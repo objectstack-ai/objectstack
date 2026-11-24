@@ -123,6 +123,7 @@ import { validatePageSourceStyling } from './validate-page-source-styling.js';
 import { validateCapabilityReferences } from './validate-capability-references.js';
 import {
   validateFlowApiTriggerSecret,
+  validateFlowSubflowTargets,
   validateFlowTriggerReadiness,
 } from './validate-flow-trigger-readiness.js';
 import { validateApprovalApprovers } from './validate-approval-approvers.js';
@@ -1659,6 +1660,21 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
   // GET → edit → PUT passes, and a secretless `api` flow is refused at `/meta`
   // with this id instead of being stored for the engine to refuse at
   // registration.
+  // #35143 — a `subflow` / `map` node calling a flow this stack does not
+  // define. CLI only: the runtime gate's flow snapshot holds just the written
+  // flow, so every call to another stored flow would read as unknown there.
+  // Advisory, with the sibling unknown-object hedge: another installed package
+  // may ship the called flow.
+  {
+    name: 'validateFlowSubflowTargets',
+    tier: 'advisory',
+    input: 'normalized',
+    commands: ALL,
+    source: 'packages/lint/src/validate-flow-trigger-readiness.ts',
+    surfaces: CLI_ONLY,
+    surfaceReason: RUNTIME_NEEDS_FULL_SNAPSHOT,
+    run: (stack) => validateFlowSubflowTargets(stack),
+  },
   {
     name: 'validateFlowApiTriggerSecret',
     tier: 'gating',

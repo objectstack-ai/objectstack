@@ -76,9 +76,9 @@ const ROWS = [
   { id: 't2', subject: 'Call back', lead: 'L-1', owner_id: 'u-2', due_date: '2026-11-04' },
 ];
 const CANDIDATES = [
-  { id: 'c1', name: 'Alpha' },
-  { id: 'c2', name: 'Bravo' },
-  { id: 'c3', name: 'Charlie' },
+  { id: 'c1', name: 'Alpha', subject: 'Alpha' },
+  { id: 'c2', name: 'Bravo', subject: 'Bravo' },
+  { id: 'c3', name: 'Charlie', subject: 'Charlie' },
 ];
 
 interface Harness {

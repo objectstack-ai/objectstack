@@ -937,7 +937,7 @@ os compile --json                    # JSON output for CI pipelines
   → Normalizing stack definition...
   → Lowering inline handlers...
   → Validating protocol compliance...
-  → Running author-time rules (77)...
+  → Running author-time rules (78)...
   → Checking that every required capability has a provider installable in this edition...
   → Collecting package docs (ADR-0046)... 0 collected
   → Writing artifact...
@@ -3484,7 +3484,13 @@ os register --url https://api.example.com
 
 In an interactive terminal, login uses a browser-based device flow by default:
 the CLI prints a one-time verification URL, opens the browser, and polls until
-you approve access in your browser.
+you approve access in your browser. The browser is opened only for an `http` or
+`https` URL written in plain URL characters, and without a shell; any other
+verification URL is printed but not opened, with a line saying so. Open it
+yourself only if you recognise it. Text the server supplies (the verification
+URL, the user code, an error) is printed as one line of printable characters,
+with control characters shown escaped and the length capped; `--json` records
+carry the server's fields as they are.
 
 ```bash
 os login
@@ -3583,7 +3589,10 @@ os cloud login --email me@acme.com --password secret   # CI
 ```
 
 Like `os login`, in an interactive terminal it uses the browser-based device
-flow: it prints a one-time verification URL and polls until you approve. If
+flow: it prints a one-time verification URL, opens it in the browser under the
+same rule as `os login` (only an `http` or `https` URL in plain URL characters,
+without a shell), prints the server's text as one line as `os login` does, and
+polls until you approve. If
 cloud credentials already exist it exits successfully with "Already logged in";
 pass `--force` to re-authenticate. Re-authenticating to the same control plane
 as the same account keeps the active environment recorded in `cloud.json`; a
@@ -3852,15 +3861,36 @@ environments can be registered side by side. `--url` skips ObjectOS Cloud: it
 takes the base URL of a self-hosted or local server (the command adds
 `/api/v1/mcp` itself and refuses a URL that already ends in it) and registers it
 as `objectstack`, the name `os dev`'s banner gives it. `--name` overrides either
-name.
+name. On both paths the URL must be an `http` or `https` URL with no user name
+or password, made only of letters, digits, `-`, `.`, `_`, `~`, `:`, `/`, `[` and
+`]` (an IPv6 host's brackets, and in a `--url` path prefix), so the printed line
+is safe to paste into a shell; the line double-quotes an address that holds a
+bracket, which sh-family shells read as a pattern. An address from the control
+plane must also be a bare host, with an optional scheme and port. Any other
+address is refused with exit 1, and nothing is registered or printed; the
+refusal names the characters accepted and a way on (for `--url`, run
+`claude mcp add --transport http NAME URL` yourself).
+
+Every string the control plane supplies that the command prints (the
+environment's name and id, an error text) is printed as one line of printable
+characters, with control characters shown escaped and the length capped. After
+the Endpoint, Name and Connect lines, nothing from the control plane is printed
+but those lines' own name and address.
 
 For Claude Code — the only `--client` value, and the default — the command runs
 `claude mcp add --transport http NAME URL`. `--print` prints the endpoint and that
 line and runs nothing, which is also how to connect any other client: add the
 endpoint as a remote HTTP MCP server in its settings. Then, in Claude Code, run
-`/mcp` and authenticate the server. If `claude` is not on your `PATH`, or
-`claude mcp add` fails (for a name already registered, `claude mcp remove NAME` or
-pick another `--name`), the command exits non-zero.
+`/mcp` and authenticate the server. `claude` is started without a shell. On
+Windows the command runs the `claude.exe` (or `claude.com`) that the first
+matching fully qualified `PATH` entry holds (rooted at a drive letter, or a UNC
+share); the current directory, relative entries and entries rooted at the
+current drive are not searched. If that entry holds a batch-file shim instead
+(`claude.cmd`, which an npm global install writes), the command does not run it
+and exits 1: run the printed `claude mcp add` line yourself, or install Claude
+Code's native Windows build and run `os mcp connect` again. If `claude` is not on
+your `PATH`, or `claude mcp add` fails (for a name already registered,
+`claude mcp remove NAME` or pick another `--name`), the command exits non-zero.
 
 **No token is stored.** The command hands the client the URL alone and writes no
 token into a client config. `-t, --token` (or the `os cloud login` session) is

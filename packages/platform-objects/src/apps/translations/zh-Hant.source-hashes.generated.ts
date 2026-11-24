@@ -18,8 +18,19 @@
  */
 
 export const zhHantGeneratedSourceHashes: Readonly<Record<string, string>> = {
-  "metadataForms.field.fields.inlineEdit.helpText": "1ce60e4c6d5fc0e1",
-  "metadataForms.field.fields.inlineEdit.label": "f29ea014320f588e",
+  "metadataForms.report.fields.dateRange.allowCustomRange.helpText": "eb95a6b1536e22fd",
+  "metadataForms.report.fields.dateRange.allowCustomRange.label": "a1fb0e1cf5fe5d8e",
+  "metadataForms.report.fields.dateRange.defaultRange.helpText": "03ccdb24491c9b5f",
+  "metadataForms.report.fields.dateRange.defaultRange.label": "c1f190468a0e2b35",
+  "metadataForms.report.fields.dateRange.dimension.helpText": "7f5dabb1a400cafb",
+  "metadataForms.report.fields.dateRange.dimension.label": "7cd8aace5973d40c",
+  "metadataForms.report.fields.description.helpText": "d5c5a151cf9ee5a3",
+  "metadataForms.report.fields.exportOptions.fileNamePrefix.helpText": "af18eb69f2b52809",
+  "metadataForms.report.fields.exportOptions.fileNamePrefix.label": "850d403550ac0496",
+  "metadataForms.report.fields.exportOptions.formats.helpText": "4f9fc2fe325dd041",
+  "metadataForms.report.fields.exportOptions.formats.label": "193cd91818d64ef7",
+  "metadataForms.report.fields.exportOptions.includeHeaders.helpText": "44cbc80015ff051d",
+  "metadataForms.report.fields.exportOptions.includeHeaders.label": "f114a4778c9727ae",
   "objects.sys_email.fields.message_id.label": "14cd089a4062f4b1",
   "objects.sys_email_template.fields.id.label": "00b0385c9c152888",
   "objects.sys_exchange_rate.fields.id.label": "00b0385c9c152888",

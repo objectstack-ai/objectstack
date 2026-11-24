@@ -17,7 +17,7 @@
 
 import * as React from 'react';
 import { useDesignModeActive, useDesignModeChange } from './designMode.js';
-import { pinsChangeKey, servedPins, type ObjectPins, type PinCandidate, type PinPage } from './designModeHeaderPins.js';
+import { pinsChangeKey, servedPins, type ObjectPins, type PinCandidate, type PinPage } from './designModeHeaderPinsModel.js';
 
 const HeaderPinsPanel = React.lazy(() => import('./DesignModeHeaderPinsPanel.js'));
 

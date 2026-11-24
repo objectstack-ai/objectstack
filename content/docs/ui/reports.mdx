@@ -248,6 +248,16 @@ same custom-range switch, on by default.
 - **The window is a filter, not a bucket.** It is applied with the report's `runtimeFilter`
   and the dataset's own filter. How rows are grouped by date stays with the dimension's
   `dateGranularity` and the report's `rows` / `columns`.
+- **Compare with the previous period** is a switch beside the period chip, not a report key.
+  Like the chip's own pick, it belongs to the viewer and is not saved. While it is on and the
+  period names a window, the chart is compared with **the same-length window just before it**
+  (`compareTo: { kind: 'previousPeriod' }` on the window's dimension): a bar or line chart draws
+  the earlier window as a muted series, and a single number shows the previous value and the
+  change under it. All time names no window, so nothing is compared.
+- **Where it is offered**: a chart that can draw a second series (`bar`, `column`,
+  `horizontal-bar`, `line`, `area`) over a category axis, or a single number (`metric`, `kpi`).
+  It is not offered on a `seriesBy` split, nor on a chart whose x axis is the window's own date
+  dimension: there the earlier window's date buckets would not line up with the current ones.
 
 **`exportOptions`** uses the list export's key and member names: `formats`,
 `includeHeaders`, `fileNamePrefix`. A report table downloads as `csv` or `xlsx`. Export is on
@@ -260,12 +270,9 @@ rows are already aggregated.
 permissions allow **export of the dataset's base object**. That is the permission-set
 `allowExport` axis the list toolbar uses (see [Permissions and protection](#permissions-and-protection)).
 
-<Callout type="warn">
-**Declared, not drawn yet.** The Console report page does not read either key yet: there is
-no period chip and no export control on it today. Until the renderer ships, `os validate`
-warns on both keys so the gap is visible. The declarations are the contract the renderer
-implements.
-</Callout>
+On the Console report page, a report that declares `dateRange` draws a period chip above the
+report, and every query the report makes runs inside the chosen window. The Export control is
+drawn once the table has rows.
 
 What is deliberately **not** offered: a `joined` report refuses both keys, because its blocks
 may bind different datasets and it draws one table per block. A report has no subscription or

@@ -114,7 +114,7 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       "fieldGroups.collapse": {
         label: "折叠",
-        helpText: "该分区能否折叠，作用于录入表单和记录详情页。未设置：none。"
+        helpText: "该分区能否折叠。录入表单按设置执行；默认记录页上读者可以折叠每个有标题的分组，因此那里只决定初始状态：collapsed 先收起，其余先展开。未设置：none。"
       },
       "fieldGroups.visibleWhen": {
         label: "可见条件",
@@ -239,6 +239,10 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       "fields.deleteBehavior": {
         label: "删除行为",
         helpText: "被引用记录删除时的处理方式"
+      },
+      "fields.transferBehavior": {
+        label: "转移行为",
+        helpText: "更改被引用记录的负责人时，是否也可一并转移通过此字段指向它的记录"
       },
       "fields.multiple": {
         label: "多选",
@@ -768,6 +772,10 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       deleteBehavior: {
         label: "删除行为",
         helpText: "被引用记录删除时的处理方式"
+      },
+      transferBehavior: {
+        label: "转移行为",
+        helpText: "更改被引用记录的负责人时，是否也可一并转移通过此字段指向它的记录"
       },
       relatedListFilter: {
         label: "关联列表筛选",
@@ -1403,7 +1411,7 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       "navigation.size": {
         label: "尺寸",
-        helpText: "抽屉详情的浮层尺寸档位：'auto'（默认——渲染器按字段数与视口推导，AI 无需填写），或粗粒度覆盖 sm/md/lg/xl/full。优先使用它而非像素 `width`；page 模式会忽略它。"
+        helpText: "记录抽屉的宽度档位：'auto'（默认）沿用宿主固定的默认宽度，每个对象都一样，与字段数无关（控制台的记录侧边面板以 460px 打开）；或粗粒度覆盖 sm/md/lg/xl/full（上限分别为 480/720/960/1200/1600px，始终受视口限制）。读者拖动出的宽度优先于两者。优先使用它而非像素 `width`；记录以整页打开时它不起作用（控制台在手机上一律以整页打开记录），在手机宽度的屏幕上也不起作用，那里抽屉占满屏幕。"
       },
       "navigation.width": {
         label: "宽度",
@@ -2194,7 +2202,8 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "显示名称"
       },
       description: {
-        label: "描述"
+        label: "描述",
+        helpText: "一句话说明这张报表看什么，显示在名称下方"
       },
       type: {
         label: "类型",
@@ -2276,9 +2285,33 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "日期范围",
         helpText: "默认时间段与自定义范围开关。维度必须是数据集的日期维度；数据集只有一个日期维度时可留空"
       },
+      "dateRange.dimension": {
+        label: "日期字段",
+        helpText: "时间段按数据来源里的哪个日期分组筛选；只有一个日期分组时可留空"
+      },
+      "dateRange.defaultRange": {
+        label: "默认时间段",
+        helpText: "打开报表时显示的时间段"
+      },
+      "dateRange.allowCustomRange": {
+        label: "允许自定义范围",
+        helpText: "允许使用者自己选择开始和结束日期"
+      },
       exportOptions: {
         label: "导出选项",
         helpText: "下载格式（csv、xlsx）与文件名。谁可以下载由数据集对象上的导出权限决定"
+      },
+      "exportOptions.formats": {
+        label: "格式",
+        helpText: "可下载的格式。不设置时提供 csv 与 xlsx；空列表则关闭下载"
+      },
+      "exportOptions.includeHeaders": {
+        label: "包含表头",
+        helpText: "在下载文件的第一行写入列名"
+      },
+      "exportOptions.fileNamePrefix": {
+        label: "文件名",
+        helpText: "下载文件名的开头，用来代替报表名称"
       }
     }
   },

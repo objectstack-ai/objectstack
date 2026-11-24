@@ -79,11 +79,13 @@ function served(id: string, lists: Lists = {}): Answer {
         overrides,
         extensions,
         switchedOff,
+        arrangements: [],
         contributions,
         counts: {
           overrides: overrides.length,
           extensions: extensions.length,
           switchedOff: switchedOff.length,
+          arrangements: 0,
           contributions: contributions.length,
         },
       },

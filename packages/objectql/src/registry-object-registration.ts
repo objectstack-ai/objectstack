@@ -51,6 +51,7 @@ import { QUEUE_FIELD_DEF, applyAuditFieldGovernance, fieldPatchTargetMisses, ins
 import type { FieldPatchTargetMiss } from '@objectstack/metadata-core';
 import { scalarOverridesPackagedBase } from '@objectstack/spec/system';
 import { SEARCH_COMPANION_FIELD, provisionSearchCompanion } from './search-companion.js';
+import { provisionSyncProvenanceIndex, stripProvisionedSyncProvenanceIndexFrom } from './sync-provenance-index.js';
 import { applyExtensionPlacements, fieldGroupKeysOf, placementContributorsOf } from './registry-extension-placement.js';
 import type { ExtensionPlacementNote } from './registry-extension-placement.js';
 import { applyCustomArrangement, relatedListsArrangementOf, rememberRelatedListsArrangement } from './registry-custom-arrangement.js';
@@ -1663,6 +1664,12 @@ export class ObjectRegistrationFacet {
     // change the answer the two steps above reached over the fields map.
     out = provisionTenantScopeIndex(out, { multiTenant: this.multiTenant });
 
+    // [ADR-0153 D4] The sync-in provenance index, a document-gated stamp like
+    // the one above. Runs AFTER it, so the tenant index's write-side inverse
+    // still finds its entry last; its own inverse runs first in
+    // `stripMaterializedStampsFrom`.
+    out = provisionSyncProvenanceIndex(out);
+
     return out;
   }
 
@@ -1742,7 +1749,12 @@ export class ObjectRegistrationFacet {
     if (base === null || typeof base !== 'object') return base;
     return this.stripDeploymentTenancyFrom(
       this.stripProvisionedPrimaryFrom(
-        this.stripProvisionedSearchCompanionFrom(this.stripProvisionedTenantIndexFrom(base)),
+        this.stripProvisionedSearchCompanionFrom(
+          // [ADR-0153 D4] The sync-in provenance index is stamped last, so it
+          // is taken off first: the tenant inverse re-stamps and compares, and
+          // holds only while its own entry is the last one.
+          this.stripProvisionedTenantIndexFrom(stripProvisionedSyncProvenanceIndexFrom(base)),
+        ),
       ),
     );
   }

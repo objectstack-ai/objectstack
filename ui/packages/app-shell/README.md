@@ -642,6 +642,12 @@ for admins and only when the app has an owning package (`_packageId`), and
 package writability stays a server-side concern — a read-only package opens in
 Studio as browse-only. For a read-only package the button draws an eye with the
 words "Open {app} in Studio" (ADR-0146 D5) instead of the pencil.
+From 768 px up, where no top bar is drawn, the sidebar's app menu carries the
+same entry on the same target and posture (`useAppStudioEntry`): "Edit app"
+behind a pencil, or "View in Studio" behind an eye for a read-only package.
+Beside it, "Design layout" turns on the shell's design mode, which edits the
+app's layout (its menu, header pins and page arrangement) in place; the mode's
+bar carries the same name.
 
 The way back is the 「‹ Back to app」 link at the left end of Studio's top bar
 (`StudioBackToApp`), followed by the app's name and the "Studio" mark. Entered

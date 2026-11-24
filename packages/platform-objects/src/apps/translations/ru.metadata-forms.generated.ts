@@ -114,7 +114,7 @@ export const ruMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       "fieldGroups.collapse": {
         label: "Сворачивание",
-        helpText: "Можно ли свернуть раздел в форме ввода и на странице записи. Если не задано: нельзя."
+        helpText: "Можно ли свернуть раздел. Форма ввода следует настройке. На стандартной странице записи читатель может свернуть любую группу с заголовком, поэтому там настройка задаёт только начальное состояние: Collapsed начинается свёрнутым, остальные — развёрнутыми. Если не задано: нельзя."
       },
       "fieldGroups.visibleWhen": {
         label: "Видимо, когда",
@@ -239,6 +239,10 @@ export const ruMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       "fields.deleteBehavior": {
         label: "Поведение при удалении",
         helpText: "Что происходит при удалении связанной записи"
+      },
+      "fields.transferBehavior": {
+        label: "Поведение при смене владельца",
+        helpText: "Может ли «Сменить владельца» у связанной записи заодно передать записи, которые ссылаются на неё через это поле"
       },
       "fields.multiple": {
         label: "Множественный выбор",
@@ -768,6 +772,10 @@ export const ruMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       deleteBehavior: {
         label: "Поведение при удалении",
         helpText: "Что происходит при удалении связанной записи"
+      },
+      transferBehavior: {
+        label: "Поведение при смене владельца",
+        helpText: "Может ли «Сменить владельца» у связанной записи заодно передать записи, которые ссылаются на неё через это поле"
       },
       relatedListFilter: {
         label: "Фильтр связанного списка",
@@ -2194,7 +2202,8 @@ export const ruMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "Метка"
       },
       description: {
-        label: "Описание"
+        label: "Описание",
+        helpText: "One sentence on what this report shows, displayed under its name."
       },
       type: {
         label: "Тип",
@@ -2276,9 +2285,33 @@ export const ruMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "Диапазон дат",
         helpText: "Период по умолчанию и переключатель произвольного диапазона. Измерение должно быть измерением даты набора данных; оставьте пустым, если такое измерение в наборе ровно одно."
       },
+      "dateRange.dimension": {
+        label: "Date Field",
+        helpText: "The date grouping of the data source the period applies to. Leave it empty when the data source has only one."
+      },
+      "dateRange.defaultRange": {
+        label: "Default Period",
+        helpText: "The period the report opens with."
+      },
+      "dateRange.allowCustomRange": {
+        label: "Allow Custom Range",
+        helpText: "Let people pick their own start and end dates."
+      },
       exportOptions: {
         label: "Параметры экспорта",
         helpText: "Форматы скачивания (csv, xlsx) и имя файла. Кто может скачивать, определяет разрешение на экспорт объекта набора данных."
+      },
+      "exportOptions.formats": {
+        label: "Formats",
+        helpText: "The download formats offered. Left unset, both csv and xlsx are offered; an empty list turns downloads off."
+      },
+      "exportOptions.includeHeaders": {
+        label: "Include Headers",
+        helpText: "Put the column names in the first row of the downloaded file."
+      },
+      "exportOptions.fileNamePrefix": {
+        label: "File Name",
+        helpText: "The start of the downloaded file’s name, used instead of the report name."
       }
     }
   },

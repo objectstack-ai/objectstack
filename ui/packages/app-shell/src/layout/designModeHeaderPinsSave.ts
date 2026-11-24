@@ -58,7 +58,7 @@ import {
   type EnsuredCustomizationPackage,
   type ListedPackageManifest,
 } from '../views/studio-design/packages-io.js';
-import { pinsRefusal, servedPins, type ObjectPins, type PinPage } from './designModeHeaderPins.js';
+import { pinsRefusal, servedPins, type ObjectPins, type PinPage } from './designModeHeaderPinsModel.js';
 
 /** The doors the save goes through; the defaults are the console's own. */
 export interface ObjectPinsSaveDoors {

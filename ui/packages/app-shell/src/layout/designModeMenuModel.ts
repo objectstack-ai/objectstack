@@ -388,7 +388,11 @@ function locate(menu: Menu, keyOf: (entry: MenuEntry) => string | null): Map<str
  * entries without an id the first free `nav_item_<n>` of what the reader was
  * shown (`withEntryIds`), which a stored entry pruned from the reader can
  * already hold. A stored entry without an id is matched to an unmatched served
- * entry by its group, type and target, in order.
+ * entry by its group, type and target, in order; an id-less entry is served
+ * with its stored keys (only an entry with an id is translated), so among
+ * such twins the one whose keys are its own is taken first ({@link servedAs},
+ * objectstack#36538): a twin the reader was not shown (one with other
+ * `requiredPermissions`, say) never takes the shown one's key.
  */
 interface StoredKeyer {
   (entry: MenuEntry): string | null;
@@ -398,6 +402,19 @@ interface StoredKeyer {
 
 function sameThing(a: MenuEntry, b: MenuEntry): boolean {
   return a.type === b.type && targetKeyOf(a) === targetKeyOf(b);
+}
+
+/**
+ * Whether the served entry `served` carries the own keys of the stored entry
+ * `stored`, its `id` (which the editor gives an entry without one) and its
+ * `children` (which the server prunes) left out (objectstack#36538).
+ */
+function servedAs(stored: MenuEntry, served: MenuEntry): boolean {
+  const { id: _a, ...a } = ownKeys(stored);
+  const { id: _b, ...b } = ownKeys(served);
+  const keys = new Set([...Object.keys(a), ...Object.keys(b)]);
+  for (const key of keys) if (JSON.stringify(a[key]) !== JSON.stringify(b[key])) return false;
+  return true;
 }
 
 function storedKeyer(served: Menu, stored: Menu): StoredKeyer {
@@ -417,22 +434,26 @@ function storedKeyer(served: Menu, stored: Menu): StoredKeyer {
   };
   byId(stored);
   const unclaimed = [...servedAt.entries()].filter(([id]) => !matched.has(id));
-  const claim = (entry: MenuEntry, parentId: string | null): string | null => {
-    const at = unclaimed.findIndex(([, s]) => s.parentId === parentId && sameThing(s.entry, entry));
+  const claim = (entry: MenuEntry, parentId: string | null, exact: boolean): string | null => {
+    const at = unclaimed.findIndex(
+      ([, s]) => s.parentId === parentId && sameThing(s.entry, entry) && (!exact || servedAs(entry, s.entry)),
+    );
     if (at < 0) return null;
     const [[id]] = unclaimed.splice(at, 1);
     return id;
   };
   // `undefined`: the group was never shown, so nothing in it can be claimed.
+  // Each level claims its twins carrying their own keys first, in order, and
+  // only then the rest, so a twin not shown never takes a shown one's key.
   const adopt = (entries: Menu, parentId: string | null | undefined) => {
-    for (const entry of entries) {
-      let key = keys.get(entry) ?? null;
-      if (!key && !idOf(entry) && parentId !== undefined) {
-        key = claim(entry, parentId);
+    for (const exact of [true, false]) {
+      for (const entry of entries) {
+        if (keys.has(entry) || idOf(entry) || parentId === undefined) continue;
+        const key = claim(entry, parentId, exact);
         if (key) keys.set(entry, key);
       }
-      if (isGroup(entry)) adopt(childrenOf(entry), key ?? undefined);
     }
+    for (const entry of entries) if (isGroup(entry)) adopt(childrenOf(entry), keys.get(entry) ?? undefined);
   };
   adopt(stored, null);
   const keyOf = ((entry: MenuEntry) => keys.get(entry) ?? null) as StoredKeyer;
@@ -493,6 +514,43 @@ function staysInOrder(served: Map<string, Located>, edited: Map<string, Located>
     }
   });
   return out;
+}
+
+/**
+ * `menu` with each own entry that sits in or after the run of another
+ * package's entries closing its level in `served` put just before that run,
+ * at every depth (objectstack#36538, review N10). Those entries are appended
+ * when the app is served, so an own entry at or past them is stored, and
+ * served, before them; an entry the editor put there before it knew which
+ * entries are another package's is drawn where the save puts it. `foreign`
+ * tells another package's entry by its id. The answer is `menu` itself when
+ * no entry moves.
+ */
+export function withOwnBeforeForeignRuns(menu: Menu, served: Menu, foreign: (id: string) => boolean): Menu {
+  const isForeign = (entry: MenuEntry) => {
+    const id = idOf(entry);
+    return !!id && foreign(id);
+  };
+  const walk = (entries: Menu, parentId: string | null): Menu => {
+    let next: Menu = entries.map((entry) => {
+      if (!isGroup(entry)) return entry;
+      const kids = childrenOf(entry);
+      const fixed = walk(kids, idOf(entry));
+      return fixed === kids ? entry : { ...entry, children: fixed };
+    });
+    if (next.every((entry, i) => entry === entries[i])) next = entries;
+    const shown = siblingsAt(served, parentId) ?? [];
+    let start = shown.length;
+    while (start > 0 && isForeign(shown[start - 1])) start -= 1;
+    const run = new Set(shown.slice(start).map(idOf));
+    const first = next.findIndex((entry) => run.has(idOf(entry)));
+    if (first < 0) return next;
+    const after = next.slice(first);
+    const own = after.filter((entry) => !isForeign(entry));
+    if (own.length === 0) return next;
+    return [...next.slice(0, first), ...own, ...after.filter(isForeign)];
+  };
+  return walk(menu, null);
 }
 
 /**

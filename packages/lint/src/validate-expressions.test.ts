@@ -4487,6 +4487,10 @@ describe('validateStackExpressions — reads only keys the spec declares (meta-t
       // artefact as `scope` above. The action copy pass reads its metadata in
       // that module, not here.
       'templates',
+      // [#35356] NOT a receiver either — the tail of the
+      // `'./validate-working-day-sites.js'` import specifier, the same artefact
+      // as `templates` above. That pass reads its metadata in that module.
+      'sites',
       // [#19939] The spec's value-slot template judge, one refusal at a time.
       // Its keys are that helper's own `{ path, label, message, source }` —
       // never metadata keys — and it is named to stay clear of the `message` /

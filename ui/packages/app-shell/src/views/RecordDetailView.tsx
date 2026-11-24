@@ -76,7 +76,7 @@ import { matchAppBySegment, resolveHostAppSegment } from '../utils/appRoute.js';
 import { hostInConsolePath } from '../utils/hostInConsolePath.js';
 import { useShellPageActionsSlot, useShellSidebarExpandSlot } from '../layout/shellPageActionsSlot.js';
 import { DesignModeHeaderPins, useObjectPins } from '../layout/DesignModeHeaderPins.js';
-import { headerReadsPins } from '../layout/designModeHeaderPins.js';
+import { headerReadsPins } from '../layout/designModeHeaderPinsModel.js';
 import { useDesignModeActive } from '../layout/designMode.js';
 import { recycleBinRefusalLabelsOf, recycleBinRestoreOf } from '../utils/recycleBinRestore.js';
 import { launchConsoleFlow } from '../utils/flowLaunch.js';
@@ -1097,10 +1097,8 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
   // In a pane, the record's title is what its top bar's breadcrumb names
   // (objectstack#27524, Target 7); the pane's slot for the record's ⊟ is there
   // too (`RecordPaneBarToggles` below).
+  // The report itself waits for `recordCrumbName` below (objectstack#36235).
   const paneBar = useRecordPaneBar();
-  useEffect(() => {
-    if (embedded && recordId) paneBar?.reportTitle(recordId, recordTitle);
-  }, [embedded, paneBar, recordId, recordTitle]);
   // objectstack#35593 — the page's top bar is the record's one header row: its
   // two slots for the record header (`page:header` draws its name and tags,
   // and its button group, into them), and whether a header holds the bar,
@@ -4913,6 +4911,29 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
     || (holdsRouteRecord
       ? (pureRecordId ? shortRecordId(pureRecordId) : '')
       : objectDef ? servedObjectLabel(objectDef, language, objectLabel) : objectName ?? '');
+  // objectstack#36235 — the pane's bar names the record by what this page
+  // reports, and draws a placeholder until it does. So the report is the
+  // record's title once the page holds the record, and the short id only for a
+  // held record with nothing to be named by; a read in flight reports nothing,
+  // and the bar never reads the raw id while the record loads. A page that
+  // settles WITHOUT the record (not found, deleted, access ended, forbidden,
+  // failed, the object unknown, the named page refused) reports the name its
+  // crumb draws then, the object's label, so the bar's placeholder ends with
+  // the read instead of standing over the page's own state.
+  const settledWithoutRecord = !isLoading && (
+    !objectDef
+    || namedPageState === 'refused'
+    || recordDeleted
+    || pageRecordStatus === 'missing'
+    || pageRecordStatus === 'accessEnded'
+    || pageRecordStatus === 'forbidden'
+    || pageRecordStatus === 'failed'
+  );
+  const paneRecordTitle = recordTitle
+    || ((holdsRouteRecord || settledWithoutRecord) && recordCrumbName ? recordCrumbName : undefined);
+  useEffect(() => {
+    if (embedded && recordId) paneBar?.reportTitle(recordId, paneRecordTitle);
+  }, [embedded, paneBar, recordId, paneRecordTitle]);
 
   // objectstack#27058, Target 3 — the top bar on a phone: one link that
   // returns where the page came from. A top-level page reads

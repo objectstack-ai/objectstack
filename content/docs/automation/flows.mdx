@@ -2702,8 +2702,9 @@ and is read as `vars["current_user"]` / `vars["vars"]`.
    it `record.budget != null`, which both doors accept, and `has()` is no guard.
    The columns the platform adds count too: `owner_id`, `created_by`,
    `updated_by`, `owning_business_unit_id`, `queue` and `organization_id` are
-   `null` on a row a system write, a seed or a guest left them empty in, so they
-   need the same guard; `created_at` and `updated_at` are stamped on every
+   `null` on a row a system write, a seed or a guest left them empty in, and a
+   `synced` object's `_sync_` columns can be `null` too, so they need the same
+   guard; `created_at` and `updated_at` are stamped on every
    stored row and need none.
 </Callout>
 
@@ -3029,7 +3030,7 @@ export const renewalReminder: Flow = {
         // run acts as its own record's organization) and not read under
         // `single`. See "The acting organization" below.
         organization: '<sys_organization.id>',
-        // schedule: { type: 'cron', expression: '0 8 * * *' } // optional; defaults to daily 08:00 UTC
+        // schedule: { type: 'cron', expression: '0 8 * * *', timezone: 'UTC' } // optional; defaults to daily 08:00 UTC
       },
     },
     { id: 'notify_owner', type: 'notify', label: 'Notify Owner' },
@@ -3094,7 +3095,7 @@ it runs as**, on the start node's `config`, beside the cadence it scopes:
 
 ```typescript
 config: {
-  schedule: { type: 'cron', expression: '0 8 * * *' },
+  schedule: { type: 'cron', expression: '0 8 * * *', timezone: 'UTC' },
   organization: 'org_msokm9oaz0cal87q', // a sys_organization.id
 }
 ```

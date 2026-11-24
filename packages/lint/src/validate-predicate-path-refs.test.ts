@@ -702,10 +702,14 @@ describe('#7010 corpus — shipped METADATA_FORM_REGISTRY', () => {
     // It is 93 today, an ADDITION of TWO: #35096 and #34823 offered the action
     // form's `texts` and `refusals` rows, each gated like `body` on
     // `data.type == 'script'`. They reach the literal-comparison census below.
-    // It is 94 today, an ADDITION of ONE: #35926 offered the field form's
+    // It is 95 today, an ADDITION of TWO: #35315 offered `transferBehavior` on
+    // the field form and on the object form's field rows, each gated on
+    // `data.type in ['lookup','master_detail']`. In-lists, so they do not reach
+    // the literal-comparison census below.
+    // It is 96 today, an ADDITION of ONE: #35926 offered the field form's
     // `inlineEdit` select, gated on `data.type in ['lookup','master_detail']`. It
     // is an in-list, so it does not reach the literal-comparison census below.
-    expect(predicates, 'the shipped metadata forms carry no predicates at all').toBe(94);
+    expect(predicates, 'the shipped metadata forms carry no predicates at all').toBe(96);
 
     const findings = validatePredicatePathRefs(corrupted);
     expect(findings).toHaveLength(predicates);
@@ -897,10 +901,11 @@ describe('#7010 corpus — shipped METADATA_FORM_REGISTRY', () => {
     expect(
       restored,
       "the object form's `data.type`-rooted predicates are no longer where this test looks",
-    ).toBe(18);
+      // 19 since #35315: the field rows' `transferBehavior` select joined.
+    ).toBe(19);
 
     const findings = validatePredicatePathRefs({ views: [objectForm] });
-    expect(findings).toHaveLength(18);
+    expect(findings).toHaveLength(19);
     expect(new Set(findings.map((f) => f.rule))).toEqual(new Set([PREDICATE_PATH_UNROOTED]));
     expect(findings[0].message).toContain('`type`');
   });

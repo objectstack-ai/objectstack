@@ -1089,7 +1089,15 @@ function relationFieldEntries(fields: unknown): Array<[string, RelationFieldDef]
  *    lists only UNLINKED children (this relationship empty): a row already
  *    here would be a no-op pick, and a row under another parent would move
  *    silently. Moving a child between parents stays on the child's own
- *    form, where the change is visible (seat ruling on L1-a S1, #35725);
+ *    form, where the change is visible (seat ruling on L1-a S1, #35725).
+ *    When the relationship lookup is scoped by the child's own fields
+ *    (`dependsOn`: a contract's opportunity `dependsOn` the contract's
+ *    account), the picker lists only children that lookup could name this
+ *    parent from: each `dependsOn` field equal to the parent's value
+ *    (objectstack#36707 — the opportunity's 合同 tab listed every account's
+ *    unlinked contracts, and a pick linked another customer's contract).
+ *    A scope it cannot resolve (the parent's value is empty or not read, or
+ *    a `lookupFilters` comparand reads `$record`) offers no picker;
  *  - `master_detail` with a source catalog: the picker lists the catalog and
  *    a pick creates a row of this list naming it (`linkField`). The catalog
  *    is the child's one other REQUIRED single-valued `lookup` (a line's
@@ -1120,12 +1128,17 @@ export function derivedAddOf(
   childFields: unknown,
   referenceField: string | undefined,
   childObject: string | undefined,
+  parentRecord?: Record<string, unknown>,
 ): RelatedListAdd | undefined {
   if (!referenceField || !childObject) return undefined;
   const entries = relationFieldEntries(childFields);
   const rel = entries.find(([name]) => name === referenceField)?.[1];
   if (!rel || rel.multiple === true) return undefined;
-  if (rel.type === 'lookup') return { picker: { object: childObject, filter: [{ field: referenceField, operator: 'is_empty' }] } };
+  if (rel.type === 'lookup') {
+    const scope = parentScopeOf(rel, parentRecord);
+    if (!scope) return undefined;
+    return { picker: { object: childObject, filter: [{ field: referenceField, operator: 'is_empty' }, ...scope] } };
+  }
   if (rel.type !== 'master_detail') return undefined;
   const catalogs = entries.filter(([name, def]) =>
     name !== referenceField
@@ -1150,6 +1163,51 @@ export function derivedAddOf(
 }
 
 /**
+ * The candidate rules a `lookup` relationship's own scope adds to the derived
+ * picker of children (`derivedAddOf`), seen from the parent: `[]` when the
+ * lookup is unscoped, `undefined` when the scope cannot be resolved here.
+ *
+ * `dependsOn` scopes the lookup's candidates by equality — a `{ field, param }`
+ * entry (a bare string names both) sends the child's `field` value as the
+ * parent object's `param` (`LookupField`'s `dependentFilter`). Reversed, a
+ * child can name this parent only when its `field` equals the parent's
+ * `param`, so each entry becomes `field equals <parent's param>`. With the
+ * parent's value empty or not read yet no child could name it: no picker,
+ * never an unscoped one. A `lookupFilters` comparand reading `$record` relates
+ * the parent's columns to the child's by any operator, and this side does not
+ * invert it: no picker either.
+ */
+function parentScopeOf(rel: RelationFieldDef, parentRecord: Record<string, unknown> | undefined): ViewFilterElement[] | undefined {
+  if (Array.isArray(rel.lookupFilters) && rel.lookupFilters.some(readsRecord)) return undefined;
+  if (!Array.isArray(rel.dependsOn) || rel.dependsOn.length === 0) return [];
+  const rules: ViewFilterElement[] = [];
+  for (const entry of rel.dependsOn) {
+    const field = typeof entry === 'string' ? entry : (entry as { field?: unknown } | null)?.field;
+    const param = typeof entry === 'string' ? entry : ((entry as { param?: unknown }).param ?? field);
+    if (typeof field !== 'string' || field === '' || typeof param !== 'string' || param === '') return undefined;
+    const value = referenceValueOf(parentRecord?.[param]);
+    if (value === undefined) return undefined;
+    rules.push({ field, operator: 'equals', value });
+  }
+  return rules;
+}
+
+/** A record field's value as a filter comparand: an expanded reference reads as its id. */
+function referenceValueOf(raw: unknown): string | number | boolean | undefined {
+  const value = raw && typeof raw === 'object' && !Array.isArray(raw)
+    ? ((raw as { id?: unknown; _id?: unknown }).id ?? (raw as { _id?: unknown })._id)
+    : raw;
+  if (typeof value === 'number' || typeof value === 'boolean') return value;
+  return typeof value === 'string' && value !== '' ? value : undefined;
+}
+
+/** Does this `lookupFilters` entry compare with a `{ $record }` value? */
+function readsRecord(entry: unknown): boolean {
+  const value = (entry as { value?: unknown } | null)?.value;
+  return !!value && typeof value === 'object' && '$record' in (value as object);
+}
+
+/**
  * Does the insert fill this field when a create omits it — the engine's
  * `applyFieldDefaults`: a non-null `defaultValue`, else a select option marked
  * `default: true`?
@@ -1166,11 +1224,7 @@ function insertDefaults(def: RelationFieldDef): boolean {
  */
 function scopedByRow(def: RelationFieldDef): boolean {
   if (Array.isArray(def.dependsOn) && def.dependsOn.length > 0) return true;
-  if (!Array.isArray(def.lookupFilters)) return false;
-  return def.lookupFilters.some((entry) => {
-    const value = (entry as { value?: unknown } | null)?.value;
-    return !!value && typeof value === 'object' && '$record' in (value as object);
-  });
+  return Array.isArray(def.lookupFilters) && def.lookupFilters.some(readsRecord);
 }
 
 /** One group of a stateful child list (`statusGroupsOf`). */
@@ -1544,8 +1598,8 @@ export const RelatedList: React.FC<RelatedListProps> = ({
   // when the page authored none (`derivedAddOf`). The rest of this component
   // reads `add` alone, so a derived add takes the authored one's path.
   const derivedAdd = React.useMemo(
-    () => (enlargedFace && !authoredAdd && !schema ? derivedAddOf(objectSchema?.fields, referenceField, api) : undefined),
-    [enlargedFace, authoredAdd, schema, objectSchema, referenceField, api],
+    () => (enlargedFace && !authoredAdd && !schema ? derivedAddOf(objectSchema?.fields, referenceField, api, parentRecord) : undefined),
+    [enlargedFace, authoredAdd, schema, objectSchema, referenceField, api, parentRecord],
   );
   const add = authoredAdd ?? derivedAdd;
   // objectstack#27056 — the card's count, asked up front with the column's
@@ -2118,7 +2172,12 @@ export const RelatedList: React.FC<RelatedListProps> = ({
     });
     return () => { cancelled = true; };
   }, [pickerOpen, pickerObject, pickerSchema, dataSource]);
-  const pickerDisplayField = add?.picker?.labelField || 'name';
+  // The label column is the picked object's name field (ADR-0079: declared
+  // `nameField`, else derived) when the add names no `labelField` — a derived
+  // add never does (objectstack#36707: a contract's 合同 tab picker led with an
+  // empty 「NAME」, the contract's name being `contract_number`). `name` only
+  // until the schema is read.
+  const pickerDisplayField = add?.picker?.labelField || resolveNameField(pickerSchema) || 'name';
   const pickerColumns = React.useMemo(() => {
     const derived = deriveLookupColumns(pickerSchema, { displayField: pickerDisplayField });
     return derived.length > 0 ? derived : undefined;
@@ -3944,6 +4003,11 @@ export const RelatedList: React.FC<RelatedListProps> = ({
   // count until its rows land (out of view, or counted at 0, they never do).
   const countAnswers = compact && cardCount !== null && !loadFailure && (loading || !rowsWanted);
   const recordCount = countAnswers ? cardCount! : windowed && total != null ? total : relatedData.length;
+  // objectstack#36235 — a count not known yet is drawn as nothing, never as
+  // the 0 an empty first read holds: while the first rows are in flight (or a
+  // card out of view has not asked) and no count answers for them, the badge
+  // waits. A refetch over rows already drawn keeps their count.
+  const countPending = !countAnswers && loading && relatedData.length === 0 && !(windowed && total != null);
   // In windowed mode an empty page beyond page 0 is a transient overflow (the
   // step-back effect above corrects it), not an empty collection.
   // A failed read is never empty: it draws its own line (objectstack#26415).
@@ -4228,7 +4292,7 @@ export const RelatedList: React.FC<RelatedListProps> = ({
     // Rows still to come: one placeholder per row the count says the card
     // names, so the card does not grow when they land.
     const pendingRows = countAnswers && cardCount! > 0 ? Math.min(cardCount!, COMPACT_RELATED_ROWS) : 0;
-    const countChip = !loadFailure && (
+    const countChip = !loadFailure && !countPending && (
       <span
         className="inline-flex h-5 shrink-0 items-center rounded bg-muted px-1.5 text-xs font-normal text-foreground"
         data-related-card-count=""
@@ -4236,7 +4300,9 @@ export const RelatedList: React.FC<RelatedListProps> = ({
         {recordCount}
       </span>
     );
-    const viewAll = t('detail.relatedPanelViewAll', { count: recordCount, defaultValue: 'View all {{count}}' });
+    const viewAll = countPending
+      ? t('detail.viewAll')
+      : t('detail.relatedPanelViewAll', { count: recordCount, defaultValue: 'View all {{count}}' });
     return (
       <section
         ref={setCompactCard}
@@ -4550,7 +4616,7 @@ export const RelatedList: React.FC<RelatedListProps> = ({
             </span>
             {/* No count over a failed read: "0" would be the claim the
                 load-failed line exists to withdraw (objectstack#26415). */}
-            {!loadFailure && (
+            {!loadFailure && !countPending && (
               <Badge
                 variant="secondary"
                 className={cn(

@@ -49,8 +49,9 @@ function served(id: string, overrides: number, extensions: number, switchedOff: 
     overrides: Array.from({ length: overrides }, (_, i) => ({ type: 'view', name: `view_${i}` })),
     extensions: Array.from({ length: extensions }, (_, i) => ({ object: 'account', kind: 'field' as const, name: `field_${i}` })),
     switchedOff: Array.from({ length: switchedOff }, (_, i) => ({ type: 'flow', name: `flow_${i}` })),
+    arrangements: [],
     contributions: [],
-    counts: { overrides, extensions, switchedOff, contributions: 0 },
+    counts: { overrides, extensions, switchedOff, arrangements: 0, contributions: 0 },
   };
   return { status: 200, body: { success: true, data } };
 }
@@ -259,8 +260,9 @@ function servedOff(id: string, items: Array<{ type: string; name: string }>) {
     overrides: [],
     extensions: [],
     switchedOff: items,
+    arrangements: [],
     contributions: [],
-    counts: { overrides: 0, extensions: 0, switchedOff: items.length, contributions: 0 },
+    counts: { overrides: 0, extensions: 0, switchedOff: items.length, arrangements: 0, contributions: 0 },
   };
   return { status: 200, body: { success: true, data } };
 }

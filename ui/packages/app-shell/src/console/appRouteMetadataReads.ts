@@ -85,6 +85,10 @@ export const APP_ROUTE_METADATA_READS: ReadonlyArray<{ path: string; reads: read
   { path: 'design/dashboard/:dashboardName', reads: ['dashboard'] },
   // SearchResultsPage: record-search targets, and nav labels for dashboards.
   { path: 'search', reads: ['object', 'dashboard'] },
+  // InboxPage (objectstack#36741): the right pane embeds RecordDetailView, and
+  // the rows name each item's object and app.
+  { path: 'inbox', reads: ['object', 'page'] },
+  { path: 'inbox/:inboxTab', reads: ['object', 'page'] },
   // The app designer's object pickers.
   { path: 'create-app', reads: OBJECT },
   { path: 'edit-app/:editAppName', reads: OBJECT },

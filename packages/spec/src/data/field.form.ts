@@ -246,6 +246,13 @@ export const fieldForm = defineForm({
           { label: 'Cascade (delete children)', value: 'cascade' },
           { label: 'Restrict (block the delete)', value: 'restrict' },
         ] },
+        // #35315 — the Change Owner cascade (ruling 7000907189 point 4), beside
+        // `deleteBehavior`. `visibleWhen` is the key's parse gate: `FieldSchema`
+        // refuses `transferBehavior` on every type but these two.
+        { field: 'transferBehavior', type: 'select', visibleWhen: "data.type in ['lookup','master_detail']", helpText: 'Whether Change Owner on the referenced record can also move the records that point at it through this field', options: [
+          { label: 'None (stay with their owner)', value: 'none' },
+          { label: 'Cascade (offer to move with the referenced record)', value: 'cascade' },
+        ] },
         // #19085 — `relatedListFilter` gets the row its declaration always
         // implied. The served schema DECLARED the key and no form offered it,
         // so an author's only door was the Source tab's free-text JSON, where

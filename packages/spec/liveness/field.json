@@ -116,6 +116,13 @@
       "evidence": "packages/objectql/src/engine.ts",
       "note": "reference cascade/restrict."
     },
+    "transferBehavior": {
+      "status": "live",
+      "verifiedAt": "2026-11-23",
+      "evidenceScope": "in-repo",
+      "evidence": "packages/core/src/security/change-record-owner.ts#transferCascadeRelations; packages/spec/src/data/field.zod.ts#transferBehavior; packages/spec/src/data/object.zod.ts#refuseIneligibleTransferCascades",
+      "note": "The reader offers and runs only declared single-value cascades whose child offers Change Owner (ruling 7000907189 point 4); the parse doors refuse the key off lookup / master_detail, 'cascade' on a sys_ reference or a multi-value reference, and on an object that does not offer Change Owner. Pinned in packages/spec/src/data/field-transfer-behavior.test.ts and packages/core/src/security/change-record-owner.test.ts."
+    },
     "expression": {
       "status": "live",
       "evidence": "packages/objectql/src/engine.ts",

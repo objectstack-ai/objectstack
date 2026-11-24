@@ -15,7 +15,11 @@
  *   to a group, add an item before or after it, rename and icon, remove from
  *   the menu. Removing takes the entry off the menu only; what it opened is
  *   kept, and the picker offers it again.
- * - An entry can be dragged to another place, in its group or another one.
+ * - An entry can be dragged to another place, in its group or another one,
+ *   or moved from the keyboard: Space picks it up, the arrows move it, Space
+ *   or Enter drops it and Escape puts it back. Enter on an entry not picked up
+ *   opens its page (objectstack#36538, review N13). A drop outside the menu
+ *   moves nothing (review N14).
  *
  * A name is changed only in the app's source language (objectstack#36363,
  * ruling (4)): the stored labels are the app's own, and a translation is
@@ -31,6 +35,10 @@
  * 「⋮」 says it is changed in that package, and it is not dragged. Adding an
  * item before or after it stays open; no other entry is moved past it (a
  * move up, a move down or a drop onto it), since its place is that package's.
+ * A group another package puts into the menu takes no own entry: it is not
+ * offered by 「Move to group」, is no drop target, and has no 「Add menu item」
+ * (objectstack#36538, review N9), since the save could put such an entry
+ * nowhere but the end of the stored menu.
  *
  * In the picker's 「Dashboards」, the first row is 「New dashboard…」
  * (objectstack#36364): it asks for a name, and on 「Create」 the dashboard is
@@ -64,13 +72,17 @@ import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
 import {
   DndContext,
+  KeyboardCode,
   KeyboardSensor,
   PointerSensor,
   closestCenter,
   useDroppable,
   useSensor,
   useSensors,
+  type CollisionDetection,
   type DragEndEvent,
+  type DragStartEvent,
+  type KeyboardCodes,
 } from '@dnd-kit/core';
 import { SortableContext, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
@@ -151,6 +163,7 @@ import {
   storedEntriesById,
   targetKeyFor,
   withEntryIds,
+  withOwnBeforeForeignRuns,
   type Menu,
   type MenuEntry,
   type MenuTargetKind,
@@ -192,6 +205,22 @@ const parentOfEndZone = (id: string): string | null | undefined => {
   return rest === '' ? null : rest;
 };
 
+/**
+ * The keys of a keyboard move (objectstack#36538, review N13): Space picks an
+ * entry up, so Enter on an entry still opens its page, as on any link; Space
+ * or Enter drops it, Escape puts it back.
+ */
+const MENU_KEYBOARD_CODES: KeyboardCodes = {
+  start: [KeyboardCode.Space],
+  cancel: [KeyboardCode.Esc],
+  end: [KeyboardCode.Space, KeyboardCode.Enter],
+};
+
+/** Whether the point `at` lies outside the box `box`. */
+function outside(at: { x: number; y: number }, box: DOMRect): boolean {
+  return at.x < box.left || at.x > box.right || at.y < box.top || at.y > box.bottom;
+}
+
 export interface DesignModeMenuProps {
   /** The app on screen: its name, its served `navigation` and its package. */
   readonly app: { readonly name: string; readonly navigation?: unknown; readonly _packageId?: unknown };
@@ -211,7 +240,7 @@ export default function DesignModeMenu({ app, basePath, resolveTargetLabel, reso
     () => withEntryIds(inShownOrder(Array.isArray(app.navigation) ? (app.navigation as Menu) : [])),
     [app.navigation],
   );
-  const menu = change.value ?? served;
+  const staged = change.value ?? served;
 
   const texts = React.useMemo(
     () => ({
@@ -226,6 +255,12 @@ export default function DesignModeMenu({ app, basePath, resolveTargetLabel, reso
       }),
       notWritable: t('designMode.menu.notWritable', {
         defaultValue: "This app's customization package cannot be written, so its menu cannot be saved.",
+      }),
+      storedUnread: t('designMode.menu.storedUnread', {
+        defaultValue: "This app's saved menu could not be read, so nothing was saved.",
+      }),
+      publishedMoved: t('designMode.menu.publishedMoved', {
+        defaultValue: "Someone published this app's menu while you were saving, so nothing was saved. Save again to apply your changes over theirs.",
       }),
     }),
     [t],
@@ -260,6 +295,12 @@ export default function DesignModeMenu({ app, basePath, resolveTargetLabel, reso
   );
   /** Whether the entry `id` is another package's (served, and not in the stored menu). */
   const contributed = (id: string): boolean => !!storedById && !storedById.has(id) && !!entryOf(served, id);
+  // An own entry the editor put in or past another package's closing entries
+  // before the stored read told them apart is drawn where the save puts it:
+  // before them (objectstack#36538, review N10).
+  const menu = storedById ? withOwnBeforeForeignRuns(staged, served, contributed) : staged;
+  /** Whether the group `parentId` (the top level for `null`) is another package's: no own entry goes into it. */
+  const foreignGroup = (parentId: string | null): boolean => parentId !== null && contributed(parentId);
   /** Whether the entry beside `id`, `by` places away in its group, is another package's. */
   const besideContributed = (id: string, by: -1 | 1): boolean => {
     const place = placeOf(menu, id);
@@ -293,8 +334,22 @@ export default function DesignModeMenu({ app, basePath, resolveTargetLabel, reso
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
-    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates, keyboardCodes: MENU_KEYBOARD_CODES }),
   );
+  // The collision rule (objectstack#36538, review N14): a pointer released
+  // outside the menu's own box is over nothing, so the drop moves nothing;
+  // inside it, and for a keyboard move (which has no pointer), the nearest
+  // entry's centre, as before.
+  const menuArea = React.useRef<HTMLDivElement>(null);
+  const collision = React.useCallback<CollisionDetection>((args) => {
+    const at = args.pointerCoordinates;
+    const box = at ? menuArea.current?.getBoundingClientRect() : null;
+    if (at && box && outside(at, box)) return [];
+    return closestCenter(args);
+  }, []);
+  const keyboardHint = t('designMode.menu.keyboardHint', {
+    defaultValue: 'Drag an item to move it, or focus it and press Space, then the arrow keys. Enter opens it.',
+  });
   const leafIds = React.useMemo(() => {
     const out: string[] = [];
     const walk = (entries: Menu) => {
@@ -312,18 +367,33 @@ export default function DesignModeMenu({ app, basePath, resolveTargetLabel, reso
   // it is not a click, so it opens nothing. dnd-kit stops that click's
   // propagation in the document's capture phase but leaves its default (a full
   // navigation), so the default is cancelled before it, on the window.
+  //
+  // The window after a pointer drag starts at the RELEASE of the press that
+  // dragged, never at the drag's end: an Escape while the button is held ends
+  // the drag, and the release that follows, however late, is still no click
+  // (objectstack#36538, review N12). A keyboard move holds the links shut
+  // until it ends, whatever the pointer does meanwhile (review N16).
   const lastDragEnd = React.useRef(0);
-  const dragging = React.useRef(false);
-  const onDragStart = () => {
-    dragging.current = true;
+  /** A pointer press began a drag, and has not been released. */
+  const pointerDrag = React.useRef(false);
+  /** A keyboard move is held. */
+  const keyboardDrag = React.useRef(false);
+  /** A pointer button is down. */
+  const pointerHeld = React.useRef(false);
+  const onDragStart = (event: DragStartEvent) => {
+    if (typeof KeyboardEvent !== 'undefined' && event.activatorEvent instanceof KeyboardEvent) keyboardDrag.current = true;
+    else pointerDrag.current = true;
   };
   const endDrag = () => {
-    dragging.current = false;
+    keyboardDrag.current = false;
+    // Still held (an Escape mid-drag): the release stamps the window.
+    if (pointerHeld.current) return;
+    pointerDrag.current = false;
     lastDragEnd.current = Date.now();
   };
   React.useEffect(() => {
     const onClick = (event: MouseEvent) => {
-      const justDragged = dragging.current || Date.now() - lastDragEnd.current < 300;
+      const justDragged = keyboardDrag.current || pointerDrag.current || Date.now() - lastDragEnd.current < 300;
       if (justDragged && event.target instanceof Element && event.target.closest('[data-design-menu-link]')) event.preventDefault();
     };
     // The drag's end is stamped from the pointer itself too: dnd-kit reports a
@@ -331,11 +401,13 @@ export default function DesignModeMenu({ app, basePath, resolveTargetLabel, reso
     // that would leave the flag set and every link of the editor shut. A new
     // press starts over.
     const onPress = () => {
-      dragging.current = false;
+      pointerHeld.current = true;
+      pointerDrag.current = false;
     };
     const onRelease = () => {
-      if (!dragging.current) return;
-      dragging.current = false;
+      pointerHeld.current = false;
+      if (!pointerDrag.current) return;
+      pointerDrag.current = false;
       lastDragEnd.current = Date.now();
     };
     window.addEventListener('click', onClick, true);
@@ -357,12 +429,12 @@ export default function DesignModeMenu({ app, basePath, resolveTargetLabel, reso
     if (!overId || overId === id) return;
     const endParent = parentOfEndZone(overId);
     if (endParent !== undefined) {
-      update(moveToOwnEnd(id, endParent));
+      if (!foreignGroup(endParent)) update(moveToOwnEnd(id, endParent));
       return;
     }
     const from = placeOf(menu, id);
     const to = placeOf(menu, overId);
-    if (!from || !to || contributed(overId)) return;
+    if (!from || !to || contributed(overId) || foreignGroup(to.parentId)) return;
     // `to.index` read after the entry leaves: below its old place in the same
     // group it lands after the entry dropped on, elsewhere before it.
     update(moveEntry(menu, id, to.parentId, to.index));
@@ -519,8 +591,9 @@ export default function DesignModeMenu({ app, basePath, resolveTargetLabel, reso
             canUp={canMoveBy(menu, id, -1) && !besideContributed(id, -1)}
             canDown={canMoveBy(menu, id, 1) && !besideContributed(id, 1)}
             groups={groups
-              .filter((g) => g.id !== place?.parentId)
+              .filter((g) => g.id !== place?.parentId && !contributed(g.id))
               .map((g) => ({ id: g.id, label: labelOf(g.entry), depth: g.depth }))}
+            canAdd={!foreignGroup(place?.parentId ?? null)}
             atTopLevel={place?.parentId === null}
             onUp={() => update(moveBy(menu, id, -1))}
             onDown={() => update(moveBy(menu, id, 1))}
@@ -560,6 +633,8 @@ export default function DesignModeMenu({ app, basePath, resolveTargetLabel, reso
       }
     });
     if (addAt && addAt.parentId === parentId && addAt.index >= entries.length) rows.push(<Placeholder key="placeholder" depth={depth} buildingReport={buildingReport} />);
+    // Another package's group takes no own entry: no 「Add menu item」, no drop at its end.
+    if (foreignGroup(parentId)) return rows;
     rows.push(
       <AddRow
         key="add"
@@ -585,16 +660,25 @@ export default function DesignModeMenu({ app, basePath, resolveTargetLabel, reso
   return (
     <SidebarGroup data-testid="design-mode-menu">
       <SidebarGroupLabel className={HIDDEN_ICON_LABEL_NOT_FOCUSABLE}>{t('designMode.menu.title', { defaultValue: 'Menu' })}</SidebarGroupLabel>
+      <p
+        className={cn('px-2 pb-1 text-xs text-sidebar-foreground/60', HIDDEN_ICON_LABEL_NOT_FOCUSABLE)}
+        data-testid="design-menu-keyboard-hint"
+      >
+        {keyboardHint}
+      </p>
       <SidebarGroupContent>
         <DndContext
           sensors={sensors}
-          collisionDetection={closestCenter}
+          collisionDetection={collision}
+          accessibility={{ screenReaderInstructions: { draggable: keyboardHint } }}
           onDragStart={onDragStart}
           onDragEnd={onDragEnd}
           onDragCancel={endDrag}
         >
           <SortableContext items={leafIds} strategy={verticalListSortingStrategy}>
-            <SidebarMenu>{renderEntries(menu, null, 0)}</SidebarMenu>
+            <div ref={menuArea} data-testid="design-menu-area">
+              <SidebarMenu>{renderEntries(menu, null, 0)}</SidebarMenu>
+            </div>
           </SortableContext>
         </DndContext>
       </SidebarGroupContent>
@@ -731,6 +815,7 @@ function EntryActions({
   canUp,
   canDown,
   groups,
+  canAdd,
   atTopLevel,
   onUp,
   onDown,
@@ -746,6 +831,8 @@ function EntryActions({
   canUp: boolean;
   canDown: boolean;
   groups: Array<{ id: string; label: string; depth: number }>;
+  /** Whether an item may be added beside it: not in another package's group. */
+  canAdd: boolean;
   atTopLevel: boolean;
   onUp: () => void;
   onDown: () => void;
@@ -800,10 +887,10 @@ function EntryActions({
           </DropdownMenuSubContent>
         </DropdownMenuSub>
         <DropdownMenuSeparator />
-        <DropdownMenuItem onSelect={onAddBefore}>
+        <DropdownMenuItem disabled={!canAdd} onSelect={onAddBefore}>
           {t('designMode.menu.addBefore', { defaultValue: 'Add an item before' })}
         </DropdownMenuItem>
-        <DropdownMenuItem onSelect={onAddAfter}>
+        <DropdownMenuItem disabled={!canAdd} onSelect={onAddAfter}>
           {t('designMode.menu.addAfter', { defaultValue: 'Add an item after' })}
         </DropdownMenuItem>
         <DropdownMenuItem disabled={fixed} onSelect={onRename}>

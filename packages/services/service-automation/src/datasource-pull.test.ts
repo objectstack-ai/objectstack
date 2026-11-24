@@ -865,3 +865,73 @@ describe('[ADR-0153 D7] retention never removes the run that holds a mapping\'s 
         ]);
     });
 });
+
+describe('[ADR-0153 D4] every row a datasource pull writes carries its provenance', () => {
+    /** Every copy's provenance columns, by key. */
+    async function provenance(ql: ObjectQL): Promise<Rec[]> {
+        const rows = await ql.find('order_copy', { orderBy: [{ field: 'external_no', order: 'asc' }], context: SYSTEM as never });
+        return rows.map((r: Rec) => ({
+            external_no: r.external_no,
+            _sync_source: r._sync_source,
+            _sync_external_id: r._sync_external_id,
+            _sync_run_id: r._sync_run_id,
+            _sync_deleted_at: r._sync_deleted_at ?? null,
+            pulledAt: typeof r._sync_pulled_at === 'string' || r._sync_pulled_at instanceof Date,
+        }));
+    }
+
+    it('stamps the mapping, the source key, the write time and the sys_sync_run row; D3\'s mark stays empty', async () => {
+        const h = await harness(THREE.slice(0, 2), { runs: true });
+        const result = await pullConnectorSource(h.deps, { mapping: MAPPING.name, context: JOB });
+        expect(result.summary.errors, JSON.stringify(result.summary.results)).toBe(0);
+        const [run] = await runRows(h.ql);
+        expect(await provenance(h.ql)).toEqual([
+            { external_no: 'A-1', _sync_source: MAPPING.name, _sync_external_id: 'A-1', _sync_run_id: run!.id, _sync_deleted_at: null, pulledAt: true },
+            { external_no: 'A-2', _sync_source: MAPPING.name, _sync_external_id: 'A-2', _sync_run_id: run!.id, _sync_deleted_at: null, pulledAt: true },
+        ]);
+    });
+
+    it('a second run restamps the run on the rows it updates', async () => {
+        const h = await harness(THREE.slice(0, 1), { runs: true });
+        await pullConnectorSource(h.deps, { mapping: MAPPING.name, context: JOB });
+        await h.erp.knex.raw('update ERP_ORDERS set AMOUNT = 11, UPDATED_AT = ? where ORDER_NO = ?', [at(5000), 'A-1']);
+        await pullConnectorSource(h.deps, { mapping: MAPPING.name, context: JOB });
+        const runs = await runRows(h.ql);
+        expect(runs).toHaveLength(2);
+        expect((await provenance(h.ql))[0]!._sync_run_id).toBe(runs[1]!.id);
+    });
+
+    it('with no ledger the run column is not written (so empty on a row the pull created), and the other stamps still land', async () => {
+        const h = await harness(THREE.slice(0, 1));
+        await pullConnectorSource(h.deps, { mapping: MAPPING.name, context: SYSTEM });
+        expect(await provenance(h.ql)).toEqual([
+            { external_no: 'A-1', _sync_source: MAPPING.name, _sync_external_id: 'A-1', _sync_run_id: null, _sync_deleted_at: null, pulledAt: true },
+        ]);
+    });
+
+    it('a key of several fields is stamped as a JSON array of their values in upsertKey order', async () => {
+        const h = await harness(THREE.slice(0, 1), { mapping: { ...MAPPING, upsertKey: ['amount', 'external_no'] } });
+        await pullConnectorSource(h.deps, { mapping: MAPPING.name, context: SYSTEM });
+        expect((await provenance(h.ql))[0]!._sync_external_id).toBe('["10","A-1"]');
+    });
+
+    it('a mapping that writes a _sync_ column itself is refused mapping_target_refused (400) and nothing is written', async () => {
+        const h = await harness(THREE.slice(0, 1), {
+            mapping: { ...MAPPING, fieldMapping: [...MAPPING.fieldMapping, { source: 'updated_at', target: '_sync_deleted_at' }] },
+        });
+        const err = await refusalOf(pullConnectorSource(h.deps, { mapping: MAPPING.name, context: SYSTEM }));
+        expect([err.code, err.status, err.reason]).toEqual(['VALIDATION_ERROR', 400, 'mapping_target_refused']);
+        expect(err.message).toContain('_sync_deleted_at');
+        expect(await copies(h.ql)).toEqual([]);
+    });
+
+    it('a synced target that withholds every injected column (systemFields: false) is still written, unstamped', async () => {
+        const h = await harness(THREE.slice(0, 1), {
+            target: { ...TARGET, systemFields: false },
+        });
+        await pullConnectorSource(h.deps, { mapping: MAPPING.name, context: SYSTEM });
+        const rows = await h.ql.find('order_copy', { context: SYSTEM as never });
+        expect(rows).toHaveLength(1);
+        expect(Object.keys(rows[0] as Rec).filter((k) => k.startsWith('_sync_'))).toEqual([]);
+    });
+});
