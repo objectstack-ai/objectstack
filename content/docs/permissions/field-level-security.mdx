@@ -6,6 +6,92 @@ description: "Control visibility and editability of specific fields — readable
 
 Control visibility and editability of specific fields.
 
+## The three axes
+
+A permission set answers three separate questions, and each key answers one
+of them:
+
+| Axis | Keys | What it decides |
+|:---|:---|:---|
+| **Object permission** | `allowRead`, `allowCreate`, `allowEdit`, `allowDelete` | Whether the caller can use the object at all. |
+| **Record scope** | `viewAllRecords`, `modifyAllRecords` | Which records the caller reaches. |
+| **Fields** | `fields` rows, `viewAllFields`, and a field's own `requiredPermissions` | Which fields of those records the caller reads and edits. |
+
+<Callout type="warn">
+**From v19, View All and Modify All stop opening fields.** Until then a set
+that holds `viewAllRecords` on an object also reads every field of it, and a
+set that holds `modifyAllRecords` reads and edits every field (the exact votes
+are under [Server-side enforcement](#server-side-enforcement-of-declared-rules)).
+Do not build on that: where a role should read every field, grant
+[`viewAllFields`](#viewallfields-a-role-that-reads-every-field).
+</Callout>
+
+## Choosing by sensitivity
+
+Fields are visible by default: a field that no permission set names follows
+the object grant. Write a rule only for an exception, and pick the mechanism
+by how sensitive the field is:
+
+| The field is | Write | Why |
+|:---|:---|:---|
+| **Ordinary** | Nothing. | It follows the object grant. |
+| **Role-dependent**: one role reads or edits it, another does not | `fields` rows in the permission sets that differ. | Rows union across a user's sets, and the most permissive answer wins. |
+| **High-sensitivity**: salary, ID numbers | `requiredPermissions` on the field itself, plus `maskingRule` where a partial value is needed. | The capability gate is applied after the sets are merged, so no field row, `viewAllFields`, View All or Modify All re-opens the field. |
+
+```typescript
+// On the object: the gate travels with the field.
+fields: {
+  salary:    { type: 'currency', requiredPermissions: ['hr.view_compensation'] },
+  id_number: { type: 'text', requiredPermissions: ['hr.view_identity'], maskingRule: 'id_card' },
+}
+
+// On the permission set whose holders read both in full.
+definePermissionSet({
+  name: 'hr_specialist',
+  systemPermissions: ['hr.view_compensation', 'hr.view_identity'],
+  objects: { employee: { allowRead: true, allowEdit: true } },
+});
+```
+
+A caller who does not hold the capability gets `salary` stripped from every
+record and reads `id_number` as its masked value. A write to either field is
+refused.
+
+## `viewAllFields`: a role that reads every field
+
+`viewAllFields: true` on a set's object entry casts a read vote on every field
+of that object, fields added later included. Use it for admin-like roles that
+must read everything:
+
+```typescript
+definePermissionSet({
+  name: 'sales_manager',
+  objects: { crm_account: { allowRead: true, allowEdit: true, viewAllFields: true } },
+  // The set's own row beats its own bit: its holders do not read this field.
+  fields: { 'crm_account.partner_margin': { readable: false } },
+});
+```
+
+- **Read only.** It never casts an edit vote. An edit comes from the default
+  (a field no set names follows the object grant) or from an explicit
+  `editable: true` row.
+- **A set's own row beats it.** A `readable: false` row in the same set keeps
+  that field hidden for that set. Another set's `viewAllFields` still reads
+  the field, because grants union across sets.
+- **A field vote only.** It grants no object access, so pair it with
+  `allowRead`. It widens no record: that is `viewAllRecords`.
+- **On the `'*'` entry** it votes on every object the set does not name
+  itself, private objects (`access.default: 'private'`) included. A `'*'`
+  entry without View All or Modify All gives no access to a private object,
+  but its `viewAllFields` still votes on that object's fields. So it re-opens
+  a field that is hidden by the set which does grant the object.
+- **A capability gate still applies.** It does not lift a field's
+  `requiredPermissions` or a masking rule.
+- **High-privilege.** A set that carries it cannot be bound to the `everyone`
+  or `guest` audience.
+- **Authored in metadata.** Studio's permission matrix has no control for the
+  bit. It keeps the key when it saves a set that already carries it.
+
 ## Field Permissions in Permission Sets
 
 Field permissions are keyed `<object>.<field>` and use `readable` / `editable`,
@@ -156,9 +242,9 @@ roll-up is not a computed field in this sense: it does not follow the
 fields it aggregates, so mask it on its own where a set must not see it.
 The record the engine echoes for a
 public-form submission carries no computed field that reads through a
-reference. View All and Modify All lift a permission set's `readable:
-false`, not a capability gate or a masking rule, so their holders are
-withheld a computed field over such a field too. To let a permission
+reference. View All, Modify All and `viewAllFields` lift a permission set's
+`readable: false`, not a capability gate or a masking rule, so their holders
+are withheld a computed field over such a field too. To let a permission
 set's holders read a computed field, grant that set read on every field
 the expression reads, unmasked: the capability a field's
 `requiredPermissions` names also lifts a masking rule it gates, and a
@@ -198,16 +284,20 @@ only constrain fields they explicitly enumerate, and field grants union
 most-permissively across a user's sets (one set's `readable: true`
 out-votes another set's `false`). Until a subtractive muting layer lands
 (ADR-0066 ⑧), a `{ readable: false }` rule masks the field only as long
-as **no other set the user holds** declares it `readable: true` or holds
+as **no other set the user holds** declares it `readable: true`, carries
+`viewAllFields` on that object, or holds
 View All (`viewAllRecords`, reads every field of the object) or Modify All
 (`modifyAllRecords`, reads and edits every field) on that object, and
 the set that declares it does not itself hold Modify All on that object:
-the set's own View All leaves its `readable: false` binding, while its
+the set's own View All or `viewAllFields` leaves its `readable: false`
+binding, while its
 own Modify All still reads and edits every field of the object, its own
 rows included (`security-superuser-field-mask-inert` warns on such a row),
-until the field-axis split (#34365) — so
-protect sensitive fields by granting them only in the sets that need
-them, and treat a sensitive field on a broadly-granted object as a
+until v19, when View All and Modify All stop voting on fields — so
+gate a high-sensitivity field with `requiredPermissions`
+([Choosing by sensitivity](#choosing-by-sensitivity)), grant a
+role-dependent field only in the sets that need
+it, and treat a sensitive field on a broadly-granted object as a
 review smell — see the
 [FLS posture warning](/docs/permissions/authorization#combination-semantics-the-fixed-order).
 Declared rules themselves are enforced fail-closed: a masked field is
