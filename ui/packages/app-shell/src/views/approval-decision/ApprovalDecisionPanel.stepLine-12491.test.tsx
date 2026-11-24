@@ -44,6 +44,9 @@ vi.mock('../DeclaredActionsBar.js', () => ({
   DeclaredActionsBar: () => <div data-testid="declared-actions-probe" />,
 }));
 
+// The submitted-record card's lazy detail surface: loaded here, at collection,
+// so no clocked case pays its first transform.
+import '@object-ui/plugin-detail';
 import { RecordContextProvider } from '@object-ui/react';
 import { builtInLocales } from '@object-ui/i18n/locales';
 import { ApprovalDecisionRenderer } from './ApprovalDecisionPanel';
