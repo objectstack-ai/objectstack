@@ -15,6 +15,11 @@ import {
   studioMenuEntryMatches,
   studioMenuScope,
 } from './studioMenuModel';
+import { studioMenuGroupLabel } from './studioMenuGroupLabel';
+import { translateMetadataDomain } from '../metadata-admin/i18n';
+// The zh rows of the menu's own names live in `@object-ui/i18n`'s lazily loaded `studio` namespace.
+import { loadStudioCatalogue } from '@object-ui/i18n/namespaces/studio';
+await loadStudioCatalogue('zh');
 
 const PKG = 'com.example.crm';
 const TYPES = [
@@ -113,5 +118,19 @@ describe('the menu search', () => {
     expect(studioMenuEntryMatches(entry, '权限集', 'PERMISSION')).toBe(true);
     expect(studioMenuEntryMatches(entry, 'Permission Sets', 'flow')).toBe(false);
     expect(studioMenuEntryMatches(entry, 'Permission Sets', '  ')).toBe(true);
+  });
+});
+
+describe('the group names: the menu\'s own, the shared dictionary unchanged', () => {
+  it('the menu names `system` Platform / 平台 and `security` Access / 访问; the other four as the dictionary does', () => {
+    expect(STUDIO_MENU_GROUPS.map((g) => studioMenuGroupLabel(g, 'en'))).toEqual(['Data', 'UI', 'Automation', 'Platform', 'Access', 'AI']);
+    expect(STUDIO_MENU_GROUPS.map((g) => studioMenuGroupLabel(g, 'zh-CN'))).toEqual(['数据', '界面', '自动化', '平台', '访问', 'AI']);
+  });
+
+  it('the shared dictionary keeps System / 系统 and Security / 安全 (Setup\'s datasource pages read it, `PageShell`\'s badge)', () => {
+    expect(translateMetadataDomain('system', 'en')).toBe('System');
+    expect(translateMetadataDomain('system', 'zh-CN')).toBe('系统');
+    expect(translateMetadataDomain('security', 'en')).toBe('Security');
+    expect(translateMetadataDomain('security', 'zh-CN')).toBe('安全');
   });
 });

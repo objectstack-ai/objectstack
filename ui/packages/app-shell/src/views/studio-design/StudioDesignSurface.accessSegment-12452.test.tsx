@@ -119,7 +119,7 @@ vi.mock('./StudioAiCopilot', () => ({ StudioChatDock: () => null }));
 vi.mock('../../preview/DraftChangesPanel', () => ({ DraftChangesPanel: () => null }));
 
 import { StudioDesignSurface } from './StudioDesignSurface';
-import { translateMetadataDomain } from '../metadata-admin/i18n';
+import { t } from '../metadata-admin/i18n';
 // The source under test reaches dynamic imports of `@objectstack/lint`; their first
 // load is paid here, at collection, never inside a case's clock (`check:test-source-alias`).
 import '@objectstack/lint';
@@ -144,7 +144,8 @@ window.matchMedia = ((query: string) => ({
 
 const key = (type: string, name: string) => `${type}/${name}`;
 
-const ACCESS = translateMetadataDomain('security', 'en');
+/** The menu's own name for the `security` group (the shared dictionary keeps "Security"). */
+const ACCESS = t('engine.studio.menu.groupSecurity', 'en');
 const OBJECT_ENTRY = 'studio-menu-entry-type:object';
 const PERMISSION_ENTRY = 'studio-menu-entry-type:permission';
 

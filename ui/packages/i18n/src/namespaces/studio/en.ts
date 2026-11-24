@@ -3506,6 +3506,8 @@ const STUDIO_EN: Record<string, string> = {
   'engine.studio.menu.owd': 'Default sharing',
   'engine.studio.menu.diagnostics': 'Diagnostics',
   'engine.studio.menu.environment': 'Positions and permissions',
+  'engine.studio.menu.groupSystem': 'Platform',
+  'engine.studio.menu.groupSecurity': 'Access',
   // objectstack#36502 — the notice on a retired Interfaces link's landing.
   'engine.studio.interfacesRetired.sentence': 'Interface edits have moved into the app.',
   'engine.studio.interfacesRetired.backToApp': 'Back to the app',

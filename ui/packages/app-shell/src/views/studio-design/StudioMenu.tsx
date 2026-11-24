@@ -37,7 +37,8 @@ import {
 } from '@object-ui/components';
 import { useGlobalDiagnostics, useMetadataClient, useMetadataTypes } from '../metadata-admin/useMetadata.js';
 import { scopeDirectoryEntries } from '../metadata-admin/directoryScope.js';
-import { t, tFormat, translateMetadataDomain, translateMetadataType } from '../metadata-admin/i18n.js';
+import { t, tFormat, translateMetadataType } from '../metadata-admin/i18n.js';
+import { studioMenuGroupLabel } from './studioMenuGroupLabel.js';
 import { useMetadataRefreshNonce } from './useMetadataRefreshNonce.js';
 import { STUDIO_HEADER_ICON_BUTTON } from './studio-tokens.js';
 import {
@@ -212,7 +213,7 @@ export function StudioMenu({ segment, locale, onReenterPillar }: StudioMenuProps
               <SidebarGroup key={group} className="py-1" data-testid={`studio-menu-group-${group}`}>
                 <SidebarGroupLabel id={labelId} className={cn('gap-1.5', HIDDEN_ICON_LABEL_NOT_FOCUSABLE)}>
                   <Icon className="h-3.5 w-3.5" aria-hidden="true" />
-                  <span className="flex-1 truncate">{translateMetadataDomain(group, locale)}</span>
+                  <span className="flex-1 truncate">{studioMenuGroupLabel(group, locale)}</span>
                   <span
                     className="tabular-nums text-[11px] font-normal text-muted-foreground"
                     title={tFormat('engine.studio.menu.typeCount', locale, { count: typeCount })}

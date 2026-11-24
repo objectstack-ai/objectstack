@@ -10,8 +10,9 @@
  *
  * Six, one per domain the spec registers a metadata type under, in the
  * amendment's order. A type's group is its served registry `domain`; the
- * group's name is `translateMetadataDomain`'s, which draws `system` as
- * Platform and `security` as Access (decision 11).
+ * group's name is the menu's own (`studioMenuGroupLabel`), which draws
+ * `system` as Platform and `security` as Access (decision 11) while the shared
+ * dictionary keeps System and Security.
  *
  * ## Entries
  *
