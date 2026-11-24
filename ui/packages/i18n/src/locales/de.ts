@@ -2794,9 +2794,6 @@ const de = {
       targetQueue: 'Eine Warteschlange',
       queue: 'Warteschlange',
       queuePlaceholder: 'Warteschlange auswählen',
-      queuesLoading: 'Warteschlangen werden geladen…',
-      queuesFailed: 'Die Warteschlangen konnten nicht gelesen werden: {{message}}',
-      noQueues: 'Es ist keine Warteschlange eingerichtet.',
       notify: 'Neuen Besitzer benachrichtigen',
       alreadyOwner: 'Diese Person ist bereits Besitzer dieses Datensatzes.',
       submit: 'Besitzer ändern',
@@ -2810,7 +2807,6 @@ const de = {
       skipped: '{{count}} ausgewählte Datensätze bieten Besitzer ändern nicht an und werden ausgelassen.',
       skipped_one: '{{count}} ausgewählter Datensatz bietet Besitzer ändern nicht an und wird ausgelassen.',
       skipped_other: '{{count}} ausgewählte Datensätze bieten Besitzer ändern nicht an und werden ausgelassen.',
-      noClient: 'Der Besitzer kann hier nicht geändert werden.',
       cascadeHeading: 'Zugehörige Datensätze mit übertragen',
       cascadeHelp: 'Zugehörige Datensätze, die auf diesen verweisen und dem bisherigen Inhaber gehören, gehen ebenfalls an den neuen Inhaber.',
       cascadeOption: '{{object}} ({{field}})',
@@ -2818,6 +2814,7 @@ const de = {
       cascadeReport: '{{object}} ({{field}}): {{moved}} übertragen, {{failed}} konnten nicht übertragen werden.',
       cascadeRemaining: 'Beim bisherigen Inhaber geblieben, über der Grenze von 500 Datensätzen je Änderung: {{count}}.',
       cascadeReadFailure: '{{object}} ({{field}}): Die zugehörigen Datensätze konnten nicht gelesen werden: {{message}}',
+      gridOnly: 'Um den Besitzer mehrerer Datensätze auf einmal zu ändern, wechseln Sie zu einer Rasteransicht.',
     },
     objectView: {
       // objectui#13330 — Setup → Users on a managed environment.
