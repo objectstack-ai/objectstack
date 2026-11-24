@@ -8,6 +8,7 @@
 
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { Dialog, DialogContent, DialogTitle } from '@object-ui/components';
 import { PeoplePicker } from './PeoplePicker';
 import { pushRecentLookupId } from './recentLookups';
 
@@ -356,5 +357,62 @@ describe('PeoplePicker', () => {
     fireEvent.click(screen.getByText('Amy Lin'));
     expect(onSelect).toHaveBeenCalledWith('u1');
     expect(onOpenChange).toHaveBeenCalledWith(false);
+  });
+});
+
+/**
+ * The inline popover inside a dialog (objectstack#36852). Radix Dialog's
+ * scroll lock treats the dialog content as its only shard; the popover is
+ * portalled to the body, outside it, so a non-modal popover gets every wheel
+ * and touch move cancelled. `modal` makes the popover its own, topmost lock
+ * layer. A second cause sat under it: the popover is capped by `max-h-*`
+ * only, so the list area's viewport (`h-full`) took its content height and
+ * the list was clipped, not scrolled; the list area is a flex column so the
+ * viewport shrinks to the room it is given.
+ *
+ * jsdom does no layout or scrolling, so the pins read the observable half of
+ * `modal` (while the popover is open the dialog behind it is hidden from
+ * assistive technology) and the list area's flex column; the wheel and touch
+ * readings are on the pull request.
+ */
+describe('PeoplePicker inline popover inside a dialog', () => {
+  function renderInDialog(open: boolean) {
+    render(
+      <Dialog open onOpenChange={vi.fn()}>
+        <DialogContent data-testid="host-dialog">
+          <DialogTitle>Form</DialogTitle>
+          <PeoplePicker
+            {...baseProps}
+            open={open}
+            inline
+            trigger={<button data-testid="inline-trigger">open</button>}
+            dataSource={makeDataSource()}
+            onOpenChange={vi.fn()}
+            onSelect={vi.fn()}
+          />
+        </DialogContent>
+      </Dialog>,
+    );
+  }
+
+  it('while the popover is open, the dialog behind it is hidden (the popover is modal)', async () => {
+    renderInDialog(true);
+    const popover = await screen.findByTestId('people-picker-inline');
+    await waitFor(() => expect(screen.getByText('Amy Lin')).toBeTruthy());
+    expect(screen.getByTestId('host-dialog').closest('[aria-hidden="true"]')).not.toBeNull();
+    expect(popover.closest('[aria-hidden="true"]')).toBeNull();
+  });
+
+  it('the list area is a flex column, so its viewport shrinks to the popover and scrolls', async () => {
+    renderInDialog(true);
+    await waitFor(() => expect(screen.getByText('Amy Lin')).toBeTruthy());
+    expect(screen.getByTestId('people-picker-list')).toHaveClass('flex', 'flex-col', 'min-h-0', 'flex-1');
+  });
+
+  it('CONTROL: with the popover closed, the dialog is not hidden', async () => {
+    renderInDialog(false);
+    const dialog = await screen.findByTestId('host-dialog');
+    expect(screen.queryByTestId('people-picker-inline')).toBeNull();
+    expect(dialog.closest('[aria-hidden="true"]')).toBeNull();
   });
 });

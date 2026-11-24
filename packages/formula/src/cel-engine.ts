@@ -2810,6 +2810,7 @@ export const celEngine: DialectEngine = {
           systemPermissions: ctx.systemPermissions,
         },
         optionLabels: ctx.optionLabels,
+        workCalendars: ctx.workCalendars,
       };
       try {
         // #3183 — coerce a date-field operand compared with `==`/`!=` against a

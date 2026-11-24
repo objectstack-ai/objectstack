@@ -442,8 +442,8 @@ export const ScheduledDigestFlow = defineFlow({
         // this filled dev.db to 260MB+ over a multi-day `pnpm dev`. 60s keeps
         // the schedule trigger observable within a minute while cutting the
         // write rate 3x. Production digests use a cron expression instead,
-        // e.g. { type: 'cron', expression: '0 8 * * *' }. Real bounding comes
-        // from the lifecycle/retention work (ADR-0057), not this number.
+        // e.g. { type: 'cron', expression: '0 8 * * *', timezone: 'UTC' }. Real
+        // bounding comes from the lifecycle/retention work (ADR-0057), not this number.
         schedule: { type: 'interval', intervalMs: 60000 },
       },
     },
@@ -2044,7 +2044,7 @@ export const TaskDueReminderFlow = defineFlow({
           filter: { status: { $ne: 'done' } }, // optional, ANDed with the date window
         },
         // schedule defaults to daily 08:00 UTC; override with
-        // schedule: { type: 'cron', expression: '0 8 * * *' }
+        // schedule: { type: 'cron', expression: '0 8 * * *', timezone: 'UTC' }
       },
     },
     // "Your task is due" has nobody to address on a task with no assignee, so

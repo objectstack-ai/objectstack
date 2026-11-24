@@ -10,8 +10,10 @@
 // approval step at all, so `os lint` and `os i18n check` never listed an
 // approval flow as untranslated: HotCRM's six approval flows rendered English
 // in zh-CN / ja-JP / es-ES under a green coverage run. These pins are the CLI
-// half: the walker scaffolds both keys, the coverage gate demands them, and a
-// flow no reader names (no screen, no approval) still owes no label.
+// half: the walker scaffolds both keys and the coverage gate demands them. The
+// flow label is now asked of every named flow (the docs flow embed titles any
+// flow by it), pinned in `i18n-flow-screen-coverage.test.ts`; a scheduled flow
+// still owes no approval or screen key.
 //
 // The ledger mock is `i18n-flow-screen-coverage.test.ts`'s, for its reason:
 // these pins measure the bucket itself, whatever the shipped ledger says next.
@@ -61,7 +63,7 @@ const quickNote = {
   edges: [],
 };
 
-/** A scheduled flow with no screen and no approval: no reader names it. */
+/** A scheduled flow with no screen and no approval: only its label is read (the docs flow embed's title). */
 const nightlyDigest = {
   name: 'nightly_digest',
   label: 'Nightly Digest',
@@ -96,8 +98,8 @@ describe('what the walker harvests from an approval flow (#24916)', () => {
     expect(flowKeys({ flows: [flow] })).toEqual(['flows.expense_approval.label']);
   });
 
-  it('still emits no label for a flow with neither a screen nor an approval node', () => {
-    expect(flowKeys({ flows: [nightlyDigest] })).toEqual([]);
+  it('emits only the flow label for a flow with neither a screen nor an approval node', () => {
+    expect(flowKeys({ flows: [nightlyDigest] })).toEqual(['flows.nightly_digest.label']);
   });
 });
 
@@ -139,14 +141,14 @@ describe('the coverage gate demands the approval flow and its steps (#24916)', (
     expect(keys.filter((k) => k.startsWith('flows.expense_approval.'))).toEqual([]);
   });
 
-  it('keeps the screen flow\'s demand exactly as it was, and asks nothing of the scheduled flow', () => {
+  it('keeps the screen flow\'s demand exactly as it was, and asks only the scheduled flow\'s label', () => {
     const keys = zhFlowIssues(tree()).map((i) => i.key);
     expect(keys.filter((k) => k.startsWith('flows.quick_note.'))).toEqual([
       'flows.quick_note.label',
       'flows.quick_note.screens.ask.title',
       'flows.quick_note.screens.ask.fields.note.label',
     ]);
-    expect(keys.filter((k) => k.startsWith('flows.nightly_digest.'))).toEqual([]);
+    expect(keys.filter((k) => k.startsWith('flows.nightly_digest.'))).toEqual(['flows.nightly_digest.label']);
   });
 
   it('accepts the translated pack the way the translation contract declares it', () => {

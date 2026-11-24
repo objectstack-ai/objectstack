@@ -32,8 +32,9 @@ import {
   RelatedCountStore,
   ObjectIconTile,
   RecordHeaderBarContext,
+  toast,
 } from '@object-ui/components';
-import { SchemaRenderer, ActionCtxReact, useCapabilityGate, useCondition, toPredicateInput, useSettledSchema, useFilterScope, useResolvedFilter, usePredicateScope, classifyLoadError, answeredLoadFailure, declaredUserMessage, type LoadErrorKind, type RelatedRowActionDef } from '@object-ui/react';
+import { SchemaRenderer, ActionCtxReact, useCapabilityGate, useCondition, toPredicateInput, useSettledSchema, useFilterScope, useResolvedFilter, usePredicateScope, classifyLoadError, answeredLoadFailure, declaredUserMessage, extractWriteErrorMessage, isExternalWriteRefusal, type LoadErrorKind, type RelatedRowActionDef } from '@object-ui/react';
 import {
   Plus,
   ExternalLink,
@@ -2655,17 +2656,38 @@ export const RelatedList: React.FC<RelatedListProps> = ({
     setDeleteTarget(row);
   }, []);
 
+  const { objectLabel } = useObjectLabel();
+  /**
+   * objectstack#36851 — a delete the server REFUSES (a hook, a record lock:
+   * `409 RECORD_LOCKED`) says so, in the toast the object's list page shows
+   * for the same refusal (`recordDelete` in `@object-ui/core`): "Failed to
+   * delete LABEL", described by the producer-marked `userMessage` when the
+   * refusal carries one (verbatim, `declaredUserMessage`), the read-only
+   * sentence for an external datasource (ADR-0015), else the server's own
+   * sentence with its machine prefix stripped. It used to reach the console
+   * only, so the dialog closed and the row simply stayed. The row stays and
+   * the dialog closes as before: the toast is the whole answer.
+   */
   const handleConfirmDelete = React.useCallback(async () => {
     if (deleteTarget) {
       try {
         await onRowDelete?.(deleteTarget);
         setRefreshNonce((n) => n + 1); // reflect the removal
       } catch (err) {
-        console.error('[RelatedList] remove failed', err);
+        const label = objectLabel({ name: api ?? '', label: objectSchema?.label ?? api ?? '' });
+        const description =
+          declaredUserMessage(err)
+          ?? (isExternalWriteRefusal(err)
+            ? t('form.readOnlyExternalSource', { defaultValue: 'This table is read-only. Its records come from an external data source that does not accept changes.' })
+            : extractWriteErrorMessage(err));
+        toast.error(
+          t('objectActions.deleteFailed', { label, defaultValue: `Failed to delete ${label}` }),
+          description ? { description } : undefined,
+        );
       }
     }
     setDeleteTarget(null);
-  }, [deleteTarget, onRowDelete]);
+  }, [deleteTarget, onRowDelete, objectLabel, api, objectSchema, t]);
   // objectstack#35892 — the related tab's floating bar deletes the selected
   // rows (up to every matching row, with "select all"): one confirm that
   // counts them, then the data source's batch delete in one call where it
@@ -2674,7 +2696,6 @@ export const RelatedList: React.FC<RelatedListProps> = ({
   // outcome stays on screen: how many went, and how many did not.
   const [bulkDeleteTargets, setBulkDeleteTargets] = React.useState<any[] | null>(null);
   const [bulkDeleteOutcome, setBulkDeleteOutcome] = React.useState<{ succeeded: number; failed: number } | null>(null);
-  const { objectLabel } = useObjectLabel();
   const handleBulkDeleteRows = React.useCallback((rows: any[]) => {
     if (rows.length > 0) setBulkDeleteTargets(rows);
   }, []);
@@ -4003,6 +4024,11 @@ export const RelatedList: React.FC<RelatedListProps> = ({
   // count until its rows land (out of view, or counted at 0, they never do).
   const countAnswers = compact && cardCount !== null && !loadFailure && (loading || !rowsWanted);
   const recordCount = countAnswers ? cardCount! : windowed && total != null ? total : relatedData.length;
+  // objectstack#36235 — a count not known yet is drawn as nothing, never as
+  // the 0 an empty first read holds: while the first rows are in flight (or a
+  // card out of view has not asked) and no count answers for them, the badge
+  // waits. A refetch over rows already drawn keeps their count.
+  const countPending = !countAnswers && loading && relatedData.length === 0 && !(windowed && total != null);
   // In windowed mode an empty page beyond page 0 is a transient overflow (the
   // step-back effect above corrects it), not an empty collection.
   // A failed read is never empty: it draws its own line (objectstack#26415).
@@ -4287,7 +4313,7 @@ export const RelatedList: React.FC<RelatedListProps> = ({
     // Rows still to come: one placeholder per row the count says the card
     // names, so the card does not grow when they land.
     const pendingRows = countAnswers && cardCount! > 0 ? Math.min(cardCount!, COMPACT_RELATED_ROWS) : 0;
-    const countChip = !loadFailure && (
+    const countChip = !loadFailure && !countPending && (
       <span
         className="inline-flex h-5 shrink-0 items-center rounded bg-muted px-1.5 text-xs font-normal text-foreground"
         data-related-card-count=""
@@ -4295,7 +4321,9 @@ export const RelatedList: React.FC<RelatedListProps> = ({
         {recordCount}
       </span>
     );
-    const viewAll = t('detail.relatedPanelViewAll', { count: recordCount, defaultValue: 'View all {{count}}' });
+    const viewAll = countPending
+      ? t('detail.viewAll')
+      : t('detail.relatedPanelViewAll', { count: recordCount, defaultValue: 'View all {{count}}' });
     return (
       <section
         ref={setCompactCard}
@@ -4609,7 +4637,7 @@ export const RelatedList: React.FC<RelatedListProps> = ({
             </span>
             {/* No count over a failed read: "0" would be the claim the
                 load-failed line exists to withdraw (objectstack#26415). */}
-            {!loadFailure && (
+            {!loadFailure && !countPending && (
               <Badge
                 variant="secondary"
                 className={cn(

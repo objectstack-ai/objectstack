@@ -68,8 +68,10 @@ describe('the drawer root steps through the host\'s rows (objectstack#26679)', (
     fireEvent.keyDown(document.body, { key: 'ArrowUp' });
     expect(body()).toBe('L-1');
     // Still the root: no ← and no path (objectstack#27524) — the record row
-    // names it by its id until it reports a title (objectstack#35853).
-    expect(document.querySelector('[data-record-drawer-title]')?.textContent).toBe('#L-1');
+    // holds a placeholder until the record reports its title, never its id
+    // (objectstack#35853, objectstack#36235).
+    expect(document.querySelector('[data-record-drawer-title-pending]')).not.toBeNull();
+    expect(document.querySelector('[data-record-drawer-title]')).toBeNull();
     expect(screen.queryByTestId('record-drawer-trail')).toBeNull();
     // objectstack#27524, Target 7 — the counter follows the step.
     expect(screen.getByText('1 of 3')).toBeInTheDocument();

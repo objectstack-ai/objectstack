@@ -21,7 +21,7 @@ import { describe, it, expect, vi, afterEach } from 'vitest';
 // The page reaches a dynamic `@objectstack/lint` import; its first load is paid
 // here, at collection, never inside a case's clock (`check:test-source-alias`).
 import '@objectstack/lint';
-import { render, screen, cleanup, waitFor } from '@testing-library/react';
+import { render, screen, cleanup, waitFor, fireEvent } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { MePermissionsProvider, type MePermissionsResponse, type MePermissionsAuthenticatedResponse } from '@object-ui/permissions';
 
@@ -101,8 +101,8 @@ async function mountEdit(perms: MePermissionsResponse, opts: { createMode?: bool
   );
   if (!opts.createMode) {
     await waitFor(() => expect(mockClient.layered).toHaveBeenCalled());
-    // The toolbar paints once the item has loaded; References is ungated.
-    await screen.findByTitle('References');
+    // The tab row paints once the item has loaded; References is ungated.
+    await screen.findByTestId('item-tab-references');
   }
 }
 
@@ -117,38 +117,45 @@ async function mountMatrix(perms: MePermissionsResponse, embedded = false) {
   await screen.findByText('Sales');
 }
 
+/**
+ * The item tools are tabs since objectstack#36901: the audit log is read
+ * inside the History tab, so one gate decides both — the tab is offered, or
+ * neither is.
+ */
+async function expectBoth() {
+  fireEvent.click(screen.getByTestId('item-tab-history'));
+  expect(await screen.findByTestId('item-tab-panel-history')).toBeInTheDocument();
+  expect(screen.getByTestId('item-tab-view-audit')).toBeInTheDocument();
+}
+
 describe('ResourceEditPage — History and Audit follow the trail doors (objectui#12475)', () => {
   it('a setup.access-only caller sees neither entry', async () => {
     await mountEdit(SETUP_ONLY);
-    expect(screen.queryByTestId('history-button')).toBeNull();
-    expect(screen.queryByTestId('audit-button')).toBeNull();
+    expect(screen.queryByTestId('item-tab-history')).toBeNull();
+    expect(screen.queryByTestId('item-tab-panel-history')).toBeNull();
   });
 
   it('a studio.access author sees both', async () => {
     await mountEdit(STUDIO_AUTHOR);
-    expect(screen.getByTestId('history-button')).toBeInTheDocument();
-    expect(screen.getByTestId('audit-button')).toBeInTheDocument();
+    await expectBoth();
   });
 
   it('a manage_metadata holder sees both', async () => {
     await mountEdit(METADATA_AUTHOR);
-    expect(screen.getByTestId('history-button')).toBeInTheDocument();
-    expect(screen.getByTestId('audit-button')).toBeInTheDocument();
+    await expectBoth();
   });
 
   it('an unreported capability set fails open', async () => {
     await mountEdit(UNREPORTED);
-    expect(screen.getByTestId('history-button')).toBeInTheDocument();
-    expect(screen.getByTestId('audit-button')).toBeInTheDocument();
+    await expectBoth();
   });
 
   it('CONTROL: create mode is unchanged — no trail entries, for an author either', async () => {
     await mountEdit(STUDIO_AUTHOR, { createMode: true });
-    // The create form has painted (its subtitle) before an absence is asserted.
-    await screen.findByText('Create new');
-    expect(screen.queryByTestId('history-button')).toBeNull();
-    expect(screen.queryByTestId('audit-button')).toBeNull();
-    expect(screen.queryByTitle('References')).toBeNull();
+    // The create form has painted (its title) before an absence is asserted.
+    await screen.findAllByText('Create new');
+    expect(screen.queryByTestId('item-tab-history')).toBeNull();
+    expect(screen.queryByTestId('item-tab-references')).toBeNull();
   });
 });
 

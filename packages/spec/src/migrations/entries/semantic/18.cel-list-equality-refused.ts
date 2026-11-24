@@ -19,7 +19,12 @@ export const entry: SemanticMigration = {
     + 'string, number or boolean literal, in either operand order. Not the shape: a name a comprehension macro '
     + 'binds (`record.items.exists(labels, labels == \'a\')`, where `labels` is one item), a bare name a '
     + 'declared flow variable holds, nor any read in a flow no record write or sweep starts (an API, scheduled or '
-    + 'trigger-less flow), whose run holds what its entrance handed it',
+    + 'trigger-less flow), whose run holds what its entrance handed it. '
+    + 'Also the one-hop read `record.REF.LEAF` at the two sites that serve a hop, a validation rule\'s `condition` '
+    + '/ `when` (nested branches included) and a field `expression`: REF a single-valued reference field and LEAF '
+    + 'a list-valued field of its target (`record.account.labels == \'vip\'`), compared with the same literals. Not '
+    + 'that shape: a reference that is itself multi-valued, a second hop, a `previous` hop, nor a hop at any other '
+    + 'site, where `record.REF` holds the stored id',
   replacement:
     'Test membership, parenthesised whole so it stands where the comparison stood, in the spelling the site reads. '
     + 'A `record.` / `previous.` read evaluated as CEL: `(has(record.labels) && record.labels != null && \'frontend\' '
@@ -32,7 +37,11 @@ export const entry: SemanticMigration = {
     + 'refusal names the rewrite for its site. Compare the list with `null` to test whether it is set, and with a list '
     + 'literal for a whole-list match. '
     + '`os validate`, `os build`, the MCP `validate_expression` tool and the Studio object editor\'s draft check '
-    + 'refuse the shape as `list-equality`, an error; the flow registration pass logs it.',
+    + 'refuse the shape as `list-equality`, an error; the flow registration pass logs it. '
+    + 'The one-hop read takes the same rewrite on the hop read, `(has(record.account.labels) && '
+    + 'record.account.labels != null && \'vip\' in record.account.labels)` for `==` and its `!=` twin, and is refused '
+    + 'as `list-equality` by `os validate`, `os build` and the object save door; the Studio draft check and '
+    + 'the shared-validator half of the MCP `validate_expression` tool do not see a hop target\'s fields.',
   reason:
     'CEL compares the whole list with the scalar, so `[\'frontend\', \'qa\'] == \'frontend\'` is `false`, and so '
     + 'is `null == \'frontend\'`: the expression answers `false` (`true` for `!=`) on every row whatever the list '

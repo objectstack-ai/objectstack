@@ -1385,7 +1385,6 @@ const STUDIO_EN: Record<string, string> = {
   'engine.edit.detail': 'Detail',
   'engine.edit.preview': 'Preview',
   'engine.edit.designer': 'Designer',
-  'engine.edit.related': 'Related',
   'engine.edit.hideInspector': 'Hide inspector',
   'engine.edit.showInspector': 'Show inspector',
   'engine.edit.noChanges': 'No changes to save',
@@ -1926,8 +1925,7 @@ const STUDIO_EN: Record<string, string> = {
   'engine.packages.empty': 'No packages',
   'engine.packages.emptyCreate': 'Create your first package to start authoring metadata.',
   'engine.packages.emptyFiltered': 'No packages match your filters.',
-  'engine.packages.installedApps.title': 'Installed Apps',
-  'engine.packages.installedApps.description': 'The apps installed from the marketplace into this system.',
+  'engine.packages.admin.description': 'Turn the packages installed in this system on or off, or delete one. A new package opens in Studio, where it is designed.',
   'engine.packages.installedApps.empty': 'No apps installed from the marketplace yet',
   'engine.packages.installedApps.emptyHint': 'Apps you install from the marketplace are listed here.',
   'engine.packages.installedApps.col.update': 'Update',
@@ -1956,6 +1954,9 @@ const STUDIO_EN: Record<string, string> = {
   'engine.packages.source.marketplace': 'Marketplace',
   'engine.packages.source.authored': 'Authored',
   'engine.packages.source.showAll': 'Show all',
+  'engine.packages.source.all': 'All',
+  'engine.packages.face.unknown': 'Unknown page view "{value}". Use admin, or leave it out.',
+  'engine.packages.face.repeated': 'The page view is given more than once ({value}). Give admin once, or leave it out.',
   'engine.packages.source.unknown': 'Package "{id}" was refused: the server sent no source for it, or one that is not code, marketplace or authored.',
   'engine.packages.source.filterUnknown': 'Unknown source filter "{value}". Use code, marketplace or authored.',
   'engine.packages.source.filterRepeated': 'The source filter is given more than once ({value}). Give one of code, marketplace or authored.',
@@ -2012,6 +2013,7 @@ const STUDIO_EN: Record<string, string> = {
   'engine.packages.detail.type': 'Type',
   'engine.packages.detail.description': 'Description',
   'engine.packages.detail.browseMetadata': "Browse this package's metadata",
+  'engine.packages.detail.openInStudio': 'Open in Studio',
   'engine.packages.detail.pendingChanges': 'Pending changes',
   'engine.packages.detail.pendingHint': 'Drafted, not yet published. Publish the whole app, or review each below.',
   'engine.packages.detail.publishApp': 'Publish app ({count})',
@@ -2621,7 +2623,8 @@ const STUDIO_EN: Record<string, string> = {
   'engine.studio.data.firstObjectHint':
     'Objects are your app’s data foundation (e.g. “Orders”, “Customers”). Create one below; then design its fields, forms, and automations. Each Save is live at once.',
   'engine.studio.data.tab.records': 'Records',
-  'engine.studio.data.tab.form': 'Form',
+  // objectstack#36505 — the tab edits the object's field groups only.
+  'engine.studio.data.tab.form': 'Field layout',
   'engine.studio.data.tab.rules': 'Validations',
   'engine.studio.data.tab.settings': 'Settings',
   'engine.studio.data.tab.hooks': 'Hooks',
@@ -2657,11 +2660,10 @@ const STUDIO_EN: Record<string, string> = {
   'engine.studio.data.form.sourceLabel': 'Preview source',
   'engine.studio.data.form.sourceDraft': 'Draft',
   'engine.studio.data.form.sourcePublished': 'Published',
-  // objectstack-ai/objectstack#36425 — the Form tab edits the object's field
-  // groups, which the app's create and edit dialogs lay out by.
-  'engine.studio.data.form.layoutSource.fieldGroups': 'Field groups',
-  'engine.studio.data.form.layoutSource.fieldGroupsTitle':
-    'New and Edit in the app lay out this object\'s fields by these groups.',
+  // objectstack-ai/objectstack#36425, objectstack#36505 — the Field layout
+  // tab edits the object's field groups, which these surfaces lay out by.
+  'engine.studio.data.form.usedOn':
+    'These groups and this order are used on the record page, the right-side preview, and the create and edit dialogs.',
   'engine.studio.data.fieldProps': 'Field properties',
   'engine.studio.data.groupProps': 'Group properties',
   'engine.studio.data.fieldInspectorMissing':
@@ -3494,6 +3496,10 @@ const STUDIO_EN: Record<string, string> = {
   'engine.studio.pillar.automations': 'Automations',
   'engine.studio.pillar.interfaces': 'Interfaces',
   'engine.studio.pillar.access': 'Access',
+  // objectstack#36502 — the notice on a retired Interfaces link's landing.
+  'engine.studio.interfacesRetired.sentence': 'Interface edits have moved into the app.',
+  'engine.studio.interfacesRetired.backToApp': 'Back to the app',
+  'engine.studio.interfacesRetired.dismiss': 'Dismiss',
   // objectstack#28561 — the "All metadata" area beside the pillars (ADR-0146 D1).
   'engine.studio.pillar.metadata': 'All metadata',
   // Header · package-level publish + app bridge
@@ -3720,6 +3726,11 @@ const STUDIO_EN: Record<string, string> = {
   'engine.studio.designer.fieldTitleReadOnly': 'Click a field to view its properties',
   // objectui#12451 — the Form tab toolbar's hint.
   'engine.studio.designer.toolbarHint': 'Drag fields to arrange · click a field to edit its properties',
+  // objectstack#36505 — where a field of an installed object comes from.
+  'engine.studio.designer.source.base': 'Original package',
+  'engine.studio.designer.source.baseTitle': 'Comes with the installed package, as it ships',
+  'engine.studio.designer.source.environment': 'This environment',
+  'engine.studio.designer.source.environmentTitle': 'Added in this environment, in its customization package',
   'engine.studio.designer.addGroup': 'Add group',
   // What the form designer's drag live region says (objectui#11802): labels,
   // never the canvas's internal ids, and the place as "N of M" in the group.
@@ -4037,6 +4048,11 @@ const STUDIO_EN: Record<string, string> = {
   'engine.list.warnTitle': 'Metadata warnings',
   'engine.list.warnCount': '{count} warning(s):',
   'engine.list.allSources': 'All sources',
+  'engine.list.sort': 'Sort',
+  'engine.list.sort.name.asc': 'API name (A–Z)',
+  'engine.list.sort.name.desc': 'API name (Z–A)',
+  'engine.list.sort.label.asc': 'Label (A–Z)',
+  'engine.list.sort.label.desc': 'Label (Z–A)',
   'engine.package.writableRequired': 'Pick or create a writable base (package) first — this item cannot be authored into a read-only code package.',
   'engine.list.source.artifact': 'Artifact',
   'engine.list.source.runtime': 'Runtime',
@@ -4838,6 +4854,22 @@ const STUDIO_EN: Record<string, string> = {
   'engine.studio.itemTools.sourceReadOnly': 'Read-only: this item cannot be edited here.',
   'engine.studio.itemTools.layersFailed': 'Could not read this item\'s layers: {message}',
   'engine.studio.itemTools.layersRetry': 'Try again',
+  // Studio detail header: the one header of every full-screen detail (objectstack#36892).
+  'engine.studio.detailHeader.close': 'Close and go back to the list',
+  'engine.studio.detailHeader.previous': 'Previous item',
+  'engine.studio.detailHeader.next': 'Next item',
+  'engine.studio.detailHeader.position': 'Item {index} of {total}',
+  'engine.studio.detailHeader.notInList': 'Not in the current list',
+  'engine.studio.detailHeader.package': 'From package {package}',
+  'engine.studio.detailHeader.more': 'More',
+  // Studio item tabs: the item tools as tabs of the item page (objectstack#36901).
+  'engine.studio.itemTabs.details': 'Details',
+  'engine.studio.itemTabs.preview': 'Preview',
+  'engine.studio.itemTabs.related': 'Related',
+  'engine.studio.itemTabs.references': 'Referenced by',
+  'engine.studio.itemTabs.history': 'History',
+  'engine.studio.itemTabs.source': 'Source',
+  'engine.studio.itemTabs.versions': 'Versions',
 };
 
 export default STUDIO_EN;

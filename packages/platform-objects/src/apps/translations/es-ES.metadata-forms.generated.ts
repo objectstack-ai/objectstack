@@ -114,7 +114,7 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       "fieldGroups.collapse": {
         label: "Contraer",
-        helpText: "Si la sección se puede contraer, en el formulario de entrada y en la página de detalle del registro. Sin definir: none."
+        helpText: "Si la sección se puede contraer. El formulario de entrada lo aplica tal como está definido. En la página de registro predeterminada el lector puede contraer cualquier grupo con título, así que allí solo fija el estado inicial: Collapsed empieza contraído y los demás, abiertos. Sin definir: none."
       },
       "fieldGroups.visibleWhen": {
         label: "Condición de visibilidad",
@@ -1626,30 +1626,30 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
     fields: {
       name: {
         label: "Nombre",
-        helpText: "Identificador único snake_case"
+        helpText: "Nombre interno único de este panel: letras minúsculas, números y guiones bajos, empezando por una letra (por ejemplo, sales_overview)."
       },
       label: {
         label: "Etiqueta",
-        helpText: "Nombre mostrado"
+        helpText: "El título que ven las personas para este panel."
       },
       description: {
         label: "Descripción"
       },
       columns: {
         label: "Columnas",
-        helpText: "Columnas de cuadrícula (predeterminado 12)"
+        helpText: "En cuántas columnas se colocan los widgets, de 1 a 24. Si lo dejas vacío, el panel elige un ancho que se ajuste a sus widgets."
       },
       gap: {
         label: "Separación",
-        helpText: "Espacio entre widgets, en incrementos de 0.25rem (4 = 1rem)"
+        helpText: "Cuánto espacio dejar entre los widgets. Cuanto mayor es el número, más separados quedan; déjalo vacío para usar el espaciado estándar."
       },
       refreshIntervalSeconds: {
         label: "Intervalo de actualización",
-        helpText: "Actualización automática (segundos)"
+        helpText: "Cada cuántos segundos el panel vuelve a cargar sus datos. Déjalo vacío o escribe 0 para desactivar la recarga automática."
       },
       header: {
         label: "Encabezado",
-        helpText: "Configuración de cabecera del panel (title, subtitle, actions)"
+        helpText: "Lo que se muestra en la parte superior del panel: su título, su descripción y los botones de acción."
       },
       "header.showTitle": {
         label: "Mostrar título",
@@ -1677,7 +1677,7 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       widgets: {
         label: "Widgets del panel",
-        helpText: "Widgets del panel con posición y tamaño"
+        helpText: "Los gráficos, cifras y tablas de este panel, y dónde se sitúa cada uno."
       },
       "widgets.id": {
         label: "ID del widget"
@@ -1732,11 +1732,11 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       dateRange: {
         label: "Rango de fechas",
-        helpText: "Selector predeterminado de intervalo de fechas"
+        helpText: "El periodo con el que se abre el panel y si los usuarios pueden elegir sus propias fechas."
       },
       globalFilters: {
         label: "Filtros globales",
-        helpText: "Filtros aplicados a todos los widgets"
+        helpText: "Filtros que los usuarios pueden usar para acotar todos los widgets a la vez, o solo los que elijas."
       },
       "globalFilters.name": {
         label: "Nombre"
@@ -2198,7 +2198,8 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "Etiqueta"
       },
       description: {
-        label: "Descripción"
+        label: "Descripción",
+        helpText: "Una frase sobre lo que muestra este informe; aparece bajo su nombre."
       },
       type: {
         label: "Tipo",
@@ -2280,9 +2281,33 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "Rango de fechas",
         helpText: "Periodo predeterminado e interruptor de rango personalizado. La dimensión debe ser una dimensión de fecha del conjunto de datos; déjela vacía cuando el conjunto de datos tenga exactamente una."
       },
+      "dateRange.dimension": {
+        label: "Campo de fecha",
+        helpText: "La agrupación de fecha de la fuente de datos a la que se aplica el período. Déjelo vacío si la fuente de datos solo tiene una."
+      },
+      "dateRange.defaultRange": {
+        label: "Período predeterminado",
+        helpText: "El período con el que se abre el informe."
+      },
+      "dateRange.allowCustomRange": {
+        label: "Permitir rango personalizado",
+        helpText: "Permite que cada persona elija sus propias fechas de inicio y fin."
+      },
       exportOptions: {
         label: "Opciones de exportación",
         helpText: "Formatos de descarga (csv, xlsx) y nombre de archivo. Quién puede descargar lo determina el permiso de exportación del objeto del conjunto de datos."
+      },
+      "exportOptions.formats": {
+        label: "Formatos",
+        helpText: "Los formatos de descarga ofrecidos. Sin definir, se ofrecen csv y xlsx; una lista vacía desactiva las descargas."
+      },
+      "exportOptions.includeHeaders": {
+        label: "Incluir encabezados",
+        helpText: "Pone los nombres de columna en la primera fila del archivo descargado."
+      },
+      "exportOptions.fileNamePrefix": {
+        label: "Nombre de archivo",
+        helpText: "El inicio del nombre del archivo descargado. Si se deja vacío, el archivo toma la etiqueta del informe, o su nombre si no tiene etiqueta."
       }
     }
   },

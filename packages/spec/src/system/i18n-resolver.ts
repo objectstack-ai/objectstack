@@ -6337,6 +6337,38 @@ export function resolveMetadataFormLabels<T extends Record<string, any>>(
 }
 
 /**
+ * Translate the column headers of a metadata type's Studio list layout (a
+ * `METADATA_LIST_REGISTRY` entry) against the active translation bundle.
+ *
+ * A column is translated through the slot of the type's form field of the
+ * same path, `metadataForms.<type>.fields.<field>.label`, so a column header
+ * and the form label of that key read the same words. A column whose slot has
+ * no translation keeps its English header.
+ *
+ * Returns a new list object; the input is not mutated.
+ *
+ * @example
+ * ```ts
+ * const localized = resolveMetadataListLabels(METADATA_LIST_REGISTRY.hook, 'hook', bundle, { locale: 'zh-CN' });
+ * ```
+ */
+export function resolveMetadataListLabels<T extends { columns?: ReadonlyArray<Record<string, any>> }>(
+  list: T,
+  type: string,
+  bundle: TranslationBundle | undefined,
+  opts?: ResolveOptions,
+): T {
+  if (!list || typeof list !== 'object' || !Array.isArray(list.columns)) return list;
+  if (!lookupMetadataForm(bundle, type, opts)) return list;
+  const columns = list.columns.map((column) => {
+    if (!column || typeof column !== 'object' || typeof column.field !== 'string') return column;
+    const label = lookupMetadataFormField(bundle, type, column.field, 'label', opts);
+    return label ? { ...column, label } : column;
+  });
+  return { ...list, columns };
+}
+
+/**
  * Every `metadataForms.<type>.fields.<path>` key recorded at any locale of the
  * chain — the union, so a key one locale names and another does not is still
  * visited (the per-key lookup then walks the chain in order).

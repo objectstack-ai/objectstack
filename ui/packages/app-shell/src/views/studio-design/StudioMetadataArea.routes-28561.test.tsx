@@ -17,6 +17,7 @@ import * as React from 'react';
 import { render, screen, cleanup, waitFor } from '@testing-library/react';
 import { MemoryRouter, Route, Routes, useLocation, useSearchParams } from 'react-router-dom';
 import { useMetadataAreaHost } from '../metadata-admin/metadataAreaHost';
+import { registerMetadataResource } from '../metadata-admin/registry';
 
 function PageStub({ page }: { page: string }) {
   const host = useMetadataAreaHost();
@@ -73,6 +74,9 @@ vi.mock('./packages-io.js', async (importOriginal) => ({
 }));
 
 import { StudioMetadataArea } from './StudioMetadataArea';
+// The source under test reaches dynamic imports of `@objectstack/lint`; their first
+// load is paid here, at collection, never inside a case's clock (`check:test-source-alias`).
+import '@objectstack/lint';
 
 const WRITABLE = 'com.example.crm';
 const READ_ONLY = 'com.vendor.hr';
@@ -169,6 +173,21 @@ describe('the area mounts the metadata pages (objectstack#28561)', () => {
     mount(`/studio/${WRITABLE}/metadata/_diagnostics?package=${WRITABLE}`);
     expect((await page()).page).toBe('diagnostics');
     cleanup();
+    // objectstack#36901 — history is the item page's History tab: the old
+    // address opens it there, its query kept.
+    mount(`/studio/${WRITABLE}/metadata/hook/h1/history?package=${WRITABLE}`);
+    expect((await page()).page).toBe('item');
+    expect(where()).toBe(`/studio/${WRITABLE}/metadata/hook/h1?package=${WRITABLE}&tab=history`);
+  });
+
+  it('CONTROL: a type whose item page is its own editor, or a designer\'s, keeps the standalone history page', async () => {
+    // The permission set's matrix editor links `./history`; it has no tabs.
+    registerMetadataResource({ type: 'matrix_36901', EditPage: () => null });
+    mount(`/studio/${WRITABLE}/metadata/matrix_36901/m1/history?package=${WRITABLE}`);
+    expect((await page()).page).toBe('history');
+    expect(where()).toBe(`/studio/${WRITABLE}/metadata/matrix_36901/m1/history?package=${WRITABLE}`);
+    cleanup();
+    // So does an item a pillar's designer opens (a flow), which has no tab row yet.
     mount(`/studio/${WRITABLE}/metadata/flow/f1/history?package=${WRITABLE}`);
     expect((await page()).page).toBe('history');
   });
@@ -192,7 +211,6 @@ describe('a pillar type opened from the area opens its pillar', () => {
   for (const [type, pillar] of [
     ['object', 'data'],
     ['flow', 'automations'],
-    ['view', 'interfaces'],
     ['permission', 'access'],
   ] as const) {
     it(`${type} → ${pillar}, with \`?surface=\``, async () => {
@@ -207,6 +225,25 @@ describe('a pillar type opened from the area opens its pillar', () => {
   it('a type no pillar designs opens the generic page', async () => {
     mount(`/studio/${WRITABLE}/metadata/agent/support_bot?package=${WRITABLE}`);
     expect((await page()).page).toBe('item');
+  });
+
+  // objectstack#36502 — the Interfaces pillar is retired, so a view (like a
+  // page, dashboard or report) is read and edited on the generic page.
+  it('a view opens the generic page, no longer the retired Interfaces pillar', async () => {
+    mount(`/studio/${WRITABLE}/metadata/view/item_1?package=${WRITABLE}`);
+    expect((await page()).page).toBe('item');
+    expect(new URL(where(), 'http://x').pathname).toBe(`/studio/${WRITABLE}/metadata/view/item_1`);
+  });
+
+  it('on a read-only package a view opens the Customize editor, the door the retired Interfaces pillar was (objectstack#36502)', async () => {
+    mount(`/studio/${READ_ONLY}/metadata/view/item_1?package=${READ_ONLY}`);
+    expect((await page()).page).toBe('form-editor');
+    expect(JSON.parse(screen.getByTestId('form-editor').getAttribute('data-item') ?? 'null')).toEqual({
+      type: 'view',
+      name: 'item_1',
+      member: null,
+      readOnly: true,
+    });
   });
 
   it('`?review=1` opens the generic page and its review, and the page stays once the review is open', async () => {

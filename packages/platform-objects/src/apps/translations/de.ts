@@ -40,7 +40,7 @@ export const de: TranslationData = {
         group_overview: { label: 'Übersicht' },
         group_apps: { label: 'Apps' },
         nav_marketplace_browse: { label: 'Marketplace durchsuchen' },
-        nav_marketplace_installed: { label: 'Installierte Apps' },
+        nav_packages: { label: 'Pakete' },
         nav_cloud_connection: { label: 'Cloud-Verbindung' },
         group_people_org: { label: 'Personen und Organisation' },
         group_access_control: { label: 'Zugriffssteuerung' },

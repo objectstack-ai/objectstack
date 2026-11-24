@@ -114,7 +114,7 @@ export const zhHantMetadataForms: NonNullable<TranslationData['metadataForms']> 
       },
       "fieldGroups.collapse": {
         label: "摺疊",
-        helpText: "該分割區能否摺疊，作用於輸入表單和記錄詳細資料頁面。未設定：none。"
+        helpText: "該分割區能否摺疊。輸入表單依設定執行；預設記錄頁面上讀者可以摺疊每個有標題的分組，因此那裡只決定初始狀態：collapsed 先收合，其餘先展開。未設定：none。"
       },
       "fieldGroups.visibleWhen": {
         label: "可見條件",
@@ -1626,30 +1626,30 @@ export const zhHantMetadataForms: NonNullable<TranslationData['metadataForms']> 
     fields: {
       name: {
         label: "名稱",
-        helpText: "snake_case 唯一識別碼"
+        helpText: "儀表板的唯一內部名稱：使用小寫字母、數字和底線，以字母開頭（例如 sales_overview）。"
       },
       label: {
         label: "顯示名稱",
-        helpText: "顯示名"
+        helpText: "使用者看到的儀表板標題。"
       },
       description: {
         label: "描述"
       },
       columns: {
         label: "欄",
-        helpText: "格線欄數（預設 12）"
+        helpText: "元件排列所用的欄數，1 到 24。留空時儀表板會依元件的寬度自動選擇。"
       },
       gap: {
         label: "間距",
-        helpText: "元件之間的間距，每級 0.25rem（4 = 1rem）"
+        helpText: "元件之間保留的空間。數值越大越寬鬆；留空則使用標準間距。"
       },
       refreshIntervalSeconds: {
         label: "重新整理間隔",
-        helpText: "自動重新整理間隔（秒）"
+        helpText: "儀表板重新載入資料的頻率（秒）。留空或填 0 表示不自動重新整理。"
       },
       header: {
         label: "頁首",
-        helpText: "儀表板頁首設定（title、subtitle、actions）"
+        helpText: "儀表板頂端顯示的內容：標題、描述與操作按鈕。"
       },
       "header.showTitle": {
         label: "顯示標題",
@@ -1677,7 +1677,7 @@ export const zhHantMetadataForms: NonNullable<TranslationData['metadataForms']> 
       },
       widgets: {
         label: "元件",
-        helpText: "包含位置和尺寸的儀表板元件"
+        helpText: "儀表板上的圖表、數字與表格，以及每一項所在的位置。"
       },
       "widgets.id": {
         label: "元件 ID"
@@ -1732,11 +1732,11 @@ export const zhHantMetadataForms: NonNullable<TranslationData['metadataForms']> 
       },
       dateRange: {
         label: "日期範圍",
-        helpText: "預設日期範圍選擇器"
+        helpText: "開啟儀表板時預設的時間範圍，以及檢視者能否自選日期。"
       },
       globalFilters: {
         label: "全域篩選",
-        helpText: "套用到所有元件的篩選條件"
+        helpText: "檢視者可用來一次篩選所有元件，或只篩選你指定元件的篩選條件。"
       },
       "globalFilters.name": {
         label: "名稱"
@@ -2198,7 +2198,8 @@ export const zhHantMetadataForms: NonNullable<TranslationData['metadataForms']> 
         label: "顯示名稱"
       },
       description: {
-        label: "描述"
+        label: "描述",
+        helpText: "One sentence on what this report shows, displayed under its name."
       },
       type: {
         label: "類型",
@@ -2280,9 +2281,33 @@ export const zhHantMetadataForms: NonNullable<TranslationData['metadataForms']> 
         label: "日期範圍",
         helpText: "預設時間段與自訂範圍開關。維度必須是資料集的日期維度；資料集只有一個日期維度時可留空"
       },
+      "dateRange.dimension": {
+        label: "Date Field",
+        helpText: "The date grouping of the data source the period applies to. Leave it empty when the data source has only one."
+      },
+      "dateRange.defaultRange": {
+        label: "Default Period",
+        helpText: "The period the report opens with."
+      },
+      "dateRange.allowCustomRange": {
+        label: "Allow Custom Range",
+        helpText: "Let people pick their own start and end dates."
+      },
       exportOptions: {
         label: "匯出選項",
         helpText: "下載格式（csv、xlsx）與檔案名稱。誰可以下載由資料集物件上的匯出權限決定"
+      },
+      "exportOptions.formats": {
+        label: "Formats",
+        helpText: "The download formats offered. Left unset, both csv and xlsx are offered; an empty list turns downloads off."
+      },
+      "exportOptions.includeHeaders": {
+        label: "Include Headers",
+        helpText: "Put the column names in the first row of the downloaded file."
+      },
+      "exportOptions.fileNamePrefix": {
+        label: "File Name",
+        helpText: "The start of the downloaded file’s name, used instead of the report name."
       }
     }
   },

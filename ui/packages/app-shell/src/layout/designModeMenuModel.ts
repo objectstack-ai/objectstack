@@ -581,9 +581,16 @@ export function withOwnBeforeForeignRuns(menu: Menu, served: Menu, foreign: (id:
  * since the editor read it, is not moved, patched or written, and takes no
  * part in the order comparison. Only an entry `served` does not hold is an
  * addition; one whose id a stored entry already holds is written under a
- * fresh `nav_item_<n>` that neither menu holds.
+ * fresh `nav_item_<n>` that neither menu holds, and `writtenAs`, when given,
+ * is told so (the edited id, then the id written), so what is keyed by the
+ * entry's id elsewhere (its translation, objectstack#36504) follows it.
  */
-export function rebaseMenuEdits(served: Menu, edited: Menu, stored: Menu): Menu {
+export function rebaseMenuEdits(
+  served: Menu,
+  edited: Menu,
+  stored: Menu,
+  writtenAs?: Map<string, string>,
+): Menu {
   const keyOf = storedKeyer(served, stored);
   const s = locate(served, idOf);
   const e = locate(edited, idOf);
@@ -697,7 +704,10 @@ export function rebaseMenuEdits(served: Menu, edited: Menu, stored: Menu): Menu 
     const now = e.get(id)!;
     let entry: MenuEntry;
     if (taken.has(id)) entry = taken.get(id)!;
-    else if (!s.has(id)) entry = keyOf.alias(storedIds.has(id) ? { ...now.entry, id: freshId() } : now.entry, id);
+    else if (!s.has(id)) {
+      entry = keyOf.alias(storedIds.has(id) ? { ...now.entry, id: freshId() } : now.entry, id);
+      if (entry.id !== id) writtenAs?.set(id, String(entry.id));
+    }
     else continue;
     // A group the stored menu lacks: the entry goes to the end of the top level.
     const lost = now.parentId !== null && !groupEntries(result, now.parentId);
@@ -716,4 +726,91 @@ export function rebaseMenuEdits(served: Menu, edited: Menu, stored: Menu): Menu 
     result = replaceGroup(result, parentId, [...siblings.slice(0, at), entry, ...siblings.slice(at)]);
   }
   return result;
+}
+
+/**
+ * Where a label the editor took is stored (objectstack#36504): the language it
+ * was typed in, as the deployment names it (`locale`), and whether that is
+ * the app's source language (`source`), the one its stored labels are in.
+ */
+export interface MenuLabelLanguage {
+  readonly locale: string;
+  readonly source: boolean;
+}
+
+/**
+ * Whether a label typed in `language` for an entry goes to that language's
+ * translation, not to the stored label (objectstack#36504, ruling (4) of
+ * objectstack#36363 relaxed by it). The stored label is the app's own text, so
+ * it takes only a label typed in the source language, and only where the
+ * label shown is the stored one: an entry added in this session (`shown` is
+ * `null`), or one whose served label (`translateApp`'s answer for the reader)
+ * equals its stored label. Every other label is a translation: one typed in
+ * another language, and one typed over a translation shown in the source
+ * language, which the stored label would never reach. An entry the stored
+ * menu does not hold (`stored` absent) has no stored label to take it.
+ */
+export function labelGoesToTranslation(
+  language: MenuLabelLanguage,
+  shown: MenuEntry | null,
+  stored: MenuEntry | null | undefined,
+): boolean {
+  if (!language.source) return true;
+  if (!shown) return false;
+  if (!stored) return true;
+  return JSON.stringify(shown.label) !== JSON.stringify(stored.label);
+}
+
+/** The label edits of a menu that are translations, and the menu left to store. */
+export interface MenuLabelSplit {
+  /** `edited` with each translated label put back as served (an added entry's taken off). */
+  readonly navigation: Menu;
+  /** The translated labels, by the edited entry's id; `null` drops the entry's translation. */
+  readonly labels: ReadonlyMap<string, string | null>;
+}
+
+/**
+ * Split the label edits that turned `served` into `edited` (objectstack#36504):
+ * those {@link labelGoesToTranslation} sends to `language`'s translation come
+ * out as `labels`, and the entry is put back with its served label, so the
+ * stored label is never written from them; an entry added with a label typed
+ * outside the source language is stored without one, its base label left
+ * for the source language to set (review N5 of objectstack#36437). A cleared
+ * name drops the entry's translation (`null`). `storedById` is the stored
+ * entry behind each served one (`storedEntriesById`).
+ */
+export function splitLabelEdits(
+  served: Menu,
+  edited: Menu,
+  storedById: ReadonlyMap<string, MenuEntry>,
+  language: MenuLabelLanguage,
+): MenuLabelSplit {
+  const s = locate(served, idOf);
+  const labels = new Map<string, string | null>();
+  const visit = (entries: Menu): Menu => {
+    let changed = false;
+    const out = entries.map((entry) => {
+      let next = entry;
+      if (isGroup(entry)) {
+        const kids = childrenOf(entry);
+        const kept = visit(kids);
+        if (kept !== kids) next = { ...next, children: kept };
+      }
+      const id = idOf(entry);
+      const was = id ? s.get(id)?.entry ?? null : null;
+      const typed = (entry as Record<string, unknown>).label;
+      const relabelled = was ? JSON.stringify(typed) !== JSON.stringify(was.label) : typed !== undefined;
+      if (id && relabelled && labelGoesToTranslation(language, was, storedById.get(id))) {
+        const text = typeof typed === 'string' && typed ? typed : null;
+        // An entry added without a name has no translation to drop.
+        if (text !== null || was) labels.set(id, text);
+        const { label: _typed, ...rest } = next as Record<string, unknown>;
+        next = was && was.label !== undefined ? { ...rest, label: was.label } : rest;
+      }
+      if (next !== entry) changed = true;
+      return next;
+    });
+    return changed ? out : entries;
+  };
+  return { navigation: visit(edited), labels };
 }

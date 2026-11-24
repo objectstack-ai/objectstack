@@ -27,8 +27,8 @@ export const EscalateOverdueCasesFlow = defineFlow({
       type: 'start',
       label: 'Daily at 09:00 Shanghai time',
       // The cadence lives HERE — FlowSchema has NO top-level `schedule` key (a
-      // named parse error). A bare cron string also works; a cron`…` tag does not.
-      // A bare expression runs in UTC. A wall-clock hour the request names is
+      // named parse error). A cron`…` tag fails. A cron with no `timezone`
+      // (a bare string) runs in UTC and warns. A wall-clock hour the request names is
       // written AS SAID with its IANA `timezone` — never converted to UTC by hand:
       // the arithmetic may be right, but nothing then records which zone was meant.
       config: { schedule: { type: 'cron', expression: '0 9 * * *', timezone: 'Asia/Shanghai' } },

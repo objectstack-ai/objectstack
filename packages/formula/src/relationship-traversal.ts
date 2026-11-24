@@ -239,6 +239,27 @@ export function rootMemberOf(node: unknown, roots: readonly string[]): { readonl
 }
 
 /**
+ * [#36237] The ONE-HOP read `node` itself is — `record.account.labels`,
+ * `record['account']['labels']`, any mix of the {@link asMember} spellings —
+ * as `{ root, field, leaf }`, or `undefined` when `node` is anything else: a
+ * read of the root's own member (`record.labels`, {@link rootMemberOf}'s
+ * answer), a deeper read (`record.a.b.c`), a call, a literal.
+ *
+ * {@link rootMemberOf} one segment further, for a check that judges an
+ * OPERAND reached through a relationship: `@objectstack/lint`'s hop pass asks
+ * whether one side of a `==` is a read of the hop target's field.
+ */
+export function hopMemberOf(
+  node: unknown,
+  roots: readonly string[],
+): { readonly root: string; readonly field: string; readonly leaf: string } | undefined {
+  const member = asMember(node);
+  if (!member) return undefined;
+  const read = rootMemberOf(member.receiver, roots);
+  return read ? { ...read, leaf: member.name } : undefined;
+}
+
+/**
  * Analyse one authored CEL source for the hops it takes through `root`.
  *
  * Returns `null` when the source does not parse or blows the platform's bounds

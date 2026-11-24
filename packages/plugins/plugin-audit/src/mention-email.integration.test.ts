@@ -156,8 +156,9 @@ async function boot(): Promise<Rig> {
 }
 
 let seq = 0;
-async function mention(engine: ObjectQL, mentions: string[], body = `note ${++seq}`): Promise<void> {
-  await engine.insert('sys_comment', {
+/** Alice writes a top-level comment mentioning `mentions`; its id. */
+async function mention(engine: ObjectQL, mentions: string[], body = `note ${++seq}`): Promise<string> {
+  const row: any = await engine.insert('sys_comment', {
     thread_id: `${TASK}:t1`,
     body,
     author_id: ALICE,
@@ -165,6 +166,7 @@ async function mention(engine: ObjectQL, mentions: string[], body = `note ${++se
     organization_id: DEFAULT_ORGANIZATION_ID,
     mentions: JSON.stringify(mentions),
   }, { context: SYSTEM });
+  return String(row.id);
 }
 
 async function deliveries(engine: ObjectQL): Promise<Array<Record<string, any>>> {
@@ -188,14 +190,14 @@ const byChannel = (rows: Array<Record<string, any>>, recipient: string) =>
 describe('an @mention reaches the mentioned person by e-mail as well as the inbox', () => {
   it('default: one inbox notice and one e-mail with the comment preview and an absolute link to the record', async () => {
     rig = await boot();
-    await mention(rig.engine, [CAROL], 'Carol, can you review the launch plan?');
+    const id = await mention(rig.engine, [CAROL], 'Carol, can you review the launch plan?');
 
     const rows = await drained(rig.engine);
     expect(byChannel(rows, CAROL)).toEqual(['email:success', 'inbox:success']);
     expect(rig.sent).toHaveLength(1);
     expect(rig.sent[0]).toMatchObject({ to: `${CAROL}@example.com`, subject: 'Alice mentioned you' });
     expect(rig.sent[0].text).toBe(
-      `Carol, can you review the launch plan?\n\nOpen the comment: ${ORIGIN}/_console/${TASK}/t1`,
+      `Carol, can you review the launch plan?\n\nOpen the comment: ${ORIGIN}/_console/${TASK}/t1?comments=${id}`,
     );
     // The author is never notified, on either channel.
     expect(byChannel(rows, ALICE)).toEqual([]);
@@ -203,13 +205,13 @@ describe('an @mention reaches the mentioned person by e-mail as well as the inbo
 
   it('[#34729] a zh-CN reader gets the zh-CN subject and link line', async () => {
     rig = await boot();
-    await mention(rig.engine, [MEI], '请看一下发布计划');
+    const id = await mention(rig.engine, [MEI], '请看一下发布计划');
 
     const rows = await drained(rig.engine);
     expect(byChannel(rows, MEI)).toEqual(['email:success', 'inbox:success']);
     expect(rig.sent).toHaveLength(1);
     expect(rig.sent[0]).toMatchObject({ to: `${MEI}@example.com`, subject: 'Alice 提到了你' });
-    expect(rig.sent[0].text).toBe(`请看一下发布计划\n\n查看评论：${ORIGIN}/_console/${TASK}/t1`);
+    expect(rig.sent[0].text).toBe(`请看一下发布计划\n\n查看评论：${ORIGIN}/_console/${TASK}/t1?comments=${id}`);
   });
 
   it('muted: a person whose collab.mention e-mail preference is off gets the inbox notice only', async () => {

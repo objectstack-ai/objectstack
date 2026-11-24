@@ -33,6 +33,7 @@
 
 import { resolveCloudActiveEnvironmentId } from './active-environment.js';
 import { readErrorMessage } from './response-envelope.js';
+import { terminalText } from './terminal-text.js';
 
 /** One environment as the control plane's list answers it, reduced to what a pick needs. */
 export interface CloudEnvironmentSummary {
@@ -113,9 +114,12 @@ export function installableEnvironments(rows: CloudEnvironmentSummary[]): CloudE
   return rows.filter((row) => row.status !== 'archived' && !row.infrastructure);
 }
 
-/** `name (id)`, or the bare id when the row has no name. */
+/**
+ * `name (id)`, or the bare id when the row has no name, each as one line of
+ * printable characters: both are the control plane's text.
+ */
 export function describeEnvironment(env: { id: string; displayName?: string }): string {
-  return env.displayName ? `${env.displayName} (${env.id})` : env.id;
+  return env.displayName ? `${terminalText(env.displayName)} (${terminalText(env.id)})` : terminalText(env.id);
 }
 
 /**
@@ -139,7 +143,7 @@ export async function resolveInstallTarget(args: {
   const active = await resolveCloudActiveEnvironmentId(args.baseUrl);
   if (active) return { kind: 'resolved', environmentId: active, source: 'active' };
 
-  const needs = `${args.subject} needs an environment ${args.purpose ?? 'to install into'}`;
+  const needs = `${terminalText(args.subject)} needs an environment ${terminalText(args.purpose ?? 'to install into')}`;
   const remedy = 'Pass `--env <id>` (or set $OS_ENVIRONMENT_ID), or record one with `os environments switch <id>`.';
   const listed = await (args.list ?? listCloudEnvironments)({
     baseUrl: args.baseUrl,
@@ -151,8 +155,8 @@ export async function resolveInstallTarget(args: {
       kind: 'refused',
       message:
         `${needs}. None was given, and the list of your `
-        + `organization's environments on ${args.baseUrl} could not be read`
-        + `${listed.status ? ` (${listed.status})` : ''}: ${listed.error}. ${remedy}`,
+        + `organization's environments on ${terminalText(args.baseUrl)} could not be read`
+        + `${listed.status ? ` (${terminalText(listed.status)})` : ''}: ${terminalText(listed.error)}. ${remedy}`,
     };
   }
 
@@ -165,7 +169,7 @@ export async function resolveInstallTarget(args: {
     return {
       kind: 'refused',
       message:
-        `${needs}, and your account has none on ${args.baseUrl}. `
+        `${needs}, and your account has none on ${terminalText(args.baseUrl)}. `
         + `Create one in the ObjectOS Cloud console, then run this again. ${remedy}`,
     };
   }
@@ -173,7 +177,7 @@ export async function resolveInstallTarget(args: {
     kind: 'refused',
     message:
       `${needs}, and your account can reach `
-      + `${candidates.length} on ${args.baseUrl}, so none was picked:\n`
+      + `${candidates.length} on ${terminalText(args.baseUrl)}, so none was picked:\n`
       + candidates.map((env) => `    • ${describeEnvironment(env)}`).join('\n')
       + `\n  ${remedy}`,
   };

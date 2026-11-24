@@ -114,7 +114,7 @@ export const deMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       "fieldGroups.collapse": {
         label: "Einklappen",
-        helpText: "Ob der Abschnitt im Eingabeformular und auf der Datensatz-Detailseite eingeklappt werden kann. Nicht gesetzt: nein."
+        helpText: "Ob der Abschnitt eingeklappt werden kann. Das Eingabeformular folgt der Einstellung. Auf der Standard-Datensatzseite kann der Leser jede Gruppe mit Titel einklappen; dort legt die Einstellung nur den Anfangszustand fest: Collapsed beginnt eingeklappt, die anderen offen. Nicht gesetzt: nein."
       },
       "fieldGroups.visibleWhen": {
         label: "Sichtbar wenn",
@@ -1626,30 +1626,30 @@ export const deMetadataForms: NonNullable<TranslationData['metadataForms']> = {
     fields: {
       name: {
         label: "Name",
-        helpText: "Eindeutige Kennung in snake_case"
+        helpText: "Eindeutiger interner Name dieses Dashboards: Kleinbuchstaben, Ziffern und Unterstriche, beginnend mit einem Buchstaben (zum Beispiel sales_overview)."
       },
       label: {
         label: "Bezeichnung",
-        helpText: "Anzeigename"
+        helpText: "Der Titel, den Benutzer für dieses Dashboard sehen."
       },
       description: {
         label: "Beschreibung"
       },
       columns: {
         label: "Spalten",
-        helpText: "Rasterspalten (Standard 12)"
+        helpText: "Auf wie vielen Spalten die Widgets angeordnet werden, von 1 bis 24. Leer lassen, damit das Dashboard eine Breite wählt, die zu seinen Widgets passt."
       },
       gap: {
         label: "Abstand",
-        helpText: "Abstand zwischen Widgets in Schritten von 0,25rem (4 = 1rem)"
+        helpText: "Wie viel Platz zwischen den Widgets bleibt. Größere Zahlen rücken sie weiter auseinander; leer lassen für den Standardabstand."
       },
       refreshIntervalSeconds: {
         label: "Aktualisierungsintervall (Sekunden)",
-        helpText: "Automatische Aktualisierung (Sekunden)"
+        helpText: "Wie oft das Dashboard seine Daten neu lädt, in Sekunden. Leer lassen oder 0 eingeben, um das automatische Neuladen auszuschalten."
       },
       header: {
         label: "Kopfzeile",
-        helpText: "Konfiguration der Dashboard-Kopfzeile (Titel, Untertitel, Aktionen)"
+        helpText: "Was oben im Dashboard angezeigt wird: Titel, Beschreibung und Aktionsschaltflächen."
       },
       "header.showTitle": {
         label: "Titel anzeigen",
@@ -1677,7 +1677,7 @@ export const deMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       widgets: {
         label: "Widgets",
-        helpText: "Dashboard-Widgets mit Position und Größe"
+        helpText: "Die Diagramme, Kennzahlen und Tabellen dieses Dashboards und wo jedes davon steht."
       },
       "widgets.id": {
         label: "Widget-ID"
@@ -1732,11 +1732,11 @@ export const deMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       dateRange: {
         label: "Datumsbereich",
-        helpText: "Standardauswahl des Datumsbereichs"
+        helpText: "Der Zeitraum, mit dem das Dashboard öffnet, und ob Betrachter selbst einen Zeitraum wählen dürfen."
       },
       globalFilters: {
         label: "Globale Filter",
-        helpText: "Auf alle Widgets angewendete Filter"
+        helpText: "Filter, mit denen Betrachter alle Widgets auf einmal eingrenzen können oder nur die von Ihnen gewählten."
       },
       "globalFilters.name": {
         label: "Filtername"
@@ -2198,7 +2198,8 @@ export const deMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "Bezeichnung"
       },
       description: {
-        label: "Beschreibung"
+        label: "Beschreibung",
+        helpText: "One sentence on what this report shows, displayed under its name."
       },
       type: {
         label: "Typ",
@@ -2280,9 +2281,33 @@ export const deMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "Datumsbereich",
         helpText: "Standardzeitraum und Umschalter für einen benutzerdefinierten Bereich. Die Dimension muss eine Datumsdimension des Datasets sein; leer lassen, wenn das Dataset genau eine hat."
       },
+      "dateRange.dimension": {
+        label: "Date Field",
+        helpText: "The date grouping of the data source the period applies to. Leave it empty when the data source has only one."
+      },
+      "dateRange.defaultRange": {
+        label: "Default Period",
+        helpText: "The period the report opens with."
+      },
+      "dateRange.allowCustomRange": {
+        label: "Allow Custom Range",
+        helpText: "Let people pick their own start and end dates."
+      },
       exportOptions: {
         label: "Exportoptionen",
         helpText: "Download-Formate (csv, xlsx) und Dateiname. Wer herunterladen darf, regelt die Exportberechtigung für das Dataset-Objekt."
+      },
+      "exportOptions.formats": {
+        label: "Formats",
+        helpText: "The download formats offered. Left unset, both csv and xlsx are offered; an empty list turns downloads off."
+      },
+      "exportOptions.includeHeaders": {
+        label: "Include Headers",
+        helpText: "Put the column names in the first row of the downloaded file."
+      },
+      "exportOptions.fileNamePrefix": {
+        label: "File Name",
+        helpText: "The start of the downloaded file’s name, used instead of the report name."
       }
     }
   },

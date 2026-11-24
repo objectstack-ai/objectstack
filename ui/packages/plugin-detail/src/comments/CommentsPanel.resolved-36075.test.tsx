@@ -284,3 +284,15 @@ describe('useRecordComments — the icon’s count (objectstack#36075 item 8)', 
     expect(screen.getByTestId('count')).toHaveTextContent('5');
   });
 });
+
+describe('a link to a resolved thread (objectstack#36410)', () => {
+  it('shows it past the default filter, marked', () => {
+    render(
+      <DiscussionContextProvider items={ITEMS as any[]} onAddComment={vi.fn()} onResolveComment={vi.fn()}>
+        <CommentsPanel onClose={vi.fn()} focusThreadId="t2" />
+      </DiscussionContextProvider>,
+    );
+    expect(screen.getByText('settled one')).toBeInTheDocument();
+    expect(document.querySelector('[data-comment-target="true"]')).toHaveAttribute('data-comment-id', 't2');
+  });
+});

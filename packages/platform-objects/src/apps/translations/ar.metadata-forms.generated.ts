@@ -114,7 +114,7 @@ export const arMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       "fieldGroups.collapse": {
         label: "الطي",
-        helpText: "ما إذا كان يمكن طي القسم، في نموذج الإدخال وصفحة تفاصيل السجل. عند عدم التعيين: لا."
+        helpText: "ما إذا كان يمكن طي القسم. يتبع نموذج الإدخال الإعداد كما هو. في صفحة السجل الافتراضية يمكن للقارئ طي كل مجموعة لها عنوان، لذا يحدد الإعداد هناك الحالة الأولى فقط: Collapsed تبدأ مطوية والبقية مفتوحة. عند عدم التعيين: لا."
       },
       "fieldGroups.visibleWhen": {
         label: "مرئي عندما",
@@ -1626,30 +1626,30 @@ export const arMetadataForms: NonNullable<TranslationData['metadataForms']> = {
     fields: {
       name: {
         label: "الاسم",
-        helpText: "معرّف فريد بصيغة snake_case"
+        helpText: "اسم داخلي فريد للوحة المعلومات هذه: أحرف لاتينية صغيرة وأرقام وشرطات سفلية، ويبدأ بحرف (مثل sales_overview)."
       },
       label: {
         label: "التسمية",
-        helpText: "اسم العرض"
+        helpText: "العنوان الذي يراه المستخدمون للوحة المعلومات هذه."
       },
       description: {
         label: "الوصف"
       },
       columns: {
         label: "الأعمدة",
-        helpText: "أعمدة الشبكة (الافتراضي 12)"
+        helpText: "عدد الأعمدة التي تُرتَّب عليها عناصر الواجهة، من 1 إلى 24. اتركه فارغًا لتختار اللوحة عرضًا يناسب عناصرها."
       },
       gap: {
         label: "التباعد",
-        helpText: "المسافة بين عناصر الواجهة، بخطوات من 0.25rem ‏(4 = 1rem)"
+        helpText: "مقدار المسافة بين عناصر الواجهة. كلما زاد الرقم تباعدت أكثر؛ اتركه فارغًا لاستخدام المسافة القياسية."
       },
       refreshIntervalSeconds: {
         label: "فاصل التحديث بالثواني",
-        helpText: "التحديث التلقائي (بالثواني)"
+        helpText: "عدد الثواني بين كل إعادة تحميل لبيانات اللوحة. اتركه فارغًا أو أدخل 0 لإيقاف إعادة التحميل التلقائي."
       },
       header: {
         label: "الترويسة",
-        helpText: "تهيئة ترويسة لوحة المعلومات (العنوان، والعنوان الفرعي، والإجراءات)"
+        helpText: "ما يظهر أعلى لوحة المعلومات: عنوانها ووصفها وأزرار الإجراءات."
       },
       "header.showTitle": {
         label: "إظهار العنوان",
@@ -1677,7 +1677,7 @@ export const arMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       widgets: {
         label: "عناصر الواجهة",
-        helpText: "عناصر واجهة لوحة المعلومات مع الموضع والحجم"
+        helpText: "المخططات والأرقام والجداول في لوحة المعلومات هذه، وموضع كل منها."
       },
       "widgets.id": {
         label: "معرّف عنصر الواجهة"
@@ -1732,11 +1732,11 @@ export const arMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       dateRange: {
         label: "النطاق الزمني",
-        helpText: "محدد النطاق الزمني الافتراضي"
+        helpText: "الفترة التي تُفتح بها اللوحة، وما إذا كان بإمكان المشاهدين اختيار تواريخهم الخاصة."
       },
       globalFilters: {
         label: "عوامل التصفية العامة",
-        helpText: "عوامل التصفية المطبَّقة على جميع عناصر الواجهة"
+        helpText: "عوامل تصفية يستخدمها المشاهدون لتضييق جميع عناصر الواجهة دفعة واحدة، أو العناصر التي تختارها فقط."
       },
       "globalFilters.name": {
         label: "الاسم"
@@ -2198,7 +2198,8 @@ export const arMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "التسمية"
       },
       description: {
-        label: "الوصف"
+        label: "الوصف",
+        helpText: "One sentence on what this report shows, displayed under its name."
       },
       type: {
         label: "النوع",
@@ -2280,9 +2281,33 @@ export const arMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "النطاق الزمني",
         helpText: "الفترة الافتراضية ومفتاح النطاق المخصّص. يجب أن يكون البُعد بُعدًا تاريخيًا من مجموعة البيانات؛ اتركه فارغًا حين لا تحتوي مجموعة البيانات إلا على بُعد واحد منه."
       },
+      "dateRange.dimension": {
+        label: "Date Field",
+        helpText: "The date grouping of the data source the period applies to. Leave it empty when the data source has only one."
+      },
+      "dateRange.defaultRange": {
+        label: "Default Period",
+        helpText: "The period the report opens with."
+      },
+      "dateRange.allowCustomRange": {
+        label: "Allow Custom Range",
+        helpText: "Let people pick their own start and end dates."
+      },
       exportOptions: {
         label: "خيارات التصدير",
         helpText: "صيغ التنزيل (csv، xlsx) واسم الملف. من يحق له التنزيل يحدده إذن التصدير على كائن مجموعة البيانات."
+      },
+      "exportOptions.formats": {
+        label: "Formats",
+        helpText: "The download formats offered. Left unset, both csv and xlsx are offered; an empty list turns downloads off."
+      },
+      "exportOptions.includeHeaders": {
+        label: "Include Headers",
+        helpText: "Put the column names in the first row of the downloaded file."
+      },
+      "exportOptions.fileNamePrefix": {
+        label: "File Name",
+        helpText: "The start of the downloaded file’s name, used instead of the report name."
       }
     }
   },

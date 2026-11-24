@@ -114,7 +114,7 @@ export const ptBRMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       "fieldGroups.collapse": {
         label: "Recolher",
-        helpText: "Se a seção pode ser recolhida, no formulário de entrada e na página de detalhes do registro. Não definido: nenhuma."
+        helpText: "Se a seção pode ser recolhida. O formulário de entrada segue a configuração. Na página de registro padrão, o leitor pode recolher qualquer grupo com título, então ali ela define só o estado inicial: Collapsed começa recolhida e as demais, abertas. Não definido: nenhuma."
       },
       "fieldGroups.visibleWhen": {
         label: "Visível quando",
@@ -1626,30 +1626,30 @@ export const ptBRMetadataForms: NonNullable<TranslationData['metadataForms']> = 
     fields: {
       name: {
         label: "Nome",
-        helpText: "Identificador único em snake_case"
+        helpText: "Nome interno único deste painel: letras minúsculas, números e sublinhados, começando com uma letra (por exemplo, sales_overview)."
       },
       label: {
         label: "Rótulo",
-        helpText: "Nome de exibição"
+        helpText: "O título que as pessoas veem para este painel."
       },
       description: {
         label: "Descrição"
       },
       columns: {
         label: "Colunas",
-        helpText: "Colunas da grade (padrão 12)"
+        helpText: "Em quantas colunas os widgets são organizados, de 1 a 24. Deixe vazio para o painel escolher uma largura que se ajuste aos seus widgets."
       },
       gap: {
         label: "Espaçamento",
-        helpText: "Espaço entre os widgets, em passos de 0.25rem (4 = 1rem)"
+        helpText: "Quanto espaço deixar entre os widgets. Números maiores os afastam mais; deixe vazio para o espaçamento padrão."
       },
       refreshIntervalSeconds: {
         label: "Intervalo de atualização (segundos)",
-        helpText: "Atualização automática (segundos)"
+        helpText: "Com que frequência o painel recarrega os dados, em segundos. Deixe vazio ou informe 0 para desligar a recarga automática."
       },
       header: {
         label: "Cabeçalho",
-        helpText: "Configuração do cabeçalho do painel (título, subtítulo, ações)"
+        helpText: "O que aparece no topo do painel: título, descrição e botões de ação."
       },
       "header.showTitle": {
         label: "Mostrar título",
@@ -1677,7 +1677,7 @@ export const ptBRMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       widgets: {
         label: "Widgets",
-        helpText: "Widgets do painel com posição e dimensionamento"
+        helpText: "Os gráficos, números e tabelas deste painel, e onde cada um fica."
       },
       "widgets.id": {
         label: "ID do widget"
@@ -1732,11 +1732,11 @@ export const ptBRMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       dateRange: {
         label: "Intervalo de datas",
-        helpText: "Seletor de intervalo de datas padrão"
+        helpText: "O período com que o painel abre e se os usuários podem escolher as próprias datas."
       },
       globalFilters: {
         label: "Filtros globais",
-        helpText: "Filtros aplicados a todos os widgets"
+        helpText: "Filtros que os usuários podem usar para restringir todos os widgets de uma vez, ou só os que você escolher."
       },
       "globalFilters.name": {
         label: "Nome"
@@ -2198,7 +2198,8 @@ export const ptBRMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "Rótulo"
       },
       description: {
-        label: "Descrição"
+        label: "Descrição",
+        helpText: "One sentence on what this report shows, displayed under its name."
       },
       type: {
         label: "Tipo",
@@ -2280,9 +2281,33 @@ export const ptBRMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "Intervalo de datas",
         helpText: "Período padrão e opção de intervalo personalizado. A dimensão deve ser uma dimensão de data do conjunto de dados; deixe-a em branco quando o conjunto de dados tiver exatamente uma."
       },
+      "dateRange.dimension": {
+        label: "Date Field",
+        helpText: "The date grouping of the data source the period applies to. Leave it empty when the data source has only one."
+      },
+      "dateRange.defaultRange": {
+        label: "Default Period",
+        helpText: "The period the report opens with."
+      },
+      "dateRange.allowCustomRange": {
+        label: "Allow Custom Range",
+        helpText: "Let people pick their own start and end dates."
+      },
       exportOptions: {
         label: "Opções de exportação",
         helpText: "Formatos de download (csv, xlsx) e nome do arquivo. Quem pode baixar é definido pela permissão de exportação no objeto do conjunto de dados."
+      },
+      "exportOptions.formats": {
+        label: "Formats",
+        helpText: "The download formats offered. Left unset, both csv and xlsx are offered; an empty list turns downloads off."
+      },
+      "exportOptions.includeHeaders": {
+        label: "Include Headers",
+        helpText: "Put the column names in the first row of the downloaded file."
+      },
+      "exportOptions.fileNamePrefix": {
+        label: "File Name",
+        helpText: "The start of the downloaded file’s name, used instead of the report name."
       }
     }
   },
