@@ -136,6 +136,13 @@ vi.mock('../metadata-admin/useMetadata', async (importOriginal) => {
 
 vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn(), info: vi.fn(), warning: vi.fn() } }));
 
+// Monaco's loader fails (offline), so the JSON source editor is its textarea.
+vi.mock('@monaco-editor/react', () => {
+  const Editor = () => null;
+  return { Editor, default: Editor, loader: { init: () => Promise.reject(new Error('offline')) } };
+});
+vi.mock('@object-ui/plugin-editor', () => ({ configureBundledMonaco: () => Promise.resolve() }));
+
 import { StudioBundleItemEditor } from './StudioBundleItemEditor';
 import type { StudioBaseCustomization } from './StudioDesignSurface';
 import { ensureCustomizationPackage } from './packages-io';

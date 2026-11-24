@@ -76,6 +76,13 @@ vi.stubGlobal(
   vi.fn(async () => new Response('null', { status: 404, headers: { 'content-type': 'application/json' } })),
 );
 
+// Monaco's loader fails (offline), so the JSON source editor is its textarea.
+vi.mock('@monaco-editor/react', () => {
+  const Editor = () => null;
+  return { Editor, default: Editor, loader: { init: () => Promise.reject(new Error('offline')) } };
+});
+vi.mock('@object-ui/plugin-editor', () => ({ configureBundledMonaco: () => Promise.resolve() }));
+
 import { MetadataResourceEditPage } from './ResourceEditPage';
 import { registerMetadataPreview, type MetadataPreviewProps } from './preview-registry';
 import { t } from './i18n';
@@ -140,7 +147,6 @@ describe('the item page opens on its tab (decision 4)', () => {
 
     // Source reads the same buffer: the unsaved canvas edit is there.
     fireEvent.click(screen.getByTestId('item-tab-source'));
-    // The editor is the textarea once Monaco's grace period passes, as in jsdom.
     const source = await screen.findByRole('textbox', { name: 'JSON source' }, { timeout: 8000 });
     expect((source as HTMLTextAreaElement).value).toContain('Edited on canvas');
 
