@@ -133,7 +133,7 @@ function recordPageProps() {
 }
 
 /** Mount the record page, then launch the flow action through a real runner. */
-async function launch(data: Record<string, unknown>) {
+async function launch(data: Record<string, unknown>, callContext?: Record<string, unknown>) {
   render(
     <MemoryRouter initialEntries={[`/app/demo/${OBJECT_NAME}/${RECORD_ID}`]}>
       <MetadataCtx.Provider value={METADATA}>
@@ -168,7 +168,7 @@ async function launch(data: Record<string, unknown>) {
 
   let result: any;
   await act(async () => {
-    result = await runner.execute({ ...ACTION } as any);
+    result = await runner.execute({ ...ACTION } as any, callContext as any);
   });
   unsubscribe();
   expect(String(authFetchSpy.mock.calls[0][0])).toContain('/api/v1/automation/check_dup/trigger');
@@ -234,5 +234,28 @@ describe('objectui#11092 — a paused record-page launch names the flow by its s
     expect(within(dialog).getByRole('heading', { name: 'Confirm' })).toBeTruthy();
     expect(within(dialog).getByText('Duplicate Screening')).toBeTruthy();
     expect(within(dialog).queryByText('check_dup')).toBeNull();
+  });
+});
+
+// objectstack#36915 — a list embedded on a record page runs its per-record bulk
+// flow through THIS page's runtime, whose ActionProvider replaces the
+// console's. Each record is dispatched with `reportsRefusal` (the runner's
+// `callContext`): the page's flow handler then opens no notice, and the
+// refusal comes back on the result for the bulk result to list.
+describe('objectstack#36915 — record-page flow handler honours reportsRefusal', () => {
+  it('a dispatch with reportsRefusal opens no notice and answers the refusal on the result', async () => {
+    const { result } = await launch({ success: true, status: 'refused', refusalMessage: SENTENCE }, { reportsRefusal: true });
+
+    expect(result).toEqual({ success: true, silent: true, handedOff: true, refusal: { message: SENTENCE } });
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(document.body.textContent).not.toContain(SENTENCE);
+  });
+
+  it('control: the same dispatch without the flag still opens the notice', async () => {
+    const { result } = await launch({ success: true, status: 'refused', refusalMessage: SENTENCE });
+
+    expect(result.refusal).toEqual({ message: SENTENCE });
+    const dialog = await screen.findByRole('dialog');
+    expect(within(dialog).getByRole('alert').textContent).toContain(SENTENCE);
   });
 });
