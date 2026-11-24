@@ -1382,7 +1382,6 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
   // order, then the rest as before (`./rowActionArrangement`). Keyed on the
   // arm's content so an unchanged arm hands the menus the same defs.
   const recordArmKey = JSON.stringify((objectSchema as any)?.actionLayout?.record ?? null);
-  // eslint-disable-next-line react-hooks/exhaustive-deps -- the arm is keyed on content by `recordArmKey`
   const resolvedRowActionDefs = useMemo(() => rankRowActionDefs(foldedRowActionDefs, JSON.parse(recordArmKey)), [foldedRowActionDefs, recordArmKey]);
   // Honor the object's resolved CRUD affordance: the ADR-0103 lifecycle bucket
   // (`managedBy`), the `userActions.edit`/`delete` override — explicit `false`
