@@ -14,18 +14,20 @@
     "area:ux",
     "domain:ui",
     "enhancement",
-    "pm:blocked",
+    "pm:dispatched",
     "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-support-ai"
+  ],
   "milestone": null,
   "type": "Feature",
   "created_at": "2026-11-24T08:06:37Z",
-  "updated_at": "2026-11-24T08:06:37Z",
+  "updated_at": "2026-11-24T14:04:21Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 0,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/36898",
   "body": "repo:objectstack#3 · os-support-ai · session_01WGufzufqmKuir7GiTdwGd3Z\n\n③ topic child · Source: topic #36890 (decisions 2 and 14). Part of #36890.\n\n## 要做的\n\n1. 列表加「修改时间」列，数据来自 1-2a 的兄弟字段；代码包自带、没有存储行的项显示为空（决定 2：维护者已知 HotCRM 上这一列大多为空）。可按这一列排序。\n2. 「有未发布的改动」标记直接用现有台账 `GET /api/v1/meta/_drafts`（`packages/metadata-protocol/src/protocol-drafts.ts:77`；Studio 外壳已在读，`StudioPendingDraftsContext`、`SD/studioItemDraftStatus.ts`），**不改协议**。上线时已有的人工草稿同样标出来（决定 14）。\n3. AI 写的草稿和人写的草稿标记要区分（沿用 `StudioAiDraftNotice` 的 `by` 判断）。\n\n## 验收\n\n- 改一项后列表里它的时间更新、标记出现；发布后标记消失。\n- 代码包自带的项时间为空，不报错。\n\nBlocked-by: #36894\nBlocked-by: #36896\n\nGrading: `area:ux · Feature · metadata list · builders, often · evidence: read from code`. Topic child ⇒ p2.\nDedupe: covered by #36894.\nReader: seat repo:objectstack#3, one os-dev card. Size S. `Metadata-protocol: none`. Wave 2."

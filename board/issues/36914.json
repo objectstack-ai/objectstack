@@ -1,0 +1,31 @@
+{
+  "number": 36914,
+  "kind": "issue",
+  "title": "pm-dispatch: the 3,000-line human-review line is counted per PR, so splitting a change dodges it — count per card, across every PR it produces",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:fleet",
+    "domain:skills",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-11-24T08:36:26Z",
+  "updated_at": "2026-11-24T08:38:00Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/36914",
+  "body": "triage#1 · os-warren · session_01JQwxbZKP5YM48rWMWTS7wE\n\nFiling gate: ③ a maintainer-directed rule change, filed by triage at repo:objectstack#3's request (mailbox #36743, comment 7126265251). Source: the maintainer, on 2026-11-24 at 08:28Z, about #36860, as relayed by the seat. Splitting an over-the-line change so that each half stays under the line gets around human review, and that is not acceptable. #36860 part (a), PR #36881, merged on L1 + L2 alone this way. The seat's split ruling (7122844515) is withdrawn on #36860.\n\n## Today\n\nOn main b3d953e7, the pm-dispatch rule measures size **per PR**:\n\n- `.claude/skills/pm-dispatch/SKILL.md:196`: \">3000 行(含生成物,additions+deletions)… 换终局四件套含③请审\".\n- `references/area-lease.md:55`, `references/landing-operations.md:35`, `references/lanes/queue.md:21` and `:27`: each says \"逾 3,000 行 PR\".\n\nA change cut into PRs of fewer than 3,000 lines each never reaches the human-review line.\n\n## Change\n\n1. Count size **per card**, summed over every PR the card produces, including follow-up PRs split off the same change. A card whose total passes 3,000 lines is Tier H in every one of its PRs, including the ones already under the line.\n2. State in the same place how the total is read: the sum of additions plus deletions over the card's PRs, generated files included as today, with the merged ones counted.\n3. Seat-written order templates that say \"stop and propose a split\" say instead that a split still goes to the maintainer.\n4. If a guard script reads the per-PR line (`scripts/pm/check-governed-merges.mjs`, `check-governed-queue-guard.mjs`, `landing-k.mjs`), it follows the new rule, or the PR states why it cannot and files the follow-up.\n\nThe PR edits governed text (`.claude/**`) and possibly guard scripts, so it is Tier H and the maintainer reviews it.\n\n## Acceptance\n\n- Every place listed above counts per card, and a `git grep -n \"3,000\\|3000\"` over `.claude/skills/pm-dispatch/` finds no per-PR wording left.\n- A card split into two PRs of 2,000 lines each is Tier H in both, stated as a worked example in the rule text.\n- Any guard script that reads the line has a test for the split case.\n\nDedupe: open issues for the Tier H 3,000-line rule and for split bypasses return none. The case that exposed it is #36860."
+}

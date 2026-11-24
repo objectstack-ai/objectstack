@@ -1,0 +1,37 @@
+{
+  "number": 36974,
+  "kind": "pull_request",
+  "title": "fix(i18n): the full search page names component, doc and link results in every language",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "os-support-ai"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-24T12:35:47Z",
+  "updated_at": "2026-11-24T14:14:24Z",
+  "closed_at": "2026-11-24T14:14:21Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-24T14:14:21Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/36974",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-support-ai\"} -->\n_Requested by **Yibo Wang** · [project thread](https://claude.ai/code/project/chan_01BVUyyPie8gHwoPM18iABwB?thread=cmsg_01BVUyyPie8gHwoPM18iABwBP9pYn3ZkhGT2R2hstwEY6w)_\n\nrepo:objectstack#3 · os-support-ai · session_01WGufzh1FMUQYf1PcEunaaK\n\nFixes #36955\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 控制台用户打开完整搜索页时，组件、文档和链接类结果的分组标题与标签从原始键名变成各语言的正常文字，搜索框提示也提到组件和文档。\n- 属于控制台体验修复，替在应用导航里放了审批收件箱、服务手册这类入口的用户解决看不懂的标题。\n- 出错时最多是某个分组标题仍显示英文或键名，不影响搜索和跳转，可直接撤回。\n- 无。\n\n## What changes\n\n- `ui/packages/i18n/src/locales/*.ts` (all eleven console packs; `zh-Hant.ts` regenerated with `gen:zh-hant` from `zh-Hans.ts`): the `search` block gains `typeComponents`, `typeDocs`, `typeUrls` and `badgeComponent`, `badgeDoc`, `badgeUrl`; `placeholder` and its twin `inputAriaLabel` now also name components and docs.\n- **`typeUrls` / `badgeUrl` go beyond the card's four keys, declared here:** the page derives `search.type` + Type + `s` from every listed nav item, and a `type: 'url'` item resolves to its own href (not `#`), so it is listed and printed `search.typeUrls` / `search.badgeUrl` the same way. Same defect class, same block, same gate family; the new pin goes red without them (mutation below).\n- `ui/packages/app-shell/src/views/__tests__/SearchResultsPage.resultTypeKeys-36955.test.tsx` (new): renders the page with one nav item of every spec nav type (read from `NavigationItemTypeSchema`, which is read off `@objectstack/spec`), each carrying every target field, so the page's own `resolveHref` decides which types are listed; collects every `search.type…` / `search.badge…` key the page asks `t` for and asserts each is a non-empty string in every built-in pack. No hand-written type or key list.\n- Gate-forced follow-ons of the placeholder change (claim surface amended for them): `SearchResultsPage.tsx` widens `SearchResult['type']` with `'component' | 'doc' | 'url'` (check-i18n-dead-keys one-hop leg reads that union as the badge discriminator); `global-search-renderer.tsx` inline `defaultValue`s of `search.placeholder` / `search.inputAriaLabel` follow the new en text (check-i18n-call-site-keys default-value drift); `ui/scripts/i18n-en-drift-baseline.json` drops the `search.placeholder` waiver, now stale because all ten translations follow the en change here (check-i18n-en-drift).\n- Changeset: `@object-ui/i18n` patch, `@object-ui/app-shell` patch (private).\n\n**Read first:** `ui/packages/app-shell/src/views/__tests__/SearchResultsPage.resultTypeKeys-36955.test.tsx` (the derivation; its non-vacuity case), then `ui/packages/i18n/src/locales/ru.ts` and `ar.ts` search blocks (genitive / Arabic list wording).\n\n**Two-minute check:** `cd ui && pnpm exec vitest run packages/app-shell/src/views/__tests__/SearchResultsPage.resultTypeKeys-36955.test.tsx` — expect 12 passed (1 non-vacuity case + 11 packs).\n\n## Tests\n\n<details><summary>New pin, green at HEAD</summary>\n\n```\n Test Files  1 passed (1)\n      Tests  12 passed (12)\nos-verify-lock: VERDICT command-exit 0\n```\n</details>\n\n<details><summary>Mutation (one-shot, not kept): drop ru badgeUrl</summary>\n\nRan through `scripts/ablation-replace.mjs` (anchor x1 to x0, blob df16126d99d7 to e7498ebd3155), restored to the HEAD blob df16126d99d7, `git diff HEAD` empty afterwards.\n\n```\n     × ru names every heading and badge the page asks for\nAssertionError: expected [ 'search.badgeUrl' ] to deeply equal []\n      Tests  1 failed | 11 passed (12)\n```\n</details>\n\n<details><summary>@object-ui/i18n test + type-check</summary>\n\n```\npnpm --filter @object-ui/i18n test        Test Files  110 passed (110) · Tests 2026 passed | 13 skipped\npnpm --filter @object-ui/i18n type-check  VERDICT command-exit 0\n```\n</details>\n\n## Acceptance notes\n\n- The page's `SearchResult['type']` union, `TYPE_ICONS` and `TYPE_COLORS` still list only object/dashboard/page/report, so component, doc and link results render with the fallback database icon and no badge colour. Cosmetic, not in this card's surface; noted, not filed.\n- `global-search-renderer.tsx` (the `global:search` record-search block) shares `search.placeholder` / `search.inputAriaLabel` with the full search page, so its placeholder now also names components and docs, which a record search does not return (it already named dashboards, pages and reports, which it also does not return). Noted, not filed.\n\n## Verification\n\nSee the report comment on #36955 for the local gate list and its exit codes; CI runs the rest.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01WGufzh1FMUQYf1PcEunaaK\n\n---\n\n## Round 2 (after pr_create, head 9df9b39a)\n\n- Claim amendments 7131602500 and 7133172172 cover the files beyond the first surface: `global-search-renderer.tsx` (inline `defaultValue` of `search.placeholder` / `search.inputAriaLabel` follows the new en text), `ui/scripts/i18n-en-drift-baseline.json` (stale `search.placeholder` waiver dropped), the `SearchResult['type']` union in `SearchResultsPage.tsx` (`'component' | 'doc' | 'url'`), and two one-line test edits forced by them: `ui/scripts/__tests__/check-i18n-en-drift.test.ts` (`WAIVER_CEILING` 7 → 6) and `global-page-blocks.render.test.tsx` (finds the `global:search` box by its new accessible name).\n- Line budget: 18 files, +247/−32 (one PR for the card).\n\n\n_Generated by [Claude Code](https://claude.ai/code/session_01WGufzh1FMUQYf1PcEunaaK)_\n<!-- signed: repo:objectstack#3 · os-support-ai · session_01WGufzh1FMUQYf1PcEunaaK -->\n"
+}

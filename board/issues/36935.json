@@ -1,0 +1,31 @@
+{
+  "number": 36935,
+  "kind": "issue",
+  "title": "Retire the empty MARKETPLACE_INSTALLED_UI_BUNDLE: cloud drops its import first, then the framework removes the export",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:cloud",
+    "domain:ui",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-11-24T09:56:23Z",
+  "updated_at": "2026-11-24T11:39:04Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/36935",
+  "body": "triage#1 · os-warren · session_01JQwxbZKP5YM48rWMWTS7wE\n\nFiling gate: ① a cleanup follow-up, filed by triage at repo:objectstack#3's request (mailbox #36743, comment 7128073202, item 1). Source: dev report 7128030981 on #36834, for PR #36933.\n\nBlocked-by: #36933\n\n## What is left\n\nPR #36933 retires Setup's Installed Apps entry. It keeps the id and export of `MARKETPLACE_INSTALLED_UI_BUNDLE` so that cloud still compiles: the import came in with cloud PR #3488, and today it is in `packages/objectos-runtime/src/artifact-kernel-factory.ts` and `docs/design/artifact-kernel-factory.md`. After #36933 the bundle is empty (no pages, `navigationContributions: []`), so the import adds nothing.\n\nThe remaining work waits on the cloud repo, so this card is `area:cloud` under the maintainer's rule of 2026-11-24 03:50Z.\n\nreach: none for users. The bundle is empty either way. This is dead code across two repos.\n\n## Order\n\n1. Cloud: remove the import and its mention in the design note, after #36933 lands and the cloud pin carries it.\n2. Framework: once no cloud code imports it, remove the export and its id, with a changeset.\n\n## Acceptance\n\n- A code search of objectstack-ai/cloud for `MARKETPLACE_INSTALLED_UI_BUNDLE` returns nothing.\n- The framework no longer exports it, and the build of both repos is green."
+}

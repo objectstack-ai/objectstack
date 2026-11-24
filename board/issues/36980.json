@@ -1,0 +1,34 @@
+{
+  "number": 36980,
+  "kind": "issue",
+  "title": "Import wizard: the duplicate-match-key row error is an English sentence in a zh-CN session, and record-level validation errors carry a `_record:` prefix",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "sunhaolin",
+    "id": 6194896,
+    "type": "User"
+  },
+  "labels": [
+    "area:ux",
+    "bug",
+    "domain:ui",
+    "pm:dispatched",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-support-ai"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-24T13:13:21Z",
+  "updated_at": "2026-11-24T13:37:57Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/36980",
+  "body": "## What happens\n\nConsole import wizard (list → Import), UI language zh-CN, `@objectstack/*` 18.6.0, HotCRM lead import (saved mapping, upsert on `email`). Two kinds of row error reach the user in a form they cannot read as the rest of the dialog:\n\n### 1. The duplicate-match-key refusal is an English sentence with a machine field name\n\nUpload a file where two rows carry the same upsert key, then Validate. The preview lists, for each of those rows:\n\n> 第 1 行：Rows 1, 5 of this import have the same match key (email), so none of them was written: keep one row per key and import again\n\nEverything around it is Chinese. The sentence is composed in English in `packages/core/src/utils/import-runner.ts` (`code: 'DUPLICATE_MATCH_KEY'`, still so on `main`), and the wizard prints `error` as is. The key is named by its API name (`email`), not the field label (`邮箱`), unlike the field errors next to it.\n\n### 2. A record-level validation error is prefixed with `_record:`\n\nA row refused by an object-level validation rule (here `crm_lead.disqualification_reason_required`) is shown as:\n\n> 第 3 行：_record: 线索标记为不合格时必须填写取消资格原因\n\nA field-level error on the same screen is shown with the field label (`名字: 此字段为必填项`, `行业: … 不在允许的选项范围内`). The record-level one leaks the internal `_record` path token as if it were a field name. The same text is what the result page and (presumably) the failed-rows download carry.\n\n## Expected\n\n1. The duplicate-key row error is rendered in the request's language (the wizard has the `code` and could compose it client-side, or the runner localizes it as it does validation messages), and names the key by field label.\n2. A record-level error is shown without the `_record:` prefix (just the message, as a record form's banner shows it).\n\n## Steps\n\n1. HotCRM 6.6.0 local dev, sign in, language 简体中文, Sales → 线索 → 导入.\n2. Upload a CSV with headers `First Name,Last Name,Company,Email,Lead Status` where rows 1 and 5 share an email, and one row has `Lead Status` = `Disqualified`.\n3. 下一步 → 校验数据.\n\nFound in a UI test pass of HotCRM; not worked around there.\n"
+}

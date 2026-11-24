@@ -13,18 +13,20 @@
   "labels": [
     "area:ux",
     "domain:ui",
-    "pm:blocked",
+    "pm:dispatched",
     "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-support-ai"
+  ],
   "milestone": null,
   "type": "Task",
   "created_at": "2026-11-24T08:05:58Z",
-  "updated_at": "2026-11-24T08:05:58Z",
+  "updated_at": "2026-11-24T14:06:02Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 0,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/36895",
   "body": "repo:objectstack#3 · os-support-ai · session_01WGufzufqmKuir7GiTdwGd3Z\n\n③ topic child · Source: topic #36890. Part of #36890.\n\n## 为什么\n\n专题把对象、流程、权限集从分区地址（`/studio/<包>/data?surface=object:<名>` 等）搬到元数据地址（`/studio/<包>/metadata/<类型>/<名>`）。今天元数据地址上点对象会被 `SD/StudioMetadataArea.tsx:161-166`（`AreaItemOpen`）按 `SD/metadataArea.ts:70-78` 的 `AREA_PILLAR_FOR_TYPE` 转回分区。如果先把分区地址重定向到元数据地址，两条规则会互相跳成死循环（fable 评审）。所以先把地址收口到一个函数，再由每张设计器卡在装好全屏设计器的同一个 PR 里切换自己的类型。\n\n## 要改的地址生成点（读代码确认，主干 0819cab1，非测试）\n\n1. `AS/utils/appRoute.ts:263, 290, 316`（`appStudioDesignPath`、`appStudioSurfacePath`、`appStudioObjectPath`）\n2. `SD/metadataArea.ts:86, 108`（`studioPillarItemPath`、`areaItemPillarPath`）\n3. `SD/setupMetadataRedirect.ts:73, 93, 94`\n4. `AS/chrome/CommandPalette.tsx:1043, 1132, 1152`\n5. `SD/studioScope.ts:58`\n6. `AS/console/ai/artifactStudioPath.ts:38`、`AS/console/ai/AiChatPage.tsx:3146`\n7. `AS/console/AppNoAccessEmptyState.tsx:150`\n8. `AS/views/RecordTabsConfig.tsx:112`、`AS/views/DashboardInPageEditor.tsx:197`\n9. `SD/BuilderLanding.tsx:113, 169, 822`、`SD/studioChangesLink.ts:50`、`SD/switchedOffActionTargets.ts:65`\n10. `SDS` 自身（分区链接、配对包跳转、`~org` 跳转、权限集「新建类似」）\n11. `ui/apps/console/src/components/StudioRoute.tsx:285, 349`、`ui/apps/console/src/AppContent.tsx:68, 178`\n12. 服务端：`packages/cli/src/commands/meta/register.ts:213`、`packages/runtime/src/domains/mcp-authoring.ts:1293-1294`（MCP 写草稿后返回给 AI 的审阅链接）；`skills/objectstack-mcp-build/evals/draft-door-procedure.json` 里 5 处同一地址\n13. `SD/InterfacesNavRail.tsx:253` 随 #36502 删除，不用改。\n\n（`AS/` = `ui/packages/app-shell/src/`，`SD/` = `AS/views/studio-design/`，`SDS` = `SD/StudioDesignSurface.tsx`。）\n\n## 要做的\n\n1. 加一个函数（例如 `studioItemPath(包, 类型, 名, 选项)`；服务端两处用一份共享的纯函数或常量，放哪里在 PR 里写明），上面每一处改成调用它。**函数暂时仍返回今天的地址**，行为不变。\n2. 写一张映射表，覆盖 `?surface=` 的全部写法（`object:<名>` 带视图 id、`owd:overview`、`?nav=`），以及要原样保留的 `?changes=review`、`?review=1`、`?package=`、`?scope=environment`。后续设计器卡按表切换。\n3. 和 #36502 第 3 项（旧 `/interfaces` 地址跳转）用同一张表。\n\n## 不做的\n\n- 不改任何地址的实际结果；不加重定向（各设计器卡在自己的 PR 里加；4-1 删分区路由）。\n\n## 验收\n\n- 全仓（含 `packages/` 和 `skills/`）不再有手拼 Studio 地址的地方，有一个守门测试或 lint 规则钉住。\n- 全量测试通过，所有现有地址字面不变。`packages/` 下的改动带 changeset。\n\nBlocked-by: #36502\n\nGrading: `area:ux · Task · Studio navigation (about 20 producers build Studio URLs by hand) · builders and AI review links · evidence: read from code`. Topic child ⇒ p2.\nDedupe: `studio path helper` / `appStudioDesignPath` (no open card).\nReader: seat repo:objectstack#3, one os-dev card. Size M. `Metadata-protocol: none`. Wave 1 (after #36502 merges)."

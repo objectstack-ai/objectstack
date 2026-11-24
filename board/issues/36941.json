@@ -1,0 +1,30 @@
+{
+  "number": 36941,
+  "kind": "issue",
+  "title": "专题：起步应用（公司、联系人、任务、备忘）与平台任务/备忘第一步",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:data",
+    "pm:epic",
+    "priority:p1"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-24T10:06:50Z",
+  "updated_at": "2026-11-24T10:10:59Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/36941",
+  "body": "director#1 · os-warren · session_01JQwxbZPWs72rvmFQAcYF9A\n\nFiling gate: ③ maintainer-directed (topic parent). Source: maintainer. Key words (maintainer, 2026-11-24, strategy thread): 「起步模版可以这样设计 公司、人员、任务、备忘，其中任务备忘不挂关联。」 「但是任务和备忘应该是未来平台的核心能力啊」 「任务和备忘并不应该影响原始记录的权限。」 「同意，立卡」 「立卡派发，并且考虑新创建的云环境是否应该预置这个应用，以及开发人员用命令行启动的的开发环境是否也应该包含」 「应该立一张专题卡吧？」\n\n## 维护者速读\n\n- 做什么：平台新增内置的「任务」「备忘」两个对象（第一步不挂关联、权限各自独立）；再做一个起步应用「公司、联系人」，菜单里同时放平台的任务和备忘。\n- 默认带上：新建云工作区的第一个环境默认装好起步应用；命令行新建项目的空白模板改用同一套公司、联系人。\n- 不做：任务/备忘挂到任意记录（#35947 其余部分继续搁置）。\n- 需要你做的：无。\n\n## Children\n\n1. #36942 — platform `sys_task` + `sys_note` objects, step 1 (no links). area:data.\n2. #36943 — home page 「我的工作」 lists my tasks. area:ux. Blocked-by 1.\n3. #36944 — starter app `examples/app-starter` (公司 + 联系人, menu with platform 任务/备忘), published as a starter. area:package. Blocked-by 1.\n4. #36945 — `create-objectstack` blank template: replace its sample `note` object with the starter's 公司/联系人. area:build. Blocked-by 1, 3.\n5. objectstack-ai/cloud#4957 — a new workspace's first environment installs the starter by default. area:environment. Blocked-by 3.\n\n## Rulings that bound every child\n\n- 任务 and 备忘 are platform built-in objects (not package objects), customizable like any object (#35947 decision 1).\n- Step 1 carries **no link** to other records. The attach-to-any-record mechanism (#35947 batches 1, 2 and its link UI) stays on hold.\n- Permissions: each object has its own sharing; it never grants, and never derives, access to any other record (maintainer 09:30Z). When the link step restarts, #35947's \"permission follows the parent\" is dropped.\n- 公司/联系人 are a starter **package**, not platform objects, so a customer who builds their own CRM or installs HotCRM does not get two of each (#35328 A). 「联系人」 = external people; the platform already has employees.\n- Chinese labels: 任务, 备忘 (the maintainer's word; #35947's text says 备注).\n\n## Done when\n\nAll children closed; a new cloud workspace and a fresh `npm create objectstack` project both open with 公司、联系人、任务、备忘 in the menu.\n\nReader: seats per area (data/package/build p1 → seat 4; ux → seat 3; cloud card → cloud seat).\nDedupe: `tasks notes platform objects`, `sys_task`, `starter template company contact`, `starter package` (objectstack) and `starter new environment` (cloud) → only #35947 (parent design, on hold; this epic takes its step 1).\n"
+}

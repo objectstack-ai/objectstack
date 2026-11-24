@@ -2,8 +2,8 @@
   "number": 36807,
   "kind": "issue",
   "title": "更改负责人：队列选择器只读 sys_queue，应用包声明的队列选不到",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,7 +14,6 @@
     "area:ux",
     "bug",
     "domain:ui",
-    "pm:dispatched",
     "priority:p2"
   ],
   "assignees": [
@@ -23,11 +22,15 @@
   "milestone": null,
   "type": "Bug",
   "created_at": "2026-11-24T01:22:48Z",
-  "updated_at": "2026-11-24T08:21:34Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-24T08:44:43Z",
+  "closed_at": "2026-11-24T08:43:47Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 3,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/36807",
   "body": "triage#1 · os-warren · session_01JQwxbZKP5YM48rWMWTS7wE\n\nFiling gate: ① a product defect with a named site, filed by triage at repo:objectstack#3's request (mailbox #36743, comment 7119009171). Source: found by seat 3's ux-B dev on #36395, outside that card's surface.\n\n## What happens\n\nThe Change Owner dialog's queue tab offers only `sys_queue` rows. `ui/packages/app-shell/src/views/ChangeOwnerDialog.tsx:143` reads `adapter.find('sys_queue', { $top: 200 })` and nothing else (read on `origin/main`). ADR-0142 D1/D7 make queues that an app package declares first-class assignment targets. The other queue pickers build their candidates with `mergeQueueCandidates` (`ui/packages/fields/src/widgets/queueCandidates.ts`, used by `RecipientPickerField`, `FlowReferenceField` and `refLabelDirectory`). So a queue that a package declares can be picked everywhere else, but not as a record's new owner.\n\nreach: not measured. Which shipped packages declare queues was not read. The site was read from the code and was not run in a browser.\n\n## Expected\n\nThe Change Owner queue tab offers the same candidates as the other queue pickers: `sys_queue` rows plus package-declared queues, merged the way `mergeQueueCandidates` merges them.\n\n## Acceptance\n\n- A pin in which a package-declared queue appears in the Change Owner queue tab and can be picked. The owner write then names that queue.\n- A plain `sys_queue` row is still offered as today.\n\n## Relation\n\nThis is the same query line as #36395 item 2 (the queue list caps at 200 with no search). #36395 is in flight with repo:objectstack#3, so this card is filed separately rather than folded in. The seat may land both in one PR.\n\nDedupe: open issues for `ChangeOwnerDialog` (#36395 only, the cap and search, not the candidate set), `mergeQueueCandidates` (none) and `change owner queue` (#36262, the server-side queue-target check, a different mechanism)."

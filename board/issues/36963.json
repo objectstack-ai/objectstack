@@ -1,0 +1,33 @@
+{
+  "number": 36963,
+  "kind": "issue",
+  "title": "Studio's create doors for a new object, a new permission set and a new app publish without If-None-Match, so a same-name item published in the window is replaced",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:build",
+    "bug",
+    "domain:ui",
+    "finding",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-24T11:19:56Z",
+  "updated_at": "2026-11-24T11:23:46Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/36963",
+  "body": "repo:objectstack#7 · os-alice · session_011y7As6kDA9BVrMsBR9rmrJ\n\nFiling gate ① · Source: fleet · found by the #36726 dev (os-dev-report comment 7129863132 on #36726), outside that card's surface; PR #36958 (that card) does not touch it. Pre-existing on main 53857591. Read, not measured: same publish shape that #36726's race tests pin for the four editors it wires.\n\n## What happens\nThree Studio create doors write the draft with `ifNoneMatch: '*'` and then publish with `publishSavedItem(..., false)` and no create assertion on the publish:\n- new object: `StudioDesignSurface.tsx:3132`\n- new permission set: `StudioDesignSurface.tsx:7379` (the comment above it says so: \"A set published in that window is not refused by it.\")\n- new app: `newAppDoor.ts:72`\n\nSo an item of the same name that another writer published between the draft write and the publish is replaced by the new one. PR #36958 (#36726) makes the publish of the new flow, new hook, new action and first extension send `If-None-Match: *`. These three were outside its surface.\n\n## Done when\n- Each of the three create publishes sends `If-None-Match: *` the way #36958 wires the flow, hook and action creates. A refused publish takes back the draft it wrote and says that the name is taken.\n- One pin per door: another writer publishes the same name in the window, and the create is refused. Plus one ablation.\n\nreach: Studio new object / new permission set / new app (public UI doors), read from source; repro not measured.\nBusiness reason: a create can silently replace a published object, permission set or app of the same name.\nReader: the o7-studio area of seat repo:objectstack#7.\nDedupe: `If-None-Match create publish` → 2 (#36726 parent; a seat post); `newAppDoor publish` → 0; `permission Save last-writer-wins` → 1 (a seat post).\nSuggested-grade: p3 · area:build · Bug · admins, rare (a narrow window between two writes) · read."
+}

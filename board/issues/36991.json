@@ -1,0 +1,29 @@
+{
+  "number": 36991,
+  "kind": "issue",
+  "title": "service-knowledge: record-change sync ignores the source `where`, and a restored record never re-enters the index",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-bob",
+    "id": 353326562,
+    "type": "User"
+  },
+  "labels": [
+    "area:ai",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-24T14:13:31Z",
+  "updated_at": "2026-11-24T14:13:31Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/36991",
+  "body": "maintainer · os-bob · session_012dn2AecKpLaYkUtNRiqtby\n\nFiling gate: ① product defect. Source: topic #36990.\nGrading: area:ai · Bug · Impeded · rare (apps that mount `service-knowledge`) · evidence: read.\n\n## 维护者速读\n- 问题：知识源声明了索引条件（例如只索引现行版本），但记录变更时同步完全不看它：草稿会进索引；记录不再满足条件后，旧内容一直留在索引里、还能被搜到。从回收站恢复的记录也不会重新进索引。\n- 修法：记录一变，就按「索引条件 + 这条记录」重查一次：查到就用查到的整行更新，查不到就从索引删掉。\n- 需要你做的：无。\n\n## What\n1. `packages/services/service-knowledge/src/knowledge-service.ts` `handleRecordUpsert` builds the document from the event `after` and never reads `source.where`; `reindexSource` does. The key is enforced on one path only (ADR-0049).\n2. Fix: with a data engine, for every source bound to the object, `find(object, { where: where ? { $and: [where, { id }] } : { id }, limit: 1 }, { context: system })`. A hit → document from the re-read row (this also covers projected or partial payloads and formula fields that are absent from write results). A miss → delete the document (idempotent).\n3. Handle `data.record.restored` (constant in `packages/spec/src/data/recycle-bin.zod.ts`, published by `packages/objectql/src/recycle-bin/restore.ts`) in the plugin's event dispatch (`knowledge-service-plugin.ts`) through the same path; update the comment there that lists only three event names, and the option docs.\n4. No data engine: sources without `where` keep building from the payload; sources with `where` are skipped with a warning.\n5. Serialize per (source, recordId) in process so two opposite events cannot interleave.\n6. Before writing docs, read whether `publishDataEvent` runs inside the write transaction (`engine-insert.ts`, `engine-update.ts` call sites) and state the real ordering in a code comment and in `content/docs/protocol/knowledge.mdx`; bulk events (`data.records.*`) stay uncovered and the doc says so.\n\n## Out of scope\nNew adapter-contract members; organization ids on documents; any queue.\n\n## Acceptance\n- Tests: enter on match; exit when a record stops matching; no `where`; payload missing a content field; restored → searchable; restored but not matching → not indexed; both no-engine paths; two opposite events end consistent with the database.\n- Rewrite `__tests__/event-sync-data-events.test.ts` (it asserts building from `after`).\n- Container run per AGENTS.md, counts in the PR body.\n\nBlocked-by: #36650 (PR #36823 edits the same file)\nParent: #36990. Reader: the server lane for `service-knowledge`.\nDedupe: `knowledge where event sync is:open` 4 (none on this mechanism) · `handleRecordUpsert` 4 (all closed) · `knowledge restored index` (open hits #36650, #36839, #33933 — none on this mechanism)."
+}

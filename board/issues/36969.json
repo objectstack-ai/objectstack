@@ -1,0 +1,32 @@
+{
+  "number": 36969,
+  "kind": "issue",
+  "title": "控制台隐藏已关闭的 AI 搭建入口，旧搭建对话可打开",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:cloud",
+    "pm:dispatched",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-11-24T11:45:03Z",
+  "updated_at": "2026-11-24T14:16:42Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/36969",
+  "body": "repo:cloud#1 · os-warren · session_01JQwxbX11yNi4DyGhuzqBpV\n\nFiling gate: ③ maintainer-directed follow-up. Source: epic objectstack-ai/cloud#4950 (maintainer 2026-11-24 08:43Z 「先立专题，关闭界面内AI搭建，并立刻派发」), out-of-scope finding in the cloud#4951 dev report (PR objectstack-ai/cloud#4958, merged `16b444ef`). Filed by the cloud seat on the project coordinator's routing, 2026-11-24 11:43Z.\n\nGrading: area:cloud (work that serves the cloud repo, maintainer rule 2026-11-24 03:50Z) · Task · p1 (child of the p1 epic) · evidence: read.\n\nPart of objectstack-ai/cloud#4950.\n\n## 维护者速读\n\n- 用户能看到什么变化：托管产品已经关掉了界面内 AI 搭建，但控制台里还有几个「用 AI 搭建」的入口（侧边栏、首页的「Build an app」、Studio 里的 AI 侧栏），点进去只剩问数，像是坏了。改完后，搭建对话不在的环境里这些入口不再出现或改成别的说法；以前的搭建对话链接也能正常打开。\n- 为什么做：属于「关闭界面内 AI 搭建」专题的收尾，cloud 侧开关已上 staging。\n- 出错会怎样：入口判断写错的话，搭建对话还开着的环境（自部署、以后重新打开）会丢掉入口；所以判断要看目录里有没有 `build`，不能写死。\n- 要你做什么：无。\n\n## Background (verified by the seat on cloud `main` 16b444ef)\n\nWith `OS_AI_IN_APP_BUILD` unset (the hosted default since cloud#4951), AI Studio persists the `build` agent **inactive**: the agent catalog no longer lists it, and the chat route answers `403 PERMISSION_DENIED`, `Agent \"build\" is not active`. The `ask` agent is still listed, and the authoring tools stay registered for the MCP build door. The framework console gates its build entries on \"AI Studio / any agent present\", not on `build` being in the catalog, so they still show and resolve to `ask`.\n\n## What\n\nOn `main` (paths; line numbers drift, find them by the quoted strings):\n\n1. `ui/packages/app-shell/src/layout/SidebarAppMenu.tsx` — the 「Add app」 foot offers \"build with AI\". Show it only when the live agent catalog lists `build` (alias-aware, `resolveAgentParam`); otherwise leave Studio / template / marketplace.\n2. `ui/packages/app-shell/src/console/home/HomePage.tsx` — the \"Build an app\" chip (`home-build-app`, `aiStudioEnabled && aiEnabled`). Without `build` in the catalog, take the objectstack#26614 branch that already exists for an empty catalog (\"New in Studio\", opening Studio's new-package flow), not a chip that promises an AI build.\n3. `ui/packages/app-shell/src/views/studio-design/StudioAiCopilot.tsx` with `hooks/surfaceAgent.ts` — the Studio AI dock resolves to `ask` when `build` is gone. Its labels and empty state must not offer building (it is the ask chat there), or the dock is hidden for authoring if that is the existing pattern; pick the smaller change and say which.\n4. `ui/packages/app-shell/src/console/ai/AiChatPage.tsx` — `/ai/build/<conversationId>` on a deployment where `build` is unavailable redirects to `/ai/<friendly>` and **drops the conversation id**, so old build conversations cannot be opened on the full page. Keep the id (`/ai/ask/<id>` or a read-only render of the build thread), so history stays readable. The cloud ruling keeps people's conversations.\n5. Also check the cloud#1674 maker convergence (`makerConvergedOnBuild`, the bare `/ai/ask` → `/ai/build` redirect). Confirm it does not fire when `build` is not in the catalog, and add a test if none pins that.\n\nNot in scope: anything in the cloud repo, the MCP build door, the `ask` agent.\n\n## Acceptance\n\n- Unit/component tests: catalog without `build` → no build-with-AI entry in the sidebar menu, home chip in its no-AI-build form, Studio dock offers no building, `/ai/build/<id>` keeps `<id>`. Catalog with `build` → today's behaviour, byte-for-byte (regression pins).\n- One ablation per gate (remove the `build`-in-catalog check → its test goes red).\n- Changeset (patch for the console package(s)); `Clause-②: no`.\n- Reaches hosted users with the next cloud pin bump. The cloud seat moves the pin after merge."
+}

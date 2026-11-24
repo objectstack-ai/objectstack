@@ -1,0 +1,36 @@
+{
+  "number": 36925,
+  "kind": "pull_request",
+  "title": "fix(plugin-kanban): key a reference swimlane by its id and title it by the record's name",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tooling"
+  ],
+  "assignees": [
+    "os-support-ai"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-24T09:13:36Z",
+  "updated_at": "2026-11-24T10:01:37Z",
+  "closed_at": "2026-11-24T10:01:34Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-24T10:01:34Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/36925",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-support-ai\"} -->\n_Requested by **Yibo Wang** · [project thread](https://claude.ai/code/project/chan_01BVUyyPie8gHwoPM18iABwB?thread=cmsg_01BVUyyPie8gHwoPM18iABwBDHJBvzScLgkhKgms97sNuU)_\n\nrepo:objectstack#3 · os-support-ai · session_01WGufzhoBbwh8URjwQHde8v\n\nFixes #36841\nClause-②: no\nMetadata-protocol: none\nTests: on head `1b3daca9d67`, `ObjectKanban.referenceSwimlanes-36841.test.tsx` (4/4), the whole `packages/plugin-kanban/` suite (Test Files 85/85, Tests 567/567), and `@object-ui/plugin-kanban` type-check (exit 0).\n\n## 维护者速读\n\n- 看板按查找字段(如\"客户\"、\"负责人\")分泳道时,泳道标题从一串 \"[object Object]\" 变成对应记录的名称,不同记录的卡片分进各自的泳道。\n- 属于看板泳道体验修复:看板按引用字段分列时已修好这一问题,这次把同样的做法用到泳道上。\n- 出错时最坏是泳道标题显示记录编号而非名称,或泳道顺序变化;不涉及数据写入,可直接撤回。\n- 无。\n\n## What changes\n\n`ui/packages/plugin-kanban/src/KanbanImpl.tsx`, one file of code:\n\n- A swimlane is keyed by `swimlaneKeyOf`, which calls `laneKeyOf` from `kanbanReferenceLanes.ts`: the helper that keys the column lanes on a reference field. An expanded reference (the record `$expand` returns) is keyed by its id. A missing value, and an expanded record with no id, go to the Uncategorized swimlane. Any other value keeps the key it had before: `String(value)`.\n- That one key does every swimlane job: bucketing cards into cells, the row count, the sort, the React key, the drop-reason element id, the lane rows reported to `onLaneRowsChange`, and the collapsed set kept under `objectui:kanban-collapsed:FIELD`. The board used to repeat the same stringify expression in four places. Now they all call `swimlaneOf`.\n- The heading comes from `lanesFromRecords`, the helper that titles the column lanes. It reads the field's `displayField`, taken from `objectFields` only when the field names its `reference` (the rule `ObjectKanban` applies to a column lane), then the shared title ladder `referencedRecordTitle` over the expanded record, then the id. The Uncategorized swimlane is still drawn from `kanban.uncategorized`.\n\n## Tests\n\n- New file `ObjectKanban.referenceSwimlanes-36841.test.tsx`. It drives a real `ObjectKanban` (rows shaped as `$expand` returns them, columns from a select field) swimlaned by a lookup field and by a user field:\n  - (a) one swimlane per account, titled by `displayField`, each cell holding that account's cards, the empty value in Uncategorized, and no `[object Object]` anywhere;\n  - (b) a user field with no `displayField` is titled off the expanded record;\n  - (c) the swimlanes sort by id: the ids are set opposite to the titles, so a title sort fails;\n  - (d) collapsing writes the id to the browser store, and a remount reads it back.\n\n<details><summary>Ablations (each run by `scripts/ablation-replace.mjs`: anchor hit 1 to 0, blob moved, restored blob equal to HEAD, `git diff HEAD` empty)</summary>\n\n- Keying: `swimlaneKeyOf` body changed to `return String(value)`. Tests 4 failed (4): (a) through (d) all red. Restored, blob `bcf0aadada6c` equals HEAD.\n- Title: `title: titles.get(key) ?? key` changed to `title: key`. Tests 4 failed (4). Restored, blob `bcf0aadada6c` equals HEAD.\n\n</details>\n\n## Acceptance notes\n\n- **The cross-swimlane write-back point does not hold on `main` as the card states it.** Nothing on the board writes a swimlane value. `KanbanBoard`'s drop handler calls `onCardMove(cardId, fromColumnId, toColumnId, index)` and passes no swimlane. `useCrossSwimlaneMove` writes nothing itself: it checks `acceptFrom` and hands the caller's own lane ids to the caller's `onCardMove`. It is exported from `index.tsx`, and no file in the repo calls it. So there is no write-back to fix, and this PR does not touch `useCrossSwimlaneMove.ts`. A host that builds that hook's `swimlanes` from `lanesFromRecords` gets the reference id as `toSwimlane`, because that helper keys by the id.\n- **Title rung not reached:** the target object's declared `nameField`. A column lane gets it because `ObjectKanban` reads the `groupBy` field's target object schema. The board makes no such read for the swimlane field, and the card's file surface does not include `ObjectKanban.tsx`. So a swimlane on a target whose name lives in a field with no name-like key, and with no `displayField` on the field, is titled by its id. No per-card read was added. Follow-up: none filed; the gap is in the seat report.\n- Collapsed-swimlane entries stored before this change under the text `[object Object]` no longer match any swimlane and are ignored.\n\n## Verification\n\nRead first, by risk: the `swimlanes` memo and `swimlaneKeyOf` in `KanbanImpl.tsx`, and then the swimlane render loop that uses `swimlaneOf`.\n\nTwo-minute check: `pnpm --dir ui exec vitest run packages/plugin-kanban/src/ObjectKanban.referenceSwimlanes-36841.test.tsx`. Expect `Tests 4 passed (4)`.\n\n<details><summary>Local gates</summary>\n\nHead `1b3daca9d67`. Derived with `node scripts/pm/dispatch-gates.mjs --commands` (no paths; merge base `151e8123c`, 3 changed paths). All 38 derived families were run locally, and each exited 0. Reconciliation: `dispatch-gates --ran`: 38 derived, 38 run, 0 NOT-MEASURED (a derived zero: every entry recorded an exit code).\n\n- `pnpm --dir ui exec vitest run scripts/`: Test Files 172 passed, 2 skipped (174); Tests 5127 passed, 2 skipped.\n- `node scripts/pm/overlap-check.mjs`: `VERDICT clean exit 0`, merges cleanly into `origin/main`.\n- `pnpm check:new-line-citations` (ui): 0 new citations.\n- Dependency closure built with `pnpm --filter '@object-ui/plugin-kanban^...' build`: exit 0.\n\n</details>\n\n---\n\n_Generated by [Claude Code](https://claude.ai/code/session_01WGufzhoBbwh8URjwQHde8v)_\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n<!-- signed: repo:objectstack#3 · os-support-ai · session_01WGufzhoBbwh8URjwQHde8v -->\n"
+}

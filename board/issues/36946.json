@@ -1,0 +1,37 @@
+{
+  "number": 36946,
+  "kind": "issue",
+  "title": "Manual reader: bold ending in full-width punctuation renders as literal asterisks before a CJK letter (#33723 fixed chat only)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "sunhaolin",
+    "id": 6194896,
+    "type": "User"
+  },
+  "labels": [
+    "area:ux",
+    "bug",
+    "domain:ui",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-support-ai"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-24T10:14:05Z",
+  "updated_at": "2026-11-24T12:32:18Z",
+  "closed_at": "2026-11-24T12:31:19Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/36946",
+  "body": "## What happens\n\nIn the console's manual reader (`/_console/apps/<app>/docs/<book>/<page>`), a `**bold**` run that ends in full-width punctuation and is followed directly by a CJK letter is not rendered bold: the page shows the raw asterisks.\n\nThis is the same CommonMark flanking limitation that #33723 fixed for chat (PR #34079 added `remark-cjk-friendly` through `CHAT_MARKDOWN_PLUGINS` in `ui/packages/plugin-chatbot`). A code search finds `remark-cjk-friendly` only under `ui/packages/plugin-chatbot`, so the manual reader's markdown pipeline does not run it.\n\n## Reproduce\n\nHotCRM 6.6.0 on `@objectstack/*` 18.6.0, UI language 简体中文.\n\n1. Open the Service app → 帮助 → 服务手册 (`/_console/apps/app.objectstack.hotcrm.service/docs/crm_service_manual/crm_service_cases`).\n2. Read the paragraph on reopening a case.\n\nSource (`src/service/docs/crm_service_cases.zh.md:49`):\n\n```md\n**关闭日期**和**解决耗时（小时）**会被清空\n```\n\nRendered: 「**关闭日期**」 is bold, then the page shows the literal text `**解决耗时（小时）**会被清空`.\n\nTwo more pages checked in the browser, same result:\n\n| Page | Source | Rendered text |\n|---|---|---|\n| Expense manual, `crm_expense_recording` | `- **每个项目一张报销单。**每个项目的费用…` | `**每个项目一张报销单。**每个项目的费用…` |\n| Marketing manual, `crm_marketing_campaigns` | `**投资回报率（%）**是（…` | `**投资回报率（%）**是（…` |\n| Marketing manual, `crm_marketing_automation` | `**它跳过和拒绝什么：**已经在活动中的人…` | `**它跳过和拒绝什么：**已经在活动中的人…` |\n\n## Expected\n\nThe run renders bold, as it now does in chat after #33723.\n\n## Reach\n\nAny package manual written in Chinese (or Japanese) hits this whenever a bold label ends in `）`, `。` or `：` and the sentence continues without a space, which is the normal way to write both languages. In HotCRM's shipped zh-CN manuals a source scan finds 17 such lines in 5 pages:\n\n- `src/service/docs/crm_service_cases.zh.md` 49, 50\n- `src/expense/docs/crm_expense_recording.zh.md` 27, 44, 67\n- `src/marketing/docs/crm_marketing_automation.zh.md` 12, 14, 16, 18, 22, 24, 26, 30, 32\n- `src/marketing/docs/crm_marketing_campaigns.zh.md` 55, 59\n- `src/docs/crm_analytics_metrics.zh.md` 69\n\nThe English manuals are unaffected. The package cannot fix this without bending its prose around the parser (inserting a space or moving the punctuation outside the bold), so it is reported here rather than worked around.\n\n## Suggested fix\n\nRun the same CJK-friendly emphasis rule in the manual reader's markdown pipeline (ideally one shared plugin list for chat and docs), with a test for `**…（…）**` + CJK letter and `**…。**` + CJK letter.\n\nIf the MCP `read_package_doc` / `search_package_docs` output or any other surface renders these pages through its own pipeline, it likely needs the same rule; not checked.\n"
+}

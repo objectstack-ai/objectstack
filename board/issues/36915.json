@@ -1,0 +1,37 @@
+{
+  "number": 36915,
+  "kind": "issue",
+  "title": "console: a per-record bulk flow action counts runs the flow refused (status \"refused\") as succeeded, and shows only one of the refusal messages",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "sunhaolin",
+    "id": 6194896,
+    "type": "User"
+  },
+  "labels": [
+    "area:ux",
+    "bug",
+    "domain:ui",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-support-ai"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-24T08:37:20Z",
+  "updated_at": "2026-11-24T12:57:25Z",
+  "closed_at": "2026-11-24T12:56:34Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 8,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/36915",
+  "body": "## Summary\n\nOn a list view whose `bulkActions` names a `type: 'flow'` action in the bare-string form (per-record dispatch), the selection bar's result dialog counts a run that the flow **refused** as a success. A flow that ends on an `end` node with `outcome: 'refused'` answers `200` with `data.status: \"refused\"` and a `refusalMessage`; the bulk result still reads \"Succeeded N / N\" and lists the refused rows as done. In the same run only **one** refusal dialog is shown, whichever refused row it belongs to; the other refused rows' reasons are never displayed.\n\nThe same action launched from a row menu behaves correctly: the refusal dialog replaces the success toast.\n\n## Environment\n\n- `@objectstack/*` 18.6.0, console at `/_console`, zh-CN locale (same in en)\n- App: HotCRM 6.6.0 (`objectstack-ai/hotcrm`), action `create_campaign` on `crm_lead` (`type: 'flow'`, `target: 'campaign_lead_member_enroll'`, `recordIdParam: 'leadId'`, one lookup param), wired as `bulkActions: ['create_campaign']` on the All Leads grid\n\n## Steps\n\n1. Open the leads list, tick three leads: two with `email_opt_out = true`, one without.\n2. Selection bar → **Add to Campaign**, pick an open campaign, Next, confirm the three listed records, **Run**.\n\n## Actual\n\nThree `POST /api/v1/actions/crm_lead/create_campaign` calls, all `200`:\n\n```jsonc\n// two of them\n{\"success\":true,\"data\":{\"success\":true,\"status\":\"refused\",\n  \"refusalMessage\":\"<lead name> has opted out of email, so the lead was not added to the campaign.\",\n  \"output\":{\"enrolled\":false,\"addedCount\":0,\"alreadyCount\":0}, ...}}\n// one of them\n{\"success\":true,\"data\":{\"success\":true,\n  \"output\":{\"enrolled\":true,\"campaignName\":\"…\",\"addedCount\":1,\"alreadyCount\":0}, ...}}\n```\n\nThe console then shows two dialogs at once:\n\n- the bulk result dialog: **\"Succeeded 3 / 3\"**, listing all three leads;\n- on top of it, one refusal dialog with the message of **one** of the two refused leads.\n\nClosing the refusal dialog does not reveal a second one. One member row was created, not three. With a single opted-out lead selected the result reads \"Succeeded 1 / 1\" next to a dialog that says the lead was not added.\n\n## Expected\n\n- A per-record dispatch whose response carries `status: \"refused\"` is not counted as succeeded. The result dialog reports it apart (for example \"1 succeeded, 2 refused\") and shows each refused row with its own `refusalMessage`.\n- No separate refusal dialog is stacked on the result dialog; or, if one is kept, it carries every refused row's message.\n\n## Why it matters\n\nThe user reads \"Succeeded 3 / 3\" and takes the whole selection as enrolled. The one refusal they are shown names one person, so the other refused people are lost silently. Any app that puts a gate in a flow as an `outcome: 'refused'` end (the documented way to refuse with per-record text, #14945) gets a wrong count on the bulk door.\n\nRelated: #34269 fixed the same symptom for the **aggregate** contract (`BulkActionResult` dropped, all rows reported succeeded). This is the per-record fan-out contract, where each call's own `status` is the per-row verdict.\n"
+}

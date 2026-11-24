@@ -1,0 +1,31 @@
+{
+  "number": 36943,
+  "kind": "issue",
+  "title": "首页「我的工作」显示我的任务",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ux",
+    "domain:ui",
+    "pm:blocked",
+    "priority:p1"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Feature",
+  "created_at": "2026-11-24T10:08:13Z",
+  "updated_at": "2026-11-24T10:20:32Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/36943",
+  "body": "director#1 · os-warren · session_01JQwxbZPWs72rvmFQAcYF9A\n\nFiling gate: ③ maintainer-directed. Source: topic (parent epic). Key words (maintainer, 2026-11-24, strategy thread): 「起步模版可以这样设计 公司、人员、任务、备忘，其中任务备忘不挂关联。」 「但是任务和备忘应该是未来平台的核心能力啊」 「任务和备忘并不应该影响原始记录的权限。」 「同意，立卡」 「立卡派发，并且考虑新创建的云环境是否应该预置这个应用，以及开发人员用命令行启动的的开发环境是否也应该包含」 「应该立一张专题卡吧？」\n\nGrading: area:ux · Feature · p1 · reach: n/a · evidence: read.\n\nBlocked-by: #36942\n\n## 维护者速读\n\n- 做什么：首页「我的工作」现在只有待审批、通知、动态，加一块「我的任务」：分配给我、未完成、按到期时间排。\n- 需要你做的：无。\n\n## What\n\n1. The home page's 我的工作 area gets a 我的任务 block reading `sys_task` where 负责人 = me and 状态 ≠ 完成, sorted by 到期时间, overdue ones marked.\n2. Tick to complete in place (sets 状态 = 完成); the title opens the task.\n3. A link to the full 分配给我的 view. Empty state says there is nothing assigned.\n4. Use the home page's existing block pattern (epic #36107 line); no new widget kind.\n\n## Acceptance\n\nContainer run; a test for the query (assignee + open + order) and the in-place complete; one screenshot in the PR.\n\nParent: objectstack-ai/objectstack#36941."
+}

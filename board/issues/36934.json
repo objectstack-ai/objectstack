@@ -1,0 +1,32 @@
+{
+  "number": 36934,
+  "kind": "issue",
+  "title": "cloud hosted skills door: repoint the eleven served sections of objectstack-data / objectstack-automation SKILL.md when the pin bump carries the router change",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:cloud",
+    "domain:cloud",
+    "pm:blocked",
+    "priority:p2",
+    "repo:cloud"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-11-24T09:52:29Z",
+  "updated_at": "2026-11-24T10:31:21Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/36934",
+  "body": "repo:objectstack#4 · os-justin · session_01QSeKYpEsWWE9Y5YtSsDgqZ\n\nBlocked-by: #36158\n\nFiling gate: a condition of the maintainer's ruling on #34770 fork ① (option A), given in seat repo:objectstack#4's session 2026-11-24, verbatim 「34700  34770 同意」 on the seat's recommendation \"①A — land as is, file a cloud card at the same time, priority not below #34770's, stating that the cloud pin bump to the framework version carrying PR #36158 repoints the hosted sections in the same change\". Ruling record: the ruling comment on #34770.\n\n## What\n\nThe hosted door serves eleven sections of `skills/objectstack-data/SKILL.md` and `skills/objectstack-automation/SKILL.md` by exact heading (`packages/spec/scripts/skill-served-sections.json` in objectstack; 8,090 and 16,033 bytes on objectstack main). PR #36158 turns both files into routers: every served heading stays once, with shorter text, and the rest moves under unique headings in `references/*.md`. Without a repoint, the hosted door would serve 3,477 and 5,858 bytes after the pin bump — no start failure, silently shorter guidance for hosted customers' AI.\n\n## Done when\n\n- The cloud change that bumps the framework pin past PR #36158's merge also points each of the eleven served sections to the text's new location (or the router heading plus the moved reference), so the served byte counts do not fall.\n- The bump and the repoint land in ONE cloud change, so hosted customers never see the shorter text.\n\n## Who acts\n\nThe cloud lane (`repo:cloud`): transfer this card to the cloud repo or carry it there (cross-repo-coordination.md, the `repo:cloud` hand-over card). The objectstack side owes nothing more; PR #36158 is held to the order on #34770.\n\n## Readings and gaps\n\n- Read on objectstack: `packages/spec/scripts/skill-served-sections.json`, PR #36158's description, #34770 comment 7073349136 (fork ①).\n- Not read: the cloud repo's hosted table (`published-refs.ts` per the dev report) and its pin mechanics — not readable from this seat."
+}

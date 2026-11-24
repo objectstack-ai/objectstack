@@ -1,0 +1,37 @@
+{
+  "number": 36922,
+  "kind": "issue",
+  "title": "console: a related-list tab's count badge stops updating after a row action — a later delete leaves the tab at the old number while the list shows the new one",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "sunhaolin",
+    "id": 6194896,
+    "type": "User"
+  },
+  "labels": [
+    "area:ux",
+    "bug",
+    "domain:ui",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-support-ai"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-24T09:05:27Z",
+  "updated_at": "2026-11-24T11:46:11Z",
+  "closed_at": "2026-11-24T11:42:15Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/36922",
+  "body": "## What happens\n\nOn a record page, the count badge on a related-list tab stops following the list after a row action has run in that list. The list itself (rows and its own \"All N\" chip) is correct; only the tab badge keeps the old number until the page is reloaded.\n\nMeasured in a browser on `@objectstack/*` 18.6.0 (console at `/_console`), zh-CN, as an org admin, on a parent record whose related list is a master-detail child with one row action (a flow-free `update` action) and the standard row menu (Edit / Delete).\n\n## Steps\n\n1. Open a record page on its related tab (`…/record/<id>?related=<child>.<lookup>`). Tab reads `<Child> 9`, the list chip reads `All 9`.\n2. On one row, open the row menu and run the object's row action (here: \"Mark as responded\", which updates that row's status). Success toast shows; the row updates. Tab still `9`, chip `All 9` (correct, nothing was removed).\n3. On another row, open the row menu → Delete → confirm.\n\n## Actual\n\n- The row is gone, the list shows 8 rows, the chip reads `All 8`.\n- The tab badge still reads `9`, and stays there (checked again 7 s later, and after a further delete attempt on the parent).\n- A full reload shows `8`.\n\nSeen twice with the same sequence (11 → list 10 / badge 11; 9 → list 8 / badge 9).\n\n## Control\n\nSame page, fresh load, no row action first: delete a row, then delete another. The badge follows both times (10 → 9, then 8 → 7 → 6). So a plain delete refreshes the badge; it is the row action before it that breaks the refresh.\n\n## Expected\n\nThe tab badge and the list's own count always agree after any write made from that list (row action, delete, create), without a reload.\n\n## Reach\n\nAnyone who works a related list from the record page: after one row action, every later delete in that list leaves the tab showing a number the list contradicts. Not checked: whether a create from the related list's New after a row action is also missed, and whether a header (record-level) action has the same effect.\n\n## Dedupe\n\nSearched open and closed issues for \"related tab count stale\", \"related list count badge delete\", \"tab count badge delete row\", \"数量角标\". Nearest is #36822 (badge blanks for a moment when a refetch answers zero rows), which is a different symptom: here the badge is never refetched at all.\n"
+}

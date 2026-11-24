@@ -1,0 +1,32 @@
+{
+  "number": 36967,
+  "kind": "issue",
+  "title": "ui test flake: useDeferredFirstSend's \"first send creates one row and is replayed into it\" races React's passive-effect flush under load (ejected #36869 from the merge queue)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ai",
+    "domain:ui",
+    "finding",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-11-24T11:29:16Z",
+  "updated_at": "2026-11-24T11:33:02Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/36967",
+  "body": "repo:objectstack#4 · os-justin · session_01QSeKYpEsWWE9Y5YtSsDgqZ\n\nFiling gate: ① a test defect found by seat repo:objectstack#4 while handling a merge-queue ejection; it blocks the landing of PR #36869 (card #35399, p1). Untriaged: grade, domain and state are triage's.\n\n## Signature\n\nQueue run 45373444137 (`gh-readonly-queue/main/pr-36869-49c6bf3d51…`), job `Test UI (7/16)`:\n`FAIL dom packages/app-shell/src/console/ai/__tests__/useDeferredFirstSend.test.tsx > useDeferredFirstSend — the first send creates the conversation (objectstack#32031) > mounting creates nothing; the first send creates one row and is replayed into it` — `AssertionError: expected \"vi.fn()\" to be called 1 times, but got 0 times` at `:358` (`expect(doSend).toHaveBeenCalledTimes(1)` right after `await flushReplay()`).\n\n## Reproduction attempts (seat's diagnosis run, no writes)\n\nOn the queue's merged tree (origin/main `49c6bf3d51` + #36869 head `b36be4c714`) and on origin/main alone, after CI's package build step:\n- the file alone, 10 runs each tree: 20/20 passed;\n- merged tree under CPU load (`--pool forks --maxWorkers=1` plus 6 CPU hogs on 4 cores, load ~11), 10 runs: 10 passed;\n- merged tree, the full shard as CI runs it (`pnpm --dir ui run test --shard=7/16`), once: 445 files / 5247 tests, all passed in 649 s (the failing CI shard took 680 s and failed only this test).\n#36869's diff does not touch `console/ai/`; its only reach into the test's import closure is one added i18n string per locale.\n\n## Mechanism (read from React and Testing Library source; not force-reproduced)\n\nThe hook's replay effect sends the stashed message from a `setTimeout(0)`; the test's `flushReplay()` waits on its own `setTimeout(0)`. `setConversationId('conv-1')` lands after `await res.json()` inside `waitFor`, where RTL has act off; React 19 commits on its scheduler and runs passive effects as a later task (`scheduleCallback(NormalPriority, flushPassiveEffects)`). `waitFor` resolves on the DOM change before the remounted pane's `useEffect` has set the replay timer; RTL's `setTimeout(0)` drain normally covers that gap, but on a starved runner the scheduler can yield past it — then `flushReplay`'s timer is set first, fires first, and `doSend` has 0 calls.\n\n## Fix (test only)\n\nReplace `await flushReplay(); expect(doSend).toHaveBeenCalledTimes(1)` with `await waitFor(() => expect(doSend).toHaveBeenCalledTimes(1))` (and the same for any sibling case using `flushReplay()` before a call-count assertion in this file). No product change: the product's ordering is correct; the test's wait is too short.\n\nDedupe: `useDeferredFirstSend flaky`, `flushReplay`, `queue-signature useDeferredFirstSend` — no open card; the merge-queue triage comment on #36869 (7129251672) counts this the only hit in 24 h."
+}

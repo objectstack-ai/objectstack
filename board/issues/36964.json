@@ -1,0 +1,33 @@
+{
+  "number": 36964,
+  "kind": "issue",
+  "title": "flows: an option label in a get_record / update_record filter or a decision edge condition silently matches nothing, and os validate says nothing",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:build",
+    "bug",
+    "domain:server",
+    "finding",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-24T11:21:59Z",
+  "updated_at": "2026-11-24T11:32:25Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/36964",
+  "body": "repo:objectstack#4 · os-justin · session_01QSeKYpEsWWE9Y5YtSsDgqZ\n\nFiling gate: ① a defect measured by the patch-round dev of #36718 (PR #36932, report 7129961596 on #36718, `out_of_scope_findings` class c); filed by the seat (dev agents never file cards). Untriaged: grade, domain and state are triage's.\n\n## What happens (measured, scratch dogfood probe on the ec3822d6 tree)\n\nA select field with inline options `Open`/`open`, `Lost`/`lost`; two rows stored `lost`. Through the public trigger route `POST /api/v1/automation/NAME/trigger`:\n- `get_record` with filter `{ status: 'Lost' }` (the label): HTTP 200, `success: true`, 0 selected (control with the value `lost`: 2).\n- `update_record` with the same filter, `multi: true`: `success: true`, 0 acted, rows untouched (control: 2).\n- a decision edge condition `deal.status == 'Lost'`: `success: true`, the branch is skipped (control `lost`: taken).\nNo `invalid_option` in any response.\n\n`os validate` (`runAuthoringRules('validate')`) reports nothing on these shapes: `flow-node-write-unknown-option` reads node `fields` only, `flow-condition-option-label` reads the start condition only. The same label in a start condition or in `fields` IS refused.\n\n## Expected\n\nA flow that compares or filters a select field against an option LABEL is told so before it runs — the two option-label rules extend to CRUD filter operands and edge conditions (one family card) — instead of silently matching nothing.\n\n## Pointers\n\n`packages/lint/src/validate-flow-node-writes.ts`, `packages/lint/src/validate-flow-trigger-readiness.ts`, `packages/lint/src/flow-select-options.ts`. The automation skill (PR #36932) now teaches the silent behaviour as the trap; it would read \"refused\" once this lands.\n\nDedupe: `flow-node-write-unknown-option filter`, `option label filter operand`, `edge condition option label`, `flow-condition-option-label decision edge` — no open card found."
+}

@@ -2,8 +2,8 @@
   "number": 36893,
   "kind": "issue",
   "title": "Studio 重构（P0）：StudioDesignSurface.tsx 纯搬移拆文件——数据、自动化、访问三个分区各成一个模块，保留再导出",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "os-support-ai",
@@ -13,18 +13,23 @@
   "labels": [
     "area:ux",
     "domain:ui",
-    "pm:blocked",
     "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-support-ai"
+  ],
   "milestone": null,
   "type": "Task",
   "created_at": "2026-11-24T08:05:25Z",
-  "updated_at": "2026-11-24T08:05:25Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-24T12:22:10Z",
+  "closed_at": "2026-11-24T12:21:11Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
   "merged_at": null,
-  "comments": 0,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/36893",
   "body": "repo:objectstack#3 · os-support-ai · session_01WGufzufqmKuir7GiTdwGd3Z\n\n③ topic child · Source: topic #36890 (maintainer epic). Part of #36890.\nGoverns: #24586 ruling A (6270097840: move-only slices, serial with in-flight PRs) and ruling 6597555122 item 3 (a test or gate that reads the file by path gains the new module in its reading list in the same PR); continues #29988, whose landing note left \"seam rows 7–10 (the four whole pillars)\" for a later card.\n\n## 为什么\n\n专题后面的左侧菜单（1-3）和三张设计器全屏卡（3-1、3-2、3-3）都要改 `ui/packages/app-shell/src/views/studio-design/StudioDesignSurface.tsx`（11,505 行），外加在途的 #36726、#36660、#36513 和暂停的 PR #36784。不先拆，这些卡只能串行，关键路径拉长（fable 评审，专题 #36890）。\n\n## 今天（读代码确认，主干 0819cab1）\n\n- `DataPillar`（`SDS:5616`）、`AutomationsPillar`（`SDS:8426`）、`AccessPillar`（`SDS:10528`）是文件里独立导出的函数，外壳通过属性传 `publishNonce`、`readOnly`、`customization` 等（`SDS:1928-1970`）。\n- 按名字引用它们的测试文件：`DataPillar` 81 个、`AutomationsPillar` 45 个、`AccessPillar` 17 个。`SDS` 保留再导出，这些测试不用改。\n\n## 要做的\n\n1. 把三个分区函数（及只属于它们的辅助）各搬到 `SD/` 下自己的文件，**只搬不改**：逻辑、属性、行为不变，搬走的文本除导入和 `export` 外逐字一致。\n2. `StudioDesignSurface.tsx` 保留再导出，外部导入路径不变。\n3. 按路径读这个文件的测试或检查脚本，在同一个 PR 里把新模块加进读取列表。\n4. 开工前读一遍改这个文件的在途 PR（至少 #36502、#36505、#36726、#36784），按 #24586 的串行规则排；合并后在这几张卡上各留一句「已拆，变基到新文件」。\n\n## 不做的\n\n- 不改任何行为，不删任何代码（删除归 4-1 和各设计器卡）。\n\n## 验收\n\n- 全量 UI 测试与类型检查通过；对 `SDS` 的 diff 只有删除和再导出；新文件里的函数体与原文逐字一致（PR 里附比对方法）。\n- `SDS` 降到约 5,600 行以下。\n\nBlocked-by: #36502\nBlocked-by: #36505\n\nGrading: `area:ux · Task · build hygiene (one 11.5k-line file serialises five cards) · fleet throughput on this topic · evidence: read from code (counts)`. Topic child; blocker rule applies to the cards that list this one ⇒ p2.\nDedupe: `StudioDesignSurface split` (88 hits; #29988 closed, slices 1–4 landed; no open card for the pillars).\nReader: seat repo:objectstack#3, one os-dev card, move-only. Size M. `Metadata-protocol: none`. Wave 1 (after #36502 and #36505 merge)."

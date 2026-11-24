@@ -2,8 +2,8 @@
   "number": 36894,
   "kind": "issue",
   "title": "Studio 重构（1-2a）：元数据列表响应加一个按名字索引的修改时间兄弟字段（服务端，协议新增）",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "os-support-ai",
@@ -14,18 +14,23 @@
     "area:ux",
     "domain:server",
     "enhancement",
-    "pm:queue",
     "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-support-ai"
+  ],
   "milestone": null,
   "type": "Feature",
   "created_at": "2026-11-24T08:05:42Z",
-  "updated_at": "2026-11-24T08:05:42Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-24T12:22:35Z",
+  "closed_at": "2026-11-24T12:21:12Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 0,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/36894",
   "body": "repo:objectstack#3 · os-support-ai · session_01WGufzufqmKuir7GiTdwGd3Z\n\n③ topic child · Source: topic #36890 (decision 2: the list gets a 「修改时间」 column). Part of #36890.\n\n## 为什么\n\n专题的统一列表要一列「修改时间」（决定 2）。今天列表行拿不到这个时间。\n\n## 今天（读代码确认，主干 0819cab1）\n\n- 列表响应是 `items: z.array(z.unknown())`（`packages/spec/src/api/protocol.zod.ts:368-370`），每一项是整个元数据体。已有的附加信息（`registrations`、`disabledActions`）都放在「items 旁边、按名字索引」的兄弟字段里，说明写着「Beside the items, never inside one」（`:371-389`）。\n- 修改时间只在单项读取里从存储行取（`packages/metadata-protocol/src/protocol-meta-item-reads.ts:1173-1174`）。代码包里的项没有存储行。\n- 「有草稿」已有台账 `GET /api/v1/meta/_drafts`（`protocol-drafts.ts:77`），不在本卡范围。\n\n## 要做的\n\n1. 在元数据列表响应加一个兄弟字段（建议名 `changedAt: { <名>: ISO 时间 }`，开发者可定名，在 PR 里写明），只给有存储行的项；代码包自带、没有存储行的项不出现。\n2. 跨包列表（`~all`）和环境范围下一项可能有多层存储行：写明取哪一层的时间（建议：生效的那一层），并有测试。\n3. spec 的响应 schema、TSDoc、生成的 API 面、文档同步；列表类型钉测试更新。\n\n## 不做的\n\n- 不改每一项的元数据体；不做客户端列（1-2b）。\n\n## 验收\n\n- 自建包里改一项后列表响应带它的时间；代码包自带的项不带；`~all` 下取层规则有测试。\n- `check:api-surface`、`check:docs` 和列表类型钉测试通过；changeset 按协议新增定级。\n\nGrading: `area:ux · Feature · metadata list (builders cannot see what changed recently) · builders, often · evidence: read from code`. Maintainer-sourced topic child ⇒ p2.\nDedupe: `metadata list updatedAt` / `changedAt` (no card on this field).\nReader: seat repo:objectstack#3, one os-dev card at contract tier (protocol added ⇒ L2 contract review). Size M. `Metadata-protocol: added`. Wave 0 (can start now)."

@@ -1,0 +1,36 @@
+{
+  "number": 36938,
+  "kind": "pull_request",
+  "title": "fix(fields): a dependsOn lookup filters by a populated parent's id, not \"[object Object]\"",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tooling"
+  ],
+  "assignees": [
+    "os-justin"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-24T09:58:49Z",
+  "updated_at": "2026-11-24T11:16:55Z",
+  "closed_at": "2026-11-24T11:16:53Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-24T11:16:53Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/36938",
+  "body": "Fixes #36837\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 用户在记录详情页（以及编辑弹窗）里点一个依赖上级查找字段的选择器（例如报价单的「联系人」按所属客户过滤）时，原来永远显示「未找到选项」，现在能列出该客户下的联系人。\n- 属于表单级联选择（依赖字段过滤）这一核心能力，替产品负责人报告的报价单场景解决。\n- 若有误，最坏情况是依赖过滤取错值导致选择器为空，与修复前相同；改动只在一处，可直接撤回。\n- 无。\n\n## What changes\n\nA lookup with `dependsOn` naming another lookup builds its candidate filter from the record the host hands it (`dependentValues`). A record page hands the record as the server returned it, so the parent lookup arrives **populated** (`{ id, name, … }`). The one place that turns that record into the filter, `LookupField`'s `dependentFilter` memo, did `String(v)` on it. The request then carried `[\"crm_account\",\"=\",\"[object Object]\"]` and the picker never matched.\n\n`dependentFilter` now collapses the parent value through `collapseReference`. That is the rule `lookupRecordReference.ts` already applies to `{ $record }` filter comparands (\"an expanded row collapses to its id\"), now exported so both candidate-filter readers share it. It is fixed at that one producer. All four candidate surfaces read the same memo, so all four are fixed: the quick-select popover, the Level-2 table picker, the PeoplePicker and the create-new seed (`initialValues` / inline `create`). The fix applies whatever the host is: detail inline edit, header highlight, in-place editor or the record form. A bare-id parent is unchanged.\n\nFiles:\n- `ui/packages/fields/src/widgets/LookupField.tsx`: the `dependentFilter` memo collapses each parent value; an import is added.\n- `ui/packages/fields/src/widgets/lookupRecordReference.ts`: `collapseReference` is exported and its doc names both readers.\n- `ui/packages/fields/src/widgets/LookupField.dependsOn.test.tsx`: a new top-level `describe` in the existing dependsOn harness.\n- `.changeset/36837-dependson-lookup-id.md`: `@object-ui/fields` patch.\n\n## Tests\n\n- New pin \"a populated dependsOn parent scopes by its id (objectstack#36837)\":\n  - The populated parent `{ account: { id: 'a1', name: 'Acme' } }` must put `$filter.account === 'a1'` on every `find` call, and the list must show only that account's contact.\n  - Control: the same parent passed as a bare id sends the identical filter.\n- Red before the fix: `expected '[object Object]' to be 'a1'`, the card's captured request reproduced (1 failed | 10 passed).\n- Green after the fix: the five dependsOn / record-reference LookupField files pass, 39/39. The whole `ui/packages/fields/` suite passes at e19a6b25: Test Files 326 passed | 1 skipped, Tests 4982 passed | 7 skipped.\n- Ablation, one run at e19a6b25 through `scripts/ablation-replace.mjs`:\n  - The mutation dropped `collapseReference(...)` from the memo and landed: anchor 1 → 0, blob c7c449f → 71cd8a0.\n  - The new pin went red with `Received: \"[object Object]\"`.\n  - The restore was verified: the blob equals HEAD's c7c449f and `git diff HEAD` is empty.\n  - The test imports `./LookupField` from source, so no dist rebuild was needed.\n\n## Acceptance notes\n\n- The `[object Object]` family the card names is in separate code. The kanban grouping (#36430) and the drill dialog (#36507) live in `plugin-kanban` / `plugin-dashboard`, and neither reads `dependentFilter` or `collapseReference`. They are not touched here.\n- The gate check (`dependenciesMissing`) already treats a populated object as \"present\", so it needed no change.\n- I kept the edit in the picker component to one line plus one import, because #36832 is also reworking the lookup picker.\n\n## Verification\n\nFirst file to read: `LookupField.tsx`, the `dependentFilter` memo. It is the only risky part of the change.\n\nTwo-minute check: `pnpm --dir ui exec vitest run packages/fields/src/widgets/LookupField.dependsOn.test.tsx` should show 11 passed.\n\n**Seat-written open.** Seat `repo:objectstack#4` (os-justin, `session_01QSeKYpEsWWE9Y5YtSsDgqZ`) opened this draft on the maintainer's ruling in the seat session, verbatim 「一选1+」 (2026-11-24): option 1+ — the seat performs only the writes the dev session's permission classifier refused, each checked against the branch; pull requests stay draft; no standing allow rule is added (evidence card #36936). Refused once in dev session `session_01QSeKYq2vSKPUSvT9fXdzEY`, reason `[Undermining Oversight]`: `node scripts/pm/fleet-write/dispatch.mjs --repo objectstack-ai/objectstack --actions-file FILE` carrying this one `pr_create`. Title and body above are the dev's text, unchanged; branch head checked at `e19a6b25` (4 files, +84 −3; the `LookupField.tsx` change read against the body).\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01QSeKYq2vSKPUSvT9fXdzEY)_\n"
+}

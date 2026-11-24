@@ -2,8 +2,8 @@
   "number": 36837,
   "kind": "issue",
   "title": "查找选择器的依赖过滤把 lookup 对象拼成了 \"[object Object]\"：报价详情页选联系人永远「未找到选项」（dependsOn）",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "huangyiirene",
@@ -14,7 +14,6 @@
     "area:data",
     "bug",
     "domain:ui",
-    "pm:dispatched",
     "priority:p1"
   ],
   "assignees": [
@@ -23,11 +22,15 @@
   "milestone": null,
   "type": "Bug",
   "created_at": "2026-11-24T03:22:07Z",
-  "updated_at": "2026-11-24T04:07:34Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-24T11:17:35Z",
+  "closed_at": "2026-11-24T11:16:55Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 4,
+  "comments": 6,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/36837",
   "body": "### 环境\n云端，平台 18.6.0，hotcrm 6.6.0（2026-11-24，Irene 操作，Claude 在同一会话里抓到请求）。\n\n### 现象\n报价单详情页直接编辑，点「联系人」选择器：显示「未找到选项」。这张报价所属客户下实际有联系人（查询 `crm_contact` 按 `crm_account = <该客户 id>` 能查到 1 条）。\n\n### 原因（请求证据）\n选择器发出的请求：\n```\nGET /api/v1/data/crm_contact?populate=crm_account&top=50&filter=[\"crm_account\",\"=\",\"[object Object]\"]\n```\n`crm_quote.crm_contact` 在 HotCRM 里声明了 `dependsOn: ['crm_account']`（联系人按报价的所属客户过滤）。控制台把记录上**已 populate 的客户对象**直接拼进了过滤条件，被转成字符串 `[object Object]`，而不是取它的 id，所以永远查不到。\n\n### 期望\n依赖字段的值是 lookup 对象（已 populate）时，过滤条件取其 id；详情页直接编辑和「编辑」弹窗行为一致。\n\n### 相关\n同类 `[object Object]` 问题：#36507（drill 对话框）、#36430（看板分组）。\n\n优先级：priority:p1（产品负责人 Irene 2026-11-24 调整）。\n\n"

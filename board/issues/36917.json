@@ -1,0 +1,31 @@
+{
+  "number": 36917,
+  "kind": "issue",
+  "title": "spec(userActions.transfer): the published description still says the switch gates only the Change Owner action; it now also gates the offboarding hand-over",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:data",
+    "domain:spec",
+    "pm:blocked",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-24T08:41:10Z",
+  "updated_at": "2026-11-24T09:34:21Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/36917",
+  "body": "repo:objectstack#4 · os-justin · session_01QSeKYpEsWWE9Y5YtSsDgqZ\n\nFiling gate: ② contract text made false — S1 of the L1 review on PR #36869 (card #35399), recorded there in the seat's `## 席位核对` comment on head `a31b2c96ff`.\n\n## What is false\n\nPR #36869 (`Metadata-protocol: semantic`) makes an object's Change Owner switch (`userActions.transfer`) also decide whether the offboarding hand-over moves the object's `owner_id`. The published key's own description still says it gates only the Change Owner action:\n- `packages/spec/src/data/object.zod.ts` — the `.describe()` on `userActions.transfer` (~4362 on the PR head);\n- `packages/spec/src/data/user-action-transfer.ts` — the module text (~55).\n\nAn author or an AI reading the schema (or the generated reference docs built from it) learns a narrower meaning than the runtime enforces.\n\n## Expected\n\nBoth sentences name both consumers — the Change Owner action and the offboarding hand-over (count and transfer) — and nothing else; regenerate the spec artifacts the `.describe()` change owes (`gen:schema && gen:docs`, `check:generated`). Prose only: no shape, accept-set or default change.\n\n## Order\n\nAfter PR #36869 merges (it is what makes the sentence false). Kept out of that PR so it stays off the published-schema review face."
+}

@@ -1,0 +1,32 @@
+{
+  "number": 36936,
+  "kind": "issue",
+  "title": "fleet: three of seven cloud dev sessions had identical relay writes refused by their permission classifier (\"Undermining Oversight\") while sibling sessions passed",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:fleet",
+    "domain:skills",
+    "pm:queue",
+    "priority:p2",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-11-24T09:56:29Z",
+  "updated_at": "2026-11-24T10:31:24Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/36936",
+  "body": "repo:objectstack#4 · os-justin · session_01QSeKYpEsWWE9Y5YtSsDgqZ\n\nFiling gate: condition 4 of the maintainer's ruling in seat repo:objectstack#4's session, 2026-11-24, verbatim 「一选1+」 — option 1+: the seat performs only the writes the dev sessions' classifier refused (each checked against the branch, pull requests kept draft, every such write naming the refused command), and a non-blocking card records the evidence; no standing allow rule is added until it concludes.\n\n## What happened\n\nSeat repo:objectstack#4 dispatched seven cloud dev sessions on 2026-11-24. All write through the same relay scripts. Three had their write refused by their own permission classifier, reason given only as `[Undermining Oversight]`; the `--dry-run` of the same actions file passed in each.\n\n| Card | Dev session | Refused write | Count |\n|:--|:--|:--|:--|\n| #36718 | `session_01QSeKYkHoFSRK5JsuPYqbtc` | `node scripts/pm/fleet-write/dispatch.mjs --repo objectstack-ai/objectstack --actions-file FILE`, one `pr_create` (draft) | 2 (with a `cd` prefix, then bare) |\n| #36837 | `session_01QSeKYq2vSKPUSvT9fXdzEY` | the same, one `pr_create` (draft) | 1 |\n| #32115 | `session_01QSeKYkTjJ5ybZ2ydLHnMbv` | the same with one `issue_patch` (PR #34738 body); `node scripts/pm/post-stamped.mjs --comment=32115 --file=FILE` | 1 + 1 |\n\n- No refused session tried to approve, ready, merge, enqueue or arm auto-merge. Each stopped on refusal, as os-dev.md requires.\n- The same spellings passed in sibling sessions of the same seat within minutes: #36650's session (02:31Z, 03:13Z), #34700's (05:36–05:38Z, PR #34817 body and comment 7123127949), #35399's (05:38–05:40Z). #32115's refusals fell at 05:31–05:32Z.\n- No pattern found: a governed surface (#36718, `skills/**`) and ordinary UI code (#36837) were both refused; both scripts were refused; two models were involved.\n- Differences seen, none established as a cause: the #32115 session had just checked whether the relay credential was present in its container; the #36837 session opened its PR with 25 of 38 derived gates run; the #36718 session showed neither.\n\n## What this card is for\n\nFind why the classifier judges an identical relay write differently per session, and what a dev session can do so that a legitimate draft-PR open or report post is not read as undermining oversight — without widening what the relay may do (the same `dispatch.mjs` also carries `pr_ready`, `automerge_enable` and `pr_enqueue_front`, so a Bash allow rule on it would hide those from the classifier too).\n\n## Done when\n\n- A cause is named with a reproduction, or the card records that the refusals do not reproduce and closes not planned.\n- Any change it brings (dispatch-prompt wording, os-dev.md, the relay's own op split) is proposed on its own card, under the governed-surface rules that apply.\n- Until then: no standing allow rule; a refused write is performed only by the seat, on the maintainer's word cited on the card.\n\n## Readings\n\nSession transcripts of the three refused and four passing sessions (a read-only, fable-tier review done for the seat), refusal events f472009c, 93f7f968 (#36718), 74a5a533 (#36837), e7380d9f, 6775157a (#32115). Not read: the classifier's own reasoning (not exposed)."
+}

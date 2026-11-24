@@ -1,0 +1,34 @@
+{
+  "number": 36972,
+  "kind": "issue",
+  "title": "Profile page: saving the name shows no confirmation, the page remounts and drops the success alert",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "sunhaolin",
+    "id": 6194896,
+    "type": "User"
+  },
+  "labels": [
+    "area:ux",
+    "bug",
+    "domain:ui",
+    "pm:dispatched",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-support-ai"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-24T12:13:51Z",
+  "updated_at": "2026-11-24T13:59:02Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/36972",
+  "body": "## Summary\n\nOn the profile page (Account → Profile), clicking **Save changes** in the *Personal information* card saves the name, but the user gets no confirmation: the inline success alert (\"Profile updated successfully.\" / 「个人资料已更新。」) never appears, and no toast is shown. The page content is torn down and rebuilt right after the save, which throws away the local `saved` state the alert depends on.\n\nThe same happens in the *Language* card whenever the saved value changes the interface language (\"Language preference updated.\" is never seen).\n\n## Steps to reproduce\n\n1. Open `/_console/apps/com.objectstack.account/component/account/profile_card`.\n2. Click **保存更改 / Save changes** in the *Personal information* card (changing the name or not makes no difference).\n3. Watch the card.\n\n## Actual\n\n- The record is saved (`GET /api/v1/data/sys_user/<id>` shows the value).\n- No `[role=alert]` and no toast at any time. A `MutationObserver` on `document.body` recorded, relative to the click:\n  - 8 ms: `main` present, no alert\n  - 50 ms: **no `main` element at all**\n  - 250 ms: `main` present again, no alert\n  (an earlier run gave 0 / 37 / 160 ms)\n- The button that was clicked is no longer in the document afterwards (`document.contains(button) === false`): the card was remounted, not re-rendered.\n- During the gap the header briefly shows the \"?\" avatar and \"User\", and the shell refetches `/api/v1/packages`, `/api/v1/auth/me/permissions`, `sys_user_preference`, `/api/v1/me/apps`, `/api/v1/auth/me/localization` and `sys_user/<id>`.\n\nFor comparison, saving the *Language* card with a value that does not change the interface language (back to \"Use deployment default\") does not remount the page, and there the alert appears after ~34 ms and stays. So the alert itself works; it is the remount after the session user changes that loses it.\n\n## Expected\n\nAfter a successful save the user sees a confirmation that stays long enough to read, and the page does not blank out.\n\n## Where\n\n`ui/apps/console/src/pages/system/ProfilePage.tsx`: both cards keep the confirmation in component state (`setSaved(true)` at lines 121 and 688, rendered as `{saved && <Alert>…}`), and the component is mounted under `<Suspense>` through the Account app's `account:profile_card` registry entry. `updateUser({ name })` refreshes the session user, the shell above re-suspends/remounts, and the state is gone. A toast, or state that survives the remount, would not be lost.\n\n## Environment\n\nReproduced on `@objectstack/*` 18.6.0, console build `958ee03594`. Not re-tested on `main`: the `saved`-state code is unchanged there, but whether the shell still remounts after `updateUser` on `main` is unverified.\n"
+}

@@ -1,0 +1,33 @@
+{
+  "number": 36951,
+  "kind": "issue",
+  "title": "console: a screen flow dialog over a record page falls back to its first screen on any route change (browser Back/Forward), because the host keeps only the run's launch state",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:workflow",
+    "bug",
+    "domain:ui",
+    "finding",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-24T10:52:14Z",
+  "updated_at": "2026-11-24T11:31:55Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/36951",
+  "body": "repo:objectstack#4 · os-justin · session_01QSeKYpEsWWE9Y5YtSsDgqZ\n\nFiling gate: ① a defect found by the dev of #36849 (report on that card, `out_of_scope_findings`), read from code, not reproduced; filed by the seat (dev agents never file cards). Untriaged: grade, domain and state are triage's.\n\n## What happens (read from code)\n\n`RecordDetailView` keeps only a screen flow run's LAUNCH state (the step the run first paused on); every later step lives inside `FlowRunner`. The record page's loading-reset effect on `objectName` / record id draws a skeleton through an early return, which unmounts `FlowRunner`; when it mounts again it is rebuilt from the launch state — step one, its inputs and a live Next. Next then posts step one's values to a run already past it and gets the engine's 400 \"Invalid screen input\".\n\nPR #36947 (#36849) closes the case the card reported — following a record link on a result screen now ends the dialog first. Any OTHER route change while a multi-step wizard sits on step 2+ over a record page still shows step one again: browser Back/Forward, or a navigation not made through the dialog.\n\n## Expected\n\nA screen flow dialog never falls back to an earlier screen of a run that has moved past it: either the host keeps the run's current step across its own remounts, or the dialog ends on a route change it did not make.\n\n## Pointers\n\n`ui/packages/app-shell/src/views/FlowRunner.tsx` (header section \"Following a record link ends the dialog\"), the record page host (`RecordDetailView`, its loading-reset early return), #36864 (lost-resume recovery, related), #36849 / PR #36947.\n\nDedupe: `FlowRunner remount launch state`, `RecordDetailView isLoading early return`, `screen flow browser back step one` — no open card found."
+}

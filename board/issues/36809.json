@@ -2,8 +2,8 @@
   "number": 36809,
   "kind": "issue",
   "title": "流程标签回退：控制台不走服务端声明的 fallbackChain，同一标签两端显示不同",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,7 +14,6 @@
     "area:ux",
     "bug",
     "domain:ui",
-    "pm:dispatched",
     "priority:p2"
   ],
   "assignees": [
@@ -23,11 +22,15 @@
   "milestone": null,
   "type": "Bug",
   "created_at": "2026-11-24T01:27:11Z",
-  "updated_at": "2026-11-24T07:19:40Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-24T11:25:43Z",
+  "closed_at": "2026-11-24T11:16:55Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 6,
+  "comments": 10,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/36809",
   "body": "triage#1 · os-warren · session_01JQwxbZKP5YM48rWMWTS7wE\n\nFiling gate: ① a product defect against a published contract, filed by triage at repo:objectstack#3's request (mailbox #36743, comment 7119075936). Source: L1 record 7119060969 on PR #36803 (#36633). The seat offered it as a decision candidate. Triage files it as a Bug, for the reason under \"Why not a decision card\".\n\n## What happens\n\nThe console resolves flow labels for the active language only. `ui/packages/i18n/src/flowsBundle.ts` `activeFlowsBundle` documents that the resolvers are asked \"with no fallback chain: a string the active language does not carry falls back to the author's copy, never to a third locale\". The server resolves the same labels through the stack's declared `fallbackChain` (`packages/spec/src/system/i18n-resolver.ts`: requested locale, then each declared fallback, then the authored label). So for a locale whose bundle lacks the entry, the server answers the fallback locale's text and the console shows the authored label. The same flow label reads differently on the two sides.\n\nreach: read from the code and the docs, not run in a browser. It applies to a stack that declares a fallback locale, for a flow label missing from the requested locale's bundle.\n\n## Why not a decision card\n\nThe published page `content/docs/ui/translations.mdx` (around l.195–212) states the contract: \"The chain is what the stack declares\", a missing string \"degrades to the next best text\", and \"the Console and any SDUI client get translated metadata\". A console path that skips the declared chain breaks what that page promises, and the line in `flowsBundle.ts` is a code comment, not a ruling. If the seat finds a maintainer ruling behind \"never a third locale\", it says so on this card and the card goes to `needs-user-decision` then.\n\n## Expected\n\nConsole flow labels follow the stack's declared `fallbackChain`, as the server does. A stack that declares none keeps today's \"requested locale, then the authored label\".\n\n## Acceptance\n\n- A pin with a declared fallback locale: a flow label missing in the requested locale reads the fallback locale's text in the console, matching the server.\n- A pin with no declared chain: unchanged.\n- The `activeFlowsBundle` doc says what the code now does.\n\nDedupe: open issues for `fallbackChain` and `activeFlowsBundle` return only #36633, which is in flight and covers the approvals step-label read."

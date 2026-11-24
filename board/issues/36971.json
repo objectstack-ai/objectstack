@@ -1,0 +1,34 @@
+{
+  "number": 36971,
+  "kind": "issue",
+  "title": "Profile language card says the interface language is chosen separately, but it and the globe menu are the same setting",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "sunhaolin",
+    "id": 6194896,
+    "type": "User"
+  },
+  "labels": [
+    "area:ux",
+    "bug",
+    "domain:ui",
+    "pm:dispatched",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-support-ai"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-24T12:13:43Z",
+  "updated_at": "2026-11-24T14:16:46Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/36971",
+  "body": "## Summary\n\nThe **Language** card on the profile page (Account → Profile) tells the user that it only sets the language of notifications and messages, and that the interface language is a separate setting in the globe menu:\n\n> The language used for notifications and messages sent to you. The interface language is chosen separately, from the globe menu.\n\n(zh-Hans: 「发送给您的通知和消息所使用的语言。界面语言另行设置,在地球图标菜单中切换。」)\n\nThat is no longer true. The two controls are one setting (`sys_user.locale`), and changing either changes both. A user who follows the text and picks \"English\" only for their emails gets the whole console switched to English.\n\n## Steps to reproduce\n\nConsole UI in Simplified Chinese, `sys_user.locale = null`.\n\n1. Open `/_console/apps/com.objectstack.account/component/account/profile_card`.\n2. In **语言 → 首选语言** pick **English**, click **保存**.\n   - Result: the whole console switches to English at once (`<html lang=\"en\">`, tab title \"Account — ObjectOS\", navigation, every app). `GET /api/v1/auth/me/localization` returns `locale: \"en\"`; `localStorage` `objectui-locale` and `objectui-locale-seed` are `en`.\n3. Open the account menu → **Language** → **简体中文**.\n   - Result: the console is Chinese again and `GET /api/v1/data/sys_user/<id>` now shows `locale: \"zh-Hans\"`, i.e. the globe menu wrote the very column the card says it does not touch. The profile card's select shows 简体中文.\n\n## Expected\n\nThe card describes what the control does: one language setting for the interface and for notifications/messages, the same one as the globe menu.\n\n## Where\n\n`main` still has the old wording, although the behaviour was unified on purpose:\n\n- `ui/packages/app-shell/src/hooks/useUserLocale.ts` (objectui#10059): \"For a signed-in user `sys_user.locale` is the ONLY decider … Both controls write the same column through the same adapter … changing the language in either place changes it in both\".\n- `ui/apps/console/src/pages/system/ProfilePage.tsx`\n  - line 721, `profile.language.description` default text: \"… The interface language is chosen separately, from the globe menu.\"\n  - lines ~570–579, the component comment: \"Saving here therefore does NOT call `changeLanguage`, and switching the UI language from the globe menu does NOT write this column.\"\n- `profile.language.description` in the locale files (`en`, `zh-Hans`, and the others) carries the same sentence.\n\nSmall extra in the zh-Hans string: it uses a half-width comma (「另行设置,在」) inside a Chinese sentence.\n\n## Environment\n\n`@objectstack/*` 18.6.0, console build `958ee03594`; the wording was re-checked on `main` today (2026-11-24).\n"
+}

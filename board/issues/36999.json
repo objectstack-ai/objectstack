@@ -1,0 +1,29 @@
+{
+  "number": 36999,
+  "kind": "issue",
+  "title": "conversation focus: a pinned record in the chat request, shown as a chip, kept across navigation",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-bob",
+    "id": 353326562,
+    "type": "User"
+  },
+  "labels": [
+    "area:cloud",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Feature",
+  "created_at": "2026-11-24T14:15:13Z",
+  "updated_at": "2026-11-24T14:15:13Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/36999",
+  "body": "maintainer · os-bob · session_012dn2AecKpLaYkUtNRiqtby\n\nFiling gate: ③ maintainer-directed. Source: topic #36996.\nGrading: area:cloud · Feature · p2 (topic) · reach: n/a (new capability) · evidence: read.\n\n## 维护者速读\n- 做什么：对话可以「钉」在一条记录上。输入框上方显示这条记录的名字，可以取消；用户翻到别的页面，对话仍然问的是这条记录。\n- 现在：助手只知道「你正在看哪一页」，一翻页就换了对象。\n- 需要你做的：无。\n\n## What\n1. Contract: `ToolExecutionContext.focus?: { object: string; id: string }[]` beside `surfaceContext` in `packages/spec/src/contracts/ai-service.ts`. Docblock: client-reported and advisory, never an access decision; the server re-reads the record as the caller; at most one entry in phase 1. The name is `focus`: `scope` already means the conversation cache key in `useChatConversation.ts`.\n2. Console (`ui/packages/app-shell/src/console/ai/AiChatPage.tsx` and the dock conversation): every turn's request carries `context.focus` while a focus is pinned. The request body is the authority; anything stored on the conversation only restores the chip.\n3. Chip: the composer slot that draws the page chip today (`console.ai.discussing`). A pinned focus replaces it, shows the record's display name (resolved client-side as the user), and has a remove control. Opening another record asks once 「改为问《X》？」; a decline is remembered for the conversation.\n4. Capability gate: the pin UI is drawn and `focus` is sent only when the AI service advertises that it honours focus (one flag on the discovery the console already reads, named in the PR and mirrored by the cloud child). Without the flag nothing changes: a chip the server ignores would mislead.\n5. Entry point in this card: a pin control on the page chip. The drawer entry and the `ask_ai` action call the same setter when they land.\nUI contract: the spec key in 1; no product-named widget.\n\n## Out of scope\nWhat the server does with the focus (cloud child, a row on #36996); more than one record.\n\n## Acceptance\n- Tests: a pinned focus is sent on every turn and survives navigation; removal stops it; the first turn of a new conversation carries it; the one-time prompt; no flag ⇒ no chip and no `focus` key; full-page chat and dock behave the same.\n- API surface baseline regenerated; changeset; all locales.\n\nBlocked-by: none. Same files in flight: #36969 (claim order applies).\nParent: #36996. Reader: `domain:ui` lane with one spec file.\nDedupe: `conversation focus record chat` 13 (none on this mechanism) · `is:open surfaceContext` 1 (seat post only)."
+}

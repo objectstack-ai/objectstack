@@ -1,0 +1,32 @@
+{
+  "number": 36920,
+  "kind": "issue",
+  "title": "os-dev: finished work the pinned branch cannot take stays local; push a no-PR backup branch by default",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:fleet",
+    "domain:skills",
+    "enhancement",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-11-24T08:51:47Z",
+  "updated_at": "2026-11-24T08:56:39Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/36920",
+  "body": "repo:objectstack#3 · os-support-ai · session_01WGufzg7mFFG5b13DcQ93kf\n\nFiling gate: ③ a maintainer-directed rule change. The maintainer, in the #36860 card thread on 2026-11-24: at 08:49Z, \"还有避免代码丢失的问题应该是技能的默认选项，是否建议优化技能\" (avoiding code loss should be the skills' default; should the skills be improved?), answered yes; at 08:50Z, \"立 skills 卡\" (file the skills card).\n\n## What happened\n\nOn #36860, a card thread had about half a day of finished work (part (b) of a two-PR split: 26 metadata types, 2,220 bundle lines, 9 console moves) that existed only as a local branch in a cloud container that can be reclaimed at any time:\n\n- The thread's only push target was its platform-pinned branch, which carried the open PR for part (a). Pushing part (b) there would have changed that PR.\n- Pushing to any other branch needed the maintainer's explicit permission, so the work waited about two hours on a decision card.\n- A durable copy under `/mnt/project-files/` was refused by auto-approval, and the seat agreed not to route around that.\n- The hand-off memory named a local branch (`wip-36860-full`), which a later thread on another container cannot reach.\n\nThe general rule already exists (`.claude/agents/os-dev.md:102`: every compilable small step is commit + push, and a takeover trusts only the remote branch's last sha). It has no answer for work the pinned branch cannot take, so the default was to keep it local.\n\n## Change\n\nIn `.claude/agents/os-dev.md`, and wherever the card-thread and hand-off rules restate it (`.claude/skills/pm-dispatch/references/area-lease.md` hand-off, the seat order template):\n\n1. **Backup branch by default.** When finished commits cannot go to the work branch (an open PR there that they would change, a split part held back, work paused on a decision or a review), push them at once to a no-PR backup branch `claude/issue-<n>-<slug>-wip`. Never open a PR from it, never merge it, and delete it when its work lands. This is standing permission, so no decision card is needed.\n2. **No local-only work at the end of a turn.** Before a turn ends on a wait (CI, review, a decision, a merge), every commit is on a remote branch, and the report names it.\n3. **Hand-offs name a remote branch and sha**, never a local branch or a container path.\n4. Name the backup-branch pattern in the session-level branch allowance (the maintainer's project instructions), so the harness's \"push to no other branch without explicit permission\" does not block rule 1.\n\nThe PR edits governed text (`.claude/**`), so it is Tier H and the maintainer reviews it. `Rule-change: ruled`, with the two quotes above as `Ruling-ref`.\n\n## Acceptance\n\n- `os-dev.md` states rules 1 to 3. The seat order template and the hand-off reference say the same, or point to `os-dev.md`.\n- A worked example in the rule text: a card thread whose pinned branch holds an open PR pushes its next part to `claude/issue-<n>-<slug>-wip` without asking.\n- Item 4 is done in the project instructions, or the PR says the maintainer owes it.\n\nDedupe: open issues for backup branches, local-only work and code loss return none. The case that exposed it is #36860 (backup pushed after the maintainer's approval as `claude/issue-36860-part-b-wip`).\n"
+}

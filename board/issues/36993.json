@@ -1,0 +1,29 @@
+{
+  "number": 36993,
+  "kind": "issue",
+  "title": "service-knowledge: search returns a short page after the permission filter instead of refilling",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-bob",
+    "id": 353326562,
+    "type": "User"
+  },
+  "labels": [
+    "area:ai",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-24T14:13:50Z",
+  "updated_at": "2026-11-24T14:13:50Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/36993",
+  "body": "maintainer · os-bob · session_012dn2AecKpLaYkUtNRiqtby\n\nFiling gate: ① product defect. Source: topic #36990.\nGrading: area:ai · Bug · Impeded · rare (apps that mount `service-knowledge`) · evidence: read.\n\n## 维护者速读\n- 问题：检索先取前 K 条，再按权限过滤，过滤完不补。一个人能看的记录越少，搜到的越接近空。\n- 修法：第一轮多取一些；过滤后不够，再取一轮。\n- 需要你做的：无。\n\n## What\n1. `knowledge-service.ts` `search` / `applyPermissionFilter`: first round asks each source for `topK × 5`; when fewer than `topK` survive and the adapter returned as many as asked, a second round asks up to `topK × 20`. At most two rounds (each embeds the query once).\n2. Counting toward `topK` dedupes by `sourceRecordId`; what is returned stays chunk-level hits.\n3. System context: one round of `topK`, no refill. No context: fail closed as today.\n4. The number of hits removed by the filter goes to logs only, never into the result. `search`'s return type is unchanged.\n5. Build on the shape #36839 leaves in the same function.\n\n## Acceptance\n- 100 hits, the caller can read 5 → returns those 5 (within the cap); several sources; an adapter that caps `topK` does not loop; return-type snapshot unchanged.\n- Container run per AGENTS.md.\n\nBlocked-by: #36839 (same function)\nParent: #36990. Reader: the server lane for `service-knowledge`.\nDedupe: `knowledge search permission filter topK` 1 (#36839, claimed by another seat, different mechanism) · `applyPermissionFilter` 5 (open: #36839 only)."
+}

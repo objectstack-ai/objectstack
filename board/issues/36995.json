@@ -1,0 +1,29 @@
+{
+  "number": 36995,
+  "kind": "issue",
+  "title": "embedder-openai: embed() sends every input in one request; providers with a per-request cap reject a reindex",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-bob",
+    "id": 353326562,
+    "type": "User"
+  },
+  "labels": [
+    "area:ai",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-24T14:14:03Z",
+  "updated_at": "2026-11-24T14:14:03Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/36995",
+  "body": "maintainer · os-bob · session_012dn2AecKpLaYkUtNRiqtby\n\nFiling gate: ① product defect. Source: topic #36990.\nGrading: area:ai · Bug · Impeded · rare (deployments that configure a provider with a per-request input cap) · evidence: read (the cap per provider is measured in this card's step 1).\n\n## 维护者速读\n- 问题：向量化时把所有文本塞进一个请求。有的服务商每次请求最多只收几条，大一点的重建会整批失败。\n- 修法：按每家服务商的上限自动分批，顺序不变。\n- 不做：「单条文本太长」的处理。它要和切分一起做，放在「知识检索平台化」专题。\n- 需要你做的：无。\n\n## What\n1. Measure first: for each provider in the known-model table that the PR touches, send one request above its documented per-request input count and record what happens (error or truncation). Name the providers and results in the PR.\n2. `packages/plugins/embedder-openai/src/index.ts` `embed()`: split `texts` into batches of the model's per-request cap (known-model table; an `OpenAIEmbedderOptions` override; unknown model → a conservative default with one warning), send them in sequence, return vectors in input order.\n3. No change to the `IEmbedder` contract.\n\n## Acceptance\n- Inputs above the cap are split and order is preserved; a failing batch fails the call with the batch index; measured provider caps recorded in the PR.\n- Container run per AGENTS.md; changeset.\n\nBlocked-by: none\nParent: #36990. Reader: the plugins lane.\nDedupe: `embedder-openai` 159 · `embedder batch` 117 (none open on this mechanism)."
+}

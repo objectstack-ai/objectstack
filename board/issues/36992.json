@@ -1,0 +1,29 @@
+{
+  "number": 36992,
+  "kind": "issue",
+  "title": "service-knowledge: reindexSource reads the whole object in one unbounded find and upserts it in one call",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-bob",
+    "id": 353326562,
+    "type": "User"
+  },
+  "labels": [
+    "area:ai",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-24T14:13:43Z",
+  "updated_at": "2026-11-24T14:13:43Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/36992",
+  "body": "maintainer · os-bob · session_012dn2AecKpLaYkUtNRiqtby\n\nFiling gate: ① product defect. Source: topic #36990.\nGrading: area:ai · Bug · Impeded · rare (apps that mount `service-knowledge`) · evidence: read.\n\n## 维护者速读\n- 问题：全量重建一次把整张表读进内存，再一次性交给适配器，数据多了会撑爆内存或超时。\n- 修法：按 id 分页读，一页一页写。\n- 需要你做的：无。\n\n## What\n1. `knowledge-service.ts` `reindexSource`: page with `orderBy id` + `id > cursor`; upsert per page; an in-process lock per source; a failed page ends the run with `ok: false` and names the page.\n2. Keep the existing total-cap meaning of `KnowledgeReindexOptions.limit`; `dryRun` uses `count` instead of loading rows.\n3. Page size: the adapter sends a page's text to the embedder in one go, so the page size must not exceed what the embedder accepts per request (sibling child on `embedder-openai`); default 100 until that lands, then follow it.\n4. Result keeps `{ indexed, discovered, object?, ok, message? }`; fields are only added.\n5. No purge of stale documents here (it needs an adapter list method, which waits for the knowledge-platform ADR).\n\n## Acceptance\n- Every `find` has a `limit`; every `upsert` is at most one page; 0 / page / page+1 boundaries; cursor order checked once on a SQL driver; `limit` caps the total.\n- Container run per AGENTS.md.\n\nBlocked-by: #36991 (same file)\nParent: #36990. Reader: the server lane for `service-knowledge`.\nDedupe: `reindexSource` 3 (all closed: #14825, #22640, #4672)."
+}

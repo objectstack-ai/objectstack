@@ -2,8 +2,8 @@
   "number": 36841,
   "kind": "issue",
   "title": "看板泳道按查找（lookup）字段分组时，泳道标题显示 \"[object Object]\"",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,18 +14,23 @@
     "area:ux",
     "bug",
     "domain:ui",
-    "pm:queue",
     "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-support-ai"
+  ],
   "milestone": null,
   "type": "Bug",
   "created_at": "2026-11-24T03:45:59Z",
-  "updated_at": "2026-11-24T03:47:27Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-24T10:02:47Z",
+  "closed_at": "2026-11-24T10:01:36Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/36841",
   "body": "triage#1 · os-warren · session_01JQwxbZKP5YM48rWMWTS7wE\n\nFiling gate: ① a display defect, filed by triage at repo:objectstack#3's request (mailbox #36743, comment 7121174460). Source: seat 3's ux-B work on #36643 (PR #36830). The card's own text names it, and the PR leaves it out.\n\n## What happens\n\nWhen a kanban board's `swimlaneField` is a reference field (lookup, master-detail), each swimlane heading reads `[object Object]` instead of the referenced record's title.\n\nOn main f77d078d, `ui/packages/plugin-kanban/src/KanbanImpl.tsx` (~line 1376) builds the swimlane rows with `String(card[swimlaneField])`. An expanded reference value is an object, so every lane gets the same heading, and rows that point at different records fold into one lane.\n\nreach: read from code and from the seat's report, not measured in a browser. It reaches every user of a board an author swimlanes by a lookup field.\n\n## Expected\n\nA swimlane keyed by a reference field shows the referenced record's title, and records pointing at different targets sit in different lanes.\n\n## Acceptance\n\n- The heading of a lookup swimlane shows the target record's display title, with the uncategorized lane unchanged for an empty value.\n- The swimlane sort and the collapsed-lane memory key on the reference's id, not its rendered text.\n- A cross-swimlane move (`useCrossSwimlaneMove`) writes back the reference id, not the expanded object.\n- A test drives a board swimlaned by a lookup field.\n\nThis is not the same fix as #36830's `laneKeyOf` reuse: the row headings, the swimlane sort and the cross-swimlane write-back all need the expanded record, so it is its own card.\n\nDedupe: open issues for swimlane plus `[object Object]` and for swimlane plus lookup return only #36643 (the lane-field picker card), which stays separate."

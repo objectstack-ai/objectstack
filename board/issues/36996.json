@@ -1,0 +1,30 @@
+{
+  "number": 36996,
+  "kind": "issue",
+  "title": "专题：记录范围 AI 问询（在一条记录上问 AI：对话钉在这条记录上、平台按配置交给模型这条记录的资料、外部 AI 经 MCP 拿到同一份）",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-bob",
+    "id": 353326562,
+    "type": "User"
+  },
+  "labels": [
+    "area:ai",
+    "pm:epic",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-24T14:14:25Z",
+  "updated_at": "2026-11-24T14:17:36Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/36996",
+  "body": "maintainer · os-bob · session_012dn2AecKpLaYkUtNRiqtby\n\nFiling gate: ③ maintainer-directed (topic parent). Source: maintainer. Key words (maintainer, 2026-11-24, this session): 「先立专题 ① 记录范围 AI 问询 ；⑤ 应用技能进入应用内 AI ，M0 那几项知识服务缺陷 也立专题，目前开发的策略是按专题派」「需要拍板的事项 都同意」「这几个专题任务用fable 审核之后立卡」. Reviewed by an independent Fable pass before filing.\nBatch-of: 4 epics filed together on 2026-11-24 (this one, #36990, 「知识检索平台化」, cloud 「应用技能进入应用内 AI」).\n\n## 维护者速读\n\n- 做什么：用户在一条记录上（一份制度、一个客户）点「问 AI」，对话固定在这条记录上；平台按应用作者的配置，把这条记录的资料（字段、关联记录目录、正文）以提问人的权限读出来交给模型，第一轮就能答；外部 AI 通过 MCP 拿到同一份资料。\n- 谁受益：任何元数据应用。第一个用户是制度问询应用（BrightRule），客户管理里「问这个客户」是同一机制换配置。\n- 开源与企业版：机制开源（MCP 也要用）；审计、正则脱敏、AI 身份收窄留企业版（决定记录在 cloud 子卡 1）。\n- 不做：字段级「不许发给 AI」的声明、向量检索，各自另立专题。\n- 需要你做的：合并两份 ADR（子卡 1 在 cloud，子卡 2 在本仓）。\n\n## Children\n\n| Milestone | Child | Blocked-by | Lane |\n|---|---|---|---|\n| M1 | 1. objectstack-ai/cloud card (filed below) — ADR: the record context mechanism is open; governance over it is Enterprise | none | cloud |\n| M1 | 2. (filed below) ADR: record context pack, its tool, conversation focus, the `ask_ai` action type, the skill `context` key, the citation shape | 1 | spec |\n| M1 | 3. (filed below) the assistant cannot be opened while a record drawer is open (area:cloud) | none | ui |\n| M1 | 4. (filed below) conversation focus: a pinned record in the chat request, shown as a chip (area:cloud) | none | ui + spec |\n| M2 | 5. context pack: `ai_context` type + render service + `get_record_context` over MCP + one data wrapper — type and its reader in one PR (row; filed when child 2 merges) | 2 | spec + server |\n| M2 | 6. action type `ask_ai`, spec and console executor in one PR (row) | 2, 4 | spec + ui |\n| M2 | 7. Studio form and authoring surfaces for `ai_context`, area:build (row) | 5 | ui |\n| M2 | 8. skill key `context`; MCP skill prompts take a record argument (row) | 5 | server |\n| M2 | 9. cloud: the in-app chat persists the focus and pre-reads the pack as a tool call on the first turn (row) | 4, 5, 8 | cloud |\n| M3 | 10. answer citations that open the record at the cited place (row; split after child 2 merges) | 2 | — |\n\nRows are filed as cards when their milestone starts (rolling split); their full draft bodies are kept with the maintainer session.\n\n## Rulings that bound every child\n\n- A context pack is its own governed metadata type that names a root object. Objects carry no AI recipe; the object-level `ai` key stays refused on business objects (`packages/spec/src/data/ai-read-exposure.ts`).\n- Read as the asking user: field- and row-level rules hold. A field hidden from the caller reads \"not visible to you\"; a related row the caller cannot read is absent, with no dangling id.\n- One tool definition, declared once in spec and served by every transport (the ADR-0149 D2 pattern). The pack reaches a model as a tool result, never as system-prompt text.\n- A key lands with its first reader in the same PR (ADR-0049).\n- Focus is per conversation, one record in phase 1, client-reported and advisory: never an access decision.\n- Field egress is not a dependency of this epic.\n\n## Done when\n\nOn a record page with an `ask_ai` action, in an edition with the in-app assistant, the first answer needs no tool call beyond the context read; the focus survives navigation; the same context is served by `get_record_context` over MCP on the open edition; the open edition shows no AI button.\n\nReader: triage routes each child by content; children 3, 4, 6 are area:cloud (they serve only editions with the in-app assistant).\nDedupe (objectstack, is:issue): `get_record_context` 0 · `ai_context` 0 · `\"ask_ai\"` 0 · `\"context pack\"` 8 (closed, unrelated) · `conversation focus record chat` 13 (none on this mechanism) · `is:open ChatDock` 2 (#35445: its rest waits on cloud#4894; the page chip already sits in the composer) · `is:open AiChatPage` 5 (#36969 in flight on the same file) · `is:open metadata type admission ADR-0088` 3 (#36868: precedent, no overlap).\nRelated, not children: #35445 (assistant panel, page chip), #36969 (same files), #34659 (its `sourceLine` covers dataset answers, not record citations), #36650 (MCP knowledge tool), #32749 (reading uploaded files in chat)."
+}

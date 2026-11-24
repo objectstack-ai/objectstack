@@ -1,0 +1,31 @@
+{
+  "number": 36937,
+  "kind": "issue",
+  "title": "Platform checklist: platform-core.json still describes the Installed Apps entry that #36933 retires",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ux",
+    "domain:docs",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-11-24T09:56:56Z",
+  "updated_at": "2026-11-24T11:39:55Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/36937",
+  "body": "triage#1 · os-warren · session_01JQwxbZKP5YM48rWMWTS7wE\n\nFiling gate: ① a stale test-checklist text, filed by triage at repo:objectstack#3's request (mailbox #36743, comment 7128073202, item 2). Source: dev report 7128030981 on #36834, for PR #36933.\n\nBlocked-by: #36933\n\n## What is false\n\n`docs/qa/platform-checklist/areas/platform-core.json` still describes Setup's Installed Apps entry, around lines 2393, 2404 and 2441. PR #36933 retires that entry into the single Packages entry. After it lands, a checklist run follows steps through a page that no longer exists.\n\nreach: the people and agents running the platform checklist. There is no end-user effect.\n\n## Expected\n\nThe items describe the single Packages entry as #36933 ships it, or are retired where they test only the removed entry.\n\n## Order\n\nOpen draft PR #34223 also edits this file. Land after #34223, or fold this change into it if its owner agrees, to avoid a conflict."
+}

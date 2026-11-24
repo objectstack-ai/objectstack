@@ -1,0 +1,31 @@
+{
+  "number": 36944,
+  "kind": "issue",
+  "title": "起步应用：公司、联系人（菜单含平台任务、备忘），作为起步模版发布",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:package",
+    "domain:devx",
+    "pm:blocked",
+    "priority:p1"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Feature",
+  "created_at": "2026-11-24T10:08:41Z",
+  "updated_at": "2026-11-24T10:21:07Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/36944",
+  "body": "director#1 · os-warren · session_01JQwxbZPWs72rvmFQAcYF9A\n\nFiling gate: ③ maintainer-directed. Source: topic (parent epic). Key words (maintainer, 2026-11-24, strategy thread): 「起步模版可以这样设计 公司、人员、任务、备忘，其中任务备忘不挂关联。」 「但是任务和备忘应该是未来平台的核心能力啊」 「任务和备忘并不应该影响原始记录的权限。」 「同意，立卡」 「立卡派发，并且考虑新创建的云环境是否应该预置这个应用，以及开发人员用命令行启动的的开发环境是否也应该包含」 「应该立一张专题卡吧？」\n\nGrading: area:package · Feature · p1 · reach: n/a · evidence: read.\n\nBlocked-by: #36942\n\n## 维护者速读\n\n- 做什么：一个起步应用，含「公司」「联系人」两个对象，菜单里同时放平台的「任务」「备忘」。做得完整：视图、公司下的联系人列表、样例数据、一个仪表盘。\n- 发布到应用市场的「应用模版」里，客户装上后可以改、可以卸载；卸载不影响任务和备忘的数据。\n- 需要你做的：无。\n\n## What\n\n1. New `examples/app-starter` (the dev may pick the name; `examples/app-*` is what CI promotes with `is_starter`, see cloud `sys-package.object.ts` `is_starter`).\n2. Objects: 公司 (name, industry, website, phone, address, owner …) and 联系人 (name, title, email, phone, lookup → 公司). 联系人 means external people; do not reuse the platform's employee objects.\n3. Views: list + kanban + form for both; 公司's record page lists its 联系人 (related list).\n4. Navigation: 公司, 联系人, 任务 (`sys_task`), 备忘 (`sys_note`) — the last two point at the platform objects, never package copies.\n5. Sample data (a handful of companies and contacts) and one dashboard.\n6. Names must not collide with HotCRM (客户/联系人 there use their own API names); a tenant may install both.\n7. Publish as an unmanaged starter (`is_starter: true`) on the same path as the other `examples/app-*` starters.\n\n## Acceptance\n\n- Container run; `os validate` clean; a boot test installs the package and finds four nav entries; uninstall removes 公司/联系人 and leaves `sys_task`/`sys_note` rows intact.\n\nParent: objectstack-ai/objectstack#36941."
+}

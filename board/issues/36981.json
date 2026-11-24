@@ -1,0 +1,34 @@
+{
+  "number": 36981,
+  "kind": "issue",
+  "title": "Console Setup: Settings, Installed apps, Audit log and the connector pages send no bearer token, so a session the rest of the console accepts reads \"Authentication is required\" there",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "sunhaolin",
+    "id": 6194896,
+    "type": "User"
+  },
+  "labels": [
+    "area:ux",
+    "bug",
+    "domain:ui",
+    "pm:dispatched",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-support-ai"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-24T13:13:28Z",
+  "updated_at": "2026-11-24T13:37:26Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/36981",
+  "body": "## What happens\n\nWith a valid bearer session (`auth-session-token` in localStorage) but no valid session cookie, the console keeps working everywhere — lists, records, forms, actions, approvals, dashboards, the Setup object pages — because its authenticated fetch sends the bearer. A handful of Setup surfaces call their endpoints with `credentials: 'include'` only, get a 401, and print the raw server error instead of working or sending the user to sign in:\n\n| Setup page | Request | What the page shows (UI language zh-CN) |\n|---|---|---|\n| 全部设置, and every settings namespace page (本地化, 公司, 认证, 访问策略, 邮件投递, 短信投递, 文件存储, AI, 知识库, 数据生命周期, 品牌) | `GET /api/settings` → 401 | `Authentication is required to access this endpoint.` |\n| 已安装应用 | `GET /api/v1/packages` → 401 (also `/api/v1/cloud-connection/org-packages`) | `Authentication is required to access this endpoint. (UNAUTHENTICATED)` |\n| 审计日志 | 401 | `HTTP 401: {\"error\":\"UNAUTHENTICATED\",\"code\":\"UNAUTHENTICATED\",\"message\":\"Authentication is required to access this endpoint.\"}` followed by the empty state \"暂无审计记录\" |\n| 连接器凭据 | 401 | `无法加载连接器凭据。 Authentication is required to access this endpoint.` |\n| 连接器连接 | 401 | `无法加载连接器连接。 UNAUTHENTICATED` |\n\nMeasured in the page: the same endpoints answer 200 when the request carries `Authorization: Bearer <the stored token>`; `GET /api/v1/auth/get-session` answers 200 with the bearer and 401 with the cookie alone. `ui/apps/console/src/pages/settings/api.ts` on `main` still calls plain `fetch(BASE, { credentials: 'include', … })`, so this is not fixed there.\n\nSo an administrator who is, as far as the whole product tells them, signed in, opens Settings and reads an English \"Authentication is required\" with no way forward; the audit log additionally claims there are no audit records.\n\n## How the state arises\n\nReproduced on local dev: two ObjectStack runtimes on `localhost` at different ports. Cookies are scoped by host, not port, so signing in on the second (`:4002`) replaces the first one's (`:4001`) session cookie; the first tab keeps working on its bearer token, except for the pages above. Any other way of holding a bearer but not a cookie (blocked third-party cookies on a cross-origin console, a cleared cookie jar with localStorage kept) should land in the same place.\n\n## Expected\n\nOne of:\n- these surfaces use the console's authenticated fetch (bearer + cookie) like the rest of the app; or\n- if they are cookie-only on purpose, a 401 there is handled as \"session ended\" (sign-in redirect), not printed.\n\nIn either case the raw `HTTP 401: {json}` and the bare `UNAUTHENTICATED` should not be user-facing text, and a failed load of the audit log should not render the \"no audit records\" empty state.\n\n## Steps\n\n1. Start two apps: `objectstack dev -p 4001` and `objectstack dev -p 4002` (separate checkouts/DBs).\n2. Sign in on `http://localhost:4001/_console`, then sign in on `http://localhost:4002/_console` in the same browser.\n3. Back on 4001 (still signed in, everything works): Setup → 全部设置 / 已安装应用 / 审计日志 / 连接器凭据 / 连接器连接.\n\n`@objectstack/*` 18.6.0. Found in a UI test pass of HotCRM.\n"
+}

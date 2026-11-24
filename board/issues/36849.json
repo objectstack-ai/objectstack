@@ -2,8 +2,8 @@
   "number": 36849,
   "kind": "issue",
   "title": "console: following a record link on a screen flow's result screen leaves the dialog open on the first screen; Next then fails with 400 Invalid screen input",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "sunhaolin",
@@ -14,18 +14,23 @@
     "area:workflow",
     "bug",
     "domain:ui",
-    "pm:queue",
     "priority:p1"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-justin"
+  ],
   "milestone": null,
   "type": "Bug",
   "created_at": "2026-11-24T04:44:21Z",
-  "updated_at": "2026-11-24T05:35:15Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-24T11:27:23Z",
+  "closed_at": "2026-11-24T11:26:10Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/36849",
   "body": "## What happens\n\nOn the last screen of a multi-screen screen flow (a result screen that carries `record_link` fields), clicking one of the record links navigates to that record, but the flow dialog does not close. It stays open on top of the new page and re-renders the **first** screen of the flow, with its inputs and a live \"Next\" button. Clicking \"Next\" there posts the first screen's inputs to the already-advanced run and is refused with 400, shown as a raw English toast plus an inline error.\n\nA single-screen flow closes correctly. The defect needs at least two screens, the last one holding record links.\n\n## Reproduce\n\nPlatform `@objectstack/*` 18.6.0, console at `/_console`, UI locale zh-CN, HotCRM 6.6.0 metadata (any app with a two-screen flow whose last screen holds `record_link` fields reproduces it).\n\n1. Open a lead, run **Convert Lead** (screen flow `lead_conversion`): fill the first screen, click Next. The run completes and the result screen shows three links: account, contact, opportunity.\n2. Click the account link.\n3. The route changes to the account record page, and the dialog is still open, now showing the first screen again (the \"create opportunity\" inputs).\n4. Click \"Next\".\n\nSame result on the second flow tried, `quote_generation` (Opportunity → Generate Quote; first screen `quoteName` / `expirationDays` / `discount`, last screen `quoteLink`).\n\n## Evidence\n\n```\n400 POST /api/v1/automation/lead_conversion/runs/run_08e7b005-4c69-4b8b-8116-d239b117be7b/resume\nInvalid screen input: Unknown screen field \"createOpportunity\" — not declared on this screen; … declared fields: 'accountLink', 'contactLink', 'opportunityLink'\n\n400 POST /api/v1/automation/quote_generation/runs/run_afc6330e-d6db-4079-88ce-e5807eeeb0b5/resume\nInvalid screen input: Unknown screen field \"quoteName\" …; \"expirationDays\" …; \"discount\" — not declared on this screen — declared fields: 'quoteLink'\n```\n\nThe server is right to refuse: the run is on its last screen and the dialog is submitting the first one. The message reaches the user verbatim, in English, in a zh-CN console.\n\n## Expected\n\nFollowing a record link on a result screen ends the dialog (the run has nothing left to ask), and the user lands on the record with nothing on top of it. The dialog never falls back to an earlier screen of a run that has moved past it.\n\n## Why p1\n\nThe result screen exists so the user can open what the flow created (#25872, #26304). Doing exactly that leaves a stale wizard over the record, and its only forward button answers with a raw validation error, so the user cannot tell whether the conversion happened. It did; the records are created. The way out is the dialog's close button.\n\n## Related\n\n- #26902 (closed): the result screen showed Cancel and closing it did not complete the run. Different symptom, same screen.\n- #33856 (closed): the Flow Runs page kept \"Waiting for input\" after a screen run completed.\n\nFound in a browser walkthrough of HotCRM on the pinned platform.\n"
