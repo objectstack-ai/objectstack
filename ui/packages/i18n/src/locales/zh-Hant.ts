@@ -2746,6 +2746,14 @@ const zhHant = {
       changesDrafted: '已暫存為草稿',
       changesFailed: '未生效',
       discussing: '正在看：{{target}}',
+      focus: {
+        pin: '釘住這條記錄，換頁後仍問它',
+        pinned: '正在問：{{target}}',
+        remove: '不再問這條記錄',
+        switchPrompt: '改為問《{{target}}》？',
+        switchAccept: '改為問它',
+        switchDecline: '不用',
+      },
       // changesConfirmMessage: gate-only, read from zh-Hans (GATE_ONLY_KEYS, scripts/zh-hant.mjs).
       changeVerb: {
         createObject: '新建物件',

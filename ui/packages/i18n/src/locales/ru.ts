@@ -2587,6 +2587,14 @@ const ru = {
       changesDrafted: "Сохранено как черновик",
       changesFailed: "Не применено",
       discussing: "Просмотр: {{target}}",
+      focus: {
+        pin: "Продолжать спрашивать об этой записи",
+        pinned: "Вопросы о записи: {{target}}",
+        remove: "Больше не спрашивать об этой записи",
+        switchPrompt: "Спрашивать вместо этого о «{{target}}»?",
+        switchAccept: "Переключить",
+        switchDecline: "Оставить",
+      },
       changeVerb: {
         createObject: "Создать объект",
         addField: "Добавить поле",

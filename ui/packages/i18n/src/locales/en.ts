@@ -3250,6 +3250,15 @@ const en = {
       changesDrafted: 'Saved as draft',
       changesFailed: 'Not applied',
       discussing: 'Viewing: {{target}}',
+      // objectstack#36999 — the conversation focus: the record the chat is pinned to.
+      focus: {
+        pin: 'Keep asking about this record',
+        pinned: 'Asking about: {{target}}',
+        remove: 'Stop asking about this record',
+        switchPrompt: 'Ask about "{{target}}" instead?',
+        switchAccept: 'Switch',
+        switchDecline: 'Keep',
+      },
       // Wording is load-bearing: this is SENT to the agent and must satisfy the
       // cloud confirm gate's English clause `apply (this|the) change`
       // (service-ai-studio confirm-gate.ts APPROVAL_RE). "apply what you just
