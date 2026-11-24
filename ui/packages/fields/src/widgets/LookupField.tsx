@@ -2011,13 +2011,14 @@ export function LookupField({ value, onChange, field, readonly, error: fieldErro
   // The candidate panel: the popover's body, the phone drawer's body, or the
   // list cell's editor itself.
   //
-  // In the popover and the drawer (objectstack#36832) the search row is pinned
-  // at the top, the options scroll in the middle, and "show all results" and
-  // quick-create sit in a footer pinned under the list, so they stay in view
-  // whatever its length. The footer reads the same `canCreate` as the empty
-  // state's create button, and is not drawn when it would hold nothing. The
-  // list cell's editor keeps both at the end of its list, above its own pinned
-  // rows.
+  // In the popover and the drawer the search row is pinned at the top, the options scroll in
+  // the middle, and "show all results" and quick-create sit in a footer pinned
+  // under the list (objectstack#36825). Inside the room Radix reports the list
+  // is what gives way, so they stay whole and clickable whatever its length,
+  // on either side the popover opens to. The footer reads the same `canCreate`
+  // as the empty state's create button, and is not drawn when it would hold
+  // nothing. The list cell's editor keeps both at the end of its list, above
+  // its own pinned rows.
   const panelFace: 'popover' | 'drawer' | 'cell' = inCell && !props.disabled ? 'cell' : isMobile ? 'drawer' : 'popover';
   const offersShowAll = hasDataSource && totalCount > filteredOptions.length;
   const showAllButton = offersShowAll ? (
@@ -2493,9 +2494,9 @@ export function LookupField({ value, onChange, field, readonly, error: fieldErro
         </Drawer>
       ) : (
       // `modal`: the popover is its own scroll-lock layer. Portalled out of
-      // a modal form's DOM, a non-modal popover's list is outside that
-      // dialog's scroll lock, which cancels every wheel and touch move on it;
-      // as the topmost lock it scrolls (objectstack#36832).
+      // a modal form's DOM, a non-modal popover's list sits outside that
+      // dialog's scroll lock, which cancels every wheel and touch move on
+      // it; as the topmost lock its list scrolls (objectstack#36825).
       <Popover
         modal
         open={isOpen}
