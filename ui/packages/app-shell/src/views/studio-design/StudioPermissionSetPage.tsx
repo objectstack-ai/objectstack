@@ -249,7 +249,7 @@ export function StudioPermissionSetPage({
       cancelled = true;
     };
   }, [pairBase]);
-  const baseShown = pairBase !== null && pairBaseLabel?.id === pairBase ? pairBaseLabel.label : pairBase;
+  const baseShown = pairBase === null ? '' : pairBaseLabel?.id === pairBase ? pairBaseLabel.label : pairBase;
   const status: StudioItemStatus | undefined = readOnly
     ? undefined
     : pairBase !== null
