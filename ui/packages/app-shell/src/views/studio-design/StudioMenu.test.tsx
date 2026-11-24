@@ -179,7 +179,8 @@ describe('the current entry and the search', () => {
 
     fireEvent.change(search, { target: { value: 'flow' } });
     const links = within(screen.getByTestId('studio-menu')).getAllByRole('link');
-    expect(links.map((a) => a.getAttribute('data-testid'))).toEqual(['studio-menu-entry-type:flow']);
+    // "flow" names the flow type and the organization's flows.
+    expect(links.map((a) => a.getAttribute('data-testid'))).toEqual(['studio-menu-entry-type:flow', 'studio-menu-entry-orgFlows']);
 
     fireEvent.change(search, { target: { value: 'zzz-nothing' } });
     expect(within(screen.getByTestId('studio-menu')).queryAllByRole('link')).toEqual([]);

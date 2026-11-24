@@ -39,7 +39,7 @@ import '@testing-library/jest-dom/vitest';
 import '@objectstack/lint';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import { MemoryRouter, Route, Routes } from 'react-router-dom';
+import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
 
 let clientImpl: any;
 
@@ -188,6 +188,11 @@ afterEach(() => {
   window.history.replaceState(null, '', '/');
 });
 
+/** The router's query, so a case can wait for the pillar to mirror its open set into it. */
+function SearchProbe() {
+  return <output data-testid="router-search">{useLocation().search}</output>;
+}
+
 async function renderSurfaceOnAccess() {
   window.history.replaceState(null, '', '/studio/app.a/access');
   render(
@@ -199,6 +204,7 @@ async function renderSurfaceOnAccess() {
         <Route path="/studio" element={<div data-testid="studio-landing-page" />} />
         <Route path="*" element={<div data-testid="left-studio" />} />
       </Routes>
+      <SearchProbe />
     </MemoryRouter>,
   );
   // First set auto-selects; wait for its matrix row so the whole editor (not
@@ -323,6 +329,8 @@ describe('Studio — unsaved pillar edits guard (#2600)', () => {
 
   it('CONTROL: clean, the default-sharing entry opens the overview without asking', async () => {
     await renderSurfaceOnAccess();
+    // As an author's click comes after it: the pillar has mirrored its open set.
+    await waitFor(() => expect(decodeURIComponent(screen.getByTestId('router-search').textContent ?? '')).toContain('permission:set_a'));
     reenterOnOwd();
     await screen.findByTestId('owd-internal-a_account');
     expect(confirmSpy).not.toHaveBeenCalled();

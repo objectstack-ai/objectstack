@@ -1222,13 +1222,23 @@ function StudioDesignSurfaceBody({ aiSlot, area }: StudioDesignSurfaceProps): Re
   // `?surface=` (the default sharing overview, on the Access pillar) opens the
   // pillar afresh, as arriving from any other page does: a pillar reads its
   // deep link once, at mount (`useSurfaceDeepLink`). The shell's link guard
-  // lets a link to the page already shown through, so this asks first.
+  // lets a link to the page already shown through, so this asks first. The
+  // remount waits for the new query to be the router's: the router may apply
+  // a navigation in a later render than the click's own state updates, and a
+  // pillar remounted before it would capture the old deep link.
   const [pillarEntry, setPillarEntry] = React.useState(0);
+  const reentryPending = React.useRef(false);
+  const currentSearch = useLocation().search;
   const reenterPillar = React.useCallback((): boolean => {
     if (!confirmLeavePillar()) return false;
-    setPillarEntry((n) => n + 1);
+    reentryPending.current = true;
     return true;
   }, [confirmLeavePillar]);
+  React.useLayoutEffect(() => {
+    if (!reentryPending.current) return;
+    reentryPending.current = false;
+    setPillarEntry((n) => n + 1);
+  }, [currentSearch]);
   // objectstack#26708 — a package that is not there has no menu.
   const showMenu = !pkgMissing;
 
