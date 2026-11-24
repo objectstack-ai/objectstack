@@ -4187,7 +4187,7 @@ const ar = {
       allApps: "جميع التطبيقات",
       editAppInStudio: "تعديل {{app}} في Studio",
       openAppInStudio: "عرض {{app}} في Studio",
-      backToHome: "العودة إلى الرئيسية",
+      backToHome: "العودة إلى صفحة بدء التطبيق",
       settings: "الإعدادات",
       productHome: "الصفحة الرئيسية لـ {{product}}",
       addApp: 'إضافة تطبيق',

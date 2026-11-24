@@ -3988,7 +3988,7 @@ const zhHant = {
       allApps: '所有應用',
       editAppInStudio: '在 Studio 中編輯 {{app}}',
       openAppInStudio: '在 Studio 中檢視 {{app}}',
-      backToHome: '返回首頁',
+      backToHome: '返回應用起始頁',
       settings: '系統設定',
       productHome: '{{product}} 首頁',
       addApp: '新增應用',

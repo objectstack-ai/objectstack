@@ -3858,7 +3858,7 @@ const ja = {
       allApps: "すべてのアプリ",
       editAppInStudio: "Studio で {{app}} を編集",
       openAppInStudio: "Studio で {{app}} を表示",
-      backToHome: "ホームに戻る",
+      backToHome: "アプリのスタートページに戻る",
       settings: "システム設定",
       productHome: "{{product}} ホーム",
       addApp: 'アプリを追加',

@@ -3988,7 +3988,7 @@ const zh = {
       allApps: '所有应用',
       editAppInStudio: '在 Studio 中编辑 {{app}}',
       openAppInStudio: '在 Studio 中查看 {{app}}',
-      backToHome: '返回首页',
+      backToHome: '返回应用起始页',
       settings: '系统设置',
       productHome: '{{product}} 首页',
       addApp: '添加应用',
