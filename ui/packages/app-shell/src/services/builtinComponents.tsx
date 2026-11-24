@@ -317,7 +317,11 @@ registerMetadataResource({
   description: 'Domain entities — tables in the data model. Each object owns its fields, relationships, validations, and lifecycle hooks.',
   domain: 'data',
   searchableFields: ['name', 'label', 'description'],
-  // objectstack#36860 — the list columns are the spec's (`METADATA_LIST_REGISTRY`).
+  listColumns: [
+    { key: 'name', label: 'Name', width: '25%' },
+    { key: 'label', label: 'Label', width: '25%' },
+    { key: 'description', label: 'Description' },
+  ],
   // objectui#10202 — the editor is seeded from the SERVED object, where a
   // picklist-bound field carries `picklist` plus the options resolved from the
   // list; the authoring door refuses the two together. The saved body drops
@@ -333,9 +337,12 @@ registerMetadataResource({
   description: 'Columns attached to objects — name, type, validation, and storage settings.',
   domain: 'data',
   searchableFields: ['name', 'label', 'object', 'type'],
-  // objectstack#36860 — name / type / label are the spec's columns; a field
-  // row's `object` is stamped by the server, not a `FieldSchema` key.
-  listExtraColumns: [{ key: 'object', label: 'Object', width: '20%' }],
+  listColumns: [
+    { key: 'name', label: 'Name', width: '25%' },
+    { key: 'object', label: 'Object', width: '20%' },
+    { key: 'type', label: 'Type', width: '15%' },
+    { key: 'label', label: 'Label' },
+  ],
 });
 
 /* -------------------------------------------------------------------------- */
@@ -353,8 +360,12 @@ registerMetadataResource({
   // objectui#7611 — no `managedBy` column: the registry serves no such key on a
   // permission set (measured on objectstack main), so it read "Custom" for every
   // set, the platform's own included. Provenance is the list's own Source badge,
-  // read from the served `_packageId` / `_provenance`. objectstack#36860 — the
-  // columns are the spec's.
+  // read from the served `_packageId` / `_provenance`.
+  listColumns: [
+    { key: 'name', label: 'Name', width: '30%' },
+    { key: 'label', label: 'Label', width: '30%' },
+    { key: 'description', label: 'Description' },
+  ],
 });
 
 // objectstack#25333 — the position list says who holds each position and which
@@ -373,9 +384,10 @@ registerMetadataResource({
   // admits a live position create (`allowRuntimeCreate`); under `?package=`
   // the create stays a package draft (ADR-0086).
   createLive: true,
-  // objectstack#36860 — name / label / description are the spec's columns; the
-  // holder count and the granted sets are served beside each row.
-  listExtraColumns: [
+  listColumns: [
+    { key: 'name', label: 'Name', width: '20%' },
+    { key: 'label', label: 'Label', width: '20%' },
+    { key: 'description', label: 'Description' },
     {
       key: '_holderCount',
       label: 'Holders',
@@ -401,16 +413,20 @@ registerMetadataResource({
   label: 'Views',
   description: 'Saved list / kanban / calendar / gantt configurations on top of an object.',
   domain: 'ui',
-  // objectstack#36860 — the columns are the spec's.
-  listCells: {
-    type: {
+  listColumns: [
+    { key: 'name', label: 'Name', width: '30%' },
+    { key: 'object', label: 'Object', width: '20%' },
+    {
+      key: 'type',
+      label: 'Type',
       width: '15%',
       // Expanded ViewItems keep their display type under `config.type`
       // and only the list/form family at the top level — derive it so the
       // column shows "calendar" / "grid" / "form" instead of "—".
       render: (_v, item) => viewDisplayType(item) ?? '—',
     },
-  },
+    { key: 'label', label: 'Label' },
+  ],
   // ADR-0017 — the framework exposes each view as a canonical first-class
   // ViewItem ({ name, object, viewKind, label, config }). The inspector and
   // preview read that shape directly (`draft.config`), so NO toDraft/fromDraft
@@ -425,6 +441,11 @@ registerMetadataResource({
   label: 'Dashboards',
   description: 'Composed dashboards with charts, KPIs, and tables.',
   domain: 'ui',
+  listColumns: [
+    { key: 'name', label: 'Name', width: '30%' },
+    { key: 'label', label: 'Label', width: '30%' },
+    { key: 'description', label: 'Description' },
+  ],
 });
 
 /**
@@ -454,6 +475,11 @@ registerMetadataResource({
   label: 'Pages',
   description: 'Visual page layouts authored as JSON metadata.',
   domain: 'ui',
+  listColumns: [
+    { key: 'name', label: 'Name', width: '30%' },
+    { key: 'label', label: 'Label', width: '30%' },
+    { key: 'route', label: 'Route' },
+  ],
   fromDraft: pageSaveBody,
 });
 
@@ -469,10 +495,12 @@ registerMetadataResource({
   description: 'Documentation navigation spine — ordered groups with membership derived over docs (glob/tag rules), plus an explicit pages override for curated order.',
   domain: 'system',
   searchableFields: ['name', 'label', 'description', 'slug'],
-  // objectstack#36860 — the columns are the spec's; the audience cell names
-  // the org default and a permission-set audience in words.
-  listCells: {
-    audience: {
+  listColumns: [
+    { key: 'name', label: 'Name', width: '25%' },
+    { key: 'label', label: 'Label', width: '25%' },
+    {
+      key: 'audience',
+      label: 'Audience',
       width: '12%',
       render: (v) =>
         v == null
@@ -481,5 +509,12 @@ registerMetadataResource({
             ? `permission set: ${(v as { permissionSet: string }).permissionSet}`
             : String(v),
     },
-  },
+    {
+      key: 'groups',
+      label: 'Groups',
+      width: '10%',
+      render: (v) => (Array.isArray(v) ? String(v.length) : '0'),
+    },
+    { key: 'description', label: 'Description' },
+  ],
 });

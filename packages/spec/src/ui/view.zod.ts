@@ -8421,6 +8421,8 @@ export type ListColumn = z.input<typeof ListColumnSchema>;
 /** Post-parse shape of {@link ListColumn} — defaults applied, transforms run (ADR-0122). */
 export type ListColumnParsed = z.infer<typeof ListColumnSchema>;
 export type MetadataListCellType = z.input<typeof MetadataListCellTypeSchema>;
+/** Post-parse shape of {@link MetadataListCellType} (ADR-0122). */
+export type MetadataListCellTypeParsed = z.infer<typeof MetadataListCellTypeSchema>;
 export type MetadataListColumn = z.input<typeof MetadataListColumnSchema>;
 /** Post-parse shape of {@link MetadataListColumn} — defaults applied, transforms run (ADR-0122). */
 export type MetadataListColumnParsed = z.infer<typeof MetadataListColumnSchema>;

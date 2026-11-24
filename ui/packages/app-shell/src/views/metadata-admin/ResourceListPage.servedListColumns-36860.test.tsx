@@ -24,6 +24,10 @@ import { render, cleanup, screen, within } from '@testing-library/react';
 import '@testing-library/jest-dom';
 import * as React from 'react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
+// Dynamic imports the page's anchors and editors reach, paid at collection
+// rather than inside a case's clocked window.
+import '@object-ui/plugin-detail';
+import '@objectstack/lint';
 
 const HOOKS: Record<string, unknown>[] = [
   { name: 'stamp_owner', label: 'Stamp owner', object: 'account', events: ['beforeInsert', 'beforeUpdate'], async: true },
@@ -32,13 +36,11 @@ const HOOKS: Record<string, unknown>[] = [
 ];
 const AGENTS: Record<string, unknown>[] = [{ name: 'helper', label: 'Helper', model: { provider: 'openai', model: 'gpt-4o' } }];
 const QUEUES: Record<string, unknown>[] = [{ name: 'tier1', label: 'Tier 1', members: [{ type: 'user', id: 'a' }, { type: 'user', id: 'b' }] }];
-const VIEWS: Record<string, unknown>[] = [
-  { name: 'all_accounts', object: 'account', label: 'All accounts', viewKind: 'list', config: { type: 'kanban' } },
-];
+const SKILLS: Record<string, unknown>[] = [{ name: 'triage', label: 'Triage', tools: ['a', 'b'] }];
 
 const CLIENT = {
   list: async (type: string) =>
-    type === 'hook' ? HOOKS : type === 'agent' ? AGENTS : type === 'queue' ? QUEUES : type === 'view' ? VIEWS : [],
+    type === 'hook' ? HOOKS : type === 'agent' ? AGENTS : type === 'queue' ? QUEUES : type === 'skill' ? SKILLS : [],
 };
 
 // Headers as the server serves them to a zh-CN reader.
@@ -96,19 +98,6 @@ const QUEUE_ENTRY = {
 };
 // Control: a type that serves no list.
 const SKILL_ENTRY = { type: 'skill', label: 'Skill', allowEnvironmentOverlay: false, allowRuntimeCreate: true };
-const VIEW_ENTRY = {
-  type: 'view',
-  label: 'View',
-  allowEnvironmentOverlay: false,
-  allowRuntimeCreate: true,
-  list: {
-    data: { provider: 'schema', schemaId: 'view' },
-    columns: [
-      { field: 'name', label: 'Name' },
-      { field: 'type', label: 'Type', type: 'badge' },
-    ],
-  },
-};
 
 vi.mock('./useMetadata', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
@@ -116,7 +105,7 @@ vi.mock('./useMetadata', async (importOriginal) => ({
   useMetadataTypes: () => ({
     loading: false,
     error: null,
-    entries: [HOOK_ENTRY, AGENT_ENTRY, QUEUE_ENTRY, SKILL_ENTRY, VIEW_ENTRY],
+    entries: [HOOK_ENTRY, AGENT_ENTRY, QUEUE_ENTRY, SKILL_ENTRY],
   }),
 }));
 
@@ -153,7 +142,7 @@ afterEach(() => {
 
 function mount(type: string) {
   return render(
-    <MemoryRouter initialEntries={[`/apps/studio/metadata/${type}`]}>
+    <MemoryRouter initialEntries={[`/apps/setup/metadata/${type}?scope=environment`]}>
       <Routes>
         <Route path="/apps/:appName/metadata/:type" element={<MetadataResourceListPage />} />
       </Routes>
@@ -198,8 +187,8 @@ describe('the generic list reads the served columns (objectstack#36860)', () => 
   it('a type serving no list keeps the default columns (control)', async () => {
     mount('skill');
     const headers = await headersOf();
-    expect(headers).toContain('Name');
-    expect(headers).toContain('Description');
+    // The setup list's default: label first (#27356), then description.
+    expect(headers.slice(0, 2)).toEqual(['Label', 'Description']);
     expect(headers).not.toContain('Tools');
   });
 
@@ -207,10 +196,5 @@ describe('the generic list reads the served columns (objectstack#36860)', () => 
     mount('queue');
     expect((await headersOf()).slice(0, 3)).toEqual(['Name', 'Members', 'Package']);
     expect((await rowOf('tier1')).slice(0, 2)).toEqual(['tier1', '2 people']);
-  });
-
-  it('the view list keeps its derived display type through its cell override', async () => {
-    mount('view');
-    expect((await rowOf('all_accounts')).slice(0, 2)).toEqual(['all_accounts', 'kanban']);
   });
 });

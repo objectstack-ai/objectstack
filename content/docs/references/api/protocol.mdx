@@ -1714,6 +1714,7 @@ One changed key path of the pending draft, and the last write that changed it.
 | **domain** | `Enum<'data' \| 'ui' \| 'automation' \| 'system' \| 'security' \| 'ai'>` | ✅ | Protocol domain |
 | **overrideSource** | `Enum<'registry' \| 'env'>` | ✅ | Whether allowEnvironmentOverlay comes from the static registry or is elevated by the OS_METADATA_WRITABLE environment variable |
 | **createSeed** | `any` | optional | Authoritative minimal valid create seed for this type — Studio/CLI/API derive create defaults from it (single source of truth in @objectstack/spec). Absent for canvas-create types whose shape is built interactively. |
+| **list** | `{ data?: object \| object \| object; columns: object[] }` | optional | Studio list layout of this type: the columns its metadata list shows, each naming a key of the type schema, headers in the request locale. Absent for a type with no declared list, which Studio lists by name, label and description. |
 
 
 ---
