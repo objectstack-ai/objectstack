@@ -6,7 +6,7 @@
  * LICENSE file in the root directory of this source tree.
  */
 import { describe, it, expect, vi } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { render, screen, fireEvent, within } from '@testing-library/react';
 import React from 'react';
 import '@testing-library/jest-dom/vitest';
 import userEvent from '@testing-library/user-event';
@@ -399,5 +399,139 @@ describe('ObjectFormDesigner — a disabled group arrow says why (objectstack#32
     expect(firstDown.parentElement).not.toHaveAttribute('data-disabled-reason');
     await user.click(firstDown);
     expect(onChange).toHaveBeenCalledTimes(1);
+  });
+});
+
+/**
+ * objectstack#36505 — an object still written with the older per-field
+ * `group` shows its groups as the record page does, and the first write the
+ * designer makes converts it to the `fieldGroups[].fields` spelling with no
+ * visible change.
+ */
+describe('ObjectFormDesigner — a legacy `fields[].group` object converts on its first save (objectstack#36505)', () => {
+  const legacy = {
+    name: 'crm_quote',
+    fields: {
+      name: { type: 'text', label: 'Name', group: 'basic' },
+      account: { type: 'text', label: 'Account', group: 'basic' },
+      fee: { type: 'currency', label: 'Fee', group: 'money' },
+      terms: { type: 'textarea', label: 'Terms' },
+    },
+    fieldGroups: [
+      { key: 'basic', label: 'Basic' },
+      { key: 'money', label: 'Money' },
+    ],
+  };
+  /** Each section's title and the labels of the cards under it, in canvas order. */
+  const canvas = (container: HTMLElement) =>
+    Array.from(container.querySelectorAll<HTMLElement>('.\\@container')).map((section) => {
+      const input = section.querySelector('input');
+      const title = input ? input.value : (section.querySelector('span')?.textContent ?? '');
+      const cards = Array.from(section.querySelectorAll<HTMLElement>('.touch-none')).map(
+        (card) => card.querySelector('.truncate')?.textContent ?? '',
+      );
+      return [title, cards];
+    });
+
+  it('shows the legacy groups, and a rename saves every group\'s list and drops each field\'s `group`', async () => {
+    const onChange = vi.fn();
+    const { container, rerender } = render(
+      <ObjectFormDesigner draft={legacy} systemFieldNames={new Set()} onChange={onChange} onSelectField={noop} />,
+    );
+    const before = canvas(container);
+    expect(before).toEqual([
+      ['Basic', ['Name', 'Account']],
+      ['Money', ['Fee']],
+      [t('engine.studio.designer.ungrouped', 'en'), ['Terms']],
+    ]);
+
+    const money = screen.getByDisplayValue('Money');
+    await userEvent.clear(money);
+    await userEvent.type(money, 'Pricing');
+    fireEvent.blur(money);
+
+    expect(onChange).toHaveBeenCalledTimes(1);
+    const patch = onChange.mock.calls[0][0] as { fields: Record<string, Record<string, unknown>>; fieldGroups: unknown };
+    expect(patch.fieldGroups).toEqual([
+      { key: 'basic', label: 'Basic', fields: ['name', 'account'] },
+      { key: 'money', label: 'Pricing', fields: ['fee'] },
+    ]);
+    expect(Object.values(patch.fields).map((def) => def.group)).toEqual([undefined, undefined, undefined, undefined]);
+
+    // The saved body draws the same canvas, the rename aside.
+    rerender(
+      <ObjectFormDesigner draft={{ ...legacy, ...patch }} systemFieldNames={new Set()} onChange={onChange} onSelectField={noop} />,
+    );
+    expect(canvas(container)).toEqual([
+      ['Basic', ['Name', 'Account']],
+      ['Pricing', ['Fee']],
+      [t('engine.studio.designer.ungrouped', 'en'), ['Terms']],
+    ]);
+  });
+
+  it('CONTROL: an object already in the list spelling saves only what the edit changed', async () => {
+    const onChange = vi.fn();
+    const listed = {
+      name: 'crm_quote',
+      fields: { name: { type: 'text', label: 'Name' }, fee: { type: 'currency', label: 'Fee' } },
+      fieldGroups: [{ key: 'basic', label: 'Basic', fields: ['name'] }, { key: 'money', label: 'Money', fields: ['fee'] }],
+    };
+    render(<ObjectFormDesigner draft={listed} systemFieldNames={new Set()} onChange={onChange} onSelectField={noop} />);
+    const money = screen.getByDisplayValue('Money');
+    await userEvent.clear(money);
+    await userEvent.type(money, 'Pricing');
+    fireEvent.blur(money);
+    expect(onChange).toHaveBeenCalledTimes(1);
+    expect(Object.keys(onChange.mock.calls[0][0])).toEqual(['fieldGroups']);
+  });
+});
+
+/**
+ * objectstack#36505 — on an installed object the canvas names where each
+ * field comes from, and a field another package contributes is arranged like
+ * any other once the `.custom` arrangement takes it.
+ */
+describe('ObjectFormDesigner — an installed object\'s field sources (objectstack#36505)', () => {
+  const draft = {
+    name: 'crm_lead',
+    fields: {
+      name: { type: 'text', label: 'Name' },
+      region__c: { type: 'text', label: 'Region' },
+      visit_count: { type: 'number', label: 'Visits' },
+    },
+  };
+  const contributed = new Map([
+    ['visit_count', { kind: 'field' as const, object: 'crm_lead', name: 'visit_count', packageId: 'com.acme.visits', packageName: 'Visits' }],
+  ]);
+  const sources = new Map([['name', 'base' as const], ['region__c', 'environment' as const]]);
+  const card = (label: string) => screen.getByText(label).closest('[aria-label]') as HTMLElement;
+
+  it('marks the original package\'s field and this environment\'s, and the contributed one with its package', () => {
+    render(
+      <ObjectFormDesigner
+        draft={draft}
+        systemFieldNames={new Set()}
+        onChange={noop}
+        onSelectField={noop}
+        contributedFields={contributed}
+        fieldSources={sources}
+        arrangeContributed
+      />,
+    );
+    expect(within(card('Name')).getByTestId('field-source-mark')).toHaveAttribute('data-source', 'base');
+    expect(within(card('Name')).getByTestId('field-source-mark')).toHaveTextContent(t('engine.studio.designer.source.base', 'en'));
+    expect(within(card('Region')).getByTestId('field-source-mark')).toHaveAttribute('data-source', 'environment');
+    expect(within(card('Visits')).queryByTestId('field-source-mark')).toBeNull();
+    expect(within(card('Visits')).getByTestId('contribution-mark')).toHaveAttribute('data-package', 'com.acme.visits');
+    // Arranged: the contributed card is a drag source like the others.
+    expect(card('Visits')).toHaveAttribute('aria-roledescription', t('engine.studio.designer.fieldRole', 'en'));
+  });
+
+  it('CONTROL: without the arrangement a contributed card is not dragged, and a writable package draws no source', () => {
+    render(
+      <ObjectFormDesigner draft={draft} systemFieldNames={new Set()} onChange={noop} onSelectField={noop} contributedFields={contributed} />,
+    );
+    expect(screen.queryAllByTestId('field-source-mark')).toHaveLength(0);
+    expect(card('Visits').getAttribute('aria-roledescription') ?? '').toBe('');
   });
 });

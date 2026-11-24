@@ -73,6 +73,8 @@ const en = {
     autofillCurrencyDiffers: '{{field}} was not filled: the picked amount is {{amount}} in {{from}}, but {{field}} here is in {{to}}. Enter it in {{to}}.',
     autofillSourceNoCurrency: '{{field}} was not filled: the picked amount {{amount}} names no currency, but {{field}} here is in {{to}}. Enter it in {{to}}.',
     autofillNoCurrency: '{{field}} was not filled: the picked amount is {{amount}}, but no currency is chosen here yet. Choose the currency, then enter {{field}}.',
+    autofillCurrencyUnread: '{{field}} was not filled: the picked amount is {{amount}}, but the currency here could not be read. Check the currency, then enter {{field}}.',
+    autofillKept: '{{field}} still holds its earlier value.',
   },
   common: {
     // objectui#13461 — a disclosure toggle's name (the tree-view node toggle).

@@ -39,6 +39,7 @@ import { laneCount, useKanbanLanePaging } from './KanbanLanePaging'
 import { readCollapsedLanes, useKanbanLaneMenu, writeCollapsedLanes } from './KanbanLaneMenu'
 import { ownerInitials, type KanbanCardOwner } from './KanbanCardOwner'
 import { createKanbanDndAnnouncer } from './kanbanDndAnnouncements'
+import { laneKeyOf, lanesFromRecords } from './kanbanReferenceLanes'
 
 // Utility function to merge class names (inline to avoid external dependency)
 const cn = (...classes: Array<string | false | null | undefined>) => classes.filter(Boolean).join(' ')
@@ -98,6 +99,35 @@ const useKanbanT = createSafeTranslation(
  * `kanban.uncategorized` (objectui#12899).
  */
 const UNCATEGORIZED_LANE = 'Uncategorized'
+
+/**
+ * The swimlane a card's swimlane-field value belongs to (objectstack#36841).
+ *
+ * Keyed the way a column lane keys a card (`laneKeyOf`, objectstack#36430): an
+ * expanded reference (a lookup, user or master-detail value the board fetched
+ * with `$expand`) by its foreign key, never by `String(value)`, which is the
+ * same `"[object Object]"` for every target. A
+ * missing value, and an expanded record with no key, sit in the no-value lane;
+ * any other value keeps the key it always had. This one key buckets, sorts,
+ * counts and tracks the collapsed set; the heading is drawn from it.
+ */
+function swimlaneKeyOf(value: unknown): string {
+  if (value == null) return UNCATEGORIZED_LANE
+  const key = laneKeyOf(value)
+  return key === '' && typeof value === 'object' ? UNCATEGORIZED_LANE : key
+}
+
+/**
+ * The `displayField` a reference swimlane field declares, read only when the
+ * field names the object it references — the rule `ObjectKanban` applies to a
+ * reference column lane.
+ */
+function swimlaneDisplayFieldOf(objectFields: unknown, swimlaneField: string): string | undefined {
+  const def = (objectFields as Record<string, { reference?: unknown; displayField?: unknown } | undefined> | undefined)?.[swimlaneField]
+  return typeof def?.reference === 'string' && def.reference && typeof def.displayField === 'string' && def.displayField
+    ? def.displayField
+    : undefined
+}
 
 /**
  * Marks a swimlane row as a participant in the board's ONE horizontal axis
@@ -1378,17 +1408,22 @@ function KanbanBoardInner({ columns, onCardMove, onCardClick, className, dnd, qu
     setBoardColumns(safeColumns)
   }
 
-  // Compute swimlane rows when swimlaneField is provided
+  // Compute swimlane rows when swimlaneField is provided: one per lane key
+  // (`swimlaneKeyOf`), sorted by that key, each titled by the referenced
+  // record's name when the value is an expanded reference (`lanesFromRecords`,
+  // the column lanes' titling), else by the key itself.
+  const swimlaneDisplayField = swimlaneField ? swimlaneDisplayFieldOf(objectFields, swimlaneField) : undefined
   const swimlanes = React.useMemo(() => {
     if (!swimlaneField) return null
     const allCards = boardColumns.flatMap(col => col.cards)
-    const laneValues = new Set<string>()
-    allCards.forEach(card => {
-      const val = card[swimlaneField]
-      laneValues.add(val != null ? String(val) : UNCATEGORIZED_LANE)
-    })
-    return Array.from(laneValues).sort()
-  }, [boardColumns, swimlaneField])
+    const titles = new Map(
+      lanesFromRecords(allCards, swimlaneField, undefined, swimlaneDisplayField).map(lane => [lane.id, lane.title]),
+    )
+    const keys = new Set<string>()
+    allCards.forEach(card => keys.add(swimlaneKeyOf(card[swimlaneField])))
+    return Array.from(keys).sort().map(key => ({ key, title: titles.get(key) ?? key }))
+  }, [boardColumns, swimlaneField, swimlaneDisplayField])
+  const swimlaneOf = (card: KanbanCard) => swimlaneKeyOf(card[swimlaneField!])
 
   const toggleLane = React.useCallback((lane: string) => {
     setCollapsedLanes(prev => {
@@ -1776,14 +1811,12 @@ function KanbanBoardInner({ columns, onCardMove, onCardClick, className, dnd, qu
   // (AGENTS.md #10): the board re-buckets into new arrays on every pass.
   const shownLanes: KanbanLaneRows[] = []
   if (onLaneRowsChange) {
-    const swimlaneOf = (card: KanbanCard) =>
-      card[swimlaneField!] != null ? String(card[swimlaneField!]) : UNCATEGORIZED_LANE
     for (const col of boardColumns) {
       if (isColumnCollapsed(col)) continue
       const rows = swimlanes
         ? swimlanes
-            .filter((lane) => !collapsedLanes.has(lane))
-            .flatMap((lane) => col.cards.filter((card) => swimlaneOf(card) === lane))
+            .filter((lane) => !collapsedLanes.has(lane.key))
+            .flatMap((lane) => col.cards.filter((card) => swimlaneOf(card) === lane.key))
         : col.cards
       if (rows.length > 0) shownLanes.push({ key: String(col.id), label: String(col.title ?? col.id), rows })
     }
@@ -2008,12 +2041,12 @@ function KanbanBoardInner({ columns, onCardMove, onCardClick, className, dnd, qu
           </div>
 
           {/* Swimlane rows */}
-          {swimlanes.map(lane => {
+          {swimlanes.map(({ key: lane, title }) => {
             const isCollapsed = collapsedLanes.has(lane)
             // Display only: the key above and below is still `lane`.
-            const laneLabel = lane === UNCATEGORIZED_LANE ? t('kanban.uncategorized') : lane
+            const laneLabel = lane === UNCATEGORIZED_LANE ? t('kanban.uncategorized') : title
             const laneCardCount = boardColumns.reduce((sum, col) =>
-              sum + col.cards.filter(c => (c[swimlaneField!] != null ? String(c[swimlaneField!]) : UNCATEGORIZED_LANE) === lane).length, 0)
+              sum + col.cards.filter(c => swimlaneOf(c) === lane).length, 0)
 
             return (
               <div key={lane} className="border rounded-lg bg-muted/10">
@@ -2039,9 +2072,7 @@ function KanbanBoardInner({ columns, onCardMove, onCardClick, className, dnd, qu
                     data-swimlane-scroll-row=""
                   >
                     {boardColumns.map(col => {
-                      const laneCards = col.cards.filter(c =>
-                        (c[swimlaneField!] != null ? String(c[swimlaneField!]) : UNCATEGORIZED_LANE) === lane
-                      )
+                      const laneCards = col.cards.filter(c => swimlaneOf(c) === lane)
                       // A collapsed column narrows in EVERY row and withholds
                       // its cards in each of them (objectui#9628) — a column
                       // collapsed in the title row and open here would be the

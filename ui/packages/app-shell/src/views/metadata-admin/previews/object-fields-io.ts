@@ -465,6 +465,68 @@ export function writeGroupLayout(
   };
 }
 
+/** A group standing for a related list's table (objectstack#27069): it holds no fields. */
+function isTableGroup(group: ObjectFieldGroup): boolean {
+  return typeof (group as { relatedList?: unknown }).relatedList === 'string';
+}
+
+/**
+ * objectstack#36505 — the grouping in the spelling `fieldGroups[].fields`
+ * keeps (objectstack#35900), membership and display order unchanged: each
+ * group lists its members in its own `fields` (a list it already has is kept
+ * as written, and the fields its older `group` spelling adds are appended,
+ * after the listed ones, which is where {@link groupMembership} shows them),
+ * and every field's `group` naming a declared group is dropped, since the list
+ * now holds it. A `group` naming no declared group says nothing and is kept.
+ * A related-table group holds no fields and is left as it is.
+ *
+ * The Field layout designer writes through this, so an object written in the
+ * older spelling converts on its first save, and what the canvas shows does
+ * not move. `changed` is false when the object already uses the lists alone.
+ */
+export function groupListLayout(
+  view: FieldsView,
+  groups: ObjectFieldGroup[],
+): { view: FieldsView; groups: ObjectFieldGroup[]; changed: boolean } {
+  const membership = groupMembership(view, groups);
+  let changed = false;
+  const declared = new Set<string>();
+  const nextGroups = groups.map((g) => {
+    if (isTableGroup(g)) return g;
+    declared.add(g.key);
+    const own = (g as { fields?: unknown }).fields;
+    const listed = Array.isArray(own) ? own.filter((n): n is string => typeof n === 'string') : [];
+    const extra = (membership.members.get(g.key) ?? []).filter((n) => !listed.includes(n));
+    if (Array.isArray(own) && extra.length === 0) return g;
+    changed = true;
+    return { ...g, fields: [...listed, ...extra] } as ObjectFieldGroup;
+  });
+  const entries = view.entries.map((e) => {
+    if (typeof e.def.group !== 'string' || !declared.has(e.def.group)) return e;
+    changed = true;
+    const def = { ...e.def };
+    delete def.group;
+    return { name: e.name, def };
+  });
+  return changed ? { view: { shape: view.shape, entries }, groups: nextGroups, changed } : { view, groups, changed };
+}
+
+/**
+ * objectstack#36505 (ADR-0146 D10) — the whole field arrangement an installed
+ * object's paired `.custom` extension writes (`ObjectExtensionSchema.fieldGroups`,
+ * the objectstack#36498 shape): every group, in order, each listing its members
+ * in display order ({@link groupMembership}), a related-table group as it is.
+ * Every group lists its `fields`, so the arrangement shows exactly what it
+ * lists: the older `group` spelling is never left to place a field in it. A
+ * field no group lists shows after the last group.
+ */
+export function groupArrangement(view: FieldsView, groups: ObjectFieldGroup[]): ObjectFieldGroup[] {
+  const membership = groupMembership(view, groups);
+  return groups.map((g) =>
+    isTableGroup(g) ? g : ({ ...g, fields: [...(membership.members.get(g.key) ?? [])] } as ObjectFieldGroup),
+  );
+}
+
 /**
  * The current grouped layout as {@link writeGroupLayout} takes it: every
  * declared group's members and the ungrouped bucket, in display order, over the
