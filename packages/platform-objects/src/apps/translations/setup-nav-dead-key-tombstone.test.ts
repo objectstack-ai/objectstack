@@ -94,6 +94,15 @@
 //                           `audit-nav-contribution.test.ts`, since that
 //                           package depends on this one and cannot be imported
 //                           from here.
+//   nav_marketplace_installed  Setup › Installed Apps, contributed by
+//                           `@objectstack/cloud-connection`
+//                           (`MARKETPLACE_INSTALLED_UI_BUNDLE`): it opened the
+//                           package list filtered to marketplace installs, and
+//                           retired when Setup's own Packages entry
+//                           (`nav_packages`) took its place, every source with a
+//                           Source filter on the page (objectstack#36834). The
+//                           declaring side is pinned in that package's
+//                           `marketplace-installed-ui-entry.pin.test.ts`.
 //
 // ---------------------------------------------------------------------------
 // What to do when this test goes red
@@ -133,6 +142,7 @@ const DEAD_SETUP_NAV_IDS = [
   'nav_declared_sharing_rules',
   'nav_device_codes',
   'nav_jwks',
+  'nav_marketplace_installed',
   'nav_metadata',
   'nav_packaged_actions',
   'nav_packaged_automation',

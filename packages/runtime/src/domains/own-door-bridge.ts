@@ -4,7 +4,7 @@
  * The shared body of a dispatcher bridge to a plugin's own-row door (#36506):
  * one exact claim of a door's method and path shapes, forwarded to one
  * transport-neutral member on the REQUEST kernel's service slot. Not a domain
- * itself; `personal-views.ts` and `attachments.ts` are its two callers.
+ * itself; `personal-views.ts`, `attachments.ts` and `print.ts` are its callers.
  *
  * ## Why a bridge, and for which kernel
  *

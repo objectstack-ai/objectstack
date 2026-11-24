@@ -21,6 +21,7 @@ import { PHONE_TOUCH_HEIGHT, PHONE_TOUCH_SQUARE } from './touchTarget.js';
 import type { DataSource, FormField, QueryParams, LookupColumnDef, LookupFieldMetadata } from '@object-ui/types';
 import { RecordPickerDialog, lookupFiltersToRecord } from './RecordPickerDialog.js';
 import {
+  collapseReference,
   readRecordBeingEdited,
   readsRecord,
   resolveLookupFilters,
@@ -865,7 +866,9 @@ export function LookupField({ value, onChange, field, readonly, error: fieldErro
   const dependentFilter = useMemo<Record<string, any> | undefined>(() => {
     const f: Record<string, any> = {};
     for (const { field, param } of dependsOn) {
-      const v = resolvedDependentValues[field];
+      // A record page hands over the record as the server returned it, so a
+      // lookup parent can arrive populated — its id is what the filter compares.
+      const v = collapseReference(resolvedDependentValues[field]);
       if (v === undefined || v === null || v === '') continue;
       f[param] = typeof v === 'number' ? v : String(v);
     }

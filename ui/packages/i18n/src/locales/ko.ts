@@ -159,6 +159,7 @@ const ko = {
     completedNamed: '{{action}} 완료',
     failed: '작업 실패',
     parallelFailed: '하나 이상의 병렬 작업이 실패했습니다',
+    serviceUnavailable: '이 작업에 필요한 서비스가 현재 환경에서 활성화되어 있지 않습니다. 관리자에게 문의하세요.',
     selectExactlyOneRow: '이 작업은 단일 레코드에서 실행됩니다. 행을 하나만 선택하세요.',
     selectRowFirst: '이 작업은 단일 레코드에서 실행됩니다. 먼저 행을 선택하세요.',
     undo: '실행 취소',
