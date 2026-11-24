@@ -465,8 +465,8 @@ See [Read limits a deployment may set](/docs/api/data-api#read-limits-a-deployme
 **Retry:** `no_retry`
 
 ### `FIELD_NOT_ACCESSIBLE`
-**Cause:** The user does not have access to a specific field on the object.  
-**Fix:** Remove the inaccessible field from the request, or request field-level access.  
+**Cause:** The user does not have access to a specific field on the object, or the write would change a field that is locked for the record (read-only, or under a `readonlyWhen` condition that holds): Change Owner answers it for a locked owner or queue, and writes nothing.  
+**Fix:** Remove the inaccessible field from the request, or request field-level access; for a locked field, change the record so the lock no longer holds.  
 **Retry:** `no_retry`
 
 ### `RECORD_NOT_ACCESSIBLE`

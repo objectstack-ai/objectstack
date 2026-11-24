@@ -4,7 +4,7 @@
  * The shell's design mode (objectstack#36362): the mode and its bar, and the
  * extension point other surfaces stage their changes through.
  *
- * - The bar holds 「Design mode」, 「Cancel」 and 「Save」 and nothing else;
+ * - The bar holds 「Design layout」, 「Cancel」 and 「Save」 and nothing else;
  *   「Save」 is off while nothing is staged.
  * - 「Save」 commits every staged change in the order first staged, then
  *   leaves the mode; a failed commit stops there, keeps it and every later
@@ -101,13 +101,13 @@ afterEach(() => {
 });
 
 describe('the bar (objectstack#36362)', () => {
-  it('holds 「Design mode」, 「Cancel」 and 「Save」, and nothing else', () => {
+  it('holds 「Design layout」, 「Cancel」 and 「Save」, and nothing else', () => {
     render(<Shell><EnterButton /></Shell>);
     expect(bar()).toBeNull();
     fireEvent.click(screen.getByText('enter'));
 
-    const region = screen.getByRole('region', { name: 'Design mode' });
-    expect(region).toHaveTextContent(/^Design modeCancelSave$/);
+    const region = screen.getByRole('region', { name: 'Design layout' });
+    expect(region).toHaveTextContent(/^Design layoutCancelSave$/);
     expect(within(region).getAllByRole('button').map((b) => b.textContent)).toEqual(['Cancel', 'Save']);
     expect(within(region).queryAllByRole('link')).toEqual([]);
   });
@@ -264,7 +264,7 @@ describe('leaving with something staged (objectstack#36362)', () => {
       inApp.click();
       expect(confirmSpy).not.toHaveBeenCalled();
       home.click();
-      expect(confirmSpy).toHaveBeenCalledWith('Leave design mode? Your unsaved changes will be lost.');
+      expect(confirmSpy).toHaveBeenCalledWith('Leave Design layout? Your unsaved changes will be lost.');
     } finally {
       window.removeEventListener('click', stop);
       inApp.remove();

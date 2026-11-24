@@ -19,7 +19,7 @@ import { renderHook, act } from '@testing-library/react';
 const toast = vi.hoisted(() => ({ success: vi.fn(), error: vi.fn(), warning: vi.fn(), info: vi.fn() }));
 vi.mock('sonner', () => ({ toast }));
 
-import { mayShareViews, useViewSharing } from './objectViewViewSharing';
+import { mayManageViews, useViewSharing } from './objectViewViewSharing';
 
 const t = ((key: string, options?: { defaultValue?: string; name?: string }) =>
     (options?.defaultValue ?? key).replace('{{name}}', options?.name ?? '')) as never;
@@ -55,10 +55,10 @@ beforeEach(() => {
 
 describe('objectstack#36409 — who may share views', () => {
     it('an administrator holding manage_metadata; neither half alone', () => {
-        expect(mayShareViews(true, true)).toBe(true);
-        expect(mayShareViews(true, false)).toBe(false); // an organization administrator
-        expect(mayShareViews(false, true)).toBe(false);
-        expect(mayShareViews(false, false)).toBe(false);
+        expect(mayManageViews(true, true)).toBe(true);
+        expect(mayManageViews(true, false)).toBe(false); // an organization administrator
+        expect(mayManageViews(false, true)).toBe(false);
+        expect(mayManageViews(false, false)).toBe(false);
     });
 });
 

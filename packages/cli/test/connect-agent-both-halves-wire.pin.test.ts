@@ -277,13 +277,15 @@ describe('#17647 — Connect-an-Agent visibility: BOTH halves, over the wire', (
         // `group_apps` held here, so that group collapses too; 31 until the
         // Units of Measure entry, `nav_units_of_measure`, joined Configuration
         // (#35488); 32 until the working-calendar pair, `nav_work_calendars`
-        // and `nav_work_calendar_exceptions`, joined it, ADR-0157.)
+        // and `nav_work_calendar_exceptions`, joined it, ADR-0157; 34 until
+        // the public forms entry, `nav_public_forms`, joined it, #36444.)
         // `nav_settings_branding` is not among them, and not because of a
         // tenancy wall (this harness boots none): since #24766 it is
         // contributed by `@objectstack/service-settings` together with the
         // `branding` namespace, offered only where no organization wall stands,
         // and this harness composes platform-objects and the MCP bundle alone.
-        expect(allowedIds).toHaveLength(34);
+        expect(allowedIds).toHaveLength(35);
+        expect(allowedIds).toContain('nav_public_forms');
         expect(allowedIds).toContain('nav_work_calendars');
         expect(allowedIds).toContain('nav_work_calendar_exceptions');
         expect(allowedIds).not.toContain('nav_packaged_actions');
@@ -312,8 +314,8 @@ describe('#17647 — Connect-an-Agent visibility: BOTH halves, over the wire', (
         expect(withAccountHalf.statusCode).toBe(200);
         expect(withoutAccountHalf.statusCode).toBe(200);
         expect(navIds(withAccountHalf.body?.item)).toEqual(navIds(withoutAccountHalf.body?.item));
-        // 34: the composition the count in the test above states.
-        expect(navIds(withAccountHalf.body?.item)).toHaveLength(34);
+        // 35: the composition the count in the test above states.
+        expect(navIds(withAccountHalf.body?.item)).toHaveLength(35);
 
         // The mechanism behind the invariance, asserted rather than assumed:
         // the bundle aims exactly one contribution at `setup` and one at

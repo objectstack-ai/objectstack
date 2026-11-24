@@ -17,27 +17,37 @@ import { contentDispositionValue } from './content-disposition.js';
  *  2. **`X-Content-Type-Options: nosniff`, always** — the browser takes the
  *     answered type as final and never sniffs the bytes into another one.
  *  3. **A sandbox CSP, always**, with no script allowed to run.
- *     {@link STORED_BYTES_CONTENT_SECURITY_POLICY} — an opaque-origin document
- *     that loads nothing — on every answer but one: allow-listed audio or video
- *     answered inline carries {@link STORED_MEDIA_CONTENT_SECURITY_POLICY}.
- *     A browser plays those in a media document that loads the file's own URL;
- *     measured in Chromium, that load is refused under an opaque origin and
- *     under `default-src 'none'` alike, so the player never starts. The media
- *     policy keeps the sandbox and its script ban, keeps the document's origin
- *     so the load is same-origin, and allows media from that origin only.
- *     Under `nosniff` those bytes are only ever read as media.
+ *     {@link STORED_BYTES_CONTENT_SECURITY_POLICY}, which asks for a sandboxed
+ *     document that runs nothing and loads nothing, on every answer but one:
+ *     allow-listed audio or video answered inline carries
+ *     {@link STORED_MEDIA_CONTENT_SECURITY_POLICY}. A browser plays those in a
+ *     media document that loads the file's own URL; measured in Chromium, that
+ *     load is refused under an opaque origin and under `default-src 'none'`
+ *     alike, so the player never starts. The media policy keeps the sandbox
+ *     and its script ban, keeps the document's origin so the load is
+ *     same-origin, and allows media from that origin only. Under `nosniff`
+ *     those bytes are only ever read as media. The policy is a request: how a
+ *     browser's built-in viewer applies it is the browser's, so no rule here
+ *     rests on any answer being rendered as an opaque-origin document — it
+ *     rests on rules 1, 2 and 4.
+ *  4. **Inline only for bytes that begin with their type's signature.** A
+ *     door that holds the bytes when it answers previews an allow-listed type
+ *     in place only when {@link bytesBeginWithTheirTypeSignature}; any other
+ *     body, an empty one included, is an `attachment` under the default
+ *     policy. {@link LEADING_SIGNATURES} holds one test per allow-listed type.
  *
  * Consumers:
  *  - the local adapter's raw byte route (`GET …/_local/raw/:token`), which
- *    sets every header in {@link servedBytesHeaders};
+ *    sets every header in {@link servedBytesHeaders} from the bytes it holds;
  *  - the S3 adapter's signed download URL, which bakes the type and the
  *    disposition into `ResponseContentType` / `ResponseContentDisposition`. A
- *    `GetObject` signed URL can carry no other response header, so rules 2
- *    and 3 are the bucket's to send; rule 1 holds there as everywhere.
+ *    `GetObject` signed URL is minted without reading the object and can
+ *    carry no other response header, so rule 1 is what it bakes in; rules 2
+ *    and 3 are the bucket's to send.
  *
  * ⛔ Never widen the list for one surface: a type earns a place here only if
- * nothing it carries runs with the page's authority. SVG and HTML are never
- * inline.
+ * nothing it carries runs with the page's authority, and only with a leading
+ * signature beside it. SVG and HTML are never inline.
  */
 const INLINE_MEDIA_TYPES: ReadonlySet<string> = new Set([
   // Audio.
@@ -73,7 +83,7 @@ export const INLINE_CONTENT_TYPES: ReadonlySet<string> = new Set([
   ...INLINE_MEDIA_TYPES,
 ]);
 
-/** The CSP a stored-bytes answer carries: a sandboxed, opaque-origin document that may load nothing and run nothing. */
+/** The CSP a stored-bytes answer carries: it asks for a sandboxed document that may load nothing and run nothing (rule 3). */
 export const STORED_BYTES_CONTENT_SECURITY_POLICY = "sandbox; default-src 'none'; style-src 'unsafe-inline'";
 
 /**
@@ -84,6 +94,116 @@ export const STORED_BYTES_CONTENT_SECURITY_POLICY = "sandbox; default-src 'none'
  */
 export const STORED_MEDIA_CONTENT_SECURITY_POLICY =
   "sandbox allow-same-origin; default-src 'none'; media-src 'self'; style-src 'unsafe-inline'";
+
+// ── Leading signatures (rule 4) ──────────────────────────────────────────────
+
+type Signature = (head: Uint8Array) => boolean;
+
+/**
+ * The most bytes any signature test is handed: the WHATWG MIME Sniffing
+ * standard's resource header, which the plain-text test reads in full. The
+ * body is cut to it before any test runs, so no entry reads past it.
+ */
+export const LEADING_WINDOW = 1445;
+
+/** A byte sequence, spelled once when the table is built: ASCII text or byte values. */
+const seq = (expected: string | readonly number[]): Uint8Array =>
+  typeof expected === 'string' ? Uint8Array.from(expected, (c) => c.charCodeAt(0)) : Uint8Array.from(expected);
+
+/** Whether `head` carries `want` at offset `at`. */
+function carries(head: Uint8Array, at: number, want: Uint8Array): boolean {
+  if (head.length < at + want.length) return false;
+  for (let i = 0; i < want.length; i++) if (head[at + i] !== want[i]) return false;
+  return true;
+}
+
+const oneOf = (...tests: Signature[]): Signature => (head) => tests.some((test) => test(head));
+const at = (offset: number, expected: string | readonly number[]): Signature => {
+  const want = seq(expected);
+  return (head) => carries(head, offset, want);
+};
+
+const RIFF = (form: string): Signature => {
+  const riff = at(0, 'RIFF');
+  const body = at(8, form);
+  return (head) => riff(head) && body(head);
+};
+const OGG = at(0, 'OggS');
+const EBML = at(0, [0x1a, 0x45, 0xdf, 0xa3]);
+const ID3 = at(0, 'ID3');
+/** An ISO base media file: a leading `ftyp` box. */
+const FTYP = at(4, 'ftyp');
+/**
+ * Where a brand scan stops: the box's end, the head's end, or the major
+ * brand, the minor version and 31 compatible brands, whichever comes first.
+ */
+const FTYP_SCAN_END = 8 + 4 * 32;
+/**
+ * A leading `ftyp` box, at least 16 bytes long by its own size field, whose
+ * major or compatible brands name one of `brands`; the minor-version slot is
+ * not a brand. Only brands inside {@link FTYP_SCAN_END} count.
+ */
+const ftypBrand = (...brands: string[]): Signature => {
+  const wanted = brands.map(seq);
+  return (head) => {
+    if (!FTYP(head)) return false;
+    const size = ((head[0] << 24) | (head[1] << 16) | (head[2] << 8) | head[3]) >>> 0;
+    if (size < 16) return false;
+    const end = Math.min(size, head.length, FTYP_SCAN_END);
+    for (let i = 8; i + 4 <= end; i += 4) if (i !== 12 && wanted.some((brand) => carries(head, i, brand))) return true;
+    return false;
+  };
+};
+/** An MPEG audio frame header: an 11-bit sync, a defined version and a defined layer. */
+const MPEG_FRAME: Signature = (head) =>
+  head.length >= 2 && head[0] === 0xff && (head[1] & 0xe0) === 0xe0 && ((head[1] >> 3) & 3) !== 1 && ((head[1] >> 1) & 3) !== 0;
+/** An ADTS frame header: a 12-bit sync and layer `00`. */
+const ADTS_FRAME: Signature = (head) => head.length >= 2 && head[0] === 0xff && (head[1] & 0xf6) === 0xf0;
+
+/** The bytes text never carries: the WHATWG MIME Sniffing standard's binary data bytes. */
+const isBinaryDataByte = (b: number) => b <= 0x08 || b === 0x0b || (b >= 0x0e && b <= 0x1a) || (b >= 0x1c && b <= 0x1f);
+const BYTE_ORDER_MARK = oneOf(at(0, [0xef, 0xbb, 0xbf]), at(0, [0xfe, 0xff]), at(0, [0xff, 0xfe]));
+/**
+ * Plain text has no signature; its test is the standard text-or-binary one
+ * over the first {@link LEADING_WINDOW} bytes: a byte-order mark, or no binary
+ * data byte.
+ */
+const TEXT: Signature = (head) =>
+  head.length > 0 && (BYTE_ORDER_MARK(head) || !head.subarray(0, LEADING_WINDOW).some(isBinaryDataByte));
+
+/**
+ * The leading-signature test for every allow-listed type (rule 4), keyed by
+ * the served essence. A type on {@link INLINE_CONTENT_TYPES} with no entry
+ * here is never inline; the table-completeness pin holds the two equal.
+ */
+export const LEADING_SIGNATURES: ReadonlyMap<string, Signature> = new Map<string, Signature>([
+  ['image/png', at(0, [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])],
+  ['image/jpeg', at(0, [0xff, 0xd8, 0xff])],
+  ['image/gif', oneOf(at(0, 'GIF87a'), at(0, 'GIF89a'))],
+  ['image/webp', RIFF('WEBP')],
+  ['image/avif', ftypBrand('avif', 'avis')],
+  ['image/bmp', at(0, 'BM')],
+  ['application/pdf', at(0, '%PDF-')],
+  ['text/plain', TEXT],
+  ['audio/mpeg', oneOf(ID3, MPEG_FRAME)],
+  ['audio/mp4', FTYP],
+  ['audio/aac', oneOf(ADTS_FRAME, at(0, 'ADIF'), ID3)],
+  ['audio/ogg', OGG],
+  ['audio/wav', RIFF('WAVE')],
+  ['audio/wave', RIFF('WAVE')],
+  ['audio/x-wav', RIFF('WAVE')],
+  ['audio/webm', EBML],
+  ['audio/flac', at(0, 'fLaC')],
+  ['video/mp4', FTYP],
+  ['video/webm', EBML],
+  ['video/ogg', OGG],
+  ['video/quicktime', oneOf(FTYP, ...['moov', 'mdat', 'wide', 'free', 'skip'].map((atom) => at(4, atom)))],
+]);
+
+/** Whether the bytes begin with the leading signature of their served type (rule 4), judged on their first {@link LEADING_WINDOW} bytes; false for a type with no entry. */
+export function bytesBeginWithTheirTypeSignature(declared: string | null | undefined, bytes: Uint8Array): boolean {
+  return LEADING_SIGNATURES.get(servedContentType(declared).split(';')[0])?.(bytes.subarray(0, LEADING_WINDOW)) ?? false;
+}
 
 /** The type answered for bytes whose declared type is missing or is not a media type. */
 const OPAQUE_BYTES = 'application/octet-stream';
@@ -146,16 +266,18 @@ export function servedContentSecurityPolicy(
     : STORED_BYTES_CONTENT_SECURITY_POLICY;
 }
 
-/** Every header a stored-bytes answer on the app's origin carries (rules 1–3). */
+/** Every header a stored-bytes answer on the app's origin carries (rules 1–4), judged on the bytes it answers with. */
 export function servedBytesHeaders(input: {
   contentType: string | null | undefined;
   filename: string | undefined;
   disposition: 'inline' | 'attachment' | undefined;
+  bytes: Uint8Array;
 }): Record<string, string> {
+  const disposition = bytesBeginWithTheirTypeSignature(input.contentType, input.bytes) ? input.disposition : 'attachment';
   return {
     'content-type': servedContentType(input.contentType),
-    'content-disposition': servedContentDisposition(input.contentType, input.filename, input.disposition),
+    'content-disposition': servedContentDisposition(input.contentType, input.filename, disposition),
     'x-content-type-options': 'nosniff',
-    'content-security-policy': servedContentSecurityPolicy(input.contentType, input.disposition),
+    'content-security-policy': servedContentSecurityPolicy(input.contentType, disposition),
   };
 }

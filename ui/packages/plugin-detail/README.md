@@ -919,7 +919,9 @@ the console — and a double-click keeps the default there too.
 A tab row closes the record header (`RecordTabRow`): 「详情」 (Details) where
 the details are not pinned, then one tab per related list in the reader's
 arrangement, then Attachments, Approvals, and 动态 (Activity) last, each with
-its count. A tab is its panel's whole face: choosing it draws the full list
+its count. 动态 is left out for an object that switches off all three of its
+sources (`enable.feeds` and `enable.activities` false, `enable.trackHistory`
+not true), since that stream would be empty. A tab is its panel's whole face: choosing it draws the full list
 (every column, paging, sort, inline edit) or the full stream below the row,
 with the header unchanged, and the URL carries it
 (`?related=<object>.<field>`, `?related=timeline`); 「详情」 or Esc returns

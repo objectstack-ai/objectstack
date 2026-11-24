@@ -66,7 +66,7 @@ same literal goes inside `ObjectSchema.create({...})`):
 |:---------|:-------|:-----------|:------------|
 | `name`   | string | `snake_case` | Immutable machine identifier (`/^[a-z_][a-z0-9_]*$/`) |
 | `fields` | map    | keys in `snake_case` | Field definitions |
-| `sharingModel` | enum | one of the four below | Org-wide default record visibility (OWD). Zod marks it optional, but **a publish with no authored `sharingModel` is refused** with the 422 lint envelope `security-owd-unset` — absence is not a decision. Author it on every object |
+| `sharingModel` | enum | one of the four below | Org-wide default record visibility (OWD). Zod marks it optional, but **a publish with no authored `sharingModel` is refused** with the 422 lint envelope `security-owd-unset`. Author it on every object |
 
 **`sharingModel` — the four canonical values:**
 
@@ -77,7 +77,7 @@ same literal goes inside `ObjectSchema.create({...})`):
 | `public_read_write` | everyone reads and writes |
 | `controlled_by_parent` | inherited from the master record (`master_detail` children); a row with no (optional) master is its owner's |
 
-Choose the posture from the request, not by habit: a business object a team
+Choose the posture from the request: a business object a team
 shares is `public_read_write` (`private` would hide every colleague's records
 from everyone else); `private` fits personal or sensitive data only its owner
 should see (HR reviews, pay, personal notes); `public_read` fits reference data
@@ -89,33 +89,34 @@ all (Relationship Patterns below).
 
 | Property | Default | Description |
 |:---------|:--------|:------------|
-| `label` | Auto from `name` | Human-readable singular label |
+| `label` | Auto from `name` | Singular label |
 | `pluralLabel` | — | Plural form; author it alongside `label` |
 | `icon` | — | Icon for nav, list headers and lookup pickers; give every object one |
 | `color` | `gray` | Tile colour behind the white `icon`: `gray` `blue` `teal` `green` `amber` `orange` `red` `pink` `purple` (no hex). Group the app's objects into a few business families, one name each, as the platform's own objects do: people `blue`, security `purple`, approvals and work `orange`, messaging `pink`, integrations `teal`, reference data and finance `green`, audit and settings `amber`. `red` only for an alert object; one nobody opens gets none |
 | `highlightFields` | derived | Ordered field keys used as a record's compact face: the columns a **related list** renders on the parent's detail page, and what a lookup picker shows. Declare it on the CHILD object (see [Relationships](./rules/relationships.md)) |
 | `namespace` | — | **Not a schema key**: refused as unknown. Embed the prefix in `name` |
-| `datasource` | `'default'` | Target datasource ID for virtualized data |
-| `nameField` | derived (e.g. `'name'`/`'title'`) | **Canonical** record-title field — the stored field used as the record's display name. Use a single text/email field; a composite title to import, sort or search by is a stored computed field (a non-`formula` field with an `expression`); a text formula is display-only |
+| `datasource` | `'default'` | Target datasource ID |
+| `nameField` | derived (e.g. `'name'`/`'title'`) | Record-title field: the stored field used as the record's display name. Use a single text/email field; a composite title to import, sort or search by is a stored computed field (a non-`formula` field with an `expression`); a text formula is display-only |
 | `displayNameField` | — | **Deprecated** alias for `nameField`, still read |
 | `titleFormat` | — | **Refused** by a save and `os validate` (`title-format-retired`): use `nameField` |
 | `enable` | — | Capability flags (next section) |
-| `fieldGroups` | — | Ordered list of logical field groups for forms/detail pages (see [Field Groups](./references/examples-objects.md#field-groups-mvp)) |
-| `lifecycle` | `record` semantics (permanent) | Data retention/rotation/archival contract. **Required for append-only, high-write-rate objects** (see [Data Lifecycle & Retention](./rules/lifecycle.md)) |
+| `fieldGroups` | — | Ordered field groups for forms/detail pages (see [Field Groups](./references/examples-objects.md#field-groups-mvp)) |
+| `lifecycle` | `record` (permanent) | Data retention/rotation/archival contract. **Required for append-only, high-write-rate objects** (see [Data Lifecycle & Retention](./rules/lifecycle.md)) |
 
 ### Object Capabilities (`enable`)
 
 | Flag | Default | Purpose |
 |:-----|:--------|:--------|
-| `trackHistory` | `false` | Field-level audit trail |
+| `fieldHistory` | on | A changed field's old → new values on the activity timeline, served per the reader's field read rule. `false`: off for the object. A field opts out with its own `fieldHistory: false`; a media or structured field (`json`, `address`, `code`…) shows values only with `true`, a credential never. `sys_audit_log` keeps its own grant |
+| `trackHistory` | `false` | Ledger view on the record page and the `history` API verb; not the values switch |
 | `searchable` | `true` | Index records for global search |
 | `apiEnabled` | `true` | Expose via automatic REST + MCP APIs |
 | `apiMethods` | all | Whitelist over the six primitives (`get`, `list`, `create`, `update`, `delete`, `bulk`); derived verbs (search/export/upsert/…) follow automatically |
-| `files` | `false` | Attachments & document management |
-| `feeds` | `true` | Social feed, comments, mentions — **opt-out**: explicit `false` hides the feed UI and rejects new comments |
-| `activities` | `true` | Activity timeline (`sys_activity` mirror of CRUD) — **opt-out**: explicit `false` stops mirroring and hides the timeline |
+| `files` | `false` | Attachments |
+| `feeds` | `true` | Feed, comments, mentions; `false` hides the feed UI and rejects new comments |
+| `activities` | `true` | Activity timeline (`sys_activity` mirror of CRUD); `false` stops mirroring and hides the timeline |
 | `clone` | `true` | Record deep cloning |
-| `aiReadable` | — | Platform `sys_*` objects only (not `sys_metadata`, `sys_metadata_history`): read-only AI access (query, get, aggregate, describe, list; no write). App objects never declare it, `false` included: refused at parse |
+| `aiReadable` | — | Platform `sys_*` objects only; on an app object, `false` included, refused at parse |
 
 ---
 
@@ -135,7 +136,7 @@ default, never removes a field the type default scans; declare
 search target: unlike `fields` / `sort` / `filters`, the search axis does not
 resolve traversal, and `project_id.name` in `searchableFields` (or in a
 `$searchFields` override) is **refused** (`os validate`
-`searchable-field-unknown`; a request, `400 INVALID_FIELD`), not silently dropped.
+`searchable-field-unknown`; a request, `400 INVALID_FIELD`).
 
 **This is the one prescription — emit it every time.** To search by a related
 record's title, copy that title into a **stored field on this object** and
@@ -162,8 +163,7 @@ and CEL reads only this record's own fields, so it cannot hold the related title
 a `formula` entry in any `searchableFields` is refused — `os validate`
 `searchable-field-unsearchable`, a request `400 INVALID_FIELD`.
 
-**Mirror maintenance is the trade-off** — a mirror is only as fresh as whatever
-writes it. Cover both paths: a `beforeInsert` / `beforeUpdate` hook on `task`
+**Mirror maintenance is the trade-off.** Cover both paths: a `beforeInsert` / `beforeUpdate` hook on `task`
 stamps `project_name` from the incoming `project_id`'s parent; an `afterUpdate`
 hook on `project` re-stamps its tasks when it is renamed. Rows written past the hooks (bulk import, direct SQL) need a
 one-off backfill. See [Lifecycle Hooks](./references/data-hooks.md).
