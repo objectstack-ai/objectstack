@@ -2334,8 +2334,8 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.studio.data.newFieldLabel': '新字段',
   'engine.studio.data.nameFieldLabel': '名称',
   // objectstack#36748 — 新建的对象自动加入所属软件包唯一应用的菜单。
-  'engine.studio.data.appMenu.failed': '「{object}」已创建，但没能加入应用「{app}」的菜单：{reason}可以在应用的设计模式里添加。',
-  'engine.studio.data.appMenu.failedNoApp': '「{object}」已创建，但没能加入所属应用的菜单：{reason}可以在应用的设计模式里添加。',
+  'engine.studio.data.appMenu.failed': '「{object}」已创建，但没能加入应用「{app}」的菜单：{reason}可以在应用的设计布局里添加。',
+  'engine.studio.data.appMenu.failedNoApp': '「{object}」已创建，但没能加入所属应用的菜单：{reason}可以在应用的设计布局里添加。',
   'engine.studio.data.appMenu.pendingDraft': '这个应用在 Studio 里有尚未发布的改动。',
   'engine.studio.data.appMenu.unreadable': '读不到这个应用的菜单。',
   'engine.studio.data.fieldCount': '{count} 个字段',
@@ -4186,6 +4186,12 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.draftConflict.overwriteConfirm': '覆盖',
   'engine.draftConflict.back': '返回',
   'engine.draftConflict.notSaved': '未保存：{type}「{name}」在你打开后已在别处保存。',
+  'engine.draftConflict.publishedTitle': '你打开之后这里已被修改',
+  'engine.draftConflict.publishedDescription':
+    '{type}「{name}」在你打开后已在别处保存（其他人或另一个标签页），那次修改已经生效。可以重新加载已保存的版本（此处未保存的修改将丢弃），或用你的版本覆盖它。',
+  'engine.draftConflict.publishedOverwriteTitle': '覆盖已保存的版本？',
+  'engine.draftConflict.publishedOverwriteDescription':
+    '你的{type}「{name}」将代替已保存的版本生效，你打开之后保存的那些修改会丢失。',
   'engine.studio.inspector.props': '属性',
   'engine.studio.inspector.draftFooter': '编辑在点击顶栏「保存」后生效。',
   'engine.studio.inspector.collapse': '收起属性',

@@ -36,8 +36,16 @@ const SCHEMAS: Record<string, unknown> = Object.fromEntries(
 
 const CALLER = { userId: 'u_manager', tenantId: 'org_1' };
 
-/** An in-memory engine: by-id updates, a per-row write refusal the way the owner guard throws it. */
-function fakeEngine(opts: { refuse?: (id: string) => unknown; hiddenUsers?: string[] } = {}) {
+/**
+ * An in-memory engine: by-id updates, a per-row write refusal the way the owner
+ * guard throws it, and a `readonlyWhen` lock (`locked`: the keys a lock holds
+ * on the row) handled as the engine handles one — stripped and committed
+ * without, answering the stored row; refused before any write, as
+ * `ERR_READONLY_FIELD_REJECTED`, under `strictReadonlyWrites`.
+ */
+function fakeEngine(opts: { refuse?: (id: string) => unknown; hiddenUsers?: string[]; locked?: (row: Row) => string[] } = {}) {
+  /** Per update call, in order: whether it passed `strictReadonlyWrites: true`. */
+  const strictWrites: boolean[] = [];
   const tables: Record<string, Row[]> = {
     sys_user: [{ id: 'u_next', banned: false }, { id: 'u_gone', banned: true }, { id: 'u_manager', banned: false }],
     lead: [{ id: 'l1', owner_id: 'u_a' }, { id: 'l2', owner_id: 'u_b' }, { id: 'l3', owner_id: 'u_a' }],
@@ -45,9 +53,10 @@ function fakeEngine(opts: { refuse?: (id: string) => unknown; hiddenUsers?: stri
     memo: [{ id: 'm1', owner_id: 'u_a' }],
   };
   const calls: Array<{ op: string; object: string; data?: Row; where?: Row; context?: unknown }> = [];
-  const engine: ChangeOwnerEngine & { tables: typeof tables; calls: typeof calls } = {
+  const engine: ChangeOwnerEngine & { tables: typeof tables; calls: typeof calls; strictWrites: typeof strictWrites } = {
     tables,
     calls,
+    strictWrites,
     getSchema: (name) => SCHEMAS[name],
     async find(object, q) {
       calls.push({ op: 'find', object, where: q?.where, context: q?.context });
@@ -63,16 +72,32 @@ function fakeEngine(opts: { refuse?: (id: string) => unknown; hiddenUsers?: stri
     async update(object, data, o) {
       assertEngineUpdateDispatch(data, o);
       calls.push({ op: 'update', object, data, where: o?.where, context: o?.context });
+      strictWrites.push(o?.strictReadonlyWrites === true);
       const row = (tables[object] ?? []).find((r) => r.id === o?.where?.id);
       if (!row) return null;
       const refusal = opts.refuse?.(row.id);
       if (refusal) throw refusal;
-      Object.assign(row, data);
+      const lockedKeys = (opts.locked?.(row) ?? []).filter((k) => Object.prototype.hasOwnProperty.call(data, k));
+      if (lockedKeys.length > 0 && o?.strictReadonlyWrites === true) throw readonlyRejected(object, lockedKeys);
+      const kept = Object.fromEntries(Object.entries(data).filter(([k]) => !lockedKeys.includes(k)));
+      Object.assign(row, kept);
       return row;
     },
   };
   return engine;
 }
+
+/** The engine's strict refusal of a write a `readonlyWhen` strip would half-apply. */
+const readonlyRejected = (object: string, fields: string[]) => Object.assign(
+  new Error(`Cannot update ${object}: ${fields.join(', ')} is read-only for this record`),
+  { name: 'ReadonlyFieldRejectedError', code: 'ERR_READONLY_FIELD_REJECTED', object, fields },
+);
+
+/** A lock on `owner_id` (and, when asked, `queue`) once the record is closed — a `readonlyWhen` that holds. */
+const lockedWhenClosed = (keys: string[] = ['owner_id']) => (row: Row) => (row.status === 'closed' ? keys : []);
+
+/** What the messaging service answers an emit that went out: one row taken by the outbox. */
+const SENT = { notificationId: 'n1', deduped: false, deliveries: [], delivered: 0, enqueued: 1, failed: 0, suppressed: [] };
 
 /** The owner guard's refusal of an owner change without the transfer grant, as plugin-security throws it. */
 const transferDenied = () => Object.assign(
@@ -126,6 +151,7 @@ describe('[#35402] changeRecordOwner — one record', () => {
     expect(result).toEqual({ object: 'lead', id: 'l1', ownerId: 'u_next', notified: false });
     const writes = engine.calls.filter((c) => c.op === 'update');
     expect(writes).toEqual([{ op: 'update', object: 'lead', data: { owner_id: 'u_next' }, where: { id: 'l1' }, context: CALLER }]);
+    expect(engine.strictWrites).toEqual([true]);
   });
 
   it('[ADR-0142 D3] a queue target leaves the owner empty and names the queue', async () => {
@@ -200,6 +226,7 @@ describe('[#35402] changeRecordsOwner — the bulk form', () => {
     const writes = engine.calls.filter((c) => c.op === 'update');
     expect(writes.map((w) => w.where)).toEqual([{ id: 'l1' }, { id: 'l2' }, { id: 'l9' }]);
     expect(writes.every((w) => w.context === CALLER)).toBe(true);
+    expect(engine.strictWrites).toEqual([true, true, true]);
     expect(engine.tables.lead.map((r) => r.owner_id)).toEqual(['u_next', 'u_b', 'u_a']);
   });
 
@@ -230,9 +257,89 @@ describe('[#35402] changeRecordsOwner — the bulk form', () => {
   });
 });
 
+describe('a readonlyWhen lock that holds: the answer is what was saved, not what was asked', () => {
+  const closed = (engine: ReturnType<typeof fakeEngine>, ids: string[]) => {
+    for (const r of engine.tables.lead) if (ids.includes(r.id)) r.status = 'closed';
+  };
+
+  it('single: a locked owner_id is the row\'s refusal, 403 FIELD_NOT_ACCESSIBLE, nothing written and nobody told', async () => {
+    const engine = fakeEngine({ locked: lockedWhenClosed() });
+    closed(engine, ['l1']);
+    const messaging = { emit: vi.fn(async () => SENT) };
+    const err = await refusalOf(changeRecordOwner(engine, 'lead', 'l1', { ownerId: 'u_next' }, CALLER, { notify: true, messaging }));
+    expect({ code: err.code, status: err.status, fields: err.fields }).toEqual({ code: 'FIELD_NOT_ACCESSIBLE', status: 403, fields: ['owner_id'] });
+    expect(engine.tables.lead[0]!.owner_id).toBe('u_a');
+    expect(messaging.emit).not.toHaveBeenCalled();
+  });
+
+  it('bulk: the locked row is listed under failures with that code, the rest move, and the notice names only the moved', async () => {
+    const engine = fakeEngine({ locked: lockedWhenClosed() });
+    closed(engine, ['l2']);
+    const messaging = { emit: vi.fn(async () => SENT) };
+    const report = await changeRecordsOwner(engine, 'lead', ['l1', 'l2', 'l3'], { ownerId: 'u_next' }, CALLER, { notify: true, messaging });
+    expect(report).toMatchObject({ updated: 2, failed: 1, notified: true });
+    expect(report.failures.map((f) => [f.id, f.code])).toEqual([['l2', 'FIELD_NOT_ACCESSIBLE']]);
+    expect(engine.tables.lead.map((r) => r.owner_id)).toEqual(['u_next', 'u_b', 'u_next']);
+    expect((messaging.emit.mock.calls[0] as any[])[0].payload.recordIds).toEqual(['l1', 'l3']);
+  });
+
+  it('bulk: every row locked moves nothing and sends no notification', async () => {
+    const engine = fakeEngine({ locked: lockedWhenClosed() });
+    closed(engine, ['l1', 'l3']);
+    const messaging = { emit: vi.fn(async () => SENT) };
+    const report = await changeRecordsOwner(engine, 'lead', ['l1', 'l3'], { ownerId: 'u_next' }, CALLER, { notify: true, messaging });
+    expect(report).toMatchObject({ updated: 0, failed: 2, notified: false });
+    expect(messaging.emit).not.toHaveBeenCalled();
+  });
+
+  it('[ADR-0142 D3] a queue target whose owner_id is locked: refused whole, the queue does not land either', async () => {
+    const single = fakeEngine({ locked: lockedWhenClosed() });
+    closed(single, ['l1']);
+    const err = await refusalOf(changeRecordOwner(single, 'lead', 'l1', { queue: 'triage' }, CALLER));
+    expect({ code: err.code, status: err.status, fields: err.fields }).toEqual({ code: 'FIELD_NOT_ACCESSIBLE', status: 403, fields: ['owner_id'] });
+    expect(single.tables.lead[0]).toMatchObject({ owner_id: 'u_a' });
+    expect(single.tables.lead[0]!.queue).toBeUndefined();
+
+    const bulk = fakeEngine({ locked: lockedWhenClosed() });
+    closed(bulk, ['l1']);
+    const report = await changeRecordsOwner(bulk, 'lead', ['l1', 'l3'], { queue: 'triage' }, CALLER);
+    expect(report).toMatchObject({ ownerId: null, queue: 'triage', updated: 1, failed: 1 });
+    expect(report.failures.map((f) => [f.id, f.code])).toEqual([['l1', 'FIELD_NOT_ACCESSIBLE']]);
+    expect(bulk.tables.lead[0]!.queue).toBeUndefined();
+  });
+
+  it('a lock that does not hold for the row changes nothing: the move lands', async () => {
+    const engine = fakeEngine({ locked: lockedWhenClosed() });
+    const result = await changeRecordOwner(engine, 'lead', 'l1', { ownerId: 'u_next' }, CALLER);
+    expect(result).toEqual({ object: 'lead', id: 'l1', ownerId: 'u_next', notified: false });
+    expect(engine.tables.lead[0]!.owner_id).toBe('u_next');
+  });
+});
+
+describe('notified is read off the emit answer', () => {
+  const answered = (counts: { delivered: number; enqueued: number }) => ({ ...SENT, ...counts });
+
+  it('zero delivered and zero enqueued (a muted topic, an unavailable channel) is notified: false, single and bulk', async () => {
+    const messaging = { emit: vi.fn(async () => answered({ delivered: 0, enqueued: 0 })) };
+    const single = await changeRecordOwner(fakeEngine(), 'lead', 'l1', { ownerId: 'u_next' }, CALLER, { notify: true, messaging });
+    expect(single.notified).toBe(false);
+    const bulk = await changeRecordsOwner(fakeEngine(), 'lead', ['l1', 'l2'], { ownerId: 'u_next' }, CALLER, { notify: true, messaging });
+    expect(bulk.notified).toBe(false);
+    expect(messaging.emit).toHaveBeenCalledTimes(2);
+  });
+
+  it('a delivered row or an enqueued row is notified: true', async () => {
+    for (const counts of [{ delivered: 1, enqueued: 0 }, { delivered: 0, enqueued: 2 }]) {
+      const messaging = { emit: vi.fn(async () => answered(counts)) };
+      const result = await changeRecordOwner(fakeEngine(), 'lead', 'l1', { ownerId: 'u_next' }, CALLER, { notify: true, messaging });
+      expect(result.notified, JSON.stringify(counts)).toBe(true);
+    }
+  });
+});
+
 describe('[#35402] notify', () => {
   it('tells the new owner once, naming the record, only when asked', async () => {
-    const messaging = { emit: vi.fn(async () => ({})) };
+    const messaging = { emit: vi.fn(async () => SENT) };
     const quiet = await changeRecordOwner(fakeEngine(), 'lead', 'l1', { ownerId: 'u_next' }, CALLER, { messaging });
     expect(quiet.notified).toBe(false);
     expect(messaging.emit).not.toHaveBeenCalled();
@@ -258,7 +365,7 @@ describe('[#35402] notify', () => {
   });
 
   it('the bulk form sends one notification for the rows that moved, none when nothing moved', async () => {
-    const messaging = { emit: vi.fn(async () => ({})) };
+    const messaging = { emit: vi.fn(async () => SENT) };
     const engine = fakeEngine({ refuse: (id) => (id === 'l2' ? transferDenied() : undefined) });
     const report = await changeRecordsOwner(engine, 'lead', ['l1', 'l2', 'l3'], { ownerId: 'u_next' }, CALLER, { notify: true, messaging });
     expect(report.notified).toBe(true);
@@ -277,7 +384,7 @@ describe('[#35402] notify', () => {
   });
 
   it('a caller taking a record themselves, a missing service and a failing one all answer notified: false, and the change stands', async () => {
-    const self = await changeRecordOwner(fakeEngine(), 'lead', 'l1', { ownerId: 'u_manager' }, CALLER, { notify: true, messaging: { emit: vi.fn() } });
+    const self = await changeRecordOwner(fakeEngine(), 'lead', 'l1', { ownerId: 'u_manager' }, CALLER, { notify: true, messaging: { emit: vi.fn(async () => SENT) } });
     expect(self.notified).toBe(false);
     const absent = await changeRecordOwner(fakeEngine(), 'lead', 'l1', { ownerId: 'u_next' }, CALLER, { notify: true });
     expect(absent.notified).toBe(false);
