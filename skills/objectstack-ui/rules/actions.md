@@ -35,8 +35,10 @@ goes to the ⋯ menu, those `more` names first. `record` takes `record_header` /
 `record_more` actions wherever that header draws (record page, side preview,
 phone bar, a row's ⋮ menu order); `list` takes `list_toolbar` actions and may
 pin `$import` / `$export` (pinned only). `os validate` refuses a name the arm's
-scope does not place. On an installed object only its paired `.custom` package's
-extension writes it (as `fieldGroups`, objectstack-data), each arm whole.
+scope does not place, on the object or an extension of one the same stack
+defines. On an installed object only its paired `.custom` package's extension
+writes it (as `fieldGroups`, objectstack-data), each arm whole, not judged
+there: a wrong name draws nothing.
 
 ## Visibility, Disable & Feedback
 
@@ -95,7 +97,6 @@ export const ConvertLeadAction = defineAction({
   locations: ['record_header', 'list_item'],
   visible: P`record.status == "qualified" && record.is_converted == false`,
   confirmText: 'Are you sure you want to convert this lead?',
-  successMessage: 'Lead converted successfully!',
   onSuccess: { navigate: '/apps/crm_enterprise/opportunity/record/${result.output.opportunity_id}' },
   refreshAfter: true,
 });
@@ -109,7 +110,6 @@ export const AddToCampaignAction = defineAction({
   name: 'crm_create_campaign',
   label: 'Add to Campaign',
   objectName: 'lead',
-  icon: 'send',
   type: 'script',
   execution: 'perRecord',
   params: [
@@ -125,7 +125,6 @@ export const AddToCampaignAction = defineAction({
     capabilities: ['api.write'],
     timeoutMs: 10000,
   },
-  successMessage: 'Leads added to campaign!',
   refreshAfter: true,
 });
 ```
