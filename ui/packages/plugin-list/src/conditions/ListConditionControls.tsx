@@ -59,7 +59,6 @@ import {
   relationPathOf,
   removeCondition,
   seedValueFor,
-  sortWording,
   upsertCondition,
   type ConditionField,
   type ViewConditionChip,
@@ -358,18 +357,6 @@ export function useLookupValueNames(
     },
     [byTarget, fields],
   );
-}
-
-/** The words for one sort direction on a field of `type`: time, size or the alphabet. */
-export function sortDirectionLabel(type: string | undefined, order: 'asc' | 'desc', t: Translate): string {
-  switch (sortWording(type)) {
-    case 'time':
-      return order === 'asc' ? t('listConditions.sort.time_asc') : t('listConditions.sort.time_desc');
-    case 'size':
-      return order === 'asc' ? t('listConditions.sort.size_asc') : t('listConditions.sort.size_desc');
-    default:
-      return order === 'asc' ? t('listConditions.sort.alphabet_asc') : t('listConditions.sort.alphabet_desc');
-  }
 }
 
 // ---------------------------------------------------------------------------

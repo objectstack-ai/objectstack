@@ -248,7 +248,8 @@ describe('Flows — Save and Cancel in the top bar, live at once (objectstack#36
 
     await waitFor(() => expect(server.log).toEqual(['save flow/escalate', 'publish flow/escalate']), { timeout: 8000 });
     expect((mockClient.save.mock.calls[0] as unknown[])[3]).toMatchObject({ mode: 'draft', packageId: PKG, ifNoneMatch: '*' });
-    expect(mockClient.publish).toHaveBeenCalledWith('flow', 'escalate', { packageId: PKG });
+    // objectstack#36726 — asserting no published flow of its name.
+    expect(mockClient.publish).toHaveBeenCalledWith('flow', 'escalate', { packageId: PKG, ifNoneMatch: '*' });
     expect(server.active.get('flow/escalate')?.status, 'born off').toBe('obsolete');
     expect(server.drafts.has('flow/escalate'), 'no draft is left').toBe(false);
 

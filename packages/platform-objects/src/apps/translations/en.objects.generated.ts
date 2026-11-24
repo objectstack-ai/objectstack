@@ -4627,5 +4627,90 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
         }
       }
     }
+  },
+  sys_task: {
+    label: "Task",
+    pluralLabel: "Tasks",
+    description: "Things to do, with an assignee and a due time.",
+    fields: {
+      title: {
+        label: "Title"
+      },
+      description: {
+        label: "Description"
+      },
+      status: {
+        label: "Status",
+        options: {
+          todo: "To Do",
+          in_progress: "In Progress",
+          done: "Done"
+        }
+      },
+      due_at: {
+        label: "Due"
+      },
+      assignee_id: {
+        label: "Assignee"
+      },
+      completed_at: {
+        label: "Completed At",
+        help: "Written by the platform when the status becomes Done, and cleared when it leaves Done."
+      },
+      owner_id: {
+        label: "Owner"
+      }
+    },
+    _views: {
+      assigned_to_me: {
+        label: "Assigned to Me",
+        emptyState: {
+          title: "Nothing assigned to you",
+          message: "Open tasks assigned to you appear here."
+        }
+      },
+      created_by_me: {
+        label: "Created by Me",
+        emptyState: {
+          title: "No tasks yet",
+          message: "Tasks you create appear here."
+        }
+      },
+      all: {
+        label: "All Tasks"
+      }
+    }
+  },
+  sys_note: {
+    label: "Note",
+    pluralLabel: "Notes",
+    description: "Notes: a title and a formatted body.",
+    fields: {
+      title: {
+        label: "Title"
+      },
+      body: {
+        label: "Body"
+      },
+      heading: {
+        label: "Heading",
+        help: "The title, or the first line of the body when the title is empty. Kept by the platform."
+      },
+      owner_id: {
+        label: "Owner"
+      }
+    },
+    _views: {
+      mine: {
+        label: "My Notes",
+        emptyState: {
+          title: "No notes yet",
+          message: "Notes you write appear here."
+        }
+      },
+      all: {
+        label: "All Notes"
+      }
+    }
   }
 };

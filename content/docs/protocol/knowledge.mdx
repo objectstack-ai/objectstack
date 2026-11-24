@@ -21,7 +21,9 @@ The Knowledge Protocol contract and the `service-knowledge` orchestrator are ope
 framework mechanisms. The AI **consumer** that wires the `search_knowledge` tool
 into an in-product chat loop (shown below) ships in
 **ObjectOS**. On the open-source framework, reach your data through `@objectstack/mcp`
-(BYO-AI) instead.
+(BYO-AI) instead: its door serves the same `search_knowledge` tool wherever the
+knowledge service is installed, searching only the sources whose `aiExposed` is
+not `false`, as the caller.
 </Callout>
 
 This document describes the **why**, the **contract**, the **plugin
@@ -50,7 +52,7 @@ distinctive value to add **around** them:
    caller's `ExecutionContext` so RLS naturally applies — the same
    policy that protects REST and ObjectQL queries also protects what
    the LLM can read.
-3. **Realtime sync.** ObjectQL `record.*` events drive incremental
+3. **Realtime sync.** ObjectQL `data.record.*` events drive incremental
    reindex without manual cron jobs.
 4. **Unified audit + observability.** Knowledge searches participate in
    the same trace / audit pipeline as REST, ObjectQL, and tool calls.
@@ -343,10 +345,54 @@ with a `permissions` mapping function at index time.
 ## 6. Sync model
 
 For `object` sources, `KnowledgeService` subscribes to the ObjectQL engine's
-`data.record.created`, `data.record.updated` and `data.record.deleted` events
-(the legacy unprefixed `record.*` shape is still accepted). Each event triggers
-a single `adapter.upsert` / `adapter.delete` call — the record body is read
-from the event's `after`, and a delete's id from its required `recordId`.
+`data.record.created`, `data.record.updated`, `data.record.restored` and
+`data.record.deleted` events. A bare `record.*` event is not part of the
+vocabulary: no producer emits one, and the subscription ignores it.
+
+A source's `where` decides which rows it indexes on every path — the event
+sync as well as `reindexSource`. For a created, updated or restored row, with a
+data engine bound, each source re-reads the row under the system context:
+`find(object, { where: { $and: [where, { id }] }, limit: 1 })` (just `{ id }`
+when the source has no `where`).
+
+- **A row comes back** — the document is built from the re-read row, not from
+  the event's `after`, so a write result that omits a field (a projected
+  result, a formula the write did not return) cannot leave the document
+  short. The same field rules as a reindex apply: the fields the source lists
+  and the record `title`, never a credential-class or `internal` field.
+- **No row comes back** — the row does not match (a draft, or a row that
+  stopped matching), and its document is deleted. Deleting an absent document
+  changes nothing.
+- **A restored row** (a recycle-bin restore) takes the same path, so it
+  re-enters the index only if it matches.
+- **No data engine bound** — nothing can be re-read: a source without `where`
+  builds the document from the event's `after`, and a source with `where` is
+  not synced, which the service logs once per source as a warning.
+
+A delete removes the document named by the event's required `recordId`. Syncs
+of one document run one after another in the process, so two events for the
+same row cannot interleave: each re-reads after the previous one finished, and
+the last leaves the index agreeing with the database. Because the sync is
+inline, a write's sync can wait behind an earlier in-flight sync of the same
+document (on a single-connection pool, up to the pool's acquire timeout); the
+index still ends consistent.
+
+**When the sync runs.** The engine publishes `data.record.created` and
+`data.record.updated` from inside the write, after its `after*` hooks — before
+any unit of work around the write commits (the write's own unit, opened when a
+metadata hook can abort it, or a caller's `engine.transaction(…)`). The
+in-process realtime service awaits each subscriber, so the re-read runs inside
+the same open transaction and sees the row the write just made. If that unit
+then rolls back, the index is wrong in one of two ways until the row's next
+event or a `reindexSource`:
+
+- **The uncommitted row matched** — the document stays built from a row that
+  never committed.
+- **The uncommitted row did not match** — the document was deleted, so the
+  committed row, which may still match, is missing from the index.
+
+`data.record.restored` is
+published after the restore's own unit has committed.
 
 - **MVP (Phase 1):** synchronous, inline with the originating mutation.
   Fast for low-volume dev / demo. Indexing failures are logged but do
