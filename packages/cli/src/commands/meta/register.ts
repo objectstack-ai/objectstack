@@ -210,7 +210,7 @@ export function draftSaveLines(args: {
   if (args.packageId) {
     lines.push(
       `Review and publish it in Studio's Changes for package ${args.packageId} `
-        + `(/studio/${encodeURIComponent(args.packageId)}/interfaces?changes=review).`,
+        + `(/studio/${encodeURIComponent(args.packageId)}/data?changes=review).`,
     );
   }
   return lines;

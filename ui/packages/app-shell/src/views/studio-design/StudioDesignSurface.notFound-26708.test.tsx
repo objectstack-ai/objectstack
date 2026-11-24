@@ -9,7 +9,9 @@
  * "package not found", with no pillars and no package actions, and a way back
  * to the Studio landing. And `/studio/<pkg>/<segment>` for a segment no pillar
  * has fell through to the Interfaces pillar with nothing highlighted; it now
- * renders a not-found state, the real pillars still linked above it.
+ * renders a not-found state, the real pillars still linked above it. (The
+ * Interfaces pillar itself retired with objectstack#36502: its old segment is
+ * not "not found" but lands on the Data pillar, pinned last in this file.)
  *
  * Read from the package list Studio already loads (`GET /api/v1/packages`,
  * one request): a kernel package the switcher hides is installed, so it is
@@ -161,8 +163,8 @@ describe('Studio: a package id no package has renders "package not found" (objec
     renderAt(`/studio/${PACKAGE_ID}/data`);
     await listAnswered(fetchMock);
     expect(screen.queryByTestId('studio-package-not-found')).toBeNull();
-    // The four pillars and, objectstack#28561, the "All metadata" area.
-    expect(within(screen.getByTestId('studio-pillar-nav')).getAllByRole('link')).toHaveLength(5);
+    // The three pillars and, objectstack#28561, the "All metadata" area.
+    expect(within(screen.getByTestId('studio-pillar-nav')).getAllByRole('link')).toHaveLength(4);
   });
 
   it('CONTROL — a kernel package the Studio landing hides is installed, never "not found"', async () => {
@@ -177,12 +179,12 @@ describe('Studio: a package id no package has renders "package not found" (objec
     renderAt(`/studio/${PHANTOM}/data`);
     await listAnswered(fetchMock);
     expect(screen.queryByTestId('studio-package-not-found')).toBeNull();
-    expect(within(screen.getByTestId('studio-pillar-nav')).getAllByRole('link')).toHaveLength(5);
+    expect(within(screen.getByTestId('studio-pillar-nav')).getAllByRole('link')).toHaveLength(4);
   });
 });
 
 describe('Studio: a pillar segment no pillar has renders a not-found state (objectstack#26708)', () => {
-  it('names the segment, keeps the real pillars linked, and does not mount Interfaces', async () => {
+  it('names the segment, keeps the real pillars linked, and mounts no pillar', async () => {
     servePackages();
     renderAt(`/studio/${PACKAGE_ID}/bogus_pillar`);
 
@@ -192,21 +194,21 @@ describe('Studio: a pillar segment no pillar has renders a not-found state (obje
     expect(links.map((a) => a.getAttribute('href'))).toEqual([
       `/studio/${PACKAGE_ID}/data`,
       `/studio/${PACKAGE_ID}/automations`,
-      `/studio/${PACKAGE_ID}/interfaces`,
       `/studio/${PACKAGE_ID}/access`,
       `/studio/${PACKAGE_ID}/metadata`,
     ]);
     for (const link of links) expect(link).not.toHaveAttribute('aria-current');
   });
 
-  it('CONTROL — the interfaces segment still opens the Interfaces pillar', async () => {
+  it('CONTROL — the retired interfaces segment is not "not found": it lands on the Data pillar (objectstack#36502)', async () => {
     servePackages();
     renderAt(`/studio/${PACKAGE_ID}/interfaces`);
     const current = await waitFor(() =>
       within(screen.getByTestId('studio-pillar-nav')).getByRole('link', { current: 'page' }),
     );
-    expect(current).toHaveAttribute('href', `/studio/${PACKAGE_ID}/interfaces`);
+    expect(current).toHaveAttribute('href', `/studio/${PACKAGE_ID}/data`);
     expect(screen.queryByTestId('studio-pillar-not-found')).toBeNull();
+    expect(screen.getByTestId('studio-interfaces-retired')).toBeInTheDocument();
   });
 });
 

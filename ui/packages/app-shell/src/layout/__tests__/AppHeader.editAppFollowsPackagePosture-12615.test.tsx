@@ -262,8 +262,8 @@ async function editAppOn(
 const SETUP_ROUTE = '/apps/com.objectstack.setup/dashboard/system_overview';
 const HOTCRM_ROUTE = '/apps/app.objectstack.hotcrm/dashboard/pipeline';
 const BASE_ROUTE = '/apps/com.example.my_base/dashboard/pipeline';
-const BASE_PENCIL = '/studio/com.example.my_base/interfaces?surface=dashboard:pipeline';
-const HOTCRM_VIEW = '/studio/app.objectstack.hotcrm/interfaces?surface=dashboard:pipeline';
+const BASE_PENCIL = '/studio/com.example.my_base/metadata/dashboard/pipeline';
+const HOTCRM_VIEW = '/studio/app.objectstack.hotcrm/metadata/dashboard/pipeline';
 
 let fetchMock: ReturnType<typeof vi.fn>;
 
