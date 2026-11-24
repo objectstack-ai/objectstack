@@ -15,7 +15,7 @@ They now ride the inbox's address as page-scoped params: `scope` (the tab: `subm
 - A value at its default is left out, so an untouched inbox keeps a bare address.
 - Every change replaces the current history entry instead of adding one, so Back leaves the inbox rather than stepping through filter changes.
 - The search text reaches the address after the same short pause the server search already waited for. A search typed and opened at once is written before the request opens, so Back still returns to it.
-- A value the inbox does not offer (an unknown tab, sort or status, or a status on "My Pending", which has no status filter) reads as the default. A process or object that none of the loaded requests carries is dropped from the address once the first rows arrive.
+- A value the inbox does not offer (an unknown tab, sort or status, or a status on "My Pending", which has no status filter) reads as the default. A process or object the address names is checked once, when the first requests arrive, and is dropped only if those requests are the whole list (on "My Pending", or when the first page holds every request) and none of them carries it. On "Submitted by me" and "All", a value past the first page is kept and shown in its dropdown, so a filter picked after loading more pages survives Back, a reload and a copied link.
 - Switching tabs still clears the filters, search and sort, now in the address too. Other params are kept.
 - The `?request=` notification link still opens that request.
 
