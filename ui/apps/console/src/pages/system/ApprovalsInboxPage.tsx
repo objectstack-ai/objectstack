@@ -80,7 +80,7 @@ import { toast } from 'sonner';
 import { useAuth } from '@object-ui/auth';
 import { declaredUserMessage } from '@object-ui/react';
 import { useDisplayLocale, useObjectTranslation } from '@object-ui/i18n';
-import { APPROVAL_STATUS_LABELS } from '@objectstack/spec/contracts';
+import { APPROVAL_STATUSES, APPROVAL_STATUS_LABELS } from '@objectstack/spec/contracts';
 import {
   CheckCircle2,
   XCircle,
@@ -1843,11 +1843,12 @@ function ApprovalsQueue() {
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="all">{tr('allStatuses', 'All statuses')}</SelectItem>
-                    <SelectItem value="pending">{statusLabel('pending')}</SelectItem>
-                    <SelectItem value="approved">{statusLabel('approved')}</SelectItem>
-                    <SelectItem value="rejected">{statusLabel('rejected')}</SelectItem>
-                    <SelectItem value="recalled">{statusLabel('recalled')}</SelectItem>
-                    <SelectItem value="returned">{statusLabel('returned')}</SelectItem>
+                    {/* One option per status the CONTRACT declares, so a state the
+                        platform adds is offered the day it ships (a hand-typed list
+                        missed `cancelled` while its rows already showed here). */}
+                    {APPROVAL_STATUSES.map((s) => (
+                      <SelectItem key={s} value={s}>{statusLabel(s)}</SelectItem>
+                    ))}
                   </SelectContent>
                 </Select>
               )}
