@@ -116,8 +116,9 @@ function customizationRead() {
     overrides,
     extensions: [],
     switchedOff: [],
+    arrangements: [],
     contributions: [],
-    counts: { overrides: overrides.length, extensions: 0, switchedOff: 0, contributions: 0 },
+    counts: { overrides: overrides.length, extensions: 0, switchedOff: 0, arrangements: 0, contributions: 0 },
   };
 }
 

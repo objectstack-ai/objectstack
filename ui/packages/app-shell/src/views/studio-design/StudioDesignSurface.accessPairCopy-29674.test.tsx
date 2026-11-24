@@ -119,8 +119,9 @@ const READ = {
   overrides: [],
   extensions: [],
   switchedOff: [],
+  arrangements: [],
   contributions: [],
-  counts: { overrides: 0, extensions: 0, switchedOff: 0, contributions: 0 },
+  counts: { overrides: 0, extensions: 0, switchedOff: 0, arrangements: 0, contributions: 0 },
 };
 
 /** Each package's list, by type: the base ships its objects and its set; the pair holds only the copy. */

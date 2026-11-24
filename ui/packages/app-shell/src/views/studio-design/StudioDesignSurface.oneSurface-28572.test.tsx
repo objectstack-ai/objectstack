@@ -162,8 +162,9 @@ const READ = {
   overrides: [{ type: 'dashboard', name: 'pipeline', basedOn: '4.0.0' }],
   extensions: [{ object: 'crm_account', kind: 'field', name: 'tier__c' }],
   switchedOff: [],
+  arrangements: [],
   contributions: [],
-  counts: { overrides: 1, extensions: 1, switchedOff: 0, contributions: 0 },
+  counts: { overrides: 1, extensions: 1, switchedOff: 0, arrangements: 0, contributions: 0 },
 };
 /**
  * objectstack#29786 — what the third package contributes to the base: a nav
@@ -215,7 +216,7 @@ const SERVED_APP = {
     { id: 'nav_knowledge', type: 'url', label: 'Knowledge base', url: '/kb2' },
   ],
 };
-const EMPTY_READ = { packageId: BASE, overrides: [], extensions: [], switchedOff: [], contributions: [], counts: { overrides: 0, extensions: 0, switchedOff: 0, contributions: 0 } };
+const EMPTY_READ = { packageId: BASE, overrides: [], extensions: [], switchedOff: [], arrangements: [], contributions: [], counts: { overrides: 0, extensions: 0, switchedOff: 0, arrangements: 0, contributions: 0 } };
 
 /** The base's own lists, by type. The override is served under the base's name (ADR-0146 D8 item 2). */
 const BASE_LISTS: Record<string, Array<Record<string, unknown>>> = {

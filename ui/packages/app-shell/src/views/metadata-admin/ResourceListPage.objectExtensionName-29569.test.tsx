@@ -95,13 +95,14 @@ import { t } from './i18n';
 
 registerDefaultMetadataSchemas();
 
-const EMPTY_COUNTS = { overrides: 0, extensions: 0, switchedOff: 0, contributions: 0 };
+const EMPTY_COUNTS = { overrides: 0, extensions: 0, switchedOff: 0, arrangements: 0, contributions: 0 };
 /** The base's read as served on the card: the extension's field, no override. */
 const SERVED_READ = {
   packageId: BASE,
   overrides: [],
   extensions: [{ object: 'showcase_task', kind: 'field', name: 'custom_note__c' }],
   switchedOff: [],
+  arrangements: [],
   contributions: [],
   counts: { ...EMPTY_COUNTS, extensions: 1 },
 };
