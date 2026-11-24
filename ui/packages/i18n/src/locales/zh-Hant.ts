@@ -3009,7 +3009,7 @@ const zhHant = {
       // objectstack#35955 — a list's unsaved changes: Reset and Update view
       // (objectstack#36737, the view's own actions, as Twenty's).
       draft: {
-        discard: '重設',
+        discard: '重置',
         discardTitle: '把列表恢復成檢視本來的樣子：篩選、排序、分組、列和佈局。列寬和行高不變。',
         save: '更新檢視',
         heading: '未儲存的改動',
