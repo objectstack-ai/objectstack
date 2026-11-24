@@ -89,8 +89,8 @@ options: [
 
 | Type | When to Use | Key Config |
 |:-----|:------------|:-----------|
-| `lookup` | Reference another object (independent) | `reference`, `lookupFilters`, `multiple`, `deleteBehavior`, `lookupAutofill` |
-| `master_detail` | Parent–child with lifecycle control | `reference`, `deleteBehavior` (`cascade`/`restrict` — `set_null` is refused), `lookupAutofill` |
+| `lookup` | Reference another object (independent) | `reference`, `lookupFilters`, `multiple`, `deleteBehavior`, `transferBehavior`, `lookupAutofill` |
+| `master_detail` | Parent–child with lifecycle control | `reference`, `deleteBehavior` (`cascade`/`restrict` — `set_null` is refused), `transferBehavior`, `lookupAutofill` |
 | `tree` | Hierarchical self-reference | `reference` — optional; when written, this object's own name (any other object is refused at parse) |
 | `user` | Person picker — a lookup specialized to `sys_user` (reviewer, watchers). Stored identically to `lookup` | `multiple` (collaborators), `defaultValue: 'current_user'`, `deleteBehavior` (no default; declared, as on `lookup`: relationships.md → Delete Behaviors) |
 
@@ -122,8 +122,8 @@ Stored as JSON on the parent row, no separate table/FK:
 
 | Type | When to Use |
 |:-----|:------------|
-| `composite` | Single embedded JSON object, **untyped**: a field declares no sub-fields (`fields`/`subFields` are refused) |
-| `repeater` | Embedded JSON **array**, **untyped**: no sub-fields or `columns`; a typed list is a `master_detail` child a parent `fieldGroups[].relatedList` names |
+| `composite` | Single JSON object, **untyped**: a field declares no sub-fields (`fields`/`subFields` are refused) |
+| `repeater` | JSON **array**, **untyped**: no sub-fields or `columns`; a typed list is a `master_detail` child a parent `fieldGroups[].relatedList` names |
 | `record` | Name-keyed **map** of embedded sub-objects (insertion order = display order; ADR-0007) |
 
 ## Calculated
@@ -132,7 +132,7 @@ Stored as JSON on the parent row, no separate table/FK:
 |:-----|:------------|:-------|
 | `formula` | Computed on read: neither aggregatable nor a dataset or cube dimension (group key); both need a stored field of its return type with the same `expression` (objectstack-ui → Dashboards → Dataset-Bound Widgets) that reads only its own row (relationships.md → Computed column) | `expression` (CEL, `record.` prefixes), `returnType` (`'number' \| 'text' \| 'boolean' \| 'date' \| 'currency'`); `'currency'` carries its own `currencyConfig` |
 | `summary` | Roll-up aggregation from child records | `summaryOperations` ({ object, field? (omit for `count`), function, relationshipField?, filter? }) |
-| `autonumber` | Auto-incrementing display format (→ Autonumber) | `format` (shorthand) / `autonumberFormat` (canonical) — e.g., `"CASE-{0000}"` |
+| `autonumber` | Auto-incrementing display format (→ Autonumber) | `format` (shorthand) / `autonumberFormat` (canonical) |
 
 ## Enhanced Types
 

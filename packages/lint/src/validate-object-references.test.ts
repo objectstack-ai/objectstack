@@ -8,6 +8,7 @@ import {
 } from './validate-object-references.js';
 import { runAuthoringRules, splitBySeverity } from './authoring-rules.js';
 import { PLATFORM_OBJECT_PREFIXES } from '@objectstack/spec/system';
+import { defineStack } from '@objectstack/spec';
 import { explainRule } from './rule-explanations.js';
 
 // [#22161] Each `object-reference-unregistered-platform` finding is one
@@ -499,6 +500,32 @@ describe('validateObjectReferences — the severity ladder', () => {
         },
       ],
     });
+    expect(findings).toEqual([]);
+  });
+
+  // The built-in tasks and notes (`@objectstack/platform-objects`): an app in
+  // any package puts both in its menu, declaring neither, and validate passes.
+  //
+  // The entry spells `requiresObject` beside `objectName`: `defineStack`
+  // refuses a `type: 'object'` entry naming an object the stack does not
+  // declare unless it does (the cross-reference check), and this rule then
+  // judges the gate against the platform registry — rung ③, so the app needs
+  // no `packages[]` context for them. Without the gate this rule never reads a
+  // bare `objectName`, so an assertion over that shape would pass vacuously.
+  it('accepts gated navigation entries naming the built-in sys_task and sys_note from an app that declares neither', () => {
+    const navigation = [
+      { id: 'nav_tasks', type: 'object', label: 'Tasks', objectName: 'sys_task', requiresObject: 'sys_task' },
+      { id: 'nav_notes', type: 'object', label: 'Notes', objectName: 'sys_note', requiresObject: 'sys_note' },
+    ];
+    expect(() =>
+      defineStack({
+        manifest: { id: 'com.example.starter', name: 'starter', version: '0.1.0', type: 'app' },
+        objects: [{ name: 'starter_company', label: 'Company', fields: { name: { type: 'text', label: 'Name' } } }],
+        apps: [{ name: 'starter', label: 'Starter', navigation }],
+      } as Parameters<typeof defineStack>[0]),
+    ).not.toThrow();
+
+    const findings = validateObjectReferences({ ...baseStack(), apps: [{ name: 'starter', navigation }] });
     expect(findings).toEqual([]);
   });
 

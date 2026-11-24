@@ -11,6 +11,7 @@
 - **Amended** (2026-11-10, [#32060](https://github.com/objectstack-ai/objectstack/issues/32060)): a dated note under [What builds on this](#what-builds-on-this) records what O3 and O4 shipped. The status line above is left as it is.
 - **Amended** (2026-11-15, [#33689](https://github.com/objectstack-ai/objectstack/issues/33689)): a dated note under [D3](#d3--its-authority-its-own-grants-under-the-agent-ceiling) records that rule 3 holds unchanged under the amended action-confirmation contract. The status line above is left as it is.
 - **Amended** (2026-11-20, [#35731](https://github.com/objectstack-ai/objectstack/issues/35731)): a dated note under **Leaves unchanged** records the second producer of `performedBy`, the in-product AI path. The status line above is left as it is.
+- **Amended** (2026-11-24, [#36086](https://github.com/objectstack-ai/objectstack/issues/36086)): a dated note under [D3](#d3--its-authority-its-own-grants-under-the-agent-ceiling) records that the agent ceiling also clears `viewAllFields`. The status line above is left as it is.
 
 ---
 
@@ -99,6 +100,14 @@ ADR-0118 refused a seeded "system" pseudo-user for two reasons: seeding writes t
 > - **Until the implementing change ships**, the gate is `packages/runtime/src/action-execution.ts#actionConfirmationRefusal`
 >   as before, and it refuses an account through
 >   `packages/runtime/src/action-execution.ts#isAiServiceAccountCaller` whatever the call sends.
+
+> **Amendment note (2026-11-24, [#36050](https://github.com/objectstack-ai/objectstack/issues/36050) — PR [#36085](https://github.com/objectstack-ai/objectstack/pull/36085)): the ceiling also clears `viewAllFields`.**
+> The fourth bullet's list gains one bit. `viewAllFields` is the read-only field half of View All
+> ([ADR-0066](./0066-unified-authorization-model.md) D2 ⑧, note of 2026-11-24). The clamp at evaluation clears it on
+> every `objects` entry, the `'*'` wildcard included, beside `viewAllRecords` and `modifyAllRecords`
+> (`packages/plugins/plugin-security/src/agent-ceiling-clamp.ts#AGENT_CEILING_OBJECT_KEYS`), and assigning a set
+> that carries it to an account is refused by name. Left standing, the bit would let an agent principal read every
+> field another of its sets hides. The bullet is left as written; read its list with this note.
 
 ### D4 — Its credentials: dedicated API keys, minted by a person
 

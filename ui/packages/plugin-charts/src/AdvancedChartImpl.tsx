@@ -52,7 +52,7 @@ import {
   ChartContainerConfig
 } from './ChartContainerImpl';
 import { mapScatterClick, mapTreemapClick, mapSankeyClick } from './chartDrillEvents';
-import { formatterFor, domainFor, ticksFor, plotsWholeNumbers, wholeNumberTickCount, RENDERABLE, SINGLE_VALUE_CHART_TYPES, TABULAR_CHART_TYPES, effectiveChartFamily, comboBaseFamily, placeYAxes, type DeclaredChartFamily, type NormalizedAxis, type NormalizedSeries, type ValueAxisSlot, type YAxisPlacement } from './normalizeChartSchema';
+import { formatterFor, compactTickFormatter, valueTickExponent, domainFor, ticksFor, plotsWholeNumbers, wholeNumberTickCount, RENDERABLE, SINGLE_VALUE_CHART_TYPES, TABULAR_CHART_TYPES, effectiveChartFamily, comboBaseFamily, placeYAxes, type DeclaredChartFamily, type NormalizedAxis, type NormalizedSeries, type ValueAxisSlot, type YAxisPlacement } from './normalizeChartSchema';
 import { buildCategoryRank, chartRowBucketId, formatMonthBucketLabel, isRealCalendarDate, toDateInputValue, toDisplayDate, type ChartSegmentClickEvent } from '@object-ui/core';
 import { createSafeTranslation, useDisplayLocale, useSafeTranslate } from '@object-ui/i18n';
 
@@ -2468,19 +2468,6 @@ function AdvancedChartImplInner({
   const getPalette = (): string[] =>
     Array.isArray(colors) && colors.length > 0 ? colors : THEME_CHART_PALETTE;
 
-  // Compact numeric formatter for Y-axis ticks (1,200,000 → 1.2M).
-  // Keeps the axis readable when bar/area series have large values.
-  const formatYTick = React.useCallback((value: any): string => {
-    if (value == null || value === '') return '';
-    const num = typeof value === 'number' ? value : Number(value);
-    if (!Number.isFinite(num)) return String(value);
-    try {
-      return new Intl.NumberFormat(displayLocale, { notation: 'compact', maximumFractionDigits: 1 }).format(num);
-    } catch {
-      return String(num);
-    }
-  }, [displayLocale]);
-
   // ── Spec ChartAxis presentation (objectui#2880 S2) ──────────────────────
   // The author's `format` wins over the compact default; `min`/`max` pin the
   // domain; `logarithmic` swaps the scale; `title` labels the axis. All three
@@ -2583,26 +2570,6 @@ function AdvancedChartImplInner({
   const rotatedXAxisBand = rotateXLabels
     ? rotatedXAxisHeight(data.map((d) => String(xAxisTickFormatter(d?.[xAxisKey]) ?? '')))
     : undefined;
-  const yTickFormatter = React.useMemo(
-    () => formatterFor(primaryY?.format, displayLocale) ?? formatYTick,
-    [primaryY?.format, displayLocale, formatYTick],
-  );
-  // Per slot, for the charts that draw both value axes.
-  const leftYTickFormatter = React.useMemo(
-    () => formatterFor(leftY?.format, displayLocale) ?? formatYTick,
-    [leftY?.format, displayLocale, formatYTick],
-  );
-  const rightYTickFormatter = React.useMemo(
-    () => formatterFor(rightY?.format, displayLocale) ?? formatYTick,
-    [rightY?.format, displayLocale, formatYTick],
-  );
-  /**
-   * The tick formatter of the value axis a series' marks are measured
-   * against — the one its value labels print with (objectstack#27372).
-   */
-  const valueTickFormatterOf = (s: { yAxis?: string }): typeof yTickFormatter =>
-    hasDualAxis ? (s.yAxis === 'right' ? rightYTickFormatter : leftYTickFormatter) : yTickFormatter;
-
   /**
    * Every number plotted in one slot of a dual axis (or on the only axis,
    * whichever slot it sits in) — the range `stepSize` lays its ticks over.
@@ -2623,6 +2590,43 @@ function AdvancedChartImplInner({
     }
     return out;
   }, [data, slotSeries]);
+
+  /**
+   * The tick formatter of one value axis: the author's `format` where it
+   * declares one, else the compact default (1,200,000 → `1.2M`) — either
+   * printed to the decimal place the axis' tick step needs, so two ticks never
+   * share a label (objectstack#36988; see `valueTickExponent`). The step is
+   * measured over the values plotted in the slot, with the tick count
+   * `yAxisSpecProps` hands recharts for it.
+   */
+  const valueAxisTickFormatter = React.useCallback(
+    (axis: NormalizedAxis | undefined, side: ValueAxisSlot) => {
+      const values = axisValues(side);
+      const tickCount = plotsWholeNumbers(slotSeries(side)) ? wholeNumberTickCount(axis, values) : undefined;
+      const exponent = valueTickExponent(axis, values, tickCount);
+      return formatterFor(axis?.format, displayLocale, exponent) ?? compactTickFormatter(displayLocale, exponent);
+    },
+    [axisValues, slotSeries, displayLocale],
+  );
+  const yTickFormatter = React.useMemo(
+    () => valueAxisTickFormatter(primaryY, soleYSlot),
+    [valueAxisTickFormatter, primaryY, soleYSlot],
+  );
+  // Per slot, for the charts that draw both value axes.
+  const leftYTickFormatter = React.useMemo(
+    () => valueAxisTickFormatter(leftY, 'left'),
+    [valueAxisTickFormatter, leftY],
+  );
+  const rightYTickFormatter = React.useMemo(
+    () => valueAxisTickFormatter(rightY, 'right'),
+    [valueAxisTickFormatter, rightY],
+  );
+  /**
+   * The tick formatter of the value axis a series' marks are measured
+   * against — the one its value labels print with (objectstack#27372).
+   */
+  const valueTickFormatterOf = (s: { yAxis?: string }): typeof yTickFormatter =>
+    hasDualAxis ? (s.yAxis === 'right' ? rightYTickFormatter : leftYTickFormatter) : yTickFormatter;
 
   /**
    * Recharts props derived from one spec y-axis (domain / scale / ticks /

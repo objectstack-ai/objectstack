@@ -29,6 +29,9 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testi
 import { MemoryRouter } from 'react-router-dom';
 
 import { PackageDetailSheet, type InstalledPackageRow } from './PackagesPage';
+// Loaded at import so their first load is not paid inside a test's clocked window.
+import '@objectstack/formula';
+import '@objectstack/lint';
 
 const PKG_ID = 'com.acme.crm';
 const PKG_NAME = 'Acme CRM';
@@ -60,6 +63,7 @@ function respond(body: unknown, status = 200) {
   return {
     ok: status >= 200 && status < 300,
     status,
+    headers: new Headers(),
     text: async () => text,
     json: async () => JSON.parse(text),
   } as unknown as Response;
