@@ -56,6 +56,7 @@ import type {
 // objectui#12929 — the batch publish door's request options are picked off the
 // client's declared `packages.publishDrafts` signature (type-only, erased).
 import type { ObjectStackClient } from '@objectstack/client';
+import type { MetadataProvenance } from '@objectstack/spec/kernel';
 
 /**
  * One advisory finding the framework's runtime authoring gate produced for a
@@ -652,8 +653,13 @@ export interface MetadataLayered<T = unknown> {
   lockSource?: 'artifact' | 'package' | 'overlay' | 'env-forced';
   /** Optional docs URL for the lock reason (rendered as "View docs →"). */
   lockDocsUrl?: string;
-  /** Origin of the item: `package` (loader) | `org` (tenant) | `env-forced`. */
-  provenance?: 'package' | 'org' | 'env-forced';
+  /**
+   * Origin of the item: `package` (loader) | `org` (tenant) | `env-forced` |
+   * `platform` (the platform's own boot registration, a store-slot marker).
+   * Typed from the spec's `MetadataProvenance`, so a value the spec adds is
+   * accepted here without a second edit (#37013).
+   */
+  provenance?: MetadataProvenance;
   /** Owning package id (denormalised from the loader tag). */
   packageId?: string;
   /** Owning package version. */
