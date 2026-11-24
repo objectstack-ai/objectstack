@@ -40,7 +40,13 @@ import { describe, it, expect, vi, afterEach } from 'vitest';
 import { ActionProvider } from '@object-ui/react';
 import { LookupField } from './LookupField';
 
-afterEach(cleanup);
+// A selected record joins the picker's recently-used list in localStorage, and
+// the rail re-reads those ids on the next open: cleared, so each row starts
+// with no recents and the only id-carrying query is the one under test.
+afterEach(() => {
+  cleanup();
+  localStorage.clear();
+});
 
 const TARGET = 'crm_expense_request';
 const OUTSIDE = "The record was created, but it does not match this field's filters, so it cannot be chosen here.";
