@@ -286,7 +286,7 @@ export function StudioDetailHeader({
           aria-label={closeLabel}
           title={closeLabel}
           onClick={close}
-          className={cn(STUDIO_HEADER_ICON_BUTTON, '-ml-2')}
+          className={STUDIO_HEADER_ICON_BUTTON}
         >
           <X className="h-4 w-4" aria-hidden="true" />
         </button>

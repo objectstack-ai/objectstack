@@ -60,6 +60,13 @@ function tabbable(): HTMLElement[] {
   ).filter((el) => !(el as HTMLButtonElement).disabled && el.tabIndex >= 0 && !el.closest('[hidden]'));
 }
 
+/** `window.confirm`, which the leave guard asks; jsdom here has none of its own. */
+function stubConfirm(answer: boolean) {
+  const spy = vi.fn((_message?: string) => answer);
+  Object.defineProperty(window, 'confirm', { configurable: true, writable: true, value: spy });
+  return spy;
+}
+
 const releases: Array<() => void> = [];
 afterEach(() => {
   cleanup();
@@ -163,7 +170,7 @@ describe('‹ › step through the list, and the ends are off', () => {
 describe('× and ‹ › go through the leave guard', () => {
   it('with unsaved edits, Cancel keeps the page: neither × nor › leaves', () => {
     releases.push(registerUnsavedEdits('Discard your changes?'));
-    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false);
+    const confirm = stubConfirm(false);
     const onClose = vi.fn();
     const onOpenItem = vi.fn();
     render(<Header onClose={onClose} onOpenItem={onOpenItem} />);
@@ -177,7 +184,7 @@ describe('× and ‹ › go through the leave guard', () => {
 
   it('with unsaved edits, OK leaves', () => {
     releases.push(registerUnsavedEdits('Discard your changes?'));
-    vi.spyOn(window, 'confirm').mockReturnValue(true);
+    stubConfirm(true);
     const onClose = vi.fn();
     const onOpenItem = vi.fn();
     render(<Header onClose={onClose} onOpenItem={onOpenItem} />);
@@ -188,7 +195,7 @@ describe('× and ‹ › go through the leave guard', () => {
   });
 
   it('CONTROL: with nothing unsaved, × leaves without asking', () => {
-    const confirm = vi.spyOn(window, 'confirm');
+    const confirm = stubConfirm(true);
     const onClose = vi.fn();
     render(<Header onClose={onClose} />);
     fireEvent.click(screen.getByTestId('studio-detail-close'));
@@ -200,7 +207,7 @@ describe('× and ‹ › go through the leave guard', () => {
 describe('the keyboard: Esc triggers ×, and ‹ › are reachable', () => {
   it('Esc on the page triggers ×, through the leave guard', () => {
     releases.push(registerUnsavedEdits('Discard your changes?'));
-    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true);
+    const confirm = stubConfirm(true);
     const onClose = vi.fn();
     render(<Header onClose={onClose} />);
     fireEvent.keyDown(document.body, { key: 'Escape' });
