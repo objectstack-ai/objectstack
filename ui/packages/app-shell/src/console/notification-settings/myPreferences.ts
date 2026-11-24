@@ -15,8 +15,12 @@
  *    person's own row (`ownRowId`), a create otherwise. The server's own-row
  *    policy refuses anything else.
  *
- * There is no "reset to the organization's default": that needs a delete,
- * which the member grant does not carry (ruled out of this page).
+ * Digest and quiet hours each go back to following the organization by an
+ * update of the person's own `(*, *)` row that empties the field
+ * ({@link followOrganizationWrite}): an empty field is "not set" (objectstack
+ * ruling 7073270426). The row itself stays, and so does its `enabled`; a
+ * per-cell row is never removed here either. Removing a row is a delete, which
+ * the member grant does not carry (objectstack ruling 6968686390).
  */
 
 /** The door the page reads. */
@@ -189,8 +193,9 @@ export function cellWrite(userId: string, topic: PreferenceTopic, cell: Preferen
  *  - a value: `daily` / `weekly`, or a complete window.
  *
  * So every digest choice takes effect when saved, and so does clearing quiet
- * hours: a cleared window is saved as the explicit off, never as empty, which
- * would only hand the decision back to the organization.
+ * hours: a cleared window is saved as the explicit off, never as empty. Empty
+ * hands the decision back to the organization, and only the page's "Follow
+ * organization setting" action writes it ({@link followOrganizationWrite}).
  */
 export const QUIET_HOURS_OFF: Readonly<{ off: true }> = Object.freeze({ off: true });
 
@@ -236,6 +241,22 @@ export function generalWrite(
     kind: 'create',
     data: { user_id: userId, topic: PREFERENCE_WILDCARD, channel: PREFERENCE_WILDCARD, enabled: general.enabled.value, ...patch },
   };
+}
+
+/** A field of the person's own `(*, *)` row that can go back to following the organization. */
+export type FollowableField = 'digest' | 'quiet_hours';
+
+/**
+ * The write that returns one field to following the organization: the person's
+ * own `(*, *)` row, updated with that field empty (ruling 7073270426: empty is
+ * "not set", so the next row decides, in the end the organization's default).
+ * `null` when there is nothing to clear: no own `(*, *)` row, or the field is
+ * not the person's own answer now (the door says where it comes from).
+ */
+export function followOrganizationWrite(general: GeneralPreferences, field: FollowableField): PreferenceWrite | null {
+  const setting = field === 'digest' ? general.digest : general.quietHours;
+  if (!general.ownRowId || setting.source !== 'own') return null;
+  return { kind: 'update', id: general.ownRowId, data: { [field]: null } };
 }
 
 /** The data door the writes go through (the console's adapter). */

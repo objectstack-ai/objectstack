@@ -43,16 +43,29 @@
  * wrote. A landed publish announces itself (`emitMetadataRefresh`), and the
  * console re-reads the app, its menu included.
  *
+ * The publish is pinned to the published row the save was composed from
+ * (objectstack#36538, the `/layers` read's `overlayVersion`, objectstack#36601):
+ * a publish somebody else lands between the read and this save's publish is
+ * refused `409`, the draft is discarded, and the bar says so, never written
+ * over. The pin is read at the address the publish writes (`publishPinAt`),
+ * before the body is read, so a publish in between pairs an old pin with a
+ * new body and is refused, the safe direction.
+ *
+ * A stored read that holds no app (the layered read answers a 404 as an
+ * empty view) refuses the save (objectstack#36538): nothing served is
+ * written, and the stored app's own keys are never dropped.
+ *
  * @module
  */
 
 import { stripReadDecorations } from '@objectstack/spec/kernel';
 import { emitMetadataRefresh } from '../assistant/assistantBus.js';
-import { isDraftVersionConflict } from '../views/metadata-admin/DraftConflictDialog.js';
+import { isDraftVersionConflict, publishedPinOf, type DraftPin } from '../views/metadata-admin/DraftConflictDialog.js';
 import { overrideDraftBody } from '../views/studio-design/StudioCustomizeControls.js';
 import {
   ensureCustomizationPackage,
   fetchListedPackageManifests,
+  listedCustomizationPairOf,
   listedPackageVersion,
   type EnsuredCustomizationPackage,
   type ListedPackageManifest,
@@ -67,7 +80,7 @@ export interface AppMenuSaveDoors {
   readonly client: {
     layered: (type: string, name: string, options: { packageId?: string }) => Promise<unknown>;
     save: (type: string, name: string, body: unknown, options: Record<string, unknown>) => Promise<unknown>;
-    publish: (type: string, name: string, options: { packageId?: string }) => Promise<unknown>;
+    publish: (type: string, name: string, options: { packageId?: string; ifMatch?: string; ifNoneMatch?: '*' }) => Promise<unknown>;
     reset: (type: string, name: string, options: Record<string, unknown>) => Promise<unknown>;
   };
 }
@@ -82,6 +95,17 @@ export interface AppMenuSaveTexts {
   readonly noVersion: string;
   /** The customization package the server answered is not writable. */
   readonly notWritable: string;
+  /**
+   * The stored read holds no app (objectstack#36538): nothing is written.
+   * Absent, said with {@link notListed}.
+   */
+  readonly storedUnread?: string;
+  /**
+   * The menu was published by somebody else between this save's read and its
+   * publish (objectstack#36538): nothing went live. Absent, the server's
+   * refusal is passed on as it came.
+   */
+  readonly publishedMoved?: string;
 }
 
 /** A document as stored, less what a read adds and what belongs to its package. */
@@ -99,6 +123,30 @@ function storedApp(layers: unknown): Record<string, unknown> {
 }
 
 /**
+ * Whether a layered read holds a stored app at all ({@link storedApp} reads
+ * one): `MetadataClient.layered` answers a 404 as a view with every layer
+ * `null`, which holds none (objectstack#36538).
+ */
+export function holdsStoredApp(layers: unknown): boolean {
+  const read = (layers ?? {}) as { effective?: unknown; code?: unknown };
+  return read.effective != null || read.code != null;
+}
+
+/**
+ * The pin a publish at the address of the layered read `layers` is sent with
+ * (objectstack#36538): the read's `overlayVersion` (`publishedPinOf`), and
+ * `If-None-Match: *` for a read that holds no layer at all there (a 404,
+ * which the server answers when nothing of the item is stored at that
+ * address, so no published row is either). A read from a server that serves
+ * no `overlayVersion` pins nothing, as before.
+ */
+export function publishPinAt(layers: unknown): DraftPin | null {
+  const read = (layers ?? {}) as { effective?: unknown; code?: unknown; overlay?: unknown };
+  if (read.effective == null && read.code == null && read.overlay == null) return { ifNoneMatch: '*' };
+  return publishedPinOf(layers);
+}
+
+/**
  * The menu save once every check has passed: the package it writes to and
  * the app document it writes there. Nothing has been written yet, save the
  * customization package the ensure door creates on first use.
@@ -112,6 +160,12 @@ export interface PreparedAppMenuSave {
    */
   readonly target: string;
   readonly body: Record<string, unknown>;
+  /**
+   * The published row of the app at `target` the body was composed over
+   * (objectstack#36538), as the pin its publish is sent with; `null` or
+   * absent, the publish is not pinned.
+   */
+  readonly publishPin?: DraftPin | null;
 }
 
 /**
@@ -129,8 +183,14 @@ export async function prepareAppMenuSave(
   const manifests = await doors.listPackages();
   const listed = manifests.get(packageId);
   if (!listed) throw new Error(texts.notListed);
+  // An installed app's menu is published in its customization package: the
+  // published row there is read first, before the body (objectstack#36538).
+  const listedPair = listed.writable ? null : listedCustomizationPairOf(manifests, packageId);
+  const pairPin = listedPair ? publishPinAt(await doors.client.layered('app', appName, { packageId: listedPair })) : null;
   // The app as stored, a customization of an installed app folded in.
-  const stored = storedApp(await doors.client.layered('app', appName, { packageId }));
+  const layers = await doors.client.layered('app', appName, { packageId });
+  if (!holdsStoredApp(layers)) throw new Error(texts.storedUnread ?? texts.notListed);
+  const stored = storedApp(layers);
   const storedNav = Array.isArray(stored.navigation) ? (stored.navigation as Menu) : [];
   // The stored menu in its shown order, as the editor's is (`inShownOrder`),
   // so the edits land where the editor showed them; the result's order is
@@ -139,23 +199,27 @@ export async function prepareAppMenuSave(
   const nextNav = withOrderRewritten(navPayloadOf(rebased as unknown[]) as Menu);
   let body: Record<string, unknown> | null = { ...stored, name: appName, navigation: nextNav };
   let target = packageId;
+  let publishPin = publishedPinOf(layers);
   if (!listed.writable) {
     body = overrideDraftBody(body, packageId, listedPackageVersion(manifests, packageId));
     if (body === null) throw new Error(texts.noVersion);
     const pair = await doors.ensureCustomization(packageId);
     if (!pair.writable) throw new Error(texts.notWritable);
     target = pair.packageId;
+    // The pin read at the pair, when it is the pair answered; a pair this
+    // call created holds nothing yet; any other was not read, and is not pinned.
+    publishPin = pair.packageId === listedPair ? pairPin : pair.created ? { ifNoneMatch: '*' } : null;
   }
-  return { appName, target, body };
+  return { appName, target, body, publishPin };
 }
 
 /** Write and publish a prepared menu save ({@link prepareAppMenuSave}). */
 export async function writeAppMenu(
   prepared: PreparedAppMenuSave,
-  texts: Pick<AppMenuSaveTexts, 'pendingDraft'>,
+  texts: Pick<AppMenuSaveTexts, 'pendingDraft' | 'publishedMoved'>,
   doors: Pick<AppMenuSaveDoors, 'client'>,
 ): Promise<void> {
-  const { appName, target, body } = prepared;
+  const { appName, target, body, publishPin } = prepared;
   try {
     await doors.client.save('app', appName, body, { mode: 'draft', packageId: target, ifNoneMatch: '*' });
   } catch (err) {
@@ -163,7 +227,7 @@ export async function writeAppMenu(
     throw err;
   }
   try {
-    await doors.client.publish('app', appName, { packageId: target });
+    await doors.client.publish('app', appName, { packageId: target, ...(publishPin ?? {}) });
   } catch (err) {
     try {
       await doors.client.reset('app', appName, { state: 'draft', packageId: target });
@@ -171,6 +235,8 @@ export async function writeAppMenu(
       console.error('[design-mode] a refused publish left the menu draft pending:', discardErr);
     }
     emitMetadataRefresh();
+    // A publish somebody landed since the read: nothing went live.
+    if (texts.publishedMoved && isDraftVersionConflict(err)) throw Object.assign(new Error(texts.publishedMoved), { cause: err });
     throw err;
   }
   emitMetadataRefresh();
@@ -196,7 +262,9 @@ export function consoleAppMenuDoors(client: AppMenuSaveDoors['client']): AppMenu
 
 /**
  * The stored menu of the app `appName` of the package `packageId`: the
- * navigation of its layered read (`storedApp`), `null` when the read fails.
+ * navigation of its layered read (`storedApp`), `null` when the read fails
+ * or holds no app (`holdsStoredApp`, objectstack#36538): an empty menu would
+ * read every served entry as another package's.
  * The editor compares an entry's shown label with it to tell a translated
  * label from the stored one (objectstack#36363, ruling (4)).
  */
@@ -206,7 +274,9 @@ export async function readStoredMenu(
   client: Pick<AppMenuSaveDoors['client'], 'layered'>,
 ): Promise<Menu | null> {
   try {
-    const stored = storedApp(await client.layered('app', appName, packageId ? { packageId } : {}));
+    const layers = await client.layered('app', appName, packageId ? { packageId } : {});
+    if (!holdsStoredApp(layers)) return null;
+    const stored = storedApp(layers);
     return Array.isArray(stored.navigation) ? (stored.navigation as Menu) : [];
   } catch {
     return null;

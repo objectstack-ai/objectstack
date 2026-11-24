@@ -28,8 +28,9 @@ const READ: PackageCustomizations = {
     { object: 'crm_lead', kind: 'index', fields: ['email'] },
   ],
   switchedOff: [{ type: 'flow', name: 'nightly_sync' }],
+  arrangements: [],
   contributions: [],
-  counts: { overrides: 3, extensions: 2, switchedOff: 1, contributions: 0 },
+  counts: { overrides: 3, extensions: 2, switchedOff: 1, arrangements: 0, contributions: 0 },
 };
 const index = indexCustomizations('hotcrm', READ)!;
 
@@ -69,7 +70,7 @@ describe('the directory\'s numbers (objectstack#28568)', () => {
   });
 
   it('an empty read counts nothing', () => {
-    const empty = { ...READ, overrides: [], extensions: [], counts: { overrides: 0, extensions: 0, switchedOff: 1, contributions: 0 } };
+    const empty = { ...READ, overrides: [], extensions: [], counts: { overrides: 0, extensions: 0, switchedOff: 1, arrangements: 0, contributions: 0 } };
     expect(customizationCountsByType(empty)).toEqual({});
     expect(customizationTotal(empty)).toBe(0);
   });
