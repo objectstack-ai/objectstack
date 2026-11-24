@@ -118,6 +118,12 @@ import { readDraftChecks, type DraftCheck } from './flowDraftChecks.js';
 import { clearPublishChecksShown, markPublishChecksShown } from './publishChecksShown.js';
 // objectstack#27835 — a property by its label on the item type's form.
 import { formKeyLabel, labelSpellsKey } from './changeKeyLabels.js';
+import { createAuthenticatedFetch } from '@object-ui/auth';
+
+/** The console's authenticated fetch: the stored bearer token beside the session cookie. */
+function authFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+  return createAuthenticatedFetch()(input, init);
+}
 
 export interface DraftChangeEntry {
   /**
@@ -213,7 +219,7 @@ function entryKey(entry: Pick<DraftChangeEntry, 'type' | 'name' | 'member'>): st
  */
 async function publishedNamesOf(type: string): Promise<Set<string>> {
   // `type` is already the canonical singular — folded in `listPendingDrafts`.
-  const res = await fetch(`/api/v1/meta/${encodeURIComponent(type)}`, {
+  const res = await authFetch(`/api/v1/meta/${encodeURIComponent(type)}`, {
     credentials: 'include',
     headers: { Accept: 'application/json' },
     cache: 'no-store',
@@ -285,7 +291,7 @@ async function fetchItemRead(
   // type with no members, and refuse a blank one.
   if (opts.member) params.push(`member=${encodeURIComponent(opts.member)}`);
   const qs = params.length ? `?${params.join('&')}` : '';
-  const res = await fetch(
+  const res = await authFetch(
     `/api/v1/meta/${encodeURIComponent(type)}/${encodeURIComponent(name)}${qs}`,
     { credentials: 'include', headers: { Accept: 'application/json' }, cache: 'no-store' },
   );

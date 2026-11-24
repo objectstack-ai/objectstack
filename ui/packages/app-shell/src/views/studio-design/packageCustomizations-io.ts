@@ -31,6 +31,12 @@ import {
 } from '@objectstack/spec/api';
 import { isCustomizationPackage } from '@objectstack/spec/kernel';
 import { readEnvelopeFailureText } from '../../utils/apiErrorEnvelope.js';
+import { createAuthenticatedFetch } from '@object-ui/auth';
+
+/** The console's authenticated fetch: the stored bearer token beside the session cookie. */
+function authFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+  return createAuthenticatedFetch()(input, init);
+}
 
 /** What the landing draws for one base: two served numbers, and which switched-off items are actions. */
 export interface PackageCustomizationCounts {
@@ -67,7 +73,7 @@ export async function fetchPackageCustomizations(baseId: string): Promise<Packag
   if (isCustomizationPackage(baseId)) {
     throw new Error(`Package '${baseId}' is a customization package: customizations are read for its base.`);
   }
-  const res = await fetch(packageCustomizationsUrl(baseId), {
+  const res = await authFetch(packageCustomizationsUrl(baseId), {
     credentials: 'include',
     headers: { Accept: 'application/json' },
     cache: 'no-store',

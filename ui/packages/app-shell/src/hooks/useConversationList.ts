@@ -11,6 +11,12 @@
 import { useCallback, useEffect, useState } from 'react';
 import { publishPlanApprovalPending } from '../assistant/assistantBus.js';
 import { isHitlContinuation } from '@object-ui/plugin-chatbot/core';
+import { createAuthenticatedFetch } from '@object-ui/auth';
+
+/** The console's authenticated fetch: the stored bearer token beside the session cookie. */
+function authFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+  return createAuthenticatedFetch()(input, init);
+}
 
 /**
  * One row of the conversation-history list.
@@ -143,7 +149,7 @@ async function fetchConversationDetail(
   apiBase: string,
   id: string,
 ): Promise<ConversationListItem | undefined> {
-  const res = await fetch(`${apiBase}/conversations/${encodeURIComponent(id)}`, {
+  const res = await authFetch(`${apiBase}/conversations/${encodeURIComponent(id)}`, {
     credentials: 'include',
   });
   if (!res.ok) return undefined;
@@ -168,7 +174,7 @@ export function useConversationList(
   const remove = useCallback(
     async (id: string) => {
       try {
-        await fetch(`${apiBase}/conversations/${encodeURIComponent(id)}`, {
+        await authFetch(`${apiBase}/conversations/${encodeURIComponent(id)}`, {
           method: 'DELETE',
           credentials: 'include',
         });
@@ -189,7 +195,7 @@ export function useConversationList(
       setConversations((rows) =>
         rows.map((r) => (r.id === id ? { ...r, title: trimmed || undefined } : r)),
       );
-      const res = await fetch(`${apiBase}/conversations/${encodeURIComponent(id)}`, {
+      const res = await authFetch(`${apiBase}/conversations/${encodeURIComponent(id)}`, {
         method: 'PATCH',
         credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
@@ -216,7 +222,7 @@ export function useConversationList(
     setError(undefined);
     (async () => {
       try {
-        const res = await fetch(
+        const res = await authFetch(
           `${apiBase}/conversations?limit=${encodeURIComponent(String(limit))}`,
           { credentials: 'include' },
         );

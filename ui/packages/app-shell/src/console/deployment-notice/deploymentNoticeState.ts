@@ -32,6 +32,12 @@
  */
 
 import { bearerAuthHeaders } from '../../utils/authToken.js';
+import { createAuthenticatedFetch } from '@object-ui/auth';
+
+/** The console's authenticated fetch: the stored bearer token beside the session cookie. */
+function authFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+  return createAuthenticatedFetch()(input, init);
+}
 
 export type DeploymentFindingId =
   | 'database_local_file'
@@ -91,7 +97,7 @@ export function parseDeploymentNotice(body: unknown): DeploymentNoticeState | nu
 
 export async function fetchDeploymentNotice(): Promise<DeploymentNoticeState | null> {
   try {
-    const res = await fetch(`${serverUrl()}${NOTICE_PATH}`, {
+    const res = await authFetch(`${serverUrl()}${NOTICE_PATH}`, {
       credentials: 'include',
       headers: { Accept: 'application/json', ...bearerAuthHeaders() },
     });
@@ -107,7 +113,7 @@ export type HideAnswer = 'hidden' | 'no-audit-log' | 'changed' | 'failed';
 
 export async function hideDeploymentNotice(fingerprint: string): Promise<HideAnswer> {
   try {
-    const res = await fetch(`${serverUrl()}${NOTICE_PATH}/hide`, {
+    const res = await authFetch(`${serverUrl()}${NOTICE_PATH}/hide`, {
       method: 'POST',
       credentials: 'include',
       headers: { 'Content-Type': 'application/json', Accept: 'application/json', ...bearerAuthHeaders() },
