@@ -191,6 +191,53 @@ describe('the area mounts the metadata pages (objectstack#28561)', () => {
   });
 });
 
+/**
+ * objectstack#36897 — on a read-only base with its customization handed in,
+ * the create is the pair's: the ensure door is asked once and its answer's
+ * package opens the create; a walled door, or a refusal, never writes.
+ */
+describe("a read-only base's create opens in its .custom pair (objectstack#36897)", () => {
+  const PAIR = `${READ_ONLY}.custom`;
+  const customizationOf = (walled: boolean, ensurePackage: () => Promise<unknown>) =>
+    ({ base: READ_ONLY, baseLabel: 'HR', basedOn: null, walled, pairId: null, ensure: async () => PAIR, ensurePackage }) as any;
+  function mountCustomized(customization: unknown) {
+    return render(
+      <MemoryRouter initialEntries={[`/studio/${READ_ONLY}/metadata/translation/new?package=${READ_ONLY}`]}>
+        <Where />
+        <Routes>
+          <Route path={`/studio/${READ_ONLY}/metadata/*`} element={<StudioMetadataArea packageId={READ_ONLY} customization={customization as any} />} />
+          <Route path="/studio/:packageId/metadata/*" element={<PackageArea />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+  }
+
+  it("the ensure door's pair opens the create", async () => {
+    listed.set(PAIR, { id: PAIR, name: 'HR (customizations)', writable: true, manifest: {} });
+    const ensurePackage = vi.fn(async () => ({ basePackageId: READ_ONLY, packageId: PAIR, namespace: 'hrx', created: true, writable: true }));
+    mountCustomized(customizationOf(false, ensurePackage));
+    await waitFor(() => expect(where()).toBe(`/studio/${PAIR}/metadata/translation/new?package=${encodeURIComponent(PAIR)}`));
+    expect((await page()).page).toBe('create');
+    expect(ensurePackage).toHaveBeenCalledTimes(1);
+  });
+
+  it('a refusal is shown where the create was asked, and nothing opens', async () => {
+    const ensurePackage = vi.fn(async () => {
+      throw new Error('The customization package could not be created.');
+    });
+    mountCustomized(customizationOf(false, ensurePackage));
+    expect(await screen.findByTestId('studio-area-pair-create-refused')).toHaveTextContent('could not be created');
+    expect(where()).toBe(`/studio/${READ_ONLY}/metadata/translation/new?package=${READ_ONLY}`);
+  });
+
+  it('a walled door never asks, and lands on the list as before', async () => {
+    const ensurePackage = vi.fn();
+    mountCustomized(customizationOf(true, ensurePackage));
+    expect((await page()).page).toBe('list');
+    expect(ensurePackage).not.toHaveBeenCalled();
+  });
+});
+
 describe('a pillar type opened from the area opens its pillar', () => {
   for (const [type, pillar] of [
     ['object', 'data'],
