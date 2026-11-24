@@ -50,12 +50,13 @@ describe('zodIssuesToFields — invalid_union expansion (#5014)', () => {
             const body = { object: 'account', query: { object: 'account', search: { fields: ['name'] } } };
             const fields = fieldsFor(FindDataRequestSchema as unknown as z.ZodType, body);
 
-            // The union's own entry is still there, unchanged — clients read it today.
-            expect(fields).toContainEqual({
+            // [#35433] The union's own bare entry is gone: the branch below
+            // explains it, so `fields[0]` is the located cause.
+            expect(fields).not.toContainEqual(expect.objectContaining({
                 field: 'query.search',
                 code: 'invalid_shape',
-                message: 'Invalid input',
-            });
+            }));
+            expect(fields[0]!.field).toBe('query.search.query');
 
             // …and now the branch that explains it reaches the author. `required`,
             // not `invalid_type`: the branch path is RELATIVE to the union, so the
@@ -146,11 +147,11 @@ describe('zodIssuesToFields — invalid_union expansion (#5014)', () => {
             const member = (n: number) => z.object({ [`k${n}`]: z.string() });
             const schema = z.object({ u: z.union([member(1), member(2), member(3), member(4), member(5)]) });
             const fields = fieldsFor(schema, { u: {} });
-            // 1 union anchor + exactly 3 of the 5 tied branches: an author fixing
-            // one shape does not need the other four spelled out, and an unbounded
-            // expansion is how a union with many members becomes unreadable.
-            expect(fields).toHaveLength(4);
-            expect(fields[0]).toEqual({ field: 'u', code: 'invalid_shape', message: 'Invalid input' });
+            // Exactly 3 of the 5 tied branches: an author fixing one shape does
+            // not need the other four spelled out, and an unbounded expansion is
+            // how a union with many members becomes unreadable. The explained
+            // bare union entry is not among them (#35433).
+            expect(fields.map((f) => f.field)).toEqual(['u.k1', 'u.k2', 'u.k3']);
         });
     });
 
@@ -196,12 +197,13 @@ describe('zodIssuesToFields — invalid_union expansion (#5014)', () => {
 
     describe('wire compatibility (ADR-0114)', () => {
         /**
-         * The expansion is ADDITIVE. Every entry the route emitted before still
-         * appears, in the same order, with the same `field`/`code`/`message`;
-         * branch entries are inserted after the union entry they explain. Nothing
-         * about `{field, code, message}` changes, which is what ADR-0114 requires
-         * of anything sharing `mapDataError`'s envelope — the array's LENGTH was
-         * never part of that contract.
+         * Branch entries take the place of the union entry they explain, and
+         * nothing about `{field, code, message}` changes, which is what ADR-0114
+         * requires of anything sharing `mapDataError`'s envelope — the array's
+         * LENGTH was never part of that contract. [#35433] The union entry
+         * itself — zod's bare `Invalid input`, `invalid_shape` — is dropped when
+         * an entry below explains it, and kept when nothing does; the
+         * expansion is no longer strictly additive, by the maintainer's ruling.
          */
         it('leaves non-union issues mapped exactly one-to-one', () => {
             const schema = z.object({ a: z.string(), b: z.number() });
@@ -212,18 +214,23 @@ describe('zodIssuesToFields — invalid_union expansion (#5014)', () => {
             ]);
         });
 
-        it('keeps the union entry first and unchanged among its expansion', () => {
+        it('puts the explanation where the explained union entry stood, and keeps an unexplained one', () => {
             const schema = z.object({
                 a: z.string(),
                 u: z.union([z.string(), z.object({ deep: z.string() })]),
-                z: z.number(),
+                z: z.string(),
             });
-            const fields = fieldsFor(schema, { a: 'ok', u: {}, z: 1 });
-            const idx = fields.findIndex((f) => f.field === 'u');
-            expect(fields[idx]).toEqual({ field: 'u', code: 'invalid_shape', message: 'Invalid input' });
-            // The independent `z`/`a` issues keep their own relative order.
-            expect(fields.filter((f) => f.field === 'u.deep')).toHaveLength(1);
-            expect(fields.findIndex((f) => f.field === 'u.deep')).toBe(idx + 1);
+            const fields = fieldsFor(schema, { a: 1, u: {}, z: 1 });
+            // [#35433] `u`'s bare entry is dropped; its one cause sits in its
+            // place, between the independent `a` and `z` issues.
+            expect(fields.map((f) => [f.field, f.code])).toEqual([
+                ['a', 'invalid_type'], ['u.deep', 'required'], ['z', 'invalid_type'],
+            ]);
+
+            // CONTROL — every branch a bare kind mismatch: nothing explains the
+            // union, so its own entry is the whole answer and stays.
+            const alone = fieldsFor(z.object({ u: z.union([z.string(), z.number()]) }), { u: {} });
+            expect(alone).toEqual([{ field: 'u', code: 'invalid_shape', message: 'Invalid input' }]);
         });
 
         it('still tolerates junk in place of an issue list', () => {
