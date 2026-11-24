@@ -8,7 +8,7 @@ Clause-②: no (narrowing)
 Metadata-protocol: none
 Skills-docs: none (no skills/ page names the union's `invalid_shape` / `Invalid input` entry or reads `fields[]` by position)
 
-What narrows: `zodIssuesToFields` (`@objectstack/spec/api`, re-exported by `@objectstack/rest`) no longer emits a union's own `{ code: 'invalid_shape', message: 'Invalid input' }` entry when an entry below it explains the failure, at every depth. Every `400 VALIDATION_FAILED` / `VALIDATION_ERROR` whose `fields[]` comes from it moves: the query door, personal-view config saves, and the other declared-schema ingress doors. `fields[0]` of such a refusal is now the first located cause.
+What narrows: `zodIssuesToFields` (`@objectstack/spec/api`) no longer emits a union's own `{ code: 'invalid_shape', message: 'Invalid input' }` entry when an entry below it explains the failure, at every depth. A `400 VALIDATION_FAILED` whose `fields[]` comes from it moves only when the refused value sits on a union slot with a branch that explains the failure: the query door, personal-view config saves, and the other declared-schema ingress doors can answer one. Plain create, update, bulk and batch record writes emit no such entry and do not move. `fields[0]` of a refusal that does move is now the first located cause.
 
 <!-- adr-0087: not-required (no-migration-prescription) No schema key, accepted value or metadata type is added, removed or renamed, and nothing stored is rewritten: what moves is which entries a refusal's fields list carries, computed afresh on every refused request. The accept set is unchanged. The one reading instruction is in the body: read entries by field and code, never by index. -->
 
@@ -29,4 +29,4 @@ The fix for a caller that read `fields[0]` expecting the union's slot: find the 
 
 The comparison is against zod's exact default text, held in one constant beside the mapper and pinned against a real zod parse, so a zod upgrade that rewords the default fails a test instead of quietly bringing every such entry back.
 
-**Now the same as the metadata envelope.** This is the rule a refused metadata save's `issues[]` took in the previous release (`@objectstack/metadata-protocol`), so the two machine-read lists say the same thing about one value; the cross-package parity test pins them entry for entry. The terminal renderer (`formatZodError`, the CLI) still prints the union line as the parent of its indented tree.
+**Now the same as the metadata envelope.** This is the rule a refused metadata save's `issues[]` takes (`@objectstack/metadata-protocol`, whose change ships in this same release), so the two machine-read lists say the same thing about one value; the cross-package parity test pins them entry for entry. The terminal renderer (`formatZodError`, the CLI) still prints the union line as the parent of its indented tree.

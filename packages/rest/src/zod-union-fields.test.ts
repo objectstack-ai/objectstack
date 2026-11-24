@@ -260,9 +260,11 @@ describe('zodIssuesToFields — invalid_union expansion (#5014)', () => {
  * 'Invalid key in record'}` — with the sentence naming the rule produced and
  * dropped, which is #5014 verbatim.
  *
- * The expansion is strictly ADDITIVE, same contract as #5014: the container's
- * own entry stays (it is the only one naming the slot, and existing clients
- * read it) and the leaf entries follow it. ADR-0114's `{field, code, message}`
+ * This expansion is strictly ADDITIVE: the container's own entry stays (its
+ * code is the only one saying a KEY was refused, and existing clients read it)
+ * and the leaf entries follow it. The union expansion (#5014) no longer is —
+ * since #35433 an explained union entry is dropped — so the two descents now
+ * differ on exactly this point. ADR-0114's `{field, code, message}`
  * shape is unchanged, and the container entry keeps mapping to `invalid_shape`.
  *
  * Every fixture drives a REAL `safeParse`, for the reason the file's header
