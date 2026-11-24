@@ -817,6 +817,10 @@ export const koMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "관련 목록 열",
         helpText: "상위 레코드 상세 페이지에서 이 관계의 관련 목록 열로, 이(하위) 객체의 필드 이름입니다(예: name, status). 설정하지 않으면 하위 객체에서 도출됩니다. 이름만 지정하며, 레이블, 셀 유형, 서식은 하위 객체의 필드 정의에서 가져옵니다."
       },
+      inlineEdit: {
+        label: "Inline Edit",
+        helpText: "How the parent's form edits this child's rows when a field group of the parent names this child (fieldGroups[].relatedList). Unset: picked from this object's fields."
+      },
       inlineTitle: {
         label: "인라인 제목",
         helpText: "상위 레코드의 인라인 마스터-세부 그리드 제목입니다."

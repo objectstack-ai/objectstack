@@ -936,6 +936,29 @@ const baseDefaultPermissionSets: PermissionSet[] = [
       // (ADR-0090 D5). An external member resolves `external_default` and gets
       // no such line.
       sys_unit: { allowRead: true, allowCreate: false, allowEdit: false, allowDelete: false },
+      // [#36942 — maintainer ruling 7131539862, verbatim 「1. #36942 任务/备忘默认权限： A。」]
+      // The platform's built-in tasks and notes (`@objectstack/platform-objects`
+      // `work/`), for every member, whichever application is installed: read,
+      // create and edit, in the `sys_comment` shape above (ruling 6633054352).
+      // Left to applications, the capability would depend on which package is
+      // installed and vanish on uninstall; read only would leave a task nobody
+      // can tick done.
+      //
+      // These two lines open the OBJECTS. WHICH ROWS is each object's own
+      // private sharing, and ⛔ no row policy is added for either: a task is
+      // read by its creator (`owner_id`, stamped on insert) and its assignee
+      // (the declared `sys_task_assignee` rule, a `field` recipient on
+      // `assignee_id` with `edit` access); a note by its creator. Another
+      // member reads neither, by id or by list — the premise the ruling rests
+      // on, pinned with this grant in place by
+      // `task-note-objects-36942.test.ts`. The assignee's edit lands through
+      // that share: the `owner_only_writes` floor below defers to an `edit`
+      // share, measured there too, so no per-object alternative is added.
+      //
+      // ⛔ No `allowDelete`, for the anchor reason above. An external member
+      // resolves `external_default` and gets no such line.
+      sys_task: { allowRead: true, allowCreate: true, allowEdit: true, allowDelete: false },
+      sys_note: { allowRead: true, allowCreate: true, allowEdit: true, allowDelete: false },
     },
     // [#21237] The identity object's `Admin` group is admin-review data, not a
     // staff directory: `sys_user_org_members` below opens every org peer's row,

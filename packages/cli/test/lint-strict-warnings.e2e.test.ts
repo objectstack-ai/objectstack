@@ -136,7 +136,7 @@ function stack(
 ): string {
   const { engines = true, requireMaster = true, adviseMaster = true, unknownColumn = false } = opts;
   const enginesLine = engines ? `engines: { protocol: '>=1' },` : '';
-  const masterAdvice = adviseMaster ? `deleteBehavior: 'cascade', inlineEdit: true,` : '';
+  const masterAdvice = adviseMaster ? `deleteBehavior: 'cascade',` : '';
   const lineGroup = adviseMaster ? `fieldGroups: [{ key: 'lines', label: 'Lines', relatedList: '${ns}_line' }],` : '';
   const masterRequired = requireMaster ? `required: true,` : '';
   const columns = unknownColumn ? `'title', 'nope_missing'` : `'title'`;

@@ -102,6 +102,7 @@ import { useDesignModeActive } from './designMode.js';
 import { electSidebarArea, type SidebarAreaRoute } from './sidebarAreaElection.js';
 import type { FavoriteItem } from '../hooks/useFavorites.js';
 import { usePhoneAppHomeSlot } from './PhoneAppHome.js';
+import { useSidebarFooterSlot } from './sidebarFooterSlot.js';
 
 /**
  * The app's menu as the design mode edits it (objectstack#36363). Loaded on
@@ -569,6 +570,8 @@ export function UnifiedSidebar({ activeAppName, onAppChange, railOverlay = false
   // holds (`PhoneAppHome`), so the page lists what the sidebar lists, in its
   // order, under the same gates.
   const phoneHomeSlot = usePhoneAppHomeSlot();
+  // objectstack#36739 — what the host draws at the sidebar's bottom.
+  const footerSlot = useSidebarFooterSlot();
 
   // One ⋯ menu on every entry, in place of the pin action (objectui#12427):
   // its first entry adds the entry to Favorites or removes it, through the
@@ -969,6 +972,7 @@ export function UnifiedSidebar({ activeAppName, onAppChange, railOverlay = false
       </SidebarContent>
       {shellChrome && (
         <SidebarFooter className="gap-1 border-t border-sidebar-border p-2">
+          {footerSlot?.('sidebar')}
           <AccountMenu trigger="sidebar" />
         </SidebarFooter>
       )}
@@ -999,6 +1003,7 @@ export function UnifiedSidebar({ activeAppName, onAppChange, railOverlay = false
             data-testid="phone-app-home-nav"
           >
             {renderAppMenu('home')}
+            {footerSlot?.('phoneAppHome')}
           </nav>,
           phoneHomeSlot,
         )

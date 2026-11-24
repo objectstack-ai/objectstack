@@ -7,6 +7,7 @@ import type {
 } from '@objectstack/spec/contracts';
 import type { KnowledgeSource } from '@objectstack/spec/ai';
 import { KNOWLEDGE_SERVICE } from '@objectstack/spec/contracts';
+import { RECORD_RESTORED_EVENT } from '@objectstack/spec/data';
 import { KnowledgeService } from './knowledge-service.js';
 import type { KnowledgeLogger } from './knowledge-service.js';
 import type { KnowledgeFieldSecurity } from './knowledge-source-admission.js';
@@ -41,9 +42,15 @@ export interface KnowledgeServicePluginOptions {
   sources?: KnowledgeSource[];
   /**
    * Subscribe to ObjectQL `data.record.created` / `data.record.updated` /
-   * `data.record.deleted` events from `IRealtimeService` for `object`
-   * sources. Defaults to `true`. Set to `false` to disable inline event
-   * sync (e.g. when an external indexer drives upserts).
+   * `data.record.restored` / `data.record.deleted` events from
+   * `IRealtimeService` for `object` sources. Defaults to `true`. Set to
+   * `false` to disable inline event sync (e.g. when an external indexer drives
+   * upserts).
+   *
+   * A created, updated or restored row is re-read against each source's
+   * `where` (with a data engine bound): a matching row is indexed from the
+   * re-read row, and a row that does not match has its document removed —
+   * see `KnowledgeService.handleRecordUpsert`.
    *
    * The aggregate `data.records.updated` / `data.records.deleted` events a
    * predicate write (`multi: true`) publishes carry a count, not records:
@@ -215,14 +222,19 @@ export class KnowledgeServicePlugin implements Plugin {
         // `{ recordId, after }` as if it were the row (a document with none of
         // the record's fields), and a delete never resolves an id at all.
         //
-        // These three are the only per-record names the ObjectQL engine
-        // publishes. There is deliberately no `record.created|updated|deleted`
+        // These four are the only per-record names the ObjectQL engine
+        // publishes: created, updated, deleted, and `data.record.restored`
+        // (`RECORD_RESTORED_EVENT`, one per row a recycle-bin restore writes
+        // back — a restore is never a create, ADR-0148 D2). A restored row
+        // takes the upsert path: it is re-read against each source's `where`
+        // like any other written row, so it re-enters the index only if it
+        // matches. There is deliberately no `record.created|updated|deleted`
         // branch: no producer emits those names (the spec's `RealtimeEventType`
         // dropped them for the same reason), so a branch for them is dead code
         // plus a `payload.record ?? payload` fallback for a shape nobody sends.
         // An event type this handler does not name — those, and `metadata.*`
         // too — falls through without a sync.
-        if (type === 'data.record.created' || type === 'data.record.updated') {
+        if (type === 'data.record.created' || type === 'data.record.updated' || type === RECORD_RESTORED_EVENT) {
           const record = payload.after as Record<string, unknown> | undefined;
           if (record && typeof record === 'object') {
             await service.handleRecordUpsert(object, record);
@@ -258,6 +270,9 @@ export class KnowledgeServicePlugin implements Plugin {
         // half-claimed, and stays so until a real object source justifies the
         // adapter-enumeration surface it would need (#4606's enforced-first
         // rule). Reporting it accurately is the whole job of this branch.
+        // An explicit reindexSource refreshes the rows that still exist and
+        // match; it removes no documents, so a predicate DELETE stays stale
+        // until the index purge (#37096) — the warning says so.
         if (type === 'data.records.updated' || type === 'data.records.deleted') {
           const matched = payload.matched;
           ctx.logger.warn?.(
@@ -267,7 +282,9 @@ export class KnowledgeServicePlugin implements Plugin {
               'may now be stale and cannot be repaired from the event stream. ' +
               'Retention-sweep deletes are covered separately: the lifecycle reap guard de-indexes those rows ' +
               'before they are deleted; ' +
-              'application-level predicate writes are not, and need an explicit reindexSource.',
+              'application-level predicate writes are not. An explicit reindexSource refreshes the documents of rows ' +
+              'that still exist and match; it removes none, so the documents of deleted rows stay in the index ' +
+              'until an index purge removes them.',
             { object, type, matched },
           );
           return;
