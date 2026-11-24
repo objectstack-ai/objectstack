@@ -94,12 +94,20 @@ const stackConfig = () => ({
   })),
 });
 
-/** What the sharing-rule service serves, as a system caller lists it: [id, name] per rule. */
+/**
+ * What the sharing-rule service serves on the fixture's object, as a system
+ * caller lists it: [id, name] per rule.
+ *
+ * Scoped to `crm_deal` because platform packages declare sharing rules of
+ * their own, which every boot serves (`@objectstack/platform-objects` declares
+ * `sys_task_assignee` on `sys_task`). Every rule this fixture declares or
+ * inserts is on `crm_deal`, so each one is still counted, exactly.
+ */
 async function servedRules(kernel: { getService(name: string): unknown }): Promise<Array<[string, string]>> {
   const service = kernel.getService('sharingRules') as {
     listRules(filter: Record<string, unknown>, context: Record<string, unknown>): Promise<Array<{ id: string; name: string }>>;
   };
-  return (await service.listRules({}, { isSystem: true, positions: [], permissions: [] })).map((r) => [r.id, r.name]);
+  return (await service.listRules({ object: 'crm_deal' }, { isSystem: true, positions: [], permissions: [] })).map((r) => [r.id, r.name]);
 }
 
 let dir: string;
