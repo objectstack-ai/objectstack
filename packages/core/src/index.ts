@@ -237,6 +237,11 @@ export * from './utils/operation-user-message.js';
 // resolve with it (one name space for both doors).
 export * from './utils/object-not-found.js';
 
+// The one `OBJECT_PACKAGE_DISABLED` envelope: the data door, the by-name
+// `/meta` reads and the Change Owner doors refuse an object of a disabled
+// package with it. `@objectstack/metadata-protocol` re-exports it.
+export * from './utils/object-package-disabled.js';
+
 // [#22777] The one walk that finds a filter's nested-relation conditions and
 // their target objects: the data door (`@objectstack/metadata-protocol`) and
 // the MCP stdio data bridge (`@objectstack/mcp`) ask each target its exposure

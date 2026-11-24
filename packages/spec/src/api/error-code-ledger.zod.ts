@@ -1211,6 +1211,14 @@ export const ERROR_CODE_LEDGER = {
     // capability is off, and it is not `PERMISSION_DENIED`, the answer the write
     // path gives a caller who lacks the transfer grant on an object that offers it.
     'CHANGE_OWNER_DISABLED',
+    // [#36261] 404 from the same two Change Owner doors, the same wire path
+    // (`handleRouteError` passthrough): an object of a disabled package is
+    // refused before its switch is read, with the data door's own envelope.
+    // Stamped by `objectPackageDisabledError` (`utils/object-package-disabled.ts`),
+    // the ONE constructor, moved down from `@objectstack/metadata-protocol` so
+    // core's Change Owner rules raise it; metadata-protocol re-exports it and
+    // keeps its row for the data door. Provenance, not identity.
+    'OBJECT_PACKAGE_DISABLED',
     'ERR_BULK_RESULT_MISMATCH',
     'FILTER_TOKEN_UNKNOWN',       // filter references an unknown context token
     'FILTER_TOKEN_UNRESOLVED',
