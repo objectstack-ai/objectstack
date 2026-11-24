@@ -55,13 +55,25 @@ const filteredField = {
 
 /**
  * The server, as the picker sees it: a query answers the rows of `table` its
- * `$filter` admits — field equality (bare or `$eq`) under any `$and` nesting
- * is all these rows need.
+ * `$filter` admits. The picker sends either an object filter (field equality,
+ * bare or `$eq`) or a filter AST (`['and', …]`, `[field, '=', value]`, a list
+ * of conditions); equality under any nesting is all these rows need.
  */
 function admits(row: Record<string, unknown>, filter: unknown): boolean {
   if (!filter || typeof filter !== 'object') return true;
-  const f = filter as Record<string, unknown>;
-  return Object.entries(f).every(([key, cond]) => {
+  if (Array.isArray(filter)) {
+    const [head, ...rest] = filter as unknown[];
+    if (head === 'and') return rest.every((part) => admits(row, part));
+    if (head === 'or') return rest.some((part) => admits(row, part));
+    if (typeof head === 'string' && filter.length === 3) {
+      const [, op, value] = filter as [string, string, unknown];
+      if (op === '=' || op === '==' || op === 'eq') return row[head] === value;
+      if (op === 'in') return Array.isArray(value) && value.includes(row[head]);
+      throw new Error(`test server: unhandled operator ${op}`);
+    }
+    return (filter as unknown[]).every((part) => admits(row, part));
+  }
+  return Object.entries(filter as Record<string, unknown>).every(([key, cond]) => {
     if (key === '$and' && Array.isArray(cond)) return cond.every((part) => admits(row, part));
     const want = cond && typeof cond === 'object' && '$eq' in (cond as object) ? (cond as any).$eq : cond;
     return row[key] === want;
