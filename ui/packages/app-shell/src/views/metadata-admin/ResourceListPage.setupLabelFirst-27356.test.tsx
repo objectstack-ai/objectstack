@@ -8,6 +8,8 @@
  * The same page outside Setup is the control: the API name column, the Label
  * column and the type's label as the title, as before.
  */
+// Paid at collection, not inside a case's clock (check:test-source-alias).
+import '@objectstack/lint';
 import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
 import { render, cleanup, screen, within } from '@testing-library/react';
 import '@testing-library/jest-dom';
@@ -104,6 +106,9 @@ function mount(appName: string) {
 
 const headers = () => Array.from(document.querySelectorAll('thead th')).map((th) => th.textContent);
 
+/** The table row of `el`'s first cell: the row's test id sits there, and `ObjectGrid` draws the row (objectstack#36897). */
+const trOf = (el: HTMLElement) => el.closest('tr') as HTMLElement;
+
 describe('a metadata list under Setup leads with labels (objectstack#27356 row 5)', () => {
   it('titles the page as the navigation entry that opens it', async () => {
     mount('setup');
@@ -139,7 +144,7 @@ describe('a metadata list under Setup leads with labels (objectstack#27356 row 5
   it('clamps a description to two lines and keeps the whole text on hover', async () => {
     mount('setup');
     await screen.findByRole('link', { name: 'Sales Director' });
-    const row = screen.getByTestId('metadata-row-sales_director');
+    const row = trOf(screen.getByTestId('metadata-row-sales_director'));
     const clamp = within(row).getByText(LONG);
     expect(clamp).toHaveClass('line-clamp-2');
     expect(clamp).toHaveAttribute('title', LONG);

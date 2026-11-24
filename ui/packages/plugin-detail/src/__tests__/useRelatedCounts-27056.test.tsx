@@ -17,6 +17,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { act, renderHook } from '@testing-library/react';
 import { RelatedCountStore } from '@object-ui/components';
+import { notifyDataChanged } from '@object-ui/react';
 import {
   prefetchRelatedCounts,
   relatedCountTargetsIn,
@@ -243,5 +244,97 @@ describe('relatedCountTargetsIn (objectstack#27056)', () => {
       { id: 'note.account', objectName: 'note', relationshipField: 'account' },
       { id: 'order.account', objectName: 'order', relationshipField: 'account', filter: { status: 'open' } },
     ]);
+  });
+});
+
+/**
+ * objectstack#36922 — a related list's row action, then a delete: the badge
+ * follows the list.
+ *
+ * A row action writes twice to the data-change bus, a beat apart: the
+ * dataSource write's own mutation event, then the bridge's
+ * `notifyRelatedChanged` once the runner returns. The first change sends a
+ * re-count; the second overtakes it while it is out. The overtaken read
+ * installs nothing, and that absence must not be read as a failed count: a
+ * count marked failed is never asked again for this parent, so every later
+ * write (a delete, a create) left the badge on its old number.
+ */
+describe('useRelatedCounts after a row action (objectstack#36922)', () => {
+  const ONE: RelatedCountTarget[] = [{ id: 'task.account', objectName: 'task', relationshipField: 'account' }];
+
+  async function mounted() {
+    const { reads, dataSource } = heldSource();
+    const hook = renderHook(() => useRelatedCounts(ONE, { parentId: 'acc-1', dataSource, fieldsOf: () => FIELDS }));
+    await flush();
+    await act(async () => reads[0].resolve(9));
+    await flush();
+    expect(hook.result.current.stateOf('task.account')).toEqual({ kind: 'counted', count: 9 });
+    return { reads, dataSource, hook };
+  }
+
+  const write = async () => {
+    act(() => notifyDataChanged({ objectName: 'task' }));
+    await flush();
+  };
+
+  it('control: a plain delete re-counts', async () => {
+    const { reads, hook } = await mounted();
+    await write();
+    expect(reads).toHaveLength(2);
+    await act(async () => reads[1].resolve(8));
+    await flush();
+    expect(hook.result.current.stateOf('task.account')).toEqual({ kind: 'counted', count: 8 });
+  });
+
+  it('a row action whose second change overtakes the re-count, then a delete: re-counted', async () => {
+    const { reads, hook } = await mounted();
+    // The row action: the write's own event sends a re-count …
+    await write();
+    expect(reads).toHaveLength(2);
+    // … and the bridge's event lands while that re-count is out.
+    await write();
+    await act(async () => {
+      for (const r of reads.slice(1)) r.resolve(9);
+    });
+    await flush();
+    await act(async () => {
+      for (const r of reads.slice(1)) r.resolve(9);
+    });
+    await flush();
+    expect(hook.result.current.stateOf('task.account')).toEqual({ kind: 'counted', count: 9 });
+
+    // The delete.
+    const before = reads.length;
+    await write();
+    expect(reads.length).toBeGreaterThan(before);
+    await act(async () => {
+      for (const r of reads.slice(before)) r.resolve(8);
+    });
+    await flush();
+    expect(hook.result.current.stateOf('task.account')).toEqual({ kind: 'counted', count: 8 });
+  });
+
+  it('a row action, then a create from the list: re-counted', async () => {
+    const { reads, hook } = await mounted();
+    await write();
+    await write();
+    await act(async () => {
+      for (const r of reads.slice(1)) r.resolve(9);
+    });
+    await flush();
+    await act(async () => {
+      for (const r of reads.slice(1)) r.resolve(9);
+    });
+    await flush();
+
+    // The create: the form overlay's save reaches the bus as a change to the child.
+    const before = reads.length;
+    await write();
+    expect(reads.length).toBeGreaterThan(before);
+    await act(async () => {
+      for (const r of reads.slice(before)) r.resolve(10);
+    });
+    await flush();
+    expect(hook.result.current.stateOf('task.account')).toEqual({ kind: 'counted', count: 10 });
   });
 });

@@ -86,7 +86,7 @@ import {
   type ConcurrentUpdateConflict,
 } from '@object-ui/plugin-detail';
 import { ChevronRight, ChevronLeft, ChevronsLeft, ChevronsRight, Download, Rows2, Rows3, Rows4, AlignJustify, Loader2, Check } from 'lucide-react';
-import { useRowColor } from './useRowColor';
+import { useRowColor, rowTintClass } from './useRowColor';
 import { GroupRow } from './GroupRow';
 import { resolveRowCrudAffordances, resolveRowRecordCrudAffordance } from './rowCrudAffordances';
 import { useRecordCrudVerdicts } from './hooks/useRecordCrudVerdicts';
@@ -100,7 +100,7 @@ import { RowActionMenu, formatActionLabel } from './components/RowActionMenu';
 import { BulkActionBar, FloatingSelectionBarAnchor } from './components/SelectionBar';
 import { RowContextMenuItems, SelectionContextMenuItems } from './components/RowContextMenu';
 import { BulkActionDialog } from './components/BulkActionDialog';
-import type { BulkResult } from './hooks/useBulkExecutor';
+import type { BulkRecordVerdict, BulkResult } from './hooks/useBulkExecutor';
 import type { BulkActionDef } from '@object-ui/types';
 import { type ObjectGridColumnDraft } from './objectGridColumns';
 import { rowRecordId } from './objectGridLinkCell';
@@ -379,6 +379,39 @@ export interface ObjectGridComponentProps extends ObjectGridExternalPaginationPr
    * composes, nothing an author writes, and no node key reaches it.
    */
   recordLinkAdornment?: (record: any) => React.ReactNode;
+  /**
+   * [objectstack#36897] Host-drawn cells, by column field: a shown column
+   * whose field is a key here draws what the host returns for the row, in
+   * place of the grid's own cell renderer. Called with the row's value at
+   * that field and the row record. A column whose field is not a key keeps
+   * the grid's own cell, and an absent prop changes nothing.
+   *
+   * For a host whose rows are not records of an object (the console's
+   * metadata list: a switch with a confirm, a lock, a clone button): the grid
+   * still owns the table, its header, sort arrows, paging and row clicks; the
+   * host owns what a cell says. Table view only: the phone's card rows keep
+   * the grid's own title and summary.
+   *
+   * The table keeps its columns as state, re-seeded after a change of their
+   * identity: a host whose cells draw from state of its own passes the same
+   * functions on every render and reads that state when called (a ref), so
+   * a change redraws at once.
+   *
+   * A RUNTIME prop, never authored metadata: it is a React node a host
+   * composes, nothing an author writes, and no node key reaches it.
+   */
+  hostCells?: Readonly<Record<string, (value: any, record: any) => React.ReactNode>>;
+  /**
+   * [objectstack#36897] A host-chosen tint for ONE row, as a colour name of
+   * the palette `rowColor` resolves (`red`, `amber`, …). `null`, `undefined`
+   * or a name outside the palette tints nothing; where it names one it wins
+   * over the row's authored `rowColor`. The tint reaches the row's sticky
+   * cells as `rowColor`'s does.
+   *
+   * A RUNTIME prop, never authored metadata: the host decides it, and no node
+   * key reaches it.
+   */
+  rowTint?: (record: any) => string | null | undefined;
   /**
    * [objectstack#33317] Whether a click on a row opens anything, as the HOST
    * that owns the row click knows it. `false` ⇒ the row's record-link cells
@@ -913,6 +946,8 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
   rowOperations,
   rowAdornment,
   recordLinkAdornment,
+  hostCells,
+  rowTint,
   rowOpensRecord,
   cellSelection: cellSelectionProp,
   headerMenu: hostHeaderMenu,
@@ -1767,7 +1802,7 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
   });
 
   // --- Action support for action columns ---
-  const { execute: executeAction, updateContext: updateActionContext } = useAction();
+  const { execute: executeAction, updateContext: updateActionContext, runner: actionRunner } = useAction();
 
   // Publish the checkbox selection into the shared ActionRunner context so
   // actions rendered OUTSIDE the grid but inside the same <ActionProvider>
@@ -2859,7 +2894,7 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
     def: BulkActionDef,
     row: Record<string, unknown>,
     params: Record<string, unknown>,
-  ): Promise<void> => {
+  ): Promise<BulkRecordVerdict | void> => {
     const source = def.actionDef as Record<string, any> | undefined;
     if (!source) return;
     const {
@@ -2869,13 +2904,18 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
       resultDialog: _resultDialog,
       ...rest
     } = stripCollectedActionKeys(source);
-    const res = await executeAction({
+    // Dispatched with `reportsRefusal` for this one call (the runner's
+    // `callContext`): a handler that meets a refusal answers it on
+    // `res.refusal` and opens no notice of its own, because the result panel
+    // lists every refused record with its own sentence. One notice per record
+    // would stack N dialogs on that panel; one shared notice would name one.
+    const res = await actionRunner.execute({
       ...rest,
       // `_rowRecord` is the same row-context key the list_item path attaches,
       // so `recordIdParam` / `recordIdField` injection behaves identically.
       params: { ...params, _rowRecord: row },
       toast: { showOnSuccess: false, showOnError: false },
-    } as any);
+    } as any, { reportsRefusal: true });
     // Reject so the executor records this row under its own id in the result
     // (and the error CSV) instead of counting a failed action as succeeded.
     // The refusal's producer-marked `userMessage` rides on the rejection, as
@@ -2885,6 +2925,10 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
       const error = new Error(res?.error || `Action ${def.name} failed`);
       throw res?.userMessage ? Object.assign(error, { userMessage: res.userMessage }) : error;
     }
+    // A refused run is a successful evaluation whose answer was no: it wrote
+    // nothing, so the executor counts it as refused, never as succeeded, and
+    // lists it with this record's own sentence.
+    if (res.refusal) return { refusal: { message: res.refusal.message } };
   };
 
   // Whole-selection dispatcher for a def that opted into
@@ -3554,15 +3598,24 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
   // objectui#13330 — the host's node beside each row's title (`rowAdornment`):
   // in the declared name field's column when one is shown, else the first
   // shown column. After the cell's own content, never in place of it.
+  // objectstack#36897 — the host's own cells (`hostCells`), by column field.
+  const hostCelledColumns = hostCells
+    ? (orderedColumns as any[]).map((c) => {
+        const draw = typeof c?.accessorKey === 'string' && Object.prototype.hasOwnProperty.call(hostCells, c.accessorKey)
+          ? hostCells[c.accessorKey]
+          : undefined;
+        return draw ? { ...c, cell: (value: any, row: any) => draw(value, row) } : c;
+      })
+    : orderedColumns;
   const tableColumns = (() => {
-    if (!rowAdornment) return orderedColumns;
+    if (!rowAdornment) return hostCelledColumns;
     const declaredTitle = declaredNameField(objectSchema);
-    const shown = (orderedColumns as any[]).filter((c) => c?.accessorKey !== '_actions');
+    const shown = (hostCelledColumns as any[]).filter((c) => c?.accessorKey !== '_actions');
     const titleColumn =
       (typeof declaredTitle === 'string' && declaredTitle !== ''
         ? shown.find((c) => c.accessorKey === declaredTitle)
         : undefined) ?? shown[0];
-    if (!titleColumn) return orderedColumns;
+    if (!titleColumn) return hostCelledColumns;
     const cell = titleColumn.cell;
     const adorned = {
       ...titleColumn,
@@ -3578,7 +3631,7 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
         );
       },
     };
-    return (orderedColumns as any[]).map((c) => (c === titleColumn ? adorned : c));
+    return (hostCelledColumns as any[]).map((c) => (c === titleColumn ? adorned : c));
   })();
 
   // objectstack#36290 — the card a cell's 「Change history」 item opened
@@ -3996,7 +4049,9 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
     // that verdict, which is what this adds.
     showAddRow: !!operations?.create && addRowGranted,
     onAddRecord: onAddRecord,
-    rowClassName: schema.rowColor ? (row: any, _idx: number) => getRowClassName(row) : undefined,
+    rowClassName: schema.rowColor || rowTint
+      ? (row: any, _idx: number) => rowTintClass(rowTint?.(row)) ?? getRowClassName(row)
+      : undefined,
     rowStyle: schema.conditionalFormatting?.length ? (row: any, _idx: number) => getRowStyle(row) : undefined,
     frozenColumns: effectiveFrozenColumns,
     onSelectionChange: (rows: any[]) => {

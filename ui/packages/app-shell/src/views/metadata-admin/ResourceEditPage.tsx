@@ -27,13 +27,9 @@ import {
   Save,
   RotateCcw,
   Trash2,
-  History,
-  Link2,
   Loader2,
   AlertTriangle,
-  Layers3,
   GitCompareArrows,
-  Boxes,
   Eye,
   Pencil,
   X,
@@ -49,7 +45,6 @@ import {
   Send,
   Undo2,
   Lock,
-  ShieldCheck,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button } from '@object-ui/components';
@@ -92,9 +87,16 @@ import type {
 // read-decoration contract objectui#7603 established here; it was hoisted so
 // the three sibling copies could stop re-deriving it.
 import { extractDraftBody, formatMetadataError } from '@object-ui/data-objectstack';
-import { PageShell } from './PageShell.js';
+import { PageShell, WritabilityBadge } from './PageShell.js';
+import { ResourceDetailHeader } from './ResourceDetailHeader.js';
+import {
+  ItemToolTabPanel,
+  ItemToolTabStrip,
+  offeredItemToolTabs,
+  useItemToolTab,
+  type ItemToolTab,
+} from '../item-tools/ItemToolTabs.js';
 import { MetadataTypeActions } from './MetadataTypeActions.js';
-import { LayeredDiff, countOverlaidFields } from '../item-tools/LayeredDiff.js';
 import { DraftReviewPanel, computeDraftChangeCount } from './DraftReviewPanel.js';
 import {
   SchemaForm,
@@ -134,9 +136,7 @@ import {
 import { useCreateDerive, deriveDefaultCreateFields } from './createDerive.js';
 import { RelatedPanel, type RelatedTarget } from './RelatedPanel.js';
 import { MetadataDetailDrawer } from './MetadataDetailDrawer.js';
-import { HistoryPanel } from '../item-tools/ResourceHistoryPage.js';
-import { AuditPanel } from '../item-tools/AuditPanel.js';
-import { ReferencesPanel, useReferencesScan } from '../item-tools/ReferencesPanel.js';
+import { useReferencesScan } from '../item-tools/ReferencesPanel.js';
 import {
   getMetadataPreview,
   useRegisteredMetadataPreview,
@@ -1598,25 +1598,27 @@ function MetadataResourceEditPageImpl({
   // mounted for that caller. Unknown fails open.
   const canReadTrail = useCanReadAuthoringTrail();
 
-  // objectui#12496 — the open sheet is SEEDED from the `?tab=` deep link the
-  // URL-sync effect below writes, so a shared or refreshed link reopens it.
-  // It is read here, in the state's initializer, and not in a mount effect:
-  // the sync effect's mount pass ran first with no sheet open and deleted
-  // `tab` before any later reader could see it. Only a sheet this page offers
-  // THIS caller is accepted — the same conditions the header buttons render
-  // on. Anything else (an unknown value, a gated sheet, `review`, which needs
-  // a loaded draft) opens nothing, and the sync effect drops it from the URL.
-  // Embedded items are not deep-linkable: they live in the parent body and
-  // need the parent payload to materialise.
-  const [openSheet, setOpenSheet] =
-    React.useState<'layers' | 'references' | 'related' | 'history' | 'audit' | 'review' | null>(() => {
-      if (typeof window === 'undefined' || embedded || createMode) return null;
-      const tab = new URLSearchParams(window.location.search).get('tab');
-      if (tab === 'layers' || tab === 'references') return tab;
-      if (tab === 'related') return hasAnchors ? tab : null;
-      if (tab === 'history' || tab === 'audit') return canReadTrail ? tab : null;
-      return null;
-    });
+  // objectstack#36901 (epic objectstack#36890 decision 8) — the item tools are
+  // TABS of this page (`item-tools/ItemToolTabs.tsx`): details, the canvas of
+  // a type that registers one, related, references, history (with the audit
+  // log) and source (with the layered comparison). Each is offered on the
+  // conditions its old sheet was: related for a type with anchors, history
+  // for a caller who may read the authoring trail (objectui#12475). The open
+  // tab is the address's `?tab=`, seeded on first render (objectui#12496), and
+  // the retired sheets' values still open their tab (`layers` → Source,
+  // `audit` → History). A create draft and an item embedded in another surface
+  // have the details alone: the parent page owns the address.
+  const hasCanvas = !createMode && !embedded && !!registeredPreview;
+  const offeredTabs = React.useMemo(
+    () =>
+      createMode || embedded
+        ? (['details'] as ItemToolTab[])
+        : offeredItemToolTabs({ preview: hasCanvas, related: hasAnchors, trail: canReadTrail }),
+    [createMode, embedded, hasCanvas, hasAnchors, canReadTrail],
+  );
+  const itemTab = useItemToolTab(offeredTabs, { enabled: !embedded && !createMode });
+  // The draft review is the header's status chip (decision 8), opened here.
+  const [reviewOpen, setReviewOpen] = React.useState(false);
 
   // ADR-0033 Phase B — `?review=1` arrival (from the chat's "Review N change(s)"
   // affordance). The AI may have drafted this item *after* the page mounted, so
@@ -1634,7 +1636,7 @@ function MetadataResourceEditPageImpl({
       return; // wait for the reload to settle before reading hasDraft
     }
     if (!loading) {
-      if (hasDraft) setOpenSheet('review');
+      if (hasDraft) setReviewOpen(true);
       const next = new URLSearchParams(searchParams);
       next.delete('review');
       setSearchParams(next, { replace: true });
@@ -1649,23 +1651,6 @@ function MetadataResourceEditPageImpl({
   // navigations since most users live in the form 99% of the time.
   const [inspectorTab, setInspectorTab] =
     React.useState<'properties' | 'source'>('properties');
-
-  // When the References sheet opens, lazy-load the data (idempotent).
-  // Also keep the URL `?tab=` query in sync so deep-links round-trip: the
-  // state's initializer above reads the link, so this mount pass keeps an
-  // accepted `tab` and drops one that opened nothing.
-  React.useEffect(() => {
-    if (openSheet === 'references') {
-      void loadReferences();
-    }
-    if (typeof window !== 'undefined' && !embedded) {
-      const url = new URL(window.location.href);
-      if (openSheet) url.searchParams.set('tab', openSheet);
-      else url.searchParams.delete('tab');
-      window.history.replaceState({}, '', url.toString());
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [openSheet, embedded]);
 
   // Designer-style split-panel state. The inspector (right form panel)
   // can collapse to give the preview the full canvas. The collapsed
@@ -1956,7 +1941,7 @@ function MetadataResourceEditPageImpl({
   React.useEffect(() => {
     if (typeof window === 'undefined' || embedded) return;
     // `?open=` on first mount restores the Related drawer target. `?tab=` is
-    // read by `openSheet`'s initializer, not here (objectui#12496).
+    // read by `useItemToolTab`'s initializer, not here (objectui#12496).
     const sp = new URLSearchParams(window.location.search);
     const open = sp.get('open');
     if (open && open.includes(':')) {
@@ -2709,13 +2694,63 @@ function MetadataResourceEditPageImpl({
   }, [embedded, type, name, draft]);
   useRegisterAssistantEditor(assistantEditorCtx);
 
+  // objectstack#36901 — the page's frame. On its own route the item fills the
+  // content pane under the one Studio detail header (`ResourceDetailHeader`:
+  // × back to the list, ‹ › through it, the tabs, the page's actions); embedded
+  // in another surface it keeps the compact `PageShell` row and no tabs. The
+  // loading and refused states draw the same frame, so the header (and its
+  // list read for ‹ ›) is not mounted twice.
+  const packageLabel =
+    (layered?.packageId as string | undefined) ?? (ownerPackageId && ownerPackageId !== 'all' ? ownerPackageId : undefined);
+  const itemLabel = typeof draft.label === 'string' && draft.label.trim() !== '' ? draft.label : name;
+  const renderFrame = (
+    body: React.ReactNode,
+    extras: { actions?: React.ReactNode; tabs?: React.ReactNode } = {},
+  ): React.ReactElement =>
+    embedded ? (
+      <PageShell
+        entry={entry ?? { type, label: type }}
+        itemName={createMode ? '(new)' : name}
+        subtitle={createMode ? t('engine.edit.createNew', locale) : undefined}
+        actions={extras.actions}
+      >
+        {body}
+      </PageShell>
+    ) : (
+      <div className="flex h-full min-h-0 flex-col overflow-hidden" data-testid="resource-detail">
+        <ResourceDetailHeader
+          testId="resource-detail-header"
+          type={type}
+          name={createMode ? '' : name}
+          pager={!createMode}
+          tabAddress={itemTab.address}
+          locale={locale}
+          label={createMode ? t('engine.edit.createNew', locale) : itemLabel}
+          apiName={createMode ? undefined : name}
+          typeLabel={translateMetadataType(type, locale, entry?.label ?? type)}
+          packageLabel={packageLabel}
+          meta={<WritabilityBadge entry={entry} readOnly={hostReadOnly} locale={locale} compact />}
+          primaryAction={extras.actions ? <div className="flex items-center gap-1">{extras.actions}</div> : undefined}
+          tabs={extras.tabs}
+          // objectstack#36892 — the header's Esc is document-wide and yields
+          // only to an event already handled. The canvas fullscreen is no
+          // Radix overlay: its own Esc listener is on `window`, after the
+          // document's, so while it is open Esc must leave the page alone.
+          closeOnEscape={!isFullscreen}
+        />
+        <div className="min-h-0 flex-1 overflow-auto">{body}</div>
+      </div>
+    );
+
   if (loading) {
     return (
-      <PageShell entry={entry} itemName={name}>
-        <div className="p-6 text-sm text-muted-foreground flex items-center gap-2">
-          <Loader2 className="h-4 w-4 animate-spin" /> Loading {type}/{name}…
-        </div>
-      </PageShell>
+      <DraftVerdictContext.Provider value={serverDiagnostics}>
+        {renderFrame(
+          <div className="p-6 text-sm text-muted-foreground flex items-center gap-2">
+            <Loader2 className="h-4 w-4 animate-spin" /> Loading {type}/{name}…
+          </div>,
+        )}
+      </DraftVerdictContext.Provider>
     );
   }
 
@@ -2724,11 +2759,13 @@ function MetadataResourceEditPageImpl({
   // over the published body.
   if (draftRefused) {
     return (
-      <PageShell entry={entry ?? { type, label: type }} itemName={name}>
-        <div className="p-6">
-          <StudioRefusalStrip refusal={draftRefused} locale={locale} className="px-3 py-2 text-sm" />
-        </div>
-      </PageShell>
+      <DraftVerdictContext.Provider value={serverDiagnostics}>
+        {renderFrame(
+          <div className="p-6">
+            <StudioRefusalStrip refusal={draftRefused} locale={locale} className="px-3 py-2 text-sm" />
+          </div>,
+        )}
+      </DraftVerdictContext.Provider>
     );
   }
 
@@ -2841,10 +2878,6 @@ function MetadataResourceEditPageImpl({
     </InspectorReadOnlyReason>
   );
 
-  // Note: URL `?tab=` deep-links were repurposed to open side-panel
-  // sheets (Layers / References / Related). Anything else is ignored —
-  // the main work area is always the form+preview.
-
   // The shortcut hint, or why Save is withheld. Enabled (or mid-save) it is
   // the button's accessible name and tooltip both, so the word drawn beside
   // the icon (objectui#13337) leaves the name a reader hears unchanged; a
@@ -2885,112 +2918,6 @@ function MetadataResourceEditPageImpl({
           recordId={name}
           onAfter={() => setReloadKey((k) => k + 1)}
         />
-      )}
-      {/* Info sheets — icon-only group, mirrors the canvas
-          toolbar style (small ghost icons + tooltip). Keeps
-          the primary edit / save actions visually dominant. */}
-      {(!createMode || hasAnchors) && (
-        <div className="flex items-center rounded-md border bg-background p-0.5">
-          {!createMode && (
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => setOpenSheet('layers')}
-              title={t('engine.edit.layers', locale)}
-              className="h-7 w-7 p-0 relative"
-            >
-              <Layers3 className="h-3.5 w-3.5" />
-              {layered?.overlay && (() => {
-                const n = countOverlaidFields(layered.code, layered.effective);
-                return n > 0 ? (
-                  <span
-                    className="absolute -top-1 -right-1 min-w-[14px] h-[14px] px-1 rounded-full bg-emerald-600 text-emerald-50 text-[9px] leading-[14px] text-center font-medium"
-                    title={t('engine.layers.diff', locale)}
-                  >
-                    {n}
-                  </span>
-                ) : null;
-              })()}
-            </Button>
-          )}
-          {!createMode && hasDraft && (
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => setOpenSheet('review')}
-              title={t('designer.draftReview.title', locale)}
-              className="h-7 w-7 p-0 relative"
-              data-testid="resource-review-trigger"
-            >
-              <GitCompareArrows className="h-3.5 w-3.5" />
-              {(() => {
-                const n = computeDraftChangeCount(
-                  layered?.effective ?? null,
-                  draft,
-                );
-                return n > 0 ? (
-                  <span
-                    className="absolute -top-1 -right-1 min-w-[14px] h-[14px] px-1 rounded-full bg-amber-500 text-amber-50 text-[9px] leading-[14px] text-center font-medium"
-                    title={tFormat('designer.draftReview.badge', locale, { n })}
-                  >
-                    {n}
-                  </span>
-                ) : null;
-              })()}
-            </Button>
-          )}
-          {!createMode && (
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => setOpenSheet('references')}
-              title={t('engine.edit.references', locale)}
-              className="h-7 w-7 p-0 relative"
-            >
-              <Link2 className="h-3.5 w-3.5" />
-              {refsState.status === 'loaded' && refsState.items.length > 0 && (
-                <span className="absolute -top-1 -right-1 min-w-[14px] h-[14px] px-1 rounded-full bg-muted text-foreground text-[9px] leading-[14px] text-center font-medium border">
-                  {refsState.items.length}
-                </span>
-              )}
-            </Button>
-          )}
-          {hasAnchors && (
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => setOpenSheet('related')}
-              title={t('engine.edit.related', locale)}
-              className="h-7 w-7 p-0"
-            >
-              <Boxes className="h-3.5 w-3.5" />
-            </Button>
-          )}
-          {!createMode && canReadTrail && (
-            <Button
-              variant="ghost"
-              size="sm"
-              data-testid="history-button"
-              onClick={() => setOpenSheet('history')}
-              title={t('engine.edit.history', locale)}
-              className="h-7 w-7 p-0"
-            >
-              <History className="h-3.5 w-3.5" />
-            </Button>
-          )}
-          {!createMode && canReadTrail && (
-            <Button
-              variant="ghost"
-              size="sm"
-              data-testid="audit-button"
-              onClick={() => setOpenSheet('audit')}
-              title={t('engine.edit.auditTab', locale)}
-              className="h-7 w-7 p-0"
-            >
-              <ShieldCheck className="h-3.5 w-3.5" />
-            </Button>
-          )}
-        </div>
       )}
       {!createMode && canWrite && layered?.overlay && lockDeletable && (
         <Button
@@ -3164,16 +3091,81 @@ function MetadataResourceEditPageImpl({
     </>
   );
 
-  const page = (
-    <PageShell
-      entry={entry ?? { type, label: type }}
-      itemName={createMode ? '(new)' : name}
-      subtitle={createMode ? t('engine.edit.createNew', locale) : undefined}
-      actions={PreviewComponent ? null : actionsNode}
-    >
+  // objectstack#36901 (decision 8) — the draft review is a status chip in the
+  // header, not a sheet trigger among the tools: shown while a draft is
+  // pending, it opens the review (ADR-0033 Phase B), as `?review=1` does.
+  const draftChangeCount = hasDraft && !createMode ? computeDraftChangeCount(layered?.effective ?? null, draft) : 0;
+  const reviewChip =
+    !createMode && hasDraft ? (
+      <button
+        type="button"
+        data-testid="resource-review-trigger"
+        onClick={() => setReviewOpen(true)}
+        title={t('designer.draftReview.title', locale)}
+        className="inline-flex h-6 shrink-0 items-center gap-1 whitespace-nowrap rounded bg-amber-400/15 px-2 text-[11px] text-amber-700 hover:bg-amber-400/25 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring dark:text-amber-300"
+      >
+        <GitCompareArrows className="h-3 w-3 shrink-0" aria-hidden="true" />
+        <span>{t('engine.studio.unpublishedDraft', locale)}</span>
+        {draftChangeCount > 0 && (
+          <span className="tabular-nums opacity-80">· {tFormat('designer.draftReview.badge', locale, { n: draftChangeCount })}</span>
+        )}
+      </button>
+    ) : null;
+
+  // objectstack#36901 (decision 8) — the body the open tab draws. The canvas
+  // (Preview) and the details form edit the ONE draft this page holds, and the
+  // header's Save, ⌘S and autosave save it whichever tab is open (decision 4):
+  // a tab switch keeps every unsaved edit, so it asks nothing. A create draft
+  // draws the canvas when its type authors there (`CREATE_MODE_CANVAS_TYPES`).
+  const activeTab = itemTab.location.tab;
+  const canvasOpen = !!PreviewComponent && (createMode || activeTab === 'preview');
+  const toolTab =
+    activeTab === 'references' || activeTab === 'history' || activeTab === 'source' ? activeTab : null;
+  const tabStrip =
+    offeredTabs.length > 1 ? (
+      <ItemToolTabStrip
+        tabs={offeredTabs}
+        active={activeTab}
+        onSelect={(tab) => itemTab.select(tab)}
+        counts={refsState.status === 'loaded' ? { references: refsState.items.length } : undefined}
+        locale={locale}
+      />
+    ) : undefined;
+  const toolTabBody =
+    activeTab === 'related' && hasAnchors ? (
+      <div data-testid="item-tab-panel-related">
+        <RelatedPanel type={type} name={name} parentItem={draft} onOpen={(target) => setRelatedTarget(target)} />
+      </div>
+    ) : toolTab ? (
+      <ItemToolTabPanel
+        tab={toolTab}
+        view={itemTab.location.view}
+        onViewChange={(view) => itemTab.select(toolTab, view)}
+        type={type}
+        name={name}
+        packageId={ownerPackageId}
+        className=""
+        // Source edits this page's draft, on the gate the form is editable on.
+        source={{
+          value: draft,
+          onChange: formReadOnly ? undefined : handleCreateAwareChange,
+          issues: displayIssues.map((i) => ({ path: i.path ?? '', message: i.message })),
+        }}
+        layered={layered}
+        references={{ state: refsState, load: loadReferences }}
+        // The rollback door asks the capability and wall verdicts the save
+        // door asks, so it is offered on Save's gate (objectui#12183: a walled
+        // tenant was offered it, refused).
+        onRolledBack={canWrite ? () => setReloadKey((k) => k + 1) : undefined}
+        locale={locale}
+      />
+    ) : null;
+
+  const page = renderFrame(
+    <>
       <div
         className={
-          PreviewComponent
+          canvasOpen
             ? 'flex h-full min-h-0 flex-col'
             : 'p-6 space-y-6 max-w-7xl'
         }
@@ -3181,7 +3173,7 @@ function MetadataResourceEditPageImpl({
         {(error || readOnly || hasDraft || isLocked || walledDeciding) && (
           <div
             className={
-              PreviewComponent
+              canvasOpen
                 ? 'px-6 pt-4 space-y-3'
                 : 'space-y-3'
             }
@@ -3372,14 +3364,14 @@ function MetadataResourceEditPageImpl({
 
         <div
           className={
-            PreviewComponent
+            canvasOpen
               ? 'flex w-full flex-1 min-h-0 flex-col'
               : 'w-full'
           }
         >
           <div
             className={
-              PreviewComponent
+              canvasOpen
                 ? 'mt-2 flex-1 min-h-0 flex flex-col px-6 pb-4'
                 : 'mt-4 space-y-3'
             }
@@ -3388,7 +3380,7 @@ function MetadataResourceEditPageImpl({
                 "可写" badge in the header plus the Edit button in the
                 action bar already convey both signal and call-to-action,
                 and saving every vertical pixel for the canvas matters. */}
-            {!PreviewComponent && formReadOnly && !readOnly && canWrite && !createMode && (
+            {!PreviewComponent && formReadOnly && !readOnly && canWrite && !createMode && (activeTab === 'details' || activeTab === 'source') && (
               <div className="flex items-center justify-between gap-3 text-xs text-muted-foreground border rounded p-2.5 bg-muted/30">
                 <span>
                   {t('engine.edit.readOnlyBanner', locale).split(/\{edit\}/).map((part, i, arr) => (
@@ -3528,6 +3520,8 @@ function MetadataResourceEditPageImpl({
                 <button
                   type="button"
                   onClick={() => {
+                    // The held selection is the canvas's: open it there.
+                    if (PreviewComponent && !createMode) itemTab.select('preview');
                     setInspectorTab('properties');
                     setSelection(inspectorHeld[0].selection);
                   }}
@@ -3537,7 +3531,7 @@ function MetadataResourceEditPageImpl({
                 </button>
               </div>
             )}
-            {PreviewComponent ? (
+            {canvasOpen ? (
               <div
                 className={
                   isFullscreen
@@ -3602,11 +3596,15 @@ function MetadataResourceEditPageImpl({
                           )}
                         </div>
                         <div className="flex items-center gap-1">
-                          {/* All page-level actions live here when the
-                              designer is present — merged from the
-                              PageShell header to reclaim a full row. */}
-                          {actionsNode}
-                          <span className="mx-1 h-5 w-px bg-border" aria-hidden />
+                          {/* The page's actions are the detail header's;
+                              fullscreen covers that header, so they move
+                              here while it is on (never in both places). */}
+                          {isFullscreen && (
+                            <>
+                              {actionsNode}
+                              <span className="mx-1 h-5 w-px bg-border" aria-hidden />
+                            </>
+                          )}
                           {PreviewComponent && (
                             <Button
                               variant="ghost"
@@ -3856,6 +3854,8 @@ function MetadataResourceEditPageImpl({
                     VSCode-style inspector toggle next to the fullscreen
                     button, so this duplicate affordance was just noise. */}
               </div>
+            ) : toolTabBody ? (
+              toolTabBody
             ) : (
               withReadOnlyReason(
                 <SchemaForm
@@ -3880,8 +3880,8 @@ function MetadataResourceEditPageImpl({
             {/* objectui#7611 — under the designer, too: `position` renders
                 through its preview, so the section takes a bounded strip
                 below the canvas instead of squeezing it. */}
-            {environmentSections && (
-              <div className={PreviewComponent ? 'shrink-0 max-h-[35vh] overflow-y-auto' : undefined}>
+            {environmentSections && (canvasOpen || activeTab === 'details') && (
+              <div className={canvasOpen ? 'shrink-0 max-h-[35vh] overflow-y-auto' : undefined}>
                 {environmentSections.map((EnvironmentSection, i) => (
                   <EnvironmentSection key={i} name={name} draft={draft} />
                 ))}
@@ -3891,33 +3891,10 @@ function MetadataResourceEditPageImpl({
         </div>
       </div>
 
-      {/* Layers / References / Related are right-side sheets, opened from
-          the page-shell header. They used to live in tabs above the form,
-          which stole vertical space from the primary work area. */}
-      <Sheet
-        open={openSheet === 'layers'}
-        onOpenChange={(o) => !o && setOpenSheet(null)}
-      >
-        <SheetContent side="right" className="w-[92vw] sm:max-w-[720px] p-0 flex flex-col gap-0">
-          <SheetHeader className="px-4 py-3 border-b">
-            <SheetTitle className="text-base">{t('engine.edit.layers', locale)}</SheetTitle>
-            <SheetDescription className="text-xs">
-              {type} / {name}
-            </SheetDescription>
-          </SheetHeader>
-          <div className="flex-1 min-h-0 overflow-auto p-4">
-            <LayeredDiff layered={layered} locale={locale} />
-          </div>
-        </SheetContent>
-      </Sheet>
-
       {/* ADR-0033 Phase B — generic draft↔published review/diff. Available for
           ANY type whenever a pending draft exists; opened by the chat's
           "Review N change(s)" affordance (?review=1) or the toolbar button. */}
-      <Sheet
-        open={openSheet === 'review'}
-        onOpenChange={(o) => !o && setOpenSheet(null)}
-      >
+      <Sheet open={reviewOpen} onOpenChange={setReviewOpen}>
         <SheetContent side="right" className="w-[92vw] sm:max-w-[720px] p-0 flex flex-col gap-0">
           <SheetHeader className="px-4 py-3 border-b">
             <SheetTitle className="text-base">{t('designer.draftReview.title', locale)}</SheetTitle>
@@ -3934,124 +3911,6 @@ function MetadataResourceEditPageImpl({
           </div>
         </SheetContent>
       </Sheet>
-
-      <Sheet
-        open={openSheet === 'references'}
-        onOpenChange={(o) => !o && setOpenSheet(null)}
-      >
-        <SheetContent side="right" className="w-[92vw] sm:max-w-[720px] p-0 flex flex-col gap-0">
-          <SheetHeader className="px-4 py-3 border-b">
-            <SheetTitle className="text-base">
-              {t('engine.edit.references', locale)}
-              {/* Only a completed scan may show a count — a `0` badge over a
-                  failed check is the same false measurement in miniature. */}
-              {refsState.status === 'loaded' && (
-                <Badge
-                  variant="outline"
-                  className="ml-2 text-[10px]"
-                  data-testid="refs-count-badge"
-                >
-                  {refsState.items.length}
-                </Badge>
-              )}
-            </SheetTitle>
-            <SheetDescription className="text-xs">
-              {type} / {name}
-            </SheetDescription>
-          </SheetHeader>
-          <div className="flex-1 min-h-0 overflow-auto p-4">
-            <ReferencesPanel
-              state={refsState}
-              locale={locale}
-              onRetry={() => void loadReferences()}
-            />
-          </div>
-        </SheetContent>
-      </Sheet>
-
-      {hasAnchors && (
-        <Sheet
-          open={openSheet === 'related'}
-          onOpenChange={(o) => !o && setOpenSheet(null)}
-        >
-          <SheetContent side="right" className="w-[92vw] sm:max-w-[860px] p-0 flex flex-col gap-0">
-            <SheetHeader className="px-4 py-3 border-b">
-              <SheetTitle className="text-base">{t('engine.edit.related', locale)}</SheetTitle>
-              <SheetDescription className="text-xs">
-                {type} / {name}
-              </SheetDescription>
-            </SheetHeader>
-            <div className="flex-1 min-h-0 overflow-auto p-4">
-              <RelatedPanel
-                type={type}
-                name={name}
-                parentItem={draft}
-                onOpen={(t) => setRelatedTarget(t)}
-              />
-            </div>
-          </SheetContent>
-        </Sheet>
-      )}
-
-      {!createMode && canReadTrail && (
-        <Sheet
-          open={openSheet === 'history'}
-          onOpenChange={(o) => !o && setOpenSheet(null)}
-        >
-          <SheetContent side="right" className="w-[92vw] sm:max-w-[720px] p-0 flex flex-col gap-0">
-            <SheetHeader className="px-4 py-3 border-b">
-              <SheetTitle className="text-base">{t('engine.edit.history', locale)}</SheetTitle>
-              <SheetDescription className="text-xs">
-                {type} / {name}
-              </SheetDescription>
-            </SheetHeader>
-            <div className="flex-1 min-h-0 overflow-auto p-4">
-              <HistoryPanel
-                type={type}
-                name={name}
-                client={client}
-                locale={locale}
-                packageId={ownerPackageId}
-                // The rollback door asks the capability and wall verdicts the
-                // save door asks, so it is offered on Save's gate
-                // (objectui#12183: a walled tenant was offered it, refused).
-                onRollback={canWrite ? () => setReloadKey((k) => k + 1) : undefined}
-                rollbackLabel={t('engine.edit.rollback', locale)}
-                rollbackConfirm={(version) =>
-                  t('engine.edit.rollbackConfirm', locale).replace(
-                    '{version}',
-                    String(version),
-                  )
-                }
-              />
-            </div>
-          </SheetContent>
-        </Sheet>
-      )}
-
-      {!createMode && canReadTrail && (
-        <Sheet
-          open={openSheet === 'audit'}
-          onOpenChange={(o) => !o && setOpenSheet(null)}
-        >
-          <SheetContent side="right" className="w-[92vw] sm:max-w-[860px] p-0 flex flex-col gap-0">
-            <SheetHeader className="px-4 py-3 border-b">
-              <SheetTitle className="text-base">{t('engine.edit.auditTab', locale)}</SheetTitle>
-              <SheetDescription className="text-xs">
-                {type} / {name}
-              </SheetDescription>
-            </SheetHeader>
-            <div className="flex-1 min-h-0 overflow-hidden p-3">
-              <AuditPanel
-                type={type}
-                name={name}
-                client={client}
-                locale={locale}
-              />
-            </div>
-          </SheetContent>
-        </Sheet>
-      )}
 
       <MetadataDetailDrawer
         target={relatedTarget}
@@ -4144,7 +4003,19 @@ function MetadataResourceEditPageImpl({
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-    </PageShell>
+    </>,
+    {
+      // A canvas type's actions sat in its canvas toolbar under the old
+      // `PageShell`; the detail header holds them for every type now.
+      actions:
+        embedded || !isFullscreen ? (
+          <>
+            {reviewChip}
+            {actionsNode}
+          </>
+        ) : undefined,
+      tabs: tabStrip,
+    },
   );
   // objectstack#26858 — the verdict on the body on screen, for an expression
   // field to read at its own path (`useServerErrorsAt`).

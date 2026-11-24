@@ -547,6 +547,7 @@
     "GetMetaTypesRequest (type)",
     "GetMetaTypesRequestSchema (const)",
     "GetMetaTypesResponse (type)",
+    "GetMetaTypesResponseParsed (type)",
     "GetMetaTypesResponseSchema (const)",
     "GetNotificationPreferencesRequest (type)",
     "GetNotificationPreferencesRequestSchema (const)",

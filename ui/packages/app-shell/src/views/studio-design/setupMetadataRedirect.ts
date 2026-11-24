@@ -17,7 +17,8 @@
  * Datasources page, so redirecting it here would loop.
  */
 
-import { STUDIO_ALL_PACKAGES_SEGMENT, areaLocationRedirect, studioMetadataAreaPath } from './metadataArea.js';
+import { STUDIO_ALL_PACKAGES_SEGMENT, areaLocationRedirect } from './metadataArea.js';
+import { studioHomePath, studioLandingPath, studioMetadataAreaAddress, studioPillarPath } from './studioAddress.js';
 
 /** The one metadata type whose Setup pages stay in Setup (ADR-0146 D1). */
 export const SETUP_KEPT_METADATA_TYPE = 'datasource';
@@ -37,8 +38,7 @@ export function setupMetadataStudioPath(rest: string, search: string, hash = '')
   const tail = segments.join('/');
   const onLeg = areaLocationRedirect(STUDIO_ALL_PACKAGES_SEGMENT, tail, search);
   if (onLeg) return `${onLeg}${hash}`;
-  const query = new URLSearchParams(search).toString();
-  return `${studioMetadataAreaPath(STUDIO_ALL_PACKAGES_SEGMENT)}${tail ? `/${tail}` : ''}${query ? `?${query}` : ''}${hash}`;
+  return studioMetadataAreaAddress(STUDIO_ALL_PACKAGES_SEGMENT, tail, { query: new URLSearchParams(search), hash });
 }
 
 /**
@@ -68,10 +68,9 @@ export function setupMetadataRest(pathname: string): string | null {
 export function packagedAutomationStudioPath(search: string, hash = ''): string {
   const params = new URLSearchParams(search);
   const query = params.toString();
-  const tail = `${query ? `?${query}` : ''}${hash}`;
   const pkg = params.get('package');
-  if (pkg && pkg !== 'all') return `/studio/${encodeURIComponent(pkg)}/automations${tail}`;
-  return `${studioMetadataAreaPath(STUDIO_ALL_PACKAGES_SEGMENT)}/flow${tail}`;
+  if (pkg && pkg !== 'all') return studioPillarPath(pkg, 'automations', { query, hash });
+  return studioMetadataAreaAddress(STUDIO_ALL_PACKAGES_SEGMENT, 'flow', { query, hash });
 }
 
 /**
@@ -88,8 +87,7 @@ export function packagedAutomationStudioPath(search: string, hash = ''): string 
 export function packagedActionsStudioPath(search: string, hash = ''): string {
   const params = new URLSearchParams(search);
   const query = params.toString();
-  const tail = `${query ? `?${query}` : ''}${hash}`;
   const pkg = params.get('package');
-  if (pkg && pkg !== 'all') return `/studio/${encodeURIComponent(pkg)}/data${tail}`;
-  return `/studio${tail}`;
+  if (pkg && pkg !== 'all') return studioHomePath(pkg, { query, hash });
+  return studioLandingPath({ query, hash });
 }

@@ -21,11 +21,13 @@ const manifest = {
   version: 1,
   label: 'AI',
   icon: 'Sparkles',
+  // No knowledge-base wording: the embedder section that serves the knowledge
+  // service is contributed only where that service is mounted
+  // (`aiEmbedderSettingsSpecifiers` below).
   description:
-    'LLM provider, model, credentials, and embedder configuration used by ' +
-    'the platform AI and knowledge services. Provider SDK packages (e.g. ' +
-    '@ai-sdk/openai for chat, @objectstack/embedder-openai for embeddings) ' +
-    'must be installed on the host for the chosen provider to be loadable at runtime.',
+    'LLM provider, model and credentials used by the platform AI service. ' +
+    'The provider SDK package (e.g. @ai-sdk/openai) must be installed on the ' +
+    'host for the chosen provider to be loadable at runtime.',
   scope: 'global',
   readPermission: 'manage_platform_settings',
   writePermission: 'manage_platform_settings',
@@ -252,71 +254,95 @@ const manifest = {
     { type: 'action_button', id: 'reset', label: 'Reset to environment defaults',
       required: false, icon: 'RotateCcw',
       handler: { kind: 'http', method: 'POST', url: '/api/settings/ai/reset' } },
-
-    // ════════════════════════════════════════════════════════════════
-    // Embedder — text → vector provider used by knowledge / RAG.
-    // Decoupled from the chat provider above so an organisation can
-    // mix-and-match (e.g. OpenAI for chat + 阿里通义 for embeddings).
-    //
-    // The preset list mirrors @objectstack/embedder-openai's
-    // OPENAI_COMPATIBLE_PRESETS so a UI dropdown maps 1:1 to a
-    // runtime baseUrl. The "none" choice is the explicit opt-out
-    // for instances that disable knowledge / RAG entirely.
-    // ════════════════════════════════════════════════════════════════
-    { type: 'group', id: 'embedder', label: 'Embedder', required: false,
-      description:
-        'Text → vector provider used by knowledge sources and RAG. ' +
-        'Independent from the chat provider above — mix providers freely ' +
-        '(e.g. OpenAI for chat + 阿里通义 for embeddings).' },
-    { type: 'select', key: 'embedder_provider', label: 'Provider',
-      required: false, default: 'none',
-      options: [
-        { value: 'none', label: 'Disabled (no embeddings)' },
-        { value: 'openai', label: 'OpenAI' },
-        { value: 'azure', label: 'Azure OpenAI' },
-        { value: 'dashscope', label: '阿里通义 DashScope' },
-        { value: 'zhipu', label: '智谱 BigModel' },
-        { value: 'siliconflow', label: '硅基流动 SiliconFlow' },
-        { value: 'doubao', label: '火山引擎 Doubao' },
-        { value: 'minimax', label: 'MiniMax' },
-        { value: 'ollama', label: 'Ollama (local)' },
-        { value: 'custom', label: 'Custom (OpenAI-compatible)' },
-      ],
-    },
-    { type: 'password', key: 'embedder_api_key', label: 'Embedder API key',
-      required: false, encrypted: true,
-      description: 'Bearer token sent as Authorization header. For Ollama any non-empty value works.',
-      visible: "${data.embedder_provider && data.embedder_provider !== 'none'}" },
-    { type: 'text', key: 'embedder_model', label: 'Model',
-      required: false,
-      description:
-        'Examples — OpenAI: text-embedding-3-small · 阿里通义: text-embedding-v3 · ' +
-        '智谱: embedding-3 · 硅基流动: BAAI/bge-m3 · Ollama: bge-m3',
-      visible: "${data.embedder_provider && data.embedder_provider !== 'none'}" },
-    { type: 'text', key: 'embedder_base_url', label: 'Base URL',
-      required: false,
-      description:
-        'Endpoint root (without /embeddings). Auto-filled from preset; ' +
-        'override for proxies or self-hosted gateways.',
-      visible: "${data.embedder_provider === 'custom' || data.embedder_provider === 'azure'}" },
-    { type: 'number', key: 'embedder_dimensions', label: 'Dimensions',
-      required: false, min: 1, max: 8192,
-      description:
-        'Override output dimensionality (Matryoshka models only — OpenAI v3, 智谱 embedding-3, BGE-m3 dense). ' +
-        'Leave blank to use the model default.',
-      visible: "${data.embedder_provider && data.embedder_provider !== 'none'}" },
-    { type: 'number', key: 'embedder_batch_size', label: 'Batch size',
-      required: false, default: 64, min: 1, max: 2048,
-      description: 'Chunks sent to the embedding provider in one request. Reduce if hitting provider rate / size limits.',
-      visible: "${data.embedder_provider && data.embedder_provider !== 'none'}" },
-    { type: 'action_button', id: 'test_embedder', label: 'Test embedder',
-      required: false, icon: 'Plug',
-      handler: { kind: 'http', method: 'POST', url: '/api/settings/ai/test_embedder' } },
   ],
 };
 
-/** AI — provider / model / credentials configuration. */
+/**
+ * AI — provider / model / credentials configuration.
+ *
+ * It carries no embedder section. The embedder keys (`embedder_*`) and the
+ * "Test embedder" button configure the text-to-vector provider that only the
+ * knowledge service uses, so they are offered only where that service is
+ * mounted: `@objectstack/service-knowledge` appends
+ * {@link aiEmbedderSettingsSpecifiers} to this namespace when it starts beside
+ * a settings service ({@link withAiEmbedderSection}). A deployment without it
+ * serves no embedder key: a read or write of one is refused like any key the
+ * manifest does not declare.
+ */
 export const aiSettingsManifest = manifest as unknown as SettingsManifest;
+
+/**
+ * The embedder section of the `ai` namespace — the text-to-vector provider the
+ * knowledge service uses — contributed by `@objectstack/service-knowledge`
+ * when it is mounted, never by default ({@link aiSettingsManifest}).
+ *
+ * The preset list mirrors @objectstack/embedder-openai's
+ * OPENAI_COMPATIBLE_PRESETS so a UI dropdown maps 1:1 to a runtime baseUrl.
+ * The "none" choice is the explicit opt-out for an instance that mounts the
+ * knowledge service and still wants no embeddings.
+ */
+export const aiEmbedderSettingsSpecifiers: SettingsManifest['specifiers'] = [
+  { type: 'group', id: 'embedder', label: 'Embedder', required: false,
+    description:
+      'Text → vector provider used by knowledge sources and RAG. ' +
+      'Independent from the chat provider above — mix providers freely ' +
+      '(e.g. OpenAI for chat + 阿里通义 for embeddings).' },
+  { type: 'select', key: 'embedder_provider', label: 'Provider',
+    required: false, default: 'none',
+    options: [
+      { value: 'none', label: 'Disabled (no embeddings)' },
+      { value: 'openai', label: 'OpenAI' },
+      { value: 'azure', label: 'Azure OpenAI' },
+      { value: 'dashscope', label: '阿里通义 DashScope' },
+      { value: 'zhipu', label: '智谱 BigModel' },
+      { value: 'siliconflow', label: '硅基流动 SiliconFlow' },
+      { value: 'doubao', label: '火山引擎 Doubao' },
+      { value: 'minimax', label: 'MiniMax' },
+      { value: 'ollama', label: 'Ollama (local)' },
+      { value: 'custom', label: 'Custom (OpenAI-compatible)' },
+    ],
+  },
+  { type: 'password', key: 'embedder_api_key', label: 'Embedder API key',
+    required: false, encrypted: true,
+    description: 'Bearer token sent as Authorization header. For Ollama any non-empty value works.',
+    visible: "${data.embedder_provider && data.embedder_provider !== 'none'}" },
+  { type: 'text', key: 'embedder_model', label: 'Model',
+    required: false,
+    description:
+      'Examples — OpenAI: text-embedding-3-small · 阿里通义: text-embedding-v3 · ' +
+      '智谱: embedding-3 · 硅基流动: BAAI/bge-m3 · Ollama: bge-m3',
+    visible: "${data.embedder_provider && data.embedder_provider !== 'none'}" },
+  { type: 'text', key: 'embedder_base_url', label: 'Base URL',
+    required: false,
+    description:
+      'Endpoint root (without /embeddings). Auto-filled from preset; ' +
+      'override for proxies or self-hosted gateways.',
+    visible: "${data.embedder_provider === 'custom' || data.embedder_provider === 'azure'}" },
+  { type: 'number', key: 'embedder_dimensions', label: 'Dimensions',
+    required: false, min: 1, max: 8192,
+    description:
+      'Override output dimensionality (Matryoshka models only — OpenAI v3, 智谱 embedding-3, BGE-m3 dense). ' +
+      'Leave blank to use the model default.',
+    visible: "${data.embedder_provider && data.embedder_provider !== 'none'}" },
+  { type: 'number', key: 'embedder_batch_size', label: 'Batch size',
+    required: false, default: 64, min: 1, max: 2048,
+    description: 'Chunks sent to the embedding provider in one request. Reduce if hitting provider rate / size limits.',
+    visible: "${data.embedder_provider && data.embedder_provider !== 'none'}" },
+  { type: 'action_button', id: 'test_embedder', label: 'Test embedder',
+    required: false, icon: 'Plug',
+    handler: { kind: 'http', method: 'POST', url: '/api/settings/ai/test_embedder' } },
+] as unknown as SettingsManifest['specifiers'];
+
+/**
+ * `manifest` with the embedder section appended, or `manifest` itself when it
+ * already declares it. The knowledge service registers the result over the
+ * `ai` namespace it found registered.
+ */
+export function withAiEmbedderSection(manifest: SettingsManifest): SettingsManifest {
+  const keys = new Set(manifest.specifiers.map((s) => s.key ?? s.id));
+  if (aiEmbedderSettingsSpecifiers.some((s) => keys.has(s.key ?? s.id))) return manifest;
+  return { ...manifest, specifiers: [...manifest.specifiers, ...aiEmbedderSettingsSpecifiers] };
+}
 
 /**
  * The live-call hint the three real-provider branches of `ai/test` end with.
@@ -434,18 +460,18 @@ export const aiTestActionHandler: SettingsActionHandler = async ({ values, paylo
 };
 
 /**
- * Handler for `ai/test_embedder` ("Test embedder"), registered by
- * `SettingsServicePlugin`'s default `actionHandlers` map (#24769).
+ * Handler for `ai/test_embedder` ("Test embedder"). Registered by
+ * `@objectstack/service-knowledge` together with the embedder section it
+ * contributes ({@link aiEmbedderSettingsSpecifiers}); a deployment without the
+ * knowledge service has neither the button nor this handler.
  *
  * It checks form completeness only — a provider is chosen, an API key is
  * present (Ollama excepted), a Base URL is present for `custom` / `azure` —
  * and sends NO embedding request. Nothing in this repository replaces it with
- * a live probe: neither `@objectstack/embedder-openai` nor
- * `@objectstack/service-knowledge` registers `ai/test_embedder` (a plugin that
- * did would call `SettingsService.registerAction`, which replaces this
- * handler). So its success message says what was checked and that no request
- * was sent, and names no package whose mounting would make this check live —
- * none does.
+ * a live probe (a plugin that did would call `SettingsService.registerAction`,
+ * which replaces this handler). So its success message says what was checked
+ * and that no request was sent, and names no package whose mounting would make
+ * this check live — none does.
  */
 export const aiTestEmbedderActionHandler: SettingsActionHandler = async ({ values, payload }) => {
   const overrides = extractOverrides(payload);

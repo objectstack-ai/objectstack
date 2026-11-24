@@ -818,8 +818,11 @@ export function useConsoleActionRuntime(opts: ConsoleActionRuntimeOptions): Cons
         });
       }
       // Ended `refused`: the Close-only notice carries the engine's sentence,
-      // titled with the action the user clicked.
-      if (judged.followUp?.kind === 'refusal') {
+      // titled with the action the user clicked. A caller that reports the
+      // refusal itself (`reportsRefusal`, the grid's per-record bulk fan-out)
+      // gets it on `judged.result.refusal` instead, so N refused records never
+      // share one notice stacked on its result.
+      if (judged.followUp?.kind === 'refusal' && context?.reportsRefusal !== true) {
         setFlowRefusal({ open: true, title: action.label, message: judged.followUp.message });
       }
       if (judged.refresh) refresh();

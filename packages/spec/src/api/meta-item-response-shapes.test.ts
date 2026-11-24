@@ -339,6 +339,31 @@ describe('the engine\'s verdict on a stored flow: `registration` beside the item
 });
 
 /**
+ * #36894 — when each listed item last changed, `changedAt` beside the list,
+ * keyed by name: an ISO-8601 instant in UTC written with `Z`, and absent when
+ * no listed item is served from a stored row.
+ */
+export type ListChangedAtIsKeyedInstants = Assert< Eq< GetMetaItemsResponse['changedAt'], Record<string, string> | undefined > >;
+
+describe('`changedAt` beside the list: when each listed item\'s served row last changed', () => {
+  const BOARD = { name: 'sales_board', label: 'Sales' };
+
+  it('keeps the instants keyed by name through a parse, and absence stays absence', () => {
+    const changedAt = { sales_board: '2026-11-24T10:15:00.000Z', ops_board: '2026-11-20T08:00:00Z' };
+    expect(GetMetaItemsResponseSchema.parse({ type: 'dashboard', items: [BOARD], changedAt }).changedAt).toEqual(changedAt);
+    expect('changedAt' in GetMetaItemsResponseSchema.parse({ type: 'dashboard', items: [BOARD] })).toBe(false);
+  });
+
+  it('refuses a value that is not an instant in UTC with `Z`: an offset, a local time, a bare date, a number', () => {
+    for (const value of ['2026-11-24T18:15:00+08:00', '2026-11-24T10:15:00', '2026-11-24', 'yesterday', 1764000000000]) {
+      const result = GetMetaItemsResponseSchema.safeParse({ type: 'dashboard', items: [BOARD], changedAt: { sales_board: value } });
+      expect(result.success, String(value)).toBe(false);
+      expect(result.error?.issues[0]?.path).toEqual(['changedAt', 'sales_board']);
+    }
+  });
+});
+
+/**
  * #24298 — a pending draft's per-key provenance, `draftChanges`, beside the
  * item on the draft read: a closed `by` vocabulary, a path that is an ARRAY of
  * keys, and absence kept distinct from "nothing changed". Typed at the level

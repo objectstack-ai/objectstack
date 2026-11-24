@@ -84,6 +84,21 @@ function scalarText(value: unknown): string | undefined {
   return undefined;
 }
 
+/**
+ * A summary member as text: a scalar as written, or an expression envelope
+ * (`{ dialect, source }`, how the spec serves a cron schedule's `expression`)
+ * as its authored `source`. Any other object member is left out.
+ */
+function memberText(value: unknown): string | undefined {
+  const text = scalarText(value);
+  if (text !== undefined) return text;
+  if (value && typeof value === 'object' && !Array.isArray(value)) {
+    const source = (value as { source?: unknown }).source;
+    if (typeof source === 'string') return source;
+  }
+  return undefined;
+}
+
 /** Draw one cell by the column's declared renderer. */
 export function renderListCell(type: string | undefined, value: unknown): React.ReactNode {
   if (type === 'count') {
@@ -106,7 +121,7 @@ export function renderListCell(type: string | undefined, value: unknown): React.
     case 'summary': {
       if (value && typeof value === 'object' && !Array.isArray(value)) {
         const parts = Object.values(value as Record<string, unknown>)
-          .map(scalarText)
+          .map(memberText)
           .filter((v): v is string => v !== undefined && v !== '');
         if (parts.length > 0) return parts.join(' · ');
       }

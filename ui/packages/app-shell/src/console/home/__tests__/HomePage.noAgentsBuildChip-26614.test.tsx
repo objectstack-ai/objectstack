@@ -17,6 +17,12 @@
  *   - while the catalog has not answered, neither form is drawn, so neither
  *     flashes before the other.
  *
+ * objectstack#36969 — the AI form is drawn where the catalog serves the build
+ * agent itself (alias-aware), not any agent: where in-app building is closed
+ * the catalog keeps `ask` and drops `build`, and the chip takes the "New in
+ * Studio" form there, as for an empty catalog. So the unchanged-chip cases
+ * serve `build`; a catalog of `ask` or of another agent alone is pinned below.
+ *
  * The catalog stand-in moves the way the real `useAgents` does: an empty first
  * frame before the request leaves, then loading, then the answer. `t` echoes
  * the key, so a hardcoded string fails here; that every key exists in all ten
@@ -144,6 +150,9 @@ vi.mock('../../../hooks/useInboxBell', () => ({ useInboxBell: () => ({ markRead:
 // like every other source this page reads.
 vi.mock('../../deployment-notice/DeploymentNotice', () => ({ DeploymentNotice: () => null }));
 
+// The console's preview code loads `@objectstack/lint` lazily; paid at import,
+// not inside a test's clock.
+import '@objectstack/lint';
 import { HomePage } from '../HomePage';
 import { STUDIO_NEW_PACKAGE_PATH } from '../../../views/studio-design/studioNewPackage';
 
@@ -158,9 +167,9 @@ afterEach(() => {
   cleanup();
 });
 
-describe('with an agent in the catalog, the build chip is unchanged (objectstack#26614)', () => {
+describe('with the build agent in the catalog, the build chip is unchanged (objectstack#26614)', () => {
   beforeEach(() => {
-    state.agents = [{ name: 'custom_helper' }];
+    state.agents = [{ name: 'build' }, { name: 'custom_helper' }];
   });
 
   it('"Build an app" opens Studio', async () => {
@@ -204,6 +213,43 @@ describe('with no agent in the catalog (objectstack#26614)', () => {
     expect(template).toHaveAttribute('aria-describedby', screen.getByTestId('home-authoring-gate-reason').id);
     expect(screen.queryByTestId('home-build-in-studio')).toBeNull();
     expect(screen.queryByTestId('home-build-app')).toBeNull();
+  });
+});
+
+describe('without the build agent in the catalog, the chip takes its Studio form (objectstack#36969)', () => {
+  it.each([
+    ['in-app building closed: `ask` served, `build` not', [{ name: 'ask' }]],
+    ['another agent only', [{ name: 'custom_helper' }]],
+  ])('%s: "New in Studio", to Studio\'s new-package flow, and no "Build an app"', async (_case, agents) => {
+    state.agents = agents;
+    const user = userEvent.setup();
+    render(<HomePage />);
+    const chip = await screen.findByTestId('home-build-in-studio');
+    expect(chip).toBeEnabled();
+    expect(chip).toHaveTextContent('«home.build.inStudio»');
+    expect(screen.queryByTestId('home-build-app')).toBeNull();
+    await user.click(chip);
+    expect(navigateMock).toHaveBeenCalledWith(STUDIO_NEW_PACKAGE_PATH);
+  });
+
+  it('a session that may not author gets no build chip there', async () => {
+    state.agents = [{ name: 'ask' }];
+    state.canAuthorMetadata = false;
+    render(<HomePage />);
+    expect(await screen.findByTestId('home-start-template')).toBeDisabled();
+    expect(screen.queryByTestId('home-build-in-studio')).toBeNull();
+    expect(screen.queryByTestId('home-build-app')).toBeNull();
+  });
+
+  it('regression: the build agent\'s legacy id keeps "Build an app", to /studio', async () => {
+    state.agents = [{ name: 'metadata_assistant' }, { name: 'data_chat' }];
+    const user = userEvent.setup();
+    render(<HomePage />);
+    const build = await screen.findByTestId('home-build-app');
+    expect(build).toHaveTextContent('«home.build.title»');
+    expect(screen.queryByTestId('home-build-in-studio')).toBeNull();
+    await user.click(build);
+    expect(navigateMock).toHaveBeenCalledWith('/studio');
   });
 });
 

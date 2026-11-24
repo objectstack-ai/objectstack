@@ -19,8 +19,8 @@
  * of the app, the same read the Data pillar lists its objects with.
  */
 
-import { DESIGNER_SURFACE_PARAM, formatSurfaceParam } from '../metadata-admin/nav-selection.js';
 import { DESIGNER_SURFACE_ACTION_PARAM } from './useSurfaceDeepLink.js';
+import { studioItemPath, studioMetadataTypePath } from './studioAddress.js';
 
 /** The slice of the metadata client the object read uses. */
 export interface ActionObjectClient {
@@ -56,17 +56,15 @@ export async function readActionObjects(client: ActionObjectClient, packageId: s
  * Actions view when `object` names one, else the action's own item page.
  */
 export function switchedOffActionPath(packageId: string, name: string, object: string | null | undefined): string {
-  const pkg = encodeURIComponent(packageId);
   if (object) {
-    const query = new URLSearchParams({
-      [DESIGNER_SURFACE_PARAM]: formatSurfaceParam({ type: 'object', name: object }),
-      [DESIGNER_SURFACE_ACTION_PARAM]: name,
+    // `URLSearchParams` serialisation, as this link has always been spelled.
+    return studioItemPath(packageId, 'object', object, {
+      spelling: 'form',
+      qualifiers: { [DESIGNER_SURFACE_ACTION_PARAM]: name },
     });
-    return `/studio/${pkg}/data?${query.toString()}`;
   }
-  return `/studio/${pkg}/metadata/action/${encodeURIComponent(name)}`;
+  return studioItemPath(packageId, 'action', name);
 }
 
 /** The app's action list in the "All metadata" area: where several switched-off actions are listed. */
-export const switchedOffActionListPath = (packageId: string): string =>
-  `/studio/${encodeURIComponent(packageId)}/metadata/action`;
+export const switchedOffActionListPath = (packageId: string): string => studioMetadataTypePath(packageId, 'action');
