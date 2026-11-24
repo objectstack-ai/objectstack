@@ -427,8 +427,7 @@ describe('[#21154] a query over activity text or the approval snapshot, by a rea
           expect(a.status, a.text).toBe(200);
           answers.push({ status: a.status, rows: a.rows });
           const named = await list(c, 'sys_activity', { object_name: OBJ }, `&$search=${encodeURIComponent(value)}&$searchFields=summary`);
-          expect(named.status, named.text).toBe(403);
-          expect(named.code).toBe('PERMISSION_DENIED');
+          expectRefused(named, predicateWords('sys_activity', 'summary'));
         }
         expect(answers[0]).toEqual(answers[1]);
       });

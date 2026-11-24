@@ -423,6 +423,8 @@ describe('[#21260] the ledger audit capability exempts its holder from the paren
       expect(rowsOf(await (await search(who, VALUE.withheld)).json())).toHaveLength(0);
       const named = await stack.apiAs(token[who], 'GET', `/data/${LEDGER}?search=${VALUE.withheld}&searchFields=old_value&limit=5`);
       expect(named.status, `${who} names a snapshot column: ${await named.clone().text()}`).toBe(403);
+      // The ADR-0112 envelope: the nested code, not the status alone.
+      expect(((await named.json()) as any)?.error?.code, `${who} names a snapshot column`).toBe('PERMISSION_DENIED');
     }
     // The holder is served the deleted record's rows, found by the column it may query.
     const held = rowsOf(await (await search('holder', id.gone)).json());
