@@ -3652,6 +3652,53 @@ export interface MetaListTranslationSources {
 }
 
 /**
+ * The `/meta/types` listing in the request's locale: each entry's type label
+ * and description, its `form` labels, its `list` headers and its JSON Schema
+ * titles, all through the `metadataForms.<type>` group of the bundle.
+ *
+ * The one translation both doors run (objectstack#36886): `RestServer`'s
+ * `GET /meta/types` and the runtime dispatcher's `GET /metadata/types`, so a
+ * reader gets the same words whichever door their host serves.
+ *
+ * No bundle or no locale answers the listing as it came; an entry is never
+ * rewritten in place.
+ */
+export async function translateMetaTypesListing(
+    sources: Pick<MetaListTranslationSources, 'resolveI18nService' | 'requestLocale' | 'reportTranslationFault'>,
+    payload: unknown,
+): Promise<unknown> {
+    const listing: any = payload;
+    if (!listing || typeof listing !== 'object' || !Array.isArray(listing.entries)) return payload;
+    const i18n = await sources.resolveI18nService();
+    const bundle = translationBundleOf(i18n, (warning) => sources.reportTranslationFault?.(warning));
+    if (!bundle) return payload;
+    const locale = sources.requestLocale(i18n);
+    if (!locale) return payload;
+    const {
+        resolveMetadataTypeLabel,
+        resolveMetadataTypeDescription,
+        resolveMetadataFormLabels,
+        resolveMetadataFormSchemaTitles,
+        resolveMetadataListLabels,
+    } = await import('@objectstack/spec/system');
+    const opts = metaTranslateOptions(i18n, locale);
+    const entries = listing.entries.map((entry: any) => {
+        if (!entry || typeof entry !== 'object' || typeof entry.type !== 'string') return entry;
+        const next: any = { ...entry };
+        next.label = resolveMetadataTypeLabel(bundle, entry.type, entry.label ?? entry.type, opts);
+        const desc = resolveMetadataTypeDescription(bundle, entry.type, entry.description, opts);
+        if (desc !== undefined) next.description = desc;
+        if (entry.form) next.form = resolveMetadataFormLabels(entry.form, entry.type, bundle, opts);
+        if (entry.list) next.list = resolveMetadataListLabels(entry.list, entry.type, bundle, opts);
+        if (entry.schema && typeof entry.schema === 'object') {
+            next.schema = resolveMetadataFormSchemaTitles(entry.schema, entry.type, bundle, opts);
+        }
+        return next;
+    });
+    return { ...listing, entries };
+}
+
+/**
  * [#20320] Translate a metadata LIST — a bare array or the
  * `{ type, items }` envelope, answered in the shape it came in — for the
  * request's locale. `metaType` is the canonical singular (the caller folds its

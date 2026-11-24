@@ -34,6 +34,7 @@ import { holdersOfName, servedHolderOf } from './permission-set-holder.js';
 import { usePackageCustomizations } from '../studio-design/CustomizationMark.js';
 import { customizationMarkOf, customizationTotal } from '../studio-design/customizationMarks.js';
 import { classifyProvenance } from './ResourceListPage.js';
+import { useListChangedAt } from './listChangedAt.js';
 import {
   decodeListState,
   hasListContext,
@@ -124,6 +125,9 @@ export function useListOrderedNames(type: string): ListOrderedNames {
     };
   }, [client, type, listInclude]);
 
+  // objectstack#36898 — the change times the `changed` sort reads.
+  const changedAt = useListChangedAt(client, type, listInclude ? { include: listInclude } : undefined, null);
+
   // The activation ledger, read only when the status filter needs it.
   const needsLedger = state.status !== 'all' && envScope && hasCatalogActivation(type);
   const [ledgerRead, setLedgerRead] = React.useState<{ type: string; read: CatalogLedgerRead | 'error' } | null>(null);
@@ -147,6 +151,7 @@ export function useListOrderedNames(type: string): ListOrderedNames {
     if (rows === null || rows.type !== type) return { status: 'loading', names: EMPTY, fromList };
     if (state.customizedOnly && customizations.status === 'loading') return { status: 'loading', names: EMPTY, fromList };
     if (needsLedger && ledger === null) return { status: 'loading', names: EMPTY, fromList };
+    if (state.sort.key === 'changed' && changedAt === null) return { status: 'loading', names: EMPTY, fromList };
 
     const scoped = scopeListRows(rows.rows, { listFilter, unscoped, activePackage, pairId });
     const markOf = (row: Row) =>
@@ -172,6 +177,7 @@ export function useListOrderedNames(type: string): ListOrderedNames {
       label: (row) => (typeof row.item.label === 'string' ? row.item.label : undefined),
       matches: (row, query) => matchesQuery(row.item, query, searchKey.split('\n')),
       source: (row) => row.source,
+      changedAt: (row) => changedAt?.[String(row.item[primaryKey] ?? '')],
       ...(customizedOffered ? { customized: (row: Row) => markOf(row) !== null } : {}),
       ...(envScope && hasCatalogActivation(type)
         ? {
@@ -187,5 +193,5 @@ export function useListOrderedNames(type: string): ListOrderedNames {
     };
     return { status: 'ready', names: orderedListNames(scoped, state, read, locale), fromList };
     // Keyed on the config members read, never on `config`, rebuilt every render.
-  }, [rows, type, locale, state, fromList, customizations, needsLedger, ledger, envScope, unscoped, activePackage, pairId, primaryKey, listFilter, bundleMemberField, searchKey]);
+  }, [rows, changedAt, type, locale, state, fromList, customizations, needsLedger, ledger, envScope, unscoped, activePackage, pairId, primaryKey, listFilter, bundleMemberField, searchKey]);
 }

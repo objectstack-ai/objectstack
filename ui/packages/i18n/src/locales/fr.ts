@@ -3547,7 +3547,7 @@ const fr = {
     },
     language: {
       title: "Langue",
-      description: "La langue utilisée pour les notifications et les messages qui vous sont envoyés. La langue de l'interface se choisit séparément, dans le menu du globe.",
+      description: "La langue de l'interface et des notifications et messages qui vous sont envoyés. C'est le même réglage que le menu du globe : modifier l'un modifie l'autre.",
       label: "Langue préférée",
       systemDefault: "Utiliser la valeur par défaut du déploiement",
       save: "Enregistrer",

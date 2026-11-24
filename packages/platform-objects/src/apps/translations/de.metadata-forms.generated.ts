@@ -1088,15 +1088,54 @@ export const deMetadataForms: NonNullable<TranslationData['metadataForms']> = {
   },
   seed: {
     label: "Startdaten",
-    description: "Fixture- bzw. Initialisierungsdaten, die bei der Veröffentlichung angewendet werden"
+    description: "Fixture- bzw. Initialisierungsdaten, die bei der Veröffentlichung angewendet werden",
+    fields: {
+      object: {
+        label: "Objekt"
+      },
+      mode: {
+        label: "Modus"
+      }
+    }
   },
   picklist: {
     label: "Auswahlliste",
-    description: "Gemeinsame Optionsliste, auf die Auswahlfelder per Name verweisen"
+    description: "Gemeinsame Optionsliste, auf die Auswahlfelder per Name verweisen",
+    fields: {
+      name: {
+        label: "Name"
+      },
+      label: {
+        label: "Bezeichnung"
+      },
+      options: {
+        label: "Optionen"
+      },
+      description: {
+        label: "Beschreibung"
+      }
+    }
   },
   mapping: {
     label: "Importzuordnung",
-    description: "Wiederverwendbare Feldzuordnung für Import/Export (Umbenennung + Transformationen), beim Import per Name referenziert"
+    description: "Wiederverwendbare Feldzuordnung für Import/Export (Umbenennung + Transformationen), beim Import per Name referenziert",
+    fields: {
+      name: {
+        label: "Name"
+      },
+      label: {
+        label: "Bezeichnung"
+      },
+      targetObject: {
+        label: "Zielobjekt"
+      },
+      mode: {
+        label: "Modus"
+      },
+      sourceFormat: {
+        label: "Quellformat"
+      }
+    }
   },
   view: {
     label: "Ansicht",
@@ -1420,6 +1459,9 @@ export const deMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       "sharing.lockedBy": {
         label: "Gesperrt von",
         helpText: "Benutzer, der die Ansichtskonfiguration gesperrt hat"
+      },
+      object: {
+        label: "Objekt"
       }
     }
   },
@@ -2576,7 +2618,24 @@ export const deMetadataForms: NonNullable<TranslationData['metadataForms']> = {
     }
   },
   job: {
-    label: "Hintergrundjob"
+    label: "Hintergrundjob",
+    fields: {
+      name: {
+        label: "Name"
+      },
+      label: {
+        label: "Bezeichnung"
+      },
+      schedule: {
+        label: "Zeitplan"
+      },
+      enabled: {
+        label: "Aktiviert"
+      },
+      description: {
+        label: "Beschreibung"
+      }
+    }
   },
   datasource: {
     label: "Datenquelle"
@@ -2586,10 +2645,41 @@ export const deMetadataForms: NonNullable<TranslationData['metadataForms']> = {
   },
   api: {
     label: "API-Endpunkt",
-    description: "Eine stabile HTTP-URL, die andere Systeme aufrufen, um einen Flow auszuführen oder mit Datensätzen der App zu arbeiten"
+    description: "Eine stabile HTTP-URL, die andere Systeme aufrufen, um einen Flow auszuführen oder mit Datensätzen der App zu arbeiten",
+    fields: {
+      name: {
+        label: "Name"
+      },
+      method: {
+        label: "Methode"
+      },
+      path: {
+        label: "Pfad"
+      },
+      type: {
+        label: "Typ"
+      },
+      "objectParams.object": {
+        label: "Objekt"
+      },
+      "objectParams.operation": {
+        label: "Vorgang"
+      }
+    }
   },
   translation: {
-    label: "Übersetzung"
+    label: "Übersetzung",
+    fields: {
+      name: {
+        label: "Name"
+      },
+      label: {
+        label: "Bezeichnung"
+      },
+      locale: {
+        label: "Gebietsschema"
+      }
+    }
   },
   email_template: {
     label: "E-Mail-Vorlage",
@@ -2666,11 +2756,45 @@ export const deMetadataForms: NonNullable<TranslationData['metadataForms']> = {
   },
   doc: {
     label: "Dokumentation",
-    description: "Eine in Markdown geschriebene Hilfeseite, die ein Paket mitliefert oder die Sie selbst schreiben"
+    description: "Eine in Markdown geschriebene Hilfeseite, die ein Paket mitliefert oder die Sie selbst schreiben",
+    fields: {
+      name: {
+        label: "Name"
+      },
+      label: {
+        label: "Bezeichnung"
+      },
+      group: {
+        label: "Gruppe"
+      },
+      tags: {
+        label: "Schlagwörter"
+      },
+      description: {
+        label: "Beschreibung"
+      }
+    }
   },
   book: {
     label: "Dokumentationsbuch",
-    description: "Ein Inhaltsverzeichnis, das Hilfeseiten in geordnete Abschnitte gruppiert"
+    description: "Ein Inhaltsverzeichnis, das Hilfeseiten in geordnete Abschnitte gruppiert",
+    fields: {
+      name: {
+        label: "Name"
+      },
+      label: {
+        label: "Bezeichnung"
+      },
+      audience: {
+        label: "Zielgruppe"
+      },
+      groups: {
+        label: "Gruppen"
+      },
+      description: {
+        label: "Beschreibung"
+      }
+    }
   },
   permission: {
     label: "Berechtigungssatz",
@@ -2774,15 +2898,66 @@ export const deMetadataForms: NonNullable<TranslationData['metadataForms']> = {
   },
   sharing_rule: {
     label: "Freigaberegel",
-    description: "Eine Regel, die ein Paket zur Freigabe von Datensätzen deklariert; Organisationen erstellen ihre eigenen in Setup"
+    description: "Eine Regel, die ein Paket zur Freigabe von Datensätzen deklariert; Organisationen erstellen ihre eigenen in Setup",
+    fields: {
+      name: {
+        label: "Name"
+      },
+      label: {
+        label: "Bezeichnung"
+      },
+      object: {
+        label: "Objekt"
+      },
+      sharedWith: {
+        label: "Geteilt mit"
+      },
+      accessLevel: {
+        label: "Zugriffsebene"
+      }
+    }
   },
   queue: {
     label: "Warteschlange",
-    description: "Eine benannte Gruppe von Personen, in der Datensätze liegen können, bis eine von ihnen den Datensatz übernimmt; Organisationen besetzen ihre eigenen in Setup"
+    description: "Eine benannte Gruppe von Personen, in der Datensätze liegen können, bis eine von ihnen den Datensatz übernimmt; Organisationen besetzen ihre eigenen in Setup",
+    fields: {
+      name: {
+        label: "Name"
+      },
+      label: {
+        label: "Bezeichnung"
+      },
+      members: {
+        label: "Mitglieder"
+      },
+      description: {
+        label: "Beschreibung"
+      }
+    }
   },
   assignment_rule: {
     label: "Zuweisungsregel",
-    description: "Eine Regel, die ein Paket deklariert, um neue Datensätze an eine Warteschlange oder eine Person zu leiten"
+    description: "Eine Regel, die ein Paket deklariert, um neue Datensätze an eine Warteschlange oder eine Person zu leiten",
+    fields: {
+      name: {
+        label: "Name"
+      },
+      label: {
+        label: "Bezeichnung"
+      },
+      object: {
+        label: "Objekt"
+      },
+      entries: {
+        label: "Einträge"
+      },
+      active: {
+        label: "Aktiv"
+      },
+      description: {
+        label: "Beschreibung"
+      }
+    }
   },
   agent: {
     label: "KI-Agent",
@@ -2864,6 +3039,9 @@ export const deMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       guardrails: {
         label: "Schutzmaßnahmen",
         helpText: "Sicherheitsregeln und Inhaltsrichtlinien"
+      },
+      "model.model": {
+        label: "Modell"
       }
     }
   },

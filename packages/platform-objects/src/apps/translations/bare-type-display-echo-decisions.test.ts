@@ -431,7 +431,10 @@ function carriesToken(text: string, token: string): boolean {
  */
 function isBare(type: string): boolean {
   const entry = (enMetadataForms as Record<string, any>)[type];
-  return !!entry && entry.fields === undefined && entry.sections === undefined;
+  // A form panel is what carries `sections`. Since #36860 a type with no form
+  // may still carry `fields` — the headers of its Studio list columns
+  // (`METADATA_LIST_REGISTRY`) — and stays bare: it has no panel.
+  return !!entry && entry.sections === undefined;
 }
 
 interface BareLeaf {
