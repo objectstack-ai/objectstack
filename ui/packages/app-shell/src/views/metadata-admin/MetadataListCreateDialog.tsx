@@ -65,9 +65,17 @@ export function MetadataListCreateDialog(props: MetadataListCreateDialogProps): 
   return null;
 }
 
-/** Where the item is written: the pair the ensure door answers on a read-only base, else the list's package. */
-async function createTarget(packageId: string, inPair: boolean, namespace: string | null) {
-  if (!inPair) return { packageId, namespace };
+/**
+ * Where the item is written: the pair the ensure door answers on a read-only
+ * base, else the list's package — with its namespace read now when the
+ * dialog's preview read has not answered yet, so a quick submit is not
+ * written unprefixed.
+ */
+async function createTarget(packageId: string, inPair: boolean, namespace: string | null | undefined) {
+  if (!inPair) {
+    const ns = namespace !== undefined ? namespace : ((await fetchPackages()).find((p) => p.id === packageId)?.namespace ?? null);
+    return { packageId, namespace: ns };
+  }
   const pair = await ensureCustomizationPackage(packageId);
   return { packageId: pair.packageId, namespace: pair.namespace };
 }
@@ -81,13 +89,15 @@ function ObjectCreate({ open, onOpenChange, packageId, inPair, locale, onCreated
   // The package's object-name namespace (framework#2694): the dialog previews
   // the stored name; on a read-only base the pair's, by the spec's pairing
   // rule, while the save prefixes with the namespace the ensure door answers.
-  const [namespace, setNamespace] = React.useState<string | null>(null);
+  // `undefined` while the read has not answered.
+  const [namespace, setNamespace] = React.useState<string | null | undefined>(undefined);
   React.useEffect(() => {
     if (!open) return;
     let cancelled = false;
     setOwd(OWD_DEFAULT);
     setError(null);
     setTaken(null);
+    setNamespace(undefined);
     fetchPackages()
       .then((list) => {
         if (!cancelled) setNamespace(list.find((p) => p.id === packageId)?.namespace ?? null);
@@ -99,8 +109,8 @@ function ObjectCreate({ open, onOpenChange, packageId, inPair, locale, onCreated
       cancelled = true;
     };
   }, [open, packageId]);
-  const pairNamespace = customizationNamespace(namespace);
-  const previewNamespace = inPair ? (pairNamespace.ok ? pairNamespace.value : null) : namespace;
+  const pairNamespace = customizationNamespace(namespace ?? null);
+  const previewNamespace = inPair ? (pairNamespace.ok ? pairNamespace.value : null) : (namespace ?? null);
 
   const create = async (label: string, rawName: string) => {
     setBusy(true);
