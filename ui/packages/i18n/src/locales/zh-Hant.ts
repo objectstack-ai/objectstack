@@ -890,6 +890,8 @@ const zhHant = {
       aggregateNotCompleted: '操作未對所選記錄全部完成。部分記錄可能已被修改；關閉後列表會顯示它們的當前值。',
       resultNotConfirmed: ' · 未確認 {{count}}',
       notConfirmedRecords: '操作未報告這些記錄的結果，請檢查它們的當前值：',
+      resultRefused: ' · 被拒絕 {{count}}',
+      refusedRecords: '操作拒絕了以下記錄：',
       aggregateUnreadable: '操作已完成，但無法讀取其結果，因此不知道哪些記錄被修改了。關閉後列表會顯示它們的當前值。',
       retry: '重試',
       downloadErrorCsv: '下載錯誤 CSV',
