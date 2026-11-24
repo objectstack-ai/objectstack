@@ -2307,7 +2307,7 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       "exportOptions.fileNamePrefix": {
         label: "文件名",
-        helpText: "下载文件名的开头，用来代替报表名称"
+        helpText: "下载文件名的开头。留空时以报表的显示名称命名，没有显示名称时用名称"
       }
     }
   },

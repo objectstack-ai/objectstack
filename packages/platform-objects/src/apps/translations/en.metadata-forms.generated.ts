@@ -2206,19 +2206,19 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         helpText: "Report type: tabular, summary, matrix or joined."
       },
       dataset: {
-        label: "Dataset",
+        label: "Data Source",
         helpText: "The report reads its numbers from here; everyone sees only the records they have access to."
       },
       values: {
-        label: "Values",
-        helpText: "The metrics to total or count (from the data source)."
+        label: "Metrics",
+        helpText: "The metrics to show, such as totals, counts, averages or ratios (from the data source)."
       },
       rows: {
-        label: "Rows",
+        label: "Group By",
         helpText: "The fields to group by (from the data source)."
       },
       columns: {
-        label: "Columns",
+        label: "Group Columns By",
         helpText: "Groups spread across the columns (matrix reports only)."
       },
       order: {
@@ -2307,7 +2307,7 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       "exportOptions.fileNamePrefix": {
         label: "File Name",
-        helpText: "The start of the downloaded file’s name, used instead of the report name."
+        helpText: "The start of the downloaded file’s name. Left empty, the file is named after the report’s label, or its name when it has no label."
       }
     }
   },
