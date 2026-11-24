@@ -41,6 +41,11 @@ export interface CommentItemProps {
    * while the comment is being edited: the press is then the editor's.
    */
   interactionProps?: React.HTMLAttributes<HTMLDivElement>;
+  /**
+   * The comment a link was opened at (objectstack#36410: a comment
+   * notification): marked, so the eye finds it where the list scrolled.
+   */
+  targeted?: boolean;
   className?: string;
 }
 
@@ -59,6 +64,7 @@ export const CommentItem: React.FC<CommentItemProps> = ({
   onToggleReaction,
   footer,
   interactionProps,
+  targeted = false,
   className,
 }) => {
   const { t } = useDetailTranslation();
@@ -70,10 +76,12 @@ export const CommentItem: React.FC<CommentItemProps> = ({
       className={cn(
         'group/comment relative',
         interactionProps && !editing && 'select-none [-webkit-touch-callout:none]',
+        targeted && 'rounded-md bg-accent/60 ring-4 ring-accent/60',
         className,
       )}
       data-comment-item=""
       data-comment-id={String(item.id)}
+      data-comment-target={targeted ? 'true' : undefined}
     >
       <div className="flex min-h-5 items-center gap-2 pr-1">
         <CommentAuthorAvatar name={item.actor} avatarUrl={item.actorAvatarUrl} />

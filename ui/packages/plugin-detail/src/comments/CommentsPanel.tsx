@@ -15,11 +15,20 @@ import { CommentsFilterMenu } from './CommentsFilterMenu';
 import { CommentHoverActions } from './CommentHoverActions';
 import { CommentThread } from './CommentThread';
 import { DEFAULT_COMMENT_THREAD_FILTER, filterCommentThreads, type CommentThreadFilter } from './commentThreads';
+import { scrollCommentIntoView } from './scrollToComment';
 import { useRecordComments } from './useRecordComments';
 
 export interface CommentsPanelProps {
   /** Closes the panel (its ✕, and Esc while focus is inside it). */
   onClose?: () => void;
+  /**
+   * objectstack#36410 — the thread a link opened the panel at (a comment
+   * notification), by its top-level comment's id: the panel shows it (past
+   * the filter), opens its replies and scrolls to it.
+   */
+  focusThreadId?: string | null;
+  /** The comment in that thread to scroll to; absent, the thread's own comment. */
+  focusCommentId?: string | null;
   className?: string;
 }
 
@@ -30,7 +39,7 @@ export interface CommentsPanelProps {
  * fills the box its host gives it: where it sits (beside the record, over it,
  * over a drawer) and how wide is the host's to decide.
  */
-export const CommentsPanel: React.FC<CommentsPanelProps> = ({ onClose, className }) => {
+export const CommentsPanel: React.FC<CommentsPanelProps> = ({ onClose, focusThreadId = null, focusCommentId = null, className }) => {
   const { t } = useDetailTranslation();
   const comments = useRecordComments();
   const { threads, loading, denied, failed, onRetry, onAddComment, resolvable } = comments;
@@ -38,6 +47,18 @@ export const CommentsPanel: React.FC<CommentsPanelProps> = ({ onClose, className
   // The filter menu (objectstack#36075 item 7): resolved threads hidden by
   // default, 「只看我参与的」 off. Held while the panel is open, never stored.
   const [filter, setFilter] = React.useState<CommentThreadFilter>(DEFAULT_COMMENT_THREAD_FILTER);
+  // objectstack#36410 — the comment a link names, until the panel has
+  // scrolled to it once (`settledFocus`); after that the reader's own
+  // filtering and scrolling are left alone.
+  const focusKey = focusThreadId ? `${focusThreadId}\n${focusCommentId ?? ''}` : null;
+  const targetId = focusThreadId ? focusCommentId || focusThreadId : null;
+  const [settledFocus, setSettledFocus] = React.useState<string | null>(null);
+  const focusThread = focusThreadId ? threads.find((th) => String(th.root.id) === focusThreadId) : undefined;
+  // A thread the filter hides (resolved, or not the reader's) is shown: the
+  // filter goes to show all (adjusted while rendering).
+  if (focusThread && focusKey !== settledFocus && resolvable && filterCommentThreads([focusThread], filter).length === 0) {
+    setFilter({ showResolved: true, onlyMine: false });
+  }
   // Where the deployment stores no resolution there is nothing to hide: the
   // menu is not offered and every thread shows.
   const shown = React.useMemo(
@@ -53,6 +74,21 @@ export const CommentsPanel: React.FC<CommentsPanelProps> = ({ onClose, className
     const list = listRef.current;
     if (list) list.scrollTop = list.scrollHeight;
   }, [threadCount, loading]);
+  // After it, so a linked comment wins over the foot: scrolled to once the
+  // thread is drawn; a thread that is not here (deleted, or a stale link)
+  // leaves the list as it opens.
+  React.useLayoutEffect(() => {
+    if (!focusKey || !focusThreadId || settledFocus === focusKey) return;
+    const list = listRef.current;
+    if (!list) return;
+    if (focusThread) {
+      if (scrollCommentIntoView(list, targetId ?? focusThreadId) || scrollCommentIntoView(list, focusThreadId)) {
+        setSettledFocus(focusKey);
+      }
+      return;
+    }
+    if (!loading) setSettledFocus(focusKey);
+  }, [focusKey, focusThreadId, targetId, settledFocus, focusThread, shown, loading]);
 
   let body: React.ReactNode;
   if (denied) {
@@ -110,6 +146,8 @@ export const CommentsPanel: React.FC<CommentsPanelProps> = ({ onClose, className
             key={String(thread.root.id)}
             thread={thread}
             comments={comments}
+            openSignal={focusKey && String(thread.root.id) === focusThreadId ? focusKey : null}
+            targetId={String(thread.root.id) === focusThreadId ? targetId : null}
             renderActions={(actions) => (
               <CommentHoverActions
                 onReply={actions.onReply}

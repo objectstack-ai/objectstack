@@ -53,7 +53,11 @@ import { NAV_RUN_ACTION_PARAM } from '@object-ui/layout';
  * | `shortcuts` | Keyboard-shortcuts dialog overlay.             | replace      |
  * | `comments`  | The phone's comment page over a record route:  | push (open), |
  * |             | empty = the threads, a top-level comment's id  | pop (close)  |
- * |             | = that thread (objectstack#36076).             |              |
+ * |             | = that thread (objectstack#36076). On the      |              |
+ * |             | desktop, a thread's id opens the comment panel |              |
+ * |             | at it (a comment notice's link, #36410).       |              |
+ * | `comment`   | With `comments`: the comment in that thread to | with         |
+ * |             | scroll to (objectstack#36410).                 | `comments`   |
  * | `from`      | Ancestor breadcrumb trail for a record route,  | push (with   |
  * |             | so drilling record→related-record keeps a      | the drill-in) |
  * |             | clickable path back (`Account → #p → Invoice`).|              |
@@ -133,9 +137,20 @@ export const NAV_DRAWER_OPEN_STATE = '__navDrawerOpen';
 /**
  * The phone's comment page over the record page (`?comments=`, objectstack#36076):
  * present and empty, the record's threads; a top-level comment's id, that
- * thread. Read by `RecordDetailView` on a phone's record page only.
+ * thread. On the desktop full page (objectstack#36410), a top-level comment's
+ * id opens the comment panel at that thread — the link a comment notice
+ * carries (plugin-audit writes it, `/{object}/{id}?comments=…`); empty there,
+ * it means nothing. Read by `RecordDetailView`.
  */
 export const RECORD_COMMENTS_PARAM = 'comments';
+
+/**
+ * Beside {@link RECORD_COMMENTS_PARAM} (objectstack#36410): the comment in
+ * that thread to scroll to and mark — a reply a notice is about. Absent, the
+ * thread's own comment. Read by `RecordDetailView`; dropped whenever the
+ * reader moves to another thread or leaves the comments.
+ */
+export const RECORD_COMMENT_PARAM = 'comment';
 
 /**
  * History-state flag beside {@link RECORD_COMMENTS_PARAM}: the record view
@@ -188,6 +203,7 @@ export const RESERVED_URL_PARAMS: readonly string[] = [
   RECORD_DETAIL_TAB_PARAM,
   RECORD_RELATED_ENLARGE_PARAM,
   RECORD_COMMENTS_PARAM,
+  RECORD_COMMENT_PARAM,
   COMMAND_PALETTE_PARAM,
   KEYBOARD_SHORTCUTS_PARAM,
   RECORD_TRAIL_PARAM,
