@@ -98,6 +98,7 @@ const answer = (status: number, body: unknown) => ({
   ok: status >= 200 && status < 300,
   status,
   statusText: '',
+  headers: new Headers(),
   json: async () => body,
 });
 

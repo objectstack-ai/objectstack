@@ -15,7 +15,7 @@
  */
 
 import * as React from 'react';
-import { useParams, useNavigate, useSearchParams, useLocation, Link, Navigate } from 'react-router-dom';
+import { useParams, useNavigate, useSearchParams, useLocation, Navigate } from 'react-router-dom';
 // The ONE draft-envelope reader (objectui#8181): unwrap AND strip the
 // framework's read decorations in one place. This file used to carry its own
 // copy that did the unwrap and skipped the strip.
@@ -50,10 +50,7 @@ import {
   STUDIO_HEADER,
   STUDIO_HEADER_ICON_BUTTON,
   STUDIO_HEADER_PACKAGE_COLUMN,
-  STUDIO_HEADER_PILLAR_NAME,
   STUDIO_HEADER_WIDE_WORD,
-  STUDIO_HEADER_PILLAR,
-  STUDIO_HEADER_PILLAR_NAV,
   STUDIO_PILLARS_HOST,
 } from './studio-tokens.js';
 import {
@@ -93,19 +90,14 @@ import {
   TooltipTrigger,
 } from '@object-ui/components';
 import {
-  Database,
-  Workflow,
   Loader2,
   Plus,
   GitBranch,
   Rocket,
-  Shield,
   PanelRightClose,
   PanelRightOpen,
   FileQuestion,
   PackageX,
-  Library,
-  type LucideIcon,
 } from 'lucide-react';
 import { useMetadataClient } from '../metadata-admin/useMetadata.js';
 // objectui#11773 — every draft save of an existing item sends the version its buffer was built on.
@@ -140,7 +132,8 @@ import {
   isStudioOrgScope,
   studioOrgScopePath,
 } from './studioScope.js';
-import { STUDIO_METADATA_AREA, studioMetadataAreaPath } from './metadataArea.js';
+import { STUDIO_METADATA_AREA, isStudioAllPackagesScope } from './metadataArea.js';
+import { StudioMenu, StudioMenuProvider, StudioMenuTrigger } from './StudioMenu.js';
 import { StudioMetadataArea } from './StudioMetadataArea.js';
 import { useMetadataRefreshNonce } from './useMetadataRefreshNonce.js';
 import {
@@ -203,30 +196,15 @@ function formatBackfillReceipt(receipt: PublishBackfillReceipt, locale: string):
     .join(' · ');
 }
 
-// objectui#12452 — Access is a segment of its own, and the "More" overflow that
-// held it alone (objectui#5813) is retired. If a second overflow pillar is ever
-// added, More returns with the objectui#11794 behaviour: its trigger keeps the
-// name More whichever of its pillars is open.
-// objectstack#36502 — the Interfaces pillar is retired: interfaces are designed
-// in the running app's design mode (`studioInterfacesRetired.tsx`). Data, the
-// first segment, is the Studio home.
-const PILLARS: ReadonlyArray<{ key: string; label: string; Icon: LucideIcon }> = [
-  { key: STUDIO_HOME_PILLAR, label: 'Data', Icon: Database },
-  { key: 'automations', label: 'Automations', Icon: Workflow },
-  { key: 'access', label: 'Access', Icon: Shield },
-];
-/**
- * objectstack ADR-0146 D1 (#28561) — the "All metadata" area joins the four
- * pillars in the header: a package's type directory, lists, generic item page,
- * history and diagnostics (`StudioMetadataArea`). Not a pillar: it designs no
- * type of its own, and its URLs are the area's (`/studio/<package>/metadata/…`,
- * `metadataArea.ts`), so `PILLARS` and the not-found check do not hold it.
- */
-const METADATA_AREA_TAB: { key: string; label: string; Icon: LucideIcon } = {
-  key: STUDIO_METADATA_AREA,
-  label: 'All metadata',
-  Icon: Library,
-};
+// The pillar segments `/studio/<package>/<pillar>` serves. objectstack#36899
+// (ADR-0084, amended) — they are no longer a navigation: Studio's one
+// navigation is the left menu (`StudioMenu`), and these pages are where an
+// object, a flow or a permission set opens until each becomes a full-screen
+// item page. Data stays the Studio home. objectstack#36502 — the Interfaces
+// pillar is retired (`studioInterfacesRetired.tsx`). The "All metadata" area
+// (`/studio/<package>/metadata/…`, `metadataArea.ts`) is not a pillar, so the
+// not-found check does not hold it.
+const PILLARS: readonly string[] = [STUDIO_HOME_PILLAR, 'automations', 'access'];
 // objectstack#29988 — the pillar kit moved to its own module; re-exported for its pins.
 export { StudioHeldNotice, StudioReadOnlyLink, type StudioBaseCustomization };
 
@@ -302,14 +280,18 @@ function StudioDesignSurfaceBody({ aiSlot, area }: StudioDesignSurfaceProps): Re
   // The route segment: a package id, or the package-less scope's reserved
   // segment (objectui#11553, `studioScope.ts`). URLs are built from it.
   const scopeSegment = params.packageId ?? 'com.example.showcase';
-  // `null` in the package-less scope. Every package-scoped read, write and
-  // publish below keys on this value, so none of them can be handed the
-  // reserved segment as though it named a package.
-  const packageId: string | null = isStudioOrgScope(scopeSegment) ? null : scopeSegment;
+  // objectstack#36899 — the "All metadata" area's cross-package leg (`~all`)
+  // is drawn in this shell too, so the left menu is the same on every Studio
+  // page: the area alone, with no package, no package actions and no slot.
+  const allScope = isStudioAllPackagesScope(scopeSegment);
+  // `null` in the package-less scope and on the cross-package leg. Every
+  // package-scoped read, write and publish below keys on this value, so none
+  // of them can be handed a reserved segment as though it named a package.
+  const packageId: string | null = isStudioOrgScope(scopeSegment) || allScope ? null : scopeSegment;
   const tab = area ?? params.tab ?? STUDIO_HOME_PILLAR;
   // objectstack#26708 — a segment no pillar has is a not-found state, never
   // a pillar it falls through to.
-  const pillarKnown = PILLARS.some((p) => p.key === tab);
+  const pillarKnown = PILLARS.includes(tab);
   const locale = useMetadataLocale();
   // objectstack#36502 — a landing from an old Interfaces URL says once where
   // interface editing went. The landing's history state is read once and
@@ -1222,15 +1204,38 @@ function StudioDesignSurfaceBody({ aiSlot, area }: StudioDesignSurfaceProps): Re
       const pillar = PILLAR_FOR_SURFACE_TYPE[target.type];
       // objectui#11553 — the package-less scope has one pillar; a surface
       // owned by another is not in this scope, so nothing to navigate to.
-      const reachable = packageId !== null || pillar === STUDIO_ORG_SCOPE_PILLAR;
+      const reachable = !allScope && (packageId !== null || pillar === STUDIO_ORG_SCOPE_PILLAR);
       if (pillar && pillar !== tab && reachable) {
         if (!confirmLeavePillar()) return false;
         shellNavigate(studioPillarItemAddress(scopeSegment, pillar, target, { segmentEncoding: 'verbatim' }));
       }
       setChangesOpen(false);
     },
-    [tab, packageId, scopeSegment, confirmLeavePillar, shellNavigate],
+    [tab, allScope, packageId, scopeSegment, confirmLeavePillar, shellNavigate],
   );
+  // objectstack#36899 — a menu entry that re-enters the open pillar on another
+  // `?surface=` (the default sharing overview, on the Access pillar) opens the
+  // pillar afresh, as arriving from any other page does: a pillar reads its
+  // deep link once, at mount (`useSurfaceDeepLink`). The shell's link guard
+  // lets a link to the page already shown through, so this asks first. The
+  // remount waits for the new query to be the router's: the router may apply
+  // a navigation in a later render than the click's own state updates, and a
+  // pillar remounted before it would capture the old deep link.
+  const [pillarEntry, setPillarEntry] = React.useState(0);
+  const reentryPending = React.useRef(false);
+  const currentSearch = useLocation().search;
+  const reenterPillar = React.useCallback((): boolean => {
+    if (!confirmLeavePillar()) return false;
+    reentryPending.current = true;
+    return true;
+  }, [confirmLeavePillar]);
+  React.useLayoutEffect(() => {
+    if (!reentryPending.current) return;
+    reentryPending.current = false;
+    setPillarEntry((n) => n + 1);
+  }, [currentSearch]);
+  // objectstack#26708 — a package that is not there has no menu.
+  const showMenu = !pkgMissing;
 
   const publishButton = (
     <button
@@ -1272,7 +1277,9 @@ function StudioDesignSurfaceBody({ aiSlot, area }: StudioDesignSurfaceProps): Re
     <SurfaceDeepLinkProvider onRequest={requestSurface}>
       <StudioSaveProvider value={saveBar.registry}>
       <StudioRightSlotContext.Provider value={slotHandle}>
-      <div className="flex h-screen w-full overflow-hidden bg-background text-foreground">
+      {/* objectstack#36899 — the left menu's provider is the frame: the app
+          sidebar's, under Studio's own collapse cookie (`StudioMenu.tsx`). */}
+      <StudioMenuProvider className="h-screen min-h-0 overflow-hidden bg-background text-foreground">
         {/* The ADR-0080 `aiSlot` seam — a cloud edition may still inject its own
           * left copilot panel; the built-in copilot is the RIGHT dock below. */}
         {/* objectstack#32615 — not beside a package that is not there. */}
@@ -1282,70 +1289,38 @@ function StudioDesignSurfaceBody({ aiSlot, area }: StudioDesignSurfaceProps): Re
 
         <div className="flex min-w-0 flex-1 flex-col">
           <header className={STUDIO_HEADER} data-testid="studio-shell-header">
-            {/* objectui#12459 — three columns: the way back to the app at the
-                left, the pillars centered, the package actions at the right.
-                objectui#12509 — below `sm` the pillars take a second row of
-                their own (`STUDIO_HEADER_PILLAR_NAV`), and on any row the
-                app's name is the piece that gives way. */}
+            {/* objectui#12459 — the way back to the app at the left, the
+                package actions at the right. objectstack#36899 — the pillars
+                that sat between them are gone: the left menu is Studio's one
+                navigation, and its show / hide control leads the bar. Changes
+                and Publish stay at the right end, beside Cancel and Save. */}
             <div className={cn('flex min-w-0 items-center gap-1', STUDIO_HEADER_PACKAGE_COLUMN)}>
+              {showMenu && <StudioMenuTrigger locale={locale} />}
               {/* objectstack#36501 — 「‹ Back to app」, the app's name and the
-                  Studio mark: Studio's one way out, to the app page the author
-                  came from. It replaced the Studio-home button, the package
-                  switcher and the top-right Open app; a different package is
-                  picked in the app, or on the Studio landing. */}
+                  Studio mark: Studio's one way out. objectstack#36899
+                  (decision 5) — it names the CURRENT package's app; with none,
+                  the package, or the scope on `~org` and `~all`. */}
               <StudioBackToApp
                 packageId={packageId}
-                packageLabel={pkgEntry?.id === packageId ? pkgEntry.name : null}
+                packageLabel={
+                  packageId !== null
+                    ? pkgEntry?.id === packageId
+                      ? pkgEntry.name
+                      : null
+                    : t(allScope ? 'engine.studio.menu.environment' : 'engine.studio.menu.orgFlows', locale)
+                }
                 apps={publishedApps}
                 locale={locale}
                 beforeNavigate={confirmLeavePillar}
                 navigate={shellNavigate}
               />
             </div>
-            <nav className={STUDIO_HEADER_PILLAR_NAV} data-testid="studio-pillar-nav">
-              {/* objectui#11553 — the package-less scope offers its one pillar. */}
-              {/* objectstack#26708 — a package that is not there has no pillars. */}
-              {/* objectstack#28561 — and a package has the "All metadata" area beside its pillars. */}
-              {(packageId === null ? PILLARS.filter((p) => p.key === STUDIO_ORG_SCOPE_PILLAR) : pkgMissing ? [] : [...PILLARS, METADATA_AREA_TAB]).map((p) => (
-                <Link
-                  key={p.key}
-                  to={p.key === STUDIO_METADATA_AREA ? studioMetadataAreaPath(scopeSegment) : studioPillarPath(scopeSegment, p.key, { segmentEncoding: 'verbatim' })}
-                  aria-current={tab === p.key ? 'page' : undefined}
-                  // No click handler of its own (objectui#13253): a dirty
-                  // pillar is registered with the shell's seam, whose
-                  // capture-phase link guard asks before this link leaves and
-                  // skips what this handler used to skip (the open pillar's
-                  // own URL, a modified or non-primary click). Asking here as
-                  // well would be a second question after OK.
-                  title={t(`engine.studio.pillar.${p.key}`, locale)}
-                  className={
-                    STUDIO_HEADER_PILLAR +
-                    ' ' +
-                    (tab === p.key
-                      ? 'bg-background font-medium text-foreground shadow-sm'
-                      : 'text-muted-foreground hover:text-foreground')
-                  }
-                >
-                  <p.Icon className={'h-3.5 w-3.5 ' + (tab === p.key ? 'text-primary' : '')} />
-                  {/* objectui#12725 — named from 1024 px up; below that the
-                      pillars read as icons, the name kept in the accessible
-                      name and the tooltip. objectstack#28561 — the "All
-                      metadata" area is named from 1280 px: the top bar's
-                      1024 px row was sized for the four pillar names.
-                      objectstack#34725 — both now answer the bar's own width
-                      (see STUDIO_HEADER_PILLAR_NAME). */}
-                  <span className={p.key === STUDIO_METADATA_AREA ? STUDIO_HEADER_WIDE_WORD : STUDIO_HEADER_PILLAR_NAME}>
-                    {t(`engine.studio.pillar.${p.key}`, locale)}
-                  </span>
-                </Link>
-              ))}
-            </nav>
 
             {/* Package-level draft review + one atomic publish (replaces per-item Publish) */}
             <div className="flex min-w-0 items-center justify-end gap-2">
               {/* objectstack#26708 — nothing to create, review or publish in a
-                  package that is not there. */}
-              {!pkgMissing && (<>
+                  package that is not there, nor on the cross-package leg. */}
+              {!pkgMissing && !allScope && (<>
               {/* objectui#11553 — the package-less scope has no app to create. */}
               {packageId === null || packageApp ? null : appDraftPending ? (
                 <span
@@ -1491,8 +1466,12 @@ function StudioDesignSurfaceBody({ aiSlot, area }: StudioDesignSurfaceProps): Re
               form measures, and it says whether the right slot squeezes it
               (`STUDIO_PILLARS_HOST` in `studio-tokens.ts`): the slot shown
               beside it, not overlaying the page under `md`. */}
+          {/* objectstack#36899 — the left menu and the page beside it. The
+              menu docks in this row, below the header (a drawer under 768 px). */}
+          <div className="relative flex min-h-0 flex-1 overflow-hidden">
+          {showMenu && <StudioMenu segment={scopeSegment} locale={locale} onReenterPillar={reenterPillar} />}
           <div
-            className={cn('min-h-0 flex-1', STUDIO_PILLARS_HOST)}
+            className={cn('min-h-0 min-w-0 flex-1', STUDIO_PILLARS_HOST)}
             data-testid="studio-pillars-host"
             data-studio-slot={slotHost && slotOpen && slotHasContent && !isMobile ? 'open' : 'closed'}
           >
@@ -1510,10 +1489,12 @@ function StudioDesignSurfaceBody({ aiSlot, area }: StudioDesignSurfaceProps): Re
                 by its segment, and serves its one pillar: another pillar's
                 URL lands on it rather than on a package pillar with no
                 package under it. */}
-            {packageId === null ? (
+            {allScope ? (
+              <StudioMetadataArea key={scopeSegment} packageId={null} />
+            ) : packageId === null ? (
               tab === STUDIO_ORG_SCOPE_PILLAR ? (
                 <AutomationsPillar
-                  key={scopeSegment}
+                  key={`${scopeSegment}:${pillarEntry}`}
                   packageId={null}
                   publishNonce={publishNonce}
                   onDraftSaved={onDraftSaved}
@@ -1557,7 +1538,7 @@ function StudioDesignSurfaceBody({ aiSlot, area }: StudioDesignSurfaceProps): Re
               />
             ) : tab === 'data' ? (
               <DataPillar
-                key={packageId}
+                key={`${packageId}:${pillarEntry}`}
                 packageId={packageId}
                 publishNonce={publishNonce}
                 onDraftSaved={onDraftSaved}
@@ -1572,7 +1553,7 @@ function StudioDesignSurfaceBody({ aiSlot, area }: StudioDesignSurfaceProps): Re
               />
             ) : tab === 'automations' ? (
               <AutomationsPillar
-                key={packageId}
+                key={`${packageId}:${pillarEntry}`}
                 packageId={packageId}
                 objectOrder={packageAppObjectOrder}
                 publishNonce={publishNonce}
@@ -1589,7 +1570,7 @@ function StudioDesignSurfaceBody({ aiSlot, area }: StudioDesignSurfaceProps): Re
               // mounted. Unkeyed, the open set, the rail and the `?surface=`
               // capture stayed the base's.
               <AccessPillar
-                key={packageId}
+                key={`${packageId}:${pillarEntry}`}
                 packageId={packageId}
                 publishNonce={publishNonce}
                 onDraftSaved={onDraftSaved}
@@ -1600,6 +1581,7 @@ function StudioDesignSurfaceBody({ aiSlot, area }: StudioDesignSurfaceProps): Re
               />
             )}
             </StudioPendingDraftsContext.Provider>
+          </div>
           </div>
         </div>
 
@@ -1691,7 +1673,7 @@ function StudioDesignSurfaceBody({ aiSlot, area }: StudioDesignSurfaceProps): Re
             </>
           }
         />
-      </div>
+      </StudioMenuProvider>
       </StudioRightSlotContext.Provider>
       </StudioSaveProvider>
     </SurfaceDeepLinkProvider>

@@ -88,6 +88,7 @@ beforeEach(() => {
       return {
         ok: answer.status >= 200 && answer.status < 300,
         status: answer.status,
+        headers: new Headers(),
         json: async () => answer.body,
       } as unknown as Response;
     }),
