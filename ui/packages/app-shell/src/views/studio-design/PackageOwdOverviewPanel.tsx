@@ -30,7 +30,7 @@
  */
 
 import * as React from 'react';
-import { Lock, ArrowUpRight } from 'lucide-react';
+import { ArrowUpRight } from 'lucide-react';
 import type { MetadataClient, MetadataLayered } from '@object-ui/data-objectstack';
 // The ONE draft-envelope reader (objectui#8181): unwrap AND strip the
 // framework's read decorations in one place. This file used to carry its own
@@ -545,20 +545,13 @@ export function PackageOwdOverviewPanel({
   ];
   return (
     <div className="flex h-full flex-col" data-testid="owd-overview">
-      {/* objectui#12456 — the overview's title and subtitle are the Access
-          pillar's item header above this panel, so its own header is the
-          toolbar row: what the dials decide. objectstack#36511 — its Save is
-          the top bar's. */}
+      {/* objectui#12456 — the overview's title and subtitle are the item
+          header above this panel, so its own header is the toolbar row: what
+          the dials decide. objectstack#36511 — its Save is the top bar's.
+          objectstack#36905 — a read-only package's one mark is that header's
+          (objectui#12453), so this row draws none. */}
       <div className="flex items-center gap-3 border-b px-6 py-3">
         <p className="min-w-0 flex-1 text-xs text-muted-foreground">{t('engine.studio.owd.description', locale)}</p>
-        {readOnly && (
-          <span
-            title={t('engine.studio.pkg.readonlyHint', locale)}
-            className="flex shrink-0 items-center gap-1.5 text-[11px] text-muted-foreground"
-          >
-            <Lock className="h-3 w-3" /> {t('engine.studio.pkg.readonly', locale)}
-          </span>
-        )}
       </div>
 
       <Dialog open={!!prereq} onOpenChange={(open) => !open && setPrereq(null)}>
