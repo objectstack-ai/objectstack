@@ -136,6 +136,7 @@ import { validateInternalFormViews } from './validate-internal-form-views.js';
 import { validatePublicFormFileFields } from './validate-public-form-file-fields.js';
 import { validateThankYouRecordFields } from './validate-thank-you-record-fields.js';
 import { validateAssignmentRules } from './validate-assignment-rules.js';
+import { validateAiContext } from './validate-ai-context.js';
 import { validateSeedStateMachine } from './validate-seed-state-machine.js';
 import { validateVisibilityPredicates } from './validate-visibility-predicates.js';
 import { validatePredicatePathRefs } from './validate-predicate-path-refs.js';
@@ -1961,6 +1962,21 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     surfaces: CLI_ONLY,
     surfaceReason: RUNTIME_NEEDS_FULL_SNAPSHOT,
     run: (stack) => validateAssignmentRules(stack),
+  },
+  // [ADR-0160 D1] Context packs that name an object or field the stack does not
+  // define, a related list with no link to the root, or a body that is not
+  // long text. Advisory: the tool reads what resolves and states nothing about
+  // the rest, so the author hears it here. CLI-only — every verdict reads the
+  // stack's `objects` beside its `aiContexts`.
+  {
+    name: 'validateAiContext',
+    tier: 'advisory',
+    input: 'parsed',
+    commands: ALL,
+    source: 'packages/lint/src/validate-ai-context.ts',
+    surfaces: CLI_ONLY,
+    surfaceReason: RUNTIME_NEEDS_FULL_SNAPSHOT,
+    run: (stack) => validateAiContext(stack),
   },
   // [#34613] `validateSeedReplaySafety` (framework#3434, the `insert`-mode
   // replay warning) is retired: `SeedMode` itself refuses `insert` and

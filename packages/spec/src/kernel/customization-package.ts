@@ -364,6 +364,9 @@ export const OVERRIDE_TYPE_CLASSIFICATION = {
   datasource: { disposition: 'excluded', basis: 'setup_owned_connection' },
   tool: behaviouralSwitchFirst,
   skill: behaviouralSwitchFirst,
+  // [ADR-0160 D1] A context pack does not join D2's list ("an override of a
+  // packaged pack" is later work): excluded on the `skill` row's basis.
+  ai_context: behaviouralSwitchFirst,
 } as const satisfies Record<MetadataType, OverrideTypeClassification>;
 
 /** The metadata types a declared override applies to (`disposition: 'overridable'`). */
