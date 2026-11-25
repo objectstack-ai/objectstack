@@ -122,13 +122,13 @@
           "status": "live",
           "verifiedAt": "2026-11-24",
           "note": "LIVE since the D3 slice of the P2 engine card (#32062, ADR-0153 D3): under `'mark'` (absent reads as `'mark'`, no schema default) a pull stamps `_sync_deleted_at` on a row the source deleted and clears it when a later pull reads the row again; `'ignore'` leaves every row. A FULL connector pull (no `watermark`) marks by absence only when one response is the whole set (`paging: { style: 'none' }`); with no `paging` it records `unjudged, no paging declared` and with a style whose loop is not built yet `unjudged, pages not followed`. An incremental source under `'mark'` with no `deletedField` is refused at parse (packages/spec/src/data/mapping.zod.ts#incrementalSourceDeleteRefusal) and again at run time (`delete_policy_unhonourable`). A `synced` target that withholds the provenance columns is refused under `'mark'`. Planned 2026-11-10 (P2 spec card #32061); `authorWarn` / `authorHint` dropped with the flip.",
-          "evidence": "packages/services/service-automation/src/connector-pull.ts#pullConnectorSource (reads `deletePolicy` through packages/services/service-automation/src/sync-delete-mark.ts#syncDeletePolicyOf and marks through `SyncDeleteMarker`: `deletedField` row by row, then the absence mark of a complete full pull)"
+          "evidence": "packages/services/service-automation/src/connector-pull.ts#pullOnce (reads `deletePolicy` through packages/services/service-automation/src/sync-delete-mark.ts#syncDeletePolicyOf and marks through `SyncDeleteMarker`: `deletedField` row by row, then the absence mark of a complete full pull)"
         },
         "deletedField": {
           "status": "live",
           "verifiedAt": "2026-11-24",
           "note": "LIVE since the D3 slice of the P2 engine card (#32062, ADR-0153 D3): on any pull under `'mark'`, a read record whose value in this field is truthy has its copy marked `_sync_deleted_at`, and every other read record's copy is cleared. The only way an incremental pull learns of a delete. Planned 2026-11-10 (P2 spec card #32061); `authorWarn` / `authorHint` dropped with the flip.",
-          "evidence": "packages/services/service-automation/src/sync-delete-mark.ts#SyncDeleteMarker (`afterBatch` reads the source record's `deletedField` and marks or clears its copy by `_sync_external_id`), called from packages/services/service-automation/src/connector-pull.ts#pullConnectorSource"
+          "evidence": "packages/services/service-automation/src/sync-delete-mark.ts#SyncDeleteMarker (`afterBatch` reads the source record's `deletedField` and marks or clears its copy by `_sync_external_id`), called from packages/services/service-automation/src/connector-pull.ts#pullOnce"
         }
       }
     },

@@ -1080,6 +1080,21 @@ describe('[ADR-0153 D3] delete marking on a datasource source', () => {
         expect(await marks(h.ql)).toEqual({ 'A-1': false, 'A-2': false, 'A-3': true });
     });
 
+    it('[review M1] a read row with a blank match key names no target row, so the run marks nothing by absence (unjudged, rows refused)', async () => {
+        // upsertKey on a copied column the source can leave empty: the row is read, refused, and stamped with no key.
+        const byAmount = { ...FULL, upsertKey: ['amount'] };
+        const h = await harness(THREE, { mapping: byAmount, runs: true });
+        await pullConnectorSource(h.deps, { mapping: MAPPING.name, context: JOB });
+        await h.erp.knex.raw("update ERP_ORDERS set AMOUNT = NULL where ORDER_NO = 'A-1'");
+        await h.erp.knex.raw("delete from ERP_ORDERS where ORDER_NO = 'A-3'");
+        const result = await pullConnectorSource(h.deps, { mapping: MAPPING.name, context: JOB });
+        expect(result.summary.errors).toBe(1);
+        expect(result.source === 'datasource' && result.deletes).toEqual({ note: 'unjudged, rows refused', marked: 0, cleared: 0, skippedNullWatermark: 0 });
+        expect(await marks(h.ql)).toEqual({ 'A-1': false, 'A-2': false, 'A-3': false });
+        const run = await lastRun(h.ql);
+        expect({ deletes: run.deletes, marked: Number(run.marked_deleted_count) }).toEqual({ deletes: 'unjudged, rows refused', marked: 0 });
+    });
+
     it('a pull refused part-way marks nothing by absence', async () => {
         const h = await harness(THREE, { mapping: FULL });
         await pullConnectorSource(h.deps, { mapping: MAPPING.name, context: SYSTEM });
@@ -1141,6 +1156,15 @@ describe('[ADR-0153 D3] delete marking on a datasource source', () => {
         const err = await refusalOf(pullConnectorSource(h.deps, { mapping: MAPPING.name, context: SYSTEM }));
         expect([err.code, err.status, err.reason]).toEqual(['VALIDATION_ERROR', 400, 'delete_policy_unhonourable']);
         expect(err.message).toContain('deletedField');
+        expect(reads).toEqual([]);
+        expect(await copies(h.ql)).toEqual([]);
+    });
+
+    it('[review N4] a stored deletePolicy outside mark / ignore is refused delete_policy_unhonourable (400), not read as mark', async () => {
+        const h = await harness(THREE, { mapping: { ...FULL, datasourceSource: { ...FULL.datasourceSource, deletePolicy: 'purge' } } });
+        const reads = onSourceReads(h);
+        const err = await refusalOf(pullConnectorSource(h.deps, { mapping: MAPPING.name, context: SYSTEM }));
+        expect([err.code, err.status, err.reason]).toEqual(['VALIDATION_ERROR', 400, 'delete_policy_unhonourable']);
         expect(reads).toEqual([]);
         expect(await copies(h.ql)).toEqual([]);
     });

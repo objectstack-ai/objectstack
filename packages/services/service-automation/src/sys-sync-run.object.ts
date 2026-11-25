@@ -252,7 +252,7 @@ export const SysSyncRun = ObjectSchema.create({
       readonly: true,
       maxLength: 64,
       group: 'Outcome',
-      description: "What the pull did about rows the source deleted: 'judged' (a complete full read marked every row it did not read), 'by deletedField' (an incremental pull marked through the source's deletedField), 'ignored' (deletePolicy: 'ignore'), or 'unjudged, …' with the reason a full pull marked nothing by absence: 'null watermark', 'no paging declared', 'pages not followed' or 'rows refused'. Empty when the pull failed.",
+      description: "What the pull did about rows the source deleted: 'judged' (a complete full read marked every row it did not read), 'by deletedField' (an incremental pull marked through the source's deletedField), 'ignored' (deletePolicy: 'ignore'), or 'unjudged, …' with the reason a full pull marked nothing by absence: 'null watermark', 'no paging declared', 'pages not followed' or 'rows refused'. Empty when the pull failed, and for a connector pull whose target carries no provenance columns, which judges no deletes.",
     }),
 
     // [ADR-0153 D2 invariant 11, D3] Read with the delete judgment.

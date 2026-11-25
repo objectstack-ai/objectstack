@@ -119,7 +119,18 @@ export interface SyncDeletePolicy {
     deletedField?: string;
 }
 
-/** The delete policy a stored source block declares; tolerant of an unparsed block. */
+/**
+ * Why a stored source block's `deletePolicy` cannot be read, when it is
+ * neither absent, `'mark'` nor `'ignore'`: the parse refuses such a block, and
+ * the pull refuses it too rather than reading it as `'mark'`.
+ */
+export function syncDeletePolicyRefusal(block: unknown): string | undefined {
+    const value = block !== null && typeof block === 'object' ? (block as Rec).deletePolicy : undefined;
+    if (value === undefined || value === 'mark' || value === 'ignore') return undefined;
+    return `deletePolicy ${JSON.stringify(value) ?? String(value)} is not one of 'mark' or 'ignore'; declare one of them, or leave it out to mark.`;
+}
+
+/** The delete policy a stored source block declares; the caller has refused a value {@link syncDeletePolicyRefusal} names. */
 export function syncDeletePolicyOf(block: unknown): SyncDeletePolicy {
     const b = block !== null && typeof block === 'object' ? block as Rec : {};
     const deletedField = typeof b.deletedField === 'string' && b.deletedField.length > 0 ? b.deletedField : undefined;

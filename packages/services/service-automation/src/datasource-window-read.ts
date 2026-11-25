@@ -96,6 +96,8 @@ export interface SyncWindowQuery {
     where: FilterCondition;
     orderBy?: SortNode[];
     limit?: number;
+    /** The fields to read, when not every one: a count reads the key only. */
+    fields?: string[];
 }
 
 /** What the windowed read reads from: one federated object, as the mapping names it. */

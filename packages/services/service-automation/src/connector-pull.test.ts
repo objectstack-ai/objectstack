@@ -1064,6 +1064,24 @@ describe('[ADR-0153 D3] delete marking on a connector source, on a real engine',
         expect(await e.marks()).toEqual({ c1: false, c2: false, c3: false });
     });
 
+    it('[review M1] a full pull whose records stopped sending the upsertKey field marks nothing by absence (unjudged, rows refused)', async () => {
+        const keyless = (name: string) => ({ name, updated_at: '2026-01-02' });
+        const e = await onEngine({ paging: { style: 'none' } }, [[rec('c1'), rec('c2')], [keyless('C1'), keyless('C2')]]);
+        await e.pull();
+        const second = await e.pull();
+        expect(second.summary.errors).toBe(2);
+        expect(second.source === 'connector' && second.deletes).toEqual({ note: 'unjudged, rows refused', marked: 0, cleared: 0 });
+        expect(await e.marks()).toEqual({ c1: false, c2: false });
+    });
+
+    it('[review M1] one keyless record is enough: the record the response left out is not marked either', async () => {
+        const e = await onEngine({ paging: { style: 'none' } }, [[rec('c1'), rec('c2'), rec('c3')], [rec('c1'), { name: 'X' }]]);
+        await e.pull();
+        const second = await e.pull();
+        expect(second.source === 'connector' && second.deletes).toEqual({ note: 'unjudged, rows refused', marked: 0, cleared: 0 });
+        expect(await e.marks()).toEqual({ c1: false, c2: false, c3: false });
+    });
+
     it('a full pull with no paging declared marks nothing by absence: one response is not known to be the whole set', async () => {
         const e = await onEngine({}, [[rec('c1'), rec('c2')], [rec('c1')]]);
         await e.pull();
@@ -1096,6 +1114,15 @@ describe('[ADR-0153 D3] delete marking on a connector source, on a real engine',
 
     it('an incremental source under mark with no deletedField is refused delete_policy_unhonourable (400) before the action is called', async () => {
         const e = await onEngine({ watermark: { field: 'updated_at', param: 'since' } }, [[rec('c1')]]);
+        const err = await e.pull().then(() => undefined, (x: unknown) => x);
+        expect(err).toBeInstanceOf(ConnectorPullError);
+        expect([(err as ConnectorPullError).code, (err as ConnectorPullError).status, (err as ConnectorPullError).reason])
+            .toEqual(['VALIDATION_ERROR', 400, 'delete_policy_unhonourable']);
+        expect(e.handler).not.toHaveBeenCalled();
+    });
+
+    it('[review N4] a stored deletePolicy outside mark / ignore is refused delete_policy_unhonourable (400) before the action is called', async () => {
+        const e = await onEngine({ paging: { style: 'none' }, deletePolicy: 'purge' }, [[rec('c1')]]);
         const err = await e.pull().then(() => undefined, (x: unknown) => x);
         expect(err).toBeInstanceOf(ConnectorPullError);
         expect([(err as ConnectorPullError).code, (err as ConnectorPullError).status, (err as ConnectorPullError).reason])

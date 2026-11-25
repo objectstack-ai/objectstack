@@ -324,6 +324,9 @@ export const OrdersPullJob = defineJob({
   - **`deletedField`**, on any run that declares it: a read record whose value
     in that source field is truthy (a soft-delete flag or a deleted-at column)
     has its copy marked, and every other read record's copy is cleared.
+    Truthy is JavaScript's: the text `'false'` or `'0'` marks the row, so map a
+    real boolean or a deleted-at value; on a `connectorSource` a misspelt field
+    reads as falsy on every record and marks nothing, silently.
   - **Absence**, on a full run whose read was complete: every row of the
     mapping (its `_sync_source`) the run did not read is marked. A
     `datasourceSource` run with `full: true` is complete when its windows read
@@ -334,15 +337,22 @@ export const OrdersPullJob = defineJob({
     `watermark` is complete only when it declares
     `paging: { style: 'none' }`, which says its one response is the whole set;
     with no `paging`, or a paging style the pull does not follow yet, it marks
-    nothing by absence. A run that is refused or stops part-way, or one whose
-    rows the import runner refused beyond a thousand, marks nothing by absence.
+    nothing by absence. A run that is refused or stops part-way, one whose
+    rows the import runner refused beyond a thousand, or one that read any
+    record whose `upsertKey` value is blank (it names no row) marks nothing by
+    absence (`deletes: unjudged, rows refused`). A row pulled before the
+    provenance columns existed has no `_sync_source`, so no pull marks it.
+  - **Two mappings on one target** each mark and clear only the rows whose
+    `_sync_source` is their own; a second mapping is not refused.
 
   An incremental source (a `connectorSource` with a `watermark`, a
   `datasourceSource` without `full: true`) never sees an absent row, so under
   `'mark'` it must name `deletedField`, or declare `deletePolicy: 'ignore'`:
   `os validate` refuses it otherwise, and so does the pull of a mapping no build
   judged. A `synced` target that declares `systemFields: false` has no column to
-  mark, so its mapping declares `deletePolicy: 'ignore'`.
+  mark, so its mapping declares `deletePolicy: 'ignore'`; `os validate` does not
+  catch this one, only the pull refuses it (`mapping_target_refused`), so a
+  stack that validates green still fails each run until it is fixed.
 - **Every row says where it came from.** A `synced` object carries five
   hidden, read-only columns the platform adds to it, beside the tenant and audit
   columns, with an index on (`organization_id`, `_sync_source`,

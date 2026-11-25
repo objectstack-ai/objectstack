@@ -96,7 +96,7 @@ import { pullDatasourceSource, type DatasourcePullResult } from './datasource-pu
 import { markSyncPullWrite } from '@objectstack/objectql';
 import { carriesSyncProvenanceColumns, mappedSyncProvenanceTarget, stampSyncProvenance } from './sync-provenance-stamp.js';
 import { incrementalSourceDeleteRefusal } from '@objectstack/spec/data';
-import { SyncDeleteMarker, syncDeletePolicyOf, type SyncDeletesNote } from './sync-delete-mark.js';
+import { SyncDeleteMarker, syncDeletePolicyOf, syncDeletePolicyRefusal, type SyncDeletesNote } from './sync-delete-mark.js';
 import { targetWithoutSyncColumns, type SyncPullDeletes } from './datasource-pull.js';
 import {
     SYNC_RUN_OBJECT,
@@ -761,7 +761,7 @@ async function pullOnce(
     }
     // [ADR-0153 D3] The incremental-`mark` refusal, judged again for a mapping no parse saw.
     const deletePolicy = syncDeletePolicyOf(source);
-    const unhonourable = incrementalSourceDeleteRefusal('connectorSource', source);
+    const unhonourable = syncDeletePolicyRefusal(source) ?? incrementalSourceDeleteRefusal('connectorSource', source);
     if (unhonourable) {
         return refuse('VALIDATION_ERROR', 400, 'delete_policy_unhonourable', `Mapping "${mappingName}": ${unhonourable}`);
     }

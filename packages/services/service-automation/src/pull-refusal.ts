@@ -61,6 +61,8 @@ export type ConnectorPullRefusalReason =
      * `deletePolicy` absent or `'mark'` with no `deletedField`: it never sees
      * a row the source deleted, so the policy could mark nothing. Refused
      * before anything is read, with the sentence its parse refuses it with.
+     * Also a stored `deletePolicy` outside `'mark'` / `'ignore'`, which the
+     * parse refuses as well.
      */
     | 'delete_policy_unhonourable'
     /**

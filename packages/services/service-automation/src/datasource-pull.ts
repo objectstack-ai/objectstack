@@ -117,7 +117,7 @@ import {
 import { refuseBlankMatchKeys } from './connector-pull.js';
 import { ConnectorPullError, type ConnectorPullRefusalReason } from './pull-refusal.js';
 import { carriesSyncProvenanceColumns, mappedSyncProvenanceTarget, stampSyncProvenance } from './sync-provenance-stamp.js';
-import { SyncDeleteMarker, syncDeletePolicyOf, type SyncDeletesNote } from './sync-delete-mark.js';
+import { SyncDeleteMarker, syncDeletePolicyOf, syncDeletePolicyRefusal, type SyncDeletesNote } from './sync-delete-mark.js';
 
 /** [ADR-0153 D3] What one pull did about deletes: the run record's `deletes` and counts. */
 export interface SyncPullDeletes {
@@ -242,7 +242,7 @@ export async function pullDatasourceSource(
     }
     // [ADR-0153 D3] The incremental-`mark` refusal, judged again for a mapping no parse saw.
     const deletePolicy = syncDeletePolicyOf(ds);
-    const unhonourable = incrementalSourceDeleteRefusal('datasourceSource', ds);
+    const unhonourable = syncDeletePolicyRefusal(ds) ?? incrementalSourceDeleteRefusal('datasourceSource', ds);
     if (unhonourable) return invalid('delete_policy_unhonourable', unhonourable);
 
     // The target: a `synced` object (D4), its fields the import door's.
@@ -384,6 +384,7 @@ export async function pullDatasourceSource(
                 object: sourceObject,
                 where: query.where,
                 ...(query.orderBy ? { orderBy: query.orderBy } : {}),
+                ...(query.fields ? { fields: query.fields } : {}),
                 limit: query.limit ?? windowLimit,
                 // [S3] The pull reads `records` only. Without this the data door
                 // runs `engine.count` over the same `where` beside every read that
@@ -527,7 +528,8 @@ async function countNullWatermarks(
 ): Promise<number> {
     if (readPath === 'floored') {
         try {
-            return (await find({ where: where as SyncWindowQuery['where'] })).length;
+            // [review N3] The floor answers rows, not a count: read the key only.
+            return (await find({ where: where as SyncWindowQuery['where'], fields: ['id'] })).length;
         } catch (error) {
             const cap = overCapOf(error);
             if (cap !== undefined) return cap + 1;
@@ -548,6 +550,7 @@ async function countNullWatermarks(
             where: (cursor === undefined ? where : { $and: [where, { id: { $gt: cursor } }] }) as SyncWindowQuery['where'],
             orderBy: [{ field: 'id', order: 'asc' }],
             limit: pageSize,
+            fields: ['id'],
         });
         count += page.length;
         if (page.length < pageSize) return count;
