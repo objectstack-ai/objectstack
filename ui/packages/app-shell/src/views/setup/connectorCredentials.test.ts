@@ -54,7 +54,7 @@ beforeEach(() => {
     'fetch',
     vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       calls.push({ url: String(input), method: (init?.method ?? 'GET').toUpperCase(), body: init?.body });
-      return { ok: next.status >= 200 && next.status < 300, status: next.status, json: async () => next.body } as unknown as Response;
+      return { ok: next.status >= 200 && next.status < 300, status: next.status, headers: new Headers(), json: async () => next.body } as unknown as Response;
     }),
   );
 });

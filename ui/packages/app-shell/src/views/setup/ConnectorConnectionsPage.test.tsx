@@ -98,7 +98,7 @@ beforeEach(() => {
       calls.push({ url, method, body: init?.body });
       const queue = answers.get(`${method} ${url}`);
       const next = queue ? (queue.length > 1 ? queue.shift()! : queue[0]) : { status: 500, body: errorEnvelope('X', `unexpected ${method} ${url}`) };
-      return { ok: next.status >= 200 && next.status < 300, status: next.status, json: async () => next.body } as unknown as Response;
+      return { ok: next.status >= 200 && next.status < 300, status: next.status, headers: new Headers(), json: async () => next.body } as unknown as Response;
     }),
   );
   fakeWindow = { closed: false, opener: window, location: { href: 'about:blank' }, close: vi.fn(() => { if (fakeWindow) fakeWindow.closed = true; }) };

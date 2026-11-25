@@ -4627,5 +4627,90 @@ export const deObjects: NonNullable<TranslationData['objects']> = {
         }
       }
     }
+  },
+  sys_task: {
+    label: "Aufgabe",
+    pluralLabel: "Aufgaben",
+    description: "Zu erledigende Dinge, mit einer zuständigen Person und einer Fälligkeit.",
+    fields: {
+      title: {
+        label: "Titel"
+      },
+      description: {
+        label: "Beschreibung"
+      },
+      status: {
+        label: "Status",
+        options: {
+          todo: "Offen",
+          in_progress: "In Bearbeitung",
+          done: "Erledigt"
+        }
+      },
+      due_at: {
+        label: "Fällig am"
+      },
+      assignee_id: {
+        label: "Zuständig"
+      },
+      completed_at: {
+        label: "Erledigt am",
+        help: "Wird von der Plattform gesetzt, wenn der Status zu Erledigt wechselt, und gelöscht, wenn er Erledigt verlässt."
+      },
+      owner_id: {
+        label: "Eigentümer"
+      }
+    },
+    _views: {
+      assigned_to_me: {
+        label: "Mir zugewiesen",
+        emptyState: {
+          title: "Ihnen ist nichts zugewiesen",
+          message: "Offene Aufgaben, die Ihnen zugewiesen sind, erscheinen hier."
+        }
+      },
+      created_by_me: {
+        label: "Von mir erstellt",
+        emptyState: {
+          title: "Noch keine Aufgaben",
+          message: "Von Ihnen erstellte Aufgaben erscheinen hier."
+        }
+      },
+      all: {
+        label: "Alle Aufgaben"
+      }
+    }
+  },
+  sys_note: {
+    label: "Notiz",
+    pluralLabel: "Notizen",
+    description: "Notizen: ein Titel und ein formatierter Text.",
+    fields: {
+      title: {
+        label: "Titel"
+      },
+      body: {
+        label: "Text"
+      },
+      heading: {
+        label: "Überschrift",
+        help: "Der Titel oder, wenn er leer ist, die erste Zeile des Textes. Wird von der Plattform gepflegt."
+      },
+      owner_id: {
+        label: "Eigentümer"
+      }
+    },
+    _views: {
+      mine: {
+        label: "Meine Notizen",
+        emptyState: {
+          title: "Noch keine Notizen",
+          message: "Von Ihnen geschriebene Notizen erscheinen hier."
+        }
+      },
+      all: {
+        label: "Alle Notizen"
+      }
+    }
   }
 };
