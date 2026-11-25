@@ -11,13 +11,19 @@
  * wrong — and is exactly why the author has to hear it here instead: a typo in
  * a pack ships as a pack that quietly reads less than it says.
  *
- * Four verdicts, each a `warning` (the pack loads and reads what resolves):
+ * Five verdicts, each a `warning` (the pack loads and reads what resolves):
  *
  * - `ai-context-field-unknown`: a name in `fields`, a `related` entry's
  *   `fields`, `where` or `orderBy`, or `body.field` that the object does not
  *   define (a `where` or `orderBy` field the child lacks leaves the whole list
  *   out of every answer, ADR-0160 D1/D3 second amendment — the tool never
  *   runs a filter with one of its conditions removed);
+ * - `ai-context-sort-field-unsortable`: a `related` entry's `orderBy` field
+ *   the child does not offer as a sort — the sortability projection's
+ *   `sortable: false` (`resolveObjectSortability`): a formula, or a field
+ *   whose author declared `sortable: false`. Both MCP doors refuse such an
+ *   order with `INVALID_SORT`, so `get_record_context` leaves the list out of
+ *   every answer instead and states nothing (ADR-0160 D1: an author defect);
  * - `ai-context-related-link-unknown`: a `related` entry with no reference
  *   field to the root — `field` names none that points at it, or, omitted, the
  *   child has none or several (then `field` must say which);
@@ -43,6 +49,7 @@
  */
 
 import { AI_CONTEXT_BODY_FIELD_TYPES, aiContextWhereFields } from '@objectstack/spec/ai';
+import { resolveObjectSortability } from '@objectstack/spec/api';
 import { REFERENCE_VALUE_TYPES, referenceTargetOf } from '@objectstack/spec/data';
 import { closureDependencyRemedy, recordsOf } from './object-graph.js';
 
@@ -63,6 +70,7 @@ export const AI_CONTEXT_OBJECT_UNKNOWN = 'ai-context-object-unknown';
 export const AI_CONTEXT_FIELD_UNKNOWN = 'ai-context-field-unknown';
 export const AI_CONTEXT_RELATED_LINK_UNKNOWN = 'ai-context-related-link-unknown';
 export const AI_CONTEXT_BODY_NOT_LONG_TEXT = 'ai-context-body-not-long-text';
+export const AI_CONTEXT_SORT_FIELD_UNSORTABLE = 'ai-context-sort-field-unsortable';
 
 type AnyRec = Record<string, unknown>;
 
@@ -209,9 +217,28 @@ export function validateAiContext(
         if (!childFields.has(name)) listLeftOut(name, 'where', `${path}.where`);
       }
       const orderBy = Array.isArray(entry.orderBy) ? (entry.orderBy as unknown[]) : [];
+      // Judged by the projection the doors refuse by, never by a second reading of `type` or `sortable`.
+      const sortability = orderBy.length > 0 ? resolveObjectSortability({ fields: objects.get(child)?.fields }).fields : {};
       orderBy.forEach((node, k) => {
         const name = node && typeof node === 'object' ? str((node as AnyRec).field) : '';
-        if (name && !childFields.has(name)) listLeftOut(name, 'orderBy', `${path}.orderBy[${k}].field`);
+        if (!name) return;
+        if (!childFields.has(name)) {
+          listLeftOut(name, 'orderBy', `${path}.orderBy[${k}].field`);
+          return;
+        }
+        const verdict = sortability[name];
+        if (verdict?.sortable !== false) return;
+        const why = verdict.reason === 'virtual-type' ? 'is a formula, computed on read' : 'declares `sortable: false`';
+        out.push({
+          severity: 'warning',
+          rule: AI_CONTEXT_SORT_FIELD_UNSORTABLE,
+          where,
+          path: `${path}.orderBy[${k}].field`,
+          message:
+            `\`orderBy\` sorts by field '${name}' of object '${child}', which ${why}, so it is not offered as a sort ` +
+            'and the list is left out of every answer (an order is never read with one of its fields removed)',
+          hint: `Order the list by a field of '${child}' that is offered as a sort, or remove '${name}' from \`orderBy\``,
+        });
       });
       if (!root || !objects.has(root)) return;
       const named = str(entry.field);

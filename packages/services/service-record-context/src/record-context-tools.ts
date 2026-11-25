@@ -18,6 +18,7 @@ import {
   type RecordContextRelatedList,
   type RecordContextRelatedRow,
 } from '@objectstack/spec/ai';
+import { resolveObjectSortability } from '@objectstack/spec/api';
 import type { AIToolDefinition } from '@objectstack/spec/contracts';
 import { isMultiValueField, resolveDisplayField, resolveRecordDisplayName } from '@objectstack/spec/data';
 import { boundedOutline, boundedText, headingsOf, isHtmlBodyType, sectionOf, RECORD_CONTEXT_BODY_MAX_CHARS } from './body-outline.js';
@@ -74,9 +75,12 @@ import { sentencesFor, type Sentences } from './sentences.js';
  * They run inside the one capped child query, as the caller: `where` joined
  * to the link filter with `$and`, `orderBy` as the order, `limit` (else the
  * row cap) as the cut, stated when it cuts. Before that query, each field
- * they name is judged: one the child's published definition lacks is an
- * author defect, and the section is left out with nothing stated (a filter is
- * never read with one of its conditions removed); one the caller cannot
+ * they name is judged: one the child's published definition lacks, or an
+ * `orderBy` field that definition does not offer as a sort (the sortability
+ * projection's `sortable: false`: a formula, or `sortable: false` declared by
+ * its author, which the doors refuse with `INVALID_SORT`), is an author
+ * defect, and the section is left out with nothing stated (a filter or an
+ * order is never read with one of its fields removed); one the caller cannot
  * query on ({@link queryableAmong}) drops the section with the one
  * not-visible statement, and is never named. Neither is ever a refusal.
  */
@@ -431,7 +435,8 @@ export async function executeGetRecordContext(input: unknown, door: RecordContex
   for (const entry of pack.related ?? []) {
     const served = childServed.get(entry.object);
     if (!served) continue;
-    const childPublished = fieldMapOf(await publishedOf(entry.object));
+    const childPublishedDefinition = await publishedOf(entry.object);
+    const childPublished = fieldMapOf(childPublishedDefinition);
     const link = resolveRelatedLink(entry, childPublished, root);
     if (link === undefined) continue; // author defect, reported on author surfaces
     const servedFields = fieldMapOf(served);
@@ -442,11 +447,16 @@ export async function executeGetRecordContext(input: unknown, door: RecordContex
       continue;
     }
     // [ADR-0160 D3, second amendment] The fields `where` and `orderBy` name,
-    // judged before the one query: one the published definition lacks is an
-    // author defect (left out, nothing stated); one this caller cannot query
-    // on drops the section with the statement, never named, never refused.
+    // judged before the one query: one the published definition lacks, or an
+    // `orderBy` field it does not offer as a sort, is an author defect (left
+    // out, nothing stated, the same for every caller); one this caller cannot
+    // query on drops the section with the statement, never named, never refused.
     const queried = [...new Set([...aiContextWhereFields(entry.where), ...(entry.orderBy ?? []).map((n) => n.field)])];
     if (!queried.every((name) => childPublished.has(name))) continue;
+    if (entry.orderBy?.length) {
+      const sortability = resolveObjectSortability(childPublishedDefinition).fields;
+      if (entry.orderBy.some((n) => sortability[n.field]?.sortable === false)) continue;
+    }
     if (!(await queryableAmong(door, entry.object, queried, servedFields, childPublished))) {
       hidden = true;
       continue;

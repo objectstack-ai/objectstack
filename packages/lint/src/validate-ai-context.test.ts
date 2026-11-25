@@ -6,6 +6,7 @@ import {
   AI_CONTEXT_FIELD_UNKNOWN,
   AI_CONTEXT_OBJECT_UNKNOWN,
   AI_CONTEXT_RELATED_LINK_UNKNOWN,
+  AI_CONTEXT_SORT_FIELD_UNSORTABLE,
   validateAiContext,
 } from './validate-ai-context.js';
 import { explainRule } from './rule-explanations.js';
@@ -24,7 +25,7 @@ const objects = [
   },
   {
     name: 'policy_revision',
-    fields: { version: { type: 'text' }, policy: { type: 'lookup', reference: 'policy' } },
+    fields: { version: { type: 'text' }, policy: { type: 'lookup', reference: 'policy' }, rank: { type: 'number', sortable: false } },
   },
   {
     name: 'policy_link',
@@ -96,6 +97,40 @@ describe('validateAiContext — ADR-0160 D1 author defects', () => {
     })).toEqual([]);
   });
 
+  it('reports an orderBy field the child does not offer as a sort (sortable: false, a formula): the list is left out', () => {
+    const ranked = objects.map((o) => o.name !== 'policy_revision' ? o : {
+      ...o,
+      fields: {
+        ...o.fields,
+        score: { type: 'formula', expression: 'rank * 2' },
+        seq: { type: 'number' },
+      },
+    });
+    const stack = {
+      objects: ranked,
+      aiContexts: [pack({
+        related: [{
+          object: 'policy_revision',
+          where: { rank: { $gt: 0 } },
+          orderBy: [{ field: 'seq' }, { field: 'rank', order: 'desc' }, { field: 'score' }],
+        }],
+      })],
+    };
+    expect(rulesOf(stack)).toEqual([
+      [AI_CONTEXT_SORT_FIELD_UNSORTABLE, 'aiContexts[0].related[0].orderBy[1].field'],
+      [AI_CONTEXT_SORT_FIELD_UNSORTABLE, 'aiContexts[0].related[0].orderBy[2].field'],
+    ]);
+    const [declared, formula] = validateAiContext(stack);
+    expect(declared.severity).toBe('warning');
+    expect(declared.message).toContain("'rank'");
+    expect(declared.message).toContain('`sortable: false`');
+    expect(declared.message).toContain('left out');
+    expect(formula.message).toContain('formula');
+    // Control: the same fields in `where` and a sortable order are clean.
+    expect(rulesOf({ objects: ranked, aiContexts: [pack({ related: [{ object: 'policy_revision', where: { rank: 1, score: 2 }, orderBy: [{ field: 'seq' }] }] })] }))
+      .toEqual([]);
+  });
+
   it('reports an object the stack does not define once, without judging its fields; a sys_ object is not judged', () => {
     expect(rulesOf({ objects, aiContexts: [pack({ object: 'polcy', related: undefined, body: undefined })] })).toEqual([
       [AI_CONTEXT_OBJECT_UNKNOWN, 'aiContexts[0].object'],
@@ -128,7 +163,7 @@ describe('validateAiContext — ADR-0160 D1 author defects', () => {
   it('every verdict is a warning, and every rule it emits has an `os explain` entry', () => {
     const findings = validateAiContext({ objects, aiContexts: [pack({ fields: ['nope'], body: { field: 'title' } })] });
     expect(findings.every((f) => f.severity === 'warning')).toBe(true);
-    for (const id of [AI_CONTEXT_OBJECT_UNKNOWN, AI_CONTEXT_FIELD_UNKNOWN, AI_CONTEXT_RELATED_LINK_UNKNOWN, AI_CONTEXT_BODY_NOT_LONG_TEXT]) {
+    for (const id of [AI_CONTEXT_OBJECT_UNKNOWN, AI_CONTEXT_FIELD_UNKNOWN, AI_CONTEXT_RELATED_LINK_UNKNOWN, AI_CONTEXT_BODY_NOT_LONG_TEXT, AI_CONTEXT_SORT_FIELD_UNSORTABLE]) {
       expect(explainRule(id), id).toBeTruthy();
     }
   });
@@ -160,6 +195,7 @@ describe('validateAiContext on the runtime publish door (ADR-0160 D1)', () => {
   const FAMILIES: ReadonlyArray<[string, Record<string, unknown>, string, string]> = [
     ['a misspelled field', pack({ fields: ['title', 'titel'] }), AI_CONTEXT_FIELD_UNKNOWN, 'aiContexts[0].fields[1]'],
     ['a misspelled where field', pack({ related: [{ object: 'policy_revision', where: { verison: 'v1' } }] }), AI_CONTEXT_FIELD_UNKNOWN, 'aiContexts[0].related[0].where'],
+    ['an order on a field not offered as a sort', pack({ related: [{ object: 'policy_revision', orderBy: [{ field: 'rank' }] }] }), AI_CONTEXT_SORT_FIELD_UNSORTABLE, 'aiContexts[0].related[0].orderBy[0].field'],
     ['an unknown related object', pack({ related: [{ object: 'policy_revison' }] }), AI_CONTEXT_OBJECT_UNKNOWN, 'aiContexts[0].related[0].object'],
     ['a related list with no link', pack({ related: [{ object: 'account' }] }), AI_CONTEXT_RELATED_LINK_UNKNOWN, 'aiContexts[0].related[0]'],
     ['a body that is not long text', pack({ body: { field: 'title' } }), AI_CONTEXT_BODY_NOT_LONG_TEXT, 'aiContexts[0].body.field'],

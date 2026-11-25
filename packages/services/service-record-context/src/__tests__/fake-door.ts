@@ -1,5 +1,6 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
+import { resolveObjectSortability } from '@objectstack/spec/api';
 import type { RecordContextDoor } from '../door.js';
 
 /**
@@ -24,6 +25,10 @@ import type { RecordContextDoor } from '../door.js';
  *   `orderBy` naming one — or any field the caller cannot query on — is
  *   refused by the read, as the security plugin's engine guard refuses it;
  *   `noQueryableAnswer` makes the door carry no `queryableFieldsOf`;
+ * - an `orderBy` on a field the object's sortability projection calls
+ *   unsortable (a formula, or `sortable: false`) refuses the read with
+ *   `INVALID_SORT`, as the Data API ingress (`assertSortFieldsExist`, the
+ *   HTTP MCP door) and the stdio door (`unofferedSortRefusal`) refuse it;
  * - a lookup is expanded to `{ id, name }` when its target is readable and the
  *   target row is readable, else left as the bare id.
  */
@@ -165,6 +170,12 @@ export function fakeDoor(app: FakeApp): FakeDoor {
       door.reads.push({ member: 'query', object, opts });
       const def = served(object);
       if (!def) throw coded('OBJECT_NOT_FOUND', 404, `Object '${object}' not found`);
+      const sortability = resolveObjectSortability(app.objects[object]).fields;
+      for (const { field } of opts.orderBy ?? []) {
+        if (sortability[field]?.sortable === false) {
+          throw coded('INVALID_SORT', 400, `Query parameter 'orderBy' sorts by '${field}', a field on '${object}' that is not offered as a sort`);
+        }
+      }
       // The security plugin's engine guard: a filter or sort on a field the
       // caller cannot query on is refused, naming it.
       const allowed = new Set(['id', ...queryable(object)]);

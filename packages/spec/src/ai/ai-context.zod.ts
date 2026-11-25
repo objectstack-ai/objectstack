@@ -42,7 +42,8 @@ import { z } from 'zod';
  *
  * A `related` entry may choose, order and cut its rows: `where` (the object
  * filter form on the child's OWN fields, {@link AI_CONTEXT_WHERE_OPERATORS}
- * joined by {@link AI_CONTEXT_WHERE_COMBINATORS}, literal comparands only),
+ * joined by {@link AI_CONTEXT_WHERE_COMBINATORS} at most
+ * {@link AI_CONTEXT_WHERE_MAX_DEPTH} deep, literal comparands only),
  * `orderBy` (`{ field, order }[]`) and `limit`. They run inside the one
  * capped child query, as the caller, joined to the link filter with `$and`:
  * they grant nothing and add no object to the call's read set (D4).
@@ -86,6 +87,16 @@ export const AI_CONTEXT_WHERE_OPERATORS = [
 
 /** The combinators that join a related list's `where` conditions. `$not` is not admitted. */
 export const AI_CONTEXT_WHERE_COMBINATORS = ['$and', '$or'] as const;
+
+/**
+ * The most `$and` / `$or` lists a condition of a related list's `where` sits
+ * beneath (the top-level condition sits beneath none). Deeper nesting is
+ * refused at parse, like the pack's other bounds (ADR-0160 row 11), and
+ * {@link aiContextWhereFields} walks to exactly this depth, so every field a
+ * `where` that parsed names is judged by the render service and the author
+ * surfaces. 32 is the bound the platform's other filter walks keep.
+ */
+export const AI_CONTEXT_WHERE_MAX_DEPTH = 32;
 
 /**
  * The field types a pack's `body` may name: the long-text types, the ones a
@@ -146,10 +157,12 @@ function comparandRefusal(value: unknown): string | undefined {
  * [ADR-0160 D1, second amendment] The one walk that holds a related list's
  * `where` to its admitted subset of the object filter form: field keys that
  * are the child's own fields (no dotted path, no condition on a lookup's
- * target), the ten {@link AI_CONTEXT_WHERE_OPERATORS}, `$and` / `$or`, and
- * literal comparands. A bare value is `$eq`, as the filter form reads it.
+ * target), the ten {@link AI_CONTEXT_WHERE_OPERATORS}, `$and` / `$or` nested
+ * at most {@link AI_CONTEXT_WHERE_MAX_DEPTH} deep, and literal comparands. A
+ * bare value is `$eq`, as the filter form reads it. `depth` is how many
+ * `$and` / `$or` lists `node` sits beneath.
  */
-function checkRelatedWhere(node: unknown, ctx: z.RefinementCtx, path: (string | number)[]): void {
+function checkRelatedWhere(node: unknown, ctx: z.RefinementCtx, path: (string | number)[], depth = 0): void {
   if (!isPlainNode(node)) {
     ctx.addIssue({ code: 'custom', path, message: `A condition is an object of field conditions; ${WHERE_ADMITTED}` });
     return;
@@ -161,7 +174,16 @@ function checkRelatedWhere(node: unknown, ctx: z.RefinementCtx, path: (string | 
         ctx.addIssue({ code: 'custom', path: at, message: `\`${key}\` takes a list of conditions` });
         continue;
       }
-      value.forEach((member, i) => checkRelatedWhere(member, ctx, [...at, i]));
+      if (depth + 1 > AI_CONTEXT_WHERE_MAX_DEPTH) {
+        ctx.addIssue({
+          code: 'custom',
+          path: at,
+          message: `\`${key}\` nests too deep: a related list's \`where\` nests $and / $or at most `
+            + `${AI_CONTEXT_WHERE_MAX_DEPTH} levels deep`,
+        });
+        continue;
+      }
+      value.forEach((member, i) => checkRelatedWhere(member, ctx, [...at, i], depth + 1));
       continue;
     }
     if (key.startsWith('$')) {
@@ -232,15 +254,16 @@ function checkRelatedWhere(node: unknown, ctx: z.RefinementCtx, path: (string | 
 
 /**
  * The child fields a related list's `where` names, each once, in first-named
- * order — walked through `$and` / `$or`. Safe on any shape: a value that is
- * no condition names no field. The render service judges each one against
+ * order — walked through `$and` / `$or` to {@link AI_CONTEXT_WHERE_MAX_DEPTH},
+ * the depth parse admits, so on a `where` that parsed no field is missed.
+ * Safe on any shape: a value that is no condition names no field. The render service judges each one against
  * the caller's queryable fields before it reads, and the author surfaces
  * report one the child does not define (ADR-0160 D1, D3).
  */
 export function aiContextWhereFields(where: unknown): string[] {
   const out: string[] = [];
   const walk = (node: unknown, depth: number) => {
-    if (depth > 32 || !isPlainNode(node)) return;
+    if (depth > AI_CONTEXT_WHERE_MAX_DEPTH || !isPlainNode(node)) return;
     for (const [key, value] of Object.entries(node)) {
       if ((AI_CONTEXT_WHERE_COMBINATORS as readonly string[]).includes(key)) {
         if (Array.isArray(value)) for (const member of value) walk(member, depth + 1);
@@ -296,7 +319,7 @@ export const AiContextRelatedSchema = lazySchema(() => strictObject(
     where: AiContextRelatedWhereSchema.optional().describe(
       'Which child rows the list carries: a filter on the child\'s own fields, in the object filter form. A bare '
       + `value is \`$eq\`; the operators are ${AI_CONTEXT_WHERE_OPERATORS.join(', ')}, joined by `
-      + `${AI_CONTEXT_WHERE_COMBINATORS.join(' / ')}. Comparands are literal values: no dotted path, no field-to-field `
+      + `${AI_CONTEXT_WHERE_COMBINATORS.join(' / ')} nested at most ${AI_CONTEXT_WHERE_MAX_DEPTH} deep. Comparands are literal values: no dotted path, no field-to-field `
       + 'comparand, no $now anchor and no {…} placeholder. Joined to the link with $and and read as the caller, so '
       + 'it grants nothing',
     ),
@@ -318,7 +341,8 @@ export const AiContextRelatedSchema = lazySchema(() => strictObject(
       .optional()
       .describe(
         'The order of the rows: `{ field, order }[]` on the child\'s own fields, `order` `asc` (the default) or '
-        + '`desc`. Without it the rows come in the data engine\'s order',
+        + '`desc`. Without it the rows come in the data engine\'s order. A field the child does not offer as a sort '
+        + '(it declares `sortable: false`, or is a formula) leaves the list out of every answer',
       ),
     limit: z
       .number()

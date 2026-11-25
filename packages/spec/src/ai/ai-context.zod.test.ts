@@ -3,6 +3,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   AI_CONTEXT_MAX_RELATED_ROWS,
+  AI_CONTEXT_WHERE_MAX_DEPTH,
   AI_CONTEXT_WHERE_OPERATORS,
   AiContextRelatedSchema,
   AiContextSchema,
@@ -103,5 +104,25 @@ describe('ai_context related — where, orderBy and limit (ADR-0160 D1, second a
     ]);
     expect(aiContextWhereFields(undefined)).toEqual([]);
     expect(aiContextWhereFields('x')).toEqual([]);
+  });
+
+  it('nesting is bounded at parse at the depth aiContextWhereFields walks: every field of a where that parsed is named', () => {
+    // `deep` sits beneath `levels` $and / $or lists, with `top` beside the outermost.
+    const nested = (levels: number) => {
+      let node: Record<string, unknown> = { deep: { $eq: 1 } };
+      for (let i = 0; i < levels; i++) node = { [i % 2 ? '$or' : '$and']: [node] };
+      return { top: true, ...node };
+    };
+    expect(AI_CONTEXT_WHERE_MAX_DEPTH).toBe(32);
+    const atBound = parse({ where: nested(AI_CONTEXT_WHERE_MAX_DEPTH) });
+    expect(atBound.success).toBe(true);
+    expect(aiContextWhereFields(atBound.data?.where)).toEqual(['top', 'deep']);
+    const past = messages({ where: nested(AI_CONTEXT_WHERE_MAX_DEPTH + 1) });
+    expect(past).toContain(`nests $and / $or at most ${AI_CONTEXT_WHERE_MAX_DEPTH} levels deep`);
+    // Refused once, at the list that would carry a condition past the bound.
+    expect(past.split('\n')).toHaveLength(1);
+    expect(past.split(':')[0].split('.')).toHaveLength(2 + 2 * AI_CONTEXT_WHERE_MAX_DEPTH);
+    // The walker stops where parse stops: a field past the bound is in no list.
+    expect(aiContextWhereFields(nested(AI_CONTEXT_WHERE_MAX_DEPTH + 1))).toEqual(['top']);
   });
 });

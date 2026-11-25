@@ -551,6 +551,36 @@ describe('get_record_context — a related list\'s where, orderBy and limit (ADR
     expect(listReads(door)).toEqual([]);
   });
 
+  it.each<[string, Record<string, unknown>]>([
+    ['declares `sortable: false`', { name: 'notes_rank', type: 'number', label: 'Notes rank', sortable: false }],
+    ['is a formula', { name: 'notes_rank', type: 'formula', label: 'Notes rank', expression: 'sort_no * 2' }],
+  ])('an orderBy field that %s is not offered as a sort: an author defect, the section left out, nothing stated, the door never asked', async (_label, def) => {
+    const app = filteredApp({ orderBy: [{ field: 'notes_rank', order: 'asc' }] });
+    (app.objects.policy_revision as { fields: Record<string, unknown> }).fields.notes_rank = def;
+    const door = fakeDoor(app);
+    const out = await executeGetRecordContext(CALL, door);
+    expect(out.data.related).toBeUndefined();
+    expect(out.notes).toEqual([]);
+    expect(JSON.stringify(out)).not.toContain('notes_rank');
+    expect(listReads(door)).toEqual([]);
+    // The door this judgement keeps the call from: the same order handed to it is refused whole.
+    await expect(door.query('policy_revision', { where: { policy: 'p1' }, orderBy: [{ field: 'notes_rank', order: 'asc' }] }))
+      .rejects.toMatchObject({ code: 'INVALID_SORT', status: 400 });
+    // The root's own answer is untouched.
+    expect(out.data.fields.map((f) => f.name)).toEqual(['title']);
+  });
+
+  it('control: a where on a field that is not offered as a sort still reads; only an order on it is judged', async () => {
+    const app = filteredApp({ where: { notes_rank: { $gt: 0 } }, orderBy: [{ field: 'sort_no', order: 'asc' }] });
+    (app.objects.policy_revision as { fields: Record<string, unknown> }).fields.notes_rank = {
+      name: 'notes_rank', type: 'number', label: 'Notes rank', sortable: false,
+    };
+    app.records.policy_revision = app.records.policy_revision.map((r) => ({ ...r, notes_rank: r.sort_no }));
+    const out = await run(app);
+    expect(out.data.related![0].rows.map((r) => r.id)).toEqual(['r2', 'r1', 'r3']);
+    expect(out.notes).toEqual([]);
+  });
+
   it('the read set is the same with and without the three keys', async () => {
     const metadataOf = (app: FakeApp) => ({
       listContextPacks: async () => app.packs,
