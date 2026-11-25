@@ -493,17 +493,14 @@ describe('#37094 — the open edition registers EMBEDDER_SERVICE from the ai.emb
     expect(requests.map((r) => r.inputs.length)).toEqual([50, 10]);
   });
 
-  it('a Base URL left saved from a custom endpoint is not applied under a preset provider', async () => {
+  it('a preset provider uses its preset endpoint even when a Base URL is saved', async () => {
     const requests = stubProvider();
-    // The operator once saved `custom` with a gateway, then switched to OpenAI
-    // with a new key: the Base URL row stays saved, but the form no longer
-    // offers the field, and the new key must not go to the old gateway.
     const { embedder, lines } = await bootEmbedder({
       saved: {
         embedder_provider: 'openai',
         embedder_api_key: API_KEY,
         embedder_model: 'text-embedding-3-small',
-        embedder_base_url: 'https://old-gateway.example.com/v1',
+        embedder_base_url: 'https://gateway.example.com/v1',
       },
     });
     await embedder.embed(['x']);

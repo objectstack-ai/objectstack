@@ -227,11 +227,9 @@ async function embedderFromSettings(ctx: PluginContext): Promise<EmbedderFromSet
   const preset = Object.prototype.hasOwnProperty.call(OPENAI_COMPATIBLE_PRESETS, providerId)
     ? (providerId as OpenAICompatiblePreset)
     : undefined;
-  // The saved Base URL applies only where the form offers the field (`custom`,
-  // `azure`, the manifest's `visible` rule). A URL saved under one of those and
-  // left behind when the operator switches to a preset provider must not carry
-  // the new provider's key to the old host: every other provider uses its
-  // preset endpoint.
+  // The saved Base URL applies only to the providers whose form offers the
+  // field (`custom`, `azure`, the manifest's `visible` rule); every other
+  // provider uses its preset endpoint.
   const baseUrl =
     BASE_URL_PROVIDERS.has(providerId) && typeof saved.embedder_base_url === 'string'
       ? saved.embedder_base_url.trim()
