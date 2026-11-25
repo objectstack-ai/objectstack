@@ -222,7 +222,7 @@ describe('search_knowledge — a refused source (ADR-0161 K7, rule 5)', () => {
   function twoSources(refusing: readonly string[], refusal: () => Error = rebuild) {
     const adapter = adapterWith({ policy_clauses: [hit('policy_clauses', 'p1', 0.9)], faq: [hit('faq', 'f1', 0.4)] });
     const answer = adapter.search as unknown as ReturnType<typeof vi.fn>;
-    const inner = answer.getMockImplementation()!;
+    const inner = answer.getMockImplementation()! as (query: string, opts: { source: KnowledgeSource }) => Promise<unknown>;
     answer.mockImplementation(async (query: string, opts: { source: KnowledgeSource }) => {
       if (refusing.includes(opts.source.id)) throw refusal();
       return inner(query, opts);
