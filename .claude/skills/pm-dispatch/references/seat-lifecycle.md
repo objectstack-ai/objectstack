@@ -36,8 +36,8 @@
 - 竞态三招:动手前重 fetch 正文、审计评论时间戳先到先得、写后回读。
 - 收班 = 状态 flush + 在飞 `Release:`+`Resume-from:` 回队待兄弟席、不等落地;简报非继承裁决。
 - 坐席同笔:建自绑巡查 routine、开信箱并订阅、存根记 `Patrol:` 与 `Mailbox:`、发 `seat-online`。
-- 分诊席与车道席会话 effort 恒 `high`;坐席时低于即登记行注明,请账号主人以 `high` 重开。
-- 席会话 ⛔ 中途不改 effort;要另一档就起隔离子代理(`execution-duties.md`)。
+- 席会话的档位与 effort 照 `execution-duties.md` 定档节;坐席时低于即登记行注明,请账号主人照该值重开。
+- 席会话 ⛔ 中途不改 effort;要另一档就起隔离子代理。
 - 收班同笔删 routine、关信箱、发 `seat-offline`;强制接管者代发 `seat-online`(`project-forms.md`)。
 - 下班席(`seat-offline`,或两敲 `Request: progress` 无答走接管四件)的在飞归同车道在线兄弟席。
 - 兄弟席 `Resume-from:` 引简报或轮次记录认领;待裁先等字;无兄弟席「待席」;公告归安全席。
@@ -87,7 +87,7 @@
 
 - 停:队列空或 `rounds` 用尽(仅一次性调用适用);一轮 ≥ 半数派发失败或升级;维护者打断。
 - 队列空是待命非退场(按需席除外):巡查跑到收班,只维护者令停;⛔ 不按 N 次无变化即停。
-- 队列空是逐卡表:报无卡可派即贴 `card-pick.mjs --order <序> --why`;无卡点即候选,⛔ 不得报空。
+- 每轮对所接车道与专题跑 `card-pick.mjs --order <序> --why`,报空即贴;无卡点即当轮派,⛔ 不得报空。
 - 卡点一份词表:候选定义反面,open `Blocked-by:`、`outside --order`、无分诊审计、他席 `Claim:`。
 - 单车道仓 `repo:*` 席:每轮首触 sweep 清空再认领,先于待命五项;cloud 细则见 `lanes/cloud.md`。
 - 巡查每轮探针后读信箱、认领满 `batch`,跑待命五项;间隔按 `execution-duties.md` 收集节②。

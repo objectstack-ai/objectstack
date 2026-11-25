@@ -16,9 +16,10 @@
  * chat page's `⌘⇧O` / `⌘⇧S` are advertised by that page, so they are listed
  * only where that page is mounted.
  *
- * Two advertisers sit beside a handler they do not own the code of: `⌘B` is
- * the Shadcn `SidebarProvider`'s own listener (a synced primitive, see
- * `ConsoleLayout`), and `Esc` is Radix's dismiss handler on every dialog and
+ * Two advertisers sit beside a handler they do not own the code of: `⌘B` is,
+ * on a phone, the Shadcn `SidebarProvider`'s own listener (a synced primitive;
+ * from 768 px up the console sidebar answers it, see `ConsoleLayout`), and
+ * `Esc` is Radix's dismiss handler on every dialog and
  * panel (see `KeyboardShortcutsDialog`). The pin
  * `KeyboardShortcutsDialog.wiredOnly-11674.test.tsx` fires every listed
  * entry's chord against the real handler, those two included, and fails on a
@@ -68,11 +69,13 @@ export interface AdvertisedShortcut {
 }
 
 /**
- * `⌘⇧H` / `Ctrl+Shift+H` — back to home from any app page (objectui#12605).
- * `AppHeader` owns the listener and advertises this beside it; the app pill's
- * 「Back to home」 row draws its keycaps from the same chord, so the row, the
- * keyboard-shortcuts dialog and the handler cannot disagree. It lives here,
- * not beside either holder, because both read it: a test that stubs one
+ * `⌘⇧H` / `Ctrl+Shift+H` from any app page (objectui#12605), as a phone
+ * advertises it: 「Back to home」, because a phone's Home is still its app
+ * list. The app layout owns the listener (`useGoHomeShortcut`, installed by
+ * `ConsoleLayout`) and advertises this or {@link GO_TO_APP_START_SHORTCUT}
+ * beside it; the app pill's row draws its keycaps from the same chord, so the
+ * row, the keyboard-shortcuts dialog and the handler cannot disagree. It lives
+ * here, not beside either holder, because both read it: a test that stubs one
  * holder's module must not take the other's chord with it.
  */
 export const GO_HOME_SHORTCUT: AdvertisedShortcut = {
@@ -80,6 +83,18 @@ export const GO_HOME_SHORTCUT: AdvertisedShortcut = {
   group: 'navigation',
   chord: { key: 'h', mod: true, shift: true },
   label: (t: ShortcutLabelTranslate) => t('console.shortcuts.goHome'),
+};
+
+/**
+ * The same chord as a desktop advertises it. From 768 px up the platform home
+ * page is retired (objectstack#36732): the chord opens where `/` lands, the
+ * last-used app's start page (`useHomePath`). So the row says that, in the
+ * words the app pill's row uses (`layout.appSwitcher.backToHome`), and the
+ * dialog and the pill name one destination.
+ */
+export const GO_TO_APP_START_SHORTCUT: AdvertisedShortcut = {
+  ...GO_HOME_SHORTCUT,
+  label: (t: ShortcutLabelTranslate) => t('layout.appSwitcher.backToHome'),
 };
 
 const KEYCAP_TEXT: Record<string, string> = { Escape: 'Esc' };

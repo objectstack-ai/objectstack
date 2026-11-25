@@ -298,6 +298,7 @@ export const SysShareLink = ObjectSchema.create({
 
   enable: {
     trackHistory: false,
+    fieldHistory: false, // [#36290] keeps this object's "no history": values off in the activity stream
     searchable: false,
     apiEnabled: true,
     // The /api/v1/share-links endpoints are the authoritative surface;

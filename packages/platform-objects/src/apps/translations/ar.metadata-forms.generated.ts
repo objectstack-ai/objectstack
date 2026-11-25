@@ -77,8 +77,8 @@ export const arMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         helpText: "أسماء حقول هذا الكائن، الأهم أولًا — يفوز الإدخال الأول حيث لا يتسع إلا لواحد (ADR-0085). تحدد الأعمدة الافتراضية للقوائم والقوائم المرتبطة والبطاقات ومعاينات السجلات الفرعية وبطاقة التمرير للسجل ومنتقي السجلات. يُرفض عند النشر أي اسم ليس حقلًا من هذا الكائن."
       },
       relatedLists: {
-        label: "القوائم المرتبطة",
-        helpText: "ترتيب العمل للقوائم المرتبطة بهذا الكائن في صفحة سجله، الأهم أولًا. كل إدخال اسم كائن فرعي (مثل task)، أو object.field عندما يكون لذلك الكائن الفرعي أكثر من علاقة بهذا الكائن. تأتي القوائم المُدرجة أولًا؛ ويتبعها الباقي بالترتيب المشتق. الاسم الذي لا يطابق أي علاقة تشير إلى هذا الكائن لا يضع شيئًا، لذا يرفضه حفظ الكائن أو التحقق منه."
+        label: "علامات تبويب صفحة السجل",
+        helpText: "علامات تبويب صفحة السجل بعد النظرة العامة، بالترتيب. كل إدخال اسم كائن فرعي (مثل task)، أو object.field عندما تكون لذلك الكائن الفرعي أكثر من علاقة بهذا الكائن، أو علامة تبويب مدمجة (sys_attachment وsys_approval_request وsys_activity)، أو إدخال بعنوانه وأعمدته الخاصة يُضبط في إعدادات الكائن في Studio. بمجرد إدراج أي شيء، لا تظهر علامة تبويب لقائمة مرتبطة لا يسمّيها أي إدخال، بما في ذلك قائمة تضيفها حزمة أخرى، إلى أن يسمّيها هذا الكائن؛ ولا تظهر المرفقات إلا عند إدراجها. فارغ: تظهر كل القوائم بالترتيب الافتراضي. يُرفض عند حفظ الكائن أي اسم لا يطابق علاقة تشير إلى هذا الكائن."
       },
       searchableFields: {
         label: "الحقول القابلة للبحث",
@@ -114,7 +114,7 @@ export const arMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       "fieldGroups.collapse": {
         label: "الطي",
-        helpText: "ما إذا كان يمكن طي القسم، في نموذج الإدخال وصفحة تفاصيل السجل. عند عدم التعيين: لا."
+        helpText: "ما إذا كان يمكن طي القسم. يتبع نموذج الإدخال الإعداد كما هو. في صفحة السجل الافتراضية يمكن للقارئ طي كل مجموعة لها عنوان، لذا يحدد الإعداد هناك الحالة الأولى فقط: Collapsed تبدأ مطوية والبقية مفتوحة. عند عدم التعيين: لا."
       },
       "fieldGroups.visibleWhen": {
         label: "مرئي عندما",
@@ -240,6 +240,10 @@ export const arMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "سلوك الحذف",
         helpText: "ما يحدث عند حذف السجل المُشار إليه"
       },
+      "fields.transferBehavior": {
+        label: "سلوك تغيير المالك",
+        helpText: "ما إذا كان «تغيير المالك» على السجل المشار إليه يمكنه أيضًا نقل السجلات التي تشير إليه عبر هذا الحقل"
+      },
       "fields.multiple": {
         label: "متعدد",
         helpText: "السماح باختيار عدة سجلات"
@@ -276,9 +280,13 @@ export const arMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "اللغة",
         helpText: "لغة المحرر (مثل sql، javascript)"
       },
+      "fields.fieldHistory": {
+        label: "قيم تغييرات الحقل",
+        helpText: "القيم القديمة → الجديدة لهذا الحقل في الخط الزمني لنشاط السجل. الافتراضي يتبع المنصة: مُشغَّل لمعظم الأنواع، ومُطفأ لحقل وسائط أو JSON أو بيانات اعتماد. عند الإطفاء يُذكر التغيير باسم الحقل فقط؛ وعند التشغيل تظهر أيضًا قيم حقل الوسائط أو JSON. حقل بيانات الاعتماد لا يعرض القيم أبدًا، وإذا أطفأه الكائن نفسه فالعبرة بالكائن."
+      },
       "fields.trackHistory": {
         label: "تتبّع السجل",
-        helpText: "تلخيص هذا الحقل في الخط الزمني لنشاط السجل"
+        helpText: "يجعل حقل الوسائط أو JSON (صورة، ملف، json، …) يعرض القيم القديمة → الجديدة في الخط الزمني للنشاط. الحقول الأخرى تعرضها أصلًا، وإطفاؤه لا يخفيها: استخدم «قيم تغييرات الحقل»."
       },
       "fields.visibleWhen": {
         label: "مرئي عندما",
@@ -298,6 +306,10 @@ export const arMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       "enable.trackHistory": {
         label: "تتبّع السجل"
+      },
+      "enable.fieldHistory": {
+        label: "قيم تغييرات الحقل",
+        helpText: "القيم القديمة → الجديدة للحقول المعدّلة في الخط الزمني لنشاط السجل. الافتراضي مُشغَّل. الإطفاء يُخفي القيم في الكائن كله، أيًّا كان إعداد الحقل."
       },
       "enable.searchable": {
         label: "قابل للبحث"
@@ -460,6 +472,18 @@ export const arMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       "userActions.transfer": {
         label: "تغيير المالك",
         helpText: "إجراء تغيير المالك، فرديًا وجماعيًا: التشغيل يعرضه والإيقاف يخفيه. غير مُعيَّن: مُشغَّل، إلا أنه مُوقَف على كائن تفاصيل controlled_by_parent. يُعرض فقط على كائن لسجلاته مالك قابل لإعادة التعيين (ownership بقيمة user أو غير مُعيَّن، بلا managedBy، ليس كائن sys_، وowner_id ليس للقراءة فقط، وعلى كائن خارجي يكون owner_id مُعرَّفًا أو مربوطًا)؛ وتشغيله على أي كائن آخر مرفوض. يتحكم في الإجراء فقط، لا في التعديل العادي لـ owner_id. يُحرَّر كائن {enabled, visibleWhen, disabledWhen} المخزَّن مفتاحًا تلو الآخر؛ اكتب واحدًا في المصدر لتقييد الإجراء بكل سجل."
+      },
+      actionLayout: {
+        label: "ترتيب الإجراءات",
+        helpText: "ترتيب إجراءات هذا الكائن وأيّها يظهر أزرارًا، لكل نطاق: pinned (3 أزرار على الأكثر، بالترتيب) وmore (ترتيب قائمة «المزيد»؛ والإجراء غير المذكور في أيٍّ منهما يأتي بعدها بترتيبه الافتراضي). عند عدم التعيين: يختار كل سطح أزراره حسب ترتيب الإجراءات كما كان."
+      },
+      "actionLayout.list": {
+        label: "القائمة",
+        helpText: "شريط أدوات صفحة القائمة، بالصيغة {\"pinned\": [...], \"more\": [...]}: أسماء الإجراءات الموضوعة في شريط أدوات القائمة؛ $import / $export في pinned فقط. 3 مثبتة على الأكثر. وإن لم تُثبَّت، تظل الصفحة ترسم قائمة الاستيراد / التصدير الخاصة بها. يرفض os validate الاسم الذي ليس إجراءً لهذا الكائن أو غير الموضوع في شريط أدوات القائمة؛ ومثل هذا الاسم لا يرسم شيئًا."
+      },
+      "actionLayout.record": {
+        label: "السجل",
+        helpText: "رأس السجل (صفحة السجل، والمعاينة الجانبية، والشريط السفلي في الهاتف)، بالصيغة {\"pinned\": [...], \"more\": [...]}: أسماء الإجراءات الموضوعة في رأس السجل أو في قائمة «المزيد» الخاصة به. 3 مثبتة على الأكثر. يرفض os validate الاسم الذي ليس إجراءً لهذا الكائن أو غير الموضوع في صفحة السجل؛ ومثل هذا الاسم لا يرسم شيئًا."
       },
       editMode: {
         label: "وضع التحرير",
@@ -749,6 +773,10 @@ export const arMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "سلوك الحذف",
         helpText: "ما يحدث عند حذف السجل المُشار إليه"
       },
+      transferBehavior: {
+        label: "سلوك تغيير المالك",
+        helpText: "ما إذا كان «تغيير المالك» على السجل المشار إليه يمكنه أيضًا نقل السجلات التي تشير إليه عبر هذا الحقل"
+      },
       relatedListFilter: {
         label: "عامل تصفية القائمة المرتبطة",
         helpText: "عامل التصفية الافتراضي للقائمة المرتبطة الخاصة بهذه العلاقة في صفحة تفاصيل السجل الأصل — يُركَّب بـ AND مع مطابقة السجل الأصل، وتعدّ شارة علامة التبويب المجموعة نفسها"
@@ -788,6 +816,10 @@ export const arMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       relatedListColumns: {
         label: "أعمدة القائمة المرتبطة",
         helpText: "أعمدة القائمة المرتبطة الخاصة بهذه العلاقة في صفحة تفاصيل السجل الأصل، كأسماء حقول من هذا الكائن (الفرعي)، مثل name، status. عند عدم التعيين: تُشتق من الكائن الفرعي. أسماء فقط — التسميات وأنواع الخلايا والتنسيق تأتي من تعريفات حقول الكائن الفرعي."
+      },
+      inlineEdit: {
+        label: "Inline Edit",
+        helpText: "How the parent's form edits this child's rows when a field group of the parent names this child (fieldGroups[].relatedList). Unset: picked from this object's fields."
       },
       inlineTitle: {
         label: "العنوان المضمَّن",
@@ -865,6 +897,10 @@ export const arMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "مخفي",
         helpText: "إخفاء الحقل من طرق عرض الواجهة الافتراضية"
       },
+      showOnCreate: {
+        label: "إظهار عند الإنشاء",
+        helpText: "اطلب هذا الحقل عند إنشاء سجل. عند الإيقاف: يتجاهله مربع حوار الإنشاء والإنشاء بصفحة كاملة والإنشاء الذي يفتحه إجراء؛ ويظل يظهر في التحرير وصفحة السجل والقوائم. الحقل المطلوب يُطلب دائمًا، لذا لا يمكن إيقافه."
+      },
       searchable: {
         label: "قابل للبحث",
         helpText: "تضمينه في نتائج البحث العام"
@@ -897,9 +933,13 @@ export const arMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "داخلي",
         helpText: "عدم إعادة قيمة هذا الحقل أبدًا على مسار البيانات العام: يحذف المحرك المفتاح من نتائج find/findOne ومن متون استجابات الإنشاء والتحديث، في الإسقاط الافتراضي وعندما يسمّي العميل الحقل في ?select=. لا يتأثر التخزين ولا التصفية ولا الفهرسة."
       },
+      fieldHistory: {
+        label: "قيم تغييرات الحقل",
+        helpText: "القيم القديمة → الجديدة لهذا الحقل في الخط الزمني لنشاط السجل. الافتراضي يتبع المنصة: مُشغَّل لمعظم الأنواع، ومُطفأ لحقل وسائط أو JSON أو بيانات اعتماد. عند الإطفاء يُذكر التغيير باسم الحقل فقط؛ وعند التشغيل تظهر أيضًا قيم حقل الوسائط أو JSON. حقل بيانات الاعتماد لا يعرض القيم أبدًا، وإذا أطفأه الكائن نفسه فالعبرة بالكائن."
+      },
       trackHistory: {
         label: "تتبّع السجل",
-        helpText: "عرض تغييرات قيمة هذا الحقل كإدخالات في الخط الزمني لنشاط السجل (ADR-0052 §5b). اشتراك اختياري لكل حقل."
+        helpText: "يجعل حقل الوسائط أو JSON (صورة، ملف، json، …) يعرض القيم القديمة → الجديدة في الخط الزمني للنشاط. الحقول الأخرى تعرضها أصلًا، وإطفاؤه لا يخفيها: استخدم «قيم تغييرات الحقل»."
       },
       widget: {
         label: "عنصر الواجهة",
@@ -1052,15 +1092,54 @@ export const arMetadataForms: NonNullable<TranslationData['metadataForms']> = {
   },
   seed: {
     label: "البيانات الأولية",
-    description: "بيانات تجهيز / تهيئة تُطبَّق عند النشر"
+    description: "بيانات تجهيز / تهيئة تُطبَّق عند النشر",
+    fields: {
+      object: {
+        label: "الكائن"
+      },
+      mode: {
+        label: "الوضع"
+      }
+    }
   },
   picklist: {
     label: "قائمة الاختيار",
-    description: "قائمة خيارات مشتركة تشير إليها حقول الاختيار بالاسم"
+    description: "قائمة خيارات مشتركة تشير إليها حقول الاختيار بالاسم",
+    fields: {
+      name: {
+        label: "الاسم"
+      },
+      label: {
+        label: "التسمية"
+      },
+      options: {
+        label: "الخيارات"
+      },
+      description: {
+        label: "الوصف"
+      }
+    }
   },
   mapping: {
     label: "تعيين الاستيراد",
-    description: "تعيين حقول قابل لإعادة الاستخدام للاستيراد/التصدير (إعادة تسمية + تحويلات)، يُشار إليه بالاسم عند الاستيراد"
+    description: "تعيين حقول قابل لإعادة الاستخدام للاستيراد/التصدير (إعادة تسمية + تحويلات)، يُشار إليه بالاسم عند الاستيراد",
+    fields: {
+      name: {
+        label: "الاسم"
+      },
+      label: {
+        label: "التسمية"
+      },
+      targetObject: {
+        label: "الكائن الهدف"
+      },
+      mode: {
+        label: "الوضع"
+      },
+      sourceFormat: {
+        label: "تنسيق المصدر"
+      }
+    }
   },
   view: {
     label: "طريقة العرض",
@@ -1355,11 +1434,11 @@ export const arMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       navigation: {
         label: "التنقل",
-        helpText: "تهيئة التنقل عند النقر على عنصر (درج جانبي افتراضيًا، أو page، أو new_window، أو none)"
+        helpText: "تهيئة التنقل عند النقر على عنصر: حجم الدرج الجانبي، و`preventNavigation` لقائمة لا تفتح صفوفها أي شيء (`mode` مُهمَل — اسم السجل يفتح الصفحة، وأيقونة التمرير تفتح اللوحة الجانبية)"
       },
       "navigation.mode": {
         label: "الوضع",
-        helpText: "[DEPRECATED] No longer picks how an object's list opens a record: in the console the record name opens the full page and the hover icon beside it opens the side panel, for every reader. There `drawer`, `page` and `new_window` still parse and change nothing; `none` still means rows open nothing — prefer `preventNavigation: true`. Omit the key."
+        helpText: "[مُهمَل] لم يعد يحدد في قائمة الكائن (عرض قائمة، أو `listViews` الخاصة بالكائن) طريقة فتح السجل: في وحدة التحكم، ولكل قارئ، يفتح اسم السجل الصفحة الكاملة وتفتح الأيقونة التي تظهر بجانبه عند التمرير اللوحة الجانبية. هناك لا تزال `drawer` و`page` و`new_window` تُحلَّل ولا تغيّر شيئًا، لذا احذف المفتاح؛ ولا تزال `none` تعني أن الصفوف لا تفتح شيئًا — يُفضَّل `preventNavigation: true`. أما كتلة الصفحة التي تحمل `navigation` (كتلة قائمة، أو المخطط الزمني، أو عرض مضمَّن) فلا تزال تحترم كل القيم."
       },
       "navigation.preventNavigation": {
         label: "منع التنقل",
@@ -1384,6 +1463,9 @@ export const arMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       "sharing.lockedBy": {
         label: "مقفل بواسطة",
         helpText: "المستخدم الذي قفل تهيئة طريقة العرض"
+      },
+      object: {
+        label: "الكائن"
       }
     }
   },
@@ -1590,30 +1672,30 @@ export const arMetadataForms: NonNullable<TranslationData['metadataForms']> = {
     fields: {
       name: {
         label: "الاسم",
-        helpText: "معرّف فريد بصيغة snake_case"
+        helpText: "اسم داخلي فريد للوحة المعلومات هذه: أحرف لاتينية صغيرة وأرقام وشرطات سفلية، ويبدأ بحرف (مثل sales_overview)."
       },
       label: {
         label: "التسمية",
-        helpText: "اسم العرض"
+        helpText: "العنوان الذي يراه المستخدمون للوحة المعلومات هذه."
       },
       description: {
         label: "الوصف"
       },
       columns: {
         label: "الأعمدة",
-        helpText: "أعمدة الشبكة (الافتراضي 12)"
+        helpText: "عدد الأعمدة التي تُرتَّب عليها عناصر الواجهة، من 1 إلى 24. اتركه فارغًا لتختار اللوحة عرضًا يناسب عناصرها."
       },
       gap: {
         label: "التباعد",
-        helpText: "المسافة بين عناصر الواجهة، بخطوات من 0.25rem ‏(4 = 1rem)"
+        helpText: "مقدار المسافة بين عناصر الواجهة. كلما زاد الرقم تباعدت أكثر؛ اتركه فارغًا لاستخدام المسافة القياسية."
       },
       refreshIntervalSeconds: {
         label: "فاصل التحديث بالثواني",
-        helpText: "التحديث التلقائي (بالثواني)"
+        helpText: "عدد الثواني بين كل إعادة تحميل لبيانات اللوحة. اتركه فارغًا أو أدخل 0 لإيقاف إعادة التحميل التلقائي."
       },
       header: {
         label: "الترويسة",
-        helpText: "تهيئة ترويسة لوحة المعلومات (العنوان، والعنوان الفرعي، والإجراءات)"
+        helpText: "ما يظهر أعلى لوحة المعلومات: عنوانها ووصفها وأزرار الإجراءات."
       },
       "header.showTitle": {
         label: "إظهار العنوان",
@@ -1641,7 +1723,7 @@ export const arMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       widgets: {
         label: "عناصر الواجهة",
-        helpText: "عناصر واجهة لوحة المعلومات مع الموضع والحجم"
+        helpText: "المخططات والأرقام والجداول في لوحة المعلومات هذه، وموضع كل منها."
       },
       "widgets.id": {
         label: "معرّف عنصر الواجهة"
@@ -1696,11 +1778,11 @@ export const arMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       dateRange: {
         label: "النطاق الزمني",
-        helpText: "محدد النطاق الزمني الافتراضي"
+        helpText: "الفترة التي تُفتح بها اللوحة، وما إذا كان بإمكان المشاهدين اختيار تواريخهم الخاصة."
       },
       globalFilters: {
         label: "عوامل التصفية العامة",
-        helpText: "عوامل التصفية المطبَّقة على جميع عناصر الواجهة"
+        helpText: "عوامل تصفية يستخدمها المشاهدون لتضييق جميع عناصر الواجهة دفعة واحدة، أو العناصر التي تختارها فقط."
       },
       "globalFilters.name": {
         label: "الاسم"
@@ -2162,7 +2244,8 @@ export const arMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "التسمية"
       },
       description: {
-        label: "الوصف"
+        label: "الوصف",
+        helpText: "One sentence on what this report shows, displayed under its name."
       },
       type: {
         label: "النوع",
@@ -2244,9 +2327,33 @@ export const arMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "النطاق الزمني",
         helpText: "الفترة الافتراضية ومفتاح النطاق المخصّص. يجب أن يكون البُعد بُعدًا تاريخيًا من مجموعة البيانات؛ اتركه فارغًا حين لا تحتوي مجموعة البيانات إلا على بُعد واحد منه."
       },
+      "dateRange.dimension": {
+        label: "Date Field",
+        helpText: "The date grouping of the data source the period applies to. Leave it empty when the data source has only one."
+      },
+      "dateRange.defaultRange": {
+        label: "Default Period",
+        helpText: "The period the report opens with."
+      },
+      "dateRange.allowCustomRange": {
+        label: "Allow Custom Range",
+        helpText: "Let people pick their own start and end dates."
+      },
       exportOptions: {
         label: "خيارات التصدير",
         helpText: "صيغ التنزيل (csv، xlsx) واسم الملف. من يحق له التنزيل يحدده إذن التصدير على كائن مجموعة البيانات."
+      },
+      "exportOptions.formats": {
+        label: "Formats",
+        helpText: "The download formats offered. Left unset, both csv and xlsx are offered; an empty list turns downloads off."
+      },
+      "exportOptions.includeHeaders": {
+        label: "Include Headers",
+        helpText: "Put the column names in the first row of the downloaded file."
+      },
+      "exportOptions.fileNamePrefix": {
+        label: "File Name",
+        helpText: "The start of the downloaded file’s name, used instead of the report name."
       }
     }
   },
@@ -2515,7 +2622,24 @@ export const arMetadataForms: NonNullable<TranslationData['metadataForms']> = {
     }
   },
   job: {
-    label: "مهمة خلفية"
+    label: "مهمة خلفية",
+    fields: {
+      name: {
+        label: "الاسم"
+      },
+      label: {
+        label: "التسمية"
+      },
+      schedule: {
+        label: "الجدول الزمني"
+      },
+      enabled: {
+        label: "مُفعَّل"
+      },
+      description: {
+        label: "الوصف"
+      }
+    }
   },
   datasource: {
     label: "مصدر البيانات"
@@ -2525,10 +2649,41 @@ export const arMetadataForms: NonNullable<TranslationData['metadataForms']> = {
   },
   api: {
     label: "نقطة نهاية API",
-    description: "عنوان HTTP ثابت تستدعيه الأنظمة الأخرى لتشغيل تدفق أو للعمل مع السجلات في التطبيق"
+    description: "عنوان HTTP ثابت تستدعيه الأنظمة الأخرى لتشغيل تدفق أو للعمل مع السجلات في التطبيق",
+    fields: {
+      name: {
+        label: "الاسم"
+      },
+      method: {
+        label: "الأسلوب"
+      },
+      path: {
+        label: "المسار"
+      },
+      type: {
+        label: "النوع"
+      },
+      "objectParams.object": {
+        label: "الكائن"
+      },
+      "objectParams.operation": {
+        label: "العملية"
+      }
+    }
   },
   translation: {
-    label: "الترجمة"
+    label: "الترجمة",
+    fields: {
+      name: {
+        label: "الاسم"
+      },
+      label: {
+        label: "التسمية"
+      },
+      locale: {
+        label: "اللغة"
+      }
+    }
   },
   email_template: {
     label: "قالب البريد الإلكتروني",
@@ -2605,11 +2760,45 @@ export const arMetadataForms: NonNullable<TranslationData['metadataForms']> = {
   },
   doc: {
     label: "الوثائق",
-    description: "صفحة مساعدة مكتوبة بصيغة Markdown تشحنها حزمة أو تكتبها بنفسك"
+    description: "صفحة مساعدة مكتوبة بصيغة Markdown تشحنها حزمة أو تكتبها بنفسك",
+    fields: {
+      name: {
+        label: "الاسم"
+      },
+      label: {
+        label: "التسمية"
+      },
+      group: {
+        label: "المجموعة"
+      },
+      tags: {
+        label: "الوسوم"
+      },
+      description: {
+        label: "الوصف"
+      }
+    }
   },
   book: {
     label: "كتاب الوثائق",
-    description: "جدول محتويات يجمّع صفحات المساعدة في أقسام مرتبة"
+    description: "جدول محتويات يجمّع صفحات المساعدة في أقسام مرتبة",
+    fields: {
+      name: {
+        label: "الاسم"
+      },
+      label: {
+        label: "التسمية"
+      },
+      audience: {
+        label: "الجمهور"
+      },
+      groups: {
+        label: "المجموعات"
+      },
+      description: {
+        label: "الوصف"
+      }
+    }
   },
   permission: {
     label: "مجموعة الأذونات",
@@ -2713,15 +2902,66 @@ export const arMetadataForms: NonNullable<TranslationData['metadataForms']> = {
   },
   sharing_rule: {
     label: "قاعدة المشاركة",
-    description: "قاعدة تعلنها حزمة لمشاركة السجلات؛ وتؤلّف المؤسسات قواعدها الخاصة في الإعداد"
+    description: "قاعدة تعلنها حزمة لمشاركة السجلات؛ وتؤلّف المؤسسات قواعدها الخاصة في الإعداد",
+    fields: {
+      name: {
+        label: "الاسم"
+      },
+      label: {
+        label: "التسمية"
+      },
+      object: {
+        label: "الكائن"
+      },
+      sharedWith: {
+        label: "مُشارَك مع"
+      },
+      accessLevel: {
+        label: "مستوى الوصول"
+      }
+    }
   },
   queue: {
     label: "قائمة الانتظار",
-    description: "مجموعة مُسمّاة من الأشخاص يمكن أن تبقى السجلات فيها حتى يتولّى أحدهم السجل؛ وتزوّد المؤسسات قوائمها بالأشخاص في الإعداد"
+    description: "مجموعة مُسمّاة من الأشخاص يمكن أن تبقى السجلات فيها حتى يتولّى أحدهم السجل؛ وتزوّد المؤسسات قوائمها بالأشخاص في الإعداد",
+    fields: {
+      name: {
+        label: "الاسم"
+      },
+      label: {
+        label: "التسمية"
+      },
+      members: {
+        label: "الأعضاء"
+      },
+      description: {
+        label: "الوصف"
+      }
+    }
   },
   assignment_rule: {
     label: "قاعدة الإسناد",
-    description: "قاعدة تعلنها حزمة لتوجيه السجلات الجديدة إلى قائمة انتظار أو إلى شخص"
+    description: "قاعدة تعلنها حزمة لتوجيه السجلات الجديدة إلى قائمة انتظار أو إلى شخص",
+    fields: {
+      name: {
+        label: "الاسم"
+      },
+      label: {
+        label: "التسمية"
+      },
+      object: {
+        label: "الكائن"
+      },
+      entries: {
+        label: "الإدخالات"
+      },
+      active: {
+        label: "نشط"
+      },
+      description: {
+        label: "الوصف"
+      }
+    }
   },
   agent: {
     label: "وكيل الذكاء الاصطناعي",
@@ -2803,6 +3043,9 @@ export const arMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       guardrails: {
         label: "حواجز الحماية",
         helpText: "قواعد السلامة وسياسات المحتوى"
+      },
+      "model.model": {
+        label: "النموذج"
       }
     }
   },

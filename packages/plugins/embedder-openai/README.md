@@ -110,6 +110,7 @@ example that no reader could install or run.
 | `id` | `'openai'` | Stable id surfaced as `IEmbedder.id`. |
 | `headers` | `{}` | Extra request headers. |
 | `fetch` | `globalThis.fetch` | Inject for tests / custom transport. |
+| `maxBatchSize` | (model's documented cap, else `10`) | Most inputs per `/embeddings` request. `embed()` splits longer input into batches sent in sequence and returns vectors in input order. A model with no documented cap uses `10` and warns once per instance. |
 
 ## Contract
 

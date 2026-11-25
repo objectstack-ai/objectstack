@@ -79,7 +79,7 @@ import { describe, expect, it } from 'vitest';
 
 import { ALL_CONVERSIONS } from '../conversions/registry';
 import { TimeUpdateInterval } from '../data/analytics.zod';
-import { CurrencyConfigSchema } from '../data/field.zod';
+import { CurrencyConfigSchema, FieldSchema } from '../data/field.zod';
 import { IndexSchema, ObjectSchema } from '../data/object.zod';
 import { ManifestPermissionsSchema, PluginPackagingSchema } from '../kernel/manifest.zod';
 import {
@@ -261,6 +261,7 @@ const JOIN: Readonly<Record<string, readonly Renderer[]>> = {
   ),
   'object-external-sharing-model-removed': [tombstone(ObjectSchema, 'object', 'externalSharingModel')],
   'object-grid-default-filters-removed': [tombstone(ObjectGridPropsSchema, 'object-grid', 'defaultFilters')],
+  'object-grid-single-click-edit-removed': [tombstone(ObjectGridPropsSchema, 'object-grid', 'singleClickEdit')],
   'email-template-category-is-system-removed': [
     tombstone(EmailTemplateDefinitionSchema, 'email_template', 'category'),
     tombstone(EmailTemplateDefinitionSchema, 'email_template', 'isSystem'),
@@ -315,6 +316,19 @@ const JOIN: Readonly<Record<string, readonly Renderer[]>> = {
   // #27123: `packaging: 'manifest-deps'`, refused by the enum's own error map.
   'manifest-packaging-manifest-deps-removed': [
     refusal("manifest.packaging 'manifest-deps'", () => PluginPackagingSchema.safeParse('manifest-deps')),
+  ],
+  // #35926: a relationship field's boolean `inlineEdit`, refused by the enum's own error map.
+  'field-inline-edit-boolean-removed': [
+    refusal(
+      'field.inlineEdit: true',
+      () => FieldSchema.safeParse({ type: 'master_detail', reference: 'order', inlineEdit: true }),
+      'inlineEdit',
+    ),
+    refusal(
+      'field.inlineEdit: false',
+      () => FieldSchema.safeParse({ type: 'lookup', reference: 'order', inlineEdit: false }),
+      'inlineEdit',
+    ),
   ],
   'declared-index-unique-scope': [
     refusal('indexes[].unique: true', () => IndexSchema.safeParse({ fields: ['code'], unique: true })),
@@ -440,6 +454,24 @@ const JOIN: Readonly<Record<string, readonly Renderer[]>> = {
   // #26677: value-level retirements — each retired member is refused by the
   // enum's own error map with its prescription, so the refusal is the parse.
   'list-view-options-bag-folded': [tombstone(VIEW_METADATA_MEMBERS.listOverlay, 'view (list overlay)', 'options')],
+  // #36403: one family on both wire doors — the two flattened overlays carry the
+  // tombstone in their own shape; the record is a discriminated union, so its
+  // refusal is read off a parse.
+  'view-column-state-removed': [
+    tombstone(VIEW_METADATA_MEMBERS.listOverlay, 'view (list overlay)', 'columnState'),
+    tombstone(VIEW_METADATA_MEMBERS.formOverlay, 'view (form overlay)', 'columnState'),
+    refusal(
+      'a view item record carrying columnState',
+      () => VIEW_METADATA_MEMBERS.viewItem.safeParse({
+        name: 'crm_case.mine',
+        object: 'crm_case',
+        viewKind: 'list',
+        columnState: { order: ['subject'] },
+        config: { type: 'grid', columns: ['subject'] },
+      }),
+      'columnState',
+    ),
+  ],
   'navigation-mode-overlay-values-removed': [
     ...(['modal', 'split', 'popover'] as const).map((mode) =>
       refusal(`navigation.mode '${mode}'`, () => NavigationModeSchema.safeParse(mode)),

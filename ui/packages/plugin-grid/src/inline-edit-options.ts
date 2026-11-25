@@ -12,7 +12,7 @@
  * is bound to reject.
  */
 
-import { isInlineExcludedFieldType } from '@object-ui/fields';
+import { isInlineExcludedFieldType, hasInCellPanelEditWidget } from '@object-ui/fields';
 import { isExpressionComputedField } from '@object-ui/core';
 
 /**
@@ -60,7 +60,11 @@ export function fieldInlineReadOnlyKind(
   if (isExpressionComputedField(fieldDef)) return 'computed';
   if (typeof fieldDef.type !== 'string') return null;
   if (COMPUTED_FIELD_TYPES.has(fieldDef.type)) return 'computed';
-  return NON_EDITABLE_FIELD_TYPES.has(fieldDef.type) || isInlineExcludedFieldType(fieldDef.type) ? 'notInline' : null;
+  if (NON_EDITABLE_FIELD_TYPES.has(fieldDef.type)) return 'notInline';
+  // The rich-content types are excluded from in-place editing everywhere, and
+  // a cell still edits them, in a panel under it (objectstack#36023).
+  if (hasInCellPanelEditWidget(fieldDef.type)) return null;
+  return isInlineExcludedFieldType(fieldDef.type) ? 'notInline' : null;
 }
 
 /**
@@ -72,7 +76,8 @@ export function fieldInlineReadOnlyKind(
  * for every type the fields package
  * excludes from inline editing (`isInlineExcludedFieldType` — alias-aware,
  * so `composite` → `object`, `repeater` → `grid` are read-only cells, never
- * a plain text box). A null/unknown field is treated as editable so the
+ * a plain text box), save the rich-content types the cell edits in a panel
+ * (`hasInCellPanelEditWidget`). A null/unknown field is treated as editable so the
  * grid's own `editable` flag still governs.
  */
 export function isFieldInlineEditable(

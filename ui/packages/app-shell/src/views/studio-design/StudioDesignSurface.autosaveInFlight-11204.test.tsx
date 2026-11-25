@@ -20,6 +20,9 @@
  * stayed dirty for good over content the server already held; the last case
  * below is that reading.
  *
+ * objectstack#36511 — the Data pillar saves with the top bar's Save instead:
+ * its block pins that an edit taken during a Save is the next Save's.
+ *
  * The canvases and inspectors are the REAL registered `FlowPreview` /
  * `FlowInspector` and `PagePreview` / `PageBlockInspector` /
  * `PageDefaultInspector`. The Data pillar's records grid is a double that
@@ -121,7 +124,13 @@ const mockClient = vi.hoisted(() => {
       server.drafts.set(k(type, name), body);
       return { type, name, item };
     }),
-    publish: vi.fn(async () => ({ success: true })),
+    // The Data pillar's Save publishes the item (objectstack#36511): its draft goes live.
+    publish: vi.fn(async (type: string, name: string) => {
+      const draft = server.drafts.get(k(type, name));
+      if (draft) server.active.set(k(type, name), draft);
+      server.drafts.delete(k(type, name));
+      return { success: true };
+    }),
     reset: vi.fn(async () => ({})),
   };
 });
@@ -168,7 +177,10 @@ vi.mock('@object-ui/plugin-view', async (importOriginal) => {
 
 vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn(), info: vi.fn(), dismiss: vi.fn() } }));
 
-import { AutomationsPillar, DataPillar, InterfacesPillar } from './StudioDesignSurface';
+// The source reaches a dynamic import of it: its first load is paid at collection (`check:test-source-alias`).
+import '@objectstack/lint';
+import { AutomationsPillar, DataPillar } from './StudioDesignSurface';
+import { StudioSaveHarness, pressStudioSave } from './__tests__/studioSaveHarness';
 import { addFieldFromGrid } from './__tests__/dataPillarAddField';
 import { createEmptyDataSource } from './__tests__/emptyDataSource';
 import { registerMetadataPreview } from '../metadata-admin/preview-registry';
@@ -243,16 +255,23 @@ function editText(el: HTMLElement, value: string): void {
   fireEvent.blur(el);
 }
 
-describe('Automations pillar — an edit taken while a flow save is in flight (objectui#11204)', () => {
+/**
+ * objectstack#36511 — a flow saves with the top bar's Save too: an edit taken
+ * while a Save is in flight stays on screen, and the flow stays dirty once that
+ * Save lands, so the next Save sends it.
+ */
+describe('Automations pillar — an edit taken while a flow Save is in flight (objectui#11204)', () => {
   function startLabel(body: Record<string, unknown>): string {
     return String((body.nodes as Array<{ id: string; label?: string }>).find((n) => n.id === 'start')?.label);
   }
 
-  it('stays on screen and lands in the next save', async () => {
+  it('stays on screen, unsent, and the next Save sends it', async () => {
     render(
-      <MemoryRouter initialEntries={[`/studio/${PKG}/automations`]}>
-        <AutomationsPillar packageId={PKG} />
-      </MemoryRouter>,
+      <StudioSaveHarness>
+        <MemoryRouter initialEntries={[`/studio/${PKG}/automations`]}>
+          <AutomationsPillar packageId={PKG} />
+        </MemoryRouter>
+      </StudioSaveHarness>,
     );
     // Loaded once the Status pill reads the flow's `active` status — in the
     // switch's words, with no runtime reading (objectui#11779).
@@ -260,46 +279,61 @@ describe('Automations pillar — an edit taken while a flow save is in flight (o
     fireEvent.click(document.querySelector('[data-node-id="start"] [role="button"]') as HTMLElement);
     const label = await within(screen.getByRole('complementary')).findByLabelText('Label', undefined, { timeout: 8000 });
 
-    const release = holdNextSave();
     editText(label, 'Kick-off');
-    await screen.findByTestId('auto-autosaving', undefined, { timeout: 8000 });
-    expect(savesOf('flow').map(startLabel)).toEqual(['Kick-off']);
+    const release = holdNextSave();
+    await pressStudioSave({ settle: false });
+    await waitFor(() => expect(savesOf('flow').map(startLabel)).toEqual(['Kick-off']), { timeout: 8000 });
     editText(label, 'Kick-off two');
     await waitFor(() => expect(document.querySelector('[data-node-id="start"]')).toHaveTextContent('Kick-off two'), { timeout: 8000 });
 
     await release();
+    await waitFor(() => expect(screen.getByTestId('studio-save')).toBeEnabled(), { timeout: 8000 });
     await settle();
     expect(document.querySelector('[data-node-id="start"]')).toHaveTextContent('Kick-off two');
-    expect(savesOf('flow').map(startLabel)).toEqual(['Kick-off', 'Kick-off two']);
+    expect(savesOf('flow').map(startLabel), 'nothing sends it by itself').toEqual(['Kick-off']);
+
+    await pressStudioSave();
+    await waitFor(() => expect(savesOf('flow').map(startLabel)).toEqual(['Kick-off', 'Kick-off two']), { timeout: 8000 });
   });
 });
 
-describe('Data pillar — an edit taken while an object save is in flight (objectui#11204)', () => {
+/**
+ * objectstack#36511 — the object page saves with the top bar's Save: an edit
+ * taken while a Save is in flight stays on screen, and the page stays dirty
+ * once that Save lands, so the next Save sends it. Nothing sends it by itself.
+ */
+describe('Data pillar — an edit taken while an object Save is in flight (objectui#11204)', () => {
   function renderData() {
     return render(
-      <MemoryRouter initialEntries={[`/studio/${PKG}/data`]}>
-        <DataPillar packageId={PKG} />
-      </MemoryRouter>,
+      <StudioSaveHarness>
+        <MemoryRouter initialEntries={[`/studio/${PKG}/data`]}>
+          <DataPillar packageId={PKG} />
+        </MemoryRouter>
+      </StudioSaveHarness>,
     );
   }
   const fieldNames = (body: Record<string, unknown>) => readFields(body.fields).entries.map((e) => e.name);
   const fieldCountShown = () => screen.getByText(/^\d+ fields$/).textContent;
-  const addField = () => addFieldFromGrid();
+  /** Save pressed with the save held in flight, then the edit taken meanwhile, then the save landed. */
+  async function editDuringSave(edit: () => Promise<void>): Promise<void> {
+    const release = holdNextSave();
+    await pressStudioSave({ settle: false });
+    await waitFor(() => expect(server.saves).toHaveLength(1), { timeout: 8000 });
+    await edit();
+    await release();
+    await waitFor(() => expect(screen.getByTestId('studio-save')).toBeEnabled(), { timeout: 8000 });
+  }
 
-  it('the autosave: an added field stays on screen and lands in the next save', async () => {
+  it('an added field stays on screen, unsent, and the next Save sends it', async () => {
     renderData();
     await waitFor(() => expect(fieldCountShown()).toBe('2 fields'), { timeout: 8000 });
-
-    const release = holdNextSave();
-    await addField();
-    await screen.findByTestId('data-autosaving', undefined, { timeout: 8000 });
-    expect(savesOf('object').map(fieldNames)).toEqual([['title', 'status', 'new_field']]);
+    await addFieldFromGrid();
     // A second label: a repeated one would ask for its api name (objectui#13389).
-    await addFieldFromGrid(undefined, { label: 'Second field' });
+    await editDuringSave(() => addFieldFromGrid(undefined, { label: 'Second field' }));
     expect(fieldCountShown()).toBe('4 fields');
+    expect(savesOf('object').map(fieldNames)).toEqual([['title', 'status', 'new_field']]);
 
-    await release();
-    await settle();
+    await pressStudioSave();
     expect(fieldCountShown()).toBe('4 fields');
     expect(savesOf('object').map(fieldNames)).toEqual([
       ['title', 'status', 'new_field'],
@@ -307,19 +341,15 @@ describe('Data pillar — an edit taken while an object save is in flight (objec
     ]);
   });
 
-  it("the grid's column reorder, a save the pillar sends itself: a field added meanwhile lands in the next save", async () => {
+  it("the grid's column reorder is an edit Save sends: a field added during that Save is the next Save's", async () => {
     renderData();
     await waitFor(() => expect(fieldCountShown()).toBe('2 fields'), { timeout: 8000 });
-
-    const release = holdNextSave();
     fireEvent.click(await screen.findByRole('button', { name: 'Reverse columns' }, { timeout: 8000 }));
-    await screen.findByTestId('data-autosaving', undefined, { timeout: 8000 });
+    expect(server.saves).toEqual([]);
+    await editDuringSave(() => addFieldFromGrid());
     expect(savesOf('object').map(fieldNames)).toEqual([['status', 'title']]);
-    await addField();
-    expect(fieldCountShown()).toBe('3 fields');
 
-    await release();
-    await settle();
+    await pressStudioSave();
     expect(fieldCountShown()).toBe('3 fields');
     expect(savesOf('object').map(fieldNames)).toEqual([
       ['status', 'title'],
@@ -327,114 +357,14 @@ describe('Data pillar — an edit taken while an object save is in flight (objec
     ]);
   });
 
-  it('the control: a reorder with nothing edited meanwhile is the only save', async () => {
+  it('the control: a reorder with nothing edited meanwhile is the only save, and leaves nothing to save', async () => {
     renderData();
     await waitFor(() => expect(fieldCountShown()).toBe('2 fields'), { timeout: 8000 });
-
     fireEvent.click(await screen.findByRole('button', { name: 'Reverse columns' }, { timeout: 8000 }));
-    await waitFor(() => expect(server.saves).toHaveLength(1), { timeout: 8000 });
-    await settle();
+    await pressStudioSave();
     expect(savesOf('object').map(fieldNames)).toEqual([['status', 'title']]);
+    await waitFor(() => expect(screen.queryByTestId('studio-save')).toBeNull());
   });
 });
 
-describe('Interfaces page inspector — an edit taken while a page save is in flight (objectui#11204)', () => {
-  it('stays on screen and lands in the next save', async () => {
-    render(
-      <MemoryRouter initialEntries={[`/studio/${PKG}/interfaces`]}>
-        <InterfacesPillar packageId={PKG} />
-      </MemoryRouter>,
-    );
-    await screen.findByRole('button', { name: 'Select hello' }, { timeout: 8000 });
-    const label = await within(screen.getByRole('complementary')).findByLabelText(/^Label/, undefined, { timeout: 8000 });
 
-    const release = holdNextSave();
-    editText(label, 'Welcome');
-    await screen.findByTestId('if-autosaving', undefined, { timeout: 8000 });
-    expect(savesOf('page').map((b) => b.label)).toEqual(['Welcome']);
-    editText(label, 'Welcome two');
-
-    await release();
-    await settle();
-    expect(within(screen.getByRole('complementary')).getByLabelText(/^Label/)).toHaveValue('Welcome two');
-    expect(savesOf('page').map((b) => b.label)).toEqual(['Welcome', 'Welcome two']);
-  });
-});
-
-describe('Interfaces nav autosave — the same claim, in place of its edit generation (objectui#11204)', () => {
-  /** The pillar as the Studio surface mounts it: a draft-saved signal re-reads the app. */
-  const dirtyReports: boolean[] = [];
-  function NavHost() {
-    const [nonce, setNonce] = React.useState(0);
-    return (
-      <MemoryRouter initialEntries={[`/studio/${PKG}/interfaces`]}>
-        <InterfacesPillar
-          packageId={PKG}
-          draftNonce={nonce}
-          onDraftSaved={() => setNonce((n) => n + 1)}
-          onDirtyChange={(d) => dirtyReports.push(d)}
-        />
-      </MemoryRouter>
-    );
-  }
-  beforeEach(() => {
-    dirtyReports.length = 0;
-  });
-
-  /** The pillar's rail: the innermost navigation landmark that lists the app's items. */
-  function rail(): HTMLElement {
-    const lists = screen.getAllByRole('navigation').filter((n) => n.textContent?.includes('Home menu'));
-    const innermost = lists.filter((n) => !lists.some((other) => other !== n && n.contains(other)));
-    expect(innermost).toHaveLength(1);
-    return innermost[0];
-  }
-  // objectui#11196: a new canvas entry is born with no `label`, and a save
-  // carries it with no `label` key (`{ id }` below). It was born "New item".
-  // objectui#11776: a save sends an entry only once it names a target, so each
-  // Add here is bound to the fixture's object in its inspector, and the rail
-  // shows it by that object's name.
-  const addedItemsInRail = () => within(rail()).queryAllByRole('button', { name: new RegExp(OBJECT.name) }).length;
-  const addBoundItem = async () => {
-    fireEvent.click(screen.getByRole('button', { name: /Add nav item/ }));
-    // *Link object* is the shared `Select` since objectui#11865: open its list and pick.
-    fireEvent.keyDown(screen.getByTestId('nav-link-object'), { key: 'ArrowDown' });
-    fireEvent.click(await screen.findByRole('option', { name: new RegExp(`\\(${OBJECT.name}\\)$`) }));
-  };
-  const navEditingOpen = () => screen.queryAllByRole('button', { name: /Add nav item/ }).length > 0;
-  const savedNavEntries = () =>
-    savesOf('app').map((b) =>
-      (b.navigation as Array<Record<string, unknown>>).map((n) =>
-        Object.prototype.hasOwnProperty.call(n, 'label') ? String(n.label) : { id: n.id },
-      ),
-    );
-
-  it('an edit undone while the save is in flight leaves the buffer as it landed: clean, and "Done" closes', async () => {
-    render(<NavHost />);
-    await screen.findByRole('button', { name: /Landing menu/ }, { timeout: 8000 });
-    fireEvent.click(screen.getByTitle(/^Edit navigation/));
-    await screen.findByRole('button', { name: /Add nav item/ }, { timeout: 8000 });
-
-    const release = holdNextSave();
-    await addBoundItem();
-    await screen.findByTestId('nav-autosaving', undefined, { timeout: 8000 });
-    await addBoundItem();
-    expect(addedItemsInRail()).toBe(2);
-    // Undo it: the buffer is back to exactly what the save in flight carries.
-    const rows = within(rail()).getAllByRole('button', { name: new RegExp(OBJECT.name) });
-    fireEvent.mouseEnter(rows[rows.length - 1]);
-    fireEvent.click(within(rows[rows.length - 1]).getByRole('button', { name: 'Remove nav item' }));
-    expect(addedItemsInRail()).toBe(1);
-
-    await release();
-    await settle();
-    expect(savedNavEntries()).toEqual([['Home menu', 'Landing menu', { id: 'nav_item_3' }]]);
-    expect(addedItemsInRail()).toBe(1);
-    expect(dirtyReports[dirtyReports.length - 1]).toBe(false);
-
-    await act(async () => {
-      fireEvent.click(screen.getByTitle('Done editing'));
-    });
-    await waitFor(() => expect(navEditingOpen()).toBe(false), { timeout: 8000 });
-    expect(server.saves).toHaveLength(1);
-  });
-});

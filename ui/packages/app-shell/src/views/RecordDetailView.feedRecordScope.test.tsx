@@ -39,6 +39,7 @@ import { MetadataCtx } from '@object-ui/react';
 // I18nProvider is mounted. Selecting through them keeps this file pinned to
 // the composer/empty-state semantics rather than to a literal string.
 import { DETAIL_DEFAULT_TRANSLATIONS } from '@object-ui/plugin-detail';
+import { COMMENTS_PANEL_OPEN_KEY } from './recordCommentsPanel';
 
 vi.mock('@object-ui/auth', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
@@ -225,7 +226,9 @@ function tree(dataSource: any, recordId: string, pages: any[] = []) {
           onEdit={() => {}}
           objectNameOverride={OBJECT_NAME}
           recordIdOverride={recordId}
-          embedded
+          // objectstack#36150 — an authored page draws on the full page only;
+          // objectstack#36225 — the comment panel is the full page's alone.
+          // So every case mounts the full page.
         />
       </MetadataCtx.Provider>
     </MemoryRouter>
@@ -253,6 +256,16 @@ afterEach(() => {
 });
 
 describe('RecordDetailView — the feed does not follow the user to the next record (#3268)', () => {
+  // objectstack#36075 — on the synthesized page the record's comments are the
+  // comment panel's: these open the page with it open (the reader left it
+  // so), and it stays open across the record→record navigation.
+  beforeEach(() => {
+    window.localStorage.setItem(COMMENTS_PANEL_OPEN_KEY, 'open');
+  });
+  afterEach(() => {
+    window.localStorage.clear();
+  });
+
   it('drops record A’s comment when the view navigates to record B', async () => {
     // The defect, verbatim from the issue: A’s comment stayed on B’s panel.
     const dataSource = makeDataSource({
@@ -330,6 +343,8 @@ describe('RecordDetailView — the feed does not follow the user to the next rec
     rerender(tree(dataSource, REC_B));
 
     expect(await screen.findByText(EMPTY_COMMENTS)).toBeTruthy();
+    // The comment panel settles on B's own empty state too.
+    await waitFor(() => expect(document.querySelector('[data-comments-panel] [data-comments-empty]')).not.toBeNull());
     expect(screen.queryByText(commentFor(REC_A))).toBeNull();
     await waitFor(() => expect(screen.queryByTestId('activity-loading')).toBeNull());
   });

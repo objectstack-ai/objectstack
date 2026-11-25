@@ -1,7 +1,7 @@
 /**
  * objectstack#35955 — Discard and Save on a list that holds a draft (the
- * 「Personalized」 marker of objectstack#28950 before it), at the host seam: the real object page, the real
- * `ListPreferencesProvider` and the real router, with `ListView` captured (its
+ * 「Personalized」 marker of objectstack#28950 before it), at the host seam: the real object page, the
+ * reader's list layout in this browser (`./listLayoutStore.ts`) and the real router, with `ListView` captured (its
  * own half, what of the list differs from the view, is pinned in plugin-list's
  * `ListView.personalization-28950.test.tsx`).
  *
@@ -115,11 +115,9 @@ vi.mock('./metadata-admin/useMetadata', async (importOriginal) => ({
 import { ObjectView, type ConsoleObjectViewProps } from './ObjectView';
 import { listDraftScope, readListDraft, resetListDraftStoreForTests } from './listDraftStore';
 import { ExpressionProvider } from '../providers/ExpressionProvider';
-import { UserStateAdaptersProvider, useAttachListStateFamily } from '../context/UserStateAdapters';
-import { ListPreferencesProvider } from '../context/ListPreferencesProvider';
+import { listLayoutStorageKey, resetListLayoutStoreForTests } from './listLayoutStore';
 import { withoutListStateParams } from './objectViewListUrlState';
 import { applyListStateParams, applyUserFilterParams } from './userFilterUrlState';
-import { buildListFilterKey } from './listFilterStorage';
 
 const FIELDS = {
   id: { type: 'text', label: 'Id' },
@@ -152,25 +150,6 @@ function makeDataSource() {
   } as unknown as ConsoleObjectViewProps['dataSource'];
 }
 
-function makeFamily(rows: Record<string, unknown>) {
-  return {
-    prefix: 'ui.list.',
-    load: vi.fn(async () => structuredClone(rows) as Record<string, any>),
-    save: vi.fn(async (key: string, value: unknown) => {
-      rows[key] = structuredClone(value);
-    }),
-  };
-}
-
-function AttachFamily({ family }: { family: any }) {
-  const attach = useAttachListStateFamily();
-  React.useEffect(() => {
-    attach(family);
-    return () => attach(null);
-  }, [attach, family]);
-  return null;
-}
-
 /** The address bar, as the page last wrote it. */
 let currentSearch = '';
 function LocationProbe() {
@@ -181,28 +160,23 @@ function LocationProbe() {
   return null;
 }
 
-function mount(family: any, query = '') {
+function mount(query = '') {
   return render(
-    <UserStateAdaptersProvider>
-      <AttachFamily family={family} />
-      <ListPreferencesProvider>
-        <ExpressionProvider user={{ id: session.userId, name: 'Ada', profile: 'admin' }}>
-          <MemoryRouter initialEntries={[`/apps/demo/${OBJECT_NAME}/view/${SYSTEM_ID}${query}`]}>
-            <Routes>
-              <Route
-                path="/apps/:appName/:objectName/view/:viewId"
-                element={(
-                  <>
-                    <LocationProbe />
-                    <ObjectView dataSource={makeDataSource()} objects={[OBJECT as any]} onEdit={() => {}} />
-                  </>
-                )}
-              />
-            </Routes>
-          </MemoryRouter>
-        </ExpressionProvider>
-      </ListPreferencesProvider>
-    </UserStateAdaptersProvider>,
+    <ExpressionProvider user={{ id: session.userId, name: 'Ada', profile: 'admin' }}>
+      <MemoryRouter initialEntries={[`/apps/demo/${OBJECT_NAME}/view/${SYSTEM_ID}${query}`]}>
+        <Routes>
+          <Route
+            path="/apps/:appName/:objectName/view/:viewId"
+            element={(
+              <>
+                <LocationProbe />
+                <ObjectView dataSource={makeDataSource()} objects={[OBJECT as any]} onEdit={() => {}} />
+              </>
+            )}
+          />
+        </Routes>
+      </MemoryRouter>
+    </ExpressionProvider>,
   );
 }
 
@@ -236,6 +210,7 @@ beforeEach(() => {
   currentSearch = '';
   localStorage.clear();
   resetListDraftStoreForTests();
+  resetListLayoutStoreForTests();
   client = new MetadataClient({ baseUrl: 'http://localhost', fetch: vi.fn(async () => json({ data: [] }, 200)) as unknown as typeof fetch });
   vi.stubGlobal('fetch', vi.fn(async () => json({ data: [] }, 200)));
   vi.spyOn(console, 'error').mockImplementation(() => {});
@@ -271,7 +246,7 @@ function openMenu(trigger: HTMLElement) {
 
 describe('Discard and Save, while the list holds a draft (objectstack#35955; the marker of objectstack#28950 before it)', () => {
   it('is drawn only while the list reports a draft part, names the parts in the Save menu, and the header ⋯ carries no reset', async () => {
-    mount(makeFamily({}));
+    mount();
     await listReady();
     expect(screen.queryByTestId('list-draft')).toBeNull();
 
@@ -298,8 +273,7 @@ describe('Discard and Save, while the list holds a draft (objectstack#35955; the
   });
 
   it('after a reload, Discard opens the list as the view declares it and leaves no `uf_*` param behind', async () => {
-    const family = makeFamily({});
-    mount(family, personalizedQuery());
+    mount(personalizedQuery());
     await listReady();
     // The list opened from the link: every part of it is the reader's.
     expect(listProps.initialSearchTerm).toBe('Alan');
@@ -327,13 +301,12 @@ describe('Discard and Save, while the list holds a draft (objectstack#35955; the
   });
 
   it('in session, the search is the draft\'s: kept nowhere durable, and Discard drops it', async () => {
-    mount(makeFamily({}));
+    mount();
     await listReady();
-    const cacheKey = buildListFilterKey(session.userId, OBJECT_NAME, SYSTEM_ID);
 
     act(() => listProps.onSearchChange('Alan'));
     await wait(400);
-    expect(localStorage.getItem(cacheKey!)).toBeNull();
+    expect(Object.keys(localStorage).filter((key) => key.includes(OBJECT_NAME))).toEqual([]);
     expect(readListDraft(listDraftScope(session.userId, OBJECT_NAME, SYSTEM_ID)).search).toBe('Alan');
     expect(new URLSearchParams(currentSearch).get('uf__search')).toBe('Alan');
 
@@ -348,9 +321,10 @@ describe('Discard and Save, while the list holds a draft (objectstack#35955; the
     expect(ufParams()).toEqual([]);
   });
 
-  it('column widths are the reader\'s, never a draft: a stored width draws nothing, and Discard keeps it', async () => {
-    const family = makeFamily({ [`ui.list.${OBJECT_NAME}`]: { perView: { [SYSTEM_ID]: { columnState: { widths: { name: 280 } } } } } });
-    mount(family);
+  it('column widths are the reader\'s, never a draft: a kept width draws nothing, and Discard keeps it', async () => {
+    const layoutKey = listLayoutStorageKey(session.userId, OBJECT_NAME)!;
+    localStorage.setItem(layoutKey, JSON.stringify({ perView: { [SYSTEM_ID]: { widths: { name: 280 } } } }));
+    mount();
     await listReady();
     expect(screen.queryByTestId('list-draft')).toBeNull();
     expect(listProps.schema.columnState).toEqual({ widths: { name: 280 } });
@@ -365,9 +339,7 @@ describe('Discard and Save, while the list holds a draft (objectstack#35955; the
 
     expect(listProps.schema.columnState).toEqual({ widths: { name: 280 } });
     expect(screen.queryByTestId('list-draft')).toBeNull();
-    // Nothing of the order reached the reader's stored row.
-    for (const [, value] of family.save.mock.calls) {
-      expect(JSON.stringify(value)).not.toContain('order');
-    }
+    // Nothing of the order reached the reader's kept layout.
+    expect(JSON.parse(localStorage.getItem(layoutKey)!)).toEqual({ perView: { [SYSTEM_ID]: { widths: { name: 280 } } } });
   });
 });

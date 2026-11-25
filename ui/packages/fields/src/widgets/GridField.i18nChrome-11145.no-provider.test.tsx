@@ -29,7 +29,7 @@
 import { describe, it, expect } from 'vitest';
 import * as React from 'react';
 import { render, screen, fireEvent } from '@testing-library/react';
-import { GridField } from './GridField';
+import { GridFieldWidget as GridField } from './grid-field/GridFieldWidget';
 
 const columns = [
   { name: 'qty', label: 'Qty', type: 'number' as const },

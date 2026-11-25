@@ -840,6 +840,99 @@ const PINS: { readonly [C in ExpressionRefusalCode]: readonly [Pin<C>, ...Pin<C>
         "label() reads a select field's option label; read any other field directly (record.first).",
     },
   ],
+  // [#36167] A list-valued field compared with a scalar answers a constant.
+  'list-equality': [
+    {
+      produce: () =>
+        onlyError('predicate', "record.labels == 'frontend'", {
+          scope: 'record',
+          fields: ['labels'],
+          fieldTypes: { labels: 'multiselect' },
+        }),
+      params: {
+        reference: 'record.labels',
+        operator: '==',
+        operand: '"frontend"',
+        answer: 'false',
+        rewrite: '(has(record.labels) && record.labels != null && "frontend" in record.labels)',
+      },
+      message:
+        'list compared with a scalar — `record.labels` holds a list (a multi-value field), and `==` compares the whole ' +
+        'list with `"frontend"`, so the expression answers `false` on every row whatever the list holds: the condition ' +
+        'never changes. Test membership with `in`: write ' +
+        '`(has(record.labels) && record.labels != null && "frontend" in record.labels)`. ' +
+        'To test whether the list is set, compare it with `null`.',
+    },
+    {
+      produce: () =>
+        onlyError('predicate', "'u1' != previous.owners", {
+          scope: 'record',
+          fields: ['owners'],
+          fieldTypes: { owners: 'user' },
+          multiValueFields: ['owners'],
+        }),
+      params: {
+        reference: 'previous.owners',
+        operator: '!=',
+        operand: '"u1"',
+        answer: 'true',
+        rewrite: '(!has(previous.owners) || previous.owners == null || !("u1" in previous.owners))',
+      },
+      message:
+        'list compared with a scalar — `previous.owners` holds a list (a multi-value field), and `!=` compares the whole ' +
+        'list with `"u1"`, so the expression answers `true` on every row whatever the list holds: the condition ' +
+        'never changes. Test membership with `in`: write ' +
+        '`(!has(previous.owners) || previous.owners == null || !("u1" in previous.owners))`. ' +
+        'To test whether the list is set, compare it with `null`.',
+    },
+    {
+      // A bare field name at a flattened site proven to bind the typed row.
+      produce: () =>
+        onlyError('predicate', "owners != 'u1'", {
+          scope: 'flattened',
+          faultOutcome: 'run-fails',
+          fields: ['owners'],
+          fieldTypes: { owners: 'user' },
+          multiValueFields: ['owners'],
+        }),
+      params: {
+        reference: 'owners',
+        operator: '!=',
+        operand: '"u1"',
+        answer: 'true',
+        rewrite: '(owners == null || !("u1" in owners))',
+      },
+      message:
+        'list compared with a scalar — `owners` holds a list (a multi-value field), and `!=` compares the whole ' +
+        'list with `"u1"`, so the expression answers `true` on every row whatever the list holds: the condition ' +
+        'never changes. Test membership with `in`: write `(owners == null || !("u1" in owners))`. ' +
+        'To test whether the list is set, compare it with `null`.',
+    },
+    {
+      // A source compiled to a query filter (a sharing rule's condition).
+      produce: () =>
+        onlyError('predicate', "record.labels == 'frontend'", {
+          scope: 'record',
+          filterCompiled: true,
+          fields: ['labels'],
+          fieldTypes: { labels: 'multiselect' },
+        }),
+      params: {
+        reference: 'record.labels',
+        operator: '==',
+        operand: '"frontend"',
+        answer: 'false',
+        rewrite: '(record.labels != null && record.labels.contains("frontend"))',
+      },
+      message:
+        'list compared with a scalar — `record.labels` holds a list (a multi-value field), and `==` compares the whole ' +
+        'list with `"frontend"`: as CEL it answers `false` on every row, and this condition compiles to a query ' +
+        'filter, where `==` against a list column is refused, so it never tests membership. Test membership with ' +
+        '`contains`, which compiles to a membership filter: write ' +
+        '`(record.labels != null && record.labels.contains("frontend"))`. To test whether the list is set, compare ' +
+        'it with `null`.',
+    },
+  ],
   'empty-expression': [
     {
       produce: () => rootsRefusal('   '),
@@ -926,6 +1019,8 @@ const SWEEP_SOURCES: readonly string[] = [
   'has(status) && other == 1',
   'daysBetween(record.a, record.b) > 3',
   "label(record.name) + label(record.status)",
+  // [#36167] A list-valued field compared with a scalar.
+  "record.tags == 'frontend'",
 ];
 
 const SWEEP_INPUTS: readonly ExprInput[] = [
@@ -950,7 +1045,7 @@ const SWEEP_SCHEMAS: readonly (ExprSchemaHint | undefined)[] = [
     scope: 'record',
     objectName: 'deal',
     fields: ['amount', 'close_date', 'name', 'active', 'account', 'status'],
-    fieldTypes: { close_date: 'date', name: 'text', active: 'boolean', account: 'lookup' },
+    fieldTypes: { close_date: 'date', name: 'text', active: 'boolean', account: 'lookup', tags: 'multiselect' },
     roleCatalog: ['org_admin', 'sales'],
     optionFields: ['status'],
   },

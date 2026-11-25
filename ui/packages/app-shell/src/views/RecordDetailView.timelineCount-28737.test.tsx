@@ -242,7 +242,9 @@ describe('objectstack#28737 — the 动态 count is the server\'s, and the page 
     const [page] = held.filter(isPage);
     expect(page.body.activity).toEqual({ top: 5 });
     expect(page.body.timeline).toEqual({ discussion: true, activity: true, fieldChanges: false });
-    expect(chipOf(view.container)).toBe('341');
+    // objectstack#36075 — the comment panel holds the record's one comment,
+    // so the 动态 count is the served total without it.
+    expect(chipOf(view.container)).toBe('340');
     expect(activityReads(held)).toEqual([]);
 
     // The 动态 tab draws the whole stream: it reads the window once, and the
@@ -252,7 +254,7 @@ describe('objectstack#28737 — the 动态 count is the server\'s, and the page 
     await settle(held);
     expect(activityReads(held)).toHaveLength(1);
     expect(activityReads(held)[0].path).toMatch(/[?&]\$?top=200\b/);
-    expect(view.container.textContent).toContain('341');
+    expect(view.container.textContent).toContain('340');
   });
 
   it('a record with none shows 0 and makes no fallback read, the 动态 tab opened included', async () => {
@@ -285,8 +287,9 @@ describe('objectstack#28737 — the 动态 count is the server\'s, and the page 
     const { held, open } = await boot({ activity: { total: 330, records: ROWS(5) } });
     const view = open();
     await settle(held);
-    // One comment + five activity rows: what the page holds, not the record's stream.
-    expect(chipOf(view.container)).toBe('6');
+    // Five activity rows: what the page holds, not the record's stream; the
+    // one comment is the comment panel's (objectstack#36075).
+    expect(chipOf(view.container)).toBe('5');
   });
 });
 
@@ -334,7 +337,8 @@ describe('objectstack#30035 — the 动态 stream is read again after a save', (
     const { held, open, ds } = await boot(answers, undefined, ALL, embedded);
     const view = open();
     await settle(held);
-    expect(chipOf(view.container)).toBe('2');
+    // The served 2 less the comment the comment panel holds (objectstack#36075).
+    expect(chipOf(view.container)).toBe('1');
     expect(view.container.textContent).not.toContain('changed the amount');
     const before = held.length;
 
@@ -349,9 +353,10 @@ describe('objectstack#30035 — the 动态 stream is read again after a save', (
   for (const [surface, embedded] of [['the record page', false], ['the drawer', true]] as const) {
     it(`${surface}: the count and the rows hold the save's activity row without a reload`, async () => {
       const { view, after } = await saveAndRead(embedded);
-      expect(chipOf(view.container)).toBe('3');
-      // A drawer draws no right rail (objectstack#35596): its rows are the 动态 tab's.
-      if (embedded) await act(async () => { fireEvent.click(timelineTab(view.container)); });
+      expect(chipOf(view.container)).toBe('2');
+      // No page draws the right rail any more (objectstack#35596 for the
+      // drawer, objectstack#35890 for the page): the rows are the 动态 tab's.
+      await act(async () => { fireEvent.click(timelineTab(view.container)); });
       expect(view.container.textContent).toContain('changed the amount');
       // One ask of the streams the open asked, and only those: no related
       // list, verdict, projection or approval rides it.

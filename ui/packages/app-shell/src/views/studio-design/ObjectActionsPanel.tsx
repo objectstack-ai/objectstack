@@ -77,10 +77,10 @@ import React from 'react';
 import { useParams } from 'react-router-dom';
 import { toast } from 'sonner';
 import { Ban, Zap, Plus, Trash2, ChevronDown, ChevronRight, Loader2, Power } from 'lucide-react';
-import { useDisplayLocale } from '@object-ui/i18n';
 import { Popover, PopoverTrigger, PopoverContent } from '@object-ui/components';
 import { getIcon } from '../../utils/getIcon.js';
 import { useRegisteredMetadataDefaultInspector } from '../metadata-admin/default-inspector-registry.js';
+import type { FormViewSpec } from '../metadata-admin/form-spec.js';
 import type { I18nLabel } from '@objectstack/spec/ui';
 import { t, tFormat, useMetadataLocale } from '../metadata-admin/i18n.js';
 import { readFields } from '../metadata-admin/previews/object-fields-io.js';
@@ -93,7 +93,7 @@ import {
   type ActionPresetFieldOpt,
 } from './actionPresets.js';
 import { StudioEmptyState, StudioEmptyStateAction } from './StudioEmptyState.js';
-import { usePairObjectActions, type PairActionsDoor } from './pairObjectActions.js';
+import type { PairActionsDoor, PairObjectActions } from './pairObjectActions.js';
 import { RailCustomizationFilter, RailCustomizationMark, useRailCustomizationsOnly } from './StudioRailCustomizations.js';
 import { FlowLedgerSwitch } from './FlowLedgerSwitch.js';
 import { isStudioOrgScope } from './studioScope.js';
@@ -148,15 +148,32 @@ function labelText(label: I18nLabel | undefined, fallback: string, locale: strin
   return label == null ? fallback : navItemLabelText(label, locale);
 }
 
+/** The pair's actions where there is no pair: nothing listed, nothing offered. */
+const NO_PAIR_ACTIONS: PairObjectActions = {
+  rows: [],
+  pairId: null,
+  error: null,
+  saving: false,
+  dirty: false,
+  renamedFrom: () => null,
+  create: async () => false,
+  patch: () => undefined,
+  remove: async () => undefined,
+  reportBlocking: () => undefined,
+  dialog: <></>,
+};
+
 export function ObjectActionsPanel({
   draft,
   onPatch,
   disabled,
   actionSchema,
+  actionForm,
   onBlockingIssuesChange,
   onCelVerdictsChange,
   focus,
   pair = null,
+  pairActions = null,
 }: {
   draft: Record<string, unknown>;
   onPatch: (patch: Record<string, unknown>) => void;
@@ -188,23 +205,36 @@ export function ObjectActionsPanel({
    */
   actionSchema?: Record<string, unknown>;
   /**
+   * The served FormView layout for the `action` type (`/meta/types`), handed
+   * to ActionDefaultInspector as `serverForm` so the rows it draws from the
+   * served form (the refusal catalogue and declared texts) take their served
+   * face, not the raw JSON editor (objectstack#35650).
+   */
+  actionForm?: FormViewSpec;
+  /**
    * objectstack#30088 — on a read-only base's object, its pair: New saves the
    * action as an `action` item there (see the header). Absent, every action is
    * the object draft's.
    */
   pair?: PairActionsDoor | null;
+  /** objectstack#36511 — the pair's actions on this object, the Data pillar's buffer (`usePairObjectActions`). */
+  pairActions?: PairObjectActions | null;
 }) {
   const locale = useMetadataLocale();
   // The last-saved time reads the DISPLAY locale (objectui#10232).
-  const displayLocale = useDisplayLocale();
   const objectName = typeof draft.name === 'string' ? draft.name : '';
   // objectui#4527 — each action's blocking CEL verdict, by name (see below).
   const [celErrors, setCelErrors] = React.useState<Record<string, number>>({});
-  const blockingOf = React.useCallback((name: string) => celErrors[name] ?? 0, [celErrors]);
   // objectstack#30088 — the pair's actions on this object, and the vendor's:
   // the object's served actions less any the pair holds (a published one is
   // served folded into the object too).
-  const added = usePairObjectActions(pair, objectName, blockingOf);
+  // objectstack#36511 — read and buffered by the Data pillar, so an unsaved
+  // edit outlives this view.
+  const added = pairActions ?? NO_PAIR_ACTIONS;
+  const reportPairBlockingRef = React.useRef(added.reportBlocking);
+  React.useLayoutEffect(() => {
+    reportPairBlockingRef.current = added.reportBlocking;
+  });
   const addedNames = React.useMemo(() => new Set(added.rows.map((r) => r.name)), [added.rows]);
   const actions = React.useMemo(
     () =>
@@ -361,6 +391,7 @@ export function ObjectActionsPanel({
    * DERIVED against the live action-name set rather than repaired by an effect.
    */
   const reportCel = React.useCallback((actionName: string, count: number) => {
+    reportPairBlockingRef.current(actionName, count);
     setCelErrors((prev) => (prev[actionName] === count ? prev : { ...prev, [actionName]: count }));
   }, []);
   const liveActionNames = React.useMemo(
@@ -610,7 +641,6 @@ export function ObjectActionsPanel({
   if (allListed.length === 0) {
     return (
       <div className="flex min-h-0 flex-1 flex-col">
-        {added.dialog}
         {pairError}
         <StudioEmptyState
           testId="actions-empty"
@@ -628,7 +658,6 @@ export function ObjectActionsPanel({
 
   return (
     <div className="flex min-h-0 flex-1 gap-4">
-      {added.dialog}
       {/* action list */}
       <div data-testid="actions-list" className="flex w-72 shrink-0 flex-col rounded-lg border">
         <header className="flex items-center gap-2 border-b px-3 py-2">
@@ -766,17 +795,11 @@ export function ObjectActionsPanel({
           <>
             {editable(sel.name) && (
               <div className="flex shrink-0 items-center justify-end gap-2 border-b px-2 py-1">
-                {/* objectstack#30088 — a pair action autosaves on its own: its status line. */}
+                {/* objectstack#36511 — a pair action is sent by the top bar's Save. */}
                 {selAdded && added.saving ? (
                   <span className="inline-flex items-center gap-1 text-[11px] text-muted-foreground" data-testid="actions-pair-saving">
                     <Loader2 className="h-3 w-3 animate-spin" />
                     {t('engine.studio.autoSaving', locale)}
-                  </span>
-                ) : selAdded && added.savedAt !== null && added.savedAt.name === sel.name && added.dirty !== sel.name ? (
-                  <span className="text-[11px] text-muted-foreground" data-testid="actions-pair-saved-at">
-                    {tFormat('engine.studio.data.lastSaved', locale, {
-                      time: added.savedAt.at.toLocaleTimeString(displayLocale, { hour: '2-digit', minute: '2-digit' }),
-                    })}
                   </span>
                 ) : null}
                 <button
@@ -806,6 +829,7 @@ export function ObjectActionsPanel({
               readOnly={!editable(sel.name)}
               locale={locale}
               serverSchema={actionSchema}
+              serverForm={actionForm}
               onBlockingIssuesChange={(count) => reportCel(String(sel.name ?? ''), count)}
             />
           </>

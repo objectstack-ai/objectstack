@@ -16,7 +16,7 @@
  * {@link readAutomationAddress} reads the namespace position in the router's
  * documented order (`readNamespacePositionSegment`, `@objectstack/spec/kernel`):
  * the grammar's literals (`trigger`, `hooks`, `connectors`, `actions`,
- * `_status`; `credential-refs` and `oauth` under `connectors`) first, then
+ * `_status`, `_record-starts`; `credential-refs` and `oauth` under `connectors`) first, then
  * `_env`, then an installed namespace (the registry's `getNamespaceOwners`,
  * G2's mapping, never a second one), else the bare grammar. An addressed path
  * comes back as the bare path after its qualifier, so every gate of the domain,
@@ -399,6 +399,8 @@ export function automationRouteAllow(parts: readonly string[]): string[] {
     switch (parts.length) {
         case 1:
             for (const verb of ['GET', 'PUT', 'DELETE']) allow.add(verb);
+            // [#35928] The record-update preview, a literal a flow name never spells.
+            if (a === '_record-starts') allow.add('POST');
             break;
         case 2:
             if (a === 'trigger') allow.add('POST');

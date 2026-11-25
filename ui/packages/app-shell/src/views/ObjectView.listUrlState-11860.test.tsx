@@ -98,9 +98,7 @@ import '@objectstack/lint';
 // opened with is read (objectui#11860's grouping pins below).
 import '@object-ui/plugin-grid';
 import { ExpressionProvider } from '../providers/ExpressionProvider';
-import { buildListFilterKey } from './listFilterStorage';
 import { LIST_FILTER_PARAM, LIST_GROUP_PARAM, LIST_SEARCH_PARAM, LIST_SORT_PARAM, withoutListStateParams } from './userFilterUrlState';
-import { localListStateKey } from '../context/ListPreferencesProvider';
 import { listDraftScope, patchListDraft, resetListDraftStoreForTests, type ListDraftPatch } from './listDraftStore';
 import { acceptStoredFilters, acceptStoredSort } from './objectViewListUrlState';
 import { toast } from 'sonner';
@@ -396,6 +394,32 @@ describe('objectstack#35955 — a reload drops a list\'s address state only when
     await mountHost([address]);
     expect(filterOf(lastQuery())).toContain('"priority","=","urgent"');
   });
+
+  // The two edges of the address match (objectstack#35955, PR 2's known
+  // edges): each is pinned as it behaves, not changed.
+  it('edge: a reload whose address is rewritten before the list seeds counts as no reload of the list, so the address state applies', async () => {
+    // The reload asked for one address; the list opens on another (a landing
+    // redirect, a view segment filled in) that carries the same `uf_*` state.
+    const reloaded = link(VIEW, { filter: URGENT });
+    const address = link(`${VIEW}/all`, { filter: URGENT });
+    stubNavigation('reload', new URL(reloaded, window.location.origin).href);
+    window.history.replaceState(null, '', address);
+    const host = await mountHost([address]);
+    expect(filterOf(lastQuery())).toContain('"priority","=","urgent"');
+    expect(new URLSearchParams(host.search()).has(LIST_FILTER_PARAM)).toBe(true);
+  });
+
+  it('edge: a reload of a record page, then Back to the list: the list\'s history entry applies its `uf_*` state', async () => {
+    const record = `${VIEW}/all/record/1`;
+    const address = link(`${VIEW}/all`, { filter: URGENT });
+    window.history.replaceState(null, '', record);
+    stubNavigation('reload', new URL(record, window.location.origin).href);
+    const host = await mountHost([record]);
+    window.history.replaceState(null, '', address);
+    await host.go(address);
+    expect(filterOf(lastQuery())).toContain('"priority","=","urgent"');
+    expect(new URLSearchParams(host.search()).has(LIST_FILTER_PARAM)).toBe(true);
+  });
 });
 
 describe('a malformed or stale param is dropped — the list opens and nothing throws (objectui#11860)', () => {
@@ -485,10 +509,10 @@ function storeViewPreference(viewId: string, pref: { sort?: unknown; filters?: u
 
 describe('objectstack#35955 — state an earlier console stored for the reader no longer opens the list', () => {
   it('a stored sort and filter, in the server row\'s cache or the older per-browser key, are not applied', async () => {
-    localStorage.setItem(localListStateKey('u1', OBJ), JSON.stringify({
+    localStorage.setItem(`list-state:u1:${OBJ}`, JSON.stringify({
       perView: { all: { sort: [{ field: 'due_date', order: 'desc' }], filters: { id: 'root', logic: 'and', conditions: [{ id: 'p', field: 'priority', operator: 'equals', value: 'urgent' }] } } },
     }));
-    localStorage.setItem(buildListFilterKey('u1', OBJ, 'all')!, JSON.stringify({ search: 'mine' }));
+    localStorage.setItem(`list-filters:u1:${OBJ}:all`, JSON.stringify({ search: 'mine' }));
     const host = await mountHost([`${VIEW}/all`]);
     const q = lastQuery();
     expect(filterOf(q)).not.toContain('urgent');
@@ -734,6 +758,19 @@ async function openGroupPanel() {
   await settle();
 }
 
+/**
+ * "Add group field", then the field. This harness's data source answers no
+ * `getObjectSchema`, so the list knows no field's type and the button opens
+ * the field dropdown instead of adding a level (objectstack#36204): the level
+ * is written once a field is picked there.
+ */
+async function addGroupLevel(name: string) {
+  fireEvent.click(screen.getByTestId('grouping-add'));
+  const listbox = await screen.findByRole('listbox');
+  // No definition either for the labels: the options are the field names.
+  fireEvent.click(within(listbox).getByRole('option', { name }));
+}
+
 /** The Group level's own Clear, inside the Display menu. */
 function clearGrouping() {
   const panel = screen.getByTestId('view-settings-content');
@@ -763,7 +800,7 @@ describe('the toolbar grouping is in the URL too (objectui#11860)', () => {
     const host = await mountHost(['/elsewhere', `${VIEW}/all`]);
     expect(groupedBy()).toBeUndefined();
     await openGroupPanel();
-    fireEvent.click(screen.getByTestId('grouping-add'));
+    await addGroupLevel('priority');
     await settle();
     const written = groupParamOf(host);
     expect(written?.fields).toHaveLength(1);
@@ -784,7 +821,7 @@ describe('the toolbar grouping is in the URL too (objectui#11860)', () => {
   it('the grouping a user set on a link survives a reload of that link', async () => {
     const host = await mountHost([`${VIEW}/all`]);
     await openGroupPanel();
-    fireEvent.click(screen.getByTestId('grouping-add'));
+    await addGroupLevel('priority');
     await settle();
     const url = `${host.pathname()}${host.search()}`;
     const field = groupParamOf(host).fields[0].field;

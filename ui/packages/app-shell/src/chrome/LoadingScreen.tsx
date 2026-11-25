@@ -124,7 +124,7 @@ export function LoadingScreen({ message, error, onRetry, retrying }: LoadingScre
             <div className="flex flex-col items-center gap-3 p-5 rounded-lg border border-destructive/30 bg-destructive/5 w-full">
               <div className="flex items-center gap-2 text-destructive">
                 <AlertCircle className="h-5 w-5 shrink-0" />
-                <span className="text-sm font-semibold">
+                <span className="text-sm font-medium">
                   {strings.error.connectionFailed}
                 </span>
               </div>

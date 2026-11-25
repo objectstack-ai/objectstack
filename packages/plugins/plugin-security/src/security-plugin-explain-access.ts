@@ -516,6 +516,11 @@ export async function explainAccessForCaller(
         // manager — the exact behaviour this binding had before the gate.
         ? { listRecordShares: (o: string, rid: string) => sharing.listShares(o, rid, { isSystem: true }) }
         : {}),
+      // [ADR-0155 ② ruled R2] Whether share grants count on the object at all:
+      // the sharing service's own verdict, asked of it, never restated here.
+      ...(sharing && typeof sharing.shareGrantsInertReason === 'function'
+        ? { shareGrantsInertReason: (o: string) => sharing.shareGrantsInertReason(o) }
+        : {}),
       // [#26180] The pending approval requests that grant the EXPLAINED
       // principal read of the record — the same answer the sharing read filter
       // ORs in, asked with the explained context, so the attribution names the

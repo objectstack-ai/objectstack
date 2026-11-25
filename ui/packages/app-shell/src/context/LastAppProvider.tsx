@@ -1,8 +1,8 @@
 /**
  * LastAppProvider
  *
- * The app this person last had open (objectstack#35881): where a phone lands
- * after sign-in. On a phone it comes first, ahead of the app the product
+ * The app this person last had open (objectstack#35881): where a sign-in
+ * lands, on a phone and, since objectstack#36732, on a desktop. On a phone it comes first, ahead of the app the product
  * declares as default, which applies only when there is no record yet (ruling
  * 7045309332, 「上次用的优先」). Stored per person, so it follows them to
  * another device: one `sys_user_preference` row, `ui.app.last`, holding the
@@ -12,8 +12,10 @@
  * adapter.
  *
  * Written whenever an app is open, at any width: it is the person's last app,
- * not their last phone app. Read only by the phone's landing:
- * `RootLandingRedirect` in the console app, through `resolvePhoneLandingPath`.
+ * not their last phone app. Read by the landing at every width
+ * (`RootLandingRedirect` in the console app; from 768 px up also the retired
+ * `/home` address, objectstack#36732) and by the desktop chrome's Home
+ * (`useHomePath`).
  *
  * @module
  */
@@ -31,7 +33,9 @@ import {
 import { useAuth } from '@object-ui/auth';
 import {
   createDebouncedFlush,
+  readScopedCopy,
   scopedKey,
+  useOrganizationScope,
   useStorageSync,
   useUserStateAdapter,
 } from './UserStateAdapters.js';
@@ -57,18 +61,18 @@ function sanitize(value: unknown): string | null {
   return typeof first === 'string' && first ? first : null;
 }
 
-function loadLocal(userId: string | null): string | null {
+function loadLocal(userId: string | null, orgId: string | null): string | null {
   try {
-    const raw = localStorage.getItem(scopedKey(LAST_APP_PREFERENCE_KEY, userId));
+    const raw = readScopedCopy(LAST_APP_PREFERENCE_KEY, userId, orgId);
     return raw ? sanitize(JSON.parse(raw)) : null;
   } catch {
     return null;
   }
 }
 
-function saveLocal(name: string, userId: string | null) {
+function saveLocal(name: string, userId: string | null, orgId: string | null) {
   try {
-    localStorage.setItem(scopedKey(LAST_APP_PREFERENCE_KEY, userId), JSON.stringify([name]));
+    localStorage.setItem(scopedKey(LAST_APP_PREFERENCE_KEY, userId, orgId), JSON.stringify([name]));
   } catch {
     // storage full / privacy mode: the server row still carries it
   }
@@ -79,25 +83,29 @@ const LastAppContext = createContext<LastAppValue | null>(null);
 export function LastAppProvider({ children }: { children: ReactNode }) {
   const { user } = useAuth();
   const userId = user?.id ?? null;
+  // The browser copy is kept per organization, like the server row it mirrors
+  // (objectstack#36244): an app of one organization is no landing in another.
+  const orgId = useOrganizationScope();
   // A list-shaped adapter, like every slot: the list holds the one name.
   const adapter = useUserStateAdapter<string>('lastApp');
 
-  const [local, setLocal] = useState<{ userId: string | null; name: string | null }>(() => ({
+  const [local, setLocal] = useState<{ userId: string | null; orgId: string | null; name: string | null }>(() => ({
     userId,
-    name: loadLocal(userId),
+    orgId,
+    name: loadLocal(userId, orgId),
   }));
   const [remote, setRemote] = useState<{ adapter: unknown; name: string | null } | null>(null);
   // A pick made in this session beats any read that lands after it.
   const picked = useRef<string | null>(null);
 
-  if (local.userId !== userId) {
-    // Adjusted while rendering, on the signed-in user changing.
-    setLocal({ userId, name: loadLocal(userId) });
+  if (local.userId !== userId || local.orgId !== orgId) {
+    // Adjusted while rendering, on the signed-in user or organization changing.
+    setLocal({ userId, orgId, name: loadLocal(userId, orgId) });
     picked.current = null;
   }
 
-  useStorageSync<string[]>(scopedKey(LAST_APP_PREFERENCE_KEY, userId), (value) => {
-    setLocal({ userId, name: sanitize(value) });
+  useStorageSync<string[]>(scopedKey(LAST_APP_PREFERENCE_KEY, userId, orgId), (value) => {
+    setLocal({ userId, orgId, name: sanitize(value) });
   });
 
   const flusher = useMemo(
@@ -119,23 +127,25 @@ export function LastAppProvider({ children }: { children: ReactNode }) {
         if (cancelled) return;
         const name = sanitize(items);
         setRemote({ adapter, name });
-        if (name && !picked.current) saveLocal(name, userId);
+        if (name && !picked.current) saveLocal(name, userId, orgId);
       });
     return () => {
       cancelled = true;
     };
-  }, [adapter, userId]);
+  }, [adapter, userId, orgId]);
 
   const rememberApp = useCallback(
     (name: string) => {
       if (!name) return;
       picked.current = name;
-      setLocal((prev) => (prev.name === name && prev.userId === userId ? prev : { userId, name }));
-      if (loadLocal(userId) === name && remote?.name === name) return;
-      saveLocal(name, userId);
+      setLocal((prev) =>
+        prev.name === name && prev.userId === userId && prev.orgId === orgId ? prev : { userId, orgId, name },
+      );
+      if (loadLocal(userId, orgId) === name && remote?.name === name) return;
+      saveLocal(name, userId, orgId);
       if (adapter) flusher.schedule([name]);
     },
-    [userId, adapter, flusher, remote?.name],
+    [userId, orgId, adapter, flusher, remote?.name],
   );
 
   const remoteName = remote && remote.adapter === adapter ? remote.name : null;

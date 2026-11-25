@@ -468,7 +468,7 @@ import { SCANNED_ROOTS as RUNNER_ENV_SCANNED_ROOTS, findRunnerEnvReads, isProduc
 import { findViolations as findErrorCodeCasingViolations } from '../check-error-code-casing.mjs';
 // The workspace parse the README claim net (#31292) reads its population through, the one the gate itself imports.
 // Dependency-free, and it declares no path population of its own.
-import { WORKSPACE_FILE, parseWorkspaceGlobs, workspacePackageDirs } from '../workspace-enumerator.mjs';
+import { WORKSPACE_FILE, parseWorkspaceGlobs, workspacePackageDirs, workspacePackages } from '../workspace-enumerator.mjs';
 // The hand-written tables — ledgers, marker grammars, the change-kind roster, the tier globs — are
 // DATA, and live beside this file; this engine loads them, matches paths against them and derives.
 // Every table is re-exported under the name it always had, so no consumer moved.
@@ -488,6 +488,7 @@ import {
   CHANGE_KIND_ROWS,
   UI_SCRIPTS_SUITE_ROOTS,
   SPEC_MIGRATION_ENTRY_ROOTS,
+  FIELD_SCHEMA_KEY_DECLARATIONS,
   MANDATORY_TIER_GLOB_ROWS,
   SUSPECT_TIER_GLOB_ROWS,
   GENERATED_MODULE_SOURCES,
@@ -508,6 +509,7 @@ export {
   GENERATED_MODULE_SOURCES,
   UI_SCRIPTS_SUITE_ROOTS,
   SPEC_MIGRATION_ENTRY_ROOTS,
+  FIELD_SCHEMA_KEY_DECLARATIONS,
 };
 
 // Re-exported so this tool's self-test drives the SAME predicates the gate
@@ -8713,13 +8715,24 @@ export function trackedPrefixes(files) {
 // absolute literal — is outside the tree by construction. So the classifier has
 // THREE answers, and the third carries the honesty: a site whose base it cannot
 // resolve is UNRESOLVED, never "probably fine". For `mkdtempSync` — the shape
-// every in-tree fixture in this tree is built from — an unresolved site is a
-// FAILURE. A detector that silently skipped what it could not read would be
-// this card's own defect one level up: green over the sites nobody measured.
+// every in-tree fixture in this tree is built from — an unresolved site in a
+// test file or in repo tooling is a FAILURE. A detector that silently skipped
+// what it could not read would be this card's own defect one level up: green
+// over the sites nobody measured.
 //
-// Measured on the tree at the time of writing: 359 `mkdtempSync` sites — 4 in
-// the tree (the four `packages/cli` fixtures the convention names), the rest in
-// the system temp directory, 0 unresolved.
+// The boundary of that rule is the FILE POPULATION: an unresolved site in
+// shipped package source (a non-test file under the own `src/` of a workspace
+// member whose manifest is not `private: true`, `isShippedPackageSource`) is
+// REPORTED and not failed, because its base is chosen at run time by whoever
+// runs the published code (ruling record 7075362923).
+//
+// Measured on 2026-11-22 on the tree of d8599c2c through
+// `scratchDirSitesInSource` and `isShippedPackageSource`: 1823 `mkdtempSync`
+// sites — 1465 in `isTestFilePath` test files (47 in the tree), 344 in every
+// other source outside shipped package source (repo tooling, package scripts,
+// test helpers and tests by directory; 0 in the tree; 0 of them under a private
+// member's `src/`), 14 in shipped package source (all in the system temp
+// directory); 0 unresolved in any population.
 //
 // `mkdirSync` is swept too and deliberately NOT held to completeness: of its
 // sites, ~124 take a base this resolver cannot see (a function parameter, a
@@ -9990,6 +10003,56 @@ export function exposedScratchDirs({ cwd = ROOT, files = null } = {}) {
     });
   }
   return { ...sweep, exposed, covered };
+}
+
+/**
+ * ── Which UNRESOLVED `mkdtempSync` site fails completeness: the FILE ──────────
+ *
+ * In a test file or a repo script the base of a scratch directory is something
+ * this tree chose, so a base the scan cannot read is a gap in the reading and
+ * fails. Shipped package source is the population where that stops holding: a
+ * published command stages beside a directory its USER names at run time (a
+ * cwd-relative argument), and no reading of this tree can say whether that
+ * lands inside a checkout. Failing it forces a spelling that only hides the
+ * base, never a safer directory. So that population is reported and not
+ * failed (ruling record 7075362923, 「扫描只管仓内运行的代码」).
+ *
+ * The boundary is the site's FILE, never its resolution: "in the tree" is
+ * exactly what an unresolved site does not know. ⛔ Nor is it "not a test
+ * file" alone — repo tooling is code this checkout runs, and it stays held.
+ *
+ * Shipped package source = a non-test source under the own `src/` of a
+ * published workspace member. "Non-test" is the runner-env gate's
+ * `isProductSource` (a test by name or by directory, `.d.ts` excluded), the
+ * stricter of the tree's test predicates, so a helper under `src/__tests__/`
+ * stays held. "Published member" is a workspace member whose manifest is not
+ * `private: true`, as the enumerator's `workspacePackages` pairs them: a
+ * private member (an example app, a QA harness, the docs app) is not published
+ * code and has no such user, so its `src/` is code this checkout runs and stays
+ * held, as does a member whose manifest does not parse. Neither half is a list
+ * kept here.
+ *
+ * `members` is `workspacePackages(root)`'s shape: `{ dir, manifest }` pairs.
+ */
+export function isShippedPackageSource(rel, members) {
+  return isRunnerEnvProductSource(rel)
+    && members.some(({ dir, manifest }) => manifest?.private !== true && rel.startsWith(`${dir}/src/`));
+}
+
+/**
+ * The completeness rule's verdict over a sweep's `unresolved` sites: `failing`
+ * is what reds the live case, `reported` the shipped-source remainder it names
+ * and does not fail. A `mkdirSync` site is in neither — that half was never
+ * held to completeness (the header above).
+ */
+export function mkdtempCompleteness(unresolved, { members = workspacePackages(ROOT) } = {}) {
+  const failing = [];
+  const reported = [];
+  for (const site of unresolved) {
+    if (site.call !== 'mkdtempSync') continue;
+    (isShippedPackageSource(site.file, members) ? reported : failing).push(site);
+  }
+  return { failing, reported };
 }
 
 /** An ignore file every clone has, as opposed to one local to whoever ran this. */
@@ -12097,6 +12160,124 @@ export function readBySpecMigrationEntryConsumers(path, roots = SPEC_MIGRATION_E
 }
 
 /**
+ * The members an object literal declares at its own depth, in source order: a key by its name (a quoted key by
+ * its content), a spread as `...` and the name path it spreads, a computed key as its bracketed source text.
+ * `open` is the offset of the literal's opening brace in `source`. Returns null when the literal does not close
+ * where the brackets say it does, so a reader that lost its place says so instead of answering a short list.
+ *
+ * Read over `maskCommentsAndLiterals`, whose blanking keeps every offset: a brace or a comma inside a comment,
+ * a string, a template or a regex is not structure, and a quoted key's name is read back from `source` between
+ * the delimiters the mask keeps. ⚠ A comma inside type arguments at the literal's own depth (an `as` cast to a
+ * two-parameter generic) reads as a separator; the text after it never opens a member, because a member is a
+ * name followed by its colon, paren, comma or closing brace, so the cost is nil on every declaration this reads
+ * today, and the live census in the self-test holds the read against both closure tables.
+ */
+export function objectLiteralMembers(source, open, masked = maskCommentsAndLiterals(source)) {
+  if (masked[open] !== '{') return null;
+  const members = [];
+  let depth = 0;
+  let atMember = true;
+  let computedAt = -1;
+  for (let k = open + 1; k < masked.length; k++) {
+    const c = masked[k];
+    if (depth === 0 && atMember && !/\s/.test(c)) {
+      atMember = false;
+      const rest = masked.slice(k, k + 200);
+      const spread = /^\.\.\.\s*([A-Za-z_$][\w$.]*)/.exec(rest);
+      const named = /^(?:(?:get|set|async)\s+)?\*?\s*([A-Za-z_$][\w$]*)\s*\??\s*[:(,}<]/.exec(rest);
+      if (spread) members.push(`...${spread[1]}`);
+      else if (c === "'" || c === '"') {
+        const end = masked.indexOf(c, k + 1);
+        if (end < 0) return null;
+        members.push(source.slice(k + 1, end));
+        k = end;
+        continue;
+      } else if (c === '[') computedAt = k;
+      else if (named) members.push(named[1]);
+    }
+    if (c === '{' || c === '[' || c === '(') depth++;
+    else if (c === '}' || c === ']' || c === ')') {
+      if (depth === 0) return c === '}' ? members : null;
+      depth--;
+      if (depth === 0 && c === ']' && computedAt >= 0) {
+        members.push(source.slice(computedAt, k + 1));
+        computedAt = -1;
+      }
+    } else if (c === ',' && depth === 0) atMember = true;
+  }
+  return null;
+}
+
+/**
+ * The key set one `FIELD_SCHEMA_KEY_DECLARATIONS` row reads, sorted, or null when the declaration is not where
+ * the row says it is. `declares` names the binding; `call` (when set) names the call whose argument number
+ * `argument` (from 0) is the object literal; with no `call` the literal follows the `=` directly.
+ */
+export function declaredKeySet(source, { declares, call = null, argument = 0 }) {
+  const masked = maskCommentsAndLiterals(source);
+  const decl = new RegExp(`\\b(?:const|let|var)\\s+${declares}\\b[^=]*=`).exec(masked);
+  if (!decl) return null;
+  let at = decl.index + decl[0].length;
+  if (call !== null) {
+    const callAt = masked.indexOf(`${call}(`, at);
+    if (callAt < 0) return null;
+    at = callAt + call.length + 1;
+    // Step over the arguments before the one the row names: each ends at a comma at the call's own depth.
+    for (let skipped = 0; skipped < argument; skipped++) {
+      let depth = 0;
+      let k = at;
+      for (; k < masked.length; k++) {
+        const c = masked[k];
+        if (c === '{' || c === '[' || c === '(') depth++;
+        else if (c === '}' || c === ']' || c === ')') {
+          if (depth === 0) return null;
+          depth--;
+        } else if (c === ',' && depth === 0) break;
+      }
+      if (k >= masked.length) return null;
+      at = k + 1;
+    }
+  }
+  const lead = masked.slice(at).search(/\S/);
+  if (lead < 0) return null;
+  const members = objectLiteralMembers(source, at + lead, masked);
+  return members === null ? null : [...members].sort();
+}
+
+/**
+ * Does this change set change FieldSchema's key set? The trigger for the closure pins outside the spec package
+ * (`CHANGE_KIND_ROWS`, the `field-schema-key-set` row): two tables in other packages classify every FieldSchema
+ * key and a third counts them, so a key added, removed or renamed reds their suites while the spec package's
+ * own stay green.
+ *
+ * Read from the DIFF, as the README claim net is: the declaration's members at the change set's base (the merge
+ * base `readReadmeNetBase` reads, memoised once) against the working tree, per declaring file. An edit that
+ * leaves the members alone (prose, a `.describe()`, a refine, a nested schema) derives nothing; a file created
+ * or deleted, or a declaration this reader cannot find on either side, derives the row, because a reader that
+ * lost its place must read wide, never quiet. A surface named before its code (the PM's derivation at
+ * dispatch, where the file is unchanged) derives nothing either, and that asymmetry is the honest one: the
+ * question is about a diff, and the dev's re-derivation off the merge base is where the missed suites cost the
+ * CI round trip.
+ *
+ * @param {string} path repo-relative
+ * @param {{ readHead?: (rel: string) => string|null, readBase?: (rel: string) => string|null,
+ *           declarations?: typeof FIELD_SCHEMA_KEY_DECLARATIONS }} [io] injectable for the self-test
+ */
+export function changesFieldSchemaKeySet(path, { readHead = readTrackedSource, readBase = readReadmeNetBase, declarations = FIELD_SCHEMA_KEY_DECLARATIONS } = {}) {
+  const rel = path.replace(/^\.\//, '');
+  const row = declarations.find((d) => d.path === rel);
+  if (!row) return false;
+  const head = readHead(rel) ?? null;
+  const base = readBase(rel) ?? null;
+  if (head === base) return false;
+  if (head === null || base === null) return true;
+  const after = declaredKeySet(head, row);
+  const before = declaredKeySet(base, row);
+  if (after === null || before === null) return true;
+  return JSON.stringify(after) !== JSON.stringify(before);
+}
+
+/**
  * The one shape a PACKAGE-TEST subset gate's name may take: `pnpm --filter PKG exec vitest run FILE`, FILE
  * relative to that package, one file and no other argument. Returns the FILE, or null.
  *
@@ -12165,6 +12346,7 @@ const CHANGE_KIND_PREDICATES = Object.freeze({
   'adr-anchored-file': (path) => breaksAnAdrAnchor(path),
   'ui-scripts-suite-input': (path) => readByUiScriptsSuite(path),
   'spec-migration-entry': (path) => readBySpecMigrationEntryConsumers(path),
+  'field-schema-key-set': (path) => changesFieldSchemaKeySet(path),
   // One per population net (#31257), each bound to its own net.
   ...Object.fromEntries(Object.entries(POPULATION_NETS).map(([key, net]) => [key, (path) => reachesPopulationNet(path, net)])),
   'published-readme-claim': (path) => takesAReadmeClaim(path),
@@ -13270,7 +13452,7 @@ export function tierLines(result) {
   if (!mandatory) {
     return [
       `Model tier — no path-derived mandate: the surface hits none of the ${declared} declared glob(s), derived here, not recalled.`,
-      `  The tier stays the PM's per-card judgment call (floor ${TIER_FLOOR} · default ${TIER_DEFAULT} · ceiling ${TIER_CEILING}).`,
+      `  The tier stays below the ceiling: with no mandate the PM picks floor or default per card, and a ceiling build takes a path-derived mandate or the maintainer's explicit order (floor ${TIER_FLOOR} · default ${TIER_DEFAULT} · ceiling ${TIER_CEILING}).`,
       clause2,
       ...suspicion,
     ];
@@ -13444,6 +13626,81 @@ export function containerModelRefusal(body) {
       ' `--tier` printed for the card\'s paths nor a `reason:` naming the per-card ruling — a ceiling nobody derived is the' +
       ' hand-written default that ran a whole shift at the scarcest tier.',
   };
+}
+
+// ---------------------------------------------------------------------------
+// 定档 at claim WRITE time — the line itself, its size, and its `effort:` slot
+// ---------------------------------------------------------------------------
+
+/** Where 定档 lives — the refusals and the dispatch hook point a reader there, and the self-test reads the table from it. */
+export const TIER_SIZING_RULEBOOK = '.claude/skills/pm-dispatch/references/execution-duties.md';
+
+/**
+ * 定档's effort table, keyed by the size token a claim's `Container & model:`
+ * line opens with. ONE copy: the self-test re-reads the rulebook's own row
+ * (`S … medium;M、L、XL high`) and reds when this constant and that row
+ * disagree, so the values are never forked silently. `XS` is triage's size
+ * vocabulary one step under `S`; 定档 names no row for it and it reads as `S`.
+ */
+export const EFFORT_BY_SIZE = Object.freeze({ XS: 'medium', S: 'medium', M: 'high', L: 'high', XL: 'high' });
+
+/**
+ * The one value above the table's top, and the only file surface a CLAIM may
+ * carry it for: 定档's ADR-revision row. Its other use — the adversarial
+ * re-read of a high-severity security fix — is passed to that subagent and by
+ * rule never written in a claim, so no `reason:` unlocks it here.
+ */
+export const EFFORT_ABOVE_TABLE = Object.freeze({ value: 'xhigh', surface: 'docs/adr/' });
+
+const FILE_SURFACE_KEY_LINE = /^[ \t]*(?:>[ \t]*)?(?:[-*][ \t]+)?(?:\*\*)?`?File surface`?(?:\*\*)?[ \t]*:(.*)$/m;
+
+/**
+ * The size and the effort a `Container & model:` line declares: the size is the
+ * FIRST token of the value, the effort the first token after `effort:`, and a
+ * `reason:` counts only inside the effort slot (from its key to the line's end,
+ * or to a `model:` key written after it) — the model slot's citation is its own.
+ *
+ * @returns {{ present: false } | { present: true, line: string, size: string|null, effort: string|null, reasonCited: boolean }}
+ */
+export function readClaimEffort(body) {
+  const m = CONTAINER_MODEL_KEY_LINE.exec(String(body ?? ''));
+  if (!m) return { present: false };
+  const value = String(m[1] ?? '');
+  const size = /^(?:\*\*|`|[ \t])*(XS|XL|S|M|L)(?![A-Za-z0-9])/.exec(value)?.[1] ?? null;
+  const key = /\beffort[ \t]*:[ \t]*(?:\*\*|`|[ \t])*([A-Za-z]+)?/i.exec(value);
+  const slot = key ? value.slice(key.index).split(/\bmodel[ \t]*:/i)[0] : '';
+  return { present: true, line: m[0].trim(), size, effort: key?.[1]?.toLowerCase() ?? null, reasonCited: /\breason[ \t]*:/i.test(slot) };
+}
+
+/**
+ * The refusal a claim BEING WRITTEN earns when its `Container & model:` line
+ * does not carry 定档 — `null` when it does. The row shape is the keyed-line row
+ * `containerModelRefusal` answers with.
+ *
+ * ⛔ WRITE time only. `readContainerModelLine` above stays the tolerant READER:
+ * claims already on the board predate this line and its effort slot, and a
+ * reader that judged them would file rows nobody can repair. A claim about to
+ * be sent has an author who can — so here absence IS the refusal. Scoping to a
+ * comment that OPENS with `Claim:` is the caller's (`post-stamped.mjs`).
+ *
+ * Measured: S cards claimed at `high` and nothing refused it; claims with no
+ * effort at all, whose devs then ran on whatever the session inherited.
+ */
+export function claimTierWriteRefusal(body) {
+  const read = readClaimEffort(body);
+  const row = (why) => ({ key: 'Container & model', line: read.present ? read.line : '(this claim carries no such line)', why: `${why} 定档: ${TIER_SIZING_RULEBOOK}.` });
+  if (!read.present) return row('the claim carries no `Container & model:` line, so the tier and effort its dev runs at were derived from nothing and are whatever the session inherits.');
+  const problems = [];
+  const allowed = [...new Set(Object.values(EFFORT_BY_SIZE)), EFFORT_ABOVE_TABLE.value];
+  const expected = read.size === null ? null : EFFORT_BY_SIZE[read.size];
+  if (read.size === null) problems.push(`the line opens with no size token (${Object.keys(EFFORT_BY_SIZE).join(', ')}), so its effort compares to nothing`);
+  if (read.effort === null) problems.push('the `effort:` slot reads no value — an empty slot is the session-inherited effort');
+  else if (!allowed.includes(read.effort)) problems.push(`\`effort: ${read.effort}\` is no value 定档 gives a card (${allowed.join(', ')})`);
+  else if (read.effort === EFFORT_ABOVE_TABLE.value && !String(FILE_SURFACE_KEY_LINE.exec(String(body ?? ''))?.[1] ?? '').includes(EFFORT_ABOVE_TABLE.surface))
+    problems.push(`\`effort: ${read.effort}\` is the ADR-revision row's alone and this claim's \`File surface:\` names no \`${EFFORT_ABOVE_TABLE.surface}**\` path — the adversarial re-read's value goes to that subagent, never into a claim`);
+  else if (expected !== null && read.effort !== expected && !read.reasonCited)
+    problems.push(`size ${read.size} reads \`effort: ${expected}\` and the line says \`${read.effort}\` with no \`reason:\` inside the effort slot`);
+  return problems.length === 0 ? null : row(`${problems.join('; ')}.`);
 }
 
 // ---------------------------------------------------------------------------

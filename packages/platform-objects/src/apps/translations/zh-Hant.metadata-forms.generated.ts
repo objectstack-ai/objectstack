@@ -77,8 +77,8 @@ export const zhHantMetadataForms: NonNullable<TranslationData['metadataForms']> 
         helpText: "本物件的欄位名，依重要性從高到低排列——只能放下一個時取第一項（ADR-0085）。決定預設清單欄和相關清單欄、卡片、子記錄預覽、記錄懸停卡片和記錄選擇器。不是本物件欄位的名稱會在發布時被拒絕。"
       },
       relatedLists: {
-        label: "相關清單順序",
-        helpText: "本物件記錄頁上相關清單的業務順序，依重要性從高到低排列。每一項是子物件名稱（例如 task），當該子物件與本物件有多個關係時寫 object.field。列出的清單排在前面，其餘依派生順序排在後面。不對應任何指向本物件的關係的名稱不起作用，儲存或驗證物件時會被拒絕。"
+        label: "記錄頁頁籤",
+        helpText: "記錄頁在概覽之後顯示的頁籤，依順序排列。每一項是子物件名稱（例如 task）；當該子物件與本物件有多個關係時寫 object.field；也可以是內建頁籤（sys_attachment、sys_approval_request、sys_activity），或帶自己標題和欄位的一項（在 Studio 的物件設定裡設定）。一旦列出任何一項，未列出的相關清單就不顯示頁籤（其他套件新增的清單也一樣），直到本物件列出它；附件只有列出時才顯示。為空時，所有清單依預設順序顯示。不對應任何指向本物件之關係的名稱，在儲存物件時會被拒絕。"
       },
       searchableFields: {
         label: "可搜尋欄位",
@@ -114,7 +114,7 @@ export const zhHantMetadataForms: NonNullable<TranslationData['metadataForms']> 
       },
       "fieldGroups.collapse": {
         label: "摺疊",
-        helpText: "該分割區能否摺疊，作用於輸入表單和記錄詳細資料頁面。未設定：none。"
+        helpText: "該分割區能否摺疊。輸入表單依設定執行；預設記錄頁面上讀者可以摺疊每個有標題的分組，因此那裡只決定初始狀態：collapsed 先收合，其餘先展開。未設定：none。"
       },
       "fieldGroups.visibleWhen": {
         label: "可見條件",
@@ -240,6 +240,10 @@ export const zhHantMetadataForms: NonNullable<TranslationData['metadataForms']> 
         label: "刪除行為",
         helpText: "被參照記錄刪除時的處理方式"
       },
+      "fields.transferBehavior": {
+        label: "轉移行為",
+        helpText: "變更被引用記錄的負責人時，是否也可一併轉移透過此欄位指向它的記錄"
+      },
       "fields.multiple": {
         label: "多選",
         helpText: "允許選擇多筆記錄"
@@ -276,9 +280,13 @@ export const zhHantMetadataForms: NonNullable<TranslationData['metadataForms']> 
         label: "語言",
         helpText: "編輯器語言（如 sql、javascript）"
       },
+      "fields.fieldHistory": {
+        label: "欄位修改值",
+        helpText: "在記錄的活動時間軸上顯示該欄位的舊值 → 新值。預設跟隨平台：大多數類型為開，媒體、JSON 或憑證欄位為關。關：只寫出欄位名；開：媒體或 JSON 欄位也顯示值。憑證欄位始終不顯示值；物件本身的欄位修改值設為關時，以物件為準。"
+      },
       "fields.trackHistory": {
         label: "歷史追蹤",
-        helpText: "在記錄的活動時間軸上概述該欄位的變更"
+        helpText: "讓媒體或 JSON 欄位（圖片、檔案、json 等）在活動時間軸上顯示舊值 → 新值。其他欄位本來就會顯示，關掉它也不會隱藏值：請用「欄位修改值」。"
       },
       "fields.visibleWhen": {
         label: "可見條件",
@@ -298,6 +306,10 @@ export const zhHantMetadataForms: NonNullable<TranslationData['metadataForms']> 
       },
       "enable.trackHistory": {
         label: "歷史追蹤"
+      },
+      "enable.fieldHistory": {
+        label: "欄位修改值",
+        helpText: "在記錄的活動時間軸上顯示被修改欄位的舊值 → 新值。預設為開。關：整個物件都不顯示值，無論欄位如何設定。"
       },
       "enable.searchable": {
         label: "可搜尋"
@@ -460,6 +472,18 @@ export const zhHantMetadataForms: NonNullable<TranslationData['metadataForms']> 
       "userActions.transfer": {
         label: "變更負責人",
         helpText: "變更負責人操作（單筆與批次）：開啟即提供，關閉即隱藏。未設定時開啟，但 controlled_by_parent 明細物件預設關閉。僅在記錄有可重新指派負責人的物件上提供（ownership 為 user 或未設定、無 managedBy、不是 sys_ 物件、owner_id 未設為唯讀，外部物件上 owner_id 已宣告或已對應）；在其他物件上開啟會被拒絕。它只控制該操作，不影響直接編輯 owner_id。已儲存的 {enabled, visibleWhen, disabledWhen} 物件逐鍵編輯；在原始碼中寫一個即可按每筆記錄控制該操作。"
+      },
+      actionLayout: {
+        label: "動作佈局",
+        helpText: "本物件動作的順序及哪些顯示為按鈕，按作用域分：pinned（最多 3 個按鈕，按順序）和 more（「更多」選單的順序；兩者都沒寫的動作按預設順序排在後面）。未設定時，各處仍按動作的排序選按鈕。"
+      },
+      "actionLayout.list": {
+        label: "列表",
+        helpText: "列表頁工具列，寫作 {\"pinned\": [...], \"more\": [...]}：放在列表工具列上的動作名稱；$import / $export 只能放在 pinned。最多固定 3 個。未固定時，頁面仍顯示自己的匯入 / 匯出選單。os validate 會拒絕不是本物件動作、或未放在列表工具列上的名稱；這樣的名稱什麼也不顯示。"
+      },
+      "actionLayout.record": {
+        label: "記錄",
+        helpText: "記錄頁頭（記錄頁、側邊預覽、手機底欄），寫作 {\"pinned\": [...], \"more\": [...]}：放在記錄頁頭或其「更多」選單中的動作名稱。最多固定 3 個。os validate 會拒絕不是本物件動作、或未放在記錄頁上的名稱；這樣的名稱什麼也不顯示。"
       },
       editMode: {
         label: "編輯方式",
@@ -749,6 +773,10 @@ export const zhHantMetadataForms: NonNullable<TranslationData['metadataForms']> 
         label: "刪除行為",
         helpText: "被參照記錄刪除時的處理方式"
       },
+      transferBehavior: {
+        label: "轉移行為",
+        helpText: "變更被引用記錄的負責人時，是否也可一併轉移透過此欄位指向它的記錄"
+      },
       relatedListFilter: {
         label: "關聯清單篩選",
         helpText: "該關係在父記錄詳細資料頁面上的關聯清單的預設篩選——以 AND 方式與父記錄比對條件組合，分頁徽標統計的也是同一集合"
@@ -788,6 +816,10 @@ export const zhHantMetadataForms: NonNullable<TranslationData['metadataForms']> 
       relatedListColumns: {
         label: "相關清單欄",
         helpText: "父記錄詳細資料頁面上此關係的相關清單的欄，寫作本物件（即子物件）的欄位名，例如 name、status。未設定：從子物件推導。只寫名稱——標籤、儲存格類型和格式都來自子物件的欄位定義。"
+      },
+      inlineEdit: {
+        label: "Inline Edit",
+        helpText: "How the parent's form edits this child's rows when a field group of the parent names this child (fieldGroups[].relatedList). Unset: picked from this object's fields."
       },
       inlineTitle: {
         label: "內嵌表格標題",
@@ -865,6 +897,10 @@ export const zhHantMetadataForms: NonNullable<TranslationData['metadataForms']> 
         label: "隱藏",
         helpText: "在預設介面檢視中隱藏"
       },
+      showOnCreate: {
+        label: "新建時顯示",
+        helpText: "新建記錄時是否填寫此欄位。關閉後，新建彈窗、整頁新建和動作開啟的新建都不顯示它；編輯、記錄頁和清單仍然顯示。必填欄位新建時總要填寫，不能關閉。"
+      },
       searchable: {
         label: "可搜尋",
         helpText: "納入全域搜尋結果"
@@ -897,9 +933,13 @@ export const zhHantMetadataForms: NonNullable<TranslationData['metadataForms']> 
         label: "不對外傳回",
         helpText: "該欄位的值永遠不經通用資料通道傳回：引擎會從 find/findOne 結果以及建立和更新的回應體中刪除這個鍵——預設投影如此，用戶端在 ?select= 中點名它時同樣如此。儲存、過濾和索引都不受影響。"
       },
+      fieldHistory: {
+        label: "欄位修改值",
+        helpText: "在記錄的活動時間軸上顯示該欄位的舊值 → 新值。預設跟隨平台：大多數類型為開，媒體、JSON 或憑證欄位為關。關：只寫出欄位名；開：媒體或 JSON 欄位也顯示值。憑證欄位始終不顯示值；物件本身的欄位修改值設為關時，以物件為準。"
+      },
       trackHistory: {
         label: "記錄變更歷史",
-        helpText: "把該欄位的值變更呈現為記錄活動時間軸上的條目（ADR-0052 §5b）。依欄位逐個開啟。"
+        helpText: "讓媒體或 JSON 欄位（圖片、檔案、json 等）在活動時間軸上顯示舊值 → 新值。其他欄位本來就會顯示，關掉它也不會隱藏值：請用「欄位修改值」。"
       },
       widget: {
         label: "控制項覆寫",
@@ -1052,15 +1092,54 @@ export const zhHantMetadataForms: NonNullable<TranslationData['metadataForms']> 
   },
   seed: {
     label: "種子資料",
-    description: "發布時套用的預置/初始化資料"
+    description: "發布時套用的預置/初始化資料",
+    fields: {
+      object: {
+        label: "物件"
+      },
+      mode: {
+        label: "模式"
+      }
+    }
   },
   picklist: {
     label: "共用選項集",
-    description: "選擇欄位依名稱參照的共用選項清單"
+    description: "選擇欄位依名稱參照的共用選項清單",
+    fields: {
+      name: {
+        label: "名稱"
+      },
+      label: {
+        label: "顯示名稱"
+      },
+      options: {
+        label: "選項"
+      },
+      description: {
+        label: "描述"
+      }
+    }
   },
   mapping: {
     label: "匯入對應",
-    description: "可複用的匯入/匯出欄位對應（重新命名 + 轉換），在匯入時依名稱參照"
+    description: "可複用的匯入/匯出欄位對應（重新命名 + 轉換），在匯入時依名稱參照",
+    fields: {
+      name: {
+        label: "名稱"
+      },
+      label: {
+        label: "顯示名稱"
+      },
+      targetObject: {
+        label: "目標物件"
+      },
+      mode: {
+        label: "模式"
+      },
+      sourceFormat: {
+        label: "來源格式"
+      }
+    }
   },
   view: {
     label: "檢視",
@@ -1355,11 +1434,11 @@ export const zhHantMetadataForms: NonNullable<TranslationData['metadataForms']> 
       },
       navigation: {
         label: "導覽",
-        helpText: "點選條目時的導覽設定（預設為抽屜，也可為 page、new_window 或 none）"
+        helpText: "點選條目時的導覽設定：抽屜尺寸，以及讓清單列不開啟任何內容的 `preventNavigation`（`mode` 已棄用——點記錄名稱進入整頁，點懸停圖示從側邊開啟）"
       },
       "navigation.mode": {
         label: "模式",
-        helpText: "[DEPRECATED] No longer picks how an object's list opens a record: in the console the record name opens the full page and the hover icon beside it opens the side panel, for every reader. There `drawer`, `page` and `new_window` still parse and change nothing; `none` still means rows open nothing — prefer `preventNavigation: true`. Omit the key."
+        helpText: "[已棄用] 在物件清單（清單檢視、物件的 `listViews`）上不再決定記錄如何開啟：在主控台中，對所有使用者而言，點記錄名稱進入整頁，點名稱旁的懸停圖示從側邊面板開啟。這裡 `drawer`、`page`、`new_window` 仍可解析，但不再起作用，請省略此鍵；`none` 仍表示清單列不開啟任何內容——建議改用 `preventNavigation: true`。帶 `navigation` 的頁面區塊（清單區塊、時間軸、嵌入檢視）仍按所有取值生效。"
       },
       "navigation.preventNavigation": {
         label: "禁止導覽",
@@ -1384,6 +1463,9 @@ export const zhHantMetadataForms: NonNullable<TranslationData['metadataForms']> 
       "sharing.lockedBy": {
         label: "鎖定者",
         helpText: "鎖定該檢視設定的使用者"
+      },
+      object: {
+        label: "物件"
       }
     }
   },
@@ -1590,30 +1672,30 @@ export const zhHantMetadataForms: NonNullable<TranslationData['metadataForms']> 
     fields: {
       name: {
         label: "名稱",
-        helpText: "snake_case 唯一識別碼"
+        helpText: "儀表板的唯一內部名稱：使用小寫字母、數字和底線，以字母開頭（例如 sales_overview）。"
       },
       label: {
         label: "顯示名稱",
-        helpText: "顯示名"
+        helpText: "使用者看到的儀表板標題。"
       },
       description: {
         label: "描述"
       },
       columns: {
         label: "欄",
-        helpText: "格線欄數（預設 12）"
+        helpText: "元件排列所用的欄數，1 到 24。留空時儀表板會依元件的寬度自動選擇。"
       },
       gap: {
         label: "間距",
-        helpText: "元件之間的間距，每級 0.25rem（4 = 1rem）"
+        helpText: "元件之間保留的空間。數值越大越寬鬆；留空則使用標準間距。"
       },
       refreshIntervalSeconds: {
         label: "重新整理間隔",
-        helpText: "自動重新整理間隔（秒）"
+        helpText: "儀表板重新載入資料的頻率（秒）。留空或填 0 表示不自動重新整理。"
       },
       header: {
         label: "頁首",
-        helpText: "儀表板頁首設定（title、subtitle、actions）"
+        helpText: "儀表板頂端顯示的內容：標題、描述與操作按鈕。"
       },
       "header.showTitle": {
         label: "顯示標題",
@@ -1641,7 +1723,7 @@ export const zhHantMetadataForms: NonNullable<TranslationData['metadataForms']> 
       },
       widgets: {
         label: "元件",
-        helpText: "包含位置和尺寸的儀表板元件"
+        helpText: "儀表板上的圖表、數字與表格，以及每一項所在的位置。"
       },
       "widgets.id": {
         label: "元件 ID"
@@ -1696,11 +1778,11 @@ export const zhHantMetadataForms: NonNullable<TranslationData['metadataForms']> 
       },
       dateRange: {
         label: "日期範圍",
-        helpText: "預設日期範圍選擇器"
+        helpText: "開啟儀表板時預設的時間範圍，以及檢視者能否自選日期。"
       },
       globalFilters: {
         label: "全域篩選",
-        helpText: "套用到所有元件的篩選條件"
+        helpText: "檢視者可用來一次篩選所有元件，或只篩選你指定元件的篩選條件。"
       },
       "globalFilters.name": {
         label: "名稱"
@@ -2162,7 +2244,8 @@ export const zhHantMetadataForms: NonNullable<TranslationData['metadataForms']> 
         label: "顯示名稱"
       },
       description: {
-        label: "描述"
+        label: "描述",
+        helpText: "One sentence on what this report shows, displayed under its name."
       },
       type: {
         label: "類型",
@@ -2244,9 +2327,33 @@ export const zhHantMetadataForms: NonNullable<TranslationData['metadataForms']> 
         label: "日期範圍",
         helpText: "預設時間段與自訂範圍開關。維度必須是資料集的日期維度；資料集只有一個日期維度時可留空"
       },
+      "dateRange.dimension": {
+        label: "Date Field",
+        helpText: "The date grouping of the data source the period applies to. Leave it empty when the data source has only one."
+      },
+      "dateRange.defaultRange": {
+        label: "Default Period",
+        helpText: "The period the report opens with."
+      },
+      "dateRange.allowCustomRange": {
+        label: "Allow Custom Range",
+        helpText: "Let people pick their own start and end dates."
+      },
       exportOptions: {
         label: "匯出選項",
         helpText: "下載格式（csv、xlsx）與檔案名稱。誰可以下載由資料集物件上的匯出權限決定"
+      },
+      "exportOptions.formats": {
+        label: "Formats",
+        helpText: "The download formats offered. Left unset, both csv and xlsx are offered; an empty list turns downloads off."
+      },
+      "exportOptions.includeHeaders": {
+        label: "Include Headers",
+        helpText: "Put the column names in the first row of the downloaded file."
+      },
+      "exportOptions.fileNamePrefix": {
+        label: "File Name",
+        helpText: "The start of the downloaded file’s name, used instead of the report name."
       }
     }
   },
@@ -2515,7 +2622,24 @@ export const zhHantMetadataForms: NonNullable<TranslationData['metadataForms']> 
     }
   },
   job: {
-    label: "背景工作"
+    label: "背景工作",
+    fields: {
+      name: {
+        label: "名稱"
+      },
+      label: {
+        label: "顯示名稱"
+      },
+      schedule: {
+        label: "排程"
+      },
+      enabled: {
+        label: "已啟用"
+      },
+      description: {
+        label: "描述"
+      }
+    }
   },
   datasource: {
     label: "資料來源"
@@ -2525,10 +2649,41 @@ export const zhHantMetadataForms: NonNullable<TranslationData['metadataForms']> 
   },
   api: {
     label: "API 端點",
-    description: "其他系統呼叫的穩定 HTTP URL，用於執行流程或操作應用程式中的記錄"
+    description: "其他系統呼叫的穩定 HTTP URL，用於執行流程或操作應用程式中的記錄",
+    fields: {
+      name: {
+        label: "名稱"
+      },
+      method: {
+        label: "方法"
+      },
+      path: {
+        label: "路徑"
+      },
+      type: {
+        label: "類型"
+      },
+      "objectParams.object": {
+        label: "物件"
+      },
+      "objectParams.operation": {
+        label: "操作"
+      }
+    }
   },
   translation: {
-    label: "翻譯"
+    label: "翻譯",
+    fields: {
+      name: {
+        label: "名稱"
+      },
+      label: {
+        label: "顯示名稱"
+      },
+      locale: {
+        label: "地區語言"
+      }
+    }
   },
   email_template: {
     label: "郵件範本",
@@ -2605,11 +2760,45 @@ export const zhHantMetadataForms: NonNullable<TranslationData['metadataForms']> 
   },
   doc: {
     label: "文件",
-    description: "以 Markdown 編寫的說明頁面，可由套件隨附，也可自行編寫"
+    description: "以 Markdown 編寫的說明頁面，可由套件隨附，也可自行編寫",
+    fields: {
+      name: {
+        label: "名稱"
+      },
+      label: {
+        label: "顯示名稱"
+      },
+      group: {
+        label: "分組"
+      },
+      tags: {
+        label: "標籤"
+      },
+      description: {
+        label: "描述"
+      }
+    }
   },
   book: {
     label: "文件手冊",
-    description: "將說明頁面依順序分節組織的目錄"
+    description: "將說明頁面依順序分節組織的目錄",
+    fields: {
+      name: {
+        label: "名稱"
+      },
+      label: {
+        label: "顯示名稱"
+      },
+      audience: {
+        label: "受眾"
+      },
+      groups: {
+        label: "分組"
+      },
+      description: {
+        label: "描述"
+      }
+    }
   },
   permission: {
     label: "權限集",
@@ -2713,15 +2902,66 @@ export const zhHantMetadataForms: NonNullable<TranslationData['metadataForms']> 
   },
   sharing_rule: {
     label: "共用規則",
-    description: "套件宣告的記錄共用規則；組織在設定中編寫自己的規則"
+    description: "套件宣告的記錄共用規則；組織在設定中編寫自己的規則",
+    fields: {
+      name: {
+        label: "名稱"
+      },
+      label: {
+        label: "顯示名稱"
+      },
+      object: {
+        label: "物件"
+      },
+      sharedWith: {
+        label: "共用對象"
+      },
+      accessLevel: {
+        label: "存取層級"
+      }
+    }
   },
   queue: {
     label: "佇列",
-    description: "一組具名的人員，記錄可停留其中，直到其中一人認領；組織在設定中設定自己的佇列"
+    description: "一組具名的人員，記錄可停留其中，直到其中一人認領；組織在設定中設定自己的佇列",
+    fields: {
+      name: {
+        label: "名稱"
+      },
+      label: {
+        label: "顯示名稱"
+      },
+      members: {
+        label: "成員"
+      },
+      description: {
+        label: "描述"
+      }
+    }
   },
   assignment_rule: {
     label: "指派規則",
-    description: "套件宣告的規則，把新記錄指派到某個佇列或某個人"
+    description: "套件宣告的規則，把新記錄指派到某個佇列或某個人",
+    fields: {
+      name: {
+        label: "名稱"
+      },
+      label: {
+        label: "顯示名稱"
+      },
+      object: {
+        label: "物件"
+      },
+      entries: {
+        label: "條目"
+      },
+      active: {
+        label: "啟用"
+      },
+      description: {
+        label: "描述"
+      }
+    }
   },
   agent: {
     label: "AI 代理",
@@ -2803,6 +3043,9 @@ export const zhHantMetadataForms: NonNullable<TranslationData['metadataForms']> 
       guardrails: {
         label: "護欄",
         helpText: "安全規則與內容策略"
+      },
+      "model.model": {
+        label: "模型"
       }
     }
   },

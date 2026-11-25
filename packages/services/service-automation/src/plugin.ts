@@ -17,6 +17,7 @@ import type {
 } from '@objectstack/spec/integration';
 import { isConnectorCredentialRejected, isConnectorUpstreamChanged, isConnectorUpstreamUnavailable, RetryConfigSchema } from '@objectstack/spec/integration';
 import { stripReadDecorations } from '@objectstack/spec/kernel';
+import { isMultiValueField } from '@objectstack/spec/data';
 import { postureEnforcesWall, type TenancyPosture } from '@objectstack/spec/security';
 import type { MetadataMutationEvent, SysMetadataEngine } from '@objectstack/metadata-protocol';
 import { SysMetadataRepository, shadowedStoredRowsOf } from '@objectstack/metadata-protocol';
@@ -167,29 +168,37 @@ import { ObjectStoreFlowActivationStore, type FlowActivationStoreEngine } from '
  * condition validator consumes. Fields whose `type` isn't a string are still
  * listed (so existence checks work) but contribute no type (→ treated as `dyn`).
  * Returns `undefined` when there is nothing usable. Exported for unit testing.
+ *
+ * [#36167] `multiValueFields`: the fields whose stored value is a list, read
+ * through `isMultiValueField` (`@objectstack/spec/data`) — an inherently-multi
+ * option type, or a multi-capable type declared `multiple: true`, which the
+ * type alone does not say. The validator's `ExprSchemaHint.multiValueFields`,
+ * so a `==` / `!=` between such a field and a scalar is reported.
  */
 export function parseObjectFieldSchema(
     fieldsDef: unknown,
-): { fields: string[]; fieldTypes: Record<string, string> } | undefined {
+): { fields: string[]; fieldTypes: Record<string, string>; multiValueFields: string[] } | undefined {
     if (!fieldsDef || typeof fieldsDef !== 'object') return undefined;
     const fields: string[] = [];
     const fieldTypes: Record<string, string> = {};
+    const multiValueFields: string[] = [];
+    const add = (n: string, def: unknown): void => {
+        fields.push(n);
+        const { type: t, multiple } = (def ?? {}) as { type?: unknown; multiple?: unknown };
+        if (typeof t !== 'string') return;
+        fieldTypes[n] = t;
+        if (isMultiValueField({ type: t, multiple: multiple === true })) multiValueFields.push(n);
+    };
     if (Array.isArray(fieldsDef)) {
         for (const f of fieldsDef as Array<Record<string, unknown>>) {
             const n = (f as { name?: unknown })?.name;
             if (typeof n !== 'string') continue;
-            fields.push(n);
-            const t = (f as { type?: unknown })?.type;
-            if (typeof t === 'string') fieldTypes[n] = t;
+            add(n, f);
         }
     } else {
-        for (const [n, def] of Object.entries(fieldsDef as Record<string, unknown>)) {
-            fields.push(n);
-            const t = (def as { type?: unknown })?.type;
-            if (typeof t === 'string') fieldTypes[n] = t;
-        }
+        for (const [n, def] of Object.entries(fieldsDef as Record<string, unknown>)) add(n, def);
     }
-    return { fields, fieldTypes };
+    return { fields, fieldTypes, multiValueFields };
 }
 
 /**

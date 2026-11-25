@@ -266,7 +266,7 @@ function CardTitle({
   const open =
     onOpen ?? (host?.openRecord ? () => host.openRecord!(objectName, recordId) : undefined);
   const className =
-    'block max-w-full truncate rounded-sm text-left text-sm font-semibold text-primary underline-offset-4 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring';
+    'block max-w-full truncate rounded-sm text-left text-sm font-medium text-primary underline-offset-4 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring';
   if (href) {
     return (
       <a
@@ -301,7 +301,7 @@ function CardTitle({
     );
   }
   return (
-    <span className="block truncate text-sm font-semibold" data-record-hover-card-title="">
+    <span className="block truncate text-sm font-medium" data-record-hover-card-title="">
       {children}
     </span>
   );

@@ -75,6 +75,18 @@ const MEMBER_DEFAULT = defaultPermissionSets.find((p) => p.name === 'member_defa
 
 const DEAL = 'pwf_deal';
 const MEMO = 'pwf_memo';
+/** The master of the `controlled_by_parent` details below: `private`, so its owner, a share or Modify All decides who edits it. */
+const ORDER = 'pwf_order';
+/** A `controlled_by_parent` detail of {@link ORDER}, its master required. */
+const LINE = 'pwf_line';
+/** The same detail declaring `writeRequiresMasterRead`: READ on the master is the master question. */
+const LINE_MASTER_READ = 'pwf_line_master_read';
+/** The same detail declaring `ownerMayEdit`: a by-id update by the row's owner asks READ on the master. */
+const LINE_OWNER_MAY_EDIT = 'pwf_line_owner_may_edit';
+/** The same detail with an OPTIONAL master: a row that names none is its owner's. */
+const LINE_OPTIONAL = 'pwf_line_optional';
+const LINES = [LINE, LINE_MASTER_READ, LINE_OWNER_MAY_EDIT, LINE_OPTIONAL] as const;
+type LineObject = (typeof LINES)[number];
 const ORG = 'org_pwf';
 
 /** Owns r1 and r2, created r1 and r3: the owner who created some of what they own. */
@@ -96,11 +108,17 @@ const NARROW = 'usr_narrow';
  * on-behalf-of write.
  */
 const ERIN = 'usr_erin';
+/** Holds Modify All under the two wideners; owns nothing, and created only what a case seeds as theirs. */
+const WIDE_MANAGER = 'usr_wide_manager';
 
 const CRUD = { allowRead: true, allowCreate: true, allowEdit: true, allowDelete: true };
 const MODIFY_ALL = { ...CRUD, viewAllRecords: true, modifyAllRecords: true };
-const REP_SET = PermissionSetSchema.parse({ name: 'pwf_rep', objects: { [DEAL]: CRUD, [MEMO]: CRUD } });
-const MANAGER_SET = PermissionSetSchema.parse({ name: 'pwf_manager', objects: { [DEAL]: MODIFY_ALL, [MEMO]: MODIFY_ALL } });
+const onOrderAndLines = <T,>(grant: T) => Object.fromEntries([ORDER, ...LINES].map((object) => [object, grant]));
+const REP_SET = PermissionSetSchema.parse({ name: 'pwf_rep', objects: { [DEAL]: CRUD, [MEMO]: CRUD, ...onOrderAndLines(CRUD) } });
+const MANAGER_SET = PermissionSetSchema.parse({
+  name: 'pwf_manager',
+  objects: { [DEAL]: MODIFY_ALL, [MEMO]: MODIFY_ALL, ...onOrderAndLines(MODIFY_ALL) },
+});
 /**
  * Modify All, and an APP-AUTHORED update policy beside it. On an ordinary
  * business object Modify All does not bypass write-side row-level security
@@ -111,11 +129,41 @@ const NARROW_SET = PermissionSetSchema.parse({
   objects: { [DEAL]: MODIFY_ALL },
   rowLevelSecurity: [{ name: 'pwf_open_deals_only', object: DEAL, operation: 'update', using: "stage == 'open'" }],
 });
-/** An APP-AUTHORED update widener beside the platform floor: any open deal, whoever created it. */
+/**
+ * APP-AUTHORED wideners beside the platform floor: any open deal, whoever
+ * created it, may be updated, and deleted.
+ */
+const OPEN_DEALS_UPDATE = { name: 'pwf_open_deals_widener', object: DEAL, operation: 'update', using: "stage == 'open'" } as const;
+const OPEN_DEALS_DELETE = { name: 'pwf_open_deals_delete_widener', object: DEAL, operation: 'delete', using: "stage == 'open'" } as const;
 const WIDENER_SET = PermissionSetSchema.parse({
   name: 'pwf_widener',
   objects: { [DEAL]: CRUD },
-  rowLevelSecurity: [{ name: 'pwf_open_deals_widener', object: DEAL, operation: 'update', using: "stage == 'open'" }],
+  rowLevelSecurity: [OPEN_DEALS_UPDATE, OPEN_DEALS_DELETE],
+});
+/** Modify All, under the same two wideners. */
+const MODIFY_ALL_WIDENER_SET = PermissionSetSchema.parse({
+  name: 'pwf_modify_all_widener',
+  objects: { [DEAL]: MODIFY_ALL },
+  rowLevelSecurity: [OPEN_DEALS_UPDATE, OPEN_DEALS_DELETE],
+});
+/**
+ * The update widener, and a restriction the author wrote beside it: an
+ * updated deal must stay an EMEA deal (a `check`, which bounds every image
+ * whatever admitted the row).
+ */
+const WIDENER_EMEA_CHECK_SET = PermissionSetSchema.parse({
+  name: 'pwf_widener_emea_check',
+  objects: { [DEAL]: CRUD },
+  rowLevelSecurity: [OPEN_DEALS_UPDATE, { name: 'pwf_widened_stays_in_emea', object: DEAL, operation: 'update', check: "region == 'emea'" }],
+});
+/** Wideners on the owner-less memo, which admit no memo this file seeds (every memo is named 'as seeded'). */
+const MEMO_WIDENER_SET = PermissionSetSchema.parse({
+  name: 'pwf_memo_widener',
+  objects: { [MEMO]: CRUD },
+  rowLevelSecurity: [
+    { name: 'pwf_open_memos_widener', object: MEMO, operation: 'update', using: "name == 'open'" },
+    { name: 'pwf_open_memos_delete_widener', object: MEMO, operation: 'delete', using: "name == 'open'" },
+  ],
 });
 /** A CHECK-only update policy: an updated deal must be an EMEA deal. It has no `using`, so it narrows no match. */
 const EMEA_CHECK_SET = PermissionSetSchema.parse({
@@ -123,7 +171,10 @@ const EMEA_CHECK_SET = PermissionSetSchema.parse({
   objects: { [DEAL]: CRUD },
   rowLevelSecurity: [{ name: 'pwf_stays_in_emea', object: DEAL, operation: 'update', check: "region == 'emea'" }],
 });
-const SETS = [MEMBER_DEFAULT, REP_SET, MANAGER_SET, NARROW_SET, WIDENER_SET, EMEA_CHECK_SET];
+const SETS = [
+  MEMBER_DEFAULT, REP_SET, MANAGER_SET, NARROW_SET, WIDENER_SET, EMEA_CHECK_SET,
+  MODIFY_ALL_WIDENER_SET, WIDENER_EMEA_CHECK_SET, MEMO_WIDENER_SET,
+];
 
 /** The execution context `resolveAuthzContext` hands the middleware for an organization member holding the sets. */
 const memberOf = (userId: string, set: string) => ({
@@ -145,7 +196,25 @@ const MATRIX: Record<Role, { owner_id: string; created_by: string }> = {
 /** The rows DAVE's `edit` shares name. */
 const SHARED_WITH_DAVE: readonly Role[] = ['r2', 'r3'];
 
+/** A `controlled_by_parent` detail of {@link ORDER}: an ordinary tenant object carrying the owner x creator pair. */
+const lineObject = (name: string, label: string, extra: Record<string, unknown> = {}, masterRequired = true) => ({
+  name,
+  label,
+  sharingModel: 'controlled_by_parent',
+  fields: {
+    id: { name: 'id', type: 'text', primaryKey: true },
+    name: { name: 'name', type: 'text' },
+    batch: { name: 'batch', type: 'text' },
+    order: { name: 'order', type: 'master_detail', reference: ORDER, required: masterRequired },
+    owner_id: { name: 'owner_id', type: 'text' },
+    created_by: { name: 'created_by', type: 'text' },
+    organization_id: { name: 'organization_id', type: 'text' },
+  },
+  ...extra,
+});
+
 let engine: ObjectQL;
+let securityPlugin: SecurityPlugin;
 let sharing: SharingService | undefined;
 let seq = 0;
 
@@ -203,10 +272,30 @@ beforeAll(async () => {
           organization_id: { name: 'organization_id', type: 'text' },
         },
       },
+      {
+        name: ORDER,
+        label: 'Order',
+        sharingModel: 'private',
+        fields: {
+          id: { name: 'id', type: 'text', primaryKey: true },
+          name: { name: 'name', type: 'text' },
+          owner_id: { name: 'owner_id', type: 'text' },
+          created_by: { name: 'created_by', type: 'text' },
+          organization_id: { name: 'organization_id', type: 'text' },
+        },
+      },
+      lineObject(LINE, 'Order line'),
+      lineObject(LINE_MASTER_READ, 'Order line, written with read on the order', {
+        sharing: { controlledByParent: { writeRequiresMasterRead: true } },
+      }),
+      lineObject(LINE_OWNER_MAY_EDIT, 'Order line, edited by its owner', {
+        sharing: { controlledByParent: { ownerMayEdit: true } },
+      }),
+      lineObject(LINE_OPTIONAL, 'Order line, order optional', {}, false),
     ],
   } as never);
   await engine.syncSchemas();
-  await engine.insert('sys_user', [ALICE, BOB, CAROL, MANAGER, DAVE, NARROW, ERIN].map((id) => ({
+  await engine.insert('sys_user', [ALICE, BOB, CAROL, MANAGER, DAVE, NARROW, ERIN, WIDE_MANAGER].map((id) => ({
     id, name: id, email: `${id}@pwf.test`,
   })), SYS);
   await engine.insert('sys_organization', [{ id: ORG, name: 'PWF', slug: 'pwf' }], SYS);
@@ -251,6 +340,7 @@ beforeAll(async () => {
     },
   };
   const plugin = new SecurityPlugin({ fallbackPermissionSet: 'member_default' });
+  securityPlugin = plugin;
   await plugin.init(ctx as never);
   await plugin.start(ctx as never);
   wireEngineSecuritySource(engine, () => plugin);
@@ -512,13 +602,14 @@ describe('[#35802] a predicate write composes the platform ownership floor per r
 
   describe('the relief only ever adds rows', () => {
     it('an owner-creator under an authored widener still writes the closed row she created and owns, and no verdict is asked', async () => {
-      // The by-id write of r1 is refused: replacing the floor in `floor OR
-      // widener` leaves the widener alone, and r1 is closed. That narrowing is
-      // the by-id composition's, reported out of scope; the predicate path
-      // keeps writing r1, as it did before this change. (By id, the open r3
-      // and r4 are written too: an authored row-write policy that admits a
-      // row answers the sharing gate there, while the predicate path's bulk
-      // sharing scope stays the owner set. Also not this change's.)
+      // [#35917] The by-id write of r1 is admitted as well: replacing the
+      // floor never takes it out of an OR an authored term stands in, so the
+      // floor still admits r1, which she created, closed or not. (By id, the
+      // open r3 and r4 are written too: an authored row-write policy that
+      // admits a row answers the sharing gate there, while the predicate
+      // path's bulk sharing scope stays the owner set. Not the floor's
+      // composition, and not this change's; the #35917 matrix below keeps
+      // such rows closed.)
       const caller = memberOf(ALICE, WIDENER_SET.name);
       const overrides: Overrides = { r1: { stage: 'closed' } };
       const copy = await seedDeals(overrides);
@@ -528,7 +619,7 @@ describe('[#35802] a predicate write composes the platform ownership floor per r
       expect(await changedRows(DEAL, copy.ids, 'update')).toEqual(['r1', 'r2']);
 
       const byIdCopy = await seedDeals(overrides);
-      expect(await byIdAdmits(DEAL, 'update', byIdCopy.ids, caller), 'the by-id corner, reported out of scope').not.toContain('r1');
+      expect(await byIdAdmits(DEAL, 'update', byIdCopy.ids, caller)).toEqual(['r1', 'r2', 'r3', 'r4']);
     });
   });
 
@@ -666,6 +757,149 @@ describe('[#35802] a predicate write composes the platform ownership floor per r
   });
 });
 
+describe('[#35917] beside an authored widener, the by-id write keeps the floor as a term of the OR, as the predicate write does', () => {
+  // The by-id composition (step 2.7) used to take the platform floor OUT of
+  // Layer 1 on a sharing `allow`. Layer 1 is an OR of permissive policies, so
+  // beside an authored widener that left the widener as the only term, and a
+  // row the floor alone admitted (the caller's own closed deal) was refused by
+  // id, while the predicate write, which keeps the floor beside an authored
+  // term ({@link predicateWriteFloorRelief}), wrote it. Replacing the floor now
+  // drops it only where it is the OR's last term; beside an authored term it
+  // stays, so the replacement adds rows and never takes one away.
+  //
+  // The matrix keeps closed every row the caller neither owns nor holds a
+  // share on: an OPEN such row is admitted by id through the authored-policy
+  // lift of the sharing refusal, which the predicate path's bulk sharing
+  // scope does not take (the corner the test above records). Each case names
+  // its expected set and compares the two paths row for row, as the #35802
+  // cases do.
+  const ALL_CLOSED: Overrides = {
+    r1: { stage: 'closed' }, r2: { stage: 'closed' }, r3: { stage: 'closed' }, r4: { stage: 'closed' },
+  };
+
+  describe('the owner-creator, ALICE, under the wideners', () => {
+    for (const verb of ['update', 'delete'] as const) {
+      it(`by-id ${verb} of her own closed r1 is admitted, and the predicate ${verb} agrees row for row`, async () => {
+        await expectPredicateMatchesById(verb, memberOf(ALICE, WIDENER_SET.name), ['r1'], ALL_CLOSED);
+      });
+      it(`${verb}: her own closed r1 by the floor, the open r2 she owns by the widener`, async () => {
+        await expectPredicateMatchesById(verb, memberOf(ALICE, WIDENER_SET.name), ['r1', 'r2'], {
+          ...ALL_CLOSED, r2: { stage: 'open' },
+        });
+      });
+    }
+  });
+
+  describe('the rest of the #35802 matrix under the wideners, every row closed', () => {
+    for (const verb of ['update', 'delete'] as const) {
+      it(`BOB (owner, created none), ${verb}: nothing, as before`, async () => {
+        await expectPredicateMatchesById(verb, memberOf(BOB, WIDENER_SET.name), [], ALL_CLOSED);
+      });
+      it(`CAROL (created r2 and r4, owns none), ${verb}: nothing — the floor admits them, record sharing does not`, async () => {
+        await expectPredicateMatchesById(verb, memberOf(CAROL, WIDENER_SET.name), [], ALL_CLOSED);
+      });
+      it(`the Modify All holder under the wideners, ${verb}: nothing, unchanged (ADR-0066 ①)`, async () => {
+        await expectPredicateMatchesById(verb, memberOf(WIDE_MANAGER, MODIFY_ALL_WIDENER_SET.name), [], ALL_CLOSED);
+      });
+      it(`the edit-share target DAVE under the wideners, ${verb}: nothing — the shared rows are closed`, async () => {
+        await expectPredicateMatchesById(verb, memberOf(DAVE, WIDENER_SET.name), [], ALL_CLOSED);
+      });
+    }
+    it('the Modify All holder still writes only the open rows the widener admits (r2, r3), unchanged', async () => {
+      await expectPredicateMatchesById('update', memberOf(WIDE_MANAGER, MODIFY_ALL_WIDENER_SET.name), ['r2', 'r3'], {
+        r1: { stage: 'closed' }, r4: { stage: 'closed' },
+      });
+    });
+    it('the Modify All holder writes a closed row they created: the floor admits it, by id as by predicate', async () => {
+      await expectPredicateMatchesById('update', memberOf(WIDE_MANAGER, MODIFY_ALL_WIDENER_SET.name), ['r1'], {
+        ...ALL_CLOSED, r1: { stage: 'closed', created_by: WIDE_MANAGER },
+      });
+    });
+    it('the edit-share target updates the open row shared with him (r2), and not the closed one (r3)', async () => {
+      await expectPredicateMatchesById('update', memberOf(DAVE, WIDENER_SET.name), ['r2'], {
+        ...ALL_CLOSED, r2: { stage: 'open' },
+      });
+    });
+    // The verb boundary beside the floor term: an `edit` share earns `allow`
+    // on an update, so the floor stays beside the widener and admits the
+    // closed row the share holder created; on a delete the share earns no
+    // `allow`, and the sharing gate refuses it (ADR-0111 D3).
+    it('the edit-share target who created the closed shared r2: the update is admitted by the floor', async () => {
+      await expectPredicateMatchesById('update', memberOf(DAVE, WIDENER_SET.name), ['r2'], {
+        ...ALL_CLOSED, r2: { stage: 'closed', created_by: DAVE },
+      });
+    });
+    it('the edit-share target who created the closed shared r2: the delete is still refused', async () => {
+      await expectPredicateMatchesById('delete', memberOf(DAVE, WIDENER_SET.name), [], {
+        ...ALL_CLOSED, r2: { stage: 'closed', created_by: DAVE },
+      });
+    });
+  });
+
+  describe('CONTROLS', () => {
+    it('a restriction the author wrote still refuses the owner-creator: her closed r1 moved out of EMEA is refused, in EMEA it is written', async () => {
+      const caller = memberOf(ALICE, WIDENER_EMEA_CHECK_SET.name);
+      const apac = await seedDeals({ r1: { stage: 'closed', region: 'apac' } });
+      const refusal = (await engine
+        .update(DEAL, { name: 'written' }, { where: { id: apac.ids.r1 }, context: { ...caller } } as never)
+        .then(() => null, (e: unknown) => e)) as { code?: unknown; statusCode?: unknown; status?: unknown } | null;
+      expect(refusal, 'the update is refused').not.toBeNull();
+      expect(refusal?.code).toBe('PERMISSION_DENIED');
+      expect(refusal?.statusCode ?? refusal?.status).toBe(403);
+      expect(await changedRows(DEAL, apac.ids, 'update', ['r1'])).toEqual([]);
+
+      const emea = await seedDeals({ r1: { stage: 'closed' } });
+      expect(await byIdAdmits(DEAL, 'update', emea.ids, caller, ['r1'])).toEqual(['r1']);
+    });
+
+    it('the tenant wall still refuses the owner-creator her own closed row in another organization', async () => {
+      await expectPredicateMatchesById('update', memberOf(ALICE, WIDENER_SET.name), [], {
+        ...ALL_CLOSED, r1: { stage: 'closed', organization_id: 'org_other' },
+      });
+    });
+
+    describe('where record sharing abstains (no owner field), the floor stays beside the wideners', () => {
+      async function seedMemos(): Promise<{ batch: string; ids: Ids }> {
+        const batch = `memo_widener_batch_${++seq}`;
+        const ids = Object.fromEntries(ROLES.map((role) => [role, `${batch}_${role}`])) as Ids;
+        await engine.insert(MEMO, ROLES.map((role) => ({
+          id: ids[role], name: 'as seeded', batch, created_by: MATRIX[role].created_by, organization_id: ORG,
+        })), SYS);
+        return { batch, ids };
+      }
+      for (const verb of ['update', 'delete'] as const) {
+        it(`ALICE, ${verb}: the rows she created (r1, r3); r2 and r4, which she did not, are refused`, async () => {
+          const caller = memberOf(ALICE, MEMO_WIDENER_SET.name);
+          const predicateCopy = await seedMemos();
+          await predicateWrite(MEMO, verb, predicateCopy.batch, caller);
+          const byPredicate = await changedRows(MEMO, predicateCopy.ids, verb);
+          const byIdCopy = await seedMemos();
+          const byId = await byIdAdmits(MEMO, verb, byIdCopy.ids, caller);
+          expect(byPredicate).toEqual(byId);
+          expect(byId).toEqual(['r1', 'r3']);
+        });
+      }
+    });
+  });
+
+  it('security/explain answers the verdict the write gets: the owner-creator may update and delete her closed r1', async () => {
+    const caller = memberOf(ALICE, WIDENER_SET.name);
+    const { ids } = await seedDeals(ALL_CLOSED);
+    for (const operation of ['update', 'delete'] as const) {
+      const decision = (await securityPlugin.explainAccessForCaller(
+        { object: DEAL, operation, recordId: ids.r1 } as never,
+        { ...caller } as never,
+      )) as { record?: { visible?: boolean } };
+      expect(decision.record?.visible, `explain ${operation} of r1`).toBe(true);
+      const other = (await securityPlugin.explainAccessForCaller(
+        { object: DEAL, operation, recordId: ids.r4 } as never,
+        { ...caller } as never,
+      )) as { record?: { visible?: boolean } };
+      expect(other.record?.visible, `explain ${operation} of r4`).toBe(false);
+    }
+  });
+});
+
 describe('[#35802] predicateWriteFloorDropIds: the by-id floor decision, asked per row', () => {
   // A double of the by-id decision that answers like a write authority with an
   // `edit` share on every row: the floor is replaced for an update, never for
@@ -709,5 +943,226 @@ describe('[#35802] predicateWriteFloorDropIds: the by-id floor decision, asked p
     expect(asked).toEqual(ids.map(String));
     expect(dropped).toEqual(ids.filter((i) => i % 2 === 0));
     expect(peak).toBe(25);
+  });
+});
+
+// [#35802 · ruling record 7073030861] The other half of the card: its own
+// repro object, a `controlled_by_parent` detail.
+//
+// Record sharing abstains on such a detail (its access derives from the
+// master), so the composition above never replaces its floor. The by-id write
+// hands the floor to ADR-0055's master gate instead (step 2.8): a caller who
+// may edit the master writes every detail row under it, whoever created the
+// row. The gate judges a predicate write too, every master of the rows it
+// selects, and refuses the write whole on the first the caller may not write
+// under; yet the floor stayed on that path, so the master's owner changed only
+// the rows they had created and a Modify All holder changed none.
+//
+// Ruled: once the gate has passed every master a non-delegated addressed
+// predicate write reaches, the floor is handed to it there as well. The pins
+// are the same comparison as above, row for row against the by-id write, on
+//
+//   pwf_order                the master: `private`, owned by ALICE. DAVE holds
+//                            an `edit` share on it; BOB and CAROL a `read` share.
+//   pwf_line                 the detail, master required.
+//   pwf_line_master_read     … declaring `writeRequiresMasterRead`.
+//   pwf_line_owner_may_edit  … declaring `ownerMayEdit`.
+//   pwf_line_optional        … its master optional.
+//
+// Each copy of the matrix hangs under a fresh order; a second order of BOB's,
+// which ALICE reads through a share and may not edit, is there for the rows a
+// case moves under it.
+describe('[#35802] a predicate write of a controlled_by_parent detail writes the rows its by-id writes do', () => {
+  type LineSeed = {
+    /** Rows that hang under BOB's order, which ALICE can read and may not edit. */
+    underOtherOrder?: readonly Role[];
+    /** Rows that name no order (the optional-master detail only). */
+    noOrder?: readonly Role[];
+  };
+
+  async function seedLines(object: LineObject, seed: LineSeed = {}): Promise<{ batch: string; ids: Ids }> {
+    const batch = `line_batch_${++seq}`;
+    const order = `${batch}_order`;
+    const otherOrder = `${batch}_other_order`;
+    await engine.insert(ORDER, [
+      { id: order, name: 'order', owner_id: ALICE, created_by: ALICE, organization_id: ORG },
+      { id: otherOrder, name: 'other order', owner_id: BOB, created_by: BOB, organization_id: ORG },
+    ], SYS);
+    const shares: Array<[record: string, recipient: string, level: 'read' | 'edit']> = [
+      [order, DAVE, 'edit'],
+      [order, BOB, 'read'],
+      [order, CAROL, 'read'],
+      [otherOrder, ALICE, 'read'],
+    ];
+    for (const [recordId, recipient, level] of shares) {
+      await engine.insert('sys_record_share', {
+        object_name: ORDER, record_id: recordId, recipient_type: 'user', recipient_id: recipient,
+        access_level: level, source: 'manual', organization_id: ORG,
+      }, SYS);
+    }
+    const ids = Object.fromEntries(ROLES.map((role) => [role, `${batch}_${role}`])) as Ids;
+    await engine.insert(object, ROLES.map((role) => ({
+      id: ids[role],
+      name: 'as seeded',
+      batch,
+      order: seed.noOrder?.includes(role) ? null : seed.underOtherOrder?.includes(role) ? otherOrder : order,
+      organization_id: ORG,
+      ...MATRIX[role],
+    })), SYS);
+    return { batch, ids };
+  }
+
+  /** Predicate write on one copy, by-id writes on another; both must name `expected`. */
+  async function expectLinesMatchById(
+    object: LineObject,
+    verb: 'update' | 'delete',
+    caller: object,
+    expected: readonly Role[],
+    seed: LineSeed = {},
+  ): Promise<void> {
+    const predicateCopy = await seedLines(object, seed);
+    await predicateWrite(object, verb, predicateCopy.batch, caller);
+    const byPredicate = await changedRows(object, predicateCopy.ids, verb);
+
+    const byIdCopy = await seedLines(object, seed);
+    const byId = await byIdAdmits(object, verb, byIdCopy.ids, caller);
+
+    expect(byPredicate, 'the predicate write changes exactly the rows the by-id path admits').toEqual(byId);
+    expect(byId, 'the by-id oracle answers the set this case expects').toEqual([...expected]);
+  }
+
+  type Refusal = { code?: unknown; statusCode?: unknown; status?: unknown } | null;
+  const refusalOf = (p: Promise<unknown>) => p.then(() => null, (e: unknown) => e) as Promise<Refusal>;
+
+  /** The predicate write is refused by the master gate and changes no row; the by-id writes admit `byIdExpected`. */
+  async function expectRefusedWhole(
+    object: LineObject,
+    verb: 'update' | 'delete',
+    caller: object,
+    byIdExpected: readonly Role[],
+    seed: LineSeed = {},
+  ): Promise<void> {
+    const copy = await seedLines(object, seed);
+    const refusal = await refusalOf(predicateWrite(object, verb, copy.batch, caller));
+    expect(refusal, 'the predicate write is refused').not.toBeNull();
+    expect(refusal?.code).toBe('PERMISSION_DENIED');
+    expect(refusal?.statusCode ?? refusal?.status).toBe(403);
+    expect(await changedRows(object, copy.ids, verb), 'nothing was written').toEqual([]);
+
+    const byIdCopy = await seedLines(object, seed);
+    expect(await byIdAdmits(object, verb, byIdCopy.ids, caller)).toEqual([...byIdExpected]);
+  }
+
+  const ALL: readonly Role[] = ['r1', 'r2', 'r3', 'r4'];
+
+  for (const verb of ['update', 'delete'] as const) {
+    describe(`predicate ${verb}`, () => {
+      it("the master's owner (ALICE): every row under her order, the two CAROL created included", async () => {
+        await expectLinesMatchById(LINE, verb, memberOf(ALICE, REP_SET.name), ALL);
+      });
+
+      it('a member who may edit the master and created none of the rows (DAVE, an edit share on the order): every row', async () => {
+        await expectLinesMatchById(LINE, verb, memberOf(DAVE, REP_SET.name), ALL);
+      });
+
+      it('the Modify All manager, who owns and created nothing: every row', async () => {
+        await expectLinesMatchById(LINE, verb, memberOf(MANAGER, MANAGER_SET.name), ALL);
+      });
+
+      it('a member who may not edit ONE of the masters (r4 under an order ALICE only reads): refused whole, nothing written', async () => {
+        await expectRefusedWhole(LINE, verb, memberOf(ALICE, REP_SET.name), ['r1', 'r2', 'r3'], { underOtherOrder: ['r4'] });
+      });
+
+      it('a member who only reads the master (CAROL): refused whole, the rows she created included', async () => {
+        await expectRefusedWhole(LINE, verb, memberOf(CAROL, REP_SET.name), []);
+      });
+
+      it('a detail declaring writeRequiresMasterRead: a member who only reads the master (CAROL) writes every row', async () => {
+        await expectLinesMatchById(LINE_MASTER_READ, verb, memberOf(CAROL, REP_SET.name), ALL);
+      });
+
+      it("a detail declaring ownerMayEdit: the master's owner writes every row", async () => {
+        await expectLinesMatchById(LINE_OWNER_MAY_EDIT, verb, memberOf(ALICE, REP_SET.name), ALL);
+      });
+
+      it('a detail declaring ownerMayEdit, unchanged: its owner leg is a by-id update only, so BOB, who reads the master, is refused whole', async () => {
+        // Ruling 6398566164: by id BOB updates the two rows he owns and
+        // deletes none; a predicate write still asks EDIT on the master.
+        await expectRefusedWhole(LINE_OWNER_MAY_EDIT, verb, memberOf(BOB, REP_SET.name), verb === 'update' ? ['r3', 'r4'] : []);
+      });
+
+      it('rows that name no master are their owner\'s: ALICE writes the two she owns, created by her or not', async () => {
+        await expectLinesMatchById(LINE_OPTIONAL, verb, memberOf(ALICE, REP_SET.name), ['r1', 'r2'], { noOrder: ALL });
+      });
+
+      it('rows that name no master, the Modify All manager: every row', async () => {
+        await expectLinesMatchById(LINE_OPTIONAL, verb, memberOf(MANAGER, MANAGER_SET.name), ALL, { noOrder: ALL });
+      });
+
+      it("a write on another user's behalf keeps both floors (ADR-0090 D10): ALICE for ERIN writes only the rows ALICE created", async () => {
+        await expectLinesMatchById(LINE, verb, onBehalfOf(memberOf(ALICE, REP_SET.name), ERIN), ['r1', 'r3']);
+      });
+    });
+  }
+
+  it('all matched rows or none: a newly matched row a beforeDelete hook refuses refuses the whole delete', async () => {
+    // Before the ruling ALICE's predicate delete matched r1 and r3 alone (the
+    // floor) and answered success. r2, which CAROL created, is now matched as
+    // its by-id delete is admitted, and the hook's refusal of it is the answer
+    // for the whole write.
+    const refuseDeleteOf = new Set<string>();
+    engine.registerHook(
+      'beforeDelete',
+      async (ctx: any) => {
+        if (refuseDeleteOf.has(String(ctx.input?.id))) {
+          throw Object.assign(new Error('refused by the beforeDelete hook'), { status: 409 });
+        }
+      },
+      { object: LINE },
+    );
+    const copy = await seedLines(LINE);
+    refuseDeleteOf.add(copy.ids.r2);
+    try {
+      const refusal = await refusalOf(predicateWrite(LINE, 'delete', copy.batch, memberOf(ALICE, REP_SET.name)));
+      expect(refusal, 'the predicate delete is refused').not.toBeNull();
+      expect(refusal?.statusCode ?? refusal?.status).toBe(409);
+      expect(await changedRows(LINE, copy.ids, 'delete')).toEqual([]);
+    } finally {
+      refuseDeleteOf.clear();
+    }
+  });
+
+  it('a row that appears after the master gate judged the write is not written: the write is scoped to the rows the gate judged', async () => {
+    // The gate reads the rows the predicate selects and judges their masters.
+    // A row inserted after that read, under an order ALICE reads and may not
+    // edit, matches her predicate and has had no master judged; with the floor
+    // handed to the gate nothing else would refuse it. The write's scope is
+    // the gate's own id list, so the row is not matched.
+    const { batch, ids } = await seedLines(LINE);
+    const late = `${batch}_late`;
+    const realFind = engine.find.bind(engine);
+    let armed = true;
+    (engine as any).find = async (object: string, query: any, ...rest: unknown[]) => {
+      const answer = await realFind(object, query, ...(rest as []));
+      const callerRead = object === LINE && query?.context?.userId === ALICE && query?.context?.isSystem !== true;
+      if (armed && callerRead) {
+        armed = false;
+        await engine.insert(LINE, {
+          id: late, name: 'as seeded', batch, order: `${batch}_other_order`, organization_id: ORG, owner_id: BOB, created_by: ALICE,
+        }, SYS);
+      }
+      return answer;
+    };
+    try {
+      await predicateWrite(LINE, 'update', batch, memberOf(ALICE, REP_SET.name));
+    } finally {
+      (engine as any).find = realFind;
+    }
+    expect(armed, 'the row was inserted during the write').toBe(false);
+    expect(await changedRows(LINE, ids, 'update')).toEqual(ALL);
+    const lateRow = (await engine.findOne(LINE, { where: { id: late }, context: { isSystem: true } } as never)) as
+      | Record<string, unknown>
+      | null;
+    expect(lateRow?.name, 'the unjudged row keeps its value').toBe('as seeded');
   });
 });

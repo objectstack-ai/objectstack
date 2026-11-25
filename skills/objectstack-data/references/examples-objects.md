@@ -8,30 +8,33 @@ through [_index.md](./_index.md). The ones to get right:
 
 | Property | Default | Description |
 |:---------|:--------|:------------|
+| `color` | `gray` | Tile colour behind the white `icon`: `gray` `blue` `teal` `green` `amber` `orange` `red` `pink` `purple` (no hex). Group the app's objects into a few business families, one name each, as the platform's own objects do: people `blue`, security `purple`, approvals and work `orange`, messaging `pink`, integrations `teal`, reference data and finance `green`, audit and settings `amber`. `red` only for an alert object; one nobody opens gets none |
 | `highlightFields` | derived | Ordered field keys used as a record's compact face: the columns a **related list** renders on the parent's detail page, and what a lookup picker shows. Declare it on the CHILD object (see [Relationships](../rules/relationships.md)) |
-| `nameField` | derived (e.g. `'name'`/`'title'`) | **Canonical** record-title field — the stored field used as the record's display name. Use a single text/email field; a composite title to import, sort or search by is a stored computed field (a non-`formula` field with an `expression`); a text formula is display-only |
+| `nameField` | derived (e.g. `'name'`/`'title'`) | Record-title field: the stored field used as the record's display name. Use a single text/email field; a composite title to import, sort or search by is a stored computed field (a non-`formula` field with an `expression`); a text formula is display-only |
 | `ownership` | `'user'` | Whether `owner_id` exists at all, a different axis from `sharingModel` |
 
 ### Object Capabilities (`enable`)
 
 | Flag | Default | Purpose |
 |:-----|:--------|:--------|
+| `fieldHistory` | on | A changed field's old → new values on the activity timeline, served per the reader's field read rule. `false`: off for the object. A field opts out with its own `fieldHistory: false`; a media or structured field (`json`, `address`, `code`…) shows values only with `true`, a credential never. `sys_audit_log` keeps its own grant |
+| `trackHistory` | `false` | Ledger view on the record page and the `history` API verb; not the values switch |
 | `apiMethods` | all | Whitelist over the six primitives (`get`, `list`, `create`, `update`, `delete`, `bulk`); derived verbs (search/export/upsert/…) follow automatically |
-| `feeds` | `true` | Social feed, comments, mentions — **opt-out**: explicit `false` hides the feed UI and rejects new comments |
-| `activities` | `true` | Activity timeline (`sys_activity` mirror of CRUD) — **opt-out**: explicit `false` stops mirroring and hides the timeline |
-| `aiReadable` | — | Platform `sys_*` objects only (not `sys_metadata`, `sys_metadata_history`): read-only AI access (query, get, aggregate, describe, list; no write). App objects never declare it, `false` included: refused at parse |
+| `feeds` | `true` | Feed, comments, mentions; `false` hides the feed UI and rejects new comments |
+| `activities` | `true` | Activity timeline (`sys_activity` mirror of CRUD); `false` stops mirroring and hides the timeline |
+| `aiReadable` | — | Platform `sys_*` objects only; on an app object, `false` included, refused at parse |
 
 ## Field Groups (MVP)
 
 - Declare groups on `ObjectSchema.fieldGroups` — **array order is the display order**.
-- Assign each field to a group via `Field.group`, which references an
-  `ObjectFieldGroup.key`. In-group display order equals the traversal order
-  of `fields`.
+- A group lists its members, in display order, in its own `fields`. Absent,
+  its members are the fields whose `group` names its `key` (older, still read).
+  A field listed by two groups, or listed while its `group` names another, is refused.
 - Group keys must be `snake_case`.
 - Optional per-group: `icon`, `description`, and `collapse`
-  (`'none'` always open · `'expanded'` collapsible, starts open ·
-  `'collapsed'` collapsible, starts closed). Groups render identically on forms,
-  modals, and detail pages.
+  (`'none'` always open · `'expanded'` foldable, starts open ·
+  `'collapsed'` starts closed). Forms keep it; the default record page
+  lets readers fold any titled group.
 - Hide a whole group, header included, with `visibleWhen` (CEL over
   `record.*`; FALSE or a fault hides it) or `requiresFeature` (a deployment
   feature flag from `PUBLIC_AUTH_FEATURES` in `@objectstack/spec/kernel`; an
@@ -52,19 +55,19 @@ export default ObjectSchema.create({
   sharingModel: 'private',
 
   fieldGroups: [
-    { key: 'contact_info', label: 'Contact Information', icon: 'user' },
-    { key: 'billing',      label: 'Billing', collapse: 'collapsed' },
-    { key: 'system',       label: 'System' },
+    { key: 'contact_info', label: 'Contact Information', icon: 'user', fields: ['name', 'email', 'phone'] },
+    { key: 'billing', label: 'Billing', collapse: 'collapsed', fields: ['vat_id', 'billing_address'] },
+    { key: 'system', label: 'System', fields: ['created_at', 'created_by'] },
   ],
 
   fields: {
-    name:       { type: 'text',  required: true, group: 'contact_info' },
-    email:      { type: 'email',                  group: 'contact_info' },
-    phone:      { type: 'phone',                  group: 'contact_info' },
-    vat_id:     { type: 'text',                   group: 'billing' },
-    billing_address: { type: 'address',           group: 'billing' },
-    created_at: { type: 'datetime', readonly: true, group: 'system' },
-    created_by: { type: 'user', readonly: true, group: 'system' },
+    name:       { type: 'text', required: true },
+    email:      { type: 'email' },
+    phone:      { type: 'phone' },
+    vat_id:     { type: 'text' },
+    billing_address: { type: 'address' },
+    created_at: { type: 'datetime', readonly: true },
+    created_by: { type: 'user', readonly: true },
   },
 });
 ```
@@ -81,6 +84,7 @@ export default ObjectSchema.create({
   pluralLabel: 'Support Cases',
   description: 'A customer-reported issue tracked to resolution.',
   icon: 'life-buoy',
+  color: 'orange',
   sharingModel: 'private',                 // required in practice
   highlightFields: ['subject', 'status', 'priority'],
   enable: {
@@ -227,7 +231,7 @@ default, never removes a field the type default scans; declare
 search target: unlike `fields` / `sort` / `filters`, the search axis does not
 resolve traversal, and `project_id.name` in `searchableFields` (or in a
 `$searchFields` override) is **refused** (`os validate`
-`searchable-field-unknown`; a request, `400 INVALID_FIELD`), not silently dropped.
+`searchable-field-unknown`; a request, `400 INVALID_FIELD`).
 
 **This is the one prescription — emit it every time.** To search by a related
 record's title, copy that title into a **stored field on this object** and
@@ -254,8 +258,7 @@ and CEL reads only this record's own fields, so it cannot hold the related title
 a `formula` entry in any `searchableFields` is refused — `os validate`
 `searchable-field-unsearchable`, a request `400 INVALID_FIELD`.
 
-**Mirror maintenance is the trade-off** — a mirror is only as fresh as whatever
-writes it. Cover both paths: a `beforeInsert` / `beforeUpdate` hook on `task`
+**Mirror maintenance is the trade-off.** Cover both paths: a `beforeInsert` / `beforeUpdate` hook on `task`
 stamps `project_name` from the incoming `project_id`'s parent; an `afterUpdate`
 hook on `project` re-stamps its tasks when it is renamed. Rows written past the hooks (bulk import, direct SQL) need a
 one-off backfill. See [Lifecycle Hooks](./data-hooks.md).
@@ -263,12 +266,15 @@ one-off backfill. See [Lifecycle Hooks](./data-hooks.md).
 ## Object Extension Model
 
 To add fields/validations/indexes to an object you do not own, author
-`defineObjectExtension({ extend, fields, fieldPatches, priority })` and register it on
+`defineObjectExtension({ extend, fields, fieldPatches, place, priority })` and register it on
 `defineStack({ objectExtensions: [...] })`. `priority` sets merge order (default
-`200`, range `0–999`); an extension can add but never remove, except that a new
-`label` without `pluralLabel` clears the base plural unless a tenant authored it (set both). ⛔ Not the same key
-as object-level `ownership` (the record-ownership enum
-`'user' | 'business_unit' | 'org' | 'none'`).
+`200`, `0–999`); an extension adds, never removes, except that a new
+`label` without `pluralLabel` clears the base plural unless a tenant authored it (set both). ⛔ `extend`
+is not object-level `ownership` (`'user' | 'business_unit' | 'org' | 'none'`).
+
+`place: [{ field: 'tax_id', group: 'basic', after: 'industry' }, { list: 'acme_contract', after: 'crm_opportunity' }]`
+puts the extension's own fields, groups (`{ group: { key, label }, after }`) and child lists
+after (or `before`) a named item, where the target declares `fieldGroups` / `relatedLists`.
 
 **Relabel a field the owner declares with `fieldPatches` — never by redeclaring
 it in `fields`**, which takes the field over whole and cuts it off from the
@@ -293,5 +299,10 @@ declaration. Every field the pair adds ends in `__c` (`region__c`). The suffix i
 reserved to the pair, so a `__c` field in any other package, or an unsuffixed
 field in a `.custom` extension, is refused at save, publish and install and by
 `os validate` / `os build`.
+Only the pair's extension may also write `fieldGroups` and `relatedLists`, shaped
+as on an object. A written key replaces that arrangement whole (the owner's and
+every `place`): an unlisted field shows after the last group, an unnamed tab
+still shows after the listed ones, and `{ list: 'crm_note', hidden: true }` hides
+a tab. Outside a `.custom` package both keys are refused at those doors: use `place`.
 Studio's **Add field** on a base object writes the same extension, as an
 `object_extension` item of the pair.

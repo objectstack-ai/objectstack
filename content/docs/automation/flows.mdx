@@ -73,7 +73,7 @@ const approvalFlow = {
 | `version` | `number` | optional | Version number (defaults to `1`) |
 | `status` | `enum` | optional | `'draft'`, `'active'`, `'obsolete'`, `'invalid'` (defaults to `'draft'`) |
 | `type` | `FlowType` | ✅ | Flow trigger type (see below) |
-| `runAs` | `enum` | optional | `'system'` (elevated, bypasses RLS; after an approval decision its attribution user is the decider) or `'user'` (the default, RLS-respecting: the trigger user until a human decision, the decider after it, with the decider's permissions). A `'user'` run that resolved **no** trigger user has nothing to scope to, so its data operations are refused — declare `'system'` for schedule / time-relative / API triggers and for record-change flows fired by a write that carried no user |
+| `runAs` | `enum` | optional | `'system'` (elevated, bypasses RLS but not the organization wall: a run for a user has its reads and writes judged by that user's organization wall, and a run that began for no caller is not judged by it; after an approval decision its attribution user is the decider) or `'user'` (the default, RLS-respecting: the trigger user until a human decision, the decider after it, with the decider's permissions). A `'user'` run that resolved **no** trigger user has nothing to scope to, so its data operations are refused — declare `'system'` for schedule / time-relative / API triggers and for record-change flows fired by a write that carried no user |
 | `requiredPermissions` | `string[]` | optional | Capabilities a caller must hold, every one listed, to START the flow. Checked at every door that starts a flow by name (the trigger route, a `type: 'flow'` action over REST and MCP `run_action`, a declared `type: 'flow'` endpoint): anyone else but the system principal is refused `403` `PERMISSION_DENIED` and nothing runs. An action that starts the flow inherits the list. A parent flow's `subflow` node is not a door and is not checked again. This is how to say who may start an elevated `screen` or `api` flow; `current_user.positions` is not an authorization input |
 | `variables` | `FlowVariable[]` | optional | Input/output variables |
 | `nodes` | `FlowNode[]` | ✅ | Flow nodes |
@@ -1033,7 +1033,7 @@ screen flow can end on a result screen that links the records it created:
 
 Set `config.objectName`
 to instead render an object's **entire** create/edit form — including any
-master-detail child grids (`inlineEdit`) — as one wizard step. The client
+master-detail child grids (the children a field group of the object places) — as one wizard step. The client
 renders the object form and, on save, **persists the record itself** (parent +
 inline children atomically); the flow then resumes with the new record's id
 bound to `config.idVariable` so a later step can reference it.
@@ -2586,6 +2586,50 @@ uncached one: it is read live on every call and kept out of the ETag, so a
 read that carries it is always answered in full, never with `304 Not
 Modified`. It is the verdict of the engine in the process that answered.
 
+### Which flows a record update would start
+
+`POST /api/v1/automation/_record-starts` answers, before anything is written,
+which flows a proposed update of one record would start. The console's stage
+confirms read it: the list cell's state-machine confirm and the record page's
+stage confirm name those flows under their sentence (objectstack#35928).
+
+```json
+// request
+{ "object": "project", "recordId": "p1", "changes": { "status": "completed" } }
+// response
+{ "success": true, "data": { "flows": [
+  { "name": "project_closure", "label": "Project Closure", "startsApproval": true }
+] } }
+```
+
+- **Who is answered:** any signed-in caller who can read the record. The
+  record is read as the caller, through the `/data` door's own `get`, so a
+  record they cannot read answers `404 RECORD_NOT_FOUND` exactly as one that
+  does not exist. An anonymous call is refused `401`, a malformed body `400
+  VALIDATION_FAILED`, a `changes` key that is not a declared field of the
+  object `400 VALIDATION_FAILED`, any query parameter `400 VALIDATION_ERROR`,
+  and an engine without the read `501`.
+- **Which flows:** enabled `record_change` flows of that object, armed on their
+  trigger, whose `triggerType` binds an update (`record-…-update` or
+  `record-…-write`), and whose start `condition` holds for the record with
+  `changes` applied, with `previous` as the record read. The condition is judged
+  by the same gate every run passes, on the record as the caller reads it. A
+  condition that cannot be evaluated against it is not listed. Hooks are never
+  listed.
+- **What is served per flow:** its `name`, its authored `label` (a client
+  translates it by `name`, as it translates any flow label) and
+  `startsApproval`, true when the flow holds an `approval` node. No
+  description, condition or nodes.
+
+The answer is a preview, not a promise: the write itself is judged when it
+happens, and a condition that reads a field the caller cannot see is judged
+here on what the caller sees. Of the caller, the preview binds the user id and
+the tenant only. A live save also binds the writer's positions, the request's
+params and its expand, so a condition that reads those is judged here without
+them, and the preview can differ from the save in either direction: it can miss
+a flow the save starts, or list one the save does not (a negated test of the
+writer reads true here).
+
 ## Expressions in flows
 
 A flow computes with **one expression dialect, CEL**: every condition is bare
@@ -2658,8 +2702,9 @@ and is read as `vars["current_user"]` / `vars["vars"]`.
    it `record.budget != null`, which both doors accept, and `has()` is no guard.
    The columns the platform adds count too: `owner_id`, `created_by`,
    `updated_by`, `owning_business_unit_id`, `queue` and `organization_id` are
-   `null` on a row a system write, a seed or a guest left them empty in, so they
-   need the same guard; `created_at` and `updated_at` are stamped on every
+   `null` on a row a system write, a seed or a guest left them empty in, and a
+   `synced` object's `_sync_` columns can be `null` too, so they need the same
+   guard; `created_at` and `updated_at` are stamped on every
    stored row and need none.
 </Callout>
 
@@ -2985,7 +3030,7 @@ export const renewalReminder: Flow = {
         // run acts as its own record's organization) and not read under
         // `single`. See "The acting organization" below.
         organization: '<sys_organization.id>',
-        // schedule: { type: 'cron', expression: '0 8 * * *' } // optional; defaults to daily 08:00 UTC
+        // schedule: { type: 'cron', expression: '0 8 * * *', timezone: 'UTC' } // optional; defaults to daily 08:00 UTC
       },
     },
     { id: 'notify_owner', type: 'notify', label: 'Notify Owner' },
@@ -3050,7 +3095,7 @@ it runs as**, on the start node's `config`, beside the cadence it scopes:
 
 ```typescript
 config: {
-  schedule: { type: 'cron', expression: '0 8 * * *' },
+  schedule: { type: 'cron', expression: '0 8 * * *', timezone: 'UTC' },
   organization: 'org_msokm9oaz0cal87q', // a sys_organization.id
 }
 ```

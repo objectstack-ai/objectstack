@@ -272,6 +272,11 @@ export interface NavigationOverlayProps {
    */
   toggles?: React.ReactNode;
   /**
+   * The record's comment switch (objectstack#36075), drawn in the bar before
+   * the record's button group (`RecordTopBar`'s `comments`).
+   */
+  comments?: React.ReactNode;
+  /**
    * The record header's one-row bar (objectstack#35593): handed the bar's
    * element the record's button group is drawn into, after the step pair.
    */
@@ -297,10 +302,14 @@ export interface NavigationOverlayProps {
  * The one `storageKey` spelling every record overlay uses, keyed by object.
  *
  * `NavigationOverlay` prefixes it with `ov:` on the way to `localStorage`, so
- * the stored key is `ov:drawer-width:OBJECT`. The console's own object page
- * (`app-shell`'s `ObjectView`) has always used this spelling; after
- * objectui#9299 the five list-type renderers use it too, so one object has one
- * remembered overlay width no matter which view type the user resized it on.
+ * the stored key is `ov:drawer-width:OBJECT`. After objectui#9299 the five
+ * list-type renderers use it, so one object has one remembered overlay width
+ * no matter which of them the user resized it on. The console's own record
+ * preview (`app-shell`'s `ObjectView` and a record page's drawer) uses it only
+ * for an object that authors its drawer's width; every other object's preview
+ * shares one key of its own (objectstack#36149), so it no longer shares a
+ * width with that object's calendar, gantt, kanban, tree or grid overlay.
+ * This helper's spelling is unchanged.
  */
 export function recordOverlayWidthStorageKey(objectName: string): string {
   return `drawer-width:${objectName}`;
@@ -324,14 +333,15 @@ function resolveWidth(width: string | number | undefined): string | undefined {
   return width;
 }
 
-/** Hard floor for drag-resize — narrower than this and the body becomes unusable. */
-const DRAWER_MIN_PX = 360;
 /**
- * The widest a reader can drag the pane, as a share of the viewport
- * (objectstack#27545: wider than that is what the full page is for). A
- * remembered width beyond it draws at this bound.
+ * The drag range of the pane (objectstack#36149): 380 px to 900 px. Narrower
+ * and the body becomes unusable; wider is what the full page is for. A
+ * remembered width below it is not used, one above it draws at 900, and the
+ * pane never draws wider than the viewport leaves it
+ * (`sm:w-[calc(100%-1rem)]`).
  */
-const DRAWER_MAX_VW = 60;
+const DRAWER_MIN_PX = 380;
+const DRAWER_MAX_PX = 900;
 
 /**
  * Whether an `Esc` belongs to the element it was pressed in rather than to the
@@ -346,6 +356,28 @@ function escapeOwnedByTarget(target: EventTarget | null, pane?: Element | null):
   }
   const owner = target.closest('[role="menu"], [role="listbox"], [role="dialog"], [role="alertdialog"]');
   return !!owner && owner !== pane;
+}
+
+/**
+ * Whether an `Esc` was pressed inside a region of the record that owns its
+ * own `Esc` (`[data-owns-escape]`, such as the record's comment panel), which
+ * then acts on it itself. Only a region inside the pane counts.
+ */
+function escapeOwnedByRegion(target: EventTarget | null, pane?: Element | null): boolean {
+  if (!target || !(target instanceof Element)) return false;
+  const region = target.closest('[data-owns-escape]');
+  return !!region && (!pane || pane.contains(region));
+}
+
+/**
+ * Whether the pane draws a part of the record that owns EVERY `Esc` the pane
+ * hears while it is drawn, wherever the key is pressed
+ * (`[data-owns-pane-escape]`: the record's inline edit session, whose Esc
+ * ends the edit — objectstack#36472). The pane then holds itself open and
+ * leaves the key to it; once the edit ends, the next `Esc` is the pane's.
+ */
+function escapeOwnedByPaneSession(pane?: Element | null): boolean {
+  return !!pane?.querySelector('[data-owns-pane-escape]');
 }
 
 /**
@@ -370,20 +402,30 @@ function useDrawerResize(
   // ⚠️ `parseInt` is deliberate for the legacy value: that is how
   // `RecordDetailDrawer` read its own key, and reading it with a stricter
   // parser than the writer used would drop widths rather than carry them over.
+  //
+  // objectstack#36149 — a host that keeps one pane mounted and switches its
+  // key (a record page's drawer, from one object's record to another's) gets
+  // the width the NEW key holds: a key with no usable width, or no key at
+  // all, drops the previous key's width, so the host's own width applies.
   React.useEffect(() => {
-    if (!storageKey || typeof window === 'undefined') return;
+    if (typeof window === 'undefined') return;
+    if (!storageKey) {
+      setWidth(null);
+      return;
+    }
     try {
       const raw = window.localStorage.getItem(`ov:${storageKey}`);
       if (raw) {
         const n = Number(raw);
-        if (Number.isFinite(n) && n >= DRAWER_MIN_PX) setWidth(n);
+        setWidth(Number.isFinite(n) && n >= DRAWER_MIN_PX ? n : null);
         return;
       }
-      if (!legacyStorageKey) return;
-      const legacyRaw = window.localStorage.getItem(legacyStorageKey);
-      if (!legacyRaw) return;
-      const legacy = parseInt(legacyRaw, 10);
-      if (!Number.isFinite(legacy) || legacy < DRAWER_MIN_PX) return;
+      const legacyRaw = legacyStorageKey ? window.localStorage.getItem(legacyStorageKey) : null;
+      const legacy = legacyRaw ? parseInt(legacyRaw, 10) : Number.NaN;
+      if (!legacyStorageKey || !Number.isFinite(legacy) || legacy < DRAWER_MIN_PX) {
+        setWidth(null);
+        return;
+      }
       setWidth(legacy);
       window.localStorage.setItem(`ov:${storageKey}`, String(legacy));
       // Removing it is what makes this a MIGRATION rather than a permanent
@@ -391,7 +433,8 @@ function useDrawerResize(
       // width must stay gone.
       window.localStorage.removeItem(legacyStorageKey);
     } catch {
-      // ignore (private mode / quota)
+      // private mode / quota: nothing remembered, the host's width applies
+      setWidth(null);
     }
   }, [storageKey, legacyStorageKey]);
 
@@ -400,7 +443,7 @@ function useDrawerResize(
     e.preventDefault();
     draggingRef.current = true;
 
-    const maxPx = Math.floor((window.innerWidth * DRAWER_MAX_VW) / 100);
+    const maxPx = DRAWER_MAX_PX;
     // The drawer is right-anchored, at the viewport's edge.
     const paneRight = e.currentTarget.parentElement?.getBoundingClientRect().right || window.innerWidth;
     document.body.style.cursor = 'col-resize';
@@ -480,6 +523,7 @@ export const NavigationOverlay: React.FC<NavigationOverlayProps> = ({
   trail,
   stepper,
   toggles,
+  comments,
   actionSlotRef,
   stepperHidden = false,
   recordRow,
@@ -521,8 +565,23 @@ export const NavigationOverlay: React.FC<NavigationOverlayProps> = ({
   // or a menu owns it, is not. It still holds the sheet open — left
   // unprevented, the layer would dismiss the whole drawer on it.
   const sheetRef = React.useRef<HTMLDivElement>(null);
+  //
+  // A region inside the record that owns its `Esc` (`[data-owns-escape]`: the
+  // record's comment panel, objectstack#36075) gets the key at every level,
+  // the root too: the drawer holds itself open and leaves the region to act.
+  //
+  // An edit session drawn in the record (`[data-owns-pane-escape]`,
+  // objectstack#36472) gets every key the drawer hears, the root's too: the
+  // first `Esc` ends the edit and the drawer stays; the next one is the
+  // drawer's again. The drawer's layer only hears the key with nothing open
+  // over it, so a popover or menu over the record still closes first.
   const handleDrawerEscape = (e: KeyboardEvent) => {
     if (e.defaultPrevented) return;
+    if (escapeOwnedByRegion(e.target, sheetRef.current) || escapeOwnedByPaneSession(sheetRef.current)) {
+      e.preventDefault();
+      return;
+    }
+    if (!onBack) return;
     e.preventDefault();
     if (escapeOwnedByTarget(e.target, sheetRef.current)) return;
     handleEscape();
@@ -537,7 +596,7 @@ export const NavigationOverlay: React.FC<NavigationOverlayProps> = ({
   // even when it was remembered at a wider viewport; otherwise the host's
   // width as given.
   const paneWidthCss = resize.width != null
-    ? `min(${resize.width}px, ${DRAWER_MAX_VW}vw)`
+    ? `${Math.min(resize.width, DRAWER_MAX_PX)}px`
     : resolveWidth(width) ?? '42rem';
   const widthStyle: React.CSSProperties = {
     ['--ov-w' as any]: paneWidthCss,
@@ -573,9 +632,9 @@ export const NavigationOverlay: React.FC<NavigationOverlayProps> = ({
   /* The bar — the record's top bar (objectstack#27524, Target 7, after
      objectstack#26679): the left end holds `←` and the host's breadcrumb; the
      right end the counter and ↓ ↑, the host's panel switches, then ⤢ and ✕.
-     With a `recordRow` it is two rows (objectstack#35853): `←`, the
-     breadcrumb, ↑ ↓ and the counter over the record, ⤢ and ✕ at the far
-     right of the first. */
+     With a `recordRow` it is two rows (objectstack#35853): ✕, `←`, the
+     breadcrumb, ↑ ↓ and the counter over the record, ⤢ at the right of the
+     first (✕ moved to the left by objectstack#36557). */
   const bar = (
     <RecordTopBar
       leadingTestId="record-drawer-leading"
@@ -593,17 +652,18 @@ export const NavigationOverlay: React.FC<NavigationOverlayProps> = ({
       actionSlotRef={actionSlotRef}
       record={recordRow}
       toggles={toggles}
+      comments={comments}
       frame={
-        <>
-          {onExpand && (
-            <RecordTopBarButton label={resolvedExpandLabel} onClick={() => onExpand()} data-testid="record-pane-open-page">
-              <Maximize2 className="h-3.5 w-3.5" />
-            </RecordTopBarButton>
-          )}
-          <RecordTopBarButton label={closeLabel} onClick={close}>
-            <X className="h-3.5 w-3.5" />
+        onExpand ? (
+          <RecordTopBarButton label={resolvedExpandLabel} onClick={() => onExpand()} data-testid="record-pane-open-page">
+            <Maximize2 className="h-3.5 w-3.5" />
           </RecordTopBarButton>
-        </>
+        ) : undefined
+      }
+      close={
+        <RecordTopBarButton label={closeLabel} onClick={close}>
+          <X className="h-3.5 w-3.5" />
+        </RecordTopBarButton>
       }
     />
   );
@@ -634,7 +694,11 @@ export const NavigationOverlay: React.FC<NavigationOverlayProps> = ({
         // objectstack#26679 — below the root of an in-place stack, `Esc` goes
         // back one level. Only the root's `Esc` closes. objectstack#28156 — a
         // field's `Esc` stays the field's ({@link escapeOwnedByTarget}).
-        onEscapeKeyDown={onBack ? handleDrawerEscape : undefined}
+        // objectstack#36075 — at every level, a region's `Esc` stays the
+        // region's ({@link escapeOwnedByRegion}). objectstack#36472 — while
+        // the record is being edited, `Esc` ends the edit
+        // ({@link escapeOwnedByPaneSession}).
+        onEscapeKeyDown={handleDrawerEscape}
         ref={sheetRef}
         className={cn(
           // Mobile: full width (no inline cap, no max-w from base sheet).

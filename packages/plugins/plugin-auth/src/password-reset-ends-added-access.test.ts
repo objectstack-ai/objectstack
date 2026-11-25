@@ -56,12 +56,15 @@ import { SqlDriver } from '@objectstack/driver-sql';
 import { hashApiKey, resolveApiKeyAdmission } from '@objectstack/core';
 import { createHash } from 'node:crypto';
 import { mcpConsentAdmits } from './mcp-token-revocation.js';
+import { readCredentialChangedAt } from './credential-change-ends-prior-access.js';
 import { endWhatTheAccountRegistered } from './password-reset-ends-added-access.js';
 import { mintScimConnectionCredential, verifyScimBearerToken } from './scim-connection-service.js';
 import { AuthManager } from './auth-manager.js';
 import { AuthPlugin } from './auth-plugin.js';
 import { authIdentityObjects } from './manifest.js';
 import { setOperatorPassword } from './operator-password-reset.js';
+import { registerServiceAccountRowGuard } from './service-account-identity.js';
+import { registerServiceAccountOwnerLeavesTrigger } from './service-account-owner-leaves.js';
 import { inviteForAudienceGate } from './audience-gate-test-support';
 import { memoizeScrypt } from './__tests__/scrypt-memo.testkit';
 import { sqliteEnginePool } from './__tests__/sqlite-engine-pool.testkit';
@@ -411,6 +414,7 @@ describe('where the OAuth provider is mounted, a completed reset and a forced re
     }
   });
   afterEach(() => {
+    vi.useRealTimers();
     for (const key of ENV_KEYS) {
       if (saved[key] === undefined) delete process.env[key];
       else process.env[key] = saved[key];
@@ -523,17 +527,28 @@ describe('where the OAuth provider is mounted, a completed reset and a forced re
     await registerClient(s);
     await authorize(s, s.userId, 'user');
     await authorize(s, s.adminUserId, 'admin');
-    const issuedAt = Math.floor(Date.now() / 1000) + 1;
-    const grantStands = () => mcpConsentAdmits(s.auth.adapter, { clientId: CLIENT_ID, userId: s.userId }, issuedAt, s.auth.internalAdapter);
 
+    // A routine reset that takes longer than a second, as an administrator's
+    // call does under load: the wall clock moves two seconds on before it
+    // writes, so the change it stamps lies past any second read before the call.
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(Date.now() + 2_000);
     const routine = await s.fire(
       '/admin/set-user-password',
       { userId: s.userId, newPassword: SECOND, mustChangePassword: false, revokeSessionsAndKeys: false },
       s.bearer(s.adminBearer),
     );
     expect(routine.status, await routine.clone().text()).toBe(200);
+    // A token of the grant minted after the routine reset: its `iat` (no
+    // millisecond claim, so placed at `iat * 1000`) is the first whole second
+    // at or after the change that reset wrote, read back from the row, so it
+    // stands however long the reset took.
+    const changedAtMs = await readCredentialChangedAt(s.auth.internalAdapter, s.userId);
+    expect(changedAtMs, 'the routine reset stamps a credential change').toBeTypeOf('number');
+    const issuedAt = Math.ceil(changedAtMs! / 1000);
+    const grantStands = () => mcpConsentAdmits(s.auth.adapter, { clientId: CLIENT_ID, userId: s.userId }, issuedAt, s.auth.internalAdapter);
     expect(await grantsOf(s, s.userId), 'a routine reset ends nothing').toEqual(ALL);
-    expect(await grantStands()).toBe(true);
+    expect(await grantStands(), 'the MCP door admits a token of the grant minted after the routine reset').toBe(true);
 
     const forced = await s.fire(
       '/admin/set-user-password',
@@ -1166,5 +1181,162 @@ describe('every reset disables the OAuth applications the account registered and
     } finally {
       await engine.destroy?.();
     }
+  });
+
+  // An account disabled or removed by any door keeps nothing running in its
+  // name (`removed-account-registrations.ts`): an administrator's ban and an
+  // administrator's delete end what a reset ends of the account's
+  // registrations, through the reset's own arm, and an unban restores none.
+  describe("an administrator's ban and delete end the same, and an unban restores none of it", () => {
+    const ban = (s: Stage) => s.fire('/admin/ban-user', { userId: s.userId }, s.bearer(s.adminBearer));
+    const unban = (s: Stage) => s.fire('/admin/unban-user', { userId: s.userId }, s.bearer(s.adminBearer));
+    const remove = (s: Stage) => s.fire('/admin/remove-user', { userId: s.userId }, s.bearer(s.adminBearer));
+    /**
+     * The fixture's second-factor row out of the way of a delete: a
+     * `sys_two_factor` row holds a required `user_id` with no delete behaviour
+     * declared, so the engine refuses to delete a user who has one
+     * (`DELETE_RESTRICTED`, whatever this rule does). Not what these cases are
+     * about.
+     */
+    const dropSecondFactor = (s: Stage) => s.engine.delete('sys_two_factor', { where: { id: 'tf_user' }, context: { isSystem: true } } as never);
+    const userRowExists = async (s: Stage) =>
+      ((await s.engine.find('sys_user', { where: { id: s.userId }, context: { isSystem: true } } as never)) as unknown[]).length === 1;
+    /** The administrator's ledger rows for a ban of the account, by their metadata. */
+    const banLedger = async (s: Stage) =>
+      ((await s.engine.find('sys_audit_log', { where: { record_id: s.userId }, context: { isSystem: true } } as never)) as Array<{ metadata: string }>)
+        .map((row) => JSON.parse(row.metadata) as Record<string, unknown>)
+        .filter((metadata) => metadata.event === 'user.admin_banned');
+
+    it('a ban disables the apps and revokes the credential, answers the counts on the response and the ledger, and an unban restores none', async () => {
+      const s = await stage({ plugins: { oidcProvider: true } });
+      const { userBearer, userCredentialId, adminBearer } = await registered(s);
+      const kept = await keptRows(s);
+
+      const banned = await ban(s);
+      expect(banned.status, await banned.clone().text()).toBe(200);
+      const body = (await banned.json()) as { data?: { revoked?: Record<string, unknown> } };
+      expect(body.data?.revoked).toEqual({ serviceAccounts: 0, ownedApps: 2, scimCredentials: 1, failed: 0, complete: true });
+      expect(await disabledApps(s), "the account's enabled apps are disabled; the administrator's is not").toEqual(OWNED_DISABLED);
+      expect(await scimAdmits(s, userBearer), 'the credential the account minted no longer verifies').toBe(false);
+      expect(await scimAdmits(s, adminBearer), "the administrator's credential for the same connection still does").toBe(true);
+      expect(await keptRows(s), 'the single sign-on provider is kept, as a reset keeps it').toEqual(kept);
+      expect(await credentialRevokeTrail(s), 'the revoke is recorded against the administrator who banned').toEqual(
+        revokedBy(s.adminUserId, userCredentialId),
+      );
+      const ledger = await banLedger(s);
+      expect(ledger).toHaveLength(1);
+      expect(ledger[0]).toMatchObject({ suspendedServiceAccounts: 0, revokedOwnedApps: 2, revokedScimCredentials: 1, revocationComplete: true });
+      expect(s.mail.filter((m) => m.template === RESET_NOTICE), 'a ban mails the account nothing').toEqual([]);
+
+      const lifted = await unban(s);
+      expect(lifted.status, await lifted.clone().text()).toBe(200);
+      expect(await disabledApps(s), 'an unban enables no app').toEqual(OWNED_DISABLED);
+      expect(await scimAdmits(s, userBearer), 'and restores no credential').toBe(false);
+    }, 60_000);
+
+    it("an administrator's delete ends them inside its unit of work, before the row goes, and answers the counts", async () => {
+      const s = await stage({ plugins: { oidcProvider: true } });
+      const { userBearer, userCredentialId, adminBearer } = await registered(s);
+      await dropSecondFactor(s);
+
+      const removed = await remove(s);
+      expect(removed.status, await removed.clone().text()).toBe(200);
+      const body = (await removed.json()) as { success?: unknown; revoked?: Record<string, unknown> };
+      expect(body).toEqual({ success: true, revoked: { ownedApps: 2, scimCredentials: 1 } });
+      expect(await userRowExists(s), 'the account is removed').toBe(false);
+      expect(await disabledApps(s)).toEqual(OWNED_DISABLED);
+      expect(await scimAdmits(s, userBearer)).toBe(false);
+      expect(await scimAdmits(s, adminBearer), "the administrator's credential still verifies").toBe(true);
+      expect(await credentialRevokeTrail(s), 'the revoke is recorded against the administrator who removed the account').toEqual(
+        revokedBy(s.adminUserId, userCredentialId),
+      );
+    }, 60_000);
+
+    it('a delete whose registrations cannot be ended is refused, and nothing is changed', async () => {
+      const s = await stage({ plugins: { oidcProvider: true } });
+      const { userBearer } = await registered(s);
+      await dropSecondFactor(s);
+      const original = s.engine.update.bind(s.engine);
+      vi.spyOn(s.engine, 'update').mockImplementation((async (object: string, ...rest: unknown[]) => {
+        if (object === 'sys_scim_connection_credential') throw new Error('sys_scim_connection_credential cannot be written');
+        return (original as (...a: unknown[]) => Promise<unknown>)(object, ...rest);
+      }) as never);
+
+      expect(await answer(await remove(s))).toEqual({ status: 503, code: 'SERVICE_UNAVAILABLE' });
+      vi.mocked(s.engine.update).mockRestore();
+      expect(await userRowExists(s), 'the account is not removed').toBe(true);
+      expect(await disabledApps(s), 'the apps disabled before the failure are rolled back with the delete').toEqual(NONE_DISABLED);
+      expect(await scimAdmits(s, userBearer)).toBe(true);
+
+      // The control: the same delete, its writes answered, removes the account.
+      expect((await remove(s)).status).toBe(200);
+      expect(await userRowExists(s)).toBe(false);
+      expect(await scimAdmits(s, userBearer)).toBe(false);
+    }, 60_000);
+
+    // An administrator's delete of a person accountable for an AI service
+    // account is refused: deleting the row would null the account's
+    // `accountable_user_id` (the lookup's default `set_null`), which the
+    // account's row rules refuse, and the delete's unit of work rolls back with
+    // what the arm ended. So no account is left running in the name of a
+    // removed person: an administrator names a new owner, or retires the
+    // account, first.
+    it("an administrator's delete of an AI service account's accountable owner is refused, and rolls back what it ended", async () => {
+      const s = await stage({ plugins: { oidcProvider: true } });
+      const { userBearer } = await registered(s);
+      await dropSecondFactor(s);
+      registerServiceAccountRowGuard(s.engine, { packageId: 'test.sa-row-guard' });
+      registerServiceAccountOwnerLeavesTrigger(s.engine, { packageId: 'test.sa-owner-leaves' });
+      try {
+        const org = 'org_desk';
+        await s.engine.insert('sys_organization', { id: org, name: 'Desk', slug: 'desk' }, SYS);
+        await s.engine.insert('sys_member', { id: 'mem_owner_desk', user_id: s.userId, organization_id: org, role: 'member' }, SYS);
+        await s.engine.insert(
+          'sys_user',
+          { id: 'usr_agent_desk', name: 'Desk agent', email: 'desk-agent@agents.example', email_verified: false, principal_kind: 'agent', accountable_user_id: s.userId },
+          SYS,
+        );
+        await s.engine.insert('sys_member', { id: 'mem_agent_desk', user_id: 'usr_agent_desk', organization_id: org, role: 'member' }, SYS);
+
+        expect(await answer(await remove(s))).toEqual({ status: 400, code: 'VALIDATION_FAILED' });
+        expect(await userRowExists(s), 'the person is not removed').toBe(true);
+        const agent = ((await s.engine.find('sys_user', { where: { id: 'usr_agent_desk' }, context: { isSystem: true } } as never)) as any[])[0];
+        expect({ owner: agent?.accountable_user_id, banned: agent?.banned === true || agent?.banned === 1 }, 'the account keeps its owner').toEqual({
+          owner: s.userId,
+          banned: false,
+        });
+        expect(await disabledApps(s), 'what the arm ended rolled back with the refused delete').toEqual(NONE_DISABLED);
+        expect(await scimAdmits(s, userBearer)).toBe(true);
+
+        // The control: once the account is handed to another person (what
+        // set-owner writes), the same delete removes its former owner.
+        await s.engine.update('sys_user', { id: 'usr_agent_desk', accountable_user_id: s.adminUserId }, SYS);
+        expect((await remove(s)).status).toBe(200);
+        expect(await userRowExists(s)).toBe(false);
+        expect(await scimAdmits(s, userBearer)).toBe(false);
+      } finally {
+        (s.engine as unknown as { unregisterHooksByPackage(id: string): void }).unregisterHooksByPackage('test.sa-row-guard');
+        (s.engine as unknown as { unregisterHooksByPackage(id: string): void }).unregisterHooksByPackage('test.sa-owner-leaves');
+        // Through the engine, so its organization memo is invalidated for the next case.
+        for (const id of ['mem_owner_desk', 'mem_agent_desk']) {
+          await s.engine.delete('sys_member', { where: { id }, context: { isSystem: true } } as never).catch(() => undefined);
+        }
+        await s.engine.delete('sys_organization', { where: { id: 'org_desk' }, context: { isSystem: true } } as never);
+      }
+    }, 60_000);
+
+    it('an account that registered nothing is banned and removed as before, with nothing to end', async () => {
+      const s = await stage();
+      const banned = await ban(s);
+      expect(banned.status, await banned.clone().text()).toBe(200);
+      expect(((await banned.json()) as { data?: { revoked?: unknown } }).data?.revoked).toEqual({
+        serviceAccounts: 0, ownedApps: 0, scimCredentials: 0, failed: 0, complete: true,
+      });
+      expect(await credentialRevokeTrail(s)).toEqual([]);
+      const removed = await remove(s);
+      expect(removed.status, await removed.clone().text()).toBe(200);
+      expect(await removed.json()).toEqual({ success: true, revoked: { ownedApps: 0, scimCredentials: 0 } });
+      expect(await userRowExists(s)).toBe(false);
+    }, 60_000);
   });
 });

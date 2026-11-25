@@ -17,16 +17,18 @@
 
 ## 席位是读出来的,不是配出来的
 
-- 项目的席位 = 🟢 行写本账号的座位贴(车道、总监、分诊同此);派发前先读座位贴。
+- 项目的席位 = 🟢 行写本账号的座位贴;派发前先读座位贴。
 - 指令行就是指派:维护者在项目里写下或改写这一行,是唯一的指派动作。
 - 项目聊天里的长句(「本账户坐 X;Y 的 PR 由本账户复审」)是等价写法。
 - 坐席即把本账号写进 🟢 行、每席开一条席位线程;⛔ 无花名册文件。
 
 ## 接管不等撞墙账号
 
-- 🟢 行写着别的账号 ⇒ 指令行即维护者强制接管令,含在飞卡。
+- 🟢 行写着别的账号 ⇒ 指令行即维护者强制接管令。
 - 四件形状见 `execution-duties.md` 认领节;台账 = 标签 + assignee + `Claim:` + `head:claude/` PR。
 - 台账按 `assignee:<旧登录名>` 读;⛔ 项目记忆与共享目录永不是台账,只是本账号的缓存。
+- 项目记忆只存维护者原话(带时间)与技能指针,⛔ 不复述规则;与技能相左 ⇒ 照技能,删该行。
+- 维护者裁决与技能相左 ⇒ 当日立技能卡,记忆行点名它,合并即删;技能 PR 合并 ⇒ 协调者照改动行查记忆。
 
 ## 信箱 PR
 
@@ -37,8 +39,7 @@
 - 跨账号或跨项目:车道→L2 或兄弟席 `Request: contract-review`;反向随记录 `Notify: contract-review`。
 - 任一席→分诊:p0 嫌疑、main 红、确定性队列红 `Request: urgent-triage`。
 - 立锚卡者→分诊(缺则总监)`Request: main-red`,→破坏 PR 的席与锚卡车道 `Notify: main-red`。
-- 锚卡关闭:分诊(缺则总监)→正文带 `Waits-on: main-red #n` 的每张 open PR 之席 `Notify: main-green`。
-  队列 flake 锚卡同理:敲其签名踢出(名单照 `lanes/queue.md`)、仍开且未回队的每张 PR 之席。
+- 锚卡关闭:分诊(缺则总监)→正文带 `Waits-on: main-red #n` 的每张 open PR 之席 `Notify: main-green`。队列 flake 锚卡同理:敲其签名踢出(名单照 `lanes/queue.md`)、仍开且未回队的每张 PR 之席。
 - 车道→分诊问卡去留路由定级 `Request: triage`;发版板生产者→车道 `Notify: release-blocker`。
 - 车道→cloud 席:缺 cloud 事实读数 `Request: cloud-confirm`;反向随记录 `Notify: cloud-confirm`。
 - 移卡入队者→车道:p0/p1 `Blocked-by` 关闭 `Notify: unblocked`;记裁决席→被改席 `Notify: ruling`。

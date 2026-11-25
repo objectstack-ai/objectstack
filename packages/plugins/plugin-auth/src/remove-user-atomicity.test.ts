@@ -32,6 +32,8 @@
 // (`assertEngineDeleteDispatch` / `assertEngineUpdateDispatch`, #4550/#5480) so
 // the double cannot accept a call ObjectQL refuses.
 
+// Pays the first load of the egress module at collection, not inside a clocked test.
+import '@objectstack/core/egress';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { assertEngineDeleteDispatch, assertEngineUpdateDispatch, assertEngineFindOnePredicate } from '@objectstack/objectql';
 import { SysMember } from '@objectstack/platform-objects';
@@ -100,8 +102,10 @@ const createMemoryEngine = (vetoUserDelete?: () => Error | undefined) => {
     a instanceof Date || b instanceof Date
       ? new Date(a as any).getTime() === new Date(b as any).getTime()
       : a === b;
-  const matches = (row: any, where: Record<string, any> = {}) =>
+  const matches = (row: any, where: Record<string, any> = {}): boolean =>
     Object.entries(where).every(([k, v]) => {
+      // A conjunction of conditions, as the engine's predicate path takes one.
+      if (k === '$and' && Array.isArray(v)) return v.every((w) => matches(row, w));
       if (k.startsWith('$')) throw new Error(`fake driver: unsupported operator ${k}`);
       const actual = row[k];
       if (v && typeof v === 'object' && !Array.isArray(v) && !(v instanceof Date)) {
@@ -163,7 +167,15 @@ const createMemoryEngine = (vetoUserDelete?: () => Error | undefined) => {
       return rows(name).filter((r) => matches(r, q.where)).length;
     },
     async update(name: string, patch: any, options?: any) {
-      assertEngineUpdateDispatch(patch, options);
+      const dispatch = assertEngineUpdateDispatch(patch, options);
+      // The predicate path (`multi: true`, a `where` and no id in the payload)
+      // writes every matching row and answers how many it wrote.
+      if (dispatch.kind === 'multi') {
+        const targets = rows(name).filter((r) => matches(r, options?.where));
+        for (const target of targets) assertMemberUnique(name, { ...target, ...patch }, target.id);
+        for (const target of targets) Object.assign(target, patch);
+        return targets.length;
+      }
       const row = rows(name).find((r) => r.id === patch.id);
       if (!row) return null;
       assertMemberUnique(name, { ...row, ...patch }, row.id);

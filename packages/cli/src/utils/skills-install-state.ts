@@ -19,16 +19,43 @@
  *  - `modified` — a recorded skill with a file changed, removed or added;
  *  - `extra` — a skill directory the record does not name (the user's own,
  *    reported and left alone).
+ *
+ * ## The write ({@link applySkillsWrite})
+ *
+ * Staged, swapped by rename, recorded last — so a write that fails partway
+ * (disk full, permission, a locked file) leaves the previous catalog and its
+ * record exactly as they were, and a plain `update` simply runs again:
+ *
+ *  1. every new skill directory is written into a staging directory inside
+ *     `dir` ({@link SKILLS_STAGING_PREFIX}, hidden, so on the same filesystem
+ *     and never read as a skill);
+ *  2. each touched skill directory is renamed aside into the staging directory
+ *     and its staged copy renamed into place;
+ *  3. the record is written into the staging directory and renamed over the
+ *     old one.
+ *
+ * Any failure in 1–3 undoes the renames already done, newest first, so it is
+ * all or nothing across the skills: the record never names a directory the
+ * failure removed, nor a directory at a version it does not record. The
+ * staging directory goes last; one a killed run left behind is hidden, so
+ * `status` and the plan ignore it, and the next write removes it.
  */
 
 import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { dirname, join, relative, resolve, sep } from 'node:path';
 
 import { SKILLS_PACKAGE, SKILL_NAME, isExactVersion, isSafePathSegment, type SkillsCatalog } from './skills-catalog.js';
 
 /** The record's file name, inside the skills directory. */
 export const SKILLS_MANIFEST_FILE = '.objectstack-skills.json';
+
+/**
+ * The name prefix of the staging directory a write builds inside the skills
+ * directory. Hidden (a skill name starts with a letter or a digit), so neither
+ * an agent nor {@link inspectSkillsDir} reads it as a skill.
+ */
+export const SKILLS_STAGING_PREFIX = '.objectstack-skills-staging-';
 
 /** Where a Claude Code project keeps its skills, relative to the working directory. */
 export const DEFAULT_SKILLS_DIR = join('.claude', 'skills');
@@ -192,31 +219,101 @@ function underRoot(root: string, target: string): string {
   return resolved;
 }
 
+/** One undoable rename of {@link applySkillsWrite}'s swap. */
+interface SwapStep {
+  from: string;
+  to: string;
+}
+
 /**
  * Write `catalog` into `dir` along `plan`: remove each dropped skill, replace
  * each recorded one and each conflict (the caller decided those may go), add
  * the rest, then write the record last. Only directories the plan names are
- * touched.
+ * touched, and a failure partway leaves `dir` as it was (see the module
+ * header), rethrowing the failure.
  */
 export function applySkillsWrite(dir: string, catalog: SkillsCatalog, plan: SkillsWritePlan): SkillsManifest {
   // Every target is judged before the first write, so a refusal leaves the directory as it was.
-  const dropped = plan.dropped.map((name) => underRoot(dir, join(dir, name)));
+  const dropped = plan.dropped.map((name) => ({ name, root: underRoot(dir, join(dir, name)) }));
   const writes = [...catalog.skills].map(([name, files]) => {
     const root = underRoot(dir, join(dir, name));
-    return { root, files: [...files].map(([path, bytes]) => ({ target: underRoot(root, join(root, ...path.split('/'))), bytes })) };
+    return { name, root, files: [...files].map(([path, bytes]) => ({ rel: relative(root, underRoot(root, join(root, ...path.split('/')))), bytes })) };
   });
+  const manifest = manifestForCatalog(catalog);
+
   mkdirSync(dir, { recursive: true });
-  for (const target of dropped) rmSync(target, { recursive: true, force: true });
-  for (const { root, files } of writes) {
-    rmSync(root, { recursive: true, force: true });
-    for (const { target, bytes } of files) {
-      mkdirSync(dirname(target), { recursive: true });
-      writeFileSync(target, bytes);
+  removeStagingLeftovers(dir);
+  const staging = mkdtempSync(join(dir, SKILLS_STAGING_PREFIX));
+  const staged = join(staging, 'new');
+  const aside = join(staging, 'old');
+  const done: SwapStep[] = [];
+  const move = (from: string, to: string) => {
+    renameSync(from, to);
+    done.push({ from, to });
+  };
+  try {
+    for (const { name, files } of writes) {
+      for (const { rel, bytes } of files) {
+        const target = join(staged, name, rel);
+        mkdirSync(dirname(target), { recursive: true });
+        writeFileSync(target, bytes);
+      }
+    }
+    mkdirSync(aside);
+    for (const { name, root } of dropped) {
+      if (existsSync(root)) move(root, join(aside, name));
+    }
+    for (const { name, root } of writes) {
+      if (existsSync(root)) move(root, join(aside, name));
+      move(join(staged, name), root);
+    }
+    const record = join(staging, SKILLS_MANIFEST_FILE);
+    writeFileSync(record, `${JSON.stringify(manifest, null, 2)}\n`);
+    renameSync(record, join(dir, SKILLS_MANIFEST_FILE));
+  } catch (error) {
+    const stuck = undoSwap(done);
+    if (stuck.length === 0) removeStaging(staging);
+    else {
+      (error as Error).message += ` Restoring the previous skills failed too (${stuck.join('; ')}); `
+        + `their copies are in ${aside}: move them back into ${dir} before running \`os skills\` again.`;
+    }
+    throw error;
+  }
+  removeStaging(staging);
+  return manifest;
+}
+
+/**
+ * Remove a staging directory, best effort: one that will not go is hidden and
+ * read by nothing, and the next write removes it ({@link removeStagingLeftovers}),
+ * so its failure never masks the outcome of the write it served.
+ */
+function removeStaging(staging: string): void {
+  try {
+    rmSync(staging, { recursive: true, force: true });
+  } catch {
+    // Left for the next write.
+  }
+}
+
+/** Undo `done`, newest first, trying every step; the steps that could not be undone, described. */
+function undoSwap(done: SwapStep[]): string[] {
+  const stuck: string[] = [];
+  for (const { from, to } of [...done].reverse()) {
+    try {
+      renameSync(to, from);
+    } catch (error) {
+      stuck.push(`${to} → ${from}: ${(error as Error).message}`);
     }
   }
-  const manifest = manifestForCatalog(catalog);
-  writeFileSync(join(dir, SKILLS_MANIFEST_FILE), `${JSON.stringify(manifest, null, 2)}\n`);
-  return manifest;
+  return stuck;
+}
+
+/** Remove the staging directories an earlier, killed write left in `dir`. */
+function removeStagingLeftovers(dir: string): void {
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    if (entry.isDirectory() && entry.name.startsWith(SKILLS_STAGING_PREFIX)) rmSync(join(dir, entry.name), { recursive: true, force: true });
+  }
 }
 
 /** One line per modified skill, for the text face: what changed, was removed or was added. */

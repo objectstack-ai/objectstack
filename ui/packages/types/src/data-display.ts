@@ -1537,6 +1537,19 @@ export interface DataTableSchema extends BaseSchema {
    */
   onColumnsReorder?: (columns: TableColumn[]) => void;
   /**
+   * Column hide handler (objectstack#35955): called with the column's
+   * `accessorKey` when the reader picks "Hide column" in the column menu. The
+   * table hides the column in its own state either way; a host that keeps the
+   * columns shown (the list's hidden fields) hears the choice here and owns it
+   * from then on. Absent ⇒ the hide lives in the table's state alone.
+   *
+   * RUNTIME SLOT (the objectui#6124 shape) — a host-supplied function, NOT
+   * authorable metadata: JSON has no function value, so the zod twin refuses
+   * this key by name. Called by `renderers/complex/data-table.tsx`; supplied by
+   * `ObjectGrid` (`@object-ui/plugin-grid`) from its `onColumnHide` prop.
+   */
+  onColumnHide?: (columnKey: string) => void;
+  /**
    * Enable inline cell editing
    * When true, cells become editable on double-click or Enter key
    *
@@ -1673,8 +1686,30 @@ export interface DataTableSchema extends BaseSchema {
    * Answering `null` (or `undefined` / `false`) keeps the browser's menu for
    * that row. Absent, a table with its own row "⋮" menu opens those items, and
    * every other table keeps the browser's menu, exactly as before.
+   *
+   * `context.column` (objectstack#36290) is the accessor of the data cell the
+   * menu opened on, absent when it opened elsewhere on the row (the selection
+   * or "⋮" cell, or the keyboard on the row itself), so a host can add items
+   * about that cell, such as the field's change history.
+   *
+   * `context.cell` (objectstack#36289) is what the table itself does with that
+   * data cell, present exactly when `column` is: `copy` writes the cell's value
+   * to the clipboard as Ctrl/Cmd+C on the selected cell does, `paste` reads the
+   * clipboard and writes it into the cell as a paste on the selected cell does
+   * (the same conversion, the editor's checks and the same save), and `clear`
+   * empties the cell as Backspace on the selected cell does. Each is absent
+   * where the table would refuse it: `copy` on a masked cell; `paste` on a cell
+   * the reader may not edit; `clear` there too, and on a required or a
+   * two-state (yes/no) cell. A host draws them as items about that cell.
    */
-  renderRowContextMenu?: (row: any, context: { selected: boolean }) => React.ReactNode;
+  renderRowContextMenu?: (
+    row: any,
+    context: {
+      selected: boolean;
+      column?: string;
+      cell?: { copy?: () => void; paste?: () => void; clear?: () => void };
+    },
+  ) => React.ReactNode;
   /**
    * Group bands (objectui#12620): draw the table as ONE table, with one header,
    * whose body is a band row per group followed by that group's rows.

@@ -14,24 +14,24 @@ a row or a number here — fix the code, or the census, and regenerate.
 
 | Measure | Value |
 |---|---:|
-| Write call sites | 25 |
-| Object name statically decidable | 22 |
+| Write call sites | 26 |
+| Object name statically decidable | 23 |
 | Object name chosen at run time | 3 |
 | Object name spelled inline | 20 |
-| Object name spelled through a `const` | 2 |
+| Object name spelled through a `const` | 3 |
 | Object name is an `object: string` parameter | 0 |
 | Object name is some other run-time expression | 3 |
-| Against a tenancy-enabled object | 22 |
+| Against a tenancy-enabled object | 23 |
 | Against an object declaring tenancy off | 0 |
-| Threading a tenant context | 16 |
+| Threading a tenant context | 17 |
 | Provably carrying none (options read, no context key) | 0 |
 | …and decidably tenancy-enabled | 0 |
 | Options argument unreadable | 9 |
 | …and decidably tenancy-enabled | 8 |
 | Threading a decidably elevated (`isSystem`) context | 8 |
 | Threading a decidably non-elevated context | 0 |
-| Threading a context of undecidable elevation | 17 |
-| Receiver carried a readable engine type | 15 |
+| Threading a context of undecidable elevation | 18 |
+| Receiver carried a readable engine type | 16 |
 | Receiver erased, placed by the object NAME | 10 |
 | Receiver erased, placed by an `object: string` PARAMETER | 0 |
 | Receiver erased, placed by an `UNTYPED_RECEIVERS` row | 0 |
@@ -48,6 +48,7 @@ a row or a number here — fix the code, or the census, and regenerate.
 | file | verb | object | tenancy | tenant context | n |
 |---|---|---|---|---|---:|
 | `packages/services/service-storage/src/attachment-lifecycle.ts` | `update` | `sys_file` | enabled | elevated | 4 |
+| `packages/services/service-storage/src/attachment-removal-routes.ts` | `update` | `sys_attachment` | enabled | context, elevation undecidable | 1 |
 | `packages/services/service-storage/src/backfill-file-references.ts` | `update` | `object` | undecidable | options unreadable | 1 |
 | `packages/services/service-storage/src/backfill-file-references.ts` | `update` | `object` | undecidable | elevated | 1 |
 | `packages/services/service-storage/src/backfill-file-references.ts` | `insert` | `sys_file` | enabled | context, elevation undecidable | 1 |

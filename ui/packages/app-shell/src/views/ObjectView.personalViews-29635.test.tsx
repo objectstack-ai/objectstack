@@ -107,8 +107,6 @@ vi.mock('./RecordDetailView', () => ({ RecordDetailView: () => null }));
 import { ObjectView } from './ObjectView';
 import { listDraftScope, patchListDraft, readListDraft, resetListDraftStoreForTests, type ListDraftPatch } from './listDraftStore';
 import { ExpressionProvider } from '../providers/ExpressionProvider';
-import { UserStateAdaptersProvider, useAttachListStateFamily } from '../context/UserStateAdapters';
-import { ListPreferencesProvider, listPreferenceKey } from '../context/ListPreferencesProvider';
 import { applyListStateParams } from './userFilterUrlState';
 import { toast } from 'sonner';
 
@@ -444,26 +442,24 @@ describe('objectstack#29635 — My views in the list view switcher', () => {
 });
 
 /**
- * objectstack#30034 — the two reads a personal view opened by its address
- * waits on: the reader's own views (`sys_personal_view`) and the list
- * preferences (the attached family's first load). Each lands when the case
- * says, and the address bar is the page's history, read where the router
- * wrote it.
+ * objectstack#30034 — a personal view opened by its address waits on the
+ * reader's own views (`sys_personal_view`), while the default view holds a
+ * draft of the reader's (objectstack#35955: what they changed there and left;
+ * before it, the stored list preferences, a second read). The read lands when
+ * the case says, and the address bar is the page's history, read where the
+ * router wrote it.
  *
  * The race the card measured: the location the router hands the page moves in
  * a transition, so a read landing between the page's URL write and its commit
  * renders against the address as it was before that write. `landPersonalOn`
- * `'firstReplace'` lands the personal views read exactly there.
+ * `'firstReplace'` lands the personal views read exactly there; `'atOnce'`
+ * lands it before the page writes the address at all.
  */
 describe('objectstack#30034 — a personal view opened by its address never carries the default view\'s list state', () => {
-  /** The reader's stored list state for the DEFAULT view, `v1`: a filter and a sort. */
-  const DEFAULT_VIEW_STATE = {
-    perView: {
-      v1: {
-        sort: [{ field: 'status', order: 'desc' }],
-        filters: { id: 'root', logic: 'and', conditions: [{ id: 'c1', field: 'city', operator: 'equals', value: 'Rome' }] },
-      },
-    },
+  /** The reader's draft on the DEFAULT view, `v1`: a filter and a sort. */
+  const DEFAULT_VIEW_DRAFT = {
+    sort: [{ field: 'status', order: 'desc' as const }],
+    filters: { id: 'root', logic: 'and' as const, conditions: [{ id: 'c1', field: 'city', operator: 'equals', value: 'Rome' }] },
   };
 
   function deferred<T>() {
@@ -472,26 +468,15 @@ describe('objectstack#30034 — a personal view opened by its address never carr
     return { promise, resolve };
   }
 
-  function AttachFamily({ family }: { family: unknown }) {
-    const attach = useAttachListStateFamily();
-    React.useEffect(() => {
-      attach(family as never);
-      return () => attach(null);
-    }, [attach, family]);
-    return null;
-  }
-
   function mountPersonal(
     entry: string,
-    { landPersonalOn }: { landPersonalOn: 'firstReplace' | 'beforePreferences' },
+    { landPersonalOn }: { landPersonalOn: 'firstReplace' | 'atOnce' },
   ) {
+    patchListDraft(listDraftScope('u1', 'crm_lead', 'v1'), DEFAULT_VIEW_DRAFT as ListDraftPatch);
     const objects = [LEAD];
     const i18n = createI18n({ defaultLanguage: 'en', detectBrowserLanguage: false });
     const personalRead = deferred<{ data: unknown[]; total: number }>();
-    const preferencesRead = deferred<Record<string, unknown>>();
     const landPersonal = () => personalRead.resolve({ data: [OWN], total: 1 });
-    const landPreferences = () => preferencesRead.resolve({ [listPreferenceKey('crm_lead')]: structuredClone(DEFAULT_VIEW_STATE) });
-    const family = { prefix: 'ui.list.', load: vi.fn(() => preferencesRead.promise), save: vi.fn(async () => {}) };
     const history = createMemoryHistory({ initialEntries: [entry], v5Compat: true });
     const replace = history.replace.bind(history);
     let replaced = 0;
@@ -509,28 +494,22 @@ describe('objectstack#30034 — a personal view opened by its address never carr
       delete: vi.fn(async () => ({})),
     };
     render(
-      <UserStateAdaptersProvider>
-        <AttachFamily family={family} />
-        <ListPreferencesProvider>
-          <I18nProvider instance={i18n}>
-            <ExpressionProvider user={{ id: 'u1', name: 'Sales Rep' }}>
-              <HistoryRouter history={history as never}>
-                <Routes>
-                  <Route
-                    path="/apps/:appName/:objectName/view/:viewId"
-                    element={<ObjectView dataSource={dataSource as never} objects={objects} onEdit={() => {}} />}
-                  />
-                </Routes>
-              </HistoryRouter>
-            </ExpressionProvider>
-          </I18nProvider>
-        </ListPreferencesProvider>
-      </UserStateAdaptersProvider>,
+      <I18nProvider instance={i18n}>
+        <ExpressionProvider user={{ id: 'u1', name: 'Sales Rep' }}>
+          <HistoryRouter history={history as never}>
+            <Routes>
+              <Route
+                path="/apps/:appName/:objectName/view/:viewId"
+                element={<ObjectView dataSource={dataSource as never} objects={objects} onEdit={() => {}} />}
+              />
+            </Routes>
+          </HistoryRouter>
+        </ExpressionProvider>
+      </I18nProvider>,
     );
     return {
       dataSource,
       landPersonal,
-      landPreferences,
       /** The `uf_*` params of the address bar, by name. */
       ufParams: () => Object.fromEntries([...new URLSearchParams(history.location.search)].filter(([key]) => key.startsWith('uf_'))),
     };
@@ -544,11 +523,9 @@ describe('objectstack#30034 — a personal view opened by its address never carr
       .filter(([resource, params]) => resource === 'crm_lead' && (params as { $top?: number } | undefined)?.$top !== 0)
       .map(([, params]) => params as Record<string, unknown>);
 
-  it('the personal views read landing AFTER the preferences read: the address bar ends clean, holding only the personal view\'s own state', async () => {
+  it('the personal views read still out while the default view\'s draft is held: the address bar ends clean, holding only the personal view\'s own state', async () => {
     const page = mountPersonal('/apps/crm/crm_lead/view/pv_mine', { landPersonalOn: 'firstReplace' });
-    // The preferences land first; the personal views read is still out.
     await waitFor(() => expect(page.dataSource.find.mock.calls.some(([r]) => r === 'sys_personal_view')).toBe(true));
-    page.landPreferences();
     await settle();
     // Nothing wrote the address while the requested view was unresolved, so
     // the personal views read is still out: land it now.
@@ -563,12 +540,10 @@ describe('objectstack#30034 — a personal view opened by its address never carr
     expect(last).not.toContain('Rome');
   });
 
-  it('the reverse order — the personal views read landing BEFORE the preferences read: the address bar ends clean too', async () => {
-    const page = mountPersonal('/apps/crm/crm_lead/view/pv_mine', { landPersonalOn: 'beforePreferences' });
+  it('the personal views read landing at once: the address bar ends clean too', async () => {
+    const page = mountPersonal('/apps/crm/crm_lead/view/pv_mine', { landPersonalOn: 'atOnce' });
     await waitFor(() => expect(page.dataSource.find.mock.calls.some(([r]) => r === 'sys_personal_view')).toBe(true));
     page.landPersonal();
-    await settle();
-    page.landPreferences();
     await listToolbar();
     expect(switcher()).toHaveTextContent('Paris leads');
     await settle();
@@ -583,7 +558,6 @@ describe('objectstack#30034 — a personal view opened by its address never carr
     const query = applyListStateParams(new URLSearchParams(), { sort }).toString();
     const page = mountPersonal(`/apps/crm/crm_lead/view/pv_mine?${query}`, { landPersonalOn: 'firstReplace' });
     await waitFor(() => expect(page.dataSource.find.mock.calls.some(([r]) => r === 'sys_personal_view')).toBe(true));
-    page.landPreferences();
     await settle();
     page.landPersonal();
     await listToolbar();
@@ -788,5 +762,49 @@ describe('objectstack#30073 — a personal view\'s conditions are Filter panel r
     expect(toast.success).toHaveBeenCalledWith('Saved');
     await waitFor(() => expect(screen.queryByTestId('list-draft')).toBeNull());
     expect(draftOf('v1')).toEqual({});
+  });
+
+  it.each([
+    ['no label', undefined, 'Leads copy'],
+    ['a label given as a locale map', { en: 'Hot list', 'zh-CN': '热门' }, 'Hot list copy'],
+  ])('objectstack#35955 L1-b S1 — 「Save as my view」 names the copy by the view\'s tab label when it has %s', async (_case, label, expected) => {
+    const v1 = LEAD.listViews.v1 as Record<string, unknown>;
+    const authored = v1.label;
+    if (label === undefined) delete v1.label;
+    else v1.label = label;
+    try {
+      mountLeads(romeLink('/apps/crm/crm_lead/view/v1'));
+      await listToolbar();
+      fireEvent.pointerDown(await screen.findByTestId('list-draft-save'), { button: 0, ctrlKey: false, pointerType: 'mouse' });
+      fireEvent.click(await screen.findByTestId('list-draft-save-as'));
+      // Never 「 copy」 or 「[object Object] copy」: the name the tab draws.
+      expect(await screen.findByDisplayValue(expected)).toBeInTheDocument();
+    } finally {
+      v1.label = authored;
+    }
+  });
+
+  it('objectstack#35955 — the draft\'s row colour is saved too: into the reader\'s own view, and into a view of their own', async () => {
+    const RED = { field: 'status', colors: { open: 'red' } };
+    storeListState({ perView: { pv_mine: { sort: [{ field: 'name', order: 'desc' }], rowColor: RED } } });
+    const { dataSource } = mountLeads('/apps/crm/crm_lead/view/pv_mine');
+    await listToolbar();
+    await saveToThisView();
+    await waitFor(() => expect(dataSource.update).toHaveBeenCalledTimes(1));
+    const patch = dataSource.update.mock.calls[0][2];
+    expect(patch.config.rowColor).toEqual(RED);
+    expect(patch.config.sort).toEqual([{ field: 'name', order: 'desc' }]);
+    expect(ListViewSchema.safeParse(patch.config).success).toBe(true);
+    cleanup();
+
+    storeListState({ perView: { v1: { sort: [{ field: 'name', order: 'desc' }], rowColor: RED } } });
+    const second = mountLeads('/apps/crm/crm_lead/view/v1');
+    await listToolbar();
+    fireEvent.pointerDown(await screen.findByTestId('list-draft-save'), { button: 0, ctrlKey: false, pointerType: 'mouse' });
+    fireEvent.click(await screen.findByTestId('list-draft-save-as'));
+    await screen.findByDisplayValue('View 1 copy');
+    fireEvent.click(screen.getByTestId('personal-view-name-submit'));
+    await waitFor(() => expect(second.dataSource.create).toHaveBeenCalledTimes(1));
+    expect(second.dataSource.create.mock.calls[0][1].config.rowColor).toEqual(RED);
   });
 });

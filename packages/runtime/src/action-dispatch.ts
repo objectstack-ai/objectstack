@@ -326,6 +326,12 @@ interface Admission {
     recordId: any;
     params: Record<string, unknown>;
     subject: actionExec.ActionSubjectRecordLoad;
+    /**
+     * The caller-scope read of the call's `params._selectedIds`
+     * (`actionExec.loadActionSelectionRecords`); absent when the call carries
+     * none or its arm is not read (`actionExec.actionSelectionIsRead`).
+     */
+    selection?: actionExec.ActionSelectionLoad;
     /** [#33690] The call is handed to the person, never dispatched ({@link ResolvedActionCall.confirmationHandOff}). */
     handOff: boolean;
     /**
@@ -369,6 +375,7 @@ async function subjectVerdictRefusal(
     try {
         await actionExec.refuseDeniedSubjectBeforeHandOff(deps, requestContext, admission.actionDef, {
             objectName, recordId: subjectRecordIdOf(admission.recordId), subject: admission.subject, ec: wiring.ec, envId: wiring.envId,
+            ...(admission.selection !== undefined ? { selection: admission.selection } : {}),
         });
     } catch (error) {
         const thrown = error as Error & { code?: unknown; status?: unknown };
@@ -627,6 +634,19 @@ async function admitResolvedAction(
         return invalidBody(`Invalid action body — ${message}`, { field: 'recordId', code: 'invalid_type', message });
     }
     const params: Record<string, unknown> = reqBody.params ?? {};
+    // A selection names records by id, as `recordId` names one: its shape is
+    // judged here, beside the record key's, on every arm that reads it.
+    let selectionIds: string[] | undefined;
+    if (actionExec.actionSelectionIsRead(actionDef, wiring.ec)) {
+        try {
+            selectionIds = actionExec.actionSelectionIdsOrRefuse(objectName, params);
+        } catch (error) {
+            const failure = validationFailureDetails(error);
+            if (!failure) throw error;
+            const message = (error as Error).message;
+            return refuse({ message: `Invalid action body — ${message}`, status: VALIDATION_FAILED_STATUS, details: failure as unknown as ActionRefusal['details'] });
+        }
+    }
 
     // [ADR-0104 D2] The declared param contract, before the handler runs.
     const paramError = actionExec.enforceActionParams(deps, actionDef, actionSchema, params, { objectName, actionName });
@@ -671,8 +691,15 @@ async function admitResolvedAction(
     // CALLER's own scope delivered the row (commit f19475c0a).
     const subject = await actionExec.loadActionSubjectRecord(objectName, recordId, () =>
         wiring.callData('get', { object: objectName, id: recordId }, wiring.driver, wiring.envId, wiring.ec));
+    // …and each id of its selection the same way, with the same read, in the
+    // caller's own scope; the dispatch consumes the verdict as the subject load's.
+    const selection = selectionIds !== undefined && selectionIds.length > 0
+        ? await actionExec.loadActionSelectionRecords(objectName, selectionIds, (id) =>
+            wiring.callData('get', { object: objectName, id }, wiring.driver, wiring.envId, wiring.ec))
+        : undefined;
     return {
         actionDef, actionType, recordId, params, subject, handOff,
+        ...(selection !== undefined ? { selection } : {}),
         ...(dispatchPackageId !== undefined ? { dispatchPackageId } : {}),
         ...(attribution.holder !== undefined ? { holder: attribution.holder } : {}),
     };
@@ -709,6 +736,9 @@ async function dispatchAdmittedAction(
         // a trusted context. [#28657] Except ahead of an api forward that needs
         // nothing from the row: its target authorizes the caller itself.
         actionExec.refuseDeniedSubjectLoadBeforeDispatch(actionDef, objectName, recordId, subject, ec);
+        // The selection's verdict, at the same point: a selection the caller's
+        // scope did not deliver whole runs nothing (an api action is not read).
+        actionExec.refuseUndeliveredActionSelection(objectName, admission.selection, ec);
 
         // ── api forward (#27506) ── a same-origin `type: 'api'` action is
         // forwarded IN-PROCESS to its declared `target` with the caller's own

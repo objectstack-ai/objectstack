@@ -111,7 +111,7 @@ describe('objectstack#26674 · a stored externalId survives an edit-and-save', (
     fireEvent.click(await screen.findByTestId('grid-edit-code'));
     await waitFor(() => expect(screen.getByTestId('mock-drawer-form')).toBeTruthy());
     // The drawer no longer offers the switch it would otherwise have reset.
-    expect(screen.getByTestId('drawer-field-trackHistory')).toBeTruthy();
+    expect(screen.getByTestId('drawer-field-fieldHistoryDefaultOn')).toBeTruthy();
     expect(screen.queryByTestId('drawer-field-externalId')).toBeNull();
 
     fireEvent.click(screen.getByTestId('drawer-submit'));

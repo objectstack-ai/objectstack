@@ -176,7 +176,7 @@ export const deObjects: NonNullable<TranslationData['objects']> = {
       },
       ban_user: {
         label: "Benutzer sperren",
-        description: "Diesen Benutzer sperren? Er wird abgemeldet, kann sich nicht anmelden, und seine API-Schlüssel werden bis zur Entsperrung abgelehnt, ebenso seine OAuth-Zugriffstoken und Token-Aktualisierungen. Nach der Entsperrung funktionieren die Schlüssel wieder.",
+        description: "Diesen Benutzer sperren? Er wird abgemeldet, kann sich nicht anmelden, und seine API-Schlüssel werden bis zur Entsperrung abgelehnt, ebenso seine OAuth-Zugriffstoken und Token-Aktualisierungen. Nach der Entsperrung funktionieren die Schlüssel wieder. Die Sperre setzt außerdem die KI-Dienstkonten aus, für die der Benutzer verantwortlich ist, deaktiviert die von ihm registrierten OAuth-Anwendungen und widerruft die von ihm erstellten SCIM-Anmeldedaten; das Entsperren stellt nichts davon wieder her.",
         successMessage: "Benutzer gesperrt",
         params: {
           banReason: {
@@ -327,6 +327,11 @@ export const deObjects: NonNullable<TranslationData['objects']> = {
             helpText: "Die Person, an die dieser Benutzer berichtet. Der Server lehnt einen Vorgesetzten außerhalb der Organisation, eine Selbstzuweisung und eine Verknüpfung ab, die die Berichtskette schließen oder zu tief machen würde."
           }
         }
+      },
+      remove_user_manager: {
+        label: "Vorgesetzten entfernen",
+        confirmText: "Den Vorgesetzten dieses Benutzers entfernen? Bis erneut ein Vorgesetzter festgelegt wird, berichtet er an niemanden; das Genehmigungsrouting und der Datensatzbereich own_and_reports folgen der Änderung.",
+        successMessage: "Vorgesetzter entfernt"
       },
       list_platform_admins: {
         label: "Plattformadministratoren",
@@ -491,6 +496,10 @@ export const deObjects: NonNullable<TranslationData['objects']> = {
       revoke_reason: {
         label: "Widerrufsgrund",
         help: "Warum die Sitzung widerrufen wurde (idle_timeout, absolute_max, concurrent_cap, ip_not_allowed, user_revoked, admin, organization_membership_ended, admin_password_reset, password_reset, …)."
+      },
+      sso_provider_id: {
+        label: "SSO-Anbieter",
+        help: "Der SSO-Anbieter, über den diese Sitzung angemeldet wurde, falls vorhanden. Das Löschen dieses Anbieters beendet die Sitzung. Vom System verwaltet."
       },
       active_organization_id: {
         label: "Aktive Organisation"
@@ -4616,6 +4625,91 @@ export const deObjects: NonNullable<TranslationData['objects']> = {
           title: "Noch keine Kalenderausnahmen",
           message: "Fügen Sie pro Feiertag oder Ersatzarbeitstag eine Zeile hinzu oder importieren Sie ein Jahr davon aus einer Datei."
         }
+      }
+    }
+  },
+  sys_task: {
+    label: "Aufgabe",
+    pluralLabel: "Aufgaben",
+    description: "Zu erledigende Dinge, mit einer zuständigen Person und einer Fälligkeit.",
+    fields: {
+      title: {
+        label: "Titel"
+      },
+      description: {
+        label: "Beschreibung"
+      },
+      status: {
+        label: "Status",
+        options: {
+          todo: "Offen",
+          in_progress: "In Bearbeitung",
+          done: "Erledigt"
+        }
+      },
+      due_at: {
+        label: "Fällig am"
+      },
+      assignee_id: {
+        label: "Zuständig"
+      },
+      completed_at: {
+        label: "Erledigt am",
+        help: "Wird von der Plattform gesetzt, wenn der Status zu Erledigt wechselt, und gelöscht, wenn er Erledigt verlässt."
+      },
+      owner_id: {
+        label: "Eigentümer"
+      }
+    },
+    _views: {
+      assigned_to_me: {
+        label: "Mir zugewiesen",
+        emptyState: {
+          title: "Ihnen ist nichts zugewiesen",
+          message: "Offene Aufgaben, die Ihnen zugewiesen sind, erscheinen hier."
+        }
+      },
+      created_by_me: {
+        label: "Von mir erstellt",
+        emptyState: {
+          title: "Noch keine Aufgaben",
+          message: "Von Ihnen erstellte Aufgaben erscheinen hier."
+        }
+      },
+      all: {
+        label: "Alle Aufgaben"
+      }
+    }
+  },
+  sys_note: {
+    label: "Notiz",
+    pluralLabel: "Notizen",
+    description: "Notizen: ein Titel und ein formatierter Text.",
+    fields: {
+      title: {
+        label: "Titel"
+      },
+      body: {
+        label: "Text"
+      },
+      heading: {
+        label: "Überschrift",
+        help: "Der Titel oder, wenn er leer ist, die erste Zeile des Textes. Wird von der Plattform gepflegt."
+      },
+      owner_id: {
+        label: "Eigentümer"
+      }
+    },
+    _views: {
+      mine: {
+        label: "Meine Notizen",
+        emptyState: {
+          title: "Noch keine Notizen",
+          message: "Von Ihnen geschriebene Notizen erscheinen hier."
+        }
+      },
+      all: {
+        label: "Alle Notizen"
       }
     }
   }

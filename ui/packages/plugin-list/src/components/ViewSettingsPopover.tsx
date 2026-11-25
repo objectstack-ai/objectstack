@@ -37,6 +37,7 @@ import {
   SelectItem,
   SelectTrigger,
   SelectValue,
+  Switch,
 } from '@object-ui/components';
 import {
   SlidersHorizontal,
@@ -98,6 +99,31 @@ export interface ViewSettingsField {
    * Absent means groupable.
    */
   groupable?: boolean;
+  /**
+   * The field's type in the object's declaration, and whether it holds many
+   * values (`multiple: true`). The Group editors offer a field by them
+   * (objectstack#36204); absent ⇒ not offered there while types are known.
+   */
+  type?: string;
+  multiple?: boolean;
+}
+
+/**
+ * objectstack#36204 — the types a list can be grouped by, as the maintainer
+ * set them: single select and radio (a status is a `select`), a tick
+ * (`boolean`, `toggle`), a person (`user`) and a linked record (`lookup`,
+ * `master_detail`, `tree`), each holding one value. Text, numbers, dates and
+ * many-valued fields are not offered.
+ */
+const GROUPABLE_TYPES = new Set([
+  'select', 'radio',
+  'boolean', 'toggle',
+  'user', 'lookup', 'master_detail', 'tree',
+]);
+
+/** Whether the Group editors offer a field of this declaration (`GROUPABLE_TYPES`, one value). */
+export function isGroupableField(f: Pick<ViewSettingsField, 'type' | 'multiple'>): boolean {
+  return !!f.type && GROUPABLE_TYPES.has(f.type) && f.multiple !== true;
 }
 
 /**
@@ -106,10 +132,20 @@ export interface ViewSettingsField {
  * wide toolbar's, read it, so the two forms offer the same fields. A level that
  * already names a withheld field still shows: `GroupingEditor` mounts a value
  * its options do not carry, so the level can be removed.
+ *
+ * objectstack#36204 — and, while the fields' types are known (`typesKnown`,
+ * the default), only those of a groupable type (`isGroupableField`), in the
+ * reader's column order (`order`, as `orderFields` reads it). With no type
+ * known at all (the host has no object definition) every field is offered,
+ * as before: nothing tells them apart.
  */
-export function groupFieldOptions(fields: readonly ViewSettingsField[]): Array<{ value: string; label: string }> {
-  return fields
-    .filter((f) => f.groupable !== false)
+export function groupFieldOptions(
+  fields: readonly ViewSettingsField[],
+  order?: readonly string[],
+  typesKnown = true,
+): Array<{ value: string; label: string }> {
+  return orderFields(fields, order)
+    .filter((f) => f.groupable !== false && (!typesKnown || isGroupableField(f)))
     .map((f) => ({ value: f.name, label: f.label || f.name }));
 }
 
@@ -137,9 +173,75 @@ export interface ViewSettingsViewName {
   onRename?: (next: string) => boolean | Promise<boolean>;
 }
 
+/** One on/off setting of the panel: its value, and the writer of a change. */
+export interface ViewSettingsToggle {
+  value: boolean;
+  onChange: (next: boolean) => void;
+}
+
+/**
+ * objectstack#36370 — a lane statistic as the board's `kanban.summary` holds
+ * it: one of the list footer's calculations (`ColumnSummary`), over `field`
+ * where the calculation reads one. `null` = none.
+ */
+export interface ViewSettingsKanbanSummaryValue {
+  type: string;
+  field?: string;
+}
+
+/**
+ * objectstack#36880 — the fields each lane statistic that aggregates a field
+ * may name, per function: the aggregate × field-type table's row for it, so
+ * `min` / `max` also offer a date, a date-time or a time.
+ */
+export type ViewSettingsKanbanSummaryFields = Record<'sum' | 'avg' | 'min' | 'max', ReadonlyArray<{ value: string; label: string }>>;
+
+/**
+ * objectstack#36370 — the board's own settings, which the panel shows IN
+ * PLACE OF the table's columns, grouping, row height and row colour while the
+ * view is a kanban. Every part is the view's (the host holds a change in the
+ * list's draft); the panel writes nothing itself. A part whose writer is
+ * absent is shown and not changed; a part that is absent is not shown.
+ */
+export interface ViewSettingsKanban {
+  /** The field the lanes come from, and the fields that may be it (objectstack#36204's range). */
+  laneField?: string;
+  laneFieldOptions: ReadonlyArray<{ value: string; label: string }>;
+  onLaneFieldChange?: (field: string) => void;
+  /** Every lane the lane field offers, in its own order. */
+  lanes: ReadonlyArray<{ value: string; label: string }>;
+  /** The lanes the board draws, in board order. */
+  shownLanes: readonly string[];
+  onShownLanesChange?: (lanes: string[]) => void;
+  /** The fields each card shows, in order, and the fields that may be added. */
+  cardFields: readonly string[];
+  cardFieldCandidates: readonly ViewSettingsField[];
+  onCardFieldsChange?: (fields: string[]) => void;
+  /** Whether a card names each field beside its value. */
+  showFieldLabels?: ViewSettingsToggle;
+  /** Whether a card leaves out a field that holds nothing. */
+  hideEmptyFields?: ViewSettingsToggle;
+  /**
+   * The statistic each lane shows at its foot: none, a count, a number
+   * field's sum or average, or the minimum or maximum of a number or a date.
+   */
+  summary?: {
+    value: ViewSettingsKanbanSummaryValue | null;
+    fields: ViewSettingsKanbanSummaryFields;
+    onChange: (next: ViewSettingsKanbanSummaryValue | null) => void;
+  };
+}
+
 export interface ViewSettingsPopoverProps {
   t: (key: string, opts?: any) => string;
   allFields: ViewSettingsField[];
+
+  /**
+   * objectstack#36370 — the board's own settings. Present ⇒ the panel shows
+   * them instead of the table's 「Shown columns」, Group, Row height and Row
+   * colour; Layout, the name and the footer stay.
+   */
+  kanban?: ViewSettingsKanban;
 
   /** The view's name, at the top of the menu. Absent ⇒ no name row. */
   viewName?: ViewSettingsViewName;
@@ -177,6 +279,20 @@ export interface ViewSettingsPopoverProps {
   showGroup?: boolean;
   groupingConfig?: any;
   setGroupingConfig?: (next: any) => void;
+  /**
+   * objectstack#36204 — the fields the Group level offers, as the host works
+   * them out for both Group editors, and whether it is still reading their
+   * types. Absent ⇒ `groupFieldOptions(allFields, fieldOrder)`.
+   */
+  groupOptions?: Array<{ value: string; label: string }>;
+  groupOptionsLoading?: boolean;
+  /**
+   * objectstack#36204 — the label of a field a grouping level holds, as the
+   * host knows it: `groupOptions` reach past the columns, so a level can hold
+   * a field `allFields` does not carry. Absent, or answering `undefined`,
+   * the column's label, else the field's name.
+   */
+  groupFieldLabel?: (field: string) => string | undefined;
 
   showColor?: boolean;
   rowColorConfig?: { field: string; colors?: Record<string, string> } | undefined;
@@ -227,7 +343,10 @@ export interface ViewSettingsPopoverProps {
 }
 
 /** The second levels of the menu; `root` is the menu itself. */
-type MenuPage = 'root' | 'layout' | 'fields' | 'group' | 'color' | 'rowHeight';
+type MenuPage =
+  | 'root' | 'layout' | 'fields' | 'group' | 'color' | 'rowHeight'
+  // objectstack#36370 — a board's second levels.
+  | 'laneField' | 'lanes' | 'cardFields' | 'laneSummary';
 
 /**
  * One row of the menu: the setting's name on the left, its current value on
@@ -250,7 +369,7 @@ function MenuRow({
       onClick={onOpen}
       data-testid={testId}
       className={cn(
-        'flex w-full items-center gap-3 rounded-sm px-2 py-1.5 text-left text-[13px] hover:bg-muted max-sm:min-h-11',
+        'flex w-full items-center gap-3 rounded-sm px-2 py-1.5 text-left text-sm hover:bg-muted max-sm:min-h-11',
         'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
       )}
     >
@@ -288,7 +407,7 @@ function SubPage({
           onClick={onBack}
           data-testid="options-back"
           className={cn(
-            'flex min-w-0 items-center gap-1 rounded-sm px-1.5 py-1 text-[13px] font-medium hover:bg-muted max-sm:min-h-11',
+            'flex min-w-0 items-center gap-1 rounded-sm px-1.5 py-1 text-sm font-medium hover:bg-muted max-sm:min-h-11',
             'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
           )}
         >
@@ -394,7 +513,7 @@ function ViewNameField({ t, viewName }: { t: ViewSettingsPopoverProps['t']; view
   const title = t('list.optionsMenu.viewName', { defaultValue: 'View name' });
   if (!onRename) {
     return (
-      <div className="border-b px-3 py-2 text-[13px] font-medium break-words" data-testid="options-view-name">
+      <div className="border-b px-3 py-2 text-sm font-medium break-words" data-testid="options-view-name">
         {label}
       </div>
     );
@@ -432,7 +551,7 @@ function ViewNameField({ t, viewName }: { t: ViewSettingsPopoverProps['t']; view
             setDraft(label);
           }
         }}
-        className="h-8 text-[13px] font-medium max-sm:h-11"
+        className="h-8 text-sm font-medium max-sm:h-11"
         data-testid="options-view-name-input"
       />
     </div>
@@ -509,6 +628,9 @@ export function ViewSettingsContent(props: ViewSettingsPopoverProps & { closeMen
     showGroup,
     groupingConfig,
     setGroupingConfig,
+    groupOptions,
+    groupOptionsLoading,
+    groupFieldLabel,
     showColor,
     rowColorConfig,
     setRowColorConfig,
@@ -527,6 +649,7 @@ export function ViewSettingsContent(props: ViewSettingsPopoverProps & { closeMen
     onExport,
     exportBusy,
     exportError,
+    kanban,
   } = props;
 
   // The panel opens on its first level every time: the content unmounts
@@ -538,6 +661,7 @@ export function ViewSettingsContent(props: ViewSettingsPopoverProps & { closeMen
   const hasFooter = !!onSave || !!onReset || hasExport;
 
   const fieldLabel = (name: string) => allFields.find((f) => f.name === name)?.label || name;
+  const groupLevelLabel = (name: string) => groupFieldLabel?.(name) || fieldLabel(name);
   const none = t('list.none', { defaultValue: 'None' });
   const groupFields: string[] = Array.isArray(groupingConfig?.fields)
     ? groupingConfig.fields.map((f: { field?: string }) => f?.field).filter((f: unknown): f is string => typeof f === 'string' && !!f)
@@ -546,7 +670,7 @@ export function ViewSettingsContent(props: ViewSettingsPopoverProps & { closeMen
   const DensityIcon =
     density?.mode === 'compact' ? Rows4 : density?.mode === 'comfortable' ? Rows3 : Rows2;
 
-  const titles: Record<Exclude<MenuPage, 'root'>, string> = {
+  const titles: Record<'layout' | 'fields' | 'group' | 'color' | 'rowHeight', string> = {
     layout: t('list.layout', { defaultValue: 'Layout' }),
     fields: t('list.optionsMenu.addColumn', { defaultValue: 'Add column' }),
     group: t('list.group', { defaultValue: 'Group' }),
@@ -566,12 +690,176 @@ export function ViewSettingsContent(props: ViewSettingsPopoverProps & { closeMen
     ? orderFields(allFields, fieldOrder).filter((f) => !hiddenFields!.has(f.name))
     : [];
 
-  const rootMenu = (
+  // objectstack#36370 — a board's first level: its lane field, the lanes it
+  // shows, the card fields in place (drag to reorder, the eye to hide) with
+  // 「+ Add field」 one step away, the card toggles and the lane statistic.
+  // The table's columns, Group, Row height and Row colour are not offered.
+  const kanbanTitles = {
+    laneField: t('list.optionsMenu.kanbanLaneField', { defaultValue: 'Columns by' }),
+    lanes: t('list.optionsMenu.kanbanLanes', { defaultValue: 'Visible columns' }),
+    cardFields: t('list.optionsMenu.kanbanCardFields', { defaultValue: 'Card fields' }),
+    addCardField: t('list.optionsMenu.kanbanAddCardField', { defaultValue: 'Add field' }),
+    showFieldLabels: t('list.optionsMenu.kanbanShowFieldLabels', { defaultValue: 'Show field names' }),
+    hideEmptyFields: t('list.optionsMenu.kanbanHideEmptyFields', { defaultValue: 'Hide empty fields' }),
+    summary: t('list.optionsMenu.kanbanSummary', { defaultValue: 'Column summary' }),
+  };
+  const kanbanFieldLabel = (name: string) =>
+    kanban?.cardFieldCandidates.find((f) => f.name === name)?.label || fieldLabel(name);
+  // objectstack#36520 — every calculation the board's `kanban.summary` takes
+  // has a name here, so an authored `avg` / `min` / `max` reads as a word, not
+  // as its raw type.
+  const summaryWords: Record<string, string> = {
+    count: t('grid.summary.count', { defaultValue: 'Count' }),
+    sum: t('grid.summary.sum', { defaultValue: 'Sum' }),
+    avg: t('list.optionsMenu.kanbanSummaryAvg', { defaultValue: 'Average' }),
+    min: t('list.optionsMenu.kanbanSummaryMin', { defaultValue: 'Minimum' }),
+    max: t('list.optionsMenu.kanbanSummaryMax', { defaultValue: 'Maximum' }),
+  };
+  const summaryWord = (type: string) =>
+    Object.prototype.hasOwnProperty.call(summaryWords, type) ? summaryWords[type] : type;
+  const summaryText = (value: ViewSettingsKanbanSummaryValue | null): string => {
+    if (!value || value.type === 'none') return none;
+    if (!value.field || value.type === 'count') return summaryWord(value.type);
+    const offered = kanban?.summary?.fields;
+    const list = offered && Object.prototype.hasOwnProperty.call(offered, value.type)
+      ? offered[value.type as keyof ViewSettingsKanbanSummaryFields]
+      : undefined;
+    const label = list?.find((f) => f.value === value.field)?.label || kanbanFieldLabel(value.field);
+    return `${summaryWord(value.type)} · ${label}`;
+  };
+  const toggleRow = (label: string, toggle: ViewSettingsToggle, testId: string) => (
+    <label
+      className="flex w-full cursor-pointer items-center gap-3 rounded-sm px-2 py-1.5 text-sm hover:bg-muted max-sm:min-h-11"
+      data-testid={testId}
+    >
+      <span className="shrink-0 text-foreground">{label}</span>
+      <Switch
+        className="ml-auto h-5 w-9 [&>span]:h-4 [&>span]:w-4 [&>span[data-state=checked]]:translate-x-4"
+        checked={toggle.value}
+        onCheckedChange={(next) => toggle.onChange(next === true)}
+        aria-label={label}
+        data-testid={`${testId}-switch`}
+      />
+    </label>
+  );
+  const kanbanRootMenu = kanban ? (
+    <div data-testid="options-menu">
+      {viewName && <ViewNameField t={t} viewName={viewName} />}
+      <div className="border-b p-1" data-testid="options-kanban-lanes">
+        <MenuRow
+          label={kanbanTitles.laneField}
+          value={kanban.laneField
+            ? kanban.laneFieldOptions.find((o) => o.value === kanban.laneField)?.label || fieldLabel(kanban.laneField)
+            : none}
+          onOpen={() => setPage('laneField')}
+          testId="options-row-lane-field"
+        />
+        {kanban.lanes.length > 0 && (
+          <MenuRow
+            label={kanbanTitles.lanes}
+            value={`${kanban.shownLanes.length} / ${kanban.lanes.length}`}
+            onOpen={() => setPage('lanes')}
+            testId="options-row-lanes"
+          />
+        )}
+      </div>
+      <div className="border-b p-1" data-testid="options-card-fields">
+        <p className="px-2 pb-0.5 pt-1 text-xs text-muted-foreground">{kanbanTitles.cardFields}</p>
+        <FieldList
+          fields={kanban.cardFields.map((name) => ({ value: name, label: kanbanFieldLabel(name), type: fieldType?.(name) }))}
+          shownFields={kanban.cardFields}
+          order={kanban.cardFields}
+          onOrderChange={kanban.onCardFieldsChange
+            ? (order) => kanban.onCardFieldsChange!(order.filter((name) => kanban.cardFields.includes(name)))
+            : undefined}
+          onHide={kanban.onCardFieldsChange
+            ? (name) => kanban.onCardFieldsChange!(kanban.cardFields.filter((n) => n !== name))
+            : undefined}
+          searchable={false}
+          testId="options-card-fields-list"
+          className="w-full"
+        />
+        {kanban.onCardFieldsChange && (
+          <button
+            type="button"
+            onClick={() => setPage('cardFields')}
+            data-testid="options-add-card-field"
+            className={cn(
+              'flex w-full items-center gap-1.5 rounded-sm px-2 py-1.5 text-left text-sm text-muted-foreground hover:bg-muted hover:text-foreground max-sm:min-h-11',
+              'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+            )}
+          >
+            <Plus className="h-3.5 w-3.5" aria-hidden="true" />
+            {kanbanTitles.addCardField}
+          </button>
+        )}
+      </div>
+      {(kanban.showFieldLabels || kanban.hideEmptyFields) && (
+        <div className="border-b p-1" data-testid="options-card-toggles">
+          {kanban.showFieldLabels && toggleRow(kanbanTitles.showFieldLabels, kanban.showFieldLabels, 'options-toggle-field-labels')}
+          {kanban.hideEmptyFields && toggleRow(kanbanTitles.hideEmptyFields, kanban.hideEmptyFields, 'options-toggle-hide-empty')}
+        </div>
+      )}
+      <div className="p-1">
+        {layout && (
+          <MenuRow
+            label={titles.layout}
+            value={<ViewSwitcherFaceContext.Provider value="value">{layout(closeMenu)}</ViewSwitcherFaceContext.Provider>}
+            onOpen={() => setPage('layout')}
+            testId="options-row-layout"
+          />
+        )}
+        {kanban.summary && (
+          <MenuRow
+            label={kanbanTitles.summary}
+            value={summaryText(kanban.summary.value)}
+            onOpen={() => setPage('laneSummary')}
+            testId="options-row-lane-summary"
+          />
+        )}
+      </div>
+    </div>
+  ) : null;
+
+  /** A one-of-many level: each option a radio row, the current one ticked. */
+  const radioLevel = (
+    label: string,
+    options: ReadonlyArray<{ value: string; label: string }>,
+    current: string | undefined,
+    onPick: (value: string) => void,
+    testId: string,
+  ) => (
+    <div role="radiogroup" aria-label={label} className="p-1">
+      {options.map((option) => {
+        const active = option.value === current;
+        return (
+          <button
+            key={option.value}
+            type="button"
+            role="radio"
+            aria-checked={active}
+            onClick={() => onPick(option.value)}
+            data-testid={`${testId}-${option.value}`}
+            className={cn(
+              'flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-sm hover:bg-muted max-sm:min-h-11',
+              'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+              active ? 'font-medium text-foreground' : 'text-foreground/90',
+            )}
+          >
+            <span className="flex-1 truncate">{option.label}</span>
+            {active && <Check className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />}
+          </button>
+        );
+      })}
+    </div>
+  );
+
+  const rootMenu = kanbanRootMenu ?? (
     <div data-testid="options-menu">
       {viewName && <ViewNameField t={t} viewName={viewName} />}
       {fieldsOffered && (
         <div className="border-b p-1" data-testid="options-columns">
-          <p className="px-2 pb-0.5 pt-1 text-[11px] text-muted-foreground">
+          <p className="px-2 pb-0.5 pt-1 text-xs text-muted-foreground">
             {t('list.optionsMenu.shownColumns', { defaultValue: 'Shown columns' })}
           </p>
           <FieldList
@@ -589,7 +877,7 @@ export function ViewSettingsContent(props: ViewSettingsPopoverProps & { closeMen
             onClick={() => setPage('fields')}
             data-testid="options-add-column"
             className={cn(
-              'flex w-full items-center gap-1.5 rounded-sm px-2 py-1.5 text-left text-[13px] text-muted-foreground hover:bg-muted hover:text-foreground max-sm:min-h-11',
+              'flex w-full items-center gap-1.5 rounded-sm px-2 py-1.5 text-left text-sm text-muted-foreground hover:bg-muted hover:text-foreground max-sm:min-h-11',
               'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
             )}
           >
@@ -610,7 +898,7 @@ export function ViewSettingsContent(props: ViewSettingsPopoverProps & { closeMen
         {showGroup && setGroupingConfig && (
           <MenuRow
             label={titles.group}
-            value={groupFields.length > 0 ? groupFields.map(fieldLabel).join(' › ') : none}
+            value={groupFields.length > 0 ? groupFields.map(groupLevelLabel).join(' › ') : none}
             onOpen={() => setPage('group')}
             testId="options-row-group"
           />
@@ -630,7 +918,7 @@ export function ViewSettingsContent(props: ViewSettingsPopoverProps & { closeMen
             title={t('grid.toolbar.densityCycleShortHint', { defaultValue: 'Click to cycle' })}
             data-testid="view-settings-density-cycle"
             className={cn(
-              'flex w-full items-center gap-3 rounded-sm px-2 py-1.5 text-left text-[13px] hover:bg-muted max-sm:min-h-11',
+              'flex w-full items-center gap-3 rounded-sm px-2 py-1.5 text-left text-sm hover:bg-muted max-sm:min-h-11',
               'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
             )}
           >
@@ -654,7 +942,113 @@ export function ViewSettingsContent(props: ViewSettingsPopoverProps & { closeMen
   );
 
   let body: React.ReactNode = rootMenu;
-  if (page === 'layout' && layout) {
+  if (kanban && page === 'laneField') {
+    body = (
+      <SubPage title={kanbanTitles.laneField} onBack={back} testId="options-page-lane-field">
+        {kanban.laneFieldOptions.length > 0
+          ? radioLevel(kanbanTitles.laneField, kanban.laneFieldOptions, kanban.laneField, (field) => {
+              if (field !== kanban.laneField) kanban.onLaneFieldChange?.(field);
+              back();
+            }, 'options-lane-field')
+          : (
+            <p className="px-3 py-2 text-xs text-muted-foreground" data-testid="options-lane-field-none">
+              {t('list.noGroupableFields', { defaultValue: 'No field here can group the list' })}
+            </p>
+          )}
+      </SubPage>
+    );
+  } else if (kanban && page === 'lanes') {
+    const shown = kanban.shownLanes;
+    const write = kanban.onShownLanesChange;
+    body = (
+      <SubPage
+        title={kanbanTitles.lanes}
+        onBack={back}
+        testId="options-page-lanes"
+        action={write && shown.length < kanban.lanes.length
+          ? (
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-7 px-2 text-xs max-sm:h-11"
+              onClick={() => write([...shown, ...kanban.lanes.map((l) => l.value).filter((v) => !shown.includes(v))])}
+              data-testid="options-lanes-show-all"
+            >
+              {t('list.showAll', { defaultValue: 'Show all' })}
+            </Button>
+          )
+          : undefined}
+      >
+        <FieldList
+          fields={kanban.lanes.map((lane) => ({ value: lane.value, label: lane.label }))}
+          shownFields={shown}
+          order={shown}
+          onOrderChange={write ? (order) => write(order.filter((v) => shown.includes(v))) : undefined}
+          // The board keeps at least one lane: the last one shown has no eye.
+          onHide={write && shown.length > 1 ? (value) => write(shown.filter((v) => v !== value)) : undefined}
+          onShow={write ? (value) => write([...shown.filter((v) => v !== value), value]) : undefined}
+          searchable={kanban.lanes.length > 8}
+          hiddenTitle={t('list.optionsMenu.kanbanHiddenLanes', { defaultValue: 'Hidden columns' })}
+          // The view's lanes pick lanes, not records (#28211): say where a
+          // hidden lane's cards go.
+          footer={(
+            <p className="px-3 pb-2 text-xs text-muted-foreground" data-testid="options-lanes-hidden-hint">
+              {t('list.optionsMenu.kanbanHiddenLanesHint', { defaultValue: 'Cards of a hidden column show under Uncategorized.' })}
+            </p>
+          )}
+          typeIcons={false}
+          testId="options-lanes"
+          className="w-full"
+        />
+      </SubPage>
+    );
+  } else if (kanban && page === 'cardFields' && kanban.onCardFieldsChange) {
+    const write = kanban.onCardFieldsChange;
+    const shown = kanban.cardFields;
+    body = (
+      <SubPage title={kanbanTitles.addCardField} onBack={back} testId="options-page-card-fields">
+        <FieldList
+          fields={kanban.cardFieldCandidates.map((f) => ({ value: f.name, label: f.label || f.name, type: fieldType?.(f.name) }))}
+          shownFields={shown}
+          order={shown}
+          onOrderChange={(order) => write(order.filter((name) => shown.includes(name)))}
+          onHide={(name) => write(shown.filter((n) => n !== name))}
+          onShow={(name) => write([...shown.filter((n) => n !== name), name])}
+          testId="options-card-field-candidates"
+          className="w-full"
+        />
+      </SubPage>
+    );
+  } else if (kanban?.summary && page === 'laneSummary') {
+    const summary = kanban.summary;
+    const options: Array<{ value: string; label: string; pick: ViewSettingsKanbanSummaryValue | null }> = [
+      { value: 'none', label: none, pick: null },
+      { value: 'count', label: summaryWord('count'), pick: { type: 'count' } },
+      // objectstack#36370, objectstack#36520 — what the board computes
+      // (`KanbanLaneSummarySchema`): a count, or a field's sum, average,
+      // minimum or maximum; objectstack#36880 — each over the fields the
+      // aggregate table accepts for it, so a date has a minimum and a maximum.
+      ...(['sum', 'avg', 'min', 'max'] as const).flatMap((type) =>
+        summary.fields[type].map((f) => ({
+          value: `${type}:${f.value}`,
+          label: `${summaryWord(type)} · ${f.label}`,
+          pick: { type, field: f.value },
+        })),
+      ),
+    ];
+    const current = !summary.value || summary.value.type === 'none'
+      ? 'none'
+      : summary.value.type === 'count' ? 'count' : `${summary.value.type}:${summary.value.field ?? ''}`;
+    body = (
+      <SubPage title={kanbanTitles.summary} onBack={back} testId="options-page-lane-summary">
+        {radioLevel(kanbanTitles.summary, options, current, (value) => {
+          const picked = options.find((o) => o.value === value);
+          if (picked && value !== current) summary.onChange(picked.pick);
+          back();
+        }, 'options-lane-summary')}
+      </SubPage>
+    );
+  } else if (page === 'layout' && layout) {
     body = (
       <SubPage title={titles.layout} onBack={back} testId="options-page-layout">
         <ViewSwitcherFaceContext.Provider value="list">{layout(closeMenu)}</ViewSwitcherFaceContext.Provider>
@@ -703,12 +1097,16 @@ export function ViewSettingsContent(props: ViewSettingsPopoverProps & { closeMen
         <div className="p-3">
           <GroupingEditor
             value={groupingConfig as any}
-            fieldOptions={groupFieldOptions(allFields)}
+            fieldOptions={groupOptions ?? groupFieldOptions(allFields, fieldOrder)}
+            askFieldOnAdd
+            fieldOptionsLoading={groupOptionsLoading}
+            fieldLabel={groupLevelLabel}
             maxLevels={3}
             labels={{
               addGroup: t('list.addGroup', 'Add group field'),
               collapseTitle: t('list.collapsedByDefault', 'Collapsed by default'),
               removeTitle: t('list.removeGroup', 'Remove'),
+              noFields: t('list.noGroupableFields', { defaultValue: 'No field here can group the list' }),
             }}
             onChange={(next) => setGroupingConfig(next as any)}
           />
@@ -726,7 +1124,7 @@ export function ViewSettingsContent(props: ViewSettingsPopoverProps & { closeMen
         action={rowColorConfig ? clearAction(() => setRowColorConfig(undefined), 'options-color-clear') : undefined}
       >
         <div className="p-3">
-          <label className="mb-1 block text-[11px] text-muted-foreground">
+          <label className="mb-1 block text-xs text-muted-foreground">
             {t('list.colorByField', { defaultValue: 'Color by field' })}
           </label>
           <ColorFieldPicker
@@ -762,7 +1160,7 @@ export function ViewSettingsContent(props: ViewSettingsPopoverProps & { closeMen
                 onClick={() => setMode(mode)}
                 data-testid={`options-row-height-${mode}`}
                 className={cn(
-                  'flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-[13px] hover:bg-muted max-sm:min-h-11',
+                  'flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-sm hover:bg-muted max-sm:min-h-11',
                   'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
                   active ? 'font-medium text-foreground' : 'text-foreground/90',
                 )}
@@ -880,7 +1278,7 @@ export function ViewSettingsPopover(props: ViewSettingsPopoverProps) {
           <ChevronDown className="hidden h-3 w-3 opacity-60 @[56rem]/list:inline" aria-hidden="true" />
           {changedCount > 0 && (
             <span
-              className="flex h-4 min-w-[16px] items-center justify-center text-[10px] font-medium text-muted-foreground tabular-nums"
+              className="flex h-4 min-w-[16px] items-center justify-center text-xs font-medium text-muted-foreground tabular-nums"
               data-testid="toolbar-display-count"
             >
               {changedCount}

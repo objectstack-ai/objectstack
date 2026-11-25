@@ -80,6 +80,66 @@ Keys that merely hide/re-arrange correct information (`hideRelatedTab`, `showRef
 > ([ADR-0035](./0035-config-driven-master-detail.md)'s amendment of the same
 > date).
 
+> **Note (2026-11-20, [#35897](https://github.com/objectstack-ai/objectstack/issues/35897) and
+> [#35899](https://github.com/objectstack-ai/objectstack/issues/35899), epic
+> [#35896](https://github.com/objectstack-ai/objectstack/issues/35896)).** The maintainer's
+> words on the epic: 「但是你看右侧，他显示哪些子表都是通过tab配置出来的。删除tab就是不现实。」
+> (that is, removing a tab means not showing it), 「其实除了 overview，我们直接用 relatedLists
+> 是不是就可以。」 and 「三个内置项，是不是可以直接用对应的对象名」, then 「按对象名这版，立专题」.
+> So a **declared** `relatedLists` is now the object's record-page TAB LIST, not only an order:
+> the related lists it names show, in its order, and a side list it leaves out shows no tab.
+> The attachments, approvals and activity-stream tabs are placed in it by the platform object
+> each draws (`sys_attachment`, `sys_approval_request`, `sys_activity`), and an entry may give
+> its list a title and columns on the parent (`{ list, label, columns }`). This is the one
+> place §2's "keys that merely hide/re-arrange correct information are rejected at this
+> layer" yields, by that ruling: the key still passes both admission tests as the 2026-10-28
+> note reads them (which relationships matter on this object is business intent; it binds
+> every record surface and names no page), and showing is now part of that intent rather
+> than a page toggle. The guard keeps its force for every other key: no per-page show/hide
+> switch (`hideRelatedTab`, `showReferenceRail`) returns, and an undeclared `relatedLists`
+> shows every list as before. Body tables stay the field groups' to place (`fieldGroups[]
+> .relatedList`); the FK's `relatedList: false` still hides a list everywhere. A child list
+> another package adds is no exception: once `relatedLists` is declared it shows no tab until
+> the parent names it, and a build accepts that name only when the package is in the parent's
+> stack. Letting an extension package place its own list is the epic's child card
+> [#35901](https://github.com/objectstack-ai/objectstack/issues/35901).
+
+> **Note (2026-11-22, [#35901](https://github.com/objectstack-ai/objectstack/issues/35901), epic
+> [#35896](https://github.com/objectstack-ai/objectstack/issues/35896)).** The previous note's last
+> sentence is superseded. An extension package now says where the fields, groups and child lists it
+> brings go (`ObjectExtensionSchema.place`, applied once by the registry fold, ADR-0146 D10's note of
+> the same date), and a child list another package brings is **not** hidden by the parent's declared
+> `relatedLists`: placed, it sits where its package puts it; unplaced, it shows at the end of the
+> tabs (the maintainer: 「装了就自动排在末尾」, ruling 7073014077, flipping ruling 7072511859). The
+> parent's tab list still decides everything the parent's own package and package-less metadata
+> bring. The ruling's consequence, for the approver: the parent cannot hide another package's list.
+> It can move it by naming it in its own `relatedLists`; only `relatedList: false` on that package's
+> FK hides it, and that FK is the other package's to set. Placement arranges what the parent declares (「父对象声明了才生效」): a group or field placement
+> applies only where the parent declares `fieldGroups`, so §5's derivation is unchanged: an
+> extension's group lands among the declared groups (after or before one of them, or last) and a
+> field it places lands inside a group's member list, never above the parent's own fields on a
+> parent that declares no groups.
+
+> **Note (2026-11-23, [#36366](https://github.com/objectstack-ai/objectstack/issues/36366), ruling on
+> [#36635](https://github.com/objectstack-ai/objectstack/issues/36635)).** The 2026-11-20 note calls
+> `relatedLists` "the one place" where §2's "keys that merely hide/re-arrange correct information
+> are rejected at this layer" yields. There are now two places. `actionLayout` is the second, and
+> it is a **ruled exception**, by the maintainer's ruling on #36635 (record
+> [`7101013317`](https://github.com/objectstack-ai/objectstack/issues/36635#issuecomment-7101013317),
+> 「36635 选 A」). This note does not claim that the key passes the admission test. The key only
+> re-arranges an object's own actions. Its placement is the one the maintainer asked for on
+> 2026-11-22, 「放在对象上，分列表和记录」: `ObjectSchema` and `ObjectExtensionSchema` carry an
+> optional `actionLayout` with a `list` arm and a `record` arm
+> (`packages/spec/src/data/object-action-layout.ts`), each naming at most three pinned actions in
+> order, then the order of the "More" menu. An arm is a scope, not a page. The `record` arm orders
+> every surface that draws a record's actions: the record header, the side preview, a phone's
+> bottom bar and a list row's menus. The `list` arm has a single reader today, the list page
+> toolbar. An object without the key draws as before. On an installed object only its paired
+> `.custom` package writes the key (ADR-0146 D10's note of 2026-11-24). The guard keeps its force
+> for every other key, above all per-page show/hide switches. Built by
+> [#36629](https://github.com/objectstack-ai/objectstack/pull/36629); the row menus by
+> [#36815](https://github.com/objectstack-ai/objectstack/pull/36815).
+
 ### 3. Deletions (all evidenced zero-author)
 
 - **`detail` block removed from `ObjectSchema`** — all three typed keys. `renderViaSchema` retires *together with* the legacy monolith renderer path in objectui (separate execution PR; the key is only that path's steering wheel, deleting it alone saves nothing). `hideReferenceRail`/`hideRelatedTab` are removed outright (the former is a proven no-op for spec authors; the latter's raison d'être — overriding rail/tab dedup — died with the rail).
@@ -140,3 +200,15 @@ Maintainer ruling (2026-08-28, #12715): **option A — re-introduce the slot, th
 - **Whole-group disappearance (header included) rides the landed objectui#6236 contract unchanged** — FALSE (or a faulting predicate, fail-closed) hides the divider and every claimed member.
 - The `visibleOn` spelling stays rejected with guidance pointing at `visibleWhen` (the #8382 posture: pointed, not aliased).
 - Both directions of the ADR-0049 trichotomy are now on this key's record: removed while unenforced, re-declared when declared = enforced holds on day one.
+
+## Addendum (2026-11-22): on the synthesized record page the reader folds every titled group
+
+§4 gave `collapse` one meaning on every surface, and §5 one derivation for every surface. Once the default record page drew its fields as one long list, a group whose object declared nothing (or `'none'`) could not be folded there, and most groups in real apps declare nothing.
+
+Maintainer ruling (2026-11-22, objectstack#36269, option (b), 「都能折叠，默认展开」):
+
+- **On the synthesized (default) record page every titled field group folds** from its title row, whatever its `collapse`: the side preview, the phone details tab, the pinned left column and the full page. Folding a group there is the reader's action, not a fact about the data (§1).
+- **`collapse` still sets the first state there**: `'collapsed'` starts closed; `'none'` and `'expanded'` start open. The system-information group keeps starting closed.
+- **Every other surface keeps §4 as written**: on forms and in the designer preview `'none'` is always open with no toggle; an authored record page keeps its own faces; a print page draws every group open. The untitled ungrouped bucket has no toggle, and the fold state is not saved.
+- **§5 is unchanged**: `deriveFieldGroupLayout` still passes `collapse` through, and the synth still emits `collapsible` / `defaultCollapsed` from it. Only the record page's frameless face reads the result differently.
+- No key, value or default changes, so no ADR-0087 entry; the `collapse` description, the object form's help text and the docs say where the meanings differ.

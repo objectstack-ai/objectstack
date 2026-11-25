@@ -3,12 +3,12 @@
   "evals": [
     {
       "id": 1,
-      "prompt": "Create `src/views/support-case.view.ts`: a default grid (subject linking to the record, status, priority, owner, due date), a 'My Open Cases' list, a kanban by status, and a simple edit form. None of the project's files are in this directory: write the file in your answer.",
-      "expected_output": "One `defineView({ list, form, listViews })` container — never a bare flat view object. `data: { provider: 'object', object: 'support_case' }`, `columns` with `link: true` on `subject`, the owner column is the injected `owner_id` (never an `assigned_to` field), a `listViews.my_open` entry with `filter` triples (`{ field: 'owner_id', operator: 'equals', value: '{current_user_id}' }`), a kanban entry with the required top-level `columns` plus `kanban: { groupByField: 'status' }` (no top-level `groupBy`), and `form` with `type: 'simple'` and `sections` referencing a declared field group.",
+      "prompt": "Create `src/views/support-case.view.ts`: a default grid (subject linking to the record, status, priority, owner, due date), a 'My Open Cases' list, a kanban by status, and a simple edit form with the case details in one section. None of the project's files are in this directory: write the file in your answer.",
+      "expected_output": "One `defineView({ list, listViews })` container — never a bare flat view object. `data: { provider: 'object', object: 'support_case' }`, `columns` with `link: true` on `subject`, the owner column is the injected `owner_id` (never an `assigned_to` field), a `listViews.my_open` entry with `filter` triples (`{ field: 'owner_id', operator: 'equals', value: '{current_user_id}' }`), a kanban entry with the required top-level `columns` plus `kanban: { groupByField: 'status' }` (no top-level `groupBy`). No `form` in the container: the edit form is built from the object, so the answer says its section is a `fieldGroups` entry of `support_case` (an internal `form` parses and is not loaded).",
       "files": [],
       "assertions": {
         "must_contain": ["defineView", "provider: 'object'", "listViews", "groupByField", "link: true", "{current_user_id}", "owner_id"],
-        "must_not_contain": ["groupBy:", "conditionalRequired:", "'assigned_to'"]
+        "must_not_contain": ["groupBy:", "conditionalRequired:", "'assigned_to'", "form: {"]
       }
     },
     {
@@ -24,11 +24,11 @@
     {
       "id": 3,
       "prompt": "Add a Convert action on `lead` — only for qualified, not-yet-converted leads, from the record header and each list row, launching the `crm_lead_conversion` flow — and a bulk 'Add to campaign' that asks which campaign, for the selected rows.",
-      "expected_output": "Two `defineAction` items. Convert: `type: 'flow'`, `target: 'crm_lead_conversion'`, `locations: ['record_header', 'list_item']`, `visible: P`record.status == \"qualified\" && record.is_converted == false`` (bare CEL, never brace-wrapped), `confirmText`, `successMessage`, `refreshAfter: true`. Bulk: `type: 'script'`, `locations: ['list_toolbar']`, a field-backed `params: [{ field: 'campaign_id', objectOverride: 'campaign', required: true }]`, and a `body` that reads `input.selectedIds`.",
+      "expected_output": "Two `defineAction` items. Convert: `type: 'flow'`, `target: 'crm_lead_conversion'`, `locations: ['record_header', 'list_item']`, `visible: P`record.status == \"qualified\" && record.is_converted == false`` (bare CEL, never brace-wrapped), `confirmText`, `successMessage`, `refreshAfter: true`. Bulk: `type: 'script'`, `execution: 'perRecord'`, wired by the lead list view's `bulkActions: ['<name>']`, a field-backed `params: [{ field: 'campaign_id', objectOverride: 'campaign', required: true }]`, and a `body` that runs once per ticked row and reads that row's id as `ctx.recordId`.",
       "files": [],
       "assertions": {
-        "must_contain": ["defineAction", "locations", "record_header", "list_toolbar", "visible", "successMessage", "selectedIds"],
-        "must_not_contain": ["{record."]
+        "must_contain": ["defineAction", "locations", "record_header", "bulkActions", "visible", "successMessage", "ctx.recordId"],
+        "must_not_contain": ["{record.", "input.selectedIds"]
       }
     },
     {
@@ -54,10 +54,10 @@
     {
       "id": 6,
       "prompt": "Invoice entry as a stepped form — header, then line items, then review — saving the invoice and its lines together.",
-      "expected_output": "A stepped form over ONE object is `formViews` with `type: 'wizard'` and `sections`, not a screen flow (nothing branches). Line items come from the DATA MODEL: `inlineEdit` on the child's `master_detail` field, which renders the editable grid and saves parent + children in one atomic `/api/v1/batch`; `subforms` only to override derived columns. No custom page, and no 'Add line' button (the ghost row exists).",
+      "expected_output": "No form view and no screen flow (nothing branches): the invoice's New form is built from the object, so header, then lines, then the rest is the order of `invoice`'s `fieldGroups`. Line items come from the DATA MODEL: a field group naming the `master_detail` child (`fieldGroups: [{ key: 'header', ... }, { key: 'lines', label: 'Lines', relatedList: 'invoice_line' }, ...]`), which draws the editable grid in the form and saves parent + children in one atomic `/api/v1/batch`; without the group the form has no lines, whatever `inlineEdit` says. The hand-over says the steps are sections of one form, not a wizard: a `formViews` wizard is not loaded by New or Edit, and a named form an action opens draws no line items. No custom page, and no 'Add line' button (the ghost row exists).",
       "files": [],
       "assertions": {
-        "must_contain": ["type: 'wizard'", "inlineEdit", "formViews", "master_detail"],
+        "must_contain": ["fieldGroups", "relatedList", "master_detail"],
         "must_not_contain": ["type: 'screen'"]
       }
     },
@@ -123,7 +123,7 @@
     },
     {
       "id": 13,
-      "prompt": "`task` already ships `defineView({ list, form })`. Reps want a board: add a `priority` select (A / B / C) to the object and a kanban grouped by it — the list must stay — and tell them what they will see when they first open the board.",
+      "prompt": "`task` already ships `defineView({ list })`. Reps want a board: add a `priority` select (A / B / C) to the object and a kanban grouped by it — the list must stay — and tell them what they will see when they first open the board.",
       "expected_output": "A new `listViews.priority_kanban` entry (`type: 'kanban'`, the required top-level `columns`, `kanban: { groupByField: 'priority' }`) beside the untouched default `list`, never the list retyped into a board. The hand-over discloses the empty board: every existing task has no `priority` yet, so all of them sit in the trailing `Uncategorized` lane (scroll right on a narrow screen) under one empty lane per option; dragging a card onto a real lane writes the field, or they edit from the list; a runtime-token or CEL `defaultValue` on the new field fills no existing row, and a literal one does only on a SQL datasource, where it becomes the column DEFAULT.",
       "files": [],
       "assertions": {
@@ -183,12 +183,12 @@
     },
     {
       "id": 19,
-      "prompt": "Author the default form view for `opportunity`: 42 fields in six sections (Basics, Amounts, Dates, Partner, Shipping, Internal Notes). Reps fill Basics and Amounts on every create and the other four rarely. The form opens in the New dialog, mostly on wide screens.",
-      "expected_output": "One form view with `type: 'simple'`: the six sections stacked on one scrolling page, each listing its own `fields`, with `collapsed: true` on the four rarely filled ones (or `collapse: 'collapsed'` on those `fieldGroups` entries of the object). `columns: 3` uses the wide dialog and `modalSize: 'xl'` sizes it. Not tabs: a required field on another tab is flagged only on its tab, and the tab strip overflows on a phone.",
+      "prompt": "Shape the New and Edit form of `opportunity`: 42 fields in six sections (Basics, Amounts, Dates, Partner, Shipping, Internal Notes). Reps fill Basics and Amounts on every create and the other four rarely, and `loss_reason` is never known at create. The form opens in the New dialog, mostly on wide screens.",
+      "expected_output": "No form view: New and Edit are built from the object. Six `fieldGroups` entries on `opportunity` in that order, with `collapse: 'collapsed'` on the four rarely filled ones, and `showOnCreate: false` on `loss_reason`, which edit, the record page and lists still show (it must not be `required: true`: the pair is refused). Not a `form`, `formViews.default` or `formViews.create` (each parses and is not loaded), and no `modalSize` or `columns`: the dialog's size and column count are derived.",
       "files": [],
       "assertions": {
-        "must_contain": ["type: 'simple'", "modalSize"],
-        "must_not_contain": ["type: 'tabbed'"]
+        "must_contain": ["fieldGroups", "collapse: 'collapsed'", "showOnCreate: false"],
+        "must_not_contain": ["type: 'tabbed'", "modalSize:"]
       }
     },
     {
@@ -224,11 +224,21 @@
     {
       "id": 23,
       "prompt": "Our `archive_tasks` script action is wired as a `bulkActionDefs` entry with `execution: 'aggregate'`. Its body loops over the selected ids and updates each task, but some tasks are locked and their update throws, so the whole run is reported as failed even though most rows were archived. Make the result dialog say which rows were archived and why each of the others was not.",
-      "expected_output": "The body reads `input._selectedIds`, wraps each row's update in its own `try` / `catch`, and returns `{ succeeded: [ids], failed: [{ id, message }] }` (a `BulkActionResult`) as its whole return value instead of letting the error escape: a throw is one outcome for the whole selection with no per-row list. Both members are row lists (not counts, and `message`, not `error`), each id one of `_selectedIds`; a selected id named in neither list is reported as not confirmed. Not a `resultDialog`, not the per-record `bulkActions` wiring, and not a rethrow carrying the lists (a rejection's body is dropped).",
+      "expected_output": "`archive_tasks` moves to the per-record form, the form for a body that writes each selected row: the action declares `execution: 'perRecord'`, the list view names it in `bulkActions: ['archive_tasks']` in place of the `bulkActionDefs` aggregate entry, and the body updates only the row it is handed (`ctx.recordId` / `ctx.record`), with no loop over `input._selectedIds`. Each ticked task is then its own run: a locked task's throw fails that row alone and the result dialog lists it with its message, while every other row is archived and counted. Not a `try` / `catch` loop in the aggregate body that returns per-row lists or counts of what it wrote and what refused, not `execution: 'perRecord'` added while the `bulkActionDefs` aggregate entry stays, not a `resultDialog`, and not a rethrow carrying the rows (a rejection's body is dropped).",
       "files": [],
       "assertions": {
-        "must_contain": ["_selectedIds", "succeeded", "failed", "message", "catch"],
-        "must_not_contain": ["succeeded: ids.length"]
+        "must_contain": ["perRecord", "bulkActions: [", "ctx.record"],
+        "must_not_contain": ["succeeded:", "{ succeeded", "{ failed"]
+      }
+    },
+    {
+      "id": 24,
+      "prompt": "`crm_opportunity` has five record actions, all placed at `record_header`: `mark_won`, `mark_lost`, `clone`, `share`, `archive`. The team wants Mark Won, Mark Lost, Clone and Share as header buttons in that order, Archive under More, and on the list page Export as a button after the `mass_assign` toolbar action. Write the metadata that does this.",
+      "expected_output": "One key on the object, no page file and no edit to any action: `actionLayout: { record: { pinned: ['mark_won', 'mark_lost', 'clone'], more: ['share', 'archive'] }, list: { pinned: ['mass_assign', '$export'] } }`. The answer says an arm pins at most three buttons, so the fourth requested button, Share, leads `more` instead (a fourth name in `pinned` is refused). The `record` arm holds for the record page, the side preview and the phone action bar alike. `$export` is the list page's built-in, named only in the `list` arm's `pinned`; `mass_assign` must be placed at `list_toolbar` or `os validate` refuses the name. Not four names in `pinned`, not an `order` renumbering on each action (shared by every surface, and it names no buttons), not `$export` in `more`, and not a `definePage` header listing action ids.",
+      "files": [],
+      "assertions": {
+        "must_contain": ["actionLayout", "pinned", "more", "$export"],
+        "must_not_contain": ["'clone', 'share']", "definePage"]
       }
     }
   ]

@@ -2,26 +2,44 @@
 
 /**
  * Verify writes only to stores it creates: a declared MANAGED datasource runs
- * on an ephemeral stand-in, never on the database it names.
+ * on an ephemeral stand-in, never on the database it names, on every engine
+ * the platform ships, `mongodb` included; one on a driver id a plugin supplies
+ * cannot be stood in, and the boot is refused.
  *
- * The fixture declares a managed secondary datasource on a real, file-backed
- * SQLite database — the kind `objectstack dev` opens and writes. That file is
- * this suite's recording driver: whatever reaches the real datasource lands in
- * it. The derived write families run over an object bound to it on one boot
- * (the CRUD round trip, reference shapes, delete behaviours and unique
- * scopes), plus a REST create. The pins:
+ * The fixture declares two managed secondary datasources, each with a
+ * recording medium behind it:
  *
- *  - nothing reached the real database: the file was never created, so no
- *    table and no row reached it;
- *  - coverage is kept: the object's CRUD case ran and was verified, against
- *    the stand-in, and the REST create answered and read back;
+ *  - one on a real, file-backed SQLite database, the kind `objectstack dev`
+ *    opens and writes: whatever reaches it lands in that file;
+ *  - one on `mongodb`, pointed at a local TCP listener that counts every
+ *    connection made to it. The app seeds an object on it, and a hook on
+ *    another object writes into it.
+ *
+ * The derived write families run over objects bound to both on one boot (the
+ * CRUD round trip, reference shapes, delete behaviours and unique scopes),
+ * plus a REST create. The pins:
+ *
+ *  - nothing reached either real store: the file was never created, and the
+ *    listener saw no connection;
+ *  - coverage is kept: both objects' CRUD cases ran and were verified against
+ *    the stand-ins, the REST create answered and read back, and the app's seed
+ *    and hook rows for the mongodb object are in the stand-in;
  *  - CONTROL: the factory `objectstack dev` builds declared datasources with
- *    opens that very file for the same declaration and writes a row into it,
- *    so the silence above is verify's stand-in and not an unreachable file.
+ *    opens that very file and writes a row into it, and connects to that very
+ *    listener, for the same declarations, so the silence above is verify's
+ *    stand-in and not an unreachable store.
  *
- * A second describe pins the factory itself, without a boot, against a
- * recording real factory: which declarations it stands in for and which keep
- * their real driver.
+ * A second describe pins the refusal: a managed datasource on a plugin's
+ * driver id refuses the boot before anything is composed, naming the
+ * datasource and the driver id, and the plugin's recording driver is never
+ * called; its CONTROL is the same plugin driver behind an external datasource
+ * in the boot above, which a REST write reaches. A third pins the same refusal
+ * keyed on the NAME: a plugin that registers a driver under a managed
+ * `mongodb` datasource's name refuses the boot before its driver is called,
+ * whether the plugin registers it as `driver.NAME`, as a service under another
+ * key holding a driver named after the datasource, or straight into the engine
+ * from an `objectql:drivers-ready` handler.
+ * The last two pin the factory and the refusal reader without a boot.
  *
  * ⚠️ This suite resolves `@objectstack/runtime` and the service packages
  * through their BUILT `dist/`. Rebuild them before trusting a run of this file.
@@ -29,10 +47,13 @@
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { existsSync, mkdtempSync, rmSync } from 'node:fs';
+import net from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { defineStack } from '@objectstack/spec';
+import type { Plugin, PluginContext } from '@objectstack/core';
+import type { IDataDriver } from '@objectstack/spec/contracts';
 import {
   createDefaultDatasourceDriverFactory,
   type DatasourceConnectionSpec,
@@ -44,7 +65,12 @@ import { runCrudVerification, formatReport, type VerifyReport } from './verify.j
 import { runReferenceShapeProofs, formatReferenceShapeReport } from './reference-shape.js';
 import { runDeleteBehaviorProofs, formatDeleteBehaviorReport } from './delete-behavior.js';
 import { runUniqueScopeProofs, formatUniqueScopeReport } from './unique-scope.js';
-import { createVerifyDatasourceDriverFactory } from './managed-datasource-stand-in.js';
+import {
+  createManagedStandInLedger,
+  createVerifyDatasourceDriverFactory,
+  unstandableManagedDatasources,
+  unstandableManagedDatasourceRefusal,
+} from './managed-datasource-stand-in.js';
 import { deriveCrudCases } from './derive.js';
 import { warmUpBoot } from './boot-warm-up.testkit.js';
 
@@ -59,6 +85,11 @@ const BOOT_TIMEOUT = 120_000;
 const SIDE_DS = 'vms_side_ds';
 const SIDE = 'vms_side';
 const LOCAL = 'vms_local';
+const DOCS_DS = 'vms_docs_ds';
+const DOC = 'vms_doc';
+const PLUG_DS = 'vms_plug_ds';
+const PLUG_DRIVER = 'vms_plug_driver';
+const PLUG = 'vms_plug';
 
 const dir = mkdtempSync(join(tmpdir(), 'verify-managed-ds-'));
 const realDatabase = join(dir, 'side.db');
@@ -71,6 +102,125 @@ const sideDatasource = {
   config: { filename: realDatabase },
 } as const;
 
+// ── The mongodb datasource's recording medium: a listener counting connections ──
+
+let mongoConnections = 0;
+const mongoListener = net.createServer((socket) => {
+  mongoConnections += 1;
+  socket.destroy();
+});
+await new Promise<void>((resolve) => mongoListener.listen(0, '127.0.0.1', () => resolve()));
+const mongoPort = (mongoListener.address() as net.AddressInfo).port;
+
+const docsDatasource = {
+  name: DOCS_DS,
+  label: 'Managed document store (real mongodb address)',
+  driver: 'mongodb',
+  schemaMode: 'managed',
+  config: { url: `mongodb://127.0.0.1:${mongoPort}/vms?serverSelectionTimeoutMS=2000&connectTimeoutMS=2000` },
+} as const;
+
+// ── A plugin-supplied driver that records every call it receives ──
+
+type Call = { method: string; object?: string };
+
+/**
+ * How the recording plugin hands its driver to the boot:
+ *
+ *  - `service`: as the `driver.NAME` service `DriverPlugin` and `driver-odata`
+ *    register (the default), or under another key (`serviceKey`);
+ *  - `drivers-ready`: straight into the engine from an `objectql:drivers-ready`
+ *    handler, before verify's stand-in is registered. `swallow` catches what
+ *    `registerDriver` throws and carries on, as a plugin wrapping its own call
+ *    would;
+ *  - `start`: straight into the engine from the plugin's own `start()`, which
+ *    runs after AppPlugin has registered verify's stand-in.
+ *
+ * `failStart` makes the plugin's `start()` throw that message, a boot failure
+ * of its own.
+ */
+type RecordingRegistration =
+  | { via: 'service'; serviceKey?: string }
+  | { via: 'drivers-ready'; swallow?: boolean; failStart?: string }
+  | { via: 'start' };
+
+/** A driver this suite owns, named `datasource`. Every call is recorded. */
+function recordingDriver(datasource: string, calls: Call[]): IDataDriver {
+  const record = (method: string, answer: (n: number) => unknown = () => null) => async (object?: string) => {
+    calls.push({ method, object });
+    return answer(calls.length);
+  };
+  return {
+    name: datasource,
+    version: '0.0.1',
+    supports: { transactionsUnsupported: true },
+    connect: record('connect'),
+    disconnect: record('disconnect'),
+    checkHealth: record('checkHealth', () => true),
+    find: record('find', () => []),
+    findOne: record('findOne'),
+    count: record('count', () => 0),
+    execute: record('execute'),
+    create: record('create', (n) => ({ id: `plug_${n}` })),
+    update: record('update'),
+    delete: record('delete'),
+    upsert: record('upsert'),
+    bulkCreate: record('bulkCreate'),
+    bulkUpdate: record('bulkUpdate'),
+    bulkDelete: record('bulkDelete'),
+    updateMany: record('updateMany'),
+    deleteMany: record('deleteMany'),
+    beginTransaction: record('beginTransaction', () => ({})),
+    commit: record('commit'),
+    rollback: record('rollback'),
+    syncSchema: record('syncSchema'),
+    dropTable: record('dropTable'),
+  } as unknown as IDataDriver;
+}
+
+/** A plugin that registers {@link recordingDriver} for `datasource` the way `registration` says. */
+function recordingDriverPlugin(
+  datasource: string,
+  calls: Call[],
+  registration: RecordingRegistration = { via: 'service' },
+): Plugin {
+  const driver = recordingDriver(datasource, calls);
+  type Engine = { registerDriver(d: IDataDriver): void };
+  return {
+    name: `com.objectstack.verify.managed-stand-in.${datasource}`,
+    version: '1.0.0',
+    init: async (ctx: PluginContext) => {
+      calls.push({ method: 'plugin.init' });
+      if (registration.via === 'drivers-ready') {
+        ctx.hook('objectql:drivers-ready', async (engine: Engine) => {
+          calls.push({ method: 'drivers-ready' });
+          try {
+            engine.registerDriver(driver);
+          } catch (e) {
+            if (!registration.swallow) throw e;
+          }
+        });
+        return;
+      }
+      if (registration.via === 'service') {
+        ctx.registerService(registration.serviceKey ?? `driver.${datasource}`, driver);
+      }
+    },
+    start: async (ctx: PluginContext) => {
+      if (registration.via === 'start') {
+        calls.push({ method: 'plugin.start' });
+        ctx.getService<Engine>('objectql').registerDriver(driver);
+      }
+      if (registration.via === 'drivers-ready' && registration.failStart) throw new Error(registration.failStart);
+    },
+  };
+}
+
+/** The plugin driver as the control reaches it: behind an EXTERNAL datasource, which verify does not refuse. */
+const controlPlugCalls: Call[] = [];
+
+const hookErrors: string[] = [];
+
 const fixtureStack = defineStack({
   manifest: {
     id: 'com.objectstack.verify.managed-stand-in',
@@ -78,9 +228,20 @@ const fixtureStack = defineStack({
     version: '0.0.0',
     type: 'app',
     name: 'Managed Stand-in Fixture',
-    description: 'An app declaring a managed secondary datasource on a real database file.',
+    description: 'An app declaring managed secondary datasources on a real database file and a real mongodb address.',
   },
-  datasources: [sideDatasource],
+  datasources: [
+    sideDatasource,
+    docsDatasource,
+    {
+      name: PLUG_DS,
+      label: 'Plugin store (external, the control)',
+      driver: PLUG_DRIVER,
+      schemaMode: 'external',
+      config: {},
+      external: { allowWrites: true, validation: { onMismatch: 'fail', checkOnBoot: false } },
+    },
+  ],
   objects: [
     {
       name: LOCAL,
@@ -101,7 +262,52 @@ const fixtureStack = defineStack({
         local_ref: { type: 'lookup', reference: LOCAL, label: 'Local', deleteBehavior: 'set_null' },
       },
     },
+    {
+      name: DOC,
+      label: 'Doc',
+      pluralLabel: 'Docs',
+      datasource: DOCS_DS,
+      sharingModel: 'public_read_write',
+      fields: {
+        name: { type: 'text', label: 'Name' },
+        local_ref: { type: 'lookup', reference: LOCAL, label: 'Local', deleteBehavior: 'set_null' },
+      },
+    },
+    {
+      name: PLUG,
+      label: 'Plug',
+      pluralLabel: 'Plugs',
+      datasource: PLUG_DS,
+      external: { remoteName: PLUG, writable: true },
+      sharingModel: 'public_read_write',
+      tenancy: { enabled: false },
+      fields: { name: { type: 'text', label: 'Name' } },
+    },
   ],
+  hooks: [
+    {
+      // The app's own write into the mongodb datasource, fired by any insert of a local.
+      name: 'vms_local_writes_doc',
+      object: LOCAL,
+      events: ['afterInsert'],
+      async: true,
+      handler: async (ctx: { input?: { data?: Record<string, unknown> }; api: any }) => {
+        try {
+          await ctx.api.object(DOC).insert({ name: `HOOK-${String(ctx.input?.data?.name ?? '')}` });
+        } catch (e) {
+          hookErrors.push(String((e as Error)?.message ?? e));
+        }
+      },
+    },
+  ],
+  data: [
+    {
+      object: DOC,
+      mode: 'upsert',
+      records: [{ name: 'SEED-1' }, { name: 'SEED-2' }],
+    },
+  ],
+  plugins: [recordingDriverPlugin(PLUG_DS, controlPlugCalls)],
 } as never);
 
 const CONTROL_TABLE = 'vms_control';
@@ -128,11 +334,25 @@ async function realDatabaseState(): Promise<{ exists: boolean; rows: number }> {
   return { exists: true, rows: await rowsIn(SIDE) };
 }
 
+/** The mongodb object's rows, as the stand-in answers them through the REST door. */
+async function docNames(stack: VerifyStack, token: string): Promise<string[]> {
+  const res = await stack.apiAs(token, 'GET', `/data/${DOC}?$top=200`);
+  const body = JSON.parse(await res.text()) as { data?: unknown; records?: unknown };
+  const data = body.data as { records?: unknown } | unknown[] | undefined;
+  const rows = (Array.isArray(data) ? data : (data as { records?: unknown })?.records ?? body.records ?? []) as Array<{
+    name?: unknown;
+  }>;
+  return rows.map((row) => String(row.name));
+}
+
 describe('os verify runs a declared managed datasource on an ephemeral stand-in, never on its real database', () => {
   let stack: VerifyStack | undefined;
   let crud: VerifyReport;
   const reports: Record<string, string> = {};
   let restCreate: { status: number; readBack: number; body: string };
+  let docRows: string[] = [];
+  let connectionsDuringRun = -1;
+  const plugCallsDuringRest: Call[] = [];
 
   beforeAll(async () => {
     stack = await bootStack(fixtureStack as never, {});
@@ -149,12 +369,26 @@ describe('os verify runs a declared managed datasource on an ephemeral stand-in,
       ?? (JSON.parse(body) as { id?: string }).id;
     const read = await stack.apiAs(token, 'GET', `/data/${SIDE}/${id}`);
     restCreate = { status: created.status, readBack: read.status, body };
+    // The hook is async: read the mongodb object's rows once one hook row has landed.
+    const deadline = Date.now() + 15_000;
+    do {
+      docRows = await docNames(stack, token);
+      if (docRows.some((name) => name.startsWith('HOOK-'))) break;
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    } while (Date.now() < deadline);
+    // CONTROL for the refusal below: the plugin's driver behind an external
+    // datasource, which verify boots, takes a REST write.
+    const mark = controlPlugCalls.length;
+    await stack.apiAs(token, 'POST', `/data/${PLUG}`, { name: 'control' });
+    plugCallsDuringRest.push(...controlPlugCalls.slice(mark));
     await stack.stop();
     stack = undefined;
+    connectionsDuringRun = mongoConnections;
   }, BOOT_TIMEOUT * 2);
 
   afterAll(async () => {
     await stack?.stop().catch(() => undefined);
+    await new Promise<void>((resolve) => mongoListener.close(() => resolve()));
     rmSync(dir, { recursive: true, force: true });
   });
 
@@ -162,14 +396,41 @@ describe('os verify runs a declared managed datasource on an ephemeral stand-in,
     expect(await realDatabaseState(), Object.values(reports).join('\n')).toEqual({ exists: false, rows: 0 });
   });
 
-  it("the object's CRUD case still ran, and passed against the stand-in", () => {
-    const side = crud.results.find((r) => r.object === SIDE);
-    expect(side?.status, reports.crud).toBe('verified');
+  it('nothing reached the real mongodb address: no connection was ever made to it', () => {
+    expect(connectionsDuringRun, Object.values(reports).join('\n')).toBe(0);
+  });
+
+  it("both objects' CRUD cases still ran, and passed against the stand-ins", () => {
+    expect(crud.results.find((r) => r.object === SIDE)?.status, reports.crud).toBe('verified');
+    expect(crud.results.find((r) => r.object === DOC)?.status, reports.crud).toBe('verified');
+  });
+
+  it("the app's seed and its hook wrote the mongodb object's rows into the stand-in", () => {
+    expect(docRows, JSON.stringify(docRows)).toEqual(expect.arrayContaining(['SEED-1', 'SEED-2']));
+    expect(docRows.filter((name) => name.startsWith('HOOK-')).length, JSON.stringify(docRows)).toBeGreaterThan(0);
+    expect(hookErrors).toEqual([]);
   });
 
   it('a REST create to the object answers and reads back, from the stand-in', () => {
     expect(restCreate.status, restCreate.body).toBe(201);
     expect(restCreate.readBack, restCreate.body).toBe(200);
+  });
+
+  it("CONTROL: the factory `objectstack dev` uses connects to that mongodb address for the same declaration", async () => {
+    const before = mongoConnections;
+    const handle = await createDefaultDatasourceDriverFactory().create({
+      ...docsDatasource,
+      config: { ...docsDatasource.config },
+    } as DatasourceConnectionSpec);
+    // The listener closes every connection, so the connect fails; what counts is that it was made.
+    await Promise.resolve(handle.connect?.()).catch(() => undefined);
+    await Promise.resolve(handle.disconnect?.()).catch(() => undefined);
+    expect(mongoConnections).toBeGreaterThan(before);
+  }, BOOT_TIMEOUT);
+
+  it("CONTROL for the refusal: the plugin's driver, behind an external datasource verify boots, takes a REST write", () => {
+    expect(controlPlugCalls[0]).toEqual({ method: 'plugin.init' });
+    expect(plugCallsDuringRest).toContainEqual({ method: 'create', object: PLUG });
   });
 
   it("CONTROL: the factory `objectstack dev` uses opens that file for the same declaration and writes into it", async () => {
@@ -244,10 +505,332 @@ describe('createVerifyDatasourceDriverFactory — which declarations get a stand
     expect(c?.blocked).toContain('external datasource "wh" (read-only): not exercised');
   });
 
-  it('a managed datasource with no faithful stand-in (mongodb) keeps its real driver; derive withholds its objects', async () => {
-    const declared: DatasourceConnectionSpec = {
+  it.each([
+    ['mongodb', { url: 'mongodb://docs.internal' }],
+    ['turso', { url: 'libsql://edge.turso.io' }],
+    ['pg', { host: 'db.internal' }],
+  ])('a managed %s datasource is built as an in-memory store of the default store engine', async (driver, config) => {
+    const spec = await buildOne({ name: 'docs', driver, schemaMode: 'managed', config });
+    expect(spec).toEqual({ name: 'docs', driver: 'sqlite-wasm', schemaMode: 'managed', config: { filename: ':memory:' } });
+  });
+
+  it('on a memory default store, a managed mongodb datasource is built as a fresh memory store', async () => {
+    built.length = 0;
+    await createVerifyDatasourceDriverFactory({ real, defaultStore: 'memory' }).create({
       name: 'docs', driver: 'mongodb', schemaMode: 'managed', config: { url: 'mongodb://docs.internal' },
+    });
+    expect(built).toEqual([{ name: 'docs', driver: 'memory', schemaMode: 'managed', config: {} }]);
+  });
+
+  it("a managed datasource on a plugin's driver id is refused, and the real factory is never asked", async () => {
+    built.length = 0;
+    expect(() =>
+      factory.create({ name: 'plug', driver: 'acme-plugin-driver', schemaMode: 'managed', config: {} }),
+    ).toThrow(/datasource "plug" \(driver "acme-plugin-driver"\)/);
+    expect(built).toEqual([]);
+  });
+
+  it("records each stand-in's engine driver for its datasource, and never a real driver", async () => {
+    const standIns = createManagedStandInLedger();
+    const recording = createVerifyDatasourceDriverFactory({ real, defaultStore: 'sqlite-wasm', standIns });
+    const standIn = await recording.create({ name: 'docs', driver: 'mongodb', schemaMode: 'managed', config: {} });
+    const external = await recording.create({ name: 'ext', driver: 'postgres', schemaMode: 'external', config: {} });
+    expect(standIns.isStandIn('docs', standIn.driver)).toBe(true);
+    // The proof is per datasource and per instance.
+    expect(standIns.isStandIn('other', standIn.driver)).toBe(false);
+    expect(standIns.isStandIn('docs', {})).toBe(false);
+    expect(standIns.isStandIn('ext', external.driver)).toBe(false);
+  });
+});
+
+describe("os verify refuses to boot while a managed datasource on a plugin's driver id is declared", () => {
+  const refusedCalls: Call[] = [];
+  const refusedStack = defineStack({
+    manifest: {
+      id: 'com.objectstack.verify.managed-stand-in-refused',
+      namespace: 'vmr',
+      version: '0.0.0',
+      type: 'app',
+      name: 'Managed Plugin Driver Fixture',
+      description: "An app declaring a managed datasource on a plugin's driver id.",
+    },
+    datasources: [{ name: PLUG_DS, label: 'Plugin store (managed)', driver: PLUG_DRIVER, schemaMode: 'managed', config: {} }],
+    objects: [
+      {
+        name: 'vmr_item',
+        label: 'Item',
+        pluralLabel: 'Items',
+        datasource: PLUG_DS,
+        sharingModel: 'public_read_write',
+        fields: { name: { type: 'text', label: 'Name' } },
+      },
+    ],
+    data: [{ object: 'vmr_item', mode: 'upsert', externalId: 'name', records: [{ name: 'SEED' }] }],
+    plugins: [recordingDriverPlugin(PLUG_DS, refusedCalls)],
+  } as never);
+
+  it('the boot is refused, naming the datasource and the driver id, and the recording driver is never called', async () => {
+    const refusal = await bootStack(refusedStack as never, {}).then(
+      async (stack) => {
+        await stack.stop();
+        return undefined;
+      },
+      (e: unknown) => e as Error,
+    );
+    expect(refusal).toBeInstanceOf(Error);
+    expect(refusal?.message).toContain(`datasource "${PLUG_DS}" (driver "${PLUG_DRIVER}")`);
+    // Nothing was composed: the plugin never initialised, so its driver was never registered or called.
+    expect(refusedCalls).toEqual([]);
+  });
+});
+
+describe("os verify refuses to boot when a plugin registers a driver under a managed datasource's name", () => {
+  // A SHIPPED driver id (`mongodb`), so the declaration alone passes; the
+  // connection service would keep the plugin's driver registered under the
+  // datasource's name instead of asking verify's factory. The object is bound
+  // to the datasource, so the boot's schema sync and the app's seed reach
+  // whatever driver holds that name.
+  /** An app on one managed mongodb datasource, `NS_docs_ds`, whose plugin registers a driver under its name. */
+  const shadowedStack = (ns: string, calls: Call[], registration?: RecordingRegistration) => {
+    const datasource = `${ns}_docs_ds`;
+    const stack = defineStack({
+      manifest: {
+        id: `com.objectstack.verify.managed-stand-in-shadowed.${ns}`,
+        namespace: ns,
+        version: '0.0.0',
+        type: 'app',
+        name: 'Managed Name Shadowed Fixture',
+        description: "An app whose plugin registers a driver under a managed mongodb datasource's name.",
+      },
+      datasources: [
+        { name: datasource, label: 'Docs (managed mongodb)', driver: 'mongodb', schemaMode: 'managed', config: { url: `mongodb://127.0.0.1:1/${ns}` } },
+      ],
+      objects: [
+        {
+          name: `${ns}_doc`,
+          label: 'Doc',
+          pluralLabel: 'Docs',
+          datasource,
+          sharingModel: 'public_read_write',
+          fields: { name: { type: 'text', label: 'Name' } },
+        },
+      ],
+      data: [{ object: `${ns}_doc`, mode: 'upsert', externalId: 'name', records: [{ name: 'SEED' }] }],
+      plugins: [recordingDriverPlugin(datasource, calls, registration)],
+    } as never);
+    return { datasource, stack };
+  };
+
+  const refusalOf = (stack: unknown) =>
+    bootStack(stack as never, {}).then(
+      async (booted) => {
+        await booted.stop();
+        return undefined;
+      },
+      (e: unknown) => e as Error,
+    );
+
+  it('as the `driver.NAME` service: the boot is refused, naming the datasource and its declared driver id, and the plugin driver receives no call', async () => {
+    const calls: Call[] = [];
+    const { datasource, stack } = shadowedStack('vmd', calls);
+    const refusal = await refusalOf(stack);
+    expect(refusal).toBeInstanceOf(Error);
+    // The guard's own sentence, not the kernel's rollback message around it.
+    expect(refusal?.message.startsWith('verify: refusing to boot: ')).toBe(true);
+    expect(refusal?.message).toContain(`datasource "${datasource}" (driver "mongodb")`);
+    expect(refusal?.message).toContain('a driver of its own');
+    // Refused at the guard's start(), before any other plugin starts.
+    expect(String((refusal?.cause as Error | undefined)?.message)).toContain('com.objectstack.verify.managed-datasource-driver-guard');
+    // The plugin did register its driver (init ran); the driver itself was never called: no
+    // connect, no schema sync, no seed write.
+    expect(calls).toEqual([{ method: 'plugin.init' }]);
+  }, BOOT_TIMEOUT);
+
+  it('as a service under another key, holding a driver named after the datasource: refused the same way, and the driver receives no call', async () => {
+    // The engine keys an adopted driver on the instance's own `name`, not on the service key.
+    const calls: Call[] = [];
+    const { datasource, stack } = shadowedStack('vmk', calls, { via: 'service', serviceKey: 'driver.vmk_elsewhere' });
+    const refusal = await refusalOf(stack);
+    expect(refusal).toBeInstanceOf(Error);
+    // The guard's own sentence, not the kernel's rollback message around it.
+    expect(refusal?.message.startsWith('verify: refusing to boot: ')).toBe(true);
+    expect(refusal?.message).toContain(`datasource "${datasource}" (driver "mongodb")`);
+    expect(refusal?.message).toContain('a driver of its own');
+    // Read from the driver's own name at the guard's start(), before ObjectQL adopts it.
+    expect(String((refusal?.cause as Error | undefined)?.message)).toContain('com.objectstack.verify.managed-datasource-driver-guard');
+    expect(calls).toEqual([{ method: 'plugin.init' }]);
+  }, BOOT_TIMEOUT);
+
+  it('straight into the engine from an `objectql:drivers-ready` handler: refused the same way, and the driver receives no call', async () => {
+    // The hook fires after the guard's start and before the boot's schema sync,
+    // so the handler did run (it is recorded) and its driver never got a call.
+    const calls: Call[] = [];
+    const { datasource, stack } = shadowedStack('vmh', calls, { via: 'drivers-ready' });
+    const refusal = await refusalOf(stack);
+    expect(refusal).toBeInstanceOf(Error);
+    // The guard's own sentence, not the kernel's rollback message around it.
+    expect(refusal?.message.startsWith('verify: refusing to boot: ')).toBe(true);
+    expect(refusal?.message).toContain(`datasource "${datasource}" (driver "mongodb")`);
+    expect(refusal?.message).toContain('a driver of its own');
+    expect(calls).toEqual([{ method: 'plugin.init' }, { method: 'drivers-ready' }]);
+  }, BOOT_TIMEOUT);
+
+  it('a plugin that catches the refusal and carries on still gets the boot refused', async () => {
+    const calls: Call[] = [];
+    const { datasource, stack } = shadowedStack('vmw', calls, { via: 'drivers-ready', swallow: true });
+    const refusal = await refusalOf(stack);
+    expect(refusal).toBeInstanceOf(Error);
+    expect(refusal?.message.startsWith('verify: refusing to boot: ')).toBe(true);
+    expect(refusal?.message).toContain(`datasource "${datasource}" (driver "mongodb")`);
+    expect(calls).toEqual([{ method: 'plugin.init' }, { method: 'drivers-ready' }]);
+  }, BOOT_TIMEOUT);
+
+  it("CONTROL: a caught refusal followed by a boot failure of another cause reports that failure, not the guard's sentence", async () => {
+    const calls: Call[] = [];
+    const failure = 'vmf: a start failure of its own';
+    const { stack } = shadowedStack('vmf', calls, { via: 'drivers-ready', swallow: true, failStart: failure });
+    const refusal = await refusalOf(stack);
+    expect(refusal).toBeInstanceOf(Error);
+    expect(refusal?.message).toContain(failure);
+    expect(refusal?.message.startsWith('verify: refusing to boot: ')).toBe(false);
+  }, BOOT_TIMEOUT);
+});
+
+describe("os verify keeps its stand-in when a driver named after a managed datasource arrives after it", () => {
+  // The engine keeps the first driver registered under a name and discards a
+  // later one, so once verify's stand-in holds the name a late registration
+  // cannot take it: the boot runs on the stand-in and is not refused.
+  const lateStack = (ns: string, calls: Call[], late: 'start' | 'onEnable') => {
+    const datasource = `${ns}_docs_ds`;
+    const fixture = defineStack({
+      manifest: {
+        id: `com.objectstack.verify.managed-stand-in-late.${ns}`,
+        namespace: ns,
+        version: '0.0.0',
+        type: 'app',
+        name: 'Managed Name Late Fixture',
+        description: "An app that registers a driver under a managed mongodb datasource's name after verify's stand-in.",
+      },
+      datasources: [
+        { name: datasource, label: 'Docs (managed mongodb)', driver: 'mongodb', schemaMode: 'managed', config: { url: `mongodb://127.0.0.1:1/${ns}` } },
+      ],
+      objects: [
+        {
+          name: `${ns}_doc`,
+          label: 'Doc',
+          pluralLabel: 'Docs',
+          datasource,
+          sharingModel: 'public_read_write',
+          fields: { name: { type: 'text', label: 'Name' } },
+        },
+      ],
+      data: [{ object: `${ns}_doc`, mode: 'upsert', externalId: 'name', records: [{ name: 'SEED' }] }],
+      plugins: late === 'start' ? [recordingDriverPlugin(datasource, calls, { via: 'start' })] : [],
+    } as never);
+    if (late === 'start') return fixture;
+    // The app's runtime bridge: AppPlugin runs `onEnable` after it has connected
+    // the declared datasources, and its `drivers.register` calls the engine's.
+    const driver = recordingDriver(datasource, calls);
+    const onEnable = async (host: { drivers: { register(d: IDataDriver): void } }) => {
+      calls.push({ method: 'onEnable' });
+      host.drivers.register(driver);
     };
-    expect(await buildOne(declared)).toBe(declared);
+    return { ...(fixture as object), onEnable };
+  };
+
+  /** Boot, read the object's rows, write one through REST and read them again; the boot error if it is refused. */
+  const runOn = async (ns: string, fixture: unknown) => {
+    const object = `${ns}_doc`;
+    let stack: VerifyStack | undefined;
+    try {
+      stack = await bootStack(fixture as never, {});
+    } catch (e) {
+      return { error: e as Error };
+    }
+    try {
+      const token = await stack.signIn();
+      const names = async () => {
+        const res = await stack!.apiAs(token, 'GET', `/data/${object}?$top=200`);
+        const body = JSON.parse(await res.text()) as { data?: unknown; records?: unknown };
+        const data = body.data as { records?: unknown } | unknown[] | undefined;
+        const rows = (Array.isArray(data) ? data : (data as { records?: unknown })?.records ?? body.records ?? []) as Array<{ name?: unknown }>;
+        return rows.map((row) => String(row.name)).sort();
+      };
+      const seeded = await names();
+      const created = await stack.apiAs(token, 'POST', `/data/${object}`, { name: 'REST' });
+      return { seeded, created: created.status, after: await names() };
+    } finally {
+      await stack.stop();
+    }
+  };
+
+  it.each([
+    ['vml', 'start', [{ method: 'plugin.init' }, { method: 'plugin.start' }]],
+    ['vmo', 'onEnable', [{ method: 'onEnable' }]],
+  ] as const)(
+    "%s: registered from the app's %s, the boot runs on the stand-in, which takes the writes, and the driver receives no connect, schema sync or write",
+    async (ns, late, expectedCalls) => {
+      const calls: Call[] = [];
+      const run = await runOn(ns, lateStack(ns, calls, late));
+      expect(run.error?.message).toBeUndefined();
+      expect(run.seeded).toEqual(['SEED']);
+      expect(run.created).toBe(201);
+      expect(run.after).toEqual(['REST', 'SEED']);
+      // The registration was made (it is recorded) and the engine kept the stand-in.
+      expect(calls).toEqual(expectedCalls);
+    },
+    BOOT_TIMEOUT,
+  );
+});
+
+describe('unstandableManagedDatasources — which declarations refuse the boot', () => {
+  const judged = (datasources: unknown) => unstandableManagedDatasources({ datasources });
+
+  it("names a managed datasource on a plugin's driver id, with or without a declared schemaMode", () => {
+    expect(
+      judged([
+        { name: 'a', driver: 'acme-plugin-driver', schemaMode: 'managed' },
+        { name: 'b', driver: 'acme-plugin-driver' },
+      ]),
+    ).toEqual([
+      { name: 'a', driver: 'acme-plugin-driver' },
+      { name: 'b', driver: 'acme-plugin-driver' },
+    ]);
+  });
+
+  it("CONTROL: every shipped engine, an external plugin datasource and `default` are not refused", () => {
+    expect(
+      judged([
+        { name: 'pg', driver: 'pg', schemaMode: 'managed' },
+        { name: 'docs', driver: 'mongodb' },
+        { name: 'edge', driver: 'libsql' },
+        { name: 'lite', driver: 'sqlite' },
+        { name: 'wasm', driver: 'sqlite-wasm' },
+        { name: 'my', driver: 'mysql' },
+        { name: 'mem', driver: 'memory' },
+        { name: 'wh', driver: 'acme-plugin-driver', schemaMode: 'external' },
+        { name: 'wh2', driver: 'acme-plugin-driver', config: { schemaMode: 'validate-only' } },
+        { name: 'default', driver: 'acme-plugin-driver' },
+      ]),
+    ).toEqual([]);
+  });
+
+  it('reads a name-keyed map the way the harness does', () => {
+    expect(judged({ plug: { driver: 'acme-plugin-driver' } })).toEqual([{ name: 'plug', driver: 'acme-plugin-driver' }]);
+  });
+
+  it('a declaration that names no driver is said so, not printed as undefined', () => {
+    expect(unstandableManagedDatasourceRefusal([{ name: 'a', driver: undefined }])).toContain(
+      'datasource "a" (no driver declared)',
+    );
+  });
+
+  it('the refusal names every one of them', () => {
+    const sentence = unstandableManagedDatasourceRefusal([
+      { name: 'a', driver: 'x-driver' },
+      { name: 'b', driver: 'y-driver' },
+    ]);
+    expect(sentence).toContain('datasource "a" (driver "x-driver")');
+    expect(sentence).toContain('datasource "b" (driver "y-driver")');
   });
 });

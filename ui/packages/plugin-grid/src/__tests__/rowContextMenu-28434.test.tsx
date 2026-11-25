@@ -73,10 +73,13 @@ function renderGrid(opts: {
   schema?: Record<string, unknown>;
   onRowClick?: (row: any, e?: any) => void;
   host?: boolean;
+  /** The object's served `actionLayout` (objectstack#36494). */
+  actionLayout?: unknown;
 } = {}) {
   const dataSource: any = {
     getObjectSchema: async (name: string) => ({
       name,
+      ...(opts.actionLayout !== undefined ? { actionLayout: opts.actionLayout } : {}),
       fields: { id: { type: 'text' }, name: { type: 'text', label: 'Name' }, status: { type: 'text', label: 'Status' } },
     }),
   };
@@ -128,8 +131,15 @@ async function settle() {
 }
 
 const contextMenu = () => screen.queryByTestId('row-context-menu');
+/**
+ * The row's items of a menu: a menu opened on a data cell lists that cell's
+ * own items first (objectstack#36289, pinned in `cellContextMenu-36289`),
+ * which these pins leave out.
+ */
 const itemIds = (menu: HTMLElement) =>
-  within(menu).queryAllByRole('menuitem').map((el) => el.getAttribute('data-testid'));
+  within(menu).queryAllByRole('menuitem')
+    .map((el) => el.getAttribute('data-testid'))
+    .filter((id) => !id?.startsWith('row-context-cell-') && id !== 'row-context-field-history');
 
 /** The "⋮" items of a row, read off its real menu, which is closed again. */
 async function kebabItemIds(name: string): Promise<(string | null)[]> {
@@ -322,10 +332,13 @@ describe('objectstack#28434 · the browser keeps its own menu where it is the us
     renderGrid({ schema: { editable: true } });
     await settle();
     const cell = plainCellOf('Acme');
+    // objectstack#36270 — an editable grid selects a cell first: a click
+    // selects it, and a double-click opens its editor.
     await userEvent.dblClick(cell);
-    await userEvent.click(cell);
     const input = await waitFor(() => {
-      const el = cell.querySelector('input, textarea');
+      const el = cell.hasAttribute('data-editing-cell')
+        ? cell.querySelector('input:not([data-slot="cell-type-catcher"]), textarea')
+        : null;
       expect(el).not.toBeNull();
       return el as HTMLElement;
     });
@@ -393,5 +406,48 @@ describe('objectstack#28434 · the keyboard opens the same menu, Esc returns foc
     await userEvent.keyboard('{Escape}');
     await waitFor(() => expect(contextMenu()).toBeNull());
     expect(cell).toHaveFocus();
+  });
+});
+
+describe('objectstack#36494 · both row menus follow the object\'s `actionLayout.record` order', () => {
+  /** Two primaries and three secondaries, declared in this order. */
+  const ACTIONS = [
+    { name: 'promote', label: 'Promote', type: 'api', target: '/api/promote', locations: ['list_item'], variant: 'primary' },
+    { name: 'submit_review', label: 'Submit', type: 'api', target: '/api/submit', locations: ['list_item'] },
+    { name: 'archive', label: 'Archive', type: 'api', target: '/api/archive', locations: ['list_item'] },
+    { name: 'escalate', label: 'Escalate', type: 'api', target: '/api/escalate', locations: ['list_item'], variant: 'primary' },
+    { name: 'clone_row', label: 'Clone', type: 'api', target: '/api/clone', locations: ['list_item'] },
+  ];
+  const customOf = (ids: (string | null)[]) => ids.filter((id) => id?.startsWith('row-action-') && !id.startsWith('row-action-builtin-'));
+
+  it('with a `record` arm: pinned, then more, in its order, then the rest in today\'s order — in the "⋮" and the context menu', async () => {
+    renderGrid({
+      rowActionDefs: ACTIONS,
+      actionLayout: { record: { pinned: ['archive', 'escalate'], more: ['clone_row'] }, list: { pinned: ['submit_review'] } },
+    });
+    await settle();
+    // The inline button stays the first declared primary, as before.
+    expect(within(rowOf('Acme')).getByTestId('row-action-inline-promote')).toBeInTheDocument();
+    expect(customOf(await kebabItemIds('Acme'))).toEqual([
+      'row-action-archive', 'row-action-escalate', 'row-action-clone_row', 'row-action-submit_review',
+    ]);
+    // The context menu folds the inline primary in: it is unranked, so it
+    // leads the rest, primaries above secondaries as before.
+    expect(customOf(await contextItemIds('Acme'))).toEqual([
+      'row-action-archive', 'row-action-escalate', 'row-action-clone_row', 'row-action-promote', 'row-action-submit_review',
+    ]);
+  });
+
+  it('without a `record` arm (none, or only a `list` arm): both menus list exactly as today', async () => {
+    const today = [
+      'row-action-escalate', 'row-action-submit_review', 'row-action-archive', 'row-action-clone_row',
+    ];
+    for (const actionLayout of [undefined, { list: { pinned: ['archive'] } }]) {
+      renderGrid({ rowActionDefs: ACTIONS, actionLayout });
+      await settle();
+      expect(customOf(await kebabItemIds('Acme'))).toEqual(today);
+      expect(customOf(await contextItemIds('Acme'))).toEqual(['row-action-promote', ...today]);
+      cleanup();
+    }
   });
 });

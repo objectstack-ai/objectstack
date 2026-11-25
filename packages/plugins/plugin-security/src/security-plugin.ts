@@ -137,6 +137,7 @@ import {
 // body the members it reads (`RlsFilterHost`).
 import {
   computeLayeredRlsFilter,
+  computeTenantLayer0Only,
   computeWriteCheckFilter,
   isVerifiedPlatformOwnerSession,
   stageRlsMembership,
@@ -632,7 +633,7 @@ interface RlsFilterOptions {
   /**
    * Drop the PLATFORM's own row-level write ownership floor
    * (`owner_only_writes` / `owner_only_deletes` — see
-   * `platform-ownership-policies.ts`) from Layer 1.
+   * `platform-ownership-policies.ts`) from Layer 1 where it is the OR's last term; beside an authored `using` term it stays one (#35917).
    *
    * Set only when `ISharingService.checkEdit` / `checkDelete` answered `allow`
    * for the row this filter is about to be enforced against — a positive basis
@@ -679,14 +680,22 @@ interface RlsFilterOptions {
    *     master is itself `controlled_by_parent`, on a non-delegated write. Why
    *     the walk covers that master's write is stated once, at that call site's
    *     `masterGateCoversThisWrite` bullet — not restated here;
-   *   • the BULK write path does NOT, and must not: with no single id,
-   *     `assertControlledByParentWrite` judges every master the write reaches
-   *     and refuses on the first the caller may not edit, but that is a
-   *     verdict, not a row scope, so the floor stays — dropping it here would
-   *     widen the rows a member writes, a separate decision. Reading the
-   *     posture alone here would have widened bulk writes on
-   *     every `controlled_by_parent` detail to "any row under a READABLE
-   *     master", which no gate had authorized;
+   *   • [ADR-0055 §3 as amended 2026-11-22 · ruling record 7073030861] the
+   *     addressed PREDICATE write (`multi: true` update or delete) sets it,
+   *     for a caller not acting on another user's behalf, once step 2.8 has
+   *     judged the write on that caller's pass and refused nothing: with no
+   *     single id, `assertControlledByParentWrite` judges every master of the
+   *     rows the write selects, and each selected row that names none by the
+   *     owner rule, and refuses the write whole on the first it may not write
+   *     under. The vouch is the gate's own record of the rows it judged
+   *     (`predicateWriteRowIdsJudgedByMasterGate`), and the write is scoped to
+   *     those rows, so the floor is handed over for no row whose master went
+   *     unjudged. The ruling applies the precondition quoted above to this
+   *     path; it replaces an earlier bullet here that kept the floor on it
+   *     as "a separate decision". A write the gate did not judge (a shape the
+   *     engine does not route down its predicate path, a nested or
+   *     referential write, a delegated one) carries no record and keeps the
+   *     floor: the posture alone still drops nothing;
    *   • `getReadFilter` and `checkAuthoredRowWrite` do not, and need not: the
    *     floor is `update`/`delete`-only so the read path never carries it, and
    *     the authored-write probe already removes it by provenance;
@@ -1249,15 +1258,23 @@ export { describeHighPrivilegeBits } from '@objectstack/spec/security';
  *    with `clause: 'check'` reads `using` for a policy that declares no
  *    `check`), OR-combined. This is the half that changed: those writes were
  *    unchecked, and a row outside every applicable `using` is now refused.
- * 3. **The platform's ownership floor takes part in case 2 exactly when the
- *    pre-image gate kept it** (`owner_only_writes`, recognised by provenance
- *    through {@link isPlatformOwnershipFloorPolicy}; `keepOwnershipFloor`).
- *    The by-id write gate lets a declared write authority replace the floor
- *    (an `allow` from the sharing service, a `public_read_write` OWD, a
- *    covering controlled-by-parent master gate). Each of those writes targets
- *    a row whose `created_by` is someone else, so the floor's `using` on the
- *    post-image would refuse them again one step later; there it stays out.
- *    Where the pre-image kept it, it stays in: an app-authored USING-only
+ * 3. **The platform's ownership floor takes part in case 2 unless a declared
+ *    write authority replaced it** (`owner_only_writes`, recognised by
+ *    provenance through {@link isPlatformOwnershipFloorPolicy};
+ *    `keepOwnershipFloor`). A `public_read_write` OWD or a covering
+ *    controlled-by-parent master gate replaces it outright. An `allow` from
+ *    the sharing service replaces it only where no applicable app-authored
+ *    policy carries a `using` (#35917): beside one, the floor stays an OR term
+ *    in the check as it does at the pre-image. A replaced floor stays out,
+ *    because each of those writes may target a row whose `created_by` is
+ *    someone else, and the floor's `using` on the post-image would refuse it
+ *    again one step later. The check asks the applicable policies before the
+ *    pre-image's field-existence pass 1, so the two can part where that pass
+ *    sets an authored policy aside without counting it (an `organization_id`
+ *    policy on a tenancy-disabled object): there the pre-image drops the floor
+ *    and the check keeps it, and a non-creator the row gate admits is refused
+ *    by the check, as on main.
+ *    Where the floor stays in: an app-authored USING-only
  *    update policy is a WIDENER OR-ed with the floor at the pre-image
  *    (`stage == 'prospecting'`: anyone may edit an open deal), and leaving
  *    the floor out of the check would turn that widener into a restriction on
@@ -2375,7 +2392,7 @@ export class SecurityPlugin implements Plugin {
       const readLogger = () => this.logger;
       const readPermissionEvaluator = () => this.permissionEvaluator;
       const readQl = () => this.ql;
-      const host: Pick<AuthzMiddlewareHost, 'addressedByIdWriteId' | 'addressedPredicateWrite' | 'assertControlledByParentWrite' | 'callerCannotReadAddressedRow' | 'collectRLSPolicies' | 'composeWriteTenantWall' | 'computeControlledByParentFilter' | 'computeForbiddenFieldWrites' | 'computeLayeredRlsFilter' | 'computePartialMaskRules' | 'computeQueryGuardFieldPerms' | 'computeRlsFilter' | 'computeWriteCheckFilter' | 'delegatedAdminGate' | 'delegatorOwnWriteFloorOptions' | 'engineOperationScope' | 'epoch' | 'extractSingleId' | 'fieldMasker' | 'getCallerPreImage' | 'getObjectFieldNames' | 'logger' | 'maskOperationResult' | 'ownershipQueues' | 'permissionEvaluator' | 'ql' | 'raiseWriteWallRefusal' | 'readableRowsScopeForPredicateWrite' | 'resolveCallerPosture' | 'resolveHopWithheldFields' | 'resolveOperationPrincipals' | 'resolvePermissionSetsForContext' | 'resolvePreImageFloorDrop' | 'resolveSharingWriteVerdict' | 'writeCheckFieldOptions'> = {
+      const host: Pick<AuthzMiddlewareHost, 'addressedByIdWriteId' | 'addressedPredicateWrite' | 'assertControlledByParentWrite' | 'callerCannotReadAddressedRow' | 'collectRLSPolicies' | 'composeWriteTenantWall' | 'computeControlledByParentFilter' | 'computeForbiddenFieldWrites' | 'computeLayeredRlsFilter' | 'computePartialMaskRules' | 'computeQueryGuardFieldPerms' | 'computeRlsFilter' | 'computeTenantLayer0Only' | 'computeWriteCheckFilter' | 'delegatedAdminGate' | 'delegatorOwnWriteFloorOptions' | 'engineOperationScope' | 'epoch' | 'extractSingleId' | 'fieldMasker' | 'getCallerPreImage' | 'getObjectFieldNames' | 'logger' | 'maskOperationResult' | 'ownershipQueues' | 'permissionEvaluator' | 'ql' | 'raiseWriteWallRefusal' | 'readableRowsScopeForPredicateWrite' | 'resolveCallerPosture' | 'resolveHopWithheldFields' | 'resolveOperationPrincipals' | 'resolvePermissionSetsForContext' | 'resolvePreImageFloorDrop' | 'resolveSharingWriteVerdict' | 'writeCheckFieldOptions'> = {
         addressedByIdWriteId: (...a) => this.addressedByIdWriteId(...a),
         addressedPredicateWrite: (...a) => this.addressedPredicateWrite(...a),
         assertControlledByParentWrite: (...a) => this.assertControlledByParentWrite(...a),
@@ -2385,6 +2402,7 @@ export class SecurityPlugin implements Plugin {
         computeControlledByParentFilter: (...a) => this.computeControlledByParentFilter(...a),
         computeForbiddenFieldWrites: (...a) => this.computeForbiddenFieldWrites(...a),
         computeLayeredRlsFilter: (...a) => this.computeLayeredRlsFilter(...a),
+        computeTenantLayer0Only: (...a) => this.computeTenantLayer0Only(...a),
         computePartialMaskRules: (...a) => this.computePartialMaskRules(...a),
         computeQueryGuardFieldPerms: (...a) => this.computeQueryGuardFieldPerms(...a),
         computeRlsFilter: (...a) => this.computeRlsFilter(...a),
@@ -2966,9 +2984,10 @@ export class SecurityPlugin implements Plugin {
    * two, and it is private to this package by design.
    *
    * **No second RLS evaluator.** The verdict is read off the SAME
-   * {@link computeLayeredRlsFilter} the middleware enforces with, driven by the
-   * SAME `dropPlatformOwnershipFloor` knob #6684 landed for the by-id write
-   * pre-image gate — the floor is removed by provenance, everything else
+   * {@link computeLayeredRlsFilter} the middleware enforces with. The floor is
+   * removed by provenance from the permission SETS before the call (since
+   * #35917 the `dropPlatformOwnershipFloor` knob keeps the floor beside an
+   * authored term, which is the case this probe exists for); everything else
    * compiles exactly as it would on the enforcement path. Two consequences
    * worth naming, because both are load-bearing:
    *
@@ -4627,6 +4646,39 @@ export class SecurityPlugin implements Plugin {
   }
 
   /**
+   * The caller's Layer 0 alone — {@link computeLayeredRlsFilter}'s Layer 0
+   * half, with the permission sets loaded only where they decide an
+   * operator's crossing. Read by the organization wall an app-authored
+   * elevation meets (`app-automation-organization-wall.ts`).
+   */
+  private computeTenantLayer0Only(
+    loadPermissionSets: () => Promise<PermissionSet[]>,
+    object: string,
+    operation: string,
+    context: any,
+  ): ReturnType<typeof computeTenantLayer0Only> {
+    // The body lives in `security-plugin-rls-filter.ts` (see `RlsFilterHost`).
+    const readLogger = () => this.logger;
+    const readMetadata = () => this.metadata;
+    const readPermissionEvaluator = () => this.permissionEvaluator;
+    const readQl = () => this.ql;
+    const readTenancyPosture = () => this.tenancyPosture;
+    const host: Pick<RlsFilterHost, 'getObjectFieldNames' | 'getObjectSecurityMeta' | 'hasPlatformAdminPosture' | 'isVerifiedPlatformOwnerSession' | 'logger' | 'metadata' | 'permissionEvaluator' | 'ql' | 'tenancyDisabledCache' | 'tenancyPosture'> = {
+      getObjectFieldNames: (...a) => this.getObjectFieldNames(...a),
+      getObjectSecurityMeta: (...a) => this.getObjectSecurityMeta(...a),
+      hasPlatformAdminPosture: (...a) => this.hasPlatformAdminPosture(...a),
+      isVerifiedPlatformOwnerSession: (...a) => this.isVerifiedPlatformOwnerSession(...a),
+      get logger() { return readLogger(); },
+      get metadata() { return readMetadata(); },
+      get permissionEvaluator() { return readPermissionEvaluator(); },
+      get ql() { return readQl(); },
+      tenancyDisabledCache: this.tenancyDisabledCache,
+      get tenancyPosture() { return readTenancyPosture(); },
+    };
+    return computeTenantLayer0Only.call(host, loadPermissionSets, object, operation, context);
+  }
+
+  /**
    * [#12974] Is this session's account the VERIFIED declared platform owner —
    * the predicate the Layer 0 owner wall bypass keys on?
    *
@@ -5192,7 +5244,8 @@ export class SecurityPlugin implements Plugin {
    * predicate write of a detail is narrowed to the rows the read door returns
    * for the caller's own predicate ({@link readableRowsScopeForPredicateWrite},
    * where this leaf composes) and judged per master by the 2.8 gate
-   * ({@link assertControlledByParentWrite}, a verdict, never a scope).
+   * ({@link assertControlledByParentWrite}, a verdict; the rows it judged are
+   * the scope of a write it vouches for, ruling record 7073030861).
    *
    * [ADR-0139 D5.2 / D5.3] The two master shapes the engine composes no leaf
    * over — a master on another datasource, a master an object-scoped read
@@ -5717,7 +5770,8 @@ export class SecurityPlugin implements Plugin {
    * the read question the write doors narrow a predicate write's matched set to
    * ({@link readableRowsScopeForPredicateWrite}), so every row that write can
    * reach is among them. They can be MORE than it writes: the write-class
-   * scopes (the platform ownership floor, the detail's own write policy) still
+   * scopes (the detail's own write policy, and the platform ownership floor
+   * on a write this gate does not vouch for, a delegated one) still
    * leave some of them unwritten, and a row among them under a master the
    * caller may not edit refuses the write all the same. The caller named that
    * row and can read it, and its master too (the detail's read scope is the

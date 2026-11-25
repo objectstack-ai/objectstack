@@ -563,9 +563,10 @@ describe('MasterDetailForm — line column headers show the child fields\' help 
     ],
   ])('%s: each header carries its field\'s help, the form\'s own read of it', async (_label, detail) => {
     render(<MasterDetailForm schema={schema(detail)} dataSource={ds()} />);
-    const qtyHelp = await screen.findByRole('button', { name: 'Whole units only.' });
+    // The info button is named Help and described by the help (objectstack#36004).
+    const qtyHelp = await screen.findByRole('button', { name: 'Help', description: 'Whole units only.' });
     expect(qtyHelp.closest('th')!.textContent).toContain('Qty');
-    expect(screen.getByRole('button', { name: 'Tax-inclusive.' }).closest('th')!.textContent).toContain('Price');
+    expect(screen.getByRole('button', { name: 'Help', description: 'Tax-inclusive.' }).closest('th')!.textContent).toContain('Price');
     // CONTROL: a field with no help draws no info button on its header.
     expect(screen.getByRole('columnheader', { name: 'Note' }).querySelector('button')).toBeNull();
   });

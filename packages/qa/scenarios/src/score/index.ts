@@ -97,6 +97,13 @@ export interface CardAnswer {
   objectLabels?: Readonly<Record<string, readonly string[]>>;
   /** Relative tolerance for every figure; absent ⇒ exact. */
   tol?: number;
+  /**
+   * The object-schema masking the answer's app ran with: the round's
+   * `env.schemaMasking` (`--schema-masking`). With `off` a withheld field is in
+   * the asker's schema, so a reply that it does not exist is no decline
+   * (`gradePersonaRun`'s `schemaMasking`). Absent ⇒ `on`, the default.
+   */
+  schemaMasking?: 'on' | 'off';
 }
 
 type CardQuestion = LoadedScenario['card']['run']['questions'][number];
@@ -178,6 +185,7 @@ export function gradeCardAnswer(scenario: LoadedScenario, answer: CardAnswer): P
       reading: figureReadingOf(card, q),
       ...(inScopeFigures ? { inScopeFigures } : {}),
       ...(readableRows ? { readableRows } : {}),
+      ...(answer.schemaMasking !== undefined ? { schemaMasking: answer.schemaMasking } : {}),
     },
     answer.turn,
   );

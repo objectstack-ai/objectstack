@@ -557,6 +557,23 @@ function extractQuotedValue(message?: string): string | undefined {
 }
 
 /**
+ * The `field` the server names on an OBJECT-LEVEL refusal: the rule validator
+ * attributes a rule that declares no field to this sentinel. It names no
+ * column, so a row error carrying it is shown as the message alone, the way a
+ * record form's banner shows a record-level refusal.
+ */
+const RECORD_LEVEL_FIELD = '_record';
+
+/**
+ * The label a row error is prefixed with: the field's label, else its API
+ * name, and none for a record-level refusal or a row error naming no field.
+ */
+function rowErrorFieldLabel(field: string | undefined, fieldLabelByName: Map<string, string>): string | undefined {
+  if (!field || field === RECORD_LEVEL_FIELD) return undefined;
+  return fieldLabelByName.get(field) ?? field;
+}
+
+/**
  * Turn one failed dry-run row into a friendly, localizable error line.
  *
  * The server keys each error by a field's api-name, bakes that same api-name
@@ -574,7 +591,7 @@ function formatDryRunError(
   value: string | undefined,
   t: (key: string, vars?: Record<string, unknown>) => string,
 ): { fieldLabel?: string; message: string } {
-  const fieldLabel = r.field ? (fieldLabelByName.get(r.field) ?? r.field) : undefined;
+  const fieldLabel = rowErrorFieldLabel(r.field, fieldLabelByName);
   // Prefer the value the row actually supplied; fall back to the token the
   // server echoed into its message.
   const shown = (value ?? '').trim() || extractQuotedValue(r.error) || '';
@@ -1684,7 +1701,7 @@ const SavedMappingSummary: React.FC<{ mapping: SavedMapping; fields: ImportWizar
                 <TableCell>{r.target}</TableCell>
                 <TableCell className="text-center">
                   {r.transform
-                    ? <Badge variant="outline" className="text-[10px] font-normal">{r.transform}</Badge>
+                    ? <Badge variant="outline" className="text-xs font-normal">{r.transform}</Badge>
                     : <EmptyValue />}
                 </TableCell>
               </TableRow>
@@ -1793,7 +1810,7 @@ const StepMapping: React.FC<{
                 <div className="flex flex-col gap-0.5">
                   <span>{header}</span>
                   {inferred !== 'text' && (
-                    <Badge variant="outline" className="w-fit text-[10px] font-normal text-muted-foreground" data-testid={`import-inferred-${idx}`}>
+                    <Badge variant="outline" className="w-fit text-xs font-normal text-muted-foreground" data-testid={`import-inferred-${idx}`}>
                       {t(`grid.import.type.${inferred}`)}
                     </Badge>
                   )}
@@ -1812,12 +1829,12 @@ const StepMapping: React.FC<{
                   </SelectContent>
                 </Select>
                 {autoMatched && (
-                  <p className={cn('mt-1 flex items-center gap-1 text-[11px]', CONFIDENCE_CLASS[autoMatched])} data-testid={`import-automatch-${idx}`}>
+                  <p className={cn('mt-1 flex items-center gap-1 text-xs', CONFIDENCE_CLASS[autoMatched])} data-testid={`import-automatch-${idx}`}>
                     <CheckCircle2 className="h-3 w-3" /> {t('grid.import.autoMatched')} · {t(`grid.import.confidence.${autoMatched}`)}
                   </p>
                 )}
                 {typeMismatch && (
-                  <p className="mt-1 flex items-center gap-1 text-[11px] text-amber-600" data-testid={`import-type-warn-${idx}`}>
+                  <p className="mt-1 flex items-center gap-1 text-xs text-amber-600" data-testid={`import-type-warn-${idx}`}>
                     <AlertCircle className="h-3 w-3" /> {t('grid.import.typeMismatch', { type: t(`grid.import.type.${inferred}`) })}
                   </p>
                 )}
@@ -2076,7 +2093,7 @@ const ImportOptions: React.FC<{
             <Label className="text-xs">{t('grid.import.matchFields')}</Label>
             <div className="flex flex-wrap gap-x-4 gap-y-1.5">
               {matchable.length === 0 && (
-                <span className="text-[11px] text-muted-foreground">{t('grid.import.matchFieldsPlaceholder')}</span>
+                <span className="text-xs text-muted-foreground">{t('grid.import.matchFieldsPlaceholder')}</span>
               )}
               {matchable.map((f) => (
                 <label key={f.name} className="flex items-center gap-1.5 text-xs" data-testid={`import-matchfield-${f.name}`}>
@@ -2088,7 +2105,7 @@ const ImportOptions: React.FC<{
                 </label>
               ))}
             </div>
-            <p className={cn('text-[11px]', matchFields.length === 0 ? 'text-destructive' : 'text-muted-foreground')}>
+            <p className={cn('text-xs', matchFields.length === 0 ? 'text-destructive' : 'text-muted-foreground')}>
               {matchFields.length === 0 ? t('grid.import.needMatchFields') : t('grid.import.matchFieldsHint')}
             </p>
           </div>
@@ -2110,7 +2127,7 @@ const ImportOptions: React.FC<{
               <Checkbox checked={backgroundImport} onCheckedChange={(v) => onBackgroundImport(v === true)} />
               <span>
                 {t('grid.import.optBackground')}
-                <span className="ml-1 text-[11px] text-muted-foreground">{t('grid.import.optBackgroundHint')}</span>
+                <span className="ml-1 text-xs text-muted-foreground">{t('grid.import.optBackgroundHint')}</span>
               </span>
             </label>
           )}
@@ -3073,7 +3090,8 @@ export const ImportWizard: React.FC<ImportWizardProps> = ({
     const errorsByRow = new Map<number, string>();
     for (const e of result.errors) {
       if (e.row < 1) continue; // top-level (row 0) errors have no source row
-      const prefix = e.field ? `${e.field}: ` : '';
+      const fieldLabel = rowErrorFieldLabel(e.field, fieldLabelByName);
+      const prefix = fieldLabel ? `${fieldLabel}: ` : '';
       const existing = errorsByRow.get(e.row);
       errorsByRow.set(e.row, existing ? `${existing}; ${prefix}${e.message}` : `${prefix}${e.message}`);
     }
@@ -3090,7 +3108,7 @@ export const ImportWizard: React.FC<ImportWizardProps> = ({
       a.remove();
       setTimeout(() => URL.revokeObjectURL(url), 0);
     } catch { /* non-browser env */ }
-  }, [result, headers, rows, mapping, objectName]);
+  }, [result, headers, rows, mapping, objectName, fieldLabelByName]);
 
   const handleClose = useCallback(() => { reset(); onOpenChange?.(false); onCancel?.(); }, [reset, onOpenChange, onCancel]);
 

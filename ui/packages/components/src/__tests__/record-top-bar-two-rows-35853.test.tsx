@@ -10,13 +10,14 @@
  * objectstack#35853 (figure 40) — the record's top bar in two rows, the page
  * and the drawer alike:
  *
- * 1. the navigation row: the host's left end, ↑ ↓ and 「第 N 条，共 M 条 · 视图名」
- *    (the view's name returns to the list), and the frame controls — ✕ last —
- *    at its right; no record name and no actions;
+ * 1. the navigation row: ✕ first (objectstack#36557), then the host's left
+ *    end, ↑ ↓ and 「第 N 条，共 M 条 · 视图名」 (the view's name returns to the
+ *    list), and the frame controls (⤢) at its right; no record name and no
+ *    actions;
  * 2. the record row: the record's name, then its button group and ⊟.
  *
  * Without a record row it stays the one row it was (the phone's), its counter
- * still 「n / N」.
+ * still 「n / N」 and ✕ still its last control.
  */
 
 import * as React from 'react';
@@ -30,7 +31,10 @@ import { NavigationOverlay } from '../custom/navigation-overlay';
 afterEach(() => cleanup());
 
 const close = <RecordTopBarButton label="Close" data-testid="close">✕</RecordTopBarButton>;
+const expand = <RecordTopBarButton label="Open as full page" data-testid="expand">⤢</RecordTopBarButton>;
 const nav = () => document.querySelector('[data-record-top-bar-nav]') as HTMLElement;
+/** The navigation row's controls, in DOM (and Tab) order, by accessible name. */
+const navButtons = () => Array.from(nav().querySelectorAll('button')).map((el) => el.getAttribute('aria-label') ?? el.textContent);
 const recordRow = () => document.querySelector('[data-record-top-bar-record]') as HTMLElement;
 
 function Bar({ stepper, leading }: { stepper?: RecordTopBarStepper; leading?: React.ReactNode }) {
@@ -42,13 +46,14 @@ function Bar({ stepper, leading }: { stepper?: RecordTopBarStepper; leading?: Re
       record={<span data-testid="record-name">Wayne Enterprise License</span>}
       actionSlotRef={setSlot}
       toggles={<span data-testid="toggles">⊟</span>}
-      frame={close}
+      frame={expand}
+      close={close}
     />
   );
 }
 
 describe('the two-row bar', () => {
-  it('from a list: ↑ ↓ and 「N of M · view」 on the left of the navigation row, ✕ at its right, the record below', () => {
+  it('from a list: ✕, then ↑ ↓ and 「N of M · view」 on the left of the navigation row, ⤢ at its right, the record below', () => {
     const onScope = vi.fn();
     const onNext = vi.fn();
     render(<Bar stepper={{ onNext, position: { index: 1, total: 10 }, scope: 'Open deals', onScope }} />);
@@ -63,8 +68,10 @@ describe('the two-row bar', () => {
     expect(onScope).toHaveBeenCalledTimes(1);
     fireEvent.click(screen.getByRole('button', { name: 'Next record' }));
     expect(onNext).toHaveBeenCalledTimes(1);
-    // ✕ is the navigation row's last control; the row holds no name and no action.
-    expect(nav().querySelector('[data-record-top-bar-frame]')!.lastElementChild).toBe(screen.getByTestId('close'));
+    // ✕ is the navigation row's first control, ⤢ its last; the row holds no name and no action.
+    expect(nav().firstElementChild!.contains(screen.getByTestId('close'))).toBe(true);
+    expect(navButtons()).toEqual(['Close', 'Previous record', 'Next record', 'Open deals', 'Open as full page']);
+    expect(nav().querySelector('[data-record-top-bar-frame]')!.lastElementChild).toBe(screen.getByTestId('expand'));
     expect(nav().contains(screen.getByTestId('record-name'))).toBe(false);
     expect(nav().querySelector('[data-record-top-bar-actions]')).toBeNull();
     // The record row: the name, then the actions and ⊟.
@@ -73,12 +80,12 @@ describe('the two-row bar', () => {
     expect(recordRow().contains(screen.getByTestId('toggles'))).toBe(true);
   });
 
-  it('from no list: the navigation row names the object, ✕ still at its right, no ↑ ↓', () => {
-    render(<Bar leading={<span data-testid="object">Deals</span>} />);
+  it('from no list: ✕ first, then the object\'s name, no ↑ ↓', () => {
+    render(<Bar leading={<button type="button" data-testid="object">Deals</button>} />);
     expect(nav().contains(screen.getByTestId('object'))).toBe(true);
     expect(nav().querySelector('[data-record-top-bar-step]')).toBeNull();
     expect(nav().querySelector('[data-record-top-bar-position]')).toBeNull();
-    expect(nav().querySelector('[data-record-top-bar-frame]')!.lastElementChild).toBe(screen.getByTestId('close'));
+    expect(navButtons()).toEqual(['Close', 'Deals', 'Open as full page']);
   });
 
   it('in Chinese the count reads 「第 N 条，共 M 条」', async () => {
@@ -91,15 +98,20 @@ describe('the two-row bar', () => {
     expect(nav().querySelector('[data-record-top-bar-scope]')?.textContent).toBe('进行中商机');
   });
 
-  it('CONTROL: without a record row it is one row, the counter 「n / N」', () => {
-    render(<RecordTopBar stepper={{ position: { index: 1, total: 10 } }} frame={close} />);
+  it('CONTROL: without a record row it is one row, the counter 「n / N」, ✕ still last at the right end', () => {
+    render(<RecordTopBar leading={<span data-testid="lead">Deals</span>} stepper={{ position: { index: 1, total: 10 } }} frame={expand} close={close} />);
     expect(document.querySelector('[data-record-top-bar-nav]')).toBeNull();
+    expect(document.querySelector('[data-record-top-bar-close]')).toBeNull();
     expect(document.querySelector('[data-record-top-bar-position]')?.textContent).toBe('2 / 10');
+    const controls = document.querySelector('[data-record-top-bar-controls]')!;
+    expect(controls.lastElementChild).toBe(screen.getByTestId('close'));
+    expect(screen.getByTestId('expand').nextElementSibling).toBe(screen.getByTestId('close'));
   });
 });
 
 describe('the drawer draws the two-row bar', () => {
-  it('⤢ then ✕ at the right of the navigation row; the record row holds the name and the button group', () => {
+  it('✕ first in the navigation row, ⤢ at its right; ✕ keeps its name and closes; the record row holds the name and the button group', () => {
+    const onClose = vi.fn();
     function Drawer() {
       const [, setSlot] = React.useState<HTMLElement | null>(null);
       return (
@@ -108,7 +120,7 @@ describe('the drawer draws the two-row bar', () => {
           isOverlay
           mode="drawer"
           selectedRecord={{ id: 'r-1' }}
-          close={() => {}}
+          close={onClose}
           setIsOpen={() => {}}
           onExpand={() => {}}
           mainContent={<div>list</div>}
@@ -122,7 +134,12 @@ describe('the drawer draws the two-row bar', () => {
     }
     render(<Drawer />);
     const frame = Array.from(nav().querySelector('[data-record-top-bar-frame]')!.querySelectorAll('button'));
-    expect(frame.map((el) => el.getAttribute('aria-label'))).toEqual(['Open as full page', 'Close']);
+    expect(frame.map((el) => el.getAttribute('aria-label'))).toEqual(['Open as full page']);
+    const buttons = navButtons();
+    expect(buttons[0]).toBe('Close');
+    expect(buttons[buttons.length - 1]).toBe('Open as full page');
+    fireEvent.click(nav().querySelector('button') as HTMLElement);
+    expect(onClose).toHaveBeenCalledTimes(1);
     expect(nav().querySelector('[data-record-top-bar-position]')?.textContent).toBe('1 of 3');
     expect(recordRow().contains(screen.getByTestId('record-name'))).toBe(true);
     expect(recordRow().querySelector('[data-record-top-bar-actions]')).not.toBeNull();

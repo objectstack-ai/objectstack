@@ -119,7 +119,7 @@ import { z } from 'zod';
  *
  * ```ts
  * config: {
- *   schedule: { type: 'cron', expression: '0 8 * * *' },
+ *   schedule: { type: 'cron', expression: '0 8 * * *', timezone: 'UTC' },
  *   organization: 'org_msokm9oaz0cal87q',
  * }
  * ```

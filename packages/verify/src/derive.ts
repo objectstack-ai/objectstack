@@ -21,7 +21,7 @@
 
 import { isMultiValueField, referenceCarrierOf } from '@objectstack/spec/data';
 import { declaredCollection } from './artifact-collections.js';
-import { hasManagedStandIn, isManagedDatasource } from './managed-datasource-stand-in.js';
+import { isManagedDatasource } from './managed-datasource-stand-in.js';
 
 const COMPUTED = new Set(['formula', 'summary', 'autonumber', 'rollup', 'vector']);
 const RELATIONAL = new Set(['lookup', 'master_detail', 'master-detail', 'masterdetail', 'tree']);
@@ -210,9 +210,6 @@ interface Draft {
  * in. Only genuinely unsatisfiable shapes are `blocked`:
  *  - an object on an external datasource (never written: verify writes only to
  *    its ephemeral store), or
- *  - an object on a declared managed datasource whose engine verify has no
- *    ephemeral stand-in for (verify's own writes withheld; the app's seed,
- *    hooks and flows still reach the real store), or
  *  - a required relation whose target is missing from the app config (external), or
  *  - a required-reference cycle (incl. a required self-reference), or
  *  - a required relation whose target is itself blocked (cascade), or
@@ -272,20 +269,11 @@ export function deriveCrudCases(config: any): CrudCase[] {
     }
 
     // An object on a declared MANAGED datasource runs on the ephemeral store
-    // verify builds in that datasource's place (`./managed-datasource-stand-in.ts`),
-    // unless its engine has no faithful stand-in: then the boot keeps the real
-    // driver, and verify withholds its own derived writes from the object. The
-    // app's seed, hooks and flows still write to that real store.
-    // `default` is verify's own store whatever the app declares under that name.
-    if (ds && obj.datasource !== 'default' && typeof ds.driver === 'string' && !hasManagedStandIn(ds.driver)) {
-      d.blocked =
-        `managed datasource "${obj.datasource}" (driver "${ds.driver}"): not exercised — verify has no ` +
-        "ephemeral stand-in for this engine, so it withholds its own writes; the app's seed, hooks and " +
-        'flows still write to the real database';
-      d.withheld = true;
-      drafts.set(obj.name, d);
-      continue;
-    }
+    // verify builds in that datasource's place (`./managed-datasource-stand-in.ts`)
+    // and is exercised like any other: every engine the platform ships has a
+    // stand-in, and a boot declaring a managed datasource on a plugin's driver
+    // id is refused before it composes. `default` is verify's own store
+    // whatever the app declares under that name.
 
     for (const [name, f] of Object.entries(fields)) {
       const type = String((f as any)?.type ?? '').toLowerCase();

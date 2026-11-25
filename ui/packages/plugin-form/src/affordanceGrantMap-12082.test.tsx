@@ -115,6 +115,7 @@ const EXPECTED_GRANT: Record<string, Grant> = {
   relatedRowDelete: 'delete',
   attachmentUpload: 'create',
   attachmentDelete: 'delete',
+  attachmentRename: 'update',
   // The rows the write census found: affordances that read no grant at all.
   calendarQuickCreate: 'create',
   calendarReschedule: 'update',
@@ -132,6 +133,10 @@ const EXPECTED_GRANT: Record<string, Grant> = {
   // asked of `sys_comment`.
   feedCommentEdit: 'update',
   feedCommentDelete: 'delete',
+  // objectstack#36191: the same Delete through the own-comment delete door,
+  // which needs no delete grant, so it asks the grant the comment was posted
+  // under (as `feedReactionRemove` does for a reaction).
+  feedCommentDeleteOwn: 'create',
   // objectui#12982: Setup's Clone of a declared sharing rule, asked of
   // `sys_sharing_rule`: it creates an organization rule.
   declarationClone: 'create',
@@ -695,6 +700,11 @@ const WRITE_SITES: Record<string, WriteSite> = {
   // own completion attaches it (the upload adapter's `attachTo`), so the
   // `attachmentUpload` row is read where the upload is offered and no
   // `create` is called. Its delete is still a data-source write.
+  // Studio's 「新建应用」 door (objectstack#36748): the dialog's `newApp` step
+  // writes the new package's app as METADATA (a draft, then its publish), not a
+  // record through a data source; the member is named `create` like one.
+  'packages/app-shell/src/views/metadata-admin/PackageFormDialog.tsx :: PackageFormDialog > submit :: create':
+    outOfFamily("Studio's new-app door writes the new package's app metadata (draft, then publish) through the metadata client, not a record the caller browses; the Studio surface it is offered on is the author's own"),
   'packages/app-shell/src/views/RecordAttachmentsPanel.tsx :: RecordAttachmentsPanel > handleDelete :: delete':
     mapped(['attachmentDelete'], 'packages/app-shell/src/views/RecordAttachmentsPanel.tsx'),
   'packages/app-shell/src/views/RecordDetailView.tsx :: RecordDetailView > apiHandler :: update':
@@ -853,6 +863,10 @@ const WRITE_SITES: Record<string, WriteSite> = {
   // the picked rows (relatedRowEdit).
   'packages/plugin-detail/src/RelatedList.tsx :: RelatedList > handleAddRecords :: batch':
     mapped(['relatedNew', 'relatedRowEdit'], RELATED_LIST),
+  // The related tab's bulk delete (objectstack#35892): one batch call to the
+  // data source, offered beside the host's row delete and read here.
+  'packages/plugin-detail/src/RelatedList.tsx :: RelatedList > handleConfirmBulkDelete :: delete':
+    mapped(['relatedRowDelete'], RELATED_LIST),
   'packages/plugin-detail/src/renderers/record-related-list.tsx :: RecordRelatedListBody :: delete': {
     ...mapped(['relatedRowDelete'], RELATED_LIST_BLOCK),
     note: "the FALLBACK remove (an `add` config, no host delete) reads the same row the host's delete reads, so it never puts back a delete the host withheld",

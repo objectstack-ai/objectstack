@@ -266,6 +266,18 @@ export const ptBRObjects: NonNullable<TranslationData['objects']> = {
       edited_at: {
         label: "Editado em"
       },
+      is_resolved: {
+        label: "Resolvido",
+        help: "Se o tópico iniciado por este comentário de primeiro nível está resolvido; recusado em uma resposta"
+      },
+      resolved_by: {
+        label: "Resolvido por",
+        help: "Quem resolveu o tópico — registrado pela plataforma, nunca escrito pelos autores"
+      },
+      resolved_at: {
+        label: "Resolvido em",
+        help: "Quando o tópico foi resolvido — registrado pela plataforma, nunca escrito pelos autores"
+      },
       created_at: {
         label: "Criado em"
       },

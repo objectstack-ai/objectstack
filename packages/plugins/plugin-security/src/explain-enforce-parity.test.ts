@@ -831,7 +831,9 @@ const D_BOUNDED = 'u_d_bounded';
  * - `p_beta`: another organization's row, which only the wall-less posture lets through;
  * - `p_del_*`: the same two shapes again, for the delete rows (a delete that lands removes its row);
  * - `p_bounded_*`, `p_del_bounded_*`, `m_bounded_*`: rows `D_BOUNDED`'s own authored
- *   policies refuse (`held`) or admit (`free`), and a detail under each master (#24746).
+ *   policies refuse (`held`, created by someone else) or admit (`free`), and a detail
+ *   under each master (#24746); `p_bounded_held_created`, a `held` row the writer
+ *   created, which the ownership floor admits beside the authored policy (#35917).
  *
  * One rig per posture, shared by its rows: an admitted update writes only
  * `note`, which no policy reads, and every delete row has its own record.
@@ -934,13 +936,17 @@ async function bootDelegated(posture: TenancyPosture) {
     row('p_beta', D_ORG, D_ORG, BETA),
     row('p_del_theirs_created_by_org', D_OTHER, D_ORG),
     row('p_del_org_mine_created_by_other', D_ORG, D_OTHER),
-    { ...row('p_bounded_held', D_BOUNDED, D_BOUNDED), name: 'held' },
+    // [#35917, ruled A] A `held` row is one `D_BOUNDED` did NOT create: the
+    // ownership floor stays an OR term beside an authored write policy, so a
+    // row the writer created is admitted (`p_bounded_held_created`).
+    { ...row('p_bounded_held', D_BOUNDED, D_OTHER), name: 'held' },
     { ...row('p_bounded_free', D_BOUNDED, D_BOUNDED), name: 'free' },
-    { ...row('p_del_bounded_held', D_BOUNDED, D_BOUNDED), name: 'held' },
+    { ...row('p_del_bounded_held', D_BOUNDED, D_OTHER), name: 'held' },
+    { ...row('p_bounded_held_created', D_BOUNDED, D_BOUNDED), name: 'held' },
   ]) await e.insert(PARENT, r, SYS);
   await e.insert(MASTER, row('m_org', D_ORG, D_ORG), SYS);
   await e.insert(MASTER, row('m_theirs', D_OTHER, D_OTHER), SYS);
-  await e.insert(MASTER, { ...row('m_bounded_held', D_BOUNDED, D_BOUNDED), name: 'held' }, SYS);
+  await e.insert(MASTER, { ...row('m_bounded_held', D_BOUNDED, D_OTHER), name: 'held' }, SYS);
   await e.insert(MASTER, { ...row('m_bounded_free', D_BOUNDED, D_BOUNDED), name: 'free' }, SYS);
   await e.insert(DETAIL, { id: 'd_under_org', note: '', created_by: D_ORG, master: 'm_org', organization_id: ALPHA }, SYS);
   await e.insert(DETAIL, { id: 'd_under_theirs', note: '', created_by: D_ORG, master: 'm_theirs', organization_id: ALPHA }, SYS);
@@ -1302,6 +1308,9 @@ function delegatedRows(posture: TenancyPosture, label: string, walled: boolean):
     [D_BOUNDED, true, 'update', 'PARENT', 'p_bounded_held', 'a row its own authored update policy refuses', REFUSED_DENIED, '#24746'],
     [D_BOUNDED, false, 'update', 'PARENT', 'p_bounded_held', 'a row its own authored update policy refuses', REFUSED_DENIED, '#24746'],
     [D_BOUNDED, true, 'update', 'PARENT', 'p_bounded_free', 'a row its own authored update policy admits', 'admitted', '#24746'],
+    // [#35917, ruled A] The floor stays an OR term beside the authored policy: a held row the writer created is admitted.
+    [D_BOUNDED, true, 'update', 'PARENT', 'p_bounded_held_created', 'a held row it created, which the ownership floor admits beside its authored update policy', 'admitted', '#35917'],
+    [D_BOUNDED, false, 'update', 'PARENT', 'p_bounded_held_created', 'a held row it created, which the ownership floor admits beside its authored update policy', 'admitted', '#35917'],
     [D_BOUNDED, true, 'delete', 'PARENT', 'p_del_bounded_held', 'a row its own authored delete policy refuses', REFUSED_DENIED, '#24746'],
     [D_BOUNDED, true, 'update', 'DETAIL', 'd_under_bounded_held', 'a detail under a master its own authored update policy refuses', REFUSED_DENIED, '#24746'],
     [D_BOUNDED, false, 'update', 'DETAIL', 'd_under_bounded_held', 'a detail under a master its own authored update policy refuses', REFUSED_DENIED, '#24746'],

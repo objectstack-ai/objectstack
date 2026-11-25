@@ -164,7 +164,7 @@ describe('ObjectView.handleViewCreate persists a kanban through the one builder 
     await waitFor(() => expect(metadataClient.save).toHaveBeenCalledTimes(1));
     const [type, , body, opts] = metadataClient.save.mock.calls[0] as unknown as [string, string, any, any];
     expect(type).toBe('view');
-    expect(opts).toEqual({ mode: 'draft' });
+    expect(opts).toEqual({ mode: 'draft', ifNoneMatch: '*' });
     // The spec's verdict first: it is the claim this pin exists for.
     const listView = ListViewSchema.safeParse(body.config);
     expect(listView.success, JSON.stringify(listView.error?.issues)).toBe(true);

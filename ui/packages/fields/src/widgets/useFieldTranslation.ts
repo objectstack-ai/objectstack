@@ -58,6 +58,13 @@ const FIELD_DEFAULTS: Record<string, string> = {
   // row for a numeric `count`, as i18next reads the `en` pack.
   'lookup.recordCount_one': '{{count}} record',
   'lookup.recordCount_other': '{{count}} records',
+  // objectstack#36249 — why a pick left an amount empty (`withheldAutofillMessage`).
+  // Same values as the `en` pack.
+  'lookup.autofillCurrencyDiffers': '{{field}} was not filled: the picked amount is {{amount}} in {{from}}, but {{field}} here is in {{to}}. Enter it in {{to}}.',
+  'lookup.autofillSourceNoCurrency': '{{field}} was not filled: the picked amount {{amount}} names no currency, but {{field}} here is in {{to}}. Enter it in {{to}}.',
+  'lookup.autofillNoCurrency': '{{field}} was not filled: the picked amount is {{amount}}, but no currency is chosen here yet. Choose the currency, then enter {{field}}.',
+  'lookup.autofillCurrencyUnread': '{{field}} was not filled: the picked amount is {{amount}}, but the currency here could not be read. Check the currency, then enter {{field}}.',
+  'lookup.autofillKept': '{{field}} still holds its earlier value.',
   'lookup.pageOf': 'Page {{current}} of {{total}}',
   'lookup.filters': 'Filters',
   'lookup.clear': 'Clear',
@@ -67,6 +74,12 @@ const FIELD_DEFAULTS: Record<string, string> = {
   'lookup.nextPage': 'Next page',
   'lookup.jumpToPage': 'Jump to page',
   'lookup.retry': 'Retry',
+  // objectstack#36865 — why a quick-created record was not selected: it fails
+  // the field's `lookupFilters`. Same value as the `en` pack.
+  'lookup.createdOutsideFilters': "The record was created, but it does not match this field's filters, so it cannot be chosen here.",
+  // objectstack#36865 — the re-read that checks a quick-created record failed:
+  // the record exists, so the line says so. Same value as the `en` pack.
+  'lookup.createdUnchecked': "The record was created, but it could not be checked against this field's filters, so it was not chosen. Search for it here rather than creating it again.",
   // objectui#3231 — the empty / dependency-gated state of the fixed-option
   // widgets (select, multiselect, radio, checkboxes). Only used when the host
   // supplies no `emptyHint`; the gate sentence shares its key with the form

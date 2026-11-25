@@ -26,7 +26,20 @@
  *    ⛔ There is no second catalog here.
  *  - `params` fills the entries' `{{name}}` holes. A value is used as given,
  *    or, spelled `{ key, fallback }`, is itself the recipient-language text of
- *    `key` (an object's label, `objects.<object>.label`), else `fallback`.
+ *    the catalog entry `key`, else `fallback`; or, spelled
+ *    `{ object, fallback }`, is the label of the object whose API name is
+ *    `object`, in the recipient's language, else `fallback`.
+ *  - [#35384] An object's label is METADATA, not a catalog sentence, so the
+ *    `{ object }` param is resolved as `GET /meta/object/:name` serves it:
+ *    by `translateObject` (`@objectstack/spec/system`) over the object's
+ *    served definition and its packaged base, with the metadata route's
+ *    `ResolveOptions` (the recipient's negotiated locale, the DECLARED
+ *    fallback chain, and the authored language — the declared `sourceLocale`
+ *    else `defaultLocale`). So a recipient in a deployment's `sourceLocale`
+ *    reads the authored label, never the `defaultLocale` row `t()` falls back
+ *    to, and a renamed packaged object reads its rename. A `{ key }` param
+ *    still resolves through `t()`: rows stored before the typed param existed
+ *    render exactly as they did.
  *  - The literal `payload.title` / `payload.body` stay the text delivered
  *    whenever a key cannot be rendered: no `i18n` service, a key with no entry
  *    in the recipient's locale or in the catalog's own fallback locale, a
@@ -61,17 +74,42 @@
  */
 
 import type { IDataEngine } from '@objectstack/spec/contracts';
-import { resolveBundleLocale } from '@objectstack/spec/system';
+import {
+    resolveBundleLocale,
+    translateObject,
+    type ObjectLike,
+    type ResolveOptions,
+    type TranslationBundle,
+} from '@objectstack/spec/system';
 import { RECIPIENT_LOCALE_FIELD, USER_OBJECT, resolveRecipientLocale } from './recipient-locale.js';
 import { FAN_OUT_SYSTEM_CONTEXT } from './fan-out-system-context.js';
 import { DEFAULT_LOCALE } from './template-renderer.js';
 
 /**
- * One `{{name}}` value of {@link NotificationTextKeys.params}: the text itself,
- * or a catalog key rendered in the recipient's language with `fallback` as the
- * text when the key has no entry.
+ * One `{{name}}` value of {@link NotificationTextKeys.params}: the text itself;
+ * a catalog key rendered in the recipient's language with `fallback` as the
+ * text when the key has no entry; or [#35384] an object's label, by the
+ * object's name, resolved as the metadata route serves it with `fallback` as
+ * the text when nothing resolves ({@link NotificationObjectLabelParam}).
  */
-export type NotificationTextParam = string | { readonly key: string; readonly fallback: string };
+export type NotificationTextParam =
+    | string
+    | { readonly key: string; readonly fallback: string }
+    | NotificationObjectLabelParam;
+
+/**
+ * [#35384] A `{{name}}` value that is the label of the object whose API name
+ * `object` holds (`crm_deal`), in the recipient's language, as
+ * `GET /meta/object/:name` serves it: `translateObject` over the object's
+ * served definition and packaged base, with the metadata route's resolve
+ * options. `fallback` is the text when nothing resolves (no `i18n` service
+ * that can hand its translations over, no data engine that knows the object).
+ */
+export interface NotificationObjectLabelParam {
+    /** The object's API name (`ObjectSchema.name`), never its label: the param names the object, the render picks its label. */
+    readonly object: string;
+    readonly fallback: string;
+}
 
 /**
  * A notification's text as catalog keys (`EmitInput.keyedText`). At least one
@@ -92,10 +130,19 @@ export interface RenderedNotificationText {
     readonly body: string;
 }
 
-/** The slice of `II18nService` the render asks: `t()`, and `getLocales()` to negotiate when offered. */
+/**
+ * The slice of `II18nService` the render asks: `t()`, `getLocales()` to
+ * negotiate when offered, and [#35384] the members an object label is resolved
+ * by, as the metadata route reads them: `getTranslations()` per locale, and the
+ * declared `getFallbackLocale()` / `getSourceLocale()` / `getDefaultLocale()`.
+ */
 export interface NotificationTextI18n {
     t(key: string, locale: string, params?: Record<string, unknown>): string;
     getLocales?(): string[];
+    getTranslations?(locale: string): Record<string, unknown>;
+    getFallbackLocale?(): string | undefined;
+    getSourceLocale?(): string | undefined;
+    getDefaultLocale?(): string;
 }
 
 /**
@@ -112,6 +159,14 @@ const PARAM_NAME_SHAPE = /^\w+$/;
 
 const TEXT_MEMBERS: ReadonlySet<string> = new Set(['titleKey', 'bodyKey', 'params']);
 const KEYED_PARAM_MEMBERS: ReadonlySet<string> = new Set(['key', 'fallback']);
+const OBJECT_LABEL_PARAM_MEMBERS: ReadonlySet<string> = new Set(['object', 'fallback']);
+
+/**
+ * An object's API name: one segment of {@link CATALOG_KEY_SHAPE}, so every
+ * object a `{ key: 'objects.<object>.label' }` param could name, the typed
+ * param names too.
+ */
+const OBJECT_NAME_SHAPE = /^[A-Za-z0-9_-]+$/;
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
     return value !== null && typeof value === 'object' && !Array.isArray(value);
@@ -140,7 +195,19 @@ function problemOf(value: unknown): string | undefined {
     for (const [name, param] of Object.entries(params)) {
         if (!PARAM_NAME_SHAPE.test(name)) return `.params has a name '${name}' no {{hole}} can spell`;
         if (typeof param === 'string') continue;
-        if (!isPlainObject(param)) return `.params.${name} must be a string or { key, fallback }`;
+        if (!isPlainObject(param)) return `.params.${name} must be a string, { key, fallback } or { object, fallback }`;
+        if ('object' in param) {
+            for (const member of Object.keys(param)) {
+                if (!OBJECT_LABEL_PARAM_MEMBERS.has(member)) {
+                    return `.params.${name} has an undeclared member '${member}' (declared: object, fallback)`;
+                }
+            }
+            if (typeof param.object !== 'string' || !OBJECT_NAME_SHAPE.test(param.object)) {
+                return `.params.${name}.object must be an object's API name such as 'crm_deal' (got ${JSON.stringify(param.object)})`;
+            }
+            if (typeof param.fallback !== 'string') return `.params.${name}.fallback must be a string`;
+            continue;
+        }
         for (const member of Object.keys(param)) {
             if (!KEYED_PARAM_MEMBERS.has(member)) return `.params.${name} has an undeclared member '${member}' (declared: key, fallback)`;
         }
@@ -304,8 +371,17 @@ export class NotificationTextRenderer {
     ): RenderedNotificationText {
         const locale = negotiatedLocale(i18n, requested ?? DEFAULT_LOCALE);
         const params: Record<string, string> = {};
+        // [#35384] Built on the first object label this render asks, once.
+        let translation: { value: MetaLabelTranslation | undefined } | undefined;
         for (const [name, param] of Object.entries(keys.params ?? {})) {
-            params[name] = typeof param === 'string' ? param : (lookup(i18n, param.key, locale) ?? param.fallback);
+            if (typeof param === 'string') {
+                params[name] = param;
+            } else if ('object' in param) {
+                translation ??= { value: metaLabelTranslation(i18n, locale) };
+                params[name] = this.objectLabel(translation.value, param.object) ?? param.fallback;
+            } else {
+                params[name] = lookup(i18n, param.key, locale) ?? param.fallback;
+            }
         }
         const entry = (key: string): string | undefined => announceMisses
             ? this.entry(i18n, key, locale, params)
@@ -314,6 +390,33 @@ export class NotificationTextRenderer {
             title: keys.titleKey ? (entry(keys.titleKey) ?? literal.title) : literal.title,
             body: keys.bodyKey ? (entry(keys.bodyKey) ?? literal.body) : literal.body,
         };
+    }
+
+    /**
+     * [#35384] The label of `objectName` as `GET /meta/object/:name` serves it
+     * in the options' locale: `translateObject` over the object's served
+     * definition (`getSchema`, its `label` a code extension's rename included)
+     * with its packaged base (`registry.getPackagedObjectBase`, ADR-0029
+     * D9.2a), the two reads the metadata route's own accessors make, off the
+     * data engine this renderer already reads recipients from. `undefined`
+     * when nothing resolves: no translation to resolve with, no engine that
+     * knows the object, or a throw (a misbehaving service costs the language,
+     * never the delivery).
+     */
+    private objectLabel(translation: MetaLabelTranslation | undefined, objectName: string): string | undefined {
+        if (!translation) return undefined;
+        try {
+            const data = this.opts.getData() as unknown as ObjectLabelSource | undefined;
+            const served = labelText(servedObjectDef(data, objectName)?.label);
+            const doc: ObjectLike = { name: objectName, ...(served !== undefined ? { label: served } : {}) };
+            const packagedBase = packagedBaseOf(data, objectName);
+            return labelText(translateObject(doc, translation.bundle, {
+                ...translation.options,
+                ...(packagedBase !== undefined ? { packagedBase } : {}),
+            }).label);
+        } catch {
+            return undefined;
+        }
     }
 
     /** A title/body entry, or `undefined` (said once per key and locale) when the catalog holds none. */
@@ -336,6 +439,89 @@ export class NotificationTextRenderer {
         }
         return text;
     }
+}
+
+/** What an object label is translated with: the bundle and the metadata route's `ResolveOptions`. */
+interface MetaLabelTranslation {
+    readonly bundle: TranslationBundle | undefined;
+    readonly options: ResolveOptions;
+}
+
+/**
+ * [#35384] What the metadata route (`GET /meta/object/:name`) translates an
+ * object with, for a recipient in `locale`: the bundle, every locale `i18n`
+ * holds keyed by locale (`translationBundleOf` in rest), and the
+ * `ResolveOptions` that route builds (`metaTranslateOptions` in rest): the
+ * locale, the DECLARED fallback chain (`getFallbackLocale()`), and the
+ * authored language, the declared `sourceLocale` (`getSourceLocale()`) else
+ * `defaultLocale` (`getDefaultLocale()`). Each getter is feature-detected; a
+ * service that declares none gets none. The locale is the negotiated one, as
+ * objectql's refusal labels and the approvals reader hand it.
+ *
+ * `undefined` for a service that cannot hand its translations over (no
+ * `getLocales` / `getTranslations`) or that throws: the param's fallback
+ * stands.
+ */
+function metaLabelTranslation(i18n: NotificationTextI18n, locale: string): MetaLabelTranslation | undefined {
+    if (typeof i18n.getLocales !== 'function' || typeof i18n.getTranslations !== 'function') return undefined;
+    try {
+        const bundle: Record<string, unknown> = {};
+        for (const code of i18n.getLocales()) {
+            const data = i18n.getTranslations(code);
+            if (data && typeof data === 'object') bundle[code] = data;
+        }
+        const fallback = typeof i18n.getFallbackLocale === 'function' ? i18n.getFallbackLocale() : undefined;
+        const source = typeof i18n.getSourceLocale === 'function' ? i18n.getSourceLocale() : undefined;
+        const authored = typeof source === 'string' && source.length > 0
+            ? source
+            : typeof i18n.getDefaultLocale === 'function' ? i18n.getDefaultLocale() : undefined;
+        const options: ResolveOptions = {
+            locale,
+            ...(typeof fallback === 'string' && fallback.length > 0 ? { fallbackChain: [fallback] } : {}),
+            ...(typeof authored === 'string' && authored.length > 0 ? { defaultLocale: authored } : {}),
+        };
+        return { bundle: Object.keys(bundle).length > 0 ? (bundle as TranslationBundle) : undefined, options };
+    } catch {
+        return undefined;
+    }
+}
+
+/**
+ * [#35384] Where an object's label is served from: the data engine's
+ * `getSchema(name)` (the served definition) and `registry.getPackagedObjectBase(name)`
+ * (the packaged declaration). Each member is feature-detected.
+ */
+interface ObjectLabelSource {
+    getSchema?(objectName: string): unknown;
+    registry?: unknown;
+}
+
+/** The object's served definition, `undefined` when the source cannot answer. */
+function servedObjectDef(source: ObjectLabelSource | undefined, objectName: string): Record<string, unknown> | undefined {
+    if (!source || typeof source.getSchema !== 'function') return undefined;
+    try {
+        const def = source.getSchema(objectName);
+        return def && typeof def === 'object' ? (def as Record<string, unknown>) : undefined;
+    } catch {
+        return undefined;
+    }
+}
+
+/** The object's packaged base, `undefined` when none is known (the translator then answers from the catalog). */
+function packagedBaseOf(source: ObjectLabelSource | undefined, objectName: string): unknown {
+    const registry = source?.registry as { getPackagedObjectBase?: (name: string) => unknown } | undefined;
+    if (!registry || typeof registry.getPackagedObjectBase !== 'function') return undefined;
+    try {
+        const base = registry.getPackagedObjectBase(objectName);
+        return base && typeof base === 'object' ? base : undefined;
+    } catch {
+        return undefined;
+    }
+}
+
+/** A non-blank label, or `undefined`. */
+function labelText(value: unknown): string | undefined {
+    return typeof value === 'string' && value.trim().length > 0 ? value : undefined;
 }
 
 /** `t()`'s answer, or `undefined` for a miss (`t()` echoes the key), an empty answer or a throw. */

@@ -12,6 +12,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { t } from '../metadata-admin/i18n';
 import { PackageOwdOverviewPanel } from './PackageOwdOverviewPanel';
+import { StudioSaveHarness } from './__tests__/studioSaveHarness';
 
 vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
 
@@ -26,6 +27,8 @@ function makeClient() {
     list: async (type: string) => (type === 'object' ? [{ name: 'crm_memo', label: 'Memo' }] : []),
     listDrafts: async () => [],
     layered: async () => ({ effective: body, code: null }),
+    publish: async () => ({}),
+    reset: async () => ({}),
     getDraft: async () => null,
     save: vi.fn(async () => {
       throw Object.assign(new Error(REFUSAL), { status: 422, code: 'VALIDATION_ERROR' });
@@ -39,10 +42,10 @@ async function pick(label: string) {
 }
 
 async function refuseOnce() {
-  render(<PackageOwdOverviewPanel client={makeClient()} packageId="com.example.crm" locale="en-US" />);
+  render(<StudioSaveHarness><PackageOwdOverviewPanel client={makeClient()} packageId="com.example.crm" locale="en-US" /></StudioSaveHarness>);
   await screen.findByTestId('owd-row-crm_memo');
   await pick(CBP);
-  fireEvent.click(screen.getByTestId('owd-save'));
+  fireEvent.click(await screen.findByTestId('studio-save'));
   await screen.findByText(new RegExp(REFUSAL));
 }
 
@@ -55,7 +58,8 @@ describe('PackageOwdOverviewPanel — the refusal banner and the revert (objects
   it('reverting the refused edit to the loaded value clears the banner', async () => {
     await refuseOnce();
     await pick(PRIVATE);
-    expect(screen.getByTestId('owd-save')).toHaveTextContent(t('engine.studio.owd.saveNone', 'en-US'));
+    // objectstack#36511 — nothing is left to save, so the top bar draws no Save.
+    await waitFor(() => expect(screen.queryByTestId('studio-save')).toBeNull());
     await waitFor(() => expect(screen.queryByText(new RegExp(REFUSAL))).toBeNull());
   });
 

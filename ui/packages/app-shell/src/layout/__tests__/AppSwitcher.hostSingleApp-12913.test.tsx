@@ -160,7 +160,7 @@ describe('CONTROLS (objectui#12913)', () => {
     expect(screen.getByTestId('app-switcher-trigger')).toHaveAttribute('title', 'Cloud');
     const menu = within(screen.getByTestId('app-switcher-menu'));
     expect(menu.getByTestId('app-switcher-row-cloud_control')).toBeInTheDocument();
-    expect(menu.getByTestId('app-switcher-home')).toHaveTextContent('Back to home');
+    expect(menu.getByTestId('app-switcher-home')).toHaveTextContent('Back to app start page');
     expect(menu.getByTestId('app-switcher-all-apps')).toHaveTextContent('All apps');
   });
 });

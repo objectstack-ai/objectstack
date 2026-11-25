@@ -235,7 +235,7 @@ object through:
 
 | Sub-config | Keys `ObjectView` forwards |
 | --- | --- |
-| `table` | read by name: `columns`, `fields`, `title`, `filter`, `sort`, `pagination`, `pageSize`, `selection`, `selectable`, `operations`, `className`; handed to the grid as written: `editable`, `singleClickEdit`, `frozenColumns`, `rowHeight`, `resizable`, `reorderableColumns`, `searchableFields`, `showSearch`, `showPagination`, `showColumnTypeIcons`, `conditionalFormatting`, `rowActions`, `bulkActions`, `bulkActionDefs`, `exportOptions`, `grouping`, `aggregations`, `rowColor`, `label` |
+| `table` | read by name: `columns`, `fields`, `title`, `filter`, `sort`, `pagination`, `pageSize`, `selection`, `selectable`, `operations`, `className`; handed to the grid as written: `editable`, `frozenColumns`, `rowHeight`, `resizable`, `reorderableColumns`, `searchableFields`, `showSearch`, `showPagination`, `showColumnTypeIcons`, `conditionalFormatting`, `rowActions`, `bulkActions`, `bulkActionDefs`, `exportOptions`, `grouping`, `aggregations`, `rowColor`, `label` |
 | `form` | `fields`, `customFields`, `sections`, `groups`, `layout`, `columns`, `title`, `description`, `subforms`, `buttons`, `defaults`, `initialValues`, `readOnly`, `showSubmit`, `submitText`, `showCancel`, `cancelText`, `showReset`, `className` |
 
 `table` declares exactly these keys (objectui#10976). Any other grid key —
@@ -508,12 +508,28 @@ ignore a modifier click too.
 
 In the Console's object pages, a record that opens in the drawer opens in a
 drawer **over the list**, and the list keeps its full width. The drawer is
-720 px wide, and the reader can drag its edge from 360 px to 60% of the
-viewport. It draws no dimming overlay and is non-modal, so the list behind it
-stays readable and clickable:
+460 px wide, and the reader can drag its edge from 380 px to 900 px. The
+dragged width is remembered in the browser and applies to every object's
+drawer, except one whose `navigation` authors a `size` (other than `auto`) or a
+`width` (pixel or percent). The list's drawer reads the view's `navigation`,
+then the object's; a record page's drawer reads its root record's object's.
+Such a drawer keeps that object's own remembered width, shared with its
+calendar, gantt, kanban, tree and grid overlays and a resizable
+`RecordDetailDrawer`: it opens at the authored width until a width is dragged
+in it or in one of them. The width belongs to the drawer's root. A child level
+keeps the root's width, and in the list a record a lookup chip opens as the
+root takes the list's width and remembered width, not those of the opened
+record's object. The drawer draws no dimming overlay and is non-modal, so the
+list behind it stays readable and clickable:
 
 - the open record's row is highlighted and follows the drawer's ↑ ↓;
 - clicking another row swaps the record.
+
+The drawer's header puts the record's name first. It draws at most one
+labelled action, the page's primary, and only while the name keeps room for
+about 16 characters. There is no Edit button and no copy-id icon: Edit, Copy
+record ID and every other action are in the header's `⋯`. A child list's tab
+in the drawer lists one row per record (its title and one summary line).
 
 Readers who prefer the full page choose it in the list's Display menu (Open
 records: Drawer or Full page). That choice is the reader's own, stored in the

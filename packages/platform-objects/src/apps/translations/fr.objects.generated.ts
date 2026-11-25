@@ -176,7 +176,7 @@ export const frObjects: NonNullable<TranslationData['objects']> = {
       },
       ban_user: {
         label: "Bannir l’utilisateur",
-        description: "Bannir cet utilisateur ? Il sera déconnecté, ne pourra plus se connecter et ses clés API seront refusées jusqu’à la levée du bannissement, tout comme ses jetons d’accès OAuth et leurs renouvellements. Les clés fonctionnent de nouveau après la levée du bannissement.",
+        description: "Bannir cet utilisateur ? Il sera déconnecté, ne pourra plus se connecter et ses clés API seront refusées jusqu’à la levée du bannissement, tout comme ses jetons d’accès OAuth et leurs renouvellements. Les clés fonctionnent de nouveau après la levée du bannissement. Le bannissement suspend aussi les comptes de service IA dont il est responsable, désactive les applications OAuth qu'il a enregistrées et révoque les identifiants SCIM qu'il a émis ; la levée du bannissement ne rétablit rien de tout cela.",
         successMessage: "Utilisateur banni",
         params: {
           banReason: {
@@ -327,6 +327,11 @@ export const frObjects: NonNullable<TranslationData['objects']> = {
             helpText: "L’utilisateur dont cette personne relève. Le serveur refuse un responsable extérieur à son organisation, une auto-attribution et un lien qui fermerait la chaîne hiérarchique ou la rendrait trop profonde."
           }
         }
+      },
+      remove_user_manager: {
+        label: "Retirer le responsable",
+        confirmText: "Retirer le responsable de cet utilisateur ? Il ne rendra compte à personne tant qu’un responsable n’est pas de nouveau défini ; le routage des approbations et la portée d’enregistrements own_and_reports suivent ce changement.",
+        successMessage: "Responsable retiré"
       },
       list_platform_admins: {
         label: "Administrateurs de la plateforme",
@@ -491,6 +496,10 @@ export const frObjects: NonNullable<TranslationData['objects']> = {
       revoke_reason: {
         label: "Motif de la révocation",
         help: "Pourquoi la session a été révoquée (idle_timeout, absolute_max, concurrent_cap, user_revoked, admin, organization_membership_ended, admin_password_reset, password_reset, …)."
+      },
+      sso_provider_id: {
+        label: "Fournisseur SSO",
+        help: "Le fournisseur SSO par lequel cette session a été ouverte, le cas échéant. Supprimer ce fournisseur met fin à la session. Géré par le système."
       },
       active_organization_id: {
         label: "Organisation active"
@@ -4616,6 +4625,91 @@ export const frObjects: NonNullable<TranslationData['objects']> = {
           title: "Aucune exception de calendrier pour le moment",
           message: "Ajoutez une ligne par jour férié ou jour de récupération, ou importez-en une année depuis un fichier."
         }
+      }
+    }
+  },
+  sys_task: {
+    label: "Tâche",
+    pluralLabel: "Tâches",
+    description: "Choses à faire, avec un responsable et une échéance.",
+    fields: {
+      title: {
+        label: "Titre"
+      },
+      description: {
+        label: "Description"
+      },
+      status: {
+        label: "Statut",
+        options: {
+          todo: "À faire",
+          in_progress: "En cours",
+          done: "Terminée"
+        }
+      },
+      due_at: {
+        label: "Échéance"
+      },
+      assignee_id: {
+        label: "Responsable"
+      },
+      completed_at: {
+        label: "Terminée le",
+        help: "Renseigné par la plateforme quand le statut passe à Terminée, et effacé quand il ne l'est plus."
+      },
+      owner_id: {
+        label: "Propriétaire"
+      }
+    },
+    _views: {
+      assigned_to_me: {
+        label: "Qui me sont assignées",
+        emptyState: {
+          title: "Aucune tâche ne vous est assignée",
+          message: "Les tâches ouvertes qui vous sont assignées apparaissent ici."
+        }
+      },
+      created_by_me: {
+        label: "Créées par moi",
+        emptyState: {
+          title: "Aucune tâche pour l'instant",
+          message: "Les tâches que vous créez apparaissent ici."
+        }
+      },
+      all: {
+        label: "Toutes les tâches"
+      }
+    }
+  },
+  sys_note: {
+    label: "Note",
+    pluralLabel: "Notes",
+    description: "Notes : un titre et un corps mis en forme.",
+    fields: {
+      title: {
+        label: "Titre"
+      },
+      body: {
+        label: "Corps"
+      },
+      heading: {
+        label: "Intitulé",
+        help: "Le titre, ou la première ligne du corps quand le titre est vide. Tenu à jour par la plateforme."
+      },
+      owner_id: {
+        label: "Propriétaire"
+      }
+    },
+    _views: {
+      mine: {
+        label: "Mes notes",
+        emptyState: {
+          title: "Aucune note pour l'instant",
+          message: "Les notes que vous écrivez apparaissent ici."
+        }
+      },
+      all: {
+        label: "Toutes les notes"
       }
     }
   }

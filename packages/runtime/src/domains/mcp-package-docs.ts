@@ -17,14 +17,18 @@
  * A page the caller may not read is neither found nor read, and reads as not
  * found.
  *
- * The caller is the request's execution context as the door received it. On
- * an OAuth grant that is the agent envelope (ADR-0090 D10): the security
- * service resolves its permission sets from the token's grant, the
- * scope-derived ceiling, and not from the person's own sets, so a manual whose
- * audience is a permission set the person holds stays hidden on that
- * connection unless the grant carries the set. That fails closed, and it is
- * stricter than the `/meta` doors a signed-in person reads through the
- * Console, which judge the person's own sets.
+ * The caller is the request's execution context as the door received it. Its
+ * permission-set holdings, which a `{ permissionSet }` audience reads, are its
+ * own, with one exception ({@link packageDocsReadGate}): on a delegated agent
+ * envelope (an OAuth grant: `principalKind: 'agent'` acting `onBehalfOf` a
+ * person) they are the delegating person's own sets, resolved by grant
+ * resolution in the organization the request runs in (ADR-0090 D10: the
+ * token's ceiling decides whether the docs tools are reached at all, and the
+ * person's holdings decide which manuals open). Never the envelope's
+ * scope-derived ceiling sets, and never a union with them. A person who does
+ * not exist, who holds no membership in that organization, or whose grants
+ * cannot be read holds no set here: permission-set audiences stay closed. An
+ * AI service account (an agent acting for nobody) keeps its own sets.
  *
  * ## The search
  *
@@ -66,6 +70,7 @@ import {
     type ResolverDoc,
 } from '@objectstack/spec/system';
 import type { ErrorCode } from '@objectstack/spec/api';
+import { resolveUserAuthzGrants, vetOrganizationClaim } from '@objectstack/core';
 
 /** The protocol read these members take: the merged `/meta` list read. */
 export interface PackageDocsProtocol {
@@ -80,6 +85,12 @@ export interface PackageDocsSources {
     readGate: MetaItemReadGateSources;
     /** This request's locale, the default translation a read serves. */
     locale?: string;
+    /**
+     * [#36854] The manuals in `locale`, through the `/meta/book` door's own
+     * translation (`books.<name>.label` in the translation bundle), names and
+     * order unchanged. Absent: every manual keeps its authored label.
+     */
+    translateBooks?(books: readonly any[], locale: string): Promise<readonly any[]>;
 }
 
 /** Where the Console is mounted: its router basename. */
@@ -198,17 +209,44 @@ function titleOf(label: unknown, headings: readonly Heading[], name: string): st
     return headings[0]?.text || name;
 }
 
-/** Where a page lives, for this caller. */
-function addressOf(doc: any, books: readonly any[], corpus: ResolverDoc[], title: string) {
+/**
+ * [#36854] Each manual's label in `locale`, by name, as the `/meta/book` door
+ * serves it ({@link PackageDocsSources.translateBooks}); `undefined` when
+ * there is no locale or no translation to ask. Only the label is read from
+ * the translation: the home manual is still picked from the manuals as they
+ * are listed, so a translation never moves a page to another manual.
+ */
+async function bookLabelsIn(
+    sources: PackageDocsSources,
+    books: readonly any[],
+    locale: string | undefined,
+): Promise<ReadonlyMap<string, string> | undefined> {
+    if (!locale || !sources.translateBooks || books.length === 0) return undefined;
+    const labels = new Map<string, string>();
+    for (const book of await sources.translateBooks(books, locale)) {
+        if (typeof book?.name === 'string' && typeof book.label === 'string' && book.label) labels.set(book.name, book.label);
+    }
+    return labels;
+}
+
+/** Where a page lives, for this caller; its manual's label in the served locale when `labels` carries it. */
+function addressOf(
+    doc: any,
+    books: readonly any[],
+    corpus: ResolverDoc[],
+    title: string,
+    labels?: ReadonlyMap<string, string>,
+) {
     const pkg = packageOf(doc);
     if (!pkg) return { name: doc.name as string, title };
     const book = homeBookOf(doc, books, corpus);
     const slug = (book as { slug?: string }).slug ?? book.name;
+    const label = labels?.get(book.name) ?? book.label;
     return {
         name: doc.name as string,
         package: pkg,
         title,
-        book: { name: book.name, ...(book.label ? { label: book.label } : {}) },
+        book: { name: book.name, ...(label ? { label } : {}) },
         url: `${CONSOLE_BASE_PATH}/apps/${encodeURIComponent(pkg)}/docs/${encodeURIComponent(slug)}/${encodeURIComponent(doc.name)}`,
     };
 }
@@ -320,6 +358,7 @@ export function createPackageDocMembers(getSources: () => Promise<PackageDocsSou
             const sources = await getSources();
             const { docs, books } = await readableDocsAndBooks(sources);
             const corpus = corpusOf(docs);
+            const labels = await bookLabelsIn(sources, books, sources.locale);
             const scoped = input.package ? docs.filter((d) => packageOf(d) === input.package) : docs;
             const hits: Array<{ score: number; hit: any }> = [];
             for (const doc of scoped) {
@@ -343,7 +382,7 @@ export function createPackageDocMembers(getSources: () => Promise<PackageDocsSou
                 hits.push({
                     score: best.score,
                     hit: {
-                        ...addressOf(doc, books, corpus, best.variant.title),
+                        ...addressOf(doc, books, corpus, best.variant.title, labels),
                         matchedOn: best.first.on,
                         matchedTerms: best.matched,
                         ...(best.first.heading ? { heading: best.first.heading } : {}),
@@ -389,7 +428,7 @@ export function createPackageDocMembers(getSources: () => Promise<PackageDocsSou
                 : undefined;
             const title = titleOf(served.label, typeof served.content === 'string' ? headingsOf(served.content) : [], doc.name);
             return {
-                ...addressOf(doc, books, corpusOf(docs), title),
+                ...addressOf(doc, books, corpusOf(docs), title, await bookLabelsIn(sources, books, locale)),
                 ...(typeof served.description === 'string' ? { description: served.description } : {}),
                 ...(servedLocale ? { locale: servedLocale } : {}),
                 content: typeof served.content === 'string' ? served.content : '',
@@ -398,19 +437,89 @@ export function createPackageDocMembers(getSources: () => Promise<PackageDocsSou
     };
 }
 
-/** The `/meta` read gates' ports over `protocol`, with `caller` as the caller: I/O only. */
+/**
+ * The `/meta` read gates' ports over `protocol`, with `caller` as the caller:
+ * I/O only. On a delegated agent envelope ({@link delegatingPersonOf}) the
+ * holdings the audience reads are the person's ({@link delegatorHoldingsCaller}),
+ * resolved once per gate and only when a `{ permissionSet }` audience is in
+ * play; `resolveEngine` is the data engine their grants are read through.
+ */
 export function packageDocsReadGate(
     protocol: PackageDocsProtocol,
     caller: MetaReadGateCaller | undefined,
     resolveService: (name: string) => Promise<unknown>,
+    resolveEngine: () => Promise<unknown> = async () => undefined,
 ): MetaItemReadGateSources {
+    type Security = Awaited<ReturnType<MetaItemReadGateSources['resolveSecurityService']>>;
+    const security = async () => (await resolveService('security')) as Security;
+    const personId = delegatingPersonOf(caller);
+    let holdings: Promise<MetaReadGateCaller> | undefined;
     return {
         resolveCaller: async () => caller,
-        resolveSecurityService: async () => (await resolveService('security')) as Awaited<ReturnType<MetaItemReadGateSources['resolveSecurityService']>>,
+        resolveSecurityService: personId === undefined
+            ? security
+            : async () => {
+                const svc = await security();
+                const names = svc?.resolvePermissionSetNames?.bind(svc);
+                if (!names) return undefined;
+                // A throw here (no such person, no membership, an unreadable
+                // grant) is read by the gate as unresolved holdings: closed.
+                return {
+                    resolvePermissionSetNames: async () =>
+                        names(await (holdings ??= delegatorHoldingsCaller(resolveEngine, personId, caller?.tenantId))),
+                };
+            },
         listMetaItems: (type) => protocol.getMetaItems({ type }),
         // Only the `app` and `dashboard` arms probe services or log nav prunes;
         // the `doc` and `book` arms these members read do neither.
         serviceProbe: () => null,
         navPruneLogged: new Set<string>(),
+    };
+}
+
+/**
+ * The person a delegated agent envelope acts for (ADR-0090 D10): its
+ * `onBehalfOf.userId` when the caller is an agent principal, else `undefined`.
+ * An AI service account is an agent acting for nobody, so it keeps its own sets.
+ */
+export function delegatingPersonOf(caller: MetaReadGateCaller | undefined): string | undefined {
+    if (caller?.principalKind !== 'agent') return undefined;
+    const id = (caller.onBehalfOf as { userId?: unknown } | undefined)?.userId;
+    return typeof id === 'string' && id.length > 0 ? id : undefined;
+}
+
+/**
+ * The delegating person as the audience reads a caller: their own grants
+ * (`resolveUserAuthzGrants`, as the open draft door's reader resolves them,
+ * with no capability asked of them) in the organization the request runs in.
+ * Fails closed as the security plugin's delegator resolution does: it throws
+ * when no `sys_user` row has the id (the resolver synthesises a baseline for
+ * any id), and when the person holds no current membership in that
+ * organization (`vetOrganizationClaim`, the one membership rule).
+ */
+async function delegatorHoldingsCaller(
+    resolveEngine: () => Promise<unknown>,
+    userId: string,
+    organization: unknown,
+): Promise<MetaReadGateCaller> {
+    const ql = (await resolveEngine()) as { findOne(object: string, query: unknown): Promise<unknown> } | undefined;
+    if (!ql) throw new Error('no data engine to resolve the delegating person\'s grants from');
+    const tenantId = typeof organization === 'string' && organization.length > 0 ? organization : undefined;
+    if (!(await ql.findOne('sys_user', { where: { id: userId }, context: { isSystem: true } }))) {
+        throw new Error('the delegating person does not exist');
+    }
+    const grants = await resolveUserAuthzGrants(ql as never, userId, tenantId ? { tenantId } : {});
+    if (tenantId && vetOrganizationClaim(tenantId, grants.accessible_org_ids) === undefined) {
+        throw new Error('the delegating person holds no membership in the request\'s organization');
+    }
+    return {
+        userId,
+        ...(tenantId ? { tenantId } : {}),
+        positions: grants.positions,
+        permissions: grants.permissions,
+        ...(grants.permissionSetAddresses ? { permissionSetAddresses: grants.permissionSetAddresses } : {}),
+        systemPermissions: grants.systemPermissions,
+        principalKind: grants.principalKind ?? 'human',
+        isSystem: false,
     };
 }

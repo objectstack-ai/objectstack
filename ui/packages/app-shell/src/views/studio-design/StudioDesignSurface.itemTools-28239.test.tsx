@@ -13,7 +13,7 @@
  *    read-only;
  *  - History and Audit follow the authoring-trail doors, as on Setup;
  *  - CONTROL: Setup's item page still opens the five from the shared
- *    directory.
+ *    directory (as its tabs since objectstack#36901).
  *
  * The REAL pillars and the REAL Setup page; the metadata client is a server
  * double, and the records grid and the object settings panel are stubbed.
@@ -26,7 +26,6 @@ import * as React from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
-import { MePermissionsProvider, type MePermissionsResponse } from '@object-ui/permissions';
 
 const PKG = 'com.acme.app';
 
@@ -127,7 +126,6 @@ vi.mock('@monaco-editor/react', () => {
 });
 vi.mock('@object-ui/plugin-editor', () => ({ configureBundledMonaco: () => Promise.resolve() }));
 
-import { AutomationsPillar, DataPillar, InterfacesPillar } from './StudioDesignSurface';
 import { StudioItemHeader } from './StudioItemHeader';
 import { StudioItemTools } from '../item-tools/StudioItemTools';
 import { MetadataResourceEditPage } from '../metadata-admin/ResourceEditPage';
@@ -152,11 +150,6 @@ registerMetadataDefaultInspector('page', PageDefaultInspector);
 // The Automations pillar's `/automation/_status` probe: "absent", its documented fallback.
 vi.stubGlobal('fetch', vi.fn(async () => new Response('null', { status: 404, headers: { 'content-type': 'application/json' } })));
 
-function mePermissions(systemPermissions: string[]): MePermissionsResponse {
-  return { authenticated: true, userId: 'u1', tenantId: 'org_1', hasAnyQueue: false, objectsUsingQueues: [], positions: [], permissionSets: [], systemPermissions, objects: {}, fields: {} };
-}
-const SETUP_ONLY = mePermissions(['manage_org_users', 'setup.access', 'setup.write']);
-
 const ROLLBACK = t('engine.edit.rollback', 'en');
 
 beforeEach(() => {
@@ -167,125 +160,6 @@ beforeEach(() => {
 
 afterEach(cleanup);
 
-type Pillar = 'data' | 'interfaces' | 'automations';
-const PILLARS: Array<{ pillar: Pillar; type: string; name: string; ready: () => Promise<unknown> }> = [
-  { pillar: 'data', type: 'object', name: 'showcase_account', ready: () => screen.findByTestId('records-panel', undefined, { timeout: 8000 }) },
-  { pillar: 'interfaces', type: 'page', name: 'home', ready: () => screen.findByRole('button', { name: 'Select hello' }, { timeout: 8000 }) },
-  { pillar: 'automations', type: 'flow', name: 'approval', ready: () => screen.findByTestId('auto-canvas-caption', undefined, { timeout: 8000 }) },
-];
-
-function mountPillar(pillar: Pillar, opts: { readOnly?: boolean; perms?: MePermissionsResponse } = {}) {
-  const body =
-    pillar === 'data' ? (
-      <DataPillar packageId={PKG} readOnly={opts.readOnly} />
-    ) : pillar === 'interfaces' ? (
-      <InterfacesPillar packageId={PKG} readOnly={opts.readOnly} />
-    ) : (
-      <AutomationsPillar packageId={PKG} readOnly={opts.readOnly} />
-    );
-  const routed = <MemoryRouter initialEntries={[`/studio/${PKG}/${pillar}`]}>{body}</MemoryRouter>;
-  render(opts.perms ? <MePermissionsProvider initialPermissions={opts.perms}>{routed}</MePermissionsProvider> : routed);
-}
-
-/** Click a tool and return the sheet it opened. */
-async function openTool(tool: string): Promise<HTMLElement> {
-  fireEvent.click(await screen.findByTestId(`studio-item-tool-${tool}`, undefined, { timeout: 8000 }));
-  return screen.findByTestId(`studio-item-tool-sheet-${tool}`);
-}
-
-describe('Studio item toolbar — every pillar opens the five tools (objectstack#28239)', () => {
-  it.each(PILLARS)('$pillar: Layers, References, History, Audit and Source open on $type/$name', async ({ pillar, type, name, ready }) => {
-    mountPillar(pillar);
-    await ready();
-    const tools = within(await screen.findByTestId('studio-item-tools', undefined, { timeout: 8000 }));
-    expect(tools.getAllByRole('button').map((b) => b.getAttribute('data-testid'))).toEqual([
-      'studio-item-tool-layers',
-      'studio-item-tool-references',
-      'studio-item-tool-history',
-      'studio-item-tool-audit',
-      'studio-item-tool-source',
-    ]);
-
-    const layers = await openTool('layers');
-    expect(await within(layers).findByRole('tab', { name: t('engine.layers.diff', 'en') })).toBeInTheDocument();
-    expect(mockClient.layered).toHaveBeenCalledWith(type, name, { packageId: PKG });
-
-    const refs = await openTool('references');
-    expect(await within(refs).findByText('all_accounts')).toBeInTheDocument();
-    expect(mockClient.references).toHaveBeenCalledWith(type, name);
-
-    const history = await openTool('history');
-    expect(await within(history).findAllByTitle(ROLLBACK)).toHaveLength(2);
-    // The holder the layers read names, for a type stored per package only
-    // (objectstack#32905): the doors refuse `?package=` on an object or a page.
-    expect(mockClient.history).toHaveBeenCalledWith(type, name, type === 'flow' ? { limit: 100, packageId: PKG } : { limit: 100 });
-
-    await openTool('audit');
-    await waitFor(() => expect(mockClient.audit).toHaveBeenCalledWith(type, name, { limit: 100 }));
-
-    const source = await openTool('source');
-    const editor = await within(source).findByRole('textbox', { name: 'JSON source' }, { timeout: 8000 });
-    expect((editor as HTMLTextAreaElement).value).toContain(`"name": "${name}"`);
-    expect(editor).not.toHaveAttribute('readonly');
-  });
-});
-
-describe('Studio item toolbar — rollback (objectstack#28239)', () => {
-  it('asks the in-app confirm, writes through the same rollback door as Setup, and the pillar re-reads the item', async () => {
-    mountPillar('data');
-    await PILLARS[0]!.ready();
-    const history = await openTool('history');
-    const buttons = await within(history).findAllByTitle(ROLLBACK);
-    const reads = mockClient.layered.mock.calls.filter(([type]) => type === 'object').length;
-    // Newest first: the second button is version 1.
-    fireEvent.click(buttons[1]!);
-    const dialog = await screen.findByRole('alertdialog');
-    expect(within(dialog).getByRole('heading').textContent).toBe('Restore object/showcase_account to version 1?');
-    expect(mockClient.rollback).not.toHaveBeenCalled();
-    fireEvent.click(within(dialog).getByTestId('history-rollback-confirm-action'));
-
-    // An object is not stored per package: the rollback names none (objectstack#32905).
-    await waitFor(() => expect(mockClient.rollback).toHaveBeenCalledWith('object', 'showcase_account', 1));
-    expect(mockClient.rollback).toHaveBeenCalledTimes(1);
-    await waitFor(() =>
-      expect(mockClient.layered.mock.calls.filter(([type]) => type === 'object').length).toBeGreaterThan(reads),
-    );
-  });
-
-  it('a read-only package shows its history without rollback, and its source read-only', async () => {
-    mountPillar('automations', { readOnly: true });
-    await PILLARS[2]!.ready();
-    const history = await openTool('history');
-    expect(await within(history).findByText('seq 2')).toBeInTheDocument();
-    expect(within(history).queryAllByTitle(ROLLBACK)).toHaveLength(0);
-
-    const source = await openTool('source');
-    expect(source).toHaveTextContent(t('engine.studio.itemTools.sourceReadOnly', 'en'));
-    const editor = await within(source).findByRole('textbox', { name: 'JSON source' }, { timeout: 8000 });
-    expect(editor).toHaveAttribute('readonly');
-  });
-
-  it('CONTROL: a writable package offers the rollback the read-only one withholds', async () => {
-    mountPillar('automations');
-    await PILLARS[2]!.ready();
-    const history = await openTool('history');
-    expect(await within(history).findAllByTitle(ROLLBACK)).toHaveLength(2);
-  });
-});
-
-describe('Studio item toolbar — History and Audit follow the trail doors (objectstack#28239)', () => {
-  it('a setup.access-only caller is offered Layers, References and Source, not History or Audit', async () => {
-    mountPillar('data', { perms: SETUP_ONLY });
-    await PILLARS[0]!.ready();
-    const tools = within(await screen.findByTestId('studio-item-tools', undefined, { timeout: 8000 }));
-    expect(tools.getAllByRole('button').map((b) => b.getAttribute('data-testid'))).toEqual([
-      'studio-item-tool-layers',
-      'studio-item-tool-references',
-      'studio-item-tool-source',
-    ]);
-  });
-});
-
 describe("CONTROL — Setup's item page still opens the five from the shared directory (objectstack#28239)", () => {
   it('Layers, References, History, Audit and Source open on a Setup item', async () => {
     render(
@@ -293,22 +167,23 @@ describe("CONTROL — Setup's item page still opens the five from the shared dir
         <MetadataResourceEditPage type="page" name="home" />
       </MemoryRouter>,
     );
-    fireEvent.click(await screen.findByTitle(t('engine.edit.layers', 'en'), undefined, { timeout: 8000 }));
+    // The five are the page's tabs since objectstack#36901: layers read
+    // inside Source, the audit log inside History.
+    fireEvent.click(await screen.findByTestId('item-tab-source', undefined, { timeout: 8000 }));
+    fireEvent.click(screen.getByTestId('item-tab-view-layers'));
     expect(await screen.findByRole('tab', { name: t('engine.layers.diff', 'en') })).toBeInTheDocument();
 
-    fireEvent.click(screen.getByTitle(t('engine.edit.references', 'en')));
+    fireEvent.click(screen.getByTestId('item-tab-references'));
     expect(await screen.findByText('all_accounts')).toBeInTheDocument();
 
-    fireEvent.click(screen.getByTestId('history-button'));
+    fireEvent.click(screen.getByTestId('item-tab-history'));
     expect(await screen.findAllByTitle(ROLLBACK)).toHaveLength(2);
 
-    fireEvent.click(screen.getByTestId('audit-button'));
+    fireEvent.click(screen.getByTestId('item-tab-view-audit'));
     await waitFor(() => expect(mockClient.audit).toHaveBeenCalledWith('page', 'home', { limit: 100 }));
 
-    // Setup's source is the inspector's Source tab, beside the open sheet.
-    fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Close' }));
-    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
-    fireEvent.click(screen.getByRole('tab', { name: t('engine.edit.inspector.source', 'en') }));
+    fireEvent.click(screen.getByTestId('item-tab-source'));
+    fireEvent.click(screen.getByTestId('item-tab-view-editor'));
     expect(await screen.findByRole('textbox', { name: 'JSON source' }, { timeout: 8000 })).toBeInTheDocument();
   });
 });

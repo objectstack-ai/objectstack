@@ -594,3 +594,31 @@ describe('dryRun — a write targets exactly the rows the engine dispatch names'
         expect(result.steps.find((s) => s.nodeId === 'as')).toMatchObject({ kind: 'assignment', values: { seen: 'won/won' } });
     });
 });
+
+describe('dryRun — no authored key in an outbound payload reaches a prototype', () => {
+    const scriptRun = (inputs: Record<string, unknown>) => {
+        const h = harness();
+        h.engine.registerNodeExecutor({ type: 'script', async execute() { return { success: true, output: {} }; } });
+        return h.engine.dryRun(flow([
+            { id: 'start', type: 'start', label: 'Start' },
+            { id: 'run', type: 'script', label: 'Run', config: { function: 'noop', inputs } },
+            { id: 'end', type: 'end', label: 'End' },
+        ], chain('start', 'run', 'end')), { userId: 'usr_maker' });
+    };
+
+    it('a value-map key spelling a prototype segment leaves a fresh object unchanged', async () => {
+        try {
+            const result = await scriptRun({ amount: { dialect: 'cel', source: '7' }, '__proto__.dryProbe': { dialect: 'cel', source: '1' } });
+            expect(result.status).toBe('completed');
+            expect(({} as Record<string, unknown>).dryProbe).toBeUndefined();
+            expect(result.steps.find((s) => s.nodeId === 'run')).toMatchObject({ kind: 'outbound', payload: { inputs: { amount: 7 } } });
+        } finally {
+            delete (Object.prototype as Record<string, unknown>).dryProbe;
+        }
+    });
+
+    it('control: an ordinary value-map key is still evaluated into the payload', async () => {
+        const result = await scriptRun({ amount: { dialect: 'cel', source: '7' }, note: { dialect: 'cel', source: "'ok'" } });
+        expect(result.steps.find((s) => s.nodeId === 'run')).toMatchObject({ kind: 'outbound', payload: { inputs: { amount: 7, note: 'ok' } } });
+    });
+});

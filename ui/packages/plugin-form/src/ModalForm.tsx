@@ -43,6 +43,7 @@ import { Loader2, Maximize2, Minimize2 } from 'lucide-react';
 import { MasterDetailForm } from './MasterDetailForm';
 import { MasterDetailFrameContext, type MasterDetailFrame } from './masterDetailFrame';
 import { SchemaRenderer, useSafeFieldLabel, usePreviewMode } from '@object-ui/react';
+import { FormOwnerLine } from './formOwnerLine';
 import { createSafeTranslation, useLocalization } from '@object-ui/i18n';
 import { buildSectionFields as buildSectionFieldsShared } from './sectionFields';
 import { buildFlatFields } from './flatFields';
@@ -1062,7 +1063,7 @@ const ModalFormBody: React.FC<ModalFormProps> = ({
     if (error) {
       return (
         <div className="p-4 border border-red-300 bg-red-50 rounded-md">
-          <h3 className="text-red-800 font-semibold">{t('form.errorLoading')}</h3>
+          <h3 className="text-red-800 font-medium">{t('form.errorLoading')}</h3>
           <p className="text-red-600 text-sm mt-1">{error.message}</p>
         </div>
       );
@@ -1313,7 +1314,7 @@ const ModalFormBody: React.FC<ModalFormProps> = ({
       <div className="@container rounded-md border bg-card p-4">
         {(schema.title || schema.description) && (
           <div className="mb-3 space-y-0.5">
-            {schema.title && <div className="text-sm font-semibold">{schema.title}</div>}
+            {schema.title && <div className="text-sm font-medium">{schema.title}</div>}
             {schema.description && <p className="text-xs text-muted-foreground">{schema.description}</p>}
           </div>
         )}
@@ -1534,6 +1535,15 @@ const ModalFormBody: React.FC<ModalFormProps> = ({
               a section, a tab, a subform row (objectui#10166). */}
           <UploadGateProvider gate={uploadGate}>
             {closedAffordanceNotice}
+            {/* objectstack#35403 — the record's owner, read-only, with the
+                host's Change Owner action beside it. */}
+            <FormOwnerLine
+              mode={schema.mode}
+              objectName={schema.objectName}
+              recordId={schema.recordId}
+              record={loading ? null : formData}
+              objectSchema={objectSchema}
+            />
             {/* The dialog owns its body's wait (objectui#12559) — see
                 `ModalFormBodyPending`. */}
             <Suspense fallback={<ModalFormBodyPending />}>
@@ -1606,7 +1616,7 @@ const ModalFormBody: React.FC<ModalFormProps> = ({
                   <kbd
                     aria-hidden="true"
                     data-testid="modal-form-submit-shortcut"
-                    className="ml-2 hidden rounded border border-current/25 px-1 font-sans text-[11px] leading-4 opacity-75 sm:inline"
+                    className="ml-2 hidden rounded border border-current/25 px-1 font-sans text-xs leading-4 opacity-75 sm:inline"
                   >
                     {submitShortcutLabel()}
                   </kbd>

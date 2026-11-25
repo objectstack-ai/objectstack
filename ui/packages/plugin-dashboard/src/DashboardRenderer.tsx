@@ -15,13 +15,15 @@ import {
   resolveDashboardFilterDefs,
   dashboardFilterVariableDefs,
   buildWidgetScopedFilter,
+  boundMemberFilterNames,
+  dashboardFiltersNotApplied,
   mergeFilters,
   toDomProps,
   chartCategoryKey,
   chartMeasureKey,
   chartConfigPresentation,
 } from '@object-ui/core';
-import { cn, Card, CardHeader, CardTitle, CardContent, Button, getLazyIcon, Empty, EmptyTitle, EmptyDescription } from '@object-ui/components';
+import { cn, Card, CardHeader, CardTitle, CardContent, Button, getLazyIcon, Empty, EmptyTitle, EmptyDescription, ChartSkeleton } from '@object-ui/components';
 import { forwardRef, useState, useEffect, useLayoutEffect, useRef, useCallback, useMemo, Fragment } from 'react';
 import type { HTMLAttributes } from 'react';
 import { Lock, RefreshCw } from 'lucide-react';
@@ -48,7 +50,9 @@ import { DatasetWidget } from './DatasetWidget';
 import type { DashboardChartRenderSchema } from './chartRenderHandoff';
 import { useDashboardAutoRefresh, type DashboardAutoRefresh } from './useDashboardAutoRefresh';
 import { DashboardFilterBar } from './DashboardFilterBar';
+import { WidgetFilterMark, WidgetResizeHandle } from './designAffordances';
 import { DatasetQueryCoalescerContext, useDatasetQueryCoalescer } from './datasetQueryBatch';
+import { filterFieldSource, jsonColumnOperatorsFor, useFilterFieldFacts, warnFilterLoweredWithoutFacts, type FilterFieldSource } from './filterFieldFacts';
 
 /**
  * One `header.actions[]` entry, as the node's declaration types it: the spec's
@@ -280,6 +284,18 @@ export interface DashboardRendererProps
    * while the component arm was assignable to the widget arm).
    */
   onWidgetsReorder?: (widgets: DashboardComponentSchema['widgets']) => void;
+  /**
+   * objectstack#36372 — a widget's corner handle was dragged (or arrowed) to
+   * a new span, in whole grid tracks. Drawn in design mode only, on a widget
+   * with an `id`, and only when this is set; the host writes the span into
+   * the widget's `layout`.
+   */
+  onWidgetResize?: (widgetId: string, span: { w: number; h: number }) => void;
+  /**
+   * objectstack#36372 — design mode's "Add filter", drawn at the end of the
+   * filter bar (and the bar drawn for it when no filter is declared yet).
+   */
+  onAddFilter?: () => void;
   /** Optional handler for actionType="modal" header actions. Receives a schema and ActionContext. */
   modalHandler?: ModalHandler;
   /** Optional named handlers for actionType="script" header actions, keyed by action name (actionUrl). */
@@ -342,7 +358,7 @@ export interface DashboardRendererProps
 }
 
 const DashboardRendererInner = forwardRef<HTMLDivElement, DashboardRendererProps>(
-  ({ schema, className, dataSource: dataSourceProp, onRefresh, recordCount, userActions, designMode, selectedWidgetId, onWidgetClick, onWidgetsReorder, modalHandler, scriptHandlers, hideHeaderText, onRefreshStateChange, localized, ...props }: DashboardRendererProps & { [key: string]: any }, ref) => {
+  ({ schema, className, dataSource: dataSourceProp, onRefresh, recordCount, userActions, designMode, selectedWidgetId, onWidgetClick, onWidgetsReorder, onWidgetResize, onAddFilter, modalHandler, scriptHandlers, hideHeaderText, onRefreshStateChange, localized, ...props }: DashboardRendererProps & { [key: string]: any }, ref) => {
     // The package this dashboard is served from: its widgets' datasets were
     // authored against it, so each dataset query names it as the reader's
     // package (`callerPackage`, ADR-0150 D3).
@@ -390,7 +406,9 @@ const DashboardRendererInner = forwardRef<HTMLDivElement, DashboardRendererProps
       return 4;
     })();
     const columns = inferredColumns;
-    const gap = schema.gap || 4;
+    // The spec admits `gap: 0` (`min(0)`), so only an ABSENT gap takes the
+    // default; `||` drew a declared zero 1rem apart (objectstack#36912).
+    const gap = schema.gap ?? 4;
     // Positioned (explicit-columns) grid vs responsive auto-flow grid.
     // Defined here (not just above desktopBody) so renderWidget can give
     // layout-less widgets a sensible default span in the positioned grid.
@@ -422,6 +440,20 @@ const DashboardRendererInner = forwardRef<HTMLDivElement, DashboardRendererProps
       [schema.globalFilters, schema.dateRange]
     );
     const { variables: filterValues, setVariable: setFilterValue, resetVariables: resetFilterValues } = usePageVariables();
+    // objectstack#35992 — a `select` / `lookup` filter bound to a field holding
+    // several values is lowered to `$contains` per member, which needs the
+    // bound field's definition: read once per widget source (a dataset's base
+    // object, or a `provider: 'object'` widget's object) when the dashboard
+    // declares such a filter at all (`./filterFieldFacts`).
+    const filterFieldSources: FilterFieldSource[] = [];
+    if (filterDefs.some((def) => def.type === 'select' || def.type === 'lookup')) {
+      const entries: DashboardWidgetSlotEntry[] = schema.widgets ?? [];
+      for (const entry of entries) {
+        const source = isSlotComponentEntry(entry) ? undefined : filterFieldSource(entry);
+        if (source) filterFieldSources.push(source);
+      }
+    }
+    const filterFieldFactsFor = useFilterFieldFacts(dataSource, filterFieldSources, dashboardPackageId);
 
     // ── i18n: convention-based label resolution for dashboard / widget /
     // action text. The dashboard name (`schema.name`) keys all lookups; when
@@ -1074,8 +1106,22 @@ const DashboardRendererInner = forwardRef<HTMLDivElement, DashboardRendererProps
         // are needed downstream.
         // Widget arm only: `filterBindings` and `filter` are widget keys, and
         // the node a component entry becomes takes no filter (objectui#11598).
+        //
+        // A `select` / `lookup` filter that binds this widget is lowered
+        // against the bound field's definition (objectstack#35992): while that
+        // definition is in flight the widget's query is HELD (a skeleton draws
+        // instead), so no `=` / `$in` the server refuses on a field holding
+        // several values goes out first. A definition that cannot be read
+        // keeps the `=` / `$in` lowering, and says so per filter.
+        const fieldSource = widgetArm ? filterFieldSource(widgetArm) : undefined;
+        const memberFilters = widgetArm && fieldSource ? boundMemberFilterNames(widgetArm, filterDefs, filterValues) : [];
+        const fieldFacts = fieldSource && memberFilters.length > 0 ? filterFieldFactsFor(fieldSource) : undefined;
+        if (fieldSource && fieldFacts?.status === 'unavailable') {
+            for (const name of memberFilters) warnFilterLoweredWithoutFacts(name, fieldSource, fieldFacts.reason);
+        }
+        const holdForFieldFacts = fieldFacts?.status === 'pending';
         const scopedFilter = widgetArm && filterDefs.length > 0
-            ? buildWidgetScopedFilter(widgetArm, filterDefs, filterValues)
+            ? buildWidgetScopedFilter(widgetArm, filterDefs, filterValues, undefined, jsonColumnOperatorsFor(fieldFacts))
             : undefined;
         const componentSchema = ((): SchemaRendererProps['schema'] => {
             // No cast (objectui#11466): `getComponentSchema` returns
@@ -1119,6 +1165,21 @@ const DashboardRendererInner = forwardRef<HTMLDivElement, DashboardRendererProps
         const refusedTileKey = datasetWidget ? `${widgetKey}::${String(datasetWidget.dataset)}` : undefined;
         if (!designMode && refusedTileKey && refusedTiles.has(refusedTileKey)) return null;
         const isSelected = designMode && selectedWidgetId === widget.id;
+        // objectstack#36372 — the filters that do not reach this widget, asked
+        // of the binding its query below is built from, drawn in every mode.
+        const filtersNotApplied = widgetArm && filterDefs.length > 0 ? dashboardFiltersNotApplied(widgetArm, filterDefs) : [];
+        const filterMark = filtersNotApplied.length > 0
+          ? <WidgetFilterMark defs={filtersNotApplied} widgetId={widget.id} />
+          : null;
+        const resizeHandle = designMode && onWidgetResize && widget.id && !isMobile ? (
+          <WidgetResizeHandle
+            span={{ w: clampedLayout?.w ?? 1, h: clampedLayout?.h ?? 1 }}
+            maxColumns={hasExplicitColumns ? columns : 4}
+            gapPx={gap * 4}
+            label={tt('dashboard.inPageEdit.resizeCard', 'Resize card')}
+            onResize={(span) => onWidgetResize(widget.id as string, span)}
+          />
+        ) : null;
 
         const designModeProps = designMode ? {
             'data-testid': `dashboard-preview-widget-${widget.id}`,
@@ -1157,7 +1218,9 @@ const DashboardRendererInner = forwardRef<HTMLDivElement, DashboardRendererProps
                      below for its title + border chrome. Do not re-add a `datasetBound` fork
                      here: the arm is unreachable by construction (objectui#4620). */}
                  <SchemaRenderer schema={componentSchema} className={cn("h-full w-full", designMode && "pointer-events-none")} dataSource={dataSource} />
+                 {filterMark && <div className="pointer-events-none absolute bottom-1 left-2 z-0 max-w-[calc(100%-1rem)]">{filterMark}</div>}
                  {designMode && <div className="absolute inset-0 z-10" aria-hidden="true" data-testid="widget-click-overlay" />}
+                 {resizeHandle}
             </div>
         ) : (
             <Card
@@ -1179,11 +1242,16 @@ const DashboardRendererInner = forwardRef<HTMLDivElement, DashboardRendererProps
                         {resolvedDescription && (
                             <p className="text-xs text-muted-foreground mt-0.5 line-clamp-2">{resolvedDescription}</p>
                         )}
+                        {filterMark && <div className="mt-1">{filterMark}</div>}
                     </CardHeader>
                 )}
                 <CardContent className="p-0">
                     <div className={cn("h-full w-full", datasetMetric ? "p-3 sm:p-4" : "p-3 sm:p-4 md:p-6", designMode && "pointer-events-none")}>
-                        {datasetWidget
+                        {holdForFieldFacts
+                          ? <div className="h-full w-full" aria-busy="true" data-testid="dashboard-widget-filter-pending">
+                              <ChartSkeleton className="h-full" />
+                            </div>
+                          : datasetWidget
                           ? <DatasetWidget
                               widget={datasetWidget}
                               dataSource={dataSource}
@@ -1194,9 +1262,13 @@ const DashboardRendererInner = forwardRef<HTMLDivElement, DashboardRendererProps
                                 : undefined}
                             />
                           : <SchemaRenderer schema={componentSchema} dataSource={dataSource} />}
+                        {/* A dataset metric tile draws no card header: its mark
+                            sits under the tile instead (objectstack#36372). */}
+                        {filterMark && (datasetMetric || !resolvedTitle) && <div className="mt-1">{filterMark}</div>}
                     </div>
                 </CardContent>
                 {designMode && <div className="absolute inset-0 z-10" aria-hidden="true" data-testid="widget-click-overlay" />}
+                {resizeHandle}
             </Card>
         );
 
@@ -1375,7 +1447,7 @@ const DashboardRendererInner = forwardRef<HTMLDivElement, DashboardRendererProps
       </div>
     );
 
-    const filterBar = filterDefs.length > 0 && (
+    const filterBar = (filterDefs.length > 0 || (designMode && onAddFilter)) && (
       <DashboardFilterBar
         defs={filterDefs}
         values={filterValues}
@@ -1383,6 +1455,7 @@ const DashboardRendererInner = forwardRef<HTMLDivElement, DashboardRendererProps
         onReset={resetFilterValues}
         dataSource={dataSource}
         className={refreshControl ? 'min-w-0 grow' : undefined}
+        onAddFilter={designMode ? onAddFilter : undefined}
       />
     );
 

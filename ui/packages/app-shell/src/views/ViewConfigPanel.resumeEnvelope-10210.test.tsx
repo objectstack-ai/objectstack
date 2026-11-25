@@ -82,7 +82,7 @@ function served<T extends { label: string }>(doc: T): T & { _packageId: string }
 }
 
 /**
- * A metadata client whose served draft read (`get(..., { state: 'draft' })`)
+ * A metadata client whose served draft read (`getDraft`, objectstack#36137)
  * answers the translated envelope, and whose layered read serves the stored
  * view: `draft` the pending draft as stored (`undefined`: no `draft` key at all).
  */
@@ -92,7 +92,7 @@ function makeClient(opts: { draft: Record<string, unknown> | null | undefined; s
   const pending = opts.servedDraft ?? !!opts.draft;
   return {
     layered: vi.fn(async () => layers),
-    get: vi.fn(async () =>
+    getDraft: vi.fn(async () =>
       pending ? { type: 'view', name: VIEW_ID, item: served((opts.draft ?? SOURCE) as typeof SOURCE) } : null,
     ),
   };

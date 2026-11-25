@@ -7,6 +7,7 @@
  */
 
 import type React from 'react';
+import { getPersonInitials } from '@object-ui/types';
 import type {
   AuthUser as SpecAuthUser,
   DelegableScope,
@@ -83,19 +84,13 @@ export interface AuthUser extends SpecAuthUser {
 }
 
 /**
- * Get user initials from their name or email.
- * Returns up to 2 uppercase characters.
+ * Get user initials from their name or email: the name by the shared
+ * letters-only rule (`getPersonInitials`, objectstack#36346), else the email's
+ * first character. Returns up to 2 characters.
  */
 export function getUserInitials(user: Pick<AuthUser, 'name' | 'email'> | null | undefined): string {
   if (!user) return '?';
-  if (user.name) {
-    return user.name
-      .split(' ')
-      .map((n) => n[0])
-      .join('')
-      .toUpperCase()
-      .slice(0, 2);
-  }
+  if (user.name) return getPersonInitials(user.name);
   return user.email?.[0]?.toUpperCase() ?? '?';
 }
 

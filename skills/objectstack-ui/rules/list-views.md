@@ -12,7 +12,7 @@
 ### The `defineView` container (`*.view.ts` file shape)
 
 Views ship **inside a `defineView` container** — one per object, aggregating
-the default `list` and `form`, named `listViews`, and `formViews`. The loader
+the default `list`, named `listViews` and named `formViews`. The loader
 expands it into `<object>.<key>` view items that power the view switcher.
 
 <!-- os:check -->
@@ -23,10 +23,12 @@ const data = { provider: 'object' as const, object: 'support_case' };
 
 export const CaseViews = defineView({
   list: { label: 'All Cases', type: 'grid', data, columns: ['subject', 'status'] },
-  form: { type: 'simple', data, sections: [{ group: 'case_detail' }] },
   listViews: {
     open: { label: 'Open', type: 'grid', data, columns: ['subject', 'status'],
             filter: [{ field: 'status', operator: 'equals', value: 'open' }] },
+  },
+  formViews: {  // named: a `form` action targets `support_case.triage`
+    triage: { type: 'simple', data, sections: [{ group: 'case_detail' }] },
   },
 });
 ```
@@ -146,9 +148,7 @@ Rules:
   `element: 'dropdown'` (value chips) is allowed — `tabs` is page-only**
   (ADR-0047 amendment): the saved-view switcher already owns the tab bar, so
   `ObjectUserFiltersSchema` **rejects** `tabs` at parse (not dropped) and the
-  `validate` list-view-mode lint reports it. The full
-  `dropdown | tabs | toggle` range applies only to **page lists** /
-  `interfaceConfig.userFilters`.
+  `validate` list-view-mode lint reports it.
 - **Omit `userFilters` when unsure — omission means a clean toolbar.** Nothing
   is auto-derived.
 - `userFilters: { element: 'dropdown' }` (no `fields`) is valid shorthand:
@@ -166,10 +166,8 @@ import { defineView } from '@objectstack/spec';
 const data = { provider: 'object' as const, object: 'support_case' };
 
 export const CaseViews = defineView({
-  // No `searchableFields` → the toolbar searches everything the object allows.
   list: { label: 'All Cases', type: 'grid', data, columns: ['subject', 'status'] },
   listViews: {
-    // This list only: search the reference number and the subject line.
     triage: {
       label: 'Triage', type: 'grid', data,
       columns: ['case_number', 'subject', 'status'],
@@ -194,8 +192,7 @@ Modelling side: **objectstack-data → Search Fields**. Query side
 #### ⛔ One bad entry 400s EVERY search on that list
 
 The client sends this list verbatim as the `$searchFields` override and the
-ingress gate refuses any entry outside the allowed set before the engine runs —
-the whole search box, for every user and every term: no result at all.
+ingress gate refuses any entry outside the allowed set before the engine runs.
 
 | What you write on the view | `os validate` | Toolbar search at runtime |
 |:---------------------------|:--------------|:--------------------------|
@@ -205,7 +202,7 @@ the whole search box, for every user and every term: no result at all.
 | a renamed / mistyped column, or a dotted path (`account_id.name`) | `searchable-field-unknown` | `400 INVALID_FIELD` |
 | a real column outside the allowed set, or a virtual `formula` column | `searchable-field-unsearchable` | `400 INVALID_FIELD` |
 
-Both diagnostics are **errors**, not warnings — `os validate` fails the build.
+Both diagnostics are **errors**: `os validate` fails the build.
 
 To remove the search box, toggle the affordance instead:
 
@@ -219,7 +216,7 @@ export const AuditViews = defineView({
   list: {
     label: 'Audit Log', type: 'grid', data,
     columns: ['case_number', 'status'],
-    userActions: { search: false },   // ← no search box
+    userActions: { search: false },
   },
 });
 ```
@@ -268,9 +265,11 @@ const board: ListView = {
   data: { provider: 'object', object: 'project_task' },
   columns: ['title', 'owner_id', 'priority'],
   kanban: {
-    groupByField: 'status',                // a select field — one lane per option
+    groupByField: 'status',                // a select field
     lanes: ['todo', 'in_progress', 'review'],
-    summarizeField: 'estimate_hours',      // optional — summed at the top of each column
+    summary: { type: 'sum', field: 'estimate_hours' },  // each lane's foot statistic
+    showFieldLabels: false,                // default true: cards name each field
+    hideEmptyFields: false,                // default true: cards drop an empty field
     columns: ['title', 'owner_id', 'priority'],   // fields shown on each card
   },
   sort: [{ field: 'priority', order: 'desc' }],
@@ -282,13 +281,18 @@ const board: ListView = {
 > off the board. Omit it to draw every option in its own order; a value that is
 > not one of the field's inline options, or listed twice, fails `os validate`.
 
+> `summary.type`: `none`, `count`, or `sum` / `avg` / `min` / `max` of a `field`,
+> computed by the query over every record of the lane, not only the loaded
+> cards. Known gap: over a lookup field or in a grouped view, `sum` covers one
+> fetched page and the other three show nothing. `summary` overrides the older
+> sum-only `summarizeField`.
+
 ### Adding a board, calendar, gallery or gantt beside the list
 
 "Add a kanban (calendar / gallery / gantt) view" means a NEW `listViews` entry
 that coexists with the views the object has — its key encodes the kind or
 purpose (`status_kanban`, `timeline_gantt`: the key a nav item's `viewName`
-names, registered as `OBJECT.status_kanban`), the default `list` and every
-other view untouched. Never satisfy an add by retyping `list` (or an existing named
+names, registered as `OBJECT.status_kanban`). Never satisfy an add by retyping `list` (or an existing named
 view) to `type: 'kanban'`: nothing refuses it, the view is converted in place
 and the original is gone. Change a view's kind in place only when the request
 says to convert or replace THAT view.
@@ -324,8 +328,8 @@ const timeline: ListView = {
   data: { provider: 'object', object: 'project_task' },
   columns: ['name', 'owner_id', 'status'],   // left-pane tree columns
   gantt: {
-    startDateField: 'start_date',               // task bar start
-    endDateField: 'end_date',                   // task bar end
+    startDateField: 'start_date',
+    endDateField: 'end_date',
     titleField: 'name',                         // bar label
     progressField: 'progress',                  // 0–100 fill
     dependenciesField: 'depends_on',            // FS dependency arrows
@@ -341,21 +345,29 @@ group, **no resize handles**. Leaf tasks resize unless `locked: true`.
 
 ## Form Views
 
-Field width, column count and the `sections` ladder:
-[Record Presentation](./navigation.md#record-presentation--surface-width--columns-are-auto-derived).
+**An object's New and Edit forms are not form views.** The dialogs, the
+full-page form (`editMode: 'page'`) and a create or edit an action opens are
+built from the object: its fields, sectioned by `fieldGroups` in array order,
+following each field's own rules. Authored there:
 
-| Type | When to Use |
-|:-----|:------------|
-| `simple` | Stacked sections on one scrolling page — the default, at any field count |
-| `tabbed` | One tab per section — only for sections read apart; a required field on another tab is flagged only on its tab, and the tab strip overflows on a phone |
-| `wizard` | Step-by-step flow — guided data entry (onboarding, applications) |
+- `collapse: 'collapsed'` on a `fieldGroups` entry folds a rarely filled
+  section.
+- `showOnCreate: false` on a field leaves it off every create surface; edit,
+  the record page and lists keep it. Beside `required: true` it is refused,
+  whatever its `defaultValue`: keep it on create, or make it `requiredWhen`.
+- Dialog size and column count are derived, never authored:
+  [Record Presentation](./navigation.md#record-presentation--surface-width--columns-are-auto-derived).
 
-**A long form stays `simple`: collapse what is rarely filled** with
-`collapse: 'collapsed'` on the object's `fieldGroups` entry, or `collapsed: true`
-on a form section listing its own `fields`. `columns` (form or section) is a
-per-row ceiling a narrow screen lowers; unset, a section draws two, so set `3`
-for a wide data-entry form. `modalSize` (`sm` to `full`) sizes the New / Edit
-dialog; unset, the field count picks `lg` or `xl`.
+A container's `form`, `formViews.default` and `formViews.create` still parse
+and steer nothing (sections, tabs, steps, `subforms`, `defaults`, `modalSize`);
+`os validate` warns `form-view-internal-not-loaded`. Two kinds of form view
+load:
+
+**A named form** is a `formViews` entry under any other key, registered as
+`OBJECT.key`; an action of `type: 'form'` whose `target` is that name opens it
+on its own page (`/forms/:name`). Its `type` is `simple` (stacked sections, the
+default), `tabbed` (a tab per section) or `wizard` (a step per section, each
+listing `fields`, never `{ group }`). It draws no child line items.
 
 **A public form** is a form view with
 `sharing: { enabled: true, allowAnonymous: true, publicLink: 'slug' }`:
@@ -365,46 +377,31 @@ Web-to-Lead at `GET/POST /api/v1/forms/:slug`.
 
 To let users enter a record **together with its child line items** (invoice +
 lines, project + tasks) and save them **atomically**, you almost never need a
-custom page or form config. Prefer, in order:
+custom page. Prefer, in order:
 
-1. **Relationship `inlineEdit` (default, zero UI config).** Declare it in the
-   DATA MODEL — set `inlineEdit` on the child's `master_detail` field that
-   references the parent. Every standard New/Edit form for the parent (modal,
-   drawer, full-page) then auto-renders the children and saves parent + children
-   in one atomic `/api/v1/batch`. **No view metadata needed.** A parent or child
+1. **A parent field group naming the child (zero view config).** In the DATA
+   MODEL, the parent declares `fieldGroups: [{ key: 'lines', label: 'Lines',
+   relatedList: 'invoice_line' }]`. Its standard New/Edit forms (modal,
+   drawer, full-page) then draw the children there and save parent + children
+   in one atomic `/api/v1/batch`. Without the group nothing changes: the child
+   is a tab and the form has no lines. A parent or child
    declaring `enable.apiMethods` must list `'bulk'`, or that save is refused
-   `405 OBJECT_API_METHOD_NOT_ALLOWED`. The
-   `true` / `'grid'` / `'form'` ladder and what each value picks:
+   `405 OBJECT_API_METHOD_NOT_ALLOWED`. `inlineEdit` only picks how rows are
+   edited, `'grid'` / `'form'` or left out:
    **objectstack-data → Relationships → Inline Editing**.
 
-2. **Form view `subforms` (override / tuning).** Add to a form view only when you
-   need to override the derived columns/order, or expose a child the
-   relationship didn't mark inline:
+2. **`object-master-detail-form` page block (bespoke layout).** Use a page only
+   for free-form layouts: `details: [{ childObject }]`.
 
-   ```typescript
-   form: {
-     type: 'simple',
-     sections: [{ group: 'invoice_header' }],  // a declared fieldGroup
-     subforms: [
-       { childObject: 'invoice_line', // set `columns` only to override
-         title: 'Line Items', addLabel: 'Add line' },
-     ],
-   },
-   ```
-
-3. **`object-master-detail-form` page block (bespoke layout).** Use a page only
-   for free-form layouts. Same `details: [{ childObject }]` shorthand.
-
-**Line-item grid behaviors (`grid` mode).** The editable grid is a real
-spreadsheet-style line editor, and
-every behaviour is derived from the DATA MODEL — computed columns, catalog
+**Line-item grid behaviors (`grid` mode).** Every behaviour of the editable
+grid is derived from the DATA MODEL — computed columns, catalog
 typeahead auto-fill, persisted drag-reorder, and the live Subtotal → Tax → Total
 stack: **objectstack-data → Relationships → Inline Editing**. Three things are
 authored on this side: a trailing **ghost** row always exists, so never add an
 "Add line" button to the grid (typing in the ghost materialises a row; an
 untouched one is never persisted; a record-header action that inserts a priced
 line is [Actions](./actions.md)); `autofill: false` opts one column out of the typeahead copy;
-and the form's `taxRateField` overrides which parent field drives the totals.
+and that page block's `taxRateField` overrides which parent field drives the totals.
 
 ## Field Conditional Rules in Forms
 

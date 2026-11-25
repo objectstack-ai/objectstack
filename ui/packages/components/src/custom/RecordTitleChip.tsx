@@ -182,7 +182,8 @@ export const RecordTitleChip: React.FC<RecordTitleChipProps> = ({
                 <Button
                   variant="ghost"
                   size="icon"
-                  className="h-6 w-6 shrink-0"
+                  // A phone's tap target, as the copy-id button beside it.
+                  className="h-6 w-6 min-h-[44px] min-w-[44px] shrink-0 sm:min-h-0 sm:min-w-0"
                   onClick={handleToggleFavorite}
                   aria-label={favLabel}
                   aria-pressed={isFavorite}

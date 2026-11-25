@@ -14,6 +14,9 @@
  * REAL Data pillar end to end.
  */
 
+// Warmed at module top so the first load of the console's lazily loaded
+// authoring code is paid during collection, not inside a test's clock.
+import '@objectstack/lint';
 import '@testing-library/jest-dom/vitest';
 import * as React from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -139,7 +142,7 @@ describe('Data pillar — New object previews the name it saves (objectui#11792)
     await waitFor(() =>
       expect(screen.getByTestId('create-item-stored-name')).toHaveTextContent('repairs_repair_ticket'),
     );
-    fireEvent.click(within(dialog).getByRole('button', { name: /save as draft|存为草稿/i }));
+    fireEvent.click(within(dialog).getByRole('button', { name: /^(create|创建)$/i }));
     await waitFor(() => expect(mockClient.save).toHaveBeenCalled());
     expect(savedName()).toBe('repairs_repair_ticket');
   });
@@ -148,7 +151,7 @@ describe('Data pillar — New object previews the name it saves (objectui#11792)
     packagesFixture = [{ id: 'com.test.repairs', name: 'Repairs', writable: true, namespace: null }];
     const dialog = await openAndType('Repair Ticket');
     expect(await screen.findByTestId('create-item-stored-name')).toHaveTextContent('repair_ticket');
-    fireEvent.click(within(dialog).getByRole('button', { name: /save as draft|存为草稿/i }));
+    fireEvent.click(within(dialog).getByRole('button', { name: /^(create|创建)$/i }));
     await waitFor(() => expect(mockClient.save).toHaveBeenCalled());
     expect(savedName()).toBe('repair_ticket');
   });

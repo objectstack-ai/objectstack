@@ -1,6 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { describe, it, expect, vi } from 'vitest';
+import { markRunCaller } from '@objectstack/core';
 import type { AutomationContext } from '@objectstack/spec/contracts';
 import type { HookContext } from '@objectstack/spec/data';
 import { ExpressionEngine } from '@objectstack/formula';
@@ -163,6 +164,25 @@ describe('RecordChangeTrigger', () => {
         expect(seen[0].impersonatedBy).toBe('u_admin');
         expect(seen[1].userId).toBe('u9');
         expect('impersonatedBy' in seen[1]).toBe(false);
+    });
+
+    it('a write of a decided segment of a run that began for no caller starts a run for no caller', async () => {
+        const { engine, hooks } = fakeEngine();
+        const trigger = new RecordChangeTrigger(engine, silentLogger());
+        const seen: AutomationContext[] = [];
+        trigger.start(binding(), async (ctx) => { seen.push(ctx); });
+
+        await hooks[0].handler(hookCtx({ session: markRunCaller({ userId: 'u_decider' }, null) } as Partial<HookContext>));
+        // Control: an ordinary write starts a run for its writer.
+        await hooks[0].handler(hookCtx());
+
+        expect(seen).toHaveLength(2);
+        expect(seen[0].userId).toBe('u_decider');
+        // The caller-less fact rides its own key; the writer stays the run's
+        // trigger user for every other reader (no `triggerUserId` is written).
+        expect((seen[0] as Record<string, unknown>).beganForNoCaller).toBe(true);
+        expect('triggerUserId' in seen[0]).toBe(false);
+        expect('beganForNoCaller' in seen[1]).toBe(false);
     });
 
     it('does not register a hook for an unsupported trigger event', () => {

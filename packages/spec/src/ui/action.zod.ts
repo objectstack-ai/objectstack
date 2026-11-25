@@ -779,6 +779,10 @@ const GLOBAL_NAV_RETIRED =
  *                       never surfaces on the object's own list views.
  * - `record_section`  — actions surfaced inside a body section/tab of a record
  *                       (e.g. a Security tab grouping change-password, 2FA, etc.).
+ *                       Drawn only by an authored record page block that renders
+ *                       it; the standard record page (a phone, the side preview,
+ *                       and an object with no authored page) does not draw it, so
+ *                       an action that must reach every surface adds `record_more`.
  *
  * `global_nav` was REMOVED in 17 (#6888, maintainer ruling 2026-08-09). It had
  * been declared here since the vocabulary was written and no product surface
@@ -1361,7 +1365,7 @@ const actionObject = () => strictObject({
   icon: z.string().optional().describe('Icon name'),
 
   /** Where does this action appear? */
-  locations: z.array(ActionLocationSchema).optional().describe('Locations where this action is visible'),
+  locations: z.array(ActionLocationSchema).optional().describe('Locations where this action is visible. `record_section` is drawn only by an authored record page block that renders it; the standard record page (on a phone, in the side preview, and for an object with no authored page) does not draw it, so an action that must reach every surface adds `record_more` as well.'),
 
   /** 
    * Visual Component Type
@@ -1490,7 +1494,8 @@ const actionObject = () => strictObject({
    */
   body: HookBodySchema.optional().describe(
     'Action body — expression (L1) or sandboxed JS (L2). Only used when type is `script`. '
-      + "An action body runs as system, and its update, transfer, delete, purge or restore of an object declared managedBy: 'append-only' is refused with PERMISSION_DENIED; an insert is not judged by this rule.",
+      + "An action body runs as system, and its update, transfer, delete, purge or restore of an object declared managedBy: 'append-only' is refused with PERMISSION_DENIED; an insert is not judged by this rule. "
+      + "Its system elevation does not lift the organization wall: the body has its reads and writes judged by the invoking user's organization wall. A write whose own data names an organization outside it, or empties a record's organization, is refused with PERMISSION_DENIED. Where the wall denies the user (no active organization under isolated, no membership under group), its reads of an organization's records return none, its deletes remove none, and its other writes are refused with PERMISSION_DENIED.",
   ),
 
   /**

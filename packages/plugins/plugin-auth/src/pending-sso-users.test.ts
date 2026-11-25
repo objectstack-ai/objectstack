@@ -28,6 +28,9 @@ import { CLOUD_MANAGED_REFUSAL_MESSAGES } from './cloud-managed';
 import { PENDING_SSO_MESSAGES, PENDING_SSO_SOURCE } from './pending-sso-marker';
 import { BANNED_USER_SESSION_REFUSAL, PENDING_SSO_SESSION_REFUSAL } from './user-session-admission';
 import { EnvironmentUserHostRefusal, type EnvironmentUserEvent, type EnvironmentUserHost } from './environment-user-host';
+// The SSO discovery egress guard the source loads with a dynamic import, paid
+// during collection rather than inside a clocked case (check-test-source-alias, "The source reach").
+import '@objectstack/core/egress';
 import { runAdminUnbanUser } from './admin-ban-endpoints';
 import { runAddSsoUser } from './pending-sso-users';
 import { INTERNAL_ERROR_MESSAGE } from '@objectstack/types';
@@ -1573,6 +1576,9 @@ describe('[#34404] admin/remove-sso-user writes an admin audit row for a removal
 // password refused while the lock holds, then judges and drives the DECLARED
 // action against the door and signs in again.
 
+/** What a ban of an account that runs nothing in its name ended beside the ban, as its audit row counts it. */
+const NOTHING_ENDED = { suspendedServiceAccounts: 0, revokedOwnedApps: 0, revokedScimCredentials: 0, revocationComplete: true };
+
 /** The admin audit rows a ban or an unban writes (`writeAdminAudit`, action `update`). */
 const banAuditRows = (s: Awaited<ReturnType<typeof stage>>): any[] =>
   ((s.engine.tables.get('sys_audit_log') ?? []) as any[]).filter((r) => r.action === 'update');
@@ -1591,7 +1597,8 @@ describe('[#35440] admin/ban-user and admin/unban-user write an admin audit row 
         expect(row).toMatchObject({ user_id: s.ids.admin, actor: s.ids.admin, object_name: 'sys_user', record_id: s.ids.member });
       }
       expect(rows.map((r) => JSON.parse(r.metadata))).toEqual([
-        { event: 'user.admin_banned', hostNotified: true },
+        // A ban's row also counts what it ended beside the ban (`admin-ban-endpoints.ts`): here, nothing.
+        { event: 'user.admin_banned', hostNotified: true, ...NOTHING_ENDED },
         { event: 'user.admin_unbanned', hostNotified: true },
       ]);
     });
@@ -1620,7 +1627,7 @@ describe('[#35440] admin/ban-user and admin/unban-user write an admin audit row 
   it('with no host wired the rows carry hostNotified false', async () => {
     const s = await stage({ host: 'none' });
     expect((await s.fire('/admin/ban-user', { userId: s.ids.member }, s.bearers.admin)).status).toBe(200);
-    expect(banAuditRows(s).map((r) => JSON.parse(r.metadata))).toEqual([{ event: 'user.admin_banned', hostNotified: false }]);
+    expect(banAuditRows(s).map((r) => JSON.parse(r.metadata))).toEqual([{ event: 'user.admin_banned', hostNotified: false, ...NOTHING_ENDED }]);
   });
 
   it('CONTROL: a refused ban and a refused unban write no row', async () => {

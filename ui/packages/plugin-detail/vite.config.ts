@@ -60,8 +60,11 @@ export default defineConfig({
     lib: {
       entry: resolve(__dirname, 'src/index.tsx'),
       name: 'ObjectUIPluginDetail',
-      formats: ['es', 'umd'],
-      fileName: (format) => `index.${format === 'es' ? 'js' : 'umd.cjs'}`,
+      // The UMD build only. The ESM build (`dist/index.js`, `dist/core.js`)
+      // is `vite.es.config.ts`, a second pass: a lib build with more than one
+      // entry cannot emit UMD.
+      formats: ['umd'],
+      fileName: () => 'index.umd.cjs',
     },
     rollupOptions: {
       // IMPORTANT: do NOT inline @object-ui/* runtime packages.

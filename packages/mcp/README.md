@@ -180,8 +180,9 @@ analytics service serves its dataset executor), and `search_package_docs` /
 `readPackageDoc` (the runtime's HTTP bridge does where the protocol serves the
 `/meta` list read; it reads every page through the `/meta/doc` docs-audience
 gate as the caller, so a page the caller may not read is neither found nor
-read; on an OAuth grant the caller is the agent, judged on the token's grant
-rather than the person's own permission sets; the stdio bridge carries neither); a bridge without those seams
+read; on an OAuth connection whose grant reaches the docs tools, a
+permission-set audience is read against the delegating person's own permission
+sets, never wider; the stdio bridge carries neither); a bridge without those seams
 serves the rest and advertises nothing it cannot do.
 
 OAuth scopes narrow the families at consent time: `data:read` covers

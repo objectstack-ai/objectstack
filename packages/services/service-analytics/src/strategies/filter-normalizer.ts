@@ -543,6 +543,19 @@ const MONGO_TO_CUBE_OP: Record<string, string> = {
 };
 
 /**
+ * [#36168] The `$` spelling each leaf operator above was lowered from: the
+ * inverse of {@link MONGO_TO_CUBE_OP}, derived from it rather than listed a
+ * second time, so a reader of the normalised tree that has to name an operator
+ * names the spelling the map lowered (`equals` is `$eq`, whether the author
+ * wrote `$eq` or the implicit equality `{ field: value }`; a `$between` reaches
+ * the tree as its `gte` / `lte` bounds). Operators the map does not produce
+ * (`set`, `notSet`, `empty`, `notEmpty`) have no entry.
+ */
+export const CUBE_TO_MONGO_OP: Readonly<Record<string, string>> = Object.freeze(
+  Object.fromEntries(Object.entries(MONGO_TO_CUBE_OP).map(([mongo, cube]) => [cube, mongo])),
+);
+
+/**
  * [#20068] The one operator `FILTER_TEXT_CASES` writes comparand REJECTION rows
  * for, in the `$` spelling this door judges. {@link assertCompilableComparand}
  * asks `isRefusedTextComparand` for this operator and no other.

@@ -40,7 +40,7 @@ export const ru: TranslationData = {
         group_overview: { label: 'Обзор' },
         group_apps: { label: 'Приложения' },
         nav_marketplace_browse: { label: 'Обзор Marketplace' },
-        nav_marketplace_installed: { label: 'Установленные приложения' },
+        nav_packages: { label: 'Пакеты' },
         nav_cloud_connection: { label: 'Подключение к облаку' },
         group_people_org: { label: 'Люди и организация' },
         group_access_control: { label: 'Управление доступом' },
@@ -110,6 +110,7 @@ export const ru: TranslationData = {
         nav_settings_knowledge: { label: 'Знания' },
         nav_settings_lifecycle: { label: 'Жизненный цикл данных' },
         nav_recycle_bin: { label: 'Корзина' },
+        nav_public_forms: { label: 'Публичные формы' },
         nav_notification_preferences: { label: 'Настройки уведомлений' },
         nav_notification_templates: { label: 'Шаблоны уведомлений' },
 

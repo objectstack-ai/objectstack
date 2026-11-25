@@ -245,7 +245,7 @@ function PendingApprovers({ request }: { request: ApprovalRequestLite }) {
   if (chips.length === 0) return null;
   return (
     <div data-testid="approval-decision-pending-approvers">
-      <div className="text-[11px] text-muted-foreground mb-1">
+      <div className="text-xs text-muted-foreground mb-1">
         {String(t('approvalsInbox.waitingOn', { defaultValue: 'Waiting on' }))}
       </div>
       <div className="flex flex-wrap gap-1">
@@ -253,7 +253,7 @@ function PendingApprovers({ request }: { request: ApprovalRequestLite }) {
           <Badge
             key={`${chip.label}-${chip.group ?? ''}-${i}`}
             variant="outline"
-            className="text-[11px]"
+            className="text-xs"
             // The raw slot belongs on hover, never as the identification.
             title={chip.title}
             data-testid="approver-chip"
@@ -386,7 +386,7 @@ function DecisionComment({ request, thread }: { request: ApprovalRequestLite; th
       data-testid="approval-decision-comment"
       data-action={action.action}
     >
-      <div className="text-[11px] text-muted-foreground mb-0.5">
+      <div className="text-xs text-muted-foreground mb-0.5">
         {verb}
         {action.actor_name ? ` · ${action.actor_name}` : ''}
       </div>

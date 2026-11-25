@@ -30,7 +30,7 @@ import { useSearchParams, useNavigate, useParams } from 'react-router-dom';
 import { ListView } from '@object-ui/plugin-list';
 import { useAdapter, SchemaRenderer, useNavigationOverlay } from '@object-ui/react';
 import { Empty, EmptyTitle, EmptyDescription, NavigationOverlay } from '@object-ui/components';
-import { Database } from 'lucide-react';
+import { Database, FileText } from 'lucide-react';
 import { useObjectTranslation } from '@object-ui/i18n';
 import { isSystemManagedField } from '@object-ui/types';
 import { leadWithNameField } from '@object-ui/core';
@@ -38,6 +38,7 @@ import { usePermissions } from '@object-ui/permissions';
 import type { ActionBarSchema, ListViewSchema } from '@object-ui/types';
 import { useMetadata } from '../providers/MetadataProvider.js';
 import { metadataText } from '../hooks/useNavTargetLabel.js';
+import { PageHeader } from '../layout/PageHeader.js';
 import { usePreviewListDataSource } from '../preview/unpublishedObjectReads.js';
 import { useTenancyPosture } from '../hooks/useTenancyPosture.js';
 import { useNavigationContext } from '../context/NavigationContext.js';
@@ -57,6 +58,14 @@ interface InterfaceListPageProps {
    * top-right (PageView's pencil), reserve right padding on the header so the
    * toolbar buttons don't sit under it. */
   reserveEditAffordance?: boolean;
+  /**
+   * objectstack#36111 — draw the console page header (`PageHeader`) for the
+   * page's title, description and buttons, as the app's lists and dashboards
+   * do; its right end holds the shell's button group. The console's page
+   * route sets it from the phone breakpoint up; Studio's preview and the
+   * phone keep the page's own title row.
+   */
+  consoleHeader?: boolean;
 }
 
 /**
@@ -274,7 +283,7 @@ export function defaultMapFromObject(objectDef: any): { locationField: string } 
   return { locationField: field };
 }
 
-export function InterfaceListPage({ page, className, onConfigChange, reserveEditAffordance }: InterfaceListPageProps) {
+export function InterfaceListPage({ page, className, onConfigChange, reserveEditAffordance, consoleHeader }: InterfaceListPageProps) {
   const { t, language } = useObjectTranslation();
   // objectui#12980 — the source object, read by name, not the whole registry:
   // reading `objects` would load every object to find one. Inside an app that
@@ -676,21 +685,34 @@ export function InterfaceListPage({ page, className, onConfigChange, reserveEdit
 
   return (
     <div className={className ?? 'h-full flex flex-col'} data-testid="interface-list-page">
-      <div className={`pl-4 pt-4 pb-2 shrink-0 flex items-start justify-between gap-3 ${reserveEditAffordance ? 'pr-12' : 'pr-4'}`}>
-        <div className="min-w-0">
-          <h1 className="text-lg font-semibold leading-tight">
-            {pageLabel ?? page.name}
-          </h1>
-          {pageDescription && (
-            <p className="text-sm text-muted-foreground mt-0.5">{pageDescription}</p>
+      {consoleHeader ? (
+        <PageHeader
+          title={pageLabel ?? page.name}
+          subtitle={pageDescription || undefined}
+          icon={<FileText className="h-4 w-4" />}
+          actions={buttonActions.length > 0 ? (
+            <div className="shrink-0" data-testid="interface-page-buttons">
+              <SchemaRenderer schema={buttonBar} />
+            </div>
+          ) : undefined}
+        />
+      ) : (
+        <div className={`pl-4 pt-4 pb-2 shrink-0 flex items-start justify-between gap-3 ${reserveEditAffordance ? 'pr-12' : 'pr-4'}`}>
+          <div className="min-w-0">
+            <h1 className="text-lg font-semibold leading-tight">
+              {pageLabel ?? page.name}
+            </h1>
+            {pageDescription && (
+              <p className="text-sm text-muted-foreground mt-0.5">{pageDescription}</p>
+            )}
+          </div>
+          {buttonActions.length > 0 && (
+            <div className="shrink-0" data-testid="interface-page-buttons">
+              <SchemaRenderer schema={buttonBar} />
+            </div>
           )}
         </div>
-        {buttonActions.length > 0 && (
-          <div className="shrink-0" data-testid="interface-page-buttons">
-            <SchemaRenderer schema={buttonBar} />
-          </div>
-        )}
-      </div>
+      )}
       <div className="flex-1 min-h-0 overflow-auto">
         <ListView
           schema={schema}

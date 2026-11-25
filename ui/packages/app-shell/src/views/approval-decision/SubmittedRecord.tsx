@@ -96,7 +96,7 @@ import { isDeadlineSettled, withoutDeniedFields } from '@object-ui/core';
 import { getCellRenderer, resolveCellRendererType } from '@object-ui/fields';
 import { useSafeFieldLabel } from '@object-ui/i18n';
 import { usePermissions } from '@object-ui/permissions';
-import { deriveFieldGroupDetailSections, isWideFieldType, RelatedList } from '@object-ui/plugin-detail';
+import { deriveFieldGroupDetailSections, isWideFieldType } from '@object-ui/plugin-detail/core';
 import {
   useAdapter,
   useDataInvalidation,
@@ -112,6 +112,7 @@ import { deriveRecordDetailSections } from '../recordDetailSections.js';
 import { deriveRelatedLists } from '../../utils/deriveRelatedLists.js';
 import { servedObjectLabel, servedObjectPluralLabel } from '../../hooks/servedObjectLabel.js';
 import { useReportRecordRead } from './recordReadReport.js';
+import { LazyRelatedList } from '../lazyDetailSurfaces.js';
 import {
   distinctLabels,
   planSubmittedRecord,
@@ -345,7 +346,7 @@ function SubmittedValue({ model, field }: { model: SubmittedRecordModel; field: 
       <div className="mt-0.5 flex flex-wrap items-center gap-1 text-xs" data-submitted-current>
         <Badge
           variant="outline"
-          className="border-amber-500/60 px-1.5 py-0 text-[10px] font-medium text-amber-700 dark:text-amber-400"
+          className="border-amber-500/60 px-1.5 py-0 text-xs font-medium text-amber-700 dark:text-amber-400"
           data-testid="submitted-field-changed"
         >
           {String(t('approvalsInbox.snapshotChanged', { defaultValue: 'Changed' }))}
@@ -392,7 +393,7 @@ function SectionHeading({ id, label, icon }: { id: string; label: string; icon?:
     <div className="border-b border-border" data-submitted-section-heading>
       <h4
         id={id}
-        className="flex min-h-11 sm:min-h-9 w-full scroll-mt-3 items-center gap-2 py-1.5 text-left text-[13px] font-semibold text-foreground"
+        className="flex min-h-11 sm:min-h-9 w-full scroll-mt-3 items-center gap-2 py-1.5 text-left text-sm font-medium text-foreground"
       >
         {icon && <SectionIcon name={icon} />}
         <span className="min-w-0 break-words">{label}</span>
@@ -520,7 +521,7 @@ export function SubmittedRecordCard({ model, className }: { model: SubmittedReco
                     data-submitted-field={field.key}
                     data-changed={field.changed ? 'true' : undefined}
                   >
-                    <dt className="text-[11px] text-muted-foreground">{labels.get(field.key)}</dt>
+                    <dt className="text-xs text-muted-foreground">{labels.get(field.key)}</dt>
                     <dd className="break-words" title={model.display?.[field.key]}>
                       <SubmittedValue model={model} field={field} />
                     </dd>
@@ -556,7 +557,7 @@ export function SubmittedAttachmentsCard({ model, className }: { model: Submitte
             data-submitted-attachment={field.key}
             data-changed={field.changed ? 'true' : undefined}
           >
-            <div className="text-[11px] text-muted-foreground">{labels.get(field.key)}</div>
+            <div className="text-xs text-muted-foreground">{labels.get(field.key)}</div>
             <SubmittedValue model={model} field={field} />
           </div>
         ))}
@@ -607,8 +608,8 @@ export function SubmittedChildTables({ model, className }: { model: SubmittedRec
             className="rounded-lg border bg-card px-4 py-3"
             data-submitted-child={relation.childObject}
           >
-            <p className="mb-2 text-[11px] text-muted-foreground" data-submitted-child-note>{note}</p>
-            <RelatedList
+            <p className="mb-2 text-xs text-muted-foreground" data-submitted-child-note>{note}</p>
+            <LazyRelatedList
               title={title}
               type="table"
               api={relation.childObject}

@@ -42,13 +42,13 @@ export function BookSidebar({
   return (
     <nav aria-label={book.label ?? book.name} className="text-sm">
       {showLabel && book.label ? (
-        <div className="mb-3 px-2 text-sm font-semibold text-foreground">{book.label}</div>
+        <div className="mb-3 px-2 text-sm font-medium text-foreground">{book.label}</div>
       ) : null}
       <div className={headings ? 'space-y-5' : undefined}>
         {book.groups.map((group) => (
           <div key={group.key}>
             {headings ? (
-              <div className="mb-1 px-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+              <div className="mb-1 px-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
                 {group.label}
               </div>
             ) : null}

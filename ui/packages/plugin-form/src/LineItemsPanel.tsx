@@ -26,7 +26,7 @@ import {
   CardTitle,
   cn,
 } from '@object-ui/components';
-import { LineItemsField, lookupAutofillByField, columnHelpByField, useBooleanValueLabel, type GridColumn } from '@object-ui/fields';
+import { LineItemsField, preloadGridField, lookupAutofillByField, columnHelpByField, useBooleanValueLabel, type GridColumn } from '@object-ui/fields';
 import type { GridFieldMetadata } from '@object-ui/types';
 import { createSafeTranslation, useLocalization } from '@object-ui/i18n';
 import { useSchemaContext, useRecordContext, useFilterScope, useResolvedFilter, useDataInvalidation, usePrintPage, NonGridRowCeilingNote } from '@object-ui/react';
@@ -34,7 +34,7 @@ import { usePermissions } from '@object-ui/permissions';
 import { buildMasterDetailEditBatch, sumRows } from './masterDetailTx';
 import { applyColumnPermissions } from './fieldWriteGate';
 import { hydrateColumns } from './deriveMasterDetail';
-import { parentCurrencyFieldsOf, followedColumnCurrencies } from './parentCurrencyColumns';
+import { currencyFieldDefsOf, parentCurrencyFieldsOf, followedColumnCurrencies } from './parentCurrencyColumns';
 import {
   runBatchTransaction,
   mergeFilterNodes,
@@ -212,6 +212,9 @@ function describeRefusedRowLimit(authored: unknown, childObject: unknown): strin
 }
 
 export const LineItemsPanel: React.FC<{ schema: LineItemsPanelSchema }> = ({ schema }) => {
+  // The line grid's body loads on first use (objectstack#36102). Start it now,
+  // while the child schema is fetched, so the grid is there before its columns.
+  preloadGridField();
   const ctx = useSchemaContext() as any;
   const { t } = useLineItemsTranslation();
   // The session's word for a boolean value, which draws a hydrated `boolean` /
@@ -761,6 +764,12 @@ export const LineItemsPanel: React.FC<{ schema: LineItemsPanelSchema }> = ({ sch
     ),
     [childSchema, schema.relationshipField, parentRow, tenantCurrency],
   );
+  // Each currency column's child field, so a pick copies an amount only into
+  // a column in the same currency (objectstack#36249).
+  const lineCurrencyFields = useMemo(
+    () => currencyFieldDefsOf(childSchema?.fields as Record<string, unknown> | undefined),
+    [childSchema],
+  );
   const lineLookupAutofill = useMemo(
     () => lookupAutofillByField(childSchema?.fields as Record<string, unknown> | undefined),
     [childSchema],
@@ -918,6 +927,7 @@ export const LineItemsPanel: React.FC<{ schema: LineItemsPanelSchema }> = ({ sch
               // targets in the row. Empty until that schema arrives.
               lookupAutofill={lineLookupAutofill}
               columnCurrencies={lineColumnCurrencies}
+              columnFields={lineCurrencyFields}
               columnHelp={lineColumnHelp}
               readonly={schema.readonly}
               // No input while the save is in flight (objectui#10631): `save`

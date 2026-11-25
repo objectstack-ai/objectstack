@@ -92,6 +92,7 @@ import {
 import { isExpandableFieldType, referencedRecordTitle } from '@object-ui/core';
 import { readLookupTargetDef } from './lookupGroupTargets';
 import { groupOrderByOf, serverSummaryOf, type GroupAggregationConfig, type UsableGroupingField } from './useGroupedData';
+import { honestGroupAggregationsByDepth } from './recordCurrencyAggregates';
 
 /**
  * `aggregations` as the summary columns the header query compiles from. An
@@ -145,9 +146,18 @@ export interface ServerGroupHeadersInput {
    */
   search?: string;
   searchFields?: readonly string[];
-  /** `object-grid.aggregations` — the per-group numbers besides the count. */
+  /**
+   * `object-grid.aggregations` — the per-group numbers besides the count.
+   * Each depth's header query carries only those its own `groupBy` admits
+   * (`honestGroupAggregationsByDepth`, objectstack#36276).
+   */
   aggregations?: GroupAggregationConfig[];
-  /** The object's field catalogue, for reference-typed grouping keys. */
+  /**
+   * The object's field catalogue: for reference-typed grouping keys, and for
+   * the unit or currency field of a `record`-mode measure (ADR-0144 D6,
+   * ADR-0158 U7 R1), which decides at which depths an aggregate over it is
+   * asked.
+   */
   objectFields?: Record<string, { type?: unknown; reference?: unknown; displayField?: unknown } | undefined>;
   /** Any change re-asks the server (refresh, data invalidation). */
   reloadKey: string;
@@ -220,7 +230,16 @@ export function useServerGroupHeaders(input: ServerGroupHeadersInput): ServerGro
       ? { search, ...(searchFields && searchFields.length > 0 ? { searchFields: [...searchFields] } : {}) }
       : null,
   );
-  const aggregationsKey = JSON.stringify(summaryColumnsOf(aggregations));
+  // [ADR-0144 D6, ADR-0158 U7 R1, objectstack#36276] The summary columns PER
+  // DEPTH, each judged on the levels that depth's header query groups by: a
+  // measure aggregate over a `record`-mode amount or quantity is asked only of
+  // a query whose `groupBy` holds its unit or currency field. The engine
+  // refuses any other (`INVALID_FIELD`, 400), and a refused depth failed every
+  // header of the view. The levels judged are the ones sent below, so the
+  // judgment and the compiled `groupBy` cannot disagree.
+  const aggregationsKey = JSON.stringify(
+    honestGroupAggregationsByDepth(aggregations, objectFields, fields.map((f) => f.field)).map(summaryColumnsOf),
+  );
   const referenceKey = JSON.stringify(
     fields.map((f) => {
       const def = objectFields?.[f.field];
@@ -253,7 +272,7 @@ export function useServerGroupHeaders(input: ServerGroupHeadersInput): ServerGro
     const fieldNames = levels.map((level) => level.field);
     const references: Array<[string, string | null] | null> = JSON.parse(referenceKey);
     const grouping = groupingOf(levels);
-    const columns = JSON.parse(aggregationsKey) as NonNullable<ListViewGroupQuerySource['columns']>;
+    const columnsByDepth = JSON.parse(aggregationsKey) as Array<NonNullable<ListViewGroupQuerySource['columns']>>;
     const composedWhere = JSON.parse(whereKey) as FilterCondition | null;
     const searched = JSON.parse(searchKey) as { search: string; searchFields?: string[] } | null;
 
@@ -262,7 +281,7 @@ export function useServerGroupHeaders(input: ServerGroupHeadersInput): ServerGro
         const headers = await Promise.all(
           fieldNames.map((_, depthIndex) => {
             const query = compileListViewGroupQuery(
-              { grouping, columns },
+              { grouping, columns: columnsByDepth[depthIndex] ?? [] },
               { ...(composedWhere ? { where: composedWhere } : {}), depth: depthIndex + 1 },
             );
             // Every depth counts the same searched rows (objectui#11021).

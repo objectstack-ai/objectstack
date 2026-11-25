@@ -198,7 +198,7 @@ describe('a runtime draft write moves the draft preview bar (objectui#13139)', (
     try {
       await expect(
         persistRuntimeMetadata('view', VIEW, { label: 'x' }, { metadataClient, objectName: OBJECT }),
-      ).resolves.toBeUndefined();
+      ).resolves.toBe('saved');
       expect(metadataClient.save).toHaveBeenCalledTimes(1);
       expect(warn).toHaveBeenCalledTimes(1);
       expect(warn.mock.calls[0]?.[1]).toBeInstanceOf(Error);

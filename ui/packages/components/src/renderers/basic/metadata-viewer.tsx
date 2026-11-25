@@ -21,7 +21,16 @@
 import * as React from 'react';
 import { ComponentRegistry } from '@object-ui/core';
 import { useMetadataItem, resolveInlineAriaProps } from '@object-ui/react';
-import { useDisplayLocale, useObjectTranslation } from '@object-ui/i18n';
+import {
+  formatCurrency,
+  formatNumber,
+  resolveFieldCurrency,
+  useDisplayLocale,
+  useFlowLabelTranslations,
+  useLocalization,
+  type FlowLabelTranslations,
+  useObjectTranslation,
+} from '@object-ui/i18n';
 import type { AriaProps } from '@object-ui/types';
 import {
   ArrowRight,
@@ -35,8 +44,20 @@ import {
   AlertTriangle,
 } from 'lucide-react';
 import type { SelectOption as SpecSelectOption } from '@objectstack/spec/data';
+import { isFlowTechnicalNodeType } from '@objectstack/spec/automation';
 import { cn } from '../../lib/utils';
 import { readProps } from './readProps';
+import {
+  decisionBranches,
+  entryGuard,
+  flowSubjects,
+  readCondition,
+  subjectFieldOf,
+  type BranchGuard,
+  type ConditionContext,
+  type FlowConditionField,
+  type FlowSubjects,
+} from './flow-branches';
 
 // ---------------------------------------------------------------------------
 // Shared helpers
@@ -78,8 +99,8 @@ function Shell({
         <Icon className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-baseline gap-x-2">
-            <span className="text-sm font-semibold leading-tight">{title}</span>
-            <span className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">{hint}</span>
+            <span className="text-sm font-medium leading-tight">{title}</span>
+            <span className="font-mono text-xs uppercase tracking-wider text-muted-foreground">{hint}</span>
           </div>
           {subtitle && <div className="mt-0.5 text-xs text-muted-foreground">{subtitle}</div>}
         </div>
@@ -336,12 +357,12 @@ function StateMachineView({ object, name }: ViewerProps) {
             >
               <Chip value={s} />
               {isInitial && (
-                <span className="inline-flex items-center gap-1 rounded bg-emerald-100 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-emerald-700 dark:bg-emerald-950/50 dark:text-emerald-400">
+                <span className="inline-flex items-center gap-1 rounded bg-emerald-100 px-1.5 py-0.5 text-xs font-medium uppercase tracking-wide text-emerald-700 dark:bg-emerald-950/50 dark:text-emerald-400">
                   <CircleDot className="h-3 w-3" /> {t('element.metadataViewer.initial', { defaultValue: 'initial' })}
                 </span>
               )}
               {isFinal ? (
-                <span className="inline-flex items-center gap-1 rounded bg-muted px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+                <span className="inline-flex items-center gap-1 rounded bg-muted px-1.5 py-0.5 text-xs font-medium uppercase tracking-wide text-muted-foreground">
                   <Flag className="h-3 w-3" /> {t('element.metadataViewer.final', { defaultValue: 'final' })}
                 </span>
               ) : (
@@ -369,21 +390,171 @@ function StateMachineView({ object, name }: ViewerProps) {
 // Node-action families that are infrastructure, not business steps. With
 // `detail: business` (the default), these are folded away so a non-technical
 // reader sees the process, not the plumbing (ADR-0051 §3.4 altitude projection).
-const TECHNICAL_NODE_TYPES = new Set([
-  'script',
-  'http',
-  'connector_action',
-  'assignment',
-  'get_record',
-  'create_record',
-  'update_record',
-  'delete_record',
-  'boundary_event',
-]);
+// The table is the spec's (`FLOW_TECHNICAL_NODE_TYPES`), the one the i18n
+// coverage check reads to ask a translation for exactly the steps drawn here.
+
+/**
+ * What the embed names a step by, in the reader's language where the package
+ * translates it.
+ *
+ * A screen that authors its own `config.title` is named by that heading — the
+ * words its reader meets at run time, translated under
+ * `screens.<node_id>.title` — unless the heading holds a `{{ }}` hole a
+ * drawing cannot fill. Every other step, and such a screen, by its label's one
+ * key (`approvals` / untitled `screens` / `nodes`, `useFlowLabelTranslations`),
+ * else the authored label.
+ */
+function flowStepName(node: any, translated: FlowLabelTranslations | undefined): string | undefined {
+  if (!node) return undefined;
+  const title = node.type === 'screen' ? node.config?.title : undefined;
+  if (typeof title === 'string' && title) {
+    const heading = translated?.screenTitle(node) ?? title;
+    if (!heading.includes('{{')) return heading;
+  }
+  const own = translated?.stepLabel(node);
+  if (own) return own;
+  return typeof node.label === 'string' && node.label ? node.label : node.id;
+}
+
+/**
+ * How the business view reads a condition (`flow-branches.ts`): field labels
+ * and options from the flow's object as served, amounts in the reader's
+ * locale and, for a currency field, its currency.
+ */
+function useConditionContext(object: any, subjects: FlowSubjects): ConditionContext {
+  const { t } = useObjectTranslation();
+  const locale = useDisplayLocale();
+  const { currency: tenantCurrency } = useLocalization();
+  return {
+    field(path): FlowConditionField | undefined {
+      const name = subjectFieldOf(path, subjects);
+      const def = getField(object, name);
+      if (!name || !def || typeof def !== 'object') return undefined;
+      return {
+        label: typeof def.label === 'string' && def.label ? def.label : name,
+        type: def.type,
+        options: Array.isArray(def.options) ? def.options : undefined,
+        currency: def.type === 'currency' ? resolveFieldCurrency(def, tenantCurrency) : undefined,
+      };
+    },
+    formatNumber(value, field) {
+      if (!field.currency) return formatNumber(value, { locale });
+      // A whole threshold reads whole (`$500,000`); a fractional one at the
+      // currency's own width.
+      const whole = Number.isInteger(value) ? { minimumFractionDigits: 0, maximumFractionDigits: 0 } : {};
+      try {
+        return formatCurrency(value, { locale, currency: field.currency, ...whole });
+      } catch {
+        return formatNumber(value, { locale });
+      }
+    },
+    words: {
+      and: t('element.metadataViewer.conditionAnd', { defaultValue: 'and' }),
+      or: t('element.metadataViewer.conditionOr', { defaultValue: 'or' }),
+      more: t('element.metadataViewer.conditionMore', { defaultValue: 'other conditions' }),
+    },
+  };
+}
+
+/** The business view's condition reader, provided by {@link FlowConditions}. */
+const ConditionScope = React.createContext<ConditionContext | null>(null);
+
+/**
+ * Reads the object the flow runs on (one request per embed) and provides the
+ * condition reader to the branches below it. Mounted once the flow is known,
+ * so its object request starts in the loading state rather than drawing the
+ * conditions unread for a render.
+ */
+function FlowConditions({ flow, fallback, children }: { flow: unknown; fallback: React.ReactNode; children: React.ReactNode }) {
+  const subjects = flowSubjects(flow);
+  const subject = useMetadataItem('object', subjects.object ?? null);
+  const ctx = useConditionContext(subject.item, subjects);
+  if (subject.loading) return <>{fallback}</>;
+  return <ConditionScope.Provider value={ctx}>{children}</ConditionScope.Provider>;
+}
+
+/** A branch's condition as text, or the neutral marker when it cannot be read; never the raw expression. */
+function ConditionText({ guard, ctx }: { guard: BranchGuard; ctx: ConditionContext }) {
+  const { t } = useObjectTranslation();
+  if (guard.kind === 'none') return null;
+  if (guard.kind === 'otherwise') {
+    return (
+      <span data-condition="otherwise" className="italic text-muted-foreground">
+        {t('element.metadataViewer.otherwise', { defaultValue: 'otherwise' })}
+      </span>
+    );
+  }
+  const text = guard.kind === 'cel' ? readCondition(guard.source, ctx) : null;
+  if (text === null) {
+    return (
+      <span data-condition="opaque" className="italic text-muted-foreground">
+        {t('element.metadataViewer.condition', { defaultValue: 'condition' })}
+      </span>
+    );
+  }
+  return (
+    <span data-condition="read" className="font-medium">
+      {text}
+    </span>
+  );
+}
+
+/** The flow's entry condition, once, above its steps. */
+function EntryCondition({ flow }: { flow: unknown }) {
+  const { t } = useObjectTranslation();
+  const ctx = React.useContext(ConditionScope);
+  const guard = entryGuard(flow);
+  if (!ctx || guard.kind === 'none') return null;
+  return (
+    <div data-flow-entry className="mb-2 text-xs text-muted-foreground">
+      {withChips(t('element.metadataViewer.runsWhen', { defaultValue: 'Runs when {{condition}}', condition: CHIP[0] }), [
+        <ConditionText key="c" guard={guard} ctx={ctx} />,
+      ])}
+    </div>
+  );
+}
+
+/** A decision's branches: each condition (or the neutral marker) and the step it leads to. */
+function Branches({
+  flow,
+  node,
+  nodes,
+  translated,
+}: {
+  flow: unknown;
+  node: any;
+  nodes: any[];
+  /** The package's step-label translations ({@link flowStepName}), or `undefined`. */
+  translated?: FlowLabelTranslations;
+}) {
+  const ctx = React.useContext(ConditionScope);
+  const branches = decisionBranches(flow, node);
+  if (!ctx || branches.length === 0) return null;
+  return (
+    <ul data-flow-branches={node.id} className="w-full space-y-1 pl-7 text-xs">
+      {branches.map((b) => {
+        const target = nodes.find((x) => x?.id === b.target);
+        return (
+          <li key={b.key} data-branch-target={b.target} className="flex flex-wrap items-center gap-1.5">
+            <ConditionText guard={b.guard} ctx={ctx} />
+            <ArrowRight className="h-3 w-3 shrink-0 text-muted-foreground" />
+            <span>{flowStepName(target, translated) ?? b.target}</span>
+          </li>
+        );
+      })}
+    </ul>
+  );
+}
 
 function FlowView({ name, detail }: ViewerProps) {
   const { item: flow, loading, error } = useMetadataItem('flow', name ?? null);
   const { t, ...view } = useViewStates();
+  // The package's `flows` translations in the reader's language: the flow label
+  // and each step's label (`flowStepName`), the resolution the Studio designer
+  // and the runner share. A step the package leaves untranslated keeps its
+  // authored label.
+  const translated = useFlowLabelTranslations(name ?? '');
+  const business = (detail ?? 'business') === 'business';
 
   if (!name) return view.missing('name');
   if (loading) return view.loading(name);
@@ -391,43 +562,45 @@ function FlowView({ name, detail }: ViewerProps) {
   if (!flow) return view.notFound(name);
 
   const allNodes: any[] = Array.isArray(flow.nodes) ? flow.nodes : [];
-  const business = (detail ?? 'business') === 'business';
-  const nodes = business ? allNodes.filter((n) => !TECHNICAL_NODE_TYPES.has(n?.type)) : allNodes;
+  const nodes = business ? allNodes.filter((n) => !isFlowTechnicalNodeType(n?.type)) : allNodes;
   const hiddenCount = allNodes.length - nodes.length;
 
-  return (
+  const card = (
     <Shell
       hint={t('element.metadataViewer.flow', { defaultValue: 'Flow' })}
       icon={GitBranch}
-      title={flow.label ?? flow.name ?? name}
+      title={translated?.flowLabel ?? flow.label ?? flow.name ?? name}
       subtitle={
         flow.description ??
         t('element.metadataViewer.steps', { defaultValue: 'Steps: {{count}}', count: allNodes.length })
       }
     >
+      {business && <EntryCondition flow={flow} />}
       {nodes.length === 0 ? (
         <Placeholder>{t('element.metadataViewer.noSteps', { defaultValue: 'No steps to show.' })}</Placeholder>
       ) : (
         <ol className="space-y-1.5">
           {nodes.map((n, i) => (
-            <li key={n?.id ?? i} className="flex items-center gap-2.5 rounded-md border bg-muted/20 px-2.5 py-2">
-              <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-primary/10 text-[11px] font-semibold text-primary">
+            <li key={n?.id ?? i} className="flex flex-wrap items-center gap-2.5 rounded-md border bg-muted/20 px-2.5 py-2">
+              <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-primary/10 text-xs font-medium text-primary">
                 {i + 1}
               </span>
               <span className="text-sm">
-                {n?.label ?? n?.id ?? t('element.metadataViewer.untitledStep', { defaultValue: '(step)' })}
+                {flowStepName(n, translated) ??
+                  t('element.metadataViewer.untitledStep', { defaultValue: '(step)' })}
               </span>
               {n?.type && (
-                <span className="ml-auto rounded border bg-background px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground">
+                <span className="ml-auto rounded border bg-background px-1.5 py-0.5 font-mono text-xs text-muted-foreground">
                   {n.type}
                 </span>
               )}
+              {business && <Branches flow={flow} node={n} nodes={allNodes} translated={translated} />}
             </li>
           ))}
         </ol>
       )}
       {business && hiddenCount > 0 && (
-        <div className="mt-2 text-[11px] text-muted-foreground">
+        <div className="mt-2 text-xs text-muted-foreground">
           {withChips(
             t('element.metadataViewer.hiddenSteps', {
               defaultValue: 'Technical steps hidden: {{count}} · set {{setting}} to show all',
@@ -439,6 +612,13 @@ function FlowView({ name, detail }: ViewerProps) {
         </div>
       )}
     </Shell>
+  );
+  return business ? (
+    <FlowConditions flow={flow} fallback={view.loading(name)}>
+      {card}
+    </FlowConditions>
+  ) : (
+    card
   );
 }
 

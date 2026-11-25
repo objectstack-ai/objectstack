@@ -178,15 +178,22 @@ const TYPE_LABELS_ZH: Record<string, string> = {
   picklist: '选项列表',
 };
 
+/**
+ * The group name each registered metadata `domain` is drawn with, everywhere a
+ * domain is named: the Studio menu, the All metadata directory's headings and
+ * chips, and the domain badge on a type or item page (Setup's datasource pages
+ * included). `system` is Platform / 平台 and `security` is Access / 访问, the
+ * names objectstack ADR-0084 (amended 2026-11-24) gives those two groups.
+ */
 const DOMAIN_LABELS_EN: Record<string, string> = {
   data: 'Data',
   ui: 'UI',
   automation: 'Automation',
   ai: 'AI',
-  system: 'System',
+  system: 'Platform',
   platform: 'Platform',
   identity: 'Identity',
-  security: 'Security',
+  security: 'Access',
   other: 'Other',
 };
 
@@ -195,10 +202,10 @@ const DOMAIN_LABELS_ZH: Record<string, string> = {
   ui: '界面',
   automation: '自动化',
   ai: 'AI',
-  system: '系统',
+  system: '平台',
   platform: '平台',
   identity: '身份',
-  security: '安全',
+  security: '访问',
   other: '其他',
 };
 
@@ -575,18 +582,19 @@ const FLOW_FIELD_ZH: Record<string, Record<string, FlowFieldZh>> = {
   // field ids, so one overlay localizes both forms.
   notify: {
     recipients: { label: '收件人', help: '接收通知的人：触发记录的某个字段、用户、团队或邮箱地址。至少需要一个。' },
-    title: { label: '标题', help: '通知标题(别名:subject)。' },
-    message: { label: '内容', help: '通知正文(别名:body)。' },
-    channels: { label: '渠道', help: '扇出投递的渠道(默认站内)。' },
-    topic: { label: '主题', help: '事件主题(默认 "notify")。' },
-    severity: { label: '级别', help: 'info | warning | critical' },
-    sourceObject: { label: '来源对象', help: '通知所关联记录的对象名。' },
+    // objectstack#36746 — the author's words: no key aliases, no literal defaults.
+    title: { label: '标题', help: '收件人看到的通知标题。必填。' },
+    message: { label: '内容', help: '显示在标题下方的正文。', placeholder: '可以插入记录里的值，例如 {{ record.name }}' },
+    channels: { label: '渠道', help: '通知送达的地方：站内信、邮件或推送。不填时只发站内信。' },
+    topic: { label: '通知类别', help: '这类通知属于哪一类。收件人可以在通知设置里按类别开关通知。不填时归入通用通知。' },
+    severity: { label: '级别', help: '通知的重要程度。', opts: { info: '一般', warning: '警告', critical: '紧急' } },
+    sourceObject: { label: '来源对象', help: '点开通知时打开哪个对象的记录。需与来源记录一起填写。' },
     sourceId: { label: '来源记录', help: '通知链接到的记录 id(需配合来源对象):以文本写出的 id,或公式(如 record.id)。' },
-    actorId: { label: '触发用户', help: '引发该事件的用户 id。' },
+    actorId: { label: '触发用户', help: '记在这条通知上的发起人。一般不用填写。' },
     // objectui#11968 — keyed `actionUrl`, the key the contract declares and both
     // forms now write; the `url` spelling is the converted alias.
     actionUrl: { label: '链接 URL', help: '显式的点击跳转 URL;覆盖默认值。会渲染 {{ }} 占位。' },
-    payload: { label: '附加数据', help: '合并进模板输入的额外数据。' },
+    payload: { label: '附加数据', help: '随通知一起保存的额外数据，供模板使用。一般不用填写。' },
     // The engine-published descriptor's `template` / `templateData` carry no
     // title and a developer-length description; these rows say what the author
     // decides.

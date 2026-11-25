@@ -59,10 +59,14 @@ import { resolveRequestExecutionContext, type RequestAuthService } from './reque
  *     gives both, so the door says nothing about a row the caller cannot see.
  *  6. **The owner.** A row the caller CAN read whose owner column names anyone
  *     else is refused loudly, `PERMISSION_DENIED` / `403`, and stays.
+ *  7. **The object's own refusal**, for a door whose object declares one
+ *     ({@link OwnRowDeleteDoor.refuseRemoval}): a row the caller owns that the
+ *     object still may not lose. The door that declares it says why; its
+ *     refusal is answered with its own `code` and `status`, and the row stays.
  *
  * ## The removal
  *
- * Only after all six does the door remove the row, by id, under a system
+ * Only after all seven does the door remove the row, by id, under a system
  * context. That elevation is what lets the door reach a row the caller holds
  * no `delete` grant on, and step 6 is the only thing that admits it: the
  * elevated write is reached by no other path. The context keeps the caller as
@@ -89,6 +93,14 @@ export interface OwnRowDeleteDoor {
   ownerField: string;
   /** The words the door's answers name the row with. */
   words: OwnRowDeleteWords;
+  /**
+   * Step 7, optional: refuse the removal of a row the caller owns that the
+   * object still may not lose. Asked after the owner check with the row as the
+   * caller read it, the engine and the caller's context; it throws the refusal
+   * (an error carrying the ADR-0112 `code` and `status` the door answers) or
+   * resolves to admit. Nothing is removed before it resolves.
+   */
+  refuseRemoval?(row: Record<string, unknown>, engine: OwnRowDeleteEngine, context: ExecutionContext): Promise<void>;
 }
 
 /** How a door's answers name its row: `reaction` / `reaction` / `member`, `personal view` / `view` / `user`. */
@@ -197,10 +209,11 @@ function notYourRowError(door: OwnRowDeleteDoor, id: string): Error {
 }
 
 /**
- * Remove the caller's own row `id` of `door.object` — steps 5 and 6 of the
+ * Remove the caller's own row `id` of `door.object` — steps 5 to 7 of the
  * door, and the removal. Throws `RECORD_NOT_FOUND` / `404` for a row the
- * caller cannot read or that does not exist, and `PERMISSION_DENIED` / `403`
- * for a row whose owner is someone else. `context` must name a user.
+ * caller cannot read or that does not exist, `PERMISSION_DENIED` / `403`
+ * for a row whose owner is someone else, and the door's own refusal (step 7).
+ * `context` must name a user.
  */
 export async function removeOwnRow(
   engine: OwnRowDeleteEngine,
@@ -220,6 +233,9 @@ export async function removeOwnRow(
 
   // Step 6: the structural check, and the only thing that admits the write below.
   if (row[door.ownerField] !== callerId) throw notYourRowError(door, id);
+
+  // Step 7: the object's own refusal, where it declares one.
+  if (door.refuseRemoval) await door.refuseRemoval(row, engine, context);
 
   const removed = await engine.delete(door.object, {
     where: { id },
@@ -292,7 +308,7 @@ async function handleRemoveOwnRow(
     return;
   }
 
-  // ⑤ ⑥ and the removal.
+  // ⑤ ⑥ ⑦ and the removal.
   try {
     await removeOwnRow(engine, door, id, context);
   } catch (err) {

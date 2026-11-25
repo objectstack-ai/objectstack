@@ -12,8 +12,9 @@ import type {
   ShareAccessLevel,
   SharingWriteVerdict,
   IOwnershipQueueService,
+  EngineFixedReadLeafClass,
 } from '@objectstack/spec/contracts';
-import { resolveInjectedColumnProvenance } from '@objectstack/spec/data';
+import { SharedRecordIds, resolveInjectedColumnProvenance } from '@objectstack/spec/data';
 import {
   normalizeTenancyPosture,
   postureEnforcesWall,
@@ -30,7 +31,9 @@ import { PLATFORM_CAPABILITY_PROVIDERS, type ExecutionContext } from '@objectsta
 // [commit 3f64fe6c6] The engine's own answer to "which column is this object walled
 // by?" — the twin of `SqlDriver.computeTenantField`, so the organization a grant
 // is stamped from is read off the SAME column the wall scopes the record by.
-import { resolveTenantFieldName } from '@objectstack/objectql';
+// [ADR-0155 ② ruled R2] …and the one reader of a driver's `fixedReadLeaves`
+// declaration, the seam's own: whether the share arm can run on an object.
+import { driverEvaluatesFixedReadLeaf, resolveTenantFieldName } from '@objectstack/objectql';
 // [Ruling of record 6355206139] The EXTERNAL rung's OWD floor — the stamp
 // plugin-security makes and this service reads, named once in core.
 import { owdForAudience } from '@objectstack/core';
@@ -73,6 +76,21 @@ export interface SharingEngine {
    * `.password_hash`.
    */
   resolveInternalField?(object: string, recordIds: readonly string[], field: string): Promise<Map<string, unknown>>;
+  /**
+   * [ADR-0155 ② ruled R2] The driver `object` dispatches to
+   * (`IDataEngine.getDriverForObject`): its `supports.fixedReadLeaves` says
+   * whether it evaluates the share arm ({@link SharingService.shareGrantsInertReason}).
+   * Optional: an engine without it cannot say, and the share arm is written,
+   * with the engine seam's refusal behind it.
+   */
+  getDriverForObject?(object: string): { readonly name?: unknown; readonly supports?: unknown } | undefined;
+  /**
+   * [ADR-0155 D4] `IObjectQLEngine.fixedReadLeafClassOf`: which of D4's two
+   * classes a share-grant leaf falls in on this engine, `null` for neither.
+   * Read for the object on another datasource (R2) and for the host class at
+   * boot (R1). Optional: an engine without it cannot say.
+   */
+  fixedReadLeafClassOf?(leaf: SharedRecordIds): EngineFixedReadLeafClass | null;
 }
 
 /**
@@ -368,41 +386,17 @@ function hasQueueColumn(schema: any): boolean {
   return resolveInjectedColumnProvenance(schema, QUEUE_FIELD) === 'injected-provisioned';
 }
 
-/**
- * The `record_id` column of a `sys_record_share` read, as the members of a
- * security `$in`. A row whose `record_id` is nullish or empty contributes
- * NOTHING — the nullish test runs on the RAW column value, BEFORE `String()`.
- *
- * The order is the whole point. The previous spelling coerced first and
- * filtered after — `grants.map((g) => String(g.record_id)).filter(Boolean)` —
- * which cannot drop a nullish `record_id` at all: `String(null)` is `'null'`
- * and `String(undefined)` is `'undefined'`, and both are truthy. The only
- * value it could drop was the empty string, so the guard was dead for exactly
- * the case its spelling advertised, and a corrupt row put the literal string
- * `'null'` into `{ id: { $in: [...] } }`. Both call sites are positive
- * polarity (an OR-ed branch, never negated) and no real record id matches that
- * member, so the effect was a silently DROPPED grant rather than a widened
- * scope — but an audit asking which security paths already handle nullish ids
- * would have counted these two as covered when they provably were not.
- *
- * `String()` is kept for the surviving values: a driver may hand back a
- * numeric primary key, and the members must compare against the string ids the
- * rest of the filter is built from. Every non-nullish value therefore
- * stringifies exactly as it did before, and the trailing `!== ''` drops
- * precisely what `filter(Boolean)` used to drop — so the non-null path is
- * unchanged and only the nullish rows are newly excluded.
- */
 /** [#26180] No pending approval grants a read: the fail-closed answer. */
 const NO_APPROVAL_GRANTS: ReadonlyMap<string, readonly string[]> = new Map();
 
-function grantedRecordIds(grants: unknown): string[] {
-  if (!Array.isArray(grants)) return [];
-  return grants
-    .map((g: any) => g?.record_id)
-    .filter((recordId: unknown) => recordId != null)
-    .map((recordId: unknown) => String(recordId))
-    .filter((recordId: string) => recordId !== '');
-}
+/**
+ * [ADR-0155 ② ruled R2] The recipient of the leaf {@link SharingService.shareGrantsInertReason}
+ * builds only to ask the engine which of D4's classes an object's share arm
+ * falls in. The recognition reads the leaf's object and its inner table, never
+ * its recipient, and this leaf is never placed in a scope or handed to any
+ * evaluator, so no principal's id is needed or used.
+ */
+const SHARE_ARM_CLASS_PROBE_RECIPIENT = 'share-arm-class-probe';
 
 /**
  * [#8418] The one WARN line a write gate emits when it refuses because the
@@ -815,30 +809,31 @@ export class SharingService implements ISharingService {
       ? { [OWNER_FIELD]: ownerIds[0] }
       : { [OWNER_FIELD]: { $in: ownerIds } };
 
-    const grants = await this.engine.find('sys_record_share', {
-      where: {
-        object_name: object,
-        recipient_type: 'user',
-        recipient_id: context.userId,
-      },
-      fields: ['record_id', 'access_level'],
-      limit: 5000,
-      context: SYSTEM_CTX,
-    });
-
-    // [#26180] …and the records a pending approval step waits on the caller
-    // for: READ only (no write gate reads this), only while the step is
-    // pending, never across organizations — the approvals service's rules.
-    const approvalIds = [...(await this.pendingApproverReadGrants(object, context)).keys()];
-    const grantedIds: string[] = approvalIds.length === 0
-      ? grantedRecordIds(grants)
-      : [...new Set([...grantedRecordIds(grants), ...approvalIds])];
     // [ADR-0142 D3] Beside the owner match: the records sitting in a queue the
     // caller belongs to.
     const queueMatch = await this.queueSittingMatch(schema, context);
     const disjuncts: unknown[] = [ownerMatch];
     if (queueMatch) disjuncts.push(queueMatch);
-    if (grantedIds.length > 0) disjuncts.push({ id: { $in: grantedIds } });
+    // [ADR-0155 D3] The records shared to the caller, as the share-grant leaf:
+    // the engine hands it to the driver, which evaluates it as a semi-join on
+    // `sys_record_share` under the fixed predicate (object, `user`, the
+    // caller), so EVERY grant counts, whatever their number, and no grant is
+    // read into memory here. It replaces the id list this read used to bind,
+    // which stopped at 5,000 grants and dropped the rest without a word. Always
+    // present on a sharing-scoped read, whether or not the caller holds a
+    // grant (the statement does not depend on the grant count), except where
+    // share grants do not count on the object at all (② ruled R2,
+    // {@link shareGrantsInertReason}).
+    if (this.shareGrantsInertReason(object) === null) {
+      disjuncts.push({ id: { $in: SharedRecordIds.read(object, context.userId) } });
+    }
+    // [#26180] …and the records a pending approval step waits on the caller
+    // for: READ only (no write gate reads this), only while the step is
+    // pending, never across organizations — the approvals service's rules.
+    // [ADR-0155 D3] A disjunct of its own: the approvals service vouches for
+    // these ids, and they are never share grants.
+    const approvalIds = [...(await this.pendingApproverReadGrants(object, context)).keys()];
+    if (approvalIds.length > 0) disjuncts.push({ id: { $in: approvalIds } });
     return disjuncts.length === 1 ? ownerMatch : { $or: disjuncts };
   }
 
@@ -937,25 +932,21 @@ export class SharingService implements ISharingService {
     // drops the share branch. Update keeps the share widening.
     if (verb === 'delete') return ownerMatch;
 
-    const grants = await this.engine.find('sys_record_share', {
-      where: {
-        object_name: object,
-        recipient_type: 'user',
-        recipient_id: context.userId,
-        access_level: { $in: [...WRITE_ACCESS_LEVELS] },
-      },
-      fields: ['record_id'],
-      limit: 5000,
-      context: SYSTEM_CTX,
-    });
-    const grantedIds: string[] = grantedRecordIds(grants);
     // [ADR-0142 D3] The update arm only: a queue member edits what sits in the
     // queue and deletes none of it (rows, never verbs — the delete arm above
     // returned before this line).
     const queueMatch = await this.queueSittingMatch(schema, context);
     const disjuncts: unknown[] = [ownerMatch];
     if (queueMatch) disjuncts.push(queueMatch);
-    if (grantedIds.length > 0) disjuncts.push({ id: { $in: grantedIds } });
+    // [ADR-0155 D3, ③ ruled A] The records shared to the caller at a
+    // {@link WRITE_ACCESS_LEVELS} level, as the leaf's write form: the engine
+    // admits it in the `where` of a predicate `update` only, and the driver
+    // evaluates it in each of that update's statements, the prior-row read and
+    // the write. Uncapped, like the read form; absent where share grants do
+    // not count on the object (② ruled R2).
+    if (this.shareGrantsInertReason(object) === null) {
+      disjuncts.push({ id: { $in: SharedRecordIds.write(object, context.userId, WRITE_ACCESS_LEVELS) } });
+    }
     return disjuncts.length === 1 ? ownerMatch : { $or: disjuncts };
   }
 
@@ -1247,8 +1238,11 @@ export class SharingService implements ISharingService {
       // 1) Ownership (write DEPTH widens the owner-set) — fast path.
       if (await this.matchesOwnerScope(object, recordId, context)) return 'allow';
 
-      // 2) Explicit write-level share (`edit`, plus not-yet-normalised `full`).
-      const editGrants = await this.engine.find('sys_record_share', {
+      // 2) Explicit write-level share (`edit`, plus not-yet-normalised `full`),
+      // [ADR-0155 ② ruled R2] on an object where share grants count: where they
+      // do not, the read and bulk-write scopes carry no share arm, so this gate
+      // reads no grant row either, and the three cannot disagree.
+      const editGrants = this.shareGrantsInertReason(object) !== null ? [] : await this.engine.find('sys_record_share', {
         where: {
           object_name: object,
           record_id: recordId,
@@ -1722,6 +1716,102 @@ export class SharingService implements ISharingService {
   }
 
   /**
+   * [ADR-0155 ② ruled R2] Why share grants do not count on `object`, or `null`
+   * when they do.
+   *
+   * From the switch on, a sharing-scoped read carries the share arm as the
+   * `SharedRecordIds` leaf, which only an evaluator that runs it can answer.
+   * ② ruled R2 for the storage that cannot: an object bound to another
+   * datasource than `sys_record_share` (D4's first class, the engine's own
+   * recognition, `fixedReadLeafClassOf`), and an object whose driver does not
+   * list the leaf in its `supports.fixedReadLeaves` (the seam's own reader,
+   * `driverEvaluatesFixedReadLeaf`). There the producer writes no share arm,
+   * `checkEdit` reads no grant row, and the grant door and the sharing-rule
+   * save door refuse a new grant as inert (ADR-0111 D7, `SHARING_NOT_ENABLED`
+   * / 422). Owner, queue and approval access are unchanged. A leaf that still
+   * reaches such an evaluator is refused by the engine seam (R1 behind R2).
+   *
+   * `null` also when the engine cannot say (no `getDriverForObject`, or one
+   * that throws): the share arm is then written, and the seam is the answer
+   * behind it. A recognition that throws counts as no answer, never as a
+   * class. An engine that answers with no driver for the object answers R2:
+   * nothing could evaluate the arm there.
+   *
+   * Asked per call, never cached: a datasource binding can change after boot,
+   * and both readings are the ones the engine seam itself makes on every read
+   * that carries the leaf.
+   */
+  shareGrantsInertReason(object: string): string | null {
+    let recognised: EngineFixedReadLeafClass | null | undefined;
+    try {
+      recognised = this.engine.fixedReadLeafClassOf?.(SharedRecordIds.read(object, SHARE_ARM_CLASS_PROBE_RECIPIENT));
+    } catch {
+      recognised = undefined;
+    }
+    if (recognised?.class === 'other-datasource') {
+      return `'${object}' is bound to datasource '${String(recognised.objectDatasource)}' while '${recognised.table}' `
+        + `is bound to '${String(recognised.tableDatasource)}': no driver evaluates a share grant across two `
+        + 'datasources, so a share row on it would never be consulted (ADR-0155 R2)';
+    }
+    if (typeof this.engine.getDriverForObject !== 'function') return null;
+    let driver: ReturnType<NonNullable<SharingEngine['getDriverForObject']>>;
+    try {
+      driver = this.engine.getDriverForObject(object);
+    } catch {
+      return null;
+    }
+    if (driverEvaluatesFixedReadLeaf(driver, 'SharedRecordIds')) return null;
+    const name = typeof driver?.name === 'string' && driver.name !== '' ? driver.name : 'unknown';
+    return `'${object}' is stored by driver '${name}', which does not evaluate a share grant (its `
+      + 'supports.fixedReadLeaves does not list SharedRecordIds), so a share row on it would never be '
+      + 'consulted (ADR-0155 R2)';
+  }
+
+  /**
+   * [ADR-0155 ② ruled R2] Of `objects`, the ones whose share grants stopped
+   * counting at the switch and that hold `sys_record_share` rows, each with
+   * {@link shareGrantsInertReason}'s reason: the instrument of the boot report
+   * ADR-0111 D10 asks for (`share-arm-boot.ts`).
+   *
+   * "Stopped" is literal: an object where no share row was consulted before
+   * the switch either (a bypass-listed internal, a `controlled_by_parent`
+   * detail, an object with no `owner_id`, a federated object whose `owner_id`
+   * is the injected anchor) is not named, since nothing changed for it. Each
+   * remaining object costs one `limit 1` system read of `sys_record_share`;
+   * an object where share grants count costs none. A read that fails leaves
+   * its object out, logged at `warn`.
+   */
+  async inertShareGrantHolders(objects: readonly string[]): Promise<Array<{ object: string; reason: string }>> {
+    const holders: Array<{ object: string; reason: string }> = [];
+    for (const object of objects) {
+      if (this.bypassObjects.has(object)) continue;
+      const schema = this.engine.getSchema?.(object);
+      if (!schema || !hasOwnerField(schema) || hasPhantomOwnerAnchor(schema)) continue;
+      if ((schema?.sharingModel ?? schema?.security?.sharingModel) === 'controlled_by_parent') continue;
+      const reason = this.shareGrantsInertReason(object);
+      if (reason === null) continue;
+      try {
+        const rows = await this.engine.find('sys_record_share', {
+          where: { object_name: object },
+          fields: ['id'],
+          limit: 1,
+          context: SYSTEM_CTX,
+        });
+        if (Array.isArray(rows) && rows.length > 0) holders.push({ object, reason });
+      } catch (err) {
+        // Left out of the list, and said so: the report is an instrument,
+        // never a gate, but a holder it could not read is not a non-holder.
+        this.logger?.warn?.(
+          `[sharing] could not read whether '${object}' holds share rows whose grants no longer count `
+            + '(ADR-0155 R2); it is left out of the boot report',
+          { object, error: err instanceof Error ? err.message : String(err) },
+        );
+      }
+    }
+    return holders;
+  }
+
+  /**
    * [ADR-0111 D7] Would a `sys_record_share` row on `object` ever be consulted
    * by a read/write decision? Returns the REASON it could not be, or `null`
    * when it could (which includes "this engine cannot tell").
@@ -1778,7 +1868,9 @@ export class SharingService implements ISharingService {
       // [#25549] The external floor composes over `owner_id`, so the arm can lift
       // only where that column is real: present, and not a phantom anchor.
       if (recipient !== undefined && isPublic && hasOwnerField(schema) && !hasPhantomOwnerAnchor(schema)) {
-        if (recipient === 'external') return null;
+        // [ADR-0155 ② ruled R2] …and only where the storage evaluates the
+        // share arm: the floor's grant would be read through it.
+        if (recipient === 'external') return this.shareGrantsInertReason(object);
         return recipient === 'internal'
           ? `'${object}' has a public sharing model, so a share row on it is consulted only for an `
             + `external member of the record's organization, and the recipient is not one`
@@ -1834,7 +1926,12 @@ export class SharingService implements ISharingService {
         + `platform's injected anchor, not a remote column — the record-level gates read it off a `
         + `table that does not have it, so a share row on it would never be consulted`;
     }
-    return null;
+    // [ADR-0155 ② ruled R2] ADR-0111 D7's arm for the storage rows: no gate
+    // consults a share row on an object whose storage cannot evaluate the share
+    // arm. Asked LAST, so every arm above keeps the attribution it shipped
+    // with (a new branch above the public check would re-attribute a shipped
+    // object's refusal); it answers only where nothing above already refuses.
+    return this.shareGrantsInertReason(object);
   }
 
   /**
@@ -1891,8 +1988,16 @@ export class SharingService implements ISharingService {
     if (schema && hasOwnerField(schema) && hasPhantomOwnerAnchor(schema)) {
       return `To use sharing rules on it, declare a real remote '${OWNER_FIELD}' column on the federated object.`;
     }
-    return `To use sharing rules on it, give the object a private or read-only sharing model `
+    const modelRemedy = `To use sharing rules on it, give the object a private or read-only sharing model `
       + `(sharingModel: 'private' or 'read') and an '${OWNER_FIELD}' field.`;
+    // [ADR-0155 ② ruled R2] In the verdict's own order: the storage arm is the
+    // reason only where the model and the owner column already allow sharing.
+    if (schema && (effectiveSharingModel(schema) === 'public' || !hasOwnerField(schema))) return modelRemedy;
+    if (this.shareGrantsInertReason(object)) {
+      return `To use sharing rules on it, store '${object}' on the datasource of 'sys_record_share', on a driver `
+        + 'that evaluates share grants (the SQL drivers do).';
+    }
+    return modelRemedy;
   }
 
   /**

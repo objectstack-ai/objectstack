@@ -77,8 +77,8 @@ export const ruMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         helpText: "Имена полей этого объекта, самые важные первыми — там, где помещается только одно, побеждает первое (ADR-0085). Определяют столбцы по умолчанию для списков и связанных списков, карточки, предпросмотр дочерних записей, всплывающую карточку записи и выбор записи. Имя, не являющееся полем этого объекта, отклоняется при публикации."
       },
       relatedLists: {
-        label: "Связанные списки",
-        helpText: "Бизнес-порядок связанных списков этого объекта на странице его записи, самые важные первыми. Каждая запись — имя дочернего объекта (например, task) или object.field, если у дочернего объекта несколько связей с этим. Перечисленные списки идут первыми; остальные следуют в выведенном порядке. Имя, не совпадающее ни с одной связью, указывающей на этот объект, ничего не размещает, поэтому при сохранении или проверке объекта оно отклоняется."
+        label: "Вкладки страницы записи",
+        helpText: "Вкладки страницы записи после обзора, по порядку. Каждый элемент — имя дочернего объекта (например, task), object.field, если у этого дочернего объекта больше одной связи с этим объектом, встроенная вкладка (sys_attachment, sys_approval_request, sys_activity) или элемент с собственным заголовком и столбцами, заданными в настройках объекта в Studio. Как только что-либо перечислено, связанный список, который не назван ни одним элементом, не показывает вкладку — в том числе список, добавленный другим пакетом, — пока этот объект его не назовёт; вложения показываются, только если они перечислены. Пусто: все списки показываются в порядке по умолчанию. Имя, не соответствующее ни одной связи, указывающей на этот объект, отклоняется при сохранении объекта."
       },
       searchableFields: {
         label: "Поля поиска",
@@ -114,7 +114,7 @@ export const ruMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       "fieldGroups.collapse": {
         label: "Сворачивание",
-        helpText: "Можно ли свернуть раздел в форме ввода и на странице записи. Если не задано: нельзя."
+        helpText: "Можно ли свернуть раздел. Форма ввода следует настройке. На стандартной странице записи читатель может свернуть любую группу с заголовком, поэтому там настройка задаёт только начальное состояние: Collapsed начинается свёрнутым, остальные — развёрнутыми. Если не задано: нельзя."
       },
       "fieldGroups.visibleWhen": {
         label: "Видимо, когда",
@@ -240,6 +240,10 @@ export const ruMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "Поведение при удалении",
         helpText: "Что происходит при удалении связанной записи"
       },
+      "fields.transferBehavior": {
+        label: "Поведение при смене владельца",
+        helpText: "Может ли «Сменить владельца» у связанной записи заодно передать записи, которые ссылаются на неё через это поле"
+      },
       "fields.multiple": {
         label: "Множественный выбор",
         helpText: "Разрешить выбор нескольких записей"
@@ -276,9 +280,13 @@ export const ruMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "Язык",
         helpText: "Язык редактора (например, sql, javascript)"
       },
+      "fields.fieldHistory": {
+        label: "Значения изменений поля",
+        helpText: "Старое → новое значение этого поля в ленте активности записи. По умолчанию — как на платформе: включено для большинства типов, выключено для медиа-, JSON- и учётных полей. Выключено — изменение называется только по имени поля; включено — показываются и значения медиа- или JSON-поля. Учётное поле никогда не показывает значения, а если выключено у самого объекта, действует настройка объекта."
+      },
       "fields.trackHistory": {
         label: "Отслеживать историю",
-        helpText: "Отражать это поле в ленте активности записи"
+        helpText: "Позволяет медиа- или JSON-полю (изображение, файл, json, …) показывать старое → новое значение в ленте активности. Остальные поля показывают их и так, и выключение их не скрывает: для этого есть «Значения изменений поля»."
       },
       "fields.visibleWhen": {
         label: "Видимо, когда",
@@ -298,6 +306,10 @@ export const ruMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       "enable.trackHistory": {
         label: "Отслеживать историю"
+      },
+      "enable.fieldHistory": {
+        label: "Значения изменений поля",
+        helpText: "Старые → новые значения изменённых полей в ленте активности записи. По умолчанию включено. Выключено — значения не показываются во всём объекте, что бы ни было задано у поля."
       },
       "enable.searchable": {
         label: "Доступно для поиска"
@@ -460,6 +472,18 @@ export const ruMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       "userActions.transfer": {
         label: "Сменить владельца",
         helpText: "Действие «Сменить владельца», одиночное и массовое: включено — предлагается, выключено — скрыто. Не задано: включено, кроме объекта-детали controlled_by_parent, где выключено. Предлагается только на объекте, у записей которого есть переназначаемый владелец (ownership user или не задано, без managedBy, не объект sys_, owner_id не только для чтения, а на внешнем объекте объявлен или сопоставлен); включение на любом другом объекте отклоняется. Управляет только действием, а не обычным изменением owner_id. Сохранённый объект {enabled, visibleWhen, disabledWhen} редактируется по ключам; задайте его в исходном коде, чтобы управлять действием для каждой записи."
+      },
+      actionLayout: {
+        label: "Расположение действий",
+        helpText: "Порядок действий этого объекта и какие из них показаны кнопками, по области: pinned (не более 3 кнопок, по порядку) и more (порядок меню «Ещё»; действие, не названное ни там, ни там, идёт следом в порядке по умолчанию). Не задано: каждая поверхность выбирает кнопки по порядку действий, как раньше."
+      },
+      "actionLayout.list": {
+        label: "Список",
+        helpText: "Панель инструментов страницы списка, в виде {\"pinned\": [...], \"more\": [...]}: имена действий на панели списка; $import / $export только в pinned. Не более 3 закреплённых. Без закрепления страница по-прежнему показывает своё меню импорта / экспорта. os validate отклоняет имя, которое не является действием этого объекта или не размещено на панели списка; такое имя ничего не показывает."
+      },
+      "actionLayout.record": {
+        label: "Запись",
+        helpText: "Заголовок записи (страница записи, боковой просмотр, нижняя панель на телефоне), в виде {\"pinned\": [...], \"more\": [...]}: имена действий в заголовке записи или его меню «Ещё». Не более 3 закреплённых. os validate отклоняет имя, которое не является действием этого объекта или не размещено на странице записи; такое имя ничего не показывает."
       },
       editMode: {
         label: "Режим редактирования",
@@ -749,6 +773,10 @@ export const ruMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "Поведение при удалении",
         helpText: "Что происходит при удалении связанной записи"
       },
+      transferBehavior: {
+        label: "Поведение при смене владельца",
+        helpText: "Может ли «Сменить владельца» у связанной записи заодно передать записи, которые ссылаются на неё через это поле"
+      },
       relatedListFilter: {
         label: "Фильтр связанного списка",
         helpText: "Фильтр по умолчанию для связанного списка этой связи на странице родительской записи — объединяется через AND с условием на родительскую запись, и счётчик вкладки считает тот же набор"
@@ -788,6 +816,10 @@ export const ruMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       relatedListColumns: {
         label: "Столбцы связанного списка",
         helpText: "Столбцы связанного списка этой связи на странице родительской записи в виде имён полей этого (дочернего) объекта, например name, status. Если не задано: выводятся из дочернего объекта. Только имена — метки, типы ячеек и форматирование берутся из определений полей дочернего объекта."
+      },
+      inlineEdit: {
+        label: "Inline Edit",
+        helpText: "How the parent's form edits this child's rows when a field group of the parent names this child (fieldGroups[].relatedList). Unset: picked from this object's fields."
       },
       inlineTitle: {
         label: "Встроенный заголовок",
@@ -865,6 +897,10 @@ export const ruMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "Скрытое",
         helpText: "Скрывать поле в представлениях интерфейса по умолчанию"
       },
+      showOnCreate: {
+        label: "Показывать при создании",
+        helpText: "Запрашивать это поле при создании записи. Выключено: диалог создания, создание на всю страницу и создание, открытое действием, его не показывают; редактирование, страница записи и списки по-прежнему показывают. Обязательное поле запрашивается всегда, поэтому его нельзя выключить."
+      },
       searchable: {
         label: "Доступно для поиска",
         helpText: "Включать в результаты глобального поиска"
@@ -897,9 +933,13 @@ export const ruMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "Внутреннее",
         helpText: "Никогда не возвращать значение этого поля через общий путь данных: движок исключает ключ из результатов find/findOne и из тел ответов на создание и обновление — как в проекции по умолчанию, так и когда клиент указывает поле в ?select=. Хранение, фильтрация и индексирование не затрагиваются."
       },
+      fieldHistory: {
+        label: "Значения изменений поля",
+        helpText: "Старое → новое значение этого поля в ленте активности записи. По умолчанию — как на платформе: включено для большинства типов, выключено для медиа-, JSON- и учётных полей. Выключено — изменение называется только по имени поля; включено — показываются и значения медиа- или JSON-поля. Учётное поле никогда не показывает значения, а если выключено у самого объекта, действует настройка объекта."
+      },
       trackHistory: {
         label: "Отслеживать историю",
-        helpText: "Отображать изменения значения этого поля как записи в ленте активности записи (ADR-0052 §5b). Включается для каждого поля отдельно."
+        helpText: "Позволяет медиа- или JSON-полю (изображение, файл, json, …) показывать старое → новое значение в ленте активности. Остальные поля показывают их и так, и выключение их не скрывает: для этого есть «Значения изменений поля»."
       },
       widget: {
         label: "Виджет",
@@ -1052,15 +1092,54 @@ export const ruMetadataForms: NonNullable<TranslationData['metadataForms']> = {
   },
   seed: {
     label: "Начальные данные",
-    description: "Тестовые / инициализирующие данные, применяемые при публикации"
+    description: "Тестовые / инициализирующие данные, применяемые при публикации",
+    fields: {
+      object: {
+        label: "Объект"
+      },
+      mode: {
+        label: "Режим"
+      }
+    }
   },
   picklist: {
     label: "Список вариантов",
-    description: "Общий список вариантов, на который поля выбора ссылаются по имени"
+    description: "Общий список вариантов, на который поля выбора ссылаются по имени",
+    fields: {
+      name: {
+        label: "Имя"
+      },
+      label: {
+        label: "Метка"
+      },
+      options: {
+        label: "Варианты"
+      },
+      description: {
+        label: "Описание"
+      }
+    }
   },
   mapping: {
     label: "Сопоставление импорта",
-    description: "Повторно используемое сопоставление полей для импорта/экспорта (переименование + преобразования), на которое ссылаются по имени при импорте"
+    description: "Повторно используемое сопоставление полей для импорта/экспорта (переименование + преобразования), на которое ссылаются по имени при импорте",
+    fields: {
+      name: {
+        label: "Имя"
+      },
+      label: {
+        label: "Метка"
+      },
+      targetObject: {
+        label: "Целевой объект"
+      },
+      mode: {
+        label: "Режим"
+      },
+      sourceFormat: {
+        label: "Формат источника"
+      }
+    }
   },
   view: {
     label: "Представление",
@@ -1355,11 +1434,11 @@ export const ruMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       navigation: {
         label: "Навигация",
-        helpText: "Настройка навигации по щелчку на элементе (по умолчанию боковая панель, page, new_window или none)"
+        helpText: "Настройка навигации по щелчку на элементе: размер боковой панели и `preventNavigation` для списка, строки которого ничего не открывают (`mode` устарел — имя записи открывает страницу, значок при наведении — боковую панель)"
       },
       "navigation.mode": {
         label: "Режим",
-        helpText: "[DEPRECATED] No longer picks how an object's list opens a record: in the console the record name opens the full page and the hover icon beside it opens the side panel, for every reader. There `drawer`, `page` and `new_window` still parse and change nothing; `none` still means rows open nothing — prefer `preventNavigation: true`. Omit the key."
+        helpText: "[УСТАРЕЛО] В списке объекта (представление списка, `listViews` объекта) больше не определяет, как открывается запись: в консоли для всех читателей имя записи открывает полную страницу, а значок, появляющийся рядом с ним при наведении, — боковую панель. Там `drawer`, `page` и `new_window` по-прежнему разбираются, но ничего не меняют, поэтому опустите ключ; `none` по-прежнему означает, что строки ничего не открывают, — лучше используйте `preventNavigation: true`. Блок страницы, содержащий `navigation` (блок списка, временная шкала, встроенное представление), по-прежнему учитывает любое значение."
       },
       "navigation.preventNavigation": {
         label: "Запретить навигацию",
@@ -1384,6 +1463,9 @@ export const ruMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       "sharing.lockedBy": {
         label: "Кем заблокировано",
         helpText: "Пользователь, заблокировавший настройку представления"
+      },
+      object: {
+        label: "Объект"
       }
     }
   },
@@ -1590,30 +1672,30 @@ export const ruMetadataForms: NonNullable<TranslationData['metadataForms']> = {
     fields: {
       name: {
         label: "Имя",
-        helpText: "Уникальный идентификатор в snake_case"
+        helpText: "Уникальное внутреннее имя дашборда: строчные латинские буквы, цифры и подчёркивания, начиная с буквы (например, sales_overview)."
       },
       label: {
         label: "Метка",
-        helpText: "Отображаемое имя"
+        helpText: "Заголовок дашборда, который видят пользователи."
       },
       description: {
         label: "Описание"
       },
       columns: {
         label: "Столбцы",
-        helpText: "Столбцы сетки (по умолчанию 12)"
+        helpText: "На сколько столбцов раскладываются виджеты, от 1 до 24. Оставьте пустым, и дашборд сам подберёт ширину под свои виджеты."
       },
       gap: {
         label: "Промежуток",
-        helpText: "Расстояние между виджетами, шагами по 0.25rem (4 = 1rem)"
+        helpText: "Сколько места оставлять между виджетами. Чем больше число, тем дальше они друг от друга; оставьте пустым для стандартного отступа."
       },
       refreshIntervalSeconds: {
         label: "Интервал обновления (с)",
-        helpText: "Автообновление (секунды)"
+        helpText: "Как часто дашборд заново загружает данные, в секундах. Оставьте пустым или введите 0, чтобы отключить автоматическую перезагрузку."
       },
       header: {
         label: "Шапка",
-        helpText: "Настройка шапки дашборда (заголовок, подзаголовок, действия)"
+        helpText: "Что показывается в верхней части дашборда: заголовок, описание и кнопки действий."
       },
       "header.showTitle": {
         label: "Показывать заголовок",
@@ -1641,7 +1723,7 @@ export const ruMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       widgets: {
         label: "Виджеты",
-        helpText: "Виджеты дашборда с положением и размерами"
+        helpText: "Диаграммы, показатели и таблицы этого дашборда и место каждого из них."
       },
       "widgets.id": {
         label: "ID виджета"
@@ -1696,11 +1778,11 @@ export const ruMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       dateRange: {
         label: "Диапазон дат",
-        helpText: "Выбор диапазона дат по умолчанию"
+        helpText: "Период, с которым открывается дашборд, и могут ли пользователи выбирать свои даты."
       },
       globalFilters: {
         label: "Глобальные фильтры",
-        helpText: "Фильтры, применяемые ко всем виджетам"
+        helpText: "Фильтры, которыми пользователи могут сузить сразу все виджеты или только выбранные вами."
       },
       "globalFilters.name": {
         label: "Имя"
@@ -2162,7 +2244,8 @@ export const ruMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "Метка"
       },
       description: {
-        label: "Описание"
+        label: "Описание",
+        helpText: "One sentence on what this report shows, displayed under its name."
       },
       type: {
         label: "Тип",
@@ -2244,9 +2327,33 @@ export const ruMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "Диапазон дат",
         helpText: "Период по умолчанию и переключатель произвольного диапазона. Измерение должно быть измерением даты набора данных; оставьте пустым, если такое измерение в наборе ровно одно."
       },
+      "dateRange.dimension": {
+        label: "Date Field",
+        helpText: "The date grouping of the data source the period applies to. Leave it empty when the data source has only one."
+      },
+      "dateRange.defaultRange": {
+        label: "Default Period",
+        helpText: "The period the report opens with."
+      },
+      "dateRange.allowCustomRange": {
+        label: "Allow Custom Range",
+        helpText: "Let people pick their own start and end dates."
+      },
       exportOptions: {
         label: "Параметры экспорта",
         helpText: "Форматы скачивания (csv, xlsx) и имя файла. Кто может скачивать, определяет разрешение на экспорт объекта набора данных."
+      },
+      "exportOptions.formats": {
+        label: "Formats",
+        helpText: "The download formats offered. Left unset, both csv and xlsx are offered; an empty list turns downloads off."
+      },
+      "exportOptions.includeHeaders": {
+        label: "Include Headers",
+        helpText: "Put the column names in the first row of the downloaded file."
+      },
+      "exportOptions.fileNamePrefix": {
+        label: "File Name",
+        helpText: "The start of the downloaded file’s name, used instead of the report name."
       }
     }
   },
@@ -2515,7 +2622,24 @@ export const ruMetadataForms: NonNullable<TranslationData['metadataForms']> = {
     }
   },
   job: {
-    label: "Фоновое задание"
+    label: "Фоновое задание",
+    fields: {
+      name: {
+        label: "Имя"
+      },
+      label: {
+        label: "Метка"
+      },
+      schedule: {
+        label: "Расписание"
+      },
+      enabled: {
+        label: "Включено"
+      },
+      description: {
+        label: "Описание"
+      }
+    }
   },
   datasource: {
     label: "Источник данных"
@@ -2525,10 +2649,41 @@ export const ruMetadataForms: NonNullable<TranslationData['metadataForms']> = {
   },
   api: {
     label: "Конечная точка API",
-    description: "Постоянный HTTP-URL, который вызывают другие системы, чтобы запустить поток или работать с записями в приложении"
+    description: "Постоянный HTTP-URL, который вызывают другие системы, чтобы запустить поток или работать с записями в приложении",
+    fields: {
+      name: {
+        label: "Имя"
+      },
+      method: {
+        label: "Метод"
+      },
+      path: {
+        label: "Путь"
+      },
+      type: {
+        label: "Тип"
+      },
+      "objectParams.object": {
+        label: "Объект"
+      },
+      "objectParams.operation": {
+        label: "Операция"
+      }
+    }
   },
   translation: {
-    label: "Перевод"
+    label: "Перевод",
+    fields: {
+      name: {
+        label: "Имя"
+      },
+      label: {
+        label: "Метка"
+      },
+      locale: {
+        label: "Язык"
+      }
+    }
   },
   email_template: {
     label: "Шаблон письма",
@@ -2605,11 +2760,45 @@ export const ruMetadataForms: NonNullable<TranslationData['metadataForms']> = {
   },
   doc: {
     label: "Документация",
-    description: "Страница справки в Markdown, которую поставляет пакет или пишете вы сами"
+    description: "Страница справки в Markdown, которую поставляет пакет или пишете вы сами",
+    fields: {
+      name: {
+        label: "Имя"
+      },
+      label: {
+        label: "Метка"
+      },
+      group: {
+        label: "Группа"
+      },
+      tags: {
+        label: "Теги"
+      },
+      description: {
+        label: "Описание"
+      }
+    }
   },
   book: {
     label: "Книга документации",
-    description: "Оглавление, группирующее страницы справки в упорядоченные разделы"
+    description: "Оглавление, группирующее страницы справки в упорядоченные разделы",
+    fields: {
+      name: {
+        label: "Имя"
+      },
+      label: {
+        label: "Метка"
+      },
+      audience: {
+        label: "Аудитория"
+      },
+      groups: {
+        label: "Группы"
+      },
+      description: {
+        label: "Описание"
+      }
+    }
   },
   permission: {
     label: "Набор разрешений",
@@ -2713,15 +2902,66 @@ export const ruMetadataForms: NonNullable<TranslationData['metadataForms']> = {
   },
   sharing_rule: {
     label: "Правило общего доступа",
-    description: "Правило, которое пакет объявляет для открытия доступа к записям; организации создают собственные в Настройке"
+    description: "Правило, которое пакет объявляет для открытия доступа к записям; организации создают собственные в Настройке",
+    fields: {
+      name: {
+        label: "Имя"
+      },
+      label: {
+        label: "Метка"
+      },
+      object: {
+        label: "Объект"
+      },
+      sharedWith: {
+        label: "Доступ для"
+      },
+      accessLevel: {
+        label: "Уровень доступа"
+      }
+    }
   },
   queue: {
     label: "Очередь",
-    description: "Именованная группа людей, в которой записи могут находиться, пока кто-то из них не возьмёт запись; организации формируют собственные в Настройке"
+    description: "Именованная группа людей, в которой записи могут находиться, пока кто-то из них не возьмёт запись; организации формируют собственные в Настройке",
+    fields: {
+      name: {
+        label: "Имя"
+      },
+      label: {
+        label: "Метка"
+      },
+      members: {
+        label: "Участники"
+      },
+      description: {
+        label: "Описание"
+      }
+    }
   },
   assignment_rule: {
     label: "Правило назначения",
-    description: "Правило, которое пакет объявляет для направления новых записей в очередь или человеку"
+    description: "Правило, которое пакет объявляет для направления новых записей в очередь или человеку",
+    fields: {
+      name: {
+        label: "Имя"
+      },
+      label: {
+        label: "Метка"
+      },
+      object: {
+        label: "Объект"
+      },
+      entries: {
+        label: "Записи"
+      },
+      active: {
+        label: "Активен"
+      },
+      description: {
+        label: "Описание"
+      }
+    }
   },
   agent: {
     label: "ИИ-агент",
@@ -2803,6 +3043,9 @@ export const ruMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       guardrails: {
         label: "Меры защиты",
         helpText: "Правила безопасности и политики содержимого"
+      },
+      "model.model": {
+        label: "Модель"
       }
     }
   },

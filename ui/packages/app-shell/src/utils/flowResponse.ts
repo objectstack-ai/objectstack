@@ -132,6 +132,14 @@
  * {@link apiActionFailureMessage} is that door's reading: both api handlers
  * (`useConsoleActionRuntime`'s and `RecordDetailView`'s) call it on a non-2xx.
  *
+ * A refusal raised before any run — the action door's caller-scoped load of
+ * the subject record answering `404 RECORD_NOT_FOUND`, a denied or locked
+ * subject, a missing run on resume, a transport failure — carries no run
+ * members, only the envelope's `userMessage` beside its `message`. Every such
+ * arm, on both doors and on resume, reads it by the same rule, `userMessage`
+ * before `message` (`refusalEnvelopeMessage`, objectstack#36390), so the toast
+ * a non-English user reads is the producer's translated line.
+ *
  * ## A LAUNCH is judged here too, not just interpreted (objectui#9973)
  *
  * Classifying the response was never the whole rule. The two launch handlers
@@ -327,6 +335,41 @@ function permissionDeniedLine(locale: string | undefined): string {
     );
 }
 
+/** The one subtree of a resident catalogue {@link serviceUnavailableLine} reads. */
+type ServiceLinePack = { actions?: { serviceUnavailable?: unknown } } | undefined;
+
+/**
+ * [objectstack#36840] The one code a `type: 'api'` action's answer carries
+ * when the service behind its target is not composed in this environment: the
+ * dispatcher's `501 NOT_IMPLEMENTED`, answered by an own-door bridge whose
+ * service slot is empty or lacks the door's member. Its message names a
+ * package to install, which tells the person who clicked nothing they can act
+ * on. Deliberately NOT read this way: a `503 SERVICE_UNAVAILABLE`, which is
+ * the platform's general "not right now" (a store that could not be read, an
+ * engine probe that failed) and whose sentence is the producer's own; and a
+ * route miss (`ROUTE_NOT_FOUND`, `ENDPOINT_NOT_FOUND`), which is as likely a
+ * misspelled action `target` whose path the author needs to see.
+ */
+const SERVICE_ABSENT_CODE = 'NOT_IMPLEMENTED';
+
+/**
+ * The runner's "this environment does not offer the service" line
+ * (`actions.serviceUnavailable`) in `locale`, read from the resident built-in
+ * catalogue exactly as {@link permissionDeniedLine} reads its line, and by the
+ * same one-chain rule `scripts/check-i18n-dead-keys.mjs` derives the `en` read
+ * from.
+ */
+function serviceUnavailableLine(locale: string | undefined): string {
+    const usable = (line: unknown): string | undefined =>
+        typeof line === 'string' && line.trim() ? line : undefined;
+    const tag = locale ? resolveBuiltInLanguage(locale) : null;
+    return (
+        (tag ? usable((getLoadedBuiltInLocales()[tag] as ServiceLinePack)?.actions?.serviceUnavailable) : undefined)
+        ?? usable((getLoadedBuiltInLocales().en as ServiceLinePack)?.actions?.serviceUnavailable)
+        ?? 'This action needs a service that is not available in this environment. Contact your administrator.'
+    );
+}
+
 /**
  * A failed run's message, by the record-save rule (objectstack#24914 ruling
  * B′): the flow's authored `errorMessage`, as the engine served it (rendered
@@ -410,11 +453,50 @@ function flowFailedEnvelopeMessage(
 }
 
 /**
+ * The message of any OTHER failed answer — a refusal the door raised before
+ * the run started or the endpoint ran (the action door's caller-scoped subject
+ * load answering `404 RECORD_NOT_FOUND`, a denied or locked subject, a missing
+ * run, a transport failure) — by {@link flowFailureMessage} with the one
+ * carrier such an envelope has: its producer-marked `userMessage`, then the
+ * envelope's own message (`fallback` when it has none). `FLOW_FAILED`'s
+ * `error.details` carriers are not read: they describe a run, and this answer
+ * had none (objectstack#36390).
+ */
+function refusalEnvelopeMessage(
+    json: unknown,
+    fallback: string,
+    locale: string | undefined,
+): string {
+    return flowFailureMessage(
+        { userMessage: refusalBodyUserMessage(json) },
+        actionErrorDetail(json, fallback),
+        locale,
+    );
+}
+
+/**
+ * A refusal body's producer-marked `userMessage`, from the two members
+ * `@objectstack/client` lifts it from: the ADR-0112 envelope's
+ * `error.userMessage`, else the top level of a flat `{ code, error }` body —
+ * the dialect the approvals door answers, where a decide refusal carries the
+ * decider's own language (objectstack#36463). One predicate for both:
+ * `declaredUserMessage`, so a blank or non-string value is no marking.
+ */
+function refusalBodyUserMessage(json: unknown): string | null {
+    const body = json as { error?: unknown; userMessage?: unknown } | null | undefined;
+    return declaredUserMessage(body?.error) ?? declaredUserMessage({ userMessage: body?.userMessage });
+}
+
+/**
  * The error a `type: 'api'` action shows for a non-2xx answer (objectstack#27487
  * — see the header). A `400 FLOW_FAILED` is a flow the endpoint ran, and reads
  * the run's refusal by the failed arm's rule; `locale` is the host's active
  * language.
- * Every other answer reads `actionErrorDetail`, as the door always has.
+ * An answer that says the target's service is absent ({@link SERVICE_ABSENT_CODE})
+ * and carries no `userMessage` reads the localized
+ * {@link serviceUnavailableLine} (objectstack#36840).
+ * Every other answer reads {@link refusalEnvelopeMessage}: its `userMessage`
+ * when it carries one, else its message (objectstack#36390).
  */
 export function apiActionFailureMessage(
     res: { status: number },
@@ -422,10 +504,17 @@ export function apiActionFailureMessage(
     fallback: string,
     locale: string | undefined,
 ): string {
-    if (res.status === 400 && errorCodeIs((json as { error?: unknown } | null | undefined)?.error, 'FLOW_FAILED')) {
+    const envelope = (json as { error?: unknown } | null | undefined)?.error;
+    if (res.status === 400 && errorCodeIs(envelope, 'FLOW_FAILED')) {
         return flowFailedEnvelopeMessage(json, fallback, locale);
     }
-    return actionErrorDetail(json, fallback);
+    // [objectstack#36840] The service behind the target is absent: the
+    // person who clicked reads the localized line, never the operator prose.
+    // A producer-marked `userMessage` still wins, as on every other refusal.
+    if (!declaredUserMessage(envelope) && errorCodeIs(envelope, SERVICE_ABSENT_CODE)) {
+        return serviceUnavailableLine(locale);
+    }
+    return refusalEnvelopeMessage(json, fallback, locale);
 }
 
 /**
@@ -480,12 +569,15 @@ export function interpretFlowResponse<S = unknown>(
             };
         }
 
-        // Nothing to resume (or no such flow). A retry cannot conjure the run
-        // back; status alone decides, since a proxy 404 carries no envelope.
+        // Nothing to resume (or no such flow, or — on the action door — the
+        // subject record the caller-scoped load could not read). A retry
+        // cannot conjure the run back; status alone decides, since a proxy
+        // 404 carries no envelope. Every arm below reads the refusal's
+        // `userMessage` before its message (objectstack#36390).
         if (res.status === 404) {
             return {
                 kind: 'failed',
-                error: actionErrorDetail(json, `${label} failed (HTTP ${res.status})`),
+                error: refusalEnvelopeMessage(json, `${label} failed (HTTP ${res.status})`, locale),
                 retryable: false,
             };
         }
@@ -494,7 +586,7 @@ export function interpretFlowResponse<S = unknown>(
         // the suspension, so retrying the same run is meaningful.
         return {
             kind: 'failed',
-            error: actionErrorDetail(json, `${label} failed (HTTP ${res.status})`),
+            error: refusalEnvelopeMessage(json, `${label} failed (HTTP ${res.status})`, locale),
             retryable: true,
         };
     }
@@ -504,7 +596,7 @@ export function interpretFlowResponse<S = unknown>(
         // the run started, so nothing was consumed.
         return {
             kind: 'failed',
-            error: actionErrorDetail(json, `${label} failed (HTTP ${res.status})`),
+            error: refusalEnvelopeMessage(json, `${label} failed (HTTP ${res.status})`, locale),
             retryable: true,
         };
     }

@@ -68,6 +68,8 @@ import {
   DEFAULT_BASE_REF,
   DEFAULT_BASE_REMOTE,
   DURABILITY_SEAM_GATE,
+  EFFORT_ABOVE_TABLE,
+  EFFORT_BY_SIZE,
   ESCAPABLE_LITERAL_LEDGER,
   GENERATED_MODULE_SOURCES,
   GIT_MAX_BUFFER_BYTES,
@@ -93,6 +95,7 @@ import {
   SELF_TEST_VERDICT,
   SUSPECT_TIER_GLOBS,
   TIER_CEILING,
+  TIER_SIZING_RULEBOOK,
   USAGE_LINE,
   absentDeclaredPaths,
   absentPathVerdict,
@@ -114,6 +117,7 @@ import {
   changedPathsFromGit,
   checkFamilyCoverageGaps,
   ciOnlyMeasurement,
+  claimTierWriteRefusal,
   classifyEntry,
   collapseHint,
   commandsFor,
@@ -185,6 +189,7 @@ import {
   isInRootTsProgram,
   isNonPathNamespace,
   isPlainTopLevelDir,
+  isShippedPackageSource,
   isTestFilePath,
   isTypeCheckInvocation,
   jobFilterOutputRefs,
@@ -210,6 +215,7 @@ import {
   maskShellComments,
   metadataFormModulePaths,
   metadataFormsSurfaceIsExtracted,
+  mkdtempCompleteness,
   liveDerivationInputs,
   narrowToDerivationInputs,
   notRunnableCommandSet,
@@ -229,6 +235,7 @@ import {
   populationReasonContinuation,
   populationReasonCutRefusal,
   reachesMetadataFormModule,
+  readClaimEffort,
   readContainerModelLine,
   readPopulationDeclaration,
   readPopulationMarker,
@@ -289,6 +296,10 @@ import {
   readBySpecMigrationEntryConsumers,
   SPEC_MIGRATION_ENTRY_ROOTS,
   packageTestSubsetFile,
+  changesFieldSchemaKeySet,
+  declaredKeySet,
+  objectLiteralMembers,
+  FIELD_SCHEMA_KEY_DECLARATIONS,
   adrAnchorTargets,
   breaksAnAdrAnchor,
   carriesACliCommandLiteral,
@@ -5625,6 +5636,115 @@ export function selfTest({ tier = 'full' } = {}) {
     try { return JSON.parse(readFileSync(nodePath.join(ROOT, pkgDir, 'package.json'), 'utf8')).name === '@objectstack/cli'; } catch { return false; }
   })());
 
+  // ── The closure pins a FieldSchema key-set change owes ────────────────────
+  //
+  // Three tests outside the spec package hold FieldSchema's whole key set (two
+  // classification tables both ways, one property count), and CI runs them only
+  // inside Test Core's package test task, so a card adding a field key learned of
+  // them a CI round after a green local ledger. The row is read from the DIFF:
+  // pinned here are the member reader, the declaration reader, the predicate on
+  // every edit shape that does and does not move the set, the rendering and the
+  // runnable union, the `--ran` verdict without one, the STALE branch, the
+  // bindings, and the live census of the reader against the driver's table.
+  const FK_GATES = Object.freeze([
+    'pnpm --filter @objectstack/driver-sql exec vitest run src/builtin-column-collision.test.ts',
+    'pnpm --filter @objectstack/metadata-core exec vitest run src/object-schema-fls-references.test.ts',
+    'pnpm --filter @objectstack/metadata-protocol exec vitest run src/protocol.meta-types-degenerate-derivation.test.ts',
+  ]);
+  const fkEntry = CHANGE_KIND_GATES.filter((k) => k.gates.some((g) => FK_GATES.includes(g.name)));
+  t('⭐ exactly one entry names the three FieldSchema closure pins, bound to the Test Core job and the field-schema-key-set predicate',
+    fkEntry.length === 1 && fkEntry[0].gates.length === 3 && FK_GATES.every((n) => fkEntry[0].gates.some((g) => g.name === n && g.ciJob === 'Test Core'))
+      && CHANGE_KIND_ROWS.filter((r) => r.gates.some((g) => FK_GATES.includes(g.name))).map((r) => r.matches).join() === 'field-schema-key-set');
+  // The member reader, pure.
+  const olm = (src) => objectLiteralMembers(src, src.indexOf('{'));
+  t('the member reader reads names, quoted keys, methods, shorthands and spreads at its own depth',
+    JSON.stringify(olm("{ a: 1, 'b-c': 2, d() {}, get e() { return 1; }, f, ...G.shape, h?: 3 }")) === JSON.stringify(['a', 'b-c', 'd', 'e', 'f', '...G.shape', 'h']));
+  t('…and a computed key as its bracketed text', JSON.stringify(olm('{ [KEY]: 1, z: 2 }')) === JSON.stringify(['[KEY]', 'z']));
+  t('…and nothing nested, commented or quoted',
+    JSON.stringify(olm("{ a: z.object({ inner: 1 }), // gone: 1,\n /* x: 2, */ b: 'c: { d: 1 }', e: [{ f: 1 }], g: (h) => { const i = { j: 1 }; return i; } }")) === JSON.stringify(['a', 'b', 'e', 'g']));
+  t('…and null for a literal that does not close, never a short list', olm('{ a: 1, b: { c: 2 }') === null);
+  // The declaration reader, pure.
+  const FK_FIELD = FIELD_SCHEMA_KEY_DECLARATIONS.find((d) => d.declares === 'FieldSchema');
+  const FK_PROT = FIELD_SCHEMA_KEY_DECLARATIONS.find((d) => d.declares === 'MetadataProtectionFields');
+  const fkSrc = (shape, opts = "surface: 'this field', guidance: { columnName: 'removed' }") =>
+    `import { z } from 'zod';\nexport const FieldSchema = lazySchema(() => {\n  const base = strictObject({ ${opts} }, {\n${shape}\n  });\n  return base.superRefine((f, ctx) => { ctx.addIssue({ code: 'custom', path: ['x'] }); });\n});\n`;
+  const FK_BASE = fkSrc("    name: z.string().describe('Machine name'),\n    type: FieldTypeSchema,\n    ...MetadataProtectionFields,");
+  t('the declaration reader takes the strictObject call\'s SECOND argument, not the options before it',
+    JSON.stringify(declaredKeySet(FK_BASE, FK_FIELD)) === JSON.stringify(['...MetadataProtectionFields', 'name', 'type']));
+  t('…a bare literal row reads the literal after the binding', JSON.stringify(declaredKeySet('export const MetadataProtectionFields = {\n  _lock: x,\n  _provenance: y,\n};', FK_PROT)) === JSON.stringify(['_lock', '_provenance']));
+  t('…and null where the declaration is not where the row says', declaredKeySet(FK_BASE.replace('strictObject(', 'z.object('), FK_FIELD) === null
+    && declaredKeySet('export const Other = {};', FK_PROT) === null);
+  // The predicate, over injected base and head blobs.
+  const FK_PATH = FK_FIELD.path;
+  const fkIo = (head, base) => ({ readHead: () => head, readBase: () => base });
+  const FK_EDITS = Object.freeze({
+    'a key added': [FK_BASE.replace('    type: FieldTypeSchema,', '    type: FieldTypeSchema,\n    showOnCreate: z.boolean().optional(),'), true],
+    'a key removed': [FK_BASE.replace("    name: z.string().describe('Machine name'),\n", ''), true],
+    'a key renamed': [FK_BASE.replace('    type: FieldTypeSchema,', '    kind: FieldTypeSchema,'), true],
+    'a spread added to the shape': [FK_BASE.replace('    ...MetadataProtectionFields,', '    ...MetadataProtectionFields,\n    ...AuditFields,'), true],
+    'the declaration moved out of the reader\'s reach': [FK_BASE.replace('strictObject(', 'z.object('), true],
+    'the file deleted': [null, true],
+    'a describe() reworded': [FK_BASE.replace("'Machine name'", "'Machine name (snake_case)'"), false],
+    'a refine edited': [FK_BASE.replace("path: ['x']", "path: ['x'], message: 'y'"), false],
+    'a key added to a NESTED schema': [FK_BASE.replace('    type: FieldTypeSchema,', '    type: FieldTypeSchema.and(z.object({ inner: z.string() })),'), false],
+    'a guidance entry added to the options': [fkSrc("    name: z.string().describe('Machine name'),\n    type: FieldTypeSchema,\n    ...MetadataProtectionFields,", "surface: 'this field', guidance: { columnName: 'removed', tracked: 'not a key' }"), false],
+    'the keys reordered': [FK_BASE.replace("    name: z.string().describe('Machine name'),\n    type: FieldTypeSchema,", "    type: FieldTypeSchema,\n    name: z.string().describe('Machine name'),"), false],
+  });
+  for (const [edit, [head, expected]] of Object.entries(FK_EDITS)) {
+    t(`${expected ? '' : 'CONTROL: '}${edit} ${expected ? 'derives' : 'derives nothing'}`, changesFieldSchemaKeySet(FK_PATH, fkIo(head, FK_BASE)) === expected);
+  }
+  t('⭐ an unchanged file derives nothing: the surface the PM names before the code exists', !changesFieldSchemaKeySet(FK_PATH, fkIo(FK_BASE, FK_BASE)));
+  t('a key added to the spread protection fields derives, on that file\'s own row',
+    changesFieldSchemaKeySet(FK_PROT.path, fkIo('export const MetadataProtectionFields = {\n  _lock: x,\n  _owner: z,\n};', 'export const MetadataProtectionFields = {\n  _lock: x,\n};')));
+  t('CONTROL: a sibling spec file whose object gained a key is not this row',
+    !changesFieldSchemaKeySet('packages/spec/src/data/object.zod.ts', fkIo(FK_BASE.replace('    type: FieldTypeSchema,', '    type: FieldTypeSchema,\n    extra: z.string(),'), FK_BASE)));
+  t('…a dispatch surface pasted with a leading ./ is the same path', changesFieldSchemaKeySet(`./${FK_PATH}`, fkIo(FK_EDITS['a key added'][0], FK_BASE)));
+  // Through the rendering, with the predicate bound to the fixture IO.
+  const fkResolved = (name, gate = null) => (gate?.ciJob ? name : `pnpm ${name}`);
+  const fkBound = fkEntry.map((k) => ({ ...k, matches: (p) => changesFieldSchemaKeySet(p, fkIo(FK_EDITS['a key added'][0], FK_BASE)) }));
+  const fkLines = changeKindLines([FK_PATH], fkResolved, fkBound);
+  t('a key-set change renders all three pins runnably, anchored on the delimiter', FK_GATES.every((n) => fkLines.some((l) => l.includes(`- ${n}   —`))));
+  t('…each line states its build prerequisite as measured: none for driver-sql, the closure build for the two that read the spec dist',
+    fkLines.some((l) => l.includes(FK_GATES[0]) && /needs NO build/.test(l))
+      && fkLines.some((l) => l.includes(FK_GATES[1]) && l.includes("pnpm --filter '@objectstack/metadata-core^...' build"))
+      && fkLines.some((l) => l.includes(FK_GATES[2]) && l.includes("pnpm --filter '@objectstack/metadata-protocol^...' build")));
+  t('…and carries no tracker number in the text a dev is shown', fkLines.length === 4 && fkLines.every((l) => !/#\d{4,5}\b/.test(l)));
+  const fkDerived = commandsFor({ kindGroups: changeKindGates([FK_PATH], fkResolved, fkBound) });
+  t('the runnable union carries all three', FK_GATES.every((n) => fkDerived.includes(n)));
+  t('CONTROL: a describe-only edit renders none of them',
+    changeKindLines([FK_PATH], fkResolved, fkEntry.map((k) => ({ ...k, matches: (p) => changesFieldSchemaKeySet(p, fkIo(FK_EDITS['a describe() reworded'][0], FK_BASE)) }))).length === 0);
+  for (const gate of FK_GATES) {
+    const without = runReconciliation({ derived: fkDerived, record: parseRunRecord(fkDerived.filter((c) => c !== gate).map((c) => `${c} :: exit 0`).join('\n')) });
+    t(`⭐ a run record carrying every derived command BUT ${gate.split(' ')[2]}'s pin is NOT ok, and names it unrun`, !without.ok && without.unrun.some((u) => u.command === gate));
+  }
+  t('CONTROL: the same record WITH all three is ok', runReconciliation({ derived: fkDerived, record: parseRunRecord(fkDerived.map((c) => `${c} :: exit 0`).join('\n')) }).ok);
+  const fkStale = changeKindLines([FK_PATH], () => null, fkBound);
+  t('an unresolvable binding renders each pin STALE, naming the job and the file it lost (a renamed pin resolves to null)',
+    fkEntry[0]?.gates.every((g) => fkStale.filter((l) => l.includes(`⚠ ${g.name}: STALE`) && l.includes("job named 'Test Core…'") && l.includes(g.ciSubset)).length === 1));
+  t('a pin whose ciSubset names another file REFUSES at load',
+    bindRefuses({ name: FK_GATES[0], ciJob: 'Test Core', ciRunner: 'set -- pnpm turbo run test', ciSubset: 'packages/drivers/driver-sql/src/renamed.test.ts' }));
+  // Against the LIVE tree.
+  for (const g of fkEntry[0]?.gates ?? []) {
+    t(`⭐ LIVE: ${g.ciSubset} exists, inside the package its name filters on, and its binding resolves`, (() => {
+      if (!existsSync(nodePath.join(ROOT, g.ciSubset)) || !ciJobRunsRunner(g, discoverFamilies().workflowEntries)) return false;
+      const pkgDir = g.ciSubset.slice(0, -('/' + packageTestSubsetFile(g.name)).length);
+      try { return JSON.parse(readFileSync(nodePath.join(ROOT, pkgDir, 'package.json'), 'utf8')).name === /--filter\s(\S+)/.exec(g.name)[1]; } catch { return false; }
+    })());
+  }
+  const liveFk = FIELD_SCHEMA_KEY_DECLARATIONS.map((d) => [d, declaredKeySet(readFileSync(nodePath.join(ROOT, d.path), 'utf8'), d)]);
+  t('⭐ LIVE: every declaration row reads on this tree', liveFk.every(([, keys]) => Array.isArray(keys) && keys.length > 0));
+  const liveFieldKeys = (() => {
+    const field = liveFk.find(([d]) => d === FK_FIELD)?.[1] ?? [];
+    const prot = liveFk.find(([d]) => d === FK_PROT)?.[1] ?? [];
+    return [...field.filter((k) => k !== '...MetadataProtectionFields'), ...(field.includes('...MetadataProtectionFields') ? prot : [])].sort();
+  })();
+  const liveStorage = declaredKeySet(readFileSync(nodePath.join(ROOT, 'packages/drivers/driver-sql/src/builtin-column-collision.ts'), 'utf8'),
+    { declares: 'FIELD_KEY_STORAGE_CLASS', call: 'Object.freeze', argument: 0 }) ?? [];
+  t(`⭐ LIVE census: the reader's FieldSchema key set (${liveFieldKeys.length}, the spread expanded, no other spread) equals the driver's classification table (${liveStorage.length}), which its own test holds equal to the schema`,
+    liveFieldKeys.length > 50 && liveFieldKeys.every((k) => !k.startsWith('...')) && JSON.stringify(liveFieldKeys) === JSON.stringify(liveStorage));
+  t('CONTROL: the live files, read at base and head alike, derive nothing',
+    FIELD_SCHEMA_KEY_DECLARATIONS.every((d) => { const text = readFileSync(nodePath.join(ROOT, d.path), 'utf8'); return !changesFieldSchemaKeySet(d.path, fkIo(text, text)); }));
+
   // ── The metadata-form edge (#9116) ────────────────────────────────────────
   //
   // The bundles' OTHER producer, and the half no owning-package test can reach:
@@ -8326,7 +8446,8 @@ export function selfTest({ tier = 'full' } = {}) {
       // 744 -> 748 (#31257): the two imported gate readers and their comment.
       // 748 -> 751 (#31292): the workspace-enumerator import and its comment.
       // 751 -> 753 (#34760): the data import and its re-export each gained SPEC_MIGRATION_ENTRY_ROOTS.
-      'scripts/pm/dispatch-gates.mjs:753 inherited-population',
+      // 753 -> 755 (the FieldSchema key-set row): the data import and its re-export each gained FIELD_SCHEMA_KEY_DECLARATIONS.
+      'scripts/pm/dispatch-gates.mjs:755 inherited-population',
       // Ninth row, added with the declaration it names: the recogniser's mailbox
       // doorbell battery pins the seven key templates verbatim in the pm-dispatch
       // references' project-forms.md, a population claim on a governed file, so
@@ -11012,6 +11133,24 @@ export function selfTest({ tier = 'full' } = {}) {
   t('⛔ the same with `MANDATORY` only in the `effort:` slot — the mandate is not cited, and the claim is refused', (() => { const body = CM(`\`model: ${CONTRACT_REVIEW_TIER_NAME}\`, \`effort: xhigh (MANDATORY per the standing order)\``); const r = readContainerModelLine(body); return r.ceiling && r.mandateCited === false && containerModelRefusal(body)?.key === 'Container & model'; })());
   t('⭐ the positive twin: a citation INSIDE the `model:` slot, commas and parentheses included, still reads with an `effort:` slot after it', (() => { const mandate = CM(`\`model: ${CONTRACT_REVIEW_TIER_NAME}\` (\`--tier\` at \`abc1234\`: MANDATORY, SKILL.md), \`effort: high\``); const reason = CM(`\`model: ${CONTRACT_REVIEW_TIER_NAME} (reason: ruled on the card, 2026-11-20)\`, \`effort: xhigh, reason: timing\``); return readContainerModelLine(mandate).mandateCited && containerModelRefusal(mandate) === null && readContainerModelLine(reason).reasonCited && containerModelRefusal(reason) === null; })());
 
+  // ── 定档 at claim WRITE time: the effort table is the rulebook's, and absence is a refusal ──
+  //
+  // FRESHNESS first: `EFFORT_BY_SIZE` is a copy of one row of 定档, so the row is re-read from
+  // the rulebook here and compared — an edit to either side alone reds this case, never forks.
+  const sizingText = readFileSync(nodePath.join(ROOT, TIER_SIZING_RULEBOOK), 'utf8');
+  const sizingSection = sizingText.slice(Math.max(0, sizingText.indexOf('### 定档')));
+  const sizingRow = /^- S [^`\n]*`([a-z]+)`;M、L、XL `([a-z]+)`/m.exec(sizingSection);
+  t('⭐ FRESHNESS: 定档\'s own row still reads S ⇒ medium and M、L、XL ⇒ high, and `EFFORT_BY_SIZE` equals it — XS riding on S', sizingRow !== null && EFFORT_BY_SIZE.S === sizingRow[1] && EFFORT_BY_SIZE.XS === sizingRow[1] && ['M', 'L', 'XL'].every((k) => EFFORT_BY_SIZE[k] === sizingRow[2]) && Object.keys(EFFORT_BY_SIZE).length === 5, JSON.stringify({ row: sizingRow?.slice(1) ?? null, table: EFFORT_BY_SIZE }));
+  t('⭐ FRESHNESS: 定档 still caps effort at the table\'s top and gives the one value above it to the ADR-revision row, never to a claim\'s adversarial re-read', sizingSection.includes(`- effort 最高 \`${EFFORT_BY_SIZE.XL}\``) && sizingSection.includes(`- ADR 修订(改 \`${EFFORT_ABOVE_TABLE.surface}**\` 的卡)effort 照常设令 \`${EFFORT_ABOVE_TABLE.value}\``) && sizingSection.includes('⛔ 不写进认领'));
+  const SZ = (value, surface = 'scripts/pm/**') => `Claim: PM loop round 1\nFile surface: \`${surface}\`\nContainer & model: ${value}`;
+  t('readClaimEffort: the size is the FIRST token, the effort the first after its key, decoration stripped and case folded', (() => { const r = readClaimEffort(SZ('`S 级机械卡`, `mode:subagent`, `model: opus`, `effort: Medium`')); return r.present && r.size === 'S' && r.effort === 'medium' && r.reasonCited === false && readClaimEffort(SZ('XL, mode:cloud, model: opus, effort: high')).size === 'XL' && readClaimEffort(SZ('`Small`, effort: high')).size === null && readClaimEffort('Claim: x').present === false; })());
+  t('readClaimEffort: a `reason:` counts inside the effort slot only — the model slot\'s, before or after it, is its own', readClaimEffort(SZ('`S`, `model: opus (reason: quota)`, `effort: high`')).reasonCited === false && readClaimEffort(SZ('`S`, `effort: high`, `model: opus (reason: quota)`')).reasonCited === false && readClaimEffort(SZ('`S`, `model: opus`, `effort: high, reason: design judgement`')).reasonCited === true);
+  t('⭐ claimTierWriteRefusal: every size at its table value passes, and so does a reasoned exception', Object.entries(EFFORT_BY_SIZE).every(([size, effort]) => claimTierWriteRefusal(SZ(`\`${size}\`, \`model: opus\`, \`effort: ${effort}\``)) === null) && claimTierWriteRefusal(SZ('`S`, `model: opus`, `effort: high, reason: not mechanical`')) === null);
+  t('⛔ THE MEASURED SHAPES: S at `high` with no reason, no `effort:` value, and no line at all are each refused, naming 定档\'s file', [SZ('`S`, `mode:subagent`, `model: opus`, `effort: high`'), SZ('`M`, `mode:subagent`, `model: opus`'), 'Claim: PM loop round 1\nSeat: domain:skills#1'].every((b) => { const r = claimTierWriteRefusal(b); return r?.key === 'Container & model' && r.why.includes(TIER_SIZING_RULEBOOK); }) && claimTierWriteRefusal(SZ('`S`, `model: opus`, `effort: high`')).why.includes('size S reads `effort: medium`'));
+  t('⛔ a line opening with no size, and a value 定档 gives no card, are refused — both problems named in ONE row', (() => { const r = claimTierWriteRefusal(SZ('`mode:cloud`, `model: opus`, `effort: max, reason: hard`')); return r !== null && r.why.includes('no size token') && r.why.includes('`effort: max` is no value') && claimTierWriteRefusal(SZ('`M`, `effort: low, reason: lookup`')) !== null; })());
+  t('`xhigh` in a claim: refused off the ADR surface whatever the reason, refused on it without one, read on it with the standing order cited', claimTierWriteRefusal(SZ('`M`, `effort: xhigh, reason: adversarial re-read`'))?.why.includes('never into a claim') === true && claimTierWriteRefusal(SZ('`M`, `effort: xhigh`', 'docs/adr/0087-x.md')) !== null && claimTierWriteRefusal(SZ('`M`, `effort: xhigh, reason: the standing order`', 'docs/adr/0087-x.md')) === null);
+  t('⛔ control: the READ-time reader is untouched — a claim with no line, or no effort, still earns no `containerModelRefusal`', containerModelRefusal('Claim: x') === null && containerModelRefusal(SZ('`S`, `model: opus`')) === null);
+
   // Hoisted out of the slow sections that used to declare them: a later section reads each one.
   const CLI = fileURLToPath(ENGINE_URL);
   const runCli = (args) => spawnSync(process.execPath, [CLI, ...args], { encoding: 'utf8', cwd: ROOT });
@@ -11452,6 +11591,97 @@ export function selfTest({ tier = 'full' } = {}) {
     wrapperBodyScan,
   );
 
+  // ── Which UNRESOLVED mkdtempSync site fails completeness: the FILE ─────────
+  //
+  // The live completeness case in the slow section below fails an unresolved
+  // mkdtempSync site in a test file or repo tooling, and REPORTS one in shipped
+  // package source, whose base the user names at run time (ruling record
+  // 7075362923). The boundary is pinned here, in the fast tier a pull request's
+  // lane runs, on the exact spelling that redded main: a staging directory
+  // beside a caller's directory. Each arm has a control one step away.
+  const callerDirSource = 'const staging = mkdtempSync(join(dir, SKILLS_STAGING_PREFIX));';
+  const tmpdirSource = 'const staging = mkdtempSync(join(tmpdir(), SKILLS_STAGING_PREFIX));';
+  const completenessPackages = [{ dir: 'packages/cli', manifest: { name: '@objectstack/cli' } }];
+  const completenessOf = (rel, source = callerDirSource, members = completenessPackages) =>
+    mkdtempCompleteness(scratchDirSitesInSource(rel, source).unresolved, { members });
+  const verdictIs = (v, failing, reported) => v.failing.length === failing && v.reported.length === reported;
+  const shippedVerdict = completenessOf('packages/cli/src/utils/skills-install-state.ts');
+  t(
+    "a caller's-directory mkdtempSync base in shipped package source is REPORTED, not failed",
+    verdictIs(shippedVerdict, 0, 1) && shippedVerdict.reported[0].file === 'packages/cli/src/utils/skills-install-state.ts',
+    shippedVerdict,
+  );
+  t(
+    'CONTROL: the same file in a directory that holds no workspace package still FAILS',
+    verdictIs(
+      completenessOf('packages/cli/src/utils/skills-install-state.ts', callerDirSource, [{ dir: 'packages/core', manifest: {} }]),
+      1,
+      0,
+    ),
+  );
+  t(
+    "CONTROL: and in the package but outside its own src/ (one directory up), it still FAILS",
+    verdictIs(completenessOf('packages/cli/utils/skills-install-state.ts'), 1, 0),
+  );
+  // A src/ segment of the member's that is NOT its own src/: product source by
+  // name (so `isProductSource` alone would pass it), under the member, and red
+  // the day the member prefix is loosened from MEMBER/src/ to MEMBER/.
+  t(
+    "CONTROL: under the member but in a src/ that is not the member's own (packages/cli/scripts/src/), it still FAILS",
+    verdictIs(completenessOf('packages/cli/scripts/src/staging.ts'), 1, 0)
+      && runnerEnvIsProductSource('packages/cli/scripts/src/staging.ts'),
+  );
+  // A private member is not published code: its src/ is code this checkout
+  // runs (an example app, a QA harness), so the same site there FAILS. The
+  // control is the published arm above, the same path with the flag absent.
+  t(
+    "a private: true member's src/ is not shipped source — the same site there FAILS",
+    verdictIs(
+      completenessOf('packages/cli/src/utils/skills-install-state.ts', callerDirSource, [
+        { dir: 'packages/cli', manifest: { name: '@objectstack/cli', private: true } },
+      ]),
+      1,
+      0,
+    ),
+  );
+  t(
+    'the same site in a test file FAILS — beside the shipped file, by name',
+    verdictIs(completenessOf('packages/cli/src/utils/skills-install-state.test.ts'), 1, 0),
+  );
+  t(
+    'and in a test helper under src/__tests__/, by directory — the stricter test predicate holds it',
+    verdictIs(completenessOf('packages/cli/src/__tests__/staging-helper.ts'), 1, 0),
+  );
+  t(
+    'CONTROL: the test file with a base the scan CAN read (the system temp directory) is in neither list',
+    verdictIs(completenessOf('packages/cli/src/utils/skills-install-state.test.ts', tmpdirSource), 0, 0),
+  );
+  t(
+    'the same site in repo tooling FAILS — the tooling population is not dropped with the test predicate',
+    verdictIs(completenessOf('scripts/pm/stage-skills.mjs'), 1, 0) && !isTestFilePath('scripts/pm/stage-skills.mjs'),
+  );
+  t(
+    'CONTROL: the tooling file with a base the scan CAN read is in neither list',
+    verdictIs(completenessOf('scripts/pm/stage-skills.mjs', tmpdirSource), 0, 0),
+  );
+  t(
+    'and an unresolved mkdirSync site is in neither list — that half was never held to completeness',
+    verdictIs(completenessOf('scripts/pm/stage-skills.mjs', 'mkdirSync(join(dir, SKILLS_STAGING_PREFIX));'), 0, 0)
+      && scratchDirSitesInSource('scripts/pm/stage-skills.mjs', 'mkdirSync(join(dir, SKILLS_STAGING_PREFIX));').unresolved.length === 1,
+  );
+  // The default member list is THIS tree's workspace, read from its manifest
+  // globs and manifests: the arms above hold on it too, not only on a
+  // hand-built list — packages/qa/dogfood is a private member of this tree.
+  const liveDefault = (rel) => mkdtempCompleteness(scratchDirSitesInSource(rel, callerDirSource).unresolved);
+  t(
+    "on this tree's own workspace, the shipped arm is REPORTED, the tooling and private-member arms FAIL",
+    verdictIs(liveDefault('packages/cli/src/utils/skills-install-state.ts'), 0, 1)
+      && verdictIs(liveDefault('scripts/pm/stage-skills.mjs'), 1, 0)
+      && verdictIs(liveDefault('packages/qa/dogfood/src/staging.ts'), 1, 0)
+      && JSON.parse(readFileSync(nodePath.join(ROOT, 'packages/qa/dogfood/package.json'), 'utf8')).private === true
+      && isShippedPackageSource('packages/cli/src/utils/skills-install-state.ts', completenessPackages),
+  );
+
   slow("the change set derived from git — temporary repositories with real history", () => {
   // ── The change set derived from git (#9320) ───────────────────────────────
   //
@@ -11851,14 +12081,21 @@ export function selfTest({ tier = 'full' } = {}) {
       }`,
       liveScratch.exposed.length === 0,
     );
-    const unreadableTempSites = liveScratch.unresolved.filter((s) => s.call === 'mkdtempSync');
+    // Completeness holds in test files and repo tooling; an unresolved site in
+    // shipped package source is REPORTED on this line and not failed, because
+    // its base is the user's run-time choice (`mkdtempCompleteness`, pinned in
+    // the fast tier; ruling record 7075362923).
+    const completeness = mkdtempCompleteness(liveScratch.unresolved);
+    const siteList = (sites) => sites.map((s) => `${s.file}:${s.line} (${s.why})`).join(', ');
     t(
-      `no mkdtempSync site in this tree takes a base the scan cannot read${
-        unreadableTempSites.length
-          ? ` — UNRESOLVED: ${unreadableTempSites.map((s) => `${s.file}:${s.line} (${s.why})`).join(', ')}`
+      `no mkdtempSync site in a test file or repo tooling takes a base the scan cannot read${
+        completeness.failing.length ? ` — UNRESOLVED: ${siteList(completeness.failing)}` : ''
+      }${
+        completeness.reported.length
+          ? ` — reported, not failed (shipped package source, base chosen at run time): ${siteList(completeness.reported)}`
           : ''
       }`,
-      unreadableTempSites.length === 0,
+      completeness.failing.length === 0,
     );
   } finally {
     rmSync(gitTmp, { recursive: true, force: true });

@@ -41,7 +41,9 @@ import { useAuth } from '@object-ui/auth';
 import type { DataSource } from '@object-ui/types';
 import {
   createDebouncedFlush,
+  readScopedCopy,
   scopedKey,
+  useOrganizationScope,
   useStorageSync,
   useUserStateAdapter,
 } from './UserStateAdapters.js';
@@ -218,18 +220,18 @@ function contentOf(item: RecentItem): string {
   }
 }
 
-function loadRecent(userId?: string | null): RecentItem[] {
+function loadRecent(userId?: string | null, orgId?: string | null): RecentItem[] {
   try {
-    const raw = localStorage.getItem(scopedKey(STORAGE_BASE_KEY, userId));
+    const raw = readScopedCopy(STORAGE_BASE_KEY, userId, orgId);
     return raw ? readList(JSON.parse(raw)) : [];
   } catch {
     return [];
   }
 }
 
-function saveRecent(items: RecentItem[], userId?: string | null) {
+function saveRecent(items: RecentItem[], userId?: string | null, orgId?: string | null) {
   try {
-    localStorage.setItem(scopedKey(STORAGE_BASE_KEY, userId), JSON.stringify(items));
+    localStorage.setItem(scopedKey(STORAGE_BASE_KEY, userId, orgId), JSON.stringify(items));
   } catch {
     // ignore
   }
@@ -248,9 +250,12 @@ const RecentItemsContext = createContext<RecentItemsContextValue | null>(null);
 export function RecentItemsProvider({ children }: { children: ReactNode }) {
   const { user } = useAuth();
   const userId = user?.id ?? null;
+  // The browser copy is kept per organization, like the server row it mirrors
+  // (objectstack#36244).
+  const orgId = useOrganizationScope();
   const adapter = useUserStateAdapter<RecentItem>('recent');
 
-  const [recentItems, setRecentItems] = useState<RecentItem[]>(() => loadRecent(userId));
+  const [recentItems, setRecentItems] = useState<RecentItem[]>(() => loadRecent(userId, orgId));
 
   // The list as last installed — always the one the persisted copies hold,
   // since every list arrives either FROM storage (`adopt`) or is written TO it
@@ -266,11 +271,11 @@ export function RecentItemsProvider({ children }: { children: ReactNode }) {
   }, []);
 
   useEffect(() => {
-    adopt(loadRecent(userId));
-  }, [userId, adopt]);
+    adopt(loadRecent(userId, orgId));
+  }, [userId, orgId, adopt]);
 
   // Cross-tab sync — see FavoritesProvider for the rationale.
-  useStorageSync<RecentItem[]>(scopedKey(STORAGE_BASE_KEY, userId), value => {
+  useStorageSync<RecentItem[]>(scopedKey(STORAGE_BASE_KEY, userId, orgId), value => {
     adopt(readList(value));
   });
 
@@ -285,7 +290,7 @@ export function RecentItemsProvider({ children }: { children: ReactNode }) {
         if (cancelled || token !== hydrationToken.current) return;
         const sane = readList(remote);
         adopt(sane);
-        saveRecent(sane, userId);
+        saveRecent(sane, userId, orgId);
       } catch {
         // ignore — degrade to localStorage
       }
@@ -293,7 +298,7 @@ export function RecentItemsProvider({ children }: { children: ReactNode }) {
     return () => {
       cancelled = true;
     };
-  }, [adapter, userId, adopt]);
+  }, [adapter, userId, orgId, adopt]);
 
   const flusher = useMemo(
     () => createDebouncedFlush<RecentItem[]>(async items => {
@@ -312,10 +317,10 @@ export function RecentItemsProvider({ children }: { children: ReactNode }) {
       if (JSON.stringify(next) === JSON.stringify(itemsRef.current)) return;
       itemsRef.current = next;
       setRecentItems(next);
-      saveRecent(next, userId);
+      saveRecent(next, userId, orgId);
       if (adapter) flusher.schedule(next);
     },
-    [userId, adapter, flusher],
+    [userId, orgId, adapter, flusher],
   );
 
   const addRecentItem = useCallback(

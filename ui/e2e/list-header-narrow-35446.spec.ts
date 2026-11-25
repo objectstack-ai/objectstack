@@ -140,7 +140,7 @@ function Header() {
     actions: { create: () => {} }, t, listActions: [], toolbarActionsWithDeepLink: [],
     identityImportEnabled: false, objectCanImport: true, importVisible: true, importDisabled: false,
     setShowImport: openImport, listFavorite, isEnvironmentList: false, toolbarBar,
-    viewAccess: { refusal: null },
+    viewAccess: { refusal: null }, createLabel: t('console.objectView.new'),
   });
   return h(ObjectViewPageHeader, {
     objectDef,

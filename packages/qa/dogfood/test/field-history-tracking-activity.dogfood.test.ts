@@ -4,16 +4,18 @@
 // clauses at the REST doors of the booted showcase, as shipped.
 // `showcase_account` declares `enable.trackHistory: true` and per-field
 // `trackHistory` on `industry` and `status` (labels Industry / Lifecycle);
-// `website` is untracked. `showcase_task` declares per-field trackHistory and
+// `website` declares none. `showcase_task` declares per-field trackHistory and
 // NO object-level opt-in — the natural negative for the derived operation.
 //
 //   acceptance[0], negative[2] — a tracked edit made through
 //     `PATCH /data/showcase_account/:id` lands its sys_activity row with the
 //     ADR-0052 §5b summary in DISPLAY values: the field label and the option
 //     labels ('Industry: Retail → Finance'), never the raw option values.
-//   acceptance[1], negative[0] — a website-only edit lands no old → new diff:
-//     the row carries the #25787 generic frame, which names the changed
-//     field's LABEL and never its values.
+//   acceptance[1], negative[0] — a website-only edit lands its old → new
+//     values too: since #36290 values show for every changed field unless the
+//     object (`enable.fieldHistory: false`) or the field (`fieldHistory: false`)
+//     turns them off, and `website` declares neither. The label-only frame for
+//     a turned-off field is the plugin-audit unit pins' (audit-writers.test.ts).
 //   acceptance[3] — the derived `history` operation follows get ∧
 //     enable.trackHistory: present in showcase_account's effective operation
 //     vocabulary and absent from showcase_task's, read off
@@ -84,19 +86,16 @@ describe('records-forms.field-history-tracking — the activity summary and the 
     expect(row.changed_fields).toEqual(['industry']);
   });
 
-  it('acceptance[1], negative[0]: a website-only edit lands the generic frame, never an old → new diff', async () => {
-    const { id, name, baseline } = await createAccount();
+  it('acceptance[1], negative[0]: a website-only edit lands its old → new values, on by default (#36290)', async () => {
+    const { id, baseline } = await createAccount();
     await patch(id, { website: 'https://after.example' });
     const rows = await activityOf(id, baseline + 1);
     expect(rows.length, JSON.stringify(rows)).toBe(baseline + 1);
     const row = rows[rows.length - 1];
-    // The #25787 generic update summary names WHICH field changed (its label),
-    // never its values: no arrow, neither URL.
-    expect(row.summary, JSON.stringify(row)).toBe(`Updated Account (Success Overlay) "${name}": Website`);
-    expect(row.summary).not.toContain('→');
-    expect(row.summary).not.toContain('before.example');
-    expect(row.summary).not.toContain('after.example');
-    expect(JSON.parse(row.metadata).summary_message.key).toBe('activityUpdatedFields');
+    // `website` declares no trackHistory and the account no enable.fieldHistory,
+    // so the change is named with both values.
+    expect(row.summary, JSON.stringify(row)).toBe('Website: https://before.example → https://after.example');
+    expect(JSON.parse(row.metadata).summary_message.key).toBe('fieldChanges');
   });
 
   it('acceptance[3]: the derived history operation is offered on showcase_account and not on showcase_task', async () => {

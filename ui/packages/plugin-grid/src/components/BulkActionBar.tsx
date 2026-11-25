@@ -42,6 +42,14 @@ function isBulkDefOffered(
   return partitionBulkRows(def, selectedRows, { scope, fields: objectFields as never }).eligible.length > 0;
 }
 
+/**
+ * objectstack#35403 — the reserved selection-bar name of the built-in bulk
+ * Change Owner, dispatched to the host's `onBulkChangeOwner` (never the action
+ * runner), as the built-in `delete` is dispatched to `onBulkDelete`. The
+ * `sys_` prefix keeps it apart from every author-declared action name.
+ */
+export const CHANGE_OWNER_BULK_ACTION = 'sys_change_owner';
+
 /** A legacy string bulk action, with the destructive styling its name implies. */
 export interface LegacyBulkActionItem {
   name: string;
@@ -107,7 +115,11 @@ export function useBulkActionItems(input: {
       const actionStr = String(action).toLowerCase();
       return {
         name: action,
-        label: actionStr === 'delete' ? t('grid.delete', { defaultValue: 'Delete' }) : formatActionLabel(action),
+        label: actionStr === 'delete'
+          ? t('grid.delete', { defaultValue: 'Delete' })
+          : action === CHANGE_OWNER_BULK_ACTION
+            ? t('grid.changeOwner', { defaultValue: 'Change Owner' })
+            : formatActionLabel(action),
         destructive: actionStr.includes('delete') || actionStr.includes('remove') || actionStr.includes('destroy'),
       };
     });

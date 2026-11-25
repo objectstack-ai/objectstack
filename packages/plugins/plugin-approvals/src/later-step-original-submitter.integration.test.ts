@@ -380,6 +380,19 @@ describe('every step of an approval run names the run\'s original submitter (#24
     expect(told.map((e) => [e.topic, e.source?.id, e.audience])).toEqual([['approval.approved', step2.id, [SUBMITTER]]]);
   });
 
+  it('a run a caller-less run’s decided segment starts by its write names its writer as submitter, as on any write it starts', async () => {
+    // The context the record-change trigger builds for such a write: the
+    // writer (the decider) as its user, and the caller-less fact on its own
+    // key, read by the organization wall alone. The run's trigger user is the
+    // writer, so `excludeSubmitter` (which keys on the submitter) excludes them.
+    const record = { id: 'D_callerless', title: 'callerless', amount: 100, organization_id: ORG };
+    await engine.insert('crm_deal', record, { context: SYSTEM } as any);
+    const run = await automation.execute('deal_one_step', { object: 'crm_deal', record, userId: 'u_dec', beganForNoCaller: true } as any);
+    expect(run.status).toBe('paused');
+    const only = await pendingOn('D_callerless');
+    expect(only.submitter_id).toBe('u_dec');
+  });
+
   it('control: a one-step run names its trigger user, and that user may recall it', async () => {
     const only = await submit('deal_one_step', 'control');
     expect([only.flow_node_id, only.submitter_id]).toEqual(['mgr', SUBMITTER]);

@@ -64,6 +64,13 @@ vi.mock('./metadata-admin/inspectors/ReportDefaultInspector', () => ({
   ),
 }));
 
+// objectstack#36716 — the editor reads where its Save would land from the
+// package list: the report's package is listed, and writable.
+vi.mock('./studio-design/packages-io', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  fetchListedPackageManifests: vi.fn(async () => new Map([['com.qa.tr', { writable: true, manifest: { id: 'com.qa.tr' } }]])),
+}));
+
 const meta = vi.hoisted(() => ({ value: null as any }));
 vi.mock('../providers/MetadataProvider', () => ({ useMetadata: () => meta.value }));
 
@@ -189,7 +196,10 @@ describe('the report quick edit edits the authored report (objectstack#35008, Re
     mountReport();
     const [type, name, body, opts] = await openEditAndSave();
 
-    expect([type, name, opts]).toEqual(['report', 'task_overview', { mode: 'draft' }]);
+    // objectstack#36374 — Save stages the body and publishes it in the same press.
+    // objectstack#36716 — saved in the writable package it is served from.
+    expect([type, name, opts]).toEqual(['report', 'task_overview', { mode: 'draft', ifNoneMatch: '*', packageId: PKG }]);
+    expect(client.value.publish).toHaveBeenCalledWith('report', 'task_overview', { packageId: PKG });
     // Read at the package the served report came from.
     expect(client.value.layered).toHaveBeenCalledWith('report', 'task_overview', { packageId: PKG });
     expect(body.label).toBe(SOURCE.label);

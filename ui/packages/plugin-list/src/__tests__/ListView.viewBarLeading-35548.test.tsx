@@ -130,7 +130,7 @@ describe('objectstack#35548 — one view bar, handed the list state', () => {
     expect(bar.row.className.split(/\s+/)).toEqual(expect.arrayContaining(['border-b', 'sm:h-10']));
     for (const trigger of [bar.filter, bar.sort, bar.options]) {
       expect(trigger, 'a text trigger is missing from the kanban view bar').not.toBeNull();
-      expect(trigger!.className.split(/\s+/)).toContain('text-[13px]');
+      expect(trigger!.className.split(/\s+/)).toContain('text-sm');
     }
     // Text, not icons, from `sm` up: each trigger carries its label.
     expect(bar.filter!.textContent).toMatch(/Filter|筛选/);

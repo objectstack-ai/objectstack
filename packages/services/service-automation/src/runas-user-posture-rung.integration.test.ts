@@ -163,12 +163,13 @@ describe("[#28070] a runAs:'user' run's data context carries the rung its resolv
     expect(h.ctxOf('first')).not.toHaveProperty('posture');
   });
 
-  it("a runAs:'system' run is unchanged: elevated, and no rung is resolved or carried", async () => {
+  it("a runAs:'system' run is elevated and carries no grants; its user's rung rides it, for the organization wall", async () => {
     const h = envelopeHarness();
     h.engine.registerFlow('rung_sys', recordingFlow('rung_sys', 'system') as never);
     await h.engine.execute('rung_sys', { userId: 'usr_admin', tenantId: 'org_a' } as never);
     expect(h.ctxOf('first')).toEqual({
       isSystem: true, actor: 'svc:flow:rung_sys', userId: 'usr_admin', tenantId: 'org_a', flowRunId: expect.any(String),
+      posture: 'PLATFORM_ADMIN',
       [FLOW_WRITE_REFERENCE_CHECK]: true, // #28881
     });
   });

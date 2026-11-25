@@ -1,0 +1,8 @@
+{
+  "file": "packages/plugins/plugin-sharing/src/sharing-service.ts",
+  "adrs": [
+    "ADR-0111",
+    "ADR-0155"
+  ],
+  "invariant": "buildReadFilter and buildWriteFilter write the share arm as the share-grant leaf ({ id: { $in: SharedRecordIds.read(object, user) } }, or .write(object, user, WRITE_ACCESS_LEVELS) on the update scope), never an id list read from sys_record_share, so every grant counts at any count (ADR-0155 D3, Q2 ruled). The approval ids stand as a disjunct of their own; delete scopes to the owner match alone. On an object whose storage cannot evaluate the leaf (shareGrantsInertReason: another datasource than sys_record_share, or a driver that does not declare SharedRecordIds) share grants do not count at all: no scope carries the arm, checkEdit consults no grant, and the grant door and the sharing-rule save door refuse with SHARING_NOT_ENABLED (ADR-0155 R2, ADR-0111 D7). Do not reintroduce a capped grant read, and do not read the grants into memory as a fallback."
+}

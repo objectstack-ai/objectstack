@@ -98,7 +98,7 @@ An **Object** maps to a database table and exposes automatic CRUD APIs. As JSON
 
 ```json
 { "name": "crm_account", "label": "Account", "pluralLabel": "Accounts", "icon": "building",
-  "sharingModel": "public_read_write",
+  "color": "blue", "sharingModel": "public_read_write",
   "fields": { "name": { "type": "text", "label": "Name", "required": true } } }
 ```
 
@@ -106,10 +106,10 @@ An **Object** maps to a database table and exposes automatic CRUD APIs. As JSON
   `name` (`namespace` is not a key).
 - **Author `sharingModel` on every object**: Zod marks it optional, but a
   publish without it is refused (`security-owd-unset`). Choose it from the
-  request, not by habit. `public_read_write`: a business object a team shares
+  request. `public_read_write`: a business object a team shares
   (`private` would hide every colleague's records). `private`: personal or
   sensitive data only its owner should see (HR reviews, pay), widened by
-  sharing rules, RLS or `readScope` / `writeScope`. `public_read`: reference
+  sharing rules, RLS or `readScope`/`writeScope`. `public_read`: reference
   data everyone reads and the owner maintains (price lists, policies).
   `controlled_by_parent`: a `master_detail` child, inherited from its master.
 - Author `pluralLabel` and `icon` beside `label`. The record title is

@@ -161,13 +161,13 @@ export const ThreadedReplies: React.FC<ThreadedRepliesProps> = ({
                     (objectstack#34614), as on the entry it replies to. */}
                 <div className="flex flex-wrap items-center gap-x-1.5">
                   <span className="text-xs font-medium">{reply.actor}</span>
-                  <span className="text-[10px] text-muted-foreground whitespace-nowrap" data-feed-when="">
+                  <span className="text-xs text-muted-foreground whitespace-nowrap" data-feed-when="">
                     {formatTimestamp(reply.createdAt, t, displayLocale)}
                   </span>
                   {/* A reply edited by its author reads as edited, as a root
                       comment does (objectui#12268). */}
                   {reply.edited && (
-                    <span className="text-[10px] text-muted-foreground italic">{t('detail.edited')}</span>
+                    <span className="text-xs text-muted-foreground italic">{t('detail.edited')}</span>
                   )}
                 </div>
                 <CommentBody

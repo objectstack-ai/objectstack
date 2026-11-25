@@ -37,11 +37,6 @@ import '@object-ui/plugin-dashboard';
 import { MetadataClient } from '@object-ui/data-objectstack';
 
 const PKG = 'com.acme.app';
-const NAV = [
-  { id: 'n1', type: 'dashboard', label: 'Customers', dashboardName: 'customer_dashboard' },
-  { id: 'n2', type: 'dashboard', label: 'Fresh', dashboardName: 'fresh_dashboard' },
-];
-const dashboard = (name: string) => ({ name, label: name, widgets: [] });
 const flow = (name: string) => ({
   name,
   label: name,
@@ -135,7 +130,7 @@ vi.mock('@object-ui/react', async (importOriginal) => {
 // The console's preview and authoring code loads `@objectstack/lint` lazily;
 // warmed here so its first load is paid at import, not inside a test's clock.
 import '@objectstack/lint';
-import { AutomationsPillar, DataPillar, InterfacesPillar } from './StudioDesignSurface';
+import { AutomationsPillar, DataPillar } from './StudioDesignSurface';
 import { registerMetadataPreview } from '../metadata-admin/preview-registry';
 import { DashboardPreview } from '../metadata-admin/previews/DashboardPreview';
 import { createEmptyDataSource, failOnAbsorbedFetchError } from './__tests__/emptyDataSource';
@@ -187,88 +182,11 @@ function asked(type: string, name: string, suffix: '?state=draft' | '/layers'): 
 
 const misses = () => server.requests.filter((r) => r.status === 404).map((r) => `${r.path}${r.search}`);
 
-function interfacesTree() {
-  return (
-    <MemoryRouter initialEntries={[`/studio/${PKG}/interfaces`]}>
-      <InterfacesPillar packageId={PKG} />
-    </MemoryRouter>
-  );
-}
-
-describe('Interfaces pillar — opening leaves asks no 404 question (objectui#11799)', () => {
-  beforeEach(() => {
-    put(server.active, 'app', 'acme_app', { name: 'acme_app', label: 'Acme', navigation: NAV });
-    put(server.active, 'dashboard', 'customer_dashboard', dashboard('customer_dashboard'));
-    // Created in Studio and never published: a draft and no layer.
-    put(server.drafts, 'dashboard', 'fresh_dashboard', dashboard('fresh_dashboard'));
-  });
-
-  it('a saved leaf with no draft reads its baseline and no draft; an unsaved leaf reads its draft and its stored draft layer, no miss', async () => {
-    render(interfacesTree());
-    await waitFor(() => expect(asked('dashboard', 'customer_dashboard', '/layers')).toBe(1));
-    await settle();
-    expect(asked('dashboard', 'customer_dashboard', '?state=draft')).toBe(0);
-    expect(asked('app', 'acme_app', '?state=draft')).toBe(0);
-
-    fireEvent.click(await screen.findByTitle('dashboard · fresh_dashboard'));
-    await waitFor(() => expect(asked('dashboard', 'fresh_dashboard', '?state=draft')).toBe(1));
-    await settle();
-    // objectstack#30859 — the one `/layers` read is the stored draft, answered.
-    expect(asked('dashboard', 'fresh_dashboard', '/layers')).toBe(1);
-    expect(misses()).toEqual([]);
-  });
-
-  it('a draft saved a moment ago is found when the leaf is opened again: no stale "absent"', async () => {
-    render(interfacesTree());
-    await waitFor(() => expect(asked('dashboard', 'customer_dashboard', '/layers')).toBe(1));
-    await settle();
-    expect(asked('dashboard', 'customer_dashboard', '?state=draft')).toBe(0);
-
-    // A draft lands for the open leaf through the transport Studio writes on.
-    await act(async () => {
-      await client.save('dashboard', 'customer_dashboard', { ...dashboard('customer_dashboard'), label: 'Edited' }, {
-        mode: 'draft',
-        packageId: PKG,
-      });
-    });
-
-    fireEvent.click(await screen.findByTitle('dashboard · fresh_dashboard'));
-    await waitFor(() => expect(asked('dashboard', 'fresh_dashboard', '?state=draft')).toBe(1));
-    fireEvent.click(await screen.findByTitle('dashboard · customer_dashboard'));
-    await waitFor(() => expect(asked('dashboard', 'customer_dashboard', '?state=draft')).toBe(1));
-    await settle();
-    // It now has a draft: the second `/layers` read is its stored draft layer
-    // (objectstack#30859), whose answer carries the published layer as well.
-    expect(asked('dashboard', 'customer_dashboard', '/layers')).toBe(2);
-    expect(misses()).toEqual([]);
-  });
-});
-
-describe('Interfaces pillar — an app found only in the drafts ledger (objectui#11799)', () => {
-  it('reads its draft and its stored draft layer, no miss', async () => {
-    put(server.drafts, 'app', 'acme_app', { name: 'acme_app', label: 'Acme', navigation: NAV });
-    put(server.active, 'dashboard', 'customer_dashboard', dashboard('customer_dashboard'));
-    render(interfacesTree());
-    await waitFor(() => expect(asked('app', 'acme_app', '?state=draft')).toBe(1));
-    await waitFor(() => expect(asked('dashboard', 'customer_dashboard', '/layers')).toBe(1));
-    await settle();
-    // objectstack#30859 — the one `/layers` read is the stored draft, answered.
-    expect(asked('app', 'acme_app', '/layers')).toBe(1);
-    expect(misses()).toEqual([]);
-  });
-
-  it('control: a published app reads its baseline', async () => {
-    put(server.active, 'app', 'acme_app', { name: 'acme_app', label: 'Acme', navigation: NAV });
-    put(server.active, 'dashboard', 'customer_dashboard', dashboard('customer_dashboard'));
-    render(interfacesTree());
-    await waitFor(() => expect(asked('app', 'acme_app', '/layers')).toBe(1));
-    await settle();
-    expect(asked('app', 'acme_app', '?state=draft')).toBe(0);
-  });
-});
-
 describe('Automations pillar — opening flows asks no 404 question (objectui#11799)', () => {
-  it('a saved flow with no draft reads its baseline and no draft; an unsaved flow reads its draft and no baseline', async () => {
+  // objectstack#36726 — an unsaved flow's layers are read too, for the Save's
+  // publish pin; an item with only a draft has layers (objectstack#30859), so
+  // the read is answered, never a miss.
+  it('a saved flow with no draft reads its baseline and no draft; an unsaved flow reads its draft and its layers, no miss', async () => {
     put(server.active, 'flow', 'p_flow', flow('p_flow'));
     put(server.drafts, 'flow', 'fresh_flow', flow('fresh_flow'));
     render(
@@ -283,7 +201,7 @@ describe('Automations pillar — opening flows asks no 404 question (objectui#11
     fireEvent.click((await screen.findAllByText('fresh_flow'))[0]);
     await waitFor(() => expect(asked('flow', 'fresh_flow', '?state=draft')).toBe(1));
     await settle();
-    expect(asked('flow', 'fresh_flow', '/layers')).toBe(0);
+    expect(asked('flow', 'fresh_flow', '/layers')).toBe(1);
     expect(misses()).toEqual([]);
   });
 });

@@ -28,11 +28,15 @@
  * body draws the owner (the meta line does not), and an object whose body
  * draws no `owner_id` (the field is `hidden`) keeps the owner on the meta
  * line.
+ *
+ * On the laid-out page the meta line is the details column's last group,
+ * 「系统信息」 (objectstack#36147), folded until opened: the owner and the
+ * record ID it keeps are that group's rows, read here with the group opened.
  */
 
 import * as React from 'react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, cleanup, waitFor } from '@testing-library/react';
+import { render, cleanup, waitFor, fireEvent, within } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { MetadataCtx } from '@object-ui/react';
 import { RelatedCountStore } from '@object-ui/components';
@@ -172,7 +176,17 @@ async function metaLineLoaded(): Promise<HTMLElement> {
   );
 }
 
-const ownerEntry = (metaLine: HTMLElement) => metaLine.querySelector('[data-record-meta-owner]');
+/** Open the 「系统信息」 group the meta line is on the laid-out page (objectstack#36147). */
+function openSystemInfo(metaLine: HTMLElement) {
+  const toggle = within(metaLine).getByRole('button', { name: 'System information' });
+  if (toggle.getAttribute('aria-expanded') !== 'true') fireEvent.click(toggle);
+}
+/** The value of the system group's row labelled `label`, or `null`. */
+const systemRow = (metaLine: HTMLElement, label: string) => {
+  const el = Array.from(metaLine.querySelectorAll('[data-detail-field-label]')).find((l) => l.textContent === label);
+  return (el?.closest('[data-detail-field-row]') as HTMLElement | null) ?? null;
+};
+const ownerEntry = (metaLine: HTMLElement) => systemRow(metaLine, 'Owner');
 /** How many times the owner's name is painted on the whole page. */
 const ownerCount = () => document.body.textContent!.split('Ada Admin').length - 1;
 
@@ -214,11 +228,12 @@ describe('the owner at every width, once (objectstack#28909)', () => {
     mountPage();
     const metaLine = await metaLineLoaded();
     expect(document.querySelector('[data-highlights-face]')).toBeNull();
+    openSystemInfo(metaLine);
     await waitFor(() => expect(ownerCount()).toBe(1));
     expect(ownerEntry(metaLine)).toBeNull();
     expect(metaLine.textContent).not.toContain('Ada Admin');
     // The rest of the meta line is still drawn.
-    expect(metaLine.querySelector('[data-record-meta-id]')!.textContent).toBe('r-1');
+    expect(systemRow(metaLine, 'Record ID')!.textContent).toContain('r-1');
   });
 
   it.each([
@@ -229,11 +244,16 @@ describe('the owner at every width, once (objectstack#28909)', () => {
     mountPage(OBJECTS_OWNER_HIDDEN);
     const metaLine = await metaLineLoaded();
     expect(document.querySelector('[data-highlights-face]')).toBeNull();
-    const owner = ownerEntry(metaLine);
+    openSystemInfo(metaLine);
+    const owner = await waitFor(() => {
+      const row = ownerEntry(metaLine);
+      expect(row?.textContent).toContain('Ada Admin');
+      return row;
+    });
     expect(owner).toBeTruthy();
     expect(owner!.textContent).toContain('Ada Admin');
     expect(ownerCount()).toBe(1);
     // The rest of the meta line is still drawn.
-    expect(metaLine.querySelector('[data-record-meta-id]')!.textContent).toBe('r-1');
+    expect(systemRow(metaLine, 'Record ID')!.textContent).toContain('r-1');
   });
 });

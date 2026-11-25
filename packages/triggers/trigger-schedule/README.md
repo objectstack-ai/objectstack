@@ -66,6 +66,10 @@ refusal names the spelling you wrote.
 | `{ type: 'interval', intervalMs }` / `{ every }` | interval                               |
 | `{ type: 'once', at }` / `{ at }`              | once                                     |
 
+A cron with no `timezone` runs in UTC, and `os validate` warns on it
+(`flow-schedule-timezone-missing`). Author the first row with its `timezone`
+(`'UTC'` when UTC is meant); the bare string cannot carry one.
+
 ## Usage
 
 ```ts
@@ -127,7 +131,7 @@ schedule and launched **once per matching record**:
       maxRecords: 1000,              // optional per-sweep cap (default 1000)
     },
     organization: '<sys_organization.id>', // REQUIRED — same refusal as above
-    schedule: { type: 'cron', expression: '0 8 * * *' }, // optional; defaults to daily 08:00 UTC
+    schedule: { type: 'cron', expression: '0 8 * * *', timezone: 'UTC' }, // optional; defaults to daily 08:00 UTC
     condition: '...',                // optional per-record start-condition gate
   },
 }

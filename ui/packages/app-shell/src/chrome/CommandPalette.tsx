@@ -15,14 +15,17 @@
  * app. On `/studio` (`scope="studio"`), a frame outside every app, it has no
  * app-scoped group and no full-search command, whose links all start with
  * `/apps/APP`; it lists the Studio's packages, objects and flows instead, each
- * opening its Studio page.
+ * opening its Studio page. On a Studio design page (objectstack#36900) the page
+ * hands the palette its own groups (`surface`): on a package, every type and
+ * item of that package by the left menu's groups, in place of every package's
+ * objects and flows.
  *
  * A failure inside the palette closes it and leaves the console mounted; the
  * next open draws a fresh palette (objectui#13387).
  */
 
 import { useEffect, useState, useMemo, type ReactNode } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import {
   Command,
   Dialog,
@@ -35,7 +38,9 @@ import {
   CommandItem,
   CommandList,
   CommandSeparator,
+  DIALOG_VIEWPORT_GUTTER,
   ObjectIconTile,
+  cn,
 } from '@object-ui/components';
 import {
   LayoutDashboard,
@@ -48,9 +53,10 @@ import {
   Boxes,
   Database,
   Workflow,
+  Plus,
   type LucideIcon,
 } from 'lucide-react';
-import { useRecordSearch } from '@object-ui/react';
+import { useObjectLabel, usePredicateScope, useRecordSearch, type RecordSearchHit } from '@object-ui/react';
 import { usePermissions } from '@object-ui/permissions';
 import { useTheme } from './ThemeProvider.js';
 import { navEntriesShownToMember, useNavMemberGates, type NavMemberGates } from '../hooks/useNavMemberGates.js';
@@ -59,6 +65,7 @@ import { resolveKeyedI18nLabel, getRecordDisplayName, appRouteSegment } from '..
 import { appAddressSegment, filterActiveApps } from '../utils/appRoute.js';
 import { navigationNames } from '../console/appObjectScope.js';
 import { getIcon } from '../utils/getIcon.js';
+import { AppMark } from '../layout/AppMark.js';
 import { useRecentItems } from '../context/RecentItemsProvider.js';
 import { useRecentItemLabel } from '../hooks/useRecentItemLabel.js';
 import { recentItemObject } from '../console/home/recentItemTypeLabel.js';
@@ -77,9 +84,21 @@ import { useAuth } from '@object-ui/auth';
 import { matchesPaletteQuery } from './paletteMatch.js';
 import { fetchPackages, type PkgEntry } from '../views/studio-design/packages-io.js';
 import { isPackageLessItem, studioOrgScopePath } from '../views/studio-design/studioScope.js';
-import { DESIGNER_SURFACE_PARAM, formatSurfaceParam } from '../views/metadata-admin/nav-selection.js';
+import { studioHomePath, studioItemPath } from '../views/studio-design/studioAddress.js';
 import { flattenNavigation, useAppReportEntries } from '../views/appReportIndex.js';
 import { useServedApps } from '../hooks/useLauncherApps.js';
+import { servedObjectLabel } from '../hooks/servedObjectLabel.js';
+import {
+  CREATE_AS_MAX,
+  paletteCreateHref,
+  paletteCreateTargets,
+  routeObjectName,
+  type PaletteCreateObjectDef,
+  type PaletteCreateTarget,
+} from './paletteCreate.js';
+import { PalettePreviewPane, type PalettePreviewTarget } from './PalettePreviewPane.js';
+import { PaletteEnterHint } from './PaletteEnterHint.js';
+import { PaletteCurrentPageGroup, paletteCurrentPage } from './PaletteCurrentPage.js';
 
 /** A recent row names its object by name (objectstack#29121). */
 const RECENT_ROW_LABELS: NavTargetLabelOptions = { byName: true };
@@ -107,6 +126,45 @@ interface AppCommandPaletteProps {
  */
 interface StudioCommandPaletteProps {
   scope: 'studio';
+  /**
+   * The Studio design page the palette is open on (objectstack#36900), which
+   * hands it that page's own groups; omitted on the `/studio` landing.
+   */
+  surface?: StudioPaletteSurface;
+}
+
+/** What a scope's own groups are handed while the palette is open (objectstack#36900). */
+export interface StudioPaletteGroupsProps {
+  /** The typed query, matched with `matchesPaletteQuery`. */
+  query: string;
+  /** Closes the palette and opens a Studio address, through the page's {@link StudioPaletteSurface.open}. */
+  open: (to: string) => void;
+  /** Whether a read the groups wait on is still in flight: the empty palette says "Searching…" meanwhile. */
+  onLoadingChange: (loading: boolean) => void;
+}
+
+/**
+ * A Studio design page's half of the palette (objectstack#36900): the page
+ * knows its scope, its unsaved work and how it re-enters itself, so it draws
+ * its own groups and opens what is picked. The palette stays free of the
+ * page's reads: they load with the page, never with the console.
+ */
+export interface StudioPaletteSurface {
+  /**
+   * Whether the page is one package's. Its groups then list that package's
+   * items, so the palette does not also list every package's objects and
+   * flows; the package-less scope and the cross-package leg keep them.
+   */
+  packageScope: boolean;
+  /** The page's groups for the query, drawn above the packages; mounted only while the palette is open. */
+  renderGroups: (props: StudioPaletteGroupsProps) => ReactNode;
+  /**
+   * Opens a Studio address the palette picked, after it closes: the page asks
+   * the shell's unsaved-edits seam (every editor that registered edits, not
+   * only the page's own), and re-enters itself when the address is the page
+   * already open on another query (`openStudioPaletteAddress`).
+   */
+  open: (to: string) => void;
 }
 
 type CommandPaletteProps = AppCommandPaletteProps | StudioCommandPaletteProps;
@@ -228,7 +286,12 @@ function CommandPaletteBody(props: CommandPaletteProps & { gates: NavMemberGates
   const { apps, activeApp, objects, onAppChange, dataSource } = inStudio ? NO_APP : props;
   const { open, setOpen } = useCommandPalette();
   const [inputValue, setInputValue] = useState('');
+  // The entry the keyboard is on, by its cmdk value (objectstack#36286): the
+  // footer says what Enter does to it, and a record hit is previewed beside
+  // the results.
+  const [selectedValue, setSelectedValue] = useState('');
   const navigate = useNavigate();
+  const location = useLocation();
   const { appName } = useParams();
   const { setTheme } = useTheme();
   const { t, language } = useObjectTranslation();
@@ -248,7 +311,10 @@ function CommandPaletteBody(props: CommandPaletteProps & { gates: NavMemberGates
 
   // Reset query when the palette closes so reopening doesn't show stale state.
   useEffect(() => {
-    if (!open) setInputValue('');
+    if (!open) {
+      setInputValue('');
+      setSelectedValue('');
+    }
   }, [open]);
   // What was typed between the shortcut and this input's focus starts the
   // query (objectstack#32627).
@@ -348,8 +414,15 @@ function CommandPaletteBody(props: CommandPaletteProps & { gates: NavMemberGates
 
   // objectui#11863 — the Studio's packages, objects and flows, read only while
   // the palette is open in the `studio` scope, matched like the entries above.
-  const studio = useStudioPaletteEntries(open && inStudio);
+  //
+  // objectstack#36900 — on a design page the page draws its own groups, and
+  // on a package those list its items in place of every package's objects
+  // and flows. What the palette picks there opens through the page.
+  const surface = inStudio ? props.surface : undefined;
+  const studio = useStudioPaletteEntries(open && inStudio, !surface?.packageScope);
   const studioMatches = (entry: StudioPaletteEntry) => matches(entry.label, entry.name);
+  const openStudio = (to: string) => (surface ? runCommand(() => surface.open(to)) : leaveTo(to));
+  const [surfaceLoading, setSurfaceLoading] = useState(false);
   const studioPackages = studio.packages.filter(studioMatches);
   const studioObjects = studio.objects.filter(studioMatches);
   const studioFlows = studio.flows.filter(studioMatches);
@@ -472,6 +545,71 @@ function CommandPaletteBody(props: CommandPaletteProps & { gates: NavMemberGates
     });
   }, [recordHits, objectsByName, t]);
 
+  // objectstack#36286 — the record hit the keyboard is on, previewed beside
+  // the results while there are any.
+  const recordHitByValue = new Map<string, RecordSearchHit>();
+  for (const hit of recordHits) recordHitByValue.set(recordHitValue(hit), hit);
+  const selectedHit = recordHitByValue.get(selectedValue);
+  const previewTarget: PalettePreviewTarget | null = selectedHit
+    ? { objectName: selectedHit.objectName, recordId: selectedHit.recordId }
+    : null;
+  const showPreview = recordGroups.length > 0;
+  // A query's record hits answer after its other entries are drawn, above
+  // them: when a new set of hits lands, the selection moves to the first one,
+  // so the top entry is the one Enter opens and the pane previews.
+  const firstHitValue = recordGroups[0]?.hits[0] ? recordHitValue(recordGroups[0].hits[0]) : '';
+  // Compared by the hits' text alone (ui/AGENTS.md #10): only a new set of
+  // hits moves the selection, and the arrow keys own it after.
+  const hitSignature = recordHits.map(recordHitValue).join('\n');
+  const [seenHitSignature, setSeenHitSignature] = useState('');
+  if (hitSignature !== seenHitSignature) {
+    setSeenHitSignature(hitSignature);
+    if (firstHitValue !== '') setSelectedValue(firstHitValue);
+  }
+
+  // objectstack#36286 — what the page behind the palette offers (its list's
+  // or its record's favorites entry), above everything else on the empty
+  // palette; nothing once something is typed.
+  const currentPage =
+    open && !inStudio && inputValue.trim() === ''
+      ? paletteCurrentPage(location.pathname, (name) => objectsByName.has(name))
+      : null;
+
+  // objectstack#36286 — the app's objects the member may create a record of,
+  // the object of the page the palette was opened on first. Only once
+  // something is typed: the empty palette is the recent records' screen.
+  const predicateScope = usePredicateScope();
+  const { objectLabel } = useObjectLabel();
+  const query = inputValue.trim();
+  const createTargets: PaletteCreateTarget[] =
+    open && query !== '' && !inStudio
+      ? paletteCreateTargets(
+          searchableObjectNames,
+          objectsByName as ReadonlyMap<string, PaletteCreateObjectDef>,
+          perms,
+          predicateScope,
+          routeObjectName(location.pathname, searchableObjectNames),
+        )
+      : [];
+  const createLabel = (target: PaletteCreateTarget) =>
+    servedObjectLabel(target.def as { name: string; label?: unknown }, language, objectLabel, target.objectName);
+  // A "New OBJECT" entry, found by its label's words and the object's own label and name.
+  const newRecordRows = createTargets
+    .map((target) => {
+      const objectText = createLabel(target);
+      const label = t('console.objectView.newObject', { object: objectText, defaultValue: 'New {{object}}' });
+      return { target, label, objectText };
+    })
+    .filter((row) => matches(row.label, row.objectText, row.target.objectName, NEW_RECORD_TERM));
+  // "Create 'words' as OBJECT": the typed words seed the object's title field.
+  // Not for an object the query already names as a "New" entry — the words
+  // ask for that action then, not for a record called that.
+  const newRecordObjects = new Set(newRecordRows.map((row) => row.target.objectName));
+  const createAsRows = createTargets
+    .filter((target) => target.prefillField && !newRecordObjects.has(target.objectName))
+    .slice(0, CREATE_AS_MAX)
+    .map((target) => ({ target, objectText: createLabel(target) }));
+
   return (
     <PaletteDialog
       open={open}
@@ -485,15 +623,18 @@ function CommandPaletteBody(props: CommandPaletteProps & { gates: NavMemberGates
         // without relying on i18n-fragile visible text (C4).
         'data-testid': COMMAND_PALETTE_TESTID,
       }}
+      value={selectedValue}
+      onValueChange={setSelectedValue}
+      wide={showPreview}
     >
       <CommandInput
         placeholder={t('console.commandPalette.placeholder')}
         value={inputValue}
         onValueChange={setInputValue}
       />
-      <CommandList>
+      <CommandList className="min-w-0">
         <CommandEmpty>
-          {isSearching || studio.loading ? (
+          {isSearching || studio.loading || surfaceLoading ? (
             <span className="inline-flex items-center gap-2 text-muted-foreground">
               <span
                 aria-hidden
@@ -505,6 +646,14 @@ function CommandPaletteBody(props: CommandPaletteProps & { gates: NavMemberGates
             t('console.commandPalette.noResults')
           )}
         </CommandEmpty>
+
+        {currentPage && (
+          <PaletteCurrentPageGroup
+            page={currentPage}
+            objectDef={objectsByName.get(currentPage.objectName)}
+            run={runCommand}
+          />
+        )}
 
         {/* Recently visited records (cloud-synced via sys_user_preference).
             Only renders when the input is empty so search results don't
@@ -568,7 +717,7 @@ function CommandPaletteBody(props: CommandPaletteProps & { gates: NavMemberGates
                   key={`${hit.objectName}:${hit.recordId}`}
                   // Stable across queries: cmdk filters nothing here
                   // (`shouldFilter` false), it only selects by the value.
-                  value={`record ${hit.display} ${hit.objectLabel} ${hit.objectName} ${hit.recordId}`}
+                  value={recordHitValue(hit)}
                   onSelect={() => leaveTo(`${recordHitBaseUrl(hit.objectName)}/${hit.objectName}/record/${hit.recordId}`)}
                 >
                   <ObjectIconTile glyph={Icon} color={group.color} className="mr-2" />
@@ -583,6 +732,7 @@ function CommandPaletteBody(props: CommandPaletteProps & { gates: NavMemberGates
             </CommandGroup>
           );
         })}
+
         {/* Object Navigation */}
         {objectItems.length > 0 && (
           <CommandGroup heading={t('console.commandPalette.objects')}>
@@ -665,6 +815,9 @@ function CommandPaletteBody(props: CommandPaletteProps & { gates: NavMemberGates
           </CommandGroup>
         )}
 
+        {/* objectstack#36900 — a Studio design page's own groups, first. */}
+        {open && surface?.renderGroups({ query: inputValue, open: openStudio, onLoadingChange: setSurfaceLoading })}
+
         {/* Studio (objectui#11863): packages, objects and flows, `studio` scope only */}
         {studioPackages.length > 0 && (
           <CommandGroup heading={t('console.commandPalette.packages')}>
@@ -674,7 +827,7 @@ function CommandPaletteBody(props: CommandPaletteProps & { gates: NavMemberGates
                 kind="studio-package"
                 entry={entry}
                 Icon={Boxes}
-                onOpen={() => leaveTo(entry.href)}
+                onOpen={() => openStudio(entry.href)}
               />
             ))}
           </CommandGroup>
@@ -687,7 +840,7 @@ function CommandPaletteBody(props: CommandPaletteProps & { gates: NavMemberGates
                 kind="studio-object"
                 entry={entry}
                 Icon={Database}
-                onOpen={() => leaveTo(entry.href)}
+                onOpen={() => openStudio(entry.href)}
               />
             ))}
           </CommandGroup>
@@ -700,7 +853,7 @@ function CommandPaletteBody(props: CommandPaletteProps & { gates: NavMemberGates
                 kind="studio-flow"
                 entry={entry}
                 Icon={Workflow}
-                onOpen={() => leaveTo(entry.href)}
+                onOpen={() => openStudio(entry.href)}
               />
             ))}
           </CommandGroup>
@@ -713,14 +866,14 @@ function CommandPaletteBody(props: CommandPaletteProps & { gates: NavMemberGates
             <CommandGroup heading={t('console.commandPalette.switchApp')}>
               {appItems
                 .map(app => {
-                  const Icon = getIcon(app.icon);
                   return (
                     <CommandItem
                       key={app.name}
                       value={`app ${resolveKeyedI18nLabel(app.label, t)} ${app.name}`}
                       onSelect={() => runCommand(() => confirmUnsavedLeave(() => onAppChange(appAddressSegment(apps, app) ?? app.name)))}
                     >
-                      <Icon className="mr-2 h-4 w-4" />
+                      {/* objectstack#36157 — the app's own mark, as the switcher draws it. */}
+                      <AppMark app={app} size="sm" className="mr-2" />
                       <span>{resolveKeyedI18nLabel(app.label, t)}</span>
                       {app.name === activeApp?.name && (
                         <span className="ml-auto text-xs text-muted-foreground">{t('console.commandPalette.current')}</span>
@@ -747,6 +900,49 @@ function CommandPaletteBody(props: CommandPaletteProps & { gates: NavMemberGates
           </>
         )}
 
+        {/* objectstack#36286 — create a record, below every result: the
+            "New OBJECT" entries the query finds, then "Create 'words' as
+            OBJECT". Last, so Enter on a query that finds something opens it. */}
+        {(newRecordRows.length > 0 || createAsRows.length > 0) && (
+          <>
+            <CommandSeparator />
+            <CommandGroup heading={t('console.commandPalette.create', { defaultValue: 'Create' })}>
+              {newRecordRows.map(({ target, label }) => (
+                <CommandItem
+                  key={`create-new:${target.objectName}`}
+                  value={`create new ${target.objectName}`}
+                  onSelect={() => leaveTo(paletteCreateHref(baseUrl, target.objectName))}
+                >
+                  <ObjectIconTile
+                    glyph={getIcon(typeof target.def.icon === 'string' ? target.def.icon : undefined)}
+                    color={typeof target.def.color === 'string' ? target.def.color : undefined}
+                    className="mr-2"
+                  />
+                  <span className="truncate">{label}</span>
+                </CommandItem>
+              ))}
+              {createAsRows.map(({ target, objectText }) => (
+                <CommandItem
+                  key={`create-as:${target.objectName}`}
+                  value={`create as ${target.objectName}`}
+                  onSelect={() =>
+                    leaveTo(paletteCreateHref(baseUrl, target.objectName, { field: target.prefillField!, value: query }))
+                  }
+                >
+                  <Plus className="mr-2 h-4 w-4" />
+                  <span className="truncate">
+                    {t('console.commandPalette.createAs', {
+                      query,
+                      object: objectText,
+                      defaultValue: 'Create "{{query}}" as {{object}}',
+                    })}
+                  </span>
+                </CommandItem>
+              ))}
+            </CommandGroup>
+          </>
+        )}
+
         {/* Full Search Page */}
         {showFullSearch && (
           <>
@@ -764,6 +960,8 @@ function CommandPaletteBody(props: CommandPaletteProps & { gates: NavMemberGates
           </>
         )}
       </CommandList>
+      {showPreview && <PalettePreviewPane target={previewTarget} dataSource={dataSource} />}
+      <PaletteEnterHint value={selectedValue} />
     </PaletteDialog>
   );
 }
@@ -785,6 +983,9 @@ function PaletteDialog({
   title,
   description,
   contentProps,
+  value,
+  onValueChange,
+  wide,
   children,
 }: {
   open: boolean;
@@ -792,14 +993,19 @@ function PaletteDialog({
   title: ReactNode;
   description: ReactNode;
   contentProps: Record<`data-${string}`, string>;
+  /** The selected entry's cmdk value (objectstack#36286). */
+  value: string;
+  onValueChange: (value: string) => void;
+  /** Room for the record preview beside the results (objectstack#36286). */
+  wide: boolean;
   children: ReactNode;
 }) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="overflow-hidden p-0 shadow-lg" {...contentProps}>
+      <DialogContent className={cn('overflow-hidden p-0 shadow-lg', wide && PALETTE_WIDE_CLASS)} {...contentProps}>
         <DialogTitle className="sr-only">{title}</DialogTitle>
         <DialogDescription className="sr-only">{description}</DialogDescription>
-        <Command shouldFilter={false} className={PALETTE_COMMAND_CLASS}>
+        <Command shouldFilter={false} value={value} onValueChange={onValueChange} className={PALETTE_COMMAND_CLASS}>
           {children}
         </Command>
       </DialogContent>
@@ -807,9 +1013,23 @@ function PaletteDialog({
   );
 }
 
-/** The cmdk root's classes, as `CommandDialog` draws them. */
+/**
+ * The palette's width while a record preview is drawn beside the results
+ * (objectstack#36286): room for two halves. The preview pane itself shows only
+ * from a 45rem frame on (`PREVIEW_PANE_CLASS`), so a narrower window keeps the
+ * results alone. The cap (768px) is wider than the narrowest `sm` window can
+ * hold with a margin, so it reads the shared viewport gutter (objectui#12603).
+ */
+const PALETTE_WIDE_CLASS = `sm:max-w-3xl ${DIALOG_VIEWPORT_GUTTER}`;
+
+/**
+ * The cmdk root's classes, as `CommandDialog` draws them, laid out as a grid
+ * (objectstack#36286): the input and the footer span the frame, the results
+ * and the record preview pane share the row between them. The root is also the
+ * container the pane's width query reads (`@container/palette`).
+ */
 const PALETTE_COMMAND_CLASS =
-  '[&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-muted-foreground [&_[cmdk-group]:not([hidden])_~[cmdk-group]]:pt-0 [&_[cmdk-group]]:px-2 [&_[cmdk-input-wrapper]_svg]:h-5 [&_[cmdk-input-wrapper]_svg]:w-5 [&_[cmdk-input]]:h-12 [&_[cmdk-item]]:px-2 [&_[cmdk-item]]:py-3 [&_[cmdk-item]_svg]:h-5 [&_[cmdk-item]_svg]:w-5';
+  '@container/palette grid grid-cols-[minmax(0,1fr)_auto] [&>[cmdk-input-wrapper]]:col-span-2 [&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-muted-foreground [&_[cmdk-group]:not([hidden])_~[cmdk-group]]:pt-0 [&_[cmdk-group]]:px-2 [&_[cmdk-input-wrapper]_svg]:h-5 [&_[cmdk-input-wrapper]_svg]:w-5 [&_[cmdk-input]]:h-12 [&_[cmdk-item]]:px-2 [&_[cmdk-item]]:py-3 [&_[cmdk-item]_svg]:h-5 [&_[cmdk-item]_svg]:w-5';
 
 /** The theme commands, matched by their label and their value (objectui#11812, objectstack#33061). */
 const THEME_COMMANDS = [
@@ -817,6 +1037,18 @@ const THEME_COMMANDS = [
   { value: 'theme dark', theme: 'dark', Icon: Moon },
   { value: 'theme system', theme: 'system', Icon: Monitor },
 ] as const;
+
+/**
+ * A record hit's cmdk value (objectstack#36286 reads the selection back by it):
+ * stable across queries, since cmdk filters nothing here (`shouldFilter`
+ * false) and only selects by the value.
+ */
+function recordHitValue(hit: RecordSearchHit): string {
+  return `record ${hit.display} ${hit.objectLabel} ${hit.objectName} ${hit.recordId}`;
+}
+
+/** A "New OBJECT" entry is also found by this word, in every language (objectstack#36286). */
+const NEW_RECORD_TERM = 'create new';
 
 /** The full-search command's value, matched beside its label (objectui#11812, objectstack#33061). */
 const FULL_SEARCH_VALUE = 'search all results full page';
@@ -854,16 +1086,6 @@ interface StudioPaletteEntries {
 const NO_STUDIO_ENTRIES: StudioPaletteEntries = { packages: [], objects: [], flows: [], loading: false };
 
 /**
- * A Studio pillar opened on one item, through the pillar's `?surface=` deep
- * link: the shape `studioOrgScopePath` builds for the package-less scope, under
- * a package. An object opens in the Data pillar and a flow in Automations,
- * the pillars `StudioDesignSurface` routes those surface types to.
- */
-function studioSurfacePath(packageId: string, pillar: 'data' | 'automations', surface: { type: string; name: string }): string {
-  return `/studio/${encodeURIComponent(packageId)}/${pillar}?${DESIGNER_SURFACE_PARAM}=${encodeURIComponent(formatSurfaceParam(surface))}`;
-}
-
-/**
  * The Studio's packages, objects and flows, as the `studio` scope lists them
  * (objectui#11863). Nothing is read until `enabled` (the palette is open in that
  * scope). The package list is read again each time it opens; until that read
@@ -886,8 +1108,12 @@ function studioSurfacePath(packageId: string, pillar: 'data' | 'automations', su
  * cache list. Until the package list answers nothing is listed, so no entry
  * is drawn without its package. If that read fails, the packaged entries are
  * left out; the landing behind the palette shows the same read's error.
+ *
+ * `crossPackageItems` false (a package's design page, objectstack#36900)
+ * lists the packages alone: the page lists its own package's items, and the
+ * objects and flows of every package are neither read nor listed.
  */
-function useStudioPaletteEntries(enabled: boolean): StudioPaletteEntries {
+function useStudioPaletteEntries(enabled: boolean, crossPackageItems = true): StudioPaletteEntries {
   const metadata = useMetadata();
   const { t } = useObjectTranslation();
   const [packages, setPackages] = useState<PkgEntry[] | null>(null);
@@ -912,9 +1138,10 @@ function useStudioPaletteEntries(enabled: boolean): StudioPaletteEntries {
 
   // Read only while open: each read starts that type's fetch when it has not
   // been loaded yet, and the provider re-renders this palette when it answers.
-  const objectItems: StudioServedItem[] = metadata.objects;
-  const flowItems: StudioServedItem[] = metadata.getItemsByType('flow');
+  const objectItems: StudioServedItem[] = crossPackageItems ? metadata.objects : [];
+  const flowItems: StudioServedItem[] = crossPackageItems ? metadata.getItemsByType('flow') : [];
   const typeLoading = (type: string) => {
+    if (!crossPackageItems) return false;
     const status = metadata.getTypeStatus?.(type);
     return status === 'idle' || status === 'loading';
   };
@@ -935,7 +1162,7 @@ function useStudioPaletteEntries(enabled: boolean): StudioPaletteEntries {
       key: `${pkg.id}:${item.name}`,
       label: resolveKeyedI18nLabel(item.label, t) || item.name,
       name: item.name,
-      href: studioSurfacePath(pkg.id, 'data', { type: 'object', name: item.name }),
+      href: studioItemPath(pkg.id, 'object', item.name),
       packageName: pkg.name,
     });
   }
@@ -959,7 +1186,7 @@ function useStudioPaletteEntries(enabled: boolean): StudioPaletteEntries {
       key: `${pkg.id}:${item.name}`,
       label,
       name: item.name,
-      href: studioSurfacePath(pkg.id, 'automations', { type: 'flow', name: item.name }),
+      href: studioItemPath(pkg.id, 'flow', item.name),
       packageName: pkg.name,
     });
   }
@@ -969,7 +1196,7 @@ function useStudioPaletteEntries(enabled: boolean): StudioPaletteEntries {
       key: pkg.id,
       label: pkg.name,
       name: pkg.id,
-      href: `/studio/${encodeURIComponent(pkg.id)}/data`,
+      href: studioHomePath(pkg.id),
     })),
     objects,
     flows,

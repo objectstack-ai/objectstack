@@ -22,6 +22,8 @@
  *  - objectstack#30063 — the page tile counts a page's override.
  */
 
+// Paid at collection, not inside a case's clock (check:test-source-alias).
+import '@objectstack/lint';
 import '@testing-library/jest-dom/vitest';
 import * as React from 'react';
 import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
@@ -115,10 +117,11 @@ const HOTCRM_READ = {
   ],
   extensions: [{ object: 'crm_account', kind: 'field', name: 'tier__c' }],
   switchedOff: [],
+  arrangements: [],
   contributions: [],
-  counts: { overrides: 2, extensions: 1, switchedOff: 0, contributions: 0 },
+  counts: { overrides: 2, extensions: 1, switchedOff: 0, arrangements: 0, contributions: 0 },
 };
-const EMPTY_READ = { packageId: PLAIN, overrides: [], extensions: [], switchedOff: [], contributions: [], counts: { overrides: 0, extensions: 0, switchedOff: 0, contributions: 0 } };
+const EMPTY_READ = { packageId: PLAIN, overrides: [], extensions: [], switchedOff: [], arrangements: [], contributions: [], counts: { overrides: 0, extensions: 0, switchedOff: 0, arrangements: 0, contributions: 0 } };
 
 let customizationsFail = false;
 /** objectstack#30063 — the read also lists a page's override. */
@@ -197,6 +200,8 @@ describe('the All metadata lists mark a base\'s customizations (objectstack#2856
   it('the translation list marks the served override "Customized (HotCRM)", and the filter shows it alone', async () => {
     mountList(area(BASE), 'translation', `?package=${BASE}`);
     const only = await screen.findByTestId('metadata-only-customizations');
+    // The grid draws its rows once its table is ready (objectstack#36897).
+    await screen.findByTestId('metadata-row-crm_en');
     expect(marksOf('crm_en')).toEqual([`customized:${tFormat('engine.customizationMark.customized', 'en-US', { baseName: 'HotCRM' })}`]);
     expect(marksOf('crm_en')).toEqual(['customized:Customized (HotCRM)']);
     // CONTROL: the base's item the read does not list carries no mark.
@@ -215,6 +220,7 @@ describe('the All metadata lists mark a base\'s customizations (objectstack#2856
   it('the email-template list holds the pair\'s item beside the base\'s, marked "Added"', async () => {
     mountList(area(BASE), 'email_template', `?package=${BASE}`);
     await screen.findByTestId('metadata-only-customizations');
+    await screen.findByTestId('metadata-row-renewal_notice');
     expect(marksOf('renewal_notice')).toEqual([`added:${t('engine.customizationMark.added', 'en-US')}`]);
     // The read overrides `welcome` in zh-CN only: the en member is the base's own.
     expect(marksOf('welcome')).toEqual([]);
@@ -226,6 +232,7 @@ describe('the All metadata lists mark a base\'s customizations (objectstack#2856
     const failed = await screen.findByTestId('metadata-customizations-failed');
     expect(failed).toHaveTextContent('The customization ledger is unavailable.');
     // The pair's item is still listed (the list read is its own), unmarked.
+    await screen.findByTestId('metadata-row-renewal_notice');
     expect(marksOf('renewal_notice')).toEqual([]);
     expect(screen.queryByTestId('metadata-only-customizations')).toBeNull();
   });

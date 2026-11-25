@@ -18,6 +18,8 @@
  * - A reader who may not edit (no field grant, a page that may not edit, an
  *   approval lock) sees the plain tag.
  * - The keyboard: Enter on the tag opens, arrows move, Enter picks, Esc closes.
+ * - After a 409 the dialog asks what the re-read record needs (#36036): a field
+ *   another writer filled meanwhile leaves the dialog and the move.
  *
  * `@object-ui/*` resolves to source through the root vitest alias table.
  */
@@ -118,7 +120,7 @@ function mount(opts: MountOptions = {}) {
       data={{ id: 'o1', name: 'Wayne deal', stage, loss_reason: null, updated_at: VERSION }}
       objectSchema={opts.schema ?? OPPORTUNITY}
       dataSource={dataSource as any}
-      refresh={refresh}
+      reread={refresh}
     >
       <InlineEditProvider canEdit={opts.canEdit ?? true}>
         <RecordStageMenu field="stage" label={label} tag={tag} />
@@ -143,7 +145,17 @@ beforeEach(() => {
   perms.writeDenied = [];
 });
 
-afterEach(() => cleanup());
+// objectstack#35928 — the stage confirm asks which flows the move would start.
+// Answered here as a deployment without that read (501), so the confirm reads as
+// it does without it and no request leaves for the network.
+beforeEach(() => {
+  vi.stubGlobal('fetch', vi.fn(async () => ({ ok: false, status: 501, json: async () => ({}) })));
+});
+
+afterEach(() => {
+  cleanup();
+  vi.unstubAllGlobals();
+});
 
 describe('#35891 the stage tag opens a menu of every stage', () => {
   it('lists every stage in order, the current one checked', () => {
@@ -403,6 +415,120 @@ describe('#35956 the stage menu opens the shared fill-in dialog', () => {
   });
 });
 
+describe('#36036 after a 409 re-read, the stage dialog asks what the re-read record needs', () => {
+  const NEXT_VERSION = '2026-11-20T12:05:00.000Z';
+  const conflict = () => Object.assign(new Error('CONCURRENT_UPDATE'), { code: 'CONCURRENT_UPDATE', status: 409 });
+  const STORED = { id: 'o1', name: 'Wayne deal', stage: 'prospecting', loss_reason: null, loss_detail: null, updated_at: VERSION };
+  // A typed loss reason of "other" makes one more field required in turn.
+  const CHAINED = {
+    ...OPPORTUNITY,
+    fields: {
+      ...OPPORTUNITY.fields,
+      loss_detail: {
+        type: 'text',
+        label: 'Loss Detail',
+        requiredWhen: 'has(record.loss_reason) && record.loss_reason == "other"',
+      },
+    },
+  } as unknown as typeof OPPORTUNITY;
+
+  /**
+   * The page's re-read as the record page wires it: a notice that returns at
+   * once, the re-read row landing in the record context afterwards.
+   */
+  function mountReRead(reread: Record<string, unknown>, schema: typeof OPPORTUNITY = OPPORTUNITY) {
+    let calls = 0;
+    const dataSource = makeDataSource(async () => {
+      calls += 1;
+      if (calls === 1) throw conflict();
+      return {};
+    });
+    const refresh = vi.fn();
+    function Host() {
+      const [row, setRow] = React.useState<Record<string, unknown>>(STORED);
+      refresh.mockImplementation(() => { setTimeout(() => setRow(reread), 0); });
+      return (
+        <RecordContextProvider
+          objectName="crm_opportunity"
+          recordId="o1"
+          data={row}
+          objectSchema={schema}
+          dataSource={dataSource as any}
+          reread={refresh}
+        >
+          <InlineEditProvider canEdit>
+            <RecordStageMenu field="stage" label="Prospecting" tag={<span>Prospecting</span>} />
+          </InlineEditProvider>
+        </RecordContextProvider>
+      );
+    }
+    render(<Host />);
+    return { dataSource, refresh };
+  }
+
+  const fieldsShown = (dialog: HTMLElement) =>
+    Array.from(dialog.querySelectorAll('[data-required-fields-field]')).map((el) => el.getAttribute('data-required-fields-field'));
+
+  async function typeAndHitConflict(dialog: HTMLElement, dataSource: ReturnType<typeof makeDataSource>, refresh: ReturnType<typeof vi.fn>) {
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Move' }));
+    await waitFor(() => expect(dataSource.update).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(refresh).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(dialog.querySelector('[data-required-fields-refusal]')).toHaveTextContent('Someone else changed this record'));
+  }
+
+  it('another writer filled the asked field: it leaves the dialog, and the next Move does not send it', async () => {
+    const { dataSource, refresh } = mountReRead({ ...STORED, loss_reason: 'Budget cut', updated_at: NEXT_VERSION });
+    fireEvent.click(item(openMenu(), 'Closed Lost'));
+    const dialog = await screen.findByRole('dialog');
+    expect(fieldsShown(dialog)).toEqual(['loss_reason']);
+    fireEvent.change(within(dialog).getByRole('textbox'), { target: { value: 'Price' } });
+    await typeAndHitConflict(dialog, dataSource, refresh);
+    // Nothing is left to fill: the record, the stage and the move button.
+    await waitFor(() => expect(fieldsShown(dialog)).toEqual([]));
+    expect(within(dialog).getByText('Move this record to Closed Lost?')).toBeInTheDocument();
+    expect(dialog.querySelector('[data-required-fields-change-row="stage"]')).toHaveTextContent('Stage:Closed Lost');
+    expect(within(dialog).queryByRole('textbox')).toBeNull();
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Move' }));
+    await waitFor(() => expect(dataSource.update).toHaveBeenCalledTimes(2));
+    expect(dataSource.update).toHaveBeenLastCalledWith(
+      'crm_opportunity', 'o1', { stage: 'closed_lost' }, { ifMatch: NEXT_VERSION },
+    );
+  });
+
+  it('control: a 409 where the asked field is still empty keeps it, with the typed value, and sends it', async () => {
+    const { dataSource, refresh } = mountReRead({ ...STORED, name: 'Wayne deal (renamed)', updated_at: NEXT_VERSION });
+    fireEvent.click(item(openMenu(), 'Closed Lost'));
+    const dialog = await screen.findByRole('dialog');
+    fireEvent.change(within(dialog).getByRole('textbox'), { target: { value: 'Price' } });
+    await typeAndHitConflict(dialog, dataSource, refresh);
+    await waitFor(() => expect(within(dialog).getByText('Wayne deal (renamed)')).toBeInTheDocument());
+    expect(fieldsShown(dialog)).toEqual(['loss_reason']);
+    expect(within(dialog).getByRole('textbox')).toHaveValue('Price');
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Move' }));
+    await waitFor(() => expect(dataSource.update).toHaveBeenCalledTimes(2));
+    expect(dataSource.update).toHaveBeenLastCalledWith(
+      'crm_opportunity', 'o1', { stage: 'closed_lost', loss_reason: 'Price' }, { ifMatch: NEXT_VERSION },
+    );
+  });
+
+  it('a value typed for the filled field no longer asks for the field it chained in', async () => {
+    const { dataSource, refresh } = mountReRead({ ...STORED, loss_reason: 'Budget cut', updated_at: NEXT_VERSION }, CHAINED);
+    fireEvent.click(item(openMenu(), 'Closed Lost'));
+    const dialog = await screen.findByRole('dialog');
+    fireEvent.change(within(dialog).getByRole('textbox'), { target: { value: 'other' } });
+    await waitFor(() => expect(fieldsShown(dialog)).toEqual(['loss_reason', 'loss_detail']));
+    const detail = dialog.querySelector('[data-required-fields-field="loss_detail"]') as HTMLElement;
+    fireEvent.change(within(detail).getByRole('textbox'), { target: { value: 'Went with a competitor' } });
+    await typeAndHitConflict(dialog, dataSource, refresh);
+    await waitFor(() => expect(fieldsShown(dialog)).toEqual([]));
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Move' }));
+    await waitFor(() => expect(dataSource.update).toHaveBeenCalledTimes(2));
+    expect(dataSource.update).toHaveBeenLastCalledWith(
+      'crm_opportunity', 'o1', { stage: 'closed_lost' }, { ifMatch: NEXT_VERSION },
+    );
+  });
+});
+
 describe('#35891 who sees the plain tag', () => {
   it('a reader the page may not let edit (an approval lock included) sees the tag, no arrow', () => {
     mount({ canEdit: false });
@@ -421,6 +547,51 @@ describe('#35891 who sees the plain tag', () => {
     mount();
     expect(screen.queryByTestId('plain-tag')).toBeNull();
     expect(trigger()).toHaveTextContent('Prospecting');
+  });
+});
+
+describe('#36309 a host with only refresh still re-reads; reread wins where both are given', () => {
+  const conflict = () => Object.assign(new Error('CONCURRENT_UPDATE'), { code: 'CONCURRENT_UPDATE', status: 409 });
+
+  function mountWith(members: { refresh?: () => Promise<void>; reread?: () => Promise<void> }) {
+    const dataSource = makeDataSource(async () => { throw conflict(); });
+    render(
+      <RecordContextProvider
+        objectName="crm_opportunity"
+        recordId="o1"
+        data={{ id: 'o1', name: 'Wayne deal', stage: 'prospecting', loss_reason: null, updated_at: VERSION }}
+        objectSchema={OPPORTUNITY}
+        dataSource={dataSource as any}
+        {...members}
+      >
+        <InlineEditProvider canEdit>
+          <RecordStageMenu field="stage" label="Prospecting" tag={<span>Prospecting</span>} />
+        </InlineEditProvider>
+      </RecordContextProvider>,
+    );
+    return { dataSource };
+  }
+
+  it('a provider with only refresh: a 409 on Move calls refresh', async () => {
+    const refresh = vi.fn(async () => {});
+    const { dataSource } = mountWith({ refresh });
+    fireEvent.click(item(openMenu(), 'Negotiation'));
+    const dialog = await screen.findByRole('dialog');
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Move' }));
+    await waitFor(() => expect(dataSource.update).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(refresh).toHaveBeenCalledTimes(1));
+  });
+
+  it('CONTROL — a provider with both: a 409 on Move calls reread, not refresh', async () => {
+    const refresh = vi.fn(async () => {});
+    const reread = vi.fn(async () => {});
+    const { dataSource } = mountWith({ refresh, reread });
+    fireEvent.click(item(openMenu(), 'Negotiation'));
+    const dialog = await screen.findByRole('dialog');
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Move' }));
+    await waitFor(() => expect(dataSource.update).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(reread).toHaveBeenCalledTimes(1));
+    expect(refresh).not.toHaveBeenCalled();
   });
 });
 
@@ -477,5 +648,77 @@ describe('#35891 the keyboard', () => {
     fireEvent.click(screen.getByRole('button', { name: 'go' }));
     const dialog = await screen.findByRole('alertdialog');
     await waitFor(() => expect(within(dialog).getByRole('button', { name: 'Cancel' })).toHaveFocus());
+  });
+});
+
+// objectstack#35928 — under its sentence the confirm names the flows the move
+// would start (`POST /api/v1/automation/_record-starts`, read through
+// `../stageChangeStarts`, the reader the list cell's confirm shares); no flows,
+// a refused read and a malformed answer leave the sentence alone.
+describe('#35928 the stage menu\'s dialog names the flows the move starts', () => {
+  const CLOSURE = { name: 'closure', label: 'Closure Sign-off', startsApproval: true };
+  const NOTIFY = { name: 'notify_owner', label: 'Notify Owner', startsApproval: false };
+  type StartsAnswer = { status: number; body: unknown } | 'network-error';
+
+  /** The global `fetch`, answering the read with `answer` and recording every request. */
+  function installStartsFetch(answer: StartsAnswer) {
+    const calls: Array<{ url: string; body: any }> = [];
+    vi.stubGlobal('fetch', vi.fn(async (url: unknown, init?: { body?: unknown }) => {
+      calls.push({ url: String(url), body: init?.body ? JSON.parse(String(init.body)) : undefined });
+      if (answer === 'network-error') throw new TypeError('Failed to fetch');
+      return { ok: answer.status < 400, status: answer.status, json: async () => answer.body };
+    }));
+    return calls;
+  }
+  const listed = (flows: unknown[]): StartsAnswer => ({ status: 200, body: { success: true, data: { flows } } });
+  const startsCalls = (calls: Array<{ url: string }>) => calls.filter((c) => c.url === '/api/v1/automation/_record-starts');
+  /** Let an answer that arrived land before reading that nothing was drawn for it. */
+  const settle = () => new Promise((r) => setTimeout(r, 0));
+
+  async function openConfirm(): Promise<HTMLElement> {
+    mount();
+    fireEvent.click(item(openMenu(), 'Negotiation'));
+    return screen.findByRole('dialog');
+  }
+
+  it('list: asks for the record and the move, and names each flow under the sentence, approval marked', async () => {
+    const calls = installStartsFetch(listed([CLOSURE, NOTIFY]));
+    const dialog = await openConfirm();
+    const list = await within(dialog).findByTestId('stage-change-starts');
+    expect(within(dialog).getByText('Move this record to Negotiation?')).toBeInTheDocument();
+    expect(list).toHaveTextContent('Saving this change starts these flows:');
+    const closure = list.querySelector('[data-stage-change-start="closure"]')!;
+    const notify = list.querySelector('[data-stage-change-start="notify_owner"]')!;
+    expect(closure).toHaveTextContent('Closure Sign-off');
+    expect(closure.querySelector('[data-stage-change-start-approval]')).toHaveTextContent('starts an approval');
+    expect(notify).toHaveTextContent('Notify Owner');
+    expect(notify.querySelector('[data-stage-change-start-approval]')).toBeNull();
+    expect(startsCalls(calls).map((c: any) => c.body)).toEqual([{ object: 'crm_opportunity', recordId: 'o1', changes: { stage: 'negotiation' } }]);
+  });
+
+  it('empty: no flows answered draws no list, and the sentence stands alone', async () => {
+    const calls = installStartsFetch(listed([]));
+    const dialog = await openConfirm();
+    await waitFor(() => expect(startsCalls(calls)).toHaveLength(1));
+    await settle();
+    expect(within(dialog).queryByTestId('stage-change-starts')).toBeNull();
+    expect(within(dialog).getByText('Move this record to Negotiation?')).toBeInTheDocument();
+  });
+
+  it('failure: a refused read, a network error and a malformed answer each draw no list', async () => {
+    const answers: StartsAnswer[] = [
+      { status: 404, body: { success: false, error: { code: 'RECORD_NOT_FOUND', message: 'no' } } },
+      'network-error',
+      { status: 200, body: { flows: [CLOSURE] } },
+    ];
+    for (const answer of answers) {
+      const calls = installStartsFetch(answer);
+      const dialog = await openConfirm();
+      await waitFor(() => expect(startsCalls(calls)).toHaveLength(1));
+      await settle();
+      expect(within(dialog).queryByTestId('stage-change-starts')).toBeNull();
+      expect(within(dialog).getByText('Move this record to Negotiation?')).toBeInTheDocument();
+      cleanup();
+    }
   });
 });

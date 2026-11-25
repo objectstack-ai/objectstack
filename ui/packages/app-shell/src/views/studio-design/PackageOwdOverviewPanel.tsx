@@ -16,9 +16,11 @@
  * the per-principal permission-set matrix (which was considered and rejected).
  * It has no principal dimension.
  *
- *   • Save = per-object metadata DRAFTs under the package scope — byte-for-byte
- *     what the per-object Settings tab writes, just N objects in one action.
- *     Publish then flows through the unchanged package security-domain gate.
+ *   • Save = the Studio top bar's one Save (objectstack#36511): each changed
+ *     object's draft under the package scope — byte-for-byte what the
+ *     per-object Settings tab writes — then that object's own publish, so the
+ *     change is live at once. Cancel puts every dial back. A refused object
+ *     keeps its edit on the page, and the reason is shown.
  *   • `controlled_by_parent` rows show the master link (read-only) under the
  *     row's dial.
  *   • There is no external column: `externalSharingModel` is retired by
@@ -28,7 +30,7 @@
  */
 
 import * as React from 'react';
-import { Save, Loader2, Lock, ArrowUpRight } from 'lucide-react';
+import { Lock, ArrowUpRight } from 'lucide-react';
 import type { MetadataClient, MetadataLayered } from '@object-ui/data-objectstack';
 // The ONE draft-envelope reader (objectui#8181): unwrap AND strip the
 // framework's read decorations in one place. This file used to carry its own
@@ -61,6 +63,7 @@ import { readFields } from '../metadata-admin/previews/object-fields-io.js';
 import { t, tFormat, type SupportedLocale } from '../metadata-admin/i18n.js';
 import { cbpMasterDetailDefaultsRequired, deriveMasterObject, requireCbpMasterDetails } from './owd-sharing.js';
 import { toast } from 'sonner';
+import { STUDIO_SAVE_TOAST_ID, publishSavedItem, useStudioSaveEntry, type StudioSaveResult } from './studioSaveBar.js';
 
 
 /**
@@ -221,8 +224,6 @@ export interface PackageOwdOverviewPanelProps {
   packageId: string;
   /** Bumped on package publish → re-read the freshly published baseline. */
   publishNonce?: number;
-  /** Notify the surface so its pending-changes counter refreshes after a save. */
-  onDraftSaved?: () => void;
   /**
    * Courtesy gate: read-only packages render badges only (the framework's
    * ADR-0124 D1 — server enforces, client is courtesy).
@@ -242,7 +243,6 @@ export function PackageOwdOverviewPanel({
   client,
   packageId,
   publishNonce = 0,
-  onDraftSaved,
   readOnly = false,
   locale,
   highlightObject,
@@ -394,17 +394,31 @@ export function PackageOwdOverviewPanel({
     if (!isDirty) setSaveError(null);
   }, [isDirty]);
 
-  const doSave = React.useCallback(async (force = false) => {
+  // objectstack#36511 — the top bar's Save: each changed row's draft, then that
+  // object's own publish, one row after another. A row refused keeps its edit
+  // on the page and is named in the refusal; the rows saved are live.
+  const doSave = React.useCallback(async (force = false): Promise<StudioSaveResult> => {
     const changed = rowState.filter((s) => s.dirty);
-    if (changed.length === 0) return;
+    if (changed.length === 0) return { kind: 'declined' };
     setSaving(true);
     setSaveError(null);
     setPrereq(null);
+    const refused: Array<{ name: string; label: string; reason: string; edit: OwdEdit }> = [];
+    let saved = 0;
+    const savedNames = new Set<string>();
+    // Read the rows back from the server, then put back the edits of the rows
+    // this pass did not save.
+    const reloadKeeping = async (unsaved: ReadonlyArray<{ row: { name: string }; edit: OwdEdit }>) => {
+      await load();
+      if (unsaved.length > 0) {
+        setEdits((prev) => ({ ...prev, ...Object.fromEntries(unsaved.map((u) => [u.row.name, u.edit])) }));
+      }
+    };
     try {
       // Each changed row lands as that object's package-scoped DRAFT: read the
-      // fresh body (below), apply just `sharingModel` (unset → drop the key), and
-      // save. Identical to the per-object Settings write, N times — publish
-      // then goes through the same package security-domain gate unchanged.
+      // fresh body (below), apply just `sharingModel` (unset → drop the key),
+      // save, and publish that one object. Identical to the per-object
+      // Settings write, N times.
       for (const s of changed) {
         // objectui#11799 — the row's saved state from the load decides whether
         // the baseline is asked before the draft is in hand.
@@ -447,9 +461,15 @@ export function PackageOwdOverviewPanel({
           // objectstack#27458 — making the relationship required is a change
           // the server's destructive-change guard asks to confirm (409). Name
           // the prerequisite and offer it, instead of a dead-end banner. The
-          // guard stands: nothing is forced until the author confirms.
+          // guard stands: nothing is forced until the author confirms, and the
+          // Save stops here with every edit still on the page.
           if (!force && relations.length > 0 && (e as { status?: number })?.status === 409 && errorCodeIs(e, 'DESTRUCTIVE_CHANGE')) {
             const issues = (e as { issues?: unknown }).issues;
+            // Rows this pass already published are live: the page reads them
+            // back before it asks, so it never shows a live row as unsaved, and
+            // Cancel never puts back a value the server no longer holds. Every
+            // row not yet saved keeps its edit for the confirm's second pass.
+            if (saved > 0) await reloadKeeping(changed.filter((c) => !savedNames.has(c.row.name)));
             setPrereq({
               object: s.row.label,
               relations,
@@ -457,22 +477,66 @@ export function PackageOwdOverviewPanel({
                 .map((i) => String((i as { message?: unknown })?.message ?? ''))
                 .filter(Boolean),
             });
-            return;
+            return { kind: 'declined' };
           }
-          throw e;
+          refused.push({ name: s.row.name, label: s.row.label, reason: formatMetadataError(e), edit: s.edit });
+          continue;
         }
+        // A draft that was pending before this save (a copilot's) is published
+        // with it; a refused publish takes back only the draft this save wrote.
+        const live = await publishSavedItem(client, { type: 'object', name: s.row.name, packageId }, s.row.hasDraft);
+        if (!live.ok) {
+          refused.push({ name: s.row.name, label: s.row.label, reason: formatMetadataError(live.error), edit: s.edit });
+          continue;
+        }
+        saved += 1;
+        savedNames.add(s.row.name);
       }
-      toast.success(tFormat('engine.studio.owd.saved', locale, { count: changed.length }));
-      onDraftSaved?.();
-      await load();
-    } catch (e) {
-      setSaveError(formatMetadataError(e));
+      // A Save leaves no draft: the publish told the ledger behind Changes.
+      // The reload puts every dial back at what the server holds: a refused
+      // row's edit stays on the page, unsaved.
+      if (saved > 0) await reloadKeeping(changed.filter((c) => !savedNames.has(c.row.name)));
+      if (refused.length === 0) return { kind: 'saved' };
+      const reason = refused
+        .map((r) => tFormat('engine.studio.save.refusedLine', locale, { item: r.label, reason: r.reason }))
+        .join('\n');
+      setSaveError(reason);
+      return { kind: 'refused', reason };
     } finally {
       setSaving(false);
     }
-  }, [rowState, client, packageId, onDraftSaved, load, locale]);
+  }, [rowState, client, packageId, load, locale]);
 
-  const canSave = !readOnly && !saving && dirtyCount > 0;
+  // Cancel: every dial back at what the server holds, nothing sent.
+  const doCancel = React.useCallback(() => {
+    setEdits(Object.fromEntries(rows.map((r) => [r.name, { internal: r.internal }])));
+    setSaveError(null);
+    setPrereq(null);
+  }, [rows]);
+
+  useStudioSaveEntry(
+    !readOnly && loaded && !loadError
+      ? {
+          label: t('engine.studio.owd.title', locale),
+          order: 0,
+          dirty: isDirty,
+          held: null,
+          save: () => doSave(),
+          cancel: doCancel,
+        }
+      : null,
+  );
+
+  // The prerequisite's confirm saves again, forced on the rows that carry one;
+  // it is the author's answer to the top bar's Save, so it reports as Save does.
+  const confirmPrereq = React.useCallback(async () => {
+    const result = await doSave(true);
+    if (result.kind === 'saved') {
+      toast.success(tFormat('engine.studio.save.done', locale, { items: t('engine.studio.owd.title', locale) }), {
+        id: STUDIO_SAVE_TOAST_ID,
+      });
+    }
+  }, [doSave, locale]);
 
   // The dial's options, in the order the native control listed them.
   const internalOptions = [
@@ -483,29 +547,17 @@ export function PackageOwdOverviewPanel({
     <div className="flex h-full flex-col" data-testid="owd-overview">
       {/* objectui#12456 — the overview's title and subtitle are the Access
           pillar's item header above this panel, so its own header is the
-          toolbar row: what the dials decide, and Save. */}
+          toolbar row: what the dials decide. objectstack#36511 — its Save is
+          the top bar's. */}
       <div className="flex items-center gap-3 border-b px-6 py-3">
         <p className="min-w-0 flex-1 text-xs text-muted-foreground">{t('engine.studio.owd.description', locale)}</p>
-        {readOnly ? (
+        {readOnly && (
           <span
             title={t('engine.studio.pkg.readonlyHint', locale)}
             className="flex shrink-0 items-center gap-1.5 text-[11px] text-muted-foreground"
           >
             <Lock className="h-3 w-3" /> {t('engine.studio.pkg.readonly', locale)}
           </span>
-        ) : (
-          <button
-            type="button"
-            onClick={() => void doSave()}
-            disabled={!canSave}
-            data-testid="owd-save"
-            className="inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md bg-primary px-3 text-xs font-medium text-primary-foreground disabled:opacity-50"
-          >
-            {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />}
-            {dirtyCount > 0
-              ? tFormat('engine.studio.owd.save', locale, { count: dirtyCount })
-              : t('engine.studio.owd.saveNone', locale)}
-          </button>
         )}
       </div>
 
@@ -531,7 +583,7 @@ export function PackageOwdOverviewPanel({
           )}
           <DialogFooter>
             <Button variant="ghost" onClick={() => setPrereq(null)}>{t('engine.cancel', locale)}</Button>
-            <Button data-testid="owd-cbp-prereq-confirm" onClick={() => void doSave(true)} disabled={saving}>
+            <Button data-testid="owd-cbp-prereq-confirm" onClick={() => void confirmPrereq()} disabled={saving}>
               {t('engine.studio.owd.cbpPrereqConfirm', locale)}
             </Button>
           </DialogFooter>

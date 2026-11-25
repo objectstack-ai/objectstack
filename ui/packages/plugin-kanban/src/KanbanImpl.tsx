@@ -24,18 +24,22 @@ import {
   verticalListSortingStrategy,
 } from "@dnd-kit/sortable"
 import { CSS } from "@dnd-kit/utilities"
-import { Avatar, AvatarFallback, AvatarImage, Badge, Card, CardHeader, CardTitle, CardDescription, CardContent, ScrollArea, Button, Input, useResizeObserver, DataEmptyState } from "@object-ui/components"
+import { Avatar, AvatarFallback, AvatarImage, Badge, Card, CardHeader, CardTitle, CardDescription, CardContent, ScrollArea, Button, Input, useResizeObserver, DataEmptyState, DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@object-ui/components"
 import { useHasDndProvider, useDnd, usePredicateScope } from "@object-ui/react"
 import { resolveConditionalFormatting } from "@object-ui/core"
 import type { KanbanConditionalFormattingRule } from "@object-ui/types"
 import type { KanbanCard, KanbanColumn } from './types'
 import { createSafeTranslation } from "@object-ui/i18n"
-import { Plus, Sigma } from "lucide-react"
+import { EyeOff, FoldHorizontal, MoreHorizontal, Plus, Sigma, UnfoldHorizontal } from "lucide-react"
 import { useKanbanRecordsSettled } from './KanbanRecordsSettled'
 import { useKanbanColumnSummary, sumLaneField } from './KanbanColumnSummary'
+import { laneFigureOf } from './KanbanLaneStatistic'
+import { useKanbanCardDisplay } from './KanbanCardDisplay'
 import { laneCount, useKanbanLanePaging } from './KanbanLanePaging'
+import { readCollapsedLanes, useKanbanLaneMenu, writeCollapsedLanes } from './KanbanLaneMenu'
 import { ownerInitials, type KanbanCardOwner } from './KanbanCardOwner'
 import { createKanbanDndAnnouncer } from './kanbanDndAnnouncements'
+import { laneKeyOf, lanesFromRecords } from './kanbanReferenceLanes'
 
 // Utility function to merge class names (inline to avoid external dependency)
 const cn = (...classes: Array<string | false | null | undefined>) => classes.filter(Boolean).join(' ')
@@ -75,6 +79,15 @@ const useKanbanT = createSafeTranslation(
     // Why a lane refuses the dragged card (#27099), when the board's
     // `dropBlockedReason` gives no sentence of its own.
     'kanban.dropBlocked': 'A card in {{from}} cannot be moved to {{to}}.',
+    // objectstack#36370 — the lane header's 「+」 and 「⋯」 menu, and the empty
+    // lane's create row, when the host asks for them (`KanbanLaneMenu.ts`).
+    'kanban.laneMenu.actions': '{{column}} column actions',
+    'kanban.laneMenu.collapse': 'Collapse column',
+    'kanban.laneMenu.expand': 'Expand column',
+    'kanban.laneMenu.hide': 'Hide column',
+    'kanban.laneMenu.hideHint': 'Its cards move to Uncategorized',
+    'kanban.laneMenu.createIn': 'New record in {{column}}',
+    'kanban.laneMenu.create': 'New',
   },
   'kanban.noCards',
 )
@@ -86,6 +99,35 @@ const useKanbanT = createSafeTranslation(
  * `kanban.uncategorized` (objectui#12899).
  */
 const UNCATEGORIZED_LANE = 'Uncategorized'
+
+/**
+ * The swimlane a card's swimlane-field value belongs to (objectstack#36841).
+ *
+ * Keyed the way a column lane keys a card (`laneKeyOf`, objectstack#36430): an
+ * expanded reference (a lookup, user or master-detail value the board fetched
+ * with `$expand`) by its foreign key, never by `String(value)`, which is the
+ * same `"[object Object]"` for every target. A
+ * missing value, and an expanded record with no key, sit in the no-value lane;
+ * any other value keeps the key it always had. This one key buckets, sorts,
+ * counts and tracks the collapsed set; the heading is drawn from it.
+ */
+function swimlaneKeyOf(value: unknown): string {
+  if (value == null) return UNCATEGORIZED_LANE
+  const key = laneKeyOf(value)
+  return key === '' && typeof value === 'object' ? UNCATEGORIZED_LANE : key
+}
+
+/**
+ * The `displayField` a reference swimlane field declares, read only when the
+ * field names the object it references — the rule `ObjectKanban` applies to a
+ * reference column lane.
+ */
+function swimlaneDisplayFieldOf(objectFields: unknown, swimlaneField: string): string | undefined {
+  const def = (objectFields as Record<string, { reference?: unknown; displayField?: unknown } | undefined> | undefined)?.[swimlaneField]
+  return typeof def?.reference === 'string' && def.reference && typeof def.displayField === 'string' && def.displayField
+    ? def.displayField
+    : undefined
+}
 
 /**
  * Marks a swimlane row as a participant in the board's ONE horizontal axis
@@ -213,6 +255,15 @@ export interface KanbanBoardProps {
   /** Field name for swimlane rows (2D grouping) */
   swimlaneField?: string
   /**
+   * The object `swimlaneField` references, as read by `ObjectKanban`
+   * (objectstack#36930). A reference swimlane is titled through it by
+   * `lanesFromRecords` → `referencedRecordTitle`, so it names a record by the
+   * target's declared `nameField` (ADR-0079) exactly as a column lane over the
+   * same reference does. Absent, the title falls to the field's
+   * `displayField` and then the shared ladder on the expanded record.
+   */
+  swimlaneTargetDef?: unknown
+  /**
    * The cards in `columns` are a fetched WINDOW, not the whole group
    * (`5591f03bd`) — see `laneCountLabel`. Injected by `ObjectKanban`, the
    * only entry point that issues the windowed query; a board handed its rows
@@ -328,6 +379,8 @@ function SortableCard({ card, onCardClick, conditionalFormatting, objectFields }
   // `aria-disabled` (objectui#12082).
   const movable = React.useContext(KanbanCardsMovable)
   const opens = React.useContext(KanbanCardsOpenRecord)
+  // objectstack#36370 — `kanban.showFieldLabels: false` draws the values alone.
+  const { showFieldLabels } = useKanbanCardDisplay()
   // A card that neither drags nor opens (objectstack#33548) is no control: no
   // `button` role, no tab stop, no key activation and no hover-as-link face.
   // Its click still reaches `onCardClick`, which the host routes to nothing.
@@ -415,7 +468,7 @@ function SortableCard({ card, onCardClick, conditionalFormatting, objectFields }
               keeps its markup. */}
           {owner ? (
             <div className="flex items-start justify-between gap-2">
-              <CardTitle className="min-w-0 text-xs sm:text-sm font-semibold tracking-tight text-foreground group-hover:text-primary transition-colors leading-snug line-clamp-2">{card.title}</CardTitle>
+              <CardTitle className="min-w-0 text-xs sm:text-sm font-medium tracking-tight text-foreground group-hover:text-primary transition-colors leading-snug line-clamp-2">{card.title}</CardTitle>
               <Avatar className="size-6 shrink-0" title={owner.name} aria-label={owner.name} data-kanban-card-owner="">
                 {owner.image && <AvatarImage src={owner.image} alt={owner.name} />}
                 <AvatarFallback className="bg-primary/10 text-primary text-[10px] font-medium">
@@ -424,7 +477,7 @@ function SortableCard({ card, onCardClick, conditionalFormatting, objectFields }
               </Avatar>
             </div>
           ) : (
-            <CardTitle className="text-xs sm:text-sm font-semibold tracking-tight text-foreground group-hover:text-primary transition-colors leading-snug line-clamp-2">{card.title}</CardTitle>
+            <CardTitle className="text-xs sm:text-sm font-medium tracking-tight text-foreground group-hover:text-primary transition-colors leading-snug line-clamp-2">{card.title}</CardTitle>
           )}
           {!(card.cardFieldCells && card.cardFieldCells.length > 0) && (card.cardSubtitle ?? card.description) && (
             <CardDescription className="text-xs text-muted-foreground line-clamp-2 sm:line-clamp-none">
@@ -449,7 +502,7 @@ function SortableCard({ card, onCardClick, conditionalFormatting, objectFields }
                     className="flex min-w-0 items-baseline gap-1.5 text-foreground/85"
                     title={cell.label || cell.field}
                   >
-                    <dt className="shrink-0 text-muted-foreground">{cell.label || cell.field}</dt>
+                    {showFieldLabels && <dt className="shrink-0 text-muted-foreground">{cell.label || cell.field}</dt>}
                     <dd className="min-w-0 flex-1 truncate">{cell.node}</dd>
                   </div>
                 ))}
@@ -749,12 +802,13 @@ function LaneTotal({
   className?: string
 }) {
   const summary = useKanbanColumnSummary()
-  if (!summary) return null
+  // objectstack#36370 — the view's lane statistic is drawn at the foot.
+  if (!summary || summary.placement === 'foot') return null
   const total = sumLaneField(cards, summary.field)
   if (total === null) return null
   return (
     <span
-      className={cn("inline-flex items-center gap-0.5 text-[11px] font-medium text-muted-foreground tabular-nums whitespace-nowrap", className)}
+      className={cn("inline-flex items-center gap-0.5 text-xs font-medium text-muted-foreground tabular-nums whitespace-nowrap", className)}
       title={summary.label}
       data-kanban-lane-total=""
     >
@@ -763,6 +817,162 @@ function LaneTotal({
       {summary.renderTotal(total)}
       {countsAreWindowed ? '+' : null}
     </span>
+  )
+}
+
+/**
+ * objectstack#36370 — the view's lane statistic (`kanban.summary`), at the
+ * lane's foot: its calculation's name and its figure, 「Sum · Amount
+ * ¥1,200」. A count over a lane the board pages for itself is the server's
+ * count of the lane, and carries the windowed `+` where that is a floor.
+ *
+ * objectstack#36520 — a `sum`, `avg`, `min` or `max` covers every record of
+ * the lane: the server lane read's figure (`KanbanColumnSummary.figures`),
+ * never one added up over the cards the lane has loaded, on every board that
+ * queries its own cards. Over cards a host hands in, a `sum` adds them: that
+ * is a whole lane only if the host handed every card in. `ListView` hands a
+ * board whose lanes it does not know before the query (lanes over a lookup,
+ * a view with grouping) its fetched page, so there the `sum` covers that
+ * page alone, with no marker (a known gap). Renders nothing without the
+ * statistic, or while the figure is pending or unknowable.
+ */
+function LaneFootStatistic({
+  laneId,
+  cards,
+  count,
+}: {
+  laneId: string
+  cards: KanbanCard[]
+  /** The lane's count as its header writes it, for a `count`. */
+  count: { count: number; atLeast: boolean }
+}) {
+  const summary = useKanbanColumnSummary()
+  if (!summary || summary.placement !== 'foot' || !summary.type) return null
+  const type = summary.type
+  const isCount = type === 'count'
+  const value = isCount
+    ? count.count
+    : summary.figures !== undefined
+      ? summary.figures === null ? null : laneFigureOf(summary.figures, laneId, type, count.count > 0)
+      : type === 'sum' ? sumLaneField(cards, summary.field) : null
+  if (value === null) return null
+  const name = isCount ? summary.typeLabel : `${summary.typeLabel} · ${summary.label}`
+  return (
+    <div
+      className="flex items-center justify-between gap-2 border-t border-border/40 px-3 sm:px-4 py-1.5 text-xs text-muted-foreground tabular-nums"
+      data-kanban-lane-statistic=""
+    >
+      <span className="truncate" title={name}>{name}</span>
+      <span className="shrink-0 font-medium text-foreground/85">
+        {summary.renderTotal(value)}
+        {isCount && count.atLeast ? '+' : null}
+      </span>
+    </div>
+  )
+}
+
+/**
+ * objectstack#36370 — the lane header's 「+」 and 「⋯」, drawn only where the
+ * host asked for the lane menu (`KanbanLaneMenu.ts`). 「+」 opens the host's
+ * create form with this lane's value filled in; 「⋯」 collapses the lane (the
+ * reader's own, in this browser) or hides it (the view's lanes, in the list's
+ * draft). The `Uncategorized` lane has no value to fill in or to hide, so it
+ * offers the collapse alone.
+ */
+function LaneHeaderActions({
+  column,
+  collapsed,
+  onToggleCollapse,
+}: {
+  column: KanbanColumn
+  collapsed: boolean
+  onToggleCollapse?: () => void
+}) {
+  const { t } = useKanbanT()
+  const laneMenu = useKanbanLaneMenu()
+  if (!laneMenu) return null
+  const laneId = String(column.id)
+  const takesActions = laneMenu.laneTakesActions(laneId)
+  const create = takesActions ? laneMenu.onCreateInLane : undefined
+  const hide = takesActions ? laneMenu.onHideLane : undefined
+  return (
+    <div className="flex items-center" data-kanban-lane-actions="">
+      {create && (
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          className="h-6 w-6 p-0 text-muted-foreground hover:text-foreground"
+          aria-label={t('kanban.laneMenu.createIn', { column: column.title })}
+          title={t('kanban.laneMenu.createIn', { column: column.title })}
+          onClick={() => create(laneId)}
+          data-kanban-lane-create=""
+        >
+          <Plus className="h-3.5 w-3.5" aria-hidden="true" />
+        </Button>
+      )}
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="h-6 w-6 p-0 text-muted-foreground hover:text-foreground"
+            aria-label={t('kanban.laneMenu.actions', { column: column.title })}
+            title={t('kanban.laneMenu.actions', { column: column.title })}
+            data-kanban-lane-menu=""
+          >
+            <MoreHorizontal className="h-3.5 w-3.5" aria-hidden="true" />
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end" className="min-w-[10rem]">
+          {onToggleCollapse && (
+            <DropdownMenuItem onSelect={() => onToggleCollapse()} data-kanban-lane-menu-collapse="">
+              {collapsed
+                ? <UnfoldHorizontal className="mr-2 h-3.5 w-3.5" aria-hidden="true" />
+                : <FoldHorizontal className="mr-2 h-3.5 w-3.5" aria-hidden="true" />}
+              {collapsed ? t('kanban.laneMenu.expand') : t('kanban.laneMenu.collapse')}
+            </DropdownMenuItem>
+          )}
+          {hide && (
+            <DropdownMenuItem onSelect={() => hide(laneId)} data-kanban-lane-menu-hide="" className="items-start">
+              <EyeOff className="mr-2 mt-0.5 h-3.5 w-3.5" aria-hidden="true" />
+              {/* objectstack#36370 — the view's lanes pick lanes, not records
+                  (#28211): a hidden lane's cards show under Uncategorized,
+                  and the item says so. */}
+              <span className="flex flex-col">
+                <span>{t('kanban.laneMenu.hide')}</span>
+                <span className="text-xs text-muted-foreground" data-kanban-lane-menu-hide-hint="">{t('kanban.laneMenu.hideHint')}</span>
+              </span>
+            </DropdownMenuItem>
+          )}
+        </DropdownMenuContent>
+      </DropdownMenu>
+    </div>
+  )
+}
+
+/**
+ * objectstack#36370 — the 「+ New」 row of an empty lane, under the same
+ * conditions as the header's 「+」.
+ */
+function LaneCreateRow({ column }: { column: KanbanColumn }) {
+  const { t } = useKanbanT()
+  const laneMenu = useKanbanLaneMenu()
+  const laneId = String(column.id)
+  const create = laneMenu && laneMenu.laneTakesActions(laneId) ? laneMenu.onCreateInLane : undefined
+  if (!create) return null
+  return (
+    <button
+      type="button"
+      onClick={() => create(laneId)}
+      aria-label={t('kanban.laneMenu.createIn', { column: column.title })}
+      className="flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-left text-xs text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+      data-kanban-lane-create-row=""
+    >
+      <Plus className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+      {t('kanban.laneMenu.create')}
+    </button>
   )
 }
 
@@ -898,18 +1108,22 @@ function KanbanColumnView({
       )}
       <div className={cn("border-b border-border/40", isCollapsed ? "px-1 py-3" : "px-3 sm:px-4 pt-3 pb-2.5")}>
         <div className={cn("flex gap-2", isCollapsed ? "flex-col items-center" : "items-center justify-between")}>
-          <h3 id={`kanban-col-${column.id}`} className={cn("text-xs sm:text-[13px] font-semibold tracking-tight truncate text-foreground/85 uppercase", isCollapsed && "min-w-0")}>
+          <h3 id={`kanban-col-${column.id}`} className={cn("text-xs font-medium tracking-tight truncate text-foreground/85 uppercase", isCollapsed && "min-w-0")}>
             <LaneHeading
               column={column}
               collapsed={isCollapsed}
-              collapsible={onToggleCollapse != null}
+              // objectstack#36370 — the host's lane menu collapses any lane, but
+              // the heading discloses only a collapsed lane (to open it again)
+              // and the lane the author made collapsible: an open lane keeps
+              // the bare title, collapsing from its 「⋯」.
+              collapsible={onToggleCollapse != null && (isCollapsed || column.collapsed === true)}
               onToggle={() => onToggleCollapse?.()}
             />
           </h3>
           <div className="flex items-center gap-1.5 shrink-0">
             <span
               className={cn(
-                "inline-flex items-center justify-center min-w-[22px] h-[20px] px-1.5 rounded-md text-[11px] font-medium tabular-nums",
+                "inline-flex items-center justify-center min-w-[22px] h-[20px] px-1.5 rounded-md text-xs font-medium tabular-nums",
                 isLimitExceeded
                   ? "bg-destructive/10 text-destructive ring-1 ring-inset ring-destructive/30"
                   : "bg-muted/70 text-muted-foreground",
@@ -919,12 +1133,13 @@ function KanbanColumnView({
               {column.limit && <span className="text-muted-foreground/70 font-normal">{` / ${column.limit}`}</span>}
             </span>
             {isLimitExceeded && (
-              <Badge variant="destructive" className="text-[10px] h-[20px] px-1.5">
+              <Badge variant="destructive" className="text-xs h-[20px] px-1.5">
                 Full
               </Badge>
             )}
             {/* A total over cards that have not arrived is the same false `0`. */}
             {!isCollapsed && !countPending && <LaneTotal cards={safeCards} countsAreWindowed={laneTotalPartial} />}
+            {!isCollapsed && <LaneHeaderActions column={column} collapsed={isCollapsed} onToggleCollapse={onToggleCollapse} />}
           </div>
         </div>
       </div>
@@ -961,6 +1176,7 @@ function KanbanColumnView({
             ))}
           </div>
         </SortableContext>
+        {safeCards.length === 0 && !countPending && <LaneCreateRow column={column} />}
         {/* objectui#12619 — the next page of this lane, at its foot. */}
         {lanePaging && lanePage?.hasMore && (
           <Button
@@ -979,6 +1195,13 @@ function KanbanColumnView({
           <QuickAddForm columnId={column.id} onAdd={onQuickAdd} />
         )}
       </ScrollArea>
+      )}
+      {!isCollapsed && !countPending && (
+        <LaneFootStatistic
+          laneId={String(column.id)}
+          cards={safeCards}
+          count={pagedCount ?? { count: safeCards.length, atLeast: countsAreWindowed === true }}
+        />
       )}
     </div>
   )
@@ -1009,7 +1232,7 @@ function moveOutcomeSentence(outcome: unknown, movedSentence: string): string | 
   return movedSentence
 }
 
-export default function KanbanBoard({ columns, onCardMove, onCardClick, className, quickAdd, onQuickAdd, coverImageField, conditionalFormatting, objectFields, swimlaneField, countsAreWindowed, cardsMovable = true, rowOpensRecord = true, canDropCard, dropBlockedReason, onLaneRowsChange }: KanbanBoardProps) {
+export default function KanbanBoard({ columns, onCardMove, onCardClick, className, quickAdd, onQuickAdd, coverImageField, conditionalFormatting, objectFields, swimlaneTargetDef, swimlaneField, countsAreWindowed, cardsMovable = true, rowOpensRecord = true, canDropCard, dropBlockedReason, onLaneRowsChange }: KanbanBoardProps) {
   const hasDnd = useHasDndProvider()
 
   if (hasDnd) {
@@ -1017,7 +1240,7 @@ export default function KanbanBoard({ columns, onCardMove, onCardClick, classNam
       <KanbanCardsMovable.Provider value={cardsMovable}>
       <KanbanCardsOpenRecord.Provider value={rowOpensRecord}>
         <DndBridge>
-          {(dnd) => <KanbanBoardInner columns={columns} onCardMove={onCardMove} onCardClick={onCardClick} className={className} dnd={dnd} quickAdd={quickAdd} onQuickAdd={onQuickAdd} coverImageField={coverImageField} conditionalFormatting={conditionalFormatting} objectFields={objectFields} swimlaneField={swimlaneField} countsAreWindowed={countsAreWindowed} canDropCard={canDropCard} dropBlockedReason={dropBlockedReason} onLaneRowsChange={onLaneRowsChange} />}
+          {(dnd) => <KanbanBoardInner columns={columns} onCardMove={onCardMove} onCardClick={onCardClick} className={className} dnd={dnd} quickAdd={quickAdd} onQuickAdd={onQuickAdd} coverImageField={coverImageField} conditionalFormatting={conditionalFormatting} objectFields={objectFields} swimlaneTargetDef={swimlaneTargetDef} swimlaneField={swimlaneField} countsAreWindowed={countsAreWindowed} canDropCard={canDropCard} dropBlockedReason={dropBlockedReason} onLaneRowsChange={onLaneRowsChange} />}
         </DndBridge>
       </KanbanCardsOpenRecord.Provider>
       </KanbanCardsMovable.Provider>
@@ -1027,13 +1250,13 @@ export default function KanbanBoard({ columns, onCardMove, onCardClick, classNam
   return (
     <KanbanCardsMovable.Provider value={cardsMovable}>
       <KanbanCardsOpenRecord.Provider value={rowOpensRecord}>
-      <KanbanBoardInner columns={columns} onCardMove={onCardMove} onCardClick={onCardClick} className={className} dnd={null} quickAdd={quickAdd} onQuickAdd={onQuickAdd} coverImageField={coverImageField} conditionalFormatting={conditionalFormatting} objectFields={objectFields} swimlaneField={swimlaneField} countsAreWindowed={countsAreWindowed} canDropCard={canDropCard} dropBlockedReason={dropBlockedReason} onLaneRowsChange={onLaneRowsChange} />
+      <KanbanBoardInner columns={columns} onCardMove={onCardMove} onCardClick={onCardClick} className={className} dnd={null} quickAdd={quickAdd} onQuickAdd={onQuickAdd} coverImageField={coverImageField} conditionalFormatting={conditionalFormatting} objectFields={objectFields} swimlaneTargetDef={swimlaneTargetDef} swimlaneField={swimlaneField} countsAreWindowed={countsAreWindowed} canDropCard={canDropCard} dropBlockedReason={dropBlockedReason} onLaneRowsChange={onLaneRowsChange} />
     </KanbanCardsOpenRecord.Provider>
       </KanbanCardsMovable.Provider>
   )
 }
 
-function KanbanBoardInner({ columns, onCardMove, onCardClick, className, dnd, quickAdd, onQuickAdd, coverImageField: _coverImageField, conditionalFormatting, objectFields, swimlaneField, countsAreWindowed, canDropCard, dropBlockedReason, onLaneRowsChange }: KanbanBoardProps & { dnd: ReturnType<typeof useDnd> | null }) {
+function KanbanBoardInner({ columns, onCardMove, onCardClick, className, dnd, quickAdd, onQuickAdd, coverImageField: _coverImageField, conditionalFormatting, objectFields, swimlaneTargetDef, swimlaneField, countsAreWindowed, canDropCard, dropBlockedReason, onLaneRowsChange }: KanbanBoardProps & { dnd: ReturnType<typeof useDnd> | null }) {
   const { t } = useKanbanT()
   // The prefix of each swimlane cell's drop-reason element id (#27099).
   const dropReasonIdBase = React.useId()
@@ -1113,9 +1336,24 @@ function KanbanBoardInner({ columns, onCardMove, onCardClick, className, dnd, qu
    * default that survives reload plus a per-view viewer override is the shape
    * the declaration describes.
    */
+  //
+  // objectstack#36370 — where the host asks for the lane menu
+  // (`KanbanLaneMenu.ts`), every lane may be collapsed from its 「⋯」, and the
+  // overrides ARE kept: the host names the board (`collapseKey`), so the
+  // reader's choice is kept in this browser under that name and read back on
+  // the next mount. Without the menu nothing here changes.
+  const laneMenu = useKanbanLaneMenu()
+  const collapseKey = laneMenu?.collapseKey
   const [laneCollapseOverrides, setLaneCollapseOverrides] = React.useState<ReadonlyMap<string, boolean>>(
-    () => new Map<string, boolean>(),
+    () => (laneMenu ? readCollapsedLanes(collapseKey) : new Map<string, boolean>()),
   )
+  // Another board under the same mount (the host switched views): its own
+  // choices, read during render as `syncedColumns` below is.
+  const [overridesKey, setOverridesKey] = React.useState(collapseKey)
+  if (overridesKey !== collapseKey) {
+    setOverridesKey(collapseKey)
+    setLaneCollapseOverrides(laneMenu ? readCollapsedLanes(collapseKey) : new Map<string, boolean>())
+  }
   const isColumnCollapsed = React.useCallback(
     (col: KanbanColumn) => laneCollapseOverrides.get(String(col.id)) ?? col.collapsed === true,
     [laneCollapseOverrides],
@@ -1127,6 +1365,18 @@ function KanbanBoardInner({ columns, onCardMove, onCardClick, className, dnd, qu
       return updated
     })
   }, [])
+  // Kept after the state settles, never inside the updater (an updater may
+  // run twice under StrictMode). Only a choice the reader made is written:
+  // the first read is what the store already holds.
+  const overridesTouched = React.useRef(false)
+  React.useEffect(() => {
+    if (!laneMenu || !overridesTouched.current) return
+    writeCollapsedLanes(collapseKey, laneCollapseOverrides)
+  }, [laneMenu, collapseKey, laneCollapseOverrides])
+  const toggleLaneFromMenu = React.useCallback((column: KanbanColumn) => {
+    overridesTouched.current = true
+    toggleColumnCollapse(String(column.id), !isColumnCollapsed(column))
+  }, [toggleColumnCollapse, isColumnCollapsed])
 
   // Ensure we always have valid columns with cards array
   const safeColumns = React.useMemo(() => {
@@ -1167,17 +1417,22 @@ function KanbanBoardInner({ columns, onCardMove, onCardClick, className, dnd, qu
     setBoardColumns(safeColumns)
   }
 
-  // Compute swimlane rows when swimlaneField is provided
+  // Compute swimlane rows when swimlaneField is provided: one per lane key
+  // (`swimlaneKeyOf`), sorted by that key, each titled by the referenced
+  // record's name when the value is an expanded reference (`lanesFromRecords`,
+  // the column lanes' titling), else by the key itself.
+  const swimlaneDisplayField = swimlaneField ? swimlaneDisplayFieldOf(objectFields, swimlaneField) : undefined
   const swimlanes = React.useMemo(() => {
     if (!swimlaneField) return null
     const allCards = boardColumns.flatMap(col => col.cards)
-    const laneValues = new Set<string>()
-    allCards.forEach(card => {
-      const val = card[swimlaneField]
-      laneValues.add(val != null ? String(val) : UNCATEGORIZED_LANE)
-    })
-    return Array.from(laneValues).sort()
-  }, [boardColumns, swimlaneField])
+    const titles = new Map(
+      lanesFromRecords(allCards, swimlaneField, swimlaneTargetDef, swimlaneDisplayField).map(lane => [lane.id, lane.title]),
+    )
+    const keys = new Set<string>()
+    allCards.forEach(card => keys.add(swimlaneKeyOf(card[swimlaneField])))
+    return Array.from(keys).sort().map(key => ({ key, title: titles.get(key) ?? key }))
+  }, [boardColumns, swimlaneField, swimlaneTargetDef, swimlaneDisplayField])
+  const swimlaneOf = (card: KanbanCard) => swimlaneKeyOf(card[swimlaneField!])
 
   const toggleLane = React.useCallback((lane: string) => {
     setCollapsedLanes(prev => {
@@ -1565,14 +1820,12 @@ function KanbanBoardInner({ columns, onCardMove, onCardClick, className, dnd, qu
   // (AGENTS.md #10): the board re-buckets into new arrays on every pass.
   const shownLanes: KanbanLaneRows[] = []
   if (onLaneRowsChange) {
-    const swimlaneOf = (card: KanbanCard) =>
-      card[swimlaneField!] != null ? String(card[swimlaneField!]) : UNCATEGORIZED_LANE
     for (const col of boardColumns) {
       if (isColumnCollapsed(col)) continue
       const rows = swimlanes
         ? swimlanes
-            .filter((lane) => !collapsedLanes.has(lane))
-            .flatMap((lane) => col.cards.filter((card) => swimlaneOf(card) === lane))
+            .filter((lane) => !collapsedLanes.has(lane.key))
+            .flatMap((lane) => col.cards.filter((card) => swimlaneOf(card) === lane.key))
         : col.cards
       if (rows.length > 0) shownLanes.push({ key: String(col.id), label: String(col.title ?? col.id), rows })
     }
@@ -1779,7 +2032,7 @@ function KanbanBoardInner({ columns, onCardMove, onCardClick, className, dnd, qu
                     collapsed={collapsed}
                     collapsible={col.collapsed === true}
                     onToggle={() => toggleColumnCollapse(col.id, !collapsed)}
-                    className=" text-xs sm:text-sm font-semibold tracking-wider text-primary/90 uppercase"
+                    className=" text-xs sm:text-sm font-medium tracking-wider text-primary/90 uppercase"
                   />
                   {/* objectstack#30431 — the count, and the total, wait for the
                       records like the flat header's do (`LaneCountPending`). */}
@@ -1797,12 +2050,12 @@ function KanbanBoardInner({ columns, onCardMove, onCardClick, className, dnd, qu
           </div>
 
           {/* Swimlane rows */}
-          {swimlanes.map(lane => {
+          {swimlanes.map(({ key: lane, title }) => {
             const isCollapsed = collapsedLanes.has(lane)
             // Display only: the key above and below is still `lane`.
-            const laneLabel = lane === UNCATEGORIZED_LANE ? t('kanban.uncategorized') : lane
+            const laneLabel = lane === UNCATEGORIZED_LANE ? t('kanban.uncategorized') : title
             const laneCardCount = boardColumns.reduce((sum, col) =>
-              sum + col.cards.filter(c => (c[swimlaneField!] != null ? String(c[swimlaneField!]) : UNCATEGORIZED_LANE) === lane).length, 0)
+              sum + col.cards.filter(c => swimlaneOf(c) === lane).length, 0)
 
             return (
               <div key={lane} className="border rounded-lg bg-muted/10">
@@ -1813,7 +2066,7 @@ function KanbanBoardInner({ columns, onCardMove, onCardClick, className, dnd, qu
                   aria-expanded={!isCollapsed}
                 >
                   <span className={cn("transition-transform text-xs", isCollapsed ? "" : "rotate-90")}>▶</span>
-                  <span className=" text-xs font-semibold text-muted-foreground uppercase tracking-wider">{laneLabel}</span>
+                  <span className=" text-xs font-medium text-muted-foreground uppercase tracking-wider">{laneLabel}</span>
                   <span className=" text-xs text-muted-foreground">
                     {recordsSettled ? `(${laneCountLabel(laneCardCount, countsAreWindowed)})` : <LaneCountPending />}
                   </span>
@@ -1828,9 +2081,7 @@ function KanbanBoardInner({ columns, onCardMove, onCardClick, className, dnd, qu
                     data-swimlane-scroll-row=""
                   >
                     {boardColumns.map(col => {
-                      const laneCards = col.cards.filter(c =>
-                        (c[swimlaneField!] != null ? String(c[swimlaneField!]) : UNCATEGORIZED_LANE) === lane
-                      )
+                      const laneCards = col.cards.filter(c => swimlaneOf(c) === lane)
                       // A collapsed column narrows in EVERY row and withholds
                       // its cards in each of them (objectui#9628) — a column
                       // collapsed in the title row and open here would be the
@@ -1906,9 +2157,13 @@ function KanbanBoardInner({ columns, onCardMove, onCardClick, className, dnd, qu
               // over it, and the disclosure only where the author asked for one.
               collapsed={isColumnCollapsed(column)}
               onToggleCollapse={
-                column.collapsed === true
-                  ? () => toggleColumnCollapse(column.id, !isColumnCollapsed(column))
-                  : undefined
+                // objectstack#36370 — with the host's lane menu, every lane
+                // collapses from its 「⋯」 and opens again from its heading.
+                laneMenu
+                  ? () => toggleLaneFromMenu(column)
+                  : column.collapsed === true
+                    ? () => toggleColumnCollapse(column.id, !isColumnCollapsed(column))
+                    : undefined
               }
             />
           ))}

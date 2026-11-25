@@ -106,7 +106,7 @@ export const viewForm = defineForm({
       fields: [
         { field: 'resizable', colSpan: 1, helpText: 'Enable column resizing' },
         // `striped` / `bordered` inputs removed with the keys (#7176 — pass-through-only, retired).
-        { field: 'compactToolbar', colSpan: 1, helpText: 'Collapse Group/Color/Density/Hide-fields into a single View settings popover' },
+        { field: 'compactToolbar', colSpan: 1, helpText: 'Collapse Group/Color/Density/Hide-fields into a single View settings popover. On by default: omitted or `true`, the renderer draws this compact toolbar; `false` draws the wide toolbar, one button per control. The compact toolbar draws no Refresh button, so `userActions.refresh` governs only the wide toolbar; pull-to-refresh is unaffected by either key.' },
         { field: 'rowHeight', colSpan: 1, helpText: 'Row height / density setting' },
         {
           field: 'selection',
@@ -247,7 +247,7 @@ export const viewForm = defineForm({
             { field: 'sort', helpText: 'Allow users to sort records' },
             { field: 'search', helpText: 'Allow users to search records' },
             { field: 'filter', helpText: 'Allow users to filter records' },
-            { field: 'refresh', helpText: 'Allow users to reload the view data from the backend without a full page reload' },
+            { field: 'refresh', helpText: 'Allow users to reload the view data from the backend without a full page reload. Governs only the wide toolbar\'s Refresh button (`compactToolbar: false`): the default toolbar has no Refresh, so the toggle changes nothing there.' },
             { field: 'rowHeight', helpText: 'Allow users to toggle row height/density' },
             { field: 'group', helpText: 'Allow users to change record grouping from the toolbar. Toggle only — the grouping itself is configured in the view-level `grouping` block.' },
             { field: 'addRecordForm', helpText: 'Add records through a form instead of inline' },
@@ -260,7 +260,8 @@ export const viewForm = defineForm({
         // [#24692] Spelled out so the form offers exactly the two live keys:
         // `mode` and `formView` are `retiredKey()` tombstones on
         // `AddRecordConfigSchema` (no renderer ever read them — the Add button
-        // opens the create form, `formViews.create` when declared), and
+        // opens the object's own create form, laid out by its `fieldGroups`
+        // and leaving out every `showOnCreate: false` field), and
         // `enabled` is required, so an Add-record block always says whether it
         // is on.
         {
@@ -302,7 +303,7 @@ export const viewForm = defineForm({
             },
             { field: 'preventNavigation', helpText: 'Disable standard navigation entirely' },
             { field: 'openNewTab', helpText: 'Open the record\'s full page in a new browser tab when it is clicked; rows that open nothing stay that way, and a phone opens the page in place' },
-            { field: 'size', helpText: 'Overlay size bucket for the drawer detail: \'auto\' (default — renderer derives from field count + viewport; AI writes nothing) or a coarse override sm/md/lg/xl/full. Prefer this over the pixel `width`; page mode ignores it.' },
+            { field: 'size', helpText: 'Width bucket for the record drawer: \'auto\' (default) keeps the host\'s fixed default width, the same for every object whatever its field count (the console\'s record side panel opens at 460px), or a coarse override sm/md/lg/xl/full (a 480/720/960/1200/1600px cap, always clamped to the viewport). A width the reader drags wins over either. Prefer this over the pixel `width`; it has no effect where the record opens as a page (in the console, every record on a phone), nor on a phone-width screen, where the drawer fills it.' },
             { field: 'width', helpText: '[DEPRECATED → size] Pixel/percent width of the drawer (e.g. "600px"). A pixel width cannot be chosen at authoring time without knowing the client viewport — use the `size` bucket.' },
           ],
         },

@@ -70,6 +70,12 @@
  * ({@link initialScreenValues}) and never posted ({@link screenResumeValues}):
  * the engine refuses a resume that carries any value under its name.
  *
+ * Following the link leaves the page the screen is drawn over, so the host is
+ * told: `onRecordLinkFollow` runs on a click the router itself navigates on (a
+ * plain primary click), never on one that opens a new tab or window. The
+ * runtime ends its dialog there (`FlowRunner`, objectstack#36849); the Studio
+ * preview passes none.
+ *
  * ## `date`, `datetime` and `boolean` are the platform controls (objectstack#26579)
  *
  * A `date` / `datetime` field is the record form's picker (`DatePickerField` /
@@ -117,6 +123,8 @@ import { fileIdOf, getLazyFieldWidget } from '@object-ui/fields';
 import { useObjectTranslation } from '@object-ui/i18n';
 import { SCREEN_FIELD_RECORD_LINK_TYPE, flowScreenFieldOptionKey } from '@objectstack/spec/automation';
 import { appRecordPath, routableObjectNames } from './RelatedRecordActionsBridge.js';
+import { recordFormSubforms } from '../utils/recordFormNavigation.js';
+import { recordFormFieldNames } from '../utils/recordFormFields.js';
 
 /**
  * The object form's lookup picker (`LookupField`), through the shared lazy
@@ -422,15 +430,27 @@ export interface ScreenViewProps {
    * header, objectstack#26882). Absent, or a field not in it, draws no message.
    */
   errors?: Readonly<Record<string, string>>;
+  /**
+   * Called when the user follows a `record_link` field's link in this window
+   * (see the header, objectstack#36849). Not called for a click that opens the
+   * record in a new tab or window, which leaves this page where it is.
+   */
+  onRecordLinkFollow?: () => void;
   className?: string;
 }
 
-export function ScreenView({ screen, values, onValueChange, dataSource, objects, objectForm, errors, className }: ScreenViewProps) {
+export function ScreenView({ screen, values, onValueChange, dataSource, objects, objectForm, errors, onRecordLinkFollow, className }: ScreenViewProps) {
   if (isObjectFormScreen(screen)) {
     const objectDef = Array.isArray(objects) ? objects.find((o: any) => o?.name === screen.objectName) : undefined;
-    const subforms = objectDef
-      ? ((objectDef as any).form?.subforms ?? (objectDef as any).formViews?.default?.subforms)
-      : undefined;
+    // objectstack-ai/objectstack#36425 — the child collections the object's
+    // field groups place (`fieldGroups[].relatedList`, derived onto the served
+    // object as `groupSubforms`), never an internal form view's `subforms`.
+    const subforms = recordFormSubforms(objectDef);
+    // objectstack-ai/objectstack#36425 — a create asks for the same fields every
+    // other create surface does (`recordFormFieldNames`): a `showOnCreate:
+    // false` field is left out. An edit keeps the form's own field list.
+    const mode = screen.mode === 'edit' ? 'edit' : 'create';
+    const createFields = mode === 'create' && objectDef ? recordFormFieldNames(objectDef.fields, 'create') : undefined;
     // Full object create/edit form (with inline master-detail grids). At runtime
     // the form owns its own Save/Cancel bar; the preview hides it.
     return (
@@ -442,7 +462,8 @@ export function ScreenView({ screen, values, onValueChange, dataSource, objects,
               type: 'object-form',
               formType: 'simple',
               objectName: screen.objectName!,
-              mode: screen.mode === 'edit' ? 'edit' : 'create',
+              mode,
+              ...(createFields ? { fields: createFields } : {}),
               recordId: screen.mode === 'edit' ? screen.recordId : undefined,
               ...(screen.defaults ? { initialValues: screen.defaults } : {}),
               layout: 'vertical',
@@ -486,6 +507,7 @@ export function ScreenView({ screen, values, onValueChange, dataSource, objects,
             error={error}
             dataSource={dataSource}
             objects={objects}
+            onRecordLinkFollow={onRecordLinkFollow}
           />
         );
         const message = errorId && (
@@ -553,6 +575,7 @@ export function ScreenFieldInput({
   error,
   dataSource,
   objects,
+  onRecordLinkFollow,
 }: {
   field: ScreenFieldSpec;
   value: unknown;
@@ -570,6 +593,8 @@ export function ScreenFieldInput({
   dataSource?: unknown;
   /** The console's object definitions: the objects a `record_link` field may link to a page of. */
   objects?: ReadonlyArray<unknown>;
+  /** A `record_link` field's link was followed in this window ({@link ScreenViewProps.onRecordLinkFollow}). */
+  onRecordLinkFollow?: () => void;
 }) {
   const { t } = useObjectTranslation();
   const id = screenFieldControlId(field.name);
@@ -589,7 +614,14 @@ export function ScreenFieldInput({
   // It reads the served `defaultValue`, never `value`: nothing is collected.
   if (isRecordLinkScreenField(field)) {
     return (
-      <ScreenRecordLink id={id} field={field} dataSource={dataSource} objects={objects} describedBy={describedBy} />
+      <ScreenRecordLink
+        id={id}
+        field={field}
+        dataSource={dataSource}
+        objects={objects}
+        describedBy={describedBy}
+        onFollow={onRecordLinkFollow}
+      />
     );
   }
 
@@ -757,12 +789,14 @@ function ScreenRecordLink({
   dataSource,
   objects,
   describedBy,
+  onFollow,
 }: {
   id: string;
   field: ScreenFieldSpec;
   dataSource?: unknown;
   objects?: ReadonlyArray<unknown>;
   describedBy?: string;
+  onFollow?: () => void;
 }) {
   const recordId = recordLinkId(field);
   const name = (
@@ -782,12 +816,26 @@ function ScreenRecordLink({
   return (
     <div id={id} aria-describedby={describedBy} data-screen-record-link={field.name} className="min-h-9 flex items-center">
       {routed && recordId !== undefined && typeof field.reference === 'string' ? (
-        <RoutedRecordLink objectName={field.reference} recordId={recordId} objects={objects}>{name}</RoutedRecordLink>
+        <RoutedRecordLink objectName={field.reference} recordId={recordId} objects={objects} onFollow={onFollow}>
+          {name}
+        </RoutedRecordLink>
       ) : (
         name
       )}
     </div>
   );
+}
+
+/**
+ * Whether a click on a router `Link` navigates this window: the router's own
+ * rule — a primary click with no modifier key, not already handled. Any other
+ * click opens the record elsewhere (a new tab or window) and leaves this page,
+ * and whatever is drawn over it, where it is.
+ */
+function navigatesInPlace(event: React.MouseEvent<HTMLAnchorElement>): boolean {
+  return !event.defaultPrevented
+    && event.button === 0
+    && !event.metaKey && !event.altKey && !event.ctrlKey && !event.shiftKey;
 }
 
 /**
@@ -799,11 +847,13 @@ function RoutedRecordLink({
   objectName,
   recordId,
   objects,
+  onFollow,
   children,
 }: {
   objectName: string;
   recordId: string | number;
   objects?: ReadonlyArray<unknown>;
+  onFollow?: () => void;
   children: React.ReactNode;
 }) {
   const { appName } = useParams<{ appName?: string }>();
@@ -811,7 +861,11 @@ function RoutedRecordLink({
   const path = appRecordPath(appName, routableObjectNames(objects, perms), objectName, recordId);
   if (path === null) return <>{children}</>;
   return (
-    <Link to={path} className="text-primary underline-offset-4 hover:underline">
+    <Link
+      to={path}
+      className="text-primary underline-offset-4 hover:underline"
+      onClick={onFollow ? (event) => { if (navigatesInPlace(event)) onFollow(); } : undefined}
+    >
       {children}
     </Link>
   );

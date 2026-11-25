@@ -40,7 +40,7 @@ export const jaJP: TranslationData = {
         group_overview: { label: '概要' },
         group_apps: { label: 'アプリ' },
         nav_marketplace_browse: { label: 'マーケットプレイスを閲覧' },
-        nav_marketplace_installed: { label: 'インストール済みアプリ' },
+        nav_packages: { label: 'パッケージ' },
         nav_cloud_connection: { label: 'クラウド接続' },
         group_people_org: { label: 'ユーザーと組織' },
         group_access_control: { label: 'アクセス制御' },
@@ -99,6 +99,7 @@ export const jaJP: TranslationData = {
         nav_settings_knowledge: { label: 'ナレッジ' },
         nav_settings_lifecycle: { label: 'データライフサイクル' },
         nav_recycle_bin: { label: 'ごみ箱' },
+        nav_public_forms: { label: '公開フォーム' },
         nav_notification_preferences: { label: '通知設定' },
         nav_notification_templates: { label: '通知テンプレート' },
 

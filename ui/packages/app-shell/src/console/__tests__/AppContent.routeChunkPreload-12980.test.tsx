@@ -21,6 +21,11 @@
  *       with the chrome and no splash is ever drawn inside the chrome.
  *   (b) CONTROL: a route whose chunk is still in flight when its metadata
  *       lands keeps a splash in the route slot (never a blank), then renders.
+ *
+ * objectstack#35981 — the chrome no longer waits for the route's reads, and
+ * the route slot's fallback while a chunk loads is the route's skeleton, not
+ * the full-screen splash: both still carry the boot marker (`splashUp()`), and
+ * `watchSplashInsideChrome` counts the full-screen splash only.
  */
 
 import '@testing-library/jest-dom/vitest';
@@ -198,7 +203,10 @@ function watchSplashInsideChrome() {
     for (const record of records) {
       record.addedNodes.forEach((node) => {
         if (!(node instanceof Element)) return;
-        const splashes = node.matches('[data-boot-splash]') ? [node] : [...node.querySelectorAll('[data-boot-splash]')];
+        // The full-screen splash, not the route skeleton that also carries the
+        // boot marker (objectstack#35981).
+        const FULL = '[data-boot-splash]:not([data-testid="route-metadata-skeleton"])';
+        const splashes = node.matches(FULL) ? [node] : [...node.querySelectorAll(FULL)];
         for (const splash of splashes) {
           if (splash.closest('[data-testid="console-layout"]')) seen.count += 1;
         }
@@ -244,7 +252,11 @@ describe('the route element chunk loads beside the route reads (objectui#12980)'
     await waitFor(() => expect(chunks.page.requested).toBe(true));
     expect(chunks.page.splashUpWhenRequested).toBe(true);
     expect(splashUp()).toBe(true);
-    expect(screen.queryByTestId('console-layout')).not.toBeInTheDocument();
+    // objectstack#35981 — the chrome comes up (once the deployment flags have
+    // answered, a promise apart from the chunk's); the route's skeleton is the
+    // boot wait.
+    await waitFor(() => expect(screen.getByTestId('console-layout')).toBeInTheDocument());
+    expect(screen.getByTestId('route-metadata-skeleton')).toHaveAttribute('data-boot-splash');
     expect(meta.status.page).toBe('loading');
 
     // The chunk answers while the reads are still in flight; then the reads.
@@ -268,9 +280,12 @@ describe('the route element chunk loads beside the route reads (objectui#12980)'
     await waitFor(() => expect(chunks.dashboard.requested).toBe(true));
     expect(screen.getByTestId('console-layout')).toBeInTheDocument();
     expect(screen.queryByTestId('dashboard-view')).not.toBeInTheDocument();
-    // Never a blank: the route slot draws the splash while its chunk loads.
+    // Never a blank: the route slot draws the route's skeleton while its chunk
+    // loads (objectstack#35981: no longer the full-screen splash inside the
+    // chrome), and it is still the boot wait.
     expect(splashUp()).toBe(true);
-    expect(watch.seen.count).toBeGreaterThan(0);
+    expect(screen.getByTestId('route-metadata-skeleton')).toHaveAttribute('data-boot-splash');
+    expect(watch.seen.count).toBe(0);
 
     await act(async () => { chunks.dashboard.release(); });
     await waitFor(() => expect(screen.getByTestId('dashboard-view')).toBeInTheDocument());

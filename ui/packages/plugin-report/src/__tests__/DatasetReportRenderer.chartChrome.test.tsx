@@ -285,3 +285,73 @@ describe('report chart series presentation — the #4229 split, series half (obj
     expect(schema.series).toEqual([{ dataKey: 'amount', label: 'Amount' }]);
   });
 });
+
+/**
+ * objectstack#36988 — the value axis of a report chart over a PERCENT measure.
+ *
+ * The card's report (HotCRM `sla_performance`): a measure averaging a boolean
+ * with `format: '0.0%'`, charted by priority, one bucket at 1/3 and the rest 0.
+ * The table beside the chart printed `33.3%`; the chart was handed no axis
+ * format at all, so its value axis printed the raw fractions. The pattern now
+ * reaches the chart on its own value-axis key, `yAxis[0].format` — which
+ * `AdvancedChartImpl.axisLabels.test.tsx` (plugin-charts) draws, through the
+ * same `normalizeChartSchema` translation, as `0.0%` … `34.0%`.
+ *
+ * The controls are the measures that key cannot carry faithfully, which keep
+ * the chart's default axis rather than a wrong one: a percent already in
+ * percentage points (`percentScale: 'whole'`), a currency measure, and a plain
+ * numeral pattern.
+ */
+describe('report chart value axis — a percent measure’s format reaches the chart (objectstack#36988)', () => {
+  const SLA_ROWS = [
+    { priority: 'urgent', avg_sla_violated: 1 / 3 },
+    { priority: 'high', avg_sla_violated: 0 },
+    { priority: 'medium', avg_sla_violated: 0 },
+    { priority: 'low', avg_sla_violated: 0 },
+  ];
+  const SLA_REPORT = {
+    name: 'sla_performance',
+    type: 'tabular',
+    dataset: 'sla_metrics',
+    rows: ['priority'],
+    values: ['avg_sla_violated'],
+    chart: { type: 'column', xAxis: 'priority', yAxis: 'avg_sla_violated' },
+  };
+
+  async function slaSchema(measure: Record<string, unknown>) {
+    const result = {
+      rows: SLA_ROWS,
+      fields: [
+        { name: 'priority', type: 'text', label: 'Priority' },
+        { name: 'avg_sla_violated', type: 'number', label: 'SLA violation rate', ...measure },
+      ],
+    };
+    render(<DatasetReportRenderer report={SLA_REPORT as never} dataSource={sourceOf(result) as never} />);
+    await waitFor(() => expect(captured?.schema?.data?.length).toBe(SLA_ROWS.length));
+    return captured!.schema;
+  }
+
+  it('hands the chart the measure’s percent pattern as its value-axis format, beside the table’s 33.3%', async () => {
+    const schema = await slaSchema({ format: '0.0%' });
+    expect(schema.yAxis).toEqual([{ format: '0.0%' }]);
+    // The table beside it reads the same pattern through `formatMeasure`.
+    expect(await screen.findByText('33.3%')).toBeInTheDocument();
+    // Presentation only: the plotted column is still the series, unchanged.
+    expect(schema.series.map((s: { dataKey: string }) => s.dataKey)).toEqual(['avg_sla_violated']);
+  });
+
+  it('a percent already in percentage points keeps the default axis (`percentScale: whole`)', async () => {
+    const schema = await slaSchema({ format: '0.0%', percentScale: 'whole' });
+    expect(schema).not.toHaveProperty('yAxis');
+  });
+
+  it('a currency measure keeps the default axis', async () => {
+    const schema = await slaSchema({ format: '0,0.00', currency: 'CNY' });
+    expect(schema).not.toHaveProperty('yAxis');
+  });
+
+  it('a plain numeral pattern keeps the default axis', async () => {
+    const schema = await slaSchema({ format: '0,0.00' });
+    expect(schema).not.toHaveProperty('yAxis');
+  });
+});

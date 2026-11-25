@@ -20,9 +20,12 @@ export const salesUser = definePermissionSet({
 ```
 
 - `permissionSets:` is **refused at load** (`Unrecognized key(s) on this stack definition`, naming the key).
-- Bits: `allowCreate` / `allowRead` / `allowEdit` / `allowDelete`, plus
-  `allowTransfer` (ownership change), `viewAllRecords` / `modifyAllRecords`
-  (super-user, bypass sharing).
+- **Three axes.** Object permission: `allowCreate` / `allowRead` /
+  `allowEdit` / `allowDelete` (plus `allowTransfer`, ownership change) decide
+  whether the caller can use the object at all. Record scope:
+  `viewAllRecords` / `modifyAllRecords` (super-user, bypass sharing) widen
+  which records the caller reaches; from v19 they open no field (use
+  `viewAllFields`). Fields: § Field visibility.
 - **`isDefault: true` = the `everyone` baseline (ADR-0090 D5).** A published package
   declares **exactly one**, anchor-safe: `describeAnchorForbiddenBits(set, 'everyone')`
   (`@objectstack/spec/security`) returns `null`, else lint
@@ -199,6 +202,25 @@ rowLevelSecurity: [
   member directory and holds no business unit, and every org-wide default is
   owner-only for it: rows reach it **only** through the explicit grants above.
 
+## Field visibility and `viewAllFields`
+
+Fields are visible by default: a field no set names follows the object grant,
+and across sets the most permissive answer wins. Write only exceptions:
+
+- **Ordinary:** nothing.
+- **Position-dependent:** `fields` rows in the sets that differ.
+- **High-sensitivity** (salary, ID numbers): `requiredPermissions` on the
+  field (§ Sensitive fields).
+
+"Reads every field" is `viewAllFields: true` on the object entry
+(`crm_account: { allowRead: true, viewAllFields: true }`), for admin-like sets:
+
+- A read vote on every field, later ones included; never an edit vote.
+- The set's own `readable: false` row beats it.
+- It grants no object access and no record. On `'*'` it also votes on the
+  fields of private-posture objects, which a plain `'*'` does not grant.
+- Metadata only: Studio's matrix keeps the key, has no control for it.
+
 ## Field permissions — a row-conditioned edit lock (`when`)
 
 A set's `fields` entry (`'OBJECT.FIELD': { readable, editable }`) may carry
@@ -223,14 +245,9 @@ fields: {
   no relation reach (refused at `os validate` / publish).
 - **Pre-image.** An update is judged on the stored row, so a write cannot unlock
   itself by moving `status` back; an insert on the row as sent.
-- **Locks, never grants.** On unmatched rows the entry is absent; another held
-  set's `editable: true` still wins (most-permissive merge).
 - Docs: https://objectstack.ai/docs/permissions/field-level-security#row-conditioned-edit-locks-when
-  and the recipe https://objectstack.ai/docs/permissions/access-recipes#data-lock-fields-for-a-position-once-a-record-reaches-a-stage
 
 ## Sensitive fields — `secret` type + `requiredPermissions`
-
-`maskingRule` is **live** (FieldMasker). Two more channels:
 
 **`type: 'secret'` (ADR-0100): query a credential only for presence.** A
 `secret` / `password` column is never a filter, sort, group-by or import `matchFields` key (`400 INVALID_FIELD`;
@@ -246,18 +263,14 @@ where: { api_key: { $null: false } }  // ObjectQL, hook `query.filter`
 filter: [{ field: 'api_key', operator: 'is_not_null' }]  // list view
 ```
 
-**Per-field access gating — `requiredPermissions` (ADR-0066 D3).** The field
-is **masked on read and denied on write** unless
-the caller holds ALL listed capabilities — strictest-wins
-over permission-set field grants.
+**High-sensitivity fields — `requiredPermissions` (ADR-0066 D3).** The field
+is **stripped on read and denied on write** unless the caller holds ALL listed
+capabilities (a set's `systemPermissions`): strictest-wins over every field
+row, `viewAllFields`, View All and Modify All. With `maskingRule`, a caller
+without them reads the partial value.
 
 ```typescript
-fields: {
-  ssn: {
-    type: 'text',
-    requiredPermissions: ['view_pii'],
-  },
-}
+id_number: { type: 'text', requiredPermissions: ['hr.view_identity'], maskingRule: 'id_card' },
 ```
 
 ## Multi-tenancy

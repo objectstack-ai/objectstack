@@ -63,18 +63,18 @@ Control flow, `approval`, every node's `config`:
 #### Data Operations
 
 | Node | Purpose |
-|:-----|:--------|
+|:--|:--|
 | `assignment` | Set variable values |
 | `create_record` | Insert a record |
 | `update_record` | Modify records |
 | `delete_record` | Remove records |
-| `get_record` | Fetch records with filters (**no `query_record`**) |
+| `get_record` | Fetch records by filter (**no `query_record`**) |
 | `save_notice` | Tell the saver what this create/update started — record create/update trigger only, not after a pause: **objectstack-data** `rules/lifecycle.md` § Save Notice |
 
 #### External Integration
 
 | Node | Purpose |
-|:-----|:--------|
+|:--|:--|
 | `http` | Call an HTTP API. Set `timeoutMs`. `url` and `headers` are served to every member who can read flows: never a credential there, use a declared connector. Retried after a record change: `durable: true` |
 | `notify` | Send a notification (below) |
 | `connector_action` | Dispatch an action of a declared connector (§ *Integrations are declared, not coded*). `connectorConfig.input` is a value-slot map, judged against the action's `inputSchema` only at dispatch |
@@ -83,7 +83,7 @@ Control flow, `approval`, every node's `config`:
 
 ### `notify`
 
-The node as JSON (TypeScript: the same literal, a `FlowNode`):
+As JSON (TypeScript: the same literal, a `FlowNode`):
 
 ```json
 { "id": "tell_owner", "type": "notify", "label": "Notify Owner", "config": {
@@ -169,8 +169,8 @@ Most are caught by `objectstack build`:
    ```
 
 4. **A `select` is compared and written by its option `value`, never its
-   label.** `condition: "record.status == 'Lost'"` parses, matches no row and
-   never fires.
+   label.** A label in a `filter` or an edge `condition` is never checked: it
+   silently matches nothing.
 
 ## Integrations are declared, not coded
 

@@ -31,6 +31,11 @@
  * as `fallback`; the three surfaces keep their own typography without any of
  * them re-deciding when a link is safe.
  *
+ * A plain click on the link opens the file in the page, in the shared
+ * `FilePreviewDialog` (objectstack#36442); a modified click (a new tab, a new
+ * window) and the keyboard's context menu keep the link's own behaviour, and
+ * the dialog itself offers the download and the new tab.
+ *
  * ⛔ Deliberately NOT re-exported from the package barrel. It is an internal
  * detail shared by two modules, not published surface — `@object-ui/fields`
  * exports exactly what it exported before this card.
@@ -40,6 +45,7 @@ import { cn } from '@object-ui/components';
 import { useObjectTranslation } from '@object-ui/i18n';
 import { File as FileIcon, Lock } from 'lucide-react';
 import type { FileValueView } from './file-value.js';
+import { FilePreviewDialog } from './FilePreviewDialog.js';
 
 /**
  * The translated label and hint for a file the reader may not open
@@ -158,6 +164,7 @@ export function FileValueAffordance({
   /** Suppressed where the row already draws its own icon or thumbnail. */
   icon?: boolean;
 }): React.ReactElement {
+  const [previewing, setPreviewing] = React.useState(false);
   // A file the reader may not open draws its own state, never the fallback
   // name as though it were an ordinary file (objectui#12339).
   if (view.metadataRefused) {
@@ -171,12 +178,19 @@ export function FileValueAffordance({
   const name = view.name;
 
   return (
+    <>
     <a
       href={href}
       target="_blank"
       rel="noopener noreferrer"
       title={name}
-      onClick={(e) => e.stopPropagation()}
+      onClick={(e) => {
+        e.stopPropagation();
+        // A plain click previews in the page; a modified one is the browser's.
+        if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+        e.preventDefault();
+        setPreviewing(true);
+      }}
       data-slot="file-download-link"
       className={cn(
         'inline-flex min-w-0 max-w-full items-center gap-1 align-middle text-blue-600 hover:text-blue-800 hover:underline',
@@ -186,5 +200,16 @@ export function FileValueAffordance({
       {icon && <FileIcon className="size-3 shrink-0" aria-hidden="true" />}
       <span className="truncate">{name}</span>
     </a>
+    {previewing && (
+      // The dialog keeps its own clicks from the grid row or card this link
+      // sits in (it stops them at its content), as the link stops its own.
+      <FilePreviewDialog
+        files={[{ id: view.id, name, url: href, mimeType: view.mimeType, size: view.size }]}
+        index={0}
+        open
+        onOpenChange={(open) => !open && setPreviewing(false)}
+      />
+    )}
+    </>
   );
 }

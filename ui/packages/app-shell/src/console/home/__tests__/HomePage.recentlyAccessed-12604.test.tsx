@@ -239,10 +239,10 @@ describe('Home "Recently accessed" (objectui#12604)', () => {
     expect(rows().map((row) => row.getAttribute('data-recent-type'))).toEqual(['record', 'view', 'dashboard', 'object']);
   });
 
-  it('a record row draws its object’s icon; every other row its kind’s', () => {
+  it('a record, view or object row draws its object’s icon; every other row its kind’s (objectstack#36141)', () => {
     renderPage();
     const icons = rows().map((row) => within(row).getByTestId('home-recent-icon').getAttribute('data-icon'));
-    expect(icons).toEqual(['building', 'view', 'dashboard', 'object']);
+    expect(icons).toEqual(['building', 'building', 'dashboard', 'building']);
   });
 
   it('each trail reads context · app · visit time, the time in the display locale', () => {
@@ -280,11 +280,13 @@ describe('Home "Recently accessed" (objectui#12604)', () => {
   });
 });
 
-describe('a record row draws its object\'s tile (objectstack#35985)', () => {
-  it('in the object\'s palette colour; the other kinds keep their muted kind icon', () => {
+describe('a row about an object draws its object\'s tile (objectstack#35985, objectstack#36141)', () => {
+  it('a record, a view and an object row in the object\'s palette colour; a dashboard row on the neutral tile', () => {
     renderPage();
     const tiles = rows().map((row) => row.querySelector('[data-object-icon-tile]')?.getAttribute('data-object-icon-tile') ?? null);
-    expect(tiles).toEqual(['orange', null, null, null]);
+    expect(tiles).toEqual(['orange', 'orange', null, 'orange']);
+    const neutral = rows().map((row) => row.querySelector('[data-neutral-icon-tile]') !== null);
+    expect(neutral).toEqual([false, false, true, false]);
   });
 });
 

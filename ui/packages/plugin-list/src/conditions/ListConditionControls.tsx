@@ -23,10 +23,12 @@
  *
  * All three are controlled: they read the host's filter group and sort array
  * and hand back the next one. Nothing here stores anything or changes what a
- * filter row or a sort entry looks like. The one read the row makes is the
- * names of the records a lookup condition points at, through the host's data
- * source (`useLookupValueNames`), so a chip says 「Account: Globex」, not the
- * record's id.
+ * filter row or a sort entry looks like. The row makes two reads, both
+ * through the host's data source: the names of the records a lookup condition
+ * points at (`useLookupValueNames`), so a chip says 「Account: Globex」, not
+ * the record's id; and the definition of the object a view condition on a
+ * related record's field reaches (`useRelatedConditionFields`), so that chip
+ * says 「Account › Industry: Technology」.
  */
 
 import * as React from 'react';
@@ -41,7 +43,9 @@ import {
   type SortItem,
 } from '@object-ui/components';
 import { referencedRecordTitle } from '@object-ui/core';
+import { formatConditionDate } from './conditionDates';
 import type { DataSource } from '@object-ui/types';
+import { useDisplayLocale, useSafeFieldLabel } from '@object-ui/i18n';
 import { ArrowDown, ArrowUp, ArrowUpDown, ListFilter, Lock, Plus, RotateCcw, SlidersHorizontal, X } from 'lucide-react';
 import { FieldList, type FieldListItem } from './FieldList';
 import { FilterValuePanel, isQuickRowApplied, quickDateWindowOf } from './FilterValuePanel';
@@ -53,9 +57,9 @@ import {
   newConditionId,
   quickFilterFamily,
   readViewConditions,
+  relationPathOf,
   removeCondition,
   seedValueFor,
-  sortWording,
   upsertCondition,
   type ConditionField,
   type ViewConditionChip,
@@ -81,14 +85,17 @@ export type LookupValueName = (field: string, id: string) => string | undefined;
 /**
  * The value half of a chip: 「Negotiation, Proposal」, 「≥ 100」, 「Today」.
  * A lookup's value is the referenced record's name when `nameOf` has it, and
- * its id only when the name cannot be read.
+ * its id only when the name cannot be read. A date field's value reads as a
+ * date in `locale` (`formatConditionDate`), never as the stored ISO string.
  */
 export function describeConditionValue(
   field: ConditionField | undefined,
   operator: string,
   value: unknown,
   t: Translate,
-  nameOf?: LookupValueName,
+  nameOf: LookupValueName | undefined,
+  // Required, so no caller formats a date in the runtime's default locale by omission.
+  locale: string,
 ): string {
   const opLabel = quickOperatorLabel(operator, t);
   if (isValuelessOperator(operator)) return opLabel;
@@ -99,21 +106,22 @@ export function describeConditionValue(
   // A named window says what it is on its own: 「Today」, not 「between Today」.
   const window = family === 'date' && operator === 'between' ? quickDateWindowOf(value as FilterBuilderRow['value']) : undefined;
   if (window) return quickDateWindowLabel(window, t);
+  const shown = family === 'date' ? (v: unknown) => formatConditionDate(v, field?.type, locale) : String;
   if (family === 'boolean') {
     text = list.map((v) => (v === true || v === 'true' ? t('listConditions.filter.yes') : t('listConditions.filter.no'))).join(joiner);
   } else if (operator === 'between') {
-    text = list.map(String).join(' – ');
+    text = list.map(shown).join(' – ');
   } else if (family === 'option') {
     text = list.map((v) => optionLabel(field, v)).join(joiner);
   } else if (family === 'lookup' && field && nameOf) {
     text = list.map((v) => nameOf(field.value, String(v)) ?? String(v)).join(joiner);
   } else {
-    text = list.map(String).join(joiner);
+    text = list.map(shown).join(joiner);
   }
-  // 「is any of」 is what a value list means on its own; every other operator is named.
-  return operator === 'in' || (operator === 'equals' && (family === 'option' || family === 'boolean'))
-    ? text
-    : `${opLabel} ${text}`;
+  // 「is any of」 is what a value list means on its own; every other operator is
+  // named, and with no value it is the operator alone, never one with a trailing space.
+  if (operator === 'in' || (operator === 'equals' && (family === 'option' || family === 'boolean'))) return text;
+  return text ? `${opLabel} ${text}` : opLabel;
 }
 
 function chipText(
@@ -122,11 +130,12 @@ function chipText(
   operator: string,
   value: unknown,
   t: Translate,
-  nameOf?: LookupValueName,
+  nameOf: LookupValueName | undefined,
+  locale: string,
 ) {
   return t('listConditions.chips.pattern', {
     field: field?.label ?? fieldName ?? '',
-    value: describeConditionValue(field, operator, value, t, nameOf),
+    value: describeConditionValue(field, operator, value, t, nameOf, locale),
   });
 }
 
@@ -134,12 +143,127 @@ function viewChipText(
   chip: ViewConditionChip,
   fields: ReadonlyArray<ConditionField>,
   t: Translate,
-  nameOf?: LookupValueName,
+  nameOf: LookupValueName | undefined,
+  relatedFieldOf: RelatedFieldOf | undefined,
+  locale: string,
 ): string {
-  if (chip.anyOf) return chip.anyOf.map((member) => viewChipText(member, fields, t, nameOf)).join(t('listConditions.chips.or'));
+  if (chip.anyOf) {
+    return chip.anyOf.map((member) => viewChipText(member, fields, t, nameOf, relatedFieldOf, locale)).join(t('listConditions.chips.or'));
+  }
   if (!chip.field || !chip.operator) return t('listConditions.chips.viewFilter');
+  const path = relationPathOf(chip.field);
+  if (path) {
+    // A related record's field: 「Account › Industry: Technology」, each name
+    // its label where one is known and its raw name where none is. No record
+    // name is read for it (`nameOf` names the list's own lookups only).
+    const related = relatedFieldOf?.(chip.field);
+    const label = t('listConditions.chips.relationPath', {
+      lookup: fields.find((f) => f.value === path.lookup)?.label ?? path.lookup,
+      field: related?.label ?? path.field,
+    });
+    return t('listConditions.chips.pattern', {
+      field: label,
+      value: describeConditionValue(related, chip.operator, chip.value, t, undefined, locale),
+    });
+  }
   const field = fields.find((f) => f.value === chip.field);
-  return chipText(field, chip.field, chip.operator, chip.value, t, nameOf);
+  return chipText(field, chip.field, chip.operator, chip.value, t, nameOf, locale);
+}
+
+// ---------------------------------------------------------------------------
+// Related fields
+// ---------------------------------------------------------------------------
+
+/** A related record's field, by its chip path `<lookup>.<field>`, or `undefined` while it is not read. */
+export type RelatedFieldOf = (path: string) => ConditionField | undefined;
+
+/** The value of a declared option (an array of `{ value, label }` or a keyed object) and its declared label. */
+function declaredOptions(raw: unknown): Array<{ value: string; label: string }> | undefined {
+  if (!raw || typeof raw !== 'object') return undefined;
+  if (Array.isArray(raw)) {
+    return raw.map((o) => {
+      const value = o && typeof o === 'object' ? (o as { value?: unknown }).value : o;
+      const label = o && typeof o === 'object' ? (o as { label?: unknown }).label : undefined;
+      return { value: String(value), label: typeof label === 'string' && label ? label : String(value) };
+    });
+  }
+  return Object.entries(raw as Record<string, unknown>).map(([value, meta]) => {
+    const label = meta && typeof meta === 'object' ? (meta as { label?: unknown }).label : undefined;
+    return { value, label: typeof label === 'string' && label ? label : value };
+  });
+}
+
+/**
+ * The related fields the view's relation-path chips name (`<lookup>.<field>`),
+ * read from the definition of the object each lookup points at
+ * (`referenceTo`) through the host's data source: one definition read per
+ * target, again only when the targets change. The field's label and its
+ * options' labels are translated as the list translates its own fields
+ * (`fields.<object>.<field>`, `fieldOptions.<object>.<field>.<value>`), with
+ * the declared label, then the raw name, as the fallback.
+ *
+ * Keyed on the targets it reads, never on the identity of the arrays the host
+ * rebuilds every render (`ui/AGENTS.md` #10). A read that fails answers
+ * `undefined`: the chip keeps the raw names.
+ */
+export function useRelatedConditionFields(
+  dataSource: Pick<DataSource, 'getObjectSchema'> | null | undefined,
+  fields: ReadonlyArray<ConditionField>,
+  conditions: ReadonlyArray<NamedCondition>,
+): RelatedFieldOf {
+  const { fieldLabel, translateOptions } = useSafeFieldLabel();
+  const wanted = new Set<string>();
+  for (const condition of conditions) {
+    const path = relationPathOf(condition.field);
+    const target = path ? fields.find((f) => f.value === path.lookup)?.referenceTo : undefined;
+    if (target) wanted.add(target);
+  }
+  const readKey = JSON.stringify([...wanted].sort());
+
+  const [read, setRead] = React.useState<{ key: string; defs: ReadonlyMap<string, unknown> } | null>(null);
+
+  React.useEffect(() => {
+    const targets = JSON.parse(readKey) as string[];
+    if (targets.length === 0 || !dataSource || typeof dataSource.getObjectSchema !== 'function') return;
+    let cancelled = false;
+    void Promise.all(
+      targets.map(async (target) => {
+        try {
+          return [target, await dataSource.getObjectSchema(target)] as const;
+        } catch {
+          // The chip keeps the raw names: the labels are a courtesy, the condition still filters.
+          return [target, undefined] as const;
+        }
+      }),
+    ).then((answers) => {
+      if (!cancelled) setRead({ key: readKey, defs: new Map(answers) });
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [dataSource, readKey]);
+
+  const defs = read?.key === readKey ? read.defs : undefined;
+  return React.useCallback<RelatedFieldOf>(
+    (chipField) => {
+      const path = relationPathOf(chipField);
+      const target = path ? fields.find((f) => f.value === path.lookup)?.referenceTo : undefined;
+      if (!path || !target) return undefined;
+      const def = defs?.get(target) as { fields?: Record<string, { label?: unknown; type?: unknown; multiple?: unknown; options?: unknown }> } | undefined;
+      const declared = def?.fields?.[path.field];
+      if (!declared) return undefined;
+      const label = typeof declared.label === 'string' && declared.label ? declared.label : path.field;
+      const options = declaredOptions(declared.options);
+      return {
+        value: path.field,
+        label: fieldLabel(target, path.field, label),
+        type: typeof declared.type === 'string' ? declared.type : 'text',
+        multiple: declared.multiple === true,
+        ...(options ? { options: translateOptions(target, path.field, options) } : {}),
+      };
+    },
+    [defs, fields, fieldLabel, translateOptions],
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -242,18 +366,6 @@ export function useLookupValueNames(
   );
 }
 
-/** The words for one sort direction on a field of `type`: time, size or the alphabet. */
-export function sortDirectionLabel(type: string | undefined, order: 'asc' | 'desc', t: Translate): string {
-  switch (sortWording(type)) {
-    case 'time':
-      return order === 'asc' ? t('listConditions.sort.time_asc') : t('listConditions.sort.time_desc');
-    case 'size':
-      return order === 'asc' ? t('listConditions.sort.size_asc') : t('listConditions.sort.size_desc');
-    default:
-      return order === 'asc' ? t('listConditions.sort.alphabet_asc') : t('listConditions.sort.alphabet_desc');
-  }
-}
-
 // ---------------------------------------------------------------------------
 // FilterPanel
 // ---------------------------------------------------------------------------
@@ -350,7 +462,7 @@ export function FilterPanel({
         <button
           type="button"
           onClick={() => setStep({ kind: 'advanced' })}
-          className="flex h-8 w-full items-center gap-2 rounded-sm px-2 text-left text-[13px] text-muted-foreground hover:bg-accent hover:text-foreground"
+          className="flex h-8 w-full items-center gap-2 rounded-sm px-2 text-left text-sm text-muted-foreground hover:bg-accent hover:text-foreground"
           data-testid={`${testId}-open-advanced`}
         >
           <SlidersHorizontal className="h-3.5 w-3.5" aria-hidden="true" />
@@ -412,7 +524,7 @@ export function SortPanel({
           aria-checked={order === dir}
           onClick={() => setOrder(dir)}
           className={cn(
-            'flex h-7 flex-1 items-center justify-center gap-1 rounded-sm text-[13px] text-muted-foreground hover:bg-accent',
+            'flex h-7 flex-1 items-center justify-center gap-1 rounded-sm text-sm text-muted-foreground hover:bg-accent',
             order === dir && 'bg-accent font-medium text-foreground',
           )}
           data-testid={`${testId}-order-${dir}`}
@@ -436,7 +548,7 @@ export function SortPanel({
               <button
                 type="button"
                 onClick={() => setAdvanced(true)}
-                className="flex h-8 w-full items-center gap-2 rounded-sm px-2 text-left text-[13px] text-muted-foreground hover:bg-accent hover:text-foreground"
+                className="flex h-8 w-full items-center gap-2 rounded-sm px-2 text-left text-sm text-muted-foreground hover:bg-accent hover:text-foreground"
                 data-testid={`${testId}-open-advanced`}
               >
                 <SlidersHorizontal className="h-3.5 w-3.5" aria-hidden="true" />
@@ -509,11 +621,18 @@ export interface ConditionChipRowProps {
   end?: React.ReactNode;
   /** The reader may add a filter (`userActions.filter`); `false` ⇒ no 「Filter」 and no 「+」. */
   filterOffered?: boolean;
+  /**
+   * objectstack#35892 — where the row may be narrow (a record page's related
+   * tab, in a drawer too): below 28rem of the row's own width the 「Sort」 and
+   * 「Filter」 buttons and the sort chip keep their icon alone, named by their
+   * `aria-label` and `title`.
+   */
+  collapsibleLabels?: boolean;
   className?: string;
 }
 
 const CHIP_CLASS =
-  'inline-flex h-6 max-w-[280px] shrink-0 items-center gap-1 rounded-md border px-2 text-[13px] leading-none';
+  'inline-flex h-6 max-w-[280px] shrink-0 items-center gap-1 rounded-md border px-2 text-sm leading-none';
 
 /**
  * A control of the condition row below `sm`: 44 px on both sides (WCAG 2.5.5),
@@ -524,7 +643,7 @@ const ROW_TOUCH_TARGET = 'max-sm:h-11 max-sm:min-w-11';
 
 /** 「Sort」, 「Filter」 and 「+」 before anything is set: dashed, so they do not read as a condition in force. */
 const EMPTY_BUTTON_CLASS =
-  'max-sm:h-11 max-sm:min-w-11 inline-flex h-6 shrink-0 items-center gap-1 rounded-md border border-dashed px-2 text-[13px] leading-none text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring';
+  'max-sm:h-11 max-sm:min-w-11 inline-flex h-6 shrink-0 items-center gap-1 rounded-md border border-dashed px-2 text-sm leading-none text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring';
 
 export function ConditionChipRow({
   sort,
@@ -543,9 +662,11 @@ export function ConditionChipRow({
   renderSortPanel,
   end,
   filterOffered = true,
+  collapsibleLabels = false,
   className,
 }: ConditionChipRowProps) {
   const { t } = useListConditionTranslation();
+  const locale = useDisplayLocale();
   const [openChip, setOpenChip] = React.useState<string | null>(null);
 
   // Keyed on the names, not on the array the host may rebuild every render.
@@ -560,6 +681,7 @@ export function ConditionChipRow({
     ...appliedRows,
   ];
   const nameOf = useLookupValueNames(dataSource, filterFields, namedConditions);
+  const relatedFieldOf = useRelatedConditionFields(dataSource, filterFields, namedConditions);
   const independent = chipsAreIndependent(filters);
   // Nothing to show and nothing to offer: the row the host reserves stays empty.
   if (!renderSortPanel && !filterOffered && !end && !trailing && sort.length === 0 && viewChips.length === 0 && appliedRows.length === 0) {
@@ -567,6 +689,12 @@ export function ConditionChipRow({
   }
 
   const fieldOf = (list: ReadonlyArray<ConditionField>, name: string) => list.find((f) => f.value === name);
+  // objectstack#35892 — under `collapsibleLabels`, a button's words go below
+  // 28rem of the row's width (the row is its own container, `@container/conditions`).
+  const collapsingLabel = collapsibleLabels ? 'hidden @[28rem]/conditions:inline' : undefined;
+  const sortChipName = sort.length > 0
+    ? t('listConditions.chips.sortedBy', { field: fieldOf(sortFields, sort[0].field)?.label ?? sort[0].field })
+    : t('listConditions.chips.sort');
 
   const filterPopover = (key: string, trigger: React.ReactNode, conditionId?: string) => (
     <Popover key={key} open={openChip === key} onOpenChange={(open) => setOpenChip(open ? key : null)}>
@@ -593,7 +721,11 @@ export function ConditionChipRow({
       aria-label={t('listConditions.chips.region')}
       // One line at every width: what does not fit scrolls sideways
       // (objectstack#35878).
-      className={cn('flex min-w-0 flex-1 flex-nowrap items-center gap-1.5 overflow-x-auto', className)}
+      className={cn(
+        'flex min-w-0 flex-1 flex-nowrap items-center gap-1.5 overflow-x-auto',
+        collapsibleLabels && '@container/conditions',
+        className,
+      )}
       data-testid="condition-chips"
     >
       {/* objectstack#35878 — the sort, at any number of levels, is ONE chip:
@@ -609,23 +741,28 @@ export function ConditionChipRow({
                 className={cn(CHIP_CLASS, ROW_TOUCH_TARGET, 'border-primary/30 bg-primary/5 text-foreground hover:bg-primary/10')}
                 data-testid="condition-sort"
                 data-levels={sort.length}
+                {...(collapsibleLabels ? { 'aria-label': sortChipName, title: sortChipName } : {})}
               >
                 <ArrowUpDown className="h-3 w-3 shrink-0 text-muted-foreground" aria-hidden="true" />
-                <span className="truncate">
-                  {t('listConditions.chips.sortedBy', {
-                    field: fieldOf(sortFields, sort[0].field)?.label ?? sort[0].field,
-                  })}
+                <span className={cn('truncate', collapsingLabel)}>
+                  {sortChipName}
                 </span>
                 {sort.length > 1 && (
-                  <span className="rounded bg-muted px-1 text-[11px] tabular-nums text-muted-foreground" data-testid="sort-chip-more">
+                  <span className="rounded bg-muted px-1 text-xs tabular-nums text-muted-foreground" data-testid="sort-chip-more">
                     +{sort.length - 1}
                   </span>
                 )}
               </button>
             ) : (
-              <button type="button" className={EMPTY_BUTTON_CLASS} data-testid="condition-sort" data-levels={0}>
+              <button
+                type="button"
+                className={EMPTY_BUTTON_CLASS}
+                data-testid="condition-sort"
+                data-levels={0}
+                {...(collapsibleLabels ? { 'aria-label': sortChipName, title: sortChipName } : {})}
+              >
                 <ArrowUpDown className="h-3 w-3 shrink-0" aria-hidden="true" />
-                {t('listConditions.chips.sort')}
+                <span className={collapsingLabel}>{t('listConditions.chips.sort')}</span>
               </button>
             )}
           </PopoverTrigger>
@@ -644,7 +781,7 @@ export function ConditionChipRow({
       )}
 
       {viewChips.map((chip) => {
-        const text = viewChipText(chip, filterFields, t, nameOf);
+        const text = viewChipText(chip, filterFields, t, nameOf, relatedFieldOf, locale);
         return (
           <span
             key={chip.key}
@@ -664,7 +801,7 @@ export function ConditionChipRow({
       {independent
         ? appliedRows.map((row) => {
             const field = fieldOf(filterFields, row.field);
-            const text = chipText(field, row.field, row.operator, row.value, t, nameOf);
+            const text = chipText(field, row.field, row.operator, row.value, t, nameOf, locale);
             return (
               <span
                 key={row.id}
@@ -719,9 +856,15 @@ export function ConditionChipRow({
       {filterOffered && filterPopover(
         'add',
         appliedRows.length === 0 ? (
-          <button type="button" className={EMPTY_BUTTON_CLASS} data-testid="condition-add-filter" data-empty="true">
+          <button
+            type="button"
+            className={EMPTY_BUTTON_CLASS}
+            data-testid="condition-add-filter"
+            data-empty="true"
+            {...(collapsibleLabels ? { 'aria-label': t('listConditions.chips.filter'), title: t('listConditions.chips.filter') } : {})}
+          >
             <ListFilter className="h-3 w-3 shrink-0" aria-hidden="true" />
-            {t('listConditions.chips.filter')}
+            <span className={collapsingLabel}>{t('listConditions.chips.filter')}</span>
           </button>
         ) : (
           <button
@@ -743,7 +886,7 @@ export function ConditionChipRow({
           type="button"
           variant="ghost"
           size="sm"
-          className="ml-auto h-6 shrink-0 gap-1 px-1.5 text-[13px] text-muted-foreground"
+          className="ml-auto h-6 shrink-0 gap-1 px-1.5 text-sm text-muted-foreground"
           onClick={onReset}
           title={t('listConditions.chips.resetHint')}
           data-testid="condition-reset"
@@ -753,5 +896,50 @@ export function ConditionChipRow({
         </Button>
       )}
     </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// ConditionDiscardButton
+// ---------------------------------------------------------------------------
+
+export interface ConditionDiscardButtonProps {
+  onDiscard: () => void;
+  /** The button's text; defaults to 「Discard」. */
+  label?: string;
+  /** The button's tooltip; defaults to 「Back to the default sort and filter」. */
+  title?: string;
+  'data-testid'?: string;
+  className?: string;
+}
+
+/**
+ * 「Discard」 (objectstack#35892): the list page's, beside its Save
+ * (objectstack#35955), and a record page's related tab's, at its condition
+ * row's end, where there is no Save. One ghost button in the row's size, so
+ * both read as one control; a host draws it only while there is something to
+ * discard.
+ */
+export function ConditionDiscardButton({
+  onDiscard,
+  label,
+  title,
+  'data-testid': testId = 'condition-discard',
+  className,
+}: ConditionDiscardButtonProps) {
+  const { t } = useListConditionTranslation();
+  return (
+    <Button
+      type="button"
+      variant="ghost"
+      size="sm"
+      className={cn('h-6 shrink-0 gap-1 px-1.5 text-sm font-normal text-muted-foreground shadow-none', className)}
+      onClick={onDiscard}
+      title={title ?? t('listConditions.chips.discardHint')}
+      data-testid={testId}
+    >
+      <RotateCcw className="h-3.5 w-3.5" aria-hidden="true" />
+      {label ?? t('listConditions.chips.discard')}
+    </Button>
   );
 }

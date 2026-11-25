@@ -19,12 +19,22 @@
  * `apps/console`), mounted above `AppContent`; it stays on the critical path
  * and is outside this harness.
  *
+ * objectstack#35981 — the route's own bucket no longer holds the chrome: while
+ * the session's gates are out the console draws its empty frame
+ * (`data-boot-shell`), then the chrome with the route's skeleton in its slot.
+ * That skeleton is still the boot wait (`data-boot-splash`) until the route
+ * draws, so `splashUp()` below reads the same steps as before.
+ *
  * CONTROL: after the first paint, a route whose buckets have not landed draws
  * its skeleton inside the console chrome, then its content; and a bucket that
  * refetches keeps the route mounted.
  */
 
 import '@testing-library/jest-dom/vitest';
+// The chrome mounts here (ConsoleLayout -> DraftPreviewBar), whose lint
+// helpers load `@objectstack/lint` lazily: pay that load during collection,
+// not inside a case's clocked window (scripts/check-test-source-alias.mjs).
+import '@objectstack/lint';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import React, { useEffect } from 'react';
 import { act, cleanup, render, screen, waitFor } from '@testing-library/react';
@@ -130,9 +140,11 @@ function deferred<T>() {
   return { promise, resolve };
 }
 
-function createServer() {
+function createServer({ holdConfig = false }: { holdConfig?: boolean } = {}) {
   const list = deferred<AuthOrganization[]>();
   const member = deferred<unknown>();
+  const config = deferred<{ features: Record<string, unknown> }>();
+  if (!holdConfig) config.resolve({ features: {} });
   const client = {
     getSession: vi.fn(async () => ({
       // `role: 'user'`, no positions: the verdict needs the member row.
@@ -140,7 +152,7 @@ function createServer() {
       session: { token: 'tok-12809', activeOrganizationId: ORG.id },
     })),
     signOut: vi.fn(async () => undefined),
-    getConfig: vi.fn(async () => ({ features: {} })),
+    getConfig: vi.fn(() => config.promise),
     listOrganizations: vi.fn(() => list.promise),
     // `get-full-organization`: never answers. The splash must not wait on it.
     getActiveOrganization: vi.fn(() => new Promise(() => {})),
@@ -153,6 +165,7 @@ function createServer() {
     answerMember: () => act(async () => {
       member.resolve({ id: 'm1', organizationId: ORG.id, userId: USER, role: 'member' });
     }),
+    answerConfig: () => act(async () => { config.resolve({ features: { cloudManaged: false } }); }),
   };
 }
 
@@ -183,6 +196,7 @@ function boot(client: AuthClient, url: string) {
 }
 
 const splashUp = () => document.querySelector('[data-boot-splash]') !== null;
+const bootShellUp = () => document.querySelector('[data-boot-shell]') !== null;
 const askedTypes = () => new Set(meta.ensureType.mock.calls.map((c) => c[0] as string));
 
 beforeEach(() => {
@@ -214,8 +228,16 @@ describe('the console splash waits for the critical path only (objectui#12809)',
 
     await answerList();
     expect(splashUp()).toBe(true); // the member row has not answered
+    // objectstack#35981 — the chrome's empty frame, not the chrome: the admin
+    // verdict decides which navigation exists.
+    expect(bootShellUp()).toBe(true);
+    expect(screen.queryByTestId('console-layout')).not.toBeInTheDocument();
     await answerMember();
     expect(splashUp()).toBe(true); // the route's `object` bucket has not answered
+    // objectstack#35981 — the chrome is up, the route's skeleton in its slot.
+    expect(bootShellUp()).toBe(false);
+    expect(screen.getByTestId('console-layout')).toBeInTheDocument();
+    expect(screen.getByTestId('route-metadata-skeleton')).toHaveAttribute('data-boot-splash');
 
     await settle('object', [{ name: 'account' }]);
     await waitFor(() => expect(screen.getByTestId('object-view')).toHaveTextContent('account'));
@@ -225,6 +247,25 @@ describe('the console splash waits for the critical path only (objectui#12809)',
     expect(client.getActiveOrganization).not.toHaveBeenCalled();
     expect(askedTypes()).toEqual(new Set(['object']));
     for (const type of ['dashboard', 'report', 'page']) expect(meta.status[type]).toBeUndefined();
+  });
+
+  it('objectstack#35981 — the chrome also waits for the deployment flags its navigation gates read', async () => {
+    // A navigation predicate naming a flag (`features.cloudManaged != true`)
+    // faults while no flags are bound and withholds its entry (objectui#12700):
+    // a chrome mounted before `/auth/config` answers would hide such an entry
+    // and then draw it. Once the chrome stopped waiting for the route's own
+    // reads, nothing but timing had put that answer first.
+    const { client, answerList, answerMember, answerConfig } = createServer({ holdConfig: true });
+    boot(client, '/apps/crm/account');
+    await waitFor(() => expect(client.listOrganizations).toHaveBeenCalledTimes(1));
+    await answerList();
+    await answerMember();
+    expect(bootShellUp()).toBe(true);
+    expect(screen.queryByTestId('console-layout')).not.toBeInTheDocument();
+
+    await answerConfig();
+    expect(bootShellUp()).toBe(false);
+    expect(screen.getByTestId('console-layout')).toBeInTheDocument();
   });
 
   it('CONTROL: a later route whose bucket has not landed shows its skeleton inside the chrome, then its content', async () => {

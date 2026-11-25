@@ -35,6 +35,17 @@ export interface GridCellFacts {
    */
   readOnlyReason?: string | null;
   /**
+   * The host is still reading what decides whether this cell edits (the
+   * record's lock, the reader's verdict on the record). An attempt to edit it
+   * meanwhile opens no editor: the cell shows `text`, and once `settled`
+   * settles (resolved or rejected) the same attempt, with the same typed key,
+   * is asked again — unless the reader selected another cell, asked something
+   * newer of it or opened an editor in the meantime. A toggle, a paste or a
+   * clear asked meanwhile waits the same way: nothing is written before the
+   * read settles. Absent ⇒ nothing is being read.
+   */
+  checking?: { text: string; settled: Promise<unknown> } | null;
+  /**
    * What a printable key typed on the selected cell does: `replace` opens the
    * editor with the typed text in place of the value (text, numbers); `open`
    * opens the editor over the value and the key is not written (a picker, a
@@ -76,8 +87,37 @@ export interface GridCellFacts {
   validate?: (value: unknown) => string | null | undefined;
 }
 
+/**
+ * The reference cells of a select-first grid (objectstack#36015): the columns
+ * whose cells name records of another object as chips, and how the host opens
+ * one in place. In such a cell a single click on a chip opens its record with
+ * {@link GridReferenceCells.openRecord} (and selects the cell), a click beside
+ * the chips only selects, Ctrl/Cmd+Enter opens the first chip the same way,
+ * and an edit button is drawn while the pointer is over the cell or the cell
+ * is selected and it opens an editor. A Ctrl/Cmd-click on a chip still
+ * follows its link (a new tab).
+ */
+export interface GridReferenceCells {
+  /**
+   * Whether this column's cells are reference cells. Asked per column on every
+   * render, so it answers from the column alone. A column of people is not one:
+   * its chips only select.
+   */
+  isReferenceColumn: (columnKey: string) => boolean;
+  /** Open the record a chip names, in place (the list's side drawer). */
+  openRecord: (objectName: string, recordId: string) => void;
+}
+
 export interface GridCellSelection {
-  /** The host's facts for one cell; asked when the reader acts on it, never per render. */
+  /**
+   * The host's facts for one cell. The table asks for them when the reader
+   * acts on a cell (an edit, a key, a paste), and for the selected cell's
+   * `aria-readonly` (objectstack#35689): once as the cell becomes selected,
+   * and again when its row is re-read or the provider's value is a new
+   * object. The value's identity is part of this contract: keep it stable
+   * across renders (memoise it) and hand a new one only when an answer may
+   * have changed, or the selected cell is asked on every render.
+   */
   describeCell?: (row: any, columnKey: string) => GridCellFacts | null | undefined;
   /** Called when a cell becomes the selected one (a host may prefetch what an edit will need). */
   onCellSelect?: (row: any, columnKey: string) => void;
@@ -93,6 +133,12 @@ export interface GridCellSelection {
    * state-machine field (objectstack#35685).
    */
   confirmCommit?: (row: any, columnKey: string, value: unknown) => Promise<boolean> | null | undefined;
+  /**
+   * The grid's reference cells and how a chip in one opens its record
+   * (objectstack#36015). Absent ⇒ a chip is like any link a cell draws: a
+   * single click only selects the cell.
+   */
+  referenceCells?: GridReferenceCells | null;
 }
 
 const GridCellSelectionContext = React.createContext<GridCellSelection | null>(null);

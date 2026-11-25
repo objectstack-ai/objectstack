@@ -1,7 +1,8 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { z } from 'zod';
-import { ViewSchema } from '../ui/view.zod';
+import { FormViewSchema, MetadataListViewSchema, ViewSchema } from '../ui/view.zod';
+import { ActionSchema } from '../ui/action.zod';
 import { I18nLabelSchema } from '../ui/i18n.zod';
 import { DiscoverySchema } from './discovery.zod';
 import {
@@ -211,6 +212,7 @@ export const GetMetaTypesResponseSchema = lazySchema(() => z.object({
   types: z.array(z.string()).describe('Available metadata type names (e.g., "object", "plugin", "view")'),
   entries: z.array(z.object({
     type: z.string().describe('Singular type identifier'),
+    schemaId: z.string().describe('Same value as `type`: the id the type\'s `schema`, `form` and `list` are bound to'),
     label: z.string().describe('Human-readable label'),
     description: z.string().optional().describe('Brief description'),
     filePatterns: z.array(z.string()).describe('Glob patterns used to discover artifacts of this type'),
@@ -223,6 +225,10 @@ export const GetMetaTypesResponseSchema = lazySchema(() => z.object({
     domain: z.enum(['data', 'ui', 'automation', 'system', 'security', 'ai']).describe('Protocol domain'),
     overrideSource: z.enum(['registry', 'env']).describe('Whether allowEnvironmentOverlay comes from the static registry or is elevated by the OS_METADATA_WRITABLE environment variable'),
     createSeed: z.unknown().optional().describe('Authoritative minimal valid create seed for this type — Studio/CLI/API derive create defaults from it (single source of truth in @objectstack/spec). Absent for canvas-create types whose shape is built interactively.'),
+    schema: z.record(z.string(), z.unknown()).optional().describe('JSON Schema of the type, derived from its spec schema, for the generic metadata editor. Absent for a type with neither a spec schema nor a hand-crafted one.'),
+    form: FormViewSchema.optional().describe('Form layout of the type\'s Studio editor, labels in the request locale. Absent for a type with no declared form, which Studio edits from `schema` alone.'),
+    list: MetadataListViewSchema.optional().describe('Studio list layout of this type: the columns its metadata list shows, each naming a key of the type schema, headers in the request locale. Absent for a type with no declared list, which Studio lists by name, label and description.'),
+    actions: z.array(ActionSchema).optional().describe('Type-level actions on a definition of this type (e.g. a datasource "Test connection"): the registry\'s declarative actions merged with plugin-registered ones. Absent when there are none.'),
   })).optional().describe('Enriched per-type registry entries (Phase 3a)'),
 }));
 
@@ -364,6 +370,14 @@ export const FlowRegistrationSchema = lazySchema(() => z.discriminatedUnion('sta
  * its item read serves as `disabledActions` ({@link GetMetaItemResponseSchema}
  * says why it is beside the item, why absence means no ledger answered, and
  * why `[]` is stated), keyed by the object's `name`.
+ *
+ * [#36894] `changedAt` is the same position for each listed item's change
+ * time: when the stored row whose content the list serves for the item last
+ * changed, keyed by the item's `name`. Only an item served from a stored row
+ * has one; a code-shipped or file-loaded item has no recorded change time and
+ * no entry, never a stand-in (not the read time, not the boot time). It is the
+ * instant the by-name read serves as `Last-Modified`
+ * ({@link GetMetaItemCachedResponseSchema}`.lastModified`) for the same row.
  */
 export const GetMetaItemsResponseSchema = lazySchema(() => z.object({
   type: z.string().describe('Metadata type name'),
@@ -383,6 +397,23 @@ export const GetMetaItemsResponseSchema = lazySchema(() => z.object({
     + 'answered by a process whose data engine has an activation ledger attached; absent otherwise, and '
     + 'absence means no ledger answered, never that nothing is switched off. Beside the items, never '
     + 'inside one: each item\'s `actions` is served as declared.',
+  ),
+  changedAt: z.record(z.string(), z.string().datetime()).optional().describe(
+    'When each listed item last changed, keyed by the item\'s `name`: the `updated_at` of the stored '
+    + 'row whose content the list serves for that item, an ISO-8601 instant in UTC written with `Z`. '
+    + 'One entry per listed item served from a stored row; an item the list serves from code (a '
+    + 'code-shipped or file-loaded definition) has no recorded change time and no entry, never a '
+    + 'stand-in such as the read time. Where an item has several stored layers in scope (its '
+    + 'package\'s own row, the package-less row, the package\'s declared override, environment-wide or '
+    + 'scoped to one package), the time is the effective layer\'s: the row whose content is the listed '
+    + 'item. On a `?preview=draft` list an item whose pending draft is served (`_draft: true`) has the '
+    + 'draft row\'s time, since the draft is its content. Where several listed items share a name (a '
+    + 'name two or more packages ship, the members of a bundle), the latest of their times. Only the '
+    + 'names of items in this answer are keyed, and a door that leaves out some item of a name (the '
+    + 'per-caller read gate, a query filter) answers no entry for that name, since the entry may be '
+    + 'the time of the item it left out. A view a stored view container expands is not served from a '
+    + 'row of its own name and has no entry. Absent when no listed item is served from a stored row. '
+    + 'Beside the items, never inside one: an item\'s body is served as stored.',
   ),
 }));
 
@@ -521,7 +552,7 @@ const MetadataProtectionEnvelopeFields = {
     + 'resolved item declares `_lockDocsUrl`.',
   ),
   provenance: MetadataProvenanceSchema.optional().describe(
-    'Where the item came from (package | org | env-forced). Present only when the '
+    'Where the item came from (package | org | env-forced | platform). Present only when the '
     + 'resolved item declares `_provenance`.',
   ),
   packageId: z.string().optional().describe(
@@ -960,6 +991,19 @@ export const GetMetaItemLayeredResponseSchema = lazySchema(() => z.object({
   overlay: z.unknown().describe(
     'LAYER 2 — the stored customization row ALONE, not merged with `code`. '
     + '`null` when the environment has not customized the item.',
+  ),
+  overlayVersion: z.string().nullable().optional().describe(
+    'ADR-0008 version token of the stored ACTIVE row at this read\'s address '
+    + '(`?package=`, and the bundle member): the published layer a publish of '
+    + 'this item replaces. The same keyed token the plain uncached read serves '
+    + 'as `version` and a publish receipt serves as `version`. Send it back as '
+    + '`If-Match` on `POST /meta/:type/:name/publish` and a publish over a row '
+    + 'that moved since this read is refused 409 `METADATA_CONFLICT` instead of '
+    + 'replacing it. `null` when no active row is stored at that address — an '
+    + 'item served from code or a package artifact alone — so the next publish '
+    + 'creates one: pin it with `If-None-Match: *`. ABSENT from a server that '
+    + 'does not serve it: absence means "not served", never "no row". Opaque — '
+    + 'echo it verbatim, never parse it.',
   ),
   overlayScope: z.enum(['env']).nullable().describe(
     'Which scope the `overlay` row was read from: `env`, the environment layer — '
@@ -1579,6 +1623,21 @@ export const PublishMetaItemRequestSchema = lazySchema(() => z.object({
     + '`no_draft`.',
   ),
   member: z.string().optional().describe(BUNDLE_MEMBER_SELECTOR_DESCRIPTION),
+  parentVersion: z.string().nullable().optional().describe(
+    'ADR-0008 optimistic-concurrency pin on the PUBLISHED layer: the version '
+    + 'token of the active row the caller loaded and means to replace (on the '
+    + 'REST door, the `If-Match` request header; the `/layers` read\'s '
+    + '`overlayVersion`, the plain read\'s `version` and a publish receipt\'s '
+    + '`version` serve it). A token that is not the current active row\'s at the '
+    + 'address the promotion writes is refused 409 `METADATA_CONFLICT`, whose '
+    + '`currentVersion` names the active row\'s current token, and nothing is '
+    + 'promoted: the draft stays pending. ⚠️ `null` is NOT the same as absent: a '
+    + 'present `null` asserts "no active row here" (on the REST door, '
+    + '`If-None-Match: *`, which takes `*` alone and never beside `If-Match`), '
+    + 'refused 409 when one exists; an ABSENT key is unpinned and promotes over '
+    + 'whatever is live, as before. It pins the active row only — which draft is '
+    + 'promoted is the address\'s, as without it.',
+  ),
   userTextLocales: userTextLocalesMember(),
 }));
 
@@ -4618,6 +4677,11 @@ export const AiAgentCapabilitiesSchema = lazySchema(() => z.object({
   canvas: z.boolean().describe('Drives the Live Canvas split view (ADR-0037)'),
   debug: z.boolean().describe('Exposes the build-doctor debug drawer'),
   resume: z.boolean().describe('Turns resume durable multi-step runs (ADR-0013)'),
+  focus: z.boolean().optional().describe(
+    'Honours a conversation focus: the chat request\'s `context.focus`, the record the user pinned the '
+    + 'conversation to (`ToolExecutionContext.focus`). A client draws the pin and sends the key only when '
+    + 'this is true; absent reads as false.',
+  ),
 }));
 
 /** One row of the `GET /api/v1/ai/agents` catalog. */
@@ -4778,6 +4842,33 @@ export const GetLocalesRequestSchema = lazySchema(() => z.object({}));
  * the requester's `Accept-Language`) is a caller's choice the server cannot
  * make for it. Serving real names would put CLDR data behind an endpoint for
  * something every client can already compute, and no consumer asks for it.
+ *
+ * `sourceLocale` (#36504) names the language the app's inline metadata text
+ * is authored in — the declared `i18n.sourceLocale`, else the default locale,
+ * the same collapse the document translators make (`ResolveOptions.defaultLocale`
+ * fed from `getSourceLocale?.() ?? getDefaultLocale?.()`). It differs from the
+ * `isDefault` locale on a deployment authored in one language that defaults
+ * its users to another. A client that edits labels reads it to tell an edit
+ * of the source text from a translation: the console's design mode stores a
+ * menu rename made in any other language as that language's translation.
+ * Named after its config key, as `defaultLocale`'s `isDefault` mark is the
+ * config's `defaultLocale`.
+ *
+ * `fallbackChain` names the locales the server consults after the requested
+ * one and before the authored text, the deployment's DECLARED chain: the i18n
+ * service's `getFallbackLocale()` (the stack's `i18n.fallbackLocale`, else its
+ * `defaultLocale`, as the boot collapses them), which the server's own
+ * metadata translations already hand the spec resolvers as
+ * `ResolveOptions.fallbackChain`. It is absent when the i18n service reports
+ * no fallback (the file-backed service always reports one, collapsed from
+ * `fallbackLocale || defaultLocale || 'en'`), and a client then resolves the
+ * requested locale alone, as the server does. A client that resolves
+ * translated metadata itself (the console's flow labels) reads it beside
+ * `sourceLocale` (the resolvers' `defaultLocale`), after negotiating its
+ * request tag against `locales[].code` as the server negotiates a request's
+ * tag (`resolveLocaleAmong`), so its answer and the server's walk the same
+ * locales: a `zh-Hans` request on a deployment holding `zh-CN` is the
+ * `zh-CN` request, and walks no chain when `zh-CN` is the source locale.
  */
 export const GetLocalesResponseSchema = lazySchema(() => z.object({
   locales: z.array(z.object({
@@ -4787,6 +4878,16 @@ export const GetLocalesResponseSchema = lazySchema(() => z.object({
     ),
     isDefault: z.boolean().default(false).describe('Whether this is the default locale'),
   })).describe('Available locales'),
+  sourceLocale: z.string().optional().describe(
+    'The language the app\'s own text (a plain-string `label`) is written in: the declared `i18n.sourceLocale`, '
+    + 'else the default locale. Absent when the server knows neither. Text typed in any other locale is a translation',
+  ),
+  fallbackChain: z.array(z.string()).optional().describe(
+    'The locales the server consults, in order, after the requested one and before the authored text: the deployment\'s '
+    + 'declared fallback (`i18n.fallbackLocale`, else `defaultLocale`). Absent when the i18n service reports none; the '
+    + 'requested locale alone is then consulted. A request tag is negotiated against `locales[].code` first, and the chain '
+    + 'is not walked for a request that negotiates to `sourceLocale`',
+  ),
 }));
 
 /**
@@ -4868,6 +4969,8 @@ export type GetDiscoveryRequest = z.input<typeof GetDiscoveryRequestSchema>;
 export type GetDiscoveryResponse = z.input<typeof GetDiscoveryResponseSchema>;
 export type GetMetaTypesRequest = z.input<typeof GetMetaTypesRequestSchema>;
 export type GetMetaTypesResponse = z.input<typeof GetMetaTypesResponseSchema>;
+/** Post-parse shape of {@link GetMetaTypesResponse} — defaults applied, transforms run (ADR-0122). */
+export type GetMetaTypesResponseParsed = z.infer<typeof GetMetaTypesResponseSchema>;
 export type GetMetaItemsRequest = z.input<typeof GetMetaItemsRequestSchema>;
 export type FlowRegistrationRefusal = z.input<typeof FlowRegistrationRefusalSchema>;
 export type FlowRegistration = z.input<typeof FlowRegistrationSchema>;

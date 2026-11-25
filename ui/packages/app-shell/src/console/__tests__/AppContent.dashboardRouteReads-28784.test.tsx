@@ -51,7 +51,8 @@ vi.mock('../../layout/ConsoleLayout', () => ({
   ConsoleLayout: ({ children }: { children?: React.ReactNode }) => <div data-testid="console-layout">{children}</div>,
 }));
 vi.mock('../../chrome/CommandPalette', () => ({ CommandPalette: () => null }));
-vi.mock('../../hooks/useStudioDesignGate', () => ({ useStudioDesignGate: () => null }));
+// `useStudioEntryGate`: the dashboard page's Edit button reads it (objectstack#36372).
+vi.mock('../../hooks/useStudioDesignGate', () => ({ useStudioDesignGate: () => null, useStudioEntryGate: () => null }));
 vi.mock('../../chrome/KeyboardShortcutsDialog', () => ({ KeyboardShortcutsDialog: () => null }));
 vi.mock('../../chrome/OnboardingWalkthrough', () => ({ OnboardingWalkthrough: () => null }));
 vi.mock('@object-ui/i18n', async (importOriginal) => ({

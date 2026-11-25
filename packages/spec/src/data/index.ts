@@ -217,6 +217,15 @@ export * from './object.zod';
 // [#35985] The object colour palette, named once so a renderer draws exactly
 // the names the spec accepts. The `icon` / `color` leaves stay unexported.
 export { OBJECT_COLORS, type ObjectColor } from './object-icon';
+// [#36366] The action layout per scope: the pinned limit, the scopes and their built-ins.
+export {
+  OBJECT_ACTION_LAYOUT_PINNED_LIMIT,
+  OBJECT_ACTION_LAYOUT_SCOPES,
+  OBJECT_ACTION_LAYOUT_BUILTINS,
+  type ObjectActionLayoutScope,
+  type ObjectActionLayout,
+  type ObjectActionLayoutArm,
+} from './object-action-layout';
 // API-method derivation — the single source of truth turning an object's
 // `enable.apiMethods` whitelist into its effective operation set (#3391).
 export * from './api-derivation';
@@ -253,6 +262,10 @@ export * from './secret-mask';
 // from it; objectui keeps its interim `MASKED_FIELD_TYPES` copy until its own
 // re-bind card lands, and derives from it after that.
 export * from './masked-field-types';
+// Whether a changed field's old → new values show on the activity timeline, and
+// the no-line types that are off by default (#36290, #36482): one predicate for
+// plugin-audit's writer and the metadata form's "follow the default" choice.
+export * from './field-history-default';
 // The unknown-authoring-key lint's CORE — comparator, finding shape, curated
 // guidance tables (#3786). Kept frontend-safe: the stack WALKER that imports
 // every schema lives in kernel/metadata-authoring-lint.ts, so this subpath's
@@ -482,6 +495,7 @@ export * from './record-currency-path';
 // is not. Read by `defineStack`, `@objectstack/lint` and the objectui record page
 // and Studio, so the four cannot drift.
 export * from './related-list-body-table';
+export * from './related-list-entry';
 
 // Feed & Activity Protocol — retains only the UI activity-timeline config enums
 // (FeedItemType / FeedFilterMode); the feed backend contracts were retired (ADR-0052 §5).

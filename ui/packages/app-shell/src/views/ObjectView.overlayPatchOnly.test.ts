@@ -350,7 +350,7 @@ describe('objectui#12504 census — the toolbar-to-view write family is retired'
     });
 
     it('CONTROL: the doors objectui#12474 moved write the reader\'s state, never the view (density kept, hidden fields a draft since objectstack#35955)', () => {
-        expect(objectViewCode).toMatch(/onDensityChange:\s*\(mode\)\s*=>\s*\{\s*listPrefs\.patchView\(/);
+        expect(objectViewCode).toMatch(/onDensityChange:\s*\(mode\)\s*=>\s*\{[\s\S]{0,240}?listLayout\.patchView\(/);
         expect(objectViewCode).toMatch(/const persistHiddenFields = \(hidden: string\[\]\) => \{[\s\S]{0,120}?listDraft\.patch\(\{ hiddenFields: hidden \}\)/);
     });
 

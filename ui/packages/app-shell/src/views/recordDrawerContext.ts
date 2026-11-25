@@ -16,6 +16,8 @@
  */
 
 import { createContext, useContext } from 'react';
+import { recordOverlayWidthStorageKey } from '@object-ui/components';
+import { overlayWidthFor } from '@object-ui/plugin-view/core';
 
 /** What a record link inside a drawer host calls to open a record in place. */
 export interface RecordDrawerApi {
@@ -84,4 +86,52 @@ export function useRecordPaneBar(): RecordPaneBarApi | null {
 export function opensInRecordDrawer(objectDef: unknown): boolean {
   const mode = (objectDef as { navigation?: { mode?: unknown } } | null | undefined)?.navigation?.mode;
   return mode == null || mode === 'drawer';
+}
+
+/**
+ * The side preview's width until the reader drags it (objectstack#36149):
+ * 460 px — the list beside it keeps its first three columns on a 1440 px
+ * window — never wider than the viewport allows.
+ */
+export const RECORD_PREVIEW_DEFAULT_WIDTH = 'min(92vw, 460px)';
+
+/**
+ * The one remembered width of the side preview, every object's
+ * (objectstack#36149): a width the reader dragged is kept for the next
+ * record, whatever its object, so the preview never changes width from one
+ * record to the next. `NavigationOverlay` stores it as `ov:` + this key; the
+ * hyphen keeps it apart from every per-object key (`drawer-width:` + an
+ * object's snake_case name).
+ */
+export const RECORD_PREVIEW_WIDTH_KEY = 'drawer-width:record-preview';
+
+/**
+ * Where a record pane remembers its dragged width (objectstack#36149): the
+ * one shared key ({@link RECORD_PREVIEW_WIDTH_KEY}), unless the object (or
+ * the view that opens it) authors the pane's width — a `navigation.size`
+ * other than `auto`, or a `navigation.width` (pixel or percent). Such an
+ * object keeps its per-object key (`recordOverlayWidthStorageKey`), which it
+ * shares with its calendar, gantt, kanban, tree and grid overlays, so a width
+ * dragged in another object's preview never takes the place of the author's:
+ * it opens at the authored width until a width is dragged in its own pane or
+ * in one of those overlays.
+ */
+export function recordPreviewWidthKey(objectName: string, navigation: unknown): string {
+  const nav = navigation as { size?: unknown; width?: unknown } | null | undefined;
+  const authored = nav != null && (nav.width != null || (nav.size != null && nav.size !== 'auto'));
+  return authored ? recordOverlayWidthStorageKey(objectName) : RECORD_PREVIEW_WIDTH_KEY;
+}
+
+/**
+ * The record pane's width before any drag (objectstack#36149), the same on
+ * the list's preview and on a record page's drawer level: an authored
+ * `navigation.width` (pixel or percent) as written, else an authored `size`
+ * bucket; `auto`, or no size, is the side preview's 460, whatever the
+ * object's field count.
+ */
+export function recordPaneWidth(navigation: unknown, objectDef: unknown): string | number {
+  const nav = navigation as { size?: unknown; width?: string | number | null } | null | undefined;
+  if (nav?.width != null) return nav.width;
+  const size = nav?.size as Parameters<typeof overlayWidthFor>[0] | null | undefined;
+  return !size || size === 'auto' ? RECORD_PREVIEW_DEFAULT_WIDTH : overlayWidthFor(size, objectDef);
 }

@@ -94,6 +94,17 @@ const server = {
 };
 
 const apiFetch = async (_input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+  // objectstack#36911 — reaching a row's actions also reads the page's approval
+  // locks. This fake serves the explain engine: the lock door answers every row
+  // unlocked and is not counted among the explain calls these pins count.
+  if (String(_input).includes('/approvals/records/')) {
+    const ids: string[] = JSON.parse(String(init?.body ?? '{}')).recordIds ?? [];
+    return {
+      ok: true,
+      status: 200,
+      json: async () => ({ records: ids.map((recordId) => ({ recordId, locked: false })) }),
+    } as unknown as Response;
+  }
   const body = JSON.parse(String(init?.body ?? '{}')) as { object?: string; operation?: Operation; recordIds?: string[] };
   server.calls.push(body);
   if (!server.network) throw new TypeError('Failed to fetch');
@@ -131,7 +142,6 @@ function renderGrid(c: Case = {}) {
     type: 'object-grid',
     objectName: OBJECT,
     editable: true,
-    singleClickEdit: true,
     columns: [{ field: 'name', label: 'Name', type: 'text' }],
     data: { provider: 'value', items: [OWN_ROW, OTHER_ROW] },
     pageSize: 50,
@@ -140,6 +150,7 @@ function renderGrid(c: Case = {}) {
     <ActionProvider>
       <SchemaRendererProvider dataSource={dataSource} apiFetch={apiFetch}>
         <ObjectGrid
+          cellSelection={false}
           schema={schema}
           dataSource={dataSource}
           {...(kebab ? { onEdit: () => {}, onDelete: () => {} } : {})}

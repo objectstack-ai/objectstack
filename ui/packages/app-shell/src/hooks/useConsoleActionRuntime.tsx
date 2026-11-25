@@ -46,13 +46,14 @@ import { ActionConfirmDialog, type ConfirmDialogState } from '../views/ActionCon
 import { ActionParamDialog, type ParamDialogState } from '../views/ActionParamDialog.js';
 import { resolveParamDialogCompanion } from '../views/actionDialogCompanion.js';
 import { ActionResultDialog, type ResultDialogState } from '../views/ActionResultDialog.js';
-import { FlowRunner, type ScreenFlowState, type ScreenSpec } from '../views/FlowRunner.js';
+import { FlowRunner, type ScreenSpec } from '../views/FlowRunner.js';
 import { FlowRefusalNotice, type FlowRefusalState } from '../views/FlowRefusalNotice.js';
 import { resolveActionParams, withKnownObjects } from '@object-ui/fields';
 import { EnvironmentEntitlementDialog, type EntitlementDialogState } from '../environment/EnvironmentEntitlementDialog.js';
 import { entitlementDialogFromError, type EntitlementDialogSpec } from '../environment/entitlements.js';
 import { resolvePageVarTokens } from '../utils/resolvePageVarTokens.js';
 import { launchConsoleFlow } from '../utils/flowLaunch.js';
+import { useScreenFlowQueue } from './useScreenFlowQueue.js';
 import type { TranslateFn } from '@object-ui/i18n';
 import { apiActionRefusalResult } from '../utils/flowResponse.js';
 import { invitationVerifyEmailPromptPath, isAcceptNeedsVerifiedEmail } from '../console/organizations/orgErrorMessage.js';
@@ -231,8 +232,10 @@ export function useConsoleActionRuntime(opts: ConsoleActionRuntimeOptions): Cons
   const [confirmState, setConfirmState] = useState<ConfirmDialogState>({ open: false, message: '' });
   const [paramState, setParamState] = useState<ParamDialogState>({ open: false, params: [] });
   const [resultDialogState, setResultDialogState] = useState<ResultDialogState>({ open: false });
-  // A paused `screen`-node flow awaiting user input.
-  const [screenFlow, setScreenFlow] = useState<ScreenFlowState | null>(null);
+  // The paused `screen`-node flows awaiting user input, shown one after
+  // another (objectstack#36931 — a per-record bulk run can pause many).
+  const screenFlows = useScreenFlowQueue();
+  const enqueueScreenFlow = screenFlows.enqueue;
   // A flow launch that ended `refused` without pausing (objectui#9973).
   const [flowRefusal, setFlowRefusal] = useState<FlowRefusalState>({ open: false });
   // Capacity gate dialog (limit), opened by the api-action error path below
@@ -808,8 +811,10 @@ export function useConsoleActionRuntime(opts: ConsoleActionRuntimeOptions): Cons
       // refreshes on completion. The pause keeps the action's own toast
       // silent, so its `successMessage` rides along to the run's completion
       // (objectui#12234 — see FlowRunner's header).
+      // Queued, not written over: when a per-record bulk run pauses several
+      // records, each record's screen is shown in turn (objectstack#36931).
       if (judged.followUp?.kind === 'screen') {
-        setScreenFlow({
+        enqueueScreenFlow({
           flowName: launch.flowName,
           flowLabel: judged.followUp.flowLabel,
           runId: judged.followUp.runId,
@@ -818,8 +823,11 @@ export function useConsoleActionRuntime(opts: ConsoleActionRuntimeOptions): Cons
         });
       }
       // Ended `refused`: the Close-only notice carries the engine's sentence,
-      // titled with the action the user clicked.
-      if (judged.followUp?.kind === 'refusal') {
+      // titled with the action the user clicked. A caller that reports the
+      // refusal itself (`reportsRefusal`, the grid's per-record bulk fan-out)
+      // gets it on `judged.result.refusal` instead, so N refused records never
+      // share one notice stacked on its result.
+      if (judged.followUp?.kind === 'refusal' && context?.reportsRefusal !== true) {
         setFlowRefusal({ open: true, title: action.label, message: judged.followUp.message });
       }
       if (judged.refresh) refresh();
@@ -827,7 +835,7 @@ export function useConsoleActionRuntime(opts: ConsoleActionRuntimeOptions): Cons
     } catch (error) {
       return { success: false, error: (error as Error).message };
     }
-  }, [authFetch, objApiName, objects, metadata, refresh, language, t, fieldLabel, dataSource]);
+  }, [authFetch, objApiName, objects, metadata, refresh, language, t, fieldLabel, dataSource, enqueueScreenFlow]);
 
   // Server-side action handler — POST /api/v1/actions/{object}/{action}, built
   // from @object-ui/core's `createServerActionHandler` via the shared console
@@ -983,6 +991,8 @@ export function useConsoleActionRuntime(opts: ConsoleActionRuntimeOptions): Cons
     flowHandler, serverActionHandler, modalHandler, modalActionHandler,
   ]);
 
+  // The run FlowRunner shows; its close and completion settle that run alone.
+  const shownFlow = screenFlows.head;
   const dialogs = (
     <>
       {/*
@@ -1048,13 +1058,14 @@ export function useConsoleActionRuntime(opts: ConsoleActionRuntimeOptions): Cons
         }}
       />
       <FlowRunner
-        state={screenFlow}
+        key={shownFlow?.key}
+        state={shownFlow?.state ?? null}
         authFetch={authFetch}
         baseUrl={import.meta.env.VITE_SERVER_URL || ''}
         dataSource={dataSource}
         objects={objects}
-        onClose={() => setScreenFlow(null)}
-        onComplete={() => { setScreenFlow(null); refresh(); }}
+        onClose={() => { if (shownFlow) screenFlows.settle(shownFlow.key); }}
+        onComplete={() => { if (shownFlow) screenFlows.settle(shownFlow.key); refresh(); }}
       />
       <FlowRefusalNotice
         state={flowRefusal}

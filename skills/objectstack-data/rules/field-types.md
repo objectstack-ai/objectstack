@@ -40,15 +40,15 @@ const fields = {
 | `phone` | Phone numbers | `format` |
 | `password` | ⚠️ Masked-on-read input. On a generic object the value is stored **PLAINTEXT at rest**. Prefer `secret` for credentials; a generic `password` field triggers a build warning | `minLength`, `maxLength` |
 | `secret` | Reversible **encrypted-at-rest** credential (DB password, API key, token) — encrypted on write via `ICryptoProvider`, masked on read, fail-closed (ADR-0100) | — |
-| `markdown` | Markdown-formatted content | `maxLength` |
-| `html` | Raw HTML content | `maxLength` |
-| `richtext` | WYSIWYG rich text editor | `maxLength` |
+| `markdown` | Markdown content | `maxLength` |
+| `html` | Raw HTML | `maxLength` |
+| `richtext` | WYSIWYG editor | `maxLength` |
 
 ## Numbers
 
 | Type | When to Use | Config |
 |:-----|:------------|:-------|
-| `number` | Generic numeric value | `min`, `max`, `precision`, `scale` |
+| `number` | Numeric value | `min`, `max`, `precision`, `scale` |
 | `currency` | Monetary amounts | `currencyConfig` (→ Currency) |
 | `percent` | Percentage; stored as a fraction (0-1) unless the field declares `max` above 1 (`max: 100`), then whole points; seeds, defaults, API values use that scale | `min`, `max`, `precision`, `percentDisplay` — the read-only face: unset or `'bar'` draws a progress bar, `'plain'` the number alone, for a rate or a probability |
 
@@ -56,15 +56,15 @@ const fields = {
 
 | Type | When to Use | Config |
 |:-----|:------------|:-------|
-| `date` | Date only (no time component) | `defaultValue` |
-| `datetime` | Full date + time | `defaultValue` |
-| `time` | Time only (no date component) | `defaultValue`, `format` |
+| `date` | Date only | `defaultValue` |
+| `datetime` | Date + time | `defaultValue` |
+| `time` | Time only | `defaultValue`, `format` |
 
 ## Logic
 
 | Type | When to Use | Config |
 |:-----|:------------|:-------|
-| `boolean` | Standard checkbox | `defaultValue` |
+| `boolean` | Checkbox | `defaultValue` |
 | `toggle` | Toggle switch (distinct UI from checkbox) | `defaultValue` |
 
 ## Selection
@@ -89,38 +89,41 @@ options: [
 
 | Type | When to Use | Key Config |
 |:-----|:------------|:-----------|
-| `lookup` | Reference another object (independent) | `reference`, `lookupFilters`, `multiple`, `deleteBehavior`, `lookupAutofill` |
-| `master_detail` | Parent–child with lifecycle control | `reference`, `deleteBehavior` (`cascade`/`restrict` — `set_null` is refused), `lookupAutofill` |
+| `lookup` | Reference another object (independent) | `reference`, `lookupFilters`, `multiple`, `deleteBehavior`, `transferBehavior`, `lookupAutofill` |
+| `master_detail` | Parent–child with lifecycle control | `reference`, `deleteBehavior` (`cascade`/`restrict` — `set_null` is refused), `transferBehavior`, `lookupAutofill` |
 | `tree` | Hierarchical self-reference | `reference` — optional; when written, this object's own name (any other object is refused at parse) |
 | `user` | Person picker — a lookup specialized to `sys_user` (reviewer, watchers). Stored identically to `lookup` | `multiple` (collaborators), `defaultValue: 'current_user'`, `deleteBehavior` (no default; declared, as on `lookup`: relationships.md → Delete Behaviors) |
 
-**`lookupAutofill: [{ target, source, overwrite? }]`** (single-value `lookup` /
-`master_detail`): a pick copies the picked record's `source` into this object's
-`target` (`[{ target: 'unit_price', source: 'list_price' }]` on a product lookup),
-in the form and the line-item grid. `target`: a field of this object an author
-writes (not the lookup, `readonly` or computed), named once. `source`: a declared,
-non-`internal` field of `reference` the target can hold. A pick fills an empty
-target or an earlier pick's fill; `overwrite: true` always replaces. Client-side
-only; in a grid a declared target leaves the same-named `autofill` copy.
+**`lookupAutofill: [{ target, source, overwrite? }]`** (single-value only): a
+pick copies the picked record's `source` into this object's `target`
+(`unit_price` from a product's `list_price`), in the form and the line-item
+grid. `target`: a field of this object an author writes (not the lookup,
+`readonly` or computed), named once. `source`: a declared, non-`internal` field
+of `reference` the target can hold. A pick fills an empty target or an earlier
+pick's fill; `overwrite: true` always replaces. Client-side only; in a grid a
+declared target leaves the same-named `autofill` copy. Either copy moves a
+`currency` amount only between fields in the same currency (`fixed` or
+per-record); else the target is left as it was and the form says why. Nothing
+is converted.
 
 ## Media
 
 | Type | When to Use | Config |
 |:-----|:------------|:-------|
 | `image` | Image files (PNG, JPG, GIF, WebP) | `multiple` |
-| `file` | Generic file attachments | `multiple` |
-| `avatar` | User/profile picture | — |
+| `file` | File attachments | `multiple` |
+| `avatar` | Profile picture | — |
 | `video` | Video files | — |
 | `audio` | Audio files | — |
 
 ## Embedded (JSON sub-objects)
 
-Stored as JSON on the parent row — no separate table / FK:
+Stored as JSON on the parent row, no separate table/FK:
 
 | Type | When to Use |
 |:-----|:------------|
-| `composite` | Single embedded JSON object, **untyped** — a field declares no sub-fields (`fields` / `subFields` are refused) |
-| `repeater` | Embedded JSON **array**, **untyped** — no sub-fields or `columns`; a typed list is a child object (`master_detail`, `inlineEdit: 'grid'`) |
+| `composite` | Single JSON object, **untyped**: a field declares no sub-fields (`fields`/`subFields` are refused) |
+| `repeater` | JSON **array**, **untyped**: no sub-fields or `columns`; a typed list is a `master_detail` child a parent `fieldGroups[].relatedList` names |
 | `record` | Name-keyed **map** of embedded sub-objects (insertion order = display order; ADR-0007) |
 
 ## Calculated
@@ -129,23 +132,23 @@ Stored as JSON on the parent row — no separate table / FK:
 |:-----|:------------|:-------|
 | `formula` | Computed on read: neither aggregatable nor a dataset or cube dimension (group key); both need a stored field of its return type with the same `expression` (objectstack-ui → Dashboards → Dataset-Bound Widgets) that reads only its own row (relationships.md → Computed column) | `expression` (CEL, `record.` prefixes), `returnType` (`'number' \| 'text' \| 'boolean' \| 'date' \| 'currency'`); `'currency'` carries its own `currencyConfig` |
 | `summary` | Roll-up aggregation from child records | `summaryOperations` ({ object, field? (omit for `count`), function, relationshipField?, filter? }) |
-| `autonumber` | Auto-incrementing display format (→ Autonumber) | `format` (shorthand) / `autonumberFormat` (canonical) — e.g., `"CASE-{0000}"` |
+| `autonumber` | Auto-incrementing display format (→ Autonumber) | `format` (shorthand) / `autonumberFormat` (canonical) |
 
 ## Enhanced Types
 
 | Type | When to Use | Config |
 |:-----|:------------|:-------|
-| `location` | Geographic coordinates (lat/lng) | — |
+| `location` | Coordinates (lat/lng) | — |
 | `address` | Structured address (street, city, country) | — |
 | `code` | Syntax-highlighted code editor | `language` |
 | `json` | JSON data (untyped escape hatch) | — (validate with a `json_schema` validation rule on the object) |
 | `color` | Color picker | — |
 | `rating` | Star/heart rating | `max` (default 5) |
-| `slider` | Numeric slider | `min`, `max`, `step` |
-| `signature` | Digital signature pad | — |
+| `slider` | Slider | `min`, `max`, `step` |
+| `signature` | Signature pad | — |
 | `qrcode` | QR code / barcode | — |
 | `progress` | Progress bar | `min`, `max` |
-| `tags` | Free-form tag input | — |
+| `tags` | Free-form tags | — |
 | `vector` | AI/ML embeddings (semantic search, RAG) | `dimensions` (flat sibling, e.g. `1536`) |
 
 ## Common Field Configurations

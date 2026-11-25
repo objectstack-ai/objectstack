@@ -1011,6 +1011,41 @@ the next one applies the mappings again.
 
 ---
 
+## Deleting an SSO provider
+
+Deleting a provider ends the sessions a sign-in through it opened and removes
+the permission-set grants its group mappings projected. Setup's **Delete SSO
+Provider** (or `POST /api/v1/auth/sso/delete-provider` with
+`{ "providerId": "…" }`) first shows what the delete removes, then:
+
+- **unlinks** every user who signed in through the provider;
+- **ends the live sessions signed in through it.** Each session an SSO sign-in
+  opens records its provider (`sys_session.sso_provider_id`); the delete
+  revokes the live sessions that record this provider, with `revoke_reason`
+  `sso_provider_deleted`, so their next request is signed out. A session signed
+  in any other way (a password, another provider) is left as it is;
+- **removes its group mappings and the permission-set grants they projected**
+  (the grants whose `reason` is the provider's projection marker), never a grant
+  made by hand or by SCIM.
+
+The answer names each count: `unlinkedUsers`, `usersWithoutOtherSignIn`,
+`revokedSessions`, `removedGroupMappings` and `removedGrants`. When the cleanup
+after the delete fails, the answer says so (`dependentsRemoved: false`) and the
+failure is logged once at `error`.
+
+**At every boot**, the projected grants and live sessions of a provider that no
+longer exists are removed too: a projected grant whose `reason` names a
+provider with no `sys_sso_provider` row is deleted, and a live session that
+records such a provider is revoked. So the grants and sessions a failed cleanup
+left are settled at the next start; the boot logs at `info` what it removed,
+and at `error` when it could not. The boot does **not** remove the provider's
+group mappings: delete each one with Setup's **Delete Mapping** on its row, or
+`POST /api/v1/auth/admin/scim/delete-group-mapping` with `{ "mappingId": "…" }`.
+Several servers booting at once may run the sweep together; each removes what is
+left and none reports the others' removals as a failure.
+
+---
+
 ## Verify configuration
 
 Restart the server (`pnpm dev`), then:

@@ -107,6 +107,7 @@ import { validateSortableFields } from './validate-sortable-fields.js';
 import { validateListViewFieldRefs } from './validate-list-view-field-refs.js';
 import { validateObjectFieldRefs } from './validate-object-field-refs.js';
 import { validateRelatedListRefs } from './validate-related-list-refs.js';
+import { validateExtensionPlacement } from './validate-extension-placement.js';
 import { validateActionNameRefs } from './validate-action-name-refs.js';
 import { validateActionDispatchContract } from './validate-action-dispatch-contract.js';
 import { validatePageFieldBindings } from './validate-page-field-bindings.js';
@@ -492,6 +493,13 @@ export const REFERENCE_INTEGRITY_RULES: readonly ReferenceIntegrityRule[] = [
         ctx?.runtimeWriteType !== undefined && !ctx?.packageScope ? { wholeCollection: true } : undefined,
       ),
   },
+  // [#35901] The same object's tabs and groups, one question on: where an
+  // object extension's `place` will not land as written (the object declares
+  // no tab list or groups, or an anchor it does not have). Warnings only: the
+  // registry merge still places the item, and the boot log names it too.
+  // Default `runtimeTypes`: it reads `objectExtensions`, which a per-write
+  // object snapshot does not carry.
+  { name: 'validateExtensionPlacement', run: validateExtensionPlacement },
   { name: 'validateActionNameRefs', run: validateActionNameRefs },
   // [#17319] The same action name, one question on: `validateActionNameRefs`
   // asks whether the name a list view's selection bar writes resolves to an

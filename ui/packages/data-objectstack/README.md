@@ -1070,8 +1070,8 @@ for the full design.
 ### Key families
 
 Some state is one row per subject, and which subjects exist is only known
-from the rows: the console keeps each object's list state under
-`ui.list.<object>`. `createObjectStackUserPreferenceFamily` loads every row
+from the rows: the console keeps each object's record-page state under
+`ui.record.<object>`. `createObjectStackUserPreferenceFamily` loads every row
 whose key starts with a prefix, and writes one key's row at a time:
 
 ```typescript
@@ -1080,14 +1080,14 @@ import { createObjectStackUserPreferenceFamily, type ObjectStackAdapter } from '
 declare const dataSource: ObjectStackAdapter;
 declare const user: { id: string };
 
-const lists = createObjectStackUserPreferenceFamily<{ viewOrder?: string[] }>({
+const records = createObjectStackUserPreferenceFamily<{ showEmptyFields?: boolean }>({
   dataSource,
   userId: user.id,
-  prefix: 'ui.list.',
+  prefix: 'ui.record.',
 });
 
-const rows = await lists.load();                 // { 'ui.list.account': { viewOrder: [...] }, ... }
-await lists.save('ui.list.account', { viewOrder: ['account.mine', 'account.all'] });
+const rows = await records.load();               // { 'ui.record.account': { showEmptyFields: true }, ... }
+await records.save('ui.record.account', { showEmptyFields: false });
 ```
 
 A family's `load()` joins the same shared read as the per-key adapters' loads

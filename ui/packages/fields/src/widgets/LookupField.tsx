@@ -8,7 +8,12 @@ import { cn,
   AvatarImage,
   Popover,
   PopoverTrigger,
-  PopoverContent, EmptyValue } from '@object-ui/components';
+  PopoverContent,
+  Drawer,
+  DrawerTrigger,
+  DrawerContent,
+  DrawerTitle,
+  useIsMobile, EmptyValue } from '@object-ui/components';
 import { Search, X, Loader2, AlertCircle, Plus, TableProperties } from 'lucide-react';
 import { FieldWidgetComponentProps } from './types.js';
 import { toDomProps } from './toDomProps.js';
@@ -16,6 +21,7 @@ import { PHONE_TOUCH_HEIGHT, PHONE_TOUCH_SQUARE } from './touchTarget.js';
 import type { DataSource, FormField, QueryParams, LookupColumnDef, LookupFieldMetadata } from '@object-ui/types';
 import { RecordPickerDialog, lookupFiltersToRecord } from './RecordPickerDialog.js';
 import {
+  collapseReference,
   readRecordBeingEdited,
   readsRecord,
   resolveLookupFilters,
@@ -30,7 +36,19 @@ import { deriveLookupColumns } from './deriveLookupColumns.js';
 import { buildExpandFields, declaredNameField, getRecordDisplayName, mergeFilterNodes, resolveAffordance, resolveNameField, toPredicateRecord, withoutDeniedFields } from '@object-ui/core';
 import { getRecentLookupIds, pushRecentLookupId } from './recentLookups.js';
 import { getPersonInitials } from './personDisplay.js';
-import { declaredLookupAutofillPatch, type LookupAutofillPair } from './lookupAutofill.js';
+import { rememberPickedRecords } from './referenceRecordCache.js';
+import {
+  amountCurrencyOf,
+  pickedAmountCurrencyOf,
+  planDeclaredLookupAutofill,
+  readLookupAutofillTargets,
+  withheldAutofillMessage,
+  withheldStillStands,
+  type AutofillCurrencyContext,
+  type LookupAutofillPair,
+  type WithheldAutofill,
+} from './lookupAutofill.js';
+import { useFollowedParentRead } from './followedParentRow.js';
 import { getCellRendererResolver } from './_cell-renderer-bridge.js';
 // The one place a lookup column's display value is decided — shared with the
 // "browse all records" picker (RecordPickerDialog) so a single `lookupColumns`
@@ -41,7 +59,7 @@ import {
   buildLookupColumnDescriptors,
   renderLookupColumnValue,
 } from './lookupColumnDisplay.js';
-import { useSafeFieldLabel, useDisplayLocale } from '@object-ui/i18n';
+import { useSafeFieldLabel, useDisplayLocale, useLocalization, recordCurrencyPath } from '@object-ui/i18n';
 import { SchemaRendererContext as ImportedSchemaRendererContext, useAction, useHasActionProvider } from '@object-ui/react';
 import { usePermissions } from '@object-ui/permissions';
 import { useFieldTranslation } from './useFieldTranslation.js';
@@ -359,6 +377,10 @@ function OptionPreviewLine({ children }: { children: React.ReactNode }) {
 export function LookupField({ value, onChange, field, readonly, error: fieldError, inCell, onCommit, ...props }: FieldWidgetComponentProps<any>) {
   // objectstack#35688 — in a list cell the candidate list is open from the start.
   const [isOpen, setIsOpen] = useState(!!inCell);
+  // Below the phone breakpoint the candidate panel opens in a bottom drawer
+  // instead of the anchored popover (objectstack#36832), at the width the
+  // search-first variant's own sheet switches at.
+  const isMobile = useIsMobile();
   const { t } = useFieldTranslation();
   const scanOffered = useFieldScanOffered();
   // Same two i18n channels RecordPickerDialog reads, so the inline dropdown
@@ -637,6 +659,12 @@ export function LookupField({ value, onChange, field, readonly, error: fieldErro
   // `recordToOption`, ADR-0079). Without this the label fell back to a
   // non-existent `name` field and ultimately to the raw record id.
   const [refObjectSchema, setRefObjectSchema] = useState<any>(null);
+  // Whether that read has answered (or failed): the opening fill waits for it
+  // when it would copy an amount, since the amount's currency is its field's
+  // on the referenced object (objectstack#36249). A host that cannot read the
+  // schema has nothing to wait for.
+  const refSchemaReadable = !!dataSource && !!referenceTo && typeof (dataSource as any).getObjectSchema === 'function';
+  const [refSchemaAnswered, setRefSchemaAnswered] = useState(false);
   useEffect(() => {
     if (!dataSource || !referenceTo) return;
     const getSchema = (dataSource as any).getObjectSchema;
@@ -644,9 +672,11 @@ export function LookupField({ value, onChange, field, readonly, error: fieldErro
     let alive = true;
     Promise.resolve(getSchema.call(dataSource, referenceTo))
       .then((s: any) => { if (alive) setRefObjectSchema(s); })
-      .catch(() => { /* fall back to displayField chain */ });
+      .catch(() => { /* fall back to displayField chain */ })
+      .finally(() => { if (alive) setRefSchemaAnswered(true); });
     return () => { alive = false; };
   }, [dataSource, referenceTo]);
+  const refSchemaSettled = !refSchemaReadable || refSchemaAnswered;
 
   /**
    * Picker columns. Honour explicit `lookupColumns` when authored; otherwise
@@ -836,7 +866,9 @@ export function LookupField({ value, onChange, field, readonly, error: fieldErro
   const dependentFilter = useMemo<Record<string, any> | undefined>(() => {
     const f: Record<string, any> = {};
     for (const { field, param } of dependsOn) {
-      const v = resolvedDependentValues[field];
+      // A record page hands over the record as the server returned it, so a
+      // lookup parent can arrive populated — its id is what the filter compares.
+      const v = collapseReference(resolvedDependentValues[field]);
       if (v === undefined || v === null || v === '') continue;
       f[param] = typeof v === 'number' ? v : String(v);
     }
@@ -869,7 +901,17 @@ export function LookupField({ value, onChange, field, readonly, error: fieldErro
   const searchQuery = popoverQuery.search;
   const loading = popoverQuery.loading;
   const totalCount = popoverQuery.total;
-  const error = popoverQuery.error ?? createError;
+  // The fetch error alone gates the list. A create error — a failed inline
+  // create, or a quick-created record this picker will not take
+  // (objectstack#36865) — is a notice drawn above the list instead: the
+  // candidates stay listed and selectable, so the user can pick an existing
+  // record right after reading why the new one was not chosen.
+  const error = popoverQuery.error;
+  // The notice belongs to the panel it was raised in: closing the picker
+  // clears it, so a later open starts clean.
+  useEffect(() => {
+    if (!isOpen) setCreateError(null);
+  }, [isOpen]);
   // Built from the row with its relations collapsed to ids — see
   // `candidateExpand` for why the option never sees the expanded form.
   const fetchedOptions = useMemo(
@@ -1186,6 +1228,59 @@ export function LookupField({ value, onChange, field, readonly, error: fieldErro
   const onAutofill = props.onAutofill;
 
   /**
+   * The cross-currency rule of a pick in a record form (objectstack#36249):
+   * an amount is copied only into a target in the same currency
+   * (`crossCurrencyRefusal`). The picked amount's currency is its field's on
+   * the referenced object (`refObjectSchema`), read on the picked row; the
+   * target's is its definition's, which the record form stamps on this field
+   * (`withLookupAutofillTargets`), read on the record being edited. A target
+   * that follows its parent's currency reads the parent's code, read once
+   * for the parent the record holds, as the amount box itself does.
+   */
+  const { currency: homeCurrency } = useLocalization();
+  const autofillTargets = autofillPairs?.length ? readLookupAutofillTargets(fieldMeta) : undefined;
+  const followingTarget = useMemo(
+    () => (autofillTargets ? Object.values(autofillTargets).find((d) => recordCurrencyPath(d as never)) : undefined),
+    [autofillTargets],
+  );
+  const { record: editedRecordForCurrency, state: followedParentState } = useFollowedParentRead(
+    followingTarget as never,
+    resolvedDependentValues,
+    dataSource,
+  );
+  // The opening fill waits only while the parent read is out. A read that
+  // failed or cannot run ends the wait: what does not depend on the parent's
+  // code fills, and an amount that does is withheld with a note
+  // (`targetCurrencyUnread`).
+  const followedParentPending = followedParentState === 'pending';
+  const followedParentUnread = followedParentState === 'unread';
+  const autofillCurrency = !!autofillTargets;
+  /** The currency context of a pick of `row` (`crossCurrencyRefusal`), or none without stamped targets. */
+  const currencyFor = useCallback(
+    (row: Record<string, unknown>): AutofillCurrencyContext | undefined => {
+      if (!autofillTargets) return undefined;
+      const sourceFields = (refObjectSchema as { fields?: Record<string, unknown> } | null)?.fields;
+      return {
+        home: homeCurrency,
+        sourceCurrency: (source, v) => pickedAmountCurrencyOf(sourceFields?.[source] as never, v, row),
+        targetCurrency: (target, writes) => {
+          const def = autofillTargets[target];
+          if (followedParentUnread && recordCurrencyPath(def as never)) {
+            return amountCurrencyOf(def as never) ? { kind: 'unread' } : undefined;
+          }
+          return amountCurrencyOf(def as never, editedRecordForCurrency, writes);
+        },
+      };
+    },
+    [autofillTargets, refObjectSchema, homeCurrency, editedRecordForCurrency, followedParentUnread],
+  );
+  /** What the last fill left empty, for the record it picked; said under the field. */
+  const [withheldFill, setWithheldFill] = useState<{ picked: string; items: readonly WithheldAutofill[] } | null>(null);
+  const noteWithheld = useCallback((picked: unknown, items: readonly WithheldAutofill[]) => {
+    setWithheldFill(items.length > 0 && picked != null ? { picked: String(picked), items } : null);
+  }, []);
+
+  /**
    * Fill the declared targets from the picked `row`. The current values are
    * the host's live record (`dependentValues`). "An earlier pick filled it" is
    * read from `pickedRecords`, the rows this widget's own picks committed: the
@@ -1201,10 +1296,11 @@ export function LookupField({ value, onChange, field, readonly, error: fieldErro
         heldId == null || heldId === ''
           ? null
           : pickedRecords.find((r) => String(recordValue(r, idField)) === String(heldId)) ?? null;
-      const patch = declaredLookupAutofillPatch(autofillPairs, row, resolvedDependentValues, previous);
+      const { patch, withheld } = planDeclaredLookupAutofill(autofillPairs, row, resolvedDependentValues, previous, currencyFor(row));
+      noteWithheld(recordValue(row, idField), withheld);
       if (Object.keys(patch).length > 0) onAutofill(patch);
     },
-    [autofillPairs, onAutofill, normalizeId, value, pickedRecords, idField, resolvedDependentValues],
+    [autofillPairs, onAutofill, normalizeId, value, pickedRecords, idField, resolvedDependentValues, currencyFor, noteWithheld],
   );
 
   /**
@@ -1240,16 +1336,22 @@ export function LookupField({ value, onChange, field, readonly, error: fieldErro
     const row: Record<string, unknown> | undefined =
       expanded ?? hydratedRecords.find((r) => String(recordValue(r, idField)) === key);
     if (!row) return;
+    // objectstack#36249 — an amount's currency is read off the referenced
+    // object's schema and the parent the record follows: the opening fill
+    // waits for both reads, so it judges the copy once, on the answer.
+    if (autofillCurrency && (!refSchemaSettled || followedParentPending)) return;
     openingFilledRef.current = key;
     setPickedRecords((prev) => mergeRowsByValue(prev, [row], idField));
-    const patch = declaredLookupAutofillPatch(
+    const { patch, withheld } = planDeclaredLookupAutofill(
       autofillPairs.map(({ target, source }) => ({ target, source })),
       row,
       resolvedDependentValues,
       null,
+      currencyFor(row),
     );
+    noteWithheld(key, withheld);
     if (Object.keys(patch).length > 0) onAutofill(patch, { opening: true });
-  }, [autofillPairs, onAutofill, openingValue, value, normalizeId, hydratedRecords, idField, resolvedDependentValues]);
+  }, [autofillPairs, onAutofill, openingValue, value, normalizeId, hydratedRecords, idField, resolvedDependentValues, autofillCurrency, refSchemaSettled, followedParentPending, currencyFor, noteWithheld]);
 
   /**
    * Commit a pick. `row` is the record `option` was built from.
@@ -1271,6 +1373,8 @@ export function LookupField({ value, onChange, field, readonly, error: fieldErro
     (option: LookupOption, row?: Record<string, unknown>) => {
       if (row && option && option.value != null) {
         setPickedRecords((prev) => mergeRowsByValue(prev, [row], idField));
+        // objectstack#36046 — the cell that stores the id draws the record from here.
+        rememberPickedRecords(referenceTo, [row], idField, refObjectSchema ?? undefined);
       }
       if (multiple) {
         // Normalise any expanded-reference objects to bare ids so toggling
@@ -1286,7 +1390,7 @@ export function LookupField({ value, onChange, field, readonly, error: fieldErro
         }
       } else {
         if (referenceTo) pushRecentLookupId(referenceTo, option.value, perms.userId);
-        if (onSelectRecord) onSelectRecord(option);
+        if (onSelectRecord) onSelectRecord(option, { sourceFields: refObjectSchema?.fields ?? null });
         else {
           onChange(option.value);
           fillDeclaredTargets(row);
@@ -1296,7 +1400,7 @@ export function LookupField({ value, onChange, field, readonly, error: fieldErro
         setIsOpen(false);
       }
     },
-    [multiple, value, onChange, onSelectRecord, referenceTo, normalizeId, idField, fillDeclaredTargets, inCell, onCommit, perms.userId],
+    [multiple, value, onChange, onSelectRecord, referenceTo, normalizeId, idField, fillDeclaredTargets, inCell, onCommit, perms.userId, refObjectSchema],
   );
 
   const handleRemove = (optionValue: any) => {
@@ -1322,8 +1426,12 @@ export function LookupField({ value, onChange, field, readonly, error: fieldErro
       // the picked row, with `pickedRecords` still holding the earlier picks.
       if (!multiple && records.length === 1) fillDeclaredTargets(records[0]);
       setPickedRecords(records);
+      // objectstack#36046 — the picked records are what the committed ids
+      // name: a list cell storing them draws each name and face from here at
+      // once, not the raw id until the list is read again.
+      rememberPickedRecords(referenceTo, records, idField, refObjectSchema ?? undefined);
     },
-    [idField, referenceTo, multiple, fillDeclaredTargets, perms.userId],
+    [idField, referenceTo, multiple, fillDeclaredTargets, perms.userId, refObjectSchema],
   );
 
   /**
@@ -1355,7 +1463,11 @@ export function LookupField({ value, onChange, field, readonly, error: fieldErro
       const row = records[0];
       if (referenceTo) pushRecentLookupId(referenceTo, recordValue(row, idField) as string | number | undefined, perms.userId);
       setPickedRecords(records);
-      onSelectRecord(recordToOption(row, declaredDisplayField, idField, effectiveDescriptionField, refObjectSchema, perms, referenceTo));
+      rememberPickedRecords(referenceTo, records, idField, refObjectSchema ?? undefined);
+      onSelectRecord(
+        recordToOption(row, declaredDisplayField, idField, effectiveDescriptionField, refObjectSchema, perms, referenceTo),
+        { sourceFields: refObjectSchema?.fields ?? null },
+      );
       if (commitsCell) onCommit?.();
     },
     [multiple, onSelectRecord, handlePickerSelectRecords, referenceTo, idField, declaredDisplayField, effectiveDescriptionField, refObjectSchema, perms, inCell, onCommit],
@@ -1534,6 +1646,41 @@ export function LookupField({ value, onChange, field, readonly, error: fieldErro
     perms,
   }).allowed;
   const canCreate = !!onCreateNew || (allowCreate && createGranted && (hasActionProvider || hasDataSource));
+  // objectstack#36865 — a record made through quick-create is selected only
+  // when this picker could have offered it. The create form takes whatever the
+  // user enters, so the new record can fail the field's `lookupFilters` (a
+  // `draft` where the field asks for `approved`); selected anyway, it sat in
+  // the field until the server refused the save or the action. So the new id
+  // is re-read through the picker's own filter — `popoverFilter` merged with
+  // the id through `mergeFilterNodes`, the recents rail's query — and the
+  // SERVER decides, exactly as it does for every listed candidate. Absent
+  // from the answer: not selected, and the picker reopens saying why. A
+  // picker with no filter, or no data source to ask, selects as before.
+  // A failed re-read is reported as unchecked, never read as a pass.
+  const admitCreated = useCallback(
+    async (created: Record<string, unknown>): Promise<boolean> => {
+      if (!popoverFilter || !hasDataSource || !dataSource || !referenceTo) return true;
+      const rid = recordValue(created, idField);
+      if (rid === undefined || rid === null) return true;
+      let admitted = false;
+      try {
+        const res = await dataSource.find(referenceTo, {
+          $filter: mergeFilterNodes(popoverFilter, { [idField]: rid }),
+          $top: 1,
+        } as QueryParams);
+        const rows = (res as any)?.data ?? res ?? [];
+        admitted = Array.isArray(rows) && rows.length > 0;
+        if (!admitted) setCreateError(t('lookup.createdOutsideFilters'));
+      } catch {
+        // Fail closed, and say the record EXISTS: a bare transport error read
+        // as "the create failed" invites a second, duplicate create.
+        setCreateError(t('lookup.createdUnchecked'));
+      }
+      if (!admitted) setIsOpen(true);
+      return admitted;
+    },
+    [popoverFilter, hasDataSource, dataSource, referenceTo, idField, t],
+  );
   const handleCreateNew = useCallback(
     async (q: string) => {
       const label = (q || '').trim();
@@ -1574,6 +1721,7 @@ export function LookupField({ value, onChange, field, readonly, error: fieldErro
           },
         } as any);
         if (result?.success && result.data) {
+          if (!(await admitCreated(result.data))) return;
           const opt = recordToOption(result.data, declaredDisplayField, idField, effectiveDescriptionField, refObjectSchema, perms, referenceTo);
           handleSelect(opt, result.data);
           return;
@@ -1590,6 +1738,7 @@ export function LookupField({ value, onChange, field, readonly, error: fieldErro
       setCreating(true);
       try {
         const created = await (dataSource as any).create(referenceTo, { ...(dependentFilter ?? {}), [displayField]: label });
+        if (!(await admitCreated(created))) return;
         const opt = recordToOption(created, declaredDisplayField, idField, effectiveDescriptionField, refObjectSchema, perms, referenceTo);
         handleSelect(opt, created);
       } catch (err) {
@@ -1598,7 +1747,7 @@ export function LookupField({ value, onChange, field, readonly, error: fieldErro
         setCreating(false);
       }
     },
-    [onCreateNew, allowCreate, createGranted, referenceTo, hasActionProvider, execute, dataSource, displayField, declaredDisplayField, idField, effectiveDescriptionField, refObjectSchema, handleSelect, perms, dependentFilter],
+    [onCreateNew, allowCreate, createGranted, referenceTo, hasActionProvider, execute, dataSource, displayField, declaredDisplayField, idField, effectiveDescriptionField, refObjectSchema, handleSelect, perms, dependentFilter, admitCreated],
   );
 
   /**
@@ -1917,7 +2066,61 @@ export function LookupField({ value, onChange, field, readonly, error: fieldErro
       <ScanFieldButton onScan={handleScanned} />
     ) : null;
 
-  // The candidate panel: the popover's body, or the list cell's editor itself.
+  // The candidate panel: the popover's body, the phone drawer's body, or the
+  // list cell's editor itself.
+  //
+  // In the popover and the drawer the search row is pinned at the top, the
+  // options scroll in the middle, and "show all results" and quick-create sit
+  // in a footer pinned under the list (objectstack#36825). Inside the room Radix reports the list
+  // is what gives way, so they stay whole and clickable whatever its length,
+  // on either side the popover opens to. The footer reads the same `canCreate`
+  // as the empty state's create button, and is not drawn when it would hold
+  // nothing. The list cell's editor keeps both at the end of its list, above
+  // its own pinned rows.
+  const panelFace: 'popover' | 'drawer' | 'cell' = inCell && !props.disabled ? 'cell' : isMobile ? 'drawer' : 'popover';
+  const offersShowAll = hasDataSource && totalCount > filteredOptions.length;
+  const showAllButton = offersShowAll ? (
+    <button
+      type="button"
+      className={cn('w-full shrink-0 whitespace-nowrap text-center px-3 py-2 rounded-md text-sm font-medium text-primary hover:bg-accent flex items-center justify-center gap-1.5', PHONE_TOUCH_HEIGHT)}
+      onClick={() => {
+        setIsOpen(false);
+        setIsPickerOpen(true);
+      }}
+      data-testid="show-all-results"
+    >
+      <TableProperties className="size-3.5" />
+      {t('lookup.showAllResults', { count: totalCount })}
+    </button>
+  ) : null;
+  const createButton = canCreate ? (
+    <button
+      type="button"
+      className={cn('w-full min-w-0 flex-1 text-left px-3 py-2 rounded-md text-sm hover:bg-accent flex items-center gap-1.5 text-muted-foreground', PHONE_TOUCH_HEIGHT)}
+      disabled={creating}
+      onClick={() => handleCreateNew(searchQuery)}
+      data-testid="lookup-create-new"
+    >
+      {creating ? <Loader2 className="size-3.5 shrink-0 animate-spin" /> : <Plus className="size-3.5 shrink-0" />}
+      <span className="truncate">{searchQuery ? t('lookup.createNamed', { name: searchQuery }) : t('lookup.createNew')}</span>
+    </button>
+  ) : null;
+  const listShowsOptions = !error && !(loading && filteredOptions.length === 0) && visibleOptions.length > 0;
+  // One row under the list: quick-create on the left (its typed name cut
+  // short when long), "show all" on the right.
+  const pinnedFooter = panelFace !== 'cell' && listShowsOptions && (showAllButton || createButton) ? (
+    <div
+      className={cn(
+        'flex shrink-0 items-center gap-1 border-t p-1 [&>button]:w-auto',
+        panelFace === 'drawer' && 'pb-[max(0.25rem,env(safe-area-inset-bottom))]',
+      )}
+      data-testid="lookup-panel-footer"
+    >
+      {createButton ?? <span className="flex-1" aria-hidden="true" />}
+      {showAllButton}
+    </div>
+  ) : null;
+  const fadeFrom = panelFace === 'drawer' ? 'from-background' : 'from-popover';
   const lookupPanelBody = (
     <>
           {/* Search input — not offered on a target whose search resolves to
@@ -1949,6 +2152,14 @@ export function LookupField({ value, onChange, field, readonly, error: fieldErro
             </div>
           )}
 
+          {/* Create notice — above the list, never in place of it. */}
+          {createError && (
+            <div className="flex shrink-0 items-start gap-2 px-3 pb-2 text-sm text-destructive" role="alert" data-testid="lookup-create-error">
+              <AlertCircle className="mt-0.5 size-4 shrink-0" />
+              <p>{createError}</p>
+            </div>
+          )}
+
           {/* Error state */}
           {error && (
             <div className="flex shrink-0 flex-col items-center gap-2 py-4 px-2" role="alert">
@@ -1975,10 +2186,16 @@ export function LookupField({ value, onChange, field, readonly, error: fieldErro
 
           {/* Options list */}
           {!error && !(loading && filteredOptions.length === 0) && (
-            <div className="relative flex min-h-0 flex-col">
+            <div className={cn('relative flex min-h-0 flex-col', panelFace === 'drawer' && 'flex-1')}>
             <div
               ref={attachList}
-              className="max-h-64 min-h-0 scroll-py-6 overflow-y-auto px-1 pb-1"
+              // The drawer's list takes the height left between the search row
+              // and the footer, and scrolls natively there; the popover's keeps
+              // its cap and shrinks into the room Radix reports.
+              className={cn(
+                'min-h-0 scroll-py-6 overflow-y-auto px-1 pb-1',
+                panelFace === 'drawer' ? 'flex-1 overscroll-contain' : 'max-h-64',
+              )}
               role="listbox"
               id={listboxId}
               onScroll={readListMore}
@@ -2016,12 +2233,12 @@ export function LookupField({ value, onChange, field, readonly, error: fieldErro
                     return (
                       <React.Fragment key={option.value}>
                         {showRecentHeader && (
-                          <div className="px-3 pt-2 pb-1 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                          <div className="px-3 pt-2 pb-1 text-xs font-medium uppercase tracking-wide text-muted-foreground">
                             {t('lookup.recentlyUsed')}
                           </div>
                         )}
                         {showResultsHeader && (
-                          <div className="mt-1 border-t px-3 pt-2 pb-1 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                          <div className="mt-1 border-t px-3 pt-2 pb-1 text-xs font-medium uppercase tracking-wide text-muted-foreground">
                             {t('lookup.allResults')}
                           </div>
                         )}
@@ -2061,57 +2278,36 @@ export function LookupField({ value, onChange, field, readonly, error: fieldErro
                     );
                   })}
                   {/* Show total count when fetched from DataSource */}
-                  {hasDataSource && totalCount > filteredOptions.length && (
+                  {offersShowAll && (
                     <p className="text-xs text-muted-foreground text-center py-2">
                       {t('lookup.showingResults', { shown: filteredOptions.length, total: totalCount })}
                     </p>
                   )}
-                  {/* "Show All Results" button — opens the full Record Picker (Level 2) */}
-                  {hasDataSource && totalCount > filteredOptions.length && (
-                    <button
-                      type="button"
-                      className={cn('w-full text-center px-3 py-2 rounded-md text-sm font-medium text-primary hover:bg-accent flex items-center justify-center gap-1.5', PHONE_TOUCH_HEIGHT)}
-                      onClick={() => {
-                        setIsOpen(false);
-                        setIsPickerOpen(true);
-                      }}
-                      data-testid="show-all-results"
-                    >
-                      <TableProperties className="size-3.5" />
-                      {t('lookup.showAllResults', { count: totalCount })}
-                    </button>
-                  )}
-                  {/* Quick-create entry (below results) */}
-                  {canCreate && (
-                    <button
-                      type="button"
-                      className={cn('w-full text-left px-3 py-2 rounded-md text-sm hover:bg-accent flex items-center gap-1.5 text-muted-foreground', PHONE_TOUCH_HEIGHT)}
-                      disabled={creating}
-                      onClick={() => handleCreateNew(searchQuery)}
-                    >
-                      {creating ? <Loader2 className="size-3.5 animate-spin" /> : <Plus className="size-3.5" />}
-                      {searchQuery ? t('lookup.createNamed', { name: searchQuery }) : t('lookup.createNew')}
-                    </button>
-                  )}
+                  {/* The list cell's editor keeps "show all" (opens the full
+                      Record Picker, Level 2) and quick-create at the end of its
+                      list; the popover and the drawer pin them below it. */}
+                  {panelFace === 'cell' && showAllButton}
+                  {panelFace === 'cell' && createButton}
                 </>
               )}
             </div>
             {listMore.above && (
               <div
                 aria-hidden="true"
-                className="pointer-events-none absolute inset-x-0 top-0 h-6 bg-gradient-to-b from-popover to-transparent"
+                className={cn('pointer-events-none absolute inset-x-0 top-0 h-6 bg-gradient-to-b to-transparent', fadeFrom)}
                 data-testid="lookup-list-more-above"
               />
             )}
             {listMore.below && (
               <div
                 aria-hidden="true"
-                className="pointer-events-none absolute inset-x-0 bottom-0 h-6 rounded-b-md bg-gradient-to-t from-popover to-transparent"
+                className={cn('pointer-events-none absolute inset-x-0 bottom-0 h-6 bg-gradient-to-t to-transparent', !pinnedFooter && 'rounded-b-md', fadeFrom)}
                 data-testid="lookup-list-more-below"
               />
             )}
             </div>
           )}
+          {pinnedFooter}
     </>
   );
 
@@ -2222,6 +2418,20 @@ export function LookupField({ value, onChange, field, readonly, error: fieldErro
     );
   }
 
+  // objectstack#36249 — what the last fill did not copy because the picked
+  // amount is in another currency, while the field still holds that pick and
+  // the target still holds what it held at the pick (empty, or the earlier
+  // value a re-pick left in place).
+  const heldNow = normalizeId(value);
+  const withheldShown =
+    withheldFill && heldNow != null && String(heldNow) === withheldFill.picked
+      ? withheldFill.items.filter((w) => withheldStillStands(w, resolvedDependentValues?.[w.target]))
+      : [];
+  const withheldLabel = (target: string): string => {
+    const label = (autofillTargets?.[target] as { label?: unknown } | undefined)?.label;
+    return typeof label === 'string' && label !== '' ? label : target;
+  };
+
   return (
     <div className={compact ? '' : 'space-y-2'}>
       {/* Selected values display — a multi-select field's chips (full mode
@@ -2315,7 +2525,44 @@ export function LookupField({ value, onChange, field, readonly, error: fieldErro
         </div>
       ) : (
       <div className="flex items-center gap-1.5">
+      {panelFace === 'drawer' ? (
+        // The phone face (objectstack#36832): a bottom drawer, its own modal
+        // layer, so the list scrolls by touch even when the field sits in a
+        // modal form. The search row stays at the top, the list takes the
+        // height between it and the pinned footer, and the drawer follows the
+        // on-screen keyboard (vaul's `repositionInputs`). The search box is not
+        // focused on open, so the keyboard does not cover the list until the
+        // user asks to type.
+        <Drawer
+          open={isOpen}
+          onOpenChange={(o) => {
+            if (!dependenciesMissing) setIsOpen(o);
+          }}
+          shouldScaleBackground={false}
+        >
+          <DrawerTrigger asChild>
+            {triggerButton}
+          </DrawerTrigger>
+          <DrawerContent
+            className="h-[85dvh] max-h-[85dvh] outline-none"
+            aria-describedby={undefined}
+            data-testid="lookup-drawer"
+          >
+            <DrawerTitle className="shrink-0 truncate px-4 pt-3 text-base font-semibold">
+              {lookupField?.label || t('common.select')}
+            </DrawerTitle>
+            <div className="flex min-h-0 flex-1 flex-col">
+              {lookupPanelBody}
+            </div>
+          </DrawerContent>
+        </Drawer>
+      ) : (
+      // `modal`: the popover is its own scroll-lock layer. Portalled out of
+      // a modal form's DOM, a non-modal popover's list sits outside that
+      // dialog's scroll lock, which cancels every wheel and touch move on
+      // it; as the topmost lock its list scrolls (objectstack#36825).
       <Popover
+        modal
         open={isOpen}
         onOpenChange={(o) => {
           if (!dependenciesMissing) setIsOpen(o);
@@ -2344,6 +2591,7 @@ export function LookupField({ value, onChange, field, readonly, error: fieldErro
           {lookupPanelBody}
         </PopoverContent>
       </Popover>
+      )}
 
       {lookupScan}
       {singleClear}
@@ -2370,6 +2618,16 @@ export function LookupField({ value, onChange, field, readonly, error: fieldErro
         </Button>
       )}
       </div>
+      )}
+
+      {withheldShown.length > 0 && (
+        <div className="text-xs text-muted-foreground" role="status" data-testid="lookup-autofill-withheld">
+          {withheldShown.map((w) => (
+            <p key={w.target} data-withheld-target={w.target}>
+              {withheldAutofillMessage(w, withheldLabel(w.target), t, displayLocale)}
+            </p>
+          ))}
+        </div>
       )}
 
       {recordPickerDialog}

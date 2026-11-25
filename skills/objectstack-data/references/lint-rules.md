@@ -12,10 +12,10 @@ Data-model rules (in addition to naming/label/i18n):
 | `relationship/missing-reference` | error | lookup/master_detail without a `reference` target |
 | `relationship/master-detail-required` | warning; error under `controlled_by_parent` | a `master_detail` that isn't `required` (under `controlled_by_parent`, the only one may be `required: false`: the optional master) — or, under `controlled_by_parent`, is `readonly`/`system` |
 | `relationship/delete-behavior` | suggestion | `master_detail` without an explicit `deleteBehavior` |
-| `relationship/line-items-inline-edit` | suggestion | a `*_line`/`*_item` master_detail child without `inlineEdit` |
-| `relationship/inline-edit-needs-bulk` | warning | `inlineEdit` while the parent's or child's `enable.apiMethods` omits `'bulk'` |
+| `relationship/line-items-inline-edit` | suggestion | a `*_line`/`*_item` master_detail child placed by no parent field group (`fieldGroups[].relatedList`) |
+| `relationship/inline-edit-needs-bulk` | warning | a child a group places while the parent's or child's `enable.apiMethods` omits `'bulk'` |
 | `relationship/line-item-should-be-master-detail` | suggestion | a line-item-shaped child using `lookup` instead of `master_detail` |
-| `relationship/association-inline-edit` | warning | an association (comment/audit/activity) marked `inlineEdit` (clutters the parent form — use a detail-page related list) |
+| `relationship/association-inline-edit` | warning | an association (comment/audit/activity) a group places (leave it a tab) |
 | `rollup/missing-summary` | suggestion | a parent of numeric master_detail children with no roll-up `summary` |
 | `field/select-missing-options` | warning | a `select`/`multiselect`/`radio` with no `options` (or options source) |
 | `object/missing-name-field` | suggestion | an object with no `nameField` (ADR-0079's canonical title pointer) and no name-like field (`name`/`title`/`subject`/`label`/`full_name`/`display_name`/`code`) |

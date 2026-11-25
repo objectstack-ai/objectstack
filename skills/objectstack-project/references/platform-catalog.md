@@ -30,10 +30,17 @@ a seed) without declaring it.
 |:--|:--|:--|:--|
 | `sys_file` | every boot (`storage`) | a file-storage table | `file` and `image` fields store its rows; uploads go through `/api/v1/storage` |
 | `sys_attachment` | every boot | an attachments table per object | `enable.files: true` on the object opens the Attachments panel; data API |
-| `sys_comment` | `requires: ['audit']` | a comments or notes table | `enable.feeds` (default on) gives every object a discussion thread; data API |
+| `sys_comment` | `requires: ['audit']` | a comments or record-notes table | `enable.feeds` (default on) gives every object a discussion thread; data API |
 | `sys_activity` | `requires: ['audit']` | a record timeline or history table | `enable.activities` (default on) mirrors every write; data API read |
 | `sys_audit_log` | `requires: ['audit']` | a change-log or audit table | written on every write; data API read, `view_all_audit_log` for rows the caller cannot open |
 | `sys_recycle_bin` | every boot | an `is_deleted` flag with a restore | a by-id delete lands here; `POST /api/v1/data/OBJECT/recycle-bin/ENTRY/restore`; no data API |
+
+### Tasks and notes
+
+| Object | Mounted by | What you would otherwise build | How the app reaches it |
+|:--|:--|:--|:--|
+| `sys_task` | every boot | a task or to-do object | a `type: 'object'` navigation entry with `objectName` and `requiresObject` both `sys_task`. Title, status, due time, assignee, platform-written `completed_at`. Neither it nor `sys_note` links to another record. Views `assigned_to_me`, `created_by_me`, `all`. Private: creator and assignee open a task; `member_default` grants read, create and edit, not delete, without widening that; data API |
+| `sys_note` | every boot | a notes object | as `sys_task`, naming `sys_note`. Title and rich-text body. Views `mine`, `all`. Private to its creator, under the same `member_default` grant; data API |
 
 ### Notifications and mail
 
@@ -43,7 +50,7 @@ a seed) without declaring it.
 | `sys_inbox_message` | every boot (`messaging`) | a per-user inbox with read state | the in-app delivery of a notification; the Console bell reads it; data API read |
 | `sys_email` | every boot | an outbound-mail log | every email sent is logged here; templates are `emailTemplates` on the stack; data API read |
 | `sys_mailbox` | `requires: ['mailbox']` | an inbound-mailbox table | engine-owned; data API read for `manage_mailboxes` holders. `requires: ['mailbox']` mounts the objects and the ingest seam and syncs nothing: rows exist only where the host composes the mailbox service with an IMAP account source (no Setup entry) |
-| `sys_mail_message` | `requires: ['mailbox']` | an inbound-mail mirror | rows arrive only from the host's IMAP sync (the `sys_mailbox` row); `mailAssociation: true` on an email field links messages to records; data API read |
+| `sys_mail_message` | `requires: ['mailbox']` | an inbound-mail mirror | rows as the `sys_mailbox` row says; `mailAssociation: true` on an email field links messages to records; data API read |
 
 ### Money, imports and approvals
 
@@ -51,8 +58,8 @@ a seed) without declaring it.
 |:--|:--|:--|:--|
 | `sys_exchange_rate` | every boot | an exchange-rate table | `currencyConfig.homeAmount` converts at write; Setup edits rates; data API |
 | `sys_unit` | every boot | a unit table or picklist | `unitConfig` on a `number` field (`unitMode: 'fixed'` with `unit`, `'record'` with `unitField`) or a `text` field (`'code'`); a stored code is standard (UN/ECE Rec 20: `KGM`, `H87`) or a row added here in Setup; data API, no delete |
-| `sys_work_calendar` | every boot | a business-hours calendar | kept per organization in Setup; an approval's `escalation.clock: 'working_time'` reads it; data API |
-| `sys_work_calendar_exception` | every boot | a holiday table | a calendar's holidays and make-up workdays, kept in Setup; data API |
+| `sys_work_calendar` | every boot | a business-hours calendar | kept per organization in Setup; an approval's `escalation.clock: 'working_time'` and `addWorkingDays()`, `workingDaysBetween()`, `addWorkingHours()` read it; data API |
+| `sys_work_calendar_exception` | every boot | a holiday table | a calendar's holidays and make-up workdays; data API |
 | `sys_import_job` | every boot | a bulk-import job table | `POST /api/v1/data/OBJECT/import/jobs`; data API read |
 | `sys_approval_request` | `requires: ['approvals']` | an approvals table | a flow approval node opens it; `/api/v1/approvals` routes decide; data API read |
 | `sys_approval_action` | `requires: ['approvals']` | an approval decision trail | written per decision; data API read |
@@ -150,4 +157,3 @@ meanwhile, marked `// PLATFORM-CANDIDATE:` with the link.
 | Concept | State | Contract |
 |:--|:--|:--|
 | Unit display, totals and conversion | **not available** (contract accepted; a quantity shows and sums as a bare number) | https://github.com/objectstack-ai/objectstack/blob/main/docs/adr/0158-units-of-measure-standard-unit-table-org-units-quantity-unit-declaration-base-quantity.md |
-| Working-day formulas | **not available** (contract accepted; no formula reads a calendar yet) | https://github.com/objectstack-ai/objectstack/blob/main/docs/adr/0157-working-calendars-are-org-editable-runtime-data-resolved-by-code-or-refused.md |

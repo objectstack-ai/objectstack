@@ -21,12 +21,14 @@
  * mounts, so a remount of the route is read as a second mount.
  *
  * Pinned:
- *  - an admin's footer pick on a shared view: no skeleton, no remount, the
- *    list keeps the picked calculation while the refresh is on the wire and
- *    after it lands;
- *  - two successive picks: the second draft carries both;
- *  - the writes are draft saves; a reader (not an admin) served the published
- *    view draws it, without the admin's calculations.
+ *  - an admin's footer pick on a shared view, then the refresh pulse a draft
+ *    save announces: no skeleton, no remount, the list keeps the picked
+ *    calculation while the refresh is on the wire and after it lands. Since
+ *    objectstack#36194 the pick itself is a part of the list's draft and
+ *    writes nothing, so the pulse is announced here as a save announces it;
+ *  - two successive picks: the list draws both, and nothing is written;
+ *  - a reader (not an admin) served the published view draws it, without the
+ *    admin's calculations.
  * CONTROL: a whole-type invalidation of `view` (the provider dropping its
  * items, not refetching in place) still sends the route back to waiting.
  *
@@ -199,6 +201,7 @@ import '../../views/ObjectView.js';
 import { AppContent } from '../AppContent';
 import { MetadataProvider, useMetadata } from '../../providers/MetadataProvider';
 import { publishRuntimeMetadata } from '../../views/runtime-metadata-persistence.js';
+import { emitMetadataRefresh } from '../../assistant/assistantBus.js';
 
 interface Server {
   /** Hold every `/meta/view` list read until `releaseViews`, as a request on the wire. */
@@ -362,12 +365,8 @@ const pick = (field: string, summary: string) =>
   act(async () => {
     await list.props!.onColumnSummaryPick(field, summary);
   });
-const storedSummaries = (body: any) =>
-  Object.fromEntries(
-    ((body?.config?.columns ?? body?.columns ?? []) as Array<string | { field: string; summary?: unknown }>)
-      .filter((c): c is { field: string; summary?: unknown } => typeof c === 'object' && c.summary !== undefined)
-      .map((c) => [c.field, c.summary]),
-  );
+/** The refresh pulse every write of the persistence seam announces (`emitMetadataRefresh`). */
+const announceSave = () => act(() => emitMetadataRefresh());
 
 beforeEach(() => {
   server.holdViews = false;
@@ -400,7 +399,9 @@ describe('objectstack#35932 — a shared view\'s draft save keeps the list on sc
     // The refresh the save announces re-reads `/meta/view`; held, as a request on the wire.
     server.holdViews = true;
     await pick('amount', 'sum');
-    expect(saves).toHaveLength(1);
+    // objectstack#36194 — the pick is the list's draft: nothing is written.
+    expect(saves).toHaveLength(0);
+    announceSave();
     await act(async () => {
       await new Promise((resolve) => setTimeout(resolve, 50));
     });
@@ -417,28 +418,25 @@ describe('objectstack#35932 — a shared view\'s draft save keeps the list on sc
     expect(summaryOf('amount')).toBe('sum');
   });
 
-  it('two successive picks: the second draft carries both', async () => {
+  it('two successive picks: the list draws both, nothing is written', async () => {
     boot(true);
     await waitFor(() => expect(typeof list.props?.onColumnSummaryPick).toBe('function'), { timeout: 5000 });
 
     server.holdViews = true;
     await pick('amount', 'sum');
+    announceSave();
     await act(async () => {
       await new Promise((resolve) => setTimeout(resolve, 50));
     });
     await pick('closed_at', 'latest');
+    announceSave();
     server.holdViews = false;
     act(() => server.releaseViews());
     await act(async () => {
       await new Promise((resolve) => setTimeout(resolve, 50));
     });
 
-    expect(saves.map((s) => [s.type, s.name, s.options?.mode])).toEqual([
-      ['view', VIEW, 'draft'],
-      ['view', VIEW, 'draft'],
-    ]);
-    expect(storedSummaries(saves[0].body)).toEqual({ amount: 'sum' });
-    expect(storedSummaries(saves[1].body)).toEqual({ amount: 'sum', closed_at: 'latest' });
+    expect(saves).toEqual([]);
     expect(list.mounts).toBe(1);
     expect(summaryOf('amount')).toBe('sum');
     expect(summaryOf('closed_at')).toBe('latest');
@@ -448,15 +446,15 @@ describe('objectstack#35932 — a shared view\'s draft save keeps the list on sc
     boot(true);
     await waitFor(() => expect(typeof list.props?.onColumnSummaryPick).toBe('function'), { timeout: 5000 });
     await pick('amount', 'sum');
-    expect(saves.map((s) => s.options?.mode)).toEqual(['draft']);
+    expect(saves).toEqual([]);
     cleanup();
 
     forgetList();
     boot(false);
     await waitFor(() => expect(list.props?.schema?.columns).toBeDefined(), { timeout: 5000 });
     expect(summaryOf('amount')).toBeUndefined();
-    // Offered to an admin only.
-    expect(list.props?.onColumnSummaryPick).toBeUndefined();
+    // objectstack#36194 — a reader's pick is their own draft too.
+    expect(typeof list.props?.onColumnSummaryPick).toBe('function');
   });
 
   it('CONTROL: a whole-type invalidation of `view` still sends the route back to waiting', async () => {
@@ -486,6 +484,7 @@ describe('objectstack#35932 — the same, on an app with a bundle', () => {
 
     appBundle.hold = true;
     await pick('amount', 'sum');
+    announceSave();
     await settle();
     // The pulse dropped the bundle and its reload is on the wire.
     expect(appBundle.items).toBeNull();
@@ -502,18 +501,21 @@ describe('objectstack#35932 — the same, on an app with a bundle', () => {
     expect(summaryOf('amount')).toBe('sum');
   });
 
-  it('two successive picks, then Publish: both picks in the second draft, one mount throughout', async () => {
+  it('two successive picks, then Publish: both picks drawn, one mount throughout', async () => {
     boot(true, { bundle: true });
     await waitFor(() => expect(typeof list.props?.onColumnSummaryPick).toBe('function'), { timeout: 5000 });
 
     appBundle.hold = true;
     await pick('amount', 'sum');
+    announceSave();
     await settle();
     await pick('closed_at', 'latest');
+    announceSave();
     await settle();
     expect(skeletonUp()).toBe(false);
-    expect(storedSummaries(saves[0].body)).toEqual({ amount: 'sum' });
-    expect(storedSummaries(saves[1].body)).toEqual({ amount: 'sum', closed_at: 'latest' });
+    expect(saves).toEqual([]);
+    expect(summaryOf('amount')).toBe('sum');
+    expect(summaryOf('closed_at')).toBe('latest');
 
     appBundle.hold = false;
     act(() => releaseBundle());

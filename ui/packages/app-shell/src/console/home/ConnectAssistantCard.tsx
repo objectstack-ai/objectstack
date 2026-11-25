@@ -79,7 +79,7 @@ export function ConnectAssistantCard({ className }: { className?: string } = {})
         >
           {t('home.connectAssistant.title')}
         </h2>
-        <p className="sr-only text-[13px] text-muted-foreground sm:not-sr-only" data-testid="home-connect-assistant-body">
+        <p className="sr-only text-xs text-muted-foreground sm:not-sr-only" data-testid="home-connect-assistant-body">
           {t('home.connectAssistant.body')}
         </p>
       </div>

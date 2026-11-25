@@ -185,8 +185,8 @@ describe('data-table inline edit — the edit column is not a second "Actions" (
     renderComponent(makeSchema({ editable: false, onRowEdit: () => {} }));
     const label = (name: string) =>
       screen.getByRole('columnheader', { name }).querySelector('span') as HTMLElement;
-    // 13px since objectstack#35548 (the list page's header type).
-    for (const token of ['text-[13px]', 'font-medium', 'text-muted-foreground']) {
+    // 12px since objectstack#36047 (a header is secondary type).
+    for (const token of ['text-xs', 'font-medium', 'text-muted-foreground']) {
       expect(label('Name')).toHaveClass(token);
       expect(label('Actions')).toHaveClass(token);
     }

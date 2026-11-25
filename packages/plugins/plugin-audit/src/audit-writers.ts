@@ -32,7 +32,7 @@ import { omitSideCopyFromCopy } from './side-copy-columns.js';
 // `nameField` — the same argument the SECRET_MASK import above makes.
 // [#22738] `canServeApiOperation` is the spec's one exposure decision (ADR-0049),
 // asked of a referenced object before its title is read into a summary.
-import { canServeApiOperation, referenceTargetOf, resolveDisplayField } from '@objectstack/spec/data';
+import { canServeApiOperation, resolveFieldHistory, referenceTargetOf, resolveDisplayField } from '@objectstack/spec/data';
 // [#22510] The acting user's object, named by the registry constant rather
 // than a literal — `sys_activity.actor_name` is resolved from its title.
 import { SystemObjectName } from '@objectstack/spec/system';
@@ -987,12 +987,13 @@ function planTrackedLookupReads(
   fields: Record<string, any> | undefined | null,
   oldVals: Record<string, any> | null,
   newVals: Record<string, any> | null,
+  showsValues: ChangeValuesShown,
 ): Map<string, Set<string>> {
   const byObject = new Map<string, Set<string>>();
   if (!fields || !newVals) return byObject;
   for (const key of Object.keys(newVals)) {
     const field = fields[key];
-    if (!field || field.trackHistory !== true) continue;
+    if (!field || !showsValues(key, field)) continue;
     if (typeof field.type !== 'string' || !REFERENCE_FIELD_TYPES.has(field.type)) continue;
     const reference = referenceTargetForSummary(field);
     if (!reference) continue;
@@ -1029,8 +1030,10 @@ function planLabelLookupRead(
 }
 
 /**
- * ADR-0052 §5b — declarative activity. For fields declared `trackHistory: true`,
- * render the diff the writer already captured as a human-readable timeline
+ * ADR-0052 §5b — declarative activity. For every changed field whose values
+ * are shown ({@link changeValuesShownFor}: on unless the object or the field
+ * turns them off, #36290), render the diff the writer already captured as a
+ * human-readable timeline
  * summary ("Stage: Proposal → Closed Won"; multiple changes joined by "; "),
  * using the field label, select option labels and referenced record titles.
  * Returns null when no tracked field changed, so the caller falls back to the
@@ -1071,24 +1074,109 @@ function renderTrackedChangeSummary(
   oldVals: Record<string, any> | null,
   newVals: Record<string, any> | null,
   locale: ActivitySummaryLocale,
+  showsValues: ChangeValuesShown,
   lookupTitles?: Map<string, Map<string, string>>,
+  maxLength?: number,
 ): { text: string; fields: string[]; message: ActivitySummaryMessage } | null {
   if (!fields || !newVals) return null;
   const changes: ActivitySummaryFieldChange[] = [];
   for (const key of Object.keys(newVals)) {
     const field = fields[key];
-    if (!field || field.trackHistory !== true) continue;
+    if (!field || !showsValues(key, field)) continue;
     const reference = referenceTargetForSummary(field);
     const titlesFor = reference ? lookupTitles?.get(reference) : undefined;
     changes.push({
       field: key,
-      from: summaryValueOf(field, oldVals ? oldVals[key] : undefined, titlesFor),
-      to: summaryValueOf(field, newVals[key], titlesFor),
+      from: boundedChangeValue(summaryValueOf(field, oldVals ? oldVals[key] : undefined, titlesFor), MAX_CHANGE_VALUE_TEXT),
+      to: boundedChangeValue(summaryValueOf(field, newVals[key], titlesFor), MAX_CHANGE_VALUE_TEXT),
     });
   }
   if (changes.length === 0) return null;
   const message: ActivitySummaryMessage = { key: 'fieldChanges', object: objectName, changes };
-  return { text: composeStoredSummary(message, locale), fields: changes.map((c) => c.field), message };
+  return { text: fitStoredChangeSummary(message, locale, maxLength), fields: changes.map((c) => c.field), message };
+}
+
+/**
+ * [#36290] Whether a changed field's old → new VALUES are rendered: the
+ * predicate {@link changeValuesShownFor} builds for one object.
+ */
+type ChangeValuesShown = (key: string, field: any) => boolean;
+
+/**
+ * [#36290, ruling 7076513167] ADR-0052 §5b.1 with its default reversed: a
+ * changed field's old → new values render on the record's activity stream
+ * unless the object turns it off (`enable.fieldHistory: false`) or the field
+ * does (its own `fieldHistory: false`). An absent flag is on. Neither
+ * `trackHistory` turns values off: the object's keeps its own meaning (the
+ * ledger view and the `history` verb) and a parsed body materializes it as
+ * `false` on every object with an `enable` block; the field's `false` was
+ * written by the field designer on every save while it meant nothing, so a
+ * stored one cannot be told from a choice and reads like an absent key. A
+ * field's `trackHistory: true` still forces a no-line type on. A credential
+ * field never renders values, and a no-line type only when it opts in.
+ *
+ * [#36482] The rule itself is `resolveFieldHistory` in
+ * `@objectstack/spec/data`, beside the no-line type list: the metadata form
+ * asks the same predicate what an unset `fieldHistory` resolves to, so the
+ * default it shows cannot drift from what this writer keeps.
+ *
+ * Who may READ the values is not decided here: the row is redacted per reader,
+ * field by field (`activity-field-redaction.ts`).
+ */
+function changeValuesShownFor(objectDef: any): ChangeValuesShown {
+  return (_key, field) => resolveFieldHistory(field, objectDef);
+}
+
+/**
+ * [#36290] The longest text one side of a field change keeps in the stored
+ * code. The code is what a reader's record page draws each change from, so a
+ * long text keeps enough to read; bounded so one edit of a long text field
+ * cannot grow the row without limit.
+ */
+const MAX_CHANGE_VALUE_TEXT = 1000;
+
+/**
+ * [#36290] How long one side of a change may be inside the STORED one-line
+ * summary when the full sentence does not fit `sys_activity.summary`'s
+ * `maxLength`.
+ */
+const FITTED_CHANGE_VALUE_TEXT = 60;
+
+/** `value` with its text cut to `max` characters (an ellipsis marks the cut). */
+function boundedChangeValue(value: ActivitySummaryValue, max: number): ActivitySummaryValue {
+  if (value.text.length <= max) return value;
+  return { ...value, text: `${value.text.slice(0, Math.max(0, max - 1))}…` };
+}
+
+/**
+ * [#36290] The stored sentence for a field-change code, fitted to
+ * `sys_activity.summary`'s `maxLength` (the SQL driver sizes the column
+ * `varchar(n)` from it, so an over-long text fails the whole activity insert).
+ * With values on by default one save can change many fields, or one long
+ * text, so the tracked branch is fitted as the changed-fields branch is: first
+ * each side is cut to {@link FITTED_CHANGE_VALUE_TEXT} characters, then
+ * trailing changes are left out, then the sentence itself is cut. The code
+ * keeps every change, so a reader's language re-composes the whole of it.
+ */
+function fitStoredChangeSummary(
+  message: Extract<ActivitySummaryMessage, { key: 'fieldChanges' }>,
+  locale: ActivitySummaryLocale,
+  maxLength: number | undefined,
+): string {
+  const full = composeStoredSummary(message, locale);
+  if (maxLength === undefined || full.length <= maxLength) return full;
+  const cut = message.changes.map((c) => ({
+    field: c.field,
+    from: boundedChangeValue(c.from, FITTED_CHANGE_VALUE_TEXT),
+    to: boundedChangeValue(c.to, FITTED_CHANGE_VALUE_TEXT),
+  }));
+  for (let shown = cut.length; shown >= 1; shown -= 1) {
+    const text = composeStoredSummary({ ...message, changes: cut.slice(0, shown) }, locale);
+    const tail = shown < cut.length ? '; …' : '';
+    if (text.length + tail.length <= maxLength) return `${text}${tail}`;
+  }
+  const one = composeStoredSummary({ ...message, changes: cut.slice(0, 1) }, locale);
+  return `${one.slice(0, Math.max(0, maxLength - 1))}…`;
 }
 
 /**
@@ -1103,8 +1191,9 @@ const MAX_NAMED_CHANGED_FIELDS = 5;
  * changed: before this, the row said only `Updated <object> "<label>"`, so a
  * record a rollup or flow bumps repeatedly showed a wall of identical entries
  * nobody could read. `trackHistory` still governs what it always did — whether
- * a field's old → new VALUES are rendered (ADR-0052 §5b.1); an untracked
- * field's value never reaches the text, only its label does.
+ * a field's old → new VALUES are rendered (ADR-0052 §5b.1, on unless turned off
+ * since #36290); a field whose values are off never reaches the text with its
+ * value, only its label does.
  *
  * Names fields in declaration order (keys the definition does not carry come
  * after, by key), at most {@link MAX_NAMED_CHANGED_FIELDS}, then counts the
@@ -2602,9 +2691,11 @@ export function installAuditWriters(
         // that changes no tracked reference field issues no read at all. The
         // titles are read as the WRITER (see `resolveLookupTitles`): each side
         // of a change names a title the writer may read, else the stored id.
+        // [#36290] Values render unless the object or the field turns them off.
+        const showsValues = changeValuesShownFor(getObjectDef(ctx.object));
         const lookupTitles = await resolveLookupTitles(
           api,
-          planTrackedLookupReads(summaryFields, oldValue, newValue),
+          planTrackedLookupReads(summaryFields, oldValue, newValue, showsValues),
         );
         const tracked = renderTrackedChangeSummary(
           ctx.object,
@@ -2612,7 +2703,9 @@ export function installAuditWriters(
           oldValue,
           newValue,
           writeLocale,
+          showsValues,
           lookupTitles,
+          activitySummaryMaxLength(),
         );
         if (tracked) {
           summary = tracked.text;
@@ -2891,13 +2984,12 @@ export function installAuditWriters(
    */
 
   /**
-   * The record a comment is on as a Console page under the deployment's
-   * address (`mention-email.ts`): the inbox notice's own `/{object}/{id}`
-   * link, absolute through `getConsoleUrl` when it answers. No record, no
-   * link — and no e-mail.
+   * A comment notice's Console page under the deployment's address
+   * (`mention-email.ts`): the inbox notice's own link (`commentRecordPath`),
+   * absolute through `getConsoleUrl` when it answers. No record, no link —
+   * and no e-mail.
    */
-  const consoleRecordUrl = (object: string | undefined, id: string | undefined): string | null => {
-    const recordPath = object && id ? `/${object}/${id}` : null;
+  const consoleCommentUrl = (recordPath: string | null): string | null => {
     if (!recordPath) return null;
     try {
       return opts.getConsoleUrl?.(recordPath) || recordPath;
@@ -2959,13 +3051,27 @@ export function installAuditWriters(
       actorName = api?.sudo ? (await resolveActorSnapshot(api, editorId)).name : null;
     }
     const bodyPreview = String(row.body ?? '').slice(0, 240);
-    // The mention e-mail's link (`mention-email.ts`): the record the comment
-    // is on — the inbox notice's own `/{object}/{id}` link — as a Console page
-    // under the deployment's address. No record, no e-mail: a mail with no
-    // way back to the thread is not worth the daily mail budget.
-    const mentionUrl = consoleRecordUrl(source_object, source_id);
     const tenantId: string | null = sess.organizationId ?? row.organization_id ?? null;
     const commentId = row.id != null ? String(row.id) : null;
+    // [#36410] The notice opens the record with its comment panel at this
+    // comment's thread: a top-level comment is its own thread; a mention in a
+    // reply walks up to the reply's top-level comment. A walk that fails or
+    // finds no root links the record alone, as before.
+    const parentId = row.parent_id != null && String(row.parent_id) ? String(row.parent_id) : null;
+    let rootId: string | null = parentId ? null : commentId;
+    if (parentId) {
+      try {
+        rootId = await readThreadRootId(engine, parentId, String(row.thread_id ?? ''));
+      } catch (err) {
+        try { (engine as any).logger?.warn?.('Mention thread root read failed; the notice links the record alone', { commentId, err: String((err as any)?.message ?? err) }); } catch {}
+      }
+    }
+    const mentionPath = commentRecordPath(source_object, source_id, rootId, commentId);
+    // The mention e-mail's link (`mention-email.ts`): the inbox notice's own
+    // link as a Console page under the deployment's address. No record, no
+    // e-mail: a mail with no way back to the thread is not worth the daily
+    // mail budget.
+    const mentionUrl = consoleCommentUrl(mentionPath);
 
     // The notification is a copy of the comment (its preview) and a link to
     // the record, so it reaches only a mentioned user who can READ both the
@@ -3034,6 +3140,10 @@ export function installAuditWriters(
             title,
             body: bodyPreview,
             actorName,
+            // [#36410] The inbox row's link (its `action_url`): the record
+            // with the comment panel at this comment. Absent with no record,
+            // where messaging derives none either.
+            ...(mentionPath ? { url: mentionPath } : {}),
           },
         });
         // The e-mail (`mention-email.ts`): a second emit through the same
@@ -3146,7 +3256,10 @@ export function installAuditWriters(
     }
 
     const [source_object, source_id] = String(row.thread_id ?? '').split(':');
-    const replyUrl = consoleRecordUrl(source_object, source_id);
+    // [#36410] The notice opens the record with its comment panel at the
+    // thread's top-level comment, scrolled to this reply.
+    const replyPath = commentRecordPath(source_object, source_id, thread.rootId, commentId);
+    const replyUrl = consoleCommentUrl(replyPath);
     const bodyPreview = String(row.body ?? '').slice(0, 240);
     for (const uid of userIds) {
       try {
@@ -3164,7 +3277,7 @@ export function installAuditWriters(
           actorId: actorId ?? undefined,
           organizationId: tenantId ?? undefined,
           dedupKey: commentId ? `${REPLY_TOPIC}:${commentId}:${uid}` : undefined,
-          payload: { title, body: bodyPreview, actorName },
+          payload: { title, body: bodyPreview, actorName, ...(replyPath ? { url: replyPath } : {}) },
         });
         // The e-mail: the mention e-mail's second emit, under the reply topic
         // and its own 10-minute window (`replyEmailDedupKey`).
@@ -3214,6 +3327,8 @@ export function installAuditWriters(
 
 /** [#36074] Who a comment thread names: its starter and everyone in it, starter first. */
 interface CommentThreadParticipants {
+  /** [#36410] The thread's top-level comment — where its notices open the comment panel. */
+  rootId: string;
   /** The author of the thread's top-level comment. */
   starterId: string | null;
   /** Each distinct author in the thread, the starter first. */
@@ -3236,6 +3351,40 @@ const THREAD_READ_CONTEXT = { isSystem: true } as const;
  * parent cannot be found on this thread — no thread, no notice.
  */
 async function readThreadParticipants(engine: any, parentId: string, threadId: string): Promise<CommentThreadParticipants | null> {
+  const walk = await walkToThreadRoot(engine, parentId, threadId);
+  if (!walk) return null;
+  const { rootId, ancestors } = walk;
+  const replyAuthors: any[] = await engine.aggregate(
+    'sys_comment',
+    {
+      where: { parent_id: rootId, thread_id: threadId },
+      groupBy: ['author_id'],
+      aggregations: [{ function: 'count', field: 'id', alias: 'replies' }],
+    },
+    { context: THREAD_READ_CONTEXT },
+  );
+  const participants: string[] = [];
+  const add = (uid: unknown) => {
+    if (uid == null) return;
+    const id = String(uid);
+    if (id && !participants.includes(id)) participants.push(id);
+  };
+  for (const uid of ancestors) add(uid);
+  for (const r of replyAuthors ?? []) add(r?.author_id);
+  return { rootId, starterId: ancestors[0] ?? null, participants };
+}
+
+/**
+ * Up the `parent_id` chain from `parentId` to the thread's top-level comment
+ * (bounded, cycle-safe, held to `threadId`): its id and each comment's author
+ * on the way, the top-level comment's first. `null` when the parent is not on
+ * this thread.
+ */
+async function walkToThreadRoot(
+  engine: any,
+  parentId: string,
+  threadId: string,
+): Promise<{ rootId: string; ancestors: string[] } | null> {
   if (!threadId) return null;
   const ancestors: string[] = [];
   const seen = new Set<string>();
@@ -3258,25 +3407,43 @@ async function readThreadParticipants(engine: any, parentId: string, threadId: s
     if (comment.author_id != null && String(comment.author_id)) ancestors.unshift(String(comment.author_id));
     cursor = comment.parent_id != null && String(comment.parent_id) ? String(comment.parent_id) : null;
   }
-  if (!rootId) return null;
-  const replyAuthors: any[] = await engine.aggregate(
-    'sys_comment',
-    {
-      where: { parent_id: rootId, thread_id: threadId },
-      groupBy: ['author_id'],
-      aggregations: [{ function: 'count', field: 'id', alias: 'replies' }],
-    },
-    { context: THREAD_READ_CONTEXT },
-  );
-  const participants: string[] = [];
-  const add = (uid: unknown) => {
-    if (uid == null) return;
-    const id = String(uid);
-    if (id && !participants.includes(id)) participants.push(id);
-  };
-  for (const uid of ancestors) add(uid);
-  for (const r of replyAuthors ?? []) add(r?.author_id);
-  return { starterId: ancestors[0] ?? null, participants };
+  return rootId ? { rootId, ancestors } : null;
+}
+
+/** [#36410] The top-level comment of the thread `parentId` is on; `null` when it is not on `threadId`. */
+async function readThreadRootId(engine: any, parentId: string, threadId: string): Promise<string | null> {
+  return (await walkToThreadRoot(engine, parentId, threadId))?.rootId ?? null;
+}
+
+/**
+ * The Console's comment URL parameters (`ui/packages/app-shell/src/urlParams.ts`
+ * holds the reader's half): `comments` names the thread by its top-level
+ * comment's id, `comment` the comment in it to scroll to. Literal here, as the
+ * `/{object}/{id}` route is: plugin-audit takes no dependency on the Console.
+ */
+const COMMENTS_URL_PARAM = 'comments';
+const COMMENT_URL_PARAM = 'comment';
+
+/**
+ * [#36410] A comment notice's Console link, app-relative: the record the
+ * comment is on (`/{object}/{id}`, the link messaging would derive from the
+ * notice's `source`), with the comment panel open at its thread
+ * (`?comments={rootId}`) and, for a reply, the reply to scroll to
+ * (`&comment={commentId}`; a top-level comment IS the thread, so it adds
+ * none). No thread root ⇒ the record alone. No record ⇒ `null`.
+ */
+function commentRecordPath(
+  object: string | undefined,
+  id: string | undefined,
+  rootId: string | null,
+  commentId: string | null,
+): string | null {
+  if (!object || !id) return null;
+  const recordPath = `/${object}/${id}`;
+  if (!rootId) return recordPath;
+  const query = new URLSearchParams({ [COMMENTS_URL_PARAM]: rootId });
+  if (commentId && commentId !== rootId) query.set(COMMENT_URL_PARAM, commentId);
+  return `${recordPath}?${query.toString()}`;
 }
 
 /**
@@ -3284,7 +3451,7 @@ async function readThreadParticipants(engine: any, parentId: string, threadId: s
  * on sys_comment holding either a raw array of user ids `["u1","u2"]` or an
  * array of objects `[{ id: "u1" }, ...]`; a parse failure reads as no mention.
  */
-function parseCommentMentions(value: unknown): string[] {
+export function parseCommentMentions(value: unknown): string[] {
   let mentions: any = value;
   if (typeof mentions === 'string') {
     try { mentions = JSON.parse(mentions); } catch { mentions = null; }

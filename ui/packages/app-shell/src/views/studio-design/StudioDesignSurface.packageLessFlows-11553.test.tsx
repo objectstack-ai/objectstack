@@ -23,8 +23,8 @@
 import '@testing-library/jest-dom/vitest';
 import * as React from 'react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, fireEvent, cleanup, waitFor } from '@testing-library/react';
-import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
+import { render, screen, fireEvent, cleanup, waitFor, within } from '@testing-library/react';
+import { MemoryRouter, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
 
 const SHOWCASE = 'com.example.showcase';
 const NODES = [
@@ -207,10 +207,17 @@ function LocationProbe() {
   return <div data-testid="location">{`${pathname}${search}`}</div>;
 }
 
+/** A route change into the package-less scope, the surface left mounted. */
+function OrgScopeDoor() {
+  const navigate = useNavigate();
+  return <button type="button" aria-label="test door: package-less scope" data-testid="org-scope-door" onClick={() => navigate('/studio/~org/automations')} />;
+}
+
 function renderAt(url: string) {
   return render(
     <MemoryRouter initialEntries={[url]}>
       <LocationProbe />
+      <OrgScopeDoor />
       <Routes>
         <Route path="/studio/:packageId/:tab" element={<StudioDesignSurface />} />
       </Routes>
@@ -263,20 +270,26 @@ describe('the package-less scope lists a package-less flow and opens it editable
     expect(saved!.options?.packageId).toBeUndefined();
   });
 
-  it('offers its one pillar, no Create app, no package copilot, and names itself in the switcher', async () => {
+  it('offers its one page, no Create app, no package copilot, and names the scope beside 「‹ Back to app」', async () => {
     renderAt('/studio/~org/automations');
     await openedFlow('qa_urgent_alert_clone');
 
-    expect(screen.getByRole('link', { name: /Automations/ })).toHaveAttribute('href', '/studio/~org/automations');
-    expect(screen.queryByRole('link', { name: /^Data$/ })).not.toBeInTheDocument();
-    expect(screen.queryByRole('link', { name: /Interfaces/ })).not.toBeInTheDocument();
-    // objectui#12452 — Access is a package pillar segment now, not a More entry.
-    expect(screen.queryByRole('link', { name: /Access/ })).not.toBeInTheDocument();
-    // objectstack#28561 — nor the "All metadata" area: a package's, beside its pillars.
-    expect(screen.queryByRole('link', { name: /All metadata/ })).not.toBeInTheDocument();
+    // objectstack#36899 — the left menu: the scope's flows are its current
+    // entry; no package pillar, area or Interfaces page is offered.
+    const menu = within(screen.getByTestId('studio-menu'));
+    const flows = menu.getByTestId('studio-menu-entry-orgFlows');
+    expect(flows).toHaveAttribute('href', '/studio/~org/automations');
+    expect(flows).toHaveAttribute('aria-current', 'page');
+    for (const a of menu.getAllByRole('link')) {
+      expect(a.getAttribute('href')).not.toMatch(/^\/studio\/~org\/(data|access|interfaces|metadata)/);
+    }
+    expect(menu.queryByTestId('studio-menu-entry-owd')).toBeNull();
+    expect(menu.queryByTestId('studio-menu-entry-diagnostics')).toBeNull();
     expect(screen.queryByRole('button', { name: /Create app/ })).not.toBeInTheDocument();
     expect(chatDock.mounts).toBe(0);
-    expect(screen.getByTestId('studio-pkg-chip')).toHaveTextContent('Organization flows');
+    // objectstack#36501, decision 5 (objectstack#36899) — no app owns the
+    // scope, so the name slot names the scope, as for a package with no app.
+    expect(screen.getByTestId('studio-back')).toHaveTextContent(/^Back to app·Organization flows·Studio$/);
     // No "New" flow here: authoring stays package-first.
     expect(screen.queryByTitle('New automation')).not.toBeInTheDocument();
   });
@@ -331,15 +344,16 @@ describe('the packaged control: a read-only package stays read-only (objectui#11
     expect(screen.queryAllByRole('button', { name: 'Add connected node' })).toHaveLength(0);
   });
 
-  it('from that read-only package, the switcher’s entry opens the package-less scope editable', async () => {
+  it('from that read-only package, a switch into the package-less scope opens it editable', async () => {
     // The surface stays mounted across the switch, so the read-only answer the
-    // showcase got is still in hand when the package-less scope renders.
+    // showcase got is still in hand when the package-less scope renders. The
+    // switch used to be the package switcher's entry, removed by
+    // objectstack#36501; the route change is the same without it.
     renderAt(`/studio/${SHOWCASE}/automations`);
     await openedFlow('showcase_urgent_task_alert');
     await waitFor(() => expect(screen.getByRole('switch')).toBeDisabled());
 
-    fireEvent.click(screen.getByTestId('studio-pkg-chip'));
-    fireEvent.click(await screen.findByTestId('studio-org-scope-entry'));
+    fireEvent.click(screen.getByTestId('org-scope-door'));
 
     await waitFor(() => expect(location()).toBe('/studio/~org/automations'));
     await openedFlow('qa_urgent_alert_clone');

@@ -140,6 +140,9 @@ import {
   EnsureCustomizationPackageResponse,
   CloneFlowRequest,
   CloneFlowResponse,
+  // [#35928] The record-update preview's request and its payload.
+  RecordUpdateStartsRequest,
+  RecordUpdateStartsResponse,
   ValidateDataIssue,
 } from '@objectstack/spec/api';
 // [#17536] The element the two `/packages` READ doors are declared to serve.
@@ -250,11 +253,21 @@ export interface MetaItemsListOptions {
 
 /**
  * [#30205] `security.assignedWork.count`'s answer: per object and user field,
- * how many records hold the user, as the caller can read them.
+ * how many records hold the user, as the caller can read them. A row with
+ * `transferable: false` is counted but never handed over, and `reason` says
+ * why: `multi_valued` (a multi-valued user field) or `transfer_off` (the owner
+ * field of an object whose Change Owner switch, `userActions.transfer`, is off).
  */
 export interface UserAssignedWorkSummary {
   userId: string;
-  objects: Array<{ object: string; field: string; count: number; transferable: boolean }>;
+  objects: Array<{
+    object: string;
+    field: string;
+    count: number;
+    transferable: boolean;
+    /** Why the row is not handed over; present exactly when `transferable` is false. */
+    reason?: 'multi_valued' | 'transfer_off';
+  }>;
   total: number;
   truncated: boolean;
   unreadable: string[];
@@ -274,6 +287,75 @@ export interface UserWorkTransferReport {
   updated: number;
   failed: number;
   remaining: number;
+}
+
+/**
+ * [#35402] Who takes the records in `data.changeOwner` / `data.changeOwnerMany`:
+ * a person (`ownerId`), or an ownership queue (`queue`, ADR-0142) — exactly
+ * one. `notify` tells a person target; a queue target refuses it.
+ */
+export type ChangeOwnerRequest =
+  | { ownerId: string; queue?: undefined; notify?: boolean; cascade?: ChangeOwnerCascadeRelation[] }
+  | { queue: string; ownerId?: undefined; notify?: undefined; cascade?: undefined };
+
+/**
+ * [#35315 phase 2] One relationship a Change Owner cascades along: the child
+ * object, and its reference field to the parent, which declares
+ * `transferBehavior: 'cascade'`. A request naming any other is refused `400`.
+ */
+export interface ChangeOwnerCascadeRelation {
+  object: string;
+  field: string;
+}
+
+/** [#35315 phase 2] A declared cascade `data.changeOwnerCascades` lists, with the labels the child serves. */
+export interface ChangeOwnerCascadeCandidate extends ChangeOwnerCascadeRelation {
+  label: string;
+  fieldLabel: string;
+}
+
+/**
+ * [#35315 phase 2] One cascaded relationship's outcome: the child rows owned by
+ * the parent's previous owner that moved, every one refused listed with its
+ * code and sentence, and those the row cap left with the previous owner.
+ */
+export interface ChangeOwnerCascadeOutcome {
+  object: string;
+  field: string;
+  updated: number;
+  failed: number;
+  failures: Array<{ id: string; code: string; message: string }>;
+  remaining: number;
+  readFailure?: { code: string; message: string };
+}
+
+/** [#35402] `data.changeOwner`'s answer: the record's new owner, or the queue it now sits in. */
+export interface ChangeOwnerResult {
+  object: string;
+  id: string;
+  /** `null` when the record now sits in `queue`. */
+  ownerId: string | null;
+  queue?: string;
+  notified: boolean;
+  /** One outcome per relationship the request named in `cascade`; absent when it named none. */
+  cascade?: ChangeOwnerCascadeOutcome[];
+}
+
+/**
+ * [#35402] `data.changeOwnerMany`'s answer — the #30205 hand-over's per-object
+ * outcome, with every row that did not move listed by id.
+ */
+export interface ChangeOwnerReport {
+  object: string;
+  field: string;
+  ownerId: string | null;
+  queue?: string;
+  updated: number;
+  failed: number;
+  failures: Array<{ id: string; code: string; message: string }>;
+  notified: boolean;
+  /** One outcome per relationship the request named in `cascade`; absent when it named none. */
+  cascade?: ChangeOwnerCascadeOutcome[];
 }
 
 /**
@@ -6346,6 +6428,23 @@ export class ObjectStackClient {
       },
 
       /**
+       * [#35928] Which flows a proposed update of one record would start —
+       * `POST /automation/_record-starts`, the preview a stage-change confirm
+       * shows before the reader confirms the save. Answered to a caller who
+       * can read the record (an unreadable or absent record is 404
+       * `RECORD_NOT_FOUND`); each flow is its name, authored label and
+       * whether it starts an approval. Nothing runs and nothing is written.
+       */
+      listRecordUpdateStarts: async (request: RecordUpdateStartsRequest): Promise<RecordUpdateStartsResponse['data']> => {
+          const route = this.getRoute('automation');
+          const res = await this.fetch(`${this.baseUrl}${route}/_record-starts`, {
+              method: 'POST',
+              body: JSON.stringify(request),
+          });
+          return this.unwrapResponse(res);
+      },
+
+      /**
        * Enable or disable a PACKAGED flow — one a code package ships.
        *
        * [#20726, ADR-0126 §7.2] `POST /automation/:name/toggle` records the
@@ -6953,9 +7052,11 @@ export class ObjectStackClient {
       assignedWork: {
           /**
            * Per object and user field (the owner field and every app user
-           * field), how many records hold `userId`. Objects the caller cannot
-           * read are named in `unreadable`; `truncated` says more fields exist
-           * than were counted.
+           * field), how many records hold `userId`, each with whether
+           * `transfer` moves them and, when it does not, why (`reason`): a
+           * multi-valued field, or the owner field of an object whose Change
+           * Owner switch is off. Objects the caller cannot read are named in
+           * `unreadable`; `truncated` says more fields exist than were counted.
            */
           count: async (userId: string): Promise<UserAssignedWorkSummary> => {
               const res = await this.fetch(
@@ -7059,6 +7160,26 @@ export class ObjectStackClient {
         `${this.baseUrl}${route}/records/${encodeURIComponent(object)}/${encodeURIComponent(recordId)}/lock`,
       );
       return this.unwrapResponse<{ locked: boolean }>(res);
+    },
+
+    /**
+     * Whether each of a page of records of one object is held by a locking
+     * approval, in one request (`IApprovalService.getRecordLocks`): entry `i`
+     * answers `recordIds[i]` with what {@link getRecordLock} answers for that
+     * id, a record the caller cannot read (or that does not exist) as
+     * `locked: null`. At most `APPROVAL_RECORD_LOCKS_MAX_RECORD_IDS` ids per
+     * call, else 400; a deployment without the read answers 501.
+     */
+    getRecordLocks: async (
+      object: string,
+      recordIds: readonly string[],
+    ): Promise<{ records: Array<{ recordId: string; locked: boolean | null }> }> => {
+      const route = this.getRoute('approvals');
+      const res = await this.fetch(`${this.baseUrl}${route}/records/${encodeURIComponent(object)}/locks`, {
+        method: 'POST',
+        body: JSON.stringify({ recordIds: [...recordIds] }),
+      });
+      return this.unwrapResponse<{ records: Array<{ recordId: string; locked: boolean | null }> }>(res);
     },
 
     /**
@@ -8253,6 +8374,58 @@ export class ObjectStackClient {
             { method: 'POST', body: JSON.stringify(overrides ? { overrides } : {}) },
         );
         return this.unwrapResponse<CloneDataResult<T>>(res);
+    },
+
+    /**
+     * [#35402] Change Owner on ONE record — `POST /data/:object/:id/change-owner`:
+     * hand it to a person (`ownerId`) or move it to an ownership queue
+     * (`queue`), as the caller. Refused `403 CHANGE_OWNER_DISABLED` on an object
+     * that does not offer the action (`userActions.transfer`); a caller without
+     * the transfer grant on the record gets the `/data` write door's own `403`,
+     * and a record out of reach its `404`.
+     */
+    changeOwner: async (object: string, id: string, request: ChangeOwnerRequest): Promise<ChangeOwnerResult> => {
+        const route = this.getRoute('data');
+        const res = await this.fetch(
+            `${this.baseUrl}${route}/${encodeURIComponent(object)}/${encodeURIComponent(id)}/change-owner`,
+            { method: 'POST', body: JSON.stringify(request) },
+        );
+        return this.unwrapResponse<ChangeOwnerResult>(res);
+    },
+
+    /**
+     * [#35402] Change Owner on a list of up to 500 records —
+     * `POST /data/:object/change-owner`: each moves by its own update as the
+     * caller, and the answer lists every row that did not move with its code
+     * and sentence. The whole call is refused before any write on an object
+     * that does not offer the action, a repeated or empty id list, a list past
+     * the cap, and an unknown or banned person.
+     */
+    changeOwnerMany: async (object: string, ids: string[], request: ChangeOwnerRequest): Promise<ChangeOwnerReport> => {
+        const route = this.getRoute('data');
+        const res = await this.fetch(
+            `${this.baseUrl}${route}/${encodeURIComponent(object)}/change-owner`,
+            { method: 'POST', body: JSON.stringify({ ...request, ids }) },
+        );
+        return this.unwrapResponse<ChangeOwnerReport>(res);
+    },
+
+    /**
+     * [#35315 phase 2] The relationships a Change Owner of `object` may cascade
+     * to — `GET /data/:object/change-owner/cascades`: each child reference
+     * field to `object` that declares `transferBehavior: 'cascade'`, on a child
+     * that offers Change Owner itself. Whether the caller may transfer on each
+     * child is the explain engine's `transfer` operation, asked separately; the
+     * write path judges every cascaded row again. Refused `403
+     * CHANGE_OWNER_DISABLED` on an object that does not offer the action.
+     */
+    changeOwnerCascades: async (object: string): Promise<{ object: string; cascades: ChangeOwnerCascadeCandidate[] }> => {
+        const route = this.getRoute('data');
+        const res = await this.fetch(
+            `${this.baseUrl}${route}/${encodeURIComponent(object)}/change-owner/cascades`,
+            { method: 'GET' },
+        );
+        return this.unwrapResponse<{ object: string; cascades: ChangeOwnerCascadeCandidate[] }>(res);
     },
 
     /**

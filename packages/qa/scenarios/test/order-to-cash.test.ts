@@ -70,9 +70,9 @@ const EXPECTED_TRUTHS: Record<string, Truth> = {
   // 59950. The fourth, a08, has 44950: no tie at the cut-off.
   top_accounts_billed: ranking(['a02', 62350], ['a11', 60200], ['a05', 59950]),
   // Payments dated 2026-10-02..31. East: a01 5400, a02 21350, a03 9200,
-  // a07 10800, a08 20200, a09 3800. West: a04 7200, a06 5600, a10 6960,
-  // a11 28300, a12 5440 (Harbor Foods paid nothing).
-  collected_by_team_last_30_days: groups(['east', 70750], ['west', 53500]),
+  // a07 10800, a08 20200, a09 3800. West: a04 7200, a06 5600, a10 11760
+  // (PAY-0044 on 2026-10-02 included), a11 28300, a12 5440 (Harbor Foods paid nothing).
+  collected_by_team_last_30_days: groups(['east', 70750], ['west', 58300]),
   // The 104 confirmed or fulfilled orders. Subscription is p5, the service line
   // when i mod 3 = 1: 40 such orders carry 100 units (1 + i mod 4 cycles
   // 2, 1, 4, 3); the 6 not counted (13, 73, 97, 100, 106, 118) carry 13, so

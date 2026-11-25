@@ -23,7 +23,7 @@
  * the existing DetailView output.
  */
 
-import { deriveFieldGroupLayout } from '@objectstack/spec/data';
+import { deriveFieldGroupLayout, isRecordPageBuiltinTab, readRelatedListsArrangement, relatedListEntryName, type RecordPageBuiltinTab } from '@objectstack/spec/data';
 import { RECORD_HIGHLIGHTS_MAX } from '@objectstack/spec/ui';
 import type { SelectOptionKind, ServiceObject } from '@objectstack/spec/data';
 import { detectStatusField } from '@object-ui/types';
@@ -98,11 +98,31 @@ export interface ObjectDefLike {
    */
   fieldGroups?: Array<Partial<NonNullable<ServiceObject['fieldGroups']>[number]>>;
   /**
-   * Spec `enable` capability toggles. Only `files` is read here:
-   * `enable.files === true` (opt-in, objectstack-ai/objectstack#2727) makes the synthesizer emit an
-   * Attachments tab beside Details/Related (objectstack#4358).
+   * Spec `enable` capability toggles. `enable.files === true` (opt-in,
+   * objectstack-ai/objectstack#2727) makes the synthesizer emit an
+   * Attachments tab beside Details/Related (objectstack#4358). The activity
+   * stream tab follows the stream's three sources (objectstack#36693): it is
+   * left out when `feeds` and `activities` are both `false` (opt-out, spec
+   * default on) and `trackHistory` is not `true` (opt-in), since such a
+   * stream has nothing to draw (`streamHasSource`).
    */
-  enable?: { files?: boolean; [key: string]: any };
+  enable?: { files?: boolean; feeds?: boolean; activities?: boolean; trackHistory?: boolean; [key: string]: any };
+  /**
+   * The spec's `relatedLists` (objectstack#35897): the record page's tabs
+   * beside the overview, in order. Read here for the three built-in tab names
+   * (`RECORD_PAGE_BUILTIN_TABS`) and to place each related tab at its
+   * entry's position; which related lists exist (and their titles and
+   * columns) is the host's `related` option. See {@link buildDefaultTabs}.
+   */
+  relatedLists?: readonly unknown[];
+  /**
+   * The served read's `_relatedListsArrangement` decoration (ADR-0146 D10),
+   * present when the base's paired `.custom` package arranges this object's
+   * tabs. Read only through the spec's `readRelatedListsArrangement`, for
+   * `unlisted` (whether an unlisted attachments tab is still drawn, and
+   * whether an empty `relatedLists` is a declared list with every tab hidden).
+   */
+  _relatedListsArrangement?: unknown;
   // NOTE: the per-surface `detail` hints block was REMOVED from the spec by
   // ADR-0085 — presentation intent is declared via the top-level semantic
   // roles above (stageField / highlightFields / fieldGroups). Per-page
@@ -974,7 +994,7 @@ export function buildDefaultTabs(
     /**
      * The Timeline tab's content (objectstack#27055); `buildDefaultPageSchema`
      * passes the `discussion` slot here. Absent: the default stream, unless
-     * `hideDiscussion`.
+     * `hideDiscussion` or the object's stream has no source (objectstack#36693).
      */
     timeline?: any[];
   } = {},
@@ -1056,7 +1076,7 @@ function synthTabs(
   // (objectstack#34590 kept the stream last). The stream tab's token is
   // `Activity stream`, which the strip reads as `detail.timeline` (「动态」); a
   // bare `Timeline` is an author's word.
-  const timeline = options.timeline ?? (options.hideDiscussion ? [] : [buildDefaultTimeline()]);
+  const timeline = options.timeline ?? (options.hideDiscussion || !streamHasSource(def) ? [] : [buildDefaultTimeline()]);
   for (const rel of sides) {
     items.push({
       label: rel.title ?? rel.objectName,
@@ -1084,7 +1104,87 @@ function synthTabs(
   }
   // objectstack#34590 — the 动态 tab closes the strip.
   if (timeline.length > 0) items.push({ label: 'Activity stream', value: 'timeline', children: timeline });
-  return componentNode('page:tabs', { items });
+  return componentNode('page:tabs', {
+    items: arrangeDeclaredTabs(def?.relatedLists, items, readRelatedListsArrangement(def)?.unlisted),
+  });
+}
+
+/** The tab value each built-in tab name draws (objectstack#35897). */
+const BUILTIN_TAB_VALUES: Readonly<Record<RecordPageBuiltinTab, string>> = {
+  sys_attachment: 'attachments',
+  sys_approval_request: 'approvals',
+  sys_activity: 'timeline',
+};
+
+/**
+ * objectstack#35897 — the object's declared `relatedLists` arranges the tabs
+ * after the overview. Absent or empty: `items` exactly as built (every list,
+ * then attachments, approvals, the stream), unless `unlistedTabs` is
+ * `'hidden'`, which says the empty list is a declared one. Declared:
+ *
+ *  - each tab sits at the first entry naming it: a related tab at the entry
+ *    naming its relationship (`related:<object>.<field>`), a built-in at its
+ *    object name (`sys_attachment`, `sys_approval_request`, `sys_activity`);
+ *  - the attachments tab is drawn only when listed (it still needs
+ *    `enable.files`, decided above);
+ *  - an unlisted approvals tab follows every listed tab, and an unlisted
+ *    stream closes the strip, so leaving either out never hides it;
+ *  - a related tab no entry names (a list another package brings and does
+ *    not place, objectstack#35901, or a host that did not filter it) sits at
+ *    the end of the tabs: after the listed tabs, before a trailing run of
+ *    listed approvals / stream tabs, in the order passed.
+ *
+ * `unlistedTabs` (ADR-0146 D10, `unlisted` of the served read's
+ * `_relatedListsArrangement` decoration; `undefined` for every object
+ * without it). `'shown'`: the list is the base's paired `.custom` package's,
+ * laid over an object that declared none, so every tab the automatic list
+ * showed still shows. The one difference here: an unlisted attachments tab is
+ * drawn too, at the end of the tabs after the unlisted related ones.
+ * `'hidden'`: the list is laid over a declared one, and stays a declared list
+ * when it is EMPTY (the environment hid every tab of it): the tabs follow the
+ * declared rules above with no entry naming any, so an unlisted attachments
+ * tab is not drawn.
+ *
+ * Which related lists exist is the host's: `deriveRelatedLists` drops the
+ * unlisted side lists. A pure, stable reorder of the tabs already built.
+ */
+function arrangeDeclaredTabs(declared: readonly unknown[] | undefined, items: any[], unlistedTabs?: 'shown' | 'hidden'): any[] {
+  const entries = Array.isArray(declared) ? declared : [];
+  if (entries.length === 0 && unlistedTabs !== 'hidden') return items;
+  const unlistedShown = unlistedTabs === 'shown';
+  const [overview, ...tabs] = items;
+  const names = entries.map((entry) => relatedListEntryName(entry));
+  const unlisted = names.length;
+  // objectstack#35901 — the end of the tabs, for a related tab no entry names
+  // (a list another package brings and does not place): before a trailing run
+  // of listed approvals / stream tabs, which close the strip.
+  let tail = names.length;
+  while (tail > 0 && (names[tail - 1] === 'sys_approval_request' || names[tail - 1] === 'sys_activity')) tail -= 1;
+  const unlistedRelated = tail < names.length ? tail - 0.5 : unlisted;
+  const rank = (tab: any): number | null => {
+    const value = typeof tab?.value === 'string' ? tab.value : '';
+    const builtin = (Object.keys(BUILTIN_TAB_VALUES) as RecordPageBuiltinTab[])
+      .find((name) => BUILTIN_TAB_VALUES[name] === value);
+    if (builtin) {
+      const at = names.indexOf(builtin);
+      if (at !== -1) return at;
+      if (builtin === 'sys_attachment') return unlistedShown ? unlistedRelated : null;
+      return builtin === 'sys_activity' ? unlisted + 1 : unlisted;
+    }
+    if (value.startsWith('related:')) {
+      const id = value.slice('related:'.length);
+      const dot = id.indexOf('.');
+      const list = { childObject: id.slice(0, dot), referenceField: id.slice(dot + 1) };
+      const at = names.findIndex((name) => name !== undefined && !isRecordPageBuiltinTab(name) && relatedListEntryNames(name, list));
+      return at === -1 ? unlistedRelated : at;
+    }
+    return unlisted;
+  };
+  const ranked = tabs
+    .map((tab, index) => ({ tab, index, rank: rank(tab) }))
+    .filter((entry): entry is { tab: any; index: number; rank: number } => entry.rank !== null)
+    .sort((a, b) => a.rank - b.rank || a.index - b.index);
+  return [overview, ...ranked.map((entry) => entry.tab)];
 }
 
 /**
@@ -1094,6 +1194,24 @@ function synthTabs(
  */
 export function buildDefaultDiscussion(): any {
   return componentNode('record:discussion');
+}
+
+/**
+ * objectstack#36693 — whether the default record page's activity stream has a
+ * source to draw. The stream merges three, each switched by the object
+ * (`buildDefaultTimeline`): the discussion (`enable.feeds`, opt-out), the
+ * activity (`enable.activities`, opt-out) and the field changes
+ * (`enable.trackHistory`, opt-in; a field's own `trackHistory` /
+ * `fieldHistory` only decide whether a change shows its values). With all
+ * three off the 动态 tab would be empty, so the synthesizer leaves it out, the
+ * way the Attachments tab follows `enable.files`. A `relatedLists` entry
+ * `'sys_activity'` does not bring it back (`arrangeDeclaredTabs` only places
+ * tabs that were built). An authored page, or an authored `discussion` slot,
+ * draws what its author placed.
+ */
+function streamHasSource(def: ObjectDefLike | undefined): boolean {
+  const enable = def?.enable;
+  return enable?.feeds !== false || enable?.activities !== false || enable?.trackHistory === true;
 }
 
 /**
@@ -1191,11 +1309,12 @@ export function buildDefaultPageSchema(
   }
 
   // The timeline stream's content (objectstack#27055): an authored
-  // `discussion` slot replaces it; `hideDiscussion` drops it.
+  // `discussion` slot replaces it; `hideDiscussion` drops it, and so does an
+  // object whose stream has no source (objectstack#36693, `streamHasSource`).
   const timeline =
     'discussion' in slots && slots.discussion !== undefined
       ? toNodeArray(slots.discussion)
-      : options.hideDiscussion
+      : options.hideDiscussion || !streamHasSource(def)
         ? []
         : [buildDefaultTimeline()];
 

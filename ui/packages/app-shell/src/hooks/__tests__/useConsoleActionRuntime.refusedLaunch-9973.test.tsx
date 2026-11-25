@@ -110,7 +110,9 @@ describe('objectui#9973 — list-action flow launch that ends refused', () => {
   it("does NOT toast the action's successMessage, does not refresh, and returns silent success", async () => {
     const { result, refreshSpy } = await launch({ success: true, status: 'refused', refusalMessage: SENTENCE });
 
-    expect(result).toEqual({ success: true, silent: true, handedOff: true });
+    // The refusal also rides on the result (objectstack#36915), for a caller
+    // that counts outcomes; the notice above is still this launch's surface.
+    expect(result).toEqual({ success: true, silent: true, handedOff: true, refusal: { message: SENTENCE } });
     expect((toast as any).success).not.toHaveBeenCalled();
     expect((toast as any).error).not.toHaveBeenCalled();
     expect(refreshSpy).not.toHaveBeenCalled();
@@ -152,10 +154,77 @@ describe('objectui#11092 — a paused list-action launch names the flow by its s
       screen: { nodeId: 'confirm', title: 'Confirm', fields: [] },
     });
 
-    expect(result).toEqual({ success: true, silent: true, handedOff: true });
+    // The pause also rides on the result (objectstack#36931), for a caller
+    // that counts outcomes; the runner below is still this launch's surface.
+    expect(result).toEqual({ success: true, silent: true, handedOff: true, paused: { runId: 'run-1' } });
     const dialog = await screen.findByRole('dialog');
     expect(within(dialog).getByRole('heading', { name: 'Confirm' })).toBeTruthy();
     expect(within(dialog).getByText('Duplicate Screening')).toBeTruthy();
     expect(within(dialog).queryByText('check_dup')).toBeNull();
+  });
+});
+
+// objectstack#36915 — the grid's per-record bulk fan-out dispatches each record
+// with `reportsRefusal` (the runner's `callContext`) and lists every refused
+// record in its own result. The same harness, on that dispatch: no notice
+// opens, and the refusal comes back on the result for the caller to report.
+describe('objectstack#36915 — a dispatch that reports refusals itself opens no notice', () => {
+  /** Dispatch the flow action once per answer, the way the bulk fan-out does. */
+  async function fanOut(answers: Array<Record<string, unknown>>, callContext?: Record<string, unknown>) {
+    for (const data of answers) {
+      authFetchSpy.mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ success: true, data }) });
+    }
+    const results: any[] = [];
+    let done = false;
+    function Probe() {
+      const { runner } = useAction();
+      const run = async () => {
+        for (let i = 0; i < answers.length; i += 1) {
+          results.push(await runner.execute({ ...ACTION, toast: { showOnSuccess: false, showOnError: false } } as any, callContext as any));
+        }
+        done = true;
+      };
+      return <button onClick={() => { void run(); }}>run-fan-out</button>;
+    }
+    render(
+      <ConsoleActionRuntimeProvider dataSource={{}} objects={[]} objectName="lead" onRefresh={vi.fn()}>
+        <Probe />
+      </ConsoleActionRuntimeProvider>,
+    );
+    fireEvent.click(screen.getByText('run-fan-out'));
+    await waitFor(() => expect(done).toBe(true));
+    return results;
+  }
+
+  const REFUSED_A = 'Ann has opted out of email, so the lead was not added to the campaign.';
+  const REFUSED_B = 'Bob has opted out of email, so the lead was not added to the campaign.';
+
+  it("the card's repro: two refused records and one completed open no notice, and each refusal comes back with its own sentence", async () => {
+    const results = await fanOut([
+      { success: true, status: 'refused', refusalMessage: REFUSED_A },
+      { success: true, status: 'completed' },
+      { success: true, status: 'refused', refusalMessage: REFUSED_B },
+    ], { reportsRefusal: true });
+
+    expect(results.map((r) => r.refusal?.message)).toEqual([REFUSED_A, undefined, REFUSED_B]);
+    expect(results[1].refusal).toBeUndefined();
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(document.body.textContent).not.toContain(REFUSED_A);
+    expect(document.body.textContent).not.toContain(REFUSED_B);
+  });
+
+  it('one refused record opens no notice either', async () => {
+    const [result] = await fanOut([{ success: true, status: 'refused', refusalMessage: REFUSED_A }], { reportsRefusal: true });
+
+    expect(result).toEqual({ success: true, silent: true, handedOff: true, refusal: { message: REFUSED_A } });
+    expect(screen.queryByRole('dialog')).toBeNull();
+  });
+
+  it('control: the same dispatch without the flag (the row menu) still opens the notice', async () => {
+    const [result] = await fanOut([{ success: true, status: 'refused', refusalMessage: REFUSED_A }]);
+
+    expect(result.refusal).toEqual({ message: REFUSED_A });
+    const dialog = await screen.findByRole('dialog');
+    expect(within(dialog).getByRole('alert').textContent).toContain(REFUSED_A);
   });
 });

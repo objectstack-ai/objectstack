@@ -141,6 +141,13 @@ const FAMILY: Record<string, string[]> = {
   // `sys_comment` below the data door and writes nothing.
   'migrate comment-reactions': [],
   'migrate files-to-references': [],
+  // A dry run is its DEFAULT and the only form driven here: without `--apply`
+  // it boots read-only (`deferSchemaDdl` + `readOnlyProbe`, the identity
+  // objects registered for their declaration only) and deletes nothing. No
+  // `sys_user_preference` table exists in the fixture, so the face driven here
+  // is its empty report, emitted compact BEFORE the `finally` shutdown, so the
+  // shutdown's diagnostics follow the document and must stay off stdout.
+  'migrate list-preferences': [],
   'migrate meta': ['--stored'],
   'migrate multi-value-columns': [],
   // Its bare form — a read-only plan (`deferSchemaDdl` + `readOnlyProbe`) —

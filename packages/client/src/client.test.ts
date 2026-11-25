@@ -766,6 +766,18 @@ describe('Approvals namespace (ADR-0019)', () => {
         expect(opts?.method ?? 'GET').toBe('GET');
     });
 
+    it('reads the approval locks of a page of records in one POST, object segment encoded', async () => {
+        const records = [{ recordId: 'rec_1', locked: true }, { recordId: 'rec_2', locked: null }];
+        const { client, fetchMock } = createMockClient({ success: true, data: { records } });
+        const result = await client.approvals.getRecordLocks('sales order', ['rec_1', 'rec_2']);
+        expect(result).toEqual({ records });
+        expect(fetchMock).toHaveBeenCalledTimes(1);
+        const [url, opts] = fetchMock.mock.calls[0];
+        expect(String(url)).toBe('http://localhost:3000/api/v1/approvals/records/sales%20order/locks');
+        expect(opts.method).toBe('POST');
+        expect(JSON.parse(opts.body)).toEqual({ recordIds: ['rec_1', 'rec_2'] });
+    });
+
     it('should record an approve decision', async () => {
         const { client, fetchMock } = createMockClient({
             request: { id: 'req-1', status: 'approved' }, finalized: true, decision: 'approve', resumed: true

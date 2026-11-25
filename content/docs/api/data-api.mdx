@@ -455,6 +455,163 @@ single create.
 
 ---
 
+### `POST /data/:object/:id/change-owner`
+
+Hand one record to another person, or move it into an ownership queue
+(ADR-0142). The record is written by id, as the caller, through the ordinary
+write path: the caller needs edit on the record **and** the transfer grant
+(`allowTransfer` on the object, or `modifyAllRecords`). Without the grant the
+record keeps its owner and the answer is the data door's own
+`403 PERMISSION_DENIED`, exactly as a `PATCH` of `owner_id` would answer.
+A record whose `owner_id` or `queue` is locked (read-only, or under a
+`readonlyWhen` condition that holds for the record) is refused
+`403 FIELD_NOT_ACCESSIBLE`, naming the locked column, and nothing is written;
+a queue move writes both columns, so a lock on either leaves both as they were.
+
+Offered only on an object the platform gives a reassignable owner and whose
+`userActions.transfer` switch is on. The switch defaults to on, and to off on a
+`controlled_by_parent` detail. Any other object is refused as a whole with
+`403 CHANGE_OWNER_DISABLED`, whoever asks, a `modifyAllRecords` holder
+included. The same switch decides whether a banned user's hand-over
+(`/api/v1/security/users/USER_ID/assigned-work`) moves the object's owners.
+It gates these two actions only: a plain `owner_id` update (an import, a hook,
+a `PATCH`) still needs the transfer grant and nothing else.
+
+An object whose owning package is disabled is refused first, before its switch
+is read, with the data door's own `404 OBJECT_PACKAGE_DISABLED`: nothing is
+written and nobody is notified. Re-enable the package to change owners again.
+
+**Body**: exactly one target, and an optional notification.
+
+```json
+{ "ownerId": "usr_123", "notify": true }
+```
+
+```json
+{ "queue": "support_triage" }
+```
+
+- `ownerId`: the new owner. A user the caller cannot read, or one that does
+  not exist, is refused `404 RESOURCE_NOT_FOUND`; a banned user `400
+  VALIDATION_ERROR`. Both name `ownerId` in `details.fields`.
+- `queue`: an ownership queue's name. The record is written with no owner and
+  that queue; an object without a `queue` column refuses it `400`.
+- `notify` (default `false`): send the new owner one notification under the
+  `record.owner_changed` topic, in their own language. Not allowed with
+  `queue`. A notification that cannot be sent never fails the transfer.
+  `notified` is `true` only when the notification was delivered or taken by
+  the outbox; a muted topic or an unavailable channel answers `false`.
+
+**Response** `200`:
+
+```json
+{ "success": true, "data": { "object": "lead", "id": "lead_1", "ownerId": "usr_123", "notified": true } }
+```
+
+A queue move answers `"ownerId": null, "queue": "support_triage"`.
+
+### `POST /data/:object/change-owner`
+
+The same for a list of records: one by-id update per record, each under the
+same rules as the single route. Takes up to **500** ids; an empty list, a list
+over 500 and a list naming an id twice are refused `400` before anything is
+written. An object of a disabled package is refused as a whole,
+`404 OBJECT_PACKAGE_DISABLED`, and an object that does not offer Change Owner
+`403 CHANGE_OWNER_DISABLED`, both before any record is read, written or
+notified.
+
+**Body**: `{ "ids": ["lead_1", "lead_2"], "ownerId": "usr_123", "notify": true }`
+(or `queue` in place of `ownerId`).
+
+**Response** `200`, with a report: every record that did not move is listed
+with the code and sentence its own update was refused with (a locked owner or
+queue as `FIELD_NOT_ACCESSIBLE`). None is skipped.
+
+```json
+{
+  "success": true,
+  "data": {
+    "object": "lead",
+    "field": "owner_id",
+    "ownerId": "usr_123",
+    "updated": 1,
+    "failed": 1,
+    "failures": [
+      { "id": "lead_2", "code": "PERMISSION_DENIED", "message": "…" }
+    ],
+    "notified": true
+  }
+}
+```
+
+With `notify`, the new owner gets one notification for all the records that
+moved, and none when nothing moved.
+
+### Cascade to related records
+
+A relationship opts in on the child's reference field, beside
+`deleteBehavior`:
+
+```ts
+// on opportunity
+account: { type: 'lookup', reference: 'account', transferBehavior: 'cascade' }
+```
+
+Both routes above then take an optional `cascade` list naming the
+relationships to move along, and only with an `ownerId` target:
+
+```json
+{ "ownerId": "usr_123", "cascade": [{ "object": "opportunity", "field": "account" }] }
+```
+
+For each record that moved, the child records that point at it **and are
+owned by its previous owner** move to the new owner too; no other child record
+moves. Each is updated by id as the caller, so each needs the caller's own
+transfer grant on the child object. A relationship that is not one of the
+object's cascade candidates (see the route below) is refused `400
+VALIDATION_ERROR` before anything is written. `'cascade'` on a multi-value
+reference (`multiple: true`) is refused when the metadata is saved: a record
+there points at several parents, so no single Change Owner decides its owner.
+
+The answer gains one outcome per named relationship:
+
+- a child record the caller's write refuses is listed in `failures` with its
+  id, code and sentence, and counted in `failed` — a child whose `owner_id` is
+  locked on it (read-only, or under a `readonlyWhen` condition that holds) as
+  `FIELD_NOT_ACCESSIBLE`, keeping its owner; the parent's own move stands;
+- one call moves at most **500** child records; the records past that limit
+  are not listed but counted in `remaining`, still with the previous owner;
+- when a relationship's child records could not be read at all, the outcome
+  carries `readFailure` (`code` and `message`) and none of those records moved.
+
+```json
+"cascade": [
+  { "object": "opportunity", "field": "account", "updated": 3, "failed": 1, "remaining": 0,
+    "failures": [{ "id": "opp_9", "code": "PERMISSION_DENIED", "message": "…" }] }
+]
+```
+
+### `GET /data/:object/change-owner/cascades`
+
+The relationships a Change Owner of `object` may cascade along: each child
+reference field to it that declares `transferBehavior: 'cascade'`, on a child
+that offers Change Owner itself. Two more filters apply: a child whose declared
+API exposure does not serve `update` is left out, and so is a child that belongs
+to a disabled package. Whether the caller may transfer on each child
+is the explain engine's `transfer` operation (`POST /security/explain`), which
+the Console's dialog asks before it offers a tick. Takes no query parameter.
+An object of a disabled package is refused `404 OBJECT_PACKAGE_DISABLED`, as by
+the two write doors above, and an object that does not offer Change Owner is
+refused `403 CHANGE_OWNER_DISABLED`.
+
+```json
+{ "success": true, "data": { "object": "account", "cascades": [
+  { "object": "opportunity", "field": "account", "label": "Opportunity", "fieldLabel": "Account" }
+] } }
+```
+
+---
+
 ## Analytics
 
 Semantic BI queries using a cube-style API. Provided by `@objectstack/service-analytics` —

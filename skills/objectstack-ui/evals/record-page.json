@@ -3,33 +3,37 @@
   "evals": [
     {
       "id": 1,
-      "prompt": "On the lead record page, put the tasks first: our reps want the open tasks table before anything else when they open a lead. The `task` object already has a `lead` master_detail field.",
-      "expected_output": "No page file and no placement flag: `task.lead` is a `master_detail` with no `relatedList`, so it is already a full-width body table, drawn after the lead's open field sections. `relatedListFilter: { status: { $ne: 'done' } }` on `task.lead` keeps it to open tasks, and the lead's `relatedLists: ['task', ...]` puts it first among the tables, directly under those field sections. Not `inlineEdit` (form entry, not the page), not a `definePage` with `kind: 'full'`, and never a `slots.tabs`.",
+      "prompt": "On the lead record page, put the Tasks tab first: our reps want the open tasks before anything else when they open a lead. The `task` object already has a `lead` master_detail field, `event` has a `lead` lookup, and leads keep their attachments.",
+      "expected_output": "No page file. The lead's `relatedLists` is its record page's tab list, so it names every tab the page keeps, Tasks first: `relatedLists: ['task', 'event', 'sys_attachment', 'sys_approval_request', 'sys_activity']`. Once declared, only the named lists show: listing the task alone would take the Events and Attachments tabs away. `relatedListFilter: { status: { $ne: 'done' } }` on `task.lead` keeps the tab to open tasks. Not a field group naming the task list (that moves the table into the Details, which was not asked), not `inlineEdit`, not a `kind: 'full'` page, and no tabs slot.",
       "files": [],
       "assertions": {
         "must_contain": [
-          "relatedListFilter",
-          "relatedLists"
+          "relatedLists",
+          "'sys_attachment'",
+          "relatedListFilter"
         ],
         "must_not_contain": [
+          "relatedLists: ['task'],",
+          "relatedLists: ['task'] }",
+          "relatedList: 'task'",
           "inlineEdit:",
           "definePage(",
-          "slots: { tabs",
-          "kind: 'full',"
+          "slots: { tabs"
         ]
       }
     },
     {
       "id": 2,
       "prompt": "Contracts should open as a full page, not the side drawer. Reps also keep asking for records to open beside the list — add that to the contract object too.",
-      "expected_output": "One declaration: `navigation: { mode: 'page' }` on the contract list view. A pane beside the list is no longer offered: the split pane is retired. How a record opens is each reader's own choice in the list's Display menu (Open records: drawer, the default, or full page), kept in the browser and offered for drawer-mode objects only, so nothing is authored for it; `split`, `modal` and `popover` were removed in @objectstack/spec 18.3.0 and are refused.",
+      "expected_output": "Nothing to author. On an object's list the record's name opens the full page and the hover icon beside it opens the drawer over the list, for every reader. `navigation.mode` is deprecated there: `page` and `drawer` still parse and change nothing, so the contract list view declares neither. A pane beside the list is not offered: `split`, `modal` and `popover` were removed in @objectstack/spec 18.3.0 and are refused.",
       "files": [],
       "assertions": {
         "must_contain": [
-          "navigation: { mode: 'page' }",
-          "Display menu"
+          "icon"
         ],
         "must_not_contain": [
+          "mode: 'page' },",
+          "mode: 'page',",
           "mode: 'split'",
           "mode: 'modal'",
           "mode: 'popover'",
@@ -50,6 +54,63 @@
         "must_not_contain": [
           "slots: { tabs",
           "actions: ['"
+        ]
+      }
+    },
+    {
+      "id": 4,
+      "prompt": "Nobody attaches files to opportunities. Remove the Attachments tab from the opportunity record page, and keep every other tab as it is. Today the page shows Quotes (`quote.opportunity`), Contact roles (`opportunity_contact_role.opportunity`), Attachments, Approvals and Activity.",
+      "expected_output": "Declare the tab list on `opportunity` and leave the attachments built-in out: `relatedLists: ['quote', 'opportunity_contact_role', 'sys_approval_request', 'sys_activity']`. A declared list shows only the lists it names, and the attachments tab shows only when named, so it goes and the rest stay in their order. The files capability (`enable.files`) can stay. No page file, and not `relatedList: false` on a child's reference field (that hides a related list, not the attachments tab).",
+      "files": [],
+      "assertions": {
+        "must_contain": [
+          "relatedLists",
+          "'quote'",
+          "'sys_activity'"
+        ],
+        "must_not_contain": [
+          "'sys_attachment',",
+          "'sys_attachment']",
+          "definePage(",
+          "kind: 'full'"
+        ]
+      }
+    },
+    {
+      "id": 5,
+      "prompt": "Add a Tax ID field to the account, and show it right after Industry on the record page. The account declares `fieldGroups: [{ key: 'basic', label: 'Basic', fields: ['name', 'industry', 'website'] }]`.",
+      "expected_output": "A `tax_id` text field on `account`, and the `basic` group's own list names it after Industry: `fields: ['name', 'industry', 'tax_id', 'website']`. The group's `fields` decides the order inside the section, so the field's position among the object's `fields` does not matter, and the field carries no `group` key of its own (one naming another group than the list that names it is refused). No page file and no form sections.",
+      "files": [],
+      "assertions": {
+        "must_contain": [
+          "tax_id",
+          "'industry', 'tax_id'"
+        ],
+        "must_not_contain": [
+          "group: 'basic',",
+          "group: 'basic' }",
+          "definePage(",
+          "sections:"
+        ]
+      }
+    },
+    {
+      "id": 6,
+      "prompt": "On the quote record page, show the line items table above the Amount section instead of as a tab. The quote declares `fieldGroups: [{ key: 'basic', label: 'Basic', fields: ['name', 'account'] }, { key: 'amount', label: 'Amount', fields: ['subtotal', 'total'] }]` and no `relatedLists`; `quote_line` has a `quote` master_detail field, and the page's tabs today are Line items, Tasks (`task.quote`), Attachments, Approvals and Activity.",
+      "expected_output": "Two declarations on `quote`. A field group that names the child list, placed between the two sections: `fieldGroups: [{ key: 'basic', ... }, { key: 'lines', label: 'Line items', relatedList: 'quote_line' }, { key: 'amount', ... }]`; such a group carries no `fields`, and the line table is then drawn at that position in the Details, with the quote's create and edit forms inlining the lines. And a tab list that leaves the lines out, because a group-placed table keeps its tab while the parent declares no `relatedLists`: `relatedLists: ['task', 'sys_attachment', 'sys_approval_request', 'sys_activity']`. The master_detail field needs no `relatedList` value. No page file and no full page.",
+      "files": [],
+      "assertions": {
+        "must_contain": [
+          "relatedList: 'quote_line'",
+          "fieldGroups",
+          "relatedLists: ['task'"
+        ],
+        "must_not_contain": [
+          "relatedList: 'primary',",
+          "relatedList: 'primary' }",
+          "definePage(",
+          "kind: 'full'",
+          "relatedLists: ['quote_line'"
         ]
       }
     }

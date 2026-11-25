@@ -168,7 +168,7 @@ const renderObjectForm = async (extra: Record<string, unknown>) => {
   await waitFor(() => expect(screen.getAllByText('Always').length).toBeGreaterThan(0));
 };
 
-/** Mount `DrawerForm` directly — the shape `resolveFormViewLayout` produces. */
+/** Mount `DrawerForm` directly — the shape a host that skips `ObjectForm` mounts. */
 const renderDrawerFormDirect = async () => {
   render(
     <DrawerForm

@@ -17,16 +17,19 @@ import { ComponentRegistry, percentDisplayValue, type PercentScale, getRecordDis
 import { valueSchemaFor, resolveFieldScale } from '@objectstack/spec/data';
 import type { ReferenceNameOnlyValue } from '@objectstack/spec/data';
 import { useLocalization, useDisplayLocale, formatDisplayNumber, readHomeAmountSource } from '@object-ui/i18n';
-import { Badge, Avatar, AvatarImage, AvatarFallback, Button, Checkbox, EmptyValue, cn, setFieldReadFaceResolver } from '@object-ui/components';
+import { Badge, Avatar, AvatarImage, AvatarFallback, Button, Checkbox, EmptyValue, ObjectIconTile, cn, setFieldReadFaceResolver } from '@object-ui/components';
 import { Check, Copy, Phone as PhoneIcon, MapPin, CircleQuestionMark, Lock, Star } from 'lucide-react';
 import { useObjectTranslation, classifyLoadError } from '@object-ui/react';
 import { SchemaRendererContext as _SchemaRendererContext } from '@object-ui/react';
 import { useRelatedRecordActions } from '@object-ui/react';
 import { usePermissions } from '@object-ui/permissions';
 import { withFieldCarrier } from './withFieldCarrier.js';
+import { recoverableLazy } from './recoverableLazy.js';
 // Pure formatting rule shared with `AddressField`'s readonly branch — no React,
 // so this does not pull the widget out of its lazy chunk (objectui#4037).
 import { formatAddress, type AddressValue } from './widgets/address-format.js';
+import { referenceRecordCache, referenceRecordKey, heldReferenceRecord } from './widgets/referenceRecordCache.js';
+import { getPersonInitials } from './widgets/personDisplay.js';
 import { deriveHexBadgePalette } from './hexBadgePalette.js';
 // The same arrangement for numbers: one formatting call shared with
 // `NumberField`'s read-only branch (objectui#11431), and likewise for currency
@@ -34,21 +37,15 @@ import { deriveHexBadgePalette } from './hexBadgePalette.js';
 import { formatNumberFieldValue, formatCurrency, formatPercentPoints, percentCellScale } from './widgets/number-format.js';
 import { useFieldTranslation } from './widgets/useFieldTranslation.js';
 import { useBooleanValueLabel } from './widgets/booleanValueLabel.js';
+import { GridField } from './widgets/GridField.js';
 import { RecordHoverCard, type RecordHoverCardObjectDef } from './RecordHoverCard.js';
 
 // Module-level cache so multiple renderers fetching the same lookup ID
-// only trigger one network call. Keyed by `${objectName}:${id}`. It holds the
-// fetched RECORD and the referenced object's schema, not a resolved name: the
-// name is a display value, resolved per render from the row the viewer may
-// read (objectui#10501), so it follows the permission policy of the render
-// that shows it rather than the one in force when the record arrived.
-type LookupCacheEntry =
-  | { state: 'pending'; promise: Promise<void> }
-  | { state: 'ok'; record: Record<string, unknown> | null | undefined; schema: unknown }
-  // The reader's own read was REFUSED (objectstack#29641): settled, not failed.
-  | { state: 'refused' }
-  | { state: 'err' };
-const lookupNameCache: Map<string, LookupCacheEntry> = new Map();
+// only trigger one network call. It holds the fetched RECORD and the
+// referenced object's schema, not a resolved name (objectui#10501); a pick
+// fills it too (objectstack#36046). Its own module, which `LookupField`
+// shares: `./widgets/referenceRecordCache.ts`.
+const lookupNameCache = referenceRecordCache;
 
 /**
  * Pick the most reasonable display name from an arbitrary record object.
@@ -294,7 +291,7 @@ function useLookupName(
   // `displayField`s could share one; the key is left as it was so that this
   // change does not alter how many reads a screen makes.
   const cacheKey = isResolvable
-    ? `${referenceTo}:${String(value)}:${displayField ?? ''}`
+    ? referenceRecordKey(referenceTo!, value as string | number, displayField)
     : '';
 
   React.useEffect(() => {
@@ -445,7 +442,14 @@ export interface CellRendererProps {
   alwaysShowYear?: boolean;
   /**
    * The cell is one of a grid COLUMN's cells, read against the cells above
-   * and below it (objectstack#25884). Read by the `date` cell only.
+   * and below it (objectstack#25884). Read by the `date` cell and the
+   * `markdown` cell.
+   *
+   * The `markdown` cell then draws its value in the cell face
+   * (objectstack#36344): a heading is a bold line at the cell's own text size
+   * instead of a heading element, so a value that starts with `# Heading`
+   * keeps the row's height. The record page does not pass it and keeps the
+   * heading sizes.
    *
    * A `date` field that declares no `format` then paints `formatDate`'s
    * absolute default face instead of `'relative'`, and the relative phrase
@@ -590,6 +594,10 @@ function isPlainObjectValue(value: unknown): value is Record<string, unknown> {
 
 import { resolveFieldCurrency, summaryDeclaresCurrency } from './currency.js';
 export { withFollowedParentObject, FOLLOWED_PARENT_OBJECT_KEY } from './currency.js';
+import { resolveFormulaValueType } from './formulaValueType.js';
+// The face a `formula` / `summary` cell draws its result as, for a surface
+// that decides something before the cell draws (objectstack#37008).
+export { resolveFormulaValueType };
 import { HomeAmountHint } from './widgets/CurrencyField.js';
 // `summaryDeclaresCurrency` is the cell's own test for drawing a roll-up as
 // money; the grid footer formats the same field's total by it.
@@ -2475,6 +2483,19 @@ function referencedRecordId(item: unknown): string | number | undefined {
  * link address" behave the way a link is supposed to; a plain left click is
  * handed to the host so navigation stays in-app.
  */
+/**
+ * Whether a referenced record is drawn as a chip (objectstack#36147): the
+ * referenced object's colour tile (`ObjectSchema.color` and `icon`,
+ * objectstack#35985) then the record's name, on a muted pill, the name
+ * wrapping instead of truncating. A record page's field area provides it;
+ * everywhere else a reference keeps its link face. A chip with no host route
+ * is the same pill, not a link.
+ */
+export const ReferenceChipContext = React.createContext(false);
+
+const REFERENCE_CHIP_CLASS =
+  'inline-flex max-w-full items-start gap-1.5 rounded-md bg-muted px-1.5 py-0.5 align-top text-foreground';
+
 function ReferencedRecordLink({
   objectName,
   recordId,
@@ -2493,13 +2514,34 @@ function ReferencedRecordLink({
   children: React.ReactNode;
 }): React.ReactElement {
   const host = useRelatedRecordActions();
+  const chip = React.useContext(ReferenceChipContext);
   const navigable = !!objectName && recordId != null && recordId !== '';
   const href =
     navigable && host?.recordHref
       ? host.recordHref(objectName as string, recordId as string | number)
       : null;
 
-  if (!href) return <>{children}</>;
+  const face = chip ? (
+    <>
+      <ObjectIconTile
+        icon={typeof objectSchema?.icon === 'string' ? objectSchema.icon : undefined}
+        color={typeof objectSchema?.color === 'string' ? objectSchema.color : undefined}
+        size="xs"
+        className="mt-0.5"
+      />
+      <span className="min-w-0 break-words">{label || children}</span>
+    </>
+  ) : children;
+
+  if (!href) {
+    return chip ? (
+      <span className={REFERENCE_CHIP_CLASS} data-record-chip="">
+        {face}
+      </span>
+    ) : (
+      <>{children}</>
+    );
+  }
 
   // Hovering the link (or Space on it) shows the referenced record's card
   // (objectstack#27604): the same reference, a glance instead of a visit.
@@ -2507,12 +2549,20 @@ function ReferencedRecordLink({
     <RecordHoverCard objectName={objectName} recordId={recordId} objectSchema={objectSchema} label={label}>
       <a
         href={href}
-        className={cn('text-primary underline-offset-4 hover:underline', className)}
+        className={cn(
+          chip ? cn(REFERENCE_CHIP_CLASS, 'transition-colors hover:bg-accent') : 'text-primary underline-offset-4 hover:underline',
+          className,
+        )}
+        data-record-chip={chip ? '' : undefined}
         // A host's list grid draws a referenced record as a small chip led by
         // the name's first letter (objectstack#35548); these say which link
-        // is one and what its letter is. Nothing else reads them.
+        // is one and what its letter is.
         data-record-link=""
         data-initial={recordLinkInitial(label)}
+        // The record the chip names: a select-first grid opens it in place on
+        // a single click when its host asks to (objectstack#36015).
+        data-record-object={objectName}
+        data-record-id={String(recordId)}
         onClick={(e) => {
           // The rows this cell sits in carry their own click handlers — the
           // detail row copies the field value, a related-list row opens ITS own
@@ -2527,7 +2577,7 @@ function ReferencedRecordLink({
           host.openRecord(objectName as string, recordId as string | number);
         }}
       >
-        {children}
+        {face}
       </a>
     </RecordHoverCard>
   );
@@ -2916,17 +2966,18 @@ export function FormulaCellRenderer({ value, field, dependentValues }: CellRende
   // own field form says of `returnType` that consumers read it "instead of
   // re-parsing the expression", so a formula over two currency fields that
   // declares `number` (or nothing) renders as a number here, not as money.
-  const returnType = field && 'returnType' in field ? field.returnType : undefined;
+  //
   // A roll-up that declares its currency is money (ADR-0144 D6 as amended):
   // the currency cell draws it, with the parent row as its record, so a
   // `record` roll-up reads the parent's code as its children's amounts do, and
   // a `dynamic` one (a roll-up of a child `currency` field in `dynamic` mode,
   // a stored home amount included) reads the tenant default, as that child
   // field's own cells do.
-  const declaresMoney = (field as { type?: unknown } | undefined)?.type === 'summary' && summaryDeclaresCurrency(field);
-  const valueType = declaresMoney && typeof value === 'number'
-    ? 'currency'
-    : returnType ?? (typeof value === 'number' ? 'number' : 'text');
+  //
+  // The rule is `resolveFormulaValueType`, exported, so a surface that must
+  // know the face before this cell draws (a gallery card's label) asks the
+  // same function and cannot disagree with it (objectstack#37008).
+  const valueType = resolveFormulaValueType(field, value);
   if (valueType === 'number') {
     return <NumberCellRenderer value={value} field={field} />;
   }
@@ -3282,7 +3333,7 @@ export function UnresolvedReferenceMark({
  */
 const CELL_AVATAR_CLASS = 'size-6 -my-0.5';
 
-export function UserCellRenderer({ value }: CellRendererProps): React.ReactElement {
+export function UserCellRenderer({ value: stored }: CellRendererProps): React.ReactElement {
   // Called before any early return (rules of hooks). A policy that loads or
   // changes re-renders this cell through the context, and the drawing follows.
   const perms = usePermissions();
@@ -3293,7 +3344,15 @@ export function UserCellRenderer({ value }: CellRendererProps): React.ReactEleme
   // avatar-stack branch below and rendered an empty stack (objectui#8481) —
   // and the floor alone would let `0` through to `UnresolvedUserReference`,
   // which is not what a user reference of zero is.
-  if (isEmptyValue(value) || !value) return <EmptyValue />;
+  if (isEmptyValue(stored) || !stored) return <EmptyValue />;
+
+  // objectstack#36046 — a stored id this page already holds the person for
+  // (a pick in this cell, which stores the id and keeps the record it picked)
+  // is drawn as that person, as an expanded value is: never the raw id until
+  // the list is read again. An id nothing here holds stays unresolved, below.
+  const value: CellRendererProps['value'] = Array.isArray(stored)
+    ? stored.map((entry: unknown) => heldReferenceRecord(personObject, entry) ?? entry)
+    : heldReferenceRecord(personObject, stored) ?? stored;
 
   // A primitive is an UNRESOLVED reference, not "the ID/username" (objectui#8434).
   // The comment that stood here stated the branch's premise, and the premise was
@@ -3338,7 +3397,7 @@ export function UserCellRenderer({ value }: CellRendererProps): React.ReactEleme
             );
           }
           const name = user.name || user.username || 'User';
-          const initials = name.split(' ').map((n: string) => n[0]).join('').toUpperCase().slice(0, 2);
+          const initials = getPersonInitials(String(name));
           
           return (
             <Avatar
@@ -3390,7 +3449,8 @@ export function UserCellRenderer({ value }: CellRendererProps): React.ReactEleme
   }
 
   const name = user.name || user.username || 'User';
-  const initials = name.split(' ').map((n: string) => n[0]).join('').toUpperCase().slice(0, 2);
+  // objectstack#36046 — the initials every person chip draws: letters only.
+  const initials = getPersonInitials(String(name));
   
   return (
     <div className="flex items-center gap-2">
@@ -4778,7 +4838,11 @@ const fieldWidgetMap = {
   // Complex data types
   'object': () => import('./widgets/ObjectField.js').then(m => ({ default: m.ObjectField })),
   'vector': () => import('./widgets/VectorField.js').then(m => ({ default: m.VectorField })),
-  'grid': () => import('./widgets/GridField.js').then(m => ({ default: m.GridField })),
+  // The grid's public face, already in this chunk, not its body: the face loads
+  // the body through its one loader (objectstack#36102) and asks again after a
+  // failed load, where a lazy wrapper around the body here would add a second
+  // loader beside the face's own (objectstack#36451).
+  'grid': () => Promise.resolve({ default: GridField }),
   
   // Additional field types from @objectstack/spec
   'color': () => import('./widgets/ColorField.js').then(m => ({ default: m.ColorField })),
@@ -4911,22 +4975,24 @@ export { fieldHelpText } from './fieldHelpText.js';
 // page's compact related rows).
 export { RecordHoverCard, type RecordHoverCardProps, type RecordHoverCardObjectDef } from './RecordHoverCard.js';
 
-/** Cache so each widget type creates one lazy component (and one chunk request). */
+/** Cache so each widget type creates one lazy component (and one chunk request at a time). */
 const lazyFieldWidgets = new Map<string, React.ComponentType<any>>();
 
 /**
  * Lazily-loaded form field widget for a field type. Shares the exact loaders
  * of {@link fieldWidgetMap} (the same components `registerField` registers for
- * forms), wrapped in `React.lazy` and cached per type — so a consumer can
+ * forms), wrapped in `recoverableLazy` and cached per type — so a consumer can
  * render any form-supported field type without eagerly bundling every widget.
  * Render inside a `<Suspense>` boundary. Unknown types resolve to the `text`
- * widget via {@link resolveFormWidgetType}.
+ * widget via {@link resolveFormWidgetType}. A failed chunk load reaches the
+ * nearest error boundary and is not kept: the next mount loads again
+ * (objectstack#36608).
  */
 export function getLazyFieldWidget(fieldType: string): React.ComponentType<any> {
   const key = resolveFormWidgetType(fieldType);
   // A retired key has no loader in `fieldWidgetMap` by construction, so it is
   // answered with the tombstone before the lazy path (which would otherwise
-  // call `React.lazy(undefined)`). The tombstone is BOUND to `key`: a host
+  // call the lazy wrapper with no loader). The tombstone is BOUND to `key`: a host
   // that resolved the key from an authored `widget` hands over a `field` whose
   // `type` is a live type, and the refusal must name what was resolved
   // (objectui#10471) — see {@link retiredFieldTombstoneFor}.
@@ -4934,7 +5000,7 @@ export function getLazyFieldWidget(fieldType: string): React.ComponentType<any> 
   let Widget = lazyFieldWidgets.get(key);
   if (!Widget) {
     // `resolveFormWidgetType` only returns keys the map holds, hence the `!`.
-    Widget = React.lazy(fieldWidgetLoaderByKey[key]!);
+    Widget = recoverableLazy(fieldWidgetLoaderByKey[key]!);
     lazyFieldWidgets.set(key, Widget);
   }
   return Widget;
@@ -4994,7 +5060,7 @@ const FIELD_TYPES_SKIP_FALLBACK = new Set([
   // `kind:'html'` page drew a code editor and dropped its text.
   'code',
   // No other package owns the bare `time`/`address` key, but `registerField`
-  // wraps each call in a fresh `React.lazy(...)`, so re-registration (HMR,
+  // wraps each call in a fresh lazy component, so re-registration (HMR,
   // re-import) fails the registry's identity check every time and logs the
   // same "bare-name fallback overwritten" warning at every boot regardless.
   'time',
@@ -5171,8 +5237,9 @@ export function registerField(fieldType: string): void {
     return;
   }
   
-  // Create lazy component
-  const LazyFieldWidget = React.lazy(loader);
+  // Create lazy component. A failed chunk load is not kept: the next mount
+  // loads again (objectstack#36608).
+  const LazyFieldWidget = recoverableLazy(loader);
 
   // Register with field namespace. No LAYOUT wrapper — the form renderer owns
   // label/description/spacing. The only thing wrapped is the metadata carrier:
@@ -5381,6 +5448,7 @@ export * from './FieldEditWidget.js';
 export {
   collectRequiredWhenPromptFields,
   requiredWhenPromptReads,
+  requiredWhenPromptAsksOn,
   type RequiredWhenPromptField,
   type RequiredWhenPromptOptions,
 } from './requiredWhenPrompt.js';
@@ -5449,6 +5517,12 @@ export * from './widgets/FileField.js';
 export * from './widgets/ImageField.js';
 export { ImageCropperDialog } from './widgets/ImageCropperDialog.js';
 export type { ImageCropperDialogProps } from './widgets/ImageCropperDialog.js';
+// The in-page file preview a record's attachments and a file field open
+// (objectstack#36442), and the delimited-text reader its CSV view shares with
+// the grid's import wizard.
+export { FilePreviewDialog } from './widgets/FilePreviewDialog.js';
+export type { FilePreviewDialogProps, FilePreviewItem } from './widgets/FilePreviewDialog.js';
+export { decodeSpreadsheetText, parseDelimited } from './widgets/delimitedText.js';
 export * from './widgets/LocationField.js';
 export * from './widgets/FormulaField.js';
 export * from './widgets/SummaryField.js';
@@ -5456,7 +5530,10 @@ export * from './widgets/AutoNumberField.js';
 export * from './widgets/UserField.js';
 export * from './widgets/ObjectField.js';
 export * from './widgets/VectorField.js';
-export { evalArith, lookupAutofillPatch, computeRow, GridField, LineItemsField, UNTOUCHED_NEW_ROW, isUntouchedNewRow, columnHelpByField } from './widgets/GridField.js';
+// `GridField` / `LineItemsField` are the grid's lazy face: the body loads on
+// first use, or earlier through `preloadGridField` (objectstack#36102). The
+// pure helpers beside them are eager. See `widgets/GridField.ts`.
+export { evalArith, lookupAutofillPatch, computeRow, GridField, LineItemsField, preloadGridField, UNTOUCHED_NEW_ROW, isUntouchedNewRow, columnHelpByField } from './widgets/GridField.js';
 export type { ColumnCurrencies, ColumnHelp } from './widgets/GridField.js';
 export type { GridColumn } from './widgets/GridField.js';
 export * from './widgets/lookupAutofill.js';

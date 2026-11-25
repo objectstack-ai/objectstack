@@ -281,6 +281,13 @@ export function ViewVariantInspector({
   // (e.g. CelPredicateField / ConditionalFormattingEditor).
   const tLocal = React.useCallback((k: string) => t(k, locale), [locale]);
   const fieldNames = React.useMemo(() => objectFields.map((f) => f.name), [objectFields]);
+  // Each field's `type` and `multiple`, so a formatting rule that compares a
+  // list field with a scalar is refused while typing. Memoized: the CEL editor
+  // re-derives its list-valued fields only when this identity changes.
+  const celFieldDefs = React.useMemo(
+    () => objectFields.map((f) => ({ name: f.name, type: f.type, multiple: f.multiple })),
+    [objectFields],
+  );
   const cfRules = Array.isArray(variant.conditionalFormatting)
     ? (variant.conditionalFormatting as unknown[])
     : [];
@@ -362,7 +369,16 @@ export function ViewVariantInspector({
       fieldCatalog = { status: 'loading' };
     } else {
       fieldCatalog = loaded(
-        objectFields.map((f) => ({ name: f.name, label: f.label, type: f.type })),
+        // `options` ride along for the filter's picklist value picker,
+        // `multiple` for its operator set: a list-valued column is offered
+        // membership and the empty checks only.
+        objectFields.map((f) => ({
+          name: f.name,
+          label: f.label,
+          type: f.type,
+          ...(f.options ? { options: f.options } : {}),
+          ...(f.multiple ? { multiple: true } : {}),
+        })),
       );
     }
     // objectui#8167 — `none`, and the reason is recorded here rather than
@@ -537,6 +553,7 @@ export function ViewVariantInspector({
             rules={cfRules as any}
             objectName={binding.value || undefined}
             fieldNames={fieldNames}
+            fieldDefs={celFieldDefs}
             disabled={readOnly}
             t={tLocal}
             onChange={(rules) =>

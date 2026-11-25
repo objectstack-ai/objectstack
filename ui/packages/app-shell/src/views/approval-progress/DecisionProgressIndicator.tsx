@@ -69,7 +69,7 @@ export const DecisionProgressIndicator: React.FC<DecisionProgressIndicatorProps>
   return (
     <div>
       <div className="flex items-baseline justify-between gap-2 mb-1.5">
-        <span className="text-[11px] text-muted-foreground">
+        <span className="text-xs text-muted-foreground">
           {perGroup
             ? String(t('approvalsInbox.progressGroups', {
                 defaultValue: 'Sign-off progress — {{got}} of {{need}} groups',
@@ -83,7 +83,7 @@ export const DecisionProgressIndicator: React.FC<DecisionProgressIndicatorProps>
               }))}
         </span>
         {!perGroup && eligibleApprovers > 0 && (
-          <span className="text-[11px] text-muted-foreground">
+          <span className="text-xs text-muted-foreground">
             {String(t('approvalsInbox.progressEligible', {
               defaultValue: '{{count}} eligible approver(s)',
               count: eligibleApprovers,
@@ -122,7 +122,7 @@ export const DecisionProgressIndicator: React.FC<DecisionProgressIndicatorProps>
               key={g.group}
               variant="outline"
               className={cn(
-                'text-[11px] gap-1',
+                'text-xs gap-1',
                 g.satisfied
                   ? 'border-emerald-300 text-emerald-700 dark:border-emerald-700 dark:text-emerald-400'
                   : 'text-muted-foreground',

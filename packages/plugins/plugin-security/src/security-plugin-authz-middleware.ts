@@ -84,6 +84,8 @@
  */
 import {
   type PluginContext,
+  isFederatedObject,
+  resolveUserAuthzGrants,
   recordNotFoundError,
   isExternalAudienceContext,
   withoutOperationPrivateKeys,
@@ -118,6 +120,7 @@ import {
   assertFlowSystemIdentityWriteAllowed,
   warnAppAutomationAppendOnlyInsert,
 } from './flow-system-identity-write-refusal.js';
+import { applyAppAutomationOrganizationWall, RunCallerFactsMemo } from './app-automation-organization-wall.js';
 import { delegatedUnitReadScope, isUnreadableAddressedRowRefusal } from './delegated-admin-gate.js';
 import { isRowWriteProbe, logGateRefusal, type AuthzMiddlewareFn } from './record-row-write-probe.js';
 import {
@@ -134,7 +137,11 @@ import {
 } from './unresolved-posture.js';
 import { assertReadableQueryFields } from './predicate-guard.js';
 import { DelegationScopeViolationError, PermissionDeniedError, MaskedValueWriteError } from './errors.js';
-import { masterGateRefusalUserCopyOf, type MasterQuestion } from './security-plugin-cbp-write-gate.js';
+import {
+  masterGateRefusalUserCopyOf,
+  predicateWriteRowIdsJudgedByMasterGate,
+  type MasterQuestion,
+} from './security-plugin-cbp-write-gate.js';
 import {
   QUEUE_FIELD,
   CLAIM_REFUSAL,
@@ -348,6 +355,16 @@ function denialTranslator(
  * label as written, never the `defaultLocale` row `t()` falls to. ⛔ No key is
  * spelled here.
  *
+ * `locale` is the sentence's locale, which may be a regional tag the service
+ * holds no pack for (`en-US`). It is first negotiated against what
+ * `getLocales()` reports, by `resolveBundleLocale` — the one negotiation rule
+ * objectql (`negotiatedMessageLocale`), plugin-approvals
+ * (`negotiatedReaderLocale`) and the metadata route ask before they translate
+ * — so `en-US` reads as the authored `en` and names the master as `/meta`
+ * names it, instead of walking the fallback chain to the default language.
+ * The tag passes through untouched when nothing matches. Every caller of this
+ * function (the field-write and master-detail refusals) reads through it.
+ *
  * The declared document comes back with no i18n service, one that cannot hand
  * its translations over (no `getLocales` / `getTranslations`), and one that
  * throws: a misbehaving i18n service must not turn a 403 into a 500.
@@ -357,17 +374,23 @@ function denialLabels<T extends ObjectLike>(ctx: PluginContext, doc: T, locale: 
     const i18n = ctx.getService<II18nService>('i18n');
     if (!i18n || typeof i18n.getLocales !== 'function' || typeof i18n.getTranslations !== 'function') return doc;
     const bundle: Record<string, unknown> = {};
+    // `resolveBundleLocale` matches against a bundle's KEYS; the offered
+    // locales are exactly that key set, with no data behind them.
+    const offered: Record<string, true> = {};
     for (const code of i18n.getLocales()) {
+      if (typeof code !== 'string' || code.length === 0) continue;
+      offered[code] = true;
       const data = i18n.getTranslations(code);
       if (data && typeof data === 'object') bundle[code] = data;
     }
+    const negotiated = resolveBundleLocale(offered, locale) ?? locale;
     const fallback = typeof i18n.getFallbackLocale === 'function' ? i18n.getFallbackLocale() : undefined;
     const source = typeof i18n.getSourceLocale === 'function' ? i18n.getSourceLocale() : undefined;
     const authored = typeof source === 'string' && source.length > 0
       ? source
       : typeof i18n.getDefaultLocale === 'function' ? i18n.getDefaultLocale() : undefined;
     const options: ResolveOptions = {
-      locale,
+      locale: negotiated,
       ...(typeof fallback === 'string' && fallback.length > 0 ? { fallbackChain: [fallback] } : {}),
       ...(typeof authored === 'string' && authored.length > 0 ? { defaultLocale: authored } : {}),
     };
@@ -591,6 +614,7 @@ export interface AuthzMiddlewareHost {
   computeControlledByParentFilter: SecurityPlugin['computeControlledByParentFilter'];
   computeForbiddenFieldWrites: SecurityPlugin['computeForbiddenFieldWrites'];
   computeLayeredRlsFilter: SecurityPlugin['computeLayeredRlsFilter'];
+  computeTenantLayer0Only: SecurityPlugin['computeTenantLayer0Only'];
   computePartialMaskRules: SecurityPlugin['computePartialMaskRules'];
   computeQueryGuardFieldPerms: SecurityPlugin['computeQueryGuardFieldPerms'];
   computeRlsFilter: SecurityPlugin['computeRlsFilter'];
@@ -614,7 +638,7 @@ export interface AuthzMiddlewareHost {
 
 /** The authorization middleware registration `SecurityPlugin#start` runs; the comment above its call there is its contract. */
 export function registerAuthzMiddleware(
-  this: Pick<AuthzMiddlewareHost, 'addressedByIdWriteId' | 'addressedPredicateWrite' | 'assertControlledByParentWrite' | 'callerCannotReadAddressedRow' | 'collectRLSPolicies' | 'composeWriteTenantWall' | 'computeControlledByParentFilter' | 'computeForbiddenFieldWrites' | 'computeLayeredRlsFilter' | 'computePartialMaskRules' | 'computeQueryGuardFieldPerms' | 'computeRlsFilter' | 'computeWriteCheckFilter' | 'delegatedAdminGate' | 'delegatorOwnWriteFloorOptions' | 'engineOperationScope' | 'epoch' | 'extractSingleId' | 'fieldMasker' | 'getCallerPreImage' | 'getObjectFieldNames' | 'logger' | 'maskOperationResult' | 'ownershipQueues' | 'permissionEvaluator' | 'ql' | 'raiseWriteWallRefusal' | 'readableRowsScopeForPredicateWrite' | 'resolveCallerPosture' | 'resolveOperationPrincipals' | 'resolveHopWithheldFields' | 'resolvePermissionSetsForContext' | 'resolvePreImageFloorDrop' | 'resolveSharingWriteVerdict' | 'writeCheckFieldOptions'>,
+  this: Pick<AuthzMiddlewareHost, 'addressedByIdWriteId' | 'addressedPredicateWrite' | 'assertControlledByParentWrite' | 'callerCannotReadAddressedRow' | 'collectRLSPolicies' | 'composeWriteTenantWall' | 'computeControlledByParentFilter' | 'computeForbiddenFieldWrites' | 'computeLayeredRlsFilter' | 'computePartialMaskRules' | 'computeQueryGuardFieldPerms' | 'computeRlsFilter' | 'computeTenantLayer0Only' | 'computeWriteCheckFilter' | 'delegatedAdminGate' | 'delegatorOwnWriteFloorOptions' | 'engineOperationScope' | 'epoch' | 'extractSingleId' | 'fieldMasker' | 'getCallerPreImage' | 'getObjectFieldNames' | 'logger' | 'maskOperationResult' | 'ownershipQueues' | 'permissionEvaluator' | 'ql' | 'raiseWriteWallRefusal' | 'readableRowsScopeForPredicateWrite' | 'resolveCallerPosture' | 'resolveOperationPrincipals' | 'resolveHopWithheldFields' | 'resolvePermissionSetsForContext' | 'resolvePreImageFloorDrop' | 'resolveSharingWriteVerdict' | 'writeCheckFieldOptions'>,
   ctx: PluginContext,
   ql: IObjectQLEngine,
   metadata: IMetadataService,
@@ -622,6 +646,8 @@ export function registerAuthzMiddleware(
   // [#27175] The handler is kept as well as registered: the record
   // field-access answer's `writable` runs THIS function over a synthetic by-id
   // update (`record-row-write-probe.ts`), so the verdict is the gate's own.
+  // The organization wall's per-run memo of its callers' resolved facts.
+  const wallCallerGrants = new RunCallerFactsMemo<Awaited<ReturnType<typeof resolveUserAuthzGrants>>>();
   const authzMiddleware: AuthzMiddlewareFn = async (opCtx: any, chainNext: () => Promise<void>) => {
     // [#21771] Whether THIS operation was issued from inside another engine
     // operation's pipeline (a cascade, a hook's `ctx.api` write), read before
@@ -713,6 +739,90 @@ export function registerAuthzMiddleware(
       (object) => (typeof ql?.getSchema === 'function' ? ql.getSchema(object) : undefined),
       (line) => ctx.logger.warn(line),
     );
+    // [ADR-0095 D1 · ADR-0123 D2] The same elevation, judged by the same
+    // predicate, is judged by the organization wall of the caller it runs
+    // for: elevation lifts the caller's business
+    // rules, never the wall. A caller the wall denies (no active organization)
+    // reads nothing of a tenant-scoped object, its delete and purge there match
+    // nothing (the read rule), and every other write there is refused naming
+    // the missing organization; a write that names or empties the organization
+    // is judged for every caller. The wall is the caller's own Layer 0, over
+    // the caller's own context, so its exemptions are the plain door's. An
+    // elevation with no caller, and every platform system context, pass on
+    // unchanged. See
+    // `app-automation-organization-wall.ts`.
+    await applyAppAutomationOrganizationWall(opCtx, {
+      isFederated: (object) => isFederatedObject(typeof ql?.getSchema === 'function' ? ql.getSchema(object) : undefined),
+      // The door's facts for a caller whose context does not carry them (a
+      // flow run's envelope carries no permission sets), resolved by the one
+      // resolver the request path uses. A failed resolution grants nothing:
+      // no sets and an empty membership set, which the wall reads closed.
+      completeCaller: async (callerContext) => {
+        const userId = callerContext.userId;
+        if (typeof userId !== 'string' || userId === '') {
+          return { ...callerContext, permissions: Array.isArray(callerContext.permissions) ? callerContext.permissions : [] };
+        }
+        try {
+          const tenantId = typeof callerContext.tenantId === 'string' && callerContext.tenantId !== '' ? callerContext.tenantId : undefined;
+          // Once per run: a flow run's operations share their caller's facts,
+          // so the resolution is memoised under the run (never across runs,
+          // and never for an operation that belongs to none).
+          const grants = await wallCallerGrants.resolve(callerContext.flowRunId, userId, tenantId, () =>
+            resolveUserAuthzGrants(ql, userId, tenantId ? { tenantId } : {}),
+          );
+          return {
+            ...callerContext,
+            positions: grants.positions,
+            permissions: grants.permissions,
+            ...(grants.permissionSetAddresses ? { permissionSetAddresses: grants.permissionSetAddresses } : {}),
+            accessible_org_ids: Array.isArray(callerContext.accessible_org_ids)
+              ? callerContext.accessible_org_ids
+              : grants.accessible_org_ids,
+            ...(callerContext.posture === undefined && grants.posture !== undefined ? { posture: grants.posture } : {}),
+          };
+        } catch (err) {
+          ctx.logger.warn(
+            `[security] The organization wall could not resolve the grants of the user an elevated ` +
+              `${String(opCtx.operation)} on '${String(opCtx.object)}' runs for; it judges the operation with none, ` +
+              'which grants no exemption.',
+            { object: opCtx.object, operation: opCtx.operation, error: err instanceof Error ? err.message : String(err) },
+          );
+          return { ...callerContext, permissions: [], accessible_org_ids: [] };
+        }
+      },
+      // Layer 0 alone: the permission sets are loaded only where they decide
+      // a platform operator's crossing.
+      callerLayer0: async (callerContext, object, operation) => {
+        const loadSets = async (): Promise<PermissionSet[]> => {
+          try {
+            return await this.resolvePermissionSetsForContext(callerContext);
+          } catch (err) {
+            // [N1] Unresolvable sets grant no exemption: the wall's verdict stands.
+            ctx.logger.warn(
+              `[security] The organization wall could not resolve the permission sets of the user an elevated ` +
+                `${operation} on '${object}' runs for; it judges the operation with none, which grants no exemption.`,
+              { object, operation, error: err instanceof Error ? err.message : String(err) },
+            );
+            return [];
+          }
+        };
+        return this.computeTenantLayer0Only(loadSets, object, operation, callerContext);
+      },
+      rowInScope: async (object, id, layer0, context) => {
+        // Read as the platform, by the wall's predicate alone, as step 2.7
+        // reads the addressed row by the caller's — and where the write runs:
+        // inside the transaction it carries, so a row the write's own
+        // transaction wrote is there, and a single-connection store is not
+        // asked for a second connection.
+        const transaction = (context as { transaction?: unknown } | null | undefined)?.transaction;
+        const row = await this.ql.findOne(object, {
+          where: { $and: [{ id: typeof id === 'bigint' ? String(id) : id }, layer0] },
+          context: { isSystem: true, ...(transaction !== undefined ? { transaction } : {}) },
+        });
+        return !!row;
+      },
+      notFound: (object, id, context) => recordNotFoundError(object, id as string | number, context as any),
+    });
 
     // [#34885] An action body's insert is owner-stamped as a direct create
     // is: the body's `ctx.api` / `ctx.engine` run the invoker's envelope
@@ -919,7 +1029,9 @@ export function registerAuthzMiddleware(
     // never reaches 2.7, so its per-row check (step 3.6, [#19950]) keeps the
     // floor on exactly the terms its `where` scope does: step 3 decides the
     // floor per matched row ({@link predicateFloorDropIds}), and the check
-    // reads that decision for each row it judges.
+    // reads that decision for each row it judges; on a `controlled_by_parent`
+    // detail the master gate vouched for, both carry no floor
+    // ({@link predicateMasterGateRowIds}).
     let preImageFloorOpts: RlsFilterOptions | null = null;
     // [#35802] The predicate write's per-row floor decision: the matched rows
     // whose platform ownership floor step 3 replaced, because a by-id write of
@@ -928,6 +1040,18 @@ export function registerAuthzMiddleware(
     // 3.6's per-row check reads it when the engine hands the rows over, which
     // is after step 3 has run.
     let predicateFloorDropIds: ReadonlySet<unknown> | null = null;
+    // [ADR-0055 §3 as amended 2026-11-22 · ruling record 7073030861] The
+    // COVERAGE VOUCH on the predicate path: the rows ADR-0055's master gate
+    // (step 2.8) judged for this addressed predicate update or delete of a
+    // `controlled_by_parent` detail, on the caller's own pass, having refused
+    // none. Null until that pass returns, and on every other write: a by-id
+    // write (step 2.7 vouches there), a delegated one (both floors stay,
+    // ADR-0090 D10), a nested or referential one, an object that derives
+    // nothing from a master. Step 3 hands the platform ownership floor to the
+    // gate for exactly these rows and scopes the write to them; step 3.6
+    // holds a predicate update's rows to the check composed on the same
+    // decision.
+    let predicateMasterGateRowIds: readonly unknown[] | null = null;
     // [ADR-0090 D10] Its twin for the DELEGATOR of an on-behalf-of write: the
     // floor decision and coverage vouch the delegator's OWN direct by-id write
     // of this row would get ({@link delegatorOwnWriteFloorOptions}). Null on
@@ -1394,6 +1518,13 @@ export function registerAuthzMiddleware(
     // The platform's own floor defers to the platform's own ownership
     // authority; app-authored policies keep refusing exactly as before.
     //
+    // [#35917] Replacing is not deleting. Where an authored write policy
+    // stands beside the floor in Layer 1's OR, the floor stays a term of it,
+    // so a row the floor alone admits (the caller's own closed row beside an
+    // authored widener) is still admitted; the floor is dropped only where it
+    // is the OR's last term (`computeLayeredRlsFilter`), which is the
+    // predicate write's composition too (`predicateWriteFloorRelief`).
+    //
     // The verb boundary is INHERITED, not restated (ADR-0111 D3): the same
     // `rlsOperation` mapping picks `checkEdit` for the update class and
     // `checkDelete` for the delete class, so an `edit` share widens update and
@@ -1438,7 +1569,8 @@ export function registerAuthzMiddleware(
         // pass, and 2.8's condition is a strict SUPERSET of this one: the same
         // `permissionSets.length > 0 && userId && this.ql` triple, the same
         // single target id (`extractSingleId`; with none, 2.8 judges every
-        // master the write reaches instead), and one
+        // master the write reaches instead, and vouches for that write
+        // itself: `predicateMasterGateRowIds`), and one
         // additional operation (`insert`, which has no pre-image and so no
         // floor to drop). Reaching this line therefore PROVES the master gate
         // will answer the same write — the maintainer's precondition, held
@@ -1632,6 +1764,16 @@ export function registerAuthzMiddleware(
           opCtx,
           opCtx.context,
         );
+        // [ADR-0055 §3 as amended 2026-11-22 · ruling record 7073030861] The
+        // gate has just judged this write for the caller and refused nothing.
+        // On an addressed predicate write that is not delegated, the rows it
+        // judged are the vouch that it covers this write, as step 2.7's
+        // position above this block is for a by-id write. Read here, before
+        // the delegator's pass, so the record is the caller's; a delegated
+        // write takes none and keeps both floors, as its by-id write does.
+        if (!delegatorSets && this.addressedPredicateWrite(opCtx, nestedInOperation, referentialFieldClearWrite)) {
+          predicateMasterGateRowIds = predicateWriteRowIdsJudgedByMasterGate(opCtx);
+        }
         // [ADR-0090 D10] The delegator must ALSO have edit access to the master
         // — a detail write on behalf of a user requires that user's master-edit.
         if (delegatorSets) {
@@ -2230,7 +2372,11 @@ export function registerAuthzMiddleware(
         opCtx.object,
         opCtx.operation,
         opCtx.context,
-        preImageFloorOpts ?? undefined,
+        // A by-id update is held to step 2.7's floor decision. A predicate
+        // update of a `controlled_by_parent` detail the master gate vouched
+        // for is held to the check its rows' by-id writes get, the floor
+        // handed to that gate (ruling record 7073030861).
+        preImageFloorOpts ?? (predicateMasterGateRowIds ? { masterGateCoversThisWrite: true } : undefined),
       );
       // [ADR-0090 D10] The post-image must satisfy the delegator's CHECK too —
       // an on-behalf-of write may not produce a row the delegator itself
@@ -2483,10 +2629,13 @@ export function registerAuthzMiddleware(
           // old one. Every other row keeps `checkParts`. Not on a delegated
           // write, whose floors step 3 keeps, nor where step 2.7 already
           // decided this write's floor (`preImageFloorOpts`), whose
-          // `checkParts` already carry that decision.
+          // `checkParts` already carry that decision; nor where the master
+          // gate vouched for a predicate write (`predicateMasterGateRowIds`),
+          // for the same reason.
           let floorDropJudge: ((image: Record<string, unknown>) => boolean) | undefined;
           if (
             !preImageFloorOpts &&
+            !predicateMasterGateRowIds &&
             !delegatorSets &&
             this.addressedPredicateWrite(opCtx, nestedInOperation, referentialFieldClearWrite)
           ) {
@@ -2777,11 +2926,18 @@ export function registerAuthzMiddleware(
       // here with the SAME `andComposeLayers` that wrapper uses — so the
       // injected predicate is byte-identical to before, and the Layer 0
       // verdict that produced it is in hand to be RECORDED below.
+      //
+      // [ADR-0055 §3 as amended 2026-11-22 · ruling record 7073030861] A
+      // predicate write the master gate vouched for (step 2.8,
+      // `predicateMasterGateRowIds`) composes the Layer 1 its rows' by-id
+      // writes do: the platform ownership floor handed to that gate, every
+      // app-authored policy and the write-visibility derivation as they stand.
       const layered = await this.computeLayeredRlsFilter(
         permissionSets,
         opCtx.object,
         opCtx.operation,
         opCtx.context,
+        predicateMasterGateRowIds ? { masterGateCoversThisWrite: true } : undefined,
       );
       const rlsFilter = andComposeLayers(layered.layer0, layered.layer1);
       // [#35802] Where the caller's scope sits in `extra`: a predicate write
@@ -2833,7 +2989,17 @@ export function registerAuthzMiddleware(
       // writes none of the object's records, whatever its predicate addresses.
       // The by-id leg (step 2.7) refuses the same caller too.
       if (this.addressedPredicateWrite(opCtx, nestedInOperation, referentialFieldClearWrite)) {
-        const readableScope = await this.readableRowsScopeForPredicateWrite(opCtx);
+        // [ruling record 7073030861] Where the master gate vouched for this
+        // write, the scope is the gate's own row list, never a second asking
+        // of the same read question: the rows the floor is handed over for
+        // are then the rows whose masters were judged, and a row that came to
+        // match the predicate after the gate read it is not written. The list
+        // is the read door's answer for the caller's predicate, under the cap
+        // and the refusals the narrowing itself applies
+        // (`controlledByParentPredicateWriteMasters`).
+        const readableScope = predicateMasterGateRowIds
+          ? { id: { $in: [...predicateMasterGateRowIds] } }
+          : await this.readableRowsScopeForPredicateWrite(opCtx);
         extra.push(readableScope);
         // [#35802] The #5492 floor composition, per matched row. Step 2.7
         // lets the declared write authority's `allow` replace the platform
@@ -2849,8 +3015,10 @@ export function registerAuthzMiddleware(
         // and only where no authored write-class policy remains once it is
         // (where one does, replacing the floor admits no row and no verdict is
         // asked). Layer 0 is recomposed as it stood. Not for a delegated
-        // write, which keeps both floors on the by-id path too.
-        if (rlsFilter && layered.layer1 && !delegatorSets) {
+        // write, which keeps both floors on the by-id path too, nor for a
+        // write the master gate vouched for, whose Layer 1 carries no floor
+        // to replace.
+        if (rlsFilter && layered.layer1 && !delegatorSets && !predicateMasterGateRowIds) {
           const relief = await predicateWriteFloorRelief.call(
             this,
             opCtx,
@@ -3008,10 +3176,10 @@ export function idsOfReadableScope(scope: Record<string, unknown>): (string | nu
  *    replaced: `computeLayeredRlsFilter` with `dropPlatformOwnershipFloor`.
  *    If that is not `null`, an authored write-class policy remains, and
  *    `null` is answered with no verdict asked. Policies compose by `$or` only
- *    (`rls-compiler.ts`), so `floored` is that policy set OR the floor: a
- *    row `floored` refuses fails every authored policy too, and the by-id
- *    write of it, held to those policies alone, is refused as well. Replacing
- *    the floor can add no row there, so nothing is asked.
+ *    (`rls-compiler.ts`), and a replacement keeps the floor's term in an OR
+ *    an authored term stands in ([#35917]), so the by-id write of every
+ *    matched row is held to `floored` itself: replacing the floor adds no
+ *    row there and removes none, so nothing is asked.
  * 3. The rows `floored` already admits are read once, under the caller's
  *    context, and set aside: they are matched today whatever any verdict says,
  *    so nothing is asked about them and the check they are held to does not

@@ -6,7 +6,7 @@
  *
  * **objectui#4155 (the current contract): the list toolbar's filter panel must
  * not persist ANYTHING.** Filter-panel state is transient — it belongs to the
- * session and to `writeListFilterState`'s per-browser restore, not to the
+ * session and to the list's draft (objectstack#35955), not to the
  * view's stored body. It used to write a view-customization overlay on every
  * `onFilterChange`, so opening the panel and clicking `Add filter` put an
  * incomplete `field equals ''` condition into `sys_metadata`, where it REPLACED

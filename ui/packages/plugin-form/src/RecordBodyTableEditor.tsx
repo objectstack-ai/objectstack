@@ -37,19 +37,21 @@
 import React, { useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import type { BatchTransactionOperation, GridFieldMetadata } from '@object-ui/types';
 import { resolveAffordance, type SchemaLike } from '@object-ui/core';
-import { LineItemsField, lookupAutofillByField, columnHelpByField, useBooleanValueLabel, type GridColumn } from '@object-ui/fields';
+import { LineItemsField, preloadGridField, lookupAutofillByField, columnHelpByField, useBooleanValueLabel, type GridColumn } from '@object-ui/fields';
 import { cn } from '@object-ui/components';
 import { useLocalization } from '@object-ui/i18n';
 import { usePermissions } from '@object-ui/permissions';
 import {
   extractFieldErrors,
   extractWriteErrorMessage,
+  useInlineEdit,
   useRecordContext,
 } from '@object-ui/react';
 import { buildMasterDetailEditBatch, idOf, isBlankRow, type ChildSchema } from './masterDetailTx';
 import { applyColumnPermissions } from './fieldWriteGate';
 import { deriveDetail } from './deriveMasterDetail';
 import { schemaDefaultValues } from './schemaDefaults';
+import { currencyFieldDefsOf, followedColumnCurrencies, parentCurrencyFieldsOf } from './parentCurrencyColumns';
 import { useFormChromeTranslation } from './formChrome';
 
 /** One reason the server gave about one line of a body table. */
@@ -207,6 +209,9 @@ const BODY_TABLE_EDIT_LIMIT = 500;
  * a part of the record page's edit state, never a standalone block.
  */
 export const RecordBodyTableEditor: React.FC<RecordBodyTableEditorProps> = ({ objectName, relationshipField, title }) => {
+  // The line grid's body loads on first use (objectstack#36102). Start it now,
+  // while the child schema is fetched, so the grid is there before its columns.
+  preloadGridField();
   const session = useContext(RecordEditSessionContext);
   const record = useRecordContext();
   // The record page's adapter, as its related lists read it.
@@ -231,8 +236,10 @@ export const RecordBodyTableEditor: React.FC<RecordBodyTableEditorProps> = ({ ob
   useEffect(() => {
     let cancelled = false;
     if (!dataSource || typeof dataSource.getObjectSchema !== 'function') return;
-    Promise.resolve(dataSource.getObjectSchema(objectName))
-      .then((s: any) => { if (!cancelled) setChildSchema(s ?? { fields: {} }); })
+    // The child schema is what draws the line grid, so it lands together with
+    // the grid's body (objectstack#36102); `preloadGridField` never rejects.
+    Promise.all([dataSource.getObjectSchema(objectName), preloadGridField()])
+      .then(([s]) => { if (!cancelled) setChildSchema(s ?? { fields: {} }); })
       .catch(() => { if (!cancelled) setLoadFailed(true); });
     return () => { cancelled = true; };
   }, [dataSource, objectName]);
@@ -283,6 +290,37 @@ export const RecordBodyTableEditor: React.FC<RecordBodyTableEditorProps> = ({ ob
         ? schemaDefaultValues(childSchema, { currentUserId: perms.userId, homeCurrency, homeTimeZone })
         : undefined,
     [childSchema, perms.userId, homeCurrency, homeTimeZone],
+  );
+
+  // objectstack#36249 — the currency of each money column, as the record form
+  // and the other line hosts hand it to the grid: a line amount that follows
+  // this record through `relationshipField` is in this record's code
+  // (`columnCurrencies`), and any other money column is in its own field's
+  // currency (`columnFields`). A pick copies an amount only into a column in
+  // the same currency.
+  //
+  // The record is read as the user has it in the open edit, not as stored:
+  // the edit state saves a code change on the record and its new lines in one
+  // batch, so a code staged in the inline draft is the code the lines are
+  // saved under. A live value is `{ ...data, ...draft }` (InlineEditContext).
+  const inline = useInlineEdit();
+  const savedRow = record?.data as Record<string, unknown> | undefined;
+  const draftRow = inline?.draft;
+  const headerRow = useMemo<Record<string, unknown> | undefined>(
+    () => (draftRow && Object.keys(draftRow).length > 0 ? { ...(savedRow ?? {}), ...draftRow } : savedRow),
+    [savedRow, draftRow],
+  );
+  const lineColumnCurrencies = useMemo(
+    () => followedColumnCurrencies(
+      parentCurrencyFieldsOf(childSchema?.fields as Record<string, unknown> | undefined, relationshipField),
+      headerRow,
+      homeCurrency,
+    ),
+    [childSchema, relationshipField, headerRow, homeCurrency],
+  );
+  const lineCurrencyFields = useMemo(
+    () => currencyFieldDefsOf(childSchema?.fields as Record<string, unknown> | undefined),
+    [childSchema],
   );
 
   const snapshotRef = useRef<BodyTableSnapshot | null>(null);
@@ -336,6 +374,8 @@ export const RecordBodyTableEditor: React.FC<RecordBodyTableEditorProps> = ({ ob
           disabled={session.saving}
           contextRecord={record?.data as Record<string, unknown> | undefined}
           lookupAutofill={lookupAutofillByField(childSchema?.fields as Record<string, unknown> | undefined)}
+          columnCurrencies={lineColumnCurrencies}
+          columnFields={lineCurrencyFields}
           // Each child field's help, on its column header (objectstack#35804).
           columnHelp={columnHelpByField(childSchema?.fields as Record<string, unknown> | undefined)}
           newRowValues={newRowValues}

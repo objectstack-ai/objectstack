@@ -269,6 +269,18 @@ import { AppHeader } from '../AppHeader';
 import { useHomeInbox } from '../../hooks/useHomeInbox';
 import { __resetSharedUserFeeds, __markFirstPainted } from '../../hooks/sharedUserFeeds';
 
+// From 768 px up the bell opens the full-page inbox instead of a panel
+// (objectstack#36741); the panel these pins read is the phone's, so the
+// header is drawn at phone width.
+let widthBeforePhone = 0;
+beforeEach(() => {
+  widthBeforePhone = window.innerWidth;
+  Object.defineProperty(window, 'innerWidth', { configurable: true, writable: true, value: 375 });
+});
+afterEach(() => {
+  Object.defineProperty(window, 'innerWidth', { configurable: true, writable: true, value: widthBeforePhone });
+});
+
 /** Every URL passed to `fetch`, in order — the approvals reads are counted here. */
 let fetchUrls: string[] = [];
 

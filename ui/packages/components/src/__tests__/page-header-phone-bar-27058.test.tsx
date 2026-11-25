@@ -248,3 +248,68 @@ describe('the phone bar keeps Edit visible on an editable record (objectstack#34
     expect(labels).toEqual(['Generate Quote', 'Clone Opportunity', 'Print', 'Edit', 'More actions']);
   });
 });
+
+/**
+ * objectstack#36151 — a phone host that hands a top-bar slot for the `⋯`
+ * (`PageHeaderPhoneContext.more`): the bottom bar holds the action buttons
+ * alone, filling the row, and the `⋯` is drawn in the slot; with no button to
+ * draw the bar is left empty. The console's record page hands its Edit as a
+ * menu entry there (`component: 'action:menu'`), so it is one of the `⋯`'s
+ * entries. Control: without the slot (every test above) the `⋯` stays the
+ * bar's last button.
+ */
+describe('the phone bar with the host\'s top-bar ⋯ slot (objectstack#36151)', () => {
+  const MENU_EDIT = [
+    { name: 'sys_edit', label: 'Edit', component: 'action:menu' },
+    { name: 'sys_delete', label: 'Delete' },
+  ];
+
+  function TopBarHost({ schema, mountMore = true }: { schema: unknown; mountMore?: boolean }) {
+    const [barEl, setBarEl] = React.useState<HTMLDivElement | null>(null);
+    const [moreEl, setMoreEl] = React.useState<HTMLSpanElement | null>(null);
+    const face = React.useMemo<PageHeaderPhoneFace>(() => ({ actionBar: barEl, more: moreEl }), [barEl, moreEl]);
+    return (
+      <ActionProvider>
+        {mountMore && <span ref={setMoreEl} data-testid="top-more" />}
+        <RecordContextProvider
+          objectName="lead"
+          recordId="1"
+          data={{ id: '1', name: 'Mira Costa' }}
+          objectSchema={{ name: 'lead', label: 'Lead' }}
+          headerSystemActions={MENU_EDIT}
+        >
+          <PageHeaderPhoneContext.Provider value={face}>
+            <PageHeader schema={schema} />
+          </PageHeaderPhoneContext.Provider>
+        </RecordContextProvider>
+        <div ref={setBarEl} data-testid="bar" />
+      </ActionProvider>
+    );
+  }
+
+  const topMore = () => screen.getByTestId('top-more');
+
+  it('the bar is the page\'s two actions, filling the row; the ⋯ is in the slot and holds the rest and Edit', async () => {
+    render(<TopBarHost schema={{ type: 'page:header', actions: [convert, assign, ret] }} />);
+    await waitFor(() => expect(bar().querySelector('[role="toolbar"]')).not.toBeNull());
+    expect(barButtons()).toEqual(['Convert Lead', 'Assign']);
+    for (const b of within(bar()).getAllByRole('button')) expect(b.className.split(/\s+/)).toContain('flex-1');
+    expect(within(bar()).queryByRole('button', { name: 'More actions' })).toBeNull();
+    await waitFor(() => expect(within(topMore()).getByRole('button', { name: 'More actions' })).toBeTruthy());
+    expect(await openMore(topMore())).toEqual(['Return', 'Edit', 'Delete']);
+  });
+
+  it('with no page action the bar draws nothing, and the ⋯ in the slot holds Edit', async () => {
+    render(<TopBarHost schema={{ type: 'page:header', actions: [] }} />);
+    await waitFor(() => expect(within(topMore()).getByRole('button', { name: 'More actions' })).toBeTruthy());
+    expect(bar().childElementCount).toBe(0);
+    expect(await openMore(topMore())).toEqual(['Edit', 'Delete']);
+  });
+
+  it('nothing is drawn for the ⋯ until the slot exists; the bar\'s buttons still are', async () => {
+    render(<TopBarHost schema={{ type: 'page:header', actions: [convert] }} mountMore={false} />);
+    await waitFor(() => expect(bar().querySelector('[role="toolbar"]')).not.toBeNull());
+    expect(barButtons()).toEqual(['Convert Lead']);
+    expect(screen.queryByRole('button', { name: 'More actions' })).toBeNull();
+  });
+});

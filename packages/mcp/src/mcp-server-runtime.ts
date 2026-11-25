@@ -25,7 +25,7 @@ import {
 } from './tool-call-interceptor.js';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
 import { wireBridgeTools, datasetToolsServed, packageDocToolsServed, grantsAuthoringTools, thrownRefusalEnvelope, dataDoorAnswerOf, dataDoorRefusalEnvelope } from './mcp-http-tools.js';
-import { isServerFault, logServerFault } from '@objectstack/types';
+import { FLOW_RUNTIME_STATE_KEY, isServerFault, logServerFault } from '@objectstack/types';
 import type {
   McpDataBridge,
   McpActionBridge,
@@ -1917,9 +1917,15 @@ function skillsInstallLine(version: string | undefined): string | undefined {
  * the reader its connection lists ({@link definitionReaderOf}) as a plain name.
  */
 export function packageDocAnswerRule(definitionReader?: string): string {
+  // [#36856] A switched-off flow keeps its definition, `status` included, so
+  // the definition alone says it runs. The readers carry the switch beside the
+  // item as `runtimeState` (`FLOW_RUNTIME_STATE_KEY`, `@objectstack/types`),
+  // and this sentence is what tells the agent to read it.
   const processStep = definitionReader
     ? `also read its real definition with ${definitionReader}; where the manual and the definition differ, the `
-      + 'definition is what runs: answer from it and name the difference.'
+      + 'definition is what runs: answer from it and name the difference. When that answer carries '
+      + `${FLOW_RUNTIME_STATE_KEY}.enabled: false, the process is switched off and does not run, whatever its `
+      + 'status reads: say that it is switched off.'
     : 'this connection lists no tool that reads its definition, so answer from the manual and say that the '
       + 'configured process was not checked.';
   return 'For a question about the apps installed here, read their manuals before you answer: call '
@@ -2964,7 +2970,7 @@ export class MCPServerRuntime {
     });
 
     if (skillBridge) {
-      registerSkillPrompts(server, skillBridge);
+      registerSkillPrompts(server, skillBridge, this.config.logger ? { logger: this.config.logger } : {});
     }
 
     if (opts.bridge) {

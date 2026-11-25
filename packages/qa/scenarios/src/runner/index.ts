@@ -19,6 +19,7 @@ export * from './orchestrate.js';
 export * from './packages.js';
 export * from './project.js';
 export * from './prompts.js';
+export * from './schema-masking.js';
 export * from './scorecard.js';
 export * from './seed.js';
 export * from './summary.js';

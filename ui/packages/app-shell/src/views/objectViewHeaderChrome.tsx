@@ -2,16 +2,21 @@
  * The header chrome of the Console `ObjectView` (`./ObjectView.tsx`): the
  * create button, the header's actions folded into one menu for a narrow
  * header, and the list area for a view the server refused, moved out of
- * `ObjectViewInner` verbatim (objectstack#25992, slice 9). It calls no React
- * hook. Every input is passed in; the component reads the returned values.
+ * `ObjectViewInner` verbatim (objectstack#25992, slice 9). Every input is
+ * passed in, except Object settings (objectstack#36487), which it reads off
+ * the route the way the page bar's ⋮ does; the component reads the returned
+ * values.
  */
 
 import type { Dispatch, ReactNode, SetStateAction } from 'react';
+import { useNavigate, useParams } from 'react-router-dom';
 import { Button, Empty, EmptyTitle, EmptyDescription } from '@object-ui/components';
 import { Plus, Lock } from 'lucide-react';
 import type { ActionBarSchema, UIActionSchema } from '@object-ui/types';
 import type { useObjectTranslation } from '@object-ui/i18n';
 import type { useObjectListFavorite } from '../layout/SidebarItemMenu.js';
+import { useObjectSettingsGate, useObjectSettingsPath } from '../layout/SidebarItemMenu.js';
+import { confirmUnsavedLeave } from '../chrome/unsavedEdits.js';
 import type { useMetaItemRefusal } from '../hooks/useMetaItemRefusal.js';
 import type { useObjectActions } from '../hooks/useObjectActions.js';
 import { declaredPrimaryToolbarAction, MOBILE_FAB_LIST_CLEARANCE } from './objectViewHelpers.js';
@@ -38,6 +43,7 @@ export function useObjectViewHeaderChrome({
     toolbarBar,
     viewAccess,
     titleSwitcher,
+    createLabel,
 }: {
     objectCanCreate: ReturnType<typeof useObjectViewToolbarAffordances>['objectCanCreate'];
     createVisible: ReturnType<typeof useObjectViewToolbarAffordances>['createVisible'];
@@ -61,6 +67,11 @@ export function useObjectViewHeaderChrome({
      * itself — the reader's way to another view.
      */
     titleSwitcher?: ReactNode;
+    /**
+     * objectstack#36113 — the create button's words, 「New Account」: the
+     * object's singular name, since the button names what it creates.
+     */
+    createLabel: string;
 }) {
     // The header's primary action, drawn the same in both of the header's
     // faces (below). [#5153] `objectCanCreate && createVisible` — the
@@ -79,11 +90,11 @@ export function useObjectViewHeaderChrome({
             disabled={createDisabled}
             // 28px and 13px, like every control of the list's two bars
             // (objectstack#35548).
-            className="shadow-none gap-1 h-7 px-2.5 text-[13px]"
+            className="shadow-none gap-1 h-7 px-2.5 text-sm"
             data-testid="object-view-new-button"
         >
             <Plus className="h-3.5 w-3.5" />
-            <span className="hidden sm:inline">{t('console.objectView.new')}</span>
+            <span className="hidden sm:inline">{createLabel}</span>
         </Button>
     ) : null;
 
@@ -112,6 +123,13 @@ export function useObjectViewHeaderChrome({
     // face would keep no labelled action, so a long description alone would
     // send the page's one action into the `⋯`. Without a folded face the
     // header keeps `actions` at every width and the description truncates.
+    // objectstack#36487 — Object settings leads the folded menu, as it leads
+    // the page bar's ⋮ More: this object in Studio, for the principal the app
+    // bar's Studio entry is drawn for (`useObjectSettingsGate`); leaving asks
+    // first when the page holds unsaved edits (`confirmUnsavedLeave`).
+    const navigate = useNavigate();
+    const { appName, objectName } = useParams();
+    const objectSettingsPath = useObjectSettingsGate(useObjectSettingsPath({ appSegment: appName, objectName }));
     const toolbarRowActions: UIActionSchema[] = listActions?.some((a: { locations?: readonly string[] }) => a.locations?.includes('list_toolbar'))
         ? toolbarActionsWithDeepLink
         : [];
@@ -121,6 +139,14 @@ export function useObjectViewHeaderChrome({
         type: 'action:bar',
         location: 'list_toolbar',
         actions: [
+            ...(objectSettingsPath ? [{
+                name: 'object_view_object_settings',
+                label: t('console.nav.objectSettings', { defaultValue: 'Object settings' }),
+                icon: 'settings-2',
+                type: 'script' as const,
+                locations: ['list_toolbar' as const],
+                onClick: () => confirmUnsavedLeave(() => navigate(objectSettingsPath)),
+            }] : []),
             ...(importShown ? [{
                 name: 'object_view_import',
                 label: t('console.objectView.import'),

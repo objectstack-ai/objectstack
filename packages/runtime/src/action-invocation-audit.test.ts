@@ -466,9 +466,21 @@ describe('[#34292] an aggregate bulk call\'s row records the per-row counts its 
     const SELECTED = ['l1', 'l2', 'l3'];
     const PARTIAL = { succeeded: ['l1'], failed: [{ id: 'l2', message: 'Locked.' }] };
 
+    /**
+     * The selected rows exist and the caller reads them: the door reads each
+     * id of a selection in the caller's scope before it runs.
+     */
+    function deliverSelection(rig: ReturnType<typeof makeRig>): void {
+        const byId = rig.ql.find.getMockImplementation();
+        rig.ql.find.mockImplementation(async (object: string, q: any) => (SELECTED.includes(q?.where?.id)
+            ? [{ id: q.where.id }]
+            : byId?.(object, q)));
+    }
+
     /** The script handler resolves with `value`; the call carries `params` and no record. */
     async function run(door: 'rest' | 'mcp', value: unknown, params: Record<string, unknown>) {
         const rig = makeRig();
+        deliverSelection(rig);
         rig.ql.executeAction.mockImplementation(async () => value);
         if (door === 'rest') {
             const res: any = await rig.dispatcher.handleActions(
@@ -517,6 +529,7 @@ describe('[#34292] an aggregate bulk call\'s row records the per-row counts its 
 
     it('a handler that throws records failed and no counts', async () => {
         const rig = makeRig({ script: true });
+        deliverSelection(rig);
         const res: any = await rig.dispatcher.handleActions(
             `/${OBJECT}/${SCRIPT.name}`, 'POST', { params: { _selectedIds: SELECTED } }, rig.ctx({ userId: 'u_member' }),
         );

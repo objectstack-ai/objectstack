@@ -69,6 +69,14 @@ import { EMAIL_SEND_CAPABILITY } from './email-routes.js';
 // (the route modules import it lazily).
 import '@objectstack/objectql';
 
+/**
+ * These hosts' engines answer every lookup EMPTY and model no environment
+ * membership, so each host states the documented opt-out
+ * (`api.enforceProjectMembership: false`). The membership judgment itself is
+ * pinned in `rest-environment-membership-door.test.ts`.
+ */
+const MEMBERSHIP_NOT_MODELLED = false;
+
 const captured = vi.hoisted(() => ({ servers: [] as any[] }));
 
 // The plugin builds its `RestServer` inside `start()`, and nothing hands the
@@ -313,7 +321,7 @@ async function bootHosted(opts: HostedOptions = {}): Promise<Hosted> {
         ...occupants('host', reached),
         ...opts.extra?.('host'),
         ...(opts.hostAuth ? { auth: authServiceFor('u_host') } : {}),
-    }, [createRestApiPlugin({ api: { api: { enableProjectScoping: true, projectResolution: 'auto' } } } as any)]);
+    }, [createRestApiPlugin({ api: { api: { enableProjectScoping: true, projectResolution: 'auto' } }, enforceProjectMembership: MEMBERSHIP_NOT_MODELLED } as any)]);
     expect(captured.servers, 'the plugin must construct exactly one RestServer').toHaveLength(1);
     return {
         table: http.table,
@@ -594,7 +602,7 @@ describe('[#30011] single kernel: the same doors read the plugin\'s own kernel, 
             auth: authServiceFor('u_host'),
             objectql: emptyQl(),
             ...occupants('host', reached),
-        }, [createRestApiPlugin({ api: { api: { enableProjectScoping: true, projectResolution: 'auto' } } } as any)]);
+        }, [createRestApiPlugin({ api: { api: { enableProjectScoping: true, projectResolution: 'auto' } }, enforceProjectMembership: MEMBERSHIP_NOT_MODELLED } as any)]);
         expect(captured.servers).toHaveLength(1);
         h = {
             table: http.table,
@@ -924,7 +932,7 @@ describe('[#30218] single kernel: the data engine is the plugin\'s own kernel\'s
             auth: authServiceFor('u_host'),
             objectql: recordingEngine('host', calls),
             metadata: publishedStore('host'),
-        }, [createRestApiPlugin({ api: { api: { enableProjectScoping: true, projectResolution: 'auto' } } } as any)]);
+        }, [createRestApiPlugin({ api: { api: { enableProjectScoping: true, projectResolution: 'auto' } }, enforceProjectMembership: MEMBERSHIP_NOT_MODELLED } as any)]);
         expect(captured.servers).toHaveLength(1);
         h = {
             table: http.table,
@@ -1128,7 +1136,7 @@ async function bootSecurityPosture(): Promise<PostureHosted> {
         'kernel-resolver': resolver,
         // The host's OWN occupant: an answer from it is recorded as `host`.
         security: postureSecurity('host', reached),
-    }, [createRestApiPlugin({ api: { api: { enableProjectScoping: true, projectResolution: 'auto' } } } as any)]);
+    }, [createRestApiPlugin({ api: { api: { enableProjectScoping: true, projectResolution: 'auto' } }, enforceProjectMembership: MEMBERSHIP_NOT_MODELLED } as any)]);
     expect(captured.servers, 'the plugin must construct exactly one RestServer').toHaveLength(1);
     const server = captured.servers[0];
     const provider = server.securityServiceProvider;
@@ -1390,7 +1398,7 @@ describe('a single kernel with no security service keeps serving every door, as 
             protocol: postureProtocol('host', reached),
             auth: authServiceFor('u_host'),
             objectql: emptyQl(),
-        }, [createRestApiPlugin({ api: { api: { enableProjectScoping: true, projectResolution: 'auto' } } } as any)]);
+        }, [createRestApiPlugin({ api: { api: { enableProjectScoping: true, projectResolution: 'auto' } }, enforceProjectMembership: MEMBERSHIP_NOT_MODELLED } as any)]);
         expect(captured.servers).toHaveLength(1);
         h = {
             table: http.table,

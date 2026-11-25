@@ -16,8 +16,11 @@
  *   - One table per card and mode (`scratch`, `template`, `ask`, `door`). Its runs
  *     must share the prompt choice, the package source, the ask repeats, the
  *     driver, the ask client's skills, the door arm (`door.ts`: one arm per
- *     table, so an arm's runs are summed and two arms never are) and the card file they graded (its
- *     sha256, `CardStamp`) ({@link TABLE_DIMENSIONS}); when they do not, the table is
+ *     table, so an arm's runs are summed and two arms never are), the card file they graded (its
+ *     sha256, `CardStamp`) and the schema masking of the apps they booted
+ *     (`env.schemaMasking`, `schema-masking.ts`: a masking-off round asks
+ *     another question of a withheld field than a default one)
+ *     ({@link TABLE_DIMENSIONS}); when they do not, the table is
  *     refused with a line naming each difference and the files on each side,
  *     never summed. The other tables still print. A record from before the
  *     card stamp reads `card: not recorded`, so it is never summed with a
@@ -34,7 +37,8 @@
  *   - Columns: the models the question and operation turns were served
  *     (`Run · model`), the asked-for name and effort beside them likewise.
  *   - Cells: the first build and Run half — Build, Run-问数 (with the k/N
- *     spread when the run asked each turn more than once), Run-operations —
+ *     spread when the run asked each turn more than once), Run-operations,
+ *     the asks per kind when a run's turns carry one (`Run · kinds`) —
  *     and, when any run of the table iterated, the Iterate halves; then ask
  *     cost and ask time, the scorecard's per-mode rows (every persona turn of
  *     the mode, the iterate's included). Counts are summed; a cost or time is
@@ -49,9 +53,10 @@ import { basename, join, resolve } from 'node:path';
 
 import { askSkillsText, type AskSkillsInfo } from './ask-skills.js';
 import { doorArmText, type DoorArm } from './door.js';
+import { schemaMaskingText } from './schema-masking.js';
 import { packagesLine, type PackageSource } from './packages.js';
 import { promptChoiceText, type PromptChoice } from './prompts.js';
-import { askCostText, askTimeText, cardStampText, MODEL_NOT_REPORTED, type AskSpend, type CardStamp, type HalfScores, type ModelSpend, type QuestionRepeats, type Tally } from './scorecard.js';
+import { askCostText, askTimeText, cardStampText, kindCell, MODEL_NOT_REPORTED, type AskSpend, type CardStamp, type HalfScores, type KindTally, type ModelSpend, type QuestionRepeats, type Tally } from './scorecard.js';
 
 // ── The supplied template, as `run` records it ──────────────────────────────
 
@@ -94,7 +99,7 @@ interface LooseModeScorecard {
 
 interface LooseRecord {
   app?: string;
-  env?: { packages?: PackageSource; driver?: { driver?: string; replayOf?: { driver?: string }; askSkills?: AskSkillsInfo; door?: DoorArm } };
+  env?: { packages?: PackageSource; driver?: { driver?: string; replayOf?: { driver?: string }; askSkills?: AskSkillsInfo; door?: DoorArm }; schemaMasking?: string };
   template?: SuppliedTemplate;
   /** The card file the run graded (`runRecord`); absent on a record written before the runner stamped it. */
   card?: CardStamp;
@@ -189,7 +194,7 @@ export function readSummaryRecords(paths: readonly string[]): ReadSummaryResult 
 // ── Grouping: tables, rows, columns ─────────────────────────────────────────
 
 /** The dimensions a table does not show, which every run of one table must share. */
-export const TABLE_DIMENSIONS = ['prompt choice', 'package source', 'ask repeats', 'driver', 'ask skills', 'door arm', 'card'] as const;
+export const TABLE_DIMENSIONS = ['prompt choice', 'package source', 'ask repeats', 'driver', 'ask skills', 'door arm', 'card', 'schema masking'] as const;
 export type TableDimension = (typeof TABLE_DIMENSIONS)[number];
 
 /** One mode of one record: the unit a cell sums. */
@@ -224,8 +229,16 @@ function dimensionsOf(r: LooseRecord): Record<TableDimension, string> {
     'ask skills': r.env?.driver?.askSkills ? `ask skills: ${askSkillsText(r.env.driver.askSkills)}` : NO_ASK_SKILLS,
     'door arm': r.env?.driver?.door ? `door arm: ${doorArmText(r.env.driver.door)}` : NO_DOOR_ARM,
     card: r.card ? cardStampText(r.card) : NO_CARD_STAMP,
+    'schema masking': schemaMaskingText(r.env?.schemaMasking),
   };
 }
+
+/**
+ * The `schema masking` value of a record whose apps were booted masked (no
+ * `--schema-masking off`, and every record made before it): a table of such
+ * runs prints its dimensions line as before.
+ */
+const MASKED = schemaMaskingText(undefined);
 
 /**
  * The `card` value of a record written before the runner stamped the card
@@ -343,6 +356,23 @@ function countCell(tallies: ReadonlyArray<CountTally | undefined>): string {
     (sum.leaks ? ` ⚠ ${sum.leaks} leaking` : '') +
     missingText(missing, tallies.length)
   );
+}
+
+/** The runs' asks kind by kind, summed ({@link kindCell}); a run that states no kinds is counted apart, never as 0 asked. */
+function kindsCell(kinds: ReadonlyArray<KindTally | undefined>): string {
+  const present = kinds.filter((k): k is KindTally => k !== undefined);
+  if (!present.length) return '—';
+  const sum: KindTally = { byKind: {} };
+  for (const k of present) {
+    for (const [kind, t] of Object.entries(k.byKind) as Array<[keyof KindTally['byKind'], NonNullable<KindTally['byKind'][keyof KindTally['byKind']]>]>) {
+      const s = (sum.byKind[kind] ??= { passed: 0, total: 0, notMeasured: 0 });
+      s.passed += t.passed;
+      s.total += t.total;
+      s.notMeasured += t.notMeasured;
+    }
+    if (k.unkinded) sum.unkinded = (sum.unkinded ?? 0) + k.unkinded;
+  }
+  return kindCell(sum) + missingText(kinds.length - present.length, kinds.length);
 }
 
 function buildCell(builds: ReadonlyArray<HalfScores['build'] | undefined>): string {
@@ -466,12 +496,14 @@ function halfRows(t: SummaryTable): Array<[string, (es: readonly ModeEntry[]) =>
   ];
   if (t.entries.some((e) => e.sc.first?.repeats)) rows.push(['Run-问数 · k/N per turn', (es) => repeatSpreadCell(es.map((e) => e.sc.first?.repeats))]);
   rows.push(['Run-operations', (es) => countCell(es.map((e) => e.sc.first?.operations))]);
+  if (t.entries.some((e) => e.sc.first?.kinds)) rows.push(['Run · kinds', (es) => kindsCell(es.map((e) => e.sc.first?.kinds))]);
   if (t.entries.some((e) => e.sc.iterate !== undefined)) {
     rows.push(
       ['Iterate · Build', (es) => buildCell(es.map((e) => e.sc.iterate?.build))],
       ['Iterate · Run-问数', (es) => countCell(es.map((e) => e.sc.iterate?.ask))],
       ['Iterate · Run-operations', (es) => countCell(es.map((e) => e.sc.iterate?.operations))],
     );
+    if (t.entries.some((e) => e.sc.iterate?.kinds)) rows.push(['Iterate · Run · kinds', (es) => kindsCell(es.map((e) => e.sc.iterate?.kinds))]);
   }
   rows.push(['Ask cost', (es) => spendCell(es, askCostText)], ['Ask time', (es) => spendCell(es, askTimeText)]);
   return rows;
@@ -486,7 +518,7 @@ export function renderSummaryTable(t: SummaryTable): string {
     lines.push('No run of this mode ran: every one was skipped.');
   } else {
     const dims = t.dims!;
-    lines.push(`${TABLE_DIMENSIONS.filter((d) => !(d === 'ask skills' && dims[d] === NO_ASK_SKILLS) && !(d === 'door arm' && dims[d] === NO_DOOR_ARM) && !(d === 'card' && dims[d] === NO_CARD_STAMP)).map((d) => dims[d]).join(' · ')}`, '');
+    lines.push(`${TABLE_DIMENSIONS.filter((d) => !(d === 'ask skills' && dims[d] === NO_ASK_SKILLS) && !(d === 'door arm' && dims[d] === NO_DOOR_ARM) && !(d === 'card' && dims[d] === NO_CARD_STAMP) && !(d === 'schema masking' && dims[d] === MASKED)).map((d) => dims[d]).join(' · ')}`, '');
     lines.push(`| ${t.mode === 'scratch' || t.mode === 'door' ? 'Author model' : 'Supplied build'} | Half | ${t.cols.map((c) => esc(c.label)).join(' | ')} |`);
     lines.push(`|:---|:---|${t.cols.map(() => ':---').join('|')}|`);
     const halves = halfRows(t);

@@ -1,11 +1,12 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * The `hidden: true` reader behind the Approvals drawer trim (objectui#5565).
+ * The declaration readers behind the Approvals Inbox queue figure: `hidden:
+ * true` and the object's `highlightFields` (ADR-0085).
  *
- * Pins the two things the render test cannot see on its own: that BOTH served
- * `fields` shapes are read, and that every not-an-answer resolves to the empty
- * set rather than to a guess — the fail-open direction the drawer depends on.
+ * Pins what the render test cannot see on its own: that BOTH served `fields`
+ * shapes are read, which `highlightFields` entry is the figure, and that every
+ * not-an-answer resolves to no figure rather than to a guess.
  *
  * ⛔ Nothing here reads `internal`. Per the maintainer's ruling on
  * objectstack#10749 (`hidden: true` stays UI-only; `internal: true` is the
@@ -14,7 +15,7 @@
  */
 
 import { describe, it, expect, vi } from 'vitest';
-import { hiddenFieldNames, readHiddenFields, planHiddenFieldReads } from './hiddenFields';
+import { hiddenFieldNames, inboxFigureField, readInboxFigureField, planHiddenFieldReads } from './hiddenFields';
 
 describe('hiddenFieldNames — both served `fields` shapes', () => {
   it('reads the record shape (`{ name: def }`)', () => {
@@ -59,22 +60,82 @@ describe('hiddenFieldNames — both served `fields` shapes', () => {
   });
 });
 
-describe('readHiddenFields — every not-an-answer is the empty set', () => {
-  it('resolves empty when the source cannot describe objects at all', async () => {
-    expect((await readHiddenFields({}, 'showcase_purchase')).size).toBe(0);
-    expect((await readHiddenFields(null, 'showcase_purchase')).size).toBe(0);
+describe('inboxFigureField — the first numeric `highlightFields` entry, or none', () => {
+  it('takes the first numeric entry in `highlightFields` order, not declaration order', () => {
+    // `overdue_amount` is declared first and its name looks like money; the
+    // author's curated list names `total_score`, so that is the figure.
+    expect(inboxFigureField({
+      highlightFields: ['name', 'total_score', 'overdue_amount'],
+      fields: {
+        overdue_amount: { type: 'currency' },
+        name: { type: 'text' },
+        total_score: { type: 'number' },
+      },
+    })).toBe('total_score');
   });
 
-  it('resolves empty — never rejects — when the read throws', async () => {
+  it('reads the array `fields` shape too', () => {
+    expect(inboxFigureField({
+      highlightFields: ['subject', 'budget'],
+      fields: [{ name: 'subject', type: 'text' }, { name: 'budget', type: 'currency' }],
+    })).toBe('budget');
+  });
+
+  it('accepts every numeric type, and a formula only when it computes a number', () => {
+    for (const def of [
+      { type: 'number' }, { type: 'currency' }, { type: 'percent' }, { type: 'summary' },
+      { type: 'formula', returnType: 'number' }, { type: 'formula', returnType: 'currency' },
+      { type: 'formula', returnType: 'percent' },
+    ]) {
+      expect(inboxFigureField({ highlightFields: ['x'], fields: { x: def } })).toBe('x');
+    }
+    for (const def of [
+      { type: 'text' }, { type: 'date' }, { type: 'boolean' }, { type: 'formula' },
+      { type: 'formula', returnType: 'text' }, { type: 'formula', returnType: 'date' }, {},
+    ]) {
+      expect(inboxFigureField({ highlightFields: ['x'], fields: { x: def } })).toBeNull();
+    }
+  });
+
+  it('skips an entry the author declared `hidden: true`, and one the schema does not define', () => {
+    expect(inboxFigureField({
+      highlightFields: ['ghost', 'secret_total', 'fee'],
+      fields: {
+        secret_total: { type: 'currency', hidden: true },
+        fee: { type: 'currency' },
+      },
+    })).toBe('fee');
+  });
+
+  it('is none when nothing numeric is declared — never a guess from field names', () => {
+    const fields = { total_amount: { type: 'currency' }, subject: { type: 'text' } };
+    expect(inboxFigureField({ fields })).toBeNull();
+    expect(inboxFigureField({ highlightFields: [], fields })).toBeNull();
+    expect(inboxFigureField({ highlightFields: ['subject'], fields })).toBeNull();
+    for (const schema of [null, undefined, {}, 42, { highlightFields: 'total_amount', fields }]) {
+      expect(inboxFigureField(schema)).toBeNull();
+    }
+  });
+});
+
+describe('readInboxFigureField — every not-an-answer is no figure', () => {
+  it('resolves null when the source cannot describe objects at all', async () => {
+    expect(await readInboxFigureField({}, 'showcase_purchase')).toBeNull();
+    expect(await readInboxFigureField(null, 'showcase_purchase')).toBeNull();
+  });
+
+  it('resolves null — never rejects — when the read throws', async () => {
     const getObjectSchema = vi.fn(async () => { throw new Error('403'); });
-    await expect(readHiddenFields({ getObjectSchema }, 'showcase_purchase'))
-      .resolves.toEqual(new Set());
+    await expect(readInboxFigureField({ getObjectSchema }, 'showcase_purchase')).resolves.toBeNull();
     expect(getObjectSchema).toHaveBeenCalledWith('showcase_purchase');
   });
 
-  it('returns the declared names when the read answers', async () => {
-    const getObjectSchema = vi.fn(async () => ({ fields: { x: { hidden: true } } }));
-    expect([...(await readHiddenFields({ getObjectSchema }, 'o'))]).toEqual(['x']);
+  it('returns the declared figure field when the read answers', async () => {
+    const getObjectSchema = vi.fn(async () => ({
+      highlightFields: ['x'],
+      fields: { x: { type: 'number' } },
+    }));
+    expect(await readInboxFigureField({ getObjectSchema }, 'o')).toBe('x');
   });
 });
 

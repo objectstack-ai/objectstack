@@ -55,6 +55,23 @@
  * the reader may fill adds that field, any other reads at the dialog's foot.
  * A stage that needs nothing opens the same dialog as the move's confirmation.
  * `record:path` leaves the option off and keeps its plain confirmation.
+ *
+ * The fields asked are judged against the record AS IT STANDS, on every
+ * render, not frozen at the pick (objectstack#36036). A 409 re-reads the
+ * record (`RecordContextValue.reread`, else the host's `refresh`; the record
+ * view provides `reread` on the page and in a drawer alike), and the re-read row reaches this hook later through the record
+ * context (the page's re-read is a bus notice, not a fetch it can await), so
+ * the list follows that row when it lands: a field another writer filled in
+ * the meantime leaves the dialog, the move no longer sends it, and a value the
+ * reader typed for it stops counting toward the fields it would chain in. When
+ * nothing is left, the dialog is the move's confirmation again.
+ *
+ * ## The flows a move starts (objectstack#35928)
+ *
+ * Both confirmations name the flows the move would start, under their
+ * sentence, through `../stageChangeStarts` — the reader the list cell's
+ * confirm shares, so the two surfaces cannot disagree. The server judges which
+ * flows start; a read that fails or answers none leaves the sentence alone.
  */
 
 import React from 'react';
@@ -98,6 +115,7 @@ import { NON_EDITABLE_SYSTEM_FIELDS } from '../systemFields';
 import { updateVia } from '../InlineEditSaveBar';
 import { isConcurrentUpdateError } from '../ConcurrentUpdateDialog';
 import { useDetailTranslation } from '../useDetailTranslation';
+import { StageChangeStarts, useRecordUpdateStarts } from '../stageChangeStarts';
 
 /** The field a server refusal names when its rule declares no field. */
 const RECORD_LEVEL_FIELD = '_record';
@@ -188,7 +206,11 @@ export interface StageChangeOptions {
   collectFields?: boolean;
 }
 
-/** A pending move: the stage, and the fields its dialog asks for. */
+/**
+ * A pending move: the stage, and the fields its dialog asked for at the pick.
+ * The dialog asks what the CURRENT record needs (`fieldsNeededAt` at render);
+ * the pick-time list only names the fields a re-read has since filled.
+ */
 type StageTarget = { value: unknown; label: string; fields: RequiredWhenPromptField[] };
 
 export function useStageChange(
@@ -198,6 +220,9 @@ export function useStageChange(
 ): StageChange {
   const collectFields = options.collectFields === true;
   const ctx = useRecordContext();
+  // The record's re-read after a move or a 409: the host's `reread`, else its
+  // `refresh` (a host that provides only `refresh` keeps re-reading).
+  const rereadRecord = async () => { await (ctx?.reread ?? ctx?.refresh)?.(); };
   const inline = useInlineEdit();
   const perms = usePermissions();
   const { t } = useDetailTranslation();
@@ -256,6 +281,14 @@ export function useStageChange(
     setTarget({ value: stage.value, label: stage.label, fields: fieldsNeededAt(stage.value) });
   };
 
+  // objectstack#35928 — the flows the pending move would start, named under
+  // the confirm's sentence by the shared reader the list cell's confirm uses.
+  const starts = useRecordUpdateStarts(
+    target && pressable && statusField && objectName
+      ? { object: objectName, recordId: String(recordId), changes: { [statusField]: target.value } }
+      : null,
+  );
+
   const labelOf = (field: string): string => {
     const declared = fieldDefOf(objectSchema, field)?.label;
     const fallback = declared == null ? field : String(pickLocalized(declared as Parameters<typeof pickLocalized>[0], language) ?? field);
@@ -275,12 +308,12 @@ export function useStageChange(
     setBusy(true);
     try {
       await updateVia(dataSource, objectName!, recordId!, { [statusField!]: stage.value }, ifMatchOf());
-      await ctx?.refresh?.();
+      await rereadRecord();
     } catch (err) {
       setRefusal(stageRefusalLines(err, statusField!, labelOf, t));
       // A stale token means the reader is looking at an old record: show the
       // current one, so a second press is judged against what is stored.
-      if (isConcurrentUpdateError(err)) await ctx?.refresh?.();
+      if (isConcurrentUpdateError(err)) await rereadRecord();
     } finally {
       setBusy(false);
     }
@@ -301,7 +334,7 @@ export function useStageChange(
       await updateVia(dataSource, objectName!, recordId!, { ...values, [statusField!]: stage.value }, ifMatchOf());
     } catch (err) {
       const concurrent = isConcurrentUpdateError(err);
-      if (concurrent) await ctx?.refresh?.();
+      if (concurrent) await rereadRecord();
       const named = concurrent ? [] : (extractFieldErrors(err) ?? []).filter((e) => !!e.message);
       if (named.length > 0 && !declaredUserMessage(err)) throw err;
       const line = stageRefusalLines(err, statusField!, labelOf, t).join(' ');
@@ -310,7 +343,7 @@ export function useStageChange(
       setBusy(false);
     }
     setTarget(null);
-    await ctx?.refresh?.();
+    await rereadRecord();
   };
 
   const dialog = collectFields
@@ -324,6 +357,7 @@ export function useStageChange(
               {t('detail.pathStageChangeDescription', { stage: target?.label ?? '' })}
             </AlertDialogDescription>
           </AlertDialogHeader>
+          <StageChangeStarts flows={starts} />
           <AlertDialogFooter>
             <AlertDialogCancel>{t('detail.cancel')}</AlertDialogCancel>
             <AlertDialogAction onClick={() => { void confirm(); }}>
@@ -351,19 +385,32 @@ export function useStageChange(
       return { ...f, def: { ...f.def, ...(localized ? { options: localized } : {}) }, label: labelOf(f.name) };
     };
     const exclude = [statusField];
+    // What the record as it stands needs. After a 409 re-read this is the
+    // re-read row's answer: a field another writer filled is gone, so the
+    // dialog neither shows nor sends it (it sends only the fields it shows).
+    const asked = fieldsNeededAt(stage.value);
+    // A value the reader typed for a field asked at the pick and no longer
+    // asked is not sent, so it must not ask for the fields it would chain in
+    // either: the write leaves the stored value standing, and the chain is
+    // judged against what the write leaves.
+    const noLongerAsked = new Set(
+      stage.fields.filter((f) => !asked.some((a) => a.name === f.name)).map((f) => f.name),
+    );
+    const sendable = (values: Record<string, unknown>) =>
+      noLongerAsked.size === 0 ? values : Object.fromEntries(Object.entries(values).filter(([k]) => !noLongerAsked.has(k)));
     return (
       <RequiredFieldsDialog
         // A new pick is a new collection: the dialog's typed values reset.
         key={String(stage.value)}
         open
-        fields={stage.fields.map(label)}
+        fields={asked.map(label)}
         submitting={busy}
         recordName={getRecordDisplayName(objectSchema, record)}
         changes={[{ name: statusField, label: labelOf(statusField), value: stage.label }]}
         moreFields={(values) => collectRequiredWhenPromptFields(
           objectFields,
           record,
-          { ...values, [statusField]: stage.value },
+          { ...sendable(values), [statusField]: stage.value },
           { exclude, fillable },
         ).map(label)}
         refusalField={(name) => {
@@ -376,9 +423,10 @@ export function useStageChange(
         // as `stageRefusalLines` reads them; another field by its label.
         labelOf={(name) => (name !== statusField && objectFields?.[name] ? labelOf(name) : undefined)}
         title={t('detail.pathStageChangeTitle')}
-        description={stage.fields.length > 0
+        description={asked.length > 0
           ? t('detail.stageMenuFieldsDescription', { stage: stage.label })
           : t('detail.pathStageChangeDescription', { stage: stage.label })}
+        notice={<StageChangeStarts flows={starts} />}
         submitLabel={t('detail.pathStageChangeConfirm')}
         onCancel={() => setTarget(null)}
         onSubmit={(values) => submitWithFields(stage, values)}

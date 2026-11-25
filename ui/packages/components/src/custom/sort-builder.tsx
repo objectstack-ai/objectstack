@@ -9,6 +9,7 @@
 import * as React from "react"
 import { X, Plus, GripVertical } from "lucide-react"
 import { createSafeTranslation } from "@object-ui/i18n"
+import { FILTER_DATE_LIKE_TYPES, FILTER_NUMBER_LIKE_TYPES } from "@object-ui/types"
 import type { SortItem as SpecSortItem } from "@objectstack/spec/shared"
 
 import { cn } from "../lib/utils"
@@ -20,10 +21,12 @@ const useSafeSortTranslation = createSafeTranslation(
     'sortBuilder.sortBy': 'Sort by',
     'sortBuilder.thenBy': 'Then by',
     'sortBuilder.selectField': 'Select field',
-    'sortBuilder.ascending': 'A → Z',
-    'sortBuilder.descending': 'Z → A',
-    'sortBuilder.oldestFirst': 'Oldest → Newest',
-    'sortBuilder.newestFirst': 'Newest → Oldest',
+    'listConditions.sort.time_asc': 'Oldest → Newest',
+    'listConditions.sort.time_desc': 'Newest → Oldest',
+    'listConditions.sort.size_asc': 'Low → High',
+    'listConditions.sort.size_desc': 'High → Low',
+    'listConditions.sort.alphabet_asc': 'A → Z',
+    'listConditions.sort.alphabet_desc': 'Z → A',
     'sortBuilder.addSort': 'Add sort',
     'sortBuilder.removeSort': 'Remove sort',
     'sortBuilder.reorder': 'Drag to reorder',
@@ -31,8 +34,46 @@ const useSafeSortTranslation = createSafeTranslation(
   'sortBuilder.sortBy',
 )
 
-/** Field types whose order is time: their direction reads "Oldest → Newest". */
-const DATE_SORT_TYPES = new Set(['date', 'datetime'])
+/** The direction words a sort level uses, by field type: time, size or the alphabet. */
+type SortWording = 'time' | 'size' | 'alphabet'
+
+/** Ordered by time: the filter's date family. */
+const TIME_SORT_TYPES: ReadonlySet<string> = new Set<string>(FILTER_DATE_LIKE_TYPES)
+/** Ordered by size: the spec's numeric value family, and `boolean` (false < true). */
+const SIZE_SORT_TYPES: ReadonlySet<string> = new Set<string>([...FILTER_NUMBER_LIKE_TYPES, 'boolean'])
+
+/**
+ * Which words name a sort direction on a field of `type`, over the
+ * `listConditions.sort.*` rows every locale carries. An unknown or absent type
+ * reads as the alphabet.
+ *
+ * Twin: `sortDirectionLabel` in `ui/packages/plugin-list/src/conditions/conditionModel.ts`
+ * words the phone sort sheet's levels by the same rule over the same rows. It
+ * is a copy, not an import, because sharing it would add a published export
+ * to this package; change both together.
+ */
+function sortWording(type: string | undefined): SortWording {
+  if (type && TIME_SORT_TYPES.has(type)) return 'time'
+  if (type && SIZE_SORT_TYPES.has(type)) return 'size'
+  return 'alphabet'
+}
+
+/** The words for one sort direction on a field of `type`: time, size or the alphabet. */
+function sortDirectionLabel(
+  type: string | undefined,
+  order: 'asc' | 'desc',
+  t: (key: string) => string,
+): string {
+  // Literal keys, not a template: the locale gates read keys by their text.
+  switch (sortWording(type)) {
+    case 'time':
+      return order === 'asc' ? t('listConditions.sort.time_asc') : t('listConditions.sort.time_desc')
+    case 'size':
+      return order === 'asc' ? t('listConditions.sort.size_asc') : t('listConditions.sort.size_desc')
+    default:
+      return order === 'asc' ? t('listConditions.sort.alphabet_asc') : t('listConditions.sort.alphabet_desc')
+  }
+}
 
 /**
  * One row of the SortBuilder UI: the spec's `SortItem` (`{ field, order }`)
@@ -63,9 +104,10 @@ export interface SortBuilderProps {
      */
     disabled?: boolean
     /**
-     * The field's type (objectstack#27520). A `date` or `datetime` row names
-     * its direction as time ("Oldest → Newest") instead of "A → Z". Absent,
-     * the row reads "A → Z" as before.
+     * The field's type (objectstack#27520). A date-like row names its
+     * direction as time ("Oldest → Newest"), a numeric or boolean row as size
+     * ("Low → High"), anything else as the alphabet ("A → Z"); see
+     * {@link sortWording}. Absent, the row reads "A → Z".
      */
     type?: string
   }>;
@@ -124,12 +166,12 @@ export function SortBuilder({
   // already sorts by is not offered again.
   const firstChoosable = fields.find((f) => !f.disabled && !heldBy.has(f.value));
 
-  // A date's direction is time, not the alphabet (objectstack#27520).
+  // A date's direction is time and a number's is size, not the alphabet.
   const typeOf = new Map(fields.map((f) => [f.value, f.type]));
-  const directionLabels = (field: string) =>
-    DATE_SORT_TYPES.has(typeOf.get(field) ?? '')
-      ? { asc: t('sortBuilder.oldestFirst'), desc: t('sortBuilder.newestFirst') }
-      : { asc: t('sortBuilder.ascending'), desc: t('sortBuilder.descending') };
+  const directionLabels = (field: string) => ({
+    asc: sortDirectionLabel(typeOf.get(field), 'asc', t),
+    desc: sortDirectionLabel(typeOf.get(field), 'desc', t),
+  });
 
   const addItem = () => {
     const newItem: SortItem = {

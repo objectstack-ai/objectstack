@@ -7,6 +7,8 @@
  */
 
 import * as React from 'react';
+import type { FilterBuilderRowGroup, SortItem } from '@object-ui/components';
+import type { DataSource } from '@object-ui/types';
 
 /**
  * `true` inside the record page's related column (objectstack#26678): a
@@ -97,6 +99,33 @@ export interface RecordBodyTableEditorSlot {
 
 /** The open edit state's body-table editor slot, or `null` (see {@link RecordBodyTableEditorSlot}). */
 export const RecordBodyTableEditorSlotContext = React.createContext<RecordBodyTableEditorSlot | null>(null);
+
+/**
+ * What a related list opened as the record page's tab draws as its condition
+ * row (objectstack#35892): the list page's own Sort and Filter, supplied by the
+ * host because the row lives in `@object-ui/plugin-list`, which depends on
+ * this package. The host draws `plugin-list`'s `ListConditionsBlock`; while
+ * the value is `null` (a host that supplies none) the tab draws no condition
+ * row. A host element, never a node type a page could carry.
+ */
+export interface RelatedListConditionsProps {
+  objectName?: string;
+  objectDef?: { fields?: Record<string, any> } | null;
+  /** The fields the tab's table shows, in column order. */
+  shownFields?: ReadonlyArray<string>;
+  sort: ReadonlyArray<SortItem>;
+  onSortChange: (next: SortItem[]) => void;
+  filters: FilterBuilderRowGroup;
+  /** The next filter group, with the query node it applies (`undefined` = no filter). */
+  onFiltersChange: (next: FilterBuilderRowGroup, filter: unknown[] | undefined) => void;
+  /** 「Discard」 at the row's end, passed only while the reader changed anything. */
+  onDiscard?: () => void;
+  /** Where the names of the records a lookup condition points at are read. */
+  dataSource?: Pick<DataSource, 'find' | 'getObjectSchema'> | null;
+}
+
+/** The host's condition row for a related tab, or `null` (see {@link RelatedListConditionsProps}). */
+export const RelatedListConditionsSlotContext = React.createContext<((props: RelatedListConditionsProps) => React.ReactNode) | null>(null);
 
 /** Enlarge a related list in place — the host's `?related=` — for a body table. */
 export const RelatedEnlargeContext = React.createContext<((id: string) => void) | null>(null);

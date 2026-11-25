@@ -38,6 +38,7 @@
     "react": "^19.0.0"
   },
   "dependencies": {
+    "@object-ui/types": "workspace:*",
     "@objectstack/spec": "workspace:^",
     "better-auth": "1.7.12"
   },

@@ -272,8 +272,12 @@ describe('the bar\'s menus and the controls other modules draw (objectstack#2907
     expect(src).toContain(`className="w-64 ${PHONE_MENU_ROWS}"`);
   });
 
-  it('the account menu, and the theme and language controls inside it', () => {
-    expect(source('AppHeader.tsx')).toContain(`className="min-w-64 rounded-lg ${PHONE_MENU_ROWS}"`);
+  it('the account menu (its own module since objectstack#36112), and the theme and language controls inside it', () => {
+    // The phone-width cap between the two is objectstack#36041's
+    // (`AccountMenu.phoneWidth-36041.test.tsx`).
+    expect(source('AccountMenu.tsx')).toContain(
+      `className="min-w-64 rounded-lg max-md:max-w-[calc(100vw-2rem)] ${PHONE_MENU_ROWS}"`,
+    );
     for (const file of ['ModeToggle.tsx', 'LocaleSwitcher.tsx']) {
       const src = source(file);
       expect(src, file).toContain(`className="h-8 w-8 ${PHONE_TARGET}"`);

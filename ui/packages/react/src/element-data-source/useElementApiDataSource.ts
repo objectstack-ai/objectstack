@@ -62,7 +62,10 @@
  * And a write ends the reuse: once anything declares a data change
  * (`notifyDataChanged`, the bus every action and save reports to), nothing
  * read before it is handed out again, so a read after an action asks the
- * server.
+ * server. The one exception is the shell's own UI state: a save of the
+ * person's preference rows (the recent items, the last app) is bookkeeping,
+ * not a change to the data a page reads, and leaves the open's reads in place
+ * (objectstack#36497).
  *
  * Without a scope, nothing is kept beyond the request in flight, as before.
  *
@@ -223,6 +226,24 @@ export interface ElementApiOpen {
 const ElementApiOpenContext = createContext<ElementApiOpen | null>(null);
 
 /**
+ * The objects the shell writes as its own UI state during an open
+ * (objectstack#36497): `sys_user_preference`, the person's preference rows
+ * (ADR-0120 D1), where the console keeps the recent items, the last app, the
+ * favorites and the record-page choices as the person works. Opening a page
+ * writes some of them, and the data source reports each write on the
+ * data-invalidation bus like any other.
+ *
+ * Such a write is bookkeeping about the person, not a change to data an
+ * endpoint answers with, so it does not end an open's reuse: a navigation
+ * entry and a page element bound to the same URL still make one request when
+ * a preference save lands between them. The bus still carries the change to
+ * the readers that name the object (the User page's Preferences list reads
+ * those rows), so the write is not hidden from the one surface that shows it;
+ * only the open's kept reads, which name no object, let it go by.
+ */
+const UI_STATE_OBJECTS: ReadonlySet<string> = new Set(['sys_user_preference']);
+
+/**
  * Keep the API reads asked under `open` for as long as `open` names the page's
  * open: a reader below that asks for a URL the open has already read gets that
  * read's answer, with no request (see "One read per open" above). The host
@@ -232,9 +253,16 @@ export function ElementApiOpenScope({ open, children }: { open: string; children
   // The reads live as long as the scope does; `open` is what tells one open's
   // reads from the next one's.
   const [reads] = useState<ElementApiOpen['reads']>(() => new Map());
-  // An endpoint names no object, so ANY declared change may have moved its
-  // answer: every kept read is dropped, and the next reader asks again.
-  useEffect(() => subscribeDataChanges(() => reads.clear()), [reads]);
+  // An endpoint names no object, so a declared change to data may have moved
+  // its answer: every kept read is dropped, and the next reader asks again.
+  // A change to the shell's own UI state is not one (see UI_STATE_OBJECTS).
+  useEffect(
+    () =>
+      subscribeDataChanges((change) => {
+        if (!UI_STATE_OBJECTS.has(change.objectName)) reads.clear();
+      }),
+    [reads],
+  );
   const value = useMemo<ElementApiOpen>(() => ({ open, reads }), [open, reads]);
   return createElement(ElementApiOpenContext.Provider, { value }, children);
 }

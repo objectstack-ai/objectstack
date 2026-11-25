@@ -11,6 +11,14 @@ import { buildSharingMiddleware } from './sharing-plugin.js';
 import { bootRequestContext } from './exec-context-seam.testkit.js';
 import { SysRecordShare } from './objects/sys-record-share.object.js';
 import { SysSharingRule } from './objects/sys-sharing-rule.object.js';
+import { SharedRecordIds, isSharedRecordIds } from '@objectstack/spec/data';
+import { WRITE_ACCESS_LEVELS } from './access-level.js';
+import { inMembers } from './shared-record-ids.testkit.js';
+
+/** [ADR-0155 D3] The share arm of a read scope: the leaf, never an id list. */
+const shareArm = (object: string, user: string) => ({ id: { $in: SharedRecordIds.read(object, user) } });
+/** [ADR-0155 D3, ③ ruled A] The share arm of a bulk-update scope: the leaf's write form. */
+const editShareArm = (object: string, user: string) => ({ id: { $in: SharedRecordIds.write(object, user, WRITE_ACCESS_LEVELS) } });
 
 // ─────────────────────────────────────────────────────────────────────
 // In-memory fake engine
@@ -39,7 +47,8 @@ function makeFakeEngine(schemas: Record<string, any>) {
       if (k === '$or' || k === '$and') continue;
       const rv = row[k];
       if (v != null && typeof v === 'object' && '$in' in (v as any)) {
-        if (!(v as any).$in.includes(rv)) return false;
+        // [ADR-0155] A share-grant leaf resolves over this double's own rows.
+        if (!inMembers((v as any).$in, tables.sys_record_share).includes(rv)) return false;
         continue;
       }
       if (rv !== v) return false;
@@ -183,7 +192,7 @@ describe('SharingService.buildReadFilter', () => {
     // 张三 (u1) must NOT read 李四's records on an OWD-less custom object:
     // the read filter narrows to owner_id = u1 instead of passing null.
     const f = await svc.buildReadFilter('task', { userId: 'u1' });
-    expect(f).toEqual({ owner_id: 'u1' });
+    expect(f).toEqual({ $or: [{ owner_id: 'u1' }, shareArm('task', 'u1')] });
   });
 
   it('[ADR-0090 D1] system object with unset sharingModel keeps the public fall-through', async () => {
@@ -193,7 +202,7 @@ describe('SharingService.buildReadFilter', () => {
   it('[ADR-0090 D4] an unrecognised stored sharingModel fails CLOSED to private', async () => {
     engine.schemas.legacy = { name: 'legacy', sharingModel: 'read_write', fields: { id: {}, owner_id: {} } } as any;
     const f = await svc.buildReadFilter('legacy', { userId: 'u1' });
-    expect(f).toEqual({ owner_id: 'u1' });
+    expect(f).toEqual({ $or: [{ owner_id: 'u1' }, shareArm('legacy', 'u1')] });
   });
 
   it('returns null for read-only-sharing objects (writes are gated, reads are not)', async () => {
@@ -217,19 +226,21 @@ describe('SharingService.buildReadFilter', () => {
     expect(f).toEqual({ id: '__deny_all__' });
   });
 
-  it('returns owner-only filter when user has no explicit shares', async () => {
+  it('[ADR-0155 D3] carries the share arm with no grant at all: the statement does not depend on the grant count', async () => {
     const f = await svc.buildReadFilter('account', { userId: 'alice' });
-    expect(f).toEqual({ owner_id: 'alice' });
+    expect(f).toEqual({ $or: [{ owner_id: 'alice' }, shareArm('account', 'alice')] });
   });
 
-  it('returns owner OR shared-record filter when grants exist', async () => {
+  it('[ADR-0155 D3] returns owner OR the share-grant leaf, which denotes every grant to the caller', async () => {
     // Setup grants run as system — grant authorization has its own suite below.
     await svc.grant({ object: 'account', recordId: 'a1', recipientId: 'alice' }, { isSystem: true });
     await svc.grant({ object: 'account', recordId: 'a2', recipientId: 'alice', accessLevel: 'edit' }, { isSystem: true });
+    await svc.grant({ object: 'account', recordId: 'a3', recipientId: 'bob' }, { isSystem: true });
     const f: any = await svc.buildReadFilter('account', { userId: 'alice' });
-    expect(f.$or).toBeDefined();
-    expect(f.$or[0]).toEqual({ owner_id: 'alice' });
-    expect(f.$or[1].id.$in.sort()).toEqual(['a1', 'a2']);
+    expect(f).toEqual({ $or: [{ owner_id: 'alice' }, shareArm('account', 'alice')] });
+    // The branded leaf, never an unbranded copy (which the engine's door refuses).
+    expect(isSharedRecordIds(f.$or[1].id.$in)).toBe(true);
+    expect([...inMembers(f.$or[1].id.$in, engine._tables.sys_record_share)].sort()).toEqual(['a1', 'a2']);
   });
 });
 
@@ -264,17 +275,18 @@ describe('[#26180] SharingService — the pending approver\'s read', () => {
   it('ORs the pending-approval record ids in beside the owner-match', async () => {
     const svc = serviceWith(pendingOn([['a9', ['apr_1']]]));
     expect(await svc.buildReadFilter('account', { userId: 'alice' })).toEqual({
-      $or: [{ owner_id: 'alice' }, { id: { $in: ['a9'] } }],
+      $or: [{ owner_id: 'alice' }, shareArm('account', 'alice'), { id: { $in: ['a9'] } }],
     });
     expect(asked).toEqual([{ object: 'account', userId: 'alice' }]);
   });
 
-  it('joins the record shares, once per id', async () => {
+  it('[ADR-0155 D3] stands as a disjunct of its own beside the share arm, never merged into it', async () => {
     await new SharingService({ engine }).grant({ object: 'account', recordId: 'a1', recipientId: 'alice' }, { isSystem: true });
     const svc = serviceWith(pendingOn([['a1', ['apr_1']], ['a9', ['apr_2']]]));
     const f: any = await svc.buildReadFilter('account', { userId: 'alice' });
     expect(f.$or[0]).toEqual({ owner_id: 'alice' });
-    expect([...f.$or[1].id.$in].sort()).toEqual(['a1', 'a9']);
+    expect(f.$or[1]).toEqual(shareArm('account', 'alice'));
+    expect(f.$or[2]).toEqual({ id: { $in: ['a1', 'a9'] } });
   });
 
   it('never reaches a write gate: an approver on the slate who owns nothing edits and deletes nothing', async () => {
@@ -282,7 +294,9 @@ describe('[#26180] SharingService — the pending approver\'s read', () => {
     await engine.insert('account', { id: 'a9', owner_id: 'bob' });
     expect(await svc.canEdit('account', 'a9', { userId: 'alice' })).toBe(false);
     expect(await svc.canDelete('account', 'a9', { userId: 'alice' })).toBe(false);
-    expect(await svc.buildWriteFilter('account', { userId: 'alice' })).toEqual({ owner_id: 'alice' });
+    expect(await svc.buildWriteFilter('account', { userId: 'alice' })).toEqual({
+      $or: [{ owner_id: 'alice' }, editShareArm('account', 'alice')],
+    });
   });
 
   it('is not asked where the read filter imposes nothing, or denies all', async () => {
@@ -295,13 +309,13 @@ describe('[#26180] SharingService — the pending approver\'s read', () => {
   it('grants nothing to an on-behalf-of principal: the grant is the person\'s own (ADR-0090 D10)', async () => {
     const svc = serviceWith(pendingOn([['a9', ['apr_1']]]));
     const delegated = { userId: 'agent_1', onBehalfOf: { userId: 'alice' } } as any;
-    expect(await svc.buildReadFilter('account', delegated)).toEqual({ owner_id: 'agent_1' });
+    expect(await svc.buildReadFilter('account', delegated)).toEqual({ $or: [{ owner_id: 'agent_1' }, shareArm('account', 'agent_1')] });
     expect(await svc.listApprovalReadGrants('account', 'a9', delegated)).toEqual([]);
     expect(asked).toEqual([]);
   });
 
   it('fails closed: no service, no member, a throwing lookup or a rejected read all grant nothing', async () => {
-    const ownerOnly = { owner_id: 'alice' };
+    const ownerOnly = { $or: [{ owner_id: 'alice' }, shareArm('account', 'alice')] };
     const warn = vi.fn();
     const variants: Array<SharingServiceOptions['approvals']> = [
       undefined,
@@ -712,7 +726,10 @@ describe('buildSharingMiddleware (engine integration)', () => {
       context: { userId: 'alice' },
     };
     await mw(ctx, async () => {});
-    expect(ctx.ast.where).toEqual({ owner_id: 'alice' });
+    expect(ctx.ast.where).toEqual({ $or: [{ owner_id: 'alice' }, shareArm('account', 'alice')] });
+    // [ADR-0155 plan step 6] The scope lands in `where` only: never mirrored
+    // under `filter`, which the engine's executor seam does not walk.
+    expect(ctx.ast.filter).toBeUndefined();
   });
 
   it('skips read filter for system context', async () => {
@@ -849,7 +866,10 @@ describe('buildSharingMiddleware (engine integration)', () => {
       context: { userId: 'bob' },
     };
     await mw(ctx, async () => {});
-    expect(ctx.ast.where).toEqual({ $or: [{ owner_id: 'bob' }, { id: { $in: ['a2'] } }] });
+    expect(ctx.ast.where).toEqual({ $or: [{ owner_id: 'bob' }, editShareArm('account', 'bob')] });
+    expect(inMembers((ctx.ast.where as any).$or[1].id.$in, engine._tables.sys_record_share)).toEqual(['a2']);
+    // [ADR-0155 plan step 6] …and the write scope is not mirrored under `filter` either.
+    expect(ctx.ast.filter).toBeUndefined();
   });
 
   it('does not block insert', async () => {
@@ -874,7 +894,7 @@ describe('buildSharingMiddleware (engine integration)', () => {
       context: { userId: 'alice' },
     };
     await mw(ctx, async () => {});
-    expect(ctx.ast.where).toEqual({ $and: [{ name: 'Acme' }, { owner_id: 'alice' }] });
+    expect(ctx.ast.where).toEqual({ $and: [{ name: 'Acme' }, { $or: [{ owner_id: 'alice' }, shareArm('account', 'alice')] }] });
   });
 
   // ─── Bulk (multi) write owner scoping (#2982) ───────────────────
@@ -891,8 +911,8 @@ describe('buildSharingMiddleware (engine integration)', () => {
     let nextCalled = false;
     await mw(ctx, async () => { nextCalled = true; });
     expect(nextCalled).toBe(true);
-    // bob's bulk update is constrained to rows bob owns.
-    expect(ctx.ast.where).toEqual({ $and: [{ name: 'X' }, { owner_id: 'bob' }] });
+    // bob's bulk update is constrained to rows bob owns, or edit-shares to bob.
+    expect(ctx.ast.where).toEqual({ $and: [{ name: 'X' }, { $or: [{ owner_id: 'bob' }, editShareArm('account', 'bob')] }] });
   });
 
   it('bulk delete: injects the owner filter (no single id to canEdit-gate)', async () => {
@@ -920,7 +940,8 @@ describe('buildSharingMiddleware (engine integration)', () => {
       context: { userId: 'bob' },
     };
     await mw(ctx, async () => {});
-    expect(ctx.ast.where).toEqual({ $or: [{ owner_id: 'bob' }, { id: { $in: ['a1'] } }] });
+    expect(ctx.ast.where).toEqual({ $or: [{ owner_id: 'bob' }, editShareArm('account', 'bob')] });
+    expect(inMembers((ctx.ast.where as any).$or[1].id.$in, engine._tables.sys_record_share)).toEqual(['a1']);
   });
 
   it('bulk update on a public_read (read) object is STILL owner-write-scoped', async () => {
@@ -938,7 +959,7 @@ describe('buildSharingMiddleware (engine integration)', () => {
       context: { userId: 'bob' },
     };
     await mw(ctx, async () => {});
-    expect(ctx.ast.where).toEqual({ owner_id: 'bob' });
+    expect(ctx.ast.where).toEqual({ $or: [{ owner_id: 'bob' }, editShareArm('lead', 'bob')] });
   });
 
   it('bulk update: system context is unrestricted', async () => {
@@ -1498,6 +1519,8 @@ describe('[ADR-0111 D5] sys_record_share read self-scope (middleware)', () => {
     expect(ctx.ast.where).toEqual({
       $or: [{ recipient_id: 'mallory' }, { granted_by: 'mallory' }],
     });
+    // [ADR-0155 plan step 6] `where` only, as on the general read path.
+    expect(ctx.ast.filter).toBeUndefined();
   });
 
   it('manage_sharing (and the legacy manage_platform_settings) keeps the tenant-wide list', async () => {
@@ -1514,6 +1537,7 @@ describe('[ADR-0111 D5] sys_record_share read self-scope (middleware)', () => {
     const ctx = findCtx({});
     await mw(ctx, async () => {});
     expect(ctx.ast.where).toEqual({ id: '__deny_all__' });
+    expect(ctx.ast.filter).toBeUndefined();
   });
 
   it('system context is untouched', async () => {
@@ -1686,7 +1710,7 @@ describe('[#5859] resolveOwnerScopeIds fills the AUTHORITATIVE organization', ()
 
     // The bulk path reads the same owner set — dana must not be in it.
     const filter: any = await svc.buildWriteFilter('account', bob, 'update');
-    expect(filter).toEqual({ owner_id: { $in: ['alice', 'bob'] } });
+    expect(filter).toEqual({ $or: [{ owner_id: { $in: ['alice', 'bob'] } }, editShareArm('account', 'bob')] });
   });
 
   // ── [ADR-0105 D1] The posture fork on "no active organization" ────────
@@ -2085,19 +2109,19 @@ describe('[#6428] the boolean projection does not drift (compatibility clause)',
 
 // ─────────────────────────────────────────────────────────────────────
 
-describe('[#13551] the record-share `$in` drops nullish `record_id` rows', () => {
-  // The guard standing in front of BOTH `$in` constructions used to read
-  // `.map((g) => String(g.record_id)).filter(Boolean)`, which cannot drop a
-  // nullish `record_id`: `String(null)` is `'null'`, `String(undefined)` is
-  // `'undefined'`, and both are truthy. What follows pins the MECHANISM — a
-  // row with no `record_id` contributes no member — and asserts nothing about
-  // whether such a row exists in the wild.
+describe('[#13551 → ADR-0155] the scopes read no grant row: a nullish `record_id` is the evaluator\'s to drop', () => {
+  // #13551 repaired the guard in front of the id list both scopes used to
+  // bind: a row with a nullish `record_id` contributed no member. From the
+  // switch on there is no list to guard. Both scopes carry the share-grant
+  // leaf, which this service builds without reading `sys_record_share` at all,
+  // and the guard moved into the leaf's fixed inner read, which every
+  // evaluator runs (`record_id IS NOT NULL AND record_id <> ''` on SQL,
+  // pinned per dialect in driver-sql; and against a real SQLite table in
+  // `shared-record-ids-switch.test.ts`, where a corrupt row admits nothing).
   //
   // The rows are seeded straight into the fake table on purpose: `grant()`
   // refuses a nullish `recordId` at the front door, so writing the row
-  // directly is the only way to stand up the already-corrupt state the guard
-  // exists for — the shape a bad backfill or an out-of-band
-  // `sys_record_share` write would leave behind.
+  // directly is the only way to stand up the already-corrupt state.
   let engine: ReturnType<typeof makeFakeEngine>;
   let svc: SharingService;
 
@@ -2107,7 +2131,7 @@ describe('[#13551] the record-share `$in` drops nullish `record_id` rows', () =>
     record_id,
     recipient_type: 'user',
     recipient_id: 'alice',
-    access_level: 'edit', // in WRITE_ACCESS_LEVELS, so the write filter reads it too
+    access_level: 'edit', // in WRITE_ACCESS_LEVELS, so the write form denotes it too
   });
 
   beforeEach(() => {
@@ -2118,50 +2142,20 @@ describe('[#13551] the record-share `$in` drops nullish `record_id` rows', () =>
     svc = new SharingService({ engine });
   });
 
-  it('read filter: a null / undefined `record_id` contributes NO member, and the real grant survives', async () => {
-    engine._tables.sys_record_share = [shareRow('a1'), shareRow(null), shareRow(undefined)];
-    const f: any = await svc.buildReadFilter('account', { userId: 'alice' });
-    expect(f.$or[1].id.$in).toEqual(['a1']);
-    // Named literally: these are the two members the dead guard used to emit.
-    expect(f.$or[1].id.$in).not.toContain('null');
-    expect(f.$or[1].id.$in).not.toContain('undefined');
-  });
-
-  it('write filter: the same rows, the same outcome — both construction sites are repaired', async () => {
-    engine._tables.sys_record_share = [shareRow('a1'), shareRow(null), shareRow(undefined)];
-    const f: any = await svc.buildWriteFilter('account', { userId: 'alice' }, 'update');
-    expect(f.$or[1].id.$in).toEqual(['a1']);
-    expect(f.$or[1].id.$in).not.toContain('null');
-    expect(f.$or[1].id.$in).not.toContain('undefined');
-  });
-
-  it('when EVERY grant is nullish the share branch disappears, on both filters', async () => {
-    engine._tables.sys_record_share = [shareRow(null), shareRow(undefined)];
-    // Not an `$or` carrying a member that matches nothing: zero usable grants
-    // collapses to the owner match, which is what "no grants" already meant.
-    expect(await svc.buildReadFilter('account', { userId: 'alice' }))
-      .toEqual({ owner_id: 'alice' });
-    expect(await svc.buildWriteFilter('account', { userId: 'alice' }, 'update'))
-      .toEqual({ owner_id: 'alice' });
-  });
-
-  it('over-denial control: an ordinary grant set still produces exactly its ids, on both filters', async () => {
-    engine._tables.sys_record_share = [shareRow('a1'), shareRow('a2'), shareRow('a3')];
-    const read: any = await svc.buildReadFilter('account', { userId: 'alice' });
-    const write: any = await svc.buildWriteFilter('account', { userId: 'alice' }, 'update');
-    expect(read.$or[0]).toEqual({ owner_id: 'alice' });
-    expect(write.$or[0]).toEqual({ owner_id: 'alice' });
-    expect(read.$or[1].id.$in).toEqual(['a1', 'a2', 'a3']);
-    expect(write.$or[1].id.$in).toEqual(['a1', 'a2', 'a3']);
-  });
-
-  it('the non-null path is unchanged: a driver-numeric id still stringifies, an empty string is still dropped', async () => {
-    engine._tables.sys_record_share = [shareRow(42), shareRow(''), shareRow('a1')];
-    const f: any = await svc.buildReadFilter('account', { userId: 'alice' });
-    // `42` becomes `'42'` exactly as `String()` always made it, and `''` — the
-    // one value the old `.filter(Boolean)` could actually drop — is still
-    // dropped. Only the nullish rows are newly excluded.
-    expect(f.$or[1].id.$in).toEqual(['42', 'a1']);
+  it('corrupt, numeric, ordinary or no grant rows: both scopes are the same leaf, built without reading a row', async () => {
+    const tables = [
+      [],
+      [shareRow('a1'), shareRow(null), shareRow(undefined)],
+      [shareRow(null), shareRow(undefined)],
+      [shareRow(42), shareRow(''), shareRow('a1')],
+    ];
+    for (const rows of tables) {
+      engine._tables.sys_record_share = rows;
+      expect(await svc.buildReadFilter('account', { userId: 'alice' }))
+        .toEqual({ $or: [{ owner_id: 'alice' }, shareArm('account', 'alice')] });
+      expect(await svc.buildWriteFilter('account', { userId: 'alice' }, 'update'))
+        .toEqual({ $or: [{ owner_id: 'alice' }, editShareArm('account', 'alice')] });
+    }
   });
 });
 

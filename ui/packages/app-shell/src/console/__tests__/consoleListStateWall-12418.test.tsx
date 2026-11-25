@@ -6,14 +6,17 @@
  * `walledCatalogWriteVerdict`). A header sort and a Manage Views drag used to
  * be such writes: the sort PUT the view, the drag PATCHed a `sortOrder` onto
  * every saved view, so a workspace admin who is not the operator got an error
- * for a personal preference. They are the user's own list state now, a
- * `sys_user_preference` row: an organization row the tenant's user may write
- * under every posture.
+ * for a personal preference. They are the user's own list state now. Since
+ * objectstack#35955 the sort is the list's draft and the tab order and the
+ * density are the reader's layout in this browser
+ * (`list-layout:<user id>:<object>`, `../../views/listLayoutStore.ts`), so
+ * neither reaches the server at all: no metadata write, and no
+ * `sys_user_preference` write either.
  *
  * ## The tree
  *
  * The real `ConsoleShell` providers, the real `ConnectedShell` (its real
- * `ObjectStackAdapter`, its `UserStateBridge` and the list-state family), and
+ * `ObjectStackAdapter` and its `UserStateBridge`), and
  * the real object page inside it, over the fake framework the preference
  * budget pin uses (`preferenceFramework.ts`), here WALLED: every metadata
  * write is answered 403. The session reports the `group` posture and a
@@ -23,13 +26,12 @@
  *
  * ## The pins
  *
- *   1. A header sort and a drag-reorder put NO metadata write on the wire
- *      and raise no error. The drag lands as ONE preference write of the
- *      object's row; the sort is the list's draft (objectstack#35955) and
- *      writes nothing.
+ *   1. A header sort and a drag-reorder put NO write on the wire and raise no
+ *      error. The drag is kept in this browser's layout entry; the sort is
+ *      the list's draft and is kept nowhere.
  *   2. objectui#12474 — the density toggle and a Hide Fields change put NO
- *      metadata write on the wire and raise no error. The density lands as
- *      ONE preference write of the same row; the hide is the draft's.
+ *      write on the wire and raise no error. The density is kept in the same
+ *      layout entry; the hide is the draft's.
  *   3. CONTROL — the wall is live: a metadata write made in this same tree
  *      (the real adapter's own view write, `createView`) is answered 403.
  *      Since objectui#12474 no list toolbar control makes one, so the control
@@ -126,7 +128,8 @@ import { useAdapter } from '../../providers/AdapterProvider';
 import '@objectstack/lint';
 import { ObjectView } from '../../views/ObjectView';
 import { resetListDraftStoreForTests } from '../../views/listDraftStore';
-import { createPreferenceFramework, preferenceRowId, type PreferenceFramework } from './preferenceFramework';
+import { listLayoutStorageKey, resetListLayoutStoreForTests } from '../../views/listLayoutStore';
+import { createPreferenceFramework, type PreferenceFramework } from './preferenceFramework';
 
 const FIELDS = {
   id: { type: 'text', label: 'Id' },
@@ -142,7 +145,7 @@ const OBJECT = {
   },
 };
 
-/** The user already has a list-state row for the object (from another device). */
+/** A list-state row an earlier Console stored for the user: no longer read or written (objectstack#35955). */
 const STORE = { u1: { 'ui.list.account': { viewOrder: [ALL_ID, MINE_ID] } } };
 
 let fake: PreferenceFramework;
@@ -174,10 +177,14 @@ function boot() {
   );
 }
 
+/** The reader's layout entry for the object in this browser. */
+const storedLayout = () => JSON.parse(localStorage.getItem(listLayoutStorageKey('u1', OBJECT_NAME)!) ?? 'null');
+
 const wait = (ms: number) => act(() => new Promise<void>((resolve) => setTimeout(resolve, ms)));
 
 beforeEach(() => {
   resetListDraftStoreForTests();
+  resetListLayoutStoreForTests();
   listProps = null;
   pageAdapter = null;
   localStorage.clear();
@@ -195,7 +202,7 @@ afterEach(() => {
 });
 
 describe('a user\'s list state under a walled posture (objectui#12418)', () => {
-  it('a header sort and a drag-reorder write no metadata and raise no error; the drag lands as one preference write, the sort as the draft', async () => {
+  it('a header sort and a drag-reorder write nothing to the server and raise no error; the drag is kept in this browser, the sort as the draft', async () => {
     boot();
     await waitFor(() => expect(typeof listProps?.onSortChange).toBe('function'), { timeout: 5000 });
     await screen.findByTestId('stub-reorder');
@@ -208,22 +215,18 @@ describe('a user\'s list state under a walled posture (objectui#12418)', () => {
     await act(async () => {
       fireEvent.click(screen.getByTestId('stub-reorder'));
     });
-    // Past the preference debounce (500 ms) and the round trip.
-    await waitFor(() => expect(fake.wire.writes).toHaveLength(1), { timeout: 3000 });
-    await wait(400);
+    // Past the old preference debounce (500 ms) and a round trip.
+    await wait(900);
 
     expect(fake.wire.metaWrites).toEqual([]);
+    expect(fake.wire.writes).toEqual([]);
     expect(toast.error).not.toHaveBeenCalled();
-    expect(fake.wire.writes).toHaveLength(1);
-    const [write] = fake.wire.writes;
-    // An update of the row the boot read found: no second read, no insert.
-    expect(write.id).toBe(preferenceRowId('u1', 'ui.list.account'));
     expect(fake.wire.gets.length).toBe(readsBefore);
-    // objectstack#35955 — the sort is the list's draft: it is stored nowhere.
-    expect(write.value).toEqual({ viewOrder: [MINE_ID, ALL_ID] });
+    // objectstack#35955 — the order is this browser's; the sort is the list's draft, stored nowhere.
+    expect(storedLayout()).toEqual({ viewOrder: [MINE_ID, ALL_ID] });
   });
 
-  it('a density toggle and a Hide Fields change write no metadata and raise no error; the density lands as one preference write, the hide as the draft (objectui#12474)', async () => {
+  it('a density toggle and a Hide Fields change write nothing to the server and raise no error; the density is kept in this browser, the hide as the draft (objectui#12474)', async () => {
     boot();
     await waitFor(() => expect(typeof listProps?.schema?.onDensityChange).toBe('function'), { timeout: 5000 });
     await wait(100);
@@ -232,30 +235,21 @@ describe('a user\'s list state under a walled posture (objectui#12418)', () => {
     act(() => {
       listProps.schema.onDensityChange('comfortable');
     });
-    // Past the preference debounce (500 ms) and the round trip.
-    await waitFor(() => expect(fake.wire.writes).toHaveLength(1), { timeout: 3000 });
-    await wait(400);
-    expect(fake.wire.metaWrites).toEqual([]);
-    expect(toast.error).not.toHaveBeenCalled();
-    expect(fake.wire.writes).toHaveLength(1);
-    expect(fake.wire.writes[0].id).toBe(preferenceRowId('u1', 'ui.list.account'));
-    expect(fake.wire.writes[0].value).toEqual({
-      viewOrder: [ALL_ID, MINE_ID],
-      perView: { [ALL_ID]: { rowHeight: 'medium' } },
-    });
+    await wait(100);
+    expect(storedLayout()).toEqual({ perView: { [ALL_ID]: { rowHeight: 'medium' } } });
     // The list is handed the user's density back.
     expect(listProps.schema.rowHeight).toBe('medium');
 
     act(() => {
       listProps.onHiddenFieldsChange(['name']);
     });
-    // Past the preference debounce (500 ms) and a round trip: nothing more is written.
+    // Past the old preference debounce (500 ms) and a round trip: nothing is written.
     await wait(900);
     expect(fake.wire.metaWrites).toEqual([]);
+    expect(fake.wire.writes).toEqual([]);
     expect(toast.error).not.toHaveBeenCalled();
-    expect(fake.wire.writes).toHaveLength(1);
     expect(listProps.schema.hiddenFields).toEqual(['name']);
-    // No second read: each write updates the row the boot read found.
+    expect(storedLayout()).toEqual({ perView: { [ALL_ID]: { rowHeight: 'medium' } } });
     expect(fake.wire.gets.length).toBe(readsBefore);
   });
 

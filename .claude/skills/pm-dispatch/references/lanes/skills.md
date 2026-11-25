@@ -22,7 +22,7 @@
 
 - 四维分析先于派发与 L1/L2 审核。
 - Tier H 受管 PR 恒 draft 等维护者的字;flip 或 arm 前跑 `check-governed-merges --pr N` 定档。
-- 档位从 `--tier` 推导引用;pm-dispatch 根恒契约审核档;条款②闸门照现行。
+- 档位与 effort 照 `../execution-duties.md` 定档节;条款②闸门照现行。
 - 棘轮以删减付账;砍点逐条核幸存,被砍内容若在别处无家,砍掉就是丢规则。
 - 「Instruments serve the fleet」答不出 ⇒ `Suggested-grade: p3` 或建议不做,⛔ 不自入队;级归分诊。
 - 内部指令面中文,机器判据恒英文;认领前重读全线程;标签写 read-modify-write 加回读。

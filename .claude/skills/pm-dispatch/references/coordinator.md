@@ -31,14 +31,15 @@
 - 槽位只算在建的线程:等人(授权批准、决策卡)或等席位 L1/L2 审核的卡线程不占槽。
 - 交回或合入即释放槽位;S 卡的席内子代理只计该席 `batch`,不计本上限。
 
-## 四、effort 与档位按难度(coordinator 开线程时读;席位请线程时读)
+## 四、档位与 effort 照派发令(coordinator 开线程时读;席位请线程时读)
 
-- 档位与 effort 的定法住 `execution-duties.md` 派发节:档位引 `dispatch-gates --tier`,effort 按卡难度。
-- 改协议语义面卡恒 `CONTRACT_REVIEW_TIER`,⛔ 不抄模型名;隔离子代理照 `--brief-template` L2 审核。
+- 档位与 effort 的取值只住 `execution-duties.md` 定档节;coordinator 照派发令所写开线程,⛔ 不另定。
+- 开卡线程前查令:`model:` 写上限而同行既无 `--tier` MANDATORY 行、又无点名裁决的 `reason:`(评论 id,或常设档位令的 id 与时刻)⇒ 退回席位,⛔ 不开线程。
+- 隔离子代理照 `--brief-template` L2 审核。
 
 ## 五、卡线程的 `needs_decision`(coordinator 收到时读;席位请裁时读)
 
-- 席位请裁 ⇒ 开天花板档决策线程(effort `xhigh`),附 dev 报告;规则住 SKILL.md〈升级与决策〉。
+- 席位请裁 ⇒ 开决策线程(档位与 effort 照 `execution-duties.md` 定档节),附 dev 报告;规则住 SKILL.md〈升级与决策〉。
 - 等裁的卡线程不占槽(见第三节);裁决记录 = 卡上裁决评论,⛔ 不落项目文件或记忆。
 
 ## 六、额度压力(coordinator 每次开线程前读)

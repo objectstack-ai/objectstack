@@ -964,12 +964,18 @@ const SECURITY_WILDCARD_VAMA_EXPLANATION: RuleExplanation = {
       'superuser over the whole deployment, objects other packages own included. Only the platform\'s own ' +
       'admin set may combine the two, and it lives outside every package, so the rule is an error on any ' +
       'set a stack authors.',
+    '`viewAllFields` on the `\'*\'` entry is reported the same way. It is the field half of the same superuser: ' +
+      'a read vote on every field of every object, other packages\' objects included, so a field another ' +
+      'package hides with `readable: false` is read by every holder of the set that also reaches the object. ' +
+      'The organization boundary refuses to distribute such a set as it refuses the two record bits, and the ' +
+      'platform\'s own admin set carries it on its wildcard. On an object entry the bit is not reported here.',
     'An app needs no wildcard of its own: platform admins already reach every installed package\'s objects ' +
       'through that platform set. An app-level admin (`crm_admin`, say) is an ordinary set that names the ' +
       'objects it needs and that the customer binds to a position of their own choosing (ADR-0090 D9), ' +
       'because "who runs this app" and "who runs the platform" are rarely the same people.',
     'To fix it, enumerate the objects the set really needs, with `viewAllRecords` / `modifyAllRecords` only ' +
-      'on the entries where the bypass is meant, or drop the two flags from the `\'*\'` entry.',
+      'on the entries where the bypass is meant (and `viewAllFields` on the entries whose every field the set ' +
+      'should read), or drop the flags from the `\'*\'` entry.',
   ],
 };
 
@@ -1012,14 +1018,50 @@ const SECURITY_SUPERUSER_FIELD_MASK_INERT_EXPLANATION: RuleExplanation = {
       'it binds as well.',
     'The set\'s bypass is read the way the runtime reads it: its own entry for the object when it has one, ' +
       'otherwise its `\'*\'` entry, as a lookup and never a merge. Only the set that declares the entry is ' +
-      'judged: a holder of two sets is unmasked by the other set\'s View All or Modify All too, but no ' +
-      'author wrote an inert entry there.',
+      'judged here. A holder of two sets is unmasked by the other set\'s View All, Modify All or ' +
+      '`viewAllFields` too; that is `security-cross-set-field-reopen`, which skips a row this rule reports, ' +
+      'so one row earns one finding.',
     'This is a warning, not an error: the pair is legal and no door refuses it. To fix it, decide which half ' +
       'is meant. If the field must stay hidden or read-only, remove `modifyAllRecords` from the object entry ' +
       'and reach every row another way, with `readScope: \'org\'` / `writeScope: \'org\'` on the entry or a ' +
       '`rowLevelSecurity` policy whose condition every row satisfies; the mask then binds. `viewAllRecords` ' +
       'may stay, since the set\'s own `readable: false` binds beside it. If the bypass is meant, delete the ' +
       'field entry, which never took effect.',
+  ],
+};
+
+const SECURITY_CROSS_SET_FIELD_REOPEN_EXPLANATION: RuleExplanation = {
+  rule: 'security-cross-set-field-reopen',
+  covers: 'why a field one set hides is still read through another set',
+  paragraphs: [
+    'Field permissions from every set a caller holds are merged as a union, with no deny. A set that holds ' +
+      '`viewAllRecords` (View All), `modifyAllRecords` (Modify All) or `viewAllFields` on an object votes ' +
+      '`readable: true` on every field of it, and Modify All votes `editable: true` as well. So when one set ' +
+      'hides a field (`readable: false`) or locks it (`editable: false`, or `editable` omitted, which parses ' +
+      'to false), a caller who also holds a second set with one of those bits on the object reads the field ' +
+      '(and, under Modify All, edits it). The first set still reads as protecting the field, and nothing ' +
+      'refuses the pair, which is why an author takes the field to be hidden.',
+    'The bits are read the way the runtime reads them: the second set\'s own entry for the object when it ' +
+      'has one, otherwise its `\'*\'` entry, as a lookup and never a merge. Inside one set the specific row ' +
+      'beats the general bit: a second set whose own row declares the field `readable: false` beside View ' +
+      'All or `viewAllFields` casts no read vote on it, so it is not reported. View All and `viewAllFields` ' +
+      'never vote an edit, so an edit lock beside them binds and is not reported either. A row its own set\'s ' +
+      'Modify All already unbinds is `security-superuser-field-mask-inert`, not this rule, so one row earns ' +
+      'one finding.',
+    'What is not reported: a field that declares `requiredPermissions` (ADR-0066 D3), because that AND-gate ' +
+      'is applied after the merge and no set\'s bit opens it to a caller without the capabilities; a key on ' +
+      'an object this stack does not define, or naming a field the object does not declare; and any field ' +
+      'judged by its name. The rule reads only the declared two-set shape.',
+    'This is a warning, not an error: the pair is legal and no door refuses it. To fix it, decide what the ' +
+      'second set means. If it should not read the field, drop the bit from its entry (reach the rows with ' +
+      '`readScope` / `writeScope` or a row-level policy instead of View All or Modify All), or give it its own ' +
+      '`readable: false` row on the field, which binds beside View All and `viewAllFields` but not beside ' +
+      'Modify All. If it really should read every field, say so with `viewAllFields: true` on its entry: that ' +
+      'read then survives the major release in which View All and Modify All stop voting on fields. A field ' +
+      'that must stay hidden from everyone without a capability, such as a salary or an ID number, is ' +
+      'protected on the field itself: declare `requiredPermissions` on it (ADR-0066 D3), and add a ' +
+      '`maskingRule` where a partial value is needed, so the rule no longer depends on which sets a caller ' +
+      'holds.',
   ],
 };
 
@@ -1478,12 +1520,20 @@ const ACTION_BODY_DOES_NOT_COMPILE_EXPLANATION: RuleExplanation = {
       'local another name. `var input = …` is not a redeclaration and compiles.',
     'The rule compiles the body inside the same expression the runtime builds, from the same function, ' +
       'with this host\'s JavaScript engine and without running it. The runtime\'s engine is QuickJS. ' +
-      'The two agree on redeclarations, grammar and strict-mode errors; they measurably differ inside the ' +
-      'pattern of a regular expression (duplicate named groups, modifier groups), so a pattern the host ' +
-      'refuses is reported as a warning rather than refused. A literal that never closes on its line, or ' +
-      'whose flags are not a flag set, is refused like any other compile error: QuickJS refuses it too. ' +
-      'Syntax the host accepts and QuickJS does not is not caught here; at run time such an action answers ' +
-      'a 500 that names the action and the compile error.',
+      'The two agree on redeclarations, grammar and strict-mode errors, and on almost every ' +
+      'regular-expression pattern: an unterminated group, nothing to repeat, a class range out of order, ' +
+      'a back-reference to a group the pattern does not name, a Unicode property name neither knows and an ' +
+      'incomplete quantifier are refused by both, so they are refused here like any other compile error. ' +
+      'Measured against Node 22\'s V8, the two differ on two pattern constructs, duplicate named capture ' +
+      'groups and modifier groups (`(?i:…)`), and on three Unicode property names, `IDS_Unary_Operator`, ' +
+      '`Modifier_Combining_Mark` and the script `Katakana_Or_Hiragana` (with their aliases): Node 22 ' +
+      'refuses them and QuickJS runs them, so such a pattern is reported as a warning rather than refused (a ' +
+      'later Node that accepts them reports nothing). A property name is judged by this host\'s Unicode ' +
+      'tables; on a host whose tables are older than the measured Unicode 17.0, every property name it ' +
+      'refuses is a warning. A literal that never closes on its line, or whose flags ' +
+      'are not a flag set, is refused: QuickJS refuses it too. Syntax the host accepts and QuickJS does ' +
+      'not is not caught here; at run time such an action answers a 500 that names the action and the ' +
+      'compile error.',
   ],
 };
 
@@ -1491,10 +1541,13 @@ const ACTION_BODY_DOES_NOT_COMPILE_EXPLANATION: RuleExplanation = {
 const CTX_BODY_COMPILE: readonly string[] = [
   'The rule compiles the body inside the same expression the runtime builds, from the same function, ' +
     'with this host\'s JavaScript engine and without running it, and reads the failure the way ' +
-    '`action-body-does-not-compile` does: a regular-expression pattern the host refuses is a warning, ' +
-    'because the runtime\'s QuickJS accepts some patterns the host does not; every other compile failure, ' +
-    'a literal that never closes or whose flags are not a flag set included, is refused. Syntax the host ' +
-    'accepts and QuickJS does not is not caught here.',
+    '`action-body-does-not-compile` does: a regular-expression pattern Node 22 refuses as a duplicate ' +
+    'named capture group, a modifier group or a Unicode property name only QuickJS knows ' +
+    '(`IDS_Unary_Operator`, `Modifier_Combining_Mark`, `Katakana_Or_Hiragana`) is a warning, because the ' +
+    'runtime\'s QuickJS runs it; ' +
+    'every other compile failure, every other pattern failure and a literal that never closes or whose ' +
+    'flags are not a flag set included, is refused. Syntax the host accepts and QuickJS does not is not ' +
+    'caught here; at run time such a body fails with a sentence that names it and the compile error.',
 ];
 
 const HOOK_BODY_DOES_NOT_COMPILE_EXPLANATION: RuleExplanation = {
@@ -3641,6 +3694,52 @@ const TITLE_UNRESOLVABLE_EXPLANATION: RuleExplanation = {
   ],
 };
 
+/** What `validate-record-page-header.ts` cannot read (both of its entries write it out). */
+const RECORD_PAGE_HEADER_LIMITS =
+  'What it cannot see: an action\'s `visible` / `enabled` predicates and the user\'s permissions, which can ' +
+  'hide the first action on one record and not another; actions another installed package attaches to the ' +
+  'object, which the standard page draws and this stack does not declare; and the served declaration order ' +
+  'itself, estimated as the object\'s own `actions` and then the stack\'s `actions` bound to it by ' +
+  '`objectName`, in source order. So it can miss a disagreement, and can name one the runtime would hide. A ' +
+  'header naming an action this stack does not declare on the object is not judged. Print pages, slotted ' +
+  'pages, html and react pages, and record pages bound to no declared object are not judged either.';
+
+const RECORD_PAGE_HEADER_TITLE_DIFFERS_EXPLANATION: RuleExplanation = {
+  rule: 'record-page-header-title-differs',
+  covers: 'why one record shows two titles',
+  paragraphs: [
+    'An object\'s hand-written full record page (`type: \'record\'`, `kind: \'full\'`) is drawn on the ' +
+      'desktop full page only. On a phone, in the side drawer a list opens, in a split pane and in an ' +
+      'interface page\'s preview the record draws the platform\'s standard page, built from the object, and ' +
+      'that page titles the record by the object\'s name field (`nameField`, else the derived title field), ' +
+      'the name every list, search result and lookup shows too. A `page:header` `title` that is anything but ' +
+      'exactly that field\'s `{field}` token titles the same record differently on the full page.',
+    'The title has one declaration point, the object. Delete the header\'s `title` (it then derives from ' +
+      'the record), or change `nameField` to rename the record everywhere. A header that should read ' +
+      'differently on every surface belongs in a `kind: \'slotted\'` page\'s `header` slot, which the ' +
+      'standard page draws everywhere. A warning: the page renders as written.',
+    RECORD_PAGE_HEADER_LIMITS,
+  ],
+};
+
+const RECORD_PAGE_HEADER_ACTIONS_DIFFER_EXPLANATION: RuleExplanation = {
+  rule: 'record-page-header-actions-differ',
+  covers: 'why one record shows two primary buttons',
+  paragraphs: [
+    'Both record headers sort their actions with one rule: `order` ascending (unset is 0), then ' +
+      '`variant: \'primary\'`, then their incoming order; the primary button is the first action declaring ' +
+      '`variant: \'primary\'`, else the first button. The incoming order is where the two pages differ: the ' +
+      'full page takes it from the header\'s `actions` list, the standard page (phone, drawer, preview) from ' +
+      'the object\'s action declaration order, and the standard page draws every action placed at ' +
+      '`record_header` or `record_more`, listed or not. This finding means the two give a different primary ' +
+      'button, or the listed actions in a different order.',
+    'The order has one declaration point, the actions. Give each an `order` (lower first) and the main one ' +
+      '`variant: \'primary\'`, and both pages sort alike; the header\'s list then only chooses which actions ' +
+      'the full page draws. A warning: the page renders as written.',
+    RECORD_PAGE_HEADER_LIMITS,
+  ],
+};
+
 // ── Data-model rules (`data-model-rules.ts`) ───────────────────────────────
 // The three ADR-0120 uniqueness ids run on `os validate` and `os build` as
 // registry entries and on `os lint` through `lintDataModel`; the sweep ids
@@ -4282,6 +4381,12 @@ const LIST_VIEW_SUMMARY_FIELD_TYPE_REFUSED_EXPLANATION: RuleExplanation = {
       'judged the same way, under this id, and refused when the page is saved. The grid is bound by its ' +
       '`dataSource.object`, else `properties.objectName`; its grouped header numbers come from its ' +
       '`aggregations` (`grid-aggregation-field-type-refused`), not from the column summaries.',
+    'A board\'s lane foot statistic, `kanban.summary`, is judged under this id too: a `sum`, `avg`, `min` or ' +
+      '`max` is answered by one grouped aggregate over every record of each lane, so the pair is the table\'s ' +
+      'row for that function over the field\'s declaration, and a refused pair is reported at ' +
+      '`kanban.summary`, as is any of the four over a field of the boolean class (`boolean`, `toggle`), which ' +
+      'the board does not aggregate. `count` and `none` compare no value. A refused pair draws no figure at ' +
+      'the lane\'s foot.',
     AGGREGATE_PAIR_ROWS,
     'The yes / no counts of a boolean column, `count_true` and `count_false`, lower to `SUM(field)` ' +
       '(booleans aggregate as numbers, so the sum is the number of true cells) and `COUNT(field)`. The ' +
@@ -4745,6 +4850,76 @@ const RELATED_LIST_GROUP_NOT_BODY_EXPLANATION: RuleExplanation = {
   ],
 };
 
+const RELATED_LIST_COLUMN_UNKNOWN_EXPLANATION: RuleExplanation = {
+  rule: 'related-list-column-unknown',
+  covers: "the columns a relatedLists entry may name",
+  paragraphs: [
+    'A `relatedLists` entry may be written `{ list, label, columns }` to give that related list its own ' +
+      'title and columns on the parent object. The columns are field names of the CHILD object, the one ' +
+      'whose rows the list shows, exactly as the child FK\'s `relatedListColumns` names them; they win over ' +
+      'that key wherever the list is drawn.',
+    'A column that is no field of the child draws an empty column, silently, so it is an error on ' +
+      '`os validate`, `os build` and at the runtime publish gate. Judged against every child the entry ' +
+      'names whose fields this rule can see (the authored fields and the registry-injected columns); a ' +
+      'child outside the stack is not judged here.',
+    'An object extension\'s list placement (`place: [{ list, columns }]`) carries its columns the same way, ' +
+      'and they are judged the same way, against the child the placement names.',
+  ],
+};
+
+const RELATED_LIST_ATTACHMENTS_OFF_EXPLANATION: RuleExplanation = {
+  rule: 'related-list-attachments-off',
+  covers: "'sys_attachment' in relatedLists without files enabled",
+  paragraphs: [
+    "`'sys_attachment'` in `relatedLists` places the record page's attachments tab. The tab is drawn only " +
+      'for an object that enables files (`enable.files: true`), the same gate the server enforces on ' +
+      'attachment rows, so on an object without files the entry places nothing.',
+    'A warning, not an error: the entry is not wrong in itself and becomes live the moment the object ' +
+      "turns files on. Enable files to show the tab, or remove `'sys_attachment'`.",
+  ],
+};
+
+const RELATED_LIST_STREAM_PART_EXPLANATION: RuleExplanation = {
+  rule: 'related-list-stream-part',
+  covers: 'a relatedLists entry naming a part of the activity stream',
+  paragraphs: [
+    "The record page draws activities, the discussion and field changes as ONE stream, whose tab " +
+      "`relatedLists` names `'sys_activity'`. `'sys_comment'` and `'sys_audit_log'` are parts of that " +
+      'stream, not tabs of their own, so an entry naming one places nothing.',
+    "A warning, prescribing `'sys_activity'`. Which parts the stream shows is still the object's own " +
+      'switches (`enable.feeds`, `enable.activities`, `trackHistory`).',
+  ],
+};
+
+const EXTENSION_PLACEMENT_NOT_APPLIED_EXPLANATION: RuleExplanation = {
+  rule: 'extension-placement-not-applied',
+  covers: 'an object extension placement the target does not arrange',
+  paragraphs: [
+    "An object extension's `place` arranges what the extended object declares: a list placement applies when " +
+      'it declares `relatedLists`, a group or field placement when it declares `fieldGroups`. Where it declares ' +
+      'none, its automatic arrangement stays: the list shows in the automatic tab order and the field among the ' +
+      'fields, after the object\'s own. Nothing is dropped.',
+    "A list entry's `label` and `columns` are not applied either. To title the list and choose its columns on " +
+      "every parent, write `relatedListTitle` / `relatedListColumns` on the child object's lookup field.",
+    'A warning: the placement applies, unchanged, once the extended object declares its tab list or groups. ' +
+      'This check sees the extended object only when it is in the same stack; the boot log names the same ' +
+      'placement wherever the object comes from.',
+  ],
+};
+
+const EXTENSION_PLACEMENT_ANCHOR_MISSING_EXPLANATION: RuleExplanation = {
+  rule: 'extension-placement-anchor-missing',
+  covers: 'an object extension placement whose anchor is missing',
+  paragraphs: [
+    "A placement's `after` / `before` names a tab, group or group member of the extended object. One the " +
+      'object does not have (and no extension of it in the stack places) puts the item at the end of the tabs ' +
+      '(before the approvals and activity-stream tabs), of the groups, or of the group. A field placed in a ' +
+      'group the object does not have shows among the ungrouped fields.',
+    'A warning: the item still shows. Name an anchor the object has, or drop the anchor to place the item at ' +
+      'the end on purpose.',
+  ],
+};
+
 // ── Object-name references (`validate-object-references.ts`) ────────────────
 
 /** The sites judged — both object-reference ids. */
@@ -4978,6 +5153,29 @@ const FORM_SECTION_GROUP_UNKNOWN_EXPLANATION: RuleExplanation = {
     'On a form view the reference is a section\'s `group`, in `sections` and in the legacy `groups` ' +
       'alias alike, resolved against the object the form binds (its own `objectName`, `object` or ' +
       '`data.object`, else its container\'s, else the container\'s list binding).',
+  ],
+};
+
+const FORM_VIEW_INTERNAL_NOT_LOADED_EXPLANATION: RuleExplanation = {
+  rule: 'form-view-internal-not-loaded',
+  covers: 'why an internal create or edit form no longer loads',
+  paragraphs: [
+    'The Console\'s record create and edit surfaces — the create dialog, the full-page create, a create ' +
+      'or edit an action opens, and the edit dialog — lay a record out by its object\'s field groups ' +
+      '(`fieldGroups`) and follow the rules declared on its fields: `required`, `requiredWhen`, ' +
+      '`visibleWhen`, `readonlyWhen`, and `showOnCreate` for a field a create should not ask for. They no ' +
+      'longer load an object\'s internal form view, so its sections, tabs, wizard steps, subforms, ' +
+      '`modalSize`, `buttons`, `layout` and `defaults` steer nothing.',
+    'The forms reported are the ones those surfaces used to load: a view container\'s default `form`, ' +
+      'its `formViews.default` and `formViews.create`, and a stored form view item that is the default ' +
+      '(`isDefault`) or is named `<object>.create`. A form shared publicly (`sharing.enabled: true`) keeps ' +
+      'loading at its own link and is never reported; neither is a form view under any other name, which ' +
+      'an action of type `form` opens by that name. Nor is a default or create form that an action of type ' +
+      '`form` opens by name: its `target` equals the name the form is served under (`<object>.form` for a ' +
+      'container\'s default form, `<object>.create` for its `formViews.create`), so it keeps loading there.',
+    'The rule is a warning: the declared form still parses, installs and runs, and changes nothing. To ' +
+      'clear it, move the sections into the object\'s field groups, put each required and show/hide rule ' +
+      'on its field (a create-time default goes on the field\'s `defaultValue`), and delete the form.',
   ],
 };
 
@@ -5680,6 +5878,13 @@ const AI_SKILL_TOOL_UNRESOLVED_EXPLANATION: RuleExplanation = {
       'it. To run an app action, bind `action_<name>` (or `action_*`) rather than `run_action`: the MCP ' +
       'door serves that entry through `run_action`, and the in-product agents call the action tool itself. ' +
       'Ignore the warning only if a runtime plugin outside the platform registry provides the name.',
+    // Held to the rule by its test: the verdict fires for the ask product's tools the door lacks, on a projected skill only.
+    'A name that resolves can still cost the skill its MCP prompt. The MCP door offers a skill that has ' +
+      '`instructions` only on a connection that serves every tool its `tools` names, and the `ask` product\'s ' +
+      'data tools missing from `MCP_DOOR_TOOL_NAMES` (`aggregate_data`, `query_data`, `visualize_data`) are ' +
+      'served by no MCP connection, so a skill offered over MCP that binds one is withheld from every ' +
+      '`prompts/list`; that is its own verdict, naming the tool. Bind only tools both doors serve, or set ' +
+      '`mcpPrompt: false` when the skill is written for the in-product agents.',
     'The runtime drops an unresolved name without a word, so the skill\'s instructions promise a ' +
       'capability the agent cannot call, and the assistant improvises or fails when asked to use it. ' +
       'A warning, not an error (ADR-0078\'s advisory-first ratchet): a runtime plugin outside the ' +
@@ -6385,6 +6590,140 @@ const FLOW_APPROVAL_DECISION_UNROUTED_EXPLANATION: RuleExplanation = {
   ],
 };
 
+// #35143 — the second batch of publish-time flow checks.
+
+const FLOW_TRIGGER_OBJECT_MISSING_EXPLANATION: RuleExplanation = {
+  rule: 'flow-trigger-object-missing',
+  covers: 'what a record-change start with no object watches',
+  paragraphs: [
+    'A record-change start (`triggerType: \'record-…\'`) names the object it watches in `config.objectName`. ' +
+      'With none, the trigger registers its hook with no object target, and the data engine reads an absent ' +
+      'target as every object. So the flow is not idle: it starts on a write to any object, with that row as ' +
+      '`record`, and its conditions and steps read fields that row usually does not have.',
+    'A blank name (`\'\'` or spaces) is refused too, for the opposite reason: the data engine refuses to ' +
+      'register a hook on an empty object name, so the trigger is never bound and the flow never starts.',
+    'An error: the start node alone settles it. Name the object whose records should start the flow.',
+  ],
+};
+
+const FLOW_CONDITION_OPTION_LABEL_EXPLANATION: RuleExplanation = {
+  rule: 'flow-condition-option-label',
+  covers: 'why a start condition compares option values',
+  paragraphs: [
+    'A select field stores the option\'s `value`, never its `label`. A record-change start condition that ' +
+      'reads the field and compares it with a quoted label (`record.stage == \'Closed Lost\'` where the option ' +
+      'is `{ value: \'closed_lost\', label: \'Closed Lost\' }`) is false on every record, or true on every ' +
+      'record for `!=`, so the condition never tells one record from another.',
+    'Reported only when the label is the comparand of that field: `F == \'L\'`, `F != \'L\'`, `\'L\' == F`, or ' +
+      'a member of `F in [...]`, with `F` read bare or as `record.F` / `previous.F`. A label quoted elsewhere ' +
+      'in the condition, such as the comparand of another field, is not. A label that is also some option\'s ' +
+      'value is never reported. Fields whose options come from a shared picklist are not judged: the stack ' +
+      'does not hold that list.',
+  ],
+};
+
+const FLOW_TIME_RELATIVE_SHADOWED_EXPLANATION: RuleExplanation = {
+  rule: 'flow-time-relative-shadowed',
+  covers: 'which trigger wins on a start with both',
+  paragraphs: [
+    'The engine picks one trigger per flow, in a fixed order: a `record-*` `triggerType` first, then a ' +
+      '`config.timeRelative` descriptor, then a schedule. A start node carrying both a `record-*` token and a ' +
+      'descriptor is therefore a record-change flow: the date sweep is never installed, and the flow runs only ' +
+      'when someone writes a record.',
+    'Keep the one you mean: remove `triggerType` for the date sweep, or remove `timeRelative` for the ' +
+      'record-change trigger.',
+  ],
+};
+
+const FLOW_TIME_RELATIVE_KEY_MISPLACED_EXPLANATION: RuleExplanation = {
+  rule: 'flow-time-relative-key-misplaced',
+  covers: 'where a sweep reads its filter and cap',
+  paragraphs: [
+    'A time-relative sweep reads `filter` and `maxRecords` from inside its descriptor ' +
+      '(`config.timeRelative.filter`, `config.timeRelative.maxRecords`). The start node\'s own `config` ' +
+      'hands the sweep only its `schedule` and `condition`, so a `filter` written beside the descriptor ' +
+      'narrows nothing (the flow runs for every record in the window, including those the filter meant to ' +
+      'skip), and a `maxRecords` there caps nothing.',
+    'Reported only when the descriptor does not carry the same key itself. Move the key inside the descriptor.',
+  ],
+};
+
+const FLOW_TIME_RELATIVE_DATE_FIELD_INVALID_EXPLANATION: RuleExplanation = {
+  rule: 'flow-time-relative-date-field-invalid',
+  covers: 'what field a sweep can run on',
+  paragraphs: [
+    'A sweep selects the records whose `dateField` falls in a window of days, as a range query on that ' +
+      'column. A field the swept object does not have, or one that is not a `date` or `datetime` field, ' +
+      'matches no record, so the flow never runs.',
+    'Judged only when this stack declares the swept object; an object it does not declare is ' +
+      '`flow-trigger-unknown-object`\'s. The platform\'s own timestamp columns (`created_at`, `updated_at`) ' +
+      'count as datetime fields.',
+  ],
+};
+
+const FLOW_SCHEDULE_TIMEZONE_MISSING_EXPLANATION: RuleExplanation = {
+  rule: 'flow-schedule-timezone-missing',
+  covers: 'which zone a cron hour runs in',
+  paragraphs: [
+    'A cron schedule fires at its hour in the zone `timezone` names, and with none it fires in UTC. An ' +
+      'author who wants "every day at 9" for a team in another zone, and writes `0 9 * * *` with no zone, gets ' +
+      '09:00 UTC; one who converts the hour to UTC by hand records the conversion nowhere, so the next reader ' +
+      'takes the converted hour for the intended one.',
+    'A warning: UTC may be the intent. Name the zone the hour is meant in, ' +
+      '`{ type: \'cron\', expression: \'0 9 * * *\', timezone: \'Asia/Shanghai\' }`, or write `timezone: \'UTC\'` ' +
+      'to say so. Read on schedule flows and on a time-relative sweep\'s cadence.',
+  ],
+};
+
+const FLOW_SUBFLOW_UNKNOWN_EXPLANATION: RuleExplanation = {
+  rule: 'flow-subflow-unknown',
+  covers: 'how a subflow step finds the flow it calls',
+  paragraphs: [
+    'A `subflow` or `map` step runs another flow by the name in `config.flowName`. When no flow has that ' +
+      'name, the step fails on every run, and every run of the calling flow fails with it.',
+    'A warning, and on the CLI only. Another installed package may ship the called flow, which this stack ' +
+      'cannot see. And the runtime publish gate judges one flow per write, so a call to another stored flow ' +
+      'could not be told from a call to a missing one there.',
+  ],
+};
+
+const FLOW_NODE_WRITE_UNKNOWN_OPTION_EXPLANATION: RuleExplanation = {
+  rule: 'flow-node-write-unknown-option',
+  covers: 'what a flow may write to a select field',
+  paragraphs: [
+    'A select field stores one of its options\' values. The record validator refuses a write of anything ' +
+      'else (`invalid_option`), and a flow\'s create or update step hands its `fields` to that validator like ' +
+      'any caller, so the step fails the run. The usual cause is the option\'s label written where its value ' +
+      'belongs (`stage: \'Closed Lost\'` for `closed_lost`).',
+    'Only literal values are judged; a CEL value envelope is evaluated at run time. Fields whose options come ' +
+      'from a shared picklist, and `readonly` fields, are not judged.',
+  ],
+};
+
+const FLOW_NODE_WRITE_DATE_HELPER_TEXT_EXPLANATION: RuleExplanation = {
+  rule: 'flow-node-write-date-helper-text',
+  covers: 'how a flow computes a date it writes',
+  paragraphs: [
+    'A plain string in a flow\'s `fields` is written as the text it spells. `due: \'today()\'` writes the ' +
+      'seven characters `today()` to a date field, which the record validator refuses (`invalid_date`), so the ' +
+      'step fails the run. A date helper is evaluated only inside a CEL value envelope: ' +
+      '`{ dialect: \'cel\', source: \'isoDate(today())\' }` for a date, `isoDatetime(now())` for a datetime, ' +
+      '`isoDate(daysFromNow(7))` for a day offset.',
+  ],
+};
+
+const FLOW_CREATE_UPDATE_PAIR_EXPLANATION: RuleExplanation = {
+  rule: 'flow-create-update-pair',
+  covers: 'one rule written as two flows',
+  paragraphs: [
+    'Two record-change flows on the same object, one started after create and one after update, that run ' +
+      'the same steps are one rule written twice. The copies drift the first time only one of them is edited. ' +
+      'One flow with `triggerType: \'record-after-write\'` runs on both events; on the create run `previous` ' +
+      'is null, so its condition must allow that.',
+    'A warning: both copies run as written. Judged on the CLI, where the stack holds both flows.',
+  ],
+};
+
 const FLOW_HTTP_TIMEOUT_MISSING_EXPLANATION: RuleExplanation = {
   rule: 'flow-http-timeout-missing',
   covers: 'why an http node needs a timeout',
@@ -6565,6 +6904,8 @@ export const RULE_EXPLANATIONS: Readonly<Record<string, RuleExplanation>> = Obje
   [APPROVAL_EXPRESSION_NO_EMPTY_POLICY_EXPLANATION.rule]: APPROVAL_EXPRESSION_NO_EMPTY_POLICY_EXPLANATION,
   [TITLE_FORMAT_RETIRED_EXPLANATION.rule]: TITLE_FORMAT_RETIRED_EXPLANATION,
   [TITLE_UNRESOLVABLE_EXPLANATION.rule]: TITLE_UNRESOLVABLE_EXPLANATION,
+  [RECORD_PAGE_HEADER_TITLE_DIFFERS_EXPLANATION.rule]: RECORD_PAGE_HEADER_TITLE_DIFFERS_EXPLANATION,
+  [RECORD_PAGE_HEADER_ACTIONS_DIFFER_EXPLANATION.rule]: RECORD_PAGE_HEADER_ACTIONS_DIFFER_EXPLANATION,
   [UNIQUE_LEGACY_ORGANIZATION_COMPOSITE_EXPLANATION.rule]: UNIQUE_LEGACY_ORGANIZATION_COMPOSITE_EXPLANATION,
   [UNIQUE_UNSCOPED_DECLARED_INDEX_EXPLANATION.rule]: UNIQUE_UNSCOPED_DECLARED_INDEX_EXPLANATION,
   [UNIQUE_DOUBLE_DECLARATION_EXPLANATION.rule]: UNIQUE_DOUBLE_DECLARATION_EXPLANATION,
@@ -6602,6 +6943,11 @@ export const RULE_EXPLANATIONS: Readonly<Record<string, RuleExplanation>> = Obje
   [OBJECT_FIELD_REF_UNKNOWN_EXPLANATION.rule]: OBJECT_FIELD_REF_UNKNOWN_EXPLANATION,
   [RELATED_LIST_REF_UNKNOWN_EXPLANATION.rule]: RELATED_LIST_REF_UNKNOWN_EXPLANATION,
   [RELATED_LIST_GROUP_NOT_BODY_EXPLANATION.rule]: RELATED_LIST_GROUP_NOT_BODY_EXPLANATION,
+  [RELATED_LIST_COLUMN_UNKNOWN_EXPLANATION.rule]: RELATED_LIST_COLUMN_UNKNOWN_EXPLANATION,
+  [RELATED_LIST_ATTACHMENTS_OFF_EXPLANATION.rule]: RELATED_LIST_ATTACHMENTS_OFF_EXPLANATION,
+  [RELATED_LIST_STREAM_PART_EXPLANATION.rule]: RELATED_LIST_STREAM_PART_EXPLANATION,
+  [EXTENSION_PLACEMENT_NOT_APPLIED_EXPLANATION.rule]: EXTENSION_PLACEMENT_NOT_APPLIED_EXPLANATION,
+  [EXTENSION_PLACEMENT_ANCHOR_MISSING_EXPLANATION.rule]: EXTENSION_PLACEMENT_ANCHOR_MISSING_EXPLANATION,
   [OBJECT_REFERENCE_UNKNOWN_EXPLANATION.rule]: OBJECT_REFERENCE_UNKNOWN_EXPLANATION,
   [OBJECT_REFERENCE_UNREGISTERED_PLATFORM_EXPLANATION.rule]: OBJECT_REFERENCE_UNREGISTERED_PLATFORM_EXPLANATION,
   [CAPABILITY_REFERENCE_UNKNOWN_EXPLANATION.rule]: CAPABILITY_REFERENCE_UNKNOWN_EXPLANATION,
@@ -6612,6 +6958,7 @@ export const RULE_EXPLANATIONS: Readonly<Record<string, RuleExplanation>> = Obje
   [PAGE_FIELD_UNPROVISIONED_EXPLANATION.rule]: PAGE_FIELD_UNPROVISIONED_EXPLANATION,
   [PAGE_SECTION_GROUP_UNKNOWN_EXPLANATION.rule]: PAGE_SECTION_GROUP_UNKNOWN_EXPLANATION,
   [FORM_SECTION_GROUP_UNKNOWN_EXPLANATION.rule]: FORM_SECTION_GROUP_UNKNOWN_EXPLANATION,
+  [FORM_VIEW_INTERNAL_NOT_LOADED_EXPLANATION.rule]: FORM_VIEW_INTERNAL_NOT_LOADED_EXPLANATION,
   [FLOW_TEMPLATE_FIELD_UNPROVISIONED_EXPLANATION.rule]: FLOW_TEMPLATE_FIELD_UNPROVISIONED_EXPLANATION,
   [FLOW_TEMPLATE_LOOKUP_TRAVERSAL_EXPLANATION.rule]: FLOW_TEMPLATE_LOOKUP_TRAVERSAL_EXPLANATION,
   [FLOW_DOUBLE_BRACE_INTERPOLATION_EXPLANATION.rule]: FLOW_DOUBLE_BRACE_INTERPOLATION_EXPLANATION,
@@ -6671,8 +7018,19 @@ export const RULE_EXPLANATIONS: Readonly<Record<string, RuleExplanation>> = Obje
   [FLOW_NODE_TYPE_NO_EXECUTOR_EXPLANATION.rule]: FLOW_NODE_TYPE_NO_EXECUTOR_EXPLANATION,
   [FLOW_APPROVAL_DECISION_UNROUTED_EXPLANATION.rule]: FLOW_APPROVAL_DECISION_UNROUTED_EXPLANATION,
   [FLOW_HTTP_TIMEOUT_MISSING_EXPLANATION.rule]: FLOW_HTTP_TIMEOUT_MISSING_EXPLANATION,
+  [FLOW_TRIGGER_OBJECT_MISSING_EXPLANATION.rule]: FLOW_TRIGGER_OBJECT_MISSING_EXPLANATION,
+  [FLOW_CONDITION_OPTION_LABEL_EXPLANATION.rule]: FLOW_CONDITION_OPTION_LABEL_EXPLANATION,
+  [FLOW_TIME_RELATIVE_SHADOWED_EXPLANATION.rule]: FLOW_TIME_RELATIVE_SHADOWED_EXPLANATION,
+  [FLOW_TIME_RELATIVE_KEY_MISPLACED_EXPLANATION.rule]: FLOW_TIME_RELATIVE_KEY_MISPLACED_EXPLANATION,
+  [FLOW_TIME_RELATIVE_DATE_FIELD_INVALID_EXPLANATION.rule]: FLOW_TIME_RELATIVE_DATE_FIELD_INVALID_EXPLANATION,
+  [FLOW_SCHEDULE_TIMEZONE_MISSING_EXPLANATION.rule]: FLOW_SCHEDULE_TIMEZONE_MISSING_EXPLANATION,
+  [FLOW_SUBFLOW_UNKNOWN_EXPLANATION.rule]: FLOW_SUBFLOW_UNKNOWN_EXPLANATION,
+  [FLOW_NODE_WRITE_UNKNOWN_OPTION_EXPLANATION.rule]: FLOW_NODE_WRITE_UNKNOWN_OPTION_EXPLANATION,
+  [FLOW_NODE_WRITE_DATE_HELPER_TEXT_EXPLANATION.rule]: FLOW_NODE_WRITE_DATE_HELPER_TEXT_EXPLANATION,
+  [FLOW_CREATE_UPDATE_PAIR_EXPLANATION.rule]: FLOW_CREATE_UPDATE_PAIR_EXPLANATION,
   [STATE_MACHINE_NO_INITIAL_STATES_EXPLANATION.rule]: STATE_MACHINE_NO_INITIAL_STATES_EXPLANATION,
   [ACTION_NO_OBJECT_BINDING_EXPLANATION.rule]: ACTION_NO_OBJECT_BINDING_EXPLANATION,
+  [SECURITY_CROSS_SET_FIELD_REOPEN_EXPLANATION.rule]: SECURITY_CROSS_SET_FIELD_REOPEN_EXPLANATION,
 });
 
 /** The explanation for `rule`, or `undefined` when the rule has none. Exact id match. */

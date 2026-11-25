@@ -299,14 +299,14 @@ const LEDGER: ReadonlyArray<OmitEntry | SubsetEntry> = [
   //
   // The `object.fields` subset precedent at the top of this ledger, on the
   // field form: a curated repeater over four of `InlineGridColumnSchema`'s
-  // twenty keys. Unlike `object.fields` there is no fuller editor to defer to,
+  // twenty-one keys. Unlike `object.fields` there is no fuller editor to defer to,
   // so the long tail is authored in source, and the reason says why that is
   // the right place for each group of keys left out.
   {
     kind: 'subset',
     type: 'field',
     path: 'inlineColumns',
-    why: "a curated inline-grid column (ruling record 5861442317): `name` plus the three keys that apply to a column of any type (`label`, `width`, `defaultHidden`). An entry naming only a field is the shape the key's own describe recommends, because objectui's `hydrateColumns` completes it from the child field, so the rest is authored in source: `type`, since declaring it opts the column out of that hydration; the keys that apply to one cell type only (`options`, `reference`, `displayField`, `idField`, `autofill`, `multiple`, `accept`, `prefix`, `step`, `scale`, `computed`, `expr`), since a column takes its type from the child field at render and a sub-row here cannot be gated on it, so each would be offered on every column; and `required` / `readonlyWhen` / `requiredWhen`, which hydration copies from the child field, where the rule the server enforces lives",
+    why: "a curated inline-grid column (ruling record 5861442317): `name` plus the three keys that apply to a column of any type (`label`, `width`, `defaultHidden`). An entry naming only a field is the shape the key's own describe recommends, because objectui's `hydrateColumns` completes it from the child field, so the rest is authored in source: `type`, since declaring it opts the column out of that hydration; the keys that apply to one cell type only (`options`, `reference`, `displayField`, `idField`, `autofill`, `multiple`, `accept`, `max`, `prefix`, `step`, `scale`, `computed`, `expr`), since a column takes its type from the child field at render and a sub-row here cannot be gated on it, so each would be offered on every column; and `required` / `readonlyWhen` / `requiredWhen`, which hydration copies from the child field, where the rule the server enforces lives",
   },
   // ── The root coordinate (#19333): top-level keys no form may offer ──
   //
@@ -511,13 +511,6 @@ const LEDGER: ReadonlyArray<OmitEntry | SubsetEntry> = [
     kind: 'omit',
     type: 'view',
     path: ROOT_PATH,
-    key: 'columnState',
-    why: "platform-written, never authored — `Studio round-trip: column order/widths (runtime-only state, written by the console grid and stored on the view's row, which has no per-user scope — not authored)`. Declared on the wire members only so the console's own write parses; the authoring door (`ViewItemSchema`) rejects the key by name",
-  },
-  {
-    kind: 'omit',
-    type: 'view',
-    path: ROOT_PATH,
     key: 'isPinned',
     why: "platform-written, never authored — `Console round-trip: the view is pinned in the object's view switcher. … Not authored.`; the authoring door (`ViewItemSchema`) rejects the key by name",
   },
@@ -706,13 +699,6 @@ const LEDGER: ReadonlyArray<OmitEntry | SubsetEntry> = [
     path: ROOT_PATH,
     key: 'stageField',
     why: 'no registered widget spells this union (ruling record 5861442317): a field name or `false` (the status field is non-linear, so the stage heuristics are suppressed), and `false` cannot be an option value while a union renders only its first arm on create, so a control would offer the name and never reach `false`',
-  },
-  {
-    kind: 'omit',
-    type: 'field',
-    path: ROOT_PATH,
-    key: 'inlineEdit',
-    why: "no registered widget spells this union (ruling record 5861442317): `true` / `false` or `'grid'` / `'form'`, and a boolean cannot be an option value while a union renders only its first arm on create, so a control would be a switch that never reaches `'grid'` or `'form'`",
   },
   {
     kind: 'omit',
@@ -1708,7 +1694,9 @@ const RULED_ROOT_REASONS: ReadonlyArray<{ reason: string; keys: readonly string[
   },
   {
     reason: 'no registered widget spells this union',
-    keys: ['field.inlineEdit', 'field.relatedList', 'object.stageField'],
+    // `field.inlineEdit` left in the same edit that offered it on the field
+    // form (#35926: its boolean arm retired, a select spells `'grid'` / `'form'`).
+    keys: ['field.relatedList', 'object.stageField'],
   },
 ];
 
@@ -1850,7 +1838,7 @@ describe('the three ruled root reasons admit only the keys ruled into them', () 
     expect(FormSelectOptionSchema.safeParse({ label: 'probe', value: 'primary' }).success).toBe(true);
     // Lit: a `false` arm, and a boolean arm.
     expect(unspellableArmValuesOf('object', 'stageField')).toEqual([false]);
-    expect(unspellableArmValuesOf('field', 'inlineEdit')).toEqual([true, false]);
+    expect(unspellableArmValuesOf('field', 'relatedList')).toEqual([true, false]);
     // Dark: a union with no boolean or `false` arm, and a key that is no
     // union at all.
     expect(unspellableArmValuesOf('object', 'requiredPermissions')).toEqual([]);

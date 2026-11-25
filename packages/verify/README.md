@@ -80,15 +80,24 @@ don't exercise, silently breaks at runtime." Point this at *your* app.
 > itself makes to an external object (its seed, or a hook or flow that one of
 > verify's writes fires) goes where the app sends it, as under
 > `objectstack dev`. A declared MANAGED datasource (or one that declares no
-> `schemaMode`) is never connected to the database it names: verify builds it
-> as a fresh in-memory store of the same kind as its own default store, so its
-> objects are still exercised and every write to them, the app's included,
-> stays in memory. A managed datasource whose engine has no faithful in-memory
-> stand-in (`mongodb`, or a driver a plugin supplies) keeps its real driver,
-> and every derived write family leaves its objects out as `managed datasource
-> "<name>" (driver "<driver>"): not exercised`; the app's own seed, hooks and
-> flows still write to that real database during the run. Only the `--flow` run refuses
-> every write routed away from the in-memory default database.
+> `schemaMode`) is never connected to the database it names, on any engine
+> the platform ships (`mongodb` included): verify builds it as a fresh
+> in-memory store of the same kind as its own default store (a `memory`
+> datasource gets a fresh memory store), so its objects are exercised by every
+> derived family and every write to them, the app's seed, hooks and flows
+> included, stays in memory. A managed datasource on a driver id the platform
+> does not ship (a plugin's, or a misspelling) cannot be stood in: `objectstack
+> verify` refuses to boot while one is declared, naming the datasource and the
+> driver id, and exits non-zero. It refuses the same way when a plugin
+> registers a driver of its own under a managed datasource's name before the
+> stand-in holds it, whatever driver id the datasource declares, because the
+> boot would keep that driver instead of the stand-in: the driver is refused
+> before the engine holds it, so no connect, schema sync or write reaches it.
+> A driver registered under the name once the stand-in holds it is discarded
+> by the engine, and that boot runs on the stand-in. There is no switch around
+> either refusal. Only
+> the `--flow` run refuses every write routed away from the in-memory default
+> database.
 
 ## CLI (zero-config)
 

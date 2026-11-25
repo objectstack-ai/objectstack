@@ -62,6 +62,8 @@ import {
   PHANTOM_ANCHOR_WRITE_DENY_NOTICE,
   UNSERVED_OWNER_WRITE_DENY_NOTICE,
 } from './sharing-service.js';
+import { SharedRecordIds } from '@objectstack/spec/data';
+import { inMembers } from './shared-record-ids.testkit.js';
 
 /** The caller: an ordinary member whose read/write DEPTH is narrower than `org`. */
 const MEMBER = 'usr_member_1';
@@ -147,22 +149,27 @@ function makeEngine(
   tables: Record<string, Array<Record<string, unknown>>> = {},
 ) {
   /**
-   * Match one row against a `where` bag. Handles exactly the two shapes this
-   * service composes — primitive equality and `{ $in: [...] }` — and THROWS on
+   * Match one row against a `where` bag. Handles exactly the shapes this
+   * service composes — primitive equality, `{ $in: [...] }`, `$or` (conjoined
+   * with its sibling keys), and [ADR-0155] `{ $in: <share-grant leaf> }`,
+   * resolved over this double's own `sys_record_share` rows — and THROWS on
    * anything else rather than ignoring it. An unrecognised operator silently
    * skipped would make the double strictly more permissive than the engine, and
    * a fixture that over-matches is how a share lookup "finds" a grant that the
    * real store would not have returned.
    */
-  const matches = (row: Record<string, unknown>, where: Record<string, unknown>) =>
+  const matches = (row: Record<string, unknown>, where: Record<string, unknown>): boolean =>
     Object.entries(where).every(([key, cond]) => {
+      if (key === '$or' && Array.isArray(cond)) {
+        return cond.some((branch) => matches(row, branch as Record<string, unknown>));
+      }
       if (key.startsWith('$')) throw new Error(`fake engine: unsupported operator ${key}`);
       if (cond !== null && typeof cond === 'object' && !Array.isArray(cond)) {
         const ops = Object.keys(cond as object);
         if (ops.length !== 1 || ops[0] !== '$in') {
           throw new Error(`fake engine: unsupported filter operator(s) ${ops.join(',')} on '${key}'`);
         }
-        const set = (cond as { $in: unknown[] }).$in.map(String);
+        const set = inMembers((cond as { $in: unknown }).$in, tables.sys_record_share).map(String);
         return set.includes(String(row[key]));
       }
       return String(row[key]) === String(cond);
@@ -347,7 +354,9 @@ describe('[#7858] ownership scoping vs federated (external) objects', () => {
         userId: MEMBER,
         __readScope: 'own',
       } as never);
-      expect(read).toEqual({ owner_id: MEMBER });
+      // A fake engine cannot say where the object is stored, so the share arm
+      // is written (ADR-0155 R2 reads the engine's answer; none is no R2).
+      expect(read).toEqual({ $or: [{ owner_id: MEMBER }, { id: { $in: SharedRecordIds.read('ext_with_real_owner', MEMBER) } }] });
 
       const write = await svc.buildWriteFilter(
         'ext_with_real_owner',
@@ -362,7 +371,7 @@ describe('[#7858] ownership scoping vs federated (external) objects', () => {
         userId: MEMBER,
         __readScope: 'own',
       } as never);
-      expect(read).toEqual({ owner_id: MEMBER });
+      expect(read).toEqual({ $or: [{ owner_id: MEMBER }, { id: { $in: SharedRecordIds.read('local_task', MEMBER) } }] });
 
       const write = await svc.buildWriteFilter(
         'local_task',

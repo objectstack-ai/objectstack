@@ -153,6 +153,12 @@ const CASES: Array<[string, (c: RawCard) => void, string, RegExp]> = [
   ['fewer than 8 questions without a stated reason', (c) => c.run.questions.splice(7), 'run.countsReason', /7 questions \/ 6 operations is below the default 8 \/ 4/],
   ['agent actions with none confirm-gated', (c) => c.run.agentActions.forEach((a: { confirm: boolean }) => (a.confirm = false)), 'run.agentActions', /at least one confirm-gated/],
   ['an agent action on an unexpected object', (c) => (c.run.agentActions[0].object = 'lead'), 'run.agentActions[0].object', /`lead` is not in expect.objects/],
+  ['a write routed through an action the card does not declare', (c) => (op(c, 'move_eli').via = 'approve_contact'), 'run.operations[1].via', /`approve_contact` is not one of the card's `run.agentActions` on `contact`/],
+  ['a write routed through the card\'s action on another object', (c) => {
+    c.run.agentActions[0].object = 'account';
+    op(c, 'add_contact').via = 'create_contact';
+  }, 'run.operations[0].via', /`create_contact` is not one of the card's `run.agentActions` on `contact`/],
+  ['a refused write that names a route', (c) => (op(c, 'contact_bad_email').via = 'create_contact'), 'run.operations[3].via', /a `refused` write goes through no route/],
   ['an iterate delta that re-adds an expected object', (c) => (c.iterate.expectDelta = { objects: ['account'] }), 'iterate.expectDelta.objects[0]', /already in expect.objects/],
 ];
 

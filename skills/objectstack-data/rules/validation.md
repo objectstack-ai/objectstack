@@ -331,8 +331,7 @@ priority: 1000   // User validations (run last)
 
 Put conditional UI/data-entry rules on the **field definition** when the rule
 belongs to the data model and should apply everywhere the field is edited:
-default forms, Studio-authored forms, inline master-detail grids, public forms,
-and API-backed writes.
+New and Edit, named and public forms, inline master-detail grids, API writes.
 
 <!-- os:check -->
 ```typescript
@@ -362,6 +361,8 @@ export const Invoice = ObjectSchema.create({
 });
 ```
 
+- `showOnCreate: false` keeps a field off every create surface; edit, the
+  record page and lists keep it. Refused beside `required: true`.
 - Use `readonlyWhen` for state-locked fields; the ObjectQL write path ignores
   incoming changes when the predicate is `TRUE` (for everyone; per permission
   set → field permission `when`, rules/security.md).
@@ -370,8 +371,8 @@ export const Invoice = ObjectSchema.create({
   Imports and migrations are system-context writes too. Keep the field `readonly` when automation maintains it; the flow
   side: [objectstack-automation → Failure routing & `runAs`](../../objectstack-automation/SKILL.md#failure-routing--runas).
 - Use `requiredWhen` for conditional requiredness; the ObjectQL validator
-  enforces it on submit. The `conditionalRequired` alias was REMOVED in
-  protocol 17 — emitting it is a parse error.
+  enforces it on submit. The removed `conditionalRequired` alias is a parse
+  error.
 - **Choose by intent — invariant or transition gate**
   ([Script Validation](#script-validation), Tool choice). "Required when X"
   reads like an invariant and is not one; an invariant written as a gate never

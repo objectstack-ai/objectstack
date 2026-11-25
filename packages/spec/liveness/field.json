@@ -116,6 +116,13 @@
       "evidence": "packages/objectql/src/engine.ts",
       "note": "reference cascade/restrict."
     },
+    "transferBehavior": {
+      "status": "live",
+      "verifiedAt": "2026-11-23",
+      "evidenceScope": "in-repo",
+      "evidence": "packages/core/src/security/change-record-owner.ts#transferCascadeRelations; packages/spec/src/data/field.zod.ts#transferBehavior; packages/spec/src/data/object.zod.ts#refuseIneligibleTransferCascades",
+      "note": "The reader offers and runs only declared single-value cascades whose child offers Change Owner (ruling 7000907189 point 4); the parse doors refuse the key off lookup / master_detail, 'cascade' on a sys_ reference or a multi-value reference, and on an object that does not offer Change Owner. Pinned in packages/spec/src/data/field-transfer-behavior.test.ts and packages/core/src/security/change-record-owner.test.ts."
+    },
     "expression": {
       "status": "live",
       "evidence": "packages/objectql/src/engine.ts",
@@ -189,6 +196,13 @@
       "status": "live",
       "note": "renderer."
     },
+    "showOnCreate": {
+      "status": "live",
+      "verifiedAt": "2026-11-22",
+      "evidenceScope": "in-repo",
+      "evidence": "ui/packages/app-shell/src/utils/recordFormNavigation.ts#isFieldAskedOnFlow (the rule: a create leaves out a `showOnCreate: false` field, an edit lists it); ui/packages/app-shell/src/utils/recordFormFields.ts#recordFormFieldNames (the one field list every Console create surface hands its form: the create dialog in ui/packages/app-shell/src/console/AppContent.tsx, the full-page create in ui/packages/app-shell/src/views/RecordFormPage.tsx, an action-opened create in ui/packages/app-shell/src/hooks/useActionModal.tsx); packages/spec/src/data/field.zod.ts#showOnCreate (the parse refuses `showOnCreate: false` beside `required: true`, at every door that parses a field)",
+      "note": "renderer: every create surface of the Console leaves a `showOnCreate: false` field out, read through one list, since the change that stopped those surfaces loading internal form views and laid them out by field groups; editing, the record page and lists ignore the key by contract. The Studio field inspector offers the switch, locked on for a required field."
+    },
     "internal": {
       "status": "live",
       "verifiedAt": "2026-08-12",
@@ -229,7 +243,10 @@
     },
     "inlineEdit": {
       "status": "live",
-      "note": "grid inline editing."
+      "verifiedAt": "2026-11-23",
+      "evidenceScope": "in-repo",
+      "evidence": "ui/packages/app-shell/src/providers/MetadataProvider.tsx#attachInlineSubforms passes 'grid' or 'form' to resolveInlineMode (ui/packages/plugin-form/src/deriveMasterDetail.ts) as the inline form factor of a child a parent field group places",
+      "note": "The form factor ('grid' | 'form') of a child that a parent field group (fieldGroups[].relatedList) places in the parent's form; the group, not this key, decides the placement (#35889). NARROWED 2026-11-23 (#35926): the boolean arm is retired — true and false both read as absent at every reader (MetadataProvider passes them as undefined, resolveInlineMode and the lint's formFactorOf take the smart default), so a boolean is refused at parse with the prescription and stripped from stored sources by the protocol-18 conversion field-inline-edit-boolean-removed. Verdict for the surviving values: LIVE."
     },
     "language": {
       "status": "live",
@@ -398,7 +415,7 @@
       "status": "live",
       "verifiedAt": "2026-10-31",
       "evidenceScope": "in-repo",
-      "evidence": "ui/packages/fields/src/widgets/lookupAutofill.ts#declaredLookupAutofillPatch (the one fill rule: each target from the picked record's source, filled only while empty or still holding the earlier pick's value unless `overwrite: true`); ui/packages/fields/src/widgets/LookupField.tsx#fillDeclaredTargets (the record form: every single-value pick path, popover, keyboard, quick-create and the browse-all dialog, reads the field's pairs and writes through the host's `onAutofill`); ui/packages/components/src/renderers/form/form.tsx#LOOKUP_AUTOFILL_WIDGET_TYPES (the form renderer hands a lookup its `onAutofill` writer, `form.setValue` as an edit); ui/packages/fields/src/widgets/GridField.tsx#lookupAutofillPatch (the line-item grid: the declared pair fills under the same rule and takes its target out of the same-named `autofill` copy), its pairs handed over by ui/packages/plugin-form/src/MasterDetailForm.tsx#lookupAutofill and ui/packages/plugin-form/src/LineItemsPanel.tsx#lineLookupAutofill through ui/packages/fields/src/widgets/lookupAutofill.ts#lookupAutofillByField; authoring doors unchanged: packages/spec/src/data/field.zod.ts#lookupAutofill, packages/spec/src/data/object.zod.ts#refuseDishonestLookupAutofill, packages/spec/src/stack.zod.ts#collectLookupAutofillErrors",
+      "evidence": "ui/packages/fields/src/widgets/lookupAutofill.ts#declaredLookupAutofillPatch (the one fill rule: each target from the picked record's source, filled only while empty or still holding the earlier pick's value unless `overwrite: true`); ui/packages/fields/src/widgets/LookupField.tsx#fillDeclaredTargets (the record form: every single-value pick path, popover, keyboard, quick-create and the browse-all dialog, reads the field's pairs and writes through the host's `onAutofill`); ui/packages/components/src/renderers/form/form.tsx#LOOKUP_AUTOFILL_WIDGET_TYPES (the form renderer hands a lookup its `onAutofill` writer, `form.setValue` as an edit); ui/packages/fields/src/widgets/GridField.ts#lookupAutofillPatch (the line-item grid: the declared pair fills under the same rule and takes its target out of the same-named `autofill` copy), its pairs handed over by ui/packages/plugin-form/src/MasterDetailForm.tsx#lookupAutofill and ui/packages/plugin-form/src/LineItemsPanel.tsx#lineLookupAutofill through ui/packages/fields/src/widgets/lookupAutofill.ts#lookupAutofillByField; authoring doors unchanged: packages/spec/src/data/field.zod.ts#lookupAutofill, packages/spec/src/data/object.zod.ts#refuseDishonestLookupAutofill, packages/spec/src/stack.zod.ts#collectLookupAutofillErrors",
       "note": "LIVE — read by the record form and the line-item grid on a pick. Pinned end to end by ui/packages/plugin-form/src/ObjectForm.lookupAutofill-28245.test.tsx (an empty target fills and is saved, a typed value is kept, `overwrite: true` replaces, an earlier pick's value is replaced, the browse-all dialog fills too, a lookup without the key fills nothing) and ui/packages/fields/src/widgets/GridField.lookupAutofill-28245.test.tsx (the same rule in a grid row, the declared target out of the same-named copy, a stored line's own value kept). Bound: a master-detail collection whose relationship and every column are authored loads no child schema, so its grid fills only the same-named copy. PRODUCER: HotCRM's quote line item (product lookup, `unit_price` from the product's `list_price`).",
       "children": {
         "target": {
@@ -459,7 +476,7 @@
       "verifiedAt": "2026-08-17",
       "evidenceScope": "in-repo",
       "evidence": "ui/packages/app-shell/src/providers/MetadataProvider.tsx (attachInlineSubforms passes d.inlineColumns as the subform's columns) → plugin-form/MasterDetailForm.tsx (hydrateColumns) → fields/GridField.tsx (the name-keyed GridColumn renderer, objectui#3951)",
-      "note": "LIVE via objectui renderer. #9227 closed the element shape (strict, name-keyed InlineGridColumnSchema): the child keys below are exactly the GridColumn keys the widget has a live read for, measured against objectui main 2026-08-17. NOTE the .objectui-sha pin (665661ab) predates objectui#3951 — the PINNED console still reads the retired field spelling; the drilled evidence below cites objectui main, which is the contract this schema mirrors. Renderer read points moved out of spec source (#23434). Column-type hydration (packages/spec/src/stack.zod.ts HYDRATED_INLINE_COLUMN_TYPE; packages/spec/src/inline-grid-column-carriers.test.ts): objectui @db11afd4967c packages/plugin-form/src/deriveMasterDetail.ts#hydrateColumns leaves a column that declares a `type` alone and otherwise sets `type: fieldTypeToColumnType(childField.type)`; objectui @db11afd4967c packages/plugin-form/src/deriveMasterDetail.ts#fieldTypeToColumnType maps each of the column schema's nine types' namesake field type to that same column type, and its only `currency` arm is the `currency` field type. Line-position field (packages/spec/src/data/inline-grid-sort-fields.ts INLINE_GRID_SORT_FIELDS): objectui @89cad75d5570 packages/plugin-form/src/deriveMasterDetail.ts#SORT_FIELD_NAMES, the same six names in the same order. Per-row expand form (packages/spec/src/data/inline-grid-columns.ts deriveInlineRowFormFields and its test): objectui @31971ff1e28f packages/plugin-form/src/deriveMasterDetail.ts#deriveFormFields is the derivation rule, and the first two test fixtures are its own cases in objectui @31971ff1e28f packages/plugin-form/src/deriveMasterDetail.test.ts (describe \"deriveFormFields (per-row expand form)\"); the offer condition (isInlineRowFormOffered) is the one objectui @31971ff1e28f packages/plugin-form/src/MasterDetailForm.tsx#MasterDetailLines applies — `inlineMode === 'form'`, or more `formFields` than `columns`.",
+      "note": "LIVE via objectui renderer. #9227 closed the element shape (strict, name-keyed InlineGridColumnSchema): the child keys below are exactly the GridColumn keys the widget has a live read for, measured against objectui main 2026-08-17. NOTE the .objectui-sha pin (665661ab) predates objectui#3951 — the PINNED console still reads the retired field spelling; the drilled evidence below cites objectui main, which is the contract this schema mirrors. Renderer read points moved out of spec source (#23434). Column-type hydration (packages/spec/src/stack.zod.ts HYDRATED_INLINE_COLUMN_TYPE; packages/spec/src/inline-grid-column-carriers.test.ts): objectui @db11afd4967c packages/plugin-form/src/deriveMasterDetail.ts#hydrateColumns leaves a column that declares a `type` alone and otherwise sets `type: fieldTypeToColumnType(childField.type)`; objectui @db11afd4967c packages/plugin-form/src/deriveMasterDetail.ts#fieldTypeToColumnType maps each of the column schema's types' namesake field type to that same column type, and its only `currency` arm is the `currency` field type; since objectstack#36043 the in-repo ui/packages/plugin-form/src/deriveMasterDetail.ts#fieldTypeToColumnType does the same for all fourteen, `user`, `multiselect`, `tags`, `boolean` and `rating` included. Line-position field (packages/spec/src/data/inline-grid-sort-fields.ts INLINE_GRID_SORT_FIELDS): objectui @89cad75d5570 packages/plugin-form/src/deriveMasterDetail.ts#SORT_FIELD_NAMES, the same six names in the same order. Per-row expand form (packages/spec/src/data/inline-grid-columns.ts deriveInlineRowFormFields and its test): objectui @31971ff1e28f packages/plugin-form/src/deriveMasterDetail.ts#deriveFormFields is the derivation rule, and the first two test fixtures are its own cases in objectui @31971ff1e28f packages/plugin-form/src/deriveMasterDetail.test.ts (describe \"deriveFormFields (per-row expand form)\"); the offer condition (isInlineRowFormOffered) is the one objectui @31971ff1e28f packages/plugin-form/src/MasterDetailForm.tsx#MasterDetailLines applies — `inlineMode === 'form'`, or more `formFields` than `columns`.",
       "children": {
         "name": {
           "status": "live",
@@ -471,7 +488,7 @@
         },
         "type": {
           "status": "live",
-          "note": "objectui GridField.tsx — selects the cell control (text/number/currency/date/datetime/time/select/lookup/file) and drives type-based min widths (minWidthFor/widthStyle); hydrateColumns derives it from the child field type when absent."
+          "note": "objectui GridField.tsx — selects the cell control (text/number/currency/date/datetime/time/select/lookup/file/user/multiselect/tags/boolean/rating) and drives type-based min widths (minWidthFor/widthStyle); hydrateColumns derives it from the child field type when absent."
         },
         "width": {
           "status": "live",
@@ -483,7 +500,7 @@
         },
         "options": {
           "status": "live",
-          "note": "objectui GridField.tsx select cells — SelectItem per {label,value}; display formatting resolves the stored value to its label."
+          "note": "ui/packages/fields/src/widgets/grid-field/GridFieldWidget.tsx — a select cell's choices, a multiselect cell's choices (several held) and a boolean cell's two words (values `true` / `false`); display formatting resolves the stored value to its label. A tags cell reads none (objectstack#36043)."
         },
         "prefix": {
           "status": "live",
@@ -507,7 +524,11 @@
         },
         "multiple": {
           "status": "live",
-          "note": "objectui GridField.tsx — multi-record lookup cells and multi-file upload cells."
+          "note": "objectui GridField.tsx — multi-record lookup cells, multi-person user cells and multi-file upload cells."
+        },
+        "max": {
+          "status": "live",
+          "note": "objectui grid-field/GridFieldWidget.tsx — the star count of a rating cell (RatingField's `max`, default 5); hydrateColumns copies the child rating field's `max` when the column declares no type."
         },
         "accept": {
           "status": "live",
@@ -552,7 +573,7 @@
       "status": "live",
       "verifiedAt": "2026-10-29",
       "evidenceScope": "in-repo",
-      "evidence": "ui/packages/app-shell/src/utils/deriveRelatedLists.ts:367 skips the FK entirely when relatedList is false; ui/packages/app-shell/src/utils/deriveRelatedLists.ts#deriveRelatedLists marks the derived list isPrimary (a body table) by packages/spec/src/data/related-list-body-table.ts#isBodyTableRelationship: when it is 'primary', or when it is absent on a master_detail FK that sets inlineEdit; ui/packages/app-shell/src/views/RecordDetailView.tsx:1959 calls deriveRelatedLists and renders what it returns, consuming the derived structure rather than the key",
+      "evidence": "ui/packages/app-shell/src/utils/deriveRelatedLists.ts:367 skips the FK entirely when relatedList is false; ui/packages/app-shell/src/utils/deriveRelatedLists.ts#deriveRelatedLists marks the derived list isPrimary (a body table) by packages/spec/src/data/related-list-body-table.ts#isBodyTableRelationship: when it is 'primary', or when it is absent on a master_detail FK that a parent field group places; ui/packages/app-shell/src/views/RecordDetailView.tsx:1959 calls deriveRelatedLists and renders what it returns, consuming the derived structure rather than the key",
       "note": "RE-CITED 2026-08-10 (#7133/#7142): the old split citation's RecordDetailView half went to prose — every `relatedList` occurrence in that file is now a comment (:1013, :1847, :1857, :1864). The working half is deriveRelatedLists, which is what branches on the value. RecordDetailView is kept, explicitly labelled as the consumer of the DERIVED list, so the next re-audit does not read its zero key-hits as rot a second time. Verdict unchanged: LIVE. 2026-10-28 (#27069): 'primary' re-read as PLACEMENT (the record's main content: a body table, its own tab on the tabbed page) rather than order — the parent object's `relatedLists` orders the lists now — and an absent relatedList on an inline-edited master_detail FK is 'primary' by default (`isMainContentList`). Re-cited to the moved lines; verdict unchanged: LIVE. 2026-10-29 (#27478): the body-table rule moved into the spec as `isBodyTableRelationship`, the one predicate the record page (deriveRelatedLists isPrimary, RecordDetailView isBody), Studio and the refusal of a field group naming a side card read; RecordDetailView's own copy, which drew an inline-edited master_detail declaring relatedList: true as a body table, is gone. Verdict unchanged: LIVE."
     },
     "relatedListTitle": {
@@ -579,7 +600,12 @@
     "trackHistory": {
       "status": "live",
       "evidence": "packages/plugins/plugin-audit/src/audit-writers.ts",
-      "note": "ADR-0052 §5b — the audit-writer renders tracked-field diffs as human-readable activity summaries (renderTrackedChangeSummary + getFieldDefs read field.trackHistory). Reintroduces the pruned auditTrail concept WITH a runtime consumer, satisfying enforce-or-remove (ADR-0049)."
+      "note": "ADR-0052 §5b — the audit-writer renders changed-field diffs as human-readable activity summaries (renderTrackedChangeSummary + changeValuesShownFor read field.trackHistory). Since #36290 values are on by default; `true` opts a media or structured-JSON field in, and `false` reads like absent (the field designer wrote it on every save while it meant nothing, so it is not an off switch; the off switch is `fieldHistory: false`). Reintroduces the pruned auditTrail concept WITH a runtime consumer, satisfying enforce-or-remove (ADR-0049)."
+    },
+    "fieldHistory": {
+      "status": "live",
+      "evidence": "packages/plugins/plugin-audit/src/audit-writers.ts#changeValuesShownFor",
+      "note": "#36290 (ruling 7076513167 point 1): the field's off switch for old → new values on the record activity stream. The writer reads `field.fieldHistory === false` (off) and `=== true` (on, a media or JSON type included); absent is on. No .default() on purpose, so only an author who wrote it turns values off. Who reads a value is the per-reader field redaction (packages/plugins/plugin-audit/src/activity-field-redaction.ts)."
     },
     "accept": {
       "status": "live",

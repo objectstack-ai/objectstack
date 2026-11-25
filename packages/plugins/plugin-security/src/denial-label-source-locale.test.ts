@@ -18,6 +18,12 @@
  * `SqlDriver`, through the engine's own writes. The field-write gate's half
  * of the same scenario lives in its harness,
  * `owner-queue-field-write-user-message.test.ts`.
+ *
+ * The second scenario adds an `en` pack (with no row for the master) and asks
+ * in REGIONAL tags: the label locale is negotiated against what the service
+ * holds before the label is translated, so `en-US` reads as the authored `en`
+ * and names the master as `/meta` and objectql's refusals name it, instead of
+ * walking the fallback chain to the `zh-CN` row.
  */
 
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
@@ -42,8 +48,10 @@ const ZH_CN = {
  * locale, then the declared fallback, then echoes the key; the getters report
  * the declaration as `os serve` hands it over.
  */
-function servedI18n(declared: { defaultLocale: string; sourceLocale?: string }) {
-  const bundles: Record<string, Record<string, unknown>> = { 'zh-CN': ZH_CN };
+function servedI18n(
+  declared: { defaultLocale: string; sourceLocale?: string },
+  bundles: Record<string, Record<string, unknown>> = { 'zh-CN': ZH_CN },
+) {
   const fallback = declared.defaultLocale;
   const read = (data: unknown, key: string): string | undefined => {
     let cur: unknown = data;
@@ -70,91 +78,93 @@ const NO_SOURCE = { defaultLocale: 'zh-CN' };
 const sentence = (messageKey: string, locale: string, params: Record<string, unknown>) =>
   renderOperationMessage({ messageKey, params }, { locale });
 
-describe('master-detail write gate: the master is named in the declared sourceLocale as authored', () => {
-  const SYS = { context: { isSystem: true, userId: 'usr_system', tenantId: DEFAULT_ORGANIZATION_ID } } as never;
-  const WRITER = 'usr_writer';
-  const READABLE_SET: PermissionSet = PermissionSetSchema.parse({
-    name: 'lsd_readable',
-    label: 'Readable',
-    objects: {
-      '*': { allowRead: true, allowCreate: true, allowEdit: true, allowDelete: true },
-      lsd_contract: { allowRead: true, allowCreate: false, allowEdit: false, allowDelete: false },
+// One real engine and security layer for every scenario below; each test
+// swaps the i18n service it reads.
+const SYS = { context: { isSystem: true, userId: 'usr_system', tenantId: DEFAULT_ORGANIZATION_ID } } as never;
+const WRITER = 'usr_writer';
+const READABLE_SET: PermissionSet = PermissionSetSchema.parse({
+  name: 'lsd_readable',
+  label: 'Readable',
+  objects: {
+    '*': { allowRead: true, allowCreate: true, allowEdit: true, allowDelete: true },
+    lsd_contract: { allowRead: true, allowCreate: false, allowEdit: false, allowDelete: false },
+  },
+});
+const OBJECTS = [
+  SysUser,
+  { name: 'lsd_contract', label: 'Contract', sharingModel: 'public_read_write', fields: { name: { name: 'name', type: 'text' } } },
+  {
+    name: 'lsd_milestone', label: 'Milestone', sharingModel: 'controlled_by_parent',
+    fields: {
+      name: { name: 'name', type: 'text' },
+      contract: { name: 'contract', type: 'master_detail', reference: 'lsd_contract', required: true },
     },
-  });
-  const OBJECTS = [
-    SysUser,
-    { name: 'lsd_contract', label: 'Contract', sharingModel: 'public_read_write', fields: { name: { name: 'name', type: 'text' } } },
-    {
-      name: 'lsd_milestone', label: 'Milestone', sharingModel: 'controlled_by_parent',
-      fields: {
-        name: { name: 'name', type: 'text' },
-        contract: { name: 'contract', type: 'master_detail', reference: 'lsd_contract', required: true },
-      },
+  },
+];
+const services: Record<string, unknown> = {};
+let engine: ObjectQL;
+
+beforeAll(async () => {
+  engine = new ObjectQL();
+  engine.registerDriver(
+    new SqlDriver({ client: 'better-sqlite3', connection: { filename: ':memory:' }, useNullAsDefault: true }) as never,
+    true,
+  );
+  await engine.init();
+  engine.registerApp({
+    id: 'com.objectstack.qa.denial-label-source-locale',
+    name: 'A refusal names the master in the authored language',
+    version: '1.0.0',
+    type: 'plugin',
+    scope: 'system',
+    objects: OBJECTS,
+  } as never);
+  await engine.syncSchemas();
+  await installDefaultOrganization(engine as never);
+  Object.assign(services, {
+    manifest: { register: vi.fn() },
+    objectql: engine,
+    metadata: {
+      get: async (type: string, name: string) =>
+        (type === 'permission' ? (name === READABLE_SET.name ? READABLE_SET : null) : engine.getSchema(name)) ?? null,
+      list: async () => [READABLE_SET],
     },
-  ];
-  const services: Record<string, unknown> = {};
-  let engine: ObjectQL;
-
-  beforeAll(async () => {
-    engine = new ObjectQL();
-    engine.registerDriver(
-      new SqlDriver({ client: 'better-sqlite3', connection: { filename: ':memory:' }, useNullAsDefault: true }) as never,
-      true,
-    );
-    await engine.init();
-    engine.registerApp({
-      id: 'com.objectstack.qa.denial-label-source-locale',
-      name: 'A refusal names the master in the authored language',
-      version: '1.0.0',
-      type: 'plugin',
-      scope: 'system',
-      objects: OBJECTS,
-    } as never);
-    await engine.syncSchemas();
-    await installDefaultOrganization(engine as never);
-    Object.assign(services, {
-      manifest: { register: vi.fn() },
-      objectql: engine,
-      metadata: {
-        get: async (type: string, name: string) =>
-          (type === 'permission' ? (name === READABLE_SET.name ? READABLE_SET : null) : engine.getSchema(name)) ?? null,
-        list: async () => [READABLE_SET],
-      },
-      sharing: { canEdit: async () => true },
-      i18n: servedI18n(SOURCE_EN),
-    });
-    const ctx = {
-      logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
-      registerService: (name: string, svc: unknown) => { services[name] = svc; },
-      hook: () => undefined,
-      getService: (name: string) => {
-        if (!(name in services)) throw new Error(`service not registered: ${name}`);
-        return services[name];
-      },
-    };
-    const plugin = new SecurityPlugin({ fallbackPermissionSet: READABLE_SET.name });
-    await plugin.init(ctx as never);
-    await plugin.start(ctx as never);
-    wireEngineSecuritySource(engine, () => plugin);
-    vi.spyOn((engine as unknown as { logger: { warn: () => void } }).logger, 'warn').mockImplementation(() => undefined);
-    await engine.insert('sys_user', [{ id: WRITER, name: WRITER, email: `${WRITER}@lsd.test` }], SYS);
-    await engine.insert('lsd_contract', [{ id: 'ctr_1', name: 'contract' }], SYS);
+    sharing: { canEdit: async () => true },
+    i18n: servedI18n(SOURCE_EN),
   });
-
-  afterAll(async () => {
-    try { await engine?.destroy(); } catch { /* noop */ }
-  });
-
-  const refusal = async (locale: string): Promise<any> => {
-    const context = { userId: WRITER, positions: [], permissions: [READABLE_SET.name], posture: 'MEMBER', tenantId: DEFAULT_ORGANIZATION_ID, locale };
-    try {
-      await engine.insert('lsd_milestone', { name: 'new', contract: 'ctr_1' }, { context } as never);
-    } catch (e) {
-      return e;
-    }
-    throw new Error('expected the write to be refused');
+  const ctx = {
+    logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
+    registerService: (name: string, svc: unknown) => { services[name] = svc; },
+    hook: () => undefined,
+    getService: (name: string) => {
+      if (!(name in services)) throw new Error(`service not registered: ${name}`);
+      return services[name];
+    },
   };
+  const plugin = new SecurityPlugin({ fallbackPermissionSet: READABLE_SET.name });
+  await plugin.init(ctx as never);
+  await plugin.start(ctx as never);
+  wireEngineSecuritySource(engine, () => plugin);
+  vi.spyOn((engine as unknown as { logger: { warn: () => void } }).logger, 'warn').mockImplementation(() => undefined);
+  await engine.insert('sys_user', [{ id: WRITER, name: WRITER, email: `${WRITER}@lsd.test` }], SYS);
+  await engine.insert('lsd_contract', [{ id: 'ctr_1', name: 'contract' }], SYS);
+});
 
+afterAll(async () => {
+  try { await engine?.destroy(); } catch { /* noop */ }
+});
+
+const refusal = async (locale: string): Promise<any> => {
+  const context = { userId: WRITER, positions: [], permissions: [READABLE_SET.name], posture: 'MEMBER', tenantId: DEFAULT_ORGANIZATION_ID, locale };
+  try {
+    await engine.insert('lsd_milestone', { name: 'new', contract: 'ctr_1' }, { context } as never);
+  } catch (e) {
+    return e;
+  }
+  throw new Error('expected the write to be refused');
+};
+
+describe('master-detail write gate: the master is named in the declared sourceLocale as authored', () => {
   it('en: the master is named by its declared English label', async () => {
     services.i18n = servedI18n(SOURCE_EN);
     const e = await refusal('en');
@@ -172,5 +182,38 @@ describe('master-detail write gate: the master is named in the declared sourceLo
   it('CONTROL: with no sourceLocale declared, en walks to the zh-CN row as before', async () => {
     services.i18n = servedI18n(NO_SOURCE);
     expect((await refusal('en')).userMessage).toBe(sentence('master_record_edit_denied', 'en', { master: '合同' }));
+  });
+});
+
+/**
+ * An `en` pack that holds rows, none of them the master's: the authored label
+ * is the `en` text, so nothing in the pack names `lsd_contract`.
+ */
+const EN_PACK = {
+  objects: {
+    lsd_milestone: { label: 'Milestone' },
+  },
+};
+
+describe('master-detail write gate: a regional request tag names the master as the negotiated locale does', () => {
+  const withEnPack = () => servedI18n(SOURCE_EN, { 'zh-CN': ZH_CN, en: EN_PACK });
+
+  for (const tag of ['en', 'en-US', 'fr-FR']) {
+    it(`${tag}: the master is named by its authored English label`, async () => {
+      services.i18n = withEnPack();
+      const e = await refusal(tag);
+      expect(e.code).toBe('PERMISSION_DENIED');
+      expect(e.statusCode ?? e.status).toBe(403);
+      expect(e.userMessage).toBe(sentence('master_record_edit_denied', tag, { master: 'Contract' }));
+      expect(e.userMessage).not.toContain('合同');
+    });
+  }
+
+  it('CONTROL: zh-CN reads the zh-CN row', async () => {
+    services.i18n = withEnPack();
+    const e = await refusal('zh-CN');
+    expect(e.code).toBe('PERMISSION_DENIED');
+    expect(e.statusCode ?? e.status).toBe(403);
+    expect(e.userMessage).toBe(sentence('master_record_edit_denied', 'zh-CN', { master: '合同' }));
   });
 });

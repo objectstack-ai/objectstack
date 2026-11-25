@@ -48,7 +48,7 @@
 
 import * as React from 'react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, waitFor, cleanup } from '@testing-library/react';
+import { render, screen, waitFor, cleanup, fireEvent, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { MetadataCtx } from '@object-ui/react';
 
@@ -170,6 +170,21 @@ function makeMetadata(pages: any[]) {
   } as any;
 }
 
+/**
+ * objectstack#36075 — on the synthesized page the record's comments are the
+ * comment panel's, opened from the header's comments icon; the 动态 stream
+ * keeps the activity.
+ */
+async function openComments(): Promise<HTMLElement> {
+  const button = await waitFor(() => {
+    const el = document.querySelector('[data-comments-button]');
+    expect(el).not.toBeNull();
+    return el as HTMLElement;
+  });
+  fireEvent.click(button);
+  return document.querySelector('[data-comments-panel]') as HTMLElement;
+}
+
 function renderDetail(dataSource: any, pages: any[] = []) {
   return render(
     // objectstack#35595 — the whole stream, composer included, is the 动态 tab's face; the 概览 rail shows a read-only peek.
@@ -181,7 +196,7 @@ function renderDetail(dataSource: any, pages: any[] = []) {
           onEdit={() => {}}
           objectNameOverride={OBJECT_NAME}
           recordIdOverride={RECORD_ID}
-          embedded
+          /* objectstack#36150 — not `embedded`: an authored page draws on the full page only. */
         />
       </MetadataCtx.Provider>
     </MemoryRouter>,
@@ -190,6 +205,9 @@ function renderDetail(dataSource: any, pages: any[] = []) {
 
 beforeEach(() => {
   cleanup();
+  // The comment panel's open state is kept in this browser (objectstack#36075):
+  // each case opens on a closed panel.
+  window.localStorage.clear();
   // Unrelated chrome on this view (approvals, favourites, …) reaches for the
   // platform API. In jsdom that is a real socket to :3000 — noisy, slow and
   // machine-dependent. Answering it locally keeps the only asynchrony in this
@@ -292,9 +310,10 @@ describe('RecordDetailView — the feed fetch produces a loading signal (#3209)'
 
     renderDetail(dataSource);
 
-    expect(await screen.findByText('First comment on the record')).toBeTruthy();
-    expect(screen.queryByTestId('activity-loading')).toBeNull();
-    expect(screen.queryByText(EMPTY_COMMENTS)).toBeNull();
+    const panel = await openComments();
+    expect(await within(panel).findByText('First comment on the record')).toBeTruthy();
+    await waitFor(() => expect(screen.queryByTestId('activity-loading')).toBeNull());
+    expect(panel.querySelector('[data-comments-empty]')).toBeNull();
   });
 
   // ── A rejected read is an ANSWER, not a permanent spinner ───────────────
@@ -311,11 +330,14 @@ describe('RecordDetailView — the feed fetch produces a loading signal (#3209)'
 
     renderDetail(dataSource);
 
-    // The refused comment read settles on its no-permission line, the 404 on
-    // nothing: an answer either way, never a spinner.
-    const notice = await screen.findByTestId('activity-access-denied');
-    expect(notice.querySelector('[data-denied-source="comments"]')).not.toBeNull();
+    // The 404 settles the stream on its empty copy and the refused comment
+    // read settles the comment panel on its no-permission line: an answer
+    // either way, never a spinner.
+    expect(await screen.findByText(EMPTY_COMMENTS)).toBeTruthy();
     expect(screen.queryByTestId('activity-loading')).toBeNull();
+    const panel = await openComments();
+    await waitFor(() => expect(panel.querySelector('[data-comments-note="denied"]')).not.toBeNull());
+    expect(within(panel).queryByRole('status')).toBeNull();
   });
 
   it('leaves the loading state when only one read rejects and the other resolves empty', async () => {
@@ -348,7 +370,8 @@ describe('RecordDetailView — the feed fetch produces a loading signal (#3209)'
 
     renderDetail(dataSource);
 
-    expect(await screen.findByText('Survived the failed activity read')).toBeTruthy();
+    const panel = await openComments();
+    expect(await within(panel).findByText('Survived the failed activity read')).toBeTruthy();
     await waitFor(() => expect(screen.queryByTestId('activity-loading')).toBeNull());
   });
 });

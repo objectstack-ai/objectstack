@@ -40,6 +40,7 @@ export const InboxMessage = ObjectSchema.create({
     label: 'Inbox Message',
     pluralLabel: 'Inbox Messages',
     icon: 'inbox',
+    color: 'pink',
     // [#32444] Engine-owned: written only by the inbox channel (see above).
     managedBy: 'engine-owned',
     // ADR-0057: user-facing but ephemeral — expires with the pipeline's 90d

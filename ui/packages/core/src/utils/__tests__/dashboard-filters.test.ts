@@ -12,6 +12,7 @@ import {
   dashboardFilterVariableDefs,
   buildFilterCondition,
   buildWidgetScopedFilter,
+  dashboardFiltersNotApplied,
   resetDashboardFilterWarnings,
   DATE_RANGE_FILTER_NAME,
   DATE_RANGE_PRESETS,
@@ -853,5 +854,42 @@ describe('a `{current_iso_week}` default seeds the filter with the resolved week
     } finally {
       warn.mockRestore();
     }
+  });
+});
+
+// objectstack#36372 — the card mark that names a filter not applied to a card
+// reads `dashboardFiltersNotApplied`. A listed filter adds no condition to the
+// card's query for any value; an unlisted one adds one. The mark and the data
+// read the same binding.
+describe('dashboardFiltersNotApplied agrees with buildWidgetScopedFilter', () => {
+  const ownerDef: DashboardFilterDef = { name: 'owner', field: 'owner', type: 'text' };
+  const stageDef: DashboardFilterDef = { name: 'stage', field: 'stage', type: 'text', targetWidgets: ['w_listed'] };
+  const defs = [ownerDef, stageDef];
+  const widgets: Array<Parameters<typeof dashboardFiltersNotApplied>[0]> = [
+    { id: 'w_default' },
+    { id: 'w_opt_out', filterBindings: { owner: false } },
+    { id: 'w_rebound', filterBindings: { owner: 'account_owner' } },
+    { id: 'w_listed' },
+    { id: 'w_explicit_over_list', filterBindings: { stage: 'pipeline_stage' } },
+  ];
+
+  it('names exactly the filters that add no condition to the widget query', () => {
+    for (const widget of widgets) {
+      const notApplied = new Set(dashboardFiltersNotApplied(widget, defs).map((d) => d.name));
+      for (const def of defs) {
+        const scoped = buildWidgetScopedFilter(widget, [def], { [def.name]: 'x' });
+        expect({ widget: widget.id, filter: def.name, applied: scoped !== undefined }).toEqual({
+          widget: widget.id,
+          filter: def.name,
+          applied: !notApplied.has(def.name),
+        });
+      }
+    }
+  });
+
+  it('lists an opted-out filter and a filter whose allow-list leaves the widget out', () => {
+    expect(dashboardFiltersNotApplied({ id: 'w_opt_out', filterBindings: { owner: false } }, defs).map((d) => d.name))
+      .toEqual(['owner', 'stage']);
+    expect(dashboardFiltersNotApplied({ id: 'w_listed' }, defs)).toEqual([]);
   });
 });

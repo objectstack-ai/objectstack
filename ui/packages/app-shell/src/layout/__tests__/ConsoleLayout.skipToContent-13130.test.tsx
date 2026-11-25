@@ -8,8 +8,9 @@
  * twice (its link and its "More actions for …" button), so a list's New was
  * about the 60th stop, and there was no skip link anywhere in the shell.
  *
- * Pinned here: the link is the first Tab stop, ahead of the app bar and the
- * sidebar; activating it moves focus to the route slot, the element that
+ * Pinned here: the link is the first Tab stop, ahead of the sidebar on a
+ * desktop (which draws no app bar since objectstack#36112) and ahead of the
+ * app bar on a phone; activating it moves focus to the route slot, the element that
  * holds the page, without writing a hash into the URL; the next Tab lands on
  * the page's own first control; and the slot is focusable by script only.
  *
@@ -22,6 +23,9 @@
  */
 
 import '@testing-library/jest-dom/vitest';
+// The layout reaches `import('@objectstack/lint')` (the draft bar's publish
+// preflight); pay its first load at collection, never inside a clocked case.
+import '@objectstack/lint';
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import React from 'react';
 import { render, screen, cleanup, fireEvent } from '@testing-library/react';
@@ -52,7 +56,10 @@ import { NavigationProvider } from '../../context/NavigationContext';
 
 const APP = { name: 'crm', label: 'CRM', active: true, navigation: [] };
 
-function mountConsole() {
+function mountConsole(width = 1440) {
+  // 1440 px: the sidebar stays open, so no collapsed-sidebar expand button
+  // sits at the top of the page.
+  Object.defineProperty(window, 'innerWidth', { value: width, configurable: true, writable: true });
   return render(
     <I18nProvider instance={createI18n({ defaultLanguage: 'en', detectBrowserLanguage: false })} persistLanguage={false}>
       <MemoryRouter initialEntries={['/apps/crm/contact']}>
@@ -70,11 +77,24 @@ function mountConsole() {
 
 const skipLink = () => screen.getByRole('link', { name: 'Skip to content' });
 
-afterEach(() => cleanup());
+afterEach(() => {
+  cleanup();
+  Object.defineProperty(window, 'innerWidth', { value: 1024, configurable: true, writable: true });
+});
 
 describe('the console shell opens with a skip link (objectui#13130)', () => {
-  it('the first Tab stop is the skip link, ahead of the app bar and the sidebar', async () => {
+  it('the first Tab stop is the skip link, ahead of the sidebar (a desktop draws no app bar)', async () => {
     mountConsole();
+    const user = userEvent.setup();
+    expect(screen.queryByRole('button', { name: 'App launcher' })).toBeNull();
+    await user.tab();
+    expect(document.activeElement).toBe(skipLink());
+    await user.tab();
+    expect(document.activeElement).toBe(screen.getByRole('link', { name: 'Contacts' }));
+  });
+
+  it('on a phone the first Tab stop is the skip link, ahead of the app bar', async () => {
+    mountConsole(390);
     const user = userEvent.setup();
     await user.tab();
     expect(document.activeElement).toBe(skipLink());

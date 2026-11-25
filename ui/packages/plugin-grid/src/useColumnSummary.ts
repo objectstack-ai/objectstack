@@ -10,11 +10,12 @@ import { useMemo } from 'react';
 import type { ListColumn } from '@object-ui/types';
 import type { ColumnSummary, ListViewGroupHeaderRow } from '@objectstack/spec/ui';
 import { deriveColumnSummary, isColumnSummaryCompatibleWithFieldType } from '@objectstack/spec/ui';
-import type { CurrencyConfig } from '@objectstack/spec/data';
+import type { CurrencyConfig, UnitConfig } from '@objectstack/spec/data';
 import { resolveFieldScale, isAggregateCompatibleWithFieldType } from '@objectstack/spec/data';
 import { useLocalization, useDisplayLocale, resolveFieldCurrency, recordCurrencyField, createSafeTranslation } from '@object-ui/i18n';
 import { formatCurrency, formatPercent, percentCellScale, summaryDeclaresCurrency } from '@object-ui/fields';
 import { temporalCellFaceOf, temporalCellText, temporalExtreme, temporalInstant } from './temporalCellFace';
+import { recordMeasureUnitField } from './recordCurrencyAggregates';
 
 /**
  * Aggregation functions for the column footer — the spec's `ColumnSummary`
@@ -168,7 +169,8 @@ export const useSummaryTranslation = createSafeTranslation(
  * any. ⛔ No `count`: the row's first cell already carries the record count.
  * Booleans get their yes / no counts first, then the count family — never
  * the arithmetic, which reads a boolean as 0 / 1 — and a record-currency
- * amount (whose sum the footer withholds) gets the count family only. The
+ * amount or a record-unit quantity (whose sum the footer withholds) gets the
+ * count family only. The
  * yes / no counts are offered exactly where the spec's member table allows
  * them (`isColumnSummaryCompatibleWithFieldType`).
  */
@@ -180,10 +182,10 @@ const MENU_COUNTS: ReadonlyArray<ColumnSummaryType> = [
 ];
 const MENU_BOOLEAN_COUNTS: ReadonlyArray<ColumnSummaryType> = ['count_true', 'count_false'];
 export function offeredColumnSummaries(
-  field: ({ type?: string } & NonNullable<Parameters<typeof recordCurrencyField>[0]>) | undefined,
+  field: ({ type?: string; unitConfig?: UnitConfig } & NonNullable<Parameters<typeof recordCurrencyField>[0]>) | undefined,
 ): ColumnSummaryType[] {
   const type = field?.type;
-  const numeric = !!type && !BOOLEAN_FIELD_TYPES.has(type) && !recordCurrencyField(field);
+  const numeric = !!type && !BOOLEAN_FIELD_TYPES.has(type) && recordMeasureUnitField(field) === undefined;
   return [
     ...(type ? MENU_BOOLEAN_COUNTS.filter((m) => isColumnSummaryCompatibleWithFieldType(m, type)) : []),
     ...(numeric ? MENU_AGGREGATES.filter((m) => isAggregateCompatibleWithFieldType(m, type!)) : []),
@@ -652,7 +654,7 @@ function formatSummaryLabel(
 }
 
 /** The `objectSchema.fields` slice the footer formats with. */
-type SummaryFieldMetadata = Record<string, { type?: string; returnType?: string; format?: string | null; widget?: string | null; currency?: string; defaultCurrency?: string; currencyConfig?: CurrencyConfig; precision?: number | null; scale?: number | null; max?: number }>;
+type SummaryFieldMetadata = Record<string, { type?: string; returnType?: string; format?: string | null; widget?: string | null; currency?: string; defaultCurrency?: string; currencyConfig?: CurrencyConfig; unitConfig?: UnitConfig; precision?: number | null; scale?: number | null; max?: number }>;
 
 /**
  * Which rows the footer's figures describe (objectui#12081 item 3).
@@ -766,12 +768,13 @@ export function useScopedColumnSummary(
 
       const targetField = config.field || col.field;
 
-      // [ADR-0144 D6] The footer spans every row, so it is never inside one
-      // currency: a sum / avg / min / max over a `record`-mode amount would add
-      // amounts in different currencies. It draws nothing for that column (the
-      // counts stand); the consolidated figure is the home field's, and a
-      // per-currency figure is the header of a group bucketed by the code.
-      if (!NON_NUMERIC_TYPES.has(config.type) && recordCurrencyField(fieldMetadata?.[targetField])) continue;
+      // [ADR-0144 D6, ADR-0158 U7 R1] The footer spans every row, so it is
+      // never inside one unit: a sum / avg / min / max over a `record`-mode
+      // amount would add amounts in different currencies, and one over a
+      // `record`-mode quantity quantities in different units. It draws nothing
+      // for that column (the counts stand); a per-unit figure is the header of
+      // a group bucketed by the unit field.
+      if (!NON_NUMERIC_TYPES.has(config.type) && recordMeasureUnitField(fieldMetadata?.[targetField]) !== undefined) continue;
 
       // objectstack#32119 — a column whose cell paints a date-family face
       // holds times, not numbers: its `min` / `max` is the extreme time, drawn

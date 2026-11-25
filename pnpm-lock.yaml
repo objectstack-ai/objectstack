@@ -1899,6 +1899,9 @@ importers:
       '@objectstack/platform-objects':
         specifier: workspace:*
         version: link:../../platform-objects
+      '@objectstack/plugin-hono-server':
+        specifier: workspace:*
+        version: link:../plugin-hono-server
       '@objectstack/spec':
         specifier: workspace:*
         version: link:../../spec
@@ -1948,6 +1951,9 @@ importers:
       '@objectstack/platform-objects':
         specifier: workspace:*
         version: link:../../platform-objects
+      '@objectstack/plugin-hono-server':
+        specifier: workspace:*
+        version: link:../plugin-hono-server
       '@objectstack/rest':
         specifier: workspace:*
         version: link:../../rest
@@ -1982,9 +1988,6 @@ importers:
       '@objectstack/objectql':
         specifier: workspace:*
         version: link:../../objectql
-      '@objectstack/plugin-hono-server':
-        specifier: workspace:*
-        version: link:../plugin-hono-server
       '@objectstack/plugin-security':
         specifier: workspace:*
         version: link:../plugin-security
@@ -2514,15 +2517,27 @@ importers:
       '@objectstack/objectql':
         specifier: workspace:*
         version: link:../../objectql
+      '@objectstack/platform-objects':
+        specifier: workspace:*
+        version: link:../../platform-objects
       '@objectstack/plugin-approvals':
         specifier: workspace:*
         version: link:../../plugins/plugin-approvals
+      '@objectstack/plugin-audit':
+        specifier: workspace:*
+        version: link:../../plugins/plugin-audit
       '@objectstack/plugin-auth':
         specifier: workspace:*
         version: link:../../plugins/plugin-auth
       '@objectstack/plugin-hono-server':
         specifier: workspace:*
         version: link:../../plugins/plugin-hono-server
+      '@objectstack/plugin-security':
+        specifier: workspace:*
+        version: link:../../plugins/plugin-security
+      '@objectstack/plugin-sharing':
+        specifier: workspace:*
+        version: link:../../plugins/plugin-sharing
       '@objectstack/plugin-webhooks':
         specifier: workspace:*
         version: link:../../plugins/plugin-webhooks
@@ -2532,6 +2547,12 @@ importers:
       '@objectstack/service-messaging':
         specifier: workspace:*
         version: link:../../services/service-messaging
+      '@objectstack/service-print':
+        specifier: workspace:*
+        version: link:../../services/service-print
+      '@objectstack/service-storage':
+        specifier: workspace:*
+        version: link:../../services/service-storage
       '@objectstack/spec':
         specifier: workspace:*
         version: link:../../spec
@@ -2565,6 +2586,9 @@ importers:
       '@objectstack/lint':
         specifier: workspace:*
         version: link:../../lint
+      '@objectstack/metadata-core':
+        specifier: workspace:*
+        version: link:../../metadata-core
       '@objectstack/objectql':
         specifier: workspace:*
         version: link:../../objectql
@@ -3105,6 +3129,9 @@ importers:
       '@objectstack/core':
         specifier: workspace:*
         version: link:../../core
+      '@objectstack/service-settings':
+        specifier: workspace:*
+        version: link:../service-settings
       '@objectstack/spec':
         specifier: workspace:*
         version: link:../../spec
@@ -3112,6 +3139,9 @@ importers:
       '@objectstack/objectql':
         specifier: workspace:*
         version: link:../../objectql
+      '@objectstack/platform-objects':
+        specifier: workspace:*
+        version: link:../../platform-objects
       '@types/node':
         specifier: ^26.6.5
         version: 26.6.5
@@ -3241,6 +3271,9 @@ importers:
       '@objectstack/core':
         specifier: workspace:*
         version: link:../../core
+      '@objectstack/plugin-hono-server':
+        specifier: workspace:*
+        version: link:../../plugins/plugin-hono-server
       '@objectstack/service-storage':
         specifier: workspace:*
         version: link:../service-storage
@@ -3418,6 +3451,9 @@ importers:
       '@objectstack/platform-objects':
         specifier: workspace:*
         version: link:../../platform-objects
+      '@objectstack/plugin-hono-server':
+        specifier: workspace:*
+        version: link:../../plugins/plugin-hono-server
       '@objectstack/service-cluster':
         specifier: workspace:*
         version: link:../service-cluster
@@ -4255,6 +4291,9 @@ importers:
 
   ui/packages/auth:
     dependencies:
+      '@object-ui/types':
+        specifier: workspace:*
+        version: link:../types
       '@objectstack/spec':
         specifier: workspace:^
         version: link:../../../packages/spec
@@ -5813,6 +5852,9 @@ importers:
       rehype-slug:
         specifier: ^6.0.0
         version: 6.0.0
+      remark-cjk-friendly:
+        specifier: ^2.3.4
+        version: 2.3.4(@types/mdast@4.0.4)(micromark-util-types@2.0.2)(micromark@4.0.2)(unified@11.0.5)
       remark-gfm:
         specifier: ^4.0.1
         version: 4.0.1

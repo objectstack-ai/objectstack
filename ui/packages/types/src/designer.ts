@@ -1266,8 +1266,20 @@ export interface DesignerFieldDefinition {
   isSystem?: boolean;
   /** External ID flag */
   externalId?: boolean;
-  /** Track field history */
+  /**
+   * Track field history — the spec's `trackHistory`: `true` opts a media or
+   * JSON field into old → new values on the record activity; `false` reads
+   * like absent. Carried through an edit as stored; `FieldDesigner` offers no
+   * control for it (objectstack#36290).
+   */
   trackHistory?: boolean;
+  /**
+   * The spec's `fieldHistory` (objectstack#36290): this field's old → new
+   * values on the record activity. Absent follows the platform default
+   * (`resolveFieldHistory` in `@objectstack/spec/data`); `false` turns them
+   * off; `true` turns them on, a media or JSON field included.
+   */
+  fieldHistory?: boolean;
   /*
    * There is deliberately no `indexed` here (objectui#4644). The ObjectStack
    * spec has no field-level index flag: it built no index (objectstack#2377

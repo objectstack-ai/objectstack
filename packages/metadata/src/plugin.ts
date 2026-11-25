@@ -15,7 +15,7 @@ import { resolveArtifactPackageOrder, artifactPackageId } from '@objectstack/cor
 import { NodeMetadataManager } from './node-metadata-manager.js';
 import { MemoryLoader } from './loaders/memory-loader.js';
 import { restoreWithheldSeedDatasets, withholdRetiredSeedModes, type WithheldSeedDataset } from './artifact-retired-seed-modes.js';
-import { PACKAGE_SLOTTED_STORE_TYPES, bundleEntryKey, isBundledStoreType, storedItemPackageId } from './package-slotted-store.js';
+import { PACKAGE_SLOTTED_STORE_TYPES, bundleEntryKey, carriesPlatformStamp, isBundledStoreType, isPlatformOrigin, storedItemPackageId } from './package-slotted-store.js';
 import { DEFAULT_METADATA_TYPE_REGISTRY, judgeCollectionItemOwnerStamp, OWNER_STAMP_JUDGED_COLLECTIONS } from '@objectstack/spec/kernel';
 import type { MetadataPluginConfig } from '@objectstack/spec/kernel';
 import { applyProtection } from '@objectstack/spec/shared';
@@ -380,6 +380,52 @@ function claimedArtifactSlots(bodies: readonly unknown[]): (type: string, name: 
     return (type, name) => owned.get(type)?.has(name) === true;
 }
 
+/**
+ * Whether a top-level `objectExtensions` entry of a stack that carries
+ * `packages[]` is a package body's: a body carries an entry EQUAL to it by
+ * value. An extension has no slot of its own (it is keyed by `extend`, and its
+ * `name` spelling is a retired alias the schema refuses), so it is told from
+ * the residual by what it holds, never by its target: the flattened top level
+ * of a `composeStacks(…, { manifest: 'preserve' })` artifact repeats every
+ * body's entry, and a built artifact has lost the references, but each copy
+ * still holds exactly what its body's entry holds. An entry extending a target
+ * some body also extends, with other fields, is the residual's own.
+ *
+ * Equal by value is also the case where nothing is lost: the body's entry
+ * registers exactly what the copy holds. Keys set to `undefined` count as
+ * absent, as `deepEqualAuthored` (`@objectstack/spec`) and the composition
+ * door's mirror read them.
+ */
+function claimedArtifactExtensions(bodies: readonly unknown[]): (item: unknown) => boolean {
+    const declared: unknown[] = [];
+    for (const body of bodies) {
+        const items = (body as any)?.objectExtensions;
+        if (Array.isArray(items)) declared.push(...items);
+    }
+    return (item) => declared.some((entry) => entry === item || sameAuthoredValue(entry, item, 0));
+}
+
+/** Structural equality of two authored values; keys holding `undefined` count as absent. */
+function sameAuthoredValue(a: unknown, b: unknown, depth: number): boolean {
+    if (Object.is(a, b)) return true;
+    if (depth >= 32 || typeof a !== 'object' || typeof b !== 'object' || a === null || b === null) return false;
+    if (Array.isArray(a) !== Array.isArray(b)) return false;
+    if (Array.isArray(a) && Array.isArray(b)) {
+        return a.length === b.length && a.every((v, i) => sameAuthoredValue(v, b[i], depth + 1));
+    }
+    const left = a as Record<string, unknown>;
+    const right = b as Record<string, unknown>;
+    const keys = Object.keys(left).filter((k) => left[k] !== undefined);
+    if (keys.length !== Object.keys(right).filter((k) => right[k] !== undefined).length) return false;
+    return keys.every((k) => sameAuthoredValue(left[k], right[k], depth + 1));
+}
+
+/** The object an `objectExtensions` entry extends, or `undefined` when it names none. */
+function extensionTarget(item: unknown): string | undefined {
+    const target = (item as { extend?: unknown } | null | undefined)?.extend;
+    return typeof target === 'string' && target !== '' ? target : undefined;
+}
+
 /** One top-level item of a multi-package stack that none of its package bodies declares. */
 export interface UnclaimedTopLevelItem {
     /** The stack collection the item sits in, e.g. `views`. */
@@ -419,7 +465,12 @@ export interface UnclaimedTopLevel {
  * An item is unclaimed when it occupies a registry slot (`artifactItemSlot`)
  * that no package body occupies (`claimedArtifactSlots`): a container is
  * compared on its own slot, every other item on its name. An item with no
- * derivable slot is registered by no door, so it is not listed.
+ * derivable slot is registered by no door, so it is not listed — with one
+ * exception: an `objectExtensions` entry, which has no slot, is listed (type
+ * `object_extension`) when it names a target and no body carries an entry
+ * equal to it (`claimedArtifactExtensions`). The metadata door registers no
+ * extension, a body's or the residual's (it has no slot to file one under);
+ * the engine registers the residual's under this id, as it does a body's.
  *
  * @returns `undefined` for a stack without `packages[]`: its top level IS its
  *   one package's body, so it has no residual.
@@ -428,11 +479,16 @@ export function unclaimedTopLevel(stack: unknown): UnclaimedTopLevel | undefined
     if (!Array.isArray((stack as any)?.packages)) return undefined;
     const bodies = resolveArtifactPackageOrder(stack);
     const claimed = claimedArtifactSlots(bodies);
+    const claimedExtension = claimedArtifactExtensions(bodies);
     const items: UnclaimedTopLevelItem[] = [];
     for (const [field, metaType] of Object.entries(ARTIFACT_FIELD_TO_TYPE)) {
         const collection = (stack as any)[field];
         if (!Array.isArray(collection)) continue;
         collection.forEach((item: unknown, index: number) => {
+            if (metaType === 'object_extension') {
+                if (extensionTarget(item) !== undefined && !claimedExtension(item)) items.push({ field, index, type: metaType, item });
+                return;
+            }
             const slot = artifactItemSlot(metaType, item);
             if (!slot) return;
             if (claimed(metaType, slot.container ? slot.object : slot.name)) return;
@@ -508,6 +564,34 @@ function artifactItemOwnerStampRefusal(
     return err;
 }
 
+/**
+ * [#37013] The platform's provenance (`_provenance: 'platform'`) is set only by
+ * the metadata service's own platform registration
+ * (`register(…, { origin: 'platform' })`). An artifact item that carries it
+ * was authored with a value no author writes, so the door refuses it — with
+ * or without a manifest id — before the sink stores anything, naming the key
+ * and the fix.
+ */
+export function artifactItemPlatformStampRefusal(
+    metaType: string,
+    name: string,
+    item: unknown,
+): (Error & { code: 'VALIDATION_ERROR'; status: 400; httpStatus: 400; issues: Array<{ path: string; message: string; code: string }> }) | undefined {
+    // The store's own reading of where the mark lives, so the door refuses it
+    // exactly where the store would read it, and nowhere else.
+    if (!carriesPlatformStamp(item)) return undefined;
+    const issueMessage = "'platform' is set only by the metadata service's own platform registration; "
+        + 'remove `_provenance` from the item (the door stamps the provenance itself).';
+    const err = new Error(`${metaType} '${name}' carries _provenance: 'platform': ${issueMessage}`) as Error & {
+        code: 'VALIDATION_ERROR'; status: 400; httpStatus: 400; issues: Array<{ path: string; message: string; code: string }>;
+    };
+    err.code = 'VALIDATION_ERROR';
+    err.status = 400;
+    err.httpStatus = 400;
+    err.issues = [{ path: '_provenance', message: issueMessage, code: 'custom' }];
+    return err;
+}
+
 async function registerArtifactBodyCollections(
     sink: ArtifactRegistrationSink,
     body: Record<string, unknown>,
@@ -547,6 +631,8 @@ async function registerArtifactBodyCollections(
                 if (nameRefusal) throw nameRefusal;
                 const ownerStamp = artifactItemOwnerStampRefusal(field, metaType, viewObject, item, packageId);
                 if (ownerStamp) throw ownerStamp;
+                const platformStamp = artifactItemPlatformStampRefusal(metaType, viewObject, item);
+                if (platformStamp) throw platformStamp;
                 applyProtection(item as any, {
                     packageId: packageId,
                     packageVersion: packageVersion,
@@ -590,6 +676,8 @@ async function registerArtifactBodyCollections(
             const name = slot.name;
             const ownerStamp = artifactItemOwnerStampRefusal(field, metaType, name, item, packageId);
             if (ownerStamp) throw ownerStamp;
+            const platformStamp = artifactItemPlatformStampRefusal(metaType, name, item);
+            if (platformStamp) throw platformStamp;
             // ADR-0010 §3.7 — translate the author-facing
             // `protection` block into the private `_lock` envelope
             // and stamp package provenance in one call. Strips the
@@ -1765,10 +1853,15 @@ const STORED_ROW_PROTOCOL = 'datasource:';
  * the bare read's refusal, #32812), and the read naming the holder served
  * the holder's own row over its customization. Unstamped, every read answers
  * what it answers on a host that declares no package. The host's own file items, and every other
- * type's items, are stamped as before.
+ * type's items, are stamped as before, but for the platform's own stored record
+ * (#37013), which is never the host's package's item.
  */
 function unstampedStoredRow(type: string, item: unknown, protocol: string | undefined): boolean {
-    return PACKAGE_SLOTTED_STORE_TYPES.has(type) && storedItemPackageId(item) === undefined && protocol === STORED_ROW_PROTOCOL;
+    if (protocol !== STORED_ROW_PROTOCOL || storedItemPackageId(item) !== undefined) return false;
+    // [#37013] The platform's own record, of every type: stamped with the
+    // host's package it would be read as that package's item, and the
+    // platform's withdrawal would leave the registry's copy.
+    return PACKAGE_SLOTTED_STORE_TYPES.has(type) || isPlatformOrigin(item);
 }
 
 /**

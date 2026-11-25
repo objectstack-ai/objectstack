@@ -123,6 +123,8 @@ import { markPreviewExit, usePreviewDrafts } from '../../preview/PreviewModeCont
 import { CONSOLE_TOP_BAR } from '../../layout/consoleTopBar.js';
 import { armChatDockExpanded, readDockReturnLocation } from '../../layout/chatDockState.js';
 import type { ChatSurfaceContext } from '../../layout/chatSurfaceContext.js';
+import { buildFocusContext, useConversationFocus, type ConversationFocus } from '../../layout/chatFocus.js';
+import { ChatFocusRow } from './ChatFocusRow.js';
 import {
   useAdvertiseShortcut,
   type AdvertisedShortcut,
@@ -171,6 +173,7 @@ import { AiUnavailable } from './AiUnavailable.js';
 import { recordWriteFormTarget } from '../../utils/recordFormAiDraft.js';
 import { useUpload } from '@object-ui/fields';
 import { isSpreadsheetAttachment, uploadChatAttachments, chatAttachmentNotes } from './chatAttachments.js';
+import { studioHomePath } from '../../views/studio-design/studioAddress.js';
 
 /**
  * The app segment a record of `objectName` lives under: the object's owning
@@ -1200,6 +1203,8 @@ export function AiChatPage({ apiBase: apiBaseProp, defaultAgent: defaultAgentPro
     [editPackageId],
   );
 
+  // The user the conversation resolves for (none until the agent is known).
+  const conversationUserId = activeAgent ? userId : undefined;
   const {
     conversationId,
     conversationScope,
@@ -1213,7 +1218,7 @@ export function AiChatPage({ apiBase: apiBaseProp, defaultAgent: defaultAgentPro
     // that the per-(user,scope) guard then sticks with — so the agent surface
     // would resume some other agent's last chat. Waiting one tick keys the
     // conversation to the right scope from the first resolve.
-    userId: activeAgent ? userId : undefined,
+    userId: conversationUserId,
     scope: chatScope,
     apiBase,
     activeId: urlConversationId ?? legacyConversationId,
@@ -1244,6 +1249,19 @@ export function AiChatPage({ apiBase: apiBaseProp, defaultAgent: defaultAgentPro
   // reason: it must survive the keyed <ChatPane> remount, or the pane that
   // replays the first message sends (and shows) the default instead.
   const [selectedModelId, setSelectedModelId] = useState<string | undefined>(undefined);
+  // objectstack#36999 — the conversation's focus, held here for the same
+  // reason: the keyed pane remounts when the first send mints the id, and that
+  // first turn must still carry the record the user pinned.
+  const conversationFocus = useConversationFocus(paneConversationId, conversationCreateError);
+  // A first send creates the conversation: the id it mints takes the focus
+  // pinned before it (and no other arriving id does).
+  const { markSending: markFocusSending } = conversationFocus;
+  const ensureConversationForSend = useCallback(() => {
+    // With no user there is nothing to create: no mark, so no id that
+    // arrives later takes the focus as this send's.
+    if (conversationUserId) markFocusSending();
+    return ensureConversation();
+  }, [conversationUserId, markFocusSending, ensureConversation]);
   // Bumped whenever the pending ref is set OUT OF BAND (the handoff seed below).
   // ChatPane's deferred-send replay lists this in its deps, so it re-runs and
   // fires the seed even when the conversation id was ALREADY minted. Without it a
@@ -1318,8 +1336,12 @@ export function AiChatPage({ apiBase: apiBaseProp, defaultAgent: defaultAgentPro
     // A known agent that isn't deployed here (e.g. `/ai/build` with no cloud AI
     // Studio): land cleanly on the default surface rather than treating the
     // segment as a conversation id (which produced the junk `/ai/ask/build`).
+    // objectstack#36969 — a conversation the address names comes along
+    // (`/ai/build/ID` → `/ai/ask/ID`): where in-app building is closed the
+    // build agent leaves the catalog, and its old threads must still open.
     if (unavailableKnownAgent) {
-      navigate(`/ai/${friendly}${preservedQuery}`, { replace: true });
+      const tail = urlConversationId ? `/${encodeURIComponent(urlConversationId)}` : '';
+      navigate(`/ai/${friendly}${tail}${preservedQuery}`, { replace: true });
       return;
     }
     // cloud#1674 — a maker landing on BARE `/ai/ask` (no conversation) is
@@ -1674,6 +1696,7 @@ export function AiChatPage({ apiBase: apiBaseProp, defaultAgent: defaultAgentPro
             apiBase={apiBase}
             conversationId={paneConversationId}
             requestedConversationId={urlConversationId ?? legacyConversationId}
+            conversationFocus={conversationFocus}
             editPackageId={editPackageId}
             onPackageBound={handlePackageBound}
             canBind={Boolean(urlConversationId)}
@@ -1681,7 +1704,7 @@ export function AiChatPage({ apiBase: apiBaseProp, defaultAgent: defaultAgentPro
             initialMessages={paneInitialMessages}
             pendingFirstMessageRef={pendingFirstMessageRef}
             pendingFirstMessageSeq={pendingFirstMessageSeq}
-            ensureConversation={ensureConversation}
+            ensureConversation={ensureConversationForSend}
             conversationCreateError={conversationCreateError}
             selectedModelId={selectedModelId}
             onSelectedModelChange={setSelectedModelId}
@@ -1717,6 +1740,16 @@ interface ChatPaneProps {
    * `type · name`, as before.
    */
   surfaceArtifactLabel?: string;
+  /**
+   * objectstack#36999 — the conversation's focus, held by the HOST (above the
+   * pane it keys on the conversation id, so the first send still carries it;
+   * see `useConversationFocus`). Drawn and sent only while the agent's catalog
+   * row declares `capabilities.focus`: then every turn carries
+   * `context.focus`, and the composer's context row replaces the page chip
+   * ({@link ChatFocusRow}). Absent, or an agent that does not honour it →
+   * nothing changes: no pin, no chip, no key.
+   */
+  conversationFocus?: ConversationFocus;
   agents: AgentDescriptor[];
   agentsLoading: boolean;
   agentsError: Error | undefined;
@@ -1813,6 +1846,7 @@ export function ChatPane({
   activeAppPackageId,
   surfaceContext,
   surfaceArtifactLabel,
+  conversationFocus,
   onPackageBound,
   canBind,
   parentHandoffConversationId,
@@ -2031,6 +2065,10 @@ export function ChatPane({
   const setSelectedModelId = hostHoldsModel ? onSelectedModelChange : setPaneSelectedModelId;
   // The one value both the picker shows and the request sends.
   const effectiveModelId = selectedModelId ?? defaultModelId;
+  // objectstack#36999 — the focus is drawn and sent only where the agent says
+  // it honours it: a chip the server ignores would mislead.
+  const focusHonoured =
+    conversationFocus !== undefined && agentHasCapability(agents, activeAgent, 'focus');
 
   const {
     messages,
@@ -2067,6 +2105,10 @@ export function ChatPane({
         // transport reads the body per send, so this stays fresh per turn).
         // The console dock sends the page in view too (objectstack#30043).
         ...(surfaceContext ? { surface: surfaceContext } : {}),
+        // objectstack#36999 — the record the conversation is pinned to, on
+        // EVERY turn while it is pinned (the body is the authority; nothing
+        // the server stored replaces it). No key at all otherwise.
+        ...buildFocusContext(conversationFocus?.focus, focusHonoured),
         // The language this console renders in, so a reply that names a card
         // control names it as the card draws it. Only `Accept-Language` reaches
         // the server otherwise; the server validates the value itself.
@@ -2740,8 +2782,19 @@ export function ChatPane({
     return Array.from(byPackage, ([id, label]) => ({ id, label }));
   }, [metadataApps, appLabel, t]);
 
+  // objectstack#37146 — with one launchable agent there is nothing to switch,
+  // so the row names no agent (it read only 「提问」 once the in-app build
+  // entry closed). Where the host lifts Share and the Build Doctor into its
+  // own title bar (the drawer, objectstack#35445) and nothing else is left —
+  // no switcher, no build package chip, no offline note — the row is not
+  // drawn at all, so no empty band or border remains.
+  const headerHasContent =
+    showAgentLauncher || isBuildSurface || !actionsInHost || Boolean(agentsError);
+
   const headerSlot = (
-    <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border/50 px-4 pb-2 pt-3 sm:px-6">
+    <div
+      data-testid="ai-chat-header"
+      className="flex flex-wrap items-center justify-between gap-2 border-b border-border/50 px-4 pb-2 pt-3 sm:px-6">
       <div className="flex min-w-0 flex-1 items-center gap-2">
         {showAgentLauncher ? (
           launcherAgents.length <= 3 ? (
@@ -2791,7 +2844,7 @@ export function ChatPane({
                       {localizeAgentLabel(t, agent.name, agent.label)}
                     </span>
                     {agent.description ? (
-                      <span className="block text-muted-foreground text-[10px] truncate max-w-[260px]">
+                      <span className="block text-muted-foreground text-xs truncate max-w-[260px]">
                         {agent.description}
                       </span>
                     ) : null}
@@ -2800,11 +2853,7 @@ export function ChatPane({
               </SelectContent>
             </Select>
           )
-        ) : (
-          <span className="truncate text-xs font-medium text-foreground/85">
-            {activeAgentLabel}
-          </span>
-        )}
+        ) : null}
         {isBuildSurface ? (
           // A1.b — the binding chip is a SWITCHER now: each app gets its own
           // build conversation (the scope is per-package), so picking one here
@@ -2900,7 +2949,7 @@ export function ChatPane({
       )}
       {agentsError ? (
         <span
-          className="basis-full text-[10px] text-amber-700 dark:text-amber-400"
+          className="basis-full text-xs text-amber-700 dark:text-amber-400"
           title={agentsError.message}
         >
           {t('console.ai.offlineDemoMode')}
@@ -2927,6 +2976,38 @@ export function ChatPane({
         onShowDraft={showsMainArea && boundPackageId ? () => showAppInMainArea(boundPackageId) : undefined}
       />
     ) : null;
+
+  // objectui#8219 / objectui#7254 — the page chip READS the artifact's display
+  // label when the host has one, and keeps the internal `type · name` pair
+  // REACHABLE on its tooltip. No label → the pair, as before.
+  const surfaceChipTitle = surfaceContext?.artifact
+    ? `${surfaceContext.artifact.type} · ${surfaceContext.artifact.name}`
+    : undefined;
+  const surfaceChipLabel = surfaceContext?.artifact
+    ? t('console.ai.discussing', {
+        defaultValue: 'Viewing: {{target}}',
+        target: surfaceArtifactLabel || surfaceChipTitle,
+      })
+    : undefined;
+  // objectstack#36999 — while the agent honours a focus, the composer's
+  // context row (the page chip with its pin, or the pinned record's chip) is
+  // drawn here instead of the composer's text-only page chip.
+  const focusRow =
+    focusHonoured && conversationFocus ? (
+      <ChatFocusRow
+        focus={conversationFocus}
+        surface={surfaceContext}
+        surfaceLabel={surfaceChipLabel}
+        surfaceTitle={surfaceChipTitle}
+      />
+    ) : null;
+  const composerContextRow =
+    focusRow && pendingDraftsBar ? (
+      <div className="flex min-w-0 flex-1 flex-col gap-2">
+        {focusRow}
+        {pendingDraftsBar}
+      </div>
+    ) : (focusRow ?? pendingDraftsBar ?? undefined);
 
   return (
     <div ref={paneRef} className="relative flex min-h-0 flex-1 px-0">
@@ -3008,7 +3089,7 @@ export function ChatPane({
         packageRemovalPartialLabel={(failed) => t('console.ai.packageRemovalPartial', { count: failed })}
         surface="plain"
         maxHeight="100%"
-        headerSlot={hideHeader ? undefined : headerSlot}
+        headerSlot={hideHeader || !headerHasContent ? undefined : headerSlot}
         // objectui#12978 — the drafts line (`pendingDraftsBar` above) is a row
         // of the composer's own area, in
         // flow above the input. The bar used to float (`absolute bottom-20`)
@@ -3016,7 +3097,7 @@ export function ChatPane({
         // input's first line, hiding the placeholder and the first typed line;
         // in flow, the conversation gives up the room instead, at every width,
         // here and in the console dock, which mounts this same pane.
-        promptHeaderSlot={pendingDraftsBar ?? undefined}
+        promptHeaderSlot={composerContextRow}
         messages={shownMessages}
         placeholder={
           activeAgent
@@ -3139,16 +3220,18 @@ export function ChatPane({
         // The secondary door (在 Studio 中查看): Studio is the built app's
         // iteration home (direct edit + the same copilot conversation in the
         // dock, which the build's binding resumes). The package id is the
-        // canvas segment (one package = one app).
+        // canvas segment (one package = one app). objectstack#36502 — it opens
+        // the package's Studio home; the app's interfaces are designed in the
+        // running app, which the primary door opens.
         onDesignBuiltApp={(_appName, appSegment) => {
           const pkg = appSegment ?? boundPackageId;
           if (!pkg) return;
-          navigate(`/studio/${encodeURIComponent(pkg)}/interfaces`);
+          navigate(studioHomePath(pkg));
         }}
         designBuiltAppLabel={t('console.ai.viewBuiltAppInStudio', { defaultValue: 'View in Studio' })}
         // Artifact deep links: every artifact the agent built gets a one-click
         // path to where it can be edited BY HAND (object → Data, flow →
-        // Automations, dashboard/page/view/app → Interfaces). Returns null for
+        // Automations, dashboard/page/view/app → its All metadata item page). Returns null for
         // types with no direct-edit home (seed/dataset) → rendered as text.
         getArtifactAction={(artifact, appSegment) => {
           const path = artifactStudioPath(appSegment ?? boundPackageId, artifact);
@@ -3299,24 +3382,10 @@ export function ChatPane({
         changesAppliedLabel={t('console.ai.changesApplied', { defaultValue: 'Applied' })}
         changesDraftedLabel={t('console.ai.changesDrafted', { defaultValue: 'Saved as draft' })}
         changesFailedLabel={t('console.ai.changesFailed', { defaultValue: 'Not applied' })}
-        // objectui#8219 / objectui#7254 — the chip READS the artifact's display
-        // label when the host has one, and keeps the internal `type · name`
-        // pair REACHABLE on its tooltip. No label → the pair, as before.
-        surfaceContextLabel={
-          surfaceContext?.artifact
-            ? t('console.ai.discussing', {
-                defaultValue: 'Viewing: {{target}}',
-                target:
-                  surfaceArtifactLabel ||
-                  `${surfaceContext.artifact.type} · ${surfaceContext.artifact.name}`,
-              })
-            : undefined
-        }
-        surfaceContextTitle={
-          surfaceContext?.artifact
-            ? `${surfaceContext.artifact.type} · ${surfaceContext.artifact.name}`
-            : undefined
-        }
+        // The page chip (see `surfaceChipLabel` above); the focus row draws it
+        // instead while the agent honours a focus (objectstack#36999).
+        surfaceContextLabel={focusRow ? undefined : surfaceChipLabel}
+        surfaceContextTitle={focusRow ? undefined : surfaceChipTitle}
         planAnswerMessage={(question, option) =>
           outboundText('planAnswerMessage', { question, option })
         }

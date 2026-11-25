@@ -53,24 +53,26 @@
  *     estimate, not a count — the two describe different numbers of rows,
  *     and the footer stays on the page, labelled as the page's.
  *
- * ## ⛔ Never a raw money aggregate over a `record`-mode amount
+ * ## ⛔ Never a raw aggregate over a `record`-mode amount or quantity
  *
- * [ADR-0144 D6] The whole set is never inside one currency, so a `sum` /
- * `avg` / `min` / `max` over a `record`-mode amount (its `currencyField` a
- * sibling code field or a parent path) would add amounts in different
- * currencies, and the engine refuses such an aggregate with the query NOT
- * run. The footer draws no figure for that column (`useScopedColumnSummary`
- * skips it), so the question leaves it out: `wholeSetSummaryNodes` drops the
- * node by the same predicate the group headers use
- * (`requiredCurrencyGrouping`). Asked anyway, the refusal would cost every
- * other column in the query its whole-set figure. A per-currency total is a
- * query grouped by the code, which this read does not ask.
+ * [ADR-0144 D6, ADR-0158 U7 R1] The whole set is never inside one unit, so a
+ * `sum` / `avg` / `min` / `max` over a `record`-mode amount (its
+ * `currencyField` a sibling code field or a parent path) would add amounts in
+ * different currencies, and one over a `record`-mode quantity (its
+ * `unitConfig.unitField`) quantities in different units; the engine refuses
+ * either aggregate with the query NOT run. The footer draws no figure for
+ * that column (`useScopedColumnSummary` skips it), so the question leaves it
+ * out: `wholeSetSummaryNodes` drops the node by the same predicate the group
+ * headers use (`requiredAggregateGrouping`). Asked anyway, the refusal would
+ * cost every other column in the query its whole-set figure. A per-currency
+ * or per-unit total is a query grouped by the unit field, which this read
+ * does not ask.
  *
  * The leave-out needs the object's field catalogue. While the grid still
  * awaits it (`objectFieldsPending`), a column summary that aggregates the
- * amounts themselves is not asked: its currency mode is unknown, and a guess
- * that it is not `record` is the refused request. The answer comes once the
- * catalogue lands.
+ * measure itself is not asked: its mode is unknown, and a guess that it is
+ * not `record` is the refused request. The answer comes once the catalogue
+ * lands.
  *
  * ## Asked only for a footer, once per question
  *
@@ -100,10 +102,10 @@ import {
   type ListViewGroupHeaderRow,
 } from '@objectstack/spec/ui';
 import { useDataInvalidation } from '@object-ui/react';
-import { isMoneyAggregate, requiredCurrencyGrouping } from './recordCurrencyAggregates';
+import { isMeasureAggregate, requiredAggregateGrouping } from './recordCurrencyAggregates';
 
-/** The object's field catalogue; only a field's `currencyConfig` is read here. */
-export type WholeSetSummaryFields = Parameters<typeof requiredCurrencyGrouping>[2];
+/** The object's field catalogue; only a field's `type`, `currencyConfig` and `unitConfig` are read here. */
+export type WholeSetSummaryFields = Parameters<typeof requiredAggregateGrouping>[2];
 
 /** Find-param keys that shape the WINDOW or the row's SHAPE — never which rows match. */
 const WINDOW_KEYS: ReadonlySet<string> = new Set(['$top', '$skip', '$orderby', '$select', '$expand', '$count']);
@@ -118,9 +120,10 @@ const WINDOW_KEYS: ReadonlySet<string> = new Set(['$top', '$skip', '$orderby', '
  * (objectui#12081 item 3, rework round 1): the `count` node alone is not a
  * question anybody asked.
  *
- * [ADR-0144 D6] A money aggregate over a `record`-mode amount in
- * `objectFields` is no node either (see the module note): the footer draws
- * nothing for it, and the engine refuses the query that carries it.
+ * [ADR-0144 D6, ADR-0158 U7 R1] A measure aggregate over a `record`-mode
+ * amount or quantity in `objectFields` is no node either (see the module
+ * note): the footer draws nothing for it, and the engine refuses the query
+ * that carries it.
  */
 export function wholeSetSummaryNodes(
   columns: readonly ListColumn[] | undefined,
@@ -145,7 +148,7 @@ export function wholeSetSummaryNodes(
     // `count_false` asks `SUM(field)` and `COUNT(field)`), off the spec's own
     // reading of the row, so this question and the group header's agree.
     const fns = columnSummaryNodeFunctions(mapping);
-    if (fns.some((fn) => requiredCurrencyGrouping(field, fn, objectFields) !== undefined)) continue;
+    if (fns.some((fn) => requiredAggregateGrouping(field, fn, objectFields) !== undefined)) continue;
     declared = true;
     const aggregated = mapping.fieldless ? undefined : field;
     for (const fn of fns) {
@@ -218,13 +221,14 @@ export interface WholeSetSummaryInput {
   columns: ListColumn[] | undefined;
   /**
    * The object's field catalogue, read for each summarised field's currency
-   * mode: a money aggregate over a `record`-mode amount is left out of the
-   * question (ADR-0144 D6, see the module note).
+   * or unit mode: a measure aggregate over a `record`-mode amount or quantity
+   * is left out of the question (ADR-0144 D6, ADR-0158 U7 R1, see the module
+   * note).
    */
   objectFields: WholeSetSummaryFields;
   /**
-   * The grid still awaits `objectFields` (`objectTypesPending`): a money
-   * aggregate is not asked until the catalogue says its currency mode.
+   * The grid still awaits `objectFields` (`objectTypesPending`): a measure
+   * aggregate is not asked until the catalogue says its currency or unit mode.
    */
   objectFieldsPending: boolean;
   /**
@@ -243,7 +247,7 @@ export interface WholeSetSummaryInput {
  * - `off` — not asked: the rows are the whole set, or no column declares a
  *   summary that maps to an aggregate.
  * - `pending` — asked, no answer to THIS question in hand yet; or not yet
- *   askable, a money aggregate awaiting the field catalogue.
+ *   askable, a measure aggregate awaiting the field catalogue.
  * - `answered` — the whole set's header row, its `count` agreeing with the grid's.
  * - `unavailable` — no door, a refusal, an unaskable query, or an answer whose
  *   count is not the grid's.
@@ -273,10 +277,11 @@ export function useWholeSetSummary(input: WholeSetSummaryInput): WholeSetSummary
   // nothing — the read is `off`, exactly as for rows that are the whole set.
   const nodes = enabled ? wholeSetSummaryNodes(columns, objectFields) : null;
   const active = nodes !== null;
-  // [ADR-0144 D6] A money aggregate waits for the catalogue that says whether
-  // its amount is `record`-mode; it is never asked on a guess. A read that
-  // never lands keeps it unasked, and the footer on the page.
-  const awaitingFields = active && objectFieldsPending && nodes.some((node) => isMoneyAggregate(node.function));
+  // [ADR-0144 D6, ADR-0158 U7 R1] A measure aggregate waits for the catalogue
+  // that says whether its amount or quantity is `record`-mode; it is never
+  // asked on a guess. A read that never lands keeps it unasked, and the
+  // footer on the page.
+  const awaitingFields = active && objectFieldsPending && nodes.some((node) => isMeasureAggregate(node.function));
   const query = active && !awaitingFields && findParams ? compileWholeSetSummaryQuery(columns, findParams, objectFields) : null;
   const canAsk = active
     && !!objectName

@@ -173,6 +173,15 @@ export {
   FLOW_TRIGGER_UNROUTABLE,
   FLOW_API_TRIGGER_SECRET_MISSING,
   FLOW_API_TRIGGER_SIGNATURE_UNUSABLE,
+  // #35143 — the second batch of publish-time flow checks.
+  validateFlowSubflowTargets,
+  FLOW_TRIGGER_OBJECT_MISSING,
+  FLOW_CONDITION_OPTION_LABEL,
+  FLOW_TIME_RELATIVE_SHADOWED,
+  FLOW_TIME_RELATIVE_KEY_MISPLACED,
+  FLOW_TIME_RELATIVE_DATE_FIELD_INVALID,
+  FLOW_SCHEDULE_TIMEZONE_MISSING,
+  FLOW_SUBFLOW_UNKNOWN,
 } from './validate-flow-trigger-readiness.js';
 export type {
   FlowTriggerReadinessFinding,
@@ -272,6 +281,13 @@ export {
 export type { RecordTitleFinding, RecordTitleSeverity } from './validate-record-title.js';
 
 export {
+  validateRecordPageHeader,
+  RECORD_PAGE_HEADER_TITLE_DIFFERS,
+  RECORD_PAGE_HEADER_ACTIONS_DIFFER,
+} from './validate-record-page-header.js';
+export type { RecordPageHeaderFinding } from './validate-record-page-header.js';
+
+export {
   validateSemanticRoles,
   FIELD_GROUP_UNDECLARED,
   FIELD_GROUP_EMPTY,
@@ -296,6 +312,13 @@ export {
   FORM_SECTION_GROUP_UNKNOWN,
 } from './validate-form-layout.js';
 export type { FormLayoutFinding, FormLayoutSeverity } from './validate-form-layout.js';
+// #36425 — an app still declaring an internal create / edit form, which the
+// Console no longer loads. Advisory.
+export {
+  validateInternalFormViews,
+  FORM_VIEW_INTERNAL_NOT_LOADED,
+} from './validate-internal-form-views.js';
+export type { InternalFormViewFinding } from './validate-internal-form-views.js';
 
 // A form open to anonymous intake that declares a file field (ruling C on #25572).
 export { validatePublicFormFileFields, PUBLIC_FORM_FILE_FIELD } from './validate-public-form-file-fields.js';
@@ -389,6 +412,7 @@ export {
   SECURITY_CBP_OWNER_POLICY_WITHOUT_OPT_IN,
   SECURITY_CBP_MASTER_REFERENCE_HIDDEN,
   SECURITY_SUPERUSER_FIELD_MASK_INERT,
+  SECURITY_CROSS_SET_FIELD_REOPEN,
   SECURITY_UPDATE_POLICY_NO_CHECK,
   holdsSuperuserBypass,
 } from './validate-security-posture.js';
@@ -660,12 +684,31 @@ export type {
 // `relatedList` must match an inbound lookup / master_detail relationship.
 // `error`, the verdict `defineStack` gives, and on the runtime publish door,
 // which runs no `defineStack`. [#27478] A field group's `relatedList` must
-// name body tables only (`related-list-group-not-body`).
+// name body tables only (`related-list-group-not-body`). [#35897 · #35899] A
+// `relatedLists` object entry's columns must be child fields
+// (`related-list-column-unknown`, error), and since #35901 an object
+// extension's list placement's columns too; a built-in tab entry that draws
+// nothing warns (`related-list-attachments-off`, `related-list-stream-part`).
 export {
   validateRelatedListRefs,
   RELATED_LIST_REF_UNKNOWN,
   RELATED_LIST_GROUP_NOT_BODY,
+  RELATED_LIST_COLUMN_UNKNOWN,
+  RELATED_LIST_ATTACHMENTS_OFF,
+  RELATED_LIST_STREAM_PART,
 } from './validate-related-list-refs.js';
+
+// [#35901] Where an object extension's `place` will not land as written:
+// the extended object declares no `relatedLists` / `fieldGroups`
+// (`extension-placement-not-applied`), or an anchor it does not have
+// (`extension-placement-anchor-missing`). Warnings; the boot log names the
+// same placements, and is the channel for a target in another package.
+export {
+  validateExtensionPlacement,
+  EXTENSION_PLACEMENT_NOT_APPLIED,
+  EXTENSION_PLACEMENT_ANCHOR_MISSING,
+} from './validate-extension-placement.js';
+export type { ExtensionPlacementFinding } from './validate-extension-placement.js';
 export type {
   RelatedListRefFinding,
   RelatedListRefOptions,
@@ -678,6 +721,12 @@ export type { ActionNameRefFinding, ActionNameRefSeverity } from './validate-act
 
 export { validateActionLocations, ACTION_NO_PLACEMENT } from './validate-action-locations.js';
 export type { ActionLocationsFinding, ActionLocationsSeverity } from './validate-action-locations.js';
+export {
+  validateObjectActionLayout,
+  OBJECT_ACTION_LAYOUT_UNKNOWN,
+  OBJECT_ACTION_LAYOUT_NOT_PLACED,
+} from './validate-object-action-layout.js';
+export type { ObjectActionLayoutFinding } from './validate-object-action-layout.js';
 export { validateActionObjectBinding, ACTION_NO_OBJECT_BINDING } from './validate-action-object-binding.js';
 export type { ActionObjectBindingFinding } from './validate-action-object-binding.js';
 export { validateFlowNodeExecutors, FLOW_NODE_TYPE_NO_EXECUTOR } from './validate-flow-node-executors.js';
@@ -1066,6 +1115,8 @@ export {
   validateFlowNodeWrites,
   FLOW_NODE_WRITE_UNKNOWN_FIELD,
   FLOW_NODE_WRITE_UNPROVISIONED_ANCHOR,
+  FLOW_NODE_WRITE_UNKNOWN_OPTION,
+  FLOW_NODE_WRITE_DATE_HELPER_TEXT,
   FLOW_WRITE_NODE_TYPES,
   FLOW_WRITE_NODE_TYPES_DEFERRED,
 } from './validate-flow-node-writes.js';
@@ -1140,6 +1191,7 @@ export {
   FLOW_DECISION_INCLUSIVE_OVERLAP,
   FLOW_APPROVAL_DECISION_UNROUTED,
   FLOW_HTTP_TIMEOUT_MISSING,
+  FLOW_CREATE_UPDATE_PAIR,
 } from './lint-flow-patterns.js';
 
 // A credential typed as a literal into a served flow position — the advisory,

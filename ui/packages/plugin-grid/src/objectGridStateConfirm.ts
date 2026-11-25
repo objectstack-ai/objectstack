@@ -17,8 +17,13 @@
  *
  * The confirm names the field and its old and new value and says saving may
  * trigger related automation, as the maintainer ruled (ruling record
- * 7039615827 on objectstack#35685); it does not list the flows.
+ * 7039615827 on objectstack#35685). Under that sentence it names the flows the
+ * move would start (objectstack#35928, ruling record 7073655354), read through
+ * `@object-ui/plugin-detail`'s `useRecordUpdateStarts`, the reader the record
+ * page's stage confirm shares; no answer leaves the sentence alone.
  */
+
+import type { RecordUpdateStartsAsk } from '@object-ui/plugin-detail';
 
 /** The spec's `events` default for a validation rule. */
 const DEFAULT_EVENTS: readonly string[] = ['insert', 'update'];
@@ -41,6 +46,8 @@ export interface StateChangeConfirm {
   field: string;
   from: string;
   to: string;
+  /** The move as the server is asked which flows it starts; absent for a row with no record id. */
+  ask?: RecordUpdateStartsAsk;
 }
 
 type OptionLike = { value?: unknown; label?: unknown } | string | number;

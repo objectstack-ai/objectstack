@@ -24,12 +24,12 @@
  * copy says what the author can do; it names no package mechanism.
  *
  * objectstack#35196 — this page is the served Studio's door to package
- * management (ruling 甲 of objectstack#25098 puts the unfiltered package list
- * in Studio only, and the `@objectstack/studio` app whose Overview → Packages
- * entry names it is not default-loaded): every card carries Manage, which
- * opens the same detail sheet as the top-bar switcher's "Package info &
- * settings" (Disable / Enable, export, and the writable actions), and the
- * title row links to the unfiltered Packages page.
+ * management (the `@objectstack/studio` app whose Overview → Packages entry
+ * names the full list is not default-loaded; Setup → Packages opens the same
+ * list on its administration face only, objectstack#36834): every card
+ * carries Manage, which opens the same detail sheet as the top-bar
+ * switcher's "Package info & settings" (Disable / Enable, export, and the
+ * writable actions), and the title row links to the unfiltered Packages page.
  */
 
 import * as React from 'react';
@@ -67,6 +67,8 @@ import { STUDIO_NEW_PARAM, STUDIO_NEW_PACKAGE_VALUE } from './studioNewPackage.j
 import { foldCustomizationPairs } from './StudioRailCustomizations.js';
 import { loadPackageLessSurfaces } from './packageSurfaces.js';
 import { useMetadataClient } from '../metadata-admin/useMetadata.js';
+import { newAppStep } from './newAppDoor.js';
+import { studioHomePath, studioPillarPath } from './studioAddress.js';
 
 /**
  * objectui#11808 — where a read-only package's card sends the author beyond
@@ -78,10 +80,13 @@ import { useMetadataClient } from '../metadata-admin/useMetadata.js';
 const MARKETPLACE_PATH = '/apps/setup/system/marketplace';
 
 /**
- * objectstack#35196 — the unfiltered Packages page (`developer:packages` with no
- * `source`), the full list with every package's lifecycle actions. Ruling 甲
- * (objectstack#25098) gives it no Setup menu entry; this landing's link is its
- * menu door in the served Studio. The route is hosted under the Setup app's
+ * objectstack#35196 — the Packages page's development surface
+ * (`developer:packages` with no `face` and no `source`), the full list with
+ * every package's lifecycle and authoring actions; this landing's link is its
+ * menu door in the served Studio. Setup → Packages opens the same page with
+ * `?face=admin`, its administration face — enable / disable, delete and create
+ * only (objectstack#36834, amending ruling 甲 of objectstack#25098, which had
+ * given the list no Setup entry). The route is hosted under the Setup app's
  * address, the one console app every boot loads.
  */
 export const STUDIO_ALL_PACKAGES_PATH = packagesHref('/apps/setup');
@@ -106,10 +111,6 @@ type CustomizationLine =
       actionObjects?: ActionObjects;
     }
   | { kind: 'failed'; message: string };
-
-/** A package's Studio address on one pillar, the way `open` below spells it. */
-const studioPillarPath = (packageId: string, pillar: 'data' | 'automations') =>
-  `/studio/${encodeURIComponent(packageId)}/${pillar}`;
 
 /** How many switched-off actions the landing line names before its "more" link (objectstack#34724). */
 const SWITCHED_OFF_ACTIONS_NAMED = 3;
@@ -165,7 +166,7 @@ export function BuilderLanding(): React.ReactElement {
     };
   }, []);
 
-  const open = (id: string) => navigate(`/studio/${encodeURIComponent(id)}/data`);
+  const open = (id: string) => navigate(studioHomePath(id));
 
   // objectstack#35196 — Manage on a card: the switcher's detail sheet, opened
   // on the package's full installed row (`fetchInstalledPackageRow`), so
@@ -287,6 +288,8 @@ export function BuilderLanding(): React.ReactElement {
     .join('\n');
   const [customizationLines, setCustomizationLines] = React.useState<Record<string, CustomizationLine>>({});
   const metadataClient = useMetadataClient();
+  // objectstack#36748 — the app half of the 「新建自己的应用」 door.
+  const appStep = React.useMemo(() => newAppStep(metadataClient, locale), [metadataClient, locale]);
   React.useEffect(() => {
     if (!customizationTargetKey) return;
     let cancelled = false;
@@ -729,7 +732,9 @@ export function BuilderLanding(): React.ReactElement {
           </div>
         ))}
 
-        {/* new-package card — opens the spec-driven create dialog (PackageFormDialog) */}
+        {/* 「新建自己的应用」 — opens the spec-driven create dialog
+          * (PackageFormDialog) as the new-app door (objectstack#36748): one
+          * confirm creates the package and its app, live at once. */}
         <button
           type="button"
           data-testid="studio-landing-new-app"
@@ -747,6 +752,7 @@ export function BuilderLanding(): React.ReactElement {
         mode="create"
         open={createOpen}
         onOpenChange={setCreateOpen}
+        newApp={appStep}
         onSaved={(r) => open(r.id)}
       />
       <PackageDetailSheet

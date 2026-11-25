@@ -266,6 +266,18 @@
  *       handler. `unknown`/null readings are SKIPPED and never vouched for —
  *       GitHub computes mergeability asynchronously, so that reading is the
  *       platform saying "ask again later", not a state to name.
+ *   H82 a CLAIMED card's PR that CI cannot see, silent past the threshold:
+ *       a DRAFT in merge conflict, or a head — draft or not — carrying zero
+ *       GitHub Actions check suites. A card PR stays draft until its seat
+ *       lands it, so H12 and H16 (non-draft only) were blind where the
+ *       in-flight work is, and nothing read whether CI started at all: a
+ *       conflicting PR starts no `pull_request` workflow, so no green or red
+ *       event ever wakes the thread waiting for one. "Claimed" is a bound
+ *       card (closing keyword or `Part of`) the sweep holds under
+ *       `pm:dispatched`. Two per-PR reads for candidates only — the PR row
+ *       (shared with H16's) and the head's check suites filtered to the
+ *       Actions app; an unread suite is UNJUDGED, counted in the summary,
+ *       never a zero. A non-draft dirty PR stays H16's row alone.
  *
  * ## H17 — an item here that is NOT an invariant
  *
@@ -4595,6 +4607,130 @@ export function h16StuckMergeConflict(pr, nowMs = Date.now()) {
     'armed while dirty simply never lands). The owning lane PM merges `main` into the branch, ' +
     'resolves it, and re-arms afterwards. Age is the PR\'s `updated_at`, not the conflict\'s: a ' +
     'conflict carries no timestamp of its own, and base advancing does not touch the PR row.'
+  );
+}
+
+// ---------------------------------------------------------------------------
+// H82 — a claimed card's PR that CI cannot see: a DRAFT in merge conflict, or
+// a head that carries no GitHub Actions check suite at all.
+//
+// H12 and H16 read only non-draft PRs, and in this fleet a card PR stays draft
+// until its seat lands it — so the conflict detector was blind exactly where
+// the in-flight work is. And neither row reads whether CI started at all: a
+// conflicting PR starts no `pull_request` workflow, so its head carries ZERO
+// Actions check suites, no green and no red event ever arrives, and a card
+// thread waiting "until CI is green" waits on nothing while its seat waits on
+// the thread. `dispatch-runbook.md` 〈卡线程〉 states the wake rule this row
+// reads mechanically: zero Actions 30 minutes after the push, or `dirty`.
+// ---------------------------------------------------------------------------
+
+/**
+ * H82 threshold, in MINUTES — the wait the card-thread rule allows before the
+ * seat wakes the thread (`推后 30 分钟零 Actions`; the self-test pins the number).
+ *
+ * Aged by the PR's `updated_at`, H16's proxy and for H16's reason: neither a
+ * conflict nor a missing suite carries a timestamp of its own, a push bumps
+ * the PR row, and `main` advancing under it does not. The error direction is
+ * H16's too — a quiet PR whose base just moved flags at once (over-report),
+ * while a comment on the PR defers the row by one threshold (a bounded
+ * under-report, never a silence).
+ */
+export const CLAIMED_PR_BLIND_STALE_MINUTES = 30;
+
+/**
+ * The GitHub Actions app id, the `app_id` filter on the check-suites read.
+ * Unfiltered, the other apps' suites hide the gap: measured on the head this
+ * row is written for, `/commits/SHA/check-suites` answered 5 suites (deploy
+ * previews, the fleet app) and 0 of them Actions', while a head CI ran on
+ * answered 10 Actions suites of 15.
+ */
+export const GITHUB_ACTIONS_APP_ID = 15368;
+
+/**
+ * The claimed cards a PR delivers: the cards its body binds — H16's
+ * extractor, a closing keyword or `Part of`, quoted spellings naming nothing —
+ * that the sweep holds OPEN under `pm:dispatched`.
+ *
+ * `pm:dispatched` is the claim's machine-readable bit: the state model defines
+ * the label as claimed and assigned, and a label without its claim is H1/H2's
+ * row, never a reason for this one to stay silent. Reading the label costs no
+ * request; reading every bound card's thread again would.
+ *
+ * @param {object} pr — a PR row (list or single).
+ * @param {Iterable<number>} dispatched — open `pm:dispatched` card numbers.
+ * @returns {number[]} ascending.
+ */
+export function h82ClaimedCards(pr, dispatched) {
+  const held = new Set([...(dispatched ?? [])].map(Number));
+  return h16HeldCards(pr?.body).filter((n) => held.has(n));
+}
+
+/**
+ * Whether this PR buys the H82 reads — the gathering policy, exported so the
+ * self-test pins that it is never NARROWER than the predicate.
+ *
+ * Open (draft or not: the no-Actions leg reads both), not merged, not the
+ * release bot's `changeset-release/*` head, bound to at least one claimed card,
+ * and either silent past the threshold or carrying an unreadable `updated_at`
+ * — which the predicate flags rather than reads as fresh, so skipping it here
+ * would drop the row the predicate promises.
+ */
+export function h82NeedsDetail(pr, claimed, nowMs = Date.now()) {
+  if (!pr || typeof pr.draft !== 'boolean' || pr.merged_at) return false;
+  if ((pr.head?.ref ?? '').startsWith('changeset-release/')) return false;
+  if ((claimed ?? []).length === 0) return false;
+  const updated = Date.parse(pr.updated_at ?? '');
+  if (!Number.isFinite(updated)) return true;
+  return (nowMs - updated) / 60_000 > CLAIMED_PR_BLIND_STALE_MINUTES;
+}
+
+/**
+ * H82 — null when clean or unjudged, else the finding sentence. Takes the
+ * SINGLE-PR payload (the listing carries no `mergeable_state`) and the
+ * check-suites reading for its head.
+ *
+ * Two legs, one row per PR:
+ *
+ *   dirty      a DRAFT whose `mergeable_state` is literally `dirty`. A
+ *              non-draft dirty PR is H16's row, so it is ⛔ not reported
+ *              twice; `unknown` is the platform saying "ask again later" and
+ *              is skipped, as in H16.
+ *   no Actions any claimed PR, draft or not, not dirty, whose head answered
+ *              `total_count: 0` for the Actions app. A reading of `null` —
+ *              the read failed, or was not made — is UNJUDGED and says
+ *              nothing: the summary clause counts it, the row never invents
+ *              a zero.
+ *
+ * @param {object} pr — the single-PR payload.
+ * @param {number[]} claimed — `h82ClaimedCards` for it.
+ * @param {{ actionsSuites: number|null }} reading
+ */
+export function h82ClaimedPrBlind(pr, claimed, reading, nowMs = Date.now()) {
+  if (!h82NeedsDetail(pr, claimed, nowMs)) return null;
+  const dirty = pr.mergeable_state === 'dirty';
+  if (dirty && pr.draft !== true) return null;
+  const suites = reading?.actionsSuites;
+  if (!dirty && suites !== 0) return null;
+  const updated = Date.parse(pr.updated_at ?? '');
+  const age = Number.isFinite(updated)
+    ? `untouched for ~${Math.round((nowMs - updated) / 60_000)} min (threshold ${CLAIMED_PR_BLIND_STALE_MINUTES} min)`
+    : 'with an unreadable `updated_at` (which must not read as fresh)';
+  const cards = `${claimed.length === 1 ? 'card' : 'cards'} ${claimed.map((n) => `#${n}`).join(', ')}`;
+  const head = String(pr.head?.sha ?? '').slice(0, 10) || 'unread';
+  if (dirty) {
+    return (
+      `a claimed ${cards} (\`pm:dispatched\`) delivered by this DRAFT, which is in MERGE CONFLICT ` +
+      `(\`mergeable_state: dirty\`), ${age} — a conflicting PR starts no \`pull_request\` workflow, so no ` +
+      'green or red event ever arrives and a thread waiting for CI waits on nothing. H16 reads only ' +
+      'non-draft PRs, and a card PR stays draft until its seat lands it. The seat wakes the card thread ' +
+      'this round; the thread merges `origin/main`, resolves, pushes, and confirms Actions started.'
+    );
+  }
+  return (
+    `a claimed ${cards} (\`pm:dispatched\`) delivered by this ${pr.draft ? 'DRAFT' : 'ready'} PR, whose head ` +
+    `\`${head}\` carries ZERO GitHub Actions check suites, ${age} — no CI ever ran on this head, so no ` +
+    'green or red event will arrive. The seat wakes the card thread this round; the thread re-reads ' +
+    '`mergeable_state`, merges `origin/main` and pushes again, and confirms Actions started on the new head.'
   );
 }
 
@@ -10373,7 +10509,11 @@ export function renderDanglingReferences(report, { markdown = false } = {}) {
 // Tier H row in a mixed diff keeps the PR here, and an empty or tier-less slice
 // reads H (fail closed). ⛔ No second copy of which surfaces are which lives in
 // this file — a register that did not load stands nothing down, and the sweep
-// never reaches these rows without it.
+// never reaches these rows without it. The `.claude/**` row is S only as the
+// register's declaration split reads it (`h43RuleChangeSlice`, #35612): the
+// body's `Rule-change:` line off the LIST row, then the PR thread's record on
+// the head — so a pull declaring `yes` or nothing, or touching settings or
+// hooks, is Tier H here and its maintainer request is owed.
 //
 // ## The register is IMPORTED, never restated — and never fatally
 //
@@ -10460,11 +10600,17 @@ export async function loadGovernedRegister(load = (specifier) => import(specifie
     const recordTier = merges?.GOVERNED_TIER_S;
     const approvers = guard?.GOVERNED_APPROVERS;
     const repoIdForSlug = merges?.repoIdForSlug;
+    // The `.claude/**` declaration split (2026-11-19) and its record line reader: the slice H43 and H48 judge is the
+    // one the split has read, never the raw row's tier (#35612).
+    const split = merges?.applyRuleChangeSplit;
+    const readVerified = merges?.readRuleChangeVerified;
     if (
       typeof matcher !== 'function' ||
       typeof tierOf !== 'function' ||
       typeof recordTier !== 'string' ||
       typeof repoIdForSlug !== 'function' ||
+      typeof split !== 'function' ||
+      typeof readVerified !== 'function' ||
       !Array.isArray(approvers) ||
       approvers.length === 0
     ) {
@@ -10477,7 +10623,8 @@ export async function loadGovernedRegister(load = (specifier) => import(specifie
         repo: null,
         reason:
           'the governed register loaded but did not export what this row reads — `governedPathsIn`, ' +
-          '`landingTierOf`, `GOVERNED_TIER_S`, `repoIdForSlug` and a non-empty `GOVERNED_APPROVERS`. A rename ' +
+          '`landingTierOf`, `GOVERNED_TIER_S`, `repoIdForSlug`, `applyRuleChangeSplit`, `readRuleChangeVerified` ' +
+          'and a non-empty `GOVERNED_APPROVERS`. A rename ' +
           'is the likely cause, and this row is the reader that noticed',
       };
     }
@@ -10506,7 +10653,7 @@ export async function loadGovernedRegister(load = (specifier) => import(specifie
     // the register: a guard without it leaves H43's threads UNJUDGED (`h43RecordAuthors`), never the rest unread.
     const authorTrusted = typeof guard?.recordAuthorTrusted === 'function' ? guard.recordAuthorTrusted : null;
     const loadRecognisers = typeof guard?.loadRecordRecognisers === 'function' ? guard.loadRecordRecognisers : null;
-    return { available: true, matcher: (paths) => matcher(paths, repo), tierOf, recordTier, approvers, repo, reason: null, authorTrusted, loadRecognisers };
+    return { available: true, matcher: (paths) => matcher(paths, repo), split: (matched, reading) => split(matched, repo, reading), readVerified, tierOf, recordTier, approvers, repo, reason: null, authorTrusted, loadRecognisers };
   } catch (err) {
     return {
       available: false,
@@ -10545,6 +10692,58 @@ export function governedLandsOnRecord(governed, register = GOVERNED_REGISTER) {
   const list = Array.isArray(governed) ? governed : [];
   if (list.length === 0) return false;
   return register.tierOf(list) === register.recordTier;
+}
+
+/**
+ * The matched slice with the `.claude/**` declaration split READ (2026-11-19; #35612), as the queue guard reads it:
+ * the register's own `applyRuleChangeSplit` on the PR's body off its LIST row and, second, its `record` — so a pull
+ * that declares `Rule-change: yes`, declares nothing, or touches a settings or hooks path is Tier H and stays in
+ * H43's and H48's population, and one declaring `none` (or `ruled` with its `Ruling-ref:`) stands down only on a
+ * record that verifies it (`h43RuleChangeRecord`). `record` null leaves the record stage `pending` — Tier H, and the
+ * sweep reads the thread and asks again (`h43RuleChangePending`). A register that did not load returns the slice
+ * as it came: `governedLandsOnRecord` stands nothing down there anyway. Pure.
+ */
+export function h43RuleChangeSlice(governed, pr, record = null, register = GOVERNED_REGISTER) {
+  const list = Array.isArray(governed) ? governed : [];
+  if (!register?.available || typeof register.split !== 'function') return list;
+  const reading = { measured: true, reason: null, body: typeof pr?.body === 'string' ? pr.body : '', ...(record === null ? {} : { record }) };
+  return register.split(list, reading);
+}
+
+/** Does the split's record stage still wait on the PR thread for this slice? Pure. */
+export function h43RuleChangePending(slice) {
+  return (Array.isArray(slice) ? slice : []).some((s) => s?.ruleChangeVerdict?.recordStage === 'pending');
+}
+
+/**
+ * The split's `record` off the PR's own thread — the record H43's hand-off reads (`latestContractReviewOnHead` over
+ * the comments `authors` admits, the queue guard's binding) with its `Rule-change-verified:` line read by the
+ * register's reader (`readVerified`), and its record leg as this row can read it: `stands` on a PASS, `not-pass`
+ * otherwise. Two bounds, stated, both in the direction of standing down where the queue would not (under-report,
+ * never ask early): only the PR thread is read (a record on the card alone reads `absent`, so Tier H), and the
+ * record's `Served-tier:` line and signature are not read here. An unread thread or an unloaded binding is NOT
+ * MEASURED: Tier H. Pure.
+ */
+export function h43RuleChangeRecord(commentRows, headSha, authors = undefined, register = GOVERNED_REGISTER) {
+  if (!Array.isArray(commentRows) || authors?.available !== true || typeof register?.readVerified !== 'function') {
+    return { measured: false, reason: !Array.isArray(commentRows) ? 'the PR thread was not read' : 'the record-author binding or the line reader did not load' };
+  }
+  const trusted = commentRows.filter((row) => authors.admits(row));
+  const review = latestContractReviewOnHead(trusted, headSha);
+  if (review === null) return { measured: true, reason: null, located: 'absent', where: null, id: null, carried: null, ruleChangeVerified: null };
+  const row = trusted.find((r) => r?.id === review.id) ?? null;
+  const passed = review.verdict === 'PASS';
+  return {
+    measured: true,
+    reason: null,
+    located: 'found',
+    where: 'PR',
+    id: review.id,
+    carried: null,
+    ruleChangeCarried: null,
+    ruleChangeVerified: row === null ? null : register.readVerified(row.body),
+    recordLeg: { state: passed ? 'stands' : 'not-pass', reason: passed ? null : `its one \`VERDICT:\` line reads ${review.verdict ?? 'nothing (none or two)'}` },
+  };
 }
 
 /**
@@ -19038,6 +19237,13 @@ export const SWEEP_COUNT_KEYS = [
   'conflictProbed',
   'sharedFileCandidates',
   'sharedFileProbed',
+  // H82's coverage quadruple: claimed card PRs past the threshold, how many PR
+  // rows answered, and of the heads not dirty, how many check-suite reads were
+  // owed and how many answered (an unread one is UNJUDGED, never a zero).
+  'claimedPrCandidates',
+  'claimedPrProbed',
+  'claimedPrSuitesOwed',
+  'claimedPrSuitesRead',
   // H43's coverage triple and its fourth state (#14967) — the register that
   // did not load. `governedRegisterReason` is a STRING, not a counter, and it
   // rides the same contract for the same reason: without it the clause would
@@ -19651,6 +19857,10 @@ export function summaryLine(counts, findingCount) {
     `Shared-file holds (H36): changed-file page read on ${counts.sharedFileProbed ?? 0} of ` +
     `${counts.sharedFileCandidates ?? 0} open PR(s) — a pair needs both sides read, so a shortfall ` +
     'can only MISS a hold, never invent one. ' +
+    `Claimed card PRs (H82): PR row read on ${counts.claimedPrProbed ?? 0} of ${counts.claimedPrCandidates ?? 0} ` +
+    `open PR(s) bound to a \`pm:dispatched\` card and silent past ${CLAIMED_PR_BLIND_STALE_MINUTES} min, and the Actions ` +
+    `check suites read on ${counts.claimedPrSuitesRead ?? 0} of ${counts.claimedPrSuitesOwed ?? 0} head(s) not in conflict` +
+    `${(counts.claimedPrSuitesRead ?? 0) < (counts.claimedPrSuitesOwed ?? 0) ? ' — an unread head is UNJUDGED on the no-Actions leg, never clean' : ''}. ` +
     // H43's coverage clause (#14967). It is UNCONDITIONAL, like every other
     // window's: this row can be quiet for three different reasons — no governed
     // PR is short of coverage, no file page was read, or the register itself
@@ -20047,6 +20257,7 @@ export const SUMMARY_CLAUSE_ANCHORS = [
   ['h20Dispatch', 'Dispatch liveness (H20 + H27): '],
   ['h32Seats', 'Seat liveness (H32): '],
   ['h36SharedFiles', 'Shared-file holds (H36): '],
+  ['h82ClaimedPrs', 'Claimed card PRs (H82): '],
   ['h43GovernedReviews', 'Governed review requests (H43): '],
   ['h37Folds', 'Family folds (H37): '],
   ['h40References', 'Dangling references (H40): '],
@@ -20538,6 +20749,8 @@ export const HALF_STATE_FAMILY_BAND = Object.freeze({
   H4: 'stall',
   H12: 'stall',
   H16: 'stall',
+  // H82 is a `stall` for H16's reason: a claimed PR CI cannot see never lands.
+  H82: 'stall',
   H19: 'stall',
   H20: 'stall',
   H26: 'stall',
@@ -22295,6 +22508,12 @@ async function sweep(options = {}) {
     // mode as H16's detail pass, so it owes the same `read X of Y`.
     sharedFileCandidates: 0,
     sharedFileProbed: 0,
+    // H82's coverage quadruple — the PR-row half shares H16's per-row failure
+    // mode; the check-suite half is disclosed rather than rethrown (sweep pass).
+    claimedPrCandidates: 0,
+    claimedPrProbed: 0,
+    claimedPrSuitesOwed: 0,
+    claimedPrSuitesRead: 0,
     // H43's coverage triple (#14967) — the governed slice of the PRs whose
     // file page H36 already read, how many of those the cheap union left
     // short, and how many review pages answered. `governedRegisterReason` is
@@ -24768,6 +24987,8 @@ async function sweepInto(findings, seen, seenPrs, seenMerged, seenUnscoped, seen
   // a bounded gap the report states, while "no row readable" is a sweep whose
   // H16 pass silently examined nothing and would otherwise print as quiet.
   let lastDetailError = null;
+  // The PR rows this pass read, kept for H82 below so a PR both rows want costs ONE GET.
+  const prDetails = new Map();
   for (const pr of seenPrs.values()) {
     if (!h16NeedsDetail(pr)) continue;
     stats.conflictCandidates = (stats.conflictCandidates ?? 0) + 1;
@@ -24779,11 +25000,63 @@ async function sweepInto(findings, seen, seenPrs, seenMerged, seenUnscoped, seen
       continue;
     }
     stats.conflictProbed = (stats.conflictProbed ?? 0) + 1;
+    prDetails.set(pr.number, detail);
     const stuck = h16StuckMergeConflict(detail);
     if (stuck) findings.push([pr, 'H16', stuck]);
   }
   if (h16DetailPassUnreadable(stats.conflictCandidates, stats.conflictProbed)) {
     throw lastDetailError;
+  }
+
+  // H82 — a claimed card's PR that CI cannot see. Candidates only
+  // (`h82NeedsDetail`: bound to an open `pm:dispatched` card the label pages
+  // above already hold, and silent past the threshold), so the cost is bounded
+  // by the in-flight card PRs. Two reads each: the PR row (reused when H16
+  // read it) and, for a head not in conflict, its check suites filtered to the
+  // Actions app.
+  //
+  // The PR-row half takes H16's posture: one failed read drops that PR, an
+  // all-failed pass is the transport and is rethrown. The check-suite half is
+  // DISCLOSED instead of rethrown — it needs a scope the PR row does not
+  // (`checks`), so a token without it must cost the no-Actions leg, stated on
+  // the summary line, never the whole sweep.
+  const dispatchedCards = [...seen.values()].filter((i) => labelNames(i).includes('pm:dispatched')).map((i) => i.number);
+  let lastClaimedError = null;
+  for (const pr of seenPrs.values()) {
+    const claimed = h82ClaimedCards(pr, dispatchedCards);
+    if (!h82NeedsDetail(pr, claimed)) continue;
+    stats.claimedPrCandidates = (stats.claimedPrCandidates ?? 0) + 1;
+    let detail = prDetails.get(pr.number);
+    if (!detail) {
+      try {
+        detail = await rest(`/repos/${OWNER_REPO}/pulls/${pr.number}`);
+      } catch (err) {
+        lastClaimedError = err;
+        continue;
+      }
+    }
+    stats.claimedPrProbed = (stats.claimedPrProbed ?? 0) + 1;
+    let actionsSuites = null;
+    const sha = detail?.head?.sha ?? pr.head?.sha ?? null;
+    if (detail?.mergeable_state !== 'dirty') {
+      stats.claimedPrSuitesOwed = (stats.claimedPrSuitesOwed ?? 0) + 1;
+      if (sha) {
+        try {
+          const page = await rest(`/repos/${OWNER_REPO}/commits/${sha}/check-suites?app_id=${GITHUB_ACTIONS_APP_ID}&per_page=1`);
+          if (Number.isInteger(page?.total_count)) {
+            actionsSuites = page.total_count;
+            stats.claimedPrSuitesRead = (stats.claimedPrSuitesRead ?? 0) + 1;
+          }
+        } catch {
+          actionsSuites = null;
+        }
+      }
+    }
+    const blind = h82ClaimedPrBlind(detail, claimed, { actionsSuites });
+    if (blind) findings.push([pr, 'H82', blind]);
+  }
+  if (h16DetailPassUnreadable(stats.claimedPrCandidates, stats.claimedPrProbed)) {
+    throw lastClaimedError;
   }
 
   // H36 (#12286) — the shared-file pass, H16's transport posture over one
@@ -24837,10 +25110,24 @@ async function sweepInto(findings, seen, seenPrs, seenMerged, seenUnscoped, seen
     for (const pr of seenPrs.values()) {
       const files = filesByPr.get(pr.number);
       if (!files) continue;
-      const governed = GOVERNED_REGISTER.matcher(files.paths ?? []);
+      // The `.claude/**` declaration split, read off the body the LIST row carries (#35612): never the raw row's tier.
+      const governed = h43RuleChangeSlice(GOVERNED_REGISTER.matcher(files.paths ?? []), pr);
       if (governed.length > 0) governedByPr.set(pr.number, governed);
     }
     stats.governedPrs = governedByPr.size;
+
+    // A body that declares a seat value leaves the split's record stage pending: ONE thread read per such PR —
+    // H48's fetch class, cached, and one H48 buys for it anyway while it reads Tier H — then the split asks again.
+    const splitPending = [...seenPrs.values()].filter((pr) => h43RuleChangePending(governedByPr.get(pr.number)));
+    let recordAuthors = null;
+    if (splitPending.length > 0) {
+      recordAuthors = await h43RecordAuthors();
+      if (!recordAuthors.available) stats.governedRecordAuthorsReason = recordAuthors.reason;
+    }
+    for (const pr of splitPending) {
+      const record = h43RuleChangeRecord(await prCommentRowsFor(pr.number), pr.head?.sha, recordAuthors);
+      governedByPr.set(pr.number, h43RuleChangeSlice(GOVERNED_REGISTER.matcher(filesByPr.get(pr.number)?.paths ?? []), pr, record));
+    }
 
     // Oldest-first, because the PR nobody has asked about for longest is the
     // one the cap must not be the reason nobody hears about. The policy reads
@@ -24858,8 +25145,10 @@ async function sweepInto(findings, seen, seenPrs, seenMerged, seenUnscoped, seen
     // are both on the thread, nobody is owed a request, so such a PR buys no
     // review page and fires no row; an unread thread is UNJUDGED.
     // The PASS is read through the queue guard's author binding (card #33705), loaded once, here, at sweep time.
-    const recordAuthors = shortOfCoverage.length > 0 ? await h43RecordAuthors() : null;
-    if (recordAuthors !== null && !recordAuthors.available) stats.governedRecordAuthorsReason = recordAuthors.reason;
+    if (recordAuthors === null && shortOfCoverage.length > 0) {
+      recordAuthors = await h43RecordAuthors();
+      if (!recordAuthors.available) stats.governedRecordAuthorsReason = recordAuthors.reason;
+    }
     const handoffByPr = new Map();
     for (const pr of shortOfCoverage) {
       const rows = await prCommentRowsFor(pr.number);
@@ -26348,7 +26637,9 @@ export const SELF_TEST_BATTERIES = Object.freeze({
   // 93 → 94: a code span holding the KEY mentions the line and is unreadable; only the value may sit in one.
   // 94 → 103: the nine verdict-reader rows that landed with no pin of their own — the closed finding that
   // must END, the FAIL spellings, the fail-safe idiom. The battery registers 126 cases beside these rows.
-  'H43 hand-off timing': 103,
+  // 103 → 109 (#35612): the `.claude/**` declaration split on the slice — stood down on a verified `none`, listed on
+  // `yes`, the six Tier H shapes, the pending stage, the thread's record reading, an unloaded register, the loader.
+  'H43 hand-off timing': 109,
   // Registered with the seat-patrol rows (#28642), pin just under the count: two
   // free readings, each with its firing controls and its out-of-scope arms inside;
   // H71's intake readers (seat title, card labels and epic parent) add five.
@@ -26370,6 +26661,10 @@ export const SELF_TEST_BATTERIES = Object.freeze({
   // Registered with the unowned-PR row, pin just under the count: the firing, the assignee/mailbox/closed
   // exemptions, the unread-label UNJUDGED leg, the text, the band and the wiring.
   'H76 unowned open PR': 11,
+  // Registered with the claimed-card-PR row, pin AT the count: each leg's firing case beside the control that
+  // silences it, H16's blind spot read both ways, the unread suite that must stay silent, the gate, the band,
+  // the summary pair and the wiring.
+  'H82 claimed card PR CI cannot see': 24,
   // Registered with the ruled-card-in-the-box row (#29386), pin just under the
   // count: the firing case, the label / fence / anchoring / id controls each
   // beside its positive twin, the threshold boundary, the governing stamp, the
@@ -29608,6 +29903,43 @@ async function selfTest() {
   b(BATTERY76, 'H76 band: registered as `state` (H1\'s), and the sweep really pushes it', `${familyBand('H76')}/${familyRegistryCoverage().emitted.includes('H76')}`, 'state/true');
   b(BATTERY76, 'H76 wiring: every listed open PR is judged with the label taken LAZILY from mailbox-open.mjs, never spelled in the sweep', (() => { const src = readFileSync(fileURLToPath(import.meta.url), 'utf8'); return src.includes("({ MAILBOX_LABEL: mailboxLabel } = await import('./mailbox-open.mjs'));") && src.includes('const unowned = h76OpenPrWithoutAssignee(pr, mailboxLabel);'); })(), true);
   b(BATTERY76, 'floor: this battery is DECLARED on the frozen roster with a positive pin', Object.hasOwn(SELF_TEST_BATTERIES, BATTERY76) && SELF_TEST_BATTERIES[BATTERY76] > 0 && Object.isFrozen(SELF_TEST_BATTERIES), true);
+
+  // -- H82: a claimed card's PR that CI cannot see. Offline fixtures in the single-PR payload's shape, the head
+  //    the measured incident had (zero Actions suites, five from other apps), never a live read.
+  const BATTERY82 = 'H82 claimed card PR CI cannot see';
+  const NOW82 = Date.parse('2026-11-22T12:00:00Z');
+  const minsAgo82 = (m) => new Date(NOW82 - m * 60_000).toISOString();
+  const SHA82 = '473c7ff4aa0000000000000000000000000000aa';
+  const pr82 = (extra = {}) => ({ number: 35923, draft: true, merged_at: null, mergeable_state: 'clean', updated_at: minsAgo82(120), head: { ref: 'claude/project-thread-x', sha: SHA82 }, body: 'Fixes #35897\nFixes #35899', ...extra });
+  const claimed82 = h82ClaimedCards(pr82(), [35897, 35899, 1]);
+  const row82 = (extra = {}, suites = 5, claimed = claimed82, now = NOW82) => String(h82ClaimedPrBlind(pr82(extra), claimed, { actionsSuites: suites }, now) ?? '');
+  b(BATTERY82, 'H82 claimed: the bound cards the sweep holds under `pm:dispatched`, ascending', claimed82.join(), '35897,35899');
+  b(BATTERY82, '⛔ H82 claimed: a bound card NOT under `pm:dispatched` is not claimed, and its dispatched twin is', [h82ClaimedCards(pr82({ body: 'Fixes #7' }), [35897]).length, h82ClaimedCards(pr82({ body: 'Fixes #35897' }), [35897]).length].join(), '0,1');
+  b(BATTERY82, 'H82 claimed: `Part of #N` binds as H16 reads it; a backticked `Fixes #N` binds nothing', [h82ClaimedCards(pr82({ body: 'Part of #35897' }), [35897]).join(), h82ClaimedCards(pr82({ body: 'quoting `Fixes #35897`' }), [35897]).length].join('/'), '35897/0');
+  b(BATTERY82, 'H82 claimed: an absent body or an absent dispatched list claims nothing, never a crash', [h82ClaimedCards({}, [1]).length, h82ClaimedCards(pr82(), undefined).length].join(), '0,0');
+  const dirty82 = row82({ mergeable_state: 'dirty' });
+  b(BATTERY82, '⭐ H82 fires: a claimed DRAFT in merge conflict past the threshold, naming the state, both cards and the wake', ['MERGE CONFLICT', '`mergeable_state: dirty`', 'cards #35897, #35899', 'wakes the card thread', 'confirms Actions started'].every((x) => dirty82.includes(x)), true);
+  b(BATTERY82, '⛔ H82 control: the same draft CLEAN with Actions suites on its head is silent', row82(), '');
+  b(BATTERY82, '⭐ H82: H16 is silent on the dirty draft H82 fires on — the blind spot this row closes', `${h16StuckMergeConflict(pr82({ mergeable_state: 'dirty', updated_at: minsAgo82(600) }), NOW82)}/${row82({ mergeable_state: 'dirty', updated_at: minsAgo82(600) }).length > 0}`, 'null/true');
+  const none82 = row82({}, 0);
+  b(BATTERY82, '⭐ H82 fires: a claimed draft, not in conflict, whose head carries ZERO Actions suites — naming the head', ['ZERO GitHub Actions check suites', '`473c7ff4aa`', 'DRAFT PR', 'no CI ever ran on this head'].every((x) => none82.includes(x)), true);
+  b(BATTERY82, '⭐ H82: a claimed READY PR with zero Actions suites fires too — the no-Actions leg reads draft or not', row82({ draft: false }, 0).includes('ready PR'), true);
+  b(BATTERY82, '⛔ H82: a claimed non-draft DIRTY PR is H16\'s row alone, never reported twice — and H16 does fire on it', `${row82({ draft: false, mergeable_state: 'dirty', updated_at: minsAgo82(300) }, 0) === ''}/${typeof h16StuckMergeConflict(pr82({ draft: false, mergeable_state: 'dirty', updated_at: minsAgo82(300) }), NOW82)}`, 'true/string');
+  b(BATTERY82, '⛔ H82: an UNREAD suite reading (null) is silent — never a zero — while its read zero twin fires', `${row82({}, null) === ''}/${row82({}, 0).length > 0}`, 'true/true');
+  b(BATTERY82, 'H82: `unknown` mergeable state is not a conflict — silent with suites, still firing on zero suites', `${row82({ mergeable_state: 'unknown' }, 3) === ''}/${row82({ mergeable_state: 'unknown' }, 0).length > 0}`, 'true/true');
+  b(BATTERY82, 'H82: exactly at the threshold is silent, a minute past it fires', `${row82({ updated_at: minsAgo82(CLAIMED_PR_BLIND_STALE_MINUTES) }, 0) === ''}/${row82({ updated_at: minsAgo82(CLAIMED_PR_BLIND_STALE_MINUTES + 1) }, 0).length > 0}`, 'true/true');
+  b(BATTERY82, 'H82: an unreadable `updated_at` FIRES and says so, never reads as fresh', row82({ updated_at: 'not-a-date' }, 0).includes('unreadable `updated_at`'), true);
+  b(BATTERY82, '⛔ H82: an UNCLAIMED dirty draft is silent (no bound dispatched card), its claimed twin fires', `${row82({ mergeable_state: 'dirty' }, 5, []) === ''}/${dirty82.length > 0}`, 'true/true');
+  b(BATTERY82, '⛔ H82: the release bot\'s head, a merged row and a row without a `draft` field are out of scope', [row82({ head: { ref: 'changeset-release/main', sha: SHA82 } }, 0), row82({ merged_at: '2026-11-22T10:00:00Z' }, 0), String(h82ClaimedPrBlind({ mergeable_state: 'dirty', updated_at: minsAgo82(600), body: 'Fixes #35897' }, [35897], { actionsSuites: 0 }, NOW82) ?? '')].join('|'), '||');
+  const fixtures82 = [{}, { mergeable_state: 'dirty' }, { draft: false }, { updated_at: 'not-a-date' }, { updated_at: minsAgo82(31) }, { updated_at: minsAgo82(5) }, { mergeable_state: 'unknown' }, { merged_at: '2026-11-22T10:00:00Z' }];
+  b(BATTERY82, 'H82 gate: never NARROWER than the predicate — every fixture that fires was a candidate', fixtures82.every((x) => [0, 5, null].every((s) => row82(x, s) === '' || h82NeedsDetail(pr82(x), claimed82, NOW82))), true);
+  b(BATTERY82, 'H82 gate: a fresh PR buys no read, an unreadable timestamp does, an unclaimed PR does not', [h82NeedsDetail(pr82({ updated_at: minsAgo82(5) }), claimed82, NOW82), h82NeedsDetail(pr82({ updated_at: 'x' }), claimed82, NOW82), h82NeedsDetail(pr82(), [], NOW82)].join(), 'false,true,false');
+  b(BATTERY82, 'H82 constants: the card-thread wake rule\'s 30 minutes, and the GitHub Actions app id the suite read filters on', `${CLAIMED_PR_BLIND_STALE_MINUTES}/${GITHUB_ACTIONS_APP_ID}`, '30/15368');
+  b(BATTERY82, 'H82 band: a `stall`, registered, and the sweep really pushes it; not a loud finding', `${familyBand('H82')}/${familyRegistryCoverage().emitted.includes('H82')}/${isLoudFinding(none82)}`, 'stall/true/false');
+  b(BATTERY82, 'H82 summary: a partial suite read says how much and that an unread head is UNJUDGED; a full one does not', (() => { const part = saidBy('h82ClaimedPrs', summaryLine({ claimedPrCandidates: 3, claimedPrProbed: 3, claimedPrSuitesOwed: 2, claimedPrSuitesRead: 1 }, 0)); const full = saidBy('h82ClaimedPrs', summaryLine({ claimedPrCandidates: 3, claimedPrProbed: 3, claimedPrSuitesOwed: 2, claimedPrSuitesRead: 2 }, 0)); return part.includes('PR row read on 3 of 3') && part.includes('read on 1 of 2 head(s)') && part.includes('UNJUDGED') && !full.includes('UNJUDGED'); })(), true);
+  b(BATTERY82, 'H82 summary: the four count keys ride the enumerated contract', ['claimedPrCandidates', 'claimedPrProbed', 'claimedPrSuitesOwed', 'claimedPrSuitesRead'].every((k) => SWEEP_COUNT_KEYS.includes(k)), true);
+  b(BATTERY82, 'H82 wiring: after H16\'s rethrow, the PR row reused from H16, the suites read filtered to the Actions app, a failed suite read left UNJUDGED and not rethrown', (() => { const src = readFileSync(fileURLToPath(import.meta.url), 'utf8'); const at = src.indexOf('const blind = h82ClaimedPrBlind(detail, claimed, { actionsSuites });'); return at > src.indexOf('throw lastDetailError;') && src.includes('let detail = prDetails.get(pr.number);') && src.includes('/check-suites?app_id=${GITHUB_ACTIONS_APP_ID}&per_page=1') && /\} catch \{\n\s+actionsSuites = null;\n/u.test(src) && src.includes('throw lastClaimedError;'); })(), true);
+  b(BATTERY82, 'floor: this battery is DECLARED on the frozen roster with a positive pin', Object.hasOwn(SELF_TEST_BATTERIES, BATTERY82) && SELF_TEST_BATTERIES[BATTERY82] > 0, true);
 
   // -- H73 (#29386): a RULED decision card still sitting in the decision box.
   //    Positive controls beside every negative one: the label, the fence, the
@@ -33866,6 +34198,36 @@ async function selfTest() {
   t43('H43 tier: the answer is the register\'s, on the slice — S for the record row, H for mixed, H for a tier-less fixture, H for nothing', [governedLandsOnRecord(TIER_S_43), governedLandsOnRecord(MIXED_43), governedLandsOnRecord(GOV43), governedLandsOnRecord([])].join(), 'true,false,false,false');
   t43('H43 tier: ⛔ a register that did not load stands NOTHING down', governedLandsOnRecord(TIER_S_43, { available: false, tierOf: null, recordTier: null }), false);
   t43('H43 tier: …nor does one that loaded without the tier reader', governedLandsOnRecord(TIER_S_43, { available: true, tierOf: null, recordTier: 'S' }), false);
+
+  // ⚖️ The `.claude/**` declaration split (#35612): the slice H43 and H48 judge is the register's split, read off the
+  // body and the PR thread's record — `Rule-change: yes`, no line or a hooks path is Tier H and listed; a declared
+  // `none` stands down only on a record that verifies it. Each with its control one step away.
+  const CL43 = ['.claude/agents/os-dev.md'];
+  const RC43 = (line) => ({ number: 43, body: `Fixes #1\n\n${line}\n`, head: { sha: HEAD43 } });
+  const VERIFIED43 = PASS43.replace('\n\n**VERDICT', '\nRule-change-verified: none\n\n**VERDICT');
+  const rcSlice43 = (line, rows = rows43(ACCEPT43, VERIFIED43), paths = CL43) => {
+    if (!GOVERNED_REGISTER.available) return [];
+    const first = h43RuleChangeSlice(GOVERNED_REGISTER.matcher(paths), RC43(line));
+    return h43RuleChangePending(first) ? h43RuleChangeSlice(GOVERNED_REGISTER.matcher(paths), RC43(line), h43RuleChangeRecord(rows, HEAD43, AUTH43)) : first;
+  };
+  t43('⭐ #35612 H43 split: `Rule-change: none` over a PASS on the head verifying it stands down; the control — `Rule-change: yes` on the same thread — is Tier H and LISTED', [governedLandsOnRecord(rcSlice43('Rule-change: none')), governedLandsOnRecord(rcSlice43('Rule-change: yes')), typeof h43Gap(h43pr(43), rcSlice43('Rule-change: yes'), APP43, []), h43Gap(h43pr(43), rcSlice43('Rule-change: none'), APP43, [])].join(), 'true,false,string,');
+  t43('⛔ #35612 H43 split: no `Rule-change:` line, a hooks path beside the wording, a record verifying `yes`, a FAIL, no record on the head, or an unread thread — each Tier H, never stood down', [
+    rcSlice43('Clause-②: no'),
+    rcSlice43('Rule-change: none', rows43(ACCEPT43, VERIFIED43), [...CL43, '.claude/hooks/guard-main-checkout.sh']),
+    rcSlice43('Rule-change: none', rows43(ACCEPT43, VERIFIED43.replace('Rule-change-verified: none', 'Rule-change-verified: yes'))),
+    rcSlice43('Rule-change: none', rows43(ACCEPT43, VERIFIED43.replace('**VERDICT: PASS**', '**VERDICT: FAIL**'))),
+    rcSlice43('Rule-change: none', rows43(ACCEPT43)),
+    rcSlice43('Rule-change: none', null),
+  ].map((slice) => governedLandsOnRecord(slice)).join(), 'false,false,false,false,false,false');
+  t43('#35612 H43 split: a body declaring a seat value leaves the record stage PENDING until the thread is read; `yes` and a hooks path never wait on it', GOVERNED_REGISTER.available ? [h43RuleChangePending(h43RuleChangeSlice(GOVERNED_REGISTER.matcher(CL43), RC43('Rule-change: none'))), h43RuleChangePending(h43RuleChangeSlice(GOVERNED_REGISTER.matcher(CL43), RC43('Rule-change: yes'))), h43RuleChangePending(h43RuleChangeSlice(GOVERNED_REGISTER.matcher(['.claude/settings.json']), RC43('Rule-change: none')))].join() : 'NOT MEASURED', 'true,false,false');
+  t43('#35612 H43 split record: a trusted PASS on the head with its line reads FOUND, the line and the leg; none on the head is ABSENT; an unread thread or binding is NOT MEASURED', (() => {
+    const found = h43RuleChangeRecord(rows43(ACCEPT43, VERIFIED43), HEAD43, AUTH43);
+    const failed = h43RuleChangeRecord(rows43(VERIFIED43.replace('**VERDICT: PASS**', '**VERDICT: FAIL**')), HEAD43, AUTH43);
+    const stranger = h43RuleChangeRecord([{ ...rows43(VERIFIED43)[0], user: { login: 'drive-by-commenter' } }], HEAD43, AUTH43);
+    return [found.located, found.ruleChangeVerified?.value, found.recordLeg?.state, failed.recordLeg?.state, stranger.located, h43RuleChangeRecord(rows43(OLD_PASS43), HEAD43, AUTH43).located, h43RuleChangeRecord(null, HEAD43, AUTH43).measured, h43RuleChangeRecord(rows43(VERIFIED43), HEAD43, { available: false }).measured].join();
+  })(), 'found,none,stands,not-pass,absent,absent,false,false');
+  t43('#35612 H43 split: a register that did not load returns the slice untouched — and stands nothing down', [h43RuleChangeSlice(GOV43, RC43('Rule-change: none'), null, { available: false }) === GOV43 || JSON.stringify(h43RuleChangeSlice(GOV43, RC43('Rule-change: none'), null, { available: false })) === JSON.stringify(GOV43), governedLandsOnRecord(TIER_S_43, { available: false })].join(), 'true,false');
+  t43('#35612 H43 register: the loader exports the split and its line reader, bound to the swept board', GOVERNED_REGISTER.available && typeof GOVERNED_REGISTER.split === 'function' && typeof GOVERNED_REGISTER.readVerified === 'function' && GOVERNED_REGISTER.readVerified('Rule-change-verified: ruled').value === 'ruled', true);
   t43('H43 summary: the review leg is stated as Tier H only', saidBy('h43GovernedReviews', summaryLine({ governedPrs: 8, governedReviewCandidates: 5, governedReviewProbed: 5 }, 0)).includes('Tier H only'), true);
 
   // The coverage clause, both branches, cut out of the summary line so only

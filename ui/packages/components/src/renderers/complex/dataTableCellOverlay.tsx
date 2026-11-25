@@ -144,7 +144,7 @@ export function CellOverlay({
               'max-h-(--radix-popper-available-height) overflow-auto',
               'rounded-md border border-primary bg-popover text-popover-foreground shadow-lg outline-none',
               kind === 'preview'
-                ? [PREVIEW_UNCLIP_CLASS, 'px-3 py-1.5 text-[13px] leading-normal whitespace-pre-wrap break-words']
+                ? [PREVIEW_UNCLIP_CLASS, 'px-3 py-1.5 text-sm leading-normal whitespace-pre-wrap break-words']
                 : [EDITOR_DENSITY_CLASS, IN_CELL_INPUT_LAYER_CLASS],
               // A panel under the cell: the selection frame stays on the cell.
               placement === 'below' && 'border-border',
@@ -179,7 +179,7 @@ const PREVIEW_UNCLIP_CLASS =
 const EDITOR_DENSITY_CLASS = cn(
   'p-1',
   '[&_input:not([type=checkbox]):not([type=radio]):not([type=range]):not([data-in-cell-input])]:h-8 [&_[role=combobox]]:h-8',
-  '[&_input]:text-[13px] [&_textarea]:text-[13px]',
+  '[&_input]:text-sm [&_textarea]:text-sm',
   '[&_textarea]:min-h-[max(5rem,calc(var(--cell-overlay-min-h,0px)-0.625rem))]',
 );
 

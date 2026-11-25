@@ -100,7 +100,7 @@ export function useObjectViewHeaderToolbar({
         variant: 'outline',
         mobileMaxVisible: 0,
         // The page bar's controls are 28px and 13px (objectstack#35548).
-        className: '[&_button]:h-7 [&_button]:text-[13px]',
+        className: '[&_button]:h-7 [&_button]:text-sm',
     };
     return { headerToolbarActions, toolbarActionsWithDeepLink, toolbarBar };
 }

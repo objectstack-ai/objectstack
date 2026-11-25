@@ -90,32 +90,20 @@ describe('the reader\'s arrangement orders the tab row (objectstack#35595, carry
     expect(container.querySelector('[data-related-foot-line]')).toBeNull();
   });
 
-  it("draws the stored reader's order, and 「恢复默认顺序」 at the rail's foot restores the default", () => {
-    const onWrite = vi.fn();
+  it("draws the stored reader's order; with the rail gone (objectstack#35890) no foot line — 「更多」 holds the reset", () => {
     const dragged = editRelatedArrangement(DEFAULT, undefined, { kind: 'move', id: 'call.lead_id', to: 0 }, Date.now());
-    const { container } = render(<Host initial={dragged} onWrite={onWrite} />);
+    const { container } = render(<Host initial={dragged} />);
     expect(listTabs()).toEqual(['call.lead_id', 'task.lead_id', 'note.parent_id']);
-    const foot = container.querySelector('[data-record-column="right"] [data-related-foot-line]')!;
-    expect(foot).not.toBeNull();
-    const restore = foot.querySelector('[data-related-restore-default-order]') as HTMLButtonElement;
-    expect(restore.textContent).toBe('Restore default order');
-    fireEvent.click(restore);
-    expect(listTabs()).toEqual(DEFAULT);
-    expect(onWrite.mock.calls.at(-1)![0].order).toEqual([]);
     expect(container.querySelector('[data-related-foot-line]')).toBeNull();
+    expect(document.querySelector('[data-record-tab-more]')).not.toBeNull();
   });
 
-  it('a hidden list leaves the row for the end of 「更多 N ▾」; the foot line brings it back', () => {
+  it('a hidden list leaves the row for the end of 「更多 N ▾」', () => {
     const hidden = editRelatedArrangement(DEFAULT, undefined, { kind: 'hide', id: 'task.lead_id' }, Date.now());
     const { container } = render(<Host initial={hidden} />);
     expect(listTabs()).toEqual(['note.parent_id', 'call.lead_id']);
     expect(document.querySelector('[data-record-tab-more]')?.textContent).toBe('More 1');
-    const line = container.querySelector('[data-related-hidden-line]')!;
-    expect(line).toBeTruthy();
-    fireEvent.click(line.querySelector('button')!);
-    expect(listTabs()).toEqual(DEFAULT);
     expect(container.querySelector('[data-related-hidden-line]')).toBeNull();
-    expect(document.querySelector('[data-record-tab-more]')).toBeNull();
   });
 
   it('says when the default changed under a dragged order, and restores it', () => {
@@ -130,13 +118,12 @@ describe('the reader\'s arrangement orders the tab row (objectstack#35595, carry
     expect(container.querySelector('[data-related-default-changed]')).toBeNull();
   });
 
-  it('CONTROL: the rail draws no card chrome — no ⠿ handle, no 隐藏, no related list drawn whole', () => {
+  it('CONTROL: no rail is drawn, so no list is drawn whole beside the details (objectstack#35890)', () => {
     const dragged = editRelatedArrangement(DEFAULT, undefined, { kind: 'move', id: 'call.lead_id', to: 0 }, Date.now());
     const { container } = render(<Host initial={dragged} />);
-    const rail = container.querySelector('[data-record-column="right"]')!;
-    expect(rail).not.toBeNull();
-    expect(rail.querySelector('[data-related-card-id]')).toBeNull();
-    expect(rail.querySelector('[data-node="record:related_list"]')).toBeNull();
+    expect(container.querySelector('[data-record-column="right"]')).toBeNull();
+    expect(container.querySelector('[data-related-card-id]')).toBeNull();
+    expect(container.querySelector('[data-node="record:related_list"]')).toBeNull();
   });
 });
 
@@ -249,6 +236,45 @@ describe('a related tab\'s menu and 「更多」\'s reset (objectstack#35783)', 
     await user.click(document.querySelector('[data-record-tab-more]') as HTMLElement);
     const hiddenItem = (await screen.findAllByRole('menuitem')).find((el) => el.hasAttribute('data-record-tab-hidden'));
     expect(hiddenItem?.getAttribute('data-record-tab-menu-item')).toBe('note.parent_id');
+  });
+
+  it('a hidden list still opens: from its item in 「更多」, and from an address that names it (objectstack#35890)', async () => {
+    const user = userEvent.setup();
+    const hidden = editRelatedArrangement(DEFAULT, undefined, { kind: 'hide', id: 'note.parent_id' }, Date.now());
+    const { container, unmount } = render(<TabHost initial={hidden} />);
+    expect(listTabs()).toEqual(['task.lead_id', 'call.lead_id']);
+    await user.click(document.querySelector('[data-record-tab-more]') as HTMLElement);
+    await user.click(
+      document.querySelector('[data-record-tab-hidden][data-record-tab-menu-item="note.parent_id"]') as HTMLElement,
+    );
+    expect(container.querySelector('[data-related-enlarged="note.parent_id"]')).not.toBeNull();
+    unmount();
+    // The address names the hidden list (?related=note.parent_id): its face opens.
+    const page = render(
+      <RecordPageColumns
+        tier="wide"
+        columns={columnsOf()}
+        relatedArrangement={hidden}
+        onRelatedArrangementChange={vi.fn()}
+        enlargedRelated="note.parent_id"
+        onEnlargeRelated={vi.fn()}
+        onCloseEnlargedRelated={vi.fn()}
+      />,
+    );
+    expect(page.container.querySelector('[data-related-enlarged="note.parent_id"]')).not.toBeNull();
+    // CONTROL: an id naming no list still draws the columns.
+    page.rerender(
+      <RecordPageColumns
+        tier="wide"
+        columns={columnsOf()}
+        relatedArrangement={hidden}
+        onRelatedArrangementChange={vi.fn()}
+        enlargedRelated="nope.nope"
+        onEnlargeRelated={vi.fn()}
+        onCloseEnlargedRelated={vi.fn()}
+      />,
+    );
+    expect(page.container.querySelector('[data-related-enlarged]')).toBeNull();
   });
 
   it('「更多」 ends with 「恢复默认顺序」 while the arrangement is not the default: the default order, every list shown — in a drawer too', async () => {

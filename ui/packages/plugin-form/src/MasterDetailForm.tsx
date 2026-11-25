@@ -34,7 +34,7 @@ import React, { startTransition, useCallback, useContext, useEffect, useMemo, us
 import { createPortal } from 'react-dom';
 import type { BatchTransactionOperation, DataSource, GridFieldMetadata, I18nLabel } from '@object-ui/types';
 import { resolveAffordance, runBatchTransaction } from '@object-ui/core';
-import { isUntouchedNewRow, LineItemsField, lookupAutofillByField, columnHelpByField, UNTOUCHED_NEW_ROW, useBooleanValueLabel, type BooleanValueLabel, type ColumnHelp, type GridColumn, type LookupAutofillByField } from '@object-ui/fields';
+import { isUntouchedNewRow, LineItemsField, preloadGridField, lookupAutofillByField, columnHelpByField, UNTOUCHED_NEW_ROW, useBooleanValueLabel, type BooleanValueLabel, type ColumnHelp, type GridColumn, type LookupAutofillByField } from '@object-ui/fields';
 import { Button, Card, CardContent, CardHeader, CardTitle, cn, toast } from '@object-ui/components';
 import {
   formatDisplayNumber,
@@ -67,7 +67,7 @@ import { resolveInitialRecord } from './initialRecord';
 import { sectionEntryName } from './sectionFields';
 import { deriveDetail } from './deriveMasterDetail';
 import { schemaDefaultValues } from './schemaDefaults';
-import { parentCurrencyFieldsOf, followedColumnCurrencies } from './parentCurrencyColumns';
+import { currencyFieldDefsOf, parentCurrencyFieldsOf, followedColumnCurrencies } from './parentCurrencyColumns';
 // objectui#11428 — the per-row form's offer test is the spec's rule.
 import { isInlineRowFormOffered } from '@objectstack/spec/data';
 // objectui#11396 — one `details` entry, by reference: the spec's own type for
@@ -455,6 +455,12 @@ interface DetailEntry {
    * currency. Internal state, never authored.
    */
   parentCurrencyFields?: ReturnType<typeof parentCurrencyFieldsOf>;
+  /**
+   * The child fields that hold an amount of money, by name
+   * (`currencyFieldDefsOf`): a pick copies an amount into a line column only
+   * in the same currency (objectstack#36249). Internal state, never authored.
+   */
+  currencyFields?: ReturnType<typeof currencyFieldDefsOf>;
 }
 
 /** The field shape `resolveFieldCurrency` reads — the one currency resolver. */
@@ -966,6 +972,34 @@ const FormSlotPlacement: React.FC<{
 };
 
 /**
+ * Set once this module's own `preloadGridField()` has settled, so a form that
+ * mounts after that renders its grids at its first paint.
+ */
+let gridBodySettled = false;
+
+/**
+ * Whether the line grid's body is here (objectstack#36102). The grid is drawn
+ * only once it is, so a collection stays on "Loading columns…" until then and
+ * the grid never mounts on its loading placeholder, however its columns were
+ * reached: derived from the child schema, authored in full, or authored
+ * untyped and drawn while the derivation is still in flight. A failed load
+ * settles too: the grid then reports it, through the nearest error boundary.
+ */
+function useGridBodySettled(): boolean {
+  const [settled, setSettled] = useState(gridBodySettled);
+  useEffect(() => {
+    if (settled) return;
+    let live = true;
+    void preloadGridField().then(() => {
+      gridBodySettled = true;
+      if (live) setSettled(true);
+    });
+    return () => { live = false; };
+  }, [settled]);
+  return settled;
+}
+
+/**
  * The line-item grids + document totals, isolated from the header form.
  *
  * It owns `parentRecord` — the header's record (`headerRecord`) with the user's
@@ -1000,6 +1034,7 @@ const MasterDetailLines: React.FC<MasterDetailLinesProps> = ({
   // used to pass `toLocaleString` an explicit `undefined`, i.e. the MACHINE's
   // locale (objectui#9909).
   const displayLocale = useDisplayLocale();
+  const gridBodyReady = useGridBodySettled();
   // The tenant default currency (ADR-0053): the totals stack's currency when
   // the amount field fixes none (objectui#11132).
   const { currency: tenantCurrency } = useLocalization();
@@ -1211,7 +1246,7 @@ const MasterDetailLines: React.FC<MasterDetailLinesProps> = ({
                 { object: d.childObject, parent: parentObjectName, property: 'relationshipField' },
               )}
             </p>
-          ) : !d.columns?.length ? (
+          ) : !d.columns?.length || !gridBodyReady ? (
             <p className="py-4 text-sm text-muted-foreground">{t('form.masterDetail.loadingColumns')}</p>
           ) : (
             <LineItemsField
@@ -1234,6 +1269,9 @@ const MasterDetailLines: React.FC<MasterDetailLinesProps> = ({
               // The columns whose amount follows this header's currency
               // (ADR-0144 D2 as amended), in the header's live code.
               columnCurrencies={followedColumnCurrencies(entry.parentCurrencyFields, parentRecord, tenantCurrency)}
+              // Each currency column's own currency (a `fixed` code, a code on
+              // the line), for a pick's cross-currency rule (objectstack#36249).
+              columnFields={entry.currencyFields}
               // objectstack#35940 — a new line starts on the child's defaults,
               // and its empty required cell reads red once a save was tried,
               // as on the record page's edit state.
@@ -1297,7 +1335,7 @@ const MasterDetailLines: React.FC<MasterDetailLinesProps> = ({
               <dt className="text-muted-foreground">{t('form.masterDetail.tax', { rate: taxPct })}</dt>
               <dd className="tabular-nums" data-testid="md-tax">{money(taxAmount)}</dd>
             </div>
-            <div className="flex items-center justify-between border-t border-border pt-1.5 text-base font-semibold">
+            <div className="flex items-center justify-between border-t border-border pt-1.5 text-base font-medium">
               <dt>{t('form.masterDetail.total')}</dt>
               <dd className="tabular-nums" data-testid="md-grand-total">{money(grandTotal)}</dd>
             </div>
@@ -1319,6 +1357,9 @@ export const MasterDetailForm: React.FC<MasterDetailFormProps> = ({
   dataSource,
   className,
 }) => {
+  // The line grid's body loads on first use (objectstack#36102). Start it now,
+  // while the child schema is fetched, so the grid is there before its columns.
+  preloadGridField();
   const rawDetails = schema.details || [];
   const isEdit = schema.mode === 'edit' && !!schema.recordId;
   // `title` / `submitText` / `cancelText` are `I18nLabel` (see the schema
@@ -1537,6 +1578,7 @@ export const MasterDetailForm: React.FC<MasterDetailFormProps> = ({
                 lookupAutofill: lookupAutofillByField(childSchema?.fields as Record<string, unknown> | undefined),
                 columnHelp: columnHelpByField(childSchema?.fields as Record<string, unknown> | undefined),
                 parentCurrencyFields: parentCurrencyFieldsOf(childSchema?.fields as Record<string, unknown> | undefined, d.relationshipField),
+                currencyFields: currencyFieldDefsOf(childSchema?.fields as Record<string, unknown> | undefined),
               };
             }
             return {
@@ -1556,6 +1598,7 @@ export const MasterDetailForm: React.FC<MasterDetailFormProps> = ({
               lookupAutofill: lookupAutofillByField(childSchema?.fields as Record<string, unknown> | undefined),
               columnHelp: columnHelpByField(childSchema?.fields as Record<string, unknown> | undefined),
               parentCurrencyFields: parentCurrencyFieldsOf(childSchema?.fields as Record<string, unknown> | undefined, derived.relationshipField),
+              currencyFields: currencyFieldDefsOf(childSchema?.fields as Record<string, unknown> | undefined),
             };
           } catch (err) {
             // THE DERIVE FAILED, on a schema that loaded fine — almost always

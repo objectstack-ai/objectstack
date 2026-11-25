@@ -68,7 +68,7 @@ function mailPayload(bannerText: string, host: string) {
 const fetchMock = vi.fn();
 
 function ok(body: unknown): Response {
-  return { ok: true, status: 200, statusText: 'OK', json: async () => body } as unknown as Response;
+  return { ok: true, status: 200, statusText: 'OK', headers: new Headers(), json: async () => body } as unknown as Response;
 }
 
 /** The `sms` GET payload: a second namespace to move to. */
@@ -120,6 +120,7 @@ function serve() {
         ok: false,
         status: 503,
         statusText: 'Service Unavailable',
+        headers: new Headers(),
         json: async () => ({ success: false, error: { code: 'UNAVAILABLE', message: 'Settings unavailable' } }),
       } as unknown as Response;
     }
