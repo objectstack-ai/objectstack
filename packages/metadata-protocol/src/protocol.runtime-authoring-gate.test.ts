@@ -5726,7 +5726,7 @@ describe('ai_context author defects at save (ADR-0160 D1)', () => {
         );
     });
 
-    it('the same pack saved with no package keeps the os validate words', async () => {
+    it('with no package, an unknown object keeps the os validate words', async () => {
         const { protocol } = makePackProtocol();
         const item = pack({ related: [{ object: 'polcy_revision' }] });
         const result = await savePack(protocol, item);
