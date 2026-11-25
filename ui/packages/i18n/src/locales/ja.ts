@@ -1773,6 +1773,12 @@ const ja = {
       noCategoryAxis: "チャートのカテゴリ軸が必要です — オブジェクト連携チャートは軸を推測しません。次のいずれかを宣言してください：",
     },
   },
+  // objectstack#36906 — the × of an app page opened from a Studio list.
+  studioReturn: {
+    close: 'Studio に戻る',
+    closeLabel: '閉じて Studio の一覧に戻る',
+    leaveConfirm: '保存せずに移動しますか？保存していない変更は失われます。',
+  },
   dashboard: {
     // objectui#7063 — the DEFAULT empty state every dashboard widget renders
     // when its query SUCCEEDED and returned nothing. It replaced the terse
@@ -4136,6 +4142,8 @@ const ja = {
       settings: "レポート設定",
       pendingDraft: "このレポートには未公開の変更があります。上で公開または破棄してから保存してください。",
       nameTaken: "この名前から作れる識別子はすべて使用済みです。レポートに別の名前を付けてから保存してください。",
+      // objectstack#36906 — a report made from Studio's report list that could not be saved in the app's package.
+      savedOutsideApp: "アプリのカスタマイズパッケージをここでは使用できないため、このレポートはアプリのパッケージの外に保存されました。そのため Studio の一覧には表示されません。",
       adminOnlyTitle: "レポートを作成できるのはワークスペース管理者のみです",
       adminOnly: "レポートはワークスペースの全員に共有されるため、管理者が作成します。",
       designModeOnTitle: "先にレイアウトのデザインを終えてください",

@@ -22,8 +22,8 @@
 
 import '@testing-library/jest-dom/vitest';
 import * as React from 'react';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
 
 const DRAFT = vi.hoisted(() => ({
@@ -38,7 +38,7 @@ const DRAFT = vi.hoisted(() => ({
 vi.mock('./ReportBuilderHost.js', () => ({
   ReportBuilderHost: (props: {
     onSave: (draft: Record<string, unknown>) => Promise<boolean>;
-    onClose: () => void;
+    onClose: (left: { dirty: boolean }) => void;
     banner?: React.ReactNode;
   }) => (
     <div data-testid="builder">
@@ -46,8 +46,12 @@ vi.mock('./ReportBuilderHost.js', () => ({
       <button type="button" onClick={() => void props.onSave(DRAFT)}>
         save
       </button>
-      <button type="button" onClick={props.onClose}>
+      <button type="button" onClick={() => props.onClose({ dirty: false })}>
         close
+      </button>
+      {/* The real host says `dirty` when it holds edits the close would drop. */}
+      <button type="button" onClick={() => props.onClose({ dirty: true })}>
+        close over an edit
       </button>
     </div>
   ),
@@ -59,12 +63,36 @@ vi.mock('./runtime-metadata-persistence.js', async (importOriginal) => ({
   saveAndPublishRuntimeMetadata: saveAndPublish,
 }));
 
-const client = vi.hoisted(() => ({ get: vi.fn(async () => null) }));
+const client = vi.hoisted(() => ({
+  get: vi.fn(async () => null),
+  save: vi.fn(async () => ({ success: true })),
+  publish: vi.fn(async () => ({ success: true })),
+  reset: vi.fn(async () => ({ success: true })),
+}));
 vi.mock('./metadata-admin/useMetadata.js', () => ({ useMetadataClient: () => client }));
 
 const refresh = vi.hoisted(() => vi.fn(async () => {}));
+/** The app `crm` is routed by its name; its package is {@link PKG}. */
+const PKG = 'com.example.crm';
 vi.mock('../providers/MetadataProvider.js', () => ({
-  useMetadata: () => ({ reports: [], loading: false, refresh }),
+  useMetadata: () => ({ reports: [], apps: [{ name: 'crm', _packageId: 'com.example.crm' }], loading: false, refresh }),
+}));
+
+/** The package doors `resolveRuntimeCreatePackage` asks: the listed packages, and the ensure door. */
+const doors = vi.hoisted(() => ({
+  listed: new Map<string, { writable: boolean }>(),
+  ensure: vi.fn(async (_base: string): Promise<{ packageId: string; writable: boolean }> => {
+    throw new Error('not asked');
+  }),
+  listCalls: 0,
+}));
+vi.mock('./studio-design/packages-io.js', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  fetchListedPackageManifests: async () => {
+    doors.listCalls += 1;
+    return doors.listed;
+  },
+  ensureCustomizationPackage: (base: string) => doors.ensure(base),
 }));
 
 vi.mock('@object-ui/auth', async (importOriginal) => ({
@@ -73,13 +101,26 @@ vi.mock('@object-ui/auth', async (importOriginal) => ({
 }));
 
 const toastError = vi.hoisted(() => vi.fn());
+const toastInfo = vi.hoisted(() => vi.fn());
 vi.mock('sonner', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
-  toast: { error: toastError, success: vi.fn() },
+  toast: { error: toastError, info: toastInfo, success: vi.fn() },
 }));
 
+// The source under test reaches dynamic imports of `@objectstack/lint` (through the
+// draft bar's package rule): their first load is paid here, at collection, never
+// inside a case's clock (`check:test-source-alias`).
+import '@objectstack/lint';
 import { ReportNewPage } from './ReportNewPage';
 import { DesignModeProvider, useDesignModeController } from '../layout/designMode';
+import { loadHanRomanizer } from './metadata-admin/romanizeHan';
+
+// Save first awaits the Han romanizer, a cold dynamic import: its first load is
+// paid here, at collection, never inside a case's clock. The save cases also
+// wait on what they assert (`waitFor`), never on a count of ticks.
+beforeAll(async () => {
+  await loadHanRomanizer();
+});
 
 function Where() {
   return <span data-testid="where">{useLocation().pathname}</span>;
@@ -149,8 +190,26 @@ const flush = () =>
 beforeEach(() => {
   saveAndPublish.mockClear();
   client.get.mockClear();
+  client.save.mockClear();
+  client.publish.mockClear();
+  client.reset.mockClear();
   toastError.mockReset();
+  toastInfo.mockReset();
+  doors.listed = new Map([[PKG, { writable: true }]]);
+  doors.ensure.mockReset();
+  doors.ensure.mockImplementation(async () => {
+    throw new Error('not asked');
+  });
+  doors.listCalls = 0;
 });
+
+/** Install a `window.confirm` answering `answer` (this DOM ships none); returns it and the restore. */
+function installConfirm(answer: boolean) {
+  const before = window.confirm;
+  const confirm = vi.fn(() => answer);
+  window.confirm = confirm as unknown as typeof window.confirm;
+  return { confirm, restore: () => (window.confirm = before) };
+}
 afterEach(() => {
   cleanup();
 });
@@ -160,15 +219,18 @@ describe('the new-report page saves on its own (objectstack#36692)', () => {
     mount();
     expect(screen.queryByTestId('report-new-adds-to-menu')).toBeNull();
     fireEvent.click(screen.getByText('save'));
-    await flush();
-    await flush();
+    await waitFor(() => expect(screen.getByTestId('where')).toHaveTextContent('/apps/crm/report/payment_analysis'));
     expect(saveAndPublish).toHaveBeenCalledWith(
       'report',
       'payment_analysis',
       { ...DRAFT, name: 'payment_analysis' },
       expect.objectContaining({ metadataClient: client }),
     );
-    expect(screen.getByTestId('where')).toHaveTextContent('/apps/crm/report/payment_analysis');
+    // objectstack#36906 — outside Studio it is saved where it was before: naming
+    // no package, and no package door is asked.
+    expect(client.save).not.toHaveBeenCalled();
+    expect(doors.listCalls).toBe(0);
+    expect(toastInfo).not.toHaveBeenCalled();
   });
 
   it('Close goes back to the reports index, writing nothing', async () => {
@@ -177,6 +239,24 @@ describe('the new-report page saves on its own (objectstack#36692)', () => {
     await flush();
     expect(saveAndPublish).not.toHaveBeenCalled();
     expect(screen.getByTestId('where').textContent).toBe('/apps/crm/reports');
+  });
+
+  it('Close over unsaved edits asks first (objectstack#36906): declining stays, agreeing goes back', async () => {
+    const { confirm, restore } = installConfirm(false);
+    try {
+      mount();
+      fireEvent.click(screen.getByText('close over an edit'));
+      await flush();
+      expect(confirm).toHaveBeenCalledTimes(1);
+      expect(screen.getByTestId('where').textContent).toBe('/apps/crm/reports/new');
+      confirm.mockReturnValue(true);
+      fireEvent.click(screen.getByText('close over an edit'));
+      await flush();
+      expect(screen.getByTestId('where').textContent).toBe('/apps/crm/reports');
+      expect(saveAndPublish).not.toHaveBeenCalled();
+    } finally {
+      restore();
+    }
   });
 
   it('while the builder is open, entering the design mode refuses with the prompt', async () => {
@@ -228,5 +308,143 @@ describe('reached with the design mode already on, the page draws no builder (ob
     expect(screen.getByTestId('builder')).toBeInTheDocument();
     expect(screen.getByText('save')).toBeInTheDocument();
     expect(screen.queryByTestId('report-new-design-mode')).toBeNull();
+  });
+});
+
+describe("opened from Studio's report list (objectstack#36906, decision 13)", () => {
+  const studioList = '/studio/crm/metadata/report?q=pay';
+  const fromStudio = `?studio=${encodeURIComponent(studioList)}`;
+
+  function WhereFull() {
+    const { pathname, search } = useLocation();
+    return <span data-testid="where-full">{`${pathname}${search}`}</span>;
+  }
+
+  function mountFromStudio() {
+    render(
+      <MemoryRouter initialEntries={[`/apps/crm/reports/new${fromStudio}`]}>
+        <Shell>
+          <Routes>
+            <Route path="/apps/:appName/reports/new" element={<ReportNewPage />} />
+            <Route path="*" element={null} />
+          </Routes>
+          <WhereFull />
+        </Shell>
+      </MemoryRouter>,
+    );
+  }
+
+  it("the builder's x goes back to the Studio list, writing nothing and asking nothing", async () => {
+    const { confirm, restore } = installConfirm(false);
+    try {
+      mountFromStudio();
+      fireEvent.click(screen.getByText('close'));
+      await flush();
+      expect(confirm).not.toHaveBeenCalled();
+      expect(saveAndPublish).not.toHaveBeenCalled();
+      expect(screen.getByTestId('where-full').textContent).toBe(studioList);
+    } finally {
+      restore();
+    }
+  });
+
+  it("x over unsaved edits asks; declining stays with nothing sent; agreeing goes back to the Studio list", async () => {
+    const { confirm, restore } = installConfirm(false);
+    try {
+      mountFromStudio();
+      fireEvent.click(screen.getByText('close over an edit'));
+      await flush();
+      expect(confirm).toHaveBeenCalledTimes(1);
+      expect(screen.getByTestId('where-full').textContent).toBe(`/apps/crm/reports/new${fromStudio}`);
+      expect(screen.getByTestId('builder')).toBeInTheDocument();
+      expect(saveAndPublish).not.toHaveBeenCalled();
+      expect(client.save).not.toHaveBeenCalled();
+      confirm.mockReturnValue(true);
+      fireEvent.click(screen.getByText('close over an edit'));
+      await flush();
+      expect(confirm).toHaveBeenCalledTimes(2);
+      expect(screen.getByTestId('where-full').textContent).toBe(studioList);
+      expect(saveAndPublish).not.toHaveBeenCalled();
+      expect(client.save).not.toHaveBeenCalled();
+    } finally {
+      restore();
+    }
+  });
+
+  it("Save writes the report into the app's package, where the Studio list finds it", async () => {
+    mountFromStudio();
+    fireEvent.click(screen.getByText('save'));
+    await waitFor(() =>
+      expect(screen.getByTestId('where-full').textContent).toBe(`/apps/crm/report/payment_analysis${fromStudio}`),
+    );
+    expect(client.save).toHaveBeenCalledWith(
+      'report',
+      'payment_analysis',
+      { ...DRAFT, name: 'payment_analysis' },
+      { mode: 'draft', ifNoneMatch: '*', packageId: PKG },
+    );
+    expect(client.publish).toHaveBeenCalledWith('report', 'payment_analysis', { packageId: PKG });
+    expect(doors.ensure).not.toHaveBeenCalled();
+    // The package-less save is not the one taken, and nothing says it was.
+    expect(saveAndPublish).not.toHaveBeenCalled();
+    expect(toastInfo).not.toHaveBeenCalled();
+  });
+
+  it("on a read-only base, Save writes the report into the base's customization package", async () => {
+    doors.listed = new Map([[PKG, { writable: false }]]);
+    doors.ensure.mockImplementation(async (base: string) => ({ packageId: `${base}.custom`, writable: true }));
+    mountFromStudio();
+    fireEvent.click(screen.getByText('save'));
+    await waitFor(() =>
+      expect(screen.getByTestId('where-full').textContent).toBe(`/apps/crm/report/payment_analysis${fromStudio}`),
+    );
+    expect(doors.ensure).toHaveBeenCalledWith(PKG);
+    expect(client.save).toHaveBeenCalledWith(
+      'report',
+      'payment_analysis',
+      { ...DRAFT, name: 'payment_analysis' },
+      { mode: 'draft', ifNoneMatch: '*', packageId: `${PKG}.custom` },
+    );
+    expect(saveAndPublish).not.toHaveBeenCalled();
+    expect(toastInfo).not.toHaveBeenCalled();
+  });
+
+  it('control: when the ensure door refuses, Save falls back to naming no package, and says so, as a new view does', async () => {
+    doors.listed = new Map([[PKG, { writable: false }]]);
+    doors.ensure.mockImplementation(async () => {
+      throw Object.assign(new Error('Forbidden'), { status: 403 });
+    });
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      mountFromStudio();
+      fireEvent.click(screen.getByText('save'));
+      await waitFor(() =>
+        expect(screen.getByTestId('where-full').textContent).toBe(`/apps/crm/report/payment_analysis${fromStudio}`),
+      );
+      expect(doors.ensure).toHaveBeenCalledWith(PKG);
+      expect(client.save).not.toHaveBeenCalled();
+      expect(saveAndPublish).toHaveBeenCalledWith(
+        'report',
+        'payment_analysis',
+        { ...DRAFT, name: 'payment_analysis' },
+        expect.objectContaining({ metadataClient: client }),
+      );
+      // The author is told the report is not where the Studio list looks.
+      expect(toastInfo).toHaveBeenCalledTimes(1);
+      // (This harness registers no locale pack, so `t` answers the key itself.)
+      expect(toastInfo).toHaveBeenCalledWith('report.builder.savedOutsideApp');
+      // The developer-console line names the type it saved, not a view.
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining('the report is saved naming no package'), expect.anything());
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it("Save lands on the new report's page, which keeps the way back to Studio", async () => {
+    mountFromStudio();
+    fireEvent.click(screen.getByText('save'));
+    await waitFor(() =>
+      expect(screen.getByTestId('where-full').textContent).toBe(`/apps/crm/report/payment_analysis${fromStudio}`),
+    );
   });
 });
