@@ -213,9 +213,11 @@ describe('[#36677] the draft preview resolves a { $field } comparand as the live
 
 /** The preview's row filters for `where`, with the corpus fixture's declarations. */
 function previewFiltersOver(fields: Record<string, Record<string, unknown>>) {
-  const SHAPES = fields as Record<string, ValueShapeFieldDef>;
-  const declaredShape = (field: string) => SHAPES[field] ? { type: SHAPES[field]!.type, multiple: SHAPES[field]!.multiple === true } : undefined;
-  const declaredType = (field: string) => SHAPES[field]?.type;
+  const declaredType = (field: string) => (typeof fields[field]?.type === 'string' ? (fields[field]!.type as string) : undefined);
+  const declaredShape = (field: string): ValueShapeFieldDef | undefined => {
+    const type = declaredType(field);
+    return type === undefined ? undefined : { type, multiple: fields[field]!.multiple === true };
+  };
   const CUBE = { name: 'c', sql: 'x', measures: {}, dimensions: {} } as never;
   return (where: unknown) =>
     lowerPreviewRowFilters({ cube: 'c', measures: [], where } as unknown as AnalyticsQuery, CUBE, declaredType, undefined, declaredShape);
