@@ -2939,11 +2939,12 @@ const es = {
       resetViewTitle: "Restaura los filtros, la búsqueda, la ordenación, la agrupación, la disposición de columnas, los campos ocultos, la densidad, el diseño, el color de fila, los números de fila y la edición en línea propios de esta vista. Las vistas fijadas, los favoritos y la forma de abrir los registros no cambian. Solo cambia su lista.",
       personalized: "Personalizada",
       personalizedHeading: "Su lista difiere de esta vista en",
-      // objectstack#35955 — a list's unsaved changes: Discard and Save.
+      // objectstack#35955 — a list's unsaved changes: Reset and Update view
+      // (objectstack#36737, the view's own actions, as Twenty's).
       draft: {
-        discard: "Descartar",
+        discard: "Restablecer",
         discardTitle: "Devuelve la lista a como la define su vista: filtros, orden, agrupación, columnas y diseño. El ancho de las columnas y el alto de las filas se mantienen.",
-        save: "Guardar",
+        save: "Actualizar vista",
         heading: "Cambios sin guardar",
         partSeparator: ", ",
         saveToView: "Guardar en esta vista",
@@ -5463,6 +5464,10 @@ const es = {
         skill_one: '{{count}} habilidad de IA',
         skill_many: '{{count}} de habilidades de IA',
         skill_other: '{{count}} habilidades de IA',
+        ai_context: '{{count}} paquetes de contexto de IA',
+        ai_context_one: '{{count}} paquete de contexto de IA',
+        ai_context_many: '{{count}} de paquetes de contexto de IA',
+        ai_context_other: '{{count}} paquetes de contexto de IA',
         datasource: '{{count}} orígenes de datos',
         datasource_one: '{{count}} origen de datos',
         datasource_many: '{{count}} de orígenes de datos',

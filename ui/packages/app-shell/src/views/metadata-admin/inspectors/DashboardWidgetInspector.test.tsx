@@ -287,6 +287,70 @@ describe('DashboardWidgetInspector — dashboard filter bindings (framework#2501
 });
 
 /**
+ * objectstack#37031 — re-ticking Apply undoes an opt-out. A dashboard save
+ * stores the whole document, so a binding the box drops is the filter's own
+ * field, not the field the package re-targeted it to: re-ticking restores the
+ * binding the shipped dashboard (`shipped`, the layered read's `code`) gives
+ * this widget, and only when it ships none does the entry go.
+ */
+describe('DashboardWidgetInspector — re-ticking Apply restores the shipped binding (objectstack#37031)', () => {
+  const filters = {
+    dateRange: { field: 'issued_on', defaultRange: 'last_90_days' },
+    globalFilters: [{ name: 'region', field: 'region', label: 'Region', type: 'select', options: [{ value: 'EMEA', label: 'EMEA' }] }],
+  };
+  const shippedWith = (filterBindings: Record<string, string | false> | undefined, id = 'w1') => ({
+    ...filters,
+    widgets: [{ id, type: 'metric', title: 'Accounts Signed', ...(filterBindings ? { filterBindings } : {}) }],
+  });
+
+  function renderBound(filterBindings: Record<string, string | false>, shipped: Record<string, unknown> | null) {
+    const onPatch = vi.fn();
+    render(
+      <DashboardWidgetInspector
+        {...baseProps}
+        draft={{ ...filters, widgets: [widget({ filterBindings })] }}
+        shipped={shipped}
+        selection={{ kind: 'widget', id: 'w1' }}
+        onPatch={onPatch}
+      />,
+    );
+    const box = within(screen.getByTestId('widget-filter-binding-dateRange')).getByRole('checkbox');
+    return { onPatch, box };
+  }
+
+  const shipped = shippedWith({ dateRange: 'signed_on', region: 'sales_region' });
+
+  it('unticking writes the opt-out over the shipped re-target', () => {
+    const { onPatch, box } = renderBound({ dateRange: 'signed_on', region: 'sales_region' }, shipped);
+    expect(box).toBeChecked();
+    fireEvent.click(box);
+    expect(onPatch).toHaveBeenCalledWith({
+      widgets: [expect.objectContaining({ id: 'w1', filterBindings: { dateRange: false, region: 'sales_region' } })],
+    });
+  });
+
+  it('re-ticking an opt-out restores the field the shipped dashboard binds', () => {
+    const { onPatch, box } = renderBound({ dateRange: false, region: 'sales_region' }, shipped);
+    expect(box).not.toBeChecked();
+    fireEvent.click(box);
+    expect(onPatch).toHaveBeenCalledWith({
+      widgets: [expect.objectContaining({ id: 'w1', filterBindings: { dateRange: 'signed_on', region: 'sales_region' } })],
+    });
+  });
+
+  it('control: where the shipped widget opts out too, or ships no binding, re-ticking removes the entry', () => {
+    for (const ships of [shippedWith({ dateRange: false }), shippedWith(undefined), shippedWith({ dateRange: 'signed_on' }, 'other')]) {
+      const { onPatch, box } = renderBound({ dateRange: false, region: 'sales_region' }, ships);
+      fireEvent.click(box);
+      expect(onPatch).toHaveBeenCalledWith({
+        widgets: [expect.objectContaining({ id: 'w1', filterBindings: { region: 'sales_region' } })],
+      });
+      cleanup();
+    }
+  });
+});
+
+/**
  * The Title field's `I18nLabel` write-back (objectui#5428, under objectui#5301's
  * maintainer ruling of 2026-08-20).
  *

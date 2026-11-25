@@ -1,6 +1,6 @@
 /**
  * `defineStack` refuses two entries of one named collection that the runtime
- * would register under one identity — for the 27 collections of #22934, and
+ * would register under one identity — for the 28 collections of #22934, and
  * only those.
  *
  * Measured on main `246edf5b3` before the check existed (#22934 stage 0), each
@@ -144,6 +144,7 @@ const BATCH: readonly Row[] = [
   byName('docs', 'Doc', { name: 'dupe_doc', label: 'Doc', content: '# Doc' }),
   byName('tools', 'Tool', { name: 'dupe_tool', label: 'Tool', description: 'tool', parameters: { type: 'object', properties: {} } }),
   byName('skills', 'Skill', { name: 'dupe_skill', label: 'Skill', description: 'skill', instructions: 'x', tools: [] }),
+  byName('aiContexts', 'AI context pack', { name: 'dupe_pack', label: 'Pack', object: 'dupe_thing', fields: ['title'] }),
   {
     key: 'views',
     entry: { object: 'dupe_thing', list: listOf('dupe_thing') },
@@ -234,7 +235,7 @@ describe('defineStack - a duplicate identity inside one named collection is refu
     expect(BATCH.map((row) => row.key)).toEqual([
       'objects', 'datasources', 'pages', 'dashboards', 'reports', 'datasets', 'flows', 'jobs',
       'emailTemplates', 'books', 'positions', 'permissions', 'capabilities', 'sharingRules', 'webhooks',
-      'hooks', 'mappings', 'analyticsCubes', 'connectors', 'picklists', 'docs', 'tools', 'skills', 'views',
+      'hooks', 'mappings', 'analyticsCubes', 'connectors', 'picklists', 'docs', 'tools', 'skills', 'aiContexts', 'views',
       'apis', 'apps', 'objectExtensions',
     ]);
   });

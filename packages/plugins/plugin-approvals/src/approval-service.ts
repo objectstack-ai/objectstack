@@ -168,7 +168,9 @@ import {
   type FieldVisibilitySource,
 } from './payload-redaction.js';
 import { APPROVAL_REQUEST_CHILD_OBJECTS, type RequestVisibilitySource } from './request-read-gate.js';
-import { detailRowHeldByLockingApproval, nodeConfigLocksRecord, recordHeldByLockingApproval } from './lifecycle-hooks.js';
+import {
+  detailRowHeldByLockingApproval, detailRowsHeldByLockingApproval, nodeConfigLocksRecord, recordHeldByLockingApproval,
+} from './lifecycle-hooks.js';
 import { PendingApproverReadGrantSource, type PendingApproverReadGrants } from './pending-approver-read-grant.js';
 // The ADR-0043 pages — the ONE copy of their text, rendered by the plugin's
 // self-hosted mount and by `handleActionPage` alike.
@@ -11303,11 +11305,15 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
 
   /**
    * `IApprovalService.getRecordLocks` — {@link getRecordLock} for a page of
-   * rows, in two reads whatever the page size: the caller's read of the ids
-   * (the same #8652 anchor, one `$in` read AS THE CALLER, so an unreadable row
-   * and a missing one both answer `null` and stay indistinguishable) and one
-   * pending-request lookup judged by the record-lock hook's own judgement
-   * ({@link recordsHeldByLockingApproval}). Entry `i` answers `recordIds[i]`.
+   * rows, in a bounded number of reads whatever the page size: the caller's
+   * read of the ids (the same #8652 anchor, one `$in` read AS THE CALLER, so an
+   * unreadable row and a missing one both answer `null` and stay
+   * indistinguishable), one pending-request lookup judged by the record-lock
+   * hook's own judgement ({@link recordsHeldByLockingApproval}) and — on a
+   * detail object only — the detail-row lock's batch form
+   * ({@link detailRowsHeldByLockingApproval}: one FK read plus one lookup per
+   * `master_detail` edge), so a line of a held master answers `true` here as
+   * it does at {@link getRecordLock}. Entry `i` answers `recordIds[i]`.
    *
    * The cap is the door's to refuse loudly; here a blank id answers `null`.
    */
@@ -11329,7 +11335,12 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
     const held = readableAsked.length > 0
       ? await recordsHeldByLockingApproval(this.engine, objectName, readableAsked)
       : new Set<string>();
-    return ids.map((id) => (readableIds.has(id) ? { locked: held.has(id) } : null));
+    // The single door's second half, for the rows the first left unlocked.
+    const unheld = readableAsked.filter((id) => !held.has(id));
+    const heldByMaster = unheld.length > 0
+      ? await detailRowsHeldByLockingApproval(this.engine, objectName, unheld)
+      : new Set<string>();
+    return ids.map((id) => (readableIds.has(id) ? { locked: held.has(id) || heldByMaster.has(id) } : null));
   }
 
   async getRequest(requestId: string, context: ExecutionContext): Promise<ApprovalRequestRow | null> {

@@ -352,6 +352,88 @@ describe('only an administrator sees it', () => {
   });
 });
 
+describe('a session answered "not shown" asks nothing again on this device (objectstack#37182)', () => {
+  const listCalls = () => calls('GET', '/api/settings');
+
+  /** Opens the console again, as a new tab of the same browser does: the provider remounts, the device storage stays. */
+  async function reopen(systemPermissions: string[]) {
+    cleanup();
+    renderChecklist(systemPermissions);
+    await settle();
+  }
+
+  it('a member: the list is read on the first open and not on the next', async () => {
+    renderChecklist(MEMBER);
+    await settle();
+    expect(listCalls()).toHaveLength(1);
+    await reopen(MEMBER);
+    expect(listCalls()).toHaveLength(1);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(screen.queryByTestId('first-run-checklist')).toBeNull();
+  });
+
+  it('an owner who holds setup.write where localization asks more (the cloud control plane): one read, then none', async () => {
+    const OWNER = ['manage_org_users', 'setup.access', 'setup.write'];
+    const routed = fetchMock.getMockImplementation()!;
+    fetchMock.mockImplementation(async (url: string, init?: RequestInit) =>
+      url === '/api/settings' && (init?.method ?? 'GET') === 'GET'
+        ? ok({ manifests: [{ ...LOCALIZATION_MANIFEST, writePermission: 'manage_platform_settings' }, MAIL_MANIFEST] })
+        : routed(url, init),
+    );
+    renderChecklist(OWNER);
+    await settle();
+    expect(listCalls()).toHaveLength(1);
+    expect(calls('GET', '/api/settings/localization')).toHaveLength(0);
+    await reopen(OWNER);
+    await reopen(OWNER);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(screen.queryByTestId('first-run-checklist')).toBeNull();
+  });
+
+  it('an administrator reads on every open, and is shown the checklist each time', async () => {
+    renderChecklist(ADMIN);
+    expect(await screen.findByTestId('first-run-checklist')).toBeTruthy();
+    await reopen(ADMIN);
+    expect(await screen.findByTestId('first-run-checklist')).toBeTruthy();
+    expect(listCalls()).toHaveLength(2);
+    expect(calls('GET', '/api/settings/localization')).toHaveLength(2);
+  });
+
+  it('a changed capability set reads again: a member made an administrator is shown it at once', async () => {
+    renderChecklist(MEMBER);
+    await settle();
+    await reopen(ADMIN);
+    expect(listCalls()).toHaveLength(2);
+    expect(await screen.findByTestId('first-run-checklist')).toBeTruthy();
+  });
+
+  it('a list read that fails is no answer: the next open reads again', async () => {
+    const routed = fetchMock.getMockImplementation()!;
+    fetchMock.mockImplementation(async (url: string, init?: RequestInit) =>
+      url === '/api/settings'
+        ? ({ ok: false, status: 503, statusText: 'Service Unavailable', headers: new Headers(), json: async () => ({}) } as unknown as Response)
+        : routed(url, init),
+    );
+    renderChecklist(MEMBER);
+    await settle();
+    fetchMock.mockImplementation(routed);
+    await reopen(MEMBER);
+    expect(listCalls()).toHaveLength(2);
+  });
+
+  it('another user in the same browser reads for themself', async () => {
+    renderChecklist(MEMBER);
+    await settle();
+    AUTH.user = { id: 'u_other' };
+    try {
+      await reopen(MEMBER);
+    } finally {
+      AUTH.user = { id: 'u_admin' };
+    }
+    expect(listCalls()).toHaveLength(2);
+  });
+});
+
 describe('one required row, the basics; every other platform row optional (objectstack#36739)', () => {
   it('a fresh workspace: the basics first and required, then mail and invite, optional, each with its way in', async () => {
     renderChecklist(ADMIN);

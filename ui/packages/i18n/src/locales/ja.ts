@@ -2865,11 +2865,12 @@ const ja = {
       resetViewTitle: "このビュー本来のフィルター、検索、並べ替え、グループ、列の配置、非表示フィールド、密度、レイアウト、行の色、行番号、インライン編集に戻します。ピン留めしたビュー、お気に入り、レコードの開き方は変わりません。変わるのはあなたのリストだけです。",
       personalized: "個人設定あり",
       personalizedHeading: "このビューと異なる項目",
-      // objectstack#35955 — a list's unsaved changes: Discard and Save.
+      // objectstack#35955 — a list's unsaved changes: Reset and Update view
+      // (objectstack#36737, the view's own actions, as Twenty's).
       draft: {
-        discard: "破棄",
+        discard: "リセット",
         discardTitle: "一覧をビュー本来の状態に戻します：フィルター、並べ替え、グループ化、列、レイアウト。列幅と行の高さはそのままです。",
-        save: "保存",
+        save: "ビューを更新",
         heading: "未保存の変更",
         partSeparator: "、",
         saveToView: "このビューに保存",
@@ -5315,6 +5316,9 @@ const ja = {
         skill: 'AI スキル {{count}}',
         skill_one: 'AI スキル {{count}}',
         skill_other: 'AI スキル {{count}}',
+        ai_context: 'AI コンテキストパック {{count}}',
+        ai_context_one: 'AI コンテキストパック {{count}}',
+        ai_context_other: 'AI コンテキストパック {{count}}',
         datasource: 'データソース {{count}}',
         datasource_one: 'データソース {{count}}',
         datasource_other: 'データソース {{count}}',
