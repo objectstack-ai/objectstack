@@ -18,7 +18,7 @@ import {
 } from '@objectstack/spec/ai';
 import type { AIToolDefinition } from '@objectstack/spec/contracts';
 import { isMultiValueField, resolveDisplayField, resolveRecordDisplayName } from '@objectstack/spec/data';
-import { boundedText, headingsOf, isHtmlBodyType, sectionOf, RECORD_CONTEXT_BODY_MAX_CHARS } from './body-outline.js';
+import { boundedOutline, boundedText, headingsOf, isHtmlBodyType, sectionOf, RECORD_CONTEXT_BODY_MAX_CHARS } from './body-outline.js';
 import type { RecordContextDoor } from './door.js';
 import {
   fieldMapOf,
@@ -469,6 +469,9 @@ export async function executeGetRecordContext(input: unknown, door: RecordContex
     const text = typeof raw === 'string' ? raw : '';
     const base = { field: bodyField, label: labelOf(def, bodyField) };
     const headings = headingsOf(text, isHtmlBodyType(def.type));
+    // The cap bounds the listing, not which sections exist: a section call
+    // resolves its anchor against every heading, listed or not.
+    const listed = args.anchor === undefined && text.length > RECORD_CONTEXT_BODY_MAX_CHARS ? boundedOutline(headings) : undefined;
     if (args.anchor !== undefined) {
       const section = sectionOf(text, headings, args.anchor);
       if (section === undefined) throw anchorUnresolved();
@@ -477,10 +480,17 @@ export async function executeGetRecordContext(input: unknown, door: RecordContex
       if (bounded.truncated) notes.push({ kind: 'body_truncated', text: say.bodyTruncated(bodyField) });
     } else if (text.length <= RECORD_CONTEXT_BODY_MAX_CHARS) {
       body = { ...base, text };
-    } else if (headings.length > 0) {
-      body = { ...base, outline: headings.map(({ anchor, heading, level }) => ({ anchor, heading, level })) };
+    } else if (listed && listed.outline.length > 0) {
+      body = { ...base, outline: listed.outline };
       notes.push({ kind: 'body_outline', text: say.bodyOutline(bodyField) });
+      if (listed.omitted > 0) {
+        notes.push({
+          kind: 'outline_truncated',
+          text: say.outlineTruncated(bodyField, listed.outline.length, headings.length),
+        });
+      }
     } else {
+      // No headings, or none short enough to list within the bound.
       const bounded = boundedText(text);
       body = { ...base, text: bounded.text, truncated: true };
       notes.push({ kind: 'body_truncated', text: say.bodyTruncated(bodyField) });

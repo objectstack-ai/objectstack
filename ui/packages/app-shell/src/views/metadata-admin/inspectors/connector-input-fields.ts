@@ -81,6 +81,12 @@ import * as React from 'react';
 import { jsonSchemaToFlowFields } from './json-schema-to-fields.js';
 import type { FlowConfigField } from './flow-node-config.js';
 import { apiBase } from '../previews/useFlowNodePalette.js';
+import { createAuthenticatedFetch } from '@object-ui/auth';
+
+/** The console's authenticated fetch: the stored bearer token beside the session cookie. */
+function authFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+  return createAuthenticatedFetch()(input, init);
+}
 
 /** Where a connector node's mapped inputs live on the node (spec-structured). */
 export const CONNECTOR_INPUT_PATH: readonly string[] = ['connectorConfig', 'input'];
@@ -322,7 +328,7 @@ export function useConnectorRegistry(enabled: boolean): unknown[] {
     const controller = new AbortController();
     (async () => {
       try {
-        const res = await fetch(`${apiBase()}/automation/connectors`, {
+        const res = await authFetch(`${apiBase()}/automation/connectors`, {
           credentials: 'include',
           headers: { Accept: 'application/json' },
           signal: controller.signal,

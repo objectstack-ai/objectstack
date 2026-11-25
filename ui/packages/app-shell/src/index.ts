@@ -97,6 +97,19 @@ export {
   type SidebarFooterSlotPlace,
 } from './layout/sidebarFooterSlot.js';
 
+// objectstack#37150 — the shell sidebar's place for an app's docs navigation,
+// drawn by the console's docs pages (the provider and the target are the
+// shell's side, mounted by `ConsoleLayout` and `UnifiedSidebar`); and the page
+// header's two shell slots (the top-right button group and the sidebar's
+// expand button), for a docs page, which draws no `ConsolePageHeader`.
+export {
+  SidebarDocsNav,
+  SidebarDocsNavSlotProvider,
+  SidebarDocsNavTarget,
+  useSidebarDocsNavSlot,
+} from './layout/sidebarDocsNavSlot.js';
+export { useShellPageActionsSlot, useShellSidebarExpandSlot } from './layout/shellPageActionsSlot.js';
+
 // Host-app route policy (ADR-0048) — which app's `/apps/<segment>/…` URL a
 // framework-owned, app-INDEPENDENT page should build, and the two predicates it
 // is defined in terms of. Published from the package root (objectui#4280)
@@ -353,6 +366,9 @@ export {
 export { useInvitationSignUpJoin, type InvitationSignUpJoin } from './console/auth/invitationSignUpJoin.js';
 export { ForgotPasswordPage as DefaultForgotPasswordPage } from './console/auth/ForgotPasswordPage.js';
 export { HomeLayout as DefaultHomeLayout, HomeLayout } from './console/home/HomeLayout.js';
+// objectstack#37197 — the docs portal's frame: the app-less shell from 768 px up.
+export { DocsPortalShell } from './console/docs/DocsPortalShell.js';
+export type { DocsPortalShellProps } from './console/docs/DocsPortalShell.js';
 export { HomePage as DefaultHomePage, HomePage } from './console/home/HomePage.js';
 // Whether the signed-in person has connected an AI assistant (or holds a
 // working API key), and where Connect an AI Assistant opens: the one read and

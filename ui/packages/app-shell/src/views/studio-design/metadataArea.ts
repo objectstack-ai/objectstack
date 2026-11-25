@@ -35,6 +35,7 @@
  */
 
 import { CATALOG_SCOPE_PARAM, ENVIRONMENT_SCOPE } from '../metadata-admin/catalog-scope.js';
+import { DESIGNER_SURFACE_PARAM, parseSurfaceParam } from '../metadata-admin/nav-selection.js';
 import {
   STUDIO_ALL_PACKAGES_SEGMENT,
   STUDIO_ITEM_PILLAR,
@@ -44,9 +45,11 @@ import {
   studioMetadataAreaAddress,
   studioMetadataAreaRoot,
   studioMetadataItemAddress,
+  studioMetadataTypePath,
   studioPillarItemAddress,
   type StudioPillarKey,
 } from './studioAddress.js';
+import { DESIGNER_SURFACE_NAV_PARAM, DESIGNER_SURFACE_VIEW_PARAM } from './useSurfaceDeepLink.js';
 import { isStudioOrgScope, studioOrgScopePath } from './studioScope.js';
 
 // objectstack#36895 — the area's segments are Studio address vocabulary, owned
@@ -107,19 +110,29 @@ export function areaItemPillarPath(input: {
 }): string | null {
   const pillar = studioItemPillar(input.type);
   if (!pillar || !input.packageId) return null;
-  if (input.search.get(CATALOG_SCOPE_PARAM) === ENVIRONMENT_SCOPE) return null;
-  if (input.search.get(STUDIO_ITEM_REVIEW_PARAM) === STUDIO_ITEM_REVIEW_VALUE) return null;
+  if (areaItemAsksGenericPage(input.search)) return null;
   return studioPillarItemPath(input.packageId, pillar, { type: input.type, name: input.name });
 }
 
 /**
- * objectstack#36905 (Studio redesign epic #36890) — the types whose item, on a
- * package's leg, opens its designer full-screen in the area rather than the
- * generic item page: the permission set's matrix
- * (`StudioPermissionSetPage`). A designer card adds its type here in the PR
- * that deletes the type's row from `STUDIO_ITEM_PILLAR`.
+ * The query that asks an item's generic page on a package's leg, whatever its
+ * type opens otherwise: the environment scope (its catalog item is the
+ * environment's, by name) and `?review=1` (the draft review the console's
+ * review links name).
  */
-export const AREA_DESIGNER_PAGE_TYPES: readonly string[] = Object.freeze(['permission']);
+export function areaItemAsksGenericPage(search: URLSearchParams): boolean {
+  return search.get(CATALOG_SCOPE_PARAM) === ENVIRONMENT_SCOPE || search.get(STUDIO_ITEM_REVIEW_PARAM) === STUDIO_ITEM_REVIEW_VALUE;
+}
+
+/**
+ * objectstack#36905, objectstack#36904 (Studio redesign epic #36890) — the
+ * types whose item, on a package's leg, opens its designer full-screen in the
+ * area rather than the generic item page: the permission set's matrix
+ * (`StudioPermissionSetPage`) and the object designer (`DataPillar` on one
+ * object). A designer card adds its type here in the PR that deletes the
+ * type's row from `STUDIO_ITEM_PILLAR`.
+ */
+export const AREA_DESIGNER_PAGE_TYPES: readonly string[] = Object.freeze(['permission', 'object']);
 
 /**
  * Whether an item of the area opens its full-screen designer page: a
@@ -153,6 +166,27 @@ export function areaDesignerItemOf(pathname: string, segment: string | null | un
   } catch {
     return null;
   }
+}
+
+/**
+ * objectstack#36904 — where the retired Data pillar's address lands
+ * (`/studio/<package>/data`, Studio's old home): the object designer of the
+ * object its `?surface=object:<name>` names, or else the package's object
+ * list. The pillar's own qualifiers go (`?surface=`, and `?view=` and `?nav=`,
+ * which opened nothing on an object); everything else is kept verbatim —
+ * `?action=` (the designer opens its Actions tab on it) and `?changes=review`
+ * (the server's draft review link, `studioChangesReviewLink`).
+ *
+ * `search` is the URL's query, with or without its `?`.
+ */
+export function dataPillarRedirect(packageId: string, search: string): string {
+  const params = new URLSearchParams(search);
+  const target = parseSurfaceParam(params.get(DESIGNER_SURFACE_PARAM));
+  for (const key of [DESIGNER_SURFACE_PARAM, DESIGNER_SURFACE_VIEW_PARAM, DESIGNER_SURFACE_NAV_PARAM]) params.delete(key);
+  if (target?.type === 'object' && target.name) return studioMetadataItemAddress(packageId, 'object', target.name, { query: params });
+  const list = studioMetadataTypePath(packageId, 'object');
+  const query = params.toString();
+  return query ? `${list}?${query}` : list;
 }
 
 /**

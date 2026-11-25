@@ -40,6 +40,12 @@ import {
 } from './sharedUserFeeds.js';
 import { useInboxArrivalNotifier } from './useInboxArrivalNotifier.js';
 import type { InboxNotification } from '../layout/inboxGrouping.js';
+import { createAuthenticatedFetch } from '@object-ui/auth';
+
+/** The console's authenticated fetch: the stored bearer token beside the session cookie. */
+function authFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+  return createAuthenticatedFetch()(input, init);
+}
 
 /**
  * Write read receipts through the framework's dedicated REST surface
@@ -50,7 +56,7 @@ import type { InboxNotification } from '../layout/inboxGrouping.js';
  */
 export async function postInboxReadReceipts(subPath: 'read' | 'read/all', notificationIds?: string[]): Promise<void> {
   const serverUrl = (import.meta.env?.VITE_SERVER_URL || '').replace(/\/$/, '');
-  await fetch(`${serverUrl}/api/v1/notifications/${subPath}`, {
+  await authFetch(`${serverUrl}/api/v1/notifications/${subPath}`, {
     method: 'POST',
     credentials: 'include',
     // Bearer too — see utils/authToken (#2548 split-origin fix).

@@ -270,9 +270,10 @@ export class KnowledgeServicePlugin implements Plugin {
         // half-claimed, and stays so until a real object source justifies the
         // adapter-enumeration surface it would need (#4606's enforced-first
         // rule). Reporting it accurately is the whole job of this branch.
-        // An explicit reindexSource refreshes the rows that still exist and
-        // match; it removes no documents, so a predicate DELETE stays stale
-        // until the index purge (#37096) — the warning says so.
+        // A complete reindexSource refreshes the rows that still exist and
+        // match and, over an adapter that lists its documents, purges the
+        // documents of rows that are gone or no longer match — the warning
+        // says so, and names the adapter case it cannot repair.
         if (type === 'data.records.updated' || type === 'data.records.deleted') {
           const matched = payload.matched;
           ctx.logger.warn?.(
@@ -282,9 +283,10 @@ export class KnowledgeServicePlugin implements Plugin {
               'may now be stale and cannot be repaired from the event stream. ' +
               'Retention-sweep deletes are covered separately: the lifecycle reap guard de-indexes those rows ' +
               'before they are deleted; ' +
-              'application-level predicate writes are not. An explicit reindexSource refreshes the documents of rows ' +
-              'that still exist and match; it removes none, so the documents of deleted rows stay in the index ' +
-              'until an index purge removes them.',
+              'application-level predicate writes are not. A complete reindexSource (no limit, no dryRun) refreshes ' +
+              'the documents of rows that still exist and match, and purges the documents of rows that are gone or ' +
+              'no longer match when the source\'s adapter lists its documents; over an adapter that does not, they ' +
+              'stay in the index.',
             { object, type, matched },
           );
           return;

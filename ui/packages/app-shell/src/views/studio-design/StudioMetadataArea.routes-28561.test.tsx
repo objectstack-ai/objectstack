@@ -74,6 +74,12 @@ vi.mock('./StudioPermissionSetPage.js', () => ({
 /** `GET /api/v1/packages` as the listed manifests read it: one writable, one read-only, one kernel. */
 let listed: Map<string, { id: string; name: string; writable: boolean; manifest: Record<string, unknown> }>;
 let listFails = false;
+// objectstack#36904 — the object designer, stubbed: only where the area mounts it is under test.
+vi.mock('./DataPillar.js', () => ({
+  DataPillar: (props: { packageId: string; objectName: string; readOnly?: boolean }) => (
+    <div data-testid="object-designer" data-package={props.packageId} data-object={props.objectName} data-readonly={String(!!props.readOnly)} />
+  ),
+}));
 vi.mock('./packages-io.js', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   fetchListedPackageManifests: vi.fn(async () => {
@@ -294,7 +300,6 @@ describe("a read-only base's create opens in its .custom pair (objectstack#36897
 
 describe('a pillar type opened from the area opens its pillar', () => {
   for (const [type, pillar] of [
-    ['object', 'data'],
     ['flow', 'automations'],
   ] as const) {
     it(`${type} → ${pillar}, with \`?surface=\``, async () => {
@@ -305,6 +310,31 @@ describe('a pillar type opened from the area opens its pillar', () => {
       expect(url.searchParams.get('surface')).toBe(`${type}:item_1`);
     });
   }
+
+  // objectstack#36904 — an object opens its designer on its own address.
+  it('an object opens the object designer on its own address, bound to the package', async () => {
+    mount(`/studio/${WRITABLE}/metadata/object/item_1?package=${WRITABLE}`);
+    const designer = await screen.findByTestId('object-designer');
+    expect(designer).toHaveAttribute('data-package', WRITABLE);
+    expect(designer).toHaveAttribute('data-object', 'item_1');
+    expect(designer).toHaveAttribute('data-readonly', 'false');
+    expect(new URL(where(), 'http://x').pathname).toBe(`/studio/${WRITABLE}/metadata/object/item_1`);
+  });
+
+  // objectstack#36904 — the object's old history address is its designer's History tab.
+  it("an object's history address opens its designer on the History tab, the query kept", async () => {
+    mount(`/studio/${WRITABLE}/metadata/object/item_1/history?package=${WRITABLE}`);
+    const designer = await screen.findByTestId('object-designer');
+    expect(designer).toHaveAttribute('data-object', 'item_1');
+    expect(where()).toBe(`/studio/${WRITABLE}/metadata/object/item_1?package=${WRITABLE}&tab=history`);
+    expect(screen.queryByTestId('area-page')).toBeNull();
+  });
+
+  it('CONTROL: an object under `?review=1` keeps the generic page and its draft review', async () => {
+    mount(`/studio/${WRITABLE}/metadata/object/item_1?package=${WRITABLE}&review=1`);
+    expect((await page()).page).toBe('item');
+    expect(screen.queryByTestId('object-designer')).toBeNull();
+  });
 
   it('a type no pillar designs opens the generic page', async () => {
     mount(`/studio/${WRITABLE}/metadata/agent/support_bot?package=${WRITABLE}`);

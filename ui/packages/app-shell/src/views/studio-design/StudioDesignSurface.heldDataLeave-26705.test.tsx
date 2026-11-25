@@ -10,6 +10,8 @@
  * with no question. Now the surface folds the held edit into the guard a dirty
  * pillar already raises (the leave confirm, the shell's link guard and
  * `beforeunload`), and the rail asks before it opens another object.
+ * objectstack#36904 — the designer has no rail: another object is another
+ * address, so × back to the list is the departure pinned here beside the menu.
  *
  * Rendered through the REAL `StudioDesignSurface` on the real route shape; the
  * field is added the way the pillar offers it (`dataPillarAddField`).
@@ -73,8 +75,10 @@ vi.mock('../../preview/DraftChangesPanel', () => ({ DraftChangesPanel: () => nul
 // The source under test reaches a dynamic import of `@objectstack/lint`: its first
 // load is paid here, at collection, never inside a case's clock (`check:test-source-alias`).
 import '@objectstack/lint';
+import '@object-ui/plugin-detail';
 import { StudioDesignSurface } from './StudioDesignSurface';
 import { addFieldFromFormToolbar } from './__tests__/dataPillarAddField';
+import { pressStudioSave } from './__tests__/studioSaveHarness';
 import { createEmptyDataSource } from './__tests__/emptyDataSource';
 import { registerBuiltinInspectors } from '../metadata-admin/inspectors';
 import { t } from '../metadata-admin/i18n';
@@ -120,6 +124,7 @@ beforeEach(() => {
     overlayScope: null,
     effective: type === 'object' && OBJECTS[name] ? JSON.parse(JSON.stringify(OBJECTS[name])) : null,
   }));
+  mockClient.save.mockImplementation(async () => ({ success: true }));
   confirmSpy = vi.fn();
   window.confirm = confirmSpy as unknown as typeof window.confirm;
 });
@@ -130,28 +135,31 @@ afterEach(() => {
   window.history.replaceState(null, '', '/');
 });
 
-/** The object the header names: its title's tooltip (objectstack#34794). */
+/** The object the header names: its machine name beside the label (objectstack#36904). */
 async function openObjectIs(name: string): Promise<void> {
   await waitFor(
-    () => expect(within(screen.getByTestId('data-object-header')).getByRole('heading', { level: 1 })).toHaveAttribute('title', name),
+    () => expect(within(screen.getByTestId('data-object-header')).getAllByTestId('studio-item-api-name')[0]).toHaveTextContent(name),
     { timeout: 8000 },
   );
 }
 
-async function openTask(): Promise<void> {
+async function openTask(name = 'acme_task'): Promise<void> {
   // The shell's link guard reads the window's URL to skip a link to the page
   // already shown; `BrowserRouter` keeps the two equal, so this does too.
-  window.history.replaceState(null, '', `/studio/${PKG}/data`);
+  // objectstack#36904 — the object designer is the object's address.
+  const at = `/studio/${PKG}/metadata/object/${name}?package=${PKG}`;
+  window.history.replaceState(null, '', at);
   render(
-    <MemoryRouter initialEntries={[`/studio/${PKG}/data`]}>
+    <MemoryRouter initialEntries={[at]}>
       <Routes>
-        <Route path="/studio/:packageId/:tab" element={<StudioDesignSurface />} />
-        {/* objectstack#36899 — a menu type entry opens that type's area list. */}
-        <Route path="/studio/:packageId/metadata/*" element={<output data-testid="area-landed" />} />
+        {/* objectstack#36899 — a menu type entry opens that type's area list; × the object list. */}
+        <Route path="/studio/:packageId/metadata/flow" element={<output data-testid="area-landed" />} />
+        <Route path="/studio/:packageId/metadata/object" element={<output data-testid="list-landed" />} />
+        <Route path="/studio/:packageId/metadata/*" element={<StudioDesignSurface area="metadata" />} />
       </Routes>
     </MemoryRouter>,
   );
-  await openObjectIs('acme_task');
+  await openObjectIs(name);
 }
 
 /** The card's repro: add a Picklist "Priority" with no option yet; the autosave holds it. */
@@ -170,7 +178,8 @@ function reloadAsks(): boolean {
 
 /** objectstack#36899 — the left menu's entry for a type: a link to that type's area list. */
 const menuEntry = (type: string) => within(screen.getByTestId('studio-menu')).getByTestId(`studio-menu-entry-type:${type}`);
-const railRow = (label: string) => within(screen.getByTestId('studio-rail-data')).getByRole('button', { name: label });
+/** × of the designer's header: back to the object list. */
+const closeDesigner = () => fireEvent.click(within(screen.getByTestId('data-object-header')).getAllByTestId('studio-detail-close')[0]);
 
 describe('a held Data field guards every departure (objectstack#26705)', () => {
   it('leaving the pillar through the menu asks; Cancel keeps the held field, OK leaves and clears the guard', async () => {
@@ -182,7 +191,7 @@ describe('a held Data field guards every departure (objectstack#26705)', () => {
     expect(confirmSpy).toHaveBeenCalledTimes(1);
     expect(confirmSpy).toHaveBeenCalledWith(LEAVE_QUESTION);
     expect(screen.getByTestId('studio-held')).toBeInTheDocument();
-    expect(screen.getByTestId('studio-rail-data')).toBeInTheDocument();
+    expect(screen.getByTestId('data-object-header')).toBeInTheDocument();
 
     confirmSpy.mockReturnValueOnce(true);
     fireEvent.click(menuEntry('flow'));
@@ -192,26 +201,22 @@ describe('a held Data field guards every departure (objectstack#26705)', () => {
     expect(reloadAsks()).toBe(false);
   });
 
-  it('opening another object in the rail asks; Cancel keeps the held field, OK opens the other object', async () => {
+  it('× back to the list asks; Cancel keeps the held field, OK leaves for the list', async () => {
     await openTask();
     await holdAPicklist();
 
     confirmSpy.mockReturnValueOnce(false);
-    fireEvent.click(railRow('Note'));
+    closeDesigner();
     expect(confirmSpy).toHaveBeenCalledTimes(1);
     expect(confirmSpy).toHaveBeenCalledWith(LEAVE_QUESTION);
     await openObjectIs('acme_task');
     expect(screen.getByTestId('studio-held')).toBeInTheDocument();
 
-    // Re-picking the open object drops nothing, so it asks nothing.
-    fireEvent.click(railRow('Task'));
-    expect(confirmSpy).toHaveBeenCalledTimes(1);
-
     confirmSpy.mockReturnValueOnce(true);
-    fireEvent.click(railRow('Note'));
+    closeDesigner();
     expect(confirmSpy).toHaveBeenCalledTimes(2);
-    await openObjectIs('acme_note');
-    expect(screen.queryByTestId('studio-held')).toBeNull();
+    await screen.findByTestId('list-landed');
+    expect(reloadAsks()).toBe(false);
   });
 
   it('a reload asks while the field is held', async () => {
@@ -222,14 +227,118 @@ describe('a held Data field guards every departure (objectstack#26705)', () => {
   });
 
   // CONTROL: nothing held, nothing asked.
-  it('with no edit held, the rail, the reload and the menu link never ask', async () => {
+  it('with no edit held, the reload and the menu link never ask', async () => {
     await openTask();
 
-    fireEvent.click(railRow('Note'));
-    await openObjectIs('acme_note');
     expect(reloadAsks()).toBe(false);
     fireEvent.click(menuEntry('flow'));
     await screen.findByTestId('area-landed');
     expect(confirmSpy).not.toHaveBeenCalled();
+  });
+});
+
+/*
+ * objectstack#27511, objectstack#36511 — an edit the top bar's Save has not
+ * sent, or whose Save was refused, is unsaved work too (`saveBar.dirty` in the
+ * surface's `unsavedPillarWork`): the designer's departures ask before they
+ * drop it, and a saved edit leaves nothing to ask about. objectstack#36904 —
+ * the rail's object switch these cases pinned is the designer's › (the next
+ * object, by name with no list context: Note, then Task) and its ×.
+ */
+describe('an unsaved Data edit guards the designer\'s × and › (objectstack#27511, objectstack#36511)', () => {
+  const next = () => fireEvent.click(within(screen.getByTestId('data-object-header')).getAllByTestId('studio-detail-next')[0]);
+  const nextReady = () =>
+    waitFor(() => expect(within(screen.getByTestId('data-object-header')).getAllByTestId('studio-detail-next')[0]).toBeEnabled(), {
+      timeout: 8000,
+    });
+  /** A Text field: complete as added, so nothing is held; it waits for Save. */
+  async function addUnsavedField(): Promise<void> {
+    fireEvent.click(await screen.findByRole('button', { name: 'Field layout' }));
+    await addFieldFromFormToolbar();
+    await screen.findByTestId('studio-save', undefined, { timeout: 8000 });
+    expect(screen.queryByTestId('studio-held')).toBeNull();
+  }
+
+  it('› over an unsaved edit asks and sends nothing; declined, the edit stays; agreed, Task opens', async () => {
+    await openTask('acme_note');
+    await nextReady();
+    await addUnsavedField();
+
+    confirmSpy.mockReturnValueOnce(false);
+    next();
+    expect(confirmSpy).toHaveBeenCalledTimes(1);
+    expect(confirmSpy).toHaveBeenCalledWith(LEAVE_QUESTION);
+    await openObjectIs('acme_note');
+    expect(screen.getByTestId('studio-save')).toBeInTheDocument();
+    expect(reloadAsks()).toBe(true);
+
+    confirmSpy.mockReturnValueOnce(true);
+    next();
+    expect(confirmSpy).toHaveBeenCalledTimes(2);
+    await openObjectIs('acme_task');
+    expect(mockClient.save).not.toHaveBeenCalled();
+  });
+
+  it('× over an unsaved edit asks; Cancel keeps it, OK leaves for the list', async () => {
+    await openTask('acme_note');
+    await addUnsavedField();
+
+    confirmSpy.mockReturnValueOnce(false);
+    closeDesigner();
+    expect(confirmSpy).toHaveBeenCalledTimes(1);
+    expect(confirmSpy).toHaveBeenCalledWith(LEAVE_QUESTION);
+    await openObjectIs('acme_note');
+
+    confirmSpy.mockReturnValueOnce(true);
+    closeDesigner();
+    await screen.findByTestId('list-landed');
+    expect(mockClient.save).not.toHaveBeenCalled();
+  });
+
+  it('an edit whose Save was refused is not dropped silently: › asks, and a declined ask keeps it', async () => {
+    mockClient.save.mockImplementation(async () => {
+      throw Object.assign(new Error('The server refused this draft.'), { status: 500 });
+    });
+    await openTask('acme_note');
+    await nextReady();
+    await addUnsavedField();
+    await pressStudioSave();
+    expect(mockClient.save).toHaveBeenCalledTimes(1);
+
+    confirmSpy.mockReturnValueOnce(false);
+    next();
+    expect(confirmSpy).toHaveBeenCalledTimes(1);
+    expect(confirmSpy).toHaveBeenCalledWith(LEAVE_QUESTION);
+    await openObjectIs('acme_note');
+    expect(reloadAsks()).toBe(true);
+
+    confirmSpy.mockReturnValueOnce(true);
+    next();
+    await openObjectIs('acme_task');
+    expect(mockClient.save).toHaveBeenCalledTimes(1);
+  });
+
+  // CONTROL: a saved edit is the stored object; nothing is left to ask about.
+  it('a saved edit leaves at once: › opens Task with no question', async () => {
+    await openTask('acme_note');
+    await nextReady();
+    await addUnsavedField();
+    await pressStudioSave();
+    expect(mockClient.save).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(reloadAsks()).toBe(false), { timeout: 8000 });
+
+    next();
+    await openObjectIs('acme_task');
+    expect(confirmSpy).not.toHaveBeenCalled();
+  });
+
+  // CONTROL: nothing pending, nothing asked, nothing sent.
+  it('with nothing pending, › opens Task at once and sends nothing', async () => {
+    await openTask('acme_note');
+    await nextReady();
+    next();
+    await openObjectIs('acme_task');
+    expect(confirmSpy).not.toHaveBeenCalled();
+    expect(mockClient.save).not.toHaveBeenCalled();
   });
 });

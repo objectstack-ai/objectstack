@@ -16,6 +16,9 @@
  * from the grid's authoring context the way the real grid draws it.
  */
 
+// Paid at collection, not inside a case's clock (check:test-source-alias).
+import '@objectstack/lint';
+import '@object-ui/plugin-detail';
 import '@testing-library/jest-dom/vitest';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 // Module scope as well as in the `vi.mock` factory below: the cold transform is paid
@@ -90,7 +93,7 @@ afterEach(() => {
 async function openForm(props: { readOnly?: boolean } = {}) {
   render(
     <MemoryRouter initialEntries={['/studio/com.example.showcase/data']}>
-      <DataPillar packageId="com.example.showcase" readOnly={props.readOnly} />
+      <DataPillar objectName="showcase_account" packageId="com.example.showcase" readOnly={props.readOnly} />
     </MemoryRouter>,
   );
   await waitFor(() => expect(screen.getByTestId('records-panel')).toBeInTheDocument(), { timeout: 8000 });

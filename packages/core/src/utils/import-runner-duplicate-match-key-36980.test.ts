@@ -227,3 +227,83 @@ describe('the blank and multi-value match-key row refusals read in the request l
     expect(s.results[0]).toMatchObject({ code: 'BLANK_MATCH_KEY', error: '缺少匹配键:邮箱; 电话 + company [email; phone + company]' });
   });
 });
+
+/**
+ * [#37157] The `AMBIGUOUS_MATCH` row refusal (a row whose match key finds more
+ * than one stored record) reads the same way: the `import_ambiguous_match`
+ * catalog entry in the request locale, naming the key set the row was matched
+ * by in field LABELS. It used to be the English sentence `matchFields matched
+ * more than one <object API name> record`. The row keeps its shape and code.
+ */
+describe('[#37157] the ambiguous-match row refusal reads in the request language', () => {
+  const ambMeta = (labels: { email?: string; company?: string }) => new Map<string, ExportFieldMeta>([
+    ['email', { name: 'email', type: 'email', ...(labels.email !== undefined ? { label: labels.email } : {}) }],
+    ['company', { name: 'company', type: 'text', ...(labels.company !== undefined ? { label: labels.company } : {}) }],
+  ]);
+  /** Every lookup answers two stored records, so every row is ambiguous. */
+  const ambiguousProtocol = (): ImportProtocolLike => ({
+    findData: vi.fn(async () => [{ id: 'a1' }, { id: 'a2' }]),
+    createData: vi.fn(),
+    updateData: vi.fn(),
+  });
+  const run = (opts: {
+    p?: ImportProtocolLike;
+    locale?: string;
+    labels: { email?: string; company?: string };
+    matchFields?: string[];
+    translate?: ValidationMessageTranslator;
+  }) =>
+    runImport({
+      p: opts.p ?? ambiguousProtocol(),
+      objectName: OBJECT,
+      context: (opts.locale ? { locale: opts.locale } : {}) as any,
+      rows: [{ email: 'ada@example.com', company: 'Acme' }] as any,
+      metaMap: ambMeta(opts.labels),
+      ...(opts.translate ? { translate: opts.translate } : {}),
+      writeMode: 'upsert',
+      matchFields: opts.matchFields ?? ['email'],
+      dryRun: true,
+      runAutomations: false,
+      trimWhitespace: true,
+      createMissingOptions: false,
+      skipBlankMatchKey: false,
+    });
+  const EN = 'The match key (Email) matches more than one record, so the row was not written: '
+    + 'match on fields whose values identify one record';
+
+  it('zh-CN: the sentence is the zh-CN catalog entry, naming the key by its label', async () => {
+    const p = ambiguousProtocol();
+    const s = await run({ p, locale: 'zh-CN', labels: { email: '邮箱' } });
+    expect(s).toMatchObject({ ok: 0, errors: 1 });
+    const r = s.results[0]!;
+    // The row keeps its shape and its code: no new member.
+    expect(Object.keys(r).sort()).toEqual(['action', 'code', 'error', 'ok', 'row']);
+    expect(r).toMatchObject({ row: 1, ok: false, action: 'failed', code: 'AMBIGUOUS_MATCH' });
+    expect(r.error).toBe('匹配键(邮箱)匹配到多条记录,因此该行未写入:请改用取值能唯一确定一条记录的字段匹配');
+    expect(p.createData).not.toHaveBeenCalled();
+    expect(p.updateData).not.toHaveBeenCalled();
+  });
+
+  it('en: the English sentence names the key by its label, never matchFields or the API names', async () => {
+    const s = await run({ locale: 'en', labels: { email: 'Email' } });
+    expect(s.results[0]!.error).toBe(EN);
+  });
+
+  it('no locale on the context reads English', async () => {
+    const s = await run({ labels: { email: 'Email' } });
+    expect(s.results[0]!.error).toBe(EN);
+  });
+
+  it('a key set of several fields names each label; a field with no label falls back to its API name', async () => {
+    const s = await run({ locale: 'zh-CN', labels: { email: '邮箱' }, matchFields: ['email', 'company'] });
+    expect(s.results[0]!.error).toBe('匹配键(邮箱 + company)匹配到多条记录,因此该行未写入:请改用取值能唯一确定一条记录的字段匹配');
+  });
+
+  it("a deployment's `validation.field.import_ambiguous_match` override wins, filled with the labels and the API names", async () => {
+    const translate: ValidationMessageTranslator = (key, locale) =>
+      key === 'validation.field.import_ambiguous_match' && locale === 'zh-CN'
+        ? '多条记录的 {{label}} [{{field}}] 相同' : key;
+    const s = await run({ locale: 'zh-CN', labels: { email: '邮箱', company: '公司' }, matchFields: ['email', 'company'], translate });
+    expect(s.results[0]!.error).toBe('多条记录的 邮箱 + 公司 [email + company] 相同');
+  });
+});

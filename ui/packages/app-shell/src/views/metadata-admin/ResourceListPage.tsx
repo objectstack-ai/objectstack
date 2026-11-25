@@ -1224,6 +1224,10 @@ function DefaultMetadataList({ type, appName }: { type: string; appName?: string
             packageId={host.packageId}
             inPair={createInPair}
             locale={locale}
+            onOpenExisting={(path) => {
+              setCreateOpen(false);
+              navigate(path);
+            }}
             onCreated={({ name, packageId }) => {
               setCreateOpen(false);
               refresh();

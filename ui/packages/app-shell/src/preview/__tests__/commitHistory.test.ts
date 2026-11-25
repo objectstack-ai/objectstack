@@ -42,7 +42,7 @@ afterEach(() => {
 
 /** A response whose body is JSON. */
 function jsonResponse(status: number, body: unknown) {
-  return { ok: status >= 200 && status < 300, status, json: async () => body };
+  return { headers: new Headers(), ok: status >= 200 && status < 300, status, json: async () => body };
 }
 
 /**
@@ -51,7 +51,7 @@ function jsonResponse(status: number, body: unknown) {
  */
 function unparseableResponse(status: number) {
   return {
-    ok: false,
+    headers: new Headers(), ok: false,
     status,
     json: async () => {
       throw new SyntaxError('Unexpected token < in JSON at position 0');

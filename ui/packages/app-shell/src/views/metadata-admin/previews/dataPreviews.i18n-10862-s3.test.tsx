@@ -151,6 +151,9 @@ import type { ObjectFieldInfo } from './useObjectFields';
 // namespace, whose `zh` catalogue is fetched on demand (objectstack#25922).
 // Resident before any case, so the zh rows below read synchronously.
 import { loadStudioCatalogue } from '@object-ui/i18n/namespaces/studio';
+// The source under test reaches a dynamic `import('@objectstack/lint')`: pay its load at
+// collection, never inside a case's clocked window (`check:test-source-alias`).
+import '@objectstack/lint';
 await loadStudioCatalogue('zh');
 
 const realFetch = globalThis.fetch;
@@ -278,7 +281,7 @@ function expectHint(lang: Lang, key: string, vars?: Vars) {
 }
 
 /** A `fetch` answer carrying only the `json()` the previews read. */
-const answer = (body: unknown) => ({ ok: true, json: async () => body }) as unknown as Response;
+const answer = (body: unknown) => ({ headers: new Headers(), ok: true, json: async () => body }) as unknown as Response;
 
 // ─── ObjectPreview ───────────────────────────────────────────────────────────
 
