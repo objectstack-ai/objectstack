@@ -548,6 +548,7 @@ const NOT_A_GATE: Readonly<Record<string, readonly string[]>> = {
   'Not ours — a Node builtin, a global, an oclif base or a third-party namespace': [
     'dirname',
     'String',
+    'Set',
     'path',
     'fs',
     'chalk',
