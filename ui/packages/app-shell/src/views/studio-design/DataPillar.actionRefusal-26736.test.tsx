@@ -132,6 +132,7 @@ vi.mock('@object-ui/react', async (importOriginal) => {
 
 // The source reaches a dynamic import of it: its first load is paid at collection (`check:test-source-alias`).
 import '@objectstack/lint';
+import '@object-ui/plugin-detail';
 import { DataPillar } from './StudioDesignSurface';
 import { StudioSaveHarness, pressStudioSave } from './__tests__/studioSaveHarness';
 import { createEmptyDataSource } from './__tests__/emptyDataSource';
@@ -153,7 +154,7 @@ async function mountOnView(def: Record<string, unknown>, tabKey: string): Promis
   objectDef = def;
   render(
     <StudioSaveHarness><MemoryRouter initialEntries={['/studio/com.example.showcase/data']}>
-      <DataPillar packageId="com.example.showcase" />
+      <DataPillar objectName="showcase_task" packageId="com.example.showcase" />
     </MemoryRouter></StudioSaveHarness>,
   );
   // The first match is the flat tab (the passthrough menu draws a second).

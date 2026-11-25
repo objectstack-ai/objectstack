@@ -142,6 +142,7 @@ vi.mock('@object-ui/plugin-form', async (importOriginal) => {
 
 // The source reaches a dynamic `import('@objectstack/lint')`: its first load is paid at collection (`check:test-source-alias`).
 import '@objectstack/lint';
+import '@object-ui/plugin-detail';
 import { DataPillar } from './StudioDesignSurface';
 import { addFieldFromFormToolbar } from './__tests__/dataPillarAddField';
 
@@ -172,7 +173,7 @@ function Harness(): React.ReactElement {
       <button type="button" data-testid="rerender" onClick={() => force((n) => n + 1)}>
         rerender
       </button>
-      <DataPillar packageId="com.example.showcase" />
+      <DataPillar objectName="showcase_task" packageId="com.example.showcase" />
     </MemoryRouter>
   );
 }

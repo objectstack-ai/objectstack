@@ -230,7 +230,8 @@ test('a read-only base is customized, restored and extended through Studio, and 
     });
 
     await test.step(`Add ${FIELD.name}: an extension in the pair, served on the base object`, async () => {
-      await page.goto(`/studio/${BASE}/data?surface=${encodeURIComponent(`object:${OBJECT}`)}`);
+      // objectstack#36904 — the object designer, on the object's own address.
+      await page.goto(`/studio/${BASE}/metadata/object/${encodeURIComponent(OBJECT)}`);
       await page.getByTestId('data-object-header').getByRole('button', { name: 'Field layout', exact: true }).click();
       await page.getByTestId('data-form-add-extension-field').click();
       await page.getByTestId('add-field-label-input').fill(FIELD.label);

@@ -107,6 +107,8 @@ function renderAt(path: string, surface: React.ReactElement = <StudioDesignSurfa
     <MemoryRouter initialEntries={[path]}>
       <Routes>
         <Route path="/studio" element={<div data-testid="studio-landing" />} />
+        {/* objectstack#36904 — `/data` lands on the area's object list. */}
+        <Route path="/studio/:packageId/metadata/*" element={React.cloneElement(surface as React.ReactElement<{ area?: 'metadata' }>, { area: 'metadata' })} />
         <Route path="/studio/:packageId/:tab" element={surface} />
       </Routes>
     </MemoryRouter>,

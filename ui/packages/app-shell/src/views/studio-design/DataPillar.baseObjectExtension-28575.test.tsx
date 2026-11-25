@@ -148,6 +148,7 @@ vi.mock('@object-ui/plugin-view', async (importOriginal) => {
 // The console's preview and authoring code loads `@objectstack/lint` lazily;
 // warmed here so its first load is paid at import, not inside a test's clock.
 import '@objectstack/lint';
+import '@object-ui/plugin-detail';
 import { DataPillar, type StudioBaseCustomization } from './StudioDesignSurface';
 import { ObjectExtensionSchema } from '@objectstack/spec/data';
 import { StudioSaveHarness, pressStudioSave } from './__tests__/studioSaveHarness';
@@ -213,7 +214,7 @@ afterEach(() => {
 async function renderBase(over: Partial<StudioBaseCustomization> = {}) {
   render(
     <StudioSaveHarness><MemoryRouter initialEntries={[`/studio/${BASE}/data`]}>
-      <DataPillar packageId={BASE} readOnly customization={customizationOf(over)} />
+      <DataPillar objectName={OBJECT} packageId={BASE} readOnly customization={customizationOf(over)} />
     </MemoryRouter></StudioSaveHarness>,
   );
   await waitFor(() => expect(screen.getByTestId('records-panel')).toBeInTheDocument(), { timeout: 8000 });
@@ -459,7 +460,7 @@ describe('CONTROL: a writable package’s add-field is unchanged (objectstack#28
   it('a plain name into the object’s own body, and a fully editable inspector', async () => {
     render(
       <StudioSaveHarness><MemoryRouter initialEntries={['/studio/com.example.showcase/data']}>
-        <DataPillar packageId="com.example.showcase" />
+        <DataPillar objectName={OBJECT} packageId="com.example.showcase" />
       </MemoryRouter></StudioSaveHarness>,
     );
     await waitFor(() => expect(screen.getByTestId('records-panel')).toBeInTheDocument(), { timeout: 8000 });
@@ -542,7 +543,7 @@ describe('the object header says where a base object’s extension is saved (obj
   it('CONTROL: an object of a writable package says nothing of the kind', async () => {
     render(
       <StudioSaveHarness><MemoryRouter initialEntries={['/studio/com.example.showcase/data']}>
-        <DataPillar packageId="com.example.showcase" />
+        <DataPillar objectName={OBJECT} packageId="com.example.showcase" />
       </MemoryRouter></StudioSaveHarness>,
     );
     await waitFor(() => expect(screen.getByTestId('records-panel')).toBeInTheDocument(), { timeout: 8000 });
