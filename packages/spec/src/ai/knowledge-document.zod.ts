@@ -2,6 +2,7 @@
 
 import { z } from 'zod';
 import { lazySchema } from '../shared/lazy-schema';
+import { retiredKey } from '../shared/retired-key';
 
 /**
  * Knowledge Document / Chunk / Hit — canonical shapes shared by every
@@ -43,8 +44,25 @@ export const KnowledgeChunkSchema = lazySchema(() => z.object({
    */
   headingPath: z.array(z.string()).optional()
     .describe('Headings the chunk sits under, outermost first (markdown strategy)'),
-  /** Optional metadata override (falls back to the document's). */
-  metadata: z.record(z.string(), z.unknown()).optional(),
+  /**
+   * Tombstoned, not deleted: `KnowledgeChunkSchema` is not `.strict()`, so a
+   * plain deletion would let a caller keep writing `metadata`, parse clean and
+   * lose the value in silence. `retiredKey()` turns that into a rejection
+   * carrying the fix, in both channels an author meets: `tsc` (the input type
+   * is `never`) and the parse.
+   *
+   * Retired under ADR-0049 enforce-or-remove, as ADR-0161 K8 item 5 asks of
+   * #37098: the key had no producer and no reader. The service's splitter
+   * never sets per-passage metadata, and no adapter read one — a passage's
+   * metadata is its document's `metadata`, which every adapter already stores
+   * beside each passage.
+   */
+  metadata: retiredKey(
+    '`KnowledgeChunk.metadata` was removed in @objectstack/spec 18 (ADR-0049, ADR-0161 K8) — ' +
+    'nothing ever wrote or read it: the knowledge service cuts the passages and sets no ' +
+    'per-passage metadata, and no adapter consulted one. Delete the key. A passage takes its ' +
+    "document's `metadata` (`KnowledgeDocument.metadata`), which is what adapters filter on.",
+  ),
 }));
 
 /**
