@@ -255,7 +255,8 @@ describe('the group labels (objectstack#37201)', () => {
       'studio-menu-advanced-group-system',
       'studio-menu-advanced-group-security',
     ]);
-    expect(within(screen.getByTestId('studio-menu-advanced-group-security')).getAllByRole('link').map((a) => a.getAttribute('data-testid'))).toEqual([
+    // Inside the closed fold: out of the accessibility tree until it opens.
+    expect(within(screen.getByTestId('studio-menu-advanced-group-security')).getAllByRole('link', { hidden: true }).map((a) => a.getAttribute('data-testid'))).toEqual([
       'studio-menu-entry-owd',
       'studio-menu-entry-environment',
     ]);

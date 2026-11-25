@@ -46,7 +46,6 @@ import {
   SidebarMenuButton,
   SidebarMenuItem,
   SidebarProvider,
-  SidebarSeparator,
   useSidebar,
 } from '@object-ui/components';
 import {
@@ -312,7 +311,7 @@ function StudioMenuBody({
           {folded && renderGroups(tiers.common, 'common')}
           {folded && tiers.advanced.length > 0 && (
             <>
-              <SidebarSeparator className="my-1" />
+              <div aria-hidden="true" data-testid="studio-menu-advanced-divider" className="mx-2 my-1 h-px bg-sidebar-border" />
               <div className="px-2 py-1">
                 <button
                   type="button"
