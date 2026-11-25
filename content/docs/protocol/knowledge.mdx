@@ -519,14 +519,16 @@ service. It takes the service's passages, embeds them with the kernel's
 `embedder` service (or the `embedder` it is given), and answers a search by
 an exact scan.
 
-- **Which database.** The platform database when that is PostgreSQL
-  (`OS_DATABASE_URL`), else the `url` option. Its own small pool (`poolMax`,
-  default 4); no pooled connection waits on the embedder. Where organizations
+- **Which database.** The `url` option when it is given, else the platform
+  database when that is PostgreSQL (`OS_DATABASE_URL`). Its own small pool
+  (`poolMax`, default 4; a connection that takes more than
+  `connectTimeoutMs`, default 5000, fails); no pooled connection waits on the
+  embedder. Where organizations
   have databases of their own, the store is still the ONE database the
   plugin connects to; organizations are kept apart by its
   `organization_id` column, which every search filters on before ranking.
 - **Where the tables are.** In their own schema, `os_knowledge` (option
-  `schema`): `knowledge_generation`, one row per source and fingerprint, and
+  `schema`): `knowledge_generation`, one row per source and generation, and
   one passage table per vector width, `knowledge_vec_d<width>`. Object
   tables live in the connection's own schema, and the platform's drift
   checks read only that one — so no store table can collide with an object
@@ -535,8 +537,11 @@ an exact scan.
   the right to create it — or the right to create the schema, the plugin
   still registers and boot goes on: it creates nothing, warns with the SQL a
   database owner runs (`CREATE EXTENSION IF NOT EXISTS vector;` and the
-  schema's DDL), `healthCheck` answers `ok: false`, and every call answers
-  `SERVICE_UNAVAILABLE` until the SQL has run. No restart is needed after.
+  schema's DDL), `healthCheck` answers `ok: false` with that SQL, and every
+  call answers `SERVICE_UNAVAILABLE` until the SQL has run. No restart is
+  needed after. A database it cannot reach is reported as unreachable, with
+  no SQL. A caller reads one sentence; the driver's text and the SQL go only
+  to the operator — the health check, the boot warning and the log.
 - **Search.** An exact scan by cosine distance, so any width works —
   including a 3072-wide model. The organization filter and the metadata
   `filter` (equality per key) run in the same `WHERE`, before ranking.
@@ -546,8 +551,11 @@ an exact scan.
   not embedded again; its row's metadata is rewritten.
 - **Rebuilds.** A changed fingerprint is refused (§3.6). This store does not
   yet build a second generation beside the first: `beginBuild` under a new
-  fingerprint is refused with the SQL that clears the source, after which a
-  complete reindex builds it afresh.
+  fingerprint is refused, and the reindex result carries the exact
+  statements that clear the source — one `DELETE` per passage table, then
+  the generation row — after which a complete reindex builds it afresh. A
+  first generation never takes over passage rows left behind without a
+  generation row: they are deleted when it opens.
 - **An approximate index is an operator's step.** The store creates no
   HNSW or IVFFlat index; add one by hand when a table outgrows an exact scan
   (`CREATE INDEX ON os_knowledge.knowledge_vec_d1536 USING hnsw (embedding

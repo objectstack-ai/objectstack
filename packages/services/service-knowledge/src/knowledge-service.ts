@@ -258,11 +258,15 @@ export class KnowledgeService implements IKnowledgeService {
    * documents were cut by. Never cached: the settings, the descriptor and the
    * object definition may each change between two calls.
    */
-  private async planIndex(source: KnowledgeSource, adapter: IKnowledgeAdapter): Promise<IndexPlan> {
+  private async planIndex(
+    source: KnowledgeSource,
+    adapter: IKnowledgeAdapter,
+    chunkTarget: () => Promise<number | undefined> = () => this.readChunkTarget(),
+  ): Promise<IndexPlan> {
     const split = adapter.capabilities?.chunks === true
       ? resolveSplit({
         split: source.source.kind === 'object' ? (source.source as ObjectKnowledgeSource).split : undefined,
-        chunkTarget: await this.readChunkTarget(),
+        chunkTarget: await chunkTarget(),
         maxInputTokens: adapter.embedding?.maxInputTokens,
       })
       : undefined;
@@ -536,7 +540,7 @@ export class KnowledgeService implements IKnowledgeService {
           purged: null,
           failed: 0,
           failures: [],
-          message: `reindex of source '${source.id}' refused: the adapter did not begin the build (${errorText(err)}); nothing was written.`,
+          message: `reindex of source '${source.id}' refused: the adapter did not begin the build, and nothing was written. ${operatorText(err)}`,
         };
       }
     }
@@ -626,7 +630,7 @@ export class KnowledgeService implements IKnowledgeService {
         try {
           await adapter.upsert(prepared.ready, ctx);
         } catch (err) {
-          return stopped(`the adapter upsert failed: ${errorText(err)}`);
+          return stopped(`the adapter upsert failed: ${operatorText(err)}`);
         }
       }
       // A document the split cannot index is removed — an older passage of it
@@ -636,7 +640,7 @@ export class KnowledgeService implements IKnowledgeService {
         try {
           await adapter.delete(prepared.failed.map((f) => f.documentId), ctx);
         } catch (err) {
-          return stopped(`removing the page's documents that cannot be indexed failed: ${errorText(err)}`);
+          return stopped(`removing the page's documents that cannot be indexed failed: ${operatorText(err)}`);
         }
         for (const f of prepared.failed) {
           failed += 1;
@@ -740,7 +744,7 @@ export class KnowledgeService implements IKnowledgeService {
         ok: false,
         message:
           `reindex of source '${source.id}' walked every page, but the adapter did not complete the build ` +
-          `(${errorText(err)}).${done.message === undefined ? '' : ` ${done.message}`}`,
+          `(${operatorText(err)}).${done.message === undefined ? '' : ` ${done.message}`}`,
       };
     }
   }
@@ -816,20 +820,18 @@ export class KnowledgeService implements IKnowledgeService {
    * is not logged and dropped like a failure: the sources that can be searched
    * answer, and when NONE can, the call is refused whole — this method throws
    * a coded error naming each refused source with its code. When some answer,
-   * the hits are theirs and the refused sources are logged at `warn`; the
+   * the hits are theirs. A source that answers the first round and refuses the
+   * refill is refused for the whole search, its first-round hits dropped: no
+   * source is both answered and named as refused. A refused source is named
+   * with its code and the adapter's one-sentence message; the adapter's
+   * `remedy`, operator text such as the SQL to run, goes to the `warn` log
+   * with it and never to the caller. The
    * return type of `IKnowledgeService.search` has no place to name them, so a
    * caller that must name them to its own caller (the `search_knowledge` tool)
    * reads {@link searchWithRefusals}.
    */
   async search(query: string, opts: KnowledgeSearchOptions = {}): Promise<KnowledgeHit[]> {
-    const report = await this.searchWithRefusals(query, opts);
-    if (report.refused.length > 0) {
-      this.options.logger?.warn?.(
-        `[knowledge] ${report.refused.length} source(s) refused this search and were not searched: ` +
-          report.refused.map((r) => `'${r.sourceId}' (${r.code}: ${r.message})`).join('; '),
-      );
-    }
-    return report.hits;
+    return (await this.searchWithRefusals(query, opts)).hits;
   }
 
   /**
@@ -890,6 +892,7 @@ export class KnowledgeService implements IKnowledgeService {
         return widened(source) && answer !== undefined && answer.answered >= firstAsk(source);
       });
       if (saturated.length > 0) {
+        const refusedBefore = refused.length;
         const refill = await this.searchRound(query, saturated, () => topK * SEARCH_REFILL_FACTOR, opts.filter, refused);
         // A refilled source's second answer is a superset of its first: its
         // first-round survivors are dropped and the whole answer re-checked.
@@ -899,6 +902,14 @@ export class KnowledgeService implements IKnowledgeService {
         const firstKept = kept.filter((hit) => refill.has(hit.sourceId)).length;
         kept = [...kept.filter((hit) => !refill.has(hit.sourceId)), ...refilledKept];
         removed += refilledHits.length - refilledKept.length - (firstRaw - firstKept);
+        // A source that refused the refill (its index changed between the two
+        // rounds) is refused for the whole search: its first-round hits are
+        // dropped, so no source is both answered and named as refused.
+        const refusedInRefill = new Set(refused.slice(refusedBefore).map((r) => r.sourceId));
+        if (refusedInRefill.size > 0) {
+          kept = kept.filter((hit) => !refusedInRefill.has(hit.sourceId));
+          if ([...first.keys()].every((id) => refusedInRefill.has(id))) throw wholeRefusal(refused);
+        }
       }
     }
 
@@ -1141,13 +1152,16 @@ export class KnowledgeService implements IKnowledgeService {
     admitted: Array<{ source: KnowledgeSource; organizationIds?: string[] }>,
   ): Promise<SearchTarget[]> {
     const out: SearchTarget[] = [];
+    // The settings page's chunk target, read at most once for the whole search.
+    let target: Promise<number | undefined> | undefined;
+    const chunkTarget = (): Promise<number | undefined> => (target ??= this.readChunkTarget());
     for (const entry of admitted) {
       const adapter = this.adapters.get(entry.source.adapter);
       if (!adapter) {
         out.push(entry);
         continue;
       }
-      const plan = await this.planIndex(entry.source, adapter);
+      const plan = await this.planIndex(entry.source, adapter, chunkTarget);
       out.push({ ...entry, fingerprint: plan.index.fingerprint });
     }
     return out;
@@ -1203,7 +1217,12 @@ export class KnowledgeService implements IKnowledgeService {
       } catch (err) {
         const coded = codedRefusalOf(err);
         if (coded !== undefined) {
+          // The caller reads the code and the adapter's one-sentence message;
+          // the operator reads its remedy (the SQL to run, say) here.
           refused.push({ sourceId: source.id, ...coded });
+          this.options.logger?.warn?.(
+            `[knowledge] source '${source.id}' refused this search and was not searched (${coded.code}): ${operatorText(err)}`,
+          );
           continue;
         }
         this.options.logger?.error?.(
@@ -1933,7 +1952,7 @@ async function listAdapterDocuments(
       cursor = page.nextCursor;
     }
   } catch (err) {
-    return { ok: false, reason: errorText(err) };
+    return { ok: false, reason: operatorText(err) };
   }
 }
 
@@ -2018,7 +2037,7 @@ export async function purgeDocuments(input: PurgeDocumentsInput): Promise<PurgeD
       if (deleted) outcome.purged++;
       else outcome.kept++;
     } catch (err) {
-      outcome.failure = `document '${documentId}': ${errorText(err)}`;
+      outcome.failure = `document '${documentId}': ${operatorText(err)}`;
       return outcome;
     }
   }
@@ -2077,6 +2096,17 @@ function describeValue(value: unknown): string {
 /** A thrown value's text: an `Error`'s message, anything else as a string. */
 function errorText(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
+}
+
+/**
+ * An adapter error as an operator reads it: its message, then its `remedy`
+ * when it carries one — operator text such as the SQL to run, which an adapter
+ * keeps out of the message (ADR-0161 K7, rule 5). For a reindex result and the
+ * log; a search caller reads the message alone.
+ */
+function operatorText(err: unknown): string {
+  const remedy = err !== null && typeof err === 'object' ? (err as { remedy?: unknown }).remedy : undefined;
+  return typeof remedy === 'string' && remedy !== '' ? `${errorText(err)} ${remedy}` : errorText(err);
 }
 
 /** A record id the event sync can re-read by: a non-empty string or a finite number. */

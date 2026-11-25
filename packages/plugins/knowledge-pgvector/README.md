@@ -23,21 +23,24 @@ kernel.use(new KnowledgePgvectorPlugin());
 | `url` | the platform database | A `postgres://` URL. Absent: `OS_DATABASE_URL` (else the legacy `DATABASE_URL`) when it is PostgreSQL. |
 | `schema` | `'os_knowledge'` | The schema the store's tables live in. |
 | `poolMax` | `4` | Connections in the store's own pool. |
+| `connectTimeoutMs` | `5000` | How long a new connection may take before it fails; boot waits on the store's first check. |
 | `queryPrefix` | `''` | Text put before every query before it is embedded (BGE's `'Represent this sentence for searching relevant passages: '`). Passages are embedded as they are. |
 | `embedder` | the kernel's `embedder` service | The embedder to call. |
 
 ## Which database, and where
 
-The store is in ONE database: the platform's when that is PostgreSQL, else the `url` given. Where organizations have databases of their own, the store is still that one database; organizations are kept apart by the `organization_id` column, which every search filters on in SQL before ranking.
+The store is in ONE database: the `url` given, else the platform's when that is PostgreSQL. Where organizations have databases of their own, the store is still that one database; organizations are kept apart by the `organization_id` column, which every search filters on in SQL before ranking.
 
 Its tables are in their own schema, `os_knowledge` — never the connection's own schema, where object tables live and which the platform's schema-drift checks read:
 
 - `knowledge_generation` — one row per source and generation: the index fingerprint it was built under, the recipe hash, the vector width, the model.
 - `knowledge_vec_d<width>` — one passage table per vector width (`knowledge_vec_d1536`, `knowledge_vec_d3072`, …), created the first time a width is written.
 
+Rows are keyed by source id. Two deployments that share one database — staging and production, say — must each set their own `schema`, or a source id they both use would be one index.
+
 ## Setup when the connection may not create them
 
-On boot the plugin creates the `vector` extension (if it is missing and the connection may), the schema and the generation table. When it cannot, the plugin still registers and boot goes on: it warns with the SQL to run, its `healthCheck` answers `ok: false`, and every call answers `SERVICE_UNAVAILABLE` until a database owner has run:
+On boot the plugin creates the `vector` extension (if it is missing and the connection may), the schema and the generation table. When it cannot, the plugin still registers and boot goes on: it warns with the SQL to run, its `healthCheck` answers `ok: false` with that SQL, and every call answers `SERVICE_UNAVAILABLE` (one sentence; the SQL and the driver's text go only to the health check, the boot warning and the log) until a database owner has run:
 
 ```sql
 CREATE EXTENSION IF NOT EXISTS vector;
@@ -45,7 +48,7 @@ CREATE SCHEMA IF NOT EXISTS "os_knowledge";
 -- and the generation table, as the warning prints it
 ```
 
-The next call retries; no restart is needed.
+The next call retries; no restart is needed. A database the plugin cannot reach is reported as unreachable, with the driver's error and no SQL.
 
 ## An approximate index is an operator's step
 
@@ -59,7 +62,7 @@ pgvector's HNSW index takes at most 2,000 dimensions (`vector` type); a 3072-wid
 
 ## Rebuilds
 
-Every source's index is built under one index fingerprint (the embedding model and dimensions, the split, the content list — ADR-0161 K7). A write or a search under another fingerprint is refused `KNOWLEDGE_REBUILD_REQUIRED` (409) and never served from the stored vectors. This store does not yet build a second generation beside the first: when the fingerprint changes, a complete reindex is refused with the SQL that clears the source; run it, and reindex.
+Every source's index is built under one index fingerprint (the embedding model and dimensions, the split, the content list — ADR-0161 K7). A write or a search under another fingerprint is refused `KNOWLEDGE_REBUILD_REQUIRED` (409) and never served from the stored vectors. This store does not yet build a second generation beside the first: when the fingerprint changes, a complete reindex is refused, and its result carries the exact statements that clear the source — one `DELETE` per passage table, then the generation row. Run them as printed, and reindex. A first generation never takes over passage rows left without a generation row: they are deleted when it opens, so deleting only the generation row cannot carry old vectors into the new index.
 
 A passage whose text is unchanged is not embedded again on a reindex.
 

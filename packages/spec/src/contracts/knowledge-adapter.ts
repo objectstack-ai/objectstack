@@ -238,7 +238,11 @@ export interface IKnowledgeAdapter {
 
   /**
    * What the adapter reports about the embedder it calls (ADR-0161 K8,
-   * item 6). Read by the service at use, never cached from `init`.
+   * item 6). Read by the service at use, never cached from `init`. It may be
+   * absent for a moment — an embedder service not yet registered — and the
+   * fingerprint the service computes then carries no model or dimensions; an
+   * adapter that needs an embedder answers `SERVICE_UNAVAILABLE` in that
+   * window rather than comparing that fingerprint with its index's.
    */
   readonly embedding?: AdapterEmbeddingDescriptor;
 
@@ -283,8 +287,14 @@ export interface IKnowledgeAdapter {
    * opens and the walk rebuilds inside that generation; when it differs, the
    * adapter opens a generation for it, or takes up the one it already has
    * under construction for that fingerprint — or, when it cannot, refuses
-   * with a coded refusal and the walk does not run. The adapter keeps one
-   * builder per source.
+   * with a coded refusal and the walk does not run. An adapter that opens
+   * generations keeps one builder per source; one that does not build a
+   * second generation beside the first refuses a new fingerprint here.
+   *
+   * A coded refusal's `message` is one sentence a search caller may read.
+   * Operator text — what went wrong in the database, the SQL to run — goes in
+   * the error's `remedy` string, which the service shows in a reindex result
+   * and its log, never to a search caller.
    */
   beginBuild?(ctx: AdapterContext): Promise<void>;
 

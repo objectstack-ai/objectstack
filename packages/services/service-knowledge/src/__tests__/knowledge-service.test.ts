@@ -332,6 +332,56 @@ describe('KnowledgeService — reindex', () => {
     expect(adapter.upsertSpy).not.toHaveBeenCalled();
   });
 
+  it('a refused beginBuild stops a complete reindex before any listing or write: ok:false, the remedy carried', async () => {
+    const find = vi.fn(async () => [{ id: 'r1', title: 'T1', notes: 'N1' }]);
+    const listDocuments = vi.fn(async () => ({ documents: [] }));
+    const completeBuild = vi.fn(async () => undefined);
+    const adapter = Object.assign(makeAdapter('memory'), {
+      listDocuments,
+      completeBuild,
+      beginBuild: vi.fn(async () => {
+        throw Object.assign(new Error("Knowledge source 's1' needs a rebuild."), {
+          code: 'KNOWLEDGE_REBUILD_REQUIRED',
+          status: 409,
+          remedy: 'DELETE FROM "os_knowledge"."knowledge_generation" WHERE source_id = \'s1\';',
+        });
+      }),
+    });
+    const svc = new KnowledgeService({ dataEngine: { find } as unknown as IDataEngine });
+    svc.registerAdapter('memory', adapter);
+    svc.registerSource(objectSource('s1', 'task'));
+    const res = await svc.reindexSource('s1');
+    expect(res).toMatchObject({ ok: false, indexed: 0, purged: null });
+    expect(res.message).toContain('needs a rebuild');
+    expect(res.message).toContain('DELETE FROM');
+    expect(listDocuments).not.toHaveBeenCalled();
+    expect(find).not.toHaveBeenCalled();
+    expect(adapter.upsertSpy).not.toHaveBeenCalled();
+    expect(adapter.deleteSpy).not.toHaveBeenCalled();
+    expect(completeBuild).not.toHaveBeenCalled();
+  });
+
+  it('a completeBuild that throws turns a complete reindex into ok:false, though every page was written', async () => {
+    const find = vi.fn(async (_obj: string, query: { where?: unknown }) =>
+      (query.where === undefined ? [{ id: 'r1', title: 'T1', notes: 'N1' }] : []));
+    const adapter = Object.assign(makeAdapter('memory'), {
+      listDocuments: vi.fn(async () => ({ documents: [] })),
+      beginBuild: vi.fn(async () => undefined),
+      completeBuild: vi.fn(async () => {
+        throw new Error('the generation row could not be written');
+      }),
+    });
+    const svc = new KnowledgeService({ dataEngine: { find } as unknown as IDataEngine });
+    svc.registerAdapter('memory', adapter);
+    svc.registerSource(objectSource('s1', 'task'));
+    const res = await svc.reindexSource('s1');
+    expect(res).toMatchObject({ ok: false, indexed: 1 });
+    expect(res.message).toContain('did not complete the build');
+    expect(res.message).toContain('the generation row could not be written');
+    expect(adapter.upsertSpy).toHaveBeenCalledOnce();
+    expect(adapter.completeBuild).toHaveBeenCalledOnce();
+  });
+
   it('returns ok:false when no dataEngine is bound', async () => {
     const svc = new KnowledgeService();
     svc.registerAdapter('memory', makeAdapter('memory'));

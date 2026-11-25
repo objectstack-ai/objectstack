@@ -2,16 +2,17 @@
 
 /**
  * Without a database that can hold the store, nothing is created, every call
- * answers a readable `SERVICE_UNAVAILABLE` naming the SQL to run by hand,
- * `healthCheck` answers `ok: false`, and boot goes on (card #37100). Runs
- * everywhere: the database is a double that answers like PostgreSQL without
- * the `vector` extension and without the right to create it.
+ * answers a readable `SERVICE_UNAVAILABLE` — one sentence for the caller, the
+ * SQL to run by hand in its operator `remedy` — `healthCheck` answers
+ * `ok: false` with that SQL, and boot goes on (card #37100). Runs everywhere:
+ * the database is a double that answers like PostgreSQL without the `vector`
+ * extension and without the right to create it.
  */
 
 import { describe, expect, it, vi } from 'vitest';
 import type { PluginContext } from '@objectstack/core';
 import type { KnowledgeSource } from '@objectstack/spec/ai';
-import { KNOWLEDGE_SERVICE } from '@objectstack/spec/contracts';
+import { EMBEDDER_SERVICE, KNOWLEDGE_SERVICE } from '@objectstack/spec/contracts';
 import {
   KnowledgePgvectorPlugin,
   PgvectorKnowledgeAdapter,
@@ -53,13 +54,18 @@ describe('knowledge-pgvector when the database is not ready', () => {
 
     const err = await adapter.upsert([{ id: 'd1', sourceId: 's1', content: 'x' }], ctx).then(
       () => undefined,
-      (e: unknown) => e as { code?: string; status?: number; message: string },
+      (e: unknown) => e as { code?: string; status?: number; message: string; remedy?: string },
     );
     expect(err).toMatchObject({ code: 'SERVICE_UNAVAILABLE', status: 503 });
     expect(err?.message).toContain("'vector' extension (pgvector) is not installed");
-    expect(err?.message).toContain('permission denied');
-    expect(err?.message).toContain('CREATE EXTENSION IF NOT EXISTS vector;');
-    expect(err?.message).toContain('CREATE SCHEMA IF NOT EXISTS "os_knowledge";');
+    // The caller's sentence carries no driver text, no SQL, no schema name …
+    expect(err?.message).not.toContain('permission denied');
+    expect(err?.message).not.toContain('CREATE');
+    expect(err?.message).not.toContain('os_knowledge');
+    // … the operator's remedy carries all three.
+    expect(err?.remedy).toContain('permission denied');
+    expect(err?.remedy).toContain('CREATE EXTENSION IF NOT EXISTS vector;');
+    expect(err?.remedy).toContain('CREATE SCHEMA IF NOT EXISTS "os_knowledge";');
     await expect(adapter.search('x', { source, topK: 3 })).rejects.toMatchObject({ code: 'SERVICE_UNAVAILABLE' });
     await expect(adapter.listDocuments(ctx, { limit: 5 })).rejects.toMatchObject({ code: 'SERVICE_UNAVAILABLE' });
 
@@ -75,13 +81,63 @@ describe('knowledge-pgvector when the database is not ready', () => {
     expect(db.statements.some((s) => s.startsWith('CREATE SCHEMA IF NOT EXISTS "os_knowledge"'))).toBe(true);
   });
 
-  it('with no database at all, every call says why', async () => {
+  it('with no database at all, every call says so, and the operator reads why', async () => {
     const adapter = new PgvectorKnowledgeAdapter({ embedder: new FakeEmbedder(), unavailable: 'the platform database (OS_DATABASE_URL) is not PostgreSQL.' });
     await expect(adapter.search('x', { source, topK: 3 })).rejects.toMatchObject({
       code: 'SERVICE_UNAVAILABLE',
-      message: expect.stringContaining('OS_DATABASE_URL'),
+      message: expect.stringContaining('has no PostgreSQL database'),
+      remedy: expect.stringContaining('OS_DATABASE_URL'),
     });
-    expect((await adapter.healthCheck()).ok).toBe(false);
+    const health = await adapter.healthCheck();
+    expect(health.ok).toBe(false);
+    expect(health.message).toContain('OS_DATABASE_URL');
+  });
+
+  it('an unreachable database is said to be unreachable, never a missing extension, and no SQL is offered', async () => {
+    const pool: PgPoolLike = {
+      query: async () => {
+        throw new Error('connect ECONNREFUSED 10.1.2.3:5432');
+      },
+      connect: async () => {
+        throw new Error('connect ECONNREFUSED 10.1.2.3:5432');
+      },
+    };
+    const adapter = new PgvectorKnowledgeAdapter({ pool, embedder: new FakeEmbedder() });
+    const err = await adapter.search('x', { source, topK: 3 }).then(
+      () => undefined,
+      (e: unknown) => e as { code?: string; message: string; remedy?: string },
+    );
+    expect(err).toMatchObject({ code: 'SERVICE_UNAVAILABLE' });
+    expect(err?.message).toContain('cannot reach its PostgreSQL database');
+    expect(err?.message).not.toContain('extension');
+    expect(err?.message).not.toContain('10.1.2.3');
+    expect(err?.remedy).toContain('ECONNREFUSED');
+    expect(err?.remedy).not.toContain('CREATE');
+    const health = await adapter.healthCheck();
+    expect(health).toMatchObject({ ok: false, message: expect.stringContaining('ECONNREFUSED') });
+  });
+
+  it('with no embedder, a search is SERVICE_UNAVAILABLE, never a rebuild refusal of a healthy index', async () => {
+    // A ready store holding one generation, searched under a fingerprint that
+    // differs only because the embedder (model, width) is not registered yet.
+    const pool: PgPoolLike = {
+      query: async <R>(text: string) => {
+        if (text.includes('FROM pg_extension')) return { rows: [{ schema: 'public', version: '0.8.7' }] as R[] };
+        if (text.includes('SELECT generation, fingerprint')) {
+          return { rows: [{ generation: 1, fingerprint: 'fp-with-model', recipe_hash: null, dim: 384 }] as R[] };
+        }
+        return { rows: [] as R[] };
+      },
+      connect: async () => {
+        throw new Error('no transaction expected');
+      },
+    };
+    const adapter = new PgvectorKnowledgeAdapter({ pool, embedder: () => undefined });
+    await expect(adapter.search('x', { source, topK: 3, index: { fingerprint: 'fp-without-model' } })).rejects.toMatchObject({
+      code: 'SERVICE_UNAVAILABLE',
+      status: 503,
+      message: expect.stringContaining('no embedder'),
+    });
   });
 
   it('the plugin registers the adapter and boot goes on, warning with the SQL', async () => {
@@ -99,6 +155,25 @@ describe('knowledge-pgvector when the database is not ready', () => {
     expect(registered).toEqual(['pgvector']);
     expect(warn).toHaveBeenCalledWith(expect.stringContaining('not ready'));
     expect(warn.mock.calls[0][0]).toContain('is not PostgreSQL');
+    await plugin.destroy();
+  });
+
+  it("the plugin reads the kernel's embedder at each call, so a re-registered one is reported at once", async () => {
+    let embedder = new FakeEmbedder(384, 'model-one');
+    let adapter: PgvectorKnowledgeAdapter | undefined;
+    const ctx = {
+      getService: (name: string) => {
+        if (name === KNOWLEDGE_SERVICE) return { registerAdapter: (_id: string, a: PgvectorKnowledgeAdapter) => { adapter = a; } };
+        if (name === EMBEDDER_SERVICE) return embedder;
+        throw new Error(`no service ${name}`);
+      },
+      logger: { warn: vi.fn(), info: vi.fn() },
+    } as unknown as PluginContext;
+    const plugin = new KnowledgePgvectorPlugin({ env: {} });
+    await plugin.start(ctx);
+    expect(adapter?.embedding).toEqual({ dimensions: 384, model: 'model-one' });
+    embedder = new FakeEmbedder(1536, 'model-two');
+    expect(adapter?.embedding).toEqual({ dimensions: 1536, model: 'model-two' });
     await plugin.destroy();
   });
 

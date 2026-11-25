@@ -11,16 +11,22 @@ export interface KnowledgePgvectorPluginOptions {
   /** Adapter id, the value of `KnowledgeSource.adapter`. @default 'pgvector' */
   id?: string;
   /**
-   * The PostgreSQL URL of the store. Absent: the platform database's URL
-   * (`OS_DATABASE_URL`, else the legacy `DATABASE_URL`) when it is a
-   * PostgreSQL one. Absent both, the adapter registers and answers every call
-   * `SERVICE_UNAVAILABLE`, saying so.
+   * The PostgreSQL URL of the store; when given, it is used. Absent: the
+   * platform database's URL (`OS_DATABASE_URL`, else the legacy
+   * `DATABASE_URL`) when it is a PostgreSQL one. Absent both, the adapter
+   * registers and answers every call `SERVICE_UNAVAILABLE`, saying so.
    */
   url?: string;
   /** The schema the store's tables live in. @default 'os_knowledge' */
   schema?: string;
   /** Connections in the store's own pool. @default 4 */
   poolMax?: number;
+  /**
+   * How long a new connection may take before it fails, in milliseconds. Boot
+   * waits on the store's first check, so an unreachable host costs boot this
+   * long, once, and each later call as long. @default 5000
+   */
+  connectTimeoutMs?: number;
   /** Text put before every query before it is embedded (see the adapter's option). */
   queryPrefix?: string;
   /** The embedder to call. Absent: the kernel's `embedder` service, read at each call. */
@@ -83,15 +89,16 @@ export function poolFromPg(pool: pg.Pool): PgPoolLike {
  * with the host's `IKnowledgeService` during `start()`.
  *
  * It opens a small pool of its own (`poolMax`, default 4) to the store's
- * database: the platform database when that is PostgreSQL, else the `url` it
- * is given. When the database cannot hold the store yet (no pgvector
+ * database: the `url` it is given, else the platform database when that is
+ * PostgreSQL. A connection that takes longer than `connectTimeoutMs` (default
+ * 5000) fails, so an unreachable host does not hold boot. When the database cannot hold the store yet (no pgvector
  * extension, no right to create it or the schema) the adapter still
  * registers: boot continues, the warning names the SQL to run, its
  * `healthCheck` answers `ok: false`, and every call answers
  * `SERVICE_UNAVAILABLE` until the SQL has been run.
  *
  * With separate databases per organization, the store is in the ONE database
- * this plugin connects to — the platform's, not each organization's — and
+ * this plugin connects to — never each organization's — and
  * organizations are kept apart by the `organization_id` column, which every
  * search filters on.
  */
@@ -102,7 +109,6 @@ export class KnowledgePgvectorPlugin implements Plugin {
 
   private readonly opts: KnowledgePgvectorPluginOptions;
   private pool?: pg.Pool;
-  private embedderService?: IEmbedder;
 
   constructor(opts: KnowledgePgvectorPluginOptions = {}) {
     this.opts = opts;
@@ -125,20 +131,25 @@ export class KnowledgePgvectorPlugin implements Plugin {
 
     const target = resolveStoreUrl(this.opts);
     if (target.url !== undefined) {
-      this.pool = new pg.Pool({ connectionString: target.url, max: this.opts.poolMax ?? 4 });
+      this.pool = new pg.Pool({
+        connectionString: target.url,
+        max: this.opts.poolMax ?? 4,
+        connectionTimeoutMillis: this.opts.connectTimeoutMs ?? 5000,
+      });
       // An idle connection's error (the server restarted) must not end the process.
       this.pool.on('error', (err) => ctx.logger.warn?.(`KnowledgePgvectorPlugin: idle connection error: ${err.message}`));
     }
 
+    // Read at each call, never cached: the kernel's embedder may register
+    // after this plugin starts, or be replaced (ADR-0161 K8, item 6), and the
+    // adapter reports the embedder it will actually call.
     const embedder = (): IEmbedder | undefined => {
       if (this.opts.embedder) return this.opts.embedder;
-      if (this.embedderService) return this.embedderService;
       try {
-        this.embedderService = ctx.getService<IEmbedder>(EMBEDDER_SERVICE);
+        return ctx.getService<IEmbedder>(EMBEDDER_SERVICE);
       } catch {
         return undefined;
       }
-      return this.embedderService;
     };
 
     const adapter = new PgvectorKnowledgeAdapter({

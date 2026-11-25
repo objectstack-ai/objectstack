@@ -80,6 +80,9 @@ export interface PgvectorKnowledgeAdapterOptions {
 /** The ADR-0112 code of a write or a search refused under another fingerprint (ADR-0161 K7, rules 4 and 5). */
 export const KNOWLEDGE_REBUILD_REQUIRED = 'KNOWLEDGE_REBUILD_REQUIRED';
 
+/** How many times {@link PgvectorKnowledgeAdapter.upsert} plans a batch again when a concurrent write removed a passage it meant to keep. */
+const UPSERT_ATTEMPTS = 3;
+
 /** A generation row: one complete index of one source under one fingerprint. */
 interface GenerationRow {
   generation: number;
@@ -127,26 +130,39 @@ interface Readiness {
  * The generation row holds the fingerprint the source was built under. A write
  * or a search carrying another is refused `KNOWLEDGE_REBUILD_REQUIRED` and is
  * never served from the stored generation. A source that holds nothing takes
- * the first fingerprint it is handed. `beginBuild` under the stored fingerprint
- * rebuilds inside the generation; under another it is refused, with the SQL
- * that drops the source's index so it can be built afresh — this store does
- * not yet build a second generation beside the first. `completeBuild` records
+ * the first fingerprint it is handed, and passage rows of the source left
+ * without a generation row are deleted as that generation opens: it never
+ * adopts vectors of another fingerprint. `beginBuild` under the stored
+ * fingerprint rebuilds inside the generation; under another it is refused,
+ * its `remedy` carrying the exact statements that clear the source (one
+ * DELETE per passage table, then the generation row) — this store does not
+ * yet build a second generation beside the first. `completeBuild` records
  * the recipe hash; `indexStatus` answers both.
  *
  * ## Writes
  *
  * The adapter takes the service's passages (`capabilities.chunks`) and hashes
  * the text of each (`chunk_hash`). A passage whose hash is already stored is
- * not embedded again: its row's metadata is rewritten. Every embed call runs
- * before a connection is taken for the write, so no pooled connection waits on
- * the embedder.
+ * not embedded again: its row's metadata is rewritten; when that row is gone
+ * by the time the write runs (a concurrent write removed it), the batch is
+ * planned again, so the passage is embedded rather than lost. Every embed call
+ * runs before a connection is taken for the write, so no pooled connection
+ * waits on the embedder.
  *
  * ## When the database is not ready
  *
  * Without the `vector` extension (and the right to create it), or without the
  * right to create the schema, the adapter creates nothing; every call answers
- * `SERVICE_UNAVAILABLE` with the SQL to run by hand, `healthCheck` answers
- * `ok: false`, and the next call tries again.
+ * `SERVICE_UNAVAILABLE`, `healthCheck` answers `ok: false` with the SQL to run
+ * by hand, and the next call tries again. A database it cannot reach is
+ * reported as unreachable, with no SQL.
+ *
+ * ## What a caller reads
+ *
+ * A refusal's message is one sentence: no driver text, no SQL, no schema
+ * name. Operator text travels in the error's `remedy`, which `healthCheck`,
+ * the plugin's boot warning and the knowledge service's reindex result and
+ * log show.
  */
 export class PgvectorKnowledgeAdapter implements IKnowledgeAdapter {
   readonly id: string;
@@ -188,13 +204,42 @@ export class PgvectorKnowledgeAdapter implements IKnowledgeAdapter {
 
   async upsert(docs: KnowledgeDocument[], ctx: AdapterContext): Promise<void> {
     if (docs.length === 0) return;
-    const pool = this.requirePool();
+    this.requirePool();
     const readiness = await this.ready();
     const embedder = this.requireEmbedder();
     const generation = (await this.writeTarget(ctx, embedder, true))!;
     await this.ensureVectorTable(generation.dim, readiness);
+    // An unchanged passage is rewritten in place, keeping its vector. When its
+    // row is gone by the time the write runs (a concurrent rewrite of the same
+    // document removed it), the write is rolled back and planned again, so the
+    // passage is embedded and inserted rather than lost.
+    for (let attempt = 1; ; attempt++) {
+      const missing = await this.writePassages(docs, ctx.source.id, generation, readiness, embedder);
+      if (missing === undefined) return;
+      if (attempt >= UPSERT_ATTEMPTS) {
+        throw new Error(
+          `knowledge-pgvector: passage '${missing}' of source '${ctx.source.id}' was removed by a concurrent write ` +
+            `${UPSERT_ATTEMPTS} times while this write ran; nothing of this batch was written. Retry the write.`,
+        );
+      }
+    }
+  }
+
+  /**
+   * One attempt of {@link upsert}: read the stored chunk hashes, embed what
+   * changed, write in one transaction. Answers `undefined` when written, or the
+   * id of an unchanged passage whose row was gone (the transaction is rolled
+   * back).
+   */
+  private async writePassages(
+    docs: KnowledgeDocument[],
+    sourceId: string,
+    generation: GenerationRow,
+    readiness: Readiness,
+    embedder: IEmbedder,
+  ): Promise<string | undefined> {
+    const pool = this.requirePool();
     const table = qualified(this.schema, vectorTable(generation.dim));
-    const sourceId = ctx.source.id;
 
     const planned = docs.map((doc) => ({
       doc,
@@ -227,7 +272,8 @@ export class PgvectorKnowledgeAdapter implements IKnowledgeAdapter {
       vectorOf.set(p.id, v);
     });
 
-    await this.transaction(async (client) => {
+    let missing: string | undefined;
+    const written = await this.transaction(async (client) => {
       for (const { doc, passages } of planned) {
         await client.query(
           `DELETE FROM ${table} WHERE source_id = $1 AND generation = $2 AND document_id = $3 AND NOT (chunk_id = ANY($4::text[]))`,
@@ -251,12 +297,17 @@ export class PgvectorKnowledgeAdapter implements IKnowledgeAdapter {
           const vector = vectorOf.get(p.id);
           if (vector === undefined) {
             // Unchanged text: the stored vector stands; the rest of the row is rewritten.
-            await client.query(
+            const updated = await client.query(
               `UPDATE ${table} SET document_id = $4, source_record_id = $5, organization_id = $6, content = $7, title = $8,
                  doc_hash = $9, chunk_hash = $10, metadata = $11::jsonb, heading_path = $12::jsonb
-               WHERE source_id = $1 AND generation = $2 AND chunk_id = $3`,
+               WHERE source_id = $1 AND generation = $2 AND chunk_id = $3 AND chunk_hash = $10
+               RETURNING chunk_id`,
               common,
             );
+            if (updated.rows.length === 0) {
+              missing = p.id;
+              return false;
+            }
           } else {
             await client.query(
               `INSERT INTO ${table} (source_id, generation, chunk_id, document_id, source_record_id, organization_id, content,
@@ -272,7 +323,9 @@ export class PgvectorKnowledgeAdapter implements IKnowledgeAdapter {
           }
         }
       }
+      return true;
     });
+    return written ? undefined : missing;
   }
 
   async delete(documentIds: string[], ctx: AdapterContext): Promise<void> {
@@ -325,14 +378,17 @@ export class PgvectorKnowledgeAdapter implements IKnowledgeAdapter {
     if (opts.organizationIds !== undefined && opts.organizationIds.length === 0) return [];
     const pool = this.requirePool();
     const readiness = await this.ready();
+    // The embedder first: without one the service's fingerprint carries no
+    // model or width, and comparing it would refuse a healthy index as one to
+    // rebuild. No embedder is SERVICE_UNAVAILABLE, as on every other call.
+    const embedder = this.requireEmbedder();
     const generation = await this.activeGeneration(opts.source.id);
     if (!generation) return [];
     // Vectors of two fingerprints are never ranked against each other (K7, rule 5).
     if (opts.index !== undefined && generation.fingerprint !== opts.index.fingerprint) {
-      throw rebuildRequired(opts.source.id, this.dropSql(opts.source.id));
+      throw rebuildRequired(opts.source.id, await this.clearSql(opts.source.id));
     }
-    const embedder = this.requireEmbedder();
-    if (embedder.dimensions !== generation.dim) throw rebuildRequired(opts.source.id, this.dropSql(opts.source.id));
+    if (embedder.dimensions !== generation.dim) throw rebuildRequired(opts.source.id, await this.clearSql(opts.source.id));
     if (!(await this.tableExists(generation.dim))) return [];
     const topK = Math.max(0, Math.floor(opts.topK));
     if (topK === 0) return [];
@@ -415,14 +471,19 @@ export class PgvectorKnowledgeAdapter implements IKnowledgeAdapter {
     const generation = (await this.activeGeneration(ctx.source.id))
       ?? (await this.openFirstGeneration(ctx.source.id, index.fingerprint, embedder));
     if (generation.fingerprint === index.fingerprint && generation.dim === embedder.dimensions) return;
+    const sql = await this.clearSql(ctx.source.id);
     throw Object.assign(
       new Error(
-        `Knowledge source '${ctx.source.id}' was indexed under another fingerprint (embedding model, dimensions, ` +
-          'split or content recipe changed), and this store does not yet build a second generation beside the ' +
-          'first. Either restore the earlier embedding and split configuration, or drop the source\'s index and ' +
-          `reindex it: ${this.dropSql(ctx.source.id)}`,
+        `Knowledge source '${ctx.source.id}' was indexed under another embedding model, split or content recipe, ` +
+          'and this store does not yet build a second index beside the first.',
       ),
-      { code: KNOWLEDGE_REBUILD_REQUIRED, status: 409 },
+      {
+        code: KNOWLEDGE_REBUILD_REQUIRED,
+        status: 409,
+        remedy:
+          'Either restore the earlier embedding and split configuration, or clear the source\'s index and run a ' +
+          `complete reindex. Run as a database owner:\n${sql.join('\n')}`,
+      },
     );
   }
 
@@ -448,7 +509,8 @@ export class PgvectorKnowledgeAdapter implements IKnowledgeAdapter {
       const r = await this.ready();
       return { ok: true, message: `pgvector ${r.version}, tables in schema '${this.schema}'` };
     } catch (err) {
-      return { ok: false, message: err instanceof Error ? err.message : String(err) };
+      const remedy = remedyOf(err);
+      return { ok: false, message: `${errorText(err)}${remedy === undefined ? '' : ` ${remedy}`}` };
     }
   }
 
@@ -456,7 +518,7 @@ export class PgvectorKnowledgeAdapter implements IKnowledgeAdapter {
 
   private requirePool(): PgPoolLike {
     if (!this.pool) {
-      throw notReady(this.unavailable ?? 'it has no PostgreSQL connection.', []);
+      throw notReady('it has no PostgreSQL database', this.unavailable ?? 'It was given no PostgreSQL connection.', []);
     }
     return this.pool;
   }
@@ -488,32 +550,41 @@ export class PgvectorKnowledgeAdapter implements IKnowledgeAdapter {
     let ext: { schema: string; version: string } | undefined;
     try {
       ext = await this.findExtension(pool);
-      if (!ext) {
-        await pool.query('CREATE EXTENSION IF NOT EXISTS vector');
-        ext = await this.findExtension(pool);
-      }
     } catch (err) {
+      // The first query failed: the database is not reachable (or refuses this
+      // role). Not a missing extension, and no SQL would fix it.
       throw notReady(
-        `the PostgreSQL 'vector' extension (pgvector) is not installed in this database, and this connection could not ` +
-          `install it (${errorText(err)}).`,
-        ['CREATE EXTENSION IF NOT EXISTS vector;', ...ddl.map((s) => `${s};`)],
+        'it cannot reach its PostgreSQL database',
+        `The connection failed: ${errorText(err)}. Check the store's URL, the network and the role's access.`,
+        [],
       );
     }
     if (!ext) {
-      throw notReady("the PostgreSQL 'vector' extension (pgvector) is not installed in this database.", [
-        'CREATE EXTENSION IF NOT EXISTS vector;',
-        ...ddl.map((s) => `${s};`),
-      ]);
+      let refusal: unknown;
+      try {
+        await pool.query('CREATE EXTENSION IF NOT EXISTS vector');
+        ext = await this.findExtension(pool);
+      } catch (err) {
+        refusal = err;
+      }
+      if (!ext) {
+        throw notReady(
+          "the PostgreSQL 'vector' extension (pgvector) is not installed in its database",
+          `This connection could not install it${refusal === undefined ? '' : ` (${errorText(refusal)})`}.`,
+          ['CREATE EXTENSION IF NOT EXISTS vector;', ...ddl.map((statement) => `${statement};`)],
+        );
+      }
     }
     try {
       for (const statement of ddl) await pool.query(statement);
     } catch (err) {
       throw notReady(
-        `its schema '${this.schema}' and generation table could not be created (${errorText(err)}).`,
-        ddl.map((s) => `${s};`),
+        'its schema and generation table could not be created',
+        `Creating schema '${this.schema}' failed (${errorText(err)}).`,
+        ddl.map((statement) => `${statement};`),
       );
     }
-    this.readiness = { extensionSchema: `"${ext.schema}"`, version: ext.version };
+    this.readiness = { extensionSchema: quoteIdentifier(ext.schema), version: ext.version };
     return this.readiness;
   }
 
@@ -534,8 +605,9 @@ export class PgvectorKnowledgeAdapter implements IKnowledgeAdapter {
       for (const statement of ddl) await pool.query(statement);
     } catch (err) {
       throw notReady(
-        `its ${dimensions}-wide passage table could not be created (${errorText(err)}).`,
-        ddl.map((s) => `${s};`),
+        `its ${dimensions}-wide passage table could not be created`,
+        `Creating ${qualified(this.schema, vectorTable(dimensions))} failed (${errorText(err)}).`,
+        ddl.map((statement) => `${statement};`),
       );
     }
     this.tables.add(dimensions);
@@ -562,14 +634,40 @@ export class PgvectorKnowledgeAdapter implements IKnowledgeAdapter {
     return row === undefined ? undefined : { ...row, generation: Number(row.generation), dim: Number(row.dim) };
   }
 
-  /** A source that holds nothing takes the first fingerprint it is handed (there is nothing to mix with). */
+  /**
+   * A source that holds nothing takes the first fingerprint it is handed
+   * (there is nothing to mix with). "Holds nothing" is made true: passage rows
+   * of the source left in any passage table without a generation row (a
+   * generation row deleted by hand, its passages not) are deleted in the same
+   * transaction that opens the generation, so a first generation never adopts
+   * vectors embedded under another fingerprint. Only the call whose insert
+   * opened the generation clears; a concurrent one waits on the key and finds
+   * it open.
+   */
   private async openFirstGeneration(sourceId: string, fingerprint: string | undefined, embedder: IEmbedder): Promise<GenerationRow> {
-    await this.requirePool().query(
-      `INSERT INTO ${qualified(this.schema, GENERATION_TABLE)} (source_id, generation, fingerprint, dim, model, state)
-       VALUES ($1, 1, $2, $3, $4, 'active') ON CONFLICT (source_id, generation) DO NOTHING`,
-      [sourceId, fingerprint ?? null, embedder.dimensions, embedder.model ?? null],
-    );
+    await this.transaction(async (client) => {
+      const opened = await client.query(
+        `INSERT INTO ${qualified(this.schema, GENERATION_TABLE)} (source_id, generation, fingerprint, dim, model, state)
+         VALUES ($1, 1, $2, $3, $4, 'active') ON CONFLICT (source_id, generation) DO NOTHING RETURNING generation`,
+        [sourceId, fingerprint ?? null, embedder.dimensions, embedder.model ?? null],
+      );
+      if (opened.rows.length === 0) return true;
+      for (const width of await this.passageWidths(client)) {
+        await client.query(`DELETE FROM ${qualified(this.schema, vectorTable(width))} WHERE source_id = $1`, [sourceId]);
+      }
+      return true;
+    });
     return (await this.activeGeneration(sourceId))!;
+  }
+
+  /** The widths of the passage tables that exist in the store's schema. */
+  private async passageWidths(client: Pick<PgClientLike, 'query'> = this.requirePool()): Promise<number[]> {
+    const found = await client.query<{ table_name: string }>(
+      `SELECT table_name FROM information_schema.tables
+        WHERE table_schema = $1 AND table_name ~ '^knowledge_vec_d[0-9]+$' ORDER BY table_name`,
+      [this.schema],
+    );
+    return found.rows.map((r) => Number(r.table_name.slice('knowledge_vec_d'.length)));
   }
 
   /**
@@ -592,33 +690,45 @@ export class PgvectorKnowledgeAdapter implements IKnowledgeAdapter {
     return this.checkTarget(ctx, active, embedder);
   }
 
-  private checkTarget(ctx: AdapterContext, generation: GenerationRow, embedder: IEmbedder | undefined): GenerationRow {
+  private async checkTarget(
+    ctx: AdapterContext,
+    generation: GenerationRow,
+    embedder: IEmbedder | undefined,
+  ): Promise<GenerationRow> {
     const fingerprint = ctx.index?.fingerprint;
     if (fingerprint !== undefined && generation.fingerprint !== fingerprint) {
-      throw rebuildRequired(ctx.source.id, this.dropSql(ctx.source.id));
+      throw rebuildRequired(ctx.source.id, await this.clearSql(ctx.source.id));
     }
     if (embedder !== undefined && embedder.dimensions !== generation.dim) {
-      throw rebuildRequired(ctx.source.id, this.dropSql(ctx.source.id));
+      throw rebuildRequired(ctx.source.id, await this.clearSql(ctx.source.id));
     }
     return generation;
   }
 
-  /** The SQL that drops everything this store holds for a source, so it can be built afresh. */
-  private dropSql(sourceId: string): string {
+  /**
+   * The statements that clear everything this store holds for a source, so it
+   * can be built afresh: one DELETE per passage table that exists, then the
+   * generation rows — passages first, so no generation row is ever missing
+   * while its passages remain.
+   */
+  private async clearSql(sourceId: string): Promise<string[]> {
     const literal = `'${sourceId.replace(/'/g, "''")}'`;
-    return (
-      `DELETE FROM ${qualified(this.schema, GENERATION_TABLE)} WHERE source_id = ${literal}; ` +
-      `and from each ${qualified(this.schema, 'knowledge_vec_d<width>')} table, DELETE ... WHERE source_id = ${literal};`
-    );
+    const widths = await this.passageWidths().catch(() => [] as number[]);
+    return [
+      ...widths.map((width) => `DELETE FROM ${qualified(this.schema, vectorTable(width))} WHERE source_id = ${literal};`),
+      `DELETE FROM ${qualified(this.schema, GENERATION_TABLE)} WHERE source_id = ${literal};`,
+    ];
   }
 
-  private async transaction(work: (client: PgClientLike) => Promise<void>): Promise<void> {
+  /** Run `work` in one transaction: committed when it answers `true`, rolled back when it answers `false` or throws. */
+  private async transaction(work: (client: PgClientLike) => Promise<boolean>): Promise<boolean> {
     const client = await this.requirePool().connect();
     try {
       await client.query('BEGIN');
-      await work(client);
-      await client.query('COMMIT');
+      const commit = await work(client);
+      await client.query(commit ? 'COMMIT' : 'ROLLBACK');
       client.release();
+      return commit;
     } catch (err) {
       await client.query('ROLLBACK').catch(() => undefined);
       client.release(err instanceof Error ? err : true);
@@ -648,23 +758,52 @@ function requireIndex(ctx: AdapterContext, member: string): NonNullable<AdapterC
   return ctx.index;
 }
 
-function rebuildRequired(sourceId: string, dropSql: string): Error {
+/**
+ * A refusal under another fingerprint (ADR-0161 K7, rules 4 and 5). Its
+ * message is one sentence a search caller may read; the statements that clear
+ * the source are operator text, carried in `remedy` — the knowledge service
+ * shows it in a reindex result and its log, never to a search caller.
+ */
+function rebuildRequired(sourceId: string, clearSql: string[]): Error {
   return Object.assign(
     new Error(
-      `Knowledge source '${sourceId}' needs a rebuild: its index was built under another fingerprint (embedding ` +
-        'model, dimensions, split or content recipe changed), and its stored vectors are not compared with new ' +
-        `ones. Run a complete reindex of the source; if the store refuses to begin it, drop its index first: ${dropSql}`,
+      `Knowledge source '${sourceId}' needs a rebuild: its index was built under another embedding model, split or ` +
+        'content recipe, and it is not searched until a complete reindex has rebuilt it.',
     ),
-    { code: KNOWLEDGE_REBUILD_REQUIRED, status: 409 },
+    {
+      code: KNOWLEDGE_REBUILD_REQUIRED,
+      status: 409,
+      remedy:
+        'Run a complete reindex of the source; if the store refuses to begin it, clear the source\'s index first. ' +
+        `Run as a database owner:\n${clearSql.join('\n')}`,
+    },
   );
 }
 
-function notReady(reason: string, sql: string[]): Error {
-  const remedy = sql.length === 0 ? '' : ` Run as a database owner, then retry (no restart needed):\n${sql.join('\n')}`;
-  return Object.assign(new Error(`knowledge-pgvector is not ready: ${reason}${remedy}`), {
+/**
+ * The store is not ready. The message is one sentence with no database
+ * detail, as a search caller may read it; what went wrong and the SQL to run
+ * are operator text in `remedy`, shown by `healthCheck`, the plugin's boot
+ * warning and the knowledge service's log.
+ */
+function notReady(diagnosis: string, detail: string, sql: string[]): Error {
+  const remedy = `${detail}${sql.length === 0 ? '' : ` Run as a database owner, then retry (no restart needed):\n${sql.join('\n')}`}`;
+  return Object.assign(new Error(`The knowledge store (pgvector) is not ready: ${diagnosis}.`), {
     code: 'SERVICE_UNAVAILABLE',
     status: 503,
+    remedy,
   });
+}
+
+/** The operator text an adapter error carries, if any. */
+function remedyOf(err: unknown): string | undefined {
+  const remedy = err !== null && typeof err === 'object' ? (err as { remedy?: unknown }).remedy : undefined;
+  return typeof remedy === 'string' && remedy !== '' ? remedy : undefined;
+}
+
+/** A PostgreSQL identifier, double-quoted, an embedded quote doubled. */
+function quoteIdentifier(name: string): string {
+  return `"${name.replace(/"/g, '""')}"`;
 }
 
 function errorText(err: unknown): string {

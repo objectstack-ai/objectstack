@@ -4,8 +4,10 @@
  * The acceptance cases of #37100 on a LIVE PostgreSQL with pgvector, beside
  * the contract suite: a 3072-wide model, two organizations that never see each
  * other's passages, an unchanged passage that is not embedded again, a changed
- * fingerprint that is refused and never served, and the store's tables kept
- * out of the connection's own schema.
+ * fingerprint that is refused and never served, the printed statements that
+ * clear a source run as printed, a first generation that never adopts rows left
+ * behind, a passage removed under a concurrent write that is not lost, and the
+ * store's tables kept out of the connection's own schema.
  */
 
 import { afterAll, describe, expect, it } from 'vitest';
@@ -13,7 +15,7 @@ import type { KnowledgeDocument, KnowledgeSource } from '@objectstack/spec/ai';
 import type { AdapterContext } from '@objectstack/spec/contracts';
 import { KnowledgeService } from '@objectstack/service-knowledge';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
-import { KNOWLEDGE_REBUILD_REQUIRED } from '../index.js';
+import { KNOWLEDGE_REBUILD_REQUIRED, poolFromPg, type PgPoolLike } from '../index.js';
 import { FakeEmbedder, PG_URL, liveStore, requireLiveCell } from './live-pg.testkit.js';
 
 requireLiveCell('knowledge-pgvector acceptance');
@@ -160,10 +162,94 @@ describe.skipIf(!PG_URL)('knowledge-pgvector acceptance on a LIVE PostgreSQL', (
     );
     expect(refused).toMatchObject({ code: KNOWLEDGE_REBUILD_REQUIRED, status: 409 });
     expect(refused?.message).toContain(s.id);
+    // The caller is told the source needs a rebuild, never the SQL.
+    expect(refused?.message).not.toContain('DELETE');
     // A complete reindex under the new model is refused before anything is written, naming the SQL that clears the source.
     const rebuilt = await svc.reindexSource(s.id);
     expect(rebuilt.ok).toBe(false);
     expect(rebuilt.message).toContain('DELETE FROM');
+  });
+
+  it('the printed statements clear the source exactly; run as printed, the next complete reindex embeds afresh', async () => {
+    const embedder = new FakeEmbedder(384, 'model-one');
+    const adapter = store.adapter({ embedder });
+    const schema = (adapter as unknown as { schema: string }).schema;
+    const svc = new KnowledgeService({ dataEngine: rowsEngine([{ id: 'r1', body: 'granite quarry', status: 'published' }]) });
+    svc.registerAdapter('under_test', adapter);
+    const s = source('svc_clear');
+    svc.registerSource(s);
+    expect(await svc.reindexSource(s.id)).toMatchObject({ ok: true, indexed: 1 });
+
+    embedder.model = 'model-two';
+    const refused = await svc.reindexSource(s.id);
+    expect(refused.ok).toBe(false);
+    const statements = (refused.message ?? '').split('\n').filter((line) => line.startsWith('DELETE FROM'));
+    // Passages first, then the generation row; every table named exactly.
+    expect(statements).toEqual([
+      `DELETE FROM "${schema}"."knowledge_vec_d384" WHERE source_id = '${s.id}';`,
+      `DELETE FROM "${schema}"."knowledge_generation" WHERE source_id = '${s.id}';`,
+    ]);
+    for (const statement of statements) await store.pool().query(statement);
+
+    const before = embedder.calls;
+    expect(await svc.reindexSource(s.id)).toMatchObject({ ok: true, indexed: 1 });
+    expect(embedder.calls).toBe(before + 1);
+    expect(await adapter.indexStatus({ source: s, reason: 'manual' })).toMatchObject({ fingerprint: expect.any(String) });
+    expect(await svc.search('granite', { topK: 3, executionContext: SYSTEM })).toHaveLength(1);
+  });
+
+  it('a first generation never adopts passages left behind: a generation row deleted alone does not carry its vectors over', async () => {
+    const embedder = new FakeEmbedder(384, 'model-one');
+    const adapter = store.adapter({ embedder });
+    const schema = (adapter as unknown as { schema: string }).schema;
+    const svc = new KnowledgeService({ dataEngine: rowsEngine([{ id: 'r1', body: 'granite quarry', status: 'published' }]) });
+    svc.registerAdapter('under_test', adapter);
+    const s = source('svc_leftover');
+    svc.registerSource(s);
+    expect(await svc.reindexSource(s.id)).toMatchObject({ ok: true, indexed: 1 });
+
+    // Same width, another model; an operator deletes only the generation row.
+    embedder.model = 'model-two';
+    await store.pool().query(`DELETE FROM "${schema}"."knowledge_generation" WHERE source_id = $1`, [s.id]);
+    const before = embedder.calls;
+    expect(await svc.reindexSource(s.id)).toMatchObject({ ok: true, indexed: 1, skipped: 0 });
+    // The passage was embedded again under the new model: the old vector was not adopted.
+    expect(embedder.calls).toBe(before + 1);
+    expect(embedder.texts.slice(-1)).toEqual(['granite quarry']);
+    const rows = await store.pool().query<{ n: string }>(
+      `SELECT count(*) AS n FROM "${schema}"."knowledge_vec_d384" WHERE source_id = $1`,
+      [s.id],
+    );
+    expect(Number(rows.rows[0].n)).toBe(1);
+  });
+
+  it('an unchanged passage removed by a concurrent write before this one commits is embedded and kept, not lost', async () => {
+    const embedder = new FakeEmbedder();
+    const base = poolFromPg(store.pool());
+    let interfere: (() => Promise<void>) | undefined;
+    const pool: PgPoolLike = {
+      query: (text, params) => base.query(text, params),
+      connect: async () => {
+        // The concurrent write lands between this write's read of the stored
+        // hashes and its transaction.
+        const run = interfere;
+        interfere = undefined;
+        if (run) await run();
+        return base.connect();
+      },
+    };
+    const adapter = store.adapter({ embedder, pool });
+    const schema = (adapter as unknown as { schema: string }).schema;
+    const s = source('race');
+    await adapter.upsert([doc(s, '1', 'copper wire conducts heat')], ctx(s));
+    expect(embedder.calls).toBe(1);
+    interfere = async () => {
+      await base.query(`DELETE FROM "${schema}"."knowledge_vec_d384" WHERE source_id = $1`, [s.id]);
+    };
+    await adapter.upsert([doc(s, '1', 'copper wire conducts heat', { metadata: { status: 'archived' } })], ctx(s));
+    expect(embedder.calls).toBe(2);
+    const [hit] = await adapter.search('copper', { source: s, topK: 1, index: { fingerprint: FP_A.fingerprint } });
+    expect(hit).toMatchObject({ documentId: `${s.id}:1`, metadata: { status: 'archived' } });
   });
 
   it('beginBuild under another fingerprint is refused with the SQL that clears the source; under its own it is a no-op', async () => {
@@ -171,9 +257,13 @@ describe.skipIf(!PG_URL)('knowledge-pgvector acceptance on a LIVE PostgreSQL', (
     const s = source('build');
     await adapter.upsert([doc(s, '1', 'granite quarry')], ctx(s, FP_A));
     await expect(adapter.beginBuild(ctx(s, FP_A))).resolves.toBeUndefined();
-    const err = await adapter.beginBuild(ctx(s, FP_B)).then(() => undefined, (e: unknown) => e as { code?: string; message?: string });
+    const err = await adapter.beginBuild(ctx(s, FP_B)).then(
+      () => undefined,
+      (e: unknown) => e as { code?: string; message?: string; remedy?: string },
+    );
     expect(err).toMatchObject({ code: KNOWLEDGE_REBUILD_REQUIRED, status: 409 });
-    expect(err?.message).toContain(`WHERE source_id = '${s.id}'`);
+    expect(err?.message).not.toContain('DELETE');
+    expect(err?.remedy).toContain(`WHERE source_id = '${s.id}'`);
     // Nothing was served from, or written to, the stored generation under B.
     await expect(adapter.search('granite', { source: s, topK: 3, index: { fingerprint: FP_B.fingerprint } })).rejects.toMatchObject({
       code: KNOWLEDGE_REBUILD_REQUIRED,

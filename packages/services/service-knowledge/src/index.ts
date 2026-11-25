@@ -14,6 +14,7 @@ export {
   TITLE_RULE_VERSION,
   computeIndexFingerprint,
   computeRecipeHash,
+  indexExpectation,
 } from './knowledge-index-fingerprint.js';
 export type { IndexFingerprintInput, RecipeHashInput } from './knowledge-index-fingerprint.js';
 export { SPLIT_ALGORITHM_VERSION } from './split/index.js';
