@@ -6027,7 +6027,7 @@ const AI_CONTEXT_OBJECT_UNKNOWN_EXPLANATION: RuleExplanation = {
 
 const AI_CONTEXT_FIELD_UNKNOWN_EXPLANATION: RuleExplanation = {
   rule: 'ai-context-field-unknown',
-  covers: 'why every field a context pack lists must exist on its object',
+  covers: 'why each field a context pack lists must exist on its object',
   paragraphs: [
     'A pack lists the root\'s `fields`, each related list\'s `fields`, and a `body.field`. A name the object ' +
       'does not define is left out of every answer: the assistant reads less about the record than the pack says.',
