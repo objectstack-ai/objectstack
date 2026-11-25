@@ -126,17 +126,90 @@ function handBuiltStudioAddresses(fileName: string, text: string): string[] {
   return hits;
 }
 
+/**
+ * The cheap gate in front of the parser: may this source text hold anything
+ * `handBuiltStudioAddresses` flags? Parsing every ui source takes seconds and
+ * all but a few files hold none, so only the files that pass are parsed.
+ *
+ * It is a superset of the matcher by construction. The matcher flags three
+ * node shapes, and each one needs a token whose COOKED text is one of three
+ * words:
+ *
+ *  - a string or template literal (or a template head) whose text starts with
+ *    `/studio`;
+ *  - a template whose first span is the identifier `STUDIO_ROOT_PATH` or
+ *    `STUDIO_LANDING_PATH`;
+ *  - `+` with one of those identifiers on its left.
+ *
+ * A JSX attribute string is not cooked (`&#47;` stays `&#47;`), so its raw text
+ * is its text. A JS string or template is cooked, and its raw text can spell
+ * each character as itself, an identity escape (`\/`, `\s`), `\xHH`, `\uHHHH`,
+ * `\u{H…}` or a legacy octal escape (`\57`), with line continuations (a
+ * backslash before a line break, which cook to nothing) between characters. An
+ * identifier can spell a character as `\uHHHH` or `\u{H…}`. So the gate looks
+ * for each word with every character in any of those spellings, and with
+ * continuations allowed between them: a literal or identifier the matcher can
+ * flag always leaves one of these in the raw text. Extra spellings
+ * (`\t` read as `t`) only cost a parse, never a miss.
+ */
+const STUDIO_ADDRESS_WORDS = ['/studio', ...ROOT_NAMES];
+
+const hexDigits = (code: number, width: number): string =>
+  [...code.toString(16).padStart(width, '0')].map((d) => (/[a-f]/.test(d) ? `[${d}${d.toUpperCase()}]` : d)).join('');
+
+const anySpellingOf = (char: string): string => {
+  const code = char.charCodeAt(0);
+  const plain = char.replace(/[.*+?^${}()|[\]\\/]/g, '\\$&');
+  return `(?:${[
+    plain,
+    `\\\\${plain}`,
+    `\\\\x${hexDigits(code, 2)}`,
+    `\\\\u${hexDigits(code, 4)}`,
+    `\\\\u\\{0*${hexDigits(code, 1)}\\}`,
+    `\\\\0*${code.toString(8)}`,
+  ].join('|')})`;
+};
+
+const LINE_CONTINUATIONS = '(?:\\\\(?:\\r\\n|[\\n\\r\\u2028\\u2029]))*';
+
+const MAY_SPELL_STUDIO_ADDRESS = new RegExp(
+  STUDIO_ADDRESS_WORDS.map((word) => [...word].map(anySpellingOf).join(LINE_CONTINUATIONS)).join('|'),
+);
+
+function maySpellStudioAddress(text: string): boolean {
+  return MAY_SPELL_STUDIO_ADDRESS.test(text);
+}
+
+/**
+ * Every spelling the matcher flags, one hit per fixture: the first case holds
+ * the matcher to them, the pre-filter control holds the gate to them.
+ */
+const FLAGGED_SPELLINGS = [
+  "const a = '/studio';",
+  'const b = `/studio/${pkg}/data`;',
+  'const c = "/studio?new=package";',
+  'const d = <Link to="/studio" />;',
+  'const d2 = <Tab path="/studio" />;',
+  'const d3 = <Route path={`/studio/${pkg}`} />;',
+  'const e = `${STUDIO_ROOT_PATH}/${pkg}`;',
+  "const f = STUDIO_ROOT_PATH + '/' + pkg;",
+  // The same addresses with escapes in them: cooked, they are the same text.
+  "const a1 = '\\/studio';",
+  "const a2 = '\\x2Fstudio';",
+  "const a3 = '\\u002fstud\\u{69}o';",
+  "const a4 = '\\57\\163tudio';",
+  "const a5 = '/stu\\\ndio';",
+  'const b1 = `\\x2fstudio/${pkg}`;',
+  'const e1 = `${STUDIO_LANDING_PATH}/${pkg}`;',
+  'const e2 = `${STUDIO\\u005FROOT_PATH}/${pkg}`;',
+  "const f1 = STUDIO_LANDING_PATH + '/' + pkg;",
+  "const f2 = STUDIO_\\u{52}OOT_PATH + '/' + pkg;",
+];
+
 describe('no Studio address is built by hand under ui/ (objectstack#36895)', () => {
   it('the matcher sees each spelling and spares prose and look-alikes', () => {
     const scan = (text: string) => handBuiltStudioAddresses('x.tsx', text);
-    expect(scan("const a = '/studio';")).toHaveLength(1);
-    expect(scan('const b = `/studio/${pkg}/data`;')).toHaveLength(1);
-    expect(scan('const c = "/studio?new=package";')).toHaveLength(1);
-    expect(scan('const d = <Link to="/studio" />;')).toHaveLength(1);
-    expect(scan('const d2 = <Tab path="/studio" />;')).toHaveLength(1);
-    expect(scan('const d3 = <Route path={`/studio/${pkg}`} />;')).toHaveLength(1);
-    expect(scan('const e = `${STUDIO_ROOT_PATH}/${pkg}`;')).toHaveLength(1);
-    expect(scan("const f = STUDIO_ROOT_PATH + '/' + pkg;")).toHaveLength(1);
+    for (const spelling of FLAGGED_SPELLINGS) expect(scan(spelling), spelling).toHaveLength(1);
     // Not an address.
     expect(scan("const g = '/studios';")).toEqual([]);
     expect(scan("const h = '/api/v1/studio/runtime-config';")).toEqual([]);
@@ -150,7 +223,28 @@ describe('no Studio address is built by hand under ui/ (objectstack#36895)', () 
     expect(scan('const l = studioHomePath(pkg);')).toEqual([]);
   });
 
-  it('no ui source outside the builder spells one', () => {
+  it('the pre-filter keeps every source the matcher flags', () => {
+    // Each fixture's only hit is one spelling, so a gate that drops any of
+    // them would hide exactly that spelling from the walk below.
+    for (const spelling of FLAGGED_SPELLINGS) {
+      expect(handBuiltStudioAddresses('x.tsx', spelling), spelling).toHaveLength(1);
+      expect(maySpellStudioAddress(spelling), spelling).toBe(true);
+    }
+    // The one file allowed to spell the root fires the matcher and passes.
+    const builder = path.join(UI_ROOT, 'packages/app-shell/src/views/studio-design/studioAddress.ts');
+    const builderText = readFileSync(builder, 'utf8');
+    expect(handBuiltStudioAddresses(builder, builderText).length).toBeGreaterThan(0);
+    expect(maySpellStudioAddress(builderText)).toBe(true);
+    // And it does filter: a source naming no Studio address is skipped.
+    expect(maySpellStudioAddress("const i = 'studio:builder';\nconst p = '\\t';")).toBe(false);
+  });
+
+  // The walk reads every ui source; the pre-filter keeps the parse to the few
+  // that may spell an address (about 120 of 2,400 today). Measured locally:
+  // 4.5 s with every file parsed, 0.9 s with the pre-filter. The explicit budget
+  // is the second line of defence for a loaded CI shard, where the default 15 s
+  // ran out.
+  it('no ui source outside the builder spells one', { timeout: 60_000 }, () => {
     const files = uiSources();
     const rel = (file: string) => path.relative(UI_ROOT, file).split(path.sep).join('/');
     const names = new Set(files.map(rel));
@@ -163,7 +257,11 @@ describe('no Studio address is built by hand under ui/ (objectstack#36895)', () 
 
     const offenders = files
       .filter((file) => !ALLOWED.has(rel(file)))
-      .flatMap((file) => handBuiltStudioAddresses(file, readFileSync(file, 'utf8')).map((h) => `${rel(file)}:${h}`));
+      .flatMap((file) => {
+        const text = readFileSync(file, 'utf8');
+        if (!maySpellStudioAddress(text)) return [];
+        return handBuiltStudioAddresses(file, text).map((h) => `${rel(file)}:${h}`);
+      });
     expect(offenders).toEqual([]);
   });
 });

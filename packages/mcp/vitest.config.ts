@@ -79,6 +79,8 @@ export default defineConfig({
       { find: /^@objectstack\/objectql\/core$/, replacement: path.resolve(__dirname, '../objectql/src/core.ts') },
       { find: /^@objectstack\/rest$/, replacement: path.resolve(__dirname, '../rest/src/index.ts') },
       { find: /^@objectstack\/service-analytics$/, replacement: path.resolve(__dirname, '../services/service-analytics/src/index.ts') },
+      // [ADR-0160] The record-context executor, so `get_record_context`'s transport parity runs the real one.
+      { find: /^@objectstack\/service-record-context$/, replacement: path.resolve(__dirname, '../services/service-record-context/src/index.ts') },
     ],
   },
 });

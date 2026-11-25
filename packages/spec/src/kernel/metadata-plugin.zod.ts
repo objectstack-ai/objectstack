@@ -203,6 +203,10 @@ export const MetadataTypeSchema = lazySchema(() => z.enum([
   'agent',       // AI agent definitions (AgentSchema)
   'tool',        // AI tool definitions (ToolSchema)
   'skill',       // AI skill definitions (SkillSchema)
+  // [ADR-0160 D1] A context pack: which of one record's fields, related lists
+  // and body text are handed to a model. Its reader is the render service
+  // behind `get_record_context` (`@objectstack/service-record-context`).
+  'ai_context',  // AI context packs (AiContextSchema, ADR-0160 D1)
 ]));
 
 export type MetadataType = z.input<typeof MetadataTypeSchema>;
@@ -1378,6 +1382,10 @@ export const DEFAULT_METADATA_TYPE_REGISTRY: MetadataTypeRegistryEntryParsed[] =
   // type in-repo at rollback; zero production write sites found.
   { type: 'tool', label: 'AI Tool', filePatterns: ['**/*.tool.ts', '**/*.tool.yml'], supportsOverlay: true, allowEnvironmentOverlay: false, allowRuntimeCreate: true, supportsVersioning: false, executionPinned: false, loadOrder: 85, domain: 'ai' },
   { type: 'skill', label: 'AI Skill', filePatterns: ['**/*.skill.ts', '**/*.skill.yml'], supportsOverlay: true, allowEnvironmentOverlay: false, allowRuntimeCreate: true, supportsVersioning: false, executionPinned: false, loadOrder: 88, domain: 'ai' },
+  // [ADR-0160 D1] `ai_context` takes the `skill` row's flags, for the `skill`
+  // row's reason: a behavioural contract an author ships or creates at run
+  // time, and never overlaid per environment (ADR-0005's ai row).
+  { type: 'ai_context', label: 'AI Context Pack', filePatterns: ['**/*.ai-context.ts', '**/*.ai-context.yml'], supportsOverlay: true, allowEnvironmentOverlay: false, allowRuntimeCreate: true, supportsVersioning: false, executionPinned: false, loadOrder: 89, domain: 'ai' },
 ];
 
 // ==========================================

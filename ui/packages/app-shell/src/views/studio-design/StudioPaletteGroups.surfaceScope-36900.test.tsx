@@ -300,7 +300,7 @@ describe("on a package, the palette lists the left menu and the package's items 
       '/studio/com.acme.crm/data?surface=object%3Acrm_account',
     );
     expect(await openedBy(`studio-item permission ${PKG} sales_rep`)).toBe(
-      '/studio/com.acme.crm/access?surface=permission%3Asales_rep',
+      '/studio/com.acme.crm/metadata/permission/sales_rep?package=com.acme.crm',
     );
     expect(await openedBy(`studio-item dashboard ${PKG} crm_pipeline`)).toBe(
       '/studio/com.acme.crm/metadata/dashboard/crm_pipeline?package=com.acme.crm',
@@ -313,7 +313,7 @@ describe("on a package, the palette lists the left menu and the package's items 
   it('opens a menu entry where the menu entry goes, and the palette closes', async () => {
     expect(await openedBy('studio-entry type:hook')).toBe('/studio/com.acme.crm/metadata/hook?package=com.acme.crm');
     expect(await openedBy('studio-entry orgFlows')).toBe('/studio/~org/automations');
-    expect(await openedBy('studio-entry owd')).toBe('/studio/com.acme.crm/access?surface=owd%3Aoverview');
+    expect(await openedBy('studio-entry owd')).toBe('/studio/com.acme.crm/owd');
     expect(await openedBy('studio-entry diagnostics')).toBe('/studio/com.acme.crm/metadata/_diagnostics');
 
     mount(PKG);

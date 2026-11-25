@@ -31,14 +31,18 @@
  *   pick copies an amount only into a target in the same currency
  *   (objectstack#36249), and a target's currency is its definition's. A
  *   target the form draws carries the name the form shows for it, so the
- *   note about a target it did not fill names it the same way.
+ *   note about a target it did not fill names it the same way. The stamp is
+ *   written on every lookup declaring pairs, an empty one when the field map
+ *   names none of its targets: it is also the form's statement that the pick
+ *   may fill at all.
  * - The hosts this reaches are every record-form layout: `ObjectForm`'s
  *   simple and sectioned arms, `TabbedForm`, `WizardForm`, `ModalForm` and
  *   `DrawerForm`, and the forms drawn through `ObjectForm` (`MasterDetailForm`'s
  *   header and line form, `EmbeddableForm`). A line-item grid judges its own
  *   picks (`GridField`). A standalone `form` node drawn outside these hosts
- *   holds no object field map, is not stamped, and its lookup copies as it
- *   always did.
+ *   holds no object field map and is not stamped, so a `lookupAutofill`
+ *   written by hand on its field fills nothing: the pairs are an object fact,
+ *   run where the object is read.
  */
 import { RECORD_BEING_EDITED_KEY, withLookupAutofillTargets, withRecordBeingEdited } from '@object-ui/fields';
 

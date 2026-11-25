@@ -42,6 +42,8 @@ import {
   STUDIO_HOME_PILLAR,
   STUDIO_ITEM_REVIEW_PARAM,
   STUDIO_ITEM_REVIEW_VALUE,
+  STUDIO_OWD_OBJECT_PARAM,
+  STUDIO_OWD_SECTION,
   type StudioPillarKey,
   type StudioSurfaceSpelling,
 } from './studioAddress.js';
@@ -82,6 +84,12 @@ export const STUDIO_ADDRESS_FAMILIES: readonly StudioAddressFamily[] = Object.fr
     today: `/studio/<package>/<pillar>?${DESIGNER_SURFACE_PARAM}=<type>:<name>`,
     builder: 'studioItemPath',
     meaning: 'A pillar opened on one item. The family the designer cards move, one type at a time (STUDIO_ITEM_TYPES).',
+  },
+  {
+    id: 'owd',
+    today: `/studio/<package>/${STUDIO_OWD_SECTION}[?${STUDIO_OWD_OBJECT_PARAM}=<object>]`,
+    builder: 'studioOwdOverviewPath',
+    meaning: "A package's organization-wide default sharing overview (objectstack#36905), optionally on one object. Not a metadata item and not a pillar.",
   },
   { id: 'org-scope', today: '/studio/~org/automations', builder: 'studioOrgScopePath', meaning: 'The package-less scope: the organization\'s own flows.' },
   {
@@ -136,6 +144,11 @@ export interface StudioItemTypeRow {
   readonly spellings: readonly StudioSurfaceSpelling[];
   /** The metadata address it moves to, or `null` when it is a pillar page with no item of its own. */
   readonly onMetadataAddress: string | null;
+  /**
+   * Set once the type has moved: the address its pillar address now redirects
+   * to (step 3 above). Absent while the pillar still opens it.
+   */
+  readonly redirectsTo?: string;
 }
 
 export const STUDIO_ITEM_TYPES: readonly StudioItemTypeRow[] = Object.freeze([
@@ -162,16 +175,19 @@ export const STUDIO_ITEM_TYPES: readonly StudioItemTypeRow[] = Object.freeze([
     qualifiers: [],
     spellings: ['component'],
     onMetadataAddress: '/studio/<package>/metadata/permission/<name>',
+    // objectstack#36905 — moved (`accessPillarRedirect.ts`).
+    redirectsTo: '/studio/<package>/metadata/permission/<name>?package=<package>',
   },
   {
     // The Access pillar's organization-wide defaults overview. Not a metadata
-    // item: the permission designer card decides where it lives.
+    // item: objectstack#36905 gave it a route of its own (the `owd` family).
     type: 'owd',
     pillar: 'access',
     surface: 'owd:overview',
     qualifiers: [],
     spellings: ['component'],
     onMetadataAddress: null,
+    redirectsTo: `/studio/<package>/${STUDIO_OWD_SECTION}`,
   },
 ]);
 

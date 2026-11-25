@@ -3147,5 +3147,8 @@ export const ruMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "Значение"
       }
     }
+  },
+  ai_context: {
+    label: "Пакет контекста ИИ"
   }
 };
