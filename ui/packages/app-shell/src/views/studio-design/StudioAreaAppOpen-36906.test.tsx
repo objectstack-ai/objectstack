@@ -374,6 +374,14 @@ describe("a customization pair's dashboard or report opens in its base's app (ob
     expect(itemReads.calls).toEqual([['dashboard', 'headcount', { packageId: PAIR }]]);
   });
 
+  it("reached from the base's list: a row of the pair links `?package=PAIR`, which re-roots the area onto the pair", async () => {
+    mount(`/studio/${BASE}/metadata/dashboard/headcount?package=${PAIR}`);
+    const opened = await appPage();
+    expect(opened.at.split('?')[0]).toBe(`/apps/${BASE}/dashboard/headcount`);
+    expect(studioOf(opened.at)).toBe(pairList('dashboard'));
+    expect(itemReads.calls).toEqual([['dashboard', 'headcount', { packageId: PAIR }]]);
+  });
+
   it("a pair report opens the base app's builder, picked by decision 6 among the base's apps", async () => {
     apps.byPackage.set(BASE, [{ name: 'hr_people' }, { name: 'hr_reports' }]);
     rememberAppReturnPage({ path: '/apps/hr_reports/home', app: 'hr_reports', label: 'HR Reports' });
