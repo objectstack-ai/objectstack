@@ -280,7 +280,7 @@ describe('the current entry (aria-current)', () => {
 });
 
 describe('the menu search', () => {
-  const entry = { key: 'type:permission', kind: 'type' as const, type: 'permission', to: '/' };
+  const entry = { key: 'type:permission', kind: 'type' as const, type: 'permission', to: '/', tier: 'common' as const };
   it('matches the label or the machine name, case-insensitive; an empty query matches all', () => {
     expect(studioMenuEntryMatches(entry, 'Permission Sets', 'sets')).toBe(true);
     expect(studioMenuEntryMatches(entry, '权限集', 'PERMISSION')).toBe(true);
