@@ -25,19 +25,21 @@ interface Passage {
   text: string;
 }
 
-const words = (text: string): Set<string> =>
-  new Set(text.toLowerCase().split(/[^a-z0-9]+/).filter((w) => w.length > 1));
+const tokens = (text: string): string[] => text.toLowerCase().split(/[^a-z0-9]+/).filter((w) => w.length > 1);
 
-/** Score: the share of the query's words the passage holds. */
+/**
+ * Score: how many of the passage's tokens are query words, over the geometric
+ * mean of the two lengths — a cosine over token counts, so a passage that
+ * repeats the query outranks one that mentions it once, as a real index does.
+ */
 function rank(passages: Passage[], query: string, opts: AdapterSearchOptions): KnowledgeHit[] {
-  const q = words(query);
+  const q = new Set(tokens(query));
   if (q.size === 0) return [];
   return passages
     .map((p) => {
-      const w = words(p.text);
-      let n = 0;
-      for (const t of q) if (w.has(t)) n += 1;
-      return { p, score: n / q.size };
+      const t = tokens(p.text);
+      const matches = t.filter((w) => q.has(w)).length;
+      return { p, score: t.length === 0 ? 0 : matches / Math.sqrt(t.length * q.size) };
     })
     .filter((x) => x.score > 0)
     .sort((a, b) => b.score - a.score)
@@ -93,11 +95,11 @@ class StubAdapter implements IKnowledgeAdapter {
 runKnowledgeAdapterContract({
   name: 'whole-stub (no capabilities)',
   makeAdapter: () => new StubAdapter(false),
-  implements: { listDocuments: false, chunks: false },
+  implements: { listDocuments: false, chunks: false, organizationIds: false },
 });
 
 runKnowledgeAdapterContract({
   name: 'chunk-stub (capabilities.chunks)',
   makeAdapter: () => new StubAdapter(true),
-  implements: { listDocuments: false, chunks: true },
+  implements: { listDocuments: false, chunks: true, organizationIds: false },
 });
