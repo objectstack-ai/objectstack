@@ -50,6 +50,8 @@ export interface SyncRunCounts {
     created: number;
     updated: number;
     refused: number;
+    /** [ADR-0153 D3] Rows marked deleted at the source; absent counts none. */
+    marked?: number;
 }
 
 export interface SyncRunEnd {
@@ -57,6 +59,10 @@ export interface SyncRunEnd {
     counts: SyncRunCounts;
     failureReason?: string;
     failure?: string;
+    /** [ADR-0153 D3] What the run did about deletes (`SyncDeletesNote`); absent on a failed run. */
+    deletes?: string;
+    /** [ADR-0153 D2 invariant 11] Source rows with a NULL watermark; a datasource run only. */
+    skippedNullWatermark?: number;
 }
 
 /** The read position the latest committed run of a mapping stored. */
@@ -273,6 +279,9 @@ export class ObjectStoreSyncRunLedger implements SyncRunLedger {
             created_count: end.counts.created,
             updated_count: end.counts.updated,
             refused_count: end.counts.refused,
+            marked_deleted_count: end.counts.marked ?? 0,
+            deletes: end.deletes ?? null,
+            skipped_null_watermark: end.skippedNullWatermark ?? null,
             failure_reason: end.failureReason ?? null,
             failure: end.failure ?? null,
         }, { where: { id: runId }, context: SYSTEM_CONTEXT });

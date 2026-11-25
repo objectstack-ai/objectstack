@@ -37,7 +37,7 @@ import { DraftChangesPanel, draftAgentSources } from '../DraftChangesPanel';
 
 const PKG = 'com.x';
 const AT = '2026-10-28T10:00:00.000Z';
-const ok = (body: unknown) => ({ ok: true, status: 200, json: async () => body });
+const ok = (body: unknown) => ({ headers: new Headers(), ok: true, status: 200, json: async () => body });
 
 let draftChanges: unknown = undefined;
 

@@ -1082,6 +1082,7 @@
     "hookTextKeysAskedIn": "src/data/hook-refusal-codes.ts#hookTextKeysAskedIn (function)",
     "hookTextsWithoutRunnableCode": "src/data/hook-refusal-codes.ts#hookTextsWithoutRunnableCode (function)",
     "importMappingEntryTargets": "src/data/import-mapping-target.ts#importMappingEntryTargets (function)",
+    "incrementalSourceDeleteRefusal": "src/data/mapping.zod.ts#incrementalSourceDeleteRefusal (function)",
     "indexImportMappingTargets": "src/data/import-mapping-target.ts#indexImportMappingTargets (function)",
     "injectedSystemColumnDefs": "src/data/injected-system-column-provenance.ts#injectedSystemColumnDefs (function)",
     "isAcceptedFilterComparand": "src/data/filter-comparand-type.ts#isAcceptedFilterComparand (function)",

@@ -25,6 +25,7 @@ import {
   studioMetadataAreaRoot,
   studioMetadataItemAddress,
   studioMetadataTypePath,
+  studioOwdOverviewPath,
   studioPackagePath,
   studioPath,
   studioPillarItemAddress,
@@ -49,6 +50,7 @@ import { STUDIO_NEW_PACKAGE_PATH } from './studioNewPackage.js';
 import { retiredInterfacesTarget } from './studioInterfacesRetired.js';
 import { studioOrgScopePath } from './studioScope.js';
 import { AREA_PILLAR_FOR_TYPE, areaItemPillarPath, studioMetadataItemPath, studioPillarItemPath } from './metadataArea.js';
+import { accessPillarRedirect } from './accessPillarRedirect.js';
 
 describe('studioPath — the one path builder (objectstack#36895)', () => {
   it('builds from the left, encoding the scope segment', () => {
@@ -102,7 +104,8 @@ describe("today's addresses, byte for byte", () => {
   it('an item opens its pillar today when the table names one, else its "All metadata" page', () => {
     expect(studioItemPath('crm', 'object', 'account')).toBe('/studio/crm/data?surface=object%3Aaccount');
     expect(studioItemPath('crm', 'flow', 'notify')).toBe('/studio/crm/automations?surface=flow%3Anotify');
-    expect(studioItemPath('crm', 'permission', 'admin')).toBe('/studio/crm/access?surface=permission%3Aadmin');
+    // objectstack#36905 — a permission set opens its metadata address.
+    expect(studioItemPath('crm', 'permission', 'admin')).toBe('/studio/crm/metadata/permission/admin');
     expect(studioItemPath('crm', 'dashboard', 'sales')).toBe('/studio/crm/metadata/dashboard/sales');
     expect(studioItemPath('crm', 'action', 'approve')).toBe('/studio/crm/metadata/action/approve');
     // The app → Studio bridge's spelling.
@@ -155,6 +158,14 @@ describe("today's addresses, byte for byte", () => {
   });
 });
 
+describe('studioOwdOverviewPath — the sharing overview\'s own route (objectstack#36905)', () => {
+  it('is the package\'s `owd` section, optionally on one object', () => {
+    expect(studioOwdOverviewPath('crm')).toBe('/studio/crm/owd');
+    expect(studioOwdOverviewPath('crm', { object: 'sales order' })).toBe('/studio/crm/owd?object=sales+order');
+    expect(studioOwdOverviewPath('crm', { object: null, query: 'changes=review' })).toBe('/studio/crm/owd?changes=review');
+  });
+});
+
 describe('the mapping table agrees with the code (objectstack#36895)', () => {
   it("the area's pillar redirect and the item address read ONE type map", () => {
     expect(AREA_PILLAR_FOR_TYPE).toBe(STUDIO_ITEM_PILLAR);
@@ -202,9 +213,25 @@ describe('the mapping table agrees with the code (objectstack#36895)', () => {
     const builders = new Set([
       'studioLandingPath', 'studioPackagePath', 'studioPillarPath', 'studioItemPath', 'studioOrgScopePath',
       'studioMetadataAreaRoot', 'studioMetadataTypePath', 'studioMetadataItemAddress', 'studioChangesReviewPath',
-      'studioItemReviewPath', 'retiredInterfacesTarget',
+      'studioItemReviewPath', 'retiredInterfacesTarget', 'studioOwdOverviewPath',
     ]);
     for (const family of STUDIO_ADDRESS_FAMILIES) expect(builders.has(family.builder), family.id).toBe(true);
+  });
+
+  it('a moved type\'s row names where its pillar address redirects, as the redirect does (objectstack#36905)', () => {
+    const moved = STUDIO_ITEM_TYPES.filter((row) => row.redirectsTo !== undefined);
+    expect(moved.map((row) => row.type)).toEqual(['permission', 'owd']);
+    for (const row of moved) {
+      const [type, name] = row.surface.split(':');
+      const value = name === '<name>' ? 'n' : name;
+      expect(accessPillarRedirect('p', `?surface=${encodeURIComponent(`${type}:${value}`)}`), row.type).toBe(
+        row.redirectsTo!.split('<package>').join('p').replace('<name>', value),
+      );
+    }
+    // A type still in the pillar map has not moved.
+    for (const type of Object.keys(STUDIO_ITEM_PILLAR)) {
+      expect(STUDIO_ITEM_TYPES.find((r) => r.type === type)?.redirectsTo, type).toBeUndefined();
+    }
   });
 
   it('the retired `/interfaces` redirect keeps exactly what the table marks', () => {

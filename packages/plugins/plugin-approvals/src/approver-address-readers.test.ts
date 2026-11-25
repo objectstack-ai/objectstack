@@ -192,6 +192,16 @@ const PERSON_SITES: Readonly<Record<string, { count: number; role: PersonRole; w
     role: 'display',
     why: 'resolves the person\'s display name for the action log',
   },
+  'approval-activity-feed.ts · approvalActivityRow · action.actor_id': {
+    count: 1,
+    role: 'display',
+    why: 'the activity entry names the person who took the step as stored (its actor), no comparison',
+  },
+  'approval-activity-feed.ts · bindApprovalActivityFeed · action.actor_id': {
+    count: 1,
+    role: 'display',
+    why: 'resolves the step-taker\'s display name and avatar for the activity entry, no comparison',
+  },
   'approval-service.ts · localizeRoutingNotes · a.actor_id': {
     count: 2,
     role: 'display',

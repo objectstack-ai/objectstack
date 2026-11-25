@@ -10,6 +10,11 @@
  * anchor. A long body with no headings is carried up to the bound and marked
  * truncated.
  *
+ * An outline lists at most {@link RECORD_CONTEXT_OUTLINE_MAX_ENTRIES} headings,
+ * and its listing serialized stays within {@link RECORD_CONTEXT_BODY_MAX_CHARS},
+ * whatever the body holds; a cut is stated. The cap bounds the listing, not which
+ * sections exist: every heading's anchor still reads its section.
+ *
  * Headings are read the way the field type writes them: Markdown ATX headings
  * (`#` to `######` at the start of a line, outside a fenced code block) for
  * `textarea` and `markdown`, and `<h1>` to `<h6>` elements for `html` and
@@ -22,8 +27,22 @@
  * with another section.
  */
 
-/** The most characters of body text one answer carries (whole body, section, or truncated prefix). */
+/**
+ * The most characters of body text one answer carries (whole body, section, or
+ * truncated prefix). An outline's listing, serialized, is held to it too.
+ */
 export const RECORD_CONTEXT_BODY_MAX_CHARS = 8000;
+
+/**
+ * The most headings one outline lists. A body with more is listed shallowest
+ * level first and says how many it left out ({@link boundedOutline}).
+ *
+ * Chosen by measurement: an entry serializes to about 95 characters on average
+ * (the 543 Markdown documents of this repository past the body bound that have
+ * headings), so 80 entries is about 7,600 characters — an outline answer the
+ * size of the body bound. Under both bounds, 527 of those 543 are listed uncut.
+ */
+export const RECORD_CONTEXT_OUTLINE_MAX_ENTRIES = 80;
 
 /** One heading of a body. */
 export interface BodyHeading {
@@ -196,6 +215,41 @@ export function sectionOf(text: string, headings: readonly BodyHeading[], anchor
   const { level, start } = headings[at];
   const next = headings.slice(at + 1).find((h) => h.level <= level);
   return text.slice(start, next ? next.start : text.length);
+}
+
+/** One outline entry, as the answer carries it. */
+export interface BodyOutlineEntry {
+  anchor: string;
+  heading: string;
+  level: number;
+}
+
+/**
+ * The outline of `headings`, held to {@link RECORD_CONTEXT_OUTLINE_MAX_ENTRIES}
+ * entries and to {@link RECORD_CONTEXT_BODY_MAX_CHARS} serialized characters,
+ * and how many headings it left out.
+ *
+ * Headings are admitted shallowest level first, in body order within a level,
+ * until the next would pass either bound; the admitted ones are listed in body
+ * order. So a cut leaves out the deepest headings first, and a listed section's
+ * text holds the headings under it. Every anchor is the one {@link headingsOf}
+ * gave, so a listed anchor is the same whether or not the outline was cut.
+ */
+export function boundedOutline(headings: readonly BodyHeading[]): { outline: BodyOutlineEntry[]; omitted: number } {
+  const byLevel = headings.map((h, index) => ({ h, index })).sort((a, b) => a.h.level - b.h.level || a.index - b.index);
+  const admitted: Array<{ entry: BodyOutlineEntry; index: number }> = [];
+  // `[` and `]`, then one `,` between entries.
+  let chars = 2;
+  for (const { h, index } of byLevel) {
+    if (admitted.length >= RECORD_CONTEXT_OUTLINE_MAX_ENTRIES) break;
+    const entry = { anchor: h.anchor, heading: h.heading, level: h.level };
+    const cost = JSON.stringify(entry).length + (admitted.length > 0 ? 1 : 0);
+    if (chars + cost > RECORD_CONTEXT_BODY_MAX_CHARS) break;
+    chars += cost;
+    admitted.push({ entry, index });
+  }
+  admitted.sort((a, b) => a.index - b.index);
+  return { outline: admitted.map((a) => a.entry), omitted: headings.length - admitted.length };
 }
 
 /** `text` held to the bound: the text, and whether it was cut. */

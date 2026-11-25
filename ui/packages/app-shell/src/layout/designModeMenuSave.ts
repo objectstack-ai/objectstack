@@ -95,6 +95,12 @@ import {
   type Menu,
   type MenuLabelLanguage,
 } from './designModeMenuModel.js';
+import { createAuthenticatedFetch } from '@object-ui/auth';
+
+/** The console's authenticated fetch: the stored bearer token beside the session cookie. */
+function authFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+  return createAuthenticatedFetch()(input, init);
+}
 
 /** The doors the save goes through; the defaults are the console's own. */
 export interface AppMenuSaveDoors {
@@ -478,7 +484,7 @@ export function fetchDeploymentLocales(): Promise<DeploymentLocales | null> {
   if (localesRead) return localesRead;
   localesRead = (async () => {
     try {
-      const res = await fetch('/api/v1/i18n/locales', { credentials: 'include' });
+      const res = await authFetch('/api/v1/i18n/locales', { credentials: 'include' });
       if (!res.ok) return null;
       const json = (await res.json()) as { data?: Record<string, unknown> } & Record<string, unknown>;
       const body = isRecord(json?.data) ? json.data : json;

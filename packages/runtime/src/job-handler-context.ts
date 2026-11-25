@@ -46,7 +46,7 @@
  * unchanged byte for byte; no `IJobService` implementation grows a member.
  */
 
-import type { IObjectQLEngine, Logger } from '@objectstack/spec/contracts';
+import type { IObjectQLEngine, JobRunTrigger, Logger } from '@objectstack/spec/contracts';
 
 /**
  * What `AppPlugin` invokes a declarative job's `functions` entry with.
@@ -111,4 +111,17 @@ export interface JobHandlerContext {
      * keeps compiling — the widening stays additive in both directions.
      */
     executionContext?: { isSystem: true; tenantId?: string };
+    /**
+     * Why this run started: `'schedule'` on the job's schedule, `'manual'`
+     * when someone ran it now. Handed on from the job service's own context
+     * (`IJobService`'s handler context), so it is absent under a job service
+     * that sends none.
+     */
+    trigger?: JobRunTrigger;
+    /**
+     * The job service's run-history id for this attempt: on the shipped
+     * adapters, the `sys_job_run` row `DbJobAdapter` wrote. Absent under a job
+     * service that keeps no run history.
+     */
+    runId?: string;
 }

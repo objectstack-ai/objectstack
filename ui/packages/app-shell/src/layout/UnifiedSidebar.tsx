@@ -103,6 +103,7 @@ import { electSidebarArea, type SidebarAreaRoute } from './sidebarAreaElection.j
 import type { FavoriteItem } from '../hooks/useFavorites.js';
 import { usePhoneAppHomeSlot } from './PhoneAppHome.js';
 import { useSidebarFooterSlot } from './sidebarFooterSlot.js';
+import { SidebarDocsNavTarget } from './sidebarDocsNavSlot.js';
 
 /**
  * The app's menu as the design mode edits it (objectstack#36363). Loaded on
@@ -186,6 +187,13 @@ interface UnifiedSidebarProps {
    * every width, collapsed to the primitive's icon rail.
    */
   railOverlay?: boolean;
+  /**
+   * objectstack#37150 — the route is one of the app's documentation pages
+   * (`isAppDocsPath`): the body holds the docs' navigation, which the page
+   * draws into `SidebarDocsNavTarget`, in place of the app's menu and its
+   * recent items (objectstack#35424). The head and the foot are unchanged.
+   */
+  docsNav?: boolean;
 }
 
 function isMetadataDirectoryItem(item: NavigationItem): boolean {
@@ -203,7 +211,7 @@ function isOverviewGroup(item: NavigationItem): boolean {
   return id === 'overview' || label === 'overview';
 }
 
-export function UnifiedSidebar({ activeAppName, onAppChange, railOverlay = false }: UnifiedSidebarProps) {
+export function UnifiedSidebar({ activeAppName, onAppChange, railOverlay = false, docsNav = false }: UnifiedSidebarProps) {
   const { isMobile, setOpenMobile } = useSidebar();
   const location = useLocation();
   const { t, language } = useObjectTranslation();
@@ -832,6 +840,12 @@ export function UnifiedSidebar({ activeAppName, onAppChange, railOverlay = false
         </SidebarHeader>
       )}
       <SidebarContent className={`pt-2 ${ICON_RAIL_SCROLLS_VERTICALLY}`}>
+        {docsNav && context === 'app' && activeApp ? (
+          // objectstack#37150 — an app's docs page: the docs' own navigation,
+          // drawn here by the page (it carries its own landmark).
+          <SidebarDocsNavTarget />
+        ) : (
+        <>
         {/* The sidebar's one navigation landmark, so assistive tech can jump
             to it. The `Sidebar` primitive draws a plain `div` (and a dialog on
             a phone) and is Shadcn-synced, so the landmark rides inside its
@@ -969,6 +983,8 @@ export function UnifiedSidebar({ activeAppName, onAppChange, railOverlay = false
            </>
          )}
         </nav>
+        </>
+        )}
       </SidebarContent>
       {shellChrome && (
         <SidebarFooter className="gap-1 border-t border-sidebar-border p-2">
