@@ -32,19 +32,23 @@
  * ## Which rows are this mapping's, and which the run read
  *
  * A row is this mapping's when its `_sync_source` holds the mapping's name
- * (ADR-0153 D4's column; two mappings on one target object each mark only
- * their own rows this way, and ADR-0153's open point on that case stays open:
- * nothing here refuses it). Two packages may each hold a mapping of one name
- * (ADR-0150 D3); their rows on one target share a `_sync_source`, which is that
- * same open case, and the read and write of every step run under the pull's
- * context, so a job's organization scopes them (`{ isSystem, tenantId }`).
+ * (ADR-0153 D4's column). Two mappings on one target object: each marks and
+ * clears only the rows whose `_sync_source` is its own, and a second mapping is
+ * not refused (decided in this child, as ADR-0153 asks). Two packages may each
+ * hold a mapping of one name (ADR-0150 D3); their rows on one target share a
+ * `_sync_source`, so each marks and clears the other's rows: that residual is
+ * carried to triage (#36743). The read and write of every step run under the
+ * pull's context, so a job's organization scopes them (`{ isSystem, tenantId }`).
  *
  * A row the run read was written by it, so its `_sync_pulled_at` is at or
  * after the run's start ({@link SyncDeleteMarkerInit.runStartedAt}): the
  * absence mark takes the rows stamped before it. A row the source sent but the
  * import runner refused was read and not restamped, so its key is excluded by
  * name; past {@link REFUSED_KEY_LIMIT} such keys the run marks nothing by
- * absence (`unjudged, rows refused`).
+ * absence (`unjudged, rows refused`). A read row with no key at all (a blank
+ * match key, which the runner refuses and the stamp leaves unkeyed) names no
+ * target row, so the run cannot say which rows it stands for: one such row is
+ * enough for the run to mark nothing by absence (`unjudged, rows refused`).
  *
  * The keys are compared within one run only: a complete read restamps every
  * live row's `_sync_external_id` in the spelling of the mapping as it is now,
@@ -54,13 +58,20 @@
  * keys (in the new spelling) do not exclude it and the absence mark stamps it;
  * the next run that writes it restamps the key and clears the mark.
  *
+ * A row the source sends with a falsy `deletedField` is cleared, and the test
+ * is JavaScript's truthiness: the text `'false'` or `'0'` marks the row, and a
+ * field the source does not send reads as falsy on every row.
+ *
  * ## How it writes
  *
  * Each mark or clear is an update of one row by id, through the protocol's data
  * door, with the pull's write mark (`markSyncPullWrite`): the engine admits a
  * `_sync_` column from that write only, and its hooks and audit run as on any
  * write. The value is an ISO 8601 string. The rows to change are found first,
- * paged by id, under the pull's read context.
+ * paged by id, under the pull's read context; a batch's keys go into the find
+ * {@link KEYS_PER_FILTER} at a time, so one `$in` stays far below every SQL
+ * dialect's bound-parameter limit however long the batch is (a connector
+ * source hands its whole response to one batch).
  */
 
 import { SYNC_PROVENANCE_COLUMNS } from '@objectstack/spec/data';
@@ -97,6 +108,9 @@ export const REFUSED_KEY_LIMIT = 1000;
 
 /** Rows read per page when finding the rows to mark or clear. */
 const MARK_PAGE_SIZE = 500;
+
+/** Keys per `$in` when marking or clearing a batch's rows by key: one bound parameter each. */
+export const KEYS_PER_FILTER = 500;
 
 /** The source block's delete policy, as the pull reads it (absent ⇒ `'mark'`). */
 export interface SyncDeletePolicy {
@@ -146,6 +160,8 @@ export class SyncDeleteMarker {
     private mayCarryMark: boolean | undefined;
     /** Keys of rows read but not written (refused by the runner), up to {@link REFUSED_KEY_LIMIT} + 1. */
     private readonly unwritten = new Set<string>();
+    /** Read rows with no key (a blank match key, refused by the runner): one makes the absence unjudgeable. */
+    private unnamed = 0;
 
     constructor(private readonly init: SyncDeleteMarkerInit) {}
 
@@ -157,7 +173,8 @@ export class SyncDeleteMarker {
      * One batch the pull wrote: the source rows as read, the rows as handed to
      * the import runner (stamped with `_sync_external_id`), and which of them
      * were written. Marks the rows `deletedField` says were deleted, clears
-     * every other read row, and remembers the refused rows' keys.
+     * every other read row, and remembers the refused rows' keys and whether
+     * any read row had none.
      */
     async afterBatch(sourceRows: ReadonlyArray<Rec>, stampedRows: ReadonlyArray<Rec>, written: readonly boolean[]): Promise<void> {
         if (this.policy !== 'mark') return;
@@ -166,27 +183,35 @@ export class SyncDeleteMarker {
         const toClear: string[] = [];
         stampedRows.forEach((row, i) => {
             const key = row[SYNC_EXTERNAL_ID];
-            if (typeof key !== 'string' || key === '') return;
+            if (typeof key !== 'string' || key === '') {
+                this.unnamed++;
+                return;
+            }
             if (written[i] !== true && this.unwritten.size <= REFUSED_KEY_LIMIT) this.unwritten.add(key);
             if (deletedField !== undefined && Boolean(sourceRows[i]?.[deletedField])) toMark.push(key);
             else toClear.push(key);
         });
-        if (toMark.length > 0) {
-            this.marked += await this.stamp(
-                { [SYNC_EXTERNAL_ID]: { $in: toMark }, [SYNC_DELETED_AT]: { $null: true } }, new Date().toISOString());
+        const markedAt = new Date().toISOString();
+        for (let i = 0; i < toMark.length; i += KEYS_PER_FILTER) {
+            await this.stamp(
+                { [SYNC_EXTERNAL_ID]: { $in: toMark.slice(i, i + KEYS_PER_FILTER) }, [SYNC_DELETED_AT]: { $null: true } }, markedAt);
         }
         if (toClear.length > 0 && await this.anyMarked()) {
-            this.cleared += await this.stamp({ [SYNC_EXTERNAL_ID]: { $in: toClear }, [SYNC_DELETED_AT]: { $null: false } }, null);
+            for (let i = 0; i < toClear.length; i += KEYS_PER_FILTER) {
+                await this.stamp(
+                    { [SYNC_EXTERNAL_ID]: { $in: toClear.slice(i, i + KEYS_PER_FILTER) }, [SYNC_DELETED_AT]: { $null: false } }, null);
+            }
         }
     }
 
     /**
      * Whether the absence mark can exclude every refused row by name: false
-     * past {@link REFUSED_KEY_LIMIT} keys, where the caller records
-     * `unjudged, rows refused` and marks nothing by absence.
+     * when any read row had no key, or past {@link REFUSED_KEY_LIMIT} keys,
+     * where the caller records `unjudged, rows refused` and marks nothing by
+     * absence.
      */
     canMarkAbsent(): boolean {
-        return this.unwritten.size <= REFUSED_KEY_LIMIT;
+        return this.unnamed === 0 && this.unwritten.size <= REFUSED_KEY_LIMIT;
     }
 
     /**
@@ -207,7 +232,7 @@ export class SyncDeleteMarker {
         const scoped = range
             ? { $and: [where, { [range.field]: { $null: false } }, { [range.field]: { $gte: range.start } }] }
             : where;
-        this.marked += await this.stamp(scoped, new Date().toISOString());
+        await this.stamp(scoped, new Date().toISOString());
     }
 
     /** Is any row of this mapping marked? Read once; a mark this run makes keeps it true. */
@@ -218,9 +243,12 @@ export class SyncDeleteMarker {
         return this.mayCarryMark;
     }
 
-    /** Set `_sync_deleted_at` to `value` on every row of this mapping `where` matches; answers how many. */
-    private async stamp(where: Rec, value: string | null): Promise<number> {
-        let count = 0;
+    /**
+     * Set `_sync_deleted_at` to `value` on every row of this mapping `where`
+     * matches, counting each row in {@link marked} or {@link cleared} as it is
+     * written, so a run that fails part-way is closed with the rows it changed.
+     */
+    private async stamp(where: Rec, value: string | null): Promise<void> {
         let after: unknown;
         for (;;) {
             const page = await this.find(where, after, MARK_PAGE_SIZE);
@@ -232,13 +260,15 @@ export class SyncDeleteMarker {
                     context: this.init.writeContext,
                     ...(this.init.environmentId ? { environmentId: this.init.environmentId } : {}),
                 } as never);
-                count++;
+                if (value === null) this.cleared++;
+                else {
+                    this.marked++;
+                    this.mayCarryMark = true;
+                }
             }
             if (page.length < MARK_PAGE_SIZE) break;
             after = page[page.length - 1].id;
         }
-        if (value !== null && count > 0) this.mayCarryMark = true;
-        return count;
     }
 
     /** The ids of this mapping's rows `where` matches, after `after` in id order. */
