@@ -228,6 +228,67 @@ describe('the phone bottom bar is drawn on its three pages only (objectstack#358
   });
 });
 
+/**
+ * objectstack#36792 — a scroll container's end padding scrolls only after its
+ * in-flow content. While the bar is drawn the inset (the element that scrolls)
+ * keeps the bar's height as end padding, so on the bar's home and approvals
+ * pages, which grow with their content, the route slot grows with its page
+ * (a one-track grid at least the inset's height): the slot is the inset's
+ * in-flow content and the padding lands after the page's last row. A fixed
+ * `h-full` slot there let a tall page overflow it, and the scroll ended at the
+ * page's bottom, under the bar. The inbox list, an object list page that
+ * bounds itself, keeps the fixed slot; so does every route without the bar.
+ */
+describe('a phone bar page\'s end inset scrolls with its content (objectstack#36792)', () => {
+  const slot = () => screen.getByTestId('console-route');
+  const slotGrows = () => {
+    const c = slot().classList;
+    return c.contains('grid') && c.contains('min-h-full') && c.contains('h-auto') && !c.contains('h-full');
+  };
+  const slotFixed = () => {
+    const c = slot().classList;
+    return c.contains('h-full') && !c.contains('min-h-full') && !c.contains('grid');
+  };
+  const scrollerPadsEnd = () => {
+    const scroller = slot().parentElement!;
+    return (
+      scroller.classList.contains('overflow-y-auto') &&
+      scroller.classList.contains('!pb-[calc(3.5rem+env(safe-area-inset-bottom))]')
+    );
+  };
+
+  it('at 375 px the app home and the approvals inbox grow the slot inside the padded scroller', () => {
+    for (const path of ['/apps/crm', '/apps/crm/', '/apps/crm/system/approvals']) {
+      mountAt(path, 375);
+      expect(slotGrows(), path).toBe(true);
+      expect(scrollerPadsEnd(), path).toBe(true);
+      // The track never widens the slot past the inset.
+      expect(slot().classList.contains('grid-cols-[minmax(0,1fr)]'), path).toBe(true);
+      cleanup();
+    }
+  });
+
+  it('at 375 px the inbox list keeps the fixed slot: it bounds itself above the bar', () => {
+    mountAt('/apps/crm/sys_inbox_message', 375);
+    expect(slotFixed()).toBe(true);
+    expect(scrollerPadsEnd()).toBe(true);
+  });
+
+  it('CONTROL — routes without the bar, and every route from 768 px up, keep the fixed slot', () => {
+    for (const [path, width] of [
+      ['/apps/crm/crm_lead', 375],
+      [RECORD, 375],
+      ['/apps/crm/page/home', 375],
+      ['/apps/crm', 768],
+      ['/apps/crm/system/approvals', 1440],
+    ] as const) {
+      mountAt(path, width);
+      expect(slotFixed(), `${width} px ${path}`).toBe(true);
+      cleanup();
+    }
+  });
+});
+
 describe('an app\'s docs pages draw in the app shell from 768 px up (objectstack#37150), and no app menu (objectstack#35424)', () => {
   const sidebar = () => screen.queryByTestId('sidebar-stub');
   const DOCS_PATHS = [
