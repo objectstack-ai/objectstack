@@ -9,7 +9,7 @@ feat(capabilities): `requires: ['record-context']` mounts the record-context ser
 
 Clause-②: yes
 Metadata-protocol: added
-Skills-docs: follow-up owed — skills/objectstack-platform/SKILL.md (the `requires` table lists no `record-context` row) and skills/objectstack-project/references/platform-catalog.md (the generated capability table, regenerated from `packages/spec/scripts/lib/platform-catalog.ts`)
+Skills-docs: follow-up #37177
 
 An app that ships `aiContexts` packs can now serve `get_record_context` by declaring one token. Before this, the tool existed only where the host composed `RecordContextServicePlugin` in code, so an app booted from its stack file or a compiled artifact had packs that no tool read.
 
