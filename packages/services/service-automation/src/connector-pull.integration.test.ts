@@ -62,6 +62,7 @@ const MAPPING = {
         input: { method: 'GET', path: '/contacts' },
         recordsPath: 'body.results',
         watermark: { field: 'updated_at', param: 'since' },
+        deletePolicy: 'ignore',
     },
 };
 
