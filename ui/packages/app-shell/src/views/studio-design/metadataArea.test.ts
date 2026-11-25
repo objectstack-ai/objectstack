@@ -231,4 +231,3 @@ describe('areaDesignerItemOf — the copilot reads the open flow off its address
     expect(orgScopeFlowOf(`/studio/${PKG}/metadata/flow/f_1`, PKG)).toBeNull();
   });
 });
-});
