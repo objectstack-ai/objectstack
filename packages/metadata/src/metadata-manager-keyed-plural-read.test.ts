@@ -402,8 +402,9 @@ describe('[#32517] the unscoped plural reads answer every package\'s item of an 
   const A = 'com.acme.alpha';
   const B = 'com.acme.beta';
   // [#31699 PR 2] `webhook` joins the slotted set, and so these plural reads;
-  // [#31985] `tool` joins with its narrowing; [#31699 PR 3] `connector` with its.
-  const UNBUNDLED = ['api', 'agent', 'skill', 'action', 'flow', 'permission', 'picklist', 'mapping', 'dataset', 'webhook', 'tool', 'connector'];
+  // [#31985] `tool` joins with its narrowing; [#31699 PR 3] `connector` with its;
+  // `ai_context` with the ADR-0150 addendum (packs are identified by package + name).
+  const UNBUNDLED = ['api', 'agent', 'skill', 'action', 'flow', 'permission', 'picklist', 'mapping', 'dataset', 'webhook', 'tool', 'connector', 'ai_context'];
   const NAME = 'shared_item';
   const item = (packageId: string | undefined, extra: Record<string, unknown> = {}) => ({
     name: NAME,

@@ -288,7 +288,9 @@ files only: no model, no network, and no score of its own — every figure is th
 - **Template and ask modes** author no first build: the row is the build they were supplied. `run --template F`
   writes the file's name and sha256 at the record's top level (`template`), so runs on one template share a row; a
   record that names no file (written before the key) is a row of its own, never summed with another; an ask mode on
-  `this run’s from-scratch build` takes that run's scratch author.
+  `this run’s from-scratch build` takes that run's scratch author. When `F.provenance.json` sits beside the
+  template and names the same card with another `cardSha256` than the sha256 of the card file the run grades, `run`
+  prints a `warning: template provenance:` line before the card runs, and grades the card anyway.
 - **Never summed silently**: a table's runs must share the prompt choice, the package source, the ask repeats and the
   driver (a replay is its own driver), the ask skills (`--ask-skills`: names and sha256; a record without them
   reads `none`), the door arm (`--modes door`, below; a record without one reads `skills: none · rules: none`), the card file they graded (`card`, below; a record without it reads `card: not recorded`), and the schema masking of the apps they booted (`--schema-masking off`, below; a record without it reads `schema masking: on`).

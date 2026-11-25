@@ -157,8 +157,28 @@ export const KnowledgeHitSchema = lazySchema(() => z.object({
   snippet: z.string(),
   /** Optional title surfaced from the document. */
   title: z.string().optional(),
-  /** Free-form metadata propagated from the document. */
+  /**
+   * Free-form metadata propagated from the document. An adapter returns the
+   * document's `metadata` on each hit, as stored: the knowledge service checks
+   * a scoped search's hits against it (`AdapterSearchOptions.scope`, ADR-0161
+   * K8, item 17) and drops a hit that does not carry the value a scope term
+   * names.
+   */
   metadata: z.record(z.string(), z.unknown()).default({}).optional(),
+  /**
+   * The `docHash` the adapter stores for the hit's document, returned as
+   * stored (ADR-0161 K8, item 3). The knowledge service's record-level search
+   * compares it with the hash of the record as it reads now, and drops a hit
+   * whose document is stale. Absent when the adapter stores no hash.
+   */
+  docHash: z.string().optional()
+    .describe('Stored docHash of the hit\'s document, returned as stored by the adapter'),
+  /**
+   * The heading path of the chunk the hit came from, in the chunk's shape:
+   * outermost first (ADR-0161 K8, item 14). Absent when the chunk has none.
+   */
+  headingPath: z.array(z.string()).optional()
+    .describe('Headings the hit\'s chunk sits under, outermost first'),
 }));
 
 export type KnowledgeDocument = z.input<typeof KnowledgeDocumentSchema>;
