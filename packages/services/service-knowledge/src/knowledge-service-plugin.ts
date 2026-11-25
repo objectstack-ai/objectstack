@@ -555,8 +555,8 @@ export class KnowledgeServicePlugin implements Plugin {
 
     ctx.registerService(EMBEDDER_SERVICE, new UnconfiguredEmbedder(outcome.reason));
     const line =
-      `KnowledgeServicePlugin: no embedder is configured — ${outcome.reason}. The service is mounted; ` +
-      'an adapter that embeds refuses indexing and search with this reason until then.';
+      `KnowledgeServicePlugin: no embedder is configured (${outcome.reason}). The knowledge service is mounted; ` +
+      'an adapter that embeds refuses indexing and search with this reason until an embedder is configured.';
     if (outcome.quiet) ctx.logger.info?.(line);
     else ctx.logger.warn?.(line);
   }
