@@ -1073,21 +1073,6 @@ export class KnowledgeService implements IKnowledgeService {
 export const REINDEX_PAGE_SIZE = 100;
 
 /**
- * How many times `topK` a search asks each `object` source for in its first
- * round, when the permission re-check can remove hits ({@link
- * KnowledgeService.search}).
- */
-export const SEARCH_FIRST_ROUND_FACTOR = 5;
-
-/**
- * How many times `topK` the one refill round asks a source for, when fewer
- * than `topK` hits survived the re-check — the cap on what a search reads:
- * a caller who may read fewer matching rows than survive within it is
- * answered fewer than `topK`.
- */
-export const SEARCH_REFILL_FACTOR = 20;
-
-/**
  * Run `task` after every earlier task chained on the same `key` has settled —
  * an in-process promise chain per key, dropped from `tails` once idle.
  * Answers `task`'s own outcome (rejection included); the chain itself never
@@ -1178,6 +1163,21 @@ async function rereadRow(
  * contract limit: the adapter may answer fewer.
  */
 export const LIST_DOCUMENTS_PAGE_SIZE = 500;
+
+/**
+ * How many times `topK` a search asks each `object` source for in its first
+ * round, when the permission re-check can remove hits ({@link
+ * KnowledgeService.search}).
+ */
+export const SEARCH_FIRST_ROUND_FACTOR = 5;
+
+/**
+ * How many times `topK` the one refill round asks a source for, when fewer
+ * than `topK` hits survived the re-check — the cap on what a search reads:
+ * a caller who may read fewer matching rows than survive within it is
+ * answered fewer than `topK`.
+ */
+export const SEARCH_REFILL_FACTOR = 20;
 
 /** What {@link listAdapterDocuments} learned: every listed id → its stored hash, or why there is no listing. */
 type AdapterListing =
