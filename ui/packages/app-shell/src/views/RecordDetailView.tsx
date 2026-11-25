@@ -6036,8 +6036,8 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
   // Open the record's approvals: the panel where the page draws it, else its
   // 审批 tab (objectstack#35595). The approval tag below and the activity
   // stream's 「看审批」 on an approval entry (objectstack#35723) both open it.
-  const hasPageColumns = pageColumns !== null;
-  const openRecordApprovals = useCallback(() => {
+  // A plain function, not a hook: this runs below the page's early returns.
+  const openRecordApprovals = () => {
     const panel = pageRootEl?.querySelector('[data-testid="record-approvals-panel"]');
     if (panel) {
       panel.scrollIntoView({ block: 'start', behavior: 'smooth' });
@@ -6045,9 +6045,9 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
     }
     // objectstack#35595 — the approvals panel is the page's 审批 tab, not
     // drawn on 概览: open that tab.
-    if (hasPageColumns) openEnlargedRelated('approvals');
+    if (pageColumns) openEnlargedRelated('approvals');
     else if (!hasApprovalsNode) handleTabChange('approvals');
-  }, [pageRootEl, hasPageColumns, hasApprovalsNode, openEnlargedRelated, handleTabChange]);
+  };
   // objectstack#35723 — 「看审批」 only where there are approvals this reader is
   // served, the same condition the page's 审批 tab is drawn on.
   const viewApprovals = approvals.available && approvals.requests.length > 0 ? openRecordApprovals : null;
