@@ -489,6 +489,7 @@ function compareIds(a: unknown, b: unknown): number {
 function pagedEngine(rowsIn: PagedRow[]) {
   const rows = [...rowsIn];
   let hold: Promise<void> | undefined;
+  let heldReached: (() => void) | undefined;
   const matches = (row: PagedRow, where: Record<string, unknown> | undefined): boolean => {
     if (!where) return true;
     for (const [key, value] of Object.entries(where)) {
@@ -536,7 +537,10 @@ function pagedEngine(rowsIn: PagedRow[]) {
       .map((r) => ({ ...r }));
     const gate = hold;
     hold = undefined;
-    if (gate) await gate;
+    if (gate) {
+      heldReached?.();
+      await gate;
+    }
     return page;
   });
   const count = vi.fn(async (_object: string, query: { where?: Record<string, unknown> }) =>
@@ -548,10 +552,16 @@ function pagedEngine(rowsIn: PagedRow[]) {
     /** The double's live rows: a case mutates them to change the database under the service. */
     rows,
     /** The next `find` reads at call time but resolves only once the returned function is called. */
-    holdNextFind(): () => void {
+    /**
+     * The next `find` reads at call time but resolves only once the returned
+     * function is called; its `reached` resolves when that `find` has been
+     * entered, so a case waits on the walk itself, never on a clock.
+     */
+    holdNextFind(): (() => void) & { reached: Promise<void> } {
       let release!: () => void;
       hold = new Promise<void>((resolve) => { release = resolve; });
-      return release;
+      const reached = new Promise<void>((resolve) => { heldReached = resolve; });
+      return Object.assign(release, { reached });
     },
   };
 }
@@ -997,7 +1007,7 @@ describe('KnowledgeService — a complete reindex skips unchanged documents and 
     const r001 = h.rows.splice(h.rows.findIndex((r) => r.id === 'r001'), 1)[0];
     const release = h.holdNextFind();
     const walk = h.svc.reindexSource('s1');
-    await new Promise((r) => setTimeout(r, 5));
+    await release.reached;
     h.rows.push(r001);
     await h.svc.handleRecordUpsert('task', { id: 'r001' });
     // A row created during the walk: its document was never listed.
@@ -1127,7 +1137,10 @@ describe('KnowledgeService — the purge never deletes on an answer it cannot re
     // The row is restored and its event sync fires while the purge is held.
     h.rows.push(r001);
     const sync = h.svc.handleRecordUpsert('task', { id: 'r001' });
-    await new Promise((r) => setTimeout(r, 5));
+    // Let every promise that can run, run (one macrotask turn — no clock: the
+    // paths under test await only promises). Off the chain the sync finishes
+    // here, before the purge's delete; on it, the sync is still queued.
+    await new Promise<void>((resolve) => setImmediate(resolve));
     release();
     await Promise.all([walk, sync]);
     // On the chain, the sync re-reads after the purge's delete and writes the
@@ -1135,25 +1148,43 @@ describe('KnowledgeService — the purge never deletes on an answer it cannot re
     expect(la.stored.has('s1:r001')).toBe(true);
   });
 
-  it('a numeric record id restored during the walk is found by its number and kept; a gone one is purged', async () => {
+  it('the purge re-reads by the id text only: a numeric id restored mid-walk is not found (the stated limit)', async () => {
+    // The engine double compares with `!==`, as driver-mongodb and driver-memory
+    // do: a row stored under the number 2 is not found by `{ id: '2' }`. The
+    // purge does not ask again by the number (on driver-sql that number is
+    // bound against a text column), so this pins the limit the docs state.
     const la = listingAdapter();
     const rows = taskRows(5).map((r) => ({ ...r, id: Number(String(r.id).slice(1)) + 1 }));
     const h = reindexHarness(rows, objectSource('s1', 'task'), la.adapter);
     await h.svc.reindexSource('s1');
-    // Row 2 is gone when the walk reads and back before the purge; row 4 is gone for good.
     const row2 = h.rows.splice(h.rows.findIndex((r) => r.id === 2), 1)[0];
     h.rows.splice(h.rows.findIndex((r) => r.id === 4), 1);
     const release = h.holdNextFind();
     const walk = h.svc.reindexSource('s1');
-    await new Promise((r) => setTimeout(r, 5));
+    await release.reached;
     h.rows.push(row2);
     release();
     const res = await walk;
-    expect(res).toMatchObject({ ok: true, purged: 1 });
-    expect(deletedOf(la.deleteSpy)).toEqual(['s1:4']);
-    expect(la.stored.has('s1:2')).toBe(true);
-    // The text form is asked first, then the number the text spells.
+    expect(res).toMatchObject({ ok: true, purged: 2 });
+    expect(deletedOf(la.deleteSpy).sort()).toEqual(['s1:2', 's1:4']);
     const rereads = h.find.mock.calls.filter((c) => c[1].limit === 1).map((c) => c[1].where);
-    expect(rereads).toEqual(expect.arrayContaining([{ id: '2' }, { id: 2 }, { id: '4' }, { id: 4 }]));
+    expect(rereads).toEqual([{ id: '2' }, { id: '4' }]);
+  });
+});
+
+describe('KnowledgeService — the event sync on an unreadable re-read', () => {
+  it('a re-read that answers no list leaves the document and warns once; it does not delete', async () => {
+    const warn = vi.fn();
+    const adapter = makeAdapter('memory');
+    const find = vi.fn(async () => undefined as never);
+    const svc = new KnowledgeService({ dataEngine: { find } as unknown as IDataEngine, logger: { warn } });
+    svc.registerAdapter('memory', adapter);
+    svc.registerSource(objectSource('s1', 'task'));
+    await expect(svc.handleRecordUpsert('task', { id: 'r1', title: 'T', notes: 'N' })).resolves.toBeUndefined();
+    expect(find).toHaveBeenCalledTimes(1);
+    expect(adapter.deleteSpy).not.toHaveBeenCalled();
+    expect(adapter.upsertSpy).not.toHaveBeenCalled();
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(String(warn.mock.calls[0][0])).toMatch(/event-sync failed for source 's1': the re-read of record 'r1' answered undefined instead of a list of rows/);
   });
 });

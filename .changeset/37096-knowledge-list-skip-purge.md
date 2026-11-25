@@ -21,9 +21,11 @@ New, all optional, in `@objectstack/spec`:
 `KnowledgeService.reindexSource` for an `object` source, when the source's adapter implements `listDocuments`:
 
 - does not send a document to the adapter again when its hash is unchanged, and counts it in `skipped`;
-- after a full run (no `limit`, no `dryRun`, every page read), deletes each listed document whose record no longer exists or no longer matches the source's `where`. Before each deletion it reads the record again; a record that exists at that moment keeps its document, a numeric record id included. A deletion never overlaps a sync of the same record. `purged` counts the deletions.
+- after a full run (no `limit`, no `dryRun`, every page read), deletes each listed document whose record no longer exists or no longer matches the source's `where`. Before each deletion it reads the record again; a record that exists at that moment keeps its document. A deletion never overlaps a sync of the same record. `purged` counts the deletions. Known limit: on driver-mongodb and driver-memory, a record stored under a caller-supplied numeric id is not found by that re-read, so if it was restored during the run its document is deleted until the record's next change or the next full reindex.
 
 `purged` is `null` when nothing was deleted because no removal ran: the adapter has no `listDocuments`, the run had a `limit` or `dryRun`, a page failed or answered no list of rows, the source sets `refresh.onRecordChange: false`, or the adapter's listing failed (the `message` says why). If a re-read or a deletion fails, the result is `ok: false` and `purged` counts the deletions made before it.
+
+The record sync (on record create, update and restore) now leaves a document in place and logs a warning when the data engine answers its re-read with something other than a list of rows; it used to delete the document.
 
 `@objectstack/service-knowledge/testing` (new, test-only, ESM only; it imports `vitest`) exports `runKnowledgeAdapterContract({ name, makeAdapter, implements: { listDocuments } })`, a test suite any adapter package runs with its own factory: upsert, search and delete; `listDocuments` paging and `docHash` round-trips; and the skip and the removal through a real `KnowledgeService`. `@objectstack/knowledge-memory` implements `listDocuments` and runs the suite.
 

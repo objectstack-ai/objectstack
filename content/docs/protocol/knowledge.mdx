@@ -470,12 +470,16 @@ id → stored `docHash`), then walks the object's rows page by page:
   makes (the source's `where` AND the record id, under the system context) and
   deleted only when that finds no row. A row created or restored during the
   walk keeps its document: if it was listed, the re-read finds it; if it was
-  not, it was never a candidate. The record id is read back from the document
-  id as text; when that text is a whole number and the first re-read finds no
-  row, the row is asked for again by the number, so a caller-supplied numeric
-  id is found on a driver that does not equate `'5'` with `5`. The purge of a
-  document waits for any in-flight event sync of the same document. `purged`
-  counts the deletions.
+  not, it was never a candidate. The purge of a document waits for any
+  in-flight event sync of the same document. `purged` counts the deletions.
+- **Known limit: numeric record ids.** The purge reads the record id back from
+  the document id as text and re-reads by that text. On driver-mongodb and
+  driver-memory, which do not equate `'5'` with `5`, a row stored under a
+  caller-supplied numeric id is not found by that re-read; if such a row was
+  restored (or came back into `where`) after the walk read past it, its
+  document is deleted. The row itself is untouched, and its document returns at
+  the row's next event or the next complete reindex. Platform-minted ids are
+  text on every driver, so this needs a caller-supplied numeric id.
 - **`purged: null`** means no purge ran: a walk with a `limit` or a `dryRun`,
   a failed walk, a source with `refresh.onRecordChange: false` (an external
   indexer owns its index), or an adapter without `listDocuments` — which also
@@ -490,7 +494,8 @@ list of rows counts as failed, never as "no row" — and the result is
 `ok: false`, `purged` counts the deletions made before it, and the `message`
 names the document. A walk page that answers no list of rows stops the walk
 the same way, with `purged: null`, rather than ending it as if the source were
-empty.
+empty. The event sync shares that re-read: when it answers no list of rows, the
+sync leaves the document in place and logs a warning, rather than deleting it.
 
 ### Retention deletes are covered by a reap guard
 
