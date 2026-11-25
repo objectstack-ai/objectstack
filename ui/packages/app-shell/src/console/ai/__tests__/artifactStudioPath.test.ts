@@ -10,15 +10,15 @@ import { artifactStudioPath } from '../artifactStudioPath';
 describe('artifactStudioPath', () => {
   const pkg = 'app.rmpe';
 
-  it('object → Data pillar with an object surface', () => {
+  it("object → the object designer's address (objectstack#36904)", () => {
     expect(artifactStudioPath(pkg, { type: 'object', name: 'rmpe_customer' })).toBe(
-      '/studio/app.rmpe/data?surface=object%3Armpe_customer',
+      '/studio/app.rmpe/metadata/object/rmpe_customer',
     );
   });
 
-  it('flow → Automations pillar (the reserved ?surface=flow: consumer gets its first producer)', () => {
+  it('flow → the flow designer on its metadata address (objectstack#36903)', () => {
     expect(artifactStudioPath(pkg, { type: 'flow', name: 'customer_lost_follow_up' })).toBe(
-      '/studio/app.rmpe/automations?surface=flow%3Acustomer_lost_follow_up',
+      '/studio/app.rmpe/metadata/flow/customer_lost_follow_up',
     );
   });
 

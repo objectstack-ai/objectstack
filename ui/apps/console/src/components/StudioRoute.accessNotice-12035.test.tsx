@@ -77,9 +77,10 @@ vi.mock('@object-ui/app-shell', async (importOriginal) => ({
   LoadingFallback: () => <div data-testid="loading" />,
   LoadingScreen: () => <div data-testid="error-screen" />,
   getProductName: () => 'ObjectOS',
-  BuilderLanding: () => {
+  // objectstack#36908 — bare `/studio` is Studio's entry, which draws no page.
+  StudioEntryRedirect: () => {
     builderLanding();
-    return <div data-testid="studio-front-door">pick a package</div>;
+    return <div data-testid="studio-entry">entry</div>;
   },
   StudioDesignSurface: () => <div data-testid="studio-pillar-builder" />,
 }));
@@ -120,8 +121,8 @@ function inLanguage(language: Language) {
 beforeEach(() => {
   systemPermissions = [];
   builderLanding.mockClear();
-  // The landing mounts the real `AppHeader`, which reads its user-scoped feeds
-  // on mount; each answers empty here, so no request leaves the process.
+  // A screen that mounts the real `AppHeader` reads its user-scoped feeds on
+  // mount; each answers empty here, so no request leaves the process.
   vi.stubGlobal('fetch', vi.fn(async () => jsonResponse({ data: [] })));
 });
 
@@ -164,7 +165,7 @@ describe('CONTROL: a caller with Studio access enters Studio as today', () => {
     systemPermissions = [STUDIO_ENTRY_CAPABILITY];
     renderStudio('/studio/');
 
-    await waitFor(() => expect(screen.getByTestId('studio-front-door')).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByTestId('studio-entry')).toBeInTheDocument());
     expect(builderLanding).toHaveBeenCalled();
     expect(screen.getByTestId('pathname').textContent).toBe('/studio/');
     expect(screen.queryByText(sentenceIn(lang))).not.toBeInTheDocument();

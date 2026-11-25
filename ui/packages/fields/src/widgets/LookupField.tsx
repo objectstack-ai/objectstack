@@ -43,8 +43,12 @@ import {
   planDeclaredLookupAutofill,
   readLookupAutofillTargets,
   withheldAutofillMessage,
+  withheldAutofillNow,
   withheldStillStands,
+  copiedAutofillMessage,
+  copiedAutofillNow,
   type AutofillCurrencyContext,
+  type CopiedAutofill,
   type LookupAutofillPair,
   type WithheldAutofill,
 } from './lookupAutofill.js';
@@ -1310,10 +1314,18 @@ export function LookupField({ value, onChange, field, readonly, error: fieldErro
     },
     [currencyTargets, refObjectSchema, homeCurrency, editedRecordForCurrency, followedParentUnread],
   );
-  /** What the last fill left empty, for the record it picked; said under the field. */
-  const [withheldFill, setWithheldFill] = useState<{ picked: string; items: readonly WithheldAutofill[] } | null>(null);
-  const noteWithheld = useCallback((picked: unknown, items: readonly WithheldAutofill[]) => {
-    setWithheldFill(items.length > 0 && picked != null ? { picked: String(picked), items } : null);
+  /**
+   * What the last fill left unwritten and the amounts it copied (with the
+   * code each was copied under), for the record it picked; said under the
+   * field, judged against the record's currency as it is now.
+   */
+  const [withheldFill, setWithheldFill] = useState<{
+    picked: string;
+    items: readonly WithheldAutofill[];
+    copied: readonly CopiedAutofill[];
+  } | null>(null);
+  const noteWithheld = useCallback((picked: unknown, items: readonly WithheldAutofill[], copied: readonly CopiedAutofill[]) => {
+    setWithheldFill(items.length + copied.length > 0 && picked != null ? { picked: String(picked), items, copied } : null);
   }, []);
 
   /**
@@ -1332,8 +1344,8 @@ export function LookupField({ value, onChange, field, readonly, error: fieldErro
         heldId == null || heldId === ''
           ? null
           : pickedRecords.find((r) => String(recordValue(r, idField)) === String(heldId)) ?? null;
-      const { patch, withheld } = planDeclaredLookupAutofill(autofillPairs, row, resolvedDependentValues, previous, currencyFor(row));
-      noteWithheld(recordValue(row, idField), withheld);
+      const { patch, withheld, copied } = planDeclaredLookupAutofill(autofillPairs, row, resolvedDependentValues, previous, currencyFor(row));
+      noteWithheld(recordValue(row, idField), withheld, copied ?? []);
       if (Object.keys(patch).length > 0) onAutofill(patch);
     },
     [autofillPairs, onAutofill, normalizeId, value, pickedRecords, idField, resolvedDependentValues, currencyFor, noteWithheld],
@@ -1378,14 +1390,14 @@ export function LookupField({ value, onChange, field, readonly, error: fieldErro
     if (autofillCurrency && (!refSchemaSettled || followedParentPending)) return;
     openingFilledRef.current = key;
     setPickedRecords((prev) => mergeRowsByValue(prev, [row], idField));
-    const { patch, withheld } = planDeclaredLookupAutofill(
+    const { patch, withheld, copied } = planDeclaredLookupAutofill(
       autofillPairs.map(({ target, source }) => ({ target, source })),
       row,
       resolvedDependentValues,
       null,
       currencyFor(row),
     );
-    noteWithheld(key, withheld);
+    noteWithheld(key, withheld, copied ?? []);
     if (Object.keys(patch).length > 0) onAutofill(patch, { opening: true });
   }, [autofillPairs, onAutofill, openingValue, value, normalizeId, hydratedRecords, idField, resolvedDependentValues, autofillCurrency, refSchemaSettled, followedParentPending, currencyFor, noteWithheld]);
 
@@ -2457,12 +2469,25 @@ export function LookupField({ value, onChange, field, readonly, error: fieldErro
   // objectstack#36249 — what the last fill did not copy because the picked
   // amount is in another currency, while the field still holds that pick and
   // the target still holds what it held at the pick (empty, or the earlier
-  // value a re-pick left in place).
+  // value a re-pick left in place). objectstack#36412 (ruling 「保留金额并提示」)
+  // — each note is judged against the record's currency now, so a currency
+  // change in the same edit refreshes it; an amount the pick copied, still
+  // held, is named with the code it was copied under once the record's
+  // differs. A currency change writes no amount.
   const heldNow = normalizeId(value);
-  const withheldShown =
-    withheldFill && heldNow != null && String(heldNow) === withheldFill.picked
-      ? withheldFill.items.filter((w) => withheldStillStands(w, resolvedDependentValues?.[w.target]))
-      : [];
+  const pickStands = !!withheldFill && heldNow != null && String(heldNow) === withheldFill.picked;
+  const currencyNow = currencyFor({});
+  const withheldShown = pickStands
+    ? withheldFill.items
+        .filter((w) => withheldStillStands(w, resolvedDependentValues?.[w.target]))
+        .map((w) => withheldAutofillNow(w, currencyNow?.targetCurrency(w.target), homeCurrency))
+    : [];
+  const copiedShown = pickStands
+    ? withheldFill.copied.flatMap((c) => {
+        const now = copiedAutofillNow(c, resolvedDependentValues?.[c.target], currencyNow?.targetCurrency(c.target), homeCurrency);
+        return now ? [{ item: c, now }] : [];
+      })
+    : [];
   const withheldLabel = (target: string): string => {
     const label = (autofillTargets?.[target] as { label?: unknown } | undefined)?.label;
     return typeof label === 'string' && label !== '' ? label : target;
@@ -2661,6 +2686,15 @@ export function LookupField({ value, onChange, field, readonly, error: fieldErro
           {withheldShown.map((w) => (
             <p key={w.target} data-withheld-target={w.target}>
               {withheldAutofillMessage(w, withheldLabel(w.target), t, displayLocale)}
+            </p>
+          ))}
+        </div>
+      )}
+      {copiedShown.length > 0 && (
+        <div className="text-xs text-muted-foreground" role="status" data-testid="lookup-autofill-copied">
+          {copiedShown.map(({ item, now }) => (
+            <p key={item.target} data-copied-target={item.target}>
+              {copiedAutofillMessage(item, now, withheldLabel(item.target), t, displayLocale)}
             </p>
           ))}
         </div>

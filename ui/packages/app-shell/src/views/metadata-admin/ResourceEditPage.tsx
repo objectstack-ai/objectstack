@@ -174,6 +174,7 @@ import { FlowLedgerSwitch } from '../studio-design/FlowLedgerSwitch.js';
 import { useActionLedger } from '../setup/packagedActionLedger.js';
 import { standaloneActionObjectName } from '../setup/packagedActions.js';
 import { useMetadataAreaHost } from './metadataAreaHost.js';
+import { studioCreateLandsInApp } from '../studio-design/studioAppEdit.js';
 import { declarationOnlyAuthoredObject } from './sharing-rule-catalog.js';
 import { useRegisterUnsavedEdits } from '../../chrome/unsavedEdits.js';
 import { useNavigationWrites } from '../../hooks/useNavigationSync.js';
@@ -2264,6 +2265,11 @@ function MetadataResourceEditPageImpl({
         const qs = searchParams.toString();
         navigate(`../${encodeURIComponent(savedName)}${qs ? `?${qs}` : ''}`, {
           relative: 'path',
+          // objectstack#36906 — in a Studio package's area a new dashboard or
+          // report opens in its app at once, so the create's own entry is
+          // replaced: Back from the app lands on the list, not on an empty
+          // create page.
+          replace: studioCreateLandsInApp(areaHost?.packageId, type),
         });
       }
     } catch (err: any) {

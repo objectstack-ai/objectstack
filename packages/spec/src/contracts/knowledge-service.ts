@@ -63,6 +63,38 @@ export interface KnowledgeReindexResult {
   ok: boolean;
   /** Free-form diagnostics. */
   message?: string;
+  /**
+   * Documents the walk did not push because the adapter already holds them
+   * with the same `docHash` (ADR-0161 K8, item 2). `0` when the adapter has
+   * no `listDocuments`, whose walk pushes every document. Absent from a result
+   * of an implementation that predates the field.
+   */
+  skipped?: number;
+  /**
+   * Documents deleted by the purge that follows a complete walk: listed by
+   * the adapter before the walk, not seen in it, and confirmed gone by a
+   * re-read of their row (ADR-0161 K8, item 1). `null` when no purge ran:
+   * a source that is not an `object` source, no data engine bound, a refused
+   * `limit`, a walk with `limit` or `dryRun`, a failed walk, a source with
+   * `refresh.onRecordChange: false`, an adapter without `listDocuments`, or a
+   * listing that failed. A number, with `ok: false`, when the purge stopped
+   * part-way: the deletions made before it stopped. Absent from a result of an
+   * implementation that predates the field.
+   */
+  purged?: number | null;
+  /**
+   * Documents removed from the index instead of written, because they cannot
+   * be indexed as the source's split asks — today a `whole` document whose
+   * token estimate is over the embedder's input budget, which is never
+   * truncated. `0` when none was. Absent from a result of an implementation
+   * that predates the field.
+   */
+  failed?: number;
+  /**
+   * Which documents those were and why, in walk order, bounded by the
+   * service (`failed` counts them all). Absent when `failed` is absent.
+   */
+  failures?: Array<{ documentId: string; reason: string }>;
 }
 
 /**

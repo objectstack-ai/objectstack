@@ -21,6 +21,17 @@
  * query, asks nothing and hands nothing down: the code field then offers home
  * + rated + the record's own code. `aggregate` is not asked instead — it may
  * degrade to fetching every row, which is no price for a dropdown.
+ *
+ * A PARTIAL answer is read as no answer (objectstack#37278). The header query
+ * names no `limit`, so a deployment with a default page size cuts the group
+ * rows to that page and answers `hasMore`, which `queryGroupHeaders` hands on
+ * as the answer's `hasMore` (`ListViewGroupHeaderAnswer`). A cut answer is
+ * not every stored code, and the "available" group would read it as if it
+ * were: a code in use would sit in "all" as one nobody used. The header query
+ * cannot ask for the rest — it carries no `limit`, and the platform's grouped
+ * read reads no `offset` — so the field gets what a failed read gives it,
+ * home + rated + the record's own code, as the kanban lane statistic draws no
+ * figure from a cut answer. Every code stays offered in "all".
  */
 
 import * as React from "react"
@@ -47,8 +58,12 @@ export function usedCurrencyCodesQuery(codeField: string) {
   return compileListViewGroupQuery({ grouping: { fields: [{ field: codeField }] } } as never, { depth: 1 })
 }
 
-/** The distinct, domain-valid codes of `codeField` in a header answer, sorted. */
+/**
+ * The distinct, domain-valid codes of `codeField` in a header answer, sorted —
+ * none for a partial answer (`hasMore`), which is not every stored code.
+ */
 export function readUsedCurrencyCodes(rows: readonly Record<string, unknown>[] | undefined, codeField: string): string[] {
+  if ((rows as { hasMore?: unknown } | undefined)?.hasMore === true) return []
   const codes = new Set<string>()
   for (const row of rows ?? []) {
     const code = row?.[codeField]
@@ -66,8 +81,8 @@ export function withUsedCurrencyCodes<T>(def: T, codes: readonly string[] | unde
 /**
  * Code field name → the codes its object's records hold. Asked once per
  * (object, code fields) — keyed on content, so a host that rebuilds its field
- * list every render does not re-ask. A failed read leaves that field's entry
- * out; the picker still works.
+ * list every render does not re-ask. A failed read, or a partial one, leaves
+ * that field's entry out; the picker still works.
  */
 export function useUsedCurrencyCodes(
   dataSource: DataSource | null | undefined,

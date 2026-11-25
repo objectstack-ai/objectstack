@@ -123,3 +123,13 @@ describe('↑ ↓ step through the host set (ruling 3 keeps the controls)', () =
     expect(onPrevious).not.toHaveBeenCalled();
   });
 });
+
+describe('the drawer bar takes no comments switch (objectstack#36410)', () => {
+  it('`comments` is not a NavigationOverlay prop, and a stray one is not drawn', () => {
+    // @ts-expect-error `comments` left NavigationOverlayProps: the record's comments live on its full page
+    const stray: Partial<NavigationOverlayProps> = { comments: <button type="button" data-testid="stray-comments" /> };
+    renderBar(stray);
+    expect(document.querySelector('[data-record-top-bar]')).not.toBeNull();
+    expect(screen.queryByTestId('stray-comments')).toBeNull();
+  });
+});

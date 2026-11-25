@@ -209,6 +209,12 @@ export function registerApprovalNode(
           // The node object this run executes: a step naming the platform
           // administrators opens only when it belongs to the armed body.
           node,
+          // [#35863] Whether this run is the record's whole approval run or a
+          // child of another (a `subflow` body or a `map` item: the engine
+          // links those upward by `$parentRunId`). A child run's end is not
+          // the end of the record's approval, so a decided route may say
+          // "ended" only for a root run's request.
+          runRoot: !hasParentRun(context),
         }, {
           ...SYSTEM_CTX,
           userId: context?.userId,
@@ -255,4 +261,14 @@ export function registerApprovalNode(
   });
 
   logger?.info?.('[approvals] approval node executor registered');
+}
+
+/**
+ * [#35863] Whether `context` is a child run's: the engine starts a `subflow`
+ * body or a `map` item with the parent's run id as `$parentRunId`. Read the
+ * way the engine's own readers read it (a non-empty string).
+ */
+function hasParentRun(context: unknown): boolean {
+  const parent = (context as { $parentRunId?: unknown } | undefined)?.$parentRunId;
+  return typeof parent === 'string' && parent !== '';
 }

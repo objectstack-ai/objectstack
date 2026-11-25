@@ -4,7 +4,7 @@
  * PackageFormDialog — ONE modal for creating, editing, and viewing a package,
  * rendered from the spec-derived manifest form (`package-schema`) through the
  * generic {@link SchemaForm}. It replaces the three hand-rolled package forms
- * (CreatePackageDialog / EditPackageDialog / the BuilderLanding inline form),
+ * (CreatePackageDialog / EditPackageDialog / the old Studio home's inline form),
  * each of which carried its own field list and id-validation regex — a package
  * created on one surface was rejected by another.
  *
@@ -47,7 +47,7 @@ import * as React from 'react';
 import { AlertTriangle, ChevronDown } from 'lucide-react';
 import { toast } from 'sonner';
 import { ManifestSchema, deriveNamespaceFromPackageId } from '@objectstack/spec/kernel';
-import { useAuth } from '@object-ui/auth';
+import { createAuthenticatedFetch, useAuth } from '@object-ui/auth';
 import { NAMESPACE_RE, isSpecPackageId } from '../studio-design/packages-io.js';
 import { PackageIdInput } from '../studio-design/PackageIdInput.js';
 import {
@@ -72,6 +72,11 @@ import { PackageDependenciesEditor, type DependencyMap } from './PackageDependen
 import { romanizeHan, romanizerPending, useHanRomanizer } from './romanizeHan.js';
 import { readEnvelopeFailureText } from '../../utils/apiErrorEnvelope.js';
 import type { NewAppStep } from '../studio-design/newAppDoor.js';
+
+/** The console's authenticated fetch: the stored bearer token beside the session cookie. */
+function authFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+  return createAuthenticatedFetch()(input, init);
+}
 
 const API = '/api/v1/packages';
 
@@ -356,7 +361,7 @@ function readEnvelopeUserMessage(payload: unknown): string {
 type ApiJsonError = Error & { status: number; userMessage: string };
 
 async function apiJson<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(path, {
+  const res = await authFetch(path, {
     credentials: 'include',
     headers: { Accept: 'application/json', ...(init?.headers || {}) },
     ...init,

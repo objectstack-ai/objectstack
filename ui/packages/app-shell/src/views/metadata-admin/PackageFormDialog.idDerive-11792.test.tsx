@@ -30,6 +30,10 @@ await loadStudioCatalogue('zh');
 // The pinyin dictionary a Chinese name derives through, resident before any
 // case, as it is once a Console door has fetched it (objectstack#29690).
 import { loadHanRomanizer } from './romanizeHan';
+// The source under test reaches a dynamic `import('@objectstack/formula')` and `import('@objectstack/lint')`: pay its load at
+// collection, never inside a case's clocked window (`check:test-source-alias`).
+import '@objectstack/formula';
+import '@objectstack/lint';
 await loadHanRomanizer();
 
 let localeFixture: 'en-US' | 'zh-CN' = 'en-US';
@@ -60,7 +64,7 @@ beforeEach(() => {
       const body = init.body ? JSON.parse(init.body as string) : {};
       const manifest = body.manifest ?? body;
       return {
-        ok: true,
+        headers: new Headers(), ok: true,
         status: 201,
         text: async () => JSON.stringify({ success: true, data: { manifest } }),
       } as Response;

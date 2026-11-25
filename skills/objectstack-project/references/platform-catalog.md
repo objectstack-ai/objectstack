@@ -133,6 +133,7 @@ whether or not the stack lists it. Declare what the app uses
 | `approvals` | approval nodes and requests | open | on `requires` |
 | `settings` | the settings store | open | every boot |
 | `webhooks` | outbound webhooks | open | on `requires` |
+| `record-context` | get_record_context over MCP | open | on `requires` |
 | `hierarchy-security` | hierarchy-relative permission scopes | enterprise | on `requires` |
 | `ai-seat` | the AI-seat tier | cloud | on `requires` |
 | `governance` | the governance tier | cloud | on `requires` |

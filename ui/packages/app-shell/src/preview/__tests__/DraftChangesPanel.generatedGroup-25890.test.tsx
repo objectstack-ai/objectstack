@@ -46,6 +46,9 @@ vi.mock('@object-ui/i18n', async (importOriginal) => ({
 }));
 
 import { DraftChangesPanel, computeChangeDetail } from '../DraftChangesPanel';
+// The source under test reaches a dynamic `import('@objectstack/lint')`: pay its load at
+// collection, never inside a case's clocked window (`check:test-source-alias`).
+import '@objectstack/lint';
 
 /** The read's zh-CN labels for the injected columns (`SYSTEM_FIELD_LABELS`). */
 const ZH_LABELS: Record<string, string> = {
@@ -167,7 +170,7 @@ describe('computeChangeDetail — what the platform wrote is not an author row (
  * default is the card's NEW object.
  */
 function stubServer(published: Record<string, unknown> | null = null) {
-  const ok = (body: unknown) => ({ ok: true, status: 200, json: async () => body });
+  const ok = (body: unknown) => ({ headers: new Headers(), ok: true, status: 200, json: async () => body });
   vi.stubGlobal(
     'fetch',
     vi.fn(async (input: RequestInfo | URL) => {
@@ -180,7 +183,7 @@ function stubServer(published: Record<string, unknown> | null = null) {
         return ok({ item: REPAIR_TICKET_DRAFT });
       }
       if (published && url.includes(`/meta/object/${AUTHORED.name}`)) return ok(published);
-      return { ok: false, status: 404, json: async () => ({}) };
+      return { headers: new Headers(), ok: false, status: 404, json: async () => ({}) };
     }) as unknown as typeof fetch,
   );
 }

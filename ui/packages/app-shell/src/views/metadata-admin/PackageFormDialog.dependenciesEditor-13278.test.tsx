@@ -23,6 +23,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 
 import { PackageFormDialog, type ManifestRecord } from './PackageFormDialog';
+// The source under test reaches a dynamic `import('@objectstack/formula')` and `import('@objectstack/lint')`: pay its load at
+// collection, never inside a case's clocked window (`check:test-source-alias`).
+import '@objectstack/formula';
+import '@objectstack/lint';
 
 vi.mock('./i18n', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
@@ -48,7 +52,7 @@ function stubFetch() {
     vi.fn(async (url: string, init: RequestInit = {}) => {
       calls.push({ url, init });
       return {
-        ok: true,
+        headers: new Headers(), ok: true,
         status: 200,
         text: async () => JSON.stringify({ success: true, data: { manifest: MANIFEST } }),
       } as Response;

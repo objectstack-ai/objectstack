@@ -74,6 +74,11 @@ export const PLATFORM_CAPABILITY_TOKENS: readonly string[] = Object.freeze([
   'approvals',
   'settings',
   'webhooks',
+  // Record context (ADR-0160 D5): the `record-context` service, which serves
+  // `get_record_context` over MCP from the app's `aiContexts` packs.
+  // Requested, never always-on: whether an app exposes a read tool is the
+  // app's own declaration, not a side effect of shipping packs.
+  'record-context',
   // Enterprise / cloud-runtime capabilities (no open-edition provider:
   // `hierarchy-security` ships in @objectstack/security-enterprise via
   // `plugins[]`; `ai-seat` / `governance` / `audit-compliance` /
@@ -227,6 +232,7 @@ export const PLATFORM_CAPABILITY_PROVIDERS: Readonly<Record<string, PlatformCapa
     approvals: { package: '@objectstack/plugin-approvals', edition: 'open' },
     settings: { package: '@objectstack/service-settings', edition: 'open' },
     webhooks: { package: '@objectstack/plugin-webhooks', edition: 'open' },
+    'record-context': { package: '@objectstack/service-record-context', edition: 'open' },
     // ── Enterprise / cloud-runtime capabilities ────────────────────────────
     'hierarchy-security': {
       package: '@objectstack/security-enterprise',

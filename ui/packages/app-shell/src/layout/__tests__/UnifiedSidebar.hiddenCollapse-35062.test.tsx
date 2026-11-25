@@ -714,7 +714,7 @@ describe('the float carries the app menu, and its 「Design layout」 enters the
     vi.stubGlobal(
       'fetch',
       vi.fn(async (url: unknown) => ({
-        ok: true,
+        headers: new Headers(), ok: true,
         status: 200,
         json: async () =>
           String(url).endsWith('/api/v1/packages')

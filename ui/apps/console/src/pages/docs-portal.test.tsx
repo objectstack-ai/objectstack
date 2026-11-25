@@ -1098,3 +1098,207 @@ describe('objectstack#37150 — from 768 px up an app\'s docs pages draw in the 
     expect(screen.queryByTestId('sidebar-docs-nav')).toBeNull();
   });
 });
+
+describe('objectstack#37197 — the portal\'s tree in the app-less shell, 「All documentation」 the first docs row in both docs sidebars', () => {
+  function Where() {
+    return <div data-testid="where">{useLocation().pathname}</div>;
+  }
+  /**
+   * The portal's routes (`App.tsx`'s `/docs` tree) inside the shell's docs
+   * place, as `DocsPortalShell` mounts it from 768 px up: the sidebar's body
+   * (`UnifiedSidebar` draws the target) and the page header's group.
+   */
+  function InPortalShell({ entry }: { entry: string }) {
+    return (
+      <MemoryRouter initialEntries={[entry]}>
+        <SidebarDocsNavSlotProvider>
+          <aside data-testid="shell-sidebar">
+            <SidebarDocsNavTarget />
+          </aside>
+          <main data-testid="shell-route">
+            <Where />
+            <Routes>
+              <Route path="/docs" element={<DocsLayout />}>
+                <Route index element={<DocsIndex />} />
+                <Route path=":slug" element={<DocsSlug />} />
+                <Route path=":slug/:name" element={<DocPage />} />
+              </Route>
+              <Route path="/apps/:appName/docs" element={<DocsLayout />}>
+                <Route index element={<AppDocsIndex />} />
+                <Route path=":slug" element={<DocsSlug />} />
+                <Route path=":slug/:name" element={<DocPage />} />
+              </Route>
+            </Routes>
+          </main>
+        </SidebarDocsNavSlotProvider>
+      </MemoryRouter>
+    );
+  }
+  /** The phone's portal: no shell sidebar, so the page draws its column itself. */
+  function OnPhone({ entry }: { entry: string }) {
+    return (
+      <MemoryRouter initialEntries={[entry]}>
+        <Where />
+        <Routes>
+          <Route path="/docs" element={<DocsLayout />}>
+            <Route index element={<DocsIndex />} />
+            <Route path=":slug" element={<DocsSlug />} />
+            <Route path=":slug/:name" element={<DocPage />} />
+          </Route>
+          <Route path="/apps/:appName/docs" element={<DocsLayout />}>
+            <Route path=":slug" element={<DocsSlug />} />
+            <Route path=":slug/:name" element={<DocPage />} />
+          </Route>
+        </Routes>
+      </MemoryRouter>
+    );
+  }
+  const sidebar = () => screen.getByTestId('shell-sidebar');
+  const page = () => screen.getByTestId('shell-route');
+  const column = () => within(sidebar()).getByTestId('docs-nav');
+  /** The column's rows in reading order: links and book buttons, by their test id or name. */
+  const firstRow = (nav: HTMLElement) => nav.querySelector('a, button, input');
+  /** The first docs entry: the first row after the way back to an app, which is the shell's navigation, not a docs row. */
+  const firstDocsRow = (nav: HTMLElement) =>
+    [...nav.querySelectorAll('a, button, input')].find((el) => el.getAttribute('data-testid') !== 'docs-nav-back');
+  const precedes = (a: Element, b: Element) => (a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0;
+  const lastLink = (nav: HTMLElement) => [...nav.querySelectorAll('a')].pop();
+  /** The headings of the tree's sections and each section's books, in order. */
+  const treeSections = () =>
+    within(column())
+      .getAllByTestId('docs-nav-section')
+      .map((section) => [
+        within(section).getByTestId('docs-nav-section-label').textContent,
+        within(section)
+          .getAllByRole('button')
+          .map((b) => b.firstElementChild?.textContent),
+      ]);
+  const SETUP_APP = { name: 'setup', label: 'System settings', _packageId: 'com.objectstack.setup', navigation: [] };
+
+  beforeEach(() => {
+    WORLD.authored = true;
+    WORLD.shellActions = true;
+    WORLD.apps = [
+      { name: 'showcase_app', label: 'Showcase', _packageId: 'com.example.showcase', navigation: [] },
+      {
+        name: 'alpha_app',
+        label: 'Alpha',
+        _packageId: 'com.example.alpha',
+        navigation: [{ id: 'help', type: 'group', children: [{ id: 'nav_beta', type: 'doc', book: 'handbook' }] }],
+      },
+    ];
+  });
+  afterEach(() => {
+    WORLD.authored = false;
+    WORLD.shellActions = false;
+    WORLD.platform = false;
+    WORLD.apps = [];
+  });
+
+  it('/docs: the sidebar carries the tree, every book under its app\'s heading in the index\'s order, 「All documentation」 first and current', async () => {
+    render(<InPortalShell entry="/docs" />);
+    await within(page()).findByRole('heading', { level: 2, name: 'Showcase' });
+    const nav = column();
+    expect(firstRow(nav)).toBe(within(nav).getByTestId('docs-nav-all-docs'));
+    expect(within(nav).getByTestId('docs-nav-all-docs')).toHaveAttribute('href', '/docs');
+    expect(within(nav).getByTestId('docs-nav-all-docs')).toHaveAttribute('aria-current', 'page');
+    expect(treeSections()).toEqual([
+      ['Showcase', ['Showcase Manual', 'Leads Book']],
+      ['Alpha', ['Alpha Manual', 'Beta Handbook']],
+      ['Other documentation', ['Acme Manual', 'Ops']],
+    ]);
+    // The portal is in no app: no way back to one, and no column in the page.
+    expect(within(nav).queryByTestId('docs-nav-back')).toBeNull();
+    expect(within(page()).queryByTestId('docs-nav')).toBeNull();
+    expect(screen.getAllByTestId('docs-nav')).toHaveLength(1);
+    expect(within(sidebar()).getByRole('navigation', { name: 'Documentation navigation' })).toContainElement(nav);
+  });
+
+  it('a book open: the reader in the page, its book open in the tree with the article current, 「All documentation」 first and not current', async () => {
+    render(<InPortalShell entry="/docs/manual/showcase_lead_guide" />);
+    expect(await screen.findByTestId('doc-content')).toHaveTextContent('LEAD BODY');
+    const nav = column();
+    expect(firstRow(nav)).toBe(within(nav).getByTestId('docs-nav-all-docs'));
+    expect(within(nav).getByTestId('docs-nav-all-docs')).not.toHaveAttribute('aria-current');
+    expect(within(nav).getByRole('button', { name: /Showcase Manual/ })).toHaveAttribute('aria-expanded', 'true');
+    expect(within(nav).getByRole('button', { name: /Alpha Manual/ })).toHaveAttribute('aria-expanded', 'false');
+    const current = within(nav).getAllByRole('link', { name: 'Lead Guide' }).filter((l) => l.getAttribute('aria-current') === 'page');
+    expect(current.map((l) => l.getAttribute('href'))).toEqual(['/docs/manual/showcase_lead_guide']);
+    expect(within(page()).queryByTestId('docs-nav')).toBeNull();
+    expect(within(screen.getByTestId('docs-page-header')).getByTestId('shell-page-actions-stub')).toBeInTheDocument();
+  });
+
+  it('a book named by its app in the index is named the same in the tree, not by its package id', async () => {
+    WORLD.platform = true;
+    WORLD.apps = [...WORLD.apps, SETUP_APP];
+    render(<InPortalShell entry="/docs" />);
+    await within(page()).findByRole('heading', { level: 2, name: 'System settings' });
+    expect(treeSections()).toContainEqual(['System settings', ['System settings']]);
+    expect(within(column()).queryByRole('button', { name: /^Setup/ })).toBeNull();
+  });
+
+  // ADR-0046 section 6: every portal URL keeps its answer in the new frame.
+  it.each([
+    ['the index', '/docs', '/docs', null],
+    ['a book SLUG', '/docs/manual', '/docs/manual/showcase_index', 'INDEX BODY'],
+    ['a book NAME', '/docs/showcase_manual', '/docs/manual/showcase_index', 'INDEX BODY'],
+    ['a book NAME with its doc', '/docs/showcase_manual/showcase_lead_guide', '/docs/manual/showcase_lead_guide', 'LEAD BODY'],
+    ['a doc name that is also a book name (the doc permalink wins)', '/docs/showcase_lead_guide', '/docs/manual/showcase_lead_guide', 'LEAD BODY'],
+    ['the canonical SLUG/DOC', '/docs/manual/showcase_lead_guide', '/docs/manual/showcase_lead_guide', 'LEAD BODY'],
+    ['an implicit package book', '/docs/com.example.ops', '/docs/com.example.ops/ops_setup', 'OPS BODY'],
+    ['a slug that is another book\'s name', '/docs/handbook', '/docs/handbook/alpha_welcome', 'ALPHA BODY'],
+  ])('%s, %s, lands on %s in the shell', async (_what, entry, where, body) => {
+    render(<InPortalShell entry={entry} />);
+    if (body) expect(await screen.findByTestId('doc-content')).toHaveTextContent(body);
+    else await within(page()).findByRole('heading', { level: 2, name: 'Showcase' });
+    expect(screen.getByTestId('where')).toHaveTextContent(where);
+    expect(within(sidebar()).getByTestId('docs-nav')).toBeInTheDocument();
+    expect(within(page()).queryByTestId('docs-nav')).toBeNull();
+  });
+
+  it('an app\'s docs sidebar puts 「All documentation」 first among the docs entries: under the way back to the app, above the filter and the books', async () => {
+    render(<InPortalShell entry="/apps/com.example.showcase/docs/manual/showcase_lead_guide" />);
+    await screen.findByTestId('doc-content');
+    const nav = column();
+    const allDocs = within(nav).getByTestId('docs-nav-all-docs');
+    const back = within(nav).getByTestId('docs-nav-back');
+    expect(allDocs).toHaveAttribute('href', '/docs');
+    // The way back is the shell's navigation and stays the column's top row.
+    expect(firstRow(nav)).toBe(back);
+    expect(precedes(back, allDocs)).toBe(true);
+    // 「All documentation」 is the first docs row: before the filter and the first book.
+    expect(firstDocsRow(nav)).toBe(allDocs);
+    expect(precedes(allDocs, within(nav).getByTestId('docs-nav-search'))).toBe(true);
+    expect(precedes(allDocs, within(nav).getAllByRole('button')[0])).toBe(true);
+    // The app's column is one package's books, with no app headings.
+    expect(within(nav).queryAllByTestId('docs-nav-section')).toHaveLength(0);
+  });
+
+  it('…and so does an app\'s docs page that is not the reader (its docs index)', async () => {
+    render(<InPortalShell entry="/apps/com.example.showcase/docs" />);
+    await within(page()).findByText('Leads Book');
+    const nav = column();
+    expect(firstRow(nav)).toBe(within(nav).getByTestId('docs-nav-back'));
+    expect(firstDocsRow(nav)).toBe(within(nav).getByTestId('docs-nav-all-docs'));
+    expect(precedes(within(nav).getByTestId('docs-nav-all-docs'), within(nav).getAllByRole('button')[0])).toBe(true);
+  });
+
+  it('PHONE CONTROL — the column the page draws itself keeps 「All documentation」 at its foot, the portal\'s and an app\'s alike', async () => {
+    WORLD.shellActions = false;
+    for (const entry of ['/docs/manual/showcase_lead_guide', '/apps/com.example.showcase/docs/manual/showcase_lead_guide']) {
+      render(<OnPhone entry={entry} />);
+      await screen.findByTestId('doc-content');
+      const navs = screen.getAllByTestId('docs-nav');
+      expect(navs.length, entry).toBeGreaterThan(0);
+      for (const nav of navs) {
+        const allDocs = within(nav).getByTestId('docs-nav-all-docs');
+        expect(lastLink(nav), entry).toBe(allDocs);
+        expect(firstDocsRow(nav), entry).not.toBe(allDocs);
+        // The phone's column is one package's books, as before.
+        expect(within(nav).queryAllByTestId('docs-nav-section'), entry).toHaveLength(0);
+      }
+      expect(screen.queryByTestId('docs-page-header'), entry).toBeNull();
+      cleanup();
+    }
+  });
+});

@@ -41,7 +41,7 @@ function stubOk() {
       const body = init.body ? JSON.parse(init.body as string) : {};
       const manifest = body.manifest ?? body;
       return {
-        ok: true,
+        headers: new Headers(), ok: true,
         status: 201,
         text: async () => JSON.stringify({ success: true, data: { manifest, status: 'installed' } }),
       } as Response;
@@ -85,7 +85,7 @@ describe('PackageFormDialog — create mode', () => {
     vi.stubGlobal(
       'fetch',
       vi.fn(async () => ({
-        ok: false,
+        headers: new Headers(), ok: false,
         status: 409,
         text: async () => JSON.stringify({ success: false, error: { message: "Package 'com.acme.new' already exists" } }),
       })),
@@ -120,7 +120,7 @@ function stubRefusal(status: number, message: string) {
   vi.stubGlobal(
     'fetch',
     vi.fn(async () => ({
-      ok: false,
+      headers: new Headers(), ok: false,
       status,
       text: async () => JSON.stringify({ success: false, error: { message } }),
     })),

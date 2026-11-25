@@ -19,7 +19,7 @@
 import '@testing-library/jest-dom/vitest';
 import * as React from 'react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, fireEvent, cleanup, waitFor } from '@testing-library/react';
+import { render, screen, cleanup, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 
 const PKG = 'com.acme.app';
@@ -108,6 +108,11 @@ import { createEmptyDataSource, failOnAbsorbedFetchError } from './__tests__/emp
 import { registerMetadataPreview } from '../metadata-admin/preview-registry';
 import { FlowPreview } from '../metadata-admin/previews/FlowPreview';
 import { t } from '../metadata-admin/i18n';
+// The source under test reaches these dynamic imports (the command palette's
+// record preview, the drafts panel's lint, the code editor): their first load
+// is paid here, at collection, never inside a case's clock (`check:test-source-alias`).
+import '@objectstack/lint';
+import '@object-ui/plugin-detail';
 
 const dataSource = createEmptyDataSource();
 failOnAbsorbedFetchError();
@@ -144,37 +149,24 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-function renderPillar() {
+/** objectstack#36903 — the designer on one flow's address. */
+function renderPillar(name: string) {
   return render(
-    <MemoryRouter initialEntries={[`/studio/${PKG}/automations`]}>
-      <AutomationsPillar packageId={PKG} />
+    <MemoryRouter initialEntries={[`/studio/${PKG}/metadata/flow/${name}`]}>
+      <AutomationsPillar packageId={PKG} flowName={name} />
     </MemoryRouter>,
   );
 }
 
 const en = (key: string) => t(key, 'en');
 
-/** The rail row's status element for the flow labelled `label`, once one renders. */
-async function railStatus(label: string): Promise<HTMLElement> {
-  const row = await screen.findByRole('button', { name: new RegExp(label) }, { timeout: 8000 });
-  let el: HTMLElement | null = null;
-  await waitFor(
-    () => {
-      el = row.querySelector('span[title]');
-      expect(el).not.toBeNull();
-    },
-    { timeout: 8000 },
-  );
-  return el!;
-}
-
 function headerPill(label: string): { pill: HTMLElement; value: string } {
   const labelEl = screen.getByText(`${label}:`);
   return { pill: labelEl.parentElement as HTMLElement, value: labelEl.nextElementSibling?.textContent ?? '' };
 }
 
-async function openFlow(label: string, name: string): Promise<void> {
-  fireEvent.click(await screen.findByRole('button', { name: new RegExp(label) }, { timeout: 8000 }));
+async function openFlow(_label: string, name: string): Promise<void> {
+  renderPillar(name);
   await screen.findByTitle(`API name: ${name}`, undefined, { timeout: 8000 });
   await screen.findByText('Status:', undefined, { timeout: 8000 });
 }
@@ -184,13 +176,8 @@ async function statusPillReads(value: string): Promise<HTMLElement> {
   return headerPill('Status').pill;
 }
 
-describe('the engine registration verdict in the rail and the header (objectui#12349)', () => {
-  it('a refused flow reads "Refused by the engine" in the rail and the header, titled with the message as sent — not "unpublished", not "enabled"', async () => {
-    renderPillar();
-    const chip = await railStatus('Refused flow');
-    expect(chip).toHaveTextContent(en('engine.studio.auto.refused'));
-    expect(chip).toHaveAttribute('title', MESSAGE);
-
+describe('the engine registration verdict in the header (objectui#12349)', () => {
+  it('a refused flow reads "Refused by the engine" in the header, titled with the message as sent — not "unpublished", not "enabled"', async () => {
     await openFlow('Refused flow', 'refused_flow');
     const pill = await statusPillReads(en('engine.studio.auto.refused'));
     expect(pill).toHaveAttribute('title', MESSAGE);
@@ -199,39 +186,24 @@ describe('the engine registration verdict in the rail and the header (objectui#1
     expect(pill.innerHTML).not.toMatch(/emerald/);
   });
 
-  it('an unregistered flow reads "Not running here" in the rail and the header, titled by its own row', async () => {
-    renderPillar();
-    const chip = await railStatus('Unregistered flow');
-    expect(chip).toHaveTextContent(en('engine.studio.auto.notRunning'));
-    expect(chip).toHaveAttribute('title', en('engine.studio.auto.unregisteredTitle'));
-
+  it('an unregistered flow reads "Not running here" in the header, titled by its own row', async () => {
     await openFlow('Unregistered flow', 'unregistered_flow');
     const pill = await statusPillReads(en('engine.studio.auto.notRunning'));
     expect(pill).toHaveAttribute('title', en('engine.studio.auto.unregisteredTitle'));
   });
 
   it('a registered flow reads as today: On, from its runtime row', async () => {
-    renderPillar();
-    const dot = await railStatus('Registered flow');
-    expect(dot).toHaveTextContent(en('engine.studio.auto.on'));
-    expect(dot).toHaveAttribute('title', en('engine.studio.auto.onBound'));
-
     await openFlow('Registered flow', 'registered_flow');
     await statusPillReads(en('engine.studio.auto.on'));
   });
 
-  it('a flow with no verdict reads as today: no rail status, and "unpublished" in the header without a runtime row', async () => {
-    renderPillar();
-    await railStatus('Refused flow'); // the verdicts and the runtime rows are in
+  it('a flow with no verdict reads as today: "unpublished" in the header without a runtime row', async () => {
     await openFlow('Unjudged flow', 'unjudged_flow');
     await statusPillReads(en('engine.studio.unpublishedDraft'));
-    const row = screen.getByRole('button', { name: /Unjudged flow/ });
-    expect(row.querySelector('span[title]')).toBeNull();
   });
 
-  it('the verdicts are read from the flow list of the pillar\'s package', async () => {
-    renderPillar();
-    await railStatus('Refused flow');
+  it('the verdicts are read from the flow list of the designer\'s package', async () => {
+    await openFlow('Refused flow', 'refused_flow');
     expect(mockClient.listResponse).toHaveBeenCalledWith('flow', { packageId: PKG });
   });
 });

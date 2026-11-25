@@ -175,10 +175,11 @@ const CASES: PillarCase[] = [
   {
     pillar: 'Data',
     testId: 'data-object-header',
-    element: (readOnly) => <DataPillar packageId={PKG} readOnly={readOnly} />,
-    // objectstack#34794 — the object's machine name is the title's tooltip.
+    element: (readOnly) => <DataPillar objectName="acme_account" packageId={PKG} readOnly={readOnly} />,
+    // objectstack#36904 — the full-screen item header: settled once it reads
+    // the loaded object's label.
     settled: async (header) => {
-      await waitFor(() => expect(within(header).getByRole('heading', { level: 1 })).toHaveAttribute('title', OBJECT.name), {
+      await waitFor(() => expect(within(header).getAllByTestId('studio-detail-title')[0]).toHaveTextContent(OBJECT.label), {
         timeout: 8000,
       });
     },
@@ -186,7 +187,7 @@ const CASES: PillarCase[] = [
   {
     pillar: 'Automations',
     testId: 'auto-flow-header',
-    element: (readOnly) => <AutomationsPillar packageId={PKG} readOnly={readOnly} />,
+    element: (readOnly) => <AutomationsPillar packageId={PKG} flowName={FLOW.name} readOnly={readOnly} />,
     settled: async () => {
       await screen.findByTestId('auto-flow-meta', undefined, { timeout: 8000 });
     },

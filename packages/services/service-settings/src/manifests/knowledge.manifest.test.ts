@@ -12,11 +12,14 @@ describe('knowledgeSettingsManifest', () => {
     expect(() => SettingsManifestSchema.parse(knowledgeSettingsManifest)).not.toThrow();
   });
 
-  it('declares namespace=knowledge, scope=global, version=1', () => {
+  it('declares namespace=knowledge, scope=global, version=2 (chunk_overlap retired)', () => {
     const parsed = SettingsManifestSchema.parse(knowledgeSettingsManifest);
     expect(parsed.namespace).toBe('knowledge');
     expect(parsed.scope).toBe('global');
-    expect(parsed.version).toBe(1);
+    expect(parsed.version).toBe(2);
+    const keys = parsed.specifiers.map((sp: any) => sp.key).filter(Boolean);
+    expect(keys).toContain('chunk_target');
+    expect(keys).not.toContain('chunk_overlap');
   });
 
   it('exposes adapter select with memory + turso + ragflow', () => {

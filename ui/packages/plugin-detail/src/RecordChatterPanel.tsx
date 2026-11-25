@@ -14,7 +14,7 @@ import { RecordActivityTimeline } from './RecordActivityTimeline';
 import type { FeedFilterMode } from './RecordActivityTimeline';
 import { useDetailTranslation } from './useDetailTranslation';
 import { useRecordAriaProps } from './renderers/recordComponentAria';
-import { RecordTimelinePanelContext } from './recordTimelineStream';
+import { RecordTimelinePanelContext, RecordViewApprovalsContext } from './recordTimelineStream';
 
 /**
  * The inline timeline's face inside the record page's 动态 card
@@ -170,6 +170,8 @@ export const RecordChatterPanel: React.FC<RecordChatterPanelProps> = ({
    */
   const feedAria = useRecordAriaProps(config?.feed?.aria);
   const inTimelineCard = React.useContext(RecordTimelinePanelContext) !== null;
+  // objectstack#35723 — 「看审批」 on an approval entry, where the host can open the approvals.
+  const viewApprovals = React.useContext(RecordViewApprovalsContext) ?? undefined;
 
   // A refused or failed read leaves the count unknown, not zero (see the
   // timeline's header), so the collapsed toggle names the panel without one.
@@ -248,6 +250,7 @@ export const RecordChatterPanel: React.FC<RecordChatterPanelProps> = ({
               onToggleReaction={onToggleReaction}
               onEditComment={onEditComment}
               onDeleteComment={onDeleteComment}
+              onViewApprovals={viewApprovals}
               subscription={subscription}
               onToggleSubscription={onToggleSubscription}
               filterMode={filterMode}
@@ -316,6 +319,7 @@ export const RecordChatterPanel: React.FC<RecordChatterPanelProps> = ({
               onToggleReaction={onToggleReaction}
               onEditComment={onEditComment}
               onDeleteComment={onDeleteComment}
+              onViewApprovals={viewApprovals}
               subscription={subscription}
               onToggleSubscription={onToggleSubscription}
               filterMode={filterMode}

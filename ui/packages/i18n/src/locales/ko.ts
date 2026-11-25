@@ -69,6 +69,9 @@ const ko = {
     autofillNoCurrency: '{{field}}이(가) 입력되지 않았습니다. 선택한 금액은 {{amount}}이지만 여기에는 아직 통화가 선택되지 않았습니다. 통화를 선택한 후 {{field}}을(를) 입력하세요.',
     autofillCurrencyUnread: '{{field}}이(가) 입력되지 않았습니다. 선택한 금액은 {{amount}}이지만 여기의 통화를 읽을 수 없습니다. 통화를 확인한 후 {{field}}을(를) 입력하세요.',
     autofillKept: '{{field}}은(는) 이전 값을 유지합니다.',
+    autofillNowSameCurrency: '선택 시 {{field}}이(가) 입력되지 않았습니다. 레코드는 이제 {{to}} 기준입니다. 다시 선택하면 {{amount}}이(가) 입력됩니다.',
+    autofillNowSameCurrencyHeld: '선택 시 {{field}}이(가) 입력되지 않았고 이전 값을 유지합니다. 레코드는 이제 {{to}} 기준입니다. {{field}}을(를) 비운 뒤 다시 선택하면 {{amount}}이(가) 입력됩니다.',
+    autofillCopiedUnder: '{{field}}은(는) {{amount}}(으)로 입력되었지만 레코드는 이제 {{to}} 기준입니다. 필요하면 {{to}}(으)로 {{field}}을(를) 입력하세요.',
   },
   common: {
     // objectui#13461 — a disclosure toggle's name (the tree-view node toggle).
@@ -678,6 +681,7 @@ const ko = {
       needsWholeRows:
         "그룹화에는 모든 레코드가 필요하지만 이 그리드에는 한 페이지만 전달되어 그룹 개수를 셀 수 없습니다. 모든 레코드를 전달하거나 queryGroupHeaders를 구현하는 데이터 소스에서 그리드가 불러오도록 하세요.",
       draftOnly: "{{fields}}(으)로 그룹화되지 않았습니다: 게시할 때까지 초안에만 존재합니다.",
+      moreGroupsNotLoaded: "더 많은 그룹이 로드되지 않았습니다: 이 보기의 그룹 수가 서버가 한 번의 읽기로 반환하는 수보다 많아 일부만 표시됩니다.",
     },
     // objectui#4024 — column-footer aggregate prefixes, keyed by the spec's
     // `ColumnSummary` vocabulary. `pattern` owns the label/value join so this
@@ -1772,6 +1776,12 @@ const ko = {
     unconfigured: {
       noCategoryAxis: "차트 범주 축이 필요합니다 — 객체 바인딩 차트는 축을 임의로 만들지 않습니다. 다음 중 하나를 선언하세요:",
     },
+  },
+  // objectstack#36906 — the × of an app page opened from a Studio list.
+  studioReturn: {
+    close: 'Studio로 돌아가기',
+    closeLabel: '닫고 Studio 목록으로 돌아가기',
+    leaveConfirm: '저장하지 않고 나가시겠습니까? 저장하지 않은 변경 사항이 사라집니다.',
   },
   dashboard: {
     // objectui#7063 — the DEFAULT empty state every dashboard widget renders
@@ -3726,7 +3736,7 @@ const ko = {
     build: {
       title: "앱 만들기",
       noCapability: "이 시스템에서는 앱 만들기를 사용할 수 없습니다 — ‘메타데이터 관리’ 권한이 필요하지만 계정에 해당 권한이 없습니다.",
-      inStudio: "Studio에서 새로 만들기",
+      inStudio: "새 빈 앱 만들기",
     },
     template: {
       title: "템플릿으로 시작",
@@ -4133,6 +4143,8 @@ const ko = {
       settings: "보고서 설정",
       pendingDraft: "이 보고서에 게시되지 않은 변경 사항이 있습니다. 위에서 게시하거나 버린 후 저장하세요.",
       nameTaken: "이 이름으로 만들 수 있는 식별자가 모두 사용 중입니다. 보고서 이름을 바꾼 뒤 저장하세요.",
+      // objectstack#36906 — a report made from Studio's report list that could not be saved in the app's package.
+      savedOutsideApp: "여기서는 앱의 사용자 지정 패키지를 사용할 수 없어 이 보고서는 앱 패키지 밖에 저장되었습니다. 그래서 Studio 목록에 표시되지 않습니다.",
       adminOnlyTitle: "워크스페이스 관리자만 보고서를 만들 수 있습니다",
       adminOnly: "보고서는 워크스페이스의 모든 사람에게 공유되므로 관리자가 만듭니다.",
       designModeOnTitle: "먼저 레이아웃 디자인을 마치세요",
@@ -4674,6 +4686,7 @@ const ko = {
     tool: {
       aggregate_data: "관련 데이터 집계하기",
       get_record: "이 레코드 읽기",
+      get_record_context: "이 레코드의 자료 읽기",
       list_datasets: "사용 가능한 지표 확인하기",
       query_data: "필요한 데이터 조회하기",
       query_dataset: "지표로 조회하기",
@@ -4988,6 +5001,10 @@ const ko = {
     actComment: '댓글',
     actSystemNote: '시스템 안내',
     stepProgress: '승인 단계',
+    outcomeWaiting: '{{step}}(으)로 넘어가 결정을 기다리는 중',
+    outcomeNow: '{{step}}(으)로 넘어감: {{decision}}',
+    outcomeEndedAt: '{{step}}(으)로 넘어간 뒤 종료됨: {{decision}}',
+    outcomeEndedHere: '승인이 여기서 종료되었습니다',
     prevRequest: '이전',
     nextRequest: '다음',
     positionOf: '요청 {{total}}개 중 {{index}}번째',
@@ -5138,7 +5155,12 @@ const ko = {
     bulkRejected: '{{count}}개 요청을 거부했습니다',
     bulkRejected_one: '{{count}}개 요청을 거부했습니다',
     bulkRejected_other: '{{count}}개 요청을 거부했습니다',
-    bulkPartial: '{{ok}}개 성공, {{fail}}개 실패: {{which}}',
+    bulkPartialSummary: '{{ok}}개 성공, {{fail}}개 실패',
+    bulkFailureLine: '{{title}}: {{reason}}',
+    bulkFailuresShowAll: '모두 보기 ({{n}})',
+    bulkFailuresTitle: '처리되지 않음: {{n}}',
+    bulkFailuresBody: '다음 요청은 그대로 남아 있습니다. 각 요청에 이유가 표시됩니다.',
+    close: '닫기',
     rejectOneTitle: '"{{title}}"을(를) 거부할까요?',
     rejectOneBody: '요청을 거부하고 신청자에게 알립니다.',
     rejectTitle: '이 요청을 거부할까요?',
