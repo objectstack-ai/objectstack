@@ -245,7 +245,7 @@
     "ai/KnowledgeChunk:headingPath",
     "ai/KnowledgeChunk:id",
     "ai/KnowledgeChunk:index",
-    "ai/KnowledgeChunk:metadata",
+    "ai/KnowledgeChunk:metadata [RETIRED]",
     "ai/KnowledgeDocument:chunks",
     "ai/KnowledgeDocument:content",
     "ai/KnowledgeDocument:docHash",

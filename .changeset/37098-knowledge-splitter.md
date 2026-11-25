@@ -6,11 +6,18 @@
 '@objectstack/service-settings': patch
 ---
 
-feat(service-knowledge): one splitter in the knowledge service (whole / recursive / markdown, aware of Chinese text), the chunk channel to adapters, and the `split` key on an object source
+feat(service-knowledge)!: one splitter in the knowledge service (whole / recursive / markdown, aware of Chinese text), the chunk channel to adapters, and the `split` key on an object source; `KnowledgeChunk.metadata` and the Knowledge page's chunk overlap retired
 
-Clause-②: yes
-Metadata-protocol: added
-Skills-docs: none in this change — `skills/objectstack-ai/SKILL.md` lists the object source's keys and does not yet name `split`; that file is a governed surface outside this change, so teaching the key is left to its owner. `content/docs/protocol/knowledge.mdx` (new section 3.5) and `content/docs/ai/knowledge-rag.mdx` document the key, the strategies and the limits in this change.
+Clause-②: yes (narrowing) — widens the knowledge contract (the `split` key, `chunks`, `headingPath`, the adapter's `capabilities` and `embedding`, `IEmbedder.maxInputTokens`, the reindex `failed` / `failures`) and narrows two accept sets: `KnowledgeChunk.metadata` is refused, and `knowledge.chunk_overlap` is no longer a key of the `knowledge` settings namespace
+Metadata-protocol: narrowed
+Skills-docs: none in this change — `skills/objectstack-ai/SKILL.md` lists the object source's keys and does not yet name `split`, and names neither retired key; that file is a governed surface outside this change, so teaching the new key is left to its owner. `content/docs/protocol/knowledge.mdx` (new section 3.5) and `content/docs/ai/knowledge-rag.mdx` document the key, the strategies, the limits and the removals in this change.
+
+<!-- adr-0087: registered knowledge-chunk-metadata-retired -->
+
+**BREAKING** in two places, each with its fix:
+
+- `KnowledgeChunk.metadata` (`@objectstack/spec/ai`): FROM an optional `Record<string, unknown>` accepted and stripped TO a `retiredKey()` tombstone — `KnowledgeChunkSchema.parse()` (and a `KnowledgeDocument` whose `chunks` carry one) refuses it with the prescription, and `tsc` types the key `never`. Nothing ever wrote or read it: the knowledge service cuts the passages and sets no per-passage metadata, and no adapter consulted one. The fix: delete the key; a passage takes its document's `metadata` (`KnowledgeDocument.metadata`), which is what adapters filter on. D3 entry: `knowledge-chunk-metadata-retired`.
+- `knowledge.chunk_overlap` (the Knowledge settings page's **Chunk overlap**): FROM a `number` key of the `knowledge` settings namespace (default 80) TO no key — the page no longer shows it, the service no longer resolves it, and a write naming it is refused `400 UNKNOWN_KEY`. Nothing ever read it and the splitter cuts without overlap, so a value set there never had an effect. A stored value is kept, never deleted. The fix: stop writing the key (a script or seed that sets it); there is nothing to replace it with. **Target chunk size** (`knowledge.chunk_target`) is the setting that now shapes passages.
 
 The knowledge service now cuts documents into passages itself, once, and hands the same passages to every adapter that accepts them, so one source gives the same passages on each adapter.
 
@@ -45,4 +52,7 @@ What to do:
 - An adapter package that runs `runKnowledgeAdapterContract`: add `chunks: false` to `implements` (or `chunks: true` once the adapter takes the service's passages).
 - An adapter that wants the service's passages: set `capabilities: { chunks: true }`, index each `doc.chunks` entry as given, and report its embedder's limit as `embedding.maxInputTokens` (from `IEmbedder.maxInputTokens`), from a getter if the embedder resolves late.
 - A caller of `indexDocument` stops setting `chunks`.
-- A deployment that set **Chunk overlap**: nothing to do; the value had no effect and keeps having none.
+- A deployment that set **Chunk overlap**: nothing to do; the value had no effect and keeps having none. A script or seed that writes `knowledge.chunk_overlap` drops the key.
+- Code or a test that builds a `KnowledgeChunk` with `metadata`: delete the key; filter on the document's `metadata`.
+
+The retirement kit: the `retiredKey()` tombstone on `KnowledgeChunkSchema.metadata` in `ai/knowledge-document.zod.ts`, `RETIRED_KEYS_BY_MAJOR[18]` row `ai/KnowledgeChunk:metadata`, D3 `knowledge-chunk-metadata-retired` with its step-18 rationale fragment (no D2 conversion: a chunk is a runtime contract shape, never stored in stack metadata, so `os migrate meta` has no source to rewrite — the `ActionDescriptor.isAsync` disposition), the `[RETIRED]` line in `authorable-surface/ai.json`, the regenerated `knowledge-document.mdx` reference, and the pin `ai/knowledge-document.test.ts`. The settings key follows the Localization format keys' retirement: the specifier removed from `knowledge.manifest.ts` and from the 11 translation packs, the manifest at `version: 2`, stored rows kept, and the manifest pins updated.

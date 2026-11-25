@@ -44,7 +44,7 @@ const result = KnowledgeChunkSchema.parse(data);
 | **index** | `integer` | ✅ |  |
 | **content** | `string` | ✅ |  |
 | **headingPath** | `string[]` | optional | Headings the chunk sits under, outermost first (markdown strategy) |
-| **metadata** | `Record<string, any>` | optional |  |
+| **metadata** | `never` | optional | [REMOVED] `KnowledgeChunk.metadata` was removed in @objectstack/spec 18 (ADR-0049, ADR-0161 K8) — nothing ever wrote or read it: the knowledge service cuts the passages and sets no per-passage metadata, and no adapter consulted one. Delete the key. A passage takes its document's `metadata` (`KnowledgeDocument.metadata`), which is what adapters filter on. |
 
 
 ---
@@ -74,7 +74,7 @@ const result = KnowledgeChunkSchema.parse(data);
 | **index** | `integer` | ✅ |  |
 | **content** | `string` | ✅ |  |
 | **headingPath** | `string[]` | optional | Headings the chunk sits under, outermost first (markdown strategy) |
-| **metadata** | `Record<string, any>` | optional |  |
+| **metadata** | `never` | optional | [REMOVED] `KnowledgeChunk.metadata` was removed in @objectstack/spec 18 (ADR-0049, ADR-0161 K8) — nothing ever wrote or read it: the knowledge service cuts the passages and sets no per-passage metadata, and no adapter consulted one. Delete the key. A passage takes its document's `metadata` (`KnowledgeDocument.metadata`), which is what adapters filter on. |
 
 
 ---
