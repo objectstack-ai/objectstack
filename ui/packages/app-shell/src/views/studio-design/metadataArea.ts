@@ -113,6 +113,49 @@ export function areaItemPillarPath(input: {
 }
 
 /**
+ * objectstack#36905 (Studio redesign epic #36890) — the types whose item, on a
+ * package's leg, opens its designer full-screen in the area rather than the
+ * generic item page: the permission set's matrix
+ * (`StudioPermissionSetPage`). A designer card adds its type here in the PR
+ * that deletes the type's row from `STUDIO_ITEM_PILLAR`.
+ */
+export const AREA_DESIGNER_PAGE_TYPES: readonly string[] = Object.freeze(['permission']);
+
+/**
+ * Whether an item of the area opens its full-screen designer page: a
+ * {@link AREA_DESIGNER_PAGE_TYPES} type on a package's leg. The cross-package
+ * leg names no package to design in, so it keeps the generic item page (for
+ * the permission set: the matrix's environment presentation).
+ */
+export function areaItemOpensDesignerPage(input: { packageId: string | null; type: string }): boolean {
+  return input.packageId !== null && AREA_DESIGNER_PAGE_TYPES.includes(input.type);
+}
+
+/**
+ * The item an area URL opens in its full-screen designer page, read off the
+ * address (`/studio/<package>/metadata/<type>/<name>[/…]`), or `null` for any
+ * other URL. Studio's copilot reads it as it reads a pillar's `?surface=`
+ * (cloud#1610: the URL is the one source of what is being discussed), so a
+ * designer that left its pillar keeps the context the pillar gave it.
+ */
+export function areaDesignerItemOf(pathname: string, segment: string | null | undefined): { type: string; name: string } | null {
+  if (!segment || isStudioAllPackagesScope(segment) || isStudioOrgScope(segment)) return null;
+  const root = `${studioMetadataAreaRoot(segment)}/`;
+  if (!pathname.startsWith(root)) return null;
+  const [rawType, rawName] = pathname.slice(root.length).split('/');
+  // `<root>/<type>/new` is the area's create page (it routes before the item),
+  // never an item called `new`.
+  if (!rawType || !rawName || rawName === 'new') return null;
+  try {
+    const type = decodeURIComponent(rawType);
+    const name = decodeURIComponent(rawName);
+    return areaItemOpensDesignerPage({ packageId: segment, type }) ? { type, name } : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * objectstack#28569 (ADR-0146 Consequences) — the types whose item opens the
  * area's simplified form editor (`StudioBundleItemEditor`): the fields Setup's
  * form offers beside the type's preview, and Customize on a read-only base.

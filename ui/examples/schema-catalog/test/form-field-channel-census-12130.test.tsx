@@ -351,7 +351,10 @@ const LEDGER: Readonly<Record<string, LedgerRow>> = {
   lookupAutofill: {
     readers: [LOOKUP],
     why: 'RUNTIME-ONLY (objectstack#28245) — object-field metadata (the spec\'s `FieldSchema.lookupAutofill`) read off the '
-      + 'resolved `field` stash: which fields a pick fills is a fact about the object, not about one form.',
+      + 'resolved `field` stash: which fields a pick fills is a fact about the object, not about one form. Honoured only '
+      + 'in a record form, which stamps the lookup (`withLookupAutofillTargets`), and in a line-item grid column; the key '
+      + 'written on a standalone form node\'s field is read and not executed (the pick fills nothing, and a development '
+      + 'build names the field), per ruling 7138010812.',
   },
   recordBeingEdited: {
     readers: ['entry@fields/src/widgets/lookupRecordReference.ts'],

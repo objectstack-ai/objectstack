@@ -110,6 +110,9 @@ vi.mock('../metadata-admin/AccessExplainPanel', () => ({ AccessExplainPanel: () 
 // The source loads `@objectstack/lint` lazily; paid here, at collection, not
 // inside a case's clock (check:test-source-alias).
 import '@objectstack/lint';
+// objectstack#36900 — the surface mounts the command palette, which reaches the
+// record preview's `lazy()` detail entry: its first load is paid at collection too.
+import '@object-ui/plugin-detail';
 import { StudioDesignSurface } from './StudioDesignSurface';
 
 window.matchMedia = ((query: string) => ({
@@ -189,6 +192,8 @@ function renderStudio(entry = `/studio/${PACKAGE_ID}/interfaces`) {
       <MemoryRouter initialEntries={[entry]}>
         <Routes>
           <Route path="/studio/:packageId/:tab" element={<StudioDesignSurface />} />
+          {/* objectstack#36905 — a permission set opens at its metadata address. */}
+          <Route path="/studio/:packageId/metadata/*" element={<StudioDesignSurface area="metadata" />} />
         </Routes>
       </MemoryRouter>
     </I18nProvider>,
@@ -202,16 +207,18 @@ const agentSurface = () =>
 // item's label too: the chip reads the rail's word and the label, as the Data
 // rail's 「会议 · 记录」 does — never the type word (`permission` / `flow`) or
 // the machine name, which stay on the tooltip and in the agent's data.
+// objectstack#36905 — a permission set now opens full-screen at its metadata
+// address, and keeps its chip there: the agent reads the item off the path.
 describe('objectstack#35018 — 正在看 on the Access and Automations rails reads a label', () => {
   it('Access: 「正在看：权限 · 组织成员」, no type word, no machine name', async () => {
-    renderStudio(`/studio/${PACKAGE_ID}/access?surface=permission:${SET}`);
+    renderStudio(`/studio/${PACKAGE_ID}/metadata/permission/${SET}?package=${PACKAGE_ID}`);
     await waitFor(() => expect(chip.surfaceContextLabel).toBe('正在看：权限 · 组织成员'), { timeout: 6000 });
     expect(String(chip.surfaceContextLabel)).not.toContain('permission');
     expect(String(chip.surfaceContextLabel)).not.toContain(SET);
     // CONTROL: the identity stays reachable on the tooltip, and the agent's data is the URL's.
     expect(chip.surfaceContextTitle).toBe(`permission · ${SET}`);
     expect(JSON.stringify(agentSurface())).toBe(
-      JSON.stringify({ pillar: 'access', artifact: { type: 'permission', name: SET } }),
+      JSON.stringify({ pillar: 'metadata', artifact: { type: 'permission', name: SET } }),
     );
   });
 

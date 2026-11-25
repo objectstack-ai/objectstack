@@ -309,5 +309,12 @@ export interface MetadataLoaderDeleteOptions {
    * Never sent beside `packageId`.
    */
   packagelessOnly?: true;
+  /**
+   * [#37013] Delete only the name's package-less slots that hold the
+   * platform's record (`_provenance: 'platform'`): the platform withdrew its
+   * own record. ⛔ Never a package's item, nor the environment's own.
+   * Never sent beside `packageId` or `packagelessOnly`.
+   */
+  platformOnly?: true;
 }
 

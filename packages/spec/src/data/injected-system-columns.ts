@@ -97,9 +97,8 @@ const TENANT_SCOPE_COLUMN = 'organization_id';
  * - `_sync_external_id`: the row's key in the source, as text;
  * - `_sync_pulled_at`: when a pull last wrote the row;
  * - `_sync_run_id`: the `sys_sync_run` row of that pull (text, not a lookup);
- * - `_sync_deleted_at`: D3's mark. Planned with the other four so the table
- *   is provisioned once, and written by nothing until the delete marking
- *   lands (ADR-0153 D3): until then it stays empty on every row.
+ * - `_sync_deleted_at`: D3's mark, stamped when a pull finds the row deleted
+ *   at the source and cleared when a later pull reads it again (ADR-0153 D3).
  *
  * The pull is the only writer of all five: any other write that names one is
  * refused by the engine, whatever its context (ADR-0153 D4).

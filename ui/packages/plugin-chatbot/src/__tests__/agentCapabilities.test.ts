@@ -13,7 +13,7 @@ import { agentHasCapability, type AgentDescriptor } from '../useAgents';
 const withCaps = (name: string, on: boolean): AgentDescriptor => ({
   name,
   label: name,
-  capabilities: { authoring: on, canvas: on, debug: on, resume: on },
+  capabilities: { authoring: on, canvas: on, debug: on, resume: on, focus: on },
 });
 
 describe('agentHasCapability', () => {
@@ -22,7 +22,7 @@ describe('agentHasCapability', () => {
     const variant: AgentDescriptor = {
       name: 'app_author_v2',
       label: 'Author',
-      capabilities: { authoring: true, canvas: true, debug: false, resume: true },
+      capabilities: { authoring: true, canvas: true, debug: false, resume: true, focus: false },
     };
     expect(agentHasCapability([variant], 'app_author_v2', 'authoring')).toBe(true);
     expect(agentHasCapability([variant], 'app_author_v2', 'debug')).toBe(false);
@@ -43,5 +43,18 @@ describe('agentHasCapability', () => {
 
   it('no name → no capability', () => {
     expect(agentHasCapability([withCaps('build', true)], undefined, 'debug')).toBe(false);
+  });
+});
+
+describe('agentHasCapability — focus (objectstack#36999)', () => {
+  it('reads the declared flag, and an agent that declares capabilities without it does not honour focus', () => {
+    expect(agentHasCapability([withCaps('ask', true)], 'ask', 'focus')).toBe(true);
+    expect(agentHasCapability([withCaps('ask', false)], 'ask', 'focus')).toBe(false);
+  });
+
+  it('never falls back to the name check: a build agent on an older server does not honour focus', () => {
+    const legacy: AgentDescriptor[] = [{ name: 'build', label: 'Build' }];
+    expect(agentHasCapability(legacy, 'build', 'debug')).toBe(true);
+    expect(agentHasCapability(legacy, 'build', 'focus')).toBe(false);
   });
 });
