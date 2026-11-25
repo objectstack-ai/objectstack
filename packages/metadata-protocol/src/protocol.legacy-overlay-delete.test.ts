@@ -78,6 +78,8 @@
  * either.
  */
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+// Paid during collection, not inside a clocked case: the diagnostics `import()` it in a function body (`scripts/check-test-source-alias.mjs`).
+import '@objectstack/lint';
 // [#5619] The producer's OWN write-verb dispatch decisions (#4550 delete /
 // #5480 update), so the fake engine below cannot accept a call ObjectQL
 // refuses. Imported from `@objectstack/metadata-core` and not from

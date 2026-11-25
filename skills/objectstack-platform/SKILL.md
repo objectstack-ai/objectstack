@@ -41,11 +41,11 @@ are `manifest`, `packages`, `objects`, `objectExtensions`, `picklists`,
 `datasourceMapping`, `translations`, `i18n`, `plugins`, `devPlugins`,
 `devHint`, `devLogins`, `demoStaff`, `requires`, `tiers`, `onEnable`, `appName`, `email`, `sms`, `push`.
 
-There is deliberately **no** top-level `workflows` or `approvals` collection:
+There is **no** top-level `workflows` or `approvals` collection:
 an approval is a flow with Approval nodes, and record
 state machines are a `state_machine` validation rule on each object.
-A phantom key like `roles:` or `policies:` is refused: the stack
-fails to load.
+A phantom key (`roles:`, `policies:`) is no silent no-op:
+the top level refuses it and the stack fails to load.
 
 `queues` declares ownership queues (`defineQueue`, `@objectstack/spec/security`;
 objectstack-data): named sets of people a new record of an `ownership: 'user'`

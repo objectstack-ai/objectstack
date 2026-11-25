@@ -21,6 +21,8 @@
  */
 
 import { describe, it, expect } from 'vitest';
+// Paid during collection, not inside a clocked case: `plugin.ts` `import()`s it in a function body (`scripts/check-test-source-alias.mjs`).
+import '@objectstack/metadata-fs';
 import { composeStacks, defineStack, ObjectStackDefinitionSchema } from '@objectstack/spec';
 import { OWNER_STAMP_JUDGED_COLLECTIONS, type OwnerStampJudgedCollection } from '@objectstack/spec/kernel';
 import { MetadataPlugin, unclaimedTopLevel } from './plugin.js';
