@@ -9,7 +9,7 @@
 
 feat(objectql,service-record-context)!: a context pack (`ai_context`) is identified by its package and its name; `get_record_context` reaches each package's pack by its face
 
-Clause-②: no (narrowing)
+Clause-②: yes (narrowing)
 Metadata-protocol: narrowed
 Skills-docs: follow-up #37177
 
