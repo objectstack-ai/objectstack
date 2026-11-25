@@ -172,7 +172,19 @@ The console's dashboard page uses both in its in-page edit state: an admin
 who may design the dashboard's package opens it with **Edit**, changes it with
 Studio's own dashboard panels at the right, and **Save** publishes that one
 dashboard (into the package, or into the app's customization package for an
-installed app), so everyone sees it at once.
+installed app), so everyone sees it at once. The edit state needs its side
+panel, so it is not offered on a window narrower than Tailwind's `sm`
+breakpoint (640 px).
+
+A dashboard opened from Studio's dashboard list lands on this page with the
+edit state already open, in the app the author came from when it is one of
+the package's apps (or its menu opens the dashboard), else in the package's
+first published app. The page's address then carries `?studio=` with the
+Studio list, and the header draws a **×** that goes back to it, after a
+reload too. A report opened from Studio's report list lands the same way,
+with its builder open, and the report list's **New** opens the app's
+`reports/new` page. A package with no published app keeps both in Studio's
+generic item page.
 
 ## TypeScript Support
 

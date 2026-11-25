@@ -75,10 +75,12 @@ vi.mock('./RuntimeDraftBar', () => ({ RuntimeDraftBar: () => null }));
 const meta = vi.hoisted(() => ({ value: null as any }));
 vi.mock('../providers/MetadataProvider', () => ({ useMetadata: () => meta.value }));
 
+/** objectstack#36906 — the address and the landing the page is reached with, and where it navigates. */
+const route = vi.hoisted(() => ({ search: '', state: null as unknown, navigate: null as null | ((...a: unknown[]) => void) }));
 vi.mock('react-router-dom', () => ({
   useParams: () => ({ reportName: 'revenue_by_month' }),
-  useNavigate: () => vi.fn(),
-  useLocation: () => ({ pathname: '/reports/revenue_by_month', search: '' }),
+  useNavigate: () => route.navigate ?? (() => {}),
+  useLocation: () => ({ pathname: '/reports/revenue_by_month', search: route.search, hash: '', key: 'landing', state: route.state }),
 }));
 
 vi.mock('./useOpenRecordList', () => ({
@@ -123,7 +125,21 @@ function Shell({ children }: { children: React.ReactNode }) {
   );
 }
 
-function mountReport(report: Record<string, unknown>) {
+/** The shell with the page drawn only once the mode is on: a page reached with the mode already on. */
+function ShellModeFirst({ children }: { children: React.ReactNode }) {
+  const mode = useDesignModeController({ appName: 'crm', appBasePath: '/apps/crm', enabled: true });
+  return (
+    <DesignModeProvider value={mode}>
+      {mode.active && <DesignModeBar mode={mode} />}
+      <button type="button" data-testid="enter-design-mode" onClick={() => mode.enter()}>
+        enter
+      </button>
+      {mode.active && children}
+    </DesignModeProvider>
+  );
+}
+
+function mountReport(report: Record<string, unknown>, Frame: React.ComponentType<{ children: React.ReactNode }> = Shell) {
   client.value = {
     get: vi.fn(async () => null),
     getDraft: vi.fn(async () => null),
@@ -147,9 +163,9 @@ function mountReport(report: Record<string, unknown>) {
     getTypeStatus: () => 'ready',
   };
   render(
-    <Shell>
+    <Frame>
       <ReportView dataSource={{ find: vi.fn(async () => ({ data: [] })) } as any} />
-    </Shell>,
+    </Frame>,
   );
 }
 
@@ -164,6 +180,9 @@ afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
   vi.clearAllMocks();
+  route.search = '';
+  route.state = null;
+  route.navigate = null;
 });
 
 describe('the report page and the design mode exclude each other (objectstack#36692)', () => {
@@ -203,5 +222,61 @@ describe('the report page and the design mode exclude each other (objectstack#36
     await flush();
     expect(screen.queryByTestId('design-mode-bar')).toBeNull();
     expect(toast.error).toHaveBeenCalledWith(PROMPT);
+  });
+});
+
+describe('a report opened from a Studio list (objectstack#36906)', () => {
+  const studioList = '/studio/crm/metadata/report?sort=-changed';
+  const fromStudio = `?studio=${encodeURIComponent(studioList)}`;
+
+  it('lands in the builder, and the builder x goes back to the Studio list', async () => {
+    const navigate = vi.fn();
+    route.navigate = navigate;
+    route.search = fromStudio;
+    route.state = { openReportBuilder: 'revenue_by_month' };
+    mountReport(DATASET_REPORT);
+    await screen.findByTestId('report-builder');
+    expect(navigate).toHaveBeenCalledWith(`/reports/revenue_by_month${fromStudio}`, { replace: true, state: null });
+    fireEvent.click(screen.getByTestId('report-builder-close'));
+    expect(navigate).toHaveBeenLastCalledWith(studioList);
+  });
+
+  it('the builder x over unsaved edits asks first; staying keeps the builder', async () => {
+    const navigate = vi.fn();
+    route.navigate = navigate;
+    route.search = fromStudio;
+    route.state = { openReportBuilder: 'revenue_by_month' };
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false);
+    mountReport(DATASET_REPORT);
+    await screen.findByTestId('report-builder');
+    fireEvent.click(screen.getByTestId('stub-builder-edit'));
+    fireEvent.click(screen.getByTestId('report-builder-close'));
+    expect(confirm).toHaveBeenCalledTimes(1);
+    expect(navigate).not.toHaveBeenCalledWith(studioList);
+    expect(screen.getByTestId('report-builder')).toBeTruthy();
+  });
+
+  it('the report page draws x back to the Studio list beside Edit, after a reload too', async () => {
+    const navigate = vi.fn();
+    route.navigate = navigate;
+    route.search = fromStudio;
+    mountReport(DATASET_REPORT);
+    await screen.findByTestId('report-edit-button');
+    const close = screen.getByTestId('studio-return');
+    expect(close.getAttribute('data-target')).toBe(studioList);
+    fireEvent.click(close);
+    expect(navigate).toHaveBeenLastCalledWith(studioList);
+  });
+
+  it('reached with the design mode already on, the landing opens no builder and Edit is not offered; x still goes back', async () => {
+    route.search = fromStudio;
+    route.state = { openReportBuilder: 'revenue_by_month' };
+    mountReport(DATASET_REPORT, ShellModeFirst);
+    fireEvent.click(screen.getByTestId('enter-design-mode'));
+    expect(await screen.findByTestId('design-mode-bar')).toBeTruthy();
+    await screen.findByTestId('studio-return');
+    await flush();
+    expect(screen.queryByTestId('report-builder')).toBeNull();
+    expect(screen.queryByTestId('report-edit-button')).toBeNull();
   });
 });

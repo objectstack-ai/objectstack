@@ -10,8 +10,12 @@
  */
 
 import { describe, expect, it } from 'vitest';
+import { RESERVED_URL_PARAMS } from '../../urlParams.js';
 import {
   STUDIO_ITEM_PILLAR,
+  STUDIO_RETURN_PARAM,
+  readStudioReturn,
+  withStudioReturn,
   studioChangesReviewPath,
   studioHomePath,
   studioItemPath,
@@ -207,5 +211,47 @@ describe('the mapping table agrees with the code (objectstack#36895)', () => {
     expect(STUDIO_RETIRED_INTERFACES_KEPT_PARAMS).toEqual([STUDIO_CHANGES_PARAM]);
     expect(retiredInterfacesTarget('crm', '?surface=page%3Ahome&changes=review&nav=n1')).toBe('/studio/crm/data?changes=review');
     expect(retiredInterfacesTarget('crm', '?surface=page%3Ahome')).toBe('/studio/crm/data');
+  });
+});
+
+describe('the "came from Studio" param (objectstack#36906, decision 15)', () => {
+  it('carries a Studio list address on an app path, keeping its own query and fragment', () => {
+    expect(STUDIO_RETURN_PARAM).toBe('studio');
+    const list = '/studio/crm/metadata/dashboard?q=ops&sort=-changed';
+    expect(withStudioReturn('/apps/crm/dashboard/ops_board', list)).toBe(
+      '/apps/crm/dashboard/ops_board?studio=%2Fstudio%2Fcrm%2Fmetadata%2Fdashboard%3Fq%3Dops%26sort%3D-changed',
+    );
+    expect(withStudioReturn('/apps/crm/report/r1?x=1#top', '/studio/crm/metadata/report')).toBe(
+      '/apps/crm/report/r1?x=1&studio=%2Fstudio%2Fcrm%2Fmetadata%2Freport#top',
+    );
+  });
+
+  it('reads back exactly what it carried', () => {
+    const list = '/studio/crm/metadata/dashboard?q=a%20b&package=crm';
+    const path = withStudioReturn('/apps/crm/dashboard/d', list);
+    expect(readStudioReturn(path.slice(path.indexOf('?')))).toBe(list);
+    expect(readStudioReturn(new URLSearchParams({ studio: '/studio' }))).toBe('/studio');
+  });
+
+  it('refuses anything that is not a Studio address on this origin, both ways', () => {
+    for (const value of [
+      'https://evil.example/studio/crm',
+      '//evil.example/studio',
+      '/studiox/crm',
+      '/apps/crm',
+      'studio/crm',
+      '/studio\\..\\apps',
+      'javascript:alert(1)',
+      '',
+    ]) {
+      expect(readStudioReturn(new URLSearchParams({ studio: value }))).toBeNull();
+      expect(withStudioReturn('/apps/crm/dashboard/d', value)).toBe('/apps/crm/dashboard/d');
+    }
+    expect(readStudioReturn('')).toBeNull();
+    expect(readStudioReturn('?other=1')).toBeNull();
+  });
+
+  it('is one of the console reserved URL params', () => {
+    expect(RESERVED_URL_PARAMS).toContain(STUDIO_RETURN_PARAM);
   });
 });

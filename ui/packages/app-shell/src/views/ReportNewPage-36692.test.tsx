@@ -230,3 +230,43 @@ describe('reached with the design mode already on, the page draws no builder (ob
     expect(screen.queryByTestId('report-new-design-mode')).toBeNull();
   });
 });
+
+describe("opened from Studio's report list (objectstack#36906, decision 13)", () => {
+  const studioList = '/studio/crm/metadata/report?q=pay';
+  const fromStudio = `?studio=${encodeURIComponent(studioList)}`;
+
+  function WhereFull() {
+    const { pathname, search } = useLocation();
+    return <span data-testid="where-full">{`${pathname}${search}`}</span>;
+  }
+
+  function mountFromStudio() {
+    render(
+      <MemoryRouter initialEntries={[`/apps/crm/reports/new${fromStudio}`]}>
+        <Shell>
+          <Routes>
+            <Route path="/apps/:appName/reports/new" element={<ReportNewPage />} />
+            <Route path="*" element={null} />
+          </Routes>
+          <WhereFull />
+        </Shell>
+      </MemoryRouter>,
+    );
+  }
+
+  it("the builder's x goes back to the Studio list, writing nothing", async () => {
+    mountFromStudio();
+    fireEvent.click(screen.getByText('close'));
+    await flush();
+    expect(saveAndPublish).not.toHaveBeenCalled();
+    expect(screen.getByTestId('where-full').textContent).toBe(studioList);
+  });
+
+  it("Save lands on the new report's page, which keeps the way back to Studio", async () => {
+    mountFromStudio();
+    fireEvent.click(screen.getByText('save'));
+    await flush();
+    await flush();
+    expect(screen.getByTestId('where-full').textContent).toBe(`/apps/crm/report/payment_analysis${fromStudio}`);
+  });
+});
