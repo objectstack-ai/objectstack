@@ -375,8 +375,27 @@ export function withheldAutofillMessage(
  * targets under, on the lookup's own field metadata: the widget receives one
  * field, not the object, and a target's currency is its definition's. The
  * same hand-off shape as `FOLLOWED_PARENT_OBJECT_KEY` (`currency.ts`).
+ *
+ * The stamp is also the record form's statement that the lookup is drawn
+ * for the record being edited, and so the one thing that lets a pick fill
+ * other fields at all ({@link readLookupAutofillTargets}): `lookupAutofill`
+ * is a fact about the object, honoured in a record form and a line-item grid
+ * column, and a pick in any other host fills nothing.
+ *
+ * ⛔ Only a stamp {@link withLookupAutofillTargets} issued counts: a value
+ * under this key that arrived as data (written by hand on a standalone form
+ * node's field, or anywhere else) is no stamp, whatever its shape.
  */
 export const LOOKUP_AUTOFILL_TARGETS_KEY = 'lookupAutofillTargets';
+
+/**
+ * Every target map {@link withLookupAutofillTargets} issued. Membership is
+ * what makes the stamp the record form's statement rather than a document's:
+ * nothing parsed from JSON is ever in it. A copy of the field def keeps the
+ * map it carries, so the stamp survives every spread between the form and
+ * the widget.
+ */
+const ISSUED_TARGET_STAMPS = new WeakSet<object>();
 
 /**
  * `def` with the definitions of its `lookupAutofill` targets stamped, read
@@ -384,8 +403,14 @@ export const LOOKUP_AUTOFILL_TARGETS_KEY = 'lookupAutofillTargets';
  * object it follows when its currency follows a parent (ADR-0144 D2 as
  * amended). `labels` names each field as the form shows it (translated);
  * a target the form draws carries that name as its `label`, so a note about
- * it names the field the way the form does. `def` itself when it declares no
- * pairs or `fields` names none of its targets.
+ * it names the field the way the form does. Only a host that edits one
+ * record of the object calls this: the record form.
+ *
+ * A lookup that declares pairs is stamped even when `fields` names none of
+ * its targets (the schema is still loading, the form has no metadata source,
+ * a target is not a field of the map): the map is then empty, the pick
+ * copies with no currency to judge, and the stamp still says the lookup is
+ * drawn by a record form. `def` itself when it declares no pairs.
  */
 export function withLookupAutofillTargets<T extends object>(
   def: T,
@@ -393,22 +418,29 @@ export function withLookupAutofillTargets<T extends object>(
   labels?: Readonly<Record<string, string>>,
 ): T {
   const pairs = (def as { lookupAutofill?: unknown }).lookupAutofill;
-  if (!Array.isArray(pairs) || pairs.length === 0 || !fields) return def;
+  if (!Array.isArray(pairs) || pairs.length === 0) return def;
   const targets: Record<string, object> = {};
   for (const pair of pairs as LookupAutofillPair[]) {
-    const target = fields[pair?.target];
+    const target = fields?.[pair?.target];
     if (!target || typeof target !== 'object') continue;
     const stamped = withFollowedParentObject(target, fields);
     const shown = labels?.[pair.target];
     targets[pair.target] = typeof shown === 'string' && shown !== '' ? { ...stamped, label: shown } : stamped;
   }
-  return Object.keys(targets).length > 0 ? { ...def, [LOOKUP_AUTOFILL_TARGETS_KEY]: targets } : def;
+  const stamp = Object.freeze(targets);
+  ISSUED_TARGET_STAMPS.add(stamp);
+  return { ...def, [LOOKUP_AUTOFILL_TARGETS_KEY]: stamp };
 }
 
-/** The target definitions a form stamped on `field`, or `undefined`. */
+/**
+ * The target definitions a record form stamped on `field`
+ * ({@link withLookupAutofillTargets}), possibly none, or `undefined` when no
+ * record form stamped it. A value under the key that
+ * {@link withLookupAutofillTargets} did not issue is no stamp.
+ */
 export function readLookupAutofillTargets(field: unknown): Readonly<Record<string, Record<string, unknown>>> | undefined {
   const value = (field as Record<string, unknown> | null | undefined)?.[LOOKUP_AUTOFILL_TARGETS_KEY];
-  return value && typeof value === 'object' && !Array.isArray(value)
+  return value && typeof value === 'object' && ISSUED_TARGET_STAMPS.has(value)
     ? (value as Record<string, Record<string, unknown>>)
     : undefined;
 }
