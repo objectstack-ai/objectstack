@@ -35,6 +35,7 @@
 
 import * as React from 'react';
 import { Navigate, Route, Routes, useLocation, useParams, useSearchParams } from 'react-router-dom';
+import { StudioAreaAppGate, StudioAreaAppOpen } from './StudioAreaAppOpen.js';
 import {
   MetadataAreaHostContext,
   SETUP_DATASOURCES_PATH,
@@ -147,8 +148,13 @@ function AreaItem({ editor }: { editor: AreaEditorProps }): React.ReactElement {
   const [search] = useSearchParams();
   // One editor buffer per member: two locales of one template are two items.
   const member = search.get(BUNDLE_MEMBER_PARAM) ?? '';
-  // A type never holds a `/`, so this names one item.
-  return <AreaItemOpen key={`${type}/${name}/${member}`} type={type} name={name} editor={editor} />;
+  // A type never holds a `/`, so this names one item. objectstack#36906 — a
+  // dashboard or a report opens in its app instead (`StudioAreaAppGate`).
+  return (
+    <StudioAreaAppGate key={`${type}/${name}/${member}`} type={type} name={name}>
+      <AreaItemOpen type={type} name={name} editor={editor} />
+    </StudioAreaAppGate>
+  );
 }
 
 function AreaItemOpen({
@@ -221,6 +227,20 @@ function AreaHistoryRedirect(): React.ReactElement {
  * the create URL lands on the list, as before.
  */
 function AreaCreate({ customization }: { customization: StudioBaseCustomization | null }): React.ReactElement {
+  const { type = '' } = useParams<{ type: string }>();
+  const host = useMetadataAreaHost();
+  // objectstack#36906, decision 13 — a report is made on its app's
+  // new-report page; with no app to open, the area's own create.
+  if (type === 'report' && host?.packageId) {
+    return (
+      <StudioAreaAppOpen packageId={host.packageId} target={{ kind: 'new-report' }} fallback={<AreaOwnCreate customization={customization} />} />
+    );
+  }
+  return <AreaOwnCreate customization={customization} />;
+}
+
+/** The area's own create: in the package, in a read-only base's pair, or none. */
+function AreaOwnCreate({ customization }: { customization: StudioBaseCustomization | null }): React.ReactElement {
   const { type = '' } = useParams<{ type: string }>();
   const { search } = useLocation();
   const host = useMetadataAreaHost();

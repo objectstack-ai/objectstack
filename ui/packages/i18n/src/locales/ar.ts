@@ -2005,6 +2005,12 @@ const ar = {
       noCategoryAxis: "محور فئات الرسم البياني مطلوب — الرسم البياني المرتبط بكائن لا يخترع محورًا. أعلن أحد التالي:",
     },
   },
+  // objectstack#36906 — the × of an app page opened from a Studio list.
+  studioReturn: {
+    close: 'العودة إلى Studio',
+    closeLabel: 'إغلاق والعودة إلى قائمة Studio',
+    leaveConfirm: 'هل تريد المغادرة دون حفظ؟ ستفقد التغييرات غير المحفوظة.',
+  },
   dashboard: {
     // objectui#7063 — the DEFAULT empty state every dashboard widget renders
     // when its query SUCCEEDED and returned nothing. It replaced the terse

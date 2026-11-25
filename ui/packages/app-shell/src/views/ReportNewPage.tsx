@@ -45,6 +45,8 @@ import { useMetadataClient } from './metadata-admin/useMetadata.js';
 import { useMetadata } from '../providers/MetadataProvider.js';
 import { loadHanRomanizer, romanizeHan } from './metadata-admin/romanizeHan.js';
 import { toFieldNameOrEmpty } from './metadata-admin/previews/object-fields-io.js';
+import { useStudioReturnLeaveMessage, useStudioReturnPath } from './StudioReturnButton.js';
+import { withStudioReturn } from './studio-design/studioAddress.js';
 
 /** The report a new builder starts on: nothing bound, the one report type. */
 export const NEW_REPORT_SEED: ReportDraft = { name: '', label: '', type: 'summary' };
@@ -98,10 +100,21 @@ export function ReportNewPage({ dataSource }: { dataSource?: DataSource }) {
   // The builder is open whenever this page draws it (objectstack#36692).
   useHoldDesignModeOut(isResolved && isAdmin && !designing);
 
-  const backToReports = React.useCallback(() => {
-    if (appName) navigate(`/apps/${appName}/reports`);
-    else navigate(-1);
-  }, [navigate, appName]);
+  // objectstack#36906 — opened from Studio's report list (decision 13): the
+  // builder's × goes back to that list, and the new report's page keeps the
+  // way back (`?studio=`).
+  const studioReturn = useStudioReturnPath();
+  const studioLeaveMessage = useStudioReturnLeaveMessage();
+  const backToReports = React.useCallback(
+    ({ dirty }: { dirty: boolean }) => {
+      if (studioReturn) {
+        if (dirty && !window.confirm(studioLeaveMessage)) return;
+        navigate(studioReturn);
+      } else if (appName) navigate(`/apps/${appName}/reports`);
+      else navigate(-1);
+    },
+    [navigate, appName, studioReturn, studioLeaveMessage],
+  );
 
   const handleSave = React.useCallback(
     async (draft: ReportDraft): Promise<boolean> => {
@@ -140,12 +153,13 @@ export function ReportNewPage({ dataSource }: { dataSource?: DataSource }) {
         return false;
       }
       await refresh().catch(() => {});
-      navigate(appName ? `/apps/${appName}/report/${encodeURIComponent(name)}` : `../report/${encodeURIComponent(name)}`, {
+      const reportPath = appName ? `/apps/${appName}/report/${encodeURIComponent(name)}` : `../report/${encodeURIComponent(name)}`;
+      navigate(studioReturn ? withStudioReturn(reportPath, studioReturn) : reportPath, {
         replace: true,
       });
       return true;
     },
-    [metadataClient, reports, language, dataSource, refresh, navigate, appName, t],
+    [metadataClient, reports, language, dataSource, refresh, navigate, appName, t, studioReturn],
   );
 
   if (loading || !isResolved) {

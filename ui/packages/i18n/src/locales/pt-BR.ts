@@ -1828,6 +1828,12 @@ const pt = {
       noCategoryAxis: "Eixo de categorias do gráfico obrigatório — um gráfico vinculado a um objeto não o inventa. Declare um destes:",
     },
   },
+  // objectstack#36906 — the × of an app page opened from a Studio list.
+  studioReturn: {
+    close: 'Voltar ao Studio',
+    closeLabel: 'Fechar e voltar à lista do Studio',
+    leaveConfirm: 'Sair sem salvar? As alterações não salvas serão perdidas.',
+  },
   dashboard: {
     // objectui#7063 — the DEFAULT empty state every dashboard widget renders
     // when its query SUCCEEDED and returned nothing. It replaced the terse

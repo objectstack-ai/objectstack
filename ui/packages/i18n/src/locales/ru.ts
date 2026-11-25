@@ -1893,6 +1893,12 @@ const ru = {
       noCategoryAxis: "Требуется ось категорий диаграммы — диаграмма, привязанная к объекту, не придумывает её. Объявите одно из:",
     },
   },
+  // objectstack#36906 — the × of an app page opened from a Studio list.
+  studioReturn: {
+    close: 'Вернуться в Studio',
+    closeLabel: 'Закрыть и вернуться к списку Studio',
+    leaveConfirm: 'Уйти без сохранения? Несохранённые изменения будут потеряны.',
+  },
   dashboard: {
     // objectui#7063 — the DEFAULT empty state every dashboard widget renders
     // when its query SUCCEEDED and returned nothing. It replaced the terse

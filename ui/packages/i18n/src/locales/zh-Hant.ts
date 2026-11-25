@@ -1903,6 +1903,12 @@ const zhHant = {
       },
     },
   },
+  // objectstack#36906 — the × of an app page opened from a Studio list.
+  studioReturn: {
+    close: '返回 Studio',
+    closeLabel: '關閉並返回 Studio 列表',
+    leaveConfirm: '不儲存就離開嗎？未儲存的修改將會遺失。',
+  },
   dashboard: {
     total: '總計',
     noDataSourceFor: '沒有可用的資料來源：',

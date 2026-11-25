@@ -1773,6 +1773,12 @@ const ko = {
       noCategoryAxis: "차트 범주 축이 필요합니다 — 객체 바인딩 차트는 축을 임의로 만들지 않습니다. 다음 중 하나를 선언하세요:",
     },
   },
+  // objectstack#36906 — the × of an app page opened from a Studio list.
+  studioReturn: {
+    close: 'Studio로 돌아가기',
+    closeLabel: '닫고 Studio 목록으로 돌아가기',
+    leaveConfirm: '저장하지 않고 나가시겠습니까? 저장하지 않은 변경 사항이 사라집니다.',
+  },
   dashboard: {
     // objectui#7063 — the DEFAULT empty state every dashboard widget renders
     // when its query SUCCEEDED and returned nothing. It replaced the terse

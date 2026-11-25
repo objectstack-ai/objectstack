@@ -2274,6 +2274,12 @@ const en = {
     redo: 'Redo',
     canvasMinimap: 'Canvas minimap',
   },
+  // objectstack#36906 — the × of an app page opened from a Studio list.
+  studioReturn: {
+    close: 'Back to Studio',
+    closeLabel: 'Close and go back to the Studio list',
+    leaveConfirm: 'Leave without saving? Your unsaved changes will be lost.',
+  },
   dashboard: {
     total: 'Total',
     noDataSourceFor: 'No data source available for',

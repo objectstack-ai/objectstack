@@ -1773,6 +1773,12 @@ const de = {
       noCategoryAxis: "Kategorieachse des Diagramms erforderlich — ein objektgebundenes Diagramm erfindet keine. Deklarieren Sie eine davon:",
     },
   },
+  // objectstack#36906 — the × of an app page opened from a Studio list.
+  studioReturn: {
+    close: 'Zurück zu Studio',
+    closeLabel: 'Schließen und zur Studio-Liste zurückkehren',
+    leaveConfirm: 'Ohne Speichern verlassen? Nicht gespeicherte Änderungen gehen verloren.',
+  },
   dashboard: {
     // objectui#7063 — the DEFAULT empty state every dashboard widget renders
     // when its query SUCCEEDED and returned nothing. It replaced the terse

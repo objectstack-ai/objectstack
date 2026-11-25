@@ -40,8 +40,8 @@ export interface ReportBuilderHostProps {
   servedText?: ServedReportText | null;
   /** Write the report. `true` when it was saved; the host then closes the builder. */
   onSave: (report: ReportDraft) => Promise<boolean>;
-  /** Leave the builder without saving. */
-  onClose: () => void;
+  /** Leave the builder without saving. `dirty`: the builder holds edits that leaving drops. */
+  onClose: (left: { dirty: boolean }) => void;
   /** A notice above the preview (the pending-draft bar). */
   banner?: React.ReactNode;
   dataSource?: DataSource;
@@ -147,7 +147,7 @@ export function ReportBuilderHost({ initial, servedText, onSave, onClose, banner
       }
       onSave={handleSave}
       onDiscard={() => setDraft(initial)}
-      onClose={onClose}
+      onClose={() => onClose({ dirty })}
       dirty={dirty}
       saving={saving}
       banner={banner}

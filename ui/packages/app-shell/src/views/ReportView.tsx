@@ -12,6 +12,7 @@ import { RuntimeDraftBar } from './RuntimeDraftBar.js';
 // inspector: the builder draws one dataset (see `opensInBuilder`).
 import { ReportConfigPanel } from './ReportConfigPanel.js';
 import { readReportBuilderArrival, withoutReportBuilderArrival } from './reportBuilderArrival.js';
+import { StudioReturnButton, useStudioReturnLeaveMessage, useStudioReturnPath } from './StudioReturnButton.js';
 import { Pencil, BarChart3, Loader2 } from 'lucide-react';
 import { PageHeader } from '../layout/PageHeader.js';
 import { useDesignModeActive, useHoldDesignModeOut } from '../layout/designMode.js';
@@ -539,6 +540,23 @@ export function ReportView({ dataSource }: { dataSource?: DataSource }) {
     void handleOpenBuilder();
   }, [isAdmin, designing, loading, initialReport, reportName, location, navigate, handleOpenBuilder]);
 
+  // objectstack#36906 — opened from a Studio list: the header's × goes back
+  // to it, and so does the builder's own ×, asking first when the builder
+  // holds edits it would drop.
+  const studioReturn = useStudioReturnPath();
+  const studioLeaveMessage = useStudioReturnLeaveMessage();
+  const handleBuilderClose = useCallback(
+    ({ dirty }: { dirty: boolean }) => {
+      if (!studioReturn) {
+        handleCloseBuilder();
+        return;
+      }
+      if (dirty && !window.confirm(studioLeaveMessage)) return;
+      navigate(studioReturn);
+    },
+    [studioReturn, studioLeaveMessage, handleCloseBuilder, navigate],
+  );
+
   // Sync reportData when metadata finishes loading or reportName changes
   useEffect(() => {
     setReportData(initialReport);
@@ -730,7 +748,7 @@ export function ReportView({ dataSource }: { dataSource?: DataSource }) {
           initial={authoredAtOpen}
           servedText={servedText}
           onSave={handleBuilderSave}
-          onClose={handleCloseBuilder}
+          onClose={handleBuilderClose}
           dataSource={dataSource}
           onDrill={handleDatasetDrill}
           banner={
@@ -764,7 +782,9 @@ export function ReportView({ dataSource }: { dataSource?: DataSource }) {
         title={heading}
         subtitle={description || undefined}
         icon={<BarChart3 className="h-4 w-4" />}
-        actions={isAdmin && !designing ? (
+        actions={(isAdmin && !designing) || studioReturn ? (
+          <div className="flex items-center gap-2">
+          {isAdmin && !designing && (
           <button
             type="button"
             onClick={() => { void handleOpenBuilder(); }}
@@ -775,6 +795,9 @@ export function ReportView({ dataSource }: { dataSource?: DataSource }) {
             <Pencil className="h-3.5 w-3.5" />
             {t('common.edit')}
           </button>
+          )}
+          {studioReturn && <StudioReturnButton to={studioReturn} />}
+          </div>
         ) : undefined}
       />
 
