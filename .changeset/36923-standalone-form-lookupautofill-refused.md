@@ -17,9 +17,9 @@ No metadata key is added or changed. Fix: declare `lookupAutofill` on the object
 
 **BREAKING** (`@object-ui/fields`, the `lookup` and `master_detail` widgets): `LookupField` handed an `onAutofill` writer runs its field's `lookupAutofill` pairs only when the record form stamped the field.
 
-- FROM: a single-value pick filled the declared targets whenever the host handed `onAutofill` (and no `onSelectRecord`) and the field carried `lookupAutofill` pairs.
-- TO: it also needs the stamp `withLookupAutofillTargets` issues, which the record form applies to every field it draws. A host that hands `onAutofill` without that stamp, such as a standalone `form` node, sets the lookup and fills nothing, and a development build warns once per field.
-- Fix: stamp the field through `withLookupAutofillTargets` before handing it to the widget, as the record form does, or declare `lookupAutofill` on the object field and draw the object's record form.
+- FROM: a single-value pick, and the opening fill of a create form that opened with the lookup set, filled the declared targets whenever the host handed `onAutofill` (and no `onSelectRecord`) and the field carried `lookupAutofill` pairs.
+- TO: it also needs the stamp `withLookupAutofillTargets` issues, which the record form applies to every field it draws. A host that hands `onAutofill` without that stamp, such as a standalone `form` node, sets the lookup and fills nothing, on a pick and on the opening fill alike, and a development build warns once per field.
+- Fix: stamp the field through `withLookupAutofillTargets(field, objectFields)` before handing it to the widget, passing the object's field map as the record form does. With no map the stamp names no target, so the pick copies without the cross-currency rule, which is the copy this change stops. Or declare `lookupAutofill` on the object field and draw the object's record form.
 
 **BREAKING** (`@object-ui/fields`, runtime export): `readLookupAutofillTargets(field)` now answers only for a target map that `withLookupAutofillTargets` issued.
 
