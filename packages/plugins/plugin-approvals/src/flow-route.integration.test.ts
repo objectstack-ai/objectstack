@@ -33,7 +33,12 @@
  *  - a gateway right after the current step is served `undecided`, never the
  *    trunk's branch, and a gateway ahead of a step the graph decides lets that
  *    step through;
- *  - a decided request ends its route at itself, `decided`.
+ *  - a decided request ends its route at itself, `decided`;
+ *  - [#35863] and carries `outcome`: a later request pending (step 2 of a
+ *    two-step route), the approval ended with a later step's decision, or
+ *    ended at the request itself; a pending request carries none; an
+ *    approval inside a subflow is never served its child run's end, nor is a
+ *    request whose snapshot does not say its run is a root run.
  *
  * ⚠️ Direction, predicted before running: every `flow_route` pin is RED on the
  * unfixed door (it served no such member); the `flow_steps` pins are green on
@@ -43,7 +48,7 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { ObjectQL } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
-import { AutomationEngine, registerLogicNodes } from '@objectstack/service-automation';
+import { AutomationEngine, installBuiltinNodes } from '@objectstack/service-automation';
 import type { EngineQueryOptions } from '@objectstack/spec/data';
 import { ApprovalService } from './approval-service.js';
 import { ApprovalsServicePlugin } from './approvals-plugin.js';
@@ -166,6 +171,58 @@ const LINEAR = {
   ],
 };
 
+/** [#35863] One approval, run as another flow's `subflow` body: a child run. */
+const CHILD = {
+  name: 'contract_child', label: 'Contract Child', type: 'autolaunched',
+  nodes: [
+    { id: 'start', type: 'start', label: 'Start' },
+    step('legal_review', 'Legal', 'u_legal'),
+    { id: 'ok', type: 'end', label: 'Approved' },
+    { id: 'no', type: 'end', label: 'Rejected' },
+  ],
+  edges: [
+    { id: 'c1', source: 'start', target: 'legal_review' },
+    { id: 'c2', source: 'legal_review', target: 'ok', label: 'approve' },
+    { id: 'c3', source: 'legal_review', target: 'no', label: 'reject' },
+  ],
+};
+
+/** [#35863] The legal step in a child run, then the general manager in the root run. */
+const HOSTED = {
+  name: 'contract_hosted', label: 'Contract Hosted', type: 'autolaunched',
+  nodes: [
+    { id: 'start', type: 'start', label: 'Start' },
+    { id: 'legal', type: 'subflow', label: 'Legal subflow', config: { flowName: CHILD.name } },
+    step('gm_signoff', 'General Manager', 'u_gm'),
+    { id: 'ok', type: 'end', label: 'Approved' },
+    { id: 'no', type: 'end', label: 'Rejected' },
+  ],
+  edges: [
+    { id: 'h1', source: 'start', target: 'legal' },
+    { id: 'h2', source: 'legal', target: 'gm_signoff' },
+    { id: 'h3', source: 'gm_signoff', target: 'ok', label: 'approve' },
+    { id: 'h4', source: 'gm_signoff', target: 'no', label: 'reject' },
+  ],
+};
+
+/** [#35863] The manager in the root run, then the legal step in a child run, then the end. */
+const REVIEWED_THEN_LEGAL = {
+  name: 'contract_reviewed_then_legal', label: 'Contract Reviewed Then Legal', type: 'autolaunched',
+  nodes: [
+    { id: 'start', type: 'start', label: 'Start' },
+    step('manager_review', 'Manager', 'u_mgr'),
+    { id: 'legal', type: 'subflow', label: 'Legal subflow', config: { flowName: CHILD.name } },
+    { id: 'done', type: 'end', label: 'Done' },
+    { id: 'no', type: 'end', label: 'Rejected' },
+  ],
+  edges: [
+    { id: 'r1', source: 'start', target: 'manager_review' },
+    { id: 'r2', source: 'manager_review', target: 'legal', label: 'approve' },
+    { id: 'r3', source: 'manager_review', target: 'no', label: 'reject' },
+    { id: 'r4', source: 'legal', target: 'done' },
+  ],
+};
+
 /** What `flow_steps` serves for every `contract_approval` request: its trunk. */
 const CONTRACT_TRUNK = ['manager_review', 'legal_finance_joint', 'executive_signoff', 'gm_signoff'];
 
@@ -198,6 +255,12 @@ describe('[#26668] the approvals get serves the route a request takes, not the f
     expect([out.finalized, out.resumed], `${decider} approved ${req.flow_node_id}`).toEqual([true, true]);
     return pendingOn(req.record_id);
   };
+  /** `decider` rejects `req`; the run walks the `reject` edge to its end. */
+  const reject = async (req: any, decider: string): Promise<void> => {
+    const out = await svc.decide(req.id, { decision: 'reject', actorId: decider, comment: 'Not this quarter' }, asUser(decider));
+    expect([out.finalized, out.resumed], `${decider} rejected ${req.flow_node_id}`).toEqual([true, true]);
+    expect(await pendingOn(req.record_id), 'nothing pending after the rejection').toBeUndefined();
+  };
   /** The get, as the submitter reads it. */
   const get = async (req: any): Promise<any> => svc.getRequest(req.id, asUser(SUBMITTER));
   const states = (steps: any[] | undefined) => (steps ?? []).map((s) => [s.id, s.state]);
@@ -218,8 +281,9 @@ describe('[#26668] the approvals get serves the route a request takes, not the f
     for (const u of USERS) await engine.insert('sys_user', u, { context: SYSTEM } as any);
 
     automation = new AutomationEngine(silent);
-    // The gateways are `decision` nodes, built-ins a bare engine starts without.
-    registerLogicNodes(automation, { logger: silent } as any);
+    // The gateways are `decision` nodes and the hosted case a `subflow`, built-ins
+    // a bare engine starts without.
+    installBuiltinNodes(automation, { logger: silent, getService() { throw new Error('none'); } } as any);
     svc = new ApprovalService({
       engine: engine as any,
       clock: { now: () => new Date(now += 1000) },
@@ -229,6 +293,9 @@ describe('[#26668] the approvals get serves the route a request takes, not the f
     registerApprovalNode(automation as any, svc, silent);
     automation.registerFlow(CONTRACT.name, CONTRACT as any);
     automation.registerFlow(LINEAR.name, LINEAR as any);
+    automation.registerFlow(CHILD.name, CHILD as any);
+    automation.registerFlow(HOSTED.name, HOSTED as any);
+    automation.registerFlow(REVIEWED_THEN_LEGAL.name, REVIEWED_THEN_LEGAL as any);
   });
 
   afterAll(async () => {
@@ -280,7 +347,7 @@ describe('[#26668] the approvals get serves the route a request takes, not the f
     expect(row.flow_route.ahead).toBe('undecided');
   });
 
-  it('a decided request ends its route at itself', async () => {
+  it('a decided request ends its route at itself; at the last step, the outcome says the approval ended', async () => {
     const manager = await submit(CONTRACT.name, { amount: 250000, route_finance: true });
     const finance = await approve(manager, 'u_mgr');
     await approve(finance, 'u_fin');
@@ -293,7 +360,156 @@ describe('[#26668] the approvals get serves the route a request takes, not the f
         { id: 'finance_only', label: 'Finance', state: 'done' },
       ],
       ahead: 'decided',
+      // [#35863] Both gateways past the finance rung fall through to the end: no later request.
+      outcome: { status: 'approved', ended: true },
     });
+  });
+
+  it('[#35863] a request decided at step 1 of a two-step route: the outcome says step 2 is pending, then that the approval ended there', async () => {
+    const manager = await submit(CONTRACT.name, { amount: 250000, route_finance: true });
+    const finance = await approve(manager, 'u_mgr');
+
+    const before = await get(manager);
+    expect(before.flow_route).toEqual({
+      steps: [{ id: 'manager_review', label: 'Manager', state: 'done' }],
+      ahead: 'decided',
+      outcome: { step: { id: 'finance_only', label: 'Finance' }, status: 'pending', ended: false },
+    });
+
+    await reject(finance, 'u_fin');
+    const after = await get(manager);
+    expect(after.flow_route.outcome).toEqual({ step: { id: 'finance_only', label: 'Finance' }, status: 'rejected', ended: true });
+  });
+
+  it('[#35863] a request rejected at the first step: the outcome says the approval ended there, rejected', async () => {
+    const manager = await submit(CONTRACT.name, { amount: 250000, route_finance: true });
+    await reject(manager, 'u_mgr');
+
+    const row = await get(manager);
+    expect(row.flow_route).toEqual({
+      steps: [{ id: 'manager_review', label: 'Manager', state: 'current' }],
+      ahead: 'decided',
+      outcome: { status: 'rejected', ended: true },
+    });
+  });
+
+  it('[#35863] an approval inside a subflow: its child run\'s end is not served as the end of the record\'s approval', async () => {
+    const legal = await submit(HOSTED.name, {});
+    expect(legal?.flow_node_id).toBe('legal_review');
+    expect(legal.flow_run_id, 'the legal step runs in a child run').toBeTruthy();
+    const gm = await approve(legal, 'u_legal');
+    // The child run completed; the root run went on to the general manager under its own run id.
+    expect(gm?.flow_node_id).toBe('gm_signoff');
+    expect(gm.flow_run_id).not.toBe(legal.flow_run_id);
+    expect((await automation.getRun(legal.flow_run_id))?.status, 'the child run itself has ended').toBe('completed');
+
+    const row = await get(legal);
+    expect(row.status).toBe('approved');
+    expect(row.flow_route.ahead).toBe('decided');
+    // Nothing later in the child run, and the child's end is not the approval's: no outcome.
+    expect('outcome' in row.flow_route).toBe(false);
+
+    // The root run's own last request: the run completed, but its flow starts a child run, whose
+    // requests are not among this run's rows, so the approval is not known to have ended here.
+    await approve(gm, 'u_gm');
+    expect((await automation.getRun(gm.flow_run_id))?.status, 'the root run itself has ended').toBe('completed');
+    expect('outcome' in (await get(gm)).flow_route).toBe(false);
+  });
+
+  it('[#35863] a later step in a child run: the root run\'s end is not served as "ended here" for the request before it', async () => {
+    const manager = await submit(REVIEWED_THEN_LEGAL.name, {});
+    expect(manager?.flow_node_id).toBe('manager_review');
+    const legal = await approve(manager, 'u_mgr');
+    expect(legal?.flow_node_id).toBe('legal_review');
+    expect(legal.flow_run_id, 'the legal step runs in a child run').not.toBe(manager.flow_run_id);
+
+    // Legal rejects; the child run ends and the root run walks on to its end.
+    await reject(legal, 'u_legal');
+    expect((await automation.getRun(manager.flow_run_id))?.status, 'the root run has ended').toBe('completed');
+
+    // The root run's rows hold only the manager's request. "The approval ended here, approved"
+    // would be wrong twice: it went on to legal, and legal's rejection was the last decision.
+    const row = await get(manager);
+    expect(row.status).toBe('approved');
+    expect(row.flow_route).toEqual({
+      steps: [{ id: 'manager_review', label: 'Manager', state: 'done' }],
+      ahead: 'decided',
+    });
+  });
+
+  it('[#35863] a flow edited after the run is not judged by the edit: the run\'s own body hosted a subflow', async () => {
+    // The run's body: the manager, then legal in a child run. Registered under its own name so the edit below touches no other pin.
+    const name = 'contract_edited_after_run';
+    automation.registerFlow(name, { ...REVIEWED_THEN_LEGAL, name } as any);
+    await new Promise((r) => setTimeout(r, 5)); // registered strictly before the run starts
+    const manager = await submit(name, {});
+    const legal = await approve(manager, 'u_mgr');
+    expect(legal.flow_run_id, 'the legal step runs in a child run').not.toBe(manager.flow_run_id);
+    await reject(legal, 'u_legal');
+    expect((await automation.getRun(manager.flow_run_id))?.status, 'the root run has ended').toBe('completed');
+    expect('outcome' in (await get(manager)).flow_route).toBe(false);
+
+    // The flow is edited to drop its subflow, under the SAME version number: the body armed now hosts no child run.
+    const { nodes, edges } = REVIEWED_THEN_LEGAL;
+    automation.registerFlow(name, {
+      ...REVIEWED_THEN_LEGAL, name,
+      nodes: nodes.filter((n) => n.id !== 'legal'),
+      edges: [...edges.filter((e) => e.source !== 'legal' && e.target !== 'legal'), { id: 'r5', source: 'manager_review', target: 'done', label: 'approve' }],
+    } as any);
+    // Still no outcome: the run ran the body with the subflow, and legal's rejection was the last decision.
+    const row = await get(manager);
+    expect(row.flow_route).toEqual({ steps: [{ id: 'manager_review', label: 'Manager', state: 'done' }], ahead: 'decided' });
+
+    // A run started on the edited body does end at the manager: "ended" is judged by the body a run ran.
+    await new Promise((r) => setTimeout(r, 5));
+    const next = await submit(name, {});
+    await approve(next, 'u_mgr');
+    expect((await get(next)).flow_route.outcome).toEqual({ status: 'approved', ended: true });
+  });
+
+  it('[#35863] a rollback re-arms an older body: a run of the newer one is not judged by it', async () => {
+    const name = 'contract_rolled_back';
+    const { nodes, edges } = REVIEWED_THEN_LEGAL;
+    // Version 1 has no subflow; version 2, the one the run runs, adds legal in a child run.
+    automation.registerFlow(name, {
+      ...REVIEWED_THEN_LEGAL, name, version: 1,
+      nodes: nodes.filter((n) => n.id !== 'legal'),
+      edges: [...edges.filter((e) => e.source !== 'legal' && e.target !== 'legal'), { id: 'r5', source: 'manager_review', target: 'done', label: 'approve' }],
+    } as any);
+    automation.registerFlow(name, { ...REVIEWED_THEN_LEGAL, name, version: 2 } as any);
+    await new Promise((r) => setTimeout(r, 5));
+    const manager = await submit(name, {});
+    const legal = await approve(manager, 'u_mgr');
+    await reject(legal, 'u_legal');
+    expect((await automation.getRun(manager.flow_run_id))?.status, 'the root run has ended').toBe('completed');
+
+    // Version 1 armed again: a body with no subflow, registered before the run started, but not the body it ran.
+    automation.rollbackFlow(name, 1);
+    expect('outcome' in (await get(manager)).flow_route).toBe(false);
+  });
+
+  it('[#35863] a request whose snapshot does not say its run is a root run is never served "ended"', async () => {
+    const manager = await submit(LINEAR.name, {});
+    const director = await approve(manager, 'u_mgr');
+    const gm = await approve(director, 'u_dir');
+    await approve(gm, 'u_gm');
+    expect((await get(gm)).flow_route.outcome).toEqual({ status: 'approved', ended: true });
+
+    // As a request opened before the stamp reads: the run ended, but it is not known to be the root run.
+    const [stored]: any[] = await engine.find('sys_approval_request', { where: { id: gm.id }, context: SYSTEM } satisfies EngineQueryOptions);
+    const cfg = JSON.parse(stored.node_config_json);
+    expect(cfg.__runRoot, 'the approval node stamps a root run').toBe(true);
+    delete cfg.__runRoot;
+    await engine.update('sys_approval_request', { id: gm.id, node_config_json: JSON.stringify(cfg) }, { context: SYSTEM } as any);
+    expect('outcome' in (await get(gm)).flow_route).toBe(false);
+    // An earlier request of the same run keeps its own stamp: it still says the approval went on and ended.
+    expect((await get(manager)).flow_route.outcome).toEqual({ step: { id: 'gm_signoff', label: 'General Manager' }, status: 'approved', ended: true });
+  });
+
+  it('[#35863] a pending request is never served an outcome', async () => {
+    const manager = await submit(CONTRACT.name, { amount: 250000, route_finance: true });
+    const row = await get(manager);
+    expect('outcome' in row.flow_route).toBe(false);
   });
 
   it('on a linear flow the trunk is the route: at every step the route equals flow_steps, ending at the flow\'s end', async () => {
