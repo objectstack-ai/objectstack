@@ -15,10 +15,16 @@ import type {
 import { KNOWLEDGE_SERVICE } from '@objectstack/spec/contracts';
 
 /**
- * In-memory knowledge adapter. Stores per-source document maps,
- * chunks documents naively on paragraph boundaries (with a soft 800-char
- * cap), embeds each chunk as a sparse token-frequency vector, and
- * answers `search()` via brute-force cosine similarity.
+ * In-memory knowledge adapter. Stores per-source document maps, embeds each
+ * passage as a sparse token-frequency vector, and answers `search()` via
+ * brute-force cosine similarity.
+ *
+ * It does not split: it declares `capabilities.chunks` (ADR-0161 K8, item 5),
+ * so the knowledge service hands it every document already cut into passages
+ * by the service's one splitter, and it indexes each passage as given — one
+ * hit per passage, its `chunkId` the service's. A document handed to it
+ * without `chunks` (a direct call, not through the service) is indexed as one
+ * passage holding the whole text.
  *
  * Deterministic — same input always produces the same hits — so it's
  * great for tests and reference implementations. **Don't use in prod.**
@@ -30,55 +36,39 @@ import { KNOWLEDGE_SERVICE } from '@objectstack/spec/contracts';
  */
 export class KnowledgeMemoryAdapter implements IKnowledgeAdapter {
   readonly id: string;
-  private readonly store = new Map<string, ChunkRecord[]>();
+  readonly capabilities = { chunks: true } as const;
+  /** source id → document id → the stored document. */
+  private readonly store = new Map<string, Map<string, StoredDocument>>();
 
   constructor(id = 'memory') {
     this.id = id;
   }
 
   async upsert(docs: KnowledgeDocument[], ctx: AdapterContext): Promise<void> {
-    const sourceId = ctx.source.id;
-    const existing = this.store.get(sourceId) ?? [];
-    const byDoc = new Map<string, ChunkRecord[]>();
-    for (const c of existing) {
-      const arr = byDoc.get(c.documentId) ?? [];
-      arr.push(c);
-      byDoc.set(c.documentId, arr);
-    }
-    for (const doc of docs) {
-      byDoc.set(doc.id, chunkAndEmbed(doc));
-    }
-    this.store.set(sourceId, Array.from(byDoc.values()).flat());
+    const byDoc = this.store.get(ctx.source.id) ?? new Map<string, StoredDocument>();
+    for (const doc of docs) byDoc.set(doc.id, { docHash: doc.docHash, chunks: embedPassages(doc) });
+    this.store.set(ctx.source.id, byDoc);
   }
 
   async delete(documentIds: string[], ctx: AdapterContext): Promise<void> {
-    const sourceId = ctx.source.id;
-    const chunks = this.store.get(sourceId);
-    if (!chunks) return;
-    const dropSet = new Set(documentIds);
-    this.store.set(
-      sourceId,
-      chunks.filter((c) => !dropSet.has(c.documentId)),
-    );
+    const byDoc = this.store.get(ctx.source.id);
+    if (!byDoc) return;
+    for (const id of documentIds) byDoc.delete(id);
   }
 
   async listDocuments(ctx: AdapterContext, opts: AdapterListDocumentsOptions): Promise<AdapterListDocumentsPage> {
     if (!Number.isInteger(opts.limit) || opts.limit < 1) {
       throw new RangeError(`listDocuments: limit must be a positive integer, got ${String(opts.limit)}`);
     }
-    // One entry per document, from its first chunk (every chunk carries the
-    // document's hash), in id order so a cursor stays valid across writes.
-    const byDoc = new Map<string, string | undefined>();
-    for (const c of this.store.get(ctx.source.id) ?? []) {
-      if (!byDoc.has(c.documentId)) byDoc.set(c.documentId, c.docHash);
-    }
+    // In id order, so a cursor stays valid across writes.
+    const byDoc = this.store.get(ctx.source.id) ?? new Map<string, StoredDocument>();
     const ids = [...byDoc.keys()]
       .filter((id) => opts.cursor === undefined || id > opts.cursor)
       .sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
     const page = ids.slice(0, opts.limit);
     return {
       documents: page.map((documentId) => {
-        const docHash = byDoc.get(documentId);
+        const docHash = byDoc.get(documentId)?.docHash;
         return docHash === undefined ? { documentId } : { documentId, docHash };
       }),
       ...(ids.length > page.length ? { nextCursor: page[page.length - 1] } : {}),
@@ -86,7 +76,7 @@ export class KnowledgeMemoryAdapter implements IKnowledgeAdapter {
   }
 
   async search(query: string, opts: AdapterSearchOptions): Promise<KnowledgeHit[]> {
-    const chunks = this.store.get(opts.source.id) ?? [];
+    const chunks = [...(this.store.get(opts.source.id)?.values() ?? [])].flatMap((d) => d.chunks);
     if (chunks.length === 0) return [];
     const qVec = embedTokens(tokenize(query));
     const qNorm = vectorNorm(qVec);
@@ -120,12 +110,16 @@ export class KnowledgeMemoryAdapter implements IKnowledgeAdapter {
   }
 }
 
+interface StoredDocument {
+  /** The document's `docHash`, stored as given (ADR-0161 K8, item 2). */
+  docHash?: string;
+  chunks: ChunkRecord[];
+}
+
 interface ChunkRecord {
   chunkId: string;
   documentId: string;
   sourceRecordId?: string;
-  /** The document's `docHash`, stored as given (ADR-0161 K8, item 2). */
-  docHash?: string;
   content: string;
   title?: string;
   metadata: Record<string, unknown>;
@@ -133,47 +127,27 @@ interface ChunkRecord {
   vectorNorm: number;
 }
 
-const CHUNK_TARGET = 800;
-
-function chunkAndEmbed(doc: KnowledgeDocument): ChunkRecord[] {
-  const paragraphs = doc.content
-    .split(/\n{2,}/)
-    .map((p) => p.trim())
-    .filter(Boolean);
-  const chunks: string[] = [];
-  let buf = '';
-  for (const p of paragraphs.length ? paragraphs : [doc.content]) {
-    if (buf && buf.length + p.length + 2 > CHUNK_TARGET) {
-      chunks.push(buf);
-      buf = '';
-    }
-    if (p.length > CHUNK_TARGET) {
-      if (buf) {
-        chunks.push(buf);
-        buf = '';
-      }
-      for (let i = 0; i < p.length; i += CHUNK_TARGET) {
-        chunks.push(p.slice(i, i + CHUNK_TARGET));
-      }
-    } else {
-      buf = buf ? `${buf}\n\n${p}` : p;
-    }
-  }
-  if (buf) chunks.push(buf);
-  return chunks.map((content, idx) => {
-    const vec = embedTokens(tokenize(content));
-    return {
-      chunkId: `${doc.id}#${idx}`,
-      documentId: doc.id,
-      sourceRecordId: doc.sourceRecordId,
-      docHash: doc.docHash,
-      content,
-      title: doc.title,
-      metadata: doc.metadata ?? {},
-      vector: vec,
-      vectorNorm: vectorNorm(vec),
-    };
-  });
+/**
+ * One record per passage the service cut (`doc.chunks`), as given; without
+ * `chunks`, one passage holding the whole text. Never split here.
+ */
+function embedPassages(doc: KnowledgeDocument): ChunkRecord[] {
+  const passages = doc.chunks ?? [{ id: `${doc.id}#0`, content: doc.content }];
+  return passages
+    .filter((p) => p.content.trim() !== '')
+    .map((p) => {
+      const vec = embedTokens(tokenize(p.content));
+      return {
+        chunkId: p.id,
+        documentId: doc.id,
+        sourceRecordId: doc.sourceRecordId,
+        content: p.content,
+        title: doc.title,
+        metadata: doc.metadata ?? {},
+        vector: vec,
+        vectorNorm: vectorNorm(vec),
+      };
+    });
 }
 
 function tokenize(text: string): string[] {

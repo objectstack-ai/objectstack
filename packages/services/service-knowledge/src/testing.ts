@@ -10,7 +10,7 @@
  * runKnowledgeAdapterContract({
  *   name: 'knowledge-memory',
  *   makeAdapter: () => new KnowledgeMemoryAdapter(),
- *   implements: { listDocuments: true },
+ *   implements: { listDocuments: true, chunks: true },
  * });
  * ```
  *
@@ -21,7 +21,11 @@
  * optional `listDocuments` (page boundaries at 0, one page and one page + 1;
  * `docHash` returned as stored); and, through a real `KnowledgeService` over a
  * small data-engine double, the skip of unchanged documents and the purge of
- * documents the source no longer has.
+ * documents the source no longer has; and the chunk channel (ADR-0161 K8,
+ * item 5) — an adapter that declares `capabilities.chunks` receives the
+ * service's passages and indexes them as given, one that does not keeps
+ * receiving whole documents, and a `whole` document over the embedder's
+ * budget is removed and reported, never truncated.
  *
  * Every optional member is DECLARED by the caller in `implements`, and the
  * suite asserts the declaration against the adapter: a member an adapter lacks
@@ -32,6 +36,7 @@ import { describe, expect, it } from 'vitest';
 import type { IDataEngine, IKnowledgeAdapter, AdapterContext } from '@objectstack/spec/contracts';
 import type { KnowledgeDocument, KnowledgeSource, ObjectKnowledgeSource } from '@objectstack/spec/ai';
 import { KnowledgeService } from './knowledge-service.js';
+import { resolveSplit, splitDocument } from './split/index.js';
 
 /** Input of {@link runKnowledgeAdapterContract}. */
 export interface KnowledgeAdapterContractOptions {
@@ -46,6 +51,8 @@ export interface KnowledgeAdapterContractOptions {
   /** The optional members this adapter implements; checked against the adapter. */
   implements: {
     listDocuments: boolean;
+    /** `capabilities.chunks === true`: the adapter takes the service's passages. */
+    chunks: boolean;
   };
 }
 
@@ -65,15 +72,23 @@ function ctxOf(source: KnowledgeSource): AdapterContext {
   return { source, reason: 'manual' };
 }
 
-function doc(source: KnowledgeSource, n: string, content: string, docHash?: string): KnowledgeDocument {
-  return {
-    id: `${source.id}:${n}`,
-    sourceId: source.id,
-    sourceRecordId: n,
-    content,
-    title: `Title ${n}`,
-    metadata: { status: 'published' },
-    ...(docHash === undefined ? {} : { docHash }),
+/**
+ * A document as the service hands it to this adapter: with one passage (the
+ * whole text, as split `whole` gives it) when the adapter takes chunks.
+ */
+function docFor(withChunks: boolean) {
+  return (source: KnowledgeSource, n: string, content: string, docHash?: string): KnowledgeDocument => {
+    const id = `${source.id}:${n}`;
+    return {
+      id,
+      sourceId: source.id,
+      sourceRecordId: n,
+      content,
+      title: `Title ${n}`,
+      metadata: { status: 'published' },
+      ...(docHash === undefined ? {} : { docHash }),
+      ...(withChunks ? { chunks: [{ id: `${id}#0`, documentId: id, index: 0, content }] } : {}),
+    };
   };
 }
 
@@ -142,16 +157,34 @@ function rowsEngine(rows: Row[]): IDataEngine {
   } as unknown as IDataEngine;
 }
 
-/** A `KnowledgeService` over `adapter` and `rows`, with the adapter's `upsert` counted. */
-async function serviceOver(make: () => IKnowledgeAdapter | Promise<IKnowledgeAdapter>, rows: Row[], source: KnowledgeSource) {
+/**
+ * A `KnowledgeService` over `adapter` and `rows`, with the adapter's `upsert`
+ * counted and its documents kept. `maxInputTokens` stands in for the limit the
+ * adapter's embedder would report; omitted, the adapter's own report is used.
+ */
+async function serviceOver(
+  make: () => IKnowledgeAdapter | Promise<IKnowledgeAdapter>,
+  rows: Row[],
+  source: KnowledgeSource,
+  opts: { maxInputTokens?: number } = {},
+) {
   const adapter: IKnowledgeAdapter = await make();
   const upserted: string[][] = [];
+  const received: KnowledgeDocument[] = [];
   // Delegation, not a prototype proxy: an adapter with `#private` fields only
-  // answers when its methods are called on the adapter itself.
+  // answers when its methods are called on the adapter itself. The
+  // descriptors are read through on every access, as the service reads them.
   const counting: IKnowledgeAdapter = {
     id: adapter.id,
+    get capabilities() {
+      return adapter.capabilities;
+    },
+    get embedding() {
+      return opts.maxInputTokens === undefined ? adapter.embedding : { maxInputTokens: opts.maxInputTokens };
+    },
     upsert: async (docs, ctx) => {
       upserted.push(docs.map((d) => d.id));
+      received.push(...docs);
       return adapter.upsert(docs, ctx);
     },
     search: (query, searchOpts) => adapter.search(query, searchOpts),
@@ -163,7 +196,7 @@ async function serviceOver(make: () => IKnowledgeAdapter | Promise<IKnowledgeAda
   const svc = new KnowledgeService({ dataEngine: rowsEngine(rows) });
   svc.registerAdapter('under_test', counting);
   svc.registerSource(source);
-  return { adapter, svc, upserted };
+  return { adapter, svc, upserted, received };
 }
 
 const rowsOf = (n: number): Row[] =>
@@ -175,12 +208,14 @@ const rowsOf = (n: number): Row[] =>
  */
 export function runKnowledgeAdapterContract(opts: KnowledgeAdapterContractOptions): void {
   const make = opts.makeAdapter;
+  const doc = docFor(opts.implements.chunks);
 
   describe(`IKnowledgeAdapter contract — ${opts.name}`, () => {
     it('declares exactly the optional members it implements', async () => {
       const adapter: IKnowledgeAdapter = await make();
       expect(typeof adapter.id).toBe('string');
       expect(typeof adapter.listDocuments === 'function').toBe(opts.implements.listDocuments);
+      expect(adapter.capabilities?.chunks === true).toBe(opts.implements.chunks);
     });
 
     describe('upsert / search / delete', () => {
@@ -319,5 +354,81 @@ export function runKnowledgeAdapterContract(opts: KnowledgeAdapterContractOption
         });
       });
     }
+
+    describe('the chunk channel (ADR-0161 K8, item 5)', () => {
+      const longBody =
+        'Glaciers carve valleys over centuries. Their ice holds ancient air bubbles. ' +
+        'Harbour cranes unload containers at night. The night shift starts at ten. ' +
+        'Copper wire conducts heat and electricity well. It is drawn through dies.';
+      const splitSource = (id: string) =>
+        objectSource(id, { split: { strategy: 'recursive', maxChars: 80, minChars: 0 } } as Partial<ObjectKnowledgeSource>);
+
+      if (opts.implements.chunks) {
+        it("receives the service's passages, cut once, and indexes them as given", async () => {
+          const source = splitSource('chunks');
+          const rows: Row[] = [{ id: 'r1', body: longBody, status: 'published' }];
+          const h = await serviceOver(make, rows, source);
+          expect(await h.svc.reindexSource(source.id)).toMatchObject({ ok: true, indexed: 1, failed: 0, failures: [] });
+          const [sent] = h.received;
+          const expected = splitDocument(
+            sent,
+            resolveSplit({
+              split: (source.source as ObjectKnowledgeSource).split,
+              maxInputTokens: h.adapter.embedding?.maxInputTokens,
+            }),
+          );
+          if (!expected.ok) throw new Error(expected.reason);
+          expect(expected.chunks.length).toBeGreaterThan(1);
+          expect(sent.chunks).toEqual(expected.chunks);
+          // Indexed as given: a hit is one of those passages, by id and text.
+          const third = expected.chunks.find((c) => c.content.includes('Copper'))!;
+          const hits = await h.adapter.search('copper wire electricity', { source, topK: 3 });
+          expect(hits[0]).toMatchObject({ chunkId: third.id, documentId: sent.id, snippet: third.content });
+        });
+
+        it("a whole document over the embedder's budget is removed and reported, never truncated", async () => {
+          const source = objectSource('whole', { split: { strategy: 'whole' } } as Partial<ObjectKnowledgeSource>);
+          const rows: Row[] = [
+            { id: 'r1', body: 'short tundra note', status: 'published' },
+            { id: 'r2', body: longBody, status: 'published' },
+          ];
+          // 60 tokens: a 48-token budget, which the short row fits and the long one does not.
+          const h = await serviceOver(make, rows, source, { maxInputTokens: 60 });
+          const first = await h.svc.reindexSource(source.id);
+          expect(first).toMatchObject({ ok: true, discovered: 2, indexed: 1, failed: 1 });
+          expect(first.failures).toEqual([{ documentId: `${source.id}:r2`, reason: expect.stringContaining("split 'whole'") }]);
+          expect(await h.adapter.search('glaciers copper', { source, topK: 5 })).toEqual([]);
+          // A document that fit and then grew past the budget leaves the index too.
+          rows[0].body = `tundra ${longBody}`;
+          const second = await h.svc.reindexSource(source.id);
+          expect(second).toMatchObject({ ok: true, failed: 2 });
+          expect((await h.adapter.search('tundra', { source, topK: 5 })).map((x) => x.documentId)).toEqual([]);
+        });
+
+        it('indexDocument refuses caller-supplied chunks', async () => {
+          const source = splitSource('push');
+          const h = await serviceOver(make, [], source);
+          await expect(
+            h.svc.indexDocument(source.id, {
+              id: `${source.id}:x`,
+              sourceId: source.id,
+              content: 'pushed',
+              chunks: [{ id: `${source.id}:x#0`, documentId: `${source.id}:x`, index: 0, content: 'pushed' }],
+            }),
+          ).rejects.toThrow(/chunks are cut by the knowledge service/);
+          expect(h.upserted).toEqual([]);
+        });
+      } else {
+        it('receives whole documents, never chunks, whatever the source splits by or the budget', async () => {
+          const source = splitSource('nochunks');
+          const rows: Row[] = [{ id: 'r1', body: longBody, status: 'published' }];
+          const h = await serviceOver(make, rows, source, { maxInputTokens: 20 });
+          expect(await h.svc.reindexSource(source.id)).toMatchObject({ ok: true, indexed: 1, failed: 0 });
+          expect(h.received).toHaveLength(1);
+          expect(h.received[0].content).toBe(longBody);
+          expect('chunks' in h.received[0]).toBe(false);
+        });
+      }
+    });
   });
 }

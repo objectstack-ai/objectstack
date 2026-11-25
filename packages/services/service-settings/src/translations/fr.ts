@@ -732,11 +732,7 @@ export const fr: PlatformTranslationData = {
         },
         chunk_target: {
           label: 'Taille cible des morceaux (caractères)',
-          help: 'Plafond souple de taille des morceaux avant que le découpage par jetons n’intervienne.',
-        },
-        chunk_overlap: {
-          label: 'Chevauchement des morceaux (caractères)',
-          help: 'Caractères repris du morceau précédent pour que le contexte franchisse la frontière.',
+          help: 'Longueur maximale d’un passage, en caractères, lorsque le service de connaissances découpe un document. Le split.maxChars propre à une source l’emporte ; la limite d’entrée de l’embedder peut l’abaisser.',
         },
         over_fetch: {
           label: 'Multiplicateur de sur-récupération',
