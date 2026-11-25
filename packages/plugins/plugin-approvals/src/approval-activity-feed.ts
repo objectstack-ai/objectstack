@@ -115,7 +115,7 @@ const SUMMARY_MAX = 500;
 
 /** The kernel logger's slice used here (`Logger` in `@objectstack/spec/contracts`). */
 type Logger = {
-  warn?: (message: string, meta?: Record<string, any>) => void;
+  warn: (message: string, meta?: Record<string, any>) => void;
   error?: (message: string, error?: Error, meta?: Record<string, any>) => void;
 };
 

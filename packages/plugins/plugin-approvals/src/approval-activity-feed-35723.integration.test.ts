@@ -175,7 +175,7 @@ async function open(rig: Rig, object: string, recordId: string): Promise<string>
 async function entriesOf(rig: Rig, recordId: string): Promise<any[]> {
   const rows = (await rig.engine.find('sys_activity', {
     where: { record_id: recordId }, context: SYSTEM,
-  } as any)) as any[];
+  })) as any[];
   return rows.sort((a, b) => String(a.timestamp).localeCompare(String(b.timestamp)) || 0);
 }
 
