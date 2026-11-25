@@ -277,7 +277,7 @@ describe('[ADR-0160 D4] the /mcp route answers through a package pack the real p
             executionContext: { userId: 'usr_member', tenantId: 'org_1', positions: [], permissions: [], systemPermissions: [] },
         } as any);
         expect(res.response?.status).toBe(200);
-        const result = (res.response?.body as any)?.result ?? JSON.parse(await (res.response as any).text?.() ?? '{}').result;
+        const result = (res.response?.body as any)?.result;
         expect(result?.isError, JSON.stringify(result)).not.toBe(true);
         const answer = JSON.parse(result.content[0].text);
         expect(answer.data.pack.name).toBe('rcd_policy_document');

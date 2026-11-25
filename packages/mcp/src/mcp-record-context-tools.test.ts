@@ -30,6 +30,8 @@ import type { IDataEngine, IMetadataService } from '@objectstack/spec/contracts'
 import { createRecordContextTools } from '@objectstack/service-record-context';
 import { ObjectQL } from '@objectstack/objectql/core';
 import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
+import { InMemoryDriver } from '@objectstack/driver-memory';
+import { SysMetadataObject } from '@objectstack/metadata-core';
 import { MCPServerRuntime } from './mcp-server-runtime.js';
 import type { McpDataBridge } from './mcp-http-tools.js';
 import { createStdioDataBridge } from './stdio-data-bridge.js';
@@ -304,6 +306,9 @@ describe('[ADR-0160 D4] get_record_context — the gates the record tools put be
 describe('[ADR-0160 D4] get_record_context — a package pack the real protocol serves', () => {
   it('the served listing carries the read decoration, and both doors answer through the pack', async () => {
     const engineOfRecord = new ObjectQL();
+    engineOfRecord.registerDriver(new InMemoryDriver() as never, true);
+    await engineOfRecord.init();
+    engineOfRecord.registry.registerObject(SysMetadataObject as never, '@objectstack/platform-objects');
     engineOfRecord.registerApp({
       id: 'com.objectstack.qa.record-context-stdio',
       name: 'record context stdio',

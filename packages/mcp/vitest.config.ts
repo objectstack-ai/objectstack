@@ -83,6 +83,8 @@ export default defineConfig({
       // listing is read off the real `ObjectStackProtocolImplementation` in the
       // checkout, decorations included, never a build of it.
       { find: /^@objectstack\/metadata-protocol$/, replacement: path.resolve(__dirname, '../metadata-protocol/src/index.ts') },
+      // …over a real store: the in-memory driver backs the `sys_metadata` read the protocol's listing makes.
+      { find: /^@objectstack\/driver-memory$/, replacement: path.resolve(__dirname, '../drivers/driver-memory/src/index.ts') },
       // [ADR-0160] The record-context executor, so `get_record_context`'s transport parity runs the real one.
       { find: /^@objectstack\/service-record-context$/, replacement: path.resolve(__dirname, '../services/service-record-context/src/index.ts') },
     ],
