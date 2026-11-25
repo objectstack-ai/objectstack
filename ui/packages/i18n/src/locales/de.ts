@@ -3726,7 +3726,7 @@ const de = {
     build: {
       title: "App erstellen",
       noCapability: "Das Erstellen von Apps ist in diesem System nicht verfügbar — es erfordert die Berechtigung „Metadaten verwalten“, die Ihr Konto nicht besitzt.",
-      inStudio: "Neu in Studio",
+      inStudio: "Neue leere App",
     },
     template: {
       title: "Mit einer Vorlage starten",

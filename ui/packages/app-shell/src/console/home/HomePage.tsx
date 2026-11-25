@@ -987,7 +987,7 @@ export function HomePage({ checklist }: HomePageProps = {}) {
                   {aiStudioEnabled && aiResolved && !buildServed && canAuthorMetadata && (
                     <BuilderChip
                       icon={Hammer}
-                      label={t('home.build.inStudio', { defaultValue: 'New in Studio' })}
+                      label={t('home.build.inStudio', { defaultValue: 'New blank app' })}
                       tone="soft"
                       onClick={() => navigate(SETUP_NEW_PACKAGE_PATH)}
                       disabledReason={undefined}
