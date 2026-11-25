@@ -36,6 +36,7 @@ import { Loader2, ChevronDown } from 'lucide-react';
 import { resolveIcon } from './resolve-icon';
 import { hasDeclaredVisibilityGate } from './visibility-gate';
 import { readActionEntryParamValues } from './static-params';
+import { withRenderableLabel } from './renderable-label';
 import { toButtonVariant, toRunnerVariant } from './runner-variant';
 import {
   DisabledReasonMenuLabel,
@@ -285,7 +286,7 @@ DropdownActionItem.displayName = 'DropdownActionItem';
 // host-EVALUATED enablement verdict, declared rather than left to the index
 // signature, as `ActionButtonRendererProps` declares it (objectui#9131).
 const ActionGroupRenderer = forwardRef<HTMLDivElement, { schema: ActionGroupSchema; className?: string }>(
-  ({ schema, className, ...props }: { schema: ActionGroupSchema; className?: string; disabled?: boolean; [key: string]: unknown } & RendererHostProps, ref) => {
+  ({ schema: declaredSchema, className, ...props }: { schema: ActionGroupSchema; className?: string; disabled?: boolean; [key: string]: unknown } & RendererHostProps, ref) => {
     const {
       'data-obj-id': dataObjId,
       'data-obj-type': dataObjType,
@@ -305,6 +306,16 @@ const ActionGroupRenderer = forwardRef<HTMLDivElement, { schema: ActionGroupSche
       disabled: hostDisabled,
       ...rest
     } = props;
+
+    // Every label read in this group goes through the shared guard (see
+    // `renderableLabel`): the group's own label here (its `visible` diagnostic
+    // and the dropdown trigger), and each member's below where `actions` is
+    // built, so both leaves and the runner's `label` read a guarded one.
+    const groupKey = dataObjId ?? 'action:group';
+    const schema = React.useMemo(
+      () => withRenderableLabel(declaredSchema, groupKey, 'action:group'),
+      [declaredSchema, groupKey],
+    );
 
     const { execute } = useAction();
     const [dropdownLoading, setDropdownLoading] = useState(false);
@@ -329,7 +340,11 @@ const ActionGroupRenderer = forwardRef<HTMLDivElement, { schema: ActionGroupSche
     // read. The local restates the declared type; both `.map()` callbacks
     // below still infer from it.
     const declaredActions: UIActionSchema[] = schema.actions || [];
-    const actions = declaredActions.filter(a => actionRendersAt(a, schema.location));
+    const actions = declaredActions
+      .filter(a => actionRendersAt(a, schema.location))
+      .map((action, index) =>
+        withRenderableLabel(action, action.name ?? `${groupKey}#${index}`, 'action:group'),
+      );
 
     const handleExecute = useCallback(
       async (action: UIActionSchema) => {

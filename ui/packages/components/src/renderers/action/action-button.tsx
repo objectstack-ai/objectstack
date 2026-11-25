@@ -31,6 +31,7 @@ import { resolveIcon } from './resolve-icon';
 import { hasDeclaredVisibilityGate } from './visibility-gate';
 import { useAutoTriggerOnce } from './auto-trigger';
 import { readStaticParamValues } from './static-params';
+import { renderableLabel } from './renderable-label';
 import { toButtonVariant, toRunnerVariant } from './runner-variant';
 import { DisabledReasonTrigger, describedByWithReason, useDisabledReason } from './disabled-reason';
 import type { RendererHostProps } from '../../lib/renderer-host-props';
@@ -40,32 +41,6 @@ function asRecord(value: unknown): Record<string, unknown> | undefined {
   return value != null && typeof value === 'object' && !Array.isArray(value)
     ? (value as Record<string, unknown>)
     : undefined;
-}
-
-/** Components already warned about a non-string label, so each warns once. */
-const warnedNonStringLabel = new Set<string>();
-
-/**
- * The label this button may print: the contract's `label` is `z.string()`, and
- * a string is returned as it came. Anything else — typically an inline locale
- * map from metadata that never passed `validateComponentProps` — is returned as
- * `undefined`, so the button renders no text instead of throwing "Objects are
- * not valid as a React child" or printing `[object Object]`. The value is never
- * translated here: localization is the translation bundle's entry for the
- * component id, and a value the contract refuses is not given a meaning.
- * A development build warns once per component.
- */
-function renderableLabel(label: unknown, componentKey: string): string | undefined {
-  if (label == null || typeof label === 'string') return label ?? undefined;
-  if (process.env.NODE_ENV !== 'production' && !warnedNonStringLabel.has(componentKey)) {
-    warnedNonStringLabel.add(componentKey);
-    console.warn(
-      `[object-ui] action:button "${componentKey}" has a non-string label (${Array.isArray(label) ? 'array' : typeof label}); ` +
-        'the label was not rendered. The label must be a string: localize it through the translation bundle entry ' +
-        'pages.PAGE.components.COMPONENT_ID.label, not an inline locale map.',
-    );
-  }
-  return undefined;
 }
 
 /**
