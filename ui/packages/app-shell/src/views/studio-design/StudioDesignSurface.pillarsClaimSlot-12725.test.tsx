@@ -19,7 +19,8 @@
  *  - While 属性 shows, the copilot strip stays at the slot's foot.
  *  - A hidden slot unfolds on a new selection (objectstack#26737); hidden again
  *    over the same selection, it stays hidden.
- *  - CONTROL: the Access pillar claims nothing — the slot shows the copilot
+ *  - CONTROL: the sharing overview (objectstack#36905; the Access pillar before
+ *    it) claims nothing — the slot shows the copilot
  *    alone; the Interfaces pillar's own pins live in `rightSlot-12725`.
  *
  * The copilot, the flow canvas and both inspectors are stubs: the canvas
@@ -116,6 +117,8 @@ vi.mock('./StudioAiCopilot', () => ({
 // The source loads `@objectstack/lint` lazily; paid here, at collection, not
 // inside a case's clock (check:test-source-alias).
 import '@objectstack/lint';
+// objectstack#36900 — the surface mounts the command palette, which reaches the
+// record preview's `lazy()` detail entry: its first load is paid at collection too.
 import '@object-ui/plugin-detail';
 import { StudioDesignSurface } from './StudioDesignSurface';
 import { t } from '../metadata-admin/i18n';
@@ -428,8 +431,8 @@ describe('Automations: the Configuration is in the right slot (objectui#12725)',
 });
 
 describe('CONTROL — a pillar that claims nothing (objectui#12725)', () => {
-  it('Access keeps its own layout: the slot shows the copilot alone, with no properties half', async () => {
-    renderAt('access');
+  it('the sharing overview keeps its own layout: the slot shows the copilot alone, with no properties half', async () => {
+    renderAt('owd');
     await waitFor(() => expect(slot()).toHaveAttribute('data-mode', 'copilot'));
     expect(within(slot()).queryAllByRole('tab')).toHaveLength(0);
     expect(slotProps()).toBeEmptyDOMElement();

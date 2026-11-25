@@ -31,6 +31,8 @@ import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
 // The surface's reach loads `@objectstack/lint` lazily; pay that load during
 // collection, not inside a case's clocked window (`check:test-source-alias`).
 import '@objectstack/lint';
+// objectstack#36900 — the surface mounts the command palette, which reaches the
+// record preview's `lazy()` detail entry: its first load is paid at collection too.
 import '@object-ui/plugin-detail';
 
 const OWN = 'com.example.sales';
@@ -192,7 +194,7 @@ describe('opened directly, 「‹ Back to app」 lands on the package app\'s fir
 
   it('with several published apps, the first, addressed by its name', async () => {
     srv.apps = [SERVICE_APP, SALES_APP];
-    renderAt(`/studio/${OWN}/access`);
+    renderAt(`/studio/${OWN}/owd`);
     await waitFor(() => expect(within(header()).getByTestId('studio-back-app-name')).toHaveTextContent('Service desk'), {
       timeout: 8000,
     });

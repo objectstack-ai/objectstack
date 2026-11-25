@@ -14,10 +14,12 @@
  *   <root>/:type               a type's list
  *   <root>/:type/new           create (a writable package only)
  *   <root>/:type/:name         the generic item page, the item's pillar, the
- *                              object designer (#36904), or the form editor
- *                              of an email template or a translation
- *                              (`StudioBundleItemEditor`, #28569), and of a
- *                              read-only package's dataset (#30064)
+ *                              form editor of an email template or a
+ *                              translation (`StudioBundleItemEditor`, #28569),
+ *                              and of a read-only package's dataset (#30064),
+ *                              or a designer full-screen: a permission set's
+ *                              matrix (`StudioPermissionSetPage`, #36905), an
+ *                              object's designer (`DataPillar`, #36904)
  *   <root>/:type/:name/history the item's history: its History tab
  *                              (`?tab=history`), the old address redirected;
  *                              the history page for a type with an editor of
@@ -55,11 +57,12 @@ import {
 } from './metadataArea.js';
 import { StudioBundleItemEditor } from './StudioBundleItemEditor.js';
 import { DataPillar } from './DataPillar.js';
-import type { StudioSurfaceLabel } from './StudioAiCopilot.js';
+import { StudioPermissionSetPage } from './StudioPermissionSetPage.js';
 import { BUNDLE_MEMBER_PARAM, getMetadataResource } from '../metadata-admin/registry.js';
 import { ITEM_TOOL_TAB_PARAM } from '../item-tools/ItemToolTabs.js';
 import type { StudioBaseCustomization } from './StudioDesignSurface.js';
 import type { StudioRefusal } from './metadataError.js';
+import type { StudioSurfaceLabel } from './StudioAiCopilot.js';
 
 /*
  * The pages load with the area, through the specifier `AppContent` loads them
@@ -135,9 +138,10 @@ interface AreaEditorProps {
   publishNonce: number;
   onDraftSaved?: (saved?: { type: string; name: string }) => void;
   publishRefusalFor?: (type: string, name: string) => StudioRefusal | null;
-  /** objectstack#36904 — the object designer's reports to the surface: its held edit and the copilot's chip. */
-  onHeldEditChange?: (clause: string | null) => void;
+  /** objectstack#36904, objectstack#36905 — a designer page's open item label, for the copilot's chip. */
   onSurfaceLabelChange?: (surface: StudioSurfaceLabel | null) => void;
+  /** objectstack#36904 — the object designer's held edit, reported to the surface. */
+  onHeldEditChange?: (clause: string | null) => void;
   /** The object designer's copilot-changes line opens the surface's Changes. */
   onReviewChanges?: () => void;
 }
@@ -175,12 +179,16 @@ function AreaItemOpen({
   const host = useMetadataAreaHost();
   const [opens] = React.useState(() => {
     const at = { packageId: host?.packageId ?? null, type, search };
-    if (areaItemOpensDesignerPage(at) && !areaItemAsksGenericPage(search)) return { designer: true, formEditor: false, pillarPath: null };
+    // objectstack#36904 — the object designer leaves `?review=1` (and the
+    // environment scope) to the generic page, as a pillar did; a permission
+    // set's matrix (objectstack#36905) opens on any query.
+    const genericAsked = type === 'object' && areaItemAsksGenericPage(search);
+    if (areaItemOpensDesignerPage(at) && !genericAsked) return { designer: true, formEditor: false, pillarPath: null };
     if (areaItemOpensFormEditor({ ...at, readOnly: host?.readOnly === true })) return { designer: false, formEditor: true, pillarPath: null };
     return { designer: false, formEditor: false, pillarPath: areaItemPillarPath({ ...at, name }) };
   });
   if (opens.pillarPath) return <Navigate to={opens.pillarPath} replace />;
-  if (opens.designer && host?.packageId) {
+  if (opens.designer && host?.packageId && type === 'object') {
     // objectstack#36904 — the object designer, full-screen on the object's address.
     return (
       <div className="h-full min-h-0" data-testid="studio-object-designer">
@@ -196,6 +204,19 @@ function AreaItemOpen({
           onReviewChanges={editor.onReviewChanges}
         />
       </div>
+    );
+  }
+  // objectstack#36905 — a permission set opens its matrix full-screen here.
+  if (opens.designer && host?.packageId) {
+    return (
+      <StudioPermissionSetPage
+        packageId={host.packageId}
+        name={name}
+        readOnly={host.readOnly}
+        publishNonce={editor.publishNonce}
+        onDraftSaved={editor.onDraftSaved ? () => editor.onDraftSaved?.({ type, name }) : undefined}
+        onSurfaceLabelChange={editor.onSurfaceLabelChange}
+      />
     );
   }
   if (opens.formEditor && host?.packageId) {
@@ -224,18 +245,21 @@ function AreaItemOpen({
  * Cut from the path as it is spelled, so an encoded name stays encoded.
  *
  * A type whose item page is an editor of its own (`registerMetadataResource`'s
- * `EditPage`: the permission set's matrix) has no tabs, and its History button
- * opens this address: it keeps the standalone history page. So does an item
- * whose address opens a pillar's designer, until the designer mounts the tabs:
- * objectstack#36904 — an object no longer does (its designer is on its
- * address, with History as a tab); a flow still does until its designer moves.
+ * `EditPage`: the permission set's matrix) has no tabs on the cross-package
+ * leg, and its History button opens this address there: it keeps the
+ * standalone history page. So does an item whose address opens a pillar's
+ * designer, until the designer mounts the tabs. objectstack#36905 — on a
+ * package's leg the permission set's full-screen page has them;
+ * objectstack#36904 — so does the object designer (History is its tab). A
+ * flow keeps the standalone page until its designer moves.
  */
 function AreaHistoryRedirect(): React.ReactElement {
   const { type = '', name = '' } = useParams<{ type: string; name: string }>();
   const { pathname, search } = useLocation();
   const host = useMetadataAreaHost();
   const params = new URLSearchParams(search);
-  const ownEditor = !!getMetadataResource(type)?.EditPage;
+  const designerPage = areaItemOpensDesignerPage({ packageId: host?.packageId ?? null, type });
+  const ownEditor = !designerPage && !!getMetadataResource(type)?.EditPage;
   // An item a pillar's designer opens has no tab row yet (its tabs are the
   // designers' cards): its history keeps the standalone page too.
   const pillarItem = areaItemPillarPath({ packageId: host?.packageId ?? null, type, name, search: params }) !== null;
@@ -327,9 +351,14 @@ export interface StudioMetadataAreaProps {
    * at the item it refused.
    */
   publishRefusalFor?: (type: string, name: string) => StudioRefusal | null;
+  /**
+   * objectstack#36905, objectstack#36904 — told the open designer page's item
+   * label (the permission set's, the object's), for the copilot's chip, as a
+   * pillar tells it.
+   */
+  onSurfaceLabelChange?: (surface: StudioSurfaceLabel | null) => void;
   /** objectstack#36904 — handed to the object designer (`AreaEditorProps`). */
   onHeldEditChange?: (clause: string | null) => void;
-  onSurfaceLabelChange?: (surface: StudioSurfaceLabel | null) => void;
   onReviewChanges?: () => void;
 }
 

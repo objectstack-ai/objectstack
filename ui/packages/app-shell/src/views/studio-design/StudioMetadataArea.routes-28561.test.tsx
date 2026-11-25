@@ -62,6 +62,15 @@ vi.mock('./StudioBundleItemEditor.js', () => ({
   ),
 }));
 
+/** objectstack#36905 — the permission set's full-screen page, a stub printing what the area handed it. */
+vi.mock('./StudioPermissionSetPage.js', () => ({
+  StudioPermissionSetPage: ({ packageId, name, readOnly }: { packageId: string; name: string; readOnly?: boolean }) => (
+    <div data-testid="permission-page" data-item={JSON.stringify({ packageId, name, readOnly: !!readOnly })}>
+      <PageStub page="permission-page" />
+    </div>
+  ),
+}));
+
 /** `GET /api/v1/packages` as the listed manifests read it: one writable, one read-only, one kernel. */
 let listed: Map<string, { id: string; name: string; writable: boolean; manifest: Record<string, unknown> }>;
 let listFails = false;
@@ -292,7 +301,6 @@ describe("a read-only base's create opens in its .custom pair (objectstack#36897
 describe('a pillar type opened from the area opens its pillar', () => {
   for (const [type, pillar] of [
     ['flow', 'automations'],
-    ['permission', 'access'],
   ] as const) {
     it(`${type} → ${pillar}, with \`?surface=\``, async () => {
       mount(`/studio/${WRITABLE}/metadata/${type}/item_1?package=${WRITABLE}`);
@@ -365,6 +373,41 @@ describe('a pillar type opened from the area opens its pillar', () => {
     mount('/studio/~all/metadata/permission/admin_full_access?scope=environment');
     expect((await page()).page).toBe('item');
     expect(screen.queryByTestId('pillar')).toBeNull();
+  });
+});
+
+describe('a permission set opens its matrix full-screen at its metadata address (objectstack#36905)', () => {
+  const item = () => JSON.parse(screen.getByTestId('permission-page').getAttribute('data-item') ?? 'null');
+
+  it('on a writable package, in place: no pillar', async () => {
+    mount(`/studio/${WRITABLE}/metadata/permission/sales_rep?package=${WRITABLE}`);
+    expect((await page()).page).toBe('permission-page');
+    expect(item()).toEqual({ packageId: WRITABLE, name: 'sales_rep', readOnly: false });
+    expect(where()).toBe(`/studio/${WRITABLE}/metadata/permission/sales_rep?package=${WRITABLE}`);
+    expect(screen.queryByTestId('pillar')).toBeNull();
+  });
+
+  it('on a read-only package, under its gate', async () => {
+    mount(`/studio/${READ_ONLY}/metadata/permission/hr_viewer?package=${READ_ONLY}`);
+    expect((await page()).page).toBe('permission-page');
+    expect(item()).toEqual({ packageId: READ_ONLY, name: 'hr_viewer', readOnly: true });
+  });
+
+  it('CONTROL: the cross-package leg keeps the generic page (the matrix\'s environment presentation)', async () => {
+    mount('/studio/~all/metadata/permission/admin_full_access?scope=environment');
+    expect((await page()).page).toBe('item');
+    expect(screen.queryByTestId('permission-page')).toBeNull();
+  });
+
+  it('its old history address opens the page\'s History tab; the cross-package leg keeps the standalone page', async () => {
+    // As `builtinComponents` registers it: the matrix is the type's own editor.
+    registerMetadataResource({ type: 'permission', EditPage: () => null });
+    mount(`/studio/${WRITABLE}/metadata/permission/sales_rep/history?package=${WRITABLE}`);
+    expect((await page()).page).toBe('permission-page');
+    expect(where()).toBe(`/studio/${WRITABLE}/metadata/permission/sales_rep?package=${WRITABLE}&tab=history`);
+    cleanup();
+    mount('/studio/~all/metadata/permission/admin_full_access/history?scope=environment');
+    expect((await page()).page).toBe('history');
   });
 });
 

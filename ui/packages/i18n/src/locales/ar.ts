@@ -2723,6 +2723,14 @@ const ar = {
       changesDrafted: "حُفظ كمسودة",
       changesFailed: "لم يُطبَّق",
       discussing: "قيد العرض: {{target}}",
+      focus: {
+        pin: "مواصلة السؤال عن هذا السجل",
+        pinned: "السؤال عن: {{target}}",
+        remove: "التوقف عن السؤال عن هذا السجل",
+        switchPrompt: "هل تريد السؤال عن «{{target}}» بدلاً من ذلك؟",
+        switchAccept: "تبديل",
+        switchDecline: "إبقاء",
+      },
       changeVerb: {
         createObject: "إنشاء كائن",
         addField: "إضافة حقل",
@@ -3151,11 +3159,12 @@ const ar = {
       resetViewTitle: "يعيد عوامل التصفية والبحث والترتيب والتجميع وترتيب الأعمدة والحقول المخفية والكثافة والتخطيط ولون الصف وأرقام الصفوف والتحرير المضمّن الخاصة بهذا العرض. تبقى طرق العرض المثبتة والمفضلة وطريقة فتح السجلات كما هي. تتغير قائمتك فقط.",
       personalized: "مخصّصة",
       personalizedHeading: "تختلف قائمتك عن هذا العرض في",
-      // objectstack#35955 — a list's unsaved changes: Discard and Save.
+      // objectstack#35955 — a list's unsaved changes: Reset and Update view
+      // (objectstack#36737, the view's own actions, as Twenty's).
       draft: {
-        discard: "تجاهل",
+        discard: "إعادة تعيين",
         discardTitle: "يعيد القائمة كما يحددها العرض: عوامل التصفية والفرز والتجميع والأعمدة والتخطيط. يبقى عرض الأعمدة وارتفاع الصفوف كما هما.",
-        save: "حفظ",
+        save: "تحديث العرض",
         heading: "تغييرات غير محفوظة",
         partSeparator: "، ",
         saveToView: "حفظ في هذا العرض",
@@ -4187,7 +4196,7 @@ const ar = {
       allApps: "جميع التطبيقات",
       editAppInStudio: "تعديل {{app}} في Studio",
       openAppInStudio: "عرض {{app}} في Studio",
-      backToHome: "العودة إلى الرئيسية",
+      backToHome: "العودة إلى صفحة بدء التطبيق",
       settings: "الإعدادات",
       productHome: "الصفحة الرئيسية لـ {{product}}",
       addApp: 'إضافة تطبيق',
@@ -5903,6 +5912,13 @@ const ar = {
         skill_few: 'مهارات ذكاء اصطناعي {{count}}',
         skill_many: 'مهارات ذكاء اصطناعي {{count}}',
         skill_other: 'مهارات ذكاء اصطناعي {{count}}',
+        ai_context: 'حزم سياق الذكاء الاصطناعي {{count}}',
+        ai_context_zero: 'حزم سياق الذكاء الاصطناعي {{count}}',
+        ai_context_one: 'حزمة سياق الذكاء الاصطناعي {{count}}',
+        ai_context_two: 'حزم سياق الذكاء الاصطناعي {{count}}',
+        ai_context_few: 'حزم سياق الذكاء الاصطناعي {{count}}',
+        ai_context_many: 'حزم سياق الذكاء الاصطناعي {{count}}',
+        ai_context_other: 'حزم سياق الذكاء الاصطناعي {{count}}',
         datasource: 'مصادر بيانات {{count}}',
         datasource_zero: 'مصادر بيانات {{count}}',
         datasource_one: 'مصدر بيانات {{count}}',

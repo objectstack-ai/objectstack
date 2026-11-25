@@ -18,6 +18,8 @@ import '@testing-library/jest-dom/vitest';
 // The surface's reach loads `@objectstack/lint` lazily; pay that load during
 // collection, not inside a case's clocked window (`check:test-source-alias`).
 import '@objectstack/lint';
+// objectstack#36900 — the surface mounts the command palette, which reaches the
+// record preview's `lazy()` detail entry: its first load is paid at collection too.
 import '@object-ui/plugin-detail';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, render, screen, waitFor } from '@testing-library/react';
@@ -64,7 +66,8 @@ import { t } from '../metadata-admin/i18n';
 const answer = (body: unknown) => ({ ok: true, status: 200, json: async () => body });
 // objectstack#36904 — an object opens its designer on its own address; the
 // old Data and Interfaces addresses land on the object list, which is no item.
-const PILLARS = ['metadata/object/fo_job', 'automations', 'access'] as const;
+// objectstack#36905 — the sharing overview's own page took the Access pillar's place here.
+const PILLARS = ['metadata/object/fo_job', 'automations', 'owd'] as const;
 const READ_ONLY = t('engine.studio.pkg.readonly', 'en');
 
 function servePackage(writable: boolean) {

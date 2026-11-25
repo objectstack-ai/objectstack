@@ -80,6 +80,16 @@ export const STUDIO_ITEM_REVIEW_PARAM = 'review';
 /** The one {@link STUDIO_ITEM_REVIEW_PARAM} value the item page acts on. */
 export const STUDIO_ITEM_REVIEW_VALUE = '1';
 
+/**
+ * objectstack#36905 (epic decision 11) — the route segment of a package's
+ * organization-wide default sharing overview (`/studio/<package>/owd`), a page
+ * of its own in the menu's Access group. Not a metadata item and not a pillar.
+ */
+export const STUDIO_OWD_SECTION = 'owd';
+
+/** The query key that names the object the overview scrolls to and marks (`?object=<name>`). */
+export const STUDIO_OWD_OBJECT_PARAM = 'object';
+
 /** The pillar keys (`StudioDesignSurface`'s `PILLARS`). */
 export type StudioPillarKey = 'data' | 'automations' | 'access';
 
@@ -99,10 +109,12 @@ export type StudioPillarKey = 'data' | 'automations' | 'access';
  *
  * objectstack#36904 — an object opens its designer on its metadata address;
  * the old `/data?surface=object:<name>` redirects there (`dataPillarRedirect`).
+ * objectstack#36905 — a permission set opens its metadata address, where the
+ * area draws its matrix full-screen; the Access pillar's addresses redirect
+ * (`accessPillarRedirect.ts`).
  */
 export const STUDIO_ITEM_PILLAR: Readonly<Record<string, StudioPillarKey>> = Object.freeze({
   flow: 'automations',
-  permission: 'access',
 });
 
 /** The pillar an item of `type` opens in today, or `null` when it opens the area's generic item page. */
@@ -190,6 +202,19 @@ export function studioPillarPath(segment: string, pillar: string, options: Studi
 /** A package's Studio home, `/studio/<package>/data`. */
 export function studioHomePath(packageId: string, options: StudioPathOptions = {}): string {
   return studioPillarPath(packageId, STUDIO_HOME_PILLAR, options);
+}
+
+/**
+ * A package's organization-wide default sharing overview,
+ * `/studio/<package>/owd`, optionally on one object (`?object=<name>`).
+ */
+export function studioOwdOverviewPath(
+  packageId: string,
+  options: { object?: string | null; query?: string | URLSearchParams | null; segmentEncoding?: StudioSegmentEncoding } = {},
+): string {
+  const query = new URLSearchParams(typeof options.query === 'string' ? options.query : options.query ?? undefined);
+  if (options.object) query.set(STUDIO_OWD_OBJECT_PARAM, options.object);
+  return studioPath(packageId, STUDIO_OWD_SECTION, null, { query, segmentEncoding: options.segmentEncoding });
 }
 
 // ---------------------------------------------------------------------------

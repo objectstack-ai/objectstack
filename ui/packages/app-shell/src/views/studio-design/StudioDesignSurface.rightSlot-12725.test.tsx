@@ -14,7 +14,7 @@
  *  - The canvas has no 画布 / 源码 / 属性 tabs: one status line, and the item's
  *    definition opens from its ⋯ menu.
  *  - The pillar names are visible from 1024 px (`lg`), icons below.
- *  - CONTROLS: a pillar that claims nothing (Access) gets the copilot alone; no
+ *  - CONTROLS: a page that claims nothing (the sharing overview) gets the copilot alone; no
  *    copilot served → the properties alone; an injected `aiSlot` (the cloud
  *    seam) keeps the classic layout with no slot.
  *
@@ -87,6 +87,8 @@ vi.mock('./StudioAiCopilot', () => ({
 // The source loads `@objectstack/lint` lazily; paid here, at collection, not
 // inside a case's clock (check:test-source-alias).
 import '@objectstack/lint';
+// objectstack#36900 — the surface mounts the command palette, which reaches the
+// record preview's `lazy()` detail entry: its first load is paid at collection too.
 import '@object-ui/plugin-detail';
 import { StudioDesignSurface } from './StudioDesignSurface';
 import { t } from '../metadata-admin/i18n';
@@ -173,11 +175,12 @@ describe('Studio right slot — controls (objectui#12725)', () => {
   });
 
   // objectui#12725 phase 2 — Data and Automations now claim the slot, so the
-  // pillar that claims nothing is Access (its panels are in the main column
-  // and in dialogs; it has no properties aside). The Data pillar with nothing
-  // selected claims nothing either: `pillarsClaimSlot-12725`.
-  it('a pillar that claims nothing gets the copilot alone: a title, no switch, no strip', async () => {
-    renderAt('access');
+  // page that claims nothing was Access; objectstack#36905 — it is the sharing
+  // overview's own page now (one table in the main column, no properties
+  // aside). The Data pillar with nothing selected claims nothing either:
+  // `pillarsClaimSlot-12725`.
+  it('a page that claims nothing gets the copilot alone: a title, no switch, no strip', async () => {
+    renderAt('owd');
     await waitFor(() => expect(slot()).toHaveAttribute('data-mode', 'copilot'));
     expect(within(slot()).queryAllByRole('tab')).toHaveLength(0);
     expect(within(slot()).getByTestId('studio-slot-title')).toHaveTextContent(t('engine.studio.aiCopilot', 'en'));
@@ -194,9 +197,9 @@ describe('Studio right slot — controls (objectui#12725)', () => {
 // measures, and it says whether the slot squeezes it.
 describe('Studio right slot — the rails read whether it squeezes the pillars (objectstack#35061)', () => {
 
-  it('a pillar with no slot to show (Access, no copilot) keeps its host closed', async () => {
+  it('a page with no slot to show (the sharing overview, no copilot) keeps its host closed', async () => {
     copilot.available = false;
-    renderAt('access');
+    renderAt('owd');
     await screen.findByTestId('studio-shell-header');
     await act(async () => {});
     expect(slot()).not.toBeVisible();
