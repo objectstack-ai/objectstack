@@ -33,6 +33,11 @@ import { bootStack, type VerifyStack } from './harness.js';
 import { constructServedProviders } from './required-providers.js';
 import { warmUpBoot } from './boot-warm-up.testkit.js';
 
+// Pay the first transform of this dist-resolved dependency at MODULE LOAD: the
+// harness loads it lazily inside a boot, a clocked window
+// (`scripts/check-test-source-alias.mjs`, the source-reach rule).
+import '@objectstack/service-automation';
+
 // The boot's first load, paid during collection rather than in the first
 // case's clock (see `boot-warm-up.testkit.ts`). The first boot below requires
 // `approvals`, so its provider is loaded here too.
