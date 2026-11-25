@@ -36,7 +36,7 @@ export const aiContextForm = defineForm({
       fields: [
         { field: 'name', required: true, immutable: true, colSpan: 1, helpText: 'Unique identifier (snake_case). A skill\'s context key and the get_record_context tool name the pack by it.' },
         { field: 'label', required: true, colSpan: 1, helpText: 'Display name, the header of the tool answer. A pack has no description: write its purpose here.' },
-        { field: 'object', widget: 'ref:object', required: true, colSpan: 2, helpText: 'The root object: the pack reads one record of it.' },
+        { field: 'object', label: 'Root object', widget: 'ref:object', required: true, colSpan: 2, helpText: 'The root object: the pack reads one record of it.' },
       ],
     },
     {
@@ -45,7 +45,7 @@ export const aiContextForm = defineForm({
       description: 'What of the record is handed to the model. Each picker offers the fields of the root object, or of the related list\'s own object.',
       fields: [
         { field: 'fields', widget: 'field-multi', dependsOn: 'object', helpText: `The root object's fields handed to the model, in order (at most ${AI_CONTEXT_MAX_FIELDS}). A lookup among them is answered with the name of the record it points at.` },
-        { field: 'related', widget: 'related-list-entries', dependsOn: 'object', helpText: `Child lists that point at the record, one level deep (at most ${AI_CONTEXT_MAX_RELATED}). Each list names its child object, the reference field that points at the root, and the columns read for each row (at most ${AI_CONTEXT_MAX_RELATED_FIELDS}); with no columns a row is read by its name.` },
+        { field: 'related', label: 'Related lists', widget: 'related-list-entries', dependsOn: 'object', helpText: `Child lists that point at the record, one level deep (at most ${AI_CONTEXT_MAX_RELATED}). Each list names its child object, the reference field that points at the root, and the columns read for each row (at most ${AI_CONTEXT_MAX_RELATED_FIELDS}); with no columns a row is read by its name.` },
         {
           field: 'body',
           type: 'composite',
