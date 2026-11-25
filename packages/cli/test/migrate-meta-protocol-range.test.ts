@@ -43,7 +43,7 @@
  * {@link SHAPES} pins cases 1 and 2 once per major migrated from: the
  * `--from 16` shape the fix was first pinned on, while the runtime implemented
  * protocol 17, and the `--from 17` shape the defect was filed on, reachable
- * since the runtime first implemented protocol 18.
+ * since the runtime implements protocol 18.
  *
  * In-process over the real command (`MigrateMeta.run`) and the real load seam
  * (`AppPlugin.init` with a context double), against temp projects that link
