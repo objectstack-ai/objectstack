@@ -368,3 +368,57 @@ describe.each(FAMILIES)('[#36506] $prefix forwards its doors to the $slot member
         });
     });
 });
+
+// [#37273] The bridge's two `501` sentences are the operation-message
+// catalog's, in the request's top `Accept-Language` tag, for a bridge that
+// names its noun's key (the print door). Code and status are unchanged, no
+// `userMessage` is added, and a bridge that names no noun key keeps English.
+describe('[#37273] the print door\'s 501 follows the request\'s language', () => {
+    const [method, path, body] = ['POST', '/print/records', { app: 'sales', object: 'invoice', recordId: 'inv_1', page: 'invoice_document' }] as const;
+    const withHeaders = (headers: Record<string, string>) => {
+        const request = new Request(`${ORIGIN}/api/v1${path}`, { method, headers: { ...JSON_HEADERS, ...headers }, body: JSON.stringify(body) });
+        return ctx(request);
+    };
+    const SITES = [
+        {
+            name: 'no print service on the kernel',
+            services: {},
+            zh: '打印接口不可用：此内核上未注册 print 服务。该服务由 @objectstack/service-print (PrintServicePlugin) 注册。',
+            en: 'The print door is not available: no print service is registered on this kernel. @objectstack/service-print (PrintServicePlugin) registers it.',
+        },
+        {
+            name: 'a print service without handlePrintDoor',
+            services: { print: { somethingElse: vi.fn() } },
+            zh: '打印接口不可用：已注册的 print 服务未实现 handlePrintDoor。',
+            en: 'The print door is not available: the registered print service does not implement handlePrintDoor.',
+        },
+    ];
+
+    it.each(SITES)('$name: under accept-language zh-CN, 501 NOT_IMPLEMENTED in Chinese', async (site) => {
+        const { dispatcher } = makeDispatcher(site.services);
+        const result = await dispatcher.dispatch(method, path, {}, {}, withHeaders({ 'accept-language': 'zh-CN,zh;q=0.9,en;q=0.8' }));
+        expect(envelope(result)).toEqual({ status: 501, code: 'NOT_IMPLEMENTED' });
+        expect(result.response?.body?.error?.message).toBe(site.zh);
+        expect(result.response?.body?.error?.userMessage).toBeUndefined();
+    });
+
+    it.each(SITES)('$name: the control — an English or absent accept-language keeps today\'s English, byte for byte', async (site) => {
+        for (const headers of [{ 'accept-language': 'en-US,en;q=0.9' }, {}]) {
+            const { dispatcher } = makeDispatcher(site.services);
+            const result = await dispatcher.dispatch(method, path, {}, {}, withHeaders(headers));
+            expect(envelope(result), JSON.stringify(headers)).toEqual({ status: 501, code: 'NOT_IMPLEMENTED' });
+            expect(result.response?.body?.error?.message, JSON.stringify(headers)).toBe(site.en);
+        }
+    });
+
+    it('a bridge that names no noun key keeps its English sentence under zh-CN: never half translated', async () => {
+        const { dispatcher } = makeDispatcher({});
+        const request = new Request(`${ORIGIN}/api/v1/personal-views/pv_1`, { method: 'DELETE', headers: { ...JSON_HEADERS, 'accept-language': 'zh-CN' } });
+        const result = await dispatcher.dispatch('DELETE', '/personal-views/pv_1', {}, {}, ctx(request));
+        expect(envelope(result)).toEqual({ status: 501, code: 'NOT_IMPLEMENTED' });
+        expect(result.response?.body?.error?.message).toBe(
+            'The personal view delete door is not available: no personal-views service is registered on this kernel. '
+            + '@objectstack/plugin-auth (AuthPlugin) registers it.',
+        );
+    });
+});

@@ -132,6 +132,8 @@ function boot(opts: {
     extraActions?: unknown[];
     /** [#28943] Objects served beside `crm_lead` (by name), e.g. a `sys_api_key` carrying its revoke action. */
     extraObjects?: any[];
+    /** [#37273] Further services by name (an `auth` that resolves a session, for a call through the real `dispatch()`). */
+    services?: Record<string, unknown>;
 } = {}) {
     const disabled = new Set(opts.disabled ?? []);
     const injected: Injected[] = [];
@@ -172,7 +174,8 @@ function boot(opts: {
         getObject: vi.fn(async (name?: string) => (name && served[name]) || objectDef),
     };
     const resolve = (n: string) =>
-        n === 'objectql' || n === 'data' ? ql
+        opts.services?.[n] !== undefined ? opts.services[n]
+        : n === 'objectql' || n === 'data' ? ql
         : n === 'metadata' ? metadata
         : (n === 'http.server' || n === 'http-server') && !opts.noServer ? server
         : null;
@@ -1872,10 +1875,12 @@ describe('[#34912] buildApiActionRequest stamps the caller organization on every
 // header is what the door reads, not a locale planted on a context.
 describe('[#37273] the forward-unavailable 503 follows the request\'s language', () => {
     const viaWire = async (headers: Record<string, string>) => {
-        const { dispatcher } = boot({ noServer: true });
+        // A signed-in member: the session the `auth` service resolves from the cookie.
+        const auth = { api: { getSession: async () => ({ user: { id: 'u_member' } }) } };
+        const { dispatcher } = boot({ noServer: true, services: { auth } });
         const result: any = await dispatcher.dispatch(
             'POST', `/actions/${OBJECT}/${BAN_LEAD.name}`, { recordId: 'u_target' }, {},
-            { request: { headers: { host: 'app.example.test', 'content-type': 'application/json', ...headers } } } as any,
+            { request: { headers: { host: 'app.example.test', 'content-type': 'application/json', cookie: 'os.session=member', ...headers } } } as any,
         );
         return result;
     };
