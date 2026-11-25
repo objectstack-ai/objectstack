@@ -668,4 +668,39 @@ describe('the docs portal\'s head names no app and only switches apps (objectsta
     expect(portalMenu().getByTestId('sidebar-app-menu-row-crm')).toBeInTheDocument();
     expect(portalMenu().queryByTestId('sidebar-app-menu-add')).toBeNull();
   });
+
+  // objectstack#36908 — the portal's 「Add app」 is the app menu's list, under
+  // the same rule (ruling records 7153161067, 7153400210).
+  it('its 「Add app」 offers 「New blank app」 and no 「Build with AI」, with the build agent served', () => {
+    apps = [CRM];
+    admin = true;
+    renderPortalMenu();
+    const choices = within(screen.getByTestId('add-app-choices'));
+    expect(choices.getByTestId('sidebar-app-menu-add-new-in-studio')).toHaveTextContent('New blank app');
+    expect(choices.getByTestId('sidebar-app-menu-add-new-in-studio')).toHaveAttribute(
+      'href',
+      '/apps/setup/component/developer/packages?face=admin&new=package',
+    );
+    expect(choices.queryByTestId('sidebar-app-menu-add-build-with-ai')).toBeNull();
+    expect(choices.queryByText('Build with AI')).toBeNull();
+  });
+
+  it('an author who may not open Setup → Packages gets 「New blank app」 to the "All metadata" area', () => {
+    setupPair = false;
+    apps = [CRM];
+    admin = true;
+    renderPortalMenu();
+    expect(
+      within(screen.getByTestId('add-app-choices')).getByTestId('sidebar-app-menu-add-new-in-studio'),
+    ).toHaveAttribute('href', '/studio/~all/metadata');
+  });
+
+  it('guard: handed no entries, it draws no 「Add app」 and no separator for it', () => {
+    entriesOverride = [];
+    apps = [CRM];
+    admin = true;
+    renderPortalMenu();
+    expect(portalMenu().queryByTestId('sidebar-app-menu-add')).toBeNull();
+    expect(screen.getByTestId('sidebar-docs-portal-menu').querySelector('hr')).toBeNull();
+  });
 });
