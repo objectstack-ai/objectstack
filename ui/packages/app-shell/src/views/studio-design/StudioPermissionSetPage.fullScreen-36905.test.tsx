@@ -153,6 +153,8 @@ function mount(pkg: string, query = '') {
 }
 
 const where = () => screen.getByTestId('where').textContent ?? '';
+/** How many times the permission sets were listed: the page re-reads them after a discard that stays. */
+const setsReads = () => clientImpl.list.mock.calls.filter(([type]) => type === 'permission').length;
 const title = () => screen.findByTestId('studio-detail-title', undefined, { timeout: 8000 });
 
 beforeEach(() => {
@@ -284,9 +286,13 @@ describe('the draft discard (objectstack#36905)', () => {
   it('CONTROL: a published set\'s discard asks the published question and stays on the set', async () => {
     clientImpl = makeClient([SET]);
     mount(CUSTOM_PKG);
-    fireEvent.click(await screen.findByTestId('access-discard-draft', undefined, { timeout: 8000 }));
+    const discard = await screen.findByTestId('access-discard-draft', undefined, { timeout: 8000 });
+    const readsBefore = setsReads();
+    fireEvent.click(discard);
     expect(window.confirm).toHaveBeenCalledWith(tFormat('engine.studio.access.discardConfirm', 'en', { item: 'Sales rep' }));
     await waitFor(() => expect(clientImpl.reset).toHaveBeenCalledTimes(1));
+    // The page stayed: it reads the package's sets again, which a page sent to the list never does.
+    await waitFor(() => expect(setsReads()).toBeGreaterThan(readsBefore));
     expect(screen.queryByTestId('list')).toBeNull();
     expect(where()).toBe(`/studio/${CUSTOM_PKG}/metadata/permission/${SET}?package=${CUSTOM_PKG}`);
   });
@@ -306,8 +312,12 @@ describe('the draft discard (objectstack#36905)', () => {
       return [{ name: 'crm_lead', label: 'Lead' }];
     });
     mount(CUSTOM_PKG);
-    fireEvent.click(await screen.findByTestId('studio-ai-draft-discard', undefined, { timeout: 8000 }));
+    const discard = await screen.findByTestId('studio-ai-draft-discard', undefined, { timeout: 8000 });
+    const readsBefore = setsReads();
+    fireEvent.click(discard);
     await waitFor(() => expect(clientImpl.reset).toHaveBeenCalledWith('permission', SET, { state: 'draft', packageId: CUSTOM_PKG }));
+    // The page stayed: it reads the package's sets again, which a page sent to the list never does.
+    await waitFor(() => expect(setsReads()).toBeGreaterThan(readsBefore));
     expect(screen.queryByTestId('list')).toBeNull();
     expect(where()).toBe(`/studio/${CUSTOM_PKG}/metadata/permission/${SET}?package=${CUSTOM_PKG}`);
   });
