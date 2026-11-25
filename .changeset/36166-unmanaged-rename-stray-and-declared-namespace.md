@@ -1,12 +1,12 @@
 ---
-'@objectstack/metadata-protocol': minor
+'@objectstack/metadata-protocol': patch
 ---
 
 fix(metadata-protocol)!: an unmanaged install renamed into a `targetNamespace` refuses a stray-object package and a declared namespace its object names do not carry, instead of copying them under a second prefix
 
 Clause-②: no (narrowing)
-Metadata-protocol: narrowed
-Skills-docs: none — no skill under `skills/**` teaches the unmanaged install's `targetNamespace` rename (`git grep` of `skills/` for `targetNamespace`, `rename-on-install` and `unmanaged`: zero hits at a73edb3c; control: `namespace` hits `skills/objectstack-api/SKILL.md` six times)
+Metadata-protocol: none
+Ruling-ref: #36166 comment 7146137652
 
 <!-- adr-0087: not-required (no-migration-prescription) No key of any schema is added, removed, renamed or re-shaped, and no export changes shape. What moves is the answer the unmanaged install gives one request: a package body renamed into a `targetNamespace` whose object names contradict its namespace, declared or derived. No stored row, registry key or authored value changes, so there is nothing for a migration to rewrite and no tombstone. -->
 
