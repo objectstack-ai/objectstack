@@ -131,6 +131,9 @@ import {
   redactStoredMetadataRow,
   STORED_METADATA_BODY_COLUMN,
   STORED_METADATA_TYPE_COLUMN,
+  // [ADR-0160 D4] The read path's own decorations, removed from the
+  // context-pack listing before the record-context executor parses it.
+  stripReadDecorations,
 } from '@objectstack/spec/kernel';
 import type { IDataEngine, IMetadataService } from '@objectstack/spec/contracts';
 import { resolveObjectSortability } from '@objectstack/spec/api';
@@ -1878,12 +1881,17 @@ export function createStdioDataBridge(deps: StdioDataBridgeDeps): McpDataBridge 
         ((await localizedView.getObject(name)) as Record<string, unknown> | undefined) ?? null,
       publishedObjectDefinitionOf: async (name: string) =>
         ((await readObjectDeclaration(reads, name)) as Record<string, unknown> | undefined) ?? null,
+      // The authored packs, not the serving envelope: the protocol's served
+      // listing stamps every item with `_diagnostics`, which the executor's
+      // closed `AiContextSchema` refuses, dropping every pack. The read
+      // decorations go (`stripReadDecorations`); the protection envelope the
+      // schema declares stays.
       listContextPacks: async () => {
         const protocolService = protocol?.();
         if (protocolService && typeof protocolService.getMetaItems === 'function') {
-          return metaItemsArray(await protocolService.getMetaItems({ type: 'ai_context' }));
+          return metaItemsArray(await protocolService.getMetaItems({ type: 'ai_context' })).map(stripReadDecorations);
         }
-        return (await metadataService.list('ai_context')) ?? [];
+        return ((await metadataService.list('ai_context')) ?? []).map(stripReadDecorations);
       },
       get: (object: string, id: string) => self.get(object, id),
       query: (object: string, o: Parameters<McpDataBridge['query']>[1]) => self.query(object, o),
