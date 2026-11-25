@@ -74,7 +74,7 @@ describe('settings `visible` — declaration ⇄ evaluator', () => {
     expect(refusals).toEqual([]);
   });
 
-  it('the corpus is still the size the ruling measured — 10 manifests, 96 predicates', () => {
+  it('the corpus is still the size the ruling measured — 10 manifests, 87 predicates', () => {
     // If a bundled manifest gains or loses a `visible`, this number moves and
     // the reader is sent back to the measurement rather than trusting a stale
     // one. It is a tripwire on the premise, not a rule about how many
@@ -100,7 +100,11 @@ describe('settings `visible` — declaration ⇄ evaluator', () => {
     // `${data.provider !== 'memory'}` predicates on the generation-default and
     // title fields went with it (they now always show), and `title_max_length`
     // keeps only its `title_generation_enabled` term.
-    expect(predicates).toHaveLength(90);
+    // 90 -> 87 at #37098: `knowledge.chunk_overlap` was retired with its
+    // predicate, and the `indexing` group and `chunk_target` lost their
+    // `${data.adapter !== 'memory'}` terms — the in-memory adapter takes the
+    // service's passages too, so the target size applies to it.
+    expect(predicates).toHaveLength(87);
   });
 
   it('every bundled predicate is accepted by BOTH sides', () => {

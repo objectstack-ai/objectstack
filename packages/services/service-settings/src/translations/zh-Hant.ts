@@ -484,7 +484,7 @@ export const zhHant: PlatformTranslationData = {
         ragflow_base_url: { label: 'Base URL', help: '範例：http://localhost:9380' },
         ragflow_api_key: { label: 'API 金鑰' },
         ragflow_default_dataset: { label: '預設資料集 ID', help: '知識來源未指定自己的 RAGFlow 資料集時使用。' },
-        chunk_target: { label: '目標區塊大小（字元）', help: '知識服務切分文件時每個片段的最大字元數。知識來源自身的 split.maxChars 優先；嵌入模型的輸入上限可能將其調低。' },
+        chunk_target: { label: '目標區塊大小（字元）', help: '知識服務切分文件時每個片段的最大字元數。知識來源自身設定的大小優先；嵌入模型的輸入上限可能將其調低。' },
         over_fetch: { label: '超量擷取倍數', help: '搜尋時取回所要求結果數的這個倍數，以便依文件資訊篩選後仍有足夠結果可傳回。' },
         enforce_rls: { label: '搜尋時強制套用 RLS', help: '依呼叫者的記錄層級權限重新檢查每一筆命中結果。' },
       },

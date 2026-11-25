@@ -578,7 +578,7 @@ export const esES: PlatformTranslationData = {
         ragflow_default_dataset: { label: 'ID de dataset predeterminado',
           help: 'Se usa cuando una fuente de conocimiento no indica su propio dataset de RAGFlow.' },
         chunk_target: { label: 'Tamaño objetivo de fragmento (caracteres)',
-          help: 'Longitud máxima de un pasaje, en caracteres, cuando el servicio de conocimiento divide un documento. El split.maxChars propio de una fuente tiene prioridad; el límite de entrada del embedder puede reducirlo.' },
+          help: 'Longitud máxima de un pasaje, en caracteres, cuando el servicio de conocimiento divide un documento. Un tamaño fijado en la propia fuente tiene prioridad; el límite de entrada del modelo de embeddings puede reducirlo.' },
         over_fetch: { label: 'Multiplicador de sobre-obtención',
           help: 'La búsqueda obtiene este múltiplo del número de resultados pedido, para que queden suficientes tras filtrarlos por los datos del documento.' },
         enforce_rls: { label: 'Aplicar RLS en la búsqueda',

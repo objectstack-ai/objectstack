@@ -732,7 +732,7 @@ export const fr: PlatformTranslationData = {
         },
         chunk_target: {
           label: 'Taille cible des morceaux (caractères)',
-          help: 'Longueur maximale d’un passage, en caractères, lorsque le service de connaissances découpe un document. Le split.maxChars propre à une source l’emporte ; la limite d’entrée de l’embedder peut l’abaisser.',
+          help: 'Longueur maximale d’un passage, en caractères, lorsque le service de connaissances découpe un document. Une taille fixée sur la source elle-même l’emporte ; la limite d’entrée du modèle d’embedding peut l’abaisser.',
         },
         over_fetch: {
           label: 'Multiplicateur de sur-récupération',

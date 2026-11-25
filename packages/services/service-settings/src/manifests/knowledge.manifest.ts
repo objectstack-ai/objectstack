@@ -115,7 +115,7 @@ const manifest = {
       description: 'A value set on a knowledge source itself wins over these defaults.' },
     { type: 'number', key: 'chunk_target', label: 'Target chunk size (chars)',
       required: false, default: 800, min: 64, max: 8192,
-      description: "Longest passage, in characters, when the knowledge service splits a document. A knowledge source's own split.maxChars wins; the embedder's input limit can lower it." },
+      description: "Longest passage, in characters, when the knowledge service splits a document. A size set on a knowledge source itself wins; the embedding model's input limit can lower it." },
     { type: 'number', key: 'over_fetch', label: 'Over-fetch multiplier',
       required: false, default: 4, min: 1, max: 20,
       description: 'Search fetches this many times the requested number of results, so enough are left to return after they are filtered by document details.',

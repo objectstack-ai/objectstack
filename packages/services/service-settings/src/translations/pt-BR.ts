@@ -716,7 +716,7 @@ export const ptBR: PlatformTranslationData = {
         },
         chunk_target: {
           label: 'Tamanho-alvo da parte (caracteres)',
-          help: 'Tamanho máximo de um trecho, em caracteres, quando o serviço de conhecimento divide um documento. O split.maxChars da própria fonte tem prioridade; o limite de entrada do embedder pode reduzi-lo.',
+          help: 'Tamanho máximo de um trecho, em caracteres, quando o serviço de conhecimento divide um documento. Um tamanho definido na própria fonte tem prioridade; o limite de entrada do modelo de embeddings pode reduzi-lo.',
         },
         over_fetch: {
           label: 'Multiplicador de busca extra',

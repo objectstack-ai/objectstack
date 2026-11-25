@@ -723,7 +723,7 @@ export const de: PlatformTranslationData = {
         },
         chunk_target: {
           label: 'Ziel-Chunkgröße (Zeichen)',
-          help: 'Längste Passage in Zeichen, wenn der Wissensdienst ein Dokument aufteilt. Das eigene split.maxChars einer Wissensquelle hat Vorrang; das Eingabelimit des Embedders kann den Wert senken.',
+          help: 'Längste Passage in Zeichen, wenn der Wissensdienst ein Dokument aufteilt. Eine an der Wissensquelle selbst gesetzte Größe hat Vorrang; das Eingabelimit des Embedding-Modells kann den Wert senken.',
         },
         over_fetch: {
           label: 'Over-Fetch-Faktor',
