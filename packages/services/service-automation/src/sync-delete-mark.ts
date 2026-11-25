@@ -48,7 +48,11 @@
  *
  * The keys are compared within one run only: a complete read restamps every
  * live row's `_sync_external_id` in the spelling of the mapping as it is now,
- * so a reordered `upsertKey` is never compared with an older spelling here.
+ * so a reordered `upsertKey` is never compared with an older spelling for a
+ * row the run wrote. One edge remains: a row the runner refused on the first
+ * run after `upsertKey` was reordered keeps its old spelling, so the refused
+ * keys (in the new spelling) do not exclude it and the absence mark stamps it;
+ * the next run that writes it restamps the key and clears the mark.
  *
  * ## How it writes
  *

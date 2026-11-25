@@ -970,6 +970,21 @@ describe('[ADR-0153 D4] a connector pull stamps provenance on a synced target', 
         expect(h.writes).toEqual([]);
     });
 
+    it('[slice-5 review N9] a metadata read that throws is refused the same way, and its sentence is not the not-registered one', async () => {
+        const unregistered = await refusal(harness({ object: null }));
+        const h = harness({ object: syncedContact });
+        const served = h.deps.protocol.getMetaItem.bind(h.deps.protocol);
+        h.deps.protocol.getMetaItem = async (request) => {
+            if (request.type === 'object') throw new Error('metadata store unavailable');
+            return served(request);
+        };
+        const failed = await refusal(h);
+        expectRefused(failed, { code: 'VALIDATION_ERROR', status: 400, reason: 'mapping_target_refused' });
+        expect(failed.message).not.toBe(unregistered.message);
+        expect(h.handler).not.toHaveBeenCalled();
+        expect(h.writes).toEqual([]);
+    });
+
     it('a synced target that withholds every injected column (systemFields: false) under deletePolicy ignore is written unstamped, unmarked', async () => {
         const ignore = baseMapping({ connectorSource: { ...baseMapping().connectorSource, deletePolicy: 'ignore' } });
         const h = harness({ object: { ...syncedContact, systemFields: false }, mapping: ignore, result: { status: 200, ok: true, body: body.slice(0, 1) } });
