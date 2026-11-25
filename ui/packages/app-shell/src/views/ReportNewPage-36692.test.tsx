@@ -106,6 +106,10 @@ vi.mock('sonner', async (importOriginal) => ({
   toast: { error: toastError, success: vi.fn() },
 }));
 
+// The source under test reaches dynamic imports of `@objectstack/lint` (through the
+// draft bar's package rule): their first load is paid here, at collection, never
+// inside a case's clock (`check:test-source-alias`).
+import '@objectstack/lint';
 import { ReportNewPage } from './ReportNewPage';
 import { DesignModeProvider, useDesignModeController } from '../layout/designMode';
 
