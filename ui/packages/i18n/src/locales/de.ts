@@ -69,6 +69,9 @@ const de = {
     autofillNoCurrency: '{{field}} wurde nicht ausgefüllt: Der gewählte Betrag ist {{amount}}, hier ist aber noch keine Währung gewählt. Wählen Sie die Währung und geben Sie dann {{field}} ein.',
     autofillCurrencyUnread: '{{field}} wurde nicht ausgefüllt: Der gewählte Betrag ist {{amount}}, die Währung hier konnte aber nicht gelesen werden. Prüfen Sie die Währung und geben Sie dann {{field}} ein.',
     autofillKept: '{{field}} behält seinen bisherigen Wert.',
+    autofillNowSameCurrency: '{{field}} wurde bei der Auswahl nicht ausgefüllt. Der Datensatz ist jetzt in {{to}}: Wählen Sie erneut, um {{amount}} einzutragen.',
+    autofillNowSameCurrencyHeld: '{{field}} wurde bei der Auswahl nicht ausgefüllt und behält seinen bisherigen Wert. Der Datensatz ist jetzt in {{to}}: Leeren Sie {{field}} und wählen Sie erneut, um {{amount}} einzutragen.',
+    autofillCopiedUnder: '{{field}} wurde als {{amount}} übernommen, der Datensatz ist jetzt aber in {{to}}. Geben Sie {{field}} bei Bedarf in {{to}} ein.',
   },
   common: {
     // objectui#13461 — a disclosure toggle's name (the tree-view node toggle).
@@ -678,6 +681,7 @@ const de = {
       needsWholeRows:
         "Die Gruppierung benötigt alle Datensätze, aber dieses Raster hat nur eine Seite davon erhalten, daher können die Gruppen nicht gezählt werden. Übergeben Sie alle Datensätze oder lassen Sie das Raster sie aus einer Datenquelle laden, die queryGroupHeaders implementiert.",
       draftOnly: "Nicht nach {{fields}} gruppiert: Das Feld existiert nur im Entwurf, bis Sie veröffentlichen.",
+      moreGroupsNotLoaded: "Weitere Gruppen wurden nicht geladen: Diese Ansicht hat mehr Gruppen, als der Server in einem Lesevorgang zurückgibt, daher wird nur ein Teil angezeigt.",
     },
     // objectui#4024 — column-footer aggregate prefixes, keyed by the spec's
     // `ColumnSummary` vocabulary. `pattern` owns the label/value join so this
@@ -1772,6 +1776,12 @@ const de = {
     unconfigured: {
       noCategoryAxis: "Kategorieachse des Diagramms erforderlich — ein objektgebundenes Diagramm erfindet keine. Deklarieren Sie eine davon:",
     },
+  },
+  // objectstack#36906 — the × of an app page opened from a Studio list.
+  studioReturn: {
+    close: 'Zurück zu Studio',
+    closeLabel: 'Schließen und zur Studio-Liste zurückkehren',
+    leaveConfirm: 'Ohne Speichern verlassen? Nicht gespeicherte Änderungen gehen verloren.',
   },
   dashboard: {
     // objectui#7063 — the DEFAULT empty state every dashboard widget renders
@@ -3725,7 +3735,7 @@ const de = {
   home: {
     build: {
       noCapability: "Das Erstellen von Apps ist in diesem System nicht verfügbar — es erfordert die Berechtigung „Metadaten verwalten“, die Ihr Konto nicht besitzt.",
-      inStudio: "Neu in Studio",
+      inStudio: "Neue leere App",
     },
     template: {
       title: "Mit einer Vorlage starten",
@@ -4133,6 +4143,8 @@ const de = {
       settings: "Berichtseinstellungen",
       pendingDraft: "Dieser Bericht hat unveröffentlichte Änderungen. Veröffentlichen oder verwerfen Sie sie oben und speichern Sie dann.",
       nameTaken: "Alle aus diesem Namen gebildeten Kennungen sind bereits vergeben. Geben Sie dem Bericht einen anderen Namen und speichern Sie dann erneut.",
+      // objectstack#36906 — a report made from Studio's report list that could not be saved in the app's package.
+      savedOutsideApp: "Dieser Bericht wurde außerhalb des App-Pakets gespeichert, weil das Anpassungspaket der App hier nicht verwendet werden kann. Die Studio-Liste zeigt ihn daher nicht.",
       adminOnlyTitle: "Nur Workspace-Administratoren können Berichte erstellen",
       adminOnly: "Ein Bericht gilt für alle im Workspace, daher erstellt ihn ein Administrator.",
       designModeOnTitle: "Schließen Sie zuerst die Layoutgestaltung ab",
@@ -4674,6 +4686,7 @@ const de = {
     tool: {
       aggregate_data: "Die Daten zusammenfassen",
       get_record: "Den Datensatz lesen",
+      get_record_context: "Den Kontext des Datensatzes lesen",
       list_datasets: "Die verfügbaren Kennzahlen ansehen",
       query_data: "Die benötigten Daten abfragen",
       query_dataset: "Über eine Kennzahl abfragen",
@@ -4988,6 +5001,10 @@ const de = {
     actComment: 'Kommentiert',
     actSystemNote: 'Systemhinweis',
     stepProgress: 'Genehmigungsschritte',
+    outcomeWaiting: 'Weiter an {{step}}, wartet auf eine Entscheidung',
+    outcomeNow: 'Weiter an {{step}}: {{decision}}',
+    outcomeEndedAt: 'Weiter an {{step}}, dann beendet: {{decision}}',
+    outcomeEndedHere: 'Die Genehmigung endete hier',
     prevRequest: 'Zurück',
     nextRequest: 'Weiter',
     positionOf: 'Anfrage {{index}} von {{total}}',
@@ -5138,7 +5155,12 @@ const de = {
     bulkRejected: '{{count}} Anfragen abgelehnt',
     bulkRejected_one: '{{count}} Anfrage abgelehnt',
     bulkRejected_other: '{{count}} Anfragen abgelehnt',
-    bulkPartial: '{{ok}} erfolgreich, {{fail}} fehlgeschlagen: {{which}}',
+    bulkPartialSummary: '{{ok}} erfolgreich, {{fail}} fehlgeschlagen',
+    bulkFailureLine: '{{title}}: {{reason}}',
+    bulkFailuresShowAll: 'Alle anzeigen ({{n}})',
+    bulkFailuresTitle: 'Nicht entschieden: {{n}}',
+    bulkFailuresBody: 'Diese Anfragen blieben unverändert. Bei jeder steht der Grund.',
+    close: 'Schließen',
     rejectOneTitle: '„{{title}}“ ablehnen?',
     rejectOneBody: 'Die Anfrage wird abgelehnt und der Antragsteller benachrichtigt.',
     rejectTitle: 'Diese Anfrage ablehnen?',

@@ -26,9 +26,12 @@ import { t } from './i18n';
 import { loadStudioCatalogue } from '@object-ui/i18n/namespaces/studio';
 await loadStudioCatalogue('zh');
 
-/** The automation pillar's chrome: every `engine.studio.auto.*` row it renders as prose. */
+/**
+ * The flow designer's chrome: every `engine.studio.auto.*` row it renders as
+ * prose. objectstack#36903 — the rail's heading and empty rows went with the
+ * rail.
+ */
 const PILLAR_ROWS = [
-  'engine.studio.auto.heading',
   'engine.studio.auto.defaultOff',
   'engine.studio.auto.canvasHint',
   'engine.studio.auto.on',
@@ -47,8 +50,6 @@ const PILLAR_ROWS = [
   'engine.studio.auto.enabledToast',
   'engine.studio.auto.disabledToast',
   'engine.studio.auto.newTitle',
-  'engine.studio.auto.none',
-  'engine.studio.auto.emptyMain',
   'engine.studio.auto.config',
   'engine.studio.auto.emptyLine1',
   'engine.studio.auto.emptyLine2',
@@ -82,7 +83,7 @@ describe('Studio automation pillar — zh copy is plain language (objectui#11659
     expect(INTERNAL_TOKENS[2].test('已 ON')).toBe(true);
   });
 
-  it('the en heading names the pillar without the metadata type', () => {
-    expect(t('engine.studio.auto.heading', 'en-US')).not.toMatch(/\bflow\b/i);
-  });
+  // objectstack#36903 — the pillar's en heading (`engine.studio.auto.heading`)
+  // went with the rail and is retired in 19.0.0 (ruling 7153171432), so its
+  // case went with it; the designer's rows above carry the plain-language pin.
 });

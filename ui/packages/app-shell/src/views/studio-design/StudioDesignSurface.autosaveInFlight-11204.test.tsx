@@ -268,8 +268,8 @@ describe('Automations pillar — an edit taken while a flow Save is in flight (o
   it('stays on screen, unsent, and the next Save sends it', async () => {
     render(
       <StudioSaveHarness>
-        <MemoryRouter initialEntries={[`/studio/${PKG}/automations`]}>
-          <AutomationsPillar packageId={PKG} />
+        <MemoryRouter initialEntries={[`/studio/${PKG}/metadata/flow/${FLOW.name}`]}>
+          <AutomationsPillar packageId={PKG} flowName={FLOW.name} />
         </MemoryRouter>
       </StudioSaveHarness>,
     );
@@ -307,7 +307,7 @@ describe('Data pillar — an edit taken while an object Save is in flight (objec
     return render(
       <StudioSaveHarness>
         <MemoryRouter initialEntries={[`/studio/${PKG}/data`]}>
-          <DataPillar packageId={PKG} />
+          <DataPillar objectName="acme_task" packageId={PKG} />
         </MemoryRouter>
       </StudioSaveHarness>,
     );

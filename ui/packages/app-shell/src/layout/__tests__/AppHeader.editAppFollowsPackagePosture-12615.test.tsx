@@ -216,9 +216,9 @@ function serve(answer: () => Promise<unknown>) {
   const fetchMock = vi.fn(async (url: unknown) => {
     if (String(url).endsWith('/api/v1/packages')) {
       const body = await answer();
-      return { ok: true, status: 200, json: async () => body };
+      return { headers: new Headers(), ok: true, status: 200, json: async () => body };
     }
-    return { ok: true, status: 200, json: async () => ({ data: [] }) };
+    return { headers: new Headers(), ok: true, status: 200, json: async () => ({ data: [] }) };
   });
   vi.stubGlobal('fetch', fetchMock);
   return fetchMock;
@@ -333,8 +333,8 @@ describe('no verdict, no pencil (objectui#12615)', () => {
   it('a failed list read draws no pencil', async () => {
     vi.stubGlobal('fetch', vi.fn(async (url: unknown) =>
       String(url).endsWith('/api/v1/packages')
-        ? { ok: false, status: 403, json: async () => ({ success: false, error: { code: 'FORBIDDEN', message: 'no' } }) }
-        : { ok: true, status: 200, json: async () => ({ data: [] }) },
+        ? { headers: new Headers(), ok: false, status: 403, json: async () => ({ success: false, error: { code: 'FORBIDDEN', message: 'no' } }) }
+        : { headers: new Headers(), ok: true, status: 200, json: async () => ({ data: [] }) },
     ));
     expect(await editAppOn(BASE_ROUTE)).toEqual({ pencil: null, eye: null, switcherRow: '', switcherPosture: '' });
   });

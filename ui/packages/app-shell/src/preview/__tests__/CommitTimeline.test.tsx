@@ -52,7 +52,7 @@ const OUTAGE_ENVELOPE = {
 
 function mockCommitsResponse(status: number, body: unknown | null) {
   global.fetch = vi.fn(async () => ({
-    ok: status >= 200 && status < 300,
+    headers: new Headers(), ok: status >= 200 && status < 300,
     status,
     json: async () => {
       if (body === null) throw new SyntaxError('not JSON');

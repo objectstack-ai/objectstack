@@ -950,6 +950,13 @@ export function bucketKeyAtOrdinal(ordinal: number, granularity: DateGranularity
 }
 
 /**
+ * What {@link alignedCompareBucketKey} answers for a comparison bucket that IS a
+ * calendar bucket but has no counterpart in the current window: the row is
+ * dropped from the comparison grid, never merged under its own key.
+ */
+export const NO_CURRENT_COUNTERPART: unique symbol = Symbol('no current-window counterpart');
+
+/**
  * Restate ONE comparison bucket key in CURRENT-period terms (#6007) — the
  * maintainer's ruling of 2026-08-07, direction 1.
  *
@@ -984,20 +991,27 @@ export function bucketKeyAtOrdinal(ordinal: number, granularity: DateGranularity
  * ## Fail-closed, in both directions
  *
  * Returns `null` — meaning "leave this row's key alone", i.e. exactly the
- * pre-#6007 behaviour — whenever the alignment is not certain:
+ * pre-#6007 behaviour — when the key is not a calendar position at all:
  *
  *  - the key is not a string (the empty bucket keys as `null` on both
  *    aggregation paths, #3839; the two passes' empty buckets already merge with
  *    each other, and "one year after nothing" is not a date);
  *  - the key is not a bucket key of this granularity, so there is no span to
  *    shift (a raw timestamp from an unbucketed date dimension lands here);
- *  - the shifted-back bucket falls outside the CURRENT window. Two equal-length
- *    day windows can tile into different bucket counts (a 31-day window
- *    straddling a month boundary yields two month buckets, its neighbour one),
- *    and the ordinal rule then has a last bucket with no counterpart. Moving it
- *    to a bucket the caller did not ask for would trade a visibly foreign row
- *    for a plausible-looking wrong one; it keeps its own key and appends, as it
- *    did before.
+ *
+ * Returns {@link NO_CURRENT_COUNTERPART} — meaning "drop this row" — when the
+ * key IS a bucket of this granularity but its shifted-back bucket falls outside
+ * the CURRENT window. Two equal-length day windows can tile into different
+ * bucket counts (a 31-day window straddling a month boundary yields two month
+ * buckets, its neighbour one), and the ordinal rule then has a last bucket with
+ * no counterpart. Moving it to a bucket the caller did not ask for would be a
+ * plausible-looking wrong answer, and keeping its own key is no better: that
+ * key is a calendar bucket too, so it either names a CURRENT bucket the value
+ * was never aligned to (December by week: the previous period's own `W49`, the
+ * single day 30 November, overwrote the comparison `W44` had put on the
+ * current `W49`) or appends a row outside the window the caller filtered to
+ * (an extra November bar on "this month" by month). The comparison value has
+ * nowhere true to go, so it goes nowhere.
  *
  * ## Why this carries no `kind` refusal of its own
  *
@@ -1016,10 +1030,11 @@ export function bucketKeyAtOrdinal(ordinal: number, granularity: DateGranularity
  *    `shiftedRange` argument passed here — BEFORE the row map that reaches this.
  *    So there is no path on which this function sees a `kind` that `shiftRange`
  *    did not already accept; a refusal here would be unreachable code;
- *  - a throw would **contradict the posture stated above**. Every uncertainty this
- *    function knows about answers `null` — "leave this row's key alone" — and it
- *    runs inside a per-row map, where failing the whole request is a different
- *    contract from the one this docblock commits to.
+ *  - a throw would **contradict the posture stated above**. Every case this
+ *    function declines answers `null` ("leave this row's key alone") or
+ *    {@link NO_CURRENT_COUNTERPART} ("drop this row"), and it runs inside a
+ *    per-row loop, where failing the whole request is a different contract
+ *    from the one this docblock commits to.
  *
  * ⚠️ Export this function, or give it a second caller that does not go through
  * `shiftRange` first, and the pin goes red: that is the moment the `kind`
@@ -1035,7 +1050,7 @@ export function alignedCompareBucketKey(
   kind: CompareTo['kind'],
   currentRange: [string, string],
   shiftedRange: [string, string],
-): string | null {
+): string | null | typeof NO_CURRENT_COUNTERPART {
   if (typeof key !== 'string' || key.length === 0) return null;
   const span = bucketKeyToCalendarRange(key, granularity);
   if (!span) return null;
@@ -1049,7 +1064,7 @@ export function alignedCompareBucketKey(
 
   const first = bucketOrdinalOfDay(currentRange[0], granularity);
   const last = bucketOrdinalOfDay(currentRange[1], granularity);
-  if (targetOrdinal < first || targetOrdinal > last) return null;
+  if (targetOrdinal < first || targetOrdinal > last) return NO_CURRENT_COUNTERPART;
   return bucketKeyAtOrdinal(targetOrdinal, granularity);
 }
 
@@ -1886,16 +1901,22 @@ export class DatasetExecutor {
       : undefined;
 
     // Rename measure columns to `<measure>__compare` so they merge alongside primary.
-    return sub.rows.map((row) => {
-      const out: Record<string, unknown> = {};
-      for (const dim of dimensions) out[dim] = row[dim];
+    // A comparison bucket with no counterpart in the current window is dropped:
+    // its own key would merge it onto a bucket it was not aligned to, or append
+    // it outside the window (see {@link NO_CURRENT_COUNTERPART}).
+    const out: Record<string, unknown>[] = [];
+    for (const row of sub.rows) {
+      const renamed: Record<string, unknown> = {};
+      for (const dim of dimensions) renamed[dim] = row[dim];
       if (granularity) {
         const aligned = alignedCompareBucketKey(row[dimension], granularity, cmp.kind, range, shifted);
-        if (aligned != null) out[dimension] = aligned;
+        if (aligned === NO_CURRENT_COUNTERPART) continue;
+        if (aligned != null) renamed[dimension] = aligned;
       }
-      for (const m of measures) out[`${m}__compare`] = row[m];
-      return out;
-    });
+      for (const m of measures) renamed[`${m}__compare`] = row[m];
+      out.push(renamed);
+    }
+    return out;
   }
 }
 

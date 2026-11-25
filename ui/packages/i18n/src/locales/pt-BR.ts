@@ -70,6 +70,9 @@ const pt = {
     autofillNoCurrency: '{{field}} não foi preenchido: o valor escolhido é {{amount}}, mas ainda não há moeda escolhida aqui. Escolha a moeda e depois informe {{field}}.',
     autofillCurrencyUnread: '{{field}} não foi preenchido: o valor escolhido é {{amount}}, mas não foi possível ler a moeda aqui. Verifique a moeda e depois informe {{field}}.',
     autofillKept: '{{field}} mantém o valor anterior.',
+    autofillNowSameCurrency: '{{field}} não foi preenchido na escolha. O registro agora está em {{to}}: escolha novamente para preencher {{amount}}.',
+    autofillNowSameCurrencyHeld: '{{field}} não foi preenchido na escolha e mantém o valor anterior. O registro agora está em {{to}}: limpe {{field}} e escolha novamente para preencher {{amount}}.',
+    autofillCopiedUnder: '{{field}} foi copiado como {{amount}}, mas o registro agora está em {{to}}. Informe {{field}} em {{to}} se precisar mudar.',
   },
   common: {
     // objectui#13461 — a disclosure toggle's name (the tree-view node toggle).
@@ -691,6 +694,7 @@ const pt = {
       needsWholeRows:
         "O agrupamento precisa de todos os registros, mas esta grade recebeu apenas uma página deles, portanto os grupos não podem ser contados. Entregue todos os registros ou deixe a grade buscá-los em uma fonte de dados que implemente queryGroupHeaders.",
       draftOnly: "Não agrupado por {{fields}}: existe apenas no rascunho até você publicar.",
+      moreGroupsNotLoaded: "Mais grupos não foram carregados: esta visualização tem mais grupos do que o servidor retorna em uma leitura, então apenas alguns são listados.",
     },
     // objectui#4024 — column-footer aggregate prefixes, keyed by the spec's
     // `ColumnSummary` vocabulary. `pattern` owns the label/value join so this
@@ -1827,6 +1831,12 @@ const pt = {
     unconfigured: {
       noCategoryAxis: "Eixo de categorias do gráfico obrigatório — um gráfico vinculado a um objeto não o inventa. Declare um destes:",
     },
+  },
+  // objectstack#36906 — the × of an app page opened from a Studio list.
+  studioReturn: {
+    close: 'Voltar ao Studio',
+    closeLabel: 'Fechar e voltar à lista do Studio',
+    leaveConfirm: 'Sair sem salvar? As alterações não salvas serão perdidas.',
   },
   dashboard: {
     // objectui#7063 — the DEFAULT empty state every dashboard widget renders
@@ -3802,7 +3812,7 @@ const pt = {
   home: {
     build: {
       noCapability: "A criação de aplicativos não está disponível neste sistema — ela exige a permissão “Gerenciar metadados”, que sua conta não possui.",
-      inStudio: "Novo no Studio",
+      inStudio: "Novo aplicativo em branco",
     },
     template: {
       title: "Comece com um modelo",
@@ -4218,6 +4228,8 @@ const pt = {
       settings: "Configurações do relatório",
       pendingDraft: "Este relatório tem alterações não publicadas. Publique ou descarte-as acima e depois salve.",
       nameTaken: "Todos os identificadores gerados a partir deste nome já estão em uso. Dê outro nome ao relatório e salve.",
+      // objectstack#36906 — a report made from Studio's report list that could not be saved in the app's package.
+      savedOutsideApp: "Este relatório foi salvo fora do pacote do app, porque o pacote de personalização do app não pode ser usado aqui, então a lista do Studio não o mostra.",
       adminOnlyTitle: "Somente administradores do espaço de trabalho podem criar relatórios",
       adminOnly: "Um relatório é compartilhado com todo o espaço de trabalho, por isso um administrador o cria.",
       designModeOnTitle: "Termine primeiro de projetar o layout",
@@ -4766,6 +4778,7 @@ const pt = {
     tool: {
       aggregate_data: "Resumir os dados",
       get_record: "Ler o registro",
+      get_record_context: "Ler o contexto do registro",
       list_datasets: "Ver as métricas disponíveis",
       query_data: "Consultar os dados necessários",
       query_dataset: "Consultar por métrica",
@@ -5093,6 +5106,10 @@ const pt = {
     actComment: 'Comentou',
     actSystemNote: 'Nota do sistema',
     stepProgress: 'Etapas de aprovação',
+    outcomeWaiting: 'Seguiu para {{step}}, aguardando uma decisão',
+    outcomeNow: 'Seguiu para {{step}}: {{decision}}',
+    outcomeEndedAt: 'Seguiu para {{step}} e terminou: {{decision}}',
+    outcomeEndedHere: 'A aprovação terminou aqui',
     prevRequest: 'Anterior',
     nextRequest: 'Próxima',
     positionOf: 'Solicitação {{index}} de {{total}}',
@@ -5251,7 +5268,12 @@ const pt = {
     bulkRejected_one: '{{count}} solicitação rejeitada',
     bulkRejected_many: '{{count}} de solicitações rejeitadas',
     bulkRejected_other: '{{count}} solicitações rejeitadas',
-    bulkPartial: '{{ok}} com sucesso, {{fail}} falharam: {{which}}',
+    bulkPartialSummary: '{{ok}} com sucesso, {{fail}} falharam',
+    bulkFailureLine: '{{title}}: {{reason}}',
+    bulkFailuresShowAll: 'Mostrar todas ({{n}})',
+    bulkFailuresTitle: 'Não decididas: {{n}}',
+    bulkFailuresBody: 'Estas solicitações ficaram como estavam. Cada uma informa o motivo.',
+    close: 'Fechar',
     rejectOneTitle: 'Rejeitar "{{title}}"?',
     rejectOneBody: 'A solicitação será rejeitada e o solicitante notificado.',
     rejectTitle: 'Rejeitar esta solicitação?',

@@ -92,6 +92,10 @@ import { getStudioCanvasPreview } from './studio-canvas-preview';
 // The source under test reaches dynamic imports of `@objectstack/lint`; their first
 // load is paid here, at collection, never inside a case's clock (`check:test-source-alias`).
 import '@objectstack/lint';
+// The source under test reaches these dynamic imports (the command palette's
+// record preview, the drafts panel's lint, the code editor): their first load
+// is paid here, at collection, never inside a case's clock (`check:test-source-alias`).
+import '@object-ui/plugin-detail';
 
 const dataSource = createEmptyDataSource();
 failOnAbsorbedFetchError();
@@ -151,7 +155,7 @@ describe('Data pillar field rail — a late object inspector fills the open rail
 
     render(
       <MemoryRouter initialEntries={['/studio/com.example.showcase/data']}>
-        <DataPillar packageId="com.example.showcase" />
+        <DataPillar objectName="showcase_task" packageId="com.example.showcase" />
       </MemoryRouter>,
     );
     fireEvent.click(await screen.findByRole('button', { name: 'Field layout' }));
@@ -188,11 +192,10 @@ describe('Automations pillar canvas — a late flow preview replaces the fallbac
     expect(getMetadataPreview('flow')).toBeUndefined();
 
     render(
-      <MemoryRouter initialEntries={['/studio/com.acme.app/automations']}>
-        <AutomationsPillar packageId="com.acme.app" />
+      <MemoryRouter initialEntries={['/studio/com.acme.app/metadata/flow/nightly']}>
+        <AutomationsPillar packageId="com.acme.app" flowName="nightly" />
       </MemoryRouter>,
     );
-    fireEvent.click(await screen.findByRole('button', { name: /Nightly/ }));
 
     const NO_DESIGNER =
       'No metadata designers are registered in this session, so this flow cannot be designed here.';

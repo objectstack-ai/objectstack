@@ -35,6 +35,22 @@ import { fileURLToPath } from 'node:url';
 import { CAPABILITY_PROVIDERS, providesCapability } from '@objectstack/core';
 import Serve from '../src/commands/serve.js';
 
+// Pay the first transform of these dist-resolved workspace deps at MODULE LOAD:
+// `serve.ts`, which this file imports for its statics, loads them lazily inside
+// its command body, a clocked window for any case that reaches it
+// (`check:test-source-alias`, the source-reach rule).
+import '@objectstack/metadata-protocol';
+import '@objectstack/metadata';
+import '@objectstack/plugin-hono-server';
+import '@objectstack/rest';
+import '@objectstack/service-settings';
+import '@objectstack/service-datasource';
+import '@objectstack/cloud-connection';
+import '@objectstack/driver-turso';
+import '@objectstack/driver-sql';
+import '@objectstack/platform-objects/plugin';
+import '@objectstack/plugin-security';
+
 const HERE = resolve(fileURLToPath(import.meta.url), '..');
 
 /**
@@ -131,6 +147,7 @@ const EXPECTED_PROVIDER_NAME: Record<string, string> = {
   approvals: 'com.objectstack.service.approvals',
   settings: 'com.objectstack.service.settings',
   webhooks: 'com.objectstack.plugin-webhook-outbox',
+  'record-context': 'com.objectstack.service.record-context',
 };
 
 describe('#7652: every registered provider is still recognised (the other direction)', () => {

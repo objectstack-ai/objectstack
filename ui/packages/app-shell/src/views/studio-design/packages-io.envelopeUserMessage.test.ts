@@ -75,7 +75,7 @@ const CAPABILITY = 'Reading packages requires the `studio.access` or `setup.acce
 /** A failure exactly as `sendError` writes it — `{ code, message, ...extra }` under `error`. */
 function failure(status: number, error: Record<string, unknown>): Response {
   return {
-    ok: false,
+    headers: new Headers(), ok: false,
     status,
     json: async () => ({ success: false, error }),
   } as unknown as Response;
@@ -84,7 +84,7 @@ function failure(status: number, error: Record<string, unknown>): Response {
 /** The success shape: `sendOk` wraps the handler's `{ packages, total }`. */
 function listOk(packages: unknown[]): Response {
   return {
-    ok: true,
+    headers: new Headers(), ok: true,
     status: 200,
     json: async () => ({ success: true, data: { packages, total: packages.length } }),
   } as unknown as Response;
@@ -210,12 +210,11 @@ describe('fetchPackages — how `code` composes, and what is not a mark', () => 
 describe('fetchPackages — negative controls (GREEN with the fix reverted)', () => {
   /**
    * ⭐ §7. A proxy's HTML 502 has no envelope to read. The status is then the
-   * only honest thing to say, and it is what `fetchInstalledPackageRow-7881`
-   * pins for the sibling read.
+   * only honest thing to say.
    */
   it('§7 an unparseable body still names the status', async () => {
     stubFetch({
-      ok: false,
+      headers: new Headers(), ok: false,
       status: 502,
       json: async () => {
         throw new SyntaxError("Unexpected token '<', \"<html>\"... is not valid JSON");
@@ -271,7 +270,7 @@ describe('duplicatePackage — the same envelope, the same rule (#7959)', () => 
 
   it('still falls back to the status when the body is unreadable', async () => {
     stubFetch({
-      ok: false,
+      headers: new Headers(), ok: false,
       status: 502,
       json: async () => {
         throw new SyntaxError('Unexpected token < in JSON at position 0');

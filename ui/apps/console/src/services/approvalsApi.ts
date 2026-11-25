@@ -125,11 +125,18 @@ export interface ApprovalRequestRow {
    * This request's own route (single reads only, objectstack#26668): the steps
    * its run passed, its own, and while pending the steps ahead the graph alone
    * decides; `ahead` says whether the route ends, waits on an undecided branch,
-   * or stops at a decided request.
+   * or stops at a decided request; on a decided one, `outcome` says where the
+   * record's approval stands now (objectstack#35863).
    */
   flow_route?: {
     steps: Array<{ id: string; label: string; state: 'done' | 'current' | 'upcoming' }>;
     ahead: 'end' | 'undecided' | 'decided';
+    outcome?: {
+      step?: { id: string; label: string };
+      /** A request status, typed as this row's own `status`. */
+      status: ApprovalRequestRow['status'];
+      ended: boolean;
+    };
   };
   /**
    * Server-computed aggregation progress (#3266) for pending multi-approver

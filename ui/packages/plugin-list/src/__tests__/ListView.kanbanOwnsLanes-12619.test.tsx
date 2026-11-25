@@ -194,3 +194,55 @@ describe('a list view hands its board the query, not a page (objectui#12619)', (
     expect(Array.isArray(props.data)).toBe(true);
   });
 });
+
+/**
+ * objectstack#36871 — a board this view hands its window to (lanes it does not
+ * know before the query) is handed the QUERY of that window beside it, so the
+ * board asks its lane statistic over every record of each lane, not the page:
+ * the effective filter on the node, the search pair and refetch signal in
+ * `laneStatisticQuery`. The real board under the real list is pinned in
+ * `packages/app-shell/src/__tests__/listKanbanEveryRecord-12619.test.tsx`.
+ */
+describe('a list view hands the board it gives its window the query of that window (objectstack#36871)', () => {
+  const { stage: _stage, ...REST } = FIELDS;
+  const LOOKUP_LANES = { name: OBJECT, fields: { ...REST, stage: { type: 'text', label: 'Stage' } } };
+
+  it('hands the rows, the effective filter its own fetch sent, and the lane statistic request', async () => {
+    const ds = makeDataSource(LOOKUP_LANES);
+    renderList(ds, { ...VIEW, filter: [{ field: 'amount', operator: 'greater_than', value: 3 }] });
+    const props = await boardProps();
+
+    expect(Array.isArray(props.data)).toBe(true);
+    expect(props.lanePaging).toBeUndefined();
+    expect(props.laneStatisticQuery).toEqual({ search: '', reloadKey: expect.any(String) });
+    // The lowered node its own window query sent, not the authored rule objects.
+    expect(JSON.stringify(props.schema.filter)).not.toContain('"operator"');
+    expect(props.schema.filter).toEqual(ds.find.mock.calls[0][1].$filter);
+  });
+
+  it('a board grouped into swimlanes is handed the request too', async () => {
+    const ds = makeDataSource();
+    renderList(ds, { ...VIEW, grouping: { fields: [{ field: 'account', order: 'asc', collapsed: false }] } });
+    const props = await boardProps();
+
+    expect(props.laneStatisticQuery).toEqual({ search: '', reloadKey: expect.any(String) });
+  });
+
+  it('CONTROL: a board that pages its own lanes is not', async () => {
+    const ds = makeDataSource();
+    renderList(ds);
+    const props = await boardProps();
+
+    expect(props.lanePaging).toBeDefined();
+    expect(props.laneStatisticQuery).toBeUndefined();
+  });
+
+  it('CONTROL: a board over rows handed in whole is not, and keeps the authored filter', async () => {
+    const ds = makeDataSource(LOOKUP_LANES);
+    const rows = [{ id: 'o-1', name: 'Deal 1', stage: 'open', amount: 1 }];
+    renderList(ds, { ...VIEW, data: { provider: 'value', items: rows } });
+    const props = await boardProps();
+
+    expect(props.laneStatisticQuery).toBeUndefined();
+  });
+});

@@ -24,8 +24,8 @@ See `content/docs/protocol/knowledge.mdx` for the full design.
 ## TypeScript Usage
 
 ```typescript
-import { FileKnowledgeSourceSchema, HttpKnowledgeSourceSchema, KnowledgeRefreshPolicySchema, KnowledgeSourceSchema, KnowledgeSourceKindSchema, ObjectKnowledgeSourceSchema } from '@objectstack/spec/ai';
-import type { FileKnowledgeSource, HttpKnowledgeSource, KnowledgeRefreshPolicy, KnowledgeSource, KnowledgeSourceKind, ObjectKnowledgeSource } from '@objectstack/spec/ai';
+import { FileKnowledgeSourceSchema, HttpKnowledgeSourceSchema, KnowledgeRefreshPolicySchema, KnowledgeSourceSchema, KnowledgeSourceKindSchema, KnowledgeSplitSchema, KnowledgeSplitStrategySchema, ObjectKnowledgeSourceSchema } from '@objectstack/spec/ai';
+import type { FileKnowledgeSource, HttpKnowledgeSource, KnowledgeRefreshPolicy, KnowledgeSource, KnowledgeSourceKind, KnowledgeSplit, KnowledgeSplitStrategy, ObjectKnowledgeSource } from '@objectstack/spec/ai';
 
 // Validate data
 const result = FileKnowledgeSourceSchema.parse(data);
@@ -97,6 +97,7 @@ const result = FileKnowledgeSourceSchema.parse(data);
 | **contentFields** | `string[]` | ✅ | Fields contributing to document content |
 | **metadataFields** | `string[]` | optional (default: `[]`) |  |
 | **where** | `Record<string, any>` | optional |  |
+| **split** | `{ strategy: Enum<'whole' \| 'recursive' \| 'markdown'>; maxChars?: integer; minChars?: integer }` | optional | How the service cuts this object's documents into passages; omitted means recursive |
 
 ### Nested Shape: `KnowledgeSource.source[kind='file']`
 
@@ -153,6 +154,15 @@ This schema accepts one of the following structures:
 | **contentFields** | `string[]` | ✅ | Fields contributing to document content |
 | **metadataFields** | `string[]` | optional (default: `[]`) |  |
 | **where** | `Record<string, any>` | optional |  |
+| **split** | `{ strategy: Enum<'whole' \| 'recursive' \| 'markdown'>; maxChars?: integer; minChars?: integer }` | optional | How the service cuts this object's documents into passages; omitted means recursive |
+
+### Nested Shape: `KnowledgeSourceKind[kind='object'].split`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **strategy** | `Enum<'whole' \| 'recursive' \| 'markdown'>` | ✅ | Split strategy: whole, recursive or markdown |
+| **maxChars** | `integer` | optional | Longest passage in characters; wins over the settings default, the embedder limit can lower it |
+| **minChars** | `integer` | optional | Adjacent pieces shorter than this are merged up to it (default 200); a value above the effective maxChars reads as maxChars |
 
 ---
 
@@ -183,6 +193,30 @@ This schema accepts one of the following structures:
 
 ---
 
+## KnowledgeSplit
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **strategy** | `Enum<'whole' \| 'recursive' \| 'markdown'>` | ✅ | Split strategy: whole, recursive or markdown |
+| **maxChars** | `integer` | optional | Longest passage in characters; wins over the settings default, the embedder limit can lower it |
+| **minChars** | `integer` | optional | Adjacent pieces shorter than this are merged up to it (default 200); a value above the effective maxChars reads as maxChars |
+
+
+---
+
+## KnowledgeSplitStrategy
+
+### Allowed Values
+
+* `whole`
+* `recursive`
+* `markdown`
+
+
+---
+
 ## ObjectKnowledgeSource
 
 ### Properties
@@ -194,6 +228,15 @@ This schema accepts one of the following structures:
 | **contentFields** | `string[]` | ✅ | Fields contributing to document content |
 | **metadataFields** | `string[]` | optional (default: `[]`) |  |
 | **where** | `Record<string, any>` | optional |  |
+| **split** | `{ strategy: Enum<'whole' \| 'recursive' \| 'markdown'>; maxChars?: integer; minChars?: integer }` | optional | How the service cuts this object's documents into passages; omitted means recursive |
+
+### Nested Shape: `ObjectKnowledgeSource.split`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **strategy** | `Enum<'whole' \| 'recursive' \| 'markdown'>` | ✅ | Split strategy: whole, recursive or markdown |
+| **maxChars** | `integer` | optional | Longest passage in characters; wins over the settings default, the embedder limit can lower it |
+| **minChars** | `integer` | optional | Adjacent pieces shorter than this are merged up to it (default 200); a value above the effective maxChars reads as maxChars |
 
 
 ---

@@ -26,6 +26,12 @@ import { collectFlowGraphs } from '@objectstack/spec/automation';
 import { apiBase } from './useFlowNodePalette.js';
 import { t as tr, tFormat } from '../i18n.js';
 import { flowNodeDisplayName } from './flow-canvas-parts.js';
+import { createAuthenticatedFetch } from '@object-ui/auth';
+
+/** The console's authenticated fetch: the stored bearer token beside the session cookie. */
+function authFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+  return createAuthenticatedFetch()(input, init);
+}
 
 /** An error on a run/step. The engine sends the run-level `error` as a plain
  *  string (`ExecutionLog.error`) while a step-level error is a `{code,message}`
@@ -236,7 +242,7 @@ type LoadState = 'loading' | 'ready' | 'unavailable';
 /** Fetch a flow's run history. Exposed for tests. */
 export async function fetchFlowRuns(flowName: string, signal?: AbortSignal): Promise<FlowRun[] | null> {
   try {
-    const res = await fetch(
+    const res = await authFetch(
       `${apiBase()}/automation/${encodeURIComponent(flowName)}/runs?limit=25`,
       { credentials: 'include', headers: { 'Content-Type': 'application/json' }, signal },
     );

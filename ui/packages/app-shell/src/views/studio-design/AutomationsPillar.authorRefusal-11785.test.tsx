@@ -105,6 +105,11 @@ import { registerMetadataInspector } from '../metadata-admin/inspector-registry'
 import { FlowPreview } from '../metadata-admin/previews/FlowPreview';
 import { FlowInspector } from '../metadata-admin/inspectors/FlowInspector';
 import { t, tFormat } from '../metadata-admin/i18n';
+// The source under test reaches these dynamic imports (the command palette's
+// record preview, the drafts panel's lint, the code editor): their first load
+// is paid here, at collection, never inside a case's clock (`check:test-source-alias`).
+import '@objectstack/lint';
+import '@object-ui/plugin-detail';
 
 const dataSource = createEmptyDataSource();
 
@@ -129,8 +134,8 @@ afterEach(cleanup);
 async function refusedSave(issues: Array<{ path: string; message: string }>): Promise<HTMLElement> {
   server.issues = issues;
   render(
-    <MemoryRouter initialEntries={[`/studio/${PKG}/automations`]}>
-      <AutomationsPillar packageId={PKG} />
+    <MemoryRouter initialEntries={[`/studio/${PKG}/metadata/flow/${FLOW.name}`]}>
+      <AutomationsPillar packageId={PKG} flowName={FLOW.name} />
     </MemoryRouter>,
   );
   const toggle = await screen.findByRole('switch', undefined, { timeout: 8000 });

@@ -78,6 +78,9 @@ const zh = {
     autofillNoCurrency: '未填入{{field}}：所选金额为 {{amount}}，但此处尚未选择币种。请先选择币种，再填写{{field}}。',
     autofillCurrencyUnread: '未填入{{field}}：所选金额为 {{amount}}，但无法读取此处的币种。请先确认币种，再填写{{field}}。',
     autofillKept: '{{field}}仍保留原来的值。',
+    autofillNowSameCurrency: '选取时未填入{{field}}。记录现已改为 {{to}}：重新选取即可填入 {{amount}}。',
+    autofillNowSameCurrencyHeld: '选取时未填入{{field}}，且仍保留原来的值。记录现已改为 {{to}}：请先清空{{field}}，再重新选取即可填入 {{amount}}。',
+    autofillCopiedUnder: '{{field}}按 {{amount}} 带入，但记录现已改为 {{to}}。如需调整，请按 {{to}} 填写{{field}}。',
   },
   common: {
     // objectui#13461 — a disclosure toggle's name (the tree-view node toggle).
@@ -654,6 +657,7 @@ const zh = {
       needsWholeRows:
         '分组需要全部记录，但此表格只收到其中一页，因此无法统计分组。请传入全部记录，或让表格从实现了 queryGroupHeaders 的数据源获取记录。',
       draftOnly: '未按 {{fields}} 分组：它仅存在于草稿中，发布后才生效。',
+      moreGroupsNotLoaded: '更多分组未加载：此视图的分组数超过服务器单次读取返回的数量，因此只列出了部分分组。',
     },
     // objectui#4024 — column-footer aggregate prefixes, keyed by the spec's
     // `ColumnSummary` vocabulary. `pattern` owns the label/value join so this
@@ -1854,6 +1858,8 @@ const zh = {
       settings: '报表设置',
       pendingDraft: '这张报表有一份还没发布的修改。先在上方发布或丢弃它，再保存。',
       nameTaken: '由这个名称生成的标识都已被占用。请给报表换个名称再保存。',
+      // objectstack#36906 — a report made from Studio's report list that could not be saved in the app's package.
+      savedOutsideApp: '这份报表没有存进应用的包：此处无法使用应用的定制包，所以 Studio 列表里看不到它。',
       adminOnlyTitle: '只有系统管理员能搭建报表',
       adminOnly: '报表对工作区里所有人生效，所以由系统管理员搭建。',
       designModeOnTitle: '请先完成布局设计',
@@ -1902,6 +1908,12 @@ const zh = {
         grouping: '选一个分组字段',
       },
     },
+  },
+  // objectstack#36906 — the × of an app page opened from a Studio list.
+  studioReturn: {
+    close: '返回 Studio',
+    closeLabel: '关闭并返回 Studio 列表',
+    leaveConfirm: '不保存就离开吗？未保存的修改将会丢失。',
   },
   dashboard: {
     total: '总计',
@@ -3901,7 +3913,7 @@ const zh = {
     appOpened: '{{time}}打开',
     build: {
       noCapability: '本系统不提供构建应用功能 — 它需要「管理元数据」权限,而你的账号没有该权限。',
-      inStudio: '在 Studio 中新建',
+      inStudio: '新建空白应用',
     },
     template: {
       title: '从模板开始',
@@ -4935,6 +4947,7 @@ const zh = {
     tool: {
       aggregate_data: '汇总相关数据',
       get_record: '读取这条记录',
+      get_record_context: '读取记录资料',
       list_datasets: '查看指标',
       query_data: '查询所需数据',
       query_dataset: '按指标查询',
@@ -5250,6 +5263,10 @@ const zh = {
     actComment: '评论',
     actSystemNote: '系统说明',
     stepProgress: '审批步骤',
+    outcomeWaiting: '已流转到「{{step}}」，等待审批',
+    outcomeNow: '已流转到「{{step}}」：{{decision}}',
+    outcomeEndedAt: '已流转到「{{step}}」，审批结束：{{decision}}',
+    outcomeEndedHere: '审批在此结束',
     prevRequest: '上一条',
     nextRequest: '下一条',
     positionOf: '第 {{index}} / {{total}} 条请求',
@@ -5400,7 +5417,12 @@ const zh = {
     bulkRejected: '已驳回 {{count}} 条请求',
     bulkRejected_one: '已驳回 {{count}} 条请求',
     bulkRejected_other: '已驳回 {{count}} 条请求',
-    bulkPartial: '{{ok}} 条成功，{{fail}} 条失败：{{which}}',
+    bulkPartialSummary: '{{ok}} 条成功，{{fail}} 条失败',
+    bulkFailureLine: '{{title}}：{{reason}}',
+    bulkFailuresShowAll: '查看全部（{{n}}）',
+    bulkFailuresTitle: '未处理：{{n}} 条',
+    bulkFailuresBody: '以下请求保持原状，每条都附有原因。',
+    close: '关闭',
     rejectOneTitle: '驳回“{{title}}”？',
     rejectOneBody: '将驳回该请求并通知申请人。',
     rejectTitle: '驳回该请求？',

@@ -55,7 +55,8 @@ import { confirmUnsavedLeave } from '../chrome/unsavedEdits.js';
 
 /**
  * Where Object settings takes an object of `app` (objectstack#36487): the
- * object in Studio's Data surface (`surface=object:NAME`), through the
+ * object's designer in Studio, full-screen on its own address
+ * (`/studio/PKG/metadata/object/NAME`, objectstack#36904), through the
  * derivation the app bar's Studio entry reads on the object's list,
  * `appStudioObjectPath` (objectui#12520). `null` when the app has no owning
  * package Studio can open, or names no object, so the entry hides as the app

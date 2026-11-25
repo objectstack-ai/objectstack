@@ -14,6 +14,9 @@ import type { ErrorCode, MetadataProtocol } from '@objectstack/spec/api';
 import type { ISecurityService } from '@objectstack/spec/contracts';
 // [#32442] The ONE reading of `enable.aiReadable` (ruling A, #32865).
 import { isAiReadExposed } from '@objectstack/spec/data';
+// [ADR-0160 D4] The read path's own decorations, removed from the context-pack
+// listing before the record-context executor parses it (`listContextPacks`).
+import { stripReadDecorations } from '@objectstack/spec/kernel';
 import {
     BUILTIN_MEMBERSHIP_ROLES,
     MEMBERSHIP_REACH,
@@ -1688,12 +1691,19 @@ export function buildMcpBridge(
                 return (localized ?? def) as Record<string, unknown>;
             },
             publishedObjectDefinitionOf: async (name) => ((await readServedObject(name)) ?? null) as Record<string, unknown> | null,
+            // The authored packs, not the serving envelope: the merged listing
+            // is the one `/meta/ai_context` serves, so every item carries the
+            // read path's `_diagnostics`, which the executor's closed
+            // `AiContextSchema` refuses as an unrecognized key — every pack
+            // would be dropped. `stripReadDecorations` removes exactly the
+            // read decorations (`METADATA_READ_DECORATIONS`) and keeps the
+            // ADR-0010 protection envelope the schema declares.
             listContextPacks: async () => {
                 const merged = await actionExec.readMergedItems(await getProtocol(), 'ai_context');
-                if (merged !== undefined) return merged;
+                if (merged !== undefined) return merged.map(stripReadDecorations);
                 const meta: any = await getMeta();
                 const listed = typeof meta?.list === 'function' ? await meta.list('ai_context') : [];
-                return Array.isArray(listed) ? listed : [];
+                return Array.isArray(listed) ? listed.map(stripReadDecorations) : [];
             },
         }));
     }

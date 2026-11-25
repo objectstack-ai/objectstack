@@ -317,14 +317,13 @@ describe('appStudioSurfacePath', () => {
 describe('appStudioObjectPath', () => {
   const crm = { name: 'crm', _packageId: 'com.acme.crm' };
 
-  it('deep-links to the object surface in the Data pillar', () => {
-    expect(appStudioObjectPath(crm, true, 'showcase_task')).toBe(
-      '/studio/com.acme.crm/data?surface=object:showcase_task',
-    );
+  // objectstack#36904 — the object designer on its metadata address.
+  it("deep-links to the object's designer", () => {
+    expect(appStudioObjectPath(crm, true, 'showcase_task')).toBe('/studio/com.acme.crm/metadata/object/showcase_task');
   });
   it('URL-encodes the package id and the object name', () => {
     expect(appStudioObjectPath({ _packageId: 'com.acme/crm' }, true, 'my object')).toBe(
-      '/studio/com.acme%2Fcrm/data?surface=object:my%20object',
+      '/studio/com.acme%2Fcrm/metadata/object/my%20object',
     );
   });
   it('returns null for non-admins', () => {
@@ -370,11 +369,11 @@ describe('appStudioRoutePath', () => {
   it('deep-links an object route (routeType is the object name) to its Data-pillar surface', () => {
     // The fix: an object records page now opens THAT object, not the generic Data tab.
     expect(appStudioRoutePath(crm, true, { type: 'showcase_task', name: undefined })).toBe(
-      '/studio/com.acme.crm/data?surface=object:showcase_task',
+      '/studio/com.acme.crm/metadata/object/showcase_task',
     );
     // A record-detail route (name='record') still keys off the object route type.
     expect(appStudioRoutePath(crm, true, { type: 'account', name: 'record' })).toBe(
-      '/studio/com.acme.crm/data?surface=object:account',
+      '/studio/com.acme.crm/metadata/object/account',
     );
   });
 

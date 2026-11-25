@@ -21,9 +21,9 @@
  * From 768 px up the page is retired (objectstack#36732): the host redirects
  * `/home` into an app whenever the viewer has a product app, so a desktop
  * reaches this page only with none, and draws the no-apps empty state
- * ({@link DesktopNoApps}): start from a template, the app marketplace, or a
- * new package in Studio, for the viewers who may add an app. Neither 「Build
- * with AI」 nor 「Build an app」 is drawn on this page (objectstack#37227).
+ * ({@link DesktopNoApps}): a new blank app, start from a template, the app
+ * marketplace, for the viewers who may add an app. Neither 「Build with AI」
+ * nor 「Build an app」 is drawn on this page (objectstack#37227).
  *
  * @module
  */
@@ -90,7 +90,7 @@ import { usePublishAllDrafts } from '../../preview/usePublishAllDrafts.js';
 import { fetchPackages } from '../../views/studio-design/packages-io.js';
 import { resolveAiApiBase } from '../../hooks/useAiSurface.js';
 import { isAiStudioEnabled, isMarketplaceEnabled } from '../../runtime-config.js';
-import { STUDIO_NEW_PACKAGE_PATH } from '../../views/studio-design/studioNewPackage.js';
+import { useNewPackageDoorPath } from '../../hooks/useNewPackageDoorPath.js';
 import { useOpenAssistant } from '../../layout/chatDockControl.js';
 import { isProductApp } from '../../utils/homePath.js';
 import { useAddAppEntries, useMayAddApp } from '../../hooks/useAddAppEntries.js';
@@ -108,7 +108,7 @@ import { catalogServesBuild } from '../../hooks/surfaceAgent.js';
  *  - `buildServed` — the catalog lists the build agent itself, alias-aware
  *    (`catalogServesBuild`, objectstack#36969). Where in-app building is
  *    closed the catalog keeps `ask` and drops `build`; there the builder chip
- *    takes its Studio form, "New in Studio".
+ *    takes its Studio form, "New blank app".
  * All false while the catalog loads or when AI isn't enabled, so nothing
  * flashes and no AI CTA appears where there's no agent to back it.
  *
@@ -144,7 +144,7 @@ function useHomeAiAvailability(): {
 
 /**
  * One 32 px builder chip at the greeting's right (objectui#12601): "Start with
- * a template" outlined, "New in Studio" on the soft primary tint with its icon
+ * a template" outlined, "New blank app" on the soft primary tint with its icon
  * in the primary colour. Admins only — the caller decides that.
  *
  * Disabled (not hidden) when the session cannot use it: a vanished front door
@@ -260,21 +260,12 @@ function DesktopNoApps({
   );
 }
 
-/** The 「Add app」 entry this page does not draw (see {@link NoAppsAddActions}). */
-const BUILD_WITH_AI_ENTRY = 'build-with-ai';
-
 /**
  * The 「Add app」 doors as the empty state's buttons. Its own component so
  * only a viewer who may add an app pays the agent-catalog read the list makes.
- *
- * Every door but 「Build with AI」 (objectstack#37227): the maintainer ruled it
- * off the home page, so this page leaves it out of the shared list, which the
- * sidebar's 「Add app」 menu reads unchanged. A way to start an app stays: the
- * template entry where a marketplace is mounted, 「New in Studio」 where the
- * catalog does not serve the build agent.
  */
 function NoAppsAddActions() {
-  const entries = useAddAppEntries().filter((entry) => entry.key !== BUILD_WITH_AI_ENTRY);
+  const entries = useAddAppEntries();
   if (entries.length === 0) return null;
   return (
     <div className="mt-6 flex flex-col items-center gap-3 sm:flex-row">
@@ -520,6 +511,9 @@ export function HomePage({ checklist }: HomePageProps = {}) {
   // `org_owner` is an admin (`isAdmin === true`) yet deliberately holds no
   // `manage_metadata`, so role alone offered a front door the backend refuses.
   const canAuthorMetadata = useCanAuthorMetadata();
+  // objectstack#36908 — New Package in Setup, or the "All metadata" area for an
+  // author who may not open Setup → Packages.
+  const newPackagePath = useNewPackageDoorPath();
   // objectui#5504 — a runtime deployed with `OS_CLOUD_URL=off` (the EE
   // deploy template's shipped default) mounts no marketplace at all. Home
   // used to recommend it first and error afterwards; that ORDERING was the
@@ -956,7 +950,8 @@ export function HomePage({ checklist }: HomePageProps = {}) {
                   {/* objectstack#26614 — on a deployment whose agent catalog
                     * is empty or absent, "Build an app" promises a build nothing
                     * here can start. There the chip says what it opens instead,
-                    * "New in Studio", and opens Studio's new-package flow; and
+                    * "New blank app", and opens New Package in Setup → Packages,
+                    * which lands in Studio on the new package (objectstack#36908); and
                     * since Studio is then the ONLY way to build, a session that
                     * may not author gets no chip rather than a dimmed one (the
                     * template chip beside it still carries the reason). With
@@ -970,9 +965,9 @@ export function HomePage({ checklist }: HomePageProps = {}) {
                   {aiStudioEnabled && aiResolved && !buildServed && canAuthorMetadata && (
                     <BuilderChip
                       icon={Hammer}
-                      label={t('home.build.inStudio', { defaultValue: 'New in Studio' })}
+                      label={t('home.build.inStudio', { defaultValue: 'New blank app' })}
                       tone="soft"
-                      onClick={() => navigate(STUDIO_NEW_PACKAGE_PATH)}
+                      onClick={() => navigate(newPackagePath)}
                       disabledReason={undefined}
                       reasonId={undefined}
                       testId="home-build-in-studio"

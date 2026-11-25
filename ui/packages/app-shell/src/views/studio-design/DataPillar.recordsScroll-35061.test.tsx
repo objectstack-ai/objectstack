@@ -80,6 +80,7 @@ vi.mock('@object-ui/react', async (importOriginal) => {
 // The source under test reaches a dynamic import of `@objectstack/lint`: its first
 // load is paid here, at collection, never inside a case's clock (`check:test-source-alias`).
 import '@objectstack/lint';
+import '@object-ui/plugin-detail';
 import { DataPillar } from './StudioDesignSurface';
 import { registerMetadataInspector } from '../metadata-admin/inspector-registry';
 import { ObjectFieldInspector } from '../metadata-admin/inspectors/ObjectFieldInspector';
@@ -199,7 +200,7 @@ describe('revealColumn (objectstack#35061)', () => {
 async function renderGrid() {
   render(
     <MemoryRouter initialEntries={['/studio/com.example.showcase/data']}>
-      <DataPillar packageId="com.example.showcase" />
+      <DataPillar objectName={OBJECT} packageId="com.example.showcase" />
     </MemoryRouter>,
   );
   await waitFor(() => expect(document.querySelector('thead th[data-column-key="title"]')).not.toBeNull(), {

@@ -40,6 +40,9 @@
  * reader and an automation harness compute.
  */
 
+// Paid at collection, not inside a case's clock (check:test-source-alias).
+import '@objectstack/lint';
+import '@object-ui/plugin-detail';
 import '@testing-library/jest-dom/vitest';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
@@ -125,6 +128,7 @@ async function renderSurface() {
   render(
     <MemoryRouter initialEntries={['/studio/app.a/interfaces']}>
       <Routes>
+        <Route path="/studio/:packageId/metadata/*" element={<StudioDesignSurface area="metadata" />} />
         <Route path="/studio/:packageId/:tab" element={<StudioDesignSurface />} />
       </Routes>
     </MemoryRouter>,

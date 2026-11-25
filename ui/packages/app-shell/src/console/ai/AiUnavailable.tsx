@@ -15,8 +15,9 @@
  * reach the AI service"; only the latter offers a retry. Either way there is a
  * way home, so the route never dead-ends. Where AI is simply not enabled,
  * Studio is the other way to build, so a session that may author is offered
- * Studio's new-package flow beside it: the same entry, under the same label
- * and on the same terms, as Home's "New in Studio" chip (an admin, on a
+ * the new-package flow beside it (Setup → Packages with New Package open,
+ * which lands in Studio on the new package): the same entry, under the same label
+ * and on the same terms, as Home's "New blank app" chip (an admin, on a
  * runtime that offers authoring, holding the authoring capability).
  */
 
@@ -24,8 +25,9 @@ import { Link } from 'react-router-dom';
 import { useWorkspaceAdminStatus } from '@object-ui/auth';
 import { Button, Empty, EmptyDescription, EmptyTitle } from '@object-ui/components';
 import { useCanAuthorMetadata } from '../../hooks/useCanAuthorMetadata.js';
+import { usePhoneViewport } from '../../hooks/usePhoneViewport.js';
 import { isAiStudioEnabled } from '../../runtime-config.js';
-import { STUDIO_NEW_PACKAGE_PATH } from '../../views/studio-design/studioNewPackage.js';
+import { useNewPackageDoorPath } from '../../hooks/useNewPackageDoorPath.js';
 
 export function AiUnavailable({
   hasError,
@@ -41,7 +43,14 @@ export function AiUnavailable({
 }) {
   const { isAdmin } = useWorkspaceAdminStatus();
   const canAuthorMetadata = useCanAuthorMetadata();
+  // objectstack#36908 — New Package in Setup, or the "All metadata" area for an
+  // author who may not open Setup → Packages.
+  const newPackagePath = useNewPackageDoorPath();
   const offerStudio = !hasError && isAdmin && isAiStudioEnabled() && canAuthorMetadata;
+  // The way home names where it goes: a phone's Home is its app list; from
+  // 768 px up the home page is retired (objectstack#36732) and `onHome` opens
+  // an app's start page, named in the app pill's words (objectstack#37163).
+  const phone = usePhoneViewport();
   return (
     <div className="flex flex-1 items-center justify-center p-6" data-testid="ai-unavailable">
       <Empty>
@@ -67,13 +76,15 @@ export function AiUnavailable({
           )}
           {offerStudio && (
             <Button variant="outline" asChild>
-              <Link to={STUDIO_NEW_PACKAGE_PATH} data-testid="ai-unavailable-studio">
-                {t('home.build.inStudio', { defaultValue: 'New in Studio' })}
+              <Link to={newPackagePath} data-testid="ai-unavailable-studio">
+                {t('home.build.inStudio', { defaultValue: 'New blank app' })}
               </Link>
             </Button>
           )}
           <Button onClick={onHome} data-testid="ai-unavailable-home">
-            {t('console.ai.unavailableHome', { defaultValue: 'Back to home' })}
+            {phone
+              ? t('console.ai.unavailableHome', { defaultValue: 'Back to home' })
+              : t('layout.appSwitcher.backToHome', { defaultValue: 'Back to app start page' })}
           </Button>
         </div>
       </Empty>

@@ -51,7 +51,7 @@ import React, { forwardRef, useMemo } from 'react';
 import { ComponentRegistry, isActionSwitchedOff } from '@object-ui/core';
 import type { UIActionSchema, ActionBarSchema, ActionComponent } from '@object-ui/types';
 import { ACTION_LOCATIONS, actionRendersAt } from '@object-ui/types';
-import { useCondition, toPredicateInput, useCapabilityGate, useConfigBagEvaluator } from '@object-ui/react';
+import { useCondition, toPredicateInput, useCapabilityGate, useConfigBagEvaluator, useDrawsAction } from '@object-ui/react';
 import { useObjectTranslation } from '@object-ui/i18n';
 import { cn } from '../../lib/utils';
 import { useIsMobile } from '../../hooks/use-mobile';
@@ -128,6 +128,9 @@ const ActionBarRenderer = forwardRef<HTMLDivElement, { schema: ActionBarSchema; 
     const isMobile = useIsMobile();
     // [ADR-0066 D4 / framework#3923] Shared capability gate — see below.
     const mayInvoke = useCapabilityGate();
+    // [ADR-0160 D7] An `ask_ai` action is drawn only where the provider has an
+    // in-app assistant to hand its record to.
+    const drawsAction = useDrawsAction();
     // The `SchemaRenderer` memo's `properties` evaluation, for the members this
     // bar draws itself (objectui#10290) — see `renderMember` below.
     const evaluateBag = useConfigBagEvaluator();
@@ -149,7 +152,7 @@ const ActionBarRenderer = forwardRef<HTMLDivElement, { schema: ActionBarSchema; 
       // capabilities fail OPEN (see `useCapabilityGate`).
       // [objectstack#27504] …and an action this installation switched off is
       // not offered either: the served activation state, beside the same gate.
-      const permitted = actions.filter(a => mayInvoke((a as any)?.requiredPermissions) && !isActionSwitchedOff(a));
+      const permitted = actions.filter(a => mayInvoke((a as any)?.requiredPermissions) && !isActionSwitchedOff(a) && drawsAction(a));
       // Placement is `actionRendersAt`'s call, not ours (objectui#3142): an
       // action renders here only if it DECLARES this location. This bar used
       // to show a locationless action at every location, which is how an
@@ -192,7 +195,7 @@ const ActionBarRenderer = forwardRef<HTMLDivElement, { schema: ActionBarSchema; 
         });
       }
       return deduped;
-    }, [schema.actions, schema.location, mayInvoke]);
+    }, [schema.actions, schema.location, mayInvoke, drawsAction]);
 
     // System actions: always go into the overflow menu, deduped by name,
     // never filtered by location (they're chrome, not business logic).

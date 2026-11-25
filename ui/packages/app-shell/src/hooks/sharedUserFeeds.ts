@@ -101,7 +101,7 @@
  * @module
  */
 import { useEffect, useMemo, useRef, useSyncExternalStore } from 'react';
-import { useAuth } from '@object-ui/auth';
+import { createAuthenticatedFetch, useAuth } from '@object-ui/auth';
 import { usePermissions } from '@object-ui/permissions';
 import { errorCodeIs } from '@object-ui/types';
 // The refused-read verdict the record activity panel reads (objectui#11195),
@@ -121,6 +121,11 @@ import { __resetHiddenTabClock, isPollingSuspended } from './hiddenTabPollStop.j
 import type { ActivityItem } from '../layout/ActivityFeed.js';
 import { activityRowToActivityItem } from '../layout/activityItemType.js';
 import type { InboxNotification } from '../layout/inboxGrouping.js';
+
+/** The console's authenticated fetch: the stored bearer token beside the session cookie. */
+function authFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+  return createAuthenticatedFetch()(input, init);
+}
 
 /**
  * Approvals poll cadence. Polling is the FALLBACK of a push channel
@@ -1024,7 +1029,7 @@ export async function fetchPendingApprovalPage(
   });
   let res: Response;
   try {
-    res = await fetch(`${serverUrl}/api/v1/approvals/requests?${qs}`, {
+    res = await authFetch(`${serverUrl}/api/v1/approvals/requests?${qs}`, {
       credentials: 'include',
       // Bearer too — see utils/authToken (#2548 split-origin fix).
       headers: bearerAuthHeaders(),

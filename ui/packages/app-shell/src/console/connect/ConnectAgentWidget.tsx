@@ -87,7 +87,7 @@ import {
   AlertCircle,
   Sparkles,
 } from 'lucide-react';
-import { TokenStorage } from '@object-ui/auth';
+import { createAuthenticatedFetch, TokenStorage } from '@object-ui/auth';
 import { formatDateTime, useObjectTranslation } from '@object-ui/i18n';
 import { ComponentRegistry } from '@object-ui/core';
 import { notifyDataChanged } from '@object-ui/react';
@@ -103,6 +103,11 @@ import { isPublicHttpsAddress } from './deploymentReach.js';
 import { AuthorizedAccessList } from './AuthorizedAccessList.js';
 import { DeveloperNamespaceGate } from './DeveloperNamespaceGate.js';
 import { useConnectedAccess, type ConnectedEntry } from './connectedAccess.js';
+
+/** The console's authenticated fetch: the stored bearer token beside the session cookie. */
+function authFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+  return createAuthenticatedFetch()(input, init);
+}
 
 const SERVER_URL = (import.meta.env.VITE_SERVER_URL || '').replace(/\/$/, '');
 
@@ -295,7 +300,7 @@ function ConnectAgentBody() {
   useEffect(() => {
     (async () => {
       try {
-        const res = await fetch(`${SERVER_URL}/api/v1/discovery`, { credentials: 'include' });
+        const res = await authFetch(`${SERVER_URL}/api/v1/discovery`, { credentials: 'include' });
         const json = await res.json().catch(() => ({}));
         const routes = (json?.data ?? json)?.routes ?? {};
         setMcpUrl(typeof routes.mcp === 'string' ? absoluteUrl(routes.mcp) : null);
@@ -338,7 +343,7 @@ function ConnectAgentBody() {
     setMinting(true);
     setMintError(null);
     try {
-      const res = await fetch(`${SERVER_URL}/api/v1/keys`, {
+      const res = await authFetch(`${SERVER_URL}/api/v1/keys`, {
         method: 'POST',
         credentials: 'include',
         headers: withEnvAuth({ 'content-type': 'application/json' }),

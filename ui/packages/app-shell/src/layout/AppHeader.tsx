@@ -299,8 +299,10 @@ export function AppBarCrumbTrail({
  * (44 px below `md`, a phone's touch target) holding a 24 px tile on
  * `--primary` with the stack glyph, or the deployment's logo. Inside an app
  * the bar below `sm` has no room for it beside 44 px controls, so it is not
- * drawn there: the app switcher's 「Back to home」 and the drawer's 「All apps」
- * go home (objectstack#29075). Named 「PRODUCT home」; `title` keeps the product's name.
+ * drawn there: the phone's app-list sheet behind the app pill and the drawer's
+ * 「All apps」 go home (objectstack#29075). Named 「PRODUCT home」 on a phone and
+ * 「Back to app start page」 from 768 px up (objectstack#37163); `title` keeps
+ * the product's name.
  *
  * `homePath`, not a literal `/home` (objectui#7256): on a deployment that
  * DECLARES a landing this is the declared one, so the mark and the post-login
@@ -723,12 +725,21 @@ export function AppHeader({
             `/` rule follows it, so the bar reads 「PRODUCT / APP」. The rule
             is drawn, not typed: it carries no text, and the `/` separators
             the crumbs after the pill use stay theirs alone. */}
+        {/* Its accessible name says where it goes: 「PRODUCT home」 on a phone,
+            whose Home is its app list; from 768 px up, where the home page is
+            retired (objectstack#36732), 「Back to app start page」, the app
+            pill's words for the same place (objectstack#37163). The product's
+            name stays its tooltip. */}
         <ProductHomeMark
           homePath={homePath}
-          label={t('layout.appSwitcher.productHome', {
-            defaultValue: '{{product}} home',
-            product: getProductName(),
-          })}
+          label={
+            phone
+              ? t('layout.appSwitcher.productHome', {
+                  defaultValue: '{{product}} home',
+                  product: getProductName(),
+                })
+              : t('layout.appSwitcher.backToHome', { defaultValue: 'Back to app start page' })
+          }
           className={isApp ? 'max-sm:hidden' : undefined}
         />
         {isApp && (

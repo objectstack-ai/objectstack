@@ -28,6 +28,7 @@ import '@testing-library/jest-dom/vitest';
 // The surface's reach loads `@objectstack/lint` lazily; pay that load during
 // collection, not inside a case's clocked window (`check:test-source-alias`).
 import '@objectstack/lint';
+import '@object-ui/plugin-detail';
 import * as React from 'react';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, render, screen, waitFor } from '@testing-library/react';
@@ -195,8 +196,10 @@ afterEach(() => {
 
 function renderAt(packageId: string) {
   return render(
-    <MemoryRouter initialEntries={[`/studio/${packageId}/data`]}>
+    // objectstack#36904 — an object designer's header, on its own address.
+    <MemoryRouter initialEntries={[`/studio/${packageId}/metadata/object/sys_probe`]}>
       <Routes>
+        <Route path="/studio/:packageId/metadata/*" element={<StudioDesignSurface area="metadata" />} />
         <Route path="/studio/:packageId/:tab" element={<StudioDesignSurface />} />
       </Routes>
     </MemoryRouter>,

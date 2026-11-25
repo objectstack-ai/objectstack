@@ -110,7 +110,7 @@ beforeEach(() => {
   vi.stubGlobal(
     'fetch',
     vi.fn(async (url: unknown) => ({
-      ok: true,
+      headers: new Headers(), ok: true,
       status: 200,
       json: async () => (String(url).endsWith('/api/v1/packages') ? PACKAGES : { data: [] }),
     })),
@@ -162,6 +162,6 @@ describe('the folded list menu leads with Object settings (objectstack#36487)', 
 
     confirm.mockReturnValue(true);
     act(() => entry.onClick());
-    expect(where()).toBe('/studio/com.example.my_base/data?surface=object:account');
+    expect(where()).toBe('/studio/com.example.my_base/metadata/object/account');
   });
 });

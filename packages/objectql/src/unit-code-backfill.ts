@@ -55,7 +55,16 @@
  *   sees each spelling before writing.
  * - An apply run counts first, read-only, and refuses before any write while a
  *   non-blank value that is no unit code has no mapping entry, naming each one. So one
- *   apply run converts the whole field or nothing, and a re-run writes nothing.
+ *   apply run converts the whole field or nothing, and a re-run writes nothing —
+ *   over the rows it examines. A walk the `maxRecords` cap cuts short judges
+ *   only those, as the currency backfill's does: an apply run still writes the
+ *   rows it examined, and the report says that the rows past the cap were not
+ *   judged, so any of them may hold a value with no mapping entry. A re-run
+ *   without the cap finishes, and rewrites nothing already converted.
+ * - A mapping entry whose key a row stores as a unit code rewrites nothing
+ *   there (above). Where no row used such an entry, the report names it
+ *   (`unusedEntry` on the value), so an operator's entry never goes unused
+ *   without a word.
  *
  * The walk reads each row and tallies and tests its value here, in the
  * application, never in a `GROUP BY` or an anti-join on `sys_unit`: matching is
@@ -103,6 +112,12 @@ export interface UnitCodeBackfillValue {
    */
   disposition: 'member' | 'retired' | 'other-dimension' | 'mapped' | 'unmatched';
   code?: string;
+  /**
+   * On a value stored as a unit code (`member`, `retired`, `other-dimension`)
+   * that is also a mapping key no row used: the code that entry names, never
+   * written, since a unit code is never rewritten.
+   */
+  unusedEntry?: string;
 }
 
 /** The counts of one organization's rows (`organizationId` null: rows that name none). */
@@ -487,6 +502,11 @@ async function walkUnitCodes(
     }
   }
   if (walk.truncated) report.truncated = true;
+  // A mapping key stored as a unit code, which no row was rewritten from: named, never silently unused.
+  const used = new Set([...values.values()].filter((v) => v.disposition === 'mapped').map((v) => v.value));
+  for (const v of values.values()) {
+    if (v.disposition !== 'mapped' && v.disposition !== 'unmatched' && has(v.value) && !used.has(v.value)) v.unusedEntry = mapping[v.value];
+  }
   report.values = [...values.values()].sort((a, b) => (a.value < b.value ? -1 : a.value > b.value ? 1 : 0));
   report.organizations = [...organizations.values()].sort((a, b) =>
     a.organizationId === b.organizationId ? 0 : a.organizationId === null ? 1 : b.organizationId === null ? -1 : a.organizationId < b.organizationId ? -1 : 1,
@@ -573,13 +593,28 @@ export function formatUnitCodeBackfillReport(report: UnitCodeBackfillReport): st
     lines.push(`✗ ${report.unmatched} row(s) hold a value with no mapping entry: an apply run is refused until each value is ` +
       'mapped or those rows are corrected.');
   }
+  const unused = new Map(report.values.filter((v) => v.unusedEntry !== undefined).map((v) => [v.value, v.unusedEntry!]));
+  for (const [key, code] of unused) {
+    lines.push(`⚠ The mapping entry ${JSON.stringify(key)} → ${code} was not used: the rows holding ${JSON.stringify(key)} store ` +
+      'it as a unit code, which is never rewritten.');
+  }
   if (report.failures.length > 0) {
     lines.push(`✗ ${report.failures.length} row(s) could not be written:`);
     for (const f of report.failures.slice(0, MAX_SAMPLE_IDS)) lines.push(`  • ${f.recordId}: ${f.error}`);
     if (report.failures.length > MAX_SAMPLE_IDS) lines.push(`  … and ${report.failures.length - MAX_SAMPLE_IDS} more`);
     lines.push('Re-running is safe: a row holding a unit code is never rewritten.');
   }
-  if (report.truncated) lines.push('⚠ Walk incomplete — some rows were not examined; re-run without the cap to finish.');
+  if (report.truncated) {
+    lines.push('⚠ Walk incomplete — some rows were not examined; re-run without the cap to finish.');
+    // The counts above, the unmatched check included, saw only the rows examined.
+    lines.push('  The rows past the cap were not judged: any of them may hold a value with no mapping entry, which this run ' +
+      (report.applied ? 'neither named nor refused, and it wrote the rows examined only.' : 'does not name, and an apply run would not refuse.'));
+    // An unscoped run judged "one organization" from the rows it examined, as the currency backfill's report says.
+    if (report.organizationId === null && !report.allOrganizations) {
+      lines.push('  The organization check saw only the rows examined: rows past the cap may belong to another ' +
+        'organization, so name the organization (one run per organization) before writing.');
+    }
+  }
   if (!report.applied && report.mapped > 0) lines.push('Dry run — no row or table was written. Re-run with --apply to convert.');
   return lines;
 }

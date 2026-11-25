@@ -155,6 +155,7 @@ beforeEach(() => {
   fetchMock = vi.fn(async (url: string) => {
     if (String(url).endsWith('/api/v1/packages')) {
       return {
+        headers: new Headers(),
         ok: true,
         status: 200,
         json: async () => ({
@@ -296,8 +297,9 @@ describe("on a package, the palette lists the left menu and the package's items 
   }
 
   it('opens an item through the page, at the address the one builder gives', async () => {
+    // objectstack#36904 — the object designer's own address.
     expect(await openedBy(`studio-item object ${PKG} crm_account`)).toBe(
-      '/studio/com.acme.crm/data?surface=object%3Acrm_account',
+      '/studio/com.acme.crm/metadata/object/crm_account?package=com.acme.crm',
     );
     expect(await openedBy(`studio-item permission ${PKG} sales_rep`)).toBe(
       '/studio/com.acme.crm/metadata/permission/sales_rep?package=com.acme.crm',
@@ -312,7 +314,7 @@ describe("on a package, the palette lists the left menu and the package's items 
 
   it('opens a menu entry where the menu entry goes, and the palette closes', async () => {
     expect(await openedBy('studio-entry type:hook')).toBe('/studio/com.acme.crm/metadata/hook?package=com.acme.crm');
-    expect(await openedBy('studio-entry orgFlows')).toBe('/studio/~org/automations');
+    expect(await openedBy('studio-entry orgFlows')).toBe('/studio/~org/metadata/flow?source=runtime');
     expect(await openedBy('studio-entry owd')).toBe('/studio/com.acme.crm/owd');
     expect(await openedBy('studio-entry diagnostics')).toBe('/studio/com.acme.crm/metadata/_diagnostics');
 
