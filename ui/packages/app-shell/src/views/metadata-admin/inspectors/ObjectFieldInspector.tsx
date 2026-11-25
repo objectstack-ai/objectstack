@@ -526,7 +526,7 @@ function offersReferenceNameVisible(type: string): boolean {
 
 /**
  * The `deleteBehavior` values the field panel offers on `type`: the rows the
- * generic `field` form draws for the key (`field.form.ts`), so the two
+ * generic `field` form draws for the key (`field.metadata-form.ts`), so the two
  * authoring surfaces agree. All three on a `lookup`, and on a `user` field,
  * where a declared value takes effect when the user is deleted (objectstack#29253)
  * and declaring nothing keeps the field out of the delete walk. Only

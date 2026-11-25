@@ -1147,7 +1147,7 @@ describe('#19403 round 10 — the verdicts, on the live bundles', () => {
       // `bodyExtra` — authored in all three locales.
       // 623 since #20301:
       // the list view's own `tabs` is a retired key, and its form repeater left
-      // `view.form.ts` with it — the repeater's own label and its nine row labels
+      // `view.metadata-form.ts` with it — the repeater's own label and its nine row labels
       // (`name`, `label`, `icon`, `view`, `filter`, `order`, `pinned`,
       // `isDefault`, `visible`), ten leaves authored in all three locales, out of
       // the catalog.

@@ -5653,7 +5653,7 @@
         {
           "clause": "Studio's dataset form offers Synonyms and Description on the measure row, with the help text that states the limits",
           "oracle": "dom",
-          "verify": "the measure row shows Synonyms holding 'bill count' and '账单数', and Description holding the sentence; the Synonyms help text says 'At most 20, each at most 60 characters'. Studio draws them in DatasetDefaultInspector's row Advanced fold through DatasetMemberVocabulary (ui/packages/app-shell/src/views/metadata-admin/inspectors/DatasetMemberVocabulary.tsx, data-testid dataset-measures-synonyms / dataset-measures-description), which takes its label and help copy from the spec form (packages/spec/src/ui/dataset.form.ts#datasetForm)",
+          "verify": "the measure row shows Synonyms holding 'bill count' and '账单数', and Description holding the sentence; the Synonyms help text says 'At most 20, each at most 60 characters'. Studio draws them in DatasetDefaultInspector's row Advanced fold through DatasetMemberVocabulary (ui/packages/app-shell/src/views/metadata-admin/inspectors/DatasetMemberVocabulary.tsx, data-testid dataset-measures-synonyms / dataset-measures-description), which takes its label and help copy from the spec form (packages/spec/src/ui/dataset.metadata-form.ts#datasetForm)",
           "evidence": "a screenshot of the measure row"
         }
       ],
@@ -5673,7 +5673,7 @@
         "packages/spec/src/ui/dataset.zod.ts#normalizeDatasetTerm",
         "packages/spec/src/ui/dataset.zod.ts#DatasetMemberSynonymsSchema",
         "packages/spec/src/ui/dataset.zod.ts#checkDatasetVocabulary",
-        "packages/spec/src/ui/dataset.form.ts#datasetForm"
+        "packages/spec/src/ui/dataset.metadata-form.ts#datasetForm"
       ],
       "history": [
         {

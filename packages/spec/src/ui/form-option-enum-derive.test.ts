@@ -9,7 +9,7 @@
  * which `FormSelectOptionSchema` reuses by reference. So an enum member that
  * carries a hyphen or a capital — `object.managedBy`'s `system-data`,
  * `action.openIn`'s `new-tab`, `action.execution`'s `perRecord` — cannot be
- * written as an inline option at all, and `defineForm` throws at module load
+ * written as an inline option at all, and `defineMetadataForm` throws at module load
  * when an author tries. The bound stays. The rule, as ruling 乙 records it: an
  * enum-typed metadata-form row MAY carry an inline `options` list (human
  * labels, a deliberate subset); a row whose members cannot be spelled as
@@ -18,7 +18,7 @@
  *
  * What this file pins is where an author meets that rule:
  *
- * 1. **The wall says what to do.** `defineForm`'s refusal of an unspellable
+ * 1. **The wall says what to do.** `defineMetadataForm`'s refusal of an unspellable
  *    value still carries the grammar message, and names the derive path —
  *    scoped to a row whose members cannot be spelled — as its remedy. The
  *    firing control reads TODAY's message live — the object face raises the
@@ -45,7 +45,7 @@ import { z } from 'zod';
 
 import { SelectOptionSchema } from '../data/field.zod';
 import { getMetadataTypeSchema } from '../kernel/metadata-type-schemas';
-import { defineForm, FormFieldSchema, FormSelectOptionSchema } from './view.zod';
+import { defineMetadataForm, FormFieldSchema, FormSelectOptionSchema } from './view.zod';
 
 type Issue = { code: string; path: PropertyKey[]; message: string; errors?: Issue[][] };
 
@@ -92,7 +92,7 @@ function statesBlanketOmitRule(message: string): boolean {
 
 /** Build a one-row metadata form whose row lists a single inline option. */
 function formWithOption(value: string, extra: Record<string, unknown> = {}) {
-  return () => defineForm({
+  return () => defineMetadataForm({
     schemaId: 'action',
     type: 'simple',
     sections: [{ label: 'Behavior', fields: [{ field: 'openIn', options: [{ label: 'Option', value, ...extra }] }] }],
@@ -101,14 +101,14 @@ function formWithOption(value: string, extra: Record<string, unknown> = {}) {
 
 /** Build a one-row metadata form over `schemaId` with the given row. */
 function formWithRow(schemaId: string, row: Record<string, unknown>) {
-  return () => defineForm({
+  return () => defineMetadataForm({
     schemaId,
     type: 'simple',
     sections: [{ label: 'Section', fields: [row as never] }],
   });
 }
 
-/** This file's own name — the module every `defineForm(...)` call below is made from. */
+/** This file's own name — the module every `defineMetadataForm(...)` call below is made from. */
 const THIS_MODULE = 'form-option-enum-derive.test.ts';
 
 /**
@@ -120,7 +120,7 @@ const THIS_MODULE = 'form-option-enum-derive.test.ts';
  * `toBeInstanceOf(z.ZodError)` passes on it all the same. A string `stack` is
  * not enough either — zod builds `parsed.error` and a bare
  * `new z.ZodRealError(...)` with no frame at all — so the stack must also name
- * the module that called `defineForm`.
+ * the module that called `defineMetadataForm`.
  */
 function refusal(build: () => unknown): z.ZodError {
   let thrown: unknown;
@@ -129,14 +129,14 @@ function refusal(build: () => unknown): z.ZodError {
   } catch (e) {
     thrown = e;
   }
-  expect(thrown, 'expected defineForm to REFUSE at module load').toBeInstanceOf(z.ZodError);
+  expect(thrown, 'expected defineMetadataForm to REFUSE at module load').toBeInstanceOf(z.ZodError);
   expect(thrown).toBeInstanceOf(Error);
   expect(typeof (thrown as Error).stack).toBe('string');
-  expect((thrown as Error).stack, 'the stack names no frame in the module that called defineForm').toContain(THIS_MODULE);
+  expect((thrown as Error).stack, 'the stack names no frame in the module that called defineMetadataForm').toContain(THIS_MODULE);
   return thrown as z.ZodError;
 }
 
-/** The issue `defineForm` raised at the row's option value, or a loud failure. */
+/** The issue `defineMetadataForm` raised at the row's option value, or a loud failure. */
 function optionValueIssue(build: () => unknown, index = 0) {
   const thrown = refusal(build);
   const hit = leaves(thrown.issues as unknown as Issue[])
@@ -179,7 +179,7 @@ const UNSPELLABLE = [
   { value: 'x', code: 'too_small', why: 'a single character' },
 ] as const;
 
-describe('defineForm: the refusal of an unspellable option value names the derive path', () => {
+describe('defineMetadataForm: the refusal of an unspellable option value names the derive path', () => {
   it.each(UNSPELLABLE)('`$value` ($why) is refused with the remedy', ({ value, code }) => {
     const issue = optionValueIssue(formWithOption(value));
     expect(issue.code).toBe(code);
@@ -201,7 +201,7 @@ describe('defineForm: the refusal of an unspellable option value names the deriv
   it('firing control — both predicates are RED on today\'s message', () => {
     // The object face raises the grammar issue through the very property schema
     // the form face shares, and carries no remedy: this is the message
-    // `defineForm` threw before the ruling was executed.
+    // `defineMetadataForm` threw before the ruling was executed.
     for (const { value } of UNSPELLABLE) {
       const today = objectFaceMessage(value);
       expect(namesDerivePath(today), today).toBe(false);
@@ -213,7 +213,7 @@ describe('defineForm: the refusal of an unspellable option value names the deriv
     // The two spellings this PR first shipped, held as fixtures ONLY to prove
     // `statesBlanketOmitRule` can fire — a predicate that is never true would
     // make every "states no blanket rule" assertion in this file vacuous.
-    expect(statesBlanketOmitRule('On a metadata form (schema-bound, built by `defineForm`), a row whose key is a spec enum omits `options`: …')).toBe(true);
+    expect(statesBlanketOmitRule('On a metadata form (schema-bound, built by `defineMetadataForm`), a row whose key is a spec enum omits `options`: …')).toBe(true);
     expect(statesBlanketOmitRule('When this row edits a spec enum, omit `options`: …')).toBe(true);
   });
 
@@ -231,7 +231,7 @@ describe('defineForm: the refusal of an unspellable option value names the deriv
   });
 
   it('a nested row (composite `fields`) gets the same remedy', () => {
-    const thrown = refusal(() => defineForm({
+    const thrown = refusal(() => defineMetadataForm({
       schemaId: 'action',
       type: 'simple',
       sections: [{ label: 'Behavior', fields: [{ field: 'outer', fields: [{ field: 'inner', options: [{ label: 'New tab', value: 'new-tab' }] }] }] }],
@@ -360,7 +360,7 @@ describe('the verdict did not move — the bound stays', () => {
   });
 
   it('a spellable inline option still builds', () => {
-    const form = defineForm({
+    const form = defineMetadataForm({
       schemaId: 'action',
       type: 'simple',
       sections: [{ label: 'Behavior', fields: [{ field: 'mode', options: [{ label: 'Custom', value: 'custom' }] }] }],
@@ -377,7 +377,7 @@ describe('the remedy is scoped to a grammar refusal of an inline option value', 
   });
 
   it('an unrelated refusal on the same form is answered without it', () => {
-    const thrown = refusal(() => defineForm({ schemaId: 'action', type: 'no_such_layout' as never, sections: [] }));
+    const thrown = refusal(() => defineMetadataForm({ schemaId: 'action', type: 'no_such_layout' as never, sections: [] }));
     for (const issue of leaves(thrown.issues as unknown as Issue[])) {
       expect(namesDerivePath(issue.message), issue.message).toBe(false);
     }
@@ -391,7 +391,7 @@ describe('the form field\'s `options` describe states ruling 乙\'s rule', () =>
   const text = served.properties?.options?.description ?? '';
 
   it('permits an inline list on an enum-typed metadata-form row, for human labels or a deliberate subset', () => {
-    expect(text).toContain('`defineForm`');
+    expect(text).toContain('`defineMetadataForm`');
     expect(text).toMatch(/enum-typed row may list its members/);
     expect(text).toContain('human labels');
     expect(text).toContain('deliberate subset');

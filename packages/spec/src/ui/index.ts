@@ -41,13 +41,13 @@ export * from './assembled-views.zod';
 export * from './dashboard.zod';
 export * from './report.zod';
 export * from './dataset.zod';
-export { reportForm } from './report.form';
-export { viewForm } from './view.form';
-export { appForm } from './app.form';
-export { dashboardForm } from './dashboard.form';
-export { datasetForm } from './dataset.form';
-export { actionForm } from './action.form';
-export { pageForm } from './page.form';
+export { reportForm } from './report.metadata-form';
+export { viewForm } from './view.metadata-form';
+export { appForm } from './app.metadata-form';
+export { dashboardForm } from './dashboard.metadata-form';
+export { datasetForm } from './dataset.metadata-form';
+export { actionForm } from './action.metadata-form';
+export { pageForm } from './page.metadata-form';
 export * from './action.zod';
 // [#24814] The CLOSED scope of an action's copy — `confirmText`,
 // `successMessage`, `errorMessage` — as the console's runner binds it: the

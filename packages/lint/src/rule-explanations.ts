@@ -1200,7 +1200,7 @@ const VISIBILITY_ROOT_MISLAYERED_EXPLANATION: RuleExplanation = {
   paragraphs: [
     'ADR-0089 D3 binds a different root on each layer. A runtime view or page surface binds the live ' +
       'record as `record`, plus `current_user` (and page state as `page.VAR` on a page component); a ' +
-      'metadata-editing form — a `*.form.ts` module or a schema-bound form view — binds the row under ' +
+      'metadata-editing form — a `*.metadata-form.ts` module or a schema-bound form view — binds the row under ' +
       'edit as `data`.',
     'A predicate rooted at the other layer\'s namespace never matches, and the element renders ' +
       'unconditionally. The rule is a warning rather than an error because the root is at least a ' +

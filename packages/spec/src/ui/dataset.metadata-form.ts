@@ -1,6 +1,6 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
-import { defineForm } from './view.zod';
+import { defineMetadataForm } from './view.zod';
 
 /**
  * Form layout for the Dataset metadata editor (ADR-0021 analytics semantic layer).
@@ -18,7 +18,7 @@ import { defineForm } from './view.zod';
  * base object) so a business user can author a dataset without memorising
  * machine names. Mirrors {@link reportForm} — the sibling analytics editor.
  */
-export const datasetForm = defineForm({
+export const datasetForm = defineMetadataForm({
   schemaId: 'dataset',
   type: 'simple',
   sections: [

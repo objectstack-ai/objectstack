@@ -1,6 +1,6 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
-import { defineForm } from '../ui/view.zod';
+import { defineMetadataForm } from '../ui/view.zod';
 
 /**
  * Tool Metadata Form
@@ -15,7 +15,7 @@ import { defineForm } from '../ui/view.zod';
  * compliance — the same "advertising the failure mode" objectui#2962 removed
  * from the sharing-criteria builder.
  */
-export const toolForm = defineForm({
+export const toolForm = defineMetadataForm({
   schemaId: 'tool',
   type: 'simple',
   sections: [

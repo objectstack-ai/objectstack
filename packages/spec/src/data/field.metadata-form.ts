@@ -1,13 +1,13 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
-import { defineForm } from '../ui/view.zod';
+import { defineMetadataForm } from '../ui/view.zod';
 
 /**
  * Field Metadata Form
  * 
  * Form layout for creating/editing field metadata definitions.
  */
-export const fieldForm = defineForm({
+export const fieldForm = defineMetadataForm({
   schemaId: 'field',
   type: 'simple',
   sections: [
@@ -76,7 +76,7 @@ export const fieldForm = defineForm({
         { field: 'min', visibleWhen: "data.type == 'number' || data.type == 'currency'", helpText: 'Minimum value' },
         { field: 'max', visibleWhen: "data.type == 'number' || data.type == 'currency'", helpText: 'Maximum value' },
         // #19992 — the help text follows the key's describe ("Total digits")
-        // and the object designer's quick-add row (`object.form.ts`): the old
+        // and the object designer's quick-add row (`object.metadata-form.ts`): the old
         // "Decimal places (e.g., 2 for $10.50)" taught the one reading the
         // contract refuses. A currency's decimal places are its CLDR fraction
         // digits and are declared nowhere.
@@ -89,7 +89,7 @@ export const fieldForm = defineForm({
         // (the same `z.boolean().optional()` node, no default): the switch
         // writes nothing until toggled, so an untouched field stays unset and
         // the renderer decides. It reads off meanwhile, even where the renderer
-        // groups, and the help text says so in the words of the `object.form.ts`
+        // groups, and the help text says so in the words of the `object.metadata-form.ts`
         // `userActions` row. Gated like `scale`, a `number`-only hint.
         { field: 'useGrouping', visibleWhen: "data.type == 'number'", helpText: 'Digit grouping (thousands separators) in displayed values. Unset: the renderer decides; an untouched switch writes nothing, so it reads off even where the renderer groups. Off: never grouped, e.g. a year or an ID. On: always grouped.' },
         // `percentDisplay` is shown once it is enforced, the `useGrouping`
@@ -105,7 +105,7 @@ export const fieldForm = defineForm({
         ] },
         // #19332 G1b (ruling 5861442317, G1) — `currencyConfig` is a strict object
         // with two keys, and both members of its one enum are spellable option
-        // values, so it takes the `object.form.ts` `access` / `lifecycle` face: a
+        // values, so it takes the `object.metadata-form.ts` `access` / `lifecycle` face: a
         // composite whose sub-rows are DECLARED, so their labels and help text
         // reach the translation catalogs (a schema-derived sub-field never does).
         // The schema default (`dynamic`) is a placeholder the renderer never
@@ -133,12 +133,12 @@ export const fieldForm = defineForm({
         // Every `visibleWhen` below is a MEANINGFULNESS gate, not a parse gate:
         // `FieldSchema` accepts each key on any type, and each is mirrored from
         // the key's own contract text and from the same row in the object
-        // designer's quick-add grid (`object.form.ts`), so the two surfaces
+        // designer's quick-add grid (`object.metadata-form.ts`), so the two surfaces
         // cannot disagree about when a knob applies.
         { field: 'step', visibleWhen: "data.type == 'slider'", helpText: 'Step increment for the slider (default 1). Renderer-only: the write path does not reject a value off the step grid.' },
         { field: 'maxSize', visibleWhen: "data.type in ['image','file','avatar','video','audio']", helpText: 'Maximum permitted file size in BYTES (positive integer). Enforced server-side on write against the stored file size — a file with no recorded size cannot fail it.' },
         // #19332 G1b — `accept` is `string[]`, not a union, so it takes the
-        // `app.form.ts` `requiredPermissions` face (`string-tags`, a chip input
+        // `app.metadata-form.ts` `requiredPermissions` face (`string-tags`, a chip input
         // over `string[]`). Its gate is `maxSize`'s: both are checked by the same
         // server-side file-constraint pass, on the same five media types.
         { field: 'accept', widget: 'string-tags', visibleWhen: "data.type in ['image','file','avatar','video','audio']", helpText: 'Permitted upload types, as MIME types, type/* wildcards or .ext suffixes (e.g. image/*, .pdf). Offered to the file picker and re-checked server-side on write against the stored file. Unset: any type.' },
@@ -202,7 +202,7 @@ export const fieldForm = defineForm({
         // Reference field options
         { field: 'reference', widget: 'ref:object', visibleWhen: "data.type == 'lookup' || data.type == 'master_detail'", helpText: 'Referenced object name' },
         // Two declarations of one key, with disjoint `visibleWhen` (#11410) —
-        // the same split `object.form.ts` carries, and for the same reason:
+        // the same split `object.metadata-form.ts` carries, and for the same reason:
         // #9689 made `set_null` on a `master_detail` a parse-time rejection, so
         // one shared control offered a choice publish refuses.
         //
@@ -307,7 +307,7 @@ export const fieldForm = defineForm({
         // #19332 G1b (ruling 5861442317, G1) — the picker's two structured knobs.
         //
         // `lookupFilters` is the same key on the same node as the object
-        // designer's per-field row (`object.form.ts`, `fields.lookupFilters`), so
+        // designer's per-field row (`object.metadata-form.ts`, `fields.lookupFilters`), so
         // it copies that row: `json`, no inline `options` (`notIn` carries a
         // capital, which `FormSelectOptionSchema.value` cannot spell).
         //
@@ -327,7 +327,7 @@ export const fieldForm = defineForm({
         { field: 'dependsOn', widget: 'json', visibleWhen: "data.type in ['lookup','master_detail','select','multiselect','radio','checkboxes']", helpText: 'Fields on the same record this field\'s choices depend on: the form holds this field until each is set, and re-evaluates it when one changes. A lookup filters its candidates by them — a name filters the same-named field of the referenced object, {field, param} names a different one. On an option field list the parent field names; the per-option rule lives in each option\'s visibleWhen.' },
         { field: 'relatedListTitle', visibleWhen: "data.type in ['lookup','master_detail']", helpText: "Title for this relationship's related list on the parent's detail page." },
         // `relatedListColumns` is `string[]` by ruling (an object entry is
-        // refused at parse), so it takes `string-tags`, the `app.form.ts`
+        // refused at parse), so it takes `string-tags`, the `app.metadata-form.ts`
         // `requiredPermissions` face. A field picker is not offered: the names
         // are the CHILD object's (this field's own object), and no widget here
         // reads a catalog from the field draft.
@@ -344,7 +344,7 @@ export const fieldForm = defineForm({
         { field: 'inlineTitle', visibleWhen: "data.type == 'master_detail'", helpText: 'Title for the inline master-detail grid on the parent record.' },
         // #19332 (flight G2b of ruling record 5861442317) — the inline grid's
         // explicit columns, between the grid's title and its total and behind the
-        // same gate. A repeater with declared sub-rows, the `object.form.ts`
+        // same gate. A repeater with declared sub-rows, the `object.metadata-form.ts`
         // `fieldGroups` repeater's face, over a CURATED SUBSET of the twenty
         // keys `InlineGridColumnSchema` accepts; the reconciliation ledger
         // records the `subset` row and names what is left out and why.
@@ -473,7 +473,7 @@ export const fieldForm = defineForm({
         { field: 'searchable', colSpan: 1, helpText: 'Include in global search results' },
         { field: 'sortable', colSpan: 1, helpText: 'Allow sorting lists by this field' },
         // #19332 G1b — the three field-level predicates. Same keys, same node, as
-        // the object designer's per-field rows (`object.form.ts`,
+        // the object designer's per-field rows (`object.metadata-form.ts`,
         // `fields.visibleWhen` / `readonlyWhen` / `requiredWhen`), so they copy
         // that row: `type: 'code'`, `language: 'expression'`.
         { field: 'visibleWhen', type: 'code', language: 'expression', colSpan: 2, helpText: "CEL predicate over the record (e.g. record.type == 'invoice') — the form shows this field only while it is TRUE." },
@@ -483,7 +483,7 @@ export const fieldForm = defineForm({
         // object; the runtime FieldMasker enforces it on read AND export.
         { field: 'maskingRule', colSpan: 2, helpText: "Partial masking: preset ('phone', 'id_card', 'bank_account', 'email', 'name') or {\"keepHead\": n, \"keepTail\": m}. Masked for callers not holding this field's requiredPermissions" },
         // #19332 G1b — the capability gate `maskingRule` above already names.
-        // `string[]`, so the `app.form.ts` `requiredPermissions` face.
+        // `string[]`, so the `app.metadata-form.ts` `requiredPermissions` face.
         { field: 'requiredPermissions', widget: 'string-tags', colSpan: 2, helpText: "Capabilities (permission-set systemPermissions) a caller must hold — every one listed — to read or edit this field (ADR-0066 D3). Without them the value is masked on read (partially, when a maskingRule is set) and edits are denied. Empty or unset: no capability gate." },
         { field: 'internal', colSpan: 1, helpText: "Never return this field's value on the generic data path: the engine omits the key from find/findOne results and from the create and update response bodies, on the default projection and when a client names the field in ?select=. Storage, filtering and indexing are untouched." },
         // [#36290] The off switch is `fieldHistory` (no default); `trackHistory`

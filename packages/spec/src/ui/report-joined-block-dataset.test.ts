@@ -27,7 +27,7 @@ import { describe, expect, it } from 'vitest';
 import { getMetadataTypeSchema } from '../kernel/metadata-type-schemas';
 import { MIGRATIONS_BY_MAJOR, RETIRED_KEYS_BY_MAJOR } from '../migrations/registry';
 import { ObjectStackDefinitionSchema, defineStack } from '../stack.zod';
-import { reportForm } from './report.form';
+import { reportForm } from './report.metadata-form';
 import { JoinedReportBlockSchema, ReportSchema, defineReport } from './report.zod';
 
 const ENTRY_ID = 'ui-report-joined-block-dataset-required';

@@ -20,15 +20,15 @@ type Plugin = NonNullable<Options['esbuildPlugins']>[number];
  *  - `lazySchema(fn)` allocates a Proxy, defers `fn` to first use;
  *  - `strictObject(shape, …)` builds a closed zod object (construction only —
  *    the unknown-key error closure runs at parse time, not now);
- *  - `defineForm(cfg)` parses STATIC author-time data through `FormViewSchema`
+ *  - `defineMetadataForm(cfg)` parses STATIC author-time data through `FormViewSchema`
  *    — pure computation whose only observable effect is a throw on invalid
  *    static input, which this package's own build (`gen:schema` under
  *    OS_EAGER_SCHEMAS) and tests still exercise.
  */
-const PURE_CONSTRUCTORS: ReadonlySet<string> = new Set(['lazySchema', 'strictObject', 'defineForm']);
+const PURE_CONSTRUCTORS: ReadonlySet<string> = new Set(['lazySchema', 'strictObject', 'defineMetadataForm']);
 
 /** A file that never names a marked constructor is handed back untouched, unparsed. */
-const NAMES_A_PURE_CONSTRUCTOR = /\b(?:lazySchema|strictObject|defineForm)\b/;
+const NAMES_A_PURE_CONSTRUCTOR = /\b(?:lazySchema|strictObject|defineMetadataForm)\b/;
 
 const PURE_ANNOTATION = '/* @__PURE__ */ ';
 

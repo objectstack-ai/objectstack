@@ -390,7 +390,7 @@ export const SelectOptionSchema = lazySchema(() => strictObject({
    * produces the same key for fetched options — while this strict shape
    * refused it at publish, so the search behaviour was real for a key no
    * author could legally write. The object-definition authoring form
-   * (`object.form.ts` options repeater) has offered a `description` input all
+   * (`object.metadata-form.ts` options repeater) has offered a `description` input all
    * along; this declaration is what makes that offer honest. Per the same
    * inherited ruling this option shape declares `description` and no cascade
    * key of its own — `field-rows-option-description.test.ts` pins that

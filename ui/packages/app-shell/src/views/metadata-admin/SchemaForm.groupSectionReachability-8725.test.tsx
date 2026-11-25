@@ -112,7 +112,7 @@ const SCHEMA_ID = 'demo_type_8725';
 
 /**
  * A form document spelled the way it ARRIVES from `/meta/types`: plain data
- * carrying the `data` binding `defineForm` writes onto every metadata form.
+ * carrying the `data` binding `defineMetadataForm` writes onto every metadata form.
  */
 function serverForm(sections: unknown[], type = 'simple'): FormViewSpec {
   return { type, data: { provider: 'schema', schemaId: SCHEMA_ID }, sections } as unknown as FormViewSpec;

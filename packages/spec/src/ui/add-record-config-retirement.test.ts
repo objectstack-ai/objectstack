@@ -50,9 +50,9 @@ import { applyConversionsToStoredItem } from '../conversions/stored';
 import type { ConversionNotice } from '../conversions/types';
 import { MIGRATIONS_BY_MAJOR, RETIRED_KEYS_BY_MAJOR } from '../migrations/registry';
 import { ComponentPropsMap } from './component.zod';
-import { pageForm } from './page.form';
+import { pageForm } from './page.metadata-form';
 import { InterfacePageConfigSchema } from './page.zod';
-import { viewForm } from './view.form';
+import { viewForm } from './view.metadata-form';
 import { AddRecordConfigSchema, ListViewSchema, ObjectListViewSchema } from './view.zod';
 
 const STRIP_ID = 'add-record-mode-form-view-removed';

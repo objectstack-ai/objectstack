@@ -42,7 +42,7 @@ const pageSchema = {
   },
 };
 
-// FormView mirroring framework PR #1817 (packages/spec/src/ui/page.form.ts).
+// FormView mirroring framework PR #1817 (packages/spec/src/ui/page.metadata-form.ts).
 const pageForm = {
   type: 'simple' as const,
   sections: [

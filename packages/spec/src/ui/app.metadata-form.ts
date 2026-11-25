@@ -18,9 +18,9 @@
  * `metadata-form-zod-reconciliation.test.ts` instead of reaching an author.
  */
 
-import { defineForm } from './view.zod';
+import { defineMetadataForm } from './view.zod';
 
-export const appForm = defineForm({
+export const appForm = defineMetadataForm({
   schemaId: 'app',
   type: 'simple',
   sections: [

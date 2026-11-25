@@ -160,14 +160,14 @@ const SURFACE_MODULE = 'scripts/i18n-bundle-surface.mjs';
  * `metadataForms.<type>.label` / `.description` for every entry of
  * `DEFAULT_METADATA_TYPE_REGISTRY` — including form-less types like
  * `datasource`/`job`/`translation` — and separately reads
- * `METADATA_FORM_REGISTRY` itself (the map, not the `*.form.ts` leaves it
+ * `METADATA_FORM_REGISTRY` itself (the map, not the `*.metadata-form.ts` leaves it
  * points at) to decide which types also get section/field labels. Editing
  * either moves the same `platform-objects` bundles PR #9113 had to
- * regenerate — and, unlike the `*.form.ts` leaves, neither carries a filename
+ * regenerate — and, unlike the `*.metadata-form.ts` leaves, neither carries a filename
  * SURFACE_MODULE's own convention (`isMetadataFormModulePath`) can see.
  *
  * Not folded into SURFACE_MODULE: that module documents the ONE convention it
- * enumerates at runtime (the `.form.ts` suffix), and these two files
+ * enumerates at runtime (the `.metadata-form.ts` suffix), and these two files
  * deliberately do not carry it — inventing a second filename convention for
  * exactly two files would be the guess #9144 declined to make. A bare
  * coupling constant was the option the card measured to have no downside

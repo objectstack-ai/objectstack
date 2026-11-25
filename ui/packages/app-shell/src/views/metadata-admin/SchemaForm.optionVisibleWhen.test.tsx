@@ -14,7 +14,7 @@ afterEach(() => {
 });
 
 /**
- * objectui#6247 — a per-option `visibleWhen` written into a `*.form.ts` is
+ * objectui#6247 — a per-option `visibleWhen` written into a `*.metadata-form.ts` is
  * honoured by the metadata-admin renderer.
  *
  * `SelectOptionSchema` declares `visibleWhen` (ADR-0068 / objectui#2284) and is

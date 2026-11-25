@@ -41,14 +41,19 @@
  *
  * ## The one convention this module writes down
  *
- * A metadata form module is a file whose name ends `.form.ts`. That is the
- * producer's own convention, stated by the registry it feeds — packages/spec/
- * src/system/metadata-form-registry.ts: "the FormView produced by
- * defineForm({ schemaId }) in the corresponding *.form.ts". Measured on this
- * tree when this module landed: 17 files in the repo carry that suffix, all of
- * them under packages/spec/src, and the registry has exactly 17 entries with a
- * form — the convention and the population coincide, with nothing left over on
- * either side.
+ * A metadata form module is a file whose name ends `.metadata-form.ts`. That
+ * is the producer's own convention, stated by the registry it feeds —
+ * packages/spec/src/system/metadata-form-registry.ts: "the FormView produced
+ * by defineMetadataForm({ schemaId }) in the corresponding *.metadata-form.ts".
+ * Measured on this tree when this module landed: 17 files in the repo carried
+ * the suffix (then `.metadata-form.ts`), all of them under packages/spec/src, and the
+ * registry had exactly 17 entries with a form — the convention and the
+ * population coincide, with nothing left over on either side.
+ *
+ * The suffix was `.metadata-form.ts` until ADR-0159 (#37086) gave that spelling to the
+ * `form` metadata type: an app's `lead.form.ts` is a `form` item, not a
+ * Studio module, so the Studio modules moved to the name of their helper
+ * (`defineMetadataForm`) and of their translation family (`metadataForms`).
  *
  * What it still deliberately does NOT cover, stated so the next reader does
  * not mistake silence for coverage: the type-level half of the same surface.
@@ -58,7 +63,7 @@
  * and the registry module itself (packages/spec/src/system/metadata-form-
  * registry.ts) decides which forms are walked. Editing either moves the same
  * four bundles, and neither carries a filename this module's ONE convention
- * (the `.form.ts` suffix) can see — inventing a second convention for exactly
+ * (the `.metadata-form.ts` suffix) can see — inventing a second convention for exactly
  * two files would be a guess, not a discovery. #9144 closed that edge WITHOUT
  * extending this module: the two module paths are declared as bare coupling
  * constants directly in check-i18n-bundles.mjs (METADATA_TYPE_REGISTRY_MODULE
@@ -93,7 +98,7 @@ export const EXTRACT_CONFIG_FILENAME = 'i18n-extract.config.ts';
 export const METADATA_FORMS_OPT_OUT_FLAG = '--no-metadata-forms';
 
 /** The filename suffix of a metadata form module. See the module note. */
-export const METADATA_FORM_MODULE_SUFFIX = '.form.ts';
+export const METADATA_FORM_MODULE_SUFFIX = '.metadata-form.ts';
 
 /**
  * Does this path name an extract config? The FILENAME plus a `scripts/`
@@ -106,7 +111,7 @@ export function isExtractConfigPath(path) {
 /**
  * Does this path name a metadata form module?
  *
- * The suffix must be preceded by a name: a file called exactly `.form.ts` is a
+ * The suffix must be preceded by a name: a file called exactly `.metadata-form.ts` is a
  * dotted entry every walk here already skips, and accepting it would let the
  * bare suffix match as a path.
  */

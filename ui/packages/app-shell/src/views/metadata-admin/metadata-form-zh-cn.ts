@@ -351,7 +351,7 @@ export const ZH_CN_SPEC_FORMS: NonNullable<TranslationData['metadataForms']> = {
       // The date-grouping sentence lives on the `dateRange.dimension` child below (objectstack#36838).
       dateRange: { label: '日期范围', helpText: '打开报表时显示的时间段，以及使用者能否自己选择范围' },
       exportOptions: { label: '导出选项', helpText: '下载格式（csv、xlsx）与文件名。谁可以下载由数据来源对象上的导出权限决定' },
-      // The children `report.form.ts` declares for both composites (objectstack#36447),
+      // The children `report.metadata-form.ts` declares for both composites (objectstack#36447),
       // copied from the platform zh-CN bundle like every unmarked row here.
       'dateRange.dimension': { label: '日期字段', helpText: '时间段按数据来源里的哪个日期分组筛选；只有一个日期分组时可留空' },
       'dateRange.defaultRange': { label: '默认时间段', helpText: '打开报表时显示的时间段' },
@@ -455,7 +455,7 @@ export const ZH_CN_SPEC_FORMS: NonNullable<TranslationData['metadataForms']> = {
       chart: { label: '图表' },
       userFilters: { label: '用户筛选器', helpText: '快速筛选栏：控件样式（dropdown / tabs / toggle）+ 暴露的字段或标签页预设' },
       // #30267: every composite below now declares its children in
-      // `view.form.ts`, so each child row is named here (all of them, per
+      // `view.metadata-form.ts`, so each child row is named here (all of them, per
       // the ⛔ composite rule at the top of this file).
       'userFilters.element': { label: '控件样式', helpText: '对象视图上的筛选控件样式："dropdown"（按字段取值的筛选标签）。"toggle" 已弃用。"tabs" 仅用于页面——命名预设请使用 `listViews`。' },
       'userFilters.fields': { label: '筛选字段', helpText: '作为快速筛选暴露的字段（dropdown / toggle 控件）' },

@@ -1,6 +1,6 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
-import { defineForm } from '../ui/view.zod';
+import { defineMetadataForm } from '../ui/view.zod';
 
 /**
  * Position — canonical FormView layout.
@@ -10,7 +10,7 @@ import { defineForm } from '../ui/view.zod';
  * business units. Single section is enough; the FormView gives the editor
  * friendly labels and required markers.
  */
-export const positionForm = defineForm({
+export const positionForm = defineMetadataForm({
   schemaId: 'position',
   type: 'simple',
   sections: [

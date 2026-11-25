@@ -167,7 +167,7 @@ import { SEED_SETTLEMENT_SERVICE } from '@objectstack/spec/contracts';
  * ledger is simply absent — every flag reader answers "not verified", the
  * safe posture — secret-field writes fail closed (throw, never cleartext),
  * and without an i18n service the UI falls back to the inline literals
- * carried on each App / Dashboard / `*.form.ts` schema.
+ * carried on each App / Dashboard / `*.metadata-form.ts` schema.
  *
  * Structurally typed against `@objectstack/core`'s `Plugin` contract so
  * this package does not need to depend on the kernel at compile time.

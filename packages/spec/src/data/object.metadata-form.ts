@@ -1,6 +1,6 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
-import { defineForm } from '../ui/view.zod';
+import { defineMetadataForm } from '../ui/view.zod';
 import { ValueDomainSchema, type ValueDomain } from '../shared/value-domain.zod';
 
 /**
@@ -24,7 +24,7 @@ const VALUE_DOMAIN_OPTIONS = ValueDomainSchema.options.map((value) => ({
 /**
  * Form Layout for Object Metadata Type
  */
-export const objectForm = defineForm({
+export const objectForm = defineMetadataForm({
   schemaId: 'object',
   type: 'simple',
   sections: [
@@ -62,7 +62,7 @@ export const objectForm = defineForm({
         { field: 'imageField', type: 'text', colSpan: 1, helpText: 'Field whose value is each record\'s picture, drawn beside the title in the record page header. Must name a field of this object whose type is image or avatar; any other name is refused when the object is saved. Empty: no record picture, and no placeholder is drawn.' },
         { field: 'isSystem', type: 'boolean', colSpan: 1, helpText: 'System object (protected from deletion; defaults sharing to public)' },
         // #20349 — the object's two own field-name LISTS, beside the `nameField`
-        // pointer. Free text, the `view.form.ts` `searchableFields` row's face:
+        // pointer. Free text, the `view.metadata-form.ts` `searchableFields` row's face:
         // `string-tags` is a chip input over `string[]`, which is exactly this
         // node. A field picker is not an option here — `field-multi` takes its
         // catalog from the draft's `object` / `objectName` / `data.object` /
@@ -106,7 +106,7 @@ export const objectForm = defineForm({
         // `collapse` is absent).
         //
         // `fields` is the group's own member list (field names, in display
-        // order), a `tags` row as `hook.form.ts` gives a list of names; a name
+        // order), a `tags` row as `hook.metadata-form.ts` gives a list of names; a name
         // no field declares is skipped by the layout and warned by `os lint`.
         {
           field: 'fieldGroups',
@@ -392,14 +392,14 @@ export const objectForm = defineForm({
             // Formula / summary
             // `expression`, not `formula` — the key is named for what it holds,
             // not for the field type that uses it. Shown for every type, as the
-            // field designer's own row in `field.form.ts` is: `FieldSchema`
+            // field designer's own row in `field.metadata-form.ts` is: `FieldSchema`
             // accepts `expression` on any type, and on a non-formula field the
             // engine computes and stores it on write (`planStoredExpressions`),
             // so a formula-only row hid a live key on a stored field.
             { field: 'expression', type: 'code', language: 'expression', helpText: 'CEL expression the field\'s value is computed from. On a formula field: computed on read, no stored column. On any other field: computed by the engine from the row each write stores, and stored, so a client-sent value never stands.' },
             // The six members are what `FieldSchema.returnType` declares, and
             // the same explicit list the field designer's own control carries
-            // in `field.form.ts` (#19677). This grid additionally offered
+            // in `field.metadata-form.ts` (#19677). This grid additionally offered
             // `datetime` and `currency`, so an author who added a formula field
             // here and picked either wrote a value the parse refuses — the
             // refusal arriving from the save door, naming a key they never
@@ -422,7 +422,7 @@ export const objectForm = defineForm({
               visibleWhen: "data.type == 'summary'",
               fields: [
                 { field: 'object', type: 'text', required: true, helpText: 'Source child object name' },
-                // Not `required`: a `count` saves without it (see field.form.ts).
+                // Not `required`: a `count` saves without it (see field.metadata-form.ts).
                 { field: 'field', type: 'text', helpText: 'Field on the child object to aggregate (ignored for count)' },
                 { field: 'function', type: 'select', required: true, helpText: 'Aggregation function', options: [
                   { label: 'Count', value: 'count' }, { label: 'Sum', value: 'sum' }, { label: 'Avg', value: 'avg' },

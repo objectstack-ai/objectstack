@@ -18,7 +18,7 @@
 
 import { describe, it, expect } from 'vitest';
 
-import { dashboardForm } from './dashboard.form';
+import { dashboardForm } from './dashboard.metadata-form';
 
 type FormField = { field?: string; helpText?: string; fields?: FormField[] };
 

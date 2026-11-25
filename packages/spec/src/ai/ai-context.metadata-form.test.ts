@@ -10,7 +10,7 @@
 
 import { describe, it, expect } from 'vitest';
 
-import { aiContextForm } from './ai-context.form';
+import { aiContextForm } from './ai-context.metadata-form';
 import { METADATA_FORM_REGISTRY } from '../system/metadata-form-registry';
 
 type Row = { field?: string; widget?: string; dependsOn?: string; required?: boolean; fields?: Row[] };

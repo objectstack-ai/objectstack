@@ -761,10 +761,10 @@ export const ESCAPABLE_LITERAL_LEDGER_ROWS = Object.freeze([
  * zod.ts) supplies `metadataForms.<type>.label`/`.description` for EVERY
  * registry entry, including form-less types, and `METADATA_FORM_REGISTRY`
  * itself (packages/spec/src/system/metadata-form-registry.ts, the map, not
- * the `*.form.ts` leaves it points at) decides which types get section/field
+ * the `*.metadata-form.ts` leaves it points at) decides which types get section/field
  * labels at all. Editing either moves the same bundles PR #9113 paid for —
- * but unlike the `.form.ts` leaves, neither file carries a filename the
- * `.form.ts` convention (or any convention) distinguishes, so a KIND entry
+ * but unlike the `.metadata-form.ts` leaves, neither file carries a filename the
+ * `.metadata-form.ts` convention (or any convention) distinguishes, so a KIND entry
  * here would need to invent one for exactly two files.
  *
  * That is not the same shape as the two entries above: this is not a
@@ -1081,7 +1081,7 @@ export const CHANGE_KIND_ROWS = [
     ],
   },
   {
-    kind: 'edits a metadata form module (a *.form.ts the Studio form registry collects)',
+    kind: 'edits a metadata form module (a *.metadata-form.ts the Studio form registry collects)',
     matches: 'metadata-form-module',
     gates: [
       {

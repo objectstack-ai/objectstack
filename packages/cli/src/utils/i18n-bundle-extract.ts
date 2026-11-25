@@ -561,7 +561,7 @@ export function renderSourceHashModule(
  * digests of the Studio metadata-form baseline `@objectstack/platform-objects`
  * owns — unreadable in that package (no `metadataForms` bundle exists there for
  * them to be about) and re-written in all three of its companions every time an
- * unrelated `*.form.ts` in `packages/spec` moved. That is the cross-package
+ * unrelated `*.metadata-form.ts` in `packages/spec` moved. That is the cross-package
  * coupling ADR-0029 D8 and each package's `bundle-ownership.test.ts` keep out of
  * the committed bundles; the companion is not exempt from it.
  *

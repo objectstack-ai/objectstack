@@ -6322,7 +6322,7 @@ export function resolveMetadataFormLabels<T extends Record<string, any>>(
   // measurement is why. This helper takes ANY form-shaped object (`T extends
   // Record<string, any>`), and it is exported: its one in-repo caller
   // (`rest-server.ts` translating `getMetaTypes()` entries) now feeds it
-  // post-parse forms from `METADATA_FORM_REGISTRY`, all of them `defineForm`
+  // post-parse forms from `METADATA_FORM_REGISTRY`, all of them `defineMetadataForm`
   // outputs, so for THAT caller the branch is unreachable — but a stored
   // `sys_metadata` body still carries the authored key (`saveMetaItem` keeps
   // the body verbatim and the read replays the ADR-0087 conversion chain, not

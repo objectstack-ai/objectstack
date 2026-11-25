@@ -1,6 +1,6 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
-import { defineForm } from '../ui/view.zod';
+import { defineMetadataForm } from '../ui/view.zod';
 
 /**
  * EmailTemplate — canonical FormView layout.
@@ -10,7 +10,7 @@ import { defineForm } from '../ui/view.zod';
  * get syntax highlighting for the HTML body; the plain-text body uses
  * a textarea since it is rarely styled.
  */
-export const emailTemplateForm = defineForm({
+export const emailTemplateForm = defineMetadataForm({
   schemaId: 'email_template',
   type: 'simple',
   sections: [

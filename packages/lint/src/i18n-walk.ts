@@ -1933,8 +1933,8 @@ export function collectExpectedEntries(
  *     actions to the object (`obj.actions`) *and* to the top-level `actions`
  *     list — measured to be the SAME object reference, not a copy — so the two
  *     action branches above both emit `objects.<o>._actions.<a>.*`.
- *   - **Two declarations, one form field.** `field.form.ts` and
- *     `object.form.ts` each declare `deleteBehavior` twice, gated on
+ *   - **Two declarations, one form field.** `field.metadata-form.ts` and
+ *     `object.metadata-form.ts` each declare `deleteBehavior` twice, gated on
  *     `visibleWhen` (`lookup` vs `master_detail`). Both variants render into
  *     the same key, because {@link walkFormField} keys on the field path.
  *     Config-independent: it duplicates six entries on *every* config,

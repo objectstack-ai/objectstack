@@ -2021,7 +2021,7 @@ export const ViewTabSchema = lazySchema(() => strictObject({
  * Rendering details (widget, options) default to inference from the field
  * definition on the source object — authors only override when needed.
  *
- * Each property carries a `.meta({ title })` because `view.form.ts` enumerates
+ * Each property carries a `.meta({ title })` because `view.metadata-form.ts` enumerates
  * `userFilters.fields` as a repeater: the title is the English column head
  * Studio reads, and the form's declared row `label` repeats it so the i18n
  * extractor emits a catalog key per column (#30267).
@@ -3979,7 +3979,7 @@ export const MetadataListColumnSchema = lazySchema(() => ListColumnSchema
 /**
  * The list layout of a metadata type in Studio: {@link ListViewSchema} narrowed
  * to its data binding and its columns, the list counterpart of a
- * {@link defineForm} layout. Build one with {@link defineList}.
+ * {@link defineMetadataForm} layout. Build one with {@link defineList}.
  */
 export const MetadataListViewSchema = lazySchema(() => ListViewShapeSchema
   .pick({ data: true, columns: true })
@@ -4020,7 +4020,7 @@ export const MetadataListViewSchema = lazySchema(() => ListViewShapeSchema
  * `shared/strict-object.ts` documents. The census that gates this narrowing
  * (recorded in commit c459da6bc, part of the ruling) measured ZERO occurrences of
  * `default`/`isDefault`/`selected` inside form-view options across this tree,
- * the example apps and the published `*.form.ts` corpus, with the instrument's
+ * the example apps and the published `*.metadata-form.ts` corpus, with the instrument's
  * positive control hitting the 40+ enforced object-field usages.
  *
  * The protocol-18 conversion `form-view-option-default-removed` strips the key
@@ -4233,7 +4233,7 @@ const FormFieldBaseSchema = lazySchema(() => {
    * shares by reference with the object-field face, so an enum member carrying
    * a hyphen or a capital (`system-data`, `new-tab`, `perRecord`) cannot be
    * written as one at all. On a metadata form — schema-bound, built by
-   * {@link defineForm} — an enum-typed row MAY carry an inline `options` list,
+   * {@link defineMetadataForm} — an enum-typed row MAY carry an inline `options` list,
    * for human labels or a deliberate subset (the #19331 `object.ownership` /
    * `sharingModel` rows and the master_detail `deleteBehavior` rows are the
    * reference shapes). A row whose members cannot be spelled as option values
@@ -4241,10 +4241,10 @@ const FormFieldBaseSchema = lazySchema(() => {
    * Schema, and their meanings go in `helpText` (the `object.managedBy` /
    * `action.openIn` / `action.execution` rows are the reference shape). The
    * describe below states the rule where an author meets it, and
-   * `defineForm`'s module-load refusal of an unspellable value names the
+   * `defineMetadataForm`'s module-load refusal of an unspellable value names the
    * derive path as its remedy.
    */
-  options: z.array(FormSelectOptionSchema).optional().describe('Options for select/multiselect/radio/checkboxes fields (per-option `default` is not accepted here — declare the pre-selected choice on the object definition). On a metadata form (schema-bound, built by `defineForm`), an enum-typed row may list its members here, to give them human labels or to offer a deliberate subset. An option `value` is a lowercase system identifier, so a row whose members cannot be spelled as option values (a hyphen, a capital) omits `options`: the control derives the members from the served JSON Schema, and their meanings go in `helpText`.'),
+  options: z.array(FormSelectOptionSchema).optional().describe('Options for select/multiselect/radio/checkboxes fields (per-option `default` is not accepted here — declare the pre-selected choice on the object definition). On a metadata form (schema-bound, built by `defineMetadataForm`), an enum-typed row may list its members here, to give them human labels or to offer a deliberate subset. An option `value` is a lowercase system identifier, so a row whose members cannot be spelled as option values (a hyphen, a capital) omits `options`: the control derives the members from the served JSON Schema, and their meanings go in `helpText`.'),
   
   /** Reference object for lookup/master_detail fields */
   reference: z.string().optional().describe('Target object name for lookup/master_detail fields'),
@@ -4365,7 +4365,7 @@ const FormFieldBaseSchema = lazySchema(() => {
    * (ADR-0089, canonical `*When` name). Binding root depends on the surface:
    * runtime record forms bind `record` (plus `previous`, the saved record, and
    * `parent` for master-detail line items); metadata-editing forms
-   * (`*.form.ts`) bind the row under edit as `data`.
+   * (`*.metadata-form.ts`) bind the row under edit as `data`.
    *
    * ## `current_user` DOES bind here — client-side, and only under a host that
    * publishes a scope (objectui#6010)
@@ -4601,7 +4601,7 @@ export const FormSectionSchema = lazySchema(() => strictObject({
    *    translation linter (`collectViewRecord`) accepts it and `translateView`
    *    serves it. A section without a `name` has no key there and keeps its
    *    authored text in every locale.
-   *  - **A metadata-editing form** (`defineForm({ schemaId })`):
+   *  - **A metadata-editing form** (`defineMetadataForm({ schemaId })`):
    *    `metadataForms.<type>.sections.<name>`, read by
    *    `resolveMetadataFormLabels`. A section without a `name` is looked up
    *    there under a slug of its `label`.
@@ -5528,7 +5528,7 @@ export const FormViewSchema = lazySchema(() => strictObject({
   /**
    * Data Source Configuration. NOT removed in the #3896 sweep despite the
    * ledger's dead verdict — the removal attempt broke the build and thereby
-   * re-verified the entry: `defineForm` (below) writes
+   * re-verified the entry: `defineMetadataForm` (below) writes
    * `data: { provider: 'schema', schemaId }` onto EVERY metadata form, and
    * `metadata-protocol` serves it to the metadata-admin pipeline. The
    * record-form provider values (`object`/`value`) may still be unread — that
@@ -8225,10 +8225,15 @@ export function expandViewContainer(object: string, container: any): ExpandedVie
  * Type-safe factory for a standalone {@link FormView} bound to a JSON Schema
  * rather than to an ObjectQL object.
  *
- * Use this for forms that edit **metadata** (e.g. `report.form.ts`,
- * `dashboard.form.ts`), **action inputs**, or **flow screens** — anywhere the
+ * Use this for forms that edit **metadata** (e.g. `report.metadata-form.ts`,
+ * `dashboard.metadata-form.ts`), **action inputs**, or **flow screens** — anywhere the
  * data shape is described by a Zod-derived JSON Schema instead of an Object
  * field set.
+ *
+ * Named `defineForm` until ADR-0159 (question 1, ruled A): that name belongs to
+ * the `form` metadata type's factory, so this Studio helper is
+ * `defineMetadataForm` and its modules are `*.metadata-form.ts`, after the
+ * `metadataForms` translation family they feed.
  *
  * The returned FormView is validated at definition time; the runtime form
  * renderer (`@object-ui/plugin-form`) inspects `data.provider === 'schema'`
@@ -8244,7 +8249,7 @@ export function expandViewContainer(object: string, container: any): ExpandedVie
  *
  * @example
  * ```ts
- * export const reportForm = defineForm({
+ * export const reportForm = defineMetadataForm({
  *   schemaId: 'report',
  *   type: 'tabbed',
  *   sections: [
@@ -8263,7 +8268,7 @@ export function expandViewContainer(object: string, container: any): ExpandedVie
  * });
  * ```
  */
-export function defineForm(
+export function defineMetadataForm(
   config: Omit<z.input<typeof FormViewSchema>, 'data'> & { schemaId: string },
 ): FormViewParsed {
   const { schemaId, ...rest } = config;
@@ -8273,7 +8278,7 @@ export function defineForm(
   });
   if (parsed.success) return parsed.data;
   // The refusal stays an `Error` with a stack, so an uncaught module-load throw
-  // prints its issues and the remedy, with the author's `defineForm(...)` call
+  // prints its issues and the remedy, with the author's `defineMetadataForm(...)` call
   // as the first frame. Two traps, both measured on zod 4.6.1: `new z.ZodError`
   // builds a plain object (no `Error` parent, no `stack`), which node prints as
   // `ZodError { name, message: [Getter/Setter] }`; and zod builds every
@@ -8282,13 +8287,13 @@ export function defineForm(
   // The error is built from issues that already carry the remedy, so its
   // lazily computed `message` holds it whenever it is first read.
   const refusal = new z.ZodRealError(withOptionValueDeriveRemedy(parsed.error.issues));
-  z.core.util.captureStackTrace(refusal, defineForm);
+  z.core.util.captureStackTrace(refusal, defineMetadataForm);
   throw refusal;
 }
 
 /**
  * Type-safe factory for a metadata type's Studio list layout — the list
- * counterpart of {@link defineForm}. It binds the columns to the type's JSON
+ * counterpart of {@link defineMetadataForm}. It binds the columns to the type's JSON
  * Schema (`data.provider === 'schema'`) and validates them against
  * {@link MetadataListViewSchema} at definition time, so a malformed column
  * fails at module load.
@@ -8320,7 +8325,7 @@ export function defineList(
 }
 
 /**
- * [#19678] The remedy {@link defineForm}'s refusal of an unspellable inline
+ * [#19678] The remedy {@link defineMetadataForm}'s refusal of an unspellable inline
  * option `value` carries — ruling 乙 (record 5805845085, narrowing ruling
  * 不动 + 声明): the bound stays, an enum-typed row may still list spellable
  * members inline, and the wall names the derive path for a row whose members
@@ -8332,7 +8337,7 @@ export function defineList(
  * `form-select-option.test.ts`). That message cannot carry this remedy where it
  * is declared: the same grammar bounds object-field options and three
  * object-storage names, and "derive the members from the served JSON Schema"
- * is true only on a schema-bound form. `defineForm` is exactly that door — it
+ * is true only on a schema-bound form. `defineMetadataForm` is exactly that door — it
  * stamps `data.provider: 'schema'` on every form it builds — so the remedy is
  * appended here, to the issue that door raises, and nowhere else.
  */

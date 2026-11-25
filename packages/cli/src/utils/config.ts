@@ -594,7 +594,7 @@ const AUTHORED_SOURCE_PRELUDE: readonly string[] = [
  *
  *  - **A source that loads today evaluates identically.** The real helper
  *    runs, so every value the module builds is the value it builds today, with
- *    each helper's defaults and transforms (`defineForm` moves `schemaId` into
+ *    each helper's defaults and transforms (`defineMetadataForm` moves `schemaId` into
  *    `data`, …). The one difference is which value the chain starts from: an
  *    accepted `defineStack` call's ARGUMENT, not its result (see "An accepted
  *    `defineStack` call" below).

@@ -831,7 +831,7 @@
     "defineTranslationBundle": "src/system/translation.zod.ts#defineTranslationBundle (function)",
     "deriveImplicitPackageBook": "src/system/book.zod.ts#deriveImplicitPackageBook (function)",
     "docAudienceAllows": "src/system/book.zod.ts#docAudienceAllows (function)",
-    "emailTemplateForm": "src/system/email-template.form.ts#emailTemplateForm (const)",
+    "emailTemplateForm": "src/system/email-template.metadata-form.ts#emailTemplateForm (const)",
     "flowNoticeMessageKey": "src/system/i18n-resolver.ts#flowNoticeMessageKey (function)",
     "flowRecordFieldTextKey": "src/system/i18n-resolver.ts#flowRecordFieldTextKey (function)",
     "flowRefusalMessageKey": "src/system/i18n-resolver.ts#flowRefusalMessageKey (function)",
