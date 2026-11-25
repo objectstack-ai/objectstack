@@ -96,6 +96,7 @@ import { evalRowPredicate, isMultiValueRelationship, resolveAffordance, type Act
 import { actionRendersAt, type ActionLocation } from '@object-ui/types';
 import { usePermissions } from '@object-ui/permissions';
 import { relatedCreateSeedOf } from '@object-ui/plugin-detail/core';
+import { createKeepsField } from '@object-ui/plugin-form';
 import { servesRecordRead, type RecordReadPrincipal } from '../utils/recordReadServed.js';
 import { RECORD_FORM_PARAM, RECORD_FORM_OBJECT_PARAM, RECORD_FORM_LINK_PARAM, RECORD_TRAIL_PARAM, appendRecordTrail } from '../urlParams.js';
 import { documentHref } from './documentHref.js';
@@ -609,8 +610,23 @@ export function RelatedRecordActionsBridge({
             'builtin:create:disabledWhen',
             parentObjectFields,
           );
+        /**
+         * objectstack#37248 — + New opens the child's create form pre-linked to
+         * this parent. When the relationship field is one that form will not
+         * save (`readonly`, computed, server-owned, or closed to this caller on
+         * create), the record is created WITHOUT the link and never appears in
+         * this list, with nothing said. So the list does not offer it; creating
+         * the child unlinked from its own list stays where it was. The verdict
+         * is the create form's own outbound filter (`createKeepsField`), so the
+         * list and the form cannot disagree about the field.
+         */
+        const linkSurvivesCreate =
+          !relationshipField ||
+          parentId == null ||
+          parentId === '' ||
+          createKeepsField(childDef, objectName, relationshipField, perms);
         const aff = {
-          create: objectCanCreate && createVisible,
+          create: objectCanCreate && createVisible && linkSurvivesCreate,
           edit: resolveAffordance('relatedRowEdit', source).allowed,
           delete: resolveAffordance('relatedRowDelete', source).allowed,
         };
