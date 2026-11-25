@@ -644,6 +644,26 @@ function laneBox(
     : { className: columnWidthClasses(columnStyle), style: columnStyle }
 }
 
+/** Han, kana and Hangul: scripts whose glyphs stand upright in vertical text. */
+const UPRIGHT_SCRIPT = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]/u
+
+/**
+ * How a COLLAPSED lane's title runs down its narrow spine.
+ *
+ * A Latin title reads bottom-to-top, the book-spine convention: vertical-rl
+ * lays it top-to-bottom and the 180° turn flips it. That same turn stands
+ * every CJK glyph on its head — vertical-rl already sets Han, kana and Hangul
+ * upright, so the rotation is what made 「已取消」 unreadable. A title in one of
+ * those scripts drops the turn and sets EVERY glyph upright
+ * (`text-orientation: upright`), so a mixed title such as 「Q3 已取消」 runs
+ * down the spine as one column instead of turning its Latin run sideways.
+ */
+function collapsedTitleClass(title: string): string {
+  return UPRIGHT_SCRIPT.test(title)
+    ? "[writing-mode:vertical-rl] [text-orientation:upright]"
+    : "[writing-mode:vertical-rl] rotate-180"
+}
+
 /**
  * The lane heading, as a disclosure when the lane declared `collapsed`
  * (objectui#9628).
@@ -704,7 +724,7 @@ function LaneHeading({
       >
         ▶
       </span>
-      <span className={cn("truncate", collapsed && "[writing-mode:vertical-rl] rotate-180")}>
+      <span className={cn("truncate", collapsed && collapsedTitleClass(column.title))}>
         {column.title}
       </span>
     </button>
