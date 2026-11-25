@@ -55,6 +55,10 @@ import { render, screen, cleanup, fireEvent, waitFor } from '@testing-library/re
 import { ComponentRegistry } from '@object-ui/core';
 // Module-scope import (not `beforeAll`) — objectui#3010/#3021.
 import '../../../renderers';
+// The renderers reach a dynamic `@object-ui/react-runtime` import; its first
+// load is paid here, during collection, not inside a case's clock
+// (`check:test-source-alias`).
+import '@object-ui/react-runtime';
 
 interface LookupProbeProps {
   name: string;
