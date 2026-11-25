@@ -11,6 +11,7 @@ import React from 'react';
 import { describe, it, expect, afterEach, vi } from 'vitest';
 import { render, cleanup } from '@testing-library/react';
 import { formatMeasure } from '@object-ui/core';
+import { LocalizationProvider } from '@object-ui/i18n';
 
 vi.mock('recharts', async () => {
   const actual = await vi.importActual<any>('recharts');
@@ -188,6 +189,7 @@ describe('AdvancedChartImpl — a value axis prints its dataset measure’s unit
     rows: Array<{ priority: string; value: number }>,
     measureFormat: Record<string, unknown> | undefined,
     extra: Record<string, unknown> = {},
+    locale?: string,
   ) {
     const spec = normalizeChartSchema({
       type: 'chart',
@@ -206,11 +208,15 @@ describe('AdvancedChartImpl — a value axis prints its dataset measure’s unit
         showDataLabels={spec.showDataLabels}
         isAnimationActive={false}
       />,
+      // The display locale the chart reads (`useDisplayLocale`), when a case names one.
+      locale
+        ? { wrapper: ({ children }: { children: React.ReactNode }) => <LocalizationProvider value={{ locale }}>{children}</LocalizationProvider> }
+        : undefined,
     );
     return container;
   }
 
-  // The SLA report's rate, stored as percentage points: one bucket at 33.3%.
+  // A rate stored in percentage points (`percentScale: 'whole'`): one bucket at 33.3%.
   const WHOLE_RATE = [
     { priority: 'High', value: 100 / 3 },
     { priority: 'Medium', value: 0 },
@@ -240,6 +246,19 @@ describe('AdvancedChartImpl — a value axis prints its dataset measure’s unit
     expect(formatMeasure(12000, '0,0.00', 'CNY', undefined, LOCALE)).toBe('CN¥12,000.00');
   });
 
+  it('a second currency carries its own symbol (`USD` → `$12K`)', () => {
+    const ticks = valueTicks(draw(AMOUNTS, { format: '0,0.00', currency: 'USD' }));
+    expect(ticks).toEqual(['$0', '$3K', '$6K', '$9K', '$12K']);
+    expect(formatMeasure(12000, '0,0.00', 'USD', undefined, LOCALE)).toBe('$12,000.00');
+  });
+
+  it('a zh-CN session reads the currency in its own compact units (`¥30万`)', () => {
+    const large = AMOUNTS.map((r) => ({ ...r, value: r.value * 100 }));
+    const ticks = valueTicks(draw(large, { format: '0,0.00', currency: 'CNY' }, {}, 'zh-CN'));
+    expect(ticks).toEqual(['¥0', '¥30万', '¥60万', '¥90万', '¥120万']);
+    expect(formatMeasure(1200000, '0,0.00', 'CNY', undefined, 'zh-CN')).toBe('¥1,200,000.00');
+  });
+
   it('CONTROL: a per-row currency measure (no single currency) keeps distinct plain-number ticks', () => {
     // A `currencyField` column's producer hands its pattern and no currency.
     const ticks = valueTicks(draw(AMOUNTS, { format: '0,0.00' }));
@@ -253,7 +272,15 @@ describe('AdvancedChartImpl — a value axis prints its dataset measure’s unit
     expect(valueTicks(draw(rate, { format: '0.0%' }))).toEqual(['0.0%', '8.5%', '17.0%', '25.5%', '34.0%']);
   });
 
-  it('a declared axis `format` still wins — the report’s fraction-scale `yAxis[0].format` path (objectstack#36988)', () => {
+  it('a declared axis `format` wins over the carrier: a `0,0` axis over a `CNY` measure prints no symbol', () => {
+    // The two readings differ here, so swapping their order in
+    // `valueAxisTickFormatter` turns this red.
+    const ticks = valueTicks(draw(AMOUNTS, { format: '0,0.00', currency: 'CNY' }, { yAxis: [{ format: '0,0' }] }));
+    expect(ticks).toEqual(['0', '3,000', '6,000', '9,000', '12,000']);
+    expect(ticks.some((t) => t.includes('CN¥'))).toBe(false);
+  });
+
+  it('the report’s fraction-scale `yAxis[0].format` path still reads percents beside its carrier (objectstack#36988)', () => {
     const rate = [
       { priority: 'High', value: 1 / 3 },
       { priority: 'Medium', value: 0 },

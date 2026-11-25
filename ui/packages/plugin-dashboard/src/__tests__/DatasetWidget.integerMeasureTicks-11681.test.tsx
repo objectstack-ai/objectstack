@@ -215,4 +215,50 @@ describe('objectstack#37053 — a dashboard chart widget’s value axis prints i
     const ticks = await drawWidget('revenue', { format: '0,0.00', currency: 'CNY', currencyField: 'currency_code' });
     expect(ticks).toEqual(['0', '3K', '6K', '9K', '12K']);
   });
+
+  // ── The producer's other two branches (objectstack#37053) ──
+  const WHOLE = { format: '0.0%', percentScale: 'whole' };
+  const rateField = (name: string, facts: Record<string, unknown>) => ({ name, type: 'number', label: name, ...facts });
+  const settledTicks = async (c: HTMLElement) => {
+    await waitFor(() => expect(axisTicks(c).length).toBeGreaterThanOrEqual(3), { timeout: 15000 });
+    return axisTicks(c);
+  };
+
+  it('a dimensionless chart of two measures that format alike: the transposed series carries their shared format', async () => {
+    const c = await renderChart(
+      { id: 'rates', type: 'bar', dataset: 'metrics', values: ['rate_a', 'rate_b'] },
+      [{ rate_a: 100 / 3, rate_b: 12 }],
+      [rateField('rate_a', WHOLE), rateField('rate_b', WHOLE)],
+    );
+    expect(await settledTicks(c)).toEqual(['0.0%', '9.0%', '18.0%', '27.0%', '36.0%']);
+  });
+
+  it('CONTROL: a dimensionless chart mixing a percent and a currency carries no format, so the axis keeps plain numbers', async () => {
+    const c = await renderChart(
+      { id: 'mixed', type: 'bar', dataset: 'metrics', values: ['rate_a', 'revenue'] },
+      [{ rate_a: 100 / 3, revenue: 12 }],
+      [rateField('rate_a', WHOLE), rateField('revenue', { format: '0,0.00', currency: 'CNY' })],
+    );
+    const ticks = await settledTicks(c);
+    expect(ticks.some((t) => /[%¥]/.test(t)), JSON.stringify(ticks)).toBe(false);
+  });
+
+  it('the comparison overlay (`compareColumn`) carries its measure’s format, so the axis keeps the percent', async () => {
+    const c = await renderChart(
+      {
+        id: 'by_priority',
+        type: 'bar',
+        dataset: 'metrics',
+        dimensions: ['priority'],
+        values: ['rate'],
+        filter: { created: { $gte: '2026-04-01', $lte: '2026-06-30' } },
+        compareTo: { kind: 'previousYear' },
+      },
+      ROWS.map((r, i) => ({ priority: r.priority, rate: r.rate, rate__compare: [20, 10, 5][i] })),
+      [{ name: 'priority', type: 'text', label: 'Priority' }, rateField('rate', WHOLE)],
+    );
+    // The overlay is drawn: its three non-zero bars beside the current window's one.
+    await waitFor(() => expect(c.querySelectorAll('.recharts-bar-rectangle').length).toBeGreaterThanOrEqual(4), { timeout: 15000 });
+    expect(await settledTicks(c)).toEqual(['0.0%', '9.0%', '18.0%', '27.0%', '36.0%']);
+  });
 });
