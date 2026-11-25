@@ -243,29 +243,12 @@ describe('get_record_context — the order of judgement (ADR-0160 D4)', () => {
 });
 
 describe('get_record_context — object level: one refusal is the whole call\'s, within the naming bound (ADR-0160 D3/D4)', () => {
-  it('a child this caller is not served is left out, unnamed, with the one not-visible statement; the pack still answers (amended 2026-11-25)', async () => {
-    const door = fakeDoor(policyApp({ unservedObjects: ['policy_revision'] }));
-    const out = await executeGetRecordContext(CALL, door);
-    expect(out.data.record).toMatchObject({ object: 'policy', id: 'p1' });
-    expect(out.data.fields.map((f) => f.name)).toEqual(['title', 'status', 'owner', 'secret_terms', 'premium']);
-    expect(out.data.related).toBeUndefined();
-    expect(out.notes).toEqual([{ kind: 'not_visible', text: sentencesFor([]).notVisible }]);
-    expect(JSON.stringify(out)).not.toContain('policy_revision');
-    expect(JSON.stringify(out)).not.toContain('Policy revision');
-    // Nothing of the child is read, its definitions included.
-    expect(door.reads.map((r) => r.object)).not.toContain('policy_revision');
-    expect(door.asked).not.toContainEqual({ member: 'publishedObjectDefinitionOf', object: 'policy_revision' });
-    expect(door.asked).not.toContainEqual({ member: 'assertApiExposed', object: 'policy_revision' });
-  });
-
-  it('control: beside an unserved child, a served child is read as usual', async () => {
-    const app = policyApp({ unservedObjects: ['claim'] });
-    (app.packs[0] as { related: unknown[] }).related.push({ object: 'claim', field: 'policy', fields: ['number'] });
-    const out = await run(app);
-    expect(out.data.related?.map((l) => l.object)).toEqual(['policy_revision']);
-    expect(out.data.related?.[0].rows.map((r) => r.id)).toEqual(['r1', 'r2']);
-    expect(out.notes.map((n) => n.kind)).toEqual(['not_visible']);
-    expect(JSON.stringify(out)).not.toContain('claim');
+  it('a child the caller is not served is refused PERMISSION_DENIED without naming it', async () => {
+    const refused = await refusalOf(run(policyApp({ unservedObjects: ['policy_revision'] })));
+    expect(refused).toMatchObject({ code: 'PERMISSION_DENIED', status: 403 });
+    expect(refused.message).toContain('policy_document');
+    expect(refused.message).toContain('policy');
+    expect(refused.message).not.toContain('policy_revision');
   });
 
   it('a child the read guard refuses is refused with the same code, unnamed', async () => {
@@ -293,7 +276,7 @@ describe('get_record_context — object level: one refusal is the whole call\'s,
       policyApp({ unexposedObjects: ['policy_revision'] }),
     ]) {
       const door = fakeDoor(app);
-      await executeGetRecordContext(CALL, door).catch(() => undefined);
+      await refusalOf(executeGetRecordContext(CALL, door));
       expect(door.asked).not.toContainEqual({ member: 'publishedObjectDefinitionOf', object: 'policy_revision' });
     }
     const door = fakeDoor(policyApp());

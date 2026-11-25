@@ -57,19 +57,12 @@ import { sentencesFor, type Sentences } from './sentences.js';
  *    then the surviving lookups' targets (the read guard `query_records`'
  *    `expand` puts before an expansion); then the reads.
  *
- * ## Object level: a refusal for everyone refuses the whole call (D3, amended)
+ * ## Object level refuses the whole call; field level omits and states (D3)
  *
- * A child the door serves to nobody (the read guard, API exposure) or a
- * refused lookup target refuses the call with `PERMISSION_DENIED` and no
- * partial pack. The refusal names the pack and the root, and the refused
- * object only when the caller's served schema shows it (the naming bound). A
- * child that THIS caller is not served is left out instead: nothing of it is
- * read, its section is not named, and the notes carry the one not-visible
- * statement.
- *
- * ## Field level omits and states (D3)
- *
- * A field the caller's served schema hides is not named: the entry, a
+ * A refused child or lookup target refuses the call with `PERMISSION_DENIED`
+ * and no partial pack. The refusal names the pack and the root, and the
+ * refused object only when the caller's served schema shows it (the naming
+ * bound). A field the caller's served schema hides is not named: the entry, a
  * related section whose link it is, or the body, is left out, and the notes
  * carry one statement that some material is not visible. A field the served
  * schema shows and field-level security withholds keeps its name and label,
@@ -381,16 +374,9 @@ export async function executeGetRecordContext(input: unknown, door: RecordContex
     try {
       served = await door.servedObjectDefinitionOf(entry.object);
     } catch {
-      // No answer is no verdict: refused, unnamed, never read on a guess.
-      return refuseObject(entry.object, false);
+      served = null;
     }
-    if (!served) {
-      // [ADR-0160 D3, amended 2026-11-25] A child THIS caller is not served is
-      // left out: nothing of it is read, its section is not named, and the
-      // notes carry the one not-visible statement. The pack still answers.
-      hidden = true;
-      continue;
-    }
+    if (!served) await refuseObject(entry.object, false);
     try {
       await door.assertApiExposed(entry.object, 'query');
     } catch (err) {
@@ -411,12 +397,8 @@ export async function executeGetRecordContext(input: unknown, door: RecordContex
       return refuseObject(name, false);
     }
   };
-  // The read set is the plan: every object read below is one of these. A
-  // child left out at object level is out of the plan too, so not even its
-  // published definition is read.
-  const planned = new Set(
-    await planObjectsOf({ ...pack, related: (pack.related ?? []).filter((e) => childServed.has(e.object)) }, publishedOf),
-  );
+  // The read set is the plan: every object read below is one of these.
+  const planned = new Set(await planObjectsOf(pack, publishedOf));
 
   // 4b. Field-level projection onto the definitions as the caller is served them.
   const rootServedFields = fieldMapOf(rootServed);

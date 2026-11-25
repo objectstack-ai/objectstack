@@ -38,7 +38,7 @@
           "status": "live",
           "verifiedAt": "2026-11-25",
           "evidenceScope": "in-repo",
-          "evidence": "packages/services/service-record-context/src/read-set.ts#planObjectsOf — each child joins the read set; packages/services/service-record-context/src/record-context-tools.ts#executeGetRecordContext — judged at object level before anything of it is projected (a refusal for everyone refuses the whole call; a child this caller is not served is left out and stated), then read as one capped list.",
+          "evidence": "packages/services/service-record-context/src/read-set.ts#planObjectsOf — each child joins the read set; packages/services/service-record-context/src/record-context-tools.ts#executeGetRecordContext — judged at object level before anything of it is projected (a refusal refuses the whole call), then read as one capped list.",
           "producer": "packages/objectql/src/engine-top-level.ts#METADATA_ARRAY_KEYS — the stack's `aiContexts` reach the registry as `ai_context` items with their package stamped; packages/runtime/src/domains/mcp.ts#recordContextMembers and packages/mcp/src/stdio-data-bridge.ts#createStdioDataBridge read them back (`listContextPacks`) for the executor."
         },
         "field": {

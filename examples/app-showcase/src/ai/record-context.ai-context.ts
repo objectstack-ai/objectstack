@@ -15,9 +15,9 @@ import type { AiContext } from '@objectstack/spec/ai';
  * sections are read one at a time by anchor.
  *
  * A pack never widens a read: a field the caller may not read is left out
- * and the answer says so, a related object the caller may not read is left
- * out the same way, and a `where` grants nothing — the caller's row rules
- * still decide which rows arrive.
+ * and the answer says so, a related object the caller may not read
+ * refuses the whole call, and a `where` grants nothing — the caller's row
+ * rules still decide which rows arrive.
  */
 export const ShowcaseProjectBriefContext: AiContext = {
   name: 'showcase_project_brief',
