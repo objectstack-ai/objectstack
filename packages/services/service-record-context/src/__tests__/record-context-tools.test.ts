@@ -10,6 +10,7 @@ import {
 } from '@objectstack/spec/ai';
 import {
   RECORD_CONTEXT_BODY_MAX_CHARS,
+  RECORD_CONTEXT_OUTLINE_MAX_ENTRIES,
   RECORD_CONTEXT_RELATED_MAX_ROWS,
   RECORD_CONTEXT_SERVICE,
   RecordContextServicePlugin,
@@ -38,6 +39,10 @@ describe('get_record_context — the service constants (ADR-0160 D3: pinned by t
   it('fixes the body bound and the related-row cap', () => {
     expect(RECORD_CONTEXT_BODY_MAX_CHARS).toBe(8000);
     expect(RECORD_CONTEXT_RELATED_MAX_ROWS).toBe(20);
+  });
+
+  it('fixes the outline\'s entry cap', () => {
+    expect(RECORD_CONTEXT_OUTLINE_MAX_ENTRIES).toBe(80);
   });
 
   it('fixes the authoring bounds the schema refuses at parse', () => {
@@ -461,6 +466,59 @@ describe('get_record_context — the body (ADR-0160 D3)', () => {
     expect(stale).toMatchObject({ code: 'RESOURCE_NOT_FOUND', status: 404 });
     expect(noBody).toEqual(stale);
     expect(hiddenBody).toEqual(stale);
+  });
+});
+
+describe('get_record_context — the outline bound (ADR-0160 D3: every cut is stated)', () => {
+  const HEADINGS = 300;
+  /** A long body of many short headings, each over a short clause. */
+  const manyHeadings = () => Array.from({ length: HEADINGS }, (_, i) => `## Clause ${i + 1}\nThe insurer pays clause ${i + 1}.\n`).join('');
+  const withBody = (content: string, locales?: string[]) => {
+    const app = policyApp(locales ? { locales } : {});
+    app.records.policy[0].content = content;
+    return app;
+  };
+
+  it('a body of many short headings lists the cap, and one note says how many headings were left out', async () => {
+    const content = manyHeadings();
+    expect(content.length).toBeGreaterThan(RECORD_CONTEXT_BODY_MAX_CHARS);
+    const out = await run(withBody(content));
+    expect(GetRecordContextOutputSchema.safeParse(out).success).toBe(true);
+    const outline = out.data.body?.outline ?? [];
+    expect(outline).toHaveLength(RECORD_CONTEXT_OUTLINE_MAX_ENTRIES);
+    expect(outline[0]).toEqual({ anchor: 'clause-1', heading: 'Clause 1', level: 2 });
+    expect(JSON.stringify(outline).length).toBeLessThanOrEqual(RECORD_CONTEXT_BODY_MAX_CHARS);
+    expect(out.notes.map((n) => n.kind)).toEqual(['body_outline', 'outline_truncated']);
+    const cut = out.notes[1];
+    expect(cut.text).toContain(String(HEADINGS - RECORD_CONTEXT_OUTLINE_MAX_ENTRIES));
+    expect(cut.text).toContain(String(HEADINGS));
+    expect(cut.text).not.toContain('insurer');
+  });
+
+  it('states the cut in the caller\'s locale', async () => {
+    const out = await run(withBody(manyHeadings(), ['zh-CN']));
+    const cut = out.notes.find((n) => n.kind === 'outline_truncated');
+    expect(cut?.text).toContain(String(HEADINGS - RECORD_CONTEXT_OUTLINE_MAX_ENTRIES));
+    expect(cut?.text).toMatch(/大纲/);
+  });
+
+  it('the cap bounds the listing, not which sections exist: an unlisted heading\'s anchor reads its section', async () => {
+    const out = await run(withBody(manyHeadings()), { ...CALL, anchor: `clause-${HEADINGS}` });
+    expect(out.data.body).toEqual({
+      field: 'content',
+      label: 'Content',
+      anchor: `clause-${HEADINGS}`,
+      text: `## Clause ${HEADINGS}\nThe insurer pays clause ${HEADINGS}.\n`,
+    });
+    expect(out.notes).toEqual([]);
+  });
+
+  it('a body whose only heading is too long to list is carried to the bound and marked truncated', async () => {
+    const out = await run(withBody(`# ${'x'.repeat(RECORD_CONTEXT_BODY_MAX_CHARS)}\nbody`));
+    expect(out.data.body?.outline).toBeUndefined();
+    expect(out.data.body?.text).toHaveLength(RECORD_CONTEXT_BODY_MAX_CHARS);
+    expect(out.data.body?.truncated).toBe(true);
+    expect(out.notes.map((n) => n.kind)).toEqual(['body_truncated']);
   });
 });
 

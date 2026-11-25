@@ -33,7 +33,7 @@ afterEach(() => {
 
 function mockCommits(commits: unknown[]) {
   global.fetch = vi.fn(async () => ({
-    ok: true,
+    headers: new Headers(), ok: true,
     status: 200,
     json: async () => ({ commits }),
   })) as unknown as typeof fetch;

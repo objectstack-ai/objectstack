@@ -4,7 +4,7 @@ import { Skeleton } from '@object-ui/components';
 import type { ChartContainerConfig } from './ChartContainerImpl';
 import type { ChartSegmentClickEvent } from '@object-ui/core';
 import { useObjectTranslation } from '@object-ui/i18n';
-import { normalizeChartSchema } from './normalizeChartSchema';
+import { normalizeChartSchema, type MeasureValueFormat } from './normalizeChartSchema';
 
 // 🚀 Lazy load the implementation files
 const LazyChart = React.lazy(() => import('./ChartImpl'));
@@ -76,9 +76,13 @@ export interface ChartRendererProps {
      * the measure's aggregate, carried by `buildChartSeries` from the dataset
      * answer, so a value axis over counts draws whole-number ticks. The
      * authoring face refuses it by name (`ChartDataSeriesSchema.aggregate`).
+     * `measureFormat` is the same kind of carrier (objectstack#37053): the
+     * measure's `format` / `currency` / `percentScale`, filled by a
+     * dataset-bound producer so the value axis prints the measure's units —
+     * see `NormalizedSeries.measureFormat`.
      */
     series?: Array<
-      | { dataKey: string; label?: string; type?: string; variant?: 'current' | 'comparison'; opacity?: number; dashArray?: string; chartType?: 'bar' | 'line' | 'area'; stack?: string; yAxis?: 'left' | 'right'; color?: string; aggregate?: string }
+      | { dataKey: string; label?: string; type?: string; variant?: 'current' | 'comparison'; opacity?: number; dashArray?: string; chartType?: 'bar' | 'line' | 'area'; stack?: string; yAxis?: 'left' | 'right'; color?: string; aggregate?: string; measureFormat?: MeasureValueFormat }
       | { name: string; label?: unknown; type?: string; variant?: 'current' | 'comparison' | 'primary'; opacity?: number; dashArray?: string; stack?: string; yAxis?: 'left' | 'right'; color?: string }
     >;
     /** Spec `ChartConfig` shape — honored via `normalizeChartSchema`
@@ -162,7 +166,7 @@ export const ChartRenderer: React.FC<ChartRendererProps> = ({ schema, onChartCli
     // `normalizeSeries` is a no-op on a well-formed internal-shaped entry apart
     // from `type`: it round-trips every other key the internal arm of
     // `ChartRendererProps.series` declares (`dataKey`/`label`/`chartType`/
-    // `variant`/`opacity`/`dashArray`/`stack`/`yAxis`/`color`/`aggregate`) unchanged, and
+    // `variant`/`opacity`/`dashArray`/`stack`/`yAxis`/`color`/`aggregate`/`measureFormat`) unchanged, and
     // translates `type` to `chartType` — the translation this routing exists
     // for. So always taking the normalized array
     // is not a second read site for `type` (AGENTS.md #0.1) — it is routing

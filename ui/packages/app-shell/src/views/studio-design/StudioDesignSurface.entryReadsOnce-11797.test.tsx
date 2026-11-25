@@ -63,6 +63,9 @@ vi.mock('../../preview/DraftChangesPanel', () => ({ DraftChangesPanel: () => nul
 // The console's preview and authoring code loads `@objectstack/lint` lazily;
 // warmed here so its first load is paid at import, not inside a test's clock.
 import '@objectstack/lint';
+// The surface mounts the command palette, whose record preview reaches the
+// `lazy()` detail entry: its first load is paid here too, not in a test's clock.
+import '@object-ui/plugin-detail';
 import { StudioDesignSurface } from './StudioDesignSurface';
 
 window.matchMedia = ((query: string) => ({
@@ -91,7 +94,7 @@ interface Held {
 let held: Held[] = [];
 let requested: string[] = [];
 
-const answer = (body: unknown) => ({ ok: true, status: 200, json: async () => body });
+const answer = (body: unknown) => ({ headers: new Headers(), ok: true, status: 200, json: async () => body });
 
 beforeEach(() => {
   held = [];

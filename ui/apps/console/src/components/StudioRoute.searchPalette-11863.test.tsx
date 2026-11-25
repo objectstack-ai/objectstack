@@ -42,14 +42,19 @@ function jsonResponse(body: unknown, status = 200): Response {
 vi.mock('@object-ui/auth', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   useAuth: () => auth,
-  createAuthenticatedFetch: () => async () =>
-    jsonResponse({
-      authenticated: true,
-      userId: 'u1',
-      systemPermissions: ['studio.access'],
-      objects: {},
-      fields: {},
-    }),
+  // The Studio gate's permissions read answers here; every other request (the
+  // package list included, which goes out through the authenticated fetch too)
+  // answers from the wire double each case stubs.
+  createAuthenticatedFetch: () => async (input: RequestInfo | URL, init?: RequestInit) =>
+    String(input).endsWith('/api/v1/auth/me/permissions')
+      ? jsonResponse({
+          authenticated: true,
+          userId: 'u1',
+          systemPermissions: ['studio.access'],
+          objects: {},
+          fields: {},
+        })
+      : fetch(input, init),
 }));
 
 // `AuthGuard` reaches `useAuth` through the auth package's OWN module graph,
