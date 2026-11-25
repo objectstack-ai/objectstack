@@ -966,6 +966,25 @@ function actionDeclarationReads(deps: DomainHandlerDeps, context: HttpProtocolCo
 }
 
 /**
+ * [#33712, #34325] What the MCP action tools hand the bridge beside a call
+ * (`McpActionCallDoor`, `@objectstack/mcp`, which this package does not
+ * depend on): the person's client as an elicitor, or the fact that the door
+ * would have asked a client that supports confirmation.
+ */
+type McpActionCallDoorFacts = {
+    elicitConfirmation?: actionExec.ActionConfirmationElicitor;
+    elicitsCapableClients?: boolean;
+};
+
+/** The door's facts as `invokeBusinessAction` / `resumeActionRun` wiring: each only when the door set it. */
+function actionCallDoorWiring(door: McpActionCallDoorFacts | undefined): McpActionCallDoorFacts {
+    return {
+        ...(typeof door?.elicitConfirmation === 'function' ? { elicitConfirmation: door.elicitConfirmation } : {}),
+        ...(door?.elicitsCapableClients === true ? { elicitsCapableClients: true } : {}),
+    };
+}
+
+/**
  * Build a principal-bound {@link McpDataBridge}: every method runs AS the
  * request's ExecutionContext through {@link callData} (RLS/permissions) and
  * the per-env metadata reads (the protocol's merged listing, or the metadata
@@ -1573,10 +1592,12 @@ export function buildMcpBridge(
             input: { objectName?: string; namespace?: string; recordId?: string; params?: Record<string, unknown> } & AIActionConfirmation,
             // [#33712] The door's channel to the person's client, set by the
             // tool only when the client can be elicited (`McpActionCallDoor`).
-            door?: { elicitConfirmation?: actionExec.ActionConfirmationElicitor },
+            // [#34325] Or, without one, `elicitsCapableClients`: the door
+            // would have asked a client that supports confirmation.
+            door?: McpActionCallDoorFacts,
         ) => actionExec.invokeBusinessAction(deps, context, name, input ?? {}, {
             driver, envId, ec, getMeta, readObjects: readServedObjects, readActions: readServedActions, callData,
-            ...(typeof door?.elicitConfirmation === 'function' ? { elicitConfirmation: door.elicitConfirmation } : {}),
+            ...actionCallDoorWiring(door),
         }),
         // [#15705] `resume_run`: continue the caller's own paused screen run.
         // Admitted by the same gates as `run_action`; see
@@ -1584,10 +1605,10 @@ export function buildMcpBridge(
         resumeRun: async (
             runId: string,
             input: { values?: Record<string, unknown> } & AIActionConfirmation,
-            door?: { elicitConfirmation?: actionExec.ActionConfirmationElicitor },
+            door?: McpActionCallDoorFacts,
         ) => resumeActionRun(deps, context, runId, input ?? {}, {
             driver, envId, ec, getMeta, readObjects: readServedObjects, readActions: readServedActions, callData,
-            ...(typeof door?.elicitConfirmation === 'function' ? { elicitConfirmation: door.elicitConfirmation } : {}),
+            ...actionCallDoorWiring(door),
         }),
         // ── Federation surface (McpFederationBridge, #27745) ───────
         // The `external-datasource` service Studio's datasource page reaches
@@ -2413,6 +2434,8 @@ export async function resumeActionRun(
         callData: (action: string, params: any, dataDriver?: any, scopeId?: string, ec?: any) => Promise<any>;
         /** [#33712] As `invokeBusinessAction`'s: the person asked in their client, in place of a hand-off. */
         elicitConfirmation?: actionExec.ActionConfirmationElicitor;
+        /** [#34325] As `invokeBusinessAction`'s: a no-service refusal names the client route too. */
+        elicitsCapableClients?: boolean;
         /**
          * [#34386] Present exactly when the call comes through the host's
          * resume door ({@link resumeActionRunRequest}), never at the MCP
@@ -2579,7 +2602,7 @@ export async function resumeActionRun(
             params: {},
             door: 'mcp',
             run: { runId, values: values ?? {}, ...(screenNodeId !== undefined ? { screenNodeId } : {}) },
-        }, ec);
+        }, ec, { elicitsCapableClients: wiring.elicitsCapableClients === true });
         if ('refused' in answer) {
             throw resumeDoorError(deps, answer.refused.message, answer.refused.status, {
                 code: answer.refused.code,

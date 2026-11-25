@@ -87,12 +87,27 @@ export type McpActionConfirmationElicitor = (subject: McpActionConfirmationSubje
 
 /**
  * What the action tools hand the bridge beside the request: the door's own
- * channel for this call, never anything the caller sent. Passed only when the
- * call can be elicited; a bridge reads its absence as "hand off".
+ * facts about this call, never anything the caller sent
+ * ({@link actionCallDoorFor}). A bridge reads a missing elicitor as "hand
+ * off"; with no door at all, nothing is known about the door.
  */
 export interface McpActionCallDoor {
-  /** Ask the person in their client (step 1); see {@link actionConfirmationElicitorFor}. */
-  elicitConfirmation: McpActionConfirmationElicitor;
+  /**
+   * Ask the person in their client (step 1); see
+   * {@link actionConfirmationElicitorFor}. Present only when this call can be
+   * elicited.
+   */
+  elicitConfirmation?: McpActionConfirmationElicitor;
+  /**
+   * [#34325] `true` when this door would ask a client that advertised
+   * `elicitation` (it read the client's `initialize` and can carry a request
+   * to it while the call is open) and this call's client did not advertise
+   * it, so no elicitor rides beside it. The `no_confirmation_service`
+   * refusal then names the route that works here: a client that supports
+   * confirmation (step 3). Never set on a door that cannot ask any client,
+   * where that sentence would be false.
+   */
+  elicitsCapableClients?: true;
 }
 
 /**
@@ -211,4 +226,33 @@ export function actionConfirmationElicitorFor(
       return error instanceof McpError && error.code === ErrorCode.RequestTimeout ? 'timed_out' : 'cancel';
     }
   };
+}
+
+/**
+ * [#34325] The door the action tools hand the bridge for the tool call `extra`
+ * belongs to ({@link McpActionCallDoor}), or `undefined` when there is
+ * nothing to tell it:
+ *
+ * - the client can be elicited: its elicitor (step 1);
+ * - this server read the client's `initialize` and can carry a request to it,
+ *   but the client advertised no form-mode `elicitation`:
+ *   `elicitsCapableClients`, so a `no_confirmation_service` refusal tells the
+ *   caller that a client supporting confirmation is asked in place here. That
+ *   is the long-lived stdio server today;
+ * - this server never read the client's `initialize`: `undefined`, the bridge
+ *   called as before. That is the per-request Streamable HTTP server, which
+ *   asks no client, so the refusal names only the in-app route there.
+ *
+ * Judged on what the server can do, never on a transport name: a door that
+ * comes to read `initialize` gets the step-3 sentence with the elicitation
+ * that makes it true.
+ */
+export function actionCallDoorFor(
+  server: McpServer,
+  extra: RequestHandlerExtra<ServerRequest, ServerNotification> | undefined,
+): McpActionCallDoor | undefined {
+  const elicitConfirmation = actionConfirmationElicitorFor(server, extra);
+  if (elicitConfirmation) return { elicitConfirmation };
+  const readInitialize = server.server.getClientCapabilities() !== undefined;
+  return readInitialize && typeof extra?.sendRequest === 'function' ? { elicitsCapableClients: true } : undefined;
 }
