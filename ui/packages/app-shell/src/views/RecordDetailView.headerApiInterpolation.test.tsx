@@ -285,8 +285,13 @@ describe("RecordDetailView api handler — `{field}` target interpolation (objec
       });
     });
 
-    expect(authFetchSpy).toHaveBeenCalledTimes(1);
-    const [url, init] = authFetchSpy.mock.calls[0] as unknown as [string, RequestInit];
+    // Exactly one trigger goes out. The page's own reads after it (they share the
+    // authenticated fetch) are not this handler's calls.
+    const triggers = (authFetchSpy.mock.calls as unknown as Array<[string, RequestInit]>).filter(([u]) =>
+      String(u).includes('/trigger'),
+    );
+    expect(triggers).toHaveLength(1);
+    const [url, init] = triggers[0];
     expect(url).toContain('/api/v1/automation/copy_plan_flow/trigger');
     const body = JSON.parse(String(init.body));
     expect(body.params).toEqual({ comment: 'hi' });

@@ -3022,6 +3022,14 @@ ComponentRegistry.register('form',
     // the explicit call belongs beside the `onDirtyChangeProp?.(...)` one
     // below, not back in a subscription's teardown ordering.
     const resetInFlightRef = React.useRef(false);
+    // The window in which a lookup's OPENING fill is written (objectstack#37289):
+    // the targets a create form's opening value fills from its record
+    // (`onAutofill(patch, { opening: true })`, objectstack#35050). The fill
+    // joins the opening values — the dirty baseline takes it first — so the
+    // dependent-lookup clear further down reads it as it reads a `defaultValues`
+    // reset: it re-bases and acts on nothing. That clear is its only reader;
+    // the value channels above report the fill as they always have.
+    const openingFillInFlightRef = React.useRef(false);
     /**
      * objectstack#28106 — try each AI-proposed change this form draws and has
      * not tried yet, against `baseline` (the record the form holds). Tried
@@ -3248,13 +3256,18 @@ ComponentRegistry.register('form',
     // still-mounted drawer, the carried input re-applied inside it — fills
     // the parent AND the lookup in one operation; read as an edit, it would
     // empty every saved pair the moment the record opened. So the comparison
-    // is re-based, never acted on, in two cases: inside the explicit reset
+    // is re-based, never acted on, in three cases: inside the explicit reset
     // window (`resetInFlightRef`, the same signal the two value channels above
-    // read), and on a notification that names no field — react-hook-form's
-    // whole-record replacement (`reset()`, including the bare ones the cancel
-    // and `resetOnSubmit` paths call). Everything else is a value moving in
-    // this form — a user's pick, or one of the clears above emptying a field —
-    // and is acted on. That is also what makes a multi-level chain converge:
+    // read); inside a lookup's opening fill (`openingFillInFlightRef`,
+    // objectstack#37289) — a create form that opened with a lookup AND the
+    // lookup scoping it (a related tab's New seeding both) has that lookup
+    // fill its own parent from its record, and read as an edit, that fill
+    // emptied the seeded pair and the record saved unlinked; and on a
+    // notification that names no field — react-hook-form's whole-record
+    // replacement (`reset()`, including the bare ones the cancel and
+    // `resetOnSubmit` paths call). Everything else is a value moving in this
+    // form — a user's pick, a fill that pick makes, or one of the clears above
+    // emptying a field — and is acted on. That is also what makes a multi-level chain converge:
     // clearing `contact` is itself a named change, so a lookup scoped by
     // `contact` is cleared in the same pass.
     //
@@ -3294,7 +3307,7 @@ ComponentRegistry.register('form',
         const before = seen;
         const now = readParents();
         seen = now;
-        if (resetInFlightRef.current || !info?.name) return;
+        if (resetInFlightRef.current || openingFillInFlightRef.current || !info?.name) return;
         const outermost = origin === undefined;
         if (outermost) origin = info.name;
         try {
@@ -4346,17 +4359,25 @@ ComponentRegistry.register('form',
                   // A fill made by the value a create form OPENED with
                   // (`opening`, objectstack#35050) joins the opening values:
                   // the dirty baseline takes it first, so a form nobody has
-                  // touched yet still closes without the discard prompt.
+                  // touched yet still closes without the discard prompt; and
+                  // it is written inside `openingFillInFlightRef`, so it moves
+                  // no dependent lookup's parent (objectstack#37289).
                   onAutofill:
                     !isCreateForm && CREATE_AUTOFILL_WIDGET_TYPES.has(normalizeFieldType(resolvedType))
                       ? undefined
                       : (patch: Record<string, unknown>, options?: { opening?: boolean }) => {
                           if (options?.opening) baselineRef.current = { ...baselineRef.current, ...patch };
-                          for (const [target, filled] of Object.entries(patch)) {
-                            form.setValue(target, filled, {
-                              shouldDirty: !options?.opening,
-                              shouldValidate: !!form.getFieldState(target).error,
-                            });
+                          const outerFill = openingFillInFlightRef.current;
+                          openingFillInFlightRef.current = outerFill || !!options?.opening;
+                          try {
+                            for (const [target, filled] of Object.entries(patch)) {
+                              form.setValue(target, filled, {
+                                shouldDirty: !options?.opening,
+                                shouldValidate: !!form.getFieldState(target).error,
+                              });
+                            }
+                          } finally {
+                            openingFillInFlightRef.current = outerFill;
                           }
                         },
                   // The value a create form opened with, for a lookup to fill

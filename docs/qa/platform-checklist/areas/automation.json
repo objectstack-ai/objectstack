@@ -2218,7 +2218,7 @@
       "title": "POST /automation/:name/clone (Studio's New similar): whole-definition copy mutating exactly name/label/status, written switched off (status obsolete) into a package — the base's .custom pair when `package` is omitted —, protection envelope dropped, no ancestry, notice verbatim, 400/404/409/422 refusal arms — and the honest clause: the copy survives a restart and reaches Studio",
       "since": "v17",
       "status": "active",
-      "revision": 13,
+      "revision": 14,
       "priority": "P1",
       "surface": "mixed",
       "personas": [
@@ -2230,7 +2230,7 @@
           "a FILE-backed database (the restart clause is unreachable without one — same discipline as automation.durable-suspend-restart)",
           "showcase_urgent_task_alert (packaged record_change flow — the no-double-fire specimen: its trigger is an urgent showcase_task create, cheap to fire) and showcase_task_done_notify_owner (packaged flow carrying a subflow node → showcase_notify_owner — the references-not-re-pointed specimen)",
           "the read-only base com.example.showcase and its pair com.example.showcase.custom: with `package` omitted the door ensures the pair (ADR-0146 D3) and lands the copy there (resolveCloneTarget, domains/automation.ts)",
-          "for acceptance[7]'s outside-closure arm, a writable package whose manifest declares no dependency on com.example.showcase (e.g. a scratch package made from the Studio landing); delete it at teardown"
+          "for acceptance[7]'s outside-closure arm, a writable package whose manifest declares no dependency on com.example.showcase (e.g. a scratch package made from Setup → Packages, New package); delete it at teardown"
         ]
       },
       "steps": [
@@ -2359,15 +2359,16 @@
           "date": "2026-11-15",
           "change": "clause wording corrected, not narrowed. acceptance[1]: the dropped keys are judged on the clone response and the stored definition; a later GET of the copy decorates _packageId naming the copy's own holder, which is a read decoration, not a key carried from the source. Source records: QA record #33853 (comment 6894307378) on #33761. Batch D of the #33761 close-out, card #33966",
           "ref": "#33984"
-        }
+        },
+        { "revision": 14, "date": "2026-11-25", "change": "fixtures.requires[3]: the scratch package is made from Setup → Packages (New package); the Studio landing it named is removed (#36908). No clause changed", "ref": "#36908" }
       ]
     },
     {
       "id": "automation.setup-packaged-automation-board",
-      "title": "The packaged-automation doors after ADR-0146 D4 (amended 2026-11-17)/D11: Setup nav serves neither retired page (both bookmarks land in Studio), Studio's Automations pillar lists the packaged flows, its ledger switch persists, a read-only app's vendor actions carry the same switch in the Data pillar and platform actions none, New similar is offered on flows only, no lineage surface, server refusals verbatim in role=alert",
+      "title": "The packaged-automation doors after ADR-0146 D4 (amended 2026-11-17)/D11: Setup nav serves neither retired page (the flows bookmark lands in Studio; the actions bookmark in Studio when it names a package, else on Setup → Packages), Studio's Automations pillar lists the packaged flows, its ledger switch persists, a read-only app's vendor actions carry the same switch in the Data pillar and platform actions none, New similar is offered on flows only, no lineage surface, server refusals verbatim in role=alert",
       "since": "v17",
       "status": "active",
-      "revision": 14,
+      "revision": 15,
       "priority": "P1",
       "surface": "browser",
       "personas": [
@@ -2390,7 +2391,7 @@
       },
       "steps": [
         "boot the showcase on its own port and DB (dogfood §0, OS_PORT exported); build/serve the pinned console; sign in as the dev admin",
-        "nav probe: GET /api/v1/meta/app?id=setup and confirm no served item names componentRef 'automation:packaged-actions' or 'automation:packaged' (nor the ids nav_packaged_actions / nav_packaged_automation), and that the rendered Setup sidebar has no Packaged actions entry. Then type each retired bookmark and record where it lands: /_console/apps/com.objectstack.setup/component/automation/packaged (no ?package= → /_console/studio/~all/metadata/flow; with ?package=com.example.showcase → /_console/studio/com.example.showcase/automations, the query kept) and /_console/apps/com.objectstack.setup/component/automation/packaged-actions (no ?package= → /_console/studio; with ?package=com.example.showcase → /_console/studio/com.example.showcase/data, the query kept)",
+        "nav probe: GET /api/v1/meta/app?id=setup and confirm no served item names componentRef 'automation:packaged-actions' or 'automation:packaged' (nor the ids nav_packaged_actions / nav_packaged_automation), and that the rendered Setup sidebar has no Packaged actions entry. Then type each retired bookmark and record where it lands: /_console/apps/com.objectstack.setup/component/automation/packaged (no ?package= → /_console/studio/~all/metadata/flow; with ?package=com.example.showcase → /_console/studio/com.example.showcase/automations, the query kept) and /_console/apps/com.objectstack.setup/component/automation/packaged-actions (no ?package= → Setup → Packages, /_console/apps/setup/component/developer/packages?face=admin; with ?package=com.example.showcase → /_console/studio/com.example.showcase/data, the query kept)",
         "open Studio on the read-only package: /_console/studio/com.example.showcase/automations; screenshot the rail settled",
         "inventory: compare the rail's flows against GET /api/v1/automation/_status (the runtime list whose rows carry the ledger flag) and GET /api/v1/meta/flow (the items whose _packageId is com.example.showcase). Open a flow (the URL gains ?surface=flow:NAME, studioPillarItemPath in metadataArea.ts) and read the header switch data-testid auto-ledger-switch as two facts: aria-checked is the ledger flag of that flow's _status row, and data-reading says whether the flow RUNS ('on' — 'Switched on for this deployment'; 'not-running' — 'Switched on for this deployment, not running here', with the platform's reason in auto-ledger-not-running-reason; 'off' — 'Switched off for this deployment'; engine.studio.auto.ledger.*). The readings come from objectui packagedFlows.ts activationReading, the same rule the retired page used. Expect showcase_approver_bindings (authored status: 'obsolete') off, and on a default boot (OS_AUTOMATION_SCHEDULED_WORK_ENABLED unset) showcase_scheduled_digest and showcase_task_due_reminder not-running with unboundCause 'deployment_policy'. Reconcile against _status, not against counts: QA run #29124 read 32 flows on both the rail and _status",
         "toggle: on showcase_urgent_task_alert flip auto-ledger-switch OFF (POST /api/v1/automation/showcase_urgent_task_alert/toggle); reload the page fully and re-open the flow; record the switch state and the sys_metadata_activation row (metadata_type 'flow', name showcase_urgent_task_alert, active false); flip it back ON",
@@ -2402,9 +2403,9 @@
       ],
       "acceptance": [
         {
-          "clause": "the Setup navigation serves neither retired page: the served setup app carries no item naming 'automation:packaged-actions' or 'automation:packaged', the rendered sidebar has no Packaged actions entry, and each retired bookmark lands in Studio (the flows page: the cross-package flow list, or the named package's Automations pillar; the actions page: the Studio landing, or the named package's Data pillar), never on a dead Setup page",
+          "clause": "the Setup navigation serves neither retired page: the served setup app carries no item naming 'automation:packaged-actions' or 'automation:packaged', the rendered sidebar has no Packaged actions entry, and each retired bookmark lands on a live page (the flows page, in Studio: the cross-package flow list, or the named package's Automations pillar; the actions page: Setup → Packages, or the named package's Data pillar in Studio), never on a dead Setup page",
           "oracle": "network",
-          "verify": "the GET /api/v1/meta/app?id=setup body names neither nav_packaged_actions nor nav_packaged_automation, and neither ref (setup-nav.contributions.ts ships no group_apps entry; both ids are tombstoned in setup-nav-dead-key-tombstone.test.ts). The bookmark legs are the navigation traces of steps[1]: /component/automation/packaged → /studio/~all/metadata/flow with no ?package=, → /studio/com.example.showcase/automations with one (packagedAutomationStudioPath); /component/automation/packaged-actions → /studio with no ?package=, → /studio/com.example.showcase/data with one (packagedActionsStudioPath); both pinned by AppContent.setupMetadataStudio-28578.test.tsx. ⛔ A unit pin alone does not tick this clause: the live served body + the rendered sidebar are the only observation that crosses the repo seam",
+          "verify": "the GET /api/v1/meta/app?id=setup body names neither nav_packaged_actions nor nav_packaged_automation, and neither ref (setup-nav.contributions.ts ships no group_apps entry; both ids are tombstoned in setup-nav-dead-key-tombstone.test.ts). The bookmark legs are the navigation traces of steps[1]: /component/automation/packaged → /studio/~all/metadata/flow with no ?package=, → /studio/com.example.showcase/automations with one (packagedAutomationStudioPath); /component/automation/packaged-actions → Setup → Packages (SETUP_PACKAGES_PATH) with no ?package=, → /studio/com.example.showcase/data with one (packagedActionsStudioPath); both pinned by AppContent.setupMetadataStudio-28578.test.tsx. ⛔ A unit pin alone does not tick this clause: the live served body + the rendered sidebar are the only observation that crosses the repo seam",
           "evidence": "the meta/app body + sidebar screenshot + the four bookmark navigation traces"
         },
         {
@@ -2563,7 +2564,8 @@
           "date": "2026-11-17",
           "change": "Setup › Packaged actions retired (objectstack#34724, the ADR-0146 D4 amendment of 2026-11-17): a read-only app's vendor action carries the ledger switch on its Actions view in Studio, a platform action none, and the page's bookmark lands in Studio. title, fixtures (requires[1], knownGaps[0..1]), steps[1], steps[6], steps[9], acceptance[0], [3], [4], [7], negative[0] (and one new negative), automated and source re-pointed. Read from source; no QA run has driven the Studio action switch yet.",
           "ref": "#34724"
-        }
+        },
+        { "revision": 15, "date": "2026-11-25", "change": "The Studio home is removed (#36908): the retired packaged-actions bookmark that names no package now opens Setup → Packages, not /_console/studio (packagedActionsStudioPath returns SETUP_PACKAGES_PATH, setupMetadataRedirect.ts; pinned in AppContent.setupMetadataStudio-28578 and setupMetadataRedirect.test.ts). title, steps[1] and acceptance[0] (clause and verify) re-pointed. Read from source at PR head; the flows bookmark and the package-named legs are unchanged. No clause narrowed", "ref": "#36908" }
       ]
     },
     {

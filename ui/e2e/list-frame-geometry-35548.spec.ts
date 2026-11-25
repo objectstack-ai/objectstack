@@ -7,7 +7,8 @@ import { uiRoot } from '../scripts/ui-root.mjs';
 
 /**
  * GEOMETRY pin for objectstack#35548 (epic #35547), as redrawn by
- * objectstack#35878 (two rows): the list page's frame.
+ * objectstack#35878 (two rows) and objectstack#36113 (three rows again: a
+ * 44px page bar above the view bar): the list page's frame.
  *
  *   view bar 40 (the object's name as the page's heading, the switcher and
  *   View settings on the left; search, New and ⋮ on the right) · condition
@@ -15,8 +16,7 @@ import { uiRoot } from '../scripts/ui-root.mjs';
  *   (objectstack#36048; 32 and 33 before it), 14px on the heading, the cells
  *   and the bar buttons and 12px on the header (objectstack#36047), the view switcher as one trigger (type
  *   icon → name → count → caret), and each column total under its own
- *   column, right edge on the column's right edge. No page bar is drawn
- *   above the view bar. A line of the row lines' colour and weight runs
+ *   column, right edge on the column's right edge. A line of the row lines' colour and weight runs
  *   between columns in the header, the rows and the footer row, and none
  *   after the last cell, drawn as an inset shadow (objectstack#36048).
  *
@@ -43,12 +43,17 @@ import { uiRoot } from '../scripts/ui-root.mjs';
  * from those sources; icons are empty boxes of their declared size; `cn`'s
  * merge is replaced by Tailwind's own utility order (a later `px-3` beats an
  * earlier `p-4` there too). The assertions are heights, font sizes, order and
- * edges, not pixels of glyphs.
+ * edges, not pixels of glyphs. So this file never opens the live app: it
+ * proves the real classes still compute to these sizes on a transcribed
+ * tree, not that the running Console draws them. The live reading is driven
+ * by hand (the checklist's records-forms.list-view-capabilities acceptance[10]).
  *
  * ## The live reading this was cut from
  * CRM 商机 at 1280×800 zh-CN, light and dark: top bar 48, page bar 44, view
  * bar 40, header 32, first data row top 164, rows 33, 13px throughout, totals
- * on their columns' right edges. After objectstack#35878 (showcase tasks at
+ * on their columns' right edges (before objectstack#36048 and objectstack#36047;
+ * milestone acceptance objectstack#37020 read 12px on the header labels and
+ * 14px on the cells and bar buttons live on main 305fe60e). After objectstack#35878 (showcase tasks at
  * 1312, light and dark): top bar 48, view bar 40, condition row 40, the
  * header's top at 128 with and without a condition set. The kanban view draws the same two bars —
  * pinned in `ListView.viewBarLeading-35548.test.tsx`, where the bars are

@@ -24,6 +24,8 @@ import { ShowcaseApp } from './src/ui/apps/index.js';
 import { ChartGalleryDashboard, OpsDashboard, RevenuePulseDashboard } from './src/ui/dashboards/index.js';
 import { ShowcaseTaskDataset, ShowcaseProjectDataset, ShowcaseInvoiceDataset, ShowcaseAccountDataset } from './src/ui/datasets/index.js';
 import { allReports } from './src/ui/reports/index.js';
+import { ShowcaseProjectBriefContext, ShowcaseTaskNotesContext } from './src/ai/index.js';
+import { RecordContextServicePlugin } from '@objectstack/service-record-context';
 import { allActions } from './src/ui/actions/index.js';
 import { CapabilityMapPage, StartHerePage, ComponentGalleryPage, ProjectWorkspacePage, ProjectDetailPage, TaskWorkbenchPage, TaskTriagePage, TaskBoardPage, TaskCalendarPage, TaskGalleryPage, TaskSchedulePage, TaskTimelinePage, TaskMapPage, TaskAllViewsPage, ActiveProjectsPage, TaskDetailPage, InvoiceDocumentPage, ReviewQueuePage, NewProjectWizardPage, MyWorkPage, SettingsPage, StylingGalleryPage, CommandCenterPage, CommandCenterJsxPage, CrmWorkbenchPage, TaskDeskPage, PageVariablesPage, ContactFormPage, RenewalsPipelinePage } from './src/ui/pages/index.js';
 import { allFlows } from './src/automation/flows/index.js';
@@ -168,6 +170,9 @@ export default defineStack({
     // (or `OS_PRINT_BROWSER_ENDPOINT`) and `OS_PRINT_CONSOLE_URL`. With none set
     // the plugin says so once at startup, and every print is refused 503.
     new PrintServicePlugin(),
+    // [ADR-0160] The record-context service: `get_record_context` over MCP
+    // reads the context packs below (`aiContexts`) as the caller.
+    new RecordContextServicePlugin(),
   ],
 
   // Infrastructure
@@ -214,6 +219,8 @@ export default defineStack({
   books: allBooks,
   datasets: [ShowcaseTaskDataset, ShowcaseProjectDataset, ShowcaseInvoiceDataset, ShowcaseAccountDataset],
   reports: allReports,
+  // [ADR-0160] Context packs read by `get_record_context` (src/ai/).
+  aiContexts: [ShowcaseProjectBriefContext, ShowcaseTaskNotesContext],
   actions: allActions,
   // `themes` retired at #10485 (ADR-0049) — recolour via `app.branding` instead.
 

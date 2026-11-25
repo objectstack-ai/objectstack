@@ -36,6 +36,7 @@ export const MetadataTypeSchema = z.enum([
   'agent',
   'tool',
   'skill',
+  'ai_context',
   'report',
   'translation',
   'role',

@@ -24,7 +24,7 @@ import { ComponentRegistry, ExpressionEvaluator, declaredNameField, isElementDat
 import type { ComponentInput } from '@object-ui/core';
 import { actionRendersAt, detectStatusField, arrangedHeaderActions, placedHeaderActions, resolveDeclaredActionIds } from '@object-ui/types';
 import type { DeclaredActionsRefusal } from '@object-ui/types';
-import { useRecordContext, useAction, useCapabilityGate, usePredicateScope, usePageVariables, useInlineEdit, useActionTextLocalizer, useMetadataItem, reportUnresolvableVisibilityPredicate, resolveInlineAriaProps, buildNodeEvaluationScope } from '@object-ui/react';
+import { useRecordContext, useAction, useCapabilityGate, useDrawsAction, usePredicateScope, usePageVariables, useInlineEdit, useActionTextLocalizer, useMetadataItem, reportUnresolvableVisibilityPredicate, resolveInlineAriaProps, buildNodeEvaluationScope } from '@object-ui/react';
 import { renderChildren, renderNodeSlot, cn } from '../../lib/utils';
 import { LazyIcon } from '../../lib/lazy-icon';
 import { RelatedCountStore, useRelatedCountVersion } from '../../hooks/related-count-store';
@@ -2121,6 +2121,9 @@ export const PageHeaderActions: React.FC<PageHeaderActionsProps> = ({
   const { execute } = useAction();
   // [ADR-0066 D4 / framework#3923] Shared capability gate — see filterAction.
   const mayInvoke = useCapabilityGate();
+  // [ADR-0160 D7] An `ask_ai` action is absent where the provider has no
+  // in-app assistant — see filterAction.
+  const drawsAction = useDrawsAction();
   const isMobile = useIsMobile();
   // The ONE resolver for a declared action's authored strings (objectui#4265).
   // This header used to localize `label` only — via `useObjectLabel().actionLabel`
@@ -2420,6 +2423,7 @@ export const PageHeaderActions: React.FC<PageHeaderActionsProps> = ({
       // [objectstack#27504] Switched off for this installation (served
       // activation state): not offered, as the door would refuse it.
       if (isActionSwitchedOff(a)) return false;
+      if (!drawsAction(a)) return false;
       // Boolean / expression visibility — supports both `visible: false`,
       // `visible: 'record.status == "open"'` and the structured shape
       // `visible: { dialect: 'cel', source: '…' }` used by spec authors.

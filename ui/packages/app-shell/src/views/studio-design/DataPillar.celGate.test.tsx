@@ -114,6 +114,7 @@ import { registerBuiltinInspectors } from '../metadata-admin/inspectors';
 // The source under test reaches a dynamic import of `@objectstack/lint`: its first
 // load is paid here, at collection, never inside a case's clock (`check:test-source-alias`).
 import '@objectstack/lint';
+import '@object-ui/plugin-detail';
 import { __setCelFormulaLoader } from '../metadata-admin/celAuthoring';
 
 const dataSource = createEmptyDataSource();
@@ -158,7 +159,7 @@ async function openFormulaField() {
   stubEngine();
   render(
     <StudioSaveHarness><MemoryRouter initialEntries={['/studio/com.example.showcase/data']}>
-      <DataPillar packageId="com.example.showcase" />
+      <DataPillar objectName="showcase_task" packageId="com.example.showcase" />
     </MemoryRouter></StudioSaveHarness>,
   );
   fireEvent.click(await screen.findByRole('button', { name: 'Field layout' }));
@@ -201,29 +202,10 @@ describe('DataPillar — Save is gated on the field inspector’s CEL verdict (#
   });
 });
 
-/**
- * objectstack#27485, the switch arm — shared with objectstack#27511's
- * flush-or-ask switch: an edit the CEL verdict holds cannot be sent, so a
- * switch to another object asks before its load replaces the buffer.
- */
-describe('DataPillar — a switch to another object over a held formula (objectstack#27485)', () => {
-  it('asks; declined, the edit stays; agreed, it is dropped unsent', async () => {
-    const box = await openFormulaField();
-    fireEvent.change(box, { target: { value: 'record.est_hours *' } });
-    await new Promise((r) => setTimeout(r, 2300));
-    expect(mockClient.save).not.toHaveBeenCalled();
-
-    fireEvent.click(screen.getByRole('button', { name: /Site/ }));
-    expect(confirmSpy).toHaveBeenCalledTimes(1);
-    expect(box.value).toBe('record.est_hours *');
-
-    confirmSpy.mockReturnValue(true);
-    fireEvent.click(screen.getByRole('button', { name: /Site/ }));
-    await waitFor(() => expect(screen.queryByText('Est hours')).toBeNull(), { timeout: 3000 });
-    await new Promise((r) => setTimeout(r, 2300));
-    expect(mockClient.save).not.toHaveBeenCalled();
-  });
-});
+// objectstack#36904 — the switch arm of objectstack#27485 (a switch to another
+// object over a held formula asks) left with the object rail: another object
+// is another address, and leaving one is the shell's leave guard
+// (`StudioDesignSurface.heldDataLeave-26705.test.tsx`).
 
 /** The ways the field inspector closes (the card's step 4). */
 const CLOSERS: Array<[string, () => void]> = [

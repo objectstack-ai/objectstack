@@ -17,56 +17,97 @@
  * ## Entries
  *
  * A type entry for each type the package's directory lists (the same rule,
- * `scopeDirectoryEntries`), plus the types a designer creates in
- * ({@link STUDIO_MENU_DESIGNER_TYPES}), so a package without an object, a flow
- * or a permission set can still make its first. Each opens the type's list in
- * the "All metadata" area; an item opened there that a pillar designs still
- * opens its pillar until the pillars become full-screen pages
- * (`areaItemPillarPath`).
+ * `scopeDirectoryEntries`), plus every 常用 Common type
+ * ({@link STUDIO_MENU_ALWAYS_TYPES}), so a package that holds no app, page,
+ * dashboard, report, flow, permission set or agent still shows where the
+ * first is made. Each opens the type's list in the "All metadata" area; an
+ * item opened there that a pillar designs still opens its pillar until the
+ * pillars become full-screen pages (`areaItemPillarPath`). objectstack#36905
+ * — a permission set already has.
  *
  * And four entries that open no type's list, each in the group of what it
  * holds (the amendment's "Entries that are not a type"):
  *  - the organization's own flows (`~org`), under Automation;
- *  - the organization-wide default sharing overview, under Access (today the
- *    Access pillar's `?surface=owd:overview`; its own route is a later card's);
+ *  - the organization-wide default sharing overview, under Access, on its own
+ *    route (`/studio/<package>/owd`, objectstack#36905);
  *  - diagnostics, under Platform;
  *  - the cross-package environment catalog (`~all`), under Access.
  *
+ * ## Order and tier (ADR-0084, amended 2026-11-25; objectstack#37201)
+ *
+ * Inside a group the type entries follow the placement table
+ * (`STUDIO_MENU_PLACEMENT`, `studioMenuPlacement.ts`), and each entry carries
+ * its row's tier. A type with no row is 高级 Advanced and is drawn after the
+ * placed types of its group, in served order. The four entries that are not a
+ * type are 高级 and follow the types of their group, in the order above.
+ *
+ * A 常用 entry the diagnostics sweep has answered for, holding no item, is
+ * `empty`: drawn dimmed, with no number, and still a link. Before the sweep
+ * answers (`settled`), nothing is empty: "not counted yet" is not "none".
+ *
  * ## Scopes
  *
- * On a package, all six groups are drawn, an empty one included, so the menu
- * reads the same on every package. The package-less scope (`~org`) and the
- * cross-package leg (`~all`) name no package: their menu is the environment's
- * — the organization's flows and the environment catalog's types — and only
- * the groups that hold an entry are drawn.
+ * On a package, a group is drawn in a tier only where it holds an entry of
+ * that tier: the 常用 groups first, then one 高级 fold (`StudioMenu.tsx`).
+ * The package-less scope (`~org`) and the cross-package leg (`~all`) name no
+ * package: their menu is the environment's — the organization's flows and the
+ * environment catalog's types — drawn flat, in the same order, with no fold;
+ * only the groups that hold an entry are drawn.
  */
 
 import { ENVIRONMENT_SCOPE_QUERY } from '../metadata-admin/catalog-scope.js';
 import { SETUP_DATASOURCES_PATH } from '../metadata-admin/metadataAreaHost.js';
-import { DESIGNER_SURFACE_PARAM } from '../metadata-admin/nav-selection.js';
 import { AREA_PILLAR_FOR_TYPE, isStudioAllPackagesScope } from './metadataArea.js';
 import {
   STUDIO_ALL_PACKAGES_SEGMENT,
   STUDIO_METADATA_AREA,
+  STUDIO_OWD_SECTION,
   studioMetadataAreaAddress,
   studioMetadataAreaRoot,
+  studioOwdOverviewPath,
   studioPackagePath,
-  studioPillarItemAddress,
 } from './studioAddress.js';
 import { isStudioOrgScope, studioOrgScopePath } from './studioScope.js';
+import { STUDIO_MENU_PLACEMENT, type StudioMenuTier } from './studioMenuPlacement.js';
+
+export type { StudioMenuTier } from './studioMenuPlacement.js';
 
 /** The menu's collapse state, kept apart from the app sidebar's `sidebar_state`. */
 export const STUDIO_MENU_COOKIE = 'studio_menu_state';
+
+/**
+ * The 高级 Advanced fold's open state, per browser (objectstack#37201). Its own
+ * cookie: opening the fold never touches the menu's collapse state.
+ */
+export const STUDIO_MENU_ADVANCED_COOKIE = 'studio_menu_advanced';
+
+/**
+ * The fold's remembered state from a cookie jar (`document.cookie`): `true`
+ * or `false` as the menu writes it, else `false` — closed by default. Only
+ * the two literals the menu writes are read; any other value is no
+ * preference.
+ */
+export function readStudioMenuAdvancedCookie(jar: string): boolean {
+  for (const part of jar.split(';')) {
+    const at = part.indexOf('=');
+    if (at === -1 || part.slice(0, at).trim() !== STUDIO_MENU_ADVANCED_COOKIE) continue;
+    return part.slice(at + 1).trim() === 'true';
+  }
+  return false;
+}
 
 /** The six groups, in the amendment's order: each is a registered `domain`. */
 export const STUDIO_MENU_GROUPS = ['data', 'ui', 'automation', 'system', 'security', 'ai'] as const;
 export type StudioMenuGroup = (typeof STUDIO_MENU_GROUPS)[number];
 
-/** The types a designer creates in: listed on every package, holding one or not. */
-export const STUDIO_MENU_DESIGNER_TYPES: readonly string[] = Object.keys(AREA_PILLAR_FOR_TYPE);
-
-/** The OWD overview's address on the Access pillar (`AccessPillar`'s deep link). */
-const OWD_OVERVIEW_SURFACE = { type: 'owd', name: 'overview' } as const;
+/**
+ * The types a package's menu always lists, holding one or not: the 常用 Common
+ * types of the placement table, in its order (ADR-0084, amended 2026-11-25).
+ * Read off the table, so a type moved between the tiers there moves here.
+ */
+export const STUDIO_MENU_ALWAYS_TYPES: readonly string[] = Object.freeze(
+  STUDIO_MENU_PLACEMENT.filter((row) => row.tier === 'common').map((row) => row.type),
+);
 
 export type StudioMenuEntryKind = 'type' | 'orgFlows' | 'owd' | 'diagnostics' | 'environment';
 
@@ -79,6 +120,13 @@ export interface StudioMenuEntry {
   to: string;
   /** A `type` entry's served item count; absent when the sweep did not say. */
   count?: number;
+  /** 常用 Common or 高级 Advanced: the placement table's row, else Advanced. */
+  tier: StudioMenuTier;
+  /**
+   * A 常用 type the settled sweep counts no item of, on a package: drawn
+   * dimmed, with no number, and still a link (where the first is made).
+   */
+  empty?: boolean;
 }
 
 export interface StudioMenuGroupModel {
@@ -106,44 +154,73 @@ function typeEntryPath(scope: StudioMenuScope, type: string): string {
   });
 }
 
+/** Each placed type's row index: its order inside its group. */
+const PLACEMENT_INDEX: ReadonlyMap<string, number> = new Map(STUDIO_MENU_PLACEMENT.map((row, i) => [row.type, i]));
+const PLACEMENT_TIER: ReadonlyMap<string, StudioMenuTier> = new Map(STUDIO_MENU_PLACEMENT.map((row) => [row.type, row.tier]));
+
 /**
  * The menu's groups and entries. `types` are the served type entries the
- * directory rule already scoped to this menu (`scopeDirectoryEntries`), in
- * served order; a type whose domain is none of the six is not drawn.
+ * directory rule already scoped to this menu (`scopeDirectoryEntries`); a type
+ * whose domain is none of the six is not drawn. Inside a group the types
+ * follow the placement table, an unplaced type after the placed ones in
+ * served order, then the entries that are not a type. `settled` says the
+ * diagnostics sweep has answered, so a missing count means none.
  */
 export function buildStudioMenu(input: {
   scope: StudioMenuScope;
   types: ReadonlyArray<{ type: string; domain?: string }>;
   counts: Readonly<Record<string, number>>;
+  settled?: boolean;
 }): StudioMenuGroupModel[] {
-  const { scope, types, counts } = input;
+  const { scope, types, counts, settled = false } = input;
   const groups = new Map<StudioMenuGroup, StudioMenuEntry[]>(STUDIO_MENU_GROUPS.map((g) => [g, []]));
-  for (const t of types) {
+  // An unplaced type ranks after every row; the sort is stable, so those keep served order.
+  const rank = (type: string) => PLACEMENT_INDEX.get(type) ?? STUDIO_MENU_PLACEMENT.length;
+  const placed = [...types].sort((a, b) => rank(a.type) - rank(b.type));
+  for (const t of placed) {
     const entries = groups.get(t.domain as StudioMenuGroup);
     if (!entries) continue;
-    entries.push({ key: `type:${t.type}`, kind: 'type', type: t.type, to: typeEntryPath(scope, t.type), count: counts[t.type] });
+    const tier = PLACEMENT_TIER.get(t.type) ?? 'advanced';
+    const count = counts[t.type];
+    const entry: StudioMenuEntry = { key: `type:${t.type}`, kind: 'type', type: t.type, to: typeEntryPath(scope, t.type), count, tier };
+    if (scope.kind === 'package' && tier === 'common' && settled && !((count ?? 0) > 0)) entry.empty = true;
+    entries.push(entry);
   }
-  groups.get('automation')!.push({ key: 'orgFlows', kind: 'orgFlows', to: studioOrgScopePath() });
+  groups.get('automation')!.push({ key: 'orgFlows', kind: 'orgFlows', to: studioOrgScopePath(), tier: 'advanced' });
   if (scope.kind === 'package') {
     groups.get('system')!.push({
       key: 'diagnostics',
       kind: 'diagnostics',
       to: studioMetadataAreaAddress(scope.packageId, '_diagnostics'),
+      tier: 'advanced',
     });
     groups.get('security')!.push({
       key: 'owd',
       kind: 'owd',
-      to: studioPillarItemAddress(scope.packageId, 'access', OWD_OVERVIEW_SURFACE),
+      to: studioOwdOverviewPath(scope.packageId),
+      tier: 'advanced',
     });
   }
   groups.get('security')!.push({
     key: 'environment',
     kind: 'environment',
     to: studioMetadataAreaRoot(STUDIO_ALL_PACKAGES_SEGMENT),
+    tier: 'advanced',
   });
-  return STUDIO_MENU_GROUPS.map((group) => ({ group, entries: groups.get(group)! })).filter(
-    (g) => scope.kind === 'package' || g.entries.length > 0,
-  );
+  return STUDIO_MENU_GROUPS.map((group) => ({ group, entries: groups.get(group)! })).filter((g) => g.entries.length > 0);
+}
+
+/**
+ * The menu split into its two tiers on a package: the 常用 groups and the
+ * 高级 fold's groups, each holding only that tier's entries, and a group only
+ * where it holds one (ADR-0084, amended 2026-11-25, §3.3).
+ */
+export function studioMenuTiers(menu: readonly StudioMenuGroupModel[]): Record<StudioMenuTier, StudioMenuGroupModel[]> {
+  const of = (tier: StudioMenuTier) =>
+    menu
+      .map(({ group, entries }) => ({ group, entries: entries.filter((e) => e.tier === tier) }))
+      .filter((g) => g.entries.length > 0);
+  return { common: of('common'), advanced: of('advanced') };
 }
 
 /** The entry keys of the type each pillar designs (the transition's pillar pages). */
@@ -158,13 +235,12 @@ const PILLAR_TYPE: Readonly<Record<string, string>> = Object.fromEntries(
  *  - the package-less scope: its flows;
  *  - an area URL: its type, diagnostics, or on the cross-package leg's root
  *    the environment catalog;
- *  - a pillar page: the type the pillar designs — the OWD overview on the
- *    Access pillar while its `?surface=` names it.
+ *  - the sharing overview's route: the OWD overview;
+ *  - a pillar page: the type the pillar designs.
  */
 export function studioMenuCurrentKey(input: { segment: string; pathname: string; search: string }): string | null {
   const { segment, pathname } = input;
   if (isStudioOrgScope(segment)) return 'orgFlows';
-  const search = new URLSearchParams(input.search);
   const areaRoot = studioMetadataAreaRoot(segment);
   if (pathname === areaRoot || pathname.startsWith(`${areaRoot}/`)) {
     const [first] = pathname.slice(areaRoot.length).split('/').filter(Boolean);
@@ -176,9 +252,7 @@ export function studioMenuCurrentKey(input: { segment: string; pathname: string;
   const raw = pathname.startsWith(prefix) ? pathname.slice(prefix.length) : '';
   const pillar = raw.split('/')[0];
   if (pillar === STUDIO_METADATA_AREA) return null;
-  if (pillar === 'access' && (search.get(DESIGNER_SURFACE_PARAM) ?? '').startsWith(`${OWD_OVERVIEW_SURFACE.type}:`)) {
-    return 'owd';
-  }
+  if (pillar === STUDIO_OWD_SECTION) return 'owd';
   const type = PILLAR_TYPE[pillar];
   return type ? `type:${type}` : null;
 }

@@ -69,6 +69,9 @@ const de = {
     autofillNoCurrency: '{{field}} wurde nicht ausgefüllt: Der gewählte Betrag ist {{amount}}, hier ist aber noch keine Währung gewählt. Wählen Sie die Währung und geben Sie dann {{field}} ein.',
     autofillCurrencyUnread: '{{field}} wurde nicht ausgefüllt: Der gewählte Betrag ist {{amount}}, die Währung hier konnte aber nicht gelesen werden. Prüfen Sie die Währung und geben Sie dann {{field}} ein.',
     autofillKept: '{{field}} behält seinen bisherigen Wert.',
+    autofillNowSameCurrency: '{{field}} wurde bei der Auswahl nicht ausgefüllt. Der Datensatz ist jetzt in {{to}}: Wählen Sie erneut, um {{amount}} einzutragen.',
+    autofillNowSameCurrencyHeld: '{{field}} wurde bei der Auswahl nicht ausgefüllt und behält seinen bisherigen Wert. Der Datensatz ist jetzt in {{to}}: Leeren Sie {{field}} und wählen Sie erneut, um {{amount}} einzutragen.',
+    autofillCopiedUnder: '{{field}} wurde als {{amount}} übernommen, der Datensatz ist jetzt aber in {{to}}. Geben Sie {{field}} bei Bedarf in {{to}} ein.',
   },
   common: {
     // objectui#13461 — a disclosure toggle's name (the tree-view node toggle).
@@ -678,6 +681,7 @@ const de = {
       needsWholeRows:
         "Die Gruppierung benötigt alle Datensätze, aber dieses Raster hat nur eine Seite davon erhalten, daher können die Gruppen nicht gezählt werden. Übergeben Sie alle Datensätze oder lassen Sie das Raster sie aus einer Datenquelle laden, die queryGroupHeaders implementiert.",
       draftOnly: "Nicht nach {{fields}} gruppiert: Das Feld existiert nur im Entwurf, bis Sie veröffentlichen.",
+      moreGroupsNotLoaded: "Weitere Gruppen wurden nicht geladen: Diese Ansicht hat mehr Gruppen, als der Server in einem Lesevorgang zurückgibt, daher wird nur ein Teil angezeigt.",
     },
     // objectui#4024 — column-footer aggregate prefixes, keyed by the spec's
     // `ColumnSummary` vocabulary. `pattern` owns the label/value join so this
@@ -1773,6 +1777,12 @@ const de = {
       noCategoryAxis: "Kategorieachse des Diagramms erforderlich — ein objektgebundenes Diagramm erfindet keine. Deklarieren Sie eine davon:",
     },
   },
+  // objectstack#36906 — the × of an app page opened from a Studio list.
+  studioReturn: {
+    close: 'Zurück zu Studio',
+    closeLabel: 'Schließen und zur Studio-Liste zurückkehren',
+    leaveConfirm: 'Ohne Speichern verlassen? Nicht gespeicherte Änderungen gehen verloren.',
+  },
   dashboard: {
     // objectui#7063 — the DEFAULT empty state every dashboard widget renders
     // when its query SUCCEEDED and returned nothing. It replaced the terse
@@ -2443,6 +2453,14 @@ const de = {
       changesDrafted: "Als Entwurf gespeichert",
       changesFailed: "Nicht angewendet",
       discussing: "Angezeigt: {{target}}",
+      focus: {
+        pin: "Weiter zu diesem Datensatz fragen",
+        pinned: "Fragen zu: {{target}}",
+        remove: "Nicht mehr zu diesem Datensatz fragen",
+        switchPrompt: "Stattdessen zu „{{target}}“ fragen?",
+        switchAccept: "Wechseln",
+        switchDecline: "Beibehalten",
+      },
       changeVerb: {
         createObject: "Objekt erstellen",
         addField: "Feld hinzufügen",
@@ -2487,6 +2505,7 @@ const de = {
       unavailableTitle: "KI-Assistent nicht verfügbar",
       unavailableDescription: "In dieser Bereitstellung ist kein KI-Assistent aktiviert. Alles andere funktioniert wie gewohnt.",
       unavailableError: "Der KI-Dienst war nicht erreichbar. Er ist möglicherweise vorübergehend offline — versuchen Sie es erneut, oder kehren Sie zur Startseite zurück.",
+      unavailableErrorDesktop: "Der KI-Dienst war nicht erreichbar. Er ist möglicherweise vorübergehend offline — versuchen Sie es erneut, oder kehren Sie zur Startseite der App zurück.",
       unavailableRetry: "Erneut versuchen",
       unavailableHome: "Zurück zur Startseite",
       dock: {
@@ -2855,11 +2874,12 @@ const de = {
       resetViewTitle: "Stellt die eigenen Filter, Suche, Sortierung, Gruppierung, Spaltenanordnung, ausgeblendeten Felder, Dichte, Layout, Zeilenfarbe, Zeilennummern und Inline-Bearbeitung dieser Ansicht wieder her. Angeheftete Ansichten, Favoriten und die Art, wie Datensätze geöffnet werden, bleiben unverändert. Nur Ihre Liste ändert sich.",
       personalized: "Personalisiert",
       personalizedHeading: "Ihre Liste weicht von dieser Ansicht ab bei",
-      // objectstack#35955 — a list's unsaved changes: Discard and Save.
+      // objectstack#35955 — a list's unsaved changes: Reset and Update view
+      // (objectstack#36737, the view's own actions, as Twenty's).
       draft: {
-        discard: "Verwerfen",
+        discard: "Zurücksetzen",
         discardTitle: "Setzt die Liste auf den Stand der Ansicht zurück: Filter, Sortierung, Gruppierung, Spalten und Layout. Spaltenbreiten und Zeilenhöhe bleiben.",
-        save: "Speichern",
+        save: "Ansicht aktualisieren",
         heading: "Ungespeicherte Änderungen",
         partSeparator: ", ",
         saveToView: "In dieser Ansicht speichern",
@@ -3715,21 +3735,18 @@ const de = {
   },
   home: {
     build: {
-      title: "App erstellen",
       noCapability: "Das Erstellen von Apps ist in diesem System nicht verfügbar — es erfordert die Berechtigung „Metadaten verwalten“, die Ihr Konto nicht besitzt.",
-      inStudio: "Neu in Studio",
+      inStudio: "Neue leere App",
     },
     template: {
       title: "Mit einer Vorlage starten",
       marketplaceDisabled: "Für diese Laufzeitumgebung ist kein App-Marktplatz konfiguriert, daher gibt es hier keine Vorlagen zum Installieren.",
     },
-    welcomeAdminDescription: "Beschreiben Sie Ihr Geschäft in einem Satz — die KI erzeugt die Objekte, Bildschirme, APIs und Agent-Tools. Oder richten Sie alles selbst über das Menü links ein.",
     welcomeAdminDescriptionNoBuild: "Richten Sie Ihre erste Anwendung über das Verwaltungsmenü links ein. Sobald Daten vorhanden sind, kann der KI-Assistent bei der Auswertung helfen.",
     welcomeAdminDescriptionNoAi: "Richten Sie Ihre erste Anwendung über das Verwaltungsmenü links ein.",
     noAppsTitle: "Noch keine Anwendungen",
     noAppsDescription: "Das System wird eingerichtet — Apps, die Ihr Administrator für Sie freigibt, erscheinen hier.",
     noAppsAddDescription: "Erstellen Sie Ihre erste App, oder beginnen Sie mit einer Vorlage oder dem App-Marktplatz.",
-    buildWithAI: "Mit KI erstellen",
     askAI: "KI fragen",
     recoveryReminder: {
       message: "Legen Sie ein Wiederherstellungspasswort fest, damit Sie sich auch anmelden können, wenn Single Sign-on einmal nicht verfügbar ist.",
@@ -3856,7 +3873,7 @@ const de = {
       allApps: "Alle Apps",
       editAppInStudio: "{{app}} im Studio bearbeiten",
       openAppInStudio: "{{app}} im Studio ansehen",
-      backToHome: "Zurück zur Startseite",
+      backToHome: "Zurück zur Startseite der App",
       settings: "Einstellungen",
       productHome: "{{product}} Startseite",
       addApp: 'App hinzufügen',
@@ -4125,6 +4142,8 @@ const de = {
       settings: "Berichtseinstellungen",
       pendingDraft: "Dieser Bericht hat unveröffentlichte Änderungen. Veröffentlichen oder verwerfen Sie sie oben und speichern Sie dann.",
       nameTaken: "Alle aus diesem Namen gebildeten Kennungen sind bereits vergeben. Geben Sie dem Bericht einen anderen Namen und speichern Sie dann erneut.",
+      // objectstack#36906 — a report made from Studio's report list that could not be saved in the app's package.
+      savedOutsideApp: "Dieser Bericht wurde außerhalb des App-Pakets gespeichert, weil das Anpassungspaket der App hier nicht verwendet werden kann. Die Studio-Liste zeigt ihn daher nicht.",
       adminOnlyTitle: "Nur Workspace-Administratoren können Berichte erstellen",
       adminOnly: "Ein Bericht gilt für alle im Workspace, daher erstellt ihn ein Administrator.",
       designModeOnTitle: "Schließen Sie zuerst die Layoutgestaltung ab",
@@ -4666,6 +4685,7 @@ const de = {
     tool: {
       aggregate_data: "Die Daten zusammenfassen",
       get_record: "Den Datensatz lesen",
+      get_record_context: "Den Kontext des Datensatzes lesen",
       list_datasets: "Die verfügbaren Kennzahlen ansehen",
       query_data: "Die benötigten Daten abfragen",
       query_dataset: "Über eine Kennzahl abfragen",
@@ -4980,6 +5000,10 @@ const de = {
     actComment: 'Kommentiert',
     actSystemNote: 'Systemhinweis',
     stepProgress: 'Genehmigungsschritte',
+    outcomeWaiting: 'Weiter an {{step}}, wartet auf eine Entscheidung',
+    outcomeNow: 'Weiter an {{step}}: {{decision}}',
+    outcomeEndedAt: 'Weiter an {{step}}, dann beendet: {{decision}}',
+    outcomeEndedHere: 'Die Genehmigung endete hier',
     prevRequest: 'Zurück',
     nextRequest: 'Weiter',
     positionOf: 'Anfrage {{index}} von {{total}}',
@@ -5130,7 +5154,12 @@ const de = {
     bulkRejected: '{{count}} Anfragen abgelehnt',
     bulkRejected_one: '{{count}} Anfrage abgelehnt',
     bulkRejected_other: '{{count}} Anfragen abgelehnt',
-    bulkPartial: '{{ok}} erfolgreich, {{fail}} fehlgeschlagen: {{which}}',
+    bulkPartialSummary: '{{ok}} erfolgreich, {{fail}} fehlgeschlagen',
+    bulkFailureLine: '{{title}}: {{reason}}',
+    bulkFailuresShowAll: 'Alle anzeigen ({{n}})',
+    bulkFailuresTitle: 'Nicht entschieden: {{n}}',
+    bulkFailuresBody: 'Diese Anfragen blieben unverändert. Bei jeder steht der Grund.',
+    close: 'Schließen',
     rejectOneTitle: '„{{title}}“ ablehnen?',
     rejectOneBody: 'Die Anfrage wird abgelehnt und der Antragsteller benachrichtigt.',
     rejectTitle: 'Diese Anfrage ablehnen?',
@@ -5305,6 +5334,9 @@ const de = {
         skill: '{{count}} KI-Fähigkeiten',
         skill_one: '{{count}} KI-Fähigkeit',
         skill_other: '{{count}} KI-Fähigkeiten',
+        ai_context: '{{count}} KI-Kontextpakete',
+        ai_context_one: '{{count}} KI-Kontextpaket',
+        ai_context_other: '{{count}} KI-Kontextpakete',
         datasource: '{{count}} Datenquellen',
         datasource_one: '{{count}} Datenquelle',
         datasource_other: '{{count}} Datenquellen',

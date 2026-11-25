@@ -192,7 +192,7 @@ const result = AutomationApiErrorCode.parse(data);
 | **_lock** | `Enum<'none' \| 'no-overlay' \| 'no-delete' \| 'full'>` | optional | Item-level lock — controls overlay & delete (ADR-0010). |
 | **_lockReason** | `string` | optional | Human-readable reason shown when a write is refused by _lock. |
 | **_lockSource** | `Enum<'artifact' \| 'package' \| 'env-forced'>` | optional | Layer that set _lock (artifact \| package \| env-forced). |
-| **_provenance** | `Enum<'package' \| 'org' \| 'env-forced'>` | optional | Origin of the item (package \| org \| env-forced). |
+| **_provenance** | `Enum<'package' \| 'org' \| 'env-forced' \| 'platform'>` | optional | Origin of the item (package \| org \| env-forced \| platform). |
 | **_packageId** | `string` | optional | Owning package machine id. |
 | **_packageVersion** | `string` | optional | Owning package version. |
 | **_lockDocsUrl** | `string` | optional | Optional documentation link surfaced next to _lockReason. |
@@ -322,7 +322,7 @@ const result = AutomationApiErrorCode.parse(data);
 | **_lock** | `Enum<'none' \| 'no-overlay' \| 'no-delete' \| 'full'>` | optional | Item-level lock — controls overlay & delete (ADR-0010). |
 | **_lockReason** | `string` | optional | Human-readable reason shown when a write is refused by _lock. |
 | **_lockSource** | `Enum<'artifact' \| 'package' \| 'env-forced'>` | optional | Layer that set _lock (artifact \| package \| env-forced). |
-| **_provenance** | `Enum<'package' \| 'org' \| 'env-forced'>` | optional | Origin of the item (package \| org \| env-forced). |
+| **_provenance** | `Enum<'package' \| 'org' \| 'env-forced' \| 'platform'>` | optional | Origin of the item (package \| org \| env-forced \| platform). |
 | **_packageId** | `string` | optional | Owning package machine id. |
 | **_packageVersion** | `string` | optional | Owning package version. |
 | **_lockDocsUrl** | `string` | optional | Optional documentation link surfaced next to _lockReason. |
@@ -425,7 +425,7 @@ const result = AutomationApiErrorCode.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **code** | `Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| 'INVALID_FORMAT' \| 'VALUE_TOO_LONG' \| 'VALUE_TOO_SHORT' \| 'VALUE_OUT_OF_RANGE' \| … +380 more>` | ✅ | The inner refusal's code in its WIRE spelling - the ADR-0112 member a record save of the same write answers in `error.code` (e.g. `UNIQUE_VIOLATION`); the closed set `ApiErrorSchema.code` parses against |
+| **code** | `Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| 'INVALID_FORMAT' \| 'VALUE_TOO_LONG' \| 'VALUE_TOO_SHORT' \| 'VALUE_OUT_OF_RANGE' \| … +381 more>` | ✅ | The inner refusal's code in its WIRE spelling - the ADR-0112 member a record save of the same write answers in `error.code` (e.g. `UNIQUE_VIOLATION`); the closed set `ApiErrorSchema.code` parses against |
 | **message** | `string` | ✅ | The inner refusal's own diagnostic text, verbatim, without the node and operation prefixes the run's failure text adds |
 
 ### Allowed Values: `FlowInnerRefusal.code`
@@ -646,6 +646,7 @@ const result = AutomationApiErrorCode.parse(data);
 * `INVITE_SMS_FAILED`
 * `IP_NOT_ALLOWED`
 * `ITEM_LOCKED`
+* `KNOWLEDGE_REBUILD_REQUIRED`
 * `LAST_LOCAL_CREDENTIAL`
 * `LEGACY_ORGANIZATION_ROWS_UNREADABLE`
 * `MANIFEST_CONFLICT`
@@ -889,7 +890,7 @@ const result = AutomationApiErrorCode.parse(data);
 | **_lock** | `Enum<'none' \| 'no-overlay' \| 'no-delete' \| 'full'>` | optional | Item-level lock — controls overlay & delete (ADR-0010). |
 | **_lockReason** | `string` | optional | Human-readable reason shown when a write is refused by _lock. |
 | **_lockSource** | `Enum<'artifact' \| 'package' \| 'env-forced'>` | optional | Layer that set _lock (artifact \| package \| env-forced). |
-| **_provenance** | `Enum<'package' \| 'org' \| 'env-forced'>` | optional | Origin of the item (package \| org \| env-forced). |
+| **_provenance** | `Enum<'package' \| 'org' \| 'env-forced' \| 'platform'>` | optional | Origin of the item (package \| org \| env-forced \| platform). |
 | **_packageId** | `string` | optional | Owning package machine id. |
 | **_packageVersion** | `string` | optional | Owning package version. |
 | **_lockDocsUrl** | `string` | optional | Optional documentation link surfaced next to _lockReason. |
@@ -1271,7 +1272,7 @@ const result = AutomationApiErrorCode.parse(data);
 | **_lock** | `Enum<'none' \| 'no-overlay' \| 'no-delete' \| 'full'>` | optional | Item-level lock — controls overlay & delete (ADR-0010). |
 | **_lockReason** | `string` | optional | Human-readable reason shown when a write is refused by _lock. |
 | **_lockSource** | `Enum<'artifact' \| 'package' \| 'env-forced'>` | optional | Layer that set _lock (artifact \| package \| env-forced). |
-| **_provenance** | `Enum<'package' \| 'org' \| 'env-forced'>` | optional | Origin of the item (package \| org \| env-forced). |
+| **_provenance** | `Enum<'package' \| 'org' \| 'env-forced' \| 'platform'>` | optional | Origin of the item (package \| org \| env-forced \| platform). |
 | **_packageId** | `string` | optional | Owning package machine id. |
 | **_packageVersion** | `string` | optional | Owning package version. |
 | **_lockDocsUrl** | `string` | optional | Optional documentation link surfaced next to _lockReason. |
@@ -1337,7 +1338,7 @@ const result = AutomationApiErrorCode.parse(data);
 | **_lock** | `Enum<'none' \| 'no-overlay' \| 'no-delete' \| 'full'>` | optional | Item-level lock — controls overlay & delete (ADR-0010). |
 | **_lockReason** | `string` | optional | Human-readable reason shown when a write is refused by _lock. |
 | **_lockSource** | `Enum<'artifact' \| 'package' \| 'env-forced'>` | optional | Layer that set _lock (artifact \| package \| env-forced). |
-| **_provenance** | `Enum<'package' \| 'org' \| 'env-forced'>` | optional | Origin of the item (package \| org \| env-forced). |
+| **_provenance** | `Enum<'package' \| 'org' \| 'env-forced' \| 'platform'>` | optional | Origin of the item (package \| org \| env-forced \| platform). |
 | **_packageId** | `string` | optional | Owning package machine id. |
 | **_packageVersion** | `string` | optional | Owning package version. |
 | **_lockDocsUrl** | `string` | optional | Optional documentation link surfaced next to _lockReason. |

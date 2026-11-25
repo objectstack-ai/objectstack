@@ -143,7 +143,6 @@ const RECOVERY_SITES: ReadonlyArray<{
       'packages/app-shell/src/views/studio-design/StudioPillarKit.tsx',
       'packages/app-shell/src/views/studio-design/DataPillarHelpers.tsx',
       'packages/app-shell/src/views/studio-design/AutomationsPillar.tsx',
-      'packages/app-shell/src/views/studio-design/AccessPillar.tsx',
       'packages/app-shell/src/views/studio-design/DataPillar.tsx',
     ],
     site: 'Studio: the header Back to app, with no app to name',

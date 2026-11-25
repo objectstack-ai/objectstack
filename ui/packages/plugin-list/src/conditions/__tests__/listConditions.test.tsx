@@ -14,7 +14,7 @@
  * which the host owns: one click is spent before any of these panels mounts.
  */
 
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, beforeAll, afterAll } from 'vitest';
 import * as React from 'react';
 import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import type { FilterBuilderRowGroup, SortItem } from '@object-ui/components';
@@ -40,6 +40,8 @@ import { builtInLocales, en as enPack, zh as zhPack } from '@object-ui/i18n/loca
 import { I18nProvider } from '@object-ui/i18n';
 import { parseFilterAST } from '@objectstack/spec/data';
 import { convertFilterGroupToAST } from '../../ListView';
+import { PhoneFilterSheet } from '../../phone/PhoneListPanels';
+import { setDisplayTimeZone } from '@object-ui/core';
 
 // The server's JSON-column refusal set, read from the module every server face
 // imports it from (`@objectstack/core`, which no UI package depends on): the
@@ -550,7 +552,7 @@ describe('multi-value fields — the quick filter and the advanced panel offer o
     const enQuick = enPack.listConditions.operators as Record<string, string>;
     expect(MULTI_OFFER.map((op) => enQuick[op])).toEqual(['contains', 'does not contain', 'is empty', 'is not empty']);
     const t = (key: string) => LIST_CONDITION_DEFAULT_TRANSLATIONS[key] ?? key;
-    expect(describeConditionValue(MULTI_VALUE[0], 'contains', 'quality_lead', t as never)).toBe('contains Quality lead');
+    expect(describeConditionValue(MULTI_VALUE[0], 'contains', 'quality_lead', t as never, undefined, 'en-US')).toBe('contains Quality lead');
   });
 });
 
@@ -763,10 +765,10 @@ describe('condition model', () => {
   it('describes a chip value by operator: a bare list for 「is any of」, the operator named otherwise', () => {
     const t = (key: string, o?: Record<string, unknown>) =>
       (LIST_CONDITION_DEFAULT_TRANSLATIONS[key] ?? key).replace(/\{\{(\w+)\}\}/g, (_, k) => String(o?.[k] ?? ''));
-    expect(describeConditionValue(STAGE, 'in', ['proposal', 'negotiation'], t as never)).toBe('Proposal, Negotiation');
-    expect(describeConditionValue(FIELDS[2], 'greater_than_or_equal', 100, t as never)).toBe('≥ 100');
-    expect(describeConditionValue(FIELDS[3], 'between', quickDateWindowValue('today'), t as never)).toBe('Today');
-    expect(describeConditionValue(STAGE, 'is_empty', undefined, t as never)).toBe('is empty');
+    expect(describeConditionValue(STAGE, 'in', ['proposal', 'negotiation'], t as never, undefined, 'en-US')).toBe('Proposal, Negotiation');
+    expect(describeConditionValue(FIELDS[2], 'greater_than_or_equal', 100, t as never, undefined, 'en-US')).toBe('≥ 100');
+    expect(describeConditionValue(FIELDS[3], 'between', quickDateWindowValue('today'), t as never, undefined, 'en-US')).toBe('Today');
+    expect(describeConditionValue(STAGE, 'is_empty', undefined, t as never, undefined, 'en-US')).toBe('is empty');
   });
 });
 
@@ -1102,5 +1104,104 @@ describe('ConditionChipRow — an operator only the advanced panel writes (objec
   it('CONTROL: a view triple\'s comparison symbol still reads as written', () => {
     render(<Row viewFilter={[['amount', '>=', 10], ['amount', '!=', 0]]} />);
     expect(chipTexts()).toEqual(['Deal Value: >= 10', 'Deal Value: != 0']);
+  });
+});
+
+// objectstack#37034 — a date condition's value reads as a date in the viewer's
+// language, by the field's type, on every condition row (the desktop chips and
+// the phone filter sheet's rows). On the wire a `date` bound is `YYYY-MM-DD`
+// and a `datetime` bound an ISO instant: the card's sighting was a drilled
+// month bucket on `created_at`, 「创建时间：≥ 2026-10-01T00:00:00.000Z」.
+// The display zone is pinned to UTC, so an instant's day and time do not
+// depend on the zone the runner sits in.
+describe('date condition values read as dates (objectstack#37034)', () => {
+  beforeAll(() => setDisplayTimeZone('UTC'));
+  afterAll(() => setDisplayTimeZone(undefined));
+
+  const ISSUED_ON: ConditionField = { value: 'issued_on', label: '开具日期', type: 'date' };
+  const CREATED_AT: ConditionField = { value: 'created_at', label: '创建时间', type: 'datetime' };
+  const STARTS_AT: ConditionField = { value: 'starts_at', label: 'Starts at', type: 'time' };
+  const rows = (conditions: Array<[string, string, unknown]>): FilterBuilderRowGroup => ({
+    id: 'root',
+    logic: 'and',
+    conditions: conditions.map(([field, operator, value], i) => ({ id: `r${i}`, field, operator, value }) as FilterBuilderRow),
+  });
+  const inZh = (node: React.ReactNode) => (
+    <I18nProvider config={{ defaultLanguage: 'zh-CN', detectBrowserLanguage: false }} persistLanguage={false}>{node}</I18nProvider>
+  );
+  function zhChips(filters: FilterBuilderRowGroup, field: string): string[] {
+    render(inZh(
+      <ConditionChipRow
+        sort={[]}
+        sortFields={[ISSUED_ON, CREATED_AT]}
+        onSortChange={() => {}}
+        filters={filters}
+        filterFields={[ISSUED_ON, CREATED_AT]}
+        onFiltersChange={() => {}}
+        renderAdvanced={() => <div />}
+        renderSortLevels={() => <div />}
+      />,
+    ));
+    return screen.getAllByTestId(`filter-chip-open-${field}`).map((b) => b.textContent ?? '');
+  }
+  const NOT_ISO = /T\d\d:\d\d|\d{4}-\d{2}-\d{2}/;
+
+  it('the sighting: a drilled month bucket on a datetime field reads as two localized date-times, not ISO', () => {
+    const chips = zhChips(rows([
+      ['created_at', 'greater_than_or_equal', '2026-10-01T00:00:00.000Z'],
+      ['created_at', 'before', '2026-11-01T00:00:00.000Z'],
+    ]), 'created_at');
+    expect(chips).toHaveLength(2);
+    expect(chips[0]).toMatch(/^创建时间：≥ 2026年10月1日.*00:00$/);
+    expect(chips[1]).toMatch(/^创建时间：.*2026年11月1日.*00:00$/);
+    for (const chip of chips) expect(chip).not.toMatch(NOT_ISO);
+  });
+
+  it('a date field bound, as the wire writes it (YYYY-MM-DD), reads as its day', () => {
+    const chips = zhChips(rows([
+      ['issued_on', 'greater_than_or_equal', '2026-10-01'],
+      ['issued_on', 'before', '2026-11-01'],
+    ]), 'issued_on');
+    expect(chips).toHaveLength(2);
+    expect(chips[0]).toBe('开具日期：≥ 2026年10月1日');
+    expect(chips[1]).toContain('2026年11月1日');
+    for (const chip of chips) expect(chip).not.toMatch(NOT_ISO);
+  });
+
+  it('a date field compared with an instant at UTC midnight reads as that day', () => {
+    const [chip] = zhChips(rows([['issued_on', 'greater_than_or_equal', '2026-10-01T00:00:00.000Z']]), 'issued_on');
+    expect(chip).toBe('开具日期：≥ 2026年10月1日');
+  });
+
+  it('a datetime reads in the display zone', () => {
+    const [chip] = zhChips(rows([['created_at', 'greater_than_or_equal', '2026-10-15T12:00:00.000Z']]), 'created_at');
+    expect(chip).toMatch(/^创建时间：≥ 2026年10月15日.*12:00$/);
+  });
+
+  it('a date between reads both ends as dates', () => {
+    const [chip] = zhChips(rows([['issued_on', 'between', ['2026-10-01', '2026-10-31']]]), 'issued_on');
+    expect(chip).toContain('2026年10月1日 – 2026年10月31日');
+  });
+
+  it("the phone filter sheet's row reads the date in the viewer's language, not the runtime default", () => {
+    // The runtime's own locale here is English: a row that left the locale out
+    // would read 「Oct 1, 2026」 on a zh-CN session.
+    expect(new Intl.DateTimeFormat().resolvedOptions().locale).toMatch(/^en/);
+    render(inZh(
+      <PhoneFilterSheet
+        open
+        onOpenChange={() => {}}
+        fields={[ISSUED_ON, CREATED_AT]}
+        value={rows([['issued_on', 'greater_than_or_equal', '2026-10-01']])}
+        onApply={() => {}}
+      />,
+    ));
+    expect(screen.getByTestId('phone-filter-item-condition').textContent).toBe('≥ 2026年10月1日');
+  });
+
+  it('CONTROL: a time field and an unreadable value are shown as written', () => {
+    const { t } = { t: (k: string) => LIST_CONDITION_DEFAULT_TRANSLATIONS[k] ?? k };
+    expect(describeConditionValue(STARTS_AT, 'after', '09:30', t as never, undefined, 'zh-CN')).toBe('after 09:30');
+    expect(describeConditionValue(ISSUED_ON, 'after', 'not a date', t as never, undefined, 'zh-CN')).toBe('after not a date');
   });
 });

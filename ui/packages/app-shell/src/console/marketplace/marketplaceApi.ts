@@ -23,10 +23,12 @@ const API_BASE = `${SERVER_URL}/api/v1/marketplace`;
 /**
  * The console's authenticated fetch — the stored bearer token beside the
  * session cookie — for the calls to THIS runtime's own server: the local
- * install ledger (`/marketplace/install-local*`) and the cloud-connection
- * reads the Packages page makes. ⛔ Never for a request to the cloud control
- * plane's own origin (`getCloudBase()`), which must not see this runtime's
- * bearer; the browse calls keep `credentials: 'omit'` in {@link call}.
+ * install ledger (`/marketplace/install-local*`), the same-origin
+ * `/cloud-connection/*` routes, and the control plane's own install and
+ * installed-state routes when this runtime IS the control plane. ⛔ Never for
+ * a request to the cloud control plane's own origin (`getCloudBase()`), which
+ * must not see this runtime's bearer; the browse calls keep
+ * `credentials: 'omit'` in {@link call}.
  */
 function serverFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
   return createAuthenticatedFetch()(input, init);
@@ -512,7 +514,7 @@ export async function installPackage(input: {
   if (cloudBase) {
     // objectstack#29119 — the install lands in THIS environment, so its
     // package list reads from before it are forgotten however it ends.
-    const res = await fetch(`/api/v1/cloud-connection/install`, {
+    const res = await serverFetch(`/api/v1/cloud-connection/install`, {
       method: 'POST',
       credentials: 'include',
       headers: withEnvAuth({ 'Accept': 'application/json', 'Content-Type': 'application/json' }),
@@ -541,7 +543,7 @@ export async function installPackage(input: {
   // ── Cloud control-plane path (runtime IS cloud) ───────────────────────
   // Same-origin direct call to the install action.
   const base = SERVER_URL;
-  const res = await fetch(`${base}/api/v1/actions/sys_package/install_package`, {
+  const res = await serverFetch(`${base}/api/v1/actions/sys_package/install_package`, {
     method: 'POST',
     credentials: 'include',
     headers: { 'Accept': 'application/json', 'Content-Type': 'application/json' },
@@ -595,7 +597,7 @@ export async function installPackage(input: {
 export async function getInstallNamespace(packageId: string): Promise<string | null> {
   if (!packageId) return null;
   try {
-    const res = await fetch(
+    const res = await serverFetch(
       `/api/v1/cloud-connection/install-namespace?package_id=${encodeURIComponent(packageId)}`,
       { credentials: 'include', headers: withEnvAuth({ 'Accept': 'application/json' }) },
     );
@@ -794,7 +796,7 @@ export async function getCloudInstallationInfo(
   const cloudBase = getCloudBase();
   if (cloudBase) {
     try {
-      const res = await fetch(
+      const res = await serverFetch(
         `/api/v1/cloud-connection/installation?package_id=${encodeURIComponent(packageId)}`,
         { credentials: 'include', headers: withEnvAuth({ 'Accept': 'application/json' }) },
       );
@@ -823,7 +825,7 @@ export async function getCloudInstallationInfo(
   if (!environmentId) return null;
   const base = SERVER_URL;
   try {
-    const res = await fetch(
+    const res = await serverFetch(
       `${base}/api/v1/cloud/environments/${encodeURIComponent(environmentId)}/installations/${encodeURIComponent(packageId)}`,
       { credentials: 'include', headers: { 'Accept': 'application/json' } },
     );

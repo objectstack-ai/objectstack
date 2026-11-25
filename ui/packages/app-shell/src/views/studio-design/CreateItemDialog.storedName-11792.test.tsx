@@ -8,10 +8,12 @@
  * `repair_ticket` and created `repairs_repair_ticket`, because the Data pillar
  * prefixes the name with the package namespace on save. The dialog now takes
  * the caller's own rule as an optional prop and shows its output; the first
- * block drives the dialog with the same `prefixObjectName` the pillar saves
- * with, the second pins that a caller passing nothing — the app, automation
- * and access dialogs — renders exactly as before, and the third drives the
- * REAL Data pillar end to end.
+ * block drives the dialog with the same `prefixObjectName` the create saves
+ * with, and the second pins that a caller passing nothing — the app,
+ * automation and access dialogs — renders exactly as before.
+ * objectstack#36904 — the end-to-end half is the list create dialog's
+ * (`MetadataListCreateDialog.pairCreate-36897.test.tsx`), the object designer
+ * having no 「新建」 of its own.
  */
 
 // Warmed at module top so the first load of the console's lazily loaded
@@ -20,40 +22,13 @@ import '@objectstack/lint';
 import '@testing-library/jest-dom/vitest';
 import * as React from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import { MemoryRouter } from 'react-router-dom';
+import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { CreateItemDialog } from './CreateItemDialog';
-import type { PkgEntry } from './packages-io';
-
-const mockClient = {
-  list: vi.fn(async () => []),
-  listDrafts: vi.fn(async () => []),
-  layered: vi.fn(async () => ({ effective: null, code: null })),
-  getDraft: vi.fn(async () => null),
-  save: vi.fn(async () => ({})),
-};
-
-vi.mock('../metadata-admin/useMetadata', async (importOriginal) => {
-  const mod = await importOriginal<typeof import('../metadata-admin/useMetadata')>();
-  return {
-    ...mod,
-    useMetadataClient: () => mockClient,
-    useMetadataTypes: () => ({ entries: [] }),
-  };
-});
-
-let packagesFixture: PkgEntry[] = [];
-vi.mock('./packages-io', async (importOriginal) => {
-  const mod = await importOriginal<typeof import('./packages-io')>();
-  return { ...mod, fetchPackages: vi.fn(async () => packagesFixture) };
-});
 
 import { prefixObjectName } from './packages-io';
-import { DataPillar } from './StudioDesignSurface';
 
 beforeEach(() => {
   vi.clearAllMocks();
-  packagesFixture = [];
 });
 afterEach(cleanup);
 
@@ -115,44 +90,5 @@ describe('CreateItemDialog — callers that pass no rule are unchanged (objectui
     fireEvent.change(labelInput, { target: { value: 'Repair Ticket' } });
     expect(screen.queryByTestId('create-item-stored-name')).toBeNull();
     expect(dialog.querySelectorAll('input')).toHaveLength(2);
-  });
-});
-
-describe('Data pillar — New object previews the name it saves (objectui#11792)', () => {
-  async function openAndType(label: string) {
-    render(
-      <MemoryRouter initialEntries={['/studio/com.test.repairs/data']}>
-        <DataPillar packageId="com.test.repairs" />
-      </MemoryRouter>,
-    );
-    fireEvent.click(await screen.findByTestId('empty-state-new-object'));
-    const dialog = await screen.findByRole('dialog');
-    fireEvent.change(dialog.querySelectorAll('input')[0], { target: { value: label } });
-    return dialog;
-  }
-
-  function savedName(): string {
-    const call = mockClient.save.mock.calls.at(-1) as unknown as [string, string];
-    return call[1];
-  }
-
-  it('previews `<namespace>_<identifier>` and saves exactly that name', async () => {
-    packagesFixture = [{ id: 'com.test.repairs', name: 'Repairs', writable: true, namespace: 'repairs' }];
-    const dialog = await openAndType('Repair Ticket');
-    await waitFor(() =>
-      expect(screen.getByTestId('create-item-stored-name')).toHaveTextContent('repairs_repair_ticket'),
-    );
-    fireEvent.click(within(dialog).getByRole('button', { name: /^(create|创建)$/i }));
-    await waitFor(() => expect(mockClient.save).toHaveBeenCalled());
-    expect(savedName()).toBe('repairs_repair_ticket');
-  });
-
-  it('previews the bare identifier when the package has no namespace — and that is what it saves', async () => {
-    packagesFixture = [{ id: 'com.test.repairs', name: 'Repairs', writable: true, namespace: null }];
-    const dialog = await openAndType('Repair Ticket');
-    expect(await screen.findByTestId('create-item-stored-name')).toHaveTextContent('repair_ticket');
-    fireEvent.click(within(dialog).getByRole('button', { name: /^(create|创建)$/i }));
-    await waitFor(() => expect(mockClient.save).toHaveBeenCalled());
-    expect(savedName()).toBe('repair_ticket');
   });
 });

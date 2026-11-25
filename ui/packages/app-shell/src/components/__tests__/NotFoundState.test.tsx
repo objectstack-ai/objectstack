@@ -8,6 +8,12 @@
  * harnesses: the unmatched URL in `AppContent.noAppComponentRoutes`, the
  * unknown record in `RecordDetailView.recordReadFailure-11902`, the unknown app
  * in `AppContent.deniedVsUnpublished`.
+ *
+ * The button names where it goes (objectstack#37163): from 768 px up, where
+ * the platform home page is retired and Home is an app's start page, it reads
+ * 「Back to app start page」, the app pill's words; on a phone, whose Home is
+ * still its app list, 「Back to home」 (the CONTROL). jsdom's window is 1024 px
+ * wide, a desktop, so the tests above the last describe read the desktop name.
  */
 
 import '@testing-library/jest-dom/vitest';
@@ -47,7 +53,7 @@ function renderObjectNotFound(apps: unknown[] = [], language = 'en') {
 afterEach(() => cleanup());
 
 describe('the unknown-object state offers a way back to Home', () => {
-  it('names the object and its cause, and Back to home opens Home', async () => {
+  it('names the object and its cause, and the way back opens Home', async () => {
     renderObjectNotFound();
     const state = screen.getByTestId('object-not-found');
     expect(state).toHaveTextContent('Object Not Found');
@@ -55,19 +61,42 @@ describe('the unknown-object state offers a way back to Home', () => {
     // reader cannot read is answered exactly like a missing name.
     expect(state).toHaveTextContent('The object "no_such_object" does not exist, or you do not have access to it.');
 
-    fireEvent.click(screen.getByRole('button', { name: 'Back to home' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Back to app start page' }));
     expect(await screen.findByRole('heading', { name: 'Home page' })).toBeInTheDocument();
     expect(screen.getByTestId('pathname').textContent).toBe('/home');
   });
 
   it('a deployment that declares its landing app returns there', async () => {
     renderObjectNotFound([{ name: 'cloud_control', label: 'Cloud', isDefault: true, navigation: [] }]);
-    fireEvent.click(screen.getByRole('button', { name: 'Back to home' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Back to app start page' }));
     expect(await screen.findByRole('heading', { name: 'Declared landing' })).toBeInTheDocument();
   });
 
   it('zh: the way back reads in the reader language', () => {
     renderObjectNotFound([], 'zh');
-    expect(screen.getByRole('button', { name: '返回首页' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '返回应用起始页' })).toBeInTheDocument();
+  });
+});
+
+describe('the way home names where it goes, by viewport (objectstack#37163)', () => {
+  const realWidth = window.innerWidth;
+  const setWidth = (value: number) =>
+    Object.defineProperty(window, 'innerWidth', { configurable: true, writable: true, value });
+  afterEach(() => setWidth(realWidth));
+
+  it('on a desktop it names the app start page Home now is, not a home page', () => {
+    setWidth(1280);
+    renderObjectNotFound();
+    const button = screen.getByRole('button', { name: 'Back to app start page' });
+    expect(button.textContent).not.toMatch(/home/i);
+  });
+
+  it('CONTROL — on a phone, whose Home is still its app list, it keeps 「Back to home」 and opens `/home`', async () => {
+    setWidth(375);
+    renderObjectNotFound();
+    expect(screen.queryByRole('button', { name: 'Back to app start page' })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Back to home' }));
+    expect(await screen.findByRole('heading', { name: 'Home page' })).toBeInTheDocument();
+    expect(screen.getByTestId('pathname').textContent).toBe('/home');
   });
 });

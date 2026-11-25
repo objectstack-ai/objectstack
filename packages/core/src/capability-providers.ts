@@ -234,6 +234,16 @@ export const CAPABILITY_PROVIDERS: Readonly<Record<string, CapabilitySpec>> = {
     export: 'WebhookOutboxPlugin',
     identities: ['com.objectstack.plugin-webhook-outbox', 'WebhookOutboxPlugin'],
   },
+  // ADR-0160 D5: registers the `record-context` service, which the MCP doors
+  // resolve to serve `get_record_context` from the app's `aiContexts` packs.
+  // Requested, never always-on: without the token no tool and no service. A
+  // host that mounts the plugin in `plugins[]` keeps its own instance — the
+  // identities below are what `providesCapability` matches it by.
+  'record-context': {
+    pkg: '@objectstack/service-record-context',
+    export: 'RecordContextServicePlugin',
+    identities: ['com.objectstack.service.record-context', 'RecordContextServicePlugin'],
+  },
 };
 
 /**

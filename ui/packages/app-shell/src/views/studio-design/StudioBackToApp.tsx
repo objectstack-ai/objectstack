@@ -32,17 +32,13 @@
 
 import * as React from 'react';
 import { ChevronLeft } from 'lucide-react';
-import type { I18nLabel } from '@objectstack/spec/ui';
 import { useHomePath } from '../../hooks/useHomePath.js';
 import { readAppReturnPage, type AppReturnPage } from '../../utils/appReturnPage.js';
 import { navItemLabelText } from '../metadata-admin/previews/navItemLabel.js';
 import { t, tFormat } from '../metadata-admin/i18n.js';
+import { packageAppSegment, rememberedPackageApp, type StudioAppTarget } from './studioAppEdit.js';
 
-/** A published app of the open package. */
-export interface StudioAppTarget {
-  name: string;
-  label: I18nLabel;
-}
+export type { StudioAppTarget } from './studioAppEdit.js';
 
 /** Where the back link goes, and the app it names (`null`: none). */
 export interface StudioBackTarget {
@@ -75,11 +71,9 @@ export function studioBackTarget({
   const labelOf = (app: StudioAppTarget) => navItemLabelText(app.label, locale) || app.name;
   // The page the author came from, when it is one of this package's apps: its
   // record names the app by its route key, the app's name or the package id.
-  const cameFrom = remembered
-    ? (apps.find((a) => a.name === remembered.app) ?? (remembered.app === packageId ? first : undefined))
-    : undefined;
+  const cameFrom = rememberedPackageApp(remembered, packageId, apps);
   if (remembered && cameFrom) return { path: remembered.path, appLabel: labelOf(cameFrom) };
-  const segment = encodeURIComponent(apps.length > 1 ? first.name : packageId);
+  const segment = encodeURIComponent(packageAppSegment(packageId, apps, first));
   return { path: `/apps/${segment}`, appLabel: labelOf(first) };
 }
 

@@ -1,0 +1,72 @@
+{
+  "type": "ai_context",
+  "_note": "AiContextSchema (packages/spec/src/ai/ai-context.zod.ts) — a context pack, the stack's `aiContexts` (ADR-0160 D1). Seeded 2026-11-25 with the type itself (#37140): every key is read by the one executor of `get_record_context` (`@objectstack/service-record-context`), which the MCP door registers over HTTP and stdio. The protection fields (`_lock*`, `_provenance`, `_packageId`) are the framework overlay fields every kind carries and are judged where every kind's are.",
+  "props": {
+    "name": {
+      "status": "live",
+      "verifiedAt": "2026-11-25",
+      "evidenceScope": "in-repo",
+      "evidence": "packages/services/service-record-context/src/read-set.ts#selectContextPack — `context` selects the pack by this name, rooted on the call's object, with no fallback; packages/services/service-record-context/src/record-context-tools.ts#executeGetRecordContext — the answer's `data.pack.name`.",
+      "producer": "packages/objectql/src/engine-top-level.ts#METADATA_ARRAY_KEYS — the stack's `aiContexts` reach the registry as `ai_context` items with their package stamped; packages/runtime/src/domains/mcp.ts#recordContextMembers and packages/mcp/src/stdio-data-bridge.ts#createStdioDataBridge read them back (`listContextPacks`) for the executor.",
+      "note": "Identity: the address `get_record_context`'s `context` argument names."
+    },
+    "label": {
+      "status": "live",
+      "verifiedAt": "2026-11-25",
+      "evidenceScope": "in-repo",
+      "evidence": "packages/services/service-record-context/src/record-context-tools.ts#executeGetRecordContext — carried as `data.pack.label`, the header of the tool answer the model reads.",
+      "producer": "packages/objectql/src/engine-top-level.ts#METADATA_ARRAY_KEYS — the stack's `aiContexts` reach the registry as `ai_context` items with their package stamped; packages/runtime/src/domains/mcp.ts#recordContextMembers and packages/mcp/src/stdio-data-bridge.ts#createStdioDataBridge read them back (`listContextPacks`) for the executor.",
+      "note": "Display-shaped: shown to the model as the pack's header."
+    },
+    "object": {
+      "status": "live",
+      "verifiedAt": "2026-11-25",
+      "evidenceScope": "in-repo",
+      "evidence": "packages/services/service-record-context/src/read-set.ts#selectContextPack — a pack is selected only for a call on this object (`context` omitted: the one pack rooted on it); packages/services/service-record-context/src/read-set.ts#planObjectsOf — the root of the read set.",
+      "producer": "packages/objectql/src/engine-top-level.ts#METADATA_ARRAY_KEYS — the stack's `aiContexts` reach the registry as `ai_context` items with their package stamped; packages/runtime/src/domains/mcp.ts#recordContextMembers and packages/mcp/src/stdio-data-bridge.ts#createStdioDataBridge read them back (`listContextPacks`) for the executor."
+    },
+    "fields": {
+      "status": "live",
+      "verifiedAt": "2026-11-25",
+      "evidenceScope": "in-repo",
+      "evidence": "packages/services/service-record-context/src/record-context-tools.ts#executeGetRecordContext — projected onto the root as the caller is served it, read in this order, each a field entry; packages/services/service-record-context/src/read-set.ts#planObjectsOf — a lookup among them adds its target to the read set.",
+      "producer": "packages/objectql/src/engine-top-level.ts#METADATA_ARRAY_KEYS — the stack's `aiContexts` reach the registry as `ai_context` items with their package stamped; packages/runtime/src/domains/mcp.ts#recordContextMembers and packages/mcp/src/stdio-data-bridge.ts#createStdioDataBridge read them back (`listContextPacks`) for the executor."
+    },
+    "related": {
+      "children": {
+        "object": {
+          "status": "live",
+          "verifiedAt": "2026-11-25",
+          "evidenceScope": "in-repo",
+          "evidence": "packages/services/service-record-context/src/read-set.ts#planObjectsOf — each child joins the read set; packages/services/service-record-context/src/record-context-tools.ts#executeGetRecordContext — judged at object level before anything of it is projected (a refusal refuses the whole call), then read as one capped list.",
+          "producer": "packages/objectql/src/engine-top-level.ts#METADATA_ARRAY_KEYS — the stack's `aiContexts` reach the registry as `ai_context` items with their package stamped; packages/runtime/src/domains/mcp.ts#recordContextMembers and packages/mcp/src/stdio-data-bridge.ts#createStdioDataBridge read them back (`listContextPacks`) for the executor."
+        },
+        "field": {
+          "status": "live",
+          "verifiedAt": "2026-11-25",
+          "evidenceScope": "in-repo",
+          "evidence": "packages/services/service-record-context/src/read-set.ts#resolveRelatedLink — the link field the list is filtered by, resolved on the child's published definition (omitted: the child's one reference field to the root).",
+          "producer": "packages/objectql/src/engine-top-level.ts#METADATA_ARRAY_KEYS — the stack's `aiContexts` reach the registry as `ai_context` items with their package stamped; packages/runtime/src/domains/mcp.ts#recordContextMembers and packages/mcp/src/stdio-data-bridge.ts#createStdioDataBridge read them back (`listContextPacks`) for the executor."
+        },
+        "fields": {
+          "status": "live",
+          "verifiedAt": "2026-11-25",
+          "evidenceScope": "in-repo",
+          "evidence": "packages/services/service-record-context/src/record-context-tools.ts#executeGetRecordContext — the list's columns, projected onto the child as the caller is served it; packages/services/service-record-context/src/read-set.ts#planObjectsOf — a lookup among them adds its target to the read set.",
+          "producer": "packages/objectql/src/engine-top-level.ts#METADATA_ARRAY_KEYS — the stack's `aiContexts` reach the registry as `ai_context` items with their package stamped; packages/runtime/src/domains/mcp.ts#recordContextMembers and packages/mcp/src/stdio-data-bridge.ts#createStdioDataBridge read them back (`listContextPacks`) for the executor."
+        }
+      }
+    },
+    "body": {
+      "children": {
+        "field": {
+          "status": "live",
+          "verifiedAt": "2026-11-25",
+          "evidenceScope": "in-repo",
+          "evidence": "packages/services/service-record-context/src/record-context-tools.ts#executeGetRecordContext — the long-text field carried whole, as an outline, or as one section by anchor; packages/services/service-record-context/src/body-outline.ts#headingsOf reads its headings.",
+          "producer": "packages/objectql/src/engine-top-level.ts#METADATA_ARRAY_KEYS — the stack's `aiContexts` reach the registry as `ai_context` items with their package stamped; packages/runtime/src/domains/mcp.ts#recordContextMembers and packages/mcp/src/stdio-data-bridge.ts#createStdioDataBridge read them back (`listContextPacks`) for the executor."
+        }
+      }
+    }
+  }
+}

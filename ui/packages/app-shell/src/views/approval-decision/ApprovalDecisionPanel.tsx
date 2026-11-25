@@ -442,6 +442,7 @@ export function ApprovalDecisionPanel({ request, className }: ApprovalDecisionPa
   const line = {
     steps: request.flow_route?.steps,
     decided: request.flow_route?.ahead === 'decided' ? request.status : undefined,
+    outcome: request.flow_route?.ahead === 'decided' ? request.flow_route.outcome : undefined,
   };
   const hasProgress = stepLineDraws(line) || !!progress || waitsOnAnyone(request);
 

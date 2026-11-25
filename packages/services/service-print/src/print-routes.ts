@@ -9,6 +9,7 @@ import {
   evaluateAuthGate,
   isApiKeyLifecycleRefusalError,
   isAuthzStoreUnavailableError,
+  operationUserMessage,
   resolveAuthzContext,
   shouldDenyAnonymous,
   userAuthGateSourceOf,
@@ -18,6 +19,7 @@ import type { ErrorCode } from '@objectstack/spec/api';
 import type { AuthSessionApi, IAuthService, IHttpRequest, IHttpResponse, IHttpServer } from '@objectstack/spec/contracts';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
 import type { TenancyPosture } from '@objectstack/spec/security';
+import { preferredLocaleFromHeader } from '@objectstack/spec/system';
 import {
   declaredRefusalMessage,
   demotedDeclaredCode,
@@ -97,6 +99,12 @@ import type { IPrintService, PrintedRecordFile, PrintRecordRequest } from './pri
  *  - **Anything else** is a fault: `500` / `INTERNAL_ERROR`, the door's generic
  *    sentence, and the error in the fault log.
  *
+ * The door's own 5xx sentences are entries of the platform's operation-message
+ * catalog (the `print_*` keys of `BUILTIN_OPERATION_MESSAGES`), written in the
+ * request's language: its top `Accept-Language` tag, English when the catalog
+ * carries no text for it. A print that fails in a Chinese console is answered
+ * in Chinese. A refusal relayed with its producer's own text keeps that text.
+ *
  * ## What is not recorded
  *
  * The door writes no audit row of its own. A print signs a session in and out
@@ -153,7 +161,7 @@ async function handlePrintRecord(req: IHttpRequest, res: IHttpResponse, deps: Pr
       sendError(res, err.status, err.code, err.message);
       return;
     }
-    sendServerFault(res, 500, 'INTERNAL_ERROR', 'The caller of this print could not be resolved.', err, {
+    sendServerFault(res, 500, 'INTERNAL_ERROR', operationUserMessage('print_caller_unresolved', { locale: requestLocaleOf(req) }), err, {
       method: 'POST',
       path: PRINT_RECORDS_ROUTE,
     });
@@ -210,7 +218,7 @@ async function handlePrintRecord(req: IHttpRequest, res: IHttpResponse, deps: Pr
   try {
     printed = await deps.print.printRecordToFile(request, context);
   } catch (err) {
-    relayPrintFailure(res, err);
+    relayPrintFailure(res, err, requestLocaleOf(req));
     return;
   }
   sendOk(res, printed, 201);
@@ -302,15 +310,38 @@ function printRequestOf(body: unknown): PrintRecordRequest | string {
   return request as unknown as PrintRecordRequest;
 }
 
-/** This door's own sentence for a 5xx whose producer declared no text for its caller. */
-function serverAnswerFor(status: number): string {
-  if (status === 503) return 'Records cannot be printed to a file right now: the print engine is not ready. The server log records why.';
-  if (status === 504) return 'The record could not be printed to a file in the time a print is allowed.';
-  return 'The record could not be printed to a file because of an error on the server.';
+/**
+ * The language this door's own 5xx sentences are written in: the request's top
+ * `Accept-Language` tag. The console sends its UI language on every call, and
+ * the `/actions` door's in-process forward of a `type: 'api'` action carries
+ * the caller's header across, so a print clicked as an action is answered in
+ * the same language. The door reads no query parameter, so `?locale` is no
+ * source here. It picks the language of the door's words and nothing else.
+ */
+function requestLocaleOf(req: IHttpRequest): string | undefined {
+  const header = req.headers?.['accept-language'] ?? req.headers?.['Accept-Language'];
+  const value = Array.isArray(header) ? header[0] : header;
+  return preferredLocaleFromHeader(typeof value === 'string' ? value : undefined);
+}
+
+/**
+ * The catalog key of this door's own sentence for a 5xx whose producer declared
+ * no text for its caller: the platform's operation-message catalog
+ * (`BUILTIN_OPERATION_MESSAGES`, `@objectstack/spec/system`), never a second one.
+ */
+function serverAnswerKeyFor(status: number): 'print_engine_unavailable' | 'print_timed_out' | 'print_failed' {
+  if (status === 503) return 'print_engine_unavailable';
+  if (status === 504) return 'print_timed_out';
+  return 'print_failed';
+}
+
+/** This door's own sentence for a 5xx whose producer declared no text for its caller, in the request's language. */
+function serverAnswerFor(status: number, locale: string | undefined): string {
+  return operationUserMessage(serverAnswerKeyFor(status), { locale });
 }
 
 /** Relay a failed print: a declared refusal with its own `code` and `status`, anything else as a fault. */
-function relayPrintFailure(res: IHttpResponse, err: unknown): void {
+function relayPrintFailure(res: IHttpResponse, err: unknown, locale: string | undefined): void {
   const thrown = resolveThrownHttpError(err, 500);
   if (thrown.status < 500) {
     const declaredCode = demotedDeclaredCode(thrown);
@@ -326,7 +357,7 @@ function relayPrintFailure(res: IHttpResponse, err: unknown): void {
     sendError(res, thrown.status, thrown.code, refusal);
     return;
   }
-  sendServerFault(res, thrown.status, thrown.code, serverAnswerFor(thrown.status), err, {
+  sendServerFault(res, thrown.status, thrown.code, serverAnswerFor(thrown.status, locale), err, {
     method: 'POST',
     path: PRINT_RECORDS_ROUTE,
   });

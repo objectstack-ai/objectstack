@@ -54,6 +54,7 @@ import { entitlementDialogFromError, type EntitlementDialogSpec } from '../envir
 import { resolvePageVarTokens } from '../utils/resolvePageVarTokens.js';
 import { launchConsoleFlow } from '../utils/flowLaunch.js';
 import { useScreenFlowQueue } from './useScreenFlowQueue.js';
+import { useAskAiHandler } from './useAskAiHandler.js';
 import type { TranslateFn } from '@object-ui/i18n';
 import { apiActionRefusalResult } from '../utils/flowResponse.js';
 import { invitationVerifyEmailPromptPath, isAcceptNeedsVerifiedEmail } from '../console/organizations/orgErrorMessage.js';
@@ -155,7 +156,11 @@ export interface ConsoleActionRuntime {
       | 'onResultDialog'
       | 'handlers'
     >
-  >;
+  > &
+    // objectstack#37142 — present only where the console can serve an
+    // `ask_ai` click (see `useAskAiHandler`); its absence is what keeps every
+    // `ask_ai` action under the provider undrawn.
+    Pick<ActionProviderProps, 'onAskAi'>;
   /** Confirm / param / result / paused-flow / flow-refusal dialogs — render inside the provider. */
   dialogs: React.ReactNode;
 }
@@ -954,6 +959,9 @@ export function useConsoleActionRuntime(opts: ConsoleActionRuntimeOptions): Cons
     };
   }, [resolveModalTarget, modalHandler]);
 
+  // ADR-0160 D7 — the assistant an `ask_ai` action hands its record to.
+  const askAiHandler = useAskAiHandler();
+
   const actionProviderProps = useMemo(() => ({
     context: {
       ...(objectName ? { objectName } : {}),
@@ -985,10 +993,11 @@ export function useConsoleActionRuntime(opts: ConsoleActionRuntimeOptions): Cons
     onResultDialog: resultDialogHandler,
     onModal: modalHandler,
     handlers: { api: apiActionHandler, flow: flowHandler, script: serverActionHandler, modal: modalActionHandler },
+    ...(askAiHandler ? { onAskAi: askAiHandler } : {}),
   }), [
     objectName, objectDef, currentUser, activeOrganization, confirmHandler, toastHandler,
     navigateHandler, paramCollectionHandler, resultDialogHandler, apiActionHandler,
-    flowHandler, serverActionHandler, modalHandler, modalActionHandler,
+    flowHandler, serverActionHandler, modalHandler, modalActionHandler, askAiHandler,
   ]);
 
   // The run FlowRunner shows; its close and completion settle that run alone.

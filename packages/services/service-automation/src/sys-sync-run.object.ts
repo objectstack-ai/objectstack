@@ -51,9 +51,13 @@ import { ObjectSchema, Field } from '@objectstack/spec/data';
  *   (`schedule` / `manual`). Both are written when the run opens, and both are
  *   empty for a pull no job drove, or a job service that sends neither.
  *
- * Not here yet, with the slice that writes it: the marked-deleted count
- * (ADR-0153 D3) and the NULL-watermark count (invariant 11, read with D3's
- * count).
+ * - **Deletes (ADR-0153 D3).** `marked_deleted_count` is how many rows the run
+ *   stamped `_sync_deleted_at` on, `deletes` what the run did about deletes
+ *   (`SyncDeletesNote`, `./sync-delete-mark.ts`): judged, through
+ *   `deletedField`, ignored, or unjudged and why. A datasource run also counts
+ *   the source rows whose watermark is NULL (`skipped_null_watermark`, D2
+ *   invariant 11): they are in no window, and a full run that counts any marks
+ *   nothing by absence.
  *
  * Writers: the automation plugin's pull (`./connector-pull.ts`,
  * `./datasource-pull.ts`) and its boot close, under a system context.
@@ -85,7 +89,7 @@ export const SysSyncRun = ObjectSchema.create({
   description: 'One row per pull of a mapping: where it read from, what it wrote, how it ended, and the read position the next pull starts from.',
   displayNameField: 'mapping',
   nameField: 'mapping', // [ADR-0079] canonical primary-title pointer (mirrors deprecated displayNameField)
-  highlightFields: ['mapping', 'status', 'started_at', 'read_count', 'created_count', 'updated_count', 'refused_count', 'watermark_committed'],
+  highlightFields: ['mapping', 'status', 'started_at', 'read_count', 'created_count', 'updated_count', 'refused_count', 'marked_deleted_count', 'watermark_committed'],
 
   fields: {
     id: Field.text({ label: 'Run ID', required: true, readonly: true, group: 'System' }),
@@ -186,7 +190,7 @@ export const SysSyncRun = ObjectSchema.create({
       readonly: true,
       maxLength: 255,
       group: 'Identity',
-      description: 'The background job run that started this pull, as the job run history names it. Empty when no job started the pull.',
+      description: 'The background job run that started this pull, as the job run history names it. Empty when no job started the pull, and when the job service that ran it keeps no run history (it wrote no run row to name).',
     }),
 
     // [ADR-0153 D7] Why the job run that drove the pull started.
@@ -195,7 +199,7 @@ export const SysSyncRun = ObjectSchema.create({
       required: false,
       readonly: true,
       group: 'Identity',
-      description: "Why the job run started: 'schedule', on its schedule; 'manual', when someone ran the job now. Empty when no job started the pull.",
+      description: "Why the job run started: 'schedule', on its schedule; 'manual', when someone ran the job now. Empty when no job started the pull, or the job service sent no trigger.",
     }),
 
     status: Field.select(['running', 'completed', 'degraded', 'failed'], {
@@ -229,6 +233,36 @@ export const SysSyncRun = ObjectSchema.create({
       defaultValue: 0,
       group: 'Outcome',
       description: 'Rows the import runner refused (a row verdict, not a refused pull).',
+    }),
+
+    // [ADR-0153 D3] Delete marking.
+    marked_deleted_count: Field.number({
+      label: 'Marked Deleted',
+      required: false,
+      readonly: true,
+      scale: 0,
+      defaultValue: 0,
+      group: 'Outcome',
+      description: 'Rows this pull marked deleted at the source (`_sync_deleted_at`): gone from a complete full read, or carrying the source\'s `deletedField` value.',
+    }),
+
+    deletes: Field.text({
+      label: 'Deletes',
+      required: false,
+      readonly: true,
+      maxLength: 64,
+      group: 'Outcome',
+      description: "What the pull did about rows the source deleted: 'judged' (a complete full read marked every row it did not read), 'by deletedField' (an incremental pull marked through the source's deletedField), 'ignored' (deletePolicy: 'ignore'), or 'unjudged, …' with the reason a full pull marked nothing by absence: 'null watermark', 'no paging declared', 'pages not followed' or 'rows refused'. Empty when the pull failed, and for a connector pull whose target carries no provenance columns, which judges no deletes.",
+    }),
+
+    // [ADR-0153 D2 invariant 11, D3] Read with the delete judgment.
+    skipped_null_watermark: Field.number({
+      label: 'Skipped (NULL Watermark)',
+      required: false,
+      readonly: true,
+      scale: 0,
+      group: 'Outcome',
+      description: "Source rows in the job's organization whose watermark field is NULL, which no read window holds: counted by a datasource pull, empty for a connector source. Through a plugin driver's row cap, a count above the cap is recorded as the cap plus one: more than the cap.",
     }),
 
     watermark_field: Field.text({

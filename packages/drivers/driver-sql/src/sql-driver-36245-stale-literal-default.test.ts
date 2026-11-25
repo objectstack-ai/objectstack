@@ -73,6 +73,9 @@ describe('#36245 §1 — reading a physical DEFAULT', () => {
     ['current_timestamp(3)', { kind: 'expression' }],
     ["nextval('seq'::regclass)", { kind: 'expression' }],
     ["('x' || 'y')", { kind: 'expression' }],
+    // [#37320] MySQL 8's spelling of a TEXT column's `DEFAULT ('d')`.
+    [String.raw`_utf8mb4\'d\'`, { kind: 'expression' }],
+    [String.raw`_latin1\'it\\\'s\'`, { kind: 'expression' }],
   ])('%j → %j', (raw, expected) => {
     expect(physicalDefaultLiteral(raw)).toEqual(expected);
   });

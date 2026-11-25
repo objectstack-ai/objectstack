@@ -1780,6 +1780,18 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "日期范围",
         helpText: "打开仪表盘时默认的时间段，以及查看者能否自选日期。"
       },
+      "dateRange.field": {
+        label: "日期字段",
+        helpText: "时间段筛选所依据的日期字段。留空则按创建日期筛选。"
+      },
+      "dateRange.defaultRange": {
+        label: "默认时间段",
+        helpText: "打开仪表盘时显示的时间段。"
+      },
+      "dateRange.allowCustomRange": {
+        label: "允许自定义范围",
+        helpText: "允许查看者自己选择开始和结束日期。"
+      },
       globalFilters: {
         label: "全局筛选",
         helpText: "查看者可用来一次筛选全部组件，或只筛选你指定组件的筛选条件。"
@@ -3145,6 +3157,49 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       "triggerConditions.value": {
         label: "值"
+      }
+    }
+  },
+  ai_context: {
+    label: "AI 上下文包",
+    sections: {
+      basics: {
+        label: "基本信息",
+        description: "资料包的标识，以及它读取哪个对象的记录。"
+      },
+      material: {
+        label: "资料内容",
+        description: "把记录的哪些内容交给模型。每个选择器列出根对象的字段，或该关联列表自身对象的字段。"
+      }
+    },
+    fields: {
+      name: {
+        label: "名称",
+        helpText: "唯一标识（snake_case）。技能的 context 键和 get_record_context 工具都按它指名资料包。"
+      },
+      label: {
+        label: "显示名称",
+        helpText: "显示名称，即工具回答的标题。资料包没有描述：用途写在这里。"
+      },
+      object: {
+        label: "根对象",
+        helpText: "根对象：资料包读取它的一条记录。"
+      },
+      fields: {
+        label: "字段",
+        helpText: "交给模型的根对象字段，按顺序（最多 30 个）。其中的查找字段以它指向的记录名称作答。"
+      },
+      related: {
+        label: "关联列表",
+        helpText: "指向这条记录的子列表，只读一层（最多 3 个）。每个列表指明子对象、指向根对象的引用字段，以及每行读取的列（最多 10 列）；不选列时每行只读取其名称。"
+      },
+      body: {
+        label: "正文",
+        helpText: "作为记录正文读取的那一个长文本字段。"
+      },
+      "body.field": {
+        label: "正文字段",
+        helpText: "根对象的一个长文本字段（textarea、markdown、html、richtext）。选其他字段会在保存时报告，资料包也就不带正文。"
       }
     }
   }

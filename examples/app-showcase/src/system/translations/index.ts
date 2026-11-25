@@ -562,6 +562,7 @@ export const ShowcaseTranslationBundle = {
           showcase_bulk_reassign: { label: '重新分配…' },
           showcase_quick_view: { label: '快速查看' },
           showcase_log_time: { label: '记录工时' },
+          showcase_ask_about_task: { label: '问 AI' },
           showcase_new_task: { label: '新建任务' },
           showcase_archive_task: {
             label: '归档',
@@ -624,6 +625,10 @@ export const ShowcaseTranslationBundle = {
           billing_email: { label: '账单邮箱' },
           support_config: { label: '支持配置' },
           churn_reason: { label: '流失原因' },
+          // The account side of the Revenue Pulse region filter
+          // (`filterBindings: { region: 'sales_region' }`), worded as the
+          // dataset's dimension describes it (销售区域).
+          sales_region: { label: '销售区域', options: { amer: '美洲', emea: '欧洲、中东和非洲', apac: '亚太' } },
         },
         // The zh-CN mirror of the `en` `_validations` block — see the note
         // there. Vocabulary is the one this bundle already established:
@@ -758,6 +763,10 @@ export const ShowcaseTranslationBundle = {
           owner: { label: '负责人邮箱' },
           status: { label: '状态' },
           issued_on: { label: '开具日期' },
+          // The Revenue Pulse dashboard's region filter lands on this field, so
+          // a drilled list's chip names it: the same words as the dashboard's
+          // own filter label and options (`dashboards.showcase_revenue_pulse`).
+          region: { label: '区域', options: { amer: '美洲', emea: '欧洲、中东和非洲', apac: '亚太' } },
           tax_rate: { label: '税率 (%)' },
           paid_on: { label: '付款日期' },
           total: { label: '小计' },

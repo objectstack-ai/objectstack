@@ -3,7 +3,7 @@ import { FilterBuilder, cn } from '@object-ui/components';
 import { SchemaRendererContext } from '@object-ui/react';
 import type { FieldWidgetComponentProps } from './types.js';
 import { toDomProps } from './toDomProps.js';
-import { createSafeTranslation } from '@object-ui/i18n';
+import { createSafeTranslation, useSafeFieldLabel } from '@object-ui/i18n';
 import { useFieldTranslation } from './useFieldTranslation.js';
 
 /**
@@ -619,7 +619,9 @@ const VALUELESS_OPERATORS: ReadonlySet<string> = new Set([
 /**
  * One builder row in words: the field's label, the operator's label and the
  * comparand as the field draws it (an option's label for a select, the boolean
- * words for a boolean, both bounds for a range). A field the schema does not
+ * words for a boolean, both bounds for a range). The field and option labels
+ * are the ones `fieldByName` carries, which the caller has already translated
+ * for the object. A field the schema does not
  * list keeps its api name, and a value no option holds stays as stored, so the
  * sentence never invents a label.
  */
@@ -682,6 +684,7 @@ export function FilterConditionField({
   const ctx = React.useContext(SchemaRendererContext);
   const { t } = useFieldTranslation();
   const { t: tWords } = useCriteriaWordsTranslation();
+  const { fieldLabel, translateOptions } = useSafeFieldLabel();
   // Cast-free context read (objectui#7912); the local stays `any` for the
   // `FieldWidgetProps.dataSource?: unknown` channel it merges with.
   const dataSource: any = props.dataSource ?? ctx?.dataSource ?? null;
@@ -829,9 +832,18 @@ export function FilterConditionField({
     // object's field and option labels once its schema answers; one it cannot
     // represent stays the stored JSON, so nothing is hidden or reworded.
     if (group && group.conditions.length > 0) {
+      // The labels the sentence says are the object's translated ones, the
+      // way a record page draws the same field and option: `fieldLabel` for
+      // the field, `translateOptions` over its declared options, each falling
+      // back to the authored label.
+      const wordFields = (fields ?? []).map((f) => ({
+        ...f,
+        label: fieldLabel(objectName, f.value, f.label),
+        ...(f.options ? { options: translateOptions(objectName, f.value, f.options) } : {}),
+      }));
       return (
         <span className={cn('text-sm', className)} data-filter-condition="words" title={rawValue}>
-          {describeFilterGroup(group, fields ?? [], tWords)}
+          {describeFilterGroup(group, wordFields, tWords)}
         </span>
       );
     }

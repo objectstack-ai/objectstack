@@ -1001,11 +1001,17 @@ export interface DataSource<T = any> {
    * `groupBy`) and may degrade to a client-side reduction; this one takes the
    * compiled header query verbatim and never degrades.
    *
+   * A source that answers only PART of the groups (the platform cuts a
+   * grouped read to a deployment's default page size) says so with
+   * `hasMore: true` on the answer — see {@link ListViewGroupHeaderAnswer}. A
+   * caller that reads the answer as the WHOLE set of groups (a total folded
+   * over them, an absent group read as an empty one) must check it first.
+   *
    * @param resource - Object name
    * @param query - The compiled header query (`EngineAggregateOptions`)
    * @returns One header row per group, as the platform answers it
    */
-  queryGroupHeaders?(resource: string, query: EngineAggregateOptions): Promise<ListViewGroupHeaderRow[]>;
+  queryGroupHeaders?(resource: string, query: EngineAggregateOptions): Promise<ListViewGroupHeaderAnswer>;
 
   /**
    * Subscribe to mutation events.
@@ -1521,6 +1527,26 @@ export interface AggregateParams {
   /** Optional filter to apply before aggregation */
   filter?: any;
 }
+
+/**
+ * The answer of `DataSource.queryGroupHeaders`: one header row per group, as
+ * an array, so a caller that only lists the groups reads it as one.
+ *
+ * `hasMore: true` says the answer is PARTIAL — the source answered some of
+ * the groups and more exist (the platform's `POST /data/:object/query` cuts a
+ * grouped read with no `limit` to the deployment's default page size and
+ * answers `hasMore`). A group absent from a partial answer was dropped, not
+ * empty. Absent or `false`: the answer is every group the query has.
+ *
+ * ⚠ `hasMore` is a property ON the array: a copy (`[...rows]`, `.slice()`,
+ * `.map()`, a structured clone) drops it silently, and the copy then reads
+ * as a whole answer. Read the flag off the answer as returned, or carry it
+ * across the copy.
+ */
+export type ListViewGroupHeaderAnswer = ListViewGroupHeaderRow[] & {
+  /** `true` when more groups exist than the answer carries. */
+  hasMore?: boolean;
+};
 
 /**
  * Result of a server-side aggregation.

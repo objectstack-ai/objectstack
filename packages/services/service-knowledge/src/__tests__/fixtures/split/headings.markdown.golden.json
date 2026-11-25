@@ -1,0 +1,63 @@
+[
+  {
+    "id": "doc#0",
+    "documentId": "doc",
+    "index": 0,
+    "content": "Travel policy\n\nThis policy covers every business trip.",
+    "headingPath": [
+      "Travel policy"
+    ]
+  },
+  {
+    "id": "doc#1",
+    "documentId": "doc",
+    "index": 1,
+    "content": "Travel policy > Transport > Air\n\nEconomy class only. Business class needs the CEO's written approval in advance.",
+    "headingPath": [
+      "Travel policy",
+      "Transport",
+      "Air"
+    ]
+  },
+  {
+    "id": "doc#2",
+    "documentId": "doc",
+    "index": 2,
+    "content": "Travel policy > Transport > Rail\n\nSecond class or a soft sleeper berth.",
+    "headingPath": [
+      "Travel policy",
+      "Transport",
+      "Rail"
+    ]
+  },
+  {
+    "id": "doc#3",
+    "documentId": "doc",
+    "index": 3,
+    "content": "Travel policy > Meals\n\nLodging\n\nMeals are paid as a daily allowance.",
+    "headingPath": [
+      "Travel policy",
+      "Meals"
+    ]
+  },
+  {
+    "id": "doc#4",
+    "documentId": "doc",
+    "index": 4,
+    "content": "Travel policy > Meals\n\n```\n# not a heading inside a code fence\n```",
+    "headingPath": [
+      "Travel policy",
+      "Meals"
+    ]
+  },
+  {
+    "id": "doc#5",
+    "documentId": "doc",
+    "index": 5,
+    "content": "Travel policy > Appendix",
+    "headingPath": [
+      "Travel policy",
+      "Appendix"
+    ]
+  }
+]

@@ -42,11 +42,15 @@ import { MemoryRouter } from 'react-router-dom';
 // test clock running.
 import { RecordHeaderStateContext } from '@object-ui/components';
 
-const authFetchSpy = vi.fn(async () =>
-  new Response(JSON.stringify({ data: {} }), {
-    status: 200,
-    headers: { 'content-type': 'application/json' },
-  }),
+// The approvals reads go out through the authenticated fetch too; they answer from
+// the file's wire double below, as before.
+const authFetchSpy = vi.fn(async (url: string, init?: RequestInit) =>
+  String(url).includes('/approvals/requests')
+    ? fetch(url, init)
+    : new Response(JSON.stringify({ data: {} }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      }),
 );
 vi.mock('@object-ui/auth', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),

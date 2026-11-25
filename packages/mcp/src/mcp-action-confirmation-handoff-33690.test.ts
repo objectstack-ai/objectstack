@@ -511,3 +511,19 @@ describe('[#33712] Streamable HTTP: initialize batched with a tool call', () => 
     expect(bridge.calls).toEqual([]);
   });
 });
+
+/**
+ * [#35778] run_action's description says what the no-service refusal leaves
+ * the caller: a person performs the action in the app, and the agent does not
+ * make the same change through another tool. Door-neutral: it reads true on
+ * the stdio door and on Streamable HTTP.
+ */
+describe('[#35778] run_action names the next step on a no_confirmation_service refusal', () => {
+  it('its tools/list description carries the in-app clause', async () => {
+    const json = await call(makeBridge('none'), { jsonrpc: '2.0', id: 1, method: 'tools/list' });
+    const runAction = (json.result.tools as Array<{ name: string; description: string }>).find((t) => t.name === 'run_action');
+    expect(runAction?.description).toContain(
+      'On details.reason "no_confirmation_service" a person performs it in the app: do not make the same change with another tool.',
+    );
+  });
+});

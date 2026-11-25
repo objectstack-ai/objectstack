@@ -166,6 +166,7 @@ vi.mock('@object-ui/plugin-view', async (importOriginal) => {
 // The console's preview and authoring code loads `@objectstack/lint` lazily;
 // warmed here so its first load is paid at import, not inside a test's clock.
 import '@objectstack/lint';
+import '@object-ui/plugin-detail';
 import { DataPillar, type StudioBaseCustomization } from './StudioDesignSurface';
 import { StudioSaveHarness, pressStudioSave } from './__tests__/studioSaveHarness';
 import { t } from '../metadata-admin/i18n';
@@ -219,7 +220,7 @@ async function openOnForm(): Promise<void> {
   render(
     <StudioSaveHarness>
       <MemoryRouter initialEntries={[`/studio/${BASE}/data`]}>
-        <DataPillar packageId={BASE} readOnly customization={customization()} />
+        <DataPillar objectName={OBJECT} packageId={BASE} readOnly customization={customization()} />
       </MemoryRouter>
     </StudioSaveHarness>,
   );

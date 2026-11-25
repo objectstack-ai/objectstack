@@ -11,7 +11,7 @@ import { useEffect, useState } from 'react';
 import { Navigate, useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import { CheckCircle2 } from 'lucide-react';
 import { toast } from 'sonner';
-import { useAuth } from '@object-ui/auth';
+import { createAuthenticatedFetch, useAuth } from '@object-ui/auth';
 import { useObjectTranslation } from '@object-ui/i18n';
 import { getProductName, getLogoUrl } from '@object-ui/app-shell';
 import {
@@ -22,6 +22,11 @@ import {
   CardHeader,
   CardTitle,
 } from '@object-ui/components';
+
+/** The console's authenticated fetch: the stored bearer token beside the session cookie. */
+function authFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+  return createAuthenticatedFetch()(input, init);
+}
 
 const AUTH_BASE = `${import.meta.env.VITE_SERVER_URL || ''}/api/v1/auth`;
 
@@ -200,7 +205,7 @@ export function DeviceAuthPage() {
   // accept approve/deny — without it both return 400 "not been claimed
   // by a verifying session". Idempotent, so claim right before acting.
   const claimDevice = async () => {
-    await fetch(`${AUTH_BASE}/device?user_code=${encodeURIComponent(code)}`, {
+    await authFetch(`${AUTH_BASE}/device?user_code=${encodeURIComponent(code)}`, {
       credentials: 'include',
     }).catch(() => { /* approve below surfaces the real error */ });
   };
@@ -210,7 +215,7 @@ export function DeviceAuthPage() {
     setSubmitting(true);
     try {
       await claimDevice();
-      const res = await fetch(`${AUTH_BASE}/device/approve`, {
+      const res = await authFetch(`${AUTH_BASE}/device/approve`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
@@ -250,7 +255,7 @@ export function DeviceAuthPage() {
     setDenying(true);
     try {
       await claimDevice();
-      await fetch(`${AUTH_BASE}/device/deny`, {
+      await authFetch(`${AUTH_BASE}/device/deny`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',

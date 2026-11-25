@@ -108,14 +108,16 @@ export function judgePickWrites(
   currency: AutofillCurrencyContext | undefined,
 ): LookupAutofillPlan {
   const plan: LookupAutofillPlan = { patch: {}, withheld: [] };
+  const copiedAmounts: CopiedAutofill[] = [];
   const writes: Values = {};
   for (const c of candidates) writes[c.target] = c.value;
   for (const c of candidates) {
-    const refused = judgeCopy(currency, c, writes);
-    if (refused) plan.withheld.push(refused);
+    const { withheld, copied } = judgeCopy(currency, c, writes);
+    if (withheld) plan.withheld.push(withheld);
     else plan.patch[c.target] = c.value;
+    if (copied) copiedAmounts.push(copied);
   }
-  return plan;
+  return copiedAmounts.length > 0 ? { ...plan, copied: copiedAmounts } : plan;
 }
 
 /** {@link planDeclaredLookupAutofill}'s writes alone. */
@@ -258,6 +260,11 @@ function codeOf(c: AmountCurrency, home: string | undefined): string | undefined
  * - `targetCurrencyUnread`: the amount being filled follows a parent whose
  *   code could not be read.
  *
+ * - `nowSameCurrency`: the record's currency has since changed, in the same
+ *   edit, to the picked amount's own (`to`). The value stays unwritten (a
+ *   currency change fills nothing), and a pick again fills it (the
+ *   maintainer's ruling on objectstack-ai/objectstack#36412, branch B).
+ *
  * `held` is the value the target held at the pick when it held one (a re-pick
  * over a filled target): the target keeps it, and the note says so.
  */
@@ -265,7 +272,7 @@ export interface WithheldAutofill {
   readonly target: string;
   readonly source: string;
   readonly amount: number;
-  readonly reason: 'differs' | 'noTargetCurrency' | 'noSourceCurrency' | 'targetCurrencyUnread';
+  readonly reason: 'differs' | 'noTargetCurrency' | 'noSourceCurrency' | 'targetCurrencyUnread' | 'nowSameCurrency';
   readonly from?: string;
   readonly to?: string;
   readonly held?: unknown;
@@ -314,23 +321,90 @@ export interface AutofillCurrencyContext {
   home: string | undefined;
 }
 
-/** The writes and the withheld values of one pick. */
+/**
+ * An amount one pick copied into `target`: the `value` written and `under`,
+ * the code the target was in when it was written. A currency change in the
+ * same edit leaves the amount as it is (the maintainer's ruling on
+ * objectstack-ai/objectstack#36412, 「保留金额并提示」), and the host says
+ * under which currency it was copied while the target still holds it
+ * ({@link copiedAutofillNow}).
+ */
+export interface CopiedAutofill {
+  readonly target: string;
+  readonly source: string;
+  readonly value: unknown;
+  readonly under: string;
+}
+
+/**
+ * The writes and the withheld values of one pick, and `copied`, the amounts
+ * it wrote with the code each was written under. `copied` is absent when the
+ * pick wrote no amount a currency judged (absent means none), so a plan built
+ * without it stays a plan.
+ */
 export interface LookupAutofillPlan {
   patch: Values;
   withheld: WithheldAutofill[];
+  copied?: CopiedAutofill[];
 }
 
-/** `write` judged against the record with this pick's `writes` applied, or the reason it is not copied. */
+/** `write` judged against the record with this pick's `writes` applied: withheld with the reason, or copied (an amount under its target's code). */
 function judgeCopy(
   ctx: AutofillCurrencyContext | undefined,
   { target, source, value, held }: PickWrite,
   writes: Readonly<Values>,
-): WithheldAutofill | undefined {
-  if (!ctx) return undefined;
-  const refusal = crossCurrencyRefusal(ctx.sourceCurrency(source, value), ctx.targetCurrency(target, writes), ctx.home);
-  if (!refusal) return undefined;
+): { withheld?: WithheldAutofill; copied?: CopiedAutofill } {
+  if (!ctx) return {};
+  const to = ctx.targetCurrency(target, writes);
+  const refusal = crossCurrencyRefusal(ctx.sourceCurrency(source, value), to, ctx.home);
+  if (!refusal) {
+    const under = to ? codeOf(to, ctx.home) : undefined;
+    return under ? { copied: { target, source, value, under } } : {};
+  }
   const amount = typeof value === 'number' ? value : Number(value);
-  return { target, source, amount, ...refusal, ...(isEmptyValue(held) ? {} : { held }) };
+  return { withheld: { target, source, amount, ...refusal, ...(isEmptyValue(held) ? {} : { held }) } };
+}
+
+/**
+ * `item` judged again against `now`, the currency its target is in now: a
+ * currency change in the same edit refreshes a withheld note to the new
+ * currency (the maintainer's ruling on objectstack-ai/objectstack#36412,
+ * item 3). Once the target is in the picked amount's own currency, the
+ * value stays unwritten and the note says a pick again fills it
+ * (`nowSameCurrency`, branch B). `item` itself when `now` is not known, or
+ * when it names no code to say.
+ */
+export function withheldAutofillNow(
+  item: WithheldAutofill,
+  now: AmountCurrency | undefined,
+  home: string | undefined,
+): WithheldAutofill {
+  if (!now) return item;
+  const source: AmountCurrency = item.from ? { kind: 'code', code: item.from } : UNKNOWN;
+  const { target, amount, held } = item;
+  const base = { target, source: item.source, amount, ...(held === undefined ? {} : { held }) };
+  const refusal = crossCurrencyRefusal(source, now, home);
+  if (refusal) return { ...base, ...refusal };
+  const to = codeOf(now, home);
+  return to ? { ...base, reason: 'nowSameCurrency', ...(item.from ? { from: item.from } : {}), to } : item;
+}
+
+/**
+ * The code to name beside an amount a pick copied (`item`) while its target
+ * still holds it (`current`): the code the target is in `now`, when that is
+ * known and differs from the one it was copied under. `undefined` says
+ * nothing is to be said: the target was written since (a typed amount gets
+ * no note), or the currency is unchanged or cannot be named.
+ */
+export function copiedAutofillNow(
+  item: CopiedAutofill,
+  current: unknown,
+  now: AmountCurrency | undefined,
+  home: string | undefined,
+): string | undefined {
+  if (!sameValue(current, item.value) || !now) return undefined;
+  const to = codeOf(now, home);
+  return to && to !== item.under ? to : undefined;
 }
 
 /**
@@ -350,7 +424,8 @@ type Translate = (key: string, options?: Record<string, unknown>) => string;
  * The sentence that says why a pick left `item.target` empty, naming both
  * currencies and the picked amount in its own currency, so a person can
  * price it by hand. `label` is the target's label. A target that kept the
- * value it held at the pick (`held`) is said to keep it.
+ * value it held at the pick (`held`) is said to keep it; under
+ * `nowSameCurrency` it is told to clear the field before a pick again.
  */
 export function withheldAutofillMessage(
   item: WithheldAutofill,
@@ -366,8 +441,33 @@ export function withheldAutofillMessage(
         ? t('lookup.autofillSourceNoCurrency', { field: label, amount, to: item.to })
         : item.reason === 'targetCurrencyUnread'
           ? t('lookup.autofillCurrencyUnread', { field: label, amount })
-          : t('lookup.autofillNoCurrency', { field: label, amount });
-  return item.held === undefined ? why : `${why} ${t('lookup.autofillKept', { field: label })}`;
+          : item.reason === 'nowSameCurrency'
+            ? t('lookup.autofillNowSameCurrency', { field: label, amount, to: item.to })
+            : t('lookup.autofillNoCurrency', { field: label, amount });
+  if (item.held === undefined) return why;
+  // A target that still holds an earlier value: a pick again of the same
+  // record does not replace it (a declared pair without `overwrite` keeps a
+  // value this record did not fill), so the sentence says to clear it first.
+  if (item.reason === 'nowSameCurrency') return t('lookup.autofillNowSameCurrencyHeld', { field: label, amount, to: item.to });
+  return `${why} ${t('lookup.autofillKept', { field: label })}`;
+}
+
+/**
+ * The sentence beside an amount a pick copied, once the record's currency
+ * changed in the same edit: the amount as it was copied, in the code it was
+ * copied under, and the code the record is in `now`
+ * ({@link copiedAutofillNow}).
+ */
+export function copiedAutofillMessage(
+  item: CopiedAutofill,
+  now: string,
+  label: string,
+  t: Translate,
+  locale: string | undefined,
+): string {
+  const n = typeof item.value === 'number' ? item.value : Number(item.value);
+  const amount = Number.isFinite(n) ? formatCurrency(n, item.under, locale) : String(item.value);
+  return t('lookup.autofillCopiedUnder', { field: label, amount, to: now });
 }
 
 /**
@@ -375,8 +475,27 @@ export function withheldAutofillMessage(
  * targets under, on the lookup's own field metadata: the widget receives one
  * field, not the object, and a target's currency is its definition's. The
  * same hand-off shape as `FOLLOWED_PARENT_OBJECT_KEY` (`currency.ts`).
+ *
+ * The stamp is also the record form's statement that the lookup is drawn
+ * for the record being edited, and so the one thing that lets a pick fill
+ * other fields at all ({@link readLookupAutofillTargets}): `lookupAutofill`
+ * is a fact about the object, honoured in a record form and a line-item grid
+ * column, and a pick in any other host fills nothing.
+ *
+ * ⛔ Only a stamp {@link withLookupAutofillTargets} issued counts: a value
+ * under this key that arrived as data (written by hand on a standalone form
+ * node's field, or anywhere else) is no stamp, whatever its shape.
  */
 export const LOOKUP_AUTOFILL_TARGETS_KEY = 'lookupAutofillTargets';
+
+/**
+ * Every target map {@link withLookupAutofillTargets} issued. Membership is
+ * what makes the stamp the record form's statement rather than a document's:
+ * nothing parsed from JSON is ever in it. A copy of the field def keeps the
+ * map it carries, so the stamp survives every spread between the form and
+ * the widget.
+ */
+const ISSUED_TARGET_STAMPS = new WeakSet<object>();
 
 /**
  * `def` with the definitions of its `lookupAutofill` targets stamped, read
@@ -384,8 +503,14 @@ export const LOOKUP_AUTOFILL_TARGETS_KEY = 'lookupAutofillTargets';
  * object it follows when its currency follows a parent (ADR-0144 D2 as
  * amended). `labels` names each field as the form shows it (translated);
  * a target the form draws carries that name as its `label`, so a note about
- * it names the field the way the form does. `def` itself when it declares no
- * pairs or `fields` names none of its targets.
+ * it names the field the way the form does. Only a host that edits one
+ * record of the object calls this: the record form.
+ *
+ * A lookup that declares pairs is stamped even when `fields` names none of
+ * its targets (the schema is still loading, the form has no metadata source,
+ * a target is not a field of the map): the map is then empty, the pick
+ * copies with no currency to judge, and the stamp still says the lookup is
+ * drawn by a record form. `def` itself when it declares no pairs.
  */
 export function withLookupAutofillTargets<T extends object>(
   def: T,
@@ -393,22 +518,29 @@ export function withLookupAutofillTargets<T extends object>(
   labels?: Readonly<Record<string, string>>,
 ): T {
   const pairs = (def as { lookupAutofill?: unknown }).lookupAutofill;
-  if (!Array.isArray(pairs) || pairs.length === 0 || !fields) return def;
+  if (!Array.isArray(pairs) || pairs.length === 0) return def;
   const targets: Record<string, object> = {};
   for (const pair of pairs as LookupAutofillPair[]) {
-    const target = fields[pair?.target];
+    const target = fields?.[pair?.target];
     if (!target || typeof target !== 'object') continue;
     const stamped = withFollowedParentObject(target, fields);
     const shown = labels?.[pair.target];
     targets[pair.target] = typeof shown === 'string' && shown !== '' ? { ...stamped, label: shown } : stamped;
   }
-  return Object.keys(targets).length > 0 ? { ...def, [LOOKUP_AUTOFILL_TARGETS_KEY]: targets } : def;
+  const stamp = Object.freeze(targets);
+  ISSUED_TARGET_STAMPS.add(stamp);
+  return { ...def, [LOOKUP_AUTOFILL_TARGETS_KEY]: stamp };
 }
 
-/** The target definitions a form stamped on `field`, or `undefined`. */
+/**
+ * The target definitions a record form stamped on `field`
+ * ({@link withLookupAutofillTargets}), possibly none, or `undefined` when no
+ * record form stamped it. A value under the key that
+ * {@link withLookupAutofillTargets} did not issue is no stamp.
+ */
 export function readLookupAutofillTargets(field: unknown): Readonly<Record<string, Record<string, unknown>>> | undefined {
   const value = (field as Record<string, unknown> | null | undefined)?.[LOOKUP_AUTOFILL_TARGETS_KEY];
-  return value && typeof value === 'object' && !Array.isArray(value)
+  return value && typeof value === 'object' && ISSUED_TARGET_STAMPS.has(value)
     ? (value as Record<string, Record<string, unknown>>)
     : undefined;
 }

@@ -61,7 +61,7 @@ vi.mock('../../../../packages/auth/src/useAuth', async (importOriginal) => ({
 // them only through `./studioBuilder`.
 vi.mock('@object-ui/app-shell', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
-  BuilderLanding: () => <div data-testid="barrel-builder" />,
+  StudioEntryRedirect: () => <div data-testid="barrel-builder" />,
   StudioDesignSurface: () => <div data-testid="barrel-builder" />,
   StudioMetadataArea: () => <div data-testid="barrel-builder" />,
   ConnectedShell: ({ children }: { children?: React.ReactNode }) => <>{children}</>,
@@ -81,7 +81,7 @@ function SurfaceMarker({ area }: { area?: string }) {
 }
 
 vi.mock('./studioBuilder', () => ({
-  BuilderLanding: () => <div data-testid="studio-front-door" />,
+  StudioEntryRedirect: () => <div data-testid="studio-entry" />,
   StudioDesignSurface: SurfaceMarker,
   StudioMetadataArea: ({ packageId }: { packageId: string | null }) => (
     <div data-testid="studio-metadata-area" data-package={String(packageId)} />
@@ -146,8 +146,11 @@ describe('/studio — the "All metadata" area\'s routes (objectstack#28561)', ()
     const surface = await screen.findByTestId('studio-pillar-builder');
     expect(surface).toHaveAttribute('data-package', '~all');
     expect(surface).toHaveAttribute('data-area', 'metadata');
-    // The landing's frame (the console's top bar) no longer draws it.
-    expect(screen.queryByRole('link', { name: 'ObjectOS home' })).toBeNull();
+    // No console top bar frames it: the builder's own header is the only one.
+    // By its test id, not its name: the name depends on the width
+    // (objectstack#37163), and an absence asserted by an old name passes on
+    // a mark that is drawn.
+    expect(screen.queryByTestId('app-bar-product-home')).toBeNull();
     expect(screen.queryByTestId('studio-metadata-area')).toBeNull();
     expect(location()).toBe('/studio/~all/metadata/permission?scope=environment');
   });
@@ -168,6 +171,8 @@ describe('/studio — the "All metadata" area\'s routes (objectstack#28561)', ()
     '/studio/com.example.crm/metadata',
     // objectstack#36899 — the left menu's targets that are not an area list.
     '/studio/~org/automations',
+    // objectstack#36905 — the sharing overview's own route, and the old address that redirects to it.
+    '/studio/com.example.crm/owd',
     '/studio/com.example.crm/access?surface=owd%3Aoverview',
     '/studio/com.example.crm/metadata/_diagnostics',
   ])(

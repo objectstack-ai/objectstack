@@ -253,6 +253,88 @@ export function markDismissed(storage: ChecklistStorage | undefined, key: string
 }
 
 /**
+ * Where "the server answered that this session is not shown the checklist"
+ * lives, per workspace and per user: `os:first-run-checklist-not-shown:<orgId>:<userId>`
+ * (objectstack#37182).
+ *
+ * The checklist's provider is mounted above every app route, and the only way
+ * it learns that a session may not write `localization` is to ask: the first
+ * request of `readChecklistSettings` lists the settings manifests. For a
+ * session that is never shown the checklist that request bought nothing, on
+ * every console open: a plain member, and an ordinary organization owner on the
+ * cloud's control plane, which holds `setup.write` but whose `localization`
+ * manifest asks `manage_platform_settings`. No capability check before the
+ * request can tell that second session apart: the permission a deployment's
+ * manifest asks is known only once the list answers, and naming one in the
+ * console would be a second copy of the manifest's declaration.
+ *
+ * So the answer is remembered on the device, beside the dismiss record and for
+ * the same reason (the narrowest scope the client can see that holds every tab
+ * of one sign-in), with what it was read for:
+ *
+ * - the capability set it was read for: any change to it (a grant, a
+ *   revocation) is a different session as far as the checklist goes, and it
+ *   reads again;
+ * - when it was read: after {@link NOT_SHOWN_RECORD_TTL_MS} it reads again, so
+ *   a deployment that starts showing the checklist to this session (a
+ *   manifest's `writePermission` changed by an upgrade) is followed within a
+ *   day.
+ *
+ * Only a server's ANSWER is remembered: a read that failed, and an
+ * administrator's checklist, are not, so the administrator's reads are exactly
+ * what they were. The record fails toward reading again: storage that cannot
+ * be read, a record that does not parse, or one dated in the future, all read.
+ */
+export const NOT_SHOWN_RECORD_PREFIX = 'os:first-run-checklist-not-shown';
+
+/** How long a "not shown" answer stands before the provider asks again: one day. */
+export const NOT_SHOWN_RECORD_TTL_MS = 24 * 60 * 60 * 1000;
+
+export function notShownRecordKey(orgId: string, userId: string): string {
+  return `${NOT_SHOWN_RECORD_PREFIX}:${orgId}:${userId}`;
+}
+
+/**
+ * Did the server answer, within the last {@link NOT_SHOWN_RECORD_TTL_MS}, that
+ * this user in this workspace, holding exactly `held` (the capability list,
+ * newline-joined), is not shown the checklist?
+ */
+export function wasAnsweredNotShown(
+  storage: ChecklistStorage | undefined,
+  key: string,
+  held: string,
+  now: number = Date.now(),
+): boolean {
+  if (!storage) return false;
+  try {
+    const raw = storage.getItem(key);
+    if (raw === null) return false;
+    const record = JSON.parse(raw) as { held?: unknown; at?: unknown } | null;
+    if (!record || record.held !== held || typeof record.at !== 'number') return false;
+    const age = now - record.at;
+    return age >= 0 && age < NOT_SHOWN_RECORD_TTL_MS;
+  } catch {
+    return false;
+  }
+}
+
+/** Record that the server answered "not shown" for `held`. Returns `false` when it could not be written. */
+export function markAnsweredNotShown(
+  storage: ChecklistStorage | undefined,
+  key: string,
+  held: string,
+  now: number = Date.now(),
+): boolean {
+  if (!storage) return false;
+  try {
+    storage.setItem(key, JSON.stringify({ held, at: now }));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
  * The browser's own zone, or `undefined` when it reports none.
  *
  * `resolvedOptions().timeZone` is `undefined` on engines that cannot tell, and

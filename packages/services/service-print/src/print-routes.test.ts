@@ -2,6 +2,7 @@
 
 import { describe, expect, it, vi } from 'vitest';
 import { ApiErrorSchema, envelopeViolations } from '@objectstack/spec/api';
+import { BUILTIN_OPERATION_MESSAGES } from '@objectstack/spec/system';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
 import type { ChromiumDriver } from './chromium-driver.js';
 import type { PrintPlacementResolution } from './config.js';
@@ -57,6 +58,8 @@ interface DoorSetup {
   page?: Record<string, unknown>;
   /** Hand the door this service instead of a real `PrintService`. */
   service?: IPrintService;
+  /** Replace the tenancy-posture read the resolver awaits (a rejection fails the caller's resolution). */
+  resolveTenancyPosture?: () => Promise<undefined>;
 }
 
 function door(setup: DoorSetup = {}) {
@@ -159,10 +162,12 @@ function door(setup: DoorSetup = {}) {
       },
     }),
     getAuth: () => auth as never,
-    resolveTenancyPosture: async () => undefined,
+    resolveTenancyPosture: setup.resolveTenancyPosture ?? (async () => undefined),
   });
 
-  async function call(opts: { bearer?: string; body?: unknown; query?: Record<string, string> } = {}) {
+  async function call(
+    opts: { bearer?: string; body?: unknown; query?: Record<string, string>; headers?: Record<string, string> } = {},
+  ) {
     const handler = handlers.get(`POST ${PRINT_RECORDS_ROUTE}`);
     if (!handler) throw new Error('the door mounted no POST handler at its route');
     const answer: { status: number; body: any } = { status: 0, body: undefined };
@@ -182,7 +187,7 @@ function door(setup: DoorSetup = {}) {
         params: {},
         query: opts.query ?? {},
         body: opts.body,
-        headers: opts.bearer ? { authorization: `Bearer ${opts.bearer}` } : {},
+        headers: { ...(opts.bearer ? { authorization: `Bearer ${opts.bearer}` } : {}), ...opts.headers },
         method: 'POST',
         path: PRINT_RECORDS_ROUTE,
       },
@@ -359,6 +364,111 @@ describe('the print door — the refusals card ③ pins, relayed through the doo
     expect(envelope(answer)).toEqual(['INTERNAL_ERROR', 500]);
     expect(answer.body.error.message).not.toContain('/srv/secret');
     expect(logged.errors()).toContain('/srv/secret');
+  });
+});
+
+describe("the print door — its own 5xx sentences, in the request's language", () => {
+  /** A service whose print throws `error`: a declared 504, an undeclared fault. */
+  function throwing(error: unknown): IPrintService {
+    return {
+      status: () => ({ state: 'ready', placement: 'local', version: 'stand-in' }),
+      printRecordToFile: async () => {
+        throw error;
+      },
+    };
+  }
+
+  /** The three failures the card names, each with the door setup that produces it and the catalog key it answers. */
+  const FAILURES: Array<{ name: string; code: string; status: number; key: string; setup: () => DoorSetup }> = [
+    {
+      name: 'no print engine ready',
+      code: 'SERVICE_UNAVAILABLE',
+      status: 503,
+      key: 'print_engine_unavailable',
+      setup: () => ({ placement: { state: 'unconfigured', reason: 'No print engine is configured. Set OS_PRINT_CHROMIUM_PATH.' } }),
+    },
+    {
+      name: 'the render ran past its time',
+      code: 'TIMEOUT',
+      status: 504,
+      key: 'print_timed_out',
+      setup: () => ({ service: throwing(Object.assign(new Error('render timed out at /srv/secret'), { code: 'TIMEOUT', status: 504 })) }),
+    },
+    {
+      name: 'an undeclared fault',
+      code: 'INTERNAL_ERROR',
+      status: 500,
+      key: 'print_failed',
+      setup: () => ({ service: throwing(new Error('ECONNRESET at /srv/secret')) }),
+    },
+  ];
+
+  async function printAs(setup: DoorSetup, headers?: Record<string, string>) {
+    const d = door(setup);
+    const logged = quietFaultLog();
+    const answer = await d.call({ bearer: 'alice', body: { ...INVOICE, recordId: 'inv_alice' }, headers });
+    logged.restore();
+    return answer;
+  }
+
+  for (const failure of FAILURES) {
+    it(`${failure.name}: ${failure.code} / ${failure.status} under accept-language zh-CN answers the zh-CN sentence`, async () => {
+      const answer = await printAs(failure.setup(), { 'accept-language': 'zh-CN,zh;q=0.9,en;q=0.8' });
+      expect(envelope(answer)).toEqual([failure.code, failure.status]);
+      expect(answer.body.error.message).toBe(BUILTIN_OPERATION_MESSAGES['zh-CN'][failure.key]);
+      expect(answer.body.error.message).not.toBe(BUILTIN_OPERATION_MESSAGES.en[failure.key]);
+      expect(JSON.stringify(answer.body)).not.toContain('/srv/secret');
+    });
+
+    it(`${failure.name}: the control — an English or absent accept-language keeps the English sentence`, async () => {
+      const english = BUILTIN_OPERATION_MESSAGES.en[failure.key];
+      for (const headers of [{ 'accept-language': 'en-US,en;q=0.9' }, undefined]) {
+        const answer = await printAs(failure.setup(), headers);
+        expect(envelope(answer)).toEqual([failure.code, failure.status]);
+        expect(answer.body.error.message, JSON.stringify(headers)).toBe(english);
+      }
+    });
+  }
+
+  it('the English sentences are the ones the door answered before they were localized', () => {
+    expect(FAILURES.map((f) => BUILTIN_OPERATION_MESSAGES.en[f.key])).toEqual([
+      'Records cannot be printed to a file right now: the print engine is not ready. The server log records why.',
+      'The record could not be printed to a file in the time a print is allowed.',
+      'The record could not be printed to a file because of an error on the server.',
+    ]);
+  });
+
+  it('a base language reaches its regional catalog (ja → ja-JP); a language the catalog lacks answers English', async () => {
+    const [unavailable] = FAILURES;
+    const ja = await printAs(unavailable!.setup(), { 'accept-language': 'ja' });
+    expect(ja.body.error.message).toBe(BUILTIN_OPERATION_MESSAGES['ja-JP'].print_engine_unavailable);
+    const de = await printAs(unavailable!.setup(), { 'accept-language': 'de-DE' });
+    expect(de.body.error.message).toBe(BUILTIN_OPERATION_MESSAGES.en.print_engine_unavailable);
+  });
+
+  it('a caller the door cannot resolve: INTERNAL_ERROR / 500 in the request\'s language, the cause in the fault log only', async () => {
+    const setup: DoorSetup = {
+      resolveTenancyPosture: async () => {
+        throw new Error('posture read failed at /srv/secret');
+      },
+    };
+    const zh = await printAs(setup, { 'accept-language': 'zh-CN' });
+    expect(envelope(zh)).toEqual(['INTERNAL_ERROR', 500]);
+    expect(zh.body.error.message).toBe(BUILTIN_OPERATION_MESSAGES['zh-CN'].print_caller_unresolved);
+    expect(JSON.stringify(zh.body)).not.toContain('/srv/secret');
+    const absent = await printAs(setup);
+    expect(absent.body.error.message).toBe('The caller of this print could not be resolved.');
+    expect(JSON.stringify(absent.body)).not.toContain('/srv/secret');
+  });
+
+  it('a 4xx refusal keeps its producer\'s own text whatever the request\'s language', async () => {
+    const text = 'the service\'s own refusal text';
+    const answer = await printAs(
+      { service: throwing(Object.assign(new Error(text), { code: 'VALIDATION_ERROR', status: 400 })) },
+      { 'accept-language': 'zh-CN' },
+    );
+    expect(envelope(answer)).toEqual(['VALIDATION_ERROR', 400]);
+    expect(answer.body.error.message).toBe(text);
   });
 });
 

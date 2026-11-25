@@ -406,6 +406,168 @@ describe('a lane statistic covers every record of the lane (objectstack#36520)',
     await waitFor(() => expect(foot('Open')).toBeNull());
     expect(source.queryGroupHeaders).not.toHaveBeenCalled();
   });
+
+  /**
+   * objectstack#36871 — a host that hands the board one page of cards AND the
+   * query they came from (`laneStatisticQuery`; `ListView` for lanes it does
+   * not know before the query) gets the whole lane's figures, never the
+   * page's. The CONTROL is the test above: cards handed without their query.
+   */
+  function mountHanded(source: any, summary: unknown, handed: Row[], request: Record<string, unknown>, schema: Record<string, unknown> = {}) {
+    const node = (req: Record<string, unknown>) => (
+      <SchemaRendererProvider dataSource={source}>
+        <ObjectKanban
+          schema={{ type: 'object-kanban', objectName: OBJECT, groupBy: 'stage', cardFields: ['amount'], summary, ...schema } as any}
+          dataSource={source}
+          data={handed}
+          laneStatisticQuery={req}
+        />
+      </SchemaRendererProvider>
+    );
+    const result = render(node(request));
+    return { ...result, rerenderWith: (req: Record<string, unknown>) => result.rerender(node(req)) };
+  }
+
+  it.each([
+    // The page handed in is 3 open deals (0 + 1 + 2); the lane holds 70.
+    ['sum', 'Sum', '2415'],
+    ['avg', 'Avg', '34.5'],
+    ['min', 'Min', '0'],
+    ['max', 'Max', '69'],
+  ])('draws the whole lane\'s %s over a page handed in with its query (objectstack#36871)', async (type, word, open) => {
+    const source = adapter(ROWS_70);
+    mountHanded(source, { type, field: 'amount' }, deals('open', 3), { search: '', reloadKey: '0' });
+    await waitFor(() => expect(foot('Open')).not.toBeNull());
+    expect(within(lane('Open')).queryAllByRole('listitem')).toHaveLength(3);
+    expect(foot('Open')!.textContent).toContain(`${word} · Amount`);
+    expect(figure('Open')).toBe(open);
+    expect(source.queryGroupHeaders).toHaveBeenCalledTimes(1);
+    // The board reads nothing for its cards: the host handed them.
+    expect(source.find).not.toHaveBeenCalled();
+  });
+
+  it('asks that read under the node\'s filter and the host\'s search, and again when the host refetches (objectstack#36871)', async () => {
+    const source = adapter(ROWS_70);
+    const { rerenderWith } = mountHanded(
+      source,
+      { type: 'sum', field: 'amount' },
+      deals('open', 3),
+      { search: 'open', searchFields: ['name'], reloadKey: '0' },
+      { filter: [['region', '=', 'north']] },
+    );
+    await waitFor(() => expect(source.queryGroupHeaders).toHaveBeenCalledTimes(1));
+    const query = source.queryGroupHeaders.mock.calls[0][1];
+    expect(query.where).toEqual({ region: 'north' });
+    expect(query.search).toBe('open');
+    expect(query.searchFields).toEqual(['name']);
+    rerenderWith({ search: 'open', searchFields: ['name'], reloadKey: '1' });
+    await waitFor(() => expect(source.queryGroupHeaders).toHaveBeenCalledTimes(2));
+  });
+});
+
+/**
+ * objectstack#36870 — a lane read the door CUT draws no figure for any lane.
+ *
+ * Under a deployment's default page size the door slices the grouped answer
+ * and says so (`hasMore`), which `queryGroupHeaders` hands on as the answer's
+ * `hasMore`. `cappedAt` answers the lane read the way that door does: every
+ * group `groupHeadersOver` finds, cut to `pageSize` rows. The groups of
+ * `ROWS_70` are open, won, the empty group and `archived`, in that order.
+ */
+describe('a cut lane read draws no lane figure (objectstack#36870)', () => {
+  const OBJECT = 'deal';
+  const DEF = {
+    name: OBJECT,
+    fields: {
+      name: { type: 'text', label: 'Name' },
+      amount: { type: 'number', label: 'Amount' },
+      stage: {
+        type: 'select',
+        label: 'Stage',
+        options: [
+          { value: 'open', label: 'Open' },
+          { value: 'won', label: 'Won' },
+          { value: 'lost', label: 'Lost' },
+        ],
+      },
+    },
+  };
+  const deals = (stage: string | null, n: number): Row[] =>
+    Array.from({ length: n }, (_, i) => ({
+      id: `${stage ?? 'none'}-${String(i).padStart(3, '0')}`,
+      name: `${stage ?? 'none'} ${String(i).padStart(3, '0')}`,
+      stage,
+      amount: i,
+    }));
+  const ROWS_70 = [...deals('open', 70), ...deals('won', 5), ...deals(null, 2), ...deals('archived', 3)];
+
+  function cappedAt(rows: Row[], pageSize: number) {
+    const whole = groupHeadersOver(rows, OBJECT);
+    return vi.fn(async (object: string, query: any) => {
+      const groups = (await whole(object, query)) as Row[];
+      const answer = groups.slice(0, pageSize) as Row[] & { hasMore?: boolean };
+      if (answer.length < groups.length) answer.hasMore = true;
+      return answer;
+    });
+  }
+
+  function mount(pageSize: number, lanePaging: Record<string, unknown> | undefined, schema: Record<string, unknown> = {}) {
+    const store = new ValueDataSource<Row>({ items: ROWS_70 });
+    const source = {
+      find: vi.fn(async (object: string, params: any) => store.find(object, params)),
+      findOne: vi.fn(),
+      create: vi.fn(),
+      update: vi.fn(),
+      delete: vi.fn(),
+      getObjectSchema: vi.fn(async () => DEF),
+      queryGroupHeaders: cappedAt(ROWS_70, pageSize),
+    } as any;
+    render(
+      <SchemaRendererProvider dataSource={source}>
+        <ObjectKanban
+          schema={{ type: 'object-kanban', objectName: OBJECT, groupBy: 'stage', cardFields: ['amount'], summary: { type: 'sum', field: 'amount' }, ...schema } as any}
+          dataSource={source}
+          {...(lanePaging ? { lanePaging } : {})}
+        />
+      </SchemaRendererProvider>,
+    );
+    return source;
+  }
+
+  const lane = (title: string) => screen.getByRole('group', { name: title });
+  const foot = (title: string) => lane(title).querySelector<HTMLElement>('[data-kanban-lane-statistic]');
+  const figure = (title: string) => (foot(title)?.lastElementChild?.textContent ?? '').replace(/,/g, '');
+
+  it('draws no figure on any lane when the read is cut, the folded lane included', async () => {
+    // Three of four groups: open, won and the empty group. The trailing lane
+    // would total the empty group alone (1) in place of 4.
+    const source = mount(3, {});
+    await waitFor(() => expect(source.queryGroupHeaders).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(within(lane('Open')).queryAllByRole('listitem')).toHaveLength(KANBAN_LANE_PAGE_SIZE));
+    await waitFor(() => expect(within(lane('Uncategorized')).queryAllByRole('listitem')).toHaveLength(5));
+    expect((await source.queryGroupHeaders.mock.results[0].value).hasMore).toBe(true);
+    expect(document.querySelector('[data-kanban-lane-statistic]')).toBeNull();
+  });
+
+  it('draws no "Sum 0" on a board of one query whose lane group the read cut', async () => {
+    // One group: open. The board loads 10 open cards, so Won counts none of
+    // its five records and would read the dropped group as an empty lane.
+    const source = mount(1, undefined, { limit: 10 });
+    await waitFor(() => expect(source.queryGroupHeaders).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(within(lane('Open')).queryAllByRole('listitem')).toHaveLength(10));
+    expect((await source.queryGroupHeaders.mock.results[0].value).hasMore).toBe(true);
+    expect(document.querySelector('[data-kanban-lane-statistic]')).toBeNull();
+  });
+
+  it('CONTROL: a whole answer under the same door draws every lane\'s figure', async () => {
+    const source = mount(4, {});
+    await waitFor(() => expect(foot('Open')).not.toBeNull());
+    expect((await source.queryGroupHeaders.mock.results[0].value).hasMore).toBeUndefined();
+    expect(figure('Open')).toBe('2415');
+    expect(figure('Won')).toBe('10');
+    expect(figure('Lost')).toBe('0');
+    expect(figure('Uncategorized')).toBe('4');
+  });
 });
 
 describe('readLaneFigures (objectstack#36520)', () => {

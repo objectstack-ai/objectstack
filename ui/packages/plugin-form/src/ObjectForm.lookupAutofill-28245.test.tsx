@@ -18,7 +18,7 @@
  * lookup without the key fills nothing, not even a same-named field.
  */
 import { describe, it, expect, vi } from 'vitest';
-import { render, waitFor, fireEvent, screen, act } from '@testing-library/react';
+import { render, waitFor, fireEvent, screen, act, cleanup } from '@testing-library/react';
 import React from 'react';
 
 import { ObjectForm } from './ObjectForm';
@@ -669,5 +669,172 @@ describe('ObjectForm — cross-currency pick follow-ups (objectstack#36412)', ()
     await waitFor(() => expect(valueOf(container, 'description')).toBe('A widget'));
     await waitFor(() => expect(valueOf(container, 'unit_price')).toContain('100'));
     expect(screen.queryByTestId('lookup-autofill-withheld')).toBeNull();
+  });
+});
+
+describe('ObjectForm — a same-edit currency change keeps amounts and says so (objectstack#36412, ruling 「保留金额并提示」)', () => {
+  // A quote whose price follows its own code, and a catalog priced in the
+  // home currency (USD here).
+  const SCHEMAS_RULING: Record<string, unknown> = {
+    cn_quote: {
+      name: 'cn_quote',
+      fields: {
+        currency_code: { type: 'text', label: 'Currency' },
+        product: {
+          type: 'lookup',
+          label: 'Product',
+          reference: 'cn_product',
+          lookupAutofill: [
+            { target: 'unit_price', source: 'list_price' },
+            { target: 'description', source: 'summary' },
+          ],
+        },
+        unit_price: { type: 'currency', label: 'Unit Price', currencyConfig: { currencyMode: 'record', currencyField: 'currency_code' } },
+        description: { type: 'text', label: 'Description' },
+      },
+    },
+    // The same quote whose pick replaces a price somebody wrote.
+    cn_ow_quote: {
+      name: 'cn_ow_quote',
+      fields: {
+        currency_code: { type: 'text', label: 'Currency' },
+        product: {
+          type: 'lookup',
+          label: 'Product',
+          reference: 'cn_product',
+          lookupAutofill: [
+            { target: 'unit_price', source: 'list_price', overwrite: true },
+            { target: 'description', source: 'summary' },
+          ],
+        },
+        unit_price: { type: 'currency', label: 'Unit Price', currencyConfig: { currencyMode: 'record', currencyField: 'currency_code' } },
+        description: { type: 'text', label: 'Description' },
+      },
+    },
+    cn_product: {
+      name: 'cn_product',
+      fields: {
+        name: { type: 'text', label: 'Name' },
+        list_price: { type: 'currency', label: 'List Price' },
+        summary: { type: 'text', label: 'Summary' },
+      },
+    },
+  };
+  const PRODUCTS = [{ id: 'p1', name: 'Widget', list_price: 100, summary: 'A widget' }];
+  function renderQuote(currency_code: string, objectName = 'cn_quote', extra: Record<string, unknown> = {}) {
+    const ds = {
+      getObjectSchema: vi.fn(async (name: string) => SCHEMAS_RULING[name]),
+      find: vi.fn(async (name: string) => {
+        const rows = name === 'cn_product' ? PRODUCTS : [];
+        return { data: rows.map((r) => ({ ...r })), total: rows.length };
+      }),
+      findOne: vi.fn(async (name: string, id: string) => (name === 'cn_product' ? { ...PRODUCTS.find((r) => r.id === id) } : null)),
+      create: vi.fn(async (_o: string, d: Record<string, unknown>) => ({ id: 'q1', ...d })),
+      update: vi.fn(),
+    };
+    const view = render(
+      <LocalizationProvider value={{ currency: 'USD' }}>
+        <SchemaRendererContext.Provider value={{ dataSource: ds } as never}>
+          <ObjectForm schema={{ type: 'object-form', objectName, mode: 'create', initialValues: { currency_code, ...extra } } as any} dataSource={ds as any} />
+        </SchemaRendererContext.Provider>
+      </LocalizationProvider>,
+    );
+    return view.container;
+  }
+  const valueOf = (c: HTMLElement, name: string) => (c.querySelector(`input[name="${name}"]`) as HTMLInputElement | null)?.value ?? '';
+  async function type(c: HTMLElement, name: string, value: string): Promise<void> {
+    const el = await input(c, name);
+    await act(async () => {
+      fireEvent.change(el, { target: { value } });
+    });
+    await waitFor(() => expect(valueOf(c, name)).toContain(value));
+  }
+
+  it('a copied amount stays through a currency change, and a note names the code it was copied under', async () => {
+    const c = renderQuote('USD');
+    await input(c, 'description');
+    await pick('product', 'Widget');
+    await waitFor(() => expect(valueOf(c, 'unit_price')).toContain('100'));
+    // Control: copied in the record's own currency, nothing to say.
+    expect(screen.queryByTestId('lookup-autofill-copied')).toBeNull();
+
+    await type(c, 'currency_code', 'EUR');
+    expect(valueOf(c, 'unit_price')).toContain('100');
+    const note = await screen.findByTestId('lookup-autofill-copied');
+    expect(note.querySelector('[data-copied-target="unit_price"]')?.textContent).toBe(
+      'Unit Price was copied as $100.00, but the record is now in EUR. Enter Unit Price in EUR if it should change.',
+    );
+
+    // Control: back in the currency it was copied under, the note ends.
+    await type(c, 'currency_code', 'USD');
+    await waitFor(() => expect(screen.queryByTestId('lookup-autofill-copied')).toBeNull());
+    expect(valueOf(c, 'unit_price')).toContain('100');
+  });
+
+  it('a withheld note refreshes to the record’s new currency, and the amount stays empty', async () => {
+    const c = renderQuote('JPY');
+    await input(c, 'description');
+    await pick('product', 'Widget');
+    expect((await screen.findByTestId('lookup-autofill-withheld')).textContent).toContain('here is in JPY');
+
+    await type(c, 'currency_code', 'GBP');
+    await waitFor(() => expect(screen.getByTestId('lookup-autofill-withheld').textContent).toContain('here is in GBP'));
+    expect(screen.getByTestId('lookup-autofill-withheld').textContent).not.toContain('JPY');
+    expect(valueOf(c, 'unit_price')).toBe('');
+  });
+
+  it('branch B: the record turns to the picked amount’s own currency, the note stays, says so, and nothing fills until a pick again', async () => {
+    const c = renderQuote('EUR');
+    await input(c, 'description');
+    await pick('product', 'Widget');
+    await screen.findByTestId('lookup-autofill-withheld');
+
+    await type(c, 'currency_code', 'USD');
+    await waitFor(() =>
+      expect(screen.getByTestId('lookup-autofill-withheld').textContent).toBe(
+        'Unit Price was not filled when it was picked. The record is now in USD: pick again to fill $100.00.',
+      ),
+    );
+    expect(valueOf(c, 'unit_price')).toBe('');
+
+    // Control: the pick again the note offers fills it, and nothing is left to say.
+    await pick('product', 'Widget');
+    await waitFor(() => expect(valueOf(c, 'unit_price')).toContain('100'));
+    expect(screen.queryByTestId('lookup-autofill-withheld')).toBeNull();
+    expect(screen.queryByTestId('lookup-autofill-copied')).toBeNull();
+  });
+
+  it('branch B over a price that still holds an earlier value: the note says to clear it, then pick again', async () => {
+    const c = renderQuote('EUR', 'cn_ow_quote', { unit_price: 80 });
+    await input(c, 'description');
+    await pick('product', 'Widget');
+    expect((await screen.findByTestId('lookup-autofill-withheld')).textContent).toContain('Unit Price still holds its earlier value.');
+
+    await type(c, 'currency_code', 'USD');
+    await waitFor(() =>
+      expect(screen.getByTestId('lookup-autofill-withheld').textContent).toBe(
+        'Unit Price was not filled when it was picked and still holds its earlier value. The record is now in USD: clear Unit Price, then pick again to fill $100.00.',
+      ),
+    );
+    expect(valueOf(c, 'unit_price')).toContain('80');
+  });
+
+  it('a hand-typed amount gets no note through a currency change, nor one typed over a copied amount', async () => {
+    const typed = renderQuote('USD');
+    await type(typed, 'unit_price', '55');
+    await type(typed, 'currency_code', 'EUR');
+    expect(valueOf(typed, 'unit_price')).toContain('55');
+    expect(screen.queryByTestId('lookup-autofill-copied')).toBeNull();
+    expect(screen.queryByTestId('lookup-autofill-withheld')).toBeNull();
+    cleanup();
+
+    const over = renderQuote('USD');
+    await input(over, 'description');
+    await pick('product', 'Widget');
+    await waitFor(() => expect(valueOf(over, 'unit_price')).toContain('100'));
+    await type(over, 'unit_price', '55');
+    await type(over, 'currency_code', 'EUR');
+    expect(valueOf(over, 'unit_price')).toContain('55');
+    expect(screen.queryByTestId('lookup-autofill-copied')).toBeNull();
   });
 });

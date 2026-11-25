@@ -46,9 +46,11 @@ import {
   DashboardEditButton,
   DashboardEditingBadge,
   DashboardEditPanel,
+  useDashboardEditFits,
   useDashboardEditOffered,
   useDashboardInPageEdit,
 } from './DashboardInPageEditor.js';
+import { StudioReturnButton, useStudioReturnPath } from './StudioReturnButton.js';
 import { useInSetupApp } from '../console/setupApp.js';
 import { useCustomizeDoorWalled } from './studio-design/StudioCustomizeControls.js';
 import { readDashboardEditArrival, withoutDashboardEditArrival } from '../layout/designModeArrival.js';
@@ -304,21 +306,29 @@ export function DashboardView({ dataSource }: { dataSource?: any }) {
   // objectstack#36364 — a dashboard the design mode just created arrives with
   // its page asked to open the edit state, once the Edit button is offered;
   // the landing is cleared as it is read, so Back or a reload opens nothing.
+  // objectstack#36906 — a dashboard opened from a Studio list lands the same
+  // way. On a phone the edit state is never offered, so the landing is
+  // cleared there and the page stays a viewer.
   const location = useLocation();
   const navigate = useNavigate();
+  const editFits = useDashboardEditFits();
   const arrivedToEdit = readDashboardEditArrival(location.state, dashboardName);
   const landedRef = useRef<string | null>(null);
   useEffect(() => {
-    if (!arrivedToEdit || !dashboard || !editOffered || editing) return;
+    if (!arrivedToEdit || !dashboard || editing) return;
+    if (!editOffered && editFits) return;
     if (landedRef.current === location.key) return;
     landedRef.current = location.key;
     navigate(`${location.pathname}${location.search}${location.hash}`, {
       replace: true,
       state: withoutDashboardEditArrival(location.state),
     });
-    void startEdit();
+    if (editOffered) void startEdit();
     // eslint-disable-next-line react-hooks/exhaustive-deps -- runs once per landing; `startEdit` is a fresh closure each render
-  }, [arrivedToEdit, dashboard, editOffered, editing, location.key]);
+  }, [arrivedToEdit, dashboard, editOffered, editFits, editing, location.key]);
+  // objectstack#36906 — opened from a Studio list: × goes back to it.
+  const studioReturn = useStudioReturnPath();
+  const studioReturnButton = studioReturn ? <StudioReturnButton to={studioReturn} dirty={editing && edit.dirty} /> : null;
 
   const previewSchema = useMemo(() => {
     if (!dashboard || !unregistered) return dashboard;
@@ -456,6 +466,7 @@ export function DashboardView({ dataSource }: { dataSource?: any }) {
         icon={<LayoutDashboard className="h-4 w-4" />}
         badge={editing ? <DashboardEditingBadge /> : undefined}
         actions={editing ? (
+          <div className="flex items-center gap-2">
           <DashboardEditActions
             onAddCard={edit.addCard}
             onDiscard={edit.discard}
@@ -463,7 +474,9 @@ export function DashboardView({ dataSource }: { dataSource?: any }) {
             saving={edit.saving}
             dirty={edit.dirty}
           />
-        ) : (refreshState || editOffered) && (
+          {studioReturnButton}
+          </div>
+        ) : (refreshState || editOffered || studioReturnButton) && (
           <div className="flex items-center gap-2">
           {editOffered && <DashboardEditButton onClick={startEdit} busy={edit.opening} />}
           {refreshState && (
@@ -480,6 +493,7 @@ export function DashboardView({ dataSource }: { dataSource?: any }) {
             {refreshState.refreshing ? tt('dashboard.refreshing', 'Refreshing…') : tt('dashboard.refreshAll', 'Refresh All')}
           </Button>
           )}
+          {studioReturnButton}
           </div>
         )}
       />
@@ -549,6 +563,7 @@ export function DashboardView({ dataSource }: { dataSource?: any }) {
               onFiltersRevealed={edit.filtersRevealed}
               served={dashboard as Record<string, unknown> | undefined}
               published={edit.published}
+              shipped={edit.shipped}
             />
          )}
 

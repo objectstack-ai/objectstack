@@ -43,6 +43,9 @@ vi.mock('@object-ui/i18n', async (importOriginal) => ({
 }));
 
 import { DraftChangesPanel } from '../DraftChangesPanel';
+// The source under test reaches a dynamic `import('@objectstack/lint')`: pay its load at
+// collection, never inside a case's clocked window (`check:test-source-alias`).
+import '@objectstack/lint';
 
 const DRAFT_ROWS = [
   { type: 'permission', name: 'qa_readers', packageId: 'com.x', label: 'QA Readers' },
@@ -53,12 +56,12 @@ const DRAFT_ROWS = [
 
 const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
   const url = String(input);
-  const ok = (body: unknown) => ({ ok: true, status: 200, json: async () => body });
+  const ok = (body: unknown) => ({ headers: new Headers(), ok: true, status: 200, json: async () => body });
   if (url.includes('/_drafts')) return ok({ drafts: DRAFT_ROWS });
   if (/\/meta\/object(\?|$)/.test(url)) return ok([{ name: 'laneawf_qa_wf_obj', label: 'QA WF Object' }]);
   if (/\/meta\/page(\?|$)/.test(url)) return ok([]);
   if (/\/meta\/permission(\?|$)/.test(url)) return ok([]);
-  return { ok: false, status: 404, json: async () => ({}) };
+  return { headers: new Headers(), ok: false, status: 404, json: async () => ({}) };
 });
 
 afterEach(() => {
