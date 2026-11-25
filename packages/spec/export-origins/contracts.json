@@ -37,6 +37,8 @@
     "AdapterCapabilities": "src/contracts/knowledge-adapter.ts#AdapterCapabilities (interface)",
     "AdapterContext": "src/contracts/knowledge-adapter.ts#AdapterContext (interface)",
     "AdapterEmbeddingDescriptor": "src/contracts/knowledge-adapter.ts#AdapterEmbeddingDescriptor (interface)",
+    "AdapterIndexExpectation": "src/contracts/knowledge-adapter.ts#AdapterIndexExpectation (interface)",
+    "AdapterIndexStatus": "src/contracts/knowledge-adapter.ts#AdapterIndexStatus (interface)",
     "AdapterListDocumentsOptions": "src/contracts/knowledge-adapter.ts#AdapterListDocumentsOptions (interface)",
     "AdapterListDocumentsPage": "src/contracts/knowledge-adapter.ts#AdapterListDocumentsPage (interface)",
     "AdapterListedDocument": "src/contracts/knowledge-adapter.ts#AdapterListedDocument (interface)",
