@@ -134,8 +134,8 @@ describe('areaItemPillarPath — a pillar type opens its pillar', () => {
     expect(open('object', '', null)).toBeNull();
     expect(open('object', '?scope=environment')).toBeNull();
     expect(open('object', '?review=1')).toBeNull();
-    // Control: the same item without them opens the pillar.
-    expect(open('object', '?review=0')).not.toBeNull();
+    // objectstack#36903 — no type opens a pillar, with or without them.
+    expect(open('object', '?review=0')).toBeNull();
   });
 });
 

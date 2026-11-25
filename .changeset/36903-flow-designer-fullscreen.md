@@ -19,7 +19,7 @@ A flow is created from the flow list's 「新建」, with the same starting poin
 
 The organization's own flows, which belong to no package, have their own flow list and open on their own pages; that list offers no 「新建」, as before, and when it is empty it says how a packaged flow is changed instead (open its package and use New similar).
 
-Old bookmarks keep working. A link to a flow in the Automations pillar opens that flow's page, and a link to the pillar itself opens the flow list, for a package, a read-only package's customizations and the organization's own flows alike. A flow's History link opens its History tab. A link naming a flow the package does not hold says so and opens no other flow; one naming a flow that belongs to no package opens it among the organization's flows. Draft-review links and the environment view still open a flow's generic item page, as they did when flows had a pillar.
+Old bookmarks keep working. A link to a flow in the Automations pillar opens that flow's page, and a link to the pillar itself opens the flow list, for a package, a read-only package's customizations and the organization's own flows alike. A flow's History link opens its History tab. A link naming a flow the package does not hold says so and opens no other flow; one naming a flow that belongs to no package opens it among the organization's flows. A flow's draft-review link (and the environment view) opens the general item page with its review, as it did when flows had a pillar. A permission set's review link keeps opening its matrix page, as before.
 
 The flow list has no column yet for a flow's trigger object or its run status; until it has one, both are shown in the flow's header.
 

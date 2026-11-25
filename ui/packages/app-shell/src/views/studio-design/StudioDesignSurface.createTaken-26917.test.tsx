@@ -344,10 +344,11 @@ describe('objectstack#26917 — Data: New object over a taken identifier', () =>
 
 describe('objectstack#26917 — Create app over a taken identifier', () => {
   async function openCreateApp() {
-    // objectstack#36903 — the retired Automations pillar's address redirects
-    // to the flow list; the Data pillar hosts the toolbar's Create app.
+    // objectstack#36903, objectstack#36904 — the Automations and Data pillars
+    // are retired (their addresses redirect to the area); the sharing
+    // overview's page hosts the toolbar's Create app.
     render(
-      <MemoryRouter initialEntries={[`/studio/${PKG}/data`]}>
+      <MemoryRouter initialEntries={[`/studio/${PKG}/owd`]}>
         <Routes>
           <Route path="/studio/:packageId/:tab" element={<StudioDesignSurface />} />
         </Routes>

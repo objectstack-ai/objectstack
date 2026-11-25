@@ -145,9 +145,10 @@ describe("today's addresses, byte for byte", () => {
     expect(studioOrgScopePath({ type: 'flow', name: 'a:b' })).toBe('/studio/~org/metadata/flow/a%3Ab?source=runtime');
     expect(studioPillarItemPath('crm', 'access', { type: 'permission', name: 'p' })).toBe('/studio/crm/access?surface=permission%3Ap');
     expect(studioMetadataItemPath('crm', { type: 'object', name: 'account' })).toBe('/studio/crm/metadata/object/account');
+    // objectstack#36903 — the flow was the last pillar type: no item opens a pillar.
     expect(
       areaItemPillarPath({ packageId: 'crm', type: 'flow', name: 'notify', search: new URLSearchParams() }),
-    ).toBe('/studio/crm/automations?surface=flow%3Anotify');
+    ).toBeNull();
     expect(
       areaItemPillarPath({ packageId: 'crm', type: 'flow', name: 'notify', search: new URLSearchParams('review=1') }),
     ).toBeNull();
