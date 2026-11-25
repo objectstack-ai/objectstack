@@ -352,8 +352,12 @@ export class PgvectorKnowledgeAdapter implements IKnowledgeAdapter {
     }
     const pool = this.requirePool();
     await this.ready();
+    // The embedder first, as on every other call: without one the service's
+    // fingerprint carries no model or width, and comparing it would refuse a
+    // healthy index as one to rebuild. No embedder is SERVICE_UNAVAILABLE.
+    const embedder = this.requireEmbedder();
     // The generation the writes go to (ADR-0161 K8, item 1).
-    const generation = await this.writeTarget(ctx, undefined, false);
+    const generation = await this.writeTarget(ctx, embedder, false);
     if (!generation || !(await this.tableExists(generation.dim))) return { documents: [] };
     // In byte order ("C"), both the order and the cursor's comparison, so a
     // cursor stays valid whatever the database's collation.
@@ -386,9 +390,9 @@ export class PgvectorKnowledgeAdapter implements IKnowledgeAdapter {
     if (!generation) return [];
     // Vectors of two fingerprints are never ranked against each other (K7, rule 5).
     if (opts.index !== undefined && generation.fingerprint !== opts.index.fingerprint) {
-      throw rebuildRequired(opts.source.id, await this.clearSql(opts.source.id));
+      throw rebuildRequired(opts.source.id, await this.clearSql(opts.source.id, generation.dim));
     }
-    if (embedder.dimensions !== generation.dim) throw rebuildRequired(opts.source.id, await this.clearSql(opts.source.id));
+    if (embedder.dimensions !== generation.dim) throw rebuildRequired(opts.source.id, await this.clearSql(opts.source.id, generation.dim));
     if (!(await this.tableExists(generation.dim))) return [];
     const topK = Math.max(0, Math.floor(opts.topK));
     if (topK === 0) return [];
@@ -471,7 +475,7 @@ export class PgvectorKnowledgeAdapter implements IKnowledgeAdapter {
     const generation = (await this.activeGeneration(ctx.source.id))
       ?? (await this.openFirstGeneration(ctx.source.id, index.fingerprint, embedder));
     if (generation.fingerprint === index.fingerprint && generation.dim === embedder.dimensions) return;
-    const sql = await this.clearSql(ctx.source.id);
+    const sql = await this.clearSql(ctx.source.id, generation.dim);
     throw Object.assign(
       new Error(
         `Knowledge source '${ctx.source.id}' was indexed under another embedding model, split or content recipe, ` +
@@ -697,10 +701,10 @@ export class PgvectorKnowledgeAdapter implements IKnowledgeAdapter {
   ): Promise<GenerationRow> {
     const fingerprint = ctx.index?.fingerprint;
     if (fingerprint !== undefined && generation.fingerprint !== fingerprint) {
-      throw rebuildRequired(ctx.source.id, await this.clearSql(ctx.source.id));
+      throw rebuildRequired(ctx.source.id, await this.clearSql(ctx.source.id, generation.dim));
     }
     if (embedder !== undefined && embedder.dimensions !== generation.dim) {
-      throw rebuildRequired(ctx.source.id, await this.clearSql(ctx.source.id));
+      throw rebuildRequired(ctx.source.id, await this.clearSql(ctx.source.id, generation.dim));
     }
     return generation;
   }
@@ -711,9 +715,13 @@ export class PgvectorKnowledgeAdapter implements IKnowledgeAdapter {
    * generation rows — passages first, so no generation row is ever missing
    * while its passages remain.
    */
-  private async clearSql(sourceId: string): Promise<string[]> {
+  private async clearSql(sourceId: string, knownWidth: number): Promise<string[]> {
     const literal = `'${sourceId.replace(/'/g, "''")}'`;
-    const widths = await this.passageWidths().catch(() => [] as number[]);
+    // The tables found in the schema, and always the width the source's
+    // generation records: should the catalogue read fail, the statements still
+    // clear that table before the generation row, never the row alone.
+    const found = await this.passageWidths().catch(() => [] as number[]);
+    const widths = [...new Set([...found, knownWidth])].sort((a, b) => a - b);
     return [
       ...widths.map((width) => `DELETE FROM ${qualified(this.schema, vectorTable(width))} WHERE source_id = ${literal};`),
       `DELETE FROM ${qualified(this.schema, GENERATION_TABLE)} WHERE source_id = ${literal};`,

@@ -117,7 +117,7 @@ describe('knowledge-pgvector when the database is not ready', () => {
     expect(health).toMatchObject({ ok: false, message: expect.stringContaining('ECONNREFUSED') });
   });
 
-  it('with no embedder, a search is SERVICE_UNAVAILABLE, never a rebuild refusal of a healthy index', async () => {
+  it('with no embedder, a search or a listing is SERVICE_UNAVAILABLE, never a rebuild refusal of a healthy index', async () => {
     // A ready store holding one generation, searched under a fingerprint that
     // differs only because the embedder (model, width) is not registered yet.
     const pool: PgPoolLike = {
@@ -134,6 +134,13 @@ describe('knowledge-pgvector when the database is not ready', () => {
     };
     const adapter = new PgvectorKnowledgeAdapter({ pool, embedder: () => undefined });
     await expect(adapter.search('x', { source, topK: 3, index: { fingerprint: 'fp-without-model' } })).rejects.toMatchObject({
+      code: 'SERVICE_UNAVAILABLE',
+      status: 503,
+      message: expect.stringContaining('no embedder'),
+    });
+    // The listing a reindex starts with (a capped walk calls no beginBuild) answers the same.
+    const listing = { source, reason: 'reindex' as const, index: { fingerprint: 'fp-without-model', recipeHash: 'rh' } };
+    await expect(adapter.listDocuments(listing, { limit: 5 })).rejects.toMatchObject({
       code: 'SERVICE_UNAVAILABLE',
       status: 503,
       message: expect.stringContaining('no embedder'),

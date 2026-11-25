@@ -225,6 +225,16 @@ export interface AdapterEmbeddingDescriptor {
  * it did before that member existed and says so where its result can carry it.
  * The contract test suite every adapter can run is exported by
  * `@objectstack/service-knowledge/testing`.
+ *
+ * ## Coded refusals and their `remedy`
+ *
+ * Any member may refuse with an ADR-0112 coded error (`code`, `status`) —
+ * `KNOWLEDGE_REBUILD_REQUIRED` (409) under another fingerprint,
+ * `SERVICE_UNAVAILABLE` (503) when the backend is not ready. Its `message` is
+ * one sentence a search caller may read: no driver text, no SQL, no schema
+ * name. Operator text — what went wrong in the backend, the SQL to run — goes
+ * in the error's `remedy` string, which the service shows in a reindex result
+ * and its log, and never to a search caller.
  */
 export interface IKnowledgeAdapter {
   /** Stable adapter id used in `KnowledgeSource.adapter`. */
@@ -289,12 +299,8 @@ export interface IKnowledgeAdapter {
    * under construction for that fingerprint — or, when it cannot, refuses
    * with a coded refusal and the walk does not run. An adapter that opens
    * generations keeps one builder per source; one that does not build a
-   * second generation beside the first refuses a new fingerprint here.
-   *
-   * A coded refusal's `message` is one sentence a search caller may read.
-   * Operator text — what went wrong in the database, the SQL to run — goes in
-   * the error's `remedy` string, which the service shows in a reindex result
-   * and its log, never to a search caller.
+   * second generation beside the first refuses a new fingerprint here, with
+   * a `remedy` (see "Coded refusals" above).
    */
   beginBuild?(ctx: AdapterContext): Promise<void>;
 

@@ -332,6 +332,44 @@ describe('KnowledgeService — reindex', () => {
     expect(adapter.upsertSpy).not.toHaveBeenCalled();
   });
 
+  it("a refusal's remedy (operator text) reaches the warn log, never refused[].message or the thrown message", async () => {
+    const http = (id: string, adapter: string): KnowledgeSource => ({
+      id, label: id, adapter, source: { kind: 'http', urls: ['https://x.test'] } as KnowledgeSource['source'],
+    });
+    const remedy = 'Run as a database owner:\nDELETE FROM "os_knowledge"."knowledge_generation" WHERE source_id = \'refusing\';';
+    const refusing = Object.assign(makeAdapter('refusing'), {
+      search: vi.fn(async () => {
+        throw Object.assign(new Error("Knowledge source 'refusing' needs a rebuild."), {
+          code: 'KNOWLEDGE_REBUILD_REQUIRED', status: 409, remedy,
+        });
+      }),
+    });
+    const answering = makeAdapter('answering', [{ chunkId: 'c1', documentId: 'd1', sourceId: 'answering', score: 0.9, snippet: 'ok' }]);
+    const warn = vi.fn();
+    const svc = new KnowledgeService({ logger: { warn } as never });
+    svc.registerAdapter('refusing', refusing);
+    svc.registerAdapter('answering', answering);
+    svc.registerSource(http('refusing', 'refusing'));
+    svc.registerSource(http('answering', 'answering'));
+
+    // Some sources answer: the refused one is named, its message alone.
+    const report = await svc.searchWithRefusals('q');
+    expect(report.hits.map((h) => h.documentId)).toEqual(['d1']);
+    expect(report.refused).toEqual([
+      { sourceId: 'refusing', code: 'KNOWLEDGE_REBUILD_REQUIRED', status: 409, message: "Knowledge source 'refusing' needs a rebuild." },
+    ]);
+    expect(warn.mock.calls.some(([line]) => String(line).includes('DELETE FROM'))).toBe(true);
+
+    // None answers: the thrown refusal carries no remedy either.
+    const thrown = await svc.searchWithRefusals('q', { sourceIds: ['refusing'] }).then(
+      () => undefined,
+      (e: unknown) => e as { code?: string; message: string; refused?: Array<{ message: string }> },
+    );
+    expect(thrown).toMatchObject({ code: 'KNOWLEDGE_REBUILD_REQUIRED', status: 409 });
+    expect(thrown?.message).not.toContain('DELETE');
+    expect(thrown?.refused?.every((r) => !r.message.includes('DELETE'))).toBe(true);
+  });
+
   it('a refused beginBuild stops a complete reindex before any listing or write: ok:false, the remedy carried', async () => {
     const find = vi.fn(async () => [{ id: 'r1', title: 'T1', notes: 'N1' }]);
     const listDocuments = vi.fn(async () => ({ documents: [] }));
