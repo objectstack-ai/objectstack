@@ -86,7 +86,7 @@ import { lanesFromRecords, laneValueOf } from './kanbanReferenceLanes';
 import {
   compileLaneStatisticQuery,
   isLaneAggregate,
-  readLaneFigures,
+  readLaneStatistic,
   type LaneFigure,
 } from './KanbanLaneStatistic';
 
@@ -1726,8 +1726,10 @@ export const ObjectKanban: React.FC<ObjectKanbanComponentProps> = ({
     // Nothing is cleared before the answer lands: re-asking the question in
     // hand (a refresh, a write) keeps its figures on screen until the new ones.
     Promise.resolve().then(() => dataSource.queryGroupHeaders!(objectName, query)).then(
+      // A partial answer (the door cut the groups: `hasMore`) reads as no
+      // figure for any lane, as a refusal does (objectstack#36870).
       (rows) => {
-        if (!cancelled) setLaneStatistics({ question: laneStatisticQuestion + statisticLanesKey, figures: readLaneFigures(rows, reading) });
+        if (!cancelled) setLaneStatistics({ question: laneStatisticQuestion + statisticLanesKey, figures: readLaneStatistic(rows, reading) });
       },
       () => {
         // A refusal (a field the reader may not read: `403`) draws no figure.
