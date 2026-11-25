@@ -15,6 +15,7 @@ import { ConversationsSidebar } from '../../console/ai/ConversationsSidebar.js';
 import { resolvePublicShareBase } from '../../console/organizations/resolveHomeUrl.js';
 import { AiUsageIndicator } from '../../layout/AiUsageIndicator.js';
 import { usePlanApprovalPendingCount } from '../../assistant/assistantBus.js';
+import { areaDesignerItemOf } from './metadataArea.js';
 
 /**
  * objectui#8219 — the display label of the artifact a pillar has open, tagged
@@ -73,7 +74,7 @@ export function StudioCopilotConversation({
   // deep-link every pillar already mirrors (useSurfaceDeepLink). Derived per
   // render; the ChatPane transport reads it per send, so each turn carries
   // what the user is looking at RIGHT NOW.
-  const { tab } = useParams<{ tab?: string }>();
+  const { tab, packageId: segment } = useParams<{ tab?: string; packageId?: string }>();
   const copilotLocation = useLocation();
   const surfaceContext = React.useMemo(() => {
     const raw = new URLSearchParams(copilotLocation.search).get('surface');
@@ -84,9 +85,12 @@ export function StudioCopilotConversation({
         artifact = { type: raw.slice(0, idx), name: raw.slice(idx + 1) };
       }
     }
+    // objectstack#36903 — a designer open full-screen on its metadata
+    // address (the flow designer) is named by the address itself.
+    if (!artifact) artifact = areaDesignerItemOf(copilotLocation.pathname, segment) ?? undefined;
     if (!tab && !artifact) return undefined;
     return { ...(tab ? { pillar: tab } : {}), ...(artifact ? { artifact } : {}) };
-  }, [tab, copilotLocation.search]);
+  }, [tab, segment, copilotLocation.search, copilotLocation.pathname]);
   // objectui#8219 — the chip's display label, read beside the context rather
   // than inside it. Shown only when it labels the artifact the URL names: the
   // URL stays the single source of WHAT is discussed, so a label that lags or

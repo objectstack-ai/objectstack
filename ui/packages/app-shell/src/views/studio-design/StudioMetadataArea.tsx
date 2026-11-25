@@ -13,8 +13,9 @@
  *   <root>/_diagnostics        diagnostics
  *   <root>/:type               a type's list
  *   <root>/:type/new           create (a writable package only)
- *   <root>/:type/:name         the generic item page, the item's pillar, or
- *                              the form editor of an email template or a
+ *   <root>/:type/:name         the generic item page, the item's pillar, the
+ *                              flow designer full-screen (#36903), or the
+ *                              form editor of an email template or a
  *                              translation (`StudioBundleItemEditor`, #28569),
  *                              and of a read-only package's dataset (#30064)
  *   <root>/:type/:name/history the item's history: its History tab
@@ -45,12 +46,16 @@ import { t, useMetadataLocale } from '../metadata-admin/i18n.js';
 import { fetchListedPackageManifests } from './packages-io.js';
 import {
   STUDIO_ALL_PACKAGES_SEGMENT,
+  areaItemOpensDesignerPage,
   areaItemOpensFormEditor,
   areaItemPillarPath,
   areaLocationRedirect,
   studioMetadataAreaPath,
 } from './metadataArea.js';
+import { STUDIO_ORG_SCOPE_SEGMENT } from './studioScope.js';
 import { StudioBundleItemEditor } from './StudioBundleItemEditor.js';
+import { AutomationsPillar } from './AutomationsPillar.js';
+import type { StudioSurfaceLabel } from './StudioAiCopilot.js';
 import { BUNDLE_MEMBER_PARAM, getMetadataResource } from '../metadata-admin/registry.js';
 import { ITEM_TOOL_TAB_PARAM } from '../item-tools/ItemToolTabs.js';
 import type { StudioBaseCustomization } from './StudioDesignSurface.js';
@@ -124,16 +129,22 @@ function AreaLoading({ locale }: { locale: string }): React.ReactElement {
   );
 }
 
-/** What the Studio surface hands the area's form editor (`StudioBundleItemEditor`). */
+/** What the Studio surface hands the area's editors (`StudioBundleItemEditor`, the flow designer). */
 interface AreaEditorProps {
   customization: StudioBaseCustomization | null;
   publishNonce: number;
   onDraftSaved?: (saved?: { type: string; name: string }) => void;
   publishRefusalFor?: (type: string, name: string) => StudioRefusal | null;
+  /** objectstack#36903 — the area is the package-less scope's: its flows open writable, with no package. */
+  orgScope?: boolean;
+  /** objectstack#36903 — the flow designer's reports to the surface: its held edit and the copilot's chip. */
+  onHeldEditChange?: (clause: string | null) => void;
+  onSurfaceLabelChange?: (surface: StudioSurfaceLabel | null) => void;
 }
 
 /**
- * `<root>/:type/:name`: a pillar type opens its pillar, an email template or a
+ * `<root>/:type/:name`: a pillar type opens its pillar, a flow its designer
+ * full-screen (`areaItemOpensDesignerPage`), an email template or a
  * translation the form editor (`areaItemOpensFormEditor`), every other type
  * the generic item page (`areaItemPillarPath` lists when).
  *
@@ -164,10 +175,30 @@ function AreaItemOpen({
   const host = useMetadataAreaHost();
   const [opens] = React.useState(() => {
     const at = { packageId: host?.packageId ?? null, type, search };
-    if (areaItemOpensFormEditor({ ...at, readOnly: host?.readOnly === true })) return { formEditor: true, pillarPath: null };
-    return { formEditor: false, pillarPath: areaItemPillarPath({ ...at, name }) };
+    if (areaItemOpensDesignerPage({ ...at, orgScope: editor.orgScope })) return { designer: true, formEditor: false, pillarPath: null };
+    if (areaItemOpensFormEditor({ ...at, readOnly: host?.readOnly === true })) return { designer: false, formEditor: true, pillarPath: null };
+    return { designer: false, formEditor: false, pillarPath: areaItemPillarPath({ ...at, name }) };
   });
   if (opens.pillarPath) return <Navigate to={opens.pillarPath} replace />;
+  if (opens.designer) {
+    // objectstack#36903 — the flow designer, full-screen on the flow's
+    // address. The package-less scope's flows are the organization's own and
+    // open writable (its area is read-only to the list's create alone).
+    return (
+      <div className="h-full min-h-0" data-testid="studio-flow-designer">
+        <AutomationsPillar
+          packageId={host?.packageId ?? null}
+          flowName={name}
+          readOnly={editor.orgScope ? false : host?.readOnly === true}
+          customization={editor.orgScope ? null : editor.customization}
+          publishNonce={editor.publishNonce}
+          onDraftSaved={editor.onDraftSaved}
+          onHeldEditChange={editor.onHeldEditChange}
+          onSurfaceLabelChange={editor.onSurfaceLabelChange}
+        />
+      </div>
+    );
+  }
   if (opens.formEditor && host?.packageId) {
     return (
       <StudioBundleItemEditor
@@ -197,6 +228,8 @@ function AreaItemOpen({
  * `EditPage`: the permission set's matrix) has no tabs, and its History button
  * opens this address: it keeps the standalone history page. So does an item
  * whose address opens a pillar's designer, until the designer mounts the tabs.
+ * objectstack#36903 — a flow no longer does: its designer is on its address,
+ * with History as a tab, so its `/history` opens that tab like every item's.
  */
 function AreaHistoryRedirect(): React.ReactElement {
   const { type = '', name = '' } = useParams<{ type: string; name: string }>();
@@ -295,6 +328,15 @@ export interface StudioMetadataAreaProps {
    * at the item it refused.
    */
   publishRefusalFor?: (type: string, name: string) => StudioRefusal | null;
+  /**
+   * objectstack#36903 — the area of the package-less scope (`~org`, with no
+   * `packageId`): its flows, listed and opened full-screen. It creates nothing
+   * (`studioScope.ts`), so its host is read-only to the list's create.
+   */
+  orgScope?: boolean;
+  /** objectstack#36903 — handed to the flow designer (`AreaEditorProps`). */
+  onHeldEditChange?: (clause: string | null) => void;
+  onSurfaceLabelChange?: (surface: StudioSurfaceLabel | null) => void;
 }
 
 export function StudioMetadataArea({
@@ -303,17 +345,22 @@ export function StudioMetadataArea({
   publishNonce = 0,
   onDraftSaved,
   publishRefusalFor,
+  orgScope = false,
+  onHeldEditChange,
+  onSurfaceLabelChange,
 }: StudioMetadataAreaProps): React.ReactElement {
   const { pathname, search } = useLocation();
   const locale = useMetadataLocale();
-  const segment = packageId ?? STUDIO_ALL_PACKAGES_SEGMENT;
+  const segment = packageId ?? (orgScope ? STUDIO_ORG_SCOPE_SEGMENT : STUDIO_ALL_PACKAGES_SEGMENT);
   const basePath = studioMetadataAreaPath(segment);
   // The courtesy gate the pillars apply, read for the area from the listed
   // manifests (see the hook). Unknown stays ungated, as on the pillars: the
   // server's write gate is the authority, and a failed probe must not lock an
   // author out of a writable package.
   const { writable, kernel } = useListedPackageWritable(packageId);
-  const readOnly = packageId !== null && writable === false;
+  // objectstack#36903 — the package-less scope creates nothing: read-only to
+  // the list's create (its designer opens writable, `AreaItemOpen`).
+  const readOnly = orgScope || (packageId !== null && writable === false);
   // objectstack#36897 — the list offers a create exactly where `AreaCreate`
   // opens one in the pair; never on a kernel package, which has none.
   const pairCreate = readOnly && !kernel && !!customization && !customization.walled;
@@ -321,7 +368,15 @@ export function StudioMetadataArea({
     () => ({ packageId, readOnly, basePath, ...(pairCreate ? { pairCreate } : {}) }),
     [packageId, readOnly, basePath, pairCreate],
   );
-  const editor: AreaEditorProps = { customization, publishNonce, onDraftSaved, publishRefusalFor };
+  const editor: AreaEditorProps = {
+    customization,
+    publishNonce,
+    onDraftSaved,
+    publishRefusalFor,
+    orgScope,
+    onHeldEditChange,
+    onSurfaceLabelChange,
+  };
 
   // The query names the leg (`areaLocationRedirect`). Settled before any page
   // mounts, so no page reads a scope the URL is about to change.

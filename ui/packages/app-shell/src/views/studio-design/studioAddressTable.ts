@@ -78,12 +78,19 @@ export const STUDIO_ADDRESS_FAMILIES: readonly StudioAddressFamily[] = Object.fr
     builder: 'studioItemPath',
     meaning: 'A pillar opened on one item. The family the designer cards move, one type at a time (STUDIO_ITEM_TYPES).',
   },
-  { id: 'org-scope', today: '/studio/~org/automations', builder: 'studioOrgScopePath', meaning: 'The package-less scope: the organization\'s own flows.' },
+  {
+    id: 'org-scope',
+    today: '/studio/~org/metadata/flow?source=runtime',
+    builder: 'studioOrgScopePath',
+    meaning:
+      "The package-less scope: the organization's own flows, listed in its own leg of the area (objectstack#36903). The old /studio/~org/automations redirects here.",
+  },
   {
     id: 'org-scope-item',
-    today: `/studio/~org/automations?${DESIGNER_SURFACE_PARAM}=flow:<name>`,
+    today: '/studio/~org/metadata/flow/<name>?source=runtime',
     builder: 'studioOrgScopePath',
-    meaning: 'A package-less flow. It has no package, so no metadata address of a package; it moves with the flow designer card.',
+    meaning:
+      'A package-less flow, full-screen in the scope\'s leg of the area (objectstack#36903). The old /studio/~org/automations?surface=flow:<name> redirects here.',
   },
   { id: 'area-root', today: '/studio/<package or ~all>/metadata', builder: 'studioMetadataAreaRoot', meaning: 'The "All metadata" area of a package, or across packages.' },
   { id: 'area-type', today: '/studio/<package or ~all>/metadata/<type>', builder: 'studioMetadataTypePath', meaning: "A type's list in the area." },
@@ -143,6 +150,9 @@ export const STUDIO_ITEM_TYPES: readonly StudioItemTypeRow[] = Object.freeze([
     onMetadataAddress: '/studio/<package>/metadata/object/<name>',
   },
   {
+    // objectstack#36903 — switched: a flow opens its designer on its metadata
+    // address, and this pillar address redirects there
+    // (`automationsPillarRedirect.ts`), dropping `?view=` and `?nav=`.
     type: 'flow',
     pillar: 'automations',
     surface: 'flow:<name>',

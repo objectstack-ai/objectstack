@@ -62,8 +62,13 @@ export const STUDIO_MENU_COOKIE = 'studio_menu_state';
 export const STUDIO_MENU_GROUPS = ['data', 'ui', 'automation', 'system', 'security', 'ai'] as const;
 export type StudioMenuGroup = (typeof STUDIO_MENU_GROUPS)[number];
 
-/** The types a designer creates in: listed on every package, holding one or not. */
-export const STUDIO_MENU_DESIGNER_TYPES: readonly string[] = Object.keys(AREA_PILLAR_FOR_TYPE);
+/**
+ * The types a designer creates in: listed on every package, holding one or
+ * not. Named, not read off the pillar map: a type keeps its entry when its
+ * designer leaves its pillar for the metadata address (objectstack#36903, the
+ * flow).
+ */
+export const STUDIO_MENU_DESIGNER_TYPES: readonly string[] = Object.freeze(['object', 'flow', 'permission']);
 
 /** The OWD overview's address on the Access pillar (`AccessPillar`'s deep link). */
 const OWD_OVERVIEW_SURFACE = { type: 'owd', name: 'overview' } as const;
