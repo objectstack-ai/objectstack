@@ -128,9 +128,9 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-async function renderOpenFlow(): Promise<void> {
+async function renderOpenFlow(search = ''): Promise<void> {
   render(
-    <MemoryRouter initialEntries={[`/studio/${PKG}/metadata/flow/${FLOW.name}`]}>
+    <MemoryRouter initialEntries={[`/studio/${PKG}/metadata/flow/${FLOW.name}${search}`]}>
       <AutomationsPillar packageId={PKG} flowName={FLOW.name} />
     </MemoryRouter>,
   );
@@ -200,5 +200,29 @@ describe('the item header’s tab row over the open flow (objectui#12454)', () =
     fireEvent.click(screen.getByTestId('auto-tab-debug'));
     expect(sectionShown()).toBe('debug');
     expect(document.querySelector('[data-node-id="start"]')).not.toBeNull();
+  });
+});
+
+// objectstack#36903 — the open tab is in the address (`?tab=`): a refresh, a
+// shared link or ‹ › reopens it on the real designer.
+describe('the designer opens the tab its address names (objectstack#36903)', () => {
+  it('?tab=runs opens the Runs section', async () => {
+    await renderOpenFlow('?tab=runs');
+    await waitFor(() => expect(sectionShown()).toBe('runs'), { timeout: 8000 });
+    expect(screen.getByTestId('auto-tab-runs')).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByTestId('auto-tab-canvas')).toHaveAttribute('aria-pressed', 'false');
+  });
+
+  it('?tab=history opens the History tab’s panel', async () => {
+    await renderOpenFlow('?tab=history');
+    expect(await screen.findByTestId('item-tab-panel-history', undefined, { timeout: 8000 })).toBeInTheDocument();
+    expect(screen.getByTestId('auto-tab-canvas')).toHaveAttribute('aria-pressed', 'false');
+  });
+
+  // CONTROL: no `?tab=` opens the Canvas, and no tool panel.
+  it('CONTROL: with no tab in the address, the Canvas is open', async () => {
+    await renderOpenFlow();
+    expect(sectionShown()).toBe('canvas');
+    expect(screen.queryByTestId('item-tab-panel-history')).toBeNull();
   });
 });

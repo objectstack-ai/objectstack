@@ -84,7 +84,28 @@ vi.mock('@object-ui/react', async (importOriginal) => {
 });
 
 vi.mock('./StudioAiCopilot', () => ({ StudioChatDock: () => null }));
-vi.mock('../../preview/DraftChangesPanel', () => ({ DraftChangesPanel: () => null }));
+// Stands in for the Pending changes sheet: its entries ask the host to open the
+// flow a draft names, through the surface channel (objectstack#36903).
+vi.mock('../../preview/DraftChangesPanel', async () => {
+  const { createElement, Fragment } = await import('react');
+  const { useSurfaceNavigator } = await import('./surfaceDeepLinkChannel');
+  return {
+    DraftChangesPanel: () => {
+      const openSurface = useSurfaceNavigator();
+      return createElement(
+        Fragment,
+        null,
+        ['approval', 'reminder'].map((name) =>
+          createElement(
+            'button',
+            { key: name, type: 'button', onClick: () => openSurface?.({ type: 'flow', name }) },
+            `Pending flow/${name}`,
+          ),
+        ),
+      );
+    },
+  };
+});
 
 // The source under test reaches a dynamic import of `@objectstack/lint`: its first
 // load is paid here, at collection, never inside a case's clock (`check:test-source-alias`).
@@ -366,6 +387,65 @@ describe('an unsaved, not-held flow edit guards × and › (objectstack#36511)',
     await screen.findByTitle('API name: reminder', undefined, { timeout: 8000 });
     fireEvent.click(screen.getByTestId('studio-detail-close'));
     await waitFor(() => expect(where()).toBe(`/studio/${PKG}/metadata/flow`));
+    expect(confirmSpy).not.toHaveBeenCalled();
+  }, 30_000);
+});
+
+// objectstack#36903 — the Pending changes sheet's request for a flow opens the
+// flow's own address (`requestSurface`); leaving the open flow's unsaved work
+// asks first, as × and ‹ › do.
+describe('the Pending changes sheet opens a flow at its address (objectstack#36903)', () => {
+  const request = (name: string) => fireEvent.click(screen.getByRole('button', { name: `Pending flow/${name}` }));
+
+  it('over an unsaved edit it asks; Cancel keeps the edit, OK opens the flow with nothing sent', async () => {
+    await openFlow();
+    await editStartLabel('Kick-off');
+
+    confirmSpy.mockReturnValueOnce(false);
+    request('reminder');
+    expect(confirmSpy).toHaveBeenCalledTimes(1);
+    expect(confirmSpy).toHaveBeenCalledWith(LEAVE_QUESTION);
+    expect(where()).toBe(`/studio/${PKG}/metadata/flow/approval`);
+    expect(document.querySelector('[data-node-id="start"]')).toHaveTextContent('Kick-off');
+
+    confirmSpy.mockReturnValueOnce(true);
+    request('reminder');
+    expect(confirmSpy).toHaveBeenCalledTimes(2);
+    await screen.findByTitle('API name: reminder', undefined, { timeout: 8000 });
+    expect(where()).toBe(`/studio/${PKG}/metadata/flow/reminder`);
+    await pastTheOldAutosave();
+    expect(sent()).toEqual([]);
+  }, 30_000);
+
+  it('over a held step it asks; OK opens the flow', async () => {
+    await openFlow();
+    await holdANotifyStep();
+
+    confirmSpy.mockReturnValueOnce(true);
+    request('reminder');
+    expect(confirmSpy).toHaveBeenCalledTimes(1);
+    expect(confirmSpy).toHaveBeenCalledWith(LEAVE_QUESTION);
+    await screen.findByTitle('API name: reminder', undefined, { timeout: 8000 });
+    expect(where()).toBe(`/studio/${PKG}/metadata/flow/reminder`);
+  }, 30_000);
+
+  it('for the flow already open it does nothing: no question, the edit kept', async () => {
+    await openFlow();
+    await editStartLabel('Kick-off');
+
+    request('approval');
+    expect(confirmSpy).not.toHaveBeenCalled();
+    expect(where()).toBe(`/studio/${PKG}/metadata/flow/approval`);
+    expect(document.querySelector('[data-node-id="start"]')).toHaveTextContent('Kick-off');
+    expect(screen.getByTestId('studio-save')).toBeInTheDocument();
+  }, 30_000);
+
+  // CONTROL: nothing unsaved, nothing asked.
+  it('CONTROL: with no edit, it opens the flow without asking', async () => {
+    await openFlow();
+    request('reminder');
+    await screen.findByTitle('API name: reminder', undefined, { timeout: 8000 });
+    expect(where()).toBe(`/studio/${PKG}/metadata/flow/reminder`);
     expect(confirmSpy).not.toHaveBeenCalled();
   }, 30_000);
 });

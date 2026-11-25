@@ -142,12 +142,22 @@ vi.mock('./StudioAiCopilot', () => ({
   },
 }));
 
-vi.mock('../../preview/DraftChangesPanel', () => ({
-  DraftChangesPanel: (props: Record<string, unknown>) => {
-    panel.props = props;
-    return null;
-  },
-}));
+vi.mock('../../preview/DraftChangesPanel', async () => {
+  const { createElement } = await import('react');
+  const { useSurfaceNavigator } = await import('./surfaceDeepLinkChannel');
+  return {
+    DraftChangesPanel: (props: Record<string, unknown>) => {
+      panel.props = props;
+      // objectstack#36903 — an entry asks the host to open the flow a draft names.
+      const openSurface = useSurfaceNavigator();
+      return createElement(
+        'button',
+        { type: 'button', onClick: () => openSurface?.({ type: 'flow', name: 'qa_urgent_alert_clone' }) },
+        'Pending flow/qa_urgent_alert_clone',
+      );
+    },
+  };
+});
 
 vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn(), info: vi.fn(), warning: vi.fn() } }));
 
@@ -399,6 +409,15 @@ describe('the packaged control: a read-only package stays read-only (objectui#11
 });
 
 describe('the package-less scope reviews and publishes exactly its own drafts (objectui#11553)', () => {
+  // objectstack#36903 — the sheet's flow request lands on the scope's own address.
+  it('a Pending changes request for a scope flow opens it on the scope’s address', async () => {
+    renderAt(ORG_LIST);
+    expect(await screen.findByText('qa_urgent_alert_clone', {}, { timeout: 8000 })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Pending flow/qa_urgent_alert_clone' }));
+    await waitFor(() => expect(location()).toBe(ORG_CLONE), { timeout: 8000 });
+    await openedFlow('qa_urgent_alert_clone');
+  });
+
   beforeEach(() => {
     server.drafts.push(
       { type: 'flow', name: 'qa_urgent_alert_clone', packageId: null },
