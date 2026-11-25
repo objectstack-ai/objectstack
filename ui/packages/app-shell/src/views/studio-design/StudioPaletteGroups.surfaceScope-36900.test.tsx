@@ -81,13 +81,21 @@ vi.mock('../metadata-admin/useMetadata', async (importOriginal) => {
         { type: 'permission', domain: 'security' },
         { type: 'position', domain: 'security' },
         { type: 'agent', domain: 'ai' },
+        { type: 'ai_context', domain: 'ai' },
       ],
     }),
     useGlobalDiagnostics: () => ({
       loading: false,
       countsByType: { object: 1 },
-      // The agent type is served, but this package holds none: not listed.
-      packagesByType: { hook: [reads.PKG], dashboard: [reads.PKG], datasource: [reads.PKG], agent: ['com.acme.hr'] },
+      // objectstack#37201 — the agent type is 常用: listed on every package, holding one or not.
+      // The context-pack type is 高级 and served, but this package holds none: not listed.
+      packagesByType: {
+        hook: [reads.PKG],
+        dashboard: [reads.PKG],
+        datasource: [reads.PKG],
+        agent: ['com.acme.hr'],
+        ai_context: ['com.acme.hr'],
+      },
       reload: () => {},
     }),
   };
@@ -232,14 +240,16 @@ describe("on a package, the palette lists the left menu and the package's items 
     const { cacheReads } = mount(PKG);
     await itemsListed();
 
-    // The menu's six groups, the empty AI one left out, then the
-    // packages and the theme commands. No cross-package Objects / Flows.
+    // The menu's six groups, in the menu's order, then the packages and the
+    // theme commands. No cross-package Objects / Flows. objectstack#37201 —
+    // AI is drawn: its 常用 agent type is listed on a package that holds none.
     expect(headings()).toEqual([
       group('data'),
       group('ui'),
       group('automation'),
       group('system'),
       group('security'),
+      group('ai'),
       'Packages',
       'Preferences',
     ]);
@@ -254,6 +264,7 @@ describe("on a package, the palette lists the left menu and the package's items 
       'studio-entry type:permission',
       'studio-entry owd',
       'studio-entry environment',
+      'studio-entry type:agent',
     ]);
     // Another package's object, and the datasource (Setup's), are not items.
     expect(values('studio-item ')).toEqual([
@@ -297,8 +308,9 @@ describe("on a package, the palette lists the left menu and the package's items 
   }
 
   it('opens an item through the page, at the address the one builder gives', async () => {
+    // objectstack#36904 — the object designer's own address.
     expect(await openedBy(`studio-item object ${PKG} crm_account`)).toBe(
-      '/studio/com.acme.crm/data?surface=object%3Acrm_account',
+      '/studio/com.acme.crm/metadata/object/crm_account?package=com.acme.crm',
     );
     expect(await openedBy(`studio-item permission ${PKG} sales_rep`)).toBe(
       '/studio/com.acme.crm/metadata/permission/sales_rep?package=com.acme.crm',
@@ -313,7 +325,7 @@ describe("on a package, the palette lists the left menu and the package's items 
 
   it('opens a menu entry where the menu entry goes, and the palette closes', async () => {
     expect(await openedBy('studio-entry type:hook')).toBe('/studio/com.acme.crm/metadata/hook?package=com.acme.crm');
-    expect(await openedBy('studio-entry orgFlows')).toBe('/studio/~org/automations');
+    expect(await openedBy('studio-entry orgFlows')).toBe('/studio/~org/metadata/flow?source=runtime');
     expect(await openedBy('studio-entry owd')).toBe('/studio/com.acme.crm/owd');
     expect(await openedBy('studio-entry diagnostics')).toBe('/studio/com.acme.crm/metadata/_diagnostics');
 
@@ -395,7 +407,7 @@ describe("on a package, the palette lists the left menu and the package's items 
   it("CONTROL — opened, it reads each listed type's list", async () => {
     mount(PKG);
     await itemsListed();
-    expect([...reads.state.calls].sort()).toEqual(['dashboard', 'flow', 'hook', 'object', 'permission']);
+    expect([...reads.state.calls].sort()).toEqual(['agent', 'dashboard', 'flow', 'hook', 'object', 'permission']);
   });
 });
 

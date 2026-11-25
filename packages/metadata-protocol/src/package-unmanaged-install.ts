@@ -112,6 +112,7 @@ import {
     UNMANAGED_INSTALL_KEY_DISPOSITIONS,
     unmanagedInstallValueCarries,
     MetadataProtectionFields,
+    validateObjectNamespacePrefix,
 } from '@objectstack/spec/kernel';
 import type { ImportUnmanagedPackageResponse } from '@objectstack/spec/api';
 import { METADATA_ITEM_NAME_PATTERN, PLURAL_TO_SINGULAR, applyProtection } from '@objectstack/spec/shared';
@@ -619,15 +620,11 @@ export function planUnmanagedImport(
             items: items.map((item) => ({ type: item.type, name: item.name, body: item.body })),
             retryVerb: 'install',
         });
-        if (declaredNamespace === undefined) {
-            const contradicted = derivedNamespaceContradiction(
-                sourcePackageId,
-                sourceNamespace,
-                namespace,
-                items.filter((item) => item.type === 'object').map((item) => item.name),
-            );
-            if (contradicted !== undefined) throw unmanagedInstallRenameRefusal(sourcePackageId, namespace, contradicted);
-        }
+        const objectNames = items.filter((item) => item.type === 'object').map((item) => item.name);
+        const contradicted = declaredNamespace === undefined
+            ? derivedNamespaceContradiction(sourcePackageId, sourceNamespace, namespace, objectNames)
+            : declaredNamespaceContradiction(sourcePackageId, declaredNamespace, namespace, objectNames);
+        if (contradicted !== undefined) throw unmanagedInstallRenameRefusal(sourcePackageId, namespace, contradicted);
         const refused: UnmanagedImportRenameRefusal[] = [];
         for (const item of items) {
             const reason = (item.type === 'object' ? planned.objectRefusal(item.name) : undefined)
@@ -680,25 +677,38 @@ export function planUnmanagedImport(
  * (`deriveNamespaceFromPackageId`), and the rename engine trusts it: an object
  * name without that prefix takes the target prefix in front of its whole name
  * (ADR-0048 §3.5 as amended). When the producer's real namespace was dropped
- * from the manifest, every object still carries it, and that rule turns the
- * copy into `<target>_<real>_<name>` beside items the swap left alone, one app
- * in three spellings.
+ * from the manifest, its objects still carry it, and that rule turns the copy
+ * into `<target>_<real>_<name>` beside items the swap left alone, one app in
+ * three spellings.
  *
- * The signal is the object names' COMMON prefix, never one name's shape: a
+ * The signal is a prefix the object names SHARE, never one name's shape: a
  * single name cannot tell a two-word short name (`purchase_order`) from a
- * foreign prefix (`demoasset_site`). So only when there are at least two
- * objects, every object name begins with the same first segment, that segment
- * is not the derived namespace, and no object carries the derived prefix, is
- * the copy refused: every object at its own name, naming the derived
- * namespace and the common prefix, and asking for the missing key. Otherwise
- * the ADR rename applies, unchanged. Object names only: ADR-0129 D2 puts the
- * namespace on object names, while a package's flows, datasets or reports may
- * be named without it, and its translation items are named by this planner.
- * Without a rename the save door's own prefix rule refuses the same names
- * (`NAMESPACE_PREFIX`), so this is asked only on the rename path.
+ * foreign prefix (`demoasset_site`). So when no object carries the derived
+ * prefix, every group of two or more object names beginning with the same
+ * first segment is refused: each object of the group at its own name, naming
+ * the derived namespace and the shared prefix, and asking for the missing key.
+ * A stray object beside the group (`site` beside `demoasset_asset` and
+ * `demoasset_site`) neither joins the refusal nor lifts it; one object
+ * carrying the derived prefix confirms the guess, and nothing is refused.
  *
- * @returns one refusal per object, or `undefined` when the names do not
- *   contradict the derived namespace.
+ * Decided to stay as the ADR rename (a test pins each): a package whose object
+ * names share no first segment (`purchase_order` beside `asset_owner`, bare
+ * `asset` beside `site`), and a single foreign-prefixed name — one name
+ * carries no signal, so `demoasset_asset` alone copies as
+ * `<target>_demoasset_asset`. Refused as one family with the group above: a
+ * two-word short name its own package repeats (`purchase_order` beside
+ * `purchase_item`), stray or not — `namespace` declared on the package, with
+ * every object named under it, lifts it.
+ *
+ * Object names only: ADR-0129 D2 puts the namespace on object names, while a
+ * package's flows, datasets or reports may be named without it, and its
+ * translation items are named by this planner. Without a rename the save
+ * door's own prefix rule refuses the same names (`NAMESPACE_PREFIX`), and the
+ * stray beside a refused group with them, so this is asked only on the rename
+ * path.
+ *
+ * @returns one refusal per object of a shared prefix, or `undefined` when the
+ *   names do not contradict the derived namespace.
  */
 function derivedNamespaceContradiction(
     sourcePackageId: string,
@@ -706,24 +716,89 @@ function derivedNamespaceContradiction(
     targetNamespace: string,
     objectNames: readonly string[],
 ): UnmanagedImportRenameRefusal[] | undefined {
-    if (objectNames.length < 2) return undefined;
     if (objectNames.some((name) => name.startsWith(`${derivedNamespace}_`))) return undefined;
-    const firstSegment = (name: string): string | undefined => {
+    // By first segment. A name whose first segment is the derived namespace
+    // carries the derived prefix, so it returned above.
+    const bySegment = new Map<string, string[]>();
+    for (const name of objectNames) {
         const separator = name.indexOf('_');
-        return separator > 0 ? name.slice(0, separator) : undefined;
-    };
-    const common = firstSegment(objectNames[0]);
-    if (common === undefined || common === derivedNamespace) return undefined;
-    if (!objectNames.every((name) => firstSegment(name) === common)) return undefined;
-    return objectNames.map((name) => ({
-        type: 'object',
-        name,
-        reason: `Object '${name}' is not copied: package '${sourcePackageId}' declares no \`namespace\`, so its `
-            + `namespace was derived from its id as '${derivedNamespace}', but every one of its ${objectNames.length} `
-            + `object names begins '${common}_' instead. Renamed into namespace '${targetNamespace}' it would be `
-            + `'${targetNamespace}_${name}', keeping a prefix the package never declared. Declare \`namespace\` on `
-            + 'the package, the prefix its object names carry, then install again.',
-    }));
+        if (separator <= 0) continue;
+        const segment = name.slice(0, separator);
+        bySegment.set(segment, [...(bySegment.get(segment) ?? []), name]);
+    }
+    const refused: UnmanagedImportRenameRefusal[] = [];
+    for (const [segment, names] of bySegment) {
+        if (names.length < 2) continue;
+        const whole = names.length === objectNames.length;
+        const sharing = whole
+            ? `every one of its ${objectNames.length} object names begins '${segment}_'`
+            : `${names.length} of its ${objectNames.length} object names `
+                + `(${names.map((n) => `'${n}'`).join(', ')}) begin '${segment}_'`;
+        // A declared namespace is held to every object name
+        // ({@link declaredNamespaceContradiction}), so where the group is not the
+        // whole package the remedy names the other objects too: declaring the
+        // group's prefix alone would be refused on the next attempt.
+        const remedy = whole
+            ? 'Declare `namespace` on the package, the prefix its object names carry, then install again.'
+            : 'Declare `namespace` on the package, the prefix its object names carry, and name every other '
+                + 'object under that namespace too, then install again.';
+        for (const name of names) {
+            refused.push({
+                type: 'object',
+                name,
+                reason: `Object '${name}' is not copied: package '${sourcePackageId}' declares no \`namespace\`, so its `
+                    + `namespace was derived from its id as '${derivedNamespace}', but ${sharing} instead. Renamed `
+                    + `into namespace '${targetNamespace}' it would be '${targetNamespace}_${name}', keeping a prefix `
+                    + `the package never declared. ${remedy}`,
+            });
+        }
+    }
+    if (refused.length === 0) return undefined;
+    const order = new Map(objectNames.map((name, i) => [name, i]));
+    return refused.sort((a, b) => (order.get(a.name) ?? 0) - (order.get(b.name) ?? 0));
+}
+
+/**
+ * ⛔ A DECLARED NAMESPACE THE OBJECT NAMES CONTRADICT IS REFUSED, NEVER RENAMED.
+ * A package that declares `namespace` states the prefix every object it
+ * defines carries (ADR-0129 D2), and every authoring door holds it to that:
+ * `defineStack` (`STACK_NAMESPACE_PREFIX_INVALID`), the publish pre-flight and
+ * the save door (`NAMESPACE_PREFIX`) ask one judge,
+ * `validateObjectNamespacePrefix`, which this asks too. An object name the
+ * judge refuses under the declared namespace is no spelling the package could
+ * author, so it is not the "name that lacks the package's prefix" ADR-0048
+ * §3.5's rename puts the target in front of: renamed, `demoasset_asset` under
+ * a declared `other` would copy as `<target>_demoasset_asset`, a prefix the
+ * package never declared, and a bare `lead` under a declared `crm` as
+ * `<target>_lead`, a name no door would have stored under the source. Each
+ * such object is refused at its own name, naming
+ * the declared namespace and the judge's sentence. A namespace-less package is
+ * the legacy shape the judge skips, so its unprefixed names keep the ADR
+ * rename ({@link derivedNamespaceContradiction}). Without a rename the save
+ * door refuses the same names, so this is asked only on the rename path.
+ *
+ * @returns one refusal per object the judge refuses, or `undefined` when
+ *   every object name carries the declared prefix.
+ */
+function declaredNamespaceContradiction(
+    sourcePackageId: string,
+    declaredNamespace: string,
+    targetNamespace: string,
+    objectNames: readonly string[],
+): UnmanagedImportRenameRefusal[] | undefined {
+    const refused = objectNames.flatMap((name) => {
+        const violation = validateObjectNamespacePrefix(name, declaredNamespace);
+        return violation === null ? [] : [{
+            type: 'object',
+            name,
+            reason: `Object '${name}' is not copied: package '${sourcePackageId}' declares \`namespace\` `
+                + `'${declaredNamespace}', and its prefix rule refuses the name: ${violation} Renamed into namespace `
+                + `'${targetNamespace}' it would be '${targetNamespace}_${name}': the rename puts the target in place `
+                + 'of the declared prefix, and this name carries none to replace. Declare the `namespace` the object '
+                + 'names carry, or name each object under the declared one, then install again.',
+        }];
+    });
+    return refused.length > 0 ? refused : undefined;
 }
 
 /** [#30794] One item the rename into a `targetNamespace` cannot copy, and why. */

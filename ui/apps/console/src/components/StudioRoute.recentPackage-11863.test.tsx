@@ -3,7 +3,8 @@
 /**
  * objectui#11863 (Q3) — a visit to a package's pillar builder is recorded as a
  * recent `package` entry, by IDENTITY and with no label (the objectui#11678
- * shape), so the `/studio` landing can list the packages an author was last in.
+ * shape), so Studio's entry (bare `/studio`, objectstack#36908) can open the
+ * package an author was last in.
  *
  * ## Why the route, and why this instrument
  *
@@ -74,7 +75,7 @@ vi.mock('@object-ui/app-shell', async (importOriginal) => ({
 }));
 
 vi.mock('./studioBuilder', () => ({
-  BuilderLanding: () => <div data-testid="studio-front-door">pick a package</div>,
+  StudioEntryRedirect: () => <div data-testid="studio-entry">entry</div>,
   StudioDesignSurface: () => <div data-testid="studio-pillar-builder">pillars</div>,
 }));
 
@@ -133,9 +134,9 @@ beforeEach(() => {
   auth = { isAuthenticated: true, isLoading: false, user: { id: 'u1' } };
   permissionsFetch = holder;
   localStorage.clear();
-  // The landing mounts the real `AppHeader` (objectui#11863), which reads its
-  // user-scoped feeds and the AI agent catalogue on mount; each answers empty
-  // here, so no request leaves the process. The entry gate's own read goes
+  // A screen that mounts the real `AppHeader` reads its user-scoped feeds and
+  // the AI agent catalogue on mount; each answers empty here, so no request
+  // leaves the process. The entry gate's own read goes
   // through the mocked `createAuthenticatedFetch`, not this.
   vi.stubGlobal('fetch', vi.fn(async () => jsonResponse({ data: [] })));
 });
@@ -187,13 +188,13 @@ describe('/studio/PKG/TAB records the package as a recent entry (objectui#11863)
     expect(recent()).toEqual(JSON.parse(before ?? '[]'));
   });
 
-  it('the package-less scope is not a package, and the landing is not a visit: neither records anything', async () => {
+  it("the package-less scope is not a package, and Studio's entry is not a visit: neither records anything", async () => {
     renderStudio('/studio/~org/automations');
     await screen.findByTestId('studio-pillar-builder');
     cleanup();
 
     renderStudio('/studio');
-    await screen.findByTestId('studio-front-door');
+    await screen.findByTestId('studio-entry');
 
     expect(recent()).toEqual([]);
     expect(persisted()).toBeNull();

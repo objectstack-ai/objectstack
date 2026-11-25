@@ -9,7 +9,7 @@
       "title": "Every user-initiated write answers visibly — success names what changed, a refusal says why, and a no-op claims nothing",
       "since": "v17.7",
       "status": "active",
-      "revision": 17,
+      "revision": 18,
       "priority": "P1",
       "surface": "browser",
       "personas": [
@@ -19,7 +19,7 @@
       "fixtures": {
         "app": "showcase",
         "requires": [
-          "a writable scratch package for the Studio rows — create it from the Studio landing and delete it at teardown; the showcase package itself is read-only in Studio",
+          "a writable scratch package for the Studio rows — create it from Setup → Packages (New package) and delete it at teardown; the showcase package itself is read-only in Studio",
           "the organization capability for the Invite User row (a stock showcase boot bootstraps a Default Organization)",
           "an independent read of server truth for every row — a second browser context or the REST API — so a write is never judged by what the UI says about it"
         ],
@@ -207,7 +207,8 @@
           "date": "2026-11-22",
           "change": "variants[8]'s last clause re-read at base 4e55e4eb: in Studio's Records grid a click on a field's column header selects the field and opens its properties and does not sort (objectstack#34794, StudioDesignSurface's onClickCapture on data-records-body); sort and hide are in the 'Sort and hide' caret's column menu, which #35876 made a role=menu. The step said the click sorts (QA run #33914). No clause changed",
           "ref": "#35922"
-        }
+        },
+        { "revision": 18, "date": "2026-11-25", "change": "fixtures.requires[0]: the scratch package is created from Setup → Packages (New package); the Studio landing it named is removed (#36908). No clause changed", "ref": "#36908" }
       ]
     },
     {

@@ -42,7 +42,7 @@
 
 import * as React from 'react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, cleanup } from '@testing-library/react';
+import { render, cleanup, waitFor, act } from '@testing-library/react';
 import { MemoryRouter, Routes, Route } from 'react-router-dom';
 
 vi.mock('@object-ui/permissions', async (importOriginal) => {
@@ -87,7 +87,11 @@ import { I18nProvider } from '@object-ui/i18n';
 import { builtInLocales } from '@object-ui/i18n/locales';
 import { ObjectDataPage } from './ObjectDataPage';
 import { ExpressionProvider } from '../providers/ExpressionProvider';
-import { NULL_FILTER, EMPTY_FILTER } from './drillUrlFilters';
+import { NULL_FILTER, EMPTY_FILTER, BOOLEAN_FILTER } from './drillUrlFilters';
+
+// `ObjectDataPage` reaches a dynamic `import('@objectstack/lint')`: pay its load at
+// collection, never inside a case's clocked window (`check:test-source-alias`).
+import '@objectstack/lint';
 
 const h = React.createElement;
 const OBJECT_NAME = 'showcase_invoice';
@@ -101,6 +105,16 @@ const OBJECTS = [
     fields: {
       id: { type: 'text', label: 'Id' },
       owner: { type: 'text', label: 'Owner' },
+      category: {
+        type: 'select',
+        label: 'Category',
+        options: [
+          { value: 'software', label: 'Software' },
+          { value: 'hardware', label: 'Hardware' },
+        ],
+      },
+      account: { type: 'lookup', label: 'Account', reference: 'showcase_account' },
+      paid: { type: 'boolean', label: 'Paid' },
     },
   },
 ];
@@ -129,7 +143,12 @@ function packLabel(language: string): unknown {
  * does not satisfy that (objectui#4040, the same fix the sibling i18n render
  * tests carry).
  */
-function renderAt(language: string, search: string) {
+function renderAt(
+  language: string,
+  search: string,
+  resources?: Record<string, Record<string, unknown>>,
+  dataSource: unknown = makeDataSource(),
+) {
   const page = h(
     MemoryRouter,
     { initialEntries: [`/apps/demo/${OBJECT_NAME}/data?${search}`] },
@@ -138,13 +157,13 @@ function renderAt(language: string, search: string) {
       null,
       h(Route, {
         path: '/apps/:appName/:objectName/data',
-        element: h(ObjectDataPage, { dataSource: makeDataSource(), objects: OBJECTS }),
+        element: h(ObjectDataPage, { dataSource, objects: OBJECTS }),
       }),
     ),
   );
   return render(
     h(I18nProvider, {
-      config: { defaultLanguage: language, detectBrowserLanguage: false },
+      config: { defaultLanguage: language, detectBrowserLanguage: false, resources },
       children: h(ExpressionProvider, {
         user: { id: 'u1', name: 'Ada', profile: 'admin' },
         children: page,
@@ -160,8 +179,8 @@ const EMPTY_BUCKET_SEARCH = `filter[${FIELD}][${NULL_FILTER.param}]=${NULL_FILTE
  * The chip's operator half. Reached through the remove button that sits beside
  * it, so this cannot drift onto the field-name half or the row's lead-in.
  */
-function chipOperatorText(): string {
-  const remove = document.querySelector(`[data-testid="object-data-remove-filter-${FIELD}"]`);
+function chipOperatorText(field: string = FIELD): string {
+  const remove = document.querySelector(`[data-testid="object-data-remove-filter-${field}"]`);
   expect(remove, 'the empty-bucket chip did not render at all').toBeTruthy();
   return remove!.previousElementSibling?.textContent ?? '';
 }
@@ -288,5 +307,222 @@ describe('the membership and negation chips (objectstack#30743)', () => {
     renderAt('en', `filter[${FIELD}][in]=alice`);
     expect(chipOperatorText()).toBe(`${packLabelOf('en', 'filterBuilder.operators.in')} alice`);
     expect(packLabelOf('zh-Hans', 'filterBuilder.operators.in')).not.toBe(packLabelOf('en', 'filterBuilder.operators.in'));
+  });
+});
+
+/**
+ * objectstack#37259 — a chip on an options-bearing field draws each whole-value
+ * comparand as its option's TRANSLATED label, the text the grid cell shows for
+ * that value (`translateOptions` over the field's declared `options`), instead
+ * of the stored code. Same real page, same real packs, plus an app bundle that
+ * translates one object's option the way a served app bundle does
+ * (`{appNamespace}.fieldOptions.{object}.{field}.{value}`).
+ */
+describe('a URL filter chip on a select field draws the option label (objectstack#37259)', () => {
+  const OPTION_FIELD = 'category';
+  /** An app namespace carrying the zh label of both declared options. */
+  const ZH_APP_BUNDLE = {
+    'zh-Hans': {
+      testapp: {
+        // Marks `testapp` as an app namespace for `getAppNamespaces`.
+        fields: {},
+        fieldOptions: { [OBJECT_NAME]: { [OPTION_FIELD]: { software: '软件', hardware: '硬件' } } },
+      },
+    },
+  };
+  const packLabelOf = (language: string, key: string): unknown =>
+    key.split('.').reduce<unknown>(
+      (node, part) => (node as Record<string, unknown> | undefined)?.[part],
+      (builtInLocales as Record<string, unknown>)[language],
+    );
+
+  it('an equality chip draws the zh option label, not the stored code', () => {
+    renderAt('zh-Hans', `filter[${OPTION_FIELD}]=software`, ZH_APP_BUNDLE);
+    expect(chipOperatorText(OPTION_FIELD)).toBe('= 软件');
+  });
+
+  it('an equality chip draws the declared en option label', () => {
+    renderAt('en', `filter[${OPTION_FIELD}]=software`, ZH_APP_BUNDLE);
+    expect(chipOperatorText(OPTION_FIELD)).toBe('= Software');
+  });
+
+  it('a membership chip draws each member as its option label', () => {
+    renderAt(
+      'zh-Hans',
+      `filter[${OPTION_FIELD}][in]=software&filter[${OPTION_FIELD}][in]=hardware`,
+      ZH_APP_BUNDLE,
+    );
+    expect(chipOperatorText(OPTION_FIELD)).toBe(
+      `${packLabelOf('zh-Hans', 'filterBuilder.operators.in')} 软件, 硬件`,
+    );
+  });
+
+  it('a negation chip draws its comparand as the option label', () => {
+    renderAt('zh-Hans', `filter[${OPTION_FIELD}][ne]=software`, ZH_APP_BUNDLE);
+    expect(chipOperatorText(OPTION_FIELD)).toBe(
+      `${packLabelOf('zh-Hans', 'filterBuilder.operators.not_equals')} 软件`,
+    );
+  });
+
+  it('CONTROL: a comparand that names no declared option stays the raw value', () => {
+    renderAt('zh-Hans', `filter[${OPTION_FIELD}]=legacy_code`, ZH_APP_BUNDLE);
+    expect(chipOperatorText(OPTION_FIELD)).toBe('= legacy_code');
+  });
+
+  it('CONTROL: a text-operator comparand is a fragment, not an option, and stays raw', () => {
+    renderAt('zh-Hans', `filter[${OPTION_FIELD}][contains]=software`, ZH_APP_BUNDLE);
+    expect(chipOperatorText(OPTION_FIELD)).toBe(
+      `${packLabelOf('zh-Hans', 'filterBuilder.operators.contains')} software`,
+    );
+  });
+
+  it('CONTROL: a field without options keeps today\'s text', () => {
+    renderAt('zh-Hans', `filter[${FIELD}]=software`, ZH_APP_BUNDLE);
+    expect(chipOperatorText(FIELD)).toBe('= software');
+  });
+});
+
+/** What the pack itself says one key reads, in one language. */
+function packText(language: string, key: string): unknown {
+  return key.split('.').reduce<unknown>(
+    (node, part) => (node as Record<string, unknown> | undefined)?.[part],
+    (builtInLocales as Record<string, unknown>)[language],
+  );
+}
+
+/**
+ * objectstack#37288 (a) — a chip on a lookup field names the record its id
+ * points at, read the way the list's own condition chips read it (the
+ * target's records by id, named through the target's `nameField`), and keeps
+ * the raw id when that read names nothing.
+ */
+describe('a URL filter chip on a lookup field names the record (objectstack#37288)', () => {
+  const LOOKUP_FIELD = 'account';
+  const TARGET = 'showcase_account';
+  const ACCOUNTS: Record<string, { id: string; title: string }> = {
+    acc_1: { id: 'acc_1', title: 'Globex' },
+    acc_2: { id: 'acc_2', title: 'Initech' },
+  };
+
+  /** A data source that answers the target's records and definition. */
+  function lookupDataSource() {
+    const base = makeDataSource();
+    base.find = vi.fn(async (object: string, query?: { $filter?: { id?: { $in?: string[] } } }) => {
+      if (object !== TARGET) return { data: [], total: 0 };
+      const ids = query?.$filter?.id?.$in ?? [];
+      const data = ids.map((id) => ACCOUNTS[id]).filter(Boolean);
+      return { data, total: data.length };
+    });
+    base.getObjectSchema = vi.fn(async (object: string) =>
+      object === TARGET
+        ? { name: TARGET, label: 'Account', nameField: 'title', fields: { title: { type: 'text', label: 'Title' } } }
+        : OBJECTS[0]);
+    return base;
+  }
+
+  /** Wait until the target read has been made and has settled. */
+  async function targetReadSettled(ds: { find: ReturnType<typeof vi.fn> }) {
+    await waitFor(() => expect(ds.find).toHaveBeenCalledWith(TARGET, expect.anything()));
+    await act(async () => {});
+  }
+
+  it('an equality chip draws the record name in zh, not its id', async () => {
+    renderAt('zh-Hans', `filter[${LOOKUP_FIELD}]=acc_1`, undefined, lookupDataSource());
+    await waitFor(() => expect(chipOperatorText(LOOKUP_FIELD)).toBe('= Globex'));
+  });
+
+  it('a membership chip draws each member as its record name in en', async () => {
+    renderAt('en', `filter[${LOOKUP_FIELD}][in]=acc_1&filter[${LOOKUP_FIELD}][in]=acc_2`, undefined, lookupDataSource());
+    await waitFor(() =>
+      expect(chipOperatorText(LOOKUP_FIELD)).toBe(`${packText('en', 'filterBuilder.operators.in')} Globex, Initech`),
+    );
+  });
+
+  it('a membership chip draws each member as its record name in zh', async () => {
+    renderAt('zh-Hans', `filter[${LOOKUP_FIELD}][in]=acc_1&filter[${LOOKUP_FIELD}][in]=acc_2`, undefined, lookupDataSource());
+    await waitFor(() =>
+      expect(chipOperatorText(LOOKUP_FIELD)).toBe(`${packText('zh-Hans', 'filterBuilder.operators.in')} Globex, Initech`),
+    );
+  });
+
+  it('CONTROL: an id the read does not name stays the raw id once the read settles', async () => {
+    const ds = lookupDataSource();
+    renderAt('zh-Hans', `filter[${LOOKUP_FIELD}][in]=acc_1&filter[${LOOKUP_FIELD}][in]=acc_gone`, undefined, ds);
+    await targetReadSettled(ds);
+    await waitFor(() =>
+      expect(chipOperatorText(LOOKUP_FIELD)).toBe(`${packText('zh-Hans', 'filterBuilder.operators.in')} Globex, acc_gone`),
+    );
+  });
+
+  it('CONTROL: a failed read keeps the raw id', async () => {
+    const ds = lookupDataSource();
+    ds.find = vi.fn(async () => {
+      throw new Error('network down');
+    });
+    renderAt('en', `filter[${LOOKUP_FIELD}]=acc_1`, undefined, ds);
+    await targetReadSettled(ds);
+    expect(chipOperatorText(LOOKUP_FIELD)).toBe('= acc_1');
+  });
+});
+
+/**
+ * objectstack#37288 (b) — a chip on the `[bool]` slot draws its comparand as
+ * the filter builder's own true / false words in the reader's language.
+ */
+describe('a URL filter chip on a boolean draws the true / false words (objectstack#37288)', () => {
+  const BOOL_FIELD = 'paid';
+  const at = (flag: string) => `filter[${BOOL_FIELD}][${BOOLEAN_FILTER.param}]=${flag}`;
+
+  it.each([
+    [BOOLEAN_FILTER.flag, 'filterBuilder.trueLabel'],
+    [BOOLEAN_FILTER.notFlag, 'filterBuilder.falseLabel'],
+  ])('`[bool]=%s` draws the zh pack copy of `%s`', (flag, key) => {
+    renderAt('zh-Hans', at(flag));
+    const rendered = chipOperatorText(BOOL_FIELD);
+    expect(rendered).toBe(`= ${packText('zh-Hans', key)}`);
+    expect(rendered).not.toContain('filterBuilder');
+    expect(rendered).not.toContain(flag);
+  });
+
+  it('`[bool]=true` draws the en pack copy, and the packs differ', () => {
+    renderAt('en', at(BOOLEAN_FILTER.flag));
+    expect(chipOperatorText(BOOL_FIELD)).toBe(`= ${packText('en', 'filterBuilder.trueLabel')}`);
+    expect(packText('zh-Hans', 'filterBuilder.trueLabel')).not.toBe(packText('en', 'filterBuilder.trueLabel'));
+  });
+
+  it('CONTROL: the word "true" on a text field is the user\'s own comparand and stays raw', () => {
+    renderAt('zh-Hans', `filter[${FIELD}]=true`);
+    expect(chipOperatorText()).toBe('= true');
+  });
+});
+
+/**
+ * objectstack#37288 (d) — the `[nin]` arm draws its member as the option's
+ * translated label, as the `[in]` arm does.
+ */
+describe('a `[nin]` chip on a select field draws the option label (objectstack#37288)', () => {
+  const OPTION_FIELD = 'category';
+  const ZH_APP_BUNDLE = {
+    'zh-Hans': {
+      testapp: {
+        fields: {},
+        fieldOptions: { [OBJECT_NAME]: { [OPTION_FIELD]: { software: '软件', hardware: '硬件' } } },
+      },
+    },
+  };
+
+  it('draws the zh option label beside the zh "not in" label', () => {
+    renderAt('zh-Hans', `filter[${OPTION_FIELD}][nin]=software`, ZH_APP_BUNDLE);
+    expect(chipOperatorText(OPTION_FIELD)).toBe(`${packText('zh-Hans', 'filterBuilder.operators.not_in')} 软件`);
+  });
+
+  it('draws the declared en option label beside the en "not in" label', () => {
+    renderAt('en', `filter[${OPTION_FIELD}][nin]=software`, ZH_APP_BUNDLE);
+    expect(chipOperatorText(OPTION_FIELD)).toBe(`${packText('en', 'filterBuilder.operators.not_in')} Software`);
+  });
+
+  it('CONTROL: a member that names no declared option stays the raw value', () => {
+    renderAt('zh-Hans', `filter[${OPTION_FIELD}][nin]=legacy_code`, ZH_APP_BUNDLE);
+    expect(chipOperatorText(OPTION_FIELD)).toBe(`${packText('zh-Hans', 'filterBuilder.operators.not_in')} legacy_code`);
   });
 });

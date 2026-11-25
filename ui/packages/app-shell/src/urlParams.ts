@@ -7,6 +7,7 @@
  */
 
 import { NAV_RUN_ACTION_PARAM } from '@object-ui/layout';
+import { STUDIO_RETURN_PARAM } from './views/studio-design/studioAddress.js';
 
 /**
  * urlParams — the single registry of RESERVED console URL query params
@@ -45,6 +46,10 @@ import { NAV_RUN_ACTION_PARAM } from '@object-ui/layout';
  * |             | framework#2604 D3).                            |              |
  * | `formLink`  | `"<fkField>:<parentId>"` — create-mode parent  |              |
  * |             | pre-link for a child task; refresh-safe.       | with `form`  |
+ * |             | Repeats: further `"<field>:<value>"` pairs are |              |
+ * |             | values seeded beside the parent (the relation- |              |
+ * |             | ship lookup's `dependsOn` fields,              |              |
+ * |             | objectstack#37246).                            |              |
  * | `tab`       | Active record-detail tab (stable semantic      | replace      |
  * |             | values: `details` / `related:<child>` /        |              |
  * |             | `related` / `activity` / `history`,            |              |
@@ -61,6 +66,9 @@ import { NAV_RUN_ACTION_PARAM } from '@object-ui/layout';
  * | `from`      | Ancestor breadcrumb trail for a record route,  | push (with   |
  * |             | so drilling record→related-record keeps a      | the drill-in) |
  * |             | clickable path back (`Account → #p → Invoice`).|              |
+ * | `studio`    | The Studio list an app page was opened from    | with the     |
+ * |             | (objectstack#36906): the page draws × back to  | Studio open  |
+ * |             | it. Defined by `studioAddress.ts`.             |              |
  *
  * Push-vs-replace rule of thumb: an overlay the user OPENED (form, drawer)
  * pushes one entry so browser Back closes it; passive state that tracks an
@@ -71,9 +79,10 @@ import { NAV_RUN_ACTION_PARAM } from '@object-ui/layout';
  * `package`, …) belong to their page's own contract and are NOT reserved
  * here — but they must not collide with the names above.
  *
- * One reserved param is DEFINED ELSEWHERE and only re-exported here:
- * `runAction` (see {@link NAV_RUN_ACTION_PARAM}). It is the wire encoding of a
- * spec-declared nav slot, written by `@object-ui/layout`'s `resolveHref`, which
+ * Two reserved params are DEFINED ELSEWHERE and only re-exported here.
+ * `studio` ({@link STUDIO_RETURN_PARAM}) belongs to Studio's one address
+ * builder, `studioAddress.ts`. `runAction` (see {@link NAV_RUN_ACTION_PARAM})
+ * is the wire encoding of a spec-declared nav slot, written by `@object-ui/layout`'s `resolveHref`, which
  * sits below this package — so the constant lives there and this registry
  * references it rather than restating it. Restating would give the console's
  * hottest collision check a second spelling to drift from, which is the exact
@@ -106,7 +115,10 @@ export const RECORD_FORM_PARAM = 'form';
 /** Child-task object override for the record-form overlay (objectstack-ai/objectstack#2604 D3). */
 export const RECORD_FORM_OBJECT_PARAM = 'formObject';
 
-/** Child-task parent pre-link `"<fkField>:<parentId>"` (objectstack-ai/objectstack#2604 D3). */
+/**
+ * Child-task parent pre-link `"<fkField>:<parentId>"` (objectstack-ai/objectstack#2604 D3),
+ * repeated for each value seeded beside it (objectstack#37246).
+ */
 export const RECORD_FORM_LINK_PARAM = 'formLink';
 
 /** Active record-detail tab (objectui#2257; stable semantic values). */
@@ -191,6 +203,14 @@ export const RECORD_TRAIL_PARAM = 'from';
 export { NAV_RUN_ACTION_PARAM };
 
 /**
+ * The Studio address an app page returns to (`?studio=<address>`,
+ * objectstack#36906, epic #36890 decision 15). Re-exported, not restated:
+ * `studioAddress.ts` owns the Studio vocabulary and its builders
+ * (`withStudioReturn`, `readStudioReturn`); read it through them.
+ */
+export { STUDIO_RETURN_PARAM };
+
+/**
  * All reserved params, for collision checks (e.g. a lint or a dev-time
  * assertion that a page-scoped param doesn't shadow the console contract).
  */
@@ -208,6 +228,7 @@ export const RESERVED_URL_PARAMS: readonly string[] = [
   KEYBOARD_SHORTCUTS_PARAM,
   RECORD_TRAIL_PARAM,
   NAV_RUN_ACTION_PARAM,
+  STUDIO_RETURN_PARAM,
 ];
 
 /**

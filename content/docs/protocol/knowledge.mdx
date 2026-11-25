@@ -82,9 +82,9 @@ delegates the rest to plugins.
 │  • Search router  → adapter.search   │    │      (dev/test only)         │
 │  • Permission wrapper (RLS filter)   │    │  • knowledge-ragflow  │
 │  • Event sync (record.* → upsert)    │    │      (reference impl, REST)  │
-│  • Audit + metrics                   │    │                       │
-│                                      │    │  (llamaindex / dify /  │
-│  Registers `knowledge` service       │    │   pgvector: planned)   │
+│  • Audit + metrics                   │    │  • knowledge-pgvector │
+│                                      │    │      (PostgreSQL + pgvector) │
+│  Registers `knowledge` service       │    │  (llamaindex / dify: planned)│
 └──────────────────────────────────────┘    └──────────────────────────────┘
               ▲
               │ consumes
@@ -131,6 +131,7 @@ source: {
   contentFields: ['title', 'body'],       // at least one, required
   metadataFields: ['category', 'author'], // optional, carried onto the document
   where: { status: 'published' },         // optional ObjectQL filter
+  split: { strategy: 'markdown', maxChars: 600 }, // optional; see 3.5
 }
 
 // file — every object under a storage prefix
@@ -158,16 +159,36 @@ registers itself with that name. Adapter config (endpoint, dataset id,
 Canonical shapes shared by every adapter:
 
 - `KnowledgeDocument` — one logical document (`id`, `sourceId`,
-  `sourceRecordId?`, `content`, `metadata`, `permissions?`, `docHash?`).
-  `docHash` is a hash of the assembled document — content, title and
-  metadata, in a stable key order, behind a version prefix (`v1:`). The
-  service computes it on every document it hands an adapter, and
-  `indexDocument` refuses a document that already carries one; the adapter
-  stores it and returns it as stored, and never computes or alters it.
-- `KnowledgeChunk` — adapter-produced chunk of a document. The framework
-  does **not** chunk; adapters do.
+  `sourceRecordId?`, `content`, `metadata`, `permissions?`,
+  `organizationId?`, `docHash?`). `organizationId` is the organization of
+  the record the document was assembled from: the service sets it from the
+  record's `organization_id` under a walled tenancy posture (`group` or
+  `isolated`), and leaves it absent under `single`, for `file` / `http`
+  sources and for a record with no organization — see
+  [Organization scope](#organization-scope). `docHash` is a hash of the
+  assembled document — content, title and metadata, and the organization
+  when the document has one, in a stable key order, behind a version prefix
+  (`v1:`). The service computes both on every document it hands an adapter,
+  and `indexDocument` refuses a document that already carries either; the
+  adapter stores them and returns `docHash` as stored, and never computes or
+  alters either.
+- `KnowledgeDocument.chunks?` — the document's passages, cut by the
+  service's splitter (see [3.5 The split](#35-the-split)). Set by the service,
+  and only on a document handed to an adapter that declares
+  `capabilities.chunks`; `indexDocument` refuses a document that already
+  carries them. Derived from `content`, so not part of `docHash`.
+- `KnowledgeChunk` — one passage: `id` (the service sets it to
+  `${documentId}#${index}`, so a hit's `chunkId` is the same on every adapter),
+  `documentId`, `index`, `content` (what the adapter embeds and returns as a
+  snippet), and `headingPath?` (the headings it sits under, outermost first,
+  under the `markdown` strategy). The adapter indexes each passage as given and
+  does not split it again. A passage has no `metadata` of its own: it takes its
+  document's `metadata`. The chunk's former `metadata` key, which nothing wrote
+  or read, is retired, and a chunk that carries one is refused with the fix.
 - `KnowledgeHit` — a search result (`chunkId`, `documentId`, `score`,
-  `snippet`, `sourceRecordId?`, `metadata`).
+  `snippet`, `sourceRecordId?`, `metadata`, and `docHash?` and
+  `headingPath?`: the stored hash of the hit's document and the heading path
+  of its passage, both as the adapter stores them).
 
 The `sourceRecordId` field is the linchpin of permission-aware
 retrieval: when a hit references an ObjectQL record, the
@@ -175,6 +196,66 @@ retrieval: when a hit references an ObjectQL record, the
 caller's `ExecutionContext` and drops hits the user is not allowed to
 read. **A hit that the user could not have queried directly is never
 returned.**
+
+The re-check runs after ranking, so the service asks for more than it
+answers. For a caller who is not the system identity, each `object`
+source is asked for `topK × 5` hits. When the hits that survive the
+re-check name fewer than `topK` records (several passages of one record
+count once), every `object` source that answered as many hits as it was
+asked is asked once more, for `topK × 20`. That is the cap: a caller who may
+read fewer than `topK` of the rows within the cap gets fewer than `topK`
+hits. An
+adapter that answers fewer than it was asked (one that caps `topK`) is not
+asked again. A `file` or `http` source is asked for `topK` once, and so is
+every source for the system identity. The answer is at most `topK` hits.
+How many hits the re-check removed is logged at `debug`, never returned to
+the caller.
+
+#### Records, not passages
+
+A search answers passages by default (`granularity: 'chunk'`): several
+passages of one record can take several of the `topK` places. With
+`granularity: 'record'` it answers records: one hit per record, the record's
+best-scoring passage, and `topK` counts records. Every source is then asked
+for `topK × 5` passages, for every caller, and refilled once at `topK × 20`
+when fewer than `topK` records survive; that is the cap, and fewer records
+within it means fewer hits, logged at `debug`. A `file` or `http` hit is
+grouped by its document.
+
+`groupBy` names a metadata field and groups by its value instead — "which
+policies", not "which clauses" — with the best hit of each group and the
+value in the hit's `metadata`; it implies record granularity, and is refused
+with `granularity: 'chunk'` (`VALIDATION_ERROR`, 400, as are an empty
+`groupBy` and an unknown `granularity`). Hits with the same value are one group whichever
+source they come from. An `object` source that does not list the field in
+its `metadataFields` is not searched, and a record with no value for it is
+not answered: a hit is never answered ungrouped.
+
+Each record-level hit is checked against its record as it reads now, one
+system-context read per source of only the records about to be answered
+(the source's `where` AND their ids). A record that was deleted or left
+`where` since it was indexed, or whose document hash computed now differs
+from the hit's `docHash`, is not answered, and the next record moves up (at
+most three rounds; a hit still unchecked after them is not answered). Its
+document is repaired in the background, through the event sync's path, once
+until its hash matches again — except in a source with
+`refresh.onRecordChange: false`, whose index an external indexer owns: the
+service writes nothing there, and the hit is only not answered. A hit whose
+adapter stores no hash is checked for membership only. Record granularity
+also reads the display field in the permission re-check (as the caller, in
+the same query), so a caller's hit carries the record's `title` as it reads
+now; the system identity is not re-checked, so its hits carry the indexed
+title (the same whenever the hash matched).
+
+A hit's `title` is the value of the object's display field (ADR-0079
+`resolveDisplayField`: `nameField`, else the derived title field), set
+when the document is built. It is empty when that field is a
+credential-class or `internal` field, when the value is empty, and when
+the object resolves no display field. A source over an object with no
+registered definition reads a field named `title`. Documents indexed
+before this rule carry the value of a field named `title` until a complete
+reindex writes them again, so the source admission below still asks about a
+declared `title` field as well as the display field.
 
 ### 3.3 `IKnowledgeService` (consumed by the ObjectOS AI runtime, REST, Console)
 
@@ -201,18 +282,26 @@ interface IKnowledgeService {
 }
 ```
 
-`KnowledgeSearchOptions` includes `sourceIds`, `topK`, `filter`, and
+`KnowledgeSearchOptions` includes `sourceIds`, `topK`, `filter`,
+`granularity`, `groupBy`, and
 the all-important `executionContext` (from the permission-aware tool
-execution work — see `actions-as-tools.mdx`). `KnowledgeReindexOptions`
+execution work — see `actions-as-tools.mdx`). See
+[Records, not passages](#records-not-passages) for `granularity` and `groupBy`. `KnowledgeReindexOptions`
 accepts `dryRun` and `limit`; `reindexSource` returns a
 `KnowledgeReindexResult` (`indexed`, `discovered`, `skipped`, `purged`,
-`ok`, …) — see [Reindex: skip and purge](#reindex-skip-and-purge).
+`failed`, `failures`, `ok`, …) — see [Reindex: skip and purge](#reindex-skip-and-purge)
+and [3.5 The split](#35-the-split).
 
 ### 3.4 `IKnowledgeAdapter` (implemented by plugins)
 
 ```ts
 interface IKnowledgeAdapter {
   readonly id: string;
+  readonly capabilities?: { chunks?: boolean };        // takes the service's passages
+  readonly embedding?: {                                // what its embedder is
+    maxInputTokens?: number;                            //   longest input it accepts
+    model?: string; dimensions?: number; variant?: string; // what its vectors are
+  };
   upsert(docs: KnowledgeDocument[], ctx: AdapterContext): Promise<void>;
   search(query: string, opts: AdapterSearchOptions): Promise<KnowledgeHit[]>;
   delete(documentIds: string[], ctx: AdapterContext): Promise<void>;
@@ -220,22 +309,38 @@ interface IKnowledgeAdapter {
     ctx: AdapterContext,
     opts: { cursor?: string; limit: number },
   ): Promise<{ documents: { documentId: string; docHash?: string }[]; nextCursor?: string }>;
+  indexStatus?(ctx: AdapterContext): Promise<{ fingerprint?: string; recipeHash?: string; building?: boolean }>;
+  beginBuild?(ctx: AdapterContext): Promise<void>;     // with completeBuild, as a pair
+  completeBuild?(ctx: AdapterContext): Promise<void>;
   healthCheck?(): Promise<{ ok: boolean; message?: string }>;
 }
 ```
 
-The adapter surface is **deliberately minimal**: no embedding
-management, no chunk strategy, no rerank toggles. Those are the
-adapter's private concerns. Adapters that need extra knobs expose them
-in their plugin options.
+The adapter contract carries what an adapter **reports**, never how it
+is configured: no embedding configuration, no rerank toggles. Those are the
+adapter's private concerns; adapters that need extra knobs expose them in
+their plugin options. The split is the service's (ADR-0161 K1): an adapter
+that declares `capabilities.chunks` receives every document with the
+service's passages and indexes them as given; one that does not receives
+whole documents, without `chunks`, and splits them itself, as before.
+`embedding.maxInputTokens` reports the longest input the adapter's embedder
+accepts (an adapter fills it from `IEmbedder.maxInputTokens`); the service
+reads it each time it splits, never once at boot, because the embedder may
+register later — an adapter that resolves its embedder late serves it from a
+getter.
 
 Every member past `upsert` / `search` / `delete` is optional (ADR-0161
 K8): an adapter that lacks one keeps working, and the service does what it
-did before that member existed. `listDocuments` lists the documents the
+did before that member existed. `AdapterSearchOptions.organizationIds` is the
+caller's organizations; an adapter that reads it ranks only those
+organizations' documents, filtering before it ranks — see
+[Organization scope](#organization-scope). `listDocuments` lists the documents the
 adapter holds for a source, a page of at most `limit` entries at a time, each
 with the `docHash` it was stored with; `nextCursor` is absent once the
 listing is complete. A document written while a listing runs may be missing
 from it — the safe direction, since a missing entry is never purged.
+`indexStatus`, `beginBuild` and `completeBuild` carry the index fingerprint —
+see [§3.6](#36-the-index-fingerprint).
 
 **The contract test suite.** Every adapter package runs the same suite
 against its own factory:
@@ -246,16 +351,124 @@ import { runKnowledgeAdapterContract } from '@objectstack/service-knowledge/test
 runKnowledgeAdapterContract({
   name: 'my-adapter',
   makeAdapter: () => new MyAdapter(/* a fresh, empty store */),
-  implements: { listDocuments: true },
+  implements: {
+    listDocuments: true, chunks: true, organizationIds: true,
+    indexStatus: true, builds: true, refusesOtherFingerprint: true, generations: true,
+  },
 });
 ```
 
 It covers upsert / search / delete, `listDocuments` page boundaries and
-`docHash` round-trips, and — through a real `KnowledgeService` — the skip and
-the purge below. `implements` declares the optional members, and the suite
+`docHash` round-trips, the organization filter, and — through a real
+`KnowledgeService` — the skip and the purge below, a search from one
+organization under `isolated` and `group`, and the chunk channel: an adapter
+that takes chunks receives the service's passages and indexes them unchanged,
+one that does not keeps receiving whole documents, and a `whole` document over
+the embedder's budget is removed and reported; and the index fingerprint of
+§3.6 — that every call carries one, that a write or a search under another
+is refused by code, a complete reindex as one build, and, for an adapter that
+keeps generations, the switch at the end of a build. `implements` declares the optional members, and the suite
 checks the declaration against the adapter. `./testing` is a test-only,
 ESM-only entry that imports `vitest`; nothing in the runtime entry reaches it.
-`knowledge-memory` runs it as the reference implementation.
+`knowledge-memory` runs it as the reference implementation; `knowledge-pgvector`
+runs it against a live PostgreSQL in CI.
+
+### 3.5 The split
+
+The knowledge service cuts documents into passages once, in one splitter,
+and hands the same passages to every adapter that declares
+`capabilities.chunks` — so one source gives the same passages on each of
+them. The object source's `split` key chooses how:
+
+```typescript
+split: {
+  strategy: 'recursive', // 'whole' | 'recursive' | 'markdown'
+  maxChars: 600,         // optional: longest passage, in characters
+  minChars: 200,         // optional: merge adjacent pieces shorter than this (default 200)
+}
+```
+
+| Strategy | How it cuts |
+|----------|-------------|
+| `whole` | One passage per document. |
+| `recursive` (the default) | At blank lines, then line breaks, then sentence ends, then semicolons, then characters — each next level only for a piece still too long. A Markdown table or list item is one unit while it fits; a table that does not fit is cut between rows, each piece repeating the header row. Adjacent pieces are merged while the merged piece is shorter than `minChars`; a short title block leads the text after it. |
+| `markdown` | One section per heading (a `#` inside a code fence is no heading), each cut as `recursive` cuts. Every passage begins with its heading path (`Policy > Transport > Air`), which counts toward its length and is embedded with it, and carries it as `headingPath`. A heading with no text of its own joins the next passage. |
+
+**Sentence ends, for Chinese and English text.** `。？！` end a sentence
+wherever they stand. `. ? !` end one only before whitespace or the end of the
+text, so 「3.2 条」 and 「400.50 元」 stay whole. An end mark followed by a
+closing quote or bracket ends nothing, so the split never falls right after a
+closing quote or bracket: 「他说：“好。”然后」 stays one sentence. `；` ends a
+clause wherever it stands, `;` only before whitespace.
+
+**How long a passage may be.** `maxChars` is the source's `split.maxChars`,
+else the settings page's **Knowledge → Target chunk size**
+(`knowledge.chunk_target`), else 800. And when the adapter reports its
+embedder's `maxInputTokens`, every passage's token estimate (the shared
+`estimateTokens` from `@objectstack/spec/shared`) also stays within **80%** of
+that limit. A passage keeps both bounds, so the effective length is the
+smaller one; with no limit known, only `maxChars` applies. A `minChars` above
+the effective `maxChars` reads as `maxChars`. The splitter never overlaps
+passages.
+
+**`whole` over the limit.** A `whole` document whose estimate is over the 80%
+budget is **removed from the index and reported, never truncated**:
+`reindexSource` counts it in `failed` and names it in `failures`
+(`[{ documentId, reason }]`, at most 20; `failed` counts them all), the event
+sync logs it at `error` with the source, the record id, the estimate and the
+limit, and `indexDocument` throws. With no limit known nothing is checked.
+The estimate runs high on purpose — on Chinese text about 1.4× a real
+tokenizer — so a `whole` document's usable length is about **60%** of the
+model's limit; choose `recursive` or `markdown` for longer documents.
+
+**A split change is a new index.** `docHash` covers the assembled document,
+not its passages, so the skip alone would keep an unchanged document under
+its old passages. The index fingerprint (§3.6) hashes the resolved split, so
+changing `split`, `chunk_target` or the embedder's limit changes the
+fingerprint: the source's stored index is refused until a complete reindex
+rebuilds it.
+
+### 3.6 The index fingerprint
+
+Vectors from two embedding models — or from two splits of the same text —
+are not comparable, and ranking one against the other answers with noise
+that looks like an answer (ADR-0161 K7). So every index is built under one
+**fingerprint**, which the knowledge service computes and hands to the
+adapter on every call (`AdapterContext.index`, `AdapterSearchOptions.index`):
+
+| Component | Read from |
+|:--|:--|
+| embedding model, `variant`, dimensions | the adapter's `embedding` descriptor — what it reports for the embedder it calls (`IEmbedder.model`, `IEmbedder.dimensions`) |
+| split configuration and the splitter's version | the split the service applies, as resolved; absent for an adapter that splits for itself |
+| content recipe | the object, the ordered content list, and the assembly rule's version |
+
+Beside it rides a **recipe hash** of what assembly reads but no vector
+depends on: the source's `where`, its `metadataFields`, the title field and
+the fields an index may not carry. Both are SHA-256 over values in a fixed
+order, so the same source and the same adapter give the same hashes on every
+machine; no key on a source sets either. An adapter that reports no
+`embedding` descriptor gives the fingerprint no model, so a model change
+cannot be seen for it.
+
+**What the adapter does with it.** A write or a search carrying a
+fingerprint other than the one the source's stored index was built under is
+refused `KNOWLEDGE_REBUILD_REQUIRED` (409), never written into or answered
+from that index. A source that holds nothing takes the first fingerprint it
+is handed. A complete reindex is one build: the service calls `beginBuild`
+before it lists or writes anything, and `completeBuild` once every row is
+written and the purge is done; `completeBuild` records the recipe hash,
+which `indexStatus` reads back. An adapter that keeps **generations**
+(`knowledge-memory` does) builds a new fingerprint's index beside the active
+one and switches to it at `completeBuild`; until then the old one answers
+its own fingerprint. An adapter that does not refuses `beginBuild` under a
+new fingerprint and says how to clear the source so it can be built afresh.
+
+**What a caller sees.** `KnowledgeService.search` over several sources
+answers from the sources it can search, and logs each refused one by name; it
+throws the refusal (with its code and status, and `refused` naming every
+source) only when no source could be searched. The `search_knowledge` tool
+adds a `refused` list naming each refused source, so an agent never reads a
+source that needs a rebuild as one with nothing to say.
 
 ---
 
@@ -268,6 +481,7 @@ Adapters ship as standalone npm packages, registered via the standard
 import { KnowledgeServicePlugin } from '@objectstack/service-knowledge';
 import { KnowledgeMemoryPlugin } from '@objectstack/knowledge-memory';
 import { KnowledgeRagflowPlugin } from '@objectstack/knowledge-ragflow';
+import { KnowledgePgvectorPlugin } from '@objectstack/knowledge-pgvector';
 
 defineStack({
   plugins: [
@@ -277,6 +491,7 @@ defineStack({
       endpoint: process.env.RAGFLOW_URL!,
       apiKey: process.env.RAGFLOW_KEY!,
     }),
+    new KnowledgePgvectorPlugin(),                      // self-hosted, PostgreSQL + pgvector
   ],
 });
 ```
@@ -294,6 +509,61 @@ Each plugin:
 
 Multiple adapters can co-exist; sources pick which one to use via the
 `adapter` field.
+
+### 4.1 `knowledge-pgvector` — the open vector store on PostgreSQL
+
+`@objectstack/knowledge-pgvector` keeps a source's passages and vectors in
+PostgreSQL with the [pgvector](https://github.com/pgvector/pgvector)
+extension, for a self-hosted deployment that wants no separate vector
+service. It takes the service's passages, embeds them with the kernel's
+`embedder` service (or the `embedder` it is given), and answers a search by
+an exact scan.
+
+- **Which database.** The `url` option when it is given, else the platform
+  database when that is PostgreSQL (`OS_DATABASE_URL`). Its own small pool
+  (`poolMax`, default 4; a connection that takes more than
+  `connectTimeoutMs`, default 5000, fails); no pooled connection waits on the
+  embedder. Where organizations
+  have databases of their own, the store is still the ONE database the
+  plugin connects to; organizations are kept apart by its
+  `organization_id` column, which every search filters on before ranking.
+- **Where the tables are.** In their own schema, `os_knowledge` (option
+  `schema`): `knowledge_generation`, one row per source and generation, and
+  one passage table per vector width, `knowledge_vec_d<width>`. Object
+  tables live in the connection's own schema, and the platform's drift
+  checks read only that one — so no store table can collide with an object
+  table or be reported as drift.
+- **When the database is not ready.** Without the `vector` extension — and
+  the right to create it — or the right to create the schema, the plugin
+  still registers and boot goes on: it creates nothing, warns with the SQL a
+  database owner runs (`CREATE EXTENSION IF NOT EXISTS vector;` and the
+  schema's DDL), `healthCheck` answers `ok: false` with that SQL, and every
+  call answers `SERVICE_UNAVAILABLE` until the SQL has run. No restart is
+  needed after. A database it cannot reach is reported as unreachable, with
+  no SQL. A caller reads one sentence; the driver's text and the SQL go only
+  to the operator — the health check, the boot warning and the log.
+- **Search.** An exact scan by cosine distance, so any width works —
+  including a 3072-wide model. The organization filter and the metadata
+  `filter` (equality per key) run in the same `WHERE`, before ranking.
+  `queryPrefix` is put before every query before it is embedded, for a model
+  that embeds questions and passages differently.
+- **Re-embedding.** A passage whose text is unchanged (its `chunk_hash`) is
+  not embedded again; its row's metadata is rewritten.
+- **Rebuilds.** A changed fingerprint is refused (§3.6). This store does not
+  yet build a second generation beside the first: `beginBuild` under a new
+  fingerprint is refused, and the reindex result carries the exact
+  statements that clear the source — one `DELETE` per passage table, then
+  the generation row — after which a complete reindex builds it afresh. A
+  first generation never takes over passage rows left behind without a
+  generation row: they are deleted when it opens.
+- **An approximate index is an operator's step.** The store creates no
+  HNSW or IVFFlat index; add one by hand when a table outgrows an exact scan
+  (`CREATE INDEX ON os_knowledge.knowledge_vec_d1536 USING hnsw (embedding
+  vector_cosine_ops);`). pgvector's HNSW index takes at most 2,000
+  dimensions, so a 3072-wide table stays on the exact scan.
+- **The text is stored.** Each row holds its passage's text: it is as
+  sensitive as the record it came from, and it is in every backup of the
+  database.
 
 ---
 
@@ -329,11 +599,47 @@ This is the same pattern as the existing permission-aware data tools
 No matter how aggressive an adapter's retrieval is, the user never
 sees a chunk extracted from a record they can't read.
 
+### Organization scope
+
+In a deployment with more than one organization, the adapter ranks only the
+caller's organizations' documents (ADR-0161 K8, item 9). Without that, the
+best-ranked passages could all belong to another organization, and the
+re-read above would empty those places. The filter decides what is ranked;
+the re-read still decides what is returned.
+
+- **At assembly.** Under the `group` and `isolated` tenancy postures, a
+  document built from a record carries the record's `organization_id` as
+  `organizationId`. Under `single`, for `file` / `http` sources and for a
+  record with no organization, it carries none.
+- **At search.** For each `object` source, the service hands the adapter
+  `organizationIds`, the organizations the tenancy wall gives the caller for
+  that object: under `isolated` the caller's active organization, under
+  `group` every organization the caller holds a membership in. The service
+  computes the set from the caller's execution context and the deployment's
+  posture. No tool argument or search option supplies it, and
+  `search_knowledge` refuses an `organizationIds` argument.
+- **No filter** (`organizationIds` absent) under `single`, for the system
+  identity, for a `file` / `http` source, and for an object outside the wall
+  (tenancy disabled, or no `organization_id` column). The adapter ranks every
+  document of the source, as before.
+- **An empty set** (`[]`) is a caller with no organization behind a wall, for
+  example no active organization under `isolated`. The adapter ranks
+  nothing; an empty set never means "no filter".
+- **A posture that cannot be read**: a search leaves every `object` source
+  unsearched for that call and logs it at `error`. A reindex stops before
+  writing anything and says why.
+
+**Documents indexed before this change** carry no `organizationId`. Behind a
+wall, a filtered search does not rank them until a complete reindex writes
+them again. The organization is part of `docHash`, so the reindex does not
+skip them. Under `single` nothing changes: a document without an organization
+hashes as before, and the reindex skips it as before.
+
 ### Source admission: exposure and field-level rules
 
 A passage is built at index time, under a system context, from every
-`contentFields` member of its source, the record `title` and the source's
-`metadataFields`. A row re-check alone would therefore serve a caller the text
+`contentFields` member of its source, the object's display field (the
+title) and the source's `metadataFields`. A row re-check alone would therefore serve a caller the text
 of a field a field-level rule hides from them. So before an `object` source is
 searched for a non-system caller, the service asks, once per object per search:
 
@@ -347,7 +653,8 @@ searched for a non-system caller, the service asks, once per object per search:
   `enable.aiReadable: true` (the AI read tools' posture).
 - **Field-level rules** — every field the source serves (each `contentFields`
   member, `'*'` meaning every field the object declares except `id`; each `metadataFields`
-  member; `title`), less the credential-class and `internal: true` fields an
+  member; the display field the title is read from, and a declared `title`
+  field), less the credential-class and `internal: true` fields an
   index never carries, must be one the caller may **query**, per the `security`
   service's `getQueryableFields`. Without that answer: its `getReadableFields`
   less every field declaring a `maskingRule`; with no `security` service at
@@ -397,7 +704,8 @@ when the source has no `where`).
   the event's `after`, so a write result that omits a field (a projected
   result, a formula the write did not return) cannot leave the document
   short. The same field rules as a reindex apply: the fields the source lists
-  and the record `title`, never a credential-class or `internal` field.
+  and the object's display field as the title, never a credential-class or
+  `internal` field.
 - **No row comes back** — the row does not match (a draft, or a row that
   stopped matching), and its document is deleted. Deleting an absent document
   changes nothing.
@@ -558,7 +866,7 @@ up.
 | Audit + metrics | ⏳ Phase 2 |  |
 | `knowledge-llamaindex` | ⏳ Phase 2 |  |
 | `knowledge-dify` | ⏳ Phase 3 / community |  |
-| `knowledge-pgvector` | ⏳ Phase 3 |  |
+| `knowledge-pgvector` | ✅ | PostgreSQL + pgvector; exact scan, organization and metadata filter in SQL, index fingerprint (§4.1) |
 
 ### 7.1 Non-goals for Phase 1
 

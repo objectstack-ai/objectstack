@@ -71,6 +71,9 @@ const ru = {
     autofillNoCurrency: 'Поле «{{field}}» не заполнено: выбранная сумма — {{amount}}, но валюта здесь ещё не выбрана. Выберите валюту, затем введите «{{field}}».',
     autofillCurrencyUnread: 'Поле «{{field}}» не заполнено: выбранная сумма — {{amount}}, но валюту здесь не удалось прочитать. Проверьте валюту, затем введите «{{field}}».',
     autofillKept: 'В поле «{{field}}» осталось прежнее значение.',
+    autofillNowSameCurrency: 'Поле «{{field}}» не заполнено при выборе. Теперь запись в {{to}}: выберите снова, чтобы заполнить {{amount}}.',
+    autofillNowSameCurrencyHeld: 'Поле «{{field}}» не заполнено при выборе и сохраняет прежнее значение. Теперь запись в {{to}}: очистите «{{field}}» и выберите снова, чтобы заполнить {{amount}}.',
+    autofillCopiedUnder: 'Поле «{{field}}» скопировано как {{amount}}, но теперь запись в {{to}}. При необходимости введите «{{field}}» в {{to}}.',
   },
   common: {
     // objectui#13461 — a disclosure toggle's name (the tree-view node toggle).
@@ -707,6 +710,7 @@ const ru = {
       needsWholeRows:
         "Для группировки нужны все записи, но этой таблице передана только одна их страница, поэтому группы невозможно подсчитать. Передайте все записи или позвольте таблице загрузить их из источника данных, который реализует queryGroupHeaders.",
       draftOnly: "Без группировки по {{fields}}: это поле существует только в черновике до публикации.",
+      moreGroupsNotLoaded: "Загружены не все группы: в этом представлении больше групп, чем сервер возвращает за одно чтение, поэтому показана только часть.",
     },
     // objectui#4024 — column-footer aggregate prefixes, keyed by the spec's
     // `ColumnSummary` vocabulary. `pattern` owns the label/value join so this
@@ -1893,6 +1897,12 @@ const ru = {
       noCategoryAxis: "Требуется ось категорий диаграммы — диаграмма, привязанная к объекту, не придумывает её. Объявите одно из:",
     },
   },
+  // objectstack#36906 — the × of an app page opened from a Studio list.
+  studioReturn: {
+    close: 'Вернуться в Studio',
+    closeLabel: 'Закрыть и вернуться к списку Studio',
+    leaveConfirm: 'Уйти без сохранения? Несохранённые изменения будут потеряны.',
+  },
   dashboard: {
     // objectui#7063 — the DEFAULT empty state every dashboard widget renders
     // when its query SUCCEEDED and returned nothing. It replaced the terse
@@ -2641,6 +2651,7 @@ const ru = {
       unavailableTitle: "Ассистент ИИ недоступен",
       unavailableDescription: "В этой среде ассистент ИИ не включён. Всё остальное работает как обычно.",
       unavailableError: "Не удалось связаться с сервисом ИИ. Возможно, он временно недоступен — повторите попытку или вернитесь на главную.",
+      unavailableErrorDesktop: "Не удалось связаться с сервисом ИИ. Возможно, он временно недоступен — повторите попытку или вернитесь на стартовую страницу приложения.",
       unavailableRetry: "Повторить",
       unavailableHome: "На главную",
       dock: {
@@ -3893,21 +3904,18 @@ const ru = {
   },
   home: {
     build: {
-      title: "Создать приложение",
       noCapability: "Создание приложений недоступно в этой системе — для этого нужно разрешение «Управление метаданными», которого нет у вашей учётной записи.",
-      inStudio: "Создать в Studio",
+      inStudio: "Новое пустое приложение",
     },
     template: {
       title: "Начать с шаблона",
       marketplaceDisabled: "Для этого рантайма не настроен маркетплейс приложений, поэтому здесь нет шаблонов для установки.",
     },
-    welcomeAdminDescription: "Опишите свой бизнес одним предложением — ИИ создаст объекты, экраны, API и инструменты агента. Либо настройте всё сами через меню слева.",
     welcomeAdminDescriptionNoBuild: "Настройте первое приложение через меню «Администрирование» слева. Когда появятся данные, ИИ-ассистент поможет их изучить.",
     welcomeAdminDescriptionNoAi: "Настройте первое приложение через меню «Администрирование» слева.",
     noAppsTitle: "Приложений пока нет",
     noAppsDescription: "Система настраивается — приложения, которыми поделится администратор, появятся здесь.",
     noAppsAddDescription: "Создайте первое приложение или начните с шаблона или магазина приложений.",
-    buildWithAI: "Создать с помощью ИИ",
     askAI: "Спросить ИИ",
     recoveryReminder: {
       message: "Задайте резервный пароль, чтобы входить в систему даже когда единый вход недоступен.",
@@ -4323,6 +4331,8 @@ const ru = {
       settings: "Настройки отчёта",
       pendingDraft: "В этом отчёте есть неопубликованные изменения. Опубликуйте или отмените их выше, затем сохраните.",
       nameTaken: "Все идентификаторы, полученные из этого имени, уже заняты. Дайте отчёту другое имя и сохраните.",
+      // objectstack#36906 — a report made from Studio's report list that could not be saved in the app's package.
+      savedOutsideApp: "Этот отчёт сохранён вне пакета приложения, потому что пакет настроек приложения здесь использовать нельзя, поэтому список Studio его не показывает.",
       adminOnlyTitle: "Создавать отчёты могут только администраторы рабочего пространства",
       adminOnly: "Отчёт виден всем в рабочем пространстве, поэтому его создаёт администратор.",
       designModeOnTitle: "Сначала завершите дизайн макета",
@@ -4878,6 +4888,7 @@ const ru = {
     tool: {
       aggregate_data: "Агрегировать данные",
       get_record: "Прочитать запись",
+      get_record_context: "Прочитать сведения о записи",
       list_datasets: "Посмотреть доступные метрики",
       query_data: "Запросить нужные данные",
       query_dataset: "Запросить данные по метрике",
@@ -5388,7 +5399,12 @@ const ru = {
     bulkRejected_few: 'Отклонено запросов: {{count}}',
     bulkRejected_many: 'Отклонено запросов: {{count}}',
     bulkRejected_other: 'Отклонено запросов: {{count}}',
-    bulkPartial: 'Успешно: {{ok}}, с ошибкой: {{fail}}: {{which}}',
+    bulkPartialSummary: 'Успешно: {{ok}}, с ошибкой: {{fail}}',
+    bulkFailureLine: '{{title}}: {{reason}}',
+    bulkFailuresShowAll: 'Показать все ({{n}})',
+    bulkFailuresTitle: 'Не обработано: {{n}}',
+    bulkFailuresBody: 'Эти запросы остались без изменений. Для каждого указана причина.',
+    close: 'Закрыть',
     rejectOneTitle: 'Отклонить «{{title}}»?',
     rejectOneBody: 'Запрос будет отклонён, заявитель получит уведомление.',
     rejectTitle: 'Отклонить этот запрос?',

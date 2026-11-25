@@ -1966,17 +1966,29 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
   // [ADR-0160 D1] Context packs that name an object or field the stack does not
   // define, a related list with no link to the root, or a body that is not
   // long text. Advisory: the tool reads what resolves and states nothing about
-  // the rest, so the author hears it here. CLI-only — every verdict reads the
-  // stack's `objects` beside its `aiContexts`.
+  // the rest, so the author hears it here.
+  //
+  // [ADR-0160 D1] "Reported at save and by `os validate`": on the runtime
+  // publish door for `ai_context`, the door a Studio / REST `/meta` / MCP
+  // author of a pack has. The rule reads `aiContexts` and `objects` and no
+  // other collection; `objects` is the context every per-write snapshot
+  // carries, and the written pack is the sole member of its own collection.
+  // Under a stated package scope that `objects` is the write's closure, not
+  // every installed object, so the scope is passed through and an object
+  // outside it is worded for the closure with `closureDependencyRemedy`, as
+  // every save-door rule judging an object name under a scope does. The
+  // findings ride the 2xx `advisories`; with no scope they carry the rule ids
+  // and messages `os validate` prints. The save is never refused for them, as
+  // for every advisory rule on this door.
   {
     name: 'validateAiContext',
     tier: 'advisory',
     input: 'parsed',
     commands: ALL,
     source: 'packages/lint/src/validate-ai-context.ts',
-    surfaces: CLI_ONLY,
-    surfaceReason: RUNTIME_NEEDS_FULL_SNAPSHOT,
-    run: (stack) => validateAiContext(stack),
+    surfaces: CLI_AND_RUNTIME,
+    runtimeTypes: ['ai_context'],
+    run: (stack, ctx) => validateAiContext(stack, ctx.packageScope ? { packageScope: ctx.packageScope } : {}),
   },
   // [#34613] `validateSeedReplaySafety` (framework#3434, the `insert`-mode
   // replay warning) is retired: `SeedMode` itself refuses `insert` and

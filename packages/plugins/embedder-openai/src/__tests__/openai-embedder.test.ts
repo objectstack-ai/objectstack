@@ -29,6 +29,16 @@ describe('OpenAIEmbedder', () => {
     expect(e.dimensions).toBe(1536);
   });
 
+  it('reports the model it sends as IEmbedder.model, for the knowledge index fingerprint (ADR-0161 K8, item 7)', async () => {
+    const fetchImpl = mockFetch({ data: [{ index: 0, embedding: [0.1, 0.2] }] });
+    expect(new OpenAIEmbedder({ apiKey: 'k', fetch: fetchImpl }).model).toBe('text-embedding-3-small');
+    const e = new OpenAIEmbedder({ apiKey: 'k', model: 'BAAI/bge-m3', fetch: fetchImpl });
+    expect(e.model).toBe('BAAI/bge-m3');
+    await e.embed(['x']);
+    const sent = JSON.parse(String((fetchImpl as unknown as ReturnType<typeof vi.fn>).mock.calls[0][1].body));
+    expect(sent.model).toBe(e.model);
+  });
+
   it('looks up dimensions for known Chinese models', () => {
     const e = new OpenAIEmbedder({
       apiKey: 'k',
@@ -311,6 +321,19 @@ describe('OpenAIEmbedder input limit (refused, not truncated)', () => {
     const e = new OpenAIEmbedder({ apiKey: 'k', maxInputTokens: 10, fetch: f as unknown as typeof fetch });
     await expect(e.embed([cjk(7)])).rejects.toThrow(/estimated at 12 tokens, over the 10-token input limit/);
     expect(f).not.toHaveBeenCalled();
+  });
+
+  it('reports its input limit as IEmbedder.maxInputTokens: the option, else the known-model table, else none', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      expect(new OpenAIEmbedder({ apiKey: 'k' }).maxInputTokens).toBe(8192);
+      expect(new OpenAIEmbedder({ apiKey: 'k', model: 'text-embedding-v2' }).maxInputTokens).toBe(2048);
+      expect(new OpenAIEmbedder({ apiKey: 'k', model: 'BAAI/bge-large-zh-v1.5' }).maxInputTokens).toBe(512);
+      expect(new OpenAIEmbedder({ apiKey: 'k', maxInputTokens: 10 }).maxInputTokens).toBe(10);
+      expect(new OpenAIEmbedder({ apiKey: 'k', model: 'my-gateway-model', maxBatchSize: 5 }).maxInputTokens).toBeUndefined();
+    } finally {
+      warn.mockRestore();
+    }
   });
 
   it('refuses a maxInputTokens that is not a positive integer', () => {

@@ -119,6 +119,7 @@ function GlobalActionRuntimeProvider({ dataSource, children }: { dataSource: unk
       onNavigate={runtime.actionProviderProps.onNavigate}
       onParamCollection={runtime.actionProviderProps.onParamCollection}
       onResultDialog={runtime.actionProviderProps.onResultDialog}
+      onAskAi={runtime.actionProviderProps.onAskAi}
       onModal={modalHandler}
       handlers={{
         api: runtime.apiHandler,

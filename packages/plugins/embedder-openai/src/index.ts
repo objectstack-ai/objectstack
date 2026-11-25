@@ -237,14 +237,27 @@ const KNOWN_DIMENSIONS: Record<string, number> = {
 export class OpenAIEmbedder implements IEmbedder {
   readonly id: string;
   readonly dimensions: number;
-  private readonly model: string;
+  /**
+   * `IEmbedder.model`: the model this embedder sends in every request, as the
+   * provider names it (the `model` option, else `text-embedding-3-small`). A
+   * knowledge adapter reports it to the knowledge service, whose index
+   * fingerprint reads it (ADR-0161 K7; K8, item 7).
+   */
+  readonly model: string;
   private readonly baseUrl: string;
   private readonly apiKey: string;
   private readonly fetchImpl: typeof fetch;
   private readonly requestedDims?: number;
   private readonly extraHeaders: Record<string, string>;
   private readonly maxBatchSize: number;
-  private readonly maxInputTokens: number | undefined;
+  /**
+   * `IEmbedder.maxInputTokens`: the longest input this embedder sends, in
+   * tokens by the shared `estimateTokens` — the `maxInputTokens` option, else
+   * the model's documented limit from the known-model table, else absent (no
+   * limit known). A knowledge adapter reports it to the knowledge service,
+   * whose splitter keeps every passage within it (ADR-0161 K8, item 6).
+   */
+  readonly maxInputTokens?: number;
 
   constructor(opts: OpenAIEmbedderOptions) {
     if (!opts.apiKey) throw new Error('OpenAIEmbedder: apiKey required');

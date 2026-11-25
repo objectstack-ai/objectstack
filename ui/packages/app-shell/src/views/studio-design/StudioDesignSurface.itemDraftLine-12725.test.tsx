@@ -162,17 +162,18 @@ const COPILOT_DRAFTS = [
   { type: 'view', name: `${OBJECT.name}.board`, label: 'Board', packageId: PACKAGE_ID, updatedAt: null, updatedBy: 'u1' },
 ];
 
-/** Open the Data pillar on the Task object, with an empty ledger. */
+/** Open the object designer on the Task object, with an empty ledger. */
 async function openTask() {
   render(
-    <MemoryRouter initialEntries={[`/studio/${PACKAGE_ID}/data`]}>
+    <MemoryRouter initialEntries={[`/studio/${PACKAGE_ID}/metadata/object/acme_task`]}>
       <Routes>
+        <Route path="/studio/:packageId/metadata/*" element={<StudioDesignSurface area="metadata" />} />
         <Route path="/studio/:packageId/:tab" element={<StudioDesignSurface />} />
       </Routes>
     </MemoryRouter>,
   );
-  fireEvent.click(await screen.findByRole('button', { name: /Task/ }, SLOW));
-  await waitFor(() => expect(within(header()).getByText('Task')).toBeInTheDocument(), SLOW);
+  // objectstack#36904 — the object designer opens on the object's address.
+  await waitFor(() => expect(within(header()).getAllByText('Task')[0]).toBeInTheDocument(), SLOW);
   expect(headerStatus()).toBeNull();
   expect(screen.queryByTestId('studio-changes-count')).toBeNull();
 }
@@ -246,13 +247,13 @@ describe('the item header\'s draft line after the copilot\'s undo, the object op
     server.objectDraft = { ...OBJECT, description: 'copilot draft' };
     server.drafts = COPILOT_DRAFTS;
     render(
-      <MemoryRouter initialEntries={[`/studio/${PACKAGE_ID}/data`]}>
+      <MemoryRouter initialEntries={[`/studio/${PACKAGE_ID}/metadata/object/acme_task`]}>
         <Routes>
+          <Route path="/studio/:packageId/metadata/*" element={<StudioDesignSurface area="metadata" />} />
           <Route path="/studio/:packageId/:tab" element={<StudioDesignSurface />} />
         </Routes>
       </MemoryRouter>,
     );
-    fireEvent.click(await screen.findByRole('button', { name: /Task/ }, SLOW));
     await waitFor(() => expect(headerStatus()).toHaveTextContent(draftLine(2)), SLOW);
     const before = objectDraftReads();
     expect(before).toBeGreaterThan(0);

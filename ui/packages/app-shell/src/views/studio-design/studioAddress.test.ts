@@ -10,8 +10,12 @@
  */
 
 import { describe, expect, it } from 'vitest';
+import { RESERVED_URL_PARAMS } from '../../urlParams.js';
 import {
   STUDIO_ITEM_PILLAR,
+  STUDIO_RETURN_PARAM,
+  readStudioReturn,
+  withStudioReturn,
   studioChangesReviewPath,
   studioHomePath,
   studioItemPath,
@@ -42,7 +46,7 @@ import {
   DESIGNER_SURFACE_VIEW_PARAM,
 } from './useSurfaceDeepLink.js';
 import { STUDIO_CHANGES_PARAM, STUDIO_CHANGES_REVIEW } from './studioChangesLink.js';
-import { STUDIO_NEW_PACKAGE_PATH } from './studioNewPackage.js';
+import { STUDIO_NEW_PACKAGE_VALUE, STUDIO_NEW_PARAM } from './studioNewPackage.js';
 import { retiredInterfacesTarget } from './studioInterfacesRetired.js';
 import { studioOrgScopePath } from './studioScope.js';
 import { AREA_PILLAR_FOR_TYPE, areaItemPillarPath, studioMetadataItemPath, studioPillarItemPath } from './metadataArea.js';
@@ -78,7 +82,8 @@ describe('studioPath — the one path builder (objectstack#36895)', () => {
 describe("today's addresses, byte for byte", () => {
   it('landing, package, pillar, home', () => {
     expect(studioLandingPath()).toBe('/studio');
-    expect(STUDIO_NEW_PACKAGE_PATH).toBe('/studio?new=package');
+    // objectstack#36908 — the retired new-package bookmark Studio's entry forwards.
+    expect(studioLandingPath({ query: `${STUDIO_NEW_PARAM}=${STUDIO_NEW_PACKAGE_VALUE}` })).toBe('/studio?new=package');
     expect(studioPackagePath('com.acme.crm')).toBe('/studio/com.acme.crm');
     expect(studioPillarPath('com.acme.crm', 'automations')).toBe('/studio/com.acme.crm/automations');
     expect(studioHomePath('com.acme.crm')).toBe('/studio/com.acme.crm/data');
@@ -98,17 +103,16 @@ describe("today's addresses, byte for byte", () => {
   });
 
   it('an item opens its pillar today when the table names one, else its "All metadata" page', () => {
-    expect(studioItemPath('crm', 'object', 'account')).toBe('/studio/crm/data?surface=object%3Aaccount');
-    expect(studioItemPath('crm', 'flow', 'notify')).toBe('/studio/crm/automations?surface=flow%3Anotify');
+    // objectstack#36904, objectstack#36903 — an object and a flow open their designer on their metadata address.
+    expect(studioItemPath('crm', 'object', 'account')).toBe('/studio/crm/metadata/object/account');
+    expect(studioItemPath('crm', 'flow', 'notify')).toBe('/studio/crm/metadata/flow/notify');
     // objectstack#36905 — a permission set opens its metadata address.
     expect(studioItemPath('crm', 'permission', 'admin')).toBe('/studio/crm/metadata/permission/admin');
     expect(studioItemPath('crm', 'dashboard', 'sales')).toBe('/studio/crm/metadata/dashboard/sales');
     expect(studioItemPath('crm', 'action', 'approve')).toBe('/studio/crm/metadata/action/approve');
-    // The app → Studio bridge's spelling.
-    expect(studioItemPath('crm', 'object', 'account', { spelling: 'name' })).toBe('/studio/crm/data?surface=object:account');
-    // The switched-off action's spelling.
-    expect(studioItemPath('crm', 'object', 'account', { spelling: 'form', qualifiers: { action: 'approve' } })).toBe(
-      '/studio/crm/data?surface=object%3Aaccount&action=approve',
+    // On the metadata address a qualifier is its query (the switched-off action's `?action=`).
+    expect(studioItemPath('crm', 'object', 'account', { qualifiers: { action: 'approve' } })).toBe(
+      '/studio/crm/metadata/object/account?action=approve',
     );
     // A name that is an Object.prototype member is not a pillar type.
     expect(studioItemPath('crm', 'constructor', 'x')).toBe('/studio/crm/metadata/constructor/x');
@@ -141,15 +145,17 @@ describe("today's addresses, byte for byte", () => {
   });
 
   it('the repointed module builders keep their addresses', () => {
-    expect(studioOrgScopePath()).toBe('/studio/~org/automations');
-    expect(studioOrgScopePath({ type: 'flow', name: 'a:b' })).toBe('/studio/~org/automations?surface=flow%3Aa%3Ab');
+    // objectstack#36903 — the package-less scope's flows, on its leg of the area.
+    expect(studioOrgScopePath()).toBe('/studio/~org/metadata/flow?source=runtime');
+    expect(studioOrgScopePath({ type: 'flow', name: 'a:b' })).toBe('/studio/~org/metadata/flow/a%3Ab?source=runtime');
     expect(studioPillarItemPath('crm', 'access', { type: 'permission', name: 'p' })).toBe('/studio/crm/access?surface=permission%3Ap');
     expect(studioMetadataItemPath('crm', { type: 'object', name: 'account' })).toBe('/studio/crm/metadata/object/account');
+    // objectstack#36903 — the flow was the last pillar type: no item opens a pillar.
     expect(
-      areaItemPillarPath({ packageId: 'crm', type: 'object', name: 'account', search: new URLSearchParams() }),
-    ).toBe('/studio/crm/data?surface=object%3Aaccount');
+      areaItemPillarPath({ packageId: 'crm', type: 'flow', name: 'notify', search: new URLSearchParams() }),
+    ).toBeNull();
     expect(
-      areaItemPillarPath({ packageId: 'crm', type: 'object', name: 'account', search: new URLSearchParams('review=1') }),
+      areaItemPillarPath({ packageId: 'crm', type: 'flow', name: 'notify', search: new URLSearchParams('review=1') }),
     ).toBeNull();
   });
 });
@@ -234,5 +240,47 @@ describe('the mapping table agrees with the code (objectstack#36895)', () => {
     expect(STUDIO_RETIRED_INTERFACES_KEPT_PARAMS).toEqual([STUDIO_CHANGES_PARAM]);
     expect(retiredInterfacesTarget('crm', '?surface=page%3Ahome&changes=review&nav=n1')).toBe('/studio/crm/data?changes=review');
     expect(retiredInterfacesTarget('crm', '?surface=page%3Ahome')).toBe('/studio/crm/data');
+  });
+});
+
+describe('the "came from Studio" param (objectstack#36906, decision 15)', () => {
+  it('carries a Studio list address on an app path, keeping its own query and fragment', () => {
+    expect(STUDIO_RETURN_PARAM).toBe('studio');
+    const list = '/studio/crm/metadata/dashboard?q=ops&sort=-changed';
+    expect(withStudioReturn('/apps/crm/dashboard/ops_board', list)).toBe(
+      '/apps/crm/dashboard/ops_board?studio=%2Fstudio%2Fcrm%2Fmetadata%2Fdashboard%3Fq%3Dops%26sort%3D-changed',
+    );
+    expect(withStudioReturn('/apps/crm/report/r1?x=1#top', '/studio/crm/metadata/report')).toBe(
+      '/apps/crm/report/r1?x=1&studio=%2Fstudio%2Fcrm%2Fmetadata%2Freport#top',
+    );
+  });
+
+  it('reads back exactly what it carried', () => {
+    const list = '/studio/crm/metadata/dashboard?q=a%20b&package=crm';
+    const path = withStudioReturn('/apps/crm/dashboard/d', list);
+    expect(readStudioReturn(path.slice(path.indexOf('?')))).toBe(list);
+    expect(readStudioReturn(new URLSearchParams({ studio: '/studio' }))).toBe('/studio');
+  });
+
+  it('refuses anything that is not a Studio address on this origin, both ways', () => {
+    for (const value of [
+      'https://evil.example/studio/crm',
+      '//evil.example/studio',
+      '/studiox/crm',
+      '/apps/crm',
+      'studio/crm',
+      '/studio\\..\\apps',
+      'javascript:alert(1)',
+      '',
+    ]) {
+      expect(readStudioReturn(new URLSearchParams({ studio: value }))).toBeNull();
+      expect(withStudioReturn('/apps/crm/dashboard/d', value)).toBe('/apps/crm/dashboard/d');
+    }
+    expect(readStudioReturn('')).toBeNull();
+    expect(readStudioReturn('?other=1')).toBeNull();
+  });
+
+  it('is one of the console reserved URL params', () => {
+    expect(RESERVED_URL_PARAMS).toContain(STUDIO_RETURN_PARAM);
   });
 });

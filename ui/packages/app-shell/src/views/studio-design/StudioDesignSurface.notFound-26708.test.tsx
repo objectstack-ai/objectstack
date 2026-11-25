@@ -6,8 +6,10 @@
  * `/studio/<id>` for an id the package list does not hold rendered the full
  * writable builder (New object, Create app, Publish) for a package that does
  * not exist, and every save there went to a phantom package. It now renders
- * "package not found", with no menu and no package actions, and a way back
- * to the Studio landing. And `/studio/<pkg>/<segment>` for a segment no pillar
+ * "package not found", with no menu and no package actions, and a way out
+ * to Setup → Packages, the package list, or to the "All metadata" area for a
+ * principal who may not open that Setup page (objectstack#36908: the Studio
+ * home it used to walk back to was removed). And `/studio/<pkg>/<segment>` for a segment no pillar
  * has fell through to the Interfaces pillar with nothing highlighted; it now
  * renders a not-found state, the left menu (objectstack#36899, which replaced
  * the pillars above it) still beside it, nothing in it current. (The
@@ -29,7 +31,7 @@ import '@object-ui/plugin-detail';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import * as React from 'react';
-import { MemoryRouter, Route, Routes } from 'react-router-dom';
+import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
 
 const PACKAGE_ID = 'app.r34d';
 const KERNEL_ID = 'com.objectstack.platform';
@@ -79,7 +81,12 @@ vi.mock('./StudioAiCopilot', () => ({ StudioChatDock: () => <div data-testid="st
 vi.mock('../../preview/DraftChangesPanel', () => ({ DraftChangesPanel: () => null }));
 
 import { StudioDesignSurface } from './StudioDesignSurface';
+import { StudioEntryPermissionsProvider } from './studioEntryPermissions';
 import { t, tFormat } from '../metadata-admin/i18n';
+// The source under test reaches these dynamic imports (the command palette's
+// record preview, the drafts panel's lint, the code editor): their first load
+// is paid here, at collection, never inside a case's clock (`check:test-source-alias`).
+import '@object-ui/plugin-detail';
 
 const answer = (body: unknown) => ({ headers: new Headers(), ok: true, status: 200, json: async () => body });
 
@@ -102,14 +109,43 @@ function servePackages(opts: { fail?: boolean } = {}) {
   return fetchMock;
 }
 
-function renderAt(path: string, surface: React.ReactElement = <StudioDesignSurface />) {
+/** Setup → Packages, with the query it was opened with. */
+function SetupPackages() {
+  const { search } = useLocation();
+  return <div data-testid="setup-packages">{search}</div>;
+}
+
+/** The "All metadata" area across packages. */
+function AllMetadata() {
+  return <div data-testid="all-metadata" />;
+}
+
+/** Holds the two capabilities Setup → Packages is shown under. */
+const ADMIN = ['studio.access', 'setup.access', 'manage_platform_settings', 'manage_metadata'];
+/** May enter Studio and author metadata; holds neither capability Setup → Packages is shown under. */
+const STUDIO_ONLY = ['studio.access', 'manage_metadata'];
+
+/**
+ * The surface under the capability set Studio's entry gate read, as the
+ * console's `RequireStudioAccess` provides it.
+ */
+function renderAt(
+  path: string,
+  surface: React.ReactElement = <StudioDesignSurface />,
+  systemPermissions: readonly string[] = ADMIN,
+) {
   render(
-    <MemoryRouter initialEntries={[path]}>
-      <Routes>
-        <Route path="/studio" element={<div data-testid="studio-landing" />} />
-        <Route path="/studio/:packageId/:tab" element={surface} />
-      </Routes>
-    </MemoryRouter>,
+    <StudioEntryPermissionsProvider value={systemPermissions}>
+      <MemoryRouter initialEntries={[path]}>
+        <Routes>
+          <Route path="/apps/setup/component/developer/packages" element={<SetupPackages />} />
+          <Route path="/studio/~all/metadata" element={<AllMetadata />} />
+          {/* objectstack#36904, objectstack#36903 — `/data` and `/automations` land on the area's object and flow lists. */}
+          <Route path="/studio/:packageId/metadata/*" element={React.cloneElement(surface as React.ReactElement<{ area?: 'metadata' }>, { area: 'metadata' })} />
+          <Route path="/studio/:packageId/:tab" element={surface} />
+        </Routes>
+      </MemoryRouter>
+    </StudioEntryPermissionsProvider>,
   );
 }
 
@@ -167,12 +203,22 @@ describe('Studio: a package id no package has renders "package not found" (objec
     expect(packageListReads(fetchMock)).toBe(1);
   });
 
-  it('its one action walks back to the Studio landing', async () => {
+  it('CONTROL — for an administrator, its one action opens Setup → Packages, on its administration face', async () => {
     servePackages();
     renderAt(`/studio/${PHANTOM}/data`);
     const notFound = await screen.findByTestId('studio-package-not-found');
-    within(notFound).getByRole('button', { name: t('engine.studio.landingHome', 'en') }).click();
-    expect(await screen.findByTestId('studio-landing')).toBeInTheDocument();
+    within(notFound).getByRole('button', { name: t('engine.studio.notFound.packageList', 'en') }).click();
+    expect(await screen.findByTestId('setup-packages')).toHaveTextContent('?face=admin');
+  });
+
+  it('for a principal who may enter Studio but not Setup → Packages, it opens the "All metadata" area, never Setup (objectstack#36908)', async () => {
+    servePackages();
+    renderAt(`/studio/${PHANTOM}/data`, <StudioDesignSurface />, STUDIO_ONLY);
+    const notFound = await screen.findByTestId('studio-package-not-found');
+    expect(within(notFound).queryByRole('button', { name: t('engine.studio.notFound.packageList', 'en') })).toBeNull();
+    within(notFound).getByRole('button', { name: t('engine.studio.notFound.allMetadata', 'en') }).click();
+    expect(await screen.findByTestId('all-metadata')).toBeInTheDocument();
+    expect(screen.queryByTestId('setup-packages')).toBeNull();
   });
 
   it('CONTROL — a listed package renders its builder', async () => {
@@ -180,9 +226,13 @@ describe('Studio: a package id no package has renders "package not found" (objec
     renderAt(`/studio/${PACKAGE_ID}/data`);
     await listAnswered(fetchMock);
     expect(screen.queryByTestId('studio-package-not-found')).toBeNull();
-    // objectstack#36899 — the left menu, its six groups drawn.
-    for (const group of ['data', 'ui', 'automation', 'system', 'security', 'ai']) {
+    // objectstack#36899 — the left menu drawn. objectstack#37201 — the 常用 groups of the served
+    // types (object, flow, permission), and the 「高级」 fold holding the four entries that are not a type.
+    for (const group of ['data', 'automation', 'security']) {
       expect(within(menu()).getByTestId(`studio-menu-group-${group}`)).toBeInTheDocument();
+    }
+    for (const group of ['automation', 'system', 'security']) {
+      expect(within(menu()).getByTestId(`studio-menu-advanced-group-${group}`)).toBeInTheDocument();
     }
   });
 

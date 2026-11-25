@@ -20,7 +20,7 @@
 
 import '@testing-library/jest-dom/vitest';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 
 const objectDef = {
@@ -65,6 +65,7 @@ vi.mock('@object-ui/react', async (importOriginal) => {
 });
 
 import '@objectstack/lint';
+import '@object-ui/plugin-detail';
 import { DataPillar } from './StudioDesignSurface';
 import { createEmptyDataSource, failOnAbsorbedFetchError } from './__tests__/emptyDataSource';
 import { t, tFormat } from '../metadata-admin/i18n';
@@ -98,7 +99,7 @@ function serveDraft(draftChanges?: unknown[]) {
 function renderPillar(props: Partial<React.ComponentProps<typeof DataPillar>> = {}) {
   return render(
     <MemoryRouter initialEntries={['/studio/com.example.showcase/data']}>
-      <DataPillar packageId="com.example.showcase" {...props} />
+      <DataPillar objectName="showcase_task" packageId="com.example.showcase" {...props} />
     </MemoryRouter>,
   );
 }
@@ -171,8 +172,17 @@ describe('the AI assistant’s drafts on the Data canvas (objectstack#34725)', (
     const original = window.confirm;
     window.confirm = vi.fn(() => true);
     renderPillar();
-    fireEvent.click(await screen.findByTestId('studio-copilot-changes-discard'));
-    const message = await screen.findByTestId('studio-refusal-message');
+    const discard = await screen.findByTestId('studio-copilot-changes-discard');
+    const reads = mockClient.getDraft.mock.calls.length;
+    fireEvent.click(discard);
+    // objectstack#36904 — the discard re-reads the object, and a load clears the
+    // pillar's error as it starts: the refusal must outlive that read, not
+    // flash for one render before it.
+    await waitFor(() => expect(mockClient.getDraft.mock.calls.length).toBeGreaterThan(reads));
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 200));
+    });
+    const message = screen.getByTestId('studio-refusal-message');
     expect(message).toHaveTextContent(
       tFormat('engine.studio.copilotChanges.discardFailed', 'en-US', {
         items: ['Task', 'showcase_task_grid'].join(L('engine.studio.copilotChanges.itemSeparator')),

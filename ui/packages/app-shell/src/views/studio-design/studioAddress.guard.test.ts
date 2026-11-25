@@ -52,7 +52,7 @@ const ALLOWED = new Set([
 ]);
 
 /** The root's names, as a composed path would start from them. */
-const ROOT_NAMES = new Set(['STUDIO_ROOT_PATH', 'STUDIO_LANDING_PATH']);
+const ROOT_NAMES = new Set(['STUDIO_ROOT_PATH']);
 
 const SKIP_DIRS = new Set(['node_modules', 'dist', 'build', 'coverage', '.turbo', '__tests__', '__mocks__']);
 
@@ -132,14 +132,13 @@ function handBuiltStudioAddresses(fileName: string, text: string): string[] {
  * all but a few files hold none, so only the files that pass are parsed.
  *
  * It is a superset of the matcher by construction. The matcher flags three
- * node shapes, and each one needs a token whose COOKED text is one of three
+ * node shapes, and each one needs a token whose COOKED text is one of two
  * words:
  *
  *  - a string or template literal (or a template head) whose text starts with
  *    `/studio`;
- *  - a template whose first span is the identifier `STUDIO_ROOT_PATH` or
- *    `STUDIO_LANDING_PATH`;
- *  - `+` with one of those identifiers on its left.
+ *  - a template whose first span is the identifier `STUDIO_ROOT_PATH`;
+ *  - `+` with that identifier on its left.
  *
  * A JSX attribute string is not cooked (`&#47;` stays `&#47;`), so its raw text
  * is its text. A JS string or template is cooked, and its raw text can spell
@@ -200,9 +199,7 @@ const FLAGGED_SPELLINGS = [
   "const a4 = '\\57\\163tudio';",
   "const a5 = '/stu\\\ndio';",
   'const b1 = `\\x2fstudio/${pkg}`;',
-  'const e1 = `${STUDIO_LANDING_PATH}/${pkg}`;',
   'const e2 = `${STUDIO\\u005FROOT_PATH}/${pkg}`;',
-  "const f1 = STUDIO_LANDING_PATH + '/' + pkg;",
   "const f2 = STUDIO_\\u{52}OOT_PATH + '/' + pkg;",
 ];
 

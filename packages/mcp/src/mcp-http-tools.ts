@@ -4977,6 +4977,10 @@ export function registerActionTools(
         'you are answered status "pending_confirmation" with a pendingId: do not retry, tell the user to approve ' +
         'it. A refusal ACTION_CONFIRMATION_REQUIRED (declined, cancelled, timed out, or no confirmation service) ' +
         'means nothing ran; do not retry unless the user asks. ' +
+        // [#35778] The no-service reason's next step, door-neutral: true
+        // whether or not the client could have confirmed in place.
+        'On details.reason "no_confirmation_service" a person performs it in the app: do not make the same change ' +
+        'with another tool. ' +
         // [ADR-0151 D3 rule 3] An AI service account is refused, never handed off.
         'Under an AI service account\'s own key the call is refused whatever it sends: hand the action to a ' +
         'person, or its author declares ai.requiresConfirmation: false when it is safe unattended. ' +

@@ -4039,6 +4039,24 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
   const invalidationNonce = useDataInvalidation(listFetchesForItself ? schema.objectName || undefined : undefined, undefined, ownWrites);
 
   /**
+   * objectstack#36871 — a board this component hands its window to (the lanes
+   * are not known before the query: a lookup lane field, or swimlanes) is
+   * handed the QUERY of that window too: the node's `filter` is the effective
+   * filter (`selfQueryFilter`) and `laneStatisticQuery` carries the toolbar
+   * search pair and the refetch signal. The board asks its lane statistic
+   * (`kanban.summary`: `sum`, `avg`, `min`, `max`) over every record of each
+   * lane with them, as a board that pages its own lanes does, never adding up
+   * the one page it was handed. Only where THIS component fetches: rows
+   * handed in whole stay whole, and the board adds those up itself.
+   */
+  const kanbanLaneStatisticHosted =
+    currentView === 'kanban' &&
+    !kanbanLanesPaged &&
+    listFetchesForItself &&
+    !!schema.objectName &&
+    typeof dataSource?.find === 'function';
+
+  /**
    * The calendar's date bindings, for the fetch effect's window
    * (objectui#12081): the same two reads the calendar branch below makes for
    * the node it hands the calendar, so the window is on the field the calendar
@@ -5354,7 +5372,7 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
    */
   const selfQueryFilterRef = React.useRef<{ key: string; value: unknown } | null>(null);
   let selfQueryFilter: unknown = authoredFilter;
-  if (currentView === 'gantt' || currentView === 'tree' || currentView === 'chart' || currentView === 'timesheet' || gridOwnsGroupedFetch || kanbanLanesPaged) {
+  if (currentView === 'gantt' || currentView === 'tree' || currentView === 'chart' || currentView === 'timesheet' || gridOwnsGroupedFetch || kanbanLanesPaged || kanbanLaneStatisticHosted) {
     try {
       const value = buildEffectiveFilter(authoredFilter, appliedFilters, appliedUserFilterConditions, appliedQueueSittingConditions, queryDropFields);
       const key = JSON.stringify(value ?? null);
@@ -5613,6 +5631,10 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
           // (`selfQueryFilter`): the toolbar Filter and the chips reach its
           // lanes only here. See `kanbanLanesPaged`.
           ...(kanbanLanesPaged ? { filter: selfQueryFilter } : {}),
+          // objectstack#36871 — the board handed this component's window asks
+          // its lane statistic under the same effective filter that window was
+          // fetched with. See `kanbanLaneStatisticHosted`.
+          ...(kanbanLaneStatisticHosted ? { filter: selfQueryFilter } : {}),
         };
       }
       case 'calendar': {
@@ -6062,7 +6084,7 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
   // asynchronously (`/me/permissions`) and `objectDef` loads into state, so a
   // grid schema built before either resolved must be rebuilt when they do —
   // otherwise `editable` keeps the pre-verdict answer for the session.
-  }, [currentView, schema, authoredFilter, serverSort, searchFieldsSent, effectiveFields, hasAuthoredColumns, groupingConfig, rowColorConfig, navigation.handleClick, hostRoutesRowClicks, density.mode, galleryCardSize, inlineEditOffered, objectDef, selfQueryFilter, ganttSearchTerm, gridOwnsGroupedFetch, calendarWindowed, handleCalendarVisibleRange, kanbanLanesPaged, compact, cappedWindow, onColumnSummaryPick, columnSummaryPickKey, recordCountLead]);
+  }, [currentView, schema, authoredFilter, serverSort, searchFieldsSent, effectiveFields, hasAuthoredColumns, groupingConfig, rowColorConfig, navigation.handleClick, hostRoutesRowClicks, density.mode, galleryCardSize, inlineEditOffered, objectDef, selfQueryFilter, ganttSearchTerm, gridOwnsGroupedFetch, calendarWindowed, handleCalendarVisibleRange, kanbanLanesPaged, kanbanLaneStatisticHosted, compact, cappedWindow, onColumnSummaryPick, columnSummaryPickKey, recordCountLead]);
 
   // The count the toolbar shows: a record-mode amount's code condition is
   // part of its amount row (objectstack#27188), not a filter of its own, and a
@@ -8713,6 +8735,23 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
                       ? { searchFields: searchFieldsSent }
                       : {}),
                     reloadKey: `${refreshKey}:${String(schema.refreshTrigger ?? '')}`,
+                  },
+                }
+              : {})}
+            {...(kanbanLaneStatisticHosted && viewComponentSchema.type === 'object-kanban'
+              // objectstack#36871 — the board is handed this component's
+              // window, and with it the query of that window, so its lane
+              // statistic covers every record of each lane, not the window:
+              // the toolbar term and this component's refetch signal (the
+              // Refresh button, a host's `refreshTrigger`, a declared write).
+              // Host props, never node keys. See `kanbanLaneStatisticHosted`.
+              ? {
+                  laneStatisticQuery: {
+                    search: searchTerm,
+                    ...(searchFieldsSent && searchFieldsSent.length > 0
+                      ? { searchFields: searchFieldsSent }
+                      : {}),
+                    reloadKey: `${refreshKey}:${String(schema.refreshTrigger ?? '')}:${invalidationNonce}`,
                   },
                 }
               : {})}

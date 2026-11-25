@@ -30,6 +30,9 @@
  * metadata cache is a hand-rolled `MetadataCtx` value that counts its reads.
  */
 
+// Paid at collection, not inside a case's clock (check:test-source-alias).
+import '@objectstack/lint';
+import '@object-ui/plugin-detail';
 import * as React from 'react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, fireEvent, waitFor, cleanup, screen } from '@testing-library/react';
@@ -203,7 +206,7 @@ describe('the palette in the `studio` scope lists the Studio, not an app (object
     mountStudio();
     await studioListed();
     pick('studio-object Account ');
-    await waitFor(() => expect(locationNow()).toBe('/studio/com.acme.crm/data?surface=object%3Acrm_account'));
+    await waitFor(() => expect(locationNow()).toBe('/studio/com.acme.crm/metadata/object/crm_account'));
   });
 
   it("opens a packaged flow in its package's Automations pillar, on that flow", async () => {
@@ -211,7 +214,7 @@ describe('the palette in the `studio` scope lists the Studio, not an app (object
     await studioListed();
     pick('studio-flow Onboard Account ');
     await waitFor(() =>
-      expect(locationNow()).toBe('/studio/com.acme.crm/automations?surface=flow%3Acrm_onboard'),
+      expect(locationNow()).toBe('/studio/com.acme.crm/metadata/flow/crm_onboard'),
     );
   });
 
@@ -219,7 +222,7 @@ describe('the palette in the `studio` scope lists the Studio, not an app (object
     mountStudio();
     await studioListed();
     pick('studio-flow Nightly Cleanup ');
-    await waitFor(() => expect(locationNow()).toBe('/studio/~org/automations?surface=flow%3Aorg_cleanup'));
+    await waitFor(() => expect(locationNow()).toBe('/studio/~org/metadata/flow/org_cleanup?source=runtime'));
   });
 
   it('matches an entry by its label or its machine name', async () => {

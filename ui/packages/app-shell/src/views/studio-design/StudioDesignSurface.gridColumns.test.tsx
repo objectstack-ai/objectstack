@@ -34,6 +34,9 @@
  * `columns` to work around this very defect — those tests stay as they are.
  */
 
+// Paid at collection, not inside a case's clock (check:test-source-alias).
+import '@objectstack/lint';
+import '@object-ui/plugin-detail';
 import '@testing-library/jest-dom/vitest';
 import * as React from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -138,7 +141,7 @@ function Harness(): React.ReactElement {
       <button type="button" data-testid="rerender" onClick={() => force((n) => n + 1)}>
         rerender
       </button>
-      <DataPillar packageId="com.example.showcase" />
+      <DataPillar objectName="showcase_task" packageId="com.example.showcase" />
     </MemoryRouter>
   );
 }

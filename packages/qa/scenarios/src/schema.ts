@@ -413,6 +413,16 @@ export const PersonaSchema = z
       fields: z.array(FieldRefSchema).optional(),
     }),
     /**
+     * The roll-ups (summary fields, `invoice.amount_paid`) the persona is meant
+     * to read although `hidden` withholds their source rows: a rep sees what an
+     * invoice has been paid, never the payments. The runner does not charge a
+     * `security-rollup-source-unreadable` finding on one of these the build
+     * ACKNOWLEDGED on the persona's set (`rollupSourceUnreadableReason`); an
+     * unacknowledged finding on it, and every roll-up not named here, is still
+     * charged (`rollupSourceCharges`). Absent: every such roll-up is charged.
+     */
+    allowedRollups: z.array(FieldRefSchema).min(1).optional(),
+    /**
      * ROW scope: of each named object the persona sees only the rows whose
      * `field` (a field or relation path) equals `value` — a rep sees their own
      * rows (`owner`), a manager their department's (`owner.department`). The
@@ -437,6 +447,12 @@ export const PersonaSchema = z
   .refine((p) => (p.hidden.objects?.length ?? 0) + (p.hidden.fields?.length ?? 0) > 0, {
     path: ['hidden'],
     message: 'a persona names at least one object or field it must NOT see',
+  })
+  .superRefine((p, ctx) => {
+    (p.allowedRollups ?? []).forEach((r, i) => {
+      const hidden = (p.hidden.objects ?? []).includes(r.object) || (p.hidden.fields ?? []).some((h) => h.object === r.object && h.field === r.field);
+      if (hidden) ctx.addIssue({ code: 'custom', path: ['allowedRollups', i], message: `\`${r.object}.${r.field}\` is in the persona's hidden: an allowed roll-up is one the persona reads` });
+    });
   });
 
 // ── Layer 5: run.operations + run.guardrails ────────────────────────────────

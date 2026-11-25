@@ -916,9 +916,11 @@ import { isEntrypoint } from './invoked-as.mjs';
  *     claims the shim (the comment on that group in `apps/console/vite.config.ts`
  *     says why the flag that would also have stopped the capture was refused);
  *     the shim's bytes are the `vendor-react` row.
- *   - THE STUDIO BUILDER (-33,928 alone). `StudioDesignSurface` and
- *     `BuilderLanding` load through the console-local `import()` in
- *     `apps/console/src/components/studioBuilder.ts`. Most of what `index` lost
+ *   - THE STUDIO BUILDER (-33,928 alone). `StudioDesignSurface` and the
+ *     Studio home of that day load through the console-local `import()` in
+ *     `apps/console/src/components/studioBuilder.ts` (the home was removed
+ *     with objectstack#36908; Studio's entry, `StudioEntryRedirect`, rides in
+ *     that chunk now). Most of what `index` lost
  *     is the builder; the `studioScope` row is NOT new payload but 49 modules
  *     `index` held on `455c6466` (the app header and the AI chat page among
  *     them), which the bundler split out because the lazy builder imports

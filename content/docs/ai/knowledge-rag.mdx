@@ -9,7 +9,7 @@ Part of the [AI module](/docs/ai) — how agents retrieve knowledge through the 
 ObjectStack ships a Knowledge Protocol that lets you retrieve from pluggable backends (RAGFlow, LlamaIndex, Dify, custom pgvector, …) with one call: `KnowledgeService.search(query, { sourceIds?, topK? })`. The framework defines the contract and runs permission-aware filtering; the adapter plugin does the actual retrieval. See [the protocol design](/docs/protocol/knowledge) for the rationale.
 
 <Callout type="info">
-**This whole stack is open.** The `@objectstack/service-knowledge` service, the adapter plugins (`@objectstack/knowledge-memory`, `@objectstack/knowledge-ragflow`), the `@objectstack/embedder-openai` embedder, and the permission-aware retrieval + event sync below all ship in the **open-source framework**. The workflow is: declare your knowledge sources, pick an adapter, and call `search` — retrieval respects the same row-level security as any ObjectQL query. Only the in-product chat *runtime* that consumes retrieval ships in ObjectOS; see the callout under [Retrieving knowledge](#retrieving-knowledge).
+**This whole stack is open.** The `@objectstack/service-knowledge` service, the adapter plugins (`@objectstack/knowledge-memory`, `@objectstack/knowledge-ragflow`, `@objectstack/knowledge-pgvector`), the `@objectstack/embedder-openai` embedder, and the permission-aware retrieval + event sync below all ship in the **open-source framework**. The workflow is: declare your knowledge sources, pick an adapter, and call `search` — retrieval respects the same row-level security as any ObjectQL query. Only the in-product chat *runtime* that consumes retrieval ships in ObjectOS; see the callout under [Retrieving knowledge](#retrieving-knowledge).
 </Callout>
 
 ## Wiring
@@ -48,7 +48,13 @@ kernel.use(new KnowledgeMemoryPlugin());
 Retrieval is a plain service call — no AI runtime required. Resolve the `knowledge`
 service and call `search`. Hits are re-checked against the caller's
 `ExecutionContext` (RLS), sorted by score, and capped at `topK` before they come
-back.
+back. Because the re-check runs after ranking, for a caller other than the
+system identity the service asks each object source for more hits than `topK`,
+and asks once more when too few records survive, so a caller who may read few of
+the matching records still gets up to `topK` hits
+([the protocol](/docs/protocol/knowledge) gives the factors and the cap). A
+hit's `title` is the value of the object's display field (`nameField`, else the
+derived title field).
 
 ```ts
 const knowledge = ctx.getService('knowledge');
@@ -58,8 +64,27 @@ const hits = await knowledge.search('proposals about ACME', {
   topK: 5,
   executionContext,  // the caller's context — retrieval drops any hit RLS would hide
 });
-// hits: KnowledgeHit[] — each { chunkId, documentId, sourceId, sourceRecordId?, score, snippet, title? }
+// hits: KnowledgeHit[] — each { chunkId, documentId, sourceId, sourceRecordId?, score, snippet, title?, docHash?, headingPath? }
 ```
+
+By default a hit is a passage, so one record with several matching passages
+can take several of the `topK` places. Pass `granularity: 'record'` to get one
+hit per record (its best passage), or `groupBy: '<metadata field>'` to get one
+hit per value of that field — "which policies", not "which clauses":
+
+```ts
+const policies = await knowledge.search('parental leave', {
+  groupBy: 'policy',   // a field the source lists in metadataFields; implies granularity: 'record'
+  topK: 5,             // counts groups, not passages
+  executionContext,
+});
+```
+
+A record-level hit is checked against its record as it reads now: a record
+deleted, out of the source's `where`, or changed since it was indexed is not
+returned (its index entry is repaired in the background, unless the source
+sets `refresh.onRecordChange: false` for an external indexer). The rules are in
+[the protocol](/docs/protocol/knowledge#records-not-passages).
 
 <Callout type="info">
 **In-product chat ships in ObjectOS.** Exposing this retrieval to a chat UI as
@@ -98,6 +123,25 @@ const embedder = ctx.getService<IEmbedder>(EMBEDDER_SERVICE); // from @objectsta
 const vectors = await embedder.embed(chunks.map((c) => c.content));
 ```
 
+## Splitting documents into passages
+
+The knowledge service cuts each document into passages once, and every adapter that takes passages (`knowledge-memory` does) indexes the same ones. An object source chooses how with `split`:
+
+```ts
+source: {
+  kind: 'object',
+  object: 'policy',
+  contentFields: ['title', 'body'],
+  split: { strategy: 'markdown', maxChars: 600 },
+}
+```
+
+- `recursive` (the default) cuts at blank lines, then line breaks, then sentence ends, then semicolons, then characters. It reads Chinese and English sentence ends — 「3.2 条」 and 「400.50 元」 stay whole — and never cuts inside a Markdown table or list item that fits.
+- `markdown` cuts one section per heading; each passage begins with its heading path, which is embedded with it.
+- `whole` keeps each document as one passage.
+
+A passage is at most `split.maxChars` characters — else the **Knowledge → Target chunk size** setting, else 800 — and, when the adapter reports its embedder's input limit, within 80% of that limit by the shared token estimate below. A `whole` document over that budget is **removed from the index and reported** (`failed` and `failures` on the reindex result, an `error` log on the event sync), never truncated; because the estimate runs high, a `whole` document can use about 60% of the model's limit. The full rules are in [the protocol's split section](/docs/protocol/knowledge#35-the-split).
+
 ## Embedder input limits
 
 Every embedding model accepts a text up to some length, counted in tokens. A provider that is sent a longer text truncates it **without an error** — the tail is never embedded, so a search for it finds nothing. `@objectstack/embedder-openai` refuses such an input instead:
@@ -105,6 +149,8 @@ Every embedding model accepts a text up to some length, counted in tokens. A pro
 - When a limit applies, `embed()` measures every input before it sends anything. When one is over the model's limit, the whole call fails with an error naming the input's index, the model, the estimate and the limit. Nothing is sent and nothing is truncated.
 - The limit comes from the known-model table, which carries each provider's documented per-input limit (OpenAI `text-embedding-3-*` 8192, DashScope `text-embedding-v3` 8192, BigModel `embedding-3` 3072, SiliconFlow `BAAI/bge-m3` 8192, `BAAI/bge-large-*-v1.5` 512, …). Set `maxInputTokens` to override it.
 - A model that is not in the table, with no `maxInputTokens`, has no limit — its inputs are sent at any length — and the embedder warns once when it is constructed.
+- The embedder reports the limit it applies as `maxInputTokens` (`IEmbedder.maxInputTokens`), so a knowledge adapter can pass it on (`embedding.maxInputTokens`) and the service's passages fit it.
+- It reports the model it sends as `model` (`IEmbedder.model`), so a knowledge adapter can pass it on (`embedding.model`) and the index fingerprint sees a model change.
 
 ```ts
 new OpenAIEmbedder({
@@ -132,9 +178,28 @@ The sum is multiplied by 1.1 and rounded up. On the sampled classes — Chinese,
 
 Known residual: text made mostly of random hex or base64 — UUIDs, sha256 digests, encoded blobs — tokenizes at about 1–1.4 characters per token and can estimate below its real count. Emoji and rare ideographs (CJK Extension B and later) may also estimate low: `cl100k` spends two to four tokens on each. Other providers' tokenizers are not sampled.
 
+## When the model or the split changes: rebuild
+
+Vectors from two embedding models are not comparable, and neither are the passages of two splits. So every source's index is built under one **index fingerprint** — the embedding model and dimensions the adapter reports, the resolved split, and the content list — which the knowledge service computes and carries on every write and every search, and the adapter checks against the index it holds. Change any of them and the source's stored index is **refused** (`KNOWLEDGE_REBUILD_REQUIRED`, 409) until a complete reindex rebuilds it; it never answers with vectors of the old model ranked against the new one. A search over several sources still answers from the others, and the `search_knowledge` tool names each refused source in `refused`. Changing `where` or `metadataFields` changes no vector: a complete reindex repairs it in place. The full rules are in [the protocol's fingerprint section](/docs/protocol/knowledge#36-the-index-fingerprint).
+
+## Self-hosted vector store: PostgreSQL + pgvector
+
+`@objectstack/knowledge-pgvector` keeps passages and vectors in PostgreSQL with the pgvector extension — a `url` you give it, else the platform database when that is PostgreSQL — in a schema of its own (`os_knowledge`), so nothing collides with your objects' tables. Register it beside the knowledge service and point a source at it with `adapter: 'pgvector'`:
+
+```ts
+new KnowledgePgvectorPlugin({ queryPrefix: '' /* e.g. BGE's query instruction */ }),
+```
+
+- It searches by an exact scan, so a 3072-wide model works; the organization filter and the metadata `filter` run in SQL before ranking.
+- An unchanged passage is not sent to the embedder again on a reindex.
+- Without the `vector` extension (or the right to create it), boot goes on: the plugin warns with the SQL a database owner runs, and its sources answer `SERVICE_UNAVAILABLE` until then.
+- It stores each passage's text, which is as sensitive as the record it came from and is in every backup.
+
+Details — the tables, an approximate index as an operator's step, rebuilds — are in [the protocol's pgvector section](/docs/protocol/knowledge#41-knowledge-pgvector--the-open-vector-store-on-postgresql).
+
 ## Why we did not build a vector DB
 
-Mature OSS (RAGFlow, LlamaIndex, Dify) already nail chunking, embedding, hybrid retrieval, rerank, and OCR. ObjectStack's value is **the metadata-native source declaration + the permission-aware filter on top of those engines** — not yet-another-RAG-stack. Customers pick the retrieval engine that matches their data; we make sure it talks to ObjectStack the same way every time.
+Mature OSS (RAGFlow, LlamaIndex, Dify) already nail embedding, hybrid retrieval, rerank, and OCR. ObjectStack's value is **the metadata-native source declaration, one structural split for every adapter, and the permission-aware filter on top of those engines** — not yet-another-RAG-stack. Customers pick the retrieval engine that matches their data; we make sure it talks to ObjectStack the same way every time.
 
 ---
 
