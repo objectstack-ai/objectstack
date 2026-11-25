@@ -13,22 +13,51 @@
  *     the author left, with its filters, never the item's own params;
  *   - the Studio address is replaced, so Back from the app page skips it;
  *   - which opens keep the generic item page (a tab, the draft review, no app,
- *     the cross-package leg, any other type).
+ *     the cross-package leg, any other type, an item with no published version);
+ *   - a read-only base: its own rows open in its app, a pair row keeps the
+ *     generic page, and its report New opens the app page only where the pair
+ *     door is open;
+ *   - a dashboard made by the area's own create opens in its app, and Back
+ *     from there lands on the list, not on an empty create page.
  */
 
 import '@testing-library/jest-dom/vitest';
 import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
 import * as React from 'react';
-import { render, screen, cleanup } from '@testing-library/react';
-import { MemoryRouter, Route, Routes, useLocation, useNavigationType } from 'react-router-dom';
+import { render, screen, cleanup, fireEvent } from '@testing-library/react';
+import { MemoryRouter, Route, Routes, useLocation, useNavigate, useNavigationType, useParams } from 'react-router-dom';
+
+/**
+ * The area's create, reduced to its Save: it publishes (the server's half is
+ * `published` below) and lands on the item exactly as `ResourceEditPage` does,
+ * with the same `replace` rule.
+ */
+function CreateStub() {
+  const navigate = useNavigate();
+  const { type = '' } = useParams<{ type: string }>();
+  const { search } = useLocation();
+  const host = useMetadataAreaHost();
+  return (
+    <div data-testid="area-page" data-page="create">
+      <button
+        type="button"
+        onClick={() => {
+          published.add(`${type}/made_here`);
+          navigate(`../made_here${search}`, { relative: 'path', replace: studioCreateLandsInApp(host?.packageId, type) });
+        }}
+      >
+        save the new item
+      </button>
+    </div>
+  );
+}
 
 vi.mock('../metadata-admin/index.js', () => ({
   MetadataDirectoryPage: () => <div data-testid="area-page" data-page="directory" />,
   MetadataDiagnosticsPage: () => <div data-testid="area-page" data-page="diagnostics" />,
   MetadataResourceListPage: () => <div data-testid="area-page" data-page="list" />,
-  MetadataResourceEditPage: ({ createMode }: { createMode?: boolean }) => (
-    <div data-testid="area-page" data-page={createMode ? 'create' : 'item'} />
-  ),
+  MetadataResourceEditPage: ({ createMode }: { createMode?: boolean }) =>
+    createMode ? <CreateStub /> : <div data-testid="area-page" data-page="item" />,
   MetadataResourceHistoryPage: () => <div data-testid="area-page" data-page="history" />,
 }));
 
@@ -44,6 +73,10 @@ const apps = vi.hoisted(() => ({
   byName: new Map<string, Record<string, unknown>>(),
   listCalls: [] as Array<[string, unknown]>,
 }));
+/** The dashboards and reports that have a published version (`type/name`); every other one is a draft only. */
+const published = vi.hoisted(() => new Set<string>());
+/** The item reads asked, as `[type, name, options]`; `failing` makes them refuse. */
+const itemReads = vi.hoisted(() => ({ calls: [] as Array<[string, string, unknown]>, failing: false }));
 vi.mock('../metadata-admin/useMetadata.js', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   useMetadataClient: () => ({
@@ -51,11 +84,19 @@ vi.mock('../metadata-admin/useMetadata.js', async (importOriginal) => ({
       apps.listCalls.push([type, options]);
       return apps.byPackage.get(options.packageId ?? '') ?? [];
     },
-    get: async (_type: string, name: string) => apps.byName.get(name) ?? null,
+    get: async (type: string, name: string, options?: unknown) => {
+      if (type === 'app') return apps.byName.get(name) ?? null;
+      itemReads.calls.push([type, name, options]);
+      if (itemReads.failing) throw new Error('503 Service Unavailable');
+      // Without draft preview the door answers the published version, or 404 (`null`).
+      return published.has(`${type}/${name}`) ? { name } : null;
+    },
   }),
 }));
 
 import { StudioMetadataArea } from './StudioMetadataArea';
+import { studioCreateLandsInApp } from './studioAppEdit';
+import { useMetadataAreaHost } from '../metadata-admin/metadataAreaHost';
 import { rememberAppReturnPage, resetAppReturnPageForTests } from '../../utils/appReturnPage';
 // The source under test reaches dynamic imports of `@objectstack/lint`; their first
 // load is paid here, at collection, never inside a case's clock (`check:test-source-alias`).
@@ -68,6 +109,10 @@ beforeEach(() => {
   apps.byPackage = new Map([[PKG, [{ name: 'crm_app', label: 'CRM' }]]]);
   apps.byName = new Map();
   apps.listCalls = [];
+  published.clear();
+  for (const item of ['dashboard/ops_board', 'report/pipeline']) published.add(item);
+  itemReads.calls = [];
+  itemReads.failing = false;
   resetAppReturnPageForTests();
 });
 afterEach(() => {
@@ -75,11 +120,18 @@ afterEach(() => {
   resetAppReturnPageForTests();
 });
 
-/** The app page the area hands over to: its address, its landing and how it was reached. */
+/** The app page the area hands over to: its address, its landing and how it was reached; and the browser's Back. */
 function AppPage() {
   const { pathname, search, state } = useLocation();
   const how = useNavigationType();
-  return <div data-testid="app-page" data-at={`${pathname}${search}`} data-state={JSON.stringify(state)} data-how={how} />;
+  const navigate = useNavigate();
+  return (
+    <div data-testid="app-page" data-at={`${pathname}${search}`} data-state={JSON.stringify(state)} data-how={how}>
+      <button type="button" onClick={() => navigate(-1)}>
+        back
+      </button>
+    </div>
+  );
 }
 
 function PackageArea() {
@@ -88,9 +140,9 @@ function PackageArea() {
   return <StudioMetadataArea key={packageId} packageId={packageId} />;
 }
 
-function mount(url: string) {
+function mount(url: string, earlier: string[] = []) {
   return render(
-    <MemoryRouter initialEntries={[url]}>
+    <MemoryRouter initialEntries={[...earlier, url]}>
       <Routes>
         <Route path="/studio/~all/metadata/*" element={<StudioMetadataArea packageId={null} />} />
         <Route path="/studio/:packageId/metadata/*" element={<PackageArea />} />
@@ -127,6 +179,8 @@ describe('a Studio dashboard or report opens in its app (objectstack#36906)', ()
     // Replaced: Back from the app page lands on the list, not on this address.
     expect(opened.how).toBe('REPLACE');
     expect(apps.listCalls).toEqual([['app', { packageId: PKG }]]);
+    // The one read of the item, asked of the open package.
+    expect(itemReads.calls).toEqual([['dashboard', 'ops_board', { packageId: PKG }]]);
   });
 
   it('a report opens its builder on arrival, in the app the author came from when it is one of the package apps', async () => {
@@ -196,5 +250,103 @@ describe("the report list's New opens the app's new-report page (objectstack#369
     apps.byPackage.set(PKG, [{ name: 'crm_app' }]);
     mount(`/studio/${PKG}/metadata/dashboard/new?package=${PKG}`);
     expect((await screen.findByTestId('area-page')).getAttribute('data-page')).toBe('create');
+  });
+});
+
+describe('an item with no published version keeps the generic item page (objectstack#36906)', () => {
+  it('a draft-only dashboard row keeps the item page, and no app is read', async () => {
+    mount(`/studio/${PKG}/metadata/dashboard/ai_drafted?package=${PKG}`);
+    expect((await screen.findByTestId('area-page')).getAttribute('data-page')).toBe('item');
+    expect(screen.queryByTestId('app-page')).toBeNull();
+    expect(itemReads.calls).toEqual([['dashboard', 'ai_drafted', { packageId: PKG }]]);
+    expect(apps.listCalls).toEqual([]);
+  });
+
+  it('so does a draft-only report, and an item whose read fails', async () => {
+    mount(`/studio/${PKG}/metadata/report/refused_publish?package=${PKG}`);
+    expect((await screen.findByTestId('area-page')).getAttribute('data-page')).toBe('item');
+    cleanup();
+    itemReads.failing = true;
+    mount(`/studio/${PKG}/metadata/dashboard/ops_board?package=${PKG}`);
+    expect((await screen.findByTestId('area-page')).getAttribute('data-page')).toBe('item');
+    expect(screen.queryByTestId('app-page')).toBeNull();
+  });
+
+  it("a dashboard made by the area's create opens in its app, and Back from there lands on the list", async () => {
+    const list = `/studio/${PKG}/metadata/dashboard?package=${PKG}`;
+    mount(`/studio/${PKG}/metadata/dashboard/new?package=${PKG}`, [list]);
+    fireEvent.click(await screen.findByText('save the new item'));
+    const opened = await appPage();
+    expect(opened.at.split('?')[0]).toBe(`/apps/${PKG}/dashboard/made_here`);
+    expect(opened.state).toEqual({ designModeNewDashboard: 'made_here' });
+    expect(studioOf(opened.at)).toBe(list);
+    fireEvent.click(screen.getByText('back'));
+    expect((await screen.findByTestId('area-page')).getAttribute('data-page')).toBe('list');
+  });
+
+  it('the create landing is replaced only where the item opens in an app', () => {
+    expect(studioCreateLandsInApp(PKG, 'dashboard')).toBe(true);
+    expect(studioCreateLandsInApp(PKG, 'report')).toBe(true);
+    expect(studioCreateLandsInApp(PKG, 'view')).toBe(false);
+    expect(studioCreateLandsInApp(null, 'dashboard')).toBe(false);
+    expect(studioCreateLandsInApp(undefined, 'report')).toBe(false);
+  });
+});
+
+describe('a read-only base (objectstack#36906)', () => {
+  const BASE = 'com.example.hr';
+  const PAIR = `${BASE}.custom`;
+  const customizationOf = (walled: boolean) =>
+    ({ base: BASE, baseLabel: 'HR', basedOn: null, walled, pairId: null, ensure: async () => PAIR, ensurePackage: vi.fn() }) as any;
+
+  beforeEach(() => {
+    listed.value.set(BASE, { id: BASE, name: 'HR', writable: false, manifest: {} });
+    listed.value.set(PAIR, { id: PAIR, name: 'HR (customizations)', writable: true, manifest: {} });
+    apps.byPackage.set(BASE, [{ name: 'hr_app', label: 'HR' }]);
+    published.add('dashboard/headcount');
+  });
+
+  function mountBase(url: string, customization: unknown) {
+    return render(
+      <MemoryRouter initialEntries={[url]}>
+        <Routes>
+          <Route path={`/studio/${BASE}/metadata/*`} element={<StudioMetadataArea packageId={BASE} customization={customization as any} />} />
+          <Route path="/studio/:packageId/metadata/*" element={<PackageArea />} />
+          <Route path="/apps/*" element={<AppPage />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+  }
+
+  it("a base dashboard row opens in the base's app", async () => {
+    mountBase(`/studio/${BASE}/metadata/dashboard/headcount?package=${BASE}`, customizationOf(false));
+    const opened = await appPage();
+    expect(opened.at.split('?')[0]).toBe(`/apps/${BASE}/dashboard/headcount`);
+    expect(opened.state).toEqual({ designModeNewDashboard: 'headcount' });
+    expect(studioOf(opened.at)).toBe(`/studio/${BASE}/metadata/dashboard?package=${BASE}`);
+  });
+
+  it('a pair row keeps the generic item page: the pair has no published app of its own', async () => {
+    mountBase(`/studio/${PAIR}/metadata/dashboard/headcount?package=${PAIR}`, null);
+    expect((await screen.findByTestId('area-page')).getAttribute('data-page')).toBe('item');
+    expect(screen.queryByTestId('app-page')).toBeNull();
+    expect(apps.listCalls).toEqual([['app', { packageId: PAIR }]]);
+  });
+
+  it("report New opens the base app's new-report page (it saves in the pair), returning to the list", async () => {
+    mountBase(`/studio/${BASE}/metadata/report/new?package=${BASE}`, customizationOf(false));
+    const opened = await appPage();
+    expect(opened.at.split('?')[0]).toBe(`/apps/${BASE}/reports/new`);
+    expect(studioOf(opened.at)).toBe(`/studio/${BASE}/metadata/report?package=${BASE}`);
+  });
+
+  it('where the pair door is closed, report New goes back to the list, as every create there does', async () => {
+    mountBase(`/studio/${BASE}/metadata/report/new?package=${BASE}`, customizationOf(true));
+    expect((await screen.findByTestId('area-page')).getAttribute('data-page')).toBe('list');
+    expect(screen.queryByTestId('app-page')).toBeNull();
+    cleanup();
+    mountBase(`/studio/${BASE}/metadata/report/new?package=${BASE}`, null);
+    expect((await screen.findByTestId('area-page')).getAttribute('data-page')).toBe('list');
+    expect(apps.listCalls).toEqual([]);
   });
 });
