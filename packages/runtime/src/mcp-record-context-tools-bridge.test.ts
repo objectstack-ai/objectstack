@@ -19,6 +19,12 @@
  * the protocol's served listing decorates with the read path's `_diagnostics`,
  * is the pack `get_record_context` answers through on the `/mcp` route — the
  * door hands the executor the authored pack, not the serving envelope.
+ *
+ * And the two doors over one real kernel for one caller (the last `describe`):
+ * the `/mcp` route and the real `MCPServerPlugin` stdio session, through the
+ * real `record-context` service, answer every case with the same bytes —
+ * refusals included — and a pack saved at run time to the metadata registry
+ * is read as a shipped one is.
  */
 
 import { afterAll, beforeAll, describe, it, expect, vi } from 'vitest';
@@ -459,8 +465,10 @@ describe('[ADR-0149 D7 · ADR-0160 D4] get_record_context over one real kernel: 
         await new RecordContextServicePlugin().init(ctx as never);
         protocol = new ObjectStackProtocolImplementation(engine as any);
 
-        // The key's two auth tables are not part of this kernel: the engine
-        // answers them for the one key, and every other read is the engine's.
+        // The key's auth tables (`sys_api_key`, `sys_user`, `sys_member`) are
+        // not part of this kernel: these answers stand in for them, for the one
+        // key (owner `usr_member`, active in `org_1`); every other read is the
+        // engine's, and the stdio door's are recorded with their context.
         const keyedQl = new Proxy(engine as any, {
             get(target, prop, receiver) {
                 if (prop === 'update') {
@@ -548,8 +556,8 @@ describe('[ADR-0149 D7 · ADR-0160 D4] get_record_context over one real kernel: 
 
     interface DoorAnswer { isError: boolean; text: string }
 
-    const overHttp = async (args: Record<string, unknown>): Promise<DoorAnswer> => {
-        const body = { jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'get_record_context', arguments: args } };
+    const overHttp = async (args: Record<string, unknown>, tool = 'get_record_context'): Promise<DoorAnswer> => {
+        const body = { jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: tool, arguments: args } };
         const res = await dispatcher.handleMcp(body, {
             request: new Request('http://localhost/api/v1/mcp', {
                 method: 'POST',
@@ -564,14 +572,14 @@ describe('[ADR-0149 D7 · ADR-0160 D4] get_record_context over one real kernel: 
         const result = (res.response?.body as any)?.result;
         return { isError: result?.isError === true, text: result?.content?.[0]?.text };
     };
-    const overStdio = async (args: Record<string, unknown>): Promise<DoorAnswer> => {
-        const frame = await rpc('tools/call', { name: 'get_record_context', arguments: args });
+    const overStdio = async (args: Record<string, unknown>, tool = 'get_record_context'): Promise<DoorAnswer> => {
+        const frame = await rpc('tools/call', { name: tool, arguments: args });
         return { isError: frame?.result?.isError === true, text: frame?.result?.content?.[0]?.text };
     };
     /** Both doors, one call: the same bytes, or the case fails here. */
-    const both = async (args: Record<string, unknown>) => {
-        const http = await overHttp(args);
-        const stdio = await overStdio(args);
+    const both = async (args: Record<string, unknown>, tool = 'get_record_context') => {
+        const http = await overHttp(args, tool);
+        const stdio = await overStdio(args, tool);
         expect(typeof http.text).toBe('string');
         expect(stdio).toEqual(http);
         return { isError: http.isError, text: http.text, payload: JSON.parse(http.text) };
@@ -609,11 +617,14 @@ describe('[ADR-0149 D7 · ADR-0160 D4] get_record_context over one real kernel: 
         expect(data.body).toEqual({ field: 'content', label: 'Content', text: '# Scope\nCovers fire.\n# Exclusions\nFlood.' });
     });
 
-    it('the root the caller may not read is refused before any pack is looked up', async () => {
+    it('a root the caller may not read is refused before any pack is looked up, as get_record refuses it', async () => {
         const answer = await both({ objectName: 'rc_hidden', recordId: 'h1', context: 'rc_main' });
         expect(answer.isError).toBe(true);
-        expect(answer.payload.error).toMatchObject({ code: expect.any(String), status: expect.any(Number) });
+        expect(answer.payload.error).toMatchObject({ code: 'PERMISSION_DENIED', status: 403 });
         expect(answer.text).not.toContain('rc_main');
+        const record = await both({ objectName: 'rc_hidden', recordId: 'h1' }, 'get_record');
+        expect(record.isError).toBe(true);
+        expect(answer.payload.error).toEqual(record.payload.error);
     });
 
     it('[today; ADR-0160 as amended says left out and stated] a related child this caller is not served refuses the call, unnamed', async () => {
