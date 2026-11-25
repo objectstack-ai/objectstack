@@ -28,6 +28,7 @@
     "AiContextRelatedParsed (type)",
     "AiContextRelatedSchema (const)",
     "AiContextRelatedWhere (type)",
+    "AiContextRelatedWhereParsed (type)",
     "AiContextRelatedWhereSchema (const)",
     "AiContextSchema (const)",
     "AiFaceAddress (interface)",

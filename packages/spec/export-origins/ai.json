@@ -28,6 +28,7 @@
     "AiContextRelatedParsed": "src/ai/ai-context.zod.ts#AiContextRelatedParsed (type)",
     "AiContextRelatedSchema": "src/ai/ai-context.zod.ts#AiContextRelatedSchema (const)",
     "AiContextRelatedWhere": "src/ai/ai-context.zod.ts#AiContextRelatedWhere (type)",
+    "AiContextRelatedWhereParsed": "src/ai/ai-context.zod.ts#AiContextRelatedWhereParsed (type)",
     "AiContextRelatedWhereSchema": "src/ai/ai-context.zod.ts#AiContextRelatedWhereSchema (const)",
     "AiContextSchema": "src/ai/ai-context.zod.ts#AiContextSchema (const)",
     "AiFaceAddress": "src/ai/face-name.ts#AiFaceAddress (interface)",

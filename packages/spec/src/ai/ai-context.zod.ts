@@ -423,3 +423,4 @@ export type AiContextRelatedParsed = z.infer<typeof AiContextRelatedSchema>;
 export type AiContextBody = z.input<typeof AiContextBodySchema>;
 export type AiContextBodyParsed = z.infer<typeof AiContextBodySchema>;
 export type AiContextRelatedWhere = z.input<typeof AiContextRelatedWhereSchema>;
+export type AiContextRelatedWhereParsed = z.infer<typeof AiContextRelatedWhereSchema>;
