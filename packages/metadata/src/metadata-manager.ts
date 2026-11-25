@@ -1814,13 +1814,14 @@ export class MetadataManager implements IMetadataService {
    * under (`source: 'registration'`) — the contract on
    * `IMetadataService.listPackageBindings`.
    *
-   * An item is a stored row's when a loader of rows
-   * ({@link MetadataLoader.loadRowBindings}) holds a row under the key
-   * {@link list} lists the item by — the key the boot priming pass registers
-   * that row's body under, so the registry's copy of a stored row is the
-   * row's item too. Its binding is that row's column (the first loader's, the
-   * first row of the key, as {@link list} admits them): `null` for a legacy
-   * row with an empty column, ⛔ never the stamp its body carries. Any other
+   * An item is a stored row's when it is the body {@link loadMany} read from
+   * that row (the registry's copy the boot priming pass registered, whose key
+   * follows the body's stamp; {@link MetadataLoader.rowPackageIdOf}), or when
+   * a loader of rows ({@link MetadataLoader.loadRowBindings}) holds a row
+   * under the key {@link list} lists the item by. Its binding is that row's
+   * column (by key: the first loader's, the first row of the key, as
+   * {@link list} admits them): `null` for a legacy row with an empty column,
+   * ⛔ never the stamp its body carries. Any other
    * item's binding is its slot's package for a type stored per
    * `(package, name)`, else the package its body names, as {@link query}
    * reads it.
@@ -1854,11 +1855,28 @@ export class MetadataManager implements IMetadataService {
     const bindings = this.listedInSlotOrder(canonical, items).map((key): MetadataPackageBinding => {
       const data = items.get(key);
       const name = slotted ? storedNameOf(key) : key;
+      const readColumn = this.readRowColumnOf(data);
+      if (readColumn !== undefined) return { name, data, packageId: readColumn, source: 'row' };
       if (rowColumns.has(key)) return { name, data, packageId: rowColumns.get(key)!, source: 'row' };
       const registered = slotted ? slotPackageOf(key) : indexedItemPackageId(data);
       return { name, data, packageId: registered ?? null, source: 'registration' };
     });
     return { items: bindings, degraded, errors };
+  }
+
+  /**
+   * [#37039] The package column of the stored row `data` — that very object,
+   * or the body it is a stamped copy of — was read from by {@link loadMany}
+   * (the boot priming pass registers what it hands out, keyed by the body's
+   * stamp); `undefined` when no row loader handed it out.
+   */
+  private readRowColumnOf(data: unknown): string | null | undefined {
+    if (data === null || typeof data !== 'object') return undefined;
+    const loader = this.loadedFrom.get(data);
+    if (typeof loader?.rowPackageIdOf !== 'function') return undefined;
+    const origin = stampedCopyOrigins.get(data);
+    const direct = loader.rowPackageIdOf(data);
+    return direct !== undefined ? direct : origin !== undefined ? loader.rowPackageIdOf(origin) : undefined;
   }
 
   /**
@@ -5118,8 +5136,17 @@ function withEntryPackage<T>(entry: MetadataKeyedItem<T>): T {
   const data = entry.data as unknown;
   if (entry.packageId === undefined || indexedItemPackageId(data) !== undefined) return entry.data;
   if (data === null || typeof data !== 'object' || Array.isArray(data)) return entry.data;
-  return { ...(data as Record<string, unknown>), _packageId: entry.packageId } as T;
+  const stamped = { ...(data as Record<string, unknown>), _packageId: entry.packageId };
+  stampedCopyOrigins.set(stamped, data);
+  return stamped as T;
 }
+
+/**
+ * [#37039] Each body {@link withEntryPackage} stamped, with the loader's body
+ * it copied, so the row that body was read from stays askable
+ * (`MetadataManager.listPackageBindings`).
+ */
+const stampedCopyOrigins = new WeakMap<object, object>();
 
 /**
  * [#32680] A loader's keyed entry as `MetadataManager.loadManyKeyed` answers

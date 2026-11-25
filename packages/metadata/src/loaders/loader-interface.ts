@@ -149,6 +149,16 @@ export interface MetadataLoader {
   loadRowBindings?<T = any>(type: string): Promise<MetadataRowBinding<T>[]>;
 
   /**
+   * [#37039] The package column of the stored row a plural read of this
+   * loader answered `item` — that very object — from; `null` for an empty
+   * column, `undefined` for an object it did not hand out. Optional, with
+   * {@link loadRowBindings}: `MetadataManager.listPackageBindings` asks it of
+   * the registry's copy of a row the boot priming pass registered, whose key
+   * follows its body's stamp rather than the row's column.
+   */
+  rowPackageIdOf?(item: object): string | null | undefined;
+
+  /**
    * [ADR-0150 D3/D4, #32246] Every item this loader holds under `name`, each
    * with the package it holds it for ({@link MetadataKeyedItem.packageId}),
    * for a type stored per `(package, name)` (`PACKAGE_SLOTTED_STORE_TYPES`),

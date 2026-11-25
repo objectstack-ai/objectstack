@@ -457,6 +457,8 @@ export class DatabaseLoader implements MetadataLoader {
   private readonly statCache?: LRUCache<string, MetadataStats | null>;
   /** [#31699 R7-A] Each body a plural read handed out from a legacy row, with that row's id and package ({@link bindReadRowPackage}). */
   private readonly legacyReadRows = new WeakMap<object, { id: string; packageId: string }>();
+  /** [#37039] Each body a plural read answered or handed out, with its row's package column ({@link rowPackageIdOf}). */
+  private readonly readRowColumns = new WeakMap<object, string | null>();
 
   constructor(options: DatabaseLoaderOptions) {
     if (!options.driver && !options.engine) {
@@ -1254,6 +1256,7 @@ export class DatabaseLoader implements MetadataLoader {
       for (const row of rows) {
         const data = this.rowToData(row);
         if (data === null) continue;
+        this.readRowColumns.set(data, storedRowColumnPackageId(row));
         const name = row.name;
         const packageId = PACKAGE_SLOTTED_STORE_TYPES.has(type) ? storedRowPackageId(row) : undefined;
         const member = PACKAGE_SLOTTED_STORE_TYPES.has(type) ? storedRowMemberOf(type, data, row.bundle_member) : undefined;
@@ -1297,6 +1300,7 @@ export class DatabaseLoader implements MetadataLoader {
    */
   private handOut(entry: StoredTypeRow): Record<string, unknown> {
     const copy = { ...entry.data };
+    this.readRowColumns.set(copy, entry.rowPackageId);
     if (entry.legacyRowId !== undefined && entry.packageId !== undefined) this.legacyReadRows.set(copy, { id: entry.legacyRowId, packageId: entry.packageId });
     return copy;
   }
@@ -1477,6 +1481,16 @@ export class DatabaseLoader implements MetadataLoader {
    */
   async loadRowBindings<T = any>(type: string): Promise<MetadataRowBinding<T>[]> {
     return (await this.typeRowSlots<T>(type)).map(({ slot, row }) => ({ ...slot, rowPackageId: row.rowPackageId }));
+  }
+
+  /**
+   * [#37039] The package column of the row a plural read of this loader
+   * answered `item` — that very object — from (`loadMany`, `loadManyKeyed`,
+   * `loadManySlots`, `loadRowBindings`); `null` for an empty column;
+   * `undefined` for an object this loader did not hand out.
+   */
+  rowPackageIdOf(item: object): string | null | undefined {
+    return this.readRowColumns.get(item);
   }
 
   /** {@link loadManySlots}' body: each entry paired with the stored row it was read from. */
