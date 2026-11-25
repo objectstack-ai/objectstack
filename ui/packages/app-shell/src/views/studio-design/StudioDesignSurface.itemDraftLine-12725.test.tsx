@@ -106,6 +106,9 @@ vi.mock('../../preview/DraftChangesPanel', () => ({
 // The console's preview and authoring code loads `@objectstack/lint` lazily;
 // warmed here so its first load is paid at import, not inside a test's clock.
 import '@objectstack/lint';
+// The surface mounts the command palette, whose record preview reaches the
+// `lazy()` detail entry: its first load is paid here too, not in a test's clock.
+import '@object-ui/plugin-detail';
 import { StudioDesignSurface } from './StudioDesignSurface';
 import { t, tFormat } from '../metadata-admin/i18n';
 import { emitMetadataRefresh } from '../../assistant/assistantBus';
