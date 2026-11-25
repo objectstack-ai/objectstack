@@ -130,6 +130,14 @@ export type { DerivedDetail, InlineMode, ChildObjectSchemaLike } from './deriveM
 export { omitServerResolvedDefaults, isRequiredInForm, optionListDefault } from './schemaDefaults';
 
 /**
+ * Whether a create form would save a field it opened holding a value
+ * (objectstack#37248): the console's related list asks it before offering
+ * + New pre-linked to its parent, so it never offers a link the form drops.
+ * It is the form's own outbound filter and create-mode field gate, asked once.
+ */
+export { createKeepsField } from './createKeepsField';
+
+/**
  * The `form.sections[].group` RESOLVER, published for the third form-section
  * consumer (objectui#8641).
  *
