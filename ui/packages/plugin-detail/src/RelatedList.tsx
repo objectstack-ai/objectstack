@@ -3665,6 +3665,9 @@ export const RelatedList: React.FC<RelatedListProps> = ({
   // key, so a column left out is still counted when the box grows.
   const [bodyTableColumnCap, setBodyTableColumnCap] = React.useState<number | null>(null);
   const bodyTableColumnWidths = React.useRef(new Map<string, number>());
+  // objectstack#37212 — how many columns the table last drew as handed: a
+  // hand-over it has adopted. `null` until it has drawn one.
+  const bodyTableAdoptedCount = React.useRef<number | null>(null);
   const bodyTableColumnKeysKey = React.useMemo(
     () => JSON.stringify((tableColumns ?? []).map((col: any) => String(col?.accessorKey ?? ''))),
     [tableColumns],
@@ -3672,6 +3675,7 @@ export const RelatedList: React.FC<RelatedListProps> = ({
   // A different column set is measured afresh, every column drawn.
   React.useLayoutEffect(() => {
     bodyTableColumnWidths.current.clear();
+    bodyTableAdoptedCount.current = null;
     setBodyTableColumnCap(null);
   }, [bodyTableColumnKeysKey]);
   const bodyTableColumnsOmitted = bodyTable && bodyTableColumnCap !== null;
@@ -4077,6 +4081,17 @@ export const RelatedList: React.FC<RelatedListProps> = ({
     const keys = readColumnKeys(bodyTableColumnKeysKey);
     const watch = (box: HTMLElement) => {
       const read = () => {
+        // objectstack#37212 — the table adopts the columns it is handed a
+        // render later. While it still draws the hand-over it adopted last (the
+        // same leading run of these columns), it is measured for that cap, not
+        // this one, and judging this cap by it flips the cap on every commit:
+        // skip that read; its re-draw reads again. A table that draws a run of
+        // its own choosing (a column hidden from its header menu) is read.
+        const drawn = Array.from(box.querySelectorAll('thead th[data-column-key]'), (th) => th.getAttribute('data-column-key'));
+        const handed = bodyTableColumnCap ?? keys.length;
+        const leadingRun = drawn.every((key, index) => key === keys[index]);
+        if (leadingRun && drawn.length === handed) bodyTableAdoptedCount.current = handed;
+        else if (leadingRun && drawn.length === bodyTableAdoptedCount.current) return;
         // objectstack#35742 — the columns that fit whole: the box's width
         // less the cells that are no column (the row actions), against the
         // width each column asks for.
@@ -4096,7 +4111,7 @@ export const RelatedList: React.FC<RelatedListProps> = ({
         setBodyTableOverflows(box.scrollWidth - box.clientWidth > 1);
       };
       read();
-      // The table settles its columns a render after it is handed fewer:
+      // The table settles its columns a render after it is handed others:
       // read again when its cells change.
       if (typeof MutationObserver !== 'undefined') {
         cells = new MutationObserver(read);
