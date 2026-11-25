@@ -74,6 +74,7 @@
       "@objectstack/service-package",
       "@objectstack/service-queue",
       "@objectstack/service-realtime",
+      "@objectstack/service-record-context",
       "@objectstack/service-settings",
       "@objectstack/service-storage",
       "@objectstack/knowledge-memory",

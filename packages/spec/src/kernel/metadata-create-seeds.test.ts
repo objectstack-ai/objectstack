@@ -55,7 +55,7 @@ describe('metadata create seeds validate against their spec schemas', () => {
     const KNOWN_UNSEEDED = new Set([
       'report',        // canvas-create: dataset/measures picked interactively
       'app', 'seed', 'job', 'datasource', 'doc', 'book',
-      'permission', 'position', 'agent', 'tool', 'skill', 'email_template',
+      'permission', 'position', 'agent', 'tool', 'skill', 'ai_context', 'email_template',
       // [#7893] `field` is code-only by declaration as of 2026-08-12
       // (`allowRuntimeCreate: false` + `allowEnvironmentOverlay: false`, ADR-0049
       // remove side): a standalone `field` write minted a row no read path
