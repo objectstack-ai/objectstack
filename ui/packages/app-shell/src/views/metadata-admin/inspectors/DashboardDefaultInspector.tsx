@@ -192,7 +192,7 @@ export function DashboardDefaultInspector({
     // designer, the producer's English otherwise.
     return {
       schema: merged.schema,
-      form: stackSectionsForNarrowPanel(localizeDefaultPeriods(merged.form, locale, appT)),
+      form: stackSectionsForNarrowPanel(localizeDefaultPeriods(merged.form, locale, (key, options) => appT(key, options))),
     };
     // `appT` changes with the app's language and when a locale pack lands, so
     // the names follow both.

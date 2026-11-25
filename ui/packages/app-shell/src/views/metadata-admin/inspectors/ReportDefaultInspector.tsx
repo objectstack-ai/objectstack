@@ -569,7 +569,7 @@ export function ReportDefaultInspector({
       excludeFields: REPORT_CURATED_FIELDS,
       sectionTitle: t('engine.inspector.moreFields', locale),
     });
-    return { ...merged, form: localizeDefaultPeriods(merged.form, locale, appT) };
+    return { ...merged, form: localizeDefaultPeriods(merged.form, locale, (key, options) => appT(key, options)) };
     // `appT` changes with the app's language and when a locale pack lands, so
     // the names follow both.
   }, [serverSchema, locale, appT]);
