@@ -840,3 +840,85 @@ describe('useBulkExecutor — a refused per-record dispatch is counted apart', (
     expect(result.current.result?.refused).toEqual([{ id: 'l1', message: SENTENCES.l1 }]);
   });
 });
+
+// objectstack#36931 — a per-record dispatch whose flow run paused at a screen
+// (`ActionResult.paused`, answered by the grid as `{ paused: true }`). The run
+// started and waits for input, so the record is counted apart from succeeded,
+// failed and refused, beside the refused category above.
+describe('useBulkExecutor — a paused per-record dispatch is counted apart', () => {
+  const promoted = (): BulkActionDef => ({
+    name: 'qualify',
+    operation: 'custom',
+    actionDef: { name: 'qualify', type: 'flow', target: 'qualify_lead' },
+  } as BulkActionDef);
+  const ds = () => ({ update: vi.fn(), delete: vi.fn() });
+  const pausingFor = (ids: string[]) => vi.fn(async (_def: BulkActionDef, row: Record<string, unknown>) =>
+    (ids.includes(String(row.id)) ? { paused: true as const } : undefined));
+
+  it("the card's repro: two of three paused read 1 succeeded and 2 waiting, none failed or refused", async () => {
+    const runAction = pausingFor(['l1', 'l3']);
+    const { result } = renderHook(() => useBulkExecutor({ resource: 'crm_lead', dataSource: ds(), runAction }));
+
+    await act(async () => {
+      await result.current.run(promoted(), [{ id: 'l1' }, { id: 'l2' }, { id: 'l3' }], {});
+    });
+
+    expect(runAction).toHaveBeenCalledTimes(3);
+    expect(result.current.result).toMatchObject({ total: 3, succeeded: 1, failed: 0, errors: [] });
+    expect(result.current.result?.paused).toEqual([{ id: 'l1' }, { id: 'l3' }]);
+    expect(result.current.result?.refused).toBeUndefined();
+    expect(result.current.progress).toMatchObject({ done: 1, failed: 0, refused: 0, paused: 2, inFlight: false });
+  });
+
+  it('a refused and a paused record in one run land in their own categories', async () => {
+    const runAction = vi.fn(async (_def: BulkActionDef, row: Record<string, unknown>) => {
+      if (row.id === 'l1') return { refusal: { message: 'No.' } };
+      if (row.id === 'l2') return { paused: true as const };
+      return undefined;
+    });
+    const { result } = renderHook(() => useBulkExecutor({ resource: 'crm_lead', dataSource: ds(), runAction }));
+
+    await act(async () => {
+      await result.current.run(promoted(), [{ id: 'l1' }, { id: 'l2' }, { id: 'l3' }], {});
+    });
+
+    expect(result.current.result).toMatchObject({ total: 3, succeeded: 1, failed: 0 });
+    expect(result.current.result?.refused).toEqual([{ id: 'l1', message: 'No.' }]);
+    expect(result.current.result?.paused).toEqual([{ id: 'l2' }]);
+  });
+
+  it('control: a run with no pause carries no paused list', async () => {
+    const { result } = renderHook(() =>
+      useBulkExecutor({ resource: 'crm_lead', dataSource: ds(), runAction: pausingFor([]) }));
+
+    await act(async () => {
+      await result.current.run(promoted(), [{ id: 'l1' }, { id: 'l2' }], {});
+    });
+
+    expect(result.current.result).toMatchObject({ total: 2, succeeded: 2, failed: 0 });
+    expect(result.current.result?.paused).toBeUndefined();
+  });
+
+  it('retry() of a failed record whose re-run pauses moves it to waiting and is no success', async () => {
+    let attempt = 0;
+    const runAction = vi.fn(async () => {
+      attempt += 1;
+      if (attempt === 1) throw new Error('timeout');
+      return { paused: true as const };
+    });
+    const { result } = renderHook(() => useBulkExecutor({ resource: 'crm_lead', dataSource: ds(), runAction }));
+
+    await act(async () => {
+      await result.current.run(promoted(), [{ id: 'l1' }], {});
+    });
+    expect(result.current.result).toMatchObject({ succeeded: 0, failed: 1 });
+
+    let ok: boolean | undefined;
+    await act(async () => {
+      ok = await result.current.retry('l1');
+    });
+    expect(ok).toBe(false);
+    expect(result.current.result).toMatchObject({ succeeded: 0, failed: 0, errors: [] });
+    expect(result.current.result?.paused).toEqual([{ id: 'l1' }]);
+  });
+});

@@ -40,7 +40,10 @@ function workspaceSources(): Plugin {
     name: 'studio-left-menu-workspace-src',
     enforce: 'pre',
     async resolveId(id, importer) {
-      if (id.endsWith('/useMetadata.js') && importer?.endsWith('StudioMenu.tsx')) return METADATA_STUB;
+      // objectstack#36900 — the menu's reads live in `studioMenuData.ts`, beside the menu.
+      if (id.endsWith('/useMetadata.js') && (importer?.endsWith('StudioMenu.tsx') || importer?.endsWith('studioMenuData.ts'))) {
+        return METADATA_STUB;
+      }
       const m = /^@object-ui\/([a-z0-9-]+)(?:\/(.+))?$/.exec(id);
       if (!m) return null;
       const [, pkg, sub] = m;

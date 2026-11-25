@@ -3504,8 +3504,6 @@ const STUDIO_EN: Record<string, string> = {
   'engine.studio.menu.owd': 'Default sharing',
   'engine.studio.menu.diagnostics': 'Diagnostics',
   'engine.studio.menu.environment': 'Positions and permissions',
-  'engine.studio.menu.groupSystem': 'Platform',
-  'engine.studio.menu.groupSecurity': 'Access',
   // objectstack#36502 — the notice on a retired Interfaces link's landing.
   'engine.studio.interfacesRetired.sentence': 'Interface edits have moved into the app.',
   'engine.studio.interfacesRetired.backToApp': 'Back to the app',
@@ -3551,6 +3549,9 @@ const STUDIO_EN: Record<string, string> = {
   'engine.studio.customize.actionTitle': 'Change this item for this deployment. Your first edit is saved as a customization draft, and {package} itself stays as it was installed.',
   'engine.studio.customize.walled': 'On this deployment, only the platform operator can customize an installed package.',
   'engine.studio.customize.noVersion': 'The package list does not say which version of {package} is installed, so its items cannot be customized here.',
+  // objectstack#36716 — the report builder's refusals at open.
+  'engine.studio.customize.noPackage': 'This item cannot be saved here: no package it is in is one this account can save into or customize.',
+  'engine.studio.customize.pendingDraft': 'This item has unpublished changes in {package}. Publish or discard them in Studio, then edit it here.',
   'engine.studio.customize.overrides': 'Overrides {package}',
   'engine.studio.customize.overridesTitle': 'This item replaces {package}’s item of the same name on this deployment. It was taken from {package} {basedOn}.',
   'engine.studio.customize.draftFooter': 'Edits save as a draft of this deployment’s customization; Publish applies them.',

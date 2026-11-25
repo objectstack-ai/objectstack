@@ -69,7 +69,6 @@ import {
   type NewFlowTrigger,
 } from './AutomationsFlowRail.js';
 import {
-  confirmDropUnsavedWork,
   CreateTakenNotice,
   findTakenIdentifier,
   type StudioBaseCustomization,
@@ -133,7 +132,7 @@ import {
   studioOrgScopePath,
 } from './studioScope.js';
 import { STUDIO_METADATA_AREA, dataPillarRedirect, isStudioAllPackagesScope } from './metadataArea.js';
-import { StudioMenu, StudioMenuProvider, StudioMenuTrigger } from './StudioMenu.js';
+import { StudioMenu, StudioMenuDataProvider, StudioMenuProvider, StudioMenuTrigger } from './StudioMenu.js';
 import { StudioMetadataArea } from './StudioMetadataArea.js';
 import { useMetadataRefreshNonce } from './useMetadataRefreshNonce.js';
 import {
@@ -142,7 +141,11 @@ import {
 import { SurfaceDeepLinkProvider } from './surfaceDeepLinkChannel.js';
 import { buildAppSkeleton, type AppNavSeed } from './skeletons.js';
 import { t, tFormat, useMetadataLocale } from '../metadata-admin/i18n.js';
-import { useRegisterUnsavedEdits } from '../../chrome/unsavedEdits.js';
+import { confirmUnsavedLeave, useRegisterUnsavedEdits } from '../../chrome/unsavedEdits.js';
+import { CommandPalette, type StudioPaletteSurface } from '../../chrome/CommandPalette.js';
+import { CommandPaletteProvider, useCommandPaletteProviderMounted } from '../../context/CommandPaletteProvider.js';
+import { StudioPaletteGroups } from './StudioPaletteGroups.js';
+import { openStudioPaletteAddress, studioSamePageSearch } from './studioPaletteModel.js';
 import { CreateItemDialog } from './CreateItemDialog.js';
 // objectui#11787 — the shared draft autosave, moved to its own module unchanged.
 import {
@@ -480,10 +483,21 @@ function StudioDesignSurfaceBody({ aiSlot, area }: StudioDesignSurfaceProps): Re
   // unsaved work, and every guard below reads this one bit. objectstack#36511
   // — so does an edit waiting for the top bar's Save.
   const unsavedPillarWork = pillarDirty || heldEdit !== null || saveBar.dirty;
-  const confirmLeavePillar = React.useCallback(
-    () => confirmDropUnsavedWork(unsavedPillarWork, locale),
-    [unsavedPillarWork, locale],
-  );
+  // objectstack#36900 — every departure this surface starts asks the shell's
+  // unsaved-edits seam, not only this surface's own bit: the seam holds this
+  // surface's work (registered below with the same question) AND every editor
+  // below it that registers its own, the "All metadata" item page
+  // (`ResourceEditPage`) among them, whose edits this bit never sees. So the
+  // palette's picks, the header's Back to app, the retired-Interfaces notice
+  // and a request to open another pillar's surface all ask before they drop
+  // either kind of edit. `true`: nothing would be lost, or the author agreed.
+  const confirmLeavePillar = React.useCallback((): boolean => {
+    let agreed = false;
+    confirmUnsavedLeave(() => {
+      agreed = true;
+    });
+    return agreed;
+  }, []);
   // Browser-native "leave site?" prompt on tab close / reload while a pillar
   // is dirty. The matrix editor installs its own (double registration is
   // harmless); the Interfaces nav editor has none, so this closes that gap.
@@ -1242,21 +1256,66 @@ function StudioDesignSurfaceBody({ aiSlot, area }: StudioDesignSurfaceProps): Re
   // remount waits for the new query to be the router's: the router may apply
   // a navigation in a later render than the click's own state updates, and a
   // pillar remounted before it would capture the old deep link.
+  // objectstack#36900 — it waits for the query it was asked for, not for the
+  // next query change: the command palette closes itself (its `?palette=`
+  // goes) before the pick navigates, and that first change must not remount
+  // the pillar on the old deep link.
   const [pillarEntry, setPillarEntry] = React.useState(0);
-  const reentryPending = React.useRef(false);
-  const { search: currentSearch } = useLocation();
-  const reenterPillar = React.useCallback((): boolean => {
-    if (!confirmLeavePillar()) return false;
-    reentryPending.current = true;
-    return true;
-  }, [confirmLeavePillar]);
+  const reentryPending = React.useRef<string | null>(null);
+  const currentSearch = useLocation().search;
+  const reenterPillar = React.useCallback(
+    (search: string): boolean => {
+      if (!confirmLeavePillar()) return false;
+      reentryPending.current = search;
+      return true;
+    },
+    [confirmLeavePillar],
+  );
   React.useLayoutEffect(() => {
-    if (!reentryPending.current) return;
-    reentryPending.current = false;
+    const expected = reentryPending.current;
+    if (expected === null || !studioSamePageSearch(currentSearch, expected)) return;
+    reentryPending.current = null;
     setPillarEntry((n) => n + 1);
   }, [currentSearch]);
   // objectstack#26708 — a package that is not there has no menu.
   const showMenu = !pkgMissing;
+
+  // objectstack#36900 — ⌘K on every design page (decision 7 of #36890: an
+  // author switches items by ×, by ‹ › and by ⌘K). The palette lists this
+  // scope's menu, and on a package its items (`StudioPaletteGroups`); a pick
+  // leaves the way a menu entry does: it asks about unsaved work, and an
+  // address that is the page already open on another query re-enters the
+  // page, which reads its deep link once, at mount. The palette's own
+  // `?palette=` is not part of the page's query. A package that is not there
+  // has no menu, so its palette is the landing's. (`currentPathname` is read
+  // above, for `requestSurface`.)
+  const openFromPalette = React.useCallback(
+    (to: string) =>
+      openStudioPaletteAddress(
+        to,
+        { pathname: currentPathname, search: currentSearch },
+        { navigate: shellNavigate, reenter: reenterPillar },
+      ),
+    [currentPathname, currentSearch, reenterPillar, shellNavigate],
+  );
+  const paletteLabel = packageId !== null && pkgEntry?.id === packageId ? pkgEntry.name : undefined;
+  const paletteSurface = React.useMemo<StudioPaletteSurface | undefined>(
+    () =>
+      showMenu
+        ? {
+            packageScope: packageId !== null,
+            renderGroups: (groupsProps) => (
+              <StudioPaletteGroups segment={scopeSegment} packageLabel={paletteLabel} {...groupsProps} />
+            ),
+            open: openFromPalette,
+          }
+        : undefined,
+    [showMenu, packageId, scopeSegment, paletteLabel, openFromPalette],
+  );
+  // A host that already mounts a command palette above this surface keeps
+  // its own: a second provider would toggle the one `?palette=` twice per
+  // ⌘K, and a second palette would draw a second dialog.
+  const paletteHosted = useCommandPaletteProviderMounted();
 
   const publishButton = (
     <button
@@ -1294,7 +1353,8 @@ function StudioDesignSurfaceBody({ aiSlot, area }: StudioDesignSurfaceProps): Re
     </button>
   );
 
-  return (
+  const page = (
+    <StudioMenuDataProvider segment={scopeSegment}>
     <SurfaceDeepLinkProvider onRequest={requestSurface}>
       <StudioSaveProvider value={saveBar.registry}>
       <StudioRightSlotContext.Provider value={slotHandle}>
@@ -1687,10 +1747,14 @@ function StudioDesignSurfaceBody({ aiSlot, area }: StudioDesignSurfaceProps): Re
           }
         />
       </StudioMenuProvider>
+      {/* objectstack#36900 — the command palette, in its `studio` scope, with this page's groups. */}
+      {!paletteHosted && <CommandPalette scope="studio" surface={paletteSurface} />}
       </StudioRightSlotContext.Provider>
       </StudioSaveProvider>
     </SurfaceDeepLinkProvider>
+    </StudioMenuDataProvider>
   );
+  return paletteHosted ? page : <CommandPaletteProvider>{page}</CommandPaletteProvider>;
 }
 
 // objectstack#29988 — the Automations rail's flow helpers moved to their own module; re-exported for their pins.
