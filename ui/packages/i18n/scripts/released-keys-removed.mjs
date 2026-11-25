@@ -38,7 +38,7 @@
 import { execFileSync } from 'node:child_process';
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, join, posix, relative } from 'node:path';
+import { dirname, join, posix } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const args = process.argv.slice(2);
@@ -56,15 +56,17 @@ const TAG = opt('--tag', '@object-ui/i18n@18.6.0');
 const REF = opt('--ref', 'origin/main');
 const AS_JSON = args.includes('--json');
 
-const here = dirname(fileURLToPath(import.meta.url));
-const git = (...a) => execFileSync('git', a, { cwd: here, encoding: 'utf8', maxBuffer: 1 << 28 });
-const ROOT = git('rev-parse', '--show-toplevel').trim();
-const PKG = relative(ROOT, dirname(here)).split('\\').join('/'); // ui/packages/i18n
+// git runs in the package directory and every blob is named in git's own
+// cwd-relative form (`REF:./PATH`), so the script needs no repository root and
+// reads the same in the standalone and the monorepo layout.
+const PKG_DIR = dirname(dirname(fileURLToPath(import.meta.url)));
+const git = (...a) => execFileSync('git', a, { cwd: PKG_DIR, encoding: 'utf8', maxBuffer: 1 << 28 });
+const PKG = git('rev-parse', '--show-prefix').trim().replace(/\/$/, ''); // for messages only
 
-const show = (ref, path) => git('show', `${ref}:${PKG}/${path}`);
+const show = (ref, path) => git('show', `${ref}:./${path}`);
 const exists = (ref, path) => {
   try {
-    git('cat-file', '-e', `${ref}:${PKG}/${path}`);
+    git('cat-file', '-e', `${ref}:./${path}`);
     return true;
   } catch {
     return false;
