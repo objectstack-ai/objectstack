@@ -69,6 +69,9 @@ const ko = {
     autofillNoCurrency: '{{field}}이(가) 입력되지 않았습니다. 선택한 금액은 {{amount}}이지만 여기에는 아직 통화가 선택되지 않았습니다. 통화를 선택한 후 {{field}}을(를) 입력하세요.',
     autofillCurrencyUnread: '{{field}}이(가) 입력되지 않았습니다. 선택한 금액은 {{amount}}이지만 여기의 통화를 읽을 수 없습니다. 통화를 확인한 후 {{field}}을(를) 입력하세요.',
     autofillKept: '{{field}}은(는) 이전 값을 유지합니다.',
+    autofillNowSameCurrency: '선택 시 {{field}}이(가) 입력되지 않았습니다. 레코드는 이제 {{to}} 기준입니다. 다시 선택하면 {{amount}}이(가) 입력됩니다.',
+    autofillNowSameCurrencyHeld: '선택 시 {{field}}이(가) 입력되지 않았고 이전 값을 유지합니다. 레코드는 이제 {{to}} 기준입니다. {{field}}을(를) 비운 뒤 다시 선택하면 {{amount}}이(가) 입력됩니다.',
+    autofillCopiedUnder: '{{field}}은(는) {{amount}}(으)로 입력되었지만 레코드는 이제 {{to}} 기준입니다. 필요하면 {{to}}(으)로 {{field}}을(를) 입력하세요.',
   },
   common: {
     // objectui#13461 — a disclosure toggle's name (the tree-view node toggle).

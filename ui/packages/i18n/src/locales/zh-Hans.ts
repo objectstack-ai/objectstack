@@ -78,6 +78,9 @@ const zh = {
     autofillNoCurrency: '未填入{{field}}：所选金额为 {{amount}}，但此处尚未选择币种。请先选择币种，再填写{{field}}。',
     autofillCurrencyUnread: '未填入{{field}}：所选金额为 {{amount}}，但无法读取此处的币种。请先确认币种，再填写{{field}}。',
     autofillKept: '{{field}}仍保留原来的值。',
+    autofillNowSameCurrency: '选取时未填入{{field}}。记录现已改为 {{to}}：重新选取即可填入 {{amount}}。',
+    autofillNowSameCurrencyHeld: '选取时未填入{{field}}，且仍保留原来的值。记录现已改为 {{to}}：请先清空{{field}}，再重新选取即可填入 {{amount}}。',
+    autofillCopiedUnder: '{{field}}按 {{amount}} 带入，但记录现已改为 {{to}}。如需调整，请按 {{to}} 填写{{field}}。',
   },
   common: {
     // objectui#13461 — a disclosure toggle's name (the tree-view node toggle).
