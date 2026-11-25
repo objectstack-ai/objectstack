@@ -1364,6 +1364,18 @@ export interface ActionResult {
   refusal?: { message: string };
 
   /**
+   * The run paused at a screen and waits for input: a `flow` whose run is
+   * suspended on a `screen` node. Set only beside `success: true` and
+   * `handedOff: true` (the run started, and the screen finishes it), so a
+   * caller that counts outcomes reads it as waiting, never as done, the way
+   * it reads {@link ActionResult.refusal} as refused. `runId` names the
+   * suspended run, `''` when the engine sent none. The handler still hands the
+   * screen to its host's flow runner; a caller that dispatches many records
+   * reports the waiting ones in its own result.
+   */
+  paused?: { runId: string };
+
+  /**
    * An undoable operation captured by the handler (e.g. an `undoable` update
    * action's prior field values). When present, the runner pushes it onto the
    * global UndoManager and the success toast offers an "Undo" affordance.

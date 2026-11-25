@@ -292,6 +292,25 @@ describe('§3 the boot report names the sealed overlays, per type, with their re
         expect(sealed[0]).not.toContain('env_grid');
     });
 
+    it('[#37013] the platform\'s own record beside a shipped item is not named for deletion; a hatch-written row still is', async () => {
+        const { warns } = await boot(
+            {
+                sys_metadata: [
+                    metaRow('action', 'managed', { name: 'managed', label: 'platform', _provenance: 'platform' }),
+                    metaRow('hook', 'managed', { label: 'hatch-written' }),
+                ],
+            },
+            [
+                { type: 'action', name: 'managed', body: { name: 'managed', _packageId: PKG } },
+                { type: 'hook', name: 'managed', body: { name: 'managed', _packageId: PKG } },
+            ],
+        );
+        const sealed = warns.filter((w) => w.includes('[metadata_sealed_overlay_unserved]'));
+        expect(sealed).toHaveLength(1);
+        expect(sealed[0]).toContain('hook×1 (managed)');
+        expect(sealed[0]).not.toContain('action×');
+    });
+
     it('silence on a store with neither population', async () => {
         const { warns } = await boot({ sys_metadata: [metaRow('view', 'env_grid', { label: 'env' })] });
         expect(warns.filter((w) => w.includes('_unserved]'))).toEqual([]);

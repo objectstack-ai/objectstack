@@ -383,13 +383,17 @@ any unit of work around the write commits (the write's own unit, opened when a
 metadata hook can abort it, or a caller's `engine.transaction(…)`). The
 in-process realtime service awaits each subscriber, so the re-read runs inside
 the same open transaction and sees the row the write just made. If that unit
-then rolls back, the index is wrong in one of two ways until the row's next
-event or a `reindexSource`:
+then rolls back, the index is wrong in one of two ways:
 
 - **The uncommitted row matched** — the document stays built from a row that
   never committed.
 - **The uncommitted row did not match** — the document was deleted, so the
   committed row, which may still match, is missing from the index.
+
+The row's next event or a `reindexSource` repairs a row that still exists. A
+document built from an **insert** that rolled back has no row left to repair it
+from, and a reindex removes no documents, so it stays until the index purge
+([#37096](https://github.com/objectstack-ai/objectstack/issues/37096)) lands.
 
 `data.record.restored` is
 published after the restore's own unit has committed.
@@ -408,7 +412,10 @@ published after the restore's own unit has committed.
   than per-record events. A knowledge index is a per-record projection and
   `matched: 40` names no record, so there is no upsert or delete to derive —
   the service logs a warning naming the object and count instead of failing
-  silently. Repair such an index with an explicit `reindexSource`.
+  silently. An explicit `reindexSource` refreshes the documents of rows that
+  still exist and match; it removes no documents, so those of deleted rows (or
+  of rows that stopped matching) stay until the index purge
+  ([#37096](https://github.com/objectstack-ai/objectstack/issues/37096)) lands.
 </Callout>
 
 ### Retention deletes are covered by a reap guard

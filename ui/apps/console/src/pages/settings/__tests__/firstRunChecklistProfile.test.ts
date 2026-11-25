@@ -47,13 +47,13 @@ describe('the served flag selects the profile', () => {
 
   it("completion counts only the profile's required rows", () => {
     const rows = [
-      { id: 'organization_name', done: true },
+      { id: 'organization_basics', done: true },
       { id: 'first_app', done: true },
       { id: 'first_record', done: false },
     ];
     expect(checklistCompletion(rows, (id) => isProfileOptionalRow(MANAGED_PROFILE, id))).toEqual({
       done: 2,
-      total: 2,
+      total: 3,
       complete: true,
     });
     // CONTROL: without the profile the record row is required.

@@ -11,6 +11,7 @@
     "api/AiAgentCapabilities:authoring",
     "api/AiAgentCapabilities:canvas",
     "api/AiAgentCapabilities:debug",
+    "api/AiAgentCapabilities:focus",
     "api/AiAgentCapabilities:resume",
     "api/AiAgentChatRequest:context",
     "api/AiAgentChatRequest:messages",
