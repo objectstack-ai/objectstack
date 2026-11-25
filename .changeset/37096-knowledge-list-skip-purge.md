@@ -8,6 +8,7 @@ feat(service-knowledge): adapters list their documents; a complete reindex skips
 
 Clause-②: yes
 Metadata-protocol: added
+Skills-docs: none — no skill under `skills/**` teaches `KnowledgeDocument`, the adapter contract or reindex; `skills/objectstack-ai/SKILL.md` teaches `KnowledgeSource` authoring only, which this change does not touch. `content/docs/protocol/knowledge.mdx` gains the members, the skip and the purge in this change.
 
 Two optional knowledge-adapter contract members land with their reader (ADR-0161 K8, items 1 and 2):
 
