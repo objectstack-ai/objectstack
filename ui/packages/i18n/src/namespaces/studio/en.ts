@@ -2043,6 +2043,7 @@ const STUDIO_EN: Record<string, string> = {
   'engine.packages.customizations.failed': 'Couldn’t read customizations',
   'engine.packages.customizations.none': 'No changes in this environment yet',
   'engine.packages.customizations.customized': '{count} customized',
+  'engine.packages.customizations.arranged': '{count} rearranged',
   'engine.packages.customizations.separator': ', ',
   'engine.packages.customizations.switchedOff': '{count} switched off',
   'engine.packages.customizations.tab.all': 'All',
