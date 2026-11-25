@@ -1966,16 +1966,24 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
   // [ADR-0160 D1] Context packs that name an object or field the stack does not
   // define, a related list with no link to the root, or a body that is not
   // long text. Advisory: the tool reads what resolves and states nothing about
-  // the rest, so the author hears it here. CLI-only — every verdict reads the
-  // stack's `objects` beside its `aiContexts`.
+  // the rest, so the author hears it here.
+  //
+  // [ADR-0160 D1] "Reported at save and by `os validate`": on the runtime
+  // publish door for `ai_context`, the door a Studio / REST `/meta` / MCP
+  // author of a pack has. The rule reads `aiContexts` and `objects` and no
+  // other collection; `objects` is the context every per-write snapshot
+  // carries, and the written pack is the sole member of its own collection, so
+  // the snapshot cannot invent a finding. The findings ride the 2xx
+  // `advisories` with the rule ids and messages `os validate` prints; the save
+  // is never refused for them, as for every advisory rule on this door.
   {
     name: 'validateAiContext',
     tier: 'advisory',
     input: 'parsed',
     commands: ALL,
     source: 'packages/lint/src/validate-ai-context.ts',
-    surfaces: CLI_ONLY,
-    surfaceReason: RUNTIME_NEEDS_FULL_SNAPSHOT,
+    surfaces: CLI_AND_RUNTIME,
+    runtimeTypes: ['ai_context'],
     run: (stack) => validateAiContext(stack),
   },
   // [#34613] `validateSeedReplaySafety` (framework#3434, the `insert`-mode
