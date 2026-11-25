@@ -853,11 +853,19 @@ export function readRollupSourceFinding(f: Pick<RollupSourceVisibilityFinding, '
  * set not reading: the aggregated field when the set cannot read the child
  * object or that field, the filtered field when it cannot read that one. Any
  * other finding — a set no persona holds, a child the card lets the persona
- * read, the `info` row-scope arm — is not charged.
+ * read, the `info` row-scope arm — is not charged. Nor is a finding the build
+ * acknowledged (`rollupSourceUnreadableReason`, the rule's `info` arm) on a
+ * roll-up the card names in that persona's `allowedRollups` (ruling B on
+ * #37257): the card means the persona to read that total. An unacknowledged
+ * finding on an allowed roll-up is charged as any other.
  */
 export function rollupSourceCharges(scenario: LoadedScenario, artifact: unknown): RollupSourceCharge[] {
   const card = scenario.card;
   const personas = new Map(card.run.personas.map((p) => [permissionSetName(card, p.id), p] as const));
+  // The card's names are namespace-relative; the finding's are the build's (`demoorder_invoice.amount_paid`).
+  const ns = scenarioNamespace(card);
+  const named = (object: string) => (object.startsWith(`${ns}_`) ? object : `${ns}_${object}`);
+  const allowed = new Map(card.run.personas.map((p) => [p.id, new Set((p.allowedRollups ?? []).map((r) => `${named(r.object)}.${r.field}`))] as const));
   const stack = {
     objects: resolveStackCollection(artifact, 'objects'),
     objectExtensions: resolveStackCollection(artifact, 'objectExtensions'),
@@ -869,8 +877,9 @@ export function rollupSourceCharges(scenario: LoadedScenario, artifact: unknown)
     const r = readRollupSourceFinding(f);
     const persona = personas.get(r.permissionSet);
     if (!persona) continue;
-    const named = 'object' in r.unreadable ? r.childFields : [r.unreadable.field];
-    const hiddenField = (persona.hidden.fields ?? []).find((h) => h.object === r.child && named.includes(h.field));
+    if (f.severity === 'info' && allowed.get(persona.id)!.has(r.rollup)) continue;
+    const childNamed = 'object' in r.unreadable ? r.childFields : [r.unreadable.field];
+    const hiddenField = (persona.hidden.fields ?? []).find((h) => h.object === r.child && childNamed.includes(h.field));
     const withheld = (persona.hidden.objects ?? []).includes(r.child) ? { object: r.child } : hiddenField ? { field: `${hiddenField.object}.${hiddenField.field}` } : undefined;
     if (!withheld) continue;
     out.push({ persona: persona.id, permissionSet: r.permissionSet, rollup: r.rollup, child: r.child, withheld, finding: { rule: f.rule, where: f.where, path: f.path, message: f.message } });

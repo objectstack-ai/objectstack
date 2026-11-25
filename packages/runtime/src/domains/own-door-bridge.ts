@@ -59,9 +59,26 @@
  * service without the member answers `501 NOT_IMPLEMENTED`, ⛔ never the
  * dispatcher's `404 ROUTE_NOT_FOUND`: the route IS mounted, and what is
  * missing is the implementation behind it.
+ *
+ * ## The `501` is in the request's language when the bridge names its noun
+ *
+ * [#37273] The two `501` sentences are the operation-message catalog's
+ * (`own_door_service_unregistered`, `own_door_member_missing`), rendered in
+ * the request's top `Accept-Language` tag (`preferredLocaleFromHeader`, no
+ * q-value negotiation: the platform's existing reading, and the print door's
+ * own for its 5xx). The bridge holds no `ExecutionContext` and no `i18n`
+ * service, so the header is the only source and no `errors.own_door_*`
+ * override is consulted. The door's noun is a catalog key too
+ * ({@link OwnDoorBridge.nounKey}); a bridge that names none keeps its English
+ * sentence whatever the language, so a sentence is never half translated.
+ * Only the language moves: the English is byte-identical, the code and the
+ * status are unchanged, and no `userMessage` is added. The slot, member and
+ * package names are identifiers and stay as written.
  */
 
 import { INTERNAL_ERROR_MESSAGE } from '@objectstack/types';
+import { operationUserMessage } from '@objectstack/core';
+import { preferredLocaleFromHeader } from '@objectstack/spec/system';
 import type { HttpProtocolContext, HttpDispatcherResult } from '../http-dispatcher.js';
 import type { DomainHandlerDeps, DomainRequest, DomainRoute } from '../domain-handler-registry.js';
 
@@ -85,6 +102,12 @@ export interface OwnDoorBridge {
     readonly producer: string;
     /** The doors' noun for answers and log lines, e.g. `the personal view door`. */
     readonly noun: string;
+    /**
+     * [#37273] The operation-message catalog key of {@link noun} (its English
+     * text is `noun`'s, byte for byte), which puts the bridge's `501` in the
+     * request's language. Absent, the `501` stays English.
+     */
+    readonly nounKey?: string;
     /** The log tag, e.g. `personal-views`. */
     readonly tag: string;
 }
@@ -163,8 +186,7 @@ export async function handleOwnDoorBridgeRequest(
         return {
             handled: true,
             response: deps.error(
-                `${capitalize(bridge.noun)} is not available: no ${bridge.slot} service is registered on this kernel. `
-                + `${bridge.producer} registers it.`,
+                notImplementedSentence(bridge, context, 'own_door_service_unregistered', { producer: bridge.producer }),
                 501,
             ),
         };
@@ -174,8 +196,7 @@ export async function handleOwnDoorBridgeRequest(
         return {
             handled: true,
             response: deps.error(
-                `${capitalize(bridge.noun)} is not available: the registered ${bridge.slot} service `
-                + `does not implement ${bridge.member}.`,
+                notImplementedSentence(bridge, context, 'own_door_member_missing', { member: bridge.member }),
                 501,
             ),
         };
@@ -208,6 +229,36 @@ export async function handleOwnDoorBridgeRequest(
         );
         return { handled: true, response: deps.error(INTERNAL_ERROR_MESSAGE, 500) };
     }
+}
+
+/**
+ * A `501` sentence of the catalog, in the request's top `Accept-Language` tag
+ * when the bridge names its noun's key, in English otherwise (the noun would
+ * stay English, and a sentence is never half translated).
+ */
+function notImplementedSentence(
+    bridge: OwnDoorBridge,
+    context: HttpProtocolContext,
+    messageKey: 'own_door_service_unregistered' | 'own_door_member_missing',
+    params: Record<string, string>,
+): string {
+    const caller = bridge.nounKey !== undefined ? { locale: requestLocaleOf(context) } : undefined;
+    const noun = bridge.nounKey !== undefined ? operationUserMessage(bridge.nounKey, caller) : bridge.noun;
+    return operationUserMessage(messageKey, caller, { door: capitalize(noun), slot: bridge.slot, ...params });
+}
+
+/** The request's top `Accept-Language` tag, from a fetch `Request` or a plain header record. */
+function requestLocaleOf(context: HttpProtocolContext): string | undefined {
+    const headers = (context.request as { headers?: unknown } | undefined)?.headers as
+        | { get?: (name: string) => string | null }
+        | Record<string, unknown>
+        | undefined;
+    if (!headers) return undefined;
+    const value = typeof headers.get === 'function'
+        ? headers.get('accept-language')
+        : (headers as Record<string, unknown>)['accept-language'] ?? (headers as Record<string, unknown>)['Accept-Language'];
+    const header = Array.isArray(value) ? value[0] : value;
+    return preferredLocaleFromHeader(typeof header === 'string' ? header : undefined);
 }
 
 function capitalize(text: string): string {

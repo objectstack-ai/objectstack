@@ -42,6 +42,8 @@ import {
   STUDIO_HOME_PILLAR,
   STUDIO_ITEM_REVIEW_PARAM,
   STUDIO_ITEM_REVIEW_VALUE,
+  STUDIO_OWD_OBJECT_PARAM,
+  STUDIO_OWD_SECTION,
   type StudioPillarKey,
   type StudioSurfaceSpelling,
 } from './studioAddress.js';
@@ -63,14 +65,19 @@ export interface StudioAddressFamily {
 }
 
 export const STUDIO_ADDRESS_FAMILIES: readonly StudioAddressFamily[] = Object.freeze([
-  { id: 'landing', today: '/studio', builder: 'studioLandingPath', meaning: 'The front door: pick or create a writable package.' },
+  {
+    id: 'landing',
+    today: '/studio',
+    builder: 'studioLandingPath',
+    meaning: "Studio's entry, no page of its own: the package last opened, else the package list (StudioEntryRedirect).",
+  },
   {
     id: 'landing-new-package',
     today: `/studio?${STUDIO_NEW_PARAM}=${STUDIO_NEW_PACKAGE_VALUE}`,
     builder: 'studioLandingPath',
-    meaning: 'The front door with its create-package dialog open.',
+    meaning: "A retired bookmark: Studio's entry forwards it to Setup → Packages with New Package open.",
   },
-  { id: 'package', today: '/studio/<package>', builder: 'studioPackagePath', meaning: `A package's Studio; the route lands it on its home pillar, \`${STUDIO_HOME_PILLAR}\`.` },
+  { id: 'package', today: '/studio/<package>', builder: 'studioPackagePath', meaning: `A package's Studio; the route lands it on its home, \`${STUDIO_HOME_PILLAR}\`, which redirects to the package's object list (objectstack#36904).` },
   { id: 'pillar', today: '/studio/<package>/<pillar>', builder: 'studioPillarPath', meaning: 'One pillar of a package: data, automations or access.' },
   {
     id: 'pillar-item',
@@ -78,12 +85,25 @@ export const STUDIO_ADDRESS_FAMILIES: readonly StudioAddressFamily[] = Object.fr
     builder: 'studioItemPath',
     meaning: 'A pillar opened on one item. The family the designer cards move, one type at a time (STUDIO_ITEM_TYPES).',
   },
-  { id: 'org-scope', today: '/studio/~org/automations', builder: 'studioOrgScopePath', meaning: 'The package-less scope: the organization\'s own flows.' },
+  {
+    id: 'owd',
+    today: `/studio/<package>/${STUDIO_OWD_SECTION}[?${STUDIO_OWD_OBJECT_PARAM}=<object>]`,
+    builder: 'studioOwdOverviewPath',
+    meaning: "A package's organization-wide default sharing overview (objectstack#36905), optionally on one object. Not a metadata item and not a pillar.",
+  },
+  {
+    id: 'org-scope',
+    today: '/studio/~org/metadata/flow?source=runtime',
+    builder: 'studioOrgScopePath',
+    meaning:
+      "The package-less scope: the organization's own flows, listed in its own leg of the area (objectstack#36903). The old /studio/~org/automations redirects here.",
+  },
   {
     id: 'org-scope-item',
-    today: `/studio/~org/automations?${DESIGNER_SURFACE_PARAM}=flow:<name>`,
+    today: '/studio/~org/metadata/flow/<name>?source=runtime',
     builder: 'studioOrgScopePath',
-    meaning: 'A package-less flow. It has no package, so no metadata address of a package; it moves with the flow designer card.',
+    meaning:
+      'A package-less flow, full-screen in the scope\'s leg of the area (objectstack#36903). The old /studio/~org/automations?surface=flow:<name> redirects here.',
   },
   { id: 'area-root', today: '/studio/<package or ~all>/metadata', builder: 'studioMetadataAreaRoot', meaning: 'The "All metadata" area of a package, or across packages.' },
   { id: 'area-type', today: '/studio/<package or ~all>/metadata/<type>', builder: 'studioMetadataTypePath', meaning: "A type's list in the area." },
@@ -109,7 +129,7 @@ export const STUDIO_ADDRESS_FAMILIES: readonly StudioAddressFamily[] = Object.fr
     id: 'retired-interfaces',
     today: `/studio/<package>/${RETIRED_INTERFACES_SEGMENT}[?…]`,
     builder: 'retiredInterfacesTarget',
-    meaning: `The retired Interfaces pillar (objectstack#36502). Redirects to the package's \`${STUDIO_HOME_PILLAR}\` pillar, keeping only STUDIO_RETIRED_INTERFACES_KEPT_PARAMS.`,
+    meaning: `The retired Interfaces pillar (objectstack#36502). Redirects to the package's home, \`${STUDIO_HOME_PILLAR}\` (and from there to its object list, objectstack#36904), keeping only STUDIO_RETIRED_INTERFACES_KEPT_PARAMS.`,
   },
 ]);
 
@@ -131,10 +151,18 @@ export interface StudioItemTypeRow {
   readonly spellings: readonly StudioSurfaceSpelling[];
   /** The metadata address it moves to, or `null` when it is a pillar page with no item of its own. */
   readonly onMetadataAddress: string | null;
+  /**
+   * Set once the type has moved: the address its pillar address now redirects
+   * to (step 3 above). Absent while the pillar still opens it.
+   */
+  readonly redirectsTo?: string;
 }
 
 export const STUDIO_ITEM_TYPES: readonly StudioItemTypeRow[] = Object.freeze([
   {
+    // objectstack#36904 — switched: an object opens on its metadata address,
+    // and this pillar address redirects there (`dataPillarRedirect`), keeping
+    // `?action=` as the designer's query and dropping `?view=` and `?nav=`.
     type: 'object',
     pillar: 'data',
     surface: 'object:<name>',
@@ -143,6 +171,9 @@ export const STUDIO_ITEM_TYPES: readonly StudioItemTypeRow[] = Object.freeze([
     onMetadataAddress: '/studio/<package>/metadata/object/<name>',
   },
   {
+    // objectstack#36903 — switched: a flow opens its designer on its metadata
+    // address, and this pillar address redirects there
+    // (`automationsPillarRedirect.ts`), dropping `?view=` and `?nav=`.
     type: 'flow',
     pillar: 'automations',
     surface: 'flow:<name>',
@@ -157,16 +188,19 @@ export const STUDIO_ITEM_TYPES: readonly StudioItemTypeRow[] = Object.freeze([
     qualifiers: [],
     spellings: ['component'],
     onMetadataAddress: '/studio/<package>/metadata/permission/<name>',
+    // objectstack#36905 — moved (`accessPillarRedirect.ts`).
+    redirectsTo: '/studio/<package>/metadata/permission/<name>?package=<package>',
   },
   {
     // The Access pillar's organization-wide defaults overview. Not a metadata
-    // item: the permission designer card decides where it lives.
+    // item: objectstack#36905 gave it a route of its own (the `owd` family).
     type: 'owd',
     pillar: 'access',
     surface: 'owd:overview',
     qualifiers: [],
     spellings: ['component'],
     onMetadataAddress: null,
+    redirectsTo: `/studio/<package>/${STUDIO_OWD_SECTION}`,
   },
 ]);
 
@@ -252,7 +286,7 @@ export const STUDIO_QUERY_PARAMS: readonly StudioQueryParamRow[] = Object.freeze
   {
     key: STUDIO_NEW_PARAM,
     values: STUDIO_NEW_PACKAGE_VALUE,
-    meaning: "The landing's create dialog. Landing only.",
+    meaning: "The retired new-package bookmark; Studio's entry forwards it to Setup's New Package. Entry only.",
     onMetadataAddress: 'verbatim',
     keptOnRetiredInterfaces: false,
   },

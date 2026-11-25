@@ -7,8 +7,8 @@
  *
  *  - An action an object holds (its served `actions[]`, which carries the
  *    actions declared inside the object and the top-level ones bound to it by
- *    `objectName`) is switched on the object's Actions view in the Data
- *    pillar: `?surface=object:<object>&action=<name>` opens that view on it.
+ *    `objectName`) is switched on the object designer's Actions tab:
+ *    `/metadata/object/<object>?action=<name>` opens that tab on it.
  *    An action declared inside its object has no item of its own, so this is
  *    the only page that shows it.
  *  - Any other action (one bound to no object) is a standalone `action` item:
@@ -57,11 +57,8 @@ export async function readActionObjects(client: ActionObjectClient, packageId: s
  */
 export function switchedOffActionPath(packageId: string, name: string, object: string | null | undefined): string {
   if (object) {
-    // `URLSearchParams` serialisation, as this link has always been spelled.
-    return studioItemPath(packageId, 'object', object, {
-      spelling: 'form',
-      qualifiers: { [DESIGNER_SURFACE_ACTION_PARAM]: name },
-    });
+    // objectstack#36904 — `?action=` on the object designer's address.
+    return studioItemPath(packageId, 'object', object, { qualifiers: { [DESIGNER_SURFACE_ACTION_PARAM]: name } });
   }
   return studioItemPath(packageId, 'action', name);
 }

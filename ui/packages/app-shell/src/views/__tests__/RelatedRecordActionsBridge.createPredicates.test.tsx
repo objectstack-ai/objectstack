@@ -23,8 +23,8 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { render, cleanup } from '@testing-library/react';
-import { MemoryRouter } from 'react-router-dom';
+import { render, cleanup, act } from '@testing-library/react';
+import { MemoryRouter, useLocation } from 'react-router-dom';
 import React from 'react';
 
 // Controllable principal verdict, keyed by action — same double the sibling
@@ -46,7 +46,7 @@ vi.mock('@object-ui/permissions', async (importOriginal) => {
 });
 
 import { RelatedRecordActionsBridge } from '../RelatedRecordActionsBridge';
-import { useRelatedRecordActions } from '@object-ui/react';
+import { useRelatedRecordActions, type RelatedRecordHandlers } from '@object-ui/react';
 
 const CHILD = 'invoice';
 
@@ -279,5 +279,94 @@ describe('#4646 — predicates sit UNDER the object-level gates, never over them
       parentRecord: DRAFT_PARENT,
     });
     expect(h.onCreate).toBe(false);
+  });
+});
+
+/**
+ * objectstack#37246 — "+ New" on a related list whose relationship lookup is
+ * scoped by the child's own fields (`dependsOn`: a milestone's order
+ * `dependsOn` the milestone's account) opens the form with each of those
+ * fields seeded from the parent, one `formLink` pair each after the parent's
+ * own. Without them the form gated the lookup (「Select Account first」), or
+ * its `lookupAutofill` filled the account and the dependent clear emptied the
+ * order, and the milestone saved without its order.
+ */
+describe('#37246 — "+ New" seeds the relationship lookup\'s dependsOn fields from the parent', () => {
+  const MILESTONE = 'crm_billing_milestone';
+  const ORDER_PARENT = { id: 'so-1', name: 'SO-0001', crm_account: 'acc-1' };
+
+  function milestone(order: Record<string, unknown>) {
+    return [{
+      name: MILESTONE,
+      managedBy: 'platform',
+      fields: {
+        name: { type: 'text' },
+        crm_sales_order: { type: 'lookup', reference: 'crm_sales_order', ...order },
+        crm_account: { type: 'lookup', reference: 'crm_account' },
+      },
+    }];
+  }
+
+  /** Click "+ New" on the milestone list under `parentRecord`; the `formLink` pairs the URL then carries. */
+  function newFrom(opts: {
+    order: Record<string, unknown>;
+    parentRecord?: Record<string, unknown> | null;
+    parentFromList?: boolean;
+  }): string[] {
+    let handlers: RelatedRecordHandlers = {};
+    let search = '';
+    function NewProbe({ onRender }: { onRender: (h: RelatedRecordHandlers, s: string) => void }) {
+      const resolved = useRelatedRecordActions()?.resolve({ objectName: MILESTONE, relationshipField: 'crm_sales_order', parentId: 'so-1' }) ?? {};
+      onRender(resolved, useLocation().search);
+      return null;
+    }
+    render(
+      <MemoryRouter initialEntries={['/apps/crm/crm_sales_order/record/so-1']}>
+        <RelatedRecordActionsBridge
+          appName="crm"
+          objects={milestone(opts.order)}
+          dataSource={{ delete: vi.fn() }}
+          parentObjectName="crm_sales_order"
+          parentRecordId="so-1"
+          parentRecord={'parentRecord' in opts ? opts.parentRecord : ORDER_PARENT}
+          parentFromList={opts.parentFromList}
+        >
+          <NewProbe onRender={(h, s) => { handlers = h; search = s; }} />
+        </RelatedRecordActionsBridge>
+      </MemoryRouter>,
+    );
+    expect(typeof handlers.onCreate).toBe('function');
+    act(() => handlers.onCreate!());
+    const params = new URLSearchParams(search);
+    expect(params.get('form')).toBe('new');
+    expect(params.get('formObject')).toBe(MILESTONE);
+    return params.getAll('formLink');
+  }
+
+  it('a bare dependsOn entry: the parent link, then the account the order names', () => {
+    expect(newFrom({ order: { dependsOn: ['crm_account'] } })).toEqual(['crm_sales_order:so-1', 'crm_account:acc-1']);
+  });
+
+  it('the same with a lookupAutofill beside it', () => {
+    const order = { dependsOn: ['crm_account'], lookupAutofill: [{ target: 'crm_account', source: 'crm_account' }] };
+    expect(newFrom({ order })).toEqual(['crm_sales_order:so-1', 'crm_account:acc-1']);
+  });
+
+  it('a { field, param } entry reads the parent\'s param; an expanded reference reads as its id', () => {
+    const parentRecord = { id: 'so-1', customer: { id: 'acc-9', name: 'Contoso' } };
+    const order = { dependsOn: [{ field: 'crm_account', param: 'customer' }] };
+    expect(newFrom({ order, parentRecord })).toEqual(['crm_sales_order:so-1', 'crm_account:acc-9']);
+  });
+
+  it('control: a relationship lookup with no dependsOn links the parent alone, as before', () => {
+    expect(newFrom({ order: {} })).toEqual(['crm_sales_order:so-1']);
+  });
+
+  it('control: a parent that names no account seeds nothing beside the link', () => {
+    expect(newFrom({ order: { dependsOn: ['crm_account'] }, parentRecord: { id: 'so-1', crm_account: null } })).toEqual(['crm_sales_order:so-1']);
+  });
+
+  it('control: a custom page\'s lists name their own parents, so they seed the link alone', () => {
+    expect(newFrom({ order: { dependsOn: ['crm_account'] }, parentFromList: true })).toEqual(['crm_sales_order:so-1']);
   });
 });

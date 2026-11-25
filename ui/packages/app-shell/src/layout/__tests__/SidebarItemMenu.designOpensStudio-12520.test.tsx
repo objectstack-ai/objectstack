@@ -215,7 +215,7 @@ beforeEach(() => {
   vi.stubGlobal(
     'fetch',
     vi.fn(async (url: unknown) => ({
-      ok: true,
+      headers: new Headers(), ok: true,
       status: 200,
       json: async () =>
         String(url).endsWith('/api/v1/packages')
@@ -233,7 +233,7 @@ afterEach(() => {
 describe('a navigation entry\'s Object settings opens what the app bar\'s Edit app opens (objectui#12520)', () => {
   it('an object entry: the Data surface for the object, the bar\'s path on the object\'s list', async () => {
     const appBar = await appBarEditAppPath(entryRoute(LEADS, CRM));
-    expect(appBar).toBe('/studio/com.acme.crm/data?surface=object:crm_lead');
+    expect(appBar).toBe('/studio/com.acme.crm/metadata/object/crm_lead');
     expect(sidebarItemDesignPath(LEADS, CRM)).toBe(appBar);
   });
 
@@ -249,7 +249,7 @@ describe('a favorite\'s Object settings opens what the app bar\'s Edit app opens
   it('an object favorite matches the bar on the favorite\'s own route', async () => {
     const fav = favorite('object:crm_lead', '/apps/com.acme.crm/crm_lead');
     const appBar = await appBarEditAppPath(fav.href);
-    expect(appBar).toBe('/studio/com.acme.crm/data?surface=object:crm_lead');
+    expect(appBar).toBe('/studio/com.acme.crm/metadata/object/crm_lead');
     expect(favoriteDesignPath(fav, APPS)).toBe(appBar);
   });
 
@@ -261,7 +261,7 @@ describe('a favorite\'s Object settings opens what the app bar\'s Edit app opens
   it('a favorite starred in another app resolves in that app\'s package, not the one the sidebar is in', async () => {
     const fav = favorite('object:sales_quote', '/apps/com.acme.sales/sales_quote');
     const appBar = await appBarEditAppPath(fav.href);
-    expect(appBar).toBe('/studio/com.acme.sales/data?surface=object:sales_quote');
+    expect(appBar).toBe('/studio/com.acme.sales/metadata/object/sales_quote');
     expect(favoriteDesignPath(fav, APPS)).toBe(appBar);
   });
 

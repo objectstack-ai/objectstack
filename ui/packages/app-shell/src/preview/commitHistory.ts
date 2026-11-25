@@ -13,8 +13,8 @@
  * the metadata history. The history-not-confirm model: you don't approve each
  * publish — you review this timeline and revert if a change was wrong. These
  * helpers read the timeline (`GET /packages/:id/commits`) and revert one
- * commit (`POST /packages/:id/commits/:cid/revert`). Cookie-authenticated like
- * every console call; tolerant of the `{ data: ... }` / bare envelope shapes.
+ * commit (`POST /packages/:id/commits/:cid/revert`). Authenticated like every
+ * console call (the stored bearer token beside the session cookie); tolerant of the `{ data: ... }` / bare envelope shapes.
  *
  * ## Failures carry their KIND, not just a number (objectui#3529)
  *
@@ -71,6 +71,13 @@
  * operator's disposition must not depend on whether a body parsed, so status
  * alone is sufficient to produce the retryable reading.
  */
+
+import { createAuthenticatedFetch } from '@object-ui/auth';
+
+/** The console's authenticated fetch: the stored bearer token beside the session cookie. */
+function authFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+  return createAuthenticatedFetch()(input, init);
+}
 
 /**
  * A commit-store call that failed, carrying enough for a caller to tell the
@@ -194,7 +201,7 @@ function memberItemsOf(raw: unknown): CommitMemberItem[] | undefined {
 }
 
 export async function fetchCommits(packageId: string): Promise<CommitEntry[]> {
-  const res = await fetch(`/api/v1/packages/${encodeURIComponent(packageId)}/commits`, {
+  const res = await authFetch(`/api/v1/packages/${encodeURIComponent(packageId)}/commits`, {
     credentials: 'include',
     headers: { Accept: 'application/json' },
     cache: 'no-store',
@@ -229,7 +236,7 @@ export async function fetchCommits(packageId: string): Promise<CommitEntry[]> {
 }
 
 export async function revertCommit(packageId: string, commitId: string): Promise<void> {
-  const res = await fetch(
+  const res = await authFetch(
     `/api/v1/packages/${encodeURIComponent(packageId)}/commits/${encodeURIComponent(commitId)}/revert`,
     {
       method: 'POST',

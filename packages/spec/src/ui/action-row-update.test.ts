@@ -161,12 +161,14 @@ describe('`operation: \'update\'` + `patch` is accepted (the bulk def\'s vocabul
 });
 
 describe('key shape: a parallel key beside `type`, not an `ActionType` member', () => {
-  it('leaves the ActionType vocabulary exactly as it was', () => {
+  it('adds no `update` member to the ActionType vocabulary', () => {
     // objectui types its dispatch table `Record<RunnableActionType, …>` so a
     // member added here stops the console compiling until it has an executor —
     // a coupling the contract-first split must not carry. The write rides the
-    // existing `script` route instead.
-    expect([...ActionType.options]).toEqual(['script', 'url', 'modal', 'flow', 'api', 'form']);
+    // existing `script` route instead. (`ask_ai`, ADR-0160 D7, is the one
+    // member added since, and it landed with its console executor.)
+    expect([...ActionType.options]).toEqual(['script', 'url', 'modal', 'flow', 'api', 'form', 'ask_ai']);
+    expect(ActionType.options).not.toContain('update');
   });
 
   it('refuses `type: \'update\'` with the prescription, not zod\'s bare enum list', () => {

@@ -29,6 +29,12 @@ import {
 import { PageBlockCanvas } from './PageBlockCanvas.js';
 import { InterfaceListPage } from '../../InterfaceListPage.js';
 import { t as tr, tFormat } from '../i18n.js';
+import { createAuthenticatedFetch } from '@object-ui/auth';
+
+/** The console's authenticated fetch: the stored bearer token beside the session cookie. */
+function authFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+  return createAuthenticatedFetch()(input, init);
+}
 
 interface Block { type?: string; id?: string; children?: Block[]; [k: string]: unknown }
 
@@ -204,7 +210,7 @@ export function PagePreview({ draft, editing, selection, onSelectionChange, onPa
         // can `$expand` them. Without expansion record:details/highlights would
         // show raw foreign-key IDs (e.g. "O4VKrNesnsj2JYMa") instead of display
         // names — the runtime RecordDetailView $expands for exactly this reason.
-        const schemaRes = await fetch(`/api/v1/meta/object/${encodeURIComponent(recordObject)}`, opts);
+        const schemaRes = await authFetch(`/api/v1/meta/object/${encodeURIComponent(recordObject)}`, opts);
         const schemaJson = await schemaRes.json().catch(() => null);
         const schema = schemaJson?.item ?? schemaJson?.data ?? schemaJson;
         // [objectui#7429] FIELD-LEVEL SECURITY ON `$expand` — the same gate
@@ -262,7 +268,7 @@ export function PagePreview({ draft, editing, selection, onSelectionChange, onPa
         const query = expand.length > 0
           ? `?$top=50&$expand=${encodeURIComponent(expand.join(','))}`
           : `?$top=50`;
-        const recsRes = await fetch(`/api/v1/data/${encodeURIComponent(recordObject)}${query}`, opts);
+        const recsRes = await authFetch(`/api/v1/data/${encodeURIComponent(recordObject)}${query}`, opts);
         const recsJson = await recsRes.json().catch(() => null);
         // The REST data endpoint returns `{ object, records, total, hasMore }`;
         // tolerate the other common envelopes too.

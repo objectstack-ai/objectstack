@@ -116,6 +116,8 @@ function renderAt(url: string, surfaceLabel?: { type: string; name: string; labe
   render(
     <MemoryRouter initialEntries={[url]}>
       <Routes>
+        {/* objectstack#36904 — the area's routes: a designer page names its item in the path. */}
+        <Route path="/studio/:packageId/metadata/*" element={<StudioCopilotConversation packageId="app.k9" {...labelProp} />} />
         <Route
           path="/studio/:packageId/:tab"
           element={<StudioCopilotConversation packageId="app.k9" {...labelProp} />}
@@ -152,6 +154,25 @@ describe('Studio copilot display label (objectui#8219 item 3)', () => {
 
   it('no artifact in the URL: no label, whatever was reported', () => {
     renderAt('/studio/app.k9/data', DASH);
+    expect(capturedProps.surfaceArtifactLabel).toBeUndefined();
+  });
+});
+
+/*
+ * objectstack#36904 — the object designer on its metadata address reports its
+ * label as the pillar did; the chip shows it when it labels the object the
+ * path names, and only then.
+ */
+describe('Studio copilot display label on a designer\'s metadata address (objectstack#36904)', () => {
+  const TASK = { type: 'object', name: 'k9_task', label: '任务' };
+
+  it('a label for the object the address names reaches the pane', () => {
+    renderAt('/studio/app.k9/metadata/object/k9_task', TASK);
+    expect(capturedProps.surfaceArtifactLabel).toBe('任务');
+  });
+
+  it('a label for another object than the address names is not shown', () => {
+    renderAt('/studio/app.k9/metadata/object/k9_note', TASK);
     expect(capturedProps.surfaceArtifactLabel).toBeUndefined();
   });
 });

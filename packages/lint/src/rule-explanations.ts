@@ -6005,6 +6005,61 @@ const PERMISSION_RETIRED_LIFECYCLE_RESIDUE_EXPLANATION: RuleExplanation = {
 
 // ── Seed datasets (`validate-seed-state-machine.ts`) ──
 
+// ── Context packs (`validate-ai-context.ts`) ──
+
+const AI_CONTEXT_PACK_SILENCE =
+  'A warning, not a refusal: the pack loads and reads what resolves. `get_record_context` takes a name ' +
+  'the published definition lacks out of its plan and says nothing about it (ADR-0160 D3), so a caller ' +
+  'never learns what the author got wrong — which is why the author hears it here.';
+
+const AI_CONTEXT_OBJECT_UNKNOWN_EXPLANATION: RuleExplanation = {
+  rule: 'ai-context-object-unknown',
+  covers: 'why a context pack must name objects the stack defines',
+  paragraphs: [
+    'A context pack (`aiContexts`, ADR-0160) names a root `object` and the child objects of its `related` ' +
+      'lists. An object this stack does not define is read by nobody: a pack rooted on it is never selected ' +
+      'for a record the app has, and a related list on it is never read.',
+    'Name an object the stack defines (check the spelling), or remove the entry. A `sys_*` object is the ' +
+      'platform\'s and is not judged here.',
+    AI_CONTEXT_PACK_SILENCE,
+  ],
+};
+
+const AI_CONTEXT_FIELD_UNKNOWN_EXPLANATION: RuleExplanation = {
+  rule: 'ai-context-field-unknown',
+  covers: 'why each field a context pack lists must exist on its object',
+  paragraphs: [
+    'A pack lists the root\'s `fields`, each related list\'s `fields`, and a `body.field`. A name the object ' +
+      'does not define is left out of every answer: the assistant reads less about the record than the pack says.',
+    AI_CONTEXT_PACK_SILENCE,
+  ],
+};
+
+const AI_CONTEXT_RELATED_LINK_UNKNOWN_EXPLANATION: RuleExplanation = {
+  rule: 'ai-context-related-link-unknown',
+  covers: 'how a related list of a context pack finds its rows',
+  paragraphs: [
+    'A related list reads the child records whose reference field points at the root record, one level ' +
+      'deep. `field` names that reference field; omitted, the child\'s one reference field to the root is ' +
+      'used. A `field` that is not such a reference, a child with none, or a child with several and no ' +
+      '`field`, leaves the list unread.',
+    'Name the child\'s reference field to the root in `field`.',
+    AI_CONTEXT_PACK_SILENCE,
+  ],
+};
+
+const AI_CONTEXT_BODY_NOT_LONG_TEXT_EXPLANATION: RuleExplanation = {
+  rule: 'ai-context-body-not-long-text',
+  covers: 'which fields a context pack may read as a body',
+  paragraphs: [
+    'A pack\'s `body` is the one long-text field read whole, as an outline of its headings, or one section by ' +
+      'anchor. Only `textarea`, `markdown`, `html` and `richtext` fields are read as a body; any other field ' +
+      'named there is not read, and the answer carries no body.',
+    'Name a long-text field as the body, or list the field in `fields` instead.',
+    AI_CONTEXT_PACK_SILENCE,
+  ],
+};
+
 // ── Assignment rules (`validate-assignment-rules.ts`) ──
 
 const ASSIGNMENT_RULE_USER_TARGET_EXPLANATION: RuleExplanation = {
@@ -6990,6 +7045,10 @@ export const RULE_EXPLANATIONS: Readonly<Record<string, RuleExplanation>> = Obje
   [ORG_AXIS_PERMISSION_INHERITANCE_EXPLANATION.rule]: ORG_AXIS_PERMISSION_INHERITANCE_EXPLANATION,
   [ORG_AXIS_CROSS_ORG_BU_GRANT_EXPLANATION.rule]: ORG_AXIS_CROSS_ORG_BU_GRANT_EXPLANATION,
   [PERMISSION_RETIRED_LIFECYCLE_RESIDUE_EXPLANATION.rule]: PERMISSION_RETIRED_LIFECYCLE_RESIDUE_EXPLANATION,
+  [AI_CONTEXT_OBJECT_UNKNOWN_EXPLANATION.rule]: AI_CONTEXT_OBJECT_UNKNOWN_EXPLANATION,
+  [AI_CONTEXT_FIELD_UNKNOWN_EXPLANATION.rule]: AI_CONTEXT_FIELD_UNKNOWN_EXPLANATION,
+  [AI_CONTEXT_RELATED_LINK_UNKNOWN_EXPLANATION.rule]: AI_CONTEXT_RELATED_LINK_UNKNOWN_EXPLANATION,
+  [AI_CONTEXT_BODY_NOT_LONG_TEXT_EXPLANATION.rule]: AI_CONTEXT_BODY_NOT_LONG_TEXT_EXPLANATION,
   [ASSIGNMENT_RULE_USER_TARGET_EXPLANATION.rule]: ASSIGNMENT_RULE_USER_TARGET_EXPLANATION,
   [ASSIGNMENT_RULE_QUEUE_UNSTAFFED_EXPLANATION.rule]: ASSIGNMENT_RULE_QUEUE_UNSTAFFED_EXPLANATION,
   [SEED_VALUE_OUTSIDE_STATE_MACHINE_EXPLANATION.rule]: SEED_VALUE_OUTSIDE_STATE_MACHINE_EXPLANATION,

@@ -66,8 +66,12 @@ function createDialogSites(): Site[] {
 const DRAFT_LABEL = "t('engine.studio.createDraft', locale)";
 const LIVE_LABEL = "t('engine.studio.createLive', locale)";
 
-/** The dialogs of the live editors, by their title key (objectstack#36511). */
-const LIVE_TITLES = ['engine.studio.data.newObject', 'engine.studio.auto.newTitle', 'engine.studio.access.new'];
+/**
+ * The dialogs of the live editors, by their title key (objectstack#36511).
+ * objectstack#36905 — the Access pillar's went with the pillar: a permission
+ * set is created from its type's list.
+ */
+const LIVE_TITLES = ['engine.studio.data.newObject', 'engine.studio.auto.newTitle'];
 
 const titleKeyOf = (site: Site): string | undefined => site.props.match(/title=\{t\('([^']+)'/)?.[1];
 

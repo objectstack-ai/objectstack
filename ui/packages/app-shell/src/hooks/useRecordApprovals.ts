@@ -46,6 +46,12 @@ import { createQuietHttpLogger } from '@object-ui/data-objectstack';
 import { useAdapter } from '../providers/AdapterProvider.js';
 import { bearerAuthHeaders } from '../utils/authToken.js';
 import type { DecisionOutputDef } from '../utils/decisionOutputParams.js';
+import { createAuthenticatedFetch } from '@object-ui/auth';
+
+/** The console's authenticated fetch: the stored bearer token beside the session cookie. */
+function authFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+  return createAuthenticatedFetch()(input, init);
+}
 
 export interface ApprovalRequestLite {
   id: string;
@@ -129,6 +135,20 @@ export interface ApprovalRequestLite {
   flow_route?: {
     steps: Array<{ id: string; label: string; state: 'done' | 'current' | 'upcoming' }>;
     ahead: 'end' | 'undecided' | 'decided';
+    /**
+     * On a decided route only (objectstack#35863): where the record's
+     * approval stands now. `step` is the run's latest request when it is a
+     * later one (absent: the approval stands at this request), `status` that
+     * request's status (`pending`: waiting on that step), `ended` whether the
+     * record's approval is known to have stopped (`false`: not known, never
+     * "still going"). Absent when the server knows nothing past this request.
+     */
+    outcome?: {
+      step?: { id: string; label: string };
+      /** A request status, typed as this row's own `status`. */
+      status: ApprovalRequestLite['status'];
+      ended: boolean;
+    };
   };
   /** The flow run that opened this request; every request of one run shares it. */
   flow_run_id?: string;
@@ -361,7 +381,7 @@ function apiBase() {
 }
 
 async function fetchJson<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(`${apiBase()}${path}`, {
+  const res = await authFetch(`${apiBase()}${path}`, {
     credentials: 'include',
     headers: {
       'Content-Type': 'application/json',

@@ -3044,6 +3044,16 @@ describe('[#32521] the boot priming pass primes every holder of a name', () => {
   const registryKeys = (m: MetadataManager, type: string) => [...((m as any).registry.get(type)?.keys() ?? [])].sort();
   const HOST = 'com.host.app';
   /** The real pass on a host declaring `hostPackage`, over its own file-system loader under `rootDir` and then a database loader. */
+  /**
+   * The host's file of `helper`, spelt as the registry's YAML pattern for `type`
+   * declares (`helper.tool.yml`; `helper.ai-context.yml` for `ai_context`,
+   * whose suffix is hyphenated): the pass reads files by those patterns alone.
+   */
+  const hostFile = (rootDir: string, type: string) => {
+    const pattern = DEFAULT_METADATA_TYPE_REGISTRY.find((entry) => entry.type === type)?.filePatterns.find((p) => p.endsWith('.yml'));
+    if (!pattern?.startsWith('**/*.')) throw new Error(`no YAML file pattern for ${type}`);
+    return join(rootDir, type, pattern.replace('**/*', 'helper'));
+  };
   const bootOverFiles = async (rootDir: string, hostPackage: string) => {
     const plugin = new MetadataPlugin({ rootDir, packageId: hostPackage, watch: false, config: { bootstrap: 'eager' } });
     const m = (plugin as any).manager as MetadataManager;
@@ -3176,7 +3186,7 @@ describe('[#32521] the boot priming pass primes every holder of a name', () => {
       const rootDir = mkdtempSync(join(tmpdir(), 'i32521-d1-'));
       try {
         mkdirSync(join(rootDir, type));
-        const file = join(rootDir, type, `helper.${type}.yml`);
+        const file = hostFile(rootDir, type);
         writeFileSync(file, 'name: helper\nlabel: file v1\n');
         await bootOverFiles(rootDir, HOST);
         expect(await stored(type)).toEqual([[HOST, 'file v1', 1]]);
@@ -3196,7 +3206,7 @@ describe('[#32521] the boot priming pass primes every holder of a name', () => {
       const rootDir = mkdtempSync(join(tmpdir(), 'i32521-d1-'));
       try {
         mkdirSync(join(rootDir, type));
-        writeFileSync(join(rootDir, type, `helper.${type}.yml`), 'name: helper\nlabel: file\n');
+        writeFileSync(hostFile(rootDir, type), 'name: helper\nlabel: file\n');
         await seed(type, ALPHA, 1);
         await seed(type, BETA, 2);
         const m = await bootOverFiles(rootDir, HOST);

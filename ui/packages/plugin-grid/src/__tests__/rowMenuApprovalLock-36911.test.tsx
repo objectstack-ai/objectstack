@@ -21,6 +21,12 @@
  * are reached for, never on first paint (objectstack#35795). Only an ANSWERED
  * lock hides Edit: a 501, a `null` entry, a failed read or a read not yet
  * asked leaves the menu as it was.
+ *
+ * objectstack#37231 — the read says which approval holds a locked row
+ * (`lockSource`). A master-detail line held because its MASTER is held
+ * (`'master'`) offers no Delete either: the detail-row lock hook refuses that
+ * delete with `RECORD_LOCKED`. A row held by its own approval (`'record'`)
+ * keeps Delete.
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
@@ -60,10 +66,15 @@ const LOCKS_PATH = `/api/v1/approvals/records/${OBJECT}/locks`;
 const LOCKED_ROW = { id: 'p_locked', name: 'Data Centre Build' };
 /** Its sibling on the same page, with no approval running. */
 const OPEN_ROW = { id: 'p_open', name: 'Office Refresh' };
+/** A master-detail line whose MASTER is under a locking approval. */
+const MASTER_HELD_ROW = { id: 'p_line', name: 'Rack Delivery' };
 
-/** What the lock door answers, per id; `undefined` is the read's `null` entry. */
+/**
+ * What the lock door answers, per id; `undefined` is the read's `null` entry.
+ * `sources` is the `lockSource` a locked entry carries.
+ */
 type LockDoor =
-  | { kind: 'answers'; locked: Record<string, boolean | null> }
+  | { kind: 'answers'; locked: Record<string, boolean | null>; sources?: Record<string, 'record' | 'master'> }
   | { kind: 'status'; status: number }
   | { kind: 'network' };
 
@@ -82,7 +93,11 @@ const server = {
   reset() {
     server.gate = null;
     server.release = () => {};
-    server.door = { kind: 'answers', locked: { [LOCKED_ROW.id]: true, [OPEN_ROW.id]: false } };
+    server.door = {
+      kind: 'answers',
+      locked: { [LOCKED_ROW.id]: true, [OPEN_ROW.id]: false, [MASTER_HELD_ROW.id]: true },
+      sources: { [LOCKED_ROW.id]: 'record', [MASTER_HELD_ROW.id]: 'master' },
+    };
     server.lockCalls = [];
     server.responses = [];
   },
@@ -110,7 +125,13 @@ const apiFetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<R
     const ids: string[] = body.recordIds ?? [];
     return respond(200, {
       success: true,
-      data: { records: ids.map((recordId) => ({ recordId, locked: door.locked[recordId] ?? null })) },
+      data: {
+        records: ids.map((recordId) => ({
+          recordId,
+          locked: door.locked[recordId] ?? null,
+          ...(door.sources?.[recordId] ? { lockSource: door.sources[recordId] } : {}),
+        })),
+      },
     });
   }
   // `security/explain`: every row may be written, so only the lock can take Edit away.
@@ -134,7 +155,7 @@ const PageBar: React.FC = () => {
 
 function renderGrid(
   rows: Array<Record<string, unknown>> = [LOCKED_ROW, OPEN_ROW],
-  { listPage = false }: { listPage?: boolean } = {},
+  { listPage = false, edit = true }: { listPage?: boolean; edit?: boolean } = {},
 ) {
   const dataSource: any = {
     getObjectSchema: async (name: string) => ({
@@ -155,7 +176,7 @@ function renderGrid(
       <SchemaRendererProvider dataSource={dataSource} apiFetch={apiFetch}>
         <div data-testid="page-column">
           {listPage && <PageBar />}
-          <ObjectGrid schema={schema} dataSource={dataSource} onEdit={() => {}} onDelete={() => {}} />
+          <ObjectGrid schema={schema} dataSource={dataSource} onEdit={edit ? () => {} : undefined} onDelete={() => {}} />
         </div>
       </SchemaRendererProvider>
     </ActionProvider>,
@@ -224,35 +245,42 @@ describe('objectstack#36911 — the row menu follows the approval lock', () => {
 
   it('a 501 (no approvals service) leaves the menu as it was, even over an approval_status column', async () => {
     server.door = { kind: 'status', status: 501 };
-    renderGrid([{ ...LOCKED_ROW, approval_status: 'pending' }, OPEN_ROW]);
+    renderGrid([{ ...LOCKED_ROW, approval_status: 'pending' }, OPEN_ROW, MASTER_HELD_ROW]);
     await waitFor(() => expect(screen.getByText(LOCKED_ROW.name)).toBeInTheDocument());
     await reachRowActions();
     await waitFor(() => expect(server.lockCalls).toHaveLength(1));
     await settleReads();
     expect(await rowMenu(LOCKED_ROW.name)).toEqual({ edit: true, delete: true });
     expect(await rowMenu(OPEN_ROW.name)).toEqual({ edit: true, delete: true });
+    expect(await rowMenu(MASTER_HELD_ROW.name)).toEqual({ edit: true, delete: true });
   });
 
   it('a null entry (a row the reader cannot read) leaves Edit where it was', async () => {
-    server.door = { kind: 'answers', locked: { [LOCKED_ROW.id]: null, [OPEN_ROW.id]: false } };
-    renderGrid();
+    server.door = {
+      kind: 'answers',
+      locked: { [LOCKED_ROW.id]: null, [OPEN_ROW.id]: false, [MASTER_HELD_ROW.id]: null },
+    };
+    renderGrid([LOCKED_ROW, OPEN_ROW, MASTER_HELD_ROW]);
     await waitFor(() => expect(screen.getByText(LOCKED_ROW.name)).toBeInTheDocument());
     await reachRowActions();
     await waitFor(() => expect(server.lockCalls).toHaveLength(1));
     await settleReads();
     expect(await rowMenu(LOCKED_ROW.name)).toEqual({ edit: true, delete: true });
+    expect(await rowMenu(MASTER_HELD_ROW.name)).toEqual({ edit: true, delete: true });
   });
 
   it('a read that fails, or that never answered, leaves Edit where it was', async () => {
     server.door = { kind: 'network' };
-    renderGrid();
+    renderGrid([LOCKED_ROW, OPEN_ROW, MASTER_HELD_ROW]);
     await waitFor(() => expect(screen.getByText(LOCKED_ROW.name)).toBeInTheDocument());
     // Not asked yet: the menu is the one it always was.
     expect(server.lockCalls).toHaveLength(0);
+    expect(await rowMenu(MASTER_HELD_ROW.name)).toEqual({ edit: true, delete: true });
     await reachRowActions();
     await waitFor(() => expect(server.lockCalls).toHaveLength(1));
     await settleReads();
     expect(await rowMenu(LOCKED_ROW.name)).toEqual({ edit: true, delete: true });
+    expect(await rowMenu(MASTER_HELD_ROW.name)).toEqual({ edit: true, delete: true });
   });
 });
 
@@ -315,5 +343,41 @@ describe('objectstack#36911 — the read in flight', () => {
     });
     await waitFor(() => expect(screen.queryAllByTestId('row-action-builtin-edit')).toHaveLength(0));
     expect(screen.getAllByTestId('row-action-builtin-delete').length).toBeGreaterThan(0);
+  });
+});
+
+describe('objectstack#37231 — a line whose master is held offers no Delete', () => {
+  it('a master-held line offers neither Edit nor Delete; a record-held sibling offers no Edit and keeps Delete', async () => {
+    renderGrid([LOCKED_ROW, OPEN_ROW, MASTER_HELD_ROW]);
+    await waitFor(() => expect(screen.getByText(MASTER_HELD_ROW.name)).toBeInTheDocument());
+    await reachRowActions();
+    await waitFor(() => expect(server.lockCalls).toHaveLength(1));
+    await settleReads();
+    // CONTROL: the open sibling offers both, so the pins observe the lock.
+    expect(await rowMenu(OPEN_ROW.name)).toEqual({ edit: true, delete: true });
+    await waitFor(async () => expect(await rowMenu(MASTER_HELD_ROW.name)).toEqual({ edit: false, delete: false }));
+    expect(await rowMenu(LOCKED_ROW.name)).toEqual({ edit: false, delete: true });
+  });
+
+  it('a grid whose rows offer Delete but no Edit still reads the lock, and drops Delete on the master-held line', async () => {
+    renderGrid([OPEN_ROW, MASTER_HELD_ROW], { edit: false });
+    await waitFor(() => expect(screen.getByText(MASTER_HELD_ROW.name)).toBeInTheDocument());
+    expect(await rowMenu(OPEN_ROW.name)).toEqual({ edit: false, delete: true });
+    await waitFor(() => expect(server.lockCalls).toHaveLength(1));
+    await settleReads();
+    await waitFor(() => expect(screen.getByText(MASTER_HELD_ROW.name).closest('tr')
+      ?.querySelector('[data-testid="row-action-trigger"]') ?? null).toBeNull());
+    expect(await rowMenu(MASTER_HELD_ROW.name)).toEqual({ edit: false, delete: false });
+    expect(await rowMenu(OPEN_ROW.name)).toEqual({ edit: false, delete: true });
+  });
+
+  it('the list page selection bar: a selected master-held line offers neither; a selected record-held sibling keeps Delete', async () => {
+    renderGrid([LOCKED_ROW, OPEN_ROW, MASTER_HELD_ROW], { listPage: true });
+    await waitFor(() => expect(screen.getByText(MASTER_HELD_ROW.name)).toBeInTheDocument());
+    expect(await selectionBarOffers(OPEN_ROW.name)).toEqual({ edit: true, delete: true });
+    expect(server.lockCalls).toHaveLength(1);
+    expect(await selectionBarOffers(MASTER_HELD_ROW.name)).toEqual({ edit: false, delete: false });
+    expect(await selectionBarOffers(LOCKED_ROW.name)).toEqual({ edit: false, delete: true });
+    expect(server.lockCalls).toHaveLength(1);
   });
 });

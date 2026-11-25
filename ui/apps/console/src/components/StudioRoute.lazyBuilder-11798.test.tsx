@@ -6,7 +6,8 @@
  *
  * ## What changed, and what this file pins about it
  *
- * `StudioDesignSurface` and `BuilderLanding` used to be static imports of
+ * `StudioDesignSurface` and the Studio home (removed by objectstack#36908, whose
+ * entry, `StudioEntryRedirect`, rides in the same chunk) used to be static imports of
  * `StudioRoute.tsx`, so the builder sat in the eager closure of every console
  * page. They now arrive through `import('./studioBuilder')` behind `lazy()`.
  * The bundle half of that (which chunks a page load fetches) is measured on the
@@ -79,7 +80,7 @@ vi.mock('../../../../packages/auth/src/useAuth', async (importOriginal) => ({
 // count at zero, and reds the holder case.
 vi.mock('@object-ui/app-shell', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
-  BuilderLanding: () => <div data-testid="barrel-builder" />,
+  StudioEntryRedirect: () => <div data-testid="barrel-builder" />,
   StudioDesignSurface: () => <div data-testid="barrel-builder" />,
   ConnectedShell: ({ children }: { children?: React.ReactNode }) => <>{children}</>,
   RequireOrganization: ({ children }: { children?: React.ReactNode }) => <>{children}</>,
@@ -97,7 +98,7 @@ const { builderModuleLoads } = vi.hoisted(() => ({ builderModuleLoads: { count: 
 vi.mock('./studioBuilder', () => {
   builderModuleLoads.count += 1;
   return {
-    BuilderLanding: () => <div data-testid="studio-front-door">pick a package</div>,
+    StudioEntryRedirect: () => <div data-testid="studio-entry">entry</div>,
     StudioDesignSurface: () => <div data-testid="studio-pillar-builder">pillars</div>,
   };
 });
@@ -127,9 +128,9 @@ const answer = (systemPermissions: string[]) => async () =>
 
 beforeEach(() => {
   auth = { isAuthenticated: true, isLoading: false, user: { id: 'u1' } };
-  // The landing mounts the real `AppHeader` (objectui#11863), which reads its
-  // user-scoped feeds and the AI agent catalogue on mount; each answers empty
-  // here, so no request leaves the process. The entry gate's own read goes
+  // A screen that mounts the real `AppHeader` reads its user-scoped feeds and
+  // the AI agent catalogue on mount; each answers empty here, so no request
+  // leaves the process. The entry gate's own read goes
   // through the mocked `createAuthenticatedFetch`, not this.
   vi.stubGlobal('fetch', vi.fn(async () => jsonResponse({ data: [] })));
 });
@@ -176,15 +177,11 @@ describe('/studio/* — the builder module loads behind the gate (objectui#11798
     expect(builderModuleLoads.count).toBe(1);
   });
 
-  it('the front door renders inside its painted frame from the same module', async () => {
+  it("Studio's entry renders from the same module (objectstack#36908)", async () => {
     permissionsFetch = answer([STUDIO_ENTRY_CAPABILITY]);
     renderStudio('/studio');
 
-    await waitFor(() => expect(screen.getByTestId('studio-front-door')).toBeInTheDocument());
-    // The console header is the frame the landing's fallback sits under; its
-    // brand links home (objectui#11863), named 「PRODUCT home」 since
-    // objectui#12605.
-    expect(screen.getByRole('link', { name: 'ObjectOS home' })).toHaveAttribute('href', '/home');
+    await waitFor(() => expect(screen.getByTestId('studio-entry')).toBeInTheDocument());
     // Both `lazy()` declarations name one specifier, so one module serves both.
     expect(builderModuleLoads.count).toBe(1);
   });

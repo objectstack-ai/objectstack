@@ -36,6 +36,7 @@ import { I18nProvider } from '@object-ui/i18n';
 // The surface loads the linter lazily; pay that load at collection, not inside
 // a case's clocked window.
 import '@objectstack/lint';
+import '@object-ui/plugin-detail';
 
 const PACKAGE_ID = 'com.acme.app';
 
@@ -118,6 +119,7 @@ function renderWorkbench() {
     <I18nProvider config={{ defaultLanguage: 'en', detectBrowserLanguage: false }} persistLanguage={false}>
       <MemoryRouter initialEntries={[`/studio/${PACKAGE_ID}/interfaces`]}>
         <Routes>
+          <Route path="/studio/:packageId/metadata/*" element={<StudioDesignSurface area="metadata" />} />
           <Route path="/studio/:packageId/:tab" element={<StudioDesignSurface />} />
         </Routes>
       </MemoryRouter>

@@ -2,9 +2,10 @@
 
 /**
  * [ADR-0150 D2, child N] `os validate`'s and `os build`'s half of the package
- * door's namespace name refusal: inside one namespace, an item of the twelve
- * uncovered bucket 2/3 types (sharing rule, queue, assignment rule, hook, job,
- * app, page, dashboard, report, book, analytics cube, tool) has one package
+ * door's namespace name refusal: inside one namespace, an item of the
+ * covered bucket 2/3 types (sharing rule, queue, assignment rule, hook, job,
+ * app, page, dashboard, report, book, analytics cube, tool, and the context
+ * pack `ai_context` by ADR-0150's 2026-11-25 addendum) has one package
  * holder.
  *
  * ## One judge, not a second rule

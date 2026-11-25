@@ -1780,6 +1780,18 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "Rango de fechas",
         helpText: "El periodo con el que se abre el panel y si los usuarios pueden elegir sus propias fechas."
       },
+      "dateRange.field": {
+        label: "Campo de fecha",
+        helpText: "El campo de fecha por el que filtra el período. Déjelo vacío para usar la fecha de creación."
+      },
+      "dateRange.defaultRange": {
+        label: "Período predeterminado",
+        helpText: "El período con el que se abre el panel."
+      },
+      "dateRange.allowCustomRange": {
+        label: "Permitir rango personalizado",
+        helpText: "Permite que los usuarios elijan sus propias fechas de inicio y fin."
+      },
       globalFilters: {
         label: "Filtros globales",
         helpText: "Filtros que los usuarios pueden usar para acotar todos los widgets a la vez, o solo los que elijas."
@@ -3145,6 +3157,49 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       "triggerConditions.value": {
         label: "Valor"
+      }
+    }
+  },
+  ai_context: {
+    label: "Paquete de contexto de IA",
+    sections: {
+      basics: {
+        label: "Datos básicos",
+        description: "La identidad del paquete y el objeto cuyos registros lee."
+      },
+      material: {
+        label: "Contenido",
+        description: "Qué parte del registro se entrega al modelo. Cada selector ofrece los campos del objeto raíz, o del objeto propio de la lista relacionada."
+      }
+    },
+    fields: {
+      name: {
+        label: "Nombre",
+        helpText: "Identificador único (snake_case). La clave context de una habilidad y la herramienta get_record_context nombran el paquete con él."
+      },
+      label: {
+        label: "Etiqueta",
+        helpText: "Nombre visible, el encabezado de la respuesta de la herramienta. Un paquete no tiene descripción: escriba aquí su propósito."
+      },
+      object: {
+        label: "Objeto raíz",
+        helpText: "El objeto raíz: el paquete lee un registro de él."
+      },
+      fields: {
+        label: "Campos",
+        helpText: "Los campos del objeto raíz que se entregan al modelo, en orden (como máximo 30). Una búsqueda entre ellos se responde con el nombre del registro al que apunta."
+      },
+      related: {
+        label: "Listas relacionadas",
+        helpText: "Listas hijas que apuntan al registro, un solo nivel (como máximo 3). Cada lista indica su objeto hijo, el campo de referencia que apunta a la raíz y las columnas que se leen en cada fila (como máximo 10); sin columnas, cada fila se lee por su nombre."
+      },
+      body: {
+        label: "Cuerpo",
+        helpText: "El único campo de texto largo que se lee como cuerpo del registro."
+      },
+      "body.field": {
+        label: "Campo del cuerpo",
+        helpText: "Un campo de texto largo del objeto raíz (textarea, markdown, html, richtext). Cualquier otro campo se informa al guardar el paquete, y entonces el paquete no lleva cuerpo."
       }
     }
   }

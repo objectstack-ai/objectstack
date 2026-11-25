@@ -116,6 +116,9 @@ vi.mock('./MetadataInspector', () => ({
 }));
 vi.mock('./RecordDetailView', () => ({ RecordDetailView: () => null }));
 
+// `ObjectView` reaches `import('@objectstack/lint')` lazily; its first load is
+// paid here, at collection, never inside a case's clock (`check:test-source-alias`).
+import '@objectstack/lint';
 import { ObjectView } from './ObjectView';
 import { RelatedRecordActionsBridge } from './RelatedRecordActionsBridge';
 import { useRelatedRecordActions } from '@object-ui/react';
@@ -147,6 +150,9 @@ function objectsWith(createOverride: unknown) {
       fields: {
         id: { type: 'text', label: 'Id' },
         name: { type: 'text', label: 'Name' },
+        // The related list's relationship field, declared on the child as real
+        // metadata always declares it (objectstack#37248).
+        order: { type: 'lookup', reference: 'order', label: 'Order' },
       },
       userActions: createOverride === undefined ? undefined : { create: createOverride },
     },

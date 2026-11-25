@@ -32,6 +32,24 @@ export interface IEmbedder {
    */
   readonly dimensions: number;
   /**
+   * The model's identity as the provider names it (e.g.
+   * `'text-embedding-3-small'`, `'bge-m3'`). A knowledge adapter reports it
+   * (`IKnowledgeAdapter.embedding.model`) to the knowledge service, whose
+   * index fingerprint reads it: vectors of two models are never ranked
+   * against each other (ADR-0161 K7; K8, item 7). `id` stays a label for
+   * logs. Absent: a change of model cannot be seen for the indexes built
+   * with this embedder.
+   */
+  readonly model?: string;
+  /**
+   * Longest single input the model accepts, in tokens, as measured by the
+   * shared `estimateTokens` (`@objectstack/spec/shared`). Absent when the
+   * embedder knows no limit. A knowledge adapter reports it to the knowledge
+   * service (`IKnowledgeAdapter.embedding.maxInputTokens`), whose splitter
+   * keeps every passage within it (ADR-0161 K8, item 6).
+   */
+  readonly maxInputTokens?: number;
+  /**
    * Embed a batch of strings. Output order matches input order.
    * Implementations SHOULD handle empty input by returning `[]`.
    */

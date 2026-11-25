@@ -17,9 +17,9 @@
  *
  * ## The three probes, and where each one's route comes from
  *
- *   1. Studio writable list — Studio's builder landing (objectui
- *      `packages/app-shell/src/views/studio-design/BuilderLanding.tsx`, heading
- *      `engine.studio.landing.ownHeading` = "Your own apps") lists
+ *   1. Studio writable list — Studio's package readers (objectui
+ *      `packages/app-shell/src/views/studio-design/packages-io.ts`; the Studio
+ *      home that listed them as "Your own apps" was removed by #36908) read
  *      `fetchPackages()` filtered to `writable`. `fetchPackages()` (`studio-design/packages-io.ts`) is ONE
  *      read: `GET /api/v1/packages`, no query parameters; `parsePackages` drops
  *      `scope: system | cloud` rows and takes the row's top-level `writable`

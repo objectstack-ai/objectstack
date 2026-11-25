@@ -35,6 +35,8 @@ export const PRINT_BRIDGE: OwnDoorBridge = Object.freeze({
     member: 'handlePrintDoor',
     producer: '@objectstack/service-print (PrintServicePlugin)',
     noun: 'the print door',
+    // [#37273] The catalog key of `noun`: the bridge's `501` follows the request's language.
+    nounKey: 'own_door_print',
     tag: 'print',
 });
 

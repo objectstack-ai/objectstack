@@ -84,7 +84,7 @@ describe('draftPreviewPath — the deep-link table (objectui#12968)', () => {
 });
 
 function mockDrafts(list: unknown) {
-  global.fetch = vi.fn(async () => ({ ok: true, json: async () => list })) as unknown as typeof fetch;
+  global.fetch = vi.fn(async () => ({ headers: new Headers(), ok: true, json: async () => list })) as unknown as typeof fetch;
 }
 
 function renderBarAt(path: string) {

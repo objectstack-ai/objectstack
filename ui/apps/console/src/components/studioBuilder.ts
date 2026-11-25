@@ -2,15 +2,14 @@
 
 /**
  * The Studio builder's screens, as the ONE module the console loads them
- * through (objectui#11798): the landing, the pillar builder, and the "All
- * metadata" area's cross-package leg (objectstack#28561).
+ * through (objectui#11798): Studio's entry (objectstack#36908), the pillar
+ * builder, and the "All metadata" area's cross-package leg (objectstack#28561).
  *
- * `StudioRoute.tsx` (the `/studio` subtree) and `registerStudioComponents.tsx`
- * (the `studio:builder` registry entry) both reach these components through
+ * `StudioRoute.tsx` (the `/studio` subtree) reaches these components through
  * `import('./studioBuilder')`, behind a `lazy()` boundary. Nothing in the
  * console imports this module statically, and nothing may: that is what lets
- * the bundler place `StudioDesignSurface`, `BuilderLanding` and the modules only
- * they reach (such as the pillar panels and the form designer) in a chunk that
+ * the bundler place `StudioDesignSurface`, `StudioEntryRedirect` and the modules
+ * only they reach (such as the pillar panels and the form designer) in a chunk that
  * is fetched when a Studio screen first renders, instead of in the eager
  * closure every console page load pays for.
  *
@@ -30,4 +29,4 @@
  * one, and `pnpm check:eager-closure` weighs the bytes that would come back.
  */
 
-export { BuilderLanding, StudioDesignSurface, StudioMetadataArea } from '@object-ui/app-shell';
+export { StudioDesignSurface, StudioEntryRedirect, StudioMetadataArea } from '@object-ui/app-shell';

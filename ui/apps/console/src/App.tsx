@@ -31,6 +31,7 @@ import {
   ConsoleToaster,
   LoadingScreen,
   DefaultHomeLayout,
+  DocsPortalShell,
   DefaultHomePage,
   DefaultOrganizationsLayout,
   DefaultOrganizationsPage,
@@ -225,16 +226,18 @@ function HomeRoute() {
 }
 
 /**
- * The docs portal's frame (objectstack#35424): Home's layout with the docs bar,
- * around the lazily loaded docs layout, so the bar is up while the portal's
- * chunk loads.
+ * The docs portal's frame, around the lazily loaded docs layout, so the frame
+ * is up while the portal's chunk loads. From 768 px up it is the app-less
+ * variant of the app shell (objectstack#37197): the sidebar with a neutral
+ * 「Documentation」 head and the docs tree, no top bar, no app guessed. A
+ * phone keeps Home's layout with the docs bar (objectstack#35424).
  */
 function DocsPortalRoute() {
   const { user } = useAuth();
   return (
-    <DefaultHomeLayout userId={user?.id} variant="docs">
+    <DocsPortalShell userId={user?.id}>
       <Suspense fallback={<LoadingScreen />}><DocsLayout /></Suspense>
-    </DefaultHomeLayout>
+    </DocsPortalShell>
   );
 }
 

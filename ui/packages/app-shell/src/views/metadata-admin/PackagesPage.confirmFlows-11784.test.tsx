@@ -429,7 +429,7 @@ describe('Console Packages page — a delete there stays on the page (objectui#1
         <PathProbe />
         <Routes>
           <Route path={START} element={<PackagesPage />} />
-          <Route path="/studio" element={<div data-testid="studio-landing" />} />
+          <Route path="/studio" element={<div data-testid="studio-entry" />} />
           <Route path="*" element={<div data-testid="elsewhere" />} />
         </Routes>
       </MemoryRouter>,
@@ -448,7 +448,7 @@ describe('Console Packages page — a delete there stays on the page (objectui#1
     await waitFor(() => expect(listReads()).toHaveLength(2));
     await waitFor(() => expect(screen.queryByRole('button', { name: 'Delete package' })).toBeNull());
     expect(screen.getByTestId('path').textContent).toBe(START);
-    expect(screen.queryByTestId('studio-landing')).toBeNull();
+    expect(screen.queryByTestId('studio-entry')).toBeNull();
     expect(screen.queryByTestId('elsewhere')).toBeNull();
   });
 });

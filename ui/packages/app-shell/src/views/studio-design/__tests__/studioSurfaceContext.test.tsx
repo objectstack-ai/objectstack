@@ -136,6 +136,8 @@ function renderAt(url: string) {
   render(
     <MemoryRouter initialEntries={[url]}>
       <Routes>
+        {/* objectstack#36904 — the area's routes carry no :tab; a designer page names its item in the path. */}
+        <Route path="/studio/:packageId/metadata/*" element={<StudioCopilotConversation packageId="app.k9" />} />
         <Route
           path="/studio/:packageId/:tab"
           element={<StudioCopilotConversation packageId="app.k9" />}
@@ -170,5 +172,31 @@ describe('Studio copilot surfaceContext (cloud#1610 send half)', () => {
   it('a malformed surface param degrades to pillar-only, never a broken artifact', () => {
     renderAt('/studio/app.k9/access?surface=nonsense');
     expect(capturedProps.surfaceContext).toEqual({ pillar: 'access' });
+  });
+});
+
+/*
+ * objectstack#36904 — the object designer opens full-screen on the object's
+ * metadata address, which carries no `?surface=`: the copilot reads the item
+ * off the path (`areaDesignerItemOf`), under the area's segment.
+ */
+describe('Studio copilot surfaceContext on a designer\'s metadata address (objectstack#36904)', () => {
+  it('the object designer\'s address names the area and the object', () => {
+    renderAt('/studio/app.k9/metadata/object/k9_task?tab=fields');
+    expect(capturedProps.surfaceContext).toEqual({ pillar: 'metadata', artifact: { type: 'object', name: 'k9_task' } });
+  });
+
+  it('its history address names the same object, decoded', () => {
+    renderAt('/studio/app.k9/metadata/object/k9%20task/history');
+    expect(capturedProps.surfaceContext).toEqual({ pillar: 'metadata', artifact: { type: 'object', name: 'k9 task' } });
+  });
+
+  // CONTROLS: the create page, a list and a type with no designer page name no item.
+  it('the create page, the object list and a generic item page name nothing', () => {
+    for (const url of ['/studio/app.k9/metadata/object/new', '/studio/app.k9/metadata/object', '/studio/app.k9/metadata/dashboard/sales']) {
+      cleanup();
+      renderAt(url);
+      expect(capturedProps.surfaceContext, url).toBeUndefined();
+    }
   });
 });

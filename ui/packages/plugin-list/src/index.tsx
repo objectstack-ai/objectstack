@@ -53,6 +53,12 @@ export { ListConditionsBlock };
 export type { ListConditionsHostProps } from './conditions/ListConditionsBlock';
 export { ConditionDiscardButton } from './conditions/ListConditionControls';
 export type { ConditionDiscardButtonProps } from './conditions/ListConditionControls';
+// The read that names the records a lookup condition points at, for a host
+// that draws its own condition chips over the same object (the `/data` page's
+// URL filter chips): the read the list's own chips make, so both chip rows
+// name a record the same way.
+export { useLookupValueNames } from './conditions/ListConditionControls';
+export type { LookupValueName, NamedCondition } from './conditions/ListConditionControls';
 
 /**
  * Registry entry point for `<ListView>`. Both bridges it carries — the

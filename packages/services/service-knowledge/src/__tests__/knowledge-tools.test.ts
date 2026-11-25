@@ -187,6 +187,9 @@ describe('search_knowledge — malformed arguments', () => {
     // (which would answer no passage, i.e. "nothing matched").
     [{ query: 'q', sourceIds: [] }, 'sourceIds'],
     [{ query: 'q', sources: ['policy_clauses'] }, 'sources'],
+    // The organizations a search is scoped to are the service's to compute
+    // from the caller's identity (ADR-0161 K8, item 9): never an argument.
+    [{ query: 'q', organizationIds: ['org_b'] }, 'organizationIds'],
   ])('refuses %j with VALIDATION_ERROR naming %s, and searches nothing', async (input, named) => {
     const { service, adapter } = setup();
     const err = await service.knowledgeTools().searchKnowledge(input, caller).catch((e) => e);
@@ -205,5 +208,62 @@ describe('search_knowledge — no searchable source', () => {
     const answer = await createKnowledgeTools(service).searchKnowledge({ query: 'q' }, caller);
     expect(answer).toEqual({ hits: [], sources: [] });
     expect(adapter.searched).toEqual([]);
+  });
+});
+
+describe('search_knowledge — a refused source (ADR-0161 K7, rule 5)', () => {
+  const rebuild = () =>
+    Object.assign(new Error("Knowledge source 'policy_clauses' needs a rebuild."), {
+      code: 'KNOWLEDGE_REBUILD_REQUIRED',
+      status: 409,
+    });
+
+  /** Two exposed sources; `refusing` throws a coded refusal, the other answers. */
+  function twoSources(refusing: readonly string[], refusal: () => Error = rebuild) {
+    const adapter = adapterWith({ policy_clauses: [hit('policy_clauses', 'p1', 0.9)], faq: [hit('faq', 'f1', 0.4)] });
+    const answer = adapter.search as unknown as ReturnType<typeof vi.fn>;
+    const inner = answer.getMockImplementation()! as (query: string, opts: { source: KnowledgeSource }) => Promise<unknown>;
+    answer.mockImplementation(async (query: string, opts: { source: KnowledgeSource }) => {
+      if (refusing.includes(opts.source.id)) throw refusal();
+      return inner(query, opts);
+    });
+    const engine = {
+      find: vi.fn(async (_object: string, query: { where: { id: { $in: string[] } } }) =>
+        query.where.id.$in.map((id) => ({ id }))),
+    } as unknown as IDataEngine;
+    const service = new KnowledgeService({ dataEngine: engine, logger: { warn: () => undefined } });
+    service.registerAdapter('memory', adapter);
+    service.registerSource(objectSource('policy_clauses', 'policy_clause'));
+    service.registerSource(objectSource('faq', 'faq_entry'));
+    return service;
+  }
+
+  it('names the refused source beside the hits of the source that answered', async () => {
+    const answer = await createKnowledgeTools(twoSources(['policy_clauses'])).searchKnowledge({ query: 'q' }, caller);
+    expect(answer.hits.map((h) => h.sourceId)).toEqual(['faq']);
+    expect(answer.refused).toEqual([
+      { sourceId: 'policy_clauses', code: 'KNOWLEDGE_REBUILD_REQUIRED', message: "Knowledge source 'policy_clauses' needs a rebuild." },
+    ]);
+  });
+
+  it('refuses the call whole, coded, when no searched source can answer — never an empty answer', async () => {
+    const tools = createKnowledgeTools(twoSources(['policy_clauses', 'faq']));
+    await expect(tools.searchKnowledge({ query: 'q' }, caller)).rejects.toMatchObject({
+      code: 'KNOWLEDGE_REBUILD_REQUIRED',
+      status: 409,
+      refused: [{ sourceId: 'policy_clauses' }, { sourceId: 'faq' }],
+    });
+  });
+
+  it('control: a failure without a code is logged and skipped as before, and carries no refused list', async () => {
+    const answer = await createKnowledgeTools(twoSources(['policy_clauses'], () => new Error('socket hang up')))
+      .searchKnowledge({ query: 'q' }, caller);
+    expect(answer.hits.map((h) => h.sourceId)).toEqual(['faq']);
+    expect(answer).not.toHaveProperty('refused');
+  });
+
+  it('an answer with nothing refused carries no refused list', async () => {
+    const answer = await createKnowledgeTools(twoSources([])).searchKnowledge({ query: 'q' }, caller);
+    expect(answer).not.toHaveProperty('refused');
   });
 });

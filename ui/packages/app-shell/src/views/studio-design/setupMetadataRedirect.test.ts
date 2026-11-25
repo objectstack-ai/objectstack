@@ -120,12 +120,15 @@ describe('packagedAutomationStudioPath (ADR-0146 D11)', () => {
 });
 
 describe('packagedActionsStudioPath (objectstack#34724)', () => {
+  // objectstack#36908 — a URL naming no package lands on Setup → Packages,
+  // the package list, since the Studio home was removed; that page reads its
+  // own query, so the retired page's query and fragment are not carried.
   it.each([
     // [search, hash, expected]
     ['?package=crm', '', '/studio/crm/data?package=crm'],
     ['?package=com.acme.app&x=1', '#top', '/studio/com.acme.app/data?package=com.acme.app&x=1#top'],
-    ['', '', '/studio'],
-    ['?package=all', '', '/studio?package=all'],
+    ['', '', '/apps/setup/component/developer/packages?face=admin'],
+    ['?package=all', '#top', '/apps/setup/component/developer/packages?face=admin'],
   ])('%s%s → %s', (search, hash, expected) => {
     expect(packagedActionsStudioPath(search, hash)).toBe(expected);
   });

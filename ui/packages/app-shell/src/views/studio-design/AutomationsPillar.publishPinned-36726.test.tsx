@@ -148,6 +148,7 @@ vi.mock('@object-ui/react', async (importOriginal) => {
 vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn(), info: vi.fn(), dismiss: vi.fn() } }));
 
 import { AutomationsPillar } from './StudioDesignSurface';
+import { MetadataListCreateDialog } from '../metadata-admin/MetadataListCreateDialog';
 import { createEmptyDataSource } from './__tests__/emptyDataSource';
 import { StudioSaveHarness, pressStudioSave } from './__tests__/studioSaveHarness';
 import { registerMetadataPreview } from '../metadata-admin/preview-registry';
@@ -155,6 +156,10 @@ import { registerMetadataInspector } from '../metadata-admin/inspector-registry'
 import { FlowPreview } from '../metadata-admin/previews/FlowPreview';
 import { FlowInspector } from '../metadata-admin/inspectors/FlowInspector';
 import { t } from '../metadata-admin/i18n';
+// The source under test reaches these dynamic imports (the command palette's
+// record preview, the drafts panel's lint, the code editor): their first load
+// is paid here, at collection, never inside a case's clock (`check:test-source-alias`).
+import '@object-ui/plugin-detail';
 
 const dataSource = createEmptyDataSource();
 registerMetadataPreview('flow', FlowPreview);
@@ -187,8 +192,8 @@ afterEach(() => {
 function mount(): void {
   render(
     <StudioSaveHarness>
-      <MemoryRouter initialEntries={[`/studio/${PKG}/automations`]}>
-        <AutomationsPillar packageId={PKG} />
+      <MemoryRouter initialEntries={[`/studio/${PKG}/metadata/flow/${FLOW.name}`]}>
+        <AutomationsPillar packageId={PKG} flowName={FLOW.name} />
       </MemoryRouter>
     </StudioSaveHarness>,
   );
@@ -298,11 +303,15 @@ describe('Flows — two Saves over one published flow are not last-writer-wins (
     expect(live().status).toBe('active');
   }, 30_000);
 
-  it('a new flow\'s publish asserts no published flow of its name', async () => {
-    mount();
-    await screen.findByTestId(`auto-rail-row-${FLOW.name}`, undefined, WAIT);
-    fireEvent.click(screen.getByTitle(en('engine.studio.auto.newTitle')));
-    const dialog = await screen.findByRole('dialog');
+  it('a new flow\'s publish asserts no published flow of its name (the list\'s create, objectstack#36903)', async () => {
+    render(
+      <StudioSaveHarness>
+        <MemoryRouter initialEntries={[`/studio/${PKG}/metadata/flow`]}>
+          <MetadataListCreateDialog type="flow" open onOpenChange={() => {}} packageId={PKG} inPair={false} locale="en-US" onCreated={() => {}} />
+        </MemoryRouter>
+      </StudioSaveHarness>,
+    );
+    const dialog = await screen.findByRole('dialog', undefined, WAIT);
     fireEvent.click(within(dialog).getByTestId('create-flow-preset-manual'));
     fireEvent.change(dialog.querySelectorAll('input')[0], { target: { value: 'Escalate' } });
     fireEvent.click(within(dialog).getByRole('button', { name: en('engine.studio.createLive') }));

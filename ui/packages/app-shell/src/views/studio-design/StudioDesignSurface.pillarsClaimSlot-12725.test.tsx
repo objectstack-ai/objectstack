@@ -19,7 +19,8 @@
  *  - While 属性 shows, the copilot strip stays at the slot's foot.
  *  - A hidden slot unfolds on a new selection (objectstack#26737); hidden again
  *    over the same selection, it stays hidden.
- *  - CONTROL: the Access pillar claims nothing — the slot shows the copilot
+ *  - CONTROL: the sharing overview (objectstack#36905; the Access pillar before
+ *    it) claims nothing — the slot shows the copilot
  *    alone; the Interfaces pillar's own pins live in `rightSlot-12725`.
  *
  * The copilot, the flow canvas and both inspectors are stubs: the canvas
@@ -116,12 +117,19 @@ vi.mock('./StudioAiCopilot', () => ({
 // The source loads `@objectstack/lint` lazily; paid here, at collection, not
 // inside a case's clock (check:test-source-alias).
 import '@objectstack/lint';
+// objectstack#36900 — the surface mounts the command palette, which reaches the
+// record preview's `lazy()` detail entry: its first load is paid at collection too.
+import '@object-ui/plugin-detail';
 import { StudioDesignSurface } from './StudioDesignSurface';
 import { t } from '../metadata-admin/i18n';
 import { registerMetadataPreview } from '../metadata-admin/preview-registry';
 import { registerMetadataInspector } from '../metadata-admin/inspector-registry';
 import { DOCK_STUDIO_EXPANDED_STORAGE_KEY } from '../../layout/chatDockState';
 import { createEmptyDataSource } from './__tests__/emptyDataSource';
+// The source under test reaches these dynamic imports (the command palette's
+// record preview, the drafts panel's lint, the code editor): their first load
+// is paid here, at collection, never inside a case's clock (`check:test-source-alias`).
+import '@object-ui/plugin-detail';
 
 const dataSource = createEmptyDataSource();
 
@@ -199,6 +207,7 @@ function renderAt(tab: string) {
   render(
     <MemoryRouter initialEntries={[`/studio/${PACKAGE_ID}/${tab}`]}>
       <Routes>
+        <Route path="/studio/:packageId/metadata/*" element={<StudioDesignSurface area="metadata" />} />
         <Route path="/studio/:packageId/:tab" element={<StudioDesignSurface />} />
       </Routes>
     </MemoryRouter>,
@@ -206,13 +215,14 @@ function renderAt(tab: string) {
 }
 
 const SLOW = { timeout: 4000 };
+/** objectstack#36904 — the Task object's designer, on its own address. */
+const TASK_DESIGNER = 'metadata/object/acme_task';
 const slot = () => screen.getByTestId('studio-right-slot');
 const slotProps = () => screen.getByTestId('studio-slot-props');
 
 /** Data: open the object's Form tab and click its one field's card. */
 async function selectDataField() {
-  renderAt('data');
-  fireEvent.click(await screen.findByRole('button', { name: /Task/ }, SLOW));
+  renderAt(TASK_DESIGNER);
   fireEvent.click(await screen.findByRole('button', { name: t('engine.studio.data.tab.form', 'en') }, SLOW));
   const card = (await screen.findByText('Title', undefined, SLOW)).closest('[role="button"]') as HTMLElement;
   fireEvent.click(card);
@@ -220,17 +230,15 @@ async function selectDataField() {
   return card;
 }
 
-/** Automations: open the flow; its canvas is the stub above. */
+/** The flow designer on the flow's address (objectstack#36903); its canvas is the stub above. */
 async function openFlow() {
-  renderAt('automations');
-  fireEvent.click(await screen.findByRole('button', { name: /Notify owner/ }, SLOW));
+  renderAt('metadata/flow/notify_owner');
   await screen.findByTestId('pick-node', undefined, SLOW);
 }
 
 describe('Data: the field inspector is in the right slot (objectui#12725)', () => {
   it('claims nothing while no field is selected: the slot shows the copilot alone', async () => {
-    renderAt('data');
-    fireEvent.click(await screen.findByRole('button', { name: /Task/ }, SLOW));
+    renderAt(TASK_DESIGNER);
     fireEvent.click(await screen.findByRole('button', { name: t('engine.studio.data.tab.form', 'en') }, SLOW));
     await screen.findByText('Title', undefined, SLOW);
     await waitFor(() => expect(slot()).toHaveAttribute('data-mode', 'copilot'));
@@ -299,8 +307,7 @@ describe('Data: the field inspector is in the right slot (objectui#12725)', () =
 
   it('no copilot served: a selection shows the slot with the properties alone', async () => {
     copilot.available = false;
-    renderAt('data');
-    fireEvent.click(await screen.findByRole('button', { name: /Task/ }, SLOW));
+    renderAt(TASK_DESIGNER);
     fireEvent.click(await screen.findByRole('button', { name: t('engine.studio.data.tab.form', 'en') }, SLOW));
     const card = (await screen.findByText('Title', undefined, SLOW)).closest('[role="button"]') as HTMLElement;
     await act(async () => {});
@@ -427,8 +434,8 @@ describe('Automations: the Configuration is in the right slot (objectui#12725)',
 });
 
 describe('CONTROL — a pillar that claims nothing (objectui#12725)', () => {
-  it('Access keeps its own layout: the slot shows the copilot alone, with no properties half', async () => {
-    renderAt('access');
+  it('the sharing overview keeps its own layout: the slot shows the copilot alone, with no properties half', async () => {
+    renderAt('owd');
     await waitFor(() => expect(slot()).toHaveAttribute('data-mode', 'copilot'));
     expect(within(slot()).queryAllByRole('tab')).toHaveLength(0);
     expect(slotProps()).toBeEmptyDOMElement();

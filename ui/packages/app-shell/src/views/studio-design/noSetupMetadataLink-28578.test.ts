@@ -71,7 +71,7 @@ describe('Studio links into no Setup metadata page (ADR-0146 D1)', () => {
     const files = sourceFiles(here);
     // Control: the walk really reads the folder.
     expect(files.some((file) => file.endsWith('StudioDesignSurface.tsx'))).toBe(true);
-    expect(files.some((file) => file.endsWith('BuilderLanding.tsx'))).toBe(true);
+    expect(files.some((file) => file.endsWith('StudioEntryRedirect.tsx'))).toBe(true);
 
     const offenders = files.flatMap((file) =>
       setupLinks(readFileSync(file, 'utf8')).map((link) => `${path.basename(file)}: ${link}`),

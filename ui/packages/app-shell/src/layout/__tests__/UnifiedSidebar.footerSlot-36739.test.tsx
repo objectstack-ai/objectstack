@@ -8,6 +8,10 @@
  * after the app's menu on the app's home page (`'phoneAppHome'`). Dropping
  * either line in `UnifiedSidebar` fails one of the tests below.
  *
+ * objectstack#37197 — the docs portal (`docsPortal`), in no app: the shell's
+ * head with a neutral 「Documentation」 menu instead of the app's, the docs
+ * tree as the body, the account foot; the remembered app is never named.
+ *
  * Harness: the mocks of `UnifiedSidebar.phoneAppHome-35881.test.tsx`;
  * `@object-ui/layout` and `@object-ui/components` stay REAL, under the real
  * `SidebarProvider`.
@@ -129,8 +133,10 @@ vi.mock('../../hooks/useNavPins', async () => {
 vi.mock('../../hooks/useNavActionDispatch', () => ({
   useNavActionDispatch: () => vi.fn(),
 }));
+// An app route's context by default; the docs portal's block sets Home's.
+const nav = vi.hoisted(() => ({ value: { context: 'app', currentAppName: 'sales' as string | undefined } }));
 vi.mock('../../context/NavigationContext', () => ({
-  useNavigationContext: () => ({ context: 'app', currentAppName: 'sales' }),
+  useNavigationContext: () => nav.value,
 }));
 vi.mock('../ContextSelectors', () => ({
   useAppContextSelectors: () => ({ contextValues: {}, element: null }),
@@ -145,6 +151,8 @@ import { SidebarProvider } from '@object-ui/components';
 import { UnifiedSidebar } from '../UnifiedSidebar';
 import { PhoneAppHome, PhoneAppHomeSlotProvider } from '../PhoneAppHome';
 import { SidebarFooterSlotProvider, type SidebarFooterSlotPlace } from '../sidebarFooterSlot';
+import { SidebarDocsNav, SidebarDocsNavSlotProvider } from '../sidebarDocsNavSlot';
+import { CommandPaletteProvider } from '../../context/CommandPaletteProvider';
 
 function setViewport(width: number, height: number) {
   Object.defineProperty(window, 'innerWidth', { configurable: true, writable: true, value: width });
@@ -175,6 +183,7 @@ function renderSidebar({ width, slot = hostSlot as ((where: SidebarFooterSlotPla
 
 afterEach(() => {
   cleanup();
+  nav.value = { context: 'app', currentAppName: 'sales' };
   drawn.length = 0;
   initialPins = [];
   setViewport(1024, 768);
@@ -208,5 +217,107 @@ describe('the host\'s element at the bottom of an app\'s sidebar (objectstack#36
     renderSidebar({ width: 375, slot: null });
     expect(screen.queryByTestId('host-footer-phoneAppHome')).toBeNull();
     expect(screen.getByTestId('phone-app-home-nav')).toBeInTheDocument();
+  });
+});
+
+describe('an app\'s docs page: the sidebar\'s body holds the docs\' navigation (objectstack#37150)', () => {
+  /** The sidebar as `ConsoleLayout` mounts it on a route, and a docs page drawing its column. */
+  function renderDocsRoute(docsNav: boolean) {
+    setViewport(1440, 812);
+    return render(
+      <MemoryRouter initialEntries={['/apps/sales/docs/manual/intro']}>
+        <SidebarProvider>
+          <SidebarDocsNavSlotProvider>
+            <UnifiedSidebar activeAppName="sales" railOverlay docsNav={docsNav} />
+            <SidebarDocsNav>
+              <nav aria-label="Documentation navigation" data-testid="page-docs-column">
+                Manual
+              </nav>
+            </SidebarDocsNav>
+          </SidebarDocsNavSlotProvider>
+        </SidebarProvider>
+      </MemoryRouter>,
+    );
+  }
+
+  it('the page\'s column is the body, in the app menu\'s place; the head and the foot stay', () => {
+    renderDocsRoute(true);
+    const column = screen.getByTestId('page-docs-column');
+    expect(column.closest('[data-sidebar="content"]')).not.toBeNull();
+    expect(screen.queryByRole('navigation', { name: 'App navigation' })).toBeNull();
+    expect(screen.queryByText('Leads')).toBeNull();
+    expect(screen.queryByText('Sales performance')).toBeNull();
+    expect(screen.getByTestId('sidebar-shell-head')).toBeInTheDocument();
+    expect(document.querySelector('[data-sidebar="footer"]')).not.toBeNull();
+  });
+
+  it('CONTROL — on any other route the body is the app menu, and a page has nowhere to draw a column', () => {
+    renderDocsRoute(false);
+    expect(screen.queryByTestId('page-docs-column')).toBeNull();
+    expect(screen.getByRole('navigation', { name: 'App navigation' })).toBeInTheDocument();
+    expect(screen.getByText('Leads')).toBeInTheDocument();
+  });
+});
+
+describe('the docs portal: the shell\'s head and foot in no app, the docs tree as the body (objectstack#37197)', () => {
+  /** The sidebar as `DocsPortalShell` mounts it, Home's context with a remembered app, and the page's tree. */
+  function renderPortal({ search = true }: { search?: boolean } = {}) {
+    setViewport(1440, 812);
+    nav.value = { context: 'home', currentAppName: 'sales' };
+    return render(
+      <MemoryRouter initialEntries={['/docs/manual/intro']}>
+        <CommandPaletteProvider>
+          <SidebarProvider>
+            <SidebarDocsNavSlotProvider>
+              <UnifiedSidebar railOverlay docsPortal docsPortalSearch={search} onAppChange={vi.fn()} />
+              <SidebarDocsNav>
+                <nav aria-label="Documentation navigation" data-testid="page-docs-column">
+                  Every book
+                </nav>
+              </SidebarDocsNav>
+            </SidebarDocsNavSlotProvider>
+          </SidebarProvider>
+        </CommandPaletteProvider>
+      </MemoryRouter>,
+    );
+  }
+
+  it('the head is 「Documentation」, not the remembered app; the body is the page\'s tree; the foot stays', () => {
+    renderPortal();
+    const head = screen.getByTestId('sidebar-shell-head');
+    expect(within(head).getByTestId('sidebar-docs-portal-menu-trigger')).toHaveTextContent('Documentation');
+    expect(within(head).queryByTestId('sidebar-app-menu-trigger')).toBeNull();
+    expect(within(head).queryByText('Sales')).toBeNull();
+    expect(within(head).getByTestId('action:command-palette:open')).toBeInTheDocument();
+    const column = screen.getByTestId('page-docs-column');
+    expect(column.closest('[data-sidebar="content"]')).not.toBeNull();
+    expect(screen.queryByRole('navigation', { name: 'App navigation' })).toBeNull();
+    expect(screen.queryByText('Leads')).toBeNull();
+    expect(document.querySelector('[data-sidebar="footer"]')).not.toBeNull();
+  });
+
+  it('with no palette to open (no host app) the head draws no search field', () => {
+    renderPortal({ search: false });
+    expect(within(screen.getByTestId('sidebar-shell-head')).queryByTestId('action:command-palette:open')).toBeNull();
+    expect(screen.getByTestId('sidebar-docs-portal-menu-trigger')).toBeInTheDocument();
+  });
+
+  it('CONTROL — Home\'s context without `docsPortal` draws no shell head and no docs place', () => {
+    setViewport(1440, 812);
+    nav.value = { context: 'home', currentAppName: 'sales' };
+    render(
+      <MemoryRouter initialEntries={['/home']}>
+        <SidebarProvider>
+          <SidebarDocsNavSlotProvider>
+            <UnifiedSidebar railOverlay />
+            <SidebarDocsNav>
+              <nav data-testid="page-docs-column">Every book</nav>
+            </SidebarDocsNav>
+          </SidebarDocsNavSlotProvider>
+        </SidebarProvider>
+      </MemoryRouter>,
+    );
+    expect(screen.queryByTestId('sidebar-shell-head')).toBeNull();
+    expect(screen.queryByTestId('page-docs-column')).toBeNull();
   });
 });

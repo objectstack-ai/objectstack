@@ -21,7 +21,7 @@ import { ComponentRegistry } from '@object-ui/core';
 import type { ActionDef } from '@object-ui/core';
 import type { UIActionSchema, ActionLocation } from '@object-ui/types';
 import { ACTION_LOCATIONS, actionRendersAt } from '@object-ui/types';
-import { useAction } from '@object-ui/react';
+import { useAction, useDrawsAction } from '@object-ui/react';
 import { useCondition, toPredicateInput, usePredicateRecordContext } from '@object-ui/react';
 import { Button } from '../../ui';
 import {
@@ -36,6 +36,7 @@ import { Loader2, ChevronDown } from 'lucide-react';
 import { resolveIcon } from './resolve-icon';
 import { hasDeclaredVisibilityGate } from './visibility-gate';
 import { readActionEntryParamValues } from './static-params';
+import { withRenderableLabel } from './renderable-label';
 import { toButtonVariant, toRunnerVariant } from './runner-variant';
 import {
   DisabledReasonMenuLabel,
@@ -150,7 +151,10 @@ const InlineActionButton: React.FC<{
 
   // A DECLARED gate decides; truthiness would read `visible: false` as ungated
   // and render it (objectui#3812) — see `hasDeclaredVisibilityGate`.
+  // `ask_ai` is absent, not disabled, where no in-app assistant can take it (objectstack#37142).
+  const drawsAction = useDrawsAction();
   if (hasDeclaredVisibilityGate(action.visible) && !isVisible) return null;
+  if (!drawsAction(action)) return null;
 
   const button = (
     <Button
@@ -233,7 +237,10 @@ export const DropdownActionItem: React.FC<{
   );
   // Same declared-gate rule as `InlineActionButton` above — one action cannot be
   // hidden in one display mode and shown in the other (objectui#3812).
+  // `ask_ai` is absent, not disabled, where no in-app assistant can take it (objectstack#37142).
+  const drawsAction = useDrawsAction();
   if (hasDeclaredVisibilityGate(action.visible) && !isVisible) return null;
+  if (!drawsAction(action)) return null;
   const Icon = resolveIcon(action.icon);
   // Declared-gate test, same definition as `InlineActionButton` above: one
   // action cannot be greyed out in one display mode and clickable in the other
@@ -279,7 +286,7 @@ DropdownActionItem.displayName = 'DropdownActionItem';
 // host-EVALUATED enablement verdict, declared rather than left to the index
 // signature, as `ActionButtonRendererProps` declares it (objectui#9131).
 const ActionGroupRenderer = forwardRef<HTMLDivElement, { schema: ActionGroupSchema; className?: string }>(
-  ({ schema, className, ...props }: { schema: ActionGroupSchema; className?: string; disabled?: boolean; [key: string]: unknown } & RendererHostProps, ref) => {
+  ({ schema: declaredSchema, className, ...props }: { schema: ActionGroupSchema; className?: string; disabled?: boolean; [key: string]: unknown } & RendererHostProps, ref) => {
     const {
       'data-obj-id': dataObjId,
       'data-obj-type': dataObjType,
@@ -299,6 +306,16 @@ const ActionGroupRenderer = forwardRef<HTMLDivElement, { schema: ActionGroupSche
       disabled: hostDisabled,
       ...rest
     } = props;
+
+    // Every label read in this group goes through the shared guard (see
+    // `renderableLabel`): the group's own label here (its `visible` diagnostic
+    // and the dropdown trigger), and each member's below where `actions` is
+    // built, so both leaves and the runner's `label` read a guarded one.
+    const groupKey = dataObjId ?? 'action:group';
+    const schema = React.useMemo(
+      () => withRenderableLabel(declaredSchema, groupKey, 'action:group'),
+      [declaredSchema, groupKey],
+    );
 
     const { execute } = useAction();
     const [dropdownLoading, setDropdownLoading] = useState(false);
@@ -323,7 +340,11 @@ const ActionGroupRenderer = forwardRef<HTMLDivElement, { schema: ActionGroupSche
     // read. The local restates the declared type; both `.map()` callbacks
     // below still infer from it.
     const declaredActions: UIActionSchema[] = schema.actions || [];
-    const actions = declaredActions.filter(a => actionRendersAt(a, schema.location));
+    const actions = declaredActions
+      .filter(a => actionRendersAt(a, schema.location))
+      .map((action, index) =>
+        withRenderableLabel(action, action.name ?? `${groupKey}#${index}`, 'action:group'),
+      );
 
     const handleExecute = useCallback(
       async (action: UIActionSchema) => {

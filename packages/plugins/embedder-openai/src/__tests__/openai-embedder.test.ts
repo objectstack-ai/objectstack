@@ -6,6 +6,7 @@ import {
   createOpenAIEmbedder,
   OPENAI_COMPATIBLE_PRESETS,
 } from '../index';
+import { estimateTokens } from '@objectstack/spec/shared';
 
 function mockFetch(body: unknown, status = 200): typeof fetch {
   return vi.fn(async () =>
@@ -25,6 +26,16 @@ describe('OpenAIEmbedder', () => {
     const e = new OpenAIEmbedder({ apiKey: 'k', fetch: mockFetch({ data: [] }) });
     expect(e.id).toBe('openai');
     expect(e.dimensions).toBe(1536);
+  });
+
+  it('reports the model it sends as IEmbedder.model, for the knowledge index fingerprint (ADR-0161 K8, item 7)', async () => {
+    const fetchImpl = mockFetch({ data: [{ index: 0, embedding: [0.1, 0.2] }] });
+    expect(new OpenAIEmbedder({ apiKey: 'k', fetch: fetchImpl }).model).toBe('text-embedding-3-small');
+    const e = new OpenAIEmbedder({ apiKey: 'k', model: 'BAAI/bge-m3', fetch: fetchImpl });
+    expect(e.model).toBe('BAAI/bge-m3');
+    await e.embed(['x']);
+    const sent = JSON.parse(String((fetchImpl as unknown as ReturnType<typeof vi.fn>).mock.calls[0][1].body));
+    expect(sent.model).toBe(e.model);
   });
 
   it('looks up dimensions for known Chinese models', () => {
@@ -217,8 +228,175 @@ describe('OpenAIEmbedder batching (per-request input cap)', () => {
 
       // A known model, or an explicit override, stays silent.
       new OpenAIEmbedder({ apiKey: 'k', model: 'text-embedding-3-small', fetch: f as unknown as typeof fetch });
-      new OpenAIEmbedder({ apiKey: 'k', model: 'my-gateway-model', maxBatchSize: 50, fetch: f as unknown as typeof fetch });
+      new OpenAIEmbedder({
+        apiKey: 'k',
+        model: 'my-gateway-model',
+        maxBatchSize: 50,
+        maxInputTokens: 4096,
+        fetch: f as unknown as typeof fetch,
+      });
       expect(warn).toHaveBeenCalledTimes(1);
+    } finally {
+      warn.mockRestore();
+    }
+  });
+});
+
+describe('OpenAIEmbedder input limit (refused, not truncated)', () => {
+  function okFetch(): ReturnType<typeof vi.fn> {
+    return vi.fn(async (_url: string, init: RequestInit) => {
+      const { input } = JSON.parse(init.body as string) as { input: string[] };
+      return new Response(JSON.stringify({ data: input.map(() => ({ embedding: [1] })) }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    });
+  }
+  /** `n` CJK characters: estimateTokens = ceil(n × 1.5 × 1.1). */
+  const cjk = (n: number) => '数'.repeat(n);
+
+  it('refuses an over-limit input before sending anything, naming input, model, estimate and limit', async () => {
+    const f = okFetch();
+    // BAAI/bge-large-zh-v1.5 is documented at 512 tokens per input.
+    const e = new OpenAIEmbedder({ apiKey: 'k', model: 'BAAI/bge-large-zh-v1.5', fetch: f as unknown as typeof fetch });
+    const over = cjk(311); // 311 × 1.5 × 1.1 = 513.15 → 514
+    expect(estimateTokens(over)).toBe(514);
+    const err = await e.embed(['short', over]).then(
+      () => undefined,
+      (x: unknown) => x as Error,
+    );
+    expect(err).toBeInstanceOf(Error);
+    expect(err?.message).toContain('input 1 (0-based)');
+    expect(err?.message).toContain("'BAAI/bge-large-zh-v1.5'");
+    expect(err?.message).toContain('estimated at 514 tokens');
+    expect(err?.message).toContain('512-token input limit');
+    // The refusal tells the caller what to do: split the text.
+    expect(err?.message).toContain('Split the text below the limit');
+    expect(f).not.toHaveBeenCalled();
+  });
+
+  it('sends an under-limit input unchanged', async () => {
+    const f = okFetch();
+    const e = new OpenAIEmbedder({ apiKey: 'k', model: 'BAAI/bge-large-zh-v1.5', fetch: f as unknown as typeof fetch });
+    const atLimit = cjk(310); // 310 × 1.5 × 1.1 = 511.5 → 512, exactly the limit
+    expect(estimateTokens(atLimit)).toBe(512);
+    await e.embed([atLimit]);
+    const sent = JSON.parse((f.mock.calls[0][1] as RequestInit).body as string) as { input: string[] };
+    expect(sent.input).toEqual([atLimit]);
+  });
+
+  it('applies each known model its documented limit', async () => {
+    const f = okFetch();
+    const big = cjk(1300); // 1300 × 1.5 × 1.1 = 2145 → over 2048, under 3072 and 8192
+    const v2 = new OpenAIEmbedder({ apiKey: 'k', model: 'text-embedding-v2', fetch: f as unknown as typeof fetch });
+    await expect(v2.embed([big])).rejects.toThrow(/2048-token input limit/);
+    const zhipu = new OpenAIEmbedder({ apiKey: 'k', model: 'embedding-3', fetch: f as unknown as typeof fetch });
+    await zhipu.embed([big]);
+    const openai = new OpenAIEmbedder({ apiKey: 'k', fetch: f as unknown as typeof fetch });
+    await openai.embed([big]);
+    expect(f).toHaveBeenCalledTimes(2);
+  });
+
+  it('honours an explicit maxInputTokens over the known-model limit', async () => {
+    const f = okFetch();
+    const e = new OpenAIEmbedder({ apiKey: 'k', maxInputTokens: 10, fetch: f as unknown as typeof fetch });
+    await expect(e.embed([cjk(7)])).rejects.toThrow(/estimated at 12 tokens, over the 10-token input limit/);
+    expect(f).not.toHaveBeenCalled();
+  });
+
+  it('reports its input limit as IEmbedder.maxInputTokens: the option, else the known-model table, else none', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      expect(new OpenAIEmbedder({ apiKey: 'k' }).maxInputTokens).toBe(8192);
+      expect(new OpenAIEmbedder({ apiKey: 'k', model: 'text-embedding-v2' }).maxInputTokens).toBe(2048);
+      expect(new OpenAIEmbedder({ apiKey: 'k', model: 'BAAI/bge-large-zh-v1.5' }).maxInputTokens).toBe(512);
+      expect(new OpenAIEmbedder({ apiKey: 'k', maxInputTokens: 10 }).maxInputTokens).toBe(10);
+      expect(new OpenAIEmbedder({ apiKey: 'k', model: 'my-gateway-model', maxBatchSize: 5 }).maxInputTokens).toBeUndefined();
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it('refuses a maxInputTokens that is not a positive integer', () => {
+    for (const bad of [0, -1, 1.5, Number.NaN]) {
+      expect(() => new OpenAIEmbedder({ apiKey: 'k', maxInputTokens: bad })).toThrow(
+        /maxInputTokens must be a positive integer/,
+      );
+    }
+  });
+
+  it('applies every documented limit in the table, exactly', async () => {
+    // Every row of KNOWN_MAX_INPUT_TOKENS: a text estimated at the limit is
+    // sent, one estimated just over it is refused naming that limit.
+    const TABLE: ReadonlyArray<readonly [model: string, limit: number]> = [
+      ['text-embedding-3-small', 8192],
+      ['text-embedding-3-large', 8192],
+      ['text-embedding-ada-002', 8192],
+      ['text-embedding-v3', 8192],
+      ['text-embedding-v2', 2048],
+      ['text-embedding-v1', 2048],
+      ['embedding-3', 3072],
+      ['embedding-2', 512],
+      ['BAAI/bge-m3', 8192],
+      ['BAAI/bge-large-zh-v1.5', 512],
+      ['BAAI/bge-large-en-v1.5', 512],
+    ];
+    // `k` one-letter runs estimate ceil(k × 1.1): the largest k at or under the limit, then k + 1.
+    const words = (k: number) => 'x '.repeat(k);
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      for (const [model, limit] of TABLE) {
+        let k = Math.floor(limit / 1.1);
+        while (estimateTokens(words(k + 1)) <= limit) k++;
+        while (estimateTokens(words(k)) > limit) k--;
+        const f = okFetch();
+        const e = new OpenAIEmbedder({ apiKey: 'k', model, maxBatchSize: 1, fetch: f as unknown as typeof fetch });
+        await e.embed([words(k)]);
+        await expect(e.embed([words(k + 1)]), model).rejects.toThrow(`${limit}-token input limit of model '${model}'`);
+        expect(f, model).toHaveBeenCalledTimes(1);
+      }
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it('names the table a model is missing from in its warning', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      // embedding-2 has a documented input limit but no batch cap.
+      new OpenAIEmbedder({ apiKey: 'k', model: 'embedding-2', fetch: okFetch() as unknown as typeof fetch });
+      expect(warn).toHaveBeenCalledTimes(1);
+      const msg = String(warn.mock.calls[0][0]);
+      expect(msg).toContain('batch-size table');
+      expect(msg).not.toContain('input-limit table');
+      // An unknown model with neither option is named in both, in one warning.
+      new OpenAIEmbedder({ apiKey: 'k', model: 'my-gateway-model', fetch: okFetch() as unknown as typeof fetch });
+      expect(warn).toHaveBeenCalledTimes(2);
+      const both = String(warn.mock.calls[1][0]);
+      expect(both).toContain('batch-size table');
+      expect(both).toContain('input-limit table');
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it('sets no limit for an unknown model, with one warning per instance', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      const f = okFetch();
+      const e = new OpenAIEmbedder({
+        apiKey: 'k',
+        model: 'my-gateway-model',
+        maxBatchSize: 50,
+        fetch: f as unknown as typeof fetch,
+      });
+      const huge = cjk(20000);
+      await e.embed([huge]);
+      await e.embed([huge]);
+      expect(f).toHaveBeenCalledTimes(2);
+      expect(warn).toHaveBeenCalledTimes(1);
+      expect(String(warn.mock.calls[0][0])).toContain("'my-gateway-model'");
+      expect(String(warn.mock.calls[0][0])).toContain('maxInputTokens');
     } finally {
       warn.mockRestore();
     }
