@@ -2143,8 +2143,14 @@ function DatasetReportChart({
  * currency a value axis can print: a per-row currency column
  * (`currencyField`, ADR-0144 D9) has none, so its axis keeps plain numbers.
  * `undefined` when the measure states none of them.
+ *
+ * ⚠️ A second copy of this function lives in `plugin-dashboard`'s `DatasetWidget`, because
+ * the shared home (`@object-ui/core`) sits outside the change that wrote it;
+ * `DatasetReportRenderer.measureFormatCarrierParity-37053.test.ts`
+ * (plugin-report) holds the two byte-identical. Edit both, or move them to
+ * core together.
  */
-function measureFormatCarrier(
+export function measureFormatCarrier(
   field: DatasetResultField | undefined,
 ): { format?: string; currency?: string; percentScale?: 'fraction' | 'whole' } | undefined {
   if (!field) return undefined;
