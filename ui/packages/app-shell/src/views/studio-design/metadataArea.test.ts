@@ -13,8 +13,11 @@ import { describe, it, expect } from 'vitest';
 import {
   AREA_PILLAR_FOR_TYPE,
   STUDIO_ALL_PACKAGES_SEGMENT,
+  AREA_DESIGNER_PAGE_TYPES,
   areaDesignerItemOf,
+  areaItemAsksGenericPage,
   areaItemOpensDesignerPage,
+  orgScopeFlowOf,
   areaItemOpensFormEditor,
   areaItemPillarPath,
   areaLocationRedirect,
@@ -182,37 +185,50 @@ describe('areaItemOpensFormEditor — a read-only package’s dataset opens its 
 });
 
 describe('areaItemOpensDesignerPage — a flow opens its designer full-screen (objectstack#36903)', () => {
-  const at = (type: string, q = '', packageId: string | null = PKG, orgScope = false) =>
-    areaItemOpensDesignerPage({ packageId, type, search: new URLSearchParams(q), orgScope });
-
-  it('a flow on a package\'s leg, and on the package-less scope\'s', () => {
-    expect(at('flow')).toBe(true);
-    expect(at('flow', '?source=runtime', null, true)).toBe(true);
+  it('the designer list names the flow; a flow on a package\'s leg opens it', () => {
+    expect(AREA_DESIGNER_PAGE_TYPES).toContain('flow');
+    expect(areaItemOpensDesignerPage({ packageId: PKG, type: 'flow' })).toBe(true);
   });
 
-  it('not the cross-package leg, the environment scope or a draft review; not another type', () => {
-    expect(at('flow', '', null)).toBe(false);
-    expect(at('flow', '?scope=environment')).toBe(false);
-    expect(at('flow', '?review=1')).toBe(false);
-    expect(at('object')).toBe(false);
-    expect(at('object', '', null, true)).toBe(false);
-    // Control: a review value other than the one the item page acts on.
-    expect(at('flow', '?review=0')).toBe(true);
+  it('not the cross-package leg; not a type outside the list', () => {
+    expect(areaItemOpensDesignerPage({ packageId: null, type: 'flow' })).toBe(false);
+    expect(areaItemOpensDesignerPage({ packageId: PKG, type: 'dashboard' })).toBe(false);
+  });
+
+  it('the environment scope and a draft review keep the generic page, as they keep a pillar type\'s', () => {
+    const asks = (q: string) => areaItemAsksGenericPage(new URLSearchParams(q));
+    expect(asks('?scope=environment')).toBe(true);
+    expect(asks('?review=1')).toBe(true);
+    // Control: a review value other than the one the item page acts on, and no query.
+    expect(asks('?review=0')).toBe(false);
+    expect(asks('')).toBe(false);
   });
 });
 
 describe('areaDesignerItemOf — the copilot reads the open flow off its address (objectstack#36903)', () => {
-  it('names the flow of a package\'s or the scope\'s designer address, its `/history` too', () => {
+  it('names the flow of a package\'s designer address, its `/history` too', () => {
     expect(areaDesignerItemOf(`/studio/${PKG}/metadata/flow/f_1`, PKG)).toEqual({ type: 'flow', name: 'f_1' });
     expect(areaDesignerItemOf(`/studio/${PKG}/metadata/flow/f_1/history`, PKG)).toEqual({ type: 'flow', name: 'f_1' });
-    expect(areaDesignerItemOf('/studio/~org/metadata/flow/a%3Ab', '~org')).toEqual({ type: 'flow', name: 'a:b' });
   });
 
-  it('names nothing for a list, another type, the cross-package leg or a pillar', () => {
+  it('names nothing for a list, a create, another type, the cross-package leg or a pillar', () => {
     expect(areaDesignerItemOf(`/studio/${PKG}/metadata/flow`, PKG)).toBeNull();
+    expect(areaDesignerItemOf(`/studio/${PKG}/metadata/flow/new`, PKG)).toBeNull();
     expect(areaDesignerItemOf(`/studio/${PKG}/metadata/dashboard/d`, PKG)).toBeNull();
     expect(areaDesignerItemOf('/studio/~all/metadata/flow/f_1', '~all')).toBeNull();
     expect(areaDesignerItemOf(`/studio/${PKG}/data`, PKG)).toBeNull();
     expect(areaDesignerItemOf(`/studio/${PKG}/metadata/flow/f_1`, undefined)).toBeNull();
+    // The package-less scope is not a package's leg: orgScopeFlowOf answers for it.
+    expect(areaDesignerItemOf('/studio/~org/metadata/flow/f_1', '~org')).toBeNull();
   });
+
+  it('orgScopeFlowOf names the package-less scope\'s flow, and nothing on any other leg', () => {
+    expect(orgScopeFlowOf('/studio/~org/metadata/flow/a%3Ab', '~org')).toEqual({ type: 'flow', name: 'a:b' });
+    expect(orgScopeFlowOf('/studio/~org/metadata/flow/a/history', '~org')).toEqual({ type: 'flow', name: 'a' });
+    expect(orgScopeFlowOf('/studio/~org/metadata/flow', '~org')).toBeNull();
+    expect(orgScopeFlowOf('/studio/~org/metadata/flow/new', '~org')).toBeNull();
+    expect(orgScopeFlowOf('/studio/~org/metadata/object/o', '~org')).toBeNull();
+    expect(orgScopeFlowOf(`/studio/${PKG}/metadata/flow/f_1`, PKG)).toBeNull();
+  });
+});
 });

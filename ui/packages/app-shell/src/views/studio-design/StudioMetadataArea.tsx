@@ -46,6 +46,7 @@ import { t, useMetadataLocale } from '../metadata-admin/i18n.js';
 import { fetchListedPackageManifests } from './packages-io.js';
 import {
   STUDIO_ALL_PACKAGES_SEGMENT,
+  areaItemAsksGenericPage,
   areaItemOpensDesignerPage,
   areaItemOpensFormEditor,
   areaItemPillarPath,
@@ -53,6 +54,7 @@ import {
   studioMetadataAreaPath,
 } from './metadataArea.js';
 import { STUDIO_ORG_SCOPE_SEGMENT } from './studioScope.js';
+import { STUDIO_ORG_SCOPE_TYPE } from './studioAddress.js';
 import { StudioBundleItemEditor } from './StudioBundleItemEditor.js';
 import { AutomationsPillar } from './AutomationsPillar.js';
 import type { StudioSurfaceLabel } from './StudioAiCopilot.js';
@@ -175,7 +177,12 @@ function AreaItemOpen({
   const host = useMetadataAreaHost();
   const [opens] = React.useState(() => {
     const at = { packageId: host?.packageId ?? null, type, search };
-    if (areaItemOpensDesignerPage({ ...at, orgScope: editor.orgScope })) return { designer: true, formEditor: false, pillarPath: null };
+    // objectstack#36903 — the package-less scope's area holds its flows
+    // alone, and a flow there opens the flow designer as on a package's leg.
+    const designer =
+      (areaItemOpensDesignerPage(at) || (editor.orgScope === true && type === STUDIO_ORG_SCOPE_TYPE)) &&
+      !areaItemAsksGenericPage(search);
+    if (designer) return { designer: true, formEditor: false, pillarPath: null };
     if (areaItemOpensFormEditor({ ...at, readOnly: host?.readOnly === true })) return { designer: false, formEditor: true, pillarPath: null };
     return { designer: false, formEditor: false, pillarPath: areaItemPillarPath({ ...at, name }) };
   });

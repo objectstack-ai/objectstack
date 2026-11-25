@@ -15,7 +15,7 @@ import { ConversationsSidebar } from '../../console/ai/ConversationsSidebar.js';
 import { resolvePublicShareBase } from '../../console/organizations/resolveHomeUrl.js';
 import { AiUsageIndicator } from '../../layout/AiUsageIndicator.js';
 import { usePlanApprovalPendingCount } from '../../assistant/assistantBus.js';
-import { areaDesignerItemOf } from './metadataArea.js';
+import { areaDesignerItemOf, orgScopeFlowOf } from './metadataArea.js';
 
 /**
  * objectui#8219 — the display label of the artifact a pillar has open, tagged
@@ -86,8 +86,14 @@ export function StudioCopilotConversation({
       }
     }
     // objectstack#36903 — a designer open full-screen on its metadata
-    // address (the flow designer) is named by the address itself.
-    if (!artifact) artifact = areaDesignerItemOf(copilotLocation.pathname, segment) ?? undefined;
+    // address (the flow designer, on a package's leg or the package-less
+    // scope's) is named by the address itself.
+    if (!artifact) {
+      artifact =
+        areaDesignerItemOf(copilotLocation.pathname, segment) ??
+        orgScopeFlowOf(copilotLocation.pathname, segment) ??
+        undefined;
+    }
     if (!tab && !artifact) return undefined;
     return { ...(tab ? { pillar: tab } : {}), ...(artifact ? { artifact } : {}) };
   }, [tab, segment, copilotLocation.search, copilotLocation.pathname]);

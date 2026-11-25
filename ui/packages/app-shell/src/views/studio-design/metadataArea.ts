@@ -110,15 +110,26 @@ export function areaItemPillarPath(input: {
 }): string | null {
   const pillar = studioItemPillar(input.type);
   if (!pillar || !input.packageId) return null;
-  if (input.search.get(CATALOG_SCOPE_PARAM) === ENVIRONMENT_SCOPE) return null;
-  if (input.search.get(STUDIO_ITEM_REVIEW_PARAM) === STUDIO_ITEM_REVIEW_VALUE) return null;
+  if (areaItemAsksGenericPage(input.search)) return null;
   return studioPillarItemPath(input.packageId, pillar, { type: input.type, name: input.name });
 }
 
 /**
- * objectstack#36903 (Studio redesign epic #36890; ADR-0146 D1 as amended) —
- * the types whose item, on a package's leg, opens its designer full-screen in
- * the area rather than the generic item page: the flow designer
+ * The query a pillar type's item honours on the generic item page rather than
+ * its designer: the environment scope (which names no package to design in)
+ * and `?review=1` (the generic page's draft review). {@link areaItemPillarPath}
+ * keeps a pillar type there under it; objectstack#36903 — a designer page does
+ * too, so a review link (`studioItemReviewPath`) still opens the review.
+ */
+export function areaItemAsksGenericPage(search: URLSearchParams): boolean {
+  if (search.get(CATALOG_SCOPE_PARAM) === ENVIRONMENT_SCOPE) return true;
+  return search.get(STUDIO_ITEM_REVIEW_PARAM) === STUDIO_ITEM_REVIEW_VALUE;
+}
+
+/**
+ * Studio redesign epic #36890 (ADR-0146 D1 as amended) — the types whose item,
+ * on a package's leg, opens its designer full-screen in the area rather than
+ * the generic item page. objectstack#36903: the flow designer
  * (`AutomationsPillar`, fixed on one flow). A designer card adds its type here
  * in the PR that deletes the type's row from `STUDIO_ITEM_PILLAR`.
  */
@@ -126,44 +137,53 @@ export const AREA_DESIGNER_PAGE_TYPES: readonly string[] = Object.freeze(['flow'
 
 /**
  * Whether an item of the area opens its full-screen designer page: a
- * {@link AREA_DESIGNER_PAGE_TYPES} type on a package's leg, or a flow on the
- * package-less scope's leg (`orgScope`), under the same exceptions as
- * {@link areaItemPillarPath}: the cross-package leg and the environment scope
- * name no package to design in, and `?review=1` opens the generic page's
- * draft review.
+ * {@link AREA_DESIGNER_PAGE_TYPES} type on a package's leg. The cross-package
+ * leg names no package to design in, so it keeps the generic item page.
  */
-export function areaItemOpensDesignerPage(input: {
-  packageId: string | null;
-  type: string;
-  search?: URLSearchParams;
-  /** The area is the package-less scope's (`~org`), whose one type is the flow. */
-  orgScope?: boolean;
-}): boolean {
-  if (!AREA_DESIGNER_PAGE_TYPES.includes(input.type)) return false;
-  if (input.packageId === null && !(input.orgScope && input.type === STUDIO_ORG_SCOPE_TYPE)) return false;
-  if (input.search?.get(CATALOG_SCOPE_PARAM) === ENVIRONMENT_SCOPE) return false;
-  return input.search?.get(STUDIO_ITEM_REVIEW_PARAM) !== STUDIO_ITEM_REVIEW_VALUE;
+export function areaItemOpensDesignerPage(input: { packageId: string | null; type: string }): boolean {
+  return input.packageId !== null && AREA_DESIGNER_PAGE_TYPES.includes(input.type);
 }
 
 /**
  * The item an area URL opens in its full-screen designer page, read off the
- * address (`/studio/<package or ~org>/metadata/<type>/<name>[/…]`), or `null`
- * for any other URL. Studio's copilot reads it as it reads a pillar's
- * `?surface=` (cloud#1610: the URL is the one source of what is being
- * discussed), so a designer that left its pillar keeps the context the
- * pillar gave it.
+ * address (`/studio/<package>/metadata/<type>/<name>[/…]`), or `null` for any
+ * other URL. Studio's copilot reads it as it reads a pillar's `?surface=`
+ * (cloud#1610: the URL is the one source of what is being discussed), so a
+ * designer that left its pillar keeps the context the pillar gave it.
  */
 export function areaDesignerItemOf(pathname: string, segment: string | null | undefined): { type: string; name: string } | null {
-  if (!segment || isStudioAllPackagesScope(segment)) return null;
-  const orgScope = isStudioOrgScope(segment);
+  if (!segment || isStudioAllPackagesScope(segment) || isStudioOrgScope(segment)) return null;
   const root = `${studioMetadataAreaRoot(segment)}/`;
   if (!pathname.startsWith(root)) return null;
   const [rawType, rawName] = pathname.slice(root.length).split('/');
-  if (!rawType || !rawName) return null;
+  // `<root>/<type>/new` is the area's create page (it routes before the item),
+  // never an item called `new`.
+  if (!rawType || !rawName || rawName === 'new') return null;
   try {
     const type = decodeURIComponent(rawType);
     const name = decodeURIComponent(rawName);
-    return areaItemOpensDesignerPage({ packageId: orgScope ? null : segment, type, orgScope }) ? { type, name } : null;
+    return areaItemOpensDesignerPage({ packageId: segment, type }) ? { type, name } : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * objectstack#36903 — the flow the package-less scope's area opens in the flow
+ * designer, read off its address (`/studio/~org/metadata/flow/<name>[/…]`), or
+ * `null` for any other URL. The scope's area holds its flows alone
+ * ({@link orgScopeAreaRedirect}) and names no package, so the shared
+ * {@link areaDesignerItemOf} (a package's leg) never answers for it.
+ */
+export function orgScopeFlowOf(pathname: string, segment: string | null | undefined): { type: string; name: string } | null {
+  if (!isStudioOrgScope(segment)) return null;
+  const root = `${studioMetadataAreaRoot(STUDIO_ORG_SCOPE_SEGMENT)}/`;
+  if (!pathname.startsWith(root)) return null;
+  const [rawType, rawName] = pathname.slice(root.length).split('/');
+  if (!rawType || !rawName || rawName === 'new') return null;
+  try {
+    const type = decodeURIComponent(rawType);
+    return type === STUDIO_ORG_SCOPE_TYPE ? { type, name: decodeURIComponent(rawName) } : null;
   } catch {
     return null;
   }
