@@ -18,6 +18,10 @@ import { render, cleanup, waitFor } from '@testing-library/react';
 import { ComponentRegistry } from '@object-ui/core';
 import { SchemaRendererContext } from '@object-ui/react';
 import '../../../renderers';
+// The renderers reach a dynamic `import('@object-ui/react-runtime')`; pay its
+// first load at collection, never inside a case's clocked window
+// (`check:test-source-alias`).
+import '@object-ui/react-runtime';
 import {
   currencyCodeFieldNames,
   readUsedCurrencyCodes,
