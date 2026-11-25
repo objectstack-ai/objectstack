@@ -63,6 +63,20 @@ export interface KnowledgeReindexResult {
   ok: boolean;
   /** Free-form diagnostics. */
   message?: string;
+  /**
+   * Documents the walk did not push because the adapter already holds them
+   * with the same `docHash` (ADR-0161 K8, item 2). `0` when the adapter has
+   * no `listDocuments`, whose walk pushes every document.
+   */
+  skipped?: number;
+  /**
+   * Documents deleted by the purge that follows a complete walk: listed by
+   * the adapter before the walk, not seen in it, and confirmed gone by a
+   * re-read of their row (ADR-0161 K8, item 1). `null` when no purge ran — a
+   * walk with `limit` or `dryRun`, a failed walk, a source with
+   * `refresh.onRecordChange: false`, or an adapter without `listDocuments`.
+   */
+  purged?: number | null;
 }
 
 /**
