@@ -1,0 +1,36 @@
+{
+  "number": 37198,
+  "kind": "pull_request",
+  "title": "test(app-shell): pre-filter the Studio address guard's walk before parsing",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "size/m",
+    "skip-changeset",
+    "tests"
+  ],
+  "assignees": [
+    "os-justin"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-25T03:22:23Z",
+  "updated_at": "2026-11-25T04:08:18Z",
+  "closed_at": "2026-11-25T04:08:16Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-25T04:08:16Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/37198",
+  "body": "Fixes #37174\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 用户无感:只改界面工作区里的一份守卫测试,产品代码一行未动。\n- 为什么做:这份「禁止手拼工作室地址」的守卫在繁忙的 CI 分片上超时,把一个无关的合并请求两次挤出合并队列,这次修复为它解围。\n- 出错会怎样:最坏是守卫漏看某个文件里的手拼地址;新加的对照测试正是为这种情况变红而设,改动随时可直接撤回。\n- 要你做什么:无。\n\n## What changes\n\nTest-only: one file, `ui/packages/app-shell/src/views/studio-design/studioAddress.guard.test.ts`. No product file, no published file (`@object-ui/app-shell` is private and ships `dist` only), hence `skip-changeset`. This unblocks PR #37114, whose Test UI shard timed out on this case twice (queue run 45501281672; PR job 138901843717).\n\n- **Pre-filter before parsing.** The walk case TypeScript-parsed every non-test ui source (2,378 files at this head) inside the default 15 s budget. A raw-text gate, `maySpellStudioAddress`, now keeps the parse to the sources that may spell an address (123 of 2,378 here).\n- **The gate is a superset of the matcher by construction, and wider than the card's two words.** Reading the matcher showed `/studio` plus `STUDIO_ROOT_PATH` is not exact:\n  - The matcher also flags a template or `+` on `STUDIO_LANDING_PATH` (it is in `ROOT_NAMES`).\n  - The matcher reads COOKED literal text, so `'\\x2fstudio'`, `'\\57\\163tudio'`, `'/stud\\u{69}o'` and a line continuation inside the word all cook to `/studio` while the raw text holds no `/studio`. Identifiers cook `\\u` escapes the same way (`STUDIO_ROOT_PATH`).\n  - So the gate matches each of the three words with every character in any of those spellings (itself, identity escape, `\\x`, `\\u`, `\\u{}`, legacy octal), with line continuations allowed between characters.\n  - A JSX attribute string is not cooked (TypeScript keeps `&#47;` as is), so its raw text is its text.\n  - The header comment on the gate gives the argument.\n- **New control, \"the pre-filter keeps every source the matcher flags\".** It runs over one shared fixture list, `FLAGGED_SPELLINGS`: the first case's eight spellings plus ten escaped and `STUDIO_LANDING_PATH` forms. Each fixture's only hit is that spelling. The control asserts the matcher flags it once and the gate passes it. It also asserts that the builder file fires the matcher and passes the gate, and that a source naming no address is dropped. The first case now asserts the matcher over the same list, so the two cannot drift apart.\n- **Existing controls kept.** The walk still has to reach `StudioDesignSurface.tsx` and `StudioRoute.tsx`, and the builder still fires the matcher inside the walk case.\n- **Explicit budget.** The walk case now runs under `{ timeout: 60_000 }` as the second line of defence; the measured wall time is below.\n\n## Tests\n\n<details><summary>Wall time of the walk case, before and after (local, shared box, under os-verify-lock)</summary>\n\n- Before (base `95734fef75`, unchanged file): `no ui source outside the builder spells one 4471ms`. File total: `Duration 5.79s`.\n- After (`45151aec2b`): `no ui source outside the builder spells one 873ms`; `the pre-filter keeps every source the matcher flags 18ms`. File total: `Duration 1.48s`, `Tests 3 passed (3)`.\n- Probe at the same tree: walk 24 ms, reading every file 166 ms, the gate's regex over all 2,378 texts 47 ms. The rest of the before figure was the parse.\n\n</details>\n\n<details><summary>Ablation 1: the gate drops everything (`MAY_SPELL_STUDIO_ADDRESS.test(text) && false`)</summary>\n\nMade through `scripts/ablation-replace.mjs`. Result: `ok mutation landed: anchor 1 -> 0, blob fdd866a33090 -> b763c5694c5f`.\n\n- `× the pre-filter keeps every source the matcher flags`, failing with `AssertionError: const a = '/studio';: expected false to be true`. `Tests 1 failed | 2 passed (3)`.\n- The walk case stayed GREEN under this ablation (196 ms, no file parsed, so no offender). That is the hole the new control closes.\n- Restore: `ok restored: blob == HEAD (fdd866a33090) and git diff HEAD is empty`.\n\n</details>\n\n<details><summary>Ablation 2: the card's two-word filter (`/studio` or `STUDIO_ROOT_PATH` as plain substrings)</summary>\n\nMade through the same tool. Result: `ok mutation landed: anchor 1 -> 0, blob fdd866a33090 -> dbb5d30c77b9`.\n\n- `× the pre-filter keeps every source the matcher flags`, failing with `AssertionError: const a2 = '\\x2Fstudio';: expected false to be true`. `Tests 1 failed | 2 passed (3)`.\n- Restore: `ok restored: blob == HEAD (fdd866a33090) and git diff HEAD is empty`.\n\n</details>\n\n<details><summary>Derived gates at 45151aec2b (`dispatch-gates.mjs --commands`, 27 commands)</summary>\n\n- 26 of 27 exited 0 on the first pass.\n- `pnpm --dir ui exec vitest run scripts/` first went red, 22 files failing with `Cannot find package '@objectstack/spec/ui'`: the fresh worktree had no `packages/spec/dist`. After `pnpm --filter @objectstack/spec build` it went green: `Test Files 172 passed | 2 skipped (174)`, `Tests 5131 passed | 2 skipped (5133)`, `VERDICT command-exit 0`.\n- `node scripts/check-nul-bytes.mjs` and a control-byte grep over the file are clean. `eslint --no-inline-config` on the file exits 0.\n\n</details>\n\n- Whole `@object-ui/app-shell` package suite (2,443 test files, `--maxWorkers=2` on a shared box): NOT MEASURED. Reason: still running after 70 minutes when this PR was opened. The CI `Test UI` shards own that verdict.\n\n## Acceptance notes\n\n- The two-word pre-filter the card proposed would have missed `STUDIO_LANDING_PATH` and every escaped spelling (ablation 2). The filter was widened to stay an exact superset, as the dispatch asked.\n- On today's tree the widened gate passes the same 123 files the two-word filter would. The widening costs no parse time.\n- `node scripts/pm/overlap-check.mjs`: `VERDICT clean exit 0` (origin/main `95734fef75`, 0 PR heads share the file).\n\n## Verification\n\n**Read first:**\n\n1. The doc comment above `STUDIO_ADDRESS_WORDS` and the regex builder under it. This is the risk hunk: the superset argument lives there.\n2. The `FLAGGED_SPELLINGS` list and the new control case.\n3. The walk case's `maySpellStudioAddress` early return and its `{ timeout: 60_000 }`.\n\n**Two-minute check:** from `ui/`, run `pnpm --filter @object-ui/app-shell exec vitest run --root ../.. --reporter=verbose packages/app-shell/src/views/studio-design/studioAddress.guard.test.ts`. Expect three passing cases, with the walk case at about 1 s instead of about 4.5 s.\n\n---\n\n_Generated by [Claude Code](https://claude.ai/code/session_01QSeKYpEsWWE9Y5YtSsDgqZ)_\n"
+}

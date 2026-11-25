@@ -1,0 +1,37 @@
+{
+  "number": 37184,
+  "kind": "pull_request",
+  "title": "fix(console): a session answered \"not shown\" sends no first-run checklist reads on later opens",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-25T02:30:43Z",
+  "updated_at": "2026-11-25T03:28:31Z",
+  "closed_at": "2026-11-25T03:28:29Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-25T03:28:29Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/37184",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-warren\"} -->\n_Requested by **Warren** · [project thread](https://claude.ai/code/project/chan_01U5RdnAAmkSQmZbqh6FtqZ8?thread=cmsg_01U5RdnAAmkSQmZbqh6FtqZ8JtfL3chjK7xVPpJ6UJRz9z)_\n\nFixes #37182\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 做了什么：看不到「开始使用」清单的会话（普通成员；控制面上的普通组织所有者），第一次被服务端答成「不显示」后，本机记住这个答案（按组织、用户、权限集合，24 小时）；之后打开控制台不再多发 `GET /api/settings`。\n- 管理员不受影响：每次照旧读取并显示清单。权限变了、换人或换组织、过期、读取失败，都会重新读。\n- 结果：cloud 控制面计费页的预热打开回到 25 次请求；下一轮 cloud 抄版本把预算从 26 改回 25。\n- 要你做的：无。\n\n## What changes\n\n- `firstRunChecklistLogic.ts`: a device record of the server's \"not shown\" answer, `os:first-run-checklist-not-shown:<orgId>:<userId>`, holding the capability list it was read for and when (`notShownRecordKey`, `wasAnsweredNotShown`, `markAnsweredNotShown`, `NOT_SHOWN_RECORD_TTL_MS` = one day). It fails toward reading again: unreadable storage, a record that does not parse, a different capability set, an expired record, or one dated in the future all read.\n- `firstRunChecklistState.tsx`: the provider checks the record before scheduling its reads and asks nothing while it stands; when `readChecklistSettings` answers `null` (the server's answer that this session may not write `localization`), it writes the record. A read that throws writes nothing. An administrator's path is untouched.\n\n## Why\n\nSince #36791 the provider is mounted above every app route and, after the first paint, sends `GET /api/settings` for every session whose `systemPermissions` is non-empty. For a session never shown the checklist that request buys nothing, on every console open. The cloud pin round cloud#4982 (PR cloud#4983) measured it as the 26th call of the control plane's `page/pricing` warm open, budget 25.\n\nWhy a remembered answer and not a capability check before the request: the session that red the budget, an ordinary organization owner on the control plane, holds `setup.write`; that plane re-registers `localization` with `writePermission: manage_platform_settings` (cloud `control-plane-settings.ts`). Which permission a deployment's manifest asks is known only once the list answers, and naming one in the console would be a second copy of the manifest's declaration that drifts on the next deployment that changes it. The first open on a device still pays the one read; every later open within the day does not.\n\n## Verification\n\n- `pnpm exec vitest run apps/console/src/pages/settings/__tests__/firstRunChecklistLogic.test.ts apps/console/src/pages/settings/__tests__/FirstRunChecklist.test.tsx` (from `ui/`): 119 passed.\n- New provider pins (`a session answered \"not shown\" asks nothing again on this device`): a member reads once then never; an owner holding `setup.write` where `localization` asks `manage_platform_settings` reads once across three opens; an administrator reads and is shown it on every open; a member made administrator reads again at once; a failed list read records nothing; another user in the same browser reads for themself. New logic pins cover the key, capability-set match, the one-day bound, a future-dated record, unreadable storage and unparseable records.\n- Ablation: with `firstRunChecklistState.tsx` reverted to `main`, the member and control-plane-owner pins fail (2 failed, 88 passed in that file); the other four pass on both, as preservation pins.\n- `eslint` on the four touched files: 0 errors (2 pre-existing `react-refresh/only-export-components` warnings on `firstRunChecklistState.tsx`).\n- Not run locally: the cloud `console-boots` budget. The next cloud pin round reads it and moves `page/pricing` `maxCalls` back to 25, with the reading recorded on cloud#2914.\n\n## Human Minimum\n\n- [x] 1. Schemas start as Zod; `packages/spec` holds no runtime logic. (not touched)\n- [x] 2. Every name I added uses the casing for its kind.\n- [x] 3. No formatter ran; `pnpm lint` passes.\n- [x] 4. One issue, one branch off an up-to-date `main`, one pull request.\n- [x] 5. A change that publishes carries a changeset, and both declaration lines are filled in here and in the changeset.\n- [x] 6. `packages/spec` touched: its generated artifacts are regenerated and committed. (not touched)\n- [x] 7. No hand edits to `content/docs/references/`, `packages/*/CHANGELOG.md` or `content/docs/releases/`.\n- [x] 8. Title, body and comments are in English.\n- [x] The *Before Submitting* list in CONTRIBUTING.md is done.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01JQwxbZaRxCTLgg8LsLBuFb\n"
+}

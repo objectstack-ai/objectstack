@@ -1,0 +1,32 @@
+{
+  "number": 37192,
+  "kind": "issue",
+  "title": "[Decision] Studio left menu: features are there but the focus is unclear — order and visual weight inside the groups",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ux"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-25T03:08:53Z",
+  "updated_at": "2026-11-25T03:25:40Z",
+  "closed_at": "2026-11-25T03:25:40Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/37192",
+  "body": "repo:objectstack#4 · os-justin · session_01QSeKYpEsWWE9Y5YtSsDgqZ\n\nPart of #36890 (Studio rework). Raised by the maintainer on 2026-11-25, from a screenshot of the new left menu on the showcase 销售 package: 「studio 调整后的左侧菜单，功能有了，重点不清晰了。」\n\n## 维护者速读\n\n- 现在什么样：左侧 22 个类型平铺，分组标题和条目长得几乎一样；组内按英文 API 名排序，所以「对象」排在「钩子」「字段映射」后面；数字有两种意思（组标题旁是类型个数，条目旁是条数），68 个邮件模板这类大数字最抢眼。\n- 为什么会这样：决定 11 只定了「分成哪六组」，没定组内顺序和视觉层级；组内顺序是服务端返回的顺序（`studioMenuModel.ts` 的 `buildStudioMenu`「in served order」）。\n- 推荐：A（分组标题做成小号灰字标签、去掉组计数；组内按搭应用的先后排；条数弱化；空类型变淡但不隐藏），顺序写进类型到分组的那张表，一处定义。\n- 要你做什么：选 A / B / C。\n\n## Observations (from the screenshot, read against `origin/main`)\n\n1. **Group headers read as items.** 数据 / 界面 / 自动化 / 平台 / 访问 have the same size and weight as the entries under them, with only an icon to tell them apart, so the eye finds no structure.\n2. **Order inside a group is the server's order, which is the English API name.** 数据 shows hook, field mapping, object, option list. 界面 shows action, app, dashboard, dataset, page, report, view. So the core type 对象 sits third, under 钩子, and 应用 sits under 操作. The building order is lost. `buildStudioMenu` takes `types` \"in served order\"; decision 11 ruled the six groups and placed three special entries, but no order within a group.\n3. **One number, two meanings.** The count beside a group header is the number of types in it (4, 7, 1, 3, 5). The count beside an entry is items (27, 62, 68). The biggest numbers sit on types that matter least to a builder (邮件模板 68, 视图 62), so they pull the eye.\n4. **All types weigh the same.** Rare or diagnostic entries (诊断, 文档手册, 岗位, 分配规则) are as prominent as 对象, 页面 and 流程. Empty types (组织级流程, 诊断 with no count) look the same as full ones.\n\n## Options\n\n| | What | Cost |\n|:--|:--|:--|\n| **A (recommended)** | Make the hierarchy visual: group headers become small grey, non-clickable labels with no count. Order inside a group follows the building flow (below). Entry counts are smaller and grey. An empty type is dimmed but stays listed, because it is where the first item gets created. The order lives in the same type→group table that #36891 put in ADR-0084 / ADR-0146 D1, so the menu, the ⌘K palette (#36900) and the docs read one order. | S–M, one ui card plus one table edit |\n| B | A, plus a pinned 「常用」 section on top (对象, 页面, 视图, 流程, 权限集) duplicating those entries | M; a second way to reach the same type |\n| C | A, plus hiding empty types behind 「显示全部类型」 | S; the first item of a type becomes hard to find |\n\nProposed building-flow order for A. The table edit is part of A, and you may reorder it:\n- 数据: 对象 → 选项列表 → 字段映射 → 钩子\n- 界面: 应用 → 页面 → 视图 → 仪表盘 → 报表 → 数据集 → 操作\n- 自动化: 流程 → 组织级流程\n- 平台: 文档 → 文档手册 → 邮件模板 → 诊断\n- 访问: 权限集 → 岗位 → 分配规则 → 组织级默认共享 → 环境\n- AI: as served until it has entries\n\n## Four axes\n\n- **Real business need:** the reader is an app builder working through one package. What they reach for follows the building flow (object, then UI, then automation, then access), and the screenshot shows the current order works against that. Measured: the 销售 package's served order puts 钩子 first and 对象 third.\n- **Long-term fit:** one ordered table, shared by the menu, the palette and the docs, fixes the cause. B adds a second navigation idea that has to be kept in sync. C hides entry points.\n- **AI-error resistance:** an explicit order in the one type table means a new type added by an AI lands in a declared slot, or fails the table's test, instead of falling wherever the server's sort puts it.\n- **Startup focus:** A is the smallest change that fixes all four observations. B and C add surface with no measured pull.\n\nGoverning text: epic #36890 decision 11 (groups); ADR-0084 / ADR-0146 D1 type→group table (#36891).\n\nNot blocking: PR #37168, #37169, #37166 and #37089 land as they are. The menu card follows them."
+}

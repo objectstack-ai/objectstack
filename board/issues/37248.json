@@ -1,0 +1,32 @@
+{
+  "number": 37248,
+  "kind": "issue",
+  "title": "Related list offers + New for a child whose FK to the parent is readonly; the created record silently loses the link",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "sunhaolin",
+    "id": 6194896,
+    "type": "User"
+  },
+  "labels": [
+    "area:ux",
+    "bug",
+    "domain:ui",
+    "pm:queue",
+    "priority:p1"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-25T06:49:08Z",
+  "updated_at": "2026-11-25T07:32:51Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/37248",
+  "body": "## What happens\n\nA record page's related list offers **+ New** for a child whose foreign key back to the parent is `readonly`. The create dialog opens pre-linked (`?form=new&formObject=<child>&formLink=<fk>:<parentId>`), the user saves, and the record is created **without the link**: the server strips the readonly field on a user insert, as it should. The new record never appears in the related list the user started from, and nothing tells them why.\n\n## Repro (HotCRM, local dev)\n\n- `crm_sales_order.crm_quote` is `Field.lookup('crm_quote', { readonly: true, ... })`. Only a flow writes it (the accepted-quote → order flow), because one quote → one order.\n- Open any quote → right-hand **订单 / Orders** related list → **+** → fill the form → **Create**.\n- Result: the order is saved with `crm_quote = null`, and the quote's Orders list still shows 0.\n- The server side is confirmed directly: `POST /api/v1/data/crm_sales_order` with `crm_quote: <id>` returns 201 and the stored row has `crm_quote: null`. The readonly rule is behaving correctly; the UI is offering a path whose link can never be saved.\n\n## Where\n\n`ui/packages/app-shell/src/views/RelatedRecordActionsBridge.tsx` → `resolve({ objectName, relationshipField, ... })`. `aff.create` is `objectCanCreate && createVisible`: the child's create grant plus `userActions.create` predicates. It never looks at whether `relationshipField` itself is writable by the user on create.\n\n## Expected\n\nWhen the child's `relationshipField` is `readonly` (or otherwise not user-writable on create), the related list should not offer **+ New**, because a record created from it cannot belong to this parent. At minimum, the pre-link must not be silently dropped: refuse it, or say so in the dialog.\n\nCreating the child from its own list (unlinked) stays available, so nothing a user legitimately needs is lost.\n\n## Why p1\n\nIt silently produces orphan records from the exact place that implies they will be linked. The user sees \"created\", the list doesn't change, and they will likely click again, creating duplicates.\n"
+}

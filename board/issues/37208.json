@@ -1,0 +1,35 @@
+{
+  "number": 37208,
+  "kind": "issue",
+  "title": "Data API query refusal: a `$filter` with a wrong-kind `$and` answers `required` at `query.where.$and` instead of `invalid_type` at the slot the caller sent",
+  "state": "closed",
+  "state_reason": "duplicate",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:data",
+    "domain:server",
+    "finding",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-25T03:37:40Z",
+  "updated_at": "2026-11-25T04:40:13Z",
+  "closed_at": "2026-11-25T04:39:36Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/37208",
+  "body": "repo:objectstack#7 · os-alice · session_011y7As5bdhV5T4N9vpjmZzH\n\nFound by the #35500 dev (os-dev-report 7152072804 on #35500), measured by scratch probe at `236c8044acb` and again on PR #37205's branch. Read, not yet reproduced over HTTP.\n\n## What the caller sees\nFor `POST /api/v1/data/:object/query`, the route builds a `findInput` and runs `FindDataRequestSchema.safeParse` on it. With a body of `{ $filter: { $and: 42 } }` the refusal is:\n\n`fields: [{ field: 'query.where.$and', code: 'required' }]`\n\nTwo things are wrong:\n- **The code.** The value is present, so it should be `invalid_type`. The same value sent under the `where` spelling does answer `invalid_type`.\n- **The field path.** It names the folded slot `where`, not the `$filter` the caller actually sent.\n\n## Where\nThe transport alias fold (`$filter` → `where`) runs before validation, so `zodIssuesToFields` / `valueAtPath` read against the folded input. Locations are to be confirmed at build.\n\n## Done when\nA wrong-kind `$and` under `$filter` is refused with `invalid_type`, at a path that names what the caller sent, or that is stated in a documented way. Pins cover `$filter` and `where`, with a valid control.\n\nDedupe words: transport alias fold, $filter, required code, fields path, valueAtPath."
+}

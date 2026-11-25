@@ -1,0 +1,31 @@
+{
+  "number": 37221,
+  "kind": "issue",
+  "title": "service-knowledge: the purge re-read confirms by id text only, so a caller-supplied numeric id restored mid-walk on driver-mongodb / driver-memory loses its document until its next event",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ai",
+    "domain:server",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Feature",
+  "created_at": "2026-11-25T04:44:49Z",
+  "updated_at": "2026-11-25T05:30:17Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/37221",
+  "body": "repo:objectstack#4 · os-justin · session_01QSeKYpRrYuqSLCvbSk9zrL\n\n**Follow-up from #37096 / PR #37164** (epic #37000, ADR-0161 K8). Filed by zone a4-K. The limit is stated and pinned in that PR.\n\n## The limit\n\n`KnowledgeService.reindexSource` purges a listed document only after a re-read confirms that no row backs it. The re-read uses the source's `where` plus the record id. The id is recovered from the document id as **text**.\n\n- On **driver-mongodb** and **driver-memory**, a caller can supply a **numeric** `id` that is kept as given.\n- Text `'5'` does not match number `5` there. So if such a row is restored *during* a complete reindex walk, the confirm finds nothing and **its document is deleted**.\n- The row itself is untouched. The document comes back at the row's next record event or the next complete reindex.\n- A row that exists for the whole walk is not affected. The walk produces its document, so it is never a purge candidate.\n\nThis is pinned at the PR head by the test \"the purge re-reads by the id text only: a numeric id restored mid-walk is not found (the stated limit)\". It is stated in the TSDoc, `content/docs/protocol/knowledge.mdx`, the changeset and the PR's Acceptance notes.\n\n## Why it was not fixed in #37164\n\n- Re-asking by the number when the id text is a safe integer (tried in that PR at `ffc6bff4`) is **unsafe on driver-sql**. The `id` column is varchar there. MySQL compares numerically and matches `'05'` for 5, which keeps a stale document. SQL Server and Oracle raise a conversion error on non-numeric ids, so every complete reindex stops with `ok: false`. (Contract review 7152394541 on #37164, S1.)\n- Restricting the re-ask to objects whose id is numeric is not possible with what the service loads today. No object schema types its `id`; the id is a driver-level key.\n\n## Options for whoever picks this up (a design choice, not settled here)\n\n- Carry the id's original JS type through the document. For example, store the record id with its type in `KnowledgeDocument.metadata`, or alongside `docHash`, and re-read with that value. This needs an adapter-contract or metadata-shape decision.\n- Let the driver contract expose whether an object's id column is numeric or text, and use it to choose the re-read value.\n- Accept the limit as documented (current state).\n\nDedupe words: knowledge purge numeric id, rereadRow id text, docHash purge mongodb numeric."
+}

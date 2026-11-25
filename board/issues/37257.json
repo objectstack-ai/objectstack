@@ -1,0 +1,31 @@
+{
+  "number": 37257,
+  "kind": "issue",
+  "title": "[Decision] order_to_cash: may a sales rep see an invoice's 已收金额 (a roll-up of payments the card hides from reps)?",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ai",
+    "domain:devx",
+    "needs-user-decision",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-25T08:01:24Z",
+  "updated_at": "2026-11-25T08:01:24Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/37257",
+  "body": "repo:objectstack#4 · os-justin · session_01QSeKYpEsWWE9Y5YtSsDgqZ\n\nFound by eval#1's #37234 run, reading on #34920. Filed by seat repo:objectstack#4 under the maintainer's delegation, which says: \"If `security-rollup-source-unreadable` recurs, the seat files the card.\"\n\n## 维护者速读\n\n- **卡在哪：** `order_to_cash` 这次搭建 Seed 满分。Build 167 项只差 1 项，原因是销售代表能看到发票上的「已收金额」。\n- **这个金额怎么来的：** 它是该发票所有收款的汇总，而场景卡写明销售代表看不到收款记录。\n- **搭建的 AI 怎么处理的：** 它保留了可见，并写了说明理由。评分器的规则是「卡上隐藏的明细，其汇总必须遮蔽，写理由不算数」，所以照样扣分。\n- **要你定：** 卡的原意是代表能看自己发票的已收金额、余额和状态，只是看不到一笔笔的收款（B），还是连已收金额也不能看（A）。\n- **我推荐 B。**\n\n## The fact\n\n- `docs/qa/scenarios/order_to_cash.json`, prompt: 「销售代表只能看到自己客户的订单、发票和活动，看不到收款记录和产品成本」.\n- The sales-rep persona's `hidden` is `objects: [\"payment\"]` plus `product.unit_cost`.\n- The prompt also asks for: 「发票的已收金额汇总其收款，余额 = 金额 − 已收，状态随之变为部分收款或已收清」.\n- So `invoice.amount_paid` is a `summary` over `payment.amount`.\n- The runner (`rollupSourceCharges`, packages/qa/scenarios/README.md, \"Roll-ups over withheld data\") charges every `security-rollup-source-unreadable` finding on a persona's set when the card hides the child. That includes findings acknowledged with `rollupSourceUnreadableReason`: \"a total the card withholds is masked, never explained\".\n- The build kept `demoorder_invoice.amount_paid` readable for `demoorder_sales_rep`, with a written reason. Build scored 166/167 on that one charge. The same trap appeared on 2026-11-18 (N3).\n\nRe-check: `git show origin/main:docs/qa/scenarios/order_to_cash.json | grep -o '销售代表只能看到[^。]*'`\n\n## Governing text\n\n- packages/qa/scenarios/README.md § Roll-ups over withheld data.\n- `@objectstack/lint` rule `security-rollup-source-unreadable` (`os explain security-rollup-source-unreadable`).\n- The card's prompt and `expect.personas[].hidden`.\n\n## Options\n\n| | What changes | Work |\n|:--|:--|:--|\n| **A — masked** | The card says reps do not see 已收金额. A correct build masks `invoice.amount_paid` for reps. It must then mask `balance` and `status` too, because `balance = amount − amount_paid` and `status` reveal the same total. Nothing changes in the runner. | XS: card prompt, plus the `hidden` fields |\n| **B — visible (recommended)** | The card says reps see their invoices' 已收金额, 余额 and 状态, but not individual payment rows. The card names that roll-up as allowed for the persona, and the runner does not charge an acknowledged finding on a roll-up the card allows. Every other roll-up stays charged. | S: card prompt, plus one card key read by `rollupSourceCharges`, plus a pin |\n\n## Four axes\n\n- **Real business need:** an order-to-cash rep chases their own customers' invoices. Whether an invoice is paid, partly paid or overdue is the working fact; the payment rows are not. The prompt already shows reps their invoices, and the invoice's balance and status are both stated in terms of the paid total. The reading that A needs (reps see an invoice but not whether it is paid) has no stated pull. B is favoured.\n- **Long-term soundness:** B keeps the rule meaningful: an aggregate leak is charged unless the card says the aggregate is meant. A makes the card hide three invoice fields to keep one total secret, a shape no real deployment asked for. B is favoured, at the cost of one card key.\n- **Making AI builds hard to get wrong:** under A, a correct build has to see that `balance` and `status` derive from the hidden total. The runner checks only the roll-up, so a build that masks `amount_paid` but leaves `balance` readable passes while still leaking. Under B, the card states the intent outright, and the acknowledgement the build already writes becomes the right move. B is favoured.\n- **No spread at the startup stage:** A adds no runner surface. B adds one optional card key with one reader. This axis leans A.\n\n**Recommendation: B.** Three axes favour it, including long-term soundness, which carries at least half the weight.\n\n## Done when\n\n- The maintainer picks A or B on this card.\n- The card change (and, for B, the runner change) lands.\n- A re-run of #37234 scores Build and Seed both passing. That closes #37234 and unblocks #34920."
+}

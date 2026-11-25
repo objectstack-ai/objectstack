@@ -1,0 +1,34 @@
+{
+  "number": 37246,
+  "kind": "issue",
+  "title": "console: a related tab's New drops the parent it prefills when the child's relationship lookup declares dependsOn, and saves the child unlinked",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ux",
+    "bug",
+    "domain:ui",
+    "pm:dispatched",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-justin"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-25T06:42:35Z",
+  "updated_at": "2026-11-25T07:38:12Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/37246",
+  "body": "repo:hotcrm#1 · huangyiirene · session_01J8VVAmQQaqVXpJepCqm4Xa\n\nFiling gate: ① · Source: fleet (found by the hotcrm lane while working objectstack-ai/hotcrm#2753, a p1 the product owner graded)\nGrade: area:ux · Bug · p1 (blocks hotcrm#2753, p1; a blocking card takes the highest grade it blocks) · reach: measured on a booted HotCRM (server @objectstack 18.6.0, console `0.0.0-next-20261125013212`) · evidence measured (hotcrm#2753 comment 7155046293; screenshots kept in the hotcrm project files).\nReader: the `domain:ui` seat; on landing, the hotcrm seat adds `dependsOn: [crm_account]` to two lookups on the next bump.\nDedupe: searched `related tab New prefill dependsOn` (4), `dependsOn hides prefill` (3), `related list New parent prefill dropped` (12), `dependsOn seed initial values related` (10), closed included. Nearest: #35050 (closed: related-list New did not run the parent's `lookupAutofill`; the lookup's own + New seeds `dependsOn` values since then). None covers the related tab's New with `dependsOn`.\n\n## 维护者速读\n\n- 用户能看到什么变化：从记录页的相关页签「添加 → 新建」建子记录时，预填的父记录（如订单、商机）不再变成「请先选择客户」或被清空，保存后子记录正确挂在父记录下。\n- 为什么做：子对象的关系 lookup 一旦声明 `dependsOn`，页签里新建会丢掉预填的父记录并静默保存为未关联；这也挡住了 HotCRM 用 `dependsOn` 让「添加」只列同客户记录（hotcrm#2753, p1）。\n- 出错会怎样：今天的结果是数据静默挂错（子记录没有父记录、不报错）；修复只影响新建表单的初始值。\n- 要你做什么：无。\n\n## What happens\n\nA record page's related tab (#35725) → **+ Add** → **+ New** in the picker opens the create form with the parent reference prefilled. When the child's relationship lookup declares `dependsOn`:\n\n1. `crm_billing_milestone.crm_sales_order` with `dependsOn: [crm_account]` (and `lookupAutofill` filling `crm_account` from the order): the form shows Account = the order's account, but **Order shows \"Select…\"**, and Create POSTs `crm_sales_order: null`. The milestone saves without its order and no error appears, because its contract satisfies the source rule.\n2. `crm_contract.crm_opportunity` (already declares `dependsOn: [crm_account]`, no autofill): on opportunity → Contracts → Add → New, **Related Opportunity shows \"Select Account first\"**; the prefilled opportunity is hidden. This one reaches HotCRM today on the console newer than 18.6.0.\n\nThe derived Add picker itself honours `dependsOn` correctly (#36729): with `dependsOn: [crm_account]` the order's Add lists only that account's unlinked milestones (`filter=[[crm_sales_order,is_empty],[crm_account,equals,<account>]]`).\n\n## Expected\n\nThe tab's New seeds each `dependsOn` field of the relationship lookup from the parent record (child field = the parent's value, the inverse of what `parentScopeOf` already computes for the picker in #36729), the way the lookup's own + New seeds `dependsOn` values (#35050). The prefilled parent stays visible and is saved.\n\n## Done when\n\nOn an object pair like order → billing milestone with `dependsOn: [crm_account]` on the child's relationship lookup: tab → Add → New shows the parent prefilled and its dependsOn field(s) filled, Create saves the parent id; the same with no `lookupAutofill` (opportunity → contract). The Add list stays scoped as today.\n\nBlocks: objectstack-ai/hotcrm#2753."
+}

@@ -2,8 +2,8 @@
   "number": 37035,
   "kind": "issue",
   "title": "checklist re-point after #36047 and #36256/#36461: list type size (13px → two tiers) and drill-through (drawer → centred dialog)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,7 +13,6 @@
   "labels": [
     "area:ux",
     "domain:docs",
-    "pm:dispatched",
     "priority:p2",
     "tests"
   ],
@@ -23,11 +22,15 @@
   "milestone": null,
   "type": "Task",
   "created_at": "2026-11-24T16:07:47Z",
-  "updated_at": "2026-11-24T22:27:49Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-25T05:02:32Z",
+  "closed_at": "2026-11-25T04:53:58Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 3,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/37035",
   "body": "qa#1 · os-justin · session_01QSeKYpxQpmErd1ixfkgbYh\n\nKind: stale spec, so re-point the clauses (`checklist-test` §5). In each case the product follows a later ruling, and the clause still holds the earlier one. Found by milestone acceptances #37020 (#35547) and #37022 (#36255) on main `305fe60e`.\n\n- **List type size.** #35547's frame promise and the list clause expect 13px on header, cell and buttons. The page now reads 12px for header labels and 14px for cells and buttons. That is #36047's deliberate two-tier type scale (closed 2026-11-21, on the maintainer's 「同意」): body 14, labels and section headings 12.\n  - Re-point the clause to the two tiers, citing #36047.\n  - The pin `ui/e2e/list-frame-geometry-35548.spec.ts` reads a transcribed fixture, not the live app. Point it at the live page or note that.\n  - `records-forms.list-view-capabilities` also still cites the 32/33 px header and row heights in its e2e description.\n- **Drill-through container.** `dashboards.drill-through-range` acceptance[4] and `dashboards.report-measure-drill-scope` acceptance[1] say the detail list opens in a drawer. It is now a centred dialog with labelled chips (#36256, #36461). Re-point both clauses to the dialog.\n\nBump each item's revision and add a `history` line.\n\nQA-source: #37020 · records-forms.list-view-capabilities · acceptance[10]\nQA-source: #37022 · dashboards.drill-through-range · acceptance[4]\nQA-source: #37022 · dashboards.report-measure-drill-scope · acceptance[1]"

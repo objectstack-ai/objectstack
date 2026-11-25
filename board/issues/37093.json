@@ -2,8 +2,8 @@
   "number": 37093,
   "kind": "issue",
   "title": "embedder-openai: an over-limit input is refused, not truncated (known-model input limits, one shared token estimate)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "os-bob",
@@ -13,7 +13,6 @@
   "labels": [
     "area:ai",
     "domain:server",
-    "pm:dispatched",
     "priority:p2"
   ],
   "assignees": [
@@ -22,11 +21,15 @@
   "milestone": null,
   "type": "Feature",
   "created_at": "2026-11-24T19:37:11Z",
-  "updated_at": "2026-11-25T01:20:44Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-25T05:23:33Z",
+  "closed_at": "2026-11-25T05:16:12Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 4,
+  "comments": 8,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/37093",
   "body": "maintainer · os-bob · session_012dn2AecKpLaYkUtNRiqtby\n\nFiling gate: ③ maintainer-directed (topic child). Source: topic #37000 (phase 2 row 6, its embedder half); maintainer 2026-11-24 「用fable评审，并分拆第二阶段的任务」. Reviewed by an independent Fable pass before filing.\nGrading: area:ai · Feature · p2 (topic) · reach: apps that mount `service-knowledge` with `embedder-openai` · evidence: read.\n\n## 维护者速读\n- 问题：文本超过嵌入模型的输入上限时，服务商会悄悄截断，后半段内容搜不到，也没有任何报错。\n- 修法：已知模型表补上每个模型的输入上限；超限时报错并写明模型名和估算长度，不再截断。表里没有的模型不设上限，只警告一次。另外给出一个平台和应用共用的 token 估算公式。\n- 需要你做的：无。不改契约，不用等 ADR，可以现在派。\n\n## What\n1. `packages/plugins/embedder-openai/src/index.ts`: add `maxInputTokens` to the known-model table (each value checked against the provider's published docs and cited in the PR); `OpenAIEmbedderOptions.maxInputTokens?` overrides it.\n2. `embed()`: an input whose estimate exceeds the limit throws an error naming the model, the estimate and the limit; nothing is truncated. A model not in the table and with no option: no limit, one warning per embedder instance.\n3. One shared estimate function, exported from a place both `embedder-openai` and `service-knowledge` already depend on (`@objectstack/spec` shared utilities; name the module in the PR). Formula: CJK characters and full-width punctuation 1.5 each; an ASCII alphanumeric run 1; other punctuation 1; × 1.1. Documented on its docblock and in `content/docs/ai/knowledge-rag.mdx`.\n4. `IEmbedder` is not changed (same approach as #36995).\n\n## Acceptance\n- Over-limit input → error with model, estimate, limit; under-limit input unchanged.\n- Unknown model → no error, one warning.\n- A sampled test: the estimate is never below OpenAI `cl100k` token counts on Chinese regulation-like text and mixed Chinese/English text (other tokenizers by documented factor only; they cannot run in CI).\n- Container run per AGENTS.md.\n\n## Out of scope\n- `IEmbedder.maxInputTokens?` and the service learning the limit (#37098); `IEmbedder.model?` (#37100).\n- Splitting text to fit the limit (#37098).\n\nBlocked-by: none.\nParent: #37000. Reader: `domain:server` lane (`packages/plugins/embedder-openai`).\nDedupe: `maxInputTokens` 0 · `embedder truncated` 14 (open 2: seat posts only) · `EMBEDDER_SERVICE` 3 (none open).\n"

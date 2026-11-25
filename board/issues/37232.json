@@ -1,0 +1,37 @@
+{
+  "number": 37232,
+  "kind": "pull_request",
+  "title": "feat(studio): one table holds the menu's type order and its 常用 / 高级 tier",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "os-justin"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-25T05:27:21Z",
+  "updated_at": "2026-11-25T06:21:18Z",
+  "closed_at": "2026-11-25T06:21:16Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-25T06:21:16Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/37232",
+  "body": "Fixes #37200\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 用户无感：这次只新增一张「菜单排序与常用 / 高级分层」的表，左侧菜单暂时还不读它，界面与之前完全一样。\n- 属于 Studio 改版（左侧菜单分「常用 / 高级」两层）这个大任务，是菜单真正改动前的第二步。\n- 出错只会让测试变红，不会影响任何用户；这次改动可以直接撤回。\n- 无。\n\n## What changes\n\n- New `ui/packages/app-shell/src/views/studio-design/studioMenuPlacement.ts`: `STUDIO_MENU_PLACEMENT`, one ordered list of `{ type, tier }`, 32 rows (every listable type of the 33 the registry holds on `origin/main`; `field` is hidden by the directory).\n  - 常用 (common), in the ruled order: object · app, page, dashboard, report · flow · permission · agent, tool, skill.\n  - 高级 (advanced), every other type, in the proposal's order: picklist, hook, mapping, object_extension, seed · view, action, dataset · job · doc, book, email_template, translation, api, datasource, external_catalog · position, assignment_rule, sharing_rule, queue, capability · ai_context.\n  - Order and tier only; a type's group stays its served `domain`. Not wired into anything (the menu card wires it).\n- New `studioMenuPlacement.test.ts`, three holds:\n  - registry: every type `DEFAULT_METADATA_TYPE_REGISTRY` registers and the directory lists has exactly one row, and every row names a registered, listed type;\n  - ruling: the common and advanced rows, in order, as literals;\n  - ADR-0084 (merged with the type table's Order and Tier columns): tier per type both ways, each ADR row's group equal to the served domain, and the order inside each group equal to the Order column. A failure names the type or the group.\n- `.changeset/37200-studio-menu-placement.md` (`@object-ui/app-shell` patch).\n\n## Tests\n\nFinal head `5568fa63a1`.\n\n- `vitest run packages/app-shell/src/views/studio-design/studioMenuPlacement.test.ts`: 1 file, 12 tests passed.\n- `@object-ui/app-shell` `type-check` (both tsc programs): exit 0, 0 errors (after `pnpm --filter '@object-ui/app-shell^...' build`). The first run caught a real typing error in the test (a `Set` of the registry's literal type union), fixed in `2eae5a0f90`.\n- Ablations, each through `scripts/ablation-replace.mjs` on a committed head, each restored and proven by the HEAD blob hash and an empty `git diff HEAD`:\n\n<details><summary>Ablation readings</summary>\n\n| Mutation | File | Result |\n|---|---|---|\n| remove the `hook` row | placement | 3 red: exactly-one-row, same-set, advanced order |\n| swap `app` and `page` | placement | 1 red: common order |\n| add a row `not_a_registered_type` | placement | 3 red: row-names-a-registered-type, same-set, advanced order |\n| remove the `ai_context` row | placement | 3 red: exactly-one-row, same-set, advanced order |\n| `job` retiered to common | placement | 4 red, including `job: ADR-0084 row: expected 'advanced' to be 'common'` |\n| ADR row `picklist` retiered to 常用 | ADR-0084 | 1 red: `picklist: ADR-0084 row: expected 'common' to be 'advanced'` |\n| ADR row `app` Order 1 to 9 | ADR-0084 | 1 red: `group ui` order |\n\nThe first try at the unknown-type mutation was a no-op (its anchor survived inside the replacement, and the tool refused it with \"the anchor count moved 1 -> 1\"); it was re-run with an anchor that disappears. The ADR mutations were transient and restored; this PR does not edit the ADR.\n\n</details>\n\n## Acceptance notes\n\n- The card names `studioAddressTable.test.ts` as the pattern; no file has that name. The address table is pinned in `studioAddress.test.ts` (\"the mapping table agrees with the code\"), which is the model used.\n- `ai_context` was registered on `main` after the ruling (33 types). It takes an advanced row, last in ai, matching ADR-0084's table; its tier is an open question for the maintainer, and a ruling the other way is a one-row edit plus the ADR row.\n- ADR-0146 still reads \"32 at `origin/main` `151e8123`\" for the registered-type count. That sentence lives only in the ADR, which this PR does not touch; it is reported to the seat as a follow-up. Nothing in this PR relies on the count 32.\n\n## Verification\n\nRead first: `studioMenuPlacement.ts` (the rows themselves), then the ADR block of `studioMenuPlacement.test.ts` (the table-row regex is the risk: a reformatted ADR table makes the row-count test go red, never silently pass).\n\nTwo-minute check: `cd ui && pnpm exec vitest run packages/app-shell/src/views/studio-design/studioMenuPlacement.test.ts` with `@objectstack/spec` built; expect 12 passed. Change any tier in the file and expect a red that names the type.\n\n<details><summary>Gates (local, head 5568fa63a1)</summary>\n\n- `dispatch-gates.mjs --commands` derived 38 families; all 38 run, each exit 0 (`--ran` reconciliation: 38 run, 0 NOT-MEASURED, a derived zero), including `pnpm check:test-source-alias`, `pnpm check:cross-package-test-inputs` and `pnpm --dir ui exec vitest run scripts/`.\n- `overlap-check.mjs --branch=HEAD`: merges cleanly with `origin/main`, VERDICT clean exit 0.\n- Repo-wide scans and the rest of the farm are CI's.\n\n</details>\n\n---\n\n_Generated by [Claude Code](https://claude.ai/code/session_01QSeKYkkwuF6UuFtu85Yd5H)_\n"
+}

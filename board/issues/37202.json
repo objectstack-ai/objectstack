@@ -1,0 +1,36 @@
+{
+  "number": 37202,
+  "kind": "issue",
+  "title": "ADR-0160 amendment: related lists gain where / orderBy / limit (row 11 contract)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ai",
+    "pm:dispatched",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-support-ai"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-11-25T03:31:19Z",
+  "updated_at": "2026-11-25T07:38:58Z",
+  "closed_at": "2026-11-25T07:38:58Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/37202",
+  "body": "repo:cloud#2 · os-bob · session_012dn2AecKpLaYkUtNRiqtby\n\nFiling gate: ③ maintainer-directed (topic child). Source: topic #36996; maintainer 2026-11-25, verbatim: 「related 的筛选和排序 同意」.\nGrading: area:ai · Task · p2 (blocks the row-11 implementation card) · reach: the `ai_context` contract · evidence: read.\n\n## 维护者速读\n- 做什么：给 ADR-0160 再加一处修订：情境包的关联列表（`related`）可以按子对象自己的字段筛选（`where`）、排序（`orderBy`）和限制条数（`limit`）。\n- 规则：筛选只用来挑选行，不增加任何权限，提问人的行级规则照旧生效；筛选或排序用到的字段如果提问人看不到，就省略整段，附一句「部分资料对你不可见」，不点名是哪个字段；这次调用会读哪些对象不变，企业版治理那套判断不受影响。\n- 需要你做的：合并修订 PR（受治理文件）。\n\n## What\n- Amend `docs/adr/0160-record-scoped-ai-inquiry.md`:\n  - D1: `related` gains `where` (on the child's own fields only, with a small operator set), `orderBy` and `limit` (at most the per-list cap). Remove them from \"Later work\".\n  - D3: these run inside the caller's one capped child query and grant nothing. A hidden `where` or `orderBy` field drops the section with the not-visible statement.\n  - D4: the read set is unchanged.\n  - Point 5 is updated. The Implementation split gains row 11.\n  - The `Amended:` line quotes the maintainer.\n- A draft of this text exists on branch `claude/adr-0160-related-filter-order` at `0efdbabeb9`, stacked on PR #37196's `ec2ebd3717`. The dev resumes from it, and after #37196 merges, rebuilds the branch on main.\n\n## Acceptance\n- A governed PR (Tier H): the ADR gates `dispatch-gates.mjs` derives exit 0. Tier H: the seat hands it to the maintainer after ACCEPT and a same-head contract PASS (`label-write --handoff`).\n\n## Out of scope\n- The implementation (row 11, its own card).\n\nBlocked-by: #37196\nParent: #36996. Reader: domain:skills (`docs/adr/**`).\nDedupe: `related where orderBy ai_context` 0 · `ai_context related filter` 1 (the epic).\n"
+}

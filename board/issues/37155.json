@@ -2,7 +2,7 @@
   "number": 37155,
   "kind": "pull_request",
   "title": "ci(temporal-conformance): PostgreSQL service on pgvector's PG 16 image; merge-queue run on live paths",
-  "state": "open",
+  "state": "closed",
   "state_reason": null,
   "draft": false,
   "author": {
@@ -24,10 +24,14 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-24T23:06:44Z",
-  "updated_at": "2026-11-25T02:18:45Z",
-  "closed_at": null,
-  "closed_by": null,
-  "merged_at": null,
+  "updated_at": "2026-11-25T02:40:04Z",
+  "closed_at": "2026-11-25T02:40:02Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-11-25T02:40:02Z",
   "comments": 12,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/pull/37155",

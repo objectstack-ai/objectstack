@@ -1,0 +1,34 @@
+{
+  "number": 37255,
+  "kind": "pull_request",
+  "title": "fix(mcp,runtime): get_record_context reads a package's context packs on both MCP doors",
+  "state": "open",
+  "state_reason": null,
+  "draft": true,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "dependencies",
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "os-support-ai"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-25T07:51:07Z",
+  "updated_at": "2026-11-25T07:52:58Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/37255",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-support-ai\"} -->\n_Requested by **Yibo Wang** · [project thread](https://claude.ai/code/project/chan_01BVUyyPie8gHwoPM18iABwB?thread=cmsg_01BVUyyPie8gHwoPM18iABwBEaJzgBWzjWCNjBjkVoeRto)_\n\nrepo:objectstack#3 · os-support-ai · session_01WGufzi13yZRqVcp2mGonWK\n\nFixes #37243\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n- 用户能看到什么变化：部署了资料包的应用里，AI 助手读取一条记录的资料时（网页通道和本地命令行通道都一样），终于能读到资料包，不再一律回答“找不到资料包”。\n- 为什么做：属于“AI 读取记录资料”这条能力（资料包设计）的缺陷修复，替所有提供资料包的部署（含演示应用）解决读不到的问题，另外两张卡也在等它。\n- 出错会怎样：只影响 AI 读取记录资料这一个工具；若有问题，表现仍是读不到资料包，与修复前相同，可直接撤回。\n- 要你做什么：无\n\n## What changes\n- **Both record-context doors hand the executor the authored packs, not the serving envelope.** The HTTP door (`packages/runtime/src/domains/mcp.ts`, `listContextPacks` in the bridge's record-context members) and the stdio door (`packages/mcp/src/stdio-data-bridge.ts`, `listContextPacks`) read the protocol's served `ai_context` listing, which `decorateMetadataItem` stamps with `_diagnostics`; the executor's closed `AiContextSchema` parse (`parsedContextPacks`) dropped every row. Each door now maps its listing through `stripReadDecorations` (`@objectstack/spec/kernel`), the metadata-fallback branch included.\n- **Which keys the strip removes, and why.** Exactly `METADATA_READ_DECORATIONS` (`_diagnostics`, `_draft`, `_withheldFields`, `_relatedListsArrangement`), the read path's derived keys that are no part of a document. The ADR-0010 protection envelope (`_packageId`, `_packageVersion`, `_provenance`, `_lock`, `_lockReason`, `_lockSource`) stays: `AiContextSchema` declares it through `MetadataProtectionFields`, so it parses, and the pin asserts the served pack still carries `_packageId`. A blanket underscore strip would remove declared keys; stripping only `_diagnostics` would leave the next listed decoration to fail the same way.\n- **No new helper.** The shared helper already exists where producer and consumers meet: `spec/kernel/metadata-read-decorations.ts`, whose module docblock names this exact failure class (\"any re-parse of a served document\"). Both doors already depend on `@objectstack/spec`, so neither takes a new runtime dependency, and the protocol's served read (with its per-type redaction) is still the one a door reads — `getMetaItemsForExecution` would have dropped the `_diagnostics` too, but its docblock forbids reading it from a door that answers a caller.\n- **The door's contract** is stated on `RecordContextDoor.listContextPacks` (`packages/services/service-record-context/src/door.ts`). The executor's strict parse is unchanged.\n\n## Tests\n- `packages/mcp/src/mcp-record-context-tools.test.ts`: new top-level `describe` — a real `ObjectStackProtocolImplementation` over a real `ObjectQL` (an in-memory SQLite `SqlDriver` store) with a package carrying the pack; the metadata service lists no pack, so the protocol's listing is the only one. Precondition asserts the served pack carries `_packageId` and `_diagnostics`; then `get_record_context` answers through the pack, identically on MCP-over-HTTP and stdio.\n- `packages/runtime/src/mcp-record-context-tools-bridge.test.ts`: new top-level `describe` — the `/mcp` route end to end (`HttpDispatcher.handleMcp`, the real `MCPServerRuntime`, the real executor, `SecurityPlugin`, the real protocol over `ObjectQL` + `SqlDriver`); same precondition, then the call answers the pack's fields.\n- Ablation (once each, then restored; restore proven by `git diff HEAD` empty and blob == HEAD): removing the strip at either door turns its pin red with the defect's own answer, `RESOURCE_NOT_FOUND` \"No context pack named … reads object …\".\n- Test deps: `@objectstack/mcp` gains devDeps `@objectstack/metadata-protocol` and `@objectstack/driver-sql`; `@objectstack/runtime` gains devDeps `@objectstack/mcp` and `@objectstack/service-record-context`; each new value import has an anchored source alias row in that package's `vitest.config.ts` (`check:test-source-alias`).\n\n## Acceptance notes\n- Placement differs from the dataset tools on purpose: `service-analytics`' dataset executor strips decorations inside the executor; this card's ruling puts the strip at the doors and keeps `AiContextSchema`'s consumer strict. Noted, not changed.\n- Wall time, single-file cold runs on a shared box: the runtime harness file was 16.7 s before this PR and 18.3 s after (import-dominated, cases ~0.2 s); the mcp harness file 5.8 s before and 10.8–14.1 s after, nearly all of it transforming `metadata-protocol` source through the new alias. These readings come from single-file runs. A full-package run shares the transform cost across files.\n\n## Verification\n<details><summary>Local readings (final head in the report)</summary>\n\nSee the report comment on #37243 for the exact commands, exit codes and the head sha they were read on.\n</details>\n\n**Read first:** `packages/mcp/src/stdio-data-bridge.ts` (`listContextPacks`, the strip on both branches), `packages/runtime/src/domains/mcp.ts` (same), `packages/mcp/src/mcp-record-context-tools.test.ts` (the precondition that makes the pin non-vacuous).\n\n**Two-minute check:** `pnpm --filter @objectstack/mcp exec vitest run src/mcp-record-context-tools.test.ts` → 11 passed; delete `.map(stripReadDecorations)` from the stdio `listContextPacks` and the last case fails with `RESOURCE_NOT_FOUND`.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01WGufzi13yZRqVcp2mGonWK)_\n\n<!-- signed: repo:objectstack#3 · os-support-ai · session_01WGufzi13yZRqVcp2mGonWK -->\n"
+}

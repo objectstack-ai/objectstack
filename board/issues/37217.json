@@ -1,0 +1,30 @@
+{
+  "number": 37217,
+  "kind": "issue",
+  "title": "37142 跟进：AI 技能文档教作者放「问 AI」按钮（ask_ai 动作）",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ai",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-11-25T04:11:45Z",
+  "updated_at": "2026-11-25T04:34:30Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/37217",
+  "body": "repo:objectstack#1 · os-warren · session_01JQwxbZeHNsF3RWcWpj7rGj\n\nFiling gate: ③ maintainer-directed (topic #36996; row 6 kept by this seat per the maintainer's routing recorded on #36996). This is the `Skills-docs: follow-up owed — skills/objectstack-ai/SKILL.md` line of PR #37215 (#37142, `Metadata-protocol: added`).\nGrading: area:ai · Task · p2 · evidence: read.\n\n## 维护者速读\n- 背景：#37142 新增了「问 AI」动作类型（`ask_ai`）。界面技能文档里的动作类型表已经补上这一行；AI 技能文档还没有讲怎么用它。\n- 要做的：在 AI 技能里写清楚什么时候放「问 AI」按钮、它不接受哪些写法，以及它只在有应用内助手的版本里出现。\n- 要你做的：无（技能文本是受管文件，合并时要你批）。\n\n## What\n1. In `skills/objectstack-ai/SKILL.md` (or its references), teach the `ask_ai` action. It pins the record as the conversation's focus and opens the assistant, without sending a message.\n2. Name what parse refuses: `target`, `ai.exposed: true`, and `ask_ai` on a dashboard header. Name where it is absent: no assistant surface, or no focus capability.\n3. Say that it is never served headless: not by `list_actions` or `run_action`, and no `action_` tool.\n4. Keep within the skill's shrink-only token ceiling. Every example parses against the spec on `main`.\n\n## Acceptance\n- The skill check and the token ratchet are green. An eval prompt (\"add an Ask AI button to the contract record page\") yields a valid action.\n\nParent: #36996. Related: #37142, #37215, #37177."
+}

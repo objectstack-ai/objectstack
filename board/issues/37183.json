@@ -10,16 +10,23 @@
     "id": 332303061,
     "type": "Bot"
   },
-  "labels": [],
+  "labels": [
+    "area:fleet",
+    "bug",
+    "domain:server",
+    "pm:queue",
+    "priority:p2",
+    "tests"
+  ],
   "assignees": [],
   "milestone": null,
-  "type": null,
+  "type": "Bug",
   "created_at": "2026-11-25T02:19:34Z",
-  "updated_at": "2026-11-25T02:19:34Z",
+  "updated_at": "2026-11-25T02:34:04Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 0,
+  "comments": 1,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/37183",
   "body": "repo:objectstack#4 · os-justin · session_01QSeKYpRrYuqSLCvbSk9zrL\n\n**Flake report, untriaged.** Filed by zone a4-K, which owns none of this code. Routed to triage.\n\n## What failed\n\nA merge-queue build of #37155 (queue commit `a261b475eb`, run [45528039199](https://github.com/objectstack-ai/objectstack/actions/runs/45528039199), job `Test Core (5/10)` [138917103959](https://github.com/objectstack-ai/objectstack/actions/runs/45528039199/job/138917103959)), step \"Run this shard's tests\":\n\n```\n@objectstack/cli:test:  ❯ integration  src/commands/migrate/data-commands.absent-database.integration.test.ts (54 tests | 41 skipped) 585325ms\n@objectstack/cli:test:  FAIL  integration  src/commands/migrate/data-commands.absent-database.integration.test.ts > [#21552] the rest of the family: a project with no database yet is empty work, exit 0\n@objectstack/cli:test: Error: Hook timed out in 480000ms.\n@objectstack/cli:test:  ❯ src/commands/migrate/data-commands.absent-database.integration.test.ts:703:3\n```\n\n## Why it reads as a flake, not a regression\n\n- #37155 touches `.github/workflows/ci.yml`, `docs/agents/multi-agent-discipline.md` and one driver-sql test. It changes nothing in `packages/cli`.\n- The failure is a hook **timeout**, not an assertion. The file ran 585 s in total, under full-suite queue load.\n- The merge-queue triage comment on #37155 (7150528961) records this signature once in its 24 h window. That window's ledger was not read to the end, so the count is a lower bound.\n\n## Not done here\n\nNo reproduction and no fix: the code is outside the filing zone. A search for an open card on this signature (`absent-database`, `data-commands` timeout) found none. The closest closed precedents on cli suites timing out under shard load are #25499 and #27306."

@@ -2,8 +2,8 @@
   "number": 37053,
   "kind": "issue",
   "title": "Report and dashboard chart value axis: show a whole-scale percent and a currency measure in the format the table gives them",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,7 +13,6 @@
   "labels": [
     "area:ux",
     "domain:ui",
-    "pm:dispatched",
     "priority:p2"
   ],
   "assignees": [
@@ -22,11 +21,15 @@
   "milestone": null,
   "type": "Bug",
   "created_at": "2026-11-24T17:37:19Z",
-  "updated_at": "2026-11-25T01:25:15Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-25T06:13:27Z",
+  "closed_at": "2026-11-25T06:12:27Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 4,
+  "comments": 7,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/37053",
   "body": "repo:objectstack#4 · os-justin · session_01QSeKYpEsWWE9Y5YtSsDgqZ\n\n## What happens\n\nA report's embedded chart (and a dashboard chart widget over a dataset) draws its value axis without the measure's formatting when the measure is a **whole-scale percentage** (`percentScale: 'whole'`, where 33.3 means 33.3%) or a **currency** amount. The table beside it prints `33.3%` and `¥12,000.00` through `formatMeasure`; the axis prints `33.3` and `12,000`.\n\nPR #37051 (card #36988) fixed the filed case — a fraction-scale percent pattern (`'0.0%'`) now reaches the axis through `yAxis[0].format`, and every value axis now prints distinct ticks — and showed why the rest cannot ride the same key: the chart's value-axis `format` is a d3-style pattern read by `formatterFor`, and it cannot carry `percentScale: 'whole'`, a declared ISO currency, or a per-row `currencyField`.\n\n## Expected\n\nRoute **B** of the #36988 dev's open question (report comment 7139423882), chosen by the seat:\n\n- An internal, producer-filled value-format carrier on the chart renderer's props — the measure's `{ format, currency, percentScale }`, beside the internal series props (precedent: `series[].aggregate`, filled by the producer, never authored).\n- `AdvancedChartImpl` formats the value axis (and data labels where they share the axis format) through `@object-ui/core`'s measure formatting — the table's path — at the tick-step places PR #37051 introduced.\n- `DatasetReportRenderer` and the dashboard `DatasetWidget` pass the measure's field.\n- A per-row `currencyField` measure has no single axis currency: it keeps the plain-number axis, stated in the PR.\n- No spec change: the facts are the dataset's, not the chart author's. `Clause-②: yes` (widening, internal props of a published package), `Metadata-protocol: none`.\n\n## Acceptance\n\n- Tests through the real chart: a whole-scale percent measure's ticks read `…%` matching the table; a fixed-ISO currency measure's ticks carry its symbol; a per-row currency measure keeps distinct plain-number ticks (control). Red on main, green after; ablate once.\n- The dashboard widget over a percent measure is pinned the same way.\n\nNot taken: A (leave these axes as plain numbers) — a currency report axis beside a `¥` table stays unlabeled; C (an authorable `currency` / `percentScale` on the spec's chart axis) — a spec authoring-surface change for values the dataset already declares.\n\nBlocked-by: #37051\n\nFollow-up of #36988 (PR #37051 is its fix of record; this card builds on the tick-step places #37051 introduces in `AdvancedChartImpl.tsx` and edits `DatasetReportRenderer.tsx`, which #37051 also changes). Responsibility: `objectstack platform code — the chart's axis format key carries only a d3 pattern | none | every report or dashboard chart over a whole-scale percent or currency measure`\n"

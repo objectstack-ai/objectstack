@@ -1,0 +1,32 @@
+{
+  "number": 37258,
+  "kind": "issue",
+  "title": "driver-sql: schema sync adds a new storage.notNull field to an existing table as NOT NULL with no default — on SQLite the whole object's sync fails and the object becomes unwritable",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:data",
+    "bug",
+    "domain:data",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-25T08:01:38Z",
+  "updated_at": "2026-11-25T08:01:38Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/37258",
+  "body": "repo:hotcrm#1 · huangyiirene · session_01J8VVAmQQaqVXpJepCqm4Xa\n\nFiling gate: ① · Source: fleet (found by the hotcrm lane on objectstack-ai/hotcrm#2746, PR objectstack-ai/hotcrm#2787)\nGrade: area:data · Bug · p2 (an author adding a required-with-column-constraint field to an existing object loses writes to the whole object on upgrade; the hotcrm card avoided it by dropping `storage.notNull`, so nothing is blocked) · reach: measured on a dev boot, @objectstack 18.6.0, SQLite · evidence measured.\nReader: the `domain:data` seat.\nDedupe: searched `\"Cannot add a NOT NULL column\"` (1: #23847, closed, Turso remote face never emits NOT NULL — the opposite case), `\"schema sync add NOT NULL column existing table\"` (0), `\"tighten_not_null\"` (13, all closed, Turso/migrate-apply or ownership ceremony). None covers the local SQL add-column path.\n\n## 维护者速读\n\n- 用户能看到什么变化：给已有对象新增一个带列约束（`storage.notNull`）的必填字段后升级，不再导致整个对象同步失败、无法写入；列先按可空加上，提示需要先回填再收紧。\n- 为什么做：今天这样升级会让该对象整体不可写，而字段说明里承诺的是「先回填、经 schema-drift 流程收紧」。\n- 出错会怎样：修复只影响加列这一步；修错的话可能漏掉收紧提示，数据不会坏。\n- 要你做什么：无。\n\n## What happens\n\nHotCRM added `crm_contract.name` (`Field.text`, `required: true`). Booting it with `storage: { notNull: true }` against a database created before the field existed:\n\n```\nalter table crm_contract add column name text not null - Cannot add a NOT NULL column with default value NULL\n```\n\nThe contract object's whole schema sync fails and contracts become unwritable — on SQLite this happens even with zero rows, because SQLite refuses `ADD COLUMN … NOT NULL` without a default.\n\n## Expected\n\nAs the `storage.notNull` describe promises (\"a destructive migration gated by the schema-drift ceremony (backfill first)\"): schema sync adds the new column nullable, reports `tighten_not_null` drift, and the tightening runs through the ceremony after a backfill. `required` keeps refusing nameless writes meanwhile.\n\n## Done when\n\nAdding a `storage.notNull` field to an object with an existing table boots cleanly on SQLite (and Postgres), the column exists nullable, drift reports `tighten_not_null` for it, and the object stays writable. A test pins it.\n\nRelated: objectstack-ai/hotcrm#2746 (would declare `storage.notNull` on `crm_contract.name` once this lands and installs have run its backfill)."
+}

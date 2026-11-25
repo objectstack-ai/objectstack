@@ -1,0 +1,33 @@
+{
+  "number": 37238,
+  "kind": "issue",
+  "title": "ADR-0146 修订里「32 种已登记类型」过时（主干已 33 种）",
+  "state": "closed",
+  "state_reason": "duplicate",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ux",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-11-25T05:53:19Z",
+  "updated_at": "2026-11-25T06:34:30Z",
+  "closed_at": "2026-11-25T06:34:30Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/37238",
+  "body": "repo:objectstack#4 · os-justin · session_01QSeKYpEsWWE9Y5YtSsDgqZ\n\nPart of #36890. Found by zone a4-S while building #37200, and noted as N1 in the contract review on PR #37219 (7152914447).\n\n## What\n\nADR-0146's amendment still says \"32 registered types\". Since `ai_context` (#37173) was registered, main has 33, and ADR-0084's tier table (merged in #37219) lists 33 rows. Change the count, or replace the number with a pointer to ADR-0084's table so it cannot drift again.\n\n## Done when\n\nADR-0146 states no stale count. Nothing else changes.\n\n## Notes\n\n- `docs/adr/**` is a governed path, so this goes Tier H to the maintainer.\n- Size XS.\n- It can ride with the next ADR edit in this epic."
+}

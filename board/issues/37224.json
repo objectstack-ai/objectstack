@@ -1,0 +1,32 @@
+{
+  "number": 37224,
+  "kind": "issue",
+  "title": "@object-ui/core: a compact notation option on formatMeasure, so chart axes and tables share one source for compact currency amounts",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:build",
+    "domain:ui",
+    "enhancement",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Feature",
+  "created_at": "2026-11-25T04:49:45Z",
+  "updated_at": "2026-11-25T06:14:37Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/37224",
+  "body": "repo:objectstack#4 · os-justin · session_01QSeKYmRepQK9DkZeU7F53D\n\nFiling gate: ② a fleet `Feature`, filed on the seat's ruling record · Source: fleet (ruling record 7153146695 on #37053: the maintainer ruled 「A」 for PR #37194's currency arm, and the record says option C becomes a follow-up card; filed by zone a4-U)\n\n## What\n\n`formatMeasure` in `@object-ui/core` (`ui/packages/core/src/utils/dataset-format.ts`) prints a measure the way a table cell shows it. For currency that means the full amount (`CN¥1,200,000.00`). It has no compact notation.\n\nSo PR #37194 (#37053) draws currency value-axis ticks through the chart's own compact formatter, `compactTickFormatter` with a `currency` argument, which prints `CN¥1.2M`. It takes the symbol from the same `Intl` source, but this is a second formatting home beside `formatMeasure`.\n\n## Proposal\n\n- Add a `notation` option (`'standard' | 'compact'`) to `formatMeasure`. With `compact`, it prints the amount through `Intl.NumberFormat`'s compact notation, keeping the measure's currency and percent rules.\n- Then the chart's value-axis currency ticks call `formatMeasure(…, { notation: 'compact' })` instead of `compactTickFormatter`, so charts and tables share one compact source, as the ruling record says.\n- A new option on an exported function: `Clause-②: yes` (widening).\n\n## Acceptance\n\n- `formatMeasure` with `notation: 'compact'` prints a fixed-ISO currency amount compactly with its symbol (en and zh-CN pinned). The default output is byte-identical to today.\n- The chart's currency ticks route through it and match PR #37194's pinned readings (`CN¥0` … `CN¥12K`).\n\nBlocked-by: #37194\n\nGrading: area:ux · Feature · fleet source → p3, per the filing gate; triage to confirm.\n\nBusiness reason: one formatting home for compact currency amounts keeps a report's chart axis and any future compact table cell in step, with no second implementation to drift. The ruling record names this as the follow-up.\n\nReader: the zone or seat that claims it after PR #37194 lands.\n\nDedupe: `formatMeasure notation` (open and closed) → 2 hits, #37053 (the parent) and #36988 (closed, the fraction-percent axis fix). Neither covers this option."
+}

@@ -1,0 +1,36 @@
+{
+  "number": 37199,
+  "kind": "issue",
+  "title": "Studio 菜单（M1）：修订 ADR-0084——左侧菜单加「常用 / 高级」两层，类型表加顺序和层级两列",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ux",
+    "domain:ui",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-justin"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-11-25T03:22:54Z",
+  "updated_at": "2026-11-25T04:53:36Z",
+  "closed_at": "2026-11-25T04:52:30Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/37199",
+  "body": "repo:objectstack#4 · os-justin · session_01QSeKYpEsWWE9Y5YtSsDgqZ\n\nPart of #36890. Ruling: #37192, comment 7151834490 (maintainer 「同意」, with adjustments 7151811337). Proposal: 7151777190 §3.1–§3.9. The maintainer asked for these cards to be dispatched first: 「相关任务立卡优先派发处理」.\n\n## What\n\nAmend `docs/adr/0084-application-builder-information-architecture.md` in place.\n\n1. Replace the 2026-11-24 amendment's sentence \"the menu draws no audience tier\" (`:76`, `:190`) with the ruled two tiers, quoting the maintainer's words from #37192:\n   - **常用**: always listed on a package.\n   - **高级**: one collapsed fold that holds everything else.\n2. Write the sorting rule from proposal §3.1. A type is 常用 when all three hold: it has no required parent object, a builder makes it directly, and it stays inside the package. A type with no row in the table falls into 高级; it never becomes invisible.\n3. Add two columns to the type → group table, **order** and **tier**, in the ruled order:\n   - 数据: 对象\n   - 界面: 应用 · 页面 · 仪表盘 · 报表\n   - 自动化: 流程\n   - 访问: 权限集\n   - AI: 智能体 · 工具 · 技能, the last visible group\n   - every other type: 高级, in the proposal's order. This includes 选项列表, 邮件模板 and 默认共享.\n\nThe six groups of decision 11 stay as they are. ADR-0146 D1 needs no edit, because it defers the menu to ADR-0084.\n\n## Done when\n\n- The ADR's text and table state exactly the ruled tiers and order.\n- Nothing else is touched.\n\n## Notes\n\n- Governed path (`docs/adr/**`), so Tier H: after ACCEPT the seat hands it to the maintainer.\n- Runs in parallel with M2 and with the open Studio PRs; none of them touches `docs/adr/`.\n- Size S."
+}

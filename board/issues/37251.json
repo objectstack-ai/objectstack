@@ -1,0 +1,32 @@
+{
+  "number": 37251,
+  "kind": "issue",
+  "title": "console: a related tab's one entry reads 「添加」/Add where it can only create (master-detail child, no picker) — label it 「新建」/New",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ux",
+    "bug",
+    "domain:ui",
+    "pm:queue",
+    "priority:p1"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-25T07:18:41Z",
+  "updated_at": "2026-11-25T07:34:56Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/37251",
+  "body": "repo:hotcrm#1 · huangyiirene · session_01J8VVAmQQaqVXpJepCqm4Xa\n\nFiling gate: ① · Source: fleet (found by the hotcrm lane on objectstack-ai/hotcrm#2747, a p1 the product owner reported and graded; she asked that the platform side be raised on the platform)\nGrade: area:ux · Bug · p1 (blocks hotcrm#2747, p1; a blocking card takes the highest grade it blocks) · reach: measured on a booted HotCRM (server @objectstack 18.6.0, console `0.0.0-next-20261125013212`, which carries #36704), admin, en-US and zh-CN · evidence measured (hotcrm#2747 comment 7155688190).\nReader: the `domain:ui` seat; on landing, the hotcrm seat closes hotcrm#2747 at the next bump with one reading (account → 合同 shows 新建).\nDedupe: searched `related tab Add label New` (267, none on this label), `addEntry addFallbackLabel` (0), `related list Add opens New label` (503, none). Nearest: #36659 (closed: the Add picker queried the wrong object), #36707 (closed: Add not scoped by account), #36528 (closed: related-list title translation key). None covers the entry's label.\n\n## 维护者速读\n\n- 用户能看到什么变化：主从子对象页签（如客户 → 合同）上那个只能新建的按钮，从「添加」改回「新建」，和 18.6.0 一样；只有真的会弹出选择已有记录的页签才叫「添加」。\n- 为什么做：#36704 之后这类按钮已经直接打开新建表单、不再列出已有记录，但还叫「添加」，用户以为能关联已有记录（产品负责人在 hotcrm#2747 里报的就是这个）。\n- 出错会怎样：只是按钮文字；改错的话按钮名不符，不影响数据。\n- 要你做什么：无。\n\n## What happens\n\nA record page's related tab draws one entry, `addEntry` in `ui/packages/plugin-detail/src/RelatedList.tsx` (#35601). When there is no picker — `derivedAddOf` returns `undefined`, i.e. a `master_detail` child with no pure catalog, since #36704 — the entry opens New, but it keeps `addFallbackLabel = t('detail.add')`: **添加 / Add**.\n\nHotCRM account → 合同: the button reads 添加 and opens 新建合同 with 所属客户 filled in. The same on 13 more measured master-detail tabs (contacts, event attendees, orders, article feedback, price book entries, quotes, campaign members, billing milestones, invoices, payments, project budgets, budget lines, project tasks). On 18.6.0 the same button reads 新建 / New.\n\n## Expected\n\nThe no-picker branch of `addEntry` labels the entry `t('detail.new')` (新建 / New). 添加 / Add stays only where a picker opens (a junction such as project → members, or a pure catalog).\n\n## Done when\n\nOn a master-detail child tab with no picker the entry reads New / 新建 and opens the create form with the parent filled in; on a tab whose Add opens a picker it still reads Add / 添加. Both pinned by a console test in en and zh-CN.\n\nBlocks: objectstack-ai/hotcrm#2747."
+}

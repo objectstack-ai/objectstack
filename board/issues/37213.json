@@ -1,0 +1,38 @@
+{
+  "number": 37213,
+  "kind": "pull_request",
+  "title": "fix(core,spec): the AMBIGUOUS_MATCH import row refusal names the key by label and reads in the caller's locale",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "protocol:system",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "os-justin"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-25T03:55:29Z",
+  "updated_at": "2026-11-25T05:00:28Z",
+  "closed_at": "2026-11-25T05:00:26Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-25T05:00:26Z",
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/37213",
+  "body": "Fixes #37157\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n- 用户能看到什么变化：导入时某行的匹配键匹配到多条已有记录而被拒，这条提示改用用户自己的语言，并用字段名称代替内部字段名和接口参数名；控制台导入向导下载的失败行表格和接口调用方会看到新句子，向导页面上的错误列表本来就按代码显示自己的本地化文案，不变。\n- 为什么做：属于「导入体验」这一组工作，是重复匹配键、空匹配键、多值匹配键三条提示本地化的同族收尾，替非英文用户解决导入结果里看到英文和内部名称、不知道该改哪个键的问题。\n- 出错会怎样：只影响这一条提示的文字，哪些行被拒、错误代码和写入结果都不变，可以直接撤回。\n- 要你做的：无。\n\n## What changes\n\nThe import runner's last English row refusal, `AMBIGUOUS_MATCH` (a row whose match key finds more than one stored record), now renders through the mechanism its siblings use (#36980 and #37025): `renderValidationMessage` with the caller's locale (`context.locale`) and override hook (`translate`).\n\n- `packages/spec/src/system/validation-message.ts`: one new `BUILTIN_VALIDATION_MESSAGES` row, `import_ambiguous_match`, in all four locales (`en`, `zh-CN`, `ja-JP`, `es-ES`), plus a docblock paragraph beside the sibling ones. `{{label}}` is the key set the row was matched by, by field LABEL joined with ` + `, and `{{field}}` is the same names as API names. No sentence ends in a full stop; zh-CN uses the sibling punctuation. en: `The match key (Email) matches more than one record, so the row was not written: match on fields whose values identify one record`.\n- `packages/core/src/utils/import-runner.ts`: `ambiguousMatchMessage(keySet)` beside `blankMatchKeyMessage` / `multiValueMatchKeyMessage`, sharing `fieldLabel`. The `AMBIGUOUS_MATCH` row uses it on `matchedKeySet`. The code `AMBIGUOUS_MATCH` and the row shape are unchanged.\n- Per the seat's ruling (card comment 7151513753, option B), the sentence names the key fields by label only, like the siblings. The object is not named at all. The old sentence named the API parameter `matchFields` and the object's API name.\n- Caller paths: the import endpoint (`POST /data/:object/import` and the async import job) passes both the request locale and the deployment's translator, so the row reads in the request language and takes an override under `validation.field.import_ambiguous_match`. The connector and datasource pulls pass neither, so they read English and the override is not consulted.\n\n## Tests\n\nNew top-level `describe` `[#37157] the ambiguous-match row refusal reads in the request language` in the shared harness `packages/core/src/utils/import-runner-duplicate-match-key-36980.test.ts`. A protocol double answers two records for every lookup. It has five cases:\n- zh-CN, exact sentence `匹配键(邮箱)匹配到多条记录,因此该行未写入:请改用取值能唯一确定一条记录的字段匹配`, row shape and code kept, nothing written;\n- English control;\n- no locale reads English;\n- multi-field key with an unlabelled field falling back to its API name;\n- a deployment override filled with `{{label}}` and `{{field}}`.\n\n## Acceptance notes\n\n- **Premise correction (where the sentence is read):** the console import wizard's on-screen lists already render `AMBIGUOUS_MATCH` by code with the console's own `grid.import.matchAmbiguous` text (`ui/packages/plugin-grid/src/ImportWizard.tsx` ~615, `formatDryRunError`, on both the dry-run panel and the completion screen). So the on-screen row list was never English. The server sentence reaches two places: the wizard's failed-rows CSV download (`handleDownloadFailed`, the `_error` column) and REST callers. Both now get the localized sentence. The wizard is not changed.\n- `ui/packages/plugin-grid/src/importDryRun.test.ts` feeds the old English sentence as an input fixture to `formatDryRunError`. It asserts the wizard's own text, so it is unaffected.\n- Hand-written docs: `content/docs/data-modeling/import-mappings.mdx` (~269, ~305) and the `matchFields` `.describe()` describe `AMBIGUOUS_MATCH` by code and meaning and never state the sentence. They stay true and are unchanged. `check:generated` reports nothing stale.\n\n## Verification\n\nTwo-minute check: `pnpm --filter @objectstack/core exec vitest run --maxWorkers=2 src/utils/import-runner-duplicate-match-key-36980.test.ts`. Expect 14 passed, including \"zh-CN: the sentence is the zh-CN catalog entry, naming the key by its label\".\n\n<details><summary>Local readings at 584d821df4</summary>\n\n- Build `@objectstack/core...` (core and its dependency closure, spec included): lock VERDICT command-exit 0.\n- Harness file: Test Files 1 passed (1), Tests 14 passed (14).\n- Full `@objectstack/core` vitest: Test Files 165 passed (165), Tests 3871 passed (3871).\n- Typecheck `@objectstack/core` and `@objectstack/spec`: VERDICT command-exit 0.\n- `@objectstack/spec` `src/system/` vitest (every locale defines every key): Test Files 78 passed (78), Tests 2779 passed (2779).\n- `@objectstack/spec check:generated`: \"All 14 generated artifacts are up to date\".\n- Ablation through `scripts/ablation-replace.mjs`: the row put back to the old English template (anchor 1 to 0, blob db4f26baa550 to d67f32257c80), harness 5 failed / 14 (all five #37157 cases). Restore: blob == HEAD (db4f26baa550), `git diff HEAD` empty.\n- Derived gates (`dispatch-gates.mjs --commands`, 89 families): 86 exit 0, 3 exit 3 (PREREQUISITE NOT MET, so NOT MEASURED: `check:doc-formula-expressions`, because `@objectstack/formula` is not built; `check:dual-build-cjs-loads` and `check:lean-entry-closure`, which need a full workspace build). `--ran`: \"89 derived famil(ies) accounted for — 86 run, 3 NOT-MEASURED (3 DERIVED from a recorded exit 3)\".\n- `check-nul-bytes`: OK. `overlap-check --branch=origin/claude/issue-37157-ambiguous-match-row-language`: VERDICT clean exit 0.\n\n</details>\n\nL2 owed: this PR edits non-test `packages/spec/src/**` (one catalog key in four locales and one docblock paragraph). It changes no Zod shape, export, error code or authorable key.\n\nResponsibility: the platform's own `@objectstack/core` import runner | the validation-message catalog its siblings already use, not reached by this row | non-English users importing in update or upsert mode whose row matches two records, from the console import wizard.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01QSeKYmRepQK9DkZeU7F53D)_\n\n<!-- signed: repo:objectstack#4 · os-justin · session_01QSeKYmRepQK9DkZeU7F53D -->\n"
+}

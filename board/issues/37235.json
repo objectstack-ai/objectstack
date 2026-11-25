@@ -1,0 +1,32 @@
+{
+  "number": 37235,
+  "kind": "issue",
+  "title": "Eval run · skill-evals objectstack-data + objectstack-automation × 2 arms × 1 rep · 3b4f0b98 · 2026-11-25 · #34770 before round",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "eval-run"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-25T05:40:56Z",
+  "updated_at": "2026-11-25T05:42:42Z",
+  "closed_at": "2026-11-25T05:42:42Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/37235",
+  "body": "eval#1 · os-justin · session_01QSeKYpxQpmErd1ixfkgbYh\n\nThis is the **before** baseline for #34770, under ruling ②A (7128031203). The go is recorded at 7151479313.\n\nThe seat filed it from runner `session_01QSeKYnHookmVT2ba4DfXbG`'s report; the runner made no GitHub write. The after round must repeat the config below exactly and be diffed against the **with-skill failing set** in §3.\n\n## Environment\n- **Runner:**\n  - checkout: objectstack-ai/objectstack at `3b4f0b9832836e75a8300ece68acc970d1c7adf6`, detached;\n  - skills source: workspace `skills/`;\n  - #36718 is on this main, so ②A's precondition holds.\n- **Driver:**\n  - `claude -p` from Claude Code 2.1.332, on a subscription `oauth_token` login (`apiBilled: false`), with `ANTHROPIC_API_KEY` and `ANTHROPIC_AUTH_TOKEN` unset;\n  - served `claude-sonnet-5-5` on all 202 turns;\n  - requested `--model sonnet --effort medium`.\n- **Command:**\n  - `skill-evals --skills objectstack-data,objectstack-automation --repeats 1 --model sonnet --effort medium --concurrency 4`;\n  - defaults kept: `--max-turns 16`, case timeout 300 s, `--max-utilization 0.9`, `--trigger-field selection` (both bundles installed in every trigger turn).\n- **Run:**\n  - 202 of 202 turns ran: 94 behaviour cases × 2 arms, plus 14 trigger cases;\n  - 0 not run, 0 invalid, 0 error;\n  - 04:22:03Z to 04:35:48Z, 13.8 min wall.\n- **Cost:**\n  - the CLI's notional figure is $15.36, which is not billed;\n  - the runner session cost $0.81.\n- **Not available:** seven-day utilization. This CLI reports only the window status, which was `allowed` throughout. The after round will have the same gap.\n\n## 1. Behaviour results\n\n| bundle | cases | with-skill | no-skill | delta (pp) |\n|:--|--:|--:|--:|--:|\n| objectstack-automation | 29 | 24 / 29 (82.8%) | 0 / 29 (0%) | +82.8 |\n| objectstack-data | 65 | 49 / 65 (75.4%) | 1 / 65 (1.5%) | +73.8 |\n| **all** | 94 | **73 / 94 (77.7%)** | 1 / 94 (1.1%) | +76.6 |\n\nReading the no-skill arm: every case grades on literal ObjectStack API tokens. A turn in an empty directory with no skill can't know them, so near-zero is the expected floor, not a defect. The no-skill pass is `objectstack-data/hooks-security-seeds-datasources#31`.\n\n## 2. Trigger results\n14 of 14 passed:\n- **Should load:** 10 of 10, all through the `Skill` tool.\n- **Should be left alone:** 4 of 4.\n- **Missed and false loads:** 0 each.\n\nTwo should-not cases pulled in the other bundle, `automation/triggers#6` → data and `data/triggers#6` → automation. Neither loaded its own bundle, so both pass.\n\n## 3. With-skill failing set: the parity baseline (21)\nCase ids are `bundle/file#id`. M means a `must_contain` token was missed; F means a `must_not_contain` token was carried.\n\n**objectstack-automation (5)**\n- `flows-triggers-approvals#5`: F `label: 'error'`\n- `flows-triggers-approvals#11`: F `runAs: 'system'`\n- `flows-triggers-approvals#14`: M `record-after-update`, `trigger record`; F `sourceObject:`, `actionUrl:`\n- `flows-triggers-approvals#16`: M `notices.`, `type: 'approval'`\n- `integrations-declared#1`: M `defineConnector`, `/connection`\n\n**objectstack-data (16)**\n- `hooks-security-seeds-datasources`:\n  - `#3`: M `OS_DATASOURCE_ENV_CREDENTIALS`\n  - `#4`: F `new Date(`\n  - `#6`: M `permissionSets`\n  - `#8`: M `type: 'queue'`\n  - `#15`: M `defaultValue: 'current_user'`\n  - `#16`: F `permissions:`\n  - `#19`: M `permissionSets: ['hd_agent']`, `dependencies: {`\n  - `#20`: M `function: 'count'`\n  - `#34`: M `refused`\n- `objects-fields-relationships`:\n  - `#2`: M `type: 'user'`\n  - `#8`: M `sharingModel: 'private'`\n  - `#11`: M `type: 'select'`\n  - `#12`: M `type: 'summary'`, `type: 'formula'`\n  - `#20`: F `defaultCurrency: 'USD'`\n  - `#22`: M `unitConfig`, `unitMode`, `H87`, `KGM`\n  - `#24`: M `sys_exchange_rate`\n\n**No-skill failing set:** all 94 behaviour cases except `objectstack-data/hooks-security-seeds-datasources#31` (93). The runner's report holds the missed tokens for each; they are left out here, because parity reads the with-skill arm.\n\n## 4. How the after round compares (ruling ②A)\n- **Config:** the same flags, with `--skills objectstack-data,objectstack-automation`, on the #34770 PR's finalized head, after `main` is merged in.\n- **\"Not lower\":** the with-skill failing set is the same 21 cases, or a subset of them.\n- **Flips:** a case that flips in either direction is re-run once (`--filter` on that case), and its second reading counts.\n- **Triggers:** they stay at 14 of 14. A trigger regression is reported beside the parity reading, not inside it.\n\n## 5. Anomalies\n- **Exit code:** not captured, because the runner ran detached. `round.json` shows `ranTurns 202 / notRunTurns 0`, so no quota stop fired.\n- **Round files:** the runner's scratchpad is archived with the session. This record's §1 to §3 carry everything the after round needs.\n\nSecurity: none. Leak check: no account or private values in the report."
+}

@@ -1,0 +1,32 @@
+{
+  "number": 37228,
+  "kind": "pull_request",
+  "title": "docs(skills): objectstack-data teaches that os validate and os build refuse seed records a validation rule refuses",
+  "state": "open",
+  "state_reason": null,
+  "draft": true,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tooling"
+  ],
+  "assignees": [
+    "os-justin"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-25T05:02:52Z",
+  "updated_at": "2026-11-25T05:23:24Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/37228",
+  "body": "repo:objectstack#4 · os-justin · session_01QSeKYo86w1wqy2z2fMrryr\n\nFixes #37158\n\nClause-②: no\nMetadata-protocol: none\nSkills-docs: this PR is the skills-docs half (`skills/objectstack-data/references/seeds.md`); PR #37156 shipped the behaviour and named this card\n\n## 维护者速读\n\n- 用户能看到什么变化：安装 objectstack-data 技能包的写数据 agent,读到的说明从「校验命令不检查初始化数据的业务规则」改成「校验与构建命令会拒收被规则拒掉的那条数据,并指出位置、对象、序号和规则」;只有文字变化,运行时行为不变。\n- 为什么做：属于「发布文字必须与已合并的 CLI 行为一致」这件事,替写初始化数据的应用作者解决「技能包教的和命令实际做的相反」;它收口 PR #37156 留下的说明半边。\n- 出错会怎样：最坏情况是说明写得不准,agent 照着写的数据仍会被命令拦住;撤回这个改动即可恢复旧文字。\n- 要你做什么：这是发布给客户的技能文本,需要你批准或直接合并,席位不能自己落地。\n\n## What changes\n\n`skills/objectstack-data/references/seeds.md` taught the opposite of what PR\n#37156 ships. Two passages change, and the file's net bytes are paid back\ninside the same file:\n\n- **The validation-rule passage.** It said \"`os validate` does not run them on\n  seed rows\". It now says both `os validate` and `os build` exit 1 (`--json`\n  too) on each record a rule refuses, naming the record's location\n  (`data[0].records[1]`), the object, the record index and the rule; that a\n  rule the record's literal values cannot decide — it reads a reference, a\n  default, a formula or roll-up, the object has a `beforeInsert` hook, or the\n  dataset is `update` — is counted and never refused, with the load still\n  judging it and `os verify` still failing on each dropped row. The\n  parent-roll-up sentence that follows is kept: the static check counts such a\n  pair rather than refusing it (`ruleReads` returns `null` on a reference hop,\n  `packages/lint/src/seed-row-refusals.ts`), so \"children must fit in record\n  order\" is still the author's rule.\n- **The `externalId` passage.** A blank key field now fails `os validate` /\n  `os build` as well as being refused at load.\n\nMeasured against the merged code, not the card: `judgeSeedRowRefusals`\n(`packages/lint/src/seed-row-refusals.ts`) filters out `state_machine`,\ninactive rules, advisory severities and rules whose `events` leave out\n`insert`; the two CLI doors inject the write path's own `evaluateValidationRules`.\n`os verify`'s dropped-row failure still exists (`packages/cli/src/commands/verify.ts`\n`hardFailures`), so that clause stays.\n\n## Tests\n\nNo test changes: text only. The two `skills/objectstack-data/evals` cases that\ntouch this area (ids 14 and 32 in `evals/hooks-security-seeds-datasources.json`)\nassert that seed rows are NOT exempt from validation rules and that `os verify`\nfails on a dropped row — both still true, neither asserts the removed sentence,\nso no eval case is edited.\n\n## Acceptance notes\n\n- `content/docs/data-modeling/seed-data.mdx:245` says \"`os validate` warns when\n  a seeded value is not a state the machine declares\" — still true, and that\n  tree is outside this card's file surface. No other `skills/**` sentence says\n  validate skips seed-row rules (`git grep` over `skills/` at this head).\n\n## Verification\n\nRead first (risk order): `skills/objectstack-data/references/seeds.md` lines\n~136-147 (the rewritten passage — the risk hunk: it must not promise a refusal\nfor an undecidable pair), then lines ~99-103 (the blank-key sentence), then\n`.changeset/37158-skills-seed-rows-refused-at-validate.md`.\n\nTwo-minute check: `node scripts/check-skills-token-ratchet.mjs` — expect\n`skills/objectstack-data/references/seeds.md is 1898 tokens (ceiling 1898;\nheadroom 0)` and exit 0, with no ceiling raised and no edit to the ratchet\nscript.\n\n<details><summary>Local gate readings at dfeb033ce7</summary>\n\n`node scripts/pm/dispatch-gates.mjs --ran` at dfeb033ce7: 49 derived families,\n49 run. Exit codes captured before any pipe:\n\n- `node scripts/check-skills-token-ratchet.mjs` exit 0 — `seeds.md 1898 / 1898 (+0)`; authored bundle `198047 / 203016 (-4969)`\n- `node scripts/check-skills-token-ratchet.mjs --self-test` exit 0 — 104 cases\n- `pnpm check:skill-links` exit 0 — 271 links, 140 fragments\n- `pnpm check:doc-authoring` exit 0\n- `pnpm check:nul-bytes` exit 0 — 27757 files, no raw control bytes\n- `pnpm --filter @objectstack/spec run check:skill-refs` exit 0; `check:skill-served-sections` exit 0; `check:skill-compatibility`, `check:skill-identifier-liveness`, `check:skill-frame-sync`, `check:pm-skill-id-lint` exit 0\n- `node scripts/check-changeset-no-major.mjs --base origin/main` exit 0; `check-empty-changeset` exit 0 (1 declaring changeset added); `check-adr-0087-registration` exit 0 (no declared-breaking changeset)\n- `node scripts/pm/overlap-check.mjs` exit 0 — `VERDICT clean`, merges cleanly with origin/main and 0 PR heads touch these paths\n- NOT MEASURED (PREREQUISITE NOT MET, exit 3 — a full workspace build this text-only diff does not otherwise need; CI builds and runs them): `pnpm --filter @objectstack/spec run check:skill-examples`, `pnpm --filter @objectstack/lint run check:doc-formula-expressions`, `pnpm check:dual-build-cjs-loads`, `pnpm check:lean-entry-closure`\n\n</details>\n\nGoverned surface (`skills/**`): draft, awaiting its tier's record — never\nreadied, queued or auto-merged by this seat.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01QSeKYo86w1wqy2z2fMrryr)_\n"
+}

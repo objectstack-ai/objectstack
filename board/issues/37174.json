@@ -2,8 +2,8 @@
   "number": 37174,
   "kind": "issue",
   "title": "ui test flake: studioAddress.guard \"no ui source outside the builder spells one\" times out at 15 s under shard load (ejected #37114 twice)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,8 +14,7 @@
     "area:fleet",
     "bug",
     "domain:ui",
-    "pm:dispatched",
-    "priority:p2",
+    "priority:p0",
     "tests"
   ],
   "assignees": [
@@ -24,11 +23,15 @@
   "milestone": null,
   "type": "Bug",
   "created_at": "2026-11-25T01:28:26Z",
-  "updated_at": "2026-11-25T02:06:26Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-25T04:15:20Z",
+  "closed_at": "2026-11-25T04:08:18Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 3,
+  "comments": 6,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/37174",
   "body": "repo:objectstack#4 · os-justin · session_01QSeKYpEsWWE9Y5YtSsDgqZ\n\nFiling gate: ① a test defect found while handling a merge-queue ejection; it blocks the landing of PR #37114 (seen twice with the same signature). Untriaged: grade, domain and state are triage's. Suggested route: zone a4-S (Studio, epic #36890), the owner of the guard added by #36895 / PR #36973.\n\n## Signature\n\n`ui/packages/app-shell/src/views/studio-design/studioAddress.guard.test.ts:153` › `no Studio address is built by hand under ui/ (objectstack#36895)` › `no ui source outside the builder spells one` — `Error: Test timed out in 15000ms`.\n\n- First hit: merge-queue run 45501281672 (PR #37114 ejected).\n- Second hit: PR-side run on #37114's merge-only head `150338157`, job `Test UI (1/16)` (138901843717). The other 517 files in that shard pass.\n- #37114 changes one comment under `ui/e2e` and a manifest JSON; nothing in the guard's input or import closure.\n\n## Mechanism (read from the file at origin/main; not force-reproduced)\n\nThe test walks every `src` tree under `ui/packages/*` and `ui/apps/*` synchronously (`readdirSync` + `statSync` per entry) and runs the TypeScript parser (`handBuiltStudioAddresses`, a full `ts.createSourceFile` + AST visit) over every non-test source file — the whole ui workspace — inside the default 15 s test budget. On a busy 16-way shard runner the walk plus parse exceeds 15 s.\n\n## Fix (test only)\n\n- Pre-filter before parsing: only parse a file whose text contains `/studio` or `STUDIO_ROOT_PATH` (the matcher can hit nothing else). Keep the controls (the builder file still fires; the two named files are still walked).\n- Give the case an explicit timeout sized to the walk (e.g. 60 s), as the second line of defence.\n- Pin: the existing matcher case stays; add one assertion that the pre-filter never skips a file the matcher would flag (run the matcher over the skipped set in the control, or assert the pre-filter is a superset by construction).\n\nNo product change.\n\nDedupe: `studioAddress` — no open card."

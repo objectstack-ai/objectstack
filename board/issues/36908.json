@@ -23,11 +23,11 @@
   "milestone": null,
   "type": "Feature",
   "created_at": "2026-11-24T08:09:18Z",
-  "updated_at": "2026-11-25T02:22:24Z",
+  "updated_at": "2026-11-25T05:31:58Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 7,
+  "comments": 11,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/36908",
   "body": "repo:objectstack#3 · os-support-ai · session_01WGufzufqmKuir7GiTdwGd3Z\n\n③ topic child · Source: topic #36890, decision 9 (maintainer 06:36Z 「全部按建议」). Earlier, 03:07Z: 「现在软件包的列表在 /studio ，但是这个页面没有入口，也没有必要，设置中应该有一个软家包列表…」. Part of #36890.\n\n## 为什么\n\n新形态里 Studio 总是从某个应用进，或从设置的软件包列表进（#36834）。首页没有入口，也没有必要。但它今天承载了一批入口，不能顺手删。\n\n## 今天依赖 `BuilderLanding` 的东西（读代码确认，主干 0819cab1）\n\n1. 新建软件包对话框落点 `/studio?new=package`（`SD/studioNewPackage.ts:24`），被 `AS/console/home/HomePage.tsx:978`、`AS/hooks/useAddAppEntries.ts:56-57`、`AS/console/ai/AiUnavailable.tsx:70` 使用。\n2. `~all` 环境目录唯一看得见的入口（`SD/BuilderLanding.tsx:798`）；`~org` 组织流程入口（`:822`）。\n3. 安装来的应用的「已定制 n 项、已关闭 m 项」面板和被关闭动作清单（`SD/LandingCustomizationsPanel.tsx`、`SD/switchedOffActionTargets.ts`）；`packagedActionsStudioPath` 无包时落到 `/studio`（`SD/setupMetadataRedirect.ts:94`）。\n4. 包卡片上的「管理」（`PackageDetailSheet`）和完整软件包页链接；最近访问的包。\n5. 「包不存在」空状态的「回 Studio 首页」（`SDS:1901`）；`ui/apps/console/src/AppContent.tsx:68, 178` 兜底跳 `/studio`。\n6. 旧 Studio 应用的 `studio:builder` 组件引用（`ui/apps/console/src/registerStudioComponents.tsx:46-58`）。\n7. 引用 `BuilderLanding` 或首页测试标识的测试文件 40 个。\n\n## 要做的\n\n1. 逐项给出新去处并实现：新建软件包 → 设置的软件包列表（#36834）后进 Studio；`~all`、`~org` → 左侧菜单（1-3）；定制面板 → 当前包 Studio 的「概览」或设置的软件包详情（开发者提方案，PR 写明）；兜底跳转 → 设置的软件包列表。\n2. `/studio` 地址：有记住的包就进它，否则转到设置的软件包列表。\n3. 删除 `BuilderLanding` 及只为它服务的代码和测试；#36833（首页定制数量）随本卡关闭的理由写进 PR。\n\n## 验收\n\n- 上面每一项入口都有新去处，走查一次；`/studio` 不再显示包卡片页。\n\nBlocked-by: #36834\nBlocked-by: #36899\n\nGrading: `area:ux · Feature · Studio entry (a landing page with no door) · administrators and builders · evidence: read from code`. Topic child ⇒ p2.\nDedupe: `BuilderLanding` / `studio landing` (open: #36833 count bug, #35513 English package names; both are re-pointed by this card).\nReader: seat repo:objectstack#3, one os-dev card. Size M. `Metadata-protocol: none`. Wave 3."
