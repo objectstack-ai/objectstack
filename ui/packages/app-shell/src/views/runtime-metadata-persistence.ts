@@ -508,6 +508,26 @@ export async function readRuntimeDraft<T = Record<string, unknown>>(
 }
 
 /**
+ * objectstack#36350 — the pending draft as the runtime draft bar shows it: its
+ * bare body (as {@link readRuntimeDraft} answers it) and the `version` the
+ * strict draft read's envelope carries, which pins the bar's Publish
+ * ({@link publishRuntimeMetadata}) to this draft. Read through
+ * `MetadataClient.getDraft`, whose answer keeps the envelope; `draftVersion`
+ * is absent when no draft is pending or the envelope carries none (a server
+ * from before the read served one), and the Publish then goes unpinned.
+ */
+export async function readRuntimeDraftForPublish<T = Record<string, unknown>>(
+  type: RuntimeArtifactType,
+  name: string,
+  ctx: RuntimePersistCtx,
+): Promise<{ body: T | null; draftVersion?: string }> {
+  const answer = await ctx.metadataClient.getDraft(type, name);
+  const body = unwrapDraftBody(answer) as T | null;
+  const draftVersion = body ? receiptVersion(answer) : undefined;
+  return draftVersion ? { body, draftVersion } : { body };
+}
+
+/**
  * Discard the pending draft of a runtime artifact (Studio's "Discard draft").
  * The published overlay is untouched.
  */
@@ -541,7 +561,8 @@ export async function publishRuntimeMetadata(
   // has that draft's version: a draft another writer changed since is refused
   // `409 METADATA_CONFLICT` and nothing is published. Without one, whichever
   // draft is pending is published, as before.
-  await ctx.metadataClient.publish(type, name, draftVersion ? { draftVersion } : {});
+  if (draftVersion) await ctx.metadataClient.publish(type, name, { draftVersion });
+  else await ctx.metadataClient.publish(type, name);
   invalidateViewCaches(type, name, ctx);
   announceDraftLedgerWrite();
 }
@@ -616,7 +637,8 @@ export async function saveAndPublishRuntimeMetadata(
     // landing in between (a rename, pin or set-default on the same view) moves
     // the draft, and the server refuses the publish `409 METADATA_CONFLICT`
     // rather than publishing that writer's unreviewed change on their behalf.
-    await ctx.metadataClient.publish(type, name, draftVersion ? { draftVersion } : {});
+    if (draftVersion) await ctx.metadataClient.publish(type, name, { draftVersion });
+    else await ctx.metadataClient.publish(type, name);
   } catch (err) {
     if (isDraftVersionConflict(err)) {
       // The draft moved: it now holds the other writer's change on top of

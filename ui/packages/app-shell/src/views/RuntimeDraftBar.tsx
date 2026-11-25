@@ -18,7 +18,7 @@ import { Loader2, Send, Undo2 } from 'lucide-react';
 import {
   publishRuntimeMetadata,
   discardRuntimeDraft,
-  readRuntimeDraft,
+  readRuntimeDraftForPublish,
   type RuntimeArtifactType,
 } from './runtime-metadata-persistence.js';
 import { useMetadataLocale, t, tFormat } from './metadata-admin/i18n.js';
@@ -98,6 +98,8 @@ export function RuntimeDraftBar({
   // Track the `name` we've already resumed so reopening the same item doesn't
   // clobber in-flight edits with the stored draft on every effect run.
   const resumedRef = useRef<string | null>(null);
+  /** objectstack#36350 — the version of the draft this bar last read and shows. */
+  const shownDraftVersionRef = useRef<string | undefined>(undefined);
 
   const refresh = useCallback(async () => {
     if (!name || !metadataClient) {
@@ -106,11 +108,15 @@ export function RuntimeDraftBar({
     }
     let body: Record<string, unknown> | null;
     try {
-      body = await readRuntimeDraft<Record<string, unknown>>(type, name, {
+      const shown = await readRuntimeDraftForPublish<Record<string, unknown>>(type, name, {
         metadataClient,
       });
+      body = shown.body;
+      // objectstack#36350 — the draft this bar shows; its Publish is pinned to it.
+      shownDraftVersionRef.current = shown.draftVersion;
     } catch {
       // A failed draft read must not break the editor — treat as "no draft".
+      shownDraftVersionRef.current = undefined;
       setHasDraft(false);
       return;
     }
@@ -139,14 +145,22 @@ export function RuntimeDraftBar({
   useEffect(() => {
     if (savedSignal === lastSavedSignal.current) return;
     lastSavedSignal.current = savedSignal;
-    if (savedSignal) setHasDraft(true);
+    if (savedSignal) {
+      // The host's own save moved the draft past the one this bar read, and
+      // the bar has not read the new one: its Publish goes unpinned, as before.
+      shownDraftVersionRef.current = undefined;
+      setHasDraft(true);
+    }
   }, [savedSignal]);
 
   const handlePublish = useCallback(async () => {
     if (!name) return;
     setBusy(true);
     try {
-      await publishRuntimeMetadata(type, name, { metadataClient, dataSource, objectName });
+      // objectstack#36350 — pinned to the draft this bar showed: a draft
+      // another writer changed since is refused `409 METADATA_CONFLICT`, said
+      // by the toast below, and nothing is published.
+      await publishRuntimeMetadata(type, name, { metadataClient, dataSource, objectName }, shownDraftVersionRef.current);
       setHasDraft(false);
       onAfterChange?.();
     } catch (err) {
