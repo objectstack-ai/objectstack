@@ -147,6 +147,9 @@ function objectsWith(createOverride: unknown) {
       fields: {
         id: { type: 'text', label: 'Id' },
         name: { type: 'text', label: 'Name' },
+        // The related list's relationship field, declared on the child as real
+        // metadata always declares it (objectstack#37248).
+        order: { type: 'lookup', reference: 'order', label: 'Order' },
       },
       userActions: createOverride === undefined ? undefined : { create: createOverride },
     },
