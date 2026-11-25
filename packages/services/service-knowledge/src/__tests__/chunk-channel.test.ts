@@ -52,18 +52,43 @@ function source(split?: KnowledgeSplit): KnowledgeSource {
 
 const LONG = '员工在出差期间应当遵守公司的各项规章制度。'.repeat(40); // 840 chars, ~1400 tokens
 
+/**
+ * A data-engine double for the walk and the re-read: equality on a field,
+ * `$and`, and `id > cursor`; any other `where` shape throws, and the caller's
+ * `limit` is applied after the filter.
+ */
 function rowsEngine(rows: Array<Record<string, unknown>>): IDataEngine {
+  const matches = (row: Record<string, unknown>, where: Record<string, unknown> | undefined): boolean => {
+    if (!where) return true;
+    for (const [key, value] of Object.entries(where)) {
+      if (key === '$and') {
+        if (!Array.isArray(value)) throw new Error('engine double: $and takes an array');
+        if (!value.every((c) => matches(row, c as Record<string, unknown>))) return false;
+        continue;
+      }
+      if (key.startsWith('$')) throw new Error(`engine double: operator ${key} is not implemented`);
+      if (value !== null && typeof value === 'object') {
+        const ops = Object.keys(value);
+        if (key !== 'id' || ops.length !== 1 || ops[0] !== '$gt') {
+          throw new Error(`engine double: condition on '${key}' is not implemented`);
+        }
+        if (!(String(row.id) > String((value as { $gt: unknown }).$gt))) return false;
+        continue;
+      }
+      if (row[key] !== value) return false;
+    }
+    return true;
+  };
   return {
-    find: async (_o: string, q: { where?: Record<string, unknown>; limit?: number }) => {
-      const after = (q.where as { id?: { $gt?: string } } | undefined)?.id?.$gt
-        ?? ((q.where as { $and?: Array<{ id?: { $gt?: string } }> } | undefined)?.$and?.[1]?.id?.$gt);
-      const idEq = (q.where as { id?: unknown } | undefined)?.id;
-      return rows
-        .filter((r) => (typeof idEq === 'string' ? r.id === idEq : after === undefined || String(r.id) > after))
-        .slice(0, q.limit ?? rows.length)
-        .map((r) => ({ ...r }));
+    find: async (_object: string, query: { where?: Record<string, unknown>; limit?: number }) => {
+      const matched = rows
+        .filter((r) => matches(r, query?.where))
+        .sort((a, b) => (String(a.id) < String(b.id) ? -1 : String(a.id) > String(b.id) ? 1 : 0));
+      const page = typeof query?.limit === 'number' ? matched.slice(0, query.limit) : matched;
+      return page.map((r) => ({ ...r }));
     },
-    count: async () => rows.length,
+    count: async (_object: string, query: { where?: Record<string, unknown> }) =>
+      rows.filter((r) => matches(r, query?.where)).length,
   } as unknown as IDataEngine;
 }
 

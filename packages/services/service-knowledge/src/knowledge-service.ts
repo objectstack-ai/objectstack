@@ -780,14 +780,15 @@ export class KnowledgeService implements IKnowledgeService {
     for (const f of prepared.failed) {
       await adapter.delete([f.documentId], { source, reason: 'event-sync' });
       const limit = adapter.embedding?.maxInputTokens;
-      const report = this.options.logger?.error ?? this.options.logger?.warn;
-      report?.call(
-        this.options.logger,
+      const message =
         `[knowledge] record '${String(recordId)}' of source '${source.id}' is no longer in the index and search ` +
           `will not find it: its whole document estimates ${f.estimate} tokens, over the budget of ${f.budget} ` +
           `(80% of the embedder's ${String(limit)}-token input limit), and split 'whole' does not truncate. ` +
-          `Fix: give source '${source.id}' split strategy 'recursive' or 'markdown', or shorten the record.`,
-      );
+          `Fix: give source '${source.id}' split strategy 'recursive' or 'markdown', or shorten the record.`;
+      // `warn` is the guaranteed channel when a host injects no `error`.
+      const logger = this.options.logger;
+      if (logger?.error) logger.error(message);
+      else logger?.warn?.(message);
     }
   }
 
