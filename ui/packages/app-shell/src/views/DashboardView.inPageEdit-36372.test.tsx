@@ -421,18 +421,24 @@ describe('DashboardView opened from a Studio list (objectstack#36906)', () => {
     const navigate = vi.fn();
     route.navigate = navigate;
     route.search = fromStudio;
-    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false);
-    mount();
-    await openEdit();
-    fireEvent.keyDown(screen.getByTestId('dashboard-widget-resize-handle'), { key: 'ArrowRight' });
-    fireEvent.click(screen.getByTestId('studio-return'));
-    expect(confirm).toHaveBeenCalledTimes(1);
-    expect(navigate).not.toHaveBeenCalledWith(studioList);
-    expect(screen.getByTestId('dashboard-editing-badge')).toBeInTheDocument();
-    confirm.mockReturnValue(true);
-    fireEvent.click(screen.getByTestId('studio-return'));
-    expect(navigate).toHaveBeenLastCalledWith(studioList);
-    confirm.mockRestore();
+    // This DOM ships no window.confirm: install one, and put back what was there.
+    const before = window.confirm;
+    const confirm = vi.fn(() => false);
+    window.confirm = confirm as unknown as typeof window.confirm;
+    try {
+      mount();
+      await openEdit();
+      fireEvent.keyDown(screen.getByTestId('dashboard-widget-resize-handle'), { key: 'ArrowRight' });
+      fireEvent.click(screen.getByTestId('studio-return'));
+      expect(confirm).toHaveBeenCalledTimes(1);
+      expect(navigate).not.toHaveBeenCalledWith(studioList);
+      expect(screen.getByTestId('dashboard-editing-badge')).toBeInTheDocument();
+      confirm.mockReturnValue(true);
+      fireEvent.click(screen.getByTestId('studio-return'));
+      expect(navigate).toHaveBeenLastCalledWith(studioList);
+    } finally {
+      window.confirm = before;
+    }
   });
 
   it('on a phone, the landing opens no edit state: it is cleared and the page stays a viewer', async () => {

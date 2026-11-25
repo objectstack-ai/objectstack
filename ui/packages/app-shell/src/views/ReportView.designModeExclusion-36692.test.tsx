@@ -246,14 +246,24 @@ describe('a report opened from a Studio list (objectstack#36906)', () => {
     route.navigate = navigate;
     route.search = fromStudio;
     route.state = { openReportBuilder: 'revenue_by_month' };
-    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false);
-    mountReport(DATASET_REPORT);
-    await screen.findByTestId('report-builder');
-    fireEvent.click(screen.getByTestId('stub-builder-edit'));
-    fireEvent.click(screen.getByTestId('report-builder-close'));
-    expect(confirm).toHaveBeenCalledTimes(1);
-    expect(navigate).not.toHaveBeenCalledWith(studioList);
-    expect(screen.getByTestId('report-builder')).toBeTruthy();
+    // This DOM ships no window.confirm: install one, and put back what was there.
+    const before = window.confirm;
+    const confirm = vi.fn(() => false);
+    window.confirm = confirm as unknown as typeof window.confirm;
+    try {
+      mountReport(DATASET_REPORT);
+      await screen.findByTestId('report-builder');
+      fireEvent.click(screen.getByTestId('stub-builder-edit'));
+      fireEvent.click(screen.getByTestId('report-builder-close'));
+      expect(confirm).toHaveBeenCalledTimes(1);
+      expect(navigate).not.toHaveBeenCalledWith(studioList);
+      expect(screen.getByTestId('report-builder')).toBeTruthy();
+      confirm.mockReturnValue(true);
+      fireEvent.click(screen.getByTestId('report-builder-close'));
+      expect(navigate).toHaveBeenLastCalledWith(studioList);
+    } finally {
+      window.confirm = before;
+    }
   });
 
   it('the report page draws x back to the Studio list beside Edit, after a reload too', async () => {

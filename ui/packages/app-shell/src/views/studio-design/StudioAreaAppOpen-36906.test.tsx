@@ -169,7 +169,8 @@ describe('a Studio dashboard or report opens in its app (objectstack#36906)', ()
   });
 
   it('the cross-package leg and every other type keep the generic item page', async () => {
-    mount('/studio/~all/metadata/dashboard/ops_board?package=' + PKG);
+    // The cross-package leg itself (with `?package=` the area moves the open to that package's leg).
+    mount('/studio/~all/metadata/dashboard/ops_board');
     expect((await screen.findByTestId('area-page')).getAttribute('data-page')).toBe('item');
     cleanup();
     mount(`/studio/${PKG}/metadata/view/account.all?package=${PKG}`);
