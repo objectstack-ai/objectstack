@@ -13,7 +13,7 @@
  *     through `setChatFocus` and opens the drawer; it sends nothing.
  */
 
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, type Mock } from 'vitest';
 import { renderHook } from '@testing-library/react';
 import React from 'react';
 
@@ -39,8 +39,8 @@ vi.mock('../../layout/chatFocus.js', async (importOriginal) => ({
 import { ChatDockControlProvider, type ChatDockControl } from '../../layout/chatDockControl.js';
 import { useAskAiHandler } from '../useAskAiHandler.js';
 
-function dock(): ChatDockControl & { open: ReturnType<typeof vi.fn> } {
-  return { expanded: false, fullWindow: false, toggle: vi.fn(), open: vi.fn() };
+function dock(): ChatDockControl & { open: Mock<ChatDockControl['open']> } {
+  return { expanded: false, fullWindow: false, toggle: vi.fn(), open: vi.fn<ChatDockControl['open']>() };
 }
 
 function renderWith(control: ChatDockControl | null) {
