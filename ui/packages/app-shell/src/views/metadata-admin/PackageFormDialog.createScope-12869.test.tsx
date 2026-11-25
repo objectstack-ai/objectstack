@@ -18,6 +18,10 @@ import { render, screen, fireEvent, waitFor, within } from '@testing-library/rea
 import { PackageFormDialog } from './PackageFormDialog';
 import { getPackageForm } from './package-schema';
 import { t } from './i18n';
+// The source under test reaches a dynamic `import('@objectstack/formula')` and `import('@objectstack/lint')`: pay its load at
+// collection, never inside a case's clocked window (`check:test-source-alias`).
+import '@objectstack/formula';
+import '@objectstack/lint';
 
 // The one stand-in: a create form that still carries the `scope` row, so a
 // draft can hold a picked scope and the POST body is measured on its own.
@@ -46,7 +50,7 @@ beforeEach(() => {
       const body = init.body ? JSON.parse(init.body as string) : {};
       posts.push(body.manifest ?? body);
       return {
-        ok: true,
+        headers: new Headers(), ok: true,
         status: 201,
         text: async () => JSON.stringify({ success: true, data: { manifest: body.manifest } }),
       } as Response;

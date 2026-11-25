@@ -44,6 +44,9 @@ vi.mock('@object-ui/i18n', async (importOriginal) => ({
 }));
 
 import { DraftChangesPanel, computeChangeDetail } from '../DraftChangesPanel';
+// The source under test reaches a dynamic `import('@objectstack/lint')`: pay its load at
+// collection, never inside a case's clocked window (`check:test-source-alias`).
+import '@objectstack/lint';
 
 const NO_CHANGE = 'No differences detected — the draft matches the published version.';
 
@@ -87,8 +90,8 @@ function mockServer(fx: Fixture): string[] {
   global.fetch = vi.fn(async (input: RequestInfo | URL) => {
     const url = String(input);
     urls.push(url);
-    const ok = (body: unknown) => ({ ok: true, status: 200, json: async () => body });
-    const missing = { ok: false, status: 404, json: async () => ({}) };
+    const ok = (body: unknown) => ({ headers: new Headers(), ok: true, status: 200, json: async () => body });
+    const missing = { headers: new Headers(), ok: false, status: 404, json: async () => ({}) };
     if (url.includes('/_drafts')) {
       return ok(fx.drafts.map((d) => ({ ...d, packageId: 'com.x' })));
     }
