@@ -107,6 +107,7 @@ describe('[ADR-0160 D4] the MCP bridge\'s record-context members', () => {
             'fieldVisibilityOf',
             'get',
             'listContextPacks',
+            'packageNamespace',
             'publishedObjectDefinitionOf',
             'query',
             'readGuard',
@@ -285,5 +286,45 @@ describe('[ADR-0160 D4] the /mcp route answers through a package pack the real p
             ['title', 'Fire cover'],
             ['status', 'active'],
         ]);
+    });
+
+    it('[ADR-0150 addendum 2026-11-25] two packages\' packs of one name on one root: each is reached by its face, and the bare name is refused naming both', async () => {
+        for (const [id, namespace, label] of [['com.acme.rcd_sales', 'rcds', 'Sales brief'], ['com.acme.rcd_people', 'rcdp', 'People brief']]) {
+            engine.registerApp({
+                id, name: id, version: '1.0.0', type: 'plugin', scope: 'system', namespace,
+                aiContexts: [{ name: 'rcd_brief', label, object: 'rcd_policy', fields: ['title'] }],
+            } as never);
+        }
+        const dispatcher = new HttpDispatcher(kernel, undefined, { enforceProjectMembership: false });
+        const call = async (context: string) => {
+            const body = {
+                jsonrpc: '2.0', id: 1, method: 'tools/call',
+                params: { name: 'get_record_context', arguments: { objectName: 'rcd_policy', recordId: 'p1', context } },
+            };
+            const res = await dispatcher.handleMcp(body, {
+                request: new Request('http://localhost/api/v1/mcp', {
+                    method: 'POST',
+                    headers: { 'content-type': 'application/json', accept: 'application/json, text/event-stream' },
+                    body: JSON.stringify(body),
+                }),
+                response: {},
+                environmentId: undefined,
+                executionContext: { userId: 'usr_member', tenantId: 'org_1', positions: [], permissions: [], systemPermissions: [] },
+            } as any);
+            expect(res.response?.status).toBe(200);
+            const result = (res.response?.body as any)?.result;
+            return { isError: result?.isError === true, payload: JSON.parse(result.content[0].text) };
+        };
+        const sales = await call('rcds-rcd_brief');
+        expect(sales.isError, JSON.stringify(sales.payload)).toBe(false);
+        expect(sales.payload.data.pack).toEqual({ name: 'rcd_brief', label: 'Sales brief' });
+        const people = await call('rcdp-rcd_brief');
+        expect(people.isError, JSON.stringify(people.payload)).toBe(false);
+        expect(people.payload.data.pack).toEqual({ name: 'rcd_brief', label: 'People brief' });
+        const bare = await call('rcd_brief');
+        expect(bare.isError).toBe(true);
+        expect(bare.payload.error).toMatchObject({ code: 'RESOURCE_CONFLICT', status: 409 });
+        expect(bare.payload.error.message).toContain('rcds-rcd_brief');
+        expect(bare.payload.error.message).toContain('rcdp-rcd_brief');
     });
 });
