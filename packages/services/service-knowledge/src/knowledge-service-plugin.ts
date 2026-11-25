@@ -11,6 +11,7 @@ import { EMBEDDER_SERVICE, KNOWLEDGE_SERVICE } from '@objectstack/spec/contracts
 import {
   OPENAI_COMPATIBLE_PRESETS,
   createOpenAIEmbedder,
+  documentedMaxBatchSize,
   type OpenAICompatiblePreset,
 } from '@objectstack/embedder-openai';
 import { aiTestEmbedderActionHandler } from '@objectstack/service-settings';
@@ -62,7 +63,16 @@ interface EmbedderSettingsReader {
 
 /** What the `ai.embedder_*` settings resolve to at boot. */
 type EmbedderFromSettings =
-  | { kind: 'configured'; embedder: IEmbedder; provider: string; model: string | undefined; batchSize: number | undefined }
+  | {
+      kind: 'configured';
+      embedder: IEmbedder;
+      provider: string;
+      model: string | undefined;
+      /** The batch cap passed to the embedder: the saved size, held to the model's documented cap. */
+      batchSize: number | undefined;
+      /** The saved size, when the documented cap lowered it. */
+      savedBatchSize: number | undefined;
+    }
   | {
       kind: 'unconfigured';
       reason: string;
@@ -197,7 +207,13 @@ async function embedderFromSettings(ctx: PluginContext): Promise<EmbedderFromSet
   const dimensions = typeof saved.embedder_dimensions === 'number' ? saved.embedder_dimensions : undefined;
   // Only a SAVED batch size is a batch cap; unsaved, the embedder batches at the
   // model's own documented cap (some providers accept 10, not the default 64).
-  const batchSize = typeof saved.embedder_batch_size === 'number' ? saved.embedder_batch_size : undefined;
+  // A saved size is held to that documented cap when the saved model has one:
+  // an explicit `maxBatchSize` would otherwise override it. A model the table
+  // does not know, or no saved model, keeps the saved size as saved.
+  const savedBatch = typeof saved.embedder_batch_size === 'number' ? saved.embedder_batch_size : undefined;
+  const documentedCap = model ? documentedMaxBatchSize(model) : undefined;
+  const batchSize =
+    savedBatch !== undefined && documentedCap !== undefined ? Math.min(savedBatch, documentedCap) : savedBatch;
   // Ollama ignores the key, and the embedder requires a non-empty one.
   const apiKey =
     typeof saved.embedder_api_key === 'string' && saved.embedder_api_key !== ''
@@ -222,7 +238,14 @@ async function embedderFromSettings(ctx: PluginContext): Promise<EmbedderFromSet
       maxBatchSize: batchSize,
       id: providerId,
     });
-    return { kind: 'configured', embedder, provider: providerId, model, batchSize };
+    return {
+      kind: 'configured',
+      embedder,
+      provider: providerId,
+      model,
+      batchSize,
+      savedBatchSize: batchSize !== savedBatch ? savedBatch : undefined,
+    };
   } catch (err) {
     // The embedder's own refusals name the option, never the key's value.
     return {
@@ -517,7 +540,8 @@ export class KnowledgeServicePlugin implements Plugin {
    *   one `info` line, the settings are not applied. A registration this sync
    *   accessor cannot hand out (an async factory) is a registration too.
    * - Saved and complete → an `@objectstack/embedder-openai` embedder for the
-   *   saved provider. The batch size is passed only when it was saved.
+   *   saved provider. The batch size is passed only when it was saved, and is
+   *   held to the saved model's documented cap (`documentedMaxBatchSize`).
    * - Otherwise → an `UnconfiguredEmbedder`, whose every use answers an error
    *   naming the missing settings; the boot itself succeeds.
    *
@@ -548,7 +572,9 @@ export class KnowledgeServicePlugin implements Plugin {
       ctx.logger.info?.(
         `KnowledgeServicePlugin: registered '${EMBEDDER_SERVICE}' from the ai.embedder_* settings ` +
           `(provider=${outcome.provider}, model=${outcome.model ?? '(embedder default)'}, ` +
-          `batch size=${outcome.batchSize ?? "the model's own cap"}). A saved change takes effect on the next restart.`,
+          `batch size=${outcome.batchSize ?? "the model's own cap"}` +
+          `${outcome.savedBatchSize !== undefined ? ` — the saved ${outcome.savedBatchSize}, held to the model's documented cap` : ''}). ` +
+          'A saved change takes effect on the next restart.',
       );
       return;
     }

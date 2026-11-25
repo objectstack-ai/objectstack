@@ -452,6 +452,37 @@ describe('#37094 — the open edition registers EMBEDDER_SERVICE from the ai.emb
     expect(lines.some((l) => l.level === 'warn' && l.line.includes('no embedder is configured'))).toBe(false);
   });
 
+  it("a saved batch size over the model's documented cap is held to the cap", async () => {
+    const requests = stubProvider();
+    // DashScope text-embedding-v3 documents 10; the operator saved 64.
+    const { embedder, lines } = await bootEmbedder({
+      saved: {
+        embedder_provider: 'dashscope',
+        embedder_api_key: API_KEY,
+        embedder_model: 'text-embedding-v3',
+        embedder_batch_size: 64,
+      },
+    });
+    await embedder.embed(texts(25));
+    expect(requests.map((r) => r.inputs.length)).toEqual([10, 10, 5]);
+    expect(lines.some((l) => l.line.includes('batch size=10') && l.line.includes('the saved 64'))).toBe(true);
+  });
+
+  it('a saved batch size for a model with no documented cap is kept as saved', async () => {
+    const requests = stubProvider();
+    const { embedder } = await bootEmbedder({
+      saved: {
+        embedder_provider: 'custom',
+        embedder_api_key: API_KEY,
+        embedder_model: 'my-gateway-model',
+        embedder_base_url: 'https://gateway.example.com/v1',
+        embedder_batch_size: 50,
+      },
+    });
+    await embedder.embed(texts(60));
+    expect(requests.map((r) => r.inputs.length)).toEqual([50, 10]);
+  });
+
   it("'none' saved: embeddings stay disabled, and the error says so", async () => {
     stubProvider();
     const { embedder } = await bootEmbedder({ saved: { embedder_provider: 'none' } });

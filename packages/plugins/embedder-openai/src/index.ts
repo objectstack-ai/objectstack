@@ -121,6 +121,21 @@ const KNOWN_MAX_BATCH_SIZE: Record<string, number> = {
 const DEFAULT_MAX_BATCH_SIZE = 10;
 
 /**
+ * The provider-documented per-request input cap for `model`, read from the
+ * known-model table `OpenAIEmbedder` batches by, or `undefined` when the table
+ * documents none (the embedder then falls back to {@link DEFAULT_MAX_BATCH_SIZE}
+ * with a warning).
+ *
+ * Read-only: a caller that takes a batch size from elsewhere — an operator's
+ * saved setting — can hold it at or under the model's cap before passing it as
+ * `maxBatchSize`. It changes nothing about `OpenAIEmbedder` itself: an explicit
+ * `maxBatchSize` is still used as given, above the documented cap included.
+ */
+export function documentedMaxBatchSize(model: string): number | undefined {
+  return Object.prototype.hasOwnProperty.call(KNOWN_MAX_BATCH_SIZE, model) ? KNOWN_MAX_BATCH_SIZE[model] : undefined;
+}
+
+/**
  * Documented per-input token limits (the longest single text one
  * `/embeddings` input may be). A model listed here refuses an over-limit
  * input; any other model has no limit unless `maxInputTokens` sets one. Only
@@ -250,6 +265,7 @@ export class OpenAIEmbedder implements IEmbedder {
     // Once per instance, in ONE warning: the configuration is what is
     // unknown, not any one call.
     const unknown: string[] = [];
+    const documentedCap = documentedMaxBatchSize(this.model);
     if (opts.maxBatchSize !== undefined) {
       if (!Number.isInteger(opts.maxBatchSize) || opts.maxBatchSize < 1) {
         throw new Error(
@@ -257,8 +273,8 @@ export class OpenAIEmbedder implements IEmbedder {
         );
       }
       this.maxBatchSize = opts.maxBatchSize;
-    } else if (KNOWN_MAX_BATCH_SIZE[this.model] !== undefined) {
-      this.maxBatchSize = KNOWN_MAX_BATCH_SIZE[this.model];
+    } else if (documentedCap !== undefined) {
+      this.maxBatchSize = documentedCap;
     } else {
       this.maxBatchSize = DEFAULT_MAX_BATCH_SIZE;
       unknown.push(
