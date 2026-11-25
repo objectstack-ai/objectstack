@@ -1109,15 +1109,26 @@ export interface IApprovalService {
    *   who cannot read it gets `null` — exactly the answer for a record id that
    *   does not exist, ⛔ never one that tells the two apart. A caller refused
    *   the object's read outright is refused the same way for every id.
-   * - **What is answered:** `locked` only. `true` when a pending request on the
-   *   record comes from a node whose `lockRecord` is not `false` — the same
-   *   judgement, off the same snapshot, the record-lock `beforeUpdate` hook
-   *   enforces. Asked of a master-detail line, it also answers `true` while
-   *   a record the line belongs to is so held — the detail-row lock's judgement,
-   *   which refuses the line's writes.
+   * - **What is answered:** `locked`, and — only when `locked` is `true` —
+   *   `lockSource`, which approval holds the record (ruling 7148480184, option
+   *   A, revising the #25934 ruling A text "`locked` only"). `locked` is `true`
+   *   when a pending request on the record comes from a node whose
+   *   `lockRecord` is not `false` — the same judgement, off the same snapshot,
+   *   the record-lock `beforeUpdate` hook enforces — and then `lockSource` is
+   *   `'record'`. Asked of a master-detail line, it also answers `true` while
+   *   a record the line belongs to is so held — the detail-row lock's
+   *   judgement, which refuses the line's writes — and then `lockSource` is
+   *   `'master'`. When both hold (a line held by its own request under a held
+   *   master) `lockSource` is `'master'`: the stricter of the two delete rules.
+   *   A record held by its own request may still be deleted, which cancels
+   *   the request; a line of a held master refuses insert, update and delete.
+   *   An unlocked record answers `{ locked: false }`, with no `lockSource`.
+   *   An implementation may omit `lockSource` on a locked answer; the REST
+   *   doors then serve `{ locked: true }` alone, never a guessed kind.
    *   ⛔ No request id, node, participants or `pending` flag: whether
    *   the caller may see the request is still `approvalsVisibleToReaders`'
-   *   question, and this member does not answer it.
+   *   question, and this member does not answer it. `lockSource` is one kind
+   *   bit, never which request or who decides it.
    *
    * **Optional, and its absence is loud:** an approvals implementation without
    * it still satisfies this contract, so a door probes for presence and answers
@@ -1125,13 +1136,14 @@ export interface IApprovalService {
    *
    * @param object - The target object's name
    * @param recordId - The target record's id
-   * @returns `{ locked }`, or `null` when the caller cannot read that record
+   * @returns `{ locked, lockSource }` for a locked record, `{ locked: false }`
+   *   for an unlocked one, or `null` when the caller cannot read that record
    */
   getRecordLock?(
     object: string,
     recordId: string,
     context: ExecutionContext,
-  ): Promise<{ locked: boolean } | null>;
+  ): Promise<{ locked: boolean; lockSource?: 'record' | 'master' } | null>;
 
   /**
    * **Are these records held by a locking approval?** — {@link getRecordLock}
@@ -1140,12 +1152,24 @@ export interface IApprovalService {
    * per row.
    *
    * Entry `i` of the answer answers `recordIds[i]` with exactly what
-   * {@link getRecordLock} answers for that id: `{ locked }` when the caller
+   * {@link getRecordLock} answers for that id, spelled as the engine spells it: `{ locked, lockSource }` for a
+   * locked record and `{ locked: false }` for an unlocked one when the caller
    * can read the record, `null` when it cannot or when it does not exist,
    * ⛔ never an entry that tells the two apart. The same judgement, off the
    * same snapshot, the record-lock `beforeUpdate` hook enforces — and, for a
    * master-detail line, the detail-row lock's: a line answers `true` while a
-   * record it belongs to is so held. A repeated id
+   * record it belongs to is so held, with `lockSource: 'master'` (which wins
+   * when the line is held by a request of its own too). A row counts as
+   * readable only when the read hands back the row whose id IS the asked id;
+   * {@link getRecordLock} counts any row its read hands back, so an id the
+   * engine matches under another spelling answers `null` here and is judged
+   * there — but not wholly on the row found: the line-of-a-held-master half
+   * reads the row the engine found, so such a line answers `'master'`, while
+   * the row's own request is looked up by the id as asked, so a record held by
+   * its own request may answer `{ locked: false }` there. The two doors keep
+   * different readability anchors on purpose: aligning them would narrow a
+   * published answer (seat ruling 7152650156 on #37151).
+   * A repeated id
    * is answered at each of its positions. A caller refused the object's read
    * outright is refused the same way for every id.
    *
@@ -1163,7 +1187,7 @@ export interface IApprovalService {
     object: string,
     recordIds: readonly string[],
     context: ExecutionContext,
-  ): Promise<Array<{ locked: boolean } | null>>;
+  ): Promise<Array<{ locked: boolean; lockSource?: 'record' | 'master' } | null>>;
 
   /**
    * Record a decision on a node-driven request. Honours the node's

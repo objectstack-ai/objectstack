@@ -2233,6 +2233,23 @@ async function findChildRequestId(
 const REQUEST_VISIBILITY = new WeakMap<ApprovalService, RequestVisibilitySource>();
 
 /**
+ * The answer both record-lock doors give a readable row
+ * (`IApprovalService.getRecordLock` / `getRecordLocks`, ruling 7148480184):
+ * which approval holds it, the master's winning when both do — a line of a held
+ * master refuses delete as well as edit, while a record held by its own request
+ * may be deleted, which cancels the request. One spelling, so the two doors
+ * cannot answer a row differently.
+ */
+function recordLockAnswer(
+  heldByMaster: boolean,
+  heldItself: boolean,
+): { locked: boolean; lockSource?: 'record' | 'master' } {
+  if (heldByMaster) return { locked: true, lockSource: 'master' };
+  if (heldItself) return { locked: true, lockSource: 'record' };
+  return { locked: false };
+}
+
+/**
  * [#23889] Each service's own slot labeller — the one its live writers label
  * `pending_approver_labels` / `acted_as_label` with — for the boot backfills
  * (`display-label-backfill.ts`, `action-slot-backfill.ts`). In-package only, by
@@ -11313,7 +11330,21 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
    * detail object only — the detail-row lock's batch form
    * ({@link detailRowsHeldByLockingApproval}: one FK read plus one lookup per
    * `master_detail` edge), so a line of a held master answers `true` here as
-   * it does at {@link getRecordLock}. Entry `i` answers `recordIds[i]`.
+   * it does at {@link getRecordLock}, with the same `lockSource`. Entry `i`
+   * answers `recordIds[i]`.
+   *
+   * ## Which rows count as readable — the row whose id IS the asked id
+   *
+   * A row is readable here when the caller's read hands back a row whose id
+   * IS the asked id, spelled as asked: one `$in` read cannot say which asked
+   * id a row the engine spells differently answers (a case-insensitive
+   * collation, a numeric id asked as `'07'`), so such an id answers `null`
+   * here. {@link getRecordLock} counts any row its read hands back, so for
+   * such an id the two doors differ, deliberately: the two doors keep
+   * different readability anchors on purpose, and aligning them would narrow
+   * a published answer (seat ruling 7152650156 on #37151). For an id spelled as the
+   * engine spells it — what a list holds — entry `i` is exactly the single
+   * door's answer.
    *
    * The cap is the door's to refuse loudly; here a blank id answers `null`.
    */
@@ -11321,7 +11352,7 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
     object: string,
     recordIds: readonly string[],
     context: ExecutionContext,
-  ): Promise<Array<{ locked: boolean } | null>> {
+  ): Promise<Array<{ locked: boolean; lockSource?: 'record' | 'master' } | null>> {
     const objectName = String(object ?? '').trim();
     const ids = recordIds.map((recordId) => String(recordId ?? '').trim());
     const asked = Array.from(new Set(ids.filter((id) => id !== '')));
@@ -11335,12 +11366,12 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
     const held = readableAsked.length > 0
       ? await recordsHeldByLockingApproval(this.engine, objectName, readableAsked)
       : new Set<string>();
-    // The single door's second half, for the rows the first left unlocked.
-    const unheld = readableAsked.filter((id) => !held.has(id));
-    const heldByMaster = unheld.length > 0
-      ? await detailRowsHeldByLockingApproval(this.engine, objectName, unheld)
+    // The single door's second half, asked of every readable row: a line held
+    // by its own request under a held master answers `'master'` there too.
+    const heldByMaster = readableAsked.length > 0
+      ? await detailRowsHeldByLockingApproval(this.engine, objectName, readableAsked)
       : new Set<string>();
-    return ids.map((id) => (readableIds.has(id) ? { locked: held.has(id) || heldByMaster.has(id) } : null));
+    return ids.map((id) => (readableIds.has(id) ? recordLockAnswer(heldByMaster.has(id), held.has(id)) : null));
   }
 
   async getRequest(requestId: string, context: ExecutionContext): Promise<ApprovalRequestRow | null> {
@@ -11438,22 +11469,35 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
    * id, existing or not. ⚠️ Probing with {@link SYSTEM_CTX} here would admit
    * every authenticated user in the tenant.
    *
-   * ## What is answered — the lock, and nothing about the request
+   * Any row the read hands back counts, whatever spelling of the id the
+   * engine hands back (a case-insensitive collation, a numeric id asked as
+   * `'07'`); {@link getRecordLocks} counts only the row whose id IS the asked
+   * id. The two doors keep different readability anchors on purpose:
+   * aligning them would narrow a published answer (seat ruling 7152650156 on #37151).
+   * For such an id the master half below reads the row the engine found, but
+   * the row's own request is looked up by the id as asked
+   * ({@link recordHeldByLockingApproval}), so a record held by its own request
+   * may answer `{ locked: false }` under another spelling.
    *
-   * `{ locked }` only: no request id, node, participants or `pending`. Request
-   * content stays behind `approvalsVisibleToReaders` (#8652 ruling 5299823744,
-   * untouched). The judgement is the record-lock hook's own
-   * ({@link recordHeldByLockingApproval}), never a second copy of it — and,
-   * for a master-detail line, the detail-row lock's
-   * ({@link detailRowHeldByLockingApproval}): a locked record's lines are
-   * locked with it, so the read answers `true` for a line whose write the hook
-   * refuses.
+   * ## What is answered — the lock and its kind, nothing about the request
+   *
+   * `{ locked, lockSource }` (ruling 7148480184, option A): no request id,
+   * node, participants or `pending`. Request content stays behind
+   * `approvalsVisibleToReaders` (#8652 ruling 5299823744, untouched);
+   * `lockSource` is one kind bit. The judgement is the record-lock hook's own
+   * ({@link recordHeldByLockingApproval}), never a second copy of it —
+   * `lockSource: 'record'` — and, for a master-detail line, the detail-row
+   * lock's ({@link detailRowHeldByLockingApproval}): a locked record's lines
+   * are locked with it, so the read answers `true` for a line whose write the
+   * hook refuses — `lockSource: 'master'`, asked first because it wins when
+   * both hold: a line of a held master refuses delete too, a record held by
+   * its own request may be deleted (the delete cancels the request).
    */
   async getRecordLock(
     object: string,
     recordId: string,
     context: ExecutionContext,
-  ): Promise<{ locked: boolean } | null> {
+  ): Promise<{ locked: boolean; lockSource?: 'record' | 'master' } | null> {
     const objectName = String(object ?? '').trim();
     const id = String(recordId ?? '').trim();
     if (!objectName || !id) return null;
@@ -11462,9 +11506,8 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
       where: { id }, fields: ['id'], limit: 1, context,
     });
     if (!Array.isArray(readable) || readable.length === 0) return null;
-    const locked = await recordHeldByLockingApproval(this.engine, objectName, id)
-      || await detailRowHeldByLockingApproval(this.engine, objectName, id);
-    return { locked };
+    if (await detailRowHeldByLockingApproval(this.engine, objectName, id)) return recordLockAnswer(true, false);
+    return recordLockAnswer(false, await recordHeldByLockingApproval(this.engine, objectName, id));
   }
 
   private async loadRequest(
