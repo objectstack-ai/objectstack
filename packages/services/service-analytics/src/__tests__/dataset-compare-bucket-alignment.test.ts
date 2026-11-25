@@ -48,6 +48,7 @@ import { bucketKeyToCalendarRange } from '@objectstack/core';
 import { AnalyticsService } from '../analytics-service.js';
 import {
   alignedCompareBucketKey,
+  NO_CURRENT_COUNTERPART,
   bucketKeyAtOrdinal,
   bucketOrdinalOfDay,
   type DateGranularityValue,
@@ -587,11 +588,14 @@ describe('#6007 — scoped to the broken shape, and no wider', () => {
     ]);
   });
 
-  it('the #4870 pin still holds: a fake that ignores the window merges as it always did', async () => {
-    // `dataset-selection-window.test.ts`'s fake returns `2026-06` on BOTH passes.
-    // That key is not one the shift-back maps FROM, so the alignment declines and
-    // the row keeps it — which is exactly what that test asserts. Restated here
-    // so the interaction is visible from this side too.
+  it('a comparison key that names a current bucket it was not aligned to does not merge onto it', async () => {
+    // A fake that ignores the window answers `2026-06` on BOTH passes. The
+    // shifted window is 2026-05-02 … 2026-05-31, so `2026-06` shifts back to
+    // `2026-07`, outside June: it has no counterpart. Keeping its own key used
+    // to merge it onto the current `2026-06` — the collision in its smallest
+    // form. It is dropped, so June honestly reads no comparison value.
+    // (`dataset-selection-window.test.ts`'s #4870 pin now answers each pass in
+    // the window it filtered to, which is what a GROUP BY does.)
     let call = 0;
     const service = new AnalyticsService({
       queryCapabilities: () => ({ nativeSql: false, objectqlAggregate: true, inMemory: false }),
@@ -607,7 +611,7 @@ describe('#6007 — scoped to the broken shape, and no wider', () => {
       },
       CTX,
     );
-    expect(result.rows).toEqual([{ close_date: '2026-06', opp_count: 1, opp_count__compare: 2 }]);
+    expect(result.rows).toEqual([{ close_date: '2026-06', opp_count: 1, opp_count__compare: 0 }]);
   });
 });
 
@@ -682,13 +686,14 @@ describe('#6007 — alignedCompareBucketKey declines rather than guessing', () =
     expect(alignedCompareBucketKey('2025-13', 'month', 'previousYear', CUR, PREV)).toBeNull();
   });
 
-  it('returns null when the shifted-back bucket falls outside the current window', () => {
+  it('answers NO_CURRENT_COUNTERPART when the shifted-back bucket falls outside the current window', () => {
     // Two equal-length day windows can tile into different bucket counts, so the
     // ordinal rule can have a last bucket with no counterpart. Moving it to a
-    // bucket the caller never asked for would swap a visibly foreign row for a
-    // plausible-looking wrong one; it keeps its own key and appends instead.
-    expect(alignedCompareBucketKey('2025-03', 'month', 'previousYear', CUR, PREV)).toBeNull();
-    expect(alignedCompareBucketKey('2024-12', 'month', 'previousYear', CUR, PREV)).toBeNull();
+    // bucket the caller never asked for would be a plausible-looking wrong
+    // answer, and keeping its own key merges it onto a bucket it was not aligned
+    // to or appends it outside the window: the caller drops the row.
+    expect(alignedCompareBucketKey('2025-03', 'month', 'previousYear', CUR, PREV)).toBe(NO_CURRENT_COUNTERPART);
+    expect(alignedCompareBucketKey('2024-12', 'month', 'previousYear', CUR, PREV)).toBe(NO_CURRENT_COUNTERPART);
   });
 
   it('previousPeriod shifts by the ordinal distance between the two window starts', () => {
@@ -696,8 +701,8 @@ describe('#6007 — alignedCompareBucketKey declines rather than guessing', () =
     const prev: [string, string] = ['2026-05-01', '2026-05-03'];
     expect(alignedCompareBucketKey('2026-05-01', 'day', 'previousPeriod', cur, prev)).toBe('2026-05-04');
     expect(alignedCompareBucketKey('2026-05-03', 'day', 'previousPeriod', cur, prev)).toBe('2026-05-06');
-    // one bucket past the window — declined
-    expect(alignedCompareBucketKey('2026-05-04', 'day', 'previousPeriod', cur, prev)).toBeNull();
+    // one bucket past the window — no counterpart
+    expect(alignedCompareBucketKey('2026-05-04', 'day', 'previousPeriod', cur, prev)).toBe(NO_CURRENT_COUNTERPART);
   });
 });
 
