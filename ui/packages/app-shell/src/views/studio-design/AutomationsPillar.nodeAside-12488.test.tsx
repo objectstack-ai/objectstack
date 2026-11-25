@@ -125,8 +125,8 @@ afterEach(() => {
 
 async function renderOpenFlow(): Promise<void> {
   render(
-    <MemoryRouter initialEntries={[`/studio/${PKG}/automations`]}>
-      <AutomationsPillar packageId={PKG} />
+    <MemoryRouter initialEntries={[`/studio/${PKG}/metadata/flow/${FLOW.name}`]}>
+      <AutomationsPillar packageId={PKG} flowName={FLOW.name} />
     </MemoryRouter>,
   );
   await screen.findByTestId('auto-tab-canvas', undefined, { timeout: 8000 });

@@ -188,8 +188,8 @@ describe('StudioDesignSurface — every load site takes the served draft as-is, 
     server.drafts.set(key('flow', 'notify_owner'), wire(DRAFT_FLOW_WITHOUT_DESCRIPTION));
 
     render(
-      <MemoryRouter initialEntries={[`/studio/${PKG}/automations`]}>
-        <AutomationsPillar packageId={PKG} />
+      <MemoryRouter initialEntries={[`/studio/${PKG}/metadata/flow/${PUBLISHED_FLOW.name}`]}>
+        <AutomationsPillar packageId={PKG} flowName={PUBLISHED_FLOW.name} />
       </MemoryRouter>,
     );
 

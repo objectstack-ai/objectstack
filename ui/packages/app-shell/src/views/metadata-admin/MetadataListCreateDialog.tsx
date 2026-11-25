@@ -31,7 +31,7 @@ import { OWD_CREATE_MODELS, OWD_DEFAULT, type OwdCreateModel } from '../studio-d
 import { OWD_OPTION_DESC_KEY, OWD_OPTION_LABEL_KEY } from '../studio-design/DataPillarHelpers.js';
 import { buildFlowSkeleton, buildObjectSkeleton } from '../studio-design/skeletons.js';
 import { ensureCustomizationPackage, fetchPackages, prefixObjectName } from '../studio-design/packages-io.js';
-import { publishSavedItem } from '../studio-design/studioSaveBar.js';
+import { publishCreated, publishSavedItem } from '../studio-design/studioSaveBar.js';
 import { plainRefusal, type StudioRefusal } from '../studio-design/metadataError.js';
 import { addNewObjectToAppMenu } from '../studio-design/newObjectJoinsAppMenu.js';
 import { FLOW_PRESETS, flowPresetTrigger, type FlowPreset } from '../studio-design/flowPresets.js';
@@ -254,9 +254,13 @@ function FlowCreate({ open, onOpenChange, packageId, inPair, locale, onCreated }
       );
       const target = await createTarget(packageId, inPair, null);
       await client.save('flow', name, skeleton, { mode: 'draft', packageId: target.packageId, ifNoneMatch: '*', surface: 'studio' });
-      const live = await publishSavedItem(client, { type: 'flow', name, packageId: target.packageId }, false);
+      // objectstack#36726 — pinned `If-None-Match: *`, as the Automations
+      // pillar's create was (objectstack#36903 moved every flow create here):
+      // a flow another writer published under the name since the check above
+      // is refused, not replaced.
+      const live = await publishSavedItem(client, { type: 'flow', name, packageId: target.packageId }, false, publishCreated);
       if (!live.ok) {
-        setError(plainRefusal(live.error));
+        if ('error' in live) setError(plainRefusal(live.error));
         return;
       }
       toast.success(tFormat('engine.studio.auto.createdOff', locale, { name: label }));

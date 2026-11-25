@@ -88,15 +88,15 @@ afterEach(cleanup);
 
 function mount(readOnly = false) {
   render(
-    <MemoryRouter initialEntries={[`/studio/${PKG}/automations`]}>
-      <AutomationsPillar packageId={PKG} readOnly={readOnly} />
+    <MemoryRouter initialEntries={[`/studio/${PKG}/metadata/flow/${FLOW.name}`]}>
+      <AutomationsPillar packageId={PKG} flowName={FLOW.name} readOnly={readOnly} />
     </MemoryRouter>,
   );
 }
 
 /** Open the ⋯ menu and pick Delete flow: the confirm dialog. */
 async function openConfirm(): Promise<HTMLElement> {
-  fireEvent.pointerDown(await screen.findByTestId('auto-item-more', undefined, { timeout: 8000 }), { button: 0, ctrlKey: false });
+  fireEvent.pointerDown(await screen.findByTestId('studio-detail-more', undefined, { timeout: 8000 }), { button: 0, ctrlKey: false });
   fireEvent.click(await screen.findByTestId('auto-item-delete'));
   return screen.findByTestId('auto-delete-confirm-dialog');
 }
@@ -125,7 +125,7 @@ describe('Automations — Delete flow (#27356 row 19)', () => {
     expect(screen.getByText('Escalate')).toBeInTheDocument();
     expect(mockClient.layered.mock.calls.map(([, name]) => name)).not.toContain('escalate');
     expect(screen.queryByTestId('auto-canvas-caption')).toBeNull();
-    expect(screen.queryByTestId('auto-item-more')).toBeNull();
+    expect(screen.queryByTestId('studio-detail-more')).toBeNull();
     expect(toast.success).toHaveBeenCalledWith('Deleted flow "Approval"');
   });
 
@@ -150,7 +150,7 @@ describe('Automations — Delete flow (#27356 row 19)', () => {
   it('a read-only package\'s menu offers no Delete', async () => {
     mount(true);
     expect(await screen.findByTestId('auto-canvas-caption', undefined, { timeout: 8000 })).toHaveTextContent('Approval');
-    fireEvent.pointerDown(await screen.findByTestId('auto-item-more'), { button: 0, ctrlKey: false });
+    fireEvent.pointerDown(await screen.findByTestId('studio-detail-more'), { button: 0, ctrlKey: false });
     expect(await screen.findByTestId('auto-item-new-similar')).toBeInTheDocument();
     expect(screen.queryByTestId('auto-item-delete')).toBeNull();
   });

@@ -175,8 +175,8 @@ afterEach(() => {
 async function writeBlankExpression() {
   render(
     <StudioSaveHarness>
-      <MemoryRouter initialEntries={[`/studio/${PKG}/automations`]}>
-        <AutomationsPillar packageId={PKG} />
+      <MemoryRouter initialEntries={[`/studio/${PKG}/metadata/flow/${FLOW.name}`]}>
+        <AutomationsPillar packageId={PKG} flowName={FLOW.name} />
       </MemoryRouter>
     </StudioSaveHarness>,
   );

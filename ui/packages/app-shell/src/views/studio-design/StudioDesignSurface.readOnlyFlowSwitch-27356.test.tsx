@@ -109,8 +109,8 @@ afterEach(cleanup);
 function renderPillar(readOnly: boolean, status: 'active' | 'obsolete') {
   server.active.set(key('flow', FLOW.name), { ...JSON.parse(JSON.stringify(FLOW)), status });
   return render(
-    <MemoryRouter initialEntries={[`/studio/${PKG}/automations`]}>
-      <AutomationsPillar packageId={PKG} readOnly={readOnly} />
+    <MemoryRouter initialEntries={[`/studio/${PKG}/metadata/flow/${FLOW.name}`]}>
+      <AutomationsPillar packageId={PKG} flowName={FLOW.name} readOnly={readOnly} />
     </MemoryRouter>,
   );
 }

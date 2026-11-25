@@ -228,8 +228,8 @@ async function openSettings() {
 
 function renderAutomations() {
   render(
-    <MemoryRouter initialEntries={[`/studio/${PKG}/automations`]}>
-      <AutomationsPillar packageId={PKG} />
+    <MemoryRouter initialEntries={[`/studio/${PKG}/metadata/flow/${PUBLISHED_FLOW.name}`]}>
+      <AutomationsPillar packageId={PKG} flowName={PUBLISHED_FLOW.name} />
     </MemoryRouter>,
   );
 }

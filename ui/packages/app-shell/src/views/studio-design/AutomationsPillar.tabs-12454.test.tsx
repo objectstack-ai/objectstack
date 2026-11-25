@@ -125,8 +125,8 @@ afterEach(() => {
 
 async function renderOpenFlow(): Promise<void> {
   render(
-    <MemoryRouter initialEntries={[`/studio/${PKG}/automations`]}>
-      <AutomationsPillar packageId={PKG} />
+    <MemoryRouter initialEntries={[`/studio/${PKG}/metadata/flow/${FLOW.name}`]}>
+      <AutomationsPillar packageId={PKG} flowName={FLOW.name} />
     </MemoryRouter>,
   );
   await screen.findByTestId('auto-tab-canvas', undefined, { timeout: 8000 });
@@ -134,22 +134,6 @@ async function renderOpenFlow(): Promise<void> {
 
 /** The section the preview body shows. */
 const sectionShown = () => screen.getByTestId('flow-preview-section').getAttribute('data-section');
-
-describe('the Automations rail groups by object (objectui#12454)', () => {
-  it('the flow sits under its object’s group, with its count, its trigger glyph and a legend', async () => {
-    await renderOpenFlow();
-    const group = await screen.findByTestId('auto-rail-group-crm_lead', undefined, { timeout: 8000 });
-    expect(within(group).getByRole('button', { name: /Lead\s*1/ })).toHaveAttribute('aria-expanded', 'true');
-    const row = within(group).getByTestId(`auto-rail-row-${FLOW.name}`);
-    expect(row).toHaveAttribute('data-trigger', 'record');
-    expect(row.getAttribute('title')).toBe(`Route new lead · ${en('engine.studio.auto.kind.record')}`);
-    expect(screen.getByTestId('auto-rail-legend')).toHaveTextContent(en('engine.studio.auto.kind.scheduled'));
-
-    // Folding the group hides its row; the count stays on the header.
-    fireEvent.click(within(group).getByRole('button', { name: /Lead\s*1/ }));
-    expect(within(group).queryByTestId(`auto-rail-row-${FLOW.name}`)).toBeNull();
-  });
-});
 
 describe('the item header’s tab row over the open flow (objectui#12454)', () => {
   it('offers the five tabs, Canvas open, and the Problems tab carries the problem count as a pill', async () => {

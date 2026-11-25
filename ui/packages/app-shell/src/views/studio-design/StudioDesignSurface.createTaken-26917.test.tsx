@@ -123,7 +123,8 @@ vi.mock('../metadata-admin/AccessExplainPanel', () => ({ AccessExplainPanel: () 
 vi.mock('./StudioAiCopilot', () => ({ StudioChatDock: () => null }));
 vi.mock('../../preview/DraftChangesPanel', () => ({ DraftChangesPanel: () => null }));
 
-import { AutomationsPillar, DataPillar, StudioDesignSurface } from './StudioDesignSurface';
+import { DataPillar, StudioDesignSurface } from './StudioDesignSurface';
+import { ListFlowCreate } from './__tests__/listFlowCreateHost';
 import { createEmptyDataSource } from './__tests__/emptyDataSource';
 import { t, tFormat } from '../metadata-admin/i18n';
 
@@ -202,22 +203,27 @@ function submitCreate(dialog: HTMLElement, label: string) {
   );
 }
 
+/**
+ * objectstack#36903 — a flow is created from the list's 「新建」
+ * (`MetadataListCreateDialog`): the Automations pillar's New went with its
+ * rail. A taken identifier is refused there, naming the flow that holds it;
+ * the list it opens over is where that flow is opened.
+ */
 describe('objectstack#26917 — Automations: New automation over a taken identifier', () => {
   async function openNewAutomation() {
     render(
-      <MemoryRouter initialEntries={[`/studio/${PKG}/automations`]}>
-        <AutomationsPillar packageId={PKG} />
+      <MemoryRouter initialEntries={[`/studio/${PKG}/metadata/flow`]}>
+        <ListFlowCreate packageId={PKG} />
       </MemoryRouter>,
     );
-    await screen.findByTestId('auto-rail-row-alpha_intake', undefined, { timeout: 8000 });
-    fireEvent.click(screen.getByTitle(en('engine.studio.auto.newTitle')));
+    fireEvent.click(await screen.findByTitle(en('engine.studio.auto.newTitle'), undefined, { timeout: 8000 }));
     const dialog = await screen.findByRole('dialog');
     // The manual preset: the record ones hold Create until an object is named.
     fireEvent.click(within(dialog).getByTestId('create-flow-preset-manual'));
     return dialog;
   }
 
-  it("a published flow on this package's rail: refused, nothing written, and Open opens it", async () => {
+  it("a published flow in this package: refused, nothing written, the holder named", async () => {
     publish('flow', PKG, FLOW_ALPHA);
     publish('flow', PKG, FLOW_ESCALATE);
     const before = publishedBody('flow', 'escalate');
@@ -226,17 +232,11 @@ describe('objectstack#26917 — Automations: New automation over a taken identif
 
     const taken = await within(dialog).findByTestId('flow-create-taken');
     expect(taken).toHaveTextContent(
-      tFormat('engine.studio.auto.createTaken', 'en', { name: 'escalate', label: 'Escalate' }),
+      tFormat('engine.studio.auto.createTakenElsewhere', 'en', { name: 'escalate', label: 'Escalate' }),
     );
     expect(save).not.toHaveBeenCalled();
     expect(door.drafts.size).toBe(0);
     expect(door.published.get('flow/escalate')!.body).toEqual(before);
-
-    expect(getDraft.mock.calls.some(([, name]) => name === 'escalate')).toBe(false);
-    fireEvent.click(within(taken).getByTestId('flow-create-open-existing'));
-    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
-    await waitFor(() => expect(getDraft.mock.calls.some(([, name]) => name === 'escalate')).toBe(true));
-    expect(save).not.toHaveBeenCalled();
   });
 
   it('a published flow another package holds: refused, nothing written, and no Open', async () => {
@@ -394,12 +394,11 @@ describe('objectstack#30038 — Automations: New automation never saves a typed 
     publish('object', PKG, OBJ_ACCOUNT);
     publish('object', PKG, OBJ_TICKET);
     render(
-      <MemoryRouter initialEntries={[`/studio/${PKG}/automations`]}>
-        <AutomationsPillar packageId={PKG} />
+      <MemoryRouter initialEntries={[`/studio/${PKG}/metadata/flow`]}>
+        <ListFlowCreate packageId={PKG} />
       </MemoryRouter>,
     );
-    await screen.findByTestId('auto-rail-row-alpha_intake', undefined, { timeout: 8000 });
-    fireEvent.click(screen.getByTitle(en('engine.studio.auto.newTitle')));
+    fireEvent.click(await screen.findByTitle(en('engine.studio.auto.newTitle'), undefined, { timeout: 8000 }));
     const dialog = await screen.findByRole('dialog');
     fireEvent.click(within(dialog).getByTestId('create-flow-preset-record_updated'));
     const picker = within(dialog).getByRole('combobox');

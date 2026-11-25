@@ -100,7 +100,8 @@ vi.mock('@object-ui/react', async (importOriginal) => {
 
 vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn(), info: vi.fn(), dismiss: vi.fn() } }));
 
-import { AutomationsPillar, DataPillar } from './StudioDesignSurface';
+import { DataPillar } from './StudioDesignSurface';
+import { ListFlowCreate } from './__tests__/listFlowCreateHost';
 import { createEmptyDataSource, failOnAbsorbedFetchError } from './__tests__/emptyDataSource';
 import { t } from '../metadata-admin/i18n';
 
@@ -232,8 +233,8 @@ const LATER = en('engine.studio.newAutoTrigger.later');
 async function openNewFlow(): Promise<HTMLElement> {
   server.rows = [{ type: 'object', pkg: PKG, item: { name: 'ticket', label: 'Ticket' } }];
   render(
-    <MemoryRouter initialEntries={[`/studio/${PKG}/automations`]}>
-      <AutomationsPillar packageId={PKG} />
+    <MemoryRouter initialEntries={[`/studio/${PKG}/metadata/flow`]}>
+      <ListFlowCreate packageId={PKG} />
     </MemoryRouter>,
   );
   fireEvent.click(await screen.findByTitle(en('engine.studio.auto.newTitle'), undefined, { timeout: 8000 }));

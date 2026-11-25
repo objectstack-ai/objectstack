@@ -135,8 +135,8 @@ async function outlastDebounce(): Promise<void> {
 async function addNotify(): Promise<string> {
   render(
     <StudioSaveHarness>
-      <MemoryRouter initialEntries={[`/studio/${PKG}/automations`]}>
-        <AutomationsPillar packageId={PKG} />
+      <MemoryRouter initialEntries={[`/studio/${PKG}/metadata/flow/${FLOW.name}`]}>
+        <AutomationsPillar packageId={PKG} flowName={FLOW.name} />
       </MemoryRouter>
     </StudioSaveHarness>,
   );

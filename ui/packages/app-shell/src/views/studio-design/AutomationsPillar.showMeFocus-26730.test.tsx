@@ -127,8 +127,8 @@ afterEach(cleanup);
 async function refusedSave(issues: Array<{ path: string; message: string }>): Promise<HTMLElement> {
   server.issues = issues;
   render(
-    <MemoryRouter initialEntries={[`/studio/${PKG}/automations`]}>
-      <AutomationsPillar packageId={PKG} />
+    <MemoryRouter initialEntries={[`/studio/${PKG}/metadata/flow/${FLOW.name}`]}>
+      <AutomationsPillar packageId={PKG} flowName={FLOW.name} />
     </MemoryRouter>,
   );
   const toggle = await screen.findByRole('switch', undefined, { timeout: 8000 });

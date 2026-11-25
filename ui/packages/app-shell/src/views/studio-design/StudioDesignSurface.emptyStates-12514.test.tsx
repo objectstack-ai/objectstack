@@ -1,13 +1,13 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * objectui#12514 — the Automations and Access pillars of a package that holds
- * no flow, or no permission set, show one centered block in the content
- * column: the pillar's icon, one sentence, and a primary button that opens the
- * create dialog the rail's "+" opens, through the same handler.
+ * objectui#12514 — the Access pillar of a package that holds no permission
+ * set shows one centered block in the content column: the pillar's icon, one
+ * sentence, and a primary button that opens the create dialog the rail's "+"
+ * opens, through the same handler. objectstack#36903 — the Automations half
+ * went with the Automations rail; the flow designer's own empty state (an
+ * address naming no flow here) is pinned below.
  *
- *  - Automations: no aside while there is nothing to select, and the rail's
- *    empty sentence names the "+" it points at.
  *  - Access: the rail's empty sentence names the "+" too.
  *  - Read-only: the block's sentence stands alone — no button, no "+", and no
  *    rail sentence pointing at a control that is not there.
@@ -61,7 +61,7 @@ vi.mock('./StudioAiCopilot', () => ({ StudioChatDock: () => null }));
 
 import { AccessPillar, AutomationsPillar } from './StudioDesignSurface';
 import { createEmptyDataSource, failOnAbsorbedFetchError } from './__tests__/emptyDataSource';
-import { t } from '../metadata-admin/i18n';
+import { t, tFormat } from '../metadata-admin/i18n';
 
 const dataSource = createEmptyDataSource();
 failOnAbsorbedFetchError();
@@ -91,10 +91,11 @@ afterEach(() => {
   vi.clearAllMocks();
 });
 
-function renderAutomations(readOnly = false) {
+/** objectstack#36903 — the flow designer on an address naming a flow the package does not hold. */
+function renderMissingFlow() {
   render(
-    <MemoryRouter initialEntries={[`/studio/${PKG}/automations`]}>
-      <AutomationsPillar packageId={PKG} readOnly={readOnly} />
+    <MemoryRouter initialEntries={[`/studio/${PKG}/metadata/flow/gone_flow`]}>
+      <AutomationsPillar packageId={PKG} flowName="gone_flow" />
     </MemoryRouter>,
   );
 }
@@ -107,42 +108,20 @@ function renderAccess(readOnly = false) {
   );
 }
 
-describe('objectui#12514 — Automations with no flow', () => {
-  it('one block in the content column, no aside, and a rail sentence that names its "+"', async () => {
-    renderAutomations();
-    const block = await screen.findByTestId('auto-empty', undefined, { timeout: 8000 });
-    expect(block).toHaveTextContent(t('engine.studio.auto.emptyMain', 'en'));
-    expect(within(block).getByTestId('auto-empty-new')).toHaveTextContent(t('engine.studio.auto.newTitle', 'en'));
+/**
+ * objectstack#36903 — a package with no flow is the flow list's empty state
+ * now (the list's 「新建」 creates the first); the designer has no list and no
+ * New of its own. What it owes is the address naming a flow that is not there:
+ * one block saying so, no aside, nothing else opened in its place.
+ */
+describe('objectstack#36903 — the flow designer over a flow the package does not hold', () => {
+  it('one block naming the flow, no aside, no New', async () => {
+    renderMissingFlow();
+    const block = await screen.findByTestId('auto-flow-missing', undefined, { timeout: 8000 });
+    expect(block).toHaveTextContent(tFormat('engine.studio.auto.deepLinkMissing', 'en', { name: 'gone_flow' }));
     expect(screen.queryByTestId('auto-config-aside')).toBeNull();
-    expect(screen.queryByText(t('engine.studio.auto.emptyLine1', 'en'))).toBeNull();
-    const rail = screen.getByTestId('studio-rail-automations');
-    expect(within(rail).getByText(t('engine.studio.auto.none', 'en'))).toBeInTheDocument();
-    expect(t('engine.studio.auto.none', 'en')).toContain('“+”');
-  });
-
-  it('the button opens the dialog the rail’s "+" opens', async () => {
-    renderAutomations();
-    fireEvent.click(await screen.findByTestId('auto-empty-new', undefined, { timeout: 8000 }));
-    const fromEmpty = await screen.findByRole('dialog', { name: t('engine.studio.auto.newTitle', 'en') });
-    const presets = within(fromEmpty)
-      .getAllByTestId(/^create-flow-preset-/)
-      .map((el) => el.getAttribute('data-testid'));
-    expect(presets.length).toBeGreaterThan(0);
-    fireEvent.keyDown(fromEmpty, { key: 'Escape' });
-    expect(screen.queryByRole('dialog')).toBeNull();
-
-    fireEvent.click(screen.getByTestId('studio-rail-add'));
-    const fromRail = await screen.findByRole('dialog', { name: t('engine.studio.auto.newTitle', 'en') });
-    expect(within(fromRail).getAllByTestId(/^create-flow-preset-/).map((el) => el.getAttribute('data-testid'))).toEqual(presets);
-  });
-
-  it('read-only: the sentence alone — no button, no "+", no rail pointer', async () => {
-    renderAutomations(true);
-    const block = await screen.findByTestId('auto-empty', undefined, { timeout: 8000 });
-    expect(block).toHaveTextContent(t('engine.studio.auto.emptyMain', 'en'));
-    expect(screen.queryByTestId('auto-empty-new')).toBeNull();
-    expect(screen.queryByTestId('studio-rail-add')).toBeNull();
-    expect(screen.queryByText(t('engine.studio.auto.none', 'en'))).toBeNull();
+    expect(screen.queryByTitle(t('engine.studio.auto.newTitle', 'en'))).toBeNull();
+    expect(screen.queryByTestId('auto-tab-canvas')).toBeNull();
   });
 });
 

@@ -119,6 +119,7 @@ vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn(), info: vi.f
 
 import { toast } from 'sonner';
 import { AutomationsPillar } from './StudioDesignSurface';
+import { MetadataListCreateDialog } from '../metadata-admin/MetadataListCreateDialog';
 import { createEmptyDataSource } from './__tests__/emptyDataSource';
 import { StudioSaveHarness, pressStudioCancel, pressStudioSave } from './__tests__/studioSaveHarness';
 import { registerMetadataPreview } from '../metadata-admin/preview-registry';
@@ -156,10 +157,27 @@ afterEach(() => {
 function mount(): void {
   render(
     <StudioSaveHarness>
-      <MemoryRouter initialEntries={[`/studio/${PKG}/automations`]}>
-        <AutomationsPillar packageId={PKG} />
+      <MemoryRouter initialEntries={[`/studio/${PKG}/metadata/flow/${FLOW.name}`]}>
+        <AutomationsPillar packageId={PKG} flowName={FLOW.name} />
       </MemoryRouter>
     </StudioSaveHarness>,
+  );
+}
+
+/** The list's create dialog, then the created flow's designer, as the list's `onCreated` opens it. */
+function CreateThenOpen(): React.ReactElement {
+  const [created, setCreated] = React.useState<string | null>(null);
+  if (created) return <AutomationsPillar packageId={PKG} flowName={created} />;
+  return (
+    <MetadataListCreateDialog
+      type="flow"
+      open
+      onOpenChange={() => {}}
+      packageId={PKG}
+      inPair={false}
+      locale="en-US"
+      onCreated={({ name }) => setCreated(name)}
+    />
   );
 }
 
@@ -238,10 +256,15 @@ describe('Flows — Save and Cancel in the top bar, live at once (objectstack#36
   }, 30_000);
 
   it('a new flow is published as it is created, off; switched on, it is published on at once', async () => {
-    mount();
-    await screen.findByTestId(`auto-rail-row-${FLOW.name}`, undefined, { timeout: 8000 });
-    fireEvent.click(screen.getByTitle(en('engine.studio.auto.newTitle')));
-    const dialog = await screen.findByRole('dialog');
+    // objectstack#36903 — created from the list's 「新建」, then opened on its address.
+    render(
+      <StudioSaveHarness>
+        <MemoryRouter initialEntries={[`/studio/${PKG}/metadata/flow`]}>
+          <CreateThenOpen />
+        </MemoryRouter>
+      </StudioSaveHarness>,
+    );
+    const dialog = await screen.findByRole('dialog', undefined, { timeout: 8000 });
     fireEvent.click(within(dialog).getByTestId('create-flow-preset-manual'));
     fireEvent.change(dialog.querySelectorAll('input')[0], { target: { value: 'Escalate' } });
     fireEvent.click(within(dialog).getByRole('button', { name: en('engine.studio.createLive') }));

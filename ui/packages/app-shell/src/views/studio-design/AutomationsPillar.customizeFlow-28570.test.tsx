@@ -272,13 +272,13 @@ function Host({
         : null,
     [readOnly, walled, pairId, ensure, ensurePackage],
   );
-  return <AutomationsPillar packageId={BASE} readOnly={readOnly} customization={customization} />;
+  return <AutomationsPillar packageId={BASE} flowName={FLOW_NAME} readOnly={readOnly} customization={customization} />;
 }
 
 function mount(props: React.ComponentProps<typeof Host> = {}) {
   return render(
     <StudioSaveHarness>
-      <MemoryRouter initialEntries={[`/studio/${BASE}/automations`]}>
+      <MemoryRouter initialEntries={[`/studio/${BASE}/metadata/flow/${FLOW_NAME}`]}>
         <Host {...props} />
       </MemoryRouter>
     </StudioSaveHarness>,
@@ -299,7 +299,7 @@ async function customize(): Promise<void> {
 }
 
 async function openMenu(): Promise<void> {
-  fireEvent.pointerDown(await screen.findByTestId('auto-item-more', undefined, { timeout: 8000 }), { button: 0, ctrlKey: false });
+  fireEvent.pointerDown(await screen.findByTestId('studio-detail-more', undefined, { timeout: 8000 }), { button: 0, ctrlKey: false });
   await screen.findByTestId('auto-item-new-similar');
 }
 
@@ -425,13 +425,9 @@ describe('Customize a read-only base’s flow into its pair (objectstack#28570)'
     mount({ listedPair: PAIR });
     await openFlow(/^Notify owner and manager v2$/);
 
-    // objectstack#29692 — the dialog names the flow as its rail row does.
-    const railText = within(screen.getByTestId('studio-rail-automations'))
-      .getByRole('button', { name: /^Notify owner/ })
-      // The row's label, without the switch reading the row prints after it.
-      .querySelector('.flex-1')
-      ?.textContent?.trim();
-    expect(railText).toBe('Notify owner');
+    // objectstack#29692 — the dialog names the flow by its listed label, the
+    // label the base's flow list serves (objectstack#36903: the rail is gone).
+    const railText = 'Notify owner';
     fireEvent.click(within(await openRestorePopover()).getByTestId('studio-override-restore'));
     const dialog = await screen.findByTestId('studio-restore-original-dialog');
     const vars = { item: railText!, package: 'HotCRM' };
