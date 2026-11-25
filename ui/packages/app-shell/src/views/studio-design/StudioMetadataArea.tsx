@@ -371,9 +371,19 @@ export function StudioMetadataArea({
   // objectstack#36897 — the list offers a create exactly where `AreaCreate`
   // opens one in the pair; never on a kernel package, which has none.
   const pairCreate = readOnly && !kernel && !!customization && !customization.walled;
+  // objectstack#36903 — the scope's empty flow list keeps the guidance its
+  // pillar's empty state gave: a packaged flow is changed in its package, with
+  // New similar (ADR-0146 D11).
+  const emptyListHint = orgScope ? t('engine.studio.org.none', locale) : undefined;
   const host = React.useMemo<MetadataAreaHost>(
-    () => ({ packageId, readOnly, basePath, ...(pairCreate ? { pairCreate } : {}) }),
-    [packageId, readOnly, basePath, pairCreate],
+    () => ({
+      packageId,
+      readOnly,
+      basePath,
+      ...(pairCreate ? { pairCreate } : {}),
+      ...(emptyListHint ? { emptyListHint } : {}),
+    }),
+    [packageId, readOnly, basePath, pairCreate, emptyListHint],
   );
   const editor: AreaEditorProps = {
     customization,

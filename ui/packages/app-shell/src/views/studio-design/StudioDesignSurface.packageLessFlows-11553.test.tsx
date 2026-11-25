@@ -303,6 +303,18 @@ describe('the package-less scope lists a package-less flow and opens it editable
     // scope's read-only area does not offer.
     expect(screen.queryByRole('button', { name: /^(New|Create)$/ })).not.toBeInTheDocument();
     expect(screen.queryByTitle('New automation')).not.toBeInTheDocument();
+    // A list with a flow on it says nothing of the empty scope's guidance.
+    expect(document.body.textContent).not.toContain(t('engine.studio.org.none', 'en'));
+  });
+
+  // objectstack#36903 — the empty scope's list keeps its pillar's guidance
+  // (ADR-0146 D11): a packaged flow is changed in its package, with New similar.
+  it('its empty flow list says how a packaged flow is changed instead', async () => {
+    server.active.delete('flow/qa_urgent_alert_clone');
+    renderAt(ORG_LIST);
+    expect(await screen.findByText(t('engine.studio.org.none', 'en'), {}, { timeout: 8000 })).toBeInTheDocument();
+    // It reads as an empty list, not as a search that matched nothing.
+    expect(screen.queryByText(/No matches for/)).toBeNull();
   });
 
   it('opens it editable, and an edit saves a draft bound to no package', async () => {
