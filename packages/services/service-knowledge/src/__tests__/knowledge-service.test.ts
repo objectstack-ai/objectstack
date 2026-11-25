@@ -1575,7 +1575,7 @@ describe('KnowledgeService — search refills after the permission filter', () =
 
   it('no context: object sources stay unsearched (fail closed), a file source is asked topK once', async () => {
     const { svc, adapter } = setup({ s1: rankedHits('s1', 100), f1: rankedHits('f1', 100) }, []);
-    svc.registerSource({ id: 'f1', label: 'f1', adapter: 'memory', source: { kind: 'file', paths: ['x.md'] } as KnowledgeSource['source'] });
+    svc.registerSource({ id: 'f1', label: 'f1', adapter: 'memory', source: { kind: 'file', prefix: 'docs/' } });
     const out = await svc.search('q', { topK: 5 });
     expect(out.every((h) => h.sourceId === 'f1')).toBe(true);
     expect(adapter.searchSpy.mock.calls.map((c) => [(c[1] as { source: KnowledgeSource }).source.id, (c[1] as { topK: number }).topK]))
@@ -1585,7 +1585,7 @@ describe('KnowledgeService — search refills after the permission filter', () =
   it('a file source beside an object source is asked topK once; only the object source is refilled', async () => {
     // The file source answers all 5 it is asked, but only 2 exist; the object source's rows are unreadable.
     const { svc, asked } = setup({ s1: rankedHits('s1', 100), f1: rankedHits('f1', 2) }, []);
-    svc.registerSource({ id: 'f1', label: 'f1', adapter: 'memory', source: { kind: 'file', paths: ['x.md'] } as KnowledgeSource['source'] });
+    svc.registerSource({ id: 'f1', label: 'f1', adapter: 'memory', source: { kind: 'file', prefix: 'docs/' } });
     const out = await svc.search('q', { topK: 5, executionContext: MEMBER });
     expect(out.map((h) => h.sourceId)).toEqual(['f1', 'f1']);
     expect(asked()).toEqual([['s1', 25], ['f1', 5], ['s1', 100]]);
