@@ -18,6 +18,12 @@
  */
 
 export const jaJPGeneratedSourceHashes: Readonly<Record<string, string>> = {
+  "metadataForms.dashboard.fields.dateRange.allowCustomRange.helpText": "1cdc93f55eefade7",
+  "metadataForms.dashboard.fields.dateRange.allowCustomRange.label": "a1fb0e1cf5fe5d8e",
+  "metadataForms.dashboard.fields.dateRange.defaultRange.helpText": "afff2187966a112f",
+  "metadataForms.dashboard.fields.dateRange.defaultRange.label": "c1f190468a0e2b35",
+  "metadataForms.dashboard.fields.dateRange.field.helpText": "bbd8025863a4481a",
+  "metadataForms.dashboard.fields.dateRange.field.label": "7cd8aace5973d40c",
   "objects.sys_email.fields.bcc_addresses.label": "8674899b7b6d5126",
   "objects.sys_email.fields.cc_addresses.label": "02946d952cf15623",
   "objects.sys_email.fields.message_id.label": "14cd089a4062f4b1",

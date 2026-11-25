@@ -1780,6 +1780,18 @@ export const deMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "Datumsbereich",
         helpText: "Der Zeitraum, mit dem das Dashboard öffnet, und ob Betrachter selbst einen Zeitraum wählen dürfen."
       },
+      "dateRange.field": {
+        label: "Date Field",
+        helpText: "The date field the period filters on. Leave it empty to use the creation date."
+      },
+      "dateRange.defaultRange": {
+        label: "Default Period",
+        helpText: "The period the dashboard opens with."
+      },
+      "dateRange.allowCustomRange": {
+        label: "Allow Custom Range",
+        helpText: "Let viewers pick their own start and end dates."
+      },
       globalFilters: {
         label: "Globale Filter",
         helpText: "Filter, mit denen Betrachter alle Widgets auf einmal eingrenzen können oder nur die von Ihnen gewählten."
