@@ -9,10 +9,11 @@ description: "Knowledge Document / Chunk / Hit — canonical shapes shared by ev
 Knowledge Document / Chunk / Hit — canonical shapes shared by every
 `IKnowledgeAdapter` implementation.
 
-The framework does **not** prescribe chunk strategy or vector
-format. Adapters are free to chunk however they like; the framework
-only requires they round-trip these shapes when talking to the
-`IKnowledgeService`.
+The knowledge service owns the structural split (ADR-0161 K1): it cuts a
+document into passages once, by the source's `split` key, and hands the
+passages to every adapter that declares `capabilities.chunks` as the
+document's `chunks`. An adapter that does not declare it receives whole
+documents and splits them itself. The framework never sees a vector.
 
 See `content/docs/protocol/knowledge.mdx` for the full design.
 
@@ -42,6 +43,7 @@ const result = KnowledgeChunkSchema.parse(data);
 | **documentId** | `string` | ✅ |  |
 | **index** | `integer` | ✅ |  |
 | **content** | `string` | ✅ |  |
+| **headingPath** | `string[]` | optional | Headings the chunk sits under, outermost first (markdown strategy) |
 | **metadata** | `Record<string, any>` | optional |  |
 
 
@@ -61,6 +63,18 @@ const result = KnowledgeChunkSchema.parse(data);
 | **metadata** | `Record<string, any>` | optional (default: `{}`) |  |
 | **permissions** | `string[]` | optional |  |
 | **docHash** | `string` | optional | Service-computed hash of the assembled document (content, title, metadata); stored and returned as stored by the adapter |
+| **chunks** | `{ id: string; documentId: string; index: integer; content: string; … }[]` | optional | Service-cut passages of the document, handed to an adapter that declares capabilities.chunks |
+
+### Nested Shape: `KnowledgeDocument.chunks[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **id** | `string` | ✅ |  |
+| **documentId** | `string` | ✅ |  |
+| **index** | `integer` | ✅ |  |
+| **content** | `string` | ✅ |  |
+| **headingPath** | `string[]` | optional | Headings the chunk sits under, outermost first (markdown strategy) |
+| **metadata** | `Record<string, any>` | optional |  |
 
 
 ---
