@@ -4077,6 +4077,14 @@ export const RelatedList: React.FC<RelatedListProps> = ({
     const keys = readColumnKeys(bodyTableColumnKeysKey);
     const watch = (box: HTMLElement) => {
       const read = () => {
+        // objectstack#37212 — a table that still draws an earlier hand-over
+        // (another leading run of these columns: the table adopts the columns
+        // it is handed a render later) is measured for that cap, not this one,
+        // and judging this cap by it flips the cap on every commit. Wait for
+        // the table to draw what it was handed; its re-draw reads again.
+        const drawn = Array.from(box.querySelectorAll('thead th[data-column-key]'), (th) => th.getAttribute('data-column-key'));
+        const handed = bodyTableColumnCap ?? keys.length;
+        if (drawn.length !== handed && drawn.every((key, index) => key === keys[index])) return;
         // objectstack#35742 — the columns that fit whole: the box's width
         // less the cells that are no column (the row actions), against the
         // width each column asks for.
@@ -4096,7 +4104,7 @@ export const RelatedList: React.FC<RelatedListProps> = ({
         setBodyTableOverflows(box.scrollWidth - box.clientWidth > 1);
       };
       read();
-      // The table settles its columns a render after it is handed fewer:
+      // The table settles its columns a render after it is handed others:
       // read again when its cells change.
       if (typeof MutationObserver !== 'undefined') {
         cells = new MutationObserver(read);
