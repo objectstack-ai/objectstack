@@ -1907,7 +1907,7 @@ const zhHant = {
   studioReturn: {
     close: '返回 Studio',
     closeLabel: '關閉並返回 Studio 列表',
-    leaveConfirm: '不儲存就離開嗎？未儲存的修改將會遺失。',
+    leaveConfirm: '不儲存就離開嗎？未儲存的修改將會丟失。',
   },
   dashboard: {
     total: '總計',
