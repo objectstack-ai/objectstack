@@ -13,6 +13,9 @@
  * stubbed: only which one is open is under test, not what it draws.
  */
 
+// Paid at collection, not inside a case's clock (check:test-source-alias).
+import '@objectstack/lint';
+import '@object-ui/plugin-detail';
 import '@testing-library/jest-dom/vitest';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, render, screen, waitFor, within } from '@testing-library/react';
@@ -61,7 +64,8 @@ import { SurfaceDeepLinkProvider } from './surfaceDeepLinkChannel';
 import { t } from '../metadata-admin/i18n';
 
 const ADVANCED = t('engine.studio.data.tab.advanced', 'en');
-const PANELS = ['rules', 'hooks', 'actions', 'api', 'settings'].map((k) => t(`engine.studio.data.tab.${k}`, 'en'));
+// #36513's order (objectstack#36904): validations, actions, settings, hooks, API.
+const PANELS = ['rules', 'actions', 'settings', 'hooks', 'api'].map((k) => t(`engine.studio.data.tab.${k}`, 'en'));
 const VALIDATIONS = t('engine.studio.data.tab.rules', 'en');
 
 afterEach(() => {
@@ -73,7 +77,7 @@ async function renderPillar() {
   render(
     <MemoryRouter initialEntries={['/studio/com.example.showcase/data']}>
       <SurfaceDeepLinkProvider>
-        <DataPillar packageId="com.example.showcase" />
+        <DataPillar objectName="showcase_account" packageId="com.example.showcase" />
       </SurfaceDeepLinkProvider>
     </MemoryRouter>,
   );

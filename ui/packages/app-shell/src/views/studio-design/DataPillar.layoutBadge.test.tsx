@@ -27,6 +27,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { render, screen, fireEvent, cleanup } from '@testing-library/react';
 // The source reaches a dynamic `import('@objectstack/lint')`: its first load is paid at collection (`check:test-source-alias`).
 import '@objectstack/lint';
+import '@object-ui/plugin-detail';
 import { completeAddFieldPopover } from './__tests__/dataPillarAddField';
 import { MemoryRouter } from 'react-router-dom';
 
@@ -83,7 +84,7 @@ const CLAIM = /your unsaved changes/i;
 async function openFormTab(props: Partial<React.ComponentProps<typeof DataPillar>> = {}) {
   render(
     <MemoryRouter initialEntries={['/studio/com.example.showcase/data']}>
-      <DataPillar packageId="com.example.showcase" {...props} />
+      <DataPillar objectName="showcase_task" packageId="com.example.showcase" {...props} />
     </MemoryRouter>,
   );
   // First object auto-selects; the Form tab is the second segmented control.

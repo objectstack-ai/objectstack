@@ -15,7 +15,7 @@ import {
   useSidebarDocsNavSlot,
 } from '@object-ui/app-shell';
 import { AppDocsBackLink } from './AppDocsBackLink';
-import { AppDocsNav, DocsNavLandmark } from './DocsNav';
+import { AppDocsNav, DocsNavLandmark, PortalDocsNav } from './DocsNav';
 import { useAppDocsBackTo } from './useAppDocsBackTo';
 
 /**
@@ -34,7 +34,11 @@ import { useAppDocsBackTo } from './useAppDocsBackTo';
  *   page carries 「← Back to APP」 itself: at the top here, on every page but
  *   the reader, which carries it in its in-page column and passes
  *   `backLink={false}`.
- * - The portal (`/docs/...`) is drawn in Home's frame, whose bar reads
+ * - The portal (`/docs/...`), from 768 px up, is drawn in the app-less
+ *   variant of the shell (`DocsPortalShell`, objectstack#37197): the same
+ *   sidebar and page header, and the sidebar's body is the portal's column
+ *   (`PortalDocsNav`, every app's books) unless the page hands its own.
+ * - The portal on a phone is drawn in Home's frame, whose bar reads
  *   「PRODUCT / Documentation」 and links to the portal's index (`App.tsx`,
  *   the `docs` variant of `AppHeader`).
  */
@@ -45,11 +49,11 @@ export function DocShell({
 }: {
   /** Without the shell sidebar: draw 「← Back to APP」 above the page. The reader turns it off when its column has it. */
   backLink?: boolean;
-  /** The page's own docs column, for the shell sidebar (the reader's); else every book of the app. */
+  /** The page's own docs column, for the shell sidebar (the reader's); else every book of the app, or of the portal. */
   nav?: ReactNode;
   children: ReactNode;
 }) {
-  const { appName } = useParams<{ appName?: string }>();
+  const { appName, slug } = useParams<{ appName?: string; slug?: string }>();
   const backTo = useAppDocsBackTo();
   const sidebarNav = useSidebarDocsNavSlot() !== null;
   const renderActions = useShellPageActionsSlot();
@@ -58,7 +62,7 @@ export function DocShell({
     <div className="min-h-full">
       {sidebarNav ? (
         <SidebarDocsNav>
-          <DocsNavLandmark>{nav ?? <AppDocsNav />}</DocsNavLandmark>
+          <DocsNavLandmark>{nav ?? (appName ? <AppDocsNav /> : <PortalDocsNav currentSlug={slug} />)}</DocsNavLandmark>
         </SidebarDocsNav>
       ) : null}
       {renderActions || renderExpand ? (

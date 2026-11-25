@@ -345,7 +345,7 @@ describe('UnifiedSidebar: Object settings opens the Studio surface the app bar o
     await openMenu('Leads');
     fireEvent.click(screen.getByRole('menuitem', { name: 'Object settings' }));
     await waitFor(() =>
-      expect(screen.getByTestId('where')).toHaveTextContent('/studio/com.acme.crm/data?surface=object:crm_lead'),
+      expect(screen.getByTestId('where')).toHaveTextContent('/studio/com.acme.crm/metadata/object/crm_lead'),
     );
   });
 
@@ -356,7 +356,7 @@ describe('UnifiedSidebar: Object settings opens the Studio surface the app bar o
     expect(await openMenu('Quotes')).toEqual(['Remove from favorites', 'Open in new tab', 'Copy link', 'Object settings']);
     fireEvent.click(screen.getByRole('menuitem', { name: 'Object settings' }));
     await waitFor(() =>
-      expect(screen.getByTestId('where')).toHaveTextContent('/studio/com.acme.sales/data?surface=object:sales_quote'),
+      expect(screen.getByTestId('where')).toHaveTextContent('/studio/com.acme.sales/metadata/object/sales_quote'),
     );
   });
 

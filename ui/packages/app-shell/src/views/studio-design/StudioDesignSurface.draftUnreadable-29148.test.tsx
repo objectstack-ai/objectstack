@@ -139,6 +139,7 @@ import { registerMetadataPreview, getMetadataPreview } from '../metadata-admin/p
 // The source under test reaches dynamic imports of `@objectstack/lint`; their first
 // load is paid here, at collection, never inside a case's clock (`check:test-source-alias`).
 import '@objectstack/lint';
+import '@object-ui/plugin-detail';
 
 const dataSource = createEmptyDataSource();
 failOnAbsorbedFetchError();
@@ -214,7 +215,7 @@ function renderData() {
   render(
     <MemoryRouter initialEntries={[`/studio/${PKG}/data`]}>
       <SurfaceDeepLinkProvider>
-        <DataPillar packageId={PKG} />
+        <DataPillar objectName="crm_contact" packageId={PKG} />
       </SurfaceDeepLinkProvider>
     </MemoryRouter>,
   );

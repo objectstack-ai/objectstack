@@ -107,12 +107,13 @@ export type StudioPillarKey = 'data' | 'automations' | 'access';
  * objectstack#36502 — pages, dashboards, reports and views have no pillar
  * since the Interfaces pillar retired.
  *
+ * objectstack#36904 — an object opens its designer on its metadata address;
+ * the old `/data?surface=object:<name>` redirects there (`dataPillarRedirect`).
  * objectstack#36905 — a permission set opens its metadata address, where the
  * area draws its matrix full-screen; the Access pillar's addresses redirect
  * (`accessPillarRedirect.ts`).
  */
 export const STUDIO_ITEM_PILLAR: Readonly<Record<string, StudioPillarKey>> = Object.freeze({
-  object: 'data',
   flow: 'automations',
 });
 
@@ -260,7 +261,11 @@ export function studioSurfaceQuery(
 export interface StudioItemOptions {
   /** How the `?surface=` value is written, when the item opens a pillar. Default `'component'`. */
   spelling?: StudioSurfaceSpelling;
-  /** Qualifiers after `?surface=`, when the item opens a pillar: `action`, `view`, `nav`. */
+  /**
+   * Qualifiers after `?surface=`, when the item opens a pillar: `action`,
+   * `view`, `nav`. On the metadata address they are its query
+   * (objectstack#36904: `?action=` opens the object designer's Actions tab on it).
+   */
   qualifiers?: Readonly<Record<string, string>>;
   /** How the scope segment is written. Default `'component'`. */
   segmentEncoding?: StudioSegmentEncoding;
@@ -313,13 +318,16 @@ export function studioMetadataItemAddress(segment: string, type: string, name: s
 /**
  * Where one item of a package opens today: its pillar on a `?surface=` deep
  * link when {@link STUDIO_ITEM_PILLAR} names one for its type, otherwise its
- * page in the "All metadata" area. `spelling` and `qualifiers` apply to the
- * pillar address only.
+ * page in the "All metadata" area. `spelling` applies to the pillar address
+ * only; `qualifiers` are the metadata address's query.
  */
 export function studioItemPath(packageId: string, type: string, name: string, options: StudioItemOptions = {}): string {
   const pillar = studioItemPillar(type);
   if (pillar) return studioPillarItemAddress(packageId, pillar, { type, name }, options);
-  return studioMetadataItemAddress(packageId, type, name, { segmentEncoding: options.segmentEncoding });
+  return studioMetadataItemAddress(packageId, type, name, {
+    segmentEncoding: options.segmentEncoding,
+    query: options.qualifiers ? new URLSearchParams(options.qualifiers as Record<string, string>) : null,
+  });
 }
 
 // ---------------------------------------------------------------------------
