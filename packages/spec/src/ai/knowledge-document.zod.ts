@@ -48,6 +48,17 @@ export const KnowledgeDocumentSchema = lazySchema(() => z.object({
    * `object` sources is handled by re-querying via the data engine.
    */
   permissions: z.array(z.string()).optional(),
+  /**
+   * A hash of the assembled document — its content, title and metadata, in a
+   * stable key order, behind a version prefix (ADR-0161 K8, item 2). Set by
+   * the knowledge service on every document it hands an adapter; a
+   * caller-supplied value is refused by `indexDocument`. Stored by the adapter
+   * and returned as stored by `listDocuments`; an unchanged hash lets a
+   * complete reindex skip writing the document again. Adapters never compute
+   * or alter it.
+   */
+  docHash: z.string().optional()
+    .describe('Service-computed hash of the assembled document (content, title, metadata); stored and returned as stored by the adapter'),
 }));
 
 /**

@@ -95,7 +95,7 @@ vi.mock('../../providers/MetadataProvider', () => ({
 import { AppSwitcher } from '../AppSwitcher';
 
 function renderSwitcher(active = 'crm') {
-  // The router is for the menu's link rows (「All apps」, objectui#12201).
+  // The router is for the menu's link rows (the way home, objectui#12201).
   render(
     <MemoryRouter>
       <AppSwitcher activeAppName={active} onAppChange={vi.fn()} />
