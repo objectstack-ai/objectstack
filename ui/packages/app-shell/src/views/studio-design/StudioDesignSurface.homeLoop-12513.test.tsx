@@ -204,7 +204,7 @@ function renderAt(url: string) {
     <MemoryRouter initialEntries={[url]}>
       <LocationProbe />
       <Routes>
-        <Route path="/studio" element={<div data-testid="studio-entry" />} />
+        <Route path="/studio" element={<div data-testid="studio-landing" />} />
         <Route path="/studio/:packageId/:tab" element={<StudioDesignSurface />} />
       </Routes>
     </MemoryRouter>,

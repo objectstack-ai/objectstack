@@ -24,6 +24,9 @@
 import '@testing-library/jest-dom/vitest';
 // The source under test reaches `import('@objectstack/lint')`: paid here, at collection, never inside a test's clock.
 import '@objectstack/lint';
+// The source under test reaches `import('@object-ui/plugin-detail')` (the command palette's lazy
+// detail surfaces): paid here, at collection, never inside a test's clock.
+import '@object-ui/plugin-detail';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import * as React from 'react';
