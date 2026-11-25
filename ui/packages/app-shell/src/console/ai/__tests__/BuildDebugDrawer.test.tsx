@@ -64,6 +64,10 @@ describe('BuildDebugDrawer', () => {
     vi.stubGlobal('fetch', spy);
     renderDrawer();
     await screen.findByText(/Proposed but never applied/);
-    expect(spy).toHaveBeenCalledWith('/api/v1/ai/conversations/conv_x/debug', { credentials: 'include' });
+    // The authenticated fetch hands the wire a `Headers` (the bearer, when one is stored).
+    expect(spy).toHaveBeenCalledWith('/api/v1/ai/conversations/conv_x/debug', {
+      credentials: 'include',
+      headers: expect.any(Headers),
+    });
   });
 });

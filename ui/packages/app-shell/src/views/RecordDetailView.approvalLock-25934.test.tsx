@@ -37,7 +37,7 @@ import { MemoryRouter } from 'react-router-dom';
 // The approvals reads go out through the authenticated fetch too; they answer from
 // the file's wire double, as before.
 const authFetchSpy = vi.fn(async (url: string, init?: RequestInit) =>
-  String(url).includes('/approvals/requests')
+  String(url).includes('/approvals/')
     ? fetch(url, init)
     : new Response(JSON.stringify({ data: {} }), {
         status: 200,
