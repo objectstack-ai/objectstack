@@ -10,8 +10,8 @@ import React from 'react';
 import { Button } from '@object-ui/components';
 import { Trash2 } from 'lucide-react';
 import { LazyIcon, toKebabIconName } from '@object-ui/components';
-import { useObjectTranslation, usePredicateScope, useCapabilityGate } from '@object-ui/react';
-import { isActionSwitchedOff } from '@object-ui/core';
+import { useObjectTranslation, usePredicateScope, useCapabilityGate, useDrawsAction } from '@object-ui/react';
+import { isActionSwitchedOff, isAskAiAction } from '@object-ui/core';
 import type { BulkActionDef } from '@object-ui/types';
 import { partitionBulkRows, hasVisibilityGate } from '../bulkEligibility';
 import { formatActionLabel } from './RowActionMenu';
@@ -100,6 +100,10 @@ export function useBulkActionItems(input: {
 }): BulkActionItems {
   const { selectedRows, actions, actionDefs, objectFields } = input;
   const mayInvoke = useCapabilityGate();
+  // [ADR-0160 D7] An `ask_ai` action runs on one record, so the bulk bar never
+  // offers one (objectstack#37142), with or without an in-app assistant. The
+  // type of a def promoted from an object action is on its `actionDef`.
+  const drawsAction = useDrawsAction();
   const scope = usePredicateScope();
   // `language` keys the memo on the active language itself, so the label
   // follows a switch whatever identity `t` keeps across it.
@@ -109,6 +113,9 @@ export function useBulkActionItems(input: {
       (d) =>
         mayInvoke(d?.requiredPermissions)
         && !isActionSwitchedOff(d)
+        && drawsAction(d)
+        && !isAskAiAction(d)
+        && !isAskAiAction(d?.actionDef)
         && isBulkDefOffered(d, selectedRows, scope, objectFields),
     );
     const legacy = (Array.isArray(actions) ? actions : []).map((action) => {
@@ -124,7 +131,7 @@ export function useBulkActionItems(input: {
       };
     });
     return { defs, legacy };
-  }, [actionDefs, actions, selectedRows, scope, objectFields, mayInvoke, t, language]);
+  }, [actionDefs, actions, selectedRows, scope, objectFields, mayInvoke, drawsAction, t, language]);
 }
 
 /** A rich def reads as destructive by its variant or by the delete operation it runs. */

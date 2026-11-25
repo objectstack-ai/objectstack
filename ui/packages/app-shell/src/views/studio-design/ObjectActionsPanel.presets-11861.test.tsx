@@ -63,6 +63,9 @@ import { ACTION_PRESETS, TARGET_INPUT_KEYS, heldInputKey, type ActionPresetField
 import { ActionDefaultInspector } from '../metadata-admin/inspectors/ActionDefaultInspector';
 import { registerMetadataDefaultInspector } from '../metadata-admin/default-inspector-registry';
 import { t } from '../metadata-admin/i18n';
+// Paid at collection, not inside a clocked case (check:test-source-alias).
+import '@objectstack/formula';
+import '@objectstack/lint';
 
 // The real editor, as the console registers it.
 registerMetadataDefaultInspector('action', ActionDefaultInspector);
@@ -340,6 +343,13 @@ describe('the preset module’s written-out tables agree with the spec (objectui
       // A `url` target is a path since `@objectstack/spec` 18, which refuses a bare
       // relative one at `target` (objectui#12030); every other type takes a name.
       const target = type === 'url' ? '/x_target' : 'x_target';
+      // `ask_ai` takes no target at all (ADR-0160 D7): one is refused, and the
+      // editor holds nothing for it, because there is no input to fill.
+      if (type === 'ask_ai') {
+        expect(refusedAt({ ...seed, type, target }, 'target')).toBe(true);
+        expect(heldInputKey({ ...seed, type })).toBeNull();
+        return;
+      }
       expect(refusedAt({ ...seed, type, target }, 'target')).toBe(false);
       expect(heldInputKey({ ...seed, type, target })).toBeNull();
     },

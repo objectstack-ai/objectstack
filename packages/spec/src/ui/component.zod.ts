@@ -3891,7 +3891,7 @@ const rowPatchRetired = (owner: string) => retiredKey(
 );
 
 /**
- * The console runner's built-in executors: `ActionType`'s six, the members its
+ * The console runner's built-in executors: `ActionType`'s members, which its
  * `builtinExecutors` table is typed by (`Record<RunnableActionType, …>`, so the
  * table and the enum cannot drift), and its one local alias `navigation`
  * (read points recorded in `liveness/page.json`, row `regions`). Every other name is a handler a
