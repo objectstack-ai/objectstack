@@ -131,7 +131,7 @@ describe('a value axis prints its dataset measure’s units (objectstack#37053)'
 
   it('a fraction-scale percent measure reads percents through the carrier alone (the dashboard’s case)', () => {
     const rate = WHOLE_RATE.map((r) => ({ ...r, value: r.value / 100 }));
-    expect(valueTicks(draw(rate, { format: '0.0%' }))).toEqual(['0.0%', '9.0%', '18.0%', '27.0%', '36.0%']);
+    expect(valueTicks(draw(rate, { format: '0.0%' }))).toEqual(['0.0%', '8.5%', '17.0%', '25.5%', '34.0%']);
   });
 
   it('a declared axis `format` still wins — the report’s fraction-scale `yAxis[0].format` path (objectstack#36988)', () => {
@@ -151,7 +151,9 @@ describe('a value axis prints its dataset measure’s units (objectstack#37053)'
       { priority: 'Low', value: 0 },
     ];
     const ticks = valueTicks(draw(rate, { format: '0%', percentScale: 'whole' }));
-    expect(ticks).toEqual(['0%', '0.85%', '1.7%', '2.55%', '3.4%']);
+    // `formatMeasure` prints a pattern's places as a fixed width, so every tick
+    // carries the two the 0.85-point step needs.
+    expect(ticks).toEqual(['0.00%', '0.85%', '1.70%', '2.55%', '3.40%']);
     expect(new Set(ticks).size).toBe(ticks.length);
   });
 
