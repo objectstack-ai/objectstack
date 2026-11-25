@@ -290,7 +290,10 @@ export async function recordContextReadSet(
   args: RecordContextReadSetArgs,
   reads: RecordContextMetadataReads,
 ): Promise<{ pack?: string; objects: string[] }> {
-  const candidates = await contextPackCandidates(parsedContextPacks(await reads.listContextPacks()), reads.packageNamespace);
+  const namespaceOf = typeof reads.packageNamespace === 'function'
+    ? (packageId: string) => reads.packageNamespace!(packageId)
+    : undefined;
+  const candidates = await contextPackCandidates(parsedContextPacks(await reads.listContextPacks()), namespaceOf);
   const selection = selectContextPack(candidates, args);
   if (selection.kind !== 'selected') return { objects: [args.objectName] };
   return {
