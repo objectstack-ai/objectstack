@@ -549,6 +549,7 @@ export function DashboardView({ dataSource }: { dataSource?: any }) {
               onFiltersRevealed={edit.filtersRevealed}
               served={dashboard as Record<string, unknown> | undefined}
               published={edit.published}
+              shipped={edit.shipped}
             />
          )}
 

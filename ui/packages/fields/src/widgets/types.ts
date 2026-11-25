@@ -286,7 +286,11 @@ export type FieldWidgetComponentProps<T = any> = {
    * **Producer**: the form renderer, which owns the record's values.
    * **Consumer**: `LookupField`, on a single-value pick whose host owns no
    * `onSelectRecord` (a host that owns the pick, the line-item grid, applies
-   * the pairs itself). A lookup reached without it fills nothing.
+   * the pairs itself). A lookup reached without it fills nothing. A lookup
+   * reached with it fills only when the record form stamped the field
+   * (`withLookupAutofillTargets`, applied to every field the record form
+   * draws): a host that hands `onAutofill` without that stamp, such as a
+   * standalone `form` node, fills nothing either.
    *
    * `options.opening` marks the fill a create form's opening value made (see
    * {@link openingValue}): the filled values join what the form opened with,

@@ -436,7 +436,7 @@
     {
       "id": 25,
       "prompt": "`quote_line` 通过 `master_detail` 字段 `quote` 归属 `quote`。新建报价单时要在表单里直接录明细，和报价单一起保存。该怎么声明？",
-      "expected_output": "On the PARENT `quote` object, a field group that names the child: `fieldGroups: [..., { key: 'lines', label: '明细', relatedList: 'quote_line' }]` (such a group holds no fields). The standard create/edit form of `quote` then enters the lines at that group and saves quote + lines in one atomic transaction, and the record page draws the same table there. Without the group nothing changes: `quote_line` is a tab and the form has no lines, whatever `inlineEdit` on `quote_line.quote` says; `inlineEdit` only picks how the rows are edited (`'grid'` / `'form'`, `true` or absent picks by the child's shape). No custom page and no form view is needed. If either object declares `enable.apiMethods`, it must list `'bulk'`.",
+      "expected_output": "On the PARENT `quote` object, a field group that names the child: `fieldGroups: [..., { key: 'lines', label: '明细', relatedList: 'quote_line' }]` (such a group holds no fields). The standard create/edit form of `quote` then enters the lines at that group and saves quote + lines in one atomic transaction, and the record page draws the same table there. Without the group nothing changes: `quote_line` is a tab and the form has no lines, whatever `inlineEdit` on `quote_line.quote` says; `inlineEdit` only picks how the rows are edited (`'grid'` / `'form'`; absent picks by the child's shape). No custom page and no form view is needed. If either object declares `enable.apiMethods`, it must list `'bulk'`.",
       "files": [],
       "assertions": {
         "must_contain": [

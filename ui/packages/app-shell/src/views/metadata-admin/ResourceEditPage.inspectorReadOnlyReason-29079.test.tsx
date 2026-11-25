@@ -127,9 +127,9 @@ function stubCanvas(selection: MetadataSelection) {
 }
 
 /** A host's inspector for a type that ships none: it draws what it is handed. */
-function HostPositionInspector({ readOnly, readOnlyReason }: MetadataInspectorProps) {
+function HostPositionInspector({ readOnly, readOnlyReason, shipped }: MetadataInspectorProps) {
   return (
-    <div data-testid="host-position-inspector" data-readonly={String(readOnly)}>
+    <div data-testid="host-position-inspector" data-readonly={String(readOnly)} data-shipped={JSON.stringify(shipped ?? null)}>
       {readOnlyReason ?? ''}
     </div>
   );
@@ -350,5 +350,27 @@ describe('the panel shown with nothing selected names the read-only cause too (o
     await waitFor(() => expect(label).toBeEnabled());
     expect(screen.queryByTestId('metadata-properties-readonly-reason')).toBeNull();
     expect(screen.queryByText(LOCK_REASON())).toBeNull();
+  });
+});
+
+/**
+ * objectstack#37031 — the page hands a scoped inspector the item as its
+ * package ships it (the layered read's `code`), so an inspector undoing a
+ * change (the dashboard card's re-ticked Apply) restores the shipped value.
+ */
+describe('the metadata editor page hands the scoped inspector the shipped layer (objectstack#37031)', () => {
+  it('a shipped item: the inspector is handed its code layer', async () => {
+    const shipped = { ...POSITION, label: 'Sales rep (shipped)' };
+    layered = { effective: POSITION, code: shipped, overlay: POSITION, editable: true, deletable: true };
+    await openAndSelect('position', 'sales_rep');
+    const inspector = await screen.findByTestId('host-position-inspector');
+    expect(JSON.parse(inspector.getAttribute('data-shipped') ?? 'undefined')).toEqual(shipped);
+  });
+
+  it('control: an item no package ships hands nothing', async () => {
+    layered = { effective: POSITION, code: null, overlay: POSITION, editable: true, deletable: true };
+    await openAndSelect('position', 'sales_rep');
+    const inspector = await screen.findByTestId('host-position-inspector');
+    expect(inspector.getAttribute('data-shipped')).toBe('null');
   });
 });

@@ -37,6 +37,13 @@ export interface MetadataInspectorProps {
   name: string;
   /** Current draft from the editor. Treat as immutable. */
   draft: Record<string, unknown>;
+  /**
+   * The item as its package ships it (the layered read's `code`), when the
+   * host read one. An inspector that undoes an author's change restores the
+   * shipped value from it rather than a default the package never wrote.
+   * Omitted or `null`: there is nothing shipped to restore.
+   */
+  shipped?: Record<string, unknown> | null;
   /** The selection emitted by the matching preview. Never null here. */
   selection: MetadataSelection;
   /** Apply a shallow patch to the draft. */

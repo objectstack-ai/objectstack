@@ -6159,7 +6159,7 @@ const VIEW_SCOPE_RETIRED = {
  *
  * Named `scope` (not `provenance`) to avoid colliding with the loader-set
  * `_provenance` envelope field, which tracks a different axis
- * (package | org | env-forced).
+ * (package | org | env-forced | platform).
  */
 export const ViewScopeSchema = enumWithRetiredValues(['package', 'shared'], VIEW_SCOPE_RETIRED)
   .describe('View identity layer: package | shared.');

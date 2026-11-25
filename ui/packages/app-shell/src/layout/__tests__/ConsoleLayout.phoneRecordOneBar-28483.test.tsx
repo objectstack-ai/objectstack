@@ -31,7 +31,11 @@ vi.mock('../../hooks/useAiSurface', () => ({
   useAiSurfaceEnabled: () => ({ enabled: false, isLoading: false }),
 }));
 vi.mock('../UnifiedSidebar', () => ({
-  UnifiedSidebar: () => <nav aria-label="App menu" data-testid="sidebar-stub" />,
+  // `docsNav`: the body holds the docs' navigation instead of the app's menu
+  // (objectstack#37150); the sidebar's own face is `UnifiedSidebar`'s suites'.
+  UnifiedSidebar: ({ docsNav }: { docsNav?: boolean }) => (
+    <nav aria-label="App menu" data-testid="sidebar-stub" data-docs-nav={docsNav ? 'true' : 'false'} />
+  ),
 }));
 // The bar's own face is `PhoneAppNavBar.fixedTabs-35882`'s; here only where
 // the layout mounts it, with the real route rule (`isPhoneTabRoute`).
@@ -224,23 +228,46 @@ describe('the phone bottom bar is drawn on its three pages only (objectstack#358
   });
 });
 
-describe('an app\'s docs pages draw no app menu (objectstack#35424)', () => {
-  const appMenu = () => screen.queryByTestId('sidebar-stub');
+describe('an app\'s docs pages draw in the app shell from 768 px up (objectstack#37150), and no app menu (objectstack#35424)', () => {
+  const sidebar = () => screen.queryByTestId('sidebar-stub');
+  const DOCS_PATHS = [
+    '/apps/crm/docs',
+    '/apps/crm/docs/',
+    '/apps/crm/docs/crm_manual',
+    '/apps/crm/docs/crm_quotes',
+    '/apps/crm/docs/crm_manual/crm_quotes',
+  ];
 
-  it('at 1440 px a docs index, a book and an article draw no app menu, and keep the app bar (the one bar a desktop app still draws, objectstack#36112)', () => {
-    for (const path of ['/apps/crm/docs', '/apps/crm/docs/crm_manual', '/apps/crm/docs/crm_manual/crm_quotes']) {
-      mountAt(path, 1440);
-      expect(appMenu(), path).toBeNull();
+  it('at 768 px and 1440 px a docs index, a book, a flat permalink and an article draw the sidebar, its body the docs\' navigation, and no top bar', () => {
+    for (const width of [768, 1440]) {
+      for (const path of DOCS_PATHS) {
+        mountAt(path, width);
+        expect(sidebar(), `${width} px ${path}`).not.toBeNull();
+        expect(sidebar(), `${width} px ${path}`).toHaveAttribute('data-docs-nav', 'true');
+        expect(document.querySelectorAll('header'), `${width} px ${path}`).toHaveLength(0);
+        expect(screen.queryByTestId('app-bar'), `${width} px ${path}`).toBeNull();
+        cleanup();
+      }
+    }
+  });
+
+  it('PHONE CONTROL — at 390 px a docs page is unchanged: no sidebar, and the app bar', () => {
+    for (const path of DOCS_PATHS) {
+      mountAt(path, 390);
+      expect(sidebar(), path).toBeNull();
+      expect(document.querySelectorAll('header'), path).toHaveLength(1);
       expect(screen.getByTestId('app-bar'), path).toBeInTheDocument();
       cleanup();
     }
   });
 
-  it('control: every other app route keeps the app menu', () => {
-    for (const path of ['/apps/crm', '/apps/crm/crm_lead', '/apps/crm/dashboard/sales', '/apps/crm/docsearch']) {
-      mountAt(path, 1440);
-      expect(appMenu(), path).not.toBeNull();
-      cleanup();
+  it('control: every other app route keeps the app menu in the sidebar\'s body', () => {
+    for (const width of [390, 1440]) {
+      for (const path of ['/apps/crm', '/apps/crm/crm_lead', '/apps/crm/dashboard/sales', '/apps/crm/docsearch']) {
+        mountAt(path, width);
+        expect(sidebar(), `${width} px ${path}`).toHaveAttribute('data-docs-nav', 'false');
+        cleanup();
+      }
     }
   });
 
