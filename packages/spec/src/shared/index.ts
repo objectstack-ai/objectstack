@@ -54,3 +54,10 @@ export * from './epoch.zod';
 // the same way, so both reach consumers on the `@objectstack/spec/shared`
 // subpath and neither widens the root entry.
 export * from './duration.zod';
+// The ONE token estimate (`estimateTokens`): a conservative, tokenizer-free
+// estimate of a text's length in tokens, read by embedder-openai to refuse an
+// input over a model's limit (knowledge chunking is to read it too, #37098),
+// so no two readers measure the same text differently. It errs high on the
+// sampled classes; random hex or base64 can estimate below its real count
+// (the module's docblock). Pure; imports nothing.
+export * from './token-estimate';

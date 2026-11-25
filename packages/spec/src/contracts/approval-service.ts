@@ -384,11 +384,64 @@ export interface ApprovalRequestRow {
    *   yet. Steps past it are not listed, and the trunk is never listed in
    *   their place.
    * - `decided` — the request is decided, so nothing past it is walked. The
-   *   steps its run reached next are the later requests' own routes.
+   *   steps its run reached next are the later requests' own routes;
+   *   `outcome` says where the record's approval stands now.
    */
   flow_route?: {
     steps: Array<{ id: string; label: string; state: 'done' | 'current' | 'upcoming' }>;
     ahead: 'end' | 'undecided' | 'decided';
+    /**
+     * Where the record's approval stands after this request, on a decided
+     * request only (`ahead: 'decided'`), read off the request's flow run and
+     * never guessed:
+     *
+     * - `step` — the run's latest request, when that is a later one than
+     *   this request: a request of the same `flow_run_id` opened after this
+     *   one, on any node (a later round of this request's own node too). A
+     *   pending one wins over a decided one. Absent when no later request was
+     *   opened in that run, so the approval stands at this request as far as
+     *   the run's own requests tell. A request a `subflow` body or a `map`
+     *   item opens belongs to a child run (its own `flow_run_id`) and is not
+     *   among them; see `ended`.
+     * - `status` — that latest request's status (this request's own when
+     *   `step` is absent). `pending` with a `step`: the approval went on to
+     *   that step and waits on its decision.
+     * - `ended` — `true` only when the record's approval is known to have
+     *   stopped: the request's run is a root run (not a `subflow` body or a
+     *   `map` item, whose end is not the approval's: the parent run goes on),
+     *   the flow body the run ran holds no `subflow` or `map` node anywhere,
+     *   its regions included (a child run started from it may have opened
+     *   requests, after this one too, that the run's own requests do not
+     *   show), and the run has stopped for good. The body the run ran is
+     *   known only when the body armed now is the flow's newest registration
+     *   and was registered before the run started; a flow edited, rolled back
+     *   or re-registered since the run started is not judged by its current
+     *   body. When `status` is not `pending`, it is then the last decision the
+     *   record's approval took. `false` means "not known to have stopped":
+     *   the run is still going, is a child run, ran a body that can start a
+     *   child run, ran a body that is not known (its flow was registered
+     *   again since it started), was opened before the platform recorded
+     *   which runs are root runs, or cannot be read.
+     *
+     * Absent when nothing past this request is known: no later request was
+     * opened and the approval is not known to have ended, or several later
+     * requests are pending at once (parallel steps), which no single step
+     * answers. With a later request it is served even when the run cannot be
+     * read, with `ended: false`.
+     *
+     * Audience: every reader of this request, whether or not they can read
+     * the later request. It says only where the same approval went: the later
+     * step's node id and label, which the route already names for the steps
+     * it lists, and that request's status. It never carries the later
+     * request's id, its approvers, its comments or its field values; those
+     * stay behind that request's own read gate (the read-visibility tier of
+     * ruling record 5299823744).
+     */
+    outcome?: {
+      step?: { id: string; label: string };
+      status: ApprovalStatus;
+      ended: boolean;
+    };
   };
   /**
    * ADR-0044 revision round of this request on its (run, node): 1 (or absent)
@@ -1109,15 +1162,26 @@ export interface IApprovalService {
    *   who cannot read it gets `null` — exactly the answer for a record id that
    *   does not exist, ⛔ never one that tells the two apart. A caller refused
    *   the object's read outright is refused the same way for every id.
-   * - **What is answered:** `locked` only. `true` when a pending request on the
-   *   record comes from a node whose `lockRecord` is not `false` — the same
-   *   judgement, off the same snapshot, the record-lock `beforeUpdate` hook
-   *   enforces. Asked of a master-detail line, it also answers `true` while
-   *   a record the line belongs to is so held — the detail-row lock's judgement,
-   *   which refuses the line's writes.
+   * - **What is answered:** `locked`, and — only when `locked` is `true` —
+   *   `lockSource`, which approval holds the record (ruling 7148480184, option
+   *   A, revising the #25934 ruling A text "`locked` only"). `locked` is `true`
+   *   when a pending request on the record comes from a node whose
+   *   `lockRecord` is not `false` — the same judgement, off the same snapshot,
+   *   the record-lock `beforeUpdate` hook enforces — and then `lockSource` is
+   *   `'record'`. Asked of a master-detail line, it also answers `true` while
+   *   a record the line belongs to is so held — the detail-row lock's
+   *   judgement, which refuses the line's writes — and then `lockSource` is
+   *   `'master'`. When both hold (a line held by its own request under a held
+   *   master) `lockSource` is `'master'`: the stricter of the two delete rules.
+   *   A record held by its own request may still be deleted, which cancels
+   *   the request; a line of a held master refuses insert, update and delete.
+   *   An unlocked record answers `{ locked: false }`, with no `lockSource`.
+   *   An implementation may omit `lockSource` on a locked answer; the REST
+   *   doors then serve `{ locked: true }` alone, never a guessed kind.
    *   ⛔ No request id, node, participants or `pending` flag: whether
    *   the caller may see the request is still `approvalsVisibleToReaders`'
-   *   question, and this member does not answer it.
+   *   question, and this member does not answer it. `lockSource` is one kind
+   *   bit, never which request or who decides it.
    *
    * **Optional, and its absence is loud:** an approvals implementation without
    * it still satisfies this contract, so a door probes for presence and answers
@@ -1125,13 +1189,14 @@ export interface IApprovalService {
    *
    * @param object - The target object's name
    * @param recordId - The target record's id
-   * @returns `{ locked }`, or `null` when the caller cannot read that record
+   * @returns `{ locked, lockSource }` for a locked record, `{ locked: false }`
+   *   for an unlocked one, or `null` when the caller cannot read that record
    */
   getRecordLock?(
     object: string,
     recordId: string,
     context: ExecutionContext,
-  ): Promise<{ locked: boolean } | null>;
+  ): Promise<{ locked: boolean; lockSource?: 'record' | 'master' } | null>;
 
   /**
    * **Are these records held by a locking approval?** — {@link getRecordLock}
@@ -1140,12 +1205,24 @@ export interface IApprovalService {
    * per row.
    *
    * Entry `i` of the answer answers `recordIds[i]` with exactly what
-   * {@link getRecordLock} answers for that id: `{ locked }` when the caller
+   * {@link getRecordLock} answers for that id, spelled as the engine spells it: `{ locked, lockSource }` for a
+   * locked record and `{ locked: false }` for an unlocked one when the caller
    * can read the record, `null` when it cannot or when it does not exist,
    * ⛔ never an entry that tells the two apart. The same judgement, off the
    * same snapshot, the record-lock `beforeUpdate` hook enforces — and, for a
    * master-detail line, the detail-row lock's: a line answers `true` while a
-   * record it belongs to is so held. A repeated id
+   * record it belongs to is so held, with `lockSource: 'master'` (which wins
+   * when the line is held by a request of its own too). A row counts as
+   * readable only when the read hands back the row whose id IS the asked id;
+   * {@link getRecordLock} counts any row its read hands back, so an id the
+   * engine matches under another spelling answers `null` here and is judged
+   * there — but not wholly on the row found: the line-of-a-held-master half
+   * reads the row the engine found, so such a line answers `'master'`, while
+   * the row's own request is looked up by the id as asked, so a record held by
+   * its own request may answer `{ locked: false }` there. The two doors keep
+   * different readability anchors on purpose: aligning them would narrow a
+   * published answer (seat ruling 7152650156 on #37151).
+   * A repeated id
    * is answered at each of its positions. A caller refused the object's read
    * outright is refused the same way for every id.
    *
@@ -1163,7 +1240,7 @@ export interface IApprovalService {
     object: string,
     recordIds: readonly string[],
     context: ExecutionContext,
-  ): Promise<Array<{ locked: boolean } | null>>;
+  ): Promise<Array<{ locked: boolean; lockSource?: 'record' | 'master' } | null>>;
 
   /**
    * Record a decision on a node-driven request. Honours the node's

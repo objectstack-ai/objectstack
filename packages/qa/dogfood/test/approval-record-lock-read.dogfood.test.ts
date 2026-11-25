@@ -8,16 +8,17 @@
 // only lock source was the record's approval-request read, and that door
 // rightly serves a non-participant no rows (#8652). The lock now has its own
 // carrier, `GET /approvals/records/:object/:recordId/lock`, answering `{ locked }`
-// — and nothing else — to every caller who can read the record.
+// — plus, on a locked record, which approval holds it (`lockSource`, ruling
+// 7148480184) — and nothing else — to every caller who can read the record.
 //
 // Real `SecurityPlugin`, real flows, real approvals plugin. Both objects are
 // `private`, so the baseline set lets a member read and edit only their own
 // rows; the editor and the reader are widened by an extra set each.
 //
 //   ⭐ a non-participant who can read AND edit the held record is told
-//      `{ locked: true }` — and is still served no request row, and their
+//      `{ locked: true, lockSource: 'record' }` — and is still served no request row, and their
 //      edit is still refused `RECORD_LOCKED`: the read agrees with the lock;
-//   ⭐ a read-only reader is told `{ locked: true }`;
+//   ⭐ a read-only reader is told `{ locked: true, lockSource: 'record' }`;
 //   ⭐ a caller who cannot read the record gets the answer a record id that
 //      does not exist gets — the same status and the same body;
 //   ⭐ a pending node with `lockRecord: false` answers `{ locked: false }`
@@ -181,11 +182,12 @@ describe('the record-anchored approval lock read, through the REST door (#26314)
           const res = await stack.apiAs(token, 'GET', `/approvals/records/${object}/${encodeURIComponent(recordId)}/lock`);
           return { status: res.status, body: (await res.json()) as unknown };
         };
-        const LOCKED = { status: 200, body: { success: true, data: { locked: true } } };
+        // Held by its own request: `lockSource: 'record'` (ruling 7148480184).
+        const LOCKED = { status: 200, body: { success: true, data: { locked: true, lockSource: 'record' } } };
         const UNLOCKED = { status: 200, body: { success: true, data: { locked: false } } };
 
         // ⭐ 1 — the non-participant reader-editor: told it is locked, in
-        // exactly `{ locked }`, while still served no request row (#8652's
+        // exactly `{ locked, lockSource }`, while still served no request row (#8652's
         // ruling untouched) and still refused the edit (the read agrees with
         // the lock it reports).
         expect(await lockOf(editorToken, HELD, heldId)).toEqual(LOCKED);
