@@ -307,7 +307,7 @@ function orgScopeAreaRedirect(segment: string, rest: string, params: URLSearchPa
     return studioMetadataAreaAddress(pkg === ALL_PACKAGES_VALUE ? STUDIO_ALL_PACKAGES_SEGMENT : pkg, rest, { query: params });
   }
   const [rawType = '', rawName = '', ...below] = rest.split('/');
-  let type = '';
+  let type: string;
   try {
     type = decodeURIComponent(rawType);
   } catch {

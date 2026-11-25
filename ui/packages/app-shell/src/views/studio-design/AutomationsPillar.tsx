@@ -115,7 +115,6 @@ import {
   FlowRegistrationContext,
   FlowRuntimeContext,
   deriveFlowRunStatus,
-  type FlowRunStatus,
 } from '../metadata-admin/previews/flow-problems.js';
 import {
   FlowMetaPills,
@@ -126,7 +125,7 @@ import {
   type FlowProblemTally,
 } from '../metadata-admin/previews/FlowPreview.js';
 import { InspectorShellHostProvider } from '../metadata-admin/inspectors/_shared.js';
-import { useFlowLabelOf, useFlowLabelTranslations } from '../metadata-admin/previews/flow-label-translations.js';
+import { useFlowLabelTranslations } from '../metadata-admin/previews/flow-label-translations.js';
 import type { FlowRegistration } from '@objectstack/spec/api';
 import { StudioPairItemChip, withPairItems } from './StudioRailCustomizations.js';
 import {

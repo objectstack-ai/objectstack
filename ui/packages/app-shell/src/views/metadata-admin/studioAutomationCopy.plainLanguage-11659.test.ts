@@ -26,9 +26,12 @@ import { t } from './i18n';
 import { loadStudioCatalogue } from '@object-ui/i18n/namespaces/studio';
 await loadStudioCatalogue('zh');
 
-/** The automation pillar's chrome: every `engine.studio.auto.*` row it renders as prose. */
+/**
+ * The flow designer's chrome: every `engine.studio.auto.*` row it renders as
+ * prose. objectstack#36903 — the rail's heading and empty rows went with the
+ * rail.
+ */
 const PILLAR_ROWS = [
-  'engine.studio.auto.heading',
   'engine.studio.auto.defaultOff',
   'engine.studio.auto.canvasHint',
   'engine.studio.auto.on',
@@ -47,8 +50,6 @@ const PILLAR_ROWS = [
   'engine.studio.auto.enabledToast',
   'engine.studio.auto.disabledToast',
   'engine.studio.auto.newTitle',
-  'engine.studio.auto.none',
-  'engine.studio.auto.emptyMain',
   'engine.studio.auto.config',
   'engine.studio.auto.emptyLine1',
   'engine.studio.auto.emptyLine2',

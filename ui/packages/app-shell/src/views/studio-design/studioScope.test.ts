@@ -22,7 +22,6 @@ import {
   studioOrgScopePath,
 } from './studioScope';
 import { isSpecPackageId, sanitizePackageId } from './packages-io';
-import { parseSurfaceParam } from '../metadata-admin/nav-selection';
 
 describe('the reserved segment cannot name a package (objectui#11553)', () => {
   it('is refused by the spec manifest-id rule and by the predicate this app judges ids by', () => {
