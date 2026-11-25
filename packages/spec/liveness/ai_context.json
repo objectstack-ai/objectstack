@@ -64,12 +64,24 @@
           "note": "ADR-0160 second amendment (row 11). Parse-time subset of the object filter form: AI_CONTEXT_WHERE_OPERATORS joined by $and / $or, literal comparands only."
         },
         "orderBy": {
-          "status": "live",
-          "verifiedAt": "2026-11-25",
-          "evidenceScope": "in-repo",
-          "evidence": "packages/services/service-record-context/src/record-context-tools.ts#executeGetRecordContext — the order of the one capped child query, read as the caller; each field it names is judged first, as `where`'s are.",
-          "producer": "packages/objectql/src/engine-top-level.ts#METADATA_ARRAY_KEYS — the stack's `aiContexts` reach the registry as `ai_context` items with their package stamped; packages/runtime/src/domains/mcp.ts#recordContextMembers and packages/mcp/src/stdio-data-bridge.ts#createStdioDataBridge read them back (`listContextPacks`) for the executor.",
-          "note": "ADR-0160 second amendment (row 11). SortNodeSchema[]: `{ field, order }`, `direction` refused by name."
+          "children": {
+            "field": {
+              "status": "live",
+              "verifiedAt": "2026-11-25",
+              "evidenceScope": "in-repo",
+              "evidence": "packages/services/service-record-context/src/record-context-tools.ts#executeGetRecordContext — the sort key of the one capped child query, read as the caller; judged first, as `where`'s fields are: one the child lacks leaves the list out, one the caller cannot query on (`queryableAmong`) drops it with the not-visible statement.",
+              "producer": "packages/objectql/src/engine-top-level.ts#METADATA_ARRAY_KEYS — the stack's `aiContexts` reach the registry as `ai_context` items with their package stamped; packages/runtime/src/domains/mcp.ts#recordContextMembers and packages/mcp/src/stdio-data-bridge.ts#createStdioDataBridge read them back (`listContextPacks`) for the executor.",
+              "note": "ADR-0160 second amendment (row 11). The child's own field only: a dotted path is refused at parse."
+            },
+            "order": {
+              "status": "live",
+              "verifiedAt": "2026-11-25",
+              "evidenceScope": "in-repo",
+              "evidence": "packages/services/service-record-context/src/record-context-tools.ts#executeGetRecordContext — the direction of that sort key in the one child query (`asc` when omitted).",
+              "producer": "packages/objectql/src/engine-top-level.ts#METADATA_ARRAY_KEYS — the stack's `aiContexts` reach the registry as `ai_context` items with their package stamped; packages/runtime/src/domains/mcp.ts#recordContextMembers and packages/mcp/src/stdio-data-bridge.ts#createStdioDataBridge read them back (`listContextPacks`) for the executor.",
+              "note": "SortNodeSchema's `order`; `direction` is refused by name."
+            }
+          }
         },
         "limit": {
           "status": "live",
