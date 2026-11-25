@@ -706,7 +706,10 @@ describe('#7010 corpus — shipped METADATA_FORM_REGISTRY', () => {
     // the field form and on the object form's field rows, each gated on
     // `data.type in ['lookup','master_detail']`. In-lists, so they do not reach
     // the literal-comparison census below.
-    expect(predicates, 'the shipped metadata forms carry no predicates at all').toBe(95);
+    // It is 96 today, an ADDITION of ONE: #35926 offered the field form's
+    // `inlineEdit` select, gated on `data.type in ['lookup','master_detail']`. It
+    // is an in-list, so it does not reach the literal-comparison census below.
+    expect(predicates, 'the shipped metadata forms carry no predicates at all').toBe(96);
 
     const findings = validatePredicatePathRefs(corrupted);
     expect(findings).toHaveLength(predicates);

@@ -50,7 +50,7 @@ describe('aiProviderManagedByPlatform', () => {
 describe('runSettingsAction and the hosted refusal', () => {
   const fetchMock = vi.fn();
   const answer = (body: unknown, status: number): Response =>
-    ({ ok: status < 300, status, statusText: 'Conflict', json: async () => body }) as unknown as Response;
+    ({ ok: status < 300, status, statusText: 'Conflict', headers: new Headers(), json: async () => body }) as unknown as Response;
 
   beforeEach(() => {
     fetchMock.mockReset();

@@ -23,7 +23,7 @@
 import '@testing-library/jest-dom/vitest';
 import * as React from 'react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, fireEvent, cleanup, waitFor } from '@testing-library/react';
+import { render, screen, fireEvent, cleanup, waitFor, within } from '@testing-library/react';
 import { MemoryRouter, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
 
 const SHOWCASE = 'com.example.showcase';
@@ -270,21 +270,26 @@ describe('the package-less scope lists a package-less flow and opens it editable
     expect(saved!.options?.packageId).toBeUndefined();
   });
 
-  it('offers its one pillar, no Create app, no package copilot, and names no app beside 「‹ Back to app」', async () => {
+  it('offers its one page, no Create app, no package copilot, and names the scope beside 「‹ Back to app」', async () => {
     renderAt('/studio/~org/automations');
     await openedFlow('qa_urgent_alert_clone');
 
-    expect(screen.getByRole('link', { name: /Automations/ })).toHaveAttribute('href', '/studio/~org/automations');
-    expect(screen.queryByRole('link', { name: /^Data$/ })).not.toBeInTheDocument();
-    expect(screen.queryByRole('link', { name: /Interfaces/ })).not.toBeInTheDocument();
-    // objectui#12452 — Access is a package pillar segment now, not a More entry.
-    expect(screen.queryByRole('link', { name: /Access/ })).not.toBeInTheDocument();
-    // objectstack#28561 — nor the "All metadata" area: a package's, beside its pillars.
-    expect(screen.queryByRole('link', { name: /All metadata/ })).not.toBeInTheDocument();
+    // objectstack#36899 — the left menu: the scope's flows are its current
+    // entry; no package pillar, area or Interfaces page is offered.
+    const menu = within(screen.getByTestId('studio-menu'));
+    const flows = menu.getByTestId('studio-menu-entry-orgFlows');
+    expect(flows).toHaveAttribute('href', '/studio/~org/automations');
+    expect(flows).toHaveAttribute('aria-current', 'page');
+    for (const a of menu.getAllByRole('link')) {
+      expect(a.getAttribute('href')).not.toMatch(/^\/studio\/~org\/(data|access|interfaces|metadata)/);
+    }
+    expect(menu.queryByTestId('studio-menu-entry-owd')).toBeNull();
+    expect(menu.queryByTestId('studio-menu-entry-diagnostics')).toBeNull();
     expect(screen.queryByRole('button', { name: /Create app/ })).not.toBeInTheDocument();
     expect(chatDock.mounts).toBe(0);
-    // objectstack#36501 — no app owns the scope, so the back link names none.
-    expect(screen.getByTestId('studio-back')).toHaveTextContent(/^Back to app·Studio$/);
+    // objectstack#36501, decision 5 (objectstack#36899) — no app owns the
+    // scope, so the name slot names the scope, as for a package with no app.
+    expect(screen.getByTestId('studio-back')).toHaveTextContent(/^Back to app·Organization flows·Studio$/);
     // No "New" flow here: authoring stays package-first.
     expect(screen.queryByTitle('New automation')).not.toBeInTheDocument();
   });

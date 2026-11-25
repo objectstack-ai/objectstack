@@ -271,6 +271,14 @@ export interface StdioDataBridgeDeps {
    */
   datasetTools?: StdioDatasetToolsService;
   /**
+   * [ADR-0149 D2] The `knowledge` service when it serves the knowledge tool's
+   * executor ({@link StdioKnowledgeToolsService}), resolved by the host once
+   * its services are registered. Present ⇒ the bridge carries
+   * `searchKnowledge` / `knowledgeToolDefinitions`; absent ⇒ neither, and
+   * `search_knowledge` does not register.
+   */
+  knowledgeTools?: StdioKnowledgeToolsService;
+  /**
    * [ADR-0149 D2 · #34872] The `i18n` service the saved datasets and the
    * object tools' labels and descriptions are localized with, resolved at each
    * use. `undefined`, or a resolver that throws, means none: they are then
@@ -296,6 +304,19 @@ export interface StdioDatasetToolsService {
     readonly definitions: ReadonlyArray<{ name: string; description: string }>;
     listDatasets(input: unknown, context?: unknown): Promise<ListDatasetsOutput>;
     queryDataset(input: unknown, context?: unknown): Promise<QueryDatasetOutput>;
+  };
+}
+
+/**
+ * [ADR-0149 D2] The face of the `knowledge` service `search_knowledge` calls:
+ * `knowledgeTools()` binds the service-knowledge executor to the service
+ * itself. Named structurally so this package stays free of knowledge code.
+ * The executor refuses by throwing an ADR-0112 coded error.
+ */
+export interface StdioKnowledgeToolsService {
+  knowledgeTools(): {
+    readonly definitions: ReadonlyArray<{ name: string; description: string; parameters: Record<string, unknown> }>;
+    searchKnowledge(input: unknown, context?: unknown): Promise<unknown>;
   };
 }
 
@@ -1804,6 +1825,16 @@ export function createStdioDataBridge(deps: StdioDataBridgeDeps): McpDataBridge 
     bridge.listDatasets = async (input) => executor().listDatasets(input, await resolvePrincipal());
     bridge.queryDataset = async (input, opts) => executor(opts.maxRows).queryDataset(input, await resolvePrincipal());
     bridge.datasetToolDefinitions = () => executor().definitions;
+  }
+
+  // [ADR-0149 D2] The knowledge members, only where the host handed the
+  // knowledge service's executor over. Each call runs AS the principal this
+  // transport resolves per call, so the service re-checks every object-source
+  // hit against that principal's row-level security.
+  if (deps.knowledgeTools) {
+    const service = deps.knowledgeTools;
+    bridge.searchKnowledge = async (input) => service.knowledgeTools().searchKnowledge(input, await resolvePrincipal());
+    bridge.knowledgeToolDefinitions = () => service.knowledgeTools().definitions;
   }
 
   if (typeof engine.aggregate === 'function') {

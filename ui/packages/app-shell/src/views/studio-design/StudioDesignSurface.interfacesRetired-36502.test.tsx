@@ -17,7 +17,7 @@
  *  - the notice reads the card's sentence in zh-CN and its English in en,
  *    and its link goes to the package's app, as 「‹ Back to app」 does;
  *  - Dismiss hides it;
- *  - the pillar nav names no Interfaces segment;
+ *  - the left menu (objectstack#36899) links no Interfaces page;
  *  - CONTROL: an ordinary arrival on the Data pillar shows no notice.
  *
  * The URL arithmetic itself is `studioInterfacesRetired.test.ts`. Rendered
@@ -28,7 +28,7 @@ import '@testing-library/jest-dom/vitest';
 import * as React from 'react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, cleanup, fireEvent, waitFor, within } from '@testing-library/react';
-import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
+import { Link, MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
 
 const PKG = 'com.acme.app';
 
@@ -87,7 +87,12 @@ vi.mock('../metadata-admin/useMetadata', async (importOriginal) => {
     useMetadataTypes: () => ({
       loading: false,
       error: null,
-      entries: [{ type: 'permission', label: 'Permission', allowEnvironmentOverlay: true }],
+      // objectstack#36899 — the designer types the left menu lists.
+      entries: [
+        { type: 'object', label: 'Object', domain: 'data' },
+        { type: 'flow', label: 'Flow', domain: 'automation' },
+        { type: 'permission', label: 'Permission', domain: 'security', allowEnvironmentOverlay: true },
+      ],
     }),
   };
 });
@@ -185,6 +190,11 @@ function renderAt(path: string) {
       <Routes>
         <Route path="/studio/:packageId/:tab" element={<StudioDesignSurface />} />
         <Route path="/apps/*" element={<output data-testid="the-app" />} />
+        {/* objectstack#36899 — a menu type entry opens that type's area list; this stand-in links back to Data. */}
+        <Route
+          path="/studio/:packageId/metadata/*"
+          element={<Link to={`/studio/${PKG}/data`} data-testid="back-to-data">Data</Link>}
+        />
       </Routes>
       <LocationProbe />
     </MemoryRouter>,
@@ -246,24 +256,24 @@ describe('an old Interfaces URL lands on the Studio home (objectstack#36502)', (
     expect(screen.getByTestId('studio-interfaces-retired')).toBeInTheDocument();
   });
 
-  it('leaving for another pillar takes the notice away, and coming back does not bring it', async () => {
+  it('leaving through the menu takes the notice away, and coming back does not bring it', async () => {
     renderAt(`/studio/${PKG}/interfaces`);
     await screen.findByTestId('studio-interfaces-retired');
-    const nav = screen.getByTestId('studio-pillar-nav');
-    fireEvent.click(within(nav).getByRole('link', { name: 'Automations' }));
-    await waitFor(() => expect(pathname()).toBe(`/studio/${PKG}/automations`));
+    fireEvent.click(within(screen.getByTestId('studio-menu')).getByTestId('studio-menu-entry-type:flow'));
+    await waitFor(() => expect(pathname()).toBe(`/studio/${PKG}/metadata/flow`));
     expect(notice()).toBeNull();
-    fireEvent.click(within(nav).getByRole('link', { name: 'Data' }));
+    fireEvent.click(screen.getByTestId('back-to-data'));
     await waitFor(() => expect(pathname()).toBe(`/studio/${PKG}/data`));
+    await screen.findByTestId('studio-shell-header');
     expect(notice()).toBeNull();
   });
 
-  it('the pillar nav names no Interfaces segment', async () => {
+  it('the left menu links no Interfaces page', async () => {
     renderAt(`/studio/${PKG}/interfaces`);
     await screen.findByTestId('studio-shell-header');
-    const nav = screen.getByTestId('studio-pillar-nav');
-    expect(within(nav).getAllByRole('link').map((a) => a.getAttribute('href'))).not.toContain(`/studio/${PKG}/interfaces`);
-    expect(within(nav).getAllByRole('link').map((a) => a.textContent)).not.toContain('Interfaces');
+    const links = within(screen.getByTestId('studio-menu')).getAllByRole('link');
+    expect(links.map((a) => a.getAttribute('href'))).not.toContain(`/studio/${PKG}/interfaces`);
+    expect(links.map((a) => a.textContent)).not.toContain('Interfaces');
   });
 
   it('CONTROL: an ordinary arrival on the Data pillar shows no notice', async () => {

@@ -78,6 +78,13 @@ describe('areaLocationRedirect — the query names the leg', () => {
     expect(areaLocationRedirect(STUDIO_ALL_PACKAGES_SEGMENT, '', '')).toBeNull();
     expect(areaLocationRedirect(STUDIO_ALL_PACKAGES_SEGMENT, 'flow/f1', '?review=1')).toBeNull();
   });
+
+  it('the package-less scope is never written into `?package=`: it lands on its flows (objectstack#36899)', () => {
+    expect(areaLocationRedirect('~org', '', '')).toBe('/studio/~org/automations');
+    expect(areaLocationRedirect('~org', 'flow', '')).toBe('/studio/~org/automations');
+    expect(areaLocationRedirect(STUDIO_ALL_PACKAGES_SEGMENT, 'flow', '?package=~org')).toBe('/studio/~org/automations');
+    expect(areaLocationRedirect(PKG, 'flow', '?package=~org')).toBe('/studio/~org/automations');
+  });
 });
 
 describe('areaItemPillarPath — a pillar type opens its pillar', () => {

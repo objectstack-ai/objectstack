@@ -11,6 +11,7 @@
 · **Amended** (2026-10-31, ruling of record 6545950368 on #28367, go as shaped) — D10 gains rule 5, the **agent forward credential**: an `api` action's in-process forward carries the agent principal in a credential the server mints itself, bound to that one forward, single-use, short-lived and unreachable out of process, never the caller's token or key and never a human session. Two cells of the credential-kind × target-door table flip from "refuse by name" to "accept with a forward credential" (an OAuth-connected agent at an identity route and at a platform route), and a scope-family rule bounds every target outside MCP. See the amendment under D10.
 · **Amended** (2026-11-08, [ADR-0151](./0151-ai-service-account-a-headless-agent-is-a-registered-principal-of-its-own.md), proposed, adopted by its merge) — D10 gains a second provenance for an agent principal: a registered **AI service account**, a `sys_user` row of kind `agent` that is its own authorization subject. It holds its own grants under rule 2's ceiling, enforced at evaluation, and authenticates with its own API keys; rule 1's intersection does not apply because it acts for nobody; rule 4 records it as `user_id` and leaves `performedBy` to the OAuth client. The 2026-09-16 note stands: a person's key stays that person's credential. See the note under D10.
 · **Amended** (2026-11-20, [#35731](https://github.com/objectstack-ai/objectstack/issues/35731)) — dated notes under D9 (the platform baseline contribution channel is for always-on platform services only) and under D10 (`performedBy` has a second producer, the in-product AI path). D9 and D10 are left as written.
+· **Amended** (2026-11-24, [#36086](https://github.com/objectstack-ai/objectstack/issues/36086)) — dated notes under D5 (`viewAllFields` joins the high-privilege bits refused on an anchor binding) and under D12 (condition (a) of the organization boundary also refuses `viewAllFields` on `'*'`), both built by [#36085](https://github.com/objectstack-ai/objectstack/pull/36085). D5 and D12 are left as written.
 **Deciders**: ObjectStack Protocol Architects
 **Builds on**: [ADR-0049](./0049-no-unenforced-security-properties.md) (enforce-or-remove),
 [ADR-0056](./0056-permission-model-landing-verification.md) (permission-model landing verification),
@@ -316,6 +317,14 @@ Replaces both the `member_default` builtin-set fallback and ADR-0056 D7's defaul
 > bound to `everyone`. The storage service's `DELETE /api/v1/attachments/:id`, over
 > `sys_attachment.uploaded_by`, is one such door: a member removes an attachment they uploaded
 > and no other. The attachment member grant still carries read and create only.
+
+> **Note (2026-11-24, [#36050](https://github.com/objectstack-ai/objectstack/issues/36050), built by [#36085](https://github.com/objectstack-ai/objectstack/pull/36085)) —
+> `viewAllFields` is a high-privilege bit.** The lint bullet's list gains one entry:
+> `viewAllFields` on any object entry of a set, the read-only field half of View All
+> ([ADR-0066](./0066-unified-authorization-model.md) D2 ⑧, note of 2026-11-24). A set that carries
+> it is refused on an `everyone` or `guest` binding, exactly as a set that carries `viewAllRecords`
+> is (`packages/spec/src/security/high-privilege.ts#describeHighPrivilegeBits`). The bullet is left
+> as written; read its list with this note.
 
 ### D6 — Explain engine is P0; access-matrix snapshots gate publishes
 
@@ -864,6 +873,15 @@ not just "who did".
 > object is to carry its own default row scope, to apply when no held set carries a row policy for
 > it ([ADR-0095](./0095-authz-kernel-tenant-layer-and-posture-ladder.md)'s 2026-10-18 note under
 > D1), so #24136 keeps the three conditions above and gains no fourth.
+
+> **Note (2026-11-24, [#36050](https://github.com/objectstack-ai/objectstack/issues/36050), built by [#36085](https://github.com/objectstack-ai/objectstack/pull/36085)) —
+> condition (a) also refuses `viewAllFields` on `'*'`.** A set whose `objects['*']` entry carries
+> `viewAllFields` is outside the organization boundary under condition (a), beside
+> `viewAllRecords` and `modifyAllRecords`
+> (`packages/plugins/plugin-security/src/delegated-admin-gate.ts#organizationBoundaryFailure`). On
+> the wildcard the bit reads every field of every object, the fields other sets hide included. A
+> set that carries the bit on a named object only stays inside. No fourth condition is added. The
+> 2026-10-17 amendment is left as written; read its condition (a) with this note.
 
 ---
 

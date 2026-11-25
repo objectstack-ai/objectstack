@@ -406,7 +406,9 @@ const DashboardRendererInner = forwardRef<HTMLDivElement, DashboardRendererProps
       return 4;
     })();
     const columns = inferredColumns;
-    const gap = schema.gap || 4;
+    // The spec admits `gap: 0` (`min(0)`), so only an ABSENT gap takes the
+    // default; `||` drew a declared zero 1rem apart (objectstack#36912).
+    const gap = schema.gap ?? 4;
     // Positioned (explicit-columns) grid vs responsive auto-flow grid.
     // Defined here (not just above desktopBody) so renderWidget can give
     // layout-less widgets a sensible default span in the positioned grid.
