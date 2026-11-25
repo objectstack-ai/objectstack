@@ -13,6 +13,6 @@ The documentation portal (`/docs`, a book, an article) was the last desktop page
 
 Opening the portal does not pick an app: no app's colours are applied, and the app you last used, and the one you had open, stay what they were.
 
-「All documentation」 is now also the first row of an app's documentation sidebar, above 「← Back to APP」, so the two documentation sidebars match.
+「All documentation」 is now also the first documentation row of an app's documentation sidebar, right under 「← Back to APP」 and above the title filter and the books, so the two documentation sidebars match.
 
 Unchanged: every documentation address resolves to the same page as before, and a phone keeps the portal's documentation bar and the in-page column, with 「All documentation」 at its foot. Nothing to migrate.

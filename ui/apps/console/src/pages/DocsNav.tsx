@@ -33,16 +33,18 @@ export interface DocsNavSection {
 }
 
 /**
- * The docs reader's one navigation column (objectstack#35424): 「All
- * documentation」, a way back to the app the reader came from, a title
- * filter, and the books (the current one open, the others folded, each with
+ * The docs reader's one navigation column (objectstack#35424): a way back to
+ * the app the reader came from, 「All documentation」, a title filter, and
+ * the books (the current one open, the others folded, each with
  * its article count) — the package's, or, in the portal, every app's under
  * its app's heading (`sections`). Inside an app it takes the app menu's place;
  * the shell draws no menu beside it.
  *
  * objectstack#37197 — in the shell sidebar (from 768 px up, an app's docs
- * pages and the portal alike) 「All documentation」 is the column's first row,
- * marked while it is the page in view. The same column drawn in the page —
+ * pages and the portal alike) 「All documentation」 is the first row of the
+ * docs entries, marked while it is the page in view: under the way back to the
+ * app, which is the shell's navigation and not a docs row, and above the
+ * filter and the books. The same column drawn in the page —
  * which only a phone draws, since from 768 px up both docs frames carry it in
  * the sidebar — keeps it at the foot, unchanged.
  */
@@ -88,6 +90,7 @@ export function DocsNav({
 
   return (
     <div className="flex flex-col gap-4 text-sm" data-testid="docs-nav">
+      {backTo ? <AppDocsBackLink backTo={backTo} /> : null}
       {inSidebar ? (
         <Link
           to={allDocsHref}
@@ -101,7 +104,6 @@ export function DocsNav({
           <span>{allDocsLabel}</span>
         </Link>
       ) : null}
-      {backTo ? <AppDocsBackLink backTo={backTo} /> : null}
       <div className="relative">
         <label htmlFor={searchId} className="sr-only">
           {searchLabel}

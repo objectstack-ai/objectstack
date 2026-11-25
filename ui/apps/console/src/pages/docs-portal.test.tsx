@@ -1099,7 +1099,7 @@ describe('objectstack#37150 — from 768 px up an app\'s docs pages draw in the 
   });
 });
 
-describe('objectstack#37197 — the portal\'s tree in the app-less shell, 「All documentation」 first in both docs sidebars', () => {
+describe('objectstack#37197 — the portal\'s tree in the app-less shell, 「All documentation」 the first docs row in both docs sidebars', () => {
   function Where() {
     return <div data-testid="where">{useLocation().pathname}</div>;
   }
@@ -1158,6 +1158,10 @@ describe('objectstack#37197 — the portal\'s tree in the app-less shell, 「All
   const column = () => within(sidebar()).getByTestId('docs-nav');
   /** The column's rows in reading order: links and book buttons, by their test id or name. */
   const firstRow = (nav: HTMLElement) => nav.querySelector('a, button, input');
+  /** The first docs entry: the first row after the way back to an app, which is the shell's navigation, not a docs row. */
+  const firstDocsRow = (nav: HTMLElement) =>
+    [...nav.querySelectorAll('a, button, input')].find((el) => el.getAttribute('data-testid') !== 'docs-nav-back');
+  const precedes = (a: Element, b: Element) => (a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0;
   const lastLink = (nav: HTMLElement) => [...nav.querySelectorAll('a')].pop();
   /** The headings of the tree's sections and each section's books, in order. */
   const treeSections = () =>
@@ -1252,14 +1256,20 @@ describe('objectstack#37197 — the portal\'s tree in the app-less shell, 「All
     expect(within(page()).queryByTestId('docs-nav')).toBeNull();
   });
 
-  it('an app\'s docs sidebar puts 「All documentation」 first too, above the way back to the app', async () => {
+  it('an app\'s docs sidebar puts 「All documentation」 first among the docs entries: under the way back to the app, above the filter and the books', async () => {
     render(<InPortalShell entry="/apps/com.example.showcase/docs/manual/showcase_lead_guide" />);
     await screen.findByTestId('doc-content');
     const nav = column();
     const allDocs = within(nav).getByTestId('docs-nav-all-docs');
-    expect(firstRow(nav)).toBe(allDocs);
+    const back = within(nav).getByTestId('docs-nav-back');
     expect(allDocs).toHaveAttribute('href', '/docs');
-    expect(allDocs.compareDocumentPosition(within(nav).getByTestId('docs-nav-back')) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    // The way back is the shell's navigation and stays the column's top row.
+    expect(firstRow(nav)).toBe(back);
+    expect(precedes(back, allDocs)).toBe(true);
+    // 「All documentation」 is the first docs row: before the filter and the first book.
+    expect(firstDocsRow(nav)).toBe(allDocs);
+    expect(precedes(allDocs, within(nav).getByTestId('docs-nav-search'))).toBe(true);
+    expect(precedes(allDocs, within(nav).getAllByRole('button')[0])).toBe(true);
     // The app's column is one package's books, with no app headings.
     expect(within(nav).queryAllByTestId('docs-nav-section')).toHaveLength(0);
   });
@@ -1267,7 +1277,10 @@ describe('objectstack#37197 — the portal\'s tree in the app-less shell, 「All
   it('…and so does an app\'s docs page that is not the reader (its docs index)', async () => {
     render(<InPortalShell entry="/apps/com.example.showcase/docs" />);
     await within(page()).findByText('Leads Book');
-    expect(firstRow(column())).toBe(within(column()).getByTestId('docs-nav-all-docs'));
+    const nav = column();
+    expect(firstRow(nav)).toBe(within(nav).getByTestId('docs-nav-back'));
+    expect(firstDocsRow(nav)).toBe(within(nav).getByTestId('docs-nav-all-docs'));
+    expect(precedes(within(nav).getByTestId('docs-nav-all-docs'), within(nav).getAllByRole('button')[0])).toBe(true);
   });
 
   it('PHONE CONTROL — the column the page draws itself keeps 「All documentation」 at its foot, the portal\'s and an app\'s alike', async () => {
@@ -1280,7 +1293,7 @@ describe('objectstack#37197 — the portal\'s tree in the app-less shell, 「All
       for (const nav of navs) {
         const allDocs = within(nav).getByTestId('docs-nav-all-docs');
         expect(lastLink(nav), entry).toBe(allDocs);
-        expect(firstRow(nav), entry).not.toBe(allDocs);
+        expect(firstDocsRow(nav), entry).not.toBe(allDocs);
         // The phone's column is one package's books, as before.
         expect(within(nav).queryAllByTestId('docs-nav-section'), entry).toHaveLength(0);
       }
