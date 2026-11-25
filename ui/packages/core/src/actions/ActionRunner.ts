@@ -2034,6 +2034,16 @@ export class ActionRunner {
   }
 
   /**
+   * Why `action` cannot run over a selection of records, one dispatch per row
+   * (a list's bulk action bar), or `undefined` when it can. Only an `ask_ai`
+   * action is refused (ADR-0160 D7): it focuses the assistant on ONE record,
+   * so a per-row run would pin each row in turn and report every one done.
+   */
+  bulkRefusal(action: ActionDef): string | undefined {
+    return isAskAiAction(action) ? this.runnerText(RUNNER_TEXT.askAiSeveralRecords) : undefined;
+  }
+
+  /**
    * The early refusal of the handler {@link dispatchCollected} would route
    * this action to, in the translator's language when it names a key —
    * `undefined` when there is none. An update-operation action never reaches
@@ -2043,7 +2053,8 @@ export class ActionRunner {
     if (isUpdateOperationAction(action)) return undefined;
     // `ask_ai` runs on exactly one record: a launch that names none (a list
     // header with no row selected) or several is refused before its
-    // `confirmText` asks anything, and a list header greys it out the same way.
+    // `confirmText` asks anything, and a list header leaves it out (it is
+    // absent, not greyed, where no single record is held).
     if (actionType === 'ask_ai' && !this.handlers.has('ask_ai')) {
       if (!this.assistantFocusHandler) return ASK_AI_UNAVAILABLE;
       const focus = this.askAiFocus(action);
@@ -3057,7 +3068,7 @@ export class ActionRunner {
     let id = asId(row?.[idField]);
     if (id === undefined && !row) {
       const record = this.context.record as Record<string, unknown> | undefined;
-      id = asId(record?.id) ?? asId(this.context.recordId);
+      id = asId(record?.[idField]) ?? (idField === 'id' ? asId(this.context.recordId) : undefined);
     }
     if (id === undefined && !row) {
       const selected = Array.isArray(this.context.selectedRecords) ? this.context.selectedRecords : [];

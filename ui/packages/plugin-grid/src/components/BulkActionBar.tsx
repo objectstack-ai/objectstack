@@ -11,7 +11,7 @@ import { Button } from '@object-ui/components';
 import { Trash2 } from 'lucide-react';
 import { LazyIcon, toKebabIconName } from '@object-ui/components';
 import { useObjectTranslation, usePredicateScope, useCapabilityGate, useDrawsAction } from '@object-ui/react';
-import { isActionSwitchedOff } from '@object-ui/core';
+import { isActionSwitchedOff, isAskAiAction } from '@object-ui/core';
 import type { BulkActionDef } from '@object-ui/types';
 import { partitionBulkRows, hasVisibilityGate } from '../bulkEligibility';
 import { formatActionLabel } from './RowActionMenu';
@@ -100,7 +100,9 @@ export function useBulkActionItems(input: {
 }): BulkActionItems {
   const { selectedRows, actions, actionDefs, objectFields } = input;
   const mayInvoke = useCapabilityGate();
-  // [ADR-0160 D7] An `ask_ai` def is absent without an in-app assistant.
+  // [ADR-0160 D7] An `ask_ai` action runs on one record, so the bulk bar never
+  // offers one (objectstack#37142), with or without an in-app assistant. The
+  // type of a def promoted from an object action is on its `actionDef`.
   const drawsAction = useDrawsAction();
   const scope = usePredicateScope();
   // `language` keys the memo on the active language itself, so the label
@@ -112,6 +114,8 @@ export function useBulkActionItems(input: {
         mayInvoke(d?.requiredPermissions)
         && !isActionSwitchedOff(d)
         && drawsAction(d)
+        && !isAskAiAction(d)
+        && !isAskAiAction(d?.actionDef)
         && isBulkDefOffered(d, selectedRows, scope, objectFields),
     );
     const legacy = (Array.isArray(actions) ? actions : []).map((action) => {

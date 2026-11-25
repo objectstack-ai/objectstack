@@ -16,7 +16,7 @@
  *   ActionSchema[] → ActionEngine → ActionRunner → ActionResult
  */
 
-import { ActionRunner, type ActionDef, type ActionContext, type ActionResult } from './ActionRunner.js';
+import { ActionRunner, isAskAiAction, type ActionDef, type ActionContext, type ActionResult } from './ActionRunner.js';
 import { toPredicateInput } from '../evaluator/predicateInput.js';
 import { hasDeclaredPredicate } from '../evaluator/declaredPredicate.js';
 import { isActionSwitchedOff } from '../utils/action-activation.js';
@@ -308,10 +308,13 @@ export class ActionEngine {
       .map(ra => ra.action);
   }
 
-  /** Get actions that support bulk operations */
+  /**
+   * Get actions that support bulk operations. An `ask_ai` action never does:
+   * it runs on one record (ADR-0160 D7), so it is left out whatever it declares.
+   */
   getBulkActions(): ActionDef[] {
     return Array.from(this.actions.values())
-      .filter(ra => ra.bulkEnabled && !isActionSwitchedOff(ra.action) && this.runner.drawsAction(ra.action))
+      .filter(ra => ra.bulkEnabled && !isActionSwitchedOff(ra.action) && !isAskAiAction(ra.action))
       .sort((a, b) => (a.priority ?? 100) - (b.priority ?? 100))
       .map(ra => ra.action);
   }
@@ -360,6 +363,10 @@ export class ActionEngine {
     }
     if (!registered.bulkEnabled) {
       return { total: 0, succeeded: 0, failed: 0, results: [{ success: false, error: `Action ${actionName} does not support bulk operations` }] };
+    }
+    const bulkRefusal = this.runner.bulkRefusal(registered.action);
+    if (bulkRefusal) {
+      return { total: 0, succeeded: 0, failed: 0, results: [{ success: false, error: bulkRefusal }] };
     }
 
     const results: ActionResult[] = [];

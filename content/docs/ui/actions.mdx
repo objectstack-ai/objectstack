@@ -21,7 +21,7 @@ The types you'll actually use:
 | `modal` | Open a modal page — client-side only, no server dispatch | `target` names the modal page (to collect input *and* run logic, use `script` + `params`) |
 | `api` | Call an HTTP endpoint | `target` is the endpoint; `method` / `bodyShape` / `bodyExtra` shape the request. A same-origin `target` is dispatched through the action doors (REST and MCP), which forward it in-process after their gates; an off-origin one is called by the browser directly |
 | `form` | Open a form view, prefilled with the current record — in-shell, and the submit lands on the created record ([contract](/docs/protocol/objectui/actions#what-type-form-promises)) | `target` names the FormView; routed to `/forms/:target?recordId=…` |
-| `ask_ai` | Open the in-app assistant focused on the current record — client-side only, no message sent | No server dispatch; no `target` (refused). Not drawn where the console has no in-app assistant, and never an AI tool |
+| `ask_ai` | Open the in-app assistant focused on the current record — client-side only, no message sent | No server dispatch; no `target` (refused). Not drawn where the console has no in-app assistant, nor where no single record is held (the bulk bar, a related list's toolbar, a list toolbar unless exactly one row is selected); never an AI tool |
 
 <Callout type="warn">
 Prefer `confirmText`/`params` over the two action properties that are **not

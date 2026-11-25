@@ -98,7 +98,19 @@ export function catalogServesBuild(agents: readonly AgentDescriptor[]): boolean 
  * is the AI surface itself). An undeclared capability is off.
  */
 export function catalogServesFocus(agents: readonly AgentDescriptor[]): boolean {
-  return agents.some((agent) => agent.capabilities?.focus === true);
+  return focusAgentName(agents) !== undefined;
+}
+
+/**
+ * objectstack#37142 — the agent an `ask_ai` click opens the drawer on: one
+ * that declares `capabilities.focus`, so the drawer's pin control (drawn only
+ * when the ACTIVE agent honours the focus) is drawn on the record the click
+ * pinned. An `ask` agent is preferred among them; `undefined` when none
+ * declares it, which leaves the action absent.
+ */
+export function focusAgentName(agents: readonly AgentDescriptor[]): string | undefined {
+  const honouring = agents.filter((agent) => agent.capabilities?.focus === true);
+  return (honouring.find((agent) => isAskAgent(agent.name)) ?? honouring[0])?.name;
 }
 
 /**

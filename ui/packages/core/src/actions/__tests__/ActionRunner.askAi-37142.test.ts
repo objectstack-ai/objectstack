@@ -78,6 +78,12 @@ describe('ask_ai — the executor (ADR-0160 D7)', () => {
     expect(focus).toHaveBeenCalledWith({ object: 'contact', id: 'con_3' });
   });
 
+  it('reads the page record by `recordIdField` too', async () => {
+    const { runner, focus } = hostRunner({ record: { id: 'internal', uid: 'acc_uid' } });
+    await runner.execute({ ...ASK, recordIdField: 'uid' });
+    expect(focus).toHaveBeenCalledWith({ object: 'account', id: 'acc_uid' });
+  });
+
   it('reads the one selected row in a list header', async () => {
     const { runner, focus } = hostRunner({ selectedRecords: [{ id: 'acc_9' }] });
     await runner.execute({ ...ASK });
@@ -164,5 +170,26 @@ describe('ask_ai — absent without an in-app assistant', () => {
     const { runner, focus } = hostRunner();
     await runner.execute({ ...ASK }, { record: { id: 'acc_2' } });
     expect(focus).toHaveBeenCalledWith({ object: 'account', id: 'acc_2' });
+  });
+});
+
+describe('ask_ai — never a bulk action (one record, not one per row)', () => {
+  it('is refused for a selection by `bulkRefusal`, and nothing else is', () => {
+    const { runner } = hostRunner();
+    expect(runner.bulkRefusal({ ...ASK })).toBe('This action runs on a single record — select exactly one row.');
+    expect(runner.bulkRefusal({ name: 'close', type: 'script', target: 'close' })).toBeUndefined();
+  });
+
+  it('is left out of ActionEngine.getBulkActions and refused by executeBulk, even with an assistant', async () => {
+    const engine = new ActionEngine({ objectName: 'account' });
+    const focus = vi.fn();
+    engine.getRunner().setAssistantFocusHandler(focus);
+    engine.registerAction({ ...ASK }, { bulkEnabled: true });
+    engine.registerAction({ name: 'close', type: 'script', target: 'close' }, { bulkEnabled: true });
+    expect(engine.getBulkActions().map((a) => a.name)).toEqual(['close']);
+    const outcome = await engine.executeBulk('ask_about_account', [{ id: 'a' }, { id: 'b' }]);
+    expect(outcome.succeeded).toBe(0);
+    expect(outcome.results[0]).toMatchObject({ success: false });
+    expect(focus).not.toHaveBeenCalled();
   });
 });

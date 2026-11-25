@@ -2928,6 +2928,10 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
       resultDialog: _resultDialog,
       ...rest
     } = stripCollectedActionKeys(source);
+    // [ADR-0160 D7] An action that runs on ONE record (`ask_ai`) is refused
+    // here rather than run once per row, each run pinning a different row.
+    const bulkRefusal = actionRunner.bulkRefusal?.(rest as any);
+    if (bulkRefusal) throw new Error(bulkRefusal);
     // Dispatched with `reportsRefusal` for this one call (the runner's
     // `callContext`): a handler that meets a refusal answers it on
     // `res.refusal` and opens no notice of its own, because the result panel

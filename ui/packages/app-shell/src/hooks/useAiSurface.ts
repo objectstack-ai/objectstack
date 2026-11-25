@@ -43,19 +43,10 @@
 import { useRef } from 'react';
 import { useAgents } from '@object-ui/plugin-chatbot/core';
 import { catalogServesBuild, catalogServesFocus } from './surfaceAgent.js';
+import { resolveAiApiBase } from './aiApiBase.js';
 
-/**
- * Resolve the AI service base URL, mirroring AiChatPage / the Home CTAs:
- * an explicit `VITE_AI_BASE_URL` wins, otherwise `${VITE_SERVER_URL}/api/v1/ai`.
- * Shared so every catalog fetch (route guard, layouts, Home) hits the same URL.
- */
-export function resolveAiApiBase(): string {
-  const env = (import.meta as any).env ?? {};
-  const fromEnv = env.VITE_AI_BASE_URL as string | undefined;
-  if (fromEnv) return fromEnv.replace(/\/$/, '');
-  const serverUrl = (env.VITE_SERVER_URL as string | undefined) ?? '';
-  return `${serverUrl.replace(/\/$/, '')}/api/v1/ai`;
-}
+// Re-exported where its callers have always imported it from.
+export { resolveAiApiBase };
 
 export interface AiSurfaceState {
   /** True when the AI UI should render — the CALLER can reach >= 1 agent (access-filtered). */

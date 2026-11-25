@@ -83,6 +83,7 @@ import {
   resolveAffordance,
   isDeadlineSettled,
   isActionSwitchedOff,
+  isAskAiAction,
   ActionRunner,
   type ActionDef,
   type ActionResult,
@@ -1581,7 +1582,9 @@ export const RelatedList: React.FC<RelatedListProps> = ({
   // in-app assistant.
   const drawsAction = useDrawsAction();
   const permittedToolbarActions = React.useMemo(
-    () => (toolbarActions ?? []).filter((a) => mayInvoke(a?.requiredPermissions) && !isActionSwitchedOff(a) && drawsAction(a)),
+    // [ADR-0160 D7] The toolbar holds no single record (a launch from it runs
+    // on the parent), so an `ask_ai` action is absent here; its rows draw it.
+    () => (toolbarActions ?? []).filter((a) => mayInvoke(a?.requiredPermissions) && !isActionSwitchedOff(a) && drawsAction(a) && !isAskAiAction(a)),
     [toolbarActions, mayInvoke, drawsAction],
   );
 

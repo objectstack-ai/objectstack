@@ -17,7 +17,9 @@
  *   on a catalog row, objectstack#36999).
  *
  * The handler does what the pin control does: it pins the record through the
- * one setter (`setChatFocus`), then opens the drawer on whatever it shows. It
+ * one setter (`setChatFocus`), then opens the drawer on an agent that declares
+ * the capability ({@link focusAgentName}), so the drawer's own pin control,
+ * which asks the ACTIVE agent, is drawn on the pinned record. It
  * sends no message and makes no server call. A drawer that is closed has no
  * chat host yet; the setter holds the focus for the host that opening it
  * mounts.
@@ -28,23 +30,23 @@ import { useAgents } from '@object-ui/plugin-chatbot/core';
 import type { AssistantFocusHandler } from '@object-ui/core';
 import { useChatDockControl } from '../layout/chatDockControl.js';
 import { setChatFocus } from '../layout/chatFocus.js';
-import { resolveAiApiBase } from './useAiSurface.js';
-import { catalogServesFocus } from './surfaceAgent.js';
+import { resolveAiApiBase } from './aiApiBase.js';
+import { focusAgentName } from './surfaceAgent.js';
 
 export function useAskAiHandler(): AssistantFocusHandler | undefined {
   const dock = useChatDockControl();
   // No drawer, no fetch: the catalog is read only where the surface is on.
   const { agents } = useAgents({ apiBase: resolveAiApiBase(), enabled: dock !== null });
-  const focusServed = catalogServesFocus(agents);
+  const agent = focusAgentName(agents);
   const open = dock?.open;
   return useMemo<AssistantFocusHandler | undefined>(
     () =>
-      open && focusServed
+      open && agent
         ? (focus) => {
             setChatFocus({ object: focus.object, id: focus.id });
-            open();
+            open({ agent });
           }
         : undefined,
-    [open, focusServed],
+    [open, agent],
   );
 }

@@ -10,7 +10,9 @@
  *  2. A drawer, but no catalog agent declaring `capabilities.focus` → no
  *     handler (the action stays absent).
  *  3. A drawer and a focus-honouring agent → a handler that pins the record
- *     through `setChatFocus` and opens the drawer; it sends nothing.
+ *     through `setChatFocus` and opens the drawer ON that agent, so the
+ *     drawer's pin control (which asks the active agent) is drawn; it sends
+ *     nothing. An `ask` agent is preferred among several that honour it.
  */
 
 import { describe, it, expect, vi, beforeEach, type Mock } from 'vitest';
@@ -84,8 +86,17 @@ describe('useAskAiHandler (ADR-0160 D7)', () => {
     expect(harness.setChatFocus).toHaveBeenCalledTimes(1);
     expect(harness.setChatFocus).toHaveBeenCalledWith({ object: 'account', id: 'acc_1' });
     expect(control.open).toHaveBeenCalledTimes(1);
-    // On whatever the drawer shows: no target, no hand-off message.
-    expect(control.open).toHaveBeenCalledWith();
+    // On the agent that honours the focus, and with no hand-off message: the
+    // `ask` agent here does not declare it, so `custom` is opened.
+    expect(control.open).toHaveBeenCalledWith({ agent: 'custom' });
     expect(control.toggle).not.toHaveBeenCalled();
+  });
+
+  it('prefers an `ask` agent among several that honour a focus', () => {
+    harness.agents = [{ ...FOCUS_AGENT, name: 'custom' }, FOCUS_AGENT];
+    const control = dock();
+    const { result } = renderWith(control);
+    result.current!({ object: 'account', id: 'acc_1' });
+    expect(control.open).toHaveBeenCalledWith({ agent: 'ask' });
   });
 });
