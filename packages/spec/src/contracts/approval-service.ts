@@ -409,14 +409,19 @@ export interface ApprovalRequestRow {
      * - `ended` — `true` only when the record's approval is known to have
      *   stopped: the request's run is a root run (not a `subflow` body or a
      *   `map` item, whose end is not the approval's: the parent run goes on),
-     *   its flow holds no `subflow` or `map` node anywhere, its regions
-     *   included (a child run started from it may have opened requests,
-     *   after this one too, that the run's own requests do not show), and
-     *   the run has stopped for good. When `status` is not `pending`, it is
-     *   then the last decision the record's approval took. `false` means
-     *   "not known to have stopped": the run is still going, is a child run,
-     *   runs a flow that can start a child run, was opened before the
-     *   platform recorded which runs are root runs, or cannot be read.
+     *   the flow body the run ran holds no `subflow` or `map` node anywhere,
+     *   its regions included (a child run started from it may have opened
+     *   requests, after this one too, that the run's own requests do not
+     *   show), and the run has stopped for good. The body the run ran is
+     *   known only when the body armed now is the flow's newest registration
+     *   and was registered before the run started; a flow edited, rolled back
+     *   or re-registered since the run started is not judged by its current
+     *   body. When `status` is not `pending`, it is then the last decision the
+     *   record's approval took. `false` means "not known to have stopped":
+     *   the run is still going, is a child run, ran a body that can start a
+     *   child run, ran a body that is not known (its flow was registered
+     *   again since it started), was opened before the platform recorded
+     *   which runs are root runs, or cannot be read.
      *
      * Absent when nothing past this request is known: no later request was
      * opened and the approval is not known to have ended, or several later

@@ -1220,12 +1220,15 @@ and is absent when none was opened; `status` is that request's status, or this
 request's own without a `step`; `ended` is `true` only when the record's
 approval is known to have stopped: the request's run is a root run (an approval
 inside a `subflow` or a `map` item runs in a child run, whose end is not the
-approval's), its flow holds no `subflow` or `map` node anywhere (a child run
-files its requests under its own run, so the root run's requests cannot show
-what it decided), and the run has stopped for good. `false` means not known to
-have stopped, including a run that cannot be read. So on a flow that starts a
-child run, a decided request's line names the later steps of its own run but
-never says the approval ended. `outcome` is left out when nothing past
+approval's), the flow body the run ran holds no `subflow` or `map` node
+anywhere (a child run files its requests under its own run, so the root run's
+requests cannot show what it decided), and the run has stopped for good. The
+body the run ran is known only while the flow has not been registered again
+since the run started: after an edit, a rollback or a restart, older runs are
+not judged by today's body, and their requests are not served "ended". `false`
+means not known to have stopped, including a run that cannot be read. So on a
+flow that starts a child run, a decided request's line names the later steps of
+its own run but never says the approval ended. `outcome` is left out when nothing past
 the request is known: no later request and the approval not known to have
 ended, or several later requests pending at once. Every reader of the request
 gets it; it names only the later step and its status, never that request's

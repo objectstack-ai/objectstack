@@ -54,6 +54,14 @@ const OPAQUE_NODE_TYPES = new Set(['subflow', 'map', 'loop']);
  * item runs under its own run id, linked upward by `$parentRunId`. A request
  * a child run opens is filed under that child's `flow_run_id`, so it is not
  * among the run rows the route reads.
+ *
+ * ⚠️ A hand list of the engine's child-run starters: the only executors that
+ * set `$parentRunId` on a context are `subflow`
+ * (`service-automation/src/builtin/subflow-node.ts`) and `map`
+ * (`builtin/map-node.ts`); `loop`, `parallel` and `try_catch` run their
+ * regions inside the same run. A node kind that starts a child run joins this
+ * set in the same change, or {@link flowHostsChildRuns} under-reports it and
+ * "ended" is claimed past that child's requests.
  */
 const CHILD_RUN_NODE_TYPES = new Set(['subflow', 'map']);
 

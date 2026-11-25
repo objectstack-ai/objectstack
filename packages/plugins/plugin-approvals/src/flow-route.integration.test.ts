@@ -437,6 +437,36 @@ describe('[#26668] the approvals get serves the route a request takes, not the f
     });
   });
 
+  it('[#35863] a flow edited after the run is not judged by the edit: the run\'s own body hosted a subflow', async () => {
+    // The run's body: the manager, then legal in a child run. Registered under its own name so the edit below touches no other pin.
+    const name = 'contract_edited_after_run';
+    automation.registerFlow(name, { ...REVIEWED_THEN_LEGAL, name } as any);
+    await new Promise((r) => setTimeout(r, 5)); // registered strictly before the run starts
+    const manager = await submit(name, {});
+    const legal = await approve(manager, 'u_mgr');
+    expect(legal.flow_run_id, 'the legal step runs in a child run').not.toBe(manager.flow_run_id);
+    await reject(legal, 'u_legal');
+    expect((await automation.getRun(manager.flow_run_id))?.status, 'the root run has ended').toBe('completed');
+    expect('outcome' in (await get(manager)).flow_route).toBe(false);
+
+    // The flow is edited to drop its subflow, under the SAME version number: the body armed now hosts no child run.
+    const { nodes, edges } = REVIEWED_THEN_LEGAL;
+    automation.registerFlow(name, {
+      ...REVIEWED_THEN_LEGAL, name,
+      nodes: nodes.filter((n) => n.id !== 'legal'),
+      edges: [...edges.filter((e) => e.source !== 'legal' && e.target !== 'legal'), { id: 'r5', source: 'manager_review', target: 'done', label: 'approve' }],
+    } as any);
+    // Still no outcome: the run ran the body with the subflow, and legal's rejection was the last decision.
+    const row = await get(manager);
+    expect(row.flow_route).toEqual({ steps: [{ id: 'manager_review', label: 'Manager', state: 'done' }], ahead: 'decided' });
+
+    // A run started on the edited body does end at the manager: "ended" is judged by the body a run ran.
+    await new Promise((r) => setTimeout(r, 5));
+    const next = await submit(name, {});
+    await approve(next, 'u_mgr');
+    expect((await get(next)).flow_route.outcome).toEqual({ status: 'approved', ended: true });
+  });
+
   it('[#35863] a request whose snapshot does not say its run is a root run is never served "ended"', async () => {
     const manager = await submit(LINEAR.name, {});
     const director = await approve(manager, 'u_mgr');
