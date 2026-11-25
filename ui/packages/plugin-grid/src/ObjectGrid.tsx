@@ -24,7 +24,7 @@
 import React, { useEffect, useState, useCallback, useMemo } from 'react';
 import type { ObjectGridSchema, DataSource, ViewData, TableSortItem, DataTableSchema, ListViewExportFormat, RecordNavigateAction } from '@object-ui/types';
 import { isSystemManagedField, detectStatusField } from '@object-ui/types';
-import { SchemaRenderer, isPermissionError, useDataScope, useNavigationOverlay, useAction, useSafeFieldLabel, usePredicateScope, useCapabilityGate, useRelatedRecordActions, notifyDataChanged, useMetadata, claimAnswerWarnings, toastRecordSave, useOwnWrites, createOwnWrites, type AnswerWarningClaim, type RecordSaveFeedback } from '@object-ui/react';
+import { SchemaRenderer, isPermissionError, useDataScope, useNavigationOverlay, useAction, useSafeFieldLabel, usePredicateScope, useCapabilityGate, useDrawsAction, useRelatedRecordActions, notifyDataChanged, useMetadata, claimAnswerWarnings, toastRecordSave, useOwnWrites, createOwnWrites, type AnswerWarningClaim, type RecordSaveFeedback } from '@object-ui/react';
 // objectui#8920 — the grid reaches a cell renderer through THIS module and
 // nowhere else. `getCellRenderer` / `resolveCellRendererType` are deliberately
 // NOT imported here: six sites spelling the resolve three different ways is
@@ -1489,12 +1489,14 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
   // objectstack#36911 — the row menu reads the same locks: a row an approval
   // locks offers no Edit, as the record page offers none (objectstack#35593).
   // Delete stays for a record held by its own approval: the server deletes it
-  // and cancels its request. (The batch read reports only that case today, not
-  // a line held because its master is held, which refuses delete too; #37041.) So the hook also runs on a grid whose rows offer Edit. It still
+  // and cancels its request. objectstack#37231 — a master-detail line held
+  // because its MASTER is held (the read's `lockSource: 'master'`) offers no
+  // Delete either: the detail-row lock hook refuses it with `RECORD_LOCKED`.
+  // So the hook also runs on a grid whose rows offer Edit or Delete. It still
   // reads nothing until it is asked: by a cell being selected, or by a row's
   // actions being reached for (`demandRowActions` below).
-  const rowMenuOffersEdit = canEdit && !!onEdit;
-  const approvalLocks = useRowApprovalLocks(hostCellSelection || rowMenuOffersEdit ? objectName : undefined);
+  const rowMenuReadsLocks = (canEdit && !!onEdit) || (canDelete && !!onDelete);
+  const approvalLocks = useRowApprovalLocks(hostCellSelection || rowMenuReadsLocks ? objectName : undefined);
   /**
    * objectstack#36911 — what reaching for a row's actions asks
    * (`RowActionMenuProps.onActionsDemand`, objectstack#34208): the
@@ -1506,8 +1508,8 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
   const probeApprovalLocks = approvalLocks.probe;
   const demandRowActions = useCallback(() => {
     requestRecordVerdicts();
-    if (rowMenuOffersEdit) probeApprovalLocks(pageRecordIds);
-  }, [requestRecordVerdicts, probeApprovalLocks, rowMenuOffersEdit, pageRecordIds]);
+    if (rowMenuReadsLocks) probeApprovalLocks(pageRecordIds);
+  }, [requestRecordVerdicts, probeApprovalLocks, rowMenuReadsLocks, pageRecordIds]);
   // objectstack#35956 — a cell change that makes other fields required asks
   // for them first, and saves them with it (`./objectGridRequiredPrompt`).
   const fieldLabelOf = (field: string): string => {
@@ -2007,6 +2009,8 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
   // applies per row, read here too so the Actions column's verdict (below the
   // early returns, where no hook may sit) sees the same declared set.
   const mayInvokeRowAction = useCapabilityGate();
+  // [ADR-0160 D7] …and the provider's answer for an `ask_ai` row action.
+  const drawsRowAction = useDrawsAction();
   const getRowStyle = useCallback((row: Record<string, unknown>): React.CSSProperties | undefined => {
     const rules = schema.conditionalFormatting;
     if (!rules || rules.length === 0) return undefined;
@@ -2439,7 +2443,7 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
     pinnedRightCols, unpinnedCols, rightPinnedClasses, rightPinnedCellClasses, userLeftPinnedCount,
   } = resolveObjectGridActionsColumn({
     schema, data, objectSchema, persistedColumns, operations, resolvedRowActionDefs,
-    wantEditAction, wantDeleteAction, mayInvokeRowAction, rowOperations, canEdit, canDelete,
+    wantEditAction, wantDeleteAction, mayInvokeRowAction, drawsRowAction, rowOperations, canEdit, canDelete,
     recordVerdict, approvalLocks, demandRowActions, predicateScope, onEdit, onDelete, editPredicates,
     deletePredicates, executeAction, setRefreshKey, t, foldInlineRowActions: inlineActionFold.folded,
     drawRowControls: !listPageGrid,
@@ -2926,6 +2930,10 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
       resultDialog: _resultDialog,
       ...rest
     } = stripCollectedActionKeys(source);
+    // [ADR-0160 D7] An action that runs on ONE record (`ask_ai`) is refused
+    // here rather than run once per row, each run pinning a different row.
+    const bulkRefusal = actionRunner.bulkRefusal?.(rest as any);
+    if (bulkRefusal) throw new Error(bulkRefusal);
     // Dispatched with `reportsRefusal` for this one call (the runner's
     // `callContext`): a handler that meets a refusal answers it on
     // `res.refusal` and opens no notice of its own, because the result panel

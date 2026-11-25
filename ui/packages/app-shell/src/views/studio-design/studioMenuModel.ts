@@ -65,7 +65,8 @@ export type StudioMenuGroup = (typeof STUDIO_MENU_GROUPS)[number];
 /**
  * The types a designer creates in: listed on every package, holding one or
  * not. Named, not read off the pillar map: a type keeps its entry when its
- * designer leaves its pillar for the metadata address (objectstack#36905).
+ * designer leaves its pillar for the metadata address (objectstack#36903, the
+ * flow; objectstack#36905, the permission set).
  */
 export const STUDIO_MENU_DESIGNER_TYPES: readonly string[] = Object.freeze(['object', 'flow', 'permission']);
 

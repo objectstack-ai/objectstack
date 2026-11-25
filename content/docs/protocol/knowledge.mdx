@@ -158,12 +158,19 @@ registers itself with that name. Adapter config (endpoint, dataset id,
 Canonical shapes shared by every adapter:
 
 - `KnowledgeDocument` — one logical document (`id`, `sourceId`,
-  `sourceRecordId?`, `content`, `metadata`, `permissions?`, `docHash?`).
-  `docHash` is a hash of the assembled document — content, title and
-  metadata, in a stable key order, behind a version prefix (`v1:`). The
-  service computes it on every document it hands an adapter, and
-  `indexDocument` refuses a document that already carries one; the adapter
-  stores it and returns it as stored, and never computes or alters it.
+  `sourceRecordId?`, `content`, `metadata`, `permissions?`,
+  `organizationId?`, `docHash?`). `organizationId` is the organization of
+  the record the document was assembled from: the service sets it from the
+  record's `organization_id` under a walled tenancy posture (`group` or
+  `isolated`), and leaves it absent under `single`, for `file` / `http`
+  sources and for a record with no organization — see
+  [Organization scope](#organization-scope). `docHash` is a hash of the
+  assembled document — content, title and metadata, and the organization
+  when the document has one, in a stable key order, behind a version prefix
+  (`v1:`). The service computes both on every document it hands an adapter,
+  and `indexDocument` refuses a document that already carries either; the
+  adapter stores them and returns `docHash` as stored, and never computes or
+  alters either.
 - `KnowledgeChunk` — adapter-produced chunk of a document. The framework
   does **not** chunk; adapters do.
 - `KnowledgeHit` — a search result (`chunkId`, `documentId`, `score`,
@@ -231,7 +238,10 @@ in their plugin options.
 
 Every member past `upsert` / `search` / `delete` is optional (ADR-0161
 K8): an adapter that lacks one keeps working, and the service does what it
-did before that member existed. `listDocuments` lists the documents the
+did before that member existed. `AdapterSearchOptions.organizationIds` is the
+caller's organizations; an adapter that reads it ranks only those
+organizations' documents, filtering before it ranks — see
+[Organization scope](#organization-scope). `listDocuments` lists the documents the
 adapter holds for a source, a page of at most `limit` entries at a time, each
 with the `docHash` it was stored with; `nextCursor` is absent once the
 listing is complete. A document written while a listing runs may be missing
@@ -246,13 +256,14 @@ import { runKnowledgeAdapterContract } from '@objectstack/service-knowledge/test
 runKnowledgeAdapterContract({
   name: 'my-adapter',
   makeAdapter: () => new MyAdapter(/* a fresh, empty store */),
-  implements: { listDocuments: true },
+  implements: { listDocuments: true, organizationIds: true },
 });
 ```
 
 It covers upsert / search / delete, `listDocuments` page boundaries and
-`docHash` round-trips, and — through a real `KnowledgeService` — the skip and
-the purge below. `implements` declares the optional members, and the suite
+`docHash` round-trips, the organization filter, and — through a real
+`KnowledgeService` — the skip and the purge below, and a search from one
+organization under `isolated` and `group`. `implements` declares the optional members, and the suite
 checks the declaration against the adapter. `./testing` is a test-only,
 ESM-only entry that imports `vitest`; nothing in the runtime entry reaches it.
 `knowledge-memory` runs it as the reference implementation.
@@ -328,6 +339,42 @@ This is the same pattern as the existing permission-aware data tools
 (see `actions-as-tools.mdx`).
 No matter how aggressive an adapter's retrieval is, the user never
 sees a chunk extracted from a record they can't read.
+
+### Organization scope
+
+In a deployment with more than one organization, the adapter ranks only the
+caller's organizations' documents (ADR-0161 K8, item 9). Without that, the
+best-ranked passages could all belong to another organization, and the
+re-read above would empty those places. The filter decides what is ranked;
+the re-read still decides what is returned.
+
+- **At assembly.** Under the `group` and `isolated` tenancy postures, a
+  document built from a record carries the record's `organization_id` as
+  `organizationId`. Under `single`, for `file` / `http` sources and for a
+  record with no organization, it carries none.
+- **At search.** For each `object` source, the service hands the adapter
+  `organizationIds`, the organizations the tenancy wall gives the caller for
+  that object: under `isolated` the caller's active organization, under
+  `group` every organization the caller holds a membership in. The service
+  computes the set from the caller's execution context and the deployment's
+  posture. No tool argument or search option supplies it, and
+  `search_knowledge` refuses an `organizationIds` argument.
+- **No filter** (`organizationIds` absent) under `single`, for the system
+  identity, for a `file` / `http` source, and for an object outside the wall
+  (tenancy disabled, or no `organization_id` column). The adapter ranks every
+  document of the source, as before.
+- **An empty set** (`[]`) is a caller with no organization behind a wall, for
+  example no active organization under `isolated`. The adapter ranks
+  nothing; an empty set never means "no filter".
+- **A posture that cannot be read**: a search leaves every `object` source
+  unsearched for that call and logs it at `error`. A reindex stops before
+  writing anything and says why.
+
+**Documents indexed before this change** carry no `organizationId`. Behind a
+wall, a filtered search does not rank them until a complete reindex writes
+them again. The organization is part of `docHash`, so the reindex does not
+skip them. Under `single` nothing changes: a document without an organization
+hashes as before, and the reindex skips it as before.
 
 ### Source admission: exposure and field-level rules
 

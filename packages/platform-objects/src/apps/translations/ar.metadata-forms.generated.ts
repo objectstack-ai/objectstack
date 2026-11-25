@@ -1780,6 +1780,18 @@ export const arMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "النطاق الزمني",
         helpText: "الفترة التي تُفتح بها اللوحة، وما إذا كان بإمكان المشاهدين اختيار تواريخهم الخاصة."
       },
+      "dateRange.field": {
+        label: "Date Field",
+        helpText: "The date field the period filters on. Leave it empty to use the creation date."
+      },
+      "dateRange.defaultRange": {
+        label: "Default Period",
+        helpText: "The period the dashboard opens with."
+      },
+      "dateRange.allowCustomRange": {
+        label: "Allow Custom Range",
+        helpText: "Let viewers pick their own start and end dates."
+      },
       globalFilters: {
         label: "عوامل التصفية العامة",
         helpText: "عوامل تصفية يستخدمها المشاهدون لتضييق جميع عناصر الواجهة دفعة واحدة، أو العناصر التي تختارها فقط."

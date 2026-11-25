@@ -1857,6 +1857,8 @@ const zh = {
       settings: '报表设置',
       pendingDraft: '这张报表有一份还没发布的修改。先在上方发布或丢弃它，再保存。',
       nameTaken: '由这个名称生成的标识都已被占用。请给报表换个名称再保存。',
+      // objectstack#36906 — a report made from Studio's report list that could not be saved in the app's package.
+      savedOutsideApp: '这份报表没有存进应用的包：此处无法使用应用的定制包，所以 Studio 列表里看不到它。',
       adminOnlyTitle: '只有系统管理员能搭建报表',
       adminOnly: '报表对工作区里所有人生效，所以由系统管理员搭建。',
       designModeOnTitle: '请先完成布局设计',
@@ -1905,6 +1907,12 @@ const zh = {
         grouping: '选一个分组字段',
       },
     },
+  },
+  // objectstack#36906 — the × of an app page opened from a Studio list.
+  studioReturn: {
+    close: '返回 Studio',
+    closeLabel: '关闭并返回 Studio 列表',
+    leaveConfirm: '不保存就离开吗？未保存的修改将会丢失。',
   },
   dashboard: {
     total: '总计',
@@ -4939,6 +4947,7 @@ const zh = {
     tool: {
       aggregate_data: '汇总相关数据',
       get_record: '读取这条记录',
+      get_record_context: '读取记录资料',
       list_datasets: '查看指标',
       query_data: '查询所需数据',
       query_dataset: '按指标查询',

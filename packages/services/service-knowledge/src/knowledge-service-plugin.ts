@@ -1,6 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import type { Plugin, PluginContext } from '@objectstack/core';
+import { classifyAdmissionTenancyPosture } from '@objectstack/core';
 import type {
   IDataEngine,
   IRealtimeService,
@@ -166,6 +167,25 @@ export class KnowledgeServicePlugin implements Plugin {
           throw err;
         }
       },
+      // [ADR-0161 K8, item 9] The EFFECTIVE tenancy posture, read per assembly
+      // and per search from the kernel's `tenancy` service, classified the way
+      // every admission seam classifies it: never registered → `undefined` (no
+      // wall exists); registered and unreadable → a throw, which the service
+      // answers fail-closed. The async accessor first, so a factory-registered
+      // service resolves; the sync leg serves a `LiteKernel`-shaped host.
+      resolveTenancyPosture: () =>
+        classifyAdmissionTenancyPosture(async () => {
+          const kernel = typeof ctx.getKernel === 'function' ? ctx.getKernel() : undefined;
+          if (kernel && typeof kernel.getServiceAsync === 'function') {
+            return kernel.getServiceAsync<{ posture?: string; isolationActive?: boolean }>('tenancy');
+          }
+          try {
+            return ctx.getService<{ posture?: string; isolationActive?: boolean }>('tenancy');
+          } catch (err) {
+            if (isServiceNotRegisteredError(err, 'tenancy')) return undefined;
+            throw err;
+          }
+        }),
     });
 
     for (const source of this.options.sources ?? []) {

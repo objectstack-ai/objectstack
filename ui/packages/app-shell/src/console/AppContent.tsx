@@ -861,17 +861,25 @@ export function AppContent({ extraRoutes, extraRoutesNoApp }: AppContentProps = 
   // the URL means Back closes the overlay and a refresh reopens it still
   // correctly parent-linked — no transient component state to lose.
   const formObjectParam = searchParams.get(RECORD_FORM_OBJECT_PARAM);
-  const formLinkParam = searchParams.get(RECORD_FORM_LINK_PARAM);
+  // objectstack#37246 — `formLink` repeats: the parent pair first, then the
+  // values it seeds beside it (the relationship lookup's `dependsOn` fields).
+  // Keyed on the pairs' JSON text, a primitive, so the values keep their identity
+  // while the URL does (AGENTS.md #10).
+  const formLinkKey = JSON.stringify(searchParams.getAll(RECORD_FORM_LINK_PARAM));
   const editingRecord = useMemo(
     () => (recordFormParam && recordFormParam !== 'new' ? { id: recordFormParam } : null),
     [recordFormParam],
   );
   const formLinkValues = useMemo(() => {
-    if (!formLinkParam) return undefined;
-    const i = formLinkParam.indexOf(':');
-    if (i <= 0) return undefined;
-    return { [formLinkParam.slice(0, i)]: formLinkParam.slice(i + 1) };
-  }, [formLinkParam]);
+    const values: Record<string, string> = {};
+    for (const pair of JSON.parse(formLinkKey) as string[]) {
+      const i = pair.indexOf(':');
+      const field = pair.slice(0, i);
+      if (i <= 0 || field in values) continue;
+      values[field] = pair.slice(i + 1);
+    }
+    return Object.keys(values).length > 0 ? values : undefined;
+  }, [formLinkKey]);
   const [refreshKey, setRefreshKey] = useState(0);
 
   const isDialogOpen = !!recordFormParam;

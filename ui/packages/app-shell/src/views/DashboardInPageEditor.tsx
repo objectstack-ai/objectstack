@@ -207,19 +207,53 @@ export function filtersSectionLabel(locale: SupportedLocale): string | null {
 }
 
 /**
+ * The narrowest window the edit state is offered in: Tailwind's `sm`, from
+ * which the page draws the side panel the edit state needs.
+ */
+export const DASHBOARD_EDIT_MIN_WIDTH = 640;
+
+/** Is the window at least {@link DASHBOARD_EDIT_MIN_WIDTH} wide right now? */
+function dashboardEditFitsNow(): boolean {
+  return typeof window === 'undefined' || window.innerWidth >= DASHBOARD_EDIT_MIN_WIDTH;
+}
+
+/**
+ * Whether the window is wide enough for the edit state (objectstack#36906).
+ * Read synchronously on the first render, as `usePhoneViewport` reads its
+ * answer, so a landing that asks for the edit state never sees a phone as wide.
+ */
+export function useDashboardEditFits(): boolean {
+  const [fits, setFits] = React.useState<boolean>(dashboardEditFitsNow);
+  React.useEffect(() => {
+    if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return;
+    const mql = window.matchMedia(`(min-width: ${DASHBOARD_EDIT_MIN_WIDTH}px)`);
+    const onChange = () => setFits(dashboardEditFitsNow());
+    mql.addEventListener('change', onChange);
+    // A width that moved between the first render and this effect.
+    onChange();
+    return () => mql.removeEventListener('change', onChange);
+  }, []);
+  return fits;
+}
+
+/**
  * Whether this principal is offered the Edit button for a dashboard
  * `ownerPackageId` owns: the gate of the app → Studio entries
  * (`useStudioEntryGate`: a workspace admin who may author metadata, on a
  * package Studio lists, writable or not; never a kernel package). A
  * read-only package's dashboard is edited through its customization package.
  * Not while the shell's design mode is on (objectstack#36692): the two are
- * separate entries, never open together.
+ * separate entries, never open together. Not on a phone either
+ * (objectstack#36906): the edit state needs its side panel, so a window
+ * narrower than {@link DASHBOARD_EDIT_MIN_WIDTH} is offered no edit, and a
+ * landing that asks for one (from Studio, from the design mode) opens none.
  */
 export function useDashboardEditOffered(ownerPackageId: string | null | undefined): boolean {
   const path = ownerPackageId ? studioPackagePath(ownerPackageId) : null;
   const gated = useStudioEntryGate(path) !== null;
   const designing = useDesignModeActive();
-  return gated && !designing;
+  const fits = useDashboardEditFits();
+  return gated && !designing && fits;
 }
 
 /** The page header's Edit button. */

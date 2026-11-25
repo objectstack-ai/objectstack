@@ -24,7 +24,7 @@ import { CELL_OVERLAY_HOST_CLASS, isCellContentTruncated, type CellOverlaySize }
 import { ComponentRegistry, compareSortValues, csvBlob, evalRowPredicate, formatDate, hasDeclaredPredicate, isActionSwitchedOff, formatDateTime, fromDateTimeInputValue, getSortValue, isEmptyValue, isImpossibleStoredDay, toDateInputValue, toDateTimeInputValue } from '@object-ui/core';
 import type { DataTableSchema, TableColumn, TableSortItem, TableColumnType } from '@object-ui/types';
 import type { SortDirection } from '@objectstack/spec/shared';
-import { SchemaRenderer, toRenderableSchema, useCapabilityGate, useRowPredicate, usePredicateScope, extractFieldErrors, unmarkedRefusalLines } from '@object-ui/react';
+import { SchemaRenderer, toRenderableSchema, useCapabilityGate, useDrawsAction, useRowPredicate, usePredicateScope, extractFieldErrors, unmarkedRefusalLines } from '@object-ui/react';
 import { createSafeTranslation, useDisplayLocale } from '@object-ui/i18n';
 import { 
   Table, 
@@ -811,9 +811,10 @@ export const DataTableBuiltinRowActionItem: React.FC<{
 function gatedDataTableRowActions(
   schema: Pick<DataTableSchema, 'rowActionDefs' | 'onRowActionDef'>,
   mayInvoke: ReturnType<typeof useCapabilityGate>,
+  drawsAction: ReturnType<typeof useDrawsAction>,
 ): RowActionDef[] {
   return Array.isArray(schema.rowActionDefs) && schema.onRowActionDef
-    ? schema.rowActionDefs.filter((d) => mayInvoke(d.requiredPermissions) && !isActionSwitchedOff(d))
+    ? schema.rowActionDefs.filter((d) => mayInvoke(d.requiredPermissions) && !isActionSwitchedOff(d) && drawsAction(d))
     : [];
 }
 
@@ -849,9 +850,11 @@ function useDataTableRowMenuPlan(schema: DataTableSchema, row: any): DataTableRo
    * to, so an unhandled `rowActionDefs` contributes no items (unchanged).
    */
   const mayInvoke = useCapabilityGate();
+  // [ADR-0160 D7] An `ask_ai` row action is absent without an in-app assistant.
+  const drawsAction = useDrawsAction();
   const customActions = useMemo(
-    () => gatedDataTableRowActions(schema, mayInvoke),
-    [schema.rowActionDefs, schema.onRowActionDef, mayInvoke],
+    () => gatedDataTableRowActions(schema, mayInvoke, drawsAction),
+    [schema.rowActionDefs, schema.onRowActionDef, mayInvoke, drawsAction],
   );
   return useMemo(
     () =>
@@ -2262,6 +2265,7 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
   // decision and the items it opens read one answer (see `rowContextMenuItems`).
   const rowMenuScope = usePredicateScope();
   const rowMenuMayInvoke = useCapabilityGate();
+  const rowMenuDrawsAction = useDrawsAction();
   
   // Refs for column resizing
   const resizingColumn = useRef<string | null>(null);
@@ -4539,7 +4543,7 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
       onRowDelete: schema.onRowDelete,
       editPredicates: schema.rowEditPredicates,
       deletePredicates: schema.rowDeletePredicates,
-      customActions: gatedDataTableRowActions(schema, rowMenuMayInvoke),
+      customActions: gatedDataTableRowActions(schema, rowMenuMayInvoke, rowMenuDrawsAction),
       row,
       scope: rowMenuScope,
     });

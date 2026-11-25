@@ -55,7 +55,7 @@ import { formatMetadataError } from '@object-ui/data-objectstack';
 import { useObjectTranslation, useObjectLabel } from '@object-ui/i18n';
 import { usePermissions, useFieldPermissions } from '@object-ui/permissions';
 import { useAuth, useWorkspaceAdminStatus } from '@object-ui/auth';
-import { resolveAffordance, resolveFilterPlaceholders, type SchemaLike } from '@object-ui/core';
+import { optionDisplayLabel, resolveAffordance, resolveFilterPlaceholders, type SchemaLike } from '@object-ui/core';
 import { normalizeFilterOperator, ViewFilterRuleSchema } from '@objectstack/spec/ui';
 import type { ViewFilterRule } from '@objectstack/spec/ui';
 import {
@@ -328,7 +328,7 @@ export function ObjectDataPage({ dataSource, objects }: any) {
   const { t, language } = useObjectTranslation();
   // objectstack#35624 — the app Save as view saves the new view into.
   const createApp = useRuntimeCreateApp(t);
-  const { objectLabel, objectPluralLabel, fieldLabel } = useObjectLabel();
+  const { objectLabel, objectPluralLabel, fieldLabel, translateOptions } = useObjectLabel();
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const perms = usePermissions();
@@ -497,7 +497,22 @@ export function ObjectDataPage({ dataSource, objects }: any) {
 
   // One display chip per field — a date-bucket drill's two range triples
   // (>= start, < end) collapse into a single "start → end" chip (objectstack-ai/objectstack#1752).
-  const filterChips = React.useMemo(() => groupFilterChips(urlFilters), [urlFilters]);
+  //
+  // objectstack#37259 — a whole-value comparand on a field that declares
+  // `options` reads as its option's translated label: the grid cell's own path,
+  // `translateOptions` over the declared list, then the matched option's label.
+  // A value that names no option stays raw, so a stale or hand-edited address
+  // still shows what it filters by. Computed per render, like the field half's
+  // `fieldLabel`, so both halves of a chip read the catalogue at the same moment.
+  const filterChips = groupFilterChips(urlFilters, (field, value) => {
+    const raw = String(value);
+    const options = objectDef?.fields?.[field]?.options;
+    if (!objectDef || !Array.isArray(options) || options.length === 0) return raw;
+    const option = translateOptions(objectDef.name, field, options).find(
+      (opt) => String(opt.value) === raw,
+    );
+    return option ? optionDisplayLabel(option) : raw;
+  });
 
   /**
    * objectstack#35601 — a list opened by a record's related list (「↗」)

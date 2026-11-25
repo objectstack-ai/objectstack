@@ -27,6 +27,13 @@ import { KNOWLEDGE_SERVICE } from '@objectstack/spec/contracts';
  * stores each document's `docHash` as given and lists it back as stored, in
  * document-id order, the cursor being the last id of the page before. It runs
  * the contract suite of `@objectstack/service-knowledge/testing`.
+ *
+ * The first reader of the organization filter (ADR-0161 K8, item 9): it
+ * stores each document's `organizationId` as given and, when a search is
+ * handed `organizationIds`, ranks only the documents whose organization is in
+ * that set — the filter runs before the scoring, so `topK` is filled from them
+ * alone. An empty set ranks nothing; a document stored without an
+ * organization is not ranked by a filtered search.
  */
 export class KnowledgeMemoryAdapter implements IKnowledgeAdapter {
   readonly id: string;
@@ -92,10 +99,17 @@ export class KnowledgeMemoryAdapter implements IKnowledgeAdapter {
     const qNorm = vectorNorm(qVec);
     if (qNorm === 0) return [];
 
+    // The organization filter first (ADR-0161 K8, item 9): absent → every
+    // document; present → only the documents of those organizations, so a
+    // document with none is out, and `[]` leaves nothing to rank.
+    const organizations = opts.organizationIds === undefined ? undefined : new Set(opts.organizationIds);
+    const inScope = organizations === undefined
+      ? chunks
+      : chunks.filter((c) => c.organizationId !== undefined && organizations.has(c.organizationId));
     const filter = opts.filter ?? {};
     const filtered = Object.keys(filter).length
-      ? chunks.filter((c) => matchesFilter(c.metadata, filter))
-      : chunks;
+      ? inScope.filter((c) => matchesFilter(c.metadata, filter))
+      : inScope;
 
     const scored = filtered.map((c) => ({
       chunk: c,
@@ -126,6 +140,8 @@ interface ChunkRecord {
   sourceRecordId?: string;
   /** The document's `docHash`, stored as given (ADR-0161 K8, item 2). */
   docHash?: string;
+  /** The document's `organizationId`, stored as given (ADR-0161 K8, item 9). */
+  organizationId?: string;
   content: string;
   title?: string;
   metadata: Record<string, unknown>;
@@ -167,6 +183,7 @@ function chunkAndEmbed(doc: KnowledgeDocument): ChunkRecord[] {
       documentId: doc.id,
       sourceRecordId: doc.sourceRecordId,
       docHash: doc.docHash,
+      organizationId: doc.organizationId,
       content,
       title: doc.title,
       metadata: doc.metadata ?? {},

@@ -51,6 +51,12 @@ import { laneKeyOf } from './kanbanReferenceLanes';
  * lane query does; a board of one query matches it without case, as it buckets
  * its cards (`index.tsx`). A board whose lanes come from the data draws one
  * lane per key, so only the empty key is "Uncategorized".
+ *
+ * ## A partial answer
+ *
+ * The door cuts a grouped read to the deployment's default page size and says
+ * so (`hasMore`). A cut answer draws no figure for any lane
+ * ({@link readLaneStatistic}, objectstack#36870).
  */
 
 /** The lane statistics answered by the server lane read. */
@@ -229,16 +235,36 @@ export function readLaneFigures(rows: unknown, reading: LaneFigureReading): Reco
 }
 
 /**
+ * Every lane's figure from the lane read's ANSWER, or `null` — no figure for
+ * any lane — when the answer is partial (objectstack#36870).
+ *
+ * The grouped read can be cut: under a deployment's default page size the
+ * door slices the group rows and answers `hasMore`, which
+ * `DataSource.queryGroupHeaders` hands on as the answer's `hasMore`. A cut
+ * answer is not every lane's groups: a lane that folds several groups (the
+ * trailing "Uncategorized" lane) would total only the groups answered, and a
+ * lane whose group was dropped would read as empty — `0` for a sum. Neither is
+ * a figure the board can draw, and the answer does not say which lanes it cut,
+ * so no lane draws one.
+ */
+export function readLaneStatistic(
+  answer: unknown,
+  reading: LaneFigureReading,
+): Record<string, LaneFigure> | null {
+  if (Array.isArray(answer) && (answer as { hasMore?: unknown }).hasMore === true) return null;
+  return readLaneFigures(answer, reading);
+}
+
+/**
  * One lane's figure: what the read answered for it, else the figure of a lane
  * that holds no record — `0` for a sum, none for an average, a minimum or a
  * maximum.
  *
  * A lane the board knows holds records (`holdsRecords`: its count is above
- * zero) that no group answered for draws NO figure. The grouped read can be
- * cut: under a deployment's default page size the door slices the group rows
- * and answers `hasMore`, which `queryGroupHeaders` does not hand on. Such a
- * lane's group was dropped, not empty, and a `0` there would be a wrong figure
- * in place of a missing one.
+ * zero) that no group answered for draws NO figure: the board's count and the
+ * whole answer disagree (a write landed between the two reads), and a `0`
+ * there would be a wrong figure in place of a missing one. A PARTIAL answer
+ * never reaches here — {@link readLaneStatistic} answers no figures for it.
  */
 export function laneFigureOf(
   figures: Readonly<Record<string, LaneFigure>>,

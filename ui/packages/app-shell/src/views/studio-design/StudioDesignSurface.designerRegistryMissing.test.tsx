@@ -109,6 +109,9 @@ import { getStudioCanvasPreview } from './studio-canvas-preview';
 // The source under test reaches dynamic imports of `@objectstack/lint`; their first
 // load is paid here, at collection, never inside a case's clock (`check:test-source-alias`).
 import '@objectstack/lint';
+// The source under test reaches these dynamic imports (the command palette's
+// record preview, the drafts panel's lint, the code editor): their first load
+// is paid here, at collection, never inside a case's clock (`check:test-source-alias`).
 import '@object-ui/plugin-detail';
 
 const dataSource = createEmptyDataSource();
@@ -253,13 +256,10 @@ describe('Automations pillar — the fourth site, found by sweeping (#6795 C, si
     assertRegistriesEmptyWithControl();
 
     render(
-      <MemoryRouter initialEntries={['/studio/com.acme.app/automations']}>
-        <AutomationsPillar packageId="com.acme.app" />
+      <MemoryRouter initialEntries={['/studio/com.acme.app/metadata/flow/nightly']}>
+        <AutomationsPillar packageId="com.acme.app" flowName="nightly" />
       </MemoryRouter>,
     );
-    // The rail row, by role: the open flow's label now also heads the canvas
-    // (objectui#11665), so the bare text 'Nightly' names two elements.
-    fireEvent.click(await screen.findByRole('button', { name: /Nightly/ }));
 
     await waitFor(
       async () => {
@@ -287,8 +287,8 @@ describe('Automations pillar — the fourth site, found by sweeping (#6795 C, si
     mockClient.layered.mockClear();
 
     render(
-      <MemoryRouter initialEntries={['/studio/~org/automations?surface=flow%3Anobody_has_this']}>
-        <AutomationsPillar packageId={null} />
+      <MemoryRouter initialEntries={['/studio/~org/metadata/flow/nobody_has_this?source=runtime']}>
+        <AutomationsPillar packageId={null} flowName="nobody_has_this" />
       </MemoryRouter>,
     );
 
@@ -296,8 +296,9 @@ describe('Automations pillar — the fourth site, found by sweeping (#6795 C, si
     const hits = screen.getAllByText(
       'No metadata designers are registered in this session, so this flow cannot be designed here.',
     );
-    // The canvas header chip AND the rail, as with a flow open.
-    expect(hits.length).toBe(2);
+    // The header's chip; objectstack#36903 — no Configuration aside is drawn
+    // beside a flow the scope does not hold, so the chip is the one site.
+    expect(hits.length).toBe(1);
     expect(mockClient.layered).not.toHaveBeenCalledWith('flow', expect.anything());
   });
 });

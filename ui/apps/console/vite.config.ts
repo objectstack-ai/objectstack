@@ -1577,7 +1577,7 @@ export default defineConfig({
             },
             {
               name: 'plugin-detail-core',
-              test: /[\\/]packages[\\/]plugin-detail[\\/]src[\\/](core|autoLayout|relatedListCompact|relatedListSort|queueClaim|ConcurrentUpdateDialog|useDetailTranslation|recordFieldAccess|useRecordEditable|useRelatedCounts|renderers[\\/]recordActivityFeed|synth[\\/](relatedListEntry|relatedArrangement|buildDefaultPageSchema))\.tsx?$/,
+              test: /[\\/]packages[\\/]plugin-detail[\\/]src[\\/](core|autoLayout|relatedListCompact|relatedListSort|relatedParentScope|queueClaim|ConcurrentUpdateDialog|useDetailTranslation|recordFieldAccess|useRecordEditable|useRelatedCounts|renderers[\\/]recordActivityFeed|synth[\\/](relatedListEntry|relatedArrangement|buildDefaultPageSchema))\.tsx?$/,
               priority: 71,
               includeDependenciesRecursively: false,
             },

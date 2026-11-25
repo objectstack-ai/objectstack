@@ -408,6 +408,111 @@ describe('a lane statistic covers every record of the lane (objectstack#36520)',
   });
 });
 
+/**
+ * objectstack#36870 — a lane read the door CUT draws no figure for any lane.
+ *
+ * Under a deployment's default page size the door slices the grouped answer
+ * and says so (`hasMore`), which `queryGroupHeaders` hands on as the answer's
+ * `hasMore`. `cappedAt` answers the lane read the way that door does: every
+ * group `groupHeadersOver` finds, cut to `pageSize` rows. The groups of
+ * `ROWS_70` are open, won, the empty group and `archived`, in that order.
+ */
+describe('a cut lane read draws no lane figure (objectstack#36870)', () => {
+  const OBJECT = 'deal';
+  const DEF = {
+    name: OBJECT,
+    fields: {
+      name: { type: 'text', label: 'Name' },
+      amount: { type: 'number', label: 'Amount' },
+      stage: {
+        type: 'select',
+        label: 'Stage',
+        options: [
+          { value: 'open', label: 'Open' },
+          { value: 'won', label: 'Won' },
+          { value: 'lost', label: 'Lost' },
+        ],
+      },
+    },
+  };
+  const deals = (stage: string | null, n: number): Row[] =>
+    Array.from({ length: n }, (_, i) => ({
+      id: `${stage ?? 'none'}-${String(i).padStart(3, '0')}`,
+      name: `${stage ?? 'none'} ${String(i).padStart(3, '0')}`,
+      stage,
+      amount: i,
+    }));
+  const ROWS_70 = [...deals('open', 70), ...deals('won', 5), ...deals(null, 2), ...deals('archived', 3)];
+
+  function cappedAt(rows: Row[], pageSize: number) {
+    const whole = groupHeadersOver(rows, OBJECT);
+    return vi.fn(async (object: string, query: any) => {
+      const groups = (await whole(object, query)) as Row[];
+      const answer = groups.slice(0, pageSize) as Row[] & { hasMore?: boolean };
+      if (answer.length < groups.length) answer.hasMore = true;
+      return answer;
+    });
+  }
+
+  function mount(pageSize: number, lanePaging: Record<string, unknown> | undefined, schema: Record<string, unknown> = {}) {
+    const store = new ValueDataSource<Row>({ items: ROWS_70 });
+    const source = {
+      find: vi.fn(async (object: string, params: any) => store.find(object, params)),
+      findOne: vi.fn(),
+      create: vi.fn(),
+      update: vi.fn(),
+      delete: vi.fn(),
+      getObjectSchema: vi.fn(async () => DEF),
+      queryGroupHeaders: cappedAt(ROWS_70, pageSize),
+    } as any;
+    render(
+      <SchemaRendererProvider dataSource={source}>
+        <ObjectKanban
+          schema={{ type: 'object-kanban', objectName: OBJECT, groupBy: 'stage', cardFields: ['amount'], summary: { type: 'sum', field: 'amount' }, ...schema } as any}
+          dataSource={source}
+          {...(lanePaging ? { lanePaging } : {})}
+        />
+      </SchemaRendererProvider>,
+    );
+    return source;
+  }
+
+  const lane = (title: string) => screen.getByRole('group', { name: title });
+  const foot = (title: string) => lane(title).querySelector<HTMLElement>('[data-kanban-lane-statistic]');
+  const figure = (title: string) => (foot(title)?.lastElementChild?.textContent ?? '').replace(/,/g, '');
+
+  it('draws no figure on any lane when the read is cut, the folded lane included', async () => {
+    // Three of four groups: open, won and the empty group. The trailing lane
+    // would total the empty group alone (1) in place of 4.
+    const source = mount(3, {});
+    await waitFor(() => expect(source.queryGroupHeaders).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(within(lane('Open')).queryAllByRole('listitem')).toHaveLength(KANBAN_LANE_PAGE_SIZE));
+    await waitFor(() => expect(within(lane('Uncategorized')).queryAllByRole('listitem')).toHaveLength(5));
+    expect((await source.queryGroupHeaders.mock.results[0].value).hasMore).toBe(true);
+    expect(document.querySelector('[data-kanban-lane-statistic]')).toBeNull();
+  });
+
+  it('draws no "Sum 0" on a board of one query whose lane group the read cut', async () => {
+    // One group: open. The board loads 10 open cards, so Won counts none of
+    // its five records and would read the dropped group as an empty lane.
+    const source = mount(1, undefined, { limit: 10 });
+    await waitFor(() => expect(source.queryGroupHeaders).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(within(lane('Open')).queryAllByRole('listitem')).toHaveLength(10));
+    expect((await source.queryGroupHeaders.mock.results[0].value).hasMore).toBe(true);
+    expect(document.querySelector('[data-kanban-lane-statistic]')).toBeNull();
+  });
+
+  it('CONTROL: a whole answer under the same door draws every lane\'s figure', async () => {
+    const source = mount(4, {});
+    await waitFor(() => expect(foot('Open')).not.toBeNull());
+    expect((await source.queryGroupHeaders.mock.results[0].value).hasMore).toBeUndefined();
+    expect(figure('Open')).toBe('2415');
+    expect(figure('Won')).toBe('10');
+    expect(figure('Lost')).toBe('0');
+    expect(figure('Uncategorized')).toBe('4');
+  });
+});
+
 describe('readLaneFigures (objectstack#36520)', () => {
   const base = { laneField: 'stage', field: 'amount', uncolumnedId: '__uncolumned__' } as const;
   it('keys a reference lane by its foreign key and folds what is no lane into the trailing lane', () => {

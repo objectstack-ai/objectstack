@@ -308,6 +308,22 @@ export function operationMessageTranslationKey(messageKey: string): string {
  *     delegated administrator's write outside their own `adminScope`. The
  *     reason in `message` names business units and permission sets by their
  *     API names and ids; the user's half names none of them.
+ *
+ * The four `print_*` keys are the print door's own sentences for a print that
+ * failed on the server (`POST /api/v1/print/records`, `@objectstack/service-print`):
+ * the `message` of a 5xx whose producer declared no text for its caller. The
+ * door writes them in the request's language (`Accept-Language`) through
+ * `operationUserMessage` (`@objectstack/core`). None takes a placeholder: what
+ * the engine or the host said is withheld from the wire and kept in the server
+ * fault log, so the sentence can only name the situation.
+ *
+ *   - `print_engine_unavailable` — `503`: the print engine is not ready.
+ *   - `print_timed_out` — `504`: the render ran past the time a print is allowed.
+ *   - `print_failed` — any other 5xx, the door's fallback.
+ *   - `print_caller_unresolved` — `500`: the door could not resolve who asked.
+ *
+ * Their English is byte-identical to the fixed sentences the door answered
+ * before they were localized.
  */
 export const BUILTIN_OPERATION_MESSAGES: Record<string, Record<string, string>> = {
   en: {
@@ -369,6 +385,11 @@ export const BUILTIN_OPERATION_MESSAGES: Record<string, Record<string, string>> 
       'This request filters, sorts or groups by a field you do not have access to. Remove that condition and try again, or contact your administrator if you need access.',
     delegation_scope_violation:
       'This change is outside the scope you were delegated to administer. Contact your administrator if it needs to be made.',
+    print_engine_unavailable:
+      'Records cannot be printed to a file right now: the print engine is not ready. The server log records why.',
+    print_timed_out: 'The record could not be printed to a file in the time a print is allowed.',
+    print_failed: 'The record could not be printed to a file because of an error on the server.',
+    print_caller_unresolved: 'The caller of this print could not be resolved.',
   },
   'zh-CN': {
     permission_denied: '您没有执行此操作的权限，如需访问请联系管理员。',
@@ -407,6 +428,10 @@ export const BUILTIN_OPERATION_MESSAGES: Record<string, Record<string, string>> 
     record_not_found: '该记录不存在，或您无权访问它。',
     query_field_not_readable: '当前请求按您无权查看的字段筛选、排序或分组，请去掉该条件后重试，或联系管理员。',
     delegation_scope_violation: '此更改超出了您被委派管理的范围，如需更改请联系管理员。',
+    print_engine_unavailable: '暂时无法将记录打印为文件：打印引擎尚未就绪，原因已记录在服务器日志中。',
+    print_timed_out: '记录未能在打印允许的时间内打印为文件。',
+    print_failed: '服务器出错，记录未能打印为文件。',
+    print_caller_unresolved: '无法确认发起此次打印的用户。',
   },
   'ja-JP': {
     permission_denied: 'この操作を実行する権限がありません。アクセスが必要な場合は管理者にお問い合わせください。',
@@ -462,6 +487,11 @@ export const BUILTIN_OPERATION_MESSAGES: Record<string, Record<string, string>> 
       'この要求は、閲覧権限のない項目で絞り込み、並べ替え、またはグループ化しています。その条件を削除して再試行するか、アクセスが必要な場合は管理者にお問い合わせください。',
     delegation_scope_violation:
       'この変更は、管理を委任された範囲を超えています。変更が必要な場合は管理者にお問い合わせください。',
+    print_engine_unavailable:
+      '現在、レコードをファイルに印刷できません。印刷エンジンの準備ができていません。原因はサーバーログに記録されています。',
+    print_timed_out: '印刷に許可された時間内にレコードをファイルに印刷できませんでした。',
+    print_failed: 'サーバーでエラーが発生したため、レコードをファイルに印刷できませんでした。',
+    print_caller_unresolved: 'この印刷を要求したユーザーを特定できませんでした。',
   },
   'es-ES': {
     permission_denied:
@@ -522,6 +552,11 @@ export const BUILTIN_OPERATION_MESSAGES: Record<string, Record<string, string>> 
       'Esta solicitud filtra, ordena o agrupa por un campo al que no tiene acceso. Quite esa condición e inténtelo de nuevo, o póngase en contacto con su administrador si necesita acceso.',
     delegation_scope_violation:
       'Este cambio está fuera del ámbito que se le ha delegado para administrar. Póngase en contacto con su administrador si es necesario realizarlo.',
+    print_engine_unavailable:
+      'Ahora mismo no se pueden imprimir registros en un archivo: el motor de impresión no está listo. El motivo consta en el log del servidor.',
+    print_timed_out: 'No se pudo imprimir el registro en un archivo en el tiempo permitido para una impresión.',
+    print_failed: 'No se pudo imprimir el registro en un archivo debido a un error en el servidor.',
+    print_caller_unresolved: 'No se pudo identificar a la persona que solicitó esta impresión.',
   },
 };
 
