@@ -3,10 +3,17 @@
 import type { Plugin, PluginContext } from '@objectstack/core';
 import type {
   IDataEngine,
+  IEmbedder,
   IRealtimeService,
 } from '@objectstack/spec/contracts';
 import type { KnowledgeSource } from '@objectstack/spec/ai';
-import { KNOWLEDGE_SERVICE } from '@objectstack/spec/contracts';
+import { EMBEDDER_SERVICE, KNOWLEDGE_SERVICE } from '@objectstack/spec/contracts';
+import {
+  OPENAI_COMPATIBLE_PRESETS,
+  createOpenAIEmbedder,
+  type OpenAICompatiblePreset,
+} from '@objectstack/embedder-openai';
+import { aiTestEmbedderActionHandler } from '@objectstack/service-settings';
 import { RECORD_RESTORED_EVENT } from '@objectstack/spec/data';
 import { KnowledgeService } from './knowledge-service.js';
 import type { KnowledgeLogger } from './knowledge-service.js';
@@ -29,6 +36,203 @@ import { contributeKnowledgeSettings } from './knowledge-settings-contribution.j
 export function isServiceNotRegisteredError(err: unknown, name: string): boolean {
   const message = err instanceof Error ? err.message : typeof err === 'string' ? err : '';
   return message.startsWith(`[Kernel] Service '${name}' not found`);
+}
+
+/**
+ * Where an operator configures the embedder, and why a saved change waits for
+ * a restart — the tail of every "no embedder" answer below.
+ */
+const EMBEDDER_SETTINGS_REMEDY =
+  'under Settings → AI & Embedder, then restart the server: the embedder settings are read when it starts';
+
+/** The `ai.embedder_*` keys a complete provider needs, named in the "not saved" answer. */
+const EMBEDDER_REQUIRED_KEYS =
+  'ai.embedder_provider, ai.embedder_api_key and ai.embedder_model (ai.embedder_base_url for a custom or Azure endpoint)';
+
+/** One resolved setting as the settings service answers it: the value and the layer it came from. */
+interface ResolvedEmbedderSetting {
+  value?: unknown;
+  source?: string;
+}
+
+/** The slice of `SettingsService` this plugin reads at boot. */
+interface EmbedderSettingsReader {
+  getNamespace(namespace: string): Promise<{ values: Record<string, ResolvedEmbedderSetting | undefined> }>;
+}
+
+/** What the `ai.embedder_*` settings resolve to at boot. */
+type EmbedderFromSettings =
+  | { kind: 'configured'; embedder: IEmbedder; provider: string; model: string | undefined; batchSize: number | undefined }
+  | {
+      kind: 'unconfigured';
+      reason: string;
+      /**
+       * `true` when nothing asked for an embedder (no provider saved, or `none`
+       * saved): the boot line is `info`. `false` when the operator saved
+       * something that does not build one: the boot line is `warn`.
+       */
+      quiet: boolean;
+    };
+
+/**
+ * The `IEmbedder` registered when the settings configure none. Every use of it
+ * — `embed()` with any input, or reading `dimensions` to size a vector column —
+ * answers the same error, which names the missing settings and the restart, so
+ * an adapter that embeds refuses indexing and search with that text instead of
+ * a bare "service not found". Nothing is sent anywhere.
+ */
+class UnconfiguredEmbedder implements IEmbedder {
+  readonly id = 'unconfigured';
+  constructor(private readonly reason: string) {}
+  get dimensions(): number {
+    throw this.refusal();
+  }
+  async embed(texts: string[]): Promise<number[][]> {
+    if (texts.length === 0) return [];
+    throw this.refusal();
+  }
+  private refusal(): Error {
+    return new Error(`No embedder is configured, so nothing was embedded and nothing was sent: ${this.reason}.`);
+  }
+}
+
+/**
+ * A setting's value when the operator SAVED it (any layer but the manifest
+ * default, an `OS_*` override included), else `undefined`. The `ai.embedder_*`
+ * defaults — `embedder_provider: 'none'`, `embedder_batch_size: 64` — are no
+ * decision anybody made, so they never count as configuration.
+ */
+function savedValue(values: Record<string, ResolvedEmbedderSetting | undefined>, key: string): unknown {
+  const entry = values[key];
+  if (!entry || (entry.source ?? 'default') === 'default') return undefined;
+  const { value } = entry;
+  if (value === null || value === undefined) return undefined;
+  if (typeof value === 'string' && value.trim() === '') return undefined;
+  return value;
+}
+
+/**
+ * Build the embedder the saved `ai.embedder_*` settings describe, or say why
+ * there is none. Completeness is judged by the settings page's own
+ * "Test embedder" check (`aiTestEmbedderActionHandler`), handed only the SAVED
+ * values, so the boot and the button agree on what "configured" means.
+ */
+async function embedderFromSettings(ctx: PluginContext): Promise<EmbedderFromSettings> {
+  let settings: EmbedderSettingsReader | undefined;
+  try {
+    settings = ctx.getService<EmbedderSettingsReader | undefined>('settings') ?? undefined;
+  } catch (err) {
+    if (!isServiceNotRegisteredError(err, 'settings')) throw err;
+  }
+  if (!settings || typeof settings.getNamespace !== 'function') {
+    return {
+      kind: 'unconfigured',
+      quiet: true,
+      reason:
+        'the settings service is not mounted, so the ai.embedder_* settings cannot be read — mount it and save ' +
+        `the embedder ${EMBEDDER_SETTINGS_REMEDY}, or register an IEmbedder as the '${EMBEDDER_SERVICE}' service ` +
+        "from a plugin's init() or start()",
+    };
+  }
+
+  let values: Record<string, ResolvedEmbedderSetting | undefined>;
+  try {
+    values = (await settings.getNamespace('ai')).values ?? {};
+  } catch (err) {
+    return {
+      kind: 'unconfigured',
+      quiet: false,
+      reason:
+        `the ai settings could not be read (${err instanceof Error ? err.message : String(err)}) — ` +
+        `check them ${EMBEDDER_SETTINGS_REMEDY}`,
+    };
+  }
+  if (!('embedder_provider' in values)) {
+    return {
+      kind: 'unconfigured',
+      quiet: true,
+      reason:
+        "the 'ai' settings namespace does not declare the embedder keys (ai.embedder_*) — declare them in the " +
+        `host's 'ai' manifest, or register an IEmbedder as the '${EMBEDDER_SERVICE}' service from a plugin's ` +
+        'init() or start()',
+    };
+  }
+
+  const provider = savedValue(values, 'embedder_provider');
+  if (provider === undefined) {
+    return {
+      kind: 'unconfigured',
+      quiet: true,
+      reason: `no embedder provider is saved — save ${EMBEDDER_REQUIRED_KEYS} ${EMBEDDER_SETTINGS_REMEDY}`,
+    };
+  }
+  if (provider === 'none') {
+    return {
+      kind: 'unconfigured',
+      quiet: true,
+      reason: `ai.embedder_provider is saved as 'none' (embeddings disabled) — pick a provider ${EMBEDDER_SETTINGS_REMEDY}`,
+    };
+  }
+
+  const saved: Record<string, unknown> = {};
+  for (const key of Object.keys(values)) {
+    const value = savedValue(values, key);
+    if (value !== undefined) saved[key] = value;
+  }
+  const check = await aiTestEmbedderActionHandler({ namespace: 'ai', actionId: 'test_embedder', values: saved, ctx: {} });
+  if (!check.ok) {
+    return {
+      kind: 'unconfigured',
+      quiet: false,
+      reason: `the saved embedder settings are incomplete (${check.message ?? 'no detail'}) — complete them ${EMBEDDER_SETTINGS_REMEDY}`,
+    };
+  }
+
+  const providerId = String(provider);
+  const baseUrl = typeof saved.embedder_base_url === 'string' ? saved.embedder_base_url.trim() : undefined;
+  const preset = Object.prototype.hasOwnProperty.call(OPENAI_COMPATIBLE_PRESETS, providerId)
+    ? (providerId as OpenAICompatiblePreset)
+    : undefined;
+  const model = typeof saved.embedder_model === 'string' ? saved.embedder_model.trim() : undefined;
+  const dimensions = typeof saved.embedder_dimensions === 'number' ? saved.embedder_dimensions : undefined;
+  // Only a SAVED batch size is a batch cap; unsaved, the embedder batches at the
+  // model's own documented cap (some providers accept 10, not the default 64).
+  const batchSize = typeof saved.embedder_batch_size === 'number' ? saved.embedder_batch_size : undefined;
+  // Ollama ignores the key, and the embedder requires a non-empty one.
+  const apiKey =
+    typeof saved.embedder_api_key === 'string' && saved.embedder_api_key !== ''
+      ? saved.embedder_api_key
+      : providerId === 'ollama'
+        ? 'ollama'
+        : '';
+  if (!preset && !baseUrl) {
+    return {
+      kind: 'unconfigured',
+      quiet: false,
+      reason: `ai.embedder_provider '${providerId}' names no known endpoint and no ai.embedder_base_url is saved — save one ${EMBEDDER_SETTINGS_REMEDY}`,
+    };
+  }
+  try {
+    const embedder = createOpenAIEmbedder({
+      preset,
+      baseUrl: baseUrl || undefined,
+      apiKey,
+      model,
+      dimensions,
+      maxBatchSize: batchSize,
+      id: providerId,
+    });
+    return { kind: 'configured', embedder, provider: providerId, model, batchSize };
+  } catch (err) {
+    // The embedder's own refusals name the option, never the key's value.
+    return {
+      kind: 'unconfigured',
+      quiet: false,
+      reason:
+        `the saved embedder settings do not build an embedder (${err instanceof Error ? err.message : String(err)}) — ` +
+        `correct them ${EMBEDDER_SETTINGS_REMEDY}`,
+    };
+  }
 }
 
 /**
@@ -186,6 +390,15 @@ export class KnowledgeServicePlugin implements Plugin {
   }
 
   async start(ctx: PluginContext): Promise<void> {
+    // The embedder is provided at `kernel:bootstrapped`, after every
+    // `kernel:ready` handler has settled: an embedder another plugin registers
+    // in its init(), start() or `kernel:ready` (cloud `service-ai` reads its
+    // settings there) is seen and kept, never doubled. A consumer resolves
+    // `EMBEDDER_SERVICE` where it embeds, not at boot.
+    ctx.hook('kernel:bootstrapped', async () => {
+      await this.provideEmbedder(ctx);
+    });
+
     if (this.options.enableEventSync === false) return;
     const service = this.service;
     if (!service) return;
@@ -294,6 +507,58 @@ export class KnowledgeServicePlugin implements Plugin {
       });
       ctx.logger.info?.('KnowledgeServicePlugin: event sync subscription active.');
     });
+  }
+
+  /**
+   * Register `EMBEDDER_SERVICE` from the `ai.embedder_*` settings, unless an
+   * embedder is already registered.
+   *
+   * - Already registered (cloud `service-ai`, or a host's own plugin) → kept,
+   *   one `info` line, the settings are not applied. A registration this sync
+   *   accessor cannot hand out (an async factory) is a registration too.
+   * - Saved and complete → an `@objectstack/embedder-openai` embedder for the
+   *   saved provider. The batch size is passed only when it was saved.
+   * - Otherwise → an `UnconfiguredEmbedder`, whose every use answers an error
+   *   naming the missing settings; the boot itself succeeds.
+   *
+   * Read once, at boot: a saved change takes effect on the next restart (the
+   * settings page says so). Nothing is sent to a provider until the operator
+   * has saved one, and the API key is never logged.
+   */
+  private async provideEmbedder(ctx: PluginContext): Promise<void> {
+    let registered = true;
+    let existing: unknown;
+    try {
+      existing = ctx.getService<unknown>(EMBEDDER_SERVICE);
+    } catch (err) {
+      if (isServiceNotRegisteredError(err, EMBEDDER_SERVICE)) registered = false;
+    }
+    if (registered) {
+      const id = (existing as { id?: unknown } | undefined)?.id;
+      ctx.logger.info?.(
+        `KnowledgeServicePlugin: an embedder is already registered as '${EMBEDDER_SERVICE}'` +
+          `${typeof id === 'string' ? ` (id=${id})` : ''} — kept; the ai.embedder_* settings are not applied.`,
+      );
+      return;
+    }
+
+    const outcome = await embedderFromSettings(ctx);
+    if (outcome.kind === 'configured') {
+      ctx.registerService(EMBEDDER_SERVICE, outcome.embedder);
+      ctx.logger.info?.(
+        `KnowledgeServicePlugin: registered '${EMBEDDER_SERVICE}' from the ai.embedder_* settings ` +
+          `(provider=${outcome.provider}, model=${outcome.model ?? '(embedder default)'}, ` +
+          `batch size=${outcome.batchSize ?? "the model's own cap"}). A saved change takes effect on the next restart.`,
+      );
+      return;
+    }
+
+    ctx.registerService(EMBEDDER_SERVICE, new UnconfiguredEmbedder(outcome.reason));
+    const line =
+      `KnowledgeServicePlugin: no embedder is configured — ${outcome.reason}. The service is mounted; ` +
+      'an adapter that embeds refuses indexing and search with this reason until then.';
+    if (outcome.quiet) ctx.logger.info?.(line);
+    else ctx.logger.warn?.(line);
   }
 
   /**
