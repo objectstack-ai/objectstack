@@ -279,6 +279,14 @@ describe('an empty 常用 type (objectstack#37201)', () => {
     expect(entry('type:object').querySelector('span')).not.toHaveClass('text-muted-foreground');
   });
 
+  it('a sweep that counts 0 of it: still no number, never "0"', () => {
+    reads.sweep = { ...reads.sweep, countsByType: { ...reads.sweep.countsByType, app: 0 } };
+    renderAt(`/studio/${PKG}/data`);
+    expect(entry('type:app')).toHaveAttribute('data-empty', 'true');
+    expect(screen.queryByTestId('studio-menu-count-type:app')).toBeNull();
+    expect(entry('type:app')).not.toHaveTextContent('0');
+  });
+
   it('while the sweep has not answered, nothing is empty', () => {
     reads.sweep = { loading: true, countsByType: {}, packagesByType: {} };
     renderAt(`/studio/${PKG}/data`);
@@ -407,5 +415,10 @@ describe('~org and ~all draw no fold (objectstack#37201)', () => {
     for (const a of within(security).getAllByRole('link')) expect(a).toBeVisible();
     expect(security.querySelector('[data-sidebar="group-label"]')).toHaveClass('text-muted-foreground');
     expect(screen.getByTestId('studio-menu-entry-orgFlows')).toBeVisible();
+    // objectstack#37211 — no count above Organization flows (it read "0 types" over the group's one entry).
+    const automation = screen.getByTestId('studio-menu-group-automation');
+    expect(automation.querySelector('[data-sidebar="group-label"]')).toHaveTextContent(/^Automation$/);
+    expect(screen.queryByTestId('studio-menu-group-count-automation')).toBeNull();
+    expect(within(automation).getAllByRole('link').map((a) => a.getAttribute('data-testid'))).toEqual(['studio-menu-entry-orgFlows']);
   });
 });
