@@ -23,7 +23,7 @@ import { RestServer } from './rest-server.js';
 const DASHBOARD_SCHEMA = () => ({
     type: 'object',
     properties: {
-        columns: { type: 'integer', description: 'Number of grid columns (default 12)' },
+        columns: { type: 'integer', description: 'Number of grid columns. When absent, inferred from the widgets: 12 if any widget layout reaches past column 4 (x + w > 4), otherwise 4' },
         header: {
             type: 'object',
             properties: {
@@ -145,7 +145,7 @@ describe('#16458 — GET /meta serves a localised `schema` beside the localised 
         expect(entry.form.sections[0].fields[0].label).toBe('列数');
         // The overlay wrote `title` and nothing else on the node.
         expect(rowProps(entry).label.type).toBe('string');
-        expect(entry.schema.properties.columns.description).toBe('Number of grid columns (default 12)');
+        expect(entry.schema.properties.columns.description).toBe('Number of grid columns. When absent, inferred from the widgets: 12 if any widget layout reaches past column 4 (x + w > 4), otherwise 4');
     });
 
     it('control — an en request leaves the authored titles in place', async () => {
