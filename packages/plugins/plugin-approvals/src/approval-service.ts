@@ -11342,7 +11342,7 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
    * here. {@link getRecordLock} counts any row its read hands back, so for
    * such an id the two doors differ, deliberately: the two doors keep
    * different readability anchors on purpose, and aligning them would narrow
-   * a published answer (seat ruling on PR #37191). For an id spelled as the
+   * a published answer (seat ruling 7152650156 on #37151). For an id spelled as the
    * engine spells it — what a list holds — entry `i` is exactly the single
    * door's answer.
    *
@@ -11473,7 +11473,11 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
    * engine hands back (a case-insensitive collation, a numeric id asked as
    * `'07'`); {@link getRecordLocks} counts only the row whose id IS the asked
    * id. The two doors keep different readability anchors on purpose:
-   * aligning them would narrow a published answer (seat ruling on PR #37191).
+   * aligning them would narrow a published answer (seat ruling 7152650156 on #37151).
+   * For such an id the master half below reads the row the engine found, but
+   * the row's own request is looked up by the id as asked
+   * ({@link recordHeldByLockingApproval}), so a record held by its own request
+   * may answer `{ locked: false }` under another spelling.
    *
    * ## What is answered — the lock and its kind, nothing about the request
    *

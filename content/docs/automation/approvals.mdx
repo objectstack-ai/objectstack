@@ -492,8 +492,12 @@ Each entry is what the single-record read answers for that id, in the order the
 ids were sent; `null` stands where that read answers `404`, so a record the
 caller cannot read and one that does not exist look the same. Send the ids as
 the server spelled them: an id the database matches only under another spelling
-(a different letter case, `07` for `7`) answers `null` here, where the
-single-record read answers its lock. One request
+(a different letter case, `07` for `7`) answers `null` here. The single-record
+read does find such a record and answers for it, but it looks up the record's
+own request by the id as sent, so it may answer `{ "locked": false }` for a
+record its own request holds; a line of a locked record still answers
+`"master"`. The two reads keep these different rules on purpose (seat ruling
+7152650156 on #37151). One request
 carries at most 200 ids (`APPROVAL_RECORD_LOCKS_MAX_RECORD_IDS`); a longer list,
 an empty one or any other body key is refused with `400 VALIDATION_ERROR`. The
 SDK call is `client.approvals.getRecordLocks(object, recordIds)`, the service

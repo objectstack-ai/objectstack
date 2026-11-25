@@ -552,7 +552,7 @@ export function registerApprovalsEndpoints(this: ApprovalsRouteHost, basePath: s
     // Each entry is exactly the single-record door's answer for that id, as
     // the engine spells it (an id matched only under another spelling answers
     // `locked: null` here: the two doors keep different readability anchors
-    // on purpose, seat ruling on PR #37191) —
+    // on purpose, seat ruling 7152650156 on #37151) —
     // `locked`, and `lockSource` on a locked row — the 404 folded to
     // `locked: null` (unreadable or missing, told apart by nothing); a service
     // without `getRecordLocks` answers 501, never one `getRecordLock` per id.

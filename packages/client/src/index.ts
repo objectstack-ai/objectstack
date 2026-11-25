@@ -7152,8 +7152,7 @@ export class ObjectStackClient {
      * locked record which approval holds it, `lockSource`: `'record'` (its own;
      * deleting it cancels the request) or `'master'` (the record a
      * master-detail line belongs to; the server refuses the line's delete too) —
-     * and
-     * nothing else, answered to every caller who can read the record, whether
+     * and nothing else, answered to every caller who can read the record, whether
      * or not they take part in the approval (`IApprovalService.getRecordLock`).
      * A record the caller cannot read answers 404, exactly as a record id that
      * does not exist; a deployment without the read answers 501.

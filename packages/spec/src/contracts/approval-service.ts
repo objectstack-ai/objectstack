@@ -1123,6 +1123,8 @@ export interface IApprovalService {
    *   A record held by its own request may still be deleted, which cancels
    *   the request; a line of a held master refuses insert, update and delete.
    *   An unlocked record answers `{ locked: false }`, with no `lockSource`.
+   *   An implementation may omit `lockSource` on a locked answer; the REST
+   *   doors then serve `{ locked: true }` alone, never a guessed kind.
    *   ⛔ No request id, node, participants or `pending` flag: whether
    *   the caller may see the request is still `approvalsVisibleToReaders`'
    *   question, and this member does not answer it. `lockSource` is one kind
@@ -1160,9 +1162,13 @@ export interface IApprovalService {
    * when the line is held by a request of its own too). A row counts as
    * readable only when the read hands back the row whose id IS the asked id;
    * {@link getRecordLock} counts any row its read hands back, so an id the
-   * engine matches under another spelling answers `null` here and the lock
-   * there. The two doors keep different readability anchors on purpose:
-   * aligning them would narrow a published answer (seat ruling on PR #37191).
+   * engine matches under another spelling answers `null` here and is judged
+   * there — but not wholly on the row found: the line-of-a-held-master half
+   * reads the row the engine found, so such a line answers `'master'`, while
+   * the row's own request is looked up by the id as asked, so a record held by
+   * its own request may answer `{ locked: false }` there. The two doors keep
+   * different readability anchors on purpose: aligning them would narrow a
+   * published answer (seat ruling 7152650156 on #37151).
    * A repeated id
    * is answered at each of its positions. A caller refused the object's read
    * outright is refused the same way for every id.

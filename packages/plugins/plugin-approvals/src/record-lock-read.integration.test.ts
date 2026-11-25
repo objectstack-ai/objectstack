@@ -23,8 +23,8 @@
  *    (`'record'`) or its master's (`'master'`, winning when both hold) — and
  *    so which delete the server refuses; the page read gives each row the
  *    single read's kind (ruling 7148480184);
- *  - the two doors keep their own readability anchors (seat ruling on PR
- *    #37191): the single read counts any row its read hands back, the page
+ *  - the two doors keep their own readability anchors (seat ruling
+ *    7152650156 on #37151): the single read counts any row its read hands back, the page
  *    read only the row whose id IS the asked id.
  *
  * The REST door's half (one 404 for both `null`s, the closed query set, the
@@ -523,7 +523,7 @@ describe('lockSource — which approval holds a locked row, the same at the sing
 });
 
 /**
- * The readability anchors, kept apart on purpose (seat ruling on PR #37191):
+ * The readability anchors, kept apart on purpose (seat ruling 7152650156 on #37151):
  * `getRecordLock` counts any row its read hands back, whatever spelling of the
  * id the engine hands back; `getRecordLocks` counts only the row whose id IS
  * the asked id. Aligning them would narrow a published answer, so each door's
