@@ -2511,6 +2511,14 @@ const fr = {
       changesDrafted: "Enregistré comme brouillon",
       changesFailed: "Non appliqué",
       discussing: "Affiché : {{target}}",
+      focus: {
+        pin: "Continuer à poser des questions sur cet enregistrement",
+        pinned: "Questions sur : {{target}}",
+        remove: "Ne plus poser de questions sur cet enregistrement",
+        switchPrompt: "Poser plutôt des questions sur « {{target}} » ?",
+        switchAccept: "Changer",
+        switchDecline: "Conserver",
+      },
       changeVerb: {
         createObject: "Créer un objet",
         addField: "Ajouter un champ",
@@ -3936,7 +3944,7 @@ const fr = {
       allApps: "Toutes les applications",
       editAppInStudio: "Modifier {{app}} dans Studio",
       openAppInStudio: "Voir {{app}} dans Studio",
-      backToHome: "Retour à l'accueil",
+      backToHome: "Retour à la page de démarrage de l'app",
       settings: "Paramètres",
       productHome: "Accueil {{product}}",
       addApp: 'Ajouter une application',

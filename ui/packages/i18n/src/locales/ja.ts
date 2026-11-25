@@ -2445,6 +2445,14 @@ const ja = {
       changesDrafted: "下書きとして保存",
       changesFailed: "未適用",
       discussing: "表示中: {{target}}",
+      focus: {
+        pin: "このレコードについて質問し続ける",
+        pinned: "質問対象: {{target}}",
+        remove: "このレコードについての質問をやめる",
+        switchPrompt: "代わりに「{{target}}」について質問しますか？",
+        switchAccept: "切り替える",
+        switchDecline: "このまま",
+      },
       changeVerb: {
         createObject: "オブジェクトを作成",
         addField: "項目を追加",
@@ -3858,7 +3866,7 @@ const ja = {
       allApps: "すべてのアプリ",
       editAppInStudio: "Studio で {{app}} を編集",
       openAppInStudio: "Studio で {{app}} を表示",
-      backToHome: "ホームに戻る",
+      backToHome: "アプリのスタートページに戻る",
       settings: "システム設定",
       productHome: "{{product}} ホーム",
       addApp: 'アプリを追加',

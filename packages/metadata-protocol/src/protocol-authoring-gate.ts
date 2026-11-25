@@ -51,6 +51,7 @@ import { permissionSetOwnerBindingRefusal, runtimeHookWithoutBodyRefusal } from 
 import { objectBodyExtensionFieldSuffixRefusal } from './protocol-extension-field-suffix.js';
 import { datasourceCredentialsRefSaveRefusal } from './protocol-datasource-credentials-ref.js';
 import { storedFlowVerdictBody } from './protocol-flow-save-replay.js';
+import { withoutPlatformOrigin } from '@objectstack/metadata';
 import { noPendingDraftError } from './protocol-authoring-refusals.js';
 import { memberOption } from './protocol-bundle-members.js';
 import { evaluateRuntimeAuthoringGate } from './runtime-authoring-gate.js';
@@ -129,7 +130,9 @@ export function restoredBodyWriter(
         const extensionRefusal = this.objectExtensionItemRefusal(type, historyBody, name, binding);
         if (extensionRefusal) throw extensionRefusal;
         await this.refuseRestoredBodyTheSaveDoorRefuses(type, name, historyBody, binding, source);
-        return derive ? derive(historyBody) : historyBody;
+        // [#37013] A restore is never the platform's registration: the body is
+        // written without the platform's mark, read where the store reads it.
+        return withoutPlatformOrigin(derive ? derive(historyBody) : historyBody);
     };
 }
 
