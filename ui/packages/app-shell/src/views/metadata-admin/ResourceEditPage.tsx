@@ -90,7 +90,8 @@ import {
 } from '../item-tools/ItemToolTabs.js';
 import { MetadataTypeActions } from './MetadataTypeActions.js';
 import { computeDraftChangeCount } from './DraftReviewPanel.js';
-import { DraftReviewSheet, useDraftReviewArrival } from './DraftReviewSheet.js';
+import { DraftReviewSheet } from './DraftReviewSheet.js';
+import { useDraftReviewArrival } from './useDraftReviewArrival.js';
 import {
   SchemaForm,
   DRAWER_METADATA_ID_SCOPE,

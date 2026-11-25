@@ -93,7 +93,8 @@ import { HistoryPanel } from '../item-tools/ResourceHistoryPage.js';
 import { useMetadataClient, useMetadataTypes, type RichMetadataTypeEntry } from './useMetadata.js';
 // objectui#11773 — the package door's draft save sends the version it was built on.
 import { readDraftForSave, useDraftSaveGuard } from './DraftConflictDialog.js';
-import { DraftReviewSheet, useDraftReviewArrival } from './DraftReviewSheet.js';
+import { DraftReviewSheet } from './DraftReviewSheet.js';
+import { useDraftReviewArrival } from './useDraftReviewArrival.js';
 // objectstack#26858 — the served verdict the RLS clause editors read at their paths.
 import {
   DraftVerdictBodyContext,
