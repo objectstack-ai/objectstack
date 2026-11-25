@@ -44,6 +44,8 @@ const state = vi.hoisted(() => ({
   agents: [] as Array<{ name: string }>,
   /** Holds the catalog in flight. */
   catalogPending: false,
+  /** Whether the session holds the Setup → Packages pair (`setup.access` + `manage_platform_settings`). */
+  setupPair: true,
 }));
 
 vi.mock('react-router-dom', async () => {
@@ -109,6 +111,22 @@ vi.mock('../../../providers/MetadataProvider', () => ({
 vi.mock('../../../context/NavigationContext', () => ({
   useNavigationContext: () => ({ currentAppName: undefined }),
 }));
+vi.mock('@object-ui/permissions', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@object-ui/permissions')>();
+  return {
+    ...actual,
+    usePermissions: () => {
+      const real = actual.usePermissions();
+      return {
+        ...real,
+        hasCapabilities: (required: string[]) =>
+          required.includes('setup.access') || required.includes('manage_platform_settings')
+            ? state.setupPair
+            : real.hasCapabilities(required),
+      };
+    },
+  };
+});
 vi.mock('../../../hooks/useCanAuthorMetadata', () => ({
   useCanAuthorMetadata: () => state.canAuthorMetadata,
   useCanReadPendingDrafts: () => true,
@@ -162,6 +180,7 @@ beforeEach(() => {
   state.canAuthorMetadata = true;
   state.agents = [];
   state.catalogPending = false;
+  state.setupPair = true;
 });
 
 afterEach(() => {
@@ -204,6 +223,15 @@ describe('with no agent in the catalog (objectstack#26614)', () => {
     await user.click(chip);
     expect(navigateMock).toHaveBeenCalledWith(SETUP_NEW_PACKAGE_PATH);
     expect(SETUP_NEW_PACKAGE_PATH).toBe('/apps/setup/component/developer/packages?face=admin&new=package');
+  });
+
+  it('an author who may enter Studio but not Setup → Packages is sent to the "All metadata" area, never Setup (objectstack#36908)', async () => {
+    state.setupPair = false;
+    const user = userEvent.setup();
+    render(<HomePage />);
+    await user.click(await screen.findByTestId('home-build-in-studio'));
+    expect(navigateMock).toHaveBeenCalledWith('/studio/~all/metadata');
+    expect(navigateMock).not.toHaveBeenCalledWith(SETUP_NEW_PACKAGE_PATH);
   });
 
   it('a session that may not author gets no build chip; the template chip keeps the reason', async () => {

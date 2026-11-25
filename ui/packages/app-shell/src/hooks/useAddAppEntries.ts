@@ -15,7 +15,7 @@ import { useObjectTranslation } from '@object-ui/i18n';
 import { useWorkspaceAdminStatus } from '@object-ui/auth';
 import { useCanAuthorMetadata } from './useCanAuthorMetadata.js';
 import { isAiStudioEnabled, isMarketplaceEnabled } from '../runtime-config.js';
-import { SETUP_NEW_PACKAGE_PATH } from '../views/metadata-admin/packageSource.js';
+import { useNewPackageDoorPath } from './useNewPackageDoorPath.js';
 
 /** The marketplace, where templates and packages are installed from. */
 const MARKETPLACE_PATH = '/apps/setup/system/marketplace';
@@ -41,7 +41,8 @@ export function useMayAddApp(): boolean {
 
 /**
  * The 「Add app」 choices: 「新建空白应用」 / "New blank app" (a new package,
- * opened in Studio once created) wherever the deployment offers metadata
+ * opened in Studio once created; `useNewPackageDoorPath` sends an author who
+ * may not open Setup → Packages to the "All metadata" area) wherever the deployment offers metadata
  * authoring, whether or not its agent catalog serves the build agent; templates
  * and the marketplace where a marketplace is mounted.
  *
@@ -55,11 +56,12 @@ export function useMayAddApp(): boolean {
  */
 export function useAddAppEntries(): AddAppEntry[] {
   const { t } = useObjectTranslation();
+  const newPackagePath = useNewPackageDoorPath();
   const entries: AddAppEntry[] = [];
   if (isAiStudioEnabled()) {
     entries.push({
       key: 'new-in-studio',
-      to: SETUP_NEW_PACKAGE_PATH,
+      to: newPackagePath,
       label: t('home.build.inStudio', { defaultValue: 'New blank app' }),
       icon: Hammer,
     });

@@ -15,6 +15,8 @@
  */
 
 import * as React from 'react';
+import { SETUP_NEW_PACKAGE_PATH, SETUP_PACKAGES_PATH } from '../metadata-admin/packageSource.js';
+import { STUDIO_ALL_PACKAGES_SEGMENT, studioMetadataAreaPath } from './metadataArea.js';
 
 const StudioEntryPermissionsContext = React.createContext<readonly string[] | undefined>(undefined);
 
@@ -24,4 +26,52 @@ export const StudioEntryPermissionsProvider = StudioEntryPermissionsContext.Prov
 /** The capability set the Studio entry gate read; `undefined` outside its provider. */
 export function useStudioEntryPermissions(): readonly string[] | undefined {
   return React.useContext(StudioEntryPermissionsContext);
+}
+
+/**
+ * The capabilities Setup → Packages is shown under: the Setup app's entry
+ * (`setup.access`) and the menu item's gate (`manage_platform_settings`,
+ * `nav_packages` in `setup-nav.contributions.ts`).
+ */
+export const SETUP_PACKAGES_CAPABILITIES = ['setup.access', 'manage_platform_settings'] as const;
+
+/** `undefined` (no answer reported) holds nothing. */
+export function holdsSetupPackages(systemPermissions: readonly string[] | undefined): boolean {
+  const held = new Set(systemPermissions ?? []);
+  return SETUP_PACKAGES_CAPABILITIES.every((c) => held.has(c));
+}
+
+/**
+ * Where Studio's entry goes when no remembered package opens: Setup → Packages
+ * for a holder of {@link SETUP_PACKAGES_CAPABILITIES}, else the "All metadata"
+ * area across packages, which every principal who may enter Studio may open.
+ * `undefined` (no answer reported) holds nothing.
+ */
+export function studioEntryFallbackPath(systemPermissions: readonly string[] | undefined): string {
+  return holdsSetupPackages(systemPermissions)
+    ? SETUP_PACKAGES_PATH
+    : studioMetadataAreaPath(STUDIO_ALL_PACKAGES_SEGMENT);
+}
+
+/**
+ * Where the retired `/studio?new=package` bookmark goes: Setup's New Package
+ * for a holder of {@link SETUP_PACKAGES_CAPABILITIES}, else
+ * {@link studioEntryFallbackPath}'s answer for that principal.
+ */
+export function studioNewPackageEntryPath(systemPermissions: readonly string[] | undefined): string {
+  return holdsSetupPackages(systemPermissions) ? SETUP_NEW_PACKAGE_PATH : studioEntryFallbackPath(systemPermissions);
+}
+
+/**
+ * Where a door that creates a package goes, outside Studio's entry gate
+ * (Home's no-agent chip, the `/ai` screen, 「Add app」's 「New blank app」):
+ * the same choice as {@link studioNewPackageEntryPath}, decided by whether
+ * the caller holds {@link SETUP_PACKAGES_CAPABILITIES}. Those doors have no
+ * entry-gate set to read; they ask the session's own capability answer
+ * (`usePermissions().hasCapabilities`), which fails open on an unreported set
+ * as the doors' own authoring gate does — the server still refuses Setup to a
+ * non-holder (objectstack#36908).
+ */
+export function newPackageDoorPath(holdsSetupPackagesPair: boolean): string {
+  return holdsSetupPackagesPair ? SETUP_NEW_PACKAGE_PATH : studioMetadataAreaPath(STUDIO_ALL_PACKAGES_SEGMENT);
 }

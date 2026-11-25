@@ -28,7 +28,8 @@ vi.mock('./packages-io.js', () => ({
   fetchListedPackageIds: () => listed.read(),
 }));
 
-import { StudioEntryRedirect, studioEntryFallbackPath, studioNewPackageEntryPath } from './StudioEntryRedirect';
+import { StudioEntryRedirect } from './StudioEntryRedirect';
+import { newPackageDoorPath, studioEntryFallbackPath, studioNewPackageEntryPath } from './studioEntryPermissions';
 
 const SETUP_PACKAGES = '/apps/setup/component/developer/packages?face=admin';
 const ALL_METADATA = '/studio/~all/metadata';
@@ -149,5 +150,10 @@ describe('the retired `/studio?new=package` bookmark (objectstack#36908)', () =>
     expect(studioNewPackageEntryPath(['studio.access', 'manage_platform_settings'])).toBe(ALL_METADATA);
     expect(studioNewPackageEntryPath(['studio.access', 'setup.access'])).toBe(ALL_METADATA);
     expect(studioNewPackageEntryPath(undefined)).toBe(ALL_METADATA);
+  });
+
+  it('the console doors outside Studio (Home, /ai, 「Add app」) make the same choice from the session\'s own answer', () => {
+    expect(newPackageDoorPath(true)).toBe(`${SETUP_PACKAGES}&new=package`);
+    expect(newPackageDoorPath(false)).toBe(ALL_METADATA);
   });
 });

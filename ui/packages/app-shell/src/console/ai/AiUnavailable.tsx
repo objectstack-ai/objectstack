@@ -27,7 +27,7 @@ import { Button, Empty, EmptyDescription, EmptyTitle } from '@object-ui/componen
 import { useCanAuthorMetadata } from '../../hooks/useCanAuthorMetadata.js';
 import { usePhoneViewport } from '../../hooks/usePhoneViewport.js';
 import { isAiStudioEnabled } from '../../runtime-config.js';
-import { SETUP_NEW_PACKAGE_PATH } from '../../views/metadata-admin/packageSource.js';
+import { useNewPackageDoorPath } from '../../hooks/useNewPackageDoorPath.js';
 
 export function AiUnavailable({
   hasError,
@@ -43,6 +43,9 @@ export function AiUnavailable({
 }) {
   const { isAdmin } = useWorkspaceAdminStatus();
   const canAuthorMetadata = useCanAuthorMetadata();
+  // objectstack#36908 — New Package in Setup, or the "All metadata" area for an
+  // author who may not open Setup → Packages.
+  const newPackagePath = useNewPackageDoorPath();
   const offerStudio = !hasError && isAdmin && isAiStudioEnabled() && canAuthorMetadata;
   // The way home names where it goes: a phone's Home is its app list; from
   // 768 px up the home page is retired (objectstack#36732) and `onHome` opens
@@ -73,7 +76,7 @@ export function AiUnavailable({
           )}
           {offerStudio && (
             <Button variant="outline" asChild>
-              <Link to={SETUP_NEW_PACKAGE_PATH} data-testid="ai-unavailable-studio">
+              <Link to={newPackagePath} data-testid="ai-unavailable-studio">
                 {t('home.build.inStudio', { defaultValue: 'New blank app' })}
               </Link>
             </Button>

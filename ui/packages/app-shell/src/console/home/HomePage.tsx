@@ -89,7 +89,7 @@ import { usePublishAllDrafts } from '../../preview/usePublishAllDrafts.js';
 import { fetchPackages } from '../../views/studio-design/packages-io.js';
 import { resolveAiApiBase } from '../../hooks/useAiSurface.js';
 import { isAiStudioEnabled, isMarketplaceEnabled } from '../../runtime-config.js';
-import { SETUP_NEW_PACKAGE_PATH } from '../../views/metadata-admin/packageSource.js';
+import { useNewPackageDoorPath } from '../../hooks/useNewPackageDoorPath.js';
 import { useOpenAssistant } from '../../layout/chatDockControl.js';
 import { isProductApp } from '../../utils/homePath.js';
 import { useAddAppEntries, useMayAddApp } from '../../hooks/useAddAppEntries.js';
@@ -525,6 +525,9 @@ export function HomePage({ checklist }: HomePageProps = {}) {
   // `org_owner` is an admin (`isAdmin === true`) yet deliberately holds no
   // `manage_metadata`, so role alone offered a front door the backend refuses.
   const canAuthorMetadata = useCanAuthorMetadata();
+  // objectstack#36908 — New Package in Setup, or the "All metadata" area for an
+  // author who may not open Setup → Packages.
+  const newPackagePath = useNewPackageDoorPath();
   // objectui#5504 — a runtime deployed with `OS_CLOUD_URL=off` (the EE
   // deploy template's shipped default) mounts no marketplace at all. Home
   // used to recommend it first and error afterwards; that ORDERING was the
@@ -989,7 +992,7 @@ export function HomePage({ checklist }: HomePageProps = {}) {
                       icon={Hammer}
                       label={t('home.build.inStudio', { defaultValue: 'New blank app' })}
                       tone="soft"
-                      onClick={() => navigate(SETUP_NEW_PACKAGE_PATH)}
+                      onClick={() => navigate(newPackagePath)}
                       disabledReason={undefined}
                       reasonId={undefined}
                       testId="home-build-in-studio"

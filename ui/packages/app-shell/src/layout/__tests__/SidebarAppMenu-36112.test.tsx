@@ -116,6 +116,24 @@ vi.mock('../../runtime-config', async (importOriginal) => ({
   isAiStudioEnabled: () => aiStudio,
   isMarketplaceEnabled: () => marketplace,
 }));
+/** Whether the session holds the Setup → Packages pair (`setup.access` + `manage_platform_settings`). */
+let setupPair = true;
+vi.mock('@object-ui/permissions', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@object-ui/permissions')>();
+  return {
+    ...actual,
+    usePermissions: () => {
+      const real = actual.usePermissions();
+      return {
+        ...real,
+        hasCapabilities: (required: string[]) =>
+          required.includes('setup.access') || required.includes('manage_platform_settings')
+            ? setupPair
+            : real.hasCapabilities(required),
+      };
+    },
+  };
+});
 /** When set, what the 「Add app」 list answers instead of the real hook (the empty-list guard). */
 let entriesOverride: unknown[] | null = null;
 vi.mock('../../hooks/useAddAppEntries', async (importOriginal) => {
@@ -180,6 +198,7 @@ afterEach(() => {
   aiStudio = true;
   marketplace = true;
   entriesOverride = null;
+  setupPair = true;
   authOverride = {};
   toastError.mockReset();
   vi.unstubAllGlobals();
@@ -292,6 +311,12 @@ describe('「Add app」 offers 「New blank app」 whatever the catalog serves, 
       'sidebar-app-menu-add-template',
       'sidebar-app-menu-add-marketplace',
     ]);
+  });
+
+  it('an author who may enter Studio but not Setup → Packages is sent to the "All metadata" area, never Setup (objectstack#36908)', () => {
+    setupPair = false;
+    const choices = addChoices();
+    expect(choices.getByTestId('sidebar-app-menu-add-new-in-studio')).toHaveAttribute('href', '/studio/~all/metadata');
   });
 
   it.each([

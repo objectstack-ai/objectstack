@@ -15,12 +15,12 @@
  *  2. otherwise the package list: Setup → Packages for a principal who may
  *     open it, and Studio's "All metadata" area across packages
  *     (`/studio/~all/metadata`) for one who may enter Studio and not that
- *     Setup page ({@link studioEntryFallbackPath}).
+ *     Setup page (`studioEntryFallbackPath`).
  *
  * The retired `/studio?new=package` bookmark is forwarded to Setup's New
  * Package (`studioNewPackage.ts`) for a principal who may open Setup →
  * Packages, and to the same fallback as (2) for anyone else
- * ({@link studioNewPackageEntryPath}): a Studio-only author is never sent to a
+ * (`studioNewPackageEntryPath`): a Studio-only author is never sent to a
  * Setup page that refuses them.
  *
  * A package deleted since the visit is passed over: the recent store is the
@@ -32,45 +32,10 @@
 import * as React from 'react';
 import { Navigate, useSearchParams } from 'react-router-dom';
 import { useRecentItems, type RecentNamedItem } from '../../context/RecentItemsProvider.js';
-import { SETUP_NEW_PACKAGE_PATH, SETUP_PACKAGES_PATH } from '../metadata-admin/packageSource.js';
-import { STUDIO_ALL_PACKAGES_SEGMENT, studioMetadataAreaPath } from './metadataArea.js';
 import { fetchListedPackageIds } from './packages-io.js';
 import { studioPackagePath } from './studioAddress.js';
+import { studioEntryFallbackPath, studioNewPackageEntryPath } from './studioEntryPermissions.js';
 import { STUDIO_NEW_PACKAGE_VALUE, STUDIO_NEW_PARAM } from './studioNewPackage.js';
-
-/**
- * The capabilities Setup → Packages is shown under: the Setup app's entry
- * (`setup.access`) and the menu item's gate (`manage_platform_settings`,
- * `nav_packages` in `setup-nav.contributions.ts`).
- */
-const SETUP_PACKAGES_CAPABILITIES = ['setup.access', 'manage_platform_settings'] as const;
-
-/** `undefined` (no answer reported) holds nothing. */
-function holdsSetupPackages(systemPermissions: readonly string[] | undefined): boolean {
-  const held = new Set(systemPermissions ?? []);
-  return SETUP_PACKAGES_CAPABILITIES.every((c) => held.has(c));
-}
-
-/**
- * Where Studio's entry goes when no remembered package opens: Setup → Packages
- * for a holder of {@link SETUP_PACKAGES_CAPABILITIES}, else the "All metadata"
- * area across packages, which every principal who may enter Studio may open.
- * `undefined` (no answer reported) holds nothing.
- */
-export function studioEntryFallbackPath(systemPermissions: readonly string[] | undefined): string {
-  return holdsSetupPackages(systemPermissions)
-    ? SETUP_PACKAGES_PATH
-    : studioMetadataAreaPath(STUDIO_ALL_PACKAGES_SEGMENT);
-}
-
-/**
- * Where the retired `/studio?new=package` bookmark goes: Setup's New Package
- * for a holder of {@link SETUP_PACKAGES_CAPABILITIES}, else
- * {@link studioEntryFallbackPath}'s answer for that principal.
- */
-export function studioNewPackageEntryPath(systemPermissions: readonly string[] | undefined): string {
-  return holdsSetupPackages(systemPermissions) ? SETUP_NEW_PACKAGE_PATH : studioEntryFallbackPath(systemPermissions);
-}
 
 export function StudioEntryRedirect({
   systemPermissions,

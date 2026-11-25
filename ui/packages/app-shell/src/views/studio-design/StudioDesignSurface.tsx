@@ -63,8 +63,7 @@ import {
 } from './flowGrouping.js';
 import { StudioRefusalStrip } from './StudioRefusalStrip.js';
 import { PACKAGE_LIST_TOAST_ID } from './PackageSwitcher.js';
-import { studioEntryFallbackPath } from './StudioEntryRedirect.js';
-import { useStudioEntryPermissions } from './studioEntryPermissions.js';
+import { studioEntryFallbackPath, useStudioEntryPermissions } from './studioEntryPermissions.js';
 import { SETUP_PACKAGES_PATH } from '../metadata-admin/packageSource.js';
 import { StudioBackToApp, type StudioAppTarget } from './StudioBackToApp.js';
 import {
