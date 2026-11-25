@@ -57,7 +57,35 @@ import { laneKeyOf } from './kanbanReferenceLanes';
  * The door cuts a grouped read to the deployment's default page size and says
  * so (`hasMore`). A cut answer draws no figure for any lane
  * ({@link readLaneStatistic}, objectstack#36870).
+ *
+ * ## A board its host hands its cards to
+ *
+ * Such a board asks the same read when its host also hands it the query those
+ * cards came from ({@link KanbanLaneStatisticRequest}, objectstack#36871): the
+ * node's `filter` is then the host's effective filter, and the request carries
+ * the host's search pair and refresh signal. `ListView` does so for the board
+ * whose lanes it does not know before the query (lanes over a lookup field),
+ * to which it hands one page of rows: the figures cover every record of each
+ * lane, not that page. A host that hands cards without its query (rows handed
+ * in whole) gets a `sum` added up over them and no other figure.
  */
+
+/**
+ * The host's query, for the lane read of a board it hands its cards to
+ * (objectstack#36871): the search pair its own fetch sent and the signal that
+ * moves when it refetches. The filter is the node's own `filter`, which the
+ * host sets to the effective filter of that fetch.
+ *
+ * A HOST channel, never an authoring key.
+ */
+export interface KanbanLaneStatisticRequest {
+  /** The host's search term (ADR-0061), sent as the read's `search`. */
+  search?: string;
+  /** The fields the term may match, sent beside it. */
+  searchFields?: readonly string[];
+  /** Moves when the host refetches its rows: the read is asked again. */
+  reloadKey?: string | number;
+}
 
 /** The lane statistics answered by the server lane read. */
 export type KanbanLaneAggregate = 'sum' | 'avg' | 'min' | 'max';

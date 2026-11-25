@@ -87,6 +87,7 @@ import {
   compileLaneStatisticQuery,
   isLaneAggregate,
   readLaneStatistic,
+  type KanbanLaneStatisticRequest,
   type LaneFigure,
 } from './KanbanLaneStatistic';
 
@@ -472,6 +473,19 @@ export interface ObjectKanbanComponentProps {
    */
   lanePaging?: KanbanLanePagingRequest;
   /**
+   * objectstack#36871 — the host hands this board its cards AND the query they
+   * came from, so the lane statistic (`summary`: `sum`, `avg`, `min`, `max`)
+   * is asked over every record of each lane, as on a board that queries its
+   * own cards, instead of being added up over the cards handed in. The node's
+   * `filter` is the host's effective filter; this carries its search pair and
+   * its refresh signal. `ListView` passes it to the board it hands one page of
+   * rows (lanes it does not know before the query). Ignored without handed
+   * cards. See `KanbanLaneStatistic.ts`.
+   *
+   * A HOST channel, never an authoring key.
+   */
+  laneStatisticQuery?: KanbanLaneStatisticRequest;
+  /**
    * The cards the board shows, lane by lane (objectstack#28461): every open
    * lane in board order, with its title and its cards in the order the board
    * draws them. `ListView` passes it so a record pane opened from a card steps
@@ -550,6 +564,7 @@ export const ObjectKanban: React.FC<ObjectKanbanComponentProps> = ({
   onCardClick,
   rowOpensRecord,
   lanePaging,
+  laneStatisticQuery,
   ownerField,
   onRowGroupsChange,
   laneMenu,
@@ -760,17 +775,21 @@ export const ObjectKanban: React.FC<ObjectKanbanComponentProps> = ({
   // host's own fetch sends it (`$search`, with `$searchFields` only beside a
   // term).
   const lanePagingAsked = lanePaging !== undefined;
+  // objectstack#36871 — or the host's query beside the cards it hands in
+  // (`laneStatisticQuery`), for the lane read alone. A host sends one or the
+  // other; paging wins should both arrive.
+  const hostQuery = lanePaging ?? (hasExternalData ? laneStatisticQuery : undefined);
   const hostSearchKey = JSON.stringify(
-    lanePaging?.search
+    hostQuery?.search
       ? {
-          $search: lanePaging.search,
-          ...(lanePaging.searchFields && lanePaging.searchFields.length > 0
-            ? { $searchFields: [...lanePaging.searchFields] }
+          $search: hostQuery.search,
+          ...(hostQuery.searchFields && hostQuery.searchFields.length > 0
+            ? { $searchFields: [...hostQuery.searchFields] }
             : {}),
         }
       : {},
   );
-  const hostReloadKey = lanePagingAsked ? String(lanePaging?.reloadKey ?? '') : '';
+  const hostReloadKey = hostQuery !== undefined ? String(hostQuery.reloadKey ?? '') : '';
 
   /**
    * The lanes this board pages, when it pages them (objectui#12619): known
@@ -1690,12 +1709,16 @@ export const ObjectKanban: React.FC<ObjectKanbanComponentProps> = ({
   }, [pagedLaneIdsKey, schema.columns, schema.groupBy, objectDef]);
   /**
    * objectstack#36520 — the server lane read: ONE grouped aggregate over the
-   * board's own query, asked only when the board queries its cards itself.
-   * `''` asks nothing; the figures are then absent (cards handed in) or `null`.
+   * board's own query, asked when the board queries its cards itself, or when
+   * its host hands it the query beside the cards (`laneStatisticQuery`,
+   * objectstack#36871). `''` asks nothing; the figures are then absent (cards
+   * handed in without their query) or `null`.
    */
   const boardQueriesItself = !hasExternalData && !boundData && !schema.data && !!schema.objectName && !!dataSource;
+  const hostHandsQuery = hasExternalData && laneStatisticQuery !== undefined && !lanePagingAsked && !!schema.objectName && !!dataSource;
+  const laneReadAsked = boardQueriesItself || hostHandsQuery;
   const laneStatisticQuestion = useMemo((): string => {
-    if (!boardQueriesItself || !statisticFieldDrawable || !isLaneAggregate(statisticType) || !statisticField) return '';
+    if (!laneReadAsked || !statisticFieldDrawable || !isLaneAggregate(statisticType) || !statisticField) return '';
     if (!schema.groupBy || schema.swimlaneField || schema.grouping?.fields?.[0]?.field) return '';
     if (typeof dataSource?.queryGroupHeaders !== 'function') return '';
     const hostSearch = JSON.parse(hostSearchKey) as { $search?: string; $searchFields?: string[] };
@@ -1708,7 +1731,7 @@ export const ObjectKanban: React.FC<ObjectKanbanComponentProps> = ({
       searchFields: hostSearch.$searchFields,
     });
     return query ? JSON.stringify([schema.objectName, query]) : '';
-  }, [boardQueriesItself, statisticFieldDrawable, statisticType, statisticField, schema.groupBy, schema.swimlaneField, schema.grouping, schema.objectName, dataSource, hostSearchKey, queryFilter]);
+  }, [laneReadAsked, statisticFieldDrawable, statisticType, statisticField, schema.groupBy, schema.swimlaneField, schema.grouping, schema.objectName, dataSource, hostSearchKey, queryFilter]);
   const [laneStatistics, setLaneStatistics] = useState<{ question: string; figures: Record<string, LaneFigure> | null } | null>(null);
   useEffect(() => {
     if (!laneStatisticQuestion || !dataSource?.queryGroupHeaders || !isLaneAggregate(statisticType) || !statisticField || !schema.groupBy) return;
@@ -1739,7 +1762,7 @@ export const ObjectKanban: React.FC<ObjectKanbanComponentProps> = ({
     return () => { cancelled = true; };
   }, [laneStatisticQuestion, statisticLanesKey, dataSource, statisticType, statisticField, schema.groupBy, refreshKey, invalidationNonce, hostReloadKey]);
   // Read in the render the question changes, never one render late.
-  const laneFigures: Readonly<Record<string, LaneFigure>> | null | undefined = !boardQueriesItself
+  const laneFigures: Readonly<Record<string, LaneFigure>> | null | undefined = !laneReadAsked
     ? undefined
     : laneStatistics && laneStatistics.question === laneStatisticQuestion + statisticLanesKey && laneStatisticQuestion !== ''
       ? laneStatistics.figures

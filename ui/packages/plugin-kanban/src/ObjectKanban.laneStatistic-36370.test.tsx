@@ -406,6 +406,63 @@ describe('a lane statistic covers every record of the lane (objectstack#36520)',
     await waitFor(() => expect(foot('Open')).toBeNull());
     expect(source.queryGroupHeaders).not.toHaveBeenCalled();
   });
+
+  /**
+   * objectstack#36871 — a host that hands the board one page of cards AND the
+   * query they came from (`laneStatisticQuery`; `ListView` for lanes it does
+   * not know before the query) gets the whole lane's figures, never the
+   * page's. The CONTROL is the test above: cards handed without their query.
+   */
+  function mountHanded(source: any, summary: unknown, handed: Row[], request: Record<string, unknown>, schema: Record<string, unknown> = {}) {
+    const node = (req: Record<string, unknown>) => (
+      <SchemaRendererProvider dataSource={source}>
+        <ObjectKanban
+          schema={{ type: 'object-kanban', objectName: OBJECT, groupBy: 'stage', cardFields: ['amount'], summary, ...schema } as any}
+          dataSource={source}
+          data={handed}
+          laneStatisticQuery={req}
+        />
+      </SchemaRendererProvider>
+    );
+    const result = render(node(request));
+    return { ...result, rerenderWith: (req: Record<string, unknown>) => result.rerender(node(req)) };
+  }
+
+  it.each([
+    // The page handed in is 3 open deals (0 + 1 + 2); the lane holds 70.
+    ['sum', 'Sum', '2415'],
+    ['avg', 'Avg', '34.5'],
+    ['min', 'Min', '0'],
+    ['max', 'Max', '69'],
+  ])('draws the whole lane\'s %s over a page handed in with its query (objectstack#36871)', async (type, word, open) => {
+    const source = adapter(ROWS_70);
+    mountHanded(source, { type, field: 'amount' }, deals('open', 3), { search: '', reloadKey: '0' });
+    await waitFor(() => expect(foot('Open')).not.toBeNull());
+    expect(within(lane('Open')).queryAllByRole('listitem')).toHaveLength(3);
+    expect(foot('Open')!.textContent).toContain(`${word} · Amount`);
+    expect(figure('Open')).toBe(open);
+    expect(source.queryGroupHeaders).toHaveBeenCalledTimes(1);
+    // The board reads nothing for its cards: the host handed them.
+    expect(source.find).not.toHaveBeenCalled();
+  });
+
+  it('asks that read under the node\'s filter and the host\'s search, and again when the host refetches (objectstack#36871)', async () => {
+    const source = adapter(ROWS_70);
+    const { rerenderWith } = mountHanded(
+      source,
+      { type: 'sum', field: 'amount' },
+      deals('open', 3),
+      { search: 'open', searchFields: ['name'], reloadKey: '0' },
+      { filter: [['region', '=', 'north']] },
+    );
+    await waitFor(() => expect(source.queryGroupHeaders).toHaveBeenCalledTimes(1));
+    const query = source.queryGroupHeaders.mock.calls[0][1];
+    expect(query.where).toEqual({ region: 'north' });
+    expect(query.search).toBe('open');
+    expect(query.searchFields).toEqual(['name']);
+    rerenderWith({ search: 'open', searchFields: ['name'], reloadKey: '1' });
+    await waitFor(() => expect(source.queryGroupHeaders).toHaveBeenCalledTimes(2));
+  });
 });
 
 /**
