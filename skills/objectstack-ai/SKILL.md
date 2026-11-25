@@ -69,8 +69,7 @@ A `skill.tools[]` entry resolves against the union of four sources
    tools, flattened from `PLATFORM_TOOLS_BY_PACKAGE` in
    `packages/spec/src/system/constants/platform-tool-names.ts`: data /
    knowledge tools from `service-ai`, schema / metadata / package tools from
-   `service-ai-studio`. Read that file for the exact set: it is the registry
-   the lint rule checks against.
+   `service-ai-studio`.
 3. **`action_<name>`** — one tool per AI-exposed Action of your own stack
    (`PLATFORM_TOOL_FAMILY_PREFIXES`). **The default path** for anything your app
    does.
@@ -178,6 +177,32 @@ outcome). Whether *your* action is queued is
 decided entirely by the skip rule above — `actionSkipReason(action, ctx)` and
 `actionRequiresApproval(action)` (from `@objectstack/service-ai`) answer both
 questions, and Studio's "AI exposure" diagnostics use the same predicates.
+
+### The **Ask AI** button — `type: 'ask_ai'` ☁️
+
+Pins the assistant's conversation to the record the action runs on and opens
+it, sending no message. Declare it on the object, in
+`locations: ['record_header']` or `['record_more']`:
+
+<!-- os:check -->
+```typescript
+import { defineAction } from '@objectstack/spec';
+
+export default defineAction({
+  name: 'ask_about_contract',
+  label: 'Ask AI',
+  objectName: 'contract',
+  type: 'ask_ai',
+  locations: ['record_header'],
+});
+```
+
+It names nothing and is never a tool: the parse refuses a `target`,
+`ai.exposed: true`, and `actionType: 'ask_ai'` on a dashboard header (a header
+runs on no record). Nothing serves it headless: `list_actions` skips it,
+`run_action` refuses it, and no `action_` tool exists for it. The console draws
+it only where the assistant surface is on **and** the AI service honours a
+conversation focus; elsewhere it is absent, not disabled.
 
 ---
 
@@ -350,9 +375,9 @@ there is **no top-level `temperature` / `maxTokens`** on an agent
 1. **Mistaking `guardrails` for a gate.** `guardrails` is enforced per user turn
    by the AI runtime ☁️ — token and time limits, blocked tool names and categories
    refused — but it is a limit, not an approval; `memory` is enforced by the AI
-   runtime ☁️ too — long-term notes are recalled and reflected on, `maxEntries`
-   and `reflectionInterval` are required once `longTerm.enabled` is true, and
-   there is no storage backend to choose — and neither is a gate. For a gate
+   runtime ☁️ too (`maxEntries` and `reflectionInterval` are required once
+   `longTerm.enabled` is true; there is no storage backend to choose), and is
+   no gate either. For a gate
    that is **enforced**, use
    `enableActionApproval: true` (approval queue ☁️), `ai.requiresConfirmation` on
    the **action** (its door only, pitfall 2), or `approval: 'always'` on an MCP
@@ -378,37 +403,23 @@ there is **no top-level `temperature` / `maxTokens`** on an agent
 
 ---
 
-## App AI Blueprint
-
-| Layer | File | Pattern |
-|:--|:--|:--|
-| Reusable skill | `src/skills/lead-qualification.skill.ts` | `defineSkill` — `instructions` + trigger conditions + a toolset where every name resolves; pick a `surface` |
-| Knowledge source | `src/knowledge/sales-kb.ts` | `KnowledgeSourceSchema` metadata, registered at boot via `KnowledgeServicePlugin({ sources })` |
-| Central registration | `defineStack({ skills: [...] })` | `agents` / `tools` / `skills` are the only AI stack collections |
-
----
-
 ## Platform agents — reference only ☁️
 
 The `agent` type is **closed** to third parties (`allowRuntimeCreate:false`,
 `allowEnvironmentOverlay:false`; ADR-0063 §2) and `os g agent` is retired: a
 stack-authored agent is filtered out of `listAgents()`, refused outright by
-`loadAgent()`, and 404s on chat. `AgentSchema`'s full field list is in
-[references/_index.md](./references/_index.md).
+`loadAgent()`, and 404s on chat.
 
 The runtime ships **exactly two** agents, bound by *surface*. **`ask`** is the
-data product (≈ Claude Chat): conversational read / query / explore over records
+data product: conversational read / query / explore over records
 plus running the business actions the app exposes, end-user audience,
 RLS-bounded, canonical id `ask` (`ASK_AGENT_NAME`), and the implicit copilot for
 any app that does not pin `app.defaultAgent`. **`build`** is the authoring
-product (≈ Claude Code): agentic authoring of *metadata* through plan → draft →
+product: agentic authoring of *metadata* through plan → draft →
 verify → publish, builder audience, governance-gated, pinned by Studio via
 `app.defaultAgent`. There is **no per-turn intent classifier** — a `build`-shaped
 request arriving at `ask` is declined and redirected, never silently re-routed
-into authoring (ADR-0063 §1/§5). `data_chat`→`ask` and
-`metadata_assistant`→`build` resolve through the alias table for old bookmarks
-and persisted `agent_id`s; they are **not** vocabulary — always write `ask` /
-`build`.
+into authoring (ADR-0063 §1/§5).
 
 An agent's tool set is the **union of its surface-compatible skills' tools** —
 there is no global fall-through (ADR-0064), so `ask` cannot author by

@@ -90,6 +90,16 @@
         "must_contain": ["split", "strategy", "markdown", "maxChars"],
         "must_not_contain": ["chunkSize", "chunkOverlap", "overlap: 100"]
       }
+    },
+    {
+      "id": 10,
+      "prompt": "Add an Ask AI button to the contract record page, so a user can ask the assistant about the contract they are looking at. Write the action.",
+      "expected_output": "Emits a `defineAction` with `type: 'ask_ai'`, `objectName: 'contract'` and `locations: ['record_header']` (or `['record_more']`), with no `target` and no `ai.exposed: true`: the action pins the assistant's conversation to the record and opens it, sending no message. States that it is never a tool (`list_actions` skips it, `run_action` refuses it, no `action_` tool exists for it) and that the console draws it only where the in-app assistant is on and honours a conversation focus; elsewhere it is absent, not disabled.",
+      "files": [],
+      "assertions": {
+        "must_contain": ["ask_ai", "record_header", "locations"],
+        "must_not_contain": ["target:", "exposed: true", "actionType"]
+      }
     }
   ]
 }
