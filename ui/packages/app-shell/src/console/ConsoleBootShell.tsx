@@ -11,7 +11,7 @@
  * objectui#5619). Each used to draw the full-screen splash. They now draw
  * {@link ConsoleBootShell}: the chrome's frame (the sidebar at the width the
  * reader left it, with its head and foot from 768 px up; the 48 px top bar on
- * a phone and on a docs page; the route slot) with grey blocks in it and
+ * a phone; the route slot) with grey blocks in it and
  * the skeleton of the route the URL names in the slot. The real chrome takes
  * its place when the gates pass, at the same geometry.
  *
@@ -87,16 +87,17 @@ export function ConsoleBootShell() {
   // chrome lands. From 768 px up an app draws no top bar: the app menu, the
   // search and the bell sit in the sidebar's head and the account at its foot
   // (objectstack#36112). A phone keeps the bar, except on a record page,
-  // which draws its own (objectstack#28483). A docs page mounts no sidebar
-  // and keeps the bar at every width (objectstack#35424).
+  // which draws its own (objectstack#28483). An app's docs page is an app
+  // page like the others from 768 px up (objectstack#37150); on a phone it
+  // mounts no sidebar and keeps the bar (objectstack#35424).
   const phone = usePhoneViewport();
-  const docsPage = isAppDocsPath(pathname);
+  const phoneDocsPage = phone && isAppDocsPath(pathname);
   const recordPageOwnsTopBar = phone && isRecordPagePath(pathname);
-  const desktopSidebar = !phone && !docsPage;
+  const desktopSidebar = !phone;
   return (
     <div data-boot-splash="" data-boot-shell="" aria-busy="true" className="contents">
       <AppShell
-        showHeader={(phone || docsPage) && !recordPageOwnsTopBar}
+        showHeader={phone && !recordPageOwnsTopBar}
         navbar={
           <div className="flex w-full items-center gap-3">
             <Skeleton className="h-7 w-28 rounded-md" />
@@ -105,7 +106,7 @@ export function ConsoleBootShell() {
           </div>
         }
         sidebar={
-          docsPage ? undefined : (
+          phoneDocsPage ? undefined : (
           <Sidebar collapsible="offcanvas" className={phone ? CONSOLE_BELOW_TOP_BAR : undefined}>
             {desktopSidebar && (
               // Where the app menu (and the collapse button), the search and
