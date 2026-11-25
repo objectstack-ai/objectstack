@@ -32,6 +32,8 @@ import { render, screen, fireEvent, cleanup, waitFor, within } from '@testing-li
 import { MemoryRouter, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
 
 const SHOWCASE = 'com.example.showcase';
+/** objectstack#36903 — the showcase's paired customization package, listed only where a case says so. */
+const PAIR = 'com.example.showcase.custom';
 const NODES = [
   { id: 'start', type: 'start', label: 'Start' },
   { id: 'end', type: 'end', label: 'End' },
@@ -94,6 +96,9 @@ const mockClient = vi.hoisted(() => ({
   reset: vi.fn(async () => ({})),
 }));
 
+/** Whether the package list serves the showcase's pair (objectstack#36903, the pair's bookmarks). */
+const listing = vi.hoisted(() => ({ pair: false }));
+
 /** What the surface handed the pending-changes sheet, last render. */
 const panel = vi.hoisted(() => ({ props: null as null | Record<string, unknown> }));
 /** Read through a call, so a reset between renders does not narrow it away. */
@@ -114,7 +119,13 @@ vi.mock('./packages-io', async (importOriginal) => {
     // objectstack#36903 — the same answer as the area reads it: a flow opens
     // in the area now, whose courtesy gate reads the listed manifests.
     fetchListedPackageManifests: vi.fn(
-      async () => new Map([[SHOWCASE, { id: SHOWCASE, name: 'Showcase', writable: false, manifest: { scope: 'installed' } }]]),
+      async () =>
+        new Map([
+          [SHOWCASE, { id: SHOWCASE, name: 'Showcase', writable: false, manifest: { scope: 'installed', version: '1.0.0' } }],
+          ...(listing.pair
+            ? [[PAIR, { id: PAIR, name: 'Showcase customizations', writable: true, manifest: { namespace: 'showcase_custom' } }] as const]
+            : []),
+        ]),
     ),
   };
 });
@@ -207,6 +218,7 @@ beforeEach(() => {
   server.packageBatches.length = 0;
   panel.props = null;
   chatDock.mounts = 0;
+  listing.pair = false;
   for (const fn of Object.values(mockClient)) (fn as unknown as { mockClear: () => void }).mockClear();
   // Two packaged flows on the read-only showcase, and the clone, which names no package.
   seed(flow('showcase_urgent_task_alert', 'Urgent task alert', SHOWCASE));
@@ -481,5 +493,68 @@ describe('a deep-link miss and an empty list show no "no designers" notice (obje
 
     expect(screen.getByText('Visual orchestration · click a node to configure')).toBeInTheDocument();
     expect(document.body.textContent).not.toContain(NO_DESIGNERS);
+  });
+});
+
+/**
+ * objectstack#36903 — the retired Automations pillar's bookmarks, opened
+ * through the REAL surface: each lands on the flow's own address with the
+ * designer open on that flow. A read-only base's pair-added flow opens at the
+ * base's address, writable at the pair (the designer reads the pair's flows
+ * with the base's); the pair's own old address — where New similar sent the
+ * author before this card — lands on the pair's own area.
+ */
+describe('an old Automations bookmark lands on the flow’s address, the designer open on it (objectstack#36903)', () => {
+  const pairChip = () => screen.queryByTestId('studio-pair-item-chip');
+
+  it('a package’s flow: its address on the package, the designer open read-only', async () => {
+    renderAt(`/studio/${SHOWCASE}/automations?surface=flow%3Ashowcase_daily_digest`);
+
+    await waitFor(() => expect(location()).toBe(`/studio/${SHOWCASE}/metadata/flow/showcase_daily_digest?package=${SHOWCASE}`), {
+      timeout: 8000,
+    });
+    await openedFlow('showcase_daily_digest');
+    await waitFor(() => expect(screen.getByRole('switch')).toBeDisabled());
+    expect(mockClient.layered).not.toHaveBeenCalledWith('flow', 'showcase_urgent_task_alert');
+  });
+
+  describe('a read-only base with a pair', () => {
+    beforeEach(() => {
+      listing.pair = true;
+      seed(flow('showcase_alert_copy', 'Alert copy', PAIR));
+    });
+
+    it('the base’s old address naming a pair-added flow: the base’s address, open writable, with the pair chip', async () => {
+      renderAt(`/studio/${SHOWCASE}/automations?surface=flow%3Ashowcase_alert_copy`);
+
+      await waitFor(() => expect(location()).toBe(`/studio/${SHOWCASE}/metadata/flow/showcase_alert_copy?package=${SHOWCASE}`), {
+        timeout: 8000,
+      });
+      await openedFlow('showcase_alert_copy');
+      await waitFor(() => expect(screen.getByRole('switch')).toBeEnabled(), { timeout: 8000 });
+      expect(pairChip()).toBeInTheDocument();
+    });
+
+    it('the pair’s old address: the pair’s own address, the copy open writable', async () => {
+      renderAt(`/studio/${PAIR}/automations?surface=flow%3Ashowcase_alert_copy`);
+
+      await waitFor(() => expect(location().split('?')[0]).toBe(`/studio/${PAIR}/metadata/flow/showcase_alert_copy`), {
+        timeout: 8000,
+      });
+      await openedFlow('showcase_alert_copy');
+      await waitFor(() => expect(screen.getByRole('switch')).toBeEnabled(), { timeout: 8000 });
+    });
+
+    // CONTROL: with the pair listed, the base's own flow stays read-only on the base.
+    it('CONTROL: the base’s own flow, through the same old address, stays read-only and carries no pair chip', async () => {
+      renderAt(`/studio/${SHOWCASE}/automations?surface=flow%3Ashowcase_daily_digest`);
+
+      await waitFor(() => expect(location()).toBe(`/studio/${SHOWCASE}/metadata/flow/showcase_daily_digest?package=${SHOWCASE}`), {
+        timeout: 8000,
+      });
+      await openedFlow('showcase_daily_digest');
+      await waitFor(() => expect(screen.getByRole('switch')).toBeDisabled());
+      expect(pairChip()).toBeNull();
+    });
   });
 });
