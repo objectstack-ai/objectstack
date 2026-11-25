@@ -892,6 +892,8 @@ const zhHant = {
       notConfirmedRecords: '操作未報告這些記錄的結果，請檢查它們的當前值：',
       resultRefused: ' · 被拒絕 {{count}}',
       refusedRecords: '操作拒絕了以下記錄：',
+      resultPaused: ' · 等待輸入 {{count}}',
+      pausedRecords: '以下記錄正在等待輸入，它們的介面會依次開啟：',
       aggregateUnreadable: '操作已完成，但無法讀取其結果，因此不知道哪些記錄被修改了。關閉後列表會顯示它們的當前值。',
       retry: '重試',
       downloadErrorCsv: '下載錯誤 CSV',
@@ -2396,36 +2398,32 @@ const zhHant = {
       description: '同事開始使用之前，先設定好這幾項。每一項之後都可以在系統設定中修改。',
       progress: '已完成 {{done}}/{{total}}',
       dismiss: '隱藏清單',
+      // objectstack#36739 — the popover's own action: hides the pill and Home's card here; its X only closes.
+      hideHere: '在本機隱藏',
       showDone: '顯示已完成的項（{{done}}）',
-      showDoneSplit: '顯示已完成的項（必做 {{required}} · 可選 {{optional}}）',
       hideDone: '收起已完成的項',
       optional: '可選',
       set: '設定',
       change: '修改',
       view: '檢視',
-      confirm: '確認',
       cancel: '取消',
       continue: '繼續',
-      prefilled: '尚未設定的項已按你的瀏覽器給出建議。確認之前不會儲存任何內容。',
-      organizationName: {
-        title: '為組織命名',
-        todo: '組織仍在使用建立時的名稱“{{name}}”。',
-        action: '重新命名',
+      showList: '檢視清單',
+      // objectstack#36739 — the one required platform row: one form, one save.
+      organizationBasics: {
+        title: '組織基本資訊',
+        todo: '組織名稱、預設語言和國家/地區、時區、貨幣，一次儲存。',
+        name: '組織名稱',
+        nameRequired: '請填寫組織名稱。',
+        prefilled: '尚未設定的項已按你的瀏覽器給出建議。點“儲存”之前不會儲存任何內容。',
+        save: '儲存',
+        saved: '組織基本資訊已儲存',
       },
-      languageCountry: {
-        title: '預設語言和國家/地區',
-        todo: '當前為{{language}}、{{country}}。請確認，或改選其他值。',
-        saved: '預設語言和國家/地區已儲存',
-      },
-      timezone: {
-        title: '系統時區',
-        todo: '仍為平台預設時區 {{current}}。系統時區決定公式中“今天”的含義，以及報表如何按日期分組。',
-        saved: '系統時區已設定為 {{zone}}',
-      },
-      currency: {
-        title: '預設貨幣',
-        todo: '尚未設定，金額暫不顯示幣種。',
-        saved: '預設貨幣已設定為 {{currency}}',
+      // The sidebar's progress pill, in every app (objectstack#36739).
+      pill: {
+        label: '開始使用',
+        count: '{{done}}/{{total}}',
+        aria: '開始使用：已完成 {{done}}/{{total}}',
       },
       mail: {
         title: '郵件傳送',
@@ -2746,6 +2744,14 @@ const zhHant = {
       changesDrafted: '已暫存為草稿',
       changesFailed: '未生效',
       discussing: '正在看：{{target}}',
+      focus: {
+        pin: '釘住這條記錄，換頁後仍問它',
+        pinned: '正在問：{{target}}',
+        remove: '不再問這條記錄',
+        switchPrompt: '改為問《{{target}}》？',
+        switchAccept: '改為問它',
+        switchDecline: '不用',
+      },
       // changesConfirmMessage: gate-only, read from zh-Hans (GATE_ONLY_KEYS, scripts/zh-hant.mjs).
       changeVerb: {
         createObject: '新建物件',
@@ -3007,11 +3013,12 @@ const zhHant = {
       resetViewTitle: '恢復此檢視自身的篩選、搜尋、排序、分組、列布局、隱藏欄位、密度、佈局、行顏色、行號和行內編輯。固定的檢視、收藏和記錄的開啟方式保持不變。只影響你自己的列表。',
       personalized: '已個性化',
       personalizedHeading: '你的列表與此檢視不同之處',
-      // objectstack#35955 — a list's unsaved changes: Discard and Save.
+      // objectstack#35955 — a list's unsaved changes: Reset and Update view
+      // (objectstack#36737, the view's own actions, as Twenty's).
       draft: {
-        discard: '放棄',
+        discard: '重置',
         discardTitle: '把列表恢復成檢視本來的樣子：篩選、排序、分組、列和佈局。列寬和行高不變。',
-        save: '儲存',
+        save: '更新檢視',
         heading: '未儲存的改動',
         partSeparator: '、',
         saveToView: '儲存到這個檢視',
@@ -3990,7 +3997,7 @@ const zhHant = {
       allApps: '所有應用',
       editAppInStudio: '在 Studio 中編輯 {{app}}',
       openAppInStudio: '在 Studio 中檢視 {{app}}',
-      backToHome: '返回首頁',
+      backToHome: '返回應用起始頁',
       settings: '系統設定',
       productHome: '{{product}} 首頁',
       addApp: '新增應用',
@@ -4253,6 +4260,9 @@ const zhHant = {
         skill: 'AI 技能 {{count}}',
         skill_one: 'AI 技能 {{count}}',
         skill_other: 'AI 技能 {{count}}',
+        ai_context: 'AI 上下文包 {{count}}',
+        ai_context_one: 'AI 上下文包 {{count}}',
+        ai_context_other: 'AI 上下文包 {{count}}',
         datasource: '資料來源 {{count}}',
         datasource_one: '資料來源 {{count}}',
         datasource_other: '資料來源 {{count}}',

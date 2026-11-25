@@ -91,7 +91,7 @@ const result = AppMetadataBundleResponseSchema.parse(data);
 | **lockReason** | `string` | optional | Human-readable explanation shown next to a refused write. Present only when the resolved item declares `_lockReason`. |
 | **lockSource** | `Enum<'artifact' \| 'package' \| 'env-forced'>` | optional | Which layer asserted the lock. Present only when the resolved item declares `_lockSource`. |
 | **lockDocsUrl** | `string` | optional | Documentation link surfaced beside `lockReason`. Present only when the resolved item declares `_lockDocsUrl`. |
-| **provenance** | `Enum<'package' \| 'org' \| 'env-forced'>` | optional | Where the item came from (package \| org \| env-forced). Present only when the resolved item declares `_provenance`. |
+| **provenance** | `Enum<'package' \| 'org' \| 'env-forced' \| 'platform'>` | optional | Where the item came from (package \| org \| env-forced \| platform). Present only when the resolved item declares `_provenance`. |
 | **packageId** | `string` | optional | Owning package machine id. Present only when the resolved item declares `_packageId`. |
 | **packageVersion** | `string` | optional | Owning package version. Present only when the resolved item declares `_packageVersion`. |
 | **editable** | `boolean` | optional | Whether an overlay write is permitted — false iff `lock` is `no-overlay` or `full`. A derived verdict: do not recompute it from `lock` client-side. |
@@ -115,7 +115,7 @@ const result = AppMetadataBundleResponseSchema.parse(data);
 | **lockReason** | `string` | optional | Human-readable explanation shown next to a refused write. Present only when the resolved item declares `_lockReason`. |
 | **lockSource** | `Enum<'artifact' \| 'package' \| 'env-forced'>` | optional | Which layer asserted the lock. Present only when the resolved item declares `_lockSource`. |
 | **lockDocsUrl** | `string` | optional | Documentation link surfaced beside `lockReason`. Present only when the resolved item declares `_lockDocsUrl`. |
-| **provenance** | `Enum<'package' \| 'org' \| 'env-forced'>` | optional | Where the item came from (package \| org \| env-forced). Present only when the resolved item declares `_provenance`. |
+| **provenance** | `Enum<'package' \| 'org' \| 'env-forced' \| 'platform'>` | optional | Where the item came from (package \| org \| env-forced \| platform). Present only when the resolved item declares `_provenance`. |
 | **packageId** | `string` | optional | Owning package machine id. Present only when the resolved item declares `_packageId`. |
 | **packageVersion** | `string` | optional | Owning package version. Present only when the resolved item declares `_packageVersion`. |
 | **editable** | `boolean` | optional | Whether an overlay write is permitted — false iff `lock` is `no-overlay` or `full`. A derived verdict: do not recompute it from `lock` client-side. |
@@ -139,7 +139,7 @@ const result = AppMetadataBundleResponseSchema.parse(data);
 | **lockReason** | `string` | optional | Human-readable explanation shown next to a refused write. Present only when the resolved item declares `_lockReason`. |
 | **lockSource** | `Enum<'artifact' \| 'package' \| 'env-forced'>` | optional | Which layer asserted the lock. Present only when the resolved item declares `_lockSource`. |
 | **lockDocsUrl** | `string` | optional | Documentation link surfaced beside `lockReason`. Present only when the resolved item declares `_lockDocsUrl`. |
-| **provenance** | `Enum<'package' \| 'org' \| 'env-forced'>` | optional | Where the item came from (package \| org \| env-forced). Present only when the resolved item declares `_provenance`. |
+| **provenance** | `Enum<'package' \| 'org' \| 'env-forced' \| 'platform'>` | optional | Where the item came from (package \| org \| env-forced \| platform). Present only when the resolved item declares `_provenance`. |
 | **packageId** | `string` | optional | Owning package machine id. Present only when the resolved item declares `_packageId`. |
 | **packageVersion** | `string` | optional | Owning package version. Present only when the resolved item declares `_packageVersion`. |
 | **editable** | `boolean` | optional | Whether an overlay write is permitted — false iff `lock` is `no-overlay` or `full`. A derived verdict: do not recompute it from `lock` client-side. |
@@ -163,7 +163,7 @@ const result = AppMetadataBundleResponseSchema.parse(data);
 | **lockReason** | `string` | optional | Human-readable explanation shown next to a refused write. Present only when the resolved item declares `_lockReason`. |
 | **lockSource** | `Enum<'artifact' \| 'package' \| 'env-forced'>` | optional | Which layer asserted the lock. Present only when the resolved item declares `_lockSource`. |
 | **lockDocsUrl** | `string` | optional | Documentation link surfaced beside `lockReason`. Present only when the resolved item declares `_lockDocsUrl`. |
-| **provenance** | `Enum<'package' \| 'org' \| 'env-forced'>` | optional | Where the item came from (package \| org \| env-forced). Present only when the resolved item declares `_provenance`. |
+| **provenance** | `Enum<'package' \| 'org' \| 'env-forced' \| 'platform'>` | optional | Where the item came from (package \| org \| env-forced \| platform). Present only when the resolved item declares `_provenance`. |
 | **packageId** | `string` | optional | Owning package machine id. Present only when the resolved item declares `_packageId`. |
 | **packageVersion** | `string` | optional | Owning package version. Present only when the resolved item declares `_packageVersion`. |
 | **editable** | `boolean` | optional | Whether an overlay write is permitted — false iff `lock` is `no-overlay` or `full`. A derived verdict: do not recompute it from `lock` client-side. |
@@ -187,7 +187,7 @@ const result = AppMetadataBundleResponseSchema.parse(data);
 | **lockReason** | `string` | optional | Human-readable explanation shown next to a refused write. Present only when the resolved item declares `_lockReason`. |
 | **lockSource** | `Enum<'artifact' \| 'package' \| 'env-forced'>` | optional | Which layer asserted the lock. Present only when the resolved item declares `_lockSource`. |
 | **lockDocsUrl** | `string` | optional | Documentation link surfaced beside `lockReason`. Present only when the resolved item declares `_lockDocsUrl`. |
-| **provenance** | `Enum<'package' \| 'org' \| 'env-forced'>` | optional | Where the item came from (package \| org \| env-forced). Present only when the resolved item declares `_provenance`. |
+| **provenance** | `Enum<'package' \| 'org' \| 'env-forced' \| 'platform'>` | optional | Where the item came from (package \| org \| env-forced \| platform). Present only when the resolved item declares `_provenance`. |
 | **packageId** | `string` | optional | Owning package machine id. Present only when the resolved item declares `_packageId`. |
 | **packageVersion** | `string` | optional | Owning package version. Present only when the resolved item declares `_packageVersion`. |
 | **editable** | `boolean` | optional | Whether an overlay write is permitted — false iff `lock` is `no-overlay` or `full`. A derived verdict: do not recompute it from `lock` client-side. |

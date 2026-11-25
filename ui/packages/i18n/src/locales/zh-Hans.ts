@@ -892,6 +892,8 @@ const zh = {
       notConfirmedRecords: '操作未报告这些记录的结果，请检查它们的当前值：',
       resultRefused: ' · 被拒绝 {{count}}',
       refusedRecords: '操作拒绝了以下记录：',
+      resultPaused: ' · 等待输入 {{count}}',
+      pausedRecords: '以下记录正在等待输入，它们的界面会依次打开：',
       aggregateUnreadable: '操作已完成，但无法读取其结果，因此不知道哪些记录被修改了。关闭后列表会显示它们的当前值。',
       retry: '重试',
       downloadErrorCsv: '下载错误 CSV',
@@ -2396,36 +2398,32 @@ const zh = {
       description: '同事开始使用之前，先设置好这几项。每一项之后都可以在系统设置中修改。',
       progress: '已完成 {{done}}/{{total}}',
       dismiss: '隐藏清单',
+      // objectstack#36739 — the popover's own action: hides the pill and Home's card here; its X only closes.
+      hideHere: '在本机隐藏',
       showDone: '显示已完成的项（{{done}}）',
-      showDoneSplit: '显示已完成的项（必做 {{required}} · 可选 {{optional}}）',
       hideDone: '收起已完成的项',
       optional: '可选',
       set: '设置',
       change: '修改',
       view: '查看',
-      confirm: '确认',
       cancel: '取消',
       continue: '继续',
-      prefilled: '尚未设置的项已按你的浏览器给出建议。确认之前不会保存任何内容。',
-      organizationName: {
-        title: '为组织命名',
-        todo: '组织仍在使用创建时的名称“{{name}}”。',
-        action: '重命名',
+      showList: '查看清单',
+      // objectstack#36739 — the one required platform row: one form, one save.
+      organizationBasics: {
+        title: '组织基本信息',
+        todo: '组织名称、默认语言和国家/地区、时区、货币，一次保存。',
+        name: '组织名称',
+        nameRequired: '请填写组织名称。',
+        prefilled: '尚未设置的项已按你的浏览器给出建议。点“保存”之前不会保存任何内容。',
+        save: '保存',
+        saved: '组织基本信息已保存',
       },
-      languageCountry: {
-        title: '默认语言和国家/地区',
-        todo: '当前为{{language}}、{{country}}。请确认，或改选其他值。',
-        saved: '默认语言和国家/地区已保存',
-      },
-      timezone: {
-        title: '系统时区',
-        todo: '仍为平台默认时区 {{current}}。系统时区决定公式中“今天”的含义，以及报表如何按日期分组。',
-        saved: '系统时区已设置为 {{zone}}',
-      },
-      currency: {
-        title: '默认货币',
-        todo: '尚未设置，金额暂不显示币种。',
-        saved: '默认货币已设置为 {{currency}}',
+      // The sidebar's progress pill, in every app (objectstack#36739).
+      pill: {
+        label: '开始使用',
+        count: '{{done}}/{{total}}',
+        aria: '开始使用：已完成 {{done}}/{{total}}',
       },
       mail: {
         title: '邮件发送',
@@ -2746,6 +2744,14 @@ const zh = {
       changesDrafted: '已暂存为草稿',
       changesFailed: '未生效',
       discussing: '正在看：{{target}}',
+      focus: {
+        pin: '钉住这条记录，换页后仍问它',
+        pinned: '正在问：{{target}}',
+        remove: '不再问这条记录',
+        switchPrompt: '改为问《{{target}}》？',
+        switchAccept: '改为问它',
+        switchDecline: '不用',
+      },
       changesConfirmMessage: '确认修改，应用你刚才提议的改动。',
       changeVerb: {
         createObject: '新建对象',
@@ -3007,11 +3013,12 @@ const zh = {
       resetViewTitle: '恢复此视图自身的筛选、搜索、排序、分组、列布局、隐藏字段、密度、布局、行颜色、行号和行内编辑。固定的视图、收藏和记录的打开方式保持不变。只影响你自己的列表。',
       personalized: '已个性化',
       personalizedHeading: '你的列表与此视图不同之处',
-      // objectstack#35955 — a list's unsaved changes: Discard and Save.
+      // objectstack#35955 — a list's unsaved changes: Reset and Update view
+      // (objectstack#36737, the view's own actions, as Twenty's).
       draft: {
-        discard: '放弃',
+        discard: '重置',
         discardTitle: '把列表恢复成视图本来的样子：筛选、排序、分组、列和布局。列宽和行高不变。',
-        save: '保存',
+        save: '更新视图',
         heading: '未保存的改动',
         partSeparator: '、',
         saveToView: '保存到这个视图',
@@ -3990,7 +3997,7 @@ const zh = {
       allApps: '所有应用',
       editAppInStudio: '在 Studio 中编辑 {{app}}',
       openAppInStudio: '在 Studio 中查看 {{app}}',
-      backToHome: '返回首页',
+      backToHome: '返回应用起始页',
       settings: '系统设置',
       productHome: '{{product}} 首页',
       addApp: '添加应用',
@@ -4253,6 +4260,9 @@ const zh = {
         skill: 'AI 技能 {{count}}',
         skill_one: 'AI 技能 {{count}}',
         skill_other: 'AI 技能 {{count}}',
+        ai_context: 'AI 上下文包 {{count}}',
+        ai_context_one: 'AI 上下文包 {{count}}',
+        ai_context_other: 'AI 上下文包 {{count}}',
         datasource: '数据源 {{count}}',
         datasource_one: '数据源 {{count}}',
         datasource_other: '数据源 {{count}}',

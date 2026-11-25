@@ -636,6 +636,8 @@ const ko = {
       notConfirmedRecords: "작업이 이 레코드에 대해 결과를 보고하지 않았습니다. 현재 값을 확인하세요:",
       resultRefused: " · 거부됨 {{count}}",
       refusedRecords: "작업이 이 레코드를 거부했습니다:",
+      resultPaused: " · 입력 대기 {{count}}",
+      pausedRecords: "이 레코드는 입력을 기다리고 있습니다. 화면이 차례로 열립니다:",
       aggregateUnreadable: "작업은 끝났지만 결과를 읽을 수 없어 어떤 레코드가 변경되었는지 알 수 없습니다. 닫으면 목록에 현재 값이 표시됩니다.",
       retry: "다시 시도",
       downloadErrorCsv: "오류 CSV 다운로드",
@@ -2441,6 +2443,14 @@ const ko = {
       changesDrafted: "초안으로 저장됨",
       changesFailed: "적용되지 않음",
       discussing: "보는 중: {{target}}",
+      focus: {
+        pin: "이 레코드에 대해 계속 질문",
+        pinned: "질문 대상: {{target}}",
+        remove: "이 레코드에 대한 질문 중지",
+        switchPrompt: "대신 \"{{target}}\"에 대해 질문할까요?",
+        switchAccept: "전환",
+        switchDecline: "유지",
+      },
       changeVerb: {
         createObject: "객체 생성",
         addField: "필드 추가",
@@ -2593,36 +2603,32 @@ const ko = {
       description: "동료가 사용을 시작하기 전에 설정해 둘 항목입니다. 모든 항목은 나중에 설정에서 변경할 수 있습니다.",
       progress: "{{total}}개 중 {{done}}개 완료",
       dismiss: "체크리스트 숨기기",
+      // objectstack#36739 — the popover's own action: hides the pill and Home's card here; its X only closes.
+      hideHere: "이 기기에서 숨기기",
       showDone: "완료된 항목 보기({{done}})",
-      showDoneSplit: "완료된 항목 보기(필수 {{required}} · 선택 {{optional}})",
       hideDone: "완료된 항목 접기",
       optional: "선택 사항",
       set: "설정",
       change: "변경",
       view: "보기",
-      confirm: "확인",
       cancel: "취소",
       continue: "계속",
-      prefilled: "아직 설정되지 않은 값은 브라우저를 기준으로 제안되었습니다. 확인하기 전에는 아무것도 저장되지 않습니다.",
-      organizationName: {
-        title: "조직 이름 정하기",
-        todo: "아직 생성 시의 이름 \"{{name}}\"을(를) 사용하고 있습니다.",
-        action: "이름 변경",
+      showList: "목록 보기",
+      // objectstack#36739 — the one required platform row: one form, one save.
+      organizationBasics: {
+        title: "조직 기본 정보",
+        todo: "조직 이름, 기본 언어와 국가, 시간대, 통화를 한 번에 저장합니다.",
+        name: "조직 이름",
+        nameRequired: "조직 이름을 입력하세요.",
+        prefilled: "아직 설정하지 않은 항목은 브라우저 설정을 바탕으로 제안했습니다. 저장을 누르기 전에는 아무것도 저장되지 않습니다.",
+        save: "저장",
+        saved: "조직 기본 정보를 저장했습니다",
       },
-      languageCountry: {
-        title: "기본 언어 및 국가",
-        todo: "현재 {{language}}, {{country}}입니다. 확인하거나 다른 값을 선택하세요.",
-        saved: "기본 언어 및 국가를 저장했습니다",
-      },
-      timezone: {
-        title: "시스템 시간대",
-        todo: "아직 플랫폼 기본값 {{current}}입니다. 수식에서 \"오늘\"의 의미와 보고서에서 날짜를 묶는 방식을 결정합니다.",
-        saved: "시스템 시간대를 {{zone}}(으)로 설정했습니다",
-      },
-      currency: {
-        title: "기본 통화",
-        todo: "아직 설정되지 않아 금액이 통화 기호 없이 표시됩니다.",
-        saved: "기본 통화를 {{currency}}(으)로 설정했습니다",
+      // The sidebar's progress pill, in every app (objectstack#36739).
+      pill: {
+        label: "시작하기",
+        count: "{{done}}/{{total}}",
+        aria: "시작하기: {{total}}개 중 {{done}}개 완료",
       },
       mail: {
         title: "이메일 발송",
@@ -2857,11 +2863,12 @@ const ko = {
       resetViewTitle: "이 보기 자체의 필터, 검색, 정렬, 그룹, 열 배치, 숨긴 필드, 밀도, 레이아웃, 행 색상, 행 번호, 인라인 편집으로 되돌립니다. 고정한 보기, 즐겨찾기, 레코드 열기 방식은 그대로 유지됩니다. 본인의 목록만 변경됩니다.",
       personalized: "개인 설정됨",
       personalizedHeading: "이 보기와 다른 항목",
-      // objectstack#35955 — a list's unsaved changes: Discard and Save.
+      // objectstack#35955 — a list's unsaved changes: Reset and Update view
+      // (objectstack#36737, the view's own actions, as Twenty's).
       draft: {
-        discard: "변경 취소",
+        discard: "초기화",
         discardTitle: "목록을 보기에 정의된 상태로 되돌립니다: 필터, 정렬, 그룹, 열, 레이아웃. 열 너비와 행 높이는 그대로입니다.",
-        save: "저장",
+        save: "보기 업데이트",
         heading: "저장되지 않은 변경",
         partSeparator: ", ",
         saveToView: "이 보기에 저장",
@@ -3857,7 +3864,7 @@ const ko = {
       allApps: "모든 앱",
       editAppInStudio: "Studio에서 {{app}} 편집",
       openAppInStudio: "Studio에서 {{app}} 보기",
-      backToHome: "홈으로 돌아가기",
+      backToHome: "앱 시작 페이지로 돌아가기",
       settings: "시스템 설정",
       productHome: "{{product}} 홈",
       addApp: '앱 추가',
@@ -5310,6 +5317,9 @@ const ko = {
         skill: 'AI 스킬 {{count}}',
         skill_one: 'AI 스킬 {{count}}',
         skill_other: 'AI 스킬 {{count}}',
+        ai_context: 'AI 컨텍스트 팩 {{count}}',
+        ai_context_one: 'AI 컨텍스트 팩 {{count}}',
+        ai_context_other: 'AI 컨텍스트 팩 {{count}}',
         datasource: '데이터 소스 {{count}}',
         datasource_one: '데이터 소스 {{count}}',
         datasource_other: '데이터 소스 {{count}}',

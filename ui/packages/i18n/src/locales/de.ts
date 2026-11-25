@@ -636,6 +636,8 @@ const de = {
       notConfirmedRecords: "Die Aktion hat zu diesen Datensätzen nichts gemeldet. Prüfen Sie ihre aktuellen Werte:",
       resultRefused: " · Abgelehnt {{count}}",
       refusedRecords: "Die Aktion hat diese Datensätze abgelehnt:",
+      resultPaused: " · Wartet auf Eingabe {{count}}",
+      pausedRecords: "Diese Datensätze warten auf eine Eingabe. Ihre Bildschirme öffnen sich nacheinander:",
       aggregateUnreadable: "Die Aktion wurde beendet, aber ihr Ergebnis konnte nicht gelesen werden, daher ist nicht bekannt, welche Datensätze geändert wurden. Nach dem Schließen zeigt die Liste ihre aktuellen Werte.",
       retry: "Erneut versuchen",
       downloadErrorCsv: "Fehler-CSV herunterladen",
@@ -2441,6 +2443,14 @@ const de = {
       changesDrafted: "Als Entwurf gespeichert",
       changesFailed: "Nicht angewendet",
       discussing: "Angezeigt: {{target}}",
+      focus: {
+        pin: "Weiter zu diesem Datensatz fragen",
+        pinned: "Fragen zu: {{target}}",
+        remove: "Nicht mehr zu diesem Datensatz fragen",
+        switchPrompt: "Stattdessen zu „{{target}}“ fragen?",
+        switchAccept: "Wechseln",
+        switchDecline: "Beibehalten",
+      },
       changeVerb: {
         createObject: "Objekt erstellen",
         addField: "Feld hinzufügen",
@@ -2593,36 +2603,32 @@ const de = {
       description: "Was Sie einrichten sollten, bevor Ihre Kollegen loslegen. Jeder Punkt lässt sich später in Setup ändern.",
       progress: "{{done}} von {{total}} erledigt",
       dismiss: "Checkliste ausblenden",
+      // objectstack#36739 — the popover's own action: hides the pill and Home's card here; its X only closes.
+      hideHere: "Auf diesem Gerät ausblenden",
       showDone: "Erledigte anzeigen ({{done}})",
-      showDoneSplit: "Erledigte anzeigen ({{required}} Pflicht · {{optional}} optional)",
       hideDone: "Erledigte ausblenden",
       optional: "Optional",
       set: "Festlegen",
       change: "Ändern",
       view: "Anzeigen",
-      confirm: "Bestätigen",
       cancel: "Abbrechen",
       continue: "Fortsetzen",
-      prefilled: "Noch nicht festgelegte Werte sind aus Ihrem Browser vorgeschlagen. Gespeichert wird erst, wenn Sie bestätigen.",
-      organizationName: {
-        title: "Organisation benennen",
-        todo: "Sie trägt noch den Namen, mit dem sie angelegt wurde: „{{name}}“.",
-        action: "Umbenennen",
+      showList: "Liste anzeigen",
+      // objectstack#36739 — the one required platform row: one form, one save.
+      organizationBasics: {
+        title: "Grunddaten der Organisation",
+        todo: "Name, Standardsprache und -land, Zeitzone und Währung, in einem Schritt gespeichert.",
+        name: "Name der Organisation",
+        nameRequired: "Geben Sie einen Namen für Ihre Organisation ein.",
+        prefilled: "Noch nicht festgelegte Werte sind aus Ihrem Browser vorgeschlagen. Gespeichert wird erst, wenn Sie auf Speichern klicken.",
+        save: "Speichern",
+        saved: "Grunddaten der Organisation gespeichert",
       },
-      languageCountry: {
-        title: "Standardsprache und -land",
-        todo: "Derzeit {{language}} und {{country}}. Bestätigen Sie diese oder wählen Sie andere.",
-        saved: "Standardsprache und -land gespeichert",
-      },
-      timezone: {
-        title: "Systemzeitzone",
-        todo: "Noch die Standardzeitzone der Plattform, {{current}}. Sie bestimmt, was „heute“ in Formeln bedeutet und wie Berichte Daten gruppieren.",
-        saved: "Systemzeitzone auf {{zone}} festgelegt",
-      },
-      currency: {
-        title: "Standardwährung",
-        todo: "Noch nicht festgelegt, daher werden Beträge ohne Währungssymbol angezeigt.",
-        saved: "Standardwährung auf {{currency}} festgelegt",
+      // The sidebar's progress pill, in every app (objectstack#36739).
+      pill: {
+        label: "Erste Schritte",
+        count: "{{done}}/{{total}}",
+        aria: "Erste Schritte: {{done}} von {{total}} erledigt",
       },
       mail: {
         title: "E-Mail-Versand",
@@ -2857,11 +2863,12 @@ const de = {
       resetViewTitle: "Stellt die eigenen Filter, Suche, Sortierung, Gruppierung, Spaltenanordnung, ausgeblendeten Felder, Dichte, Layout, Zeilenfarbe, Zeilennummern und Inline-Bearbeitung dieser Ansicht wieder her. Angeheftete Ansichten, Favoriten und die Art, wie Datensätze geöffnet werden, bleiben unverändert. Nur Ihre Liste ändert sich.",
       personalized: "Personalisiert",
       personalizedHeading: "Ihre Liste weicht von dieser Ansicht ab bei",
-      // objectstack#35955 — a list's unsaved changes: Discard and Save.
+      // objectstack#35955 — a list's unsaved changes: Reset and Update view
+      // (objectstack#36737, the view's own actions, as Twenty's).
       draft: {
-        discard: "Verwerfen",
+        discard: "Zurücksetzen",
         discardTitle: "Setzt die Liste auf den Stand der Ansicht zurück: Filter, Sortierung, Gruppierung, Spalten und Layout. Spaltenbreiten und Zeilenhöhe bleiben.",
-        save: "Speichern",
+        save: "Ansicht aktualisieren",
         heading: "Ungespeicherte Änderungen",
         partSeparator: ", ",
         saveToView: "In dieser Ansicht speichern",
@@ -3858,7 +3865,7 @@ const de = {
       allApps: "Alle Apps",
       editAppInStudio: "{{app}} im Studio bearbeiten",
       openAppInStudio: "{{app}} im Studio ansehen",
-      backToHome: "Zurück zur Startseite",
+      backToHome: "Zurück zur Startseite der App",
       settings: "Einstellungen",
       productHome: "{{product}} Startseite",
       addApp: 'App hinzufügen',
@@ -5311,6 +5318,9 @@ const de = {
         skill: '{{count}} KI-Fähigkeiten',
         skill_one: '{{count}} KI-Fähigkeit',
         skill_other: '{{count}} KI-Fähigkeiten',
+        ai_context: '{{count}} KI-Kontextpakete',
+        ai_context_one: '{{count}} KI-Kontextpaket',
+        ai_context_other: '{{count}} KI-Kontextpakete',
         datasource: '{{count}} Datenquellen',
         datasource_one: '{{count}} Datenquelle',
         datasource_other: '{{count}} Datenquellen',

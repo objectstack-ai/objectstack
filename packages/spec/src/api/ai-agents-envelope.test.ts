@@ -117,3 +117,20 @@ describe('GET /ai/agents — the shapes a producer must NOT drift back into', ()
     expect(servesTheDeclaredShape(body)).toBe(false);
   });
 });
+
+describe('GET /ai/agents — `capabilities.focus`, the flag a client gates the conversation focus on', () => {
+  // The console draws the record pin and sends `context.focus` only to an
+  // agent whose row says it honours it; a chip the server ignores would
+  // mislead. The flag is optional, so every row served before it existed —
+  // ASK and BUILD above carry none — still parses, and reads as "not honoured".
+  it('a row that declares it parses, and so does a row that omits it', () => {
+    const honours = { ...ASK, capabilities: { ...ASK.capabilities, focus: true } };
+    expect(servesTheDeclaredShape({ success: true, data: { agents: [honours, BUILD] } })).toBe(true);
+    expect(servesTheDeclaredShape({ success: true, data: { agents: [ASK] } })).toBe(true);
+  });
+
+  it('the flag is a boolean — a truthy string is not a declaration', () => {
+    const loose = { ...ASK, capabilities: { ...ASK.capabilities, focus: 'yes' } };
+    expect(servesTheDeclaredShape({ success: true, data: { agents: [loose] } })).toBe(false);
+  });
+});

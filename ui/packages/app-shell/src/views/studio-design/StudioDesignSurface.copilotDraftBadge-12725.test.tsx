@@ -124,6 +124,9 @@ import { uiMessagesToChatMessages } from '@object-ui/plugin-chatbot';
 // The console's preview and authoring code loads `@objectstack/lint` lazily;
 // warmed here so its first load is paid at import, not inside a test's clock.
 import '@objectstack/lint';
+// objectstack#36900 — the surface mounts the command palette, which reaches the
+// record preview's `lazy()` detail entry: its first load is paid at collection too.
+import '@object-ui/plugin-detail';
 import { StudioDesignSurface } from './StudioDesignSurface';
 import { subscribeMetadataRefresh } from '../../assistant/assistantBus';
 
@@ -250,7 +253,7 @@ function LocationProbe(): React.ReactElement {
 
 function renderStudio() {
   return render(
-    <MemoryRouter initialEntries={[`/studio/${PACKAGE_ID}/access`]}>
+    <MemoryRouter initialEntries={[`/studio/${PACKAGE_ID}/owd`]}>
       <LocationProbe />
       <Routes>
         <Route path="/studio/:packageId/:tab" element={<StudioDesignSurface />} />

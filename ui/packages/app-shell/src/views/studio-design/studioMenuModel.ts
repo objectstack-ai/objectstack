@@ -10,9 +10,9 @@
  *
  * Six, one per domain the spec registers a metadata type under, in the
  * amendment's order. A type's group is its served registry `domain`; the
- * group's name is the menu's own (`studioMenuGroupLabel`), which draws
- * `system` as Platform and `security` as Access (decision 11) while the shared
- * dictionary keeps System and Security.
+ * group's name is the shared domain dictionary's (`studioMenuGroupLabel`), which
+ * draws `system` as Platform and `security` as Access (decision 11), the same
+ * names as the directory's headings and chips and a type page's badge.
  *
  * ## Entries
  *
@@ -22,13 +22,13 @@
  * or a permission set can still make its first. Each opens the type's list in
  * the "All metadata" area; an item opened there that a pillar designs still
  * opens its pillar until the pillars become full-screen pages
- * (`areaItemPillarPath`).
+ * (`areaItemPillarPath`). objectstack#36905 — a permission set already has.
  *
  * And four entries that open no type's list, each in the group of what it
  * holds (the amendment's "Entries that are not a type"):
  *  - the organization's own flows (`~org`), under Automation;
- *  - the organization-wide default sharing overview, under Access (today the
- *    Access pillar's `?surface=owd:overview`; its own route is a later card's);
+ *  - the organization-wide default sharing overview, under Access, on its own
+ *    route (`/studio/<package>/owd`, objectstack#36905);
  *  - diagnostics, under Platform;
  *  - the cross-package environment catalog (`~all`), under Access.
  *
@@ -43,15 +43,15 @@
 
 import { ENVIRONMENT_SCOPE_QUERY } from '../metadata-admin/catalog-scope.js';
 import { SETUP_DATASOURCES_PATH } from '../metadata-admin/metadataAreaHost.js';
-import { DESIGNER_SURFACE_PARAM } from '../metadata-admin/nav-selection.js';
 import { AREA_PILLAR_FOR_TYPE, isStudioAllPackagesScope } from './metadataArea.js';
 import {
   STUDIO_ALL_PACKAGES_SEGMENT,
   STUDIO_METADATA_AREA,
+  STUDIO_OWD_SECTION,
   studioMetadataAreaAddress,
   studioMetadataAreaRoot,
+  studioOwdOverviewPath,
   studioPackagePath,
-  studioPillarItemAddress,
 } from './studioAddress.js';
 import { isStudioOrgScope, studioOrgScopePath } from './studioScope.js';
 
@@ -62,11 +62,12 @@ export const STUDIO_MENU_COOKIE = 'studio_menu_state';
 export const STUDIO_MENU_GROUPS = ['data', 'ui', 'automation', 'system', 'security', 'ai'] as const;
 export type StudioMenuGroup = (typeof STUDIO_MENU_GROUPS)[number];
 
-/** The types a designer creates in: listed on every package, holding one or not. */
-export const STUDIO_MENU_DESIGNER_TYPES: readonly string[] = Object.keys(AREA_PILLAR_FOR_TYPE);
-
-/** The OWD overview's address on the Access pillar (`AccessPillar`'s deep link). */
-const OWD_OVERVIEW_SURFACE = { type: 'owd', name: 'overview' } as const;
+/**
+ * The types a designer creates in: listed on every package, holding one or
+ * not. Named, not read off the pillar map: a type keeps its entry when its
+ * designer leaves its pillar for the metadata address (objectstack#36905).
+ */
+export const STUDIO_MENU_DESIGNER_TYPES: readonly string[] = Object.freeze(['object', 'flow', 'permission']);
 
 export type StudioMenuEntryKind = 'type' | 'orgFlows' | 'owd' | 'diagnostics' | 'environment';
 
@@ -133,7 +134,7 @@ export function buildStudioMenu(input: {
     groups.get('security')!.push({
       key: 'owd',
       kind: 'owd',
-      to: studioPillarItemAddress(scope.packageId, 'access', OWD_OVERVIEW_SURFACE),
+      to: studioOwdOverviewPath(scope.packageId),
     });
   }
   groups.get('security')!.push({
@@ -158,13 +159,12 @@ const PILLAR_TYPE: Readonly<Record<string, string>> = Object.fromEntries(
  *  - the package-less scope: its flows;
  *  - an area URL: its type, diagnostics, or on the cross-package leg's root
  *    the environment catalog;
- *  - a pillar page: the type the pillar designs — the OWD overview on the
- *    Access pillar while its `?surface=` names it.
+ *  - the sharing overview's route: the OWD overview;
+ *  - a pillar page: the type the pillar designs.
  */
 export function studioMenuCurrentKey(input: { segment: string; pathname: string; search: string }): string | null {
   const { segment, pathname } = input;
   if (isStudioOrgScope(segment)) return 'orgFlows';
-  const search = new URLSearchParams(input.search);
   const areaRoot = studioMetadataAreaRoot(segment);
   if (pathname === areaRoot || pathname.startsWith(`${areaRoot}/`)) {
     const [first] = pathname.slice(areaRoot.length).split('/').filter(Boolean);
@@ -176,9 +176,7 @@ export function studioMenuCurrentKey(input: { segment: string; pathname: string;
   const raw = pathname.startsWith(prefix) ? pathname.slice(prefix.length) : '';
   const pillar = raw.split('/')[0];
   if (pillar === STUDIO_METADATA_AREA) return null;
-  if (pillar === 'access' && (search.get(DESIGNER_SURFACE_PARAM) ?? '').startsWith(`${OWD_OVERVIEW_SURFACE.type}:`)) {
-    return 'owd';
-  }
+  if (pillar === STUDIO_OWD_SECTION) return 'owd';
   const type = PILLAR_TYPE[pillar];
   return type ? `type:${type}` : null;
 }

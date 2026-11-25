@@ -57,7 +57,8 @@ describe('the menu groups (objectstack#36899, ADR-0084 amended)', () => {
     expect(entry('type:datasource').to).toBe('/apps/setup/metadata/datasource');
     expect(entry('orgFlows').to).toBe('/studio/~org/automations');
     expect(entry('diagnostics').to).toBe(`/studio/${PKG}/metadata/_diagnostics`);
-    expect(entry('owd').to).toBe(`/studio/${PKG}/access?surface=owd%3Aoverview`);
+    // objectstack#36905 — the overview's own route.
+    expect(entry('owd').to).toBe(`/studio/${PKG}/owd`);
     expect(entry('environment').to).toBe('/studio/~all/metadata');
   });
 
@@ -96,11 +97,14 @@ describe('the current entry (aria-current)', () => {
     expect(current(PKG, `/studio/${PKG}/metadata`)).toBeNull();
   });
 
-  it('a pillar page is the type it designs; the Access pillar on its OWD overview is that entry', () => {
+  it('a pillar page is the type it designs; the OWD overview\'s route is that entry', () => {
     expect(current(PKG, `/studio/${PKG}/data?surface=object:account`)).toBe('type:object');
     expect(current(PKG, `/studio/${PKG}/automations`)).toBe('type:flow');
-    expect(current(PKG, `/studio/${PKG}/access?surface=permission:admin`)).toBe('type:permission');
-    expect(current(PKG, `/studio/${PKG}/access?surface=owd:overview`)).toBe('owd');
+    // objectstack#36905 — a permission set and the overview have left the Access pillar.
+    expect(current(PKG, `/studio/${PKG}/metadata/permission/admin`)).toBe('type:permission');
+    expect(current(PKG, `/studio/${PKG}/owd`)).toBe('owd');
+    expect(current(PKG, `/studio/${PKG}/owd?object=account`)).toBe('owd');
+    expect(current(PKG, `/studio/${PKG}/access?surface=owd:overview`)).toBeNull();
     expect(current(PKG, `/studio/${PKG}/bogus`)).toBeNull();
   });
 
@@ -121,16 +125,17 @@ describe('the menu search', () => {
   });
 });
 
-describe('the group names: the menu\'s own, the shared dictionary unchanged', () => {
-  it('the menu names `system` Platform / 平台 and `security` Access / 访问; the other four as the dictionary does', () => {
+describe('the group names: one dictionary for the menu and the directory (ADR-0084, amended)', () => {
+  it('the menu names `system` Platform / 平台 and `security` Access / 访问', () => {
     expect(STUDIO_MENU_GROUPS.map((g) => studioMenuGroupLabel(g, 'en'))).toEqual(['Data', 'UI', 'Automation', 'Platform', 'Access', 'AI']);
     expect(STUDIO_MENU_GROUPS.map((g) => studioMenuGroupLabel(g, 'zh-CN'))).toEqual(['数据', '界面', '自动化', '平台', '访问', 'AI']);
   });
 
-  it('the shared dictionary keeps System / 系统 and Security / 安全 (Setup\'s datasource pages read it, `PageShell`\'s badge)', () => {
-    expect(translateMetadataDomain('system', 'en')).toBe('System');
-    expect(translateMetadataDomain('system', 'zh-CN')).toBe('系统');
-    expect(translateMetadataDomain('security', 'en')).toBe('Security');
-    expect(translateMetadataDomain('security', 'zh-CN')).toBe('安全');
+  it('the menu draws each group with the shared dictionary\'s word, in en and zh-CN', () => {
+    for (const locale of ['en', 'zh-CN']) {
+      for (const g of STUDIO_MENU_GROUPS) {
+        expect(studioMenuGroupLabel(g, locale), `${g} in ${locale}`).toBe(translateMetadataDomain(g, locale));
+      }
+    }
   });
 });

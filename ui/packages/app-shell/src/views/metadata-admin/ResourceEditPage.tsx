@@ -420,6 +420,15 @@ function readActivePackageBinding(): string | undefined {
 }
 
 /**
+ * The item as its package ships it (the layered read's `code`), handed to a
+ * scoped inspector so an undone change restores it (objectstack#37031).
+ */
+function shippedLayerOf(layered: MetadataLayered<unknown> | null): Record<string, unknown> | null {
+  const code = layered?.code;
+  return code && typeof code === 'object' && !Array.isArray(code) ? (code as Record<string, unknown>) : null;
+}
+
+/**
  * Whether a layered answer this page already read holds no layer at all: no
  * packaged baseline, no customisation row, no effective value. That is what
  * `MetadataClient.layered()` resolves for the server's 404, an item that has
@@ -1717,11 +1726,13 @@ function MetadataResourceEditPageImpl({
       document.body.style.overflow = prev;
     };
   }, [isFullscreen]);
-  // Escape exits fullscreen.
+  // Escape exits fullscreen. objectstack#36900 — not an Escape a dialog over
+  // the page (the command palette, a confirm) already took to close itself:
+  // Radix's dismissable layer marks the one it acts on `defaultPrevented`.
   React.useEffect(() => {
     if (typeof window === 'undefined' || !isFullscreen) return;
     function onKey(e: KeyboardEvent) {
-      if (e.key === 'Escape') {
+      if (e.key === 'Escape' && !e.defaultPrevented) {
         e.preventDefault();
         setIsFullscreen(false);
       }
@@ -3852,6 +3863,7 @@ function MetadataResourceEditPageImpl({
                             type={type}
                             name={name}
                             draft={draft}
+                            shipped={shippedLayerOf(layered)}
                             selection={selection}
                             onPatch={(patch) =>
                               handleDraftChange((d) => ({

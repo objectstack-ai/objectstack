@@ -11,6 +11,7 @@ import { isActionSwitchedOff } from '@object-ui/core';
 import { PINNED_RIGHT_SEAM_SHADOW_CLASSES } from '@object-ui/components';
 import { resolveRowRecordCrudAffordance } from './rowCrudAffordances';
 import { useRecordCrudVerdicts } from './hooks/useRecordCrudVerdicts';
+import type { RowApprovalLocks } from './hooks/useRowApprovalLocks';
 import { resolveLegacyRowActions } from './resolveLegacyRowActions';
 import { RowActionMenu, planRowActionMenu, type RowActionMenuProps } from './components/RowActionMenu';
 import { rowRecordId } from './objectGridLinkCell';
@@ -29,8 +30,8 @@ type RowCrudAffordances = ReturnType<typeof resolveRowCrudAffordances>;
 export function resolveObjectGridActionsColumn({
   schema, data, objectSchema, persistedColumns, operations, resolvedRowActionDefs,
   wantEditAction, wantDeleteAction, mayInvokeRowAction, rowOperations, canEdit, canDelete,
-  recordVerdict, predicateScope, onEdit, onDelete, editPredicates, deletePredicates, executeAction,
-  setRefreshKey, t, foldInlineRowActions = false, drawRowControls = true,
+  recordVerdict, approvalLocks, demandRowActions, predicateScope, onEdit, onDelete, editPredicates,
+  deletePredicates, executeAction, setRefreshKey, t, foldInlineRowActions = false, drawRowControls = true,
 }: {
   schema: ObjectGridSchema;
   data: any[];
@@ -45,6 +46,22 @@ export function resolveObjectGridActionsColumn({
   canEdit: RowCrudAffordances['canEdit'];
   canDelete: RowCrudAffordances['canDelete'];
   recordVerdict: ReturnType<typeof useRecordCrudVerdicts>;
+  /**
+   * objectstack#36911 — the approval locks of the rows on screen, the read the
+   * select-first cells ask (`useRowApprovalLocks`). A row a read ANSWERED as
+   * locked offers no Edit. Delete is untouched, which is right only while the
+   * read answers for a record held by ITS OWN approval: the server deletes such
+   * a record and cancels its request. A line held because its MASTER is held
+   * refuses delete too; if the read ever reports those lines, it must tell
+   * the two apart before this menu reads it (#37041).
+   */
+  approvalLocks: RowApprovalLocks;
+  /**
+   * objectstack#36911 — a row's actions are reached for: asks the
+   * record-grained verdicts and the page's approval locks
+   * (`RowActionMenuProps.onActionsDemand`).
+   */
+  demandRowActions: () => void;
   predicateScope: ReturnType<typeof usePredicateScope>;
   onEdit: ObjectGridComponentProps['onEdit'];
   onDelete: ObjectGridComponentProps['onDelete'];
@@ -85,11 +102,25 @@ export function resolveObjectGridActionsColumn({
   const rowActionDefsGated = (resolvedRowActionDefs as any[]).filter((d) => mayInvokeRowAction(d?.requiredPermissions) && !isActionSwitchedOff(d));
   // NON-AUTHOR SURFACE — see the `maxInlineActions` prop below.
   const maxInlineRowActions: number = foldInlineRowActions ? 0 : ((schema as any).maxInlineRowActions ?? 1);
+  /**
+   * objectstack#36911 — is this row held by its own locking approval, by a lock
+   * read that ANSWERED? (The batch read answers for the record's own approval
+   * only, not for a line under a held master; see `approvalLocks` above.) The row is handed to the hook as no row at all, so its
+   * `approval_status` column does not stand in: a read refused (501), failed,
+   * answering `null` (a row the reader cannot read) or not yet asked leaves
+   * Edit where the menu had it. An answer arriving re-renders the grid. The
+   * select-first cells read the same hook with the column fallback; the menu
+   * offers what the server is known to refuse, never less on a guess.
+   */
+  const approvalLockAnswered = (row: any): boolean => approvalLocks.isLocked(rowRecordId(row), null);
   const rowCrudVerdicts = (row: any) => {
     // [objectui#8674] The CALLER's answer for this one row, ANDed in below.
     const rowOps = rowOperations?.(row);
     return {
-      canEdit: resolveRowRecordCrudAffordance(canEdit && rowOps?.update !== false, recordVerdict(rowRecordId(row), 'update')),
+      canEdit: resolveRowRecordCrudAffordance(
+        canEdit && rowOps?.update !== false && !approvalLockAnswered(row),
+        recordVerdict(rowRecordId(row), 'update'),
+      ),
       canDelete: resolveRowRecordCrudAffordance(canDelete && rowOps?.delete !== false, recordVerdict(rowRecordId(row), 'delete')),
     };
   };
@@ -160,7 +191,8 @@ export function resolveObjectGridActionsColumn({
       // once a row's actions are reached for — this is the one channel both
       // menus and the cell signal it through — and an item whose answer is
       // still on the wire shows inert rather than clickable.
-      onActionsDemand: recordVerdict.requestVerdicts,
+      // objectstack#36911 — the same demand also asks the page's approval locks.
+      onActionsDemand: demandRowActions,
       crudVerdictPending: recordVerdict.pending
         ? {
             edit: recordVerdict(rowRecordId(row), 'update') === undefined,

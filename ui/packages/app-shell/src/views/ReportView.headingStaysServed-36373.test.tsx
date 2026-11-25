@@ -63,6 +63,13 @@ vi.mock('./metadata-admin/inspectors/ReportDefaultInspector', async () => {
   };
 });
 
+// objectstack#36716 — the editor reads where its Save would land from the
+// package list: the report's package is listed, and writable.
+vi.mock('./studio-design/packages-io', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  fetchListedPackageManifests: vi.fn(async () => new Map([['com.qa.tr', { writable: true, manifest: { id: 'com.qa.tr' } }]])),
+}));
+
 const meta = vi.hoisted(() => ({ value: null as any }));
 vi.mock('../providers/MetadataProvider', () => ({ useMetadata: () => meta.value }));
 

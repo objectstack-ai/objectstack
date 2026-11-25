@@ -84,6 +84,9 @@ export { deriveViewContainerObject } from './view-container-expansion.js';
 // converges by package, from this one declaration: a copy of the list there
 // would drift the moment a type joins the set here.
 export { PACKAGE_SLOTTED_STORE_TYPES } from './package-slotted-store.js';
+// [#37013] The platform's mark: its one place on an item, read by the store and
+// by every door that refuses or strips it.
+export { PLATFORM_PROVENANCE, carriesPlatformStamp, isPlatformOrigin, withoutPlatformOrigin } from './package-slotted-store.js';
 
 // Re-export types from spec
 export type {
