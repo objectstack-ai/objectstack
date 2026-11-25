@@ -113,10 +113,11 @@ describe('the pure half names the calling block and dedupes per block (objectui#
     expect(nonArray.map((m) => m.slice(0, m.indexOf(']') + 1)))
       .toEqual(['[record:activity]', '[record:chatter]']);
 
-    // `approval` is a declared kind nothing in ObjectUI produces (objectui#5877).
-    normalizeFeedTypes(['approval'], 'record:activity');
-    normalizeFeedTypes(['approval'], 'record:chatter');
-    normalizeFeedTypes(['approval'], 'record:chatter');
+    // `call` is a declared kind nothing in ObjectUI produces (objectui#5877;
+    // `approval` gained its producer in objectstack#35723).
+    normalizeFeedTypes(['call'], 'record:activity');
+    normalizeFeedTypes(['call'], 'record:chatter');
+    normalizeFeedTypes(['call'], 'record:chatter');
     const unproduced = warningsAbout(warn, 'NO ObjectUI producer');
     expect(unproduced.map((m) => m.slice(0, m.indexOf(']') + 1)))
       .toEqual(['[record:activity]', '[record:chatter]']);
