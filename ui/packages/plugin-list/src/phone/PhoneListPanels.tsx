@@ -48,6 +48,7 @@ import {
   type SortItem,
 } from '@object-ui/components';
 import type { DataSource } from '@object-ui/types';
+import { useDisplayLocale } from '@object-ui/i18n';
 import { ArrowUpDown, Check, ChevronLeft, GripVertical, Info, ListFilter, MoreHorizontal, Plus, X } from 'lucide-react';
 import { FieldList } from '../conditions/FieldList';
 import { isQuickRowApplied } from '../conditions/FilterValuePanel';
@@ -574,6 +575,8 @@ export function PhoneFilterSheet({ open, onOpenChange, fields, shownFields, valu
   const [staged, setStaged, step, setStep] = useStaged<FilterBuilderRowGroup, FilterStep>(open, value, { kind: 'list' });
   const applied = (staged.conditions ?? []).filter(isQuickRowApplied);
   const nameOf = useLookupValueNames(dataSource, fields, applied);
+  // A date condition reads in the viewer's display locale, as the desktop chips do.
+  const locale = useDisplayLocale();
   const independent = chipsAreIndependent(staged);
   const toList = () => setStep({ kind: 'list' });
 
@@ -626,7 +629,7 @@ export function PhoneFilterSheet({ open, onOpenChange, fields, shownFields, valu
                 <button type="button" className="min-w-0 flex-1 text-left" onClick={() => setStep({ kind: 'edit', id: row.id })} data-testid="phone-filter-item-open">
                   <div className="truncate text-sm font-medium">{label}</div>
                   <div className="truncate text-xs text-muted-foreground" data-testid="phone-filter-item-condition">
-                    {describeConditionValue(field, row.operator, row.value, t, nameOf)}
+                    {describeConditionValue(field, row.operator, row.value, t, nameOf, locale)}
                   </div>
                 </button>
                 <DropdownMenu>

@@ -193,7 +193,7 @@ const result = ApiMethod.parse(data);
 | **_lock** | `Enum<'none' \| 'no-overlay' \| 'no-delete' \| 'full'>` | optional | Item-level lock — controls overlay & delete (ADR-0010). |
 | **_lockReason** | `string` | optional | Human-readable reason shown when a write is refused by _lock. |
 | **_lockSource** | `Enum<'artifact' \| 'package' \| 'env-forced'>` | optional | Layer that set _lock (artifact \| package \| env-forced). |
-| **_provenance** | `Enum<'package' \| 'org' \| 'env-forced'>` | optional | Origin of the item (package \| org \| env-forced). |
+| **_provenance** | `Enum<'package' \| 'org' \| 'env-forced' \| 'platform'>` | optional | Origin of the item (package \| org \| env-forced \| platform). |
 | **_packageId** | `string` | optional | Owning package machine id. |
 | **_packageVersion** | `string` | optional | Owning package version. |
 | **_lockDocsUrl** | `string` | optional | Optional documentation link surfaced next to _lockReason. |
@@ -214,7 +214,7 @@ const result = ApiMethod.parse(data);
 | **edit** | `boolean \| { enabled?: boolean; visibleWhen?: string \| object; disabledWhen?: string \| object }` | optional | Allow inline / form edit of existing rows. Boolean, or an object adding per-record visibleWhen/disabledWhen CEL predicates. |
 | **delete** | `boolean \| { enabled?: boolean; visibleWhen?: string \| object; disabledWhen?: string \| object }` | optional | Show row-level delete + bulk delete. Boolean, or an object adding per-record visibleWhen/disabledWhen CEL predicates. |
 | **exportCsv** | `boolean` | optional | Show the Export entry that downloads this object's data as CSV, XLSX or JSON: the grid's Export menu and its table CSV button, the list view's Export, and a dataset report's Export over this object; false hides it. A view's export of the picture it draws (the Gantt chart's PNG / PDF) is not covered. Omitted: shown, in every managedBy bucket. It hides the entry and refuses no export request: who may export is the permission set's allowExport. |
-| **transfer** | `boolean \| { enabled?: boolean; visibleWhen?: string \| object; disabledWhen?: string \| object }` | optional | Offer the Change Owner action (single and bulk) on records of this object. Boolean, or an object adding per-record visibleWhen/disabledWhen CEL predicates. Omitted: on, except off on a controlled_by_parent detail. Offered only where the platform injects a reassignable owner_id that is provable and not declared readonly (ownership user or omitted, no managedBy, not a sys_ object; an external object declares owner_id or maps a remote column onto it); enabled: true elsewhere is refused. Gates the action, not a plain owner_id write. Resolved by resolveUserActionTransfer. |
+| **transfer** | `boolean \| { enabled?: boolean; visibleWhen?: string \| object; disabledWhen?: string \| object }` | optional | Offer the Change Owner action (single and bulk) on records of this object. Boolean, or an object adding per-record visibleWhen/disabledWhen CEL predicates. Omitted: on, except off on a controlled_by_parent detail. Offered only where the platform injects a reassignable owner_id that is provable and not declared readonly (ownership user or omitted, no managedBy, not a sys_ object; an external object declares owner_id or maps a remote column onto it); enabled: true elsewhere is refused. On those objects it also decides whether the offboarding hand-over of a user's assigned work moves owner_id: off, those records are counted as held and keep their owner (the hand-over reads only on or off, not the predicates). An owner_id the platform does not provide is handed over like any other user field. Gates the action and the hand-over's owner_id, not a plain owner_id write. Resolved by resolveUserActionTransfer. |
 
 ### Nested Shape: `Object.systemFields`
 
@@ -321,7 +321,7 @@ const result = ApiMethod.parse(data);
 | **_lock** | `Enum<'none' \| 'no-overlay' \| 'no-delete' \| 'full'>` | optional | Item-level lock — controls overlay & delete (ADR-0010). |
 | **_lockReason** | `string` | optional | Human-readable reason shown when a write is refused by _lock. |
 | **_lockSource** | `Enum<'artifact' \| 'package' \| 'env-forced'>` | optional | Layer that set _lock (artifact \| package \| env-forced). |
-| **_provenance** | `Enum<'package' \| 'org' \| 'env-forced'>` | optional | Origin of the item (package \| org \| env-forced). |
+| **_provenance** | `Enum<'package' \| 'org' \| 'env-forced' \| 'platform'>` | optional | Origin of the item (package \| org \| env-forced \| platform). |
 | **_packageId** | `string` | optional | Owning package machine id. |
 | **_packageVersion** | `string` | optional | Owning package version. |
 | **_lockDocsUrl** | `string` | optional | Optional documentation link surfaced next to _lockReason. |
@@ -564,7 +564,7 @@ const result = ApiMethod.parse(data);
 | **_lock** | `Enum<'none' \| 'no-overlay' \| 'no-delete' \| 'full'>` | optional | Item-level lock — controls overlay & delete (ADR-0010). |
 | **_lockReason** | `string` | optional | Human-readable reason shown when a write is refused by _lock. |
 | **_lockSource** | `Enum<'artifact' \| 'package' \| 'env-forced'>` | optional | Layer that set _lock (artifact \| package \| env-forced). |
-| **_provenance** | `Enum<'package' \| 'org' \| 'env-forced'>` | optional | Origin of the item (package \| org \| env-forced). |
+| **_provenance** | `Enum<'package' \| 'org' \| 'env-forced' \| 'platform'>` | optional | Origin of the item (package \| org \| env-forced \| platform). |
 | **_packageId** | `string` | optional | Owning package machine id. |
 | **_packageVersion** | `string` | optional | Owning package version. |
 | **_lockDocsUrl** | `string` | optional | Optional documentation link surfaced next to _lockReason. |
@@ -720,7 +720,7 @@ const result = ApiMethod.parse(data);
 | **_lock** | `Enum<'none' \| 'no-overlay' \| 'no-delete' \| 'full'>` | optional | Item-level lock — controls overlay & delete (ADR-0010). |
 | **_lockReason** | `string` | optional | Human-readable reason shown when a write is refused by _lock. |
 | **_lockSource** | `Enum<'artifact' \| 'package' \| 'env-forced'>` | optional | Layer that set _lock (artifact \| package \| env-forced). |
-| **_provenance** | `Enum<'package' \| 'org' \| 'env-forced'>` | optional | Origin of the item (package \| org \| env-forced). |
+| **_provenance** | `Enum<'package' \| 'org' \| 'env-forced' \| 'platform'>` | optional | Origin of the item (package \| org \| env-forced \| platform). |
 | **_packageId** | `string` | optional | Owning package machine id. |
 | **_packageVersion** | `string` | optional | Owning package version. |
 | **_lockDocsUrl** | `string` | optional | Optional documentation link surfaced next to _lockReason. |

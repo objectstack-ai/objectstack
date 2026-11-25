@@ -1485,7 +1485,29 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
   // object, an approval lock, the record — `cellReadOnlyKind`), what typing
   // does there and what pasted text stands for. `null` without the host's
   // ask, so every other grid keeps the table it had.
-  const approvalLocks = useRowApprovalLocks(hostCellSelection ? objectName : undefined);
+  //
+  // objectstack#36911 — the row menu reads the same locks: a row an approval
+  // locks offers no Edit, as the record page offers none (objectstack#35593).
+  // Delete stays for a record held by its own approval: the server deletes it
+  // and cancels its request. (The batch read reports only that case today, not
+  // a line held because its master is held, which refuses delete too; #37041.) So the hook also runs on a grid whose rows offer Edit. It still
+  // reads nothing until it is asked: by a cell being selected, or by a row's
+  // actions being reached for (`demandRowActions` below).
+  const rowMenuOffersEdit = canEdit && !!onEdit;
+  const approvalLocks = useRowApprovalLocks(hostCellSelection || rowMenuOffersEdit ? objectName : undefined);
+  /**
+   * objectstack#36911 — what reaching for a row's actions asks
+   * (`RowActionMenuProps.onActionsDemand`, objectstack#34208): the
+   * record-grained verdicts, and the approval locks of the rows on screen in
+   * one read (objectstack#35795), never on first paint. A repeat call is free:
+   * the hook asks only ids it has not asked yet.
+   */
+  const requestRecordVerdicts = recordVerdict.requestVerdicts;
+  const probeApprovalLocks = approvalLocks.probe;
+  const demandRowActions = useCallback(() => {
+    requestRecordVerdicts();
+    if (rowMenuOffersEdit) probeApprovalLocks(pageRecordIds);
+  }, [requestRecordVerdicts, probeApprovalLocks, rowMenuOffersEdit, pageRecordIds]);
   // objectstack#35956 — a cell change that makes other fields required asks
   // for them first, and saves them with it (`./objectGridRequiredPrompt`).
   const fieldLabelOf = (field: string): string => {
@@ -2418,8 +2440,8 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
   } = resolveObjectGridActionsColumn({
     schema, data, objectSchema, persistedColumns, operations, resolvedRowActionDefs,
     wantEditAction, wantDeleteAction, mayInvokeRowAction, rowOperations, canEdit, canDelete,
-    recordVerdict, predicateScope, onEdit, onDelete, editPredicates, deletePredicates, executeAction,
-    setRefreshKey, t, foldInlineRowActions: inlineActionFold.folded,
+    recordVerdict, approvalLocks, demandRowActions, predicateScope, onEdit, onDelete, editPredicates,
+    deletePredicates, executeAction, setRefreshKey, t, foldInlineRowActions: inlineActionFold.folded,
     drawRowControls: !listPageGrid,
   });
 
@@ -2929,6 +2951,11 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
     // nothing, so the executor counts it as refused, never as succeeded, and
     // lists it with this record's own sentence.
     if (res.refusal) return { refusal: { message: res.refusal.message } };
+    // A run paused at a screen started and waits for input: nothing says it
+    // will finish, so the executor counts it as waiting, never as succeeded
+    // (objectstack#36931). Its screen is the flow handler's to show; the
+    // console queues every paused record's screen, so each can be reached.
+    if (res.paused) return { paused: true };
   };
 
   // Whole-selection dispatcher for a def that opted into
@@ -2979,8 +3006,11 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
     // Only reset selection when the run actually changed something. A total
     // failure (0 succeeded — e.g. a "推计划" precondition error) leaves the data
     // untouched, so we keep the selection *and* the toolbar so the user can fix
-    // it and retry the same rows.
-    if (result && result.succeeded > 0) {
+    // it and retry the same rows. A run that paused at a screen changed
+    // something too (its steps before the screen may have written), and its
+    // record must not be re-run while its screen waits, so it resets and
+    // re-reads like a success (objectstack#36931).
+    if (result && (result.succeeded > 0 || (result.paused?.length ?? 0) > 0)) {
       resetSelection();
       // Trigger refresh via the same path used by single-record mutations.
       setRefreshKey(k => k + 1);

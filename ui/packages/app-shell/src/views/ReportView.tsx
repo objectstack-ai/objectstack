@@ -22,7 +22,14 @@ import { useExpressionContext } from '../providers/ExpressionProvider.js';
 import { preferLocal } from '../utils/preferLocal.js';
 import { useAdapter } from '../providers/AdapterProvider.js';
 import { useMetadataClient } from './metadata-admin/useMetadata.js';
-import { saveAndPublishRuntimeMetadata } from './runtime-metadata-persistence.js';
+import {
+  ensureInPlaceSaveTarget,
+  inPlaceSaveBody,
+  resolveInPlaceEditTarget,
+  saveInPlace,
+  type InPlaceEditTarget,
+} from './runtime-metadata-persistence.js';
+import { useCustomizeDoorWalled } from './studio-design/StudioCustomizeControls.js';
 import { authoredBuffer, extractDraftBody, formatMetadataError, type AuthoredLayers } from '@object-ui/data-objectstack';
 import { t as tStudio, tFormat, useMetadataLocale } from './metadata-admin/i18n.js';
 import { servedPackageId } from '@object-ui/core';
@@ -271,6 +278,17 @@ export function ReportView({ dataSource }: { dataSource?: DataSource }) {
   }, [editSchema, reportData, getFieldsForObject]);
 
   // ---- Save helper --------------------------------------------------------
+  // objectstack#36716 — where the save lands, read when the editor opens
+  // (`resolveInPlaceEditTarget`, the dashboard editor's answer): the package
+  // the report is served from when it is writable, else the app's
+  // customization package `<base>.custom` (ADR-0146 D2/D3/D11; 「定制都进
+  // .custom」), asked of the ensure door at Save and declaring the override of
+  // its base, as Studio's Customize writes it. A report that names no package
+  // is saved where it lives, naming none.
+  const metadataLocale = useMetadataLocale();
+  const editTargetRef = useRef<Exclude<InPlaceEditTarget, { kind: 'refused' }>>({ kind: 'unbound' });
+  const customizeWalled = useCustomizeDoorWalled();
+
   // objectstack#36374 — Save writes the report and publishes it in the same
   // press, so every member sees it on their next read: the maintainer's ruling
   // on epic #36510 (「人改一项、点保存、立刻生效。草稿加整包发布只留给 AI 的批量改动」).
@@ -285,7 +303,21 @@ export function ReportView({ dataSource }: { dataSource?: DataSource }) {
     async (schema: any): Promise<boolean> => {
       if (!metadataClient) return false;
       try {
-        const outcome = await saveAndPublishRuntimeMetadata('report', reportName!, schema, {
+        const opened = editTargetRef.current;
+        // A customization's body declares the override of its base; any other
+        // save writes the buffer as it is.
+        const body = opened.kind === 'customization' ? inPlaceSaveBody(schema, opened) : schema;
+        if (!body) {
+          toast.error(t('form.saveError'), {
+            description: tFormat('engine.studio.customize.noVersion', metadataLocale, {
+              package: opened.kind === 'customization' ? opened.base : '',
+            }),
+          });
+          return false;
+        }
+        // The first write of the edit: an installed app's pair is asked for (and made) here.
+        const target = await ensureInPlaceSaveTarget(opened);
+        const outcome = await saveInPlace('report', reportName!, body, target, {
           metadataClient,
           dataSource: dataSource as any,
         });
@@ -307,7 +339,7 @@ export function ReportView({ dataSource }: { dataSource?: DataSource }) {
         return false;
       }
     },
-    [metadataClient, reportName, refresh, t, dataSource],
+    [metadataClient, reportName, refresh, t, dataSource, metadataLocale],
   );
 
   // ---- Open / close the builder ------------------------------------------
@@ -333,7 +365,6 @@ export function ReportView({ dataSource }: { dataSource?: DataSource }) {
   // draft is pending, so a pending draft whose stored copy the layers do not
   // serve is `unserved` and opens no editor, instead of an editor seeded with
   // the published report that a Save would stage over the pending draft.
-  const metadataLocale = useMetadataLocale();
   // A landed save keeps the saved report as the page's picture until the
   // metadata refresh it triggers replaces it (`editSchema`). The builder's
   // buffer is the untranslated source, so a close with no landed save draws
@@ -353,33 +384,76 @@ export function ReportView({ dataSource }: { dataSource?: DataSource }) {
     let body: Record<string, unknown> | null = null;
     let published: Record<string, unknown> | null = null;
     let failure: string | null = null;
+    let target: InPlaceEditTarget = { kind: 'unbound' };
+    // A refusal said in its own sentence (and, where the doors gave one, the
+    // reason under it), not as a failed load.
+    let refusal: { title: string; description?: string } | null = null;
     try {
-      const at = packageId ? { packageId } : {};
-      const [layers, servedDraft] = await Promise.all([
-        metadataClient.layered<Record<string, unknown>>('report', reportName, at),
-        metadataClient.getDraft('report', reportName, at),
-      ]);
-      const authored = authoredBuffer('report', layers as AuthoredLayers, extractDraftBody(servedDraft));
-      const lay = layers as { effective?: unknown; code?: unknown } | null;
-      published = (lay?.effective ?? lay?.code ?? null) as Record<string, unknown> | null;
-      if (authored.kind === 'unserved') failure = tStudio('engine.studio.refusal.draftUnreadable', metadataLocale);
-      else if (Object.keys(authored.body).length > 0) body = authored.body;
-      else failure = tStudio('engine.form.notFound', metadataLocale);
+      // Where a Save would land first (objectstack#36716; reads the package
+      // list only), as `openDashboardForEdit` asks it: the reads below depend
+      // on the answer.
+      target = await resolveInPlaceEditTarget(packageId);
+      if (target.kind === 'refused') {
+        refusal = { title: tStudio('engine.studio.customize.noPackage', metadataLocale), description: target.reason };
+      } else if (target.kind === 'customization' && customizeWalled) {
+        refusal = { title: tStudio('engine.studio.customize.walled', metadataLocale) };
+      } else {
+        const at = packageId ? { packageId } : {};
+        // A customization pair the list already names is probed for a pending
+        // draft of this report, as `openDashboardForEdit` reads the pair
+        // first: a Studio draft staged there is refused here, at open, not at
+        // Save. The buffer stays the layered authored read at the package the
+        // report is served from: its effective layer already carries a
+        // published customization of the pair, so a second edit starts from
+        // the first one.
+        const pairAt =
+          target.kind === 'customization' && target.pair && target.pair !== packageId
+            ? { packageId: target.pair }
+            : null;
+        const [layers, servedDraft, pairDraft] = await Promise.all([
+          metadataClient.layered<Record<string, unknown>>('report', reportName, at),
+          metadataClient.getDraft('report', reportName, at),
+          pairAt ? metadataClient.getDraft('report', reportName, pairAt) : Promise.resolve(null),
+        ]);
+        const authored = authoredBuffer('report', layers as AuthoredLayers, extractDraftBody(servedDraft));
+        const lay = layers as { effective?: unknown; code?: unknown } | null;
+        published = (lay?.effective ?? lay?.code ?? null) as Record<string, unknown> | null;
+        if (authored.kind === 'unserved') failure = tStudio('engine.studio.refusal.draftUnreadable', metadataLocale);
+        else if (Object.keys(authored.body).length > 0) body = authored.body;
+        else failure = tStudio('engine.form.notFound', metadataLocale);
+        // The editor is not opened where its Save could not land, as Studio's
+        // Customize is refused up front: a draft already pending in the pair,
+        // or no listed base version to declare the override at.
+        if (body && pairAt && extractDraftBody(pairDraft)) {
+          refusal = {
+            title: tFormat('engine.studio.customize.pendingDraft', metadataLocale, { package: pairAt.packageId }),
+          };
+          body = null;
+        } else if (body && target.kind === 'customization' && inPlaceSaveBody(body, target) === null) {
+          refusal = { title: tFormat('engine.studio.customize.noVersion', metadataLocale, { package: target.base }) };
+          body = null;
+        }
+      }
     } catch (err) {
       failure = formatMetadataError(err);
     } finally {
       setOpeningEditor(false);
     }
     if (!body) {
-      toast.error(
-        tFormat('engine.edit.loadFailed', metadataLocale, {
-          type: 'report',
-          name: reportName,
-          message: failure ?? tStudio('engine.form.notFound', metadataLocale),
-        }),
-      );
+      if (refusal) {
+        toast.error(refusal.title, refusal.description ? { description: refusal.description } : undefined);
+      } else {
+        toast.error(
+          tFormat('engine.edit.loadFailed', metadataLocale, {
+            type: 'report',
+            name: reportName,
+            message: failure ?? tStudio('engine.form.notFound', metadataLocale),
+          }),
+        );
+      }
       return;
     }
+    editTargetRef.current = target.kind === 'refused' ? { kind: 'unbound' } : target;
     setAuthoredAtOpen(body);
     setServedText(servedReportTextOf(published, reportData));
     if (opensInBuilder(body)) {
@@ -390,7 +464,7 @@ export function ReportView({ dataSource }: { dataSource?: DataSource }) {
     setEditSchema(body);
     setEditor('panel');
     setConfigVersion((v) => v + 1);
-  }, [metadataClient, reportName, reportData, metadataLocale]);
+  }, [metadataClient, reportName, reportData, metadataLocale, customizeWalled]);
 
   const handleCloseBuilder = useCallback(() => {
     setEditor(null);

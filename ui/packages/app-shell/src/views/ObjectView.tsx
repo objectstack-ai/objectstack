@@ -976,8 +976,10 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
         handleResetView();
         toast.success(t('console.objectView.draft.savedForEveryone'));
     };
-    // objectstack#35955 — Discard and Save while the list holds a draft, at
-    // the end of the condition row (the phone draws the same slot). 「Save to
+    // objectstack#35955 — Reset and Update view while the list holds a draft,
+    // at the end of the condition row (the phone draws the same slot), the
+    // design mode on or off (objectstack#36737: a view saves on its own, as
+    // Twenty's 「Reset / Update view」 does). 「Save to
     // this view」 writes one of the reader's own views, or the shared view
     // for a reader who may edit it; 「Save as my view」 asks a name.
     const saveToThisView = canUpdatePersonalView

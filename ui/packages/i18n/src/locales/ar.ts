@@ -694,6 +694,8 @@ const ar = {
       notConfirmedRecords: "لم يُبلغ الإجراء عن نتيجة لهذه السجلات. تحقق من قيمها الحالية:",
       resultRefused: " · مرفوض {{count}}",
       refusedRecords: "رفض الإجراء هذه السجلات:",
+      resultPaused: " · بانتظار الإدخال {{count}}",
+      pausedRecords: "هذه السجلات بانتظار الإدخال. تُفتح شاشاتها واحدة تلو الأخرى:",
       aggregateUnreadable: "انتهى الإجراء، لكن تعذرت قراءة نتيجته، لذا لا يُعرف أي السجلات تم تغييرها. عند الإغلاق تعرض القائمة قيمها الحالية.",
       retry: "إعادة المحاولة",
       downloadErrorCsv: "تنزيل ملف CSV للأخطاء",
@@ -2721,6 +2723,14 @@ const ar = {
       changesDrafted: "حُفظ كمسودة",
       changesFailed: "لم يُطبَّق",
       discussing: "قيد العرض: {{target}}",
+      focus: {
+        pin: "مواصلة السؤال عن هذا السجل",
+        pinned: "السؤال عن: {{target}}",
+        remove: "التوقف عن السؤال عن هذا السجل",
+        switchPrompt: "هل تريد السؤال عن «{{target}}» بدلاً من ذلك؟",
+        switchAccept: "تبديل",
+        switchDecline: "إبقاء",
+      },
       changeVerb: {
         createObject: "إنشاء كائن",
         addField: "إضافة حقل",
@@ -2881,36 +2891,32 @@ const ar = {
       description: "ما ينبغي إعداده قبل أن يبدأ زملاؤك. يمكن تغيير كل عنصر لاحقًا في الإعداد.",
       progress: "اكتمل {{done}} من {{total}}",
       dismiss: "إخفاء القائمة",
+      // objectstack#36739 — the popover's own action: hides the pill and Home's card here; its X only closes.
+      hideHere: "إخفاء على هذا الجهاز",
       showDone: "عرض العناصر المكتملة ({{done}})",
-      showDoneSplit: "عرض العناصر المكتملة (إلزامية {{required}} · اختيارية {{optional}})",
       hideDone: "إخفاء العناصر المكتملة",
       optional: "اختياري",
       set: "تعيين",
       change: "تغيير",
       view: "عرض",
-      confirm: "تأكيد",
       cancel: "إلغاء",
       continue: "متابعة",
-      prefilled: "القيم التي لم تُعيَّن بعد مقترحة من متصفحك. لن يُحفظ شيء حتى تؤكد.",
-      organizationName: {
-        title: "سمِّ مؤسستك",
-        todo: "لا تزال تحمل الاسم الذي أُنشئت به: \"{{name}}\".",
-        action: "إعادة التسمية",
+      showList: "عرض القائمة",
+      // objectstack#36739 — the one required platform row: one form, one save.
+      organizationBasics: {
+        title: "البيانات الأساسية للمؤسسة",
+        todo: "الاسم واللغة والبلد الافتراضيان والمنطقة الزمنية والعملة، تُحفظ معًا.",
+        name: "اسم المؤسسة",
+        nameRequired: "أدخل اسمًا لمؤسستك.",
+        prefilled: "القيم التي لم تُعيَّن بعد مقترحة من متصفحك. لن يُحفظ شيء حتى تضغط حفظ.",
+        save: "حفظ",
+        saved: "تم حفظ البيانات الأساسية للمؤسسة",
       },
-      languageCountry: {
-        title: "اللغة والبلد الافتراضيان",
-        todo: "حاليًا {{language}} و{{country}}. أكّدهما أو اختر غيرهما.",
-        saved: "تم حفظ اللغة والبلد الافتراضيين",
-      },
-      timezone: {
-        title: "المنطقة الزمنية للنظام",
-        todo: "لا تزال المنطقة الزمنية الافتراضية للمنصة، {{current}}. وهي تحدد معنى \"اليوم\" في الصيغ وكيفية تجميع التقارير للتواريخ.",
-        saved: "تم تعيين المنطقة الزمنية للنظام إلى {{zone}}",
-      },
-      currency: {
-        title: "العملة الافتراضية",
-        todo: "لم تُعيَّن بعد، لذا تظهر المبالغ دون رمز عملة.",
-        saved: "تم تعيين العملة الافتراضية إلى {{currency}}",
+      // The sidebar's progress pill, in every app (objectstack#36739).
+      pill: {
+        label: "البدء",
+        count: "{{done}}/{{total}}",
+        aria: "البدء: تم {{done}} من {{total}}",
       },
       mail: {
         title: "إرسال البريد الإلكتروني",
@@ -3153,11 +3159,12 @@ const ar = {
       resetViewTitle: "يعيد عوامل التصفية والبحث والترتيب والتجميع وترتيب الأعمدة والحقول المخفية والكثافة والتخطيط ولون الصف وأرقام الصفوف والتحرير المضمّن الخاصة بهذا العرض. تبقى طرق العرض المثبتة والمفضلة وطريقة فتح السجلات كما هي. تتغير قائمتك فقط.",
       personalized: "مخصّصة",
       personalizedHeading: "تختلف قائمتك عن هذا العرض في",
-      // objectstack#35955 — a list's unsaved changes: Discard and Save.
+      // objectstack#35955 — a list's unsaved changes: Reset and Update view
+      // (objectstack#36737, the view's own actions, as Twenty's).
       draft: {
-        discard: "تجاهل",
+        discard: "إعادة تعيين",
         discardTitle: "يعيد القائمة كما يحددها العرض: عوامل التصفية والفرز والتجميع والأعمدة والتخطيط. يبقى عرض الأعمدة وارتفاع الصفوف كما هما.",
-        save: "حفظ",
+        save: "تحديث العرض",
         heading: "تغييرات غير محفوظة",
         partSeparator: "، ",
         saveToView: "حفظ في هذا العرض",
@@ -4189,7 +4196,7 @@ const ar = {
       allApps: "جميع التطبيقات",
       editAppInStudio: "تعديل {{app}} في Studio",
       openAppInStudio: "عرض {{app}} في Studio",
-      backToHome: "العودة إلى الرئيسية",
+      backToHome: "العودة إلى صفحة بدء التطبيق",
       settings: "الإعدادات",
       productHome: "الصفحة الرئيسية لـ {{product}}",
       addApp: 'إضافة تطبيق',

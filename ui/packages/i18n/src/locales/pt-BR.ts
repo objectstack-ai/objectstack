@@ -649,6 +649,8 @@ const pt = {
       notConfirmedRecords: "A ação não informou nada sobre estes registros. Verifique os valores atuais:",
       resultRefused: " · Recusados {{count}}",
       refusedRecords: "A ação recusou estes registros:",
+      resultPaused: " · Aguardando entrada {{count}}",
+      pausedRecords: "Estes registros aguardam entrada. Suas telas abrem uma após a outra:",
       aggregateUnreadable: "A ação terminou, mas o resultado não pôde ser lido, então não se sabe quais registros foram alterados. Ao fechar, a lista mostra os valores atuais.",
       retry: "Tentar novamente",
       downloadErrorCsv: "Baixar CSV de erros",
@@ -2508,6 +2510,14 @@ const pt = {
       changesDrafted: "Salvo como rascunho",
       changesFailed: "Não aplicado",
       discussing: "Vendo: {{target}}",
+      focus: {
+        pin: "Continuar perguntando sobre este registro",
+        pinned: "Perguntando sobre: {{target}}",
+        remove: "Parar de perguntar sobre este registro",
+        switchPrompt: "Perguntar sobre \"{{target}}\" em vez disso?",
+        switchAccept: "Trocar",
+        switchDecline: "Manter",
+      },
       changeVerb: {
         createObject: "Criar objeto",
         addField: "Adicionar campo",
@@ -2662,36 +2672,32 @@ const pt = {
       description: "O que configurar antes de seus colegas começarem. Cada item pode ser alterado depois em Configuração.",
       progress: "{{done}} de {{total}} concluídos",
       dismiss: "Ocultar lista",
+      // objectstack#36739 — the popover's own action: hides the pill and Home's card here; its X only closes.
+      hideHere: "Ocultar neste dispositivo",
       showDone: "Mostrar concluídos ({{done}})",
-      showDoneSplit: "Mostrar concluídos ({{required}} obrigatórios · {{optional}} opcionais)",
       hideDone: "Ocultar concluídos",
       optional: "Opcional",
       set: "Definir",
       change: "Alterar",
       view: "Ver",
-      confirm: "Confirmar",
       cancel: "Cancelar",
       continue: "Continuar",
-      prefilled: "Os valores ainda não definidos foram sugeridos com base no seu navegador. Nada é salvo até você confirmar.",
-      organizationName: {
-        title: "Dê um nome à sua organização",
-        todo: "Ela ainda tem o nome com que foi criada: \"{{name}}\".",
-        action: "Renomear",
+      showList: "Mostrar lista",
+      // objectstack#36739 — the one required platform row: one form, one save.
+      organizationBasics: {
+        title: "Dados básicos da organização",
+        todo: "Nome, idioma e país padrão, fuso horário e moeda, salvos de uma vez.",
+        name: "Nome da organização",
+        nameRequired: "Informe um nome para a sua organização.",
+        prefilled: "Os valores ainda não definidos são sugeridos com base no seu navegador. Nada é salvo até você clicar em Salvar.",
+        save: "Salvar",
+        saved: "Dados básicos da organização salvos",
       },
-      languageCountry: {
-        title: "Idioma e país padrão",
-        todo: "Atualmente {{language}} e {{country}}. Confirme-os ou escolha outros.",
-        saved: "Idioma e país padrão salvos",
-      },
-      timezone: {
-        title: "Fuso horário do sistema",
-        todo: "Ainda é o fuso padrão da plataforma, {{current}}. Ele define o que \"hoje\" significa nas fórmulas e como os relatórios agrupam datas.",
-        saved: "Fuso horário do sistema definido como {{zone}}",
-      },
-      currency: {
-        title: "Moeda padrão",
-        todo: "Ainda não definida, então os valores são exibidos sem símbolo de moeda.",
-        saved: "Moeda padrão definida como {{currency}}",
+      // The sidebar's progress pill, in every app (objectstack#36739).
+      pill: {
+        label: "Primeiros passos",
+        count: "{{done}}/{{total}}",
+        aria: "Primeiros passos: {{done}} de {{total}} concluídos",
       },
       mail: {
         title: "Envio de e-mails",
@@ -2928,11 +2934,12 @@ const pt = {
       resetViewTitle: "Restaura os filtros, a pesquisa, a ordenação, o agrupamento, a disposição das colunas, os campos ocultos, a densidade, o layout, a cor da linha, os números de linha e a edição em linha próprios desta exibição. Exibições fixadas, favoritos e a forma de abrir registros não mudam. Apenas a sua lista muda.",
       personalized: "Personalizada",
       personalizedHeading: "Sua lista difere desta exibição em",
-      // objectstack#35955 — a list's unsaved changes: Discard and Save.
+      // objectstack#35955 — a list's unsaved changes: Reset and Update view
+      // (objectstack#36737, the view's own actions, as Twenty's).
       draft: {
-        discard: "Descartar",
+        discard: "Redefinir",
         discardTitle: "Devolve a lista ao que a exibição define: filtros, ordenação, agrupamento, colunas e layout. A largura das colunas e a altura das linhas continuam.",
-        save: "Salvar",
+        save: "Atualizar exibição",
         heading: "Alterações não salvas",
         partSeparator: ", ",
         saveToView: "Salvar nesta exibição",
@@ -3937,7 +3944,7 @@ const pt = {
       allApps: "Todos os aplicativos",
       editAppInStudio: "Editar {{app}} no Studio",
       openAppInStudio: "Ver {{app}} no Studio",
-      backToHome: "Voltar ao início",
+      backToHome: "Voltar à página inicial do app",
       settings: "Configurações",
       productHome: "Início do {{product}}",
       addApp: 'Adicionar aplicativo',

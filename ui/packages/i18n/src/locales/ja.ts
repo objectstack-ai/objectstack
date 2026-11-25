@@ -636,6 +636,8 @@ const ja = {
       notConfirmedRecords: "これらのレコードについて操作からの報告がありません。現在の値を確認してください:",
       resultRefused: " · 拒否 {{count}}",
       refusedRecords: "操作はこれらのレコードを拒否しました:",
+      resultPaused: " · 入力待ち {{count}}",
+      pausedRecords: "これらのレコードは入力を待っています。画面が順番に開きます:",
       aggregateUnreadable: "操作は終了しましたが、結果を読み取れなかったため、どのレコードが変更されたかは不明です。閉じると、一覧に現在の値が表示されます。",
       retry: "再試行",
       downloadErrorCsv: "エラー CSV をダウンロード",
@@ -2443,6 +2445,14 @@ const ja = {
       changesDrafted: "下書きとして保存",
       changesFailed: "未適用",
       discussing: "表示中: {{target}}",
+      focus: {
+        pin: "このレコードについて質問し続ける",
+        pinned: "質問対象: {{target}}",
+        remove: "このレコードについての質問をやめる",
+        switchPrompt: "代わりに「{{target}}」について質問しますか？",
+        switchAccept: "切り替える",
+        switchDecline: "このまま",
+      },
       changeVerb: {
         createObject: "オブジェクトを作成",
         addField: "項目を追加",
@@ -2595,36 +2605,32 @@ const ja = {
       description: "同僚が使い始める前に設定しておく項目です。どの項目も後から「セットアップ」で変更できます。",
       progress: "{{total}} 件中 {{done}} 件完了",
       dismiss: "チェックリストを非表示",
+      // objectstack#36739 — the popover's own action: hides the pill and Home's card here; its X only closes.
+      hideHere: "このデバイスで非表示にする",
       showDone: "完了した項目を表示（{{done}}）",
-      showDoneSplit: "完了した項目を表示（必須 {{required}} · 任意 {{optional}}）",
       hideDone: "完了した項目を折りたたむ",
       optional: "任意",
       set: "設定",
       change: "変更",
       view: "表示",
-      confirm: "確定",
       cancel: "キャンセル",
       continue: "続ける",
-      prefilled: "未設定の項目にはブラウザーから推測した値が入っています。確定するまで何も保存されません。",
-      organizationName: {
-        title: "組織に名前を付ける",
-        todo: "作成時の名前「{{name}}」のままです。",
-        action: "名前を変更",
+      showList: "リストを表示",
+      // objectstack#36739 — the one required platform row: one form, one save.
+      organizationBasics: {
+        title: "組織の基本情報",
+        todo: "組織名、既定の言語と国/地域、タイムゾーン、通貨をまとめて保存します。",
+        name: "組織名",
+        nameRequired: "組織名を入力してください。",
+        prefilled: "未設定の項目はブラウザーの設定から提案しています。「保存」を押すまで何も保存されません。",
+        save: "保存",
+        saved: "組織の基本情報を保存しました",
       },
-      languageCountry: {
-        title: "既定の言語と国",
-        todo: "現在は {{language}}、{{country}} です。確定するか、別の値を選んでください。",
-        saved: "既定の言語と国を保存しました",
-      },
-      timezone: {
-        title: "システムのタイムゾーン",
-        todo: "プラットフォームの既定値 {{current}} のままです。数式での「今日」の意味や、レポートで日付をまとめる方法を決めます。",
-        saved: "システムのタイムゾーンを {{zone}} に設定しました",
-      },
-      currency: {
-        title: "既定の通貨",
-        todo: "未設定のため、金額は通貨記号なしで表示されます。",
-        saved: "既定の通貨を {{currency}} に設定しました",
+      // The sidebar's progress pill, in every app (objectstack#36739).
+      pill: {
+        label: "はじめに",
+        count: "{{done}}/{{total}}",
+        aria: "はじめに: {{total}} 件中 {{done}} 件完了",
       },
       mail: {
         title: "メール配信",
@@ -2859,11 +2865,12 @@ const ja = {
       resetViewTitle: "このビュー本来のフィルター、検索、並べ替え、グループ、列の配置、非表示フィールド、密度、レイアウト、行の色、行番号、インライン編集に戻します。ピン留めしたビュー、お気に入り、レコードの開き方は変わりません。変わるのはあなたのリストだけです。",
       personalized: "個人設定あり",
       personalizedHeading: "このビューと異なる項目",
-      // objectstack#35955 — a list's unsaved changes: Discard and Save.
+      // objectstack#35955 — a list's unsaved changes: Reset and Update view
+      // (objectstack#36737, the view's own actions, as Twenty's).
       draft: {
-        discard: "破棄",
+        discard: "リセット",
         discardTitle: "一覧をビュー本来の状態に戻します：フィルター、並べ替え、グループ化、列、レイアウト。列幅と行の高さはそのままです。",
-        save: "保存",
+        save: "ビューを更新",
         heading: "未保存の変更",
         partSeparator: "、",
         saveToView: "このビューに保存",
@@ -3860,7 +3867,7 @@ const ja = {
       allApps: "すべてのアプリ",
       editAppInStudio: "Studio で {{app}} を編集",
       openAppInStudio: "Studio で {{app}} を表示",
-      backToHome: "ホームに戻る",
+      backToHome: "アプリのスタートページに戻る",
       settings: "システム設定",
       productHome: "{{product}} ホーム",
       addApp: 'アプリを追加',
