@@ -3,10 +3,10 @@
 /**
  * objectstack#26845 — the two departures objectstack#26705 left open, seen
  * from the Automations pillar: creating a flow, and a Pending changes request
- * while a step is held.
+ * while a step is held. objectstack#36903 — the designer creates nothing now
+ * (the flow list's 「新建」 does), so the Pending changes half is what is left.
  *
- * New flow opens the created flow, whose load replaces the buffer the held
- * step lives in, so it asks before its dialog opens. A Pending changes request
+ * A Pending changes request
  * names an object, which this pillar does not hold: it leaves the pillar
  * through the surface's leave guard, which asks once, and the Data pillar it
  * lands on holds nothing, so nothing asks a second time.
@@ -110,6 +110,10 @@ import { FlowPreview } from '../metadata-admin/previews/FlowPreview';
 import { FlowInspector } from '../metadata-admin/inspectors/FlowInspector';
 import { browserClick } from '../metadata-admin/previews/__tests__/browserClick';
 import { t } from '../metadata-admin/i18n';
+// The source under test reaches these dynamic imports (the command palette's
+// record preview, the drafts panel's lint, the code editor): their first load
+// is paid here, at collection, never inside a case's clock (`check:test-source-alias`).
+import '@object-ui/plugin-detail';
 
 const dataSource = createEmptyDataSource();
 
@@ -176,9 +180,11 @@ afterEach(() => {
 async function openFlow(): Promise<void> {
   // The shell's link guard reads the window's URL to skip a link to the page
   // already shown; `BrowserRouter` keeps the two equal, so this does too.
-  window.history.replaceState(null, '', `/studio/${PKG}/automations`);
+  // objectstack#36903 — the flow designer, full-screen on the flow's address.
+  const at = `/studio/${PKG}/metadata/flow/approval?package=${PKG}`;
+  window.history.replaceState(null, '', at);
   render(
-    <MemoryRouter initialEntries={[`/studio/${PKG}/automations`]}>
+    <MemoryRouter initialEntries={[at]}>
       <Routes>
         <Route path="/studio/:packageId/metadata/*" element={<StudioDesignSurface area="metadata" />} />
         <Route path="/studio/:packageId/:tab" element={<StudioDesignSurface />} />
@@ -196,7 +202,6 @@ async function holdANotifyStep(): Promise<void> {
   await screen.findByTestId('studio-held', undefined, { timeout: 8000 });
 }
 
-const newFlow = () => fireEvent.click(within(screen.getByTestId('studio-rail-automations')).getByTestId('studio-rail-add'));
 const pendingRequest = () => fireEvent.click(screen.getByRole('button', { name: 'Pending object/acme_note' }));
 
 /** The object designer is open on the Pending changes request's object (objectstack#36904: on its own address). */
@@ -208,23 +213,6 @@ async function noteIsOpen(): Promise<void> {
 }
 
 describe('a held flow step guards create and Pending changes (objectstack#26845)', () => {
-  it('New flow asks; Cancel opens no dialog and keeps the held step, OK opens the dialog', async () => {
-    await openFlow();
-    await holdANotifyStep();
-
-    confirmSpy.mockReturnValueOnce(false);
-    newFlow();
-    expect(confirmSpy).toHaveBeenCalledTimes(1);
-    expect(confirmSpy).toHaveBeenCalledWith(LEAVE_QUESTION);
-    expect(screen.queryByRole('dialog')).toBeNull();
-    expect(screen.getByTestId('studio-held')).toBeInTheDocument();
-
-    confirmSpy.mockReturnValueOnce(true);
-    newFlow();
-    expect(confirmSpy).toHaveBeenCalledTimes(2);
-    await screen.findByRole('dialog');
-  });
-
   it("a Pending changes request for another pillar's item asks once; Cancel keeps the held step, OK opens it", async () => {
     await openFlow();
     await holdANotifyStep();
@@ -233,7 +221,7 @@ describe('a held flow step guards create and Pending changes (objectstack#26845)
     pendingRequest();
     expect(confirmSpy).toHaveBeenCalledTimes(1);
     expect(confirmSpy).toHaveBeenCalledWith(LEAVE_QUESTION);
-    expect(screen.getByTestId('studio-rail-automations')).toBeInTheDocument();
+    expect(screen.getByTitle('API name: approval')).toBeInTheDocument();
     expect(screen.getByTestId('studio-held')).toBeInTheDocument();
 
     confirmSpy.mockReturnValueOnce(true);
@@ -245,13 +233,9 @@ describe('a held flow step guards create and Pending changes (objectstack#26845)
   });
 
   // CONTROL: nothing held, nothing asked.
-  it('with no edit held, New flow and a Pending changes request never ask', async () => {
+  it('with no edit held, a Pending changes request never asks', async () => {
     await openFlow();
 
-    newFlow();
-    await screen.findByRole('dialog');
-    fireEvent.keyDown(screen.getByRole('dialog'), { key: 'Escape' });
-    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
     pendingRequest();
     await noteIsOpen();
     expect(confirmSpy).not.toHaveBeenCalled();

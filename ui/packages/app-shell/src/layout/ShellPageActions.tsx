@@ -28,9 +28,13 @@
  * headers gets the same button at the content's top-left corner
  * (`ShellSidebarExpandFallback`).
  *
- * Outside a scope (Home, the organization pages, Studio, the docs frame, a
- * test that mounts a page bare) the group is never drawn, and on a phone
- * neither: the phone has its own bar.
+ * Outside a scope (Home, the organization pages, Studio, a test that mounts a
+ * page bare) the group is never drawn, and on a phone neither: the phone has
+ * its own bar. The docs portal's desktop frame (`DocsPortalShell`,
+ * objectstack#37197) mounts an `appless` scope: the page is in no app, so the
+ * group names none — its help menu offers no app's docs and no app's
+ * shortcuts, as the portal's old bar did — however the URL reads or whichever
+ * app was open before.
  *
  * The parts are the top bar's own: the AI button IS `AssistantTopBarButton`,
  * and the help menu IS `HelpMenu`.
@@ -100,17 +104,22 @@ const ExpandHeaderRegistryContext = React.createContext<ExpandHeaderRegistry | n
 export function ShellPageActionsScope({
   on = true,
   sidebarExpand = false,
+  appless = false,
   children,
 }: {
   on?: boolean;
   sidebarExpand?: boolean;
+  /** The pages under it are in no app (the docs portal): the group reads no app. */
+  appless?: boolean;
   children: React.ReactNode;
 }) {
   const [registry] = React.useState(createExpandHeaderRegistry);
   return (
     <ExpandHeaderRegistryContext.Provider value={sidebarExpand ? registry : null}>
       <ShellSidebarExpandSlotContext.Provider value={sidebarExpand ? renderShellSidebarExpand : null}>
-        <ShellPageActionsSlotContext.Provider value={on ? renderShellPageActionsGroup : null}>
+        <ShellPageActionsSlotContext.Provider
+          value={on ? (appless ? renderApplessShellPageActionsGroup : renderShellPageActionsGroup) : null}
+        >
           {children}
         </ShellPageActionsSlotContext.Provider>
       </ShellSidebarExpandSlotContext.Provider>
@@ -216,6 +225,23 @@ export function ShellPageActions({ comments }: ShellPageActionsProps) {
 /** The slot's value while the group is on: one stable function, never remade. */
 function renderShellPageActionsGroup(props: ShellPageActionsSlotProps): React.ReactNode {
   return <ShellPageActionsGroup {...props} />;
+}
+
+/** The app-less scope's slot value: one stable function, never remade. */
+function renderApplessShellPageActionsGroup(props: ShellPageActionsSlotProps): React.ReactNode {
+  return <ApplessShellPageActionsGroup {...props} />;
+}
+
+/** The group on a page in no app: the assistant, and help without an app's docs or shortcuts. */
+function ApplessShellPageActionsGroup({ comments }: ShellPageActionsProps) {
+  const { enabled: aiEnabled } = useAiSurfaceEnabled();
+  return (
+    <div className="flex shrink-0 items-center gap-0.5" data-testid="shell-page-actions">
+      {comments}
+      {aiEnabled && <AssistantTopBarButton className="max-md:size-8" />}
+      <HelpMenu inApp={false} triggerClassName="h-8 w-8 shrink-0" triggerTestId="shell-page-actions-help" />
+    </div>
+  );
 }
 
 function ShellPageActionsGroup({ comments }: ShellPageActionsProps) {

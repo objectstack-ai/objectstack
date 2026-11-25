@@ -18,6 +18,12 @@
  */
 
 export const zhHantGeneratedSourceHashes: Readonly<Record<string, string>> = {
+  "metadataForms.dashboard.fields.dateRange.allowCustomRange.helpText": "1cdc93f55eefade7",
+  "metadataForms.dashboard.fields.dateRange.allowCustomRange.label": "a1fb0e1cf5fe5d8e",
+  "metadataForms.dashboard.fields.dateRange.defaultRange.helpText": "afff2187966a112f",
+  "metadataForms.dashboard.fields.dateRange.defaultRange.label": "c1f190468a0e2b35",
+  "metadataForms.dashboard.fields.dateRange.field.helpText": "bbd8025863a4481a",
+  "metadataForms.dashboard.fields.dateRange.field.label": "7cd8aace5973d40c",
   "metadataForms.field.fields.inlineEdit.helpText": "1ce60e4c6d5fc0e1",
   "metadataForms.field.fields.inlineEdit.label": "f29ea014320f588e",
   "metadataForms.report.fields.dateRange.allowCustomRange.helpText": "eb95a6b1536e22fd",

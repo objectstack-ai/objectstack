@@ -366,6 +366,9 @@ export {
 export { useInvitationSignUpJoin, type InvitationSignUpJoin } from './console/auth/invitationSignUpJoin.js';
 export { ForgotPasswordPage as DefaultForgotPasswordPage } from './console/auth/ForgotPasswordPage.js';
 export { HomeLayout as DefaultHomeLayout, HomeLayout } from './console/home/HomeLayout.js';
+// objectstack#37197 — the docs portal's frame: the app-less shell from 768 px up.
+export { DocsPortalShell } from './console/docs/DocsPortalShell.js';
+export type { DocsPortalShellProps } from './console/docs/DocsPortalShell.js';
 export { HomePage as DefaultHomePage, HomePage } from './console/home/HomePage.js';
 // Whether the signed-in person has connected an AI assistant (or holds a
 // working API key), and where Connect an AI Assistant opens: the one read and
@@ -614,8 +617,10 @@ export {
 // Standalone at `/studio` and embedded via the `studio:builder` component ref.
 export { BuilderLanding } from './views/studio-design/BuilderLanding.js';
 // The one Studio scope that is not a package (objectui#11553): the
-// organization's own package-less flows, at `/studio/~org/automations`. A host
-// that declares the `/studio` routes reads the reserved segment from here.
+// organization's own package-less flows, listed at
+// `/studio/~org/metadata/flow?source=runtime` (objectstack#36903; the old
+// `/studio/~org/automations` redirects there). A host that declares the
+// `/studio` routes reads the reserved segment from here.
 export {
   STUDIO_ORG_SCOPE_SEGMENT,
   STUDIO_ORG_SCOPE_PILLAR,

@@ -40,10 +40,31 @@ import { ExistingTableAdoptionRefusal } from './existing-table-refusal.js';
 import { implicitReferenceIndexes, indexedKeyColumns, isUniqueScopeDeclared } from './schema-drift.js';
 import {
   AUDIT_TIMESTAMP_COLUMNS, MYSQL_DATETIME_PRECISION, NUMERIC_SCALAR_TYPES, declaredValueShapes,
-  isDeferredDdlLockWaitRefusal, isMultiValuedColumn, isNowDefaultValue,
+  declaresColumnNotNull, isDeferredDdlLockWaitRefusal, isMultiValuedColumn, isNowDefaultValue,
 } from './sql-driver-top-level.js';
 import type { SqlDriver } from './sql-driver.js';
 import { isInstantColumnType } from './date-on-instant-column.js';
+import type { Knex } from 'knex';
+
+/**
+ * [#37258] Whether an `ALTER TABLE … ADD COLUMN` about to run adds a
+ * `storage.notNull` column to a table that already holds a row — the case in
+ * which `createColumn` adds that column nullable. `false` without a read when
+ * no column to be added declares the constraint.
+ */
+async function addsNotNullToPopulatedTable(
+  knex: Knex,
+  table: string,
+  fields: Record<string, unknown> | undefined,
+  existingColumns: readonly string[],
+): Promise<boolean> {
+  const addsNotNull = Object.entries(fields ?? {}).some(
+    ([name, field]) => !existingColumns.includes(name) && declaresColumnNotNull(field),
+  );
+  if (!addsNotNull) return false;
+  const rows = await knex(table).select(knex.raw('1 as one')).limit(1);
+  return rows.length > 0;
+}
 
 /**
  * The `SqlDriver` members the bodies of {@link RotationFacet} read — every one of
@@ -180,10 +201,12 @@ export class RotationFacet {
     } else {
       const columnInfo = await this.knex(shardName).columnInfo();
       const existingColumns = Object.keys(columnInfo);
+      // [#37258] Same question as the managed path below.
+      const populated = await addsNotNullToPopulatedTable(this.knex, shardName, obj.fields, existingColumns);
       await this.knex.schema.alterTable(shardName, (table) => {
         for (const [name, field] of Object.entries(obj.fields ?? {})) {
           if (!existingColumns.includes(name)) {
-            this.createColumn(table, name, field, keyedColumns.get(name));
+            this.createColumn(table, name, field, keyedColumns.get(name), false, populated);
           }
         }
       });
@@ -592,12 +615,18 @@ export class RotationFacet {
         const addedColumns = Object.keys(obj.fields ?? {}).filter(
           (name) => !builtinColumns.has(name) && !existingColumns.includes(name),
         );
+        // [#37258] A `storage.notNull` column added to a table that already
+        // holds rows is added nullable (unless a DEFAULT fills those rows) and
+        // left to the `tighten_not_null` ceremony — see `createColumn`. Asked
+        // only when an added column declares the constraint, so no other sync
+        // pays the read.
+        const populated = await addsNotNullToPopulatedTable(this.knex, tableName, obj.fields, existingColumns);
         try {
           await this.knex.schema.alterTable(tableName, (table) => {
             if (obj.fields) {
               for (const [name, field] of Object.entries(obj.fields)) {
                 if (!existingColumns.includes(name)) {
-                  this.createColumn(table, name, field, keyedColumns.get(name));
+                  this.createColumn(table, name, field, keyedColumns.get(name), false, populated);
                 }
               }
             }

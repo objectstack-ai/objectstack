@@ -4,7 +4,8 @@
  * The landing of a dashboard the design mode just created (objectstack#36364):
  * the design mode navigates to the new dashboard with this in the navigation
  * state, and the dashboard's page opens its edit state on arrival
- * (objectstack#36372), as its Edit button does.
+ * (objectstack#36372), as its Edit button does. A dashboard opened from a
+ * Studio list lands the same way (objectstack#36906, `StudioAreaAppOpen`).
  *
  * Navigation state, not a URL parameter: it is a one-time instruction, not a
  * place anyone links to, so a shared or reloaded address never opens the edit

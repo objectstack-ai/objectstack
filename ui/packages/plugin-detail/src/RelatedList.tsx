@@ -34,7 +34,7 @@ import {
   RecordHeaderBarContext,
   toast,
 } from '@object-ui/components';
-import { SchemaRenderer, ActionCtxReact, useCapabilityGate, useCondition, toPredicateInput, useSettledSchema, useFilterScope, useResolvedFilter, usePredicateScope, classifyLoadError, answeredLoadFailure, declaredUserMessage, extractWriteErrorMessage, isExternalWriteRefusal, type LoadErrorKind, type RelatedRowActionDef } from '@object-ui/react';
+import { SchemaRenderer, ActionCtxReact, useCapabilityGate, useDrawsAction, useCondition, toPredicateInput, useSettledSchema, useFilterScope, useResolvedFilter, usePredicateScope, classifyLoadError, answeredLoadFailure, declaredUserMessage, extractWriteErrorMessage, isExternalWriteRefusal, type LoadErrorKind, type RelatedRowActionDef } from '@object-ui/react';
 import {
   Plus,
   ExternalLink,
@@ -83,6 +83,7 @@ import {
   resolveAffordance,
   isDeadlineSettled,
   isActionSwitchedOff,
+  isAskAiAction,
   ActionRunner,
   type ActionDef,
   type ActionResult,
@@ -1497,6 +1498,15 @@ export const RelatedList: React.FC<RelatedListProps> = ({
   // value may itself be falsy. Cleared by every re-read (the fetch effect's
   // first statement) and by Retry.
   const [loadFailure, setLoadFailure] = React.useState<{ error: unknown } | null>(null);
+  // objectstack#36822 — whether `relatedData` holds the answer of a read this
+  // list actually issued, so the badge may keep drawing its count while a
+  // later read is in flight. Set only where an issued read resolves, cleared
+  // where one rejects (the rejection empties the rows, and 0 is not their
+  // count). A path that reads nothing (no scope yet, a refused filter, no
+  // adapter) never sets it, so the first real read still draws no count; one
+  // that empties the rows without reading (no scope, no adapter) clears it,
+  // so the next parent's read draws no count either.
+  const [countKnown, setCountKnown] = React.useState(false);
   // Per-lookup-field cache of resolved labels: fieldName -> Map<id, label>
   const [lookupLabels, setLookupLabels] = React.useState<Record<string, Record<string, string>>>({});
   const { t } = useDetailTranslation();
@@ -1559,9 +1569,14 @@ export const RelatedList: React.FC<RelatedListProps> = ({
    * and can only ever hide more than before.
    */
   const mayInvoke = useCapabilityGate();
+  // [ADR-0160 D7] An `ask_ai` action is absent where the provider has no
+  // in-app assistant.
+  const drawsAction = useDrawsAction();
   const permittedToolbarActions = React.useMemo(
-    () => (toolbarActions ?? []).filter((a) => mayInvoke(a?.requiredPermissions) && !isActionSwitchedOff(a)),
-    [toolbarActions, mayInvoke],
+    // [ADR-0160 D7] The toolbar holds no single record (a launch from it runs
+    // on the parent), so an `ask_ai` action is absent here; its rows draw it.
+    () => (toolbarActions ?? []).filter((a) => mayInvoke(a?.requiredPermissions) && !isActionSwitchedOff(a) && drawsAction(a) && !isAskAiAction(a)),
+    [toolbarActions, mayInvoke, drawsAction],
   );
 
   // In the record page's related column (objectstack#26678) the list is a
@@ -2231,6 +2246,8 @@ export const RelatedList: React.FC<RelatedListProps> = ({
         setRelatedData([]);
         setTotal(null);
         setHasMore(false);
+        // Nothing is read, and the emptied rows hold no count (objectstack#36822).
+        setCountKnown(false);
         setLoading(false);
         return;
       }
@@ -2262,6 +2279,7 @@ export const RelatedList: React.FC<RelatedListProps> = ({
               setRelatedData(result.rows as any[]);
               setTotal(result.total);
               setHasMore(result.total > result.rows.length);
+              setCountKnown(true);
               setLoading(false);
             },
             (err) => {
@@ -2269,6 +2287,7 @@ export const RelatedList: React.FC<RelatedListProps> = ({
               setRelatedData([]);
               setTotal(null);
               setHasMore(false);
+              setCountKnown(false);
               setLoadFailure({ error: err });
               setLoading(false);
             },
@@ -2362,6 +2381,7 @@ export const RelatedList: React.FC<RelatedListProps> = ({
             setTotal(null);
             setHasMore(false);
           }
+          setCountKnown(true);
           setLoading(false);
         }).catch((err) => {
           console.error('Failed to fetch related data:', err);
@@ -2371,6 +2391,7 @@ export const RelatedList: React.FC<RelatedListProps> = ({
           setRelatedData([]);
           setTotal(null);
           setHasMore(false);
+          setCountKnown(false);
           setLoadFailure({ error: err });
           setLoading(false);
         });
@@ -2388,6 +2409,7 @@ export const RelatedList: React.FC<RelatedListProps> = ({
         setRelatedData([]);
         setTotal(null);
         setHasMore(false);
+        setCountKnown(false);
         setLoading(false);
       } else if (referenceFieldIsMultiValue) {
         // The same refusal as the arm above, one cause earlier: this path's
@@ -2414,6 +2436,7 @@ export const RelatedList: React.FC<RelatedListProps> = ({
         setRelatedData([]);
         setTotal(null);
         setHasMore(false);
+        setCountKnown(false);
         setLoading(false);
       } else {
         const qs = new URLSearchParams({
@@ -2433,6 +2456,7 @@ export const RelatedList: React.FC<RelatedListProps> = ({
             setRelatedData(items);
             setTotal(null);
             setHasMore(false);
+            setCountKnown(true);
           })
           .catch(err => {
             console.error('Failed to fetch related data:', err);
@@ -2440,6 +2464,7 @@ export const RelatedList: React.FC<RelatedListProps> = ({
             setRelatedData([]);
             setTotal(null);
             setHasMore(false);
+            setCountKnown(false);
             setLoadFailure({ error: err });
           })
           .finally(() => { if (!cancelled) setLoading(false); });
@@ -3647,6 +3672,9 @@ export const RelatedList: React.FC<RelatedListProps> = ({
   // key, so a column left out is still counted when the box grows.
   const [bodyTableColumnCap, setBodyTableColumnCap] = React.useState<number | null>(null);
   const bodyTableColumnWidths = React.useRef(new Map<string, number>());
+  // objectstack#37212 — how many columns the table last drew as handed: a
+  // hand-over it has adopted. `null` until it has drawn one.
+  const bodyTableAdoptedCount = React.useRef<number | null>(null);
   const bodyTableColumnKeysKey = React.useMemo(
     () => JSON.stringify((tableColumns ?? []).map((col: any) => String(col?.accessorKey ?? ''))),
     [tableColumns],
@@ -3654,6 +3682,7 @@ export const RelatedList: React.FC<RelatedListProps> = ({
   // A different column set is measured afresh, every column drawn.
   React.useLayoutEffect(() => {
     bodyTableColumnWidths.current.clear();
+    bodyTableAdoptedCount.current = null;
     setBodyTableColumnCap(null);
   }, [bodyTableColumnKeysKey]);
   const bodyTableColumnsOmitted = bodyTable && bodyTableColumnCap !== null;
@@ -4010,7 +4039,11 @@ export const RelatedList: React.FC<RelatedListProps> = ({
   // the 0 an empty first read holds: while the first rows are in flight (or a
   // card out of view has not asked) and no count answers for them, the badge
   // waits. A refetch over rows already drawn keeps their count.
-  const countPending = !countAnswers && loading && relatedData.length === 0 && !(windowed && total != null);
+  // objectstack#36822 — and so does a refetch over a list that already
+  // answered 0: once a read has answered, the count is known (`countKnown`),
+  // so a later read in flight keeps drawing the last answer.
+  const countPending =
+    !countAnswers && loading && !countKnown && relatedData.length === 0 && !(windowed && total != null);
   // In windowed mode an empty page beyond page 0 is a transient overflow (the
   // step-back effect above corrects it), not an empty collection.
   // A failed read is never empty: it draws its own line (objectstack#26415).
@@ -4059,6 +4092,17 @@ export const RelatedList: React.FC<RelatedListProps> = ({
     const keys = readColumnKeys(bodyTableColumnKeysKey);
     const watch = (box: HTMLElement) => {
       const read = () => {
+        // objectstack#37212 — the table adopts the columns it is handed a
+        // render later. While it still draws the hand-over it adopted last (the
+        // same leading run of these columns), it is measured for that cap, not
+        // this one, and judging this cap by it flips the cap on every commit:
+        // skip that read; its re-draw reads again. A table that draws a run of
+        // its own choosing (a column hidden from its header menu) is read.
+        const drawn = Array.from(box.querySelectorAll('thead th[data-column-key]'), (th) => th.getAttribute('data-column-key'));
+        const handed = bodyTableColumnCap ?? keys.length;
+        const leadingRun = drawn.every((key, index) => key === keys[index]);
+        if (leadingRun && drawn.length === handed) bodyTableAdoptedCount.current = handed;
+        else if (leadingRun && drawn.length === bodyTableAdoptedCount.current) return;
         // objectstack#35742 — the columns that fit whole: the box's width
         // less the cells that are no column (the row actions), against the
         // width each column asks for.
@@ -4078,7 +4122,7 @@ export const RelatedList: React.FC<RelatedListProps> = ({
         setBodyTableOverflows(box.scrollWidth - box.clientWidth > 1);
       };
       read();
-      // The table settles its columns a render after it is handed fewer:
+      // The table settles its columns a render after it is handed others:
       // read again when its cells change.
       if (typeof MutationObserver !== 'undefined') {
         cells = new MutationObserver(read);

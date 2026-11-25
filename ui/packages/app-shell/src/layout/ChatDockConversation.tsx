@@ -313,7 +313,11 @@ export function ChatDockConversation({
   // held here for the same reason. It rides on the thread the scope resolved
   // and never re-keys it: a focus does not change which conversation the
   // drawer shows (ADR-0057 as amended for objectui#10926).
-  const conversationFocus = useConversationFocus(paneConversationId, createError);
+  // objectstack#37142 — keyed on the target too: a hand-off's carry goes to the
+  // thread this target resolves, never to a history row or another app's
+  // thread the user moves to before the first send.
+  const focusTarget = React.useMemo(() => (target ? JSON.stringify(target) : undefined), [target]);
+  const conversationFocus = useConversationFocus(paneConversationId, createError, focusTarget);
   // A first send creates the conversation: the id it mints takes the focus
   // pinned before it (and no other arriving id does).
   const { markSending: markFocusSending } = conversationFocus;

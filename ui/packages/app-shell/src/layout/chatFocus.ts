@@ -98,28 +98,45 @@ export function buildFocusContext(
 // screen; with none mounted (the drawer is closed) it waits, and the next host
 // to mount takes it, so "pin, then open the drawer" lands on the drawer's
 // conversation.
+//
+// objectstack#37142 — a caller that MOVES the chat in the same event (the
+// `ask_ai` action opens a fresh thread) says so with `follow`: the focus is the
+// next conversation's, so a host that shows one now leaves it untouched and
+// hands the focus to the conversation it moves to.
 
-type ChatFocusHost = (focus: ChatFocus | null) => void;
+/** How `setChatFocus` lands. */
+export interface SetChatFocusOptions {
+  /**
+   * The caller is moving the chat to another conversation in this same event:
+   * the focus belongs to that one, not to the conversation on screen. A host
+   * with no conversation id yet takes it at once; a host showing one keeps
+   * that conversation's focus and gives this one to the next it shows.
+   */
+  follow?: boolean;
+}
+
+type ChatFocusHost = (focus: ChatFocus | null, follow: boolean) => void;
 const hosts: ChatFocusHost[] = [];
-let pending: { focus: ChatFocus | null } | null = null;
+let pending: { focus: ChatFocus | null; follow: boolean } | null = null;
 
 /**
  * Pins `focus` to the conversation the chat shows (or clears it with `null`).
  * A new focus starts with a fresh 「ask about this one instead?」 offer.
  */
-export function setChatFocus(focus: ChatFocus | null): void {
+export function setChatFocus(focus: ChatFocus | null, options?: SetChatFocusOptions): void {
   const next = focus && isChatFocus(focus) ? { object: focus.object, id: focus.id } : null;
+  const follow = options?.follow === true;
   const host = hosts[hosts.length - 1];
-  if (host) host(next);
-  else pending = { focus: next };
+  if (host) host(next, follow);
+  else pending = { focus: next, follow };
 }
 
 function registerChatFocusHost(host: ChatFocusHost): () => void {
   hosts.push(host);
   if (pending) {
-    const { focus } = pending;
+    const { focus, follow } = pending;
     pending = null;
-    host(focus);
+    host(focus, follow);
   }
   return () => {
     const at = hosts.lastIndexOf(host);
@@ -159,9 +176,24 @@ interface FocusState {
    * other arrival of an id — a resumed thread resolving, a history row, the
    * scope blanking the id between apps — reads that conversation's own stored
    * focus instead. Only the hand-off's own focus is carried: the chip's pin,
-   * remove or decline drops the flag.
+   * remove or decline drops the flag, and so does any change of what the host
+   * was asked to show ({@link FocusState.target}): an id that arrives for a
+   * history row picked, or an app moved to, before the first send is that
+   * conversation's own (objectstack#37142).
    */
   carry: boolean;
+  /**
+   * What the host was asked to show when the state last moved (a key of the
+   * dock's target). A change drops the hand-off's carry.
+   */
+  target: string | undefined;
+  /**
+   * A `follow` hand-off that landed while this host showed a conversation
+   * (objectstack#37142): the focus of the NEXT conversation the host shows,
+   * applied when the id changes (and carried, as a hand-off is, when that
+   * next one has no id yet). The chip's own moves drop it.
+   */
+  follow?: { focus: ChatFocus | null };
 }
 
 /**
@@ -177,31 +209,51 @@ export function useConversationFocus(
   conversationId: string | undefined,
   /** The host's `createError`: a first send whose create failed minted nothing. */
   createError?: unknown,
+  /**
+   * A key of what the host was asked to show (the dock's target): while it
+   * holds, an id the host resolves takes a hand-off's carry; once it changes,
+   * the next id is the conversation's own. A host that passes none keeps the
+   * carry until an id arrives.
+   */
+  target?: string,
 ): ConversationFocus {
   const [state, setState] = React.useState<FocusState>(() => ({
     key: conversationId,
     entry: readStoredChatFocus(conversationId),
     carry: false,
+    target,
   }));
   // A first send in flight: a ref, not state, so marking it re-renders
   // nothing while the pane holds the message it is creating the row for.
   const sendingRef = React.useRef(false);
   let current = state;
-  if (state.key !== conversationId) {
+  // The host was asked for something else (a history row, another app): a
+  // hand-off's carry does not go with it. A pending `follow` does — the caller
+  // that moved the target set it for exactly that move.
+  if (current.target !== target) current = { ...current, target, carry: false };
+  if (current.key !== conversationId) {
     const carried =
-      state.key === undefined &&
+      current.key === undefined &&
       conversationId !== undefined &&
-      (state.carry || sendingRef.current) &&
-      state.entry.focus !== null;
-    current = {
-      key: conversationId,
-      entry: carried ? state.entry : readStoredChatFocus(conversationId),
-      carry: false,
-    };
-    // Derived state set during render: React re-renders before committing, so
-    // no child of this commit sees the previous conversation's focus.
-    setState(current);
+      (current.carry || sendingRef.current) &&
+      current.entry.focus !== null;
+    current = current.follow
+      ? {
+          key: conversationId,
+          entry: { focus: current.follow.focus, declined: false },
+          carry: conversationId === undefined,
+          target,
+        }
+      : {
+          key: conversationId,
+          entry: carried ? current.entry : readStoredChatFocus(conversationId),
+          carry: false,
+          target,
+        };
   }
+  // Derived state set during render: React re-renders before committing, so
+  // no child of this commit sees the previous conversation's focus.
+  if (current !== state) setState(current);
   const { key, entry } = current;
 
   React.useEffect(() => {
@@ -223,23 +275,30 @@ export function useConversationFocus(
   // keeps) here is this conversation's, and follows no other one.
   const setFocus = React.useCallback((focus: ChatFocus | null) => {
     setState((s) =>
-      sameChatFocus(s.entry.focus, focus)
+      sameChatFocus(s.entry.focus, focus) && !s.follow
         ? s
-        : { ...s, entry: { focus, declined: false }, carry: false },
+        : { ...s, entry: { focus, declined: false }, carry: false, follow: undefined },
     );
   }, []);
   const decline = React.useCallback(() => {
     setState((s) =>
-      s.entry.declined && !s.carry ? s : { ...s, entry: { ...s.entry, declined: true }, carry: false },
+      s.entry.declined && !s.carry && !s.follow
+        ? s
+        : { ...s, entry: { ...s.entry, declined: true }, carry: false, follow: undefined },
     );
   }, []);
   const markSending = React.useCallback(() => {
     sendingRef.current = true;
   }, []);
   // The setter's hand-off: applied here, and carried onto the id the host
-  // resolves next when it has none yet.
-  const handOff = React.useCallback((focus: ChatFocus | null) => {
-    setState((s) => ({ key: s.key, entry: { focus, declined: false }, carry: s.key === undefined }));
+  // resolves next when it has none yet. A `follow` hand-off to a host showing
+  // a conversation waits for the next one instead (see `FocusState.follow`).
+  const handOff = React.useCallback((focus: ChatFocus | null, follow: boolean) => {
+    setState((s) =>
+      follow && s.key !== undefined
+        ? { ...s, follow: { focus } }
+        : { ...s, entry: { focus, declined: false }, carry: s.key === undefined, follow: undefined },
+    );
   }, []);
 
   React.useEffect(() => registerChatFocusHost(handOff), [handOff]);

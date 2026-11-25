@@ -556,7 +556,7 @@ describe('#16091 — the character column both generators emit is the driver\'s'
     expect(
       SQL_DRIVER_SOURCE,
       'createColumn no longer receives `keyed` from indexedKeyColumns — re-read #16091.',
-    ).toContain('this.createColumn(table, name, field, keyedColumns.get(name));');
+    ).toContain('this.createColumn(table, name, field, keyedColumns.get(name), false, populated);');
     expect(SQL_DRIVER_SOURCE).toContain('const keyedColumns = indexedKeyColumns({');
     expect(
       SCHEMA_DRIFT_SOURCE,

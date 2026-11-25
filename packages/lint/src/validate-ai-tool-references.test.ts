@@ -360,6 +360,27 @@ describe('validate-ai-tool-references', () => {
   });
 
   /**
+   * [ADR-0160 D4] `get_record_context` is served by the MCP door and
+   * registered by cloud `service-ai` for the in-app assistant, so a skill kept
+   * out of MCP (`mcpPrompt: false`) that reads a pack resolves it. Before the
+   * cloud registration joined the registry, the rule reported it as an
+   * MCP-only name (ADR-0160's implementation split note).
+   */
+  it('resolves get_record_context on a mcpPrompt: false skill, as on one MCP projects (ADR-0160 D4)', () => {
+    for (const mcpPrompt of [false, true, undefined]) {
+      const findings = validateAiToolReferences({
+        skills: [{
+          name: 'account_brief',
+          ...(mcpPrompt === undefined ? {} : { mcpPrompt }),
+          tools: ['get_record_context', 'get_record_contexts'],
+        }],
+      });
+      // The control: a neighbour spelling nobody registers is still reported.
+      expect(findings.map((f) => f.path), String(mcpPrompt)).toEqual(['skills[0].tools[1]']);
+    }
+  });
+
+  /**
    * The chat's confirmed record write (cloud#3565; it replaced cloud#3383's
    * `draft_record`): a skill naming `create_record` / `update_record` resolves;
    * a near name nobody registers does not, and neither does the retired name.
