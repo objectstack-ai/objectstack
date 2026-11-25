@@ -177,6 +177,29 @@ describe('get_record_context — the order of judgement (ADR-0160 D4)', () => {
     expect(refused.message).toContain('policy_brief, policy_document');
   });
 
+  it('3. two packs of one name on the object are refused with one answer, named or not, and nothing is read', async () => {
+    const twin = { ...(policyApp().packs[0] as Record<string, unknown>), label: 'Twin', fields: ['title'] };
+    const app = policyApp({ packs: [...policyApp().packs, twin] });
+    const door = fakeDoor(app);
+    const named = await refusalOf(executeGetRecordContext({ ...CALL, context: 'policy_document' }, door));
+    const bare = await refusalOf(run(app));
+    expect(named).toEqual(bare);
+    expect(named).toMatchObject({ code: 'RESOURCE_CONFLICT', status: 409 });
+    expect(named.message).toContain("'policy_document'");
+    expect(door.reads).toEqual([]);
+    expect(await recordContextReadSet({ objectName: 'policy', context: 'policy_document' }, door)).toEqual({ objects: ['policy'] });
+  });
+
+  it('3. a duplicated name beside another pack is listed once; naming another pack still reads it', async () => {
+    const twin = { ...(policyApp().packs[0] as Record<string, unknown>), label: 'Twin' };
+    const brief = { name: 'policy_brief', label: 'Brief', object: 'policy', fields: ['title'] };
+    const app = policyApp({ packs: [...policyApp().packs, twin, brief] });
+    const several = await refusalOf(run(app));
+    expect(several.message).toContain('(policy_brief, policy_document)');
+    const read = await executeGetRecordContext({ ...CALL, context: 'policy_brief' }, fakeDoor(app));
+    expect(read.data).toBeDefined();
+  });
+
   it('4. a related child the read guard refuses is refused before its definition is read, and no record is read', async () => {
     const door = fakeDoor(policyApp({ guardedObjects: ['policy_revision'] }));
     const refused = await refusalOf(executeGetRecordContext(CALL, door));

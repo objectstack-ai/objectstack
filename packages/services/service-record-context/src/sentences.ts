@@ -41,6 +41,9 @@ const WRITTEN = {
     severalPacks: (object: string, names: readonly string[]) =>
       `Object '${object}' has several context packs (${names.join(', ')}): name the one to read with 'context'. `
       + 'Nothing was read.',
+    duplicatePack: (object: string, name: string) =>
+      `Object '${object}' has more than one context pack named '${name}', so none of them was read. `
+      + 'Read the record with get_record.',
     objectRefusedNamed: (pack: string, root: string, object: string) =>
       `Context pack '${pack}' on '${root}' reads object '${object}', which this door does not serve you, so the `
       + 'pack cannot be read for you. Nothing was returned. Read the record with get_record.',
@@ -65,6 +68,8 @@ const WRITTEN = {
     noPack: (object: string) => `对象 '${object}' 没有资料包，因此没有读取任何内容。请用 get_record 读取记录。`,
     severalPacks: (object: string, names: readonly string[]) =>
       `对象 '${object}' 有多个资料包（${names.join(', ')}）：请用 'context' 指定要读取的那个。没有读取任何内容。`,
+    duplicatePack: (object: string, name: string) =>
+      `对象 '${object}' 有不止一个名为 '${name}' 的资料包，因此一个都没有读取。请用 get_record 读取记录。`,
     objectRefusedNamed: (pack: string, root: string, object: string) =>
       `'${root}' 上的资料包 '${pack}' 会读取对象 '${object}'，而本入口不向你提供它，因此无法为你读取这个资料包。没有返回任何内容。请用 get_record 读取记录。`,
     objectRefusedUnnamed: (pack: string, root: string) =>

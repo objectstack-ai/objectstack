@@ -41,7 +41,8 @@ export type ContextPackSelection =
   | { kind: 'selected'; pack: AiContext }
   | { kind: 'unknown_name' }
   | { kind: 'none' }
-  | { kind: 'several'; names: string[] };
+  | { kind: 'several'; names: string[] }
+  | { kind: 'duplicate'; name: string };
 
 /** The published packs that parse, in listing order. A row that does not parse is no pack. */
 export function parsedContextPacks(rows: readonly unknown[]): AiContext[] {
@@ -57,17 +58,21 @@ export function parsedContextPacks(rows: readonly unknown[]): AiContext[] {
  * Pack selection, with no silent fallback: `context` names a pack rooted on
  * `objectName` or nothing is selected (one outcome for a name no pack has and
  * for a pack rooted on another object); without `context`, the one pack rooted
- * on `objectName`, or none, or several.
+ * on `objectName`, or none, or several. Two published packs of one name on one
+ * root (two packages may each ship one) are never chosen between: the name is
+ * refused as `duplicate`, whether `context` names it or it is the only name.
  */
 export function selectContextPack(packs: readonly AiContext[], args: RecordContextReadSetArgs): ContextPackSelection {
-  if (args.context !== undefined) {
-    const pack = packs.find((p) => p.name === args.context && p.object === args.objectName);
-    return pack ? { kind: 'selected', pack } : { kind: 'unknown_name' };
-  }
   const rooted = packs.filter((p) => p.object === args.objectName);
-  if (rooted.length === 1) return { kind: 'selected', pack: rooted[0] };
+  if (args.context !== undefined) {
+    const named = rooted.filter((p) => p.name === args.context);
+    if (named.length > 1) return { kind: 'duplicate', name: args.context };
+    return named.length === 1 ? { kind: 'selected', pack: named[0] } : { kind: 'unknown_name' };
+  }
   if (rooted.length === 0) return { kind: 'none' };
-  return { kind: 'several', names: rooted.map((p) => p.name).sort() };
+  const names = [...new Set(rooted.map((p) => p.name))].sort();
+  if (names.length > 1) return { kind: 'several', names };
+  return rooted.length === 1 ? { kind: 'selected', pack: rooted[0] } : { kind: 'duplicate', name: names[0] };
 }
 
 /** An object definition's fields as a name → definition map (both stored shapes). */

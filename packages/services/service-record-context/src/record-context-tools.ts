@@ -263,6 +263,7 @@ export async function executeGetRecordContext(input: unknown, door: RecordContex
   if (selection.kind === 'unknown_name') throw refusal('RESOURCE_NOT_FOUND', 404, say.noPackNamed(args.context ?? '', root));
   if (selection.kind === 'none') throw refusal('RESOURCE_NOT_FOUND', 404, say.noPack(root));
   if (selection.kind === 'several') throw refusal('VALIDATION_ERROR', 400, say.severalPacks(root, selection.names));
+  if (selection.kind === 'duplicate') throw refusal('RESOURCE_CONFLICT', 409, say.duplicatePack(root, selection.name));
   const pack: AiContext = selection.pack;
 
   const refuseObject = async (object: string, shown: boolean): Promise<never> => {
