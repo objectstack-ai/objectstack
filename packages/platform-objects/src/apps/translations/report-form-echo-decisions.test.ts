@@ -103,6 +103,13 @@
 // of the six decided rows moved. The "Dataset" twin below now points at the
 // English the heading was rendered from on the dataset type's own label.)
 //
+// (#36836 re-translated the three rows #36447 reworded — the `dataset_binding`
+// description, the `drilldown` hint and the `runtimeFilter` hint — from the new
+// English in all three locales, and moved the heading's "Dataset" half to the
+// word its field twin now renders (数据来源 / データソース / Fuente de datos).
+// The semantic-layer sections below record why the OLD description read as it
+// did; the twin test now asserts the business vocabulary instead.)
+//
 // ## ⚠️⚠️ The phantom-translation trap — and why this family is the SHARP case
 //
 // `reportForm` declares NO label on `drilldown` and NO label on `runtimeFilter`
@@ -248,7 +255,7 @@ const DECISIONS: readonly Decision[] = [
     en: 'Dataset binding',
     verdict: ALL_TRANSLATE,
     reason:
-      'BOTH HALVES HAVE AUTHORED TWINS ON THIS VERY PANEL, and the row names each. "Dataset": report.fields.dataset.label, which #19355 decided and authored as 数据集 / データセット / Conjunto de datos — the same three words this catalog spends on the dataset metadata type itself. "binding": report.fields.dataset.helpText, one line below this heading, already renders the verb — 要绑定的数据集 / バインドするデータセット / Conjunto de datos a vincular. ⇒ 数据集绑定 / データセットのバインド / Vinculación del conjunto de datos. ⚠️ Each locale takes the NOMINAL form its three sibling headings on this panel take (基础信息 · 关联对象 · 筛选与图表 / 基本 · 結合ブロック · フィルターとチャート / Aspectos básicos · Bloques unidos · Filtro y gráfico), which is why es nominalises its twin verb to Vinculación rather than keeping the infinitive. ⛔ WHAT WAS REFUSED: leaving it as the loanword in es — byte-identical to the source, so it would clear the echo predicate while telling a Spanish author nothing, the phantom shape round 8 refused on apiEnabled.',
+      'BOTH HALVES HAVE AUTHORED TWINS ON THIS VERY PANEL, and the row names each. "Dataset": report.fields.dataset.label, which #19355 decided and authored as 数据集 / データセット / Conjunto de datos — the same three words this catalog spends on the dataset metadata type itself. "binding": report.fields.dataset.helpText, one line below this heading, already renders the verb — 要绑定的数据集 / バインドするデータセット / Conjunto de datos a vincular. ⇒ 数据集绑定 / データセットのバインド / Vinculación del conjunto de datos. ⚠️ Each locale takes the NOMINAL form its three sibling headings on this panel take (基础信息 · 关联对象 · 筛选与图表 / 基本 · 結合ブロック · フィルターとチャート / Aspectos básicos · Bloques unidos · Filtro y gráfico), which is why es nominalises its twin verb to Vinculación rather than keeping the infinitive. ⛔ WHAT WAS REFUSED: leaving it as the loanword in es — byte-identical to the source, so it would clear the echo predicate while telling a Spanish author nothing, the phantom shape round 8 refused on apiEnabled. ⚠️ #36836 moved the "Dataset" half to the word its twin report.fields.dataset.label now renders — 数据来源 / データソース / Fuente de datos — so the heading and the field under it name the source once: 数据来源绑定 / データソースの紐付け / Vinculación de la fuente de datos (ja trades the loanword バインド for the plain 紐付け, in step with the business wording of the rest of the panel).',
   },
   {
     kind: 'section',
@@ -258,7 +265,7 @@ const DECISIONS: readonly Decision[] = [
     en: 'Where the report’s numbers come from, how they are grouped and sorted, and which records open when you click a row.',
     verdict: ALL_TRANSLATE,
     reason:
-      '⭐ THE SCHEMA WAS READ BEFORE A WORD WAS RENDERED and every claim is asserted below: the semantic layer really does declare `dimensions` (groupable axes) and `measures` (aggregatable values) and refuses `values`/`rows`; the report really does spell the same two concepts `values` and `rows` and refuses `measures`/`dimensions`; and the MAPPING this sentence states is the schema\'s own — the joined-block alias table answers `measures` → `values` and `dimensions` → `rows` in its rejection message, and the order refinement names both halves in one live sentence. ⭐ EVERY WORD IS COPIED, NOT COMPOSED: "semantic layer" from dataset.description (分析语义层 / 分析セマンティックレイヤー / Capa semántica de analítica) and from report.fields.dataset.helpText on this same panel; "measures" and "dimensions" from dataset.sections.measures.label and dataset.sections.dimensions.label (度量 · 维度 / メジャー · ディメンション / Medidas · Dimensiones); the VERB from report.fields.dataset.helpText — 来自 / から取得 / provienen de. ⚠️⚠️ THE ONE DELIBERATE DEPARTURE, and it is forced by an earlier decision of this card: #19355 rendered this panel\'s `values` box with the DATASET\'s word in all three locales (度量 / メジャー / Medidas literally mean "measures"), so a literal "Values are the dataset\'s measures" reads as an identity — 度量就是度量 — and carries information only in English. The clause is rendered as the attribution it actually makes: the two boxes COME FROM this dataset\'s measures and dimensions. ⛔ What was refused: re-wording report.fields.values.label to restore the English contrast. That is a landed decision of this card and reversing it to make one tooltip read better would take a rendering three other leaves already depend on. ⚠️ Punctuation copied from this panel\'s own three sibling descriptions rather than chosen: zh carries no trailing full stop, ja and es do. ⚠️ #36447 reworded this `en` source into business terms (from "The semantic-layer dataset this report renders. Values are the dataset’s measures; rows are its dimensions."); the zh-CN / ja-JP / es-ES verdicts and values above were taken against the OLD English and were not re-judged.',
+      '⭐ THE SCHEMA WAS READ BEFORE A WORD WAS RENDERED and every claim is asserted below: the semantic layer really does declare `dimensions` (groupable axes) and `measures` (aggregatable values) and refuses `values`/`rows`; the report really does spell the same two concepts `values` and `rows` and refuses `measures`/`dimensions`; and the MAPPING this sentence states is the schema\'s own — the joined-block alias table answers `measures` → `values` and `dimensions` → `rows` in its rejection message, and the order refinement names both halves in one live sentence. ⭐ EVERY WORD IS COPIED, NOT COMPOSED: "semantic layer" from dataset.description (分析语义层 / 分析セマンティックレイヤー / Capa semántica de analítica) and from report.fields.dataset.helpText on this same panel; "measures" and "dimensions" from dataset.sections.measures.label and dataset.sections.dimensions.label (度量 · 维度 / メジャー · ディメンション / Medidas · Dimensiones); the VERB from report.fields.dataset.helpText — 来自 / から取得 / provienen de. ⚠️⚠️ THE ONE DELIBERATE DEPARTURE, and it is forced by an earlier decision of this card: #19355 rendered this panel\'s `values` box with the DATASET\'s word in all three locales (度量 / メジャー / Medidas literally mean "measures"), so a literal "Values are the dataset\'s measures" reads as an identity — 度量就是度量 — and carries information only in English. The clause is rendered as the attribution it actually makes: the two boxes COME FROM this dataset\'s measures and dimensions. ⛔ What was refused: re-wording report.fields.values.label to restore the English contrast. That is a landed decision of this card and reversing it to make one tooltip read better would take a rendering three other leaves already depend on. ⚠️ Punctuation copied from this panel\'s own three sibling descriptions rather than chosen: zh carries no trailing full stop, ja and es do. ⚠️ #36447 reworded this `en` source into business terms (from "The semantic-layer dataset this report renders. Values are the dataset’s measures; rows are its dimensions."). ⭐ #36836 RE-JUDGED IT: the new sentence makes no semantic-layer claim at all, so the measures/dimensions attribution above no longer renders anything and the three values were re-translated from the new English — 报表的数字从哪里来、如何分组和排序，以及点击某一行时打开哪些记录 / レポートの数値をどこから取得し、… / De dónde provienen las cifras del informe, … — in the panel's business vocabulary (分组 / グループ化 / agrupan). The schema facts asserted below still hold; they now document why the old sentence existed, not what the rendering says.',
   },
   {
     kind: 'field',
@@ -278,7 +285,7 @@ const DECISIONS: readonly Decision[] = [
     en: 'Click a summarized row or cell to open the records behind it.',
     verdict: ALL_TRANSLATE,
     reason:
-      'PROSE, AND EVERY TERM IN IT HAS AN AUTHORED TWIN EXCEPT ONE, WHICH IS NAMED. "aggregated" from dataset.sections.measures.description (可聚合值 / 集計可能な値 / Valores agregables); "row" from report.fields.rows.label on this same panel (行 / 行 / Filas); "records" from dataset.fields.filter.helpText (排除软删除记录 / 論理削除済みレコードを除外 / excluir registros eliminados de forma lógica). ⛔ "cell" has NO authored twin in either catalog — stated, not borrowed — and takes each locale\'s standard grid term: 单元格 / セル / celda. ⚠️ The ja term is also this file\'s worked example of why a substring guard lies: キャンセル contains セル, which is asserted below. ⇒ 点击聚合后的行/单元格，打开其底层记录 / 集計された行/セルをクリックして、元になったレコードを開きます / Haz clic en una fila/celda agregada para abrir los registros subyacentes. ⚠️ es takes the tú imperative its siblings take (Usa un campo del objeto base, elige nombres de relación, Activa/desactiva este agente), ja the 〜します form its sibling helpTexts take, zh no trailing full stop. ⚠️ #36447 reworded this `en` source into business terms (from "Click an aggregated row/cell to open the underlying records"); the zh-CN / ja-JP / es-ES verdicts and values above were taken against the OLD English and were not re-judged.',
+      'PROSE, AND EVERY TERM IN IT HAS AN AUTHORED TWIN EXCEPT ONE, WHICH IS NAMED. "aggregated" from dataset.sections.measures.description (可聚合值 / 集計可能な値 / Valores agregables); "row" from report.fields.rows.label on this same panel (行 / 行 / Filas); "records" from dataset.fields.filter.helpText (排除软删除记录 / 論理削除済みレコードを除外 / excluir registros eliminados de forma lógica). ⛔ "cell" has NO authored twin in either catalog — stated, not borrowed — and takes each locale\'s standard grid term: 单元格 / セル / celda. ⚠️ The ja term is also this file\'s worked example of why a substring guard lies: キャンセル contains セル, which is asserted below. ⇒ 点击聚合后的行/单元格，打开其底层记录 / 集計された行/セルをクリックして、元になったレコードを開きます / Haz clic en una fila/celda agregada para abrir los registros subyacentes. ⚠️ es takes the tú imperative its siblings take (Usa un campo del objeto base, elige nombres de relación, Activa/desactiva este agente), ja the 〜します form its sibling helpTexts take, zh no trailing full stop. ⚠️ #36447 reworded this `en` source into business terms (from "Click an aggregated row/cell to open the underlying records"); #36836 re-translated all three values from the new English (zh-CN copied from the console overlay, which already carried it): the slash pair becomes "row or cell" and "underlying" becomes "the records behind it".',
   },
   {
     kind: 'field',
@@ -298,7 +305,7 @@ const DECISIONS: readonly Decision[] = [
     en: 'A filter applied whenever the report is shown, on top of the data source’s own conditions.',
     verdict: ALL_TRANSLATE,
     reason:
-      '⭐ A NEAR-EXACT TWIN EXISTS AND CARRIES THE WHOLE SENTENCE PATTERN: dataset.fields.filter.helpText is "Intrinsic scope filter (e.g. exclude soft-deleted records), ANDed into every query" — the same "<when> scope filter, ANDed <when>" shape, already authored as 固有范围筛选（…），以 AND 方式并入每个查询 / 固有スコープのフィルター（…）。すべてのクエリに AND で結合されます / Filtro de ámbito intrínseco (…), combinado con AND en cada consulta. "scope filter" (范围筛选 / スコープのフィルター / Filtro de ámbito), the ANDing clause and its grammar are all taken from it. ⭐ `AND` IS KEPT VERBATIM in all three, the machine-token treatment this catalog already applies at that twin and at object.fields["fields.relatedListFilter"].helpText, and asserted by the token guard below. ⚠️ THE SOURCE\'S OWN TWO-TIME DISTINCTION IS PRESERVED rather than flattened: the label names the key (runtime ⇒ 运行时 / 実行時 / tiempo de ejecución, copied from the twin above) while this sentence contrasts RENDER time with QUERY time, so it takes 渲染 / レンダリング / renderizado — all three already authored in this catalog (page.fields.appearance.helpText, action.fields.display.helpText, sys_report.fields.format.help). ⇒ 渲染时的范围筛选，在查询时以 AND 方式并入 / レンダリング時のスコープフィルター。クエリ時に AND で結合されます / Filtro de ámbito en tiempo de renderizado, combinado con AND en el momento de la consulta. ⚠️ #36447 reworded this `en` source into business terms (from "Render-time scope filter, ANDed at query time"); the zh-CN / ja-JP / es-ES verdicts and values above were taken against the OLD English and were not re-judged.',
+      '⭐ A NEAR-EXACT TWIN EXISTS AND CARRIES THE WHOLE SENTENCE PATTERN: dataset.fields.filter.helpText is "Intrinsic scope filter (e.g. exclude soft-deleted records), ANDed into every query" — the same "<when> scope filter, ANDed <when>" shape, already authored as 固有范围筛选（…），以 AND 方式并入每个查询 / 固有スコープのフィルター（…）。すべてのクエリに AND で結合されます / Filtro de ámbito intrínseco (…), combinado con AND en cada consulta. "scope filter" (范围筛选 / スコープのフィルター / Filtro de ámbito), the ANDing clause and its grammar are all taken from it. ⭐ `AND` IS KEPT VERBATIM in all three, the machine-token treatment this catalog already applies at that twin and at object.fields["fields.relatedListFilter"].helpText, and asserted by the token guard below. ⚠️ THE SOURCE\'S OWN TWO-TIME DISTINCTION IS PRESERVED rather than flattened: the label names the key (runtime ⇒ 运行时 / 実行時 / tiempo de ejecución, copied from the twin above) while this sentence contrasts RENDER time with QUERY time, so it takes 渲染 / レンダリング / renderizado — all three already authored in this catalog (page.fields.appearance.helpText, action.fields.display.helpText, sys_report.fields.format.help). ⇒ 渲染时的范围筛选，在查询时以 AND 方式并入 / レンダリング時のスコープフィルター。クエリ時に AND で結合されます / Filtro de ámbito en tiempo de renderizado, combinado con AND en el momento de la consulta. ⚠️ #36447 reworded this `en` source into business terms (from "Render-time scope filter, ANDed at query time"); #36836 re-translated all three values from the new English (zh-CN copied from the console overlay, which already carried it). The new sentence names no machine token, so the renderings carry no `AND` either — asserted below.',
   },
 ];
 
@@ -713,10 +720,14 @@ describe('#19403 round 9 — the semantic layer, asserted AT THE SCHEMA', () => 
 });
 
 describe('#19403 round 9 — machine tokens, and a guard that can say NO', () => {
-  it('`AND` is still verbatim in every locale, and in the twin it was copied from', () => {
+  it('`AND` left the business wording with its English, and stays verbatim in the twin it was copied from', () => {
+    // #36836 re-translated the runtimeFilter hint from the business English,
+    // which names no machine token — so no locale may carry one either. The
+    // dataset filter twin still spells the operator, verbatim, in every locale.
     const help = DECISIONS.find((d) => d.path === 'runtimeFilter' && d.prop === 'helpText')!;
+    expect(carriesToken(help.en, 'AND'), 'the en source carries AND again — re-judge the row').toBe(false);
     for (const [locale, forms] of TRANSLATED_LOCALES) {
-      expect(carriesToken(String(catalogLeaf(forms, help)), 'AND'), `${locale} dropped the AND token`).toBe(true);
+      expect(carriesToken(String(catalogLeaf(forms, help)), 'AND'), `${locale} still carries the AND token`).toBe(false);
       const twin = String(forms.dataset?.fields?.filter?.helpText);
       expect(twin.length, `${locale} dataset.fields.filter.helpText is missing`).toBeGreaterThan(0);
       expect(carriesToken(twin, 'AND'), `${locale} the twin this clause was copied from dropped AND`).toBe(true);
@@ -791,57 +802,39 @@ describe('#19403 round 9 — one schema key, one rendering', () => {
     }
   });
 
-  it('the authored vocabulary the other five rows were derived from is still there', () => {
+  it('the panel speaks one business vocabulary — the heading and its twins name the data source once', () => {
     // Round 5's discipline, from the other side: a row that names a twin has to
-    // be able to point at it.
+    // be able to point at it. #36836 moved the report panel off the semantic
+    // layer's words (数据集 / 度量 / 维度 and their ja/es twins) onto the
+    // business wording the English already reads: the heading's "Dataset" half
+    // now renders the word report.fields.dataset.label renders, and the
+    // description says nothing of measures or dimensions any more.
     const en = enMetadataForms as Record<string, any>;
-    // #36838 renamed the report row's English to "Data Source", the blocks
-    // grid's term; its translated values (asserted below) did not move. The
-    // English word "Dataset" this heading was rendered from still has an
-    // authored home with the SAME three renderings: the metadata type's own
-    // label, asserted below as well.
     expect(en.report?.fields?.dataset?.label).toBe('Data Source');
-    expect(en.dataset?.label).toBe('Dataset');
-    expect(en.dataset?.sections?.measures?.label).toBe('Measures');
-    expect(en.dataset?.sections?.dimensions?.label).toBe('Dimensions');
-    expect(String(en.dataset?.fields?.filter?.helpText)).toContain('ANDed into every query');
-    const expected: Record<
-      string,
-      { dataset: string; measures: string; dimensions: string; verb: string; inProse: readonly [string, string] }
-    > = {
-      'zh-CN': { dataset: '数据集', measures: '度量', dimensions: '维度', verb: '来自', inProse: ['度量', '维度'] },
-      'ja-JP': {
-        dataset: 'データセット',
-        measures: 'メジャー',
-        dimensions: 'ディメンション',
-        verb: '取得',
-        inProse: ['メジャー', 'ディメンション'],
-      },
-      'es-ES': {
-        dataset: 'Conjunto de datos',
-        measures: 'Medidas',
-        dimensions: 'Dimensiones',
-        verb: 'provienen',
-        // The heading is capitalised; running prose lower-cases it.
-        inProse: ['medidas', 'dimensiones'],
-      },
+    expect(en.report?.fields?.['blocks.dataset']?.label).toBe('Data Source');
+    const expected: Record<string, { source: string; dimensionsWord: string }> = {
+      'zh-CN': { source: '数据来源', dimensionsWord: '维度' },
+      'ja-JP': { source: 'データソース', dimensionsWord: 'ディメンション' },
+      'es-ES': { source: 'Fuente de datos', dimensionsWord: 'dimensiones' },
     };
+    const heading = DECISIONS.find((d) => d.kind === 'section' && d.prop === 'label')!;
     const description = DECISIONS.find((d) => d.kind === 'section' && d.prop === 'description')!;
     for (const [locale, forms] of TRANSLATED_LOCALES) {
       const want = expected[locale];
-      expect(String(forms.report?.fields?.dataset?.label), `${locale} the Dataset twin moved`).toBe(want.dataset);
-      expect(String(forms.dataset?.label), `${locale} the dataset type label no longer reads the Dataset twin`).toBe(want.dataset);
-      expect(String(forms.dataset?.sections?.measures?.label), `${locale} the Measures twin moved`).toBe(want.measures);
-      expect(String(forms.dataset?.sections?.dimensions?.label), `${locale} the Dimensions twin moved`).toBe(
-        want.dimensions,
+      expect(String(forms.report?.fields?.dataset?.label), `${locale} the Data Source twin moved`).toBe(want.source);
+      expect(String(forms.report?.fields?.['blocks.dataset']?.label), `${locale} the blocks twin diverged`).toBe(
+        want.source,
       );
-      // The VERB is copied from this panel's own dataset helpText, not chosen.
-      const verbTwin = String(forms.report?.fields?.dataset?.helpText);
-      expect(verbTwin, `${locale} the verb twin no longer carries ${want.verb}`).toContain(want.verb);
-      const rendered = String(catalogLeaf(forms, description));
-      expect(rendered, `${locale} the description dropped the verb it copied`).toContain(want.verb);
-      expect(rendered, `${locale} the description dropped the measures word`).toContain(want.inProse[0]);
-      expect(rendered, `${locale} the description dropped the dimensions word`).toContain(want.inProse[1]);
+      expect(
+        String(catalogLeaf(forms, heading)).toLowerCase(),
+        `${locale} the heading no longer names the data source its field names`,
+      ).toContain(want.source.toLowerCase());
+      // Negative control: the old semantic-layer word is gone from the
+      // description, so the old sentence cannot quietly come back.
+      expect(
+        String(catalogLeaf(forms, description)),
+        `${locale} the description speaks of dimensions again`,
+      ).not.toContain(want.dimensionsWord);
     }
   });
 });
