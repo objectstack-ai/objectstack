@@ -40,7 +40,7 @@ Open the file for what you are writing before you write it.
 
 | Authoring | Open first |
 |:--|:--|
-| A flow's `type` and variables, control-flow nodes, an installed package's flow, and the rest of each section below | [examples-flows.md](./references/examples-flows.md) |
+| Each flow type's use, control-flow nodes, an installed package's flow, and the rest of each section below | [examples-flows.md](./references/examples-flows.md) |
 | Triggers (record change, schedule, date sweep, inbound webhook), `requires` capabilities | [Triggers](./references/examples-flows.md#triggers--event-driven-automation) |
 | Routing a new record to a queue or a person | [Assignment rules](./references/examples-flows.md#assignment-rules) |
 | An approval, a send-back, an escalation, a state machine | [state-machines-and-approvals.md](./references/state-machines-and-approvals.md) — its state-introspection route is `GET /api/v1/meta/object/:name/state/:field?from=:state` |
@@ -48,10 +48,14 @@ Open the file for what you are writing before you write it.
 
 ## Flows
 
-**A flow's `type`**: `autolaunched` (no user interaction: started by events,
-APIs or other flows), `screen`, `record_change`, `api` (inbound webhook), or
-`type: 'schedule'`: a cron / interval cadence on the **start node's
-`config.schedule`**, or a per-record date sweep (`config.timeRelative`).
+**In a project a flow is `defineFlow({ … })` in a `*.flow.ts`**; a JSON block
+is that literal. Its `type`: `autolaunched` (no user interaction: started by
+events, APIs or other flows), `screen`, `record_change`, `api` (inbound
+webhook), or `type: 'schedule'`: a cron / interval cadence on the **start
+node's `config.schedule`**, or a per-record date sweep (`config.timeRelative`).
+
+`variables` is an **array**; a variable has no `label`: `variables: [{ name: 'case_id',
+type: 'text', isInput: true }, { name: 'approval_result', type: 'boolean', isOutput: true }]`.
 
 **A trigger is the start node's `config`**; there is no top-level `trigger`,
 `event` or `schedule` key. A record change:
@@ -137,7 +141,7 @@ fan-out.
 ### Filter operands (`config.filter`)
 
 Each operand is a value slot, evaluated before the query; a whole-string query
-placeholder (`{today}`) passes through verbatim. **An
+placeholder (`{current_user_id}`) passes through verbatim. **An
 operand that evaluates to `null` refuses the node** (a dropped condition
 widens a query). Route around the node with a `decision`; to match an empty
 field, write the literal `null`. A computed operand is a value, never a query
@@ -153,9 +157,9 @@ Most are caught by `objectstack build`:
    literal text it spells, and a `{…}` token is **refused** — at
    `objectstack validate` (`expression-invalid`), `registerFlow` and the
    executor — naming its CEL spelling. Compute with
-   `{ dialect: 'cel', source: '…' }` (`'{record.owner}'` →
-   `source: 'has(record.owner) ? record.owner : null'`; the run user is
-   `current_user.id`). Text slots (notify `title` / `message`, `http` `url`)
+   `{ dialect: 'cel', source: '…' }`: a field that may be empty is
+   `source: 'has(record.owner) ? record.owner : null'`, the run user
+   `current_user.id`. Text slots (notify `title` / `message`, `http` `url`)
    render `{{ }}` holes.
 2. **`create_record`'s `outputVariable` holds the created RECORD, not its id.**
    ✅ `source: 'newRec.id'`
@@ -197,7 +201,7 @@ counter field:
 
 It routes each inserted row whose `owner_id` and `queue` are both still empty,
 once, never on update. An approval for the same people is an `approval` node
-with a `queue` approver.
+with `approvers: [{ type: 'queue', value: 'crm_support_leads' }]`.
 
 ## Integrations are declared, not coded
 

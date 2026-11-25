@@ -274,7 +274,8 @@ The `format` is literal text interleaved with `{...}` tokens:
 Beyond `SKILL.md` § Field Type Selection (`secret` is encrypted at rest per
 ADR-0100):
 
-- A yes/no flag is any `is_*`, `has_*`, "done?" or "active?". An unchecked box is
+- A yes/no flag, `{ type: 'boolean', defaultValue: false }`, is any `is_*`,
+  `has_*`, "done?" or "active?". An unchecked box is
   a value. A box that must be checked (terms, consent) is the rule
   `{ name: 'terms', type: 'script',
   condition: { dialect: 'cel', source: 'record.accepted != true' }, message: 'Accept the terms.' }`.

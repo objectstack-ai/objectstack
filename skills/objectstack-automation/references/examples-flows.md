@@ -88,11 +88,6 @@ A recipient string, written or evaluated, may be an audience selector:
 - `owner_of:OBJECT:ID` — that record's owner; a computed id: `source: "'owner_of:crm_case:' + record.case_id"`.
 - `org:members` — every member of the run's organization, else that of the record the notification is about, else nobody (`single` posture: a `schedule` flow declaring no `organization`, no record). Any other `org:` value reaches nobody too. Each warns in the server log only; the node succeeds.
 
-## Flow Variables
-
-`variables` is an **array**; a variable has no `label`: `variables: [{ name: 'case_id',
-type: 'text', isInput: true }, { name: 'approval_result', type: 'boolean', isOutput: true }]`.
-
 ## Failure routing & `runAs` — the rest
 
 > **A `fault` edge**: `objectstack validate` reports an `error`-labelled
@@ -164,7 +159,7 @@ type: 'text', isInput: true }, { name: 'approval_result', type: 'boolean', isOut
    `subflow` / `map`'s, `inputs.*` `script`'s, `collection` `loop` / `map`'s,
    `filter` a CRUD node's. The spellings a refused `{…}` token is given:
    - CEL refuses an absent key where the template wrote nothing, so nothing /
-     `null` / a default is now YOUR call; `'{record.tags.0}'` → `'record.tags[0]'`;
+     `null` / a default is now YOUR call; an indexed path is `'record.tags[0]'`;
      a deep path guards each step: `has(vars.source) && has(vars.source.id) ? vars.source.id : null`
    - run user: `{$User.Id}` → `current_user.id`; a flow that can run without a
      user guards it, `current_user != null ? current_user.id : null`.
