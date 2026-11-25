@@ -2443,6 +2443,14 @@ const de = {
       changesDrafted: "Als Entwurf gespeichert",
       changesFailed: "Nicht angewendet",
       discussing: "Angezeigt: {{target}}",
+      focus: {
+        pin: "Weiter zu diesem Datensatz fragen",
+        pinned: "Fragen zu: {{target}}",
+        remove: "Nicht mehr zu diesem Datensatz fragen",
+        switchPrompt: "Stattdessen zu „{{target}}“ fragen?",
+        switchAccept: "Wechseln",
+        switchDecline: "Beibehalten",
+      },
       changeVerb: {
         createObject: "Objekt erstellen",
         addField: "Feld hinzufügen",

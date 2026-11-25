@@ -2510,6 +2510,14 @@ const pt = {
       changesDrafted: "Salvo como rascunho",
       changesFailed: "Não aplicado",
       discussing: "Vendo: {{target}}",
+      focus: {
+        pin: "Continuar perguntando sobre este registro",
+        pinned: "Perguntando sobre: {{target}}",
+        remove: "Parar de perguntar sobre este registro",
+        switchPrompt: "Perguntar sobre \"{{target}}\" em vez disso?",
+        switchAccept: "Trocar",
+        switchDecline: "Manter",
+      },
       changeVerb: {
         createObject: "Criar objeto",
         addField: "Adicionar campo",

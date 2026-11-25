@@ -32,6 +32,7 @@ const result = AiAgentCapabilitiesSchema.parse(data);
 | **canvas** | `boolean` | ✅ | Drives the Live Canvas split view (ADR-0037) |
 | **debug** | `boolean` | ✅ | Exposes the build-doctor debug drawer |
 | **resume** | `boolean` | ✅ | Turns resume durable multi-step runs (ADR-0013) |
+| **focus** | `boolean` | optional | Honours a conversation focus: the chat request's `context.focus`, the record the user pinned the conversation to (`ToolExecutionContext.focus`). A client draws the pin and sends the key only when this is true; absent reads as false. |
 
 
 ---
@@ -66,7 +67,7 @@ const result = AiAgentCapabilitiesSchema.parse(data);
 | **name** | `string` | ✅ | Agent name — the `:agentName` path segment |
 | **label** | `string` | ✅ | Display label |
 | **role** | `string` | ✅ | Agent role |
-| **capabilities** | `{ authoring: boolean; canvas: boolean; debug: boolean; resume: boolean }` | ✅ | Capability set implied by the agent surface |
+| **capabilities** | `{ authoring: boolean; canvas: boolean; debug: boolean; resume: boolean; … }` | ✅ | Capability set implied by the agent surface |
 
 ### Nested Shape: `AiAgentSummary.capabilities`
 
@@ -76,6 +77,7 @@ const result = AiAgentCapabilitiesSchema.parse(data);
 | **canvas** | `boolean` | ✅ | Drives the Live Canvas split view (ADR-0037) |
 | **debug** | `boolean` | ✅ | Exposes the build-doctor debug drawer |
 | **resume** | `boolean` | ✅ | Turns resume durable multi-step runs (ADR-0013) |
+| **focus** | `boolean` | optional | Honours a conversation focus: the chat request's `context.focus`, the record the user pinned the conversation to (`ToolExecutionContext.focus`). A client draws the pin and sends the key only when this is true; absent reads as false. |
 
 
 ---
@@ -95,7 +97,7 @@ const result = AiAgentCapabilitiesSchema.parse(data);
 | **name** | `string` | ✅ | Agent name — the `:agentName` path segment |
 | **label** | `string` | ✅ | Display label |
 | **role** | `string` | ✅ | Agent role |
-| **capabilities** | `{ authoring: boolean; canvas: boolean; debug: boolean; resume: boolean }` | ✅ | Capability set implied by the agent surface |
+| **capabilities** | `{ authoring: boolean; canvas: boolean; debug: boolean; resume: boolean; … }` | ✅ | Capability set implied by the agent surface |
 
 
 ---
