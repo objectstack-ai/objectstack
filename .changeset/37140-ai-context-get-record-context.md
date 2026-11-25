@@ -17,7 +17,7 @@ feat(ai): `ai_context` context packs and the `get_record_context` tool over MCP
 
 Clause-②: yes
 Metadata-protocol: added
-Skills-docs: follow-up owed #37177 — skills/objectstack-platform/SKILL.md, skills/objectstack-ai/ (how to author a context pack; this change only names `aiContexts` in the top-level key list, which check:skill-top-level-keys requires)
+Skills-docs: follow-up #37177 — skills/objectstack-platform/SKILL.md, skills/objectstack-ai/ (how to author a context pack; this change only names `aiContexts` in the top-level key list, which check:skill-top-level-keys requires)
 
 ADR-0160 row 5 (#37140).
 
