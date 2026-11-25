@@ -17,9 +17,11 @@
  *
  * It holds the changes made under it, and nothing else. Each change is staged
  * under a key by the surface that makes it ({@link useDesignModeChange}): the
- * menu editor, the page header's pinned actions. A staged change carries its
- * own `commit`, the write that makes it real, so the mode needs to know
- * nothing about what a change is:
+ * menu editor, the page header's pinned actions, a record page's tabs (its
+ * tab row is their editor while the mode is on, objectstack#36737, as Twenty
+ * customizes record page layouts under its one layout bar). A staged change
+ * carries its own `commit`, the write that makes it real, so the mode needs
+ * to know nothing about what a change is:
  *
  * - 「Save」 commits every staged change, in the order they were first
  *   staged, then leaves the mode. A commit that fails stops the save there:
@@ -58,6 +60,11 @@
  * - while one of them is open it holds the mode out
  *   ({@link useHoldDesignModeOut}), and entering refuses, saying to save or
  *   cancel those changes first.
+ *
+ * A list's view actions are neither the mode's nor excluded by it: a view
+ * saves on its own, so its 「Reset / Update view」 stay live under the mode's
+ * bar, and name the view, not the page (objectstack#36737, as Twenty's view
+ * bar does).
  *
  * Who may enter is the header button's gate (`useAppStudioEntry`, a workspace
  * administrator holding `manage_metadata`), read where the button is drawn
