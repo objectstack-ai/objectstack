@@ -3914,7 +3914,7 @@ const zhHant = {
     build: {
       title: '構建應用',
       noCapability: '本系統不提供構建應用功能 — 它需要「管理中繼資料」權限,而你的賬號沒有該權限。',
-      inStudio: '在 Studio 中新建',
+      inStudio: '新建空白應用',
     },
     template: {
       title: '從模板開始',

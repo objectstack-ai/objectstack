@@ -1,11 +1,12 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * objectstack#36748 — the Studio landing's 「新建自己的应用」 ends with an app.
+ * objectstack#36748 — `PackageFormDialog` handed a `newApp` step
+ * (`newAppStep`, `studio-design/newAppDoor.ts`) ends with an app.
  *
- *  1. The card opens ONE dialog titled 「新建应用」/"New app", worded for an
- *     app: a no-code author reads 「应用」, never 「软件包」, on this door
- *     (the maintainer's ruling).
+ *  1. The dialog is titled 「新建应用」/"New app" and worded for an app: a
+ *     no-code author reads 「应用」, never 「软件包」, on this door (the
+ *     maintainer's ruling).
  *  2. One confirm creates the package AND its app: the package `POST`, the
  *     app's draft under the first-write pin, then that one app's publish
  *     (objectstack#36511: a human-created item is live at once). The author
@@ -13,7 +14,14 @@
  *     「‹ Back to app」 opens it.
  *  3. A taken app name refuses the whole confirm and writes nothing.
  *
- * The REAL `BuilderLanding`, `PackageFormDialog`, metadata client and
+ * The door's first host, the Studio home, was removed (objectstack#36908);
+ * the dialog's `newApp` branch and `newAppDoor.ts` stay for the one-step
+ * 「新建应用」 of the create-package dialog (objectstack#37134). These cases
+ * moved off the home onto the dialog itself, mounted as that home mounted it:
+ * create mode, `newApp={newAppStep(client, locale)}`, and Studio on the new
+ * package after save.
+ *
+ * The REAL `PackageFormDialog`, `newAppStep`, metadata client and
  * `StudioDesignSurface` over a fetch stub that keeps the server's state:
  * packages, published apps and app drafts.
  */
@@ -22,16 +30,18 @@ import '@testing-library/jest-dom/vitest';
 import * as React from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
+import { MemoryRouter, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
 // The surface's reach loads `@objectstack/lint` lazily; pay that load during
 // collection, not inside a case's clocked window (`check:test-source-alias`).
 import '@objectstack/lint';
+// It also reaches `import('@object-ui/plugin-detail')` (the command palette's lazy
+// detail surfaces): paid here, at collection, never inside a test's clock.
 import '@object-ui/plugin-detail';
 import { loadStudioCatalogue } from '@object-ui/i18n/namespaces/studio';
 await loadStudioCatalogue('zh');
 
 let localeFixture: 'en-US' | 'zh-CN' = 'en-US';
-vi.mock('../metadata-admin/i18n', async (importOriginal) => ({
+vi.mock('./i18n', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   useMetadataLocale: () => localeFixture,
 }));
@@ -44,19 +54,17 @@ vi.mock('sonner', () => ({
   Toaster: () => null,
 }));
 vi.mock('../../components/SuggestedBindingsPanel', () => ({ SuggestedBindingsPanel: () => null }));
-vi.mock('../metadata-admin/AccessExplainPanel', () => ({ AccessExplainPanel: () => null }));
-vi.mock('./StudioAiCopilot', () => ({ StudioChatDock: () => null }));
+vi.mock('./AccessExplainPanel', () => ({ AccessExplainPanel: () => null }));
+vi.mock('../studio-design/StudioAiCopilot', () => ({ StudioChatDock: () => null }));
 vi.mock('../../preview/DraftChangesPanel', () => ({ DraftChangesPanel: () => null }));
-// The package-less flow count the landing draws is not under test here.
-vi.mock('./packageSurfaces', async (importOriginal) => {
-  const mod = await importOriginal<typeof import('./packageSurfaces')>();
-  return { ...mod, loadPackageLessSurfaces: vi.fn(async () => []) };
-});
 
 import { toast } from 'sonner';
-import { BuilderLanding } from './BuilderLanding';
-import { StudioDesignSurface } from './StudioDesignSurface';
-import { t } from '../metadata-admin/i18n';
+import { PackageFormDialog } from './PackageFormDialog';
+import { useMetadataClient } from './useMetadata';
+import { t, useMetadataLocale } from './i18n';
+import { newAppStep } from '../studio-design/newAppDoor';
+import { studioHomePath } from '../studio-design/studioAddress';
+import { StudioDesignSurface } from '../studio-design/StudioDesignSurface';
 
 window.matchMedia = ((query: string) => ({
   matches: false,
@@ -152,11 +160,34 @@ function RunningApp() {
   return <p data-testid="running-app">{location.pathname}</p>;
 }
 
-function renderLanding() {
+/** The dialog as a host mounts the door: create mode, the app step, and Studio on the new package after save. */
+function NewAppHost() {
+  const navigate = useNavigate();
+  const client = useMetadataClient();
+  const locale = useMetadataLocale();
+  const step = React.useMemo(() => newAppStep(client, locale), [client, locale]);
+  const [open, setOpen] = React.useState(false);
+  return (
+    <>
+      <button type="button" data-testid="open-new-app" onClick={() => setOpen(true)}>
+        new app
+      </button>
+      <PackageFormDialog
+        mode="create"
+        open={open}
+        onOpenChange={setOpen}
+        newApp={step}
+        onSaved={(r) => navigate(studioHomePath(r.id))}
+      />
+    </>
+  );
+}
+
+function renderDoor() {
   return render(
-    <MemoryRouter initialEntries={['/studio']}>
+    <MemoryRouter initialEntries={['/host']}>
       <Routes>
-        <Route path="/studio" element={<BuilderLanding />} />
+        <Route path="/host" element={<NewAppHost />} />
         <Route path="/studio/:packageId/metadata/*" element={<StudioDesignSurface area="metadata" />} />
         <Route path="/studio/:packageId/:tab" element={<StudioDesignSurface />} />
         <Route path="/apps/*" element={<RunningApp />} />
@@ -166,7 +197,7 @@ function renderLanding() {
 }
 
 async function openNewAppDialog(): Promise<HTMLElement> {
-  fireEvent.click(await screen.findByTestId('studio-landing-new-app'));
+  fireEvent.click(await screen.findByTestId('open-new-app'));
   return screen.findByRole('dialog');
 }
 
@@ -175,10 +206,10 @@ const nameInput = (dialog: HTMLElement) =>
 
 const describeWrite = (w: Write) => `${w.method} ${w.path}`;
 
-describe('「新建自己的应用」 opens one dialog worded for an app (objectstack#36748)', () => {
+describe('PackageFormDialog with a new-app step: one dialog worded for an app (objectstack#36748)', () => {
   it('titled 「新建应用」, its submit 「创建应用」, and no 「软件包」 anywhere on its face', async () => {
     localeFixture = 'zh-CN';
-    renderLanding();
+    renderDoor();
     const dialog = await openNewAppDialog();
     expect(within(dialog).getByRole('heading', { name: '新建应用' })).toBeInTheDocument();
     fireEvent.change(nameInput(dialog), { target: { value: 'Visits' } });
@@ -190,9 +221,9 @@ describe('「新建自己的应用」 opens one dialog worded for an app (object
   });
 });
 
-describe('one confirm creates the package and its app, and the app opens (objectstack#36748)', () => {
+describe('PackageFormDialog with a new-app step: one confirm creates the package and its app, and the app opens (objectstack#36748)', () => {
   it('package, app draft, app publish — then the header names the app and 「‹ Back to app」 opens it', async () => {
-    renderLanding();
+    renderDoor();
     const dialog = await openNewAppDialog();
     fireEvent.change(nameInput(dialog), { target: { value: 'Visits' } });
     await waitFor(() => expect(within(dialog).getByTestId('package-form-submit')).toBeEnabled());
@@ -231,7 +262,7 @@ describe('one confirm creates the package and its app, and the app opens (object
   });
 
   it('an app name already taken refuses the confirm and writes nothing', async () => {
-    renderLanding();
+    renderDoor();
     const dialog = await openNewAppDialog();
     fireEvent.change(nameInput(dialog), { target: { value: 'Visits' } });
     await waitFor(() => expect(within(dialog).getByTestId('package-form-submit')).toBeEnabled());

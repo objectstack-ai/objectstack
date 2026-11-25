@@ -23,11 +23,10 @@
 //
 // The Studio every boot serves is the console's own, at `/_console/studio`:
 // the `@objectstack/studio` app this package declares (`studio.app.ts`) is not
-// default-loaded (`apps/studio/src/index.ts`). Its served door to the full list
-// is the console's, not a nav item: the Studio landing's "All packages" link and
-// each package card's Manage, which opens the detail sheet with every action
-// (#35196). The console pins that door
-// (`ui/packages/app-shell/src/views/studio-design/BuilderLanding.packagesDoor-35196.test.tsx`).
+// default-loaded (`apps/studio/src/index.ts`). The console's Studio home, whose
+// "All packages" link and per-card Manage were the full list's served door
+// (#35196), was removed (#36908); that door moves with #37139, and until then
+// the development face is reached by its address.
 //
 // This file is the platform-objects half: what THIS package ships for each app.
 // Every direction is pinned, because each regression is silent at runtime — a

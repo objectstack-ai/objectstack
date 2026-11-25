@@ -3132,8 +3132,7 @@ const en = {
       //
       // NOT the same thing as the platform's manual automation surfaces, which
       // are real and stay as they are: `home.build.subtitle` (that card opens
-      // Studio, which does author flows), `engine.studio.landing.description`,
-      // `packagedAutomation.*` and the
+      // Studio, which does author flows), `packagedAutomation.*` and the
       // marketplace `automation` category. The boundary is v1 AI AUTHORING, not
       // the word "automation".
       //
@@ -4539,7 +4538,7 @@ const en = {
     build: {
       title: 'Build an app',
       noCapability: 'Building apps isn\'t available in this system — it requires the “Manage Metadata” permission, which your account doesn\'t have.',
-      inStudio: 'New in Studio',
+      inStudio: 'New blank app',
     },
     template: {
       title: 'Start with a template',
