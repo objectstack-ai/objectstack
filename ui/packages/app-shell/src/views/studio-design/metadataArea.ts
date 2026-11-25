@@ -45,7 +45,7 @@ import {
   STUDIO_METADATA_AREA,
   STUDIO_ORG_SCOPE_SEGMENT,
   STUDIO_ORG_SCOPE_TYPE,
-  STUDIO_ROOT_PATH,
+  studioAddressParts,
   studioMetadataAreaAddress,
   studioMetadataAreaRoot,
   studioMetadataItemAddress,
@@ -319,18 +319,7 @@ function orgScopeAreaRedirect(segment: string, rest: string, params: URLSearchPa
  * Idempotent: a settled address settles to itself.
  */
 export function settledAreaAddress(address: string): string {
-  const queryAt = address.indexOf('?');
-  const path = queryAt >= 0 ? address.slice(0, queryAt) : address;
-  const search = queryAt >= 0 ? address.slice(queryAt) : '';
-  const prefix = `${STUDIO_ROOT_PATH}/`;
-  if (!path.startsWith(prefix)) return address;
-  const [rawSegment = '', section, ...rest] = path.slice(prefix.length).split('/');
-  if (!rawSegment || section !== STUDIO_METADATA_AREA) return address;
-  let segment: string;
-  try {
-    segment = decodeURIComponent(rawSegment);
-  } catch {
-    return address;
-  }
-  return areaLocationRedirect(segment, rest.join('/'), search) ?? address;
+  const parts = studioAddressParts(address);
+  if (!parts || parts.section !== STUDIO_METADATA_AREA) return address;
+  return areaLocationRedirect(parts.segment, parts.rest, parts.search) ?? address;
 }

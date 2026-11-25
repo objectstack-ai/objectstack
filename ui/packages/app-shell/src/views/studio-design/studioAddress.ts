@@ -151,6 +151,40 @@ export function studioPath(
   return path;
 }
 
+/** The parts of a Studio address, as {@link studioPath} composes them. */
+export interface StudioAddressParts {
+  /** The scope segment, decoded: a package id, `~org`, `~all`. */
+  segment: string;
+  /** The section after it (a pillar segment, `metadata`, `owd`), or `null` when the address ends at the scope. */
+  section: string | null;
+  /** The path below the section, in its URL form (`object/account`), `''` when there is none. */
+  rest: string;
+  /** The query, `?` included, or `''`. */
+  search: string;
+}
+
+/**
+ * objectstack#36909 — a Studio address read back into its parts, the inverse
+ * of {@link studioPath} for an address with a scope segment; `null` for any
+ * other address, or one whose segment does not decode. The fragment is not
+ * read.
+ */
+export function studioAddressParts(address: string): StudioAddressParts | null {
+  const hashAt = address.indexOf('#');
+  const beforeHash = hashAt >= 0 ? address.slice(0, hashAt) : address;
+  const queryAt = beforeHash.indexOf('?');
+  const path = queryAt >= 0 ? beforeHash.slice(0, queryAt) : beforeHash;
+  const search = queryAt >= 0 ? beforeHash.slice(queryAt) : '';
+  if (!path.startsWith(STUDIO_ROOT_PATH) || path.charAt(STUDIO_ROOT_PATH.length) !== '/') return null;
+  const [rawSegment = '', section, ...rest] = path.slice(STUDIO_ROOT_PATH.length + 1).split('/');
+  if (!rawSegment) return null;
+  try {
+    return { segment: decodeURIComponent(rawSegment), section: section ?? null, rest: rest.join('/'), search };
+  } catch {
+    return null;
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Landing, package, pillar
 // ---------------------------------------------------------------------------

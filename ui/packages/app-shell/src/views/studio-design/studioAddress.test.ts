@@ -26,6 +26,7 @@ import {
   studioMetadataTypePath,
   studioOwdOverviewPath,
   studioPackagePath,
+  studioAddressParts,
   studioPath,
   studioPillarPath,
 } from './studioAddress.js';
@@ -127,6 +128,30 @@ describe("today's addresses, byte for byte", () => {
     expect(studioOrgScopePath()).toBe('/studio/~org/metadata/flow?source=runtime');
     expect(studioOrgScopePath({ type: 'flow', name: 'a:b' })).toBe('/studio/~org/metadata/flow/a%3Ab?source=runtime');
     expect(studioMetadataItemPath('crm', { type: 'object', name: 'account' })).toBe('/studio/crm/metadata/object/account');
+  });
+});
+
+describe('studioAddressParts — an address read back into its parts (objectstack#36909)', () => {
+  it('inverts the builder for an address with a scope segment', () => {
+    expect(studioAddressParts(studioMetadataItemAddress('a b', 'flow', 'f', { query: 'package=x' }))).toEqual({
+      segment: 'a b',
+      section: 'metadata',
+      rest: 'flow/f',
+      search: '?package=x',
+    });
+    expect(studioAddressParts(studioPackagePath('crm'))).toEqual({ segment: 'crm', section: null, rest: '', search: '' });
+    expect(studioAddressParts(studioPillarPath('~org', 'automations', { hash: '#x' }))).toEqual({
+      segment: '~org',
+      section: 'automations',
+      rest: '',
+      search: '',
+    });
+  });
+
+  it('answers null for anything else', () => {
+    for (const address of [studioLandingPath(), '/studio/', '/studios/crm', '/apps/crm/metadata', '/studio/%E0%A4%A/metadata']) {
+      expect(studioAddressParts(address), address).toBeNull();
+    }
   });
 });
 
