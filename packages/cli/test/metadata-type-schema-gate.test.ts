@@ -108,6 +108,8 @@ const GATED_AT: Readonly<Record<string, string>> = {
   agent: 'agents',
   tool: 'tools',
   skill: 'skills',
+  // [ADR-0160 D1] `ai_context`: CLOSED from its first day, authored at `aiContexts:`.
+  ai_context: 'aiContexts',
   // [#5384] `api` GRADUATED here from NOT_YET_CLOSED — the deliberate ratchet
   // step this file's own note asked for. `ApiEndpointSchema` is `strictObject`
   // as of #5384, so the stack's `apis:` array and the registry schema now reject

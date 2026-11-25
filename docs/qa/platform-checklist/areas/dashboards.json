@@ -198,7 +198,7 @@
       "title": "Report drill-through scopes the drilled list to the exact bucket range",
       "since": "v16",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P2",
       "surface": "browser",
       "personas": [
@@ -218,7 +218,7 @@
         "capture the drill request for the month click, including its date bounds",
         "count the rows in each drilled list (page through if paginated) and compare to the bucket's aggregate",
         "click a cell in showcase_status_priority_matrix (status × priority) and verify the drilled list is scoped by BOTH dimensions",
-        "screenshot the drill drawer each time (drill opens in-place as a drawer by default — chart.zod.ts drill target enum drawer|dialog|navigate)"
+        "screenshot the drill dialog each time (on a desktop a report or dataset-widget drill opens a centred, non-modal dialog over the standard list, its conditions as labelled chips — objectstack#36256, objectstack#36461; ReportView.tsx and DatasetWidget.tsx pass target \"dialog\", whatever chart.zod.ts's drill target default reads)"
       ],
       "acceptance": [
         {
@@ -246,10 +246,10 @@
           "evidence": "the two counts"
         },
         {
-          "clause": "the drilled list opens in the drawer (default drill target) with the clicked category as its heading context",
+          "clause": "the drilled list opens in a centred dialog (not a side drawer; nothing behind it dimmed or blurred) with the clicked category as its heading context and the drill's conditions as labelled filter chips on the list's toolbar (objectstack#36256, objectstack#36461)",
           "oracle": "screenshot",
-          "verify": "drawer screenshot shows the drilled records and a heading matching the clicked bucket's label",
-          "evidence": "drawer screenshot"
+          "verify": "at 1280×800 the dialog screenshot shows the drilled records, a heading matching the clicked bucket's label and a chip naming the clicked bucket's condition; the dialog is the centred one (ui/packages/plugin-dashboard/src/DrillDownDrawer.tsx's target 'dialog' branch, data-testid drill-down-dialog), not a full-height side sheet",
+          "evidence": "dialog screenshot"
         }
       ],
       "negative": [
@@ -262,7 +262,7 @@
       "source": [
         "#3358 §3",
         "#3415",
-        "packages/spec/src/ui/chart.zod.ts (drill semantics: derived filter from clicked category, target enum, drawer default)",
+        "packages/spec/src/ui/chart.zod.ts (drill semantics: derived filter from clicked category, target enum; its drawer default is not what the report and dataset-widget drills open, see objectstack#36256)",
         "packages/spec/src/ui/dashboard.zod.ts (ADR-0021 dataset-bound drill derives target+filter from the dataset row)",
         "examples/app-showcase/src/ui/reports/index.ts (drilldown: true on all four reports)"
       ],
@@ -278,6 +278,12 @@
           "date": "2026-08-07",
           "change": "expanded to deep-test contract: concrete steps, multi-clause acceptance, negatives, variants",
           "ref": "claude/platform-test-checklist-ocwugl"
+        },
+        {
+          "revision": 3,
+          "date": "2026-11-24",
+          "change": "steps[6], the clause acceptance[4] and the chart.zod.ts source line follow #36256 and #36461: on a desktop a report or dataset-widget drill opens a centred, non-modal dialog over the standard list with the drill's conditions as labelled chips, not the side drawer the clause read (milestone acceptance #37022 found the dialog on main 305fe60e; ReportView.tsx and DatasetWidget.tsx pass target 'dialog', DrillDownDrawer.tsx draws it). The source line no longer names chart.zod.ts's drawer default as what this drill opens",
+          "ref": "#37035"
         }
       ]
     },
@@ -1382,10 +1388,10 @@
     },
     {
       "id": "dashboards.report-measure-drill-scope",
-      "title": "A report drill lists exactly the records its measure counted: the dataset answer names each measure's drill scope, a derived measure gets none, and the drawer and its Open in list carry the scope with the bucket",
+      "title": "A report drill lists exactly the records its measure counted: the dataset answer names each measure's drill scope, a derived measure gets none, and the drill dialog and its Open in list carry the scope with the bucket",
       "since": "v18.4",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P2",
       "surface": "mixed",
       "personas": [
@@ -1402,8 +1408,8 @@
       "steps": [
         "POST /api/v1/analytics/dataset/query { datasetName: 'showcase_task_metrics', selection: { dimensions: ['status'], measures: ['task_count', 'est_hours', 'done_count', 'done_rate'] } }; read the answer's drillScopes",
         "open the report Hours by Status (Summary) in the console; click the row of a status S that holds a task with no estimate",
-        "read the drawer's record request and count; then GET /api/v1/data/showcase_task with filter status = S, and again with estimate_hours not null",
-        "click the drawer's Open in list; read the URL and the list's count"
+        "read the drill dialog's record request and count; then GET /api/v1/data/showcase_task with filter status = S, and again with estimate_hours not null",
+        "click the drill dialog's Open in list; read the URL and the list's count"
       ],
       "acceptance": [
         {
@@ -1413,20 +1419,20 @@
           "evidence": "the answer body"
         },
         {
-          "clause": "the drawer lists the bucket AND the measure scope, so its count matches the number clicked",
+          "clause": "the drill dialog (the centred dialog over the standard list, objectstack#36256 and objectstack#36461, not the side drawer) lists the bucket AND the measure scope, so its count matches the number clicked",
           "oracle": "network",
-          "verify": "the drawer's record request filters status = S and estimate_hours $null false; its count equals the second read (status S with an estimate set), which is lower than the status-only read (ui/packages/plugin-report/src/measureDrillScope.ts#scopeDrillFilter, ui/packages/plugin-report/src/DatasetReportRenderer.tsx#DatasetReportRenderer)",
-          "evidence": "the drawer request, its count and the two reads"
+          "verify": "the drill dialog's record request filters status = S and estimate_hours $null false; its count equals the second read (status S with an estimate set), which is lower than the status-only read (ui/packages/plugin-report/src/measureDrillScope.ts#scopeDrillFilter, ui/packages/plugin-report/src/DatasetReportRenderer.tsx#DatasetReportRenderer)",
+          "evidence": "the dialog's request, its count and the two reads"
         },
         {
           "clause": "Open in list carries the same scope, because the list route can write it exactly",
           "oracle": "dom",
-          "verify": "the list URL is /apps/<app>/showcase_task/data with filter[status]=S and filter[estimate_hours][null]=false, and the list shows the drawer's count (ui/packages/app-shell/src/views/useOpenRecordList.ts#drillRecordListFilter)",
+          "verify": "the list URL is /apps/<app>/showcase_task/data with filter[status]=S and filter[estimate_hours][null]=false, and the list shows the dialog's count (ui/packages/app-shell/src/views/useOpenRecordList.ts#drillRecordListFilter)",
           "evidence": "the URL and the list count"
         }
       ],
       "negative": [
-        "a drawer or list that shows every task of status S, the estimate-less one included, is a FAIL: it lists a superset of what the measure summed",
+        "a drill dialog or list that shows every task of status S, the estimate-less one included, is a FAIL: it lists a superset of what the measure summed",
         "a drill offered on a derived measure is a FAIL: no single record set is behind its number"
       ],
       "traps": [
@@ -1451,6 +1457,12 @@
           "date": "2026-11-10",
           "change": "initial — the per-measure drill scope on report drills and Open in list (#30651, #30735). Scoped sweep #32270 (epic #32022 M4, the zero-citation close-out), read from source at 60b99f8f; no live run made",
           "ref": "#32270"
+        },
+        {
+          "revision": 2,
+          "date": "2026-11-24",
+          "change": "the title, steps[2] and [3], the clauses acceptance[1] and acceptance[2] and negative[0] follow #36256 and #36461: the report drill opens a centred dialog over the standard list with labelled chips, not the drawer they read (milestone acceptance #37022 on main 305fe60e; ReportView.tsx passes target 'dialog'). What the dialog must list, the bucket AND the measure scope, is unchanged",
+          "ref": "#37035"
         }
       ]
     },

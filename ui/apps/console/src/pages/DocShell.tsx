@@ -8,35 +8,66 @@
 
 import type { ReactNode } from 'react';
 import { useParams } from 'react-router-dom';
+import {
+  SidebarDocsNav,
+  useShellPageActionsSlot,
+  useShellSidebarExpandSlot,
+  useSidebarDocsNavSlot,
+} from '@object-ui/app-shell';
 import { AppDocsBackLink } from './AppDocsBackLink';
+import { AppDocsNav, DocsNavLandmark } from './DocsNav';
 import { useAppDocsBackTo } from './useAppDocsBackTo';
 
 /**
- * The frame of the package-documentation pages (ADR-0046), inside the
- * console's own top bar. It draws no bar of its own (objectstack#35424):
+ * The frame of the package-documentation pages (ADR-0046). It draws no bar of
+ * its own (objectstack#35424):
  *
- * - Under an app (`/apps/:appName/docs/...`, ADR-0048) the app bar above reads
- *   「APP / Documentation」, and the reader names its book and article above
- *   the article. An app's docs routes draw no app menu either, so the bar's
- *   place holds 「← Back to APP」 (`AppDocsBackLink`) on every page but the
- *   reader, which carries it in its docs column and passes `backLink={false}`.
+ * - Under an app (`/apps/:appName/docs/...`, ADR-0048), from 768 px up, the
+ *   page is drawn in the app shell like every other app page
+ *   (objectstack#37150, ruling 7142354097 on objectstack#36107): no top bar,
+ *   the resident sidebar, and the page header's button group and expand
+ *   button, which this frame draws at the page's top. The docs' one
+ *   navigation column (the app's books, 「← Back to APP」 and all
+ *   documentation) is the sidebar's body: the page hands it `nav`, the
+ *   reader's own, else every book of the app (`AppDocsNav`).
+ * - Under an app on a phone the console's app bar is above the page, and the
+ *   page carries 「← Back to APP」 itself: at the top here, on every page but
+ *   the reader, which carries it in its in-page column and passes
+ *   `backLink={false}`.
  * - The portal (`/docs/...`) is drawn in Home's frame, whose bar reads
  *   「PRODUCT / Documentation」 and links to the portal's index (`App.tsx`,
  *   the `docs` variant of `AppHeader`).
  */
 export function DocShell({
   backLink = true,
+  nav,
   children,
 }: {
-  /** Inside an app: draw 「← Back to APP」 above the page. The reader turns it off when its column has it. */
+  /** Without the shell sidebar: draw 「← Back to APP」 above the page. The reader turns it off when its column has it. */
   backLink?: boolean;
+  /** The page's own docs column, for the shell sidebar (the reader's); else every book of the app. */
+  nav?: ReactNode;
   children: ReactNode;
 }) {
   const { appName } = useParams<{ appName?: string }>();
   const backTo = useAppDocsBackTo();
+  const sidebarNav = useSidebarDocsNavSlot() !== null;
+  const renderActions = useShellPageActionsSlot();
+  const renderExpand = useShellSidebarExpandSlot();
   return (
     <div className="min-h-full">
-      {appName && backLink && backTo ? (
+      {sidebarNav ? (
+        <SidebarDocsNav>
+          <DocsNavLandmark>{nav ?? <AppDocsNav />}</DocsNavLandmark>
+        </SidebarDocsNav>
+      ) : null}
+      {renderActions || renderExpand ? (
+        <div className="flex items-center gap-2 px-4 pt-3 sm:px-6" data-testid="docs-page-header">
+          {renderExpand?.()}
+          <div className="ml-auto">{renderActions?.({})}</div>
+        </div>
+      ) : null}
+      {appName && backLink && backTo && !sidebarNav ? (
         <div className="mx-auto flex max-w-3xl px-4 pt-4 sm:px-6" data-testid="docs-back-bar">
           <AppDocsBackLink backTo={backTo} />
         </div>

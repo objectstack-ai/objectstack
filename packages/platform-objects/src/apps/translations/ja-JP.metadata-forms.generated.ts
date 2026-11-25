@@ -3147,5 +3147,8 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "値"
       }
     }
+  },
+  ai_context: {
+    label: "AI コンテキストパック"
   }
 };

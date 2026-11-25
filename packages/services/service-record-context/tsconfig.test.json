@@ -1,0 +1,9 @@
+// The TEST-layer type-check program, copied from `service-knowledge`'s (whose
+// header carries the full reasoning): module semantics and `lib` only, every
+// strictness rule inherited from `tsconfig.json`. No `test-typecheck-debt.json`
+// beside it: its absence is the zero.
+{
+  "extends": ["./tsconfig.json", "../../../tsconfig.test.base.json"],
+  "include": ["src/**/*"],
+  "exclude": ["node_modules", "dist"]
+}
