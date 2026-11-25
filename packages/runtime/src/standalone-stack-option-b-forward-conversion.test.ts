@@ -56,6 +56,10 @@ const dashboard = (name: string, refresh: Record<string, number>) => ({ name, la
 /**
  * The shape `os build` writes for a two-package project: the artifact's own
  * `manifest` is its last package's, every collection sits in a body.
+ *
+ * The boot fixtures pass `'>=18.0.0'`, not `'^19'`: it keeps the floor `'^18'`
+ * read as (18.0.0), which opens the conversion window this file is about, and
+ * admits protocol 19 at the handshake. `'^19'` reads as the floor 19.0.0.
  */
 function optionB(range: string, ordersBody: Bag, coreBody: Bag = {}): Bag {
     return {

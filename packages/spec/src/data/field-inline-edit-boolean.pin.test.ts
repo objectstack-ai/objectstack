@@ -35,7 +35,7 @@ function issues(result: z.ZodSafeParseResult<unknown>): { code: string; path: st
 }
 
 const PRESCRIPTION =
-  /^`field\.inlineEdit: true` and `field\.inlineEdit: false` were removed in @objectstack\/spec 18\.7\.0 \(ADR-0049 enforce-or-remove\) — .*`fieldGroups\[\]\.relatedList`.*Delete the key, or write `'grid'`.*Run `os migrate meta --from 17`/s;
+  /^`field\.inlineEdit: true` and `field\.inlineEdit: false` were removed in @objectstack\/spec 19\.0\.0 \(ADR-0049 enforce-or-remove\) — .*`fieldGroups\[\]\.relatedList`.*Delete the key, or write `'grid'`.*Run `os migrate meta --from 17`/s;
 
 describe('§1 the boolean arm of `inlineEdit` is refused', () => {
   for (const value of [true, false]) {

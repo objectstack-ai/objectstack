@@ -19,8 +19,10 @@
  * lands in a reviewed pull request with full CI rather than in the version pass
  * (ruling record 6049734955, Q1 → B). Protocol 19 is that exception: it moved
  * here while this package was still on its 18.x stable line, beside the v19
- * line's pending `major` (ruling record 7153441862, route A, item 2), and every
- * in-repo manifest that means "the current protocol" declares `'^19'` with it.
+ * line's pending `major` (ruling record 7153441862, route A, item 2). In-repo
+ * manifests that mean "the current protocol" move to `'^19'` with it; the
+ * scaffolder's blank template follows at the version pass, and the published
+ * skills' examples in a change of their own.
  */
 export const PROTOCOL_VERSION = '19.0.0';
 

@@ -17,8 +17,10 @@ export const entry: SemanticMigration = {
     + 'marketplace',
   replacement:
     'Declare the protocol-19 range: `engines: { protocol: \'^19\' }`. `objectstack migrate meta --from 18 '
-    + '--write` rewrites the declared range at the key the handshake reads. Move it together with the '
-    + '`@objectstack/*` versions: an 18.x runtime refuses \'^19\'.',
+    + '--write` rewrites the range of a root `defineStack` manifest, at the key the handshake reads. A '
+    + 'manifest `composeStacks` composes from several packages has no one literal to rewrite: the command '
+    + 'writes nothing there and lists the range for a hand edit, so change it in each package manifest. '
+    + 'Move it together with the `@objectstack/*` versions: an 18.x runtime refuses \'^19\'.',
   reason:
     'PROTOCOL_VERSION moved to 19.0.0, and the load-time handshake (ADR-0087 D1) compares only the major '
     + 'of a manifest\'s declared range with it. A range that admits 18 and not 19 is a major-version break, '
@@ -28,8 +30,10 @@ export const entry: SemanticMigration = {
     + 'statement of the protocol the metadata was written against, so the runtime never rewrites it. ADR-0087.',
   acceptanceCriteria:
     'Grep every manifest the project declares (objectstack.config.ts and each package manifest) for an '
-    + 'engines.protocol range that does not admit 19, and run objectstack migrate meta --from 18 --write, '
-    + 'which rewrites each to \'^19\'. Then objectstack validate passes, the deployment boots without '
+    + 'engines.protocol range that does not admit 19. Run objectstack migrate meta --from 18 --write: it '
+    + 'rewrites a root defineStack manifest\'s range to \'^19\', and for a manifest composed by '
+    + 'composeStacks it writes nothing and lists the range left for a hand edit, so set each package '
+    + 'manifest to \'^19\' yourself. Then objectstack validate passes, the deployment boots without '
     + 'OS_PROTOCOL_INCOMPATIBLE, and every package installs; a manifest already declaring \'^19\' loads '
     + 'exactly as before.',
 };

@@ -3494,7 +3494,7 @@ export function checkListViewTimesheetBinding(
  * migration command — the author deletes the key by hand.
  */
 const VIEW_LIST_COLUMN_STATE_RETIRED =
-  '`listView.columnState` was removed in @objectstack/spec 18.7.0 (ADR-0049 enforce-or-remove) — it was '
+  '`listView.columnState` was removed in @objectstack/spec 19.0.0 (ADR-0049 enforce-or-remove) — it was '
   + 'never a list view key: it held one column order and set of widths the console once stored on a view '
   + 'row, and that layout is no longer applied. Delete the key. To ship a column order, list `columns` in that '
   + 'order (or set `fieldOrder`); to ship a width, set `width` on the column.';
@@ -6389,7 +6389,7 @@ type ViewItemWireArmShape<K extends 'list' | 'form', C extends z.ZodTypeAny> = {
  * the measured incident).
  */
 const VIEW_COLUMN_STATE_RETIRED =
-  '`view.columnState` was removed in @objectstack/spec 18.7.0 (ADR-0049 enforce-or-remove) — it held one '
+  '`view.columnState` was removed in @objectstack/spec 19.0.0 (ADR-0049 enforce-or-remove) — it held one '
   + 'column order and set of widths on a shared view row; nothing writes it any more, and a stored layout is '
   + 'no longer applied, so every reader sees the view\'s own column order and widths. The console keeps '
   + 'column widths in each reader\'s browser and saves a column order into the view itself. '

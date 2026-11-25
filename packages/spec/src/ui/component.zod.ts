@@ -5466,7 +5466,7 @@ export const ObjectGridPropsSchema = lazySchema(() => strictObject({
    * key from authored grids.
    */
   singleClickEdit: retiredKey(
-    '`object-grid` property `singleClickEdit` was removed in @objectstack/spec 18.7.0 (ADR-0049) — '
+    '`object-grid` property `singleClickEdit` was removed in @objectstack/spec 19.0.0 (ADR-0049) — '
     + 'a grid that renders editable now selects a cell on a click and opens its editor on double-click, '
     + 'Enter, F2 or typing, so a single-click entry no longer exists for this key to switch. '
     + 'Delete the key; `editable` (with the viewer\'s write verdict) decides whether the grid edits. '
