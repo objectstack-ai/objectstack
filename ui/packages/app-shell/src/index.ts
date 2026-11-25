@@ -98,10 +98,16 @@ export {
 } from './layout/sidebarFooterSlot.js';
 
 // objectstack#37150 — the shell sidebar's place for an app's docs navigation,
-// drawn by the console's docs pages; and the page header's two shell slots
-// (the top-right button group and the sidebar's expand button), for a docs
-// page, which draws no `ConsolePageHeader`.
-export { SidebarDocsNav, useSidebarDocsNavSlot } from './layout/sidebarDocsNavSlot.js';
+// drawn by the console's docs pages (the provider and the target are the
+// shell's side, mounted by `ConsoleLayout` and `UnifiedSidebar`); and the page
+// header's two shell slots (the top-right button group and the sidebar's
+// expand button), for a docs page, which draws no `ConsolePageHeader`.
+export {
+  SidebarDocsNav,
+  SidebarDocsNavSlotProvider,
+  SidebarDocsNavTarget,
+  useSidebarDocsNavSlot,
+} from './layout/sidebarDocsNavSlot.js';
 export { useShellPageActionsSlot, useShellSidebarExpandSlot } from './layout/shellPageActionsSlot.js';
 
 // Host-app route policy (ADR-0048) — which app's `/apps/<segment>/…` URL a

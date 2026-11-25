@@ -126,6 +126,9 @@ const { ADAPTER, WORLD, GATED_REASON } = vi.hoisted(() => {
   const PLATFORM_CONTENT: Record<string, string> = { setup_overview: 'ADMIN BODY about permission sets' };
   const WORLD = {
     authored: false,
+    // objectstack#37150 — the shell's page-header group is handed in (the
+    // console layout's scope, from 768 px up).
+    shellActions: false,
     conflict: false,
     exact: false,
     platform: false,
@@ -163,6 +166,9 @@ vi.mock('@object-ui/app-shell', async (importOriginal) => ({
   useAdapter: () => ADAPTER,
   // The apps `/meta/app` serves this caller (objectstack#35424); none by default.
   useMetadata: () => ({ apps: WORLD.apps }),
+  // objectstack#37150 — the shell's top-right group, where the layout hands
+  // it in; outside the shell the real slot answers `null`.
+  useShellPageActionsSlot: () => (WORLD.shellActions ? () => <div data-testid="shell-page-actions-stub"></div> : null),
 }));
 
 // A `{#id}` marker in a doc body stands for a heading with that anchor id. Like
@@ -205,6 +211,7 @@ vi.mock('@object-ui/i18n', async (importOriginal) => ({
 }));
 
 // Imported AFTER the mocks so the pages pick up the mocked modules.
+import { SidebarDocsNavSlotProvider, SidebarDocsNavTarget } from '@object-ui/app-shell';
 import DocsLayout from './DocsLayout';
 import DocsIndex from './DocsIndex';
 import DocsSlug from './DocsSlug';
@@ -953,5 +960,125 @@ describe('objectstack#35424 — 「All documentation」 groups its books by app 
     render(<Portal entry="/docs/manual/showcase_index" />);
     expect(await screen.findByTestId('doc-content')).toHaveTextContent('INDEX BODY');
     expect(screen.getByTestId('where')).toHaveTextContent('/docs/manual/showcase_index');
+  });
+});
+
+describe('objectstack#37150 — from 768 px up an app\'s docs pages draw in the app shell', () => {
+  function Where() {
+    return <div data-testid="where">{useLocation().pathname}</div>;
+  }
+  /**
+   * The app routes' docs tree (`AppContent`) inside the shell's two docs
+   * places: the sidebar's body (`UnifiedSidebar` draws the target) and the
+   * page-header group (mocked above).
+   */
+  function InShell({ entry }: { entry: string }) {
+    return (
+      <MemoryRouter initialEntries={[entry]}>
+        <SidebarDocsNavSlotProvider>
+          <aside data-testid="shell-sidebar">
+            <SidebarDocsNavTarget />
+          </aside>
+          <main data-testid="shell-route">
+            <Where />
+            <Routes>
+              <Route path="/apps/:appName/docs" element={<DocsLayout />}>
+                <Route index element={<AppDocsIndex />} />
+                <Route path=":slug" element={<DocsSlug />} />
+                <Route path=":slug/:name" element={<DocPage />} />
+              </Route>
+            </Routes>
+          </main>
+        </SidebarDocsNavSlotProvider>
+      </MemoryRouter>
+    );
+  }
+  const sidebar = () => screen.getByTestId('shell-sidebar');
+  const page = () => screen.getByTestId('shell-route');
+
+  beforeEach(() => {
+    WORLD.shellActions = true;
+  });
+  afterEach(() => {
+    WORLD.shellActions = false;
+  });
+
+  it('the reader\'s one docs column is the sidebar\'s body, not a column in the page', async () => {
+    render(<InShell entry="/apps/crm/docs/crm/crm_intro" />);
+    await screen.findByTestId('doc-content');
+    expect(screen.getAllByTestId('docs-nav')).toHaveLength(1);
+    const column = within(sidebar()).getByTestId('docs-nav');
+    expect(within(sidebar()).getByRole('navigation', { name: 'Documentation navigation' })).toContainElement(column);
+    expect(within(column).getByTestId('docs-nav-back')).toHaveAttribute('href', '/apps/crm');
+    expect(within(column).getByTestId('docs-nav-all-docs')).toHaveAttribute('href', '/docs');
+    expect(within(column).getAllByRole('link', { name: 'CRM Intro' })[0]).toHaveAttribute('aria-current', 'page');
+    expect(within(page()).queryByTestId('docs-nav')).toBeNull();
+    expect(screen.queryByTestId('docs-back-bar')).toBeNull();
+  });
+
+  it('the page header carries the shell\'s button group, as on every app page', async () => {
+    render(<InShell entry="/apps/crm/docs/crm/crm_intro" />);
+    await screen.findByTestId('doc-content');
+    expect(within(screen.getByTestId('docs-page-header')).getByTestId('shell-page-actions-stub')).toBeInTheDocument();
+  });
+
+  // ADR-0046 section 6: docs are name-addressed and every URL that resolved
+  // keeps its answer; the shell changes the frame, never the address.
+  it.each([
+    ['the reader', '/apps/crm/docs/crm/crm_intro'],
+    ['a book (lands on its first article)', '/apps/crm/docs/crm'],
+    ['a flat doc permalink (redirects into its book)', '/apps/crm/docs/crm_intro'],
+    ['the app\'s docs index (one book: lands on it)', '/apps/crm/docs'],
+  ])('%s, %s, reads the same article in the shell', async (_what, entry) => {
+    render(<InShell entry={entry} />);
+    expect(await screen.findByTestId('doc-content')).toHaveTextContent('Welcome to the CRM');
+    expect(screen.getByTestId('where')).toHaveTextContent('/apps/crm/docs/crm/crm_intro');
+    expect(within(sidebar()).getByTestId('docs-nav')).toBeInTheDocument();
+    expect(within(page()).queryByTestId('docs-nav')).toBeNull();
+  });
+
+  it('a page that is not the reader carries the app\'s column in the sidebar, the way back first', async () => {
+    render(<InShell entry="/apps/crm/docs/nonesuch" />);
+    await screen.findByText(/not found/i);
+    const column = within(sidebar()).getByTestId('docs-nav');
+    expect(within(column).getByTestId('docs-nav-back')).toHaveAttribute('href', '/apps/crm');
+    expect(within(column).getAllByRole('button', { name: /crm/i })).toHaveLength(1);
+    expect(screen.queryByTestId('docs-back-bar')).toBeNull();
+    expect(screen.getByTestId('docs-page-header')).toBeInTheDocument();
+  });
+
+  describe('a package with several books', () => {
+    beforeEach(() => {
+      WORLD.authored = true;
+    });
+    afterEach(() => {
+      WORLD.authored = false;
+    });
+
+    it('its docs index lists the books in the page and every book in the sidebar', async () => {
+      render(<InShell entry="/apps/com.example.showcase/docs" />);
+      await within(page()).findByText('Leads Book');
+      const column = within(sidebar()).getByTestId('docs-nav');
+      expect(within(column).getByRole('button', { name: /Showcase Manual/ })).toBeInTheDocument();
+      expect(within(column).getByRole('button', { name: /Leads Book/ })).toBeInTheDocument();
+      expect(within(column).queryByRole('button', { name: /Alpha Manual/ })).toBeNull();
+    });
+  });
+
+  it('CONTROL — without the shell\'s sidebar (a phone; the /docs portal) the page draws its column and its back link itself', async () => {
+    WORLD.shellActions = false;
+    render(
+      <MemoryRouter initialEntries={['/apps/crm/docs/nonesuch']}>
+        <Routes>
+          <Route path="/apps/:appName/docs" element={<DocsLayout />}>
+            <Route path=":slug" element={<DocsSlug />} />
+          </Route>
+        </Routes>
+      </MemoryRouter>,
+    );
+    await screen.findByText(/not found/i);
+    expect(screen.getByTestId('docs-back-bar')).toBeInTheDocument();
+    expect(screen.queryByTestId('docs-page-header')).toBeNull();
+    expect(screen.queryByTestId('sidebar-docs-nav')).toBeNull();
   });
 });
