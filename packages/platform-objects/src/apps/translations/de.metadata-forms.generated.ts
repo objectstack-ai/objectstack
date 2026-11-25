@@ -3147,5 +3147,8 @@ export const deMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "Wert"
       }
     }
+  },
+  ai_context: {
+    label: "KI-Kontextpaket"
   }
 };

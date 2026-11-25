@@ -34,10 +34,108 @@ export interface BodyHeading {
   start: number;
 }
 
-const MARKDOWN_HEADING = /^(#{1,6})[ \t]+(.+?)[ \t]*#*[ \t]*$/;
-const FENCE = /^[ \t]*(```|~~~)/;
-const HTML_HEADING = /<h([1-6])\b[^>]*>([\s\S]*?)<\/h\1\s*>/gi;
-const HTML_TAG = /<[^>]*>/g;
+// Every reader below is a forward scan: one pass over the text, no pattern
+// that can backtrack. A body is author-written, so its shape is not ours to
+// trust, and the outline is read before the body's length is judged.
+
+const isBlank = (c: string): boolean => c === ' ' || c === '\t';
+const isWordChar = (c: string): boolean => /^[A-Za-z0-9_]$/.test(c);
+const isSpace = (c: string): boolean => c === ' ' || c === '\t' || c === '\n' || c === '\r' || c === '\f' || c === '\v';
+
+/** Whether `line` opens or closes a fenced code block (``` or ~~~ after optional blanks). */
+function isFence(line: string): boolean {
+  let i = 0;
+  while (i < line.length && isBlank(line[i])) i++;
+  return line.startsWith('```', i) || line.startsWith('~~~', i);
+}
+
+/** An ATX heading's level and text, or `undefined` for any other line. */
+function markdownHeadingOf(line: string): { level: number; heading: string } | undefined {
+  let level = 0;
+  while (level < line.length && line[level] === '#') level++;
+  if (level < 1 || level > 6 || !isBlank(line[level] ?? '')) return undefined;
+  let start = level;
+  while (start < line.length && isBlank(line[start])) start++;
+  let end = line.length;
+  while (end > start && isBlank(line[end - 1])) end--;
+  while (end > start && line[end - 1] === '#') end--;
+  while (end > start && isBlank(line[end - 1])) end--;
+  const heading = line.slice(start, end).trim();
+  return heading ? { level, heading } : undefined;
+}
+
+/** `text` with every `<…>` tag removed; a `<` with no `>` after it is kept as text. */
+function stripTags(text: string): string {
+  let out = '';
+  let i = 0;
+  while (i < text.length) {
+    const open = text.indexOf('<', i);
+    if (open < 0) break;
+    const close = text.indexOf('>', open + 1);
+    if (close < 0) break;
+    out += text.slice(i, open);
+    i = close + 1;
+  }
+  return out + text.slice(i);
+}
+
+/**
+ * The `<h1>`…`<h6>` elements of `html`, in order. Each search for a `>` or a
+ * closing tag remembers where it landed, and every later search starts at or
+ * after an earlier one, so the scan stays linear however many openers are
+ * left unclosed.
+ */
+function htmlHeadingsOf(html: string): Array<{ level: number; inner: string; start: number }> {
+  const lower = html.toLowerCase();
+  const out: Array<{ level: number; inner: string; start: number }> = [];
+  let gt = -2;
+  const nextGt = (from: number): number => {
+    if (gt === -1 || gt >= from) return gt;
+    gt = lower.indexOf('>', from);
+    return gt;
+  };
+  const closers = new Map<number, number>();
+  const nextCloser = (level: number, from: number): { at: number; end: number } | undefined => {
+    let at = closers.get(level) ?? -2;
+    if (at !== -1 && at < from) {
+      at = from;
+      for (;;) {
+        at = lower.indexOf(`</h${level}`, at);
+        if (at < 0) break;
+        let k = at + 4;
+        while (k < lower.length && isSpace(lower[k])) k++;
+        if (lower[k] === '>') break;
+        at = k;
+      }
+      closers.set(level, at < 0 ? -1 : at);
+    }
+    if (at < 0) return undefined;
+    let end = at + 4;
+    while (end < lower.length && isSpace(lower[end])) end++;
+    return { at, end: end + 1 };
+  };
+  let pos = 0;
+  for (;;) {
+    const open = lower.indexOf('<h', pos);
+    if (open < 0) break;
+    const level = Number(lower[open + 2]);
+    const after = lower[open + 3] ?? '';
+    if (!(level >= 1 && level <= 6) || isWordChar(after)) {
+      pos = open + 1;
+      continue;
+    }
+    const tagEnd = nextGt(open + 3);
+    if (tagEnd < 0) break;
+    const closer = nextCloser(level, tagEnd + 1);
+    if (!closer) {
+      pos = open + 1;
+      continue;
+    }
+    out.push({ level, inner: html.slice(tagEnd + 1, closer.at), start: open });
+    pos = closer.end;
+  }
+  return out;
+}
 
 /** `heading text` → `heading-text`; letters and digits of every script kept. */
 function slugOf(text: string): string {
@@ -66,18 +164,18 @@ export function isHtmlBodyType(type: unknown): boolean {
 export function headingsOf(text: string, html: boolean): BodyHeading[] {
   const raw: Array<{ heading: string; level: number; start: number }> = [];
   if (html) {
-    for (const m of text.matchAll(HTML_HEADING)) {
-      const heading = decodeEntities(m[2].replace(HTML_TAG, '')).replace(/\s+/g, ' ').trim();
-      if (heading) raw.push({ heading, level: Number(m[1]), start: m.index ?? 0 });
+    for (const h of htmlHeadingsOf(text)) {
+      const heading = decodeEntities(stripTags(h.inner)).replace(/\s+/g, ' ').trim();
+      if (heading) raw.push({ heading, level: h.level, start: h.start });
     }
   } else {
     let inFence = false;
     let offset = 0;
     for (const line of text.split('\n')) {
-      if (FENCE.test(line)) inFence = !inFence;
+      if (isFence(line)) inFence = !inFence;
       else if (!inFence) {
-        const m = MARKDOWN_HEADING.exec(line.replace(/\r$/, ''));
-        if (m && m[2].trim()) raw.push({ heading: m[2].trim(), level: m[1].length, start: offset });
+        const m = markdownHeadingOf(line.endsWith('\r') ? line.slice(0, -1) : line);
+        if (m) raw.push({ heading: m.heading, level: m.level, start: offset });
       }
       offset += line.length + 1;
     }

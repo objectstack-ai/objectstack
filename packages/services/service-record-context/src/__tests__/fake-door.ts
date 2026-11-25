@@ -13,6 +13,10 @@ import type { RecordContextDoor } from '../door.js';
  * - `unservedObjects` are not served at all; `guardedObjects` are refused by
  *   the read guard; `unexposedObjects` are refused by API exposure;
  * - `unreadableRows` are filtered out by row-level security;
+ * - `unpublishedObjects` make the published-definition read THROW a coded
+ *   error naming the object, as a door's package gate renders it;
+ * - a `where` is equality, or `{ $contains: id }` on an array value; any
+ *   other operator or combinator is refused, never read as a field;
  * - a lookup is expanded to `{ id, name }` when its target is readable and the
  *   target row is readable, else left as the bare id.
  */
@@ -26,6 +30,7 @@ export interface FakeApp {
   guardedObjects?: string[];
   unexposedObjects?: string[];
   unreadableRows?: string[];
+  unpublishedObjects?: string[];
   narrowed?: Record<string, string>;
   locales?: string[];
 }
@@ -80,6 +85,9 @@ export function fakeDoor(app: FakeApp): FakeDoor {
     },
     async publishedObjectDefinitionOf(object) {
       door.asked.push({ member: 'publishedObjectDefinitionOf', object });
+      if (app.unpublishedObjects?.includes(object)) {
+        throw coded('OBJECT_PACKAGE_DISABLED', 404, `Object '${object}' belongs to a disabled package`);
+      }
       return app.objects[object] ?? null;
     },
     async listContextPacks() {
@@ -100,7 +108,17 @@ export function fakeDoor(app: FakeApp): FakeDoor {
       const def = served(object);
       if (!def) throw coded('OBJECT_NOT_FOUND', 404, `Object '${object}' not found`);
       let rows = (app.records[object] ?? []).filter((r) => !unreadable.has(String(r.id)));
-      rows = rows.filter((r) => Object.entries(opts.where).every(([k, v]) => r[k] === v));
+      rows = rows.filter((r) =>
+        Object.entries(opts.where).every(([k, v]) => {
+          if (k.startsWith('$')) throw new Error(`fake door: unsupported where combinator '${k}'`);
+          if (v !== null && typeof v === 'object') {
+            const ops = Object.keys(v);
+            if (ops.length !== 1 || ops[0] !== '$contains') throw new Error(`fake door: unsupported where operator on '${k}'`);
+            return Array.isArray(r[k]) && (r[k] as unknown[]).includes((v as { $contains: unknown }).$contains);
+          }
+          return r[k] === v;
+        }),
+      );
       const out = rows.slice(0, opts.limit ?? rows.length).map((r) => {
         const row = readableRow(object, r);
         for (const f of opts.expand ?? []) {

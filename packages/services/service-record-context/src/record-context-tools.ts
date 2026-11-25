@@ -17,7 +17,7 @@ import {
   type RecordContextRelatedRow,
 } from '@objectstack/spec/ai';
 import type { AIToolDefinition } from '@objectstack/spec/contracts';
-import { resolveDisplayField, resolveRecordDisplayName } from '@objectstack/spec/data';
+import { isMultiValueField, resolveDisplayField, resolveRecordDisplayName } from '@objectstack/spec/data';
 import { boundedText, headingsOf, isHtmlBodyType, sectionOf, RECORD_CONTEXT_BODY_MAX_CHARS } from './body-outline.js';
 import type { RecordContextDoor } from './door.js';
 import {
@@ -214,12 +214,17 @@ function rowsOf(read: unknown): Record<string, unknown>[] {
 interface RelatedPlan {
   object: string;
   link: string;
+  /** The link holds an array of ids (`multiple: true`): matched with `$contains`, as `get_record` matches it. */
+  multiValueLink: boolean;
   columns: string[];
   lookups: string[];
   displayField?: string;
   served: Record<string, unknown>;
   servedFields: Map<string, Record<string, unknown>>;
 }
+
+/** The codes API exposure refuses an object with: the one child refusal the naming bound lets name it. */
+const API_EXPOSURE_REFUSALS: ReadonlySet<string> = new Set(['OBJECT_API_DISABLED', 'OBJECT_API_METHOD_NOT_ALLOWED']);
 
 /**
  * [ADR-0160 D4] Execute one `get_record_context` call through `door`, as the
@@ -259,8 +264,6 @@ export async function executeGetRecordContext(input: unknown, door: RecordContex
   if (selection.kind === 'none') throw refusal('RESOURCE_NOT_FOUND', 404, say.noPack(root));
   if (selection.kind === 'several') throw refusal('VALIDATION_ERROR', 400, say.severalPacks(root, selection.names));
   const pack: AiContext = selection.pack;
-  // The read set is the plan: every object read below is one of these.
-  const planned = new Set(await planObjectsOf(pack, (name) => door.publishedObjectDefinitionOf(name)));
 
   const refuseObject = async (object: string, shown: boolean): Promise<never> => {
     throw refusal(
@@ -270,26 +273,47 @@ export async function executeGetRecordContext(input: unknown, door: RecordContex
     );
   };
 
-  // 4a. Each related child at object level, before anything of it is projected.
+  // 4a. Each related child at object level, before anything of it is read,
+  //     its published definition included: a child the caller is refused is
+  //     never asked about by name.
   const childServed = new Map<string, Record<string, unknown>>();
   for (const entry of pack.related ?? []) {
-    if (!planned.has(entry.object)) continue;
     const guarded = await door.readGuard(entry.object);
     if (guarded !== undefined) await refuseObject(entry.object, false);
-    const served = await door.servedObjectDefinitionOf(entry.object);
+    let served: Record<string, unknown> | null;
+    try {
+      served = await door.servedObjectDefinitionOf(entry.object);
+    } catch {
+      served = null;
+    }
     if (!served) await refuseObject(entry.object, false);
     try {
       await door.assertApiExposed(entry.object, 'query');
-    } catch {
-      await refuseObject(entry.object, true);
+    } catch (err) {
+      // Only API exposure's own refusal is about an object the caller's schema
+      // shows; any other failure (a package gate, an outage) names nothing.
+      await refuseObject(entry.object, API_EXPOSURE_REFUSALS.has(String((err as { code?: unknown } | null)?.code)));
     }
     childServed.set(entry.object, served as Record<string, unknown>);
   }
 
+  // Every published-definition read from here on is of an object whose gates
+  // already passed; one that still throws refuses the call unnamed, so no
+  // door's own rendering of the failure can name what the caller is not shown.
+  const publishedOf = async (name: string): Promise<Record<string, unknown> | null> => {
+    try {
+      return await door.publishedObjectDefinitionOf(name);
+    } catch {
+      return refuseObject(name, false);
+    }
+  };
+  // The read set is the plan: every object read below is one of these.
+  const planned = new Set(await planObjectsOf(pack, publishedOf));
+
   // 4b. Field-level projection onto the definitions as the caller is served them.
   let hidden = false;
   const rootServedFields = fieldMapOf(rootServed);
-  const rootPublishedFields = fieldMapOf(await door.publishedObjectDefinitionOf(root));
+  const rootPublishedFields = fieldMapOf(await publishedOf(root));
   const project = (
     names: readonly string[],
     served: Map<string, Record<string, unknown>>,
@@ -318,7 +342,7 @@ export async function executeGetRecordContext(input: unknown, door: RecordContex
   for (const entry of pack.related ?? []) {
     const served = childServed.get(entry.object);
     if (!served) continue;
-    const childPublished = fieldMapOf(await door.publishedObjectDefinitionOf(entry.object));
+    const childPublished = fieldMapOf(await publishedOf(entry.object));
     const link = resolveRelatedLink(entry, childPublished, root);
     if (link === undefined) continue; // author defect, reported on author surfaces
     const servedFields = fieldMapOf(served);
@@ -333,6 +357,7 @@ export async function executeGetRecordContext(input: unknown, door: RecordContex
     relatedPlans.push({
       object: entry.object,
       link,
+      multiValueLink: isMultiValueField({ type: String(servedFields.get(link)?.type ?? ''), multiple: servedFields.get(link)?.multiple === true }),
       columns,
       lookups: columns.filter((c) => lookupTargetOf(servedFields.get(c)) !== undefined),
       ...(displayField && servedFields.has(displayField) ? { displayField } : {}),
@@ -349,7 +374,8 @@ export async function executeGetRecordContext(input: unknown, door: RecordContex
     for (const c of plan.lookups) targets.add(lookupTargetOf(plan.servedFields.get(c)) as string);
   }
   for (const target of targets) {
-    if (!planned.has(target)) continue;
+    // A target the published plan does not reach is not read: fail closed.
+    if (!planned.has(target)) await refuseObject(target, false);
     const guarded = await door.readGuard(target);
     if (guarded !== undefined) await refuseObject(target, false);
   }
@@ -389,7 +415,7 @@ export async function executeGetRecordContext(input: unknown, door: RecordContex
     const projection = [...new Set(['id', ...(plan.displayField ? [plan.displayField] : []), ...plan.columns])];
     const rows = rowsOf(
       await door.query(plan.object, {
-        where: { [plan.link]: recordId },
+        where: { [plan.link]: plan.multiValueLink ? { $contains: recordId } : recordId },
         fields: projection,
         ...(plan.lookups.length > 0 ? { expand: plan.lookups } : {}),
         limit: probe,

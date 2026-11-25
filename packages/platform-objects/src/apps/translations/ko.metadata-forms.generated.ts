@@ -3147,5 +3147,8 @@ export const koMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "값"
       }
     }
+  },
+  ai_context: {
+    label: "AI 컨텍스트 팩"
   }
 };

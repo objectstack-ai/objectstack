@@ -234,6 +234,59 @@ describe('get_record_context — object level: one refusal is the whole call\'s,
     expect(refused.code).toBe('PERMISSION_DENIED');
     expect(refused.message).not.toContain('account');
   });
+
+  it('a child\'s gates are judged before ANY read of its definition, the published one included', async () => {
+    for (const app of [
+      policyApp({ guardedObjects: ['policy_revision'] }),
+      policyApp({ unservedObjects: ['policy_revision'] }),
+      policyApp({ unexposedObjects: ['policy_revision'] }),
+    ]) {
+      const door = fakeDoor(app);
+      await refusalOf(executeGetRecordContext(CALL, door));
+      expect(door.asked).not.toContainEqual({ member: 'publishedObjectDefinitionOf', object: 'policy_revision' });
+    }
+    const door = fakeDoor(policyApp());
+    await executeGetRecordContext(CALL, door);
+    const at = (member: string) => door.asked.findIndex((a) => a.member === member && a.object === 'policy_revision');
+    expect(at('assertApiExposed')).toBeLessThan(at('publishedObjectDefinitionOf'));
+  });
+
+  it('a child\'s exposure check failing for any reason but API exposure refuses unnamed', async () => {
+    const door = fakeDoor(policyApp());
+    const exposedOf = door.assertApiExposed.bind(door);
+    door.assertApiExposed = async (object, action) => {
+      if (object === 'policy_revision') {
+        throw Object.assign(new Error(`Object '${object}' belongs to a disabled package`), { code: 'OBJECT_PACKAGE_DISABLED', status: 404 });
+      }
+      return exposedOf(object, action);
+    };
+    const refused = await refusalOf(executeGetRecordContext(CALL, door));
+    expect(refused).toMatchObject({ code: 'PERMISSION_DENIED', status: 403 });
+    expect(refused.message).not.toContain('policy_revision');
+  });
+
+  it('a published-definition read that throws after the gates refuses the call unnamed, whatever the door\'s error says', async () => {
+    const refused = await refusalOf(run(policyApp({ unpublishedObjects: ['policy_revision'] })));
+    expect(refused).toMatchObject({ code: 'PERMISSION_DENIED', status: 403 });
+    expect(refused.message).not.toContain('policy_revision');
+    expect(refused.message).not.toContain('disabled package');
+  });
+
+  it('a lookup whose target the published plan does not reach refuses the call unnamed, before any record is read', async () => {
+    // The served definition points `owner` somewhere the published one does not.
+    const door = fakeDoor(policyApp());
+    const servedOf = door.servedObjectDefinitionOf.bind(door);
+    door.servedObjectDefinitionOf = async (object) => {
+      const def = await servedOf(object);
+      if (object !== 'policy' || !def) return def;
+      const fields = def.fields as Record<string, Record<string, unknown>>;
+      return { ...def, fields: { ...fields, owner: { ...fields.owner, reference: 'claim' } } };
+    };
+    const refused = await refusalOf(executeGetRecordContext(CALL, door));
+    expect(refused).toMatchObject({ code: 'PERMISSION_DENIED', status: 403 });
+    expect(refused.message).not.toContain('claim');
+    expect(door.reads).toEqual([]);
+  });
 });
 
 describe('get_record_context — field level: omit and state, or name the withheld (ADR-0160 D3)', () => {
@@ -289,6 +342,21 @@ describe('get_record_context — row level (ADR-0160 D3)', () => {
     expect(text).not.toContain('r2');
     expect(text).not.toContain('v2');
     expect(out.notes).toEqual([]);
+  });
+
+  it('a multi-valued link is matched with $contains, as get_record matches it', async () => {
+    const app = policyApp();
+    const revision = app.objects.policy_revision as { fields: Record<string, Record<string, unknown>> };
+    revision.fields.policy = { ...revision.fields.policy, multiple: true };
+    app.records.policy_revision = [
+      { id: 'r1', version: 'v1', policy: ['p1', 'p2'], reviewer: 'a1', note: 'shared' },
+      { id: 'r9', version: 'v9', policy: ['p2'], reviewer: 'a1', note: 'other policy' },
+    ];
+    const door = fakeDoor(app);
+    const out = await executeGetRecordContext(CALL, door);
+    expect(out.data.related![0].rows.map((r) => r.id)).toEqual(['r1']);
+    const read = door.reads.find((r) => r.object === 'policy_revision') as { opts: { where: unknown } };
+    expect(read.opts.where).toEqual({ policy: { $contains: 'p1' } });
   });
 
   it('a lookup the caller\'s expansion left unexpanded reads not visible and carries no id', async () => {

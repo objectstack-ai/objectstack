@@ -105,7 +105,7 @@ function engine(): IDataEngine {
   } as unknown as IDataEngine;
 }
 
-function stdioBridge(packs: unknown[] = [PACK], withService = true): McpDataBridge {
+function stdioBridge(packs: unknown[] = [PACK], withService = true, protocol?: Record<string, unknown>): McpDataBridge {
   const metadataService = {
     getObject: async (name: string) => OBJECTS[name],
     listObjects: async () => Object.values(OBJECTS),
@@ -116,6 +116,7 @@ function stdioBridge(packs: unknown[] = [PACK], withService = true): McpDataBrid
     engine: engine(),
     metadataService,
     resolvePrincipal: async () => ({ userId: 'u_key', isSystem: false }) as never,
+    ...(protocol ? { protocol: () => protocol as never } : {}),
     ...(withService ? { recordContextTools: { recordContextTools: () => tools } } : {}),
   });
 }
@@ -262,6 +263,27 @@ describe('[ADR-0160 D4] get_record_context — the gates the record tools put be
     expect(stdio).toEqual(http);
     expect(http.payload.error).toMatchObject({ code: 'PERMISSION_DENIED', status: 403 });
     expect(JSON.stringify(http.payload)).not.toContain('sys_note');
+  });
+
+  it('a related child whose package is disabled refuses the call unnamed, alike on both doors', async () => {
+    const disabled = Object.assign(new Error("Object 'policy_revision' belongs to a disabled package"), {
+      code: 'OBJECT_PACKAGE_DISABLED',
+      status: 404,
+      object: 'policy_revision',
+    });
+    const protocol = {
+      async getMetaItemForExecution({ type, name }: { type: string; name: string }) {
+        if (type === 'object' && name === 'policy_revision') throw disabled;
+        return { type, name, item: type === 'object' ? OBJECTS[name] : undefined };
+      },
+      async getMetaItems({ type }: { type: string }) {
+        return { type, items: type === 'ai_context' ? [PACK] : type === 'object' ? Object.values(OBJECTS) : [] };
+      },
+    };
+    const { http, stdio } = await callBoth(stdioBridge([PACK], true, protocol), GET_RECORD_CONTEXT_TOOL_NAME, { objectName: 'policy', recordId: 'p1' });
+    expect(stdio).toEqual(http);
+    expect(http.payload.error).toMatchObject({ code: 'PERMISSION_DENIED', status: 403 });
+    expect(JSON.stringify(http.payload)).not.toContain('policy_revision');
   });
 
   it('a related child its API exposure refuses refuses the call, named (the caller\'s schema shows it)', async () => {
