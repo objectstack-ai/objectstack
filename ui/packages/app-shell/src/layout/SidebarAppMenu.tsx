@@ -170,8 +170,8 @@ function AppMenuList({
   onQueryChange,
   onAppChange,
 }: {
-  apps: any[];
-  launcherApps: any[];
+  apps: NonNullable<ReturnType<typeof useMetadata>['apps']>;
+  launcherApps: ReturnType<typeof useLauncherApps>['apps'];
   activeAppName?: string;
   query: string;
   onQueryChange: (query: string) => void;
