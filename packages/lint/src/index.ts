@@ -545,6 +545,18 @@ export type {
   MembershipKeyOwners,
 } from './validate-membership-key-declarations.js';
 
+// [ruling 7000907189 point 4 · ADR-0049] A `transferBehavior: 'cascade'` the
+// Change Owner action can never offer: a parent without Change Owner, an
+// extension's field on an object that cannot take a cascade, a child whose
+// declared exposure does not serve `update`.
+export {
+  validateTransferCascades,
+  TRANSFER_CASCADE_PARENT_WITHOUT_CHANGE_OWNER,
+  TRANSFER_CASCADE_EXTENSION_CHILD_INELIGIBLE,
+  TRANSFER_CASCADE_CHILD_UPDATE_UNEXPOSED,
+} from './validate-transfer-cascades.js';
+export type { TransferCascadeFinding } from './validate-transfer-cascades.js';
+
 export {
   validateDashboardActionRefs,
   DASHBOARD_ACTION_TARGET_UNDEFINED,
