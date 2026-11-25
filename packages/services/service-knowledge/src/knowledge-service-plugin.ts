@@ -72,6 +72,8 @@ type EmbedderFromSettings =
       batchSize: number | undefined;
       /** The saved size, when the documented cap lowered it. */
       savedBatchSize: number | undefined;
+      /** The host requests go to — named in the boot line; the key never is. */
+      endpointHost: string;
     }
   | {
       kind: 'unconfigured';
@@ -119,6 +121,29 @@ function savedValue(values: Record<string, ResolvedEmbedderSetting | undefined>,
   if (value === null || value === undefined) return undefined;
   if (typeof value === 'string' && value.trim() === '') return undefined;
   return value;
+}
+
+/** The providers whose form offers the Base URL field (`embedder_base_url`'s `visible` rule). */
+const BASE_URL_PROVIDERS: ReadonlySet<string> = new Set(['custom', 'azure']);
+
+/**
+ * A saved number key read as a positive integer: the value (a number, or its
+ * decimal text, as an `OS_*` override hands it over), `undefined` when nothing
+ * is saved, `null` when what is saved is not one.
+ */
+function positiveIntegerSetting(value: unknown): number | undefined | null {
+  if (value === undefined) return undefined;
+  const n = typeof value === 'number' ? value : typeof value === 'string' && /^\s*\d+\s*$/.test(value) ? Number(value) : NaN;
+  return Number.isInteger(n) && n > 0 ? n : null;
+}
+
+/** The host of an endpoint URL, or the URL itself when it does not parse. */
+function hostOf(url: string): string {
+  try {
+    return new URL(url).host;
+  } catch {
+    return url;
+  }
 }
 
 /**
@@ -199,18 +224,40 @@ async function embedderFromSettings(ctx: PluginContext): Promise<EmbedderFromSet
   }
 
   const providerId = String(provider);
-  const baseUrl = typeof saved.embedder_base_url === 'string' ? saved.embedder_base_url.trim() : undefined;
   const preset = Object.prototype.hasOwnProperty.call(OPENAI_COMPATIBLE_PRESETS, providerId)
     ? (providerId as OpenAICompatiblePreset)
     : undefined;
+  // The saved Base URL applies only where the form offers the field (`custom`,
+  // `azure`, the manifest's `visible` rule). A URL saved under one of those and
+  // left behind when the operator switches to a preset provider must not carry
+  // the new provider's key to the old host: every other provider uses its
+  // preset endpoint.
+  const baseUrl =
+    BASE_URL_PROVIDERS.has(providerId) && typeof saved.embedder_base_url === 'string'
+      ? saved.embedder_base_url.trim()
+      : undefined;
   const model = typeof saved.embedder_model === 'string' ? saved.embedder_model.trim() : undefined;
-  const dimensions = typeof saved.embedder_dimensions === 'number' ? saved.embedder_dimensions : undefined;
+  // The two number keys can arrive as text: an `OS_AI_EMBEDDER_*` override of a
+  // key with no numeric default is handed over as the env string. A positive
+  // integer, as a number or as its decimal text, is the value; anything else
+  // is refused below rather than dropped.
+  const dimensions = positiveIntegerSetting(saved.embedder_dimensions);
+  const savedBatch = positiveIntegerSetting(saved.embedder_batch_size);
+  if (dimensions === null || savedBatch === null) {
+    const key = dimensions === null ? 'embedder_dimensions' : 'embedder_batch_size';
+    return {
+      kind: 'unconfigured',
+      quiet: false,
+      reason:
+        `ai.${key} is saved as '${String(saved[key])}', which is not a positive integer — correct it ` +
+        EMBEDDER_SETTINGS_REMEDY,
+    };
+  }
   // Only a SAVED batch size is a batch cap; unsaved, the embedder batches at the
   // model's own documented cap (some providers accept 10, not the default 64).
   // A saved size is held to that documented cap when the saved model has one:
   // an explicit `maxBatchSize` would otherwise override it. A model the table
   // does not know, or no saved model, keeps the saved size as saved.
-  const savedBatch = typeof saved.embedder_batch_size === 'number' ? saved.embedder_batch_size : undefined;
   const documentedCap = model ? documentedMaxBatchSize(model) : undefined;
   const batchSize =
     savedBatch !== undefined && documentedCap !== undefined ? Math.min(savedBatch, documentedCap) : savedBatch;
@@ -221,7 +268,8 @@ async function embedderFromSettings(ctx: PluginContext): Promise<EmbedderFromSet
       : providerId === 'ollama'
         ? 'ollama'
         : '';
-  if (!preset && !baseUrl) {
+  const endpoint = baseUrl || (preset ? OPENAI_COMPATIBLE_PRESETS[preset] : '');
+  if (!endpoint) {
     return {
       kind: 'unconfigured',
       quiet: false,
@@ -231,7 +279,7 @@ async function embedderFromSettings(ctx: PluginContext): Promise<EmbedderFromSet
   try {
     const embedder = createOpenAIEmbedder({
       preset,
-      baseUrl: baseUrl || undefined,
+      baseUrl: endpoint,
       apiKey,
       model,
       dimensions,
@@ -245,6 +293,7 @@ async function embedderFromSettings(ctx: PluginContext): Promise<EmbedderFromSet
       model,
       batchSize,
       savedBatchSize: batchSize !== savedBatch ? savedBatch : undefined,
+      endpointHost: hostOf(endpoint),
     };
   } catch (err) {
     // The embedder's own refusals name the option, never the key's value.
@@ -571,7 +620,7 @@ export class KnowledgeServicePlugin implements Plugin {
       ctx.registerService(EMBEDDER_SERVICE, outcome.embedder);
       ctx.logger.info?.(
         `KnowledgeServicePlugin: registered '${EMBEDDER_SERVICE}' from the ai.embedder_* settings ` +
-          `(provider=${outcome.provider}, model=${outcome.model ?? '(embedder default)'}, ` +
+          `(provider=${outcome.provider}, endpoint=${outcome.endpointHost}, model=${outcome.model ?? '(embedder default)'}, ` +
           `batch size=${outcome.batchSize ?? "the model's own cap"}` +
           `${outcome.savedBatchSize !== undefined ? ` — the saved ${outcome.savedBatchSize}, held to the model's documented cap` : ''}). ` +
           'A saved change takes effect on the next restart.',

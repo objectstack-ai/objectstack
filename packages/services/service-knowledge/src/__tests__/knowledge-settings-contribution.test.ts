@@ -307,19 +307,27 @@ class HostEmbedderPlugin implements Plugin {
   }
 }
 
-interface ProviderRequest { url: string; authorization: string | null; model: unknown; inputs: string[] }
+interface ProviderRequest { url: string; authorization: string | null; model: unknown; dimensions: unknown; inputs: string[] }
 
-/** Stubs the provider's `POST /embeddings` on the global `fetch`. */
-function stubProvider(): ProviderRequest[] {
+/** Stubs the provider's `POST /embeddings` on the global `fetch`; `status` other than 200 answers an error. */
+function stubProvider(status = 200): ProviderRequest[] {
   const requests: ProviderRequest[] = [];
   vi.stubGlobal('fetch', vi.fn(async (url: string | URL, init?: RequestInit) => {
-    const body = JSON.parse(String(init?.body)) as { model?: unknown; input: string[] };
+    const body = JSON.parse(String(init?.body)) as { model?: unknown; dimensions?: unknown; input: string[] };
     requests.push({
       url: String(url),
       authorization: new Headers(init?.headers).get('authorization'),
       model: body.model,
+      dimensions: body.dimensions,
       inputs: body.input,
     });
+    if (status !== 200) {
+      return new Response(JSON.stringify({ error: { message: 'Incorrect API key provided.' } }), {
+        status,
+        statusText: 'Unauthorized',
+        headers: { 'content-type': 'application/json' },
+      });
+    }
     return new Response(JSON.stringify({ data: body.input.map(() => ({ embedding: [0.6, 0.8] })) }), {
       status: 200,
       headers: { 'content-type': 'application/json' },
@@ -331,6 +339,7 @@ function stubProvider(): ProviderRequest[] {
 async function bootEmbedder(opts: {
   saved?: Record<string, unknown>;
   host?: { embedder: IEmbedder; phase: 'init' | 'kernel:ready' };
+  env?: Record<string, string>;
 } = {}) {
   const lines: LoggedLine[] = [];
   const kernel = new LiteKernel();
@@ -340,7 +349,7 @@ async function bootEmbedder(opts: {
     enableEventSync: false,
     sources: [{ id: 'docs', label: 'Docs', adapter: 'vec', source: { kind: 'http', urls: ['https://docs.example.com/'] } }],
   }));
-  kernel.use(new SettingsServicePlugin({ env: {}, registerRoutes: false, crypto: new ConfidentialTestAdapter() }));
+  kernel.use(new SettingsServicePlugin({ env: opts.env ?? {}, registerRoutes: false, crypto: new ConfidentialTestAdapter() }));
   kernel.use(new EmbeddingAdapterPlugin());
   if (opts.saved) kernel.use(new SavedAiSettings(opts.saved));
   await kernel.bootstrap();
@@ -369,6 +378,7 @@ describe('#37094 — the open edition registers EMBEDDER_SERVICE from the ai.emb
       url: 'https://api.openai.com/v1/embeddings',
       authorization: `Bearer ${API_KEY}`,
       model: 'text-embedding-3-small',
+      dimensions: undefined,
       inputs: ['hello embedder'],
     }]);
     // The key reaches the provider and nothing else.
@@ -481,6 +491,93 @@ describe('#37094 — the open edition registers EMBEDDER_SERVICE from the ai.emb
     });
     await embedder.embed(texts(60));
     expect(requests.map((r) => r.inputs.length)).toEqual([50, 10]);
+  });
+
+  it('a Base URL left saved from a custom endpoint is not applied under a preset provider', async () => {
+    const requests = stubProvider();
+    // The operator once saved `custom` with a gateway, then switched to OpenAI
+    // with a new key: the Base URL row stays saved, but the form no longer
+    // offers the field, and the new key must not go to the old gateway.
+    const { embedder, lines } = await bootEmbedder({
+      saved: {
+        embedder_provider: 'openai',
+        embedder_api_key: API_KEY,
+        embedder_model: 'text-embedding-3-small',
+        embedder_base_url: 'https://old-gateway.example.com/v1',
+      },
+    });
+    await embedder.embed(['x']);
+    expect(requests.map((r) => r.url)).toEqual(['https://api.openai.com/v1/embeddings']);
+    const boot = lines.filter((l) => l.line.includes(`registered '${EMBEDDER_SERVICE}' from the ai.embedder_* settings`));
+    expect(boot).toHaveLength(1);
+    expect(boot[0].line).toContain('endpoint=api.openai.com');
+    expect(boot[0].line).not.toContain(API_KEY);
+  });
+
+  it('an OS_AI_EMBEDDER_* override of a number key arrives as text and is applied, not dropped', async () => {
+    const requests = stubProvider();
+    const { embedder } = await bootEmbedder({
+      env: { OS_AI_EMBEDDER_DIMENSIONS: '256' },
+      saved: { embedder_provider: 'openai', embedder_api_key: API_KEY, embedder_model: 'text-embedding-3-small' },
+    });
+    expect(embedder.dimensions).toBe(256);
+    await embedder.embed(['x']);
+    expect(requests.map((r) => r.dimensions)).toEqual([256]);
+  });
+
+  it('a number key saved as text that is not a positive integer is refused at warn, not dropped', async () => {
+    const requests = stubProvider();
+    const { embedder, lines } = await bootEmbedder({
+      env: { OS_AI_EMBEDDER_DIMENSIONS: 'large' },
+      saved: { embedder_provider: 'openai', embedder_api_key: API_KEY },
+    });
+    await expect(embedder.embed(['x'])).rejects.toThrow(/ai\.embedder_dimensions is saved as 'large', which is not a positive integer/);
+    expect(lines.some((l) => l.level === 'warn' && l.line.includes('ai.embedder_dimensions'))).toBe(true);
+    expect(requests).toHaveLength(0);
+  });
+
+  it('an unsaved batch size on a model with no documented cap is the embedder fallback, not the default 64', async () => {
+    const requests = stubProvider();
+    const { embedder } = await bootEmbedder({
+      saved: {
+        embedder_provider: 'custom',
+        embedder_api_key: API_KEY,
+        embedder_model: 'my-gateway-model',
+        embedder_base_url: 'https://gateway.example.com/v1',
+      },
+    });
+    await embedder.embed(texts(70));
+    // The default 64 counted as saved would send 64, 6.
+    expect(requests.map((r) => r.inputs.length)).toEqual([10, 10, 10, 10, 10, 10, 10]);
+  });
+
+  it('the API key is in no log line and no error: incomplete settings, and a provider that refuses the key', async () => {
+    stubProvider();
+    // Saved with its key, but `custom` without the Base URL it needs.
+    const incomplete = await bootEmbedder({ saved: { embedder_provider: 'custom', embedder_api_key: API_KEY } });
+    const refusal = await incomplete.embedder.embed(['x']).then(
+      () => { throw new Error('expected a refusal'); },
+      (err: unknown) => err as Error,
+    );
+    expect(refusal.message).toMatch(/custom embedder requires a Base URL/);
+    expect(refusal.message).not.toContain(API_KEY);
+    expect(incomplete.lines.filter((l) => l.line.includes(API_KEY))).toEqual([]);
+
+    vi.unstubAllGlobals();
+    const requests = stubProvider(401);
+    const rejected = await bootEmbedder({
+      saved: { embedder_provider: 'openai', embedder_api_key: API_KEY, embedder_model: 'text-embedding-3-small' },
+    });
+    await expect(rejected.knowledge.indexDocument('docs', { id: 'd1', sourceId: 'docs', content: 'hello' }))
+      .rejects.toThrow(/401/);
+    const failure = await rejected.embedder.embed(['x']).then(
+      () => { throw new Error('expected a provider error'); },
+      (err: unknown) => err as Error,
+    );
+    expect(failure.message).not.toContain(API_KEY);
+    await rejected.knowledge.search('hello', { sourceIds: ['docs'] });
+    expect(requests.length).toBeGreaterThan(0);
+    expect(rejected.lines.filter((l) => l.line.includes(API_KEY))).toEqual([]);
   });
 
   it("'none' saved: embeddings stay disabled, and the error says so", async () => {
