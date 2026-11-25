@@ -245,3 +245,19 @@ describe('retired `triggerPhrases` — phrases never routed a skill; triggerCond
     expect(message).not.toContain('triggerPhrases');
   });
 });
+
+describe('[#37013] a stored skill the platform registered keeps its provenance through a parse', () => {
+  const stored = { name: 'data_explorer', label: 'Data explorer', instructions: 'Answer questions about records.', tools: ['query_records'] };
+
+  it('`_provenance: \'platform\'` is a declared value: the parse succeeds and keeps it', () => {
+    const result = SkillSchema.safeParse({ ...stored, _provenance: 'platform' });
+    expect(result.success).toBe(true);
+    expect(result.success && result.data._provenance).toBe('platform');
+  });
+
+  it('CONTROL — a value outside the enum is still refused at `_provenance`', () => {
+    const result = SkillSchema.safeParse({ ...stored, _provenance: 'system' });
+    expect(result.success).toBe(false);
+    expect(result.success ? [] : result.error.issues.map((issue) => issue.path.join('.'))).toEqual(['_provenance']);
+  });
+});

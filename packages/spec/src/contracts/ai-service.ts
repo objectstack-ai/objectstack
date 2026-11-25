@@ -1263,6 +1263,32 @@ export interface ToolExecutionContext {
         mode?: string;
     };
     /**
+     * The record(s) the conversation is pinned to — the conversation's FOCUS,
+     * as the client reports it on every turn (`context.focus` in the chat
+     * request body), beside the page in view ({@link surfaceContext}). Unlike
+     * the surface, a focus does not follow navigation: the user pinned it, and
+     * it stays until they remove or replace it, so "this policy" keeps meaning
+     * the pinned record while they browse elsewhere.
+     *
+     * Client-reported and advisory, exactly like {@link surfaceContext}:
+     * NEVER an access decision. A consumer that reads the record re-reads it
+     * as the caller ({@link actor}), so field- and row-level rules hold, and a
+     * record the caller cannot read is simply not there. The request body is
+     * the authority on every turn; whatever a host stores on the conversation
+     * only restores its display.
+     *
+     * At most one entry in phase 1. The name is `focus` because `scope`
+     * already means the conversation cache key on the client. A client sends
+     * it only to an agent whose catalog row declares
+     * `capabilities.focus: true` (`AiAgentCapabilitiesSchema`).
+     */
+    focus?: {
+        /** The object's machine name (e.g. `'account'`). */
+        object: string;
+        /** The record id. */
+        id: string;
+    }[];
+    /**
      * Text of the latest user message (neutral context, like currentObjectName).
      * Forwarded so a tool can detect intent — e.g. an explicit confirm/approval —
      * without re-deriving it from the transcript. Consumers own any semantics.

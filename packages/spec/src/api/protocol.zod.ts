@@ -552,7 +552,7 @@ const MetadataProtectionEnvelopeFields = {
     + 'resolved item declares `_lockDocsUrl`.',
   ),
   provenance: MetadataProvenanceSchema.optional().describe(
-    'Where the item came from (package | org | env-forced). Present only when the '
+    'Where the item came from (package | org | env-forced | platform). Present only when the '
     + 'resolved item declares `_provenance`.',
   ),
   packageId: z.string().optional().describe(
@@ -4677,6 +4677,11 @@ export const AiAgentCapabilitiesSchema = lazySchema(() => z.object({
   canvas: z.boolean().describe('Drives the Live Canvas split view (ADR-0037)'),
   debug: z.boolean().describe('Exposes the build-doctor debug drawer'),
   resume: z.boolean().describe('Turns resume durable multi-step runs (ADR-0013)'),
+  focus: z.boolean().optional().describe(
+    'Honours a conversation focus: the chat request\'s `context.focus`, the record the user pinned the '
+    + 'conversation to (`ToolExecutionContext.focus`). A client draws the pin and sends the key only when '
+    + 'this is true; absent reads as false.',
+  ),
 }));
 
 /** One row of the `GET /api/v1/ai/agents` catalog. */

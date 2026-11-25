@@ -20,7 +20,10 @@ import { z } from 'zod';
  *                     are reserved for Phase 3/2 respectively).
  *  - `_provenance`  — `'package'` for loader-introduced items,
  *                     `'org'` for tenant-authored, `'env-forced'`
- *                     reserved for emergency overrides.
+ *                     reserved for emergency overrides, `'platform'`
+ *                     for a record the platform's own code registers
+ *                     (a store-slot marker, set by the metadata service
+ *                     only).
  *  - `_packageId` / `_packageVersion` — denormalised from the
  *                     registry tag so consumers don't need a second
  *                     round-trip to inspect provenance.
@@ -54,8 +57,15 @@ export type MetadataLock = z.input<typeof MetadataLockSchema>;
 export const MetadataLockSourceSchema = z.enum(['artifact', 'package', 'env-forced']);
 export type MetadataLockSource = z.input<typeof MetadataLockSourceSchema>;
 
-/** Where the metadata item originated. */
-export const MetadataProvenanceSchema = z.enum(['package', 'org', 'env-forced']);
+/**
+ * Where the metadata item originated. `'platform'` (#37013) marks a record the
+ * platform's own code registers at boot (a built-in skill, agent or tool) and
+ * is a store-slot marker only: it keeps that record in a slot of its own
+ * beside a package's item of the same name. The metadata service sets it only
+ * on such a registration; every other door that stores or serves a body
+ * strips it, and the artifact door refuses an item that carries it.
+ */
+export const MetadataProvenanceSchema = z.enum(['package', 'org', 'env-forced', 'platform']);
 export type MetadataProvenance = z.input<typeof MetadataProvenanceSchema>;
 
 // ─────────────────────────────────────────────────────────────────────
@@ -108,9 +118,11 @@ export const MetadataProtectionFields = {
    * `'package'` — introduced by a loader from npm-package source.
    * `'org'`     — authored by a tenant via the metadata API.
    * `'env-forced'` — emergency overrides via the unlock list.
+   * `'platform'` — registered by the platform's own code at boot; set by the
+   *               metadata service only, never by a package or tenant write.
    */
   _provenance: MetadataProvenanceSchema.optional().describe(
-    'Origin of the item (package | org | env-forced).',
+    'Origin of the item (package | org | env-forced | platform).',
   ),
 
   /** Owning package machine id (e.g. `com.objectstack.setup`). */
