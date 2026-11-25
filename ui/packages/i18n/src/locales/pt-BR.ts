@@ -2572,6 +2572,7 @@ const pt = {
       unavailableTitle: "Assistente de IA indisponível",
       unavailableDescription: "Esta implantação não tem um assistente de IA habilitado. Todo o resto funciona normalmente.",
       unavailableError: "Não foi possível acessar o serviço de IA. Ele pode estar temporariamente off-line — tente novamente ou volte ao início.",
+      unavailableErrorDesktop: "Não foi possível acessar o serviço de IA. Ele pode estar temporariamente off-line — tente novamente ou volte à página inicial do app.",
       unavailableRetry: "Tentar novamente",
       unavailableHome: "Voltar ao início",
       dock: {

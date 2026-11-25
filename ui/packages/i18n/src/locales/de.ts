@@ -2505,6 +2505,7 @@ const de = {
       unavailableTitle: "KI-Assistent nicht verfügbar",
       unavailableDescription: "In dieser Bereitstellung ist kein KI-Assistent aktiviert. Alles andere funktioniert wie gewohnt.",
       unavailableError: "Der KI-Dienst war nicht erreichbar. Er ist möglicherweise vorübergehend offline — versuchen Sie es erneut, oder kehren Sie zur Startseite zurück.",
+      unavailableErrorDesktop: "Der KI-Dienst war nicht erreichbar. Er ist möglicherweise vorübergehend offline — versuchen Sie es erneut, oder kehren Sie zur Startseite der App zurück.",
       unavailableRetry: "Erneut versuchen",
       unavailableHome: "Zurück zur Startseite",
       dock: {

@@ -2507,6 +2507,7 @@ const ja = {
       unavailableTitle: "AI アシスタントを利用できません",
       unavailableDescription: "このデプロイでは AI アシスタントが有効になっていません。それ以外の機能は通常どおり動作します。",
       unavailableError: "AI サービスに接続できませんでした。一時的にオフラインの可能性があります — 再試行するか、ホームに戻ってください。",
+      unavailableErrorDesktop: "AI サービスに接続できませんでした。一時的にオフラインの可能性があります — 再試行するか、アプリのスタートページに戻ってください。",
       unavailableRetry: "再試行",
       unavailableHome: "ホームに戻る",
       dock: {

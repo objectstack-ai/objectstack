@@ -2505,6 +2505,7 @@ const ko = {
       unavailableTitle: "AI 어시스턴트를 사용할 수 없습니다",
       unavailableDescription: "이 배포에는 AI 어시스턴트가 활성화되어 있지 않습니다. 나머지 기능은 정상적으로 작동합니다.",
       unavailableError: "AI 서비스에 연결할 수 없습니다. 일시적으로 오프라인일 수 있습니다 — 다시 시도하거나 홈으로 돌아가세요.",
+      unavailableErrorDesktop: "AI 서비스에 연결할 수 없습니다. 일시적으로 오프라인일 수 있습니다 — 다시 시도하거나 앱 시작 페이지로 돌아가세요.",
       unavailableRetry: "다시 시도",
       unavailableHome: "홈으로 돌아가기",
       dock: {

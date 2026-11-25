@@ -2577,6 +2577,7 @@ const es = {
       unavailableTitle: "Asistente de IA no disponible",
       unavailableDescription: "Esta implementación no tiene habilitado un asistente de IA. Todo lo demás funciona con normalidad.",
       unavailableError: "No se pudo contactar con el servicio de IA. Puede estar temporalmente sin conexión — reinténtelo o vuelva al inicio.",
+      unavailableErrorDesktop: "No se pudo contactar con el servicio de IA. Puede estar temporalmente sin conexión — reinténtelo o vuelva a la página inicial de la app.",
       unavailableRetry: "Reintentar",
       unavailableHome: "Volver al inicio",
       dock: {
