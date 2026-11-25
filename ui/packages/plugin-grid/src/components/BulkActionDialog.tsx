@@ -19,7 +19,7 @@ import {
   Progress,
   ScrollArea,
 } from '@object-ui/components';
-import { AlertTriangle, Ban, CheckCircle2, Loader2, XCircle } from 'lucide-react';
+import { AlertTriangle, Ban, CheckCircle2, Hourglass, Loader2, XCircle } from 'lucide-react';
 import { useObjectTranslation } from '@object-ui/react';
 import { useDisplayLocale, useLocalization } from '@object-ui/i18n';
 import { getLazyFieldWidget } from '@object-ui/fields';
@@ -388,10 +388,11 @@ export const BulkActionDialog: React.FC<BulkActionDialogProps> = ({
 
   if (!def) return null;
 
-  // A refusal is listed under the record it refused, named as the confirm
-  // step named it. An entry that is no record of the run (a missing id, a
-  // batch the server answered with a count only) keeps its own id.
-  const refusedRecordName = (id: string): string => {
+  // A listed record (refused, waiting for input, unconfirmed or failed) is
+  // named as the confirm step named it. An entry that is no record of the run
+  // (a missing id, a batch the server answered with a count only) keeps its
+  // own id.
+  const listedRecordName = (id: string): string => {
     const row = rows.find(r => r.id != null && String(r.id) === id);
     return row ? affectedRecordName(objectDef, row, id) : id;
   };
@@ -406,15 +407,19 @@ export const BulkActionDialog: React.FC<BulkActionDialogProps> = ({
   // server answered with a count only leaves the successes unknown, and the
   // result keeps to its count rather than name a record that may have failed.
   // Rows an aggregate handler did not confirm are neither landed nor failed,
-  // and neither are rows a per-record dispatch answered with a refusal.
+  // and neither are rows a per-record dispatch answered with a refusal, nor
+  // rows whose per-record run paused at a screen (objectstack#36931).
   const unconfirmedIds = new Set(result?.aggregateUnconfirmed ?? []);
   const refusedRows = result?.refused ?? [];
   const refusedIds = new Set(refusedRows.map(r => r.id));
+  const pausedRows = result?.paused ?? [];
+  const pausedIds = new Set(pausedRows.map(p => p.id));
   const succeededRows = (() => {
     if (!result || result.succeeded === 0) return [];
     const failedIds = new Set(result.errors.map(e => e.id));
     const landed = rows.filter(r => r.id != null
-      && !failedIds.has(String(r.id)) && !unconfirmedIds.has(String(r.id)) && !refusedIds.has(String(r.id)));
+      && !failedIds.has(String(r.id)) && !unconfirmedIds.has(String(r.id)) && !refusedIds.has(String(r.id))
+      && !pausedIds.has(String(r.id)));
     return landed.length === result.succeeded ? landed : [];
   })();
   const succeededPreview = succeededRows.slice(0, 5);
@@ -559,12 +564,12 @@ export const BulkActionDialog: React.FC<BulkActionDialogProps> = ({
 
         {step === 'running' && (
           <div className="space-y-2">
-            <Progress value={progress.total ? (progress.done + progress.failed + progress.refused) / progress.total * 100 : 0} />
+            <Progress value={progress.total ? (progress.done + progress.failed + progress.refused + progress.paused) / progress.total * 100 : 0} />
             <div className="text-xs text-muted-foreground text-center">
               {t('grid.bulk.processed', {
-                count: progress.done + progress.failed + progress.refused,
+                count: progress.done + progress.failed + progress.refused + progress.paused,
                 total: progress.total,
-                defaultValue: `${progress.done + progress.failed + progress.refused} / ${progress.total} processed`,
+                defaultValue: `${progress.done + progress.failed + progress.refused + progress.paused} / ${progress.total} processed`,
               })}
               {progress.failed > 0 && t('grid.bulk.processedFailed', { count: progress.failed, defaultValue: ` · ${progress.failed} failed` })}
             </div>
@@ -617,7 +622,7 @@ export const BulkActionDialog: React.FC<BulkActionDialogProps> = ({
         {step === 'result' && result && !result.aggregateRejection && !result.aggregateUnreadable && (
           <div className="space-y-3 text-sm">
             <div className="flex items-center gap-2">
-              {result.failed === 0 && unconfirmedCount === 0 && refusedRows.length === 0 ? (
+              {result.failed === 0 && unconfirmedCount === 0 && refusedRows.length === 0 && pausedRows.length === 0 ? (
                 <CheckCircle2 className="h-5 w-5 text-emerald-500" />
               ) : (
                 <AlertTriangle className="h-5 w-5 text-amber-500" />
@@ -631,6 +636,7 @@ export const BulkActionDialog: React.FC<BulkActionDialogProps> = ({
                 })}
                 {result.failed > 0 && t('grid.bulk.resultFailed', { count: result.failed, defaultValue: ` · Failed ${result.failed}` })}
                 {refusedRows.length > 0 && t('grid.bulk.resultRefused', { count: refusedRows.length, defaultValue: ` · Refused ${refusedRows.length}` })}
+                {pausedRows.length > 0 && t('grid.bulk.resultPaused', { count: pausedRows.length, defaultValue: ` · Waiting for input ${pausedRows.length}` })}
                 {unconfirmedCount > 0 && t('grid.bulk.resultNotConfirmed', { count: unconfirmedCount, defaultValue: ` · Not confirmed ${unconfirmedCount}` })}
               </span>
             </div>
@@ -668,7 +674,7 @@ export const BulkActionDialog: React.FC<BulkActionDialogProps> = ({
                   <ul className="text-xs space-y-1">
                     {unconfirmedPreview.map(id => (
                       <li key={id} className="break-words" data-testid={`bulk-unconfirmed-record-${id}`}>
-                        • {refusedRecordName(id)}
+                        • {listedRecordName(id)}
                       </li>
                     ))}
                     {unconfirmedRest > 0 && (
@@ -695,8 +701,32 @@ export const BulkActionDialog: React.FC<BulkActionDialogProps> = ({
                       <li key={r.id} className="flex items-start gap-2" data-testid={`bulk-refused-row-${r.id}`}>
                         <Ban className="h-3 w-3 mt-0.5 shrink-0 text-amber-500" />
                         <div className="min-w-0 flex-1 break-words">
-                          <span className="text-muted-foreground">{refusedRecordName(r.id)}:</span> {r.message}
+                          <span className="text-muted-foreground">{listedRecordName(r.id)}:</span> {r.message}
                         </div>
+                      </li>
+                    ))}
+                  </ul>
+                </ScrollArea>
+              </div>
+            )}
+            {pausedRows.length > 0 && (
+              /* Records whose flow run paused at a screen (objectstack#36931):
+                 the run started and waits for input, so the record is neither
+                 done nor failed. Their screens open one after another over
+                 this dialog; a paused row offers no retry (a re-run would
+                 start a second run) and goes into no error CSV. */
+              <div className="space-y-1" data-testid="bulk-paused-records">
+                <p className="text-xs text-muted-foreground">
+                  {t('grid.bulk.pausedRecords', {
+                    defaultValue: 'These records are waiting for input. Their screens open one after another:',
+                  })}
+                </p>
+                <ScrollArea className="max-h-32 rounded border bg-muted/30 p-2">
+                  <ul className="text-xs space-y-1.5">
+                    {pausedRows.map(p => (
+                      <li key={p.id} className="flex items-start gap-2" data-testid={`bulk-paused-row-${p.id}`}>
+                        <Hourglass className="h-3 w-3 mt-0.5 shrink-0 text-amber-500" />
+                        <div className="min-w-0 flex-1 break-words">{listedRecordName(p.id)}</div>
                       </li>
                     ))}
                   </ul>
@@ -716,7 +746,7 @@ export const BulkActionDialog: React.FC<BulkActionDialogProps> = ({
                         <XCircle className="h-3 w-3 mt-0.5 shrink-0 text-destructive" />
                         <div className="min-w-0 flex-1">
                           <div className="break-words">
-                            <span className="text-muted-foreground" data-testid={`bulk-error-record-${e.id}`}>{refusedRecordName(e.id)}:</span> {e.userMessage ?? e.error}
+                            <span className="text-muted-foreground" data-testid={`bulk-error-record-${e.id}`}>{listedRecordName(e.id)}:</span> {e.userMessage ?? e.error}
                           </div>
                         </div>
                         {/* A plain `custom` callout has nothing to re-run, but

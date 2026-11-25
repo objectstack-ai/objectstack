@@ -201,4 +201,28 @@ describe('carry-forward N2 — Esc reaches the non-Radix fullscreen first', () =
     expect(await screen.findByTestId('list-page')).toBeInTheDocument();
     expect(where()).toBe('/studio/com.acme.app/metadata/canvas_36901?package=com.acme.app');
   });
+
+  it('objectstack#36900 — an Esc a dialog above already took (the command palette closing) leaves the fullscreen and the page alone', async () => {
+    open('canvas_36901', '?package=com.acme.app');
+    await screen.findByTestId('canvas-stub');
+    fireEvent.click(screen.getByTitle(t('engine.edit.fullscreen', 'en-US')));
+    expect(screen.getByTitle(t('engine.edit.exitFullscreen', 'en-US'))).toBeInTheDocument();
+
+    // A Radix layer takes its Escape in the capture phase and marks it handled.
+    const takenByDialog = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') e.preventDefault();
+    };
+    document.addEventListener('keydown', takenByDialog, true);
+    try {
+      fireEvent.keyDown(document.body, { key: 'Escape' });
+    } finally {
+      document.removeEventListener('keydown', takenByDialog, true);
+    }
+    expect(screen.getByTitle(t('engine.edit.exitFullscreen', 'en-US'))).toBeInTheDocument();
+    expect(where()).toBe('/studio/com.acme.app/metadata/canvas_36901/w1?package=com.acme.app');
+
+    // CONTROL: the next Esc nobody took leaves the fullscreen.
+    fireEvent.keyDown(document.body, { key: 'Escape' });
+    await waitFor(() => expect(screen.getByTitle(t('engine.edit.fullscreen', 'en-US'))).toBeInTheDocument());
+  });
 });
