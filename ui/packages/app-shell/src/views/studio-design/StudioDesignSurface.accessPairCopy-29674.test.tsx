@@ -10,7 +10,12 @@
  *
  * objectstack#36905 — each set opens at its own metadata address, the copy at
  * its pair's (`/studio/<pair>/metadata/permission/<copy>`, as the base's list
- * links it), in the full-screen page (`StudioPermissionSetPage`).
+ * links it), in the full-screen page (`StudioPermissionSetPage`). The retired
+ * pillar opened the copy on the BASE's address,
+ * `/studio/<base>/access?surface=permission:<copy>`: that old bookmark
+ * redirects to the pair's address, where the copy opens writable, and the
+ * base's own set's old address stays on the base (CONTROL). The address's
+ * other parameters ride along through the real surface.
  *
  * The REAL `StudioDesignSurface` (its area), `StudioPermissionSetPage` and
  * `PermissionMatrixEditPage` over the REAL metadata client and a fetch stub serving the package list (the
@@ -39,7 +44,7 @@ import '@objectstack/lint';
 import '@object-ui/plugin-detail';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import { MemoryRouter, Route, Routes } from 'react-router-dom';
+import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
 
 const BASE = 'com.example.showcase';
 const PAIR = 'com.example.showcase.custom';
@@ -223,6 +228,25 @@ function renderAccess(set: string) {
   );
 }
 
+/** Where the router stands. */
+function LocationProbe() {
+  const location = useLocation();
+  return <output data-testid="location">{`${location.pathname}${location.search}`}</output>;
+}
+
+/** The retired pillar's address of `set`, on the base, with `extra` beside its `?surface=`. */
+function renderPillarAddress(set: string, extra = '') {
+  return render(
+    <MemoryRouter initialEntries={[`/studio/${BASE}/access?surface=${encodeURIComponent(`permission:${set}`)}${extra}`]}>
+      <Routes>
+        <Route path="/studio/:packageId/metadata/*" element={<StudioDesignSurface area="metadata" />} />
+        <Route path="/studio/:packageId/:tab" element={<StudioDesignSurface />} />
+      </Routes>
+      <LocationProbe />
+    </MemoryRouter>,
+  );
+}
+
 const header = () => screen.getByTestId('permission-detail-header');
 const matrix = () => screen.getByTestId('perm-studio-matrix');
 const countsText = (objects: number, fields: number) =>
@@ -322,5 +346,59 @@ describe('the header’s provenance chip: Custom in the pair, Package on the bas
     renderAccess(BASE_SET.name);
     await waitFor(() => expect(within(header()).getByText(/(^|· )Contributor$/)).toBeInTheDocument(), { timeout: 8000 });
     await waitFor(() => expect(chip()).toHaveTextContent(t('engine.studio.access.origin.app', 'en')), { timeout: 8000 });
+  });
+});
+
+/**
+ * objectstack#36905 — the retired pillar's address of a set. On a read-only
+ * base it listed the sets the pair adds and opened them at the pair, writable,
+ * while the address named the base; the redirect sends such a set to the
+ * pair's address, not to the base's stack, which does not hold it.
+ */
+describe('the retired pillar’s address of a set the pair adds opens it at the pair (objectstack#36905)', () => {
+  const location = () => screen.getByTestId('location').textContent;
+
+  it('`/studio/<base>/access?surface=permission:<copy>` lands on the pair’s address, and the copy opens writable there', async () => {
+    renderPillarAddress(COPY);
+    await waitFor(() => expect(location()).toBe(`/studio/${PAIR}/metadata/permission/${COPY}?package=${PAIR}`), {
+      timeout: 8000,
+    });
+    await copyOpen();
+    await waitFor(() => expect(header()).toHaveTextContent(countsText(8, 3)));
+    expect(within(header()).getByTestId('perm-provenance-badge')).toHaveTextContent(t('perm.badge.custom', 'en'));
+    // Writable: an edit saves the copy's draft at the pair.
+    fireEvent.click(within(matrix()).getByLabelText(`sc_note ${t('perm.action.edit', 'en')}`));
+    await pressStudioSave();
+    await waitFor(() => expect(srv.saves).toHaveLength(1), { timeout: 8000 });
+    expect(new URLSearchParams(srv.saves[0]!.search).get('package')).toBe(PAIR);
+  });
+
+  it('a set created in the pair, still a draft, lands on the pair’s address too', async () => {
+    const CREATED = 'pair_auditor';
+    srv.pairDrafts.set(`permission/${CREATED}`, { name: CREATED, label: 'Pair auditor', objects: {}, fields: {} });
+    renderPillarAddress(CREATED);
+    await waitFor(() => expect(location()).toBe(`/studio/${PAIR}/metadata/permission/${CREATED}?package=${PAIR}`), {
+      timeout: 8000,
+    });
+  });
+
+  it('the address’s other parameters ride along through the surface', async () => {
+    renderPillarAddress(COPY, '&changes=review');
+    await waitFor(
+      () => expect(location()).toBe(`/studio/${PAIR}/metadata/permission/${COPY}?changes=review&package=${PAIR}`),
+      { timeout: 8000 },
+    );
+  });
+
+  it('CONTROL: the base’s own set’s old address stays on the base', async () => {
+    renderPillarAddress(BASE_SET.name);
+    await waitFor(
+      () => expect(location()).toBe(`/studio/${BASE}/metadata/permission/${BASE_SET.name}?package=${BASE}`),
+      { timeout: 8000 },
+    );
+    await waitFor(() => expect(within(header()).getByText(/(^|· )Contributor$/)).toBeInTheDocument(), { timeout: 8000 });
+    await waitFor(() => expect(within(header()).getByTestId('perm-provenance-badge')).toHaveTextContent(
+      t('engine.studio.access.origin.app', 'en'),
+    ), { timeout: 8000 });
   });
 });

@@ -20,7 +20,13 @@
  * the area's addresses, so the area does not redirect a second time
  * (`areaLocationRedirect`).
  *
- * Pure: no React, no router.
+ * A set a read-only base's `.custom` pair adds (ADR-0146 D3) — every "New
+ * similar" copy among them — was listed on the base's pillar and opened at the
+ * pair, writable, while the address kept naming the base. Such a set opens at
+ * the pair's address (`setHeldIn`, decided by {@link accessPillarSetHolder}
+ * from the two packages' sets): the base's own stack does not hold it.
+ *
+ * Pure: no React, no router. The reads live in `accessPillarLanding.tsx`.
  */
 
 import { DESIGNER_SURFACE_PARAM, parseSurfaceParam } from '../metadata-admin/nav-selection.js';
@@ -29,15 +35,46 @@ import { studioMetadataAreaAddress, studioMetadataItemAddress, studioOwdOverview
 /** The `?surface=` value the retired pillar opened its sharing overview on. */
 export const ACCESS_PILLAR_OWD_SURFACE = { type: 'owd', name: 'overview' } as const;
 
-/** The address an Access pillar URL of `packageId` redirects to; `search` is its query, with or without its `?`. */
-export function accessPillarRedirect(packageId: string, search: string): string {
+/** The permission set an Access pillar URL's query opens, or `null` when it opens none. */
+export function accessPillarSetName(search: string): string | null {
+  const surface = parseSurfaceParam(new URLSearchParams(search).get(DESIGNER_SURFACE_PARAM));
+  return surface?.type === 'permission' && surface.name ? surface.name : null;
+}
+
+/**
+ * The package that holds the set `name` the base's pillar opened, as the
+ * retired pillar decided it: the base when its sets (published or draft) hold
+ * the name; otherwise `pairId` when the pair's do, since the pillar listed the
+ * pair's sets the base does not hold and opened them there; the base else.
+ * `null` sets are a read that failed: a failed pair read lists none of the
+ * pair's sets, and a failed base read leaves the set on the base, whose page
+ * then reports the failure.
+ */
+export function accessPillarSetHolder(
+  packageId: string,
+  name: string,
+  baseSets: ReadonlySet<string> | null,
+  pair: { id: string; sets: ReadonlySet<string> | null } | null,
+): string {
+  if (baseSets === null || baseSets.has(name)) return packageId;
+  return pair?.sets?.has(name) ? pair.id : packageId;
+}
+
+/**
+ * The address an Access pillar URL of `packageId` redirects to; `search` is
+ * its query, with or without its `?`. `setHeldIn` is the package holding the
+ * set it opens ({@link accessPillarSetHolder}), `packageId` when omitted.
+ */
+export function accessPillarRedirect(packageId: string, search: string, options: { setHeldIn?: string } = {}): string {
   const params = new URLSearchParams(search);
   const surface = parseSurfaceParam(params.get(DESIGNER_SURFACE_PARAM));
   params.delete(DESIGNER_SURFACE_PARAM);
   if (surface?.type === ACCESS_PILLAR_OWD_SURFACE.type) return studioOwdOverviewPath(packageId, { query: params });
-  params.set('package', packageId);
   if (surface?.type === 'permission' && surface.name) {
-    return studioMetadataItemAddress(packageId, 'permission', surface.name, { query: params });
+    const holder = options.setHeldIn ?? packageId;
+    params.set('package', holder);
+    return studioMetadataItemAddress(holder, 'permission', surface.name, { query: params });
   }
+  params.set('package', packageId);
   return studioMetadataAreaAddress(packageId, 'permission', { query: params });
 }

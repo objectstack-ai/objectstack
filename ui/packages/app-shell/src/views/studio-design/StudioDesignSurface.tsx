@@ -134,7 +134,7 @@ import { STUDIO_METADATA_AREA, isStudioAllPackagesScope } from './metadataArea.j
 import { StudioMenu, StudioMenuDataProvider, StudioMenuProvider, StudioMenuTrigger } from './StudioMenu.js';
 import { StudioMetadataArea } from './StudioMetadataArea.js';
 import { StudioOwdOverviewPage } from './StudioOwdOverviewPage.js';
-import { accessPillarRedirect } from './accessPillarRedirect.js';
+import { AccessPillarLanding } from './accessPillarLanding.js';
 import { useMetadataRefreshNonce } from './useMetadataRefreshNonce.js';
 import {
   type SurfaceTarget,
@@ -1637,9 +1637,15 @@ function StudioDesignSurfaceBody({ aiSlot, area }: StudioDesignSurfaceProps): Re
               />
             ) : (
               // objectstack#36905 — the Access pillar draws no page: a set opens
-              // at its metadata address, the sharing overview on its own route,
-              // and the bare pillar on the list of sets.
-              <Navigate to={accessPillarRedirect(packageId, currentSearch)} state={landingState} replace />
+              // at its metadata address (a set the base's pair adds at the
+              // pair's), the sharing overview on its own route, and the bare
+              // pillar on the list of sets.
+              <AccessPillarLanding
+                key={`${packageId}${currentSearch}`}
+                packageId={packageId}
+                search={currentSearch}
+                state={landingState}
+              />
             )}
             </StudioPendingDraftsContext.Provider>
           </div>
