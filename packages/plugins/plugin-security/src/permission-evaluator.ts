@@ -12,7 +12,7 @@ import { RECYCLE_BIN_GRANT_KEYS } from '@objectstack/spec/data';
 import {
   fieldPermissionVote,
   holdsSuperuserBypass,
-  superuserFieldVote,
+  viewAllFieldsReadVote,
   type FieldConditionVerdict,
 } from '@objectstack/core';
 
@@ -36,18 +36,6 @@ export interface ConditionedFieldEntry {
   when: string;
   /** The entry's edit vote on a matching row. */
   editable: boolean;
-  /**
-   * [#29610 / ruling of record 6573563853, letter A] The sets whose Modify All
-   * vote supersedes the entry — empty when none does. Read from
-   * `superuserFieldVote` (`@objectstack/core`), the vote
-   * {@link PermissionEvaluator.getFieldPermissions} applies after the
-   * per-entry votes under every `when` verdict: when it votes `editable`, every
-   * field of the object is readable and editable on every row, so the entry's
-   * lock binds on no row for this principal. A View All vote supersedes
-   * nothing here: it votes only the read bit, which a conditioned entry already
-   * casts (the spec refuses `readable: false` beside a `when`).
-   */
-  supersededBy: string[];
 }
 
 /**
@@ -464,11 +452,11 @@ export class PermissionEvaluator {
    * are the same list, so a report that names a granting set cannot coexist
    * with a gate that found none.
    *
-   * [ADR-0066 ⑧, ruling of record 6573563853] Each set is read by
-   * `holdsSuperuserBypass` (`@objectstack/core`), the same function the field
-   * merge's super-user vote reads ({@link getFieldPermissions}, and the
-   * row-blind `/auth/me/permissions` merge), so the row bypass and the field
-   * vote name the same sets. `opts.isPrivate` is accepted and never changes
+   * [ADR-0066 ⑧] Each set is read by `holdsSuperuserBypass`
+   * (`@objectstack/core`), the one reading of the row bypass. It reaches no
+   * field: since the field-axis split (ruling of record 6912661484) the field
+   * merges' one "all fields" vote is `viewAllFields`
+   * ({@link getFieldPermissions}). `opts.isPrivate` is accepted and never changes
    * the answer: the private posture withholds only a `'*'` wildcard that
    * carries neither bit (see {@link resolveObjectPermission}).
    */
@@ -531,28 +519,17 @@ export class PermissionEvaluator {
    * set had not declared the field: the merge below is unchanged for every
    * entry without a `when`, and only DECLARING entries vote, as before.
    *
-   * [ADR-0066 D2 ⑧ as amended — ruling of record 6573563853, letter A] A set
-   * that holds the super-user bypass on the object (the sets
-   * {@link superuserBypassSets} names) then votes on EVERY field of it:
-   * `viewAllRecords` votes `readable: true`, `modifyAllRecords` votes
-   * `readable: true` and `editable: true` (`superuserFieldVote`,
-   * `@objectstack/core`). Before, a set that granted the object through its
-   * super-user bits but named no field cast no vote, so an app set's
-   * `readable: false` hid the field from a platform admin who also held it.
-   * Union without deny is otherwise unchanged.
-   *
-   * [ADR-0066 D2 ⑧ note of 2026-11-15] The vote is asked per field: a set
-   * holding View All without Modify All casts no read vote on a field its OWN
-   * row declares `readable: false`, so that row binds the set's holders.
-   * Another set's View All or Modify All still reads the field, and a Modify
-   * All set votes on every field as before, its own rows included.
-   *
-   * [Field-axis split, ruling of record 6912661484, letter A] A set carrying
-   * `viewAllFields` on the object casts the same read vote, under the same
-   * own-row rule, and never an edit vote (ruled read-only). The vote is the
-   * shared `superuserFieldVote` above, so this merge and the row-blind one
-   * cannot disagree about it. It is a field vote only:
-   * {@link superuserBypassSets} does not read it.
+   * [Field-axis split, ruling of record 6912661484, letter A, step 3] A set
+   * carrying `viewAllFields` on the object then casts a read vote on EVERY
+   * field of it the merge names, except a field its OWN row declares
+   * `readable: false` (inside one set, specific beats general), and never an
+   * edit vote (ruled read-only). The vote is the shared `viewAllFieldsReadVote`
+   * (`@objectstack/core`), so this merge and the row-blind one cannot disagree
+   * about it. It is a field vote only: {@link superuserBypassSets} does not
+   * read it. View All and Modify All cast NO field vote: they widen which
+   * records the caller reaches and nothing else, so one set's View All or
+   * Modify All no longer re-opens a field another set hides (until protocol
+   * 19 they voted on every field, ruling of record 6573563853).
    */
   getFieldPermissions(
     objectName: string,
@@ -583,14 +560,10 @@ export class PermissionEvaluator {
       }
     }
 
-    // [Ruling of record 6573563853; ADR-0066 D2 ⑧ note of 2026-11-15] The
-    // super-user vote, per field — the same function the row-blind
-    // `/auth/me/permissions` merge applies.
+    // [Ruling of record 6912661484] The `viewAllFields` read vote, per field —
+    // the same function the row-blind `/auth/me/permissions` merge applies.
     for (const [fieldName, perm] of Object.entries(result)) {
-      const superVote = superuserFieldVote(permissionSets, objectName, fieldName);
-      if (!superVote) continue;
-      perm.readable = true;
-      if (superVote.editable) perm.editable = true;
+      if (viewAllFieldsReadVote(permissionSets, objectName, fieldName)) perm.readable = true;
     }
 
     return result;
@@ -600,20 +573,17 @@ export class PermissionEvaluator {
    * [#25866] The row-conditioned entries the sets declare on `objectName`,
    * for a reader that holds no row (`os explain`): each is reported AS a
    * row-conditioned lock — judged per row by the write gate, applied as its
-   * lock everywhere else — rather than folded silently into the mask. Each
-   * entry names the sets whose Modify All vote supersedes it (`supersededBy`,
-   * #29610), so the report never calls a lock binding that the merge overrides.
+   * lock everywhere else — rather than folded silently into the mask. No
+   * object-wide bit supersedes such a lock: `viewAllFields` votes the read bit
+   * only, which a conditioned entry already casts (the spec refuses
+   * `readable: false` beside a `when`), and View All / Modify All cast no field
+   * vote (ruling of record 6912661484).
    */
   conditionedFieldEntries(
     objectName: string,
     permissionSets: PermissionSet[],
   ): ConditionedFieldEntry[] {
     const out: ConditionedFieldEntry[] = [];
-    // [#29610] The same super-user vote `getFieldPermissions` applies — never a
-    // second reading of the bits. An `editable` vote overrides every entry.
-    const supersededBy = superuserFieldVote(permissionSets, objectName)?.editable
-      ? this.superuserBypassSets(objectName, permissionSets, { bit: 'modify' })
-      : [];
     for (const ps of permissionSets) {
       if (!ps.fields) continue;
       for (const [key, perm] of Object.entries(ps.fields)) {
@@ -625,7 +595,6 @@ export class PermissionEvaluator {
           set: ps.name,
           when,
           editable: perm.editable === true,
-          supersededBy: [...supersededBy],
         });
       }
     }

@@ -400,13 +400,13 @@ const baseDefaultPermissionSets: PermissionSet[] = [
         viewAllRecords: true,
         modifyAllRecords: true,
         // [Field-axis split, ruling of record 6912661484, letter A] The
-        // read-only "every field" vote, said explicitly. Today it duplicates
-        // the vote `viewAllRecords`/`modifyAllRecords` already cast on every
-        // field (`superuserFieldVote`, `@objectstack/core`), so nothing
-        // answers differently; it is what keeps an organization administrator
-        // reading every field once those two bits stop voting on fields. The
-        // explicit entries below carry no super-user bit and so no field vote
-        // either: an explicit entry is the set's whole answer for its object.
+        // read-only "every field" vote (`viewAllFieldsReadVote`,
+        // `@objectstack/core`). `viewAllRecords`/`modifyAllRecords` cast no
+        // field vote, so this bit is what keeps an organization administrator
+        // reading every field another set hides. It votes no edit: a field
+        // another set locks stays locked for a holder of both sets. The
+        // explicit entries below carry no `viewAllFields` and so no field vote:
+        // an explicit entry is the set's whole answer for its object.
         // `deriveWallLessOrgAdmin` drops it with the two bypass bits.
         viewAllFields: true,
         // [#3544] The super-user bits do not imply export.
@@ -1801,11 +1801,11 @@ function deriveWallLessOrgAdmin(base: PermissionSet): PermissionSet {
   // deployment-wide data superuser is genuinely intended.
   //
   // [Field-axis split, ruling of record 6912661484] `viewAllFields` leaves
-  // with the two bypass bits. The variant never held the field vote those
-  // bits cast, so keeping the parent's `viewAllFields` would hand its holders
-  // every field another set hides, a behaviour change the additive step must
-  // not make. It is a field vote, not a record bypass: dropping it is about
-  // keeping today's answer, not about the tenant wall.
+  // with the two bypass bits. The variant never read the fields another set
+  // hides, so keeping the parent's `viewAllFields` would hand its holders
+  // every such field, a widening nobody ruled. It is a field vote, not a
+  // record bypass: dropping it is about keeping the variant's answer, not
+  // about the tenant wall.
   const objects: Record<string, any> = { ...(base.objects ?? {}) };
   const { viewAllRecords: _v, modifyAllRecords: _m, viewAllFields: _f, ...wildcardWithoutBypass } =
     (objects['*'] ?? {}) as Record<string, unknown>;

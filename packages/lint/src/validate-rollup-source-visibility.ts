@@ -56,10 +56,9 @@
  *  - the object grant: the set's own entry for the object, otherwise its `'*'`
  *    entry, which covers a `private` object only when it carries View All /
  *    Modify All ({@link grantFor}, `resolveObjectPermission`);
- *  - the field entry: `readable: false` hides the field, unless the set's
- *    Modify All on the object votes every field readable (ADR-0066 D2 ⑧ as
- *    amended). Beside View All alone the set's own entry binds (note of
- *    2026-11-15). No entry ⇒ readable, as the merge does with an absent key
+ *  - the field entry: `readable: false` hides the field, whatever
+ *    object-wide bit the set holds (the field-axis split, ruling of record
+ *    6912661484). No entry ⇒ readable, as the merge does with an absent key
  *    ({@link fieldHidden});
  *  - the capability gate (ADR-0066 D3): an object's `requiredPermissions` —
  *    the `string[]` form, or the `read` bucket of the per-operation map
@@ -226,18 +225,15 @@ function grantFor(set: AnyRec, objectName: string, isPrivate: boolean): Effectiv
 
 /**
  * Does the set's own field entry hide `objectName.fieldName`? `readable: false`
- * hides it unless the set's Modify All on the object votes every field
- * readable (ADR-0066 D2 ⑧ as amended). The set's View All alone casts no vote
- * on a field its own entry hides (note of 2026-11-15), so the entry binds
- * there. Nor does its `viewAllFields`: inside one set the specific row beats
- * the general bit (the field-axis split, ruling of record 6912661484), so the
- * bit never lifts this answer. No entry ⇒ not hidden.
+ * hides it whatever object-wide bit the set holds (the field-axis split,
+ * ruling of record 6912661484): View All and Modify All cast no field vote,
+ * and inside one set the specific row beats the general `viewAllFields` bit.
+ * No entry ⇒ not hidden.
  */
 function fieldHidden(set: AnyRec, objectName: string, fieldName: string): boolean {
   const fields = isRec(set.fields) ? set.fields : undefined;
   const entry = fields?.[`${objectName}.${fieldName}`];
-  if (!isRec(entry) || entry.readable !== false) return false;
-  return !holdsSuperuserBypass(set as { objects?: Record<string, unknown> }, objectName, 'modify');
+  return isRec(entry) && entry.readable === false;
 }
 
 /**
@@ -404,23 +400,16 @@ function acknowledgedReason(set: AnyRec, column: string): string | undefined {
 /**
  * The remedy, with its reach: in the field merge only DECLARING sets vote, so
  * `readable: false` on this set hides the column from every holder of the set,
- * and only an entry with `readable: true` (or View All / Modify All on the
- * parent) in a co-held set restores it.
+ * and only an entry with `readable: true` (or `viewAllFields` on the parent)
+ * in a co-held set restores it.
  */
-function hintFor(set: AnyRec, d: SummaryDescriptor): string {
+function hintFor(d: SummaryDescriptor): string {
   const column = `${d.parent.name}.${d.field}`;
   const entry = `fields["${column}"]: { readable: false }`;
   const reach =
     `That hides "${column}" from every holder of the set, and a co-held set with no entry for it does not ` +
-    `restore it (View All or Modify All on "${d.parent.name}" does); to keep it for some holders, declare ` +
+    `restore it (viewAllFields on "${d.parent.name}" does); to keep it for some holders, declare ` +
     `fields["${column}"]: { readable: true } in the sets they hold`;
-  if (holdsSuperuserBypass(set as { objects?: Record<string, unknown> }, d.parent.name, 'modify')) {
-    return (
-      `If its value should not be visible to this set, first remove Modify All on ` +
-      `"${d.parent.name}" from it, since ${entry} does not hide a field from a set holding it, then set ` +
-      `${entry} on it. ${reach}`
-    );
-  }
   return `If its value should not be visible to this set, set ${entry} on it. ${reach}`;
 }
 
@@ -446,7 +435,7 @@ export function validateRollupSourceVisibility(stack: AnyRec): RollupSourceVisib
               where: `permission set "${setName}" · summary field "${column}"`,
               path: `permissions[${i}].fields["${column}"]`,
               message: `${message}; ${ROLLUP_SEMANTICS}`,
-              hint: hintFor(set, d),
+              hint: hintFor(d),
             }
           : {
               severity: 'info',
@@ -514,7 +503,7 @@ export function validateRollupSourceVisibility(stack: AnyRec): RollupSourceVisib
         message:
           `${rollupPhrase(d, { everyRow: true })}, while ${by} narrows the rows permission set ` +
           `"${setName}" reads${forHolders}; ${ROLLUP_SEMANTICS}`,
-        hint: hintFor(set, d),
+        hint: hintFor(d),
       });
     }
   });

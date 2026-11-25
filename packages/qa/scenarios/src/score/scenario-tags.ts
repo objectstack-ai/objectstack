@@ -57,7 +57,7 @@
  * Deterministic: no model call, no network (the cost ruling on cloud#3600).
  */
 
-import { buildEffectiveObjectPermissions, holdsSuperuserBypass, resolveStackCollection, superuserFieldVote } from '@objectstack/core';
+import { buildEffectiveObjectPermissions, holdsSuperuserBypass, resolveStackCollection } from '@objectstack/core';
 import { standaloneActionOwnerKey } from '@objectstack/objectql';
 import { effectiveSharingModel } from '@objectstack/plugin-sharing';
 import {
@@ -1012,8 +1012,10 @@ export function personaGrantNeeds(card: ScenarioArtifactCard): PersonaGrantNeed[
  * write does not by itself mean the verb is absent.
  *
  *  - `field-lock` — an entry with no row condition (`when`) on a field the
- *    write names, not editable (`fieldPermissionVote`'s reading), and no Modify
- *    All vote on the object (`superuserFieldVote`) to override it;
+ *    write names, not editable (`fieldPermissionVote`'s reading). No
+ *    object-wide bit overrides it: Modify All casts no field vote and
+ *    `viewAllFields` votes no edit (the field-axis split, ruling of record
+ *    6912661484);
  *  - `row-rule` — a row policy (`rowLevelSecurity`) that applies to this write
  *    (`enabled` not false, its object or `'*'`, its operation or `all`, no
  *    `positions`: the persona holds none), or a row-conditioned entry on a
@@ -1032,8 +1034,7 @@ function writeRefusalRoute(
     const entry = entries[`${object}.${f}`];
     return isBag(entry) && entry.editable !== true ? [{ field: f, conditioned: entry.when !== undefined }] : [];
   });
-  const modifyAll = superuserFieldVote([set as { objects?: Record<string, unknown> }], object)?.editable === true;
-  const locked = modifyAll ? [] : written.filter((w) => !w.conditioned).map((w) => w.field);
+  const locked = written.filter((w) => !w.conditioned).map((w) => w.field);
   if (locked.length > 0) return { route: 'field-lock', names: locked };
   const policies = (Array.isArray(set.rowLevelSecurity) ? set.rowLevelSecurity : []).filter(
     (r): r is Bag =>
@@ -1045,7 +1046,7 @@ function writeRefusalRoute(
   );
   const rowRules = [
     ...policies.map((r) => `row policy ${String(r.name)}`),
-    ...(modifyAll ? [] : written.filter((w) => w.conditioned).map((w) => `row-conditioned field ${w.field}`)),
+    ...written.filter((w) => w.conditioned).map((w) => `row-conditioned field ${w.field}`),
   ];
   return rowRules.length > 0 ? { route: 'row-rule', names: rowRules } : { route: 'none', names: [] };
 }
