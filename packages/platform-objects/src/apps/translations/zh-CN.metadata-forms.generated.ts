@@ -3152,42 +3152,42 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
     label: "AI 上下文包",
     sections: {
       basics: {
-        label: "Basics",
-        description: "The pack's identity and the object whose records it reads."
+        label: "基本信息",
+        description: "资料包的标识，以及它读取哪个对象的记录。"
       },
       material: {
-        label: "Material",
-        description: "What of the record is handed to the model. Each picker offers the fields of the root object, or of the related list's own object."
+        label: "资料内容",
+        description: "把记录的哪些内容交给模型。每个选择器列出根对象的字段，或该关联列表自身对象的字段。"
       }
     },
     fields: {
       name: {
-        label: "Name",
-        helpText: "Unique identifier (snake_case). A skill's context key and the get_record_context tool name the pack by it."
+        label: "名称",
+        helpText: "唯一标识（snake_case）。技能的 context 键和 get_record_context 工具都按它指名资料包。"
       },
       label: {
-        label: "Label",
-        helpText: "Display name, the header of the tool answer. A pack has no description: write its purpose here."
+        label: "显示名称",
+        helpText: "显示名称，即工具回答的标题。资料包没有描述：用途写在这里。"
       },
       object: {
-        label: "Object",
-        helpText: "The root object: the pack reads one record of it."
+        label: "根对象",
+        helpText: "根对象：资料包读取它的一条记录。"
       },
       fields: {
-        label: "Fields",
-        helpText: "The root object's fields handed to the model, in order (at most 30). A lookup among them is answered with the name of the record it points at."
+        label: "字段",
+        helpText: "交给模型的根对象字段，按顺序（最多 30 个）。其中的查找字段以它指向的记录名称作答。"
       },
       related: {
-        label: "Related",
-        helpText: "Child lists that point at the record, one level deep (at most 3). Each list names its child object, the reference field that points at the root, and the columns read for each row (at most 10); with no columns a row is read by its name."
+        label: "关联列表",
+        helpText: "指向这条记录的子列表，只读一层（最多 3 个）。每个列表指明子对象、指向根对象的引用字段，以及每行读取的列（最多 10 列）；不选列时每行只读取其名称。"
       },
       body: {
-        label: "Body",
-        helpText: "The one long-text field read as the record's body."
+        label: "正文",
+        helpText: "作为记录正文读取的那一个长文本字段。"
       },
       "body.field": {
-        label: "Body field",
-        helpText: "A long-text field of the root object (textarea, markdown, html, richtext). Any other field is reported when the pack is saved, and the pack then carries no body."
+        label: "正文字段",
+        helpText: "根对象的一个长文本字段（textarea、markdown、html、richtext）。选其他字段会在保存时报告，资料包也就不带正文。"
       }
     }
   }

@@ -3170,7 +3170,7 @@ export const arMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         helpText: "Display name, the header of the tool answer. A pack has no description: write its purpose here."
       },
       object: {
-        label: "Object",
+        label: "Root object",
         helpText: "The root object: the pack reads one record of it."
       },
       fields: {
@@ -3178,7 +3178,7 @@ export const arMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         helpText: "The root object's fields handed to the model, in order (at most 30). A lookup among them is answered with the name of the record it points at."
       },
       related: {
-        label: "Related",
+        label: "Related lists",
         helpText: "Child lists that point at the record, one level deep (at most 3). Each list names its child object, the reference field that points at the root, and the columns read for each row (at most 10); with no columns a row is read by its name."
       },
       body: {
