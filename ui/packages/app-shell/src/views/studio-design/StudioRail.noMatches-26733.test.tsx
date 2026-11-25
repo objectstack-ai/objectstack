@@ -169,7 +169,6 @@ const CASES: RailCase[] = [
     emptyKey: 'engine.studio.data.noObjects',
     pillar: () => <DataPillar packageId={PKG} />,
   },
-  {
   // objectstack#36903, objectstack#36905 — the Automations and Access rails are
   // gone: a flow and a permission set are chosen from their type's list.
 ];

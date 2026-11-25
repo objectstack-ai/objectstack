@@ -14,7 +14,6 @@ import {
   AREA_DESIGNER_PAGE_TYPES,
   AREA_PILLAR_FOR_TYPE,
   STUDIO_ALL_PACKAGES_SEGMENT,
-  AREA_DESIGNER_PAGE_TYPES,
   areaDesignerItemOf,
   areaItemAsksGenericPage,
   areaItemOpensDesignerPage,
