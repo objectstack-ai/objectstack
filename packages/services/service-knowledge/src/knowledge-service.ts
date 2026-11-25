@@ -520,8 +520,7 @@ export class KnowledgeService implements IKnowledgeService {
 
   async search(query: string, opts: KnowledgeSearchOptions = {}): Promise<KnowledgeHit[]> {
     const topK = opts.topK ?? this.defaultTopK;
-    const admitted = await this.admitSources(this.resolveSearchTargets(opts.sourceIds), opts.executionContext);
-    const sources = await this.scopeByOrganization(admitted, opts.executionContext);
+    const sources = await this.admitSources(this.resolveSearchTargets(opts.sourceIds), opts.executionContext);
     if (sources.length === 0) return [];
 
     const rawHits: KnowledgeHit[] = [];
@@ -776,15 +775,20 @@ export class KnowledgeService implements IKnowledgeService {
    * hit with no `sourceRecordId`). Fails CLOSED: a gate that throws refuses
    * every source over that object, reported once at `error`. The objects'
    * admissions are asked concurrently.
+   *
+   * Each admitted source carries the organizations its search hands the
+   * adapter ({@link scopeByOrganization}, ADR-0161 K8, item 9). The system
+   * context's bypass above covers that scope too: the system identity's
+   * search is handed no organization filter.
    */
   private async admitSources(
     sources: KnowledgeSource[],
     ctx: ExecutionContext | undefined,
-  ): Promise<KnowledgeSource[]> {
-    if (ctx?.isSystem) return sources;
+  ): Promise<Array<{ source: KnowledgeSource; organizationIds?: string[] }>> {
+    if (ctx?.isSystem) return sources.map((source) => ({ source }));
     const engine = this.options.dataEngine;
     if (!ctx || !engine) {
-      const kept = sources.filter((source) => source.source.kind !== 'object');
+      const kept = sources.filter((source) => source.source.kind !== 'object').map((source) => ({ source }));
       if (kept.length < sources.length) {
         this.options.logger?.warn?.(
           !ctx
@@ -839,7 +843,7 @@ export class KnowledgeService implements IKnowledgeService {
         );
       }
     }
-    return out;
+    return this.scopeByOrganization(out, ctx);
   }
 
   /** A gate lookup threw: every source over `object` is refused (fail-closed), reported once at `error`, `warn` as the fallback. */
@@ -857,23 +861,24 @@ export class KnowledgeService implements IKnowledgeService {
   }
 
   /**
-   * [ADR-0161 K8, item 9] Pair each admitted source with the organizations its
-   * search hands the adapter (`searchOrganizationIds`): computed here, from
-   * the caller's execution context and the deployment's posture, never from
-   * anything the caller passes. A `file` / `http` source gets none — its
-   * documents carry no organization, and the adapter owns its ACL — and so
-   * does every source for the system identity.
+   * [ADR-0161 K8, item 9] Pair each source {@link admitSources} admitted for
+   * a caller that is NOT the system identity (admission's own bypass answers
+   * that one before this runs) with the organizations its search hands the
+   * adapter (`searchOrganizationIds`): computed here, from the caller's
+   * execution context and the deployment's posture, never from anything the
+   * caller passes. A `file` / `http` source gets none — its documents carry no
+   * organization, and the adapter owns its ACL.
    *
    * The posture is read once per search, and only when an `object` source is
-   * admitted for a non-system caller. A posture that cannot be read leaves
-   * every `object` source unsearched for this call (fail-closed: whether a
-   * wall stands is unknown), reported at `error`, `warn` as the fallback.
+   * admitted. A posture that cannot be read leaves every `object` source
+   * unsearched for this call (fail-closed: whether a wall stands is unknown),
+   * reported at `error`, `warn` as the fallback.
    */
   private async scopeByOrganization(
     sources: KnowledgeSource[],
-    ctx: ExecutionContext | undefined,
+    ctx: ExecutionContext,
   ): Promise<Array<{ source: KnowledgeSource; organizationIds?: string[] }>> {
-    if (!ctx || ctx.isSystem || !sources.some((source) => source.source.kind === 'object')) {
+    if (!sources.some((source) => source.source.kind === 'object')) {
       return sources.map((source) => ({ source }));
     }
     let posture: TenancyPosture | undefined;

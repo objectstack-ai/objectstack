@@ -246,12 +246,14 @@ const CALLER_AC: ExecutionContext = {
 } as ExecutionContext;
 const SYSTEM: ExecutionContext = { positions: [], permissions: [], systemPermissions: [], isSystem: true } as ExecutionContext;
 
-/** The wall each posture puts on the permission re-read (ADR-0105 D1), as the double's `wall`. */
+/**
+ * The wall each posture puts on the permission re-read (ADR-0105 D1), as the
+ * double's `wall`. The service never re-reads for the system identity, so the
+ * wall is asked about persons only.
+ */
 function wallOf(posture: TenancyPosture): (row: Row, context: ExecutionContext) => boolean {
-  if (posture === 'isolated') return (row, ctx) => ctx.isSystem === true || row.organization_id === ctx.tenantId;
-  if (posture === 'group') {
-    return (row, ctx) => ctx.isSystem === true || (ctx.accessible_org_ids ?? []).includes(String(row.organization_id));
-  }
+  if (posture === 'isolated') return (row, ctx) => row.organization_id === ctx.tenantId;
+  if (posture === 'group') return (row, ctx) => (ctx.accessible_org_ids ?? []).includes(String(row.organization_id));
   return () => true;
 }
 

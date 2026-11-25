@@ -58,11 +58,12 @@ export function documentOrganizationId(
 /**
  * The organizations a search of an `object` source over an object with
  * definition `schema` hands the adapter, for a caller with context `ctx`
- * (K8, item 9):
+ * (K8, item 9). `ctx` is never the system identity: the service's source
+ * admission answers that one, with no filter, before asking here.
  *
- * - `undefined` — no filter: the `single` posture (or no posture), the system
- *   identity, and an object the wall does not scope (tenancy disabled, or no
- *   `organization_id` column), whose documents carry no organization.
+ * - `undefined` — no filter: the `single` posture (or no posture), and an
+ *   object the wall does not scope (tenancy disabled, or no `organization_id`
+ *   column), whose documents carry no organization.
  * - the active organization (`isolated`) or the deduplicated membership set
  *   (`group`), as the Layer 0 verdict names them;
  * - `[]` — the wall denies: no active organization under `isolated`, an empty
@@ -76,7 +77,6 @@ export function searchOrganizationIds(
   posture: TenancyPosture | undefined,
   schema: unknown,
 ): string[] | undefined {
-  if (ctx.isSystem) return undefined;
   if (posture === undefined || !postureEnforcesWall(posture)) return undefined;
   const fields = declaredFields(schema);
   const verdict = computeTenantLayer0Verdict({
