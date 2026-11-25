@@ -43,8 +43,10 @@ export interface KnowledgeSearchOptions {
    *   record, so `topK` counts records. Each hit returned is checked against
    *   the record as it reads now: a record that was deleted, left the
    *   source's `where`, or changed since it was indexed is not returned, and
-   *   its document is repaired in the background. A `file` / `http` hit is
-   *   grouped by its document.
+   *   its document is repaired in the background — except in a source with
+   *   `refresh.onRecordChange: false`, whose index an external indexer owns:
+   *   there the hit is only not returned. A `file` / `http` hit is grouped by
+   *   its document.
    *
    * The return type does not change: still `KnowledgeHit[]`.
    */
@@ -54,8 +56,9 @@ export interface KnowledgeSearchOptions {
    * record — "which policies", not "which clauses" — keeping the best hit of
    * each group; the group value is the hit's `metadata[groupBy]`, and hits
    * with the same value form one group whichever source they come from. Implies
-   * `granularity: 'record'`; passing it with `granularity: 'chunk'` is
-   * refused. An `object` source that does not list the field in its
+   * `granularity: 'record'`; passing it with `granularity: 'chunk'` (or
+   * passing an empty name, or an unknown `granularity`) is refused with
+   * `code: 'VALIDATION_ERROR'`, `status: 400`. An `object` source that does not list the field in its
    * `metadataFields` answers no hits for this search (never ungrouped), and
    * neither does a record with no value for it; a `file` / `http` source
    * groups by its document.

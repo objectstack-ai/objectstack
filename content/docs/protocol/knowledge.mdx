@@ -225,7 +225,8 @@ grouped by its document.
 `groupBy` names a metadata field and groups by its value instead — "which
 policies", not "which clauses" — with the best hit of each group and the
 value in the hit's `metadata`; it implies record granularity, and is refused
-with `granularity: 'chunk'`. Hits with the same value are one group whichever
+with `granularity: 'chunk'` (`VALIDATION_ERROR`, 400, as are an empty
+`groupBy` and an unknown `granularity`). Hits with the same value are one group whichever
 source they come from. An `object` source that does not list the field in
 its `metadataFields` is not searched, and a record with no value for it is
 not answered: a hit is never answered ungrouped.
@@ -234,12 +235,17 @@ Each record-level hit is checked against its record as it reads now, one
 system-context read per source of only the records about to be answered
 (the source's `where` AND their ids). A record that was deleted or left
 `where` since it was indexed, or whose document hash computed now differs
-from the hit's `docHash`, is not answered, and the next record moves up; its
+from the hit's `docHash`, is not answered, and the next record moves up (at
+most three rounds; a hit still unchecked after them is not answered). Its
 document is repaired in the background, through the event sync's path, once
-until its hash matches again. A hit whose adapter stores no hash is checked
-for membership only. Record granularity also reads the display field in the
-permission re-check (as the caller, in the same query), so the hit's `title`
-is the record's title as it reads now.
+until its hash matches again — except in a source with
+`refresh.onRecordChange: false`, whose index an external indexer owns: the
+service writes nothing there, and the hit is only not answered. A hit whose
+adapter stores no hash is checked for membership only. Record granularity
+also reads the display field in the permission re-check (as the caller, in
+the same query), so a caller's hit carries the record's `title` as it reads
+now; the system identity is not re-checked, so its hits carry the indexed
+title (the same whenever the hash matched).
 
 A hit's `title` is the value of the object's display field (ADR-0079
 `resolveDisplayField`: `nameField`, else the derived title field), set

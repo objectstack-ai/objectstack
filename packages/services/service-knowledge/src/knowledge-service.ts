@@ -22,7 +22,7 @@ import {
   registryObjectPackageDisabled,
 } from '@objectstack/core';
 import { postureEnforcesWall, type TenancyPosture } from '@objectstack/spec/security';
-import { createKnowledgeTools, type KnowledgeTools } from './knowledge-tools.js';
+import { createKnowledgeTools, refusal, type KnowledgeTools } from './knowledge-tools.js';
 import { resolveSplit, splitDocument } from './split/index.js';
 import {
   documentOrganizationId,
@@ -697,7 +697,9 @@ export class KnowledgeService implements IKnowledgeService {
    * `topK` records when fewer groups lie within it (logged at `debug`). The
    * answer is then one hit per group ({@link answerByRecord}): the best
    * passage of the record — or of the `groupBy` value — each checked against
-   * the record as it reads now.
+   * the record as it reads now. A caller's hit carries the record's title as
+   * the permission re-check read it; the system identity is not re-checked,
+   * so its hits keep the indexed title.
    *
    * The answer is at most `topK` hits (`KnowledgeSearchOptions.topK`). How
    * many hits the re-check removed is logged at `debug`, never returned: the
@@ -708,17 +710,23 @@ export class KnowledgeService implements IKnowledgeService {
     const groupBy = opts.groupBy;
     if (groupBy !== undefined) {
       if (typeof groupBy !== 'string' || groupBy.length === 0) {
-        throw new Error('[knowledge] search groupBy must name a metadata field (a non-empty string).');
+        throw refusal('VALIDATION_ERROR', 400, '[knowledge] search groupBy must name a metadata field (a non-empty string).');
       }
       if (opts.granularity === 'chunk') {
-        throw new Error(
-          `[knowledge] search groupBy '${groupBy}' groups records, so it cannot be combined with granularity 'chunk'. ` +
+        throw refusal(
+          'VALIDATION_ERROR',
+          400,
+          `[knowledge] search groupBy ${quotedName(groupBy)} groups records, so it cannot be combined with granularity 'chunk'. ` +
             "Drop granularity, or pass granularity 'record'.",
         );
       }
     }
     if (opts.granularity !== undefined && opts.granularity !== 'chunk' && opts.granularity !== 'record') {
-      throw new Error(`[knowledge] search granularity must be 'chunk' or 'record', got '${String(opts.granularity)}'.`);
+      throw refusal(
+        'VALIDATION_ERROR',
+        400,
+        `[knowledge] search granularity must be 'chunk' or 'record', got '${String(opts.granularity)}'.`,
+      );
     }
     const byRecord = opts.granularity === 'record' || groupBy !== undefined;
     const ctx = opts.executionContext;
@@ -765,11 +773,11 @@ export class KnowledgeService implements IKnowledgeService {
     }
     kept.sort((a, b) => b.score - a.score);
     if (!byRecord) return kept.slice(0, topK);
-    const answer = await this.answerByRecord(kept, topK, groupOf);
-    if (answer.length < topK) {
+    const { hits: answer, capped } = await this.answerByRecord(kept, topK, groupOf);
+    if (answer.length < topK && !capped) {
       this.options.logger?.debug?.(
         `[knowledge] record-level search answered ${answer.length} of topK=${topK} ` +
-          `${groupBy === undefined ? 'records' : `'${groupBy}' groups`}: no more within the refill cap ` +
+          `${groupBy === undefined ? 'records' : `${quotedName(groupBy)} groups`}: no more within the refill cap ` +
           `(topK × ${SEARCH_REFILL_FACTOR} passages per source).`,
       );
     }
@@ -790,7 +798,7 @@ export class KnowledgeService implements IKnowledgeService {
       if (source.source.kind !== 'object') return true;
       if (((source.source as ObjectKnowledgeSource).metadataFields ?? []).includes(groupBy)) return true;
       this.options.logger?.debug?.(
-        `[knowledge] source '${source.id}' not searched for groupBy '${groupBy}': ` +
+        `[knowledge] source '${source.id}' not searched for groupBy ${quotedName(groupBy)}: ` +
           'the field is not one of its metadataFields.',
       );
       return false;
@@ -825,10 +833,14 @@ export class KnowledgeService implements IKnowledgeService {
    * projected to the fields assembly reads. A record that no longer exists or
    * no longer matches `where`, or whose recomputed `docHash` differs from the
    * hit's (the stored hash), is dropped — all of its passages — and its
-   * document repaired in the background ({@link repairStale}). A group whose
+   * document repaired in the background ({@link repairStale}) unless the source
+   * opted out of the event sync (`refresh.onRecordChange: false`: an external
+   * indexer owns that index, so the service writes nothing to it and the hit
+   * is only dropped). A group whose
    * lead was dropped falls back to its next passage, and the next groups move
    * up; that is checked again, at most `SEARCH_FRESHNESS_ROUNDS` times, after
-   * which a hit still unchecked is not answered. A hit whose adapter stores no
+   * which a hit still unchecked is not answered (`capped`, logged at `debug`
+   * by its own line). A hit whose adapter stores no
    * hash is checked for membership only. A read that fails drops that
    * source's checked hits (fail-closed), reported at `warn`.
    *
@@ -839,7 +851,7 @@ export class KnowledgeService implements IKnowledgeService {
     hits: KnowledgeHit[],
     topK: number,
     groupOf: (hit: KnowledgeHit) => string | undefined,
-  ): Promise<KnowledgeHit[]> {
+  ): Promise<{ hits: KnowledgeHit[]; capped: boolean }> {
     const groups = new Map<string, KnowledgeHit[]>();
     for (const hit of hits) {
       const key = groupOf(hit);
@@ -872,13 +884,13 @@ export class KnowledgeService implements IKnowledgeService {
         const key = checkKey(hit);
         return key !== undefined && !fresh.has(key);
       });
-      if (unchecked.length === 0) return top;
+      if (unchecked.length === 0) return { hits: top, capped: false };
       if (round === SEARCH_FRESHNESS_ROUNDS) {
         this.options.logger?.debug?.(
           `[knowledge] record-level search stopped checking freshness after ${SEARCH_FRESHNESS_ROUNDS} rounds; ` +
             `${unchecked.length} unchecked hit(s) not answered.`,
         );
-        return top.filter((hit) => !unchecked.includes(hit));
+        return { hits: top.filter((hit) => !unchecked.includes(hit)), capped: true };
       }
       await this.checkFreshness(unchecked, fresh, stale);
     }
@@ -919,11 +931,14 @@ export class KnowledgeService implements IKnowledgeService {
           }
         }
         const fields = freshnessFields(objSource, schema, posture?.value);
-        rows = await engine.find(objSource.object, {
-          where: objSource.where !== undefined ? { $and: [objSource.where, byId] } : byId,
-          ...(fields === undefined ? {} : { fields }),
-          context: systemContext(),
-        } as never);
+        rows = await engine.find(
+          objSource.object,
+          {
+            where: objSource.where !== undefined ? { $and: [objSource.where, byId] } : byId,
+            ...(fields === undefined ? {} : { fields }),
+          },
+          { context: systemContext() },
+        );
         if (!Array.isArray(rows)) {
           throw new Error(`the read answered ${describeValue(rows)} instead of a list of rows`);
         }
@@ -966,8 +981,14 @@ export class KnowledgeService implements IKnowledgeService {
    * it answers without it. Single-flight per document, and at most once per
    * document until a later search finds its hash matching. Never throws into
    * the search. Moves to the scheduled reconcile's queue when that lands.
+   *
+   * A source with `refresh.onRecordChange: false` is never repaired: it is
+   * asked through {@link objectSourcesFor}, the one predicate that keeps the
+   * service's writes out of a source an external indexer owns, so the stale
+   * hit is dropped from the answer and its index entry left to that indexer.
    */
   private repairStale(source: KnowledgeSource, objSource: ObjectKnowledgeSource, recordId: string): void {
+    if (objectSourcesFor([source], objSource.object).length === 0) return;
     const docId = documentIdFor(source.id, recordId);
     if (this.freshnessRepairs.has(docId)) return;
     this.freshnessRepairs.add(docId);
@@ -1863,9 +1884,11 @@ function recordKeyOf(hit: KnowledgeHit): string {
  * The projection of the freshness check's read: every field
  * {@link recordToDocument} reads for `objSource` — `id`, the content and
  * metadata fields, the title field, and `organization_id` under a walled
- * posture — limited to the fields the object declares, so the recomputed hash
- * is the one assembly would compute. `undefined` (read the whole row) when
- * the content list is `'*'` or the object's fields cannot be enumerated.
+ * posture. `undefined` (read the whole row, as the walk and the event sync
+ * do) when the content list is `'*'`, when the object's fields cannot be
+ * enumerated, or when a field the source names is not one the object declares:
+ * assembly reads such a field off the whole row, and a projection that left it
+ * out would recompute a different hash and read every record as stale.
  */
 function freshnessFields(
   objSource: ObjectKnowledgeSource,
@@ -1879,7 +1902,17 @@ function freshnessFields(
   const titleField = documentTitleField(schema);
   if (titleField !== undefined) wanted.add(titleField);
   if (posture !== undefined && postureEnforcesWall(posture)) wanted.add('organization_id');
-  return [...wanted].filter((name) => name === 'id' || names.has(name));
+  for (const name of wanted) if (name !== 'id' && !names.has(name)) return undefined;
+  return [...wanted];
+}
+
+/**
+ * A caller-supplied field name as a log line or refusal shows it: JSON-quoted
+ * (so a quote or line break in it cannot forge text around it) and cut at 64
+ * characters.
+ */
+function quotedName(name: string): string {
+  return JSON.stringify(name.length > 64 ? `${name.slice(0, 64)}…` : name);
 }
 
 /** Deterministic document id derived from the source + record id. */

@@ -82,7 +82,8 @@ const policies = await knowledge.search('parental leave', {
 
 A record-level hit is checked against its record as it reads now: a record
 deleted, out of the source's `where`, or changed since it was indexed is not
-returned (its index entry is repaired in the background). The rules are in
+returned (its index entry is repaired in the background, unless the source
+sets `refresh.onRecordChange: false` for an external indexer). The rules are in
 [the protocol](/docs/protocol/knowledge#records-not-passages).
 
 <Callout type="info">

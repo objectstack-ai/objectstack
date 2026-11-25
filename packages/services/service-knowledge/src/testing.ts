@@ -146,13 +146,12 @@ type Row = Record<string, unknown>;
  * throw — any `where` shape it does not implement, so a service change it
  * cannot answer turns the suite red rather than being answered wrongly.
  *
- * A read that pins ids alone (`where: { id: { $in } }`) with a context in the
- * query (the permission re-read, and the record-level search's freshness
- * check) answers the matching rows whole, narrowed to those `wall` admits for
- * that context; without a `wall`, every matching row. The double does not
- * model the system identity's bypass: a `wall` is asked about every context,
- * so a case that sets one sees the freshness check's system read walled too,
- * and its record-level hits answered as stale (closed, never wrongly open).
+ * The permission re-read (`where: { id: { $in } }`, the caller's context in
+ * the query) answers the rows `wall` admits for that context; without a
+ * `wall`, every row. The record-level search's freshness check passes its
+ * system context in the trailing options, never in the query, so it is
+ * answered as any other read: the rows its `where` (`id: { $in }`, alone or
+ * under `$and`) matches, whole.
  */
 function rowsEngine(rows: Row[], wall?: (row: Row, context: ExecutionContext) => boolean): IDataEngine {
   const matches = (row: Row, where: Record<string, unknown> | undefined): boolean => {
@@ -190,7 +189,7 @@ function rowsEngine(rows: Row[], wall?: (row: Row, context: ExecutionContext) =>
         const ctx = query.context;
         return rows
           .filter((r) => inIds.includes(r.id) && (wall === undefined || wall(r, ctx)))
-          .map((r) => ({ ...r }));
+          .map((r) => ({ id: r.id }));
       }
       const pinsIds = JSON.stringify(query?.where ?? {}).includes('"$in"');
       if (!pinsIds && (typeof query?.limit !== 'number' || !(query.limit > 0))) {
@@ -294,8 +293,8 @@ const SYSTEM: ExecutionContext = { positions: [], permissions: [], systemPermiss
 
 /**
  * The wall each posture puts on the permission re-read (ADR-0105 D1), as the
- * double's `wall`. The cases that set one search by passage, where the
- * service re-reads only as the caller, so the wall is asked about persons only.
+ * double's `wall`. The service never re-reads for the system identity, so the
+ * wall is asked about persons only.
  */
 function wallOf(posture: TenancyPosture): (row: Row, context: ExecutionContext) => boolean {
   if (posture === 'isolated') return (row, ctx) => row.organization_id === ctx.tenantId;
