@@ -1,8 +1,9 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * objectstack#36511 — a permission set in the Studio's Access pillar saves with
- * the top bar's Save and Cancel, and a Save is live at once.
+ * objectstack#36511 — a permission set in Studio (since objectstack#36905 on
+ * its full-screen page) saves with the top bar's Save and Cancel, and a Save
+ * is live at once.
  *
  * - A grant clicked sends nothing: no draft write leaves before Save is
  *   pressed, however long the page waits (the set's 1.5 s autosave is gone
@@ -13,7 +14,7 @@
  * - A refused publish keeps the grant unsaved, says why on the page, and takes
  *   back the draft the Save wrote.
  *
- * The REAL `AccessPillar` inside the top bar's coordinator; the writes go
+ * The REAL `StudioPermissionSetPage` inside the top bar's coordinator; the writes go
  * through a REAL `MetadataClient` whose transport records each one, so the pins
  * read the URL the server would read. The environment door (metadata-admin,
  * no package) keeps its own Save and live write: pinned in
@@ -101,7 +102,7 @@ vi.mock('../../components/SuggestedBindingsPanel', () => ({ SuggestedBindingsPan
 vi.mock('../studio-design/StudioAiCopilot', () => ({ StudioChatDock: () => null }));
 
 import { toast } from 'sonner';
-import { AccessPillar } from '../studio-design/StudioDesignSurface';
+import { StudioPermissionSetPage } from '../studio-design/StudioPermissionSetPage';
 import { StudioSaveHarness, pressStudioCancel, pressStudioSave } from '../studio-design/__tests__/studioSaveHarness';
 import { tFormat } from './i18n';
 
@@ -130,7 +131,7 @@ async function mount(): Promise<void> {
   render(
     <StudioSaveHarness>
       <MemoryRouter>
-        <AccessPillar packageId={PKG} />
+        <StudioPermissionSetPage packageId={PKG} name={SET.name} />
       </MemoryRouter>
     </StudioSaveHarness>,
   );
