@@ -3013,11 +3013,12 @@ const zhHant = {
       resetViewTitle: '恢復此檢視自身的篩選、搜尋、排序、分組、列布局、隱藏欄位、密度、佈局、行顏色、行號和行內編輯。固定的檢視、收藏和記錄的開啟方式保持不變。只影響你自己的列表。',
       personalized: '已個性化',
       personalizedHeading: '你的列表與此檢視不同之處',
-      // objectstack#35955 — a list's unsaved changes: Discard and Save.
+      // objectstack#35955 — a list's unsaved changes: Reset and Update view
+      // (objectstack#36737, the view's own actions, as Twenty's).
       draft: {
-        discard: '放棄',
+        discard: '重置',
         discardTitle: '把列表恢復成檢視本來的樣子：篩選、排序、分組、列和佈局。列寬和行高不變。',
-        save: '儲存',
+        save: '更新檢視',
         heading: '未儲存的改動',
         partSeparator: '、',
         saveToView: '儲存到這個檢視',

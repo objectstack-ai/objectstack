@@ -1,35 +1,40 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * 「Configure tabs」 on the record page (objectstack#36499, epic
- * objectstack#36359): an administrator arranges the record page's tabs in
- * place, for everyone.
+ * The record page's tabs, arranged in design mode (objectstack#36499,
+ * objectstack#36737, epic objectstack#36359): an administrator arranges the
+ * record page's tabs in place, for everyone.
  *
- * - The entry opens the record's 「…」 (it leads the menu, ahead of Refresh),
- *   drawn for a workspace administrator who may author metadata, on the
- *   desktop full page of an object whose package Studio lists: writable (an
- *   object of a self-built app, the gate of Studio's design entries,
- *   `useStudioDesignGate`), or read-only (an installed app's object, Studio's
- *   view posture, `useStudioEntryGate`) where the customization door does not
- *   wall this caller off (`useCustomizeDoorWalled`). Not on a phone, not in a
- *   drawer or pane, not on a page its author composed.
- * - Chosen, the page enters its edit state in place: a bar across the top of
- *   the page — 「Configure tabs」 at its left, 「Cancel」 and 「Save」 at its
- *   right, the design mode's bar's look — and the tab row turns into the
- *   editor ({@link RecordTabsEditor}). The record stays on screen as the
- *   preview: the page is drawn from the object with the draft's
- *   `relatedLists` (`previewRecordTabsObject`), in the administrator's
- *   default order (their own arrangement is set aside while editing).
- * - 「Cancel」 drops the draft and writes nothing. With a change held, leaving
- *   the page asks first (the shell's unsaved-edits seam).
- * - 「Save」 writes the object's `relatedLists` and publishes it
- *   (`saveRecordTabs`): the order everyone sees by default. On an installed
- *   object it writes the `relatedLists` of the object extension of the base's
- *   paired `.custom` package instead (`recordTabsInstalled.ts`), where every
- *   tab can be moved, a related one hidden, and each is marked with where it
- *   comes from (the original package, another package, this environment). A reader's own
- *   arrangement is a diff laid over that default (`relatedArrangement.ts`),
- *   and 「Restore default order」 returns them to it.
+ * - The tabs are part of the design mode (objectstack#36737, the
+ *   maintainer's ruling 「照 Twenty 归类」: a record page's layout is
+ *   customized under the one layout bar, as Twenty's record page layouts
+ *   are). While the mode is on, the tab row of the record page is the editor
+ *   ({@link RecordTabsEditor}) in place. There is no entry of its own in the
+ *   record's 「…」 and no bar of its own: the mode's bar is the one bar.
+ * - The editor is drawn for a workspace administrator who may author
+ *   metadata, on the desktop full page of an object whose package Studio
+ *   lists: writable (an object of a self-built app, the gate of Studio's
+ *   design entries, `useStudioDesignGate`), or read-only (an installed app's
+ *   object, Studio's view posture, `useStudioEntryGate`) where the
+ *   customization door does not wall this caller off
+ *   (`useCustomizeDoorWalled`). Not on a phone, not in a drawer or pane, not
+ *   on a page its author composed.
+ * - The record stays on screen as the preview: the page is drawn from the
+ *   object with the draft's `relatedLists` (`previewRecordTabsObject`), in
+ *   the administrator's default order (their own arrangement is set aside
+ *   while the mode is on).
+ * - The draft is staged with the mode's other changes, under the object's key
+ *   ({@link recordTabsChangeKey}), so it survives a move to another page of
+ *   the app. The mode's 「Cancel」 drops it and writes nothing; the mode's
+ *   「Save」 writes it with the rest (`saveRecordTabs`): the object's
+ *   `relatedLists`, published, the order everyone sees by default. On an
+ *   installed object it writes the `relatedLists` of the object extension of
+ *   the base's paired `.custom` package instead (`recordTabsInstalled.ts`),
+ *   where every tab can be moved, a related one hidden, and each is marked
+ *   with where it comes from (the original package, another package, this
+ *   environment). A reader's own arrangement is a diff laid over that default
+ *   (`relatedArrangement.ts`), and 「Restore default order」 returns them to
+ *   it.
  * - The field area is not changed here: 「Adjust field groups」 opens the
  *   object in Studio.
  *
@@ -43,7 +48,6 @@
 
 import * as React from 'react';
 import { Link } from 'react-router-dom';
-import { toast } from 'sonner';
 import {
   DndContext,
   KeyboardSensor,
@@ -55,11 +59,11 @@ import {
 } from '@dnd-kit/core';
 import { SortableContext, horizontalListSortingStrategy, sortableKeyboardCoordinates, useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
-import { Eye, EyeOff, GripVertical, Lock, Pencil, PanelsTopLeft } from 'lucide-react';
+import { Eye, EyeOff, GripVertical, Lock, Pencil } from 'lucide-react';
 import { Button, Input, cn } from '@object-ui/components';
 import { useObjectTranslation } from '@object-ui/i18n';
 import { isRecordPageBuiltinTab, readRelatedListsArrangement, relatedListEntryName } from '@objectstack/spec/data';
-import { registerUnsavedEdits } from '../chrome/unsavedEdits.js';
+import { useDesignMode, useDesignModeActive, useDesignModeChange } from '../layout/designMode.js';
 import { useStudioDesignGate, useStudioEntryGate } from '../hooks/useStudioDesignGate.js';
 import { useCustomizeDoorWalled } from './studio-design/StudioCustomizeControls.js';
 import { relatedListEntryNames, type DerivedRelatedList } from '../utils/deriveRelatedLists.js';
@@ -76,7 +80,7 @@ import {
   type RecordTabsDraft,
   type RecordTabsEdit,
 } from './recordTabsConfigModel.js';
-import { consoleRecordTabsDoors, saveRecordTabs } from './recordTabsConfigSave.js';
+import { consoleRecordTabsDoors, saveRecordTabs, type RecordTabsSaveTexts } from './recordTabsConfigSave.js';
 import {
   initialInstalledTabsDraft,
   previewInstalledTabsObject,
@@ -88,11 +92,13 @@ import type { RecordTabsIo } from './recordTabsConfigIo.js';
 
 type RecordTabsObjectDef = Record<string, unknown> & { name?: string };
 
-/** The metadata client, the stored list and the default language: loaded with the edit state (`recordTabsConfigIo.tsx`). */
+/** The metadata client, the stored list and the default language: loaded with the editor (`recordTabsConfigIo.tsx`). */
 const RecordTabsConfigIo = React.lazy(() => import('./recordTabsConfigIo.js'));
 
-/** The record's 「…」 entry's name: the host action it is drawn as. */
-export const RECORD_TABS_CONFIG_ACTION = 'sys_configure_tabs';
+/** The design mode's key for the record-page tabs of `objectName`: one staged change per object. */
+export function recordTabsChangeKey(objectName: string): string {
+  return `record-tabs:${objectName}`;
+}
 
 /** The package an object is kept in, as served (`_packageId`), or `null`. */
 export function objectPackageId(objectDef: RecordTabsObjectDef | null | undefined): string | null {
@@ -112,9 +118,17 @@ export function recordTabsStudioPath(objectDef: RecordTabsObjectDef | null | und
   return packageId && typeof name === 'string' && name ? studioItemPath(packageId, 'object', name) : null;
 }
 
-interface RecordTabsSession {
+/**
+ * What the design mode holds for an object's tabs: the draft, the draft the
+ * editor opened on, and what its write needs (the object's package and the
+ * catalog the draft was made against), so the mode's 「Save」 writes it from
+ * any page of the app.
+ */
+export interface RecordTabsChange {
   readonly objectName: string;
+  readonly packageId: string;
   readonly mode: RecordTabsMode;
+  readonly catalog: RecordTabsCatalog;
   readonly initial: RecordTabsDraft;
   readonly draft: RecordTabsDraft;
 }
@@ -122,7 +136,7 @@ interface RecordTabsSession {
 export interface RecordTabsConfigInput {
   readonly objectDef: RecordTabsObjectDef | null | undefined;
   readonly objects: readonly RecordTabsObjectDef[];
-  /** The page may offer the entry at all: a desktop full page drawing the synthesized record page. */
+  /** The page may draw the editor at all: a desktop full page drawing the synthesized record page. */
   readonly enabled: boolean;
   readonly canRead?: (objectName: string) => boolean;
   /** A related list's name on the page when no entry names it (its FK's title, else the child's plural). */
@@ -130,112 +144,113 @@ export interface RecordTabsConfigInput {
 }
 
 export interface RecordTabsConfig {
-  /** The 「…」 entry is drawn. */
-  readonly offered: boolean;
-  /** The edit state is on. */
+  /** The design mode is on and this caller may arrange this object's tabs here. */
   readonly active: boolean;
-  readonly enter: () => void;
-  /** The object the page draws while the edit state is on, else `undefined`. */
+  /** The object the page draws while the editor is on, else `undefined`. */
   readonly previewObject: RecordTabsObjectDef | undefined;
-  /** The bar, while the edit state is on. */
-  readonly bar: React.ReactNode;
-  /** The editor that takes the tab row's place, while the edit state is on. */
+  /** The editor that takes the tab row's place, while the editor is on. */
   readonly editor: React.ReactNode;
 }
 
-/** The record page's tab configuration for the object on screen. */
+/** The record page's tab configuration for the object on screen, under the design mode. */
 export function useRecordTabsConfig({ objectDef, objects, enabled, canRead, titleOf }: RecordTabsConfigInput): RecordTabsConfig {
   const { t, language } = useObjectTranslation();
+  const designing = useDesignModeActive();
+  const saving = useDesignMode()?.saving ?? false;
   const objectName = typeof objectDef?.name === 'string' ? objectDef.name : '';
   const packageId = objectPackageId(objectDef);
   const studioPath = recordTabsStudioPath(objectDef);
-  const own = useStudioDesignGate(enabled ? studioPath : null) !== null;
-  const entry = useStudioEntryGate(enabled && !own ? studioPath : null);
+  // The gates are read only while the mode is on: nothing is drawn outside it.
+  const gated = enabled && designing;
+  const own = useStudioDesignGate(gated ? studioPath : null) !== null;
+  const entry = useStudioEntryGate(gated && !own ? studioPath : null);
   const walled = useCustomizeDoorWalled();
-  const mode: RecordTabsMode | null = !packageId ? null : own ? 'own' : entry?.posture === 'view' && !walled ? 'pair' : null;
-  const offered = mode !== null;
+  const mode: RecordTabsMode | null = !gated || !packageId ? null : own ? 'own' : entry?.posture === 'view' && !walled ? 'pair' : null;
+  const active = mode !== null && !!objectDef && !!objectName;
 
-  const [held, setHeld] = React.useState<RecordTabsSession | null>(null);
-  const [saving, setSaving] = React.useState(false);
-  const session = held && held.objectName === objectName && held.mode === mode ? held : null;
-  const active = session !== null;
+  const change = useDesignModeChange<RecordTabsChange>(recordTabsChangeKey(objectName));
+  const staged = change.value && change.value.mode === mode ? change.value : undefined;
 
   const catalog = React.useMemo<RecordTabsCatalog | null>(
     () => (active && objectDef ? recordTabsCatalog(objectDef, objects, { canRead }) : null),
     [active, objectDef, objects, canRead],
   );
-
-  const enter = React.useCallback(() => {
-    if (!objectDef || !objectName || !mode) return;
-    const opened = recordTabsCatalog(objectDef, objects, { canRead });
-    const initial =
-      mode === 'pair'
-        ? initialInstalledTabsDraft(objectDef, objects, opened, { canRead })
-        : initialRecordTabsDraft(objectDef, objects, opened, { canRead });
-    setHeld({ objectName, mode, initial, draft: initial });
-  }, [objectDef, objectName, objects, canRead, mode]);
-  const cancel = React.useCallback(() => setHeld(null), []);
-  const edit = React.useCallback((change: RecordTabsEdit) => {
-    setHeld((prev) => (prev ? { ...prev, draft: editRecordTabsDraft(prev.draft, change) } : prev));
-  }, []);
-
-  const dirty = !!session && !sameRecordTabsDraft(session.draft, session.initial);
-  const leaveMessage = t('designMode.recordTabs.leaveUnsaved', {
-    defaultValue: 'Leave without saving? Your tab changes will be lost.',
-  });
-  React.useEffect(() => (dirty ? registerUnsavedEdits(leaveMessage) : undefined), [dirty, leaveMessage]);
+  const opened = React.useMemo<RecordTabsDraft | null>(() => {
+    if (!active || !catalog || !objectDef) return null;
+    return mode === 'pair'
+      ? initialInstalledTabsDraft(objectDef, objects, catalog, { canRead })
+      : initialRecordTabsDraft(objectDef, objects, catalog, { canRead });
+  }, [active, catalog, objectDef, objects, canRead, mode]);
+  /** What the editor shows: the staged draft, else the object as it is. */
+  const unchanged = React.useMemo<RecordTabsChange | null>(
+    () => (catalog && opened && packageId && mode ? { objectName, packageId, mode, catalog, initial: opened, draft: opened } : null),
+    [catalog, opened, packageId, mode, objectName],
+  );
+  const session = staged ?? unchanged;
 
   // The metadata client, the stored list and the deployment's default
-  // language (the rename gate), from the edit state's lazily loaded part.
+  // language (the rename gate), from the editor's lazily loaded part.
   const [io, setIo] = React.useState<RecordTabsIo | null>(null);
   React.useEffect(() => {
     if (!active) setIo(null);
   }, [active]);
   const client = io?.client ?? null;
 
-  const save = React.useCallback(async () => {
-    if (!session || !catalog || !packageId || !client || saving) return;
-    setSaving(true);
-    try {
-      await saveRecordTabs(
-        { objectName, packageId, draft: session.draft, catalog, initial: session.initial },
-        {
-          notListed: t('designMode.recordTabs.notListed', {
-            defaultValue: "This object's package is not listed, so its tabs cannot be saved.",
-          }),
-          pendingDraft: t('designMode.recordTabs.pendingDraft', {
-            defaultValue: 'This object has unpublished changes in Studio. Publish or discard them there, then save again.',
-          }),
-          notWritable: t('designMode.recordTabs.notWritable', {
-            defaultValue: "This object's package cannot be written, so its tabs cannot be saved here.",
-          }),
-          pairNotWritable: t('designMode.recordTabs.pairNotWritable', {
-            defaultValue: "This app's customization package cannot be written, so its tabs cannot be saved.",
-          }),
-        },
-        consoleRecordTabsDoors(client),
+  const texts = React.useMemo<RecordTabsSaveTexts>(
+    () => ({
+      notListed: t('designMode.recordTabs.notListed', {
+        defaultValue: "This object's package is not listed, so its tabs cannot be saved.",
+      }),
+      pendingDraft: t('designMode.recordTabs.pendingDraft', {
+        defaultValue: 'This object has unpublished changes in Studio. Publish or discard them there, then save again.',
+      }),
+      notWritable: t('designMode.recordTabs.notWritable', {
+        defaultValue: "This object's package cannot be written, so its tabs cannot be saved here.",
+      }),
+      pairNotWritable: t('designMode.recordTabs.pairNotWritable', {
+        defaultValue: "This app's customization package cannot be written, so its tabs cannot be saved.",
+      }),
+    }),
+    [t],
+  );
+
+  // An edit stages the draft with the mode's other changes; an edit back to
+  // where the editor opened takes it off, so 「Save」 has nothing of it to write.
+  const { stage, unstage } = change;
+  const edit = React.useCallback(
+    (step: RecordTabsEdit) => {
+      if (!session || !client) return;
+      const draft = editRecordTabsDraft(session.draft, step);
+      if (sameRecordTabsDraft(draft, session.initial)) {
+        unstage();
+        return;
+      }
+      const doors = consoleRecordTabsDoors(client);
+      stage({ ...session, draft }, (value) =>
+        saveRecordTabs(
+          {
+            objectName: value.objectName,
+            packageId: value.packageId,
+            draft: value.draft,
+            catalog: value.catalog,
+            initial: value.initial,
+          },
+          texts,
+          doors,
+        ),
       );
-      setHeld(null);
-    } catch (error) {
-      toast.error(
-        t('designMode.recordTabs.saveFailed', {
-          defaultValue: 'The tabs were not saved: {{reason}}',
-          reason: error instanceof Error ? error.message : String(error),
-        }),
-      );
-    } finally {
-      setSaving(false);
-    }
-  }, [session, catalog, packageId, saving, objectName, client, t]);
+    },
+    [session, client, stage, unstage, texts],
+  );
 
   const previewObject = React.useMemo(
     () =>
-      session && catalog && objectDef
+      session && objectDef
         ? session.mode === 'pair'
-          ? previewInstalledTabsObject(objectDef, session.draft, catalog)
-          : previewRecordTabsObject(objectDef, session.draft, catalog)
+          ? previewInstalledTabsObject(objectDef, session.draft, session.catalog)
+          : previewRecordTabsObject(objectDef, session.draft, session.catalog)
         : undefined,
-    [session, catalog, objectDef],
+    [session, objectDef],
   );
   const pairId = (objectDef && readRelatedListsArrangement(objectDef)?.packageId) ?? null;
   const packageNames = io?.packageNames;
@@ -248,98 +263,34 @@ export function useRecordTabsConfig({ objectDef, objects, enabled, canRead, titl
   const storedLists = io?.stored?.objectName === objectName ? io.stored.lists : null;
   const sourceLanguage = io?.sourceLanguage ?? false;
 
-  const bar = session ? (
+  const editor = session ? (
     <>
-      <RecordTabsConfigBar dirty={dirty} saving={saving} ready={!!client} onCancel={cancel} onSave={() => void save()} />
-      {packageId && (
-        <React.Suspense fallback={null}>
-          <RecordTabsConfigIo
-            objectName={objectName}
-            packageId={packageId}
-            pairId={session.mode === 'pair' ? pairId : null}
-            language={language}
-            onIo={setIo}
-          />
-        </React.Suspense>
-      )}
-    </>
-  ) : null;
-  const editor =
-    session && catalog ? (
       <RecordTabsEditor
-        catalog={catalog}
+        catalog={session.catalog}
         draft={session.draft}
         initial={session.initial}
         titleOf={titleOf}
         storedLists={storedLists}
         sourceLanguage={sourceLanguage}
         studioPath={studioPath}
-        disabled={saving}
+        // Until what a save writes through has loaded, and while the mode saves.
+        disabled={saving || !client}
         onEdit={edit}
         {...(session.mode === 'pair' ? { installed: { sourceOf, packageName } } : {})}
       />
-    ) : null;
+      <React.Suspense fallback={null}>
+        <RecordTabsConfigIo
+          objectName={objectName}
+          packageId={session.packageId}
+          pairId={session.mode === 'pair' ? pairId : null}
+          language={language}
+          onIo={setIo}
+        />
+      </React.Suspense>
+    </>
+  ) : null;
 
-  return { offered, active, enter, previewObject, bar, editor };
-}
-
-/**
- * The edit state's bar: 「Configure tabs」 at its left, 「Cancel」 and 「Save」
- * at its right — the design mode's bar's look (`DesignModeBar`), across the
- * top of the record page.
- */
-export function RecordTabsConfigBar({
-  dirty,
-  saving,
-  ready = true,
-  onCancel,
-  onSave,
-}: {
-  dirty: boolean;
-  saving: boolean;
-  /** What a save writes through has loaded. */
-  ready?: boolean;
-  onCancel: () => void;
-  onSave: () => void;
-}) {
-  const { t } = useObjectTranslation();
-  const title = t('designMode.recordTabs.title', { defaultValue: 'Configure tabs' });
-  return (
-    <div
-      role="region"
-      aria-label={title}
-      data-testid="record-tabs-config-bar"
-      data-ready={ready ? 'true' : 'false'}
-      className="flex h-12 min-w-0 shrink-0 items-center gap-2 bg-primary px-3 text-primary-foreground sm:px-4"
-    >
-      <PanelsTopLeft className="h-4 w-4 shrink-0" aria-hidden="true" />
-      <span className="truncate text-sm font-semibold">{title}</span>
-      <div className="ml-auto flex shrink-0 items-center gap-2">
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          className="h-8 border-primary-foreground/40 bg-transparent text-primary-foreground hover:bg-primary-foreground/10 hover:text-primary-foreground"
-          disabled={saving}
-          onClick={onCancel}
-          data-testid="record-tabs-config-cancel"
-        >
-          {t('common.cancel', { defaultValue: 'Cancel' })}
-        </Button>
-        <Button
-          type="button"
-          variant="secondary"
-          size="sm"
-          className="h-8"
-          disabled={!dirty || saving || !ready}
-          onClick={onSave}
-          data-testid="record-tabs-config-save"
-        >
-          {t('common.save', { defaultValue: 'Save' })}
-        </Button>
-      </div>
-    </div>
-  );
+  return { active: session !== null, previewObject, editor };
 }
 
 const CHIP = 'inline-flex h-8 max-w-full shrink-0 items-center gap-1 rounded-md border px-1.5 text-sm';
@@ -470,7 +421,7 @@ function SortableTabChip(props: ChipProps & { sortable: boolean }) {
 }
 
 /**
- * The tab row in the edit state: the shown tabs in order, each with a drag
+ * The tab row in design mode: the shown tabs in order, each with a drag
  * handle, a rename and a hide; then 附件 (hide only), 审批 and 动态 (fixed,
  * where the page draws them last); then the 「Hidden」 area, from which a tab
  * is shown again; and 「Adjust field groups」.
@@ -590,7 +541,12 @@ export function RecordTabsEditor({
   }
 
   return (
-    <div className="flex min-w-0 flex-col gap-2 border-b border-border pb-3" data-testid="record-tabs-editor">
+    <div
+      role="region"
+      aria-label={t('designMode.recordTabs.title', { defaultValue: 'Configure tabs' })}
+      className="flex min-w-0 flex-col gap-2 border-b border-border pb-3"
+      data-testid="record-tabs-editor"
+    >
       <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onDragEnd}>
         <SortableContext items={[...draft.order]} strategy={horizontalListSortingStrategy}>
           <ul className="flex min-w-0 flex-wrap items-center gap-2" aria-label={t('designMode.recordTabs.shown', { defaultValue: 'Tabs' })}>
