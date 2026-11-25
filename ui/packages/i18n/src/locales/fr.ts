@@ -2573,6 +2573,7 @@ const fr = {
       unavailableTitle: "Assistant IA non disponible",
       unavailableDescription: "Cette instance n'a pas d'assistant IA activé. Tout le reste fonctionne normalement.",
       unavailableError: "Impossible de joindre le service IA. Il est peut-être temporairement hors ligne — réessayez, ou retournez à l'accueil.",
+      unavailableErrorDesktop: "Impossible de joindre le service IA. Il est peut-être temporairement hors ligne — réessayez, ou retournez à la page de démarrage de l'app.",
       unavailableRetry: "Réessayer",
       unavailableHome: "Retour à l'accueil",
       dock: {

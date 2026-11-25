@@ -3372,6 +3372,7 @@ const en = {
       unavailableTitle: 'AI assistant unavailable',
       unavailableDescription: "This deployment doesn't have an AI assistant enabled. Everything else works as usual.",
       unavailableError: "Couldn't reach the AI service. It may be temporarily offline — try again, or head back home.",
+      unavailableErrorDesktop: "Couldn't reach the AI service. It may be temporarily offline — try again, or go back to the app start page.",
       unavailableRetry: 'Try again',
       unavailableHome: 'Back to home',
       dock: {

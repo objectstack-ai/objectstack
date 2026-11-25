@@ -2863,6 +2863,7 @@ const zhHant = {
       unavailableTitle: 'AI 助手不可用',
       unavailableDescription: '當前部署未啟用 AI 助手。其他功能一切正常。',
       unavailableError: '無法連線 AI 服務。它可能暫時離線 — 請重試，或返回首頁。',
+      unavailableErrorDesktop: '無法連線 AI 服務。它可能暫時離線 — 請重試，或返回應用起始頁。',
       unavailableRetry: '重試',
       unavailableHome: '返回首頁',
       dock: {

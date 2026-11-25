@@ -50,6 +50,7 @@ import {
   studioMetadataAreaPath,
   studioPackagePath,
   useHomePath,
+  usePhoneViewport,
   useRecentItems,
   useStudioEntryPermissions,
 } from '@object-ui/app-shell';
@@ -91,10 +92,13 @@ const StudioEntryRedirect = lazy(() =>
  * (`empty.appAccessDenied`): said in place, as the permanent decision it is, so
  * no Retry; and the URL stays, so the caller can send it to an administrator
  * and reload once access is granted. No header frames this screen, so the way
- * home is its own button, as there, and it reuses that screen's label.
+ * home is its own button, as there, and it reuses that screen's labels.
  */
 function StudioAccessRequired({ home }: { home: string }) {
   const { t } = useObjectTranslation();
+  // A phone's Home is its app list; from 768 px up `home` opens an app's start
+  // page, so the button says so, as the shell's other way-home buttons do.
+  const phone = usePhoneViewport();
   return (
     <div className="flex h-screen items-center justify-center p-4">
       <Empty data-testid="studio-access-required">
@@ -108,7 +112,11 @@ function StudioAccessRequired({ home }: { home: string }) {
         </EmptyTitle>
         <div className="mt-4">
           <Button asChild>
-            <Link to={home}>{t('empty.appAccessDeniedHome', { defaultValue: 'Back to home' })}</Link>
+            <Link to={home}>
+              {phone
+                ? t('empty.appAccessDeniedHome', { defaultValue: 'Back to home' })
+                : t('layout.appSwitcher.backToHome', { defaultValue: 'Back to app start page' })}
+            </Link>
           </Button>
         </div>
       </Empty>

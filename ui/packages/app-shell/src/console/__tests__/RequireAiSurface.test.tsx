@@ -5,6 +5,7 @@ import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Routes, Route } from 'react-router-dom';
 import { MetadataCtx, type MetadataContextValue } from '@object-ui/react';
 import { RequireAiSurface } from '../ConsoleShell';
+import { AiUnavailable } from '../ai/AiUnavailable';
 import { useAiSurfaceEnabled } from '../../hooks/useAiSurface';
 
 // The guard gates purely on the AI-surface signal (the agent catalog); that
@@ -214,5 +215,39 @@ describe('the no-assistant screen\'s way home names where it goes, by viewport (
     const home = screen.getByTestId('ai-unavailable-home');
     expect(home).toHaveTextContent('«console.ai.unavailableHome»');
     expect(home).not.toHaveTextContent('«layout.appSwitcher.backToHome»');
+  });
+});
+
+describe('the unreachable-service sentence names where its way home goes, by viewport', () => {
+  // `AiChatPage` draws this shape when the agent catalog fails to load: the
+  // sentence points at the button below it, so it names the same place.
+  const echo = (key: string) => `«${key}»`;
+  function renderUnreachable() {
+    return render(
+      <MemoryRouter>
+        <AiUnavailable hasError onRetry={() => {}} onHome={() => {}} t={echo} />
+      </MemoryRouter>,
+    );
+  }
+
+  beforeEach(() => {
+    viewer.phone = false;
+  });
+
+  it('on a desktop, where the button opens an app\'s start page, the sentence says so', () => {
+    renderUnreachable();
+    const screenEl = screen.getByTestId('ai-unavailable');
+    expect(screenEl).toHaveTextContent('«console.ai.unavailableErrorDesktop»');
+    expect(screenEl).not.toHaveTextContent('«console.ai.unavailableError»');
+    expect(screen.getByTestId('ai-unavailable-home')).toHaveTextContent('«layout.appSwitcher.backToHome»');
+  });
+
+  it('CONTROL — on a phone, whose Home is still its app list, it keeps 「head back home」', () => {
+    viewer.phone = true;
+    renderUnreachable();
+    const screenEl = screen.getByTestId('ai-unavailable');
+    expect(screenEl).toHaveTextContent('«console.ai.unavailableError»');
+    expect(screenEl).not.toHaveTextContent('«console.ai.unavailableErrorDesktop»');
+    expect(screen.getByTestId('ai-unavailable-home')).toHaveTextContent('«console.ai.unavailableHome»');
   });
 });

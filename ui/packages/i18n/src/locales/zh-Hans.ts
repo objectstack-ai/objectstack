@@ -2863,6 +2863,7 @@ const zh = {
       unavailableTitle: 'AI 助手不可用',
       unavailableDescription: '当前部署未启用 AI 助手。其他功能一切正常。',
       unavailableError: '无法连接 AI 服务。它可能暂时离线 — 请重试，或返回首页。',
+      unavailableErrorDesktop: '无法连接 AI 服务。它可能暂时离线 — 请重试，或返回应用起始页。',
       unavailableRetry: '重试',
       unavailableHome: '返回首页',
       dock: {
