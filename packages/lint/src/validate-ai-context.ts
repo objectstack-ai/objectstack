@@ -27,11 +27,21 @@
  * the stack does not define is reported once (the root, or the related entry)
  * and its fields are not judged; an object with no readable field map is not
  * judged; a `sys_*` object is the platform's and is not judged here.
+ *
+ * Under a package closure the runtime publish gate states (`options.packageScope`,
+ * ruling #9612) the snapshot's `objects` ARE that closure, so an object missing
+ * from it may be installed and read by `get_record_context` here, yet is out of
+ * the package's reach wherever it is installed without that dependency. The
+ * object verdict is then worded for the closure and carries the remedy every
+ * save-door rule judging an object name under a scope prints
+ * ({@link closureDependencyRemedy}). Still a `warning`: the tier never refuses.
+ * With no closure (`os validate`, a write naming no package) the wording is
+ * unchanged.
  */
 
 import { AI_CONTEXT_BODY_FIELD_TYPES } from '@objectstack/spec/ai';
 import { REFERENCE_VALUE_TYPES, referenceTargetOf } from '@objectstack/spec/data';
-import { recordsOf } from './object-graph.js';
+import { closureDependencyRemedy, recordsOf } from './object-graph.js';
 
 export type AiContextSeverity = 'warning';
 
@@ -77,7 +87,11 @@ function referenceOf(def: AnyRec | undefined): string | undefined {
  * Report the names every context pack of `stack` gives that the stack does not
  * define. Reads `stack.aiContexts` and `stack.objects`; safe on any shape.
  */
-export function validateAiContext(stack: AnyRec): AiContextFinding[] {
+export function validateAiContext(
+  stack: AnyRec,
+  options: { packageScope?: { readonly packageId: string; readonly dependencies: readonly string[] } } = {},
+): AiContextFinding[] {
+  const closure = options.packageScope;
   const out: AiContextFinding[] = [];
   const objects = new Map<string, AnyRec>();
   for (const o of recordsOf(stack.objects)) if (str(o.name)) objects.set(str(o.name), o);
@@ -95,14 +109,26 @@ export function validateAiContext(stack: AnyRec): AiContextFinding[] {
       if (!object || object.startsWith('sys_')) return undefined;
       const def = objects.get(object);
       if (!def) {
-        out.push({
-          severity: 'warning',
-          rule: AI_CONTEXT_OBJECT_UNKNOWN,
-          where,
-          path,
-          message: `names object '${object}', which this stack does not define, so the pack reads nothing of it`,
-          hint: 'Name an object the stack defines (check the spelling), or remove the entry',
-        });
+        out.push(closure
+          ? {
+              severity: 'warning',
+              rule: AI_CONTEXT_OBJECT_UNKNOWN,
+              where,
+              path,
+              message:
+                `names object '${object}', which is outside the closure of package "${closure.packageId}" ` +
+                '(the package, the packages its manifest declares in `dependencies`, and platform objects), so ' +
+                'the pack reads nothing of it where the package is installed without that dependency',
+              hint: closureDependencyRemedy(object, closure.packageId, 'name an object inside that closure'),
+            }
+          : {
+              severity: 'warning',
+              rule: AI_CONTEXT_OBJECT_UNKNOWN,
+              where,
+              path,
+              message: `names object '${object}', which this stack does not define, so the pack reads nothing of it`,
+              hint: 'Name an object the stack defines (check the spelling), or remove the entry',
+            });
         return undefined;
       }
       return fieldMapOf(def);
