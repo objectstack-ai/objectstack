@@ -62,6 +62,9 @@ vi.mock('../../preview/DraftChangesPanel', () => ({ DraftChangesPanel: () => nul
 // The console's preview and authoring code loads `@objectstack/lint` lazily;
 // warmed here so its first load is paid at import, not inside a test's clock.
 import '@objectstack/lint';
+// objectstack#36900 — the surface mounts the command palette, which reaches the
+// record preview's `lazy()` detail entry: its first load is paid at collection too.
+import '@object-ui/plugin-detail';
 import { StudioDesignSurface } from './StudioDesignSurface';
 import { t } from '../metadata-admin/i18n';
 
@@ -143,7 +146,7 @@ async function createAppThroughTheDialog() {
 describe('the Changes count after a draft save (objectui#11787)', () => {
   it('says a draft is pending from the render the save lands in, and the read it asks for is its own', async () => {
     render(
-      <MemoryRouter initialEntries={[`/studio/${PACKAGE_ID}/access`]}>
+      <MemoryRouter initialEntries={[`/studio/${PACKAGE_ID}/owd`]}>
         <Routes>
           <Route path="/studio/:packageId/:tab" element={<StudioDesignSurface />} />
         </Routes>

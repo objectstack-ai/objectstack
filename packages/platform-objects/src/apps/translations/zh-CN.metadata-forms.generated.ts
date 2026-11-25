@@ -3147,5 +3147,8 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "值"
       }
     }
+  },
+  ai_context: {
+    label: "AI 上下文包"
   }
 };

@@ -63,6 +63,9 @@ export * from './organization-locale.js';
 // the dataset tools (`@objectstack/service-analytics`) and the MCP record
 // tools (`@objectstack/mcp`), which cannot import each other.
 export * from './sentence-locale.js';
+// [ADR-0160 D3] The one envelope a record-material tool answer is built in
+// (`get_record_context`, `@objectstack/service-record-context`).
+export * from './record-material-envelope.js';
 export * from './lite-kernel.js';
 export * from './types.js';
 export * from './logger.js';

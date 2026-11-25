@@ -7418,7 +7418,7 @@ async function environmentItemAtOwnAddress(
  */
 export async function readMergedItems(
     protocol: Pick<MetadataProtocol, 'getMetaItems'> | undefined | null,
-    type: 'skill' | 'object' | 'action' | 'dataset',
+    type: 'skill' | 'object' | 'action' | 'dataset' | 'ai_context',
 ): Promise<unknown[] | undefined> {
     if (!protocol || typeof protocol.getMetaItems !== 'function') return undefined;
     const answer = await protocol.getMetaItems({ type });
