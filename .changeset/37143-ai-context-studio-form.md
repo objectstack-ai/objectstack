@@ -7,7 +7,7 @@
 
 feat(studio): author context packs (`ai_context`) in Studio — a form for the type, and a related-lists block that picks each list's columns from its own child object
 
-Clause-②: no
+Clause-②: yes (widening) — one new public export, `aiContextForm` from `@objectstack/spec/ai`, and `/meta/types` now serves a form for `ai_context`; no key is added to what a pack may hold
 Metadata-protocol: none
 
 ADR-0160 D1, clause 2 (runtime authoring). A context pack can now be created and edited in Studio like a skill: Studio's metadata editor lays it out with the new `aiContextForm` (`@objectstack/spec/ai`, registered in `METADATA_FORM_REGISTRY` as `ai_context`), and saving goes through the metadata API, where the pack's author defects are reported at save as before.

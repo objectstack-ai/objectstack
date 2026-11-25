@@ -1327,7 +1327,9 @@ describe('#19403 round 10 — the verdicts, on the live bundles', () => {
       // authored in all three locales.
       // 825 since #37140: the `ai_context` type's own label (ADR-0160 D1),
       // authored in all three locales.
-      expect(translated.length, `${locale} positive control`).toBe(825);
+      // 834 since #37143: the `ai_context` form (ADR-0160 D1 clause 2) — two
+      // section labels and seven row labels, authored in all three locales.
+      expect(translated.length, `${locale} positive control`).toBe(834);
     }
     // ⭐ DARK — the blindness, executable. On a synthetic two-locale catalog the
     // all-three predicate returns 0 while the per-locale one returns 1, so the
