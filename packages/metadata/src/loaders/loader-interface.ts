@@ -50,6 +50,20 @@ export interface MetadataKeyedItem<T = any> {
   readonly packageId?: string;
 }
 
+/**
+ * [#37039, cloud ADR-0118 D2] An entry of {@link MetadataLoader.loadRowBindings}:
+ * a stored row's item, keyed as {@link MetadataLoader.loadManySlots} keys it,
+ * with the package the row's own package column records.
+ */
+export interface MetadataRowBinding<T = any> extends MetadataKeyedItem<T> {
+  /**
+   * The package the row's package column records; `null` when the column is
+   * empty (a row written before it). ⛔ Never read off the stored body, whose
+   * stamp is whatever the row's author wrote.
+   */
+  readonly rowPackageId: string | null;
+}
+
 /** [#32985] A stored row {@link MetadataLoader.stampOnlyRows} answers: its id and the writer its `source` column names. */
 export interface MetadataStampOnlyRow {
   readonly id: string;
@@ -121,6 +135,18 @@ export interface MetadataLoader {
     type: string,
     options?: MetadataLoadOptions
   ): Promise<MetadataKeyedItem<T>[]>;
+
+  /**
+   * [#37039, cloud ADR-0118 D2] Every stored row this loader holds of `type`,
+   * as {@link loadManySlots} answers them and in its order, each with the
+   * package the row's own package column records
+   * ({@link MetadataRowBinding.rowPackageId}).
+   *
+   * Optional: only a loader of stored rows (`DatabaseLoader`) has a column to
+   * read. `MetadataManager.listPackageBindings` asks it to tell an item a
+   * stored row holds from one only a registration holds.
+   */
+  loadRowBindings?<T = any>(type: string): Promise<MetadataRowBinding<T>[]>;
 
   /**
    * [ADR-0150 D3/D4, #32246] Every item this loader holds under `name`, each

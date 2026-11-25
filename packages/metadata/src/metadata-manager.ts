@@ -29,6 +29,7 @@ import type {
   MetadataImportResult,
   MetadataTypeInfo,
   MetadataWriteOptions,
+  MetadataPackageBinding,
   IRealtimeService,
   RealtimeEventPayload,
   IPubSub,
@@ -1807,6 +1808,60 @@ export class MetadataManager implements IMetadataService {
   }
 
   /**
+   * [#37039, cloud ADR-0118 D2] Every item {@link list} answers, in its order,
+   * with the package it is bound to: the package column of the stored row that
+   * holds it (`source: 'row'`), else the package its registration files it
+   * under (`source: 'registration'`) — the contract on
+   * `IMetadataService.listPackageBindings`.
+   *
+   * An item is a stored row's when a loader of rows
+   * ({@link MetadataLoader.loadRowBindings}) holds a row under the key
+   * {@link list} lists the item by — the key the boot priming pass registers
+   * that row's body under, so the registry's copy of a stored row is the
+   * row's item too. Its binding is that row's column (the first loader's, the
+   * first row of the key, as {@link list} admits them): `null` for a legacy
+   * row with an empty column, ⛔ never the stamp its body carries. Any other
+   * item's binding is its slot's package for a type stored per
+   * `(package, name)`, else the package its body names, as {@link query}
+   * reads it.
+   *
+   * Uncached: it walks the loaders as {@link list} does, then once more for
+   * the rows. A row loader that cannot be read is reported as {@link list}
+   * reports a loader, and makes the answer `degraded`.
+   */
+  async listPackageBindings(type: string): Promise<{ items: MetadataPackageBinding[]; degraded: boolean; errors: string[] }> {
+    const canonical = canonicalMetadataServiceType(type);
+    const { items, degraded: listDegraded, errors } = await this.readListKeyed(canonical);
+    const slotted = PACKAGE_SLOTTED_STORE_TYPES.has(canonical);
+    const rowColumns = new Map<string, string | null>();
+    let degraded = listDegraded;
+    for (const loader of this.loaders.values()) {
+      if (typeof loader.loadRowBindings !== 'function') continue;
+      try {
+        for (const entry of await loader.loadRowBindings(canonical)) {
+          if (!entry || typeof entry.name !== 'string' || entry.name === '') continue;
+          // Keyed exactly as `admitLoaderSlots` / `admitLoaderItems` key it.
+          const data = this.servedLoaderBody(loader, entry.data);
+          const key = slotted ? storeSlotKey(canonical, entry.name, entry.packageId ?? indexedItemPackageId(data), data) : entry.name;
+          if (!rowColumns.has(key)) rowColumns.set(key, entry.rowPackageId);
+        }
+      } catch (e) {
+        degraded = true;
+        errors.push(`${loader.contract.name}: ${e instanceof Error ? e.message : String(e)}`);
+        this.reportLoaderReadFailure(loader.contract.name, canonical, e);
+      }
+    }
+    const bindings = this.listedInSlotOrder(canonical, items).map((key): MetadataPackageBinding => {
+      const data = items.get(key);
+      const name = slotted ? storedNameOf(key) : key;
+      if (rowColumns.has(key)) return { name, data, packageId: rowColumns.get(key)!, source: 'row' };
+      const registered = slotted ? slotPackageOf(key) : indexedItemPackageId(data);
+      return { name, data, packageId: registered ?? null, source: 'registration' };
+    });
+    return { items: bindings, degraded, errors };
+  }
+
+  /**
    * The cached / single-flight read behind {@link list} and
    * {@link listDiagnosed}.
    *
@@ -2025,6 +2080,16 @@ export class MetadataManager implements IMetadataService {
   }
 
   private async readListUncached(type: string): Promise<ListReadResult> {
+    const { items, degraded, errors } = await this.readListKeyed(type);
+    return { items: this.listedInSlotOrder(type, items).map((key) => items.get(key)), degraded, errors };
+  }
+
+  /**
+   * {@link readListUncached}'s walk, before it is narrowed to bodies: every
+   * item {@link list} answers, under the key the store holds it by, in store
+   * order (the registry's, then each loader's in loader order).
+   */
+  private async readListKeyed(type: string): Promise<{ items: Map<string, unknown>; degraded: boolean; errors: string[] }> {
     const items = new Map<string, unknown>();
 
     // From in-memory registry
@@ -2067,11 +2132,11 @@ export class MetadataManager implements IMetadataService {
       }
     }
 
-    return { items: this.listedInSlotOrder(type, items), degraded, errors };
+    return { items, degraded, errors };
   }
 
   /**
-   * [#32517] The order {@link list} answers `items` in. For a bundled type
+   * [#32517] The keys of `items`, in the order {@link list} answers them. For a bundled type
    * stored per `(package, name)`, each slot's member a by-name read answers
    * first — the registry's member written last, else the first a loader
    * admitted (`MemoryLoader.loadManySlots` hands a slot's member saved last
@@ -2082,8 +2147,8 @@ export class MetadataManager implements IMetadataService {
    * execution read) answers in the order it answered then. Every other type:
    * store order.
    */
-  private listedInSlotOrder(type: string, items: ReadonlyMap<string, unknown>): unknown[] {
-    if (!PACKAGE_SLOTTED_STORE_TYPES.has(type) || !isBundledStoreType(type)) return Array.from(items.values());
+  private listedInSlotOrder(type: string, items: ReadonlyMap<string, unknown>): string[] {
+    if (!PACKAGE_SLOTTED_STORE_TYPES.has(type) || !isBundledStoreType(type)) return Array.from(items.keys());
     const registryStore = this.registry.get(type);
     const firsts = new Map<string, string>();
     for (const key of items.keys()) {
@@ -2093,7 +2158,7 @@ export class MetadataManager implements IMetadataService {
       firsts.set(slot, latest !== undefined && registryStore!.has(latest) && items.has(latest) ? latest : key);
     }
     const first = new Set(firsts.values());
-    return [...first, ...[...items.keys()].filter((key) => !first.has(key))].map((key) => items.get(key));
+    return [...first, ...[...items.keys()].filter((key) => !first.has(key))];
   }
 
   /**

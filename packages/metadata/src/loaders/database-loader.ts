@@ -25,7 +25,7 @@ import { lowerFilterCondition, type FilterLoweringOptions } from '@objectstack/s
 import { PLURAL_TO_SINGULAR } from '@objectstack/spec/shared';
 import { historySnapshotBody } from '../utils/history-snapshot-body.js';
 import type { IDataDriver, IDataEngine, DriverQuery } from '@objectstack/spec/contracts';
-import type { MetadataLoader, MetadataKeyedItem, MetadataLoaderDeleteOptions, MetadataStampOnlyRow } from './loader-interface.js';
+import type { MetadataLoader, MetadataKeyedItem, MetadataLoaderDeleteOptions, MetadataRowBinding, MetadataStampOnlyRow } from './loader-interface.js';
 import { parsedStoredBody, stampOnlyPackageOf } from '../stamp-only-row.js';
 import {
   PACKAGE_SLOTTED_STORE_TYPES,
@@ -1260,6 +1260,7 @@ export class DatabaseLoader implements MetadataLoader {
         result.push({
           name: typeof name === 'string' && name !== '' ? name : null,
           data,
+          rowPackageId: storedRowColumnPackageId(row),
           ...(PACKAGE_SLOTTED_STORE_TYPES.has(type)
             ? {
                 packageId,
@@ -1462,6 +1463,24 @@ export class DatabaseLoader implements MetadataLoader {
    * itself is not rebound: no write, its `package_id` stays empty.
    */
   async loadManySlots<T = any>(type: string): Promise<MetadataKeyedItem<T>[]> {
+    return (await this.typeRowSlots<T>(type)).map(({ slot }) => slot);
+  }
+
+  /**
+   * [#37039, cloud ADR-0118 D2] {@link loadManySlots}' entries, in its order,
+   * each with the package its row's `package_id` column records
+   * ({@link MetadataRowBinding.rowPackageId}): `null` for a row written before
+   * the column (or by a writer that left it empty), ⛔ never the package its
+   * stored body names. The entry's own `packageId` stays the slot the store
+   * keys the row under, as {@link loadManySlots} answers it, so a reader
+   * matches each entry to the item it keyed from it.
+   */
+  async loadRowBindings<T = any>(type: string): Promise<MetadataRowBinding<T>[]> {
+    return (await this.typeRowSlots<T>(type)).map(({ slot, row }) => ({ ...slot, rowPackageId: row.rowPackageId }));
+  }
+
+  /** {@link loadManySlots}' body: each entry paired with the stored row it was read from. */
+  private async typeRowSlots<T>(type: string): Promise<Array<{ slot: MetadataKeyedItem<T>; row: StoredTypeRow }>> {
     const rows = (await this.readTypeRows(type)).filter((entry): entry is StoredTypeRow & { name: string } => entry.name !== null);
     const keys = PACKAGE_SLOTTED_STORE_TYPES.has(type) && !isBundledStoreType(type) ? pluralEntryKeys(type, rows) : [];
     // Only the row the unscoped read keeps of its key ({@link unscopedTypeRows}:
@@ -1472,15 +1491,15 @@ export class DatabaseLoader implements MetadataLoader {
       if (held === undefined || (entry.version ?? 0) >= (rows[held]!.version ?? 0)) kept.set(keys[at]!, at);
     });
     const customizes = pluralEntryCustomizedHolders(type, rows, keys).map((holder, at) => (kept.get(keys[at]!) === at ? holder : undefined));
-    if (customizes.every((holder) => holder === undefined)) return rows.map((entry) => keyedRow<T>(entry.name, entry));
+    if (customizes.every((holder) => holder === undefined)) return rows.map((entry) => ({ slot: keyedRow<T>(entry.name, entry), row: entry }));
     const slotOf = (entry: StoredTypeRow & { name: string }, at: number) =>
       storeRowSlotKey(type, entry.name, customizes[at] ?? entry.packageId, entry.member);
-    const customizationOf = new Map<string, MetadataKeyedItem<T>>();
+    const customizationOf = new Map<string, { slot: MetadataKeyedItem<T>; row: StoredTypeRow }>();
     rows.forEach((entry, at) => {
       const holder = customizes[at];
-      if (holder !== undefined) customizationOf.set(slotOf(entry, at), { name: entry.name, data: entry.data as T, packageId: holder });
+      if (holder !== undefined) customizationOf.set(slotOf(entry, at), { slot: { name: entry.name, data: entry.data as T, packageId: holder }, row: entry });
     });
-    const slots: MetadataKeyedItem<T>[] = [];
+    const slots: Array<{ slot: MetadataKeyedItem<T>; row: StoredTypeRow }> = [];
     rows.forEach((entry, at) => {
       if (customizes[at] !== undefined) return;
       const customization = customizationOf.get(slotOf(entry, at));
@@ -1488,7 +1507,7 @@ export class DatabaseLoader implements MetadataLoader {
         slots.push(customization);
         customizationOf.delete(slotOf(entry, at));
       }
-      slots.push(keyedRow<T>(entry.name, entry));
+      slots.push({ slot: keyedRow<T>(entry.name, entry), row: entry });
     });
     return slots;
   }
@@ -2441,6 +2460,19 @@ export class DatabaseLoader implements MetadataLoader {
 }
 
 /**
+ * [#37039, cloud ADR-0118 D2] The package a `sys_metadata` row's `package_id`
+ * column records, and only the column: `null` when it is empty — a row written
+ * before the column, or by a writer that left it unset — or holds the
+ * {@link ENVIRONMENT_HISTORY_MARK} sentinel, which names no package. ⛔ Never
+ * the package the stored body names: the body is what the row's author wrote,
+ * the column is what the store's write path recorded.
+ */
+function storedRowColumnPackageId(row: Record<string, unknown>): string | null {
+  const column = row.package_id;
+  return typeof column === 'string' && column !== '' && column !== ENVIRONMENT_HISTORY_MARK ? column : null;
+}
+
+/**
  * [ADR-0150 D4, #32198] The package whose item a `sys_metadata` row holds:
  * its `package_id` column when a writer filled it, else the package its stored
  * body carries (`storedItemPackageId`: the envelope's `packageId`, else the
@@ -2449,8 +2481,8 @@ export class DatabaseLoader implements MetadataLoader {
  * delete therefore never takes.
  */
 function storedRowPackageId(row: Record<string, unknown>): string | undefined {
-  const column = row.package_id;
-  if (typeof column === 'string' && column !== '' && column !== 'sys_metadata') return column;
+  const column = storedRowColumnPackageId(row);
+  if (column !== null) return column;
   const stored = row.metadata;
   if (stored === null || stored === undefined) return undefined;
   let body: unknown;
@@ -2510,6 +2542,8 @@ interface StoredTypeRow {
   member?: string | null;
   /** [#31699 R7-A] For a by-package type's row whose `package_id` is empty and whose body names `packageId`: its id. */
   legacyRowId?: string;
+  /** [#37039] The package the row's `package_id` column records ({@link storedRowColumnPackageId}), for every type. */
+  rowPackageId: string | null;
 }
 
 /** [#31699 R3-B] The unscoped read's key of a bundled type's row: its package, name and member. */
