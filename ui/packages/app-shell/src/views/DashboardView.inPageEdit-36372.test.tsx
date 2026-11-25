@@ -51,14 +51,14 @@ const packages = vi.hoisted(() => ({
   ensured: [] as string[],
 }));
 /** objectstack#36364 — the navigation state the page is reached with, and its replaces. */
-const route = vi.hoisted(() => ({ state: null as unknown, navigate: null as null | ((...a: unknown[]) => void) }));
+const route = vi.hoisted(() => ({ state: null as unknown, search: '', navigate: null as null | ((...a: unknown[]) => void) }));
 const toasts = vi.hoisted(() => ({ success: [] as unknown[], error: [] as unknown[] }));
 
 vi.mock('../providers/MetadataProvider', () => ({ useMetadata: () => meta.value }));
 vi.mock('react-router-dom', () => ({
   useParams: () => ({ dashboardName: 'ops_board' }),
   useNavigate: () => route.navigate ?? (() => {}),
-  useLocation: () => ({ pathname: '/apps/crm/dashboard/ops_board', search: '', hash: '', key: 'landing', state: route.state }),
+  useLocation: () => ({ pathname: '/apps/crm/dashboard/ops_board', search: route.search, hash: '', key: 'landing', state: route.state }),
 }));
 vi.mock('./useOpenRecordList', () => ({
   useRecordListDrillNavigation: () => ({ openRecordList: vi.fn(), canOpenRecordList: () => true }),
@@ -187,6 +187,7 @@ beforeEach(() => {
   toasts.success = [];
   toasts.error = [];
   route.state = null;
+  route.search = '';
   route.navigate = null;
 });
 
@@ -398,6 +399,90 @@ describe('DashboardView arrival from the design mode (objectstack#36364)', () =>
     await act(async () => { await new Promise((r) => setTimeout(r, 0)); });
     expect(screen.queryByTestId('dashboard-editing-badge')).not.toBeInTheDocument();
     expect(client.value.layered).not.toHaveBeenCalled();
+  });
+});
+
+describe('DashboardView opened from a Studio list (objectstack#36906)', () => {
+  const studioList = '/studio/crm/metadata/dashboard?q=ops';
+  const fromStudio = `?studio=${encodeURIComponent(studioList)}`;
+
+  let widthBefore = 0;
+  beforeEach(() => {
+    widthBefore = window.innerWidth;
+  });
+  afterEach(() => {
+    Object.defineProperty(window, 'innerWidth', { configurable: true, writable: true, value: widthBefore });
+  });
+
+  it('lands in the edit state, and x goes back to the Studio list', async () => {
+    const navigate = vi.fn();
+    route.navigate = navigate;
+    route.state = { designModeNewDashboard: 'ops_board' };
+    route.search = fromStudio;
+    mount();
+    expect(await screen.findByTestId('dashboard-editing-badge')).toBeInTheDocument();
+    // The landing is cleared, and the address keeps the way back.
+    expect(navigate).toHaveBeenCalledWith(`/apps/crm/dashboard/ops_board${fromStudio}`, { replace: true, state: null });
+    const close = screen.getByTestId('studio-return');
+    expect(close).toHaveAttribute('data-target', studioList);
+    fireEvent.click(close);
+    expect(navigate).toHaveBeenLastCalledWith(studioList);
+  });
+
+  it('after a reload (no landing), the viewer still draws x back to the Studio list', async () => {
+    route.search = fromStudio;
+    mount();
+    await screen.findByTestId('dashboard-edit');
+    expect(screen.queryByTestId('dashboard-editing-badge')).not.toBeInTheDocument();
+    expect(screen.getByTestId('studio-return')).toHaveAttribute('data-target', studioList);
+  });
+
+  it('x over unsaved edits asks first, and staying keeps the edit state', async () => {
+    const navigate = vi.fn();
+    route.navigate = navigate;
+    route.search = fromStudio;
+    // This DOM ships no window.confirm: install one, and put back what was there.
+    const before = window.confirm;
+    const confirm = vi.fn(() => false);
+    window.confirm = confirm as unknown as typeof window.confirm;
+    try {
+      mount();
+      await openEdit();
+      fireEvent.keyDown(screen.getByTestId('dashboard-widget-resize-handle'), { key: 'ArrowRight' });
+      fireEvent.click(screen.getByTestId('studio-return'));
+      expect(confirm).toHaveBeenCalledTimes(1);
+      expect(navigate).not.toHaveBeenCalledWith(studioList);
+      expect(screen.getByTestId('dashboard-editing-badge')).toBeInTheDocument();
+      confirm.mockReturnValue(true);
+      fireEvent.click(screen.getByTestId('studio-return'));
+      expect(navigate).toHaveBeenLastCalledWith(studioList);
+    } finally {
+      window.confirm = before;
+    }
+  });
+
+  it('on a phone, the landing opens no edit state: it is cleared and the page stays a viewer', async () => {
+    Object.defineProperty(window, 'innerWidth', { configurable: true, writable: true, value: 390 });
+    const navigate = vi.fn();
+    route.navigate = navigate;
+    route.state = { designModeNewDashboard: 'ops_board' };
+    route.search = fromStudio;
+    mount();
+    await screen.findAllByText('Total (served)');
+    await act(async () => { await new Promise((r) => setTimeout(r, 0)); });
+    expect(navigate).toHaveBeenCalledWith(`/apps/crm/dashboard/ops_board${fromStudio}`, { replace: true, state: null });
+    expect(screen.queryByTestId('dashboard-editing-badge')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('dashboard-edit')).not.toBeInTheDocument();
+    expect(client.value.layered).not.toHaveBeenCalled();
+    // The way back is still there.
+    expect(screen.getByTestId('studio-return')).toBeInTheDocument();
+  });
+
+  it('a ?studio= value that is not a Studio address draws no x', async () => {
+    route.search = `?studio=${encodeURIComponent('https://example.com/studio/crm')}`;
+    mount();
+    await screen.findByTestId('dashboard-edit');
+    expect(screen.queryByTestId('studio-return')).not.toBeInTheDocument();
   });
 });
 

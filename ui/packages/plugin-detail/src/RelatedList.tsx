@@ -1515,6 +1515,15 @@ export const RelatedList: React.FC<RelatedListProps> = ({
   // value may itself be falsy. Cleared by every re-read (the fetch effect's
   // first statement) and by Retry.
   const [loadFailure, setLoadFailure] = React.useState<{ error: unknown } | null>(null);
+  // objectstack#36822 — whether `relatedData` holds the answer of a read this
+  // list actually issued, so the badge may keep drawing its count while a
+  // later read is in flight. Set only where an issued read resolves, cleared
+  // where one rejects (the rejection empties the rows, and 0 is not their
+  // count). A path that reads nothing (no scope yet, a refused filter, no
+  // adapter) never sets it, so the first real read still draws no count; one
+  // that empties the rows without reading (no scope, no adapter) clears it,
+  // so the next parent's read draws no count either.
+  const [countKnown, setCountKnown] = React.useState(false);
   // Per-lookup-field cache of resolved labels: fieldName -> Map<id, label>
   const [lookupLabels, setLookupLabels] = React.useState<Record<string, Record<string, string>>>({});
   const { t } = useDetailTranslation();
@@ -2249,6 +2258,8 @@ export const RelatedList: React.FC<RelatedListProps> = ({
         setRelatedData([]);
         setTotal(null);
         setHasMore(false);
+        // Nothing is read, and the emptied rows hold no count (objectstack#36822).
+        setCountKnown(false);
         setLoading(false);
         return;
       }
@@ -2280,6 +2291,7 @@ export const RelatedList: React.FC<RelatedListProps> = ({
               setRelatedData(result.rows as any[]);
               setTotal(result.total);
               setHasMore(result.total > result.rows.length);
+              setCountKnown(true);
               setLoading(false);
             },
             (err) => {
@@ -2287,6 +2299,7 @@ export const RelatedList: React.FC<RelatedListProps> = ({
               setRelatedData([]);
               setTotal(null);
               setHasMore(false);
+              setCountKnown(false);
               setLoadFailure({ error: err });
               setLoading(false);
             },
@@ -2380,6 +2393,7 @@ export const RelatedList: React.FC<RelatedListProps> = ({
             setTotal(null);
             setHasMore(false);
           }
+          setCountKnown(true);
           setLoading(false);
         }).catch((err) => {
           console.error('Failed to fetch related data:', err);
@@ -2389,6 +2403,7 @@ export const RelatedList: React.FC<RelatedListProps> = ({
           setRelatedData([]);
           setTotal(null);
           setHasMore(false);
+          setCountKnown(false);
           setLoadFailure({ error: err });
           setLoading(false);
         });
@@ -2406,6 +2421,7 @@ export const RelatedList: React.FC<RelatedListProps> = ({
         setRelatedData([]);
         setTotal(null);
         setHasMore(false);
+        setCountKnown(false);
         setLoading(false);
       } else if (referenceFieldIsMultiValue) {
         // The same refusal as the arm above, one cause earlier: this path's
@@ -2432,6 +2448,7 @@ export const RelatedList: React.FC<RelatedListProps> = ({
         setRelatedData([]);
         setTotal(null);
         setHasMore(false);
+        setCountKnown(false);
         setLoading(false);
       } else {
         const qs = new URLSearchParams({
@@ -2451,6 +2468,7 @@ export const RelatedList: React.FC<RelatedListProps> = ({
             setRelatedData(items);
             setTotal(null);
             setHasMore(false);
+            setCountKnown(true);
           })
           .catch(err => {
             console.error('Failed to fetch related data:', err);
@@ -2458,6 +2476,7 @@ export const RelatedList: React.FC<RelatedListProps> = ({
             setRelatedData([]);
             setTotal(null);
             setHasMore(false);
+            setCountKnown(false);
             setLoadFailure({ error: err });
           })
           .finally(() => { if (!cancelled) setLoading(false); });
@@ -4032,7 +4051,11 @@ export const RelatedList: React.FC<RelatedListProps> = ({
   // the 0 an empty first read holds: while the first rows are in flight (or a
   // card out of view has not asked) and no count answers for them, the badge
   // waits. A refetch over rows already drawn keeps their count.
-  const countPending = !countAnswers && loading && relatedData.length === 0 && !(windowed && total != null);
+  // objectstack#36822 — and so does a refetch over a list that already
+  // answered 0: once a read has answered, the count is known (`countKnown`),
+  // so a later read in flight keeps drawing the last answer.
+  const countPending =
+    !countAnswers && loading && !countKnown && relatedData.length === 0 && !(windowed && total != null);
   // In windowed mode an empty page beyond page 0 is a transient overflow (the
   // step-back effect above corrects it), not an empty collection.
   // A failed read is never empty: it draws its own line (objectstack#26415).

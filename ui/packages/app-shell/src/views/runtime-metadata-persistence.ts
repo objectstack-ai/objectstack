@@ -200,6 +200,8 @@ const PACKAGE_DOORS: RuntimeCreatePackageDoors = {
  */
 export async function resolveRuntimeCreatePackage(
   appPackageId: string | null | undefined,
+  /** The metadata type being created, named in the warning when the package-less fallback is taken. */
+  type: string,
   doors: RuntimeCreatePackageDoors = PACKAGE_DOORS,
 ): Promise<string | null> {
   if (!appPackageId) return null;
@@ -211,7 +213,7 @@ export async function resolveRuntimeCreatePackage(
     return pair.writable ? pair.packageId : null;
   } catch (err) {
     console.warn(
-      `[runtime-metadata] the customization package of "${appPackageId}" could not be had; the view is saved naming no package:`,
+      `[runtime-metadata] the customization package of "${appPackageId}" could not be had; the ${type} is saved naming no package:`,
       err,
     );
     return null;
@@ -469,7 +471,7 @@ export async function createRuntimeMetadata(
     );
   }
   const app = type === 'view' ? ctx.app : null;
-  const packageId = app?.packageId ? await resolveRuntimeCreatePackage(app.packageId) : null;
+  const packageId = app?.packageId ? await resolveRuntimeCreatePackage(app.packageId, type) : null;
   // objectstack#36137 — the first-write pin: a create over a name that already
   // holds a pending draft is refused `409 METADATA_CONFLICT`, never written over it.
   await ctx.metadataClient.save(
@@ -572,7 +574,7 @@ export async function saveAndPublishRuntimeMetadata(
   ctx: RuntimePersistCtx,
 ): Promise<SaveAndPublishOutcome> {
   const app = type === 'view' ? ctx.app : null;
-  const packageId = app?.packageId ? await resolveRuntimeCreatePackage(app.packageId) : null;
+  const packageId = app?.packageId ? await resolveRuntimeCreatePackage(app.packageId, type) : null;
   try {
     await ctx.metadataClient.save(
       type,
