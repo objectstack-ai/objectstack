@@ -921,7 +921,7 @@ const en = {
       needsWholeRows:
         'Grouping needs every record, but this grid was handed one page of them, so the groups cannot be counted. Hand in every record, or let the grid fetch them from a data source that implements queryGroupHeaders.',
       draftOnly: 'Not grouped by {{fields}}: it exists only in the draft until you publish.',
-      partial: 'More groups were not loaded: this view has more groups than the server returns in one read, so only some are listed.',
+      moreGroupsNotLoaded: 'More groups were not loaded: this view has more groups than the server returns in one read, so only some are listed.',
     },
     // Column-footer aggregate prefixes, keyed by the spec's `ColumnSummary`
     // vocabulary (objectui#4024). The footer already formatted its NUMBER

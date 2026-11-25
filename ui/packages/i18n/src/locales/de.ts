@@ -678,7 +678,7 @@ const de = {
       needsWholeRows:
         "Die Gruppierung benötigt alle Datensätze, aber dieses Raster hat nur eine Seite davon erhalten, daher können die Gruppen nicht gezählt werden. Übergeben Sie alle Datensätze oder lassen Sie das Raster sie aus einer Datenquelle laden, die queryGroupHeaders implementiert.",
       draftOnly: "Nicht nach {{fields}} gruppiert: Das Feld existiert nur im Entwurf, bis Sie veröffentlichen.",
-      partial: "Weitere Gruppen wurden nicht geladen: Diese Ansicht hat mehr Gruppen, als der Server in einem Lesevorgang zurückgibt, daher wird nur ein Teil angezeigt.",
+      moreGroupsNotLoaded: "Weitere Gruppen wurden nicht geladen: Diese Ansicht hat mehr Gruppen, als der Server in einem Lesevorgang zurückgibt, daher wird nur ein Teil angezeigt.",
     },
     // objectui#4024 — column-footer aggregate prefixes, keyed by the spec's
     // `ColumnSummary` vocabulary. `pattern` owns the label/value join so this

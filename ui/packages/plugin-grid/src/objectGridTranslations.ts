@@ -46,7 +46,7 @@ const GRID_DEFAULT_TRANSLATIONS: Record<string, string> = {
   'grid.grouping.draftOnly': 'Not grouped by {{fields}}: it exists only in the draft until you publish.',
   // …and the note over a group list the server cut to its page size
   // (objectstack#37278). Byte-identical to the `en` pack.
-  'grid.grouping.partial': 'More groups were not loaded: this view has more groups than the server returns in one read, so only some are listed.',
+  'grid.grouping.moreGroupsNotLoaded': 'More groups were not loaded: this view has more groups than the server returns in one read, so only some are listed.',
   // Reused by the grouped-view pager (falls back here when no I18nProvider).
   'table.rowsPerPage': 'Rows per page',
   'table.pageInfo': 'Page {{current}} of {{total}}',

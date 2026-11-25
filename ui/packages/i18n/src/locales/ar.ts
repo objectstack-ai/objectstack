@@ -736,7 +736,7 @@ const ar = {
       needsWholeRows:
         "يتطلب التجميع جميع السجلات، لكن هذه الشبكة تلقّت صفحة واحدة منها فقط، لذا لا يمكن عدّ المجموعات. مرّر جميع السجلات، أو دع الشبكة تجلبها من مصدر بيانات يطبّق queryGroupHeaders.",
       draftOnly: "لم يتم التجميع حسب {{fields}}: هذا الحقل موجود في المسودة فقط حتى تقوم بالنشر.",
-      partial: "لم يتم تحميل مجموعات أخرى: يحتوي هذا العرض على مجموعات أكثر مما يعيده الخادم في قراءة واحدة، لذا تُعرض بعضها فقط.",
+      moreGroupsNotLoaded: "لم يتم تحميل مجموعات أخرى: يحتوي هذا العرض على مجموعات أكثر مما يعيده الخادم في قراءة واحدة، لذا تُعرض بعضها فقط.",
     },
     // objectui#4024 — column-footer aggregate prefixes, keyed by the spec's
     // `ColumnSummary` vocabulary. `pattern` owns the label/value join so this

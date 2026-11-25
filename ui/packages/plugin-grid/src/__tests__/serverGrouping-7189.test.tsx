@@ -377,7 +377,7 @@ describe('a server-grouped grid over a cut header answer (objectstack#37278)', (
   it('says more groups were not loaded, over the groups it did get', async () => {
     renderGrid(cappedDataSource(3));
     await vi.waitFor(() => expect(groupRows()).toHaveLength(3));
-    expect(screen.getByTestId('grid-grouping-partial')).toHaveTextContent('More groups were not loaded');
+    expect(screen.getByTestId('grid-grouping-more-groups-not-loaded')).toHaveTextContent('More groups were not loaded');
     // The groups listed keep their exact counts.
     for (const [label, count] of Object.entries(headerCounts())) expect(count).toBe(EXPECTED[label]);
   });
@@ -385,7 +385,7 @@ describe('a server-grouped grid over a cut header answer (objectstack#37278)', (
   it('control: a page that holds every group draws all five and no note', async () => {
     renderGrid(cappedDataSource(100));
     await vi.waitFor(() => expect(groupRows()).toHaveLength(5));
-    expect(screen.queryByTestId('grid-grouping-partial')).toBeNull();
+    expect(screen.queryByTestId('grid-grouping-more-groups-not-loaded')).toBeNull();
   });
 
   it('folds no record total over a cut answer — and the whole total over a whole one', async () => {

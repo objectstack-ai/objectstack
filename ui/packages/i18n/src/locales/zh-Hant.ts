@@ -654,7 +654,7 @@ const zhHant = {
       needsWholeRows:
         '分組需要全部記錄，但此表格只收到其中一頁，因此無法統計分組。請傳入全部記錄，或讓表格從實現了 queryGroupHeaders 的資料來源獲取記錄。',
       draftOnly: '未按 {{fields}} 分組：它僅存在於草稿中，釋出後才生效。',
-      partial: '更多分組未載入：此檢視的分組數超過伺服器單次讀取傳回的數量，因此只列出了部分分組。',
+      moreGroupsNotLoaded: '更多分組未載入：此檢視的分組數超過伺服器單次讀取返回的數量，因此只列出了部分分組。',
     },
     // objectui#4024 — column-footer aggregate prefixes, keyed by the spec's
     // `ColumnSummary` vocabulary. `pattern` owns the label/value join so this

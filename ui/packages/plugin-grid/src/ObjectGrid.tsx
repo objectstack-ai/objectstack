@@ -2437,9 +2437,9 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
     <p
       role="status"
       className="px-3 sm:px-4 py-1.5 text-xs text-muted-foreground border-b bg-muted/40"
-      data-testid="grid-grouping-partial"
+      data-testid="grid-grouping-more-groups-not-loaded"
     >
-      {t('grid.grouping.partial')}
+      {t('grid.grouping.moreGroupsNotLoaded')}
     </p>
   ) : null;
 

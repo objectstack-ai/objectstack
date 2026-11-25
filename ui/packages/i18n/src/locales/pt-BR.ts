@@ -691,7 +691,7 @@ const pt = {
       needsWholeRows:
         "O agrupamento precisa de todos os registros, mas esta grade recebeu apenas uma página deles, portanto os grupos não podem ser contados. Entregue todos os registros ou deixe a grade buscá-los em uma fonte de dados que implemente queryGroupHeaders.",
       draftOnly: "Não agrupado por {{fields}}: existe apenas no rascunho até você publicar.",
-      partial: "Mais grupos não foram carregados: esta visualização tem mais grupos do que o servidor retorna em uma leitura, então apenas alguns são listados.",
+      moreGroupsNotLoaded: "Mais grupos não foram carregados: esta visualização tem mais grupos do que o servidor retorna em uma leitura, então apenas alguns são listados.",
     },
     // objectui#4024 — column-footer aggregate prefixes, keyed by the spec's
     // `ColumnSummary` vocabulary. `pattern` owns the label/value join so this
