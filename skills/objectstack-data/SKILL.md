@@ -69,7 +69,7 @@ Open the file for what you are writing before you write it.
 | Record hooks: the sandboxed `body`, `ctx.api`, refusals, transactions | [data-hooks.md](./references/data-hooks.md) |
 | Permission sets, RLS, field permissions, `secret`, tenancy, ownership queues | [Security](./rules/security.md) |
 | Retention, append-only and audit objects, the save notice | [Lifecycle](./rules/lifecycle.md) |
-| Seed and demo data | [seeds.md](./references/seeds.md) |
+| Seed and demo data: `defineSeed()`, import modes, `externalId`, relationship references, CEL values | [seeds.md](./references/seeds.md) |
 | External databases, federated objects | [Datasources](./rules/datasources.md) |
 
 ## Conditional Field Rules

@@ -48,17 +48,23 @@ Open the file for what you are writing before you write it.
 
 ## Flows
 
+**A flow's `type`**: `autolaunched` (no user interaction: started by events,
+APIs or other flows), `screen`, `record_change`, `api` (inbound webhook), or
+`type: 'schedule'`: a cron / interval cadence on the **start node's
+`config.schedule`**, or a per-record date sweep (`config.timeRelative`).
+
 **A trigger is the start node's `config`**; there is no top-level `trigger`,
 `event` or `schedule` key. A record change:
-`{ objectName: 'support_case', triggerType: 'record-after-update', condition: "previous.status != 'escalated' && record.status == 'escalated'" }`;
-a cadence is `config.schedule`. Guard a flow that writes its own object, or
+`{ objectName: 'support_case', triggerType: 'record-after-update', condition: "previous.status != 'escalated' && record.status == 'escalated'" }`.
+Guard a flow that writes its own object, or
 it re-triggers itself. `defineStack({ requires })`
 lists `automation` and `triggers`.
 
 ### Flow Node Types
 
-Control flow, `approval`, every node's `config`:
-[Flow Node Types](./references/examples-flows.md#flow-node-types).
+Control flow and every node's `config`:
+[Flow Node Types](./references/examples-flows.md#flow-node-types). A human
+sign-off is an `approval` node (`type: 'approval'`).
 
 #### Data Operations
 
@@ -104,6 +110,11 @@ As JSON (TypeScript: the same literal, a `FlowNode`):
 - `title` is inline XOR `template`. `sourceObject` + `sourceId` are a PAIR;
   with neither and no `actionUrl` the notice links to the trigger record.
 
+An option label in a notice: `{{ stage | option:opportunity.stage }}` in the mail
+`template` (each recipient's language; mail-only, refused in inline `title` /
+`message`) — never `label()` in `templateData`, evaluated once per run, before
+fan-out.
+
 ### Failure routing & `runAs`
 
 - **A failed node is routed by a `fault` edge**, `{ source, target, type: 'fault' }`.
@@ -119,8 +130,9 @@ As JSON (TypeScript: the same literal, a `FlowNode`):
   flow.
 - **A `runAs: 'system'` sweep must pin its organization**, or it reads and
   writes across every tenant.
-- **Who may START a flow** is `requiredPermissions: ['…']` on the flow, never
-  a `current_user.positions` check inside it.
+- **Who may START a flow: `requiredPermissions: ['…']` on the flow.** Gate an
+  elevated `screen` / `api` flow here, never on `current_user.positions`
+  inside it.
 
 ### Filter operands (`config.filter`)
 
@@ -138,10 +150,13 @@ Most are caught by `objectstack build`:
 1. **A value slot takes a literal or a CEL envelope — never a `{…}` token.**
    In `assignments.*`, `fields.*`, `input.*`, `inputs.*`, `collection`, notify
    `recipients`, `http` `body` and every `filter` operand a string is the
-   literal text it spells. Compute with `{ dialect: 'cel', source: '…' }`
-   (`'{record.owner}'` → `'has(record.owner) ? record.owner : null'`; the run
-   user is `current_user.id`). Text slots (notify `title` / `message`, `http`
-   `url`) render `{{ }}` holes.
+   literal text it spells, and a `{…}` token is **refused** — at
+   `objectstack validate` (`expression-invalid`), `registerFlow` and the
+   executor — naming its CEL spelling. Compute with
+   `{ dialect: 'cel', source: '…' }` (`'{record.owner}'` →
+   `source: 'has(record.owner) ? record.owner : null'`; the run user is
+   `current_user.id`). Text slots (notify `title` / `message`, `http` `url`)
+   render `{{ }}` holes.
 2. **`create_record`'s `outputVariable` holds the created RECORD, not its id.**
    ✅ `source: 'newRec.id'`
 3. **`script` nodes call a registered function — nothing else.**
@@ -171,6 +186,18 @@ Most are caught by `objectstack build`:
 4. **A `select` is compared and written by its option `value`, never its
    label.** A label in a `filter` or an edge `condition` is never checked: it
    silently matches nothing.
+
+## Assignment rules
+
+Routing a new record to a queue or a person is a stack `assignmentRules`
+entry, ⛔ never a `beforeInsert` hook that picks an owner, nor a round-robin
+counter field:
+
+`defineAssignmentRule({ name: 'crm_case_intake', object: 'crm_case', entries: [{ name: 'rest', assignTo: { type: 'queue', value: 'crm_support_intake' }, strategy: 'round_robin' }] })`
+
+It routes each inserted row whose `owner_id` and `queue` are both still empty,
+once, never on update. An approval for the same people is an `approval` node
+with a `queue` approver.
 
 ## Integrations are declared, not coded
 

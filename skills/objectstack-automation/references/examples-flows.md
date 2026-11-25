@@ -88,11 +88,6 @@ A recipient string, written or evaluated, may be an audience selector:
 - `owner_of:OBJECT:ID` — that record's owner; a computed id: `source: "'owner_of:crm_case:' + record.case_id"`.
 - `org:members` — every member of the run's organization, else that of the record the notification is about, else nobody (`single` posture: a `schedule` flow declaring no `organization`, no record). Any other `org:` value reaches nobody too. Each warns in the server log only; the node succeeds.
 
-An option label in a notice: `{{ stage | option:opportunity.stage }}` in the mail
-`template` (each recipient's language; mail-only, refused in inline `title` /
-`message`) — never `label()` in `templateData`, evaluated once per run, before
-fan-out.
-
 ## Flow Variables
 
 `variables` is an **array**; a variable has no `label`: `variables: [{ name: 'case_id',
@@ -167,9 +162,7 @@ type: 'text', isInput: true }, { name: 'approval_result', type: 'boolean', isOut
 
 1. **Value slots** also: notify `templateData.*` / `sourceId`; `input.*` is
    `subflow` / `map`'s, `inputs.*` `script`'s, `collection` `loop` / `map`'s,
-   `filter` a CRUD node's. A `{…}` token in one is **refused** — at
-   `objectstack validate` (`expression-invalid`), `registerFlow` and the
-   executor — naming its CEL spelling:
+   `filter` a CRUD node's. The spellings a refused `{…}` token is given:
    - CEL refuses an absent key where the template wrote nothing, so nothing /
      `null` / a default is now YOUR call; `'{record.tags.0}'` → `'record.tags[0]'`;
      a deep path guards each step: `has(vars.source) && has(vars.source.id) ? vars.source.id : null`
