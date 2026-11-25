@@ -62,21 +62,24 @@ export function storeOf(kind: StoreKind) {
   const clients: Client[] = [];
   let dir: string | undefined;
   let n = 0;
+  const url = (): string => {
+    if (kind === 'memory') return ':memory:';
+    dir ??= mkdtempSync(join(tmpdir(), 'knowledge-turso-'));
+    return `file:${join(dir, `store-${++n}.db`)}`;
+  };
+  const client = (at: string = url()): Client => {
+    const made = createClient({ url: at, ...(kind === 'file' ? { timeout: 5000 } : {}) });
+    clients.push(made);
+    return made;
+  };
   return {
     kind,
     /** A fresh database's URL. */
-    url(): string {
-      if (kind === 'memory') return ':memory:';
-      dir ??= mkdtempSync(join(tmpdir(), 'knowledge-turso-'));
-      return `file:${join(dir, `store-${++n}.db`)}`;
-    },
-    client(url = this.url()): Client {
-      const client = createClient({ url, ...(kind === 'file' ? { timeout: 5000 } : {}) });
-      clients.push(client);
-      return client;
-    },
+    url,
+    /** A client of a fresh database (or of `at`). */
+    client,
     adapter(opts: Partial<TursoKnowledgeAdapterOptions> = {}): TursoKnowledgeAdapter {
-      return new TursoKnowledgeAdapter({ id: 'under_test', client: this.client(), embedder: new FakeEmbedder(), ...opts });
+      return new TursoKnowledgeAdapter({ id: 'under_test', client: client(), embedder: new FakeEmbedder(), ...opts });
     },
     closeAll(): void {
       for (const c of clients.splice(0)) c.close();

@@ -260,8 +260,8 @@ export class TursoKnowledgeAdapter implements IKnowledgeAdapter {
         // The generation may have been switched or abandoned while the embedder
         // answered: write only into the one that was planned.
         const still = await tx.execute({
-          sql: `SELECT 1 FROM ${quoted(GENERATION_TABLE)} WHERE source_id = ? AND generation = ?`,
-          args: [sourceId, target.generation],
+          sql: `SELECT 1 FROM ${quoted(GENERATION_TABLE)} WHERE source_id = ? AND generation = ? AND fingerprint IS ? AND dim = ?`,
+          args: [sourceId, target.generation, target.fingerprint, target.dim],
         });
         if (still.rows.length === 0) return { commit: false, value: `${sourceId}#generation-${target.generation}` };
         for (const { doc, passages } of planned) {
