@@ -699,5 +699,8 @@ describe('a same-edit currency change keeps a line’s amounts and says so (obje
     expect(copiedAutofillNow(copied, 100, { kind: 'home' }, 'USD')).toBe('USD');
     expect(copiedAutofillNow(copied, 100, { kind: 'code', code: 'EUR' }, 'USD')).toBeUndefined();
     expect(copiedAutofillNow(copied, 90, { kind: 'home' }, 'USD')).toBeUndefined();
+    // A plan that wrote no amount under a judged currency carries no `copied`: absent means none.
+    expect(planDeclaredLookupAutofill(pairs, widget, {}, null)).not.toHaveProperty('copied');
+    expect(planLookupAutofill(cols, cols[0], widget, { pairs, row: {} })).not.toHaveProperty('copied');
   });
 });

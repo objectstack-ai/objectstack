@@ -1345,7 +1345,7 @@ export function LookupField({ value, onChange, field, readonly, error: fieldErro
           ? null
           : pickedRecords.find((r) => String(recordValue(r, idField)) === String(heldId)) ?? null;
       const { patch, withheld, copied } = planDeclaredLookupAutofill(autofillPairs, row, resolvedDependentValues, previous, currencyFor(row));
-      noteWithheld(recordValue(row, idField), withheld, copied);
+      noteWithheld(recordValue(row, idField), withheld, copied ?? []);
       if (Object.keys(patch).length > 0) onAutofill(patch);
     },
     [autofillPairs, onAutofill, normalizeId, value, pickedRecords, idField, resolvedDependentValues, currencyFor, noteWithheld],
@@ -1397,7 +1397,7 @@ export function LookupField({ value, onChange, field, readonly, error: fieldErro
       null,
       currencyFor(row),
     );
-    noteWithheld(key, withheld, copied);
+    noteWithheld(key, withheld, copied ?? []);
     if (Object.keys(patch).length > 0) onAutofill(patch, { opening: true });
   }, [autofillPairs, onAutofill, openingValue, value, normalizeId, hydratedRecords, idField, resolvedDependentValues, autofillCurrency, refSchemaSettled, followedParentPending, currencyFor, noteWithheld]);
 

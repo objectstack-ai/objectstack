@@ -243,7 +243,7 @@ export function planLookupAutofill(
   }
   writes.push(...declaredPickWrites(declared?.pairs, record, declared?.row, declared?.previous));
   const plan = judgePickWrites(writes, currency);
-  return { patch: { [col.name]: record?.value ?? record?.id ?? record?._id, ...plan.patch }, withheld: plan.withheld, copied: plan.copied };
+  return { patch: { [col.name]: record?.value ?? record?.id ?? record?._id, ...plan.patch }, withheld: plan.withheld, ...(plan.copied ? { copied: plan.copied } : {}) };
 }
 
 /** {@link planLookupAutofill}'s writes alone. */

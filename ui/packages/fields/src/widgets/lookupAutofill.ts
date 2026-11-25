@@ -107,16 +107,17 @@ export function judgePickWrites(
   candidates: readonly PickWrite[],
   currency: AutofillCurrencyContext | undefined,
 ): LookupAutofillPlan {
-  const plan: LookupAutofillPlan = { patch: {}, withheld: [], copied: [] };
+  const plan: LookupAutofillPlan = { patch: {}, withheld: [] };
+  const copiedAmounts: CopiedAutofill[] = [];
   const writes: Values = {};
   for (const c of candidates) writes[c.target] = c.value;
   for (const c of candidates) {
     const { withheld, copied } = judgeCopy(currency, c, writes);
     if (withheld) plan.withheld.push(withheld);
     else plan.patch[c.target] = c.value;
-    if (copied) plan.copied.push(copied);
+    if (copied) copiedAmounts.push(copied);
   }
-  return plan;
+  return copiedAmounts.length > 0 ? { ...plan, copied: copiedAmounts } : plan;
 }
 
 /** {@link planDeclaredLookupAutofill}'s writes alone. */
@@ -335,11 +336,16 @@ export interface CopiedAutofill {
   readonly under: string;
 }
 
-/** The writes, the withheld values and the copied amounts of one pick. */
+/**
+ * The writes and the withheld values of one pick, and `copied`, the amounts
+ * it wrote with the code each was written under. `copied` is absent when the
+ * pick wrote no amount a currency judged (absent means none), so a plan built
+ * without it stays a plan.
+ */
 export interface LookupAutofillPlan {
   patch: Values;
   withheld: WithheldAutofill[];
-  copied: CopiedAutofill[];
+  copied?: CopiedAutofill[];
 }
 
 /** `write` judged against the record with this pick's `writes` applied: withheld with the reason, or copied (an amount under its target's code). */

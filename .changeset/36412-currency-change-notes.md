@@ -5,7 +5,7 @@
 
 fix(fields): after a currency change in the same edit, a lookup pick's amounts stay as they are and the notes beside them follow the new currency
 
-Clause-②: no
+Clause-②: yes (widening)
 Metadata-protocol: none
 
 Follows the cross-currency pick rule (a pick copies an amount only into a field in the same currency). Changing the record's currency in the same edit (a new record, one with no saved lines, lines staged in this edit) still changes and clears no amount. Now the notes say what that means, in the line-item grid and in the record form. Nothing is converted, and no metadata changes.
@@ -14,4 +14,4 @@ Follows the cross-currency pick rule (a pick copies an amount only into a field 
 - **A note about a price that was not copied follows the new currency.** The "was not filled" note is judged again against the record's currency as it is now, so it names the new currency, not the one at the pick.
 - **When the record changes to the picked price's own currency, the note stays and the field stays empty.** It now says "Unit Price was not filled when it was picked. The record is now in USD: pick again to fill $100.00." A currency change never fills a field by itself.
 
-Also in `@object-ui/fields`: new exports `withheldAutofillNow`, `copiedAutofillNow`, `copiedAutofillMessage` and the type `CopiedAutofill`. `LookupAutofillPlan` gains `copied`, the amounts a pick wrote and the currency each was written in. `WithheldAutofill` gains the reason `nowSameCurrency`. In `@object-ui/i18n`: two new `lookup.*` sentences, `autofillNowSameCurrency` and `autofillCopiedUnder`, in every locale pack.
+Also in `@object-ui/fields`, a widening of its published surface, with nothing removed or made required: new exports `withheldAutofillNow`, `copiedAutofillNow`, `copiedAutofillMessage` and the type `CopiedAutofill`. `LookupAutofillPlan` gains the optional `copied`, the amounts a pick wrote and the currency each was written in; it is absent when there are none, so a plan built without it is still a valid plan. The `WithheldAutofill.reason` union widens with `nowSameCurrency`: code that switches over every reason gains one case to say. In `@object-ui/i18n`: two new `lookup.*` sentences, `autofillNowSameCurrency` and `autofillCopiedUnder`, in every locale pack.
