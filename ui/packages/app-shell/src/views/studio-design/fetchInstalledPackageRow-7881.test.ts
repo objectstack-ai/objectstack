@@ -31,13 +31,14 @@ const MARKED = 'Publishing is temporarily unavailable. Nothing was changed.';
 function answer(response: { ok: boolean; status: number; json: () => Promise<unknown> }): void {
   vi.stubGlobal(
     'fetch',
-    vi.fn(async () => response),
+    // With the headers a real Response carries: the list read goes through the authenticated fetch.
+    vi.fn(async () => ({ headers: new Headers(), ...response })),
   );
 }
 const listOk = (packages: unknown[]) =>
-  answer({ headers: new Headers(), ok: true, status: 200, json: async () => ({ success: true, data: { packages, total: packages.length } }) });
+  answer({ ok: true, status: 200, json: async () => ({ success: true, data: { packages, total: packages.length } }) });
 const listFailure = (status: number, error: Record<string, unknown>) =>
-  answer({ headers: new Headers(), ok: false, status, json: async () => ({ success: false, error }) });
+  answer({ ok: false, status, json: async () => ({ success: false, error }) });
 
 /** The message the read throws with, for a failed answer. */
 async function thrownFor(status: number, error: Record<string, unknown>): Promise<string> {
@@ -78,7 +79,7 @@ describe('a failed read is not an empty result (objectui#7881)', () => {
 
   it('a non-JSON error body names the status, not a JSON syntax error', async () => {
     answer({
-      headers: new Headers(), ok: false,
+      ok: false,
       status: 502,
       json: async () => {
         throw new SyntaxError("Unexpected token '<', \"<html>\"... is not valid JSON");
@@ -98,7 +99,7 @@ describe('a failed read is not an empty result (objectui#7881)', () => {
   });
 
   it('CONTROL — the bare-array body the endpoint also serves reads the same', async () => {
-    answer({ headers: new Headers(), ok: true, status: 200, json: async () => [{ manifest: { id: PACKAGE_ID, name: PACKAGE_ID } }] });
+    answer({ ok: true, status: 200, json: async () => [{ manifest: { id: PACKAGE_ID, name: PACKAGE_ID } }] });
     await expect(fetchInstalledPackageRow(PACKAGE_ID)).resolves.toMatchObject({ manifest: { id: PACKAGE_ID } });
   });
 });
