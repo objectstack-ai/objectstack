@@ -131,6 +131,7 @@ import { I18nProvider } from '@object-ui/i18n';
 // The console's preview and authoring code loads `@objectstack/lint` lazily;
 // warmed here so its first load is paid at import, not inside a test's clock.
 import '@objectstack/lint';
+import '@object-ui/plugin-detail';
 import { StudioDesignSurface } from './StudioDesignSurface';
 import { subscribeMetadataRefresh } from '../../assistant/assistantBus';
 
@@ -231,6 +232,10 @@ beforeEach(() => {
         return json({ drafts: serverDrafts });
       }
       if (url === `/api/v1/meta/object?package=${encodeURIComponent(PACKAGE_ID)}`) return json(objectRows);
+      // objectstack#36904 — the object designer reads its one object's layers.
+      const layers = /^\/api\/v1\/meta\/object\/([^/?]+)\/layers/.exec(url);
+      const row = layers && objectRows.find((r) => r.name === decodeURIComponent(layers[1]));
+      if (row) return json({ code: row, overlay: null, overlayScope: null, effective: row });
       return json([]);
     }) as unknown as typeof fetch,
   );
@@ -240,6 +245,9 @@ afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
 });
+
+/** objectstack#36904 — where the old Studio home (`/data`) lands: the package's object list. */
+const OBJECT_LIST = `/studio/${PACKAGE_ID}/metadata/object?package=${encodeURIComponent(PACKAGE_ID)}`;
 
 function LocationProbe(): React.ReactElement {
   const location = useLocation();
@@ -251,6 +259,7 @@ function renderStudio(entry = `/studio/${PACKAGE_ID}/data?surface=object%3Ahcpl_
     <MemoryRouter initialEntries={[entry]}>
       <LocationProbe />
       <Routes>
+        <Route path="/studio/:packageId/metadata/*" element={<StudioDesignSurface area="metadata" />} />
         <Route path="/studio/:packageId/:tab" element={<StudioDesignSurface />} />
       </Routes>
     </MemoryRouter>,
@@ -292,7 +301,7 @@ describe('the Studio copilot\'s applied card opens the 变更 drawer in place (o
     renderStudio(`/studio/${PACKAGE_ID}/data?changes=review`);
     await waitFor(() => expect(screen.getByTestId('draft-changes-panel')).toHaveAttribute('data-open', 'true'));
     expect(screen.getByTestId('draft-changes-panel')).toHaveAttribute('data-posture', 'review');
-    await waitFor(() => expect(screen.getByTestId('location').textContent).toBe(`/studio/${PACKAGE_ID}/data`));
+    await waitFor(() => expect(screen.getByTestId('location').textContent).toBe(OBJECT_LIST));
   });
 
   // objectstack#36502 — the link printed before the Interfaces pillar retired
@@ -301,12 +310,12 @@ describe('the Studio copilot\'s applied card opens the 变更 drawer in place (o
     renderStudio(`/studio/${PACKAGE_ID}/interfaces?changes=review`);
     await waitFor(() => expect(screen.getByTestId('draft-changes-panel')).toHaveAttribute('data-open', 'true'));
     expect(screen.getByTestId('draft-changes-panel')).toHaveAttribute('data-posture', 'review');
-    await waitFor(() => expect(screen.getByTestId('location').textContent).toBe(`/studio/${PACKAGE_ID}/data`));
+    await waitFor(() => expect(screen.getByTestId('location').textContent).toBe(OBJECT_LIST));
   });
 
   it('CONTROL: a value the surface does not know opens nothing, and is dropped all the same', async () => {
     renderStudio(`/studio/${PACKAGE_ID}/data?changes=publish`);
-    await waitFor(() => expect(screen.getByTestId('location').textContent).toBe(`/studio/${PACKAGE_ID}/data`));
+    await waitFor(() => expect(screen.getByTestId('location').textContent).toBe(OBJECT_LIST));
     await act(drain);
     expect(screen.getByTestId('draft-changes-panel')).toHaveAttribute('data-open', 'false');
   });
@@ -319,6 +328,7 @@ describe('the Studio copilot\'s composer (objectui#12725 Target item 4)', () => 
       <I18nProvider config={{ defaultLanguage: 'zh', detectBrowserLanguage: false }} persistLanguage={false}>
         <MemoryRouter initialEntries={[`/studio/${PACKAGE_ID}/data?surface=object%3Ahcpl_borrowing`]}>
           <Routes>
+            <Route path="/studio/:packageId/metadata/*" element={<StudioDesignSurface area="metadata" />} />
             <Route path="/studio/:packageId/:tab" element={<StudioDesignSurface />} />
           </Routes>
         </MemoryRouter>

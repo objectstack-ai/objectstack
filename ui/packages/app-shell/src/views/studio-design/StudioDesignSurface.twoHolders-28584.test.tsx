@@ -125,6 +125,7 @@ import { createEmptyDataSource, failOnAbsorbedFetchError } from './__tests__/emp
 // The source under test reaches dynamic imports of `@objectstack/lint`; their first
 // load is paid here, at collection, never inside a case's clock (`check:test-source-alias`).
 import '@objectstack/lint';
+import '@object-ui/plugin-detail';
 
 const dataSource = createEmptyDataSource();
 failOnAbsorbedFetchError();
@@ -194,7 +195,7 @@ describe('Studio pillars — an item two packages hold is read at this package (
     );
     render(
       <MemoryRouter initialEntries={[`/studio/${PKG}/data`]}>
-        <DataPillar packageId={PKG} />
+        <DataPillar objectName="acme_account" packageId={PKG} />
       </MemoryRouter>,
     );
     await waitFor(() => expect(layersReads('object', 'acme_account')).toHaveLength(1));

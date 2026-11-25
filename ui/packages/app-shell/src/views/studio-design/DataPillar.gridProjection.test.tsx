@@ -23,6 +23,9 @@
  * would move the bug back without reddening anything.
  */
 
+// Paid at collection, not inside a case's clock (check:test-source-alias).
+import '@objectstack/lint';
+import '@object-ui/plugin-detail';
 import '@testing-library/jest-dom/vitest';
 import * as React from 'react';
 import { describe, it, expect, vi, afterEach } from 'vitest';
@@ -116,7 +119,7 @@ function renderPillar(packageId = 'com.example.showcase') {
   return render(
     <MemoryRouter initialEntries={[`/studio/${packageId}/data`]}>
       <SurfaceDeepLinkProvider>
-        <DataPillar packageId={packageId} />
+        <DataPillar objectName="showcase_book" packageId={packageId} />
       </SurfaceDeepLinkProvider>
     </MemoryRouter>,
   );
