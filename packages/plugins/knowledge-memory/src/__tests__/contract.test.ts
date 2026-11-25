@@ -10,5 +10,13 @@ import { KnowledgeMemoryAdapter } from '../index';
 runKnowledgeAdapterContract({
   name: 'knowledge-memory',
   makeAdapter: () => new KnowledgeMemoryAdapter('under_test'),
-  implements: { listDocuments: true, chunks: true, organizationIds: true },
+  implements: {
+    listDocuments: true,
+    chunks: true,
+    organizationIds: true,
+    indexStatus: true,
+    builds: true,
+    refusesOtherFingerprint: true,
+    generations: true,
+  },
 });
