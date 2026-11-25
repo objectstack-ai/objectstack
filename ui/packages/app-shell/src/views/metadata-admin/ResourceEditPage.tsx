@@ -420,6 +420,15 @@ function readActivePackageBinding(): string | undefined {
 }
 
 /**
+ * The item as its package ships it (the layered read's `code`), handed to a
+ * scoped inspector so an undone change restores it (objectstack#37031).
+ */
+function shippedLayerOf(layered: MetadataLayered<unknown> | null): Record<string, unknown> | null {
+  const code = layered?.code;
+  return code && typeof code === 'object' && !Array.isArray(code) ? (code as Record<string, unknown>) : null;
+}
+
+/**
  * Whether a layered answer this page already read holds no layer at all: no
  * packaged baseline, no customisation row, no effective value. That is what
  * `MetadataClient.layered()` resolves for the server's 404, an item that has
@@ -430,15 +439,6 @@ function readActivePackageBinding(): string | undefined {
  * such an item still has none, and asking `/layers` again only logs the same
  * 404.
  */
-/**
- * The item as its package ships it (the layered read's `code`), handed to a
- * scoped inspector so an undone change restores it (objectstack#37031).
- */
-function shippedLayerOf(layered: MetadataLayered<unknown> | null): Record<string, unknown> | null {
-  const code = layered?.code;
-  return code && typeof code === 'object' && !Array.isArray(code) ? (code as Record<string, unknown>) : null;
-}
-
 function holdsNoLayer(layered: MetadataLayered<unknown> | null): boolean {
   return !!layered && layered.code == null && layered.overlay == null && layered.effective == null;
 }
