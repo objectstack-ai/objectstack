@@ -3247,6 +3247,15 @@ const en = {
       changesDrafted: 'Saved as draft',
       changesFailed: 'Not applied',
       discussing: 'Viewing: {{target}}',
+      // objectstack#36999 — the conversation focus: the record the chat is pinned to.
+      focus: {
+        pin: 'Keep asking about this record',
+        pinned: 'Asking about: {{target}}',
+        remove: 'Stop asking about this record',
+        switchPrompt: 'Ask about "{{target}}" instead?',
+        switchAccept: 'Switch',
+        switchDecline: 'Keep',
+      },
       // Wording is load-bearing: this is SENT to the agent and must satisfy the
       // cloud confirm gate's English clause `apply (this|the) change`
       // (service-ai-studio confirm-gate.ts APPROVAL_RE). "apply what you just
@@ -3531,11 +3540,12 @@ const en = {
       resetViewTitle: 'Puts back this view’s own filters, search, sort, grouping, column layout, hidden fields, density, layout, row color, row numbers and inline editing. Pinned views, favorites and how records open stay as they are. Only your list changes.',
       personalized: 'Personalized',
       personalizedHeading: 'Your list differs from this view in',
-      // objectstack#35955 — a list's unsaved changes: Discard and Save.
+      // objectstack#35955 — a list's unsaved changes: Reset and Update view
+      // (objectstack#36737, the view's own actions, as Twenty's).
       draft: {
-        discard: 'Discard',
+        discard: 'Reset',
         discardTitle: 'Puts the list back as its view declares it: filters, sort, grouping, columns and layout. Column widths and row height stay.',
-        save: 'Save',
+        save: 'Update view',
         heading: 'Unsaved changes',
         partSeparator: ', ',
         saveToView: 'Save to this view',
@@ -4614,7 +4624,7 @@ const en = {
       allApps: 'All apps',
       editAppInStudio: 'Edit {{app}} in Studio',
       openAppInStudio: 'Open {{app}} in Studio',
-      backToHome: 'Back to home',
+      backToHome: 'Back to app start page',
       settings: 'Settings',
       productHome: '{{product}} home',
       addApp: 'Add app',

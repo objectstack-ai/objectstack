@@ -45,6 +45,7 @@ import {
   storeRowKey,
   storeRowSlotKey,
   storeRowWriteKey,
+  isPlatformOrigin,
 } from '../package-slotted-store.js';
 import { LRUCache } from '../utils/lru-cache.js';
 // [commit 6a180e42d] Both predicates moved to `@objectstack/types` — see its
@@ -1870,6 +1871,11 @@ export class DatabaseLoader implements MetadataLoader {
     if (!existing && !restoresBinding) {
       throw new Error(`Metadata ${type}/${name}${member === undefined ? '' : ` (member ${member ?? 'canonical'})`} not found for rollback`);
     }
+    // [#37013] The platform's own record is written by the platform's
+    // registration alone: a rollback never restores it (a restored body is
+    // written without the platform's mark, so the row would stop being the
+    // platform's record). Refused before anything is written.
+    if (existing && isPlatformOrigin(storedRowBodyOf(existing))) refusePlatformRecordRollback(type, name);
     if (restoresBinding) {
       // [#32540 C8] Refused before any write: an object the column cannot
       // store, or an object-less binding whose place an unnameable row holds.
@@ -2084,7 +2090,15 @@ export class DatabaseLoader implements MetadataLoader {
       const key = slotOf(row);
       if (!bySlot.has(key)) bySlot.set(key, row);
     }
-    const { key, replaces } = storeRowWriteKey(bySlot, type, name, data);
+    // [#37013] A package's first row never takes over the platform's row.
+    // Read off the stored body as written: the stamp is no conversion's. For a
+    // type whose slot holds a row per member, the row judged is the written
+    // member's — the one the write would take over — not the slot's first.
+    const writtenMember = storedRowMemberOf(type, data);
+    const platformRow = (slot: string) => isPlatformOrigin(storedRowBodyOf(writtenMember === undefined
+      ? bySlot.get(slot)
+      : rows.find((row) => slotOf(row) === slot && (memberOf(row) ?? null) === writtenMember)));
+    const { key, replaces } = storeRowWriteKey(bySlot, type, name, data, platformRow);
     // [#31699 R4-A, #32422; epic ruling 6799056319] A bundled type's slot holds
     // a row per member: the write goes to the row of the member the body
     // declares (the canonical one spelled `null`, `storedBundleMemberOf`), and
@@ -2388,9 +2402,14 @@ export class DatabaseLoader implements MetadataLoader {
       const bySlot = await this.rowSlots(type, name);
       const keys = options?.packageId === undefined && options?.packagelessOnly === true
         ? [...bySlot.keys()].filter((key) => slotPackageOf(key) === undefined)
-        : storeRemovalKeys(bySlot, type, name, options?.packageId).keys;
+        : options?.packageId === undefined && options?.platformOnly === true
+          ? [...bySlot.keys()].filter((key) => slotPackageOf(key) === undefined)
+          : storeRemovalKeys(bySlot, type, name, options?.packageId).keys;
+      // [#37013] The platform's withdrawal takes its own rows only: a
+      // package-less row whose stored body the platform wrote.
+      const taken = (row: Record<string, unknown>) => options?.platformOnly !== true || isPlatformOrigin(storedRowBodyOf(row));
       for (const key of keys) {
-        for (const row of bySlot.get(key) ?? []) await this._delete(this.tableName, row.id as string);
+        for (const row of bySlot.get(key) ?? []) if (taken(row)) await this._delete(this.tableName, row.id as string);
       }
       if (keys.length > 0) this.invalidate(type, name);
       return;
@@ -2410,6 +2429,9 @@ export class DatabaseLoader implements MetadataLoader {
       // Another package's item (or none this row can name): not this removal's.
       return;
     }
+    // [#37013] The platform's withdrawal takes the row only when the
+    // platform's registration wrote it.
+    if (options?.platformOnly === true && !isPlatformOrigin(storedRowBodyOf(existing))) return;
 
     // Delete from the main metadata table using the record's ID
     await this._delete(this.tableName, existing.id as string);
@@ -2596,4 +2618,34 @@ function generateId(): string {
   }
   // Fallback for environments without crypto.randomUUID
   return `meta_${Date.now()}_${Math.random().toString(36).substring(2, 10)}`;
+}
+
+/**
+ * [#37013] A row's stored body as written (`metadata`, parsed when stored as
+ * text), for reading a stamp off it; `undefined` for a missing row or a body
+ * that does not parse, which is then no platform record.
+ */
+/**
+ * [#37013] Refuse a rollback whose row is the platform's own record: `409
+ * RESOURCE_CONFLICT`, naming the fix. Only the platform's registration writes
+ * that record; a rollback restores a package's or the environment's item.
+ */
+function refusePlatformRecordRollback(type: string, name: string): never {
+  const err = new Error(
+    `${type}/${name}: the row this rollback would restore is the platform's own record, which only the platform's registration writes. ` +
+    'It is not rolled back: the platform registers it again at its next boot. To restore an earlier version of a package\'s item of the name, name that package.',
+  ) as Error & { code?: string; status?: number };
+  err.code = 'RESOURCE_CONFLICT';
+  err.status = 409;
+  throw err;
+}
+
+function storedRowBodyOf(row: Record<string, unknown> | undefined): unknown {
+  const stored = row?.metadata;
+  if (typeof stored !== 'string') return stored ?? undefined;
+  try {
+    return JSON.parse(stored);
+  } catch {
+    return undefined;
+  }
 }

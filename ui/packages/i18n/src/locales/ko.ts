@@ -2443,6 +2443,14 @@ const ko = {
       changesDrafted: "초안으로 저장됨",
       changesFailed: "적용되지 않음",
       discussing: "보는 중: {{target}}",
+      focus: {
+        pin: "이 레코드에 대해 계속 질문",
+        pinned: "질문 대상: {{target}}",
+        remove: "이 레코드에 대한 질문 중지",
+        switchPrompt: "대신 \"{{target}}\"에 대해 질문할까요?",
+        switchAccept: "전환",
+        switchDecline: "유지",
+      },
       changeVerb: {
         createObject: "객체 생성",
         addField: "필드 추가",
@@ -2855,11 +2863,12 @@ const ko = {
       resetViewTitle: "이 보기 자체의 필터, 검색, 정렬, 그룹, 열 배치, 숨긴 필드, 밀도, 레이아웃, 행 색상, 행 번호, 인라인 편집으로 되돌립니다. 고정한 보기, 즐겨찾기, 레코드 열기 방식은 그대로 유지됩니다. 본인의 목록만 변경됩니다.",
       personalized: "개인 설정됨",
       personalizedHeading: "이 보기와 다른 항목",
-      // objectstack#35955 — a list's unsaved changes: Discard and Save.
+      // objectstack#35955 — a list's unsaved changes: Reset and Update view
+      // (objectstack#36737, the view's own actions, as Twenty's).
       draft: {
-        discard: "변경 취소",
+        discard: "초기화",
         discardTitle: "목록을 보기에 정의된 상태로 되돌립니다: 필터, 정렬, 그룹, 열, 레이아웃. 열 너비와 행 높이는 그대로입니다.",
-        save: "저장",
+        save: "보기 업데이트",
         heading: "저장되지 않은 변경",
         partSeparator: ", ",
         saveToView: "이 보기에 저장",
@@ -3855,7 +3864,7 @@ const ko = {
       allApps: "모든 앱",
       editAppInStudio: "Studio에서 {{app}} 편집",
       openAppInStudio: "Studio에서 {{app}} 보기",
-      backToHome: "홈으로 돌아가기",
+      backToHome: "앱 시작 페이지로 돌아가기",
       settings: "시스템 설정",
       productHome: "{{product}} 홈",
       addApp: '앱 추가',
