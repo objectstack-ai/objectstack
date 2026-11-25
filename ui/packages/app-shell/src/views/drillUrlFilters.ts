@@ -629,16 +629,23 @@ export function deleteFieldFilterParams(params: URLSearchParams, field: string):
  *
  * The split is not stylistic — it is the line between text this module may
  * finish and text it may not (objectui#9159, applying objectui#8441). A range
- * or equality chip's content is the USER'S OWN comparand, which no catalogue
- * can translate and which reads the same in every locale, so it is finished
- * here as `text`. An is-null chip's content is PROSE this module would
- * otherwise hard-code in English for every reader on every locale; it therefore
+ * or equality chip's content is the USER'S OWN comparand, which no UI
+ * catalogue key names, so it is finished here as `text` — through the caller's
+ * {@link ComparandText} where the field declares options (objectstack#37259),
+ * which is the object's own option label, not operator prose. An is-null
+ * chip's content is PROSE this module would otherwise hard-code in English
+ * for every reader on every locale; it therefore
  * travels as `textKey` and is resolved at the render site, which already
  * translates the field half of the same chip.
  */
 export interface FilterChip {
   field: string;
-  /** Finished, language-neutral text (a comparand, a pair of range bounds). */
+  /**
+   * Finished text: a comparand, or a pair of range bounds. A whole-value
+   * comparand is drawn through the caller's {@link ComparandText}, which names
+   * an options-bearing field's value by its option label; every other
+   * comparand is the user's own text, verbatim.
+   */
   text?: string;
   /**
    * i18n key whose translation is this chip's operator PROSE. Alone, it IS the
@@ -649,6 +656,24 @@ export interface FilterChip {
    */
   textKey?: string;
 }
+
+/**
+ * How a chip draws ONE whole comparand of one field: the stored value a user
+ * reads, e.g. a select option's translated label rather than its code. The
+ * caller owns it because only the caller holds the object's field metadata and
+ * the translation catalogue. The default draws the value as itself.
+ */
+export type ComparandText = (field: string, value: unknown) => string;
+
+const comparandAsIs: ComparandText = (_field, value) => String(value);
+
+/**
+ * The operator words whose comparand is a WHOLE stored value (objectstack#37259),
+ * so it may be drawn as that value's option label. A text operator's comparand
+ * (`contains`, `starts_with`, …) is a fragment the user typed, which names no
+ * option, so it always stays verbatim.
+ */
+const WHOLE_VALUE_OP_WORDS: ReadonlySet<string> = new Set(['not_equals', 'in', 'not_in']);
 
 /**
  * Group filter triples into ONE display chip per field, preserving first-seen
@@ -673,6 +698,12 @@ export interface FilterChip {
  * operator's label as `textKey` and its comparand as `text`, the members of a
  * list joined with a comma.
  *
+ * An equality, negation or membership comparand is drawn through
+ * `comparandText` (objectstack#37259): the page passes one that names an
+ * options-bearing field's value by its translated option label, the text the
+ * grid cell shows for it. Range bounds and text-operator fragments stay
+ * verbatim.
+ *
  * The emptiness arms are the only ones that yield `textKey` rather than `text`, for the
  * reason on {@link FilterChip}. The keys are the filter builder's existing
  * operator keys, already present and already translated in all ten packs, and
@@ -680,7 +711,10 @@ export interface FilterChip {
  * these chips, which would put two spellings of one operator label at rest in
  * one product.
  */
-export function groupFilterChips(triples: FilterTriple[]): FilterChip[] {
+export function groupFilterChips(
+  triples: FilterTriple[],
+  comparandText: ComparandText = comparandAsIs,
+): FilterChip[] {
   const order: string[] = [];
   const byField = new Map<string, FilterTriple[]>();
   for (const tr of triples) {
@@ -717,16 +751,20 @@ export function groupFilterChips(triples: FilterTriple[]): FilterChip[] {
     const word = gte || lt ? undefined : URL_TRIPLE_OP_WORD[String(list[0][1])];
     if (word) {
       const comparand = list[0][2];
+      // objectstack#37259 — a whole-value comparand reads as the caller draws
+      // it (an option label); a text fragment stays the user's own text.
+      const draw = (v: unknown): string =>
+        WHOLE_VALUE_OP_WORDS.has(word) ? comparandText(field, v) : String(v);
       return {
         field,
         textKey: `filterBuilder.operators.${word}`,
-        text: Array.isArray(comparand) ? comparand.map(String).join(', ') : String(comparand),
+        text: Array.isArray(comparand) ? comparand.map(draw).join(', ') : draw(comparand),
       };
     }
     const text =
       gte || lt
         ? `${gte ? String(gte[2]) : '…'} → ${lt ? String(lt[2]) : '…'}`
-        : `= ${String(list[0][2])}`;
+        : `= ${comparandText(field, list[0][2])}`;
     return { field, text };
   });
 }

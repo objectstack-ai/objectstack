@@ -19,6 +19,7 @@ import {
   isPlatformProvidedToolName,
 } from './platform-tool-names';
 import { LIST_DATASETS_TOOL_NAME, QUERY_DATASET_TOOL_NAME } from '../../ai/dataset-tools.zod';
+import { GET_RECORD_CONTEXT_TOOL_NAME } from '../../ai/record-context-tools.zod';
 
 describe('PLATFORM_PROVIDED_TOOL_NAMES — internal invariants', () => {
   it('every name is snake_case (ToolSchema name grammar)', () => {
@@ -64,6 +65,17 @@ describe('PLATFORM_PROVIDED_TOOL_NAMES — internal invariants', () => {
     expect(isPlatformProvidedToolName(QUERY_DATASET_TOOL_NAME)).toBe(true);
     // The control: a neighbour spelling nobody registers still misses.
     expect(isPlatformProvidedToolName('query_datasets')).toBe(false);
+  });
+
+  it('lists get_record_context in the service-ai group and at the MCP door alike (ADR-0160 D4)', () => {
+    // Cloud `service-ai` registers the tool for the in-app assistant from the
+    // same definition the MCP door serves, delegating to the same executor.
+    // Until the group carried it, a skill kept out of MCP (`mcpPrompt: false`)
+    // that named it was reported as served over MCP only.
+    expect(PLATFORM_TOOLS_BY_PACKAGE['service-ai']).toContain(GET_RECORD_CONTEXT_TOOL_NAME);
+    expect(MCP_DOOR_TOOL_NAMES).toContain(GET_RECORD_CONTEXT_TOOL_NAME);
+    // It is one cloud package's registration, not the authoring product's.
+    expect(PLATFORM_TOOLS_BY_PACKAGE['service-ai-studio']).not.toContain(GET_RECORD_CONTEXT_TOOL_NAME);
   });
 
   it('each group is sorted, so diffs stay reviewable', () => {

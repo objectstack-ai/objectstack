@@ -22,9 +22,9 @@
 import '@testing-library/jest-dom/vitest';
 import * as React from 'react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, fireEvent, cleanup, waitFor, within } from '@testing-library/react';
+import { render, screen, fireEvent, cleanup, waitFor, within, act } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { MemoryRouter } from 'react-router-dom';
+import { MemoryRouter, Route, Routes, useNavigate, useParams } from 'react-router-dom';
 
 const PKG = 'com.acme.app';
 
@@ -101,6 +101,11 @@ import { registerMetadataInspector } from '../metadata-admin/inspector-registry'
 import { FlowPreview } from '../metadata-admin/previews/FlowPreview';
 import { FlowInspector } from '../metadata-admin/inspectors/FlowInspector';
 import { t } from '../metadata-admin/i18n';
+// The source under test reaches these dynamic imports (the command palette's
+// record preview, the drafts panel's lint, the code editor): their first load
+// is paid here, at collection, never inside a case's clock (`check:test-source-alias`).
+import '@objectstack/lint';
+import '@object-ui/plugin-detail';
 
 const dataSource = createEmptyDataSource();
 failOnAbsorbedFetchError();
@@ -129,12 +134,40 @@ beforeEach(() => {
 
 afterEach(cleanup);
 
+/**
+ * objectstack#36903 — the designer on a flow's address, keyed on the flow as
+ * the area keys it (`StudioMetadataArea`'s `AreaItem`): another flow is
+ * another address, opened here by a stand-in for ‹ › or the list.
+ */
+function FlowAt({ readOnly }: { readOnly: boolean }) {
+  const { name = '' } = useParams<{ name: string }>();
+  const navigate = useNavigate();
+  return (
+    <>
+      <button type="button" data-testid="open-other-flow" tabIndex={-1} onClick={() => navigate(`/studio/${PKG}/metadata/flow/${OTHER_FLOW.name}`)} />
+      <AutomationsPillar key={name} packageId={PKG} flowName={name} readOnly={readOnly} />
+    </>
+  );
+}
+
 function renderPillar(readOnly: boolean) {
   return render(
-    <MemoryRouter initialEntries={[`/studio/${PKG}/automations`]}>
-      <AutomationsPillar packageId={PKG} readOnly={readOnly} />
+    <MemoryRouter initialEntries={[`/studio/${PKG}/metadata/flow/${FLOW.name}`]}>
+      <Routes>
+        <Route path="/studio/:pkg/metadata/flow/:name" element={<FlowAt readOnly={readOnly} />} />
+      </Routes>
     </MemoryRouter>,
   );
+}
+
+/** The control just before `el` in the document's tab order. */
+function tabbableBefore(el: HTMLElement): HTMLElement {
+  const tabbable = Array.from(
+    document.querySelectorAll<HTMLElement>('a[href], button, input, select, textarea, [tabindex]'),
+  ).filter((c) => c.tabIndex >= 0 && !(c as HTMLButtonElement).disabled);
+  const at = tabbable.indexOf(el);
+  expect(at, 'the element is in the tab order').toBeGreaterThan(0);
+  return tabbable[at - 1]!;
 }
 
 /**
@@ -199,8 +232,8 @@ describe('Automations pillar on a read-only package (objectui#11124)', () => {
     const toggle = await openFlow();
     const wrapper = toggle.parentElement as HTMLElement;
 
-    // The control before it in the bar, then one Tab.
-    screen.getByRole('button', { name: 'Toggle sidebar' }).focus();
+    // The control before it, then one Tab.
+    tabbableBefore(wrapper).focus();
     await user.tab();
     expect(wrapper).toHaveFocus();
     expect(await screen.findByRole('tooltip')).toHaveTextContent(READ_ONLY_REASON);
@@ -345,14 +378,22 @@ describe('A refused status toggle rolls back to the server state (objectui#11124
 
     // Open the second flow — served with status `obsolete`, the very status the
     // pending toggle wrote — then let the first flow's save be refused.
-    fireEvent.click(screen.getByRole('button', { name: /Nightly digest/ }));
+    fireEvent.click(screen.getByTestId('open-other-flow'));
     await waitFor(() => expect(screen.getByTitle('API name: nightly_digest')).toBeInTheDocument(), { timeout: 8000 });
     await waitFor(() => expect(canvasStatus()).toBe(STATUS_OFF), { timeout: 8000 });
 
+    // objectstack#36903 — the first flow's designer left with its address, so
+    // its refusal is not this page's to show: wait for it to settle instead.
     open();
-    await screen.findByText(LOCKED_MESSAGE, undefined, { timeout: 8000 });
+    await act(async () => {
+      await (mockClient.save.mock.results[0]!.value as Promise<unknown>).catch(() => undefined);
+    });
     await new Promise((r) => setTimeout(r, 50));
+    expect(screen.getByTitle('API name: nightly_digest')).toBeInTheDocument();
+    expect(screen.queryByText(LOCKED_MESSAGE)).toBeNull();
     expect(canvasStatus()).toBe(STATUS_OFF);
     expect(screen.getByRole('switch')).toHaveAttribute('aria-checked', 'false');
+    // Nothing was written to the second flow.
+    expect(server.saves.map((saved) => saved.name)).toEqual(['notify_owner']);
   });
 });

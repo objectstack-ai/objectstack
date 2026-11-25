@@ -126,6 +126,10 @@ import { registerMetadataPreview } from '../metadata-admin/preview-registry';
 import { registerMetadataInspector } from '../metadata-admin/inspector-registry';
 import { DOCK_STUDIO_EXPANDED_STORAGE_KEY } from '../../layout/chatDockState';
 import { createEmptyDataSource } from './__tests__/emptyDataSource';
+// The source under test reaches these dynamic imports (the command palette's
+// record preview, the drafts panel's lint, the code editor): their first load
+// is paid here, at collection, never inside a case's clock (`check:test-source-alias`).
+import '@object-ui/plugin-detail';
 
 const dataSource = createEmptyDataSource();
 
@@ -226,10 +230,9 @@ async function selectDataField() {
   return card;
 }
 
-/** Automations: open the flow; its canvas is the stub above. */
+/** The flow designer on the flow's address (objectstack#36903); its canvas is the stub above. */
 async function openFlow() {
-  renderAt('automations');
-  fireEvent.click(await screen.findByRole('button', { name: /Notify owner/ }, SLOW));
+  renderAt('metadata/flow/notify_owner');
   await screen.findByTestId('pick-node', undefined, SLOW);
 }
 

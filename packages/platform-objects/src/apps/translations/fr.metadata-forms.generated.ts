@@ -1780,6 +1780,18 @@ export const frMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "Plage de dates",
         helpText: "La période affichée à l’ouverture du tableau de bord, et si les utilisateurs peuvent choisir leurs propres dates."
       },
+      "dateRange.field": {
+        label: "Date Field",
+        helpText: "The date field the period filters on. Leave it empty to use the creation date."
+      },
+      "dateRange.defaultRange": {
+        label: "Default Period",
+        helpText: "The period the dashboard opens with."
+      },
+      "dateRange.allowCustomRange": {
+        label: "Allow Custom Range",
+        helpText: "Let viewers pick their own start and end dates."
+      },
       globalFilters: {
         label: "Filtres globaux",
         helpText: "Filtres que les utilisateurs peuvent utiliser pour restreindre tous les widgets à la fois, ou seulement ceux que vous choisissez."

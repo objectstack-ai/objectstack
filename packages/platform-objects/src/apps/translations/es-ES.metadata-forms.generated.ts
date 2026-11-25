@@ -1780,6 +1780,18 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "Rango de fechas",
         helpText: "El periodo con el que se abre el panel y si los usuarios pueden elegir sus propias fechas."
       },
+      "dateRange.field": {
+        label: "Campo de fecha",
+        helpText: "El campo de fecha por el que filtra el período. Déjelo vacío para usar la fecha de creación."
+      },
+      "dateRange.defaultRange": {
+        label: "Período predeterminado",
+        helpText: "El período con el que se abre el panel."
+      },
+      "dateRange.allowCustomRange": {
+        label: "Permitir rango personalizado",
+        helpText: "Permite que los usuarios elijan sus propias fechas de inicio y fin."
+      },
       globalFilters: {
         label: "Filtros globales",
         helpText: "Filtros que los usuarios pueden usar para acotar todos los widgets a la vez, o solo los que elijas."

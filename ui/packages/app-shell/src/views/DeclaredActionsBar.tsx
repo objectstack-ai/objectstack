@@ -53,6 +53,7 @@ import {
   MetadataCtx,
   useAction,
   useCapabilityGate,
+  useDrawsAction,
   useCondition,
   toPredicateInput,
   usePredicateRecordContext,
@@ -1030,9 +1031,12 @@ const DeclaredActionsToolbar: React.FC<
 > = ({ actions, objectName, record, className, label, foldOverrides, foldDecisions, onDrawnActionsChange, headerParts, requireRejectReason }) => {
   const { t } = useObjectTranslation();
   const mayInvoke = useCapabilityGate();
+  // [ADR-0160 D7] An `ask_ai` action is absent where this provider has no
+  // in-app assistant to hand the record to.
+  const drawsAction = useDrawsAction();
   const permitted = useMemo(
-    () => actions.filter((action) => mayInvoke(action.requiredPermissions) && !isActionSwitchedOff(action)),
-    [actions, mayInvoke],
+    () => actions.filter((action) => mayInvoke(action.requiredPermissions) && !isActionSwitchedOff(action) && drawsAction(action)),
+    [actions, mayInvoke, drawsAction],
   );
   // objectstack#25877 — which of the permitted levers fold into the override
   // menu. Only for a viewer admitted through the override door alone

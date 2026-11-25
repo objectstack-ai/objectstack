@@ -1780,6 +1780,18 @@ export const zhHantMetadataForms: NonNullable<TranslationData['metadataForms']> 
         label: "日期範圍",
         helpText: "開啟儀表板時預設的時間範圍，以及檢視者能否自選日期。"
       },
+      "dateRange.field": {
+        label: "Date Field",
+        helpText: "The date field the period filters on. Leave it empty to use the creation date."
+      },
+      "dateRange.defaultRange": {
+        label: "Default Period",
+        helpText: "The period the dashboard opens with."
+      },
+      "dateRange.allowCustomRange": {
+        label: "Allow Custom Range",
+        helpText: "Let viewers pick their own start and end dates."
+      },
       globalFilters: {
         label: "全域篩選",
         helpText: "檢視者可用來一次篩選所有元件，或只篩選你指定元件的篩選條件。"

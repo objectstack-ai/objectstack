@@ -1780,6 +1780,18 @@ export const koMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "날짜 범위",
         helpText: "대시보드를 열 때 적용되는 기간과 보는 사람이 직접 날짜를 고를 수 있는지 여부입니다."
       },
+      "dateRange.field": {
+        label: "Date Field",
+        helpText: "The date field the period filters on. Leave it empty to use the creation date."
+      },
+      "dateRange.defaultRange": {
+        label: "Default Period",
+        helpText: "The period the dashboard opens with."
+      },
+      "dateRange.allowCustomRange": {
+        label: "Allow Custom Range",
+        helpText: "Let viewers pick their own start and end dates."
+      },
       globalFilters: {
         label: "전역 필터",
         helpText: "보는 사람이 모든 위젯을 한 번에, 또는 지정한 위젯만 좁혀 볼 수 있는 필터입니다."

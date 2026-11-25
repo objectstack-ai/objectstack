@@ -21,7 +21,7 @@ import React, { forwardRef, useCallback, useState } from 'react';
 import { ComponentRegistry } from '@object-ui/core';
 import type { ActionDef } from '@object-ui/core';
 import type { UIActionSchema } from '@object-ui/types';
-import { useAction, useRecordContext } from '@object-ui/react';
+import { useAction, useDrawsAction, useRecordContext } from '@object-ui/react';
 import { useCondition, toPredicateInput, usePredicateRecordContext } from '@object-ui/react';
 import { Button } from '../../ui';
 import { cn } from '../../lib/utils';
@@ -432,7 +432,10 @@ const ActionButtonRenderer = forwardRef<
     // everyone (objectui#3823). Reachable because `action:bar` bypasses
     // `SchemaRenderer` and spreads the whole member action onto this schema, so
     // this gate is the only one on that path. See `hasDeclaredVisibilityGate`.
+    // `ask_ai` is absent, not disabled, where no in-app assistant can take it (objectstack#37142).
+    const drawsAction = useDrawsAction();
     if (hasDeclaredVisibilityGate(schema.visible) && !isVisible) return null;
+    if (!drawsAction(schema)) return null;
 
     const button = (
       <Button
