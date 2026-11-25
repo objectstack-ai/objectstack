@@ -73,7 +73,7 @@ describe('PageShell compact header wraps instead of squeezing the breadcrumb (ob
     const meta = screen.getByTestId('page-shell-header-meta');
     expect(nav.nextElementSibling).toBe(meta);
     // The chips, the subtitle, the stats and the actions all live in it.
-    expect(meta).toContainElement(screen.getByText('Security'));
+    expect(meta).toContainElement(screen.getByText('Access'));
     expect(meta).toContainElement(screen.getByText('Can be added'));
     expect(meta).toContainElement(screen.getByText('Permission set'));
     expect(meta).toContainElement(screen.getByText('Objects granted'));

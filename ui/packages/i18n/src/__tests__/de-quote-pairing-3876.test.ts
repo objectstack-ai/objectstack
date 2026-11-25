@@ -486,7 +486,11 @@ describe('objectui#3876 — de pack closes „ with “ and not with a straight 
     // 134 once objectstack-ai/objectstack#35399 added `console.assignedWork.ownerKept`,
     // the ban dialog's line naming the action that is off („Besitzer ändern“) —
     // one literal span.
-    expect(okSpans, 'correctly paired spans').toBe(134);
+    // 132 once objectstack-ai/objectstack#36739 folded the first-run
+    // checklist's name, language, timezone and currency rows into one
+    // `organizationBasics` row: the old `organizationName.todo` („{{name}}“)
+    // and `timezone.todo` („heute“) lines went with them, two spans fewer.
+    expect(okSpans, 'correctly paired spans').toBe(132);
   });
 
   it('keeps the count identity that replaces the card’s count(„) === count(“)', () => {
@@ -626,7 +630,9 @@ describe('objectui#3876 — de pack closes „ with “ and not with a straight 
     // 133 / 133 / 0 after objectstack-ai/objectstack#36692 retired
     // `designMode.menu.newReportLeft`, one matched pair fewer.
     // 134 / 134 / 0 after objectstack-ai/objectstack#35399 added `console.assignedWork.ownerKept`.
-    expect({ open, close, rdq }).toEqual({ open: 134, close: 134, rdq: 0 });
+    // 132 / 132 / 0 after objectstack-ai/objectstack#36739 removed the
+    // checklist's `organizationName.todo` and `timezone.todo`, two pairs fewer.
+    expect({ open, close, rdq }).toEqual({ open: 132, close: 132, rdq: 0 });
     // The durable shape: every „ closed by a “, every surplus “ an English
     // opener answered by a ”. Survived translating the two English values.
     expect(close).toBe(open + rdq);

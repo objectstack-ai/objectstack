@@ -104,12 +104,9 @@ export const LIST_CONDITION_DEFAULT_TRANSLATIONS: Record<string, string> = {
   'dashboard.filters.range.this_week': 'This week',
   'dashboard.filters.range.this_month': 'This month',
   'dashboard.filters.range.last_30_days': 'Last 30 days',
-  // The phone sort sheet's level (objectstack#35884), in SortBuilder's words.
+  // The phone sort sheet's level (objectstack#35884), in SortBuilder's words;
+  // its direction reads the `listConditions.sort.*` rows above.
   'sortBuilder.addSort': 'Add sort',
-  'sortBuilder.ascending': 'A → Z',
-  'sortBuilder.descending': 'Z → A',
-  'sortBuilder.oldestFirst': 'Oldest → Newest',
-  'sortBuilder.newestFirst': 'Newest → Oldest',
   'sortBuilder.reorder': 'Drag to reorder',
   'sortBuilder.removeSort': 'Remove sort',
   'sortBuilder.levelOptions': 'Options for {{label}}',
