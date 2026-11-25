@@ -33,6 +33,11 @@ export interface FakeApp {
   unpublishedObjects?: string[];
   narrowed?: Record<string, string>;
   locales?: string[];
+  /**
+   * [ADR-0150 D6] The manifest namespace of each installed package, by id —
+   * the door's `packageNamespace`. Absent: the door has no such member.
+   */
+  namespaces?: Record<string, string>;
 }
 
 export interface FakeDoor extends RecordContextDoor {
@@ -148,6 +153,9 @@ export function fakeDoor(app: FakeApp): FakeDoor {
     async userTextLocales() {
       return app.locales ?? [];
     },
+    ...(app.namespaces
+      ? { packageNamespace: (packageId: string) => app.namespaces![packageId] }
+      : {}),
   };
   return door;
 }

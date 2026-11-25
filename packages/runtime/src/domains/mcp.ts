@@ -1681,6 +1681,7 @@ export function buildMcpBridge(
     // Its door is THIS bridge's own read members, bound to this request's
     // caller: nothing it reads is read any other way.
     if (seams.recordContextTools) {
+        let contextPackEngine: any;
         Object.assign(bridge, recordContextMembers(seams.recordContextTools, bridge, {
             assertApiExposed: (object, action) =>
                 actionExec.refuseUnexposedDataAction(deps, context, action, object, envId, ec, 'refuse'),
@@ -1699,12 +1700,19 @@ export function buildMcpBridge(
             // read decorations (`METADATA_READ_DECORATIONS`) and keeps the
             // ADR-0010 protection envelope the schema declares.
             listContextPacks: async () => {
+                // [ADR-0150 addendum 2026-11-25] The engine whose registry
+                // places each pack's package ({@link packageNamespaceOf}),
+                // resolved beside the read it serves, as `listSkills` does.
+                contextPackEngine = await deps.getObjectQL(context, envId).catch(() => undefined);
                 const merged = await actionExec.readMergedItems(await getProtocol(), 'ai_context');
                 if (merged !== undefined) return merged.map(stripReadDecorations);
                 const meta: any = await getMeta();
                 const listed = typeof meta?.list === 'function' ? await meta.list('ai_context') : [];
                 return Array.isArray(listed) ? listed.map(stripReadDecorations) : [];
             },
+            // [ADR-0150 D6, addendum 2026-11-25] A package's pack is spelt by
+            // its face `NS-NAME`, as a package-held skill's prompt name is.
+            packageNamespace: (packageId: string) => packageNamespaceOf(contextPackEngine, packageId),
         }));
     }
     return bridge;
@@ -1760,6 +1768,7 @@ function recordContextMembers(
         servedObjectDefinitionOf(name: string): Promise<Record<string, unknown> | null>;
         publishedObjectDefinitionOf(name: string): Promise<Record<string, unknown> | null>;
         listContextPacks(): Promise<readonly unknown[]>;
+        packageNamespace(packageId: string): string | undefined;
     },
 ) {
     return {
