@@ -267,6 +267,9 @@ importers:
       '@objectstack/service-print':
         specifier: workspace:*
         version: link:../../packages/services/service-print
+      '@objectstack/service-record-context':
+        specifier: workspace:*
+        version: link:../../packages/services/service-record-context
       '@objectstack/spec':
         specifier: workspace:*
         version: link:../../packages/spec

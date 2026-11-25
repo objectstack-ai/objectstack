@@ -41,6 +41,7 @@ import { lazySchema } from '../shared/lazy-schema';
 import { strictObject } from '../shared/strict-object';
 import { ROUTER_ADDRESSABLE_NAME_MESSAGE, ROUTER_ADDRESSABLE_NAME_PATTERN } from '../kernel/address-grammar';
 import { SnakeCaseIdentifierSchema } from '../shared/identifiers.zod';
+import { UNIQUE_SCALAR_ITEMS } from '../shared/refinement-projection';
 import { MetadataProtectionFields } from '../kernel/metadata-protection.zod';
 
 /** The most root fields one pack lists. */
@@ -69,9 +70,8 @@ function distinctFieldNames(max: number, what: string) {
     .array(FieldNameSchema)
     .min(1)
     .max(max, { message: `${what} lists at most ${max} fields` })
-    .refine((names) => new Set(names).size === names.length, {
-      message: `${what} names a field twice`,
-    });
+    // Published as `uniqueItems: true` (the closed `unique-items` arm).
+    .refine(UNIQUE_SCALAR_ITEMS, { message: `${what} names a field twice` });
 }
 
 /**

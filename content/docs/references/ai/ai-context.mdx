@@ -1,0 +1,85 @@
+---
+title: Ai Context schema — AI Protocol reference
+navTitle: Ai Context
+description: "Ai Context schemas of the ObjectStack AI Protocol: AiContext, AiContextBody, AiContextRelated — each property with its type, default and a TypeScript example."
+---
+
+{/* ⚠️  AUTO-GENERATED — DO NOT EDIT. Run build-docs.ts to regenerate. Hand-written docs live in the module folders under content/docs/. */}
+
+<Callout type="info">
+**Source:** `packages/spec/src/ai/ai-context.zod.ts`
+</Callout>
+
+## TypeScript Usage
+
+```typescript
+import { AiContextSchema, AiContextBodySchema, AiContextRelatedSchema } from '@objectstack/spec/ai';
+import type { AiContext, AiContextBody, AiContextRelated } from '@objectstack/spec/ai';
+
+// Validate data
+const result = AiContextSchema.parse(data);
+```
+
+---
+
+## AiContext
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **name** | `string` | ✅ | Pack machine name (snake_case) — what `get_record_context`'s `context` argument and a skill's `context` key name |
+| **label** | `string` | ✅ | Pack display name — the header of the tool answer |
+| **object** | `string` | ✅ | The root object: a pack reads one record of it |
+| **fields** | `string[]` | optional | The root object's fields handed to the model, in order (at most 30). A lookup among them is answered with the name of the record it points at |
+| **related** | `{ object: string; field?: string; fields?: string[] }[]` | optional | Child lists that point at the record (at most 3), one level deep |
+| **body** | `{ field: string }` | optional | The one long-text field read as the record's body |
+| **_lock** | `Enum<'none' \| 'no-overlay' \| 'no-delete' \| 'full'>` | optional | Item-level lock — controls overlay & delete (ADR-0010). |
+| **_lockReason** | `string` | optional | Human-readable reason shown when a write is refused by _lock. |
+| **_lockSource** | `Enum<'artifact' \| 'package' \| 'env-forced'>` | optional | Layer that set _lock (artifact \| package \| env-forced). |
+| **_provenance** | `Enum<'package' \| 'org' \| 'env-forced'>` | optional | Origin of the item (package \| org \| env-forced). |
+| **_packageId** | `string` | optional | Owning package machine id. |
+| **_packageVersion** | `string` | optional | Owning package version. |
+| **_lockDocsUrl** | `string` | optional | Optional documentation link surfaced next to _lockReason. |
+
+### Nested Shape: `AiContext.related[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **object** | `string` | ✅ | A child object with a reference field (lookup, master-detail, user or tree) that points at the pack's root object |
+| **field** | `string` | optional | The child's reference field that points at the root. Required when the child has several such fields; with one, it may be omitted. Resolved once, on the published definition |
+| **fields** | `string[]` | optional | The columns read for each row, in order (at most 10). A lookup among them is answered with the name of the record it points at. Omit to read the row's name only |
+
+### Nested Shape: `AiContext.body`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **field** | `string` | ✅ | A long-text field of the root object (textarea, markdown, html, richtext). A body past the render service's bound is carried as an outline of its headings, each section read by its anchor |
+
+
+---
+
+## AiContextBody
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **field** | `string` | ✅ | A long-text field of the root object (textarea, markdown, html, richtext). A body past the render service's bound is carried as an outline of its headings, each section read by its anchor |
+
+
+---
+
+## AiContextRelated
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **object** | `string` | ✅ | A child object with a reference field (lookup, master-detail, user or tree) that points at the pack's root object |
+| **field** | `string` | optional | The child's reference field that points at the root. Required when the child has several such fields; with one, it may be omitted. Resolved once, on the published definition |
+| **fields** | `string[]` | optional | The columns read for each row, in order (at most 10). A lookup among them is answered with the name of the record it points at. Omit to read the row's name only |
+
+
+---
+
