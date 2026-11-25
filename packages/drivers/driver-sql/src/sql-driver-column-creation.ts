@@ -50,6 +50,7 @@ import {
   isDeclaredFieldType, isMultiValuedColumn, refuseRejectedReferenceAlias, refuseUndeclaredFieldType,
 } from './sql-driver-top-level.js';
 import type { RowWidthContribution } from './sql-driver-top-level.js';
+import { emitsDeclaredColumnDefault } from './sql-driver-schema-sync.js';
 import { SqlDriverStatics as SqlDriver } from './sql-driver.js';
 import type { SqlDriver as SqlDriverClass } from './sql-driver.js';
 
@@ -704,7 +705,24 @@ export class ColumnCreationFacet {
   }
 
   /** The body of `SqlDriver#createColumn`; the method's docblock there is its contract. */
-  static createColumn(this: Pick<ColumnCreationHost, 'applyDeclaredColumnDefault' | 'declaredVarcharLength' | 'isMysql' | 'jsonColumn' | 'keyableTextLength' | 'mediaColumnIsJson'>, table: Knex.CreateTableBuilder, name: string, field: any, keyed?: { unique: boolean }, tenantColumn: boolean = false) {
+  static createColumn(this: Pick<ColumnCreationHost, 'applyDeclaredColumnDefault' | 'declaredVarcharLength' | 'isMysql' | 'jsonColumn' | 'keyableTextLength' | 'mediaColumnIsJson'>, table: Knex.CreateTableBuilder, name: string, field: any, keyed?: { unique: boolean }, tenantColumn: boolean = false, addedToPopulatedTable: boolean = false) {
+    // [#37258] `storage.notNull` on a column ADDED to a table that already
+    // holds rows: every existing row would hold NULL in it, so the database
+    // refuses `ADD COLUMN … NOT NULL` with no DEFAULT (SQLite: `Cannot add a
+    // NOT NULL column with default value NULL`; Postgres: `column … contains
+    // null values`) and that refusal used to fail the object's whole sync,
+    // leaving the object unwritable. The declaration's own contract
+    // (`FieldSchema.storage`) names what declaring NOT NULL over existing null
+    // rows is: "a destructive migration gated by the schema-drift ceremony
+    // (backfill first)". So the column is added nullable, the differ — which
+    // compares the column against `storage.notNull` — reports
+    // `tighten_not_null`, and the ceremony imposes the constraint after the
+    // backfill. A literal or NOW() DEFAULT the existing rows take
+    // ({@link emitsDeclaredColumnDefault}) leaves nothing to defer, and an
+    // empty table nothing to declare over: both keep the constraint here.
+    // `required`, the engine's write contract, is not read here at all.
+    const notNull = declaresColumnNotNull(field)
+      && !(addedToPopulatedTable && !emitsDeclaredColumnDefault(field));
     // [#11567] Stated BEFORE the `multiple` short-circuit and before the type
     // switch, because the spec's refusal is gated on neither: `FieldSchema`
     // answers `unrecognized_keys` for `reference_to` on ANY field, whatever its
@@ -742,9 +760,10 @@ export class ColumnCreationFacet {
     // it had itself just created, with no rows in them.
     //
     // ⚠️ NOT the drift ceremony this ADR routes around: `createColumn` runs on
-    // `CREATE TABLE` and on `ALTER TABLE ADD COLUMN`, so the column constrained
-    // here is always EMPTY — the same reason the string family's #11431 note
-    // below gives for narrowing a varchar here. Imposing `NOT NULL` over
+    // `CREATE TABLE` and on `ALTER TABLE ADD COLUMN`. A column added to a table
+    // that already holds rows is NOT empty — each row holds NULL in it — and
+    // `notNull` above is false there (#37258), so the constraint is imposed
+    // here only on columns no row holds a NULL in. Imposing `NOT NULL` over
     // possibly-null data stays `tighten_not_null`, destructive, behind
     // `os migrate apply --allow-destructive`, untouched.
     //
@@ -754,7 +773,7 @@ export class ColumnCreationFacet {
     // producers already agree.
     if (isMultiValuedColumn(String(field.type ?? ''), field)) {
       const jsonCol = this.jsonColumn(table, name);
-      if (declaresColumnNotNull(field) || tenantColumn) jsonCol.notNullable();
+      if (notNull || tenantColumn) jsonCol.notNullable();
       return;
     }
 
@@ -1176,7 +1195,11 @@ export class ColumnCreationFacet {
       // it — the injected tenant field stays `required: false` with no
       // `storage`, and the differ's `ceremonyOwnedNullability` reads the
       // difference as no drift.
-      if (declaresColumnNotNull(field) || tenantColumn) col.notNullable();
+      //
+      // [#37258] `notNull` is that question, answered `false` for a column
+      // added to a populated table with no DEFAULT its rows can take — see the
+      // head of this method.
+      if (notNull || tenantColumn) col.notNullable();
       this.applyDeclaredColumnDefault(col, field, type);
     }
   }

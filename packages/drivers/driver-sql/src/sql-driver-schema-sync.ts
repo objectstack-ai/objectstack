@@ -2828,15 +2828,24 @@ export function nowColumnDefault(this: Pick<SchemaSyncHost, 'isMysql' | 'isPostg
   }
 }
 
+/**
+ * [#37258] Whether {@link applyDeclaredColumnDefault} gives this field's column
+ * a physical DEFAULT — asked by `createColumn` on `ALTER TABLE … ADD COLUMN`
+ * to a table that already holds rows, where a `storage.notNull` column is
+ * accepted by the database only if the existing rows can take that DEFAULT.
+ * The one statement of the rule, so the emitter and that question cannot
+ * answer differently.
+ */
+export function emitsDeclaredColumnDefault(field: any): boolean {
+  const dv = field?.defaultValue;
+  if (dv === undefined || dv === null) return false;
+  if (isNowDefaultValue(dv)) return true;
+  return !isRuntimeDefaultToken(dv) && typeof dv !== 'object';
+}
+
 /** The body of `SqlDriver#applyDeclaredColumnDefault`; the method's docblock there is its contract. */
 export function applyDeclaredColumnDefault(this: Pick<SchemaSyncHost, 'nowColumnDefault'>, col: Knex.ColumnBuilder, field: any, type: string): void {
-  const dv = field?.defaultValue;
-  if (dv === undefined || dv === null) return;
-  if (isNowDefaultValue(dv)) {
-    col.defaultTo(this.nowColumnDefault(type));
-    return;
-  }
-  if (isRuntimeDefaultToken(dv)) return;
-  if (typeof dv === 'object') return;
-  col.defaultTo(dv as any);
+  if (!emitsDeclaredColumnDefault(field)) return;
+  const dv = field.defaultValue;
+  col.defaultTo(isNowDefaultValue(dv) ? this.nowColumnDefault(type) : (dv as any));
 }
