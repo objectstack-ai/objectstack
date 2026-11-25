@@ -2428,6 +2428,21 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
     </p>
   ) : null;
 
+  // objectstack#37278 — the server answered only PART of the view's groups
+  // (`hasMore` on a header answer: the deployment's default page size cut
+  // them). The groups drawn keep their exact counts, so nothing is withheld
+  // and this is no panel: one line in the draft note's strip, saying the list
+  // of groups is not the whole set.
+  const groupsPartialNote = serverGroupedFetch && groupHeaders.partial ? (
+    <p
+      role="status"
+      className="px-3 sm:px-4 py-1.5 text-xs text-muted-foreground border-b bg-muted/40"
+      data-testid="grid-grouping-partial"
+    >
+      {t('grid.grouping.partial')}
+    </p>
+  ) : null;
+
   // The generated columns, enriched and folded, with the persisted widths and
   // order applied (`./objectGridPersistedColumns`).
   const { persistedColumns } = resolveObjectGridPersistedColumns({
@@ -4801,6 +4816,7 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
         >
         {gridDescription}
         {groupingDraftOnlyNote}
+        {groupsPartialNote}
         <div className="space-y-2 p-2">
           {data.map(renderMobileCard)}
         </div>
@@ -5429,6 +5445,7 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
       )}
       {gridDescription}
       {groupingDraftOnlyNote}
+      {groupsPartialNote}
       {gridToolbar}
       <GridHeaderMenuProvider value={hostHeaderMenu === true}>
         <GridCellSelectionProvider value={gridCellSelection}>{renderedGridContent}</GridCellSelectionProvider>

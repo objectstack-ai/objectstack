@@ -39,13 +39,15 @@
  * `queryGroupHeaders`, and asks for no rows.
  */
 import { describe, it, expect, vi, afterEach, beforeAll } from 'vitest';
-import { render, cleanup, screen, fireEvent } from '@testing-library/react';
+import { render, cleanup, screen, fireEvent, renderHook } from '@testing-library/react';
 import { withinBand } from './groupBandScope';
 import '@testing-library/jest-dom';
 import React from 'react';
 import { compileListViewGroupQuery } from '@objectstack/spec/ui';
 
 import { ObjectGrid } from '../ObjectGrid';
+import { useServerGroupHeaders } from '../useServerGrouping';
+import { serverGroupTotalOf } from '../objectGridGrouping';
 import { ActionProvider } from '@object-ui/react';
 import { registerAllFields } from '@object-ui/fields';
 
@@ -346,5 +348,66 @@ describe('ObjectGrid groups on the server (objectui#7189)', () => {
     await vi.waitFor(() => expect(ds.getObjectSchema).toHaveBeenCalled());
     expect(ds.find).not.toHaveBeenCalled();
     expect(groupRows()).toHaveLength(0);
+  });
+});
+
+/**
+ * objectstack#37278 — a header answer CUT to a deployment's default page size.
+ * The platform's `POST /data/:object/query` cuts a grouped read that names no
+ * `limit` to `OS_DATA_DEFAULT_PAGE_SIZE` groups and answers `hasMore`, which
+ * `queryGroupHeaders` hands on as the answer's `hasMore`. The double below is
+ * the whole-store double above with that cut applied: the first `pageSize`
+ * groups of its answer, flagged when the slice dropped any. The CONTROL is
+ * the same store under a page that holds every group.
+ */
+describe('a server-grouped grid over a cut header answer (objectstack#37278)', () => {
+  const cappedDataSource = (pageSize: number) => {
+    const ds = makeServerDataSource(buildRows(false));
+    const whole = ds.queryGroupHeaders;
+    const capped = vi.fn(async (object: string, query: Parameters<typeof whole>[1]) => {
+      const groups = await whole(object, query);
+      const answer = groups.slice(0, pageSize) as typeof groups & { hasMore?: boolean };
+      if (answer.length < groups.length) answer.hasMore = true;
+      return answer;
+    });
+    return { ...ds, queryGroupHeaders: capped };
+  };
+  const fields = [{ field: 'business_unit' }];
+
+  it('says more groups were not loaded, over the groups it did get', async () => {
+    renderGrid(cappedDataSource(3));
+    await vi.waitFor(() => expect(groupRows()).toHaveLength(3));
+    expect(screen.getByTestId('grid-grouping-partial')).toHaveTextContent('More groups were not loaded');
+    // The groups listed keep their exact counts.
+    for (const [label, count] of Object.entries(headerCounts())) expect(count).toBe(EXPECTED[label]);
+  });
+
+  it('control: a page that holds every group draws all five and no note', async () => {
+    renderGrid(cappedDataSource(100));
+    await vi.waitFor(() => expect(groupRows()).toHaveLength(5));
+    expect(screen.queryByTestId('grid-grouping-partial')).toBeNull();
+  });
+
+  it('folds no record total over a cut answer — and the whole total over a whole one', async () => {
+    const ask = (pageSize: number) => {
+      const dataSource = cappedDataSource(pageSize);
+      return renderHook(() => useServerGroupHeaders({
+        enabled: true,
+        dataSource: dataSource as any,
+        objectName: OBJECT,
+        fields,
+        reloadKey: '0',
+      }));
+    };
+    const cut = ask(3);
+    await vi.waitFor(() => expect(cut.result.current.headers).toBeDefined());
+    expect(cut.result.current.partial).toBe(true);
+    expect(cut.result.current.headers![0]).toHaveLength(3);
+    expect(serverGroupTotalOf(cut.result.current)).toBeNull();
+
+    const whole = ask(100);
+    await vi.waitFor(() => expect(whole.result.current.headers).toBeDefined());
+    expect(whole.result.current.partial).toBe(false);
+    expect(serverGroupTotalOf(whole.result.current)).toBe(186);
   });
 });

@@ -78,6 +78,21 @@
  * group. A refresh (`reloadKey`) re-asks the SAME question, so it keeps the
  * answer in hand on screen while it reloads; any other change starts with
  * none.
+ *
+ * ## A cut answer is partial, and says so (objectstack#37278)
+ *
+ * The header query names no `limit`, so on a deployment with a default page
+ * size the platform cuts the group rows to that page and answers `hasMore`,
+ * which `DataSource.queryGroupHeaders` hands on as the answer's `hasMore`
+ * (`ListViewGroupHeaderAnswer`). A grouped read cannot be paged past the cut
+ * (the door slices the groups and reads no `offset`), and the header query
+ * carries no `limit` to ask for more, so the grid cannot re-read the rest:
+ * {@link ServerGroupHeaders.partial} says the group set is not every group
+ * the view has. The groups that ARE listed keep their exact counts; what the
+ * grid may not do is read the set as whole: it draws a note saying more
+ * groups were not loaded, and folds no record total over the top-level
+ * counts. Read off the answer the adapter returned, never off a copy of it:
+ * `[...rows]` or `.slice()` drops the flag.
  */
 
 import { useCallback, useEffect, useState } from 'react';
@@ -175,14 +190,20 @@ export interface ServerGroupHeaders {
    * keeps the id as its label.
    */
   keyLabels: Record<string, Record<string, string>>;
+  /**
+   * `true` when any depth's answer said `hasMore`: the platform cut the group
+   * rows to its default page size, so `headers` lists only SOME of the
+   * view's groups (objectstack#37278). `false` with no answer in hand.
+   */
+  partial: boolean;
   loading: boolean;
   error: Error | null;
 }
 
-const IDLE: ServerGroupHeaders = { headers: undefined, keyLabels: {}, loading: false, error: null };
+const IDLE: ServerGroupHeaders = { headers: undefined, keyLabels: {}, partial: false, loading: false, error: null };
 
 /** Asked, with no answer to THIS question in hand yet. */
-const PENDING: ServerGroupHeaders = { headers: undefined, keyLabels: IDLE.keyLabels, loading: true, error: null };
+const PENDING: ServerGroupHeaders = { headers: undefined, keyLabels: IDLE.keyLabels, partial: false, loading: true, error: null };
 
 /** The header state, recorded against the question it answers. */
 interface HeldHeaders extends ServerGroupHeaders {
@@ -326,10 +347,13 @@ export function useServerGroupHeaders(input: ServerGroupHeadersInput): ServerGro
           }),
         );
 
-        if (!cancelled) setState({ question, headers, keyLabels, loading: false, error: null });
+        // Read off each depth's answer as the adapter returned it: a copy
+        // would have dropped the flag (objectstack#37278).
+        const partial = headers.some((answer) => answer?.hasMore === true);
+        if (!cancelled) setState({ question, headers, keyLabels, partial, loading: false, error: null });
       } catch (err) {
         if (!cancelled) {
-          setState({ question, headers: undefined, keyLabels: {}, loading: false, error: err instanceof Error ? err : new Error(String(err)) });
+          setState({ question, headers: undefined, keyLabels: {}, partial: false, loading: false, error: err instanceof Error ? err : new Error(String(err)) });
         }
       }
     })();
