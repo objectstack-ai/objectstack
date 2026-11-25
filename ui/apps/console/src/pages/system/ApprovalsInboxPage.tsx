@@ -1107,12 +1107,22 @@ function ApprovalsQueue() {
   const [selectedRowIds, setSelectedRowIds] = useState<Set<string>>(new Set());
   const [bulkRunning, setBulkRunning] = useState(false);
   /**
-   * The last bulk run's failed rows, each with the refusal's reason. A toast
-   * carries the first few; the dialog this feeds carries every one of them,
-   * so an overflowing partial failure still names each row and why.
+   * The failed rows the "Show all" dialog lists, each with the refusal's
+   * reason. A toast carries the first few; its "Show all" action puts ITS OWN
+   * run's list here and opens the dialog, so a toast still on screen after a
+   * later run never shows that later run's rows (or an empty list).
    */
   const [bulkFailures, setBulkFailures] = useState<BulkFailure[]>([]);
   const [bulkFailuresOpen, setBulkFailuresOpen] = useState(false);
+  /**
+   * The partial-failure toasts this page raised and has not seen dismissed.
+   * They stay until dismissed, and their action opens this page's dialog, so
+   * they leave with the page.
+   */
+  const bulkFailureToasts = useRef(new Set<string | number>());
+  useEffect(() => () => {
+    for (const id of bulkFailureToasts.current) toast.dismiss(id);
+  }, []);
 
   // Inline decision confirmations (row-level quick action / mobile card /
   // keyboard). BOTH decisions confirm before executing (#2762 P0-2): the
@@ -1514,7 +1524,6 @@ function ApprovalsQueue() {
     }
     setBulkRunning(false);
     setSelectedRowIds(new Set());
-    setBulkFailures(failures);
     if (failures.length === 0) {
       toast.success(kind === 'approve'
         ? tr('bulkApproved', 'Approved {{count}} requests', { count: ok })
@@ -1523,22 +1532,30 @@ function ApprovalsQueue() {
       const lines = failures.slice(0, BULK_FAILURES_IN_TOAST).map(f =>
         tr('bulkFailureLine', '{{title}}: {{reason}}', { title: f.title, reason: f.reason }));
       const overflow = failures.length > BULK_FAILURES_IN_TOAST;
-      toast.error(tr('bulkPartialSummary', '{{ok}} succeeded, {{fail}} failed', { ok, fail: failures.length }), {
+      // The toast stays until dismissed: a row per line with its reason is
+      // more than a few seconds' reading, and the overflow's "Show all" must
+      // not time out.
+      const toastId = toast.error(tr('bulkPartialSummary', '{{ok}} succeeded, {{fail}} failed', { ok, fail: failures.length }), {
         description: lines.join('\n'),
         classNames: { description: 'whitespace-pre-line' },
-        // More failures than the toast shows: the rest are one click away, and
-        // the toast stays until dismissed so that click cannot time out.
+        duration: Infinity,
+        closeButton: true,
+        onDismiss: () => { bulkFailureToasts.current.delete(toastId); },
+        // More failures than the toast shows: the rest are one click away.
+        // The action closes over THIS run's list, never the page's latest.
         ...(overflow
           ? {
-              duration: Infinity,
-              closeButton: true,
               action: {
                 label: tr('bulkFailuresShowAll', 'Show all ({{n}})', { n: failures.length }),
-                onClick: () => setBulkFailuresOpen(true),
+                onClick: () => {
+                  setBulkFailures(failures);
+                  setBulkFailuresOpen(true);
+                },
               },
             }
           : {}),
       });
+      if (toastId != null) bulkFailureToasts.current.add(toastId);
     }
     void load();
     refreshBadge();
