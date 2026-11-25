@@ -15,8 +15,15 @@ import type { RecordContextDoor } from '../door.js';
  * - `unreadableRows` are filtered out by row-level security;
  * - `unpublishedObjects` make the published-definition read THROW a coded
  *   error naming the object, as a door's package gate renders it;
- * - a `where` is equality, or `{ $contains: id }` on an array value; any
- *   other operator or combinator is refused, never read as a field;
+ * - a `where` is read as the engine reads it: a bare value is equality,
+ *   `$and` / `$or` combine, and the operators are a related list's ten plus
+ *   `$contains` on an array value; any other operator or combinator is
+ *   refused, never read as a field; `orderBy` sorts the rows;
+ * - `unqueryableFields` are served and readable but not queryable (served
+ *   masked, say): `queryableFieldsOf` leaves them out, and a `where` or
+ *   `orderBy` naming one — or any field the caller cannot query on — is
+ *   refused by the read, as the security plugin's engine guard refuses it;
+ *   `noQueryableAnswer` makes the door carry no `queryableFieldsOf`;
  * - a lookup is expanded to `{ id, name }` when its target is readable and the
  *   target row is readable, else left as the bare id.
  */
@@ -31,6 +38,8 @@ export interface FakeApp {
   unexposedObjects?: string[];
   unreadableRows?: string[];
   unpublishedObjects?: string[];
+  unqueryableFields?: Record<string, string[]>;
+  noQueryableAnswer?: boolean;
   narrowed?: Record<string, string>;
   locales?: string[];
   /**
@@ -49,6 +58,44 @@ export interface FakeDoor extends RecordContextDoor {
 }
 
 const coded = (code: string, status: number, message: string) => Object.assign(new Error(message), { code, status });
+
+/** One operator applied to a stored value, as the engine applies it. */
+function applies(value: unknown, op: string, comparand: unknown): boolean {
+  switch (op) {
+    case '$eq': return value === comparand;
+    case '$ne': return value !== comparand;
+    case '$in': return (comparand as unknown[]).includes(value);
+    case '$nin': return !(comparand as unknown[]).includes(value);
+    case '$gt': return (value as number) > (comparand as number);
+    case '$gte': return (value as number) >= (comparand as number);
+    case '$lt': return (value as number) < (comparand as number);
+    case '$lte': return (value as number) <= (comparand as number);
+    case '$null': return (value == null) === comparand;
+    case '$exists': return (value !== undefined) === comparand;
+    case '$contains': return Array.isArray(value) && value.includes(comparand);
+    default: throw new Error(`fake door: unsupported where operator '${op}'`);
+  }
+}
+
+/** Whether `row` matches `where`. */
+function matches(row: Record<string, unknown>, where: Record<string, unknown>): boolean {
+  return Object.entries(where).every(([k, v]) => {
+    if (k === '$and') return (v as Array<Record<string, unknown>>).every((m) => matches(row, m));
+    if (k === '$or') return (v as Array<Record<string, unknown>>).some((m) => matches(row, m));
+    if (k.startsWith('$')) throw new Error(`fake door: unsupported where combinator '${k}'`);
+    if (v !== null && typeof v === 'object' && !Array.isArray(v)) {
+      return Object.entries(v as Record<string, unknown>).every(([op, c]) => applies(row[k], op, c));
+    }
+    return row[k] === v;
+  });
+}
+
+/** The field keys a `where` names, through `$and` / `$or`. */
+function whereKeys(where: Record<string, unknown>): string[] {
+  return Object.entries(where).flatMap(([k, v]) =>
+    k === '$and' || k === '$or' ? (v as Array<Record<string, unknown>>).flatMap(whereKeys) : [k],
+  );
+}
 
 export function fakeDoor(app: FakeApp): FakeDoor {
   const hidden = (o: string) => new Set(app.hiddenFields?.[o] ?? []);
@@ -69,6 +116,12 @@ export function fakeDoor(app: FakeApp): FakeDoor {
   const readableRow = (object: string, row: Record<string, unknown>) =>
     Object.fromEntries(Object.entries(row).filter(([k]) => !hidden(object).has(k) && !withheld(object).has(k)));
   const canRead = (object: string) => !guarded.has(object) && served(object) !== null;
+  const queryable = (object: string): string[] => {
+    const def = served(object);
+    if (!def) return [];
+    const out = new Set(app.unqueryableFields?.[object] ?? []);
+    return Object.keys(def.fields as Record<string, unknown>).filter((n) => !withheld(object).has(n) && !out.has(n));
+  };
 
   const door: FakeDoor = {
     asked: [],
@@ -112,18 +165,22 @@ export function fakeDoor(app: FakeApp): FakeDoor {
       door.reads.push({ member: 'query', object, opts });
       const def = served(object);
       if (!def) throw coded('OBJECT_NOT_FOUND', 404, `Object '${object}' not found`);
+      // The security plugin's engine guard: a filter or sort on a field the
+      // caller cannot query on is refused, naming it.
+      const allowed = new Set(['id', ...queryable(object)]);
+      for (const f of [...whereKeys(opts.where), ...(opts.orderBy ?? []).map((n) => n.field)]) {
+        if (!allowed.has(f)) throw coded('PERMISSION_DENIED', 403, `Field '${f}' cannot be filtered or sorted on`);
+      }
       let rows = (app.records[object] ?? []).filter((r) => !unreadable.has(String(r.id)));
-      rows = rows.filter((r) =>
-        Object.entries(opts.where).every(([k, v]) => {
-          if (k.startsWith('$')) throw new Error(`fake door: unsupported where combinator '${k}'`);
-          if (v !== null && typeof v === 'object') {
-            const ops = Object.keys(v);
-            if (ops.length !== 1 || ops[0] !== '$contains') throw new Error(`fake door: unsupported where operator on '${k}'`);
-            return Array.isArray(r[k]) && (r[k] as unknown[]).includes((v as { $contains: unknown }).$contains);
-          }
-          return r[k] === v;
-        }),
-      );
+      rows = rows.filter((r) => matches(r, opts.where));
+      for (const { field, order } of [...(opts.orderBy ?? [])].reverse()) {
+        const sign = order === 'desc' ? -1 : 1;
+        rows = [...rows].sort((a, b) => {
+          const x = a[field] as number | string;
+          const y = b[field] as number | string;
+          return x === y ? 0 : x < y ? -sign : sign;
+        });
+      }
       const out = rows.slice(0, opts.limit ?? rows.length).map((r) => {
         const row = readableRow(object, r);
         for (const f of opts.expand ?? []) {
@@ -146,6 +203,13 @@ export function fakeDoor(app: FakeApp): FakeDoor {
       const names = Object.keys(def.fields as Record<string, unknown>);
       return { served: names, readable: names.filter((n) => !withheld(object).has(n)) };
     },
+    ...(app.noQueryableAnswer
+      ? {}
+      : {
+          async queryableFieldsOf(object: string) {
+            return served(object) ? queryable(object) : undefined;
+          },
+        }),
     async diagnoseDelegation(object) {
       const statement = app.narrowed?.[object];
       return statement ? { narrowed: true, statement } : { narrowed: false };

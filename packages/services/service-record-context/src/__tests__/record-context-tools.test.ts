@@ -243,12 +243,29 @@ describe('get_record_context — the order of judgement (ADR-0160 D4)', () => {
 });
 
 describe('get_record_context — object level: one refusal is the whole call\'s, within the naming bound (ADR-0160 D3/D4)', () => {
-  it('a child the caller is not served is refused PERMISSION_DENIED without naming it', async () => {
-    const refused = await refusalOf(run(policyApp({ unservedObjects: ['policy_revision'] })));
-    expect(refused).toMatchObject({ code: 'PERMISSION_DENIED', status: 403 });
-    expect(refused.message).toContain('policy_document');
-    expect(refused.message).toContain('policy');
-    expect(refused.message).not.toContain('policy_revision');
+  it('a child this caller is not served is left out, unnamed, with the one not-visible statement; the pack still answers (amended 2026-11-25)', async () => {
+    const door = fakeDoor(policyApp({ unservedObjects: ['policy_revision'] }));
+    const out = await executeGetRecordContext(CALL, door);
+    expect(out.data.record).toMatchObject({ object: 'policy', id: 'p1' });
+    expect(out.data.fields.map((f) => f.name)).toEqual(['title', 'status', 'owner', 'secret_terms', 'premium']);
+    expect(out.data.related).toBeUndefined();
+    expect(out.notes).toEqual([{ kind: 'not_visible', text: sentencesFor([]).notVisible }]);
+    expect(JSON.stringify(out)).not.toContain('policy_revision');
+    expect(JSON.stringify(out)).not.toContain('Policy revision');
+    // Nothing of the child is read, its definitions included.
+    expect(door.reads.map((r) => r.object)).not.toContain('policy_revision');
+    expect(door.asked).not.toContainEqual({ member: 'publishedObjectDefinitionOf', object: 'policy_revision' });
+    expect(door.asked).not.toContainEqual({ member: 'assertApiExposed', object: 'policy_revision' });
+  });
+
+  it('control: beside an unserved child, a served child is read as usual', async () => {
+    const app = policyApp({ unservedObjects: ['claim'] });
+    (app.packs[0] as { related: unknown[] }).related.push({ object: 'claim', field: 'policy', fields: ['number'] });
+    const out = await run(app);
+    expect(out.data.related?.map((l) => l.object)).toEqual(['policy_revision']);
+    expect(out.data.related?.[0].rows.map((r) => r.id)).toEqual(['r1', 'r2']);
+    expect(out.notes.map((n) => n.kind)).toEqual(['not_visible']);
+    expect(JSON.stringify(out)).not.toContain('claim');
   });
 
   it('a child the read guard refuses is refused with the same code, unnamed', async () => {
@@ -276,7 +293,7 @@ describe('get_record_context — object level: one refusal is the whole call\'s,
       policyApp({ unexposedObjects: ['policy_revision'] }),
     ]) {
       const door = fakeDoor(app);
-      await refusalOf(executeGetRecordContext(CALL, door));
+      await executeGetRecordContext(CALL, door).catch(() => undefined);
       expect(door.asked).not.toContainEqual({ member: 'publishedObjectDefinitionOf', object: 'policy_revision' });
     }
     const door = fakeDoor(policyApp());
@@ -421,6 +438,151 @@ describe('get_record_context — row level (ADR-0160 D3)', () => {
   it('a list the agent ceiling narrowed carries the security service\'s own sentence', async () => {
     const out = await run(policyApp({ narrowed: { policy_revision: 'Narrowed by the agent ceiling.' } }));
     expect(out.notes).toEqual([{ kind: 'narrowed', object: 'policy_revision', text: 'Narrowed by the agent ceiling.' }]);
+  });
+});
+
+/**
+ * [ADR-0160 D1/D3/D4, second amendment] A related list's `where`, `orderBy`
+ * and `limit`: run inside the one capped child query, as the caller; a field
+ * they name that the caller cannot query on drops the section, stated and
+ * never named; one the definition lacks leaves it out silently; the read set
+ * does not move.
+ */
+describe('get_record_context — a related list\'s where, orderBy and limit (ADR-0160 second amendment)', () => {
+  /** policy_revision with `is_current`, `sort_no` and a masked `reviewer_email`; three rows on p1, one on p2. */
+  function filteredApp(entry: Record<string, unknown>, overrides: Partial<FakeApp> = {}): FakeApp {
+    const app = policyApp(overrides);
+    const revision = app.objects.policy_revision as { fields: Record<string, Record<string, unknown>> };
+    revision.fields.is_current = { name: 'is_current', type: 'boolean', label: 'Current' };
+    revision.fields.sort_no = { name: 'sort_no', type: 'number', label: 'Sort number' };
+    revision.fields.reviewer_email = {
+      name: 'reviewer_email', type: 'email', label: 'Reviewer email', maskingRule: { strategy: 'partial' },
+    };
+    app.records.policy_revision = [
+      { id: 'r1', version: 'v1', policy: 'p1', is_current: true, sort_no: 2, reviewer_email: 'a@x.io' },
+      { id: 'r2', version: 'v2', policy: 'p1', is_current: true, sort_no: 1, reviewer_email: 'b@x.io' },
+      { id: 'r3', version: 'v3', policy: 'p1', is_current: false, sort_no: 3, reviewer_email: 'c@x.io' },
+      { id: 'r9', version: 'v9', policy: 'p2', is_current: true, sort_no: 0, reviewer_email: 'd@x.io' },
+    ];
+    app.packs = [{
+      name: 'policy_document',
+      label: 'Policy document',
+      object: 'policy',
+      fields: ['title'],
+      related: [{ object: 'policy_revision', field: 'policy', fields: ['version'], ...entry }],
+    }];
+    return app;
+  }
+  const listReads = (door: ReturnType<typeof fakeDoor>) =>
+    door.reads.filter((r) => r.member === 'query' && r.object === 'policy_revision');
+
+  it('filter and order applied in ONE capped query, cut at the limit, and the cut is stated', async () => {
+    const where = { is_current: { $eq: true } };
+    const door = fakeDoor(filteredApp({ where, orderBy: [{ field: 'sort_no', order: 'asc' }], limit: 1 }));
+    const out = await executeGetRecordContext(CALL, door);
+    const list = out.data.related![0];
+    expect(list.rows.map((r) => r.id)).toEqual(['r2']);
+    expect(list.truncated).toBe(true);
+    expect(out.notes).toEqual([
+      { kind: 'related_truncated', object: 'policy_revision', text: sentencesFor([]).relatedTruncated('policy_revision', 1) },
+    ]);
+    const reads = listReads(door);
+    expect(reads).toHaveLength(1);
+    expect(reads[0].opts).toMatchObject({
+      where: { $and: [{ policy: 'p1' }, where] },
+      orderBy: [{ field: 'sort_no', order: 'asc' }],
+      limit: 2,
+    });
+  });
+
+  it('a bare value reads as $eq; a list within its limit is not cut; descending order is kept', async () => {
+    const out = await run(filteredApp({ where: { is_current: true }, orderBy: [{ field: 'sort_no', order: 'desc' }], limit: 5 }));
+    expect(out.data.related![0].rows.map((r) => r.id)).toEqual(['r1', 'r2']);
+    expect(out.data.related![0].truncated).toBeUndefined();
+    expect(out.notes).toEqual([]);
+  });
+
+  it('the filter grants nothing: a row the caller\'s row rules hide stays absent though it matches', async () => {
+    const out = await run(filteredApp({ where: { is_current: true } }, { unreadableRows: ['r2'] }));
+    expect(out.data.related![0].rows.map((r) => r.id)).toEqual(['r1']);
+    expect(JSON.stringify(out)).not.toContain('r2');
+  });
+
+  it('no where reaches another root\'s rows: it is joined to the link with $and', async () => {
+    const out = await run(filteredApp({ where: { $or: [{ is_current: true }, { version: 'v9' }] } }));
+    expect(out.data.related![0].rows.map((r) => r.id)).toEqual(['r1', 'r2']);
+  });
+
+  it.each<[string, Record<string, unknown>, Partial<FakeApp>]>([
+    ['a where field outside the caller\'s queryable fields', { where: { sort_no: { $gt: 0 } } }, { unqueryableFields: { policy_revision: ['sort_no'] } }],
+    ['an orderBy field outside the caller\'s queryable fields', { orderBy: [{ field: 'sort_no', order: 'asc' }] }, { unqueryableFields: { policy_revision: ['sort_no'] } }],
+    ['a where field the caller\'s schema hides', { where: { $and: [{ is_current: true }, { sort_no: 1 }] } }, { hiddenFields: { policy_revision: ['sort_no'] } }],
+    ['an orderBy field field-level security withholds', { orderBy: [{ field: 'sort_no', order: 'desc' }] }, { withheldFields: { policy_revision: ['sort_no'] } }],
+  ])('%s drops the whole section with the one not-visible statement, never naming it and never refusing', async (_label, entry, overrides) => {
+    const door = fakeDoor(filteredApp(entry, overrides));
+    const out = await executeGetRecordContext(CALL, door);
+    expect(out.data.related).toBeUndefined();
+    expect(out.notes).toEqual([{ kind: 'not_visible', text: sentencesFor([]).notVisible }]);
+    const text = JSON.stringify(out);
+    expect(text).not.toContain('sort_no');
+    expect(text).not.toContain('Sort number');
+    expect(listReads(door)).toEqual([]);
+  });
+
+  it('control: the same where and orderBy on fields the caller can query on read the list', async () => {
+    const out = await run(filteredApp({ where: { sort_no: { $gt: 0 } }, orderBy: [{ field: 'sort_no', order: 'asc' }] }));
+    expect(out.data.related![0].rows.map((r) => r.id)).toEqual(['r2', 'r1', 'r3']);
+    expect(out.notes).toEqual([]);
+  });
+
+  it('with no queryable answer, a field that declares a masking rule is never filtered or sorted on (the contract\'s fallback)', async () => {
+    const door = fakeDoor(filteredApp({ orderBy: [{ field: 'reviewer_email', order: 'asc' }] }, { noQueryableAnswer: true }));
+    expect(door.queryableFieldsOf).toBeUndefined();
+    const out = await executeGetRecordContext(CALL, door);
+    expect(out.data.related).toBeUndefined();
+    expect(out.notes.map((n) => n.kind)).toEqual(['not_visible']);
+    expect(JSON.stringify(out)).not.toContain('reviewer_email');
+    expect(listReads(door)).toEqual([]);
+    // Control: an unmasked field under the same fallback reads.
+    const control = await run(filteredApp({ orderBy: [{ field: 'sort_no', order: 'asc' }] }, { noQueryableAnswer: true }));
+    expect(control.data.related![0].rows.map((r) => r.id)).toEqual(['r2', 'r1', 'r3']);
+  });
+
+  it('a queryable-fields probe that throws judges nothing: the section is dropped and stated, never read on a guess', async () => {
+    const door = fakeDoor(filteredApp({ where: { is_current: true } }));
+    door.queryableFieldsOf = async () => { throw new Error('security service down'); };
+    const out = await executeGetRecordContext(CALL, door);
+    expect(out.data.related).toBeUndefined();
+    expect(out.notes.map((n) => n.kind)).toEqual(['not_visible']);
+    expect(listReads(door)).toEqual([]);
+  });
+
+  it.each<[string, Record<string, unknown>]>([
+    ['a where field', { where: { is_curent: true } }],
+    ['an orderBy field', { orderBy: [{ field: 'sortno', order: 'asc' }] }],
+  ])('%s the definition lacks is an author defect: the section is left out, nothing stated, never read without it', async (_label, entry) => {
+    const door = fakeDoor(filteredApp(entry));
+    const out = await executeGetRecordContext(CALL, door);
+    expect(out.data.related).toBeUndefined();
+    expect(out.notes).toEqual([]);
+    expect(listReads(door)).toEqual([]);
+  });
+
+  it('the read set is the same with and without the three keys', async () => {
+    const metadataOf = (app: FakeApp) => ({
+      listContextPacks: async () => app.packs,
+      publishedObjectDefinitionOf: async (name: string) => app.objects[name] ?? null,
+    });
+    const plain = filteredApp({ fields: ['version', 'reviewer'] });
+    const keyed = filteredApp({
+      fields: ['version', 'reviewer'],
+      where: { $or: [{ is_current: true }, { sort_no: { $in: [1, 2] } }] },
+      orderBy: [{ field: 'sort_no', order: 'desc' }],
+      limit: 3,
+    });
+    const without = await recordContextReadSet({ objectName: 'policy' }, metadataOf(plain));
+    expect(without).toEqual({ pack: 'policy_document', objects: ['policy', 'policy_revision', 'account'] });
+    expect(await recordContextReadSet({ objectName: 'policy' }, metadataOf(keyed))).toEqual(without);
   });
 });
 
