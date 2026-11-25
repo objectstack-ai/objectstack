@@ -183,6 +183,25 @@ caller's `ExecutionContext` and drops hits the user is not allowed to
 read. **A hit that the user could not have queried directly is never
 returned.**
 
+The re-check runs after ranking, so the service asks for more than it
+answers. For a caller who is not the system identity, each `object`
+source is asked for `topK × 5` hits. When fewer than `topK` survive the
+re-check, every `object` source that answered as many hits as it was asked
+is asked once more, for `topK × 20`. That is the cap: a caller who may read
+fewer matching rows than survive within it gets fewer than `topK` hits. An
+adapter that answers fewer than it was asked (one that caps `topK`) is not
+asked again. A `file` or `http` source is asked for `topK` once, and so is
+every source for the system identity. The answer is at most `topK` hits.
+How many hits the re-check removed is logged at `debug`, never returned to
+the caller.
+
+A hit's `title` is the value of the object's display field (ADR-0079
+`resolveDisplayField`: `nameField`, else the derived title field), set
+when the document is built. It is empty when that field is a
+credential-class or `internal` field, when the value is empty, and when
+the object resolves no display field. A source over an object with no
+registered definition reads a field named `title`.
+
 ### 3.3 `IKnowledgeService` (consumed by the ObjectOS AI runtime, REST, Console)
 
 ```ts
@@ -379,8 +398,8 @@ hashes as before, and the reindex skips it as before.
 ### Source admission: exposure and field-level rules
 
 A passage is built at index time, under a system context, from every
-`contentFields` member of its source, the record `title` and the source's
-`metadataFields`. A row re-check alone would therefore serve a caller the text
+`contentFields` member of its source, the object's display field (the
+title) and the source's `metadataFields`. A row re-check alone would therefore serve a caller the text
 of a field a field-level rule hides from them. So before an `object` source is
 searched for a non-system caller, the service asks, once per object per search:
 
@@ -394,7 +413,8 @@ searched for a non-system caller, the service asks, once per object per search:
   `enable.aiReadable: true` (the AI read tools' posture).
 - **Field-level rules** — every field the source serves (each `contentFields`
   member, `'*'` meaning every field the object declares except `id`; each `metadataFields`
-  member; `title`), less the credential-class and `internal: true` fields an
+  member; the display field the title is read from), less the
+  credential-class and `internal: true` fields an
   index never carries, must be one the caller may **query**, per the `security`
   service's `getQueryableFields`. Without that answer: its `getReadableFields`
   less every field declaring a `maskingRule`; with no `security` service at
@@ -444,7 +464,8 @@ when the source has no `where`).
   the event's `after`, so a write result that omits a field (a projected
   result, a formula the write did not return) cannot leave the document
   short. The same field rules as a reindex apply: the fields the source lists
-  and the record `title`, never a credential-class or `internal` field.
+  and the object's display field as the title, never a credential-class or
+  `internal` field.
 - **No row comes back** — the row does not match (a draft, or a row that
   stopped matching), and its document is deleted. Deleting an absent document
   changes nothing.
