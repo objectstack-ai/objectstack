@@ -78,6 +78,8 @@ const zhHant = {
     autofillNoCurrency: '未填入{{field}}：所選金額為 {{amount}}，但此處尚未選擇幣種。請先選擇幣種，再填寫{{field}}。',
     autofillCurrencyUnread: '未填入{{field}}：所選金額為 {{amount}}，但無法讀取此處的幣種。請先確認幣種，再填寫{{field}}。',
     autofillKept: '{{field}}仍保留原來的值。',
+    autofillNowSameCurrency: '選取時未填入{{field}}。記錄現已改為 {{to}}：重新選取即可填入 {{amount}}。',
+    autofillCopiedUnder: '{{field}}按 {{amount}} 帶入，但記錄現已改為 {{to}}。如需調整，請按 {{to}} 填寫{{field}}。',
   },
   common: {
     // objectui#13461 — a disclosure toggle's name (the tree-view node toggle).

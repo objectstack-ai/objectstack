@@ -70,6 +70,8 @@ const pt = {
     autofillNoCurrency: '{{field}} não foi preenchido: o valor escolhido é {{amount}}, mas ainda não há moeda escolhida aqui. Escolha a moeda e depois informe {{field}}.',
     autofillCurrencyUnread: '{{field}} não foi preenchido: o valor escolhido é {{amount}}, mas não foi possível ler a moeda aqui. Verifique a moeda e depois informe {{field}}.',
     autofillKept: '{{field}} mantém o valor anterior.',
+    autofillNowSameCurrency: '{{field}} não foi preenchido na escolha. O registro agora está em {{to}}: escolha novamente para preencher {{amount}}.',
+    autofillCopiedUnder: '{{field}} foi copiado como {{amount}}, mas o registro agora está em {{to}}. Informe {{field}} em {{to}} se precisar mudar.',
   },
   common: {
     // objectui#13461 — a disclosure toggle's name (the tree-view node toggle).

@@ -24,9 +24,13 @@ import {
   pickedAmountCurrencyOf,
   type AmountCurrency,
   type AutofillCurrencyContext,
+  type CopiedAutofill,
   type LookupAutofillByField,
   type WithheldAutofill,
+  copiedAutofillMessage,
+  copiedAutofillNow,
   withheldAutofillMessage,
+  withheldAutofillNow,
   withheldStillStands,
 } from '../lookupAutofill.js';
 import { FileCell } from '../FileField.js';
@@ -518,12 +522,15 @@ function gridAutofillCurrency(
  * column picked, the value it committed, and each withheld value. The note
  * stands while the line still holds that pick and the withheld cell still
  * holds what it held at the pick (`withheldStillStands`): empty, or the
- * earlier value a re-pick left in place.
+ * earlier value a re-pick left in place. `copied` is each amount the pick
+ * wrote, with the code it was written under (objectstack#36412): both are
+ * judged against the line's currency as it is when drawn.
  */
 interface WithheldPick {
   lookup: string;
   picked: unknown;
   items: readonly WithheldAutofill[];
+  copied: readonly CopiedAutofill[];
 }
 
 export type GridFieldWidgetProps = FieldWidgetComponentProps<Row[]> & {
@@ -974,15 +981,16 @@ function GridFieldBody({
       const heldId = row[col.name];
       const previous = heldId == null || heldId === '' ? null : pickedLookupRecords.current.get(pickKey(heldId)) ?? null;
       const currency = gridAutofillCurrency(columns, picked?.sourceFields, record, columnCurrencies, tenantCurrency, columnFields, row);
-      const { patch, withheld } = planLookupAutofill(columns, col, record, { pairs: lookupAutofill?.[col.name], row, previous }, currency);
+      const { patch, withheld, copied } = planLookupAutofill(columns, col, record, { pairs: lookupAutofill?.[col.name], row, previous }, currency);
       if (record && typeof record === 'object' && patch[col.name] != null) {
         pickedLookupRecords.current.set(pickKey(patch[col.name]), record);
       }
       setWithheldFills((prev) => {
-        if (withheld.length === 0 && !prev.has(rowIdx)) return prev;
+        const said = withheld.length + copied.length > 0;
+        if (!said && !prev.has(rowIdx)) return prev;
         const next = new Map(prev);
-        if (withheld.length === 0) next.delete(rowIdx);
-        else next.set(rowIdx, { lookup: col.name, picked: patch[col.name], items: withheld });
+        if (!said) next.delete(rowIdx);
+        else next.set(rowIdx, { lookup: col.name, picked: patch[col.name], items: withheld, copied });
         return next;
       });
       applyPatch(rowIdx, patch);
@@ -1732,11 +1740,27 @@ function GridFieldBody({
                 const reorderable = allowReorder && !isGhost && !isList;
                 // objectstack#36249 — the values this line's pick did not copy,
                 // while the pick stands and the cell still holds what it held.
+                // objectstack#36412 (ruling 「保留金额并提示」) — each judged
+                // against the line's currency now, and each amount the pick
+                // copied, still held, named with the code it was copied under
+                // once the line's differs. A currency change writes no amount.
                 const withheldPick = withheldFills.get(rowIdx);
-                const withheldShown =
-                  withheldPick && !isList && String(row[withheldPick.lookup] ?? '') === String(withheldPick.picked ?? '')
-                    ? withheldPick.items.filter((w) => withheldStillStands(w, row[w.target]))
-                    : [];
+                const pickStands =
+                  !!withheldPick && !isList && String(row[withheldPick.lookup] ?? '') === String(withheldPick.picked ?? '');
+                const lineCurrencyNow = pickStands
+                  ? gridAutofillCurrency(columns, undefined, undefined, columnCurrencies, tenantCurrency, columnFields, row)
+                  : undefined;
+                const withheldShown = pickStands
+                  ? withheldPick.items
+                      .filter((w) => withheldStillStands(w, row[w.target]))
+                      .map((w) => withheldAutofillNow(w, lineCurrencyNow?.targetCurrency(w.target), tenantCurrency))
+                  : [];
+                const copiedShown = pickStands
+                  ? withheldPick.copied.flatMap((c) => {
+                      const now = copiedAutofillNow(c, row[c.target], lineCurrencyNow?.targetCurrency(c.target), tenantCurrency);
+                      return now ? [{ item: c, now }] : [];
+                    })
+                  : [];
                 return (
                   <React.Fragment key={rowIdx}>
                   <tr
@@ -1888,6 +1912,22 @@ function GridFieldBody({
                             </p>
                           );
                         })}
+                      </td>
+                    </tr>
+                  )}
+                  {copiedShown.length > 0 && (
+                    <tr data-testid={`line-items-autofill-copied-${rowIdx}`}>
+                      <td />
+                      <td
+                        colSpan={columns.length + (hasRowActions ? 1 : 0)}
+                        className="px-2 pb-1.5 pt-0 text-xs text-muted-foreground"
+                        role="status"
+                      >
+                        {copiedShown.map(({ item, now }) => (
+                          <p key={item.target} data-copied-target={item.target}>
+                            {copiedAutofillMessage(item, now, columns.find((x) => x.name === item.target)?.label || item.target, t, displayLocale)}
+                          </p>
+                        ))}
                       </td>
                     </tr>
                   )}

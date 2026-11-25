@@ -65,6 +65,8 @@ const FIELD_DEFAULTS: Record<string, string> = {
   'lookup.autofillNoCurrency': '{{field}} was not filled: the picked amount is {{amount}}, but no currency is chosen here yet. Choose the currency, then enter {{field}}.',
   'lookup.autofillCurrencyUnread': '{{field}} was not filled: the picked amount is {{amount}}, but the currency here could not be read. Check the currency, then enter {{field}}.',
   'lookup.autofillKept': '{{field}} still holds its earlier value.',
+  'lookup.autofillNowSameCurrency': '{{field}} was not filled when it was picked. The record is now in {{to}}: pick again to fill {{amount}}.',
+  'lookup.autofillCopiedUnder': '{{field}} was copied as {{amount}}, but the record is now in {{to}}. Enter {{field}} in {{to}} if it should change.',
   'lookup.pageOf': 'Page {{current}} of {{total}}',
   'lookup.filters': 'Filters',
   'lookup.clear': 'Clear',

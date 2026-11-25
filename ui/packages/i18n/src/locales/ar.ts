@@ -76,6 +76,8 @@ const ar = {
     autofillNoCurrency: 'لم يُملأ {{field}}: المبلغ المختار هو {{amount}}، لكن لم تُختر عملة هنا بعد. اختر العملة، ثم أدخل {{field}}.',
     autofillCurrencyUnread: 'لم يُملأ {{field}}: المبلغ المختار هو {{amount}}، لكن تعذّرت قراءة العملة هنا. تحقّق من العملة، ثم أدخل {{field}}.',
     autofillKept: 'يحتفظ {{field}} بقيمته السابقة.',
+    autofillNowSameCurrency: 'لم يُملأ {{field}} عند الاختيار. السجل الآن بعملة {{to}}: اختر مرة أخرى لملء {{amount}}.',
+    autofillCopiedUnder: 'نُسخ {{field}} بقيمة {{amount}}، لكن السجل الآن بعملة {{to}}. أدخل {{field}} بعملة {{to}} إذا لزم التغيير.',
   },
   common: {
     // objectui#13461 — a disclosure toggle's name (the tree-view node toggle).

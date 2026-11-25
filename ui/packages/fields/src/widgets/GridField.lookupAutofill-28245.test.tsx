@@ -35,6 +35,8 @@ import {
   lookupAutofillByField,
   pickedAmountCurrencyOf,
   planDeclaredLookupAutofill,
+  copiedAutofillNow,
+  withheldAutofillNow,
 } from './lookupAutofill';
 
 afterEach(cleanup);
@@ -456,6 +458,8 @@ describe('cross-currency pick follow-ups: a re-pick over a filled cell, and a co
     expect(planDeclaredLookupAutofill(both, product, {}, null, context({}))).toEqual({
       patch: { currency_code: 'EUR', unit_price: 100 },
       withheld: [],
+      // objectstack#36412: the price is recorded as copied under the code the same pick wrote.
+      copied: [{ target: 'unit_price', source: 'unit_price', value: 100, under: 'EUR' }],
     });
     // Control: a code the record already holds is kept (no `overwrite`), and
     // the price is judged in it.
@@ -570,5 +574,130 @@ describe('cross-currency pick follow-ups: a re-pick over a filled cell, and a co
       expect(note.textContent).toContain('JPY');
       expect(note.textContent).not.toContain('earlier value');
     });
+  });
+});
+
+describe('a same-edit currency change keeps a line’s amounts and says so (objectstack#36412, ruling 「保留金额并提示」)', () => {
+  // A product priced in its own code (EUR); a line whose price follows its
+  // header's currency, which the host hands over per column.
+  const recordPrice = { type: 'currency', currencyConfig: { currencyMode: 'record' as const, currencyField: 'currency_code' } };
+  const ROWS = [{ id: 'p1', name: 'Euro widget', description: 'Euro widget', currency_code: 'EUR', unit_price: 100 }];
+  const ds = {
+    getObjectSchema: vi.fn(async () => ({
+      name: 'product',
+      fields: { name: { type: 'text' }, description: { type: 'text' }, currency_code: { type: 'text' }, unit_price: { ...recordPrice, label: 'Unit Price' } },
+    })),
+    find: vi.fn(async () => ({ data: ROWS.map((r) => ({ ...r })), total: ROWS.length })),
+    findOne: vi.fn(async (_o: string, id: string) => {
+      const row = ROWS.find((r) => r.id === id);
+      return row ? { ...row } : null;
+    }),
+  };
+  const drawn = [
+    { name: 'product', type: 'lookup' as const, reference: 'product' },
+    { name: 'description', type: 'text' as const },
+    { name: 'unit_price', type: 'currency' as const, label: 'Unit Price' },
+  ];
+  function Line({ header }: { header: string }) {
+    const [rows, setRows] = React.useState<Record<string, unknown>[]>([{ product: null, description: null, unit_price: null }]);
+    return (
+      <LocalizationProvider value={{ currency: 'USD' }}>
+        <SchemaRendererContext.Provider value={{ dataSource: ds } as never}>
+          <GridField value={rows} onChange={(next: Record<string, unknown>[]) => setRows(next)} field={{ columns: drawn } as never} columnCurrencies={{ unit_price: header }} />
+          <output data-testid="rows">{JSON.stringify(rows)}</output>
+        </SchemaRendererContext.Provider>
+      </LocalizationProvider>
+    );
+  }
+  const rowsNow = () => JSON.parse(screen.getByTestId('rows').textContent || '[]');
+  async function pickProduct(): Promise<void> {
+    await waitFor(() => expect(ds.getObjectSchema).toHaveBeenCalled());
+    await act(async () => { await new Promise((r) => setTimeout(r, 0)); });
+    await act(async () => {
+      fireEvent.click(screen.getAllByTestId('lookup-trigger')[0]);
+    });
+    const option = await waitFor(() => {
+      const el = screen.getAllByRole('option').find((o) => (o.getAttribute('title') ?? o.textContent ?? '').includes('Euro widget'));
+      if (!el) throw new Error('Euro widget not offered');
+      return el;
+    }, { timeout: 3000 });
+    await act(async () => {
+      fireEvent.click(option);
+    });
+    await waitFor(() => expect(rowsNow()[0]).toMatchObject({ product: 'p1', description: 'Euro widget' }));
+  }
+  const copiedNote = () => screen.queryByTestId('line-items-autofill-copied-0');
+  const withheldNote = () => screen.queryByTestId('line-items-autofill-withheld-0');
+
+  it('a copied amount stays through a header currency change, and a note names the code it was copied under', async () => {
+    const view = render(<Line header="EUR" />);
+    await pickProduct();
+    expect(rowsNow()[0].unit_price).toBe(100);
+    // Control: copied in the line's own currency, nothing to say.
+    expect(copiedNote()).toBeNull();
+
+    view.rerender(<Line header="USD" />);
+    expect(rowsNow()[0].unit_price).toBe(100);
+    expect(copiedNote()?.textContent).toBe('Unit Price was copied as €100.00, but the record is now in USD. Enter Unit Price in USD if it should change.');
+
+    // Control: back in the currency it was copied under, the note ends.
+    view.rerender(<Line header="EUR" />);
+    expect(copiedNote()).toBeNull();
+    expect(rowsNow()[0].unit_price).toBe(100);
+  });
+
+  it('a withheld note refreshes to the header’s new currency, and the cell stays empty', async () => {
+    const view = render(<Line header="JPY" />);
+    await pickProduct();
+    expect(withheldNote()?.textContent).toContain('here is in JPY');
+
+    view.rerender(<Line header="GBP" />);
+    expect(withheldNote()?.textContent).toContain('here is in GBP');
+    expect(withheldNote()?.textContent).not.toContain('JPY');
+    expect(rowsNow()[0].unit_price).toBeNull();
+  });
+
+  it('branch B: the header turns to the picked amount’s own currency, the note stays and says so, and the cell stays empty', async () => {
+    const view = render(<Line header="USD" />);
+    await pickProduct();
+    expect(withheldNote()?.textContent).toContain('here is in USD');
+
+    view.rerender(<Line header="EUR" />);
+    expect(withheldNote()?.textContent).toBe('Unit Price was not filled when it was picked. The record is now in EUR: pick again to fill €100.00.');
+    expect(rowsNow()[0].unit_price).toBeNull();
+    expect(copiedNote()).toBeNull();
+  });
+
+  it('a hand-typed amount gets no note through a currency change, nor one typed over a copied amount', async () => {
+    const view = render(<Line header="EUR" />);
+    fireEvent.change(screen.getAllByLabelText('Unit Price')[0], { target: { value: '70' } });
+    await waitFor(() => expect(rowsNow()[0].unit_price).toBe(70));
+    view.rerender(<Line header="USD" />);
+    expect(rowsNow()[0].unit_price).toBe(70);
+    expect(copiedNote()).toBeNull();
+    expect(withheldNote()).toBeNull();
+
+    cleanup();
+
+    const over = render(<Line header="EUR" />);
+    await pickProduct();
+    expect(rowsNow()[0].unit_price).toBe(100);
+    fireEvent.change(screen.getAllByLabelText('Unit Price')[0], { target: { value: '9000' } });
+    await waitFor(() => expect(rowsNow()[0].unit_price).toBe(9000));
+    over.rerender(<Line header="USD" />);
+    expect(rowsNow()[0].unit_price).toBe(9000);
+    expect(copiedNote()).toBeNull();
+  });
+
+  it('the pure judgement: a withheld item follows the currency now, and a copied one is named only while its target holds it', () => {
+    const item = { target: 'unit_price', source: 'unit_price', amount: 100, reason: 'differs' as const, from: 'EUR', to: 'JPY' };
+    expect(withheldAutofillNow(item, { kind: 'code', code: 'GBP' }, 'USD')).toEqual({ ...item, to: 'GBP' });
+    expect(withheldAutofillNow(item, { kind: 'code', code: 'EUR' }, 'USD')).toEqual({ ...item, reason: 'nowSameCurrency', to: 'EUR' });
+    // Control: a currency not known now leaves the note as it was judged.
+    expect(withheldAutofillNow(item, undefined, 'USD')).toBe(item);
+    const copied = { target: 'unit_price', source: 'unit_price', value: 100, under: 'EUR' };
+    expect(copiedAutofillNow(copied, 100, { kind: 'home' }, 'USD')).toBe('USD');
+    expect(copiedAutofillNow(copied, 100, { kind: 'code', code: 'EUR' }, 'USD')).toBeUndefined();
+    expect(copiedAutofillNow(copied, 90, { kind: 'home' }, 'USD')).toBeUndefined();
   });
 });

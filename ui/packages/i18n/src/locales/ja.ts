@@ -69,6 +69,8 @@ const ja = {
     autofillNoCurrency: '{{field}}は入力されませんでした。選択した金額は {{amount}} ですが、ここではまだ通貨が選択されていません。通貨を選択してから{{field}}を入力してください。',
     autofillCurrencyUnread: '{{field}}は入力されませんでした。選択した金額は {{amount}} ですが、ここでの通貨を読み取れませんでした。通貨を確認してから{{field}}を入力してください。',
     autofillKept: '{{field}}は以前の値のままです。',
+    autofillNowSameCurrency: '選択時に{{field}}は入力されませんでした。レコードは現在 {{to}} です。もう一度選択すると {{amount}} が入力されます。',
+    autofillCopiedUnder: '{{field}}は {{amount}} として入力されましたが、レコードは現在 {{to}} です。必要に応じて {{to}} で{{field}}を入力してください。',
   },
   common: {
     // objectui#13461 — a disclosure toggle's name (the tree-view node toggle).

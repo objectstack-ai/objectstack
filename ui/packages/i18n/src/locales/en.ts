@@ -78,6 +78,8 @@ const en = {
     autofillNoCurrency: '{{field}} was not filled: the picked amount is {{amount}}, but no currency is chosen here yet. Choose the currency, then enter {{field}}.',
     autofillCurrencyUnread: '{{field}} was not filled: the picked amount is {{amount}}, but the currency here could not be read. Check the currency, then enter {{field}}.',
     autofillKept: '{{field}} still holds its earlier value.',
+    autofillNowSameCurrency: '{{field}} was not filled when it was picked. The record is now in {{to}}: pick again to fill {{amount}}.',
+    autofillCopiedUnder: '{{field}} was copied as {{amount}}, but the record is now in {{to}}. Enter {{field}} in {{to}} if it should change.',
   },
   common: {
     // objectui#13461 — a disclosure toggle's name (the tree-view node toggle).
