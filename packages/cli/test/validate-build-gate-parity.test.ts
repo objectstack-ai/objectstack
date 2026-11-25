@@ -385,11 +385,13 @@ const NOT_A_GATE: Readonly<Record<string, readonly string[]>> = {
     ['stackFilterJudge'],
   // The seed record walk's inputs and its count. `evaluateValidationRules` is
   // handed to `judgeSeedRowRefusals` (SHARED_NON_REGISTRY_GATES above) as the
-  // judge, never called by either command; `datasetsOf` lists the datasets the
-  // walk reads, where each sits; `seedRowPairsNotJudged` totals the pairs the
-  // walk left to the load, for a dim note that refuses nothing.
-  'The seed record walk\'s injected evaluator, its dataset list and its not-judged count — the walk that reads them is the gate':
-    ['evaluateValidationRules', 'datasetsOf', 'seedRowPairsNotJudged'],
+  // judge, and `resolveTenantFieldName` as the tenancy predicate the seed
+  // loader stamps an object's organization column by; neither command calls
+  // either. `datasetsOf` lists the datasets the walk reads, where each sits;
+  // `seedRowPairsNotJudged` totals the pairs the walk left to the load, for a
+  // dim note that refuses nothing.
+  'The seed record walk\'s injected evaluator and tenancy predicate, its dataset list and its not-judged count — the walk that reads them is the gate':
+    ['evaluateValidationRules', 'resolveTenantFieldName', 'datasetsOf', 'seedRowPairsNotJudged'],
   // `os validate --target` only (`utils/restriction-profile.ts`): the first
   // reads and parses the target's restriction profile — the input
   // `judgeRestrictionProfile` (VALIDATE_ONLY_GATES above) judges against — and

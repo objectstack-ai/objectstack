@@ -28,6 +28,7 @@ import { buildAccessMatrix, diffAccessMatrix } from '@objectstack/lint';
 import { runAuthoringRules, splitBySeverity, authoringRulesFor } from '@objectstack/lint';
 import { judgeSeedRowRefusals, seedRowPairsNotJudged } from '@objectstack/lint';
 import { evaluateValidationRules } from '@objectstack/objectql';
+import { resolveTenantFieldName } from '@objectstack/core';
 import { resolveJsxGateManifest, printJsxGateNotices } from '../utils/sdui-manifest.js';
 import {
   preflightDeclaredCapabilities,
@@ -1339,7 +1340,7 @@ export default class Compile extends Command {
 
       // 4a-0-bis. [#35653] Seed RECORDS the seed load refuses — a record its
       //     own validation rule refuses, and (#35486) a keyed record with a
-      //     blank key field — the gate `os validate` runs at its step 3d-ter,
+      //     blank key field — the gate `os validate` runs at its step 3d-quater,
       //     with the write path's own evaluator. Each such record fails the
       //     build here, naming the record and the rule, rather than being
       //     dropped at boot.
@@ -1348,13 +1349,15 @@ export default class Compile extends Command {
         datasets: datasetsOf(finalBundle),
         stack: seedRowStack,
         evaluateValidationRules,
+        resolveTenantFieldName,
       });
       if (seedRows.refusals.length > 0) {
         if (flags.json) {
           await emitJson({ success: false, error: 'seed records refused', issues: seedRows.refusals, warnings: warningsSoFar(), conversions: conversionNotices }, 0, { compact: true });
           this.exit(1);
         }
-        const n = seedRows.refusals.length;
+        // One line per refusal; the heading counts records (a record two rules refuse is one record).
+        const n = new Set(seedRows.refusals.map((refusal) => refusal.location)).size;
         console.log('');
         printError(`Seed records the seed load refuses (${n} record${n > 1 ? 's' : ''})`);
         for (const refusal of seedRows.refusals) console.log(chalk.red(`  ✗ ${refusal.location}: ${refusal.message}`));

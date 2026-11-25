@@ -33,6 +33,7 @@ import { collectSeedFiles, datasetsOf } from '../utils/bundle-seed-files.js';
 import { collectConnectorSpecFiles } from '../utils/bundle-connector-spec-files.js';
 import { judgeSeedRecordValues } from '../utils/seed-record-values.js';
 import { evaluateValidationRules } from '@objectstack/objectql';
+import { resolveTenantFieldName } from '@objectstack/core';
 import { judgeSeedRowRefusals, seedRowPairsNotJudged } from '@objectstack/lint';
 import {
   printHeader,
@@ -1213,7 +1214,7 @@ export default class Validate extends Command {
         this.exit(1);
       }
 
-      // 3d-ter. [#35653] Seed RECORDS the seed load refuses — a record its own
+      // 3d-quater. [#35653] Seed RECORDS the seed load refuses — a record its own
       //     object's validation rule refuses, and (#35486) a keyed record with
       //     a blank key field — judged by the write path's own evaluator
       //     (`evaluateValidationRules`, `@objectstack/objectql`), injected into
@@ -1227,6 +1228,7 @@ export default class Validate extends Command {
         datasets: datasetsOf(result.data as Record<string, unknown>),
         stack: seedRowStack,
         evaluateValidationRules,
+        resolveTenantFieldName,
       });
       if (seedRows.refusals.length > 0) {
         if (flags.json) {
@@ -1239,7 +1241,8 @@ export default class Validate extends Command {
           });
           this.exit(1);
         }
-        const n = seedRows.refusals.length;
+        // One line per refusal; the heading counts records (a record two rules refuse is one record).
+        const n = new Set(seedRows.refusals.map((refusal) => refusal.location)).size;
         console.log('');
         printError(`Seed records the seed load refuses (${n} record${n > 1 ? 's' : ''})`);
         for (const refusal of seedRows.refusals) console.log(chalk.red(`  ✗ ${refusal.location}: ${refusal.message}`));

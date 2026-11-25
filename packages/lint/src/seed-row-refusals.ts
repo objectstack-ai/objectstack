@@ -51,14 +51,22 @@
  *    column), a `formula` / `summary` / `autonumber` field, a reference or
  *    file field (resolved from its natural key), an expression envelope or a
  *    `seedFile` reference, an empty string (stored as `null`), a value whose
- *    JavaScript type is not the stored one (`'100'` on a `number` field), or
- *    an absent / `null` value the load fills from a default (`defaultValue`,
+ *    JavaScript type is not the stored one (`'100'` on a `number` field), a
+ *    present value of a non-literal type (`date`, `datetime`, a JSON or
+ *    multi-valued field), or an absent / `null` value the load fills from a
+ *    default (`defaultValue`,
  *    an option marked `default`, or a picklist's options).
  *
  * Skipped without a count, as the load skips them: `state_machine` rules (seed
  * writes are exempt; `validateSeedStateMachine` judges the seeded value
  * instead), inactive rules, advisory rules (`severity` `warning` / `info`
- * never refuse a write), and rules whose `events` leave out `insert`.
+ * never refuse a write), and rules whose `events` leave out `insert`. A
+ * dataset whose object the stack does not declare has no rules to judge.
+ *
+ * What the stack cannot show is not counted either: a `beforeInsert` hook
+ * registered in plugin code, or a write middleware that fills a business
+ * field, runs at load and is invisible here. A stack that relies on one to
+ * fill a field a rule reads can be refused here although the load admits it.
  *
  * A rule that cannot be EVALUATED on a judged pair (a `null` compared with
  * `<`, say) is reported: the write path fails such a rule closed, so the load
@@ -72,9 +80,16 @@
  * `packages/metadata-protocol/src/seed-loader.ts`). The finding carries that
  * refusal's sentence verbatim, built the same way; a CLI test pins the two
  * equal against the real loader. A key field holding an expression is not
- * judged (its value is known only at load), nor is the organization column,
- * which a per-organization load stamps before the check. A record refused
- * for a blank key is not judged against the rules: the load refuses it first.
+ * judged (its value is known only at load), nor is the object's
+ * organization column, which a per-organization load stamps before the check.
+ * That column is the one the loader stamps (`seedRowTenantColumn`): the
+ * column `resolveTenantFieldName` (`@objectstack/core`) walls the object by —
+ * a declared `tenancy.tenantField` the object has, else `organization_id` —
+ * and `organization_id` when it walls the object by none. The resolver is
+ * injected by the door, as the evaluator is (this package does not depend on
+ * `@objectstack/core`), so the column is never re-derived here. A record
+ * refused for a blank key is not judged against the rules: the load refuses
+ * it first.
  */
 
 import { analyzeRelationshipTraversals, collectCelRootIdentifiers } from '@objectstack/formula';
@@ -137,14 +152,20 @@ export interface SeedRowJudgeInput {
     mode: 'insert',
     options: { skipStateMachine: boolean },
   ): unknown;
+  /**
+   * The tenancy-scope predicate the seed loader stamps by
+   * (`resolveTenantFieldName`, `@objectstack/core`): the column an object is
+   * walled by, or `null` when it is walled by none.
+   */
+  resolveTenantFieldName(objectSchema: unknown): string | null;
 }
 
 const isRec = (v: unknown): v is AnyRec => !!v && typeof v === 'object' && !Array.isArray(v);
 
 /** The parse's default `externalId` (`SeedSchema`), also the loader's fallback. */
 const DEFAULT_EXTERNAL_ID_FIELD = 'name';
-/** The organization column a per-organization load stamps before the key check. */
-const ORGANIZATION_COLUMN = 'organization_id';
+/** The loader's organization column for an object walled by no column of its own (`DEFAULT_TENANT_FIELD`). */
+const DEFAULT_ORGANIZATION_COLUMN = 'organization_id';
 
 /** Field types whose value, as written, is the value a rule reads at load — and the JS type it must have. */
 const LITERAL_FIELD_TYPES: ReadonlyMap<string, 'string' | 'number' | 'boolean'> = new Map([
@@ -339,10 +360,13 @@ export function judgeSeedRowRefusals(input: SeedRowJudgeInput): SeedRowJudgement
     const mode = typeof dataset.mode === 'string' ? dataset.mode : undefined;
     const externalId = (typeof dataset.externalId === 'string' && dataset.externalId)
       || (Array.isArray(dataset.externalId) && dataset.externalId.length > 0 ? (dataset.externalId as string[]) : DEFAULT_EXTERNAL_ID_FIELD);
-    const keyFields = (Array.isArray(externalId) ? externalId : [externalId])
-      .filter((field) => field !== ORGANIZATION_COLUMN);
-
     const obj = objects.get(objectName);
+    // The column the load stamps before its blank check, resolved as the
+    // loader resolves it: `seedRowTenantColumn(definition) ?? DEFAULT_TENANT_FIELD`.
+    const organizationColumn = (obj ? input.resolveTenantFieldName(obj) : null) ?? DEFAULT_ORGANIZATION_COLUMN;
+    const keyFields = (Array.isArray(externalId) ? externalId : [externalId])
+      .filter((field) => field !== organizationColumn);
+
     const fields = obj && isRec(obj.fields) ? obj.fields : undefined;
     const rules = obj && Array.isArray(obj.validations)
       ? obj.validations.filter((r): r is AnyRec =>

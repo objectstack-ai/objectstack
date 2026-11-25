@@ -21,6 +21,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { ObjectStackDefinitionSchema } from '@objectstack/spec';
 import { evaluateValidationRules } from '@objectstack/objectql';
+import { resolveTenantFieldName } from '@objectstack/core';
 import { judgeSeedRowRefusals, SEED_RECORD_KEY_FIELD_BLANK, SEED_ROW_REFUSED_BY_VALIDATION_RULE } from '@objectstack/lint';
 import { SeedLoaderService } from '@objectstack/metadata-protocol';
 import type { IDataEngine, IMetadataService } from '@objectstack/spec/contracts';
@@ -66,14 +67,25 @@ const PAYMENT = {
   ],
 };
 
+/** Walled by its own column, not `organization_id`: the column the seed loader stamps is `workspace_id`. */
+const MEMBER = {
+  name: 'xt_member',
+  label: 'Member',
+  tenancy: { enabled: true, tenantField: 'workspace_id' },
+  fields: {
+    code: { type: 'text', label: 'Code' },
+    workspace_id: { type: 'text', label: 'Workspace' },
+  },
+};
+
 function parsedStack(data: AnyRec[]): AnyRec {
-  return ObjectStackDefinitionSchema.parse({ objects: [INVOICE, PAYMENT], data }) as AnyRec;
+  return ObjectStackDefinitionSchema.parse({ objects: [INVOICE, PAYMENT, MEMBER], data }) as AnyRec;
 }
 
-/** The call `os validate` step 3d-ter and `os build` step 4a-0-bis make. */
+/** The call `os validate` step 3d-quater and `os build` step 4a-0-bis make. */
 function judge(stack: AnyRec) {
   const union = authoringRuleUnionStack(stack);
-  return judgeSeedRowRefusals({ datasets: datasetsOf(stack), stack: union, evaluateValidationRules });
+  return judgeSeedRowRefusals({ datasets: datasetsOf(stack), stack: union, evaluateValidationRules, resolveTenantFieldName });
 }
 
 describe('os validate / os build: seed records against the package\'s own validation rules', () => {
@@ -118,7 +130,7 @@ describe('os validate / os build: seed records against the package\'s own valida
 
 /** A metadata service holding the two objects, and an engine the dry run must never reach. */
 function dryRunLoader(): SeedLoaderService {
-  const objects: Record<string, AnyRec> = { xt_invoice: INVOICE, xt_payment: PAYMENT };
+  const objects: Record<string, AnyRec> = { xt_invoice: INVOICE, xt_payment: PAYMENT, xt_member: MEMBER };
   const metadata = {
     getObject: vi.fn(async (name: string) => objects[name]),
     get: vi.fn(async (_type: string, name: string) => objects[name]),
@@ -147,5 +159,19 @@ describe('os validate / os build: a keyed seed record with a blank key field (#3
     const loaderSentence = loaded.errors.find((e) => e.recordIndex === 1 && e.sourceObject === 'xt_payment')?.message;
     expect(loaderSentence).toBeDefined();
     expect(out.refusals[0].message).toBe(loaderSentence);
+  });
+
+  it('a key on the object\'s own tenancy.tenantField is left to the load, which stamps it, as the real loader does', async () => {
+    const stack = parsedStack([
+      { object: 'xt_member', mode: 'upsert', externalId: ['workspace_id', 'code'], records: [{ code: 'A' }, { code: '' }] },
+    ]);
+    const out = judge(stack);
+    expect(out.refusals.map(({ location, field }) => ({ location, field })))
+      .toEqual([{ location: 'data[0].records[1]', field: 'code' }]);
+
+    const loaded = await dryRunLoader().validate(stack.data as never[], { organizationId: 'org_seed_rules' } as never);
+    const loaderErrors = loaded.errors.filter((e) => e.sourceObject === 'xt_member');
+    expect(loaderErrors.map((e) => e.recordIndex)).toEqual([1]);
+    expect(out.refusals[0].message).toBe(loaderErrors[0].message);
   });
 });

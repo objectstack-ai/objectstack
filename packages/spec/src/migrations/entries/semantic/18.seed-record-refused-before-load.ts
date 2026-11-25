@@ -28,9 +28,13 @@ export const entry: SemanticMigration = {
     + 'rule. Both doors now run the write path\'s own evaluator over each seed record, one rule at a time, and refuse '
     + 'the config (exit 1, the refusals in `--json` too). A record and rule pair is judged only when the record\'s '
     + 'own values decide it: a rule that reads a value the load decides (a reference, a roll-up, formula or '
-    + 'autonumber field, a default, a platform-injected column, an expression value, a `beforeInsert` hook\'s write, '
-    + 'or the stored row of an `update` dataset) is counted in one note and left to the load. A keyed record with a '
-    + 'blank key field, which the load already refuses, is refused here with the load\'s own sentence. There is no '
+    + 'autonumber field, a default, a platform-injected column, an expression value, a present value of a non-literal '
+    + 'type such as `date` or `datetime`, a `json_schema` rule, a `beforeInsert` hook\'s write, or the stored row of an '
+    + '`update` dataset) is counted in one note and left to the load; a dataset whose object the stack does not declare '
+    + 'has no rules to judge, and a hook registered in plugin code is not visible to the stack at all. A keyed record '
+    + 'with a blank key field, which the load already refuses, is refused here with the load\'s own sentence; the '
+    + 'object\'s organization column (a declared `tenancy.tenantField` it has, else `organization_id`) is left to the '
+    + 'load, which stamps it. There is no '
     + 'mechanical rewrite: whether the record or the rule is wrong is the author\'s call',
   acceptanceCriteria:
     '`os validate` and `os build` exit 0 with no "Seed records the seed load refuses" block; after a boot the seed '

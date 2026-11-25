@@ -71,6 +71,19 @@ const datasetOf = (records: AnyRec[], extra: AnyRec = {}): { dataset: AnyRec; lo
   location: 'data[0]',
 });
 
+/**
+ * The tenancy resolver the doors inject (`resolveTenantFieldName`,
+ * `@objectstack/core`), as a double: a declared `tenancy.tenantField` the
+ * object has, else `organization_id` when the object declares it, else none.
+ * The real one is pinned against the real loader in `packages/cli`.
+ */
+const tenantColumnOf = (schema: unknown): string | null => {
+  const s = schema as { fields?: AnyRec; tenancy?: { tenantField?: unknown } };
+  const declared = s?.tenancy?.tenantField;
+  if (typeof declared === 'string' && s?.fields && declared in s.fields) return declared;
+  return s?.fields && 'organization_id' in s.fields ? 'organization_id' : null;
+};
+
 /** `record.amount <= 0`, as the double reads it. */
 const nonPositive = (_rule: AnyRec, record: AnyRec) => typeof record.amount === 'number' && record.amount <= 0;
 
@@ -81,6 +94,7 @@ describe('judgeSeedRowRefusals: a record its own validation rule refuses', () =>
       datasets: [datasetOf([{ name: 'P1', amount: 50 }, { name: 'P2', amount: -5 }])],
       stack: stackWith(payment),
       evaluateValidationRules: judge.evaluateValidationRules,
+      resolveTenantFieldName: tenantColumnOf,
     });
     expect(out.refusals).toEqual([{
       rule: SEED_ROW_REFUSED_BY_VALIDATION_RULE,
@@ -101,6 +115,7 @@ describe('judgeSeedRowRefusals: a record its own validation rule refuses', () =>
       datasets: [datasetOf([{ name: 'P1', amount: 50 }])],
       stack: stackWith(payment),
       evaluateValidationRules: judge.evaluateValidationRules,
+      resolveTenantFieldName: tenantColumnOf,
     });
     expect(judge.calls).toHaveLength(1);
     expect(judge.calls[0].fields.sort()).toEqual(Object.keys(payment.fields).sort());
@@ -109,6 +124,7 @@ describe('judgeSeedRowRefusals: a record its own validation rule refuses', () =>
       datasets: [datasetOf([{ name: 'P1', amount: 50 }])],
       stack: stackWith(payment),
       evaluateValidationRules: (schema) => { handed = schema; return []; },
+      resolveTenantFieldName: tenantColumnOf,
     });
     expect(handed!.validations).toHaveLength(1);
     expect(handed!.fields.note).toEqual({ type: 'text' });
@@ -120,6 +136,7 @@ describe('judgeSeedRowRefusals: a record its own validation rule refuses', () =>
       datasets: [datasetOf([{ name: 'P1', amount: 50 }])],
       stack: stackWith(payment),
       evaluateValidationRules: () => { throw new TypeError('boom'); },
+      resolveTenantFieldName: tenantColumnOf,
     })).toThrow(TypeError);
   });
 });
@@ -148,6 +165,7 @@ describe('judgeSeedRowRefusals: a pair the record\'s own values cannot decide is
         datasets: [datasetOf([record])],
         stack: stackWith({ ...payment, validations: [r] }),
         evaluateValidationRules: judge.evaluateValidationRules,
+        resolveTenantFieldName: tenantColumnOf,
       });
       expect(out.refusals).toEqual([]);
       expect(judge.calls).toEqual([]);
@@ -161,11 +179,13 @@ describe('judgeSeedRowRefusals: a pair the record\'s own values cannot decide is
       datasets: [datasetOf([{ name: 'P', amount: -1 }], { mode: 'update' })],
       stack: stackWith(payment),
       evaluateValidationRules: judge.evaluateValidationRules,
+      resolveTenantFieldName: tenantColumnOf,
     });
     const hooked = judgeSeedRowRefusals({
       datasets: [datasetOf([{ name: 'P', amount: -1 }])],
       stack: stackWith(payment, { hooks: [{ name: 'derive', object: ['xt_payment'], events: ['beforeInsert'] }] }),
       evaluateValidationRules: judge.evaluateValidationRules,
+      resolveTenantFieldName: tenantColumnOf,
     });
     expect([update.refusals, hooked.refusals]).toEqual([[], []]);
     expect([update.notJudged['update-mode'], hooked.notJudged.hook]).toEqual([1, 1]);
@@ -186,6 +206,7 @@ describe('judgeSeedRowRefusals: a pair the record\'s own values cannot decide is
         ],
       }),
       evaluateValidationRules: judge.evaluateValidationRules,
+      resolveTenantFieldName: tenantColumnOf,
     });
     expect(out.refusals).toEqual([]);
     expect(judge.calls).toEqual([]);
@@ -200,6 +221,7 @@ describe('judgeSeedRowRefusals: a keyed record with a blank key field (#35486)',
       datasets: [datasetOf([{ name: 'P1', amount: 5 }, { name: '', amount: -5 }], { mode: 'upsert' })],
       stack: stackWith(payment),
       evaluateValidationRules: judge.evaluateValidationRules,
+      resolveTenantFieldName: tenantColumnOf,
     });
     expect(out.refusals).toEqual([{
       rule: SEED_RECORD_KEY_FIELD_BLANK,
@@ -222,6 +244,7 @@ describe('judgeSeedRowRefusals: a keyed record with a blank key field (#35486)',
       datasets: [{ dataset: { object: 'xt_member', externalId: ['team', 'person'], mode: 'update', records: [{ team: 'a', person: 'b' }, { team: null }] }, location: 'packages[0].manifest.data[3]' }],
       stack: {},
       evaluateValidationRules: () => [],
+      resolveTenantFieldName: tenantColumnOf,
     });
     expect(out.refusals.map(({ location, field, message }) => ({ location, field, update: message.includes('so an update load can never find the row it names') })))
       .toEqual([{ location: 'packages[0].manifest.data[3].records[1]', field: 'team, person', update: true }]);
@@ -232,7 +255,27 @@ describe('judgeSeedRowRefusals: a keyed record with a blank key field (#35486)',
       datasets: [{ dataset: { object: 'xt_member', externalId: ['code', 'organization_id'], records: [{ code: { dialect: 'cel', source: '"A"' } }] }, location: 'data[0]' }],
       stack: {},
       evaluateValidationRules: () => [],
+      resolveTenantFieldName: tenantColumnOf,
     });
     expect(out.refusals).toEqual([]);
+  });
+
+  it('the organization column is the object\'s own: a declared tenancy.tenantField is left to the load, organization_id is then a key like any other', () => {
+    const walled = {
+      name: 'xt_member',
+      tenancy: { tenantField: 'workspace_id' },
+      fields: { code: { type: 'text' }, workspace_id: { type: 'text' }, organization_id: { type: 'text' } },
+    };
+    const out = judgeSeedRowRefusals({
+      datasets: [
+        { dataset: { object: 'xt_member', externalId: ['workspace_id', 'code'], records: [{ code: 'A' }] }, location: 'data[0]' },
+        { dataset: { object: 'xt_member', externalId: ['organization_id', 'code'], records: [{ code: 'B' }] }, location: 'data[1]' },
+      ],
+      stack: stackWith(walled),
+      evaluateValidationRules: () => [],
+      resolveTenantFieldName: tenantColumnOf,
+    });
+    expect(out.refusals.map(({ location, field }) => ({ location, field })))
+      .toEqual([{ location: 'data[1].records[0]', field: 'organization_id' }]);
   });
 });

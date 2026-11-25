@@ -4,25 +4,27 @@
 '@objectstack/spec': minor
 ---
 
-feat(cli): `os validate` and `os build` refuse seed records the seed load would drop: one its own validation rule refuses, or a keyed one with a blank key field
+feat(cli)!: `os validate` and `os build` refuse seed records the seed load would drop: one its own validation rule refuses, or a keyed one with a blank key field
 
-Clause-②: no (narrowing)
+Clause-②: yes (narrowing)
 Metadata-protocol: narrowed
-Skills-docs: follow-up owed — skills/objectstack-data/references/seeds.md (its sentence that `os validate` does not run validation rules on seed rows becomes false)
+Skills-docs: follow-up #37158
 
 <!-- adr-0087: registered seed-record-refused-before-load -->
 
-A seed write is held to the object's own validation rules (every type but `state_machine`), and a record a rule refuses is dropped from the load while the rest land. Until now nothing at authoring time judged a seed record against those rules: `os validate` and `os build` passed, and the first sign was a `[Seeder] … dropped record(s)` line at boot carrying the rule's message, not its name. Both commands now refuse such a config (exit 1), one line per record, naming where the record sits, its index and the refusing rule:
+**BREAKING** accept-set narrowing of two authoring doors, shipped as `minor`. FROM: `os validate` and `os build` exit 0 on a config one of whose seed records the seed load drops (its own validation rule refuses it, or it is keyed and leaves a key field blank). TO: both exit 1 and name the record, its object, its index and the refusing rule or the blank field. The load's own verdicts do not change. Fix: correct the record so its rule admits it, change the rule if the record is right, or give the record its key value.
+
+A seed write is held to the object's own validation rules (every type but `state_machine`), and a record a rule refuses is dropped from the load while the rest land. Until now nothing at authoring time judged a seed record against those rules: `os validate` and `os build` passed, and the first sign was a `[Seeder] … dropped record(s)` line at boot carrying the rule's message, not its name. Both commands now refuse such a config (exit 1), one line per refusal (a record two rules refuse prints two), naming where the record sits, its index and the refusing rule:
 
 ```text
 ✗ Seed records the seed load refuses (1 record)
   ✗ data[0].records[1]: Seed record #1 of 'xt_payment' is refused by its validation rule 'amount_positive': A payment amount must be positive.
 ```
 
-The verdict is the write path's own evaluator, run on one rule at a time. A record and rule pair is judged only when the record's own literal values decide it; a pair whose rule reads something the load decides (a reference, a roll-up, formula or autonumber field, a default, a platform-injected column, an expression value, a `beforeInsert` hook's write, or the stored row of an `update` dataset) is counted in one dim line and never refused. Advisory rules (`warning` / `info`) and inactive rules are not judged.
+The verdict is the write path's own evaluator, run on one rule at a time. A record and rule pair is judged only when the record's own literal values decide it; a pair whose rule reads something the load decides (a reference, a roll-up, formula or autonumber field, a default, a platform-injected column, an expression value, a present value of a non-literal type such as `date` or `datetime`, a `json_schema` rule, a `beforeInsert` hook's write, or the stored row of an `update` dataset) is counted in one dim line and never refused; a dataset whose object the stack does not declare has no rules to judge. A hook registered in plugin code is not visible to the stack, so a config that relies on one to fill a field a rule reads can be refused although the load admits it. Advisory rules (`warning` / `info`) and inactive rules are not judged.
 
-A keyed record (every live mode: `ignore`, `upsert`, `update`) whose literal value for a key field is blank (no value, `null` or `''`) is refused the same way, in the sentence the seed loader refuses it with at load, naming the object, the record index and the field. A key field holding an expression is judged at load only.
+A keyed record (every live mode: `ignore`, `upsert`, `update`) whose literal value for a key field is blank (no value, `null` or `''`) is refused the same way, in the sentence the seed loader refuses it with at load, naming the object, the record index and the field. A key field holding an expression is judged at load only, and so is the object's organization column, which the load stamps: a declared `tenancy.tenantField` the object has, else `organization_id`.
 
 `--json` output carries the refusals under `errors` (`os validate`) or `issues` (`os build`), each with `rule` (`seed-row-refused-by-validation-rule` or `seed-record-key-field-blank`), `location`, `object`, `recordIndex`, and `validationRule` or `field`.
 
-To fix a refused config: correct the record so its rule admits it, change the rule, or give the record its key value. `@objectstack/lint` exports the walk as `judgeSeedRowRefusals`, which takes the evaluator as an input.
+To fix a refused config: correct the record so its rule admits it, change the rule, or give the record its key value. `@objectstack/lint` exports the walk as `judgeSeedRowRefusals`, which takes the evaluator and the tenancy resolver (`resolveTenantFieldName`, `@objectstack/core`) as inputs.
