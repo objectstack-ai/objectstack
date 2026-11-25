@@ -10,7 +10,8 @@
  * vocabulary ships with the platform, and the embedders it talks to
  * (OpenAI, DashScope, BigModel, BGE…) each tokenize differently. It is built
  * to sit at or above OpenAI `cl100k` counts on Chinese, mixed
- * Chinese/English and English-heavy text (long words, numbers, URLs, code).
+ * Chinese/English and English-heavy text (long words, numbers, URLs, code,
+ * hashes and other identifiers).
  *
  * ## Formula
  *
@@ -21,8 +22,13 @@
  *    kana, Hangul syllables, the CJK Symbols and Punctuation block
  *    (`U+3000`–`U+303F`) and the Halfwidth and Fullwidth Forms block
  *    (`U+FF00`–`U+FFEF`);
- *  - **ceil(length / 4)** for each run of ASCII letters and digits
- *    (`[A-Za-z0-9]+`): `OpenAI` counts 2, `internationalization` 5, `8192` 1;
+ *  - for each run of ASCII letters and digits (`[A-Za-z0-9]+`), by what it
+ *    holds — a tokenizer splits identifiers, figures and words very
+ *    differently:
+ *     - letters only: **ceil(length / 4)** (`OpenAI` 2, `internationalization` 5);
+ *     - digits only: **ceil(length / 3)** (`8192` 2, a 16-digit number 6);
+ *     - letters and digits mixed: **ceil(length / 2)** (`v3` 1, a 32-char hex
+ *       id 16) — hashes, base64 and UUID segments;
  *  - **1** for each other punctuation mark or character (ASCII punctuation,
  *    non-ASCII letters, symbols, emoji);
  *  - **0** for whitespace.
@@ -34,22 +40,28 @@
  */
 export function estimateTokens(text: string): number {
   let sum = 0;
-  let asciiRun = 0;
+  let letters = 0;
+  let digits = 0;
   for (const ch of text) {
     const cp = ch.codePointAt(0)!;
-    if (isAsciiAlphanumeric(cp)) {
-      asciiRun += 1;
+    if (isAsciiDigit(cp)) {
+      digits += 1;
       continue;
     }
-    sum += asciiRunTokens(asciiRun);
-    asciiRun = 0;
+    if (isAsciiLetter(cp)) {
+      letters += 1;
+      continue;
+    }
+    sum += asciiRunTokens(letters, digits);
+    letters = 0;
+    digits = 0;
     if (isCjkOrFullWidth(cp)) {
       sum += 1.5;
     } else if (!/\s/u.test(ch)) {
       sum += 1;
     }
   }
-  sum += asciiRunTokens(asciiRun);
+  sum += asciiRunTokens(letters, digits);
   if (sum === 0) return 0;
   // The epsilon absorbs binary floating-point noise (10 × 1.1 is
   // 11.000000000000002), so an exact product is not rounded up one extra.
@@ -57,25 +69,35 @@ export function estimateTokens(text: string): number {
 }
 
 /**
- * How many ASCII letters and digits one token covers in {@link estimateTokens}:
- * a run of `n` counts `ceil(n / 4)`.
+ * How many characters of one ASCII run count as one token in
+ * {@link estimateTokens}, by what the run holds: a run of `n` counts
+ * `ceil(n / chars)`.
  */
-export const ASCII_RUN_CHARS_PER_TOKEN = 4;
+export const ASCII_RUN_CHARS_PER_TOKEN = Object.freeze({
+  /** A run of letters only. */
+  letters: 4,
+  /** A run of digits only. */
+  digits: 3,
+  /** A run mixing letters and digits (hashes, base64, UUID segments). */
+  mixed: 2,
+} as const);
 
 /** The safety factor {@link estimateTokens} multiplies its sum by. */
 export const TOKEN_ESTIMATE_MARGIN = 1.1;
 
-/** The tokens one run of `length` ASCII letters and digits counts (0 for no run). */
-function asciiRunTokens(length: number): number {
-  return Math.ceil(length / ASCII_RUN_CHARS_PER_TOKEN);
+/** The tokens one ASCII run of `letters` letters and `digits` digits counts (0 for no run). */
+function asciiRunTokens(letters: number, digits: number): number {
+  if (digits === 0) return Math.ceil(letters / ASCII_RUN_CHARS_PER_TOKEN.letters);
+  if (letters === 0) return Math.ceil(digits / ASCII_RUN_CHARS_PER_TOKEN.digits);
+  return Math.ceil((letters + digits) / ASCII_RUN_CHARS_PER_TOKEN.mixed);
 }
 
-function isAsciiAlphanumeric(cp: number): boolean {
-  return (
-    (cp >= 0x30 && cp <= 0x39) || // 0-9
-    (cp >= 0x41 && cp <= 0x5a) || // A-Z
-    (cp >= 0x61 && cp <= 0x7a) // a-z
-  );
+function isAsciiDigit(cp: number): boolean {
+  return cp >= 0x30 && cp <= 0x39; // 0-9
+}
+
+function isAsciiLetter(cp: number): boolean {
+  return (cp >= 0x41 && cp <= 0x5a) || (cp >= 0x61 && cp <= 0x7a); // A-Z, a-z
 }
 
 function isCjkOrFullWidth(cp: number): boolean {

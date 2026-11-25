@@ -26,10 +26,15 @@ describe('estimateTokens — the formula', () => {
     expect(estimateTokens('a b c d e f g h i j')).toBe(11);
   });
 
-  it('counts each ASCII alphanumeric run ceil(length / 4)', () => {
-    expect(ASCII_RUN_CHARS_PER_TOKEN).toBe(4);
-    // one 24-char run → 6 → 6.6 → 7
-    expect(estimateTokens('internationalization2026')).toBe(7);
+  it('counts an ASCII run by what it holds: letters ceil(n/4), digits ceil(n/3), mixed ceil(n/2)', () => {
+    expect(ASCII_RUN_CHARS_PER_TOKEN).toEqual({ letters: 4, digits: 3, mixed: 2 });
+    // letters only: 20 → 5 → 5.5 → 6
+    expect(estimateTokens('internationalization')).toBe(6);
+    // digits only: 8 → 3 → 3.3 → 4
+    expect(estimateTokens('12345678')).toBe(4);
+    // mixed: 8 → 4 → 4.4 → 5; a 24-char mixed run → 12 → 13.2 → 14
+    expect(estimateTokens('a1b2c3d4')).toBe(5);
+    expect(estimateTokens('internationalization2026')).toBe(14);
     // alpha(2) + beta(1) + gamma(2) = 5 → 5.5 → 6
     expect(estimateTokens('alpha beta gamma')).toBe(6);
     // a 4-char run is 1, a 5-char run is 2: 1 → 2, 2 → 3
@@ -43,8 +48,8 @@ describe('estimateTokens — the formula', () => {
   });
 
   it('counts a mixed text term by term', () => {
-    // 使用(3) + OpenAI(2) + 模型(3) + ，(1.5) + 8192(1) + 个(1.5) + token(2) + 。(1.5) = 15.5 → 17.05 → 18
-    expect(estimateTokens('使用 OpenAI 模型，8192 个 token。')).toBe(18);
+    // 使用(3) + OpenAI(2) + 模型(3) + ，(1.5) + 8192(2) + 个(1.5) + token(2) + 。(1.5) = 16.5 → 18.15 → 19
+    expect(estimateTokens('使用 OpenAI 模型，8192 个 token。')).toBe(19);
   });
 });
 
@@ -73,8 +78,10 @@ const CL100K_SAMPLES: ReadonlyArray<readonly [id: string, cl100k: number, text: 
  * English-heavy reference counts — long words, identifiers, code, URLs, figures
  * and digit runs — sampled the same way and on the same date as
  * {@link CL100K_SAMPLES}. They pin the ASCII-run rule: one token per run, the
- * rule this module first shipped with, falls below cl100k on six of these
- * eight; ceil(length / 4) does not.
+ * rule this module first shipped with, falls below cl100k on six of the first
+ * eight. The last two pin the run classes — a 20-digit run is below cl100k
+ * unless digits count ceil(n/3), a URL carrying a 32-hex id unless a mixed run
+ * counts ceil(n/2).
  */
 const CL100K_ENGLISH_SAMPLES: ReadonlyArray<readonly [id: string, cl100k: number, text: string]> = [
   ['en-long-words', 22, 'Internationalization, telecommunications infrastructure, counterrevolutionaries and electroencephalography characterize interdisciplinary microarchitectures.'],
@@ -85,6 +92,8 @@ const CL100K_ENGLISH_SAMPLES: ReadonlyArray<readonly [id: string, cl100k: number
   ['en-digits-12', 8, 'Order 123456789012 shipped.'],
   ['en-digits-8', 7, 'Order 12345678 shipped.'],
   ['en-prose', 25, 'The embedder refuses an input whose estimate exceeds the model\'s documented limit, so the provider never silently truncates the text.'],
+  ['en-digits-20', 36, 'Account 4532015112830366 transferred 98765432109876543210 units at 20261125013045 under ledger 31415926535897932384.'],
+  ['en-url-hex-id', 58, 'https://dashscope.aliyuncs.com/compatible-mode/v1/embeddings?model=text-embedding-v3&requestIdentifier=a7f3c9e2b4d8f1e6a0c5b9d3e7f2a4c8'],
 ];
 
 describe('estimateTokens — never below cl100k on Chinese, mixed and English-heavy text', () => {

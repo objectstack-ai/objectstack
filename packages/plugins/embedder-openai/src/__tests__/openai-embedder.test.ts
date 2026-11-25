@@ -260,6 +260,8 @@ describe('OpenAIEmbedder input limit (refused, not truncated)', () => {
     expect(err?.message).toContain("'BAAI/bge-large-zh-v1.5'");
     expect(err?.message).toContain('estimated at 514 tokens');
     expect(err?.message).toContain('512-token input limit');
+    // The refusal tells the caller what to do: split the text.
+    expect(err?.message).toContain('Split the text below the limit');
     expect(f).not.toHaveBeenCalled();
   });
 

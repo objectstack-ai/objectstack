@@ -103,11 +103,13 @@ No provider's tokenizer ships with the platform, so the length is an estimate: `
 | Text | Counts |
 |:---|:---|
 | A CJK character or a full-width punctuation mark (`，。：（）「」`…) | 1.5 each |
-| A run of ASCII letters and digits | ceil(length / 4) per run — `8192` 1, `OpenAI` 2, `internationalization` 5 |
+| A run of ASCII letters only | ceil(length / 4) per run — `OpenAI` 2, `internationalization` 5 |
+| A run of ASCII digits only | ceil(length / 3) per run — `8192` 2, a 16-digit number 6 |
+| A run mixing ASCII letters and digits (hashes, base64, UUID segments) | ceil(length / 2) per run — `v3` 1, a 32-character hex id 16 |
 | Any other punctuation mark or character | 1 each |
 | Whitespace | 0 |
 
-The sum is multiplied by 1.1 and rounded up. On Chinese regulation-like text, mixed Chinese/English text and English-heavy text (long words, identifiers, code, URLs, figures) the estimate stays at or above OpenAI `cl100k` token counts (the sampled counts are recorded in the function's test). Long random strings — hashes, base64, UUIDs, digit runs of 16 or more — tokenize denser than four characters per token and can be estimated below their real count. It is deliberately conservative: a text near a limit may be refused although the provider would have accepted it. Other providers' tokenizers are not sampled.
+The sum is multiplied by 1.1 and rounded up. On Chinese regulation-like text, mixed Chinese/English text and English-heavy text (long words, identifiers, code, URLs, figures, long numbers, a URL carrying a hex id) the estimate stays at or above OpenAI `cl100k` token counts (the sampled counts are recorded in the function's test). Text made mostly of random hex or base64 — UUIDs, sha256 digests, encoded blobs — tokenizes at one to one and a half characters per token and can still be estimated below its real count. It is deliberately conservative: a text near a limit may be refused although the provider would have accepted it. Other providers' tokenizers are not sampled.
 
 ## Why we did not build a vector DB
 
