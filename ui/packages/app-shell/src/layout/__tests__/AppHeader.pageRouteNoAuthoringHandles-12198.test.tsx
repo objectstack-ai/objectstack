@@ -244,7 +244,7 @@ async function studioEntriesOnPageRoute(perms: MePermissionsResponse): Promise<S
   );
   // The pill and its menu content rendered — so an absent row is a reading.
   expect(screen.getByTestId('app-switcher-trigger')).toBeInTheDocument();
-  expect(screen.getByTestId('app-switcher-all-apps')).toBeInTheDocument();
+  expect(screen.getByTestId('app-switcher-home')).toBeInTheDocument();
   // objectui#12615 — the bar's entries wait on the package list's verdict; one
   // macrotask lets every read the stub answers settle before they are read.
   await act(() => new Promise<void>((resolve) => setTimeout(resolve, 0)));
