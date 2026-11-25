@@ -913,8 +913,10 @@ export class ProtocolSaveFacet {
         // [#35524] …and the same where the active rows at the member are bound
         // to the one dependent whose addition the read naming no package does
         // not serve (it takes the base's address there): the base's draft.
+        // A stored package-unbound draft there keeps its address and is
+        // adopted, as on `main` (contract review S1).
         let followedBase: string | undefined;
-        if (draftAddress !== undefined && (draftAddress.kind === 'ambiguous' || draftAddress.into !== null)) {
+        if (draftAddress !== undefined && (draftAddress.kind === 'ambiguous' || draftAddressFollowsRowHeldBase(draftAddress))) {
             const base = await packagelessRowHeldBaseAddress(
                 host, singularType, request.name, itemDiscriminator(singularType, request.item),
             );
@@ -3317,6 +3319,19 @@ export async function packagelessRowHeldBaseAddress(
 }
 
 /**
+ * [#35524] Whether a non-ambiguous draft address naming no package is one the
+ * row-held base's address may replace ({@link packagelessRowHeldBaseAddress}):
+ * bound to a package by the active rows (`into !== null`), and [contract
+ * review S1] naming a draft key of a package, not the package-unbound draft
+ * (`key === null`), which keeps its address. The one predicate the draft
+ * doors' address ({@link packagelessRowHeldBaseDraftAddress}) and the draft
+ * save's follow ask, so they cannot part.
+ */
+export function draftAddressFollowsRowHeldBase(address: { key: string | null; into: string | null }): boolean {
+    return address.into !== null && address.key !== null;
+}
+
+/**
  * [#35524, epic ruling 6781691009, #34348 ruling (b)] THE DRAFT ADDRESS the
  * draft doors naming no package take (the draft save, the strict draft read,
  * the per-item publish and the draft discard, through
@@ -3330,8 +3345,18 @@ export async function packagelessRowHeldBaseAddress(
  *
  * `pending` (the draft address the stored rows give) itself otherwise: an ambiguous address (the doors ask
  * {@link packagelessRowHeldBaseAddress} for it themselves, #34681), an address
- * not bound to a package by the active rows, and every cell that judgment
- * declines.
+ * not bound to a package by the active rows, every cell that judgment
+ * declines, and [#35524 contract review S1] an address whose draft is the
+ * PACKAGE-UNBOUND one (`key === null`: a package-unbound draft stored at the
+ * member, no draft of the dependent beside it, as a bare draft save at the
+ * member writes it while no package holds that member). That draft keeps the
+ * address it has on `main`: the bare draft read serves it, the bare per-item
+ * publish promotes it into the dependent's row, the bare draft discard
+ * removes it, and the bare draft save adopts it (the draft save's follow
+ * declines the same address, {@link draftAddressFollowsRowHeldBase}), never
+ * a second draft bound to the base beside it. `key`, not `drafts.unbound`: a
+ * package-unbound draft stored beside the dependent's own draft is not the
+ * draft the address names (`key` is the dependent's), and that cell moves.
  *
  * FROM (`main` a73edb3cd7): the bare draft save wrote the dependent's draft
  * there and the bare publish promoted it into the dependent's row, while the
@@ -3345,7 +3370,7 @@ export async function packagelessRowHeldBaseDraftAddress(
     pending: ReturnType<ProtocolHost['packagelessDraftAddress']>,
 ): Promise<Awaited<ReturnType<ProtocolHost['packagelessDraftAddress']>>> {
     const address = await pending;
-    if (address.kind === 'ambiguous' || address.into === null) return address;
+    if (address.kind === 'ambiguous' || !draftAddressFollowsRowHeldBase(address)) return address;
     const base = await packagelessRowHeldBaseAddress(host, type, name, member);
     if (base === undefined) return address;
     return { kind: address.drafts.candidates.includes(base) ? 'draft' : 'none', key: base, into: base, drafts: address.drafts };

@@ -251,6 +251,35 @@ describe('[#35524] the bare save at a member only the dependent holds writes the
             expect(await rowsOf(b.engine, 'dd_own_bare')).toEqual([`active:${WD}:fr-FR:addon fr draft`, `active:${WA}:-:base en`]);
         });
 
+        it('a package-unbound draft stored at the member (contract review S1): the bare draft read, publish, discard and draft save act on it as on main, never a draft bound to the base', async () => {
+            // A bare draft save at fr-FR while no package holds that member is
+            // the package-unbound draft; the dependent's fr-FR row is stored after it.
+            const lay = async (name: string) => {
+                await layRow(b.engine, 'email_template', name, WA, template('en-US', 'base en'));
+                const drafted = await saveFr(b, name, 'unbound fr', { mode: 'draft' });
+                expect(drafted.ok, JSON.stringify(drafted)).toBe(true);
+                await layRow(b.engine, 'email_template', name, WD, template('fr-FR', 'addon fr'));
+                expect(await rowsOf(b.engine, name)).toEqual([`active:${WD}:fr-FR:addon fr`, `active:${WA}:-:base en`, 'draft:null:fr-FR:unbound fr']);
+            };
+            await lay('ud_read');
+            const read = await b.protocol.getMetaItem({ type: 'email_template', name: 'ud_read', member: 'fr-FR', state: 'draft' });
+            expect([read?.item?.subject, read?.item?._packageId ?? null]).toEqual(['unbound fr', null]);
+            // The bare draft save adopts the package-unbound draft into the
+            // package its active row is bound to, as on main: one draft, none
+            // bound to the base.
+            const saved = await saveFr(b, 'ud_read', 'unbound fr again', { mode: 'draft' });
+            expect(saved.ok, JSON.stringify(saved)).toBe(true);
+            expect(await rowsOf(b.engine, 'ud_read')).toEqual([`active:${WD}:fr-FR:addon fr`, `active:${WA}:-:base en`, `draft:${WD}:fr-FR:unbound fr again`]);
+            await lay('ud_publish');
+            const published = await settle(b.protocol.publishMetaItem({ type: 'email_template', name: 'ud_publish', member: 'fr-FR' }));
+            expect(published.ok, JSON.stringify(published)).toBe(true);
+            expect(await rowsOf(b.engine, 'ud_publish')).toEqual([`active:${WD}:fr-FR:unbound fr`, `active:${WA}:-:base en`]);
+            await lay('ud_discard');
+            const discarded = await settle(b.protocol.deleteMetaItem({ type: 'email_template', name: 'ud_discard', member: 'fr-FR', state: 'draft' }));
+            expect(discarded.ok, JSON.stringify(discarded)).toBe(true);
+            expect(await rowsOf(b.engine, 'ud_discard')).toEqual([`active:${WD}:fr-FR:addon fr`, `active:${WA}:-:base en`]);
+        });
+
         it('a read-only base holding rows: the bare save at the dependent\'s member answers what ?package=<base> answers', async () => {
             await layCell(b.engine, 'ro_cell', A, D);
             const bare = await saveFr(b, 'ro_cell', 'edited');
