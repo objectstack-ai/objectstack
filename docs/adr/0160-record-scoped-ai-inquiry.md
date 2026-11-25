@@ -8,6 +8,7 @@
   - **Point 2 is changed.** A related child that *this caller* is not served is left out and stated, not refused. A child the door serves to nobody still refuses the call. See [D3](#d3).
   - **Point 10** is accepted as written.
   - **Long text in a related list's cells** is allowed under one bound on the pack's carried text, and every cut is stated. See [D3](#d3), "The bound on carried text".
+  - **Filter, order and limit on `related`** are admitted, by the maintainer's further word the same day, verbatim: 「related 的筛选和排序 同意」. A `related` entry gains `where`, `orderBy` and `limit`, on the child's own fields only. The read set is unchanged. See [D1](#d1), "Filter, order and limit on a related list", [D3](#d3) and [D4](#d4).
   - Nothing else changes.
 - **Decided by**: the maintainer, 2026-11-24, verbatim and untranslated, as epic [objectstack#36996](https://github.com/objectstack-ai/objectstack/issues/36996) records them: 「先立专题 ① 记录范围 AI 问询 ；⑤ 应用技能进入应用内 AI ，M0 那几项知识服务缺陷 也立专题，目前开发的策略是按专题派」 and 「需要拍板的事项 都同意」. The six rulings the epic sets over every child are quoted in [Provenance](#provenance); ⛔ none of them is re-opened here.
 - **Card**: [objectstack#36997](https://github.com/objectstack-ai/objectstack/issues/36997). It lists ten items; D1–D9 decide items 1–9 in the card's order and [Not decided here](#not-decided-here) carries item 10.
@@ -100,7 +101,7 @@ ADR-0088's three clauses:
 | `label` | Human name. | The pack's header in the tool answer, and the refusal that names candidate packs. |
 | `object` | The root object. Required. | Pack selection; the root read. |
 | `fields` | Ordered field names on the root object. | The field section of the pack. |
-| `related` | Child lists: `{ object, field?, fields? }[]`. `object` is a child object with a reference field that points at the root; `field` names that field and is required when several do; `fields` are the columns of each row. One level, child lists only — the shape of `get_record`'s `related`. The link is resolved once, on the published definition, so no caller's pack follows a different link than the author declared. | The related section. |
+| `related` | Child lists: `{ object, field?, fields?, where?, orderBy?, limit? }[]`. `object` is a child object with a reference field that points at the root; `field` names that field and is required when several do; `fields` are the columns of each row; `where`, `orderBy` and `limit` choose and order the rows (amended 2026-11-25, below). One level, child lists only — the shape of `get_record`'s `related`. The link is resolved once, on the published definition, so no caller's pack follows a different link than the author declared. | The related section, and the child query's filter, order and cut. |
 | `body` | `{ field }`: the one long-text field rendered as the record's body. | The body section and its outline ([D3](#d3)). |
 
 ```yaml
@@ -117,9 +118,17 @@ body:
   field: content
 ```
 
+**Filter, order and limit on a related list (amended 2026-11-25).** A `related` entry may carry three more keys. They choose which child rows the pack carries and in what order; they never widen a read.
+
+- `where`: a filter on the child's **own fields only**, in the platform's object-filter form (`packages/spec/src/data/filter.zod.ts`). v1 admits `$eq`, `$ne`, `$in`, `$nin`, `$gt`, `$gte`, `$lt`, `$lte`, `$null` and `$exists` on a field, joined by `$and` / `$or`. No relation traversal (no dotted path, no lookup into another object), no formula, no field-to-field comparand, no `$now` anchor. Anything else is refused at parse.
+- `orderBy`: `{ field, direction }[]`, the `SortNodeSchema` shape (`packages/spec/src/data/query.zod.ts`), on the child's own fields only. Without it the order is the record tools' default.
+- `limit`: the rows carried for this list, at most the service's per-list cap. Without it the cap applies.
+
+The link filter stays the service's: `where` is joined to it with `$and`, so no `where` can reach a child row of another root. An example, for an application whose current text lives on a child: `where: { is_current: { $eq: true } }`, `orderBy: [{ field: 'sort_no', direction: 'asc' }]`. These keys are read by the render service in the PR that adds them ([Implementation split](#implementation-split-after-acceptance), row 11).
+
 **Registration (proposal, row 5 lands it).** One entry on each surface listed in Context. The registry row takes the `skill` row's flags, for the `skill` row's reason: a file loader (`**/*.ai-context.ts`, `**/*.ai-context.yml`), `supportsOverlay: true`, `allowRuntimeCreate: true`, `allowEnvironmentOverlay: false` (ADR-0005's ai row), `domain: 'ai'`; collection key `aiContexts`; a liveness row per key; a `KIND_COVERAGE` row with an example pack.
 
-**Author defects are reported on author surfaces.** A pack that names an object or field that does not exist, a `related` entry with no reference field to the root, or a `body.field` that is not a long-text field is reported by metadata validation at save and by `os validate`. ADR-0149 D2 is the precedent: a dataset member no caller could be served is reported on an author surface, and the tool answer says nothing about it ([D3](#d3)).
+**Author defects are reported on author surfaces.** A pack that names an object or field that does not exist, a `related` entry with no reference field to the root, a `where` or `orderBy` that names a field the child does not have, or a `body.field` that is not a long-text field is reported by metadata validation at save and by `os validate`. An operator outside `where`'s admitted set is refused at parse, before any of this. ADR-0149 D2 is the precedent: a dataset member no caller could be served is reported on an author surface, and the tool answer says nothing about it ([D3](#d3)).
 
 **Advisory reports (amended 2026-11-25, point 1's third condition).** Two configurations are legal but leave a call to fail at run time. Validation reports each one as an advisory warning, never an error:
 
@@ -128,7 +137,7 @@ body:
 
 The skill key and the action type that these reports read land in rows 8 and 6. Each report lands with its reader.
 
-**Later work, not keys:** a fallback from `body` to knowledge search; filters, order and per-list limits on `related`; reads through a parent lookup or deeper than one level; a pack `description`; an override of a packaged pack ([ADR-0146](./0146-studio-designs-setup-administers-one-editor-per-item-paired-customize-package.md) D2's list is not joined).
+**Later work, not keys:** a fallback from `body` to knowledge search; reads through a parent lookup or deeper than one level; a pack `description`; an override of a packaged pack ([ADR-0146](./0146-studio-designs-setup-administers-one-editor-per-item-paired-customize-package.md) D2's list is not joined).
 
 ### D2 — The recipe is not on the object {#d2}
 
@@ -150,7 +159,7 @@ The render service takes a pack, a record id and the caller, and returns the pac
 
 - the root record, as `get_record` reads it;
 - a lookup listed in `fields`, as `query_records`' `expand` reads it on the root;
-- a `related` entry, as `get_record`'s `related` reads a list: one capped query on the child, filtered by the link field;
+- a `related` entry, as `get_record`'s `related` reads a list: one capped query on the child, filtered by the link field joined with the entry's `where`, ordered by its `orderBy`, and cut at its `limit` (amended 2026-11-25). The filter and the order run inside that one query, as the caller: a pack's `where` is written by the author and grants nothing, so the caller's row rules still decide which rows arrive;
 - a lookup listed in a `related` entry's `fields`, as `query_records`' `expand` reads it on the child.
 
 **The pack is projected before its reads are planned.** In the record tools the caller types the names, and a name the caller's schema does not show is answered `INVALID_FIELD`: the refusal names it and tells the caller to fix the request. In a pack the author typed the names and the caller sent none. The same answer would name a field the caller's schema hides, and would tell a model its request was malformed when it sent no field. So a pack may answer differently from a caller-typed read, and the order is fixed:
@@ -177,7 +186,7 @@ The root object's gates are unchanged ([D4](#d4), "Order of judgement"). A root 
 
 - **The caller's served schema shows the field and `getReadableFields` leaves it out** — an exempt caller, or schema masking switched off. The entry keeps its `name` and `label`, carries no value and is marked withheld. The notes name it, with the executor's sentence that such fields are not visible to the caller and are not empty. This is the #35137 rule, unchanged.
 - **The caller's served schema does not show the field** — the default for an ordinary caller. The pack names nothing: no entry, no name, no count. The notes carry one statement, the same whatever was removed: some of the material this pack covers is not visible to the caller, and the answer must not treat it as empty or absent. This is the `membersWithheld` precedent of ADR-0149 D2. The statement fires only for an entry the published definition has and the caller's served schema hides. A name the published definition lacks is an author defect ([D1](#d1)) and fires nothing.
-- **The hidden field is one the pack uses structurally.** A hidden lookup in `fields` is a hidden field: it is dropped as above and never expanded. A `related` entry on a child the caller is served, whose link field that caller's schema hides, is a read the record tools refuse this caller, so the whole section is dropped, with the same statement. A hidden `body` field drops the body section, with the same statement. These are field-level rules, so they omit and state. Only an object-level refusal applies to the whole call. A child the caller is not served at all is settled at object level, in step 1: it is left out with the same statement, and it never reaches this rule.
+- **The hidden field is one the pack uses structurally.** A hidden lookup in `fields` is a hidden field: it is dropped as above and never expanded. A `related` entry on a child the caller is served, whose link field that caller's schema hides, is a read the record tools refuse this caller, so the whole section is dropped, with the same statement. A `related` entry whose `where` or `orderBy` names a field that caller's schema hides is dropped whole too, with the same statement, and the field is never named (amended 2026-11-25): a filter or an order on a field the caller cannot see would tell the caller something about it. A hidden `body` field drops the body section, with the same statement. These are field-level rules, so they omit and state. Only an object-level refusal applies to the whole call. A child the caller is not served at all is settled at object level, in step 1: it is left out with the same statement, and it never reaches this rule.
 - A masked value is carried as served. The render adds no masking and removes none.
 
 This is how ruling 2's sentence — "A field hidden from the caller reads 'not visible to you'" — holds beside ADR-0106 D1, which removes such a field whole because a kept name "still leaks existence". The model is always told that something is not visible. It is told which field only when the caller's own schema already shows that field.
@@ -234,7 +243,7 @@ The framing sentence covers the data member only, so it does not undo a note. Sp
 
 1. **It is an ordinary tool call.** On MCP it passes through `packages/mcp/src/tool-call-interceptor.ts#routeToolCallsThrough` like every tool; in the product it is a registry tool call. Anything that reads a pack for a model does it as this tool call — the first-turn pre-read of row 9 included — and never by calling the render service directly.
 2. **It is a read.** The executor writes nothing.
-3. **Its read set is knowable from the call.** The read set is the root object, each `related[].object`, and the target object of each lookup the pack lists, in `fields` or in a `related` entry's `fields`. It is a function of the validated arguments and published metadata only, never of the caller or of record data. The D5 package exports the one function that returns it for a call's arguments, and the executor plans its reads from that same function. A caller's projected plan ([D3](#d3)) reads a subset of the set, never more; row 5 pins by test that the executor reads no object outside it. The set is the call's plan when it is computed, not a guarantee across a publish: a pack published between an interceptor's judgement and the executor's reads changes it. The data door still decides every read.
+3. **Its read set is knowable from the call.** The read set is the root object, each `related[].object`, and the target object of each lookup the pack lists, in `fields` or in a `related` entry's `fields`. It is a function of the validated arguments and published metadata only, never of the caller or of record data. A `related` entry's `where` and `orderBy` name only the child's own fields, so they add no object to the set (amended 2026-11-25): an interceptor that judges the set judges a filtered pack exactly as an unfiltered one. The D5 package exports the one function that returns it for a call's arguments, and the executor plans its reads from that same function. A caller's projected plan ([D3](#d3)) reads a subset of the set, never more; row 5 pins by test that the executor reads no object outside it. The set is the call's plan when it is computed, not a guarantee across a publish: a pack published between an interceptor's judgement and the executor's reads changes it. The data door still decides every read.
 
 ### D5 — The render service lives in a new service package {#d5}
 
@@ -320,7 +329,7 @@ Each is this record's settlement, taken from the tree's precedent. Points 1, 2 a
 2. **Object level** (D3). *Amended 2026-11-25.* A related child the door serves to nobody refuses the call, following #35145. Some user may be able to read the root but not one related object the pack names. That user gets the pack without that section, and with the statement of point 10. The merged text refused the whole pack instead, and left the author to write one pack per audience. That was changed because a pack ships with an application, while object permissions are set per deployment.
 3. **A lookup the caller cannot open carries no id** (D3) — neither the bare id nor the id the engine serves beside a `referenceNameVisible` name. This extends the ruling's "no dangling id" from related rows to references. A dangling id renders the same way.
 4. **A section is read with `anchor` on the same tool** (D3, D4), not by a second tool.
-5. **`related` is child lists, one level; `body` is an object with one key** (D1), so a later key can join each without a reshaping. The schema also bounds a pack's entry counts, so an oversized pack is refused at parse.
+5. **`related` is child lists, one level; `body` is an object with one key** (D1), so a later key can join each without a reshaping. *Amended 2026-11-25:* `where`, `orderBy` and `limit` joined `related` that way. The schema also bounds a pack's entry counts, so an oversized pack is refused at parse.
 6. **`ask_ai` takes no `target` and refuses `ai.exposed: true` at parse** (D7).
 7. **The MCP prompt's record argument is optional, and the prompt names the tool call instead of carrying the pack** (D8). The call's arguments ride as a JSON object, and a skill with `context` must bind `get_record_context` in `tools`.
 8. **The read-set function is exported** from the D5 package, and the pre-read is a tool call (D4). The set is the call's plan, not a guarantee across a publish.
@@ -341,8 +350,9 @@ Rows 5–10 of the epic's table, with the epic's numbers. Listed, not filed: the
 | 8 | Skill key `context`; MCP skill prompts take a record argument | server | `added` | 5 | D8 |
 | 9 | cloud: the in-app chat persists the focus and pre-reads the pack as a tool call on the first turn | objectstack-ai/cloud | — | objectstack#36999, 5, 8 | D4 (registry registration), D6 and D8 (cloud readers) |
 | 10 | Answer citations that open the record at the cited place (split after this record merges) | — | `added` when the shape enters spec | this record | D9 |
+| 11 | `related` filter, order and limit: the `where`, `orderBy` and `limit` keys and their render-service reader in one PR (amended 2026-11-25) | spec + server | `added` | 5 | D1, D3 |
 
-The lanes are the epic's, and three of them understate the work. This record adds no row; the seat decides how the cards carry it.
+The lanes are the epic's, and three of them understate the work. The 2026-11-25 amendment adds row 11. Its keys land with their reader, so they could have joined row 5's PR; they are a separate card blocked by row 5 instead, so row 5's PR, already large, does not grow. Otherwise the seat decides how the cards carry the work.
 
 - Row 7's form is a spec file, by the precedent of `packages/spec/src/ai/skill.form.ts`.
 - Row 8's key is a spec key, with its liveness row.
