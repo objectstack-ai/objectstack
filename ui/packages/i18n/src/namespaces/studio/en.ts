@@ -3559,6 +3559,8 @@ const STUDIO_EN: Record<string, string> = {
   // objectstack#37201 — the 「高级」 fold (ADR-0084, amended 2026-11-25), and a 常用 type with no item yet.
   'engine.studio.menu.advanced': 'Advanced',
   'engine.studio.menu.emptyType': 'None yet: open the list to make the first',
+  // objectstack#37360 — the fold's last row, under no group (ADR-0084, amended 2026-11-25).
+  'engine.studio.menu.allTypes': 'All types',
   // objectstack#36502 — the notice on a retired Interfaces link's landing.
   'engine.studio.interfacesRetired.sentence': 'Interface edits have moved into the app.',
   'engine.studio.interfacesRetired.backToApp': 'Back to the app',
@@ -3989,6 +3991,10 @@ const STUDIO_EN: Record<string, string> = {
   'engine.directory.invalidTooltip': '{count} invalid item(s) — click to fix',
   'engine.directory.warnTooltip': '{count} item(s) with warnings',
   'engine.directory.itemCountTooltip': '{count} item(s) of this type',
+  // objectstack#37360 — a type the package holds no item of yet, listed under 全部类型 All types.
+  'engine.directory.notHeld': 'None yet',
+  'engine.directory.notHeldTitle': 'This package holds none yet: open the list to make the first',
+  'engine.directory.notHeldReadOnlyTitle': 'This package holds none, and none can be made here',
   // objectstack ADR-0146 D3 (#28568) — the customization marks, counts and
   // filter of the All metadata area, from a base's customization read.
   'engine.customizationMark.customized': 'Customized ({baseName})',

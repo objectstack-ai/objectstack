@@ -217,6 +217,8 @@ The menu also holds four entries that open no type's list. Each sits in the grou
 | **Diagnostics** | 平台 Platform | decision 11 |
 | **The cross-package environment directory** (the `~all` leg) | 访问 Access | **drafted here, not ruled** — [item 1](#amendment-silent) below |
 
+*(Amended 2026-11-25, card [#37360](https://github.com/objectstack-ai/objectstack/issues/37360), ruling record [comment 7177310364](https://github.com/objectstack-ai/objectstack/issues/37360#issuecomment-7177310364), maintainer, verbatim: 「37360 同意」: on a package the menu holds a fifth entry, **全部类型 All types**, the last row of the 高级 Advanced fold, below its groups — the one entry that sits under no group. It opens the type directory, which lists every type of the six groups: the ones the package holds, and the ones it holds none of yet, each marked so with what can be done there. The fold's rule stands — a 高级 type is drawn when the package holds one.)*
+
 ### What stands, and what the amendment replaces {#amendment-stands}
 
 | The 2026-07-01 text | Since the amendment |

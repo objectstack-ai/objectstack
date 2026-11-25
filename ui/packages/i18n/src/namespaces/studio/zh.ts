@@ -3143,6 +3143,8 @@ const STUDIO_ZH: Record<string, string> = {
   // objectstack#37201 — the 「高级」 fold (ADR-0084, amended 2026-11-25), and a 常用 type with no item yet.
   'engine.studio.menu.advanced': '高级',
   'engine.studio.menu.emptyType': '还没有：打开列表新建第一项',
+  // objectstack#37360 — the fold's last row, under no group (ADR-0084, amended 2026-11-25).
+  'engine.studio.menu.allTypes': '全部类型',
   // objectstack#36502 — 旧「界面」链接落地时的提示。
   'engine.studio.interfacesRetired.sentence': '界面的修改已经搬到应用里',
   'engine.studio.interfacesRetired.backToApp': '回到应用',
@@ -3532,6 +3534,10 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.directory.invalidTooltip': '{count} 个无效项 — 点击修复',
   'engine.directory.warnTooltip': '{count} 个条目带有警告',
   'engine.directory.itemCountTooltip': '此类型共 {count} 项',
+  // objectstack#37360 — a type the package holds no item of yet, listed under 全部类型 All types.
+  'engine.directory.notHeld': '还没有',
+  'engine.directory.notHeldTitle': '这个包还没有此类型：打开列表新建第一项',
+  'engine.directory.notHeldReadOnlyTitle': '这个包还没有此类型，也不能在这里新建',
   // objectstack ADR-0146 D3 (#28568) — the customization marks, counts and
   // filter of the All metadata area, from a base's customization read.
   'engine.customizationMark.customized': '已定制（{baseName}）',
