@@ -22,6 +22,9 @@ import React from 'react';
 import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { useSidebar } from '@object-ui/components';
+// The shell's reach includes the palette's lazy record preview
+// (`import('@object-ui/plugin-detail')`): pay that load during collection.
+import '@object-ui/plugin-detail';
 
 const rememberApp = vi.hoisted(() => vi.fn());
 
