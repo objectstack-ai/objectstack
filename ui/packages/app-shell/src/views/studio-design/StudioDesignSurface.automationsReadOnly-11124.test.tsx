@@ -22,7 +22,7 @@
 import '@testing-library/jest-dom/vitest';
 import * as React from 'react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, fireEvent, cleanup, waitFor, within } from '@testing-library/react';
+import { render, screen, fireEvent, cleanup, waitFor, within, act } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes, useNavigate, useParams } from 'react-router-dom';
 
@@ -377,10 +377,18 @@ describe('A refused status toggle rolls back to the server state (objectui#11124
     await waitFor(() => expect(screen.getByTitle('API name: nightly_digest')).toBeInTheDocument(), { timeout: 8000 });
     await waitFor(() => expect(canvasStatus()).toBe(STATUS_OFF), { timeout: 8000 });
 
+    // objectstack#36903 — the first flow's designer left with its address, so
+    // its refusal is not this page's to show: wait for it to settle instead.
     open();
-    await screen.findByText(LOCKED_MESSAGE, undefined, { timeout: 8000 });
+    await act(async () => {
+      await (mockClient.save.mock.results[0]!.value as Promise<unknown>).catch(() => undefined);
+    });
     await new Promise((r) => setTimeout(r, 50));
+    expect(screen.getByTitle('API name: nightly_digest')).toBeInTheDocument();
+    expect(screen.queryByText(LOCKED_MESSAGE)).toBeNull();
     expect(canvasStatus()).toBe(STATUS_OFF);
     expect(screen.getByRole('switch')).toHaveAttribute('aria-checked', 'false');
+    // Nothing was written to the second flow.
+    expect(server.saves.map((saved) => saved.name)).toEqual(['notify_owner']);
   });
 });
