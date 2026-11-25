@@ -197,7 +197,7 @@ describe('RequireAiSurface', () => {
 
 describe('the no-assistant screen\'s way home names where it goes, by viewport (objectstack#37163)', () => {
   beforeEach(() => {
-    mockSurface.mockReturnValue({ enabled: false, isLoading: false, buildServed: false });
+    mockSurface.mockReturnValue({ enabled: false, isLoading: false, buildServed: false, focusServed: false });
     viewer.phone = false;
   });
 
