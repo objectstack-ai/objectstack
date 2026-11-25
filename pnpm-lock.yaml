@@ -2777,6 +2777,9 @@ importers:
       '@libsql/client':
         specifier: ^0.18.0
         version: 0.18.0
+      '@objectstack/mcp':
+        specifier: workspace:*
+        version: link:../mcp
       '@objectstack/platform-objects':
         specifier: workspace:*
         version: link:../platform-objects
@@ -2798,6 +2801,9 @@ importers:
       '@objectstack/service-package':
         specifier: workspace:*
         version: link:../services/service-package
+      '@objectstack/service-record-context':
+        specifier: workspace:*
+        version: link:../services/service-record-context
       '@objectstack/service-settings':
         specifier: workspace:*
         version: link:../services/service-settings
