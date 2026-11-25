@@ -27,6 +27,8 @@ import { useSidebar } from '@object-ui/components';
 import '@object-ui/plugin-detail';
 
 const rememberApp = vi.hoisted(() => vi.fn());
+/** The data adapter the shell reads its connection state from; none unless a test sets one. */
+const adapter = vi.hoisted(() => ({ value: null as null | { getConnectionState: () => string; onConnectionStateChange: () => () => void } }));
 
 vi.mock('../../../hooks/useAiSurface', () => ({
   useAiSurfaceEnabled: () => ({ enabled: false, isLoading: false }),
@@ -34,15 +36,29 @@ vi.mock('../../../hooks/useAiSurface', () => ({
 vi.mock('../../../layout/useConsoleChatDock', () => ({
   useConsoleChatDock: () => ({ control: null, rail: null, sheet: null }),
 }));
+// The one app carries its own brand: the portal must not take it (design point 5).
 vi.mock('../../../providers/MetadataProvider', () => ({
-  useMetadata: () => ({ apps: [{ name: 'crm', label: 'CRM', active: true, _packageId: 'com.acme.crm', navigation: [] }] }),
+  useMetadata: () => ({
+    apps: [
+      {
+        name: 'crm',
+        label: 'CRM',
+        active: true,
+        _packageId: 'com.acme.crm',
+        navigation: [],
+        branding: { primaryColor: '#e11d48', accentColor: '#f59e0b' },
+      },
+    ],
+  }),
 }));
-vi.mock('../../../providers/AdapterProvider', () => ({ useAdapter: () => null }));
+vi.mock('../../../providers/AdapterProvider', () => ({ useAdapter: () => adapter.value }));
 vi.mock('../../../providers/ExpressionProvider', () => ({
   ExpressionProvider: ({ children }: { children: React.ReactNode }) => <>{children}</>,
 }));
-// Mounted by nothing the portal draws; a frame that remembers an app (as an
-// app's layout does) calls it.
+// A tripwire only: nothing the portal draws calls it, and the last-app check in
+// storage is what carries the "no app remembered" pin. A frame that remembers
+// an app (as an app's layout does) would call it, and the assertions on it
+// would go red with the storage check.
 vi.mock('../../../context/LastAppProvider', () => ({
   useLastApp: () => ({ lastApp: null, rememberApp }),
 }));
@@ -80,6 +96,7 @@ import { DocsPortalShell } from '../DocsPortalShell';
 import { NavigationProvider, useNavigationContext } from '../../../context/NavigationContext';
 import { SidebarDocsNav } from '../../../layout/sidebarDocsNavSlot';
 import { useShellPageActionsSlot, useShellSidebarExpandSlot } from '../../../layout/shellPageActionsSlot';
+import { ChromeBannerSlot } from '../../../layout/chromeBannerHost';
 
 function setWidth(width: number) {
   Object.defineProperty(window, 'innerWidth', { value: width, configurable: true, writable: true });
@@ -135,13 +152,21 @@ function PhonePageStandIn() {
   );
 }
 
-function mountAt(path: string, width: number, options: { openedBefore?: string } = {}) {
+function mountAt(path: string, width: number, options: { openedBefore?: string; banner?: boolean } = {}) {
   setWidth(width);
   const phone = width < 768;
   return render(
     <MemoryRouter initialEntries={[path]}>
       <NavigationProvider>
         {options.openedBefore ? <OpenedBefore app={options.openedBefore} /> : null}
+        {/* A standing banner, mounted above the routes as `ConsoleShell` mounts them. */}
+        {options.banner ? (
+          <div data-testid="shell-banner-slot">
+            <ChromeBannerSlot>
+              <div data-testid="impersonation-banner-stub">Impersonating</div>
+            </ChromeBannerSlot>
+          </div>
+        ) : null}
         <ContextProbe />
         <DocsPortalShell>{phone ? <PhonePageStandIn /> : <DocsPageStandIn />}</DocsPortalShell>
       </NavigationProvider>
@@ -154,6 +179,8 @@ const PORTAL_PATHS = ['/docs', '/docs/crm', '/docs/crm/crm_intro'];
 afterEach(() => {
   cleanup();
   rememberApp.mockClear();
+  adapter.value = null;
+  for (const name of ['--primary', '--accent', '--ring', '--brand-primary']) document.documentElement.style.removeProperty(name);
   document.cookie = 'sidebar_state=; path=/; max-age=0';
   window.localStorage.clear();
   setWidth(1440);
@@ -234,5 +261,63 @@ describe('the portal\'s page header carries the shell\'s group and expand button
     mountAt('/docs/crm/crm_intro', 390);
     expect(screen.queryByTestId('shell-page-actions')).toBeNull();
     expect(screen.queryByTestId('shell-sidebar-expand')).toBeNull();
+  });
+});
+
+describe('the portal takes no app\'s brand: the default accent (objectstack#37197, design point 5)', () => {
+  /** The accent variables an app's brand sets on the document root (`AppShell`'s branding). */
+  const brand = () => ({
+    primary: document.documentElement.style.getPropertyValue('--primary'),
+    accent: document.documentElement.style.getPropertyValue('--accent'),
+  });
+
+  it('after an app with a brand was open, the portal draws the default accent: no --primary, no --accent on the root', () => {
+    // What an app's shell leaves on the root while its page is up.
+    document.documentElement.style.setProperty('--primary', '347 77% 50%');
+    document.documentElement.style.setProperty('--accent', '38 92% 50%');
+    mountAt('/docs/crm/crm_intro', 1440, { openedBefore: 'crm' });
+    expect(screen.getByTestId('docs-portal-shell')).toBeInTheDocument();
+    expect(brand()).toEqual({ primary: '', accent: '' });
+  });
+
+  it('PHONE CONTROL — Home\'s docs frame sets no brand either', () => {
+    mountAt('/docs/crm/crm_intro', 390, { openedBefore: 'crm' });
+    expect(screen.getByTestId('home-layout')).toHaveAttribute('data-variant', 'docs');
+    expect(brand()).toEqual({ primary: '', accent: '' });
+  });
+});
+
+describe('the portal\'s standing banners and connection notice sit at the top of its content (objectstack#37197)', () => {
+  it('at 1440 px a standing banner is drawn once, in the box at the top of the content, not above the shell', () => {
+    mountAt('/docs/crm/crm_intro', 1440, { banner: true });
+    const banners = screen.getAllByTestId('impersonation-banner-stub');
+    expect(banners).toHaveLength(1);
+    const box = screen.getByTestId('docs-portal-banners');
+    expect(box).toContainElement(banners[0]);
+    expect(screen.getByTestId('shell-banner-slot')).not.toContainElement(banners[0]);
+    // The box comes before the page, at the top of the content area.
+    expect(box.compareDocumentPosition(screen.getByTestId('page')) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it('a lost connection is a notice in that box; a live one draws nothing', () => {
+    adapter.value = { getConnectionState: () => 'disconnected', onConnectionStateChange: () => () => {} };
+    mountAt('/docs/crm/crm_intro', 1440);
+    const notice = screen.getByTestId('console-connection-banner');
+    expect(screen.getByTestId('docs-portal-banners')).toContainElement(notice);
+    expect(notice).toHaveTextContent(/disconnected/i);
+    cleanup();
+    adapter.value = { getConnectionState: () => 'connected', onConnectionStateChange: () => () => {} };
+    mountAt('/docs/crm/crm_intro', 1440);
+    expect(screen.queryByTestId('console-connection-banner')).toBeNull();
+  });
+
+  it('PHONE CONTROL — on a phone the banner stays where the shell mounts it, drawn once, and no notice box is mounted', () => {
+    adapter.value = { getConnectionState: () => 'disconnected', onConnectionStateChange: () => () => {} };
+    mountAt('/docs/crm/crm_intro', 390, { banner: true });
+    const banners = screen.getAllByTestId('impersonation-banner-stub');
+    expect(banners).toHaveLength(1);
+    expect(screen.getByTestId('shell-banner-slot')).toContainElement(banners[0]);
+    expect(screen.queryByTestId('docs-portal-banners')).toBeNull();
+    expect(screen.queryByTestId('console-connection-banner')).toBeNull();
   });
 });

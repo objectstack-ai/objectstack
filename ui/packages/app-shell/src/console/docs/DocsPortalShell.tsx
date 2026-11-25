@@ -9,8 +9,12 @@
  * same `AppShell` and `UnifiedSidebar` an app's docs pages draw in
  * (objectstack#37150), so the two entry points to the same documents share one
  * frame (ruling A on objectstack#36107). No top bar; the sidebar's head carries
- * search and the bell, its foot the account, and the collapse button works as
- * on every app page. Two things differ from an app's docs pages:
+ * search (when there is an app to search) and the bell, its foot the account,
+ * and the collapse button works as on every app page. The standing banners
+ * (impersonation, read rate, storage) and the connection notice sit at the top
+ * of the content area, the content's width, as in an app (`ChromeBannerHost`,
+ * `ConnectionBanner`): drawn above the route they would span the sidebar's
+ * column and cover its head. Two things differ from an app's docs pages:
  *
  * - the head is a neutral 「Documentation」 menu (`SidebarDocsPortalMenu`)
  *   that lists the viewer's apps and 「Add app」, none of them checked, in
@@ -35,6 +39,7 @@
  */
 
 import React, { useEffect, useMemo, useState } from 'react';
+import type { ConnectionState } from '@object-ui/data-objectstack';
 import { useNavigate } from 'react-router-dom';
 import { AppShell } from '@object-ui/layout';
 import { useAuth } from '@object-ui/auth';
@@ -54,6 +59,8 @@ import { UnifiedSidebar } from '../../layout/UnifiedSidebar.js';
 import { SidebarDocsNavSlotProvider } from '../../layout/sidebarDocsNavSlot.js';
 import { ShellPageActionsScope, ShellSidebarExpandFallback } from '../../layout/ShellPageActions.js';
 import { primeConsoleSidebarOpen } from '../../layout/consoleSidebarRail.js';
+import { ChromeBannerHost } from '../../layout/chromeBannerHost.js';
+import { ConnectionBanner } from '../../layout/ConnectionBanner.js';
 import { HomeCommandPalette, HomeLayout } from '../home/HomeLayout.js';
 
 /** Home's `app`, `data` and `features`: none (module constants, as Home's). */
@@ -63,6 +70,26 @@ export interface DocsPortalShellProps {
   children: React.ReactNode;
   /** Signed-in user id, for the AI drawer (as `HomeLayout` takes it). */
   userId?: string;
+}
+
+/**
+ * The data adapter's connection state, as `AppContent` reads it for an app's
+ * layout: its current answer, then each change it reports. `undefined` with no
+ * adapter, or one that reports none.
+ */
+function useAdapterConnectionState(dataSource: unknown): ConnectionState | undefined {
+  const adapter = dataSource as {
+    getConnectionState?: () => ConnectionState;
+    onConnectionStateChange?: (listener: (event: { state: ConnectionState }) => void) => () => void;
+  } | null;
+  const [state, setState] = useState<ConnectionState | undefined>(() => adapter?.getConnectionState?.());
+  useEffect(() => {
+    if (!adapter?.onConnectionStateChange) return undefined;
+    const unsubscribe = adapter.onConnectionStateChange((event) => setState(event.state));
+    setState(adapter.getConnectionState?.());
+    return unsubscribe;
+  }, [adapter]);
+  return state;
 }
 
 /** Inside the sidebar provider: the window's width decides the sidebar's start state, as in an app. */
@@ -80,6 +107,7 @@ function DesktopDocsPortalShell({ children, userId }: DocsPortalShellProps) {
   const expressionUser = useMemo(() => buildExpressionUser(user), [user]);
   const { apps } = useMetadata();
   const dataSource = useAdapter();
+  const connectionState = useAdapterConnectionState(dataSource);
   const navigate = useNavigate();
   const { enabled: showChatbot } = useAiSurfaceEnabled();
   const chatDock = useConsoleChatDock({ enabled: showChatbot, userId: userId ?? user?.id });
@@ -114,6 +142,14 @@ function DesktopDocsPortalShell({ children, userId }: DocsPortalShellProps) {
             >
               <DocsPortalShellInner>
                 <ShellPageActionsScope sidebarExpand appless>
+                  {/* The standing banners and the connection notice, at the top
+                      of the content area and the content's width, as
+                      `ConsoleLayout` draws them; the box keeps its height in
+                      the inset's `lg` flex column. */}
+                  <div data-testid="docs-portal-banners" className="shrink-0">
+                    <ChromeBannerHost />
+                    <ConnectionBanner state={connectionState} />
+                  </div>
                   <div data-testid="docs-portal-shell" className="h-full lg:min-h-0">
                     <ShellSidebarExpandFallback />
                     {children}
