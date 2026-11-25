@@ -399,18 +399,24 @@ export interface ApprovalRequestRow {
      *   this request: a request of the same `flow_run_id` opened after this
      *   one, on any node (a later round of this request's own node too). A
      *   pending one wins over a decided one. Absent when no later request was
-     *   opened, so the approval stands at this request.
+     *   opened in that run, so the approval stands at this request as far as
+     *   the run's own requests tell. A request a `subflow` body or a `map`
+     *   item opens belongs to a child run (its own `flow_run_id`) and is not
+     *   among them; see `ended`.
      * - `status` — that latest request's status (this request's own when
      *   `step` is absent). `pending` with a `step`: the approval went on to
      *   that step and waits on its decision.
      * - `ended` — `true` only when the record's approval is known to have
      *   stopped: the request's run is a root run (not a `subflow` body or a
-     *   `map` item, whose end is not the approval's: the parent run goes on)
-     *   and has stopped for good. When `status` is not `pending`, it is then
-     *   the last decision the record's approval took. `false` means "not
-     *   known to have stopped": the run is still going, is a child run, was
-     *   opened before the platform recorded which runs are root runs, or
-     *   cannot be read.
+     *   `map` item, whose end is not the approval's: the parent run goes on),
+     *   its flow holds no `subflow` or `map` node anywhere, its regions
+     *   included (a child run started from it may have opened requests,
+     *   after this one too, that the run's own requests do not show), and
+     *   the run has stopped for good. When `status` is not `pending`, it is
+     *   then the last decision the record's approval took. `false` means
+     *   "not known to have stopped": the run is still going, is a child run,
+     *   runs a flow that can start a child run, was opened before the
+     *   platform recorded which runs are root runs, or cannot be read.
      *
      * Absent when nothing past this request is known: no later request was
      * opened and the approval is not known to have ended, or several later

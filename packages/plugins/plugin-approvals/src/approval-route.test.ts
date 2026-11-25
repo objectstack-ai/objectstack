@@ -7,11 +7,12 @@
  * outcomes that are not a pass, and each kind of branch the walk refuses to
  * decide. [#35863] Then where a decided request's approval stands now
  * (`routeOutcome`): what the run's later rows and its end say, and the cases
- * where they say nothing.
+ * where they say nothing; and which flows can start a child run, whose
+ * requests those rows never hold (`flowHostsChildRuns`).
  */
 
 import { describe, it, expect } from 'vitest';
-import { flowRoute, passedSteps, routeOutcome, stepsAhead, type RouteFlowGraph } from './approval-route.js';
+import { flowHostsChildRuns, flowRoute, passedSteps, routeOutcome, stepsAhead, type RouteFlowGraph } from './approval-route.js';
 
 const label = (id: string) => id.toUpperCase();
 const row = (flow_node_id: string, status: string, created_at: string, id = `${flow_node_id}@${created_at}`) =>
@@ -220,5 +221,29 @@ describe('[#35863] routeOutcome — where the record\'s approval stands after a 
     // A pending request is never handed an outcome, even with the run's rows and an ended run.
     const pending = flowRoute({ id: 'b@' + at(3), flow_node_id: 'b', created_at: at(3), status: 'pending' }, LINE, rows, label, true);
     expect(pending && 'outcome' in pending).toBe(false);
+  });
+});
+
+describe('[#35863] flowHostsChildRuns — a flow whose run may file requests under a child run', () => {
+  const node = (id: string, type: string, config?: Record<string, unknown>) => ({ id, type, label: id, ...(config ? { config } : {}) });
+  const region = (...nodes: unknown[]) => ({ nodes, edges: [] });
+
+  it('a subflow or a map node at the top level', () => {
+    expect(flowHostsChildRuns({ nodes: [node('s', 'start'), node('legal', 'subflow'), node('e', 'end')] })).toBe(true);
+    expect(flowHostsChildRuns({ nodes: [node('s', 'start'), node('each', 'map'), node('e', 'end')] })).toBe(true);
+  });
+
+  it('a subflow or a map node inside a container\'s region, at any depth', () => {
+    const inLoop = { nodes: [node('l', 'loop', { body: region(node('legal', 'subflow')) })] } as RouteFlowGraph;
+    const inBranch = { nodes: [node('p', 'parallel', { branches: [region(node('a', 'approval')), region(node('each', 'map'))] })] } as RouteFlowGraph;
+    const inCatch = { nodes: [node('t', 'try_catch', { try: region(node('a', 'approval')), catch: region(node('legal', 'subflow')) })] } as RouteFlowGraph;
+    const nested = { nodes: [node('l', 'loop', { body: region(node('t', 'try_catch', { try: region(node('legal', 'subflow')) })) })] } as RouteFlowGraph;
+    for (const flow of [inLoop, inBranch, inCatch, nested]) expect(flowHostsChildRuns(flow)).toBe(true);
+  });
+
+  it('no such node anywhere: approvals, gateways and in-run containers only', () => {
+    expect(flowHostsChildRuns({ nodes: [node('s', 'start'), node('a', 'approval'), node('d', 'decision'), node('e', 'end')] })).toBe(false);
+    expect(flowHostsChildRuns({ nodes: [node('l', 'loop', { body: region(node('a', 'approval')) })] } as RouteFlowGraph)).toBe(false);
+    expect(flowHostsChildRuns({})).toBe(false);
   });
 });

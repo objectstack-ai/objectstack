@@ -19,6 +19,7 @@
  * attaches the result (`ApprovalService.attachFlowRoute`).
  */
 
+import { collectFlowGraphs } from '@objectstack/spec/automation';
 import type { ApprovalRequestRow } from '@objectstack/spec/contracts';
 
 export type FlowRoute = NonNullable<ApprovalRequestRow['flow_route']>;
@@ -47,6 +48,33 @@ export type RouteStepLabel = (nodeId: string) => string;
  * approval may sit inside them where this walk cannot see it.
  */
 const OPAQUE_NODE_TYPES = new Set(['subflow', 'map', 'loop']);
+
+/**
+ * [#35863] Node types that start a CHILD run: a `subflow` body or a `map`
+ * item runs under its own run id, linked upward by `$parentRunId`. A request
+ * a child run opens is filed under that child's `flow_run_id`, so it is not
+ * among the run rows the route reads.
+ */
+const CHILD_RUN_NODE_TYPES = new Set(['subflow', 'map']);
+
+/**
+ * [#35863] Whether `flow` holds a node that starts a child run
+ * ({@link CHILD_RUN_NODE_TYPES}), anywhere: at the top level or inside a
+ * container's region (`loop` body, `parallel` branch, `try_catch`), every
+ * graph {@link collectFlowGraphs} walks.
+ *
+ * Read off the definition, not off the run's step log: a run's persisted step
+ * log is compacted to a bounded number of steps and may drop a body step, so
+ * "the run never ran one" cannot be proven from it. The definition can say
+ * "it never could". The caller uses it to refuse "ended": a run of such a flow
+ * may have opened requests in a child run that the run's own rows do not hold,
+ * so neither "the approval ended here" nor "the last decision was this one"
+ * can be known.
+ */
+export function flowHostsChildRuns(flow: RouteFlowGraph): boolean {
+  return collectFlowGraphs(flow as Parameters<typeof collectFlowGraphs>[0])
+    .some((graph) => graph.nodes.some((node) => CHILD_RUN_NODE_TYPES.has(String(node.type))));
+}
 
 /**
  * The approval steps `current`'s run passed before `current`, oldest first:
@@ -126,8 +154,10 @@ export function stepsAhead(
  * `runRows` is the run's own request rows, as for {@link passedSteps};
  * `runEnded` is whether the record's approval is KNOWN to have stopped: the
  * caller answers `true` only for a root run (never a `subflow` or `map`
- * child, whose end is not the approval's) that the run itself reports
- * stopped for good, and `false` for anything it cannot tell.
+ * child, whose end is not the approval's) whose flow starts no child run
+ * ({@link flowHostsChildRuns}: a child run's requests are not in `runRows`)
+ * and that the run itself reports stopped for good, and `false` for anything
+ * it cannot tell.
  */
 export function routeOutcome(
   current: { id: string; status?: string; created_at?: string },

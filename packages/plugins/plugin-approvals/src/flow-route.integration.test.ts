@@ -205,6 +205,24 @@ const HOSTED = {
   ],
 };
 
+/** [#35863] The manager in the root run, then the legal step in a child run, then the end. */
+const REVIEWED_THEN_LEGAL = {
+  name: 'contract_reviewed_then_legal', label: 'Contract Reviewed Then Legal', type: 'autolaunched',
+  nodes: [
+    { id: 'start', type: 'start', label: 'Start' },
+    step('manager_review', 'Manager', 'u_mgr'),
+    { id: 'legal', type: 'subflow', label: 'Legal subflow', config: { flowName: CHILD.name } },
+    { id: 'done', type: 'end', label: 'Done' },
+    { id: 'no', type: 'end', label: 'Rejected' },
+  ],
+  edges: [
+    { id: 'r1', source: 'start', target: 'manager_review' },
+    { id: 'r2', source: 'manager_review', target: 'legal', label: 'approve' },
+    { id: 'r3', source: 'manager_review', target: 'no', label: 'reject' },
+    { id: 'r4', source: 'legal', target: 'done' },
+  ],
+};
+
 /** What `flow_steps` serves for every `contract_approval` request: its trunk. */
 const CONTRACT_TRUNK = ['manager_review', 'legal_finance_joint', 'executive_signoff', 'gm_signoff'];
 
@@ -277,6 +295,7 @@ describe('[#26668] the approvals get serves the route a request takes, not the f
     automation.registerFlow(LINEAR.name, LINEAR as any);
     automation.registerFlow(CHILD.name, CHILD as any);
     automation.registerFlow(HOSTED.name, HOSTED as any);
+    automation.registerFlow(REVIEWED_THEN_LEGAL.name, REVIEWED_THEN_LEGAL as any);
   });
 
   afterAll(async () => {
@@ -390,9 +409,32 @@ describe('[#26668] the approvals get serves the route a request takes, not the f
     // Nothing later in the child run, and the child's end is not the approval's: no outcome.
     expect('outcome' in row.flow_route).toBe(false);
 
-    // The root run's own request, decided at its last step, does end the approval.
+    // The root run's own last request: the run completed, but its flow starts a child run, whose
+    // requests are not among this run's rows, so the approval is not known to have ended here.
     await approve(gm, 'u_gm');
-    expect((await get(gm)).flow_route.outcome).toEqual({ status: 'approved', ended: true });
+    expect((await automation.getRun(gm.flow_run_id))?.status, 'the root run itself has ended').toBe('completed');
+    expect('outcome' in (await get(gm)).flow_route).toBe(false);
+  });
+
+  it('[#35863] a later step in a child run: the root run\'s end is not served as "ended here" for the request before it', async () => {
+    const manager = await submit(REVIEWED_THEN_LEGAL.name, {});
+    expect(manager?.flow_node_id).toBe('manager_review');
+    const legal = await approve(manager, 'u_mgr');
+    expect(legal?.flow_node_id).toBe('legal_review');
+    expect(legal.flow_run_id, 'the legal step runs in a child run').not.toBe(manager.flow_run_id);
+
+    // Legal rejects; the child run ends and the root run walks on to its end.
+    await reject(legal, 'u_legal');
+    expect((await automation.getRun(manager.flow_run_id))?.status, 'the root run has ended').toBe('completed');
+
+    // The root run's rows hold only the manager's request. "The approval ended here, approved"
+    // would be wrong twice: it went on to legal, and legal's rejection was the last decision.
+    const row = await get(manager);
+    expect(row.status).toBe('approved');
+    expect(row.flow_route).toEqual({
+      steps: [{ id: 'manager_review', label: 'Manager', state: 'done' }],
+      ahead: 'decided',
+    });
   });
 
   it('[#35863] a request whose snapshot does not say its run is a root run is never served "ended"', async () => {

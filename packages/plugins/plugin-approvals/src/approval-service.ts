@@ -123,7 +123,7 @@ import {
   type ActingCaller,
 } from './approver-address.js';
 import { labelOrMachineName, requestDisplayLabels, slateLabelOf } from './display-labels.js';
-import { flowRoute, type RouteFlowGraph } from './approval-route.js';
+import { flowHostsChildRuns, flowRoute, type RouteFlowGraph } from './approval-route.js';
 import {
   ADMIN_RESCUE_NOTE_SNAPSHOT_KEY,
   adminRescueNoteOf,
@@ -11673,7 +11673,7 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
    * record's approval has ended. It serves that to every reader of THIS
    * request, including one who cannot read the later request: within the
    * request-visibility bound of ruling record 5299823744 (request content
-   * stays behind the read-visibility tier), as the seat ruled for this card,
+   * stays behind the read-visibility tier), as the seat ruled on PR #37148,
    * because it tells only where the same approval went. The later request's
    * id, approvers, comments and field values are never served here; a reader
    * gets those only through that request's own read gate.
@@ -11682,9 +11682,13 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
    * sweep's {@link TERMINAL_RUN_STATUSES}), and only for a request its
    * snapshot names a root run's (`__runRoot`, stamped at open): a `subflow`
    * body or a `map` item is a child run, and its end is not the end of the
-   * record's approval, since the parent run goes on. A request opened before
-   * the stamp, a child run's, or a run that cannot be read is never "ended":
-   * `ended: false` means "not known to have stopped".
+   * record's approval, since the parent run goes on. Nor for a root run whose
+   * flow starts a child run anywhere ({@link flowHostsChildRuns}): a request
+   * a child run opened, after this one included, is filed under the child's
+   * run id and is not among the rows read here, so neither "ended here" nor
+   * "the last decision" can be known. A request opened before the stamp, a
+   * child run's, a run of such a flow, or a run that cannot be read is never
+   * "ended": `ended: false` means "not known to have stopped".
    */
   private async attachFlowRoute(
     row: ApprovalRequestRow,
@@ -11712,7 +11716,8 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
       const label = (nodeId: string): string =>
         labels?.stepLabel(flowName, nodeId) ?? (nodesById.get(nodeId)?.label || stored.get(nodeId) || nodeId);
       const runRoot = parseJson<any>(raw?.node_config_json, undefined)?.__runRoot === true;
-      const ended = row.status !== 'pending' && runRoot && await this.runHasEnded(row.flow_run_id);
+      const ended = row.status !== 'pending' && runRoot && !flowHostsChildRuns(flow)
+        && await this.runHasEnded(row.flow_run_id);
       const route = flowRoute(row, flow, rows, label, ended);
       if (route) (row as any).flow_route = route;
     } catch { /* display-only — never fail the read */ }
