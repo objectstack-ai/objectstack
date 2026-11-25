@@ -384,11 +384,64 @@ export interface ApprovalRequestRow {
    *   yet. Steps past it are not listed, and the trunk is never listed in
    *   their place.
    * - `decided` — the request is decided, so nothing past it is walked. The
-   *   steps its run reached next are the later requests' own routes.
+   *   steps its run reached next are the later requests' own routes;
+   *   `outcome` says where the record's approval stands now.
    */
   flow_route?: {
     steps: Array<{ id: string; label: string; state: 'done' | 'current' | 'upcoming' }>;
     ahead: 'end' | 'undecided' | 'decided';
+    /**
+     * Where the record's approval stands after this request, on a decided
+     * request only (`ahead: 'decided'`), read off the request's flow run and
+     * never guessed:
+     *
+     * - `step` — the run's latest request, when that is a later one than
+     *   this request: a request of the same `flow_run_id` opened after this
+     *   one, on any node (a later round of this request's own node too). A
+     *   pending one wins over a decided one. Absent when no later request was
+     *   opened in that run, so the approval stands at this request as far as
+     *   the run's own requests tell. A request a `subflow` body or a `map`
+     *   item opens belongs to a child run (its own `flow_run_id`) and is not
+     *   among them; see `ended`.
+     * - `status` — that latest request's status (this request's own when
+     *   `step` is absent). `pending` with a `step`: the approval went on to
+     *   that step and waits on its decision.
+     * - `ended` — `true` only when the record's approval is known to have
+     *   stopped: the request's run is a root run (not a `subflow` body or a
+     *   `map` item, whose end is not the approval's: the parent run goes on),
+     *   the flow body the run ran holds no `subflow` or `map` node anywhere,
+     *   its regions included (a child run started from it may have opened
+     *   requests, after this one too, that the run's own requests do not
+     *   show), and the run has stopped for good. The body the run ran is
+     *   known only when the body armed now is the flow's newest registration
+     *   and was registered before the run started; a flow edited, rolled back
+     *   or re-registered since the run started is not judged by its current
+     *   body. When `status` is not `pending`, it is then the last decision the
+     *   record's approval took. `false` means "not known to have stopped":
+     *   the run is still going, is a child run, ran a body that can start a
+     *   child run, ran a body that is not known (its flow was registered
+     *   again since it started), was opened before the platform recorded
+     *   which runs are root runs, or cannot be read.
+     *
+     * Absent when nothing past this request is known: no later request was
+     * opened and the approval is not known to have ended, or several later
+     * requests are pending at once (parallel steps), which no single step
+     * answers. With a later request it is served even when the run cannot be
+     * read, with `ended: false`.
+     *
+     * Audience: every reader of this request, whether or not they can read
+     * the later request. It says only where the same approval went: the later
+     * step's node id and label, which the route already names for the steps
+     * it lists, and that request's status. It never carries the later
+     * request's id, its approvers, its comments or its field values; those
+     * stay behind that request's own read gate (the read-visibility tier of
+     * ruling record 5299823744).
+     */
+    outcome?: {
+      step?: { id: string; label: string };
+      status: ApprovalStatus;
+      ended: boolean;
+    };
   };
   /**
    * ADR-0044 revision round of this request on its (run, node): 1 (or absent)

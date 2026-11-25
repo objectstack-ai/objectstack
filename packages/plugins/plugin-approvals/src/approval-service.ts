@@ -123,7 +123,7 @@ import {
   type ActingCaller,
 } from './approver-address.js';
 import { labelOrMachineName, requestDisplayLabels, slateLabelOf } from './display-labels.js';
-import { flowRoute, type RouteFlowGraph } from './approval-route.js';
+import { flowHostsChildRuns, flowRoute, type RouteFlowGraph } from './approval-route.js';
 import {
   ADMIN_RESCUE_NOTE_SNAPSHOT_KEY,
   adminRescueNoteOf,
@@ -315,6 +315,15 @@ export interface ApprovalResumeSurface {
   getFlowSlot?(packageId: string | null, name: string): any | null;
   getRunFlow?(run: { flowName: string }): any | null;
   /**
+   * [#35863] A flow name's registrations, oldest first: each body and when it
+   * was registered. Read by {@link ApprovalService.attachFlowRoute} to tell
+   * whether a run ran the body armed now (`ranArmedBody`). ⚠️ Declares a
+   * method `AutomationEngine` ALREADY implements publicly
+   * (`getFlowVersionHistory`); it widens no engine surface. Optional: absent,
+   * no request is served "ended".
+   */
+  getFlowVersionHistory?(name: string): ReadonlyArray<{ version?: number; definition: unknown; createdAt: string }>;
+  /**
    * Terminally cancel a suspended run (ADR-0044). Used when a recall lands
    * during a revision window — the run is paused at the revise-window node,
    * which has no reject edge to resume down.
@@ -332,7 +341,7 @@ export interface ApprovalResumeSurface {
    * `null` — unknown run, evicted log, no durable store, no automation engine —
    * as "still alive".
    */
-  getRun?(runId: string): Promise<{ status?: string; flowName?: string } | null>;
+  getRun?(runId: string): Promise<{ status?: string; flowName?: string; startedAt?: string } | null>;
   /**
    * Whether a suspension still exists for `runId` — the pre-flight that keeps
    * a decision from being recorded against a run that can never advance
@@ -5143,6 +5152,16 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
        * the flow's key, the body whose origin {@link flowPackageOf} answers.
        */
       node?: unknown;
+      /**
+       * [#35863] Whether `runId` is a root run (`true`) or a child of another
+       * run, a `subflow` body or a `map` item (`false`), as the approval
+       * executor reads the run's context. Stamped on the config snapshot
+       * (`__runRoot`, precedent: `__round`) for {@link attachFlowRoute}: only
+       * a root run's end is the end of the record's approval. Absent (a
+       * caller that does not say) stamps nothing, which reads as "not known
+       * to be a root run".
+       */
+      runRoot?: boolean;
     },
     context: ExecutionContext,
   ): Promise<ApprovalRequestRow | ApprovalNodeAutoOutcome> {
@@ -5510,6 +5529,9 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
       : undefined;
     if (exclusionNote) configSnapshot[SUBMITTER_EXCLUSION_NOTE_SNAPSHOT_KEY] = exclusionNote;
     if (noApproverNote) configSnapshot[NO_APPROVER_NOTE_SNAPSHOT_KEY] = noApproverNote;
+    // [#35863] Root run or child run, as the executor said; nothing when it
+    // did not say ({@link attachFlowRoute} reads absence as "not known").
+    if (typeof input.runRoot === 'boolean') configSnapshot.__runRoot = input.runRoot;
     // ADR-0044 round numbering: rounds of a revise loop share the run — count
     // this (run, node)'s prior requests; the new one is round N+1. Stamped on
     // the snapshot (precedent: __flowLabel), so no schema migration.
@@ -11666,7 +11688,7 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
       const flow: any = await this.requestFlow(raw, flowName);
       if (!flow?.nodes?.length) return;
       const nodesById = new Map<string, any>(flow.nodes.map((n: any) => [n.id, n]));
-      await this.attachFlowRoute(row, flowName, flow, nodesById, labels);
+      await this.attachFlowRoute(row, flowName, flow, nodesById, labels, raw);
       const steps: Array<{ id: string; label: string }> = [];
       const seen = new Set<string>();
       let cur: any = flow.nodes.find((n: any) => n.type === 'start');
@@ -11706,6 +11728,34 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
    * A step is named as `flow_steps` names it ([#24863]): the reader's label,
    * else the node's authored label; a node no longer in the graph by the
    * label its request stored. Display-only and best-effort.
+   *
+   * [#35863] A decided request's route carries `outcome`, where the record's
+   * approval stands now, off the same system read. So that read now serves
+   * more than the step labels `flow_steps` serves: for the run's latest later
+   * request, its step (node id and label) and its status, and whether the
+   * record's approval has ended. It serves that to every reader of THIS
+   * request, including one who cannot read the later request: within the
+   * request-visibility bound of ruling record 5299823744 (request content
+   * stays behind the read-visibility tier), as the seat ruled on PR #37148,
+   * because it tells only where the same approval went. The later request's
+   * id, approvers, comments and field values are never served here; a reader
+   * gets those only through that request's own read gate.
+   *
+   * "Ended" is asked of the run itself ({@link runHasEnded}, the dead-run
+   * sweep's {@link TERMINAL_RUN_STATUSES}), and only for a request its
+   * snapshot names a root run's (`__runRoot`, stamped at open): a `subflow`
+   * body or a `map` item is a child run, and its end is not the end of the
+   * record's approval, since the parent run goes on. Nor for a root run whose
+   * flow starts a child run anywhere ({@link flowHostsChildRuns}): a request
+   * a child run opened, after this one included, is filed under the child's
+   * run id and is not among the rows read here, so neither "ended here" nor
+   * "the last decision" can be known. "Its flow" is the body the run ran,
+   * and the read holds only the body armed NOW, so "ended" is also refused
+   * unless the run provably ran that body ({@link ranArmedBody}): a flow
+   * edited after the run, to drop its `subflow` say, is not judged by the
+   * edit. A request opened before the stamp, a child run's, a run of such a
+   * flow, a run not known to have run the armed body, or a run that cannot be
+   * read is never "ended": `ended: false` means "not known to have stopped".
    */
   private async attachFlowRoute(
     row: ApprovalRequestRow,
@@ -11713,6 +11763,7 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
     flow: RouteFlowGraph,
     nodesById: Map<string, any>,
     labels: ReaderLabels | undefined,
+    raw: any,
   ): Promise<void> {
     try {
       if (!row.flow_run_id || !row.flow_node_id) return;
@@ -11731,9 +11782,55 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
       }
       const label = (nodeId: string): string =>
         labels?.stepLabel(flowName, nodeId) ?? (nodesById.get(nodeId)?.label || stored.get(nodeId) || nodeId);
-      const route = flowRoute(row, flow, rows, label);
+      const runRoot = parseJson<any>(raw?.node_config_json, undefined)?.__runRoot === true;
+      const ended = row.status !== 'pending' && runRoot && !flowHostsChildRuns(flow)
+        && await this.runHasEnded(row.flow_run_id, flowName, flow);
+      const route = flowRoute(row, flow, rows, label, ended);
       if (route) (row as any).flow_route = route;
     } catch { /* display-only — never fail the read */ }
+  }
+
+  /**
+   * [#35863] Whether the flow run `runId` has stopped for good, having run
+   * `flow`: its status is one of {@link TERMINAL_RUN_STATUSES} and
+   * {@link ranArmedBody} holds for it. `false` when there is no `getRun`, no
+   * such run, or a read throws: display-only, so an unreadable run is only
+   * ever "not known to have ended", never a failed read.
+   */
+  private async runHasEnded(runId: string, flowName: string, flow: unknown): Promise<boolean> {
+    if (typeof this.automation?.getRun !== 'function') return false;
+    try {
+      const run = await this.automation.getRun(runId);
+      const status = run?.status;
+      return !!status && TERMINAL_RUN_STATUSES.has(status) && this.ranArmedBody(run?.startedAt, flowName, flow);
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * [#35863] Whether a run that started at `startedAt` provably ran `flow`,
+   * the body of `flowName` armed now: `flow` is the engine's NEWEST
+   * registration of the name (`getFlowVersionHistory`, the very object), and
+   * was registered strictly before the run started. A run starts on the body
+   * armed at its start and resumes pinned to it, so with nothing registered
+   * since, that body is `flow`.
+   *
+   * Every other case is "not known", never a guess: a body registered after
+   * the run started (an edit, or the registration a restart makes), a body
+   * armed without being the newest registration (a rollback re-arms an older
+   * one), no history for the name, or no start time. The run's `flowVersion`
+   * is not the witness: it is the author's number and an edit need not change
+   * it.
+   */
+  private ranArmedBody(startedAt: unknown, flowName: string, flow: unknown): boolean {
+    if (typeof startedAt !== 'string' || typeof this.automation?.getFlowVersionHistory !== 'function') return false;
+    const history = this.automation.getFlowVersionHistory(flowName);
+    const newest = Array.isArray(history) && history.length > 0 ? history[history.length - 1] : undefined;
+    if (!newest || newest.definition !== flow) return false;
+    const registered = Date.parse(newest.createdAt);
+    const started = Date.parse(startedAt);
+    return Number.isFinite(registered) && Number.isFinite(started) && registered < started;
   }
 
   async listActions(requestId: string, context: ExecutionContext): Promise<ApprovalActionRow[]> {
