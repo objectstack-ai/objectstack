@@ -2396,6 +2396,7 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.studio.auto.nodeEnd': '结束',
   'engine.studio.auto.savedDraft': '自动化「{label}」已存为草稿',
   'engine.studio.auto.defaultOff': '默认停用 · 审阅后再启用',
+  'engine.studio.auto.heading': '自动化',
   'engine.studio.auto.deleteFlow': '删除流程',
   'engine.studio.auto.flowDeleted': '已删除流程「{item}」',
   // objectstack#28567 (ADR-0146 D4) — 流程的「新建类似」：克隆门以新的机器名与标签复制，
@@ -2460,6 +2461,8 @@ const STUDIO_ZH: Record<string, string> = {
   // objectstack#36742 — a new flow is published but born switched off: the create toast says so.
   'engine.studio.auto.createdOff': '已创建：{name}（已停用，启用后才会运行）',
   'engine.studio.auto.newTitle': '新建自动化',
+  'engine.studio.auto.none': '还没有自动化 — 点上方的「+」新建',
+  'engine.studio.auto.emptyMain': '这个软件包还没有自动化。',
   'engine.studio.auto.namePlaceholder': '名称(如:录用通知)',
   'engine.studio.auto.idPlaceholder': '标识符(如:offer_notice)',
   'engine.studio.auto.presets': '何时运行',
@@ -2473,6 +2476,12 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.studio.auto.emptyLine1': '在画布里点选一个节点,',
   'engine.studio.auto.emptyLine2': '它的配置会在这里显示。',
   'engine.studio.auto.designersMissing': '本次会话没有注册任何元数据设计器,因此无法在这里设计该流程。',
+  'engine.studio.auto.group.noObject': '无对象',
+  'engine.studio.auto.kind.record': '记录触发',
+  'engine.studio.auto.kind.scheduled': '定时',
+  'engine.studio.auto.kind.screen': '交互页面',
+  'engine.studio.auto.kind.autolaunched': '自动启动',
+  'engine.studio.auto.legend': '图例',
   // Access pillar
   'engine.studio.access.created': '权限集「{label}」已创建',
   'engine.studio.access.title': '权限矩阵',
@@ -3187,6 +3196,7 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.studio.org.name': '组织流程',
   'engine.studio.org.hint': '不属于任何软件包的流程',
   'engine.studio.org.description': '本组织自有、不属于任何软件包的流程,例如软件包流程的克隆副本。可直接编辑。',
+  'engine.studio.org.none': '没有不属于软件包的流程。要修改软件包中的流程，请打开它所在的软件包，使用“新建类似”。',
   'engine.studio.landing.envCatalog.name': '环境目录',
   'engine.studio.landing.envCatalog.description': '岗位、能力、权限集与共享规则，覆盖所有软件包。',
   // objectstack#34715 — the landing ordered by what the author came to do.

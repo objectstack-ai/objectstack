@@ -2672,6 +2672,7 @@ const STUDIO_EN: Record<string, string> = {
   'engine.studio.auto.nodeEnd': 'End',
   'engine.studio.auto.savedDraft': 'Automation “{label}” saved as draft',
   'engine.studio.auto.defaultOff': 'Off by default · review before enabling',
+  'engine.studio.auto.heading': 'Automations',
   'engine.studio.auto.deleteFlow': 'Delete flow',
   'engine.studio.auto.flowDeleted': 'Deleted flow "{item}"',
   // objectstack#28567 (ADR-0146 D4) — "New similar" on a flow: the clone door
@@ -2752,6 +2753,8 @@ const STUDIO_EN: Record<string, string> = {
   // objectstack#36742 — a new flow is published but born switched off: the create toast says so.
   'engine.studio.auto.createdOff': 'Created: {name} (switched off; it runs once you switch it on)',
   'engine.studio.auto.newTitle': 'New automation',
+  'engine.studio.auto.none': 'No automations yet — click “+” above to create one',
+  'engine.studio.auto.emptyMain': 'No automations in this package yet.',
   'engine.studio.auto.namePlaceholder': 'Name (e.g. Offer Notice)',
   'engine.studio.auto.idPlaceholder': 'Identifier (e.g. offer_notice)',
   // objectui#11861 — the New automation dialog's starting points (`flowPresets.ts`).
@@ -2767,6 +2770,14 @@ const STUDIO_EN: Record<string, string> = {
   'engine.studio.auto.emptyLine2': 'and its configuration appears here.',
   'engine.studio.auto.designersMissing':
     'No metadata designers are registered in this session, so this flow cannot be designed here.',
+  // objectui#12454 — the rail's groups and legend: a flow's trigger kind, and
+  // the trailing group of flows that name no object.
+  'engine.studio.auto.group.noObject': 'No object',
+  'engine.studio.auto.kind.record': 'Record-triggered',
+  'engine.studio.auto.kind.scheduled': 'Scheduled',
+  'engine.studio.auto.kind.screen': 'Screen',
+  'engine.studio.auto.kind.autolaunched': 'Autolaunched',
+  'engine.studio.auto.legend': 'Legend',
   // Access pillar
   'engine.studio.access.created': 'Permission set “{label}” created',
   'engine.studio.access.title': 'Permission matrix',
@@ -3608,6 +3619,8 @@ const STUDIO_EN: Record<string, string> = {
   'engine.studio.org.name': 'Organization flows',
   'engine.studio.org.hint': 'Flows that belong to no package',
   'engine.studio.org.description': 'The organization’s own flows that belong to no package, such as a clone of a packaged flow. They open editable.',
+  // ADR-0146 D11 — no link out: no Setup page copies a flow into this scope any more.
+  'engine.studio.org.none': 'No flows outside a package. To change a packaged flow, open its package and use New similar.',
   // objectstack#28561 — the "All metadata" area's cross-package leg: the
   // environment catalog, entered from the landing.
   'engine.studio.landing.envCatalog.name': 'Environment catalog',

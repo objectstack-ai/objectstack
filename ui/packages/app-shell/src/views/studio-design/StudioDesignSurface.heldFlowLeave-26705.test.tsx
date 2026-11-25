@@ -97,6 +97,7 @@ import { FlowPreview } from '../metadata-admin/previews/FlowPreview';
 import { FlowInspector } from '../metadata-admin/inspectors/FlowInspector';
 import { browserClick } from '../metadata-admin/previews/__tests__/browserClick';
 import { t } from '../metadata-admin/i18n';
+import { pressStudioSave } from './__tests__/studioSaveHarness';
 // The source under test reaches these dynamic imports (the command palette's
 // record preview, the drafts panel's lint, the code editor): their first load
 // is paid here, at collection, never inside a case's clock (`check:test-source-alias`).
@@ -276,4 +277,96 @@ describe('a held flow step guards every departure (objectstack#26705)', () => {
     await waitFor(() => expect(where()).toBe(`/studio/${PKG}/metadata/object`));
     expect(confirmSpy).not.toHaveBeenCalled();
   });
+});
+
+/** Edit the Start step's label from its Configuration aside: a plain edit, complete, so nothing is held. */
+async function editStartLabel(value: string): Promise<void> {
+  await waitFor(() => expect(document.querySelector('[data-node-id="start"] [role="button"]')).not.toBeNull(), { timeout: 8000 });
+  fireEvent.click(document.querySelector('[data-node-id="start"] [role="button"]') as HTMLElement);
+  const box = await within(screen.getByTestId('auto-config-aside')).findByLabelText('Label', undefined, { timeout: 8000 });
+  fireEvent.change(box, { target: { value } });
+  fireEvent.blur(box);
+  await waitFor(() => expect(document.querySelector('[data-node-id="start"]')).toHaveTextContent(value));
+  await screen.findByTestId('studio-save', undefined, { timeout: 8000 });
+  expect(screen.queryByTestId('studio-held'), 'a plain edit is unsaved, not held').toBeNull();
+}
+
+/** Every write the designer could send: the draft save and each publish. */
+const sent = () => [
+  ...mockClient.save.mock.calls,
+  ...mockClient.publish.mock.calls,
+  ...mockClient.publishDraft.mock.calls,
+  ...mockClient.publishPackageDrafts.mock.calls,
+];
+
+/** Past the retired autosave's 1.5 s debounce and a round trip: a write that was going to go has gone. */
+const pastTheOldAutosave = () => new Promise((r) => setTimeout(r, 2000));
+
+// objectstack#36511 — an unsaved edit that is NOT held (complete, waiting for
+// Save) is unsaved work too: × and ‹ › ask through the flow's save entry
+// (`dirty`), not through the hold. The held cases above never reach this
+// path, so it is pinned on its own.
+describe('an unsaved, not-held flow edit guards × and › (objectstack#36511)', () => {
+  it('× asks; Cancel keeps the edit, OK opens the list with nothing sent', async () => {
+    await openFlow();
+    await editStartLabel('Kick-off');
+
+    confirmSpy.mockReturnValueOnce(false);
+    fireEvent.click(screen.getByTestId('studio-detail-close'));
+    expect(confirmSpy).toHaveBeenCalledTimes(1);
+    expect(confirmSpy).toHaveBeenCalledWith(LEAVE_QUESTION);
+    expect(where()).toBe(`/studio/${PKG}/metadata/flow/approval`);
+    expect(document.querySelector('[data-node-id="start"]')).toHaveTextContent('Kick-off');
+    expect(screen.getByTestId('studio-save')).toBeInTheDocument();
+
+    confirmSpy.mockReturnValueOnce(true);
+    fireEvent.click(screen.getByTestId('studio-detail-close'));
+    expect(confirmSpy).toHaveBeenCalledTimes(2);
+    await waitFor(() => expect(where()).toBe(`/studio/${PKG}/metadata/flow`));
+    await pastTheOldAutosave();
+    expect(sent()).toEqual([]);
+    expect(reloadAsks()).toBe(false);
+  }, 30_000);
+
+  it('› asks; Cancel keeps the edit, OK opens the next flow with nothing sent', async () => {
+    await openFlow();
+    const next = await screen.findByTestId('studio-detail-next', undefined, { timeout: 8000 });
+    await waitFor(() => expect(next).toBeEnabled(), { timeout: 8000 });
+    await editStartLabel('Kick-off');
+
+    confirmSpy.mockReturnValueOnce(false);
+    fireEvent.click(screen.getByTestId('studio-detail-next'));
+    expect(confirmSpy).toHaveBeenCalledTimes(1);
+    expect(confirmSpy).toHaveBeenCalledWith(LEAVE_QUESTION);
+    expect(screen.getByTitle('API name: approval')).toBeInTheDocument();
+    expect(document.querySelector('[data-node-id="start"]')).toHaveTextContent('Kick-off');
+
+    confirmSpy.mockReturnValueOnce(true);
+    fireEvent.click(screen.getByTestId('studio-detail-next'));
+    expect(confirmSpy).toHaveBeenCalledTimes(2);
+    await screen.findByTitle('API name: reminder', undefined, { timeout: 8000 });
+    expect(where()).toBe(`/studio/${PKG}/metadata/flow/reminder`);
+    // The next flow opens as the server holds it: the edit stayed behind.
+    await waitFor(() => expect(document.querySelector('[data-node-id="start"]')).toHaveTextContent('Start'), { timeout: 8000 });
+    expect(document.querySelector('[data-node-id="start"]')).not.toHaveTextContent('Kick-off');
+    await pastTheOldAutosave();
+    expect(sent()).toEqual([]);
+  }, 30_000);
+
+  // CONTROL: the same edit, saved, is no longer unsaved — neither × nor › asks.
+  it('after Save, neither › nor × asks', async () => {
+    await openFlow();
+    const next = await screen.findByTestId('studio-detail-next', undefined, { timeout: 8000 });
+    await waitFor(() => expect(next).toBeEnabled(), { timeout: 8000 });
+    await editStartLabel('Kick-off');
+    await pressStudioSave();
+    await waitFor(() => expect(mockClient.save).toHaveBeenCalledTimes(1), { timeout: 8000 });
+    await waitFor(() => expect(screen.queryByTestId('studio-save')).toBeNull(), { timeout: 8000 });
+
+    fireEvent.click(screen.getByTestId('studio-detail-next'));
+    await screen.findByTitle('API name: reminder', undefined, { timeout: 8000 });
+    fireEvent.click(screen.getByTestId('studio-detail-close'));
+    await waitFor(() => expect(where()).toBe(`/studio/${PKG}/metadata/flow`));
+    expect(confirmSpy).not.toHaveBeenCalled();
+  }, 30_000);
 });
