@@ -30,9 +30,11 @@
  *    existing, empty table.
  * 3. The constraint is enforced: an insert that leaves a `storage.notNull`
  *    column NULL is refused by the database, as it is locally.
- * 4. A populated table: SQLite refuses `ADD COLUMN … NOT NULL` without a
- *    non-NULL DEFAULT, on both faces alike. The remote refusal names the
- *    statement, and no nullable column is slipped in instead.
+ * 4. KNOWN ASYMMETRY — a populated table, no DEFAULT: the local face adds the
+ *    column nullable and its differ reports `tighten_not_null` (#37258); this
+ *    face still sends `ADD COLUMN … NOT NULL` and SQLite refuses it, naming the
+ *    statement, with no nullable column slipped in. The remote face's own fix
+ *    is a separate card; when it lands, align the remote half with the local.
  * 5. RECORDED ASYMMETRY — a `storage.notNull` field that also declares a
  *    literal `defaultValue`, added to a populated table: the local face emits
  *    the DEFAULT and accepts; this face emits no declared DEFAULT and refuses.
@@ -198,13 +200,15 @@ describe('ADD COLUMN on a populated table', () => {
   }
 
   it.each<Door>(['syncSchemasBatch', 'syncSchema'])(
-    'with no DEFAULT: refused through %s, as locally, naming the statement, with no nullable column slipped in',
+    'KNOWN ASYMMETRY with no DEFAULT: local adds it nullable and reports tighten_not_null; refused through %s, naming the statement',
     async (door) => {
+      // Known asymmetry (#37258): the local face adds the column nullable and
+      // reports the drift; the remote face still refuses (its fix is its own card).
       const local = await populated('local');
-      await expect(local.driver.syncSchema('rows_t', WITH_ADDED(ADDED))).rejects.toThrow(
-        /Cannot add a NOT NULL column with default value NULL/,
-      );
-      expect(await notNullFlags(local.file, 'rows_t')).not.toHaveProperty('added');
+      await local.driver.syncSchema('rows_t', WITH_ADDED(ADDED));
+      expect((await notNullFlags(local.file, 'rows_t')).added).toBe(0);
+      const drift = await local.driver.detectManagedDrift([WITH_ADDED(ADDED)]);
+      expect(drift.map((e) => `${e.op.type}:${e.column}`)).toContain('tighten_not_null:added');
 
       const remote = await populated('remote');
       const refusal = SYNC[door](remote.driver, [WITH_ADDED(ADDED)]);

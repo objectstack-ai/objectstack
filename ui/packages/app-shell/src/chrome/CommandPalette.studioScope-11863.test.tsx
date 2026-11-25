@@ -30,6 +30,9 @@
  * metadata cache is a hand-rolled `MetadataCtx` value that counts its reads.
  */
 
+// Paid at collection, not inside a case's clock (check:test-source-alias).
+import '@objectstack/lint';
+import '@object-ui/plugin-detail';
 import * as React from 'react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, fireEvent, waitFor, cleanup, screen } from '@testing-library/react';
@@ -44,6 +47,9 @@ vi.mock('@object-ui/auth', async (importOriginal) => ({
 
 import { CommandPalette } from './CommandPalette';
 import { CommandPaletteProvider } from '../context/CommandPaletteProvider';
+// The source under test reaches a dynamic `import('@object-ui/plugin-detail')`: pay its load at
+// collection, never inside a case's clocked window (`check:test-source-alias`).
+import '@object-ui/plugin-detail';
 
 /** `GET /api/v1/packages`: two app packages and a kernel one, in both served shapes. */
 const PACKAGES_PAYLOAD = {
@@ -106,7 +112,7 @@ let fetchMock: ReturnType<typeof vi.fn>;
 beforeEach(() => {
   fetchMock = vi.fn(async (url: string) => {
     if (String(url).endsWith('/api/v1/packages')) {
-      return { ok: true, status: 200, json: async () => PACKAGES_PAYLOAD };
+      return { headers: new Headers(), ok: true, status: 200, json: async () => PACKAGES_PAYLOAD };
     }
     throw new Error(`unexpected request: ${url}`);
   });
@@ -200,7 +206,7 @@ describe('the palette in the `studio` scope lists the Studio, not an app (object
     mountStudio();
     await studioListed();
     pick('studio-object Account ');
-    await waitFor(() => expect(locationNow()).toBe('/studio/com.acme.crm/data?surface=object%3Acrm_account'));
+    await waitFor(() => expect(locationNow()).toBe('/studio/com.acme.crm/metadata/object/crm_account'));
   });
 
   it("opens a packaged flow in its package's Automations pillar, on that flow", async () => {

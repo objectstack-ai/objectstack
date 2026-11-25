@@ -12,7 +12,7 @@
  * | `_sync_external_id` | the row's key in the source, as text ({@link encodeSyncExternalId}) |
  * | `_sync_pulled_at` | when this write was made |
  * | `_sync_run_id` | the `sys_sync_run` row of this pull; not written when no ledger keeps the run |
- * | `_sync_deleted_at` | nothing yet: D3's mark, stamped by the delete marking when it lands |
+ * | `_sync_deleted_at` | not here: D3's mark, stamped and cleared by the delete marking (`./sync-delete-mark.ts`) |
  *
  * Both pulls (the connector source and the datasource source) stamp through
  * {@link stampSyncProvenance}, after the mapping has projected the rows and
@@ -77,9 +77,12 @@ function spellKeyValue(value: unknown): string | undefined {
  * - One field: its value spelled as text (a string trimmed, a number, bigint
  *   or boolean by `String`, a date as ISO 8601, anything else as JSON).
  * - Several fields: a JSON array of those spellings, in `upsertKey` order. The
- *   order is the author's declaration, so it is stable for as long as the
- *   mapping is; it is never sorted, since two fields' values are not
- *   interchangeable.
+ *   order is the author's declaration, so the spelling is stable for as long
+ *   as the declaration is, and it is never sorted. The consequence of that
+ *   choice: reordering `upsertKey` re-keys every row the next run writes, and
+ *   rows that run does not read keep the old spelling until a complete read
+ *   restamps them. The delete marking compares keys within one run only, so it
+ *   never compares a key across a reordered `upsertKey`.
  * - Any blank key value: `undefined`. Such a row is not written (the pulls
  *   skip a blank match key and count it refused), so no key is stamped.
  *

@@ -60,6 +60,12 @@ import { emitPublishReceipt } from '../assistant/assistantBus.js';
 import { matchAppBySegment } from '../utils/appRoute.js';
 import { CommitTimeline } from './CommitTimeline.js';
 import { usePreviewDrafts } from './PreviewModeContext.js';
+import { createAuthenticatedFetch } from '@object-ui/auth';
+
+/** The console's authenticated fetch: the stored bearer token beside the session cookie. */
+function authFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+  return createAuthenticatedFetch()(input, init);
+}
 
 export function UnpublishedAppBar() {
   const preview = usePreviewDrafts();
@@ -113,7 +119,7 @@ export function UnpublishedAppBar() {
       // published from the served copy.
       const stored = adapter?.getAuthoredItem ? await adapter.getAuthoredItem('app', appKey) : null;
       if (!stored) throw new Error(`app/${appKey}`);
-      const res = await fetch(`/api/v1/meta/app/${encodeURIComponent(appKey)}`, {
+      const res = await authFetch(`/api/v1/meta/app/${encodeURIComponent(appKey)}`, {
         method: 'PUT',
         credentials: 'include',
         headers: { 'Content-Type': 'application/json', Accept: 'application/json' },

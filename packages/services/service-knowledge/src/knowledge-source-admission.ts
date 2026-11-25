@@ -128,7 +128,7 @@ export interface ObjectAdmission {
 }
 
 /** Field names an object declares (record or array form); `undefined` when the schema carries none. */
-function declaredFields(schema: unknown): Array<[string, unknown]> | undefined {
+export function declaredFields(schema: unknown): Array<[string, unknown]> | undefined {
   const fields = (schema as { fields?: unknown } | null | undefined)?.fields;
   if (Array.isArray(fields)) {
     return fields

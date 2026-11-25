@@ -1829,6 +1829,12 @@ const fr = {
       noCategoryAxis: "Axe de catégories requis — un graphique lié à un objet n’en invente pas. Déclarez l’un des suivants :",
     },
   },
+  // objectstack#36906 — the × of an app page opened from a Studio list.
+  studioReturn: {
+    close: 'Retour à Studio',
+    closeLabel: 'Fermer et revenir à la liste de Studio',
+    leaveConfirm: 'Quitter sans enregistrer ? Les modifications non enregistrées seront perdues.',
+  },
   dashboard: {
     // objectui#7063 — the DEFAULT empty state every dashboard widget renders
     // when its query SUCCEEDED and returned nothing. It replaced the terse
@@ -4220,6 +4226,8 @@ const fr = {
       settings: "Paramètres du rapport",
       pendingDraft: "Ce rapport a des modifications non publiées. Publiez-les ou supprimez-les ci-dessus, puis enregistrez.",
       nameTaken: "Tous les identifiants dérivés de ce nom sont déjà pris. Donnez un autre nom au rapport, puis enregistrez.",
+      // objectstack#36906 — a report made from Studio's report list that could not be saved in the app's package.
+      savedOutsideApp: "Ce rapport a été enregistré hors du package de l’application, car le package de personnalisation de l’application ne peut pas être utilisé ici. La liste Studio ne l’affiche donc pas.",
       adminOnlyTitle: "Seuls les administrateurs de l’espace de travail peuvent créer des rapports",
       adminOnly: "Un rapport est partagé avec tout l’espace de travail ; c’est donc un administrateur qui le crée.",
       designModeOnTitle: "Terminez d’abord la conception de la mise en page",
@@ -5095,6 +5103,10 @@ const fr = {
     actComment: 'Commentaire',
     actSystemNote: 'Note du système',
     stepProgress: 'Étapes d\'approbation',
+    outcomeWaiting: 'Passée à {{step}}, en attente d\'une décision',
+    outcomeNow: 'Passée à {{step}} : {{decision}}',
+    outcomeEndedAt: 'Passée à {{step}}, puis terminée : {{decision}}',
+    outcomeEndedHere: 'L\'approbation s\'est terminée ici',
     prevRequest: 'Précédente',
     nextRequest: 'Suivante',
     positionOf: 'Demande {{index}} sur {{total}}',

@@ -1854,6 +1854,8 @@ const zhHant = {
       settings: '報表設定',
       pendingDraft: '這張報表有一份還沒釋出的修改。先在上方釋出或丟棄它，再儲存。',
       nameTaken: '由這個名稱生成的標識都已被佔用。請給報表換個名稱再儲存。',
+      // objectstack#36906 — a report made from Studio's report list that could not be saved in the app's package.
+      savedOutsideApp: '這份報表沒有存進應用的包：此處無法使用應用的定製包，所以 Studio 列表裡看不到它。',
       adminOnlyTitle: '只有系統管理員能搭建報表',
       adminOnly: '報表對工作區裡所有人生效，所以由系統管理員搭建。',
       designModeOnTitle: '請先完成佈局設計',
@@ -1902,6 +1904,12 @@ const zhHant = {
         grouping: '選一個分組欄位',
       },
     },
+  },
+  // objectstack#36906 — the × of an app page opened from a Studio list.
+  studioReturn: {
+    close: '返回 Studio',
+    closeLabel: '關閉並返回 Studio 列表',
+    leaveConfirm: '不儲存就離開嗎？未儲存的修改將會丟失。',
   },
   dashboard: {
     total: '總計',
@@ -5251,6 +5259,10 @@ const zhHant = {
     actComment: '評論',
     actSystemNote: '系統說明',
     stepProgress: '審批步驟',
+    outcomeWaiting: '已流轉到「{{step}}」，等待審批',
+    outcomeNow: '已流轉到「{{step}}」：{{decision}}',
+    outcomeEndedAt: '已流轉到「{{step}}」，審批結束：{{decision}}',
+    outcomeEndedHere: '審批在此結束',
     prevRequest: '上一條',
     nextRequest: '下一條',
     positionOf: '第 {{index}} / {{total}} 條請求',

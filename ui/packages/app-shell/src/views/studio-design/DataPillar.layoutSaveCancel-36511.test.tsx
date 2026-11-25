@@ -88,6 +88,7 @@ import { StudioSaveHarness, pressStudioCancel, pressStudioSave } from './__tests
 import { t } from '../metadata-admin/i18n';
 // The source reaches a dynamic import of it: its first load is paid at collection (`check:test-source-alias`).
 import '@objectstack/lint';
+import '@object-ui/plugin-detail';
 
 const dataSource = createEmptyDataSource();
 
@@ -108,7 +109,7 @@ async function mountOnLayout(): Promise<void> {
   render(
     <MemoryRouter initialEntries={[`/studio/${PACKAGE}/data`]}>
       <StudioSaveHarness>
-        <DataPillar packageId={PACKAGE} />
+        <DataPillar objectName="showcase_task" packageId={PACKAGE} />
       </StudioSaveHarness>
     </MemoryRouter>,
   );

@@ -2005,6 +2005,12 @@ const ar = {
       noCategoryAxis: "محور فئات الرسم البياني مطلوب — الرسم البياني المرتبط بكائن لا يخترع محورًا. أعلن أحد التالي:",
     },
   },
+  // objectstack#36906 — the × of an app page opened from a Studio list.
+  studioReturn: {
+    close: 'العودة إلى Studio',
+    closeLabel: 'إغلاق والعودة إلى قائمة Studio',
+    leaveConfirm: 'هل تريد المغادرة دون حفظ؟ ستفقد التغييرات غير المحفوظة.',
+  },
   dashboard: {
     // objectui#7063 — the DEFAULT empty state every dashboard widget renders
     // when its query SUCCEEDED and returned nothing. It replaced the terse
@@ -4492,6 +4498,8 @@ const ar = {
       settings: "إعدادات التقرير",
       pendingDraft: "يحتوي هذا التقرير على تغييرات غير منشورة. انشرها أو تجاهلها في الأعلى، ثم احفظ.",
       nameTaken: "كل المعرّفات المشتقة من هذا الاسم مستخدمة بالفعل. أعطِ التقرير اسمًا آخر ثم احفظ.",
+      // objectstack#36906 — a report made from Studio's report list that could not be saved in the app's package.
+      savedOutsideApp: "حُفظ هذا التقرير خارج حزمة التطبيق، لأنه لا يمكن استخدام حزمة تخصيص التطبيق هنا، لذا لا تعرضه قائمة Studio.",
       adminOnlyTitle: "يمكن لمسؤولي مساحة العمل فقط إنشاء التقارير",
       adminOnly: "التقرير مشترك مع الجميع في مساحة العمل، لذا ينشئه مسؤول.",
       designModeOnTitle: "أنهِ تصميم التخطيط أولاً",
@@ -5427,6 +5435,10 @@ const ar = {
     actComment: 'تعليق',
     actSystemNote: 'ملاحظة من النظام',
     stepProgress: 'خطوات الموافقة',
+    outcomeWaiting: 'انتقلت إلى {{step}}، بانتظار قرار',
+    outcomeNow: 'انتقلت إلى {{step}}: {{decision}}',
+    outcomeEndedAt: 'انتقلت إلى {{step}} ثم انتهت: {{decision}}',
+    outcomeEndedHere: 'انتهت الموافقة هنا',
     prevRequest: 'السابق',
     nextRequest: 'التالي',
     positionOf: 'الطلب {{index}} من {{total}}',

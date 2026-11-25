@@ -26,6 +26,9 @@
  * what is under test, so it is reduced to the button that fires `onPublish`.
  */
 
+// Paid at collection, not inside a case's clock (check:test-source-alias).
+import '@objectstack/lint';
+import '@object-ui/plugin-detail';
 import '@testing-library/jest-dom/vitest';
 import * as React from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -174,6 +177,7 @@ async function publishFromTheWorkbench(): Promise<void> {
   render(
     <MemoryRouter initialEntries={[`/studio/${PACKAGE_ID}/interfaces`]}>
       <Routes>
+        <Route path="/studio/:packageId/metadata/*" element={<StudioDesignSurface area="metadata" />} />
         <Route path="/studio/:packageId/:tab" element={<StudioDesignSurface />} />
       </Routes>
     </MemoryRouter>,

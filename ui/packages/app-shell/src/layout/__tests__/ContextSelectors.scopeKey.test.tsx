@@ -147,7 +147,7 @@ beforeEach(() => {
   vi.stubGlobal(
     'fetch',
     vi.fn(async (url: string) => ({
-      ok: true,
+      headers: new Headers(), ok: true,
       json: async () => ROWS[String(url)] ?? [],
     })),
   );

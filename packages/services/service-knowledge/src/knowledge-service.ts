@@ -1,5 +1,6 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
+import { createHash } from 'node:crypto';
 import type {
   IDataEngine,
   IKnowledgeAdapter,
@@ -20,7 +21,13 @@ import {
   collectInternalWriteResponseFields,
   registryObjectPackageDisabled,
 } from '@objectstack/core';
+import type { TenancyPosture } from '@objectstack/spec/security';
 import { createKnowledgeTools, type KnowledgeTools } from './knowledge-tools.js';
+import {
+  documentOrganizationId,
+  searchOrganizationIds,
+  type KnowledgeTenancyPostureResolver,
+} from './knowledge-organization-scope.js';
 import {
   admitObject,
   admitSourceFields,
@@ -64,6 +71,17 @@ export interface KnowledgeServiceOptions {
    * service.
    */
   resolveSecurity?: () => KnowledgeFieldSecurity | undefined;
+  /**
+   * The deployment's effective tenancy posture (ADR-0105 D1), read at each
+   * assembly and each search (ADR-0161 K8, item 9): under `group` and
+   * `isolated` a document assembled from a record carries the record's
+   * organization, and a search hands the adapter the caller's organizations
+   * (`knowledge-organization-scope.ts`). Answers `undefined` where no
+   * `tenancy` service is composed, and throws where one is registered but
+   * cannot be read. `KnowledgeServicePlugin` always wires it; omitted, the
+   * service reads as a `single`-posture deployment.
+   */
+  resolveTenancyPosture?: KnowledgeTenancyPostureResolver;
   /**
    * Default top-K when callers don't specify. The adapter may cap
    * further; the service does not enforce an upper bound itself.
@@ -160,7 +178,26 @@ export class KnowledgeService implements IKnowledgeService {
   async indexDocument(sourceId: string, doc: KnowledgeDocument): Promise<void> {
     const source = this.requireSource(sourceId);
     const adapter = this.getAdapter(source.adapter);
-    await adapter.upsert([doc], { source, reason: 'manual' });
+    // `docHash` is the service's to compute (ADR-0161 K8, item 2). A caller's
+    // own value is refused, never replaced in silence: a door that accepted it
+    // and stored something else would answer as if it had been honoured.
+    if (doc.docHash !== undefined) {
+      throw new Error(
+        `[knowledge] indexDocument refused document '${doc.id}': docHash is computed by the knowledge service ` +
+          'from the content, title and metadata; omit it.',
+      );
+    }
+    // `organizationId` is the service's too (ADR-0161 K8, item 9): it is the
+    // organization of the record a document was assembled from. A caller's own
+    // value would place a document inside an organization's ranking scope on
+    // the caller's word alone.
+    if (doc.organizationId !== undefined) {
+      throw new Error(
+        `[knowledge] indexDocument refused document '${doc.id}': organizationId is set by the knowledge service ` +
+          "from the record a document is assembled from; omit it.",
+      );
+    }
+    await adapter.upsert([{ ...doc, docHash: computeDocHash(doc) }], { source, reason: 'manual' });
   }
 
   async deleteDocument(sourceId: string, documentId: string): Promise<void> {
@@ -211,9 +248,29 @@ export class KnowledgeService implements IKnowledgeService {
    * Record events do NOT wait for a walk: the record sync has its own
    * per-document chain. A row updated or deleted between a page's read and
    * that page's upsert is written back from the older read — a deleted row's
-   * document then stays in the index as a ghost, because a reindex removes no
-   * documents (documents of rows that no longer exist or no longer match wait
-   * for the index purge, #37096).
+   * document then stays in the index as a ghost until the next complete walk
+   * purges it (below), or the row's next event repairs it.
+   *
+   * ## Skip and purge (ADR-0161 K8, items 1–2)
+   *
+   * When the adapter implements `listDocuments`, the walk first lists what the
+   * adapter holds for the source (document id → stored `docHash`). A row whose
+   * document's computed `docHash` equals the listed one is not upserted again
+   * (`skipped`); every other document is (`indexed`).
+   *
+   * After a COMPLETE walk — no `limit`, no `dryRun`, every page done — the
+   * documents listed before the walk that the walk did not see are purge
+   * candidates, handed to {@link purgeDocuments}: each is confirmed by the
+   * same re-read the event sync makes (`where` AND id) and deleted only when
+   * that re-read finds no row, so a row created or restored meanwhile keeps its
+   * document. A document written during the walk was not listed, and so is
+   * never a candidate. `purged` counts the deletions.
+   *
+   * `purged` is `null` when no purge ran: a walk with a `limit` or a `dryRun`,
+   * a failed walk, a source with `refresh.onRecordChange: false` (an external
+   * indexer owns its index), or an adapter without `listDocuments` — which
+   * also skips nothing, the walk otherwise as before. A listing that fails
+   * skips and purges nothing either; the result's `message` says so.
    */
   async reindexSource(
     sourceId: string,
@@ -228,6 +285,8 @@ export class KnowledgeService implements IKnowledgeService {
         ok: false,
         discovered: 0,
         indexed: 0,
+        skipped: 0,
+        purged: null,
         message:
           `Reindex for kind=${source.source.kind} is not handled by KnowledgeService. ` +
           `Trigger ingestion through the adapter (${source.adapter}) directly.`,
@@ -240,6 +299,8 @@ export class KnowledgeService implements IKnowledgeService {
         ok: false,
         discovered: 0,
         indexed: 0,
+        skipped: 0,
+        purged: null,
         message: 'KnowledgeService has no IDataEngine bound; cannot walk object source.',
       };
     }
@@ -267,6 +328,8 @@ export class KnowledgeService implements IKnowledgeService {
         object,
         discovered: 0,
         indexed: 0,
+        skipped: 0,
+        purged: null,
         message: `reindex of source '${source.id}' refused: limit must be a non-negative finite number, got ${String(opts.limit)}.`,
       };
     }
@@ -281,13 +344,45 @@ export class KnowledgeService implements IKnowledgeService {
         object,
         discovered: cap === undefined ? total : Math.min(total, cap),
         indexed: 0,
+        skipped: 0,
+        purged: null,
         message: 'dryRun=true; no documents pushed.',
       };
     }
 
+    // The posture decides whether each document carries its record's
+    // organization (ADR-0161 K8, item 9); read once per walk. A posture that
+    // cannot be read stops the walk before any write: a document assembled
+    // without its organization would drop out of every walled search.
+    let posture: TenancyPosture | undefined;
+    try {
+      posture = await this.readTenancyPosture();
+    } catch (err) {
+      return {
+        ok: false,
+        object,
+        discovered: 0,
+        indexed: 0,
+        skipped: 0,
+        purged: null,
+        message: `reindex of source '${source.id}' refused: the tenancy posture could not be read (${errorText(err)}); nothing was written.`,
+      };
+    }
+
+    // What the adapter holds before the walk: the skip's hashes, and the
+    // purge's candidates once the walk is complete.
+    const listing = await listAdapterDocuments(source, adapter);
+    const listed = listing.ok ? listing.documents : undefined;
+    const listingNote = listing.ok || listing.reason === undefined
+      ? undefined
+      : `the adapter's document listing failed (${listing.reason}), so no document was skipped and none was purged.`;
+    if (listingNote) this.options.logger?.warn?.(`[knowledge] reindex of source '${source.id}': ${listingNote}`);
+
     const schema = this.schemaFor(object);
+    const seen = new Set<string>();
     let discovered = 0;
     let indexed = 0;
+    let skipped = 0;
     let cursor: string | number | undefined;
     for (let page = 1; ; page++) {
       const want = cap === undefined ? REINDEX_PAGE_SIZE : Math.min(REINDEX_PAGE_SIZE, cap - discovered);
@@ -298,6 +393,8 @@ export class KnowledgeService implements IKnowledgeService {
         object,
         discovered,
         indexed,
+        skipped,
+        purged: null,
         message: `reindex of source '${source.id}' stopped at page ${page}${after}: ${what}`,
       });
 
@@ -322,21 +419,39 @@ export class KnowledgeService implements IKnowledgeService {
       // Only an EMPTY page ends the walk. A short page does not: `find` does
       // not promise `min(limit, remaining)` rows — an `afterFind` hook may drop
       // rows from a page — so rows after a short page can still exist.
-      if (!Array.isArray(rows) || rows.length === 0) break;
+      // A read that answers no list is a failed read, never the end of the
+      // source: read as an empty page it would make a complete walk of nothing
+      // and hand every listed document to the purge.
+      if (!Array.isArray(rows)) {
+        return stopped(`the read answered ${describeValue(rows)} instead of a list of rows.`);
+      }
+      if (rows.length === 0) break;
 
       let docs: KnowledgeDocument[];
       try {
-        docs = rows.map((row) => recordToDocument(source, objSource, row, schema));
+        docs = rows.map((row) => recordToDocument(source, objSource, row, schema, posture));
       } catch (err) {
         return stopped(`building the page's documents failed: ${errorText(err)}`);
       }
-      try {
-        await adapter.upsert(docs, { source, reason: 'reindex' });
-      } catch (err) {
-        return stopped(`the adapter upsert failed: ${errorText(err)}`);
+      // A document whose computed hash equals the one the adapter listed for it
+      // is unchanged: it is not written again.
+      const changed = listed === undefined
+        ? docs
+        : docs.filter((doc) => {
+          const stored = listed.get(doc.id);
+          return stored === undefined || stored !== doc.docHash;
+        });
+      if (changed.length > 0) {
+        try {
+          await adapter.upsert(changed, { source, reason: 'reindex' });
+        } catch (err) {
+          return stopped(`the adapter upsert failed: ${errorText(err)}`);
+        }
       }
+      for (const doc of docs) seen.add(doc.id);
       discovered += rows.length;
-      indexed += docs.length;
+      indexed += changed.length;
+      skipped += docs.length - changed.length;
 
       // The next page continues after this page's last id. A last row with no
       // id, or one that did not move past the cursor (an engine that ignored
@@ -350,7 +465,43 @@ export class KnowledgeService implements IKnowledgeService {
       }
       cursor = lastId;
     }
-    return { ok: true, object, discovered, indexed };
+
+    // The purge runs only after a COMPLETE walk: a `limit` walk saw part of
+    // the source, so "not seen" there means nothing (a failed page returned
+    // above; `dryRun` returned before the walk).
+    const done: KnowledgeReindexResult = { ok: true, object, discovered, indexed, skipped, purged: null };
+    if (listingNote) return { ...done, message: listingNote };
+    if (listed === undefined || cap !== undefined || (source.refresh?.onRecordChange ?? true) === false) return done;
+
+    const candidates = [...listed.keys()].filter((id) => !seen.has(id));
+    const purge = await purgeDocuments({
+      source,
+      objSource,
+      adapter,
+      engine,
+      candidates,
+      serialize: (documentId, task) => chainAfter(this.recordSyncTails, documentId, task),
+    });
+    if (purge.failure !== undefined) {
+      return {
+        ...done,
+        ok: false,
+        purged: purge.purged,
+        message:
+          `reindex of source '${source.id}' walked every page, but its purge stopped after ${purge.purged} ` +
+          `deletion(s): ${purge.failure}`,
+      };
+    }
+    if (purge.foreign > 0) {
+      return {
+        ...done,
+        purged: purge.purged,
+        message:
+          `${purge.foreign} listed document(s) carry an id that is not one this source derives from a record ` +
+          `('${source.id}:' and the record id); they were kept, because no row can confirm them.`,
+      };
+    }
+    return { ...done, purged: purge.purged };
   }
 
   // ── The `search_knowledge` AI tool (ADR-0149 D2) ──────────────────
@@ -373,7 +524,7 @@ export class KnowledgeService implements IKnowledgeService {
     if (sources.length === 0) return [];
 
     const rawHits: KnowledgeHit[] = [];
-    for (const source of sources) {
+    for (const { source, organizationIds } of sources) {
       const adapter = this.adapters.get(source.adapter);
       if (!adapter) {
         this.options.logger?.warn?.(
@@ -386,6 +537,7 @@ export class KnowledgeService implements IKnowledgeService {
           source,
           topK,
           filter: opts.filter,
+          ...(organizationIds === undefined ? {} : { organizationIds }),
         });
         // A hit is served as the source it was searched for. One whose
         // `sourceId` names another source (an adapter answering from a store
@@ -459,8 +611,7 @@ export class KnowledgeService implements IKnowledgeService {
    * the committed row — which may still match — is missing from the index.
    * The row's next event or a `reindexSource` repairs a row that still exists;
    * a document built from an INSERT that rolled back has no row left to
-   * repair it from, and a reindex removes no documents — it stays until the
-   * index purge (#37096).
+   * repair it from — it stays until a complete `reindexSource` purges it.
    * `data.record.restored` is published after the restore's own unit has
    * committed. Bulk events (`data.records.*`) carry a count, not records, and
    * are not synced here — see the plugin's event bridge.
@@ -501,7 +652,7 @@ export class KnowledgeService implements IKnowledgeService {
           this.reportWhereUnenforceable(source);
           return;
         }
-        const doc = recordToDocument(source, objSource, payload, this.schemaFor(object));
+        const doc = recordToDocument(source, objSource, payload, this.schemaFor(object), await this.readTenancyPosture());
         await adapter.upsert([doc], { source, reason: 'event-sync' });
         return;
       }
@@ -512,15 +663,9 @@ export class KnowledgeService implements IKnowledgeService {
         );
         return;
       }
-      const byId = { id: recordId };
-      const rows = await engine.find(
-        object,
-        { where: objSource.where !== undefined ? { $and: [objSource.where, byId] } : byId, limit: 1 },
-        { context: systemContext() },
-      );
-      const row = Array.isArray(rows) ? (rows[0] as Record<string, unknown> | undefined) : undefined;
+      const row = await rereadRow(engine, objSource, recordId);
       if (row) {
-        const doc = recordToDocument(source, objSource, row, this.schemaFor(object));
+        const doc = recordToDocument(source, objSource, row, this.schemaFor(object), await this.readTenancyPosture());
         await adapter.upsert([doc], { source, reason: 'event-sync' });
       } else {
         await adapter.delete([documentIdFor(source.id, String(recordId))], { source, reason: 'event-sync' });
@@ -630,15 +775,20 @@ export class KnowledgeService implements IKnowledgeService {
    * hit with no `sourceRecordId`). Fails CLOSED: a gate that throws refuses
    * every source over that object, reported once at `error`. The objects'
    * admissions are asked concurrently.
+   *
+   * Each admitted source carries the organizations its search hands the
+   * adapter ({@link scopeByOrganization}, ADR-0161 K8, item 9). The system
+   * context's bypass above covers that scope too: the system identity's
+   * search is handed no organization filter.
    */
   private async admitSources(
     sources: KnowledgeSource[],
     ctx: ExecutionContext | undefined,
-  ): Promise<KnowledgeSource[]> {
-    if (ctx?.isSystem) return sources;
+  ): Promise<Array<{ source: KnowledgeSource; organizationIds?: string[] }>> {
+    if (ctx?.isSystem) return sources.map((source) => ({ source }));
     const engine = this.options.dataEngine;
     if (!ctx || !engine) {
-      const kept = sources.filter((source) => source.source.kind !== 'object');
+      const kept = sources.filter((source) => source.source.kind !== 'object').map((source) => ({ source }));
       if (kept.length < sources.length) {
         this.options.logger?.warn?.(
           !ctx
@@ -693,7 +843,7 @@ export class KnowledgeService implements IKnowledgeService {
         );
       }
     }
-    return out;
+    return this.scopeByOrganization(out, ctx);
   }
 
   /** A gate lookup threw: every source over `object` is refused (fail-closed), reported once at `error`, `warn` as the fallback. */
@@ -703,6 +853,54 @@ export class KnowledgeService implements IKnowledgeService {
       `(${err.message}); no source over it is searched for this caller (fail-closed).`;
     if (this.options.logger?.error) this.options.logger.error(report);
     else this.options.logger?.warn?.(report);
+  }
+
+  /** The deployment's effective tenancy posture, or `undefined` when no resolver is wired. Throws what the resolver throws. */
+  private async readTenancyPosture(): Promise<TenancyPosture | undefined> {
+    return this.options.resolveTenancyPosture ? await this.options.resolveTenancyPosture() : undefined;
+  }
+
+  /**
+   * [ADR-0161 K8, item 9] Pair each source {@link admitSources} admitted for
+   * a caller that is NOT the system identity (admission's own bypass answers
+   * that one before this runs) with the organizations its search hands the
+   * adapter (`searchOrganizationIds`): computed here, from the caller's
+   * execution context and the deployment's posture, never from anything the
+   * caller passes. A `file` / `http` source gets none — its documents carry no
+   * organization, and the adapter owns its ACL.
+   *
+   * The posture is read once per search, and only when an `object` source is
+   * admitted. A posture that cannot be read leaves every `object` source
+   * unsearched for this call (fail-closed: whether a wall stands is unknown),
+   * reported at `error`, `warn` as the fallback.
+   */
+  private async scopeByOrganization(
+    sources: KnowledgeSource[],
+    ctx: ExecutionContext,
+  ): Promise<Array<{ source: KnowledgeSource; organizationIds?: string[] }>> {
+    if (!sources.some((source) => source.source.kind === 'object')) {
+      return sources.map((source) => ({ source }));
+    }
+    let posture: TenancyPosture | undefined;
+    try {
+      posture = await this.readTenancyPosture();
+    } catch (err) {
+      const report =
+        `[knowledge] the tenancy posture could not be read (${errorText(err)}); no object source is searched ` +
+        'for this caller (fail-closed).';
+      if (this.options.logger?.error) this.options.logger.error(report);
+      else this.options.logger?.warn?.(report);
+      return sources.filter((source) => source.source.kind !== 'object').map((source) => ({ source }));
+    }
+    return sources.map((source) => {
+      if (source.source.kind !== 'object') return { source };
+      const organizationIds = searchOrganizationIds(
+        ctx,
+        posture,
+        this.schemaFor((source.source as ObjectKnowledgeSource).object),
+      );
+      return organizationIds === undefined ? { source } : { source, organizationIds };
+    });
   }
 
   private sourcesForObject(object: string): KnowledgeSource[] {
@@ -844,11 +1042,220 @@ export function objectSourcesFor(sources: KnowledgeSource[], object: string): Kn
 
 /**
  * The RLS-bypassing system context of the service's own reads: the reindex
- * walk, and the event sync's re-read, which decide index MEMBERSHIP (`where`),
- * never what a caller may read — search re-checks every hit as the caller.
+ * walk, the event sync's re-read and the purge's, which decide index
+ * MEMBERSHIP (`where`), never what a caller may read — search re-checks every
+ * hit as the caller.
  */
 function systemContext(): ExecutionContext {
   return { positions: [], permissions: [], systemPermissions: [], isSystem: true };
+}
+
+/**
+ * THE membership re-read: the row `recordId` names, read under the system
+ * context and the source's `where` — `find(object, { where: where AND id,
+ * limit: 1 })` — so the database answers whether the row belongs in the
+ * index, never an event payload or an earlier read. `undefined` when no row
+ * matches (none exists, or it does not match `where`). Throws what `find`
+ * throws, and throws when `find` answers no list: "no row" is a verdict the
+ * purge deletes on, so a malformed answer is never read as one.
+ *
+ * One definition for both of its readers, the event sync
+ * ({@link KnowledgeService.handleRecordUpsert}) and the purge
+ * ({@link purgeDocuments}): they decide the same question, and a second copy
+ * is how they would drift into answering it differently.
+ */
+async function rereadRow(
+  engine: IDataEngine,
+  objSource: ObjectKnowledgeSource,
+  recordId: string | number,
+): Promise<Record<string, unknown> | undefined> {
+  const byId = { id: recordId };
+  const rows = await engine.find(
+    objSource.object,
+    { where: objSource.where !== undefined ? { $and: [objSource.where, byId] } : byId, limit: 1 },
+    { context: systemContext() },
+  );
+  if (!Array.isArray(rows)) {
+    throw new Error(`the re-read of record '${String(recordId)}' answered ${describeValue(rows)} instead of a list of rows`);
+  }
+  return rows[0] as Record<string, unknown> | undefined;
+}
+
+/**
+ * Entries one `listDocuments` call asks for. A memory bound per call, not a
+ * contract limit: the adapter may answer fewer.
+ */
+export const LIST_DOCUMENTS_PAGE_SIZE = 500;
+
+/** What {@link listAdapterDocuments} learned: every listed id → its stored hash, or why there is no listing. */
+type AdapterListing =
+  | { ok: true; documents: Map<string, string | undefined> }
+  /** `reason` is absent when the adapter has no `listDocuments`; present when the listing failed. */
+  | { ok: false; reason?: string };
+
+/**
+ * Read every page of the adapter's `listDocuments` for `source`. Never throws:
+ * an adapter without the method answers `{ ok: false }` with no reason, and a
+ * listing that throws or answers a malformed page or a cursor it already gave
+ * (a listing that would never end) answers `{ ok: false, reason }`.
+ */
+async function listAdapterDocuments(source: KnowledgeSource, adapter: IKnowledgeAdapter): Promise<AdapterListing> {
+  if (typeof adapter.listDocuments !== 'function') return { ok: false };
+  const documents = new Map<string, string | undefined>();
+  const cursors = new Set<string>();
+  let cursor: string | undefined;
+  try {
+    for (;;) {
+      const page = await adapter.listDocuments(
+        { source, reason: 'reindex' },
+        cursor === undefined ? { limit: LIST_DOCUMENTS_PAGE_SIZE } : { cursor, limit: LIST_DOCUMENTS_PAGE_SIZE },
+      );
+      if (!page || !Array.isArray(page.documents)) return { ok: false, reason: 'a page carried no documents list' };
+      for (const entry of page.documents) {
+        if (typeof entry?.documentId !== 'string') return { ok: false, reason: 'an entry carried no documentId' };
+        documents.set(entry.documentId, typeof entry.docHash === 'string' ? entry.docHash : undefined);
+      }
+      if (page.nextCursor === undefined) return { ok: true, documents };
+      if (cursors.has(page.nextCursor)) {
+        return { ok: false, reason: `the cursor '${page.nextCursor}' came back twice, so the listing would never end` };
+      }
+      cursors.add(page.nextCursor);
+      cursor = page.nextCursor;
+    }
+  } catch (err) {
+    return { ok: false, reason: errorText(err) };
+  }
+}
+
+/** Input of {@link purgeDocuments}. */
+export interface PurgeDocumentsInput {
+  source: KnowledgeSource;
+  objSource: ObjectKnowledgeSource;
+  adapter: IKnowledgeAdapter;
+  engine: IDataEngine;
+  /** Document ids believed stale: listed by the adapter, not produced from a current row. */
+  candidates: Iterable<string>;
+  /**
+   * Runs one candidate's confirm-and-delete after every earlier sync of that
+   * document has finished, answering the task's own outcome — the service
+   * passes its per-document record-sync chain, so an event sync of the same
+   * row can never land between the purge's re-read and its delete.
+   */
+  serialize: <T>(documentId: string, task: () => Promise<T>) => Promise<T>;
+  /** Diagnostics tag on the adapter's `delete`. @default 'reindex' */
+  reason?: string;
+}
+
+/** Outcome of {@link purgeDocuments}. */
+export interface PurgeDocumentsOutcome {
+  /** Candidates deleted. */
+  purged: number;
+  /** Candidates whose row the re-read found: kept. */
+  kept: number;
+  /** Candidates whose id this source does not derive from a record id: kept, nothing can confirm them. */
+  foreign: number;
+  /** Why the purge stopped early (a re-read or a delete that threw); absent when it went through every candidate. */
+  failure?: string;
+}
+
+/**
+ * The index purge (ADR-0161 K8, item 1): delete the candidates whose row is
+ * gone. Each candidate is confirmed by {@link rereadRow} — the event sync's
+ * own re-read, `where` AND id under the system context — and deleted only
+ * when that finds no row, so a document whose row was created, restored or
+ * came back into `where` since the candidates were computed is kept. Stops at
+ * the first re-read or delete that throws (a re-read that answers no list
+ * included), counting what it did before.
+ *
+ * KNOWN LIMIT — numeric record ids. The record id is recovered from the
+ * document id as text, and the re-read asks for that text. A driver that does
+ * not equate `'5'` with `5` (driver-mongodb, driver-memory) does not find a
+ * row stored under a caller-supplied NUMERIC id, so if such a row's document
+ * is a candidate while the row exists (it was restored, or came back into
+ * `where`, after the walk read past it), the document is deleted. The row is
+ * untouched; its document returns at the row's next event or the next complete
+ * reindex. Asking again by the number is not done: on driver-sql the number
+ * is bound against the text `id` column, which MySQL compares numerically
+ * (`'05'` matches `5`) and SQL Server and Oracle reject outright, and the
+ * object schema does not say which ids are numeric. Platform-minted ids are
+ * text on every driver, so the limit needs a caller-supplied numeric id.
+ *
+ * The caller decides when a purge may run at all (a complete reindex walk;
+ * the scheduled reconcile reuses this function) and computes the candidates.
+ */
+export async function purgeDocuments(input: PurgeDocumentsInput): Promise<PurgeDocumentsOutcome> {
+  const { source, objSource, adapter, engine } = input;
+  const prefix = `${source.id}:`;
+  const outcome: PurgeDocumentsOutcome = { purged: 0, kept: 0, foreign: 0 };
+  for (const documentId of input.candidates) {
+    const recordId = documentId.startsWith(prefix) ? documentId.slice(prefix.length) : '';
+    if (recordId === '') {
+      outcome.foreign++;
+      continue;
+    }
+    try {
+      const deleted = await input.serialize(documentId, async () => {
+        if (await rereadRow(engine, objSource, recordId)) return false;
+        await adapter.delete([documentId], { source, reason: input.reason ?? 'reindex' });
+        return true;
+      });
+      if (deleted) outcome.purged++;
+      else outcome.kept++;
+    } catch (err) {
+      outcome.failure = `document '${documentId}': ${errorText(err)}`;
+      return outcome;
+    }
+  }
+  return outcome;
+}
+
+/**
+ * The version of the {@link computeDocHash} recipe, the hash's prefix. Bump it
+ * when what the hash covers or how it serializes changes: every stored hash
+ * then reads as changed, and the next complete reindex writes every document
+ * once.
+ *
+ * Not bumped for `organizationId` (ADR-0161 K8, item 9): the organization
+ * enters the hashed body only when the document carries one, so a document
+ * without one hashes as it did before, and only the documents that gained an
+ * organization read as changed — exactly the ones a complete reindex must
+ * write again for a walled search to rank them.
+ */
+export const DOC_HASH_VERSION = 'v1';
+
+/**
+ * A document's `docHash` (ADR-0161 K8, item 2): SHA-256 over its content,
+ * title and metadata — and its organization, when it carries one (item 9) —
+ * serialized with object keys in a stable order, behind
+ * the {@link DOC_HASH_VERSION} prefix. The same assembled document gives the
+ * same hash on every machine, whatever order its metadata keys were built in.
+ */
+export function computeDocHash(doc: Pick<KnowledgeDocument, 'content' | 'title' | 'metadata' | 'organizationId'>): string {
+  const body = stableJson({
+    content: doc.content,
+    title: doc.title ?? null,
+    metadata: doc.metadata ?? {},
+    ...(doc.organizationId === undefined ? {} : { organizationId: doc.organizationId }),
+  });
+  return `${DOC_HASH_VERSION}:${createHash('sha256').update(body).digest('hex')}`;
+}
+
+/** `JSON.stringify` with every plain object's keys sorted, and a bigint as its decimal text. */
+function stableJson(value: unknown): string {
+  return JSON.stringify(value, (_key, v: unknown) => {
+    if (typeof v === 'bigint') return v.toString();
+    if (v !== null && typeof v === 'object' && !Array.isArray(v) && Object.getPrototypeOf(v) === Object.prototype) {
+      const sorted: Record<string, unknown> = {};
+      for (const k of Object.keys(v as Record<string, unknown>).sort()) sorted[k] = (v as Record<string, unknown>)[k];
+      return sorted;
+    }
+    return v;
+  });
+}
+
+/** How a non-list answer is named in a refusal: `null`, `undefined`, or its `typeof`. */
+function describeValue(value: unknown): string {
+  return value === null ? 'null' : value === undefined ? 'undefined' : `a value of type ${typeof value}`;
 }
 
 /** A thrown value's text: an `Error`'s message, anything else as a string. */
@@ -879,12 +1286,19 @@ export function documentIdFor(sourceId: string, recordId: string): string {
  * served to every reader the source admits, and a mask placeholder is no
  * content. Without a schema nothing is withheld here (the engine's event body
  * and read path still apply their own projection upstream).
+ *
+ * `posture` (the deployment's effective tenancy posture) decides the
+ * document's `organizationId` (ADR-0161 K8, item 9): the record's
+ * `organization_id` under `group` and `isolated`, none under `single` or with
+ * no posture — `documentOrganizationId`. The organization enters `docHash`
+ * only when the document carries one.
  */
 export function recordToDocument(
   source: KnowledgeSource,
   objSource: ObjectKnowledgeSource,
   record: Record<string, unknown>,
   schema?: unknown,
+  posture?: TenancyPosture,
 ): KnowledgeDocument {
   const withheld = new Set<string>([
     ...collectCredentialWriteResponseFields(schema),
@@ -909,7 +1323,7 @@ export function recordToDocument(
     if (withheld.has(field)) continue;
     if (record[field] !== undefined) metadata[field] = record[field];
   }
-  return {
+  const doc: KnowledgeDocument = {
     id: documentIdFor(source.id, recordId || `unknown-${Date.now()}`),
     sourceId: source.id,
     sourceRecordId: recordId || undefined,
@@ -917,4 +1331,8 @@ export function recordToDocument(
     title: typeof record.title === 'string' && !withheld.has('title') ? record.title : undefined,
     metadata,
   };
+  const organizationId = documentOrganizationId(record, posture);
+  if (organizationId !== undefined) doc.organizationId = organizationId;
+  doc.docHash = computeDocHash(doc);
+  return doc;
 }

@@ -237,9 +237,11 @@ beside the package, or beside another copy of it, under names of its own. Send
 
 The copy is renamed by the same rules as duplicating a package:
 
-- **Every object takes the new namespace.** `crm_lead` copies as `acme_lead`,
-  and an object whose name lacks the package's prefix takes the new one in
-  front (`ticket` copies as `acme_ticket`).
+- **Every object takes the new namespace.** `crm_lead` copies as `acme_lead`.
+  In a package that declares no `namespace`, an object whose name lacks the
+  prefix derived from the package id takes the new one in front (`ticket`
+  copies as `acme_ticket`). In a package that declares one, such an object is
+  refused (see the table below).
 - **What names an object follows it.** A lookup's `reference`, a view's
   `object`, a permission set's `objects` keys and the object part of its
   `fields` keys, a translation's object keys, a form action's view target.
@@ -266,8 +268,9 @@ refusal is answered before the base exists, so nothing is installed:
 | The rename | The answer |
 |:---|:---|
 | A `targetNamespace` the namespace rule refuses, or a shared one | `400 INVALID_REQUEST`, naming `targetNamespace` |
-| An object whose copy name another object's copy takes (`ticket` beside `crm_ticket`) | `400 INVALID_REQUEST`, naming the object and the rename that clears it |
-| A package that declares no `namespace`, with two or more objects whose names all begin with the same first word, not the namespace derived from the package id (`demoasset_asset` and `demoasset_site` in `com.acme.asset-lifecycle`, which derives `asset_lifecycle`; `purchase_order` and `purchase_item` too) | `400 INVALID_REQUEST`, naming each object, the derived namespace and the common prefix; declaring `namespace` on the package clears it |
+| An object whose copy name another object's copy takes (`ticket` beside `crm_ticket`, in a package that declares no `namespace` and whose id derives `crm`) | `400 INVALID_REQUEST`, naming the object and the rename that clears it |
+| A package that declares no `namespace`, where no object carries the namespace derived from the package id and two or more object names begin with the same first word, whatever other objects stand beside them (`demoasset_asset` and `demoasset_site`, with or without `site`, in `com.acme.asset-lifecycle`, which derives `asset_lifecycle`; `purchase_order` and `purchase_item` too) | `400 INVALID_REQUEST`, naming each object of the group, the derived namespace and the shared prefix; declaring `namespace` on the package and naming every object under it clears it. A package with a single object keeps the rename. |
+| A package that declares a `namespace` some of its object names do not carry (`ticket` or `demoasset_asset` in a package that declares `crm`) | `400 INVALID_REQUEST`, naming each such object and the declared namespace; the install without `targetNamespace` refuses the same names (`422 NAMESPACE_PREFIX`) |
 | A copy name that is not a legal item name, longer than an object's table name may be (63 characters), or longer than an item name may be (255) | `400 INVALID_REQUEST`, naming each item |
 | A renamed key that meets a key the item already holds (a permission set granting both `crm_lead` and `acme_lead`) | `400 INVALID_REQUEST`, naming the item and both keys |
 | A capability whose copy name another capability of the package declares (`crm.approve` beside `acme.approve`) | `400 INVALID_REQUEST`, naming the capability |

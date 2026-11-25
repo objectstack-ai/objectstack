@@ -119,7 +119,7 @@ import '@objectstack/lint';
 // record preview's `lazy()` detail entry: its first load is paid here too.
 import '@object-ui/plugin-detail';
 
-const answer = (body: unknown) => ({ ok: true, status: 200, json: async () => body });
+const answer = (body: unknown) => ({ headers: new Headers(), ok: true, status: 200, json: async () => body });
 
 /** The package list as the server serves it: one writable app package and one kernel package. */
 function servePackages() {
@@ -295,13 +295,15 @@ describe('⌘K on the builder (objectstack#36900)', () => {
 
   it("on a package's pillar, Ctrl+K opens the palette with the menu's entries, and a pick opens through the surface", async () => {
     servePackages();
-    renderAt(`/studio/${PACKAGE_ID}/data`);
+    // objectstack#36904 — the Data pillar is retired (`/data` lands on the
+    // object list); the Automations pillar is a pillar page still.
+    renderAt(`/studio/${PACKAGE_ID}/automations`);
     await waitFor(() => menu().getByTestId('studio-menu-entry-type:flow'));
     expect(overlay()).toBeNull();
 
     fireEvent.keyDown(document, { key: 'k', ctrlKey: true });
     await waitFor(() => expect(overlay()).not.toBeNull());
-    expect(where()).toBe(`/studio/${PACKAGE_ID}/data?palette=1`);
+    expect(where()).toBe(`/studio/${PACKAGE_ID}/automations?palette=1`);
     await waitFor(() => expect(paletteItem('studio-entry type:flow')).not.toBeNull());
     expect(paletteItem('studio-entry orgFlows')).not.toBeNull();
 

@@ -79,6 +79,7 @@ vi.mock('../../preview/DraftChangesPanel', () => ({
 
 import { toast } from 'sonner';
 import '@objectstack/lint';
+import '@object-ui/plugin-detail';
 import { StudioDesignSurface } from './StudioDesignSurface';
 import { addFieldFromFormToolbar } from './__tests__/dataPillarAddField';
 import { createEmptyDataSource } from './__tests__/emptyDataSource';
@@ -130,8 +131,9 @@ const PUBLISH = new RegExp(`^${t('engine.studio.publish', 'en')}$`);
 
 async function mountAndEdit(): Promise<HTMLElement> {
   render(
-    <MemoryRouter initialEntries={[`/studio/${PACKAGE_ID}/data`]}>
+    <MemoryRouter initialEntries={[`/studio/${PACKAGE_ID}/metadata/object/a_task`]}>
       <Routes>
+        <Route path="/studio/:packageId/metadata/*" element={<StudioDesignSurface area="metadata" />} />
         <Route path="/studio/:packageId/:tab" element={<StudioDesignSurface />} />
       </Routes>
     </MemoryRouter>,

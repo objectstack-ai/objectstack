@@ -75,8 +75,9 @@ describe('an item opens through the one address builder (#36895)', () => {
     for (const type of Object.keys(STUDIO_ITEM_PILLAR)) {
       expect(studioPaletteItemAddress(PKG, { type, name: 'x', packageId: PAIR })).toBe(studioItemPath(PKG, type, 'x'));
     }
+    // objectstack#36904 — an object opens its designer on its own address, scoped to its owner.
     expect(studioPaletteItemAddress(PKG, { type: 'object', name: 'crm_account', packageId: PKG })).toBe(
-      '/studio/com.acme.crm/data?surface=object%3Acrm_account',
+      '/studio/com.acme.crm/metadata/object/crm_account?package=com.acme.crm',
     );
   });
 

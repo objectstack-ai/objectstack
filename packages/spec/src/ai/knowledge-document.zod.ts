@@ -48,6 +48,34 @@ export const KnowledgeDocumentSchema = lazySchema(() => z.object({
    * `object` sources is handled by re-querying via the data engine.
    */
   permissions: z.array(z.string()).optional(),
+  /**
+   * The organization the document belongs to (ADR-0161 K8, item 9). Set by the
+   * knowledge service when it assembles a document from a record: the
+   * record's `organization_id`, under a walled tenancy posture (`group` or
+   * `isolated`, ADR-0105 D1). Absent for `file` / `http` sources, under the
+   * `single` posture, and for a record that carries no organization; a
+   * caller-supplied value is refused by `indexDocument`. Stored by the adapter
+   * and read by its search: when the search is handed
+   * `AdapterSearchOptions.organizationIds`, only documents whose organization
+   * is in that set are ranked, so a document without one is not. An adapter
+   * that stores `docHash` stores `organizationId` from the same version on;
+   * otherwise, once it starts reading this field, a complete reindex skips its
+   * documents and a walled search never ranks them.
+   */
+  organizationId: z.string().optional()
+    .describe('Organization of the record the document was assembled from; set by the knowledge service under a walled tenancy posture'),
+  /**
+   * A hash of the assembled document — its content, title and metadata, and its
+   * `organizationId` when it has one, in a stable key order, behind a version
+   * prefix (ADR-0161 K8, item 2). Set by
+   * the knowledge service on every document it hands an adapter; a
+   * caller-supplied value is refused by `indexDocument`. Stored by the adapter
+   * and returned as stored by `listDocuments`; an unchanged hash lets a
+   * complete reindex skip writing the document again. Adapters never compute
+   * or alter it.
+   */
+  docHash: z.string().optional()
+    .describe('Service-computed hash of the assembled document (content, title, metadata, and organizationId when set); stored and returned as stored by the adapter'),
 }));
 
 /**

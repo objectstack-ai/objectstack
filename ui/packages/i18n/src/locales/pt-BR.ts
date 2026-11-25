@@ -1828,6 +1828,12 @@ const pt = {
       noCategoryAxis: "Eixo de categorias do gráfico obrigatório — um gráfico vinculado a um objeto não o inventa. Declare um destes:",
     },
   },
+  // objectstack#36906 — the × of an app page opened from a Studio list.
+  studioReturn: {
+    close: 'Voltar ao Studio',
+    closeLabel: 'Fechar e voltar à lista do Studio',
+    leaveConfirm: 'Sair sem salvar? As alterações não salvas serão perdidas.',
+  },
   dashboard: {
     // objectui#7063 — the DEFAULT empty state every dashboard widget renders
     // when its query SUCCEEDED and returned nothing. It replaced the terse
@@ -4219,6 +4225,8 @@ const pt = {
       settings: "Configurações do relatório",
       pendingDraft: "Este relatório tem alterações não publicadas. Publique ou descarte-as acima e depois salve.",
       nameTaken: "Todos os identificadores gerados a partir deste nome já estão em uso. Dê outro nome ao relatório e salve.",
+      // objectstack#36906 — a report made from Studio's report list that could not be saved in the app's package.
+      savedOutsideApp: "Este relatório foi salvo fora do pacote do app, porque o pacote de personalização do app não pode ser usado aqui, então a lista do Studio não o mostra.",
       adminOnlyTitle: "Somente administradores do espaço de trabalho podem criar relatórios",
       adminOnly: "Um relatório é compartilhado com todo o espaço de trabalho, por isso um administrador o cria.",
       designModeOnTitle: "Termine primeiro de projetar o layout",
@@ -5094,6 +5102,10 @@ const pt = {
     actComment: 'Comentou',
     actSystemNote: 'Nota do sistema',
     stepProgress: 'Etapas de aprovação',
+    outcomeWaiting: 'Seguiu para {{step}}, aguardando uma decisão',
+    outcomeNow: 'Seguiu para {{step}}: {{decision}}',
+    outcomeEndedAt: 'Seguiu para {{step}} e terminou: {{decision}}',
+    outcomeEndedHere: 'A aprovação terminou aqui',
     prevRequest: 'Anterior',
     nextRequest: 'Próxima',
     positionOf: 'Solicitação {{index}} de {{total}}',

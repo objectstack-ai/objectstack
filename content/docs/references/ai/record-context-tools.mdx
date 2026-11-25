@@ -78,7 +78,7 @@ const result = GetRecordContextInputSchema.parse(data);
 | **label** | `string` | ✅ | Its label at the caller's locale |
 | **text** | `string` | optional | The body text, or the one section `anchor` asked for |
 | **anchor** | `string` | optional | The section `text` holds, when the call named one |
-| **outline** | `{ anchor: string; heading: string; level: integer }[]` | optional | The body's headings in order, when the body is past the bound and is not carried whole |
+| **outline** | `{ anchor: string; heading: string; level: integer }[]` | optional | The body's headings in order, when the body is past the bound and is not carried whole. Held to the service's outline bounds: a cut leaves out the deepest headings first and is stated by an `outline_truncated` note |
 | **truncated** | `true` | optional | Present when `text` was cut at the bound: a long body with no headings, or a section past the bound |
 
 ### Nested Shape: `RecordContextBody.outline[number]`
@@ -148,7 +148,7 @@ const result = GetRecordContextInputSchema.parse(data);
 | **label** | `string` | ✅ | Its label at the caller's locale |
 | **text** | `string` | optional | The body text, or the one section `anchor` asked for |
 | **anchor** | `string` | optional | The section `text` holds, when the call named one |
-| **outline** | `{ anchor: string; heading: string; level: integer }[]` | optional | The body's headings in order, when the body is past the bound and is not carried whole |
+| **outline** | `{ anchor: string; heading: string; level: integer }[]` | optional | The body's headings in order, when the body is past the bound and is not carried whole. Held to the service's outline bounds: a cut leaves out the deepest headings first and is stated by an `outline_truncated` note |
 | **truncated** | `true` | optional | Present when `text` was cut at the bound: a long body with no headings, or a section past the bound |
 
 
@@ -176,7 +176,7 @@ const result = GetRecordContextInputSchema.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **kind** | `Enum<'withheld_fields' \| 'not_visible' \| 'body_outline' \| 'body_truncated' \| 'related_truncated' \| 'narrowed'>` | ✅ | What the note states |
+| **kind** | `Enum<'withheld_fields' \| 'not_visible' \| 'body_outline' \| 'body_truncated' \| 'outline_truncated' \| 'related_truncated' \| 'narrowed'>` | ✅ | What the note states |
 | **text** | `string` | ✅ | The sentence, in the caller's locale |
 | **object** | `string` | optional | The object the note is about, where it is about one |
 | **fields** | `string[]` | optional | The withheld fields (`withheld_fields` only) |
@@ -192,6 +192,7 @@ const result = GetRecordContextInputSchema.parse(data);
 * `not_visible`
 * `body_outline`
 * `body_truncated`
+* `outline_truncated`
 * `related_truncated`
 * `narrowed`
 

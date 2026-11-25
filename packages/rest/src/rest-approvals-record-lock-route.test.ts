@@ -10,8 +10,10 @@
  *
  *  - preservation: the service is asked with the path's object and record id
  *    and the caller's own context, and its answer is served as
- *    `{ success: true, data: { locked } }` — `locked` and nothing else, even
- *    when an implementation hands back more;
+ *    `{ success: true, data: { locked, lockSource } }` — `locked`, and on a
+ *    locked record which approval holds it (`'record'` or `'master'`, ruling
+ *    7148480184), and nothing else, even when an implementation hands back
+ *    more;
  *  - one 404 for every `null`: the same status and the same body whatever the
  *    id, so the door cannot tell an unreadable record from a missing one;
  *  - the closed query-parameter set is EMPTY (AGENTS.md route rule 5): a name
@@ -95,17 +97,33 @@ function boot(approvals: Record<string, unknown>) {
 }
 
 describe('[#26314] GET /approvals/records/:object/:recordId/lock', () => {
-    it('asks the service with the path and the caller, and serves `locked` alone', async () => {
+    it('asks the service with the path and the caller, and serves `locked` and its `lockSource` alone', async () => {
         // An implementation that hands back MORE than the contract's payload:
-        // the door still serves `locked` and nothing else.
-        const getRecordLock = vi.fn().mockResolvedValue({ locked: true, requestId: 'req_1', pending: true });
+        // the door still serves `locked`, the kind, and nothing else.
+        const getRecordLock = vi.fn().mockResolvedValue({
+            locked: true, lockSource: 'master', requestId: 'req_1', pending: true,
+        });
+        const drive = boot({ getRecordLock });
+        expect(await drive('expense_line', 'line_1')).toEqual({
+            status: 200, body: { success: true, data: { locked: true, lockSource: 'master' } },
+        });
+        expect(getRecordLock).toHaveBeenCalledTimes(1);
+        expect(getRecordLock).toHaveBeenCalledWith('expense_line', 'line_1', CALLER);
+
+        getRecordLock.mockResolvedValueOnce({ locked: true, lockSource: 'record' });
+        expect(await drive('expense', 'rec_1')).toEqual({
+            status: 200, body: { success: true, data: { locked: true, lockSource: 'record' } },
+        });
+        // Unlocked: no kind, even when an implementation names one.
+        getRecordLock.mockResolvedValueOnce({ locked: false, lockSource: 'record' });
+        expect(await drive('expense', 'rec_2')).toEqual({ status: 200, body: { success: true, data: { locked: false } } });
+    });
+
+    it('serves a locked answer that names no kind, or an unknown one, as `{ locked: true }` alone — never a guessed kind', async () => {
+        const getRecordLock = vi.fn().mockResolvedValueOnce({ locked: true }).mockResolvedValueOnce({ locked: true, lockSource: 'req_1' });
         const drive = boot({ getRecordLock });
         expect(await drive('expense', 'rec_1')).toEqual({ status: 200, body: { success: true, data: { locked: true } } });
-        expect(getRecordLock).toHaveBeenCalledTimes(1);
-        expect(getRecordLock).toHaveBeenCalledWith('expense', 'rec_1', CALLER);
-
-        getRecordLock.mockResolvedValueOnce({ locked: false });
-        expect(await drive('expense', 'rec_2')).toEqual({ status: 200, body: { success: true, data: { locked: false } } });
+        expect(await drive('expense', 'rec_1')).toEqual({ status: 200, body: { success: true, data: { locked: true } } });
     });
 
     it('answers every `null` with one 404, the same body whatever the id', async () => {
@@ -174,25 +192,27 @@ function bootLocks(approvals: Record<string, unknown>) {
 describe('POST /approvals/records/:object/locks — the lock of a page of records', () => {
     it('asks the service once with the ids in order and the caller, and serves one entry per id', async () => {
         const getRecordLocks = vi.fn().mockResolvedValue([
-            { locked: true, requestId: 'req_1' }, null, { locked: false },
+            { locked: true, lockSource: 'record', requestId: 'req_1' }, null, { locked: false },
+            { locked: true, lockSource: 'master', pending: true },
         ]);
         const drive = bootLocks({ getRecordLocks });
-        const answer = await drive('expense', { recordIds: ['rec_1', 'rec_hidden', 'rec_3'] });
+        const answer = await drive('expense', { recordIds: ['rec_1', 'rec_hidden', 'rec_3', 'rec_4'] });
         expect(answer).toEqual({
             status: 200,
             body: {
                 success: true,
                 data: {
                     records: [
-                        { recordId: 'rec_1', locked: true },
+                        { recordId: 'rec_1', locked: true, lockSource: 'record' },
                         { recordId: 'rec_hidden', locked: null },
                         { recordId: 'rec_3', locked: false },
+                        { recordId: 'rec_4', locked: true, lockSource: 'master' },
                     ],
                 },
             },
         });
         expect(getRecordLocks).toHaveBeenCalledTimes(1);
-        expect(getRecordLocks).toHaveBeenCalledWith('expense', ['rec_1', 'rec_hidden', 'rec_3'], CALLER);
+        expect(getRecordLocks).toHaveBeenCalledWith('expense', ['rec_1', 'rec_hidden', 'rec_3', 'rec_4'], CALLER);
     });
 
     it('takes a full page at the cap', async () => {

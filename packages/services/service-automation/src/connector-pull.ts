@@ -28,10 +28,21 @@
  *      with `runImport` — the runner, coercion and row verdicts the import
  *      door uses, so a synced row and an uploaded row speak one vocabulary.
  *
- * ⛔ One response per pull. The connector's own paging is not followed: no
- * paging convention is declared, and inventing one is the stop valve. The
- * limit is stated where authors read it (`mapping.zod.ts`'s `watermark`
- * describe and `SYNC_ARCHITECTURE.md`).
+ * ⛔ One response per pull. The connector's own paging is not followed yet:
+ * `connectorSource.paging` is declared spec-first and its loop is a later
+ * change. The limit is stated where authors read it (`mapping.zod.ts`'s
+ * `watermark` describe and `SYNC_ARCHITECTURE.md`).
+ *
+ * [ADR-0153 D3] Deletes (`./sync-delete-mark.ts`): under `deletePolicy`
+ * absent or `'mark'` the pull marks through `deletedField` when it declares
+ * one, and a FULL pull (no `watermark`) marks every row of the mapping it did
+ * not read, only when its one response is known to be the whole set:
+ * `paging: { style: 'none' }`. With no `paging` it marks nothing by absence
+ * (`unjudged, no paging declared`): a paged endpoint read as one response
+ * would mark every row past its first page. With a paging style the pull does
+ * not follow yet it marks nothing by absence either (`unjudged, pages not
+ * followed`). An incremental source under `'mark'` with no `deletedField` is
+ * refused before the call (`delete_policy_unhonourable`).
  *
  * ⛔ Nothing here schedules a pull. A `job` whose `pull` names the mapping
  * drives it (`JobSchema.pull`): the runtime's job binder calls the `automation`
@@ -84,6 +95,9 @@ import { ConnectorPullError, type ConnectorPullRefusalReason } from './pull-refu
 import { pullDatasourceSource, type DatasourcePullResult } from './datasource-pull.js';
 import { markSyncPullWrite } from '@objectstack/objectql';
 import { carriesSyncProvenanceColumns, mappedSyncProvenanceTarget, stampSyncProvenance } from './sync-provenance-stamp.js';
+import { incrementalSourceDeleteRefusal } from '@objectstack/spec/data';
+import { SyncDeleteMarker, syncDeletePolicyOf, syncDeletePolicyRefusal, type SyncDeletesNote } from './sync-delete-mark.js';
+import { targetWithoutSyncColumns, type SyncPullDeletes } from './datasource-pull.js';
 import {
     SYNC_RUN_OBJECT,
     type SyncRunCounts,
@@ -238,6 +252,8 @@ export interface ConnectorSourcePullOutcome {
     pulled: number;
     /** The import runner's report for the write. */
     summary: ImportRunSummary;
+    /** [ADR-0153 D3] What the run did about deletes; absent for a target that carries no provenance columns. */
+    deletes?: SyncPullDeletes;
 }
 
 /** `connectorSource` as a stored mapping carries it (raw; the spec shape is `MappingSchema.connectorSource`). */
@@ -247,6 +263,9 @@ interface ConnectorSourceLike {
     input?: unknown;
     recordsPath?: unknown;
     watermark?: { field?: unknown; param?: unknown };
+    paging?: { style?: unknown };
+    deletePolicy?: unknown;
+    deletedField?: unknown;
 }
 
 type PulledMapping = MappingArtifactLike & { connectorSource?: ConnectorSourceLike; datasourceSource?: unknown };
@@ -345,9 +364,15 @@ export async function pullConnectorSource(
     }
     const status = Number(result.summary?.errors ?? 0) > 0 ? 'degraded' : 'completed';
     const counts = countsOf(result);
+    const deletes = result.deletes;
     if (deps.runs && run.id) {
         try {
-            await deps.runs.close(run.id, { status, counts });
+            await deps.runs.close(run.id, {
+                status,
+                counts,
+                ...(deletes ? { deletes: deletes.note } : {}),
+                ...(deletes?.skippedNullWatermark !== undefined ? { skippedNullWatermark: deletes.skippedNullWatermark } : {}),
+            });
         } catch (closeErr) {
             // The rows and the committed position are right; only the record of
             // how the run ended is not, so the pull still answers.
@@ -365,6 +390,8 @@ export async function pullConnectorSource(
     deps.logger.info(
         `[Automation] pull of mapping "${opts.mapping}" ${status}: read ${counts.read}, created ${counts.created}, `
         + `updated ${counts.updated}, refused ${counts.refused}`
+        + (deletes ? `; deletes ${deletes.note}: marked ${deletes.marked}, cleared ${deletes.cleared}` : '')
+        + (deletes?.skippedNullWatermark ? `, ${deletes.skippedNullWatermark} source row(s) with a NULL watermark` : '')
         + (committed !== undefined ? `; read position committed at ${String(committed)}` : '')
         + (run.id ? ` (${SYNC_RUN_OBJECT} ${run.id})` : ''),
         { mapping: opts.mapping, status, ...counts, ...(run.id ? { syncRunId: run.id } : {}) },
@@ -380,6 +407,7 @@ function countsOf(result: ConnectorPullResult): SyncRunCounts {
         created: Number(s?.created ?? 0),
         updated: Number(s?.updated ?? 0),
         refused: Number(s?.errors ?? 0),
+        marked: Number(result.deletes?.marked ?? 0),
     };
 }
 
@@ -423,11 +451,23 @@ function servedHolderPackage(answer: Record<string, unknown> | undefined): strin
     return id;
 }
 
-/** The job run that drove the pull, as the request carries it: only what it says. */
+/** The longest `job_run_id` the run record holds (its `maxLength`). */
+const JOB_RUN_ID_MAX = 255;
+
+/**
+ * The job run that drove the pull, as the request carries it: only what it
+ * says, and only what the run record can hold. A `trigger` outside the
+ * record's two values, or a `jobRunId` longer than its column, is left out
+ * rather than failing the run record's open (and so the pull) on the store's
+ * validation: the record then reads as a pull no job named.
+ */
 function originOf(opts: ConnectorPullOptions): SyncRunOrigin {
+    const jobRunId = typeof opts.jobRunId === 'string' && opts.jobRunId.length > 0 && opts.jobRunId.length <= JOB_RUN_ID_MAX
+        ? opts.jobRunId : undefined;
+    const trigger = opts.trigger === 'schedule' || opts.trigger === 'manual' ? opts.trigger : undefined;
     return {
-        ...(opts.jobRunId ? { jobRunId: opts.jobRunId } : {}),
-        ...(opts.trigger ? { trigger: opts.trigger } : {}),
+        ...(jobRunId ? { jobRunId } : {}),
+        ...(trigger ? { trigger } : {}),
     };
 }
 
@@ -719,6 +759,12 @@ async function pullOnce(
             );
         }
     }
+    // [ADR-0153 D3] The incremental-`mark` refusal, judged again for a mapping no parse saw.
+    const deletePolicy = syncDeletePolicyOf(source);
+    const unhonourable = syncDeletePolicyRefusal(source) ?? incrementalSourceDeleteRefusal('connectorSource', source);
+    if (unhonourable) {
+        return refuse('VALIDATION_ERROR', 400, 'delete_policy_unhonourable', `Mapping "${mappingName}": ${unhonourable}`);
+    }
 
     // 4. The watermark (W1): read from the TARGET, never stored elsewhere.
     const declaredWatermark = isPlainObject(source.watermark) ? source.watermark : undefined;
@@ -769,13 +815,17 @@ async function pullOnce(
     // 5. The object's definition — the door's read, for the target refusal,
     //    compound-part assembly and cell coercion alike.
     let schema: unknown;
+    let schemaReadFailed = false;
     try {
         const r = await protocol.getMetaItem({ type: 'object', name: objectName }) as Record<string, unknown> | undefined;
         schema = r?.item;
         if (!schema && typeof protocol.getObjectSchema === 'function') {
             schema = await protocol.getObjectSchema(objectName, environmentId);
         }
-    } catch { /* judged by nobody, coerced as pass-through — the door's rule */ }
+    } catch {
+        // Judged below: a read that failed is told apart from an object that is not registered.
+        schemaReadFailed = true;
+    }
     // [ADR-0153 D4] The provenance columns are the pull's to stamp, never a
     // mapping's to write. A `synced` target carries them (the plan injects
     // them) and gets them stamped. One that withholds every injected column
@@ -793,11 +843,25 @@ async function pullOnce(
     // definition, and a row written without them could never be marked or
     // repaired by a later run. (The datasource pull refuses the same way.)
     if (!isPlainObject(schema)) {
+        // [slice-5 review N9] A failed metadata read is not a mapping defect:
+        // the sentence says which of the two happened.
         return refuse('VALIDATION_ERROR', 400, 'mapping_target_refused',
             `Mapping "${mappingName}": the definition of targetObject '${objectName}' could not be read, so the pull `
-            + 'cannot tell which provenance columns its rows carry (ADR-0153 D4). Register the object, then run the pull again.');
+            + 'cannot tell which provenance columns its rows carry (ADR-0153 D4). '
+            + (schemaReadFailed
+                ? 'The metadata read failed, which may pass: run the pull again, and if it keeps failing, the server log '
+                    + 'has the metadata service\'s own failure.'
+                : 'No object of that name is registered: register the object, then run the pull again.'));
     }
     const stampsProvenance = carriesSyncProvenanceColumns(schema);
+    // [ADR-0153 D3] A `synced` target that withholds the columns cannot carry
+    // a mark. A target of another bucket is refused at build (a sourced
+    // mapping targets a `synced` object); one that reaches the pull unjudged is
+    // written as before, unstamped, and its deletes are not judged at all.
+    const synced = schema.managedBy === 'synced';
+    if (synced && deletePolicy.policy === 'mark' && !stampsProvenance) {
+        return refuse('VALIDATION_ERROR', 400, 'mapping_target_refused', `Mapping "${mappingName}": ${targetWithoutSyncColumns(objectName)}`);
+    }
     const refusedTarget = refuseUnknownMappingTargets(artifact, objectName, schema);
     if (refusedTarget) return refuseWith(refusedTarget, 'mapping_target_refused');
 
@@ -904,16 +968,19 @@ async function pullOnce(
     // pull's mark — the one context the engine admits a `_sync_` column from —
     // as the system when the caller handed no context: the columns are
     // `readonly`, which only a system write keeps.
+    // [ADR-0153 D3] Taken before the write: every row it writes is stamped at or after it.
+    const runStartedAt = new Date().toISOString();
     const rows = stampsProvenance
         ? stampSyncProvenance(applied.rows, matchFields, {
-            mapping: mappingName, runId: run.id, pulledAt: new Date().toISOString(),
+            mapping: mappingName, runId: run.id, pulledAt: runStartedAt,
         })
         : applied.rows;
+    const writeContext = stampsProvenance ? markSyncPullWrite(context ?? { isSystem: true }) : context;
     const summary = await runImport({
         p: protocol,
         objectName,
         environmentId,
-        context: stampsProvenance ? markSyncPullWrite(context ?? { isSystem: true }) : context,
+        context: writeContext,
         rows: rows as Array<Record<string, any>>,
         metaMap: buildFieldMetaMap(schema),
         writeMode,
@@ -934,6 +1001,34 @@ async function pullOnce(
     run.progress.created = refused.summary.created;
     run.progress.updated = refused.summary.updated;
     run.progress.refused = refused.summary.errors;
+
+    // 8. [ADR-0153 D3] Deletes: `deletedField` row by row, then, on a full
+    //    pull whose one response is the whole set, every row it did not read.
+    let deletes: SyncPullDeletes | undefined;
+    if (stampsProvenance) {
+        const marker = new SyncDeleteMarker({
+            protocol, ...(environmentId ? { environmentId } : {}), mapping: mappingName, targetObject: objectName,
+            policy: deletePolicy, readContext: context ?? { isSystem: true }, writeContext, runStartedAt,
+        });
+        const written = rows.map((_, i) => {
+            const r = refused.summary.results[i];
+            return r?.ok === true && (r.action === 'created' || r.action === 'updated');
+        });
+        await marker.afterBatch(records as Array<Record<string, unknown>>, rows, written);
+        let note: SyncDeletesNote;
+        const pagingStyle = isPlainObject(source.paging) ? source.paging.style : undefined;
+        if (deletePolicy.policy === 'ignore') note = 'ignored';
+        else if (declaredWatermark) note = 'by deletedField';
+        else if (pagingStyle === undefined) note = 'unjudged, no paging declared';
+        else if (pagingStyle !== 'none') note = 'unjudged, pages not followed';
+        else if (!marker.canMarkAbsent()) note = 'unjudged, rows refused';
+        else {
+            await marker.markAbsent();
+            note = 'judged';
+        }
+        run.progress.marked = marker.marked;
+        deletes = { note, marked: marker.marked, cleared: marker.cleared };
+    }
     if (refused.count > 0) {
         logger.warn(
             `[Automation] connector pull: mapping "${mappingName}" — ${refused.count} pulled record(s) carry no value for `
@@ -951,6 +1046,7 @@ async function pullOnce(
         ...(watermark ? { watermark } : {}),
         pulled: records.length,
         summary: refused.summary,
+        ...(deletes ? { deletes } : {}),
     };
 }
 

@@ -70,6 +70,12 @@ import {
   type PermissionSetHolder,
   type PermissionSetHolding,
 } from './permission-set-holder.js';
+import { createAuthenticatedFetch } from '@object-ui/auth';
+
+/** The console's authenticated fetch: the stored bearer token beside the session cookie. */
+function authFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+  return createAuthenticatedFetch()(input, init);
+}
 
 /**
  * Item name → switched on, for every item of the type the ledger holds a row
@@ -167,7 +173,7 @@ export function isCatalogHolderActive(
  */
 export async function readCatalogLedger(type: string, signal?: AbortSignal): Promise<CatalogLedgerRead> {
   if (!hasCatalogActivation(type)) return { states: new Map(), permissionRows: [] };
-  const res = await fetch(`${apiBase()}/data/sys_metadata_activation?top=${LEDGER_PAGE_SIZE}`, {
+  const res = await authFetch(`${apiBase()}/data/sys_metadata_activation?top=${LEDGER_PAGE_SIZE}`, {
     credentials: 'include',
     headers: JSON_HEADERS,
     cache: 'no-store',
@@ -222,7 +228,7 @@ export async function writeCatalogActivation(
 ): Promise<boolean> {
   if (!hasCatalogActivation(type)) throw new Error(`No activation for metadata type '${type}'`);
   const query = type === 'permission' ? packageQuery(packageId) : '';
-  const res = await fetch(
+  const res = await authFetch(
     `${apiBase()}/security/_activation/${encodeURIComponent(type)}/${encodeURIComponent(name)}${query}`,
     {
       method: 'POST',

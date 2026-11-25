@@ -68,7 +68,7 @@ function mockServer(byName: Record<string, Body | 'fail'> = published) {
   global.fetch = vi.fn(async (input: RequestInfo | URL) => {
     const url = String(input);
     requests.push(url);
-    const ok = (body: unknown) => ({ ok: true, status: 200, json: async () => body });
+    const ok = (body: unknown) => ({ headers: new Headers(), ok: true, status: 200, json: async () => body });
     if (url.includes('/_drafts')) {
       return ok([CONTAINER, LISTED, FRESH].map((name) => ({ type: 'view', name, packageId: 'com.x' })));
     }
@@ -78,11 +78,11 @@ function mockServer(byName: Record<string, Body | 'fail'> = published) {
     if (!name) return ok([{ name: 'ebqu_claim.form' }, { name: LISTED }]);
     const decoded = decodeURIComponent(name);
     if (url.includes('state=draft')) {
-      return draft[decoded] ? ok({ type: 'view', name: decoded, item: draft[decoded] }) : { ok: false, status: 404, json: async () => ({}) };
+      return draft[decoded] ? ok({ type: 'view', name: decoded, item: draft[decoded] }) : { headers: new Headers(), ok: false, status: 404, json: async () => ({}) };
     }
     const body = byName[decoded];
-    if (body === 'fail') return { ok: false, status: 500, json: async () => ({}) };
-    return body ? ok(body) : { ok: false, status: 404, json: async () => ({}) };
+    if (body === 'fail') return { headers: new Headers(), ok: false, status: 500, json: async () => ({}) };
+    return body ? ok(body) : { headers: new Headers(), ok: false, status: 404, json: async () => ({}) };
   }) as unknown as typeof fetch;
 }
 

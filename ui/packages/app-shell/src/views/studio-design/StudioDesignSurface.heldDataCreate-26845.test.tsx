@@ -20,7 +20,7 @@
 import '@testing-library/jest-dom/vitest';
 import * as React from 'react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, fireEvent, cleanup, waitFor, within } from '@testing-library/react';
+import { render, screen, fireEvent, cleanup, waitFor, within, act } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 
 const PKG = 'com.acme.app';
@@ -50,11 +50,26 @@ vi.mock('../metadata-admin/useMetadata', async (importOriginal) => {
   return { ...mod, useMetadataClient: () => mockClient, useMetadataTypes: () => ({ entries: [] }) };
 });
 
+const PAIR = `${PKG}.custom`;
+/** objectstack#36904 — while set, the package is a read-only base whose `.custom` pair is listed. */
+const pkgs = vi.hoisted(() => ({ readOnlyBase: false }));
+
 vi.mock('./packages-io', async (importOriginal) => {
   const mod = await importOriginal<typeof import('./packages-io')>();
   return {
     ...mod,
-    fetchPackages: vi.fn(async () => [{ id: 'com.acme.app', name: 'Acme', writable: true, namespace: 'acme' }]),
+    fetchPackages: vi.fn(async () => [{ id: 'com.acme.app', name: 'Acme', writable: !pkgs.readOnlyBase, namespace: 'acme' }]),
+    fetchListedPackageManifests: vi.fn(
+      async () =>
+        new Map(
+          pkgs.readOnlyBase
+            ? [
+                ['com.acme.app', { name: 'Acme', writable: false, manifest: { version: '1.0.0' } }],
+                ['com.acme.app.custom', { name: 'Acme (custom)', writable: true, manifest: {} }],
+              ]
+            : [],
+        ),
+    ),
   };
 });
 
@@ -90,7 +105,9 @@ vi.mock('../../preview/DraftChangesPanel', async () => {
 // The source under test reaches a dynamic import of `@objectstack/lint`: its first
 // load is paid here, at collection, never inside a case's clock (`check:test-source-alias`).
 import '@objectstack/lint';
+import '@object-ui/plugin-detail';
 import { StudioDesignSurface } from './StudioDesignSurface';
+import { fetchListedPackageManifests } from './packages-io';
 import { addFieldFromFormToolbar } from './__tests__/dataPillarAddField';
 import { createEmptyDataSource } from './__tests__/emptyDataSource';
 import { registerBuiltinInspectors } from '../metadata-admin/inspectors';
@@ -137,6 +154,7 @@ beforeEach(() => {
     overlayScope: null,
     effective: type === 'object' && OBJECTS[name] ? JSON.parse(JSON.stringify(OBJECTS[name])) : null,
   }));
+  pkgs.readOnlyBase = false;
   confirmSpy = vi.fn();
   window.confirm = confirmSpy as unknown as typeof window.confirm;
 });
@@ -147,10 +165,10 @@ afterEach(() => {
   window.history.replaceState(null, '', '/');
 });
 
-/** The object the header names: its title's tooltip (objectstack#34794). */
+/** The object the header names: its machine name beside the label (objectstack#36904). */
 async function openObjectIs(name: string): Promise<void> {
   await waitFor(
-    () => expect(within(screen.getByTestId('data-object-header')).getByRole('heading', { level: 1 })).toHaveAttribute('title', name),
+    () => expect(within(screen.getByTestId('data-object-header')).getAllByTestId('studio-item-api-name')[0]).toHaveTextContent(name),
     { timeout: 8000 },
   );
 }
@@ -158,10 +176,15 @@ async function openObjectIs(name: string): Promise<void> {
 async function openTask(): Promise<void> {
   // The shell's link guard reads the window's URL to skip a link to the page
   // already shown; `BrowserRouter` keeps the two equal, so this does too.
-  window.history.replaceState(null, '', `/studio/${PKG}/data`);
+  // objectstack#36904 — the object designer is the object's address.
+  const at = `/studio/${PKG}/metadata/object/acme_task?package=${PKG}`;
+  window.history.replaceState(null, '', at);
   render(
-    <MemoryRouter initialEntries={[`/studio/${PKG}/data`]}>
+    <MemoryRouter initialEntries={[at]}>
       <Routes>
+        {/* objectstack#36904 — the pair's own object address (the request's landing on a read-only base). */}
+        <Route path={`/studio/${PAIR}/metadata/object/:name`} element={<output data-testid="pair-landed" />} />
+        <Route path="/studio/:packageId/metadata/*" element={<StudioDesignSurface area="metadata" />} />
         <Route path="/studio/:packageId/:tab" element={<StudioDesignSurface />} />
       </Routes>
     </MemoryRouter>,
@@ -176,33 +199,12 @@ async function holdAPicklist(): Promise<void> {
   await screen.findByTestId('studio-held', undefined, { timeout: 8000 });
 }
 
-const newObject = () => fireEvent.click(within(screen.getByTestId('studio-rail-data')).getByTestId('studio-rail-add'));
 const pendingRequest = (name: string) => fireEvent.click(screen.getByRole('button', { name: `Pending object/${name}` }));
 
-describe('a held Data field guards create and Pending changes (objectstack#26845)', () => {
-  it('New object asks; Cancel opens no dialog and keeps the held field, OK opens it and the create asks nothing', async () => {
-    await openTask();
-    await holdAPicklist();
-
-    confirmSpy.mockReturnValueOnce(false);
-    newObject();
-    expect(confirmSpy).toHaveBeenCalledTimes(1);
-    expect(confirmSpy).toHaveBeenCalledWith(LEAVE_QUESTION);
-    expect(screen.queryByRole('dialog')).toBeNull();
-    expect(screen.getByTestId('studio-held')).toBeInTheDocument();
-
-    confirmSpy.mockReturnValueOnce(true);
-    newObject();
-    expect(confirmSpy).toHaveBeenCalledTimes(2);
-    const dialog = await screen.findByRole('dialog');
-    fireEvent.change(within(dialog).getByLabelText(t('engine.studio.data.nameLabel', 'en')), {
-      target: { value: 'Ticket' },
-    });
-    fireEvent.click(within(dialog).getByRole('button', { name: t('engine.studio.createLive', 'en') }));
-    await openObjectIs('acme_ticket');
-    expect(confirmSpy).toHaveBeenCalledTimes(2);
-  });
-
+// objectstack#36904 — the designer has no 「新建」 (the object list's dialog is the
+// create), so what is left to guard here is the Pending changes request, which
+// now opens the object's own address.
+describe('a held Data field guards Pending changes (objectstack#26845)', () => {
   it('a Pending changes request for another object asks; Cancel keeps the held field, OK opens the object', async () => {
     await openTask();
     await holdAPicklist();
@@ -228,13 +230,33 @@ describe('a held Data field guards create and Pending changes (objectstack#26845
   });
 
   // CONTROL: nothing held, nothing asked.
-  it('with no edit held, New object and a Pending changes request never ask', async () => {
+  it('with no edit held, a Pending changes request never asks', async () => {
     await openTask();
 
     pendingRequest('acme_note');
     await openObjectIs('acme_note');
-    newObject();
-    await screen.findByRole('dialog');
+    expect(confirmSpy).not.toHaveBeenCalled();
+  });
+});
+
+/*
+ * objectstack#36904 — on a read-only base the Pending changes sheet reviews
+ * the `.custom` pair's drafts (`draftScope`), so an object it names opens on
+ * the pair's address, where an object the pair adds resolves; the base's
+ * address does not name it.
+ */
+describe('a Pending changes request on a read-only base opens the pair\'s address (objectstack#36904)', () => {
+  it('the request for another object lands on /studio/PAIR/metadata/object/NAME', async () => {
+    pkgs.readOnlyBase = true;
+    await openTask();
+    // The pair is read off the package list after the entries read settles.
+    await waitFor(() => expect(fetchListedPackageManifests).toHaveBeenCalled());
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 50));
+    });
+
+    pendingRequest('acme_note');
+    await screen.findByTestId('pair-landed', undefined, { timeout: 8000 });
     expect(confirmSpy).not.toHaveBeenCalled();
   });
 });

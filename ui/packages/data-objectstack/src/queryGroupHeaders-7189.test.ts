@@ -117,3 +117,39 @@ describe('ObjectStackAdapter.queryGroupHeaders (objectui#7189)', () => {
     expect(posted[0].url).toMatch(/\/data\/work_item\/query$/);
   });
 });
+
+/**
+ * objectstack#36870 — a grouped read the door CUT says so. With no `limit`,
+ * `POST /data/:object/query` slices the grouped answer to the deployment's
+ * default page size (`OS_DATA_DEFAULT_PAGE_SIZE`) and answers `hasMore: true`;
+ * the adapter hands that on as the answer's `hasMore`, beside rows that are
+ * still an array, so a caller that only lists the groups reads it unchanged.
+ */
+describe('ObjectStackAdapter.queryGroupHeaders hands on a cut answer (objectstack#36870)', () => {
+  /** The door's grouped branch under a default page size: slice, then say whether groups were dropped. */
+  function cappedAt(defaultPageSize: number) {
+    const records = HEADER_ROWS.slice(0, defaultPageSize);
+    return makeAdapter({
+      status: 200,
+      body: {
+        success: true,
+        data: { object: 'work_item', records, total: HEADER_ROWS.length, hasMore: records.length < HEADER_ROWS.length },
+      },
+    });
+  }
+
+  it('sets `hasMore` on an answer capped by a small default page size', async () => {
+    const { adapter } = cappedAt(2);
+    const rows = await adapter.queryGroupHeaders('work_item', compileListViewGroupQuery(VIEW));
+    expect(rows.hasMore).toBe(true);
+    expect(Array.isArray(rows)).toBe(true);
+    expect([...rows]).toEqual(HEADER_ROWS.slice(0, 2));
+  });
+
+  it('CONTROL: a whole answer carries no `hasMore`', async () => {
+    const { adapter } = cappedAt(100);
+    const rows = await adapter.queryGroupHeaders('work_item', compileListViewGroupQuery(VIEW));
+    expect(rows.hasMore).toBeUndefined();
+    expect([...rows]).toEqual(HEADER_ROWS);
+  });
+});

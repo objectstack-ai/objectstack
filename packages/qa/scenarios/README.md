@@ -742,7 +742,9 @@ npx @objectstack/scenarios help                                      # the comma
   lets the persona read, or the rule's `info` row-scope arm is not charged. A finding the build acknowledged
   (`rollupSourceUnreadableReason` on the set's entry for the roll-up, which turns the rule's finding to `info` and
   suffixes its message with the reason) is still charged, in the same check: a written reason does not change what
-  the persona sees, and a total the card withholds is masked, never explained. The remedy is the rule's own: mask the
+  the persona sees, and a total the card withholds is masked, never explained. The one exception is a roll-up the card
+  names in the persona's `allowedRollups` (`[{ "object": "invoice", "field": "amount_paid" }]`, bare card names): an
+  acknowledged finding on it is not charged, an unacknowledged one is. The remedy is the rule's own: mask the
   parent summary on the set (`fields["<parent>.<summary>"]: { readable: false }`). Ask mode authors nothing and is never
   charged.
 - **Persona contract**: the build is asked for one permission set per persona, named `<namespace>_<persona id>`. The runner
