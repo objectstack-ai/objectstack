@@ -21,7 +21,7 @@ import {
   collectInternalWriteResponseFields,
   registryObjectPackageDisabled,
 } from '@objectstack/core';
-import type { TenancyPosture } from '@objectstack/spec/security';
+import { postureEnforcesWall, type TenancyPosture } from '@objectstack/spec/security';
 import { createKnowledgeTools, type KnowledgeTools } from './knowledge-tools.js';
 import { resolveSplit, splitDocument } from './split/index.js';
 import {
@@ -32,6 +32,7 @@ import {
 import {
   admitObject,
   admitSourceFields,
+  declaredFields,
   documentTitleField,
   type KnowledgeFieldSecurity,
   type KnowledgeSourceAdmission,
@@ -135,6 +136,12 @@ export class KnowledgeService implements IKnowledgeService {
   private readonly reindexTails = new Map<string, Promise<void>>();
   /** Sources whose `where` the no-engine sync path has already reported it cannot enforce. */
   private readonly whereUnenforceableReported = new Set<string>();
+  /**
+   * Documents a record-level search found stale and handed to a background
+   * repair ({@link repairStale}): one repair per document until a later
+   * search finds its hash matching, which clears the entry.
+   */
+  private readonly freshnessRepairs = new Set<string>();
 
   constructor(private readonly options: KnowledgeServiceOptions = {}) {
     this.defaultTopK = options.defaultTopK ?? 10;
@@ -653,7 +660,7 @@ export class KnowledgeService implements IKnowledgeService {
   /**
    * Search every source the caller is admitted to, re-check each object-source
    * hit as the caller ({@link applyPermissionFilter}), and answer the best
-   * `topK` hits by score.
+   * `topK` hits by score — passages, or records under `granularity: 'record'`.
    *
    * ## The refill after the permission filter
    *
@@ -663,7 +670,7 @@ export class KnowledgeService implements IKnowledgeService {
    * can remove hits (a caller who is not the system identity, with an engine to
    * re-check with), each `object` source is asked for
    * `topK × SEARCH_FIRST_ROUND_FACTOR` hits. When the survivors name fewer
-   * than `topK` records ({@link distinctRecords}: several passages of one
+   * than `topK` records ({@link distinctGroups}: several passages of one
    * record count once),
    * the sources that answered as many hits as they were asked — the only ones
    * that may hold more — are asked once more, for
@@ -678,35 +685,71 @@ export class KnowledgeService implements IKnowledgeService {
    * re-check (no context, no engine — object sources are then not searched at
    * all), get one round of `topK`.
    *
-   * The answer is at most `topK` hits (`KnowledgeSearchOptions.topK`), chunk-
-   * level as before. How many hits the re-check removed is logged at `debug`,
-   * never returned: the count is an oracle on rows the caller may not read.
+   * ## Records, not chunks (`granularity: 'record'`, `groupBy`)
+   *
+   * Several passages of one record would fill `topK` with one record, so
+   * under record granularity EVERY source — `file` / `http` too, and for every
+   * caller — is asked `topK × SEARCH_FIRST_ROUND_FACTOR` passages, and the
+   * sources that answered all they were asked are refilled once, at
+   * `topK × SEARCH_REFILL_FACTOR`, when the survivors name fewer than `topK`
+   * groups. That refill is the cap: a search reads at most
+   * `topK × SEARCH_REFILL_FACTOR` passages per source, and answers fewer than
+   * `topK` records when fewer groups lie within it (logged at `debug`). The
+   * answer is then one hit per group ({@link answerByRecord}): the best
+   * passage of the record — or of the `groupBy` value — each checked against
+   * the record as it reads now.
+   *
+   * The answer is at most `topK` hits (`KnowledgeSearchOptions.topK`). How
+   * many hits the re-check removed is logged at `debug`, never returned: the
+   * count is an oracle on rows the caller may not read.
    */
   async search(query: string, opts: KnowledgeSearchOptions = {}): Promise<KnowledgeHit[]> {
     const topK = opts.topK ?? this.defaultTopK;
+    const groupBy = opts.groupBy;
+    if (groupBy !== undefined) {
+      if (typeof groupBy !== 'string' || groupBy.length === 0) {
+        throw new Error('[knowledge] search groupBy must name a metadata field (a non-empty string).');
+      }
+      if (opts.granularity === 'chunk') {
+        throw new Error(
+          `[knowledge] search groupBy '${groupBy}' groups records, so it cannot be combined with granularity 'chunk'. ` +
+            "Drop granularity, or pass granularity 'record'.",
+        );
+      }
+    }
+    if (opts.granularity !== undefined && opts.granularity !== 'chunk' && opts.granularity !== 'record') {
+      throw new Error(`[knowledge] search granularity must be 'chunk' or 'record', got '${String(opts.granularity)}'.`);
+    }
+    const byRecord = opts.granularity === 'record' || groupBy !== undefined;
     const ctx = opts.executionContext;
-    const sources = await this.admitSources(this.resolveSearchTargets(opts.sourceIds), ctx);
+    let sources = await this.admitSources(this.resolveSearchTargets(opts.sourceIds), ctx);
+    if (groupBy !== undefined) sources = this.sourcesGroupableBy(sources, groupBy);
     if (sources.length === 0) return [];
 
     const filtered = ctx !== undefined && ctx.isSystem !== true && this.options.dataEngine !== undefined;
+    const widened = (source: KnowledgeSource): boolean =>
+      byRecord || (filtered && source.source.kind === 'object');
     const firstAsk = (source: KnowledgeSource): number =>
-      filtered && source.source.kind === 'object' ? topK * SEARCH_FIRST_ROUND_FACTOR : topK;
+      widened(source) ? topK * SEARCH_FIRST_ROUND_FACTOR : topK;
+    const groupOf = byRecord
+      ? (hit: KnowledgeHit): string | undefined => this.groupKeyOf(hit, groupBy)
+      : recordKeyOf;
     const first = await this.searchRound(query, sources, firstAsk, opts.filter);
     const raw = [...first.values()].flatMap((answer) => answer.hits);
-    let kept = await this.applyPermissionFilter(raw, ctx);
+    let kept = await this.applyPermissionFilter(raw, ctx, byRecord);
     let removed = raw.length - kept.length;
 
-    if (filtered && distinctRecords(kept) < topK) {
+    if ((filtered || byRecord) && distinctGroups(kept, groupOf) < topK) {
       const saturated = sources.filter(({ source }) => {
         const answer = first.get(source.id);
-        return source.source.kind === 'object' && answer !== undefined && answer.answered >= firstAsk(source);
+        return widened(source) && answer !== undefined && answer.answered >= firstAsk(source);
       });
       if (saturated.length > 0) {
         const refill = await this.searchRound(query, saturated, () => topK * SEARCH_REFILL_FACTOR, opts.filter);
         // A refilled source's second answer is a superset of its first: its
         // first-round survivors are dropped and the whole answer re-checked.
         const refilledHits = [...refill.values()].flatMap((answer) => answer.hits);
-        const refilledKept = await this.applyPermissionFilter(refilledHits, ctx);
+        const refilledKept = await this.applyPermissionFilter(refilledHits, ctx, byRecord);
         const firstRaw = raw.filter((hit) => refill.has(hit.sourceId)).length;
         const firstKept = kept.filter((hit) => refill.has(hit.sourceId)).length;
         kept = [...kept.filter((hit) => !refill.has(hit.sourceId)), ...refilledKept];
@@ -717,11 +760,218 @@ export class KnowledgeService implements IKnowledgeService {
     if (removed > 0) {
       this.options.logger?.debug?.(
         `[knowledge] the permission re-check removed ${removed} hit(s) this caller may not read; ` +
-          `${Math.min(kept.length, topK)} of topK=${topK} answered.`,
+          `${Math.min(byRecord ? distinctGroups(kept, groupOf) : kept.length, topK)} of topK=${topK} answered.`,
       );
     }
     kept.sort((a, b) => b.score - a.score);
-    return kept.slice(0, topK);
+    if (!byRecord) return kept.slice(0, topK);
+    const answer = await this.answerByRecord(kept, topK, groupOf);
+    if (answer.length < topK) {
+      this.options.logger?.debug?.(
+        `[knowledge] record-level search answered ${answer.length} of topK=${topK} ` +
+          `${groupBy === undefined ? 'records' : `'${groupBy}' groups`}: no more within the refill cap ` +
+          `(topK × ${SEARCH_REFILL_FACTOR} passages per source).`,
+      );
+    }
+    return answer;
+  }
+
+  /**
+   * The sources a `groupBy` search asks: every `file` / `http` source (it
+   * groups by document), and each `object` source that lists `groupBy` in its
+   * `metadataFields`. Any other object source answers no hits for this search
+   * — its hits carry no group value, and a hit is never answered ungrouped.
+   */
+  private sourcesGroupableBy(
+    sources: Array<{ source: KnowledgeSource; organizationIds?: string[] }>,
+    groupBy: string,
+  ): Array<{ source: KnowledgeSource; organizationIds?: string[] }> {
+    return sources.filter(({ source }) => {
+      if (source.source.kind !== 'object') return true;
+      if (((source.source as ObjectKnowledgeSource).metadataFields ?? []).includes(groupBy)) return true;
+      this.options.logger?.debug?.(
+        `[knowledge] source '${source.id}' not searched for groupBy '${groupBy}': ` +
+          'the field is not one of its metadataFields.',
+      );
+      return false;
+    });
+  }
+
+  /**
+   * The group a hit falls in under record granularity: with `groupBy`, an
+   * object-source hit's `metadata[groupBy]` value (`undefined` — no group,
+   * never answered — when the hit carries none); without it, the hit's record.
+   * A `file` / `http` hit is its document either way.
+   */
+  private groupKeyOf(hit: KnowledgeHit, groupBy: string | undefined): string | undefined {
+    const source = this.sources.get(hit.sourceId);
+    if (source?.source.kind !== 'object') return `document:${hit.sourceId}#${hit.documentId}`;
+    if (groupBy === undefined) return recordKeyOf(hit);
+    const value = hit.metadata?.[groupBy];
+    if (value === undefined || value === null || value === '') return undefined;
+    return `value:${stableJson(value)}`;
+  }
+
+  /**
+   * The record-level answer: one hit per group, the group's best passage,
+   * best group first, at most `topK`. `hits` is sorted best first.
+   *
+   * ## The freshness check
+   *
+   * The index is a copy, and a record may have changed since it was indexed.
+   * So each `object`-source hit about to be answered is checked against its
+   * record as it reads now — one system-context read per source, of the hits'
+   * records only (at most `topK`), `{ $and: [where, { id: { $in } }] }`
+   * projected to the fields assembly reads. A record that no longer exists or
+   * no longer matches `where`, or whose recomputed `docHash` differs from the
+   * hit's (the stored hash), is dropped — all of its passages — and its
+   * document repaired in the background ({@link repairStale}). A group whose
+   * lead was dropped falls back to its next passage, and the next groups move
+   * up; that is checked again, at most `SEARCH_FRESHNESS_ROUNDS` times, after
+   * which a hit still unchecked is not answered. A hit whose adapter stores no
+   * hash is checked for membership only. A read that fails drops that
+   * source's checked hits (fail-closed), reported at `warn`.
+   *
+   * Not checked: a `file` / `http` hit (no record to read), an object hit
+   * without a record id, and every hit when no data engine is bound.
+   */
+  private async answerByRecord(
+    hits: KnowledgeHit[],
+    topK: number,
+    groupOf: (hit: KnowledgeHit) => string | undefined,
+  ): Promise<KnowledgeHit[]> {
+    const groups = new Map<string, KnowledgeHit[]>();
+    for (const hit of hits) {
+      const key = groupOf(hit);
+      if (key === undefined) continue;
+      const members = groups.get(key);
+      if (members) members.push(hit);
+      else groups.set(key, [hit]);
+    }
+    const engine = this.options.dataEngine;
+    const checkKey = (hit: KnowledgeHit): string | undefined =>
+      engine !== undefined && hit.sourceRecordId !== undefined && this.sources.get(hit.sourceId)?.source.kind === 'object'
+        ? `${hit.sourceId}#${hit.sourceRecordId}`
+        : undefined;
+    const fresh = new Set<string>();
+    const stale = new Set<string>();
+    const leads = (): KnowledgeHit[] => {
+      const out: KnowledgeHit[] = [];
+      for (const members of groups.values()) {
+        const lead = members.find((hit) => {
+          const key = checkKey(hit);
+          return key === undefined || !stale.has(key);
+        });
+        if (lead) out.push(lead);
+      }
+      return out.sort((a, b) => b.score - a.score).slice(0, topK);
+    };
+    for (let round = 0; ; round++) {
+      const top = leads();
+      const unchecked = top.filter((hit) => {
+        const key = checkKey(hit);
+        return key !== undefined && !fresh.has(key);
+      });
+      if (unchecked.length === 0) return top;
+      if (round === SEARCH_FRESHNESS_ROUNDS) {
+        this.options.logger?.debug?.(
+          `[knowledge] record-level search stopped checking freshness after ${SEARCH_FRESHNESS_ROUNDS} rounds; ` +
+            `${unchecked.length} unchecked hit(s) not answered.`,
+        );
+        return top.filter((hit) => !unchecked.includes(hit));
+      }
+      await this.checkFreshness(unchecked, fresh, stale);
+    }
+  }
+
+  /**
+   * One round of the freshness check ({@link answerByRecord}): read the
+   * records `hits` name, one system-context read per source, and sort each
+   * record into `fresh` or `stale` (`sourceId#recordId`).
+   */
+  private async checkFreshness(hits: KnowledgeHit[], fresh: Set<string>, stale: Set<string>): Promise<void> {
+    const engine = this.options.dataEngine;
+    if (!engine) return;
+    const bySource = new Map<string, Map<string, KnowledgeHit>>();
+    for (const hit of hits) {
+      const records = bySource.get(hit.sourceId) ?? new Map<string, KnowledgeHit>();
+      if (!records.has(hit.sourceRecordId!)) records.set(hit.sourceRecordId!, hit);
+      bySource.set(hit.sourceId, records);
+    }
+    let posture: { value: TenancyPosture | undefined } | null | undefined;
+    for (const [sourceId, records] of bySource) {
+      const source = this.sources.get(sourceId)!;
+      const objSource = source.source as ObjectKnowledgeSource;
+      const ids = [...records.keys()];
+      const byId = { id: { $in: ids } };
+      const schema = this.schemaFor(objSource.object);
+      let rows: unknown;
+      try {
+        if (posture === undefined) {
+          try {
+            posture = { value: await this.readTenancyPosture() };
+          } catch (err) {
+            posture = null;
+            this.options.logger?.warn?.(
+              `[knowledge] the tenancy posture could not be read (${errorText(err)}); the freshness check of this ` +
+                'search compares no document hash, only whether each record still belongs to its source.',
+            );
+          }
+        }
+        const fields = freshnessFields(objSource, schema, posture?.value);
+        rows = await engine.find(objSource.object, {
+          where: objSource.where !== undefined ? { $and: [objSource.where, byId] } : byId,
+          ...(fields === undefined ? {} : { fields }),
+          context: systemContext(),
+        } as never);
+        if (!Array.isArray(rows)) {
+          throw new Error(`the read answered ${describeValue(rows)} instead of a list of rows`);
+        }
+      } catch (err) {
+        this.options.logger?.warn?.(
+          `[knowledge] the freshness check of source '${sourceId}' could not read its records ` +
+            `(${errorText(err)}); its hits are not answered.`,
+        );
+        for (const id of ids) stale.add(`${sourceId}#${id}`);
+        continue;
+      }
+      const byRow = new Map<string, Record<string, unknown>>();
+      for (const row of rows as Array<Record<string, unknown> | null | undefined>) {
+        if (row && isRecordId(row.id)) byRow.set(String(row.id), row);
+      }
+      for (const [recordId, hit] of records) {
+        const key = `${sourceId}#${recordId}`;
+        const docId = documentIdFor(sourceId, recordId);
+        const row = byRow.get(recordId);
+        const changed =
+          row !== undefined &&
+          hit.docHash !== undefined &&
+          posture !== null &&
+          recordToDocument(source, objSource, row, schema, posture?.value).docHash !== hit.docHash;
+        if (row === undefined || changed) {
+          stale.add(key);
+          this.repairStale(source, objSource, recordId);
+        } else {
+          fresh.add(key);
+          if (hit.docHash !== undefined && posture !== null) this.freshnessRepairs.delete(docId);
+        }
+      }
+    }
+  }
+
+  /**
+   * Repair the document of a record the freshness check found stale: the
+   * event sync's own path ({@link syncRecord}, serialized per document), run
+   * in system context, in this process and NOT awaited — the search that found
+   * it answers without it. Single-flight per document, and at most once per
+   * document until a later search finds its hash matching. Never throws into
+   * the search. Moves to the scheduled reconcile's queue when that lands.
+   */
+  private repairStale(source: KnowledgeSource, objSource: ObjectKnowledgeSource, recordId: string): void {
+    const docId = documentIdFor(source.id, recordId);
+    if (this.freshnessRepairs.has(docId)) return;
+    this.freshnessRepairs.add(docId);
+    void this.serializeRecordSync(docId, () => this.syncRecord(source, objSource.object, recordId, { id: recordId }));
   }
 
   /**
@@ -1162,10 +1412,18 @@ export class KnowledgeService implements IKnowledgeService {
    * same conservative posture as a missing data engine). This closes the
    * agent/RAG fall-open where an omitted `ToolExecutionContext.actor` used to
    * return unfiltered semantic search over the whole corpus.
+   *
+   * With `liveTitles` (record granularity), the same read — as the caller, in
+   * the same query — also reads the object's display field
+   * (`documentTitleField`, the field assembly takes the title from), and a
+   * surviving hit's `title` is the record's title as it reads now, not as it
+   * was indexed. The field gate (`admitSourceFields`) already asked that the
+   * caller may query that field.
    */
   private async applyPermissionFilter(
     hits: KnowledgeHit[],
     ctx: ExecutionContext | undefined,
+    liveTitles = false,
   ): Promise<KnowledgeHit[]> {
     // Explicit elevation → pass through (indexing / trusted jobs).
     if (ctx?.isSystem) return hits;
@@ -1190,16 +1448,30 @@ export class KnowledgeService implements IKnowledgeService {
     }
 
     const allowed = new Set<string>(); // `${object}#${recordId}`
+    const titles = new Map<string, string>(); // `${object}#${recordId}` → the title as it reads now
     for (const [object, group] of byObject) {
       const ids = [...new Set(group.map((h) => h.sourceRecordId!).filter(Boolean))];
       if (ids.length === 0) continue;
+      const schema = liveTitles ? this.schemaFor(object) : undefined;
+      const withheld = new Set<string>([
+        ...collectCredentialWriteResponseFields(schema),
+        ...collectInternalWriteResponseFields(schema),
+      ]);
+      const titleField = liveTitles ? documentTitleField(schema) : undefined;
+      const readsTitle = titleField !== undefined && titleField !== 'id' && !withheld.has(titleField);
       try {
         const rows = (await this.options.dataEngine.find(object, {
           where: { id: { $in: ids } } as Record<string, unknown>,
-          fields: ['id'],
+          fields: readsTitle ? ['id', titleField] : ['id'],
           context: ctx,
-        } as never)) as Array<{ id?: string }>;
-        for (const row of rows) if (row?.id) allowed.add(`${object}#${row.id}`);
+        } as never)) as Array<Record<string, unknown> & { id?: string }>;
+        for (const row of rows) {
+          if (!row?.id) continue;
+          allowed.add(`${object}#${row.id}`);
+          if (!readsTitle) continue;
+          const title = documentTitle(row, schema, withheld);
+          if (title !== undefined) titles.set(`${object}#${row.id}`, title);
+        }
       } catch (err) {
         this.options.logger?.warn?.(
           `[knowledge] RLS lookup failed for object='${object}': ${(err as Error).message}; ` +
@@ -1208,15 +1480,22 @@ export class KnowledgeService implements IKnowledgeService {
       }
     }
 
-    return hits.filter((hit) => {
-      if (this.isNonObjectSourceHit(hit)) return true; // file / http hit
+    const out: KnowledgeHit[] = [];
+    for (const hit of hits) {
+      if (this.isNonObjectSourceHit(hit)) {
+        out.push(hit); // file / http hit
+        continue;
+      }
       // An object-source hit the re-check cannot place — no record id, or a
       // source nobody registered — is not provably readable: dropped.
       const source = this.sources.get(hit.sourceId);
-      if (!source || !hit.sourceRecordId) return false;
-      const objName = (source.source as ObjectKnowledgeSource).object;
-      return allowed.has(`${objName}#${hit.sourceRecordId}`);
-    });
+      if (!source || !hit.sourceRecordId) continue;
+      const key = `${(source.source as ObjectKnowledgeSource).object}#${hit.sourceRecordId}`;
+      if (!allowed.has(key)) continue;
+      const title = titles.get(key);
+      out.push(title === undefined ? hit : { ...hit, title });
+    }
+    return out;
   }
 
   /** A hit of a REGISTERED source that is not an `object` source (file / http): the adapter owns its ACL. */
@@ -1349,6 +1628,14 @@ export const SEARCH_FIRST_ROUND_FACTOR = 5;
  * cap gets fewer than `topK` hits.
  */
 export const SEARCH_REFILL_FACTOR = 20;
+
+/**
+ * How many times a record-level search re-runs the freshness check when hits
+ * it was about to answer turned out stale and others moved up
+ * ({@link KnowledgeService.search}). A hit still unchecked after the last
+ * round is not answered.
+ */
+export const SEARCH_FRESHNESS_ROUNDS = 3;
 
 /** What {@link listAdapterDocuments} learned: every listed id → its stored hash, or why there is no listing. */
 type AdapterListing =
@@ -1553,17 +1840,46 @@ function documentTitle(
 }
 
 /**
- * How many records `hits` name — what {@link KnowledgeService.search} counts
- * toward `topK` when it decides whether to refill: several passages of one
- * record count once. An object-source hit is its source and record id; any
- * other hit is its document.
+ * How many groups `hits` name, by `groupOf` — what {@link KnowledgeService.search}
+ * counts toward `topK` when it decides whether to refill: several passages of
+ * one record (or of one `groupBy` value) count once. A hit with no group
+ * counts for nothing.
  */
-function distinctRecords(hits: KnowledgeHit[]): number {
+function distinctGroups(hits: KnowledgeHit[], groupOf: (hit: KnowledgeHit) => string | undefined): number {
   const keys = new Set<string>();
   for (const hit of hits) {
-    keys.add(hit.sourceRecordId !== undefined ? `record:${hit.sourceId}#${hit.sourceRecordId}` : `document:${hit.documentId}`);
+    const key = groupOf(hit);
+    if (key !== undefined) keys.add(key);
   }
   return keys.size;
+}
+
+/** A hit's record: an object-source hit is its source and record id; any other hit is its document. */
+function recordKeyOf(hit: KnowledgeHit): string {
+  return hit.sourceRecordId !== undefined ? `record:${hit.sourceId}#${hit.sourceRecordId}` : `document:${hit.documentId}`;
+}
+
+/**
+ * The projection of the freshness check's read: every field
+ * {@link recordToDocument} reads for `objSource` — `id`, the content and
+ * metadata fields, the title field, and `organization_id` under a walled
+ * posture — limited to the fields the object declares, so the recomputed hash
+ * is the one assembly would compute. `undefined` (read the whole row) when
+ * the content list is `'*'` or the object's fields cannot be enumerated.
+ */
+function freshnessFields(
+  objSource: ObjectKnowledgeSource,
+  schema: unknown,
+  posture: TenancyPosture | undefined,
+): string[] | undefined {
+  const declared = declaredFields(schema);
+  if (declared === undefined || objSource.contentFields.includes('*')) return undefined;
+  const names = new Set(declared.map(([name]) => name));
+  const wanted = new Set<string>(['id', ...objSource.contentFields, ...(objSource.metadataFields ?? [])]);
+  const titleField = documentTitleField(schema);
+  if (titleField !== undefined) wanted.add(titleField);
+  if (posture !== undefined && postureEnforcesWall(posture)) wanted.add('organization_id');
+  return [...wanted].filter((name) => name === 'id' || names.has(name));
 }
 
 /** Deterministic document id derived from the source + record id. */

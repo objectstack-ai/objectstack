@@ -29,8 +29,38 @@ export interface KnowledgeSearchOptions {
    * source the caller is allowed to see is queried.
    */
   sourceIds?: string[];
-  /** Max number of hits to return. Adapters may cap further. */
+  /**
+   * Max number of hits to return. Adapters may cap further. Under
+   * `granularity: 'record'` it counts records (or `groupBy` groups), not
+   * passages.
+   */
   topK?: number;
+  /**
+   * What one hit stands for (ADR-0161 K1, record-level return).
+   *
+   * - `'chunk'` (the default): one hit per matching passage, as before.
+   * - `'record'`: one hit per record — the best-scoring passage of the
+   *   record, so `topK` counts records. Each hit returned is checked against
+   *   the record as it reads now: a record that was deleted, left the
+   *   source's `where`, or changed since it was indexed is not returned, and
+   *   its document is repaired in the background. A `file` / `http` hit is
+   *   grouped by its document.
+   *
+   * The return type does not change: still `KnowledgeHit[]`.
+   */
+  granularity?: 'chunk' | 'record';
+  /**
+   * Group record-level hits by the value of this metadata field instead of by
+   * record — "which policies", not "which clauses" — keeping the best hit of
+   * each group; the group value is the hit's `metadata[groupBy]`, and hits
+   * with the same value form one group whichever source they come from. Implies
+   * `granularity: 'record'`; passing it with `granularity: 'chunk'` is
+   * refused. An `object` source that does not list the field in its
+   * `metadataFields` answers no hits for this search (never ungrouped), and
+   * neither does a record with no value for it; a `file` / `http` source
+   * groups by its document.
+   */
+  groupBy?: string;
   /** Adapter-specific filter (passed opaquely). */
   filter?: Record<string, unknown>;
   /**
