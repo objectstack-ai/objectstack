@@ -63,7 +63,7 @@ import { PackageFormDialog } from './PackageFormDialog';
 import { useMetadataClient } from './useMetadata';
 import { t, useMetadataLocale } from './i18n';
 import { newAppStep } from '../studio-design/newAppDoor';
-import { studioPackagePath } from '../studio-design/studioAddress';
+import { studioHomePath } from '../studio-design/studioAddress';
 import { StudioDesignSurface } from '../studio-design/StudioDesignSurface';
 
 window.matchMedia = ((query: string) => ({
@@ -177,7 +177,7 @@ function NewAppHost() {
         open={open}
         onOpenChange={setOpen}
         newApp={step}
-        onSaved={(r) => navigate(studioPackagePath(r.id))}
+        onSaved={(r) => navigate(studioHomePath(r.id))}
       />
     </>
   );
