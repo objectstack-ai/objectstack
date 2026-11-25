@@ -829,12 +829,15 @@ function LaneTotal({
  * objectstack#36520 — a `sum`, `avg`, `min` or `max` covers every record of
  * the lane: the server lane read's figure (`KanbanColumnSummary.figures`),
  * never one added up over the cards the lane has loaded, on every board that
- * queries its own cards. Over cards a host hands in, a `sum` adds them: that
- * is a whole lane only if the host handed every card in. `ListView` hands a
- * board whose lanes it does not know before the query (lanes over a lookup,
- * a view with grouping) its fetched page, so there the `sum` covers that
- * page alone, with no marker (a known gap). Renders nothing without the
- * statistic, or while the figure is pending or unknowable.
+ * queries its own cards. objectstack#36871 — and on a board whose host hands
+ * it its cards together with the query they came from (`laneStatisticQuery`):
+ * `ListView` hands a board whose lanes it does not know before the query
+ * (lanes over a lookup field) one page of rows and that query, so its figures
+ * are the whole lane's too, never the page's. Only over cards a host hands in
+ * WITHOUT its query (rows handed in whole) is a `sum` added up here, and the
+ * other three draw nothing there. A board drawn in swimlanes (a view with
+ * grouping) draws no lane foot. Renders nothing without the statistic, or
+ * while the figure is pending or unknowable.
  */
 function LaneFootStatistic({
   laneId,
