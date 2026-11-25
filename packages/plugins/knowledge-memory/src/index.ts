@@ -51,7 +51,7 @@ export class KnowledgeMemoryAdapter implements IKnowledgeAdapter {
   }
 
   async delete(documentIds: string[], ctx: AdapterContext): Promise<void> {
-    const byDoc = this.store.get(ctx.source.id);
+    const byDoc: Map<string, StoredDocument> | undefined = this.store.get(ctx.source.id);
     if (!byDoc) return;
     for (const id of documentIds) byDoc.delete(id);
   }
