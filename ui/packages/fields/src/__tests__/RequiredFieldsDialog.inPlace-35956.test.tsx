@@ -165,3 +165,94 @@ describe('RequiredFieldsDialog with nothing to fill (objectstack#35956 PR 2, the
     await waitFor(() => expect(textboxOf(dialog, 'win_reason')).toHaveFocus());
   });
 });
+
+describe('RequiredFieldsDialog judges option visibleWhen on the record with the change merged in (objectstack#37250)', () => {
+  // The shape hotcrm authors on `crm_opportunity.loss_reason`: every option is
+  // offered only once the record is (or is being moved to) `closed_lost` —
+  // i.e. it reads the very field the change writes.
+  const LOST_ONLY =
+    '(has(record.stage) && record.stage == "closed_lost") || (has(record.requested_status) && record.requested_status == "closed_lost")';
+  const PENDING_FIELDS = {
+    stage: {
+      type: 'select',
+      label: 'Stage',
+      options: [
+        { value: 'negotiation', label: 'Negotiation' },
+        { value: 'closed_lost', label: 'Closed Lost' },
+        { value: 'closed_won', label: 'Closed Won' },
+      ],
+    },
+    loss_reason: {
+      type: 'select',
+      label: 'Loss Reason',
+      requiredWhen: 'record.stage == "closed_lost"',
+      options: [
+        { value: 'price', label: 'Price', visibleWhen: LOST_ONLY },
+        { value: 'timing', label: 'Timing', visibleWhen: LOST_ONLY },
+      ],
+    },
+    loss_channel: {
+      type: 'radio',
+      label: 'Loss Channel',
+      requiredWhen: 'record.stage == "closed_lost"',
+      options: [
+        { value: 'lost_option', label: 'Lost option', visibleWhen: LOST_ONLY },
+        { value: 'won_option', label: 'Won option', visibleWhen: 'record.stage == "closed_won"' },
+        { value: 'plain_option', label: 'Plain option' },
+        { value: 'detail_option', label: 'Detail option', visibleWhen: 'record.loss_detail == "price"' },
+      ],
+    },
+    loss_detail: { type: 'text', label: 'Loss Detail', requiredWhen: 'record.stage == "closed_lost"' },
+  };
+  const STORED = { id: 'o2', name: 'Globex deal', stage: 'negotiation', loss_reason: null, loss_channel: null, loss_detail: null };
+  const MOVE = { stage: 'closed_lost' };
+
+  const renderPending = () => {
+    render(
+      <RequiredFieldsDialog
+        open
+        fields={labelled(collectRequiredWhenPromptFields(PENDING_FIELDS, STORED, MOVE))}
+        recordName="Globex deal"
+        changes={[{ name: 'stage', label: 'Stage', value: 'Closed Lost' }]}
+        onCancel={vi.fn()}
+        onSubmit={vi.fn()}
+      />,
+    );
+    return screen.getByTestId('required-fields-dialog');
+  };
+  const rowOf = (dialog: HTMLElement, name: string) =>
+    dialog.querySelector(`[data-required-fields-field="${name}"]`) as HTMLElement;
+
+  it('the collector carries the record it judged: the stored record with the change merged in', () => {
+    const out = collectRequiredWhenPromptFields(PENDING_FIELDS, STORED, MOVE);
+    expect(out.map((f) => f.name)).toEqual(['loss_reason', 'loss_channel', 'loss_detail']);
+    for (const f of out) expect(f.record).toEqual({ ...STORED, ...MOVE });
+  });
+
+  it('a select whose options read the changed field offers them, instead of the empty state', () => {
+    const dialog = renderPending();
+    const row = rowOf(dialog, 'loss_reason');
+    expect(row).not.toBeNull();
+    expect(row.querySelector('[data-testid="select-empty-loss_reason"]')).toBeNull();
+    expect(within(row).getByRole('combobox')).toBeInTheDocument();
+  });
+
+  it('offers exactly the options visible on the merged record', () => {
+    const dialog = renderPending();
+    const row = rowOf(dialog, 'loss_channel');
+    expect(row.querySelector('[data-testid="radio-empty-loss_channel"]')).toBeNull();
+    expect(within(row).getByText('Lost option')).toBeInTheDocument();
+    expect(within(row).getByText('Plain option')).toBeInTheDocument();
+    // Judged on the merged record, not opened up: `stage` is `closed_lost`, so
+    // the won-only option stays hidden.
+    expect(within(row).queryByText('Won option')).toBeNull();
+    expect(within(row).queryByText('Detail option')).toBeNull();
+  });
+
+  it('a value typed into the dialog joins the record the other rows read', () => {
+    const dialog = renderPending();
+    expect(within(rowOf(dialog, 'loss_channel')).queryByText('Detail option')).toBeNull();
+    fireEvent.change(within(rowOf(dialog, 'loss_detail')).getByRole('textbox'), { target: { value: 'price' } });
+    expect(within(rowOf(dialog, 'loss_channel')).getByText('Detail option')).toBeInTheDocument();
+  });
+});
