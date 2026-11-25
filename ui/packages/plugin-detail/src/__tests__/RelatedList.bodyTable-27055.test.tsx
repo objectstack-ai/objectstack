@@ -745,8 +745,8 @@ describe('RelatedList — a body table in the record preview drawer settles its 
   }
   const headerKeys = () =>
     Array.from(document.querySelectorAll('thead th[data-column-key]')).map((th) => th.getAttribute('data-column-key'));
-  const updateDepthErrors = (errors: ReturnType<typeof vi.spyOn>) =>
-    errors.mock.calls.filter((call) => /Maximum update depth|#185/.test(call.map(String).join(' ')));
+  const updateDepthErrors = (errors: { mock: { calls: unknown[][] } }) =>
+    errors.mock.calls.filter((call: unknown[]) => /Maximum update depth|#185/.test(call.map(String).join(' ')));
 
   it('in the 326 px details column of the 460 px preview: the table draws, and the cap settles on the leading columns that fit', async () => {
     const errors = renderLines();
