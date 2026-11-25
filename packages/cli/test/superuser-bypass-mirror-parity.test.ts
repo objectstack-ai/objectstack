@@ -6,13 +6,14 @@
  *
  * `holdsSuperuserBypass` (`@objectstack/core`, `security/effective-object-permissions.ts`)
  * is the ONE reading of "does this set hold View All / Modify All on this
- * object": the row bypass and both field merges ask it (ADR-0066 D2, ruling
- * of record 6573563853 letter A). `@objectstack/lint` depends on
- * `@objectstack/spec` alone, so its `security-superuser-field-mask-inert`
- * rule reads the bypass through a verbatim COPY exported under the same name.
- * A copy is a second reading the day the two drift, and a drifted lint either
- * warns about a mask the runtime enforces or stays silent about one it
- * ignores. This package depends on both, so the parity is pinned here: a
+ * object": the row bypass asks it (ADR-0066 D2, ruling of record 6573563853
+ * letter A; since v19, #36055, the field merges no longer do: View All and
+ * Modify All cast no field vote). `@objectstack/lint` depends on
+ * `@objectstack/spec` alone, so its roll-up source-visibility rule reads the
+ * record bypass through a verbatim COPY exported under the same name. A copy
+ * is a second reading the day the two drift, and a drifted lint either warns
+ * about a child row the runtime lets the caller reach or stays silent about
+ * one it hides. This package depends on both, so the parity is pinned here: a
  * change to either function reds this file until the other follows.
  *
  * The matrix is the cartesian product of what the lookup reads: the set's own
