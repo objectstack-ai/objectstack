@@ -450,9 +450,9 @@ const SRC = resolve(HERE, '../..');
 
 function sourceFiles(dir: string): string[] {
   return readdirSync(dir).flatMap((entry) => {
-    const path = join(dir, entry);
-    if (statSync(path).isDirectory()) return sourceFiles(path);
-    return /\.tsx?$/.test(entry) && !/\.test\.tsx?$/.test(entry) ? [path] : [];
+    const entryFile = join(dir, entry);
+    if (statSync(entryFile).isDirectory()) return sourceFiles(entryFile);
+    return /\.tsx?$/.test(entry) && !/\.test\.tsx?$/.test(entry) ? [entryFile] : [];
   });
 }
 
