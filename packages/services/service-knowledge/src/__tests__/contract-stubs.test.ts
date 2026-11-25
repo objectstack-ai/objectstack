@@ -98,11 +98,27 @@ class StubAdapter implements IKnowledgeAdapter {
 runKnowledgeAdapterContract({
   name: 'whole-stub (no capabilities)',
   makeAdapter: () => new StubAdapter(false),
-  implements: { listDocuments: false, chunks: false, organizationIds: false },
+  implements: {
+    listDocuments: false,
+    chunks: false,
+    organizationIds: false,
+    indexStatus: false,
+    builds: false,
+    refusesOtherFingerprint: false,
+    generations: false,
+  },
 });
 
 runKnowledgeAdapterContract({
   name: 'chunk-stub (capabilities.chunks)',
   makeAdapter: () => new StubAdapter(true),
-  implements: { listDocuments: false, chunks: true, organizationIds: false },
+  implements: {
+    listDocuments: false,
+    chunks: true,
+    organizationIds: false,
+    indexStatus: false,
+    builds: false,
+    refusesOtherFingerprint: false,
+    generations: false,
+  },
 });

@@ -10,7 +10,15 @@
  * runKnowledgeAdapterContract({
  *   name: 'knowledge-memory',
  *   makeAdapter: () => new KnowledgeMemoryAdapter(),
- *   implements: { listDocuments: true, chunks: true, organizationIds: true },
+ *   implements: {
+ *     listDocuments: true,
+ *     chunks: true,
+ *     organizationIds: true,
+ *     indexStatus: true,
+ *     builds: true,
+ *     refusesOtherFingerprint: true,
+ *     generations: true,
+ *   },
  * });
  * ```
  *
@@ -28,6 +36,13 @@
  * budget is removed and reported, never truncated; and the organization filter
  * (ADR-0161 K8, item 9) — on the adapter alone, and through a real
  * `KnowledgeService` under the `isolated`, `group` and `single` postures; and
+ * the index fingerprint (ADR-0161 K7; K8, item 8) — every call through the
+ * service carries it, a complete reindex is one `beginBuild` /
+ * `completeBuild` pair and a partial one is neither, `indexStatus` answers
+ * what the last complete build recorded, a write or a search under another
+ * fingerprint is refused `KNOWLEDGE_REBUILD_REQUIRED` and never served from the
+ * other generation, and — for an adapter that builds generations — a build
+ * under a new fingerprint switches to it at its end; and
  * what a hit carries back (ADR-0161 K8, items 3 and 14) — an adapter that
  * stores `docHash` returns it on each hit as stored, which the service's
  * record-level freshness check compares (pinned through a real
@@ -43,7 +58,13 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import type { IDataEngine, IKnowledgeAdapter, AdapterContext, AdapterSearchOptions } from '@objectstack/spec/contracts';
+import type {
+  IDataEngine,
+  IKnowledgeAdapter,
+  AdapterContext,
+  AdapterIndexExpectation,
+  AdapterSearchOptions,
+} from '@objectstack/spec/contracts';
 import type { KnowledgeDocument, KnowledgeSource, ObjectKnowledgeSource } from '@objectstack/spec/ai';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
 import type { TenancyPosture } from '@objectstack/spec/security';
@@ -71,8 +92,31 @@ export interface KnowledgeAdapterContractOptions {
      * it is handed, filtering before it ranks.
      */
     organizationIds: boolean;
+    /** `indexStatus` (ADR-0161 K8, item 8 b). */
+    indexStatus: boolean;
+    /** `beginBuild` and `completeBuild`, which come as a pair (ADR-0161 K8, item 8 c). */
+    builds: boolean;
+    /**
+     * A write or a search carrying an `index` fingerprint other than the active
+     * generation's is refused with the ADR-0112 code `KNOWLEDGE_REBUILD_REQUIRED`
+     * (ADR-0161 K7, rules 4 and 5). Asserted by behaviour.
+     */
+    refusesOtherFingerprint: boolean;
+    /**
+     * `beginBuild` under a new fingerprint opens a generation beside the active
+     * one, and `completeBuild` switches to it (ADR-0161 K7, rules 1 to 3).
+     * Asserted by behaviour; needs `builds` and `refusesOtherFingerprint`.
+     */
+    generations: boolean;
   };
 }
+
+/** The ADR-0112 code of a write or a search refused under another fingerprint (ADR-0161 K7, rules 4 and 5). */
+const REBUILD_REQUIRED = 'KNOWLEDGE_REBUILD_REQUIRED';
+
+/** Two fixed fingerprints for the adapter-alone cases; opaque to the adapter. */
+const FP_OLD = { fingerprint: 'fp-contract:old', recipeHash: 'rh-contract:1' };
+const FP_NEW = { fingerprint: 'fp-contract:new', recipeHash: 'rh-contract:1' };
 
 /** Every case's source id starts with this, so a shared store can be told apart. */
 const SOURCE_PREFIX = 'contract_';
@@ -86,8 +130,17 @@ function objectSource(id: string, extra: Partial<ObjectKnowledgeSource> = {}): K
   } as KnowledgeSource;
 }
 
-function ctxOf(source: KnowledgeSource): AdapterContext {
-  return { source, reason: 'manual' };
+function ctxOf(source: KnowledgeSource, index?: AdapterIndexExpectation): AdapterContext {
+  return index === undefined ? { source, reason: 'manual' } : { source, reason: 'manual', index };
+}
+
+/** Asserts `promise` rejects with an ADR-0112 coded refusal: `code` and `status`, never a bare throw. */
+async function expectRebuildRefusal(promise: Promise<unknown>): Promise<void> {
+  const err = await promise.then(
+    () => { throw new Error('expected a KNOWLEDGE_REBUILD_REQUIRED refusal, got an answer'); },
+    (e: unknown) => e,
+  );
+  expect(err).toMatchObject({ code: REBUILD_REQUIRED, status: 409 });
 }
 
 /**
@@ -234,6 +287,10 @@ async function serviceOver(
   const upserted: string[][] = [];
   const received: KnowledgeDocument[] = [];
   const searched: AdapterSearchOptions[] = [];
+  /** Every context a write, delete or listing was handed, in order. */
+  const contexts: AdapterContext[] = [];
+  /** `begin` / `complete`, in the order the service called them. */
+  const builds: Array<'begin' | 'complete'> = [];
   // Delegation, not a prototype proxy: an adapter with `#private` fields only
   // answers when its methods are called on the adapter itself. The
   // descriptors are read through on every access, as the service reads them.
@@ -248,15 +305,45 @@ async function serviceOver(
     upsert: async (docs, ctx) => {
       upserted.push(docs.map((d) => d.id));
       received.push(...docs);
+      contexts.push(ctx);
       return adapter.upsert(docs, ctx);
     },
     search: (query, searchOpts) => {
       searched.push(searchOpts);
       return adapter.search(query, searchOpts);
     },
-    delete: (ids, ctx) => adapter.delete(ids, ctx),
+    delete: (ids, ctx) => {
+      contexts.push(ctx);
+      return adapter.delete(ids, ctx);
+    },
     ...(typeof adapter.listDocuments === 'function'
-      ? { listDocuments: (ctx: AdapterContext, listOpts: { cursor?: string; limit: number }) => adapter.listDocuments!(ctx, listOpts) }
+      ? {
+        listDocuments: (ctx: AdapterContext, listOpts: { cursor?: string; limit: number }) => {
+          contexts.push(ctx);
+          return adapter.listDocuments!(ctx, listOpts);
+        },
+      }
+      : {}),
+    ...(typeof adapter.indexStatus === 'function'
+      ? { indexStatus: (ctx: AdapterContext) => adapter.indexStatus!(ctx) }
+      : {}),
+    ...(typeof adapter.beginBuild === 'function'
+      ? {
+        beginBuild: (ctx: AdapterContext) => {
+          builds.push('begin');
+          contexts.push(ctx);
+          return adapter.beginBuild!(ctx);
+        },
+      }
+      : {}),
+    ...(typeof adapter.completeBuild === 'function'
+      ? {
+        completeBuild: (ctx: AdapterContext) => {
+          builds.push('complete');
+          contexts.push(ctx);
+          return adapter.completeBuild!(ctx);
+        },
+      }
       : {}),
   };
   const posture = setup.posture;
@@ -266,7 +353,7 @@ async function serviceOver(
   });
   svc.registerAdapter('under_test', counting);
   svc.registerSource(source);
-  return { adapter, svc, upserted, received, searched };
+  return { adapter, svc, upserted, received, searched, contexts, builds };
 }
 
 /** The last element of `list`, or `undefined` when it is empty. */
@@ -319,6 +406,13 @@ export function runKnowledgeAdapterContract(opts: KnowledgeAdapterContractOption
       expect(typeof adapter.id).toBe('string');
       expect(typeof adapter.listDocuments === 'function').toBe(opts.implements.listDocuments);
       expect(adapter.capabilities?.chunks === true).toBe(opts.implements.chunks);
+      expect(typeof adapter.indexStatus === 'function').toBe(opts.implements.indexStatus);
+      // The two ends of a build come together or not at all.
+      expect(typeof adapter.beginBuild === 'function').toBe(opts.implements.builds);
+      expect(typeof adapter.completeBuild === 'function').toBe(opts.implements.builds);
+      if (opts.implements.generations) {
+        expect(opts.implements.builds && opts.implements.refusesOtherFingerprint).toBe(true);
+      }
     });
 
     describe('upsert / search / delete', () => {
@@ -594,6 +688,154 @@ export function runKnowledgeAdapterContract(opts: KnowledgeAdapterContractOption
         });
       });
     }
+
+    describe('the index fingerprint (ADR-0161 K7; K8, item 8)', () => {
+      it('every write, delete, listing and search through the service carries one fingerprint and recipe hash', async () => {
+        const rows = rowsOf(2);
+        const source = objectSource('fp_carry');
+        const h = await serviceOver(make, rows, source);
+        expect(await h.svc.reindexSource(source.id)).toMatchObject({ ok: true, indexed: 2 });
+        await h.svc.handleRecordDelete('article', 'r0');
+        await h.svc.search('zebra1', { topK: 3, executionContext: SYSTEM });
+        expect(h.contexts.length).toBeGreaterThan(0);
+        const [first] = h.contexts;
+        expect(first.index?.fingerprint).toMatch(/^fp1:[0-9a-f]{64}$/);
+        expect(first.index?.recipeHash).toMatch(/^rh1:[0-9a-f]{64}$/);
+        for (const ctx of h.contexts) expect(ctx.index).toEqual(first.index);
+        expect(lastOf(h.searched)?.index).toEqual({ fingerprint: first.index!.fingerprint });
+      });
+
+      it('changes the fingerprint when the content recipe changes, and only the recipe hash when where or metadataFields do', async () => {
+        const rows = rowsOf(1);
+        const seen = async (extra: Partial<ObjectKnowledgeSource>) => {
+          const h = await serviceOver(make, rows, objectSource('fp_vary', extra));
+          await h.svc.reindexSource(`${SOURCE_PREFIX}fp_vary`, { limit: 10 });
+          return h.contexts[0].index!;
+        };
+        const base = await seen({});
+        expect(await seen({})).toEqual(base); // the same source, the same adapter: the same hashes
+        const content = await seen({ contentFields: ['body', 'status'] });
+        expect(content.fingerprint).not.toBe(base.fingerprint);
+        const where = await seen({ where: { status: 'published' } });
+        expect(where.fingerprint).toBe(base.fingerprint);
+        expect(where.recipeHash).not.toBe(base.recipeHash);
+        const metadata = await seen({ metadataFields: [] });
+        expect(metadata.fingerprint).toBe(base.fingerprint);
+        expect(metadata.recipeHash).not.toBe(base.recipeHash);
+      });
+
+      if (opts.implements.builds) {
+        it('a complete reindex is one beginBuild / completeBuild pair; a limit or a dryRun calls neither', async () => {
+          const rows = rowsOf(3);
+          const source = objectSource('fp_pair');
+          const h = await serviceOver(make, rows, source);
+          expect(await h.svc.reindexSource(source.id)).toMatchObject({ ok: true });
+          expect(h.builds).toEqual(['begin', 'complete']);
+          await h.svc.reindexSource(source.id, { limit: 10 });
+          await h.svc.reindexSource(source.id, { dryRun: true });
+          expect(h.builds).toEqual(['begin', 'complete']);
+          expect(await h.svc.reindexSource(source.id)).toMatchObject({ ok: true });
+          expect(h.builds).toEqual(['begin', 'complete', 'begin', 'complete']);
+        });
+      } else {
+        it('without beginBuild / completeBuild a complete reindex walks as before', async () => {
+          const source = objectSource('fp_nobuild');
+          const h = await serviceOver(make, rowsOf(2), source);
+          expect(await h.svc.reindexSource(source.id)).toMatchObject({ ok: true, indexed: 2 });
+          expect(h.builds).toEqual([]);
+        });
+      }
+
+      if (opts.implements.indexStatus) {
+        it('indexStatus answers nothing before a build, and what the last complete build recorded after it', async () => {
+          const source = objectSource('fp_status');
+          const h = await serviceOver(make, rowsOf(2), source);
+          const before = await h.adapter.indexStatus!(ctxOf(source));
+          expect(before.recipeHash).toBeUndefined();
+          expect(before.building ?? false).toBe(false);
+          await h.svc.reindexSource(source.id);
+          const carried = h.contexts[0].index!;
+          const after = await h.adapter.indexStatus!(ctxOf(source));
+          expect(after.fingerprint).toBe(carried.fingerprint);
+          if (opts.implements.builds) expect(after.recipeHash).toBe(carried.recipeHash);
+          expect(after.building ?? false).toBe(false);
+        });
+      }
+
+      if (opts.implements.refusesOtherFingerprint) {
+        it('a search under another fingerprint is refused, coded, and never answered from the stored generation', async () => {
+          const adapter: IKnowledgeAdapter = await make();
+          const a = objectSource('fp_search');
+          await adapter.upsert([doc(a, '1', 'basalt columns')], ctxOf(a, FP_OLD));
+          expect((await adapter.search('basalt', { source: a, topK: 5, index: { fingerprint: FP_OLD.fingerprint } })).length).toBe(1);
+          await expectRebuildRefusal(adapter.search('basalt', { source: a, topK: 5, index: { fingerprint: FP_NEW.fingerprint } }));
+        });
+
+        it('a write under another fingerprint, with no build open for it, is refused and writes nothing', async () => {
+          const adapter: IKnowledgeAdapter = await make();
+          const a = objectSource('fp_write');
+          await adapter.upsert([doc(a, '1', 'basalt columns')], ctxOf(a, FP_OLD));
+          await expectRebuildRefusal(adapter.upsert([doc(a, '2', 'basalt quarry')], ctxOf(a, FP_NEW)));
+          const hits = await adapter.search('basalt', { source: a, topK: 5, index: { fingerprint: FP_OLD.fingerprint } });
+          expect(hits.map((x) => x.documentId)).toEqual([`${a.id}:1`]);
+        });
+
+        it('through KnowledgeService: a changed recipe refuses the source by name, and the call whole only when none answers', async () => {
+          const rows = rowsOf(2);
+          const stale = objectSource('fp_stale');
+          const h = await serviceOver(make, rows, stale);
+          await h.svc.reindexSource(stale.id);
+          // The content list changes: a new fingerprint the stored index was not built under.
+          h.svc.registerSource(objectSource('fp_stale', { contentFields: ['body', 'status'] }));
+          const whole = await h.svc.search('zebra1', { topK: 5, executionContext: SYSTEM }).then(
+            () => undefined,
+            (e: unknown) => e,
+          );
+          expect(whole).toMatchObject({ code: REBUILD_REQUIRED, status: 409, refused: [{ sourceId: stale.id, code: REBUILD_REQUIRED }] });
+          // A second source that can be searched answers; the stale one is named, never read as empty.
+          const fresh = objectSource('fp_fresh');
+          h.svc.registerSource(fresh);
+          await h.svc.reindexSource(fresh.id);
+          const report = await h.svc.searchWithRefusals('zebra1', { topK: 5, executionContext: SYSTEM });
+          expect(report.hits.map((x) => x.sourceId)).toEqual([fresh.id]);
+          expect(report.refused).toEqual([expect.objectContaining({ sourceId: stale.id, code: REBUILD_REQUIRED, status: 409 })]);
+          expect((await h.svc.search('zebra1', { topK: 5, executionContext: SYSTEM })).map((x) => x.sourceId)).toEqual([fresh.id]);
+        });
+      }
+
+      if (opts.implements.generations) {
+        it('a build under a new fingerprint fills a new generation and switches to it at completeBuild; the old one answers its own fingerprint until then', async () => {
+          const adapter: IKnowledgeAdapter = await make();
+          const a = objectSource('fp_gen');
+          await adapter.upsert([doc(a, '1', 'granite quarry')], ctxOf(a, FP_OLD));
+          await adapter.beginBuild!(ctxOf(a, FP_NEW));
+          expect((await adapter.indexStatus?.(ctxOf(a)))?.building ?? true).toBe(true);
+          await adapter.upsert([doc(a, '1', 'marble quarry')], ctxOf(a, FP_NEW));
+          // Resumed, not restarted: a second beginBuild for the same fingerprint keeps what was written.
+          await adapter.beginBuild!(ctxOf(a, FP_NEW));
+          await expectRebuildRefusal(adapter.search('quarry', { source: a, topK: 5, index: { fingerprint: FP_NEW.fingerprint } }));
+          const old = await adapter.search('quarry', { source: a, topK: 5, index: { fingerprint: FP_OLD.fingerprint } });
+          expect(old.map((x) => x.snippet)).toEqual(['granite quarry']);
+          await adapter.completeBuild!(ctxOf(a, FP_NEW));
+          const now = await adapter.search('quarry', { source: a, topK: 5, index: { fingerprint: FP_NEW.fingerprint } });
+          expect(now.map((x) => x.snippet)).toEqual(['marble quarry']);
+          await expectRebuildRefusal(adapter.search('quarry', { source: a, topK: 5, index: { fingerprint: FP_OLD.fingerprint } }));
+          expect(await adapter.indexStatus?.(ctxOf(a))).toEqual({ fingerprint: FP_NEW.fingerprint, recipeHash: FP_NEW.recipeHash });
+        });
+
+        it('through KnowledgeService: a complete reindex after a recipe change builds the new generation and search answers again', async () => {
+          const rows = rowsOf(2);
+          const source = objectSource('fp_rebuild');
+          const h = await serviceOver(make, rows, source);
+          await h.svc.reindexSource(source.id);
+          h.svc.registerSource(objectSource('fp_rebuild', { contentFields: ['body', 'status'] }));
+          await expectRebuildRefusal(h.svc.search('zebra1', { topK: 5, executionContext: SYSTEM }));
+          expect(await h.svc.reindexSource(source.id)).toMatchObject({ ok: true, indexed: 2, skipped: 0 });
+          const hits = await h.svc.search('zebra1', { topK: 5, executionContext: SYSTEM });
+          expect(hits.map((x) => x.documentId)).toEqual([`${source.id}:r1`]);
+        });
+      }
+    });
 
     describe('the chunk channel (ADR-0161 K8, item 5)', () => {
       const longBody =

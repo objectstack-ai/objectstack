@@ -222,7 +222,13 @@ const KNOWN_DIMENSIONS: Record<string, number> = {
 export class OpenAIEmbedder implements IEmbedder {
   readonly id: string;
   readonly dimensions: number;
-  private readonly model: string;
+  /**
+   * `IEmbedder.model`: the model this embedder sends in every request, as the
+   * provider names it (the `model` option, else `text-embedding-3-small`). A
+   * knowledge adapter reports it to the knowledge service, whose index
+   * fingerprint reads it (ADR-0161 K7; K8, item 7).
+   */
+  readonly model: string;
   private readonly baseUrl: string;
   private readonly apiKey: string;
   private readonly fetchImpl: typeof fetch;
