@@ -13,7 +13,7 @@ Metadata-protocol: none
 
 If a deployment overrides one of these keys (in its own i18next resources, or a Studio catalogue it registers), that override no longer applies: nothing in the console or Studio asks for the key, so the overriding text is never shown. Remove the override, or move the text to the key the surface reads now.
 
-`@object-ui/i18n` is in the changesets `fixed` group, so this one `major` moves every package in that group to 19.0.0 at the next version step, every `@objectstack/*` package included.
+`@object-ui/i18n` is in the changesets `fixed` group, so this `major` moves every package in that group to 19, every `@objectstack/*` package included. The line's opening marker is a second `major` (on `@objectstack/spec`) in the same group; two majors in one fixed group still give one 19.0.0. In pre mode under `next` the first version step reads `19.0.0-next.0`.
 
 The list is reproduced by `node ui/packages/i18n/scripts/released-keys-removed.mjs` (the tag against `origin/main`, every locale and namespace the package publishes, nested keys flattened).
 
