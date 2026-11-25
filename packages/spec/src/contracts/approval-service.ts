@@ -1105,7 +1105,8 @@ export interface IApprovalService {
    * the carrier.
    *
    * - **Who is answered:** every caller who can READ the record, judged by
-   *   reading it AS THE CALLER (object read, then row-level access). A caller
+   *   reading it AS THE CALLER (object read, then row-level access); the row
+   *   read must be the asked id's own, spelled as asked. A caller
    *   who cannot read it gets `null` — exactly the answer for a record id that
    *   does not exist, ⛔ never one that tells the two apart. A caller refused
    *   the object's read outright is refused the same way for every id.

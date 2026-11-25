@@ -522,10 +522,11 @@ describe('lockSource — which approval holds a locked row, the same at the sing
 
 /**
  * The readability anchor, one rule at both doors (#37151 comment 7148285178):
- * `getRecordLock` counts a row readable when the caller's read of the id
- * returns one, whatever spelling of the id the engine hands back; the page read
- * used to count it only when the engine echoed the asked spelling, so a loosely
- * matched id answered `null` there and the lock at the single read.
+ * a row counts as readable when the caller's read hands back the row whose id
+ * IS the asked id. `getRecordLock` used to count any row the read handed back,
+ * so a loosely matched id (a case-insensitive collation, `'07'` for `'7'`)
+ * answered the lock there and `null` at the page read, which cannot say which
+ * asked id a row spelled otherwise answers without a read per row.
  */
 describe('both lock reads count a row readable by one rule — a loosely matched id included', () => {
   const LINE = lineOf(HELD);
@@ -554,33 +555,34 @@ describe('both lock reads count a row readable by one rule — a loosely matched
     }, { object });
   }
 
-  it('answers a loosely matched id at the page read as the single read does', async () => {
+  it('answers a loosely matched id `null` at both reads, and the echoed spelling of the same row its lock', async () => {
     const rig = await boot();
     caseInsensitiveIds(rig.engine, LINE);
     caseInsensitiveIds(rig.engine, HELD);
     const loose = (id: string) => id.toUpperCase();
+    // CONTROL — the engine does hand the row back under the loose spelling.
+    const found = await rig.engine.find(LINE, { where: { id: loose(recordA(LINE)) }, fields: ['id'], context: SYSTEM } as any);
+    expect((found as any[]).map((row) => row.id)).toEqual([recordA(LINE)]);
 
-    // The single read finds the row under the loose spelling; the line's master is held.
-    expect(await rig.svc.getRecordLock(LINE, loose(recordA(LINE)), asUser(SUBMITTER))).toEqual(BYMASTER);
-    // The page read answers it the same — alone, beside echoed ids, beside a missing one.
-    expect(await rig.svc.getRecordLocks(LINE, [loose(recordA(LINE))], asUser(SUBMITTER))).toEqual([BYMASTER]);
+    expect(await rig.svc.getRecordLock(LINE, loose(recordA(LINE)), asUser(SUBMITTER))).toBeNull();
+    expect(await rig.svc.getRecordLock(LINE, recordA(LINE), asUser(SUBMITTER))).toEqual(BYMASTER);
+    expect(await rig.svc.getRecordLocks(LINE, [loose(recordA(LINE))], asUser(SUBMITTER))).toEqual([null]);
+    // Beside the echoed spelling of the same row, beside a missing id: one answer per spelling.
     const lineIds = [loose(recordA(LINE)), recordB(LINE), MISSING, loose(recordB(LINE)), recordA(LINE)];
     expect(await rig.svc.getRecordLocks(LINE, lineIds, asUser(SUBMITTER)))
-      .toEqual([BYMASTER, { locked: false }, null, { locked: false }, BYMASTER]);
+      .toEqual([null, { locked: false }, null, null, BYMASTER]);
     for (const caller of [SUBMITTER, APPROVER, READER]) {
       for (const [object, ids] of [
         [LINE, lineIds],
-        [HELD, [loose(recordA(HELD)), recordB(HELD), loose(MISSING), loose(recordB(HELD))]],
+        [LINE, [loose(recordA(LINE))]],
+        [HELD, [loose(recordA(HELD)), recordB(HELD), loose(MISSING), recordA(HELD)]],
       ] as Array<[string, string[]]>) {
         const page = await rig.svc.getRecordLocks(object, ids, asUser(caller));
         const oneByOne = [];
         for (const id of ids) oneByOne.push(await rig.svc.getRecordLock(object, id, asUser(caller)));
-        expect(page, `${caller} ${object}`).toEqual(oneByOne);
+        expect(page, `${caller} ${object} ${ids.join(',')}`).toEqual(oneByOne);
       }
     }
-    // The reader still cannot read line `_b`, however it is spelled.
-    expect(await rig.svc.getRecordLocks(LINE, [loose(recordB(LINE)), loose(recordA(LINE))], asUser(READER)))
-      .toEqual([null, BYMASTER]);
   });
 
   it('pays no read per row for a page asked in the spellings the engine echoes, missing ids included', async () => {

@@ -11333,20 +11333,11 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
    * it does at {@link getRecordLock}, with the same `lockSource`. Entry `i`
    * answers `recordIds[i]`.
    *
-   * ## Which rows count as readable — the single door's rule
+   * ## Which rows count as readable — one rule at both doors
    *
-   * {@link getRecordLock} counts a row readable when the caller's read of its
-   * id returns a row, whatever spelling of the id the engine hands back (a
-   * case-insensitive collation, a numeric id asked as `'07'`). One `$in` read
-   * cannot say which asked id a row answers when the engine spells it
-   * differently, so an id it echoes back is judged here, and the ids it does
-   * not echo are answered by the single door itself, one call each — but only
-   * when the read handed back a row under a spelling nobody asked, the one
-   * sign that an unechoed id may still name a readable row. A page asked with
-   * the ids the engine spells (what a list holds) never pays that read; an
-   * unechoed id with no such row answers `null`, as the single door would.
-   * The one case left: a page asking two spellings of the same row, where
-   * the engine echoes one, answers `null` for the other.
+   * A row is readable when the caller's read hands back a row whose id IS the
+   * asked id, spelled as asked — the rule {@link getRecordLock} applies too
+   * (see its doc block for why a loosely matched id answers `null` at both).
    *
    * The cap is the door's to refuse loudly; here a blank id answers `null`.
    */
@@ -11363,18 +11354,8 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
     const readable = await this.engine.find(objectName, {
       where: { id: { $in: asked } }, fields: ['id'], limit: asked.length, context,
     });
-    const rows = (Array.isArray(readable) ? readable : []) as Array<{ id?: unknown }>;
-    const readableIds = new Set(rows.map((row) => String(row?.id)));
+    const readableIds = new Set((Array.isArray(readable) ? readable : []).map((row: any) => String(row?.id)));
     const readableAsked = asked.filter((id) => readableIds.has(id));
-    // The single door's readability rule for the ids the read did not echo
-    // (see the doc block): only when some row came back under another spelling.
-    const askedIds = new Set(asked);
-    const answeredAlone = new Map<string, { locked: boolean; lockSource?: 'record' | 'master' } | null>();
-    if (rows.some((row) => !askedIds.has(String(row?.id)))) {
-      for (const id of asked) {
-        if (!readableIds.has(id)) answeredAlone.set(id, await this.getRecordLock(objectName, id, context));
-      }
-    }
     const held = readableAsked.length > 0
       ? await recordsHeldByLockingApproval(this.engine, objectName, readableAsked)
       : new Set<string>();
@@ -11383,11 +11364,7 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
     const heldByMaster = readableAsked.length > 0
       ? await detailRowsHeldByLockingApproval(this.engine, objectName, readableAsked)
       : new Set<string>();
-    return ids.map((id) => {
-      if (answeredAlone.has(id)) return answeredAlone.get(id)!;
-      if (!readableIds.has(id)) return null;
-      return recordLockAnswer(heldByMaster.has(id), held.has(id));
-    });
+    return ids.map((id) => (readableIds.has(id) ? recordLockAnswer(heldByMaster.has(id), held.has(id)) : null));
   }
 
   async getRequest(requestId: string, context: ExecutionContext): Promise<ApprovalRequestRow | null> {
@@ -11485,6 +11462,16 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
    * id, existing or not. ⚠️ Probing with {@link SYSTEM_CTX} here would admit
    * every authenticated user in the tenant.
    *
+   * The row read must be the asked id's own: a row the engine hands back under
+   * another spelling (a case-insensitive collation, a numeric id asked as
+   * `'07'`) answers `null`, as at {@link getRecordLocks}. That is the one rule
+   * both doors can apply alike: one `$in` read for a page cannot say which
+   * asked id a row spelled otherwise answers — a page asking two spellings of
+   * one row reads exactly like a page asking a missing id — and resolving it
+   * would cost a read per row. The ids a client holds are the ones the engine
+   * spelled, so nothing it asks is refused by this; and the lock is judged
+   * under the row's own id, never under another spelling of it.
+   *
    * ## What is answered — the lock and its kind, nothing about the request
    *
    * `{ locked, lockSource }` (ruling 7148480184, option A): no request id,
@@ -11511,7 +11498,7 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
     const readable = await this.engine.find(objectName, {
       where: { id }, fields: ['id'], limit: 1, context,
     });
-    if (!Array.isArray(readable) || readable.length === 0) return null;
+    if (!Array.isArray(readable) || !readable.some((row: any) => String(row?.id) === id)) return null;
     if (await detailRowHeldByLockingApproval(this.engine, objectName, id)) return recordLockAnswer(true, false);
     return recordLockAnswer(false, await recordHeldByLockingApproval(this.engine, objectName, id));
   }
