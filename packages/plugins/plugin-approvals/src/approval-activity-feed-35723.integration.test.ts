@@ -5,7 +5,7 @@
  * users who can read the record's approvals read them.
  *
  *  - one `sys_activity` entry per approval step (submitted, approved,
- *    rejected, recalled, sent back, resubmitted) about the record the request
+ *    rejected, recalled, sent back, resubmitted, cancelled) about the record the request
  *    governs, in the shape the
  *    console reads as the `approval` feed kind: `type: 'system'`,
  *    `metadata.kind: 'approval'`, `source_object: 'sys_approval_request'`;
@@ -275,6 +275,18 @@ describe('approval steps on the record activity stream (#35723)', () => {
       ['submit', 'Submitted for approval'],
       ['revise', `Sent back for revision · ${STEP}`],
       ['resubmit', 'Resubmitted for approval'],
+    ]);
+  });
+
+  it('writes a cancelled entry, attributed to no one, when the governed record is deleted', async () => {
+    const rig = await boot();
+    const recordId = `${SHEET}_deleted`;
+    await open(rig, SHEET, recordId);
+    await rig.engine.delete(SHEET, { where: { id: recordId }, context: SYSTEM } as any);
+    const entries = await entriesOf(rig, recordId);
+    expect(entries.map((e) => [kindOf(e).action, e.summary, e.actor_id ?? null])).toEqual([
+      ['submit', 'Submitted for approval', SUBMITTER],
+      ['cancel', 'Approval request cancelled', null],
     ]);
   });
 
