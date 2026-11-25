@@ -116,6 +116,9 @@ vi.mock('./MetadataInspector', () => ({
 }));
 vi.mock('./RecordDetailView', () => ({ RecordDetailView: () => null }));
 
+// `ObjectView` reaches `import('@objectstack/lint')` lazily; its first load is
+// paid here, at collection, never inside a case's clock (`check:test-source-alias`).
+import '@objectstack/lint';
 import { ObjectView } from './ObjectView';
 import { RelatedRecordActionsBridge } from './RelatedRecordActionsBridge';
 import { useRelatedRecordActions } from '@object-ui/react';
