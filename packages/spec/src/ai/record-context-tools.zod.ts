@@ -241,11 +241,20 @@ export function getRecordContextToolJsonSchemas(): Readonly<
 
 export type GetRecordContextInput = z.input<typeof GetRecordContextInputSchema>;
 export type RecordContextFieldEntry = z.input<typeof RecordContextFieldEntrySchema>;
+export type RecordContextFieldEntryParsed = z.infer<typeof RecordContextFieldEntrySchema>;
 export type RecordContextRelatedRow = z.input<typeof RecordContextRelatedRowSchema>;
+export type RecordContextRelatedRowParsed = z.infer<typeof RecordContextRelatedRowSchema>;
 export type RecordContextRelatedList = z.input<typeof RecordContextRelatedListSchema>;
+export type RecordContextRelatedListParsed = z.infer<typeof RecordContextRelatedListSchema>;
 export type RecordContextOutlineEntry = z.input<typeof RecordContextOutlineEntrySchema>;
+export type RecordContextOutlineEntryParsed = z.infer<typeof RecordContextOutlineEntrySchema>;
 export type RecordContextBody = z.input<typeof RecordContextBodySchema>;
+export type RecordContextBodyParsed = z.infer<typeof RecordContextBodySchema>;
 export type RecordContextData = z.input<typeof RecordContextDataSchema>;
+export type RecordContextDataParsed = z.infer<typeof RecordContextDataSchema>;
 export type RecordContextNoteKind = z.input<typeof RecordContextNoteKind>;
+export type RecordContextNoteKindParsed = z.infer<typeof RecordContextNoteKind>;
 export type RecordContextNote = z.input<typeof RecordContextNoteSchema>;
+export type RecordContextNoteParsed = z.infer<typeof RecordContextNoteSchema>;
 export type GetRecordContextOutput = z.input<typeof GetRecordContextOutputSchema>;
+export type GetRecordContextOutputParsed = z.infer<typeof GetRecordContextOutputSchema>;

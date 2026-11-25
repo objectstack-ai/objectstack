@@ -90,8 +90,13 @@ const PACK = {
 function engine(): IDataEngine {
   return {
     find: vi.fn(async (object: string, query: { where?: Record<string, unknown>; limit?: number; fields?: string[] }) => {
+      const where = query.where ?? {};
       const rows = (ROWS[object] ?? [])
-        .filter((r) => Object.entries(query.where ?? {}).every(([k, v]) => r[k] === v))
+        .filter((r) => Object.entries(where).every(([k, v]) => {
+          // Equality only: a combinator or operator this double does not implement is refused, never read as a field.
+          if (k.startsWith('$') || (v !== null && typeof v === 'object')) throw new Error(`engine double: unsupported where '${k}'`);
+          return r[k] === v;
+        }))
         .slice(0, query.limit ?? Infinity);
       return query.fields
         ? rows.map((r) => Object.fromEntries(Object.entries(r).filter(([k]) => k === 'id' || query.fields!.includes(k))))

@@ -179,5 +179,8 @@ export const AiContextSchema = lazySchema(() => strictObject(
 ));
 
 export type AiContext = z.input<typeof AiContextSchema>;
+export type AiContextParsed = z.infer<typeof AiContextSchema>;
 export type AiContextRelated = z.input<typeof AiContextRelatedSchema>;
+export type AiContextRelatedParsed = z.infer<typeof AiContextRelatedSchema>;
 export type AiContextBody = z.input<typeof AiContextBodySchema>;
+export type AiContextBodyParsed = z.infer<typeof AiContextBodySchema>;
