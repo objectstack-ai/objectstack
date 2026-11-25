@@ -3699,10 +3699,38 @@ const step18: MigrationStep = {
   ],
 };
 
+/**
+ * Protocol 19 step — accumulating, uncut.
+ *
+ * Opened by the protocol move itself (ruling record 7153441862, route A, item
+ * 2): `PROTOCOL_VERSION` reads `'19.0.0'` on the v19 prerelease line, so the
+ * load-time handshake (ADR-0087 D1) refuses a manifest whose range admits only
+ * 18. That refusal is this step's first semantic entry, and the one every
+ * upgrading author meets first. Later retirements on the v19 line add their
+ * entries as files; a major-19 conversion, once one exists, graduates here the
+ * way step 18's do.
+ */
+const step19: MigrationStep = {
+  toMajor: 19,
+  rationale:
+    'Protocol 19 moves the load-time handshake: a manifest whose `engines.protocol` range admits '
+    + 'protocol 18 and not 19 is refused before any of its metadata loads, so each manifest an app '
+    + 'or package declares moves its range to `^19`, together with its `@objectstack/*` versions.',
+  conversionIds: [],
+  semantic: [
+    // One file per entry under `entries/semantic/`, concatenated here sorted by
+    // entry id by `gen:migration-registry` (#7297). Add an entry by adding a
+    // FILE — never by editing between the markers, which is generated.
+    // <os-generated semantic:19>
+    // </os-generated semantic:19>
+  ],
+};
+
 /** All migration steps, keyed by the major they migrate into. */
 export const MIGRATIONS_BY_MAJOR: Readonly<Record<number, MigrationStep>> = {
   17: step17,
   18: step18,
+  19: step19,
 };
 
 /** The majors that have a step, ascending. */
