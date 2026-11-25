@@ -19,7 +19,7 @@
 // row moves too (contract review S2 option (b)): the bare draft save writes
 // WA's draft beside it and leaves it untouched, the bare draft read reads back
 // what was saved, the bare publish promotes WA's draft, and with no WA draft
-// the bare publish and discard answer as `?package=WA` does. Driven on a
+// the bare draft read, publish and discard answer as `?package=WA` does. Driven on a
 // booted kernel (the real protocol, metadata service, registry and
 // `sys_metadata` store).
 //
@@ -304,11 +304,14 @@ describe('[#35524] the bare save at a member only the dependent holds writes the
                 expect(await bareRead(b, 'ud_publish_bare', fr)).toEqual([200, 'saved fr', WA]);
             });
 
-            it('with no base draft, the bare per-item publish and draft discard answer as the requests naming the base do, the discard naming the package-unbound draft still stored', async () => {
+            it('with no base draft, the bare draft read, per-item publish and draft discard answer as the requests naming the base do, the discard naming the package-unbound draft still stored', async () => {
                 await lay('ud_discard');
                 await lay('ud_discard_named');
                 const publishOf = (name: string, extra: Record<string, unknown> = {}) => settle(b.protocol.publishMetaItem({ type: 'email_template', name, member: 'fr-FR', ...extra }))
                     .then((r: any) => [r.code, r.status]);
+                // The draft read with no base draft serves the package-unbound draft, bare as named.
+                expect(await draftRead('ud_discard')).toEqual(await draftRead('ud_discard_named', { packageId: WA }));
+                expect(await draftRead('ud_discard')).toEqual(['unbound fr', null]);
                 const barePublish = await publishOf('ud_discard');
                 expect(barePublish).toEqual(await publishOf('ud_discard_named', { packageId: WA }));
                 expect(barePublish).toEqual(['NO_DRAFT', 404]);

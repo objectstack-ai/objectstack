@@ -3365,9 +3365,10 @@ export function draftAddressFollowsRowHeldBase(address: { into: string | null })
  * reads back what it saved, the bare per-item publish promotes the base's
  * draft, and the bare draft discard with no base draft answers as the discard
  * naming the base does, naming the remaining package-unbound draft
- * (`protocol-diff-delete-load.ts`). No bare draft door at this member acts
- * on the package-unbound draft any more, exactly as no door naming the base
- * does; the discard's receipt names it as still stored.
+ * (`protocol-diff-delete-load.ts`). With no base draft there, the bare draft
+ * read still serves the package-unbound draft, as the draft read naming the
+ * base does, while the bare publish and discard leave it stored, as the
+ * requests naming the base do.
  *
  * `pending` (the draft address the stored rows give) itself otherwise: an
  * ambiguous address (the doors ask {@link packagelessRowHeldBaseAddress} for
