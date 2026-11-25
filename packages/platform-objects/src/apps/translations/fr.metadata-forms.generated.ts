@@ -3147,5 +3147,8 @@ export const frMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "Valeur"
       }
     }
+  },
+  ai_context: {
+    label: "Pack de contexte IA"
   }
 };

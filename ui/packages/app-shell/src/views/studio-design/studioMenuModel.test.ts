@@ -57,7 +57,8 @@ describe('the menu groups (objectstack#36899, ADR-0084 amended)', () => {
     expect(entry('type:datasource').to).toBe('/apps/setup/metadata/datasource');
     expect(entry('orgFlows').to).toBe('/studio/~org/automations');
     expect(entry('diagnostics').to).toBe(`/studio/${PKG}/metadata/_diagnostics`);
-    expect(entry('owd').to).toBe(`/studio/${PKG}/access?surface=owd%3Aoverview`);
+    // objectstack#36905 — the overview's own route.
+    expect(entry('owd').to).toBe(`/studio/${PKG}/owd`);
     expect(entry('environment').to).toBe('/studio/~all/metadata');
   });
 
@@ -96,11 +97,14 @@ describe('the current entry (aria-current)', () => {
     expect(current(PKG, `/studio/${PKG}/metadata`)).toBeNull();
   });
 
-  it('a pillar page is the type it designs; the Access pillar on its OWD overview is that entry', () => {
+  it('a pillar page is the type it designs; the OWD overview\'s route is that entry', () => {
     expect(current(PKG, `/studio/${PKG}/data?surface=object:account`)).toBe('type:object');
     expect(current(PKG, `/studio/${PKG}/automations`)).toBe('type:flow');
-    expect(current(PKG, `/studio/${PKG}/access?surface=permission:admin`)).toBe('type:permission');
-    expect(current(PKG, `/studio/${PKG}/access?surface=owd:overview`)).toBe('owd');
+    // objectstack#36905 — a permission set and the overview have left the Access pillar.
+    expect(current(PKG, `/studio/${PKG}/metadata/permission/admin`)).toBe('type:permission');
+    expect(current(PKG, `/studio/${PKG}/owd`)).toBe('owd');
+    expect(current(PKG, `/studio/${PKG}/owd?object=account`)).toBe('owd');
+    expect(current(PKG, `/studio/${PKG}/access?surface=owd:overview`)).toBeNull();
     expect(current(PKG, `/studio/${PKG}/bogus`)).toBeNull();
   });
 

@@ -22,7 +22,7 @@
  * After the fix every key is refused: 28 by this check (`STACK_CROSS_REFERENCE_INVALID`,
  * which runs before the single-app count, as in `defineStack`), and `objects` by its
  * own object-conflict refusal, which this check leaves to the `objectConflict`
- * strategy. The census covers the table as it stands — 29 keys, the 27 of #22934
+ * strategy. The census covers the table as it stands — 30 keys, the 27 of #22934
  * plus `queues` and `assignmentRules`, which joined the table later.
  *
  * The control is the cross-package reuse ADR-0048 §3.4 allows: under
@@ -108,6 +108,7 @@ const CENSUS: readonly Row[] = [
   byName('docs', 'Doc', { name: 'dupe_doc', label: 'Doc', content: '# Doc' }),
   byName('tools', 'Tool', { name: 'dupe_tool', label: 'Tool', description: 'tool', parameters: { type: 'object', properties: {} } }),
   byName('skills', 'Skill', { name: 'dupe_skill', label: 'Skill', description: 'skill', instructions: 'x', tools: [] }),
+  byName('aiContexts', 'AI context pack', { name: 'dupe_pack', label: 'Pack', object: 'dupe_thing', fields: ['title'] }),
   {
     // The second container binds the same object the other way round: no
     // top-level `object`, the binding read off its form.
@@ -169,7 +170,7 @@ describe('composeStacks - two sub-stacks of one package under one identity, ever
     expect(CENSUS.map((row) => row.key)).toEqual([
       'objects', 'datasources', 'pages', 'dashboards', 'reports', 'datasets', 'flows', 'jobs', 'emailTemplates',
       'books', 'positions', 'permissions', 'capabilities', 'sharingRules', 'queues', 'assignmentRules', 'webhooks',
-      'hooks', 'mappings', 'analyticsCubes', 'connectors', 'picklists', 'docs', 'tools', 'skills', 'views', 'apis',
+      'hooks', 'mappings', 'analyticsCubes', 'connectors', 'picklists', 'docs', 'tools', 'skills', 'aiContexts', 'views', 'apis',
       'apps', 'objectExtensions',
     ]);
   });
