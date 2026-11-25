@@ -28,6 +28,7 @@ import '@testing-library/jest-dom';
 import React from 'react';
 import { FilterScopeProvider, RecordContextProvider, RecordPagePreferencesProvider, type RecordPagePreference } from '@object-ui/react';
 import { ComponentRegistry } from '@object-ui/core';
+import { I18nProvider } from '@object-ui/i18n';
 import { RelatedList, derivedAddOf } from '../RelatedList';
 import { resetRelatedTabConditionsForTests } from '../relatedTabConditions';
 
@@ -114,15 +115,18 @@ function renderList({
   onNew = vi.fn(),
   onViewAll = vi.fn(),
   preferences = null,
+  language,
   ...harness
 }: Harness & {
+  /** Render under an `I18nProvider` in this language; none ⇒ provider-less (the English defaults). */
+  language?: string;
   enlarged?: boolean;
   onNew?: (() => void) | undefined;
   onViewAll?: (() => void) | undefined;
   preferences?: { get: (o: string) => RecordPagePreference; update: (o: string, p: RecordPagePreference) => void } | null;
 } = {}) {
   const dataSource = dataSourceFor(harness);
-  const utils = render(
+  const tree = (
     <FilterScopeProvider currentUserId="u-1">
       <RecordPagePreferencesProvider value={preferences}>
         <RelatedListEnlargedContext.Provider value={enlarged}>
@@ -141,7 +145,12 @@ function renderList({
           />
         </RelatedListEnlargedContext.Provider>
       </RecordPagePreferencesProvider>
-    </FilterScopeProvider>,
+    </FilterScopeProvider>
+  );
+  const utils = render(
+    language
+      ? <I18nProvider config={{ defaultLanguage: language, detectBrowserLanguage: false }}>{tree}</I18nProvider>
+      : tree,
   );
   return { ...utils, dataSource };
 }
@@ -507,3 +516,42 @@ describe('the related tab no longer remembers the reader\'s header sort (objects
 function RecordContextHarness({ children }: { children: React.ReactNode }) {
   return <RecordContextProvider objectName="lead" recordId="L-1" data={{ id: 'L-1' }}>{children}</RecordContextProvider>;
 }
+
+/**
+ * objectstack#37251 — the add entry is named for what it does. Where it can
+ * only create (a `master_detail` child with no catalog: no picker since
+ * objectstack#36704) it reads 新建 / New and opens the create form, whose
+ * parent the host fills in; where it opens a picker it keeps 添加 / Add.
+ */
+describe('the add entry reads New where it can only create, Add where it opens a picker (objectstack#37251)', () => {
+  const MASTER_DETAIL_NO_CATALOG = {
+    subject: { type: 'text', label: 'Subject' },
+    lead: { type: 'master_detail', reference: 'lead', label: 'Lead', required: true },
+  };
+
+  it.each([
+    ['en', 'New', 'Add'],
+    ['zh-CN', '新建', '添加'],
+  ] as const)('%s: a master_detail child with no picker reads %s and opens the create form', async (language, newLabel, addLabel) => {
+    const onNew = vi.fn();
+    renderList({ language, onNew, fields: MASTER_DETAIL_NO_CATALOG });
+    await waitFor(() => expect(screen.getByText('Send quote')).toBeInTheDocument());
+    expect(addButton()!.textContent?.trim()).toBe(newLabel);
+    expect(addButton()!.textContent).not.toContain(addLabel);
+    fireEvent.click(addButton()!);
+    expect(onNew).toHaveBeenCalledTimes(1);
+    expect(screen.queryByTestId('record-picker-dialog')).toBeNull();
+  });
+
+  it.each([
+    ['en', 'Add', 'New'],
+    ['zh-CN', '添加', '新建'],
+  ] as const)('control, %s: a lookup child whose entry opens a picker still reads %s', async (language, addLabel, newLabel) => {
+    renderList({ language });
+    await waitFor(() => expect(screen.getByText('Send quote')).toBeInTheDocument());
+    expect(addButton()!.textContent?.trim()).toBe(addLabel);
+    expect(addButton()!.textContent).not.toContain(newLabel);
+    fireEvent.click(addButton()!);
+    expect(await screen.findByTestId('record-picker-dialog')).toBeInTheDocument();
+  });
+});

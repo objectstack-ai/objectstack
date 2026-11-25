@@ -125,6 +125,9 @@ import { createEmptyDataSource, failOnAbsorbedFetchError } from './__tests__/emp
 // The source under test reaches dynamic imports of `@objectstack/lint`; their first
 // load is paid here, at collection, never inside a case's clock (`check:test-source-alias`).
 import '@objectstack/lint';
+// The source under test reaches these dynamic imports (the command palette's
+// record preview, the drafts panel's lint, the code editor): their first load
+// is paid here, at collection, never inside a case's clock (`check:test-source-alias`).
 import '@object-ui/plugin-detail';
 
 const dataSource = createEmptyDataSource();
@@ -175,8 +178,8 @@ describe('Studio pillars — an item two packages hold is read at this package (
   it('Automations: the flow is read at this package', async () => {
     holdBoth('flow', 'p_flow', flow('p_flow', 'Mine'), flow('p_flow', 'Theirs'));
     render(
-      <MemoryRouter initialEntries={[`/studio/${PKG}/automations`]}>
-        <AutomationsPillar packageId={PKG} />
+      <MemoryRouter initialEntries={[`/studio/${PKG}/metadata/flow/p_flow`]}>
+        <AutomationsPillar packageId={PKG} flowName="p_flow" />
       </MemoryRouter>,
     );
     await waitFor(() => expect(layersReads('flow', 'p_flow')).toHaveLength(1));

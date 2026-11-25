@@ -17,7 +17,7 @@ import React, { forwardRef, useCallback, useMemo, useState } from 'react';
 import { ComponentRegistry } from '@object-ui/core';
 import type { ActionDef } from '@object-ui/core';
 import type { UIActionSchema } from '@object-ui/types';
-import { useAction } from '@object-ui/react';
+import { useAction, useDrawsAction } from '@object-ui/react';
 import { useCondition, toPredicateInput, usePredicateRecordContext } from '@object-ui/react';
 import { useObjectTranslation } from '@object-ui/i18n';
 import { Button } from '../../ui';
@@ -129,7 +129,10 @@ export const ActionMenuItem: React.FC<{
   // and render it (objectui#3812) — the same gate `action:group`'s two member
   // leaves read. `false` short-circuits at the evaluation entry, so the
   // `throwOnError` posture above still only applies to real predicates.
+  // `ask_ai` is absent, not disabled, where no in-app assistant can take it (objectstack#37142).
+  const drawsAction = useDrawsAction();
   if (hasDeclaredVisibilityGate(action.visible) && !isVisible) return null;
+  if (!drawsAction(action)) return null;
 
   return (
     <DropdownMenuItem

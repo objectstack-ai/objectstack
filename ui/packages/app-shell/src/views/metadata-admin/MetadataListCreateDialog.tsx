@@ -232,7 +232,7 @@ function ObjectCreate({ open, onOpenChange, packageId, inPair, locale, onCreated
   );
 }
 
-function FlowCreate({ open, onOpenChange, packageId, inPair, locale, onCreated }: MetadataListCreateDialogProps) {
+function FlowCreate({ open, onOpenChange, packageId, inPair, locale, onCreated, onOpenExisting }: MetadataListCreateDialogProps) {
   const client = useMetadataClient();
   const startTrigger = React.useMemo(() => newFlowTriggerFields(locale), [locale]);
   const watchesObject = startTrigger.object?.showWhen?.equals ?? [];
@@ -242,7 +242,9 @@ function FlowCreate({ open, onOpenChange, packageId, inPair, locale, onCreated }
   const [needs, setNeeds] = React.useState<string | null>(null);
   const [busy, setBusy] = React.useState(false);
   const [error, setError] = React.useState<StudioRefusal | null>(null);
-  const [taken, setTaken] = React.useState<Taken | null>(null);
+  // `here`: the flow holding the identifier is this package's own (published or
+  // a draft), so the notice offers to open it, as the Automations pillar's did.
+  const [taken, setTaken] = React.useState<(Taken & { here: boolean }) | null>(null);
   const group = React.useId();
   React.useEffect(() => {
     if (!open) return;
@@ -261,7 +263,8 @@ function FlowCreate({ open, onOpenChange, packageId, inPair, locale, onCreated }
     try {
       const held = await findTakenIdentifier(client, 'flow', name, locale);
       if (held) {
-        setTaken(held);
+        const own = await loadPackageSurfaces(client, 'flow', packageId, locale).catch(() => []);
+        setTaken({ ...held, here: own.some((flow) => flow.name === name) });
         return;
       }
       // Born switched off (`obsolete`, what the switch writes for Off):
@@ -275,9 +278,13 @@ function FlowCreate({ open, onOpenChange, packageId, inPair, locale, onCreated }
       );
       const target = await createTarget(packageId, inPair, null);
       await client.save('flow', name, skeleton, { mode: 'draft', packageId: target.packageId, ifNoneMatch: '*', surface: 'studio' });
-      const live = await publishSavedItem(client, { type: 'flow', name, packageId: target.packageId }, false);
+      // objectstack#36726 — pinned `If-None-Match: *`, as the Automations
+      // pillar's create was (objectstack#36903 moved every flow create here):
+      // a flow another writer published under the name since the check above
+      // is refused, not replaced.
+      const live = await publishSavedItem(client, { type: 'flow', name, packageId: target.packageId }, false, publishCreated);
       if (!live.ok) {
-        setError(plainRefusal(live.error));
+        if ('error' in live) setError(plainRefusal(live.error));
         return;
       }
       toast.success(tFormat('engine.studio.auto.createdOff', locale, { name: label }));
@@ -313,7 +320,13 @@ function FlowCreate({ open, onOpenChange, packageId, inPair, locale, onCreated }
           {taken && (
             <CreateTakenNotice
               scope="flow"
-              sentence={tFormat('engine.studio.auto.createTakenElsewhere', locale, { label: taken.label, name: taken.name })}
+              sentence={tFormat(
+                taken.here ? 'engine.studio.auto.createTaken' : 'engine.studio.auto.createTakenElsewhere',
+                locale,
+                { label: taken.label, name: taken.name },
+              )}
+              openLabel={tFormat('engine.studio.create.openExisting', locale, { label: taken.label })}
+              onOpen={taken.here && onOpenExisting ? () => onOpenExisting(studioItemPath(packageId, 'flow', taken.name)) : undefined}
             />
           )}
           <fieldset className="space-y-2">

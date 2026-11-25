@@ -1780,6 +1780,18 @@ export const ruMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "Диапазон дат",
         helpText: "Период, с которым открывается дашборд, и могут ли пользователи выбирать свои даты."
       },
+      "dateRange.field": {
+        label: "Date Field",
+        helpText: "The date field the period filters on. Leave it empty to use the creation date."
+      },
+      "dateRange.defaultRange": {
+        label: "Default Period",
+        helpText: "The period the dashboard opens with."
+      },
+      "dateRange.allowCustomRange": {
+        label: "Allow Custom Range",
+        helpText: "Let viewers pick their own start and end dates."
+      },
       globalFilters: {
         label: "Глобальные фильтры",
         helpText: "Фильтры, которыми пользователи могут сузить сразу все виджеты или только выбранные вами."

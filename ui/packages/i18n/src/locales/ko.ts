@@ -1773,6 +1773,12 @@ const ko = {
       noCategoryAxis: "차트 범주 축이 필요합니다 — 객체 바인딩 차트는 축을 임의로 만들지 않습니다. 다음 중 하나를 선언하세요:",
     },
   },
+  // objectstack#36906 — the × of an app page opened from a Studio list.
+  studioReturn: {
+    close: 'Studio로 돌아가기',
+    closeLabel: '닫고 Studio 목록으로 돌아가기',
+    leaveConfirm: '저장하지 않고 나가시겠습니까? 저장하지 않은 변경 사항이 사라집니다.',
+  },
   dashboard: {
     // objectui#7063 — the DEFAULT empty state every dashboard widget renders
     // when its query SUCCEEDED and returned nothing. It replaced the terse
@@ -4133,6 +4139,8 @@ const ko = {
       settings: "보고서 설정",
       pendingDraft: "이 보고서에 게시되지 않은 변경 사항이 있습니다. 위에서 게시하거나 버린 후 저장하세요.",
       nameTaken: "이 이름으로 만들 수 있는 식별자가 모두 사용 중입니다. 보고서 이름을 바꾼 뒤 저장하세요.",
+      // objectstack#36906 — a report made from Studio's report list that could not be saved in the app's package.
+      savedOutsideApp: "여기서는 앱의 사용자 지정 패키지를 사용할 수 없어 이 보고서는 앱 패키지 밖에 저장되었습니다. 그래서 Studio 목록에 표시되지 않습니다.",
       adminOnlyTitle: "워크스페이스 관리자만 보고서를 만들 수 있습니다",
       adminOnly: "보고서는 워크스페이스의 모든 사람에게 공유되므로 관리자가 만듭니다.",
       designModeOnTitle: "먼저 레이아웃 디자인을 마치세요",
@@ -4674,6 +4682,7 @@ const ko = {
     tool: {
       aggregate_data: "관련 데이터 집계하기",
       get_record: "이 레코드 읽기",
+      get_record_context: "이 레코드의 자료 읽기",
       list_datasets: "사용 가능한 지표 확인하기",
       query_data: "필요한 데이터 조회하기",
       query_dataset: "지표로 조회하기",

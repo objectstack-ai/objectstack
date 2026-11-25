@@ -793,21 +793,26 @@ On the declared page:
   rule already switched off has no served projection, so its clone continues
   in the pre-filled New form, which asks for the criteria.
 
-### Package-less flows (`/studio/~org/automations`)
+### Package-less flows (`/studio/~org/metadata/flow`)
 
 A flow that belongs to no package — a clone of a packaged flow is one, by
 ADR-0126 §7.1 — matches no package scope, so Studio gives it one scope of its
-own: `/studio/~org/automations` (`studioOrgScopePath()`, segment
-`STUDIO_ORG_SCOPE_SEGMENT`). It is the same `StudioDesignSurface` with no
-package under it, reached from the Studio home and from the package switcher.
-Its Automations rail lists every flow whose served `_packageId` names no
-package, opens each one editable, and saves package-less drafts; its Publish
-promotes those drafts one by one through the single-item publish door, because
-the package batch publish cannot reach a draft bound to no package. It offers
-no other pillar and no "New" flow. `~` is outside every package-id alphabet,
-so the segment can never name a package. A `?surface=flow:` deep link that
-names a flow the open rail does not hold opens no other flow in its place;
-from a package's pillar, a package-less flow is opened in this scope instead.
+own, segment `STUDIO_ORG_SCOPE_SEGMENT` (`~org`): its own leg of the "All
+metadata" area. The list is `/studio/~org/metadata/flow?source=runtime` and a
+flow opens full-screen in the flow designer at
+`/studio/~org/metadata/flow/<name>?source=runtime` (`studioOrgScopePath()`,
+`orgScopeFlowOf()`). It is the same `StudioDesignSurface` with no package under
+it, reached from the Studio home and the left menu. The list holds every flow
+whose served `_packageId` names no package and offers no create; each flow opens
+editable and saves package-less drafts. An empty list says how a packaged flow
+is changed instead (in its package, with New similar). Publish promotes the
+scope's drafts one by one through the single-item publish door, because the
+package batch publish cannot reach a draft bound to no package. `~` is outside
+every package-id alphabet, so the segment can never name a package. A package's
+address naming a package-less flow opens it in this scope; one naming a flow
+nowhere held says so and opens no other flow. The retired
+`/studio/~org/automations` addresses (with or without `?surface=flow:<name>`)
+redirect to the list or the flow (objectstack#36903).
 
 ### Access matrix (package-scoped)
 

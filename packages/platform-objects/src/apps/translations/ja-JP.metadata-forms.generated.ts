@@ -1780,6 +1780,18 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "日付範囲",
         helpText: "ダッシュボードを開いたときの期間と、閲覧者が日付を自分で選べるかどうか。"
       },
+      "dateRange.field": {
+        label: "日付フィールド",
+        helpText: "期間で絞り込む日付フィールド。空のままにすると作成日で絞り込みます。"
+      },
+      "dateRange.defaultRange": {
+        label: "既定の期間",
+        helpText: "ダッシュボードを開いたときに表示される期間。"
+      },
+      "dateRange.allowCustomRange": {
+        label: "カスタム範囲を許可",
+        helpText: "開始日と終了日を閲覧者が自分で選べるようにします。"
+      },
       globalFilters: {
         label: "グローバルフィルター",
         helpText: "閲覧者がすべてのウィジェット、または指定したウィジェットだけをまとめて絞り込めるフィルター。"

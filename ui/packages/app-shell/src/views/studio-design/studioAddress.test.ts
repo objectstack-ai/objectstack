@@ -10,8 +10,12 @@
  */
 
 import { describe, expect, it } from 'vitest';
+import { RESERVED_URL_PARAMS } from '../../urlParams.js';
 import {
   STUDIO_ITEM_PILLAR,
+  STUDIO_RETURN_PARAM,
+  readStudioReturn,
+  withStudioReturn,
   studioChangesReviewPath,
   studioHomePath,
   studioItemPath,
@@ -98,9 +102,9 @@ describe("today's addresses, byte for byte", () => {
   });
 
   it('an item opens its pillar today when the table names one, else its "All metadata" page', () => {
-    // objectstack#36904 — an object opens its designer on its metadata address.
+    // objectstack#36904, objectstack#36903 — an object and a flow open their designer on their metadata address.
     expect(studioItemPath('crm', 'object', 'account')).toBe('/studio/crm/metadata/object/account');
-    expect(studioItemPath('crm', 'flow', 'notify')).toBe('/studio/crm/automations?surface=flow%3Anotify');
+    expect(studioItemPath('crm', 'flow', 'notify')).toBe('/studio/crm/metadata/flow/notify');
     // objectstack#36905 — a permission set opens its metadata address.
     expect(studioItemPath('crm', 'permission', 'admin')).toBe('/studio/crm/metadata/permission/admin');
     expect(studioItemPath('crm', 'dashboard', 'sales')).toBe('/studio/crm/metadata/dashboard/sales');
@@ -140,13 +144,15 @@ describe("today's addresses, byte for byte", () => {
   });
 
   it('the repointed module builders keep their addresses', () => {
-    expect(studioOrgScopePath()).toBe('/studio/~org/automations');
-    expect(studioOrgScopePath({ type: 'flow', name: 'a:b' })).toBe('/studio/~org/automations?surface=flow%3Aa%3Ab');
+    // objectstack#36903 — the package-less scope's flows, on its leg of the area.
+    expect(studioOrgScopePath()).toBe('/studio/~org/metadata/flow?source=runtime');
+    expect(studioOrgScopePath({ type: 'flow', name: 'a:b' })).toBe('/studio/~org/metadata/flow/a%3Ab?source=runtime');
     expect(studioPillarItemPath('crm', 'access', { type: 'permission', name: 'p' })).toBe('/studio/crm/access?surface=permission%3Ap');
     expect(studioMetadataItemPath('crm', { type: 'object', name: 'account' })).toBe('/studio/crm/metadata/object/account');
+    // objectstack#36903 — the flow was the last pillar type: no item opens a pillar.
     expect(
       areaItemPillarPath({ packageId: 'crm', type: 'flow', name: 'notify', search: new URLSearchParams() }),
-    ).toBe('/studio/crm/automations?surface=flow%3Anotify');
+    ).toBeNull();
     expect(
       areaItemPillarPath({ packageId: 'crm', type: 'flow', name: 'notify', search: new URLSearchParams('review=1') }),
     ).toBeNull();
@@ -233,5 +239,47 @@ describe('the mapping table agrees with the code (objectstack#36895)', () => {
     expect(STUDIO_RETIRED_INTERFACES_KEPT_PARAMS).toEqual([STUDIO_CHANGES_PARAM]);
     expect(retiredInterfacesTarget('crm', '?surface=page%3Ahome&changes=review&nav=n1')).toBe('/studio/crm/data?changes=review');
     expect(retiredInterfacesTarget('crm', '?surface=page%3Ahome')).toBe('/studio/crm/data');
+  });
+});
+
+describe('the "came from Studio" param (objectstack#36906, decision 15)', () => {
+  it('carries a Studio list address on an app path, keeping its own query and fragment', () => {
+    expect(STUDIO_RETURN_PARAM).toBe('studio');
+    const list = '/studio/crm/metadata/dashboard?q=ops&sort=-changed';
+    expect(withStudioReturn('/apps/crm/dashboard/ops_board', list)).toBe(
+      '/apps/crm/dashboard/ops_board?studio=%2Fstudio%2Fcrm%2Fmetadata%2Fdashboard%3Fq%3Dops%26sort%3D-changed',
+    );
+    expect(withStudioReturn('/apps/crm/report/r1?x=1#top', '/studio/crm/metadata/report')).toBe(
+      '/apps/crm/report/r1?x=1&studio=%2Fstudio%2Fcrm%2Fmetadata%2Freport#top',
+    );
+  });
+
+  it('reads back exactly what it carried', () => {
+    const list = '/studio/crm/metadata/dashboard?q=a%20b&package=crm';
+    const path = withStudioReturn('/apps/crm/dashboard/d', list);
+    expect(readStudioReturn(path.slice(path.indexOf('?')))).toBe(list);
+    expect(readStudioReturn(new URLSearchParams({ studio: '/studio' }))).toBe('/studio');
+  });
+
+  it('refuses anything that is not a Studio address on this origin, both ways', () => {
+    for (const value of [
+      'https://evil.example/studio/crm',
+      '//evil.example/studio',
+      '/studiox/crm',
+      '/apps/crm',
+      'studio/crm',
+      '/studio\\..\\apps',
+      'javascript:alert(1)',
+      '',
+    ]) {
+      expect(readStudioReturn(new URLSearchParams({ studio: value }))).toBeNull();
+      expect(withStudioReturn('/apps/crm/dashboard/d', value)).toBe('/apps/crm/dashboard/d');
+    }
+    expect(readStudioReturn('')).toBeNull();
+    expect(readStudioReturn('?other=1')).toBeNull();
+  });
+
+  it('is one of the console reserved URL params', () => {
+    expect(RESERVED_URL_PARAMS).toContain(STUDIO_RETURN_PARAM);
   });
 });

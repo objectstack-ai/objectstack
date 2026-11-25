@@ -1833,6 +1833,12 @@ const es = {
       noCategoryAxis: "Se requiere el eje de categorías del gráfico — un gráfico vinculado a un objeto no lo inventa. Declare uno de:",
     },
   },
+  // objectstack#36906 — the × of an app page opened from a Studio list.
+  studioReturn: {
+    close: 'Volver a Studio',
+    closeLabel: 'Cerrar y volver a la lista de Studio',
+    leaveConfirm: '¿Salir sin guardar? Se perderán los cambios no guardados.',
+  },
   dashboard: {
     // objectui#7063 — the DEFAULT empty state every dashboard widget renders
     // when its query SUCCEEDED and returned nothing. It replaced the terse
@@ -4224,6 +4230,8 @@ const es = {
       settings: "Configuración del informe",
       pendingDraft: "Este informe tiene cambios sin publicar. Publícalos o descártalos arriba y luego guarda.",
       nameTaken: "Todos los identificadores derivados de este nombre ya están en uso. Ponle otro nombre al informe y guarda.",
+      // objectstack#36906 — a report made from Studio's report list that could not be saved in the app's package.
+      savedOutsideApp: "Este informe se guardó fuera del paquete de la app, porque aquí no se puede usar el paquete de personalización de la app, así que la lista de Studio no lo muestra.",
       adminOnlyTitle: "Solo los administradores del espacio de trabajo pueden crear informes",
       adminOnly: "Un informe se comparte con todo el espacio de trabajo, así que lo crea un administrador.",
       designModeOnTitle: "Termina primero de diseñar la disposición",
@@ -4772,6 +4780,7 @@ const es = {
     tool: {
       aggregate_data: "Resumir los datos",
       get_record: "Leer el registro",
+      get_record_context: "Leer el contexto del registro",
       list_datasets: "Ver las métricas disponibles",
       query_data: "Consultar los datos necesarios",
       query_dataset: "Consultar por métrica",

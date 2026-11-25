@@ -132,7 +132,17 @@ const mockClient = vi.hoisted(() => {
       server.drafts.set(k(type, name), body);
       return { type, name, item };
     }),
-    publish: vi.fn(async () => ({ success: true })),
+    // The draft goes live, as the server's publish does: objectstack#36903 —
+    // the list's create publishes, then opens the flow's address, which reads
+    // the live list.
+    publish: vi.fn(async (type: string, name: string) => {
+      const body = server.drafts.get(k(type, name));
+      if (body) {
+        server.active.set(k(type, name), body);
+        server.drafts.delete(k(type, name));
+      }
+      return { success: true };
+    }),
     reset: vi.fn(async () => ({})),
   };
 });
@@ -155,10 +165,15 @@ vi.mock('@object-ui/react', async (importOriginal) => {
 vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
 
 import { AutomationsPillar } from './StudioDesignSurface';
+import { ListFlowCreate } from './__tests__/listFlowCreateHost';
 import { createEmptyDataSource, failOnAbsorbedFetchError } from './__tests__/emptyDataSource';
 import { registerMetadataPreview } from '../metadata-admin/preview-registry';
 import { FlowPreview } from '../metadata-admin/previews/FlowPreview';
 import { t } from '../metadata-admin/i18n';
+// The source under test reaches these dynamic imports (the command palette's
+// record preview, the drafts panel's lint, the code editor): their first load
+// is paid here, at collection, never inside a case's clock (`check:test-source-alias`).
+import '@object-ui/plugin-detail';
 
 const dataSource = createEmptyDataSource();
 failOnAbsorbedFetchError();
@@ -197,29 +212,23 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-function renderPillar() {
+/** objectstack#36903 — the designer on one flow's address. */
+function renderPillar(name: string) {
   return render(
-    <MemoryRouter initialEntries={[`/studio/${PKG}/automations`]}>
-      <AutomationsPillar packageId={PKG} />
+    <MemoryRouter initialEntries={[`/studio/${PKG}/metadata/flow/${name}`]}>
+      <AutomationsPillar packageId={PKG} flowName={name} />
     </MemoryRouter>,
   );
 }
 
-const en = (key: string) => t(key, 'en');
-
-/** The rail row's status element (the dot or the chip) for the flow labelled `label`. */
-async function railStatus(label: string): Promise<HTMLElement> {
-  const row = await screen.findByRole('button', { name: new RegExp(label) }, { timeout: 8000 });
-  let el: HTMLElement | null = null;
-  await waitFor(
-    () => {
-      el = row.querySelector('span[title]');
-      expect(el).not.toBeNull();
-    },
-    { timeout: 8000 },
-  );
-  return el!;
+/** The list's create, then the created flow's designer, as the list's `onCreated` opens it. */
+function CreateThenOpen(): React.ReactElement {
+  const [created, setCreated] = React.useState<string | null>(null);
+  if (created) return <AutomationsPillar packageId={PKG} flowName={created} />;
+  return <ListFlowCreate packageId={PKG} onCreated={({ name }) => setCreated(name)} />;
 }
+
+const en = (key: string) => t(key, 'en');
 
 /** The header pill whose label is `label` (e.g. "Status"): the pill element and its value. */
 function headerPill(label: string): { pill: HTMLElement; value: string } {
@@ -227,9 +236,9 @@ function headerPill(label: string): { pill: HTMLElement; value: string } {
   return { pill: labelEl.parentElement as HTMLElement, value: labelEl.nextElementSibling?.textContent ?? '' };
 }
 
-/** Open the flow labelled `label` from the rail and wait until its header names it (the API name on the chip's tooltip). */
-async function openFlow(label: string, name: string): Promise<void> {
-  fireEvent.click(await screen.findByRole('button', { name: new RegExp(label) }, { timeout: 8000 }));
+/** Open the flow on its address and wait until its header names it (the API name on the chip's tooltip). */
+async function openFlow(_label: string, name: string): Promise<void> {
+  renderPillar(name);
   await screen.findByTitle(`API name: ${name}`, undefined, { timeout: 8000 });
   await screen.findByText('Status:', undefined, { timeout: 8000 });
 }
@@ -247,7 +256,6 @@ function openProblems(): void {
 
 describe('the header Trigger pill reads the Start node (objectui#11779)', () => {
   it('a record-triggered flow shows its trigger event and object, not the flow type "autolaunched"', async () => {
-    renderPillar();
     await openFlow('Notify on update', 'notify_on_update');
     const { value } = headerPill('Trigger');
     expect(value).toBe('Record updated · task');
@@ -255,9 +263,10 @@ describe('the header Trigger pill reads the Start node (objectui#11779)', () => 
   });
 
   it('a schedule flow reads as a schedule; a manual flow falls back to its type', async () => {
-    renderPillar();
     await openFlow('Task due reminder', 'task_due_reminder');
     expect(headerPill('Trigger').value).toBe('Schedule');
+    // objectstack#36903 — another flow is another address: a fresh mount.
+    cleanup();
     await openFlow('Approve manually', 'approve_manually');
     expect(headerPill('Trigger').value).toBe('autolaunched');
   });
@@ -265,20 +274,14 @@ describe('the header Trigger pill reads the Start node (objectui#11779)', () => 
   // objectui#12845 — the label names the schedule KIND, not one cadence: an
   // interval flow reads exactly what the cron flow above reads, never "cron".
   it('an interval schedule flow reads the same Schedule label as a cron one, never cron', async () => {
-    renderPillar();
     await openFlow('Scheduled digest', 'scheduled_digest');
     expect(headerPill('Trigger').value).toBe('Schedule');
     expect(headerPill('Trigger').value).not.toMatch(/cron/i);
   });
 });
 
-describe('one run status in the rail, the header and Problems (objectui#11779)', () => {
-  it('a published flow with no `status` key reads On in the rail and the header, never "draft" — the control', async () => {
-    renderPillar();
-    const dot = await railStatus('Notify on update');
-    expect(dot).toHaveTextContent(en('engine.studio.auto.on'));
-    expect(dot).toHaveAttribute('title', en('engine.studio.auto.onBound'));
-
+describe('one run status in the header and Problems (objectstack#36903: the rail is gone) (objectui#11779)', () => {
+  it('a published flow with no `status` key reads On in the header, never "draft" — the control', async () => {
     await openFlow('Notify on update', 'notify_on_update');
     const pill = await statusPillReads(en('engine.studio.auto.on'));
     expect(pill).toHaveAttribute('title', en('engine.studio.auto.onBound'));
@@ -286,13 +289,7 @@ describe('one run status in the rail, the header and Problems (objectui#11779)',
     expect(pill.innerHTML).toMatch(/emerald/);
   });
 
-  it('an unbound schedule flow reads "Not running here" in the rail and the header alike, titled with the reason, and not On', async () => {
-    renderPillar();
-    const chip = await railStatus('Task due reminder');
-    expect(chip).toHaveTextContent(en('engine.studio.auto.notRunning'));
-    expect(chip).toHaveAttribute('title', REASON);
-    expect(chip).not.toHaveTextContent(en('engine.studio.auto.on'));
-
+  it('an unbound schedule flow reads "Not running here" in the header alike, titled with the reason, and not On', async () => {
     await openFlow('Task due reminder', 'task_due_reminder');
     const pill = await statusPillReads(en('engine.studio.auto.notRunning'));
     expect(pill).toHaveAttribute('title', REASON);
@@ -300,7 +297,6 @@ describe('one run status in the rail, the header and Problems (objectui#11779)',
   });
 
   it('Problems says so too: a note carrying the reason, not counted as a problem and not an error', async () => {
-    renderPillar();
     await openFlow('Task due reminder', 'task_due_reminder');
     await statusPillReads(en('engine.studio.auto.notRunning'));
     openProblems();
@@ -315,11 +311,6 @@ describe('one run status in the rail, the header and Problems (objectui#11779)',
   });
 
   it('a flow with no declared trigger reads On, says "no trigger", and gets no Problems note — the control', async () => {
-    renderPillar();
-    const dot = await railStatus('Approve manually');
-    expect(dot).toHaveTextContent(en('engine.studio.auto.on'));
-    expect(dot).toHaveAttribute('title', en('engine.studio.auto.onUnbound'));
-
     await openFlow('Approve manually', 'approve_manually');
     const pill = await statusPillReads(en('engine.studio.auto.on'));
     expect(pill).toHaveAttribute('title', en('engine.studio.auto.onUnbound'));
@@ -328,23 +319,21 @@ describe('one run status in the rail, the header and Problems (objectui#11779)',
     expect(screen.queryByTestId('flow-run-status-note')).toBeNull();
   });
 
-  it('a flow the engine does not have reads as an unpublished draft in the header, and carries no rail status', async () => {
-    renderPillar();
-    await railStatus('Notify on update'); // the runtime rows are in
+  it('a flow the engine does not have reads as an unpublished draft in the header', async () => {
     await openFlow('Never published', 'never_published');
     await statusPillReads(en('engine.studio.unpublishedDraft'));
-    const row = screen.getByRole('button', { name: /Never published/ });
-    expect(row.querySelector('span[title]')).toBeNull();
   });
 });
 
 describe('a new flow is born switched off, as the bar promises (objectui#11779)', () => {
   it('"New" saves `status: obsolete`, a spec-valid flow, and the switch reads Disabled under "Off by default"', async () => {
-    renderPillar();
-    await railStatus('Notify on update');
-    expect(screen.getByText(en('engine.studio.auto.defaultOff'))).toBeInTheDocument();
-
-    fireEvent.click(screen.getByTitle(en('engine.studio.auto.newTitle')));
+    // objectstack#36903 — created from the list's 「新建」, then opened on its address.
+    render(
+      <MemoryRouter initialEntries={[`/studio/${PKG}/metadata/flow`]}>
+        <CreateThenOpen />
+      </MemoryRouter>,
+    );
+    fireEvent.click(await screen.findByTitle(en('engine.studio.auto.newTitle'), undefined, { timeout: 8000 }));
     fireEvent.change(await screen.findByPlaceholderText(en('engine.studio.auto.namePlaceholder')), {
       target: { value: 'Offer notice' },
     });
@@ -362,5 +351,6 @@ describe('a new flow is born switched off, as the bar promises (objectui#11779)'
     const toggle = await screen.findByRole('switch', undefined, { timeout: 8000 });
     expect(toggle).toHaveAttribute('aria-checked', 'false');
     expect(toggle).toHaveTextContent(en('engine.studio.auto.disabled'));
+    expect(screen.getByText(en('engine.studio.auto.defaultOff'))).toBeInTheDocument();
   });
 });
