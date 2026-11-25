@@ -634,3 +634,141 @@ describe('RelatedList — a body table draws the list\'s dense rows (objectstack
     expect(tableRoot()?.className ?? '').not.toContain('[&_tbody_td]:h-8');
   });
 });
+
+describe('RelatedList — a body table in the record preview drawer settles its columns (objectstack#37212)', () => {
+  // The preview drawer opens 460 px wide, which leaves its details column a
+  // 326 px scroll box: the width at which this list's column cap read the
+  // table data-table drew for the PREVIOUS cap (data-table adopts a new
+  // `columns` prop a commit later) and flipped 1 -> 2 -> 1 until React gave
+  // up with "Maximum update depth exceeded" (#185). The full page's details
+  // column is wide enough that nothing is left out, so it never flipped.
+  //
+  // The layout below is the browser's, reduced to what the cap reads: a data
+  // header cell is as wide as its inline min-width (else its own natural
+  // width), the row-actions cell is 66 px, and a table narrower than its box
+  // stretches to fill it, the actions cell taking its share.
+  const ACTIONS_PX = 66;
+  const NATURAL_PX: Record<string, number> = { product: 104, tier: 156, quantity: 112, total: 120 };
+  let boxPx = 326;
+  const proto = HTMLElement.prototype;
+  const saved = {
+    scrollWidth: Object.getOwnPropertyDescriptor(proto, 'scrollWidth'),
+    clientWidth: Object.getOwnPropertyDescriptor(proto, 'clientWidth'),
+    getBoundingClientRect: Object.getOwnPropertyDescriptor(proto, 'getBoundingClientRect'),
+  };
+  const dataCellPx = (th: HTMLElement) =>
+    parseFloat(th.style.minWidth) || NATURAL_PX[th.getAttribute('data-column-key') ?? ''] || 0;
+  const tableOf = (box: HTMLElement) => {
+    const heads = Array.from(box.querySelectorAll<HTMLElement>('thead th[data-column-key]'));
+    const data = heads.reduce((sum, th) => sum + dataCellPx(th), 0);
+    const natural = data + ACTIONS_PX;
+    const stretch = Math.max(0, boxPx - natural);
+    return { natural, actionsPx: ACTIONS_PX + (stretch * ACTIONS_PX) / natural };
+  };
+  beforeAll(() => {
+    Object.defineProperty(proto, 'clientWidth', {
+      configurable: true,
+      get(this: HTMLElement) {
+        return this.hasAttribute('data-table-scroll-box') ? boxPx : 0;
+      },
+    });
+    Object.defineProperty(proto, 'scrollWidth', {
+      configurable: true,
+      get(this: HTMLElement) {
+        return this.hasAttribute('data-table-scroll-box') ? Math.max(boxPx, tableOf(this).natural) : 0;
+      },
+    });
+    Object.defineProperty(proto, 'getBoundingClientRect', {
+      configurable: true,
+      value(this: HTMLElement) {
+        const box = this.tagName === 'TH' ? this.closest<HTMLElement>('[data-table-scroll-box]') : null;
+        const width = !box ? 0 : this.hasAttribute('data-column-key') ? dataCellPx(this) : tableOf(box).actionsPx;
+        return { x: 0, y: 0, top: 0, left: 0, bottom: 0, right: width, width, height: 0, toJSON() {} } as DOMRect;
+      },
+    });
+  });
+  afterAll(() => {
+    for (const [key, descriptor] of Object.entries(saved)) {
+      if (descriptor) Object.defineProperty(proto, key, descriptor);
+      else delete (proto as any)[key];
+    }
+  });
+  afterEach(() => {
+    boxPx = 326;
+    vi.restoreAllMocks();
+  });
+
+  // The first column's cells store a long value and draw a short label, so the
+  // table's first estimate of it (from the stored value) is wider than the
+  // width it asks for once drawn — the move that set the cap flipping.
+  const lineFields = {
+    product: {
+      type: 'select',
+      label: 'Product',
+      options: [{ value: 'enterprise_license_annual_plan', label: 'License' }],
+    },
+    tier: { type: 'text', label: 'Tier level' },
+    quantity: { type: 'number', label: 'Quantity' },
+    total: { type: 'currency', label: 'Total', currencyConfig: { currencyMode: 'fixed', defaultCurrency: 'USD' } },
+  };
+  const lineRows = [
+    { id: 'l1', product: 'enterprise_license_annual_plan', tier: 'ent', quantity: 2, total: 20 },
+    { id: 'l2', product: 'enterprise_license_annual_plan', tier: 'std', quantity: 3, total: 45 },
+  ];
+
+  function renderLines() {
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
+    render(
+      <RecordBodyTablesContext.Provider value={new Set(['opportunity_line_item.opportunity'])}>
+        <RelatedEnlargeContext.Provider value={vi.fn()}>
+          <RelatedList
+            title="Line items"
+            type="table"
+            api="opportunity_line_item"
+            objectName="opportunity_line_item"
+            referenceField="opportunity"
+            parentId="o1"
+            columns={Object.keys(lineFields).map((field) => ({ field, label: (lineFields as any)[field].label }))}
+            data={lineRows}
+            onRowEdit={vi.fn()}
+            dataSource={{
+              find: vi.fn(async () => lineRows),
+              getObjectSchema: vi.fn(async () => ({ name: 'opportunity_line_item', fields: lineFields })),
+            } as any}
+          />
+        </RelatedEnlargeContext.Provider>
+      </RecordBodyTablesContext.Provider>,
+    );
+    return errors;
+  }
+  const headerKeys = () =>
+    Array.from(document.querySelectorAll('thead th[data-column-key]')).map((th) => th.getAttribute('data-column-key'));
+  const updateDepthErrors = (errors: ReturnType<typeof vi.spyOn>) =>
+    errors.mock.calls.filter((call) => /Maximum update depth|#185/.test(call.map(String).join(' ')));
+
+  it('in the 326 px details column of the 460 px preview: the table draws, and the cap settles on the leading columns that fit', async () => {
+    const errors = renderLines();
+    await waitFor(() => expect(document.querySelector('[data-body-table-columns-omitted]')).not.toBeNull());
+    // Let every read the table's re-draws trigger run out.
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(screen.queryByText(/failed to render/i)).toBeNull();
+    expect(updateDepthErrors(errors)).toEqual([]);
+    // Settled: what the list hands is what the table draws, a leading run.
+    const host = document.querySelector('[data-body-table-overflow]') as HTMLElement;
+    const omitted = Number(host.getAttribute('data-body-table-columns-omitted'));
+    const keys = Object.keys(lineFields);
+    expect(headerKeys()).toEqual(keys.slice(0, keys.length - omitted));
+    expect(screen.getAllByText('License').length).toBeGreaterThan(0);
+  });
+
+  it('CONTROL — the full page\'s wide details column: every column drawn, none left out, no error', async () => {
+    boxPx = 1052;
+    const errors = renderLines();
+    await waitFor(() => expect(screen.getAllByText('License').length).toBeGreaterThan(0));
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(screen.queryByText(/failed to render/i)).toBeNull();
+    expect(updateDepthErrors(errors)).toEqual([]);
+    expect(document.querySelector('[data-body-table-columns-omitted]')).toBeNull();
+    expect(headerKeys()).toEqual(Object.keys(lineFields));
+  });
+});
