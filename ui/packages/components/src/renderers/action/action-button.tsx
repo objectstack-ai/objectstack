@@ -182,8 +182,9 @@ const ActionButtonRenderer = forwardRef<
 
     const { execute } = useAction();
     const [loading, setLoading] = useState(false);
-    // Every read of the label below goes through this guard (see `renderableLabel`).
-    const label = renderableLabel(schema.label, schema.id ?? schema.name ?? dataObjId ?? 'action:button');
+    // Every read of the label below goes through this guard (see `renderableLabel`);
+    // `data-obj-id` is the component id `SchemaRenderer` hands down.
+    const label = renderableLabel(schema.label, dataObjId ?? schema.name ?? 'action:button');
 
     // Record data may be passed from SchemaRenderer (e.g. DetailView passes
     // record data), bound the three canonical ways — `record.status`, bare
