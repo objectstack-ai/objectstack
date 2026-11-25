@@ -62,7 +62,8 @@ const result = KnowledgeChunkSchema.parse(data);
 | **title** | `string` | optional |  |
 | **metadata** | `Record<string, any>` | optional (default: `{}`) |  |
 | **permissions** | `string[]` | optional |  |
-| **docHash** | `string` | optional | Service-computed hash of the assembled document (content, title, metadata); stored and returned as stored by the adapter |
+| **organizationId** | `string` | optional | Organization of the record the document was assembled from; set by the knowledge service under a walled tenancy posture |
+| **docHash** | `string` | optional | Service-computed hash of the assembled document (content, title, metadata, and organizationId when set); stored and returned as stored by the adapter |
 | **chunks** | `{ id: string; documentId: string; index: integer; content: string; … }[]` | optional | Service-cut passages of the document, handed to an adapter that declares capabilities.chunks |
 
 ### Nested Shape: `KnowledgeDocument.chunks[number]`
