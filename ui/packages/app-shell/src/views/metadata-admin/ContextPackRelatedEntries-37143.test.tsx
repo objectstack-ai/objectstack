@@ -64,7 +64,7 @@ function relatedRow(): Record<string, unknown> | undefined {
   return undefined;
 }
 
-function renderBlock(value: unknown, onChange = vi.fn(), root: string | undefined = 'policy') {
+function renderBlock(value: unknown, onChange = vi.fn(), root: string | null = 'policy') {
   render(
     <Entries
       id="related"
@@ -72,7 +72,7 @@ function renderBlock(value: unknown, onChange = vi.fn(), root: string | undefine
       onChange={onChange}
       schema={RELATED_SCHEMA}
       fieldSpec={relatedRow() as never}
-      formData={{ name: 'policy_document', label: 'Policy document', object: root }}
+      formData={{ name: 'policy_document', label: 'Policy document', ...(root === null ? {} : { object: root }) }}
     />,
   );
   return onChange;
@@ -149,7 +149,7 @@ describe('context pack related lists (objectstack#37143)', () => {
     renderBlock([{ object: 'policy', field: 'parent' }, { object: 'policy_revision' }, { object: 'acknowledgement', field: 'policy' }]);
     expect(screen.getByTestId('context-pack-add-list')).toBeDisabled();
     cleanup();
-    renderBlock(undefined, vi.fn(), undefined);
+    renderBlock(undefined, vi.fn(), null);
     expect(screen.getByTestId('context-pack-add-list')).toBeDisabled();
   });
 
