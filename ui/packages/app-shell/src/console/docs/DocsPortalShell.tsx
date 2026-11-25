@@ -38,7 +38,7 @@
  * @module
  */
 
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from 'react';
 import type { ConnectionState } from '@object-ui/data-objectstack';
 import { useNavigate } from 'react-router-dom';
 import { AppShell } from '@object-ui/layout';
@@ -82,14 +82,12 @@ function useAdapterConnectionState(dataSource: unknown): ConnectionState | undef
     getConnectionState?: () => ConnectionState;
     onConnectionStateChange?: (listener: (event: { state: ConnectionState }) => void) => () => void;
   } | null;
-  const [state, setState] = useState<ConnectionState | undefined>(() => adapter?.getConnectionState?.());
-  useEffect(() => {
-    if (!adapter?.onConnectionStateChange) return undefined;
-    const unsubscribe = adapter.onConnectionStateChange((event) => setState(event.state));
-    setState(adapter.getConnectionState?.());
-    return unsubscribe;
-  }, [adapter]);
-  return state;
+  const subscribe = useCallback(
+    (onChange: () => void) => adapter?.onConnectionStateChange?.(() => onChange()) ?? (() => {}),
+    [adapter],
+  );
+  const read = useCallback(() => adapter?.getConnectionState?.(), [adapter]);
+  return useSyncExternalStore(subscribe, read, read);
 }
 
 /** Inside the sidebar provider: the window's width decides the sidebar's start state, as in an app. */
