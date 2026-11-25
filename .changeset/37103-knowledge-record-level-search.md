@@ -1,5 +1,5 @@
 ---
-'@objectstack/spec': patch
+'@objectstack/spec': minor
 '@objectstack/service-knowledge': patch
 '@objectstack/knowledge-memory': patch
 ---
@@ -7,7 +7,8 @@
 feat(service-knowledge): a search can answer records, not passages — `granularity` and `groupBy`, with a freshness check
 
 Clause-②: yes (widening)
-Metadata-protocol: none
+Metadata-protocol: added
+Skills-docs: none — no page under `skills/**` teaches the knowledge search options or the hit's shape (the one knowledge eval asks about source authoring); `content/docs/ai/knowledge-rag.mdx` and `content/docs/protocol/knowledge.mdx` teach them, updated here.
 
 ADR-0161 K1 (record-level return), K8 items 3 and 14.
 
