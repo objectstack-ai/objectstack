@@ -16,7 +16,26 @@
     },
     "ai/AiContext": {
       "sites": [
-        "related"
+        "related",
+        "related.element.orderBy",
+        "related.element.where.lazy",
+        "related.element.where.lazy.lazy",
+        "related.element.where.lazy.lazy.right.$not.lazy"
+      ]
+    },
+    "ai/AiContextRelated": {
+      "sites": [
+        "orderBy",
+        "where.lazy",
+        "where.lazy.lazy",
+        "where.lazy.lazy.right.$not.lazy"
+      ]
+    },
+    "ai/AiContextRelatedWhere": {
+      "sites": [
+        "lazy",
+        "lazy.lazy",
+        "lazy.lazy.right.$not.lazy"
       ]
     },
     "ai/BlueprintField": {
@@ -122,6 +141,9 @@
         "manifest.agents.element.memory",
         "manifest.agents.element.structuredOutput.schema",
         "manifest.aiContexts.element.related",
+        "manifest.aiContexts.element.related.element.orderBy",
+        "manifest.aiContexts.element.related.element.where.lazy",
+        "manifest.aiContexts.element.related.element.where.lazy.lazy",
         "manifest.analyticsCubes.element.measures.valueType",
         "manifest.apps.element",
         "manifest.assignmentRules.element",
@@ -317,6 +339,9 @@
         "data.options[1].manifest.agents.element.memory",
         "data.options[1].manifest.agents.element.structuredOutput.schema",
         "data.options[1].manifest.aiContexts.element.related",
+        "data.options[1].manifest.aiContexts.element.related.element.orderBy",
+        "data.options[1].manifest.aiContexts.element.related.element.where.lazy",
+        "data.options[1].manifest.aiContexts.element.related.element.where.lazy.lazy",
         "data.options[1].manifest.analyticsCubes.element.measures.valueType",
         "data.options[1].manifest.apps.element",
         "data.options[1].manifest.assignmentRules.element",
@@ -491,6 +516,9 @@
         "options[1].manifest.agents.element.memory",
         "options[1].manifest.agents.element.structuredOutput.schema",
         "options[1].manifest.aiContexts.element.related",
+        "options[1].manifest.aiContexts.element.related.element.orderBy",
+        "options[1].manifest.aiContexts.element.related.element.where.lazy",
+        "options[1].manifest.aiContexts.element.related.element.where.lazy.lazy",
         "options[1].manifest.analyticsCubes.element.measures.valueType",
         "options[1].manifest.apps.element",
         "options[1].manifest.assignmentRules.element",
@@ -593,6 +621,8 @@
         "data.packages.element.options[1].manifest.agents.element.memory",
         "data.packages.element.options[1].manifest.agents.element.structuredOutput.schema",
         "data.packages.element.options[1].manifest.aiContexts.element.related",
+        "data.packages.element.options[1].manifest.aiContexts.element.related.element.orderBy",
+        "data.packages.element.options[1].manifest.aiContexts.element.related.element.where.lazy",
         "data.packages.element.options[1].manifest.analyticsCubes.element.measures.valueType",
         "data.packages.element.options[1].manifest.apps.element",
         "data.packages.element.options[1].manifest.assignmentRules.element",

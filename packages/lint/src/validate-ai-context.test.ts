@@ -69,6 +69,33 @@ describe('validateAiContext — ADR-0160 D1 author defects', () => {
     ]);
   });
 
+  it('reports a where or orderBy field the child does not define (ADR-0160 second amendment): the list is left out', () => {
+    const stack = {
+      objects,
+      aiContexts: [pack({
+        related: [{
+          object: 'policy_revision',
+          fields: ['version'],
+          where: { $or: [{ version: 'v1' }, { is_curent: true }] },
+          orderBy: [{ field: 'version', order: 'asc' }, { field: 'sortno', order: 'desc' }],
+          limit: 5,
+        }],
+      })],
+    };
+    expect(rulesOf(stack)).toEqual([
+      [AI_CONTEXT_FIELD_UNKNOWN, 'aiContexts[0].related[0].where'],
+      [AI_CONTEXT_FIELD_UNKNOWN, 'aiContexts[0].related[0].orderBy[1].field'],
+    ]);
+    const [whereFinding] = validateAiContext(stack);
+    expect(whereFinding.message).toContain("'is_curent'");
+    expect(whereFinding.message).toContain('left out');
+    // Control: the same keys on fields the child defines are clean.
+    expect(rulesOf({
+      objects,
+      aiContexts: [pack({ related: [{ object: 'policy_revision', where: { version: { $ne: 'v0' } }, orderBy: [{ field: 'version' }] }] })],
+    })).toEqual([]);
+  });
+
   it('reports an object the stack does not define once, without judging its fields; a sys_ object is not judged', () => {
     expect(rulesOf({ objects, aiContexts: [pack({ object: 'polcy', related: undefined, body: undefined })] })).toEqual([
       [AI_CONTEXT_OBJECT_UNKNOWN, 'aiContexts[0].object'],
@@ -132,6 +159,7 @@ describe('validateAiContext on the runtime publish door (ADR-0160 D1)', () => {
 
   const FAMILIES: ReadonlyArray<[string, Record<string, unknown>, string, string]> = [
     ['a misspelled field', pack({ fields: ['title', 'titel'] }), AI_CONTEXT_FIELD_UNKNOWN, 'aiContexts[0].fields[1]'],
+    ['a misspelled where field', pack({ related: [{ object: 'policy_revision', where: { verison: 'v1' } }] }), AI_CONTEXT_FIELD_UNKNOWN, 'aiContexts[0].related[0].where'],
     ['an unknown related object', pack({ related: [{ object: 'policy_revison' }] }), AI_CONTEXT_OBJECT_UNKNOWN, 'aiContexts[0].related[0].object'],
     ['a related list with no link', pack({ related: [{ object: 'account' }] }), AI_CONTEXT_RELATED_LINK_UNKNOWN, 'aiContexts[0].related[0]'],
     ['a body that is not long text', pack({ body: { field: 'title' } }), AI_CONTEXT_BODY_NOT_LONG_TEXT, 'aiContexts[0].body.field'],

@@ -14,7 +14,10 @@
  * Four verdicts, each a `warning` (the pack loads and reads what resolves):
  *
  * - `ai-context-field-unknown`: a name in `fields`, a `related` entry's
- *   `fields`, or `body.field` that the object does not define;
+ *   `fields`, `where` or `orderBy`, or `body.field` that the object does not
+ *   define (a `where` or `orderBy` field the child lacks leaves the whole list
+ *   out of every answer, ADR-0160 D1/D3 second amendment — the tool never
+ *   runs a filter with one of its conditions removed);
  * - `ai-context-related-link-unknown`: a `related` entry with no reference
  *   field to the root — `field` names none that points at it, or, omitted, the
  *   child has none or several (then `field` must say which);
@@ -39,7 +42,7 @@
  * unchanged.
  */
 
-import { AI_CONTEXT_BODY_FIELD_TYPES } from '@objectstack/spec/ai';
+import { AI_CONTEXT_BODY_FIELD_TYPES, aiContextWhereFields } from '@objectstack/spec/ai';
 import { REFERENCE_VALUE_TYPES, referenceTargetOf } from '@objectstack/spec/data';
 import { closureDependencyRemedy, recordsOf } from './object-graph.js';
 
@@ -188,6 +191,28 @@ export function validateAiContext(
       const childFields = judged(child, where, `${path}.object`);
       if (!childFields) return;
       unknownFields(strings(entry.fields), childFields, child, where, `${path}.fields`);
+      // [ADR-0160 D1, second amendment] The fields `where` and `orderBy` name.
+      // One the child lacks is no condition dropped: the list is left out.
+      const listLeftOut = (name: string, key: 'where' | 'orderBy', at: string) => {
+        out.push({
+          severity: 'warning',
+          rule: AI_CONTEXT_FIELD_UNKNOWN,
+          where,
+          path: at,
+          message:
+            `\`${key}\` names field '${name}', which object '${child}' does not define, so the list is left out of ` +
+            'every answer (a filter or an order is never read with one of its fields removed)',
+          hint: `Name a field of '${child}' (check the spelling), or remove it from \`${key}\``,
+        });
+      };
+      for (const name of aiContextWhereFields(entry.where)) {
+        if (!childFields.has(name)) listLeftOut(name, 'where', `${path}.where`);
+      }
+      const orderBy = Array.isArray(entry.orderBy) ? (entry.orderBy as unknown[]) : [];
+      orderBy.forEach((node, k) => {
+        const name = node && typeof node === 'object' ? str((node as AnyRec).field) : '';
+        if (name && !childFields.has(name)) listLeftOut(name, 'orderBy', `${path}.orderBy[${k}].field`);
+      });
       if (!root || !objects.has(root)) return;
       const named = str(entry.field);
       const links = [...childFields.keys()].filter((name) => referenceOf(childFields.get(name)) === root);
