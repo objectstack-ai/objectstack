@@ -1,5 +1,5 @@
 ---
-'@objectstack/spec': patch
+'@objectstack/spec': minor
 '@objectstack/service-knowledge': patch
 '@objectstack/knowledge-memory': patch
 ---
@@ -7,7 +7,7 @@
 feat(service-knowledge): adapters list their documents; a complete reindex skips unchanged documents and purges the ones its source no longer has; one adapter contract test suite
 
 Clause-②: yes
-Metadata-protocol: none
+Metadata-protocol: added
 
 Two optional knowledge-adapter contract members land with their reader (ADR-0161 K8, items 1 and 2):
 
