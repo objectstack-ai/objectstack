@@ -18,12 +18,14 @@ of them:
 | **Fields** | `fields` rows, `viewAllFields`, and a field's own `requiredPermissions` | Which fields of those records the caller reads and edits. |
 
 <Callout type="warn">
-**From v19, View All and Modify All stop opening fields.** Until then a set
-that holds `viewAllRecords` on an object also reads every field of it, and a
-set that holds `modifyAllRecords` reads and edits every field (the exact votes
-are under [Server-side enforcement](#server-side-enforcement-of-declared-rules)).
-Do not build on that: where a set should read every field, grant
-[`viewAllFields`](#viewallfields-a-set-that-reads-every-field).
+**View All and Modify All do not open fields (v19).** A set that holds
+`viewAllRecords` or `modifyAllRecords` on an object reaches every record of
+it and casts no field vote: a field another set hides stays hidden, and the
+set's own `fields` rows still hide or lock their fields. Where a set should
+read every field, grant
+[`viewAllFields`](#viewallfields-a-set-that-reads-every-field). Up to v18 the
+two bits also read (and Modify All also edited) every field;
+`os migrate meta --from 18` adds `viewAllFields: true` beside them in source.
 </Callout>
 
 ## Choosing by sensitivity
@@ -242,8 +244,8 @@ roll-up is not a computed field in this sense: it does not follow the
 fields it aggregates, so mask it on its own where a set must not see it.
 The record the engine echoes for a
 public-form submission carries no computed field that reads through a
-reference. View All, Modify All and `viewAllFields` lift a permission set's
-`readable: false`, not a capability gate or a masking rule, so their holders
+reference. `viewAllFields` lifts a permission set's
+`readable: false`, not a capability gate or a masking rule, so its holders
 are withheld a computed field over such a field too. To let a permission
 set's holders read a computed field, grant that set read on every field
 the expression reads, unmasked: the capability a field's
@@ -284,16 +286,9 @@ only constrain fields they explicitly enumerate, and field grants union
 most-permissively across a user's sets (one set's `readable: true`
 out-votes another set's `false`). Until a subtractive muting layer lands
 (ADR-0066 ⑧), a `{ readable: false }` rule masks the field only as long
-as **no other set the user holds** declares it `readable: true`, carries
-`viewAllFields` on that object, or holds
-View All (`viewAllRecords`, reads every field of the object) or Modify All
-(`modifyAllRecords`, reads and edits every field) on that object, and
-the set that declares it does not itself hold Modify All on that object:
-the set's own View All or `viewAllFields` leaves its `readable: false`
-binding, while its
-own Modify All still reads and edits every field of the object, its own
-rows included (`security-superuser-field-mask-inert` warns on such a row),
-until v19, when View All and Modify All stop voting on fields — so
+as **no other set the user holds** declares it `readable: true` or carries
+`viewAllFields` on that object (View All and Modify All cast no field vote)
+— so
 gate a high-sensitivity field with `requiredPermissions`
 ([Choosing by sensitivity](#choosing-by-sensitivity)), grant a
 position-dependent field only in the sets that need

@@ -67,7 +67,7 @@
  *    the field (`foldFieldRequiredPermissions`), unless the set's
  *    `systemPermissions` hold EVERY listed capability. View All / Modify All
  *    lifts neither: the object gate runs whatever the grants, and the field fold
- *    runs after the super-user vote ({@link missingCapabilities}).
+ *    runs after the `viewAllFields` vote ({@link missingCapabilities}).
  *
  * ## What is judged, per (permission set × summary field)
  *

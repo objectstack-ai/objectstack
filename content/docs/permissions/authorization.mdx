@@ -153,27 +153,23 @@ implementation detail:
 <Callout type="warn">
 **FLS posture (ADR-0066 ⑧):** runtime field security is block-list-shaped —
 an **undeclared** field is visible by default, and field grants union (one
-set's `readable: true` out-votes another's `false`). A set that holds View All
-(`viewAllRecords`) on an object also votes `readable: true` on every field of
-that object, and a set that holds Modify All (`modifyAllRecords`) votes
-`readable: true` and `editable: true`; View All never grants an edit. So
+set's `readable: true` out-votes another's `false`). View All
+(`viewAllRecords`) and Modify All (`modifyAllRecords`) widen records only and
+cast no field vote. A set that carries `viewAllFields` on an object votes
+`readable: true` on every field of that object, and never an edit vote. So
 another set's `readable: false` never hides a field from a caller who also
-holds a View All or Modify All set on its object; a field's
-`requiredPermissions` capability gate still applies to every caller. One
-exception: a View All set casts no read vote on a field its **own**
+holds a `viewAllFields` set on its object; a field's `requiredPermissions`
+capability gate still applies to every caller. One exception: a
+`viewAllFields` set casts no read vote on a field its **own**
 `readable: false` entry hides, so that entry binds the set's holders, unless
 another set they hold casts a read vote on the field (its own `readable: true`
-entry, or View All or Modify All on the object); a co-held set that says
-nothing about the field does not restore it. A Modify All set still votes on
-every field, its own entries included. Otherwise union without deny is
-unchanged. A set that carries `viewAllFields` on the object casts the same
-read vote as View All, under the same own-entry exception, and never an edit
-vote. From v19 View All and Modify All stop voting on fields: where a set
-should read every field, grant
+entry, or `viewAllFields` on the object); a co-held set that says nothing about
+the field does not restore it. Otherwise union without deny is unchanged. Up
+to v18 View All and Modify All also voted on fields; where a set should read
+every field, grant
 [`viewAllFields`](/docs/permissions/field-level-security#viewallfields-a-set-that-reads-every-field).
 Until the muting layer lands, protect sensitive fields by granting them only
-in the sets that need them, grant the object without Modify All to a set that
-must withhold a field from its own holders, and treat "sensitive field on a
+in the sets that need them, and treat "sensitive field on a
 public object" as a review smell.
 </Callout>
 
