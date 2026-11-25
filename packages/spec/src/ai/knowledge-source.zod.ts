@@ -214,7 +214,11 @@ export type KnowledgeRefreshPolicy = z.input<typeof KnowledgeRefreshPolicySchema
 /** Post-parse shape of {@link KnowledgeRefreshPolicy} — defaults applied, transforms run (ADR-0122): `cron` is the `{ dialect: 'cron', source }` envelope. */
 export type KnowledgeRefreshPolicyParsed = z.infer<typeof KnowledgeRefreshPolicySchema>;
 export type KnowledgeSplitStrategy = z.input<typeof KnowledgeSplitStrategySchema>;
+/** Post-parse shape of {@link KnowledgeSplitStrategy} (ADR-0122). */
+export type KnowledgeSplitStrategyParsed = z.infer<typeof KnowledgeSplitStrategySchema>;
 export type KnowledgeSplit = z.input<typeof KnowledgeSplitSchema>;
+/** Post-parse shape of {@link KnowledgeSplit} (ADR-0122). */
+export type KnowledgeSplitParsed = z.infer<typeof KnowledgeSplitSchema>;
 export type ObjectKnowledgeSource = z.input<typeof ObjectKnowledgeSourceSchema>;
 export type FileKnowledgeSource = z.input<typeof FileKnowledgeSourceSchema>;
 export type HttpKnowledgeSource = z.input<typeof HttpKnowledgeSourceSchema>;
