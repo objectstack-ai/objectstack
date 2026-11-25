@@ -17,6 +17,7 @@
  * knowledge page has exactly one sidebar entry exactly when the hub lists it.
  */
 
+import { createHash } from 'node:crypto';
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { LiteKernel } from '@objectstack/core';
 import type { Plugin, PluginContext } from '@objectstack/core';
@@ -37,6 +38,7 @@ import {
   aiEmbedderSettingsSpecifiers,
   aiTestEmbedderActionHandler,
   knowledgeTestActionHandler,
+  type CryptoAdapter,
   type SettingsService,
 } from '@objectstack/service-settings';
 import { KnowledgeServicePlugin } from '../knowledge-service-plugin.js';
@@ -215,6 +217,24 @@ const API_KEY = 'sk-embedder-secret-37094';
 
 interface LoggedLine { level: string; line: string }
 
+/**
+ * The API key is a secret field, which the settings service stores only through
+ * an adapter that declares confidentiality; this kernel has no data engine, so
+ * the adapter (not a crypto provider) is the seam.
+ */
+class ConfidentialTestAdapter implements CryptoAdapter {
+  readonly confidential = true;
+  async encrypt(plaintext: string): Promise<string> {
+    return 'kms:' + Buffer.from(plaintext, 'utf8').toString('base64');
+  }
+  async decrypt(ciphertext: string): Promise<string> {
+    return Buffer.from(ciphertext.replace(/^kms:/, ''), 'base64').toString('utf8');
+  }
+  digest(plaintext: string): string {
+    return createHash('sha256').update(plaintext).digest('hex');
+  }
+}
+
 /** Records every line the kernel's shared logger is handed. */
 class LogRecorder implements Plugin {
   name = 'test.log-recorder';
@@ -320,7 +340,7 @@ async function bootEmbedder(opts: {
     enableEventSync: false,
     sources: [{ id: 'docs', label: 'Docs', adapter: 'vec', source: { kind: 'http', urls: ['https://docs.example.com/'] } }],
   }));
-  kernel.use(new SettingsServicePlugin({ env: {}, registerRoutes: false }));
+  kernel.use(new SettingsServicePlugin({ env: {}, registerRoutes: false, crypto: new ConfidentialTestAdapter() }));
   kernel.use(new EmbeddingAdapterPlugin());
   if (opts.saved) kernel.use(new SavedAiSettings(opts.saved));
   await kernel.bootstrap();
