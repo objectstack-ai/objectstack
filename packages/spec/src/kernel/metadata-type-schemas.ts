@@ -72,6 +72,7 @@ import { PositionSchema } from '../identity/position.zod';
 import { AgentSchema } from '../ai/agent.zod';
 import { ToolSchema } from '../ai/tool.zod';
 import { SkillSchema } from '../ai/skill.zod';
+import { AiContextSchema } from '../ai/ai-context.zod';
 
 import type { MetadataType } from './metadata-plugin.zod';
 import { DEFAULT_METADATA_TYPE_REGISTRY } from './metadata-plugin.zod';
@@ -204,6 +205,7 @@ const BUILTIN_METADATA_TYPE_SCHEMAS: Partial<Record<MetadataType, z.ZodType>> = 
   agent: AgentSchema,
   tool: ToolSchema,
   skill: SkillSchema,
+  ai_context: AiContextSchema,
 };
 
 /**
