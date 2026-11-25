@@ -964,7 +964,7 @@ export function HomePage({ checklist }: HomePageProps = {}) {
                   {/* objectstack#26614 — on a deployment whose agent catalog
                     * is empty or absent, "Build an app" promises a build nothing
                     * here can start. There the chip says what it opens instead,
-                    * "New in Studio", and opens New Package in Setup → Packages,
+                    * "New blank app", and opens New Package in Setup → Packages,
                     * which lands in Studio on the new package (objectstack#36908); and
                     * since Studio is then the ONLY way to build, a session that
                     * may not author gets no chip rather than a dimmed one (the

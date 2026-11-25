@@ -10,7 +10,7 @@
  *
  *   - with an agent in the catalog the chip is unchanged: "Build an app", to
  *     `/studio`, dimmed with its reason for a session that may not author;
- *   - with none it says what it opens, "New in Studio", and opens Studio's
+ *   - with none it says what it opens, "New blank app", and opens Studio's
  *     new-package flow (`SETUP_NEW_PACKAGE_PATH`, Setup → Packages with New
  *     Package open since objectstack#36908);
  *   - with none, a session that may not author gets no build chip at all,
@@ -20,8 +20,8 @@
  *
  * objectstack#36969 — the AI form is drawn where the catalog serves the build
  * agent itself (alias-aware), not any agent: where in-app building is closed
- * the catalog keeps `ask` and drops `build`, and the chip takes the "New in
- * Studio" form there, as for an empty catalog. So the unchanged-chip cases
+ * the catalog keeps `ask` and drops `build`, and the chip takes the "New
+ * blank app" form there, as for an empty catalog. So the unchanged-chip cases
  * serve `build`; a catalog of `ask` or of another agent alone is pinned below.
  *
  * The catalog stand-in moves the way the real `useAgents` does: an empty first
@@ -44,8 +44,12 @@ const state = vi.hoisted(() => ({
   agents: [] as Array<{ name: string }>,
   /** Holds the catalog in flight. */
   catalogPending: false,
-  /** Whether the session holds the Setup → Packages pair (`setup.access` + `manage_platform_settings`). */
-  setupPair: true,
+  /**
+   * Whether the session holds the Setup → Packages pair (`setup.access` +
+   * `manage_platform_settings`). `'unreported'` stubs nothing: the real
+   * provider around the page answers, with no `systemPermissions` at all.
+   */
+  setupPair: true as boolean | 'unreported',
 }));
 
 vi.mock('react-router-dom', async () => {
@@ -117,6 +121,7 @@ vi.mock('@object-ui/permissions', async (importOriginal) => {
     ...actual,
     usePermissions: () => {
       const real = actual.usePermissions();
+      if (state.setupPair === 'unreported') return real;
       return {
         ...real,
         hasCapabilities: (required: string[]) =>
@@ -174,6 +179,7 @@ vi.mock('../../deployment-notice/DeploymentNotice', () => ({ DeploymentNotice: (
 import '@objectstack/lint';
 import { HomePage } from '../HomePage';
 import { SETUP_NEW_PACKAGE_PATH } from '../../../views/metadata-admin/packageSource';
+import { MePermissionsProvider, type MePermissionsAuthenticatedResponse } from '@object-ui/permissions';
 
 beforeEach(() => {
   navigateMock.mockReset();
@@ -213,7 +219,7 @@ describe('with the build agent in the catalog, the build chip is unchanged (obje
 });
 
 describe('with no agent in the catalog (objectstack#26614)', () => {
-  it('the chip reads "New in Studio" and opens Studio\'s new-package flow', async () => {
+  it('the chip reads "New blank app" and opens Studio\'s new-package flow', async () => {
     const user = userEvent.setup();
     render(<HomePage />);
     const chip = await screen.findByTestId('home-build-in-studio');
@@ -234,6 +240,41 @@ describe('with no agent in the catalog (objectstack#26614)', () => {
     expect(navigateMock).not.toHaveBeenCalledWith(SETUP_NEW_PACKAGE_PATH);
   });
 
+  /**
+   * objectstack#36908 — the doors fail OPEN where the server never reported
+   * the capability set, as their own authoring gate (`useCanAuthorMetadata`)
+   * does: the door is only a link, and Setup → Packages and the create route
+   * keep their own server-side gates. Nothing is stubbed here: the real
+   * provider answers, once with no `systemPermissions` and once (the control)
+   * with a reported set that holds neither capability of the pair.
+   */
+  it.each([
+    ['an unreported set (no `systemPermissions`) fails open, to Setup\'s New Package', undefined, SETUP_NEW_PACKAGE_PATH],
+    ['control: a reported set without the pair goes to the "All metadata" area', ['manage_metadata'], '/studio/~all/metadata'],
+  ])('%s', async (_case, systemPermissions, to) => {
+    state.setupPair = 'unreported';
+    const answer: MePermissionsAuthenticatedResponse = {
+      authenticated: true,
+      userId: 'u1',
+      tenantId: 'org_1',
+      positions: [],
+      hasAnyQueue: false,
+      objectsUsingQueues: [],
+      permissionSets: ['member'],
+      ...(systemPermissions ? { systemPermissions } : {}),
+      objects: {},
+      fields: {},
+    };
+    const user = userEvent.setup();
+    render(
+      <MePermissionsProvider initialPermissions={answer}>
+        <HomePage />
+      </MePermissionsProvider>,
+    );
+    await user.click(await screen.findByTestId('home-build-in-studio'));
+    expect(navigateMock).toHaveBeenCalledWith(to);
+  });
+
   it('a session that may not author gets no build chip; the template chip keeps the reason', async () => {
     state.canAuthorMetadata = false;
     render(<HomePage />);
@@ -249,7 +290,7 @@ describe('without the build agent in the catalog, the chip takes its Studio form
   it.each([
     ['in-app building closed: `ask` served, `build` not', [{ name: 'ask' }]],
     ['another agent only', [{ name: 'custom_helper' }]],
-  ])('%s: "New in Studio", to Studio\'s new-package flow, and no "Build an app"', async (_case, agents) => {
+  ])('%s: "New blank app", to Studio\'s new-package flow, and no "Build an app"', async (_case, agents) => {
     state.agents = agents;
     const user = userEvent.setup();
     render(<HomePage />);

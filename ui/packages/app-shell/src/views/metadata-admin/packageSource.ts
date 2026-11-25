@@ -207,7 +207,7 @@ export const SETUP_PACKAGES_PATH = `${packagesHref('/apps/setup')}?${PACKAGES_FA
 
 /**
  * Setup → Packages with New Package open (objectstack#36908): the console's
- * new-package doors (Home's and the `/ai` screen's 「New in Studio」, the
+ * new-package doors (Home's and the `/ai` screen's 「New blank app」, the
  * 「Add app」 menu). The create lands in Studio on the new package.
  */
 export const SETUP_NEW_PACKAGE_PATH = `${SETUP_PACKAGES_PATH}&${PACKAGES_NEW_PARAM}=${PACKAGES_NEW_PACKAGE_VALUE}`;

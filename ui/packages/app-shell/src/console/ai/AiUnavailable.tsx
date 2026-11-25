@@ -17,7 +17,7 @@
  * Studio is the other way to build, so a session that may author is offered
  * the new-package flow beside it (Setup → Packages with New Package open,
  * which lands in Studio on the new package): the same entry, under the same label
- * and on the same terms, as Home's "New in Studio" chip (an admin, on a
+ * and on the same terms, as Home's "New blank app" chip (an admin, on a
  * runtime that offers authoring, holding the authoring capability).
  */
 
