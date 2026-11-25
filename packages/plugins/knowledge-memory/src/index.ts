@@ -89,7 +89,8 @@ export class KnowledgeMemoryAdapter implements IKnowledgeAdapter {
     const index = this.store.get(ctx.source.id);
     for (const generation of [index?.active, index?.building]) {
       if (!generation) continue;
-      for (const id of documentIds) generation.docs.delete(id);
+      const docs: Map<string, StoredDocument> = generation.docs;
+      for (const id of documentIds) docs.delete(id);
     }
   }
 
