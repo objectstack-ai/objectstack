@@ -22,8 +22,8 @@
 
 import '@testing-library/jest-dom/vitest';
 import * as React from 'react';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
 
 const DRAFT = vi.hoisted(() => ({
@@ -101,9 +101,10 @@ vi.mock('@object-ui/auth', async (importOriginal) => ({
 }));
 
 const toastError = vi.hoisted(() => vi.fn());
+const toastInfo = vi.hoisted(() => vi.fn());
 vi.mock('sonner', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
-  toast: { error: toastError, success: vi.fn() },
+  toast: { error: toastError, info: toastInfo, success: vi.fn() },
 }));
 
 // The source under test reaches dynamic imports of `@objectstack/lint` (through the
@@ -112,6 +113,15 @@ vi.mock('sonner', async (importOriginal) => ({
 import '@objectstack/lint';
 import { ReportNewPage } from './ReportNewPage';
 import { DesignModeProvider, useDesignModeController } from '../layout/designMode';
+import { loadHanRomanizer } from './metadata-admin/romanizeHan';
+import { builtInLocales } from '@object-ui/i18n/locales';
+
+// Save first awaits the Han romanizer, a cold dynamic import: its first load is
+// paid here, at collection, never inside a case's clock. The save cases also
+// wait on what they assert (`waitFor`), never on a count of ticks.
+beforeAll(async () => {
+  await loadHanRomanizer();
+});
 
 function Where() {
   return <span data-testid="where">{useLocation().pathname}</span>;
@@ -185,6 +195,7 @@ beforeEach(() => {
   client.publish.mockClear();
   client.reset.mockClear();
   toastError.mockReset();
+  toastInfo.mockReset();
   doors.listed = new Map([[PKG, { writable: true }]]);
   doors.ensure.mockReset();
   doors.ensure.mockImplementation(async () => {
@@ -209,19 +220,18 @@ describe('the new-report page saves on its own (objectstack#36692)', () => {
     mount();
     expect(screen.queryByTestId('report-new-adds-to-menu')).toBeNull();
     fireEvent.click(screen.getByText('save'));
-    await flush();
-    await flush();
+    await waitFor(() => expect(screen.getByTestId('where')).toHaveTextContent('/apps/crm/report/payment_analysis'));
     expect(saveAndPublish).toHaveBeenCalledWith(
       'report',
       'payment_analysis',
       { ...DRAFT, name: 'payment_analysis' },
       expect.objectContaining({ metadataClient: client }),
     );
-    expect(screen.getByTestId('where')).toHaveTextContent('/apps/crm/report/payment_analysis');
     // objectstack#36906 — outside Studio it is saved where it was before: naming
     // no package, and no package door is asked.
     expect(client.save).not.toHaveBeenCalled();
     expect(doors.listCalls).toBe(0);
+    expect(toastInfo).not.toHaveBeenCalled();
   });
 
   it('Close goes back to the reports index, writing nothing', async () => {
@@ -365,8 +375,9 @@ describe("opened from Studio's report list (objectstack#36906, decision 13)", ()
   it("Save writes the report into the app's package, where the Studio list finds it", async () => {
     mountFromStudio();
     fireEvent.click(screen.getByText('save'));
-    await flush();
-    await flush();
+    await waitFor(() =>
+      expect(screen.getByTestId('where-full').textContent).toBe(`/apps/crm/report/payment_analysis${fromStudio}`),
+    );
     expect(client.save).toHaveBeenCalledWith(
       'report',
       'payment_analysis',
@@ -375,8 +386,9 @@ describe("opened from Studio's report list (objectstack#36906, decision 13)", ()
     );
     expect(client.publish).toHaveBeenCalledWith('report', 'payment_analysis', { packageId: PKG });
     expect(doors.ensure).not.toHaveBeenCalled();
-    // The package-less save is not the one taken.
+    // The package-less save is not the one taken, and nothing says it was.
     expect(saveAndPublish).not.toHaveBeenCalled();
+    expect(toastInfo).not.toHaveBeenCalled();
   });
 
   it("on a read-only base, Save writes the report into the base's customization package", async () => {
@@ -384,8 +396,9 @@ describe("opened from Studio's report list (objectstack#36906, decision 13)", ()
     doors.ensure.mockImplementation(async (base: string) => ({ packageId: `${base}.custom`, writable: true }));
     mountFromStudio();
     fireEvent.click(screen.getByText('save'));
-    await flush();
-    await flush();
+    await waitFor(() =>
+      expect(screen.getByTestId('where-full').textContent).toBe(`/apps/crm/report/payment_analysis${fromStudio}`),
+    );
     expect(doors.ensure).toHaveBeenCalledWith(PKG);
     expect(client.save).toHaveBeenCalledWith(
       'report',
@@ -394,10 +407,10 @@ describe("opened from Studio's report list (objectstack#36906, decision 13)", ()
       { mode: 'draft', ifNoneMatch: '*', packageId: `${PKG}.custom` },
     );
     expect(saveAndPublish).not.toHaveBeenCalled();
-    expect(screen.getByTestId('where-full').textContent).toBe(`/apps/crm/report/payment_analysis${fromStudio}`);
+    expect(toastInfo).not.toHaveBeenCalled();
   });
 
-  it('control: when the ensure door refuses, Save falls back to naming no package, as a new view does', async () => {
+  it('control: when the ensure door refuses, Save falls back to naming no package, and says so, as a new view does', async () => {
     doors.listed = new Map([[PKG, { writable: false }]]);
     doors.ensure.mockImplementation(async () => {
       throw Object.assign(new Error('Forbidden'), { status: 403 });
@@ -406,8 +419,9 @@ describe("opened from Studio's report list (objectstack#36906, decision 13)", ()
     try {
       mountFromStudio();
       fireEvent.click(screen.getByText('save'));
-      await flush();
-      await flush();
+      await waitFor(() =>
+        expect(screen.getByTestId('where-full').textContent).toBe(`/apps/crm/report/payment_analysis${fromStudio}`),
+      );
       expect(doors.ensure).toHaveBeenCalledWith(PKG);
       expect(client.save).not.toHaveBeenCalled();
       expect(saveAndPublish).toHaveBeenCalledWith(
@@ -416,7 +430,11 @@ describe("opened from Studio's report list (objectstack#36906, decision 13)", ()
         { ...DRAFT, name: 'payment_analysis' },
         expect.objectContaining({ metadataClient: client }),
       );
-      expect(screen.getByTestId('where-full').textContent).toBe(`/apps/crm/report/payment_analysis${fromStudio}`);
+      // The author is told the report is not where the Studio list looks.
+      expect(toastInfo).toHaveBeenCalledTimes(1);
+      expect(toastInfo).toHaveBeenCalledWith(builtInLocales.en.report.builder.savedOutsideApp);
+      // The developer-console line names the type it saved, not a view.
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining('the report is saved naming no package'), expect.anything());
     } finally {
       warn.mockRestore();
     }
@@ -425,8 +443,8 @@ describe("opened from Studio's report list (objectstack#36906, decision 13)", ()
   it("Save lands on the new report's page, which keeps the way back to Studio", async () => {
     mountFromStudio();
     fireEvent.click(screen.getByText('save'));
-    await flush();
-    await flush();
-    expect(screen.getByTestId('where-full').textContent).toBe(`/apps/crm/report/payment_analysis${fromStudio}`);
+    await waitFor(() =>
+      expect(screen.getByTestId('where-full').textContent).toBe(`/apps/crm/report/payment_analysis${fromStudio}`),
+    );
   });
 });

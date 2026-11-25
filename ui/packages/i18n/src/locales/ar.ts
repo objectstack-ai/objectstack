@@ -4498,6 +4498,8 @@ const ar = {
       settings: "إعدادات التقرير",
       pendingDraft: "يحتوي هذا التقرير على تغييرات غير منشورة. انشرها أو تجاهلها في الأعلى، ثم احفظ.",
       nameTaken: "كل المعرّفات المشتقة من هذا الاسم مستخدمة بالفعل. أعطِ التقرير اسمًا آخر ثم احفظ.",
+      // objectstack#36906 — a report made from Studio's report list that could not be saved in the app's package.
+      savedOutsideApp: "حُفظ هذا التقرير خارج حزمة التطبيق، لأنه لا يمكن استخدام حزمة تخصيص التطبيق هنا، لذا لا تعرضه قائمة Studio.",
       adminOnlyTitle: "يمكن لمسؤولي مساحة العمل فقط إنشاء التقارير",
       adminOnly: "التقرير مشترك مع الجميع في مساحة العمل، لذا ينشئه مسؤول.",
       designModeOnTitle: "أنهِ تصميم التخطيط أولاً",

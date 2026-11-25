@@ -123,8 +123,8 @@ export function ReportNewPage({ dataSource }: { dataSource?: DataSource }) {
   // the app's package, where that list finds it, as a new view made in an app
   // is (`resolveRuntimeCreatePackage`): the package when it is writable, else
   // its customization package through the ensure door, else, when neither can
-  // be had, naming no package, as before. A report made from the app's own
-  // reports index is saved as before, naming no package.
+  // be had, naming no package, as before, and a notice says so. A report made
+  // from the app's own reports index is saved as before, naming no package.
   const appPackageId = draftBarPackageOf(appName, apps as Parameters<typeof draftBarPackageOf>[1]);
 
   const handleSave = React.useCallback(
@@ -149,7 +149,7 @@ export function ReportNewPage({ dataSource }: { dataSource?: DataSource }) {
         }
         const body = { ...draft, label, name };
         const ctx = { metadataClient, dataSource: dataSource as any };
-        const packageId = studioReturn ? await resolveRuntimeCreatePackage(appPackageId) : null;
+        const packageId = studioReturn ? await resolveRuntimeCreatePackage(appPackageId, 'report') : null;
         const outcome = packageId
           ? await saveAndPublishInPackage('report', name, body, packageId, ctx)
           : await saveAndPublishRuntimeMetadata('report', name, body, ctx);
@@ -157,6 +157,11 @@ export function ReportNewPage({ dataSource }: { dataSource?: DataSource }) {
           toast.error(t('form.saveError'), { description: t('report.builder.pendingDraft') });
           return false;
         }
+        // Opened from Studio, the app's package (or its customization package)
+        // could not be had, so the report was saved naming no package: the
+        // Studio list × goes back to does not show it. Say so, as a new view
+        // saved outside its app does (`onSavedOutsideApp`).
+        if (studioReturn && appPackageId && !packageId) toast.info(t('report.builder.savedOutsideApp'));
       } catch (err) {
         toast.error(t('form.saveError'), {
           description: formatMetadataError(err),

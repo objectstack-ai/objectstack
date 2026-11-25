@@ -4225,6 +4225,8 @@ const pt = {
       settings: "Configurações do relatório",
       pendingDraft: "Este relatório tem alterações não publicadas. Publique ou descarte-as acima e depois salve.",
       nameTaken: "Todos os identificadores gerados a partir deste nome já estão em uso. Dê outro nome ao relatório e salve.",
+      // objectstack#36906 — a report made from Studio's report list that could not be saved in the app's package.
+      savedOutsideApp: "Este relatório foi salvo fora do pacote do app, porque o pacote de personalização do app não pode ser usado aqui, então a lista do Studio não o mostra.",
       adminOnlyTitle: "Somente administradores do espaço de trabalho podem criar relatórios",
       adminOnly: "Um relatório é compartilhado com todo o espaço de trabalho, por isso um administrador o cria.",
       designModeOnTitle: "Termine primeiro de projetar o layout",

@@ -1854,6 +1854,8 @@ const zhHant = {
       settings: '報表設定',
       pendingDraft: '這張報表有一份還沒釋出的修改。先在上方釋出或丟棄它，再儲存。',
       nameTaken: '由這個名稱生成的標識都已被佔用。請給報表換個名稱再儲存。',
+      // objectstack#36906 — a report made from Studio's report list that could not be saved in the app's package.
+      savedOutsideApp: '這份報表沒有存進應用的包：此處無法使用應用的定製包，所以 Studio 列表裡看不到它。',
       adminOnlyTitle: '只有系統管理員能搭建報表',
       adminOnly: '報表對工作區裡所有人生效，所以由系統管理員搭建。',
       designModeOnTitle: '請先完成佈局設計',

@@ -4226,6 +4226,8 @@ const fr = {
       settings: "Paramètres du rapport",
       pendingDraft: "Ce rapport a des modifications non publiées. Publiez-les ou supprimez-les ci-dessus, puis enregistrez.",
       nameTaken: "Tous les identifiants dérivés de ce nom sont déjà pris. Donnez un autre nom au rapport, puis enregistrez.",
+      // objectstack#36906 — a report made from Studio's report list that could not be saved in the app's package.
+      savedOutsideApp: "Ce rapport a été enregistré hors du package de l’application, car le package de personnalisation de l’application ne peut pas être utilisé ici. La liste Studio ne l’affiche donc pas.",
       adminOnlyTitle: "Seuls les administrateurs de l’espace de travail peuvent créer des rapports",
       adminOnly: "Un rapport est partagé avec tout l’espace de travail ; c’est donc un administrateur qui le crée.",
       designModeOnTitle: "Terminez d’abord la conception de la mise en page",
