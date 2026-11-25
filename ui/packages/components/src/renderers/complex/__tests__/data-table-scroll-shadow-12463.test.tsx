@@ -20,7 +20,7 @@
  * The layout itself (rows scrolling under a sticky header, the footer in
  * view) was read in a real browser and is reported on the pull request.
  */
-import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, afterEach, vi } from 'vitest';
 import { render, fireEvent, act } from '@testing-library/react';
 import '@testing-library/jest-dom';
 import React from 'react';
@@ -185,5 +185,80 @@ describe('data-table scrollbar at rest while the table scrolls sideways (objects
     } finally {
       restore();
     }
+  });
+});
+
+/**
+ * objectstack#37239 — the shadow follows the TABLE's own width, not only the
+ * box's and the rows'. The Studio metadata list draws its rows while the table
+ * still fits its box, then its columns widen the `<table>` past the box with no
+ * row added and no change to the box (measured in a real browser: 1134 → 1826
+ * px inside a 1134 px box). The `<table>` sits in the shadcn `Table` wrapper,
+ * which keeps the box's width, so only an observer on the `<table>` itself sees
+ * that change.
+ *
+ * jsdom has no layout and its `ResizeObserver` is an inert polyfill, so this
+ * stands in a recording one: `resize(el)` calls back every observer watching
+ * `el`, and no other, which is what a browser does when only `el` changed size.
+ */
+describe('data-table shadow when the table widens inside an unchanged box (objectstack#37239)', () => {
+  const observed = new Map<Element, Set<ResizeObserverCallback>>();
+  class RecordingResizeObserver {
+    private readonly targets = new Set<Element>();
+    constructor(private readonly callback: ResizeObserverCallback) {}
+    observe(el: Element) {
+      this.targets.add(el);
+      if (!observed.has(el)) observed.set(el, new Set());
+      observed.get(el)!.add(this.callback);
+    }
+    unobserve(el: Element) {
+      this.targets.delete(el);
+      observed.get(el)?.delete(this.callback);
+    }
+    disconnect() {
+      for (const el of this.targets) observed.get(el)?.delete(this.callback);
+      this.targets.clear();
+    }
+  }
+  function resize(el: Element) {
+    act(() => {
+      for (const callback of Array.from(observed.get(el) ?? [])) callback([], {} as ResizeObserver);
+    });
+  }
+  function setWidths(box: HTMLElement, scrollWidth: number, clientWidth: number) {
+    Object.defineProperty(box, 'scrollWidth', { configurable: true, value: scrollWidth });
+    Object.defineProperty(box, 'clientWidth', { configurable: true, value: clientWidth });
+  }
+
+  beforeAll(() => { vi.stubGlobal('ResizeObserver', RecordingResizeObserver); });
+  afterEach(() => { observed.clear(); });
+  afterAll(() => { vi.unstubAllGlobals(); });
+
+  it('draws the shadow once the <table> alone grows past the box, with no scroll and no row added', () => {
+    const { getByTestId, queryByTestId, container } = renderTable(baseSchema);
+    const box = getByTestId('data-table-scroll-box');
+    const table = container.querySelector('table')!;
+    // The wrapper between the box and the table: the element a read keyed on
+    // the box's children alone would watch. It is not the table.
+    expect(table.parentElement).not.toBe(box);
+    expect(table.parentElement!.parentElement).toBe(box);
+
+    // The rows are drawn and the table fits its box: no shadow.
+    setWidths(box, 1134, 1134);
+    resize(table);
+    expect(queryByTestId('data-table-scroll-shadow-right')).toBeNull();
+
+    // The columns widen the table; the box, its wrapper and the rows do not change.
+    setWidths(box, 1826, 1134);
+    resize(table);
+    expect(getByTestId('data-table-scroll-shadow-right')).toBeInTheDocument();
+  });
+
+  it('CONTROL: a table that grows yet still fits its box draws no shadow', () => {
+    const { getByTestId, queryByTestId, container } = renderTable(baseSchema);
+    const box = getByTestId('data-table-scroll-box');
+    setWidths(box, 900, 1134);
+    resize(container.querySelector('table')!);
+    expect(queryByTestId('data-table-scroll-shadow-right')).toBeNull();
   });
 });

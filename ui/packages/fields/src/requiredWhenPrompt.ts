@@ -72,6 +72,16 @@ export interface RequiredWhenPromptField {
   name: string;
   /** The field definition, with `name` guaranteed present for the widget. */
   def: Record<string, unknown> & { type?: string };
+  /**
+   * The record this field was judged against: the stored record with the
+   * change merged in, i.e. the record as the write would leave it. Set by
+   * {@link collectRequiredWhenPromptFields}; the fill-in dialog hands it to
+   * the field's control, so an option `visibleWhen` that reads the field the
+   * change writes (`record.stage == "closed_lost"` on a loss reason) is judged
+   * on the same record the prompt was (objectstack#37250). Absent on a row a
+   * host builds itself (a field a refusal names).
+   */
+  record?: Record<string, unknown>;
 }
 
 /** How {@link collectRequiredWhenPromptFields} narrows its set. */
@@ -152,7 +162,7 @@ export function collectRequiredWhenPromptFields(
     if (!hasFieldEditWidget(def.type as string | undefined)) continue;
     if (options.fillable && !options.fillable(name, def)) continue;
 
-    prompts.push({ name, def: { name, ...def } });
+    prompts.push({ name, def: { name, ...def }, record: next });
   }
   return prompts;
 }
