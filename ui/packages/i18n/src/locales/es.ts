@@ -4772,6 +4772,7 @@ const es = {
     tool: {
       aggregate_data: "Resumir los datos",
       get_record: "Leer el registro",
+      get_record_context: "Leer el contexto del registro",
       list_datasets: "Ver las métricas disponibles",
       query_data: "Consultar los datos necesarios",
       query_dataset: "Consultar por métrica",

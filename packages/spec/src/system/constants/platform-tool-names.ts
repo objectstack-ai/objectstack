@@ -55,11 +55,16 @@ export const PLATFORM_TOOLS_BY_PACKAGE: Readonly<Record<string, readonly string[
    * the installed datasets and the metrics each defines, and `query_dataset`
    * answers a question through one governed metric instead of an ad-hoc
    * aggregate. Their names and shapes are declared once in
-   * `../../ai/dataset-tools.zod` (ADR-0149 D2), which MCP registers too.
+   * `../../ai/dataset-tools.zod` (ADR-0149 D2), which MCP registers too. And
+   * `get_record_context` (ADR-0160 D4): one record read through its context
+   * pack, as the caller, from the definition in
+   * `../../ai/record-context-tools.zod` and delegated to the open
+   * `record-context` service's executor — the same one the MCP door serves.
    */
   'service-ai': [
     'aggregate_data',
     'get_record',
+    'get_record_context',
     'list_datasets',
     'query_data',
     'query_dataset',

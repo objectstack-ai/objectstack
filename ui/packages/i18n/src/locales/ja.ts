@@ -4677,6 +4677,7 @@ const ja = {
     tool: {
       aggregate_data: "関連データを集計する",
       get_record: "このレコードを読み込む",
+      get_record_context: "このレコードの資料を読む",
       list_datasets: "利用できる指標を確認する",
       query_data: "必要なデータを照会する",
       query_dataset: "指標で照会する",

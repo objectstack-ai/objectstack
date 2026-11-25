@@ -4768,6 +4768,7 @@ const fr = {
     tool: {
       aggregate_data: "Synthétiser les données",
       get_record: "Lire l’enregistrement",
+      get_record_context: "Lire le contexte de l’enregistrement",
       list_datasets: "Consulter les indicateurs disponibles",
       query_data: "Interroger les données nécessaires",
       query_dataset: "Interroger un indicateur",

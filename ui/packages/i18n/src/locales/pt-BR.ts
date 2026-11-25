@@ -4767,6 +4767,7 @@ const pt = {
     tool: {
       aggregate_data: "Resumir os dados",
       get_record: "Ler o registro",
+      get_record_context: "Ler o contexto do registro",
       list_datasets: "Ver as métricas disponíveis",
       query_data: "Consultar os dados necessários",
       query_dataset: "Consultar por métrica",

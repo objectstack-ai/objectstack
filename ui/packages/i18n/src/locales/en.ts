@@ -5647,6 +5647,7 @@ const en = {
     tool: {
       aggregate_data: 'Aggregate the data',
       get_record: 'Read the record',
+      get_record_context: 'Read the record context',
       list_datasets: 'Check the available metrics',
       query_data: 'Query the data',
       query_dataset: 'Query by a metric',

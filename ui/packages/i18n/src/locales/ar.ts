@@ -5061,6 +5061,7 @@ const ar = {
     tool: {
       aggregate_data: "تجميع البيانات ذات الصلة",
       get_record: "قراءة هذا السجل",
+      get_record_context: "قراءة ملف سياق هذا السجل",
       list_datasets: "عرض المؤشرات المتاحة",
       query_data: "الاستعلام عن البيانات المطلوبة",
       query_dataset: "الاستعلام حسب المؤشر",

@@ -4936,6 +4936,7 @@ const zh = {
     tool: {
       aggregate_data: '汇总相关数据',
       get_record: '读取这条记录',
+      get_record_context: '读取记录资料',
       list_datasets: '查看指标',
       query_data: '查询所需数据',
       query_dataset: '按指标查询',

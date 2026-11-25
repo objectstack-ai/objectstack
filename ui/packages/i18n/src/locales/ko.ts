@@ -4674,6 +4674,7 @@ const ko = {
     tool: {
       aggregate_data: "관련 데이터 집계하기",
       get_record: "이 레코드 읽기",
+      get_record_context: "이 레코드의 자료 읽기",
       list_datasets: "사용 가능한 지표 확인하기",
       query_data: "필요한 데이터 조회하기",
       query_dataset: "지표로 조회하기",
