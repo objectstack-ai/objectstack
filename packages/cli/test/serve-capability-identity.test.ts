@@ -38,7 +38,7 @@ import Serve from '../src/commands/serve.js';
 // Pay the first transform of these dist-resolved workspace deps at MODULE LOAD:
 // `serve.ts`, which this file imports for its statics, loads them lazily inside
 // its command body, a clocked window for any case that reaches it
-// (`scripts/check-test-source-alias.mjs`, the source-reach rule).
+// (`check:test-source-alias`, the source-reach rule).
 import '@objectstack/metadata-protocol';
 import '@objectstack/metadata';
 import '@objectstack/plugin-hono-server';

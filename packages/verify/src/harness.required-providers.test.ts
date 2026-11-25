@@ -35,7 +35,7 @@ import { warmUpBoot } from './boot-warm-up.testkit.js';
 
 // Pay the first transform of this dist-resolved dependency at MODULE LOAD: the
 // harness loads it lazily inside a boot, a clocked window
-// (`scripts/check-test-source-alias.mjs`, the source-reach rule).
+// (`check:test-source-alias`, the source-reach rule).
 import '@objectstack/service-automation';
 
 // The boot's first load, paid during collection rather than in the first
