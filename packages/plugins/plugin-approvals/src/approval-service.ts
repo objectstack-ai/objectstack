@@ -11333,11 +11333,18 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
    * it does at {@link getRecordLock}, with the same `lockSource`. Entry `i`
    * answers `recordIds[i]`.
    *
-   * ## Which rows count as readable — one rule at both doors
+   * ## Which rows count as readable — the row whose id IS the asked id
    *
-   * A row is readable when the caller's read hands back a row whose id IS the
-   * asked id, spelled as asked — the rule {@link getRecordLock} applies too
-   * (see its doc block for why a loosely matched id answers `null` at both).
+   * A row is readable here when the caller's read hands back a row whose id
+   * IS the asked id, spelled as asked: one `$in` read cannot say which asked
+   * id a row the engine spells differently answers (a case-insensitive
+   * collation, a numeric id asked as `'07'`), so such an id answers `null`
+   * here. {@link getRecordLock} counts any row its read hands back, so for
+   * such an id the two doors differ, deliberately: the two doors keep
+   * different readability anchors on purpose, and aligning them would narrow
+   * a published answer (seat ruling on PR #37191). For an id spelled as the
+   * engine spells it — what a list holds — entry `i` is exactly the single
+   * door's answer.
    *
    * The cap is the door's to refuse loudly; here a blank id answers `null`.
    */
@@ -11462,15 +11469,11 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
    * id, existing or not. ⚠️ Probing with {@link SYSTEM_CTX} here would admit
    * every authenticated user in the tenant.
    *
-   * The row read must be the asked id's own: a row the engine hands back under
-   * another spelling (a case-insensitive collation, a numeric id asked as
-   * `'07'`) answers `null`, as at {@link getRecordLocks}. That is the one rule
-   * both doors can apply alike: one `$in` read for a page cannot say which
-   * asked id a row spelled otherwise answers — a page asking two spellings of
-   * one row reads exactly like a page asking a missing id — and resolving it
-   * would cost a read per row. The ids a client holds are the ones the engine
-   * spelled, so nothing it asks is refused by this; and the lock is judged
-   * under the row's own id, never under another spelling of it.
+   * Any row the read hands back counts, whatever spelling of the id the
+   * engine hands back (a case-insensitive collation, a numeric id asked as
+   * `'07'`); {@link getRecordLocks} counts only the row whose id IS the asked
+   * id. The two doors keep different readability anchors on purpose:
+   * aligning them would narrow a published answer (seat ruling on PR #37191).
    *
    * ## What is answered — the lock and its kind, nothing about the request
    *
@@ -11498,7 +11501,7 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
     const readable = await this.engine.find(objectName, {
       where: { id }, fields: ['id'], limit: 1, context,
     });
-    if (!Array.isArray(readable) || !readable.some((row: any) => String(row?.id) === id)) return null;
+    if (!Array.isArray(readable) || readable.length === 0) return null;
     if (await detailRowHeldByLockingApproval(this.engine, objectName, id)) return recordLockAnswer(true, false);
     return recordLockAnswer(false, await recordHeldByLockingApproval(this.engine, objectName, id));
   }

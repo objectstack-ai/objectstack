@@ -1105,8 +1105,7 @@ export interface IApprovalService {
    * the carrier.
    *
    * - **Who is answered:** every caller who can READ the record, judged by
-   *   reading it AS THE CALLER (object read, then row-level access); the row
-   *   read must be the asked id's own, spelled as asked. A caller
+   *   reading it AS THE CALLER (object read, then row-level access). A caller
    *   who cannot read it gets `null` — exactly the answer for a record id that
    *   does not exist, ⛔ never one that tells the two apart. A caller refused
    *   the object's read outright is refused the same way for every id.
@@ -1151,7 +1150,7 @@ export interface IApprovalService {
    * per row.
    *
    * Entry `i` of the answer answers `recordIds[i]` with exactly what
-   * {@link getRecordLock} answers for that id: `{ locked, lockSource }` for a
+   * {@link getRecordLock} answers for that id, spelled as the engine spells it: `{ locked, lockSource }` for a
    * locked record and `{ locked: false }` for an unlocked one when the caller
    * can read the record, `null` when it cannot or when it does not exist,
    * ⛔ never an entry that tells the two apart. The same judgement, off the
@@ -1159,7 +1158,12 @@ export interface IApprovalService {
    * master-detail line, the detail-row lock's: a line answers `true` while a
    * record it belongs to is so held, with `lockSource: 'master'` (which wins
    * when the line is held by a request of its own too). A row counts as
-   * readable by the same rule as at {@link getRecordLock}. A repeated id
+   * readable only when the read hands back the row whose id IS the asked id;
+   * {@link getRecordLock} counts any row its read hands back, so an id the
+   * engine matches under another spelling answers `null` here and the lock
+   * there. The two doors keep different readability anchors on purpose:
+   * aligning them would narrow a published answer (seat ruling on PR #37191).
+   * A repeated id
    * is answered at each of its positions. A caller refused the object's read
    * outright is refused the same way for every id.
    *

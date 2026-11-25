@@ -22,8 +22,10 @@
  *  - `lockSource` says which approval holds a locked row — its own
  *    (`'record'`) or its master's (`'master'`, winning when both hold) — and
  *    so which delete the server refuses; the page read gives each row the
- *    single read's kind, and counts a row readable by the single read's rule,
- *    a loosely matched id included (ruling 7148480184).
+ *    single read's kind (ruling 7148480184);
+ *  - the two doors keep their own readability anchors (seat ruling on PR
+ *    #37191): the single read counts any row its read hands back, the page
+ *    read only the row whose id IS the asked id.
  *
  * The REST door's half (one 404 for both `null`s, the closed query set, the
  * `{ locked, lockSource }`-only payload) is pinned in `@objectstack/rest`; the whole path
@@ -521,14 +523,14 @@ describe('lockSource — which approval holds a locked row, the same at the sing
 });
 
 /**
- * The readability anchor, one rule at both doors (#37151 comment 7148285178):
- * a row counts as readable when the caller's read hands back the row whose id
- * IS the asked id. `getRecordLock` used to count any row the read handed back,
- * so a loosely matched id (a case-insensitive collation, `'07'` for `'7'`)
- * answered the lock there and `null` at the page read, which cannot say which
- * asked id a row spelled otherwise answers without a read per row.
+ * The readability anchors, kept apart on purpose (seat ruling on PR #37191):
+ * `getRecordLock` counts any row its read hands back, whatever spelling of the
+ * id the engine hands back; `getRecordLocks` counts only the row whose id IS
+ * the asked id. Aligning them would narrow a published answer, so each door's
+ * own anchor is pinned here, and the two doors agree for every id spelled as
+ * the engine spells it.
  */
-describe('both lock reads count a row readable by one rule — a loosely matched id included', () => {
+describe('the two doors keep their own readability anchors — a loosely matched id', () => {
   const LINE = lineOf(HELD);
 
   /** Rewrite every `id` value in a read's predicate to lower case: a case-insensitive collation. */
@@ -555,7 +557,7 @@ describe('both lock reads count a row readable by one rule — a loosely matched
     }, { object });
   }
 
-  it('answers a loosely matched id `null` at both reads, and the echoed spelling of the same row its lock', async () => {
+  it('the single door answers the lock for a loosely spelled id; the page door answers it `null`', async () => {
     const rig = await boot();
     caseInsensitiveIds(rig.engine, LINE);
     caseInsensitiveIds(rig.engine, HELD);
@@ -564,24 +566,25 @@ describe('both lock reads count a row readable by one rule — a loosely matched
     const found = await rig.engine.find(LINE, { where: { id: loose(recordA(LINE)) }, fields: ['id'], context: SYSTEM });
     expect((found as any[]).map((row) => row.id)).toEqual([recordA(LINE)]);
 
-    expect(await rig.svc.getRecordLock(LINE, loose(recordA(LINE)), asUser(SUBMITTER))).toBeNull();
-    expect(await rig.svc.getRecordLock(LINE, recordA(LINE), asUser(SUBMITTER))).toEqual(BYMASTER);
+    // The single door: any row the read hands back counts — the line of a held master answers its lock.
+    expect(await rig.svc.getRecordLock(LINE, loose(recordA(LINE)), asUser(SUBMITTER))).toEqual(BYMASTER);
+    expect(await rig.svc.getRecordLock(LINE, loose(recordB(LINE)), asUser(SUBMITTER))).toEqual({ locked: false });
+    // …and still `null` for a row the caller cannot read, however it is spelled.
+    expect(await rig.svc.getRecordLock(LINE, loose(recordB(LINE)), asUser(READER))).toBeNull();
+
+    // The page door: only the row whose id IS the asked id — a loose spelling answers `null`,
+    // alone and beside the echoed spelling of the same row.
     expect(await rig.svc.getRecordLocks(LINE, [loose(recordA(LINE))], asUser(SUBMITTER))).toEqual([null]);
-    // Beside the echoed spelling of the same row, beside a missing id: one answer per spelling.
-    const lineIds = [loose(recordA(LINE)), recordB(LINE), MISSING, loose(recordB(LINE)), recordA(LINE)];
-    expect(await rig.svc.getRecordLocks(LINE, lineIds, asUser(SUBMITTER)))
-      .toEqual([null, { locked: false }, null, null, BYMASTER]);
+    expect(await rig.svc.getRecordLocks(LINE, [loose(recordA(LINE)), recordA(LINE), MISSING], asUser(SUBMITTER)))
+      .toEqual([null, BYMASTER, null]);
+
+    // Every id spelled as the engine spells it: the two doors agree, for every caller.
+    const echoed = [recordA(LINE), recordB(LINE), MISSING, recordA(LINE)];
     for (const caller of [SUBMITTER, APPROVER, READER]) {
-      for (const [object, ids] of [
-        [LINE, lineIds],
-        [LINE, [loose(recordA(LINE))]],
-        [HELD, [loose(recordA(HELD)), recordB(HELD), loose(MISSING), recordA(HELD)]],
-      ] as Array<[string, string[]]>) {
-        const page = await rig.svc.getRecordLocks(object, ids, asUser(caller));
-        const oneByOne = [];
-        for (const id of ids) oneByOne.push(await rig.svc.getRecordLock(object, id, asUser(caller)));
-        expect(page, `${caller} ${object} ${ids.join(',')}`).toEqual(oneByOne);
-      }
+      const page = await rig.svc.getRecordLocks(LINE, echoed, asUser(caller));
+      const oneByOne = [];
+      for (const id of echoed) oneByOne.push(await rig.svc.getRecordLock(LINE, id, asUser(caller)));
+      expect(page, caller).toEqual(oneByOne);
     }
   });
 

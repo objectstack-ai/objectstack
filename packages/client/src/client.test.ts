@@ -758,19 +758,29 @@ describe('Approvals namespace (ADR-0019)', () => {
     });
 
     it('[#26314] reads a record\'s approval lock off the envelope, path segments encoded', async () => {
-        const { client, fetchMock } = createMockClient({ success: true, data: { locked: true } });
+        const { client, fetchMock } = createMockClient({ success: true, data: { locked: true, lockSource: 'record' } });
         const result = await client.approvals.getRecordLock('order', 'rec/1');
-        expect(result).toEqual({ locked: true });
+        expect(result).toEqual({ locked: true, lockSource: 'record' });
+        // The answer types the kind (the test program compiles this line).
+        const kind: 'record' | 'master' | undefined = result.lockSource;
+        expect(kind).toBe('record');
         const [url, opts] = fetchMock.mock.calls[0];
         expect(String(url)).toBe('http://localhost:3000/api/v1/approvals/records/order/rec%2F1/lock');
         expect(opts?.method ?? 'GET').toBe('GET');
     });
 
     it('reads the approval locks of a page of records in one POST, object segment encoded', async () => {
-        const records = [{ recordId: 'rec_1', locked: true }, { recordId: 'rec_2', locked: null }];
+        const records = [
+            { recordId: 'rec_1', locked: true, lockSource: 'master' },
+            { recordId: 'rec_2', locked: null },
+            { recordId: 'rec_3', locked: false },
+        ];
         const { client, fetchMock } = createMockClient({ success: true, data: { records } });
         const result = await client.approvals.getRecordLocks('sales order', ['rec_1', 'rec_2']);
         expect(result).toEqual({ records });
+        // The entry types the kind (the test program compiles this line).
+        const kinds: Array<'record' | 'master' | undefined> = result.records.map((entry) => entry.lockSource);
+        expect(kinds).toEqual(['master', undefined, undefined]);
         expect(fetchMock).toHaveBeenCalledTimes(1);
         const [url, opts] = fetchMock.mock.calls[0];
         expect(String(url)).toBe('http://localhost:3000/api/v1/approvals/records/sales%20order/locks');

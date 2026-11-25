@@ -549,7 +549,10 @@ export function registerApprovalsEndpoints(this: ApprovalsRouteHost, basePath: s
 
     // The lock of a PAGE of records, in one request: what a list asks before it
     // opens a cell editor, so moving through the rows sends no request per row.
-    // Each entry is exactly the single-record door's answer for that id —
+    // Each entry is exactly the single-record door's answer for that id, as
+    // the engine spells it (an id matched only under another spelling answers
+    // `locked: null` here: the two doors keep different readability anchors
+    // on purpose, seat ruling on PR #37191) —
     // `locked`, and `lockSource` on a locked row — the 404 folded to
     // `locked: null` (unreadable or missing, told apart by nothing); a service
     // without `getRecordLocks` answers 501, never one `getRecordLock` per id.

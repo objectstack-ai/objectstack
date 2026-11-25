@@ -470,9 +470,7 @@ A line under a locked record that also has a pending request of its own answers
 `lockSource`.
 
 The record is read as the caller: a record they cannot read answers
-`404 RECORD_NOT_FOUND`, the same body a record id that does not exist gets, and
-so does an id spelled differently from the record's own (a different letter
-case, `07` for `7`), even where the database matches it. The
+`404 RECORD_NOT_FOUND`, the same body a record id that does not exist gets. The
 SDK call is `client.approvals.getRecordLock(object, recordId)`, and the service
 member is `IApprovalService.getRecordLock`. An approvals service without that
 member answers `501`.
@@ -492,7 +490,10 @@ curl -b cookies.txt -X POST -H 'Content-Type: application/json' \
 
 Each entry is what the single-record read answers for that id, in the order the
 ids were sent; `null` stands where that read answers `404`, so a record the
-caller cannot read and one that does not exist look the same. One request
+caller cannot read and one that does not exist look the same. Send the ids as
+the server spelled them: an id the database matches only under another spelling
+(a different letter case, `07` for `7`) answers `null` here, where the
+single-record read answers its lock. One request
 carries at most 200 ids (`APPROVAL_RECORD_LOCKS_MAX_RECORD_IDS`); a longer list,
 an empty one or any other body key is refused with `400 VALIDATION_ERROR`. The
 SDK call is `client.approvals.getRecordLocks(object, recordIds)`, the service

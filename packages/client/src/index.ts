@@ -7148,18 +7148,25 @@ export class ObjectStackClient {
     },
 
     /**
-     * Whether a record is held by a locking approval — `{ locked }` and
+     * Whether a record is held by a locking approval — `{ locked }`, plus on a
+     * locked record which approval holds it, `lockSource`: `'record'` (its own;
+     * deleting it cancels the request) or `'master'` (the record a
+     * master-detail line belongs to; the server refuses the line's delete too) —
+     * and
      * nothing else, answered to every caller who can read the record, whether
      * or not they take part in the approval (`IApprovalService.getRecordLock`).
      * A record the caller cannot read answers 404, exactly as a record id that
      * does not exist; a deployment without the read answers 501.
      */
-    getRecordLock: async (object: string, recordId: string): Promise<{ locked: boolean }> => {
+    getRecordLock: async (
+      object: string,
+      recordId: string,
+    ): Promise<{ locked: boolean; lockSource?: 'record' | 'master' }> => {
       const route = this.getRoute('approvals');
       const res = await this.fetch(
         `${this.baseUrl}${route}/records/${encodeURIComponent(object)}/${encodeURIComponent(recordId)}/lock`,
       );
-      return this.unwrapResponse<{ locked: boolean }>(res);
+      return this.unwrapResponse<{ locked: boolean; lockSource?: 'record' | 'master' }>(res);
     },
 
     /**
@@ -7173,13 +7180,15 @@ export class ObjectStackClient {
     getRecordLocks: async (
       object: string,
       recordIds: readonly string[],
-    ): Promise<{ records: Array<{ recordId: string; locked: boolean | null }> }> => {
+    ): Promise<{ records: Array<{ recordId: string; locked: boolean | null; lockSource?: 'record' | 'master' }> }> => {
       const route = this.getRoute('approvals');
       const res = await this.fetch(`${this.baseUrl}${route}/records/${encodeURIComponent(object)}/locks`, {
         method: 'POST',
         body: JSON.stringify({ recordIds: [...recordIds] }),
       });
-      return this.unwrapResponse<{ records: Array<{ recordId: string; locked: boolean | null }> }>(res);
+      return this.unwrapResponse<{
+        records: Array<{ recordId: string; locked: boolean | null; lockSource?: 'record' | 'master' }>;
+      }>(res);
     },
 
     /**
