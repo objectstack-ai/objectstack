@@ -34,7 +34,7 @@
 
 import * as React from 'react';
 import { Link, useParams, useNavigate, useSearchParams, useLocation } from 'react-router-dom';
-import { ListView } from '@object-ui/plugin-list';
+import { ListView, conditionCandidatesOf, conditionOptionsOf, useLookupValueNames } from '@object-ui/plugin-list';
 import { useNavigationOverlay, useRowPredicate } from '@object-ui/react';
 import {
   Button,
@@ -495,25 +495,6 @@ export function ObjectDataPage({ dataSource, objects }: any) {
     }) as FilterTriple[];
   }, [filterParamsKey, canRead, user?.id, activeOrganization?.id]);
 
-  // One display chip per field — a date-bucket drill's two range triples
-  // (>= start, < end) collapse into a single "start → end" chip (objectstack-ai/objectstack#1752).
-  //
-  // objectstack#37259 — a whole-value comparand on a field that declares
-  // `options` reads as its option's translated label: the grid cell's own path,
-  // `translateOptions` over the declared list, then the matched option's label.
-  // A value that names no option stays raw, so a stale or hand-edited address
-  // still shows what it filters by. Computed per render, like the field half's
-  // `fieldLabel`, so both halves of a chip read the catalogue at the same moment.
-  const filterChips = groupFilterChips(urlFilters, (field, value) => {
-    const raw = String(value);
-    const options = objectDef?.fields?.[field]?.options;
-    if (!objectDef || !Array.isArray(options) || options.length === 0) return raw;
-    const option = translateOptions(objectDef.name, field, options).find(
-      (opt) => String(opt.value) === raw,
-    );
-    return option ? optionDisplayLabel(option) : raw;
-  });
-
   /**
    * objectstack#35601 — a list opened by a record's related list (「↗」)
    * carries that record as its SOURCE, in the record trail (`?from=`, the last
@@ -532,6 +513,56 @@ export function ObjectDataPage({ dataSource, objects }: any) {
   const sourceConditionOn = !!source && !!sourceField
     && urlFilters.some(([field, op, value]) => field === sourceField && op === '=' && String(value) === source.i);
   const sourceFilterKey = sourceField ? `filter[${sourceField}]` : undefined;
+
+  // The names of the records the lookup comparands point at, read the way the
+  // list's own condition chips read them (`useLookupValueNames`: the target's
+  // records by id, named by the lookup's `displayField`, else the target's
+  // name field). The source condition stays out of the read: its chip is
+  // named by the record trail.
+  const lookupChipFields = React.useMemo(
+    () => conditionCandidatesOf(
+      objectDef?.fields ?? {},
+      (_field, fallback) => fallback,
+      (_field, raw) => conditionOptionsOf(raw),
+    ),
+    [objectDef],
+  );
+  const lookupNameOf = useLookupValueNames(
+    dataSource,
+    lookupChipFields,
+    urlFilters
+      .filter(([field]) => !(sourceConditionOn && field === sourceField))
+      .map(([field, op, value]) => ({ field, operator: String(op), value })),
+  );
+
+  // One display chip per field — a date-bucket drill's two range triples
+  // (>= start, < end) collapse into a single "start → end" chip (objectstack-ai/objectstack#1752).
+  //
+  // A whole-value comparand reads as the grid cell draws that value, and stays
+  // raw when nothing names it, so a stale or hand-edited address still shows
+  // what it filters by:
+  // - a boolean (the `[bool]` slot) as the filter builder's true / false words,
+  //   translated at this seam like the operator labels;
+  // - a lookup id as the name of the record it points at (above), the raw id
+  //   while that read is in flight, fails or names nothing;
+  // - a value of a field that declares `options` as its option's translated
+  //   label: `translateOptions` over the declared list, then the matched
+  //   option's label (objectstack#37259).
+  // Computed per render, like the field half's `fieldLabel`, so both halves of
+  // a chip read the catalogue at the same moment.
+  const filterChips = groupFilterChips(urlFilters, (field, value) => {
+    if (typeof value === 'boolean') return t(value ? 'filterBuilder.trueLabel' : 'filterBuilder.falseLabel');
+    const raw = String(value);
+    const recordName = lookupNameOf(field, raw);
+    if (recordName) return recordName;
+    const options = objectDef?.fields?.[field]?.options;
+    if (!objectDef || !Array.isArray(options) || options.length === 0) return raw;
+    const option = translateOptions(objectDef.name, field, options).find(
+      (opt) => String(opt.value) === raw,
+    );
+    return option ? optionDisplayLabel(option) : raw;
+  });
+
   const conditionsAreSourced = sourceConditionOn
     && Array.from(searchParams.keys()).every((k) => k === sourceFilterKey || !(k.startsWith('filter[') || k.startsWith('uf_')));
   const resetToSource = React.useCallback(() => {
