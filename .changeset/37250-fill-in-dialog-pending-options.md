@@ -2,15 +2,22 @@
 '@object-ui/fields': patch
 ---
 
-fix(fields): the required-fields fill-in dialog offers the options the change makes available
+fix(fields): the required-fields fill-in dialog hands its controls the record the change would leave
 
-Clause-②: no
+Clause-②: yes (widening)
 Metadata-protocol: none
 
-When a change in place (a stage move on the record page, a list cell, an inline edit, a kanban drop) makes another field required, the fill-in dialog asks for it. A choice field there could show "No options available" and the change could not be saved. This happened when the field's options are each shown only for some values of the field the change writes. Example: every loss reason is shown only while the stage is "closed lost". Moving an opportunity to "closed lost" asked for a loss reason and offered none.
+A change made in place (a stage move on the record page, a list cell, an inline edit, a kanban drop) can make another field required. The fill-in dialog then asks for that field. The dialog handed its controls no record, so every control that reads the record judged it on an empty one. Any option `visibleWhen` that read a record field was judged without that field. A condition guarded by `has(record.x)` was false, so the option was hidden. A condition without that guard could not be evaluated, and the option was offered whatever the condition said. A choice field whose options were all hidden showed "No options available", and the change could not be saved. Example: each loss reason is shown only while the stage is "closed lost", so moving an opportunity to "closed lost" asked for a loss reason and offered none. Every option list gated by `dependsOn`, and every dependent lookup, stayed on its "select the parent first" gate.
 
-The dialog now judges each option's `visibleWhen` against the record as the write would leave it: the saved record, the change, and the values typed into the dialog so far. So the loss reasons appear, and an option that depends on another value typed into the dialog appears once that value is typed. Options that are not visible on that record stay hidden. The same record already decided which fields the dialog asks for, so the fields asked for do not change.
+The dialog now hands every control the record as the write would leave it: the saved record, with the change and the values typed into the dialog so far applied on top. What reads that record now resolves on it:
 
-For hosts: each field `collectRequiredWhenPromptFields` returns now carries `record`, the record it was judged against. The dialog hands it, with the typed values, to every control as `dependentValues`. A row a host builds itself (a field a refusal names) reads the same record when the dialog has a field that carries one.
+- option visibility;
+- `dependsOn` gates on option lists and lookups;
+- dependent-lookup filters;
+- the currency of a money field that takes its currency from the record or from a parent record.
+
+An option that depends on another value typed into the dialog appears once that value is typed. Options that are not visible on that record stay hidden. Which fields the dialog asks for was already decided on this record and does not change.
+
+Widening: the exported `RequiredWhenPromptField` type gains one optional member, `record?: Record<string, unknown>`. That is the record the field was judged against. `collectRequiredWhenPromptFields` sets it on every field it returns, and `RequiredFieldsDialogField` inherits it. The dialog passes it, with the typed values, to every control as `dependentValues`. A row a host builds itself (a field a refusal names) carries no `record`. It reads the record of another field shown in the dialog. When no shown field carries one, it reads only the typed values.
 
 No metadata key, value or default changes.

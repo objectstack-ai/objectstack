@@ -172,6 +172,8 @@ describe('RequiredFieldsDialog judges option visibleWhen on the record with the 
   // i.e. it reads the very field the change writes.
   const LOST_ONLY =
     '(has(record.stage) && record.stage == "closed_lost") || (has(record.requested_status) && record.requested_status == "closed_lost")';
+  const WON_ONLY =
+    '(has(record.stage) && record.stage == "closed_won") || (has(record.requested_status) && record.requested_status == "closed_won")';
   const PENDING_FIELDS = {
     stage: {
       type: 'select',
@@ -203,17 +205,30 @@ describe('RequiredFieldsDialog judges option visibleWhen on the record with the 
       ],
     },
     loss_detail: { type: 'text', label: 'Loss Detail', requiredWhen: 'record.stage == "closed_lost"' },
+    // The mirror case: a win reason, shown only once the record is (or is
+    // being moved to) `closed_won`.
+    win_reason: {
+      type: 'select',
+      label: 'Win Reason',
+      requiredWhen: 'record.stage == "closed_won"',
+      options: [
+        { value: 'product', label: 'Product', visibleWhen: WON_ONLY },
+        { value: 'relationship', label: 'Relationship', visibleWhen: WON_ONLY },
+      ],
+    },
   };
-  const STORED = { id: 'o2', name: 'Globex deal', stage: 'negotiation', loss_reason: null, loss_channel: null, loss_detail: null };
+  const STORED = {
+    id: 'o2', name: 'Globex deal', stage: 'negotiation', loss_reason: null, loss_channel: null, loss_detail: null, win_reason: null,
+  };
   const MOVE = { stage: 'closed_lost' };
 
-  const renderPending = () => {
+  const renderPending = (move: Record<string, unknown> = MOVE, shown = 'Closed Lost') => {
     render(
       <RequiredFieldsDialog
         open
-        fields={labelled(collectRequiredWhenPromptFields(PENDING_FIELDS, STORED, MOVE))}
+        fields={labelled(collectRequiredWhenPromptFields(PENDING_FIELDS, STORED, move))}
         recordName="Globex deal"
-        changes={[{ name: 'stage', label: 'Stage', value: 'Closed Lost' }]}
+        changes={[{ name: 'stage', label: 'Stage', value: shown }]}
         onCancel={vi.fn()}
         onSubmit={vi.fn()}
       />,
@@ -247,6 +262,15 @@ describe('RequiredFieldsDialog judges option visibleWhen on the record with the 
     // the won-only option stays hidden.
     expect(within(row).queryByText('Won option')).toBeNull();
     expect(within(row).queryByText('Detail option')).toBeNull();
+  });
+
+  it('the mirror case: a move to closed_won offers the win reasons its options gate on', () => {
+    const dialog = renderPending({ stage: 'closed_won' }, 'Closed Won');
+    expect(rowOf(dialog, 'loss_reason')).toBeNull();
+    const row = rowOf(dialog, 'win_reason');
+    expect(row).not.toBeNull();
+    expect(row.querySelector('[data-testid="select-empty-win_reason"]')).toBeNull();
+    expect(within(row).getByRole('combobox')).toBeInTheDocument();
   });
 
   it('a value typed into the dialog joins the record the other rows read', () => {
