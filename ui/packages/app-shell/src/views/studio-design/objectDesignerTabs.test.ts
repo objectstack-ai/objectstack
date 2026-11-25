@@ -22,6 +22,12 @@ import {
   readObjectDesignerTab,
 } from './objectDesignerTabs';
 import { t } from '../metadata-admin/i18n';
+import { loadStudioCatalogue } from '@object-ui/i18n/namespaces/studio';
+
+// The studio namespace's zh catalogue is fetched on demand: loaded here, at
+// collection, so the order pin reads Chinese whatever ran before it in this
+// worker (unloaded, `t` answers from `en`).
+await loadStudioCatalogue('zh');
 
 const TOOLS = OBJECT_DESIGNER_TOOL_TABS;
 
