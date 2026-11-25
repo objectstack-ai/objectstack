@@ -113,9 +113,10 @@ export const APPROVAL_ACTIVITY_STEPS: Readonly<Partial<Record<ApprovalActionKind
 /** `sys_activity.summary` holds at most this many characters. */
 const SUMMARY_MAX = 500;
 
+/** The kernel logger's slice used here (`Logger` in `@objectstack/spec/contracts`). */
 type Logger = {
-  warn?: (msg: string, meta?: Record<string, unknown>) => void;
-  error?: (msg: string, meta?: Record<string, unknown>) => void;
+  warn?: (message: string, meta?: Record<string, any>) => void;
+  error?: (message: string, error?: Error, meta?: Record<string, any>) => void;
 };
 
 /** The engine slice the producer needs. */
@@ -244,6 +245,7 @@ export function bindApprovalActivityFeed(engine: ApprovalActivityEngine, logger?
           + 'the approval itself stands and the approvals tab shows it, but the record\'s activity will keep looking '
           + 'complete without it; later failures are not logged again. Check that sys_activity (plugin-audit) is '
           + 'provisioned and writable on this datasource.',
+        err instanceof Error ? err : undefined,
         { action: action.action, request: action.request_id, error: err?.message ?? String(err) },
       );
     }
