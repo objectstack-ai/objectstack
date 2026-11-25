@@ -4087,6 +4087,9 @@ const STUDIO_EN: Record<string, string> = {
   'engine.list.emptyType': 'No {type} items registered',
   'engine.list.emptyQuery': 'No matches for "{query}"',
   'engine.list.createHint': 'Click "New" above to create the first {type}.',
+  // objectstack#36907 — a Studio dashboard list's New opens an app's design mode.
+  'engine.list.dashboardNewNoApp':
+    'A new dashboard is made in an app\'s design mode, so that it hangs in a menu. This package has no app to make it in.',
   'engine.list.readOnlyHint':
     'This type is read-only — instances are defined by code artifacts in packages.',
   // objectui#7611 — the environment scope (Setup catalog). See `catalog-scope.ts`.

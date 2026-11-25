@@ -12,6 +12,11 @@
  *    for this caller) nothing is offered.
  *  - Setup (no area) is unchanged — the control: its 「新建」 goes to the
  *    item page's create and opens no dialog.
+ *
+ * objectstack#36907 — a dashboard list's 「新建」 in the area opens an app's
+ * design mode, so it is offered only where an app opens (decision 6, the
+ * pair leg included), never on a phone; with no app the list says why. The
+ * report list's 「新建」 is the control: it reads no app.
  */
 
 // Paid at collection, not inside a case's clock (check:test-source-alias).
@@ -19,21 +24,34 @@ import '@objectstack/lint';
 import '@testing-library/jest-dom/vitest';
 import * as React from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
 import '@objectstack/spec/identity';
 import { MetadataAreaHostContext, type MetadataAreaHost } from './metadataAreaHost';
 
 const BASE = 'hotcrm';
 
+/** objectstack#36907 — the published apps per package (unset: one app), and the app reads asked. */
+const APPS = { byPackage: new Map<string, unknown[]>(), reads: [] as string[] };
 const CLIENT = {
-  list: async (type: string) =>
-    type === 'package'
+  list: async (type: string, options?: { packageId?: string }) => {
+    if (type === 'app') {
+      APPS.reads.push(options?.packageId ?? '');
+      return APPS.byPackage.get(options?.packageId ?? '') ?? [{ name: 'crm_app_one', label: 'One app' }];
+    }
+    return type === 'package'
       ? [{ manifest: { id: BASE, name: 'HotCRM', scope: 'installed' } }]
-      : [{ name: `crm_${type}_one`, label: `One ${type}`, _packageId: BASE }],
+      : [{ name: `crm_${type}_one`, label: `One ${type}`, _packageId: BASE }];
+  },
 };
 const entry = (type: string, domain: string) => ({ type, label: type, domain, allowEnvironmentOverlay: false, allowRuntimeCreate: true });
-const ENTRIES = [entry('object', 'data'), entry('flow', 'automation'), entry('email_template', 'system')];
+const ENTRIES = [
+  entry('object', 'data'),
+  entry('flow', 'automation'),
+  entry('email_template', 'system'),
+  entry('dashboard', 'ui'),
+  entry('report', 'ui'),
+];
 
 vi.mock('./useMetadata', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
@@ -74,13 +92,17 @@ const fetchMock = vi.fn(async (url: string) => {
   return json(404, { success: false });
 });
 
+const DESKTOP_WIDTH = window.innerWidth;
 beforeEach(() => {
   fetchMock.mockClear();
   vi.stubGlobal('fetch', fetchMock);
+  APPS.byPackage = new Map();
+  APPS.reads = [];
 });
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
+  Object.defineProperty(window, 'innerWidth', { configurable: true, writable: true, value: DESKTOP_WIDTH });
 });
 
 const READ_ONLY_BASE: MetadataAreaHost = { packageId: BASE, readOnly: true, basePath: `/studio/${BASE}/metadata`, pairCreate: true };
@@ -142,5 +164,81 @@ describe('the list offers 「新建」 on a read-only base, into its pair (objec
     fireEvent.click(createButton()!);
     await waitFor(() => expect(screen.getByTestId('location').textContent).toMatch(/^\/apps\/setup\/metadata\/object\/new/));
     expect(screen.queryByTestId('create-object-owd')).toBeNull();
+  });
+});
+
+describe("a dashboard list's 「新建」 in the area opens an app's design mode (objectstack#36907)", () => {
+  const WRITABLE: MetadataAreaHost = { packageId: BASE, readOnly: false, basePath: `/studio/${BASE}/metadata` };
+  const PAIR = `${BASE}.custom`;
+  const reason = () => screen.queryByTestId('metadata-list-create-unavailable');
+  // The header's 新建 (an empty list draws a second one in its empty state).
+  const newButton = () => screen.queryByTestId('metadata-list-create');
+
+  it("offered where an app opens: it goes to the area's create, which opens the app's design mode", async () => {
+    mount(WRITABLE, 'dashboard');
+    await screen.findByTestId('metadata-row-crm_dashboard_one');
+    await waitFor(() => expect(newButton()).not.toBeNull());
+    expect(reason()).toBeNull();
+    expect(APPS.reads).toEqual([BASE]);
+    fireEvent.click(newButton()!);
+    await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent(`/studio/${BASE}/metadata/dashboard/new?package=${BASE}`));
+  });
+
+  it('with no app to open, no 新建, and the list says why', async () => {
+    APPS.byPackage.set(BASE, []);
+    mount(WRITABLE, 'dashboard');
+    await screen.findByTestId('metadata-row-crm_dashboard_one');
+    expect(await screen.findByTestId('metadata-list-create-unavailable')).toHaveTextContent(
+      t('engine.list.dashboardNewNoApp', 'en-US'),
+    );
+    expect(newButton()).toBeNull();
+  });
+
+  it('on a phone, no 新建 and no app read: the design mode is never on there', async () => {
+    Object.defineProperty(window, 'innerWidth', { configurable: true, writable: true, value: 390 });
+    mount(WRITABLE, 'dashboard');
+    // A phone draws the list as cards: wait for the list's reads to settle.
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    });
+    expect(screen.getByTestId('location')).toHaveTextContent(`/studio/${BASE}/metadata/dashboard?package=${BASE}`);
+    expect(newButton()).toBeNull();
+    expect(reason()).toBeNull();
+    expect(APPS.reads).toEqual([]);
+  });
+
+  it("a read-only base: offered by its own app; behind the customization wall nothing is offered, and no app is read", async () => {
+    mount(READ_ONLY_BASE, 'dashboard');
+    await screen.findByTestId('metadata-row-crm_dashboard_one');
+    await waitFor(() => expect(newButton()).not.toBeNull());
+    cleanup();
+    APPS.reads = [];
+    mount(NO_PAIR_CREATE, 'dashboard');
+    await screen.findByTestId('metadata-row-crm_dashboard_one');
+    expect(newButton()).toBeNull();
+    expect(reason()).toBeNull();
+    expect(APPS.reads).toEqual([]);
+  });
+
+  it("the pair leg: a pair publishing no app is offered by its base's app, one read more", async () => {
+    APPS.byPackage.set(PAIR, []);
+    mount({ packageId: PAIR, readOnly: false, basePath: `/studio/${PAIR}/metadata` }, 'dashboard');
+    await waitFor(() => expect(newButton()).not.toBeNull());
+    expect(APPS.reads).toEqual([PAIR, BASE]);
+    cleanup();
+    APPS.reads = [];
+    APPS.byPackage.set(BASE, []);
+    mount({ packageId: PAIR, readOnly: false, basePath: `/studio/${PAIR}/metadata` }, 'dashboard');
+    expect(await screen.findByTestId('metadata-list-create-unavailable')).toBeInTheDocument();
+    expect(newButton()).toBeNull();
+  });
+
+  it('CONTROL — the report list: 新建 offered with no app, and no app read', async () => {
+    APPS.byPackage.set(BASE, []);
+    mount(WRITABLE, 'report');
+    await screen.findByTestId('metadata-row-crm_report_one');
+    expect(newButton()).not.toBeNull();
+    expect(reason()).toBeNull();
+    expect(APPS.reads).toEqual([]);
   });
 });
