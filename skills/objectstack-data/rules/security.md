@@ -175,8 +175,10 @@ rowLevelSecurity: [
 - A package's rule reads `value` as its package's queue, else the one
   holder in its declared `dependencies` closure plus `sys`, else (none
   declares it) an org's `sys_queue` row. Else it grants no one new, warned
-  `RESOURCE_CONFLICT`: `outside-closure`, `ambiguous-in-closure` (two
-  dependencies hold it), `ambiguous-in-environment`.
+  `RESOURCE_CONFLICT`: `outside-closure` (only a non-dependency
+  or an environment item holds `support`),
+  `ambiguous-in-closure` (two dependencies do), `ambiguous-in-environment`
+  (the one it reaches and a non-dependency do).
 
 ## Positions grant only what they name; portal users are `external`
 
@@ -349,10 +351,9 @@ switched off, or a disabled claimant.
 Beyond `SKILL.md` § Access depth: a scope
 widens the owner match declaratively instead of a hand-written RLS policy
 (ADR-0057 D1): it resolves at request time into an `owner_id IN (…)` set and
-AND-injects like RLS. Open-core boundary ADR-0016: the paid plugin goes in
-`plugins[]`, and `defineStack`, a save and a publish refuse a
-hierarchy-relative grant the stack does not declare
-(`STACK_HIERARCHY_SCOPE_CAPABILITY_REQUIRED`). The CLI only advises on a
+AND-injects like RLS. Open-core boundary ADR-0016: the plugin goes in
+`plugins[]`, and `defineStack` errors unless the stack declares
+`requires: ['hierarchy-security']`. The CLI only advises on a
 missing or unwired plugin: `os validate` warns, `os verify --json` lists it in
 `capabilities`.
 

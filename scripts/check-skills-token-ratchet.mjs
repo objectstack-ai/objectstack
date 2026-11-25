@@ -1405,15 +1405,17 @@ export const CEILINGS = new Map([
   // 16272 bytes (4068 tokens, headroom 0); the LANDED file is 17168 bytes ->
   // 4292 tokens, ceiling +224, pinned AT the measurement, zero headroom.
   //   ceil($(wc -c < skills/objectstack-data/rules/security.md) / 4) == ceil(17168 / 4)
-  // 4292 -> 4771 (#34770): RECEIVES from SKILL.md, no new teaching, § Ownership queues whole (as
+  // 4292 -> 4781 (#34770): RECEIVES from SKILL.md, no new teaching, § Ownership queues whole (as
   // `##`; the sharing bullet that pointed at it in SKILL.md now points inside this file) and, as
   // `## Access depth — readScope / writeScope`, the mechanics the entry's bound Access depth
-  // section no longer spells (the `owner_id IN (…)` resolution, the two ADR citations, what the
-  // CLI reports). The file is 17168 -> 19082 bytes (+1914) -> 4771
-  // tokens, zero headroom before, ceiling +479, pinned AT the measurement. Authority as the
-  // `references/examples-objects.md` row.
-  //   ceil($(wc -c < skills/objectstack-data/rules/security.md) / 4) == ceil(19082 / 4)
-  ['skills/objectstack-data/rules/security.md', 4771],
+  // section no longer spells (the `owner_id IN (…)` resolution, the two ADR citations, the
+  // `defineStack` error in the entry's own clause, what the CLI reports). The sharing bullet's
+  // three `RESOURCE_CONFLICT` glosses are untouched; the position bullet says "the two closure
+  // refusals" for the two reason names that bullet glosses. The file is 17168 -> 19123 bytes
+  // (+1955) -> 4781 tokens, zero headroom before, ceiling +489, pinned AT the measurement.
+  // Authority as the `references/examples-objects.md` row.
+  //   ceil($(wc -c < skills/objectstack-data/rules/security.md) / 4) == ceil(19123 / 4)
+  ['skills/objectstack-data/rules/security.md', 4781],
   // 3024 -> 3109 (2026-08-31 app-repo-principles raise, see the block above).
   // Severity Levels listed the three values and left the CHOICE unstated: a
   // block rests on a judgement a person made, so a machine-inferred signal — a
@@ -1805,7 +1807,7 @@ export const CEILINGS = new Map([
   // receiving rows of this change (ruling record 7128031203, fork 4 = A): a ceiling raised
   // because text MOVED between files is accepted when each raised row equals the measured bytes
   // moved in, with zero headroom, and the sum of ceilings does not rise. Both hold here: every
-  // row is pinned AT its measurement, and the nine rows this change moves sum to 34408 against
+  // row is pinned AT its measurement, and the nine rows this change moves sum to 34418, the
   // 34418 before it. Beside the standing 2026-10-27 ruling 「A:先削重复,余额按实测提高」 (record 6513306068);
   // as the objectstack-ui rows of part 1.
   //   ceil($(wc -c < skills/objectstack-automation/references/examples-flows.md) / 4) == ceil(26203 / 4)
@@ -1974,14 +1976,14 @@ export const CEILINGS = new Map([
   // `files`, `clone`; and `titleFormat`, which a save and `os validate` refuse by name. The file
   // is 6892 -> 14338 bytes (+7446) -> 3585 tokens, the row's 5 tokens of headroom absorbed,
   // ceiling +1857, pinned AT the measurement; the six objectstack-data files this change touches
-  // are 2610 bytes smaller together (92866 -> 90256).
+  // are 2569 bytes smaller together (92866 -> 90297).
   // Authority: the ruling of record that orders the entry file down to router size, decision
   // record 6943107981 S3 = A (this header: a ruling of record that orders text into a file
   // authorises its own measured delta), and the maintainer's ruling of 2026-11-24 on the seven
   // receiving rows of this change (ruling record 7128031203, fork 4 = A): a ceiling raised
   // because text MOVED between files is accepted when each raised row equals the measured bytes
   // moved in, with zero headroom, and the sum of ceilings does not rise. Both hold here: every
-  // row is pinned AT its measurement, and the nine rows this change moves sum to 34408 against
+  // row is pinned AT its measurement, and the nine rows this change moves sum to 34418, the
   // 34418 before it. Beside the standing 2026-10-27 ruling 「A:先削重复,余额按实测提高」 (record 6513306068);
   // as the objectstack-ui rows of part 1.
   //   ceil($(wc -c < skills/objectstack-data/references/examples-objects.md) / 4) == ceil(14338 / 4)
