@@ -9,7 +9,7 @@
       "title": "The first-run authoring loop closes: package → object → record → app → publish → end-user, zero code, zero restarts",
       "since": "v16",
       "status": "active",
-      "revision": 15,
+      "revision": 16,
       "priority": "P0",
       "surface": "mixed",
       "personas": ["admin (seeded admin@objectos.ai)", "end user (same account driving the published app)"],
@@ -27,7 +27,7 @@
       },
       "steps": [
         "boot the showcase example (objectstack dev --ui --seed-admin -p <port> -d file:/tmp/<run>/data.db), sign in as admin@objectos.ai/admin123, and note the boot timestamp in the server log (the zero-restart clause reads it later). Run steps[0] to [8] once per locale leg (fixtures.requires[0]): the en leg, then the zh-CN leg, each switched with the avatar-menu language switcher right after sign-in",
-        "Home → the build chip → create a NEW writable package (维修中心 / com.example.repairs, namespace repairs) via the new-package wizard. Type the identifier yourself: since #29734 a Chinese display name derives its id through pinyin (维修中心 gives com.ORG.weixiu-zhongxin, deriveCreatePackageId in ui/packages/app-shell/src/views/metadata-admin/PackageFormDialog.tsx), which is not the id the later steps name, and the namespace derives from the id you type. The build chip has two forms (ui/packages/app-shell/src/console/home/HomePage.tsx): with an agent catalog it reads 'Build an app' (data-testid home-build-app) and opens the Studio landing, where New package opens the wizard; with none it reads 'New in Studio' (home-build-in-studio) and opens Studio with the New package dialog already open, the form QA run #27481 met on the stock showcase. Record which",
+        "Home → the build chip → create a NEW writable package (维修中心 / com.example.repairs, namespace repairs) via the new-package wizard. Type the identifier yourself: since #29734 a Chinese display name derives its id through pinyin (维修中心 gives com.ORG.weixiu-zhongxin, deriveCreatePackageId in ui/packages/app-shell/src/views/metadata-admin/PackageFormDialog.tsx), which is not the id the later steps name, and the namespace derives from the id you type. The build chip has two forms (ui/packages/app-shell/src/console/home/HomePage.tsx): where the agent catalog serves the build agent it reads 'Build an app' (data-testid home-build-app) and opens Studio on the last package you worked in, or Setup → Packages when there is none, where New package opens the wizard; otherwise it reads 'New blank app' (home-build-in-studio) and opens Setup → Packages with the New package dialog already open (the form QA run #27481 met on the stock showcase, then labelled 'New in Studio'). A sign-in without Setup access (setup.access + manage_platform_settings) is sent to Studio's All metadata area instead, which creates no package; use the dev admin. Either way the create lands in Studio on the new package. Record which",
         "Data pillar → new object 'Repair Ticket' (the identifier auto-suggests repair_ticket from the display name, and the dialog PREFIXES it with the package namespace, so the object is named repairs_repair_ticket — the name every later step and clause uses (framework#2694, objectui StudioDesignSurface prefixObjectName). The dialog also carries an OWD (sharing model) choice, pre-selected to the platform's recommended baseline: confirm or change it, then click 'Save as draft', the dialog's confirm button (engine.studio.createDraft; no Studio create dialog has a button named Create)) → add a picklist field Status with 3 values. After a navigation the object surface opens on its Records tab (the Data pillar's default view, ui/packages/app-shell/src/views/studio-design/StudioDesignSurface.tsx); Add field is the Field layout tab's (字段布局, formerly Form) button (where QA run #28545 found it; the Records grid's add-column header carries it too). Each option's stored value derives from its label as you type it — 'In Repair' stores in_repair (ui/packages/app-shell/src/views/metadata-admin/inspectors/ObjectFieldInspector.tsx OptionsEditor) — so overwrite the value wherever the run wants a different one (a short code such as wip), and note the three stored values: acceptance[1] and acceptance[2] read them. There is no Save draft button: the designer autosaves, and a picklist field is held unsaved until it has at least one option (the status line reads 'Not saved yet: the field “Status” needs at least one option'), so add the field and fill its options, and the draft save fires",
         "open the Changes panel and Publish, then confirm with 'Publish all' in the review sheet; the toast names the count — 'Published N items in this package' (N = the drafts promoted), 'Published 1 item in this package' for one (engine.studio.publishedAllCount / publishedAllCountOne, objectui#11807; 'Published all drafts in this package' is the fallback when the count is unknown) — and, because the publish puts an object live, it adds 'Members can use it once a permission set grants them access.' with an 'Open Access' action (StudioDesignSurface.tsx)",
         "create a record in the runtime-faithful Records grid with a Status value chosen",
@@ -101,7 +101,8 @@
         { "revision": 12, "date": "2026-11-04", "change": "acceptance[0].verify re-pointed: the Studio package switcher, which declares the studio-pkg-chip testid, moved unchanged from ui/packages/app-shell/src/views/studio-design/StudioDesignSurface.tsx to PackageSwitcher.tsx beside it (#29988 slice 2, a move-only split). Re-read at base f7aab8958. No clause changed", "ref": "#29988" },
         { "revision": 13, "date": "2026-11-04", "change": "fixtures.knownGaps[3] corrected from QA run #29877 (W5-P0, at 589049b0; the list of record is comment 6600018008 on #27377): the zh-CN leg's acceptance[2] failure is fixed by PR #29790 (#29673 closed), and the run read that leg passing acceptance[2] and [3], so the instruction to score it FAIL citing #29673 is withdrawn and the row is a regression row. Read at base f68b47ca", "ref": "#29906" },
         { "revision":  14, "date":  "2026-11-24", "change":  "steps[5] and knownGaps[1] no longer route through Studio's Interfaces pillar, retired by #36502: the Create-app scaffold (box on) is the nav item, the dialog stays on the Data pillar, and a hand-wired entry is the running app's design-mode menu editor. No clause changed", "ref":  "#36502" },
-        { "revision": 15, "date": "2026-11-24", "change": "steps name the object page tab by its new name, Field layout (字段布局, formerly Form; card #36505).", "ref": "#36505" }
+        { "revision": 15, "date": "2026-11-24", "change": "steps name the object page tab by its new name, Field layout (字段布局, formerly Form; card #36505).", "ref": "#36505" },
+        { "revision": 16, "date": "2026-11-25", "change": "steps[1]: the Studio home is removed (#36908). 'Build an app' opens Studio on the last package, or Setup → Packages when there is none; the other chip reads 'New blank app' and opens Setup → Packages with New package open. There is no Studio landing. Read from source at PR head (HomePage.tsx, useNewPackageDoorPath, studioEntryPermissions.ts). No clause changed", "ref": "#36908" }
       ]
     },
     {
@@ -2270,7 +2271,7 @@
       "title": "Studio asks before an unsent edit is left behind: a held (incomplete) or dirty edit in any pillar survives a pillar switch, a rail switch, the package switcher, Home and a reload — or is discarded only after the author confirms",
       "since": "v18",
       "status": "active",
-      "revision": 11,
+      "revision": 12,
       "priority": "P1",
       "surface": "browser",
       "personas": [
@@ -2280,7 +2281,7 @@
         "app": "showcase",
         "requires": [
           "a fresh boot of the showcase on its own port and DB (dogfood §0) with OS_PORT exported, signed in as the seeded admin, and a console built from this tree with `pnpm console:build` — the root `pnpm build` does not refresh packages/console/dist (QA run #26715 needed the console build on every card)",
-          "a writable package created from the Studio landing (New package) holding one published object with a few fields, one flow, an app whose navigation names one dashboard, and one permission set"
+          "a writable package created from Setup → Packages (New package) holding one published object with a few fields, one flow, an app whose navigation names one dashboard, and one permission set"
         ]
       },
       "steps": [
@@ -2396,7 +2397,8 @@
           "date": "2026-11-24",
           "change": "steps name the object page tab by its new name, Field layout (字段布局, formerly Form; card #36505).",
           "ref": "#36505"
-        }
+        },
+        { "revision": 12, "date": "2026-11-25", "change": "fixtures.requires[1]: the writable package is created from Setup → Packages (New package); the Studio landing it named is removed (#36908). steps[2]'s studio-home departure is unchanged here. No clause changed", "ref": "#36908" }
       ]
     },
     {
@@ -5140,7 +5142,7 @@
         {
           "clause": "a failed read draws no number and no mark — never a '0' — the detail asks for read-only bases only, a package with nothing customized draws nothing, and a pair id is never asked",
           "oracle": "network",
-          "verify": "step 5: the detail sends no customizations request for a writable package; the All metadata area of a writable package reads its customizations (usePackageCustomizations asks every package but a pair; metadataAreaHost.customizations-28568 pins that read for a package with no pair) and, the counts being zero, draws no total, no mark and no filter; the pair id answers 400 VALIDATION_ERROR naming its base (the console refuses it before sending). A failed read shows the muted couldn't-read line with the server's sentence, never a count — not staged live: BuilderLanding.customizationCounts-28566 and metadataAreaHost.customizations-28568 pin it",
+          "verify": "step 5: the detail sends no customizations request for a writable package; the All metadata area of a writable package reads its customizations (usePackageCustomizations asks every package but a pair; metadataAreaHost.customizations-28568 pins that read for a package with no pair) and, the counts being zero, draws no total, no mark and no filter; the pair id answers 400 VALIDATION_ERROR naming its base (the console refuses it before sending). A failed read shows the muted couldn't-read line with the server's sentence, never a count — not staged live: PackageCustomizationsPanel.test.tsx and metadataAreaHost.customizations-28568 pin it",
           "evidence": "the network trace + the pair-id refusal body"
         }
       ],
