@@ -111,6 +111,10 @@ vi.mock('../metadata-admin/AccessExplainPanel', () => ({ AccessExplainPanel: () 
 // inside a case's clock (check:test-source-alias).
 import '@objectstack/lint';
 import { StudioDesignSurface } from './StudioDesignSurface';
+// The source under test reaches these dynamic imports (the command palette's
+// record preview, the drafts panel's lint, the code editor): their first load
+// is paid here, at collection, never inside a case's clock (`check:test-source-alias`).
+import '@object-ui/plugin-detail';
 
 window.matchMedia = ((query: string) => ({
   matches: false,

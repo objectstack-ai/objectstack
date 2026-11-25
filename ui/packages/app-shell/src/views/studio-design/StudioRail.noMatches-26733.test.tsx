@@ -88,6 +88,10 @@ import { t, tFormat } from '../metadata-admin/i18n';
 // `zh` catalogue is fetched on demand (objectstack#25922). Resident before any
 // case, so the zh case reads it synchronously.
 import { loadStudioCatalogue } from '@object-ui/i18n/namespaces/studio';
+// The source under test reaches these dynamic imports (the command palette's
+// record preview, the drafts panel's lint, the code editor): their first load
+// is paid here, at collection, never inside a case's clock (`check:test-source-alias`).
+import '@object-ui/plugin-detail';
 await loadStudioCatalogue('zh');
 
 const dataSource = createEmptyDataSource();

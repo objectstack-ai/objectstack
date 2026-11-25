@@ -133,6 +133,10 @@ import { FlowInspector } from '../metadata-admin/inspectors/FlowInspector';
 import { FlowPreview } from '../metadata-admin/previews/FlowPreview';
 import { valueEnvelopeRefusal } from '../metadata-admin/inspectors/flow-value-envelope';
 import { t } from '../metadata-admin/i18n';
+// The source under test reaches these dynamic imports (the command palette's
+// record preview, the drafts panel's lint, the code editor): their first load
+// is paid here, at collection, never inside a case's clock (`check:test-source-alias`).
+import '@object-ui/plugin-detail';
 
 const dataSource = createEmptyDataSource();
 

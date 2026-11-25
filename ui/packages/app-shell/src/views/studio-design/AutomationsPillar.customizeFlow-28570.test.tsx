@@ -179,6 +179,10 @@ import { publishRefusal } from './metadataError';
 import { t, tFormat } from '../metadata-admin/i18n';
 import { createEmptyDataSource } from './__tests__/emptyDataSource';
 import { StudioSaveHarness, pressStudioSave } from './__tests__/studioSaveHarness';
+// The source under test reaches these dynamic imports (the command palette's
+// record preview, the drafts panel's lint, the code editor): their first load
+// is paid here, at collection, never inside a case's clock (`check:test-source-alias`).
+import '@object-ui/plugin-detail';
 
 const dataSource = createEmptyDataSource();
 

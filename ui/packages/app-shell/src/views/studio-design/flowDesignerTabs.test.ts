@@ -7,6 +7,10 @@
 
 import { describe, it, expect } from 'vitest';
 import { FLOW_DESIGNER_TOOL_TABS, flowDesignerTabAddress, readFlowDesignerTab } from './flowDesignerTabs';
+// The source under test reaches these dynamic imports (the command palette's
+// record preview, the drafts panel's lint, the code editor): their first load
+// is paid here, at collection, never inside a case's clock (`check:test-source-alias`).
+import '@object-ui/plugin-editor';
 
 describe('the flow designer\'s tab address', () => {
   it('reads each section and writes it back; Canvas is the default and writes nothing', () => {
