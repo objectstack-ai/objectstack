@@ -14,7 +14,6 @@ import { defineSeed } from '@objectstack/spec/data';
 import { Status } from '../objects/status.object';
 import { Category } from '../objects/category.object';
 
-// Reference data — every environment
 export const statusSeed = defineSeed(Status, {
   externalId: 'code',
   mode: 'upsert',
@@ -24,7 +23,6 @@ export const statusSeed = defineSeed(Status, {
   ],
 });
 
-// Demo data — dev/test only
 export const categorySeed = defineSeed(Category, {
   externalId: 'slug',
   env: ['dev', 'test'],
@@ -40,7 +38,7 @@ export const SeedData = [statusSeed, categorySeed];
 
 | Field | Default | Purpose |
 |:------|:--------|:--------|
-| `object` | derived | Auto-set from `objectDef.name`; hand-written only in a runtime save (below) |
+| `object` | derived | Auto-set from `objectDef.name` |
 | `externalId` | `'name'` | Stable business key (or field list) every mode matches on (below) |
 | `mode` | `'ignore'` | Import strategy (below) |
 | `columns` | — | Per-column write policy, keyed by field (below) |
@@ -98,7 +96,7 @@ defineSeed(Invoice, {
 differ across environments.
 
 Every record carries a value for each `externalId` field (each field of a
-list; `name` when the seed names none). One left blank (no value, `null` or
+list). One left blank (no value, `null` or
 `''`; whitespace is a value) fails `os validate` / `os build` and is refused
 at load in every mode: the result names
 the object, record index, field and fix, and the other records still load.
@@ -138,10 +136,12 @@ out), or a cycle refuses the whole load; nothing is written.
 **Seed rows obey the object's validation rules** (all but `state_machine`); a
 refused row never lands. `os validate` / `os build` exit 1 (`--json` too) on
 each record a rule refuses, naming its location (`data[0].records[1]`), object,
-index and rule. A rule the record's literals cannot decide (it reads a
-reference, default, formula or roll-up; the object has a `beforeInsert` hook;
-an `update` set) is counted, never refused: the load judges it, and
-`os verify` fails on each dropped row. One reading a parent roll-up
+index and rule. Only text, number, boolean and single-select literals (or a
+field absent or `null` with no default) decide a rule. Anything else it reads
+(a date, JSON, multi-valued, reference or CEL value, `''`, a formula or
+roll-up field), a `beforeInsert` hook on the object or an `update` set leaves
+it counted, never refused: the load judges it, and `os verify` fails on each
+dropped row. One reading a parent roll-up
 (`record.invoice.amount_paid`) sees the total earlier rows left, so children
 must fit in record order. ⛔ Never seed the roll-up: a seeded `amount_paid` is
 never stored (a warning per dataset); the child rows compute it.
