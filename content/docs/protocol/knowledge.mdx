@@ -175,7 +175,9 @@ Canonical shapes shared by every adapter:
   `documentId`, `index`, `content` (what the adapter embeds and returns as a
   snippet), and `headingPath?` (the headings it sits under, outermost first,
   under the `markdown` strategy). The adapter indexes each passage as given and
-  does not split it again.
+  does not split it again. A passage has no `metadata` of its own: it takes its
+  document's `metadata`. The chunk's former `metadata` key, which nothing wrote
+  or read, is retired, and a chunk that carries one is refused with the fix.
 - `KnowledgeHit` — a search result (`chunkId`, `documentId`, `score`,
   `snippet`, `sourceRecordId?`, `metadata`).
 
