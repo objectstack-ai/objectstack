@@ -8,7 +8,7 @@
 
 import { ObjectStackClient, type QueryOptions as ObjectStackQueryOptions } from '@objectstack/client';
 import type { DroppedFieldsEvent, EngineAggregateOptions } from '@objectstack/spec/data';
-import type { Dataset, ListViewGroupHeaderRow } from '@objectstack/spec/ui';
+import type { Dataset } from '@objectstack/spec/ui';
 // objectui#11013 — a VALUE import: the keys `listViews` carries off a stored
 // ViewItem record are the spec's own record of the console's round-trip keys,
 // read off the pin rather than hand-listed (see `VIEW_ITEM_ROUND_TRIP_KEYS`).
@@ -79,6 +79,7 @@ import type {
   ImportJobSummaryInfo,
   ImportJobUndoResult,
   ListImportJobsOptions,
+  ListViewGroupHeaderAnswer,
 } from '@object-ui/types';
 import { errorCodeIs, errorCodeIsAnyOf } from '@object-ui/types';
 import {
@@ -7696,11 +7697,17 @@ export class ObjectStackAdapter<T = unknown> implements DataSource<T> {
    * that promises the query's own numbers, which is the defect this member
    * exists to end. A failure is thrown to the caller, and a body without a
    * `records` array is refused rather than read as "no groups".
+   *
+   * The door answers `hasMore` beside `records`: a grouped read with no
+   * `limit` is cut to the deployment's default page size, and `hasMore: true`
+   * says groups were dropped. It is handed on as the answer's `hasMore`
+   * (objectstack#36870), so a caller that folds the groups into a total can
+   * tell a cut answer from a whole one.
    */
   async queryGroupHeaders(
     resource: string,
     query: EngineAggregateOptions,
-  ): Promise<ListViewGroupHeaderRow[]> {
+  ): Promise<ListViewGroupHeaderAnswer> {
     await this.connect();
     const result: unknown = await this.client.data.query(resource, query as any);
     const records = (result as { records?: unknown } | null)?.records;
@@ -7711,7 +7718,9 @@ export class ObjectStackAdapter<T = unknown> implements DataSource<T> {
         + 'sent verbatim; nothing was approximated from a page of rows.',
       );
     }
-    return records as ListViewGroupHeaderRow[];
+    const answer = records as ListViewGroupHeaderAnswer;
+    if ((result as { hasMore?: unknown }).hasMore === true) answer.hasMore = true;
+    return answer;
   }
 
   /**

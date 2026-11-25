@@ -475,6 +475,7 @@ export type {
   FileUploadResult,
   AggregateParams,
   AggregateResult,
+  ListViewGroupHeaderAnswer,
   DataSourceMutationEvent,
   BulkWriteRowError,
   BulkWriteResult,
