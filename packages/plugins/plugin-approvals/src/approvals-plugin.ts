@@ -39,7 +39,11 @@ import { bindSnapshotRedactionMiddleware } from './payload-redaction-middleware.
 import { bindSnapshotPredicateGuard } from './payload-predicate-guard.js';
 import { bindRequestChildReadGates, bindRequestReadGate } from './request-read-gate.js';
 import { bindReaderLocaleLabelsMiddleware } from './reader-locale-labels-middleware.js';
-import { bindApprovalActivityFeed, bindApprovalActivityReadGate } from './approval-activity-feed.js';
+import {
+  bindApprovalActivityFeed,
+  bindApprovalActivityLocale,
+  bindApprovalActivityReadGate,
+} from './approval-activity-feed.js';
 import type { FieldVisibilitySource } from './payload-redaction.js';
 import { registerApprovalNode, type ApprovalAutomationSurface } from './approval-node.js';
 import { backfillActionSlots } from './action-slot-backfill.js';
@@ -460,6 +464,8 @@ export class ApprovalsServicePlugin implements Plugin {
       // its reads could not be narrowed.
       bindApprovalActivityReadGate(engine as any, visibility, ctx.logger);
       bindApprovalActivityFeed(engine as any, ctx.logger);
+      // …each entry's line in the reader's language, by the same lookup.
+      bindApprovalActivityLocale(engine as any, i18nService, ctx.logger);
     } else {
       ctx.logger.warn(
         'ApprovalsServicePlugin: the ObjectQL engine has no middleware seam — reads of sys_approval_request, '

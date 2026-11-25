@@ -16,8 +16,8 @@
  * step, written by `ApprovalService` with the record it governs copied onto
  * the row (`object_name` + `record_id`, the request's pointer pair). For each
  * row of a kind in {@link APPROVAL_ACTIVITY_STEPS} — `submit`, `approve`,
- * `reject`, `recall` — the hook appends one `sys_activity` row about that
- * record. Reading the decision log rather than calling in from each decision
+ * `reject`, `recall`, `revise` (sent back for revision), `resubmit` and
+ * `cancel` — the hook appends one `sys_activity` row about that record. Reading the decision log rather than calling in from each decision
  * method keeps `approval-service.ts` untouched, and a step the service learns
  * to record in a new place reaches the stream with no second call site.
  *
@@ -28,7 +28,8 @@
  *    may write (`SYS_ACTIVITY_PLATFORM_TYPES`; the app activity door refuses
  *    it), so an app cannot write a row that reads as an approval step;
  *  - the domain kind rides in `metadata.kind` ({@link APPROVAL_ACTIVITY_KIND}),
- *    with the step's action kind and step label beside it;
+ *    with the step's action kind, its stored label, and the two machine names
+ *    the label is translated by (`flow_name`, `step_name`) beside it;
  *  - `source_object` / `source_id` point at the request
  *    (`sys_approval_request`), the entity the entry drills to.
  *
@@ -38,6 +39,29 @@
  *
  * The row carries no decision comment and no snapshot value: it is the one
  * line the stream draws, and the request's detail stays on the approvals tab.
+ *
+ * [#35723 L1 N2] An object with `enable.activities: false` gets no entry, as
+ * the CRUD mirror writes none for it (`audit-writers.ts`): that flag stops
+ * mirroring into the object's timeline and hides the timeline, so an entry
+ * there would be written for no reader.
+ *
+ * ## In the reader's language
+ *
+ * `summary` is the line composed in English from this plugin's catalog
+ * (`approvalActivity*` in `translations/messages.ts`, {@link APPROVAL_ACTIVITY_STEPS}),
+ * the text every reader of the column without a locale is served — the shape
+ * #26167 gave the CRUD mirror (`activity-summary-message.ts` in plugin-audit):
+ * the sentence is stored with its CODE beside it (here the step's `action` and
+ * the step's machine names in `metadata`), and a read re-composes it per
+ * reader. {@link bindApprovalActivityLocale}, an engine middleware on
+ * `sys_activity`, does that for a non-system read that carries a locale, with
+ * the approvals door's own lookup (`readerLabelsFor`, `reader-locale-labels.ts`):
+ * the sentence is `messages.approvalActivity*` in the reader's locale, and the
+ * step label is `flows.<flow>.approvals.<node_id>.label` read the way the
+ * approvals door reads it, else the stored label. ⛔ Nothing here is a second
+ * negotiation or a second label rule. Nothing is re-composed for a system read,
+ * a read with no locale or no `i18n` service, a key the locale's pack misses,
+ * or a row whose `summary` the read was not served — the stored line stands.
  *
  * ## Who reads it
  *
@@ -79,6 +103,9 @@ import type { ApprovalActionKind } from '@objectstack/spec/contracts';
 import { pinnedEquality } from './payload-predicate-guard.js';
 import { APPROVAL_REQUEST_OBJECT, type MiddlewareEngine } from './payload-redaction-middleware.js';
 import { REQUEST_READ_OPS, type RequestVisibilitySource } from './request-read-gate.js';
+import { approvalMessageKey, interpolate } from './approval-notification-text.js';
+import { flowNameOfProcess, readerLabelsFor, type ReaderLabelI18n, type ReaderLabels } from './reader-locale-labels.js';
+import { enMessages, type ApprovalMessageId } from './translations/messages.js';
 
 /** The activity stream's table (plugin-audit's). */
 export const ACTIVITY_OBJECT = 'sys_activity';
@@ -98,16 +125,25 @@ export const APPROVAL_ACTIVITY_SOURCE_OBJECT = APPROVAL_REQUEST_OBJECT;
 /** The hook package the producer binds under, so a second `start()` replaces it. */
 export const APPROVAL_ACTIVITY_HOOK_PACKAGE = 'plugin-approvals:activity';
 
+/** The catalog sentences of one step kind: its line, and for a decision at a step the twin naming the step. */
+export interface ApprovalActivityStep {
+  line: ApprovalMessageId;
+  stepped?: ApprovalMessageId;
+}
+
 /**
- * The approval steps the stream shows, each with the one-line summary its
- * entry is written with. A kind not listed (a reminder, a reassignment, a
- * thread comment, …) writes no entry.
+ * The approval steps the stream shows, each with the catalog sentence its
+ * entry is written with (`translations/messages.ts`). A kind not listed (a
+ * reminder, a reassignment, a thread comment, …) writes no entry.
  */
-export const APPROVAL_ACTIVITY_STEPS: Readonly<Partial<Record<ApprovalActionKind, string>>> = Object.freeze({
-  submit: 'Submitted for approval',
-  approve: 'Approved',
-  reject: 'Rejected',
-  recall: 'Recalled the approval request',
+export const APPROVAL_ACTIVITY_STEPS: Readonly<Partial<Record<ApprovalActionKind, ApprovalActivityStep>>> = Object.freeze({
+  submit: { line: 'approvalActivitySubmitted' },
+  approve: { line: 'approvalActivityApproved', stepped: 'approvalActivityApprovedStep' },
+  reject: { line: 'approvalActivityRejected', stepped: 'approvalActivityRejectedStep' },
+  recall: { line: 'approvalActivityRecalled' },
+  revise: { line: 'approvalActivitySentBack', stepped: 'approvalActivitySentBackStep' },
+  resubmit: { line: 'approvalActivityResubmitted' },
+  cancel: { line: 'approvalActivityCancelled' },
 });
 
 /** `sys_activity.summary` holds at most this many characters. */
@@ -132,14 +168,27 @@ const text = (value: unknown): string | null =>
   typeof value === 'string' && value.trim() ? value.trim() : null;
 
 /**
- * The summary an approval entry is written with: the step's line, then the
- * step's label where the step has one (`Approved · Manager review`).
+ * The catalog sentence of a step and its params: the step's twin naming the
+ * step's label where the kind has one and a label is known
+ * (`Approved · Manager review`), else its line. `null` for a kind the stream
+ * does not show.
  */
+export function approvalActivityMessage(
+  kind: string,
+  stepLabel: unknown,
+): { id: ApprovalMessageId; params: Record<string, string> } | null {
+  const step = Object.prototype.hasOwnProperty.call(APPROVAL_ACTIVITY_STEPS, kind)
+    ? APPROVAL_ACTIVITY_STEPS[kind as ApprovalActionKind]
+    : undefined;
+  if (!step) return null;
+  const label = step.stepped ? text(stepLabel) : null;
+  return label && step.stepped ? { id: step.stepped, params: { step: label } } : { id: step.line, params: {} };
+}
+
+/** The summary an approval entry is written with: its catalog sentence in English ({@link approvalActivityMessage}). */
 export function approvalActivitySummary(kind: string, stepLabel: unknown): string | null {
-  const line = APPROVAL_ACTIVITY_STEPS[kind as ApprovalActionKind];
-  if (!line) return null;
-  const label = kind === 'approve' || kind === 'reject' ? text(stepLabel) : null;
-  return (label ? `${line} · ${label}` : line).slice(0, SUMMARY_MAX);
+  const message = approvalActivityMessage(kind, stepLabel);
+  return message ? interpolate(enMessages[message.id], message.params).slice(0, SUMMARY_MAX) : null;
 }
 
 /** What the entry names of the person who took the step. */
@@ -155,6 +204,7 @@ export interface ApprovalActivityActor {
 export function approvalActivityRow(
   action: Record<string, unknown>,
   actor: ApprovalActivityActor,
+  flowName?: string | null,
 ): Record<string, unknown> | null {
   const kind = text(action.action);
   const object = text(action.object_name);
@@ -165,6 +215,8 @@ export function approvalActivityRow(
   if (!summary) return null;
   const actorId = text(action.actor_id);
   const stepLabel = text(action.step_label);
+  const stepName = text(action.step_name);
+  const flow = text(flowName);
   return {
     type: APPROVAL_ACTIVITY_TYPE,
     timestamp: text(action.created_at) ?? new Date().toISOString(),
@@ -180,6 +232,7 @@ export function approvalActivityRow(
       kind: APPROVAL_ACTIVITY_KIND,
       action: kind,
       ...(stepLabel ? { step_label: stepLabel } : {}),
+      ...(flow && stepName ? { flow_name: flow, step_name: stepName } : {}),
     }),
   };
 }
@@ -219,13 +272,39 @@ export function bindApprovalActivityFeed(engine: ApprovalActivityEngine, logger?
     }
   };
 
+  /** The flow a request runs (`process_name` without `flow:`), the key its step label is translated by. */
+  const flowOf = async (requestId: unknown, transaction: unknown): Promise<string | null> => {
+    if (requestId == null) return null;
+    try {
+      const rows = await engine.find(APPROVAL_ACTIVITY_SOURCE_OBJECT, {
+        where: { id: String(requestId) },
+        fields: ['id', 'process_name'],
+        limit: 1,
+        context: { isSystem: true, ...(transaction != null ? { transaction } : {}) },
+      });
+      const row: any = Array.isArray(rows) ? rows[0] : undefined;
+      return flowNameOfProcess(row?.process_name) ?? null;
+    } catch {
+      // The entry is still written, in its stored label only.
+      return null;
+    }
+  };
+
   engine.registerHook('afterInsert', async (ctx: any) => {
     const action = ctx?.result as Record<string, unknown> | undefined;
     if (!action || typeof action !== 'object') return;
     // No activity stream on this deployment (no plugin-audit): nothing to write.
     if (!has(ACTIVITY_OBJECT, 'type')) return;
+    if (!approvalActivityMessage(text(action.action) ?? '', null)) return;
+    // [L1 N2] An object that opts out of its timeline gets no entry, as the CRUD mirror writes none.
+    const governed = text(action.object_name);
+    if (!governed || objectMutesActivities(engine, governed)) return;
     const actorId = text(action.actor_id);
-    const row = approvalActivityRow(action, actorId ? await actorOf(actorId) : { name: null, avatarUrl: null });
+    const row = approvalActivityRow(
+      action,
+      actorId ? await actorOf(actorId) : { name: null, avatarUrl: null },
+      await flowOf(action.request_id, ctx?.transaction),
+    );
     if (!row) return;
     const organizationId = text(action.organization_id);
     if (organizationId && has(ACTIVITY_OBJECT, 'organization_id')) row.organization_id = organizationId;
@@ -250,6 +329,16 @@ export function bindApprovalActivityFeed(engine: ApprovalActivityEngine, logger?
       );
     }
   }, { object: APPROVAL_ACTION_OBJECT, packageId: APPROVAL_ACTIVITY_HOOK_PACKAGE, priority: 100 });
+}
+
+/** Whether `object` declares `enable.activities: false` (the spec default is on). */
+function objectMutesActivities(engine: ApprovalActivityEngine, object: string): boolean {
+  try {
+    const def: any = engine.getSchema?.(object);
+    return def?.enable?.activities === false;
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -299,5 +388,87 @@ export function bindApprovalActivityReadGate(
     }
     if (filter) ast.where = ast.where ? { $and: [ast.where, filter] } : filter;
     return next();
+  }, { object: ACTIVITY_OBJECT });
+}
+
+/** The columns {@link localizeApprovalActivityRow} recognises an approval entry by. */
+const RECOGNITION_COLUMNS = ['type', 'source_object', 'metadata'] as const;
+
+/** A stored `metadata` value: a JSON object, or `null` for anything else. */
+function metadataOf(raw: unknown): Record<string, unknown> | null {
+  if (raw && typeof raw === 'object' && !Array.isArray(raw)) return raw as Record<string, unknown>;
+  if (typeof raw !== 'string' || !raw.trim()) return null;
+  try {
+    const value = JSON.parse(raw);
+    return value && typeof value === 'object' && !Array.isArray(value) ? value : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Overlay an approval entry's served `summary` with its line in the reader's
+ * language, in place: the step's catalog sentence through `labels`, its
+ * `{{step}}` the step's label as the approvals door reads it, else the stored
+ * label. Any other row, a row served without a `summary`, and a sentence the
+ * reader's pack does not hold keep what they carry.
+ */
+export function localizeApprovalActivityRow(row: Record<string, unknown>, labels: ReaderLabels): void {
+  if (typeof row.summary !== 'string' || !row.summary) return;
+  if (row.type !== APPROVAL_ACTIVITY_TYPE || row.source_object !== APPROVAL_ACTIVITY_SOURCE_OBJECT) return;
+  const metadata = metadataOf(row.metadata);
+  if (!metadata || metadata.kind !== APPROVAL_ACTIVITY_KIND) return;
+  const flow = text(metadata.flow_name);
+  const node = text(metadata.step_name);
+  const step = (flow && node ? labels.stepLabel(flow, node) : undefined) ?? text(metadata.step_label);
+  const message = approvalActivityMessage(text(metadata.action) ?? '', step);
+  if (!message) return;
+  const line = labels.sentence(approvalMessageKey(message.id), message.params);
+  if (line) row.summary = line.slice(0, SUMMARY_MAX);
+}
+
+/**
+ * Bind the middleware that serves an approval entry's line in the reader's
+ * language (see the header). `getI18n` is resolved on each read: the `i18n`
+ * service is another plugin's and may start after this one. A read that
+ * projects `summary` without the columns an entry is recognised by borrows
+ * them for the read and takes them off every row before the rows go back.
+ */
+export function bindApprovalActivityLocale(
+  engine: MiddlewareEngine,
+  getI18n: () => ReaderLabelI18n | undefined,
+  logger?: Logger,
+): void {
+  engine.registerMiddleware(async (opCtx: any, next: () => Promise<void>) => {
+    if (opCtx?.operation !== 'find' && opCtx?.operation !== 'findOne') return next();
+    const context = opCtx?.context;
+    if (!context || context.isSystem) return next();
+    let labels: ReaderLabels | undefined;
+    try {
+      labels = readerLabelsFor(getI18n(), context.locale);
+    } catch {
+      // The i18n service is optional and late-bound: the stored line stands.
+      labels = undefined;
+    }
+    if (!labels) return next();
+    const fields: unknown = opCtx.ast?.fields;
+    const borrowed = Array.isArray(fields) && fields.length > 0 && fields.includes('summary')
+      ? RECOGNITION_COLUMNS.filter((column) => !fields.includes(column))
+      : [];
+    if (borrowed.length > 0) opCtx.ast.fields = [...(fields as unknown[]), ...borrowed];
+    await next();
+    const result = opCtx.result;
+    const rows: unknown[] = Array.isArray(result) ? result : result ? [result] : [];
+    for (const row of rows) {
+      if (!row || typeof row !== 'object') continue;
+      try {
+        localizeApprovalActivityRow(row as Record<string, unknown>, labels);
+      } catch (err: any) {
+        logger?.warn('[approvals] activity entry locale middleware failed — the stored line is served', {
+          error: err?.message ?? String(err),
+        });
+      }
+      for (const column of borrowed) delete (row as Record<string, unknown>)[column];
+    }
   }, { object: ACTIVITY_OBJECT });
 }
