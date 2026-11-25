@@ -4546,13 +4546,11 @@ const en = {
     open: 'Open',
     loading: 'Loading…',
     welcome: 'Build your business system with AI',
-    welcomeAdminDescription: 'Describe your business in one sentence — AI generates the objects, screens, APIs and agent tools. Or set things up yourself from the menu on the left.',
     welcomeAdminDescriptionNoBuild: 'Set up your first application from the Administration menu on the left. Once you have data, the AI assistant can help you explore it.',
     welcomeAdminDescriptionNoAi: 'Set up your first application from the Administration menu on the left.',
     noAppsTitle: 'No applications yet',
     noAppsDescription: 'The system is being set up — apps your admin shares with you will show up here.',
     noAppsAddDescription: 'Build your first app, or start from a template or the app marketplace.',
-    buildWithAI: 'Build with AI',
     askAI: 'Ask AI',
     recoveryReminder: {
       message: 'Set a recovery password so you can still sign in if single sign-on is ever unavailable.',

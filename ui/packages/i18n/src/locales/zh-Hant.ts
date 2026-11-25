@@ -3922,13 +3922,11 @@ const zhHant = {
     open: '開啟',
     loading: '載入中…',
     welcome: '用 AI 搭建你的業務系統',
-    welcomeAdminDescription: '用一句話描述你的業務，AI 會為你生成物件、介面、API 和智慧體工具；也可以從左側選單自行搭建。',
     welcomeAdminDescriptionNoBuild: '從左側的「管理」選單建立你的第一個應用。有了資料後，AI 助手可以幫你查詢和分析。',
     welcomeAdminDescriptionNoAi: '從左側的「管理」選單建立你的第一個應用。',
     noAppsTitle: '還沒有應用',
     noAppsDescription: '系統正在準備中——管理員共享給你的應用會顯示在這裡。',
     noAppsAddDescription: '搭建你的第一個應用，或者從模板、應用市場開始。',
-    buildWithAI: '用 AI 搭建',
     askAI: '問 AI',
     recoveryReminder: {
       message: '建議設定一個備用密碼，這樣即使單點登入不可用，你仍能直接登入。',

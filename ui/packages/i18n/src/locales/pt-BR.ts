@@ -3818,13 +3818,11 @@ const pt = {
       title: "Comece com um modelo",
       marketplaceDisabled: "Este runtime não tem um marketplace de aplicativos configurado, portanto não há modelos para instalar aqui.",
     },
-    welcomeAdminDescription: "Descreva seu negócio em uma frase — a IA gera os objetos, as telas, as APIs e as ferramentas do agente. Ou configure você mesmo pelo menu à esquerda.",
     welcomeAdminDescriptionNoBuild: "Configure seu primeiro aplicativo pelo menu de Administração à esquerda. Quando houver dados, o assistente de IA poderá ajudar a explorá-los.",
     welcomeAdminDescriptionNoAi: "Configure seu primeiro aplicativo pelo menu de Administração à esquerda.",
     noAppsTitle: "Ainda não há aplicativos",
     noAppsDescription: "O sistema está sendo preparado — os aplicativos que seu administrador compartilhar aparecerão aqui.",
     noAppsAddDescription: "Crie seu primeiro aplicativo ou comece com um modelo ou o marketplace de aplicativos.",
-    buildWithAI: "Criar com IA",
     askAI: "Perguntar à IA",
     recoveryReminder: {
       message: "Defina uma senha de recuperação para conseguir entrar mesmo que o logon único fique indisponível.",

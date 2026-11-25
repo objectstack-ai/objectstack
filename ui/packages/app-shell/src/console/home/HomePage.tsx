@@ -814,22 +814,29 @@ export function HomePage({ checklist }: HomePageProps = {}) {
               white-label deployments should see their own name in the hero, that
               is a copy change to the ten packs, not an argument at this call site.
             */}
-            <EmptyTitle>{t('home.welcome', { defaultValue: 'Build your business system with AI' })}</EmptyTitle>
-            <EmptyDescription>
+            {/*
+              objectstack#37227 — where the build agent is deployed this
+              welcome used to promise building with AI, the 「Build with AI」
+              button below it. That button is gone from Home, so the promise
+              would be false: the title is the plain no-apps one there, and the
+              description is the same NoBuild / NoAi copy any other deployment
+              reads. The assistant drawer still serves the build agent.
+            */}
+            <EmptyTitle>
               {buildAvailable
-                ? t('home.welcomeAdminDescription', {
+                ? t('home.noAppsTitle', { defaultValue: 'No applications yet' })
+                : t('home.welcome', { defaultValue: 'Build your business system with AI' })}
+            </EmptyTitle>
+            <EmptyDescription>
+              {askAvailable
+                ? t('home.welcomeAdminDescriptionNoBuild', {
                     defaultValue:
-                      'Describe your business in one sentence — AI generates the objects, screens, APIs and agent tools. Or set things up yourself from the menu on the left.',
+                      'Set up your first application from the Administration menu on the left. Once you have data, the AI assistant can help you explore it.',
                   })
-                : askAvailable
-                  ? t('home.welcomeAdminDescriptionNoBuild', {
-                      defaultValue:
-                        'Set up your first application from the Administration menu on the left. Once you have data, the AI assistant can help you explore it.',
-                    })
-                  : t('home.welcomeAdminDescriptionNoAi', {
-                      defaultValue:
-                        'Set up your first application from the Administration menu on the left.',
-                    })}
+                : t('home.welcomeAdminDescriptionNoAi', {
+                    defaultValue:
+                      'Set up your first application from the Administration menu on the left.',
+                  })}
             </EmptyDescription>
             <HomeAiActions
               askAvailable={askAvailable}

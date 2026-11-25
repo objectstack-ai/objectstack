@@ -390,12 +390,15 @@ describe('HomePage authoring-CTA capability gate (objectstack#8270)', () => {
       expect(screen.queryByTestId('home-build-with-ai')).toBeNull();
     });
 
-    it('keeps the ordinary admin welcome when the capability IS held, without "Build with AI" (objectstack#37227)', () => {
+    it('keeps the admin welcome when the capability IS held, without "Build with AI" or its promise (objectstack#37227)', () => {
       renderHome(eePayload([...OWNER_CAPS, 'manage_metadata']));
 
       expect(screen.queryByTestId('home-authoring-gate-reason-empty')).toBeNull();
-      expect(screen.getByText('«home.welcome»')).toBeInTheDocument();
-      expect(screen.getByText('«home.welcomeAdminDescription»')).toBeInTheDocument();
+      // objectstack#37227 — with the build agent deployed the welcome makes no
+      // build promise: the no-apps title and the NoAi copy (no ask agent here).
+      expect(screen.getByText('«home.noAppsTitle»')).toBeInTheDocument();
+      expect(screen.getByText('«home.welcomeAdminDescriptionNoAi»')).toBeInTheDocument();
+      expect(screen.queryByText('«home.welcome»')).toBeNull();
       // The phone's zero-app welcome, a maker the build agent serves: the
       // build CTA stood here before; "Ask AI" stays withheld for a maker.
       expect(screen.queryByTestId('home-build-with-ai')).toBeNull();

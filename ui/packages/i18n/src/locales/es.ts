@@ -3823,13 +3823,11 @@ const es = {
       title: "Empezar con una plantilla",
       marketplaceDisabled: "Este runtime no tiene un marketplace de aplicaciones configurado, por lo que no hay plantillas que instalar aquí.",
     },
-    welcomeAdminDescription: "Describa su negocio en una frase — la IA genera los objetos, las pantallas, las API y las herramientas del agente. O configúrelo usted mismo desde el menú de la izquierda.",
     welcomeAdminDescriptionNoBuild: "Configure su primera aplicación desde el menú de Administración de la izquierda. Cuando tenga datos, el asistente de IA podrá ayudarle a explorarlos.",
     welcomeAdminDescriptionNoAi: "Configure su primera aplicación desde el menú de Administración de la izquierda.",
     noAppsTitle: "Todavía no hay aplicaciones",
     noAppsDescription: "El sistema se está preparando — las aplicaciones que su administrador comparta aparecerán aquí.",
     noAppsAddDescription: "Cree su primera aplicación, o empiece con una plantilla o el mercado de aplicaciones.",
-    buildWithAI: "Crear con IA",
     askAI: "Preguntar a la IA",
     recoveryReminder: {
       message: "Establezca una contraseña de recuperación para poder iniciar sesión aunque el inicio de sesión único no esté disponible.",

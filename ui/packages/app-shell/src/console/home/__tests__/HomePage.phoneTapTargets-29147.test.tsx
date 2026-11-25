@@ -213,6 +213,65 @@ describe('the greeting row (objectstack#29147)', () => {
   });
 });
 
+/**
+ * objectstack#37227 — the phone's zero-app admin welcome no longer promises
+ * building with AI where the build agent is deployed: its 「Build with AI」
+ * button is gone, so the title is the plain no-apps one and the description is
+ * the NoBuild / NoAi copy every other deployment reads. A deployment without
+ * the build agent keeps the welcome title (the control).
+ */
+describe('the phone zero-app admin welcome (objectstack#37227)', () => {
+  async function renderZeroAppPhone(): Promise<() => void> {
+    const restoreWidth = atPhoneWidth();
+    state.apps = [];
+    render(<HomePage />);
+    await waitFor(() => expect(state.answered).toBe(true));
+    return restoreWidth;
+  }
+
+  it('build agent deployed: the no-apps title and the NoAi copy, no build promise', async () => {
+    state.agents = [{ name: 'build' }];
+    state.buildAgent = true;
+    const restore = await renderZeroAppPhone();
+    try {
+      expect(screen.getByText('«home.noAppsTitle»')).toBeInTheDocument();
+      expect(screen.getByText('«home.welcomeAdminDescriptionNoAi»')).toBeInTheDocument();
+      expect(screen.queryByText('«home.welcome»')).toBeNull();
+      expect(screen.queryByText('«home.welcomeAdminDescription»')).toBeNull();
+      expect(screen.queryByTestId('home-build-with-ai')).toBeNull();
+      // cloud#1674: "Ask AI" stays withheld for a maker.
+      expect(screen.queryByTestId('home-ask-ai')).toBeNull();
+    } finally {
+      restore();
+    }
+  });
+
+  it('build and ask agents deployed: the NoBuild copy', async () => {
+    state.agents = [{ name: 'build' }, { name: 'ask' }];
+    state.buildAgent = true;
+    state.askAgent = true;
+    const restore = await renderZeroAppPhone();
+    try {
+      expect(screen.getByText('«home.noAppsTitle»')).toBeInTheDocument();
+      expect(screen.getByText('«home.welcomeAdminDescriptionNoBuild»')).toBeInTheDocument();
+      expect(screen.queryByText('«home.welcomeAdminDescription»')).toBeNull();
+    } finally {
+      restore();
+    }
+  });
+
+  it('CONTROL — no agent: the welcome title and the NoAi copy, as before', async () => {
+    const restore = await renderZeroAppPhone();
+    try {
+      expect(screen.getByText('«home.welcome»')).toBeInTheDocument();
+      expect(screen.getByText('«home.welcomeAdminDescriptionNoAi»')).toBeInTheDocument();
+      expect(screen.queryByText('«home.noAppsTitle»')).toBeNull();
+    } finally {
+      restore();
+    }
+  });
+});
+
 
 /**
  * objectstack#36732 — from 768 px up a viewer with no product app is drawn the
