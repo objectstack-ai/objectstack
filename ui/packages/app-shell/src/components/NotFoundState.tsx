@@ -20,6 +20,12 @@
  * factory, into every view that draws a not-found state. A screen that already
  * holds `useHomePath()` passes it as `to`.
  *
+ * The button names where it goes. A phone's Home is still its app list, so
+ * there it reads 「Back to home」. From 768 px up the platform home page is
+ * retired (objectstack#36732) and Home is an app's start page, so there it
+ * reads 「Back to app start page」, the app pill's words for the same place
+ * (`layout.appSwitcher.backToHome`, objectstack#37163).
+ *
  * @module
  */
 
@@ -30,6 +36,7 @@ import { Button, Empty, EmptyDescription, EmptyTitle, cn } from '@object-ui/comp
 import { useObjectTranslation } from '@object-ui/i18n';
 import { useMetadata } from '@object-ui/react';
 import { HOME_LAUNCHER_PATH, resolveDeclaredHomePath, type DeclaredHomeApp } from '../utils/homePath.js';
+import { usePhoneViewport } from '../hooks/usePhoneViewport.js';
 
 export interface NotFoundStateProps {
   /** What was not found, e.g. "Record not found". */
@@ -63,7 +70,11 @@ export function NotFoundState({ title, description, actions, icon: Icon, testId,
   );
 }
 
-/** "Back to home": navigates to the console's Home, the declared landing app where there is one. */
+/**
+ * The way home: navigates to the console's Home, the declared landing app where
+ * there is one. 「Back to home」 on a phone, 「Back to app start page」 from 768 px
+ * up (module doc).
+ */
 export function BackToHomeButton({
   testId,
   variant = 'outline',
@@ -78,9 +89,12 @@ export function BackToHomeButton({
   const { apps } = useMetadata();
   const homePath = to ?? resolveDeclaredHomePath(apps as DeclaredHomeApp[] | undefined) ?? HOME_LAUNCHER_PATH;
   const { t } = useObjectTranslation();
+  const phone = usePhoneViewport();
   return (
     <Button variant={variant} onClick={() => navigate(homePath)} data-testid={testId}>
-      {t('empty.appAccessDeniedHome', { defaultValue: 'Back to home' })}
+      {phone
+        ? t('empty.appAccessDeniedHome', { defaultValue: 'Back to home' })
+        : t('layout.appSwitcher.backToHome', { defaultValue: 'Back to app start page' })}
     </Button>
   );
 }

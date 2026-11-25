@@ -111,7 +111,9 @@ describe('RequireAiSurface', () => {
     expect(screen.queryByText('HOME')).not.toBeInTheDocument();
     const page = screen.getByTestId('ai-unavailable');
     expect(page).toHaveTextContent('«console.ai.unavailableDescription»');
-    expect(screen.getByTestId('ai-unavailable-home')).toHaveTextContent('«console.ai.unavailableHome»');
+    // objectstack#37163 — on a desktop the way home names the app start page
+    // it opens, in the app pill's words (phone: the describe at the end).
+    expect(screen.getByTestId('ai-unavailable-home')).toHaveTextContent('«layout.appSwitcher.backToHome»');
     // Nothing failed, so nothing is offered again.
     expect(screen.queryByTestId('ai-unavailable-retry')).toBeNull();
   });
@@ -190,5 +192,27 @@ describe('RequireAiSurface', () => {
     await user.click(screen.getByTestId('ai-unavailable-home'));
     expect(screen.getByText('HOME')).toBeInTheDocument();
     expect(screen.queryByText('DECLARED LANDING')).not.toBeInTheDocument();
+  });
+});
+
+describe('the no-assistant screen\'s way home names where it goes, by viewport (objectstack#37163)', () => {
+  beforeEach(() => {
+    mockSurface.mockReturnValue({ enabled: false, isLoading: false, buildServed: false });
+    viewer.phone = false;
+  });
+
+  it('on a desktop, where Home is an app\'s start page, it reads as the app pill\'s row does', () => {
+    renderGuardedAi([{ name: 'crm', label: 'CRM' }]);
+    const home = screen.getByTestId('ai-unavailable-home');
+    expect(home).toHaveTextContent('«layout.appSwitcher.backToHome»');
+    expect(home).not.toHaveTextContent('«console.ai.unavailableHome»');
+  });
+
+  it('CONTROL — on a phone, whose Home is still its app list, it keeps 「Back to home」', () => {
+    viewer.phone = true;
+    renderGuardedAi([{ name: 'crm', label: 'CRM' }]);
+    const home = screen.getByTestId('ai-unavailable-home');
+    expect(home).toHaveTextContent('«console.ai.unavailableHome»');
+    expect(home).not.toHaveTextContent('«layout.appSwitcher.backToHome»');
   });
 });

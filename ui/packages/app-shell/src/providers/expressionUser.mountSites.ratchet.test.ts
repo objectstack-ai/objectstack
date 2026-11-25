@@ -196,14 +196,15 @@ describe('objectui#6515 — every expression mount site binds the shared `curren
     // against in itself — it would pass forever. The production sites are
     // `AppContent` and `RecordFormPage` (the provider kind; their imperative
     // field-list evaluators retired with objectstack#35249, when the field list
-    // stopped evaluating `visibleWhen`), the console's `InternalFormRoute`, and
-    // Home's `HomeLayout` (objectui#12700).
+    // stopped evaluating `visibleWhen`), the console's `InternalFormRoute`,
+    // Home's `HomeLayout` (objectui#12700), and the docs portal's desktop frame
+    // `DocsPortalShell`, which binds Home's scope (objectstack#37197).
     const sites = files
       .filter((f) => !EXEMPT.has(path.relative(repoRoot, f)))
       .flatMap((f) => collectSites(f, stripComments(readFileSync(f, 'utf8'))));
-    expect(sites.length).toBeGreaterThanOrEqual(4);
+    expect(sites.length).toBeGreaterThanOrEqual(5);
     expect(new Set(sites.map((s) => path.basename(s.file)))).toEqual(
-      new Set(['AppContent.tsx', 'RecordFormPage.tsx', 'InternalFormRoute.tsx', 'HomeLayout.tsx']),
+      new Set(['AppContent.tsx', 'RecordFormPage.tsx', 'InternalFormRoute.tsx', 'HomeLayout.tsx', 'DocsPortalShell.tsx']),
     );
   });
 

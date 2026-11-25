@@ -16,6 +16,9 @@
  * does not redden this file and a missing row does (`t` echoes a missing key).
  */
 
+// Paid at collection, not inside a case's clock (check:test-source-alias).
+import '@objectstack/lint';
+import '@object-ui/plugin-detail';
 import '@testing-library/jest-dom/vitest';
 // The source under test reaches a dynamic `import('@objectstack/lint')`; its first load is paid
 // here, at collection, never inside a case's clock (`check:test-source-alias`).
@@ -94,7 +97,7 @@ const absent = (key: string) => t(key, 'en-US');
 async function openForm(readOnly: boolean): Promise<HTMLElement> {
   render(
     <MemoryRouter initialEntries={['/studio/com.example.showcase/data']}>
-      <DataPillar packageId="com.example.showcase" readOnly={readOnly} />
+      <DataPillar objectName="showcase_task" packageId="com.example.showcase" readOnly={readOnly} />
     </MemoryRouter>,
   );
   fireEvent.click(await screen.findByRole('button', { name: row('engine.studio.data.tab.form') }));

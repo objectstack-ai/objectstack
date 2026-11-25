@@ -44,6 +44,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@object-ui/components';
+import { createAuthenticatedFetch } from '@object-ui/auth';
 import { getIcon } from '../utils/getIcon.js';
 import { resolveKeyedI18nLabel } from '../utils/index.js';
 
@@ -210,7 +211,10 @@ function useSelectorOptions(def: ContextSelectorDef): { options: Option[]; refet
   // dropdown-open and on a global `objectui:packages-changed` signal.
   const load = React.useCallback(async () => {
     try {
-      const res = await fetch(endpoint, {
+      // The console's authenticated fetch, built per call. The endpoint is
+      // author-written (`optionsSource.endpoint`) and may name another host, so
+      // `sameOriginOnly` keeps the stored bearer token to this server's requests.
+      const res = await createAuthenticatedFetch({ sameOriginOnly: true })(endpoint, {
         credentials: 'include',
         headers: { Accept: 'application/json' },
       });

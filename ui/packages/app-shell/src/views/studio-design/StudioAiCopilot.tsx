@@ -86,8 +86,9 @@ export function StudioCopilotConversation({
         artifact = { type: raw.slice(0, idx), name: raw.slice(idx + 1) };
       }
     }
-    // objectstack#36905 — a designer that opens full-screen at its metadata
-    // address carries its item in the path, under the area's segment.
+    // objectstack#36905, objectstack#36904 — a designer that opens full-screen
+    // at its metadata address (the permission set's matrix, the object
+    // designer) carries its item in the path, under the area's segment.
     if (!tab && !artifact) {
       const item = areaDesignerItemOf(copilotLocation.pathname, segment);
       if (item) {

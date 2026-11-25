@@ -68,10 +68,10 @@ interface KeysAnswer {
 async function errorTextFor(keys: KeysAnswer): Promise<string> {
   const fetchMock = vi.fn(async (url: unknown) => {
     if (String(url).includes('/discovery')) {
-      return { ok: true, status: 200, json: async () => DISCOVERY } as unknown as Response;
+      return { headers: new Headers(), ok: true, status: 200, json: async () => DISCOVERY } as unknown as Response;
     }
     return {
-      ok: keys.status >= 200 && keys.status < 300,
+      headers: new Headers(), ok: keys.status >= 200 && keys.status < 300,
       status: keys.status,
       json: async () => {
         if (!('body' in keys)) throw new SyntaxError('Unexpected token < in JSON at position 0');

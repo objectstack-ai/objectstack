@@ -16,7 +16,7 @@ import { rewriteDocLinks } from './doc-links';
 import { conflictCandidates, readsByNameAfter } from './doc-address';
 import { DocShell } from './DocShell';
 import { useAppDocsBackTo } from './useAppDocsBackTo';
-import { DocsNav, usePackageDocsNavBooks } from './DocsNav';
+import { DocsNav, PortalDocsNav, usePackageDocsNavBooks } from './DocsNav';
 import { DocRefusal } from './BookPage';
 import { useBookData } from './use-book-data';
 import { useActiveHeading } from './useActiveHeading';
@@ -395,12 +395,16 @@ export default function DocPage() {
   const docsLabel = t('help.documentation', { defaultValue: 'Documentation' });
 
   const pageNav = sidebarNav ? null : docsNav;
+  // The shell sidebar's column: the package's books inside an app; in the
+  // portal's app-less shell every app's books, this one open (objectstack#37197).
+  const sidebarColumn = appName ? docsNav ?? undefined : <PortalDocsNav currentSlug={slug} activeDoc={name} />;
 
   return (
-    <DocShell backLink={!docsNav} nav={docsNav ?? undefined}>
+    <DocShell backLink={!docsNav} nav={sidebarColumn}>
       {/* objectstack#35424 — the docs column is the page's one navigation.
-        * Inside an app from 768 px up it is the shell sidebar's body, where the
-        * app menu would be (objectstack#37150); elsewhere it sits full height
+        * From 768 px up it is the shell sidebar's body, where the app menu
+        * would be: an app's (objectstack#37150) and the portal's app-less
+        * shell (objectstack#37197); elsewhere (a phone) it sits full height
         * beside the article, and on narrow screens it folds into a disclosure
         * above it. */}
       <div className="flex min-h-full" data-testid="doc-reader">

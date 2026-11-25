@@ -113,8 +113,8 @@ beforeEach(() => {
     vi.fn(async (input: unknown) => {
       const url = String(input);
       fetchCalls.push(url);
-      if (routeOf(url) === DRAFTS_ROUTE) return { ok: true, status: 200, json: async () => ({ drafts: DRAFTS }) };
-      return { ok: false, status: 404, json: async () => ({}) };
+      if (routeOf(url) === DRAFTS_ROUTE) return { headers: new Headers(), ok: true, status: 200, json: async () => ({ drafts: DRAFTS }) };
+      return { headers: new Headers(), ok: false, status: 404, json: async () => ({}) };
     }),
   );
 });

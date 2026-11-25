@@ -113,10 +113,10 @@ function fullCreateSeed(): Record<string, unknown> {
 
 function stubFetch() {
   vi.stubGlobal('fetch', vi.fn(async (url: string) => {
-    if (url.startsWith('/api/v1/meta/object/')) return { ok: true, json: async () => ({ item: OBJECT_DEF }) } as any;
-    if (url.startsWith(`/api/v1/data/${OBJECT}`)) return { ok: true, json: async () => ({ records: [RECORD] }) } as any;
+    if (url.startsWith('/api/v1/meta/object/')) return { headers: new Headers(), ok: true, json: async () => ({ item: OBJECT_DEF }) } as any;
+    if (url.startsWith(`/api/v1/data/${OBJECT}`)) return { headers: new Headers(), ok: true, json: async () => ({ records: [RECORD] }) } as any;
     // The record-edit probe and anything else the real blocks ask for.
-    return { ok: true, json: async () => ({}) } as any;
+    return { headers: new Headers(), ok: true, json: async () => ({}) } as any;
   }));
 }
 

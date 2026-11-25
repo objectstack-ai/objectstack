@@ -84,7 +84,7 @@ function stubWire(answers: Record<string, Answer>, objects: Record<string, unkno
     if (answer === 'never') return new Promise<Response>(() => {});
     if (!answer) throw new Error(`unexpected request ${url}`);
     return {
-      ok: answer.status >= 200 && answer.status < 300,
+      headers: new Headers(), ok: answer.status >= 200 && answer.status < 300,
       status: answer.status,
       json: async () => answer.body,
       text: async () => JSON.stringify(answer.body),
@@ -362,7 +362,7 @@ describe('Studio landing: "m switched off" leads to the switched-off actions (ob
     label: 'Task',
     actions: [{ name: 'showcase_embedded_probe' }, { name: 'showcase_mark_done', objectName: 'showcase_task' }],
   };
-  const embeddedPath = '/studio/com.example.showcase/data?surface=object%3Ashowcase_task&action=showcase_embedded_probe';
+  const embeddedPath = '/studio/com.example.showcase/metadata/object/showcase_task?action=showcase_embedded_probe';
 
   it('one switched-off action its object holds: the count opens the object\'s Actions view on it', async () => {
     packages.list = [SHOWCASE];
@@ -375,8 +375,8 @@ describe('Studio landing: "m switched off" leads to the switched-off actions (ob
     expect(off).toHaveAttribute('href', embeddedPath);
     expect(requested.some((u) => OBJECT_LIST_RE.test(u))).toBe(true);
     fireEvent.click(off);
-    await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent('/studio/com.example.showcase/data'));
-    expect(screen.getByTestId('location-search')).toHaveTextContent('?surface=object%3Ashowcase_task&action=showcase_embedded_probe');
+    await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent('/studio/com.example.showcase/metadata/object/showcase_task'));
+    expect(screen.getByTestId('location-search')).toHaveTextContent('?action=showcase_embedded_probe');
   });
 
   it('several: each named action links where it is switched, its object\'s Actions view or its own page', async () => {

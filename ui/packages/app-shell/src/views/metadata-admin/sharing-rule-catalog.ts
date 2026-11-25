@@ -48,6 +48,12 @@
 
 import { actionErrorDetail } from '@object-ui/core';
 import { apiBase } from '../../utils/apiBase.js';
+import { createAuthenticatedFetch } from '@object-ui/auth';
+
+/** The console's authenticated fetch: the stored bearer token beside the session cookie. */
+function authFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+  return createAuthenticatedFetch()(input, init);
+}
 
 /** The registry type of a declared sharing rule. */
 export const DECLARED_SHARING_RULE_TYPE = 'sharing_rule';
@@ -89,7 +95,7 @@ export async function readSharingRuleProjection(
   name: string,
   signal?: AbortSignal,
 ): Promise<SharingRuleProjection | null> {
-  const res = await fetch(`${apiBase()}/sharing/rules/${encodeURIComponent(name)}`, {
+  const res = await authFetch(`${apiBase()}/sharing/rules/${encodeURIComponent(name)}`, {
     credentials: 'include',
     headers: { Accept: 'application/json' },
     cache: 'no-store',

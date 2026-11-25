@@ -113,6 +113,7 @@ vi.mock('@object-ui/plugin-view', async (importOriginal) => {
 
 // The source reaches a dynamic import of it: its first load is paid at collection (`check:test-source-alias`).
 import '@objectstack/lint';
+import '@object-ui/plugin-detail';
 import { DataPillar, type StudioBaseCustomization } from './StudioDesignSurface';
 import { StudioSaveHarness, pressStudioSave } from './__tests__/studioSaveHarness';
 import { t } from '../metadata-admin/i18n';
@@ -170,7 +171,7 @@ afterEach(() => {
 async function renderBase(over: Partial<StudioBaseCustomization> = {}) {
   render(
     <StudioSaveHarness><MemoryRouter initialEntries={[`/studio/${BASE}/data`]}>
-      <DataPillar packageId={BASE} readOnly customization={customizationOf(over)} />
+      <DataPillar objectName={OBJECT} packageId={BASE} readOnly customization={customizationOf(over)} />
     </MemoryRouter></StudioSaveHarness>,
   );
   await waitFor(() => expect(screen.getByTestId('records-panel')).toBeInTheDocument(), { timeout: 8000 });
