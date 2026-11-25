@@ -546,8 +546,9 @@ an exact scan.
   no SQL. A caller reads one sentence; the driver's text and the SQL go only
   to the operator — the health check, the boot warning and the log.
 - **Search.** An exact scan by cosine distance, so any width works —
-  including a 3072-wide model. The organization filter and the metadata
-  `filter` (equality per key) run in the same `WHERE`, before ranking.
+  including a 3072-wide model. The organization filter, the
+  [record scope](#record-scope) and the metadata `filter` (equality per key)
+  run in the same `WHERE`, before ranking.
   `queryPrefix` is put before every query before it is embedded, for a model
   that embeds questions and passages differently.
 - **Re-embedding.** A passage whose text is unchanged (its `chunk_hash`) is
@@ -926,7 +927,7 @@ up.
 | Audit + metrics | ⏳ Phase 2 |  |
 | `knowledge-llamaindex` | ⏳ Phase 2 |  |
 | `knowledge-dify` | ⏳ Phase 3 / community |  |
-| `knowledge-pgvector` | ✅ | PostgreSQL + pgvector; exact scan, organization and metadata filter in SQL, index fingerprint (§4.1) |
+| `knowledge-pgvector` | ✅ | PostgreSQL + pgvector; exact scan, organization, record scope and metadata filter in SQL, index fingerprint (§4.1) |
 
 ### 7.1 Non-goals for Phase 1
 
