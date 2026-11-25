@@ -1112,7 +1112,10 @@ export interface IApprovalService {
    * - **What is answered:** `locked` only. `true` when a pending request on the
    *   record comes from a node whose `lockRecord` is not `false` — the same
    *   judgement, off the same snapshot, the record-lock `beforeUpdate` hook
-   *   enforces. ⛔ No request id, node, participants or `pending` flag: whether
+   *   enforces. Asked of a master-detail line, it also answers `true` while
+   *   a record the line belongs to is so held — the detail-row lock's judgement,
+   *   which refuses the line's writes.
+   *   ⛔ No request id, node, participants or `pending` flag: whether
    *   the caller may see the request is still `approvalsVisibleToReaders`'
    *   question, and this member does not answer it.
    *
@@ -1140,7 +1143,9 @@ export interface IApprovalService {
    * {@link getRecordLock} answers for that id: `{ locked }` when the caller
    * can read the record, `null` when it cannot or when it does not exist,
    * ⛔ never an entry that tells the two apart. The same judgement, off the
-   * same snapshot, the record-lock `beforeUpdate` hook enforces. A repeated id
+   * same snapshot, the record-lock `beforeUpdate` hook enforces — and, for a
+   * master-detail line, the detail-row lock's: a line answers `true` while a
+   * record it belongs to is so held. A repeated id
    * is answered at each of its positions. A caller refused the object's read
    * outright is refused the same way for every id.
    *
