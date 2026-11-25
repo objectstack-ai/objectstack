@@ -80,15 +80,27 @@ describe('KnowledgeService — adapter & source registry', () => {
     const a = makeAdapter('memory');
     svc.registerAdapter('memory', a);
     svc.registerSource(objectSource('s1', 'task'));
-    const doc: KnowledgeDocument = { id: 'd1', sourceId: 's1', content: 'hello', docHash: 'caller-supplied' };
+    const doc: KnowledgeDocument = { id: 'd1', sourceId: 's1', content: 'hello' };
     await svc.indexDocument('s1', doc);
-    // The service computes `docHash`; a caller's own value never reaches the adapter.
+    // The service computes `docHash` and stamps it on the document it hands the adapter.
     expect(a.upsertSpy).toHaveBeenCalledWith(
       [{ ...doc, docHash: computeDocHash(doc) }],
       expect.objectContaining({ reason: 'manual' }),
     );
     await svc.deleteDocument('s1', 'd1');
     expect(a.deleteSpy).toHaveBeenCalledWith(['d1'], expect.objectContaining({ reason: 'manual' }));
+  });
+
+  it('indexDocument refuses a caller-supplied docHash, naming it, and writes nothing', async () => {
+    const svc = new KnowledgeService();
+    const a = makeAdapter('memory');
+    svc.registerAdapter('memory', a);
+    svc.registerSource(objectSource('s1', 'task'));
+    const doc: KnowledgeDocument = { id: 'd1', sourceId: 's1', content: 'hello', docHash: 'v1:caller-supplied' };
+    await expect(svc.indexDocument('s1', doc)).rejects.toThrow(
+      /indexDocument refused document 'd1': docHash is computed by the knowledge service/,
+    );
+    expect(a.upsertSpy).not.toHaveBeenCalled();
   });
 
   it('indexDocument throws on unknown source', async () => {

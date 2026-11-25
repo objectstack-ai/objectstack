@@ -161,8 +161,15 @@ export class KnowledgeService implements IKnowledgeService {
   async indexDocument(sourceId: string, doc: KnowledgeDocument): Promise<void> {
     const source = this.requireSource(sourceId);
     const adapter = this.getAdapter(source.adapter);
-    // `docHash` is the service's to compute (ADR-0161 K8, item 2): a caller's
-    // own value is replaced, never passed through.
+    // `docHash` is the service's to compute (ADR-0161 K8, item 2). A caller's
+    // own value is refused, never replaced in silence: a door that accepted it
+    // and stored something else would answer as if it had been honoured.
+    if (doc.docHash !== undefined) {
+      throw new Error(
+        `[knowledge] indexDocument refused document '${doc.id}': docHash is computed by the knowledge service ` +
+          'from the content, title and metadata; omit it.',
+      );
+    }
     await adapter.upsert([{ ...doc, docHash: computeDocHash(doc) }], { source, reason: 'manual' });
   }
 
