@@ -5407,7 +5407,7 @@ const zhHant = {
     bulkRejected_other: '已駁回 {{count}} 條請求',
     bulkPartialSummary: '{{ok}} 條成功，{{fail}} 條失敗',
     bulkFailureLine: '{{title}}：{{reason}}',
-    bulkFailuresShowAll: '查看全部（{{n}}）',
+    bulkFailuresShowAll: '檢視全部（{{n}}）',
     bulkFailuresTitle: '未處理：{{n}} 條',
     bulkFailuresBody: '以下請求保持原狀，每條都附有原因。',
     close: '關閉',
