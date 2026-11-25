@@ -287,13 +287,10 @@ ADR-0100):
 
 ## Changing a field that has data
 
-The metadata→DB sync is **additive-only**: new tables/columns are created on
-boot, but existing columns are **never** altered or dropped. A non-additive
-change to an object that already has data silently diverges from the physical
-schema, and the **database column wins at write time**:
+Beyond `SKILL.md` trap 1 (the sync only adds; the column wins at write time):
 
 | Change | Existing DB on restart |
-|--------|------------------------|
+|--|--|
 | add object / field / index | ✅ applied automatically |
 | `storage: { notNull: true }` removed (relax `NOT NULL`) | ⚠️ **never auto-applied** — the drift is `category: 'needs_confirm'` (`relax_not_null`), so `os migrate apply` confirms it |
 | `unique` re-scoped global → per-tenant | dev auto-heals; otherwise `os migrate apply` (`replace_unique_index`) |

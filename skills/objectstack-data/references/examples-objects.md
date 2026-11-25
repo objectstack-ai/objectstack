@@ -2,12 +2,12 @@
 
 ## Object keys
 
-Beyond [SKILL.md § Object Definition](../SKILL.md#object-definition). Every key,
-each `enable` flag (`ObjectCapabilities`) and its default: `data/object.zod.ts`,
-through [_index.md](./_index.md). The ones to get right:
+Beyond `SKILL.md` § Object Definition. Every key, `enable` flag
+(`ObjectCapabilities`) and default: `data/object.zod.ts`
+([_index.md](./_index.md)). The ones to get right:
 
 | Property | Default | Description |
-|:---------|:--------|:------------|
+|:--|:--|:--|
 | `color` | `gray` | Tile colour behind the white `icon`: `gray` `blue` `teal` `green` `amber` `orange` `red` `pink` `purple` (no hex). Group the app's objects into a few business families, one name each, as the platform's own objects do: people `blue`, security `purple`, approvals and work `orange`, messaging `pink`, integrations `teal`, reference data and finance `green`, audit and settings `amber`. `red` only for an alert object; one nobody opens gets none |
 | `highlightFields` | derived | Ordered field keys used as a record's compact face: the columns a **related list** renders on the parent's detail page, and what a lookup picker shows. Declare it on the CHILD object (see [Relationships](../rules/relationships.md)) |
 | `nameField` | derived (e.g. `'name'`/`'title'`) | Record-title field: the stored field used as the record's display name. Use a single text/email field; a composite title to import, sort or search by is a stored computed field (a non-`formula` field with an `expression`); a text formula is display-only |
@@ -16,7 +16,7 @@ through [_index.md](./_index.md). The ones to get right:
 ### Object Capabilities (`enable`)
 
 | Flag | Default | Purpose |
-|:-----|:--------|:--------|
+|:--|:--|:--|
 | `fieldHistory` | on | A changed field's old → new values on the activity timeline, served per the reader's field read rule. `false`: off for the object. A field opts out with its own `fieldHistory: false`; a media or structured field (`json`, `address`, `code`…) shows values only with `true`, a credential never. `sys_audit_log` keeps its own grant |
 | `trackHistory` | `false` | Ledger view on the record page and the `history` API verb; not the values switch |
 | `apiMethods` | all | Whitelist over the six primitives (`get`, `list`, `create`, `update`, `delete`, `bulk`); derived verbs (search/export/upsert/…) follow automatically |
@@ -233,9 +233,7 @@ resolve traversal, and `project_id.name` in `searchableFields` (or in a
 `$searchFields` override) is **refused** (`os validate`
 `searchable-field-unknown`; a request, `400 INVALID_FIELD`).
 
-**This is the one prescription — emit it every time.** To search by a related
-record's title, copy that title into a **stored field on this object** and
-declare *that* field searchable. A task list searched by project name:
+**The one prescription** (`SKILL.md` trap 2), for a task list searched by project name:
 
 ```typescript
 {
@@ -276,9 +274,7 @@ is not object-level `ownership` (`'user' | 'business_unit' | 'org' | 'none'`).
 puts the extension's own fields, groups (`{ group: { key, label }, after }`) and child lists
 after (or `before`) a named item, where the target declares `fieldGroups` / `relatedLists`.
 
-**Relabel a field the owner declares with `fieldPatches` — never by redeclaring
-it in `fields`**, which takes the field over whole and cuts it off from the
-owner's upgrades. A patch carries display keys only:
+**A `fieldPatches` patch** (`SKILL.md` trap 3) carries display keys only:
 `label`, `description`, `inlineHelpText`,
 `placeholder`, and an option's `label` keyed by its stored `value`; the type,
 values and rules stay the owner's. A key the tenant edited keeps the tenant's

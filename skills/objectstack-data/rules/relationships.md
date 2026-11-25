@@ -395,5 +395,4 @@ no other visible field carries, injected ones included: `owner_id` (Owner, 负�
 `created_by` (创建人), `updated_by` (更新人), `created_at` (创建时间), `updated_at`
 (更新时间). `ownership: 'none'` only for a shared catalog or a pure junction table.
 
-A multi-value `lookup` is read as that array: reference its elements
-positionally (`record.tags[0]` in a flow's CEL).
+A `multiple: true` lookup's ids are referenced positionally (`record.tags[0]` in a flow's CEL).

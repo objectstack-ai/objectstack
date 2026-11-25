@@ -1,7 +1,5 @@
 # Automation — flows, triggers and assignment rules
 
-A `the rest` section holds what its `SKILL.md` section does not say.
-
 > **Predicates and conditions are CEL** — every `condition` / `guard` /
 > `entryCondition` / filter `value` is an **Expression** envelope: a plain CEL
 > string, or the `P\`...\`` / `cel\`...\`` tag (author-time validation); pick one
@@ -102,9 +100,8 @@ type: 'text', isInput: true }, { name: 'approval_result', type: 'boolean', isOut
 
 ## Failure routing & `runAs` — the rest
 
-> **A `fault` edge** routes the failed node to a handler instead of ending the
-> run; `objectstack validate` reports an `error`-labelled ordinary edge
-> (`flow-error-label-not-fault`). A handled failure does not consume the
+> **A `fault` edge**: `objectstack validate` reports an `error`-labelled
+> ordinary edge (`flow-error-label-not-fault`). A handled failure does not consume the
 > flow-level retry (`errorHandling.strategy: 'retry'`), which replays from the
 > start — prefer a fault edge for a local failure. The handler reads
 > `{{ <nodeId>.error }}` (run-wide `{{ $error.message }}`; in CEL,
@@ -135,9 +132,8 @@ type: 'text', isInput: true }, { name: 'approval_result', type: 'boolean', isOut
 > user, who is recorded as `granted_by`; invitations and memberships change
 > through the organization endpoints (row 1b, https://objectstack.ai/docs/permissions/system-context#1-authorization-and-scoping).
 >
-> **A `runAs: 'system'` sweep**: system context has no trigger user, so a scan
-> or rollup with no organization predicate crosses tenants; filter on the
-> platform-injected tenant column, never re-declare it per object.
+> **A `runAs: 'system'` sweep**: system context has no trigger user; filter on
+> the platform-injected tenant column, never re-declare it per object.
 
 > **`requiredPermissions`**: the four entrances above refuse a non-system caller
 > missing any named capability with `403 PERMISSION_DENIED`; an action starting
@@ -169,10 +165,9 @@ type: 'text', isInput: true }, { name: 'approval_result', type: 'boolean', isOut
 
 ## Value slots and the other silent traps — the rest
 
-1. **Value slots**, all of them: `assignments.*`, `fields.*`, `subflow` / `map`
-   `input.*`, `script` `inputs.*`, `loop` / `map` `collection`, notify
-   `recipients` / `templateData.*` / `sourceId`, `http` `body` and every CRUD
-   `filter` operand. A `{…}` token there is **refused** — at
+1. **Value slots** also: notify `templateData.*` / `sourceId`; `input.*` is
+   `subflow` / `map`'s, `inputs.*` `script`'s, `collection` `loop` / `map`'s,
+   `filter` a CRUD node's. A `{…}` token in one is **refused** — at
    `objectstack validate` (`expression-invalid`), `registerFlow` and the
    executor — naming its CEL spelling:
    - CEL refuses an absent key where the template wrote nothing, so nothing /
@@ -183,10 +178,9 @@ type: 'text', isInput: true }, { name: 'approval_result', type: 'boolean', isOut
      `current_user` holds `id`, `positions`, `organizationId`, `isPlatformAdmin`
      only — an email or a name is a `sys_user` read by that id
 
-   Text slots (notify `title` / `message` / `actionUrl`, screen `title` /
-   `description`, end `message`, `http` `url` / `headers`) render `{{ }}`
-   holes — a variable path, optional formatter (a `default:` argument is
-   literal text, never a path), no logic; a `{…}` token there
+   Text slots also: notify `actionUrl`, screen `title` / `description`, end
+   `message`, `http` `headers`. A hole is a variable path, optional formatter
+   (a `default:` argument is literal text, never a path), no logic; a `{…}` token there
    is refused with its `{{ }}` spelling. A date or the run user has no hole:
    assign it first (`assignments: { v: { dialect: 'cel', source:
    'current_user.id' } }`), then write `{{ v }}`.

@@ -329,8 +329,8 @@ priority: 1000   // User validations (run last)
 
 ## Conditional Field Rules
 
-Put conditional UI/data-entry rules on the **field definition** when the rule
-belongs to the data model and should apply everywhere the field is edited:
+A rule that belongs to the data model goes on the **field definition** and
+applies everywhere the field is edited:
 New and Edit, named and public forms, inline master-detail grids, API writes.
 
 <!-- os:check -->

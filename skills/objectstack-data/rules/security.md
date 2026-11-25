@@ -171,7 +171,7 @@ rowLevelSecurity: [
   a parent's owner, parent optional → an optional master (relationships.md);
   one record, once → a sharing rule or a manual share; a team's records → a
   sharing rule whose `sharedWith: { type: 'queue', value: '<queue name>' }`
-  reaches an ownership queue's members ([Ownership queues](#ownership-queues--park-a-record-for-a-team-to-claim)).
+  reaches an ownership queue's members (§ Ownership queues below).
 - A package's rule reads `value` as its package's queue, else the one
   holder in its declared `dependencies` closure plus `sys`, else (none
   declares it) an org's `sys_queue` row. Else it grants no one new, warned

@@ -20,10 +20,9 @@ metadata:
 
 ## First checks
 
-1. **Version.** This skill targets the `@objectstack/spec` major in its
-   `compatibility` line. Read the installed one
-   (`node_modules/@objectstack/spec/package.json`); where they differ, the
-   installed contract is right.
+1. **Version.** Read the installed `@objectstack/spec`
+   (`node_modules/@objectstack/spec/package.json`); where it differs from this
+   skill's `compatibility` line, the installed contract is right.
 2. **Read what exists.** Read the object being changed, those it references,
    and the hooks, seeds and permission sets naming it. Extend what is there:
    no second status field, owner field or look-alike object.
@@ -149,7 +148,7 @@ The rest, and a handler named apart from the owner:
 ### Validation Patterns
 
 **⚠️ Script validation is inverted:** it **fails** when the expression is
-`true`. On insert an omitted optional field reads as `null` in the predicate.
+`true`.
 
 A `state_machine` rule that runs on insert declares `initialStates` (entry
 states only), or publish refuses it: a record could be created already
