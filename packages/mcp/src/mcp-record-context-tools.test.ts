@@ -16,6 +16,10 @@
  * (order of judgement, naming bound, field and row level, the body) are
  * pinned with the service, in `service-record-context`'s tests; the HTTP
  * bridge's door wiring in `packages/runtime/src/mcp-record-context-tools-bridge.test.ts`.
+ *
+ * And over the real protocol (no protocol double): a package pack the
+ * protocol's served listing decorates with `_diagnostics` is the pack the
+ * stdio door answers through — the door hands the executor the authored pack.
  */
 
 import { describe, expect, it, vi } from 'vitest';
@@ -24,6 +28,10 @@ import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import { GET_RECORD_CONTEXT_TOOL_NAME, MCP_OAUTH_SCOPE_DATA_READ, MCP_OAUTH_SCOPE_DATA_WRITE } from '@objectstack/spec/ai';
 import type { IDataEngine, IMetadataService } from '@objectstack/spec/contracts';
 import { createRecordContextTools } from '@objectstack/service-record-context';
+import { ObjectQL } from '@objectstack/objectql/core';
+import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
+import { SqlDriver } from '@objectstack/driver-sql';
+import { SysMetadataObject } from '@objectstack/metadata-core';
 import { MCPServerRuntime } from './mcp-server-runtime.js';
 import type { McpDataBridge } from './mcp-http-tools.js';
 import { createStdioDataBridge } from './stdio-data-bridge.js';
@@ -292,5 +300,48 @@ describe('[ADR-0160 D4] get_record_context — the gates the record tools put be
     expect(stdio).toEqual(http);
     expect(http.payload.error).toMatchObject({ code: 'PERMISSION_DENIED', status: 403 });
     expect(http.payload.error.message).toContain("'closed_revision'");
+  });
+});
+
+describe('[ADR-0160 D4] get_record_context — a package pack the real protocol serves', () => {
+  it('the served listing carries the read decoration, and both doors answer through the pack', async () => {
+    const engineOfRecord = new ObjectQL();
+    const store = new SqlDriver({ client: 'better-sqlite3', connection: { filename: ':memory:' }, useNullAsDefault: true } as never);
+    await store.initObjects([SysMetadataObject] as never);
+    engineOfRecord.registerDriver(store as never, true);
+    await engineOfRecord.init();
+    engineOfRecord.registry.registerObject(SysMetadataObject as never, '@objectstack/platform-objects');
+    engineOfRecord.registerApp({
+      id: 'com.objectstack.qa.record-context-stdio',
+      name: 'record context stdio',
+      version: '1.0.0',
+      type: 'plugin',
+      scope: 'system',
+      objects: [OBJECTS.policy, OBJECTS.policy_revision],
+      aiContexts: [PACK],
+    } as never);
+    const protocol = new ObjectStackProtocolImplementation(engineOfRecord as never);
+    try {
+      // Precondition: the protocol serves the pack decorated, as `/meta/ai_context` does.
+      // Were it served bare, this case could not tell a door that strips from one that does not.
+      const listed = (await protocol.getMetaItems({ type: 'ai_context' })) as { items: Array<Record<string, unknown>> };
+      const served = listed.items.find((p) => p.name === PACK.name);
+      expect(served?._packageId).toBe('com.objectstack.qa.record-context-stdio');
+      expect(served).toHaveProperty('_diagnostics');
+
+      // No pack on the metadata service: the only listing is the protocol's.
+      const bridge = stdioBridge([], true, protocol as unknown as Record<string, unknown>);
+      const { http, stdio } = await callBoth(bridge, GET_RECORD_CONTEXT_TOOL_NAME, {
+        objectName: 'policy',
+        recordId: 'p1',
+        context: PACK.name,
+      });
+      expect(http.isError, JSON.stringify(http.payload)).toBe(false);
+      expect(stdio).toEqual(http);
+      expect(http.payload.data.pack.name).toBe(PACK.name);
+      expect(http.payload.data.related[0].rows.map((r: { id: string }) => r.id)).toEqual(['r1', 'r2']);
+    } finally {
+      await engineOfRecord.destroy();
+    }
   });
 });

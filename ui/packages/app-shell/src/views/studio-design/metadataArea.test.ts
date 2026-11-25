@@ -15,10 +15,12 @@ import {
   AREA_PILLAR_FOR_TYPE,
   STUDIO_ALL_PACKAGES_SEGMENT,
   areaDesignerItemOf,
+  areaItemAsksGenericPage,
   areaItemOpensDesignerPage,
   areaItemOpensFormEditor,
   areaItemPillarPath,
   areaLocationRedirect,
+  dataPillarRedirect,
   isStudioAllPackagesScope,
   studioMetadataAreaPath,
 } from './metadataArea';
@@ -95,10 +97,10 @@ describe('areaItemPillarPath — a pillar type opens its pillar', () => {
   const open = (type: string, q = '', packageId: string | null = PKG) =>
     areaItemPillarPath({ packageId, type, name: 'n_1', search: search(q) });
 
-  it('object and flow open their pillar with `?surface=`', () => {
-    // objectstack#36905 — a permission set no longer does (`areaItemOpensDesignerPage`).
+  it('flow opens its pillar with `?surface=`', () => {
+    // objectstack#36905, objectstack#36904 — a permission set and an object no
+    // longer do (`areaItemOpensDesignerPage`).
     const expected: Record<string, string> = {
-      object: 'data',
       flow: 'automations',
     };
     expect(AREA_PILLAR_FOR_TYPE).toEqual(expected);
@@ -113,7 +115,8 @@ describe('areaItemPillarPath — a pillar type opens its pillar', () => {
 
   it('every other type opens the generic item page', () => {
     // objectstack#36502 — page, dashboard, report and view lost their pillar with Interfaces.
-    for (const type of ['permission', 'translation', 'email_template', 'agent', 'position', 'sharing_rule', 'app', 'page', 'dashboard', 'report', 'view']) {
+    // objectstack#36905, objectstack#36904 — a permission set and an object open their designer page instead.
+    for (const type of ['permission', 'object', 'translation', 'email_template', 'agent', 'position', 'sharing_rule', 'app', 'page', 'dashboard', 'report', 'view']) {
       expect(open(type), type).toBeNull();
     }
   });
@@ -129,11 +132,12 @@ describe('areaItemPillarPath — a pillar type opens its pillar', () => {
 
 describe('areaItemOpensDesignerPage — a permission set opens its matrix full-screen (objectstack#36905)', () => {
   it('on a package\'s leg only', () => {
-    expect(AREA_DESIGNER_PAGE_TYPES).toEqual(['permission']);
+    expect(AREA_DESIGNER_PAGE_TYPES).toEqual(['permission', 'object']);
     expect(areaItemOpensDesignerPage({ packageId: PKG, type: 'permission' })).toBe(true);
     // The cross-package leg keeps the matrix's environment presentation.
     expect(areaItemOpensDesignerPage({ packageId: null, type: 'permission' })).toBe(false);
-    for (const type of ['object', 'flow', 'position', 'view']) {
+    // objectstack#36904 — and an object (pinned below, with the object designer).
+    for (const type of ['flow', 'position', 'view']) {
       expect(areaItemOpensDesignerPage({ packageId: PKG, type }), type).toBe(false);
     }
   });
@@ -194,5 +198,62 @@ describe('areaItemOpensFormEditor — a read-only package’s dataset opens its 
     // CONTROL: a type no editor customizes stays on the generic page.
     expect(areaItemOpensFormEditor(at('flow', true))).toBe(false);
     expect(areaItemOpensFormEditor(at('object', true))).toBe(false);
+  });
+});
+
+describe('the object designer on its address, and the retired Data pillar (objectstack#36904)', () => {
+  const at = (q = '', packageId: string | null = PKG, type = 'object') =>
+    areaItemOpensDesignerPage({ packageId, type }) && !areaItemAsksGenericPage(new URLSearchParams(q));
+
+  it("an object opens its designer on a package's leg", () => {
+    expect(AREA_DESIGNER_PAGE_TYPES).toContain('object');
+    expect(at()).toBe(true);
+    expect(at('package=' + PKG + '&tab=hooks')).toBe(true);
+  });
+
+  it('keeps the generic page for the cross-package leg, the environment scope and the draft review', () => {
+    expect(at('', null)).toBe(false);
+    expect(at('scope=environment')).toBe(false);
+    expect(at('review=1')).toBe(false);
+    // CONTROL: another type never opens it.
+    expect(at('', PKG, 'flow')).toBe(false);
+  });
+
+  it('the old object address lands on its designer, keeping `?action=` and dropping `?view=` and `?nav=`', () => {
+    expect(dataPillarRedirect(PKG, '?surface=object%3Aaccount')).toBe(`/studio/${PKG}/metadata/object/account`);
+    expect(dataPillarRedirect(PKG, 'surface=object:account&view=account.all&nav=n1&action=approve')).toBe(
+      `/studio/${PKG}/metadata/object/account?action=approve`,
+    );
+    // A name the URL encodes stays one segment.
+    expect(dataPillarRedirect(PKG, `?surface=${encodeURIComponent('object:a/b')}`)).toBe(`/studio/${PKG}/metadata/object/a%2Fb`);
+  });
+
+  it('the old home and any other surface land on the object list, with the query kept (the draft review link)', () => {
+    expect(dataPillarRedirect(PKG, '')).toBe(`/studio/${PKG}/metadata/object`);
+    expect(dataPillarRedirect(PKG, '?changes=review')).toBe(`/studio/${PKG}/metadata/object?changes=review`);
+    expect(dataPillarRedirect(PKG, '?surface=flow%3Anotify')).toBe(`/studio/${PKG}/metadata/object`);
+  });
+});
+
+describe('areaDesignerItemOf — the item a designer page\'s address names, for the copilot (objectstack#36904)', () => {
+  it('names the object of its designer address, its history page included', () => {
+    expect(areaDesignerItemOf(`/studio/${PKG}/metadata/object/account`, PKG)).toEqual({ type: 'object', name: 'account' });
+    expect(areaDesignerItemOf(`/studio/${PKG}/metadata/object/a%2Fb/history`, PKG)).toEqual({ type: 'object', name: 'a/b' });
+  });
+
+  it('names nothing on the create page, a list, the directory, diagnostics, a generic item or another leg', () => {
+    for (const path of [
+      `/studio/${PKG}/metadata/object/new`,
+      `/studio/${PKG}/metadata/object`,
+      `/studio/${PKG}/metadata`,
+      `/studio/${PKG}/metadata/_diagnostics/x`,
+      `/studio/${PKG}/metadata/dashboard/sales`,
+      `/studio/${PKG}/automations`,
+    ]) {
+      expect(areaDesignerItemOf(path, PKG), path).toBeNull();
+    }
+    const all = `/studio/${STUDIO_ALL_PACKAGES_SEGMENT}/metadata/object/account`;
+    expect(areaDesignerItemOf(all, STUDIO_ALL_PACKAGES_SEGMENT)).toBeNull();
+    expect(areaDesignerItemOf(`/studio/${PKG}/metadata/object/account`, undefined)).toBeNull();
   });
 });

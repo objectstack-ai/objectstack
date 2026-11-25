@@ -97,9 +97,11 @@ vi.mock('@object-ui/react', async (importOriginal) => {
 
 // The source reaches a dynamic `import('@objectstack/lint')`: its first load is paid at collection (`check:test-source-alias`).
 import '@objectstack/lint';
+import '@object-ui/plugin-detail';
 import { DataPillar } from './StudioDesignSurface';
 import { createEmptyDataSource } from './__tests__/emptyDataSource';
 import { registerBuiltinInspectors } from '../metadata-admin/inspectors';
+import { t } from '../metadata-admin/i18n';
 
 const dataSource = createEmptyDataSource();
 registerBuiltinInspectors();
@@ -116,10 +118,10 @@ beforeEach(() => {
 });
 afterEach(cleanup);
 
-async function openPillar() {
+async function openPillar(objectName: string) {
   render(
     <MemoryRouter initialEntries={[`/studio/${PKG}/data`]}>
-      <DataPillar packageId={PKG} />
+      <DataPillar packageId={PKG} objectName={objectName} />
     </MemoryRouter>,
   );
   await act(async () => {
@@ -136,26 +138,53 @@ describe('DataPillar — a draft-only object logs no failed read (objectui#12508
   it('a draft-only object: /layers answers its draft layer, nothing fails, and the editor holds its draft', async () => {
     server.drafts.set('st_ticket', ticket);
     server.draftHeaders = ['st_ticket'];
-    await openPillar();
+    await openPillar('st_ticket');
 
     expect(reads('st_ticket', ''), 'the draft read never ran: the harness is dead').toEqual([200]);
     expect(reads('st_ticket', '/layers')).toEqual([200]);
     expect(server.requests.filter((r) => r.status >= 400)).toEqual([]);
+    // objectstack#36904 — the header reads the label the draft declares, not the name.
+    expect((await screen.findAllByTestId('studio-detail-title'))[0]).toHaveTextContent('Ticket');
+    expect(screen.queryByTestId('data-object-not-found')).toBeNull();
     fireEvent.click(await screen.findByRole('button', { name: 'Field layout' }));
     expect(await screen.findByText('Subject')).toBeInTheDocument();
   });
 
+  // CONTROL (objectui#11843): a draft-only object that declares no label is titled by its name.
+  it('CONTROL: a draft-only object with no label is titled by its name', async () => {
+    const { label: _label, ...unlabelled } = ticket;
+    server.drafts.set('st_ticket', unlabelled);
+    server.draftHeaders = ['st_ticket'];
+    await openPillar('st_ticket');
+
+    expect(reads('st_ticket', '')).toEqual([200]);
+    const title = (await screen.findAllByTestId('studio-detail-title'))[0];
+    expect(title).toHaveTextContent('st_ticket');
+    expect(title).not.toHaveTextContent('Ticket');
+  });
+
   it('CONTROL: a name the drafts list holds but whose draft is no longer served still reads its /layers', async () => {
     server.draftHeaders = ['st_ticket'];
-    await openPillar();
+    await openPillar('st_ticket');
 
     expect(reads('st_ticket', '')).toEqual([404]);
     expect(reads('st_ticket', '/layers')).toEqual([404]);
   });
 
+  // objectstack#36904 — the address can name an object that is not there.
+  it('an address naming no object, published or drafted, says it was not found', async () => {
+    server.published = [kase];
+    await openPillar('st_gone');
+
+    expect(reads('st_gone', '/layers')).toEqual([404]);
+    expect(await screen.findByTestId('data-object-not-found')).toHaveTextContent('st_gone');
+    // Not offered as a new object to design.
+    expect(screen.queryByText(t('engine.studio.data.draftObjectTitle', 'en'))).toBeNull();
+  });
+
   it('CONTROL: a published object still reads its layers', async () => {
     server.published = [kase];
-    await openPillar();
+    await openPillar('st_case');
 
     expect(reads('st_case', '/layers')).toEqual([200]);
     fireEvent.click(await screen.findByRole('button', { name: 'Field layout' }));
@@ -165,7 +194,7 @@ describe('DataPillar — a draft-only object logs no failed read (objectui#12508
   it('CONTROL: a 5xx on a published object\'s /layers still surfaces as the pillar\'s refusal', async () => {
     server.published = [kase];
     server.failLayers.add('st_case');
-    await openPillar();
+    await openPillar('st_case');
 
     expect(reads('st_case', '/layers')).toEqual([500]);
     expect(await screen.findByTestId('studio-refusal')).toBeInTheDocument();

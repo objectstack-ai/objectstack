@@ -92,7 +92,7 @@ describe('Data pillar field rail — the built-in designers arrive after it rend
 
     render(
       <MemoryRouter initialEntries={['/studio/com.example.showcase/data']}>
-        <DataPillar packageId="com.example.showcase" />
+        <DataPillar objectName="showcase_task" packageId="com.example.showcase" />
       </MemoryRouter>,
     );
     fireEvent.click(await screen.findByRole('button', { name: 'Field layout' }));

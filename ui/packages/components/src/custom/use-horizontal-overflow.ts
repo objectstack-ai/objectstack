@@ -16,8 +16,9 @@ export function hasOverflowRight(box: Pick<HTMLElement, 'scrollLeft' | 'clientWi
 /**
  * Track {@link hasOverflowRight} for the box `ref` points at: read in a layout
  * effect, so the first painted frame is already right, and again on every
- * scroll and whenever the box or its content changes size. `false` while
- * `disabled` (the box does not scroll on its own).
+ * scroll and whenever the box or its content (the box's children and their
+ * children) changes size. `false` while `disabled` (the box does not scroll
+ * on its own).
  */
 export function useHorizontalOverflow(
   ref: React.RefObject<HTMLElement | null>,
@@ -38,8 +39,18 @@ export function useHorizontalOverflow(
       observer = new ResizeObserver(read);
       observer.observe(box);
       // The content's own size moves `scrollWidth` without resizing the box
-      // (rows arrive, a column is resized).
-      for (const child of Array.from(box.children)) observer.observe(child);
+      // (rows arrive, a column is resized). The content is each child of the
+      // box AND each child's own children: a table usually sits in a wrapper
+      // that keeps the box's width (the shadcn `Table`'s `w-full` container,
+      // `overflow-visible` inside a box that scrolls), so the wrapper never
+      // resizes while the `<table>` in it widens past the box. Measured on
+      // the Studio metadata list (objectstack#37239): the rows drew at the
+      // box's width, then the columns widened the table from 1134 to 1826 px
+      // with no row added, and a read keyed on the wrapper alone never ran.
+      for (const child of Array.from(box.children)) {
+        observer.observe(child);
+        for (const grandchild of Array.from(child.children)) observer.observe(grandchild);
+      }
     }
     return () => {
       box.removeEventListener('scroll', read);

@@ -181,7 +181,7 @@ describe('SidebarItemMenu: what each entry does (objectui#12427)', () => {
     await openMenu();
     fireEvent.click(screen.getByRole('menuitem', { name: 'Object settings' }));
     await waitFor(() =>
-      expect(screen.getByTestId('where')).toHaveTextContent('/studio/com.acme.crm/data?surface=object:crm_lead'),
+      expect(screen.getByTestId('where')).toHaveTextContent('/studio/com.acme.crm/metadata/object/crm_lead'),
     );
   });
 
@@ -248,7 +248,7 @@ describe('SidebarItemMenu: right-click (objectui#12427)', () => {
 
 describe('sidebarItemDesignPath: only an object entry has a Studio entry (objectui#12520, objectstack#36487)', () => {
   it('an object entry opens its object in the Data surface', () => {
-    expect(sidebarItemDesignPath(LEADS, APP)).toBe('/studio/com.acme.crm/data?surface=object:crm_lead');
+    expect(sidebarItemDesignPath(LEADS, APP)).toBe('/studio/com.acme.crm/metadata/object/crm_lead');
   });
 
   it('a dashboard, page or report entry has none: each is edited on its own page', () => {

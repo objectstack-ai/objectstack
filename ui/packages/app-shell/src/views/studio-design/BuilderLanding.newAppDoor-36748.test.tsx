@@ -26,6 +26,7 @@ import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
 // The surface's reach loads `@objectstack/lint` lazily; pay that load during
 // collection, not inside a case's clocked window (`check:test-source-alias`).
 import '@objectstack/lint';
+import '@object-ui/plugin-detail';
 import { loadStudioCatalogue } from '@object-ui/i18n/namespaces/studio';
 await loadStudioCatalogue('zh');
 
@@ -156,6 +157,7 @@ function renderLanding() {
     <MemoryRouter initialEntries={['/studio']}>
       <Routes>
         <Route path="/studio" element={<BuilderLanding />} />
+        <Route path="/studio/:packageId/metadata/*" element={<StudioDesignSurface area="metadata" />} />
         <Route path="/studio/:packageId/:tab" element={<StudioDesignSurface />} />
         <Route path="/apps/*" element={<RunningApp />} />
       </Routes>

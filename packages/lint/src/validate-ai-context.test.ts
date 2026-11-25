@@ -9,6 +9,8 @@ import {
   validateAiContext,
 } from './validate-ai-context.js';
 import { explainRule } from './rule-explanations.js';
+import { runAuthoringRules } from './authoring-rules.js';
+import { runRuntimeAuthoringRules, runtimeAuthoringRulesFor, stackKeyForType } from './runtime-gate.js';
 
 const objects = [
   {
@@ -102,5 +104,86 @@ describe('validateAiContext — ADR-0160 D1 author defects', () => {
     for (const id of [AI_CONTEXT_OBJECT_UNKNOWN, AI_CONTEXT_FIELD_UNKNOWN, AI_CONTEXT_RELATED_LINK_UNKNOWN, AI_CONTEXT_BODY_NOT_LONG_TEXT]) {
       expect(explainRule(id), id).toBeTruthy();
     }
+  });
+});
+
+/**
+ * ADR-0160 D1: "reported at save and by `os validate`". The runtime publish
+ * door judges a written `ai_context` against the live objects, and answers
+ * the same rule ids, `where`, messages and hints `os validate` prints for the
+ * same pack — as advisories, never a refusal (the tier every advisory rule on
+ * that door keeps).
+ */
+describe('validateAiContext on the runtime publish door (ADR-0160 D1)', () => {
+  /** One pack written at the door, judged against `objects` as the live context. */
+  const atSave = (body: Record<string, unknown>) =>
+    runRuntimeAuthoringRules({ type: 'ai_context', item: body, context: { objects } });
+  /** The same pack as `os validate` judges it: the CLI command's own entry over the stack. */
+  const atValidate = (body: Record<string, unknown>) =>
+    runAuthoringRules('validate', { parsed: { objects, aiContexts: [body] }, normalized: { objects, aiContexts: [body] } })
+      .filter((f) => f.rule.startsWith('ai-context-'));
+  const face = (f: { rule: string; where: string; path: string; message: string; hint?: string; severity: string }) =>
+    ({ rule: f.rule, severity: f.severity, where: f.where, path: f.path, message: f.message, hint: f.hint });
+
+  it('the door dispatches an ai_context write to the rule, into the aiContexts collection', () => {
+    expect(runtimeAuthoringRulesFor('ai_context').map((r) => r.name)).toContain('validateAiContext');
+    expect(stackKeyForType('ai_context')).toBe('aiContexts');
+  });
+
+  const FAMILIES: ReadonlyArray<[string, Record<string, unknown>, string, string]> = [
+    ['a misspelled field', pack({ fields: ['title', 'titel'] }), AI_CONTEXT_FIELD_UNKNOWN, 'aiContexts[0].fields[1]'],
+    ['an unknown related object', pack({ related: [{ object: 'policy_revison' }] }), AI_CONTEXT_OBJECT_UNKNOWN, 'aiContexts[0].related[0].object'],
+    ['a related list with no link', pack({ related: [{ object: 'account' }] }), AI_CONTEXT_RELATED_LINK_UNKNOWN, 'aiContexts[0].related[0]'],
+    ['a body that is not long text', pack({ body: { field: 'title' } }), AI_CONTEXT_BODY_NOT_LONG_TEXT, 'aiContexts[0].body.field'],
+  ];
+
+  for (const [what, body, rule, path] of FAMILIES) {
+    it(`${what} is reported at save as ${rule}, in the words os validate prints, and the save is not refused`, () => {
+      const verdict = atSave(body);
+      expect(verdict.rulesRun).toContain('validateAiContext');
+      expect(verdict.errors, 'an advisory rule never refuses the write').toEqual([]);
+      expect(verdict.advisories.map((f) => [f.rule, f.path])).toEqual([[rule, path]]);
+      expect(verdict.advisories.map(face)).toEqual(atValidate(body).map(face));
+    });
+  }
+
+  it('under a stated package scope, an installed object outside the closure is worded for the closure, with the closure remedy', () => {
+    const scoped = objects.map((o) => ({ ...o, _packageId: o.name === 'account' ? 'com.other' : 'app.policy' }));
+    const body = pack({ related: [{ object: 'account' }] });
+    const verdict = runRuntimeAuthoringRules({
+      type: 'ai_context',
+      item: body,
+      context: { objects: scoped },
+      packageScope: { packageId: 'app.policy', dependencies: [] },
+    });
+    expect(verdict.errors, 'an advisory rule never refuses the write').toEqual([]);
+    expect(verdict.advisories.map((f) => [f.rule, f.path])).toEqual([[AI_CONTEXT_OBJECT_UNKNOWN, 'aiContexts[0].related[0].object']]);
+    const [finding] = verdict.advisories;
+    expect(finding!.message).toContain('outside the closure of package "app.policy"');
+    expect(finding!.message).not.toContain('this stack does not define');
+    expect(finding!.hint).toBe(
+      'Declare a dependency on the package that defines "account" in the `dependencies` of "app.policy"\'s manifest, '
+      + 'or name an object inside that closure',
+    );
+    // Non-vacuous: declaring the dependency brings the object into the closure, and the pack is clean.
+    expect(runRuntimeAuthoringRules({
+      type: 'ai_context',
+      item: body,
+      context: { objects: scoped },
+      packageScope: { packageId: 'app.policy', dependencies: ['com.other'] },
+    }).advisories.filter((f) => f.rule === AI_CONTEXT_OBJECT_UNKNOWN)).toEqual([]);
+  });
+
+  it('with no scope the object verdict keeps the words os validate prints', () => {
+    const [finding] = validateAiContext({ objects, aiContexts: [pack({ object: 'polcy', related: undefined, body: undefined })] });
+    expect(finding!.message).toBe("names object 'polcy', which this stack does not define, so the pack reads nothing of it");
+    expect(finding!.hint).toBe('Name an object the stack defines (check the spelling), or remove the entry');
+  });
+
+  it('a pack that names only what the live objects define earns nothing at save', () => {
+    const verdict = atSave(pack());
+    expect(verdict.rulesRun).toContain('validateAiContext');
+    expect(verdict.advisories).toEqual([]);
+    expect(verdict.errors).toEqual([]);
   });
 });

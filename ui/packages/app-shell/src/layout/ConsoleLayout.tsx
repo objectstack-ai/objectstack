@@ -23,7 +23,7 @@ import { DraftPreviewBar } from '../preview/DraftPreviewBar.js';
 import { UnpublishedAppBar } from '../preview/UnpublishedAppBar.js';
 import { ConsoleNotificationBanners } from './ConsoleNotificationBanners.js';
 import { UnifiedSidebar } from './UnifiedSidebar.js';
-import { PhoneAppNavBar, isPhoneTabRoute } from './PhoneAppNavBar.js';
+import { PhoneAppNavBar, isPhoneTabRoute, phoneTabOf } from './PhoneAppNavBar.js';
 import { PhoneAppHomeSlotProvider } from './PhoneAppHome.js';
 import { PhonePageBarProvider } from './PhonePageBar.js';
 import { SidebarDocsNavSlotProvider } from './sidebarDocsNavSlot.js';
@@ -195,6 +195,15 @@ export function ConsoleLayout({
   // the top left goes back. The route slot leaves the bar's height free at its
   // end.
   const phoneNavBar = phone && isPhoneTabRoute(location.pathname);
+  // objectstack#36792 — the inset's end padding only scrolls when it follows
+  // in-flow content: a page taller than an `h-full` route slot overflows the
+  // slot, and the scroll ends at the page's bottom, under the bar. So on the
+  // bar's home and approvals pages the slot grows with its page (at least the
+  // inset's height, so a short page or an empty state still fills it) and the
+  // padding ends the scroll above the bar. The inbox list keeps the fixed slot:
+  // it is an object list page, which bounds itself and scrolls its rows in its
+  // own box (objectui#12463), and a growing slot would unbound a long one.
+  const phoneSlotGrows = phoneNavBar && phoneTabOf(location.pathname) !== 'notifications';
   // objectstack#35424 — a docs page has one navigation, the docs' own (the
   // app's books and a way back to the app), so the app's menu is not drawn
   // there. objectstack#37150 (ruling 7142354097 on objectstack#36107) — from
@@ -393,7 +402,14 @@ export function ConsoleLayout({
           ref={mainContentRef}
           tabIndex={-1}
           data-testid="console-route"
-          className="h-full lg:min-h-0 focus:outline-none"
+          className={cn(
+            'h-full lg:min-h-0 focus:outline-none',
+            // objectstack#36792 — a one-track grid: its row stretches to the
+            // `min-h-full` floor, so a page's `h-full` root still resolves
+            // against it, and grows past it with a taller page. The track's
+            // `minmax(0,1fr)` keeps a wide page from widening the slot.
+            phoneSlotGrows && 'grid h-auto min-h-full grid-cols-[minmax(0,1fr)]',
+          )}
         >
         <ShellSidebarExpandFallback />
         {children}

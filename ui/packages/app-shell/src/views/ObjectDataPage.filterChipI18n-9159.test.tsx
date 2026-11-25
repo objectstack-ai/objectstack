@@ -89,6 +89,10 @@ import { ObjectDataPage } from './ObjectDataPage';
 import { ExpressionProvider } from '../providers/ExpressionProvider';
 import { NULL_FILTER, EMPTY_FILTER } from './drillUrlFilters';
 
+// `ObjectDataPage` reaches a dynamic `import('@objectstack/lint')`: pay its load at
+// collection, never inside a case's clocked window (`check:test-source-alias`).
+import '@objectstack/lint';
+
 const h = React.createElement;
 const OBJECT_NAME = 'showcase_invoice';
 const FIELD = 'owner';
@@ -101,6 +105,14 @@ const OBJECTS = [
     fields: {
       id: { type: 'text', label: 'Id' },
       owner: { type: 'text', label: 'Owner' },
+      category: {
+        type: 'select',
+        label: 'Category',
+        options: [
+          { value: 'software', label: 'Software' },
+          { value: 'hardware', label: 'Hardware' },
+        ],
+      },
     },
   },
 ];
@@ -129,7 +141,7 @@ function packLabel(language: string): unknown {
  * does not satisfy that (objectui#4040, the same fix the sibling i18n render
  * tests carry).
  */
-function renderAt(language: string, search: string) {
+function renderAt(language: string, search: string, resources?: Record<string, Record<string, unknown>>) {
   const page = h(
     MemoryRouter,
     { initialEntries: [`/apps/demo/${OBJECT_NAME}/data?${search}`] },
@@ -144,7 +156,7 @@ function renderAt(language: string, search: string) {
   );
   return render(
     h(I18nProvider, {
-      config: { defaultLanguage: language, detectBrowserLanguage: false },
+      config: { defaultLanguage: language, detectBrowserLanguage: false, resources },
       children: h(ExpressionProvider, {
         user: { id: 'u1', name: 'Ada', profile: 'admin' },
         children: page,
@@ -160,8 +172,8 @@ const EMPTY_BUCKET_SEARCH = `filter[${FIELD}][${NULL_FILTER.param}]=${NULL_FILTE
  * The chip's operator half. Reached through the remove button that sits beside
  * it, so this cannot drift onto the field-name half or the row's lead-in.
  */
-function chipOperatorText(): string {
-  const remove = document.querySelector(`[data-testid="object-data-remove-filter-${FIELD}"]`);
+function chipOperatorText(field: string = FIELD): string {
+  const remove = document.querySelector(`[data-testid="object-data-remove-filter-${field}"]`);
   expect(remove, 'the empty-bucket chip did not render at all').toBeTruthy();
   return remove!.previousElementSibling?.textContent ?? '';
 }
@@ -288,5 +300,77 @@ describe('the membership and negation chips (objectstack#30743)', () => {
     renderAt('en', `filter[${FIELD}][in]=alice`);
     expect(chipOperatorText()).toBe(`${packLabelOf('en', 'filterBuilder.operators.in')} alice`);
     expect(packLabelOf('zh-Hans', 'filterBuilder.operators.in')).not.toBe(packLabelOf('en', 'filterBuilder.operators.in'));
+  });
+});
+
+/**
+ * objectstack#37259 — a chip on an options-bearing field draws each whole-value
+ * comparand as its option's TRANSLATED label, the text the grid cell shows for
+ * that value (`translateOptions` over the field's declared `options`), instead
+ * of the stored code. Same real page, same real packs, plus an app bundle that
+ * translates one object's option the way a served app bundle does
+ * (`{appNamespace}.fieldOptions.{object}.{field}.{value}`).
+ */
+describe('a URL filter chip on a select field draws the option label (objectstack#37259)', () => {
+  const OPTION_FIELD = 'category';
+  /** An app namespace carrying the zh label of both declared options. */
+  const ZH_APP_BUNDLE = {
+    'zh-Hans': {
+      testapp: {
+        // Marks `testapp` as an app namespace for `getAppNamespaces`.
+        fields: {},
+        fieldOptions: { [OBJECT_NAME]: { [OPTION_FIELD]: { software: '软件', hardware: '硬件' } } },
+      },
+    },
+  };
+  const packLabelOf = (language: string, key: string): unknown =>
+    key.split('.').reduce<unknown>(
+      (node, part) => (node as Record<string, unknown> | undefined)?.[part],
+      (builtInLocales as Record<string, unknown>)[language],
+    );
+
+  it('an equality chip draws the zh option label, not the stored code', () => {
+    renderAt('zh-Hans', `filter[${OPTION_FIELD}]=software`, ZH_APP_BUNDLE);
+    expect(chipOperatorText(OPTION_FIELD)).toBe('= 软件');
+  });
+
+  it('an equality chip draws the declared en option label', () => {
+    renderAt('en', `filter[${OPTION_FIELD}]=software`, ZH_APP_BUNDLE);
+    expect(chipOperatorText(OPTION_FIELD)).toBe('= Software');
+  });
+
+  it('a membership chip draws each member as its option label', () => {
+    renderAt(
+      'zh-Hans',
+      `filter[${OPTION_FIELD}][in]=software&filter[${OPTION_FIELD}][in]=hardware`,
+      ZH_APP_BUNDLE,
+    );
+    expect(chipOperatorText(OPTION_FIELD)).toBe(
+      `${packLabelOf('zh-Hans', 'filterBuilder.operators.in')} 软件, 硬件`,
+    );
+  });
+
+  it('a negation chip draws its comparand as the option label', () => {
+    renderAt('zh-Hans', `filter[${OPTION_FIELD}][ne]=software`, ZH_APP_BUNDLE);
+    expect(chipOperatorText(OPTION_FIELD)).toBe(
+      `${packLabelOf('zh-Hans', 'filterBuilder.operators.not_equals')} 软件`,
+    );
+  });
+
+  it('CONTROL: a comparand that names no declared option stays the raw value', () => {
+    renderAt('zh-Hans', `filter[${OPTION_FIELD}]=legacy_code`, ZH_APP_BUNDLE);
+    expect(chipOperatorText(OPTION_FIELD)).toBe('= legacy_code');
+  });
+
+  it('CONTROL: a text-operator comparand is a fragment, not an option, and stays raw', () => {
+    renderAt('zh-Hans', `filter[${OPTION_FIELD}][contains]=software`, ZH_APP_BUNDLE);
+    expect(chipOperatorText(OPTION_FIELD)).toBe(
+      `${packLabelOf('zh-Hans', 'filterBuilder.operators.contains')} software`,
+    );
+  });
+
+  it('CONTROL: a field without options keeps today\'s text', () => {
+    renderAt('zh-Hans', `filter[${FIELD}]=software`, ZH_APP_BUNDLE);
+    expect(chipOperatorText(FIELD)).toBe('= software');
   });
 });

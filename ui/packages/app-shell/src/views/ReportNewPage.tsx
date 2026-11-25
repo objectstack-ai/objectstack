@@ -40,11 +40,18 @@ import type { DataSource } from '@object-ui/types';
 import type { ReportDraft } from '@object-ui/plugin-report';
 import { ReportBuilderHost } from './ReportBuilderHost.js';
 import { useDesignModeActive, useHoldDesignModeOut } from '../layout/designMode.js';
-import { saveAndPublishRuntimeMetadata } from './runtime-metadata-persistence.js';
+import {
+  resolveRuntimeCreatePackage,
+  saveAndPublishInPackage,
+  saveAndPublishRuntimeMetadata,
+} from './runtime-metadata-persistence.js';
+import { draftBarPackageOf } from '../preview/DraftPreviewBar.js';
 import { useMetadataClient } from './metadata-admin/useMetadata.js';
 import { useMetadata } from '../providers/MetadataProvider.js';
 import { loadHanRomanizer, romanizeHan } from './metadata-admin/romanizeHan.js';
 import { toFieldNameOrEmpty } from './metadata-admin/previews/object-fields-io.js';
+import { useStudioReturnLeaveMessage, useStudioReturnPath } from './StudioReturnButton.js';
+import { withStudioReturn } from './studio-design/studioAddress.js';
 
 /** The report a new builder starts on: nothing bound, the one report type. */
 export const NEW_REPORT_SEED: ReportDraft = { name: '', label: '', type: 'summary' };
@@ -92,16 +99,33 @@ export function ReportNewPage({ dataSource }: { dataSource?: DataSource }) {
   const { appName } = useParams<{ appName: string }>();
   const navigate = useNavigate();
   const metadataClient = useMetadataClient();
-  const { reports, loading, refresh } = useMetadata();
+  const { reports, apps, loading, refresh } = useMetadata();
   const { isAdmin, isResolved } = useWorkspaceAdminStatus();
   const designing = useDesignModeActive();
   // The builder is open whenever this page draws it (objectstack#36692).
   useHoldDesignModeOut(isResolved && isAdmin && !designing);
 
-  const backToReports = React.useCallback(() => {
-    if (appName) navigate(`/apps/${appName}/reports`);
-    else navigate(-1);
-  }, [navigate, appName]);
+  // objectstack#36906 — opened from Studio's report list (decision 13): the
+  // builder's × goes back to that list, and the new report's page keeps the
+  // way back (`?studio=`). Either way, × over unsaved edits asks first.
+  const studioReturn = useStudioReturnPath();
+  const studioLeaveMessage = useStudioReturnLeaveMessage();
+  const backToReports = React.useCallback(
+    ({ dirty }: { dirty: boolean }) => {
+      if (dirty && !window.confirm(studioLeaveMessage)) return;
+      if (studioReturn) navigate(studioReturn);
+      else if (appName) navigate(`/apps/${appName}/reports`);
+      else navigate(-1);
+    },
+    [navigate, appName, studioReturn, studioLeaveMessage],
+  );
+  // objectstack#36906 — a report made from Studio's report list is saved in
+  // the app's package, where that list finds it, as a new view made in an app
+  // is (`resolveRuntimeCreatePackage`): the package when it is writable, else
+  // its customization package through the ensure door, else, when neither can
+  // be had, naming no package, as before, and a notice says so. A report made
+  // from the app's own reports index is saved as before, naming no package.
+  const appPackageId = draftBarPackageOf(appName, apps as Parameters<typeof draftBarPackageOf>[1]);
 
   const handleSave = React.useCallback(
     async (draft: ReportDraft): Promise<boolean> => {
@@ -124,14 +148,20 @@ export function ReportNewPage({ dataSource }: { dataSource?: DataSource }) {
           return false;
         }
         const body = { ...draft, label, name };
-        const outcome = await saveAndPublishRuntimeMetadata('report', name, body, {
-          metadataClient,
-          dataSource: dataSource as any,
-        });
+        const ctx = { metadataClient, dataSource: dataSource as any };
+        const packageId = studioReturn ? await resolveRuntimeCreatePackage(appPackageId, 'report') : null;
+        const outcome = packageId
+          ? await saveAndPublishInPackage('report', name, body, packageId, ctx)
+          : await saveAndPublishRuntimeMetadata('report', name, body, ctx);
         if (outcome === 'pending-draft') {
           toast.error(t('form.saveError'), { description: t('report.builder.pendingDraft') });
           return false;
         }
+        // Opened from Studio, the app's package (or its customization package)
+        // could not be had, so the report was saved naming no package: the
+        // Studio list × goes back to does not show it. Say so, as a new view
+        // saved outside its app does (`onSavedOutsideApp`).
+        if (studioReturn && appPackageId && !packageId) toast.info(t('report.builder.savedOutsideApp'));
       } catch (err) {
         toast.error(t('form.saveError'), {
           description: formatMetadataError(err),
@@ -140,12 +170,13 @@ export function ReportNewPage({ dataSource }: { dataSource?: DataSource }) {
         return false;
       }
       await refresh().catch(() => {});
-      navigate(appName ? `/apps/${appName}/report/${encodeURIComponent(name)}` : `../report/${encodeURIComponent(name)}`, {
+      const reportPath = appName ? `/apps/${appName}/report/${encodeURIComponent(name)}` : `../report/${encodeURIComponent(name)}`;
+      navigate(studioReturn ? withStudioReturn(reportPath, studioReturn) : reportPath, {
         replace: true,
       });
       return true;
     },
-    [metadataClient, reports, language, dataSource, refresh, navigate, appName, t],
+    [metadataClient, reports, language, dataSource, refresh, navigate, appName, t, studioReturn, appPackageId],
   );
 
   if (loading || !isResolved) {

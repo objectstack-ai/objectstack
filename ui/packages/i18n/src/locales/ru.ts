@@ -1893,6 +1893,12 @@ const ru = {
       noCategoryAxis: "Требуется ось категорий диаграммы — диаграмма, привязанная к объекту, не придумывает её. Объявите одно из:",
     },
   },
+  // objectstack#36906 — the × of an app page opened from a Studio list.
+  studioReturn: {
+    close: 'Вернуться в Studio',
+    closeLabel: 'Закрыть и вернуться к списку Studio',
+    leaveConfirm: 'Уйти без сохранения? Несохранённые изменения будут потеряны.',
+  },
   dashboard: {
     // objectui#7063 — the DEFAULT empty state every dashboard widget renders
     // when its query SUCCEEDED and returned nothing. It replaced the terse
@@ -4323,6 +4329,8 @@ const ru = {
       settings: "Настройки отчёта",
       pendingDraft: "В этом отчёте есть неопубликованные изменения. Опубликуйте или отмените их выше, затем сохраните.",
       nameTaken: "Все идентификаторы, полученные из этого имени, уже заняты. Дайте отчёту другое имя и сохраните.",
+      // objectstack#36906 — a report made from Studio's report list that could not be saved in the app's package.
+      savedOutsideApp: "Этот отчёт сохранён вне пакета приложения, потому что пакет настроек приложения здесь использовать нельзя, поэтому список Studio его не показывает.",
       adminOnlyTitle: "Создавать отчёты могут только администраторы рабочего пространства",
       adminOnly: "Отчёт виден всем в рабочем пространстве, поэтому его создаёт администратор.",
       designModeOnTitle: "Сначала завершите дизайн макета",

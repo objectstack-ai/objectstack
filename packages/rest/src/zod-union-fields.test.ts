@@ -1,16 +1,17 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, afterEach } from 'vitest';
 import { z } from 'zod';
 import { FieldErrorCode } from '@objectstack/spec/api';
+import { ObjectQL } from '@objectstack/objectql';
+import { SqlDriver } from '@objectstack/driver-sql';
+import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
+import { installDefaultOrganization } from './default-organization.testkit.js';
 // `.js` extension deliberately: under `moduleResolution: NodeNext` an
 // extensionless relative import does not resolve, every symbol it names becomes
 // `any`, and each callback over those symbols then reports TS7006 (AGENTS.md
 // §Build & Test). This is the same spelling `rest-server.ts` itself uses.
-import { zodIssuesToFields } from './rest-server.js';
-// Pays the first load of the engine `rest-server.ts` reaches through a dynamic
-// import at collection, never inside a clocked case (check:test-source-alias).
-import '@objectstack/objectql';
+import { RestServer, zodIssuesToFields } from './rest-server.js';
 
 /**
  * `invalid_union` expansion on the wire (#5014).
@@ -330,5 +331,123 @@ describe('zodIssuesToFields — invalid_key / invalid_element descent (#5389)', 
             .toEqual([{ field: 'm.k', code: 'invalid_shape', message: 'Invalid key in record' }]);
         expect(zodIssuesToFields([{ code: 'invalid_element', path: ['m'], message: 'Invalid value', issues: 'nope' }]))
             .toEqual([{ field: 'm', code: 'invalid_shape', message: 'Invalid value' }]);
+    });
+});
+
+/**
+ * [#35500] `POST /api/v1/data/:object/query` with a `where` of the wrong kind,
+ * through the real route over a real engine and driver.
+ *
+ * `where` on that door is `z.union([FilterArraySchema, DataEngineFilterSchema])`,
+ * and both members are themselves unions. A number, a string or `null` used to
+ * answer one bare `{field: 'query.where', code: 'invalid_shape', message:
+ * 'Invalid input'}` per member and nothing that said what to send, so an AI
+ * caller had nothing to retry with. A member that is itself a bare union of
+ * kinds is now read as the kind mismatch it is, and the slot's own sentence
+ * names the two shapes it takes.
+ */
+describe('[#35500] POST /data/:object/query — a wrong-typed where answers one entry that names the shapes', () => {
+    const OBJECT = 'where_shape_35500';
+    const TASKS = {
+        name: OBJECT,
+        label: 'Where shape 35500',
+        fields: {
+            status: { name: 'status', type: 'text' as const },
+            amount: { name: 'amount', type: 'number' as const },
+        },
+    };
+    const ROWS = [
+        { id: 'r1', status: 'open', amount: 50 },
+        { id: 'r2', status: 'done', amount: 500 },
+    ];
+
+    const live: ObjectQL[] = [];
+    afterEach(async () => {
+        while (live.length) {
+            try { await live.pop()?.destroy(); } catch { /* noop */ }
+        }
+    });
+
+    const noop = () => {};
+    const mockServer = () => ({ get: noop, post: noop, put: noop, delete: noop, patch: noop, use: noop, listen: async () => {}, close: async () => {} });
+    const makeRes = () => {
+        const res: any = {
+            write: () => true, end: () => {},
+            header: () => res,
+            status: (code: number) => { res._status = code; return res; },
+            json: (body: any) => { res._json = body; return res; },
+        };
+        return res;
+    };
+
+    async function boot() {
+        const driver: any = new SqlDriver({ client: 'better-sqlite3', connection: { filename: ':memory:' }, useNullAsDefault: true });
+        const engine = new ObjectQL();
+        live.push(engine);
+        engine.registerDriver(driver, true);
+        await engine.init();
+        engine.registry.registerObject(TASKS as any);
+        await engine.syncSchemas();
+        await installDefaultOrganization(engine);
+        await engine.insert(OBJECT, ROWS as any);
+
+        const calls = { find: 0 };
+        const find = driver.find.bind(driver);
+        driver.find = (o: string, ...rest: unknown[]) => { if (o === OBJECT) calls.find += 1; return find(o, ...rest); };
+
+        const protocol = new ObjectStackProtocolImplementation(engine as any);
+        const rest = new RestServer(mockServer() as any, protocol as any, { api: { requireAuth: false } } as any);
+        (rest as any).resolveExecCtx = async () => ({ userId: 'test-user' });
+        rest.registerRoutes();
+        const route = rest.getRoutes().find((r: any) => r.method === 'POST' && r.path === '/api/v1/data/:object/query');
+        expect(route).toBeDefined();
+        const post = async (body: Record<string, unknown>) => {
+            const res = makeRes();
+            // What the wire carries: JSON.
+            await route!.handler({ params: { object: OBJECT }, body: JSON.parse(JSON.stringify(body)) } as any, res);
+            return res;
+        };
+        return { post, calls };
+    }
+
+    it.each([
+        ['42', 42],
+        ['a string', 'status = open'],
+        ['null', null],
+    ])('%s: 400 VALIDATION_FAILED with exactly one fields[] entry, before any read', async (_name, where) => {
+        const { post, calls } = await boot();
+        const res = await post({ where });
+        expect(res._status).toBe(400);
+        expect(res._json.code).toBe('VALIDATION_FAILED');
+        expect(res._json.fields.map((f: any) => [f.field, f.code])).toEqual([['query.where', 'invalid_shape']]);
+        // The entry names both accepted shapes instead of zod's bare default.
+        expect(res._json.fields[0].message).not.toBe('Invalid input');
+        expect(res._json.fields[0].message).toContain('condition object');
+        expect(res._json.fields[0].message).toContain('filter array');
+        expect(calls.find).toBe(0);
+    });
+
+    it('a malformed AST: 400 VALIDATION_FAILED with its located causes and no duplicate Invalid input', async () => {
+        const { post, calls } = await boot();
+        const res = await post({ where: [['status', '=', 'open'], 'and'] });
+        expect(res._status).toBe(400);
+        expect(res._json.code).toBe('VALIDATION_FAILED');
+        expect(res._json.fields).toEqual([
+            { field: 'query.where', code: 'min_items', message: expect.any(String) },
+            { field: 'query.where.1', code: 'invalid_shape', message: 'Invalid input' },
+        ]);
+        expect(calls.find).toBe(0);
+    });
+
+    it('CONTROL: a valid filter object and a valid filter array are still served', async () => {
+        const { post, calls } = await boot();
+        const asObject = await post({ where: { status: 'open' } });
+        expect(asObject._status ?? 200).toBe(200);
+        expect(asObject._json.records.map((r: any) => r.id)).toEqual(['r1']);
+
+        const asArray = await post({ where: ['amount', '>', 100] });
+        expect(asArray._status ?? 200).toBe(200);
+        expect(asArray._json.records.map((r: any) => r.id)).toEqual(['r2']);
+        expect(calls.find).toBe(2);
     });
 });
