@@ -693,6 +693,24 @@ describe('ObjectForm — a same-edit currency change keeps amounts and says so (
         description: { type: 'text', label: 'Description' },
       },
     },
+    // The same quote whose pick replaces a price somebody wrote.
+    cn_ow_quote: {
+      name: 'cn_ow_quote',
+      fields: {
+        currency_code: { type: 'text', label: 'Currency' },
+        product: {
+          type: 'lookup',
+          label: 'Product',
+          reference: 'cn_product',
+          lookupAutofill: [
+            { target: 'unit_price', source: 'list_price', overwrite: true },
+            { target: 'description', source: 'summary' },
+          ],
+        },
+        unit_price: { type: 'currency', label: 'Unit Price', currencyConfig: { currencyMode: 'record', currencyField: 'currency_code' } },
+        description: { type: 'text', label: 'Description' },
+      },
+    },
     cn_product: {
       name: 'cn_product',
       fields: {
@@ -703,7 +721,7 @@ describe('ObjectForm — a same-edit currency change keeps amounts and says so (
     },
   };
   const PRODUCTS = [{ id: 'p1', name: 'Widget', list_price: 100, summary: 'A widget' }];
-  function renderQuote(currency_code: string) {
+  function renderQuote(currency_code: string, objectName = 'cn_quote', extra: Record<string, unknown> = {}) {
     const ds = {
       getObjectSchema: vi.fn(async (name: string) => SCHEMAS_RULING[name]),
       find: vi.fn(async (name: string) => {
@@ -717,7 +735,7 @@ describe('ObjectForm — a same-edit currency change keeps amounts and says so (
     const view = render(
       <LocalizationProvider value={{ currency: 'USD' }}>
         <SchemaRendererContext.Provider value={{ dataSource: ds } as never}>
-          <ObjectForm schema={{ type: 'object-form', objectName: 'cn_quote', mode: 'create', initialValues: { currency_code } } as any} dataSource={ds as any} />
+          <ObjectForm schema={{ type: 'object-form', objectName, mode: 'create', initialValues: { currency_code, ...extra } } as any} dataSource={ds as any} />
         </SchemaRendererContext.Provider>
       </LocalizationProvider>,
     );
@@ -784,6 +802,21 @@ describe('ObjectForm — a same-edit currency change keeps amounts and says so (
     await waitFor(() => expect(valueOf(c, 'unit_price')).toContain('100'));
     expect(screen.queryByTestId('lookup-autofill-withheld')).toBeNull();
     expect(screen.queryByTestId('lookup-autofill-copied')).toBeNull();
+  });
+
+  it('branch B over a price that still holds an earlier value: the note says to clear it, then pick again', async () => {
+    const c = renderQuote('EUR', 'cn_ow_quote', { unit_price: 80 });
+    await input(c, 'description');
+    await pick('product', 'Widget');
+    expect((await screen.findByTestId('lookup-autofill-withheld')).textContent).toContain('Unit Price still holds its earlier value.');
+
+    await type(c, 'currency_code', 'USD');
+    await waitFor(() =>
+      expect(screen.getByTestId('lookup-autofill-withheld').textContent).toBe(
+        'Unit Price was not filled when it was picked and still holds its earlier value. The record is now in USD: clear Unit Price, then pick again to fill $100.00.',
+      ),
+    );
+    expect(valueOf(c, 'unit_price')).toContain('80');
   });
 
   it('a hand-typed amount gets no note through a currency change, nor one typed over a copied amount', async () => {

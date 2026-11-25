@@ -71,6 +71,7 @@ const fr = {
     autofillCurrencyUnread: '{{field}} n’a pas été rempli : le montant choisi est de {{amount}}, mais la devise ici n’a pas pu être lue. Vérifiez la devise, puis saisissez {{field}}.',
     autofillKept: '{{field}} garde sa valeur précédente.',
     autofillNowSameCurrency: '{{field}} n’a pas été rempli lors du choix. L’enregistrement est maintenant en {{to}} : choisissez à nouveau pour remplir {{amount}}.',
+    autofillNowSameCurrencyHeld: '{{field}} n’a pas été rempli lors du choix et garde sa valeur précédente. L’enregistrement est maintenant en {{to}} : videz {{field}}, puis choisissez à nouveau pour remplir {{amount}}.',
     autofillCopiedUnder: '{{field}} a été copié comme {{amount}}, mais l’enregistrement est maintenant en {{to}}. Saisissez {{field}} en {{to}} s’il doit changer.',
   },
   common: {

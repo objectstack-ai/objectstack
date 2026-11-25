@@ -424,7 +424,8 @@ type Translate = (key: string, options?: Record<string, unknown>) => string;
  * The sentence that says why a pick left `item.target` empty, naming both
  * currencies and the picked amount in its own currency, so a person can
  * price it by hand. `label` is the target's label. A target that kept the
- * value it held at the pick (`held`) is said to keep it.
+ * value it held at the pick (`held`) is said to keep it; under
+ * `nowSameCurrency` it is told to clear the field before a pick again.
  */
 export function withheldAutofillMessage(
   item: WithheldAutofill,
@@ -443,7 +444,12 @@ export function withheldAutofillMessage(
           : item.reason === 'nowSameCurrency'
             ? t('lookup.autofillNowSameCurrency', { field: label, amount, to: item.to })
             : t('lookup.autofillNoCurrency', { field: label, amount });
-  return item.held === undefined ? why : `${why} ${t('lookup.autofillKept', { field: label })}`;
+  if (item.held === undefined) return why;
+  // A target that still holds an earlier value: a pick again of the same
+  // record does not replace it (a declared pair without `overwrite` keeps a
+  // value this record did not fill), so the sentence says to clear it first.
+  if (item.reason === 'nowSameCurrency') return t('lookup.autofillNowSameCurrencyHeld', { field: label, amount, to: item.to });
+  return `${why} ${t('lookup.autofillKept', { field: label })}`;
 }
 
 /**

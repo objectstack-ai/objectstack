@@ -79,6 +79,7 @@ const en = {
     autofillCurrencyUnread: '{{field}} was not filled: the picked amount is {{amount}}, but the currency here could not be read. Check the currency, then enter {{field}}.',
     autofillKept: '{{field}} still holds its earlier value.',
     autofillNowSameCurrency: '{{field}} was not filled when it was picked. The record is now in {{to}}: pick again to fill {{amount}}.',
+    autofillNowSameCurrencyHeld: '{{field}} was not filled when it was picked and still holds its earlier value. The record is now in {{to}}: clear {{field}}, then pick again to fill {{amount}}.',
     autofillCopiedUnder: '{{field}} was copied as {{amount}}, but the record is now in {{to}}. Enter {{field}} in {{to}} if it should change.',
   },
   common: {

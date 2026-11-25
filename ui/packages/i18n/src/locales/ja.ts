@@ -70,6 +70,7 @@ const ja = {
     autofillCurrencyUnread: '{{field}}は入力されませんでした。選択した金額は {{amount}} ですが、ここでの通貨を読み取れませんでした。通貨を確認してから{{field}}を入力してください。',
     autofillKept: '{{field}}は以前の値のままです。',
     autofillNowSameCurrency: '選択時に{{field}}は入力されませんでした。レコードは現在 {{to}} です。もう一度選択すると {{amount}} が入力されます。',
+    autofillNowSameCurrencyHeld: '選択時に{{field}}は入力されず、以前の値のままです。レコードは現在 {{to}} です。{{field}}を空にしてからもう一度選択すると {{amount}} が入力されます。',
     autofillCopiedUnder: '{{field}}は {{amount}} として入力されましたが、レコードは現在 {{to}} です。必要に応じて {{to}} で{{field}}を入力してください。',
   },
   common: {

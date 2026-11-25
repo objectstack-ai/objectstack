@@ -598,8 +598,8 @@ describe('a same-edit currency change keeps a line’s amounts and says so (obje
     { name: 'description', type: 'text' as const },
     { name: 'unit_price', type: 'currency' as const, label: 'Unit Price' },
   ];
-  function Line({ header }: { header: string }) {
-    const [rows, setRows] = React.useState<Record<string, unknown>[]>([{ product: null, description: null, unit_price: null }]);
+  function Line({ header, line }: { header: string; line?: Record<string, unknown> }) {
+    const [rows, setRows] = React.useState<Record<string, unknown>[]>([{ product: null, description: null, unit_price: null, ...line }]);
     return (
       <LocalizationProvider value={{ currency: 'USD' }}>
         <SchemaRendererContext.Provider value={{ dataSource: ds } as never}>
@@ -666,6 +666,24 @@ describe('a same-edit currency change keeps a line’s amounts and says so (obje
     expect(withheldNote()?.textContent).toBe('Unit Price was not filled when it was picked. The record is now in EUR: pick again to fill €100.00.');
     expect(rowsNow()[0].unit_price).toBeNull();
     expect(copiedNote()).toBeNull();
+
+    // Control: the pick again the note offers fills it, and nothing is left to say.
+    await pickProduct();
+    await waitFor(() => expect(rowsNow()[0].unit_price).toBe(100));
+    expect(withheldNote()).toBeNull();
+    expect(copiedNote()).toBeNull();
+  });
+
+  it('branch B over a cell that still holds an earlier value: the note says to clear it, then pick again', async () => {
+    const view = render(<Line header="USD" line={{ unit_price: 80 }} />);
+    await pickProduct();
+    expect(withheldNote()?.textContent).toContain('Unit Price still holds its earlier value.');
+
+    view.rerender(<Line header="EUR" />);
+    expect(withheldNote()?.textContent).toBe(
+      'Unit Price was not filled when it was picked and still holds its earlier value. The record is now in EUR: clear Unit Price, then pick again to fill €100.00.',
+    );
+    expect(rowsNow()[0].unit_price).toBe(80);
   });
 
   it('a hand-typed amount gets no note through a currency change, nor one typed over a copied amount', async () => {

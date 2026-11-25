@@ -77,6 +77,7 @@ const ar = {
     autofillCurrencyUnread: 'لم يُملأ {{field}}: المبلغ المختار هو {{amount}}، لكن تعذّرت قراءة العملة هنا. تحقّق من العملة، ثم أدخل {{field}}.',
     autofillKept: 'يحتفظ {{field}} بقيمته السابقة.',
     autofillNowSameCurrency: 'لم يُملأ {{field}} عند الاختيار. السجل الآن بعملة {{to}}: اختر مرة أخرى لملء {{amount}}.',
+    autofillNowSameCurrencyHeld: 'لم يُملأ {{field}} عند الاختيار ويحتفظ بقيمته السابقة. السجل الآن بعملة {{to}}: امسح {{field}} ثم اختر مرة أخرى لملء {{amount}}.',
     autofillCopiedUnder: 'نُسخ {{field}} بقيمة {{amount}}، لكن السجل الآن بعملة {{to}}. أدخل {{field}} بعملة {{to}} إذا لزم التغيير.',
   },
   common: {

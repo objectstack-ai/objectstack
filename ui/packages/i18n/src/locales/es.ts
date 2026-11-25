@@ -71,6 +71,7 @@ const es = {
     autofillCurrencyUnread: 'No se rellenó {{field}}: el importe elegido es {{amount}}, pero no se pudo leer la moneda de aquí. Compruebe la moneda y luego introduzca {{field}}.',
     autofillKept: '{{field}} conserva su valor anterior.',
     autofillNowSameCurrency: 'No se rellenó {{field}} al elegirlo. El registro ahora está en {{to}}: vuelva a elegirlo para rellenar {{amount}}.',
+    autofillNowSameCurrencyHeld: 'No se rellenó {{field}} al elegirlo y conserva su valor anterior. El registro ahora está en {{to}}: vacíe {{field}} y vuelva a elegirlo para rellenar {{amount}}.',
     autofillCopiedUnder: '{{field}} se copió como {{amount}}, pero el registro ahora está en {{to}}. Introduzca {{field}} en {{to}} si debe cambiar.',
   },
   common: {

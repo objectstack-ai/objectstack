@@ -70,6 +70,7 @@ const de = {
     autofillCurrencyUnread: '{{field}} wurde nicht ausgefüllt: Der gewählte Betrag ist {{amount}}, die Währung hier konnte aber nicht gelesen werden. Prüfen Sie die Währung und geben Sie dann {{field}} ein.',
     autofillKept: '{{field}} behält seinen bisherigen Wert.',
     autofillNowSameCurrency: '{{field}} wurde bei der Auswahl nicht ausgefüllt. Der Datensatz ist jetzt in {{to}}: Wählen Sie erneut, um {{amount}} einzutragen.',
+    autofillNowSameCurrencyHeld: '{{field}} wurde bei der Auswahl nicht ausgefüllt und behält seinen bisherigen Wert. Der Datensatz ist jetzt in {{to}}: Leeren Sie {{field}} und wählen Sie erneut, um {{amount}} einzutragen.',
     autofillCopiedUnder: '{{field}} wurde als {{amount}} übernommen, der Datensatz ist jetzt aber in {{to}}. Geben Sie {{field}} bei Bedarf in {{to}} ein.',
   },
   common: {
