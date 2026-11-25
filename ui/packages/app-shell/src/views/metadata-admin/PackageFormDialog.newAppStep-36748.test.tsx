@@ -188,6 +188,7 @@ function renderDoor() {
     <MemoryRouter initialEntries={['/host']}>
       <Routes>
         <Route path="/host" element={<NewAppHost />} />
+        <Route path="/studio/:packageId/metadata/*" element={<StudioDesignSurface area="metadata" />} />
         <Route path="/studio/:packageId/:tab" element={<StudioDesignSurface />} />
         <Route path="/apps/*" element={<RunningApp />} />
       </Routes>

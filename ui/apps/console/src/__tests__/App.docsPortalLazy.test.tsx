@@ -98,6 +98,8 @@ vi.mock('@object-ui/app-shell', async (importOriginal) => ({
   RequireOrganization: passthrough,
   SystemRedirect: () => null,
   DefaultHomeLayout: passthrough,
+  // objectstack#37197: the portal's frame, around the lazy docs layout.
+  DocsPortalShell: passthrough,
   DefaultHomePage: stub('home-page'),
   DefaultOrganizationsLayout: passthrough,
   DefaultOrganizationsPage: stub('organizations-page'),

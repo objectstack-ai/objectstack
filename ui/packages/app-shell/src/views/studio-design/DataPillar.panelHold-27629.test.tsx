@@ -106,6 +106,7 @@ vi.mock('@object-ui/react', async (importOriginal) => {
 
 // The source reaches a dynamic import of it: its first load is paid at collection (`check:test-source-alias`).
 import '@objectstack/lint';
+import '@object-ui/plugin-detail';
 import { DataPillar } from './StudioDesignSurface';
 import { StudioSaveHarness, pressStudioSave } from './__tests__/studioSaveHarness';
 import { createEmptyDataSource, failOnAbsorbedFetchError } from './__tests__/emptyDataSource';
@@ -150,7 +151,7 @@ const rawEditorIn = (root: HTMLElement) =>
 function mount() {
   render(
     <StudioSaveHarness><MemoryRouter initialEntries={['/studio/com.example.showcase/data']}>
-      <DataPillar packageId="com.example.showcase" />
+      <DataPillar objectName="showcase_task" packageId="com.example.showcase" />
     </MemoryRouter></StudioSaveHarness>,
   );
 }

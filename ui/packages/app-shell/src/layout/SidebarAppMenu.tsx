@@ -43,7 +43,7 @@ import {
   DropdownMenuTrigger,
   Input,
 } from '@object-ui/components';
-import { Check, ChevronDown, Eye, Pencil, PencilRuler, Plus } from 'lucide-react';
+import { BookOpen, Check, ChevronDown, Eye, Pencil, PencilRuler, Plus } from 'lucide-react';
 import { useObjectTranslation } from '@object-ui/i18n';
 import { useAuth } from '@object-ui/auth';
 import { useMetadata } from '../providers/MetadataProvider.js';
@@ -155,6 +155,77 @@ function AddAppSubmenu({ entries }: { entries: readonly AddAppEntry[] }) {
   );
 }
 
+/**
+ * The menu's app list: the viewer's apps, with a search field above them once
+ * there are more than {@link APP_MENU_SEARCH_FROM}. `activeAppName` is checked
+ * and choosing it does nothing; without one (the docs portal, which is in no
+ * app) no row is checked.
+ */
+function AppMenuList({
+  apps,
+  launcherApps,
+  activeAppName,
+  query,
+  onQueryChange,
+  onAppChange,
+}: {
+  apps: NonNullable<ReturnType<typeof useMetadata>['apps']>;
+  launcherApps: ReturnType<typeof useLauncherApps>['apps'];
+  activeAppName?: string;
+  query: string;
+  onQueryChange: (query: string) => void;
+  onAppChange: (segment: string) => void;
+}) {
+  const { t } = useObjectTranslation();
+  const { appLabel } = useServedAppLabel();
+  const searchable = launcherApps.length > APP_MENU_SEARCH_FROM;
+  const needle = query.trim().toLocaleLowerCase();
+  const listed = searchable && needle
+    ? launcherApps.filter((app: any) => appLabel(app).toLocaleLowerCase().includes(needle))
+    : launcherApps;
+  return (
+    <>
+      {searchable && (
+        <div className="p-1" onKeyDown={(event) => event.stopPropagation()}>
+          <Input
+            value={query}
+            onChange={(event) => onQueryChange(event.target.value)}
+            placeholder={t('layout.appSwitcher.searchApps', { defaultValue: 'Search apps…' })}
+            aria-label={t('layout.appSwitcher.searchApps', { defaultValue: 'Search apps…' })}
+            data-testid="sidebar-app-menu-search"
+            className="h-8"
+            autoFocus
+          />
+        </div>
+      )}
+      <div className="max-h-[min(60vh,28rem)] overflow-y-auto">
+        {listed.map((app: any) => {
+          const isActive = activeAppName !== undefined && app.name === activeAppName;
+          return (
+            <DropdownMenuItem
+              key={app.name}
+              onSelect={() => {
+                if (!isActive) onAppChange(appAddressSegment(apps, app) ?? app.name);
+              }}
+              className="flex items-center gap-2.5 py-2"
+              data-testid={`sidebar-app-menu-row-${app.name}`}
+            >
+              <AppMark app={app} size="sm" />
+              <span className="flex-1 truncate">{appLabel(app)}</span>
+              {isActive && <Check className="size-3.5 shrink-0 text-primary" aria-hidden />}
+            </DropdownMenuItem>
+          );
+        })}
+        {listed.length === 0 && (
+          <div className="px-2 py-1.5 text-sm text-muted-foreground" data-testid="sidebar-app-menu-empty">
+            {t('layout.appSwitcher.noAppsMatch', { defaultValue: 'No apps match' })}
+          </div>
+        )}
+      </div>
+    </>
+  );
+}
+
 export interface SidebarAppMenuProps {
   activeAppName: string;
   /** Opens the app at this address segment (the host asks first about unsaved edits). */
@@ -162,7 +233,6 @@ export interface SidebarAppMenuProps {
 }
 
 export function SidebarAppMenu({ activeAppName, onAppChange }: SidebarAppMenuProps) {
-  const { t } = useObjectTranslation();
   const { appLabel } = useServedAppLabel();
   const { apps: metadataApps } = useMetadata();
   const apps = metadataApps || [];
@@ -184,12 +254,6 @@ export function SidebarAppMenu({ activeAppName, onAppChange }: SidebarAppMenuPro
   if (!activeApp) return null;
   const activeLabel = appLabel(activeApp);
 
-  const searchable = launcherApps.length > APP_MENU_SEARCH_FROM;
-  const needle = query.trim().toLocaleLowerCase();
-  const listed = searchable && needle
-    ? launcherApps.filter((app: any) => appLabel(app).toLocaleLowerCase().includes(needle))
-    : launcherApps;
-
   return (
     <DropdownMenu onOpenChange={(open) => { if (!open) setQuery(''); }}>
       <DropdownMenuTrigger asChild>
@@ -205,46 +269,71 @@ export function SidebarAppMenu({ activeAppName, onAppChange }: SidebarAppMenuPro
         </button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="start" sideOffset={4} className="w-64" data-testid="sidebar-app-menu">
-        {searchable && (
-          <div className="p-1" onKeyDown={(event) => event.stopPropagation()}>
-            <Input
-              value={query}
-              onChange={(event) => setQuery(event.target.value)}
-              placeholder={t('layout.appSwitcher.searchApps', { defaultValue: 'Search apps…' })}
-              aria-label={t('layout.appSwitcher.searchApps', { defaultValue: 'Search apps…' })}
-              data-testid="sidebar-app-menu-search"
-              className="h-8"
-              autoFocus
-            />
-          </div>
-        )}
-        <div className="max-h-[min(60vh,28rem)] overflow-y-auto">
-          {listed.map((app: any) => {
-            const isActive = app.name === activeApp.name;
-            return (
-              <DropdownMenuItem
-                key={app.name}
-                onSelect={() => {
-                  if (!isActive) onAppChange(appAddressSegment(apps, app) ?? app.name);
-                }}
-                className="flex items-center gap-2.5 py-2"
-                data-testid={`sidebar-app-menu-row-${app.name}`}
-              >
-                <AppMark app={app} size="sm" />
-                <span className="flex-1 truncate">{appLabel(app)}</span>
-                {isActive && <Check className="size-3.5 shrink-0 text-primary" aria-hidden />}
-              </DropdownMenuItem>
-            );
-          })}
-          {listed.length === 0 && (
-            <div className="px-2 py-1.5 text-sm text-muted-foreground" data-testid="sidebar-app-menu-empty">
-              {t('layout.appSwitcher.noAppsMatch', { defaultValue: 'No apps match' })}
-            </div>
-          )}
-        </div>
+        <AppMenuList
+          apps={apps}
+          launcherApps={launcherApps}
+          activeAppName={activeApp.name}
+          query={query}
+          onQueryChange={setQuery}
+          onAppChange={onAppChange}
+        />
         {(enterDesignMode || studioEntry || offerAddApp) && <DropdownMenuSeparator />}
         {enterDesignMode && <DesignLayoutItem onEnter={enterDesignMode} />}
         {studioEntry && <StudioAppItem entry={studioEntry} />}
+        {offerAddApp && <AddAppSubmenu entries={addAppEntries} />}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
+/**
+ * objectstack#37197 — the docs portal's first row (`DocsPortalShell`): a
+ * neutral 「Documentation」 head where an app's name is, since the portal is
+ * in no app. It opens the same app list as the app menu, under 「Your apps」,
+ * with no row checked, and 「Add app」 for the viewers who may build. The
+ * app-scoped rows (「Design layout」, 「Edit app」) are not drawn: there is no
+ * app here for them to act on. Choosing an app opens it.
+ */
+export function SidebarDocsPortalMenu({ onAppChange }: { onAppChange: (segment: string) => void }) {
+  const { t } = useObjectTranslation();
+  const { apps: metadataApps } = useMetadata();
+  const apps = metadataApps || [];
+  const { apps: launcherApps } = useLauncherApps(apps);
+  const mayAddApp = useMayAddApp();
+  // objectstack#36908 — the same list and rule as the app menu: no 「Add app」
+  // (and no separator for it) when there is nothing to offer.
+  const addAppEntries = useAddAppEntries();
+  const offerAddApp = mayAddApp && addAppEntries.length > 0;
+  const [query, setQuery] = React.useState('');
+  const label = t('help.documentation', { defaultValue: 'Documentation' });
+  return (
+    <DropdownMenu onOpenChange={(open) => { if (!open) setQuery(''); }}>
+      <DropdownMenuTrigger asChild>
+        <button
+          type="button"
+          data-testid="sidebar-docs-portal-menu-trigger"
+          title={label}
+          className="flex h-8 min-w-0 flex-1 items-center gap-2 rounded-md px-1.5 text-left text-sm font-medium text-sidebar-foreground outline-none transition-colors hover:bg-sidebar-accent focus-visible:ring-2 focus-visible:ring-sidebar-ring data-[state=open]:bg-sidebar-accent"
+        >
+          <span className="flex size-6 shrink-0 items-center justify-center rounded-md bg-muted text-foreground/80" aria-hidden>
+            <BookOpen className="size-3.5" />
+          </span>
+          <span className="min-w-0 truncate">{label}</span>
+          <ChevronDown className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />
+        </button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="start" sideOffset={4} className="w-64" data-testid="sidebar-docs-portal-menu">
+        <div className="px-2 pb-1 pt-1.5 text-xs font-medium text-muted-foreground">
+          {t('layout.appSwitcher.yourApps', { defaultValue: 'Your apps' })}
+        </div>
+        <AppMenuList
+          apps={apps}
+          launcherApps={launcherApps}
+          query={query}
+          onQueryChange={setQuery}
+          onAppChange={onAppChange}
+        />
+        {offerAddApp && <DropdownMenuSeparator />}
         {offerAddApp && <AddAppSubmenu entries={addAppEntries} />}
       </DropdownMenuContent>
     </DropdownMenu>

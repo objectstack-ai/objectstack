@@ -72,7 +72,8 @@ import '@objectstack/lint';
 // objectstack#36900 — the surface mounts the command palette, which reaches the
 // record preview's `lazy()` detail entry: its first load is paid at collection too.
 import '@object-ui/plugin-detail';
-import { AutomationsPillar, DataPillar } from './StudioDesignSurface';
+// objectstack#36904, objectstack#36905 — the Data and Access pillars' rails are gone; the Automations rail is left.
+import { AutomationsPillar } from './StudioDesignSurface';
 import { StudioRail, StudioRailRow } from './StudioRail';
 import { railAbbreviation } from './railAbbreviation';
 import {
@@ -155,16 +156,9 @@ interface RailCase {
   pillar: () => React.ReactElement;
 }
 
+// objectstack#36904 — the object designer has no rail: objects are listed on
+// the area's object list, so the Data rail's cases left this file.
 const CASES: RailCase[] = [
-  {
-    name: 'Data',
-    railTestId: 'studio-rail-data',
-    placeholderKey: 'engine.studio.data.searchObjects',
-    labels: ['Account', 'Contact'],
-    match: 'acc',
-    emptyKey: 'engine.studio.data.noObjects',
-    pillar: () => <DataPillar packageId={PKG} />,
-  },
   {
     name: 'Automations',
     railTestId: 'studio-rail-automations',

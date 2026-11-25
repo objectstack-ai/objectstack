@@ -99,17 +99,16 @@ describe("today's addresses, byte for byte", () => {
   });
 
   it('an item opens its pillar today when the table names one, else its "All metadata" page', () => {
-    expect(studioItemPath('crm', 'object', 'account')).toBe('/studio/crm/data?surface=object%3Aaccount');
+    // objectstack#36904 — an object opens its designer on its metadata address.
+    expect(studioItemPath('crm', 'object', 'account')).toBe('/studio/crm/metadata/object/account');
     expect(studioItemPath('crm', 'flow', 'notify')).toBe('/studio/crm/automations?surface=flow%3Anotify');
     // objectstack#36905 — a permission set opens its metadata address.
     expect(studioItemPath('crm', 'permission', 'admin')).toBe('/studio/crm/metadata/permission/admin');
     expect(studioItemPath('crm', 'dashboard', 'sales')).toBe('/studio/crm/metadata/dashboard/sales');
     expect(studioItemPath('crm', 'action', 'approve')).toBe('/studio/crm/metadata/action/approve');
-    // The app → Studio bridge's spelling.
-    expect(studioItemPath('crm', 'object', 'account', { spelling: 'name' })).toBe('/studio/crm/data?surface=object:account');
-    // The switched-off action's spelling.
-    expect(studioItemPath('crm', 'object', 'account', { spelling: 'form', qualifiers: { action: 'approve' } })).toBe(
-      '/studio/crm/data?surface=object%3Aaccount&action=approve',
+    // On the metadata address a qualifier is its query (the switched-off action's `?action=`).
+    expect(studioItemPath('crm', 'object', 'account', { qualifiers: { action: 'approve' } })).toBe(
+      '/studio/crm/metadata/object/account?action=approve',
     );
     // A name that is an Object.prototype member is not a pillar type.
     expect(studioItemPath('crm', 'constructor', 'x')).toBe('/studio/crm/metadata/constructor/x');
@@ -147,10 +146,10 @@ describe("today's addresses, byte for byte", () => {
     expect(studioPillarItemPath('crm', 'access', { type: 'permission', name: 'p' })).toBe('/studio/crm/access?surface=permission%3Ap');
     expect(studioMetadataItemPath('crm', { type: 'object', name: 'account' })).toBe('/studio/crm/metadata/object/account');
     expect(
-      areaItemPillarPath({ packageId: 'crm', type: 'object', name: 'account', search: new URLSearchParams() }),
-    ).toBe('/studio/crm/data?surface=object%3Aaccount');
+      areaItemPillarPath({ packageId: 'crm', type: 'flow', name: 'notify', search: new URLSearchParams() }),
+    ).toBe('/studio/crm/automations?surface=flow%3Anotify');
     expect(
-      areaItemPillarPath({ packageId: 'crm', type: 'object', name: 'account', search: new URLSearchParams('review=1') }),
+      areaItemPillarPath({ packageId: 'crm', type: 'flow', name: 'notify', search: new URLSearchParams('review=1') }),
     ).toBeNull();
   });
 });

@@ -186,7 +186,8 @@ describe('Setup → Packages: an installed app’s customizations (objectstack#3
     await waitFor(() => expect(rows()).toHaveLength(1));
     expect(within(rows()[0]).getByRole('link')).toHaveAttribute(
       'href',
-      `/studio/${APP}/data?surface=object%3Aopportunity&action=clone_opportunity`,
+      // objectstack#36904 — `?action=` on the object designer's address.
+      `/studio/${APP}/metadata/object/opportunity?action=clone_opportunity`,
     );
   });
 

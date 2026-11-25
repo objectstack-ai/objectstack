@@ -24,6 +24,7 @@ import { MemoryRouter } from 'react-router-dom';
 // The CEL authoring code loads `@objectstack/lint` lazily; warmed here so its
 // first load is paid at import, not inside a test's clock.
 import '@objectstack/lint';
+import '@object-ui/plugin-detail';
 
 const REFUSED = 'record.amount > 100';
 const ACCEPTED = 'record.amount != null && record.amount > 100';
@@ -183,7 +184,7 @@ function mount(draft: Record<string, unknown> | null) {
   server = { draft, sent: [] };
   render(
     <StudioSaveHarness><MemoryRouter initialEntries={['/studio/com.example.showcase/data']}>
-      <DataPillar packageId="com.example.showcase" />
+      <DataPillar objectName="showcase_task" packageId="com.example.showcase" />
     </MemoryRouter></StudioSaveHarness>,
   );
 }

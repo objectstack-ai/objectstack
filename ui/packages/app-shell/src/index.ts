@@ -366,6 +366,9 @@ export {
 export { useInvitationSignUpJoin, type InvitationSignUpJoin } from './console/auth/invitationSignUpJoin.js';
 export { ForgotPasswordPage as DefaultForgotPasswordPage } from './console/auth/ForgotPasswordPage.js';
 export { HomeLayout as DefaultHomeLayout, HomeLayout } from './console/home/HomeLayout.js';
+// objectstack#37197 — the docs portal's frame: the app-less shell from 768 px up.
+export { DocsPortalShell } from './console/docs/DocsPortalShell.js';
+export type { DocsPortalShellProps } from './console/docs/DocsPortalShell.js';
 export { HomePage as DefaultHomePage, HomePage } from './console/home/HomePage.js';
 // Whether the signed-in person has connected an AI assistant (or holds a
 // working API key), and where Connect an AI Assistant opens: the one read and

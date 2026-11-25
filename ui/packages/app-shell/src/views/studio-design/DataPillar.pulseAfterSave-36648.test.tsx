@@ -116,6 +116,7 @@ vi.mock('./useMetadataRefreshNonce', async () => {
 
 // The source reaches a dynamic import of it: its first load is paid at collection (`check:test-source-alias`).
 import '@objectstack/lint';
+import '@object-ui/plugin-detail';
 import * as React from 'react';
 import { DataPillar } from './StudioDesignSurface';
 import { StudioSaveHarness, pressStudioSave } from './__tests__/studioSaveHarness';
@@ -154,7 +155,7 @@ afterEach(() => {
 async function openRuleGuard(): Promise<HTMLTextAreaElement> {
   render(
     <StudioSaveHarness><MemoryRouter initialEntries={['/studio/com.example.showcase/data']}>
-      <DataPillar packageId="com.example.showcase" />
+      <DataPillar objectName="showcase_task" packageId="com.example.showcase" />
     </MemoryRouter></StudioSaveHarness>,
   );
   fireEvent.click(await screen.findByTestId('data-tab-flat-rules'));

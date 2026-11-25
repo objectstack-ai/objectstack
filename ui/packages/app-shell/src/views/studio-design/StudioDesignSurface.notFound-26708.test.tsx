@@ -136,6 +136,8 @@ function renderAt(
         <Routes>
           <Route path="/apps/setup/component/developer/packages" element={<SetupPackages />} />
           <Route path="/studio/~all/metadata" element={<AllMetadata />} />
+          {/* objectstack#36904 — `/data` lands on the area's object list. */}
+          <Route path="/studio/:packageId/metadata/*" element={React.cloneElement(surface as React.ReactElement<{ area?: 'metadata' }>, { area: 'metadata' })} />
           <Route path="/studio/:packageId/:tab" element={surface} />
         </Routes>
       </MemoryRouter>
