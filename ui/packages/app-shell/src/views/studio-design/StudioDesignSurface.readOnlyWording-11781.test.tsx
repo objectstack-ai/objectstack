@@ -20,6 +20,9 @@ import '@testing-library/jest-dom/vitest';
 // The source under test reaches a dynamic `import('@objectstack/lint')`; its first load is paid
 // here, at collection, never inside a case's clock (`check:test-source-alias`).
 import '@objectstack/lint';
+// objectstack#36900 — the surface mounts the command palette, which reaches the
+// record preview's `lazy()` detail entry: its first load is paid at collection too.
+import '@object-ui/plugin-detail';
 import * as React from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { render, screen, fireEvent, cleanup } from '@testing-library/react';

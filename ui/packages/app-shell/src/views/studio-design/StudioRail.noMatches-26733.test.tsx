@@ -69,6 +69,9 @@ vi.mock('./StudioAiCopilot', () => ({ StudioChatDock: () => null }));
 
 // The pillars reach `@objectstack/lint` through a dynamic import; paid here, at collection, not in a case's clock.
 import '@objectstack/lint';
+// objectstack#36900 — the surface mounts the command palette, which reaches the
+// record preview's `lazy()` detail entry: its first load is paid at collection too.
+import '@object-ui/plugin-detail';
 import { AutomationsPillar, DataPillar } from './StudioDesignSurface';
 import { StudioRail, StudioRailRow } from './StudioRail';
 import { railAbbreviation } from './railAbbreviation';
