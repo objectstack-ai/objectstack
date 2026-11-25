@@ -8,6 +8,9 @@
 '@objectstack/mcp': minor
 '@objectstack/service-record-context': minor
 '@objectstack/lint': minor
+'@objectstack/platform-objects': patch
+'@object-ui/app-shell': patch
+'@object-ui/i18n': patch
 ---
 
 feat(ai): `ai_context` context packs and the `get_record_context` tool over MCP
@@ -24,3 +27,4 @@ ADR-0160 row 5 (#37140).
 - **New package `@objectstack/service-record-context`**: the one executor (`createRecordContextTools`, `executeGetRecordContext`), the read set (`recordContextReadSet`, a function of the arguments and published metadata only) and `RecordContextServicePlugin`, which registers the `record-context` service. Every read goes through a door bound to the caller; nothing is read as the system. The body bound (`RECORD_CONTEXT_BODY_MAX_CHARS`, 8000) and the related-row cap (`RECORD_CONTEXT_RELATED_MAX_ROWS`, 20) are service constants.
 - **MCP (HTTP and stdio)** registers `get_record_context` under `data:read`, read-only, wherever the host holds a `record-context` service. A host without it registers nothing new. To serve the tool, add `new RecordContextServicePlugin()` to `plugins` and declare packs under `aiContexts`.
 - **`@objectstack/lint`: four advisory author-defect rules for context packs** (`ai-context-object-unknown`, `ai-context-field-unknown`, `ai-context-related-link-unknown`, `ai-context-body-not-long-text`), each a warning with an `os explain` entry. `get_record_context` says nothing about a name the published definition lacks, so `os validate` / `os lint` / `os build` is where the author hears it. CLI only for now: the rule reads the whole stack snapshot.
+- **Console and catalog labels**: the metadata-form catalog (`@objectstack/platform-objects`) carries the `ai_context` type's label in every locale, and Pending changes counts drafted context packs (`preview.changes.typeCount.ai_context`).
