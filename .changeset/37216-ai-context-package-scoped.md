@@ -24,7 +24,7 @@ ADR-0150's addendum of 2026-11-25 puts the context pack in bucket 3 beside `skil
 
 **BREAKING (narrowing), each counted on `objectstack-ai/objectstack` at `d7f299c0` and `objectstack-ai/hotcrm` at `9b735103`:**
 
-- A second package of one namespace that ships a pack name another package of that namespace already holds is refused at install (`409`, the namespace name conflict) and by `os validate`. First-party packages refused: 0. The one declarer, `examples/app-showcase`, ships two packs with different names in one package. hotcrm declares none.
+- A second package of one namespace that ships a pack name another package of that namespace already holds is refused at install (`422 NAMESPACE_CONFLICT`, naming every holder) and by `os validate`. First-party packages refused: 0. The one declarer, `examples/app-showcase`, ships two packs with different names in one package. hotcrm declares none.
 - `GET /api/v1/meta/ai_context/NAME` with no package, for a name two packages hold, answers `409 RESOURCE_CONFLICT` naming both. Before, it served the first match. Read each pack with `?package=ID`. First-party reads refused: 0.
 - A package-less pack row under a name a package ships is that package's customization and is not served. The rule is read by type and name, whatever object the row is rooted on. This was already true and this change does not alter it. What changes is which item such a row is compared against: the one holder's. First-party rows affected: 0.
 

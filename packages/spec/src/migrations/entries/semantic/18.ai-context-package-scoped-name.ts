@@ -37,8 +37,9 @@ export const entry: SemanticMigration = {
     + 'by-name read answers 409 RESOURCE_CONFLICT naming both holders, and get_record_context resolves a bare '
     + 'name as for a caller with no package (the environment\'s own pack, else the one package holder, else 409 '
     + 'RESOURCE_CONFLICT naming each candidate by its face). A second holder of a pack name inside one namespace '
-    + 'is refused at install (409, the namespace name conflict) and by os validate. A package-less row under a '
-    + 'name one package holds is that holder\'s customization and is not served (ADR-0150 D4 as ruled for skill). '
+    + 'is refused at install (422 NAMESPACE_CONFLICT, naming every holder) and by os validate. A package-less row '
+    + 'under a name one package holds is that holder\'s customization and is not served (ADR-0150 D4 as ruled for '
+    + 'skill). '
     + 'A name one package holds answers exactly as before. Measured when the change landed: no first-party '
     + 'package ships a pack name another package holds (the one declarer, examples/app-showcase, ships two packs '
     + 'of different names in one package), so 0 first-party installs, reads or rows are refused.',
