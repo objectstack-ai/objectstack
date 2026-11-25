@@ -133,7 +133,8 @@ export interface ApprovalRequestRow {
     ahead: 'end' | 'undecided' | 'decided';
     outcome?: {
       step?: { id: string; label: string };
-      status: string;
+      /** A request status, typed as this row's own `status`. */
+      status: ApprovalRequestRow['status'];
       ended: boolean;
     };
   };

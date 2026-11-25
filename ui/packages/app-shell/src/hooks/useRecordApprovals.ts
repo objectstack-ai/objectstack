@@ -139,7 +139,8 @@ export interface ApprovalRequestLite {
      */
     outcome?: {
       step?: { id: string; label: string };
-      status: string;
+      /** A request status, typed as this row's own `status`. */
+      status: ApprovalRequestLite['status'];
       ended: boolean;
     };
   };
