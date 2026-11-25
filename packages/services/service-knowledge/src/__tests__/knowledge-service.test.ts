@@ -1285,11 +1285,10 @@ describe('KnowledgeService — search hands the adapter the caller\'s organizati
       find: vi.fn(async () => []),
       getSchema: vi.fn(() => opts.schema),
     } as unknown as IDataEngine;
-    const svc = new KnowledgeService({
-      dataEngine: engine,
-      ...(opts.posture ? { resolveTenancyPosture: opts.posture } : {}),
-      ...(opts.logger ? { logger: opts.logger } : {}),
-    });
+    const options: ConstructorParameters<typeof KnowledgeService>[0] = { dataEngine: engine };
+    if (opts.posture) options.resolveTenancyPosture = opts.posture;
+    if (opts.logger) options.logger = opts.logger as unknown as NonNullable<typeof options>['logger'];
+    const svc = new KnowledgeService(options);
     svc.registerAdapter('memory', adapter);
     svc.registerSource(objectSource('s1', 'task'));
     svc.registerSource({
