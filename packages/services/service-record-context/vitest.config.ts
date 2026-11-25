@@ -17,6 +17,9 @@ export default defineConfig({
     // prefix and sends a subpath to `index.ts/<sub>`.
     alias: [
       { find: /^@objectstack\/core$/, replacement: path.resolve(__dirname, '../../core/src/index.ts') },
+      // `@objectstack/core`'s source imports it by value; unaliased it would
+      // follow the workspace link to an unbuilt `dist/`.
+      { find: /^@objectstack\/metadata-core$/, replacement: path.resolve(__dirname, '../../metadata-core/src/index.ts') },
       { find: /^@objectstack\/types$/, replacement: path.resolve(__dirname, '../../types/src/index.ts') },
       {
         find: /^@objectstack\/spec\/([a-z-]+)$/,
