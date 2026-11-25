@@ -58,6 +58,12 @@ import { apiBase } from '../../utils/apiBase.js';
 import { envelopeData, envelopeRefused } from '../setup/packagedFlows.js';
 import { t, tFormat } from './i18n.js';
 import { holderCandidatesOf, packageQuery, PermissionSetHolderConflict } from './permission-set-holder.js';
+import { createAuthenticatedFetch } from '@object-ui/auth';
+
+/** The console's authenticated fetch: the stored bearer token beside the session cookie. */
+function authFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+  return createAuthenticatedFetch()(input, init);
+}
 
 /** What a clone that the server accepted reports back. */
 export interface PermissionSetCloned {
@@ -123,7 +129,7 @@ export async function clonePermissionSet(
   sourcePackage?: string,
 ): Promise<PermissionSetCloned> {
   const url = `${apiBase()}/security/permission-sets/${encodeURIComponent(source)}/clone${packageQuery(sourcePackage)}`;
-  const res = await fetch(url, {
+  const res = await authFetch(url, {
     method: 'POST',
     credentials: 'include',
     headers: { Accept: 'application/json', 'Content-Type': 'application/json' },

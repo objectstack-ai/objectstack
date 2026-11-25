@@ -29,6 +29,8 @@
  * can be exercised directly.
  */
 
+import { createAuthenticatedFetch } from '@object-ui/auth';
+
 /** The draft types whose read carries the publish gate's advisories (the server's `DRAFT_ADVISORY_TYPES`). */
 export const DRAFT_CHECK_TYPES: ReadonlySet<string> = new Set(['flow']);
 
@@ -97,7 +99,9 @@ export async function readDraftChecks(
   drafts: readonly DraftCheckTarget[],
   opts: { language?: string; fetchImpl?: typeof fetch } = {},
 ): Promise<DraftCheck[]> {
-  const doFetch = opts.fetchImpl ?? globalThis.fetch;
+  // The console's authenticated fetch unless the caller hands its own: the
+  // stored bearer token beside the session cookie, built per call.
+  const doFetch = opts.fetchImpl ?? createAuthenticatedFetch();
   const targets = drafts.filter((d) => DRAFT_CHECK_TYPES.has(d.type));
   const perDraft = await Promise.all(
     targets.map(async (target) => {

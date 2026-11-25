@@ -47,7 +47,7 @@ function renderBar() {
 }
 
 function mockDrafts(list: unknown) {
-  global.fetch = vi.fn(async () => ({ ok: true, json: async () => list })) as unknown as typeof fetch;
+  global.fetch = vi.fn(async () => ({ headers: new Headers(), ok: true, json: async () => list })) as unknown as typeof fetch;
 }
 
 afterEach(() => {
@@ -110,7 +110,7 @@ describe('DraftPreviewBar', () => {
   });
 
   it('keeps Publish visible but promises no sample data when the draft count is unknown (fetch failed) — only a known zero relaxes', async () => {
-    global.fetch = vi.fn(async () => ({ ok: false, json: async () => null })) as unknown as typeof fetch;
+    global.fetch = vi.fn(async () => ({ headers: new Headers(), ok: false, json: async () => null })) as unknown as typeof fetch;
     renderBar();
     // pendingCount stays null → not known-zero → safe default keeps the publish path.
     await waitFor(() => {

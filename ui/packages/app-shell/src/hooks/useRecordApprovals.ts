@@ -46,6 +46,12 @@ import { createQuietHttpLogger } from '@object-ui/data-objectstack';
 import { useAdapter } from '../providers/AdapterProvider.js';
 import { bearerAuthHeaders } from '../utils/authToken.js';
 import type { DecisionOutputDef } from '../utils/decisionOutputParams.js';
+import { createAuthenticatedFetch } from '@object-ui/auth';
+
+/** The console's authenticated fetch: the stored bearer token beside the session cookie. */
+function authFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+  return createAuthenticatedFetch()(input, init);
+}
 
 export interface ApprovalRequestLite {
   id: string;
@@ -375,7 +381,7 @@ function apiBase() {
 }
 
 async function fetchJson<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(`${apiBase()}${path}`, {
+  const res = await authFetch(`${apiBase()}${path}`, {
     credentials: 'include',
     headers: {
       'Content-Type': 'application/json',
