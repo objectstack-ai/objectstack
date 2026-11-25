@@ -1780,6 +1780,18 @@ export const ptBRMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "Intervalo de datas",
         helpText: "O período com que o painel abre e se os usuários podem escolher as próprias datas."
       },
+      "dateRange.field": {
+        label: "Date Field",
+        helpText: "The date field the period filters on. Leave it empty to use the creation date."
+      },
+      "dateRange.defaultRange": {
+        label: "Default Period",
+        helpText: "The period the dashboard opens with."
+      },
+      "dateRange.allowCustomRange": {
+        label: "Allow Custom Range",
+        helpText: "Let viewers pick their own start and end dates."
+      },
       globalFilters: {
         label: "Filtros globais",
         helpText: "Filtros que os usuários podem usar para restringir todos os widgets de uma vez, ou só os que você escolher."

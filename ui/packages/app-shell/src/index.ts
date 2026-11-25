@@ -625,8 +625,10 @@ export {
   useStudioEntryPermissions,
 } from './views/studio-design/studioEntryPermissions.js';
 // The one Studio scope that is not a package (objectui#11553): the
-// organization's own package-less flows, at `/studio/~org/automations`. A host
-// that declares the `/studio` routes reads the reserved segment from here.
+// organization's own package-less flows, listed at
+// `/studio/~org/metadata/flow?source=runtime` (objectstack#36903; the old
+// `/studio/~org/automations` redirects there). A host that declares the
+// `/studio` routes reads the reserved segment from here.
 export {
   STUDIO_ORG_SCOPE_SEGMENT,
   STUDIO_ORG_SCOPE_PILLAR,

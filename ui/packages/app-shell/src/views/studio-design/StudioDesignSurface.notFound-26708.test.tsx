@@ -83,6 +83,10 @@ vi.mock('../../preview/DraftChangesPanel', () => ({ DraftChangesPanel: () => nul
 import { StudioDesignSurface } from './StudioDesignSurface';
 import { StudioEntryPermissionsProvider } from './studioEntryPermissions';
 import { t, tFormat } from '../metadata-admin/i18n';
+// The source under test reaches these dynamic imports (the command palette's
+// record preview, the drafts panel's lint, the code editor): their first load
+// is paid here, at collection, never inside a case's clock (`check:test-source-alias`).
+import '@object-ui/plugin-detail';
 
 const answer = (body: unknown) => ({ headers: new Headers(), ok: true, status: 200, json: async () => body });
 
@@ -136,7 +140,7 @@ function renderAt(
         <Routes>
           <Route path="/apps/setup/component/developer/packages" element={<SetupPackages />} />
           <Route path="/studio/~all/metadata" element={<AllMetadata />} />
-          {/* objectstack#36904 — `/data` lands on the area's object list. */}
+          {/* objectstack#36904, objectstack#36903 — `/data` and `/automations` land on the area's object and flow lists. */}
           <Route path="/studio/:packageId/metadata/*" element={React.cloneElement(surface as React.ReactElement<{ area?: 'metadata' }>, { area: 'metadata' })} />
           <Route path="/studio/:packageId/:tab" element={surface} />
         </Routes>

@@ -62,8 +62,18 @@ export const STUDIO_ALL_PACKAGES_SEGMENT = '~all';
 /** The reserved `/studio/<segment>` value for the package-less scope (`studioScope.ts`). */
 export const STUDIO_ORG_SCOPE_SEGMENT = '~org';
 
-/** The one pillar the package-less scope offers. */
+/**
+ * The package-less scope's retired pillar segment. objectstack#36903 — the
+ * scope's flows are listed and opened in its "All metadata" area
+ * (`studioOrgScopePath`); this segment only redirects there.
+ */
 export const STUDIO_ORG_SCOPE_PILLAR = 'automations';
+
+/**
+ * objectstack#36903 — the one type the package-less scope's area serves: its
+ * flows, the items that belong to no package (`studioScope.ts`).
+ */
+export const STUDIO_ORG_SCOPE_TYPE = 'flow';
 
 /** The retired Interfaces pillar's route segment (objectstack#36502). No pillar answers to it any more. */
 export const RETIRED_INTERFACES_SEGMENT = 'interfaces';
@@ -112,9 +122,13 @@ export type StudioPillarKey = 'data' | 'automations' | 'access';
  * objectstack#36905 — a permission set opens its metadata address, where the
  * area draws its matrix full-screen; the Access pillar's addresses redirect
  * (`accessPillarRedirect.ts`).
+ *
+ * objectstack#36903 — a flow opens its designer full-screen on its metadata
+ * address; the old `/automations?surface=flow:<name>` redirects there
+ * (`automationsPillarRedirect.ts`).
  */
 export const STUDIO_ITEM_PILLAR: Readonly<Record<string, StudioPillarKey>> = Object.freeze({
-  flow: 'automations',
+  // objectstack#36903 — the last pillar type left: every item opens its designer or the generic page.
 });
 
 /** The pillar an item of `type` opens in today, or `null` when it opens the area's generic item page. */
@@ -344,4 +358,63 @@ export function studioItemReviewPath(packageId: string, type: string, name: stri
   return studioMetadataItemAddress(packageId, type, name, {
     query: `${STUDIO_ITEM_REVIEW_PARAM}=${STUDIO_ITEM_REVIEW_VALUE}`,
   });
+}
+
+// ---------------------------------------------------------------------------
+// "Came from Studio": an app page opened from a Studio list
+// ---------------------------------------------------------------------------
+
+/**
+ * The query key an app page carries when Studio opened it (objectstack#36906,
+ * epic #36890 decision 15). Its value is the Studio address to return to: the
+ * list the author left, with its filters and sort. It lives in the address,
+ * not in navigation state, so after a reload the page's × still goes back to
+ * Studio.
+ *
+ * Registered with the console's reserved params (`urlParams.ts`).
+ */
+export const STUDIO_RETURN_PARAM = 'studio';
+
+/**
+ * `appPath` (an app address; its own query and fragment are kept) with
+ * {@link STUDIO_RETURN_PARAM} set to `studioAddress`. A value that is not a
+ * Studio address is not carried: `appPath` comes back unchanged.
+ */
+export function withStudioReturn(appPath: string, studioAddress: string): string {
+  if (!isStudioAddress(studioAddress)) return appPath;
+  const hashAt = appPath.indexOf('#');
+  const hash = hashAt >= 0 ? appPath.slice(hashAt) : '';
+  const beforeHash = hashAt >= 0 ? appPath.slice(0, hashAt) : appPath;
+  const queryAt = beforeHash.indexOf('?');
+  const path = queryAt >= 0 ? beforeHash.slice(0, queryAt) : beforeHash;
+  const params = new URLSearchParams(queryAt >= 0 ? beforeHash.slice(queryAt + 1) : '');
+  params.set(STUDIO_RETURN_PARAM, studioAddress);
+  return `${path}?${params.toString()}${hash}`;
+}
+
+/**
+ * The Studio address that an app page's {@link STUDIO_RETURN_PARAM} names.
+ * Returns `null` when the param is missing, or when its value is anything
+ * other than a Studio address on this origin. The value comes from the
+ * address bar, so it is untrusted and is never followed outside Studio.
+ */
+export function readStudioReturn(search: string | URLSearchParams | null | undefined): string | null {
+  if (!search) return null;
+  const params = typeof search === 'string' ? new URLSearchParams(search) : search;
+  const value = params.get(STUDIO_RETURN_PARAM);
+  return value && isStudioAddress(value) ? value : null;
+}
+
+/** Whether `value` is a Studio address on this origin: `/studio` or a path below it, nothing else. */
+function isStudioAddress(value: string): boolean {
+  if (!value.startsWith(STUDIO_ROOT_PATH) || value.includes('\\')) return false;
+  const next = value.charAt(STUDIO_ROOT_PATH.length);
+  if (next !== '' && next !== '/' && next !== '?' && next !== '#') return false;
+  try {
+    const base = 'http://studio.invalid';
+    const url = new URL(value, base);
+    return url.origin === base && (url.pathname === STUDIO_ROOT_PATH || url.pathname.startsWith(`${STUDIO_ROOT_PATH}/`));
+  } catch {
+    return false;
+  }
 }

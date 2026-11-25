@@ -12,7 +12,8 @@
  * on the Start node. Leaving it unset saves the skeleton as before — the
  * control.
  *
- * Driven through the REAL `AutomationsPillar` and its `CreateItemDialog`; the
+ * Driven through the REAL list create dialog (`MetadataListCreateDialog`,
+ * objectstack#36903: the pillar's New moved there) and its `CreateItemDialog`; the
  * metadata client is a double that records each save. Every saved flow is
  * judged by the installed spec's `FlowSchema`, and its trigger kind by the
  * spec's own `resolveFlowTriggerKind` — the question the engine asks before it
@@ -77,7 +78,7 @@ vi.mock('@object-ui/react', async (importOriginal) => {
 
 vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
 
-import { AutomationsPillar } from './StudioDesignSurface';
+import { ListFlowCreate } from './__tests__/listFlowCreateHost';
 import { createEmptyDataSource, failOnAbsorbedFetchError } from './__tests__/emptyDataSource';
 import { t } from '../metadata-admin/i18n';
 import { fieldsForNodeType } from '../metadata-admin/inspectors/flow-node-config';
@@ -104,8 +105,8 @@ const en = (key: string) => t(key, 'en');
 
 function renderPillar() {
   return render(
-    <MemoryRouter initialEntries={[`/studio/${PKG}/automations`]}>
-      <AutomationsPillar packageId={PKG} />
+    <MemoryRouter initialEntries={[`/studio/${PKG}/metadata/flow`]}>
+      <ListFlowCreate packageId={PKG} />
     </MemoryRouter>,
   );
 }

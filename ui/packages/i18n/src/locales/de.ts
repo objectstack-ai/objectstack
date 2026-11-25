@@ -1773,6 +1773,12 @@ const de = {
       noCategoryAxis: "Kategorieachse des Diagramms erforderlich — ein objektgebundenes Diagramm erfindet keine. Deklarieren Sie eine davon:",
     },
   },
+  // objectstack#36906 — the × of an app page opened from a Studio list.
+  studioReturn: {
+    close: 'Zurück zu Studio',
+    closeLabel: 'Schließen und zur Studio-Liste zurückkehren',
+    leaveConfirm: 'Ohne Speichern verlassen? Nicht gespeicherte Änderungen gehen verloren.',
+  },
   dashboard: {
     // objectui#7063 — the DEFAULT empty state every dashboard widget renders
     // when its query SUCCEEDED and returned nothing. It replaced the terse
@@ -4134,6 +4140,8 @@ const de = {
       settings: "Berichtseinstellungen",
       pendingDraft: "Dieser Bericht hat unveröffentlichte Änderungen. Veröffentlichen oder verwerfen Sie sie oben und speichern Sie dann.",
       nameTaken: "Alle aus diesem Namen gebildeten Kennungen sind bereits vergeben. Geben Sie dem Bericht einen anderen Namen und speichern Sie dann erneut.",
+      // objectstack#36906 — a report made from Studio's report list that could not be saved in the app's package.
+      savedOutsideApp: "Dieser Bericht wurde außerhalb des App-Pakets gespeichert, weil das Anpassungspaket der App hier nicht verwendet werden kann. Die Studio-Liste zeigt ihn daher nicht.",
       adminOnlyTitle: "Nur Workspace-Administratoren können Berichte erstellen",
       adminOnly: "Ein Bericht gilt für alle im Workspace, daher erstellt ihn ein Administrator.",
       designModeOnTitle: "Schließen Sie zuerst die Layoutgestaltung ab",
@@ -4675,6 +4683,7 @@ const de = {
     tool: {
       aggregate_data: "Die Daten zusammenfassen",
       get_record: "Den Datensatz lesen",
+      get_record_context: "Den Kontext des Datensatzes lesen",
       list_datasets: "Die verfügbaren Kennzahlen ansehen",
       query_data: "Die benötigten Daten abfragen",
       query_dataset: "Über eine Kennzahl abfragen",

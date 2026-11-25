@@ -293,17 +293,17 @@ describe('⌘K on the builder (objectstack#36900)', () => {
   const overlay = () => document.querySelector('[data-testid="overlay:command-palette"]');
   const paletteItem = (value: string) => document.querySelector(`[cmdk-item][data-value="${value}"]`);
 
-  it("on a package's pillar, Ctrl+K opens the palette with the menu's entries, and a pick opens through the surface", async () => {
+  it("on a package's page, Ctrl+K opens the palette with the menu's entries, and a pick opens through the surface", async () => {
     servePackages();
-    // objectstack#36904 — the Data pillar is retired (`/data` lands on the
-    // object list); the Automations pillar is a pillar page still.
-    renderAt(`/studio/${PACKAGE_ID}/automations`);
+    // objectstack#36904, objectstack#36903 — the Data and Automations pillars
+    // are retired: the package's object list in the area hosts the palette.
+    renderAt(`/studio/${PACKAGE_ID}/metadata/object?package=${PACKAGE_ID}`);
     await waitFor(() => menu().getByTestId('studio-menu-entry-type:flow'));
     expect(overlay()).toBeNull();
 
     fireEvent.keyDown(document, { key: 'k', ctrlKey: true });
     await waitFor(() => expect(overlay()).not.toBeNull());
-    expect(where()).toBe(`/studio/${PACKAGE_ID}/automations?palette=1`);
+    expect(new URL(where(), 'http://x').searchParams.get('palette')).toBe('1');
     await waitFor(() => expect(paletteItem('studio-entry type:flow')).not.toBeNull());
     expect(paletteItem('studio-entry orgFlows')).not.toBeNull();
 

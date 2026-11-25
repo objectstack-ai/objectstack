@@ -35,12 +35,15 @@
  */
 
 import { CATALOG_SCOPE_PARAM, ENVIRONMENT_SCOPE } from '../metadata-admin/catalog-scope.js';
+import { LIST_SOURCE_PARAM } from '../metadata-admin/metadataListState.js';
 import { DESIGNER_SURFACE_PARAM, parseSurfaceParam } from '../metadata-admin/nav-selection.js';
 import {
   STUDIO_ALL_PACKAGES_SEGMENT,
   STUDIO_ITEM_PILLAR,
   STUDIO_ITEM_REVIEW_PARAM,
   STUDIO_ITEM_REVIEW_VALUE,
+  STUDIO_ORG_SCOPE_SEGMENT,
+  STUDIO_ORG_SCOPE_TYPE,
   studioItemPillar,
   studioMetadataAreaAddress,
   studioMetadataAreaRoot,
@@ -50,7 +53,7 @@ import {
   type StudioPillarKey,
 } from './studioAddress.js';
 import { DESIGNER_SURFACE_NAV_PARAM, DESIGNER_SURFACE_VIEW_PARAM } from './useSurfaceDeepLink.js';
-import { isStudioOrgScope, studioOrgScopePath } from './studioScope.js';
+import { STUDIO_ORG_SCOPE_SOURCE, isStudioOrgScope, studioOrgScopePath } from './studioScope.js';
 
 // objectstack#36895 — the area's segments are Studio address vocabulary, owned
 // by `studioAddress.ts`; re-exported under their names here.
@@ -125,14 +128,15 @@ export function areaItemAsksGenericPage(search: URLSearchParams): boolean {
 }
 
 /**
- * objectstack#36905, objectstack#36904 (Studio redesign epic #36890) — the
- * types whose item, on a package's leg, opens its designer full-screen in the
- * area rather than the generic item page: the permission set's matrix
- * (`StudioPermissionSetPage`) and the object designer (`DataPillar` on one
- * object). A designer card adds its type here in the PR that deletes the
- * type's row from `STUDIO_ITEM_PILLAR`.
+ * objectstack#36905, objectstack#36904, objectstack#36903 (Studio redesign
+ * epic #36890) — the types whose item, on a package's leg, opens its designer
+ * full-screen in the area rather than the generic item page: the permission
+ * set's matrix (`StudioPermissionSetPage`), the object designer (`DataPillar`
+ * on one object) and the flow designer (`AutomationsPillar`, fixed on one
+ * flow). A designer card adds its type here in the PR that deletes the type's
+ * row from `STUDIO_ITEM_PILLAR`.
  */
-export const AREA_DESIGNER_PAGE_TYPES: readonly string[] = Object.freeze(['permission', 'object']);
+export const AREA_DESIGNER_PAGE_TYPES: readonly string[] = Object.freeze(['permission', 'object', 'flow']);
 
 /**
  * Whether an item of the area opens its full-screen designer page: a
@@ -163,6 +167,27 @@ export function areaDesignerItemOf(pathname: string, segment: string | null | un
     const type = decodeURIComponent(rawType);
     const name = decodeURIComponent(rawName);
     return areaItemOpensDesignerPage({ packageId: segment, type }) ? { type, name } : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * objectstack#36903 — the flow the package-less scope's area opens in the flow
+ * designer, read off its address (`/studio/~org/metadata/flow/<name>[/…]`), or
+ * `null` for any other URL. The scope's area holds its flows alone
+ * ({@link orgScopeAreaRedirect}) and names no package, so the shared
+ * {@link areaDesignerItemOf} (a package's leg) never answers for it.
+ */
+export function orgScopeFlowOf(pathname: string, segment: string | null | undefined): { type: string; name: string } | null {
+  if (!isStudioOrgScope(segment)) return null;
+  const root = `${studioMetadataAreaRoot(STUDIO_ORG_SCOPE_SEGMENT)}/`;
+  if (!pathname.startsWith(root)) return null;
+  const [rawType, rawName] = pathname.slice(root.length).split('/');
+  if (!rawType || !rawName || rawName === 'new') return null;
+  try {
+    const type = decodeURIComponent(rawType);
+    return type === STUDIO_ORG_SCOPE_TYPE ? { type, name: decodeURIComponent(rawName) } : null;
   } catch {
     return null;
   }
@@ -256,15 +281,16 @@ const ALL_PACKAGES_VALUE = 'all';
  *    names no package lists across packages, and no page repairs one in
  *    (#29566);
  *  - the package-less scope (`~org`, as the segment or as `?package=`) names
- *    no package, so it is never written into `?package=`: it has no area, and
- *    lands on its flows, the one leg Studio's menu offers it (#36899).
+ *    no package, so it is never written into `?package=` (#36899).
+ *    objectstack#36903 — it has an area of one type, its flows
+ *    ({@link orgScopeAreaRedirect}).
  *
  * `rest` is the path below the area's root as the URL spells it (encoded),
  * `''` at the root; `search` is the URL's query, with or without its `?`.
  */
 export function areaLocationRedirect(segment: string, rest: string, search: string): string | null {
   const params = new URLSearchParams(search);
-  if (isStudioOrgScope(segment) || isStudioOrgScope(params.get('package'))) return studioOrgScopePath();
+  if (isStudioOrgScope(segment) || isStudioOrgScope(params.get('package'))) return orgScopeAreaRedirect(segment, rest, params);
   const allLeg = isStudioAllPackagesScope(segment);
   const at = (leg: string) => studioMetadataAreaAddress(leg, rest, { query: params });
 
@@ -282,4 +308,48 @@ export function areaLocationRedirect(segment: string, rest: string, search: stri
   }
   if (pkg === ALL_PACKAGES_VALUE) return allLeg ? null : at(STUDIO_ALL_PACKAGES_SEGMENT);
   return pkg === segment ? null : at(pkg);
+}
+
+/**
+ * objectstack#36903 — where a URL of the package-less scope's area belongs,
+ * or `null` when it is already there. The scope's area serves its flows alone
+ * (`studioScope.ts`): the list, a flow, and a flow's `/history`, each with the
+ * scope's source filter (`?source=runtime`) and no `?package=`.
+ *
+ *  - a link on the scope's leg that names a real package (a packaged row the
+ *    author reached by clearing the list's source filter) re-roots onto that
+ *    package's leg, as a package's own leg does (`?package=all`, the
+ *    cross-package leg);
+ *  - a `?package=~org` link from another leg lands on the scope's leg, on the
+ *    same flow;
+ *  - any other path (the directory, another type, a create — the scope
+ *    creates nothing) lands on the scope's list.
+ */
+function orgScopeAreaRedirect(segment: string, rest: string, params: URLSearchParams): string | null {
+  const pkg = params.get('package');
+  const onScope = isStudioOrgScope(segment);
+  if (onScope && pkg && !isStudioOrgScope(pkg)) {
+    return studioMetadataAreaAddress(pkg === ALL_PACKAGES_VALUE ? STUDIO_ALL_PACKAGES_SEGMENT : pkg, rest, { query: params });
+  }
+  const [rawType = '', rawName = '', ...below] = rest.split('/');
+  let type: string;
+  try {
+    type = decodeURIComponent(rawType);
+  } catch {
+    type = '';
+  }
+  const flowPath =
+    type === STUDIO_ORG_SCOPE_TYPE && rawName !== 'new' && (below.length === 0 || (below.length === 1 && below[0] === 'history'));
+  if (!flowPath) return studioOrgScopePath();
+  const next = new URLSearchParams(params);
+  next.delete('package');
+  next.delete(CATALOG_SCOPE_PARAM);
+  next.set(LIST_SOURCE_PARAM, STUDIO_ORG_SCOPE_SOURCE);
+  const settled =
+    onScope &&
+    !params.has('package') &&
+    !params.has(CATALOG_SCOPE_PARAM) &&
+    params.get(LIST_SOURCE_PARAM) === STUDIO_ORG_SCOPE_SOURCE;
+  if (settled) return null;
+  return studioMetadataAreaAddress(STUDIO_ORG_SCOPE_SEGMENT, rest.replace(/\/+$/, ''), { query: next, segmentEncoding: 'verbatim' });
 }

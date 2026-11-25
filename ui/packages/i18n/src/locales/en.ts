@@ -2220,6 +2220,8 @@ const en = {
       settings: 'Report settings',
       pendingDraft: 'This report has unpublished changes. Publish or discard them above, then save.',
       nameTaken: 'Every name made from this one is already taken. Give the report another name, then save.',
+      // objectstack#36906 — a report made from Studio's report list that could not be saved in the app's package.
+      savedOutsideApp: 'This report was saved outside the app’s package, because the app’s customization package cannot be used here, so the Studio list does not show it.',
       adminOnlyTitle: 'Only workspace admins can build reports',
       adminOnly: 'A report is shared with everyone in the workspace, so an admin builds it.',
       designModeOnTitle: 'Finish designing the layout first',
@@ -2273,6 +2275,12 @@ const en = {
     undo: 'Undo',
     redo: 'Redo',
     canvasMinimap: 'Canvas minimap',
+  },
+  // objectstack#36906 — the × of an app page opened from a Studio list.
+  studioReturn: {
+    close: 'Back to Studio',
+    closeLabel: 'Close and go back to the Studio list',
+    leaveConfirm: 'Leave without saving? Your unsaved changes will be lost.',
   },
   dashboard: {
     total: 'Total',
@@ -5646,6 +5654,7 @@ const en = {
     tool: {
       aggregate_data: 'Aggregate the data',
       get_record: 'Read the record',
+      get_record_context: 'Read the record context',
       list_datasets: 'Check the available metrics',
       query_data: 'Query the data',
       query_dataset: 'Query by a metric',

@@ -4,7 +4,9 @@
  * The landing that opens a report's builder on arrival (objectstack#36374): a
  * door that has just made a report (the design mode's Add menu item,
  * objectstack#36364) navigates to the report's page with this in the
- * navigation state, and the page opens the builder as its 「Edit」 does.
+ * navigation state, and the page opens the builder as its 「Edit」 does. A
+ * report opened from a Studio list lands the same way (objectstack#36906,
+ * `StudioAreaAppOpen`).
  *
  * Navigation state, not a URL parameter: it is a one-time instruction, not a
  * place anyone links to, so a shared or reloaded address never opens the

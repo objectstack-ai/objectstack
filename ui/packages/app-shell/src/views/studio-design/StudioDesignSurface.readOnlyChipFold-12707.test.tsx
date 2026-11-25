@@ -91,6 +91,11 @@ import { registerMetadataInspector } from '../metadata-admin/inspector-registry'
 import { FlowPreview } from '../metadata-admin/previews/FlowPreview';
 import { FlowInspector } from '../metadata-admin/inspectors/FlowInspector';
 import { t } from '../metadata-admin/i18n';
+// The source under test reaches these dynamic imports (the command palette's
+// record preview, the drafts panel's lint, the code editor): their first load
+// is paid here, at collection, never inside a case's clock (`check:test-source-alias`).
+import '@objectstack/lint';
+import '@object-ui/plugin-detail';
 
 const dataSource = createEmptyDataSource();
 failOnAbsorbedFetchError();
@@ -105,7 +110,12 @@ const HINT = t('engine.studio.pkg.readonlyHint', 'en');
 const TAB_WIDTH = 80;
 const LINK_FULL = 250;
 const LINK_FOLDED = 28;
-const layout = { row: 800 };
+/**
+ * A row wide enough for every tab and the whole link. objectstack#36903 — the
+ * flow's tab row carries the item tools too (References, History, Source).
+ */
+const WIDE_ROW = 1000;
+const layout = { row: WIDE_ROW };
 
 const spies: Array<{ mockRestore: () => void }> = [];
 const resizeCallbacks = new Set<() => void>();
@@ -119,7 +129,7 @@ const isTabRow = (el: Element) => el.tagName === 'NAV';
 beforeEach(() => {
   server.active.clear();
   server.active.set(`flow/${FLOW.name}`, FLOW);
-  layout.row = 800;
+  layout.row = WIDE_ROW;
   vi.stubGlobal(
     'fetch',
     vi.fn(async () => new Response('null', { status: 404, headers: { 'content-type': 'application/json' } })),
@@ -168,8 +178,8 @@ afterEach(() => {
 
 async function renderReadOnlyFlow(): Promise<HTMLElement> {
   render(
-    <MemoryRouter initialEntries={[`/studio/${PKG}/automations`]}>
-      <AutomationsPillar packageId={PKG} readOnly />
+    <MemoryRouter initialEntries={[`/studio/${PKG}/metadata/flow/${FLOW.name}`]}>
+      <AutomationsPillar packageId={PKG} flowName={FLOW.name} readOnly />
     </MemoryRouter>,
   );
   await screen.findByTestId('auto-tab-canvas', undefined, { timeout: 8000 });
@@ -187,7 +197,7 @@ function resizeRow(width: number) {
 const labelOf = (link: HTMLElement) => link.querySelector('span') as HTMLElement;
 
 describe('the read-only link at the tab row’s end folds to its glyph (objectui#12707)', () => {
-  it('at an 800 px tab row it shows whole', async () => {
+  it('at a wide tab row it shows whole', async () => {
     const link = await renderReadOnlyFlow();
     // The link sits in the tab row, after the tabs.
     expect(link.closest('nav')).toBe(screen.getByTestId('auto-tab-canvas').parentElement);
@@ -213,7 +223,7 @@ describe('the read-only link at the tab row’s end folds to its glyph (objectui
     expect(link).not.toHaveAttribute('data-folded');
     resizeRow(560);
     expect(link).toHaveAttribute('data-folded', 'true');
-    resizeRow(800);
+    resizeRow(WIDE_ROW);
     expect(link).not.toHaveAttribute('data-folded');
   });
 
