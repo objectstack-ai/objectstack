@@ -130,7 +130,7 @@ function sampleA(): string {
 function sampleB(): string {
   let out = realLock;
   const forked = [
-    "  '@ai-sdk/react@4.0.121(react@19.3.0)(zod@4.6.7)':",
+    "  '@ai-sdk/react@4.0.121(@types/react@19.3.0)(react@19.3.0)(zod@4.6.7)':",
     AI_KEY,
   ];
   for (const key of forked) {

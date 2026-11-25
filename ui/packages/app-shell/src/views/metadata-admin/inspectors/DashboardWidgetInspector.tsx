@@ -104,8 +104,30 @@ function findWidget(
   return { widget: widgets[index], index };
 }
 
+/**
+ * The binding the shipped dashboard gives widget `widgetId` for filter
+ * `filterName`, when it re-targets the filter to a field (a string). An
+ * opt-out (`false`) or no entry ships nothing to restore: `undefined`.
+ */
+export function shippedFilterBinding(
+  shipped: Record<string, unknown> | null | undefined,
+  widgetId: string | undefined,
+  filterName: string,
+): string | undefined {
+  if (!shipped || !widgetId) return undefined;
+  const widgets = Array.isArray((shipped as any).widgets) ? ((shipped as any).widgets as unknown[]) : [];
+  const widget = widgets.find(
+    (w): w is { filterBindings?: unknown } => !!w && typeof w === 'object' && (w as { id?: unknown }).id === widgetId,
+  );
+  const bindings = widget?.filterBindings;
+  if (!bindings || typeof bindings !== 'object' || Array.isArray(bindings)) return undefined;
+  const binding = (bindings as Record<string, unknown>)[filterName];
+  return typeof binding === 'string' && binding !== '' ? binding : undefined;
+}
+
 export function DashboardWidgetInspector({
   draft,
+  shipped,
   selection,
   onPatch,
   onClearSelection,
@@ -475,10 +497,11 @@ export function DashboardWidgetInspector({
       </div>
 
       {/* Dashboard filter bindings (framework#2501) — one row per dashboard
-          filter: an Apply toggle (unchecked writes `false` = opt out) and a
-          field picker re-targeting the filter to THIS widget's field (empty =
-          default: the filter's own field). Only rendered when the dashboard
-          declares filters. */}
+          filter: an Apply toggle (unchecked writes `false` = opt out; checked
+          again restores the field the shipped dashboard binds, else the
+          default) and a field picker re-targeting the filter to THIS widget's
+          field (empty = default: the filter's own field). Only rendered when
+          the dashboard declares filters. */}
       {filterDefs.length > 0 && (
         <div className="space-y-3 rounded-md border p-3">
           <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
@@ -518,7 +541,12 @@ export function DashboardWidgetInspector({
                   <InspectorCheckboxField
                     label={t('engine.inspector.widget.filterBindingApply', locale)}
                     value={!optedOut}
-                    onCommit={(apply) => setBinding(apply ? undefined : false)}
+                    // Undoing an opt-out restores the shipped binding: the
+                    // stored body is the whole document, so a dropped key is
+                    // the filter's own field, never the package's re-target.
+                    onCommit={(apply) =>
+                      setBinding(apply ? shippedFilterBinding(shipped, widget.id, def.name) : false)
+                    }
                     disabled={readOnly}
                   />
                 </div>

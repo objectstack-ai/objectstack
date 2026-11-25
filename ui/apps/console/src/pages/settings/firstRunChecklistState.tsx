@@ -16,6 +16,10 @@
  *   answers `null` and nothing further is asked;
  * - after the console's first paint (`whenBootPainted`), so the reads never go
  *   out beside the page's own first reads;
+ * - not at all for a session the server already answered "not shown" on this
+ *   device, for this organization, user and capability set, within the last
+ *   day (`wasAnsweredNotShown`, objectstack#37182): the list request that
+ *   finds that out would otherwise go out on every console open;
  * - each answer is stored with the identity it was read for (organization,
  *   user, capability set), so an answer read for another one is never drawn.
  *
@@ -45,10 +49,13 @@ import {
   dismissRecordKey,
   hasInvitedColleagues,
   LOCALIZATION_NAMESPACE,
+  markAnsweredNotShown,
   markDismissed,
+  notShownRecordKey,
   organizationBasics,
   readBrowserAnswers,
   readChecklistSettings,
+  wasAnsweredNotShown,
   wasDismissed,
   type BrowserAnswers,
   type ChecklistCompletion,
@@ -205,14 +212,25 @@ export function FirstRunChecklistProvider({ children }: { children: ReactNode })
   }, [getAuthConfig]);
 
   useEffect(() => {
-    if (!identity || !orgId || heldKey === null) return;
+    if (!identity || !orgId || !userId || heldKey === null) return;
     const held = heldKey === '' ? [] : heldKey.split('\n');
+
+    // The server already answered "not shown" for exactly this session: ask
+    // nothing (objectstack#37182).
+    const notShownKey = notShownRecordKey(orgId, userId);
+    if (wasAnsweredNotShown(deviceStorage(), notShownKey, heldKey)) return;
 
     let cancelled = false;
     whenBootPainted()
-      .then(() => (cancelled ? null : readChecklistSettings(held)))
+      .then(() => (cancelled ? undefined : readChecklistSettings(held)))
       .then((found) => {
-        if (cancelled || !found) return;
+        if (cancelled || found === undefined) return;
+        if (!found) {
+          // An answer, not a failure (a failed read throws past this): keep it
+          // so the next open does not ask again.
+          markAnsweredNotShown(deviceStorage(), notShownKey, heldKey);
+          return;
+        }
         setLoaded({ identity, settings: found });
         // Only an administrator's checklist asks who else is here.
         Promise.all([getMembers(orgId), listInvitations(orgId)])

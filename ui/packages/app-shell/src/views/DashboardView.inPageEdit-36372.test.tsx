@@ -100,6 +100,7 @@ vi.mock('./metadata-admin/inspectors/DashboardWidgetInspector', async () => {
         <div data-testid="stub-widget-inspector">
           {p.selection.id}
           <span data-testid="stub-widget-served-title">{pair ? `${pair.served} ← ${pair.authored}` : 'none'}</span>
+          <span data-testid="stub-widget-shipped">{JSON.stringify(p.shipped ?? null)}</span>
         </div>
       );
     },
@@ -260,6 +261,25 @@ describe('DashboardView in-page edit (objectstack#36372)', () => {
     fireEvent.click(screen.getByTestId('dashboard-preview-widget-widget_total'));
     // The pair the title box shows and writes by: served for the session, authored as stored.
     expect(screen.getByTestId('stub-widget-served-title')).toHaveTextContent('Total (served) ← Total (stored)');
+  });
+
+  it('the card panel is handed the dashboard as its package ships it (objectstack#37031)', async () => {
+    packages.listed = new Map([
+      ['crm', { id: 'crm', writable: false, manifest: { id: 'crm', version: '1.4.0' } }],
+      ['crm.custom', { id: 'crm.custom', writable: true, manifest: { id: 'crm.custom', version: '0.0.0' } }],
+    ]);
+    gate.entry = { path: '/studio/crm', posture: 'view' };
+    const shipped = { ...stored, widgets: [{ ...stored.widgets[0], filterBindings: { dateRange: 'signed_on' } }] };
+    const customized = {
+      ...stored,
+      overrides: { package: 'crm', basedOn: '1.4.0' },
+      widgets: [{ ...stored.widgets[0], filterBindings: { dateRange: false } }],
+    };
+    client.value = makeClient({ layered: vi.fn(async () => ({ code: shipped, overlay: customized, effective: customized })) });
+    mount();
+    await openEdit();
+    fireEvent.click(screen.getByTestId('dashboard-preview-widget-widget_total'));
+    expect(JSON.parse(screen.getByTestId('stub-widget-shipped').textContent ?? 'null')).toEqual(shipped);
   });
 
   it('Add card appends a card and selects it', async () => {

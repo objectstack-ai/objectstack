@@ -16,8 +16,10 @@
     "model-registry",
     "usage",
     "---More---",
+    "ai-context",
     "build-progress",
     "dataset-tools",
-    "object-query-source"
+    "object-query-source",
+    "record-context-tools"
   ]
 }
