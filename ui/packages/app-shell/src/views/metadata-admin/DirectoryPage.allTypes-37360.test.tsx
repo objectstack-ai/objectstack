@@ -194,7 +194,8 @@ describe('全部类型 All types: the directory lists every type of the six grou
       expect(screen.getByTestId('location')).toHaveTextContent(`/studio/${PKG}/metadata/email_template?package=${PKG}`),
     );
     expect(await screen.findByTestId('metadata-list-create')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: t('engine.list.create', 'en-US') })).toBeInTheDocument();
+    // The header's New and the empty list's own: the package holds none yet.
+    expect(screen.getAllByRole('button', { name: t('engine.list.create', 'en-US') }).length).toBeGreaterThan(0);
   });
 
   it('CONTROL: a type outside the six groups and a hidden type are never listed', async () => {
