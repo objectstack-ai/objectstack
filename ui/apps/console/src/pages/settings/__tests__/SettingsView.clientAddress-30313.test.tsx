@@ -69,13 +69,14 @@ const LOCALIZATION = {
 };
 
 const ok = (data: unknown) =>
-  ({ ok: true, status: 200, statusText: 'OK', json: async () => ({ success: true, data }) }) as unknown as Response;
+  ({ ok: true, status: 200, statusText: 'OK', headers: new Headers(), json: async () => ({ success: true, data }) }) as unknown as Response;
 
 const refused = (status: number, code: string) =>
   ({
     ok: false,
     status,
     statusText: status === 401 ? 'Unauthorized' : 'Forbidden',
+    headers: new Headers(),
     json: async () => ({ success: false, error: { code, message: 'Platform admin required.' } }),
   }) as unknown as Response;
 
@@ -192,6 +193,7 @@ describe('SettingsView — Allowed IP ranges shows the address the server judges
           ok: false,
           status: 400,
           statusText: 'Bad Request',
+          headers: new Headers(),
           json: async () => ({
             success: false,
             error: {
@@ -319,6 +321,7 @@ describe('SettingsView — Access policy shows the address the server judges (ob
           ok: false,
           status: 404,
           statusText: 'Not Found',
+          headers: new Headers(),
           json: async () => ({ success: false, error: { code: 'NOT_FOUND', message: 'Not found.' } }),
         }) as unknown as Response,
     ],

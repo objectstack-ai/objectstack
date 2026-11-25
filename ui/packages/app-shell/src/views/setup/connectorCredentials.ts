@@ -23,6 +23,7 @@
 
 import type { ConnectorCredentialRef } from '@objectstack/spec/contracts';
 import { actionErrorDetail } from '@object-ui/core';
+import { createAuthenticatedFetch } from '@object-ui/auth';
 import { apiBase } from '../../utils/apiBase.js';
 import { componentRefToUrlSegments } from '../../services/componentRegistry.js';
 
@@ -113,6 +114,11 @@ export function readCredentialWrite(status: number, payload: unknown): Credentia
 
 const JSON_HEADERS = { Accept: 'application/json' } as const;
 
+/** The console's authenticated fetch: the stored bearer token beside the session cookie. */
+function authFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+  return createAuthenticatedFetch()(input, init);
+}
+
 function doorUrl(ref?: string): string {
   const base = `${apiBase()}/automation/connectors/credential-refs`;
   return ref === undefined ? base : `${base}/${encodeURIComponent(ref)}`;
@@ -126,7 +132,7 @@ async function bodyOf(res: Response): Promise<unknown> {
 export async function fetchCredentialListing(signal?: AbortSignal): Promise<CredentialListing> {
   let res: Response;
   try {
-    res = await fetch(doorUrl(), { credentials: 'include', headers: JSON_HEADERS, cache: 'no-store', signal });
+    res = await authFetch(doorUrl(), { credentials: 'include', headers: JSON_HEADERS, cache: 'no-store', signal });
   } catch (err) {
     if ((err as { name?: unknown })?.name === 'AbortError') throw err;
     return { kind: 'failed', message: (err as Error)?.message ?? String(err) };
@@ -142,7 +148,7 @@ export async function putConnectorCredential(ref: string, value: string): Promis
   if (value.length === 0) return null;
   let res: Response;
   try {
-    res = await fetch(doorUrl(ref), {
+    res = await authFetch(doorUrl(ref), {
       method: 'PUT',
       credentials: 'include',
       headers: { ...JSON_HEADERS, 'Content-Type': 'application/json' },
@@ -158,7 +164,7 @@ export async function putConnectorCredential(ref: string, value: string): Promis
 export async function clearConnectorCredential(ref: string): Promise<CredentialWrite> {
   let res: Response;
   try {
-    res = await fetch(doorUrl(ref), { method: 'DELETE', credentials: 'include', headers: JSON_HEADERS });
+    res = await authFetch(doorUrl(ref), { method: 'DELETE', credentials: 'include', headers: JSON_HEADERS });
   } catch (err) {
     return { ok: false, status: 0, message: (err as Error)?.message ?? String(err) };
   }

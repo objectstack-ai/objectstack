@@ -21,6 +21,9 @@
  *   tools is carried no docs member at all.
  * - The address follows the Console's home-manual pick: the manual that claims
  *   the page, else the package's implicit manual (ADR-0046 §6.4).
+ * - [#36854] A cited manual's name is served in the request's locale, as the
+ *   `/meta/book` door serves it (`books.<name>.label`), its authored label
+ *   when the bundle carries none.
  * - The door's twin for the tool layer is `packages/mcp/src/mcp-package-doc-tools-35442.test.ts`.
  */
 
@@ -90,6 +93,18 @@ const DOCS = [
 ];
 
 /**
+ * [#36854] An i18n service double: a zh-CN bundle naming the sales manual (and
+ * not the admin one), an empty `en` one, and `en` as the default.
+ */
+const i18nService = {
+    getLocales: () => ['en', 'zh-CN'],
+    getTranslations: (locale: string) => (locale === 'zh-CN'
+        ? { books: { crm_sales: { label: '销售手册' } } }
+        : locale === 'en' ? {} : undefined),
+    getDefaultLocale: () => 'en',
+};
+
+/**
  * The grant rows behind the OAuth pins: `admin` holds `crm_admin` in `orgA`;
  * `u1` is a member of `orgA` holding it only in `orgB`; `ghost` has grant and
  * membership rows and no `sys_user` row.
@@ -153,7 +168,7 @@ function kernelOver(items: { doc: any[]; book: any[] } | null) {
         ? { getMetaItems: async ({ type }: { type: string }) => ({ type, items: (items as any)[type] ?? [] }) }
         : {};
     const security = { resolvePermissionSetNames: async (ctx: any) => [...(ctx?.permissions ?? [])] };
-    const all: Record<string, any> = { protocol, security, mcp, objectql: grantQl() };
+    const all: Record<string, any> = { protocol, security, mcp, objectql: grantQl(), i18n: i18nService };
     const get = (n: string) => all[n] ?? null;
     return { getService: get, getServiceAsync: async (n: string) => get(n), context: { getService: get } } as any;
 }
@@ -162,13 +177,17 @@ function kernelOver(items: { doc: any[]; book: any[] } | null) {
 const session = (userId: string) => ({ userId, isSystem: false, permissions: userId === 'admin' ? ['crm_admin'] : [] });
 
 /** The options the `/mcp` route hands the MCP runtime for this caller. */
-async function servedFor(caller: string | Record<string, unknown>, items: { doc: any[]; book: any[] } | null = { doc: DOCS, book: BOOKS }) {
+async function servedFor(
+    caller: string | Record<string, unknown>,
+    items: { doc: any[]; book: any[] } | null = { doc: DOCS, book: BOOKS },
+    headers: Record<string, string> = {},
+) {
     const kernel = kernelOver(items);
     const dispatcher = new HttpDispatcher(kernel, undefined, { enforceProjectMembership: false });
     const res = await dispatcher.handleMcp({ jsonrpc: '2.0', id: 1, method: 'tools/list' }, {
         request: new Request('http://localhost/api/v1/mcp', {
             method: 'POST',
-            headers: { 'content-type': 'application/json', accept: 'application/json, text/event-stream' },
+            headers: { 'content-type': 'application/json', accept: 'application/json, text/event-stream', ...headers },
             body: '{}',
         }),
         response: {},
@@ -364,5 +383,36 @@ describe('[#35442] search and read details', () => {
         const bridge = await bridgeFor('u1', null);
         expect(bridge.searchPackageDocs).toBeUndefined();
         expect(bridge.readPackageDoc).toBeUndefined();
+    });
+});
+
+describe('[#36854] a cited manual\'s name is served in the request\'s locale', () => {
+    const zh = { 'accept-language': 'zh-CN' };
+
+    it('zh-CN: search and read both name the manual by its translated label', async () => {
+        const bridge = (await servedFor('u1', undefined, zh)).bridge;
+        const answer = await bridge.searchPackageDocs({ terms: ['回款'] }, MAX);
+        expect(answer.results[0]).toMatchObject({
+            name: 'crm_order_payment',
+            book: { name: 'crm_sales', label: '销售手册' },
+            url: `/_console/apps/${CRM}/docs/sales/crm_order_payment`,
+        });
+        const page = await bridge.readPackageDoc({ name: 'crm_order_payment' });
+        expect(page.book).toEqual({ name: 'crm_sales', label: '销售手册' });
+    });
+
+    it('a manual the bundle does not name keeps its authored label; the address is unchanged', async () => {
+        const bridge = (await servedFor('admin', undefined, zh)).bridge;
+        const page = await bridge.readPackageDoc({ name: 'crm_commission_rules' });
+        expect(page.book).toEqual({ name: 'crm_admin_book', label: 'Administration' });
+        expect(page.url).toBe(`/_console/apps/${CRM}/docs/admin/crm_commission_rules`);
+    });
+
+    it('control: no locale on the request, or a read asking for en, serves the authored label', async () => {
+        const plain = await bridgeFor('u1');
+        expect((await plain.readPackageDoc({ name: 'crm_order_payment' })).book).toEqual({ name: 'crm_sales', label: 'Sales manuals' });
+        const asked = (await servedFor('u1', undefined, zh)).bridge;
+        const page = await asked.readPackageDoc({ name: 'crm_order_payment', locale: 'en' });
+        expect(page).toMatchObject({ title: 'Orders and payments', locale: 'en', book: { name: 'crm_sales', label: 'Sales manuals' } });
     });
 });

@@ -36,10 +36,18 @@
  *
  * ## Required and optional rows
  *
- * The checklist stays on Home until its REQUIRED rows are done. An optional row
- * ({@link OPTIONAL_ROWS}: email delivery) is shown and says so, but is not
- * counted toward completion: once the required rows are done the checklist
- * draws nothing, whether or not the optional ones are ({@link checklistCompletion}).
+ * The maintainer's ruling on objectstack#36739 (「基本信息合成一张表单一次保存；
+ * 其余改可选」): the platform has ONE required row, the organization's basics
+ * ({@link organizationBasics}: its name, language, country, time zone and
+ * currency, saved together). Every other platform row ({@link OPTIONAL_ROWS})
+ * is shown, says it is optional, still ticks itself from the real setting, and
+ * never holds the checklist open: a customer who uses no AI, or an
+ * administrator trying the product alone, can finish. A host adds its own
+ * required rows through its profile (`firstRunChecklistProfile.ts`).
+ *
+ * The progress counts every row drawn, optional ones included ("2 of 5
+ * done"); whether the checklist is finished is judged on the required rows
+ * alone ({@link checklistCompletion}).
  *
  * ## One offer
  *
@@ -107,81 +115,67 @@ export const DEFAULT_ORGANIZATION_NAME = 'Default Organization';
 
 /** The rows the checklist can show, in the order it shows them. */
 export type ChecklistRowId =
-  | 'organization_name'
-  | 'language_country'
-  | 'timezone'
-  | 'currency'
+  | 'organization_basics'
   | 'mail'
   | 'invite'
-  | 'ai_provider';
+  | 'ai_provider'
+  | 'connect_assistant';
 
 /**
  * The rows an administrator may leave undone: shown, and marked optional, but
- * never what keeps the checklist on Home.
+ * never what keeps the checklist open.
  *
- * `mail`, on the maintainer's ruling on objectstack#32643: 「环境的新手清单中要求
- * 设置邮箱。我觉得这个不应该是必须的设置」. A deployment whose applications send
- * no mail has nothing to set up, and a hosted tenant has no transport of its
- * own to set up, so a required mail row kept the checklist open for good. A
- * mail setup that delivers still reads done ({@link isMailDelivering}).
+ * `mail`, on the maintainer's ruling on objectstack#32643: a deployment whose
+ * applications send no mail has nothing to set up, and a hosted tenant has no
+ * transport of its own to set up, so a required mail row kept the checklist
+ * open for good. A mail setup that delivers still reads done
+ * ({@link isMailDelivering}).
+ *
+ * `invite`, `ai_provider` and `connect_assistant`, on the maintainer's ruling
+ * on objectstack#36739: a lone administrator trying the product, or a customer
+ * who uses no AI, could otherwise never finish. Each still reads done from the
+ * real records, by the rules it always had.
  */
-export const OPTIONAL_ROWS: ReadonlySet<string> = new Set<ChecklistRowId>(['mail']);
+export const OPTIONAL_ROWS: ReadonlySet<string> = new Set<ChecklistRowId>([
+  'mail',
+  'invite',
+  'ai_provider',
+  'connect_assistant',
+]);
 
 /** Whether the checklist row `id` may be left undone ({@link OPTIONAL_ROWS}). */
 export function isOptionalRow(id: string): boolean {
   return OPTIONAL_ROWS.has(id);
 }
 
-/** How far the checklist's required rows are along. */
+/** How far the checklist is along. */
 export interface ChecklistCompletion {
-  /** Required rows that are done. */
+  /** Rows shown that are done, optional ones included. */
   done: number;
-  /** Required rows shown. */
+  /** Rows shown, optional ones included. */
   total: number;
   /**
-   * Every required row shown is done (or none is shown): the checklist draws
-   * nothing, whatever the optional rows say.
+   * Every REQUIRED row shown is done (or none is shown): the checklist is
+   * finished, whatever the optional rows say. The sidebar's progress pill and
+   * the cards that hide once finished read this.
    */
   complete: boolean;
 }
 
 /**
- * The checklist's completion, counted over the rows it shows that are not
- * optional. An optional row neither holds the checklist open nor counts toward
- * the progress line. `isOptional` defaults to the platform's own optional rows;
- * the checklist passes its profile's answer (`isProfileOptionalRow`), which a
- * host can widen.
+ * The checklist's completion. The progress (`done` of `total`) counts every
+ * row shown; `complete` is judged on the rows that are not optional, so an
+ * optional row never holds the checklist open. `isOptional` defaults to the
+ * platform's own optional rows; the checklist passes its profile's answer
+ * (`isProfileOptionalRow`), which a host can widen.
  */
 export function checklistCompletion(
   rows: ReadonlyArray<{ id: string; done: boolean }>,
   isOptional: (id: string) => boolean = isOptionalRow,
 ): ChecklistCompletion {
-  const required = rows.filter((row) => !isOptional(row.id));
-  const done = required.filter((row) => row.done).length;
-  return { done, total: required.length, complete: done === required.length };
-}
-
-/** The rows that are done, split the way the progress line counts them. */
-export interface ChecklistDoneCount {
-  /** Done rows the progress line counts ({@link checklistCompletion}'s `done`). */
-  required: number;
-  /** Done rows that are optional, which the progress line leaves out. */
-  optional: number;
-}
-
-/**
- * How many of the rows shown are done, required and optional apart. The
- * control that unfolds the done rows names this count: the progress line
- * counts the required rows alone, so a bare total of every done row would
- * read larger than the progress line once an optional row is done.
- */
-export function checklistDoneCount(
-  rows: ReadonlyArray<{ id: string; done: boolean }>,
-  isOptional: (id: string) => boolean = isOptionalRow,
-): ChecklistDoneCount {
-  const done = rows.filter((row) => row.done);
-  const optional = done.filter((row) => isOptional(row.id)).length;
-  return { required: done.length - optional, optional };
+  const done = rows.filter((row) => row.done).length;
+  const complete = rows.every((row) => row.done || isOptional(row.id));
+  return { done, total: rows.length, complete };
 }
 
 /**
@@ -446,14 +440,6 @@ export interface ChecklistField {
   offer?: string;
 }
 
-/** A row that edits localization keys in place: language and country, timezone, currency. */
-export interface ChecklistSettingsRow {
-  id: 'language_country' | 'timezone' | 'currency';
-  fields: ChecklistField[];
-  /** Every field is set. */
-  done: boolean;
-}
-
 /** What the browser answers, each `undefined` when it cannot tell. */
 export interface BrowserAnswers {
   language?: string;
@@ -465,12 +451,11 @@ export function readBrowserAnswers(): BrowserAnswers {
   return { language: browserLanguage(), zone: browserTimeZone() };
 }
 
-/** The keys each settings row edits, in the order its fields are drawn. */
-const SETTINGS_ROW_KEYS: ReadonlyArray<{ id: ChecklistSettingsRow['id']; keys: readonly string[] }> = [
-  { id: 'language_country', keys: [LOCALE_KEY, COUNTRY_KEY] },
-  { id: 'timezone', keys: [TIMEZONE_KEY] },
-  { id: 'currency', keys: [CURRENCY_KEY] },
-];
+/**
+ * The localization keys the organization's basics edit, in the order the form
+ * draws them: language, country, time zone, currency.
+ */
+export const BASICS_SETTING_KEYS: readonly string[] = [LOCALE_KEY, COUNTRY_KEY, TIMEZONE_KEY, CURRENCY_KEY];
 
 /** What the browser would offer for `spec`, before the admissibility check. */
 function browserOfferFor(spec: Specifier, browser: BrowserAnswers): string | undefined {
@@ -489,34 +474,46 @@ function browserOfferFor(spec: Specifier, browser: BrowserAnswers): string | und
 }
 
 /**
- * The localization rows, from the namespace's manifest and resolved values.
- *
- * A row is drawn only when every key it edits is declared by the manifest and
- * resolved by the server: a deployment that retired a key gets no row that
- * would write it. An unset field carries the browser's offer when the write
- * door would take it; a set field carries none, and shows its current value.
+ * The organization's basics: one form, one row, one save (objectstack#36739).
+ * Its name (written through the organization, not the settings) and the
+ * localization keys of {@link BASICS_SETTING_KEYS}.
  */
-export function localizationRows(
+export interface OrganizationBasics {
+  /** The organization carries a name of its own ({@link isOrganizationNamed}). */
+  named: boolean;
+  /** The localization keys the form edits, each one the manifest declares and the server resolves. */
+  fields: ChecklistField[];
+  /** Named, and every field set: the row is done. */
+  done: boolean;
+}
+
+/**
+ * The organization's basics, from the localization namespace's manifest and
+ * resolved values and the organization's name.
+ *
+ * A key is a field only when the manifest declares it and the server resolves
+ * it: a deployment that retired a key gets no field that would write it. An
+ * unset field carries the browser's offer when the write door would take it;
+ * a set field carries none, and shows its current value.
+ */
+export function organizationBasics(
   manifest: SettingsManifest,
   values: Record<string, ResolvedSettingValue>,
   browser: BrowserAnswers,
-): ChecklistSettingsRow[] {
-  const rows: ChecklistSettingsRow[] = [];
-  for (const { id, keys } of SETTINGS_ROW_KEYS) {
-    const fields: ChecklistField[] = [];
-    for (const key of keys) {
-      const spec = manifest.specifiers.find((s) => s.key === key);
-      const resolved = values[key];
-      if (!spec || !resolved) break;
-      const set = isKeySet(key, resolved);
-      const candidate = set ? undefined : browserOfferFor(spec, browser);
-      const offer = candidate && isAdmissibleValue(spec, candidate) ? candidate : undefined;
-      fields.push({ key, spec, resolved, set, ...(offer ? { offer } : {}) });
-    }
-    if (fields.length !== keys.length) continue;
-    rows.push({ id, fields, done: fields.every((field) => field.set) });
+  organizationName: unknown,
+): OrganizationBasics {
+  const fields: ChecklistField[] = [];
+  for (const key of BASICS_SETTING_KEYS) {
+    const spec = manifest.specifiers.find((s) => s.key === key);
+    const resolved = values[key];
+    if (!spec || !resolved) continue;
+    const set = isKeySet(key, resolved);
+    const candidate = set ? undefined : browserOfferFor(spec, browser);
+    const offer = candidate && isAdmissibleValue(spec, candidate) ? candidate : undefined;
+    fields.push({ key, spec, resolved, set, ...(offer ? { offer } : {}) });
   }
-  return rows;
+  const named = isOrganizationNamed(organizationName);
+  return { named, fields, done: named && fields.every((field) => field.set) };
 }
 
 /**

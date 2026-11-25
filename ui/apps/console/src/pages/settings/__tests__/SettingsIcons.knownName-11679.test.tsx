@@ -62,7 +62,7 @@ afterEach(() => {
 });
 
 function ok(body: unknown): Response {
-  return { ok: true, status: 200, statusText: 'OK', json: async () => body } as unknown as Response;
+  return { ok: true, status: 200, statusText: 'OK', headers: new Headers(), json: async () => body } as unknown as Response;
 }
 
 /**

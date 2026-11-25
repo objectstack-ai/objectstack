@@ -14,15 +14,23 @@ import { describe, it, expect } from 'vitest';
 import { PackageScopedNameRefusedError } from '@objectstack/core';
 import {
   inheritStoreWriteOrder,
+  isPlatformOrigin,
+  carriesPlatformStamp,
   lastWrittenKeyOf,
   latestMemberOf,
   newSlotView,
+  readPlatformEntry,
   recordStoreWrite,
   refuseSeveralSlots,
   refuseSlotNotHeld,
   slotOfKey,
+  storePlatformRemovalKeys,
+  storeRemovalKeys,
+  storeRowWriteKey,
   storeSlotKey,
   storeWriteKey,
+  withoutPlatformOrigin,
+  withPlatformOrigin,
 } from './package-slotted-store.js';
 
 const TYPE = 'email_template';
@@ -175,5 +183,94 @@ describe('[#32714 item 2] a package taking over a bundled name moves the member 
   it('CONTROL — beside a second package nothing is taken over: the bare members stay, each package fills its own slot', () => {
     const store = written(member(undefined, 'en-US'), member(BETA, 'en-US'));
     expect(storeWriteKey(store, TYPE, NAME, member(ALPHA, 'en-US')).replaces).toEqual([]);
+  });
+});
+
+describe('[#37013] the platform\'s record of a name keeps the bare slot beside a package\'s same-named item', () => {
+  const SKILL = 'skill';
+  const ASK = 'data_explorer';
+  const platform = (label: string) => withPlatformOrigin({ name: ASK, label }) as Record<string, unknown>;
+  const shippedBy = (packageId: string, label: string) => ({ name: ASK, label, _packageId: packageId, _provenance: 'package' });
+  const environment = (label: string) => ({ name: ASK, label });
+
+  /** Written the way the registry writes: the key the rule picks, the keys it replaces dropped. */
+  function writtenSkills(...items: unknown[]): Map<string, unknown> {
+    const store = new Map<string, unknown>();
+    for (const item of items) {
+      const { key, replaces } = storeWriteKey(store, SKILL, ASK, item);
+      for (const replaced of replaces) store.delete(replaced);
+      store.set(key, item);
+      recordStoreWrite(store, key);
+    }
+    return store;
+  }
+  const labels = (store: ReadonlyMap<string, unknown>) => [...store.entries()].map(([key, item]) => [key.replace('\u0000', '/'), (item as { label: string }).label]);
+
+  it('the stamp is positive, and a body naming a package is that package\'s item whatever it says', () => {
+    expect(isPlatformOrigin(platform('p'))).toBe(true);
+    expect(isPlatformOrigin(environment('e')), 'a missing package stamp is not the platform').toBe(false);
+    expect(isPlatformOrigin({ ...shippedBy(ALPHA, 'a'), _provenance: 'platform' })).toBe(false);
+  });
+
+  it('platform first, then a package: both stay, each in its own slot (BASE: the package took over the bare slot)', () => {
+    const store = writtenSkills(platform('platform'), shippedBy(ALPHA, 'alpha'));
+    expect(labels(store)).toEqual([[ASK, 'platform'], [`${ALPHA}/${ASK}`, 'alpha']]);
+  });
+
+  it('a package first, then the platform: the platform fills the bare slot and the package\'s slot is untouched (BASE: folded into the holder\'s slot as its customization)', () => {
+    const alpha = shippedBy(ALPHA, 'alpha');
+    const store = writtenSkills(alpha, platform('platform'));
+    expect(store.get(`${ALPHA}\u0000${ASK}`)).toBe(alpha);
+    expect(labels(store)).toEqual([[`${ALPHA}/${ASK}`, 'alpha'], [ASK, 'platform']]);
+  });
+
+  it('the platform re-registering rewrites its own slot only', () => {
+    const alpha = shippedBy(ALPHA, 'alpha');
+    const store = writtenSkills(platform('v1'), alpha, platform('v2'));
+    expect(store.get(`${ALPHA}\u0000${ASK}`)).toBe(alpha);
+    expect(labels(store)).toEqual([[ASK, 'v2'], [`${ALPHA}/${ASK}`, 'alpha']]);
+  });
+
+  it('CONTROL — the environment\'s own item in the bare slot is still taken over by a package\'s first item, and a package-less write beside one holder is still its customization (D4)', () => {
+    expect(labels(writtenSkills(environment('env'), shippedBy(ALPHA, 'alpha')))).toEqual([[`${ALPHA}/${ASK}`, 'alpha']]);
+    expect(labels(writtenSkills(shippedBy(ALPHA, 'alpha'), environment('env')))).toEqual([[`${ALPHA}/${ASK}`, 'env']]);
+  });
+
+  it('a row store reads the platform\'s row through the loader\'s predicate: never taken over by a package\'s first row', () => {
+    const rows = new Map<string, unknown>([[ASK, { id: 'r1' }]]);
+    expect(storeRowWriteKey(rows, SKILL, ASK, shippedBy(ALPHA, 'alpha'), (key) => key === ASK).replaces).toEqual([]);
+    expect(storeRowWriteKey(rows, SKILL, ASK, shippedBy(ALPHA, 'alpha')).replaces, 'CONTROL — the environment\'s row is').toEqual([ASK]);
+  });
+
+  it('the platform\'s removal takes its own slot only, whatever packages hold the name; a package\'s removal takes the package\'s only', () => {
+    const store = writtenSkills(platform('platform'), shippedBy(ALPHA, 'alpha'), shippedBy(BETA, 'beta'));
+    expect(storePlatformRemovalKeys(store, SKILL, ASK)).toEqual({ keys: [ASK], platformOnly: true });
+    expect(storeRemovalKeys(store, SKILL, ASK, ALPHA).keys).toEqual([`${ALPHA}\u0000${ASK}`]);
+  });
+
+  it('the platform\'s removal leaves the environment\'s own item in the bare slot: it takes its own record only', () => {
+    expect(storePlatformRemovalKeys(writtenSkills(environment('env')), SKILL, ASK)).toEqual({ keys: [], platformOnly: true });
+  });
+
+  it('a platform read answers the platform\'s record only: never a package\'s, never the environment\'s own', () => {
+    expect(readPlatformEntry(writtenSkills(shippedBy(ALPHA, 'alpha'), platform('platform')), SKILL, ASK)).toEqual({ found: true, data: platform('platform') });
+    expect(readPlatformEntry(writtenSkills(shippedBy(ALPHA, 'alpha')), SKILL, ASK)).toEqual({ found: false });
+    expect(readPlatformEntry(writtenSkills(environment('env')), SKILL, ASK)).toEqual({ found: false });
+  });
+
+  it('stamping and stripping copy: the caller\'s object is never changed, and an unstamped item passes through as the same object', () => {
+    const body = environment('env');
+    expect(withPlatformOrigin(body)).not.toBe(body);
+    expect(body).toEqual(environment('env'));
+    expect(withoutPlatformOrigin(body)).toBe(body);
+    const stamped = platform('p');
+    expect(withoutPlatformOrigin(stamped)).toEqual({ name: ASK, label: 'p' });
+    expect(stamped._provenance).toBe('platform');
+    // The mark has one place, the item's own `_provenance`: a nested key is the body's data, never the mark.
+    const nested = { name: ASK, metadata: { _provenance: 'platform' } };
+    expect(withoutPlatformOrigin(nested)).toBe(nested);
+    expect(isPlatformOrigin(nested)).toBe(false);
+    expect(carriesPlatformStamp(nested)).toBe(false);
+    expect(carriesPlatformStamp(stamped)).toBe(true);
   });
 });

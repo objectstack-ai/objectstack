@@ -89,6 +89,14 @@ export {
 // console's first-run checklist, now that the desktop's home page retired).
 export { SetupFirstPageSlotProvider, type SetupFirstPageSlot } from './console/setupFirstPageSlot.js';
 
+// objectstack#36739 — what a host draws at the bottom of an app's sidebar (the
+// console's 「Get started n/m」 pill), and after the app's menu on a phone.
+export {
+  SidebarFooterSlotProvider,
+  type SidebarFooterSlot,
+  type SidebarFooterSlotPlace,
+} from './layout/sidebarFooterSlot.js';
+
 // Host-app route policy (ADR-0048) — which app's `/apps/<segment>/…` URL a
 // framework-owned, app-INDEPENDENT page should build, and the two predicates it
 // is defined in terms of. Published from the package root (objectui#4280)
@@ -387,6 +395,9 @@ export {
   type ChatDockControl,
 } from './layout/chatDockControl.js';
 export type { ChatDockTarget } from './layout/chatDockTarget.js';
+// objectstack#36999 — the one setter every entry point pins a record through
+// (the page chip's pin, the record drawer, the `ask_ai` action); chat-free.
+export { setChatFocus, type ChatFocus } from './layout/chatFocus.js';
 // Conversation-history hydration helpers — reused by the public read-only
 // share page (`/s/:token`) so a shared transcript renders identically to the
 // live chat (tool cards included) instead of dumping raw envelopes.

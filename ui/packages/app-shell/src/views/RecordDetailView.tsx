@@ -40,7 +40,8 @@ import { resolveParamDialogCompanion } from './actionDialogCompanion.js';
 import { ActionResultDialog, type ResultDialogState } from './ActionResultDialog.js';
 import { ChangeOwnerDialog } from './ChangeOwnerDialog.js';
 import { useRecordChangeOwnerOffer } from './changeOwner.js';
-import { FlowRunner, type ScreenFlowState, type ScreenSpec } from './FlowRunner.js';
+import { FlowRunner, type ScreenSpec } from './FlowRunner.js';
+import { useScreenFlowQueue } from '../hooks/useScreenFlowQueue.js';
 import { FlowRefusalNotice, type FlowRefusalState } from './FlowRefusalNotice.js';
 import { RelatedRecordActionsBridge } from './RelatedRecordActionsBridge.js';
 import { PublishRecordEditCommand, type RecordHeaderEditEntry } from './recordPaletteEdit.js';
@@ -1059,8 +1060,11 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
   // activity rows of more: the 动态 tab reads the window when it opens.
   const [activityPeekByRecord, setActivityPeekByRecord] = useState<Record<string, boolean>>({});
   const [mentionSuggestions, setMentionSuggestions] = useState<MentionSuggestion[]>([]);
-  // Screen-flow runtime: a paused `screen`-node flow launched from a record action.
-  const [screenFlow, setScreenFlow] = useState<ScreenFlowState | null>(null);
+  // Screen-flow runtime: the paused `screen`-node flows launched from a record
+  // action, or from a list on this page, shown one after another
+  // (objectstack#36931 — a per-record bulk run can pause many).
+  const screenFlows = useScreenFlowQueue();
+  const enqueueScreenFlow = screenFlows.enqueue;
   // A record-action flow launch that ended `refused` without pausing (objectui#9973).
   const [flowRefusal, setFlowRefusal] = useState<FlowRefusalState>({ open: false });
   const [historyEntries, setHistoryEntries] = useState<any[] | null>(null);
@@ -2315,8 +2319,10 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
       // refreshes on completion. The pause keeps the action's own toast
       // silent, so its `successMessage` rides along to the run's completion
       // (objectui#12234 — see FlowRunner's header).
+      // Queued, not written over, as in useConsoleActionRuntime's copy: each
+      // record a per-record bulk run paused shows its screen in turn.
       if (judged.followUp?.kind === 'screen') {
-        setScreenFlow({
+        enqueueScreenFlow({
           flowName: launch.flowName,
           flowLabel: judged.followUp.flowLabel,
           runId: judged.followUp.runId,
@@ -2337,7 +2343,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
     } catch (error) {
       return { success: false, error: (error as Error).message };
     }
-  }, [authFetch, pureRecordId, objectName, objects, language, t, fieldLabel, dataSource]);
+  }, [authFetch, pureRecordId, objectName, objects, language, t, fieldLabel, dataSource, enqueueScreenFlow]);
 
   // Server-side action handler — POST /api/v1/actions/{object}/{action},
   // built from @object-ui/core's `createServerActionHandler` via the shared
@@ -6673,13 +6679,14 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
         }}
       />
       <FlowRunner
-        state={screenFlow}
+        key={screenFlows.head?.key}
+        state={screenFlows.head?.state ?? null}
         authFetch={authFetch}
         baseUrl={import.meta.env.VITE_SERVER_URL || ''}
         dataSource={dataSource}
         objects={objects}
-        onClose={() => setScreenFlow(null)}
-        onComplete={() => { setScreenFlow(null); notifyRecordChanged(); }}
+        onClose={() => { if (screenFlows.head) screenFlows.settle(screenFlows.head.key); }}
+        onComplete={() => { if (screenFlows.head) screenFlows.settle(screenFlows.head.key); notifyRecordChanged(); }}
       />
       <FlowRefusalNotice
         state={flowRefusal}

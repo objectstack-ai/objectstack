@@ -137,7 +137,7 @@ Create a parent-child relationship between a master and its detail records. A `m
           type: 'master_detail',
           reference: 'order',
           deleteBehavior: 'cascade',
-          inlineEdit: true,
+          inlineEdit: 'grid',
           inlineAmountField: 'line_total',
         },
         product: { label: 'Product', type: 'lookup', reference: 'product' },
