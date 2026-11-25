@@ -4,6 +4,8 @@ import type {
   IKnowledgeAdapter,
   IKnowledgeService,
   AdapterContext,
+  AdapterListDocumentsOptions,
+  AdapterListDocumentsPage,
   AdapterSearchOptions,
 } from '@objectstack/spec/contracts';
 import type {
@@ -20,6 +22,11 @@ import { KNOWLEDGE_SERVICE } from '@objectstack/spec/contracts';
  *
  * Deterministic — same input always produces the same hits — so it's
  * great for tests and reference implementations. **Don't use in prod.**
+ *
+ * The reference implementation of `listDocuments` (ADR-0161 K8, item 1): it
+ * stores each document's `docHash` as given and lists it back as stored, in
+ * document-id order, the cursor being the last id of the page before. It runs
+ * the contract suite of `@objectstack/service-knowledge/testing`.
  */
 export class KnowledgeMemoryAdapter implements IKnowledgeAdapter {
   readonly id: string;
@@ -53,6 +60,29 @@ export class KnowledgeMemoryAdapter implements IKnowledgeAdapter {
       sourceId,
       chunks.filter((c) => !dropSet.has(c.documentId)),
     );
+  }
+
+  async listDocuments(ctx: AdapterContext, opts: AdapterListDocumentsOptions): Promise<AdapterListDocumentsPage> {
+    if (!Number.isInteger(opts.limit) || opts.limit < 1) {
+      throw new RangeError(`listDocuments: limit must be a positive integer, got ${String(opts.limit)}`);
+    }
+    // One entry per document, from its first chunk (every chunk carries the
+    // document's hash), in id order so a cursor stays valid across writes.
+    const byDoc = new Map<string, string | undefined>();
+    for (const c of this.store.get(ctx.source.id) ?? []) {
+      if (!byDoc.has(c.documentId)) byDoc.set(c.documentId, c.docHash);
+    }
+    const ids = [...byDoc.keys()]
+      .filter((id) => opts.cursor === undefined || id > opts.cursor)
+      .sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
+    const page = ids.slice(0, opts.limit);
+    return {
+      documents: page.map((documentId) => {
+        const docHash = byDoc.get(documentId);
+        return docHash === undefined ? { documentId } : { documentId, docHash };
+      }),
+      ...(ids.length > page.length ? { nextCursor: page[page.length - 1] } : {}),
+    };
   }
 
   async search(query: string, opts: AdapterSearchOptions): Promise<KnowledgeHit[]> {
@@ -94,6 +124,8 @@ interface ChunkRecord {
   chunkId: string;
   documentId: string;
   sourceRecordId?: string;
+  /** The document's `docHash`, stored as given (ADR-0161 K8, item 2). */
+  docHash?: string;
   content: string;
   title?: string;
   metadata: Record<string, unknown>;
@@ -134,6 +166,7 @@ function chunkAndEmbed(doc: KnowledgeDocument): ChunkRecord[] {
       chunkId: `${doc.id}#${idx}`,
       documentId: doc.id,
       sourceRecordId: doc.sourceRecordId,
+      docHash: doc.docHash,
       content,
       title: doc.title,
       metadata: doc.metadata ?? {},

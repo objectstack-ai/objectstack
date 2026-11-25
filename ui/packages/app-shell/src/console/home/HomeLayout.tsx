@@ -97,7 +97,7 @@ function useHostAppPaletteObjects(hostApp: Record<string, any>): any[] {
   return metadata.objects ?? NO_OBJECTS;
 }
 
-interface HomeCommandPaletteProps {
+export interface HomeCommandPaletteProps {
   apps: any[];
   hostApp: Record<string, any>;
   onAppChange: (segment: string) => void;
@@ -118,8 +118,12 @@ function OpenedHomeCommandPalette({ apps, hostApp, onAppChange, dataSource }: Ho
   );
 }
 
-/** Home's palette: mounted from its first open (see the module doc). */
-function HomeCommandPalette(props: HomeCommandPaletteProps) {
+/**
+ * Home's palette: mounted from its first open (see the module doc). The docs
+ * portal's desktop frame (`DocsPortalShell`) mounts the same one, for the same
+ * reason: it is outside every app too.
+ */
+export function HomeCommandPalette(props: HomeCommandPaletteProps) {
   const { open } = useCommandPalette();
   const [opened, setOpened] = useState(open);
   if (open && !opened) setOpened(true);

@@ -155,7 +155,7 @@ describe('Data pillar field rail — a late object inspector fills the open rail
 
     render(
       <MemoryRouter initialEntries={['/studio/com.example.showcase/data']}>
-        <DataPillar packageId="com.example.showcase" />
+        <DataPillar objectName="showcase_task" packageId="com.example.showcase" />
       </MemoryRouter>,
     );
     fireEvent.click(await screen.findByRole('button', { name: 'Field layout' }));

@@ -98,8 +98,8 @@ describe('the current entry (aria-current)', () => {
   });
 
   it('a pillar page is the type it designs; the OWD overview\'s route is that entry', () => {
-    expect(current(PKG, `/studio/${PKG}/data?surface=object:account`)).toBe('type:object');
-    // objectstack#36903 — a flow is its designer's metadata address, the flow type's entry.
+    // objectstack#36904, objectstack#36903 — the object and flow designers are area pages: their type.
+    expect(current(PKG, `/studio/${PKG}/metadata/object/account`)).toBe('type:object');
     expect(current(PKG, `/studio/${PKG}/metadata/flow/notify`)).toBe('type:flow');
     // objectstack#36905 — a permission set and the overview have left the Access pillar.
     expect(current(PKG, `/studio/${PKG}/metadata/permission/admin`)).toBe('type:permission');

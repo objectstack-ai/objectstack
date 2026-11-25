@@ -25,6 +25,12 @@ export default defineConfig({
       { find: /^@objectstack\/core\/logger$/, replacement: path.resolve(__dirname, '../../core/src/logger.ts') },
       { find: '@objectstack/core/egress', replacement: path.resolve(__dirname, '../../core/src/egress.ts') },
       { find: '@objectstack/core', replacement: path.resolve(__dirname, '../../core/src/index.ts') },
+      // The published `./testing` subpath BEFORE the bare package, which is a
+      // PREFIX match with a FILE replacement (ENOTDIR otherwise).
+      {
+        find: /^@objectstack\/service-knowledge\/testing$/,
+        replacement: path.resolve(__dirname, '../../services/service-knowledge/src/testing.ts'),
+      },
       {
         find: '@objectstack/service-knowledge',
         replacement: path.resolve(__dirname, '../../services/service-knowledge/src/index.ts'),

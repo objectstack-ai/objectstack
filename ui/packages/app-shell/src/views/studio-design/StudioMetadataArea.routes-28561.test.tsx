@@ -87,6 +87,12 @@ vi.mock('./StudioPermissionSetPage.js', () => ({
 /** `GET /api/v1/packages` as the listed manifests read it: one writable, one read-only, one kernel. */
 let listed: Map<string, { id: string; name: string; writable: boolean; manifest: Record<string, unknown> }>;
 let listFails = false;
+// objectstack#36904 — the object designer, stubbed: only where the area mounts it is under test.
+vi.mock('./DataPillar.js', () => ({
+  DataPillar: (props: { packageId: string; objectName: string; readOnly?: boolean }) => (
+    <div data-testid="object-designer" data-package={props.packageId} data-object={props.objectName} data-readonly={String(!!props.readOnly)} />
+  ),
+}));
 vi.mock('./packages-io.js', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   fetchListedPackageManifests: vi.fn(async () => {
@@ -202,16 +208,19 @@ describe('the area mounts the metadata pages (objectstack#28561)', () => {
     expect(where()).toBe(`/studio/${WRITABLE}/metadata/hook/h1?package=${WRITABLE}&tab=history`);
   });
 
-  it('CONTROL: a type whose item page is its own editor, or a designer\'s, keeps the standalone history page', async () => {
+  it('CONTROL: a type whose item page is its own editor keeps the standalone history page; a designer type does not', async () => {
     // The permission set's matrix editor links `./history`; it has no tabs.
     registerMetadataResource({ type: 'matrix_36901', EditPage: () => null });
     mount(`/studio/${WRITABLE}/metadata/matrix_36901/m1/history?package=${WRITABLE}`);
     expect((await page()).page).toBe('history');
     expect(where()).toBe(`/studio/${WRITABLE}/metadata/matrix_36901/m1/history?package=${WRITABLE}`);
     cleanup();
-    // So does an item a pillar's designer opens (an object), which has no tab row yet.
+    // objectstack#36903 — the designer-item exemption is gone with the last
+    // pillar type: an object's old history address opens its designer's
+    // History tab (and a flow's, below), no longer the standalone page.
     mount(`/studio/${WRITABLE}/metadata/object/o1/history?package=${WRITABLE}`);
-    expect((await page()).page).toBe('history');
+    expect(await screen.findByTestId('object-designer')).toHaveAttribute('data-object', 'o1');
+    expect(where()).toBe(`/studio/${WRITABLE}/metadata/object/o1?package=${WRITABLE}&tab=history`);
   });
 
   it('a flow\'s history is its full-screen designer\'s History tab (objectstack#36903)', async () => {
@@ -311,19 +320,8 @@ describe("a read-only base's create opens in its .custom pair (objectstack#36897
   });
 });
 
-describe('a pillar type opened from the area opens its pillar', () => {
-  for (const [type, pillar] of [
-    ['object', 'data'],
-  ] as const) {
-    it(`${type} → ${pillar}, with \`?surface=\``, async () => {
-      mount(`/studio/${WRITABLE}/metadata/${type}/item_1?package=${WRITABLE}`);
-      await screen.findByTestId('pillar');
-      const url = new URL(where(), 'http://x');
-      expect(url.pathname).toBe(`/studio/${WRITABLE}/${pillar}`);
-      expect(url.searchParams.get('surface')).toBe(`${type}:item_1`);
-    });
-  }
-
+// objectstack#36903 — the last pillar type gone: no item of the area opens a pillar.
+describe('a designer type opened from the area opens its designer page, no pillar', () => {
   it('a flow opens its designer full-screen on its own address, no pillar (objectstack#36903)', async () => {
     mount(`/studio/${WRITABLE}/metadata/flow/item_1?package=${WRITABLE}`);
     expect((await page()).page).toBe('flow-designer');
@@ -333,6 +331,31 @@ describe('a pillar type opened from the area opens its pillar', () => {
     });
     expect(where()).toBe(`/studio/${WRITABLE}/metadata/flow/item_1?package=${WRITABLE}`);
     expect(screen.queryByTestId('pillar')).toBeNull();
+  });
+
+  // objectstack#36904 — an object opens its designer on its own address.
+  it('an object opens the object designer on its own address, bound to the package', async () => {
+    mount(`/studio/${WRITABLE}/metadata/object/item_1?package=${WRITABLE}`);
+    const designer = await screen.findByTestId('object-designer');
+    expect(designer).toHaveAttribute('data-package', WRITABLE);
+    expect(designer).toHaveAttribute('data-object', 'item_1');
+    expect(designer).toHaveAttribute('data-readonly', 'false');
+    expect(new URL(where(), 'http://x').pathname).toBe(`/studio/${WRITABLE}/metadata/object/item_1`);
+  });
+
+  // objectstack#36904 — the object's old history address is its designer's History tab.
+  it("an object's history address opens its designer on the History tab, the query kept", async () => {
+    mount(`/studio/${WRITABLE}/metadata/object/item_1/history?package=${WRITABLE}`);
+    const designer = await screen.findByTestId('object-designer');
+    expect(designer).toHaveAttribute('data-object', 'item_1');
+    expect(where()).toBe(`/studio/${WRITABLE}/metadata/object/item_1?package=${WRITABLE}&tab=history`);
+    expect(screen.queryByTestId('area-page')).toBeNull();
+  });
+
+  it('CONTROL: an object under `?review=1` keeps the generic page and its draft review', async () => {
+    mount(`/studio/${WRITABLE}/metadata/object/item_1?package=${WRITABLE}&review=1`);
+    expect((await page()).page).toBe('item');
+    expect(screen.queryByTestId('object-designer')).toBeNull();
   });
 
   it('a type no pillar designs opens the generic page', async () => {

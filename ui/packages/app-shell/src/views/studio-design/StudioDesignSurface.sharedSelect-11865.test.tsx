@@ -36,6 +36,7 @@
 // Warmed at module top so the first load of the console's lazily loaded
 // authoring code is paid during collection, not inside a test's clock.
 import '@objectstack/lint';
+import '@object-ui/plugin-detail';
 import '@testing-library/jest-dom/vitest';
 import * as React from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -100,8 +101,8 @@ vi.mock('@object-ui/react', async (importOriginal) => {
 
 vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn(), info: vi.fn(), dismiss: vi.fn() } }));
 
-import { DataPillar } from './StudioDesignSurface';
 import { ListFlowCreate } from './__tests__/listFlowCreateHost';
+import { MetadataListCreateDialog } from '../metadata-admin/MetadataListCreateDialog';
 import { createEmptyDataSource, failOnAbsorbedFetchError } from './__tests__/emptyDataSource';
 import { t } from '../metadata-admin/i18n';
 // The source under test reaches these dynamic imports (the command palette's
@@ -168,14 +169,13 @@ const owdName = (descKey: string) =>
 const OBJECT_PKG = 'com.test.crmext';
 
 async function openNewObject(): Promise<HTMLElement> {
-  // An empty package: the pillar offers *New object* from its empty state.
+  // objectstack#36904 — New object is the object list's create dialog.
   server.rows = [];
   render(
-    <MemoryRouter initialEntries={[`/studio/${OBJECT_PKG}/data`]}>
-      <DataPillar packageId={OBJECT_PKG} />
+    <MemoryRouter>
+      <MetadataListCreateDialog type="object" open onOpenChange={() => {}} packageId={OBJECT_PKG} inPair={false} locale="en-US" onCreated={() => {}} />
     </MemoryRouter>,
   );
-  fireEvent.click(await screen.findByTestId('empty-state-new-object', undefined, { timeout: 8000 }));
   return await screen.findByTestId('create-object-owd');
 }
 

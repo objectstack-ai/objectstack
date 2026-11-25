@@ -307,7 +307,7 @@ describe('Data pillar — an edit taken while an object Save is in flight (objec
     return render(
       <StudioSaveHarness>
         <MemoryRouter initialEntries={[`/studio/${PKG}/data`]}>
-          <DataPillar packageId={PKG} />
+          <DataPillar objectName="acme_task" packageId={PKG} />
         </MemoryRouter>
       </StudioSaveHarness>,
     );

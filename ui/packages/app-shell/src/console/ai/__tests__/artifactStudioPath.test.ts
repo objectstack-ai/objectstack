@@ -10,9 +10,9 @@ import { artifactStudioPath } from '../artifactStudioPath';
 describe('artifactStudioPath', () => {
   const pkg = 'app.rmpe';
 
-  it('object → Data pillar with an object surface', () => {
+  it("object → the object designer's address (objectstack#36904)", () => {
     expect(artifactStudioPath(pkg, { type: 'object', name: 'rmpe_customer' })).toBe(
-      '/studio/app.rmpe/data?surface=object%3Armpe_customer',
+      '/studio/app.rmpe/metadata/object/rmpe_customer',
     );
   });
 

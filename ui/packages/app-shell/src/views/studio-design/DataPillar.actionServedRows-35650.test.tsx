@@ -107,6 +107,7 @@ vi.mock('@object-ui/react', async (importOriginal) => {
 
 // The source reaches a dynamic import of it: its first load is paid at collection (`check:test-source-alias`).
 import '@objectstack/lint';
+import '@object-ui/plugin-detail';
 import { DataPillar } from './StudioDesignSurface';
 import { StudioSaveHarness } from './__tests__/studioSaveHarness';
 import { createEmptyDataSource } from './__tests__/emptyDataSource';
@@ -125,7 +126,7 @@ async function openActionsView(): Promise<void> {
   objectDef = { name: 'showcase_task', label: 'Task', fields: [{ name: 'title', label: 'Title', type: 'text' }], actions: [SIGN] };
   render(
     <StudioSaveHarness><MemoryRouter initialEntries={['/studio/com.example.showcase/data']}>
-      <DataPillar packageId="com.example.showcase" />
+      <DataPillar objectName="showcase_task" packageId="com.example.showcase" />
     </MemoryRouter></StudioSaveHarness>,
   );
   // The first match is the flat tab (the passthrough menu draws a second).

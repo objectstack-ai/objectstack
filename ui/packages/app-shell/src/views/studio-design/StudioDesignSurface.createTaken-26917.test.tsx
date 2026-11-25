@@ -27,6 +27,7 @@
 // Warmed at module top so the first load of the console's lazily loaded
 // authoring code is paid during collection, not inside a test's clock.
 import '@objectstack/lint';
+import '@object-ui/plugin-detail';
 import '@testing-library/jest-dom/vitest';
 import * as React from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -123,8 +124,9 @@ vi.mock('../metadata-admin/AccessExplainPanel', () => ({ AccessExplainPanel: () 
 vi.mock('./StudioAiCopilot', () => ({ StudioChatDock: () => null }));
 vi.mock('../../preview/DraftChangesPanel', () => ({ DraftChangesPanel: () => null }));
 
-import { DataPillar, StudioDesignSurface } from './StudioDesignSurface';
+import { StudioDesignSurface } from './StudioDesignSurface';
 import { ListFlowCreate } from './__tests__/listFlowCreateHost';
+import { MetadataListCreateDialog } from '../metadata-admin/MetadataListCreateDialog';
 import { createEmptyDataSource } from './__tests__/emptyDataSource';
 import { t, tFormat } from '../metadata-admin/i18n';
 // The source under test reaches these dynamic imports (the command palette's
@@ -288,14 +290,16 @@ describe('objectstack#26917 — Automations: New automation over a taken identif
   });
 });
 
+// objectstack#36904 — New object is the object list's create dialog; the
+// designer has no object list, so an identifier this package holds is refused
+// the same way as one another package holds.
 describe('objectstack#26917 — Data: New object over a taken identifier', () => {
   async function openNewObject() {
     render(
-      <MemoryRouter initialEntries={[`/studio/${PKG}/data`]}>
-        <DataPillar packageId={PKG} />
+      <MemoryRouter>
+        <MetadataListCreateDialog type="object" open onOpenChange={() => {}} packageId={PKG} inPair={false} locale="en-US" onCreated={() => {}} />
       </MemoryRouter>,
     );
-    fireEvent.click(await screen.findByRole('button', { name: en('engine.studio.data.newObject') }, { timeout: 8000 }));
     const dialog = await screen.findByRole('dialog');
     // The identifier is stored with the package's namespace prefix
     // (`prefixObjectName`): wait until the dialog previews it.
@@ -321,24 +325,6 @@ describe('objectstack#26917 — Data: New object over a taken identifier', () =>
     expect(save).not.toHaveBeenCalled();
     expect(door.drafts.size).toBe(0);
     expect(door.published.get('object/acme_ticket')!.body).toEqual(before);
-  });
-
-  it("an object on this package's rail: refused, nothing written, and Open opens it", async () => {
-    publish('object', PKG, OBJ_ACCOUNT);
-    publish('object', PKG, OBJ_TICKET);
-    const dialog = await openNewObject();
-    submitCreate(dialog, 'Ticket');
-
-    const taken = await within(dialog).findByTestId('object-create-taken');
-    expect(taken).toHaveTextContent(
-      tFormat('engine.studio.data.createTaken', 'en', { name: 'acme_ticket', label: 'Ticket' }),
-    );
-    expect(save).not.toHaveBeenCalled();
-
-    fireEvent.click(within(taken).getByTestId('object-create-open-existing'));
-    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
-    await waitFor(() => expect(getDraft.mock.calls.some(([type, name]) => type === 'object' && name === 'acme_ticket')).toBe(true));
-    expect(save).not.toHaveBeenCalled();
   });
 
   it('a fresh identifier is created as before, under the first-write pin', async () => {

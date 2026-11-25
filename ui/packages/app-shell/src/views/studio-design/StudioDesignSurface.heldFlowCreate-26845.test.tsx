@@ -101,6 +101,7 @@ vi.mock('../../preview/DraftChangesPanel', async () => {
 // The source under test reaches a dynamic import of `@objectstack/lint`: its first
 // load is paid here, at collection, never inside a case's clock (`check:test-source-alias`).
 import '@objectstack/lint';
+import '@object-ui/plugin-detail';
 import { StudioDesignSurface } from './StudioDesignSurface';
 import { createEmptyDataSource } from './__tests__/emptyDataSource';
 import { registerMetadataPreview } from '../metadata-admin/preview-registry';
@@ -203,11 +204,10 @@ async function holdANotifyStep(): Promise<void> {
 
 const pendingRequest = () => fireEvent.click(screen.getByRole('button', { name: 'Pending object/acme_note' }));
 
-/** The Data pillar is open on the Pending changes request's object. */
+/** The object designer is open on the Pending changes request's object (objectstack#36904: on its own address). */
 async function noteIsOpen(): Promise<void> {
-  await screen.findByTestId('studio-rail-data', undefined, { timeout: 8000 });
   await waitFor(
-    () => expect(within(screen.getByTestId('data-object-header')).getByRole('heading', { level: 1 })).toHaveAttribute('title', 'acme_note'),
+    () => expect(within(screen.getByTestId('data-object-header')).getAllByTestId('studio-item-api-name')[0]).toHaveTextContent('acme_note'),
     { timeout: 8000 },
   );
 }

@@ -635,10 +635,12 @@ dashboard, page, or report — it opens that item's page in Studio's "All
 metadata" area (`/studio/:packageId/metadata/<type>/<name>`), where it is read
 and edited as metadata; interfaces themselves are designed in the running app,
 since objectstack#36502 retired Studio's Interfaces pillar. On an object route
-it opens that object in the Data pillar
-(`/studio/:packageId/data?surface=object:<name>`), and at the app root the
-package's Data tab (`/studio/:packageId/data`). An old
-`/studio/:packageId/interfaces` link lands on the Data tab with a one-line
+it opens that object's designer full-screen on its own address
+(`/studio/:packageId/metadata/object/<name>`, objectstack#36904), and at the
+app root the package's Studio home, which lands on the package's object list
+(`/studio/:packageId/metadata/object`; the retired Data pillar's
+`/studio/:packageId/data` redirects there). An old
+`/studio/:packageId/interfaces` link lands on the object list with a one-line
 notice that interface editing moved into the app.
 The route-type → surface-type decision lives in `appStudioRoutePath`. It is the
 reverse of the builder's "Open app" bridge (ADR-0080): the entry only renders

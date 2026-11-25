@@ -36,6 +36,7 @@
 
 import { CATALOG_SCOPE_PARAM, ENVIRONMENT_SCOPE } from '../metadata-admin/catalog-scope.js';
 import { LIST_SOURCE_PARAM } from '../metadata-admin/metadataListState.js';
+import { DESIGNER_SURFACE_PARAM, parseSurfaceParam } from '../metadata-admin/nav-selection.js';
 import {
   STUDIO_ALL_PACKAGES_SEGMENT,
   STUDIO_ITEM_PILLAR,
@@ -47,9 +48,11 @@ import {
   studioMetadataAreaAddress,
   studioMetadataAreaRoot,
   studioMetadataItemAddress,
+  studioMetadataTypePath,
   studioPillarItemAddress,
   type StudioPillarKey,
 } from './studioAddress.js';
+import { DESIGNER_SURFACE_NAV_PARAM, DESIGNER_SURFACE_VIEW_PARAM } from './useSurfaceDeepLink.js';
 import { STUDIO_ORG_SCOPE_SOURCE, isStudioOrgScope, studioOrgScopePath } from './studioScope.js';
 
 // objectstack#36895 — the area's segments are Studio address vocabulary, owned
@@ -125,14 +128,15 @@ export function areaItemAsksGenericPage(search: URLSearchParams): boolean {
 }
 
 /**
- * objectstack#36905, objectstack#36903 (Studio redesign epic #36890) — the
- * types whose item, on a package's leg, opens its designer full-screen in the
- * area rather than the generic item page: the permission set's matrix
- * (`StudioPermissionSetPage`) and the flow designer (`AutomationsPillar`,
- * fixed on one flow). A designer card adds its type here in the PR that
- * deletes the type's row from `STUDIO_ITEM_PILLAR`.
+ * objectstack#36905, objectstack#36904, objectstack#36903 (Studio redesign
+ * epic #36890) — the types whose item, on a package's leg, opens its designer
+ * full-screen in the area rather than the generic item page: the permission
+ * set's matrix (`StudioPermissionSetPage`), the object designer (`DataPillar`
+ * on one object) and the flow designer (`AutomationsPillar`, fixed on one
+ * flow). A designer card adds its type here in the PR that deletes the type's
+ * row from `STUDIO_ITEM_PILLAR`.
  */
-export const AREA_DESIGNER_PAGE_TYPES: readonly string[] = Object.freeze(['permission', 'flow']);
+export const AREA_DESIGNER_PAGE_TYPES: readonly string[] = Object.freeze(['permission', 'object', 'flow']);
 
 /**
  * Whether an item of the area opens its full-screen designer page: a
@@ -187,6 +191,27 @@ export function orgScopeFlowOf(pathname: string, segment: string | null | undefi
   } catch {
     return null;
   }
+}
+
+/**
+ * objectstack#36904 — where the retired Data pillar's address lands
+ * (`/studio/<package>/data`, Studio's old home): the object designer of the
+ * object its `?surface=object:<name>` names, or else the package's object
+ * list. The pillar's own qualifiers go (`?surface=`, and `?view=` and `?nav=`,
+ * which opened nothing on an object); everything else is kept verbatim —
+ * `?action=` (the designer opens its Actions tab on it) and `?changes=review`
+ * (the server's draft review link, `studioChangesReviewLink`).
+ *
+ * `search` is the URL's query, with or without its `?`.
+ */
+export function dataPillarRedirect(packageId: string, search: string): string {
+  const params = new URLSearchParams(search);
+  const target = parseSurfaceParam(params.get(DESIGNER_SURFACE_PARAM));
+  for (const key of [DESIGNER_SURFACE_PARAM, DESIGNER_SURFACE_VIEW_PARAM, DESIGNER_SURFACE_NAV_PARAM]) params.delete(key);
+  if (target?.type === 'object' && target.name) return studioMetadataItemAddress(packageId, 'object', target.name, { query: params });
+  const list = studioMetadataTypePath(packageId, 'object');
+  const query = params.toString();
+  return query ? `${list}?${query}` : list;
 }
 
 /**

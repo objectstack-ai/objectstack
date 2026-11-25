@@ -58,9 +58,9 @@ export interface MetadataListCreateDialogProps {
   /** The item is live: where it was created. */
   onCreated: (created: { name: string; packageId: string }) => void;
   /**
-   * objectstack#36903 — open the item already holding the identifier, at its
-   * address (`studioItemPath`), when this package holds it. Without it the
-   * notice names the holder and offers no Open.
+   * objectstack#36903, objectstack#36904 — open the item already holding the
+   * identifier, at its address (`studioItemPath`), when the package the create
+   * writes to holds it. Without it the notice names the holder and offers no Open.
    */
   onOpenExisting?: (path: string) => void;
 }
@@ -88,12 +88,15 @@ async function createTarget(packageId: string, inPair: boolean, namespace: strin
   return { packageId: pair.packageId, namespace: pair.namespace };
 }
 
-function ObjectCreate({ open, onOpenChange, packageId, inPair, locale, onCreated }: MetadataListCreateDialogProps) {
+function ObjectCreate({ open, onOpenChange, packageId, inPair, locale, onCreated, onOpenExisting }: MetadataListCreateDialogProps) {
   const client = useMetadataClient();
   const [owd, setOwd] = React.useState<OwdCreateModel>(OWD_DEFAULT);
   const [busy, setBusy] = React.useState(false);
   const [error, setError] = React.useState<StudioRefusal | null>(null);
-  const [taken, setTaken] = React.useState<Taken | null>(null);
+  // objectstack#36904 — `at`: the package the create writes to holds the
+  // object with that identifier (published or a draft), so the notice offers
+  // to open it there, as the Data pillar's in-page create did for its rail.
+  const [taken, setTaken] = React.useState<(Taken & { at: string | null }) | null>(null);
   // The package's object-name namespace (framework#2694): the dialog previews
   // the stored name; on a read-only base the pair's, by the spec's pairing
   // rule, while the save prefixes with the namespace the ensure door answers.
@@ -129,14 +132,18 @@ function ObjectCreate({ open, onOpenChange, packageId, inPair, locale, onCreated
       const name = prefixObjectName(rawName, target.namespace);
       const held = await findTakenIdentifier(client, 'object', name, locale);
       if (held) {
-        setTaken(held);
+        const own = await loadPackageSurfaces(client, 'object', target.packageId, locale).catch(() => []);
+        setTaken({ ...held, at: own.some((object) => object.name === name) ? target.packageId : null });
         return;
       }
       const body = buildObjectSkeleton(name, label, t('engine.studio.data.nameFieldLabel', locale), owd);
       await client.save('object', name, body, { mode: 'draft', packageId: target.packageId, ifNoneMatch: '*', surface: 'studio' });
-      const live = await publishSavedItem(client, { type: 'object', name, packageId: target.packageId }, false);
+      // objectstack#36726 — pinned `If-None-Match: *`, as the flow create is:
+      // an object another writer published under the name since the check
+      // above is refused, not replaced.
+      const live = await publishSavedItem(client, { type: 'object', name, packageId: target.packageId }, false, publishCreated);
       if (!live.ok) {
-        setError(plainRefusal(live.error));
+        if ('error' in live) setError(plainRefusal(live.error));
         return;
       }
       toast.success(tFormat('engine.studio.save.done', locale, { items: label }));
@@ -194,7 +201,13 @@ function ObjectCreate({ open, onOpenChange, packageId, inPair, locale, onCreated
           {taken && (
             <CreateTakenNotice
               scope="object"
-              sentence={tFormat('engine.studio.data.createTakenElsewhere', locale, { label: taken.label, name: taken.name })}
+              sentence={tFormat(
+                taken.at !== null ? 'engine.studio.data.createTaken' : 'engine.studio.data.createTakenElsewhere',
+                locale,
+                { label: taken.label, name: taken.name },
+              )}
+              openLabel={tFormat('engine.studio.create.openExisting', locale, { label: taken.label })}
+              onOpen={taken.at !== null && onOpenExisting ? () => onOpenExisting(studioItemPath(taken.at!, 'object', taken.name)) : undefined}
             />
           )}
           {/* The object's record sharing (OWD): without it the object is

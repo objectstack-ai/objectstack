@@ -198,7 +198,7 @@ describe('「Configure tabs」 (objectstack#36499)', () => {
     const shown = Array.from(editor.querySelectorAll('[data-record-tabs-tab]')).map((el) => el.getAttribute('data-record-tabs-tab'));
     expect(shown).toEqual(['contact.account', 'task.account', 'sys_approval_request', 'sys_activity']);
     expect(screen.getByTestId('record-tabs-hidden').querySelector('[data-record-tabs-hidden-tab="case.account"]')).not.toBeNull();
-    expect(screen.getByTestId('record-tabs-field-groups')).toHaveAttribute('href', expect.stringContaining('/studio/app.crm/data'));
+    expect(screen.getByTestId('record-tabs-field-groups')).toHaveAttribute('href', expect.stringContaining('/studio/app.crm/metadata/object/'));
   });
 
   it("another package's list is drawn fixed after the object's own tabs: no move, hide or rename", async () => {

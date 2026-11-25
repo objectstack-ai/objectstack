@@ -7,7 +7,8 @@
  * With no app nothing more is written; a refused menu save, or a failed read
  * of the package's apps, keeps the object and says so in a warning.
  *
- * The REAL `DataPillar` over a recording client; the package list the menu
+ * objectstack#36904 — the create is the object list's (`MetadataListCreateDialog`),
+ * the object designer having none; the REAL dialog over a recording client; the package list the menu
  * save reads (`GET /api/v1/packages`) is a fetch stub.
  */
 
@@ -71,7 +72,7 @@ vi.mock('sonner', () => ({
 }));
 
 import { toast } from 'sonner';
-import { DataPillar } from './StudioDesignSurface';
+import { MetadataListCreateDialog } from '../metadata-admin/MetadataListCreateDialog';
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -99,16 +100,17 @@ afterEach(() => {
 
 async function createObject(label: string) {
   render(
-    <MemoryRouter initialEntries={[`/studio/${PKG}/data`]}>
-      <DataPillar packageId={PKG} />
+    <MemoryRouter>
+      <MetadataListCreateDialog type="object" open onOpenChange={() => {}} packageId={PKG} inPair={false} locale="en-US" onCreated={created} />
     </MemoryRouter>,
   );
-  fireEvent.click(await screen.findByTestId('empty-state-new-object'));
   await screen.findByTestId('create-object-owd');
   const dialog = screen.getByRole('dialog');
   fireEvent.change(dialog.querySelectorAll('input')[0], { target: { value: label } });
   fireEvent.click(within(dialog).getByRole('button', { name: /^(create|创建)$/i }));
 }
+
+const created = vi.fn();
 
 /** The object's name, as its draft was saved. */
 const objectName = () => String(mockClient.save.mock.calls.find((c) => c[0] === 'object')?.[1]);
@@ -142,8 +144,8 @@ describe('新建对象 joins the package’s one app menu (objectstack#36748)', 
         expect.stringMatching(/^“Visit” was created, but it could not be added to the menu of “Visits”: The app has unpublished changes in Studio\. /),
       ));
     expect(srv.calls).toEqual(['save object draft', 'publish object', 'save app draft']);
-    // The object is open on the rail all the same.
-    expect(await screen.findByTestId('form-toolbar')).toBeInTheDocument();
+    // The object is created all the same: the list opens it.
+    expect(created).toHaveBeenCalledTimes(1);
   });
 
   it('a failed read of the package’s apps keeps the object, warns, and draws no refusal over it', async () => {
@@ -153,7 +155,7 @@ describe('新建对象 joins the package’s one app menu (objectstack#36748)', 
         expect.stringMatching(/^“Visit” was created, but it could not be added to its app’s menu: /),
       ));
     expect(srv.calls).toEqual(['save object draft', 'publish object']);
-    expect(await screen.findByTestId('form-toolbar')).toBeInTheDocument();
+    expect(created).toHaveBeenCalledTimes(1);
     // The create's own refusal strip is not drawn over the live object.
     expect(toast.error).not.toHaveBeenCalled();
     expect(screen.queryByRole('alert')).toBeNull();

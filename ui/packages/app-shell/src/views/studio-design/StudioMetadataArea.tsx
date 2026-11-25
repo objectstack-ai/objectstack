@@ -18,8 +18,9 @@
  *                              form editor of an email template or a
  *                              translation (`StudioBundleItemEditor`, #28569),
  *                              and of a read-only package's dataset (#30064),
- *                              or a permission set's full-screen matrix
- *                              (`StudioPermissionSetPage`, #36905)
+ *                              or a designer full-screen: a permission set's
+ *                              matrix (`StudioPermissionSetPage`, #36905), an
+ *                              object's designer (`DataPillar`, #36904)
  *   <root>/:type/:name/history the item's history: its History tab
  *                              (`?tab=history`), the old address redirected;
  *                              the history page for a type with an editor of
@@ -59,6 +60,7 @@ import { STUDIO_ORG_SCOPE_SEGMENT } from './studioScope.js';
 import { STUDIO_ORG_SCOPE_TYPE } from './studioAddress.js';
 import { StudioBundleItemEditor } from './StudioBundleItemEditor.js';
 import { AutomationsPillar } from './AutomationsPillar.js';
+import { DataPillar } from './DataPillar.js';
 import { StudioPermissionSetPage } from './StudioPermissionSetPage.js';
 import { BUNDLE_MEMBER_PARAM, getMetadataResource } from '../metadata-admin/registry.js';
 import { ITEM_TOOL_TAB_PARAM } from '../item-tools/ItemToolTabs.js';
@@ -142,15 +144,17 @@ interface AreaEditorProps {
   publishRefusalFor?: (type: string, name: string) => StudioRefusal | null;
   /** objectstack#36903 — the area is the package-less scope's: its flows open writable, with no package. */
   orgScope?: boolean;
-  /** objectstack#36903 — the flow designer's report to the surface: its held edit. */
-  onHeldEditChange?: (clause: string | null) => void;
-  /** objectstack#36905, objectstack#36903 — a designer page's open item label, for the copilot's chip. */
+  /** objectstack#36904, objectstack#36905, objectstack#36903 — a designer page's open item label, for the copilot's chip. */
   onSurfaceLabelChange?: (surface: StudioSurfaceLabel | null) => void;
+  /** objectstack#36904, objectstack#36903 — the object and flow designers' held edit, reported to the surface. */
+  onHeldEditChange?: (clause: string | null) => void;
+  /** The object designer's copilot-changes line opens the surface's Changes. */
+  onReviewChanges?: () => void;
 }
 
 /**
- * `<root>/:type/:name`: a pillar type opens its pillar, a flow its designer
- * full-screen (`areaItemOpensDesignerPage`), an email template or a
+ * `<root>/:type/:name`: a pillar type opens its pillar, an object, a flow or
+ * a permission set its designer full-screen (`areaItemOpensDesignerPage`), an email template or a
  * translation the form editor (`areaItemOpensFormEditor`), every other type
  * the generic item page (`areaItemPillarPath` lists when).
  *
@@ -184,10 +188,10 @@ function AreaItemOpen({
     // objectstack#36903 — the package-less scope's area holds its flows
     // alone, and a flow there opens the flow designer as on a package's leg.
     // A review link (or the environment scope) asks the generic page, whose
-    // draft review it opens. A type whose item page is its own editor
-    // (`registerMetadataResource`'s `EditPage`: the permission set's matrix)
-    // has no such review there, so it keeps its designer page, as on main
-    // (objectstack#36905).
+    // draft review it opens (objectstack#36904: the object's, as a pillar's
+    // did). A type whose item page is its own editor (`registerMetadataResource`'s
+    // `EditPage`: the permission set's matrix, objectstack#36905) has no such
+    // review there, so it keeps its designer page on any query.
     const genericPage = areaItemAsksGenericPage(search) && !getMetadataResource(type)?.EditPage;
     const designer =
       (areaItemOpensDesignerPage(at) || (editor.orgScope === true && type === STUDIO_ORG_SCOPE_TYPE)) && !genericPage;
@@ -196,6 +200,24 @@ function AreaItemOpen({
     return { designer: false, formEditor: false, pillarPath: areaItemPillarPath({ ...at, name }) };
   });
   if (opens.pillarPath) return <Navigate to={opens.pillarPath} replace />;
+  if (opens.designer && host?.packageId && type === 'object') {
+    // objectstack#36904 — the object designer, full-screen on the object's address.
+    return (
+      <div className="h-full min-h-0" data-testid="studio-object-designer">
+        <DataPillar
+          packageId={host.packageId}
+          objectName={name}
+          readOnly={host.readOnly}
+          customization={editor.customization}
+          publishNonce={editor.publishNonce}
+          onDraftSaved={editor.onDraftSaved}
+          onHeldEditChange={editor.onHeldEditChange}
+          onSurfaceLabelChange={editor.onSurfaceLabelChange}
+          onReviewChanges={editor.onReviewChanges}
+        />
+      </div>
+    );
+  }
   if (opens.designer && type === 'flow') {
     // objectstack#36903 — the flow designer, full-screen on the flow's
     // address. The package-less scope's flows are the organization's own and
@@ -256,23 +278,21 @@ function AreaItemOpen({
  * A type whose item page is an editor of its own (`registerMetadataResource`'s
  * `EditPage`: the permission set's matrix) has no tabs on the cross-package
  * leg, and its History button opens this address there: it keeps the
- * standalone history page. So does an item whose address opens a pillar's
- * designer, until the designer mounts the tabs. objectstack#36905 — on a
- * package's leg the permission set's full-screen page has them.
- * objectstack#36903 — so does the flow designer, on its address with History
- * as a tab: a flow's `/history` opens that tab like every item's.
+ * standalone history page. On a package's leg every designer page has the
+ * tabs: the permission set's (objectstack#36905), the object's
+ * (objectstack#36904) and the flow's (objectstack#36903), so their
+ * `/history` opens that tab like every item's. No pillar designs an item any
+ * more, so the exemption that kept a pillar item's history on the standalone
+ * page is gone with the last of them (objectstack#36903).
  */
 function AreaHistoryRedirect(): React.ReactElement {
-  const { type = '', name = '' } = useParams<{ type: string; name: string }>();
+  const { type = '' } = useParams<{ type: string }>();
   const { pathname, search } = useLocation();
   const host = useMetadataAreaHost();
   const params = new URLSearchParams(search);
   const designerPage = areaItemOpensDesignerPage({ packageId: host?.packageId ?? null, type });
   const ownEditor = !designerPage && !!getMetadataResource(type)?.EditPage;
-  // An item a pillar's designer opens has no tab row yet (its tabs are the
-  // designers' cards): its history keeps the standalone page too.
-  const pillarItem = areaItemPillarPath({ packageId: host?.packageId ?? null, type, name, search: params }) !== null;
-  if (ownEditor || pillarItem) return <MetadataResourceHistoryPage />;
+  if (ownEditor) return <MetadataResourceHistoryPage />;
   params.set(ITEM_TOOL_TAB_PARAM, 'history');
   return <Navigate to={{ pathname: pathname.replace(/\/history\/?$/, ''), search: `?${params}` }} replace />;
 }
@@ -366,14 +386,16 @@ export interface StudioMetadataAreaProps {
    * (`studioScope.ts`), so its host is read-only to the list's create.
    */
   orgScope?: boolean;
-  /** objectstack#36903 — handed to the flow designer (`AreaEditorProps`). */
-  onHeldEditChange?: (clause: string | null) => void;
   /**
-   * objectstack#36905, objectstack#36903 — told the open designer page's item
-   * label (the permission set's, the flow's), for the copilot's chip, as a
+   * objectstack#36905, objectstack#36904, objectstack#36903 — told the open
+   * designer page's item label (the permission set's, the object's, the
+   * flow's), for the copilot's chip, as a
    * pillar tells it.
    */
   onSurfaceLabelChange?: (surface: StudioSurfaceLabel | null) => void;
+  /** objectstack#36904, objectstack#36903 — handed to the object and flow designers (`AreaEditorProps`). */
+  onHeldEditChange?: (clause: string | null) => void;
+  onReviewChanges?: () => void;
 }
 
 export function StudioMetadataArea({
@@ -385,6 +407,7 @@ export function StudioMetadataArea({
   orgScope = false,
   onHeldEditChange,
   onSurfaceLabelChange,
+  onReviewChanges,
 }: StudioMetadataAreaProps): React.ReactElement {
   const { pathname, search } = useLocation();
   const locale = useMetadataLocale();
@@ -423,6 +446,7 @@ export function StudioMetadataArea({
     orgScope,
     onHeldEditChange,
     onSurfaceLabelChange,
+    onReviewChanges,
   };
 
   // The query names the leg (`areaLocationRedirect`). Settled before any page

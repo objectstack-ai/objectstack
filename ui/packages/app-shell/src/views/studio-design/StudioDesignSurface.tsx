@@ -125,7 +125,7 @@ import {
   isStudioOrgScope,
   studioOrgScopePath,
 } from './studioScope.js';
-import { STUDIO_METADATA_AREA, isStudioAllPackagesScope } from './metadataArea.js';
+import { STUDIO_METADATA_AREA, dataPillarRedirect, isStudioAllPackagesScope } from './metadataArea.js';
 import { StudioMenu, StudioMenuDataProvider, StudioMenuProvider, StudioMenuTrigger } from './StudioMenu.js';
 import { StudioMetadataArea } from './StudioMetadataArea.js';
 import { StudioOwdOverviewPage } from './StudioOwdOverviewPage.js';
@@ -197,17 +197,19 @@ function formatBackfillReceipt(receipt: PublishBackfillReceipt, locale: string):
 
 // The pillar segments `/studio/<package>/<pillar>` serves. objectstack#36899
 // (ADR-0084, amended) — they are no longer a navigation: Studio's one
-// navigation is the left menu (`StudioMenu`), and these pages are where an
-// object, a flow or a permission set opens until each becomes a full-screen
-// item page. Data stays the Studio home. objectstack#36502 — the Interfaces
-// pillar is retired (`studioInterfacesRetired.tsx`). The "All metadata" area
+// navigation is the left menu (`StudioMenu`), and these pages are where a
+// flow or a permission set opens until each becomes a full-screen item page.
+// objectstack#36904 — the Data pillar is retired: an object opens its designer
+// on its metadata address, and `/data` redirects (`dataPillarRedirect`).
+// objectstack#36502 — the Interfaces pillar is retired
+// (`studioInterfacesRetired.tsx`). The "All metadata" area
 // (`/studio/<package>/metadata/…`, `metadataArea.ts`) is not a pillar, so the
 // not-found check does not hold it.
 //
-// objectstack#36903 — the Automations pillar is retired: a flow opens its
+// objectstack#36903 — the Automations pillar is retired too: a flow opens its
 // designer on its metadata address, and `/automations` redirects
 // (`automationsPillarRedirect`) before this page draws.
-const PILLARS: readonly string[] = [STUDIO_HOME_PILLAR, 'access'];
+const PILLARS: readonly string[] = ['access'];
 // objectstack#29988 — the pillar kit moved to its own module; re-exported for its pins.
 export { StudioHeldNotice, StudioReadOnlyLink, type StudioBaseCustomization };
 
@@ -220,7 +222,6 @@ export { StudioHeldNotice, StudioReadOnlyLink, type StudioBaseCustomization };
  * buys nothing.
  */
 const PILLAR_FOR_SURFACE_TYPE: Readonly<Record<string, string>> = {
-  object: 'data',
   permission: 'access',
 };
 
@@ -275,6 +276,13 @@ export function StudioDesignSurface(props: StudioDesignSurfaceProps): React.Reac
   if (!props.area && params.tab === STUDIO_ORG_SCOPE_PILLAR && params.packageId && !isStudioAllPackagesScope(params.packageId)) {
     return <Navigate to={automationsPillarRedirect(params.packageId, location.search)} state={location.state} replace />;
   }
+  // objectstack#36904 — the retired Data pillar (Studio's old home, and the
+  // old object address) lands on the object list or the object's designer, a
+  // pair's in its own area (`dataPillarRedirect`).
+  const segment = params.packageId ?? '';
+  if (!props.area && params.tab === STUDIO_HOME_PILLAR && segment && !isStudioOrgScope(segment) && !isStudioAllPackagesScope(segment)) {
+    return <Navigate to={dataPillarRedirect(segment, location.search)} state={location.state} replace />;
+  }
   const pairBase = props.area ? null : customizationPairBaseOf(params.packageId ?? null);
   if (pairBase !== null) {
     const tab = params.tab ?? STUDIO_HOME_PILLAR;
@@ -303,24 +311,26 @@ function StudioDesignSurfaceBody({ aiSlot, area }: StudioDesignSurfaceProps): Re
   const locale = useMetadataLocale();
   // objectstack#36502 — a landing from an old Interfaces URL says once where
   // interface editing went. The landing's history state is read once and
-  // latched here, keyed on the pillar it landed on: the Data pillar writes
-  // its own `?surface=` (the first object) and the Changes drawer drops
-  // `?changes=` right after the landing, and those navigations carry no state.
-  // It goes when dismissed or when the author leaves for another pillar;
-  // another old URL is a new history state, so it shows again.
-  const landingState: unknown = useLocation().state;
+  // latched here, keyed on the page it landed on: the Changes drawer drops
+  // `?changes=` right after the landing, and the area writes its `?package=`,
+  // and those navigations carry no state. objectstack#36904 — keyed on the
+  // path, not the pillar: the home is the area's object list now, and the
+  // area's other pages share its segment. It goes when dismissed or when the
+  // author leaves for another page; another old URL is a new history state,
+  // so it shows again.
+  const { state: landingState, pathname: landingPath }: { state: unknown; pathname: string } = useLocation();
   const [retiredOn, setRetiredOn] = React.useState<string | null>(() =>
-    isRetiredInterfacesLanding(landingState) ? tab : null,
+    isRetiredInterfacesLanding(landingState) ? landingPath : null,
   );
   React.useEffect(() => {
-    if (isRetiredInterfacesLanding(landingState)) setRetiredOn(tab);
+    if (isRetiredInterfacesLanding(landingState)) setRetiredOn(landingPath);
     // Keyed on the state object alone: a new landing is a new object.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [landingState]);
   React.useEffect(() => {
-    if (retiredOn !== null && retiredOn !== tab) setRetiredOn(null);
-  }, [retiredOn, tab]);
-  const retiredLanding = retiredOn !== null && retiredOn === tab;
+    if (retiredOn !== null && retiredOn !== landingPath) setRetiredOn(null);
+  }, [retiredOn, landingPath]);
+  const retiredLanding = retiredOn !== null && retiredOn === landingPath;
 
   // Courtesy gate (the framework's ADR-0124 D1 — server enforces, client is
   // courtesy): a read-only code/installed package refuses authoring
@@ -1211,14 +1221,27 @@ function StudioDesignSurfaceBody({ aiSlot, area }: StudioDesignSurfaceProps): Re
    *
    * Either way the sheet closes: a selection nobody can see is not navigation.
    */
-  const surfacePathname = useLocation().pathname;
+  const currentPathname = useLocation().pathname;
   const requestSurface = React.useCallback(
     (target: SurfaceTarget): boolean | void => {
+      // objectstack#36904 — an object is its designer's own address, in the
+      // package that holds the draft the sheet names (`draftScope`): on a
+      // read-only base, the `.custom` pair, where an object the pair adds
+      // resolves and the base's address does not.
+      if (target.type === 'object' && draftScope !== null) {
+        const to = studioItemPath(draftScope, 'object', target.name);
+        if (to !== currentPathname) {
+          if (!confirmLeavePillar()) return false;
+          shellNavigate(to);
+        }
+        setChangesOpen(false);
+        return;
+      }
       // objectstack#36903 — a flow is its designer's own address, in a
       // package's area or the package-less scope's.
       if (target.type === 'flow' && !allScope) {
         const to = packageId === null ? studioOrgScopePath(target) : studioItemPath(packageId, 'flow', target.name);
-        if (to.split('?')[0] !== surfacePathname) {
+        if (to.split('?')[0] !== currentPathname) {
           if (!confirmLeavePillar()) return false;
           shellNavigate(to);
         }
@@ -1235,7 +1258,7 @@ function StudioDesignSurfaceBody({ aiSlot, area }: StudioDesignSurfaceProps): Re
       }
       setChangesOpen(false);
     },
-    [tab, allScope, packageId, scopeSegment, confirmLeavePillar, shellNavigate, surfacePathname],
+    [tab, allScope, packageId, draftScope, scopeSegment, confirmLeavePillar, shellNavigate, currentPathname],
   );
   // objectstack#36899 — a menu entry that re-enters the open pillar on another
   // `?surface=` (the default sharing overview, on the Access pillar) opens the
@@ -1276,8 +1299,8 @@ function StudioDesignSurfaceBody({ aiSlot, area }: StudioDesignSurfaceProps): Re
   // address that is the page already open on another query re-enters the
   // page, which reads its deep link once, at mount. The palette's own
   // `?palette=` is not part of the page's query. A package that is not there
-  // has no menu, so its palette is the landing's.
-  const currentPathname = useLocation().pathname;
+  // has no menu, so its palette is the landing's. (`currentPathname` is read
+  // above, for `requestSurface`.)
   const openFromPalette = React.useCallback(
     (to: string) =>
       openStudioPaletteAddress(
@@ -1602,9 +1625,13 @@ function StudioDesignSurfaceBody({ aiSlot, area }: StudioDesignSurfaceProps): Re
                 publishNonce={publishNonce}
                 onDraftSaved={onDraftSaved}
                 publishRefusalFor={publishRefusalFor}
-                // objectstack#36903 — the flow designer's reports, as the pillars' are.
+                // objectstack#36904, objectstack#36903 — the object and flow designers' reports, as the pillars' are.
                 onHeldEditChange={setHeldEdit}
                 onSurfaceLabelChange={setSurfaceLabel}
+                onReviewChanges={() => {
+                  setChangesPosture('review');
+                  setChangesOpen(true);
+                }}
               />
             ) : tab === STUDIO_OWD_SECTION ? (
               // objectstack#36905 (decision 11) — the organization-wide default
@@ -1621,21 +1648,6 @@ function StudioDesignSurfaceBody({ aiSlot, area }: StudioDesignSurfaceProps): Re
                 icon={FileQuestion}
                 testId="studio-pillar-not-found"
                 sentence={tFormat('engine.studio.notFound.pillar', locale, { pillar: tab })}
-              />
-            ) : tab === 'data' ? (
-              <DataPillar
-                key={`${packageId}:${pillarEntry}`}
-                packageId={packageId}
-                publishNonce={publishNonce}
-                onDraftSaved={onDraftSaved}
-                readOnly={readOnly}
-                customization={customization}
-                onHeldEditChange={setHeldEdit}
-                onSurfaceLabelChange={setSurfaceLabel}
-                onReviewChanges={() => {
-                  setChangesPosture('review');
-                  setChangesOpen(true);
-                }}
               />
             ) : (
               // objectstack#36905 — the Access pillar draws no page: a set opens

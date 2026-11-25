@@ -672,3 +672,33 @@ describe('#26711 the view write door refuses an unknown top-level key', () => {
         expect(JSON.stringify(served._diagnostics)).toContain('zzz_junk_key');
     });
 });
+
+describe('#35500 a member that is itself a bare union of kinds explains nothing', () => {
+    const kindsOnly = z.object({
+        u: z.union([z.union([z.string(), z.number()]), z.union([z.boolean(), z.array(z.string())])]),
+    });
+    const issuesOf = (schema: z.ZodTypeAny, value: unknown) => {
+        const r = schema.safeParse(value);
+        expect(r.success, 'the fixture must actually fail to parse').toBe(false);
+        return (r as { error: { issues: unknown[] } }).error.issues;
+    };
+
+    it('the union is said once — not one bare entry per member', () => {
+        expect(zodIssuesToMetadataIssues(issuesOf(kindsOnly, { u: {} }))).toEqual([
+            { path: 'u', message: ZOD_UNION_DEFAULT_MESSAGE, code: 'invalid_union' },
+        ]);
+    });
+
+    it('a nested union carrying its own sentence is still heard', () => {
+        const sentence = 'Write a string or a number.';
+        const schema = z.object({ u: z.union([z.union([z.string(), z.number()], { error: sentence }), z.boolean()]) });
+        expect(zodIssuesToMetadataIssues(issuesOf(schema, { u: {} }))).toEqual([
+            { path: 'u', message: sentence, code: 'invalid_union' },
+        ]);
+    });
+
+    it('CONTROL — a member with a located cause is still selected and expanded', () => {
+        const schema = z.object({ u: z.union([z.union([z.string(), z.number()]), z.object({ a: z.string() }).strict()]) });
+        expect(zodIssuesToMetadataIssues(issuesOf(schema, { u: { a: 1 } })).map((e) => [e.path, e.code])).toEqual([['u.a', 'invalid_type']]);
+    });
+});

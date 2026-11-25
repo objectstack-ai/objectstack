@@ -86,8 +86,9 @@ export function StudioCopilotConversation({
         artifact = { type: raw.slice(0, idx), name: raw.slice(idx + 1) };
       }
     }
-    // objectstack#36903, objectstack#36904, objectstack#36905 — a designer that
-    // opens full-screen at its metadata address carries its item in the path,
+    // objectstack#36905, objectstack#36904, objectstack#36903 — a designer that
+    // opens full-screen at its metadata address (the permission set's matrix,
+    // the object designer, the flow designer) carries its item in the path,
     // under the area's segment, not in a `?surface=`; on the package-less
     // scope's leg (`~org`) so does the flow designer.
     if (!tab && !artifact) {

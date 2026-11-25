@@ -68,10 +68,11 @@ import { t } from '../metadata-admin/i18n';
 import '@object-ui/plugin-detail';
 
 const answer = (body: unknown) => ({ ok: true, status: 200, json: async () => body });
-// objectstack#36903 — the Automations pillar is retired: the flow designer
-// carries the mark on its own address, in the area. objectstack#36905 — the
-// sharing overview's own page took the Access pillar's place here.
-const PILLARS = ['data', 'metadata/flow/notify_owner', 'interfaces', 'owd'] as const;
+// objectstack#36904, objectstack#36903 — an object and a flow open their
+// designer on their own address; the old Data and Interfaces addresses land on
+// the object list, which is no item. objectstack#36905 — the sharing
+// overview's own page took the Access pillar's place here.
+const PILLARS = ['metadata/object/fo_job', 'metadata/flow/notify_owner', 'owd'] as const;
 const READ_ONLY = t('engine.studio.pkg.readonly', 'en');
 
 function servePackage(writable: boolean) {
