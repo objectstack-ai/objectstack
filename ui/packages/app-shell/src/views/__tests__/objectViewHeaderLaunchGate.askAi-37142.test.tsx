@@ -21,15 +21,20 @@ const ASK = { name: 'ask_about_account', label: 'Ask AI', type: 'ask_ai' };
 const CLOSE = { name: 'close_selected', label: 'Close', type: 'script', target: 'close' };
 
 let runnerRef: ActionRunner | undefined;
-function GrabRunner() {
-  runnerRef = useAction().runner;
+const keepRunner = (runner: ActionRunner) => {
+  runnerRef = runner;
+};
+/** Hands the provider's runner out, so a case can publish a new selection. */
+function GrabRunner({ onRunner }: { onRunner: (runner: ActionRunner) => void }) {
+  const { runner } = useAction();
+  React.useEffect(() => onRunner(runner), [runner, onRunner]);
   return null;
 }
 
 function mount(selectedRecords: Array<{ id: string }>) {
   render(
     <ActionProvider context={{ objectName: 'account', selectedRecords, selectionAvailable: true }} onAskAi={vi.fn()}>
-      <GrabRunner />
+      <GrabRunner onRunner={keepRunner} />
       <ListHeaderActionBar schema={{ type: 'action:bar', actions: [ASK, CLOSE] } as never} />
     </ActionProvider>,
   );
