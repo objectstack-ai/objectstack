@@ -373,7 +373,13 @@ export class KnowledgeService implements IKnowledgeService {
       // Only an EMPTY page ends the walk. A short page does not: `find` does
       // not promise `min(limit, remaining)` rows — an `afterFind` hook may drop
       // rows from a page — so rows after a short page can still exist.
-      if (!Array.isArray(rows) || rows.length === 0) break;
+      // A read that answers no list is a failed read, never the end of the
+      // source: read as an empty page it would make a complete walk of nothing
+      // and hand every listed document to the purge.
+      if (!Array.isArray(rows)) {
+        return stopped(`the read answered ${describeValue(rows)} instead of a list of rows.`);
+      }
+      if (rows.length === 0) break;
 
       let docs: KnowledgeDocument[];
       try {
@@ -950,7 +956,8 @@ function systemContext(): ExecutionContext {
  * limit: 1 })` — so the database answers whether the row belongs in the
  * index, never an event payload or an earlier read. `undefined` when no row
  * matches (none exists, or it does not match `where`). Throws what `find`
- * throws.
+ * throws, and throws when `find` answers no list: "no row" is a verdict the
+ * purge deletes on, so a malformed answer is never read as one.
  *
  * One definition for both of its readers, the event sync
  * ({@link KnowledgeService.handleRecordUpsert}) and the purge
@@ -968,7 +975,10 @@ async function rereadRow(
     { where: objSource.where !== undefined ? { $and: [objSource.where, byId] } : byId, limit: 1 },
     { context: systemContext() },
   );
-  return Array.isArray(rows) ? (rows[0] as Record<string, unknown> | undefined) : undefined;
+  if (!Array.isArray(rows)) {
+    throw new Error(`the re-read of record '${String(recordId)}' answered ${describeValue(rows)} instead of a list of rows`);
+  }
+  return rows[0] as Record<string, unknown> | undefined;
 }
 
 /**
@@ -1053,8 +1063,13 @@ export interface PurgeDocumentsOutcome {
  * gone. Each candidate is confirmed by {@link rereadRow} — the event sync's
  * own re-read, `where` AND id under the system context — and deleted only
  * when that finds no row, so a document whose row was created, restored or
- * came back into `where` since the candidates were computed is kept. Stops at
- * the first re-read or delete that throws, counting what it did before.
+ * came back into `where` since the candidates were computed is kept. The
+ * record id is recovered from the document id as text; when that text is a
+ * canonical safe integer and the first re-read finds nothing, the row is asked
+ * for again by the number, so a caller-supplied numeric id on a driver that
+ * does not equate `'5'` with `5` is still found. Stops at the first re-read or
+ * delete that throws (a re-read that answers no list included), counting what
+ * it did before.
  *
  * The caller decides when a purge may run at all (a complete reindex walk;
  * the scheduled reconcile reuses this function) and computes the candidates.
@@ -1072,6 +1087,12 @@ export async function purgeDocuments(input: PurgeDocumentsInput): Promise<PurgeD
     try {
       const deleted = await input.serialize(documentId, async () => {
         if (await rereadRow(engine, objSource, recordId)) return false;
+        // The document id carries the record id as text. A row whose id is the
+        // number that text spells (a caller-supplied numeric id, on a driver
+        // that does not equate '5' with 5) is asked for again by the number,
+        // so the purge and the event sync give one answer for one row.
+        const asNumber = canonicalSafeInteger(recordId);
+        if (asNumber !== undefined && (await rereadRow(engine, objSource, asNumber))) return false;
         await adapter.delete([documentId], { source, reason: input.reason ?? 'reindex' });
         return true;
       });
@@ -1115,6 +1136,18 @@ function stableJson(value: unknown): string {
     }
     return v;
   });
+}
+
+/** How a non-list answer is named in a refusal: `null`, `undefined`, or its `typeof`. */
+function describeValue(value: unknown): string {
+  return value === null ? 'null' : value === undefined ? 'undefined' : `a value of type ${typeof value}`;
+}
+
+/** The number a record id's text spells, when it is a canonical safe integer (`'5'`, `'-12'`; never `'05'` or `'-0'`). */
+function canonicalSafeInteger(text: string): number | undefined {
+  if (!/^(0|-?[1-9][0-9]*)$/.test(text)) return undefined;
+  const n = Number(text);
+  return Number.isSafeInteger(n) ? n : undefined;
 }
 
 /** A thrown value's text: an `Error`'s message, anything else as a string. */

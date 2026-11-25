@@ -1071,3 +1071,89 @@ describe('KnowledgeService — a complete reindex skips unchanged documents and 
     expect(la.stored.has('pushed-faq-1')).toBe(true);
   });
 });
+
+describe('KnowledgeService — the purge never deletes on an answer it cannot read, and waits for the event sync', () => {
+  it('a walk page that answers no list stops the walk: ok:false, purged: null, nothing deleted', async () => {
+    const la = listingAdapter();
+    const h = reindexHarness(taskRows(3), objectSource('s1', 'task'), la.adapter);
+    await h.svc.reindexSource('s1');
+    const real = h.find.getMockImplementation()!;
+    h.find.mockImplementation(async (o, q, opt) => (q.limit === REINDEX_PAGE_SIZE ? (null as never) : real(o, q, opt)));
+    const res = await h.svc.reindexSource('s1');
+    expect(res).toMatchObject({ ok: false, discovered: 0, purged: null });
+    expect(res.message).toContain('page 1: the read answered null instead of a list of rows.');
+    expect(la.deleteSpy).not.toHaveBeenCalled();
+    expect(la.stored.size).toBe(3);
+  });
+
+  it('a purge re-read that answers no list stops the purge: ok:false, the document kept', async () => {
+    const la = listingAdapter();
+    const h = reindexHarness(taskRows(3), objectSource('s1', 'task'), la.adapter);
+    await h.svc.reindexSource('s1');
+    h.rows.splice(h.rows.findIndex((r) => r.id === 'r000'), 1);
+    const real = h.find.getMockImplementation()!;
+    h.find.mockImplementation(async (o, q, opt) => (q.limit === 1 ? (undefined as never) : real(o, q, opt)));
+    const res = await h.svc.reindexSource('s1');
+    expect(res).toMatchObject({ ok: false, discovered: 2, purged: 0 });
+    expect(res.message).toMatch(/document 's1:r000': the re-read of record 'r000' answered undefined instead of a list of rows/);
+    expect(la.deleteSpy).not.toHaveBeenCalled();
+    expect(la.stored.has('s1:r000')).toBe(true);
+  });
+
+  it("the purge's re-read and delete run on the document's sync chain: an event sync arriving meanwhile lands after them", async () => {
+    const la = listingAdapter();
+    const h = reindexHarness(taskRows(3), objectSource('s1', 'task'), la.adapter);
+    await h.svc.reindexSource('s1');
+    const r001 = h.rows.splice(h.rows.findIndex((r) => r.id === 'r001'), 1)[0];
+    // Hold the purge's re-read of r001 AFTER it has read (no row): the purge is
+    // now between its re-read and its delete.
+    const real = h.find.getMockImplementation()!;
+    let reached!: () => void;
+    const atReread = new Promise<void>((resolve) => { reached = resolve; });
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    let held = false;
+    h.find.mockImplementation(async (o, q, opt) => {
+      const answer = await real(o, q, opt);
+      if (q.limit === 1 && !held) {
+        held = true;
+        reached();
+        await gate;
+      }
+      return answer;
+    });
+    const walk = h.svc.reindexSource('s1');
+    await atReread;
+    // The row is restored and its event sync fires while the purge is held.
+    h.rows.push(r001);
+    const sync = h.svc.handleRecordUpsert('task', { id: 'r001' });
+    await new Promise((r) => setTimeout(r, 5));
+    release();
+    await Promise.all([walk, sync]);
+    // On the chain, the sync re-reads after the purge's delete and writes the
+    // document back; off it, the sync would write first and the purge delete it.
+    expect(la.stored.has('s1:r001')).toBe(true);
+  });
+
+  it('a numeric record id restored during the walk is found by its number and kept; a gone one is purged', async () => {
+    const la = listingAdapter();
+    const rows = taskRows(5).map((r) => ({ ...r, id: Number(String(r.id).slice(1)) + 1 }));
+    const h = reindexHarness(rows, objectSource('s1', 'task'), la.adapter);
+    await h.svc.reindexSource('s1');
+    // Row 2 is gone when the walk reads and back before the purge; row 4 is gone for good.
+    const row2 = h.rows.splice(h.rows.findIndex((r) => r.id === 2), 1)[0];
+    h.rows.splice(h.rows.findIndex((r) => r.id === 4), 1);
+    const release = h.holdNextFind();
+    const walk = h.svc.reindexSource('s1');
+    await new Promise((r) => setTimeout(r, 5));
+    h.rows.push(row2);
+    release();
+    const res = await walk;
+    expect(res).toMatchObject({ ok: true, purged: 1 });
+    expect(deletedOf(la.deleteSpy)).toEqual(['s1:4']);
+    expect(la.stored.has('s1:2')).toBe(true);
+    // The text form is asked first, then the number the text spells.
+    const rereads = h.find.mock.calls.filter((c) => c[1].limit === 1).map((c) => c[1].where);
+    expect(rereads).toEqual(expect.arrayContaining([{ id: '2' }, { id: 2 }, { id: '4' }, { id: 4 }]));
+  });
+});
