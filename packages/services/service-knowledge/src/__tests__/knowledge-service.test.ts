@@ -602,7 +602,7 @@ describe('KnowledgeService — the reindex walk pages by id', () => {
   it('0 rows: one bounded read, no upsert', async () => {
     const h = reindexHarness([]);
     const res = await h.svc.reindexSource('s1');
-    expect(res).toEqual({ ok: true, object: 'task', discovered: 0, indexed: 0, skipped: 0, purged: null });
+    expect(res).toEqual({ ok: true, object: 'task', discovered: 0, indexed: 0, skipped: 0, purged: null, failed: 0, failures: [] });
     expect(h.find).toHaveBeenCalledTimes(1);
     expect(h.adapter.upsertSpy).not.toHaveBeenCalled();
   });
@@ -610,7 +610,7 @@ describe('KnowledgeService — the reindex walk pages by id', () => {
   it('exactly one page: one upsert of the page, then a read that comes back empty', async () => {
     const h = reindexHarness(taskRows(100));
     const res = await h.svc.reindexSource('s1');
-    expect(res).toEqual({ ok: true, object: 'task', discovered: 100, indexed: 100, skipped: 0, purged: null });
+    expect(res).toEqual({ ok: true, object: 'task', discovered: 100, indexed: 100, skipped: 0, purged: null, failed: 0, failures: [] });
     expect(upsertedIds(h.adapter)).toEqual([ids(0, 100)]);
     expect(h.find).toHaveBeenCalledTimes(2);
     expect(h.find.mock.calls[1][1].where).toEqual({ id: { $gt: 'r099' } });
@@ -619,7 +619,7 @@ describe('KnowledgeService — the reindex walk pages by id', () => {
   it('one page + 1: two upserts (100, then 1), each row once, in id order', async () => {
     const h = reindexHarness(taskRows(101));
     const res = await h.svc.reindexSource('s1');
-    expect(res).toEqual({ ok: true, object: 'task', discovered: 101, indexed: 101, skipped: 0, purged: null });
+    expect(res).toEqual({ ok: true, object: 'task', discovered: 101, indexed: 101, skipped: 0, purged: null, failed: 0, failures: [] });
     expect(upsertedIds(h.adapter)).toEqual([ids(0, 100), ids(100, 101)]);
     // A short page is not the end — only the empty third read is.
     expect(h.find).toHaveBeenCalledTimes(3);
@@ -636,7 +636,7 @@ describe('KnowledgeService — the reindex walk pages by id', () => {
     (src.source as ObjectKnowledgeSource).where = { status: 'open' };
     const h = reindexHarness(taskRows(250, (i) => ({ status: i % 5 === 0 ? 'done' : 'open' })), src);
     const res = await h.svc.reindexSource('s1');
-    expect(res).toEqual({ ok: true, object: 'task', discovered: 200, indexed: 200, skipped: 0, purged: null });
+    expect(res).toEqual({ ok: true, object: 'task', discovered: 200, indexed: 200, skipped: 0, purged: null, failed: 0, failures: [] });
     const all = upsertedIds(h.adapter).flat();
     expect(all).toHaveLength(200);
     expect(new Set(all).size).toBe(200);
@@ -653,7 +653,7 @@ describe('KnowledgeService — the reindex walk pages by id', () => {
   ])('limit %i caps the total: reads %j', async (limit, reads, total) => {
     const h = reindexHarness(taskRows(250));
     const res = await h.svc.reindexSource('s1', { limit });
-    expect(res).toEqual({ ok: true, object: 'task', discovered: total, indexed: total, skipped: 0, purged: null });
+    expect(res).toEqual({ ok: true, object: 'task', discovered: total, indexed: total, skipped: 0, purged: null, failed: 0, failures: [] });
     expect(h.find.mock.calls.map((c) => c[1].limit)).toEqual(reads);
     expect(upsertedIds(h.adapter).flat()).toEqual(ids(0, total));
   });
@@ -661,7 +661,7 @@ describe('KnowledgeService — the reindex walk pages by id', () => {
   it('a limit above the row count reads to the end', async () => {
     const h = reindexHarness(taskRows(120));
     const res = await h.svc.reindexSource('s1', { limit: 500 });
-    expect(res).toEqual({ ok: true, object: 'task', discovered: 120, indexed: 120, skipped: 0, purged: null });
+    expect(res).toEqual({ ok: true, object: 'task', discovered: 120, indexed: 120, skipped: 0, purged: null, failed: 0, failures: [] });
   });
 
   it('a short page is not the end: a page that lost a row to a hook does not stop the walk', async () => {
@@ -673,7 +673,7 @@ describe('KnowledgeService — the reindex walk pages by id', () => {
       return h.find.mock.calls.length === 1 ? page.filter((r) => r.id !== 'r049') : page;
     });
     const res = await h.svc.reindexSource('s1');
-    expect(res).toEqual({ ok: true, object: 'task', discovered: 249, indexed: 249, skipped: 0, purged: null });
+    expect(res).toEqual({ ok: true, object: 'task', discovered: 249, indexed: 249, skipped: 0, purged: null, failed: 0, failures: [] });
     expect(upsertedIds(h.adapter).map((p) => p.length)).toEqual([99, 100, 50]);
     expect(upsertedIds(h.adapter).flat()).toEqual(ids(0, 250).filter((id) => id !== 's1:r049'));
     expect(h.find).toHaveBeenCalledTimes(4);
@@ -683,7 +683,7 @@ describe('KnowledgeService — the reindex walk pages by id', () => {
     const rows = taskRows(150).map((r) => ({ ...r, id: Number(String(r.id).slice(1)) + 1 }));
     const h = reindexHarness(rows);
     const res = await h.svc.reindexSource('s1');
-    expect(res).toEqual({ ok: true, object: 'task', discovered: 150, indexed: 150, skipped: 0, purged: null });
+    expect(res).toEqual({ ok: true, object: 'task', discovered: 150, indexed: 150, skipped: 0, purged: null, failed: 0, failures: [] });
     const want = (from: number, to: number) => Array.from({ length: to - from + 1 }, (_, k) => `s1:${from + k}`);
     expect(upsertedIds(h.adapter)).toEqual([want(1, 100), want(101, 150)]);
     expect(h.find.mock.calls.map((c) => c[1].where)).toEqual([undefined, { id: { $gt: 100 } }, { id: { $gt: 150 } }]);
@@ -692,7 +692,7 @@ describe('KnowledgeService — the reindex walk pages by id', () => {
   it('a fractional limit is floored', async () => {
     const h = reindexHarness(taskRows(250));
     const res = await h.svc.reindexSource('s1', { limit: 150.7 });
-    expect(res).toEqual({ ok: true, object: 'task', discovered: 150, indexed: 150, skipped: 0, purged: null });
+    expect(res).toEqual({ ok: true, object: 'task', discovered: 150, indexed: 150, skipped: 0, purged: null, failed: 0, failures: [] });
     expect(h.find.mock.calls.map((c) => c[1].limit)).toEqual([100, 50]);
   });
 
@@ -773,7 +773,7 @@ describe('KnowledgeService — the reindex walk pages by id', () => {
     expect(h.find).toHaveBeenCalledTimes(2);
     // The failed walk released the source's lock.
     const again = await h.svc.reindexSource('s1');
-    expect(again).toEqual({ ok: true, object: 'task', discovered: 250, indexed: 250, skipped: 0, purged: null });
+    expect(again).toEqual({ ok: true, object: 'task', discovered: 250, indexed: 250, skipped: 0, purged: null, failed: 0, failures: [] });
   });
 
   it('an engine that ignores the cursor ends the walk instead of looping', async () => {
@@ -818,7 +818,7 @@ describe('KnowledgeService — the reindex walk pages by id', () => {
     expect(h.find).toHaveBeenCalledTimes(1);
     release();
     const [a, b] = await Promise.all([first, second]);
-    expect(a).toEqual({ ok: true, object: 'task', discovered: 150, indexed: 150, skipped: 0, purged: null });
+    expect(a).toEqual({ ok: true, object: 'task', discovered: 150, indexed: 150, skipped: 0, purged: null, failed: 0, failures: [] });
     expect(b).toEqual(a);
     expect(order).toEqual(['s1:r000+100', 's1:r100+50', 's1:r000+100', 's1:r100+50']);
   });
@@ -829,9 +829,9 @@ describe('KnowledgeService — the reindex walk pages by id', () => {
     const release = h.holdNextFind();
     const first = h.svc.reindexSource('s1');
     const other = await h.svc.reindexSource('s2');
-    expect(other).toEqual({ ok: true, object: 'task', discovered: 10, indexed: 10, skipped: 0, purged: null });
+    expect(other).toEqual({ ok: true, object: 'task', discovered: 10, indexed: 10, skipped: 0, purged: null, failed: 0, failures: [] });
     release();
-    expect(await first).toEqual({ ok: true, object: 'task', discovered: 10, indexed: 10, skipped: 0, purged: null });
+    expect(await first).toEqual({ ok: true, object: 'task', discovered: 10, indexed: 10, skipped: 0, purged: null, failed: 0, failures: [] });
   });
 });
 
@@ -903,9 +903,9 @@ describe('KnowledgeService — a complete reindex skips unchanged documents and 
   it('first reindex over an empty listing writes everything; the next writes nothing unchanged', async () => {
     const la = listingAdapter();
     const h = reindexHarness(taskRows(150), objectSource('s1', 'task'), la.adapter);
-    expect(await h.svc.reindexSource('s1')).toEqual({ ok: true, object: 'task', discovered: 150, indexed: 150, skipped: 0, purged: 0 });
+    expect(await h.svc.reindexSource('s1')).toEqual({ ok: true, object: 'task', discovered: 150, indexed: 150, skipped: 0, purged: 0, failed: 0, failures: [] });
     la.upsertSpy.mockClear();
-    expect(await h.svc.reindexSource('s1')).toEqual({ ok: true, object: 'task', discovered: 150, indexed: 0, skipped: 150, purged: 0 });
+    expect(await h.svc.reindexSource('s1')).toEqual({ ok: true, object: 'task', discovered: 150, indexed: 0, skipped: 150, purged: 0, failed: 0, failures: [] });
     expect(la.upsertSpy).not.toHaveBeenCalled();
     expect(la.deleteSpy).not.toHaveBeenCalled();
   });
@@ -954,7 +954,7 @@ describe('KnowledgeService — a complete reindex skips unchanged documents and 
     h.rows.find((r) => r.id === 'r003')!.status = 'done';
     h.find.mockClear();
     const res = await h.svc.reindexSource('s1');
-    expect(res).toEqual({ ok: true, object: 'task', discovered: 3, indexed: 0, skipped: 3, purged: 2 });
+    expect(res).toEqual({ ok: true, object: 'task', discovered: 3, indexed: 0, skipped: 3, purged: 2, failed: 0, failures: [] });
     expect(deletedOf(la.deleteSpy).sort()).toEqual(['s1:r001', 's1:r003']);
     for (const call of la.deleteSpy.mock.calls) expect(call[1]).toMatchObject({ reason: 'reindex' });
     // The confirming re-reads are the event sync's: `where` AND id, one row, system context.
@@ -1027,7 +1027,7 @@ describe('KnowledgeService — a complete reindex skips unchanged documents and 
     const h = reindexHarness(taskRows(4), src, la.adapter);
     await h.svc.reindexSource('s1');
     h.rows.splice(0, 1);
-    expect(await h.svc.reindexSource('s1')).toEqual({ ok: true, object: 'task', discovered: 3, indexed: 0, skipped: 3, purged: null });
+    expect(await h.svc.reindexSource('s1')).toEqual({ ok: true, object: 'task', discovered: 3, indexed: 0, skipped: 3, purged: null, failed: 0, failures: [] });
     expect(la.deleteSpy).not.toHaveBeenCalled();
   });
 
