@@ -69,7 +69,7 @@ vi.mock('./StudioAiCopilot', () => ({ StudioChatDock: () => null }));
 
 // The pillars reach `@objectstack/lint` through a dynamic import; paid here, at collection, not in a case's clock.
 import '@objectstack/lint';
-import { AccessPillar, AutomationsPillar, DataPillar } from './StudioDesignSurface';
+import { AccessPillar, DataPillar } from './StudioDesignSurface';
 import { StudioRail, StudioRailRow } from './StudioRail';
 import { railAbbreviation } from './railAbbreviation';
 import {
@@ -161,15 +161,6 @@ const CASES: RailCase[] = [
     match: 'acc',
     emptyKey: 'engine.studio.data.noObjects',
     pillar: () => <DataPillar packageId={PKG} />,
-  },
-  {
-    name: 'Automations',
-    railTestId: 'studio-rail-automations',
-    placeholderKey: 'engine.studio.designer.search',
-    labels: ['Nightly digest', 'Approve order'],
-    match: 'digest',
-    emptyKey: 'engine.studio.auto.none',
-    pillar: () => <AutomationsPillar packageId={PKG} />,
   },
   {
     name: 'Access',

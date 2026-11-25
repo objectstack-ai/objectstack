@@ -435,7 +435,7 @@ export function AutomationsPillar({
 
   // Runtime enable/bound state per flow (GET /automation/_status). Persisted
   // `status` is intent; this is what's actually live in the engine — the truth
-  // behind the rail's status dots. Refetched after a publish (publishNonce);
+  // behind the header's Status pill. Refetched after a publish (publishNonce);
   // degrades silently on an older backend / offline (dots just don't render).
   const [flowStatus, setFlowStatus] = React.useState<Record<string, FlowRailState>>({});
   // objectui#11779 — whether `flowStatus` holds an answer from the engine. With
@@ -447,7 +447,7 @@ export function AutomationsPillar({
   // list's `registrations` (served beside the items, keyed by name). A flow
   // with no entry is one no engine judged, which reads as before.
   const [flowRegistrations, setFlowRegistrations] = React.useState<Record<string, FlowRegistration>>({});
-  // objectstack#34818 — the flows of the rail's scope that have a published
+  // objectstack#34818 — the flows of the designer's scope that have a published
   // version, so the Runs tab can tell "not published yet" from "the engine is
   // not answering". `null` until read, and after a failed read: unknown.
   const [publishedFlowNames, setPublishedFlowNames] = React.useState<ReadonlySet<string> | null>(null);
@@ -1598,7 +1598,7 @@ export function AutomationsPillar({
                 )
               ) : Preview ? (
                 // objectui#11779 — the open flow's runtime row, so the flow
-                // header and its Problems panel read the run status this rail
+                // header and its Problems panel read the run status the header
                 // reads: the row, `null` when the engine has none for this flow,
                 // nothing while no runtime answer is in.
                 <FlowRuntimeContext.Provider value={flowStatusRead ? (flowStatus[current.name] ?? null) : undefined}>

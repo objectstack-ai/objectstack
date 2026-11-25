@@ -184,7 +184,7 @@ const CASES: PillarCase[] = [
   {
     pillar: 'Automations',
     testId: 'auto-flow-header',
-    element: (readOnly) => <AutomationsPillar packageId={PKG} readOnly={readOnly} />,
+    element: (readOnly) => <AutomationsPillar packageId={PKG} flowName={FLOW.name} readOnly={readOnly} />,
     settled: async () => {
       await screen.findByTestId('auto-flow-meta', undefined, { timeout: 8000 });
     },

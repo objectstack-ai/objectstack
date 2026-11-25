@@ -96,7 +96,7 @@ describe('Studio home → the package-less scope (objectui#11553)', () => {
     expect(vi.mocked(loadPackageLessSurfaces)).toHaveBeenCalledWith(expect.anything(), 'flow', expect.any(String));
 
     fireEvent.click(entry);
-    await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent('/studio/~org/automations'));
+    await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent('/studio/~org/metadata/flow?source=runtime'));
     expect(screen.getByTestId('pillar-builder')).toBeInTheDocument();
   });
 

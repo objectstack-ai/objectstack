@@ -312,7 +312,7 @@ describe("on a package, the palette lists the left menu and the package's items 
 
   it('opens a menu entry where the menu entry goes, and the palette closes', async () => {
     expect(await openedBy('studio-entry type:hook')).toBe('/studio/com.acme.crm/metadata/hook?package=com.acme.crm');
-    expect(await openedBy('studio-entry orgFlows')).toBe('/studio/~org/automations');
+    expect(await openedBy('studio-entry orgFlows')).toBe('/studio/~org/metadata/flow?source=runtime');
     expect(await openedBy('studio-entry owd')).toBe('/studio/com.acme.crm/access?surface=owd%3Aoverview');
     expect(await openedBy('studio-entry diagnostics')).toBe('/studio/com.acme.crm/metadata/_diagnostics');
 

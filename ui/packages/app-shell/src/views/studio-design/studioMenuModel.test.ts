@@ -55,7 +55,7 @@ describe('the menu groups (objectstack#36899, ADR-0084 amended)', () => {
     expect(entry('type:view').count).toBeUndefined();
     // ADR-0146 D1 — runtime configuration is Setup's.
     expect(entry('type:datasource').to).toBe('/apps/setup/metadata/datasource');
-    expect(entry('orgFlows').to).toBe('/studio/~org/automations');
+    expect(entry('orgFlows').to).toBe('/studio/~org/metadata/flow?source=runtime');
     expect(entry('diagnostics').to).toBe(`/studio/${PKG}/metadata/_diagnostics`);
     expect(entry('owd').to).toBe(`/studio/${PKG}/access?surface=owd%3Aoverview`);
     expect(entry('environment').to).toBe('/studio/~all/metadata');
@@ -98,14 +98,16 @@ describe('the current entry (aria-current)', () => {
 
   it('a pillar page is the type it designs; the Access pillar on its OWD overview is that entry', () => {
     expect(current(PKG, `/studio/${PKG}/data?surface=object:account`)).toBe('type:object');
-    expect(current(PKG, `/studio/${PKG}/automations`)).toBe('type:flow');
+    // objectstack#36903 — a flow is its designer's metadata address, the flow type's entry.
+    expect(current(PKG, `/studio/${PKG}/metadata/flow/notify`)).toBe('type:flow');
     expect(current(PKG, `/studio/${PKG}/access?surface=permission:admin`)).toBe('type:permission');
     expect(current(PKG, `/studio/${PKG}/access?surface=owd:overview`)).toBe('owd');
     expect(current(PKG, `/studio/${PKG}/bogus`)).toBeNull();
   });
 
   it('the package-less scope is its flows; the cross-package leg\'s root is the environment catalog', () => {
-    expect(current('~org', '/studio/~org/automations')).toBe('orgFlows');
+    expect(current('~org', '/studio/~org/metadata/flow')).toBe('orgFlows');
+    expect(current('~org', '/studio/~org/metadata/flow/f')).toBe('orgFlows');
     expect(current('~all', '/studio/~all/metadata')).toBe('environment');
     expect(current('~all', '/studio/~all/metadata/position')).toBe('type:position');
   });
