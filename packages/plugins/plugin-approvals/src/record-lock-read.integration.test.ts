@@ -450,7 +450,7 @@ describe('lockSource — which approval holds a locked row, the same at the sing
   /** The caller's delete, and the refusal code when it is refused. */
   async function deleteAs(rig: Rig, userId: string, object: string, recordId: string): Promise<string> {
     try {
-      await rig.engine.delete(object, { where: { id: recordId }, context: asUser(userId) } as any);
+      await rig.engine.delete(object, { where: { id: recordId }, context: asUser(userId) });
       return 'deleted';
     } catch (err: any) {
       return String(err?.code ?? err?.message);
@@ -561,7 +561,7 @@ describe('both lock reads count a row readable by one rule — a loosely matched
     caseInsensitiveIds(rig.engine, HELD);
     const loose = (id: string) => id.toUpperCase();
     // CONTROL — the engine does hand the row back under the loose spelling.
-    const found = await rig.engine.find(LINE, { where: { id: loose(recordA(LINE)) }, fields: ['id'], context: SYSTEM } as any);
+    const found = await rig.engine.find(LINE, { where: { id: loose(recordA(LINE)) }, fields: ['id'], context: SYSTEM });
     expect((found as any[]).map((row) => row.id)).toEqual([recordA(LINE)]);
 
     expect(await rig.svc.getRecordLock(LINE, loose(recordA(LINE)), asUser(SUBMITTER))).toBeNull();
