@@ -39,6 +39,7 @@
     "zod": "^4.6.6"
   },
   "devDependencies": {
+    "@objectstack/metadata-protocol": "workspace:*",
     "@objectstack/objectql": "workspace:*",
     "@objectstack/service-analytics": "workspace:*",
     "@objectstack/service-record-context": "workspace:*",
