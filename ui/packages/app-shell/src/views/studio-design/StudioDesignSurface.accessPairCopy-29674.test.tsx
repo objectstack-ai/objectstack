@@ -25,9 +25,10 @@
  *    keeping every grant it holds; no write names the base;
  *  - CONTROL: the base's own (read-only) set lists the base's objects and
  *    reads no pair list for them;
- *  - objectstack#29809: the header's provenance chip follows the list's mark,
- *    Custom for a set the pair holds (copied or created there), Package for
- *    the base's own set.
+ *  - objectstack#29809: the header's provenance chip reads Custom for a set
+ *    the pair holds (copied or created there), Package for the base's own
+ *    set. Only the header's half is pinned here: the rail that drew the
+ *    matching mark beside it went with the Access pillar (objectstack#36905).
  */
 
 import '@testing-library/jest-dom/vitest';
@@ -290,12 +291,12 @@ describe('CONTROL: the base’s own set (objectstack#29674)', () => {
 });
 
 /**
- * objectstack#29809 (ADR-0146 D3) — the header's provenance chip and the
- * list's customization mark tell one story: a set the pair holds reads Custom
- * beside the list's Added, and the base's own set still reads Package. Same
- * harness: the real surface, area and page.
+ * objectstack#29809 (ADR-0146 D3) — the header's provenance chip: a set the
+ * pair holds reads Custom, and the base's own set still reads Package. Same
+ * harness: the real surface, area and page. The header alone is read here;
+ * no list is drawn beside the page.
  */
-describe('the header’s provenance chip follows the list’s mark (objectstack#29809)', () => {
+describe('the header’s provenance chip: Custom in the pair, Package on the base (objectstack#29809)', () => {
   /** A set created in the pair: its draft, never published. */
   const CREATED = 'pair_auditor';
   const chip = () => within(header()).getByTestId('perm-provenance-badge');

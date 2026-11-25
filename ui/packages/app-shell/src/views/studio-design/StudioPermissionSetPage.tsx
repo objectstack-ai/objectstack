@@ -185,7 +185,10 @@ export function StudioPermissionSetPage({
   const dropDraft = React.useCallback(
     async (ask: (item: string, neverPublished: boolean) => boolean, failed: (e: unknown) => void) => {
       const item = titleRef.current || name;
-      const neverPublished = !read?.published.has(name);
+      // Never published only when the package's sets were read and this one is
+      // not among them: an unanswered read says nothing, so the page stays and
+      // re-reads, and never sends a published set's page to the list.
+      const neverPublished = read !== null && !read.published.has(name);
       if (!ask(item, neverPublished)) return;
       setDiscarding(true);
       try {

@@ -143,7 +143,9 @@ export function areaDesignerItemOf(pathname: string, segment: string | null | un
   const root = `${studioMetadataAreaRoot(segment)}/`;
   if (!pathname.startsWith(root)) return null;
   const [rawType, rawName] = pathname.slice(root.length).split('/');
-  if (!rawType || !rawName) return null;
+  // `<root>/<type>/new` is the area's create page (it routes before the item),
+  // never an item called `new`.
+  if (!rawType || !rawName || rawName === 'new') return null;
   try {
     const type = decodeURIComponent(rawType);
     const name = decodeURIComponent(rawName);

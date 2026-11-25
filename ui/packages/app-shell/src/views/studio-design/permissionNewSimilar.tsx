@@ -4,8 +4,9 @@
  * objectstack#28573 (ADR-0146 D6) — "New similar" on a read-only base's
  * permission set: what the strip above the set says once the clone door
  * answered, and the navigation state the copy's landing rides on. Moved out
- * of the Access pillar unchanged (objectstack#36905), so the set's full-screen
- * page and the pillar say the same thing.
+ * of the deleted Access pillar unchanged (objectstack#36905): the set's
+ * full-screen page (its ⋯ menu) and the list of sets (a base row's action)
+ * both land here, and say the same thing.
  */
 
 import * as React from 'react';

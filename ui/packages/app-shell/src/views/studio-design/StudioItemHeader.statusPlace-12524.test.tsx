@@ -274,8 +274,10 @@ describe('the status chip sits in the same place in every pillar’s item header
     expect(within(header).queryByTestId('studio-item-status')).toBeNull();
     const link = within(header).getByTestId('studio-readonly-link');
     const row = titleRow(header);
-    // In the actions slot (the page's primary action group sits inside it).
-    expect(row.lastElementChild).toHaveClass('ml-auto');
-    expect(row.lastElementChild!.contains(link)).toBe(true);
+    // A direct child of the page's primary action group, the group a direct
+    // child of the right-aligned actions slot: not merely somewhere inside it.
+    const slot = row.lastElementChild;
+    expect(slot).toHaveClass('ml-auto');
+    expect(link.parentElement!.parentElement).toBe(slot);
   });
 });

@@ -849,6 +849,7 @@ function DefaultMetadataList({ type, appName }: { type: string; appName?: string
       size="sm"
       variant={config.createFields ? 'default' : 'outline'}
       onClick={handleCreate}
+      data-testid="metadata-list-create"
       title={
         config.createFields
           ? tFormat('engine.list.createHint', locale, { type: typeLabel })

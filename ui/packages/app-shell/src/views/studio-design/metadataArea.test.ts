@@ -150,6 +150,8 @@ describe('areaItemOpensDesignerPage — a permission set opens its matrix full-s
     // Not a designer page: another type, a list, the cross-package leg, another package's path.
     expect(areaDesignerItemOf(`/studio/${PKG}/metadata/hook/h1`, PKG)).toBeNull();
     expect(areaDesignerItemOf(`/studio/${PKG}/metadata/permission`, PKG)).toBeNull();
+    // The create page is no item: `new` is its route segment, not a set's name.
+    expect(areaDesignerItemOf(`/studio/${PKG}/metadata/permission/new`, PKG)).toBeNull();
     expect(areaDesignerItemOf('/studio/~all/metadata/permission/admin', '~all')).toBeNull();
     expect(areaDesignerItemOf(`/studio/other/metadata/permission/a`, PKG)).toBeNull();
     expect(areaDesignerItemOf(`/studio/${PKG}/metadata/permission/%E0%A4%A`, PKG)).toBeNull();

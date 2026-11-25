@@ -12,12 +12,20 @@
  *  - × opens the list of sets with the list's context;
  *  - "New similar" sits in ⋯ on a read-only base, and the copy opens at its
  *    own metadata address with the strip saying where it landed;
- *  - the draft discard drops this set's draft at its package.
+ *  - the draft discard drops this set's draft at its package; a declined
+ *    question discards nothing, a never-published set goes back to the list,
+ *    a read-only package offers no discard, and an unanswered read of the
+ *    package's sets never counts a set as never published;
+ *  - the matrix's sections behave as they did in the Access pillar
+ *    (objectui#12456): five tabs, Objects the landing, each other tab its
+ *    section, the facet panels kept mounted for the Save gate, the bulk strip
+ *    on every row with keyboard focus marking the row, CRUD granting the four
+ *    cells, and the sharing chip and the object count.
  */
 
 import '@testing-library/jest-dom/vitest';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter, Route, Routes, useLocation, useParams } from 'react-router-dom';
 // The matrix reaches `@objectstack/lint`'s dynamic imports; their first load is
 // paid here, at collection, never inside a case's clock (`check:test-source-alias`).
@@ -91,7 +99,12 @@ function makeClient(drafts: string[] = [], draft: ReturnType<typeof draftOf> | n
       return this;
     },
     list: vi.fn(async (type: string) => {
-      if (type === 'object') return [{ name: 'crm_lead', label: 'Lead' }];
+      if (type === 'object') {
+        return [
+          { name: 'crm_lead', label: 'Lead' },
+          { name: 'crm_account', label: 'Account' },
+        ];
+      }
       return type === 'permission' ? [{ name: SET, label: 'Sales rep' }] : [];
     }),
     listDrafts: vi.fn(async () => drafts.map((name) => ({ name }))),
@@ -241,6 +254,63 @@ describe('the draft discard (objectstack#36905)', () => {
     await waitFor(() => expect(clientImpl.listDrafts).toHaveBeenCalled());
     expect(screen.queryByTestId('access-discard-draft')).toBeNull();
   });
+
+  // objectstack#26836's discard cases, moved from the Access pillar's pin.
+  it('a declined question discards nothing, and the discard stays offered', async () => {
+    clientImpl = makeClient([SET]);
+    window.confirm = vi.fn(() => false) as unknown as typeof window.confirm;
+    mount(CUSTOM_PKG);
+    fireEvent.click(await screen.findByTestId('access-discard-draft', undefined, { timeout: 8000 }));
+    expect(window.confirm).toHaveBeenCalledTimes(1);
+    expect(clientImpl.reset).not.toHaveBeenCalled();
+    expect(screen.getByTestId('access-discard-draft')).toBeInTheDocument();
+    expect(where()).toBe(`/studio/${CUSTOM_PKG}/metadata/permission/${SET}?package=${CUSTOM_PKG}`);
+  });
+
+  it('a set never published: its question says so, and its discard goes back to the list of sets', async () => {
+    clientImpl = makeClient([SET]);
+    // The package's published sets do not hold it: only its draft does.
+    clientImpl.list.mockImplementation(async (type: string) => (type === 'object' ? [{ name: 'crm_lead', label: 'Lead' }] : []));
+    mount(CUSTOM_PKG);
+    fireEvent.click(await screen.findByTestId('access-discard-draft', undefined, { timeout: 8000 }));
+    expect(window.confirm).toHaveBeenCalledWith(
+      tFormat('engine.studio.access.discardConfirmUnpublished', 'en', { item: 'Sales rep' }),
+    );
+    await waitFor(() => expect(clientImpl.reset).toHaveBeenCalledWith('permission', SET, { state: 'draft', packageId: CUSTOM_PKG }));
+    await screen.findByTestId('list');
+    expect(where()).toBe(`/studio/${CUSTOM_PKG}/metadata/permission?package=${encodeURIComponent(CUSTOM_PKG)}`);
+  });
+
+  it('CONTROL: a published set\'s discard asks the published question and stays on the set', async () => {
+    clientImpl = makeClient([SET]);
+    mount(CUSTOM_PKG);
+    fireEvent.click(await screen.findByTestId('access-discard-draft', undefined, { timeout: 8000 }));
+    expect(window.confirm).toHaveBeenCalledWith(tFormat('engine.studio.access.discardConfirm', 'en', { item: 'Sales rep' }));
+    await waitFor(() => expect(clientImpl.reset).toHaveBeenCalledTimes(1));
+    expect(screen.queryByTestId('list')).toBeNull();
+    expect(where()).toBe(`/studio/${CUSTOM_PKG}/metadata/permission/${SET}?package=${CUSTOM_PKG}`);
+  });
+
+  it('a read-only package offers no discard, even with a pending draft', async () => {
+    clientImpl = makeClient([SET]);
+    mount(BASE_PKG);
+    await title();
+    await waitFor(() => expect(clientImpl.listDrafts).toHaveBeenCalled());
+    expect(screen.queryByTestId('access-discard-draft')).toBeNull();
+  });
+
+  it('an unanswered read of the package\'s sets never counts the set as never published: the AI discard stays on it', async () => {
+    clientImpl = makeClient([SET], draftOf('copilot'));
+    clientImpl.list.mockImplementation(async (type: string) => {
+      if (type === 'permission') throw new Error('sets unreadable');
+      return [{ name: 'crm_lead', label: 'Lead' }];
+    });
+    mount(CUSTOM_PKG);
+    fireEvent.click(await screen.findByTestId('studio-ai-draft-discard', undefined, { timeout: 8000 }));
+    await waitFor(() => expect(clientImpl.reset).toHaveBeenCalledWith('permission', SET, { state: 'draft', packageId: CUSTOM_PKG }));
+    expect(screen.queryByTestId('list')).toBeNull();
+    expect(where()).toBe(`/studio/${CUSTOM_PKG}/metadata/permission/${SET}?package=${CUSTOM_PKG}`);
+  });
 });
 
 describe('an AI draft gets the designers\' notice and discard (objectstack#36905 item 6, epic decision 1)', () => {
@@ -311,5 +381,117 @@ describe('"New similar" in ⋯ on a read-only base (objectstack#36905, #28573)',
     fireEvent.pointerDown(screen.getByTestId('studio-detail-more'), { button: 0, ctrlKey: false, pointerType: 'mouse' });
     await screen.findByText(en('perm.basics.editHint'));
     expect(screen.queryByTestId('access-new-similar')).toBeNull();
+  });
+});
+
+/**
+ * objectui#12456 / objectstack#34795 — the matrix's sections as the Access
+ * pillar's pin held them, now on the set's page (moved from
+ * `StudioDesignSurface.accessTabs-12456`; the pillar's own header half went
+ * with the pillar).
+ */
+describe('the matrix\'s five sections on the page (objectui#12456)', () => {
+  const sectionPanel = (key: string) =>
+    screen.getByTestId(key === 'objects' || key === 'capabilities' ? `perm-tabpanel-${key}` : `perm-facet-${key}`);
+
+  async function openWritable() {
+    mount(CUSTOM_PKG);
+    await screen.findByTestId('perm-row-crm_lead', undefined, { timeout: 8000 });
+  }
+
+  it('five tabs in order, Objects the landing', async () => {
+    await openWritable();
+    const header = screen.getByTestId('permission-detail-header');
+    const tabs = Array.from(header.querySelectorAll<HTMLElement>('[data-testid^="perm-tab-"]'));
+    expect(tabs.map((b) => b.textContent)).toEqual([
+      en('engine.studio.access.tab.objects'),
+      en('engine.studio.access.tab.capabilities'),
+      en('engine.studio.access.tab.rls'),
+      en('engine.studio.access.tab.tabs'),
+      en('engine.studio.access.tab.admin'),
+    ]);
+    expect(screen.getByTestId('perm-tab-objects')).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByTestId('perm-tabpanel-objects')).toBeVisible();
+    expect(screen.getByTestId('perm-tabpanel-capabilities')).not.toBeVisible();
+    expect(screen.getByTestId('perm-tabpanel-facets')).not.toBeVisible();
+  });
+
+  it('each other tab shows its own section and hides the rest', async () => {
+    await openWritable();
+    fireEvent.click(screen.getByTestId('perm-tab-capabilities'));
+    expect(screen.getByTestId('perm-tab-capabilities')).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByTestId('perm-tabpanel-objects')).not.toBeVisible();
+    expect(within(sectionPanel('capabilities')).getByText(en('perm.field.systemCapabilities'))).toBeVisible();
+
+    for (const [key, name] of [
+      ['rls', 'perm.rls.title'],
+      ['tabs', 'perm.tabs.title'],
+      ['admin', 'perm.admin.title'],
+    ] as const) {
+      fireEvent.click(screen.getByTestId(`perm-tab-${key}`));
+      expect(sectionPanel(key)).toBeVisible();
+      expect(sectionPanel(key)).toHaveAccessibleName(en(name));
+      for (const other of ['rls', 'tabs', 'admin'].filter((k) => k !== key)) {
+        expect(sectionPanel(other)).not.toBeVisible();
+      }
+    }
+  });
+
+  it('the facet panels stay mounted while Objects is open, so each still reports to the Save gate', async () => {
+    await openWritable();
+    for (const key of ['rls', 'tabs', 'admin']) {
+      expect(screen.getByTestId(`perm-facet-${key}`)).toBeInTheDocument();
+    }
+  });
+
+  it('the bulk strip draws on every row at rest: All · Read only · None, then the CRUD arm', async () => {
+    await openWritable();
+    await screen.findByTestId('perm-row-crm_account');
+    for (const obj of ['crm_lead', 'crm_account']) {
+      expect(within(screen.getByTestId(`perm-bulk-${obj}`)).getAllByRole('button').map((b) => b.textContent)).toEqual([
+        en('perm.bulk.all'),
+        en('perm.bulk.read'),
+        en('perm.bulk.none'),
+        en('perm.bulk.crud'),
+      ]);
+    }
+  });
+
+  it("keyboard focus on a row's first checkbox marks the row; focus leaving the row clears it", async () => {
+    await openWritable();
+    const row = await screen.findByTestId('perm-row-crm_account');
+    const first = within(row).getAllByRole('checkbox')[0];
+    act(() => first.focus());
+    expect(first).toHaveFocus();
+    expect(row).toHaveAttribute('data-active', 'true');
+    // The strip's buttons are in the row's tab order.
+    act(() => within(screen.getByTestId('perm-bulk-crm_account')).getAllByRole('button')[0].focus());
+    expect(row).toHaveAttribute('data-active', 'true');
+    act(() => within(screen.getByTestId('perm-row-crm_lead')).getAllByRole('checkbox')[0].focus());
+    await waitFor(() => expect(row).not.toHaveAttribute('data-active'));
+  });
+
+  it('CRUD grants the four CRUD cells and nothing else, and the header counts it', async () => {
+    await openWritable();
+    const row = await screen.findByTestId('perm-row-crm_account');
+    fireEvent.mouseEnter(row);
+    fireEvent.click(within(row).getByRole('button', { name: en('perm.bulk.crud') }));
+    for (const action of ['perm.action.create', 'perm.action.read', 'perm.action.edit', 'perm.action.delete']) {
+      expect(within(row).getByRole('checkbox', { name: `crm_account ${en(action)}` })).toBeChecked();
+    }
+    expect(within(row).getByRole('checkbox', { name: `crm_account ${en('perm.action.viewAll')}` })).not.toBeChecked();
+    await waitFor(() =>
+      expect(within(screen.getByTestId('permission-detail-header')).getByText('2 objects granted · 0 field overrides')).toBeInTheDocument(),
+    );
+  });
+
+  it('the sharing column is a chip that opens the overview on its object; the toolbar counts the objects', async () => {
+    await openWritable();
+    const row = screen.getByTestId('perm-row-crm_lead');
+    const chip = within(row).getByTestId('owd-badge-crm_lead');
+    expect(chip).toHaveTextContent(en('perm.owd.defaultPrivate'));
+    expect(screen.getByTestId('perm-object-count')).toHaveTextContent('2 objects');
+    fireEvent.click(chip);
+    await waitFor(() => expect(where()).toBe(`/studio/${CUSTOM_PKG}/owd?object=crm_lead`));
   });
 });
