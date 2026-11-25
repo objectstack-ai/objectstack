@@ -13,8 +13,10 @@
  *
  * This scope is where such a flow is listed and edited. It is the SAME
  * `StudioDesignSurface` with no package under it, not a second builder: the
- * generic `/studio/:packageId/:tab` route serves `/studio/~org/automations`,
- * and the surface reads the reserved segment as "no package".
+ * area's route serves `/studio/~org/metadata/flow?source=runtime` (the list)
+ * and `/studio/~org/metadata/flow/<name>?source=runtime` (the designer), and
+ * the surface reads the reserved segment as "no package". objectstack#36903 —
+ * the old `/studio/~org/automations` redirects there.
  *
  * ## The segment cannot name a package
  *

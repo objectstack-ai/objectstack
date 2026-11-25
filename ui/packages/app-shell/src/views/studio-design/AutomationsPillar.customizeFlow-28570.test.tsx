@@ -431,10 +431,13 @@ describe('Customize a read-only base’s flow into its pair (objectstack#28570)'
 
     // objectstack#29692 — the dialog names the flow by its listed label, the
     // label the base's flow list serves (objectstack#36903: the rail is gone).
-    const railText = 'Notify owner';
+    // Read off the header's title, which names the flow by that label too, so
+    // the case still cross-checks the dialog against what the page shows.
+    const listedLabel = within(header()).getByTestId('auto-canvas-caption').textContent ?? '';
+    expect(listedLabel).not.toBe('');
     fireEvent.click(within(await openRestorePopover()).getByTestId('studio-override-restore'));
     const dialog = await screen.findByTestId('studio-restore-original-dialog');
-    const vars = { item: railText!, package: 'HotCRM' };
+    const vars = { item: listedLabel, package: 'HotCRM' };
     expect(dialog).toHaveTextContent(tFormat('engine.studio.customize.restoreConfirm', 'en', vars));
     expect(dialog).toHaveTextContent(tFormat('engine.studio.customize.restoreFlowBody', 'en', vars));
     expect(dialog).toHaveTextContent(t('engine.studio.customize.restoreDraft', 'en'));
