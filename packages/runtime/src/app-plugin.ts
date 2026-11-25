@@ -521,7 +521,7 @@ export class AppPlugin implements Plugin {
             // wrappers and don't count.
             const APP_CATEGORY_KEYS = [
                 'objects', 'views', 'apps', 'pages', 'dashboards', 'reports',
-                'flows', 'workflows', 'triggers', 'agents', 'tools', 'skills',
+                'flows', 'workflows', 'triggers', 'agents', 'tools', 'skills', 'aiContexts',
                 'actions', 'permissions', 'positions', 'translations',
                 'sharingRules', 'data', 'emailTemplates',
                 'docs', 'books',

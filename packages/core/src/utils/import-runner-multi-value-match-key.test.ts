@@ -15,6 +15,7 @@
  */
 
 import { describe, it, expect, vi } from 'vitest';
+import { renderValidationMessage } from '@objectstack/spec/system';
 import { multiValueMatchKeyRefusal, runImport, type ImportProtocolLike } from './import-runner';
 import type { ExportFieldMeta } from './import-field-meta.js';
 
@@ -112,7 +113,11 @@ describe('[#27465] runImport fails every row of a key naming a multi-value field
       ...baseOpts, p, rows: ROWS, writeMode, dryRun, matchFields: ['code', 'work_object'], onProgress,
     });
 
-    const refusal = multiValueMatchKeyRefusal(['work_object'], metaMap)!.message;
+    // The row sentence is the runner's own catalog entry (no locale: English),
+    // naming the field by label, the API name here as the field carries none;
+    // the door's request refusal is a different sentence.
+    const refusal = renderValidationMessage({ messageKey: 'import_multi_value_match_key', label: 'work_object' }, {});
+    expect(refusal).not.toBe(multiValueMatchKeyRefusal(['work_object'], metaMap)!.message);
     expect(summary.results).toEqual([
       { row: 1, ok: false, action: 'failed', field: 'work_object', code: 'VALIDATION_ERROR', error: refusal },
       { row: 2, ok: false, action: 'failed', field: 'work_object', code: 'VALIDATION_ERROR', error: refusal },

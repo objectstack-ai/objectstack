@@ -131,18 +131,24 @@ describe("the palette's groups are the left menu's (decision 11)", () => {
 });
 
 describe('a pick leaves, re-enters or stays, as a menu entry does (decision 12)', () => {
-  const at = { pathname: '/studio/com.acme.crm/access', search: '?surface=permission%3Asales_rep&palette=1' };
+  const at = {
+    pathname: '/studio/com.acme.crm/metadata/permission/sales_rep',
+    search: '?package=com.acme.crm&palette=1',
+  };
 
   it('leaves for another page', () => {
     expect(studioPaletteDeparture('/studio/com.acme.crm/data?surface=object%3Acrm_account', at)).toBe('leave');
+    expect(studioPaletteDeparture('/studio/com.acme.crm/owd', at)).toBe('leave');
   });
 
   it('re-enters the page open on another query', () => {
-    expect(studioPaletteDeparture('/studio/com.acme.crm/access?surface=owd%3Aoverview', at)).toBe('reenter');
+    expect(
+      studioPaletteDeparture('/studio/com.acme.crm/metadata/permission/sales_rep?package=com.acme.crm&tab=history', at),
+    ).toBe('reenter');
   });
 
   it("stays on the page already shown, the palette's own keys and the order aside", () => {
-    expect(studioPaletteDeparture('/studio/com.acme.crm/access?surface=permission%3Asales_rep', at)).toBe('stay');
+    expect(studioPaletteDeparture('/studio/com.acme.crm/metadata/permission/sales_rep?package=com.acme.crm', at)).toBe('stay');
     expect(
       studioPaletteDeparture('/studio/x/metadata/hook?package=x&sort=name', {
         pathname: '/studio/x/metadata/hook',
@@ -217,6 +223,6 @@ describe('a pick leaves through the shell seam, and re-enters through the host (
 
   it("the re-entry's query matches the router's once the palette's own key is gone, in any order", () => {
     expect(studioSamePageSearch('?b=2&a=1&palette=1', '?a=1&b=2')).toBe(true);
-    expect(studioSamePageSearch('?surface=owd%3Aoverview', '?surface=permission%3Asales_rep')).toBe(false);
+    expect(studioSamePageSearch('?package=com.acme.crm&tab=history', '?package=com.acme.crm')).toBe(false);
   });
 });

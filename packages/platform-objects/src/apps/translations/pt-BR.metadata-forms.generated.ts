@@ -3147,5 +3147,8 @@ export const ptBRMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "Valor"
       }
     }
+  },
+  ai_context: {
+    label: "Pacote de contexto de IA"
   }
 };

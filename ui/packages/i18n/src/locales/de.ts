@@ -2443,6 +2443,14 @@ const de = {
       changesDrafted: "Als Entwurf gespeichert",
       changesFailed: "Nicht angewendet",
       discussing: "Angezeigt: {{target}}",
+      focus: {
+        pin: "Weiter zu diesem Datensatz fragen",
+        pinned: "Fragen zu: {{target}}",
+        remove: "Nicht mehr zu diesem Datensatz fragen",
+        switchPrompt: "Stattdessen zu „{{target}}“ fragen?",
+        switchAccept: "Wechseln",
+        switchDecline: "Beibehalten",
+      },
       changeVerb: {
         createObject: "Objekt erstellen",
         addField: "Feld hinzufügen",
@@ -2855,11 +2863,12 @@ const de = {
       resetViewTitle: "Stellt die eigenen Filter, Suche, Sortierung, Gruppierung, Spaltenanordnung, ausgeblendeten Felder, Dichte, Layout, Zeilenfarbe, Zeilennummern und Inline-Bearbeitung dieser Ansicht wieder her. Angeheftete Ansichten, Favoriten und die Art, wie Datensätze geöffnet werden, bleiben unverändert. Nur Ihre Liste ändert sich.",
       personalized: "Personalisiert",
       personalizedHeading: "Ihre Liste weicht von dieser Ansicht ab bei",
-      // objectstack#35955 — a list's unsaved changes: Discard and Save.
+      // objectstack#35955 — a list's unsaved changes: Reset and Update view
+      // (objectstack#36737, the view's own actions, as Twenty's).
       draft: {
-        discard: "Verwerfen",
+        discard: "Zurücksetzen",
         discardTitle: "Setzt die Liste auf den Stand der Ansicht zurück: Filter, Sortierung, Gruppierung, Spalten und Layout. Spaltenbreiten und Zeilenhöhe bleiben.",
-        save: "Speichern",
+        save: "Ansicht aktualisieren",
         heading: "Ungespeicherte Änderungen",
         partSeparator: ", ",
         saveToView: "In dieser Ansicht speichern",
@@ -3856,7 +3865,7 @@ const de = {
       allApps: "Alle Apps",
       editAppInStudio: "{{app}} im Studio bearbeiten",
       openAppInStudio: "{{app}} im Studio ansehen",
-      backToHome: "Zurück zur Startseite",
+      backToHome: "Zurück zur Startseite der App",
       settings: "Einstellungen",
       productHome: "{{product}} Startseite",
       addApp: 'App hinzufügen',
@@ -5305,6 +5314,9 @@ const de = {
         skill: '{{count}} KI-Fähigkeiten',
         skill_one: '{{count}} KI-Fähigkeit',
         skill_other: '{{count}} KI-Fähigkeiten',
+        ai_context: '{{count}} KI-Kontextpakete',
+        ai_context_one: '{{count}} KI-Kontextpaket',
+        ai_context_other: '{{count}} KI-Kontextpakete',
         datasource: '{{count}} Datenquellen',
         datasource_one: '{{count}} Datenquelle',
         datasource_other: '{{count}} Datenquellen',
