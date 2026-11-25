@@ -103,11 +103,11 @@ No provider's tokenizer ships with the platform, so the length is an estimate: `
 | Text | Counts |
 |:---|:---|
 | A CJK character or a full-width punctuation mark (`，。：（）「」`…) | 1.5 each |
-| A run of ASCII letters and digits (`OpenAI`, `8192`), however long | 1 per run |
+| A run of ASCII letters and digits | ceil(length / 4) per run — `8192` 1, `OpenAI` 2, `internationalization` 5 |
 | Any other punctuation mark or character | 1 each |
 | Whitespace | 0 |
 
-The sum is multiplied by 1.1 and rounded up. On Chinese regulation-like text and mixed Chinese/English text the estimate stays at or above OpenAI `cl100k` token counts (the sampled counts are recorded in the function's test). It is deliberately conservative: a text near a limit may be refused although the provider would have accepted it. Other providers' tokenizers are not sampled.
+The sum is multiplied by 1.1 and rounded up. On Chinese regulation-like text, mixed Chinese/English text and English-heavy text (long words, identifiers, code, URLs, figures) the estimate stays at or above OpenAI `cl100k` token counts (the sampled counts are recorded in the function's test). Long random strings — hashes, base64, UUIDs, digit runs of 16 or more — tokenize denser than four characters per token and can be estimated below their real count. It is deliberately conservative: a text near a limit may be refused although the provider would have accepted it. Other providers' tokenizers are not sampled.
 
 ## Why we did not build a vector DB
 

@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { describe, it, expect } from 'vitest';
-import { estimateTokens, TOKEN_ESTIMATE_MARGIN } from './token-estimate';
+import { ASCII_RUN_CHARS_PER_TOKEN, estimateTokens, TOKEN_ESTIMATE_MARGIN } from './token-estimate';
 
 describe('estimateTokens — the formula', () => {
   it('estimates an empty or all-whitespace text at 0', () => {
@@ -26,21 +26,25 @@ describe('estimateTokens — the formula', () => {
     expect(estimateTokens('a b c d e f g h i j')).toBe(11);
   });
 
-  it('counts each ASCII alphanumeric run 1, however long', () => {
-    // one run → 1 → 1.1 → 2
-    expect(estimateTokens('internationalization2026')).toBe(2);
-    // three runs, whitespace free → 3 → 3.3 → 4
-    expect(estimateTokens('alpha beta gamma')).toBe(4);
+  it('counts each ASCII alphanumeric run ceil(length / 4)', () => {
+    expect(ASCII_RUN_CHARS_PER_TOKEN).toBe(4);
+    // one 24-char run → 6 → 6.6 → 7
+    expect(estimateTokens('internationalization2026')).toBe(7);
+    // alpha(2) + beta(1) + gamma(2) = 5 → 5.5 → 6
+    expect(estimateTokens('alpha beta gamma')).toBe(6);
+    // a 4-char run is 1, a 5-char run is 2: 1 → 2, 2 → 3
+    expect(estimateTokens('abcd')).toBe(2);
+    expect(estimateTokens('abcde')).toBe(3);
   });
 
   it('counts other punctuation 1 each and breaks a run', () => {
-    // text, -, embedding, -, 3 → 5 → 5.5 → 6
-    expect(estimateTokens('text-embedding-3')).toBe(6);
+    // text(1) + -(1) + embedding(3) + -(1) + 3(1) = 7 → 7.7 → 8
+    expect(estimateTokens('text-embedding-3')).toBe(8);
   });
 
   it('counts a mixed text term by term', () => {
-    // 使用(3) + OpenAI(1) + 模型(3) + ，(1.5) + 8192(1) + 个(1.5) + token(1) + 。(1.5) = 13.5 → 14.85 → 15
-    expect(estimateTokens('使用 OpenAI 模型，8192 个 token。')).toBe(15);
+    // 使用(3) + OpenAI(2) + 模型(3) + ，(1.5) + 8192(1) + 个(1.5) + token(2) + 。(1.5) = 15.5 → 17.05 → 18
+    expect(estimateTokens('使用 OpenAI 模型，8192 个 token。')).toBe(18);
   });
 });
 
@@ -65,8 +69,30 @@ const CL100K_SAMPLES: ReadonlyArray<readonly [id: string, cl100k: number, text: 
   ['mixed-5', 81, 'Q3 营收同比增长 23.5%，达到 RMB 1,280 万元；其中 SaaS 订阅收入占比 67%，ARR 突破 USD 2.1M。CEO 表示 2027 年将重点投入 AI Agent 与 RAG 能力建设。'],
 ];
 
-describe('estimateTokens — never below cl100k on Chinese and mixed text', () => {
+/**
+ * English-heavy reference counts — long words, identifiers, code, URLs, figures
+ * and digit runs — sampled the same way and on the same date as
+ * {@link CL100K_SAMPLES}. They pin the ASCII-run rule: one token per run, the
+ * rule this module first shipped with, falls below cl100k on six of these
+ * eight; ceil(length / 4) does not.
+ */
+const CL100K_ENGLISH_SAMPLES: ReadonlyArray<readonly [id: string, cl100k: number, text: string]> = [
+  ['en-long-words', 22, 'Internationalization, telecommunications infrastructure, counterrevolutionaries and electroencephalography characterize interdisciplinary microarchitectures.'],
+  ['en-identifiers', 25, 'SELECT customerAccountIdentifier, organizationSubscriptionTier FROM sys_organization_subscription WHERE subscriptionRenewalTimestamp > 1732492800000'],
+  ['en-code', 45, 'export async function reconcileSubscriptionEntitlements(organizationIdentifier: string, entitlementSnapshot: EntitlementSnapshot): Promise<ReconciliationOutcome> { return await entitlementReconciler.reconcile(organizationIdentifier, entitlementSnapshot); }'],
+  ['en-url', 40, 'See https://docs.siliconflow.com/en/api-reference/embeddings/create-embeddings and https://help.aliyun.com/zh/model-studio/text-embedding-synchronous-api for the limits.'],
+  ['en-numbers', 45, 'Revenue grew 23.5% to 12,800,000 in Q3 2026; ARR reached 2,100,000 and churn fell to 1.8% across 4,215 accounts.'],
+  ['en-digits-12', 8, 'Order 123456789012 shipped.'],
+  ['en-digits-8', 7, 'Order 12345678 shipped.'],
+  ['en-prose', 25, 'The embedder refuses an input whose estimate exceeds the model\'s documented limit, so the provider never silently truncates the text.'],
+];
+
+describe('estimateTokens — never below cl100k on Chinese, mixed and English-heavy text', () => {
   it.each(CL100K_SAMPLES)('%s (cl100k %i)', (_id, cl100k, text) => {
+    expect(estimateTokens(text)).toBeGreaterThanOrEqual(cl100k);
+  });
+
+  it.each(CL100K_ENGLISH_SAMPLES)('%s (cl100k %i)', (_id, cl100k, text) => {
     expect(estimateTokens(text)).toBeGreaterThanOrEqual(cl100k);
   });
 

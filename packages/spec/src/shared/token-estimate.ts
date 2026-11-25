@@ -9,8 +9,8 @@
  * It is a conservative upper estimate, not a tokenizer: no provider's
  * vocabulary ships with the platform, and the embedders it talks to
  * (OpenAI, DashScope, BigModel, BGE…) each tokenize differently. It is built
- * to sit at or above OpenAI `cl100k` counts on Chinese and mixed
- * Chinese/English prose — the text this platform's knowledge sources carry.
+ * to sit at or above OpenAI `cl100k` counts on Chinese, mixed
+ * Chinese/English and English-heavy text (long words, numbers, URLs, code).
  *
  * ## Formula
  *
@@ -21,8 +21,8 @@
  *    kana, Hangul syllables, the CJK Symbols and Punctuation block
  *    (`U+3000`–`U+303F`) and the Halfwidth and Fullwidth Forms block
  *    (`U+FF00`–`U+FFEF`);
- *  - **1** for each run of ASCII letters and digits (`[A-Za-z0-9]+`), however
- *    long;
+ *  - **ceil(length / 4)** for each run of ASCII letters and digits
+ *    (`[A-Za-z0-9]+`): `OpenAI` counts 2, `internationalization` 5, `8192` 1;
  *  - **1** for each other punctuation mark or character (ASCII punctuation,
  *    non-ASCII letters, symbols, emoji);
  *  - **0** for whitespace.
@@ -34,31 +34,41 @@
  */
 export function estimateTokens(text: string): number {
   let sum = 0;
-  let inAsciiRun = false;
+  let asciiRun = 0;
   for (const ch of text) {
     const cp = ch.codePointAt(0)!;
     if (isAsciiAlphanumeric(cp)) {
-      if (!inAsciiRun) {
-        sum += 1;
-        inAsciiRun = true;
-      }
+      asciiRun += 1;
       continue;
     }
-    inAsciiRun = false;
+    sum += asciiRunTokens(asciiRun);
+    asciiRun = 0;
     if (isCjkOrFullWidth(cp)) {
       sum += 1.5;
     } else if (!/\s/u.test(ch)) {
       sum += 1;
     }
   }
+  sum += asciiRunTokens(asciiRun);
   if (sum === 0) return 0;
   // The epsilon absorbs binary floating-point noise (10 × 1.1 is
   // 11.000000000000002), so an exact product is not rounded up one extra.
   return Math.ceil(sum * TOKEN_ESTIMATE_MARGIN - 1e-9);
 }
 
+/**
+ * How many ASCII letters and digits one token covers in {@link estimateTokens}:
+ * a run of `n` counts `ceil(n / 4)`.
+ */
+export const ASCII_RUN_CHARS_PER_TOKEN = 4;
+
 /** The safety factor {@link estimateTokens} multiplies its sum by. */
 export const TOKEN_ESTIMATE_MARGIN = 1.1;
+
+/** The tokens one run of `length` ASCII letters and digits counts (0 for no run). */
+function asciiRunTokens(length: number): number {
+  return Math.ceil(length / ASCII_RUN_CHARS_PER_TOKEN);
+}
 
 function isAsciiAlphanumeric(cp: number): boolean {
   return (
