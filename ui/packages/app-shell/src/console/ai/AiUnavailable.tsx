@@ -24,8 +24,8 @@ import { Link } from 'react-router-dom';
 import { useWorkspaceAdminStatus } from '@object-ui/auth';
 import { Button, Empty, EmptyDescription, EmptyTitle } from '@object-ui/components';
 import { useCanAuthorMetadata } from '../../hooks/useCanAuthorMetadata.js';
-import { isAiStudioEnabled } from '../../runtime-config.js';
 import { usePhoneViewport } from '../../hooks/usePhoneViewport.js';
+import { isAiStudioEnabled } from '../../runtime-config.js';
 import { STUDIO_NEW_PACKAGE_PATH } from '../../views/studio-design/studioNewPackage.js';
 
 export function AiUnavailable({
