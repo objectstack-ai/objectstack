@@ -377,3 +377,25 @@ describe('KnowledgeServicePlugin wires the field gate to the registered `securit
     expect(isServiceNotRegisteredError(new Error('boom'), 'security')).toBe(false);
   });
 });
+
+// The field gate asks about the field the title is read from — the object's
+// display field (`documentTitleField`, ADR-0161 K5) — not a field named `title`.
+describe('field gate — the title field is the object\'s display field', () => {
+  const ACCOUNT: ObjectDef = {
+    name: 'account',
+    fields: { id: { type: 'text' }, name: { type: 'text' }, title: { type: 'text' }, body: { type: 'textarea' } },
+  };
+
+  it('refusal: a caller who may not query the display field gets no hit, even with `title` visible', async () => {
+    const hideName = makeSecurity(() => ['id', 'title', 'body']);
+    const { svc, searched } = setup({ objects: [ACCOUNT], sources: [objectSource('s', 'account', ['body'])], security: hideName });
+    expect(await svc.search('q', { executionContext: MEMBER })).toEqual([]);
+    expect(searched()).toEqual([]);
+  });
+
+  it('preservation: hiding a `title` field that is not the display field does not refuse the source', async () => {
+    const hideTitle = makeSecurity(() => ['id', 'name', 'body']);
+    const { svc } = setup({ objects: [ACCOUNT], sources: [objectSource('s', 'account', ['body'])], security: hideTitle });
+    expect(ids(await svc.search('q', { executionContext: MEMBER }))).toEqual(['s']);
+  });
+});

@@ -1,6 +1,6 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, expectTypeOf, vi } from 'vitest';
 import { LiteKernel, ObjectKernel } from '@objectstack/core';
 import type { Plugin, PluginContext } from '@objectstack/core';
 import { KnowledgeServicePlugin } from '../knowledge-service-plugin.js';
@@ -9,6 +9,8 @@ import {
   KnowledgeService,
   LIST_DOCUMENTS_PAGE_SIZE,
   REINDEX_PAGE_SIZE,
+  SEARCH_FIRST_ROUND_FACTOR,
+  SEARCH_REFILL_FACTOR,
   computeDocHash,
   documentIdFor,
   recordToDocument,
@@ -1464,5 +1466,204 @@ describe('KnowledgeService — an event sync whose tenancy posture cannot be rea
     expect(adapter.upsertSpy).not.toHaveBeenCalled();
     expect(adapter.deleteSpy).not.toHaveBeenCalled();
     expect(warn).toHaveBeenCalledWith(expect.stringContaining('tenancy store down'));
+  });
+});
+
+// The permission re-check runs after ranking, so a caller who may read few of
+// the matching rows must not be answered from what is left of `topK` ranked
+// hits: object sources are over-asked, and refilled once when short.
+describe('KnowledgeService — search refills after the permission filter', () => {
+  const MEMBER = { userId: 'u1', positions: ['member'], permissions: [], isSystem: false };
+  const SYSTEM = { positions: [], permissions: [], isSystem: true };
+
+  /** `n` hits of one source, best first: rank i scores 1 - i/1000 and names `rec_i`. */
+  function rankedHits(sourceId: string, n: number): KnowledgeHit[] {
+    return Array.from({ length: n }, (_, i) => ({
+      chunkId: `${sourceId}-c${i}`, documentId: `${sourceId}:rec_${i}`, sourceId,
+      sourceRecordId: `rec_${i}`, score: 1 - i / 1000, snippet: `passage ${i}`,
+    }));
+  }
+
+  /** An adapter that ranks like a real one: the best `min(topK, cap)` of `corpus` for the source asked. */
+  function rankingAdapter(corpus: Record<string, KnowledgeHit[]>, cap = Infinity) {
+    const searchSpy = vi.fn(async (_q: string, opts: { source: KnowledgeSource; topK: number }) =>
+      (corpus[opts.source.id] ?? []).slice(0, Math.min(opts.topK, cap)));
+    return { id: 'memory', upsert: vi.fn(async () => undefined), delete: vi.fn(async () => undefined), search: searchSpy, searchSpy };
+  }
+
+  /** An engine whose re-check as a non-system caller admits only `readable` record ids. */
+  function engineReading(readable: string[]) {
+    const find = vi.fn(async (_obj: string, q: { where?: { id?: { $in?: string[] } }; context?: { isSystem?: boolean } }) =>
+      (q.where?.id?.$in ?? []).filter((id) => q.context?.isSystem || readable.includes(id)).map((id) => ({ id })));
+    return { find } as unknown as IDataEngine & { find: typeof find };
+  }
+
+  function setup(corpus: Record<string, KnowledgeHit[]>, readable: string[], opts: { cap?: number; sources?: string[] } = {}) {
+    const adapter = rankingAdapter(corpus, opts.cap);
+    const engine = engineReading(readable);
+    const debug = vi.fn();
+    const svc = new KnowledgeService({ dataEngine: engine, logger: { debug, warn: vi.fn(), error: vi.fn() } });
+    svc.registerAdapter('memory', adapter);
+    for (const id of opts.sources ?? ['s1']) svc.registerSource(objectSource(id, 'task'));
+    const asked = () => adapter.searchSpy.mock.calls.map((c) => [(c[1] as { source: KnowledgeSource }).source.id, (c[1] as { topK: number }).topK]);
+    return { svc, adapter, engine, debug, asked };
+  }
+
+  it('the first round asks topK × 5 and the refill topK × 20', () => {
+    expect(SEARCH_FIRST_ROUND_FACTOR).toBe(5);
+    expect(SEARCH_REFILL_FACTOR).toBe(20);
+  });
+
+  it('100 matching hits, the caller may read 5 spread across them: all 5 are answered, best first', async () => {
+    const readable = ['rec_3', 'rec_30', 'rec_50', 'rec_70', 'rec_99'];
+    const { svc, asked } = setup({ s1: rankedHits('s1', 100) }, readable);
+    const out = await svc.search('q', { topK: 5, executionContext: MEMBER });
+    expect(out.map((h) => h.sourceRecordId)).toEqual(readable);
+    // Round one: 25, one survivor; the source answered all 25, so one refill of 100.
+    expect(asked()).toEqual([['s1', 25], ['s1', 100]]);
+  });
+
+  it('a readable row beyond the refill cap is not reached: fewer than topK are answered', async () => {
+    const { svc, asked } = setup({ s1: rankedHits('s1', 150) }, ['rec_10', 'rec_120']);
+    const out = await svc.search('q', { topK: 5, executionContext: MEMBER });
+    expect(out.map((h) => h.sourceRecordId)).toEqual(['rec_10']);
+    expect(asked()).toEqual([['s1', 25], ['s1', 100]]); // two rounds, never a third
+  });
+
+  it('enough survivors in round one: no refill', async () => {
+    const readable = Array.from({ length: 25 }, (_, i) => `rec_${i}`).filter((_, i) => i % 2 === 0);
+    const { svc, asked } = setup({ s1: rankedHits('s1', 100) }, readable);
+    const out = await svc.search('q', { topK: 5, executionContext: MEMBER });
+    expect(out.map((h) => h.sourceRecordId)).toEqual(['rec_0', 'rec_2', 'rec_4', 'rec_6', 'rec_8']);
+    expect(asked()).toEqual([['s1', 25]]);
+  });
+
+  it('an adapter that caps topK answers fewer than asked, so it is not asked again', async () => {
+    const { svc, asked } = setup({ s1: rankedHits('s1', 100) }, ['rec_50'], { cap: 10 });
+    expect(await svc.search('q', { topK: 5, executionContext: MEMBER })).toEqual([]);
+    expect(asked()).toEqual([['s1', 25]]);
+  });
+
+  it('several sources: only a source that answered all it was asked is refilled; the others keep round one', async () => {
+    const corpus = { s1: rankedHits('s1', 100), s2: rankedHits('s2', 3) };
+    const { svc, asked } = setup(corpus, ['rec_1', 'rec_60'], { sources: ['s1', 's2'] });
+    const out = await svc.search('q', { topK: 5, executionContext: MEMBER });
+    // s1:rec_1 and s2:rec_1 score the same; their order between them is not pinned.
+    expect(out.map((h) => h.documentId).sort()).toEqual(['s1:rec_1', 's1:rec_60', 's2:rec_1']);
+    expect(out[2].documentId).toBe('s1:rec_60');
+    expect(asked()).toEqual([['s1', 25], ['s2', 25], ['s1', 100]]);
+  });
+
+  it('a refill the adapter fails keeps the source\'s round-one survivors', async () => {
+    const { svc, adapter } = setup({ s1: rankedHits('s1', 100) }, ['rec_2']);
+    const first = adapter.searchSpy.getMockImplementation()!;
+    adapter.searchSpy.mockImplementationOnce(first).mockImplementationOnce(async () => {
+      throw new Error('store unavailable');
+    });
+    const out = await svc.search('q', { topK: 5, executionContext: MEMBER });
+    expect(out.map((h) => h.sourceRecordId)).toEqual(['rec_2']);
+    expect(adapter.searchSpy).toHaveBeenCalledTimes(2);
+  });
+
+  it('the system identity: one round of topK, no refill, no re-check', async () => {
+    const { svc, asked, engine } = setup({ s1: rankedHits('s1', 100) }, []);
+    const out = await svc.search('q', { topK: 5, executionContext: SYSTEM });
+    expect(out).toHaveLength(5);
+    expect(asked()).toEqual([['s1', 5]]);
+    expect(engine.find).not.toHaveBeenCalled();
+  });
+
+  it('no context: object sources stay unsearched (fail closed), a file source is asked topK once', async () => {
+    const { svc, adapter } = setup({ s1: rankedHits('s1', 100), f1: rankedHits('f1', 100) }, []);
+    svc.registerSource({ id: 'f1', label: 'f1', adapter: 'memory', source: { kind: 'file', paths: ['x.md'] } as KnowledgeSource['source'] });
+    const out = await svc.search('q', { topK: 5 });
+    expect(out.every((h) => h.sourceId === 'f1')).toBe(true);
+    expect(adapter.searchSpy.mock.calls.map((c) => [(c[1] as { source: KnowledgeSource }).source.id, (c[1] as { topK: number }).topK]))
+      .toEqual([['f1', 5]]);
+  });
+
+  it('a file source beside an object source is asked topK once; only the object source is refilled', async () => {
+    // The file source answers all 5 it is asked, but only 2 exist; the object source's rows are unreadable.
+    const { svc, asked } = setup({ s1: rankedHits('s1', 100), f1: rankedHits('f1', 2) }, []);
+    svc.registerSource({ id: 'f1', label: 'f1', adapter: 'memory', source: { kind: 'file', paths: ['x.md'] } as KnowledgeSource['source'] });
+    const out = await svc.search('q', { topK: 5, executionContext: MEMBER });
+    expect(out.map((h) => h.sourceId)).toEqual(['f1', 'f1']);
+    expect(asked()).toEqual([['s1', 25], ['f1', 5], ['s1', 100]]);
+  });
+
+  it('the count the re-check removed goes to the debug log only; the answer and its type are unchanged', async () => {
+    const { svc, debug } = setup({ s1: rankedHits('s1', 100) }, ['rec_7']);
+    const out = await svc.search('q', { topK: 5, executionContext: MEMBER });
+    expect(out).toEqual([rankedHits('s1', 100)[7]]);
+    expect(debug).toHaveBeenCalledWith(expect.stringContaining('removed 99 hit(s)'));
+    expectTypeOf(svc.search).returns.toEqualTypeOf<Promise<KnowledgeHit[]>>();
+  });
+});
+
+// ADR-0161 K5: the title a document carries is declared — the object's display
+// field (ADR-0079 `resolveDisplayField`), never a field that happens to be
+// named `title`.
+describe('recordToDocument reads the title from the object\'s display field', () => {
+  const src: KnowledgeSource = {
+    id: 's1', label: 's1', adapter: 'memory',
+    source: { kind: 'object', object: 'invoice', contentFields: ['body'] } as ObjectKnowledgeSource,
+  };
+  const title = (record: Record<string, unknown>, schema?: unknown) =>
+    recordToDocument(src, src.source as ObjectKnowledgeSource, { id: 'r1', body: 'B', ...record }, schema).title;
+
+  it('an explicit nameField over a field not called title', () => {
+    const schema = { nameField: 'subject', fields: { subject: { type: 'text' }, title: { type: 'text' }, body: { type: 'textarea' } } };
+    expect(title({ subject: 'Quarterly policy', title: 'ignored' }, schema)).toBe('Quarterly policy');
+  });
+
+  it('a derived display field: `name` wins over `title`', () => {
+    const schema = { fields: { title: { type: 'text' }, name: { type: 'text' }, body: { type: 'textarea' } } };
+    expect(title({ name: 'Acme', title: 'Mr' }, schema)).toBe('Acme');
+  });
+
+  it('a formula name field (text result) and an autonumber name field', () => {
+    const formula = { nameField: 'label', fields: { label: { type: 'formula', returnType: 'text' }, body: { type: 'textarea' } } };
+    expect(title({ label: 'INV — Acme' }, formula)).toBe('INV — Acme');
+    const autonumber = { nameField: 'number', fields: { number: { type: 'autonumber' }, body: { type: 'textarea' } } };
+    expect(title({ number: 'INV-0042' }, autonumber)).toBe('INV-0042');
+    expect(title({ number: 42 }, autonumber)).toBe('42');
+  });
+
+  it('a withheld name field (credential-class or internal) gives no title', () => {
+    const internal = { nameField: 'digest', fields: { digest: { type: 'text', internal: true }, body: { type: 'textarea' } } };
+    expect(title({ digest: 'synthetic-internal-91c2' }, internal)).toBeUndefined();
+    const secret = { nameField: 'token', fields: { token: { type: 'secret' }, body: { type: 'textarea' } } };
+    expect(title({ token: 'synthetic-credential-5b1d' }, secret)).toBeUndefined();
+  });
+
+  it('an empty value, a value that is not text or a number, or no resolvable field gives no title', () => {
+    const schema = { nameField: 'subject', fields: { subject: { type: 'text' }, body: { type: 'textarea' } } };
+    expect(title({ subject: '  ' }, schema)).toBeUndefined();
+    expect(title({ subject: { nested: true } }, schema)).toBeUndefined();
+    expect(title({ title: 'not the display field' }, { fields: { amount: { type: 'number' }, body: { type: 'json' } } })).toBeUndefined();
+    // A nameField the definition does not declare is no title source.
+    expect(title({ ghost: 'G' }, { nameField: 'ghost', fields: { body: { type: 'textarea' } } })).toBeUndefined();
+  });
+
+  it('no object definition: a field named title, as before', () => {
+    expect(title({ title: 'Hello' })).toBe('Hello');
+    expect(title({ name: 'Acme' })).toBeUndefined();
+  });
+
+  it('the event sync and the reindex walk build the title from the engine\'s definition', async () => {
+    const schema = { name: 'invoice', nameField: 'subject', fields: { subject: { type: 'text' }, body: { type: 'textarea' } } };
+    const row = { id: 'r1', subject: 'Travel policy', body: 'B' };
+    const find = vi.fn(async (_obj: string, q: { where?: unknown }) => {
+      const w = q.where as { id?: unknown; $and?: unknown } | undefined;
+      return w === undefined || (w as { id?: unknown }).id === 'r1' ? [row] : [];
+    });
+    const svc = new KnowledgeService({ dataEngine: { find, getSchema: () => schema } as unknown as IDataEngine });
+    const adapter = makeAdapter('memory');
+    svc.registerAdapter('memory', adapter);
+    svc.registerSource(src);
+    await svc.handleRecordUpsert('invoice', { id: 'r1' });
+    await svc.reindexSource('s1');
+    const titles = adapter.upsertSpy.mock.calls.flatMap((c) => (c[0] as KnowledgeDocument[]).map((d) => d.title));
+    expect(titles).toEqual(['Travel policy', 'Travel policy']);
   });
 });
