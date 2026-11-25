@@ -73,7 +73,7 @@ export function StudioAreaAppOpen({
     const type: StudioAppEditType = target.kind === 'item' ? target.type : 'report';
     const name = target.kind === 'item' ? target.name : '';
     void (async () => {
-      let apps: StudioAppTarget[] = [];
+      let apps: StudioAppTarget[];
       try {
         const listed = (await client.list('app', { packageId })) as Array<Record<string, unknown>>;
         apps = (listed || [])
