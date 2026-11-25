@@ -13,7 +13,7 @@ export {
 } from './record-context-tools.js';
 export type { RecordContextTools } from './record-context-tools.js';
 export type { RecordContextDoor } from './door.js';
-export { RECORD_CONTEXT_BODY_MAX_CHARS } from './body-outline.js';
+export { RECORD_CONTEXT_BODY_MAX_CHARS, RECORD_CONTEXT_OUTLINE_MAX_ENTRIES } from './body-outline.js';
 export {
   fieldMapOf,
   lookupTargetOf,
