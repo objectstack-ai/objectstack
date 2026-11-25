@@ -78,6 +78,9 @@ const zh = {
     autofillNoCurrency: '未填入{{field}}：所选金额为 {{amount}}，但此处尚未选择币种。请先选择币种，再填写{{field}}。',
     autofillCurrencyUnread: '未填入{{field}}：所选金额为 {{amount}}，但无法读取此处的币种。请先确认币种，再填写{{field}}。',
     autofillKept: '{{field}}仍保留原来的值。',
+    autofillNowSameCurrency: '选取时未填入{{field}}。记录现已改为 {{to}}：重新选取即可填入 {{amount}}。',
+    autofillNowSameCurrencyHeld: '选取时未填入{{field}}，且仍保留原来的值。记录现已改为 {{to}}：请先清空{{field}}，再重新选取即可填入 {{amount}}。',
+    autofillCopiedUnder: '{{field}}按 {{amount}} 带入，但记录现已改为 {{to}}。如需调整，请按 {{to}} 填写{{field}}。',
   },
   common: {
     // objectui#13461 — a disclosure toggle's name (the tree-view node toggle).
@@ -654,6 +657,7 @@ const zh = {
       needsWholeRows:
         '分组需要全部记录，但此表格只收到其中一页，因此无法统计分组。请传入全部记录，或让表格从实现了 queryGroupHeaders 的数据源获取记录。',
       draftOnly: '未按 {{fields}} 分组：它仅存在于草稿中，发布后才生效。',
+      moreGroupsNotLoaded: '更多分组未加载：此视图的分组数超过服务器单次读取返回的数量，因此只列出了部分分组。',
     },
     // objectui#4024 — column-footer aggregate prefixes, keyed by the spec's
     // `ColumnSummary` vocabulary. `pattern` owns the label/value join so this
@@ -3910,7 +3914,7 @@ const zh = {
     build: {
       title: '构建应用',
       noCapability: '本系统不提供构建应用功能 — 它需要「管理元数据」权限,而你的账号没有该权限。',
-      inStudio: '在 Studio 中新建',
+      inStudio: '新建空白应用',
     },
     template: {
       title: '从模板开始',
@@ -5414,7 +5418,12 @@ const zh = {
     bulkRejected: '已驳回 {{count}} 条请求',
     bulkRejected_one: '已驳回 {{count}} 条请求',
     bulkRejected_other: '已驳回 {{count}} 条请求',
-    bulkPartial: '{{ok}} 条成功，{{fail}} 条失败：{{which}}',
+    bulkPartialSummary: '{{ok}} 条成功，{{fail}} 条失败',
+    bulkFailureLine: '{{title}}：{{reason}}',
+    bulkFailuresShowAll: '查看全部（{{n}}）',
+    bulkFailuresTitle: '未处理：{{n}} 条',
+    bulkFailuresBody: '以下请求保持原状，每条都附有原因。',
+    close: '关闭',
     rejectOneTitle: '驳回“{{title}}”？',
     rejectOneBody: '将驳回该请求并通知申请人。',
     rejectTitle: '驳回该请求？',

@@ -131,6 +131,7 @@ source: {
   contentFields: ['title', 'body'],       // at least one, required
   metadataFields: ['category', 'author'], // optional, carried onto the document
   where: { status: 'published' },         // optional ObjectQL filter
+  split: { strategy: 'markdown', maxChars: 600 }, // optional; see 3.5
 }
 
 // file — every object under a storage prefix
@@ -171,8 +172,19 @@ Canonical shapes shared by every adapter:
   and `indexDocument` refuses a document that already carries either; the
   adapter stores them and returns `docHash` as stored, and never computes or
   alters either.
-- `KnowledgeChunk` — adapter-produced chunk of a document. The framework
-  does **not** chunk; adapters do.
+- `KnowledgeDocument.chunks?` — the document's passages, cut by the
+  service's splitter (see [3.5 The split](#35-the-split)). Set by the service,
+  and only on a document handed to an adapter that declares
+  `capabilities.chunks`; `indexDocument` refuses a document that already
+  carries them. Derived from `content`, so not part of `docHash`.
+- `KnowledgeChunk` — one passage: `id` (the service sets it to
+  `${documentId}#${index}`, so a hit's `chunkId` is the same on every adapter),
+  `documentId`, `index`, `content` (what the adapter embeds and returns as a
+  snippet), and `headingPath?` (the headings it sits under, outermost first,
+  under the `markdown` strategy). The adapter indexes each passage as given and
+  does not split it again. A passage has no `metadata` of its own: it takes its
+  document's `metadata`. The chunk's former `metadata` key, which nothing wrote
+  or read, is retired, and a chunk that carries one is refused with the fix.
 - `KnowledgeHit` — a search result (`chunkId`, `documentId`, `score`,
   `snippet`, `sourceRecordId?`, `metadata`).
 
@@ -237,13 +249,16 @@ the all-important `executionContext` (from the permission-aware tool
 execution work — see `actions-as-tools.mdx`). `KnowledgeReindexOptions`
 accepts `dryRun` and `limit`; `reindexSource` returns a
 `KnowledgeReindexResult` (`indexed`, `discovered`, `skipped`, `purged`,
-`ok`, …) — see [Reindex: skip and purge](#reindex-skip-and-purge).
+`failed`, `failures`, `ok`, …) — see [Reindex: skip and purge](#reindex-skip-and-purge)
+and [3.5 The split](#35-the-split).
 
 ### 3.4 `IKnowledgeAdapter` (implemented by plugins)
 
 ```ts
 interface IKnowledgeAdapter {
   readonly id: string;
+  readonly capabilities?: { chunks?: boolean };        // takes the service's passages
+  readonly embedding?: { maxInputTokens?: number };     // what its embedder accepts
   upsert(docs: KnowledgeDocument[], ctx: AdapterContext): Promise<void>;
   search(query: string, opts: AdapterSearchOptions): Promise<KnowledgeHit[]>;
   delete(documentIds: string[], ctx: AdapterContext): Promise<void>;
@@ -255,10 +270,18 @@ interface IKnowledgeAdapter {
 }
 ```
 
-The adapter surface is **deliberately minimal**: no embedding
-management, no chunk strategy, no rerank toggles. Those are the
-adapter's private concerns. Adapters that need extra knobs expose them
-in their plugin options.
+The adapter contract carries what an adapter **reports**, never how it
+is configured: no embedding configuration, no rerank toggles. Those are the
+adapter's private concerns; adapters that need extra knobs expose them in
+their plugin options. The split is the service's (ADR-0161 K1): an adapter
+that declares `capabilities.chunks` receives every document with the
+service's passages and indexes them as given; one that does not receives
+whole documents, without `chunks`, and splits them itself, as before.
+`embedding.maxInputTokens` reports the longest input the adapter's embedder
+accepts (an adapter fills it from `IEmbedder.maxInputTokens`); the service
+reads it each time it splits, never once at boot, because the embedder may
+register later — an adapter that resolves its embedder late serves it from a
+getter.
 
 Every member past `upsert` / `search` / `delete` is optional (ADR-0161
 K8): an adapter that lacks one keeps working, and the service does what it
@@ -280,17 +303,75 @@ import { runKnowledgeAdapterContract } from '@objectstack/service-knowledge/test
 runKnowledgeAdapterContract({
   name: 'my-adapter',
   makeAdapter: () => new MyAdapter(/* a fresh, empty store */),
-  implements: { listDocuments: true, organizationIds: true },
+  implements: { listDocuments: true, chunks: true, organizationIds: true },
 });
 ```
 
 It covers upsert / search / delete, `listDocuments` page boundaries and
 `docHash` round-trips, the organization filter, and — through a real
-`KnowledgeService` — the skip and the purge below, and a search from one
-organization under `isolated` and `group`. `implements` declares the optional members, and the suite
+`KnowledgeService` — the skip and the purge below, a search from one
+organization under `isolated` and `group`, and the chunk channel: an adapter
+that takes chunks receives the service's passages and indexes them unchanged,
+one that does not keeps receiving whole documents, and a `whole` document over
+the embedder's budget is removed and reported. `implements` declares the optional members, and the suite
 checks the declaration against the adapter. `./testing` is a test-only,
 ESM-only entry that imports `vitest`; nothing in the runtime entry reaches it.
 `knowledge-memory` runs it as the reference implementation.
+
+### 3.5 The split
+
+The knowledge service cuts documents into passages once, in one splitter,
+and hands the same passages to every adapter that declares
+`capabilities.chunks` — so one source gives the same passages on each of
+them. The object source's `split` key chooses how:
+
+```typescript
+split: {
+  strategy: 'recursive', // 'whole' | 'recursive' | 'markdown'
+  maxChars: 600,         // optional: longest passage, in characters
+  minChars: 200,         // optional: merge adjacent pieces shorter than this (default 200)
+}
+```
+
+| Strategy | How it cuts |
+|----------|-------------|
+| `whole` | One passage per document. |
+| `recursive` (the default) | At blank lines, then line breaks, then sentence ends, then semicolons, then characters — each next level only for a piece still too long. A Markdown table or list item is one unit while it fits; a table that does not fit is cut between rows, each piece repeating the header row. Adjacent pieces are merged while the merged piece is shorter than `minChars`; a short title block leads the text after it. |
+| `markdown` | One section per heading (a `#` inside a code fence is no heading), each cut as `recursive` cuts. Every passage begins with its heading path (`Policy > Transport > Air`), which counts toward its length and is embedded with it, and carries it as `headingPath`. A heading with no text of its own joins the next passage. |
+
+**Sentence ends, for Chinese and English text.** `。？！` end a sentence
+wherever they stand. `. ? !` end one only before whitespace or the end of the
+text, so 「3.2 条」 and 「400.50 元」 stay whole. An end mark followed by a
+closing quote or bracket ends nothing, so the split never falls right after a
+closing quote or bracket: 「他说：“好。”然后」 stays one sentence. `；` ends a
+clause wherever it stands, `;` only before whitespace.
+
+**How long a passage may be.** `maxChars` is the source's `split.maxChars`,
+else the settings page's **Knowledge → Target chunk size**
+(`knowledge.chunk_target`), else 800. And when the adapter reports its
+embedder's `maxInputTokens`, every passage's token estimate (the shared
+`estimateTokens` from `@objectstack/spec/shared`) also stays within **80%** of
+that limit. A passage keeps both bounds, so the effective length is the
+smaller one; with no limit known, only `maxChars` applies. A `minChars` above
+the effective `maxChars` reads as `maxChars`. The splitter never overlaps
+passages.
+
+**`whole` over the limit.** A `whole` document whose estimate is over the 80%
+budget is **removed from the index and reported, never truncated**:
+`reindexSource` counts it in `failed` and names it in `failures`
+(`[{ documentId, reason }]`, at most 20; `failed` counts them all), the event
+sync logs it at `error` with the source, the record id, the estimate and the
+limit, and `indexDocument` throws. With no limit known nothing is checked.
+The estimate runs high on purpose — on Chinese text about 1.4× a real
+tokenizer — so a `whole` document's usable length is about **60%** of the
+model's limit; choose `recursive` or `markdown` for longer documents.
+
+**What a split change does not yet do.** `docHash` covers the assembled
+document, not its passages, so changing `split`, `chunk_target` or the
+embedder's limit does not by itself make a complete reindex rewrite an
+unchanged document: a document is re-split the next time its content, title or
+metadata changes. The index fingerprint (ADR-0161 K7), which hashes the
+resolved split, is what will rebuild a source when its split changes.
 
 ---
 

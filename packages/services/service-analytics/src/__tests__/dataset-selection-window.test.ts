@@ -151,7 +151,9 @@ describe('#3588 — selection.dateGranularity reaches the GROUP BY', () => {
       queryCapabilities: () => ({ nativeSql: false, objectqlAggregate: true, inMemory: false }),
       executeAggregate: async (object, options) => {
         calls.push({ object, options: options as Record<string, unknown> });
-        return [{ created_at: '2026-06', account_count: calls.length }];
+        // Each pass answers in the window it filtered to, as a GROUP BY does:
+        // June for the primary pass, May for the previousPeriod pass.
+        return [{ created_at: calls.length === 1 ? '2026-06' : '2026-05', account_count: calls.length }];
       },
     });
     const result = await svc.queryDataset(

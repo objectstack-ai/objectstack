@@ -69,6 +69,9 @@ const de = {
     autofillNoCurrency: '{{field}} wurde nicht ausgefüllt: Der gewählte Betrag ist {{amount}}, hier ist aber noch keine Währung gewählt. Wählen Sie die Währung und geben Sie dann {{field}} ein.',
     autofillCurrencyUnread: '{{field}} wurde nicht ausgefüllt: Der gewählte Betrag ist {{amount}}, die Währung hier konnte aber nicht gelesen werden. Prüfen Sie die Währung und geben Sie dann {{field}} ein.',
     autofillKept: '{{field}} behält seinen bisherigen Wert.',
+    autofillNowSameCurrency: '{{field}} wurde bei der Auswahl nicht ausgefüllt. Der Datensatz ist jetzt in {{to}}: Wählen Sie erneut, um {{amount}} einzutragen.',
+    autofillNowSameCurrencyHeld: '{{field}} wurde bei der Auswahl nicht ausgefüllt und behält seinen bisherigen Wert. Der Datensatz ist jetzt in {{to}}: Leeren Sie {{field}} und wählen Sie erneut, um {{amount}} einzutragen.',
+    autofillCopiedUnder: '{{field}} wurde als {{amount}} übernommen, der Datensatz ist jetzt aber in {{to}}. Geben Sie {{field}} bei Bedarf in {{to}} ein.',
   },
   common: {
     // objectui#13461 — a disclosure toggle's name (the tree-view node toggle).
@@ -678,6 +681,7 @@ const de = {
       needsWholeRows:
         "Die Gruppierung benötigt alle Datensätze, aber dieses Raster hat nur eine Seite davon erhalten, daher können die Gruppen nicht gezählt werden. Übergeben Sie alle Datensätze oder lassen Sie das Raster sie aus einer Datenquelle laden, die queryGroupHeaders implementiert.",
       draftOnly: "Nicht nach {{fields}} gruppiert: Das Feld existiert nur im Entwurf, bis Sie veröffentlichen.",
+      moreGroupsNotLoaded: "Weitere Gruppen wurden nicht geladen: Diese Ansicht hat mehr Gruppen, als der Server in einem Lesevorgang zurückgibt, daher wird nur ein Teil angezeigt.",
     },
     // objectui#4024 — column-footer aggregate prefixes, keyed by the spec's
     // `ColumnSummary` vocabulary. `pattern` owns the label/value join so this
@@ -3732,7 +3736,7 @@ const de = {
     build: {
       title: "App erstellen",
       noCapability: "Das Erstellen von Apps ist in diesem System nicht verfügbar — es erfordert die Berechtigung „Metadaten verwalten“, die Ihr Konto nicht besitzt.",
-      inStudio: "Neu in Studio",
+      inStudio: "Neue leere App",
     },
     template: {
       title: "Mit einer Vorlage starten",
@@ -5152,7 +5156,12 @@ const de = {
     bulkRejected: '{{count}} Anfragen abgelehnt',
     bulkRejected_one: '{{count}} Anfrage abgelehnt',
     bulkRejected_other: '{{count}} Anfragen abgelehnt',
-    bulkPartial: '{{ok}} erfolgreich, {{fail}} fehlgeschlagen: {{which}}',
+    bulkPartialSummary: '{{ok}} erfolgreich, {{fail}} fehlgeschlagen',
+    bulkFailureLine: '{{title}}: {{reason}}',
+    bulkFailuresShowAll: 'Alle anzeigen ({{n}})',
+    bulkFailuresTitle: 'Nicht entschieden: {{n}}',
+    bulkFailuresBody: 'Diese Anfragen blieben unverändert. Bei jeder steht der Grund.',
+    close: 'Schließen',
     rejectOneTitle: '„{{title}}“ ablehnen?',
     rejectOneBody: 'Die Anfrage wird abgelehnt und der Antragsteller benachrichtigt.',
     rejectTitle: 'Diese Anfrage ablehnen?',

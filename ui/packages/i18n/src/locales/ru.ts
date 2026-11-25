@@ -71,6 +71,9 @@ const ru = {
     autofillNoCurrency: 'Поле «{{field}}» не заполнено: выбранная сумма — {{amount}}, но валюта здесь ещё не выбрана. Выберите валюту, затем введите «{{field}}».',
     autofillCurrencyUnread: 'Поле «{{field}}» не заполнено: выбранная сумма — {{amount}}, но валюту здесь не удалось прочитать. Проверьте валюту, затем введите «{{field}}».',
     autofillKept: 'В поле «{{field}}» осталось прежнее значение.',
+    autofillNowSameCurrency: 'Поле «{{field}}» не заполнено при выборе. Теперь запись в {{to}}: выберите снова, чтобы заполнить {{amount}}.',
+    autofillNowSameCurrencyHeld: 'Поле «{{field}}» не заполнено при выборе и сохраняет прежнее значение. Теперь запись в {{to}}: очистите «{{field}}» и выберите снова, чтобы заполнить {{amount}}.',
+    autofillCopiedUnder: 'Поле «{{field}}» скопировано как {{amount}}, но теперь запись в {{to}}. При необходимости введите «{{field}}» в {{to}}.',
   },
   common: {
     // objectui#13461 — a disclosure toggle's name (the tree-view node toggle).
@@ -707,6 +710,7 @@ const ru = {
       needsWholeRows:
         "Для группировки нужны все записи, но этой таблице передана только одна их страница, поэтому группы невозможно подсчитать. Передайте все записи или позвольте таблице загрузить их из источника данных, который реализует queryGroupHeaders.",
       draftOnly: "Без группировки по {{fields}}: это поле существует только в черновике до публикации.",
+      moreGroupsNotLoaded: "Загружены не все группы: в этом представлении больше групп, чем сервер возвращает за одно чтение, поэтому показана только часть.",
     },
     // objectui#4024 — column-footer aggregate prefixes, keyed by the spec's
     // `ColumnSummary` vocabulary. `pattern` owns the label/value join so this
@@ -3901,7 +3905,7 @@ const ru = {
     build: {
       title: "Создать приложение",
       noCapability: "Создание приложений недоступно в этой системе — для этого нужно разрешение «Управление метаданными», которого нет у вашей учётной записи.",
-      inStudio: "Создать в Studio",
+      inStudio: "Новое пустое приложение",
     },
     template: {
       title: "Начать с шаблона",
@@ -5397,7 +5401,12 @@ const ru = {
     bulkRejected_few: 'Отклонено запросов: {{count}}',
     bulkRejected_many: 'Отклонено запросов: {{count}}',
     bulkRejected_other: 'Отклонено запросов: {{count}}',
-    bulkPartial: 'Успешно: {{ok}}, с ошибкой: {{fail}}: {{which}}',
+    bulkPartialSummary: 'Успешно: {{ok}}, с ошибкой: {{fail}}',
+    bulkFailureLine: '{{title}}: {{reason}}',
+    bulkFailuresShowAll: 'Показать все ({{n}})',
+    bulkFailuresTitle: 'Не обработано: {{n}}',
+    bulkFailuresBody: 'Эти запросы остались без изменений. Для каждого указана причина.',
+    close: 'Закрыть',
     rejectOneTitle: 'Отклонить «{{title}}»?',
     rejectOneBody: 'Запрос будет отклонён, заявитель получит уведомление.',
     rejectTitle: 'Отклонить этот запрос?',

@@ -184,3 +184,30 @@ export function packagesHref(basePath: string, source?: PackageSource): string {
   const path = `${basePath}/component/developer/packages`;
   return source ? `${path}?${PACKAGES_SOURCE_PARAM}=${source}` : path;
 }
+
+/**
+ * The administration face's new-package deep link, spelled as ONE URL query
+ * param (objectstack#36908): `?new=package` opens New Package on arrival, read
+ * once and dropped from the address, so a refresh or Back does not open it a
+ * second time. Page-local, like {@link PACKAGES_SOURCE_PARAM}.
+ */
+export const PACKAGES_NEW_PARAM = 'new';
+
+/** The one value {@link PACKAGES_NEW_PARAM} takes. */
+export const PACKAGES_NEW_PACKAGE_VALUE = 'package';
+
+/**
+ * Setup → Packages (objectstack#36834): the package list's administration
+ * face, hosted under the Setup app's address. Studio's entries that name no
+ * package land here since the Studio home was removed (objectstack#36908,
+ * epic decision 9): `/studio` with no remembered package, a package Studio
+ * cannot find, and a retired Setup page whose URL names none.
+ */
+export const SETUP_PACKAGES_PATH = `${packagesHref('/apps/setup')}?${PACKAGES_FACE_PARAM}=${PACKAGES_ADMIN_FACE}`;
+
+/**
+ * Setup → Packages with New Package open (objectstack#36908): the console's
+ * new-package doors (Home's and the `/ai` screen's 「New blank app」, the
+ * 「Add app」 menu). The create lands in Studio on the new package.
+ */
+export const SETUP_NEW_PACKAGE_PATH = `${SETUP_PACKAGES_PATH}&${PACKAGES_NEW_PARAM}=${PACKAGES_NEW_PACKAGE_VALUE}`;

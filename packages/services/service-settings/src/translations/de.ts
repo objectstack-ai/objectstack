@@ -723,11 +723,7 @@ export const de: PlatformTranslationData = {
         },
         chunk_target: {
           label: 'Ziel-Chunkgröße (Zeichen)',
-          help: 'Weiche Obergrenze der Chunkgröße, bevor die tokenbasierte Aufteilung greift.',
-        },
-        chunk_overlap: {
-          label: 'Chunk-Überlappung (Zeichen)',
-          help: 'Aus dem vorigen Chunk übernommene Zeichen, damit der Kontext über die Grenze erhalten bleibt.',
+          help: 'Längste Passage in Zeichen, wenn der Wissensdienst ein Dokument aufteilt. Eine an der Wissensquelle selbst gesetzte Größe hat Vorrang; das Eingabelimit des Embedding-Modells kann den Wert senken.',
         },
         over_fetch: {
           label: 'Over-Fetch-Faktor',
