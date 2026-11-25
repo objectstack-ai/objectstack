@@ -190,6 +190,21 @@ describe('CONTROLS: what the binder schedules without a refusal still composes',
     expect(refusalOf(() => composeStacks([nested, defineStack({ jobs: [job('Hourly', 'crm_hourly')] })], { manifest: 'last' }))).toBeNull();
   });
 
+  it('a nested artifact read back through JSON: its copies are other objects now, and still counted as copies, not by content', () => {
+    const nested = composeStacks(
+      [defineStack({ manifest: sales, objects: [line], jobs: [job('Sales')] }), defineStack({ jobs: [job('Own', 'crm_own')] }), defineStack({ manifest: support })],
+      { manifest: 'preserve' },
+    );
+    const reloaded = defineStack(JSON.parse(JSON.stringify(nested)));
+    const carried = reloaded as unknown as { jobs: unknown[]; packages: Array<{ manifest: { jobs: unknown[] } }> };
+    expect(carried.jobs[0], 'anti-vacuity: the copy is not the body\'s job object').not.toBe(carried.packages[0].manifest.jobs[0]);
+    expect(refusalOf(() => composeStacks([reloaded, defineStack({ manifest: billing })], { manifest: 'preserve' }))).toBeNull();
+    // …and a job beyond the copies is still the residual's.
+    const r = refusalOf(() => composeStacks([reloaded, defineStack({ manifest: billing, jobs: [job('Billing', 'crm_own')] })], { manifest: 'preserve' }));
+    expectOneIssue(r);
+    expect(r.issues![0]).toContain(`'com.example.support' (stack #0) jobs[1] ${RESIDUAL} and 'com.example.billing' (stack #1) jobs[0]`);
+  });
+
   it.each([
     ['the first body\'s twin', [false, undefined]],
     ['the second body\'s twin', [undefined, false]],
