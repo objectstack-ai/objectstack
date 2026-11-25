@@ -220,8 +220,10 @@ afterEach(() => {
 
 async function openFlow(): Promise<void> {
   render(
-    <MemoryRouter initialEntries={[`/studio/${PKG}/automations`]}>
+    <MemoryRouter initialEntries={[`/studio/${PKG}/metadata/flow/approval`]}>
       <Routes>
+        {/* objectstack#36903 — the flow designer, full-screen on the flow's address. */}
+        <Route path="/studio/:packageId/metadata/*" element={<StudioDesignSurface area="metadata" />} />
         <Route path="/studio/:packageId/:tab" element={<StudioDesignSurface />} />
       </Routes>
     </MemoryRouter>,

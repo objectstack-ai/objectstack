@@ -188,11 +188,10 @@ describe('Automations pillar canvas — a late flow preview replaces the fallbac
     expect(getMetadataPreview('flow')).toBeUndefined();
 
     render(
-      <MemoryRouter initialEntries={['/studio/com.acme.app/automations']}>
-        <AutomationsPillar packageId="com.acme.app" />
+      <MemoryRouter initialEntries={['/studio/com.acme.app/metadata/flow/nightly']}>
+        <AutomationsPillar packageId="com.acme.app" flowName="nightly" />
       </MemoryRouter>,
     );
-    fireEvent.click(await screen.findByRole('button', { name: /Nightly/ }));
 
     const NO_DESIGNER =
       'No metadata designers are registered in this session, so this flow cannot be designed here.';

@@ -189,16 +189,22 @@ describe('Automations pillar — opening flows asks no 404 question (objectui#11
   it('a saved flow with no draft reads its baseline and no draft; an unsaved flow reads its draft and its layers, no miss', async () => {
     put(server.active, 'flow', 'p_flow', flow('p_flow'));
     put(server.drafts, 'flow', 'fresh_flow', flow('fresh_flow'));
-    render(
-      <MemoryRouter initialEntries={[`/studio/${PKG}/automations`]}>
-        <AutomationsPillar packageId={PKG} />
+    const view = render(
+      <MemoryRouter initialEntries={[`/studio/${PKG}/metadata/flow/p_flow`]}>
+        <AutomationsPillar packageId={PKG} flowName="p_flow" />
       </MemoryRouter>,
     );
     await waitFor(() => expect(asked('flow', 'p_flow', '/layers')).toBe(1));
     await settle();
     expect(asked('flow', 'p_flow', '?state=draft')).toBe(0);
 
-    fireEvent.click((await screen.findAllByText('fresh_flow'))[0]);
+    // objectstack#36903 — the unsaved flow opens on its own address.
+    view.unmount();
+    render(
+      <MemoryRouter initialEntries={[`/studio/${PKG}/metadata/flow/fresh_flow`]}>
+        <AutomationsPillar packageId={PKG} flowName="fresh_flow" />
+      </MemoryRouter>,
+    );
     await waitFor(() => expect(asked('flow', 'fresh_flow', '?state=draft')).toBe(1));
     await settle();
     expect(asked('flow', 'fresh_flow', '/layers')).toBe(1);

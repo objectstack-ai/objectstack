@@ -104,6 +104,8 @@ function renderAt(path: string, surface: React.ReactElement = <StudioDesignSurfa
     <MemoryRouter initialEntries={[path]}>
       <Routes>
         <Route path="/studio" element={<div data-testid="studio-landing" />} />
+        {/* objectstack#36903 — the retired Automations pillar redirects into the area. */}
+        <Route path="/studio/:packageId/metadata/*" element={<StudioDesignSurface area="metadata" />} />
         <Route path="/studio/:packageId/:tab" element={surface} />
       </Routes>
     </MemoryRouter>,

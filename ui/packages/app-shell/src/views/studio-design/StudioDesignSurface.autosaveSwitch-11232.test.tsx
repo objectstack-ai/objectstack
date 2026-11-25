@@ -207,7 +207,7 @@ vi.mock('../metadata-admin/AccessExplainPanel', () => ({ AccessExplainPanel: () 
 vi.mock('./StudioAiCopilot', () => ({ StudioChatDock: () => null }));
 vi.mock('../../preview/DraftChangesPanel', () => ({ DraftChangesPanel: () => null }));
 
-import { AutomationsPillar, DataPillar, StudioDesignSurface } from './StudioDesignSurface';
+import { DataPillar, StudioDesignSurface } from './StudioDesignSurface';
 import { StudioSaveHarness, pressStudioSave } from './__tests__/studioSaveHarness';
 import { ADD_FIELD_OFFERED, addFieldFromGrid } from './__tests__/dataPillarAddField';
 import { createEmptyDataSource } from './__tests__/emptyDataSource';
@@ -337,50 +337,11 @@ function editText(el: HTMLElement, value: string): void {
 
 const SLOW = { timeout: 8000 };
 
-describe('Automations pillar — a flow switch inside the debounce (objectui#11232)', () => {
-  function startLabel(body: Record<string, unknown>): string {
-    return String((body.nodes as Array<{ id: string; label?: string }>).find((n) => n.id === 'start')?.label);
-  }
-  async function openStartNode(): Promise<HTMLElement> {
-    fireEvent.click(document.querySelector('[data-node-id="start"] [role="button"]') as HTMLElement);
-    return within(screen.getByRole('complementary')).findByLabelText('Label', undefined, SLOW);
-  }
-
-  it('sends nothing to the newly opened flow; the edit after its load saves to it on Save (objectstack#36511)', async () => {
-    render(
-      <StudioSaveHarness>
-        <MemoryRouter initialEntries={[`/studio/${PKG}/automations`]}>
-          <AutomationsPillar packageId={PKG} />
-        </MemoryRouter>
-      </StudioSaveHarness>,
-    );
-    await waitFor(() => expect(document.querySelector('[data-node-id="start"]')).toHaveTextContent('Start'), SLOW);
-
-    editText(await openStartNode(), 'Kick-off');
-    const release = holdLoad('flow', 'nightly_digest');
-    // The unsaved edit is asked about; confirmed, it is dropped with the switch.
-    confirmSpy.mockReturnValue(true);
-    fireEvent.click(screen.getByRole('button', { name: /Nightly digest/ }));
-    expect(confirmSpy).toHaveBeenCalledTimes(1);
-    await pastDebounce();
-
-    // Nothing is written to the flow the author only opened, and the previous
-    // flow's unsaved edit is dropped with the switch, as the Data pillar's is.
-    expect(savesOf('flow', 'nightly_digest')).toEqual([]);
-    expect(server.saves).toEqual([]);
-
-    await release();
-    await waitFor(() => expect(document.querySelector('[data-node-id="start"]')).toHaveTextContent('Begin'), SLOW);
-    await pastDebounce(1800);
-    expect(server.saves).toEqual([]);
-
-    // The control: an edit after the switch saves normally, to its own flow.
-    editText(await openStartNode(), 'Go');
-    await pressStudioSave();
-    await waitFor(() => expect(server.saves).toHaveLength(1), SLOW);
-    expect(savesOf('flow', 'nightly_digest').map((b) => [b.label, startLabel(b)])).toEqual([['Nightly digest', 'Go']]);
-  }, 30000);
-});
+// objectstack#36903 — the flow designer holds one flow, named by its address:
+// another flow is another address, and the area mounts a new designer keyed by
+// the flow's name (`StudioMetadataArea`'s `AreaItem`), so no buffer of one flow
+// can reach the next. The Automations rail's in-place switch these pins
+// covered is gone with the rail; the Data pillar's control stays.
 
 describe('Data pillar — an object switch over an unsaved edit, the control (objectui#11232)', () => {
   it('sends nothing to either object; an edit on the opened object goes to it on Save (objectstack#36511)', async () => {
@@ -448,38 +409,6 @@ describe("the load window: nothing of the previous item is offered, shown or sav
   // what was shown: every save reading is taken first, and what was shown is
   // asserted last.
 
-  it("Automations: the enable switch flipped during the load saves nothing; after the load it saves the flow's own document once", async () => {
-    render(
-      <MemoryRouter initialEntries={[`/studio/${PKG}/automations`]}>
-        <AutomationsPillar packageId={PKG} />
-      </MemoryRouter>,
-    );
-    await waitFor(() => expect(document.querySelector('[data-node-id="start"]')).toHaveTextContent('Start'), SLOW);
-
-    const release = holdLoad('flow', 'nightly_digest');
-    fireEvent.click(screen.getByRole('button', { name: /Nightly digest/ }));
-    const offered = screen.queryByRole('switch');
-    if (offered && !offered.hasAttribute('disabled')) fireEvent.click(offered);
-    await pastDebounce();
-    expect(savesRead()).toEqual([]);
-    const shownDuringLoad = { enableSwitch: screen.queryByRole('switch') !== null };
-
-    await release();
-    await waitFor(() => expect(document.querySelector('[data-node-id="start"]')).toHaveTextContent('Begin'), SLOW);
-    await pastDebounce(1800);
-    expect(server.saves).toEqual([]);
-
-    // The control: the switch after the load saves once, the flow's own document.
-    expect(screen.getByRole('switch')).toHaveAttribute('aria-checked', 'true');
-    fireEvent.click(screen.getByRole('switch'));
-    await waitFor(() => expect(server.saves).toHaveLength(1), SLOW);
-    expect(server.saves.map((s) => [s.type, s.name, s.body.label, startLabelOf(s.body), s.body.status])).toEqual([
-      ['flow', 'nightly_digest', 'Nightly digest', 'Begin', 'obsolete'],
-    ]);
-    // The switch reads the open flow's status: it was not offered on another's.
-    expect(shownDuringLoad).toEqual({ enableSwitch: false });
-  }, 30000);
-
   it('Data: a field added during the load saves nothing; one added after the load saves once, to the object opened', async () => {
     render(
       <StudioSaveHarness>
@@ -536,27 +465,6 @@ describe('a package switch: Automations and Data open nothing of the previous pa
     confirmSpy.mockReturnValue(true);
     fireEvent.click(screen.getByTestId('package-door'));
   }
-
-  it("Automations: package A's open flow is not kept; an edit saves package B's own flow, in B", async () => {
-    seedPackageB();
-    render(surfaceTree('automations'));
-    await waitFor(() => expect(document.querySelector('[data-node-id="start"]')).toHaveTextContent('Start'), SLOW);
-
-    await switchToBeta();
-    await screen.findByRole('button', { name: /Beta sync/ }, SLOW);
-    // Whatever flow the canvas holds on package B takes the edit.
-    await waitFor(() => expect(document.querySelector('[data-node-id="start"]')).not.toBeNull(), SLOW);
-    fireEvent.click(document.querySelector('[data-node-id="start"] [role="button"]') as HTMLElement);
-    // objectui#12725 — the Configuration aside now sits inside the surface's
-    // right slot, itself an `aside`: two complementary landmarks, so the
-    // Configuration is found by its own test id.
-    editText(await within(screen.getByTestId('auto-config-aside')).findByLabelText('Label', undefined, SLOW), 'Kick-off');
-    await pressStudioSave();
-    await waitFor(() => expect(server.saves).toHaveLength(1), SLOW);
-    expect(server.saves.map((s) => [s.type, s.name, s.packageId, s.body.label, startLabelOf(s.body)])).toEqual([
-      ['flow', 'beta_sync', PKG_B, 'Beta sync', 'Kick-off'],
-    ]);
-  }, 30000);
 
   it("Data: package A's open object is not kept; a field added saves package B's own object, in B", async () => {
     seedPackageB();

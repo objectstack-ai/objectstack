@@ -199,6 +199,7 @@ function renderAt(tab: string) {
   render(
     <MemoryRouter initialEntries={[`/studio/${PACKAGE_ID}/${tab}`]}>
       <Routes>
+        <Route path="/studio/:packageId/metadata/*" element={<StudioDesignSurface area="metadata" />} />
         <Route path="/studio/:packageId/:tab" element={<StudioDesignSurface />} />
       </Routes>
     </MemoryRouter>,
@@ -220,10 +221,9 @@ async function selectDataField() {
   return card;
 }
 
-/** Automations: open the flow; its canvas is the stub above. */
+/** The flow designer on the flow's address (objectstack#36903); its canvas is the stub above. */
 async function openFlow() {
-  renderAt('automations');
-  fireEvent.click(await screen.findByRole('button', { name: /Notify owner/ }, SLOW));
+  renderAt('metadata/flow/notify_owner');
   await screen.findByTestId('pick-node', undefined, SLOW);
 }
 

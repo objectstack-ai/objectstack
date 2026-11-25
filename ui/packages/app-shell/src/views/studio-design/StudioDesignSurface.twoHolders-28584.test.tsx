@@ -174,8 +174,8 @@ describe('Studio pillars — an item two packages hold is read at this package (
   it('Automations: the flow is read at this package', async () => {
     holdBoth('flow', 'p_flow', flow('p_flow', 'Mine'), flow('p_flow', 'Theirs'));
     render(
-      <MemoryRouter initialEntries={[`/studio/${PKG}/automations`]}>
-        <AutomationsPillar packageId={PKG} />
+      <MemoryRouter initialEntries={[`/studio/${PKG}/metadata/flow/p_flow`]}>
+        <AutomationsPillar packageId={PKG} flowName="p_flow" />
       </MemoryRouter>,
     );
     await waitFor(() => expect(layersReads('flow', 'p_flow')).toHaveLength(1));

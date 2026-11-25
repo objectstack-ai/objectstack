@@ -157,6 +157,8 @@ async function publishAt(path: string, expectPosts: number): Promise<void> {
   render(
     <MemoryRouter initialEntries={[path]}>
       <Routes>
+        {/* objectstack#36903 — the retired Automations pillar redirects into the area. */}
+        <Route path="/studio/:packageId/metadata/*" element={<StudioDesignSurface area="metadata" />} />
         <Route path="/studio/:packageId/:tab" element={<StudioDesignSurface />} />
       </Routes>
     </MemoryRouter>,

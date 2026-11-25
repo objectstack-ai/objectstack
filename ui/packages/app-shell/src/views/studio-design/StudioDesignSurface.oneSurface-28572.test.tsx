@@ -503,37 +503,9 @@ describe('items another package contributes are drawn greyed, with the package (
     await waitFor(() => expect(screen.getByTestId('data-field-inspector').querySelector('[data-disabled-reason]')).toBeNull());
   });
 
-  it('Automations: a contributed flow draws in its object’s group, an object with no flow of the base’s gets one, and a row opens the contributor', async () => {
-    srv.contributed = true;
-    renderAt(`/studio/${BASE}/automations`);
-    const autoRail = await screen.findByTestId('studio-rail-automations', undefined, { timeout: 8000 });
-    await waitFor(() => expect(contributed(autoRail, 'flow', 'acme_sync')).not.toBeNull(), { timeout: 8000 });
-
-    const accountGroup = within(autoRail).getByTestId('auto-rail-group-crm_account');
-    const sync = contributed(autoRail, 'flow', 'acme_sync')!;
-    expect(accountGroup).toContainElement(sync);
-    expect(within(sync).getByTestId('contribution-mark')).toHaveTextContent(FROM_ACME);
-    expect(within(autoRail).getByTestId('auto-rail-group-crm_deal')).toContainElement(
-      contributed(autoRail, 'flow', 'acme_deal_watch'),
-    );
-    // The base ships no flow: the rail does not say "no flows".
-    expect(within(autoRail).queryByText(t('engine.studio.auto.none', 'en'))).toBeNull();
-
-    fireEvent.click(sync);
-    await waitFor(() =>
-      expect(screen.getByTestId('location')).toHaveTextContent(`/studio/${encodeURIComponent(ADDON)}/automations?surface=`),
-    );
-    expect(screen.getByTestId('location').textContent).toContain('acme_sync');
-  });
-
-  it('one reader: no request beyond the base’s customization read names the contributing package', async () => {
-    srv.contributed = true;
-    renderAt(`/studio/${BASE}/automations`);
-    const autoRail = await screen.findByTestId('studio-rail-automations', undefined, { timeout: 8000 });
-    await waitFor(() => expect(contributed(autoRail, 'flow', 'acme_sync')).not.toBeNull(), { timeout: 8000 });
-    expect(srv.reads.filter((r) => r.includes(encodeURIComponent(ADDON)) || r.includes(`package=${ADDON}`))).toEqual([]);
-    expect(srv.reads.filter((r) => r.startsWith(`/api/v1/packages/${BASE}/customizations`)).length).toBeGreaterThan(0);
-  });
+  // objectstack#36903 — the Automations rail that drew another package's
+  // flows on the base's objects is gone with the rail; the flow list
+  // (`ResourceListPage`) is where a type's items are listed.
 });
 
 /**

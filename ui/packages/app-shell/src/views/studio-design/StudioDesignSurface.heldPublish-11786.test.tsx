@@ -160,6 +160,8 @@ function renderAt(url: string) {
   return render(
     <MemoryRouter initialEntries={[url]}>
       <Routes>
+        {/* objectstack#36903 — the flow designer, full-screen on the flow's address. */}
+        <Route path="/studio/:packageId/metadata/*" element={<StudioDesignSurface area="metadata" />} />
         <Route path="/studio/:packageId/:tab" element={<StudioDesignSurface />} />
       </Routes>
     </MemoryRouter>,
@@ -183,7 +185,7 @@ async function outlastDebounce(): Promise<void> {
 }
 
 async function openFlow(): Promise<void> {
-  renderAt(`/studio/${PKG}/automations`);
+  renderAt(`/studio/${PKG}/metadata/flow/approval`);
   await screen.findByTitle('API name: approval', undefined, { timeout: 8000 });
 }
 

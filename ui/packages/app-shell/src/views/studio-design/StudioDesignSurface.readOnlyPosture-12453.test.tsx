@@ -61,7 +61,9 @@ import { StudioDesignSurface } from './StudioDesignSurface';
 import { t } from '../metadata-admin/i18n';
 
 const answer = (body: unknown) => ({ ok: true, status: 200, json: async () => body });
-const PILLARS = ['data', 'automations', 'interfaces', 'access'] as const;
+// objectstack#36903 — the Automations pillar is retired: the flow designer
+// carries the mark on its own address, in the area.
+const PILLARS = ['data', 'metadata/flow/notify_owner', 'interfaces', 'access'] as const;
 const READ_ONLY = t('engine.studio.pkg.readonly', 'en');
 
 function servePackage(writable: boolean) {
@@ -79,6 +81,7 @@ function renderPillar(pillar: (typeof PILLARS)[number]) {
   render(
     <MemoryRouter initialEntries={[`/studio/${PACKAGE_ID}/${pillar}`]}>
       <Routes>
+        <Route path="/studio/:packageId/metadata/*" element={<StudioDesignSurface area="metadata" />} />
         <Route path="/studio/:packageId/:tab" element={<StudioDesignSurface />} />
       </Routes>
     </MemoryRouter>,
