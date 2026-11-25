@@ -6,7 +6,7 @@
  * `@objectstack/embedder-openai` reads it to refuse an input over a model's
  * limit; knowledge chunking is to read it too (#37098).
  *
- * It is a conservative upper estimate, not a tokenizer: no provider's
+ * It is a conservative estimate, not a tokenizer: no provider's
  * vocabulary ships with the platform, and the embedders it talks to
  * (OpenAI, DashScope, BigModel, BGE…) each tokenize differently. On the
  * sampled classes — Chinese, mixed Chinese/English, and English-heavy text
@@ -14,9 +14,9 @@
  * `cl100k` counts; on Chinese text it runs about 1.4× those counts.
  *
  * Known residual: text made mostly of random hex or base64 (UUIDs, sha256
- * digests, encoded blobs) estimates BELOW its `cl100k` count — `cl100k`
- * spends about one token per one to one and a half such characters. Emoji
- * and rare ideographs (CJK Extension B and later) may estimate low too.
+ * digests, encoded blobs) tokenizes at about 1–1.4 characters per token and
+ * can estimate below its real count. Emoji and rare ideographs (CJK
+ * Extension B and later) may estimate low too.
  *
  * ## Formula
  *

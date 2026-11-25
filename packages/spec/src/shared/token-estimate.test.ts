@@ -84,9 +84,9 @@ const CL100K_SAMPLES: ReadonlyArray<readonly [id: string, cl100k: number, text: 
 /**
  * English-heavy reference counts — long words, identifiers, code, URLs, figures
  * and digit runs — sampled the same way and on the same date as
- * {@link CL100K_SAMPLES}. They pin the ASCII-run rule: one token per run, the
- * rule this module first shipped with, falls below cl100k on six of the first
- * eight. The last two pin the run classes — a 20-digit run is below cl100k
+ * {@link CL100K_SAMPLES}. They pin the ASCII-run rule: one token per run, a
+ * first draft of the rule that never shipped, falls below cl100k on six of the
+ * first eight. The last two pin the run classes — a 20-digit run is below cl100k
  * unless digits count ceil(n/3), a URL carrying a 32-hex id unless a mixed run
  * counts ceil(n/2).
  */

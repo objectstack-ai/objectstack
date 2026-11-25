@@ -296,10 +296,12 @@ export class OpenAIEmbedder implements IEmbedder {
    * fails the whole call; the error names its 0-based batch index and input
    * range, and no later batch is sent.
    *
-   * Before any request, every input is measured with `estimateTokens`; when
-   * one is over the model's input limit the call is refused — nothing is sent
-   * and nothing is truncated. The error names the input's index, the model,
-   * the estimate and the limit.
+   * When a limit applies (a known model, or `maxInputTokens`), every input is
+   * measured with `estimateTokens` before any request; when one is over the
+   * limit the call is refused — nothing is sent and nothing is truncated. The
+   * error names the input's index, the model, the estimate and the limit. An
+   * unknown model with no `maxInputTokens` has no limit, and its inputs are
+   * not measured.
    */
   async embed(texts: string[]): Promise<number[][]> {
     if (texts.length === 0) return [];
