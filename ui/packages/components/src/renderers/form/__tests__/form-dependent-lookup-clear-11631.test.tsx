@@ -35,12 +35,17 @@
  *   `resetOnSubmit` reset; a change of an unrelated field; a lookup holding
  *   nothing (never written to); and a `dependsOn` the picker does not scope
  *   by.
+ * - OPENING-FILL rows (objectstack#37289) — a lookup's opening fill of its own
+ *   parent keeps a create form's seeded pair two levels deep; the user's own
+ *   change of either level, and a fill a pick makes, still clear.
  *
  * These components tests never load `@object-ui/fields`, so `field:lookup` is
  * served by a probe that renders a plain input and calls `onChange` with the
  * id typed into it — the value channel the real `LookupField` uses when a
  * record is picked (`onChange(option.value)`) or its chip removed
- * (`onChange(null)`). The rule under test reads the FIELD CONFIG and the
+ * (`onChange(null)`) — and, for a field a case lists in `FILLS`, writes its
+ * siblings through `onAutofill` as the real widget's opening fill and pick
+ * fill do. The rule under test reads the FIELD CONFIG and the
  * form's values; nothing else can move a value in this environment.
  */
 
