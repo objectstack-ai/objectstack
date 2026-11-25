@@ -91,14 +91,12 @@ export const KnowledgeSplitSchema = lazySchema(() => z.object({
     .describe('Longest passage in characters; wins over the settings default, the embedder limit can lower it'),
   /**
    * Adjacent pieces shorter than this are merged, up to this length
-   * (`recursive` and `markdown`). Not above `maxChars`. @default 200
+   * (`recursive` and `markdown`). A value above the effective `maxChars`
+   * reads as `maxChars`. @default 200
    */
   minChars: z.number().int().nonnegative().optional()
-    .describe('Adjacent pieces shorter than this are merged up to it (default 200); not above maxChars'),
-}).refine(
-  (split) => split.maxChars === undefined || split.minChars === undefined || split.minChars <= split.maxChars,
-  { message: 'split.minChars must not be above split.maxChars', path: ['minChars'] },
-));
+    .describe('Adjacent pieces shorter than this are merged up to it (default 200); a value above the effective maxChars reads as maxChars'),
+}));
 
 /** Source backed by an ObjectQL object — each record becomes a document. */
 export const ObjectKnowledgeSourceSchema = lazySchema(() => z.object({

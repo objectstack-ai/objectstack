@@ -49,6 +49,8 @@
     "ai/KnowledgeRefreshPolicy",
     "ai/KnowledgeSource",
     "ai/KnowledgeSourceKind",
+    "ai/KnowledgeSplit",
+    "ai/KnowledgeSplitStrategy",
     "ai/ListDatasetsInput",
     "ai/ListDatasetsOutput",
     "ai/MCPApprovalPolicy",
