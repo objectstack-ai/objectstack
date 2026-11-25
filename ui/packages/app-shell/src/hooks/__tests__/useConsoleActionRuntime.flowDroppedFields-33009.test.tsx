@@ -156,7 +156,7 @@ describe('objectstack#33009 — a flow launch warns about the read-only fields i
   it('the resume path: a paused run whose write after the pause dropped `status` warns on Submit', async () => {
     authFetchSpy.mockResolvedValueOnce(PAUSED);
     const result = await click(DECLARED);
-    expect(result).toEqual({ success: true, silent: true, handedOff: true });
+    expect(result).toEqual({ success: true, silent: true, handedOff: true, paused: { runId: 'run-1' } });
     expect(warnings()).toEqual([]);
 
     const dialog = await screen.findByRole('dialog');

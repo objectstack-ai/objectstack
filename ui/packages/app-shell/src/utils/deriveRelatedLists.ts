@@ -1,11 +1,12 @@
 /**
  * deriveRelatedLists — the read-side mirror of `attachInlineSubforms`.
  *
- * Where `inlineEdit: true` on a child's `master_detail`/`lookup` field pulls
- * that child INTO the parent's entry form (write side), the detail-page
+ * Where a field group of the parent that names a child's `master_detail`/
+ * `lookup` field pulls that child INTO the parent's entry form (write side;
+ * objectstack#35889 — the FK's `inlineEdit` only picks the form factor), the detail-page
  * RELATED LIST is the read-side counterpart: a child collection surfaced on the
- * parent's record DETAIL page. Both intents live on the relationship in the
- * data model — not in a hand-authored page.
+ * parent's record DETAIL page. Both intents live in the data model — not in a
+ * hand-authored page.
  *
  * This helper scans every object for fields whose `reference`
  * points back at the parent object and produces one related-list descriptor per
