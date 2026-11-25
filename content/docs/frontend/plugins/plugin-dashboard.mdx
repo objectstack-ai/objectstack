@@ -183,7 +183,10 @@ first published app. The page's address then carries `?studio=` with the
 Studio list, and the header draws a **×** that goes back to it, after a
 reload too. A report opened from Studio's report list lands the same way,
 with its builder open, and the report list's **New** opens the app's
-`reports/new` page. A package with no published app keeps both in Studio's
+`reports/new` page, which saves the new report in the package (or, for an
+installed app, in its customization package), so it is in the list the
+**×** goes back to. A package with no published app, and a dashboard or a
+report that has no published version yet (a draft only), keep Studio's
 generic item page.
 
 ## TypeScript Support
