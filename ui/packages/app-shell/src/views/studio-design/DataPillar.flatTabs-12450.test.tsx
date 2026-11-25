@@ -64,6 +64,7 @@ vi.mock('@object-ui/plugin-view', async (importOriginal) => {
 
 vi.mock('./ObjectValidationsPanel', () => ({ ObjectValidationsPanel: () => <div data-testid="rules-panel" /> }));
 vi.mock('./ObjectSettingsPanel', () => ({ ObjectSettingsPanel: () => <div data-testid="settings-panel" /> }));
+vi.mock('./ObjectHooksPanel', () => ({ ObjectHooksPanel: () => <div data-testid="hooks-panel" /> }));
 
 import { DataPillar } from './StudioDesignSurface';
 import { SurfaceDeepLinkProvider } from './surfaceDeepLinkChannel';
@@ -98,16 +99,17 @@ function Where() {
 }
 const tabInAddress = () => new URLSearchParams(screen.getByTestId('where').textContent ?? '').get('tab');
 
-async function renderPillar(props: { readOnly?: boolean } = {}) {
+async function renderPillar(props: { readOnly?: boolean; query?: string } = {}) {
   render(
-    <MemoryRouter initialEntries={['/studio/com.example.showcase/metadata/object/showcase_account']}>
+    <MemoryRouter initialEntries={[`/studio/com.example.showcase/metadata/object/showcase_account${props.query ?? ''}`]}>
       <SurfaceDeepLinkProvider>
         <DataPillar packageId="com.example.showcase" objectName="showcase_account" readOnly={props.readOnly} />
         <Where />
       </SurfaceDeepLinkProvider>
     </MemoryRouter>,
   );
-  await waitFor(() => expect(screen.getByTestId('records-panel')).toBeInTheDocument(), { timeout: 8000 });
+  if (props.query) await waitFor(() => expect(screen.getByTestId('data-object-header')).toBeInTheDocument(), { timeout: 8000 });
+  else await waitFor(() => expect(screen.getByTestId('records-panel')).toBeInTheDocument(), { timeout: 8000 });
 }
 
 /** The header's tab row: the `nav` the item header draws its tabs into. */
@@ -199,5 +201,35 @@ describe('the object designer’s tab row (objectui#12450, objectstack#36904)', 
     expect(validations).toHaveAttribute('aria-pressed', 'false');
     expect(screen.getByTestId('data-tab-flat-settings')).toHaveAttribute('aria-pressed', 'true');
     await waitFor(() => expect(tabInAddress()).toBe('settings'));
+  });
+});
+
+/*
+ * objectstack#36904 — the address opens the tab it names: a link to the
+ * designer (and ‹ ›, which carries it) lands on that tab, not on Records.
+ */
+describe('the object designer opens on the tab its address names (objectstack#36904)', () => {
+  it('`?tab=hooks` opens Hooks, its flat tab and the folded trigger pressed', async () => {
+    await renderPillar({ query: '?tab=hooks' });
+    await waitFor(() => expect(screen.getByTestId('hooks-panel')).toBeInTheDocument(), { timeout: 8000 });
+    expect(screen.queryByTestId('records-panel')).toBeNull();
+    expect(screen.getByTestId('data-tab-flat-hooks')).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByTestId('data-tabs-advanced-first')).toHaveAttribute('aria-pressed', 'true');
+    expect(tabInAddress()).toBe('hooks');
+  });
+
+  it('`?tab=history` opens the History tool tab', async () => {
+    await renderPillar({ query: '?tab=history' });
+    await waitFor(() => expect(screen.getByTestId('item-tab-panel-history')).toBeInTheDocument(), { timeout: 8000 });
+    expect(screen.queryByTestId('records-panel')).toBeNull();
+    expect(within(tabRow()).getByTestId('item-tab-history')).toHaveAttribute('aria-pressed', 'true');
+    expect(tabInAddress()).toBe('history');
+  });
+
+  // CONTROL: a value that names no tab opens Records.
+  it('`?tab=nonsense` opens Records', async () => {
+    await renderPillar({ query: '?tab=nonsense' });
+    await waitFor(() => expect(screen.getByTestId('records-panel')).toBeInTheDocument(), { timeout: 8000 });
+    expect(screen.queryByTestId('hooks-panel')).toBeNull();
   });
 });

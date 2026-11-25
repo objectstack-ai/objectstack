@@ -110,22 +110,60 @@ export function areaItemPillarPath(input: {
 }): string | null {
   const pillar = studioItemPillar(input.type);
   if (!pillar || !input.packageId) return null;
-  if (input.search.get(CATALOG_SCOPE_PARAM) === ENVIRONMENT_SCOPE) return null;
-  if (input.search.get(STUDIO_ITEM_REVIEW_PARAM) === STUDIO_ITEM_REVIEW_VALUE) return null;
+  if (areaItemAsksGenericPage(input.search)) return null;
   return studioPillarItemPath(input.packageId, pillar, { type: input.type, name: input.name });
 }
 
 /**
- * objectstack#36904 (ADR-0146 D1 as amended) — whether an item of the area
- * opens the object designer, full-screen on its own address: an object, on a
- * package's leg, under the same exceptions as {@link areaItemPillarPath} (the
- * cross-package leg and the environment scope name no package to design in,
- * and `?review=1` opens the generic page's draft review).
+ * The query that asks an item's generic page on a package's leg, whatever its
+ * type opens otherwise: the environment scope (its catalog item is the
+ * environment's, by name) and `?review=1` (the draft review the console's
+ * review links name).
  */
-export function areaItemOpensObjectDesigner(input: { packageId: string | null; type: string; search: URLSearchParams }): boolean {
-  if (input.type !== 'object' || !input.packageId) return false;
-  if (input.search.get(CATALOG_SCOPE_PARAM) === ENVIRONMENT_SCOPE) return false;
-  return input.search.get(STUDIO_ITEM_REVIEW_PARAM) !== STUDIO_ITEM_REVIEW_VALUE;
+export function areaItemAsksGenericPage(search: URLSearchParams): boolean {
+  return search.get(CATALOG_SCOPE_PARAM) === ENVIRONMENT_SCOPE || search.get(STUDIO_ITEM_REVIEW_PARAM) === STUDIO_ITEM_REVIEW_VALUE;
+}
+
+/**
+ * objectstack#36905, objectstack#36904 (Studio redesign epic #36890) — the
+ * types whose item, on a package's leg, opens its designer full-screen in the
+ * area rather than the generic item page: the object designer (`DataPillar`
+ * on one object). A designer card adds its type here in the PR that deletes
+ * the type's row from `STUDIO_ITEM_PILLAR`.
+ */
+export const AREA_DESIGNER_PAGE_TYPES: readonly string[] = Object.freeze(['object']);
+
+/**
+ * Whether an item of the area opens its full-screen designer page: a
+ * {@link AREA_DESIGNER_PAGE_TYPES} type on a package's leg. The cross-package
+ * leg names no package to design in, so it keeps the generic item page.
+ */
+export function areaItemOpensDesignerPage(input: { packageId: string | null; type: string }): boolean {
+  return input.packageId !== null && AREA_DESIGNER_PAGE_TYPES.includes(input.type);
+}
+
+/**
+ * The item an area URL opens in its full-screen designer page, read off the
+ * address (`/studio/<package>/metadata/<type>/<name>[/…]`), or `null` for any
+ * other URL. Studio's copilot reads it as it reads a pillar's `?surface=`
+ * (cloud#1610: the URL is the one source of what is being discussed), so a
+ * designer that left its pillar keeps the context the pillar gave it.
+ */
+export function areaDesignerItemOf(pathname: string, segment: string | null | undefined): { type: string; name: string } | null {
+  if (!segment || isStudioAllPackagesScope(segment) || isStudioOrgScope(segment)) return null;
+  const root = `${studioMetadataAreaRoot(segment)}/`;
+  if (!pathname.startsWith(root)) return null;
+  const [rawType, rawName] = pathname.slice(root.length).split('/');
+  // `<root>/<type>/new` is the area's create page (it routes before the item),
+  // never an item called `new`.
+  if (!rawType || !rawName || rawName === 'new') return null;
+  try {
+    const type = decodeURIComponent(rawType);
+    const name = decodeURIComponent(rawName);
+    return areaItemOpensDesignerPage({ packageId: segment, type }) ? { type, name } : null;
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -147,22 +185,6 @@ export function dataPillarRedirect(packageId: string, search: string): string {
   const list = studioMetadataTypePath(packageId, 'object');
   const query = params.toString();
   return query ? `${list}?${query}` : list;
-}
-
-/**
- * objectstack#36904 — the item a Studio metadata address names,
- * `/studio/<scope>/metadata/<type>/<name>` (a trailing `/history` included),
- * or `undefined` for any other path (a list, the directory, diagnostics). The
- * copilot reads the open item from it where no `?surface=` names one.
- */
-export function metadataAddressArtifact(pathname: string): { type: string; name: string } | undefined {
-  const m = /^\/studio\/[^/]+\/metadata\/([^/]+)\/([^/]+)/.exec(pathname);
-  if (!m || m[1].startsWith('_')) return undefined;
-  try {
-    return { type: decodeURIComponent(m[1]), name: decodeURIComponent(m[2]) };
-  } catch {
-    return undefined;
-  }
 }
 
 /**

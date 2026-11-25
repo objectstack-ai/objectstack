@@ -46,8 +46,9 @@ import { t, useMetadataLocale } from '../metadata-admin/i18n.js';
 import { fetchListedPackageManifests } from './packages-io.js';
 import {
   STUDIO_ALL_PACKAGES_SEGMENT,
+  areaItemAsksGenericPage,
+  areaItemOpensDesignerPage,
   areaItemOpensFormEditor,
-  areaItemOpensObjectDesigner,
   areaItemPillarPath,
   areaLocationRedirect,
   studioMetadataAreaPath,
@@ -143,7 +144,7 @@ interface AreaEditorProps {
 
 /**
  * `<root>/:type/:name`: a pillar type opens its pillar, an object the object
- * designer (`areaItemOpensObjectDesigner`), an email template or a
+ * designer (`areaItemOpensDesignerPage`), an email template or a
  * translation the form editor (`areaItemOpensFormEditor`), every other type
  * the generic item page (`areaItemPillarPath` lists when).
  *
@@ -174,7 +175,7 @@ function AreaItemOpen({
   const host = useMetadataAreaHost();
   const [opens] = React.useState(() => {
     const at = { packageId: host?.packageId ?? null, type, search };
-    if (areaItemOpensObjectDesigner(at)) return { designer: true, formEditor: false, pillarPath: null };
+    if (areaItemOpensDesignerPage(at) && !areaItemAsksGenericPage(search)) return { designer: true, formEditor: false, pillarPath: null };
     if (areaItemOpensFormEditor({ ...at, readOnly: host?.readOnly === true })) return { designer: false, formEditor: true, pillarPath: null };
     return { designer: false, formEditor: false, pillarPath: areaItemPillarPath({ ...at, name }) };
   });

@@ -44,6 +44,7 @@ vi.mock('../studio-design/packages-io.js', async (importOriginal) => ({
   fetchPackages: async () => [
     { id: 'com.vendor.hr', namespace: 'hr' },
     { id: 'com.example.crm', namespace: 'crm' },
+    { id: 'com.example.bare', namespace: null },
   ],
 }));
 const publish = vi.fn(async () => ({ ok: true }));
@@ -162,6 +163,17 @@ describe('list 「新建」 for an object: the create the object designer no lon
     fireEvent.click(screen.getByRole('button', { name: t('engine.studio.createLive', L) }));
     await waitFor(() => expect(onCreated).toHaveBeenCalledWith({ name: 'crm_repair_ticket', packageId: 'com.example.crm' }));
     expect(save.mock.calls[0]?.[1]).toBe('crm_repair_ticket');
+  });
+
+  // CONTROL: a package that declares no namespace previews, and saves, the bare identifier.
+  it('previews the bare identifier when the package has no namespace, and saves exactly that', async () => {
+    const onCreated = open('object', 'com.example.bare', false);
+    fireEvent.change(screen.getByLabelText(t('engine.studio.data.nameLabel', L)), { target: { value: 'Repair Ticket' } });
+    await waitFor(() => expect(screen.getByTestId('create-item-stored-name')).toHaveTextContent('repair_ticket'));
+    expect(screen.getByTestId('create-item-stored-name').textContent).not.toMatch(/_repair_ticket/);
+    fireEvent.click(screen.getByRole('button', { name: t('engine.studio.createLive', L) }));
+    await waitFor(() => expect(onCreated).toHaveBeenCalledWith({ name: 'repair_ticket', packageId: 'com.example.bare' }));
+    expect(save.mock.calls[0]?.[1]).toBe('repair_ticket');
   });
 
   it('a taken identifier is refused and nothing is written (objectstack#26917)', async () => {

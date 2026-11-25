@@ -15,7 +15,7 @@ import { ConversationsSidebar } from '../../console/ai/ConversationsSidebar.js';
 import { resolvePublicShareBase } from '../../console/organizations/resolveHomeUrl.js';
 import { AiUsageIndicator } from '../../layout/AiUsageIndicator.js';
 import { usePlanApprovalPendingCount } from '../../assistant/assistantBus.js';
-import { metadataAddressArtifact } from './metadataArea.js';
+import { STUDIO_METADATA_AREA, areaDesignerItemOf } from './metadataArea.js';
 
 /**
  * objectui#8219 — the display label of the artifact a pillar has open, tagged
@@ -74,23 +74,31 @@ export function StudioCopilotConversation({
   // deep-link every pillar already mirrors (useSurfaceDeepLink). Derived per
   // render; the ChatPane transport reads it per send, so each turn carries
   // what the user is looking at RIGHT NOW.
-  const { tab } = useParams<{ tab?: string }>();
+  const { tab, packageId: segment } = useParams<{ tab?: string; packageId?: string }>();
   const copilotLocation = useLocation();
   const surfaceContext = React.useMemo(() => {
     const raw = new URLSearchParams(copilotLocation.search).get('surface');
     let artifact: { type: string; name: string } | undefined;
+    let pillar = tab;
     if (raw) {
       const idx = raw.indexOf(':');
       if (idx > 0 && idx < raw.length - 1) {
         artifact = { type: raw.slice(0, idx), name: raw.slice(idx + 1) };
       }
     }
-    // objectstack#36904 — an item open on its metadata address (the object
-    // designer, full-screen) is named by the path itself, not a `?surface=`.
-    if (!artifact) artifact = metadataAddressArtifact(copilotLocation.pathname);
-    if (!tab && !artifact) return undefined;
-    return { ...(tab ? { pillar: tab } : {}), ...(artifact ? { artifact } : {}) };
-  }, [tab, copilotLocation.search, copilotLocation.pathname]);
+    // objectstack#36904, objectstack#36905 — a designer that opens full-screen
+    // at its metadata address (the object designer) carries its item in the
+    // path, under the area's segment, not in a `?surface=`.
+    if (!tab && !artifact) {
+      const item = areaDesignerItemOf(copilotLocation.pathname, segment);
+      if (item) {
+        artifact = item;
+        pillar = STUDIO_METADATA_AREA;
+      }
+    }
+    if (!pillar && !artifact) return undefined;
+    return { ...(pillar ? { pillar } : {}), ...(artifact ? { artifact } : {}) };
+  }, [tab, segment, copilotLocation.pathname, copilotLocation.search]);
   // objectui#8219 — the chip's display label, read beside the context rather
   // than inside it. Shown only when it labels the artifact the URL names: the
   // URL stays the single source of WHAT is discussed, so a label that lags or

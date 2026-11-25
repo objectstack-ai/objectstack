@@ -313,6 +313,15 @@ describe('a pillar type opened from the area opens its pillar', () => {
     expect(new URL(where(), 'http://x').pathname).toBe(`/studio/${WRITABLE}/metadata/object/item_1`);
   });
 
+  // objectstack#36904 — the object's old history address is its designer's History tab.
+  it("an object's history address opens its designer on the History tab, the query kept", async () => {
+    mount(`/studio/${WRITABLE}/metadata/object/item_1/history?package=${WRITABLE}`);
+    const designer = await screen.findByTestId('object-designer');
+    expect(designer).toHaveAttribute('data-object', 'item_1');
+    expect(where()).toBe(`/studio/${WRITABLE}/metadata/object/item_1?package=${WRITABLE}&tab=history`);
+    expect(screen.queryByTestId('area-page')).toBeNull();
+  });
+
   it('CONTROL: an object under `?review=1` keeps the generic page and its draft review', async () => {
     mount(`/studio/${WRITABLE}/metadata/object/item_1?package=${WRITABLE}&review=1`);
     expect((await page()).page).toBe('item');

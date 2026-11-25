@@ -1226,9 +1226,12 @@ function StudioDesignSurfaceBody({ aiSlot, area }: StudioDesignSurfaceProps): Re
   const currentPathname = useLocation().pathname;
   const requestSurface = React.useCallback(
     (target: SurfaceTarget): boolean | void => {
-      // objectstack#36904 — an object is its designer's own address.
-      if (target.type === 'object' && packageId !== null) {
-        const to = studioItemPath(packageId, 'object', target.name);
+      // objectstack#36904 — an object is its designer's own address, in the
+      // package that holds the draft the sheet names (`draftScope`): on a
+      // read-only base, the `.custom` pair, where an object the pair adds
+      // resolves and the base's address does not.
+      if (target.type === 'object' && draftScope !== null) {
+        const to = studioItemPath(draftScope, 'object', target.name);
         if (to !== currentPathname) {
           if (!confirmLeavePillar()) return false;
           shellNavigate(to);
@@ -1246,7 +1249,7 @@ function StudioDesignSurfaceBody({ aiSlot, area }: StudioDesignSurfaceProps): Re
       }
       setChangesOpen(false);
     },
-    [tab, allScope, packageId, scopeSegment, confirmLeavePillar, shellNavigate, currentPathname],
+    [tab, allScope, packageId, draftScope, scopeSegment, confirmLeavePillar, shellNavigate, currentPathname],
   );
   // objectstack#36899 — a menu entry that re-enters the open pillar on another
   // `?surface=` (the default sharing overview, on the Access pillar) opens the

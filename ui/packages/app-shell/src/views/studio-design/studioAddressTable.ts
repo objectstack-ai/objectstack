@@ -70,7 +70,7 @@ export const STUDIO_ADDRESS_FAMILIES: readonly StudioAddressFamily[] = Object.fr
     builder: 'studioLandingPath',
     meaning: 'The front door with its create-package dialog open.',
   },
-  { id: 'package', today: '/studio/<package>', builder: 'studioPackagePath', meaning: `A package's Studio; the route lands it on its home pillar, \`${STUDIO_HOME_PILLAR}\`.` },
+  { id: 'package', today: '/studio/<package>', builder: 'studioPackagePath', meaning: `A package's Studio; the route lands it on its home, \`${STUDIO_HOME_PILLAR}\`, which redirects to the package's object list (objectstack#36904).` },
   { id: 'pillar', today: '/studio/<package>/<pillar>', builder: 'studioPillarPath', meaning: 'One pillar of a package: data, automations or access.' },
   {
     id: 'pillar-item',
@@ -109,7 +109,7 @@ export const STUDIO_ADDRESS_FAMILIES: readonly StudioAddressFamily[] = Object.fr
     id: 'retired-interfaces',
     today: `/studio/<package>/${RETIRED_INTERFACES_SEGMENT}[?…]`,
     builder: 'retiredInterfacesTarget',
-    meaning: `The retired Interfaces pillar (objectstack#36502). Redirects to the package's \`${STUDIO_HOME_PILLAR}\` pillar, keeping only STUDIO_RETIRED_INTERFACES_KEPT_PARAMS.`,
+    meaning: `The retired Interfaces pillar (objectstack#36502). Redirects to the package's home, \`${STUDIO_HOME_PILLAR}\` (and from there to its object list, objectstack#36904), keeping only STUDIO_RETIRED_INTERFACES_KEPT_PARAMS.`,
   },
 ]);
 

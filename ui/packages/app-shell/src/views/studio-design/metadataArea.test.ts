@@ -11,15 +11,17 @@
 
 import { describe, it, expect } from 'vitest';
 import {
+  AREA_DESIGNER_PAGE_TYPES,
   AREA_PILLAR_FOR_TYPE,
   STUDIO_ALL_PACKAGES_SEGMENT,
+  areaDesignerItemOf,
+  areaItemAsksGenericPage,
+  areaItemOpensDesignerPage,
   areaItemOpensFormEditor,
-  areaItemOpensObjectDesigner,
   areaItemPillarPath,
   areaLocationRedirect,
   dataPillarRedirect,
   isStudioAllPackagesScope,
-  metadataAddressArtifact,
   studioMetadataAreaPath,
 } from './metadataArea';
 import { STUDIO_ORG_SCOPE_SEGMENT } from './studioScope';
@@ -168,9 +170,10 @@ describe('areaItemOpensFormEditor — a read-only package’s dataset opens its 
 
 describe('the object designer on its address, and the retired Data pillar (objectstack#36904)', () => {
   const at = (q = '', packageId: string | null = PKG, type = 'object') =>
-    areaItemOpensObjectDesigner({ packageId, type, search: new URLSearchParams(q) });
+    areaItemOpensDesignerPage({ packageId, type }) && !areaItemAsksGenericPage(new URLSearchParams(q));
 
   it("an object opens its designer on a package's leg", () => {
+    expect(AREA_DESIGNER_PAGE_TYPES).toContain('object');
     expect(at()).toBe(true);
     expect(at('package=' + PKG + '&tab=hooks')).toBe(true);
   });
@@ -199,15 +202,25 @@ describe('the object designer on its address, and the retired Data pillar (objec
   });
 });
 
-describe('metadataAddressArtifact — the item an address names, for the copilot (objectstack#36904)', () => {
-  it('names the item of an item address, its history page included', () => {
-    expect(metadataAddressArtifact(`/studio/${PKG}/metadata/object/account`)).toEqual({ type: 'object', name: 'account' });
-    expect(metadataAddressArtifact(`/studio/${PKG}/metadata/object/a%2Fb/history`)).toEqual({ type: 'object', name: 'a/b' });
+describe('areaDesignerItemOf — the item a designer page\'s address names, for the copilot (objectstack#36904)', () => {
+  it('names the object of its designer address, its history page included', () => {
+    expect(areaDesignerItemOf(`/studio/${PKG}/metadata/object/account`, PKG)).toEqual({ type: 'object', name: 'account' });
+    expect(areaDesignerItemOf(`/studio/${PKG}/metadata/object/a%2Fb/history`, PKG)).toEqual({ type: 'object', name: 'a/b' });
   });
 
-  it('names nothing on a list, the directory, diagnostics or another page', () => {
-    for (const path of [`/studio/${PKG}/metadata/object`, `/studio/${PKG}/metadata`, `/studio/${PKG}/metadata/_diagnostics/x`, `/studio/${PKG}/automations`]) {
-      expect(metadataAddressArtifact(path), path).toBeUndefined();
+  it('names nothing on the create page, a list, the directory, diagnostics, a generic item or another leg', () => {
+    for (const path of [
+      `/studio/${PKG}/metadata/object/new`,
+      `/studio/${PKG}/metadata/object`,
+      `/studio/${PKG}/metadata`,
+      `/studio/${PKG}/metadata/_diagnostics/x`,
+      `/studio/${PKG}/metadata/dashboard/sales`,
+      `/studio/${PKG}/automations`,
+    ]) {
+      expect(areaDesignerItemOf(path, PKG), path).toBeNull();
     }
+    const all = `/studio/${STUDIO_ALL_PACKAGES_SEGMENT}/metadata/object/account`;
+    expect(areaDesignerItemOf(all, STUDIO_ALL_PACKAGES_SEGMENT)).toBeNull();
+    expect(areaDesignerItemOf(`/studio/${PKG}/metadata/object/account`, undefined)).toBeNull();
   });
 });

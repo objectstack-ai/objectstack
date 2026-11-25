@@ -20,7 +20,7 @@
 import '@testing-library/jest-dom/vitest';
 import * as React from 'react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, fireEvent, cleanup, waitFor, within } from '@testing-library/react';
+import { render, screen, fireEvent, cleanup, waitFor, within, act } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 
 const PKG = 'com.acme.app';
@@ -50,11 +50,26 @@ vi.mock('../metadata-admin/useMetadata', async (importOriginal) => {
   return { ...mod, useMetadataClient: () => mockClient, useMetadataTypes: () => ({ entries: [] }) };
 });
 
+const PAIR = `${PKG}.custom`;
+/** objectstack#36904 — while set, the package is a read-only base whose `.custom` pair is listed. */
+const pkgs = vi.hoisted(() => ({ readOnlyBase: false }));
+
 vi.mock('./packages-io', async (importOriginal) => {
   const mod = await importOriginal<typeof import('./packages-io')>();
   return {
     ...mod,
-    fetchPackages: vi.fn(async () => [{ id: 'com.acme.app', name: 'Acme', writable: true, namespace: 'acme' }]),
+    fetchPackages: vi.fn(async () => [{ id: 'com.acme.app', name: 'Acme', writable: !pkgs.readOnlyBase, namespace: 'acme' }]),
+    fetchListedPackageManifests: vi.fn(
+      async () =>
+        new Map(
+          pkgs.readOnlyBase
+            ? [
+                ['com.acme.app', { name: 'Acme', writable: false, manifest: { version: '1.0.0' } }],
+                ['com.acme.app.custom', { name: 'Acme (custom)', writable: true, manifest: {} }],
+              ]
+            : [],
+        ),
+    ),
   };
 });
 
@@ -92,6 +107,7 @@ vi.mock('../../preview/DraftChangesPanel', async () => {
 import '@objectstack/lint';
 import '@object-ui/plugin-detail';
 import { StudioDesignSurface } from './StudioDesignSurface';
+import { fetchListedPackageManifests } from './packages-io';
 import { addFieldFromFormToolbar } from './__tests__/dataPillarAddField';
 import { createEmptyDataSource } from './__tests__/emptyDataSource';
 import { registerBuiltinInspectors } from '../metadata-admin/inspectors';
@@ -138,6 +154,7 @@ beforeEach(() => {
     overlayScope: null,
     effective: type === 'object' && OBJECTS[name] ? JSON.parse(JSON.stringify(OBJECTS[name])) : null,
   }));
+  pkgs.readOnlyBase = false;
   confirmSpy = vi.fn();
   window.confirm = confirmSpy as unknown as typeof window.confirm;
 });
@@ -165,6 +182,8 @@ async function openTask(): Promise<void> {
   render(
     <MemoryRouter initialEntries={[at]}>
       <Routes>
+        {/* objectstack#36904 — the pair's own object address (the request's landing on a read-only base). */}
+        <Route path={`/studio/${PAIR}/metadata/object/:name`} element={<output data-testid="pair-landed" />} />
         <Route path="/studio/:packageId/metadata/*" element={<StudioDesignSurface area="metadata" />} />
         <Route path="/studio/:packageId/:tab" element={<StudioDesignSurface />} />
       </Routes>
@@ -216,6 +235,28 @@ describe('a held Data field guards Pending changes (objectstack#26845)', () => {
 
     pendingRequest('acme_note');
     await openObjectIs('acme_note');
+    expect(confirmSpy).not.toHaveBeenCalled();
+  });
+});
+
+/*
+ * objectstack#36904 — on a read-only base the Pending changes sheet reviews
+ * the `.custom` pair's drafts (`draftScope`), so an object it names opens on
+ * the pair's address, where an object the pair adds resolves; the base's
+ * address does not name it.
+ */
+describe('a Pending changes request on a read-only base opens the pair\'s address (objectstack#36904)', () => {
+  it('the request for another object lands on /studio/PAIR/metadata/object/NAME', async () => {
+    pkgs.readOnlyBase = true;
+    await openTask();
+    // The pair is read off the package list after the entries read settles.
+    await waitFor(() => expect(fetchListedPackageManifests).toHaveBeenCalled());
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 50));
+    });
+
+    pendingRequest('acme_note');
+    await screen.findByTestId('pair-landed', undefined, { timeout: 8000 });
     expect(confirmSpy).not.toHaveBeenCalled();
   });
 });

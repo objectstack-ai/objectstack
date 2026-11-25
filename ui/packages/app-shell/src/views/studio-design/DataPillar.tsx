@@ -327,8 +327,9 @@ export function DataPillar({
     return idx;
   }, [metaTypes]);
   // objectstack#36904 — the object is the address's: its label, icon and
-  // colour are the loaded object's (the label the app shows, a draft-only
-  // object's own), its machine name until it has loaded.
+  // colour are the loaded object's as it is being edited (its draft when it
+  // has one, a draft-only object's included, else as served; set where the
+  // object loads), its machine name until it has loaded.
   const [served, setServed] = React.useState<{ label?: string; icon?: string; color?: string }>({});
   const current = React.useMemo<Surface>(
     () => ({ type: 'object', name: objectName, label: served.label || objectName, icon: served.icon, color: served.color }),
@@ -836,8 +837,9 @@ export function DataPillar({
         setObjVerdict(editedItemDiagnostics({ hasDraft: !!draftBody, draftDiagnostics: draftVerdict, layered: lay }));
         setObjVerdictBody(draftBody && draftVerdict ? draftBody : lay.effective);
         setObjDraftFor(`object:${current.name}`);
-        // objectstack#36904 — the header's label, icon and colour: the object
-        // as served, a draft-only object's draft (its own label, objectui#11843).
+        // objectstack#36904 — the header's label, icon and colour: the draft
+        // when there is one (a draft-only object's own label, objectui#11843),
+        // else the object as served.
         const shown = (draftBody ?? baseline) as { label?: I18nLabel; icon?: unknown; color?: unknown };
         const next = {
           label: resolveI18nLabel(shown.label, locale)?.trim() || undefined,
@@ -1263,6 +1265,11 @@ export function DataPillar({
 
   // objectui#11272 — the buffer is the open object's own once its load installed it.
   const objLoaded = current !== null && objDraftFor === `object:${current.name}`;
+  // objectstack#36904 — the address names the object, so it can name one that
+  // is not there (a deleted object's bookmark, a mistyped link): loaded with
+  // neither a stored object nor a draft, it says so rather than offering an
+  // "unpublished new object" to design. A draft-only object has its draft.
+  const objMissing = objLoaded && !hasBaseline && !hasDraft;
 
   // objectstack#28575 — the ensure door's answer for this base's extension
   // writes: asked by the first add (no prompt), once per base, and again only
@@ -2208,6 +2215,15 @@ export function DataPillar({
                     <Loader2 className="h-4 w-4 animate-spin" /> {t('engine.studio.loading', locale)}
                   </div>
                 )
+              ) : objMissing ? (
+                <div
+                  role="status"
+                  data-testid="data-object-not-found"
+                  className={cn('flex flex-col items-center justify-center gap-1 py-16 text-sm text-muted-foreground', bodyFlush && 'mx-6')}
+                >
+                  <span className="font-medium text-foreground">{t('engine.form.objectNotFound', locale)}</span>
+                  <span className="font-mono text-xs">{current.name}</span>
+                </div>
               ) : viewMode === 'rules' ? (
                 <DraftVerdictContext.Provider value={objVerdict}>
                   <DraftVerdictBodyContext.Provider value={objVerdictBody}>
