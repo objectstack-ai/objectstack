@@ -383,11 +383,13 @@ describe('the retired pillar’s address of a set the pair adds opens it at the 
   });
 
   it('the address’s other parameters ride along through the surface', async () => {
-    renderPillarAddress(COPY, '&changes=review');
+    // A parameter no Studio page consumes (`?changes=review` is, by the surface: it opens the drawer).
+    renderPillarAddress(COPY, '&ref=bookmark');
     await waitFor(
-      () => expect(location()).toBe(`/studio/${PAIR}/metadata/permission/${COPY}?changes=review&package=${PAIR}`),
+      () => expect(location()).toBe(`/studio/${PAIR}/metadata/permission/${COPY}?ref=bookmark&package=${PAIR}`),
       { timeout: 8000 },
     );
+    await copyOpen();
   });
 
   it('CONTROL: the base’s own set’s old address stays on the base', async () => {

@@ -20,7 +20,10 @@
  *    (objectui#12456): five tabs, Objects the landing, each other tab its
  *    section, the facet panels kept mounted for the Save gate, the bulk strip
  *    on every row with keyboard focus marking the row, CRUD granting the four
- *    cells, and the sharing chip and the object count.
+ *    cells, and the sharing chip and the object count;
+ *  - the sharing chip leaves a dirty matrix only after the unsaved-edits
+ *    question: declined, the page stays on the set with the edit; confirmed,
+ *    it opens the overview; a clean matrix asks nothing (CONTROL).
  */
 
 import '@testing-library/jest-dom/vitest';
@@ -503,5 +506,46 @@ describe('the matrix\'s five sections on the page (objectui#12456)', () => {
     expect(screen.getByTestId('perm-object-count')).toHaveTextContent('2 objects');
     fireEvent.click(chip);
     await waitFor(() => expect(where()).toBe(`/studio/${CUSTOM_PKG}/owd?object=crm_lead`));
+  });
+});
+
+/**
+ * The sharing chip is a `role="button"` badge that calls `navigate()`: the
+ * shell's link-click listener never sees it, so the page's own guard is all
+ * that keeps a dirty matrix's edits (`confirmUnsavedLeave`).
+ */
+describe('the sharing chip asks before it leaves a dirty matrix (objectstack#36905)', () => {
+  const editCell = () => screen.getByRole('checkbox', { name: `crm_lead ${en('perm.action.edit')}` });
+
+  async function openDirty() {
+    mount(CUSTOM_PKG);
+    await screen.findByTestId('perm-row-crm_lead', undefined, { timeout: 8000 });
+    fireEvent.click(editCell());
+    expect(editCell()).toBeChecked();
+  }
+
+  it('declined, the page stays on the set and keeps the edit', async () => {
+    await openDirty();
+    window.confirm = vi.fn(() => false) as unknown as typeof window.confirm;
+    fireEvent.click(screen.getByTestId('owd-badge-crm_lead'));
+    expect(window.confirm).toHaveBeenCalledTimes(1);
+    expect(window.confirm).toHaveBeenCalledWith(en('engine.edit.unsavedLeaveConfirm'));
+    expect(where()).toBe(`/studio/${CUSTOM_PKG}/metadata/permission/${SET}?package=${CUSTOM_PKG}`);
+    expect(editCell()).toBeChecked();
+  });
+
+  it('confirmed, it opens the overview on its object', async () => {
+    await openDirty();
+    fireEvent.click(screen.getByTestId('owd-badge-crm_lead'));
+    expect(window.confirm).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(where()).toBe(`/studio/${CUSTOM_PKG}/owd?object=crm_lead`));
+  });
+
+  it('CONTROL: a clean matrix asks nothing', async () => {
+    mount(CUSTOM_PKG);
+    await screen.findByTestId('perm-row-crm_lead', undefined, { timeout: 8000 });
+    fireEvent.click(screen.getByTestId('owd-badge-crm_lead'));
+    await waitFor(() => expect(where()).toBe(`/studio/${CUSTOM_PKG}/owd?object=crm_lead`));
+    expect(window.confirm).not.toHaveBeenCalled();
   });
 });
