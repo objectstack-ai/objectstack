@@ -46,7 +46,7 @@ const DRAWN_IDS = NOTICE.findings.map((f) => f.id).filter((id) => id !== 'email_
 
 const envelope = (data: unknown) => ({ success: true, data });
 const json = (status: number, body: unknown) =>
-  ({ ok: status >= 200 && status < 300, status, json: async () => body }) as unknown as Response;
+  ({ headers: new Headers(), ok: status >= 200 && status < 300, status, json: async () => body }) as unknown as Response;
 
 let fetchMock: ReturnType<typeof vi.fn>;
 

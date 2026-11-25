@@ -159,7 +159,7 @@ function query() {
 
 beforeEach(() => {
   sessionStorage.clear();
-  vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ROWS })));
+  vi.stubGlobal('fetch', vi.fn(async () => ({ headers: new Headers(), ok: true, json: async () => ROWS })));
 });
 
 afterEach(() => {

@@ -90,6 +90,7 @@ import {
   RecordTimelineCountContext,
   RecordTimelinePanelContext,
   RecordTimelineTotalContext,
+  RecordViewApprovalsContext,
   filterTimelineStream,
   mergeFieldHistoryIntoFeed,
   mergeTimelineStream,
@@ -409,6 +410,8 @@ export const RecordActivityRenderer: React.FC<RecordActivityRendererProps> = ({
   // has one (it holds only the newest activity then), else the rows' own.
   const countReporter = React.useContext(RecordTimelineCountContext);
   const hostTotal = React.useContext(RecordTimelineTotalContext);
+  // objectstack#35723 — 「看审批」 on an approval entry, where the host can open the approvals.
+  const viewApprovals = React.useContext(RecordViewApprovalsContext);
   const wholeTotal = asStream && hostTotal !== null ? hostTotal : applied.total;
   const reportCount = asPeek ? timelinePanel?.onCount : asStream ? (countReporter ?? undefined) : undefined;
   const reportsWhole = asPeek || streamFilter === 'all';
@@ -450,6 +453,7 @@ export const RecordActivityRenderer: React.FC<RecordActivityRendererProps> = ({
         activityFailed={activityFailed}
         commentsFailed={commentsFailed}
         onRetryFeed={hostItems === undefined ? discussion?.onRetryFeed : undefined}
+        onViewApprovals={viewApprovals ?? undefined}
         {...(asPeek
           ? {
               variant: 'peek' as const,

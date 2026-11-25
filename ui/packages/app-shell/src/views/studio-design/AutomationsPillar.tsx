@@ -138,6 +138,12 @@ import {
 } from './StudioCustomizeControls.js';
 import { SavedToCustomizationNote } from '../../preview/savedToCustomization.js';
 import { toast } from 'sonner';
+import { createAuthenticatedFetch } from '@object-ui/auth';
+
+/** The console's authenticated fetch: the stored bearer token beside the session cookie. */
+function authFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+  return createAuthenticatedFetch()(input, init);
+}
 
 /**
  * objectstack#34818 — the names of the flows that have a published version in
@@ -471,7 +477,7 @@ export function AutomationsPillar({
     let cancelled = false;
     (async () => {
       try {
-        const res = await fetch('/api/v1/automation/_status', { credentials: 'include', headers: { Accept: 'application/json' } });
+        const res = await authFetch('/api/v1/automation/_status', { credentials: 'include', headers: { Accept: 'application/json' } });
         if (!res.ok) return;
         const payload = (await res.json().catch(() => null)) as { data?: { flows?: FlowRuntimeState[] }; flows?: FlowRuntimeState[] } | null;
         const list = payload?.data?.flows ?? payload?.flows ?? [];

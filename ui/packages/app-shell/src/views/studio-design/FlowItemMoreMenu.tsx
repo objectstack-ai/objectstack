@@ -56,6 +56,12 @@ import { Copy, Loader2, Trash2 } from 'lucide-react';
 import { t, tFormat, translateMetadataType } from '../metadata-admin/i18n.js';
 import { envelopeData, envelopeRefused } from '../setup/packagedFlows.js';
 import { apiBase } from '../../utils/apiBase.js';
+import { createAuthenticatedFetch } from '@object-ui/auth';
+
+/** The console's authenticated fetch: the stored bearer token beside the session cookie. */
+function authFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+  return createAuthenticatedFetch()(input, init);
+}
 
 /** What the clone door saved: the copy's name, the package it names, and its sentence. */
 export interface FlowCopied {
@@ -96,7 +102,7 @@ async function requestFlowNewSimilar(
   fallbacks: { http: (status: number) => string; network: string },
 ): Promise<FlowNewSimilarOutcome> {
   try {
-    const res = await fetch(`${apiBase()}/automation/${encodeURIComponent(source)}/clone`, {
+    const res = await authFetch(`${apiBase()}/automation/${encodeURIComponent(source)}/clone`, {
       method: 'POST',
       credentials: 'include',
       headers: { Accept: 'application/json', 'Content-Type': 'application/json' },

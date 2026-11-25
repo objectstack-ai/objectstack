@@ -59,13 +59,13 @@ function stubKeysFailure(status: number, body: unknown) {
       const url = String(input);
       if (url.includes('/api/v1/discovery')) {
         return {
-          ok: true,
+          headers: new Headers(), ok: true,
           status: 200,
           json: async () => ({ data: { routes: { mcp: '/api/v1/mcp' } } }),
         };
       }
       return {
-        ok: status >= 200 && status < 300,
+        headers: new Headers(), ok: status >= 200 && status < 300,
         status,
         json: async () => body,
       };

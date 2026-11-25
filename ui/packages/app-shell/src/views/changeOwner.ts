@@ -29,6 +29,7 @@ import { partitionRowsByPredicate } from '@object-ui/core';
 import { SchemaRendererContext, useRowPredicate } from '@object-ui/react';
 import { usePermissions } from '@object-ui/permissions';
 import { useRecordVerdict } from '@object-ui/plugin-detail';
+import { createAuthenticatedFetch } from '@object-ui/auth';
 
 /** The record's owner column, as the spec names it. */
 export const CHANGE_OWNER_FIELD: typeof SystemFieldName.OWNER_ID = SystemFieldName.OWNER_ID;
@@ -171,7 +172,7 @@ function askObjectTransfer(
   if (known) return known;
   const answer = (async (): Promise<boolean | undefined> => {
     try {
-      const res = await (apiFetch ?? fetch)('/api/v1/security/explain', {
+      const res = await (apiFetch ?? createAuthenticatedFetch())('/api/v1/security/explain', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',

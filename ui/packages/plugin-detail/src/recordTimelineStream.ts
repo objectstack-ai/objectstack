@@ -63,6 +63,15 @@ export const RECORD_TIMELINE_PANEL_MAX_ENTRIES = 5;
 export const RecordTimelineTotalContext = React.createContext<number | null>(null);
 
 /**
+ * The stream's 「看审批」 on an approval entry (objectstack#35723): open the
+ * record's approvals — the record page's 审批 tab. The host that draws the
+ * approvals supplies it, as it does for the approval tag in the record header.
+ * `null` (no host, or a host with no approvals to open): the entry is its one
+ * line with no link, as `RecordActivityTimeline`'s `onViewApprovals` reads it.
+ */
+export const RecordViewApprovalsContext = React.createContext<(() => void) | null>(null);
+
+/**
  * Where the 动态 stream drawn in full — the 动态 tab — reports how many
  * entries it holds, for the tab's count chip on the record page's tab row
  * (objectstack#27524, Target 8). Reported while the 全部 chip is on, the
