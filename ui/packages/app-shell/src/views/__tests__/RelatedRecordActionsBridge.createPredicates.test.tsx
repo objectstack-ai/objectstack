@@ -315,9 +315,9 @@ describe('#37246 — "+ New" seeds the relationship lookup\'s dependsOn fields f
   }): string[] {
     let handlers: RelatedRecordHandlers = {};
     let search = '';
-    function NewProbe() {
-      handlers = useRelatedRecordActions()?.resolve({ objectName: MILESTONE, relationshipField: 'crm_sales_order', parentId: 'so-1' }) ?? {};
-      search = useLocation().search;
+    function NewProbe({ onRender }: { onRender: (h: RelatedRecordHandlers, s: string) => void }) {
+      const resolved = useRelatedRecordActions()?.resolve({ objectName: MILESTONE, relationshipField: 'crm_sales_order', parentId: 'so-1' }) ?? {};
+      onRender(resolved, useLocation().search);
       return null;
     }
     render(
@@ -331,7 +331,7 @@ describe('#37246 — "+ New" seeds the relationship lookup\'s dependsOn fields f
           parentRecord={'parentRecord' in opts ? opts.parentRecord : ORDER_PARENT}
           parentFromList={opts.parentFromList}
         >
-          <NewProbe />
+          <NewProbe onRender={(h, s) => { handlers = h; search = s; }} />
         </RelatedRecordActionsBridge>
       </MemoryRouter>,
     );
