@@ -17,9 +17,12 @@
  * Changesets pre mode with a pending `major` for this package: the constant may
  * already name the major that release is about to publish, so the protocol move
  * lands in a reviewed pull request with full CI rather than in the version pass
- * (ruling record 6049734955, Q1 → B).
+ * (ruling record 6049734955, Q1 → B). Protocol 19 is that exception: it moved
+ * here while this package was still on its 18.x stable line, beside the v19
+ * line's pending `major` (ruling record 7153441862, route A, item 2), and every
+ * in-repo manifest that means "the current protocol" declares `'^19'` with it.
  */
-export const PROTOCOL_VERSION = '18.0.0';
+export const PROTOCOL_VERSION = '19.0.0';
 
 /** The protocol major as an integer — the value the handshake compares. */
 export const PROTOCOL_MAJOR: number = Number.parseInt(PROTOCOL_VERSION.split('.')[0]!, 10);

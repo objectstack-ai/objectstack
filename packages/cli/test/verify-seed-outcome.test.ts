@@ -47,7 +47,7 @@ const manifest = (id: string, namespace: string, name: string) => ({
   version: '1.0.0',
   name,
   type: 'app',
-  engines: { protocol: '^18' },
+  engines: { protocol: '^19' },
 });
 
 /** The showcase invoice's shape, reduced: an amount the engine converts into the home currency at write. */

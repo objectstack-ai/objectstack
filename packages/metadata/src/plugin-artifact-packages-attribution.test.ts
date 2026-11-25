@@ -74,7 +74,7 @@ const coreStack = {
         namespace: 'crm',
         version: '1.0.0',
         type: 'app',
-        engines: { protocol: '^18' },
+        engines: { protocol: '^19' },
     },
     objects: [
         {
@@ -105,7 +105,7 @@ const ordersStack = {
         // would let a wrong-body stamp pass unnoticed.
         version: '2.4.0',
         type: 'module',
-        engines: { protocol: '^18' },
+        engines: { protocol: '^19' },
         dependencies: { [CORE_ID]: '^1.0.0' },
     },
     objects: [

@@ -84,7 +84,7 @@ const probeApp = defineStack({
     version: '0.0.1',
     type: 'app',
     name: 'Authorization Verdict Follows Runtime Metadata Probe',
-    engines: { protocol: '^18' },
+    engines: { protocol: '^19' },
   },
   permissions: [MemberSet, CapableSet],
 });
