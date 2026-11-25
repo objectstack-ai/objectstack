@@ -2723,6 +2723,14 @@ const ar = {
       changesDrafted: "حُفظ كمسودة",
       changesFailed: "لم يُطبَّق",
       discussing: "قيد العرض: {{target}}",
+      focus: {
+        pin: "مواصلة السؤال عن هذا السجل",
+        pinned: "السؤال عن: {{target}}",
+        remove: "التوقف عن السؤال عن هذا السجل",
+        switchPrompt: "هل تريد السؤال عن «{{target}}» بدلاً من ذلك؟",
+        switchAccept: "تبديل",
+        switchDecline: "إبقاء",
+      },
       changeVerb: {
         createObject: "إنشاء كائن",
         addField: "إضافة حقل",
@@ -4187,7 +4195,7 @@ const ar = {
       allApps: "جميع التطبيقات",
       editAppInStudio: "تعديل {{app}} في Studio",
       openAppInStudio: "عرض {{app}} في Studio",
-      backToHome: "العودة إلى الرئيسية",
+      backToHome: "العودة إلى صفحة بدء التطبيق",
       settings: "الإعدادات",
       productHome: "الصفحة الرئيسية لـ {{product}}",
       addApp: 'إضافة تطبيق',

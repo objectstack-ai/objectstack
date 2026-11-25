@@ -29,6 +29,13 @@ export interface AgentCapabilities {
   debug: boolean;
   /** Turns resume durable multi-step runs. */
   resume: boolean;
+  /**
+   * Honours a conversation focus — the chat request's `context.focus`, the
+   * record the user pinned the conversation to (`AiAgentCapabilitiesSchema`
+   * in `@objectstack/spec`). Hosts draw the pin and send the key only when it
+   * is true; a server that omits it does not honour it.
+   */
+  focus: boolean;
 }
 
 export interface AgentDescriptor {
@@ -85,15 +92,29 @@ function normalizeCapabilities(raw: RawAgent['capabilities']): AgentCapabilities
     canvas: raw.canvas === true,
     debug: raw.debug === true,
     resume: raw.resume === true,
+    focus: raw.focus === true,
   };
 }
+
+/**
+ * The capabilities a build agent had before the server declared any — the
+ * ones the legacy name check stands in for. A capability declared later
+ * (`focus`) has no such history: undeclared, it is off.
+ */
+const NAME_IMPLIED_CAPABILITIES: ReadonlySet<keyof AgentCapabilities> = new Set([
+  'authoring',
+  'canvas',
+  'debug',
+  'resume',
+]);
 
 /**
  * Whether `name`'s agent declares `cap` (cloud#816). Falls back to the legacy
  * `isBuildAgent(name)` name check when the catalog entry carries no
  * `capabilities` (older server) or the agent isn't in the list yet — so
  * behavior is unchanged until the server ships the field, and degrades the
- * same way afterwards.
+ * same way afterwards. The fallback covers only the capabilities that check
+ * stood in for; any other one reads false until the server declares it.
  */
 export function agentHasCapability(
   agents: readonly AgentDescriptor[],
@@ -103,7 +124,7 @@ export function agentHasCapability(
   if (!name) return false;
   const found = agents.find((a) => a.name === name);
   if (found?.capabilities) return found.capabilities[cap];
-  return isBuildAgent(name);
+  return NAME_IMPLIED_CAPABILITIES.has(cap) && isBuildAgent(name);
 }
 
 /**
