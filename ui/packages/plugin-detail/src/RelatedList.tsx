@@ -1520,7 +1520,9 @@ export const RelatedList: React.FC<RelatedListProps> = ({
   // later read is in flight. Set only where an issued read resolves, cleared
   // where one rejects (the rejection empties the rows, and 0 is not their
   // count). A path that reads nothing (no scope yet, a refused filter, no
-  // adapter) never sets it, so the first real read still draws no count.
+  // adapter) never sets it, so the first real read still draws no count; one
+  // that empties the rows without reading (no scope, no adapter) clears it,
+  // so the next parent's read draws no count either.
   const [countKnown, setCountKnown] = React.useState(false);
   // Per-lookup-field cache of resolved labels: fieldName -> Map<id, label>
   const [lookupLabels, setLookupLabels] = React.useState<Record<string, Record<string, string>>>({});
@@ -2256,6 +2258,8 @@ export const RelatedList: React.FC<RelatedListProps> = ({
         setRelatedData([]);
         setTotal(null);
         setHasMore(false);
+        // Nothing is read, and the emptied rows hold no count (objectstack#36822).
+        setCountKnown(false);
         setLoading(false);
         return;
       }
@@ -2417,6 +2421,7 @@ export const RelatedList: React.FC<RelatedListProps> = ({
         setRelatedData([]);
         setTotal(null);
         setHasMore(false);
+        setCountKnown(false);
         setLoading(false);
       } else if (referenceFieldIsMultiValue) {
         // The same refusal as the arm above, one cause earlier: this path's
@@ -2443,6 +2448,7 @@ export const RelatedList: React.FC<RelatedListProps> = ({
         setRelatedData([]);
         setTotal(null);
         setHasMore(false);
+        setCountKnown(false);
         setLoading(false);
       } else {
         const qs = new URLSearchParams({

@@ -263,4 +263,37 @@ describe('a related list\'s count across a refetch (objectstack#36822)', () => {
     await read.answer(ROWS);
     await waitFor(() => expect(headBadge()).toBe('2'));
   });
+
+  it('a list whose parent reloads through no scope draws no count during the new parent\'s read', async () => {
+    const read = heldFind();
+    const list = (parentId: string | null) => (
+      <RelatedList
+        title="Contacts"
+        type="table"
+        api="contact"
+        objectName="contact"
+        referenceField="account"
+        parentId={parentId as any}
+        columns={[{ accessorKey: 'name', header: 'Name' }]}
+        dataSource={{ find: read.find } as any}
+      />
+    );
+    const view = render(list('ACC-1'));
+    await waitFor(() => expect(read.find).toHaveBeenCalledTimes(1));
+    await read.answer(ROWS);
+    await waitFor(() => expect(headBadge()).toBe('2'));
+    // The parent reloads: no scope, so nothing is read and the rows empty.
+    view.rerender(list(null));
+    await flush();
+    expect(read.find).toHaveBeenCalledTimes(1);
+    // The new parent lands: its read is held in flight, and the emptied rows
+    // are no count of it.
+    view.rerender(list('ACC-2'));
+    await waitFor(() => expect(read.find).toHaveBeenCalledTimes(2));
+    await flush();
+    expect(document.querySelector('[data-related-list-head]')).not.toBeNull();
+    expect(headBadge()).toBeNull();
+    await read.answer([{ id: 'c3', name: 'Linus' }]);
+    await waitFor(() => expect(headBadge()).toBe('1'));
+  });
 });
