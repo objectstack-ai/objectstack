@@ -382,9 +382,10 @@ describe('/studio/* — the entry decision, both ways', () => {
     renderStudioDeepLink('/studio/', CONTROL_PLANE_APPS);
 
     await waitFor(() => expect(screen.getByTestId('studio-front-door')).toBeInTheDocument());
-    // The mark is named 「PRODUCT home」 since objectui#12605 (the ruled
-    // accessible name: product name + home); its target is unchanged.
-    expect(screen.getByRole('link', { name: 'ObjectOS home' })).toHaveAttribute('href', '/home');
+    // The mark's target is unchanged. At this desktop width it is named
+    // 「Back to app start page」 (objectstack#37163; 「PRODUCT home」 on a phone,
+    // whose control is `AppHeader.homeMark-12605.test.tsx`).
+    expect(screen.getByRole('link', { name: 'Back to app start page' })).toHaveAttribute('href', '/home');
   });
 
   it('the package-less scope\'s bare leg lands on its one pillar, the builder mounted (objectui#11553)', async () => {

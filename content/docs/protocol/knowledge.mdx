@@ -158,7 +158,12 @@ registers itself with that name. Adapter config (endpoint, dataset id,
 Canonical shapes shared by every adapter:
 
 - `KnowledgeDocument` — one logical document (`id`, `sourceId`,
-  `sourceRecordId?`, `content`, `metadata`, `permissions?`).
+  `sourceRecordId?`, `content`, `metadata`, `permissions?`, `docHash?`).
+  `docHash` is a hash of the assembled document — content, title and
+  metadata, in a stable key order, behind a version prefix (`v1:`). The
+  service computes it on every document it hands an adapter, and
+  `indexDocument` refuses a document that already carries one; the adapter
+  stores it and returns it as stored, and never computes or alters it.
 - `KnowledgeChunk` — adapter-produced chunk of a document. The framework
   does **not** chunk; adapters do.
 - `KnowledgeHit` — a search result (`chunkId`, `documentId`, `score`,
@@ -200,7 +205,8 @@ interface IKnowledgeService {
 the all-important `executionContext` (from the permission-aware tool
 execution work — see `actions-as-tools.mdx`). `KnowledgeReindexOptions`
 accepts `dryRun` and `limit`; `reindexSource` returns a
-`KnowledgeReindexResult` (`indexed`, `discovered`, `ok`, …).
+`KnowledgeReindexResult` (`indexed`, `discovered`, `skipped`, `purged`,
+`ok`, …) — see [Reindex: skip and purge](#reindex-skip-and-purge).
 
 ### 3.4 `IKnowledgeAdapter` (implemented by plugins)
 
@@ -210,6 +216,10 @@ interface IKnowledgeAdapter {
   upsert(docs: KnowledgeDocument[], ctx: AdapterContext): Promise<void>;
   search(query: string, opts: AdapterSearchOptions): Promise<KnowledgeHit[]>;
   delete(documentIds: string[], ctx: AdapterContext): Promise<void>;
+  listDocuments?(
+    ctx: AdapterContext,
+    opts: { cursor?: string; limit: number },
+  ): Promise<{ documents: { documentId: string; docHash?: string }[]; nextCursor?: string }>;
   healthCheck?(): Promise<{ ok: boolean; message?: string }>;
 }
 ```
@@ -218,6 +228,34 @@ The adapter surface is **deliberately minimal**: no embedding
 management, no chunk strategy, no rerank toggles. Those are the
 adapter's private concerns. Adapters that need extra knobs expose them
 in their plugin options.
+
+Every member past `upsert` / `search` / `delete` is optional (ADR-0161
+K8): an adapter that lacks one keeps working, and the service does what it
+did before that member existed. `listDocuments` lists the documents the
+adapter holds for a source, a page of at most `limit` entries at a time, each
+with the `docHash` it was stored with; `nextCursor` is absent once the
+listing is complete. A document written while a listing runs may be missing
+from it — the safe direction, since a missing entry is never purged.
+
+**The contract test suite.** Every adapter package runs the same suite
+against its own factory:
+
+```ts
+import { runKnowledgeAdapterContract } from '@objectstack/service-knowledge/testing';
+
+runKnowledgeAdapterContract({
+  name: 'my-adapter',
+  makeAdapter: () => new MyAdapter(/* a fresh, empty store */),
+  implements: { listDocuments: true },
+});
+```
+
+It covers upsert / search / delete, `listDocuments` page boundaries and
+`docHash` round-trips, and — through a real `KnowledgeService` — the skip and
+the purge below. `implements` declares the optional members, and the suite
+checks the declaration against the adapter. `./testing` is a test-only,
+ESM-only entry that imports `vitest`; nothing in the runtime entry reaches it.
+`knowledge-memory` runs it as the reference implementation.
 
 ---
 
@@ -392,8 +430,7 @@ then rolls back, the index is wrong in one of two ways:
 
 The row's next event or a `reindexSource` repairs a row that still exists. A
 document built from an **insert** that rolled back has no row left to repair it
-from, and a reindex removes no documents, so it stays until the index purge
-([#37096](https://github.com/objectstack-ai/objectstack/issues/37096)) lands.
+from; it stays until a complete reindex purges it (below).
 
 `data.record.restored` is
 published after the restore's own unit has committed.
@@ -412,11 +449,53 @@ published after the restore's own unit has committed.
   than per-record events. A knowledge index is a per-record projection and
   `matched: 40` names no record, so there is no upsert or delete to derive —
   the service logs a warning naming the object and count instead of failing
-  silently. An explicit `reindexSource` refreshes the documents of rows that
-  still exist and match; it removes no documents, so those of deleted rows (or
-  of rows that stopped matching) stay until the index purge
-  ([#37096](https://github.com/objectstack-ai/objectstack/issues/37096)) lands.
+  silently. A complete `reindexSource` refreshes the documents of rows that
+  still exist and match, and — over an adapter that implements
+  `listDocuments` — purges those of deleted rows and of rows that stopped
+  matching. Over an adapter that does not, they stay in the index.
 </Callout>
+
+### Reindex: skip and purge
+
+A `reindexSource` of an `object` source over an adapter that implements
+`listDocuments` first lists what the adapter holds for the source (document
+id → stored `docHash`), then walks the object's rows page by page:
+
+- **Skip.** A row whose document's computed `docHash` equals the listed one is
+  not written again; the result counts it in `skipped`. Every other document
+  is written (`indexed`). A listed entry without a `docHash` reads as changed.
+- **Purge.** After a **complete** walk — no `limit`, no `dryRun`, no failed
+  page — every document listed before the walk that the walk did not see is a
+  candidate. Each candidate is confirmed by the same re-read the event sync
+  makes (the source's `where` AND the record id, under the system context) and
+  deleted only when that finds no row. A row created or restored during the
+  walk keeps its document: if it was listed, the re-read finds it; if it was
+  not, it was never a candidate. The purge of a document waits for any
+  in-flight event sync of the same document. `purged` counts the deletions.
+- **Known limit: numeric record ids.** The purge reads the record id back from
+  the document id as text and re-reads by that text. On driver-mongodb and
+  driver-memory, which do not equate `'5'` with `5`, a row stored under a
+  caller-supplied numeric id is not found by that re-read; if such a row was
+  restored (or came back into `where`) after the walk read past it, its
+  document is deleted. The row itself is untouched, and its document returns at
+  the row's next event or the next complete reindex. Platform-minted ids are
+  text on every driver, so this needs a caller-supplied numeric id.
+- **`purged: null`** means no purge ran: a walk with a `limit` or a `dryRun`,
+  a failed walk, a source with `refresh.onRecordChange: false` (an external
+  indexer owns its index), or an adapter without `listDocuments` — which also
+  skips nothing, the walk otherwise unchanged. A listing that fails skips and
+  purges nothing either, and the result's `message` says why.
+- A listed document whose id is not one the source derives from a record
+  (`<sourceId>:<recordId>`) is never purged, since no row can confirm it; the
+  result's `message` counts such documents.
+
+A re-read or delete that fails stops the purge — a re-read that answers no
+list of rows counts as failed, never as "no row" — and the result is
+`ok: false`, `purged` counts the deletions made before it, and the `message`
+names the document. A walk page that answers no list of rows stops the walk
+the same way, with `purged: null`, rather than ending it as if the source were
+empty. The event sync shares that re-read: when it answers no list of rows, the
+sync leaves the document in place and logs a warning, rather than deleting it.
 
 ### Retention deletes are covered by a reap guard
 
@@ -445,9 +524,10 @@ returns the ids it confirms. Rows it does not confirm stay put.
   external indexer owns is never a reason to hold up another package's
   retention.
 
-Application-level predicate writes remain uncovered: de-indexing them needs an
-adapter-side enumeration capability that no adapter declares today, and that
-surface stays unbuilt until a real `object` source calls for it.
+Application-level predicate writes are not de-indexed as they happen. Their
+stale documents are removed by the next complete `reindexSource`, over an
+adapter that implements `listDocuments` ([Reindex: skip and
+purge](#reindex-skip-and-purge)); nothing runs that reindex on a schedule yet.
 
 `file` / `http` sources rely on explicit `reindexSource` calls
 (typically triggered by a cron job, a Console button, or a webhook).
@@ -467,7 +547,7 @@ up.
 | `KnowledgeSourceSchema` | ✅ | object / file / http kinds |
 | `KnowledgeDocument` / `Chunk` / `Hit` | ✅ | Canonical shapes |
 | `IKnowledgeService` contract | ✅ | search / index / delete / reindex |
-| `IKnowledgeAdapter` contract | ✅ | upsert / search / delete / healthCheck |
+| `IKnowledgeAdapter` contract | ✅ | upsert / search / delete / healthCheck; optional `listDocuments` with a contract test suite (`@objectstack/service-knowledge/testing`) |
 | `service-knowledge` orchestrator | ✅ | Adapter routing, RLS wrapper, sync |
 | `knowledge-memory` | ✅ | In-process; deterministic fake embedder |
 | `knowledge-ragflow` | ✅ | Minimal REST adapter (datasets + chunks + retrieval) |
