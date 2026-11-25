@@ -124,6 +124,16 @@ export function studioAppCreateSegment({
   return app ? packageAppSegment(packageId, apps, app) : null;
 }
 
+/**
+ * Whether a create made in a Studio package's area lands on an item that opens
+ * in an app (`StudioAreaAppGate`): a dashboard or a report, in a package. The
+ * create page's own history entry is then replaced by the item, so Back from
+ * the app page lands on the list, not on an empty create page.
+ */
+export function studioCreateLandsInApp(areaPackageId: string | null | undefined, type: string): boolean {
+  return !!areaPackageId && isStudioAppEditType(type);
+}
+
 /** The item's page in the app at `segment`: `/apps/<app>/dashboard/<name>` or `/apps/<app>/report/<name>`. */
 export function appItemPath(segment: string, type: StudioAppEditType, name: string): string {
   return `/apps/${encodeURIComponent(segment)}/${type}/${encodeURIComponent(name)}`;

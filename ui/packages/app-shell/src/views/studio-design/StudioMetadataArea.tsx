@@ -230,8 +230,10 @@ function AreaCreate({ customization }: { customization: StudioBaseCustomization 
   const { type = '' } = useParams<{ type: string }>();
   const host = useMetadataAreaHost();
   // objectstack#36906, decision 13 — a report is made on its app's
-  // new-report page; with no app to open, the area's own create.
-  if (type === 'report' && host?.packageId) {
+  // new-report page, which saves it in the package, or in a read-only base's
+  // pair. Where the pair door is closed, or with no app to open, the area's
+  // own create (which on a read-only base goes back to the list).
+  if (type === 'report' && host?.packageId && (!host.readOnly || host.pairCreate)) {
     return (
       <StudioAreaAppOpen packageId={host.packageId} target={{ kind: 'new-report' }} fallback={<AreaOwnCreate customization={customization} />} />
     );

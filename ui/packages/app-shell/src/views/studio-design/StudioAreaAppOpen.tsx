@@ -16,7 +16,14 @@
  *     page's × goes back to the list, after a reload too.
  *
  * With no app to open in, it renders `fallback`: the generic item page, or
- * the area's own create (decision 3).
+ * the area's own create (decision 3). So does an item with no published
+ * version (a draft only, such as an AI draft or a create whose publish was
+ * refused): the app page reads the published world, so it would answer
+ * 「not found」, and the generic item page is the one that opens the draft.
+ * That is one read of the item, asked as the app asks it (no draft preview).
+ * An item with a published version and a pending draft over it opens in the
+ * app on the published version; the draft stays Studio's to publish or
+ * discard, and the app's in-page Save refuses while it is pending.
  *
  * The Studio address is replaced, not stacked, so the browser's Back from the
  * app page lands on the list, as × does.
@@ -73,6 +80,21 @@ export function StudioAreaAppOpen({
     const type: StudioAppEditType = target.kind === 'item' ? target.type : 'report';
     const name = target.kind === 'item' ? target.name : '';
     void (async () => {
+      // An item the app cannot show (no published version, or the read
+      // failed) keeps the generic item page.
+      if (target.kind === 'item') {
+        let published: unknown;
+        try {
+          published = await client.get(type, name, { packageId });
+        } catch {
+          published = null;
+        }
+        if (cancelled) return;
+        if (!published) {
+          setAnswer('fallback');
+          return;
+        }
+      }
       let apps: StudioAppTarget[];
       try {
         const listed = (await client.list('app', { packageId })) as Array<Record<string, unknown>>;
@@ -128,7 +150,6 @@ export function StudioAreaAppOpen({
     </div>
   );
 }
-
 
 /**
  * `<root>/:type/:name` in the area: a dashboard or a report on a plain open

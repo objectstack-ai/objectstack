@@ -290,3 +290,32 @@ describe('a report opened from a Studio list (objectstack#36906)', () => {
     expect(screen.queryByTestId('report-edit-button')).toBeNull();
   });
 });
+
+describe("outside Studio, the builder's x over unsaved edits asks too (objectstack#36906)", () => {
+  it('a clean x closes the builder without asking; over an edit it asks, and declining keeps the builder', async () => {
+    const before = window.confirm;
+    const confirm = vi.fn(() => false);
+    window.confirm = confirm as unknown as typeof window.confirm;
+    try {
+      mountReport(DATASET_REPORT);
+      fireEvent.click(await screen.findByTestId('report-edit-button'));
+      await screen.findByTestId('report-builder');
+      fireEvent.click(screen.getByTestId('report-builder-close'));
+      expect(confirm).not.toHaveBeenCalled();
+      await waitFor(() => expect(screen.queryByTestId('report-builder')).toBeNull());
+
+      fireEvent.click(await screen.findByTestId('report-edit-button'));
+      await screen.findByTestId('report-builder');
+      fireEvent.click(screen.getByTestId('stub-builder-edit'));
+      fireEvent.click(screen.getByTestId('report-builder-close'));
+      expect(confirm).toHaveBeenCalledTimes(1);
+      expect(screen.getByTestId('report-builder')).toBeTruthy();
+      confirm.mockReturnValue(true);
+      fireEvent.click(screen.getByTestId('report-builder-close'));
+      expect(confirm).toHaveBeenCalledTimes(2);
+      await waitFor(() => expect(screen.queryByTestId('report-builder')).toBeNull());
+    } finally {
+      window.confirm = before;
+    }
+  });
+});

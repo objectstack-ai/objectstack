@@ -541,18 +541,15 @@ export function ReportView({ dataSource }: { dataSource?: DataSource }) {
   }, [isAdmin, designing, loading, initialReport, reportName, location, navigate, handleOpenBuilder]);
 
   // objectstack#36906 — opened from a Studio list: the header's × goes back
-  // to it, and so does the builder's own ×, asking first when the builder
-  // holds edits it would drop.
+  // to it, and so does the builder's own ×. Either way the builder's × asks
+  // first when the builder holds edits it would drop (decision 12).
   const studioReturn = useStudioReturnPath();
   const studioLeaveMessage = useStudioReturnLeaveMessage();
   const handleBuilderClose = useCallback(
     ({ dirty }: { dirty: boolean }) => {
-      if (!studioReturn) {
-        handleCloseBuilder();
-        return;
-      }
       if (dirty && !window.confirm(studioLeaveMessage)) return;
-      navigate(studioReturn);
+      if (studioReturn) navigate(studioReturn);
+      else handleCloseBuilder();
     },
     [studioReturn, studioLeaveMessage, handleCloseBuilder, navigate],
   );
