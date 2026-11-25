@@ -35,6 +35,9 @@ vi.mock('@object-ui/i18n', async (importOriginal) => ({
 
 import { DraftChangesPanel, computeChangeDetail } from '../DraftChangesPanel';
 import { formKeyLabel } from '../changeKeyLabels';
+// The source under test reaches a dynamic `import('@objectstack/lint')`: pay its load at
+// collection, never inside a case's clocked window (`check:test-source-alias`).
+import '@objectstack/lint';
 
 const HOURS_RULE = {
   name: 'hours_over_40',
@@ -164,7 +167,7 @@ describe('computeChangeDetail compares a view inside its body (objectstack#27835
 /* ─────────────── the panel ─────────────── */
 
 function stubServer(type: string, name: string, label: string, published: unknown, draft: unknown) {
-  const ok = (body: unknown) => ({ ok: true, status: 200, json: async () => body });
+  const ok = (body: unknown) => ({ headers: new Headers(), ok: true, status: 200, json: async () => body });
   vi.stubGlobal(
     'fetch',
     vi.fn(async (input: RequestInfo | URL) => {
@@ -173,9 +176,9 @@ function stubServer(type: string, name: string, label: string, published: unknow
       if (new RegExp(`/meta/${type}s?(\\?|$)`).test(url)) return ok(published ? [{ name }] : []);
       if (new RegExp(`/meta/${type}s?/${name}\\b`).test(url)) {
         if (url.includes('state=draft')) return ok({ item: draft });
-        return published ? ok(published) : { ok: false, status: 404, json: async () => ({}) };
+        return published ? ok(published) : { headers: new Headers(), ok: false, status: 404, json: async () => ({}) };
       }
-      return { ok: false, status: 404, json: async () => ({}) };
+      return { headers: new Headers(), ok: false, status: 404, json: async () => ({}) };
     }) as unknown as typeof fetch,
   );
 }

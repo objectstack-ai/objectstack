@@ -61,7 +61,7 @@ afterEach(() => {
  * A dataset source that answers like the executor: with `compareTo` in the
  * selection, every row also carries `<measure>__compare`.
  */
-function makeSource(opts: { refuseCompare?: boolean } = {}) {
+function makeSource(opts: { refuseCompare?: boolean; amountFacts?: Record<string, unknown> } = {}) {
   const selections: any[] = [];
   return {
     selections,
@@ -80,7 +80,7 @@ function makeSource(opts: { refuseCompare?: boolean } = {}) {
         ];
       return {
         rows,
-        fields: [{ name: 'amount', label: 'Amount', aggregate: 'sum' }],
+        fields: [{ name: 'amount', label: 'Amount', aggregate: 'sum', ...opts.amountFacts }],
         object: 'opportunity',
         dimensionFields: { stage: 'stage' },
         drillRawRows: rows.map((r) => ({ stage: 'stage' in r ? String(r.stage).toLowerCase() : undefined })),
@@ -285,5 +285,35 @@ describe('「Compare with previous period」 on a report (objectstack-ai/objects
     const src = makeSource();
     renderReport({ ...BASE, chart: { type: 'bar', xAxis: 'stage', yAxis: 'amount' } }, src, { language: 'zh-CN' });
     expect(await screen.findByTestId('report-compare-previous')).toHaveTextContent('和上一期对比');
+  });
+});
+
+/**
+ * objectstack#37053 — the comparison series carries the measure's format facts
+ * too, as `series[].measureFormat`, beside its `aggregate`. The chart's value
+ * axis applies a carrier only when every series on it states the same one, so
+ * an earlier-window series without it would cost the current one its units.
+ */
+describe('「Compare with previous period」 keeps the measure’s format on its comparison series (objectstack#37053)', () => {
+  it('both periods carry the `CNY` measure’s carrier', async () => {
+    const src = makeSource({ amountFacts: { format: '0,0.00', currency: 'CNY' } });
+    renderReport({ ...BASE, chart: { type: 'bar', xAxis: 'stage', yAxis: 'amount' } }, src);
+    await waitFor(() => expect(chartProps?.schema?.series).toBeDefined());
+    fireEvent.click(compareSwitch());
+    await waitFor(() => expect(chartProps!.schema.series).toHaveLength(2));
+    const carriers = chartProps!.schema.series.map((s: any) => [s.dataKey, s.measureFormat]);
+    expect(carriers).toEqual([
+      ['amount', { format: '0,0.00', currency: 'CNY' }],
+      ['amount__compare', { format: '0,0.00', currency: 'CNY' }],
+    ]);
+  });
+
+  it('CONTROL: a measure that states no format facts gives neither series a carrier', async () => {
+    const src = makeSource();
+    renderReport({ ...BASE, chart: { type: 'bar', xAxis: 'stage', yAxis: 'amount' } }, src);
+    await waitFor(() => expect(chartProps?.schema?.series).toBeDefined());
+    fireEvent.click(compareSwitch());
+    await waitFor(() => expect(chartProps!.schema.series).toHaveLength(2));
+    for (const s of chartProps!.schema.series) expect(s).not.toHaveProperty('measureFormat');
   });
 });

@@ -119,7 +119,7 @@ import '@objectstack/lint';
 // record preview's `lazy()` detail entry: its first load is paid here too.
 import '@object-ui/plugin-detail';
 
-const answer = (body: unknown) => ({ ok: true, status: 200, json: async () => body });
+const answer = (body: unknown) => ({ headers: new Headers(), ok: true, status: 200, json: async () => body });
 
 /** The package list as the server serves it: one writable app package and one kernel package. */
 function servePackages() {

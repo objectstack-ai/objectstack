@@ -39,6 +39,12 @@ import { fetchPackages, type PkgEntry } from '../studio-design/packages-io.js';
 import { envelopeData, envelopeRefused } from './packagedFlows.js';
 import { ledgerPageTruncated, readActionActivation, readDataRecords } from './packagedActions.js';
 import { useFlowLedgerWalledReadOnly, type FlowDoorFallbacks } from './packagedFlowLedger.js';
+import { createAuthenticatedFetch } from '@object-ui/auth';
+
+/** The console's authenticated fetch: the stored bearer token beside the session cookie. */
+function authFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+  return createAuthenticatedFetch()(input, init);
+}
 
 /**
  * How many ledger rows one read asks for. The ledger holds a row only for an
@@ -62,7 +68,7 @@ async function readJson(res: Response): Promise<unknown> {
  * `HTTP <status>` load errors are), never with a partial map.
  */
 export async function fetchActionLedger(signal?: AbortSignal): Promise<Map<string, boolean>> {
-  const res = await fetch(`${apiBase()}/data/sys_metadata_activation?top=${ACTION_LEDGER_PAGE_SIZE}`, {
+  const res = await authFetch(`${apiBase()}/data/sys_metadata_activation?top=${ACTION_LEDGER_PAGE_SIZE}`, {
     credentials: 'include',
     headers: { Accept: 'application/json' },
     cache: 'no-store',
@@ -94,7 +100,7 @@ export async function requestActionToggle(
   fallbacks: FlowDoorFallbacks,
 ): Promise<ActionToggleOutcome> {
   try {
-    const res = await fetch(
+    const res = await authFetch(
       `${apiBase()}/actions/_activation/${encodeURIComponent(objectName)}/${encodeURIComponent(name)}`,
       {
         method: 'POST',

@@ -31,6 +31,9 @@ import { cleanup, render, screen, waitFor } from '@testing-library/react';
 import { createI18n, I18nProvider } from '@object-ui/i18n';
 
 import { DraftChangesPanel } from '../DraftChangesPanel';
+// The source under test reaches a dynamic `import('@objectstack/lint')`: pay its load at
+// collection, never inside a case's clocked window (`check:test-source-alias`).
+import '@objectstack/lint';
 
 afterEach(() => {
   cleanup();
@@ -43,10 +46,10 @@ type Draft = { type: string; name: string; packageId: string | null };
 function serveDrafts(drafts: Draft[]) {
   global.fetch = vi.fn(async (input: RequestInfo | URL) => {
     const url = String(input);
-    const ok = (body: unknown) => ({ ok: true, status: 200, json: async () => body });
+    const ok = (body: unknown) => ({ headers: new Headers(), ok: true, status: 200, json: async () => body });
     if (url.includes('/_drafts')) return ok(drafts);
     if (/\/meta\/flow(\?|$)/.test(url)) return ok([]);
-    return { ok: false, status: 404, json: async () => ({}) };
+    return { headers: new Headers(), ok: false, status: 404, json: async () => ({}) };
   }) as unknown as typeof fetch;
 }
 

@@ -71,11 +71,13 @@ const READ_ONLY = t('engine.studio.pkg.readonly', 'en');
 function servePackage(writable: boolean) {
   vi.stubGlobal(
     'fetch',
-    vi.fn(async (input: unknown) =>
-      String(input) === '/api/v1/packages'
+    // The headers a real Response carries: the package list reads them through the authenticated fetch.
+    vi.fn(async (input: unknown) => ({
+      headers: new Headers(),
+      ...(String(input) === '/api/v1/packages'
         ? answer({ success: true, data: { packages: [{ manifest: { id: PACKAGE_ID, name: 'Field Ops' }, writable }] } })
-        : answer([]),
-    ),
+        : answer([])),
+    })),
   );
 }
 

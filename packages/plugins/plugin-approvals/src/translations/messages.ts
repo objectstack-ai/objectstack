@@ -84,6 +84,15 @@
  * `AnotherApprover` / `OverrideAnotherApprover`. The error's `message` keeps
  * its English for the developer and the log.
  *
+ * ## The record's activity entry
+ *
+ * [#35723] `approvalActivity*` are the one line an approval step writes on the
+ * record's activity stream (`approval-activity-feed.ts`): one sentence per step
+ * kind, and for a decision taken at a step (`Approved`, `Rejected`, `Sent back
+ * for revision`) a `…Step` twin whose `{{step}}` is the step's label. The `en`
+ * sentence, rendered, is the `summary` the row stores; a reader with a locale
+ * is served it re-composed in that locale on read, the step label included.
+ *
  * `approvalPlatformAdminSlotLabel` is not a sentence: it is the display label
  * of the platform administrators' slot (`platform_admin:*`), which names no
  * person to label it by.
@@ -151,6 +160,16 @@ const enSentences = {
   approvalDecideRefusedOverrideAnotherApprover: 'An approver on the step decides it. To move it, reassign it to someone else, reject it, or recall it and send the record for approval again.',
   approvalDecideRefusedOverrideWithdraw: '{{remedy}} To withdraw it instead, reject it or recall it.',
   approvalPlatformAdminSlotLabel: 'Platform administrators',
+  approvalActivitySubmitted: 'Submitted for approval',
+  approvalActivityApproved: 'Approved',
+  approvalActivityApprovedStep: 'Approved · {{step}}',
+  approvalActivityRejected: 'Rejected',
+  approvalActivityRejectedStep: 'Rejected · {{step}}',
+  approvalActivityRecalled: 'Recalled the approval request',
+  approvalActivitySentBack: 'Sent back for revision',
+  approvalActivitySentBackStep: 'Sent back for revision · {{step}}',
+  approvalActivityResubmitted: 'Resubmitted for approval',
+  approvalActivityCancelled: 'Approval request cancelled',
 } as const satisfies Messages;
 
 /** An authored sentence's id: one every pack below spells by hand. */
@@ -273,6 +292,16 @@ export const zhCNMessages: ApprovalMessages = {
   approvalDecideRefusedOverrideAnotherApprover: '由该步骤的审批人决定。如需改由他人处理，可将其转交给其他人、驳回它，或撤回后重新提交审批。',
   approvalDecideRefusedOverrideWithdraw: '{{remedy}}如需撤销，请驳回或撤回该请求。',
   approvalPlatformAdminSlotLabel: '平台管理员',
+  approvalActivitySubmitted: '已提交审批',
+  approvalActivityApproved: '已批准',
+  approvalActivityApprovedStep: '已批准 · {{step}}',
+  approvalActivityRejected: '已驳回',
+  approvalActivityRejectedStep: '已驳回 · {{step}}',
+  approvalActivityRecalled: '已撤回审批请求',
+  approvalActivitySentBack: '已退回修改',
+  approvalActivitySentBackStep: '已退回修改 · {{step}}',
+  approvalActivityResubmitted: '已重新提交审批',
+  approvalActivityCancelled: '审批请求已取消',
 };
 
 export const jaJPMessages: ApprovalMessages = {
@@ -332,6 +361,16 @@ export const jaJPMessages: ApprovalMessages = {
   approvalDecideRefusedOverrideAnotherApprover: 'このステップの承認者が判断します。担当を変えるには、他の人に再割り当てするか、却下するか、取り下げてからレコードを再度承認に回してください。',
   approvalDecideRefusedOverrideWithdraw: '{{remedy}}代わりに取りやめるには、却下するか取り下げてください。',
   approvalPlatformAdminSlotLabel: 'プラットフォーム管理者',
+  approvalActivitySubmitted: '承認を申請しました',
+  approvalActivityApproved: '承認しました',
+  approvalActivityApprovedStep: '承認しました · {{step}}',
+  approvalActivityRejected: '却下しました',
+  approvalActivityRejectedStep: '却下しました · {{step}}',
+  approvalActivityRecalled: '承認申請を取り消しました',
+  approvalActivitySentBack: '修正のため差し戻しました',
+  approvalActivitySentBackStep: '修正のため差し戻しました · {{step}}',
+  approvalActivityResubmitted: '承認を再申請しました',
+  approvalActivityCancelled: '承認申請がキャンセルされました',
 };
 
 export const esESMessages: ApprovalMessages = {
@@ -391,6 +430,16 @@ export const esESMessages: ApprovalMessages = {
   approvalDecideRefusedOverrideAnotherApprover: 'La decide un aprobador del paso. Para moverla, reasígnela a otra persona, recházela o retírela y vuelva a enviar el registro a aprobación.',
   approvalDecideRefusedOverrideWithdraw: '{{remedy}} Para retirarla en su lugar, recházela o retírela.',
   approvalPlatformAdminSlotLabel: 'Administradores de la plataforma',
+  approvalActivitySubmitted: 'Enviado para aprobación',
+  approvalActivityApproved: 'Aprobado',
+  approvalActivityApprovedStep: 'Aprobado · {{step}}',
+  approvalActivityRejected: 'Rechazado',
+  approvalActivityRejectedStep: 'Rechazado · {{step}}',
+  approvalActivityRecalled: 'Solicitud de aprobación retirada',
+  approvalActivitySentBack: 'Devuelto para revisión',
+  approvalActivitySentBackStep: 'Devuelto para revisión · {{step}}',
+  approvalActivityResubmitted: 'Reenviado para aprobación',
+  approvalActivityCancelled: 'Solicitud de aprobación cancelada',
 };
 
 export const zhHantMessages: ApprovalMessages = {
@@ -450,6 +499,16 @@ export const zhHantMessages: ApprovalMessages = {
   approvalDecideRefusedOverrideAnotherApprover: '由該步驟的核准人決定。如需改由他人處理，可將其轉交給其他人、駁回它，或撤回後重新送出核准。',
   approvalDecideRefusedOverrideWithdraw: '{{remedy}}如需撤銷，請駁回或撤回該請求。',
   approvalPlatformAdminSlotLabel: '平台管理員',
+  approvalActivitySubmitted: '已提交審批',
+  approvalActivityApproved: '已核准',
+  approvalActivityApprovedStep: '已核准 · {{step}}',
+  approvalActivityRejected: '已駁回',
+  approvalActivityRejectedStep: '已駁回 · {{step}}',
+  approvalActivityRecalled: '已撤回審批請求',
+  approvalActivitySentBack: '已退回修改',
+  approvalActivitySentBackStep: '已退回修改 · {{step}}',
+  approvalActivityResubmitted: '已重新提交審批',
+  approvalActivityCancelled: '審批請求已取消',
 };
 
 export const arMessages: ApprovalMessages = {
@@ -509,6 +568,16 @@ export const arMessages: ApprovalMessages = {
   approvalDecideRefusedOverrideAnotherApprover: 'يبتّ فيه موافِق في الخطوة. لنقله، أعد تعيينه إلى شخص آخر أو ارفضه أو استرجعه ثم أرسل السجل للموافقة مجددًا.',
   approvalDecideRefusedOverrideWithdraw: '{{remedy}} لسحبه بدلًا من ذلك، ارفضه أو استرجعه.',
   approvalPlatformAdminSlotLabel: 'مسؤولو المنصة',
+  approvalActivitySubmitted: 'أُرسل للموافقة',
+  approvalActivityApproved: 'تمت الموافقة',
+  approvalActivityApprovedStep: 'تمت الموافقة · {{step}}',
+  approvalActivityRejected: 'رُفض',
+  approvalActivityRejectedStep: 'رُفض · {{step}}',
+  approvalActivityRecalled: 'سُحب طلب الموافقة',
+  approvalActivitySentBack: 'أُعيد للمراجعة',
+  approvalActivitySentBackStep: 'أُعيد للمراجعة · {{step}}',
+  approvalActivityResubmitted: 'أُعيد إرساله للموافقة',
+  approvalActivityCancelled: 'أُلغي طلب الموافقة',
 };
 
 export const frMessages: ApprovalMessages = {
@@ -568,6 +637,16 @@ export const frMessages: ApprovalMessages = {
   approvalDecideRefusedOverrideAnotherApprover: 'Un approbateur de l’étape la décide. Pour la déplacer, réattribuez-la à quelqu’un d’autre, rejetez-la, ou rappelez-la et renvoyez l’enregistrement en approbation.',
   approvalDecideRefusedOverrideWithdraw: '{{remedy}} Pour la retirer plutôt, rejetez-la ou rappelez-la.',
   approvalPlatformAdminSlotLabel: 'Administrateurs de la plateforme',
+  approvalActivitySubmitted: 'Soumis pour approbation',
+  approvalActivityApproved: 'Approuvé',
+  approvalActivityApprovedStep: 'Approuvé · {{step}}',
+  approvalActivityRejected: 'Rejeté',
+  approvalActivityRejectedStep: 'Rejeté · {{step}}',
+  approvalActivityRecalled: 'Demande d’approbation retirée',
+  approvalActivitySentBack: 'Renvoyé pour révision',
+  approvalActivitySentBackStep: 'Renvoyé pour révision · {{step}}',
+  approvalActivityResubmitted: 'Soumis à nouveau pour approbation',
+  approvalActivityCancelled: 'Demande d’approbation annulée',
 };
 
 export const ptBRMessages: ApprovalMessages = {
@@ -627,6 +706,16 @@ export const ptBRMessages: ApprovalMessages = {
   approvalDecideRefusedOverrideAnotherApprover: 'Um aprovador da etapa a decide. Para movê-la, reatribua-a a outra pessoa, rejeite-a ou recolha-a e envie o registro para aprovação novamente.',
   approvalDecideRefusedOverrideWithdraw: '{{remedy}} Para retirá-la em vez disso, rejeite-a ou recolha-a.',
   approvalPlatformAdminSlotLabel: 'Administradores da plataforma',
+  approvalActivitySubmitted: 'Enviado para aprovação',
+  approvalActivityApproved: 'Aprovado',
+  approvalActivityApprovedStep: 'Aprovado · {{step}}',
+  approvalActivityRejected: 'Rejeitado',
+  approvalActivityRejectedStep: 'Rejeitado · {{step}}',
+  approvalActivityRecalled: 'Solicitação de aprovação retirada',
+  approvalActivitySentBack: 'Devolvido para revisão',
+  approvalActivitySentBackStep: 'Devolvido para revisão · {{step}}',
+  approvalActivityResubmitted: 'Reenviado para aprovação',
+  approvalActivityCancelled: 'Solicitação de aprovação cancelada',
 };
 
 export const ruMessages: ApprovalMessages = {
@@ -686,6 +775,16 @@ export const ruMessages: ApprovalMessages = {
   approvalDecideRefusedOverrideAnotherApprover: 'Решение принимает согласующий шага. Чтобы передать запрос, переназначьте его на кого-то другого, отклоните его или отзовите и отправьте запись на согласование заново.',
   approvalDecideRefusedOverrideWithdraw: '{{remedy}} Чтобы вместо этого отозвать его, отклоните или отзовите запрос.',
   approvalPlatformAdminSlotLabel: 'Администраторы платформы',
+  approvalActivitySubmitted: 'Отправлено на согласование',
+  approvalActivityApproved: 'Одобрено',
+  approvalActivityApprovedStep: 'Одобрено · {{step}}',
+  approvalActivityRejected: 'Отклонено',
+  approvalActivityRejectedStep: 'Отклонено · {{step}}',
+  approvalActivityRecalled: 'Запрос на согласование отозван',
+  approvalActivitySentBack: 'Возвращено на доработку',
+  approvalActivitySentBackStep: 'Возвращено на доработку · {{step}}',
+  approvalActivityResubmitted: 'Повторно отправлено на согласование',
+  approvalActivityCancelled: 'Запрос на согласование отменён',
 };
 
 export const deMessages: ApprovalMessages = {
@@ -745,6 +844,16 @@ export const deMessages: ApprovalMessages = {
   approvalDecideRefusedOverrideAnotherApprover: 'Ein Genehmiger des Schritts entscheidet darüber. Um sie zu verschieben, weisen Sie sie jemand anderem zu, lehnen Sie sie ab, oder rufen Sie sie zurück und reichen Sie den Datensatz erneut zur Genehmigung ein.',
   approvalDecideRefusedOverrideWithdraw: '{{remedy}} Um sie stattdessen zurückzuziehen, lehnen Sie sie ab oder rufen Sie sie zurück.',
   approvalPlatformAdminSlotLabel: 'Plattformadministratoren',
+  approvalActivitySubmitted: 'Zur Genehmigung eingereicht',
+  approvalActivityApproved: 'Genehmigt',
+  approvalActivityApprovedStep: 'Genehmigt · {{step}}',
+  approvalActivityRejected: 'Abgelehnt',
+  approvalActivityRejectedStep: 'Abgelehnt · {{step}}',
+  approvalActivityRecalled: 'Genehmigungsanfrage zurückgezogen',
+  approvalActivitySentBack: 'Zur Überarbeitung zurückgesendet',
+  approvalActivitySentBackStep: 'Zur Überarbeitung zurückgesendet · {{step}}',
+  approvalActivityResubmitted: 'Erneut zur Genehmigung eingereicht',
+  approvalActivityCancelled: 'Genehmigungsanfrage storniert',
 };
 
 export const koMessages: ApprovalMessages = {
@@ -804,6 +913,16 @@ export const koMessages: ApprovalMessages = {
   approvalDecideRefusedOverrideAnotherApprover: '이 단계의 승인자가 결정합니다. 옮기려면 다른 사람에게 재할당하거나, 반려하거나, 회수한 뒤 레코드를 다시 승인 요청하세요.',
   approvalDecideRefusedOverrideWithdraw: '{{remedy}} 대신 철회하려면 반려하거나 회수하세요.',
   approvalPlatformAdminSlotLabel: '플랫폼 관리자',
+  approvalActivitySubmitted: '승인 요청됨',
+  approvalActivityApproved: '승인됨',
+  approvalActivityApprovedStep: '승인됨 · {{step}}',
+  approvalActivityRejected: '반려됨',
+  approvalActivityRejectedStep: '반려됨 · {{step}}',
+  approvalActivityRecalled: '승인 요청 회수됨',
+  approvalActivitySentBack: '수정 요청됨',
+  approvalActivitySentBackStep: '수정 요청됨 · {{step}}',
+  approvalActivityResubmitted: '승인 재요청됨',
+  approvalActivityCancelled: '승인 요청 취소됨',
 };
 
 /** The shipped locales, keyed as the bundle beside this file keys them. */

@@ -32,6 +32,12 @@
  */
 import * as React from 'react';
 import { AI_USAGE_REFRESH_EVENT } from '@object-ui/plugin-chatbot/core';
+import { createAuthenticatedFetch } from '@object-ui/auth';
+
+/** The console's authenticated fetch: the stored bearer token beside the session cookie. */
+function authFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+  return createAuthenticatedFetch()(input, init);
+}
 
 /**
  * The binding window. `weekly` and `fiveHour` are the cloud quota policy's two
@@ -171,7 +177,7 @@ export function useAiUsage(options: UseAiUsageOptions = {}): UseAiUsageReturn {
     let cancelled = false;
     const url = `${apiBase!.replace(/\/$/, '')}/usage`;
     setLoading(true);
-    fetch(url, { method: 'GET', headers: { Accept: 'application/json' }, credentials: 'include' })
+    authFetch(url, { method: 'GET', headers: { Accept: 'application/json' }, credentials: 'include' })
       .then(async (res) => {
         if (!res.ok) throw new Error(`Failed to load AI usage (${res.status})`);
         return res.json();

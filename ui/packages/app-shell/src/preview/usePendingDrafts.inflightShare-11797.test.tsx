@@ -49,7 +49,7 @@ function heldFetch() {
           held.push({
             url: String(input),
             respond: (status, body) =>
-              resolve({ ok: status >= 200 && status < 300, status, json: async () => body }),
+              resolve({ headers: new Headers(), ok: status >= 200 && status < 300, status, json: async () => body }),
           });
         }),
     ),

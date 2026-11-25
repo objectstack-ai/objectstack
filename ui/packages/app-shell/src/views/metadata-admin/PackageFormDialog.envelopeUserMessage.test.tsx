@@ -49,6 +49,10 @@ import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 
 import { PackageFormDialog } from './PackageFormDialog';
 import { t } from './i18n';
+// The source under test reaches a dynamic `import('@objectstack/formula')` and `import('@objectstack/lint')`: pay its load at
+// collection, never inside a case's clocked window (`check:test-source-alias`).
+import '@objectstack/formula';
+import '@objectstack/lint';
 
 // Only `useMetadataLocale` is replaced — the `t` resolver and both string
 // tables stay real, so §8 asserts against the strings the product ships.
@@ -74,7 +78,7 @@ function stubBody(status: number, body: unknown) {
   vi.stubGlobal(
     'fetch',
     vi.fn(async () => ({
-      ok: status >= 200 && status < 300,
+      headers: new Headers(), ok: status >= 200 && status < 300,
       status,
       text: async () => JSON.stringify(body),
     })) as unknown as typeof fetch,
