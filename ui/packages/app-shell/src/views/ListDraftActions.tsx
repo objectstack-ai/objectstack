@@ -1,21 +1,30 @@
 /**
- * objectstack#35955 — Discard and Save on a Console list, drawn while the list
- * holds a DRAFT: a change the reader made on the list (`./listDraftStore.ts`)
- * that applies at once and is not saved anywhere. It replaces the
- * 「Personalized · Reset」 marker (objectstack#28950) at the end of the
- * condition row (objectstack#35878); with no draft the slot is empty.
+ * objectstack#35955 — Reset and Update view on a Console list, drawn while
+ * the list holds a DRAFT: a change the reader made on the list
+ * (`./listDraftStore.ts`) that applies at once and is not saved anywhere. It
+ * replaces the 「Personalized · Reset」 marker (objectstack#28950) at the end of
+ * the condition row (objectstack#35878); with no draft the slot is empty.
  *
- * - **Discard** puts the list back as its view declares it (the host's
+ * - **Reset** puts the list back as its view declares it (the host's
  *   `onDiscard`).
- * - **Save** opens its choices: 「Save to this view」 (`onSaveToView`, offered
- *   only where the host may write the open view) and 「Save as my view」
- *   (`onSaveAsMyView`, which asks a name first). The menu names what is
- *   unsaved, so a reader sees what a save keeps.
+ * - **Update view** opens its choices: 「Save to this view」 (`onSaveToView`,
+ *   offered only where the host may write the open view) and 「Save as my
+ *   view」 (`onSaveAsMyView`, which asks a name first). The menu names what is
+ *   unsaved, so a reader sees what a save keeps. Where the open view cannot
+ *   take the change, the button reads 「Save as my view」, the one save its
+ *   menu holds, so it never promises an update it does not offer (the narrow
+ *   face, short of room, reads 「Save」 there).
+ *
+ * The two read as the view's own actions, not as a page's Cancel and Save
+ * (objectstack#36737, Twenty's 「Reset / Update view」): a view is its own
+ * thing and saves on its own, so they stay drawn, and live, while the app's
+ * design mode is on, under the mode's bar (the maintainer's correction:
+ * 「tweetty 编辑布局时，列表视图还是正常显示保存」).
  *
  * As the list narrows (the phone list draws this same control in its chip
- * row, objectstack#35883), the two faces fold into ONE Save whose menu also
- * holds Discard: one control, one save path, at every width. Where no save
- * is offered, both faces are Discard alone.
+ * row, objectstack#35883), the two faces fold into ONE Update view whose menu
+ * also holds Reset: one control, one save path, at every width. Where no save
+ * is offered, both faces are Reset alone.
  *
  * Nothing here is configurable: no metadata key or option reaches it.
  */
@@ -95,7 +104,14 @@ export function ListDraftActions({
   };
   const discardLabel = t('console.objectView.draft.discard');
   const discardTitle = t('console.objectView.draft.discardTitle');
-  const saveLabel = t('console.objectView.draft.save');
+  // The button names what its menu does: 「Update view」 where the open view
+  // can take the change, else the one save there is, 「Save as my view」 (a
+  // view a read-only package ships, or a reader who may not write it). The
+  // narrow face (the phone's chip row) says 「Save」 there instead: the longer
+  // name would squeeze the view switcher beside it down to its count, and its
+  // menu, which also holds Reset, names the save.
+  const saveLabel = onSaveToView ? t('console.objectView.draft.save') : t('console.objectView.draft.saveAsMyView');
+  const compactSaveLabel = onSaveToView ? t('console.objectView.draft.save') : t('common.save');
   const offersSave = !!onSaveToView || !!onSaveAsMyView;
 
   const saveItems = (
@@ -123,7 +139,7 @@ export function ListDraftActions({
 
   return (
     <span className={cn('flex shrink-0 items-center gap-1', className)} data-testid="list-draft">
-      {/* The wide face: Discard beside Save ▾. */}
+      {/* The wide face: Reset beside Update view ▾. */}
       <ConditionDiscardButton
         label={discardLabel}
         title={discardTitle}
@@ -150,8 +166,8 @@ export function ListDraftActions({
           </DropdownMenuContent>
         </DropdownMenu>
       ) : null}
-      {/* The narrow face: one Save, whose menu also holds Discard. With no
-          save offered, a Save would hold nothing to save: Discard alone. */}
+      {/* The narrow face: one Update view, whose menu also holds Reset. With
+          no save offered, it would hold nothing to save: Reset alone. */}
       {offersSave ? (
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
@@ -162,7 +178,7 @@ export function ListDraftActions({
               data-testid="list-draft-compact"
               className="inline-flex h-6 shrink-0 gap-1 px-2 text-sm @[40rem]/list:hidden"
             >
-              {saveLabel}
+              {compactSaveLabel}
               <ChevronDown className="h-3.5 w-3.5" aria-hidden="true" />
             </Button>
           </DropdownMenuTrigger>

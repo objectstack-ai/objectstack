@@ -387,7 +387,7 @@ custom page. Prefer, in order:
    is a tab and the form has no lines. A parent or child
    declaring `enable.apiMethods` must list `'bulk'`, or that save is refused
    `405 OBJECT_API_METHOD_NOT_ALLOWED`. `inlineEdit` only picks how rows are
-   edited, the `true` / `'grid'` / `'form'` ladder:
+   edited, `'grid'` / `'form'` or left out:
    **objectstack-data → Relationships → Inline Editing**.
 
 2. **`object-master-detail-form` page block (bespoke layout).** Use a page only
