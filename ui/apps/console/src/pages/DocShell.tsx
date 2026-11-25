@@ -15,7 +15,7 @@ import {
   useSidebarDocsNavSlot,
 } from '@object-ui/app-shell';
 import { AppDocsBackLink } from './AppDocsBackLink';
-import { AppDocsNav, DocsNavLandmark } from './DocsNav';
+import { AppDocsNav, DocsNavLandmark, PortalDocsNav } from './DocsNav';
 import { useAppDocsBackTo } from './useAppDocsBackTo';
 
 /**
@@ -49,7 +49,7 @@ export function DocShell({
   nav?: ReactNode;
   children: ReactNode;
 }) {
-  const { appName } = useParams<{ appName?: string }>();
+  const { appName, slug } = useParams<{ appName?: string; slug?: string }>();
   const backTo = useAppDocsBackTo();
   const sidebarNav = useSidebarDocsNavSlot() !== null;
   const renderActions = useShellPageActionsSlot();
@@ -58,7 +58,7 @@ export function DocShell({
     <div className="min-h-full">
       {sidebarNav ? (
         <SidebarDocsNav>
-          <DocsNavLandmark>{nav ?? <AppDocsNav />}</DocsNavLandmark>
+          <DocsNavLandmark>{nav ?? (appName ? <AppDocsNav /> : <PortalDocsNav currentSlug={slug} />)}</DocsNavLandmark>
         </SidebarDocsNav>
       ) : null}
       {renderActions || renderExpand ? (

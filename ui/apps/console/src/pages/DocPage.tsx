@@ -16,7 +16,7 @@ import { rewriteDocLinks } from './doc-links';
 import { conflictCandidates, readsByNameAfter } from './doc-address';
 import { DocShell } from './DocShell';
 import { useAppDocsBackTo } from './useAppDocsBackTo';
-import { DocsNav, usePackageDocsNavBooks } from './DocsNav';
+import { DocsNav, PortalDocsNav, usePackageDocsNavBooks } from './DocsNav';
 import { DocRefusal } from './BookPage';
 import { useBookData } from './use-book-data';
 import { useActiveHeading } from './useActiveHeading';
@@ -397,7 +397,7 @@ export default function DocPage() {
   const pageNav = sidebarNav ? null : docsNav;
 
   return (
-    <DocShell backLink={!docsNav} nav={docsNav ?? undefined}>
+    <DocShell backLink={!docsNav} nav={appName ? docsNav ?? undefined : <PortalDocsNav currentSlug={slug} activeDoc={name} />}>
       {/* objectstack#35424 — the docs column is the page's one navigation.
         * Inside an app from 768 px up it is the shell sidebar's body, where the
         * app menu would be (objectstack#37150); elsewhere it sits full height

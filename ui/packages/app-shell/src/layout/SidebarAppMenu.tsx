@@ -43,7 +43,7 @@ import {
   DropdownMenuTrigger,
   Input,
 } from '@object-ui/components';
-import { Check, ChevronDown, Eye, Pencil, PencilRuler, Plus } from 'lucide-react';
+import { BookOpen, Check, ChevronDown, Eye, Pencil, PencilRuler, Plus } from 'lucide-react';
 import { useObjectTranslation } from '@object-ui/i18n';
 import { useAuth } from '@object-ui/auth';
 import { useMetadata } from '../providers/MetadataProvider.js';
@@ -242,6 +242,59 @@ export function SidebarAppMenu({ activeAppName, onAppChange }: SidebarAppMenuPro
         {(enterDesignMode || studioEntry || mayAddApp) && <DropdownMenuSeparator />}
         {enterDesignMode && <DesignLayoutItem onEnter={enterDesignMode} />}
         {studioEntry && <StudioAppItem entry={studioEntry} />}
+        {mayAddApp && <AddAppSubmenu />}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
+/**
+ * DESIGN MOCKUP (objectstack#37197, stage 1; scratch branch, never merged) —
+ * the app-less docs shell's first row: a neutral 「Documentation」 head that
+ * opens the same app list, with no app checked (no app is current on
+ * `/docs`), and without the app-scoped rows (design layout, edit app).
+ */
+export function SidebarDocsPortalMenu({ onAppChange }: { onAppChange: (segment: string) => void }) {
+  const { t } = useObjectTranslation();
+  const { appLabel } = useServedAppLabel();
+  const { apps: metadataApps } = useMetadata();
+  const apps = metadataApps || [];
+  const { apps: launcherApps } = useLauncherApps(apps);
+  const mayAddApp = useMayAddApp();
+  const label = t('help.documentation', { defaultValue: 'Documentation' });
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <button
+          type="button"
+          data-testid="sidebar-docs-portal-menu-trigger"
+          title={label}
+          className="flex h-8 min-w-0 flex-1 items-center gap-2 rounded-md px-1.5 text-left text-sm font-medium text-sidebar-foreground outline-none transition-colors hover:bg-sidebar-accent focus-visible:ring-2 focus-visible:ring-sidebar-ring data-[state=open]:bg-sidebar-accent"
+        >
+          <span className="flex size-6 shrink-0 items-center justify-center rounded-md bg-muted text-foreground/80" aria-hidden>
+            <BookOpen className="size-3.5" />
+          </span>
+          <span className="min-w-0 truncate">{label}</span>
+          <ChevronDown className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />
+        </button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="start" sideOffset={4} className="w-64" data-testid="sidebar-docs-portal-menu">
+        <div className="px-2 pb-1 pt-1.5 text-xs font-medium text-muted-foreground">
+          {t('layout.appSwitcher.yourApps', { defaultValue: 'Your apps' })}
+        </div>
+        <div className="max-h-[min(60vh,28rem)] overflow-y-auto">
+          {launcherApps.map((app: any) => (
+            <DropdownMenuItem
+              key={app.name}
+              onSelect={() => onAppChange(appAddressSegment(apps, app) ?? app.name)}
+              className="flex items-center gap-2.5 py-2"
+            >
+              <AppMark app={app} size="sm" />
+              <span className="flex-1 truncate">{appLabel(app)}</span>
+            </DropdownMenuItem>
+          ))}
+        </div>
+        {mayAddApp && <DropdownMenuSeparator />}
         {mayAddApp && <AddAppSubmenu />}
       </DropdownMenuContent>
     </DropdownMenu>

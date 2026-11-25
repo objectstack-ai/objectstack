@@ -31,6 +31,7 @@ import {
   ConsoleToaster,
   LoadingScreen,
   DefaultHomeLayout,
+  DocsPortalShell,
   DefaultHomePage,
   DefaultOrganizationsLayout,
   DefaultOrganizationsPage,
@@ -232,9 +233,10 @@ function HomeRoute() {
 function DocsPortalRoute() {
   const { user } = useAuth();
   return (
-    <DefaultHomeLayout userId={user?.id} variant="docs">
+    // DESIGN MOCKUP (objectstack#37197): the app-less shell from 768 px up.
+    <DocsPortalShell>
       <Suspense fallback={<LoadingScreen />}><DocsLayout /></Suspense>
-    </DefaultHomeLayout>
+    </DocsPortalShell>
   );
 }
 

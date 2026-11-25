@@ -654,3 +654,5 @@ export type {
   AssistantSnapshot,
 } from './assistant/assistantBus.js';
 export { RemediationOverlay } from './console/RemediationOverlay.js';
+// DESIGN MOCKUP (objectstack#37197) — scratch branch only.
+export { DocsPortalShell } from './console/docs/DocsPortalShell.js';

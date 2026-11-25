@@ -7,8 +7,11 @@
  */
 
 import { useCallback, useId, useMemo, useState, type ReactNode } from 'react';
-import { Link, useParams } from 'react-router-dom';
-import { ArrowRight, ChevronDown, ChevronRight, Search } from 'lucide-react';
+import { Link, useLocation, useParams } from 'react-router-dom';
+import { ArrowRight, ChevronDown, ChevronRight, Library, Search } from 'lucide-react';
+import { filterActiveApps, useMetadata, useServedAppLabel } from '@object-ui/app-shell';
+import { buildBookCards } from './book-nav';
+import { groupBooksByApp, type DocsIndexApp } from './docs-index';
 import { useObjectTranslation } from '@object-ui/i18n';
 import { AppDocsBackLink } from './AppDocsBackLink';
 import { useAppDocsBackTo, type AppDocsBackTo } from './useAppDocsBackTo';
@@ -37,8 +40,16 @@ export function DocsNav({
   docHref,
   backTo,
   allDocsHref,
+  sections,
+  allDocsFirst = false,
+  allDocsActive = false,
 }: {
   books: readonly DocsNavBook[];
+  /** MOCKUP (objectstack#37197) — the portal's tree: the books under their app's heading. */
+  sections?: readonly { key: string; label: string; books: readonly DocsNavBook[] }[];
+  /** MOCKUP (objectstack#37197) — 「All documentation」 as the tree's first row, not its foot. */
+  allDocsFirst?: boolean;
+  allDocsActive?: boolean;
   currentSlug?: string;
   activeDoc?: string;
   docHref: (slug: string, doc: string) => string;
@@ -53,14 +64,30 @@ export function DocsNav({
   const [toggled, setToggled] = useState<Record<string, boolean>>({});
   const searchId = useId();
   const searching = query.trim() !== '';
-  const shown = books
-    .map((entry) => ({ ...entry, filtered: filterBookArticles(entry.book, query) }))
-    .filter((entry) => !searching || entry.filtered.groups.length > 0);
+  const filterBooks = (list: readonly DocsNavBook[]) =>
+    list
+      .map((entry) => ({ ...entry, filtered: filterBookArticles(entry.book, query) }))
+      .filter((entry) => !searching || entry.filtered.groups.length > 0);
+  const shownSections = (sections ?? [{ key: '_all', label: '', books }])
+    .map((section) => ({ ...section, shown: filterBooks(section.books) }))
+    .filter((section) => section.shown.length > 0);
+  const shown = shownSections.flatMap((section) => section.shown);
   const searchLabel = t('help.searchDocs', { defaultValue: 'Search docs' });
 
   return (
     <div className="flex flex-col gap-4 text-sm" data-testid="docs-nav">
       {backTo ? <AppDocsBackLink backTo={backTo} /> : null}
+      {allDocsFirst ? (
+        <Link
+          to={allDocsHref}
+          data-testid="docs-nav-all-docs"
+          aria-current={allDocsActive ? 'page' : undefined}
+          className={`-mb-1 flex items-center gap-2 rounded-md px-2 py-1.5 font-medium transition-colors ${allDocsActive ? 'bg-primary/10 text-primary' : 'text-foreground hover:bg-muted/50'}`}
+        >
+          <Library className="h-4 w-4 shrink-0" aria-hidden />
+          <span>{t('help.allDocs', { defaultValue: 'All documentation' })}</span>
+        </Link>
+      ) : null}
       <div className="relative">
         <label htmlFor={searchId} className="sr-only">
           {searchLabel}
@@ -81,8 +108,14 @@ export function DocsNav({
           {t('help.noDocsMatch', { defaultValue: 'No articles match.' })}
         </p>
       ) : (
+        <div className="flex flex-col gap-3">
+        {shownSections.map((section) => (
+        <div key={section.key}>
+        {section.label ? (
+          <div className="px-2 pb-1 text-xs font-medium text-muted-foreground">{section.label}</div>
+        ) : null}
         <ul className="flex flex-col gap-1">
-          {shown.map(({ slug, book, filtered }) => {
+          {section.shown.map(({ slug, book, filtered }) => {
             const open = searching || (toggled[slug] ?? slug === currentSlug);
             const label = book.label ?? book.name;
             const count = bookArticles(book).length;
@@ -115,7 +148,11 @@ export function DocsNav({
             );
           })}
         </ul>
+        </div>
+        ))}
+        </div>
       )}
+      {allDocsFirst ? null : (
       <div className="border-t pt-3">
         <Link
           to={allDocsHref}
@@ -126,6 +163,7 @@ export function DocsNav({
           <ArrowRight className="h-4 w-4 shrink-0" aria-hidden />
         </Link>
       </div>
+      )}
     </div>
   );
 }
@@ -179,5 +217,58 @@ export function AppDocsNav() {
   );
   return (
     <DocsNav books={books} currentSlug={slug} docHref={docHref} backTo={backTo} allDocsHref="/docs" />
+  );
+}
+
+/**
+ * DESIGN MOCKUP (objectstack#37197) — the portal's tree in the app-less
+ * shell's sidebar: 「All documentation」 first (the portal's index), the
+ * title filter, then every book, under its app's heading as the index groups
+ * them; the open book is the one being read.
+ */
+export function PortalDocsNav({ currentSlug, activeDoc }: { currentSlug?: string; activeDoc?: string }) {
+  const { t } = useObjectTranslation();
+  const { pathname } = useLocation();
+  const { books, authoredBooks, docs } = useBookData();
+  const { apps } = useMetadata();
+  const { appLabel } = useServedAppLabel();
+  const uncategorizedLabel = t('help.uncategorized', { defaultValue: 'Uncategorized' });
+  const otherLabel = t('help.otherDocs', { defaultValue: 'Other documentation' });
+  const sections = useMemo(() => {
+    const indexApps: DocsIndexApp[] = filterActiveApps(apps as any)
+      .filter((app: any) => typeof app.name === 'string' && app.name !== '')
+      .map((app: any) => ({
+        name: app.name,
+        label: appLabel(app),
+        _packageId: typeof app._packageId === 'string' ? app._packageId : undefined,
+        navigation: app.navigation,
+        areas: app.areas,
+      }));
+    const cards = buildBookCards(books, docs);
+    const byName = new Map(books.map((b) => [b.name, b]));
+    return groupBooksByApp(books, cards, docs, indexApps).map((group) => ({
+      key: group.app ?? '_other',
+      label: group.label ?? otherLabel,
+      books: group.cards
+        .map((card) => byName.get(card.name))
+        .filter((b): b is NonNullable<typeof b> => !!b)
+        .map((b) => ({
+          slug: bookSlug(b),
+          book: labelUncategorized(resolveBookTree(b, docs, undefined, authoredBooks), uncategorizedLabel),
+        })),
+    }));
+  }, [apps, appLabel, books, docs, authoredBooks, uncategorizedLabel, otherLabel]);
+  const docHref = useCallback((bookSegment: string, doc: string) => `/docs/${bookSegment}/${doc}`, []);
+  return (
+    <DocsNav
+      books={[]}
+      sections={sections}
+      currentSlug={currentSlug}
+      activeDoc={activeDoc}
+      docHref={docHref}
+      allDocsHref="/docs"
+      allDocsFirst
+      allDocsActive={pathname === '/docs' || pathname === '/docs/'}
+    />
   );
 }

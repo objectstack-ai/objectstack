@@ -80,7 +80,7 @@ import {
 import { AppMark } from './AppMark.js';
 import { CONSOLE_BELOW_TOP_BAR } from './consoleTopBar.js';
 import { LocalizedSidebarTrigger } from './LocalizedSidebarTrigger.js';
-import { SidebarAppMenu } from './SidebarAppMenu.js';
+import { SidebarAppMenu, SidebarDocsPortalMenu } from './SidebarAppMenu.js';
 import { InboxBell } from './InboxBell.js';
 import { AccountMenu } from './AccountMenu.js';
 import { useCommandPalette, useCommandPaletteProviderMounted } from '../context/CommandPaletteProvider.js';
@@ -194,6 +194,12 @@ interface UnifiedSidebarProps {
    * recent items (objectstack#35424). The head and the foot are unchanged.
    */
   docsNav?: boolean;
+  /**
+   * DESIGN MOCKUP (objectstack#37197) — the app-less docs portal (`/docs…`):
+   * the shell chrome from 768 px up with a neutral 「Documentation」 head (the
+   * app switcher) instead of an app's menu, and the docs tree as the body.
+   */
+  docsPortal?: boolean;
 }
 
 function isMetadataDirectoryItem(item: NavigationItem): boolean {
@@ -211,7 +217,7 @@ function isOverviewGroup(item: NavigationItem): boolean {
   return id === 'overview' || label === 'overview';
 }
 
-export function UnifiedSidebar({ activeAppName, onAppChange, railOverlay = false, docsNav = false }: UnifiedSidebarProps) {
+export function UnifiedSidebar({ activeAppName, onAppChange, railOverlay = false, docsNav = false, docsPortal = false }: UnifiedSidebarProps) {
   const { isMobile, setOpenMobile } = useSidebar();
   const location = useLocation();
   const { t, language } = useObjectTranslation();
@@ -245,7 +251,7 @@ export function UnifiedSidebar({ activeAppName, onAppChange, railOverlay = false
   // objectstack#36112 — from 768 px up the console draws no top bar: the
   // sidebar starts at the top of the window and carries the app menu, the
   // search and the bell in its head, and the account at its foot.
-  const shellChrome = rail.desktop && context === 'app';
+  const shellChrome = rail.desktop && (context === 'app' || docsPortal);
   // objectstack#36362 — while the design mode is on, its bar is above the
   // sidebar, and the menu shows the app's own entries only: the person's
   // Favorites are not the app's to change.
@@ -805,13 +811,17 @@ export function UnifiedSidebar({ activeAppName, onAppChange, railOverlay = false
           </div>
         </SidebarHeader>
       )}
-      {shellChrome && activeApp && (
+      {shellChrome && (activeApp || docsPortal) && (
         <SidebarHeader className="gap-1 p-2 pb-1" data-testid="sidebar-shell-head">
           <div className="flex min-w-0 items-center gap-1">
+            {docsPortal ? (
+              <SidebarDocsPortalMenu onAppChange={(segment) => onAppChange?.(segment)} />
+            ) : (
             <SidebarAppMenu
               activeAppName={activeAppName ?? activeApp.name}
               onAppChange={(segment) => confirmUnsavedLeave(() => onAppChange?.(segment))}
             />
+            )}
             <LocalizedSidebarTrigger
               className="text-muted-foreground"
               aria-label={t('sidebar.collapse', { defaultValue: 'Collapse sidebar' })}
@@ -840,7 +850,7 @@ export function UnifiedSidebar({ activeAppName, onAppChange, railOverlay = false
         </SidebarHeader>
       )}
       <SidebarContent className={`pt-2 ${ICON_RAIL_SCROLLS_VERTICALLY}`}>
-        {docsNav && context === 'app' && activeApp ? (
+        {docsPortal || (docsNav && context === 'app' && activeApp) ? (
           // objectstack#37150 — an app's docs page: the docs' own navigation,
           // drawn here by the page (it carries its own landmark).
           <SidebarDocsNavTarget />
