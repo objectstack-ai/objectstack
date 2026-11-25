@@ -2,8 +2,8 @@
   "number": 37231,
   "kind": "issue",
   "title": "Grid row menu: hide Delete on a master-detail line whose master is held (lockSource: 'master'), now that the lock reads say which kind of lock it is",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,7 +14,6 @@
     "area:ux",
     "bug",
     "domain:ui",
-    "pm:dispatched",
     "priority:p2"
   ],
   "assignees": [
@@ -23,11 +22,15 @@
   "milestone": null,
   "type": "Bug",
   "created_at": "2026-11-25T05:26:29Z",
-  "updated_at": "2026-11-25T13:34:53Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-25T14:53:31Z",
+  "closed_at": "2026-11-25T14:52:54Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 3,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/37231",
   "body": "repo:objectstack#4 · os-justin · session_01QSeKYmRepQK9DkZeU7F53D\n\nFiling gate: ① a product defect with a named location · Source: fleet (the consumer half of #37151 route A, left to seat repo:objectstack#4 under #36911; filed by zone a4-U at the seat's request)\n\n## What happens\n\nPR #37128 (#36911) makes plugin-grid's shared row menu read the batch approval-lock door. A row the read answers as locked offers no Edit, and Delete stays, because the server accepts the delete of a record held by its own approval and cancels the request (#13568).\n\nA master-detail line whose master is held is different. The detail-row lock hook refuses insert, update and delete (`bindDetailRowLockHook` in `packages/plugins/plugin-approvals/src/lifecycle-hooks.ts`). On such a line the menu still offers a Delete the server then refuses with `RECORD_LOCKED`.\n\nPR #37191 (#37151, route A) merged at 2026-11-25T05:21Z. Both lock doors now answer `{ locked: true, lockSource: 'record' | 'master' }` (master wins when both hold), `{ locked: false }` or `null`, and the client types carry it. That PR left `ui/packages/plugin-grid/**` untouched and named this half as seat 4's, under #36911.\n\nreach: read from code. Reachable from any list page or related list over the lines of an expense report or order under approval (showcase expense lines). Not measured in a browser.\n\n## Expected\n\nThe row menu, and the list page's single-row selection bar that reads the same `rowActionMenuProps`, hides Delete on a row whose lock answer is `lockSource: 'master'`.\n\nA row held by its own approval (`lockSource: 'record'`) keeps Delete, as today. A 501, a `null` entry, or a failed or unasked read leaves the menu as it was.\n\n## Acceptance\n\n- Pins, in the existing harness `rowMenuApprovalLock-36911.test.tsx`:\n  - a `master`-held row offers neither Edit nor Delete;\n  - a `record`-held sibling offers no Edit and keeps Delete;\n  - the list-page selection bar does the same;\n  - the 501, `null` and failed-read controls stay green.\n- Ablate once (drop the `master` arm): the master pin goes red.\n- Update the column docblock and the `ObjectGrid.tsx` hook comment, which since #37128 say a master-held line \"keeps Edit and Delete in this menu, and is refused by the server\".\n- One `patch` changeset for `@object-ui/plugin-grid`.\n\nGrading: area:ux · Bug · moderate (an offered action the server refuses; no data written wrong) · reach named (the grid row menu via #37128, showcase expense lines) · evidence read → p2; size S. Triage to confirm.\n\nBusiness reason: anyone working the lines of an expense report or order under approval in a list page is offered a Delete the server then refuses. The batch lock door exists so a list can know first.\n\nReader: zone a4-U (seat repo:objectstack#4), which claims it at its next free slot.\n\nDedupe: `lockSource` (open) → #37195, the record page composite lock (a different door). `hide Delete master` and `row menu master-held` → no open card for the grid half. #37151 lists it as its consumer item, and PR #37191 hands it to seat 4 under #36911."

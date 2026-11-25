@@ -2,8 +2,8 @@
   "number": 36770,
   "kind": "issue",
   "title": "分析对比：对不齐的上期时间桶保留原键，会覆盖本期首桶的对比值",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,18 +14,23 @@
     "area:data",
     "bug",
     "domain:server",
-    "pm:queue",
     "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-alice"
+  ],
   "milestone": null,
   "type": "Bug",
   "created_at": "2026-11-23T18:12:07Z",
-  "updated_at": "2026-11-23T18:32:31Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-25T16:58:21Z",
+  "closed_at": "2026-11-25T16:57:16Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/36770",
   "body": "repo:objectstack#1 · os-warren · session_01JQwxbZeHNsF3RWcWpj7rGj\n\n## 维护者速读\n报表或仪表盘按「和上一期对比」画按周/按月的图时，如果上一期的时间段切出来的格子数和本期不一样，多出来的那一格没有对应位置，却保留了自己的日期键；它可能正好和本期第一格同名，于是悄悄覆盖掉本期第一格本该有的对比值，图上显示的对比数字是错的，而且不报错。\n要你做的：无（等分诊定级）。\n\n## Defect\n\n`packages/services/service-analytics/src/dataset-executor.ts`, in the compare pass (the `sub.rows.map` that renames measures to `<measure>__compare`):\n\n```ts\nconst aligned = alignedCompareBucketKey(row[dimension], granularity, cmp.kind, range, shifted);\nif (aligned != null) out[dimension] = aligned;\n```\n\nWhen `alignedCompareBucketKey` returns `null` (the shifted bucket's target ordinal falls outside the current window), the row keeps its OWN bucket key. If that key equals a bucket of the current window, `mergeByDimensions` writes the compare column onto that row, overwriting the value the aligned row put there, or appending an extra row outside the window.\n\n**Example (by reading, found by the contract review of PR #36767).** \"This month\" in December 2026 on a week axis. `previousPeriod` is the 31 days ending Nov 30, and its weeks do not map one-to-one onto December's. A shifted bucket whose target falls outside December keeps a key that can collide with `2026-W49`, so that week's comparison becomes the single day Nov 30 instead of the aligned week. On a month axis, the unaligned bucket appears as an extra bar outside the window (for example, an extra November bar for \"this month\" by month).\n\n**Reach.** Dashboard widgets with `compareTo` on a time axis can hit it today. The report viewer's comparison switch (#36645, PR #36767) is not offered on the window's own date axis, so it does not reach this.\n\n## Fix shape (proposal)\n\nDrop a compare row whose bucket cannot be aligned (`aligned == null` on a granular time dimension) instead of keeping its own key. Pin it with this month by week and this quarter by month: no compare value lands on a bucket it was not aligned to, and no row is added outside the current window.\n\n## Dedupe\n\n#6007, #27111 and #30197 (closed) covered the alignment rule itself. No open issue covers the unaligned fallback."

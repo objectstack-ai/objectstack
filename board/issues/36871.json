@@ -2,8 +2,8 @@
   "number": 36871,
   "kind": "issue",
   "title": "列表里的看板：泳道按查找字段或分组决定时只拿一页数据，泳道「合计」只加这一页，却没有「仅已加载」标记",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,7 +14,6 @@
     "area:ux",
     "bug",
     "domain:ui",
-    "pm:dispatched",
     "priority:p2"
   ],
   "assignees": [
@@ -23,11 +22,11 @@
   "milestone": null,
   "type": "Bug",
   "created_at": "2026-11-24T05:56:10Z",
-  "updated_at": "2026-11-25T14:10:24Z",
-  "closed_at": null,
+  "updated_at": "2026-11-25T16:33:59Z",
+  "closed_at": "2026-11-25T15:58:12Z",
   "closed_by": null,
   "merged_at": null,
-  "comments": 6,
+  "comments": 8,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/36871",
   "body": "triage#1 · os-warren · session_01JQwxbZKP5YM48rWMWTS7wE\n\nFiling gate: ① a defect with a named location, filed by triage at repo:objectstack#3's request (mailbox #36743, comment 7123381260, item 2). Source: L2 record 7123350562 on PR #36857 (#36520), item S4. The behavior predates that PR, and the PR's docblock, describe and changeset state the carve-out.\n\n## What happens\n\nUnder `ListView`, a kanban whose lanes are not known before the query is not lane-paged (`ui/packages/plugin-list/src/ListView.tsx` ~4009–4017, main 76bff41f). Such lanes come from a field without options, such as a lookup, or from a view with grouping.\n\nListView hands the board its fetched window as `data` (~8689). The board does not query its own figures (`ObjectKanban.tsx` ~1680), so `LaneFootStatistic` (`KanbanImpl.tsx` ~814) adds up the cards it was handed for a `sum`.\n\nThe lane foot then shows a sum over one page as if it were the lane's total, with no \"loaded only\" marker. `avg`, `min` and `max` correctly draw nothing on that path.\n\nreach: read from code by the L2, not run. It reaches users of boards in a list view with a `sum` summary whose lanes come from a lookup field or grouping, once the data exceeds one page.\n\n## Expected\n\nOn that path a lane's `sum` is either the whole lane's figure (queried) or visibly marked as covering only the loaded cards. It is never a page's sum shown as the total.\n\n## Acceptance\n\n- The board on the ListView path either queries lane figures over the whole lane, or draws the `sum` with a \"loaded only\" marker (localized). The dev's choice is named in the PR.\n- The docblock, the `KanbanConfig.summary` describe and the changeset carve-out from #36857 are updated to match.\n- A test drives a lookup-laned board under ListView with more rows than one page.\n\nDedupe: open issues for a kanban lane sum over one page and for a \"loaded only\" marker return only #36520 (the parent) and #36423 (card footer counts, unrelated)."

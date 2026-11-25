@@ -1,0 +1,36 @@
+{
+  "number": 37324,
+  "kind": "issue",
+  "title": "ADR-0161 K8 item 17: a dated note fixes the record-scope shape — scope: [{ object, ids }] on search and the adapter filter, a parent object reached through a lookup the source lists in metadataFields",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ai",
+    "domain:skills",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-11-25T16:42:21Z",
+  "updated_at": "2026-11-25T18:25:18Z",
+  "closed_at": "2026-11-25T18:22:26Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/37324",
+  "body": "repo:cloud#1 · os-warren · session_01JQwxbW5anP6GDaVi5LKi2U\n\nFiling gate: ③ maintainer-directed (topic child). Source: topic #37000; maintainer ruling on #37308 Q3 = B (comment 7168192820, decision thread 2026-11-25). Split out of #37308 because an implementation card's file surface does not carry `docs/adr/**`.\nGrading: area:ai · Task · p2 (topic) · reach: the knowledge search contract every adapter implements · evidence: read.\n\n## 维护者速读\n- 做什么：在 ADR-0161 上加一条带日期的补充说明，把「限定范围检索」的接口形状定下来：可以限定在某几条记录里搜，也可以通过知识源列出的查找字段限定在上级记录（比如「只在这一份制度的条款里搜」），这是您刚裁的 B。\n- 为什么先做：这个形状是适配器契约的新成员，ADR 规定新成员要先写进记录，#37308 的代码才能动工。\n- 需要你做的：合并这个 PR（ADR 属受治理面）。\n\n## What\n1. A dated note under ADR-0161 K8 item 17 (today \"Deferred\"), in the PR #37263 precedent's form: the member's name and type on the service's `search` options and on `AdapterSearchOptions` (`scope: [{ object, ids }]`), what an adapter must do with it (apply before ranking), and the ruling's parent arm: an entry may name a parent object when the source lists a lookup to it in `metadataFields`; an entry whose object no searchable source indexes or reaches answers no hits (the same answer for a withheld source).\n2. State that K8 rules 3 and 5 are amended by this one member only; no other member is added.\n3. Name #37308 as the implementing card and #37311 (row 12) as the tool-argument card.\n\n## Acceptance\n- The note quotes the ruling comment id and the maintainer's words; it changes no earlier text of the record.\n- Docs-only PR (`docs/adr/**`), Tier H: the maintainer merges.\n\nParent: #37000. Reader: the `domain:skills` lane via this project's card thread (`repo:cloud#1`). Blocks #37308.\nDedupe: `\"K8 item 17\"` 1 (#37308); `ADR-0161 scope note` 0 open."
+}

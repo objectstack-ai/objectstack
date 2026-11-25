@@ -1,0 +1,31 @@
+{
+  "number": 37307,
+  "kind": "issue",
+  "title": "knowledge_source: lint and os validate check the object and field references and the gates that need no principal, also at publish",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:build",
+    "domain:spec",
+    "pm:blocked",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Feature",
+  "created_at": "2026-11-25T14:23:14Z",
+  "updated_at": "2026-11-25T14:34:10Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/37307",
+  "body": "repo:cloud#1 · os-warren · session_01JQwxbW5anP6GDaVi5LKi2U\n\nFiling gate: ③ maintainer-directed (topic child). Source: topic #37000; maintainer 2026-11-25 「现在拆阶段三」 (decision card in the project thread) and 「#4 只负责在手任务，你接手专题剩余任务」. Reviewed by an independent Fable pass before filing.\nGrading: area:build · Feature · p2 (topic) · reach: every package that ships a `knowledge_source`, and every source saved at runtime · evidence: read.\n\n## 维护者速读\n- 问题：知识源写错了对象名或字段名，或者指向一个不允许检索的对象（系统对象、API 不开放检索的对象），现在要等到检索时才发现「怎么搜不到」。\n- 做什么：`os validate` 和发布时就检查并报出来，报错写明是哪个对象、哪个字段、为什么不行。\n- 谁受益：写应用包的作者和用 AI 搭建的作者，错误在发布前就看到。\n- 需要你做的：无。\n\n## What\nCarries ADR-0161 (`docs/adr/0161-knowledge-platform-boundary-platform-owns-assembly-sync-split-record-return-knowledge-source-is-a-governed-type.md`) Execution row \"rows 4, 5, 5b\": K4's reference checks (\"refused when the object or a named field does not exist (the lint and `os validate` checks are row 4)\") and \"A packaged item meets the gates that need no principal in `os validate` and at publish (row 4)\". The precedent is `validateAiContext` (`packages/lint/src/validate-ai-context.ts`, PR #37173) and its at-publish wiring (PR #37247, #37176).\n\n1. **A rule file `packages/lint/src/validate-knowledge-source.ts`**, registered in `packages/lint/src/authoring-rules.ts` beside `validateAiContext` (:1984) and exported from `packages/lint/src/index.ts`, each rule with an `os explain` entry in `packages/lint/src/rule-explanations.ts` (the `ai_context` entries start at :6008). Reference checks, against the stack's `objects`:\n   - `source.object` names no object;\n   - a `source.content` or `source.metadataFields` member names no field of that object;\n   - a member names a credential-class or `internal` field, which the index never carries (K5: skipped even when named) — the author hears that it will be skipped (an addition past the Execution row, under ADR-0078).\n2. **The gates that need no principal (K4, the gates of PR #36850 as `packages/services/service-knowledge/src/knowledge-source-admission.ts` states them):**\n   - the object's API exposure refuses `search` (`canServeApiOperation(enable, 'search')`, `packages/spec/src/data`);\n   - a system object without `enable.aiReadable` (`isAiReadExposed`, `packages/spec/src/data/ai-read-exposure.ts`).\n   Reuse those predicates; do not restate them. The disabled-package gate and the field-queryable gate need an environment or a principal and stay at save (row 3a).\n3. **At publish.** Map `knowledge_source` to its collection in `packages/lint/src/runtime-gate.ts` (the `ai_context` row is :312, and its comment states the rule: no mapping ahead of its rule), so the runtime publish door reports the same rule ids and messages `os validate` prints. Follow the refuse-or-warn verdict the `ai_context` row took and state it.\n4. **Severity.** A missing object or field, and both gates, are errors: such a source can never serve a hit. The credential/`internal` member is a warning. State each in the PR.\n\nRulings carried (ADR-0161 K10): embedding is egress, so the check reads the explicit `content` list (no wildcard exists after row 3a); no key is added.\n\n## Acceptance\n- `os validate` on a package whose source names a missing object, a missing content field, a missing metadata field, an object with `apiEnabled: false`, an object whose `apiMethods` omit `search`, or a `sys_*` object without `enable.aiReadable` prints one finding each, with the rule id and the object or field named; a clean source prints none.\n- A credential-class field in `content` prints the warning.\n- The same source published at runtime reports the same rule ids and messages.\n- `os explain` answers each rule id.\n- The authoring-rule wiring test and the lint suite are green.\n- Container run per AGENTS.md.\n\n## Out of scope\n- The type, its loader, the named permission and source admission at save as the authoring principal (disabled package, field-queryable): row 3a.\n- The Studio form that shows these reports: row 5. Teaching the rules in `skills/objectstack-ai`: row 5b.\n- Whether a source that names a field withheld by the field-egress declaration is refused at authoring: the field-egress topic (ADR-0161 K5).\n\nBlocked-by: #37304 (row 3a).\nParent: #37000. Reader: `domain:spec` lane (`packages/lint`).\nDedupe: `knowledge source lint` 361 (open hits are unrelated lint and seat cards; none checks a knowledge source) · `\"knowledge\" \"os validate\"` 82 (open: #37000, unrelated) · `knowledge os validate object unknown` 102 (open: none on knowledge)."
+}

@@ -2,8 +2,8 @@
   "number": 37189,
   "kind": "issue",
   "title": "Open runtime: `requires: ['record-context']` mounts the record-context service, so `get_record_context` exists without hand wiring",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "os-bob",
@@ -12,7 +12,6 @@
   },
   "labels": [
     "area:ai",
-    "pm:dispatched",
     "priority:p2"
   ],
   "assignees": [
@@ -21,11 +20,15 @@
   "milestone": null,
   "type": "Feature",
   "created_at": "2026-11-25T03:06:16Z",
-  "updated_at": "2026-11-25T13:05:03Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-25T20:02:24Z",
+  "closed_at": "2026-11-25T17:07:27Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
   "merged_at": null,
-  "comments": 5,
+  "comments": 8,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/37189",
   "body": "maintainer · os-bob · session_012dn2AecKpLaYkUtNRiqtby\n\nFiling gate: ③ maintainer-directed (topic child). Source: topic #36996, M2. An independent Fable review of rows 5–10 (2026-11-25) found that no card assembles the service. Maintainer 2026-11-25: 「同意你的建议」.\nGrading: area:ai · Feature · p2 (topic child; without it an app that declares packs gets no tool) · reach: every open deployment that ships `aiContexts` · evidence: read.\n\n## 维护者速读\n- 做什么：应用在配置里声明 `requires: ['record-context']`，开源运行时就自动挂上情境包服务，外部 AI 经 MCP 就能用 `get_record_context`。不声明的部署，什么都不变。\n- 为什么：PR #37173 里，这个工具只有在宿主手工挂上 `RecordContextServicePlugin` 时才会出现。BrightRule 这种纯元数据应用（制品启动）没有办法挂插件，写了情境包也没人读。\n- 为什么用令牌、不按「有情境包就自动挂」：和知识检索的 `requires: ['knowledge']`（#37102）保持同一种写法；而且是否对外开放一个读工具，应该由应用显式声明，不该随元数据出现而悄悄打开。\n- 需要你做的：无。\n\n## What\n1. A capability token `record-context`:\n   - in `packages/spec/src/kernel/platform-capabilities.ts` (`PLATFORM_CAPABILITY_TOKENS` / `PLATFORM_CAPABILITY_PROVIDERS`);\n   - and in `packages/core/src/capability-providers.ts#CAPABILITY_PROVIDERS`, mapped to `@objectstack/service-record-context`'s `RecordContextServicePlugin`.\n2. Readers in the same PR (ADR-0049): `packages/cli/src/commands/serve.ts` and `@objectstack/verify`'s `bootStack`.\n3. A host that already mounts the plugin by hand keeps its own (the `Serve.providesCapability` rule); the runtime adds no second one.\n4. Without the token, nothing changes: no tool, no service.\n5. Docs: where `get_record_context` and `aiContexts` are documented, add one line on the token.\n\n## Acceptance\n- A stack with `requires: ['record-context']` and one pack: over MCP, `tools/list` carries `get_record_context`, and a call returns the pack.\n- A stack without the token: no tool.\n- A host that mounts the plugin by hand gets no second mount.\n- An artifact boot (`os serve` on a compiled app) with the token serves the tool.\n- Container run per AGENTS.md.\n\n## Out of scope\n- The hosted kernel and EE. Cloud folds that into its row-9 card, objectstack-ai/cloud#4978.\n- Auto-mounting on the presence of `aiContexts`: not taken, see 维护者速读.\n- The knowledge token (#37102).\n\nBlocked-by: #37140 (the package and plugin land there; PR #37173).\nParent: #36996. Reader: the runtime and capability lane (`packages/core`, `packages/spec/src/kernel`, `packages/cli`).\nDedupe: `RecordContextServicePlugin` 0 · `record-context service mount` 95 (none on mounting this service; #37103 is knowledge) · `requires record-context` 221 (no capability card for it)."

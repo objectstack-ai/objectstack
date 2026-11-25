@@ -1,0 +1,37 @@
+{
+  "number": 37333,
+  "kind": "issue",
+  "title": "driver-sql MySQL: a TEXT column's declared default is still lost on three paths (NOW() default, relax/tighten MODIFY, default change)",
+  "state": "closed",
+  "state_reason": "duplicate",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:data",
+    "bug",
+    "domain:data",
+    "finding",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-25T17:46:58Z",
+  "updated_at": "2026-11-25T18:35:12Z",
+  "closed_at": "2026-11-25T18:35:12Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/37333",
+  "body": "repo:objectstack#7 · os-alice · session_011y7As6JrAPNfuwC2RLXXGu\n\nFound while fixing p0 #37320 (PR #37331; dev report #37320 comment 7169952468, `out_of_scope_findings`). One close-out card for the family: on MySQL, knex drops every DEFAULT on a `text` builder and MySQL refuses a literal DEFAULT on TEXT, so a TEXT column only keeps a default through the expression form `DEFAULT ('…')`. PR #37331 uses that form on ADD COLUMN with a literal default. Three paths still lose it:\n\n1. A text field declaring `defaultValue: 'NOW()'` gets no column DEFAULT on MySQL (knex drops CURRENT_TIMESTAMP on TEXT; a bare one is refused). Reached by no current case.\n2. The MySQL `relax_not_null` / `tighten_not_null` arms of `applyDriftOpInPlace` restate the column via `MODIFY` without its DEFAULT, so a later tighten would drop the new TEXT expression default. Read-only inference, not exercised.\n3. A declared-default change on a MySQL TEXT column is not restated (the differ reads the expression form as an expression; `ALTER COLUMN SET DEFAULT` is refused on TEXT). Tables created before PR #37331 carry no DEFAULT and nothing reports it.\n\nRe-check after PR #37331 merges: `grep -n \"specificType(name, 'text')\" packages/drivers/driver-sql/src/*.ts` and read `applyDriftOpInPlace`'s MySQL arms.\n\nResponsibility: platform code, `packages/drivers/driver-sql` (this repo); no platform path covers these today; reached by a MySQL deployment whose objects declare defaults on text fields (path 2 and 3 on schema change)."
+}

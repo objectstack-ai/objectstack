@@ -2,8 +2,8 @@
   "number": 37288,
   "kind": "issue",
   "title": "Filter chips and condition summaries still draw raw comparands: lookup ids, booleans, untranslated option labels, and an unpinned [nin] arm",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,7 +14,6 @@
     "area:ux",
     "bug",
     "domain:ui",
-    "pm:dispatched",
     "priority:p2"
   ],
   "assignees": [
@@ -23,11 +22,15 @@
   "milestone": null,
   "type": "Bug",
   "created_at": "2026-11-25T12:23:55Z",
-  "updated_at": "2026-11-25T14:03:53Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-25T16:58:23Z",
+  "closed_at": "2026-11-25T16:57:17Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 3,
+  "comments": 7,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/37288",
   "body": "repo:objectstack#4 · os-justin · session_01QSeKYmRepQK9DkZeU7F53D\n\nFiling gate: ① a product defect with named locations (one card for one family) · Source: fleet (L1 record 7162252170 on PR #37285 / card #37259; the seat repo:objectstack#4 named these as one follow-up card)\n\n## What happens\n\nPR #37285 (card #37259) makes the `/data` page's URL filter chip draw a select field's comparand as its translated option label. It does this through `groupFilterChips(…, comparandText)` and `useObjectLabel().translateOptions`, the grid cell's own path. The L1 record names the same-family producers that still draw a raw comparand, read at `origin/main` 4ed453dc plus #37285's head `eab0575f`:\n\n- **(a) Lookup comparand on `/data`.** A dashboard drill on a lookup dimension lands with a chip showing the related record's id. This is the `ObjectDataPage` chip's `=` and `[in]` arms. A fix needs a name resolve for the id.\n- **(b) Boolean comparand on `/data`.** `[bool]=true` reads `= true` or `= false`. The sibling `FilterConditionField.describeCondition` already draws `filterBuilder.trueLabel` and `falseLabel`.\n- **(c) `FilterConditionField.describeCondition`** (`ui/packages/fields/src/widgets/FilterConditionField.tsx` ~636), used by the report builder and the metadata-admin dataset and field inspectors. It maps options to the *authored* label without `translateOptions`, and it draws the field label untranslated, so a zh user reads the English authored text.\n- **(d) The `[nin]` arm of the `/data` chip is advertised but not pinned.** PR #37285's changeset and body both claim \"each member of a membership list (`[in]`, `[nin]`)\". The seat's ablation A5, which removes `not_in` from `WHOLE_VALUE_OP_WORDS`, leaves every pin green. The behaviour is correct by reading. Add one `filter[category][nin]=software` case to the `objectstack#37259` describe, expecting `${packLabelOf('zh-Hans','filterBuilder.operators.not_in')} 软件`.\n\nChecked by the seat and not raw: `plugin-list` `UserFilters` and `ListConditionsBlock`, and `plugin-dashboard` `DashboardFilterBar` (all go through `translateOptions`). The `/apps/:app/:object` equality arm draws no comparand chip.\n\nreach: read from code (a–c), and measured by ablation (d). Any zh user who drills from a dashboard on a lookup or boolean dimension reaches (a) and (b). Anyone who opens a report-builder or inspector condition on a select field reaches (c).\n\n## Expected\n\n- **Lookup:** the chip names the record, using the display name the grid's lookup cell draws, and falls back to the raw id when it does not resolve.\n- **Boolean:** the chip reads the `filterBuilder.trueLabel` / `falseLabel` text in the user's locale.\n- **`describeCondition`:** goes through the same `translateOptions` path for option labels and translates the field label.\n- **`[nin]`:** the arm is pinned. Each item gets a pin that goes red when ablated, plus a raw-fallback control.\n\n## Acceptance\n\n- One pin per item (a)–(d), as top-level `describe`s in the existing harnesses (`ObjectDataPage.filterChipI18n-9159.test.tsx` for a, b and d; `FilterConditionField`'s harness for c), in en and zh.\n- `Clause-②: no`, `Metadata-protocol: none`; `patch` changesets for the touched packages.\n- If (a)'s name resolve turns out to need a new fetch path, split (a) off and report it rather than widening this card.\n\nBlocked-by: #37285\n\nGrading: area:ux · Bug · minor (a label reads raw rather than translated; no data is wrong) · reach: read from code, and (d) measured by ablation · p2, size S–M; triage to confirm.\n\nBusiness reason: a zh user drilling from a dashboard sees ids and `true` in a chip beside correctly translated select chips. This is the same gap #37259 fixed for select fields, so the screen reads half translated.\n\nReader: zone a4-U, after PR #37285 lands, which provides `comparandText` and the chip harness.\n\nDedupe: `filter chip comparand`, `describeCondition`, `filter chip lookup record id` and `chip boolean true false label` (open issues) → none on this; #37259 (the select half, PR #37285) is the parent."

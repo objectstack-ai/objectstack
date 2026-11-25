@@ -1,0 +1,36 @@
+{
+  "number": 37325,
+  "kind": "issue",
+  "title": "ADR-0150 addendum: knowledge_source joins bucket 3 — one slot per (package, name), the AI face spells NS-NAME",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ai",
+    "domain:skills",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-11-25T16:42:51Z",
+  "updated_at": "2026-11-25T18:21:17Z",
+  "closed_at": "2026-11-25T18:19:47Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/37325",
+  "body": "repo:cloud#1 · os-warren · session_01JQwxbW5anP6GDaVi5LKi2U\n\nFiling gate: ③ maintainer-directed (topic child). Source: topic #37000; maintainer ruling on #37304 Q1 = B (comment 7168239918, 「按应用+名字区分，都保留」, decision thread 2026-11-25). Step 1 of #37304's ruled execution, split out because an implementation card's file surface does not carry `docs/adr/**`.\nGrading: area:ai · Task · p2 (topic) · reach: every package that ships a knowledge source · evidence: read.\n\n## 维护者速读\n- 做什么：在 ADR-0150 上加一条带日期的补充说明：知识源和技能、资料包一样，按「应用包 + 名字」区分，两个应用包带同名知识源时都保留，AI 要写「应用-名字」来指明，这是您刚裁的 B。\n- 为什么先做：ADR-0150 规定哪些类型按应用包分槽，新加一个类型要先写进记录，#37304 的代码按它来。\n- 需要你做的：合并这个 PR（ADR 属受治理面）。\n\n## What\n1. A dated addendum to ADR-0150 admitting `knowledge_source` to bucket 3 beside `skill` and `ai_context`, in the PR #37209 precedent's form: one slot per `(package, name)`; the AI face spells `NS-NAME` and refuses a bare ambiguous name loudly (409); document ids and adapter tables are keyed by package too.\n2. Name what follows: #37304 takes the four lists and readers and the store keying (memory, pgvector, turso); #37100 / #37107 inherit the keying if they land first.\n\n## Acceptance\n- The addendum quotes the ruling comment id and the maintainer's words; earlier text of the record unchanged.\n- Docs-only PR (`docs/adr/**`), Tier H: the maintainer merges.\n\nParent: #37000. Reader: the `domain:skills` lane via this project's card thread (`repo:cloud#1`). Blocks #37304.\nDedupe: `ADR-0150 knowledge_source` 1 (#37304); `bucket 3 addendum` 0 open."
+}

@@ -2,8 +2,8 @@
   "number": 37103,
   "kind": "issue",
   "title": "service-knowledge: search returns records, not chunks — granularity and groupBy",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "os-bob",
@@ -13,18 +13,23 @@
   "labels": [
     "area:ai",
     "domain:server",
-    "pm:blocked",
     "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-warren"
+  ],
   "milestone": null,
   "type": "Feature",
   "created_at": "2026-11-24T19:37:54Z",
-  "updated_at": "2026-11-24T20:38:13Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-25T19:45:23Z",
+  "closed_at": "2026-11-25T19:36:27Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/37103",
   "body": "maintainer · os-bob · session_012dn2AecKpLaYkUtNRiqtby\n\nFiling gate: ③ maintainer-directed (topic child). Source: topic #37000 (phase 2 row 10); maintainer 2026-11-24 「用fable评审，并分拆第二阶段的任务」. Reviewed by an independent Fable pass before filing.\nGrading: area:ai · Feature · p2 (topic) · reach: apps that mount `service-knowledge` · evidence: read.\n\n## 维护者速读\n- 做什么：检索可以按记录返回。同一份制度命中多个片段时合成一条，取最高分；也可以按某个字段分组（比如按制度），返回「哪几份制度」。\n- 记录在建索引之后改过内容的，不返回旧片段。\n- 谁受益：制度问询先找到「哪几份制度」，再把全文交给模型；BrightRule 可以删掉自己写的去重。\n- 需要你做的：无。\n\n## What\n1. `KnowledgeSearchOptions` (`packages/spec/src/contracts/knowledge-service.ts`): `granularity?: 'chunk' | 'record'` (default `chunk`, today's behaviour) and `groupBy?: string`. Return type stays `KnowledgeHit[]`.\n2. `knowledge-service.ts` `search()`: in record mode keep the best hit per group; `topK` counts groups; builds on #36993's refill after the permission filter, with a stated refill cap.\n3. `groupBy` must be one of the source's `metadataFields`; a source without it answers no hits for that search (never ungrouped); the group value is returned in the hit's `metadata`. File and http sources group by `documentId`.\n4. The permission re-read stays `id` + the display field (`resolveDisplayField`, shared with #36994), as the asking user, in the same query.\n5. Freshness, a separate query only for the hits that would be returned (at most topK records): one system-context read per object of the source's content and metadata fields with `{ $and: [where, { id: { $in } }] }`. A record that no longer matches `where`, or whose recomputed docHash differs from the hit's, is dropped. Repair is in process, not awaited, in system context, single-flight per (source, record) through #36991's path, at most once per record per process lifetime until its hash matches; it never throws into the search. It moves to the queue with row 15. The hit carries the stored hash (`KnowledgeHit.docHash?`, per #37001).\n6. When a chunk has `headingPath` (#37098), the hit carries it (`KnowledgeHit.headingPath?`, per #37001).\n\n## Acceptance\n- One record with 3 matching chunks → 1 hit, the highest score.\n- `topK: 5` → 5 records when that many exist within the refill cap (cap stated); fewer otherwise, logged.\n- A record deleted, unreadable, or out of `where` after indexing → absent; content changed → no stale snippet, one repair.\n- `groupBy: 'policy'`; a `groupBy` field missing from one source; system identity; several sources mixed; a file source.\n- Container run per AGENTS.md.\n\n## Out of scope\n- New `search_knowledge` tool arguments over MCP / in-app (epic row 12).\n- Grouping inside the adapter (in #37001's list).\n- The scope filter (row 11).\n\nBlocked-by: #37001, #36993 (same function; record mode builds on its refill), #37098, #37096 (docHash). Coordinates with #36994: both use `resolveDisplayField`; #36994 sets the title at index time, this card reads it live in the permission re-read.\nParent: #37000. Reader: `domain:server` lane (spec edits per `spec.md`).\nDedupe: `granularity` 227 (open: none on knowledge besides #37000) · `groupBy knowledge` 25 (open 3: #37000, unrelated skills and seat posts)."

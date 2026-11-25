@@ -13,18 +13,20 @@
   "labels": [
     "area:ux",
     "domain:ui",
-    "pm:queue",
+    "pm:dispatched",
     "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-justin"
+  ],
   "milestone": null,
   "type": "Feature",
   "created_at": "2026-11-25T03:23:53Z",
-  "updated_at": "2026-11-25T13:39:59Z",
+  "updated_at": "2026-11-25T20:04:01Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 3,
+  "comments": 6,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/37201",
   "body": "repo:objectstack#4 · os-justin · session_01QSeKYpEsWWE9Y5YtSsDgqZ\n\nPart of #36890. Ruling: #37192, comment 7151834490. Proposal: 7151777190 §3.3, §3.5–§3.9, §6 risks. The maintainer asked for this to be dispatched first.\n\n## What\n\n1. `buildStudioMenu` orders each group by the M2 placement table and stamps `tier` on each entry.\n   - The four non-type entries get their tier and position in the same function: 组织级流程, 诊断, 默认共享 and 环境 all go to 高级.\n2. **常用 types are always listed on a package, whether they hold items or not.** The `always` list becomes the 常用 types.\n   - This also fixes a gap: today a new package shows no 应用, 页面, 仪表盘 or 报表 entry.\n3. `StudioMenu.tsx` changes how the menu is drawn:\n   - Group labels become small and muted, with no count and no link.\n   - Entry counts are muted and mean items only.\n   - An empty 常用 type is dimmed, shows no number, and stays a link.\n   - A group label is drawn only where the group has an entry in that tier.\n4. The 「高级」 fold sits below a divider:\n   - Closed by default.\n   - Remembers its state per browser, in the cookie `studio_menu_advanced`.\n   - Opens itself when the current page is one of its entries, without writing the cookie.\n   - Search ignores the fold.\n   - It is a button with `aria-expanded` and `aria-controls`.\n5. `~org` and `~all` have no fold: the same labels, muted counts and table order, drawn flat.\n6. ⌘K follows with no change to its model. It reads `buildStudioMenu`'s output and ignores the fold.\n7. New i18n keys go in `ui/packages/i18n/src/namespaces/studio/{en,zh}.ts`. Add keys only; remove none.\n\n## Done when\n\n- Every point above is pinned by a test that goes red on revert. That includes the self-opening fold on a bookmark to a 高级 type, and the always-listed empty 常用 types.\n- `studioMenuModel.test.ts:64` (\"all six groups, an empty one included\") is rewritten on purpose.\n- No route, address, entry key or entry test id changes. Only the group-count test id goes.\n- \"Empty\" means the sweep answered with none, not that the sweep has not answered yet (`settled`).\n- A browser walk-through on showcase covers:\n  - package scope, with 高级 closed and open;\n  - a bookmark to 钩子;\n  - a new empty package;\n  - `~org`.\n\n## Notes\n\n- Waits for the three designer PRs: #37168, #37169 and #37089 all edit `studioMenuModel.ts` and its test. #37166 overlaps only on the i18n files.\n- Size M.\n- The follow-up decision cards from proposal §3.10 are filed when this card lands:\n  - F1: views on the object.\n  - F2: mappings in the object's import.\n  - F3: the first item of a 高级 type.\n\nBlocked-by: #37168"

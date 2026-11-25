@@ -19,11 +19,11 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-19T07:26:18Z",
-  "updated_at": "2026-11-25T13:47:00Z",
+  "updated_at": "2026-11-25T16:42:34Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 7,
+  "comments": 8,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/35381",
   "body": "repo:objectstack#6 · os-lizheng · session_012MmDsSBHy5paNUz6zke9Re\n\n⚠️ **Project-seat stub.** This post is the seat, **`repo:objectstack` seat 6** (the whole-repo lane). Only what another account must read lives here.\n- Job description: `.claude/skills/pm-dispatch/references/lanes/objectstack.md` and `references/area-lease.md` (⛔ not copied here).\n- Previous tenure: `sunhaolin` · `session_017xRBcSPM86QhYAcidhG5Bu`, clock-out brief 7073442327; its body is the previous revision of this post.\n\n## Current PM — 🟢 os-lizheng\n\n- **Holder:** `os-lizheng` · `session_012MmDsSBHy5paNUz6zke9Re`, seated 2026-11-25T13:19Z on the maintainer's summons in this session, verbatim: `/pm-dispatch objectstack`, then 「接 area:ux 的非专题任务 p1 p2」 and 「并发3」. The project's account is responsible for this seat.\n- **Intake:** open `area:ux` cards graded `priority:p1` or `priority:p2` that are NOT under an epic (no parent issue; 专题 cards stay with repo:objectstack#3). Not taken: cards another seat already claimed, cards seat 3 holds \"for the major\" (#36495 #36496), decision cards, cloud cards, security advisories, other repositories. At most 3 running dev subagents or card threads.\n- **Mailbox:** PR #37297 (subscribed). **Patrol:** `trig_01PWcotmkLF3RSeKX6PcbRTY` · `19 * * * *` (hourly, self-bound).\n- **Posture ledger lives in the project:** labels, assignee, `Claim:` comments carrying `Seat: repo:objectstack#6`, and the `head:claude/` PRs.\n\n## Leases\n\nNone at seating: cards are claimed one by one, each through `overlap-check.mjs` against in-flight PRs (seat 3's ux-A…D leases are read before every claim; a card inside a seat-3 file root is claimed only after a `Notify: split` naming it).\n\n## Hot-file serial queue\n\n- None at seating.\n\n## Notes\n\n- Write path: the relay (`post-stamped.mjs`, `label-write.mjs`, `fleet-write/dispatch.mjs`, `mailbox-open.mjs`). ⛔ No GitHub MCP writes.\n- Effort note: this seat session's effort level is not readable from inside the session; recorded as unverified.\n- Publication: objectstack. A merge to `main` publishes nothing; the release is the Version Packages PR, a human act.\n"

@@ -2,8 +2,8 @@
   "number": 37278,
   "kind": "issue",
   "title": "Grouped grid and used-currency read ignore a truncated grouped answer: queryGroupHeaders' hasMore (#36870) is read only by the kanban lane statistic",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,7 +14,6 @@
     "area:ux",
     "bug",
     "domain:ui",
-    "pm:dispatched",
     "priority:p2"
   ],
   "assignees": [
@@ -23,11 +22,15 @@
   "milestone": null,
   "type": "Bug",
   "created_at": "2026-11-25T10:56:52Z",
-  "updated_at": "2026-11-25T14:17:07Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-25T17:08:23Z",
+  "closed_at": "2026-11-25T17:07:26Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 4,
+  "comments": 6,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/37278",
   "body": "repo:objectstack#4 · os-justin · session_01QSeKYnagJvGbCtNg2PhvgW\n\nFiling gate ① — a defect with named locations. Source: the #36870 dev's out-of-scope finding (os-dev-report 7160245020, PR #37277), filed by the seat's direction as one follow-up.\n\n## What happens\n\nPR #37277 (#36870) makes `queryGroupHeaders` hand on the server's `hasMore` when a grouped read is cut by the page size (`ListViewGroupHeaderAnswer`). Only the kanban lane statistic reads it so far. Two other readers of the grouped answer still treat a truncated answer as whole:\n\n1. **The server-grouped grid (`useServerGrouping`).** On a deployment that caps the page size (`OS_DATA_DEFAULT_PAGE_SIZE` / `OS_DATA_MAX_PAGE_SIZE`), a grid grouped on a field with more distinct values than one page can list fewer groups than exist, with no marker.\n2. **The used-currency read (`usedCurrencyCodesQuery`, `ui/packages/components/src/renderers/form/usedCurrencyCodes.ts`, used by `form.tsx` ~2568).** A truncated answer can miss a currency code in use, with no marker.\n\nreach: read from code by the #36870 dev, not measured. Measure each on claim, and say in the report which one reaches users.\n\n## Expected\n\nEach reader treats a partial grouped answer as partial: it shows a \"more groups not loaded\" or partial marker (localized), or it re-reads with an explicit limit or paging. It never presents a cut answer as the whole set.\n\n## Done when\n\n- Each reader that reaches users handles `hasMore`, with a pin driven by a grouped read capped at a small default page size, and a control with a whole answer.\n- An ablation that ignores the flag turns each pin red.\n\nGrade: area:ux · Bug · p2 (the #36870 family; capped deployments only). Size S, to be measured on claim.\nReader: zone a4-C of seat repo:objectstack#4, after #36870 lands.\nBlocked-by: #36870\nDedupe: `useServerGrouping hasMore` (open objectstack issues) → 0; `grouped grid truncated groups` → 0; `usedCurrencyCodes partial` → 0."

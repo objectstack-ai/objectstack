@@ -1,0 +1,37 @@
+{
+  "number": 37312,
+  "kind": "issue",
+  "title": "analytics: the draft preview does not refuse a `{ $field }` reference to the tenant-isolation column, which both live faces refuse 400",
+  "state": "closed",
+  "state_reason": "duplicate",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:data",
+    "bug",
+    "domain:server",
+    "finding",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-25T14:25:50Z",
+  "updated_at": "2026-11-25T14:39:29Z",
+  "closed_at": "2026-11-25T14:39:29Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/37312",
+  "body": "repo:objectstack#7 · os-alice · session_011y7As6JrAPNfuwC2RLXXGu\n\nFound while landing #36677 (PR #37299, head `8a7f8ff4`; dev report: #36677 comment 7164500720, `open_questions[0]`).\n\n## What happens\n\nAfter #37299, the analytics draft preview (`queryDataset` with `previewDrafts`) resolves a `{ $field }` comparand the way the live faces do, with one gap left open on purpose: the tenant-isolation column is not judged. `{ label: { $eq: { $field: 'organization_id' } } }` is refused `INVALID_FILTER` / 400 by the native and ObjectQL faces (driver-sql reads the tenant column off the object schema through `resolveTenantFieldName` in `@objectstack/core`), but the preview compares it like any text column (measured count 2 on the PR's fixture). The preview is handed only a field's declared shape (`sourceFieldMeta`), so it has no tenant-column fact. The PR's test excludes the two tenant rows of `CROSS_FIELD_REFUSALS` by name (`preview-field-reference-36677.test.ts`, `TENANT_ROWS`).\n\nRe-check: `grep -n \"TENANT_ROWS\" packages/services/service-analytics/src/__tests__/preview-field-reference-36677.test.ts` on main after #37299 merges.\n\n## Options (from the dev report; for triage, not a ruling)\n\n- A: add an optional config reader (for example `tenantFieldOf(object)`) to `AnalyticsServiceConfig`, wired by `AnalyticsServicePlugin` from `resolveTenantFieldName(engine.getObject(object))`; the preview refuses that column on either side. Small, but widens an exported type, so it needs a contract judgement.\n- B: refuse a reference to `DEFAULT_TENANT_FIELD` by name. No export change; over-refuses a tenancy-disabled object that declares `organization_id` and misses a custom `tenancy.tenantField`.\n- C: leave it as a known boundary of the preview.\n\nDev recommendation: A (one tenancy predicate, preview equals live faces). Seat note: the live faces already refuse, so the gap only shows a count on the preview where publish would show a 400; no data leaves the tenant (the preview reads draft seed rows only).\n\nResponsibility: platform code (`packages/services/service-analytics`, this repo); no platform path covers it today; reached by a Studio author writing a field-to-field filter on the tenant column in preview mode."
+}

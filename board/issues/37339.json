@@ -1,0 +1,37 @@
+{
+  "number": 37339,
+  "kind": "pull_request",
+  "title": "fix(scenarios): travel_expense build provenance names the current card; run --template warns on a stale cardSha256",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "os-justin"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-25T18:53:56Z",
+  "updated_at": "2026-11-25T19:36:27Z",
+  "closed_at": "2026-11-25T19:36:24Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-25T19:36:24Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/37339",
+  "body": "Fixes #36491\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 用户无感:只影响内部场景评测工具,差旅报销的已验证构建记录改成指向现在这张卡,评测跑在不匹配的记录上时会先提示一句。\n- 属于场景卡评测的固定样本维护,替每日问数评测解决\"记录指向旧卡\"的问题。\n- 出错时只是多一行或少一行提示,评测照常打分;改动可直接撤回。\n- 无\n\n## What changes\n\n- `docs/qa/scenarios/builds/travel_expense.provenance.json`: `cardSha256` `29162eef…` -> `212abedb6b59a5ac0c6921c25bdcc4dc057cbc25e866a9cd2ed962920368a00d`, the sha256 of the raw bytes of `docs/qa/scenarios/travel_expense.json` on `dbc1765a24`. That is the hash the loader computes (`loader.ts` `fileSha256`, `createHash('sha256').update(bytes)`) and every run record stamps (`CardStamp`); there is no canonical form. The issue body names `a8a67be3…`; the card moved again since (#36503 to `68eb89a9…`, #36617 to `212abedb…`).\n- `packages/qa/scenarios/src/runner/cli.ts`: `templateProvenanceWarning(path, card)` reads `F.provenance.json` beside the `--template F` file; when it names the same card with another `cardSha256` (or none, or is not JSON), `run` prints a `warning: template provenance:` line before the card runs. It never refuses; a missing provenance or one for another card says nothing. It lives in the CLI entry, not the `./runner` export, so the published import surface is unchanged.\n- `packages/qa/scenarios/README.md`: one sentence under \"Template and ask modes\".\n- Changeset: `@objectstack/scenarios` patch.\n\n## Acceptance notes\n\n- **Provenance honesty.** The build was authored from card `9d0c7dad…` (the card when #35222 committed it). Practice since #35764 and #36065 has been to refresh `cardSha256` on a card edit with the build untouched, so the field reads as \"the card this fixture is current against\", while #36617's body reads it as \"the card at build time\". This PR follows the practice. Measured to back it: between `9d0c7dad…` and `212abedb…` only the card's `prompt` and `run` keys differ; `expect` and `iterate` are byte-identical (top-level `JSON.stringify` compare). A scratch `scoreGraph(artifactToEvalGraph(build), expect)` re-score gives 61/61 on both the `29162eef…` card and the current one. So the `verified` scores still hold for the current card, but `built`/`author` describe a run made against an older prompt (the step-two routing prose from #35098 and the record-triggered flow prose from #36617 are not in it). The provenance still does not record that, and this PR does not add a field for it.\n- **Other provenances.** `builds/` holds one provenance, so there are no others to refresh.\n- **Not in this PR: a fixture pin.** I wrote a test that reads `docs/qa/scenarios/builds/` and holds each `cardSha256` equal to its card. That turns the next stale card edit into a red CI run, not only a run-time warning. `check:cross-package-test-inputs` refused it because the radius is undeclared, and declaring it means editing `scripts/cross-package-test-inputs.mjs` and the root `turbo.json`, both outside this card's file surface. I left it out.\n- **Open PR #37314** changes `docs/qa/scenarios/builds/travel_expense.json` (`protocol ^18 -> ^19`) without touching the provenance. Once it lands, the provenance's `sha256` (`4ab7e603…`) no longer matches the build file, and no `amended` entry records the change. That PR does not overlap these files.\n\n## Verification\n\nFirst read (by risk):\n1. `packages/qa/scenarios/src/runner/cli.ts`, `templateProvenanceWarning`: when it stays silent and when it warns.\n2. `docs/qa/scenarios/builds/travel_expense.provenance.json`: the one-line hash change.\n\nTwo-minute check: `sha256sum docs/qa/scenarios/travel_expense.json` prints `212abedb6b59a5ac…`, the same value the provenance now holds.\n\n<details><summary>Tests and gates (head 0d4f42ec49)</summary>\n\n- `os-verify-lock.sh -c \"pnpm --filter @objectstack/scenarios build && … typecheck && … test\"` on `af13a9a6a5` (the test/src tree of the final head): VERDICT command-exit 0; Test Files 43 passed (43), Tests 1342 passed (1342).\n- Ablation (committed first, restored with `git checkout HEAD --`, `git diff HEAD` empty, blob hash matched): `scripts/ablation-replace.mjs` replaced `if (provenance.cardSha256 === card.sha256) return undefined;` with `return undefined;` (anchor 1 -> 0). `test/runner/template-provenance.test.ts` then went 2 failed / 4 passed, the two warning cases red.\n- `node scripts/pm/dispatch-gates.mjs --commands` on `af13a9a6a5`: 65 commands, all run; `--ran` reconciliation: 65 derived, 65 run, 0 UNRUN. Non-zero: `check:dual-build-cjs-loads` exit 3 PREREQUISITE NOT MET (needs a whole-workspace build, so NOT MEASURED locally; CI runs it). `check:dts-closure` exit 1 in the batch because `plugin-audit` dist was half-built in this shared tree; after `pnpm --filter @objectstack/plugin-audit build` it exits 0. On `0d4f42ec49` (changeset declaration lines only) the changeset family ran again: `check-changeset-no-major`, `check-empty-changeset`, `check-adr-0087-registration`, `check:changeset-gate-self-tests` and `check:nul-bytes` all exit 0.\n- `scripts/pm/overlap-check.mjs`: VERDICT clean exit 0. #37314's file list does not intersect this diff.\n</details>\n\n---\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01QSeKYo86w1wqy2z2fMrryr\n"
+}

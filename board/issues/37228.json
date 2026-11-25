@@ -2,7 +2,7 @@
   "number": 37228,
   "kind": "pull_request",
   "title": "docs(skills): objectstack-data teaches that os validate and os build refuse seed records a validation rule refuses",
-  "state": "open",
+  "state": "closed",
   "state_reason": null,
   "draft": false,
   "author": {
@@ -21,10 +21,14 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-25T05:02:52Z",
-  "updated_at": "2026-11-25T14:00:24Z",
-  "closed_at": null,
-  "closed_by": null,
-  "merged_at": null,
+  "updated_at": "2026-11-25T14:23:08Z",
+  "closed_at": "2026-11-25T14:23:05Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-25T14:23:05Z",
   "comments": 7,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/pull/37228",

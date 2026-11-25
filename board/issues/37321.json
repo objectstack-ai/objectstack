@@ -1,0 +1,36 @@
+{
+  "number": 37321,
+  "kind": "pull_request",
+  "title": "fix(app-shell): a related list offers no + New when the create form would drop its link",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tooling"
+  ],
+  "assignees": [
+    "os-lizheng"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-25T16:29:44Z",
+  "updated_at": "2026-11-25T18:19:48Z",
+  "closed_at": "2026-11-25T18:19:45Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-25T18:19:45Z",
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/37321",
+  "body": "Fixes #37248\n\nClause-②: yes (widening) — one new member on the @object-ui/plugin-form package entry, createKeepsField; nothing removed or renamed\nMetadata-protocol: none\n\n## 维护者速读\n\n- 用户能看到什么变化:记录详情页的相关列表里,如果子记录指回父记录的字段是只读的(例如报价下的订单),不再显示「+ 新建」;从子对象自己的列表新建不受影响。\n- 为什么做:修复相关列表新建后记录丢失关联、悄悄变成孤儿记录的问题(用户反馈,HotCRM 报价与订单)。\n- 出错会怎样:最坏是某个相关列表本该有的「+ 新建」按钮不见了,用户仍可在子对象列表新建;改动可直接撤回。\n- 要你做什么:无\n\n## What changes\n\n- `RelatedRecordActionsBridge.resolve` now withholds `onCreate` (no + New) when the list names a relationship field and a parent id, and the child's create form would not save that field. Before, `aff.create` was `objectCanCreate && createVisible` and never asked about the link.\n- The verdict is the create form's own outbound filter, not a second rule: new `createKeepsField(schema, objectName, field, perms)` in `@object-ui/plugin-form` runs `sanitizeFormData({ [field]: … }, schema, { canEdit: fieldWriteGate(perms, objectName, 'create') })` and asks whether the key survives. So it honours exactly what the form strips on a create: declared `readonly` / `readOnly`, `computed: true`, computed types (formula, summary, rollup, autonumber), `system: true`, the server-owned name roster, an undeclared key, and field-level security on create (only when a principal is loaded, the form's own fail-open).\n- The array container shape of `fields` is converted to the keyed shape the filter reads.\n- Related lists keyed by the record owner (relationship field `owner_id`) also stop offering + New: the create form sends `owner_id` only when the user changes it, so a pre-linked owner was never saved either.\n- Unchanged: lists with no relationship field or no parent id (they never pre-linked), the child's own list New, and the server (its readonly strip on a user insert is correct, per the card).\n\n## Tests\n\n- New pin `ui/packages/app-shell/src/views/__tests__/RelatedRecordActionsBridge.readonlyLink-37248.test.tsx`: CONTROL writable FK keeps + New; `readonly` FK offers none; same for the array `fields` shape; FK closed to the caller on create (loaded principal) offers none.\n- `ObjectView.createPredicates.test.tsx` (#5153, one create verdict on three surfaces): its child fixture named the related list's relationship field `order` but did not declare it, a shape real metadata does not serve (the lint rule `page-field-unknown` checks a related list's `relationshipField` against the child; showcase `showcase_task.project` / `showcase_invoice_line.invoice` are declared on the child). The create form drops an undeclared key, so + New was hidden. The fixture now declares `order` as a lookup; the assertions are untouched.\n- Red without the fix (one-off ablation, `scripts/ablation-replace.mjs`, the `&& linkSurvivesCreate` term removed): `3 failed | 1 passed (4)`, the control the one passing; restored, blob == HEAD, `git diff HEAD` empty.\n- All `RelatedRecordActionsBridge*`, `PageView.relatedListActions-12870`, `ObjectView.recordRelatedNotOnOwnList-11270` and every `RecordDetailView*` test in app-shell: `Test Files 112 passed (112)`, `Tests 927 passed (927)`.\n\n## Acceptance notes\n\n- `createKeepsField` is a new named export of the published `@object-ui/plugin-form` (additive). The related list lives in app-shell and the create form's filter is not otherwise exported; reusing it is what keeps the list and the form from disagreeing.\n- Signals honoured and left out are listed in the report. `readonlyWhen` (a conditional, record-dependent rule) is not read by the form's outbound filter, so it is not read here either.\n\n## Verification\n\n<details><summary>Local gates and type-check</summary>\n\n- Derived gate families (`dispatch-gates.mjs --commands`): 38 of 38 run, every exit 0; `--ran` reconciliation: 38 derived, 38 run, 0 NOT-MEASURED, 0 UNRUN.\n- `@object-ui/plugin-form` test suite at 2e42f22fd: `Test Files 246 passed (246)`, `Tests 2787 passed | 1 skipped (2788)`; `pnpm --dir ui exec vitest run scripts/`: `Tests 5130 passed | 2 skipped`.\n- `@object-ui/plugin-form` type-check: Done (exit 0) after building its dependency closure.\n- `@object-ui/app-shell` type-check: NOT MEASURED locally, reason: it needs every ui package's `dist/` (395 errors, all missing-declaration noise from unbuilt siblings, 285 TS2307). Declared to the CI type-check lane.\n\n</details>\n\nTwo-minute check: open a quote in HotCRM, look at the Orders related list. Expected: no + button; the Orders list page itself still offers New.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_012MmDsSBHy5paNUz6zke9Re)_\n\n<!-- signed: repo:objectstack#6 · os-lizheng · session_012MmDsSBHy5paNUz6zke9Re -->\n"
+}

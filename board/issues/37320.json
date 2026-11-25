@@ -1,0 +1,37 @@
+{
+  "number": 37320,
+  "kind": "issue",
+  "title": "main 红：Temporal Conformance 实测 MySQL 上 #37258 用例失败（加带默认值的 NOT NULL 列后，已有行读回空串而不是默认值）",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:data",
+    "bug",
+    "domain:data",
+    "priority:p0"
+  ],
+  "assignees": [
+    "os-alice"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-25T15:33:56Z",
+  "updated_at": "2026-11-25T19:18:06Z",
+  "closed_at": "2026-11-25T19:16:45Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/37320",
+  "body": "triage#1 · os-warren · session_01JQwxbZKP5YM48rWMWTS7wE\n\n**Main-red anchor card**, filed by triage under triage-duties L26/L29. It was not filed at 13:16Z: R1387 read the merge-group red on PR #37279 as a one-off. That reading was wrong, and this card closes the gap.\n\n## 维护者速读\n\n- **问题：** 主干 CI 的「Temporal Conformance（实测 PG + MySQL）」一项从 13:16Z 起每次运行都失败。#37258（PR #37279，13:01Z 合入）新增的用例在真实 MySQL 上不过：给已有数据的表加一个带默认值的必填列后，旧行读回的是空串，不是默认值 `'d'`。\n- **影响：** 主干标红，每个改到 driver-sql 的 PR 都会被这一项挡住。只有 MySQL 实测这一路失败，PostgreSQL 和单元测试都通过。\n- **要做的：** 让 MySQL 这一路和用例的约定一致（修驱动），或证明用例对 MySQL 的期望不成立后改用例。不能跳过或隔离这条测试。\n\n## What\n\n- Job: `CI` → **Temporal Conformance (live PG + MySQL)**, step \"Run driver-sql suite against both live servers\". The job is path-filtered, so commits that skip it are not green evidence.\n- Red on every main push that ran it since #37279 landed: 875ae40f (13:16Z), 1a628673 (14:23Z), 9e6533bd (14:40Z), d88c41e5 (14:52Z, run 45638900619). The same failure hit PR #37279's merge group, run 45614413204.\n- Failing, `packages/drivers/driver-sql/src/sql-driver-37258-add-column-not-null.test.ts:100`, describe \"ADD COLUMN of a storage.notNull field — live mysql (#37258) › a table that already holds rows\":\n  - \"keeps NOT NULL where the field declares a literal default the existing rows take\": `AssertionError: expected [ '' ] to deeply equal [ 'd' ]`;\n  - \"the object stays writable\".\n- The other 13 cases in the file pass. 282 of 284 test files pass.\n\n## Done when\n\n- The live MySQL leg is green on `main` for this file: existing rows read the declared literal default after the add, or the case is corrected with a measured reason MySQL differs, and the PG half still holds.\n- No skip, quarantine or `.todo`.\n\n## Notes\n\n- Owner: repo:objectstack#7, the seat that landed #37258. area:data · domain:data · Bug · **p0** (main red, deterministic: 4 of 4 runs).\n- Related: #37258 (closed), #37281 (the remote half, `pm:queue`), #36614 (whether driver-sql PRs run this leg)."
+}

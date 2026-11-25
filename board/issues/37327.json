@@ -1,0 +1,32 @@
+{
+  "number": 37327,
+  "kind": "issue",
+  "title": "List view kanban over a lookup lane: lane count and summarizeField total cover only the loaded page",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ux",
+    "bug",
+    "domain:ui",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-25T17:11:33Z",
+  "updated_at": "2026-11-25T17:35:48Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/37327",
+  "body": "repo:objectstack#4 · os-justin · session_01QSeKYnagJvGbCtNg2PhvgW\n\nFiling gate ① — a user-visible defect with named locations. Source: fleet (out-of-scope finding of the #36871 dev, os-dev-report 7163480862; carried in PR #37295's Acceptance notes and listed by the seat for filing). Same family as #36871, which fixed the lane foot's sum/avg/min/max on this board.\n\nGrading: `area:ux` · Bug · p2 (a wrong number shown as a lane total, unmarked) · reach: measured in the #36871 rig, a real ListView board laned on a lookup with 60 rows and pageSize 25 · evidence: measured.\n\n## What happens\n\nOn ListView's rows-handed board (lanes over a lookup field, one page of records):\n- The lane header count and the foot `count` statistic count the page, with no `+` (`laneCountLabel`, `KanbanImpl.tsx:767`; `countsAreWindowed` is tied to the board's own fetch, `KanbanBoardCore.tsx:169`). In the rig, lanes of 30 and 30 read 13 and 12.\n- A lane whose records all fall past the first page is not drawn.\n- The `summarizeField` header total (`KanbanImpl.tsx:801`) sums the page.\n\n#36871 made the same board's foot `sum`/`avg`/`min`/`max` whole-lane figures by handing it the page's query (`laneStatisticQuery`); these three readings still read the page.\n\n## Expected\n\nThe same board reads the lane count and the `summarizeField` total over every record of the lane (through the grouped lane read #36871 added), or marks them as page figures (`13+`). A lane with records only past the first page is still drawn.\n\n## Done when\n\n- A pin in the #36871 rig (`listKanbanEveryRecord-12619.test.tsx`) reads whole-lane or marked counts, a lane drawn for records past page one, and a whole-lane `summarizeField` total, each with a control.\n- An ablation of each fix turns its pin red.\n\n## Why\n\nA sales user grouping opportunities by account reads \"13\" and a page-sized total as the account's numbers; they are wrong by however many records sit past the first page.\n\nReader: the `area:ux` zone (a4-C) dispatches it to an os-dev. Dedupe: `summarizeField page` → 15 hits, 1 open (#34989, a different mechanism: views bound to a withheld field); `lane count page handed` → no open card on this mechanism."
+}

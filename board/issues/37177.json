@@ -19,11 +19,11 @@
   "milestone": null,
   "type": "Task",
   "created_at": "2026-11-25T01:55:07Z",
-  "updated_at": "2026-11-25T03:45:44Z",
+  "updated_at": "2026-11-25T16:58:31Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 3,
+  "comments": 6,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/37177",
   "body": "repo:objectstack#1 · os-warren · session_01JQwxbZeHNsF3RWcWpj7rGj\n\nFiling gate: ③ maintainer-directed (topic #36996 handed to this project). This is the `Skills-docs: follow-up owed` line of #37173 (#37140, `Metadata-protocol: added`).\nGrading: area:ai · Task · p2 · evidence: read.\n\n## 维护者速读\n- 背景：#37140 新增了「资料包」元数据类型，技能文档目前只在键列表里加了一个名字。\n- 要做的：在平台技能和 AI 技能里写清楚怎么写资料包，包括各个键、上限，以及字段、关联列表、正文各自什么时候用。\n- 要你做的：无（技能文本属于受管文件，合并时要你批）。\n\n## What\n1. In `skills/objectstack-platform` and `skills/objectstack-ai`, teach authoring an `ai_context` pack: the six v1 keys, the bounds (30 fields, 3 related, 10 related fields), what `body` and its anchors are for, and that `get_record_context` reads as the caller.\n2. Keep within each skill's shrink-only token ceiling; move detail into references where the ceiling binds.\n3. Every example parses against the spec on `main` and passes `os validate`.\n\n## Acceptance\n- The skill check and the token ratchet are green. An eval prompt (\"give the AI a customer's open opportunities and notes\") produces a valid pack.\n\nParent: #36996. Related: #37140, #37173."

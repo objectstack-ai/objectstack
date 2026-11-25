@@ -1,0 +1,37 @@
+{
+  "number": 37318,
+  "kind": "pull_request",
+  "title": "fix(service-analytics): drop a compareTo bucket with no current-window counterpart",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "os-alice"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-25T15:12:20Z",
+  "updated_at": "2026-11-25T16:57:17Z",
+  "closed_at": "2026-11-25T16:57:14Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-25T16:57:14Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/37318",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-alice\"} -->\n_Requested by **Alice** · [project thread](https://claude.ai/code/project/chan_01NoziMoftaSPmzgKNjJGePH?thread=cmsg_01NoziMoftaSPmzgKNjJGePHNLN2yiafBSuB9mbEEMnRSB)_\nFixes #36770\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n仪表盘组件按周、按月画趋势并开启「和上一期对比」时，对比值不再错落到本期某一格上，也不再多出一根本期范围外的柱子（例如「本月按月」多出的十一月）。\n为什么做：上一期比本期多切出一格时，那一格没有对应位置却保留了自己的日期，悄悄覆盖了本期第一周的对比数字，用户看到的对比是错的。\n出错会怎样：只影响对比列；若判断有误，最坏是某一格的对比值显示为 0，可直接撤回本次改动恢复原样。\n要你做的：无。\n\n## What changes\n\n`packages/services/service-analytics/src/dataset-executor.ts`, compare pass of `runCompare`:\n\n- `alignedCompareBucketKey` now distinguishes its two \"declined\" answers. `null` still means \"not a calendar position, leave the key alone\" (the empty bucket, a raw timestamp, a key of another granularity). A key that IS a bucket of this granularity but whose shifted-back ordinal falls outside the current window now answers the new module-level sentinel `NO_CURRENT_COUNTERPART`.\n- The caller drops a compare row that answers `NO_CURRENT_COUNTERPART` instead of keeping its own key. Before, that own key either named a current bucket the value was never aligned to (December 2026 by week: the previous period's own `2026-W49`, the single day 30 Nov, overwrote the comparison that `2026-W44` had aligned onto the current `2026-W49`) or appended a row outside the window (an extra `2026-11` row on \"this month\" by month, an extra `2026-03` row on Q2 2026 by month).\n- `NO_CURRENT_COUNTERPART` is not re-exported from `src/index.ts`; the package's public surface is byte-unchanged (the `dataset-compare-kind-refusal` barrel pin stays green).\n\n## Tests\n\nNew top-level `describe` in `src/__tests__/dataset-compare-bucket-alignment.test.ts` (the shared harness for this behaviour):\n\n- this month by week, December 2026 (scripted fake, week keys validated against core's `bucketKeyToCalendarRange`): W49..W53 carry W44..W48's values, W49 is not overwritten.\n- this month by month, December 2026 (real-bucketing fake): one row, no November row.\n- this quarter by month, Q2 2026: three rows, no `2026-03` row.\n- control: the empty (null) bucket still merges with its counterpart.\n\nRed first on `origin/main` d88c41e5 (pin commit 8c2bcea7, fix not yet applied): 3 failed / 1 passed. W49 read `opp_count__compare: 4900` where 4400 was expected; the month and quarter cases each carried an extra out-of-window row (`2026-11`, `2026-03`).\n\nFixture triage (three pins encoded the removed fallback):\n\n- `dataset-compare-bucket-alignment.test.ts` unit pins: the outside-window cases now expect `NO_CURRENT_COUNTERPART` instead of `null`.\n- The same file's restated \"#4870 pin\" (a fake answering `2026-06` on both passes) pinned exactly the removed branch. Replaced by the collision in its smallest form: that key has no counterpart and June reads `opp_count__compare: 0`.\n- `dataset-selection-window.test.ts` \"buckets the compareTo pass identically\": its fake now answers each pass in the window it filtered to (June, then May). What it pins (both passes resolve the same GROUP BY granularity) is unchanged, and so is its assertion.\n\n## Acceptance notes\n\n- The ordinal rule itself (previousPeriod aligns the n-th bucket onto the n-th) is unchanged. On December by month this still means the previous period's single day 31 Oct is the comparison for December; that is the ruled semantic, not this card.\n\n## Verification\n\n<details><summary>Local runs at the final head</summary>\n\nSee the os-dev report comment on #36770 for the head SHA, test counts and gate verdicts.\n\n</details>\n\nTwo-minute check: `pnpm --filter @objectstack/service-analytics exec vitest run --maxWorkers=2 src/__tests__/dataset-compare-bucket-alignment.test.ts -t \"no counterpart\"`: 4 passed.\n\nRead first: `dataset-executor.ts` the `runCompare` row loop (the drop), then `alignedCompareBucketKey`'s outside-window return.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_011y7As6JrAPNfuwC2RLXXGu\n"
+}
