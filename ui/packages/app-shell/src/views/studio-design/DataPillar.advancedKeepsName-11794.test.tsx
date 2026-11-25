@@ -15,6 +15,7 @@
 
 // Paid at collection, not inside a case's clock (check:test-source-alias).
 import '@objectstack/lint';
+import '@object-ui/plugin-detail';
 import '@testing-library/jest-dom/vitest';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, render, screen, waitFor, within } from '@testing-library/react';

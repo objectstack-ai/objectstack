@@ -115,6 +115,7 @@ import { registerBuiltinInspectors } from '../metadata-admin/inspectors';
 import { t, tFormat } from '../metadata-admin/i18n';
 // The source reaches a dynamic import of it: its first load is paid at collection (`check:test-source-alias`).
 import '@objectstack/lint';
+import '@object-ui/plugin-detail';
 
 const dataSource = createEmptyDataSource();
 registerBuiltinInspectors();

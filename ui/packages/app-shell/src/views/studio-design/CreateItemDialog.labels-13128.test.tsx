@@ -17,6 +17,7 @@
 
 // Paid at collection, not inside a case's clock (check:test-source-alias).
 import '@objectstack/lint';
+import '@object-ui/plugin-detail';
 import '@testing-library/jest-dom/vitest';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
@@ -99,7 +100,7 @@ describe('Studio create dialogs bind each label to its input (objectui#13128)', 
     // objectstack#36904 — New object is the object list's create dialog.
     render(
       <MemoryRouter>
-        <MetadataListCreateDialog type="object" open onOpenChange={() => {}} packageId="app.a" inPair={false} locale="en" onCreated={() => {}} />
+        <MetadataListCreateDialog type="object" open onOpenChange={() => {}} packageId="app.a" inPair={false} locale="en-US" onCreated={() => {}} />
       </MemoryRouter>,
     );
     const dialog = await screen.findByRole('dialog');

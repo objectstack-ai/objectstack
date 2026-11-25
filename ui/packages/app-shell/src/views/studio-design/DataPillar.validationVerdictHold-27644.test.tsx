@@ -24,6 +24,7 @@ import { MemoryRouter } from 'react-router-dom';
 // The CEL authoring code loads `@objectstack/lint` lazily; warmed here so its
 // first load is paid at import, not inside a test's clock.
 import '@objectstack/lint';
+import '@object-ui/plugin-detail';
 
 const REFUSED = 'record.amount > 100';
 const ACCEPTED = 'record.amount != null && record.amount > 100';

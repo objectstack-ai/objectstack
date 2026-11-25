@@ -65,6 +65,7 @@ vi.mock('@object-ui/react', async (importOriginal) => {
 });
 
 import '@objectstack/lint';
+import '@object-ui/plugin-detail';
 import { DataPillar } from './StudioDesignSurface';
 import { createEmptyDataSource, failOnAbsorbedFetchError } from './__tests__/emptyDataSource';
 import { t, tFormat } from '../metadata-admin/i18n';

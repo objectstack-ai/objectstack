@@ -128,6 +128,7 @@ import { loadStudioCatalogue } from '@object-ui/i18n/namespaces/studio';
 // The source under test reaches dynamic imports of `@objectstack/lint`; their first
 // load is paid here, at collection, never inside a case's clock (`check:test-source-alias`).
 import '@objectstack/lint';
+import '@object-ui/plugin-detail';
 await loadStudioCatalogue('zh');
 
 window.matchMedia = ((query: string) => ({

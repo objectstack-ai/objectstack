@@ -69,6 +69,7 @@ vi.mock('./StudioAiCopilot', () => ({ StudioChatDock: () => null }));
 
 // The pillars reach `@objectstack/lint` through a dynamic import; paid here, at collection, not in a case's clock.
 import '@objectstack/lint';
+import '@object-ui/plugin-detail';
 import { AccessPillar, AutomationsPillar } from './StudioDesignSurface';
 import { StudioRail, StudioRailRow } from './StudioRail';
 import { railAbbreviation } from './railAbbreviation';

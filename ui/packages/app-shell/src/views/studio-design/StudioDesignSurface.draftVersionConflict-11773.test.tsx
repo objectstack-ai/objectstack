@@ -214,6 +214,7 @@ vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn(), info: vi.f
 
 // The source reaches a dynamic import of it: its first load is paid at collection (`check:test-source-alias`).
 import '@objectstack/lint';
+import '@object-ui/plugin-detail';
 import { DataPillar } from './StudioDesignSurface';
 import { StudioSaveHarness } from './__tests__/studioSaveHarness';
 import { addFieldFromGrid, type AddFieldInput } from './__tests__/dataPillarAddField';

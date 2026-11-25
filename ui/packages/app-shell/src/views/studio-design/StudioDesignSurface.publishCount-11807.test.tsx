@@ -83,6 +83,7 @@ import { toast } from 'sonner';
 // first load is paid here, at collection, never inside a case's clock
 // (`check:test-source-alias`).
 import '@objectstack/lint';
+import '@object-ui/plugin-detail';
 import { StudioDesignSurface } from './StudioDesignSurface';
 import { t, tFormat } from '../metadata-admin/i18n';
 

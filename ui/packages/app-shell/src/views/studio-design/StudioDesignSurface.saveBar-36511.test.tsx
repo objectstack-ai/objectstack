@@ -79,6 +79,7 @@ vi.mock('../../preview/DraftChangesPanel', () => ({
 
 import { toast } from 'sonner';
 import '@objectstack/lint';
+import '@object-ui/plugin-detail';
 import { StudioDesignSurface } from './StudioDesignSurface';
 import { addFieldFromFormToolbar } from './__tests__/dataPillarAddField';
 import { createEmptyDataSource } from './__tests__/emptyDataSource';

@@ -178,6 +178,7 @@ vi.mock('@object-ui/react', async (importOriginal) => {
 // The pillar reaches a dynamic `import('@objectstack/lint')`: pay its load at
 // collection, never inside a case's clocked window (`check:test-source-alias`).
 import '@objectstack/lint';
+import '@object-ui/plugin-detail';
 import { DataPillar, type StudioBaseCustomization } from './StudioDesignSurface';
 import { StudioSaveHarness, pressStudioCancel, pressStudioSave } from './__tests__/studioSaveHarness';
 import { createEmptyDataSource } from './__tests__/emptyDataSource';

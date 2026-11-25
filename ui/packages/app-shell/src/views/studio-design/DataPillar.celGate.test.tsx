@@ -114,6 +114,7 @@ import { registerBuiltinInspectors } from '../metadata-admin/inspectors';
 // The source under test reaches a dynamic import of `@objectstack/lint`: its first
 // load is paid here, at collection, never inside a case's clock (`check:test-source-alias`).
 import '@objectstack/lint';
+import '@object-ui/plugin-detail';
 import { __setCelFormulaLoader } from '../metadata-admin/celAuthoring';
 
 const dataSource = createEmptyDataSource();

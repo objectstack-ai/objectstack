@@ -27,6 +27,7 @@
 // Warmed at module top so the first load of the console's lazily loaded
 // authoring code is paid during collection, not inside a test's clock.
 import '@objectstack/lint';
+import '@object-ui/plugin-detail';
 import '@testing-library/jest-dom/vitest';
 import * as React from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -282,7 +283,7 @@ describe('objectstack#26917 — Data: New object over a taken identifier', () =>
   async function openNewObject() {
     render(
       <MemoryRouter>
-        <MetadataListCreateDialog type="object" open onOpenChange={() => {}} packageId={PKG} inPair={false} locale="en" onCreated={() => {}} />
+        <MetadataListCreateDialog type="object" open onOpenChange={() => {}} packageId={PKG} inPair={false} locale="en-US" onCreated={() => {}} />
       </MemoryRouter>,
     );
     const dialog = await screen.findByRole('dialog');

@@ -23,6 +23,7 @@
 import '@testing-library/jest-dom/vitest';
 // The source under test reaches `import('@objectstack/lint')`: paid here, at collection, never inside a test's clock.
 import '@objectstack/lint';
+import '@object-ui/plugin-detail';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import * as React from 'react';
@@ -105,7 +106,7 @@ function renderAt(path: string, surface: React.ReactElement = <StudioDesignSurfa
       <Routes>
         <Route path="/studio" element={<div data-testid="studio-landing" />} />
         {/* objectstack#36904 — `/data` lands on the area's object list. */}
-        <Route path="/studio/:packageId/metadata/*" element={React.cloneElement(surface, { area: 'metadata' })} />
+        <Route path="/studio/:packageId/metadata/*" element={React.cloneElement(surface as React.ReactElement<{ area?: 'metadata' }>, { area: 'metadata' })} />
         <Route path="/studio/:packageId/:tab" element={surface} />
       </Routes>
     </MemoryRouter>,
