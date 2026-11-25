@@ -45,6 +45,30 @@ export interface AdapterSearchOptions {
   topK: number;
   /** Adapter-specific filter (e.g. `{ status: 'active' }`). */
   filter?: Record<string, unknown>;
+  /**
+   * The caller's organizations (ADR-0161 K8, item 9), computed by the knowledge
+   * service from the caller's identity and the deployment's tenancy posture
+   * (ADR-0105 D1) — never taken from a caller's input: under `isolated` the
+   * caller's active organization, under `group` the organizations the caller
+   * holds a membership in.
+   *
+   * - **Absent** (`undefined`): no organization filter — the `single` posture,
+   *   the system identity, a `file` / `http` source, an object outside
+   *   tenancy. Rank every document of the source, as before this member.
+   * - **Present**: rank only the documents whose
+   *   `KnowledgeDocument.organizationId` is in the set, and filter BEFORE
+   *   ranking, so `topK` is filled from those documents alone. A document
+   *   stored without an `organizationId` (one indexed before this member
+   *   existed, until a complete reindex writes it again) is not ranked.
+   * - **Empty** (`[]`): rank nothing — a caller with no organization behind a
+   *   wall. Never read as "no filter".
+   *
+   * A ranking scope, not the access decision: the service still re-reads every
+   * object-source hit as the caller. An adapter that ignores this member keeps
+   * working; other organizations' documents then take ranking places that the
+   * re-read empties.
+   */
+  organizationIds?: string[];
   /** Trace id for correlation. */
   traceId?: string;
 }
