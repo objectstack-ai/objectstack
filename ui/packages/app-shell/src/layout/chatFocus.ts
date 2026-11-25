@@ -176,9 +176,17 @@ interface FocusState {
    * other arrival of an id — a resumed thread resolving, a history row, the
    * scope blanking the id between apps — reads that conversation's own stored
    * focus instead. Only the hand-off's own focus is carried: the chip's pin,
-   * remove or decline drops the flag.
+   * remove or decline drops the flag, and so does any change of what the host
+   * was asked to show ({@link FocusState.target}): an id that arrives for a
+   * history row picked, or an app moved to, before the first send is that
+   * conversation's own (objectstack#37142).
    */
   carry: boolean;
+  /**
+   * What the host was asked to show when the state last moved (a key of the
+   * dock's target). A change drops the hand-off's carry.
+   */
+  target: string | undefined;
   /**
    * A `follow` hand-off that landed while this host showed a conversation
    * (objectstack#37142): the focus of the NEXT conversation the host shows,
@@ -201,37 +209,51 @@ export function useConversationFocus(
   conversationId: string | undefined,
   /** The host's `createError`: a first send whose create failed minted nothing. */
   createError?: unknown,
+  /**
+   * A key of what the host was asked to show (the dock's target): while it
+   * holds, an id the host resolves takes a hand-off's carry; once it changes,
+   * the next id is the conversation's own. A host that passes none keeps the
+   * carry until an id arrives.
+   */
+  target?: string,
 ): ConversationFocus {
   const [state, setState] = React.useState<FocusState>(() => ({
     key: conversationId,
     entry: readStoredChatFocus(conversationId),
     carry: false,
+    target,
   }));
   // A first send in flight: a ref, not state, so marking it re-renders
   // nothing while the pane holds the message it is creating the row for.
   const sendingRef = React.useRef(false);
   let current = state;
-  if (state.key !== conversationId) {
+  // The host was asked for something else (a history row, another app): a
+  // hand-off's carry does not go with it. A pending `follow` does — the caller
+  // that moved the target set it for exactly that move.
+  if (current.target !== target) current = { ...current, target, carry: false };
+  if (current.key !== conversationId) {
     const carried =
-      state.key === undefined &&
+      current.key === undefined &&
       conversationId !== undefined &&
-      (state.carry || sendingRef.current) &&
-      state.entry.focus !== null;
-    current = state.follow
+      (current.carry || sendingRef.current) &&
+      current.entry.focus !== null;
+    current = current.follow
       ? {
           key: conversationId,
-          entry: { focus: state.follow.focus, declined: false },
+          entry: { focus: current.follow.focus, declined: false },
           carry: conversationId === undefined,
+          target,
         }
       : {
           key: conversationId,
-          entry: carried ? state.entry : readStoredChatFocus(conversationId),
+          entry: carried ? current.entry : readStoredChatFocus(conversationId),
           carry: false,
+          target,
         };
-    // Derived state set during render: React re-renders before committing, so
-    // no child of this commit sees the previous conversation's focus.
-    setState(current);
   }
+  // Derived state set during render: React re-renders before committing, so
+  // no child of this commit sees the previous conversation's focus.
+  if (current !== state) setState(current);
   const { key, entry } = current;
 
   React.useEffect(() => {
@@ -255,14 +277,14 @@ export function useConversationFocus(
     setState((s) =>
       sameChatFocus(s.entry.focus, focus) && !s.follow
         ? s
-        : { key: s.key, entry: { focus, declined: false }, carry: false },
+        : { ...s, entry: { focus, declined: false }, carry: false, follow: undefined },
     );
   }, []);
   const decline = React.useCallback(() => {
     setState((s) =>
       s.entry.declined && !s.carry && !s.follow
         ? s
-        : { key: s.key, entry: { ...s.entry, declined: true }, carry: false },
+        : { ...s, entry: { ...s.entry, declined: true }, carry: false, follow: undefined },
     );
   }, []);
   const markSending = React.useCallback(() => {
@@ -275,7 +297,7 @@ export function useConversationFocus(
     setState((s) =>
       follow && s.key !== undefined
         ? { ...s, follow: { focus } }
-        : { key: s.key, entry: { focus, declined: false }, carry: s.key === undefined },
+        : { ...s, entry: { focus, declined: false }, carry: s.key === undefined, follow: undefined },
     );
   }, []);
 

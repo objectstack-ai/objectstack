@@ -542,4 +542,42 @@ describe('the `ask_ai` action — the pin follows the fresh thread it opens (obj
     expect((await send('first')).focus).toEqual([ACCOUNT_1]);
     expect(readStoredChatFocus('conv-1').focus).toEqual(ACCOUNT_1);
   });
+
+  it('a history conversation picked before the first send keeps its own focus', async () => {
+    const REC_9: ChatFocus = { object: 'account', id: 'rec_9' };
+    window.sessionStorage.setItem('ai-chat-focus:conv-old', JSON.stringify({ focus: REC_9, declined: false }));
+    mountAssistantDock(record('rec_2'));
+    await composerReady();
+    await waitFor(() => expect(ask.run).toBeTypeOf('function'));
+    act(() => ask.run!(ACCOUNT_1));
+    await waitFor(() => expect(screen.getByTestId('chat-focus-chip')).toHaveTextContent('account · rec_1'));
+
+    // No send: the user opens a conversation from the history instead.
+    page.open({ agent: 'ask', conversationId: 'conv-old' });
+    await waitFor(() => expect(screen.getByTestId('chat-focus-chip')).toHaveTextContent('account · rec_9'));
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    });
+    expect(readStoredChatFocus('conv-old').focus).toEqual(REC_9);
+    await composerReady();
+    expect((await send('and this one?')).focus).toEqual([REC_9]);
+    expect(state.minted).toBe(0);
+  });
+
+  it('a history conversation with no focus of its own is not pinned to the record', async () => {
+    mountAssistantDock(record('rec_2'));
+    await composerReady();
+    await waitFor(() => expect(ask.run).toBeTypeOf('function'));
+    act(() => ask.run!(ACCOUNT_1));
+    await waitFor(() => expect(screen.getByTestId('chat-focus-chip')).toHaveTextContent('account · rec_1'));
+
+    page.open({ agent: 'ask', conversationId: 'conv-bare' });
+    await waitFor(() => expect(screen.queryByTestId('chat-focus-chip')).toBeNull());
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    });
+    expect(readStoredChatFocus('conv-bare').focus).toBeNull();
+    await composerReady();
+    expect(await send('anything?')).not.toHaveProperty('focus');
+  });
 });
