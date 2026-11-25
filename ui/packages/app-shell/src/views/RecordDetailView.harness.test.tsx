@@ -3717,3 +3717,141 @@ describe('RecordDetailView.paletteEdit-36286', () => {
     expect(editCommand()).toBeUndefined();
   });
 });
+
+// ── RecordDetailView.approvalActivityLine-35723 ─────────────────────────────
+
+/**
+ * objectstack#35723 — plugin-approvals writes one `sys_activity` entry per
+ * approval step about the record it governs (`type: 'system'`,
+ * `metadata.kind: 'approval'`, the request as its source). The record page's
+ * stream draws it as the one-line approval entry, and the page wires its
+ * 「看审批」 to the record's approvals: the 审批 tab the header's approval tag
+ * opens (objectstack#35595). With no approvals served to the reader the line
+ * keeps no link.
+ */
+describe('RecordDetailView.approvalActivityLine-35723', () => {
+  restoreAfterBlock();
+
+  const OBJECT = 'os_35723_memo';
+  const RECORD = 'm1';
+  const REQUEST = 'req_35723';
+
+  const MEMO_DEF = {
+    name: OBJECT,
+    label: 'Memo',
+    fields: { id: { label: 'Id', type: 'text' }, name: { label: 'Name', type: 'text' } },
+  };
+
+  const ENTRY = {
+    id: 'act_submit',
+    type: 'system',
+    summary: 'Submitted for approval',
+    timestamp: '2026-11-20T09:00:00.000Z',
+    actor_id: 'u_submitter',
+    actor_name: 'Sam Submitter',
+    object_name: OBJECT,
+    record_id: RECORD,
+    source_object: 'sys_approval_request',
+    source_id: REQUEST,
+    metadata: JSON.stringify({ kind: 'approval', action: 'submit' }),
+  };
+
+  const REQUEST_ROW = {
+    id: REQUEST,
+    process_name: 'flow:memo_review',
+    object_name: OBJECT,
+    record_id: RECORD,
+    status: 'pending',
+    submitter_id: 'u_submitter',
+    current_step: 'review',
+    pending_approvers: ['user:u_approver'],
+    viewer: { can_act: false, is_submitter: false, can_override: false },
+  };
+
+  /** The approvals door: the record's requests, as this reader is served them. */
+  function stubApprovals(requests: Record<string, unknown>[]) {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      const u = String(url);
+      const body = u.includes('/approvals/requests?object=')
+        ? { data: requests }
+        : u.endsWith(`/approvals/requests/${REQUEST}`) ? (requests[0] ?? {}) : { data: [] };
+      return { ok: true, status: 200, json: async () => body, text: async () => JSON.stringify(body) };
+    }) as never);
+  }
+
+  function renderMemo() {
+    const pages: any[] = [];
+    const metadata = {
+      objects: [MEMO_DEF], pages, loading: false, error: null,
+      refresh: async () => {}, invalidate: () => {},
+      ensureType: async () => pages, getItem: async () => null, getItemsByType: () => pages,
+    } as any;
+    const ds = {
+      find: vi.fn(async (object: string) => (object === 'sys_activity'
+        ? { data: [ENTRY], total: 1 }
+        : { data: [], total: 0 })),
+      findOne: vi.fn(async () => ({ id: RECORD, name: 'Budget memo' })),
+      create: vi.fn(async () => ({})),
+      update: vi.fn(async () => ({})),
+      delete: vi.fn(async () => ({})),
+      getObjectSchema: async () => MEMO_DEF,
+    } as Record<string, any>;
+    return render(
+      <MemoryRouter initialEntries={[`/apps/demo/${OBJECT}/record/${RECORD}`]}>
+        <MetadataCtx.Provider value={metadata}>
+          <RecordDetailView
+            dataSource={ds as never}
+            objects={[MEMO_DEF] as never}
+            onEdit={() => {}}
+            objectNameOverride={OBJECT}
+            recordIdOverride={RECORD}
+          />
+        </MetadataCtx.Provider>
+      </MemoryRouter>,
+    );
+  }
+
+  /** The stream is the page's 动态 tab: open it. */
+  async function openStream(container: HTMLElement) {
+    const tab = await waitFor(() => {
+      const found = container.querySelector('[role="tab"][data-record-tab="timeline"]');
+      expect(found).not.toBeNull();
+      return found as HTMLButtonElement;
+    }, { timeout: 5000 });
+    await act(async () => { fireEvent.click(tab); });
+  }
+
+  beforeAll(() => {
+    Object.defineProperty(window, 'innerWidth', { configurable: true, value: 1280 });
+  });
+
+  afterEach(() => {
+    cleanup();
+    vi.unstubAllGlobals();
+  });
+
+  it('draws the entry as the approval line, and 「看审批」 opens the 审批 tab', async () => {
+    stubApprovals([REQUEST_ROW]);
+    const { container } = renderMemo();
+    // The page draws its 审批 tab once the reader is served the request.
+    await waitFor(() => expect(container.querySelector('[role="tab"][data-record-tab="approvals"]')).not.toBeNull(), { timeout: 5000 });
+    await openStream(container);
+    const link = await waitFor(() => {
+      const found = container.querySelector('[data-stream-approval-row] [data-stream-view-approval]');
+      expect(found).not.toBeNull();
+      return found as HTMLButtonElement;
+    }, { timeout: 5000 });
+    expect(container.querySelector('[data-related-enlarged="approvals"]')).toBeNull();
+    await act(async () => { fireEvent.click(link); });
+    await waitFor(() => expect(container.querySelector('[data-related-enlarged="approvals"]')).not.toBeNull());
+  });
+
+  it('CONTROL — no approvals served to the reader: the line, with no link', async () => {
+    stubApprovals([]);
+    const { container } = renderMemo();
+    await openStream(container);
+    await waitFor(() => expect(container.querySelector('[data-stream-approval-row]')).not.toBeNull(), { timeout: 5000 });
+    await act(async () => {});
+    expect(container.querySelector('[data-stream-view-approval]')).toBeNull();
+  });
+});
