@@ -222,6 +222,36 @@ const ACTIVITY_MILESTONE_KIND = 'milestone';
 export const MILESTONE_ACTIVITY_FEED_TYPE: FeedItemType = 'system';
 
 /**
+ * The three values that make a `sys_activity` row an APPROVAL STEP
+ * (objectstack#35723): plugin-approvals writes one per step it records —
+ * submitted, approved, rejected, recalled — about the record the request
+ * governs.
+ *
+ * The row follows ADR-0052 §5: `type` stays the domain-neutral `system`, the
+ * domain kind rides in `metadata.kind`, and `source_object` points at the
+ * request. The writer's names are `APPROVAL_ACTIVITY_TYPE`,
+ * `APPROVAL_ACTIVITY_KIND` and `APPROVAL_ACTIVITY_SOURCE_OBJECT`
+ * (`@objectstack/plugin-approvals`, `approval-activity-feed.ts`). That package is
+ * a server plugin this UI package does not depend on, so the values are
+ * restated here and pinned by the tests, as {@link ACTIVITY_MILESTONE_KIND} is.
+ *
+ * All three are read, not the kind alone. `system` is a type only the platform
+ * may write (the app activity door refuses it), so an app's own entry cannot
+ * draw as an approval step; and the request pointer is what plugin-approvals'
+ * read gate on `sys_activity` keys on, so a row drawn as an approval step is
+ * exactly a row served only to the users who can read the record's approvals.
+ */
+const APPROVAL_ACTIVITY_TYPE = 'system';
+const APPROVAL_ACTIVITY_KIND = 'approval';
+const APPROVAL_ACTIVITY_SOURCE_OBJECT = 'sys_approval_request';
+
+/**
+ * The feed type an approval step renders as (objectstack#35723): the stream's
+ * one-line approval entry, whose 「看审批」 opens the record's approvals.
+ */
+export const APPROVAL_ACTIVITY_FEED_TYPE: FeedItemType = 'approval';
+
+/**
  * Feed kinds an ObjectUI surface produces WITHOUT going through
  * {@link ACTIVITY_TYPE_TO_FEED_TYPE}.
  *
@@ -304,6 +334,7 @@ export const PRODUCED_FEED_TYPES: ReadonlySet<FeedItemType> = new Set<FeedItemTy
   ...Object.values(ACTIVITY_TYPE_TO_FEED_TYPE).filter((v): v is FeedItemType => Boolean(v)),
   UNMAPPED_ACTIVITY_FEED_TYPE,
   MILESTONE_ACTIVITY_FEED_TYPE,
+  APPROVAL_ACTIVITY_FEED_TYPE,
   ...FEED_TYPES_PRODUCED_OFF_MAP,
 ]);
 
@@ -691,7 +722,7 @@ export function normalizeFilterMode(value: unknown, block: string): FeedFilterMo
  *
  * ## The failure being repaired (objectui#5877)
  *
- * `types: ['approval']` parses, typechecks, builds, and renders a permanently
+ * `types: ['call']` parses, typechecks, builds, and renders a permanently
  * EMPTY tab with nothing said anywhere. Every entry is a declared member of the
  * spec's `FeedItemType`, so the sibling diagnostic above has nothing to report
  * — and the author, or the AI writing the metadata, reads the result as a
@@ -790,7 +821,7 @@ function warnUnproducedFeedTypes(kinds: readonly FeedItemType[], block: string):
  * | `[]`                          | `[]`        | nothing — the author said "no kinds" |
  * | `['crm_task']` (none known)   | `[]`        | nothing, plus one diagnostic   |
  * | `['task', 'crm_task']`        | `['task']`  | the recognised members, plus one diagnostic |
- * | `['approval']` (no producer)  | `['approval']` | nothing, plus one diagnostic — the kind is declared and honoured, but nothing emits it (objectui#5877) |
+ * | `['call']` (no producer)      | `['call']`  | nothing, plus one diagnostic — the kind is declared and honoured, but nothing emits it (objectui#5877) |
  *
  * `undefined` now means "no `types` key was authored" and ONLY that. It used to
  * mean that OR "everything you authored was dropped", and {@link applyFeedConfig}
@@ -1147,6 +1178,13 @@ export function composeImpersonatedActor(template: string | undefined, admin: st
   return pattern.split('{{admin}}').join(admin).split('{{user}}').join(user);
 }
 
+/** Whether a `sys_activity` row is an approval step (objectstack#35723). See {@link APPROVAL_ACTIVITY_FEED_TYPE}. */
+function isApprovalStepRow(row: SysActivityRow, rawType: string, activityKind: string | undefined): boolean {
+  return rawType === APPROVAL_ACTIVITY_TYPE
+    && activityKind === APPROVAL_ACTIVITY_KIND
+    && row?.source_object === APPROVAL_ACTIVITY_SOURCE_OBJECT;
+}
+
 /**
  * One `sys_activity` row → one {@link FeedItem}, or `null` when the row is not
  * record activity (see {@link ACTIVITY_TYPE_TO_FEED_TYPE}).
@@ -1188,7 +1226,9 @@ export function activityRowToFeedItem(
   const activityKind = activityKindOf(row);
   const feedType = COMPLETED_FEED_TYPES.has(mapped) && activityKind === ACTIVITY_MILESTONE_KIND
     ? MILESTONE_ACTIVITY_FEED_TYPE
-    : mapped;
+    : isApprovalStepRow(row, rawType, activityKind)
+      ? APPROVAL_ACTIVITY_FEED_TYPE
+      : mapped;
   const changedFields = activityChangedFields(row);
   const fieldChanges = activityFieldChangesOf(row);
   const recordFacts = activityRecordFacts(row);

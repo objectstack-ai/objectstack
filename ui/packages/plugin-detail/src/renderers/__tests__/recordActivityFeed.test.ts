@@ -655,7 +655,7 @@ describe('an unusable `types` filter narrows or refuses, never widens (objectui#
  * objectui#5877 — a declared feed kind with no producer must not render a
  * permanently empty tab in silence.
  *
- * `types: ['approval']` parses, typechecks, builds and renders nothing, and
+ * `types: ['note']` parses, typechecks, builds and renders nothing, and
  * before this suite nothing anywhere said why. Both directions are asserted,
  * because a warn-on-everything implementation satisfies the first one alone:
  * an unproduced kind MUST warn, and a produced kind MUST NOT. The populations
@@ -700,13 +700,15 @@ describe('a `types` entry naming a kind nothing produces says so (objectui#5877)
    * turn this red: the census is the diagnostic's input, and it moving without
    * anyone noticing is exactly how the warn would start lying.
    */
-  it('the census — 5 produced kinds, the declared rest not', () => {
+  it('the census — 6 produced kinds, the declared rest not', () => {
     // The produced set is this package's and stays exact. The declared set is
     // the spec's, so it is held by name (#26238): a kind the spec adds lands on
     // the unproduced side, which is what the diagnostic warns about.
-    expect(produced.slice().sort()).toEqual(['comment', 'event', 'field_change', 'system', 'task']);
+    // `approval` joined in objectstack#35723: plugin-approvals writes one
+    // activity row per approval step, read as that kind.
+    expect(produced.slice().sort()).toEqual(['note', 'comment', 'event', 'field_change', 'system', 'task']);
     for (const kind of [
-      'approval', 'call', 'email', 'file', 'note', 'record_create', 'record_delete', 'sharing',
+      'call', 'email', 'file', 'note', 'record_create', 'record_delete', 'sharing',
     ]) {
       expect(unproduced).toContain(kind);
     }
@@ -726,9 +728,9 @@ describe('a `types` entry naming a kind nothing produces says so (objectui#5877)
 
   it('WARNS for a genuinely unproduced kind — the card\'s own example', () => {
     const warn = quiet();
-    normalizeFeedTypes(['approval'], 'record:activity');
+    normalizeFeedTypes(['note'], 'record:activity');
     expect(warn).toHaveBeenCalledTimes(1);
-    expect(said(warn)).toContain('"approval"');
+    expect(said(warn)).toContain('"note"');
     expect(said(warn)).toContain('NO PRODUCER');
   });
 
@@ -773,13 +775,13 @@ describe('a `types` entry naming a kind nothing produces says so (objectui#5877)
 
   it('keeps the two populations apart inside ONE diagnostic', () => {
     const warn = quiet();
-    normalizeFeedTypes(['sharing', 'approval'], 'record:activity');
+    normalizeFeedTypes(['sharing', 'note'], 'record:activity');
     expect(warn).toHaveBeenCalledTimes(1);
     const message = said(warn);
     expect(message).toContain('DELIBERATELY NOT ADOPTED');
     expect(message).toContain('"sharing"');
     expect(message).toContain('NO PRODUCER');
-    expect(message).toContain('"approval"');
+    expect(message).toContain('"note"');
     // The honest limitation, stated in the message rather than in a comment
     // nobody reads: an unproduced kind is not thereby known to be an oversight.
     expect(message).toContain('not recorded anywhere');
@@ -799,20 +801,20 @@ describe('a `types` entry naming a kind nothing produces says so (objectui#5877)
     const warn = quiet();
     // Returned as authored, so nothing that renders changes: a declared kind is
     // still a legal filter, and the block still filters to it.
-    expect(normalizeFeedTypes(['approval'], 'record:activity')).toEqual(['approval']);
-    expect(normalizeFeedTypes(['approval', 'comment'], 'record:activity')).toEqual(['approval', 'comment']);
-    expect(warn).toHaveBeenCalledTimes(1); // deduped: `approval` named once
+    expect(normalizeFeedTypes(['note'], 'record:activity')).toEqual(['note']);
+    expect(normalizeFeedTypes(['note', 'comment'], 'record:activity')).toEqual(['note', 'comment']);
+    expect(warn).toHaveBeenCalledTimes(1); // deduped: `note` named once
   });
 
   it('dedupes per distinct kind, and names only the fresh ones', () => {
     const warn = quiet();
-    normalizeFeedTypes(['approval'], 'record:activity');
-    normalizeFeedTypes(['approval'], 'record:activity');
+    normalizeFeedTypes(['note'], 'record:activity');
+    normalizeFeedTypes(['note'], 'record:activity');
     expect(warn).toHaveBeenCalledTimes(1);
-    normalizeFeedTypes(['approval', 'call'], 'record:activity');
+    normalizeFeedTypes(['note', 'call'], 'record:activity');
     expect(warn).toHaveBeenCalledTimes(2);
     expect(said(warn, 1)).toContain('"call"');
-    expect(said(warn, 1)).not.toContain('"approval"');
+    expect(said(warn, 1)).not.toContain('"note"');
   });
 
   it('is its OWN channel — the unrecognised warning does not silence it', () => {
@@ -820,21 +822,21 @@ describe('a `types` entry naming a kind nothing produces says so (objectui#5877)
     // whichever fired first swallow the other, and these two vocabularies meet
     // in one authored list all the time.
     const warn = quiet();
-    normalizeFeedTypes(['crm_task', 'approval'], 'record:activity');
+    normalizeFeedTypes(['crm_task', 'note'], 'record:activity');
     expect(warn).toHaveBeenCalledTimes(2);
     const messages = warn.mock.calls.map((c) => String(c[0]));
     expect(messages.some((m) => m.includes('unrecognised') && m.includes('"crm_task"'))).toBe(true);
-    expect(messages.some((m) => m.includes('NO PRODUCER') && m.includes('"approval"'))).toBe(true);
+    expect(messages.some((m) => m.includes('NO PRODUCER') && m.includes('"note"'))).toBe(true);
   });
 
   it('fires through applyFeedConfig — the path the block actually renders on', () => {
     // Asserting the sanitiser alone would leave the diagnostic unreachable from
     // the pipeline; this is the call `record:activity` makes on every render.
     const warn = quiet();
-    const applied = applyFeedConfig(feed, { types: ['approval'] }, 50, 'record:activity');
+    const applied = applyFeedConfig(feed, { types: ['note'] }, 50, 'record:activity');
     expect(applied.items).toEqual([]); // the permanently empty tab, unchanged
     expect(warn).toHaveBeenCalledTimes(1);
-    expect(said(warn)).toContain('"approval"');
+    expect(said(warn)).toContain('"note"');
   });
 
   it('the produced set is DERIVED from the producers, not a second hand list', () => {

@@ -10,7 +10,7 @@
 
 import { useState, useEffect, useLayoutEffect, useCallback, useContext, useMemo, useRef, type ReactElement } from 'react';
 import { useParams, useNavigate, useLocation, useSearchParams, Link } from 'react-router-dom';
-import { activityRowToFeedItem, buildCommentThreads, CommentsButton, CommentsPage, RecordCommentsInPanelContext, composeImpersonatedActor, IMPERSONATED_ACTOR_FALLBACK, auditEntriesToFeedItems, bodyTableIdsOf, claimQueuedRecord, RECORD_PAGE_TIMELINE_PANEL, RECORD_TIMELINE_PANEL_MAX_ENTRIES, RecordFieldChangesContext, RecordFieldHistoryContext, RecordTimelineTotalContext, DefaultRecordPageContext, EMPTY_RELATED_ARRANGEMENT, InlineEditSaveBar, RECORD_PAGE_DETAILS_WIDTH, RecordBodyTablesContext, RecordMetaFooter, RecordPageColumns, buildDefaultPageColumns, buildDefaultPageSchema, extractMentions, recordSitsInQueue, resolveTitleField, useQueueClaimOffered, useRecordEditable, useRecordPageTier } from '@object-ui/plugin-detail';
+import { activityRowToFeedItem, buildCommentThreads, CommentsButton, CommentsPage, RecordCommentsInPanelContext, composeImpersonatedActor, IMPERSONATED_ACTOR_FALLBACK, auditEntriesToFeedItems, bodyTableIdsOf, claimQueuedRecord, RECORD_PAGE_TIMELINE_PANEL, RECORD_TIMELINE_PANEL_MAX_ENTRIES, RecordFieldChangesContext, RecordFieldHistoryContext, RecordTimelineTotalContext, RecordViewApprovalsContext, DefaultRecordPageContext, EMPTY_RELATED_ARRANGEMENT, InlineEditSaveBar, RECORD_PAGE_DETAILS_WIDTH, RecordBodyTablesContext, RecordMetaFooter, RecordPageColumns, buildDefaultPageColumns, buildDefaultPageSchema, extractMentions, recordSitsInQueue, resolveTitleField, useQueueClaimOffered, useRecordEditable, useRecordPageTier } from '@object-ui/plugin-detail';
 import { isRefusedFeedRead } from '@object-ui/plugin-detail/core';
 // objectstack#36075 — the comment panel's unresolved count and the moderator's verdict.
 import { unresolvedThreadCount, useRecordVerdict } from '@object-ui/plugin-detail';
@@ -6033,20 +6033,28 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
     : approvals.latestRequest?.status === 'rejected' && !approvals.pendingRequest && !lockedForReader
       ? 'border-destructive/30 bg-destructive/10 text-destructive'
       : 'border-amber-300 bg-amber-50 text-amber-800 dark:border-amber-500/40 dark:bg-amber-500/10 dark:text-amber-300';
+  // Open the record's approvals: the panel where the page draws it, else its
+  // 审批 tab (objectstack#35595). The approval tag below and the activity
+  // stream's 「看审批」 on an approval entry (objectstack#35723) both open it.
+  const hasPageColumns = pageColumns !== null;
+  const openRecordApprovals = useCallback(() => {
+    const panel = pageRootEl?.querySelector('[data-testid="record-approvals-panel"]');
+    if (panel) {
+      panel.scrollIntoView({ block: 'start', behavior: 'smooth' });
+      return;
+    }
+    // objectstack#35595 — the approvals panel is the page's 审批 tab, not
+    // drawn on 概览: open that tab.
+    if (hasPageColumns) openEnlargedRelated('approvals');
+    else if (!hasApprovalsNode) handleTabChange('approvals');
+  }, [pageRootEl, hasPageColumns, hasApprovalsNode, openEnlargedRelated, handleTabChange]);
+  // objectstack#35723 — 「看审批」 only where there are approvals this reader is
+  // served, the same condition the page's 审批 tab is drawn on.
+  const viewApprovals = approvals.available && approvals.requests.length > 0 ? openRecordApprovals : null;
   const approvalTag = approvalTagText ? (
     <button
       type="button"
-      onClick={() => {
-        const panel = pageRootEl?.querySelector('[data-testid="record-approvals-panel"]');
-        if (panel) {
-          panel.scrollIntoView({ block: 'start', behavior: 'smooth' });
-          return;
-        }
-        // objectstack#35595 — the approvals panel is the page's 审批 tab, not
-        // drawn on 概览: the tag opens that tab.
-        if (pageColumns) openEnlargedRelated('approvals');
-        else if (!hasApprovalsNode) handleTabChange('approvals');
-      }}
+      onClick={openRecordApprovals}
       className={cn(
         'inline-flex h-5 shrink-0 items-center rounded-md border px-1.5 text-xs font-medium focus:outline-none focus-visible:ring-2 focus-visible:ring-ring',
         approvalTagTone,
@@ -6327,6 +6335,8 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
         {/* objectstack#28737 — the whole stream's count, for the 动态 panel,
             its tab and the tab row's probe. */}
         <RecordTimelineTotalContext.Provider value={assignedPage ? null : timelineTotal}>
+        {/* objectstack#35723 — the stream's 「看审批」 on an approval entry. */}
+        <RecordViewApprovalsContext.Provider value={viewApprovals}>
         {/* No `approval` handler in the set below (objectui#3055): the record
             page has no bespoke approval action TYPE any more. A decision is an
             ordinary `type:'api'` action declared on `sys_approval_request` and
@@ -6640,6 +6650,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
           )}
           {modalElement}
         </ActionProvider>
+        </RecordViewApprovalsContext.Provider>
         </RecordTimelineTotalContext.Provider>
         </RecordFieldHistoryContext.Provider>
         </RecordFieldChangesContext.Provider>

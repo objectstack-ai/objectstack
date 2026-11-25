@@ -287,6 +287,8 @@ export {
   // panel's most entries (the host asks that many activity rows at open).
   RecordTimelineTotalContext,
   RECORD_TIMELINE_PANEL_MAX_ENTRIES,
+  // objectstack#35723 — the stream's 「看审批」 on an approval entry.
+  RecordViewApprovalsContext,
   // objectstack#36075 — the record's comments live in its comment panel.
   RecordCommentsInPanelContext,
   auditEntriesToFeedItems,
