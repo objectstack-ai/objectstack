@@ -20,4 +20,4 @@ The package-card page at bare `/studio` is gone. Studio is opened from an app or
 
 The Packages page's development view (import, publish, revert, adopt loose items) is still at its address. Its menu entry is added by a separate card.
 
-`@object-ui/app-shell` is private. It no longer exports `BuilderLanding`, and it now exports `StudioEntryRedirect` and `SETUP_PACKAGES_PATH`. The `engine.studio.landing.*` strings are removed from `@object-ui/i18n`, except the three duplicate-form strings the Packages page still uses. The `engine.packages.customizations.*` strings are added. `@objectstack/platform-objects` changes a code comment only.
+`@object-ui/app-shell` is private. It no longer exports `BuilderLanding`, and it now exports `StudioEntryRedirect` and `SETUP_PACKAGES_PATH`. In `@object-ui/i18n`, the `engine.studio.landing.*` strings and `engine.studio.landingHome` that shipped in 18.6.0 stay in the studio namespace (`en`, `zh`), no longer read; no published key is removed. Four landing strings added after 18.6.0 and never released are removed. The `engine.packages.customizations.*` strings are added. `@objectstack/platform-objects` changes a code comment only.
