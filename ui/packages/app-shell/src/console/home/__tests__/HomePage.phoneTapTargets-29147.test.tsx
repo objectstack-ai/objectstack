@@ -19,7 +19,7 @@
 import '@testing-library/jest-dom/vitest';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import React from 'react';
-import { render, screen, cleanup, within } from '@testing-library/react';
+import { render, screen, cleanup, within, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
 const navigateMock = vi.fn();
@@ -30,6 +30,8 @@ const state = vi.hoisted(() => ({
   agents: [] as Array<{ name: string }>,
   askAgent: false,
   buildAgent: false,
+  /** Set once the stand-in has drawn the catalog's answer (objectstack#37227). */
+  answered: false,
 }));
 
 vi.mock('react-router-dom', async () => {
@@ -76,6 +78,7 @@ vi.mock('@object-ui/plugin-chatbot/core', async (importOriginal) => {
         if (phase === 'idle') setPhase('loading');
         else if (phase === 'loading') setPhase('answered');
       }, [phase]);
+      if (phase === 'answered') state.answered = true;
       return { agents: phase === 'answered' ? state.agents : [], isLoading: phase === 'loading' };
     },
     isAskAgent: () => state.askAgent,
@@ -164,6 +167,7 @@ beforeEach(() => {
   state.agents = [];
   state.askAgent = false;
   state.buildAgent = false;
+  state.answered = false;
 });
 
 afterEach(() => {
@@ -177,12 +181,15 @@ describe('the greeting row (objectstack#29147)', () => {
     expectPhoneTarget(screen.getByTestId('home-start-template'), ['h-8'], ['max-sm:h-11']);
   });
 
-  it('"Build an app" and "Build with AI" are 44 px below sm and 32 px from sm', async () => {
+  it('with the build agent served, neither "Build an app" nor "Build with AI" joins the row (objectstack#37227)', async () => {
     state.agents = [{ name: 'build' }];
     state.buildAgent = true;
     render(<HomePage />);
-    expectPhoneTarget(await screen.findByTestId('home-build-app'), ['h-8'], ['max-sm:h-11']);
-    expectPhoneTarget(screen.getByTestId('home-build-with-ai'), ['h-8'], ['max-sm:h-11']);
+    expectPhoneTarget(await screen.findByTestId('home-start-template'), ['h-8'], ['max-sm:h-11']);
+    // Absence is read after the catalog answers: before it, neither was drawn anyway.
+    await waitFor(() => expect(state.answered).toBe(true));
+    expect(screen.queryByTestId('home-build-app')).toBeNull();
+    expect(screen.queryByTestId('home-build-with-ai')).toBeNull();
   });
 
   it('"Ask AI" is 44 px below sm and 32 px from sm', async () => {

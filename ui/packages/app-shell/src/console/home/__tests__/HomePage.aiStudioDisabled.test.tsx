@@ -90,7 +90,10 @@ vi.mock('@object-ui/auth', async (importOriginal) => ({
 
 vi.mock('@object-ui/plugin-chatbot/core', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@object-ui/plugin-chatbot/core')>()),
-  useAgents: () => ({ agents: [{ name: 'build' }] }),
+  // objectstack#37227 — Home draws no build chip where the catalog serves the
+  // build agent ("Build an app" was ruled off the page), so the chip this flag
+  // gates is the Studio form, "New in Studio", drawn where it does not.
+  useAgents: () => ({ agents: [{ name: 'custom_helper' }] }),
   isAskAgent: () => false,
   agentHasCapability: () => true,
 }));
@@ -304,9 +307,10 @@ describe('Home on a runtime reporting features.aiStudio: false (objectui#5521)',
     await bootOn(serverConfig({ aiStudio: false }));
   });
 
-  it('withholds the "Build an app" cover entirely — not dimmed, gone', () => {
+  it('withholds the build chip entirely — not dimmed, gone', () => {
     renderHome();
 
+    expect(screen.queryByTestId('home-build-in-studio')).toBeNull();
     expect(screen.queryByTestId('home-build-app')).toBeNull();
     // Counter-probe against a page that rendered NOTHING: the strip behind the
     // cover is still there with the workspace's app on it.
@@ -352,7 +356,7 @@ describe('Home on the measured composed hosted-SaaS shape (objectui#5521)', () =
     await bootOn(serverConfig({ aiStudio: false, marketplace: false, installLocal: false }));
     renderHome();
 
-    expect(screen.queryByTestId('home-build-app')).toBeNull();
+    expect(screen.queryByTestId('home-build-in-studio')).toBeNull();
     expect(screen.getByTestId('home-start-template')).toBeDisabled();
     expect(screen.getByTestId('home-marketplace-disabled-reason')).toHaveTextContent(
       '«home.template.marketplaceDisabled»',
@@ -363,13 +367,13 @@ describe('Home on the measured composed hosted-SaaS shape (objectui#5521)', () =
 });
 
 describe('Home on a runtime that DOES offer AI Studio', () => {
-  it('keeps the "Build an app" cover exactly as before', async () => {
+  it('keeps the build chip exactly as before', async () => {
     // Same fixture, same helper, one flag flipped — so the denials above cannot
     // be passing because the card never renders in this suite at all.
     await bootOn(serverConfig({ aiStudio: true }));
     renderHome();
 
-    const build = screen.getByTestId('home-build-app');
+    const build = screen.getByTestId('home-build-in-studio');
     expect(build).toBeInTheDocument();
     expect(build).toBeEnabled();
   });
@@ -382,7 +386,7 @@ describe('Home on a runtime that DOES offer AI Studio', () => {
     await bootOn(serverConfig({}));
     renderHome();
 
-    expect(screen.getByTestId('home-build-app')).toBeEnabled();
+    expect(screen.getByTestId('home-build-in-studio')).toBeEnabled();
   });
 
   it('fails OPEN when the runtime answers no config at all', async () => {
@@ -390,6 +394,6 @@ describe('Home on a runtime that DOES offer AI Studio', () => {
 
     renderHome();
 
-    expect(screen.getByTestId('home-build-app')).toBeEnabled();
+    expect(screen.getByTestId('home-build-in-studio')).toBeEnabled();
   });
 });
