@@ -1781,16 +1781,16 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         helpText: "El periodo con el que se abre el panel y si los usuarios pueden elegir sus propias fechas."
       },
       "dateRange.field": {
-        label: "Date Field",
-        helpText: "The date field the period filters on. Leave it empty to use the creation date."
+        label: "Campo de fecha",
+        helpText: "El campo de fecha por el que filtra el período. Déjelo vacío para usar la fecha de creación."
       },
       "dateRange.defaultRange": {
-        label: "Default Period",
-        helpText: "The period the dashboard opens with."
+        label: "Período predeterminado",
+        helpText: "El período con el que se abre el panel."
       },
       "dateRange.allowCustomRange": {
-        label: "Allow Custom Range",
-        helpText: "Let viewers pick their own start and end dates."
+        label: "Permitir rango personalizado",
+        helpText: "Permite que los usuarios elijan sus propias fechas de inicio y fin."
       },
       globalFilters: {
         label: "Filtros globales",

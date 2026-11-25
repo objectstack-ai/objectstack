@@ -1781,16 +1781,16 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         helpText: "ダッシュボードを開いたときの期間と、閲覧者が日付を自分で選べるかどうか。"
       },
       "dateRange.field": {
-        label: "Date Field",
-        helpText: "The date field the period filters on. Leave it empty to use the creation date."
+        label: "日付フィールド",
+        helpText: "期間で絞り込む日付フィールド。空のままにすると作成日で絞り込みます。"
       },
       "dateRange.defaultRange": {
-        label: "Default Period",
-        helpText: "The period the dashboard opens with."
+        label: "既定の期間",
+        helpText: "ダッシュボードを開いたときに表示される期間。"
       },
       "dateRange.allowCustomRange": {
-        label: "Allow Custom Range",
-        helpText: "Let viewers pick their own start and end dates."
+        label: "カスタム範囲を許可",
+        helpText: "開始日と終了日を閲覧者が自分で選べるようにします。"
       },
       globalFilters: {
         label: "グローバルフィルター",
