@@ -44,6 +44,7 @@ import { SysApprovalAction } from './sys-approval-action.object.js';
 import { SysApprovalApprover } from './sys-approval-approver.object.js';
 import { SysApprovalDelegation } from './sys-approval-delegation.object.js';
 import { installDefaultOrganization } from './default-organization.testkit.js';
+import { detailRowHeldByLockingApproval, detailRowsHeldByLockingApproval } from './lifecycle-hooks.js';
 
 /** Its approval node locks the record. */
 const HELD = 'held_sheet';
@@ -335,6 +336,62 @@ describe('a locked record\'s lines are locked with it — the record-lock read a
     expect(await writeAs(rig, READER, LINE, recordA(LINE))).toBe('written');
   });
 
+  it('the page read answers a line of a held master as the single read does — held itself, held by its master, unheld', async () => {
+    const rig = await boot();
+    // Held itself: record `_a` of the sheet. Held by its master: line `_a`. Unheld: record `_b` and line `_b`.
+    const scenes: Array<[string, string[]]> = [
+      [HELD, [recordA(HELD), recordB(HELD), MISSING, recordA(HELD)]],
+      [LINE, [recordA(LINE), recordB(LINE), MISSING, recordA(LINE)]],
+    ];
+    for (const caller of [SUBMITTER, APPROVER, READER]) {
+      for (const [object, ids] of scenes) {
+        const page = await rig.svc.getRecordLocks(object, ids, asUser(caller));
+        const oneByOne = [];
+        for (const id of ids) oneByOne.push(await rig.svc.getRecordLock(object, id, asUser(caller)));
+        expect(page, `${caller} ${object}`).toEqual(oneByOne);
+      }
+    }
+    expect(await rig.svc.getRecordLocks(LINE, [recordA(LINE), recordB(LINE)], asUser(SUBMITTER)))
+      .toEqual([{ locked: true }, { locked: false }]);
+    // The reader: line `_a` locked, as its write is refused; line `_b` unreadable reads as missing.
+    expect(await rig.svc.getRecordLocks(LINE, [recordA(LINE), recordB(LINE), MISSING], asUser(READER)))
+      .toEqual([{ locked: true }, null, null]);
+    expect(await writeAs(rig, READER, LINE, recordA(LINE))).toBe('RECORD_LOCKED');
+    // A line held by a request of its own answers locked by both reads too.
+    await rig.svc.openNodeRequest({
+      object: LINE, recordId: recordB(LINE), runId: 'run_line_b', nodeId: 'review', flowName: 'line_review',
+      config: nodeConfig(true) as any, submitterId: SUBMITTER, record: { id: recordB(LINE), title: recordB(LINE) },
+    }, asUser(SUBMITTER));
+    expect(await rig.svc.getRecordLocks(LINE, [recordA(LINE), recordB(LINE)], asUser(SUBMITTER)))
+      .toEqual([await rig.svc.getRecordLock(LINE, recordA(LINE), asUser(SUBMITTER)),
+        await rig.svc.getRecordLock(LINE, recordB(LINE), asUser(SUBMITTER))]);
+    expect(await rig.svc.getRecordLocks(LINE, [recordA(LINE), recordB(LINE)], asUser(SUBMITTER)))
+      .toEqual([{ locked: true }, { locked: true }]);
+    // Decided: the line unlocks for the page read as for the hook.
+    await rig.svc.decide(rig.requests.get(HELD)!, { decision: 'approve', actorId: APPROVER }, asUser(APPROVER));
+    expect(await rig.svc.getRecordLocks(LINE, [recordA(LINE)], asUser(READER))).toEqual([{ locked: false }]);
+  });
+
+  it('reads a page of lines in a bounded number of engine reads whatever its size, never one per row', async () => {
+    const rig = await boot();
+    for (let i = 0; i < 6; i += 1) {
+      await rig.engine.insert(LINE, { id: `${LINE}_x${i}`, title: `x${i}`, sheet: i % 2 ? recordA(HELD) : recordB(HELD) },
+        { context: SYSTEM } as any);
+    }
+    const find = rig.engine.find.bind(rig.engine);
+    const reads: string[] = [];
+    (rig.engine as any).find = (object: string, query: any) => {
+      reads.push(object);
+      return find(object, query);
+    };
+    const ids = [recordA(LINE), recordB(LINE), ...Array.from({ length: 6 }, (_, i) => `${LINE}_x${i}`)];
+    // As SYSTEM: the extra lines are outside the stand-in's per-user grants.
+    const page = await rig.svc.getRecordLocks(LINE, ids, SYSTEM);
+    // The caller's anchor, the rows' own requests, the rows' FK columns, the masters' requests.
+    expect(reads).toEqual([LINE, 'sys_approval_request', LINE, 'sys_approval_request']);
+    expect(page.map((entry) => entry?.locked)).toEqual([true, false, false, true, false, true, false, true]);
+  });
+
   it('answers a line the caller cannot read exactly as one that does not exist', async () => {
     const rig = await boot();
     await rig.svc.openNodeRequest({
@@ -344,5 +401,27 @@ describe('a locked record\'s lines are locked with it — the record-lock read a
     expect(await rig.svc.getRecordLock(LINE, recordB(LINE), asUser(SUBMITTER))).toEqual({ locked: true });
     expect(await rig.svc.getRecordLock(LINE, recordB(LINE), asUser(READER))).toBeNull();
     expect(await rig.svc.getRecordLock(LINE, MISSING, asUser(READER))).toBeNull();
+  });
+});
+
+describe('the one-row detail read answers from the row it found, not from how the engine spells its id', () => {
+  // A stand-in engine that answers the by-id read with the row's id spelled
+  // differently from the asked one (a driver that normalizes case, or hands a
+  // numeric id back as a number) — the master it names is held by a locking request.
+  const engine = {
+    getSchema: (name: string) => name === 'line'
+      ? { fields: { order: { name: 'order', type: 'master_detail', reference: 'order' } } }
+      : undefined,
+    find: async (name: string) => name === 'line'
+      ? [{ id: 'LINE-1', order: 'ord_1' }]
+      : name === 'sys_approval_request'
+        ? [{ record_id: 'ord_1', status: 'pending', node_config_json: '{}' }]
+        : [],
+  } as any;
+
+  it('a held line asked by an id the engine spells back differently answers true', async () => {
+    expect(await detailRowHeldByLockingApproval(engine, 'line', 'line-1')).toBe(true);
+    // The batch form keeps answering with the ids as the engine spells them.
+    expect([...await detailRowsHeldByLockingApproval(engine, 'line', ['line-1'])]).toEqual(['LINE-1']);
   });
 });

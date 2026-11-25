@@ -3017,11 +3017,12 @@ const ru = {
       resetViewTitle: "Возвращает собственные фильтры, поиск, сортировку, группировку, расположение столбцов, скрытые поля, плотность, макет, цвет строк, номера строк и встроенное редактирование этого представления. Закреплённые представления, избранное и способ открытия записей не меняются. Меняется только ваш список.",
       personalized: "Настроено",
       personalizedHeading: "Ваш список отличается от представления",
-      // objectstack#35955 — a list's unsaved changes: Discard and Save.
+      // objectstack#35955 — a list's unsaved changes: Reset and Update view
+      // (objectstack#36737, the view's own actions, as Twenty's).
       draft: {
-        discard: "Отменить",
+        discard: "Сбросить",
         discardTitle: "Возвращает список к виду, заданному представлением: фильтры, сортировка, группировка, столбцы и макет. Ширина столбцов и высота строк сохраняются.",
-        save: "Сохранить",
+        save: "Обновить представление",
         heading: "Несохранённые изменения",
         partSeparator: ", ",
         saveToView: "Сохранить в это представление",
@@ -5622,6 +5623,11 @@ const ru = {
         skill_few: 'ИИ-навыки: {{count}}',
         skill_many: 'ИИ-навыки: {{count}}',
         skill_other: 'ИИ-навыки: {{count}}',
+        ai_context: 'Пакеты контекста ИИ: {{count}}',
+        ai_context_one: 'Пакет контекста ИИ: {{count}}',
+        ai_context_few: 'Пакеты контекста ИИ: {{count}}',
+        ai_context_many: 'Пакеты контекста ИИ: {{count}}',
+        ai_context_other: 'Пакеты контекста ИИ: {{count}}',
         datasource: 'Источники данных: {{count}}',
         datasource_one: 'Источник данных: {{count}}',
         datasource_few: 'Источники данных: {{count}}',

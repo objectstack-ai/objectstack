@@ -3147,5 +3147,8 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "Valor"
       }
     }
+  },
+  ai_context: {
+    label: "Paquete de contexto de IA"
   }
 };

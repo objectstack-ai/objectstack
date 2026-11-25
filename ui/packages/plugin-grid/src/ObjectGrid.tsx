@@ -1485,7 +1485,29 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
   // object, an approval lock, the record — `cellReadOnlyKind`), what typing
   // does there and what pasted text stands for. `null` without the host's
   // ask, so every other grid keeps the table it had.
-  const approvalLocks = useRowApprovalLocks(hostCellSelection ? objectName : undefined);
+  //
+  // objectstack#36911 — the row menu reads the same locks: a row an approval
+  // locks offers no Edit, as the record page offers none (objectstack#35593).
+  // Delete stays for a record held by its own approval: the server deletes it
+  // and cancels its request. (The batch read reports only that case today, not
+  // a line held because its master is held, which refuses delete too; #37041.) So the hook also runs on a grid whose rows offer Edit. It still
+  // reads nothing until it is asked: by a cell being selected, or by a row's
+  // actions being reached for (`demandRowActions` below).
+  const rowMenuOffersEdit = canEdit && !!onEdit;
+  const approvalLocks = useRowApprovalLocks(hostCellSelection || rowMenuOffersEdit ? objectName : undefined);
+  /**
+   * objectstack#36911 — what reaching for a row's actions asks
+   * (`RowActionMenuProps.onActionsDemand`, objectstack#34208): the
+   * record-grained verdicts, and the approval locks of the rows on screen in
+   * one read (objectstack#35795), never on first paint. A repeat call is free:
+   * the hook asks only ids it has not asked yet.
+   */
+  const requestRecordVerdicts = recordVerdict.requestVerdicts;
+  const probeApprovalLocks = approvalLocks.probe;
+  const demandRowActions = useCallback(() => {
+    requestRecordVerdicts();
+    if (rowMenuOffersEdit) probeApprovalLocks(pageRecordIds);
+  }, [requestRecordVerdicts, probeApprovalLocks, rowMenuOffersEdit, pageRecordIds]);
   // objectstack#35956 — a cell change that makes other fields required asks
   // for them first, and saves them with it (`./objectGridRequiredPrompt`).
   const fieldLabelOf = (field: string): string => {
@@ -2418,8 +2440,8 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
   } = resolveObjectGridActionsColumn({
     schema, data, objectSchema, persistedColumns, operations, resolvedRowActionDefs,
     wantEditAction, wantDeleteAction, mayInvokeRowAction, rowOperations, canEdit, canDelete,
-    recordVerdict, predicateScope, onEdit, onDelete, editPredicates, deletePredicates, executeAction,
-    setRefreshKey, t, foldInlineRowActions: inlineActionFold.folded,
+    recordVerdict, approvalLocks, demandRowActions, predicateScope, onEdit, onDelete, editPredicates,
+    deletePredicates, executeAction, setRefreshKey, t, foldInlineRowActions: inlineActionFold.folded,
     drawRowControls: !listPageGrid,
   });
 

@@ -43,6 +43,7 @@ describe('openDashboardForEdit', () => {
       kind: 'ready',
       target: { kind: 'package', packageId: 'crm' },
       doc: stored,
+      shipped: { name: 'exec' },
     });
     expect(client.getDraft).toHaveBeenCalledWith('dashboard', 'exec', { packageId: 'crm' });
   });
@@ -54,7 +55,12 @@ describe('openDashboardForEdit', () => {
     };
     // The doors carry no ensure door at all: opening could not create the pair if it tried.
     const opened = await openDashboardForEdit('exec', 'crm', client, { doors: doors(false) });
-    expect(opened).toEqual({ kind: 'ready', target: { kind: 'customization', base: 'crm', basedOn: '3.0.0', pair: null }, doc: stored });
+    expect(opened).toEqual({
+      kind: 'ready',
+      target: { kind: 'customization', base: 'crm', basedOn: '3.0.0', pair: null },
+      doc: stored,
+      shipped: stored,
+    });
     expect(client.getDraft).not.toHaveBeenCalled();
     expect(client.layered).toHaveBeenCalledTimes(1);
     expect(client.layered).toHaveBeenCalledWith('dashboard', 'exec', { packageId: 'crm' });
@@ -71,6 +77,33 @@ describe('openDashboardForEdit', () => {
     const opened = await openDashboardForEdit('exec', 'crm', client, { doors: pairListed });
     expect(opened).toMatchObject({ kind: 'ready', target: { kind: 'customization', base: 'crm', pair: 'crm.custom' }, doc: stored });
     expect(client.getDraft).toHaveBeenCalledWith('dashboard', 'exec', { packageId: 'crm.custom' });
+  });
+
+  it('a pair that holds a customization opens it, with the base as shipped beside it', async () => {
+    // objectstack#37031: the panels restore an undone opt-out from `shipped`.
+    const shippedDoc = { ...stored, widgets: [{ id: 'a', type: 'bar', filterBindings: { dateRange: 'signed_on' } }] };
+    const customized = {
+      ...stored,
+      overrides: { package: 'crm', basedOn: '3.0.0' },
+      widgets: [{ id: 'a', type: 'bar', filterBindings: { dateRange: false } }],
+    };
+    const client = {
+      getDraft: vi.fn(async () => null),
+      layered: vi.fn(async () => ({ code: shippedDoc, effective: customized })),
+    };
+    const pairListed = listed({ crm: { writable: false, version: '3.0.0' }, 'crm.custom': { writable: true, version: '0.0.0' } });
+    const opened = await openDashboardForEdit('exec', 'crm', client, { doors: pairListed });
+    expect(opened).toMatchObject({ kind: 'ready', doc: customized, shipped: shippedDoc });
+    expect(client.layered).toHaveBeenCalledTimes(1);
+    expect(client.layered).toHaveBeenCalledWith('dashboard', 'exec', { packageId: 'crm.custom' });
+  });
+
+  it('an item no package ships opens with nothing shipped', async () => {
+    const client = { getDraft: vi.fn(async () => null), layered: vi.fn(async () => ({ code: null, effective: stored })) };
+    await expect(openDashboardForEdit('exec', 'crm', client, { doors: doors(true) })).resolves.toMatchObject({
+      kind: 'ready',
+      shipped: null,
+    });
   });
 
   it('is refused for an installed app where Studio\'s Customize is: the ensure door walled, or no version to declare', async () => {

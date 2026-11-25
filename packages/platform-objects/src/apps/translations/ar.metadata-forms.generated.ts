@@ -3147,5 +3147,8 @@ export const arMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "القيمة"
       }
     }
+  },
+  ai_context: {
+    label: "حزمة سياق الذكاء الاصطناعي"
   }
 };

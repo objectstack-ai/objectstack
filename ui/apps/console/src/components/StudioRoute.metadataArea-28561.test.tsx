@@ -168,6 +168,8 @@ describe('/studio — the "All metadata" area\'s routes (objectstack#28561)', ()
     '/studio/com.example.crm/metadata',
     // objectstack#36899 — the left menu's targets that are not an area list.
     '/studio/~org/automations',
+    // objectstack#36905 — the sharing overview's own route, and the old address that redirects to it.
+    '/studio/com.example.crm/owd',
     '/studio/com.example.crm/access?surface=owd%3Aoverview',
     '/studio/com.example.crm/metadata/_diagnostics',
   ])(
