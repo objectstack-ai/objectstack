@@ -116,6 +116,19 @@ type TabKey = InboxUrlState['tab'];
 /** Server page size for the paginated tabs (submitted / all). */
 const PAGE_SIZE = 50;
 
+/** One row a bulk approve / reject could not decide, and the refusal's reason. */
+interface BulkFailure {
+  id: string;
+  title: string;
+  reason: string;
+}
+
+/**
+ * How many failed rows a bulk run's toast lists before the rest move behind
+ * its "Show all" action (the dialog lists every one).
+ */
+const BULK_FAILURES_IN_TOAST = 3;
+
 /**
  * Semantic status colors (green = approved, amber = waiting, red = rejected,
  * slate = recalled, violet = returned for revision) — variant-based Badge
@@ -1093,6 +1106,13 @@ function ApprovalsQueue() {
   // Bulk selection (only meaningful on "pending" tab where the user can act)
   const [selectedRowIds, setSelectedRowIds] = useState<Set<string>>(new Set());
   const [bulkRunning, setBulkRunning] = useState(false);
+  /**
+   * The last bulk run's failed rows, each with the refusal's reason. A toast
+   * carries the first few; the dialog this feeds carries every one of them,
+   * so an overflowing partial failure still names each row and why.
+   */
+  const [bulkFailures, setBulkFailures] = useState<BulkFailure[]>([]);
+  const [bulkFailuresOpen, setBulkFailuresOpen] = useState(false);
 
   // Inline decision confirmations (row-level quick action / mobile card /
   // keyboard). BOTH decisions confirm before executing (#2762 P0-2): the
@@ -1473,7 +1493,7 @@ function ApprovalsQueue() {
     if (targets.length === 0) return;
     setBulkRunning(true);
     let ok = 0;
-    const failures: string[] = [];
+    const failures: BulkFailure[] = [];
     for (const r of targets) {
       const pending = new Set(r.pending_approvers || []);
       const actor = identities.find(i => pending.has(i)) || user?.id || '';
@@ -1481,25 +1501,48 @@ function ApprovalsQueue() {
         const fn = kind === 'approve' ? approvalsApi.approve : approvalsApi.reject;
         await fn(r.id, { actor_id: actor, ...decisionComment(comment) });
         ok++;
-      } catch {
-        failures.push(r.record_title || formatIdentity(r.record_id));
+      } catch (err: any) {
+        // Each failure keeps its refusal's own text, read the way the
+        // single-row Approve reads it (`userMessage` first, else the page's
+        // generic line) — a bare title says which row, never why.
+        failures.push({
+          id: r.id,
+          title: r.record_title || formatIdentity(r.record_id),
+          reason: humanizeError(err, tr('actionFailed', 'Action failed')),
+        });
       }
     }
     setBulkRunning(false);
     setSelectedRowIds(new Set());
+    setBulkFailures(failures);
     if (failures.length === 0) {
       toast.success(kind === 'approve'
         ? tr('bulkApproved', 'Approved {{count}} requests', { count: ok })
         : tr('bulkRejected', 'Rejected {{count}} requests', { count: ok }));
     } else {
-      const shown = failures.slice(0, 3).join(', ');
-      toast.error(tr('bulkPartial', '{{ok}} succeeded, {{fail}} failed: {{which}}', {
-        ok, fail: failures.length, which: shown + (failures.length > 3 ? '…' : ''),
-      }));
+      const lines = failures.slice(0, BULK_FAILURES_IN_TOAST).map(f =>
+        tr('bulkFailureLine', '{{title}}: {{reason}}', { title: f.title, reason: f.reason }));
+      const overflow = failures.length > BULK_FAILURES_IN_TOAST;
+      toast.error(tr('bulkPartialSummary', '{{ok}} succeeded, {{fail}} failed', { ok, fail: failures.length }), {
+        description: lines.join('\n'),
+        classNames: { description: 'whitespace-pre-line' },
+        // More failures than the toast shows: the rest are one click away, and
+        // the toast stays until dismissed so that click cannot time out.
+        ...(overflow
+          ? {
+              duration: Infinity,
+              closeButton: true,
+              action: {
+                label: tr('bulkFailuresShowAll', 'Show all ({{n}})', { n: failures.length }),
+                onClick: () => setBulkFailuresOpen(true),
+              },
+            }
+          : {}),
+      });
     }
     void load();
     refreshBadge();
-  }, [actionableSelectedRows, identities, user?.id, load, refreshBadge, tr]);
+  }, [actionableSelectedRows, identities, user?.id, load, refreshBadge, humanizeError, tr]);
 
   /** Confirmed row-level approve (from the shared dialog). */
   const inlineApprove = useCallback(async (r: ApprovalRequestRow) => {
@@ -2062,6 +2105,32 @@ function ApprovalsQueue() {
               </div>
             </div>
           )}
+
+          {/* Every failed row of the last bulk run, with its reason — the
+              toast's "Show all" opens it when the failures overflow the toast. */}
+          <AlertDialog open={bulkFailuresOpen} onOpenChange={setBulkFailuresOpen}>
+            <AlertDialogContent>
+              <AlertDialogHeader>
+                <AlertDialogTitle>
+                  {tr('bulkFailuresTitle', 'Not decided: {{n}}', { n: bulkFailures.length })}
+                </AlertDialogTitle>
+                <AlertDialogDescription>
+                  {tr('bulkFailuresBody', 'These requests were left as they were. Each one says why.')}
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <ul data-testid="approvals-bulk-failures" className="max-h-[50vh] overflow-y-auto space-y-2 text-sm">
+                {bulkFailures.map(f => (
+                  <li key={f.id}>
+                    <span className="font-medium">{f.title}</span>
+                    <span className="block text-muted-foreground">{f.reason}</span>
+                  </li>
+                ))}
+              </ul>
+              <AlertDialogFooter>
+                <AlertDialogCancel>{tr('close', 'Close')}</AlertDialogCancel>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
 
           {loading ? (
             <div className="space-y-2">
