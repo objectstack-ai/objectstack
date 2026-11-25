@@ -25,6 +25,7 @@ import { Link } from 'react-router-dom';
 import { useWorkspaceAdminStatus } from '@object-ui/auth';
 import { Button, Empty, EmptyDescription, EmptyTitle } from '@object-ui/components';
 import { useCanAuthorMetadata } from '../../hooks/useCanAuthorMetadata.js';
+import { usePhoneViewport } from '../../hooks/usePhoneViewport.js';
 import { isAiStudioEnabled } from '../../runtime-config.js';
 import { SETUP_NEW_PACKAGE_PATH } from '../../views/metadata-admin/packageSource.js';
 
@@ -43,6 +44,10 @@ export function AiUnavailable({
   const { isAdmin } = useWorkspaceAdminStatus();
   const canAuthorMetadata = useCanAuthorMetadata();
   const offerStudio = !hasError && isAdmin && isAiStudioEnabled() && canAuthorMetadata;
+  // The way home names where it goes: a phone's Home is its app list; from
+  // 768 px up the home page is retired (objectstack#36732) and `onHome` opens
+  // an app's start page, named in the app pill's words (objectstack#37163).
+  const phone = usePhoneViewport();
   return (
     <div className="flex flex-1 items-center justify-center p-6" data-testid="ai-unavailable">
       <Empty>
@@ -74,7 +79,9 @@ export function AiUnavailable({
             </Button>
           )}
           <Button onClick={onHome} data-testid="ai-unavailable-home">
-            {t('console.ai.unavailableHome', { defaultValue: 'Back to home' })}
+            {phone
+              ? t('console.ai.unavailableHome', { defaultValue: 'Back to home' })
+              : t('layout.appSwitcher.backToHome', { defaultValue: 'Back to app start page' })}
           </Button>
         </div>
       </Empty>

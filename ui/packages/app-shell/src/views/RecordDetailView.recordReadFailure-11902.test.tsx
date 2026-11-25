@@ -324,12 +324,14 @@ describe('the not-found state offers a way out: the object list, then Home (obje
     expect(await screen.findByRole('heading', { name: 'Invoice list' })).toBeInTheDocument();
   });
 
-  it('Back to home opens Home', async () => {
+  // objectstack#37163 — on a desktop (jsdom's 1024 px) the way home names the
+  // app start page Home now is; the phone CONTROL is in `NotFoundState.test`.
+  it('the way home (「Back to app start page」 on a desktop) opens Home', async () => {
     answer = 'notFound';
     await openRecordPage(EN);
 
     await screen.findByTestId('record-not-found', undefined, { timeout: 5000 });
-    fireEvent.click(screen.getByRole('button', { name: 'Back to home' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Back to app start page' }));
     expect(await screen.findByRole('heading', { name: 'Home page' })).toBeInTheDocument();
   });
 
@@ -339,6 +341,6 @@ describe('the not-found state offers a way out: the object list, then Home (obje
 
     await screen.findByText(NOT_FOUND_ZH, undefined, { timeout: 5000 });
     expect(screen.getByRole('link', { name: /^返回发票/ })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: '返回首页' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '返回应用起始页' })).toBeInTheDocument();
   });
 });
