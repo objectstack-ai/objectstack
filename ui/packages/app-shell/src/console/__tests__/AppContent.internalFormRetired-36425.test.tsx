@@ -320,7 +320,7 @@ describe('#37246 — a related New pre-links the parent with its dependsOn value
     expect(schema.initialValues).toStrictEqual({ account: 'acct-parent' });
   });
 
-  it('control: the first pair of a field wins, and a malformed pair is skipped', async () => {
+  it('the first pair of a field wins, and a malformed pair is skipped', async () => {
     const schema = await openAt('/apps/crm/crm_note?form=new&formObject=crm_case&formLink=account:acct-parent&formLink=account:other&formLink=:x&formLink=status:open', 'crm_case');
     expect(schema.initialValues).toStrictEqual({ account: 'acct-parent', status: 'open' });
   });
