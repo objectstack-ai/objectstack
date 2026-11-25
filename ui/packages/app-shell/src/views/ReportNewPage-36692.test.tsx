@@ -220,17 +220,10 @@ describe('the new-report page saves on its own (objectstack#36692)', () => {
     expect(screen.queryByTestId('report-new-adds-to-menu')).toBeNull();
     fireEvent.click(screen.getByText('save'));
     await waitFor(() => expect(screen.getByTestId('where')).toHaveTextContent('/apps/crm/report/payment_analysis'));
-    expect(saveAndPublish).toHaveBeenCalledWith(
-      'report',
-      'payment_analysis',
-      { ...DRAFT, name: 'payment_analysis' },
-      expect.objectContaining({ metadataClient: client }),
-    );
-    // objectstack#36906 — outside Studio it is saved where it was before: naming
-    // no package, and no package door is asked.
-    expect(client.save).not.toHaveBeenCalled();
-    expect(doors.listCalls).toBe(0);
-    expect(toastInfo).not.toHaveBeenCalled();
+    // objectstack#37261 — where it is saved is pinned by the app's-own-New
+    // describe below; here, that it was saved and published once.
+    expect(client.save).toHaveBeenCalledTimes(1);
+    expect(client.publish).toHaveBeenCalledTimes(1);
   });
 
   it('Close goes back to the reports index, writing nothing', async () => {
@@ -308,6 +301,70 @@ describe('reached with the design mode already on, the page draws no builder (ob
     expect(screen.getByTestId('builder')).toBeInTheDocument();
     expect(screen.getByText('save')).toBeInTheDocument();
     expect(screen.queryByTestId('report-new-design-mode')).toBeNull();
+  });
+});
+
+describe("the app's own New saves into the app's package, as a new view does (objectstack#37261)", () => {
+  // Opened from the app's reports index, outside Studio: the same rule as the
+  // Studio leg below and as a new view (`resolveRuntimeCreatePackage`).
+  async function saveFromApp() {
+    mount();
+    fireEvent.click(screen.getByText('save'));
+    await waitFor(() => expect(screen.getByTestId('where')).toHaveTextContent('/apps/crm/report/payment_analysis'));
+  }
+
+  it("from an app on a writable package, a new report names that package", async () => {
+    await saveFromApp();
+    expect(client.save).toHaveBeenCalledWith(
+      'report',
+      'payment_analysis',
+      { ...DRAFT, name: 'payment_analysis' },
+      { mode: 'draft', ifNoneMatch: '*', packageId: PKG },
+    );
+    expect(client.publish).toHaveBeenCalledWith('report', 'payment_analysis', { packageId: PKG });
+    expect(doors.ensure).not.toHaveBeenCalled();
+    expect(saveAndPublish).not.toHaveBeenCalled();
+    expect(toastInfo).not.toHaveBeenCalled();
+  });
+
+  it("on an installed (read-only) app, a new report names the base's customization package", async () => {
+    doors.listed = new Map([[PKG, { writable: false }]]);
+    doors.ensure.mockImplementation(async (base: string) => ({ packageId: `${base}.custom`, writable: true }));
+    await saveFromApp();
+    expect(doors.ensure).toHaveBeenCalledWith(PKG);
+    expect(client.save).toHaveBeenCalledWith(
+      'report',
+      'payment_analysis',
+      { ...DRAFT, name: 'payment_analysis' },
+      { mode: 'draft', ifNoneMatch: '*', packageId: `${PKG}.custom` },
+    );
+    expect(client.publish).toHaveBeenCalledWith('report', 'payment_analysis', { packageId: `${PKG}.custom` });
+    expect(saveAndPublish).not.toHaveBeenCalled();
+    expect(toastInfo).not.toHaveBeenCalled();
+  });
+
+  it('control: when the ensure door refuses, Save falls back to naming no package, and says so, as a new view does', async () => {
+    doors.listed = new Map([[PKG, { writable: false }]]);
+    doors.ensure.mockImplementation(async () => {
+      throw Object.assign(new Error('Forbidden'), { status: 403 });
+    });
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      await saveFromApp();
+      expect(doors.ensure).toHaveBeenCalledWith(PKG);
+      expect(client.save).not.toHaveBeenCalled();
+      expect(saveAndPublish).toHaveBeenCalledWith(
+        'report',
+        'payment_analysis',
+        { ...DRAFT, name: 'payment_analysis' },
+        expect.objectContaining({ metadataClient: client }),
+      );
+      expect(toastInfo).toHaveBeenCalledTimes(1);
+      expect(toastInfo).toHaveBeenCalledWith('report.builder.savedOutsideApp');
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining('the report is saved naming no package'), expect.anything());
+    } finally {
+      warn.mockRestore();
+    }
   });
 });
 
