@@ -5,8 +5,11 @@
  * at the window's top, the standing banners and the connection notice sit at
  * the top of the content area, the page header carries the sidebar's expand
  * button while the sidebar is collapsed, and a route with no shell header gets
- * that button at the content's corner. A phone keeps its bar, and so does an
- * app's docs page, which mounts no sidebar.
+ * that button at the content's corner. A phone keeps its bar. An app's docs
+ * pages are no exception from 768 px up (objectstack#37150): the connection
+ * notice is drawn above them too, and their own header (`DocShell`'s, drawn
+ * from the shell's expand slot) carries the expand button, so the corner
+ * fallback stays away (objectstack#37197 pins both).
  *
  * Harness: the real `ConsoleLayout` with its real `@object-ui/layout`
  * `AppShell` and the real `ShellPageActionsScope`; the sidebar, the app bar
@@ -41,6 +44,7 @@ import { ConsoleLayout } from '../ConsoleLayout';
 import { ChromeBannerSlot } from '../chromeBannerHost';
 import { PageHeader } from '../PageHeader';
 import { NavigationProvider } from '../../context/NavigationContext';
+import { useShellSidebarExpandSlot } from '../shellPageActionsSlot';
 
 const APP = { name: 'crm', label: 'CRM', active: true, navigation: [] };
 
@@ -106,8 +110,15 @@ describe('an app draws no top bar from 768 px up (objectstack#36112)', () => {
     }
   });
 
-  it('control: an app\'s docs pages, which mount no sidebar, keep the bar at every width', () => {
-    mountAt('/apps/crm/docs/crm_manual', 1440, <div>Manual</div>);
+  it('an app\'s docs pages are no exception (objectstack#37150): the sidebar and no bar from 768 px up; a phone keeps the bar', () => {
+    for (const width of [768, 1440]) {
+      mountAt('/apps/crm/docs/crm_manual', width, <div>Manual</div>);
+      expect(document.querySelectorAll('header'), `${width} px`).toHaveLength(0);
+      expect(screen.queryByTestId('app-bar'), `${width} px`).toBeNull();
+      expect(screen.getByTestId('sidebar-stub'), `${width} px`).toBeInTheDocument();
+      cleanup();
+    }
+    mountAt('/apps/crm/docs/crm_manual', 390, <div>Manual</div>);
     expect(screen.getByTestId('app-bar')).toBeInTheDocument();
     expect(screen.queryByTestId('sidebar-stub')).toBeNull();
   });
@@ -161,5 +172,42 @@ describe('an app draws no top bar from 768 px up (objectstack#36112)', () => {
     const fallback = screen.getByTestId('shell-sidebar-expand-fallback');
     expect(screen.getByTestId('console-route')).toContainElement(fallback);
     expect(fallback).toContainElement(screen.getByTestId('shell-sidebar-expand'));
+  });
+});
+
+/**
+ * The docs pages' header as `DocShell` draws it (the console's docs frame,
+ * outside this package): the shell's expand slot at its left edge.
+ */
+function DocsPageHeaderStandIn() {
+  const renderExpand = useShellSidebarExpandSlot();
+  return renderExpand ? <div data-testid="docs-page-header">{renderExpand()}</div> : null;
+}
+
+describe('an app\'s docs pages keep the shell\'s notices and expand button from 768 px up (objectstack#37150, pinned by objectstack#37197)', () => {
+  it('a lost connection is a notice at the top of the content area on a docs page; a phone draws none there', () => {
+    mountAt('/apps/crm/docs/crm_manual/intro', 1440, <div>Manual</div>, { connectionState: 'disconnected' });
+    const notice = screen.getByTestId('console-connection-banner');
+    expect(screen.getByTestId('console-banners')).toContainElement(notice);
+    expect(notice).toHaveTextContent('Disconnected');
+    cleanup();
+    // PHONE CONTROL — the app bar carries the connection there; no notice in the content.
+    mountAt('/apps/crm/docs/crm_manual/intro', 390, <div>Manual</div>, { connectionState: 'disconnected' });
+    expect(screen.queryByTestId('console-connection-banner')).toBeNull();
+    expect(screen.getByTestId('app-bar')).toBeInTheDocument();
+  });
+
+  it('collapsed, the docs header carries the expand button and the corner fallback is not drawn; a phone draws neither', () => {
+    mountAt('/apps/crm/docs/crm_manual/intro', 1440, <DocsPageHeaderStandIn />);
+    expect(screen.queryByTestId('shell-sidebar-expand')).toBeNull();
+    fireEvent.click(screen.getByTestId('collapse'));
+    expect(screen.getByTestId('docs-page-header')).toContainElement(screen.getByTestId('shell-sidebar-expand'));
+    expect(screen.queryByTestId('shell-sidebar-expand-fallback')).toBeNull();
+    expect(screen.getAllByTestId('shell-sidebar-expand')).toHaveLength(1);
+    cleanup();
+    // PHONE CONTROL — no sidebar on a phone's docs page, so no expand slot and no fallback.
+    mountAt('/apps/crm/docs/crm_manual/intro', 390, <DocsPageHeaderStandIn />);
+    expect(screen.queryByTestId('docs-page-header')).toBeNull();
+    expect(screen.queryByTestId('shell-sidebar-expand-fallback')).toBeNull();
   });
 });

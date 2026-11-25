@@ -54,6 +54,13 @@ import { Button, DataEmptyState } from '@object-ui/components';
 import { useObjectTranslation } from '@object-ui/i18n';
 import { useServedAppLabel } from '../hooks/useServedAppLabel.js';
 import { useCanAuthorMetadata } from '../hooks/useCanAuthorMetadata.js';
+import { studioHomePath } from '../views/studio-design/studioAddress.js';
+import { createAuthenticatedFetch } from '@object-ui/auth';
+
+/** The console's authenticated fetch: the stored bearer token beside the session cookie. */
+function authFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+  return createAuthenticatedFetch()(input, init);
+}
 
 export interface AppNoAccessEmptyStateProps {
   /** The active app, as the console's metadata list carries it (`_packageId` as served). */
@@ -94,7 +101,7 @@ function useStoredMenuEmpty(appName: string, packageId: string | null, ask: bool
   React.useEffect(() => {
     if (!ask || !packageId) return;
     let cancelled = false;
-    fetch(`/api/v1/meta/app/${encodeURIComponent(appName)}/layers?package=${encodeURIComponent(packageId)}`, {
+    authFetch(`/api/v1/meta/app/${encodeURIComponent(appName)}/layers?package=${encodeURIComponent(packageId)}`, {
       credentials: 'include',
       headers: { Accept: 'application/json' },
       cache: 'no-store',
@@ -147,7 +154,7 @@ export function AppNoAccessEmptyState({ app, setupPath, reason = 'no-navigation'
           })}
           action={
             <Button asChild variant="outline">
-              <Link to={`/studio/${encodeURIComponent(packageId)}/data`} data-testid="app-empty-menu-open-studio">
+              <Link to={studioHomePath(packageId)} data-testid="app-empty-menu-open-studio">
                 {t('empty.openInStudio', { defaultValue: 'Open in Studio' })}
               </Link>
             </Button>

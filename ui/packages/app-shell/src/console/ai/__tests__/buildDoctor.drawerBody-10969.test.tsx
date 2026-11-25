@@ -50,8 +50,8 @@ function answer(report: BuildDebugReport | null) {
     'fetch',
     vi.fn(async () =>
       report
-        ? { ok: true, status: 200, json: async () => report }
-        : { ok: false, status: 404, json: async () => ({}) },
+        ? { headers: new Headers(), ok: true, status: 200, json: async () => report }
+        : { headers: new Headers(), ok: false, status: 404, json: async () => ({}) },
     ),
   );
 }

@@ -35,15 +35,15 @@
 
 import { canonicalMetaUrlType } from '@objectstack/spec/shared';
 import {
-  DESIGNER_SURFACE_PARAM,
-  formatSurfaceParam,
-} from '../metadata-admin/nav-selection.js';
+  STUDIO_ORG_SCOPE_PILLAR,
+  STUDIO_ORG_SCOPE_SEGMENT,
+  studioPillarItemAddress,
+  studioPillarPath,
+} from './studioAddress.js';
 
-/** The reserved `/studio/<segment>` value for the package-less scope. */
-export const STUDIO_ORG_SCOPE_SEGMENT = '~org';
-
-/** The one pillar the package-less scope offers. */
-export const STUDIO_ORG_SCOPE_PILLAR = 'automations';
+// objectstack#36895 — the scope's reserved segment and its one pillar are
+// Studio address vocabulary, owned by `studioAddress.ts`; re-exported here.
+export { STUDIO_ORG_SCOPE_SEGMENT, STUDIO_ORG_SCOPE_PILLAR } from './studioAddress.js';
 
 /** Whether a `/studio/:packageId` route segment names the package-less scope. */
 export function isStudioOrgScope(segment: string | null | undefined): boolean {
@@ -55,9 +55,10 @@ export function isStudioOrgScope(segment: string | null | undefined): boolean {
  * through the pillar's `?surface=` deep link.
  */
 export function studioOrgScopePath(surface?: { type: string; name: string }): string {
-  const base = `/studio/${STUDIO_ORG_SCOPE_SEGMENT}/${STUDIO_ORG_SCOPE_PILLAR}`;
-  if (!surface) return base;
-  return `${base}?${DESIGNER_SURFACE_PARAM}=${encodeURIComponent(formatSurfaceParam(surface))}`;
+  // The reserved segment is written as it is, as it always was (`~` is outside
+  // every package-id alphabet, and `encodeURIComponent` leaves it unchanged).
+  if (!surface) return studioPillarPath(STUDIO_ORG_SCOPE_SEGMENT, STUDIO_ORG_SCOPE_PILLAR, { segmentEncoding: 'verbatim' });
+  return studioPillarItemAddress(STUDIO_ORG_SCOPE_SEGMENT, STUDIO_ORG_SCOPE_PILLAR, surface, { segmentEncoding: 'verbatim' });
 }
 
 /**

@@ -48,6 +48,8 @@ import {
   stdioObjectView,
   type StdioObjectReads,
   type StdioDatasetToolsService,
+  type StdioKnowledgeToolsService,
+  type StdioRecordContextToolsService,
   type StdioProtocolObjectReads,
   type StoredHashDigest,
 } from './stdio-data-bridge.js';
@@ -194,6 +196,37 @@ function datasetToolsService(ctx: PluginContext): StdioDatasetToolsService | und
     return undefined;
   }
   return service && typeof service.datasetTools === 'function' ? (service as StdioDatasetToolsService) : undefined;
+}
+
+/**
+ * [ADR-0149 D2] The `knowledge` service when it serves the knowledge tool's
+ * executor (`knowledgeTools`), else `undefined` (no knowledge service, or one
+ * without it). A lookup that throws is "not served", as for
+ * {@link datasetToolsService}.
+ */
+function knowledgeToolsService(ctx: PluginContext): StdioKnowledgeToolsService | undefined {
+  let service: Partial<StdioKnowledgeToolsService> | undefined;
+  try {
+    service = ctx.getService<Partial<StdioKnowledgeToolsService>>('knowledge');
+  } catch {
+    return undefined;
+  }
+  return service && typeof service.knowledgeTools === 'function' ? (service as StdioKnowledgeToolsService) : undefined;
+}
+
+/**
+ * [ADR-0160 D4] The `record-context` service when it serves the
+ * `get_record_context` executor (`recordContextTools`), else `undefined`. A
+ * lookup that throws is "not served", as for {@link knowledgeToolsService}.
+ */
+function recordContextToolsService(ctx: PluginContext): StdioRecordContextToolsService | undefined {
+  let service: Partial<StdioRecordContextToolsService> | undefined;
+  try {
+    service = ctx.getService<Partial<StdioRecordContextToolsService>>('record-context');
+  } catch {
+    return undefined;
+  }
+  return service && typeof service.recordContextTools === 'function' ? (service as StdioRecordContextToolsService) : undefined;
 }
 
 /**
@@ -817,6 +850,12 @@ export class MCPServerPlugin implements Plugin {
           // registered during `init()`, so an absence now is final (ADR-0116),
           // and the tools must be registered before the transport attaches.
           datasetTools: datasetToolsService(ctx),
+          // [ADR-0149 D2] Read on the same schedule: `search_knowledge`
+          // registers only where the kernel holds a knowledge service.
+          knowledgeTools: knowledgeToolsService(ctx),
+          // [ADR-0160 D4] Read on the same schedule: `get_record_context`
+          // registers only where the kernel holds a record-context service.
+          recordContextTools: recordContextToolsService(ctx),
           // [ADR-0149 D2] The i18n service the saved datasets are localized
           // with, resolved at each use as the protocol is; a host that
           // registers none serves them untranslated.

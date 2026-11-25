@@ -20,8 +20,9 @@
 import { describe, it, expect } from 'vitest';
 import { z } from 'zod';
 import { FieldErrorCode } from './errors.zod';
-import { zodIssuesToFields } from './zod-issues-to-fields';
+import { ZOD_UNION_DEFAULT_MESSAGE, zodIssuesToFields } from './zod-issues-to-fields';
 import { FlowSchema } from '../automation/flow.zod';
+import { FindDataRequestSchema } from './protocol.zod';
 
 /** Parse and map, asserting the fixture really fails — with the parsed input. */
 const fieldsFor = (schema: { safeParse: (v: unknown) => any }, value: unknown) => {
@@ -113,11 +114,10 @@ describe('zodIssuesToFields — the ambiguous and unmapped Zod codes land on cat
     it('custom lands on invalid_value; invalid_union on invalid_shape — catalog members both', () => {
         expect(fieldsFor(z.object({ a: z.string().refine(() => false, 'no') }), { a: 'x' })[0].code)
             .toBe('invalid_value');
-        const unionFields = fieldsFor(
-            z.object({ u: z.union([z.object({ k: z.string() }), z.object({ j: z.number() })]) }),
-            { u: { k: 42 } },
-        );
-        expect(unionFields[0].code).toBe('invalid_shape');
+        // Every branch a bare kind mismatch: nothing below explains the union,
+        // so its own entry is the whole answer and is kept (#35433).
+        const unionFields = fieldsFor(z.object({ u: z.union([z.string(), z.number()]) }), { u: {} });
+        expect(unionFields.map((f) => f.code)).toEqual(['invalid_shape']);
         for (const f of unionFields) {
             expect(() => FieldErrorCode.parse(f.code), `'${f.code}' is not a catalog member`).not.toThrow();
         }
@@ -127,5 +127,139 @@ describe('zodIssuesToFields — the ambiguous and unmapped Zod codes land on cat
         for (const junk of [null, undefined, {}, 'issues', 0]) {
             expect(zodIssuesToFields(junk)).toEqual([]);
         }
+    });
+});
+
+/**
+ * [#35433] The maintainer's ruling: `fields[]` drops a union's own entry — zod's
+ * bare `"Invalid input"`, mapped to `invalid_shape` — whenever an entry below
+ * explains it, at every depth, and keeps it when nothing does. The same rule the
+ * metadata envelope took on #35400, so the two machine lists agree; the
+ * cross-package pin lives in `metadata-protocol`'s
+ * `union-branch-policy.cross-package-parity.test.ts`.
+ */
+describe('zodIssuesToFields — an explained bare union head is dropped (#35433)', () => {
+    // adr0112-ok: D6 — a field-addressed FieldErrorCode in a fields[] entry
+    const HEAD = { code: 'invalid_shape', message: ZOD_UNION_DEFAULT_MESSAGE };
+
+    it('the compared text is zod\'s real default for a failed union', () => {
+        const r = z.union([z.string(), z.number()]).safeParse({});
+        expect(r.success).toBe(false);
+        expect(r.error!.issues[0]!.code).toBe('invalid_union');
+        expect(r.error!.issues[0]!.message).toBe(ZOD_UNION_DEFAULT_MESSAGE);
+    });
+
+    it('a top-level union head is dropped, so fields[0] is the located cause', () => {
+        const fields = fieldsFor(
+            z.object({ u: z.union([z.string(), z.object({ a: z.string() }).strict()]) }),
+            { u: {} },
+        );
+        expect(fields.map((f) => [f.field, f.code])).toEqual([['u.a', 'required']]);
+        expect(fields).not.toContainEqual(expect.objectContaining(HEAD));
+    });
+
+    it('every head of a nested union is dropped while something below explains it', () => {
+        const inner = z.union([z.object({ a: z.string() }).strict(), z.object({ b: z.string() }).strict()]);
+        const fields = fieldsFor(
+            z.object({ outer: z.union([z.object({ inner }).strict(), z.number()]) }),
+            { outer: { inner: { a: 1 } } },
+        );
+        expect(fields.map((f) => [f.field, f.code])).toEqual([['outer.inner.a', 'invalid_type']]);
+    });
+
+    it('a head nothing below explains is kept — every branch a kind mismatch, or the depth bound', () => {
+        expect(fieldsFor(z.object({ u: z.union([z.string(), z.number()]) }), { u: {} }))
+            .toEqual([{ field: 'u', ...HEAD }]);
+
+        // Four nested unions; the walk stops after three levels, so the fourth
+        // head is the last word and is kept, and only the three above it go.
+        const nested = (depth: number): z.ZodTypeAny => depth === 0
+            ? z.object({ leaf: z.string() }).strict()
+            : z.union([z.object({ next: nested(depth - 1) }).strict(), z.object({ sibling: z.number() }).strict()]);
+        expect(fieldsFor(z.object({ u: nested(4) }), { u: { next: { next: { next: { next: { leaf: 1 } } } } } }))
+            .toEqual([{ field: 'u.next.next.next', ...HEAD }]);
+    });
+
+    it('a head carrying the schema\'s own sentence is kept ahead of what it explains', () => {
+        const authored = 'Write a label string or an object with a `text` key.';
+        const fields = fieldsFor(
+            z.object({ u: z.union([z.string(), z.object({ text: z.string() }).strict()], { error: authored }) }),
+            { u: {} },
+        );
+        expect(fields.map((f) => [f.field, f.code, f.message])).toEqual([
+            ['u', 'invalid_shape', authored],
+            ['u.text', 'required', expect.any(String)],
+        ]);
+    });
+
+    it('a container head is kept whatever follows it — it alone says the KEY was refused', () => {
+        const fields = fieldsFor(
+            z.object({ m: z.record(z.string().regex(/^[a-z_]+$/, 'Must be snake_case.'), z.number()) }),
+            { m: { 'Bad Key': 1 } },
+        );
+        expect(fields.map((f) => [f.field, f.code, f.message])).toEqual([
+            ['m.Bad Key', 'invalid_shape', 'Invalid key in record'],
+            ['m.Bad Key', 'invalid_format', 'Must be snake_case.'],
+        ]);
+    });
+});
+
+describe('zodIssuesToFields — a wrong-typed query where answers one entry that names the shapes (#35500)', () => {
+    // adr0112-ok: D6 — a field-addressed FieldErrorCode in a fields[] entry
+    const SHAPE = 'invalid_shape';
+
+    /**
+     * The data API's own parse: `POST /data/:object/query` validates
+     * `{object, query}` against this schema and answers `fields[]` from this
+     * mapper. `where` there is `z.union([FilterArraySchema, DataEngineFilterSchema])`,
+     * and both members are unions, so a wrong kind used to answer one bare
+     * `Invalid input` entry per member and nothing that said what to send.
+     */
+    const doorFields = (slot: string, where: unknown) => {
+        const body = { object: 'account', query: { object: 'account', [slot]: where } };
+        return fieldsFor(FindDataRequestSchema, body);
+    };
+
+    it.each([
+        ['42', 42],
+        ['a string', 'status = open'],
+        ['null', null],
+        ['a boolean', true],
+    ])('%s is refused with exactly one entry, and it names both accepted shapes', (_name, where) => {
+        const fields = doorFields('where', where);
+        expect(fields.map((f) => [f.field, f.code])).toEqual([['query.where', SHAPE]]);
+        expect(fields[0]!.message).not.toBe(ZOD_UNION_DEFAULT_MESSAGE);
+        expect(fields[0]!.message).toContain('condition object');
+        expect(fields[0]!.message).toContain('filter array');
+    });
+
+    it('every spelling of the slot answers the same one entry ($filter shown)', () => {
+        const fields = doorFields('$filter', 42);
+        expect(fields.map((f) => [f.field, f.code])).toEqual([['query.$filter', SHAPE]]);
+        expect(fields[0]!.message).toBe(doorFields('where', 42)[0]!.message);
+    });
+
+    it('a malformed AST is refused with its located causes and no duplicate Invalid input', () => {
+        const fields = doorFields('where', [['status', '=', 'open'], 'and']);
+        expect(fields.map((f) => [f.field, f.code, f.message])).toEqual([
+            ['query.where', 'min_items', expect.any(String)],
+            ['query.where.1', SHAPE, ZOD_UNION_DEFAULT_MESSAGE],
+        ]);
+        // The kind sentence is for a value of the wrong kind; an array is the
+        // right kind, so its causes speak and the bare union head is dropped.
+        expect(fields.filter((f) => f.field === 'query.where' && f.code === SHAPE)).toEqual([]);
+    });
+
+    it('CONTROL — a valid filter object and a valid filter array are still accepted', () => {
+        for (const where of [{ status: 'open' }, ['status', '=', 'open'], ['and', ['status', '=', 'open'], ['amount', '>', 100]]]) {
+            const body = { object: 'account', query: { object: 'account', where } };
+            expect(FindDataRequestSchema.safeParse(body).success, JSON.stringify(where)).toBe(true);
+        }
+    });
+
+    it('a member that is itself a bare union of kinds explains nothing, at any depth', () => {
+        const kinds = z.union([z.union([z.string(), z.number()]), z.union([z.boolean(), z.array(z.string())])]);
+        expect(fieldsFor(z.object({ u: kinds }), { u: {} }))
+            .toEqual([{ field: 'u', code: SHAPE, message: ZOD_UNION_DEFAULT_MESSAGE }]);
     });
 });

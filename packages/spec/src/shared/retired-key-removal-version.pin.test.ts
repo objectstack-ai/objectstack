@@ -79,7 +79,7 @@ import { describe, expect, it } from 'vitest';
 
 import { ALL_CONVERSIONS } from '../conversions/registry';
 import { TimeUpdateInterval } from '../data/analytics.zod';
-import { CurrencyConfigSchema } from '../data/field.zod';
+import { CurrencyConfigSchema, FieldSchema } from '../data/field.zod';
 import { IndexSchema, ObjectSchema } from '../data/object.zod';
 import { ManifestPermissionsSchema, PluginPackagingSchema } from '../kernel/manifest.zod';
 import {
@@ -316,6 +316,19 @@ const JOIN: Readonly<Record<string, readonly Renderer[]>> = {
   // #27123: `packaging: 'manifest-deps'`, refused by the enum's own error map.
   'manifest-packaging-manifest-deps-removed': [
     refusal("manifest.packaging 'manifest-deps'", () => PluginPackagingSchema.safeParse('manifest-deps')),
+  ],
+  // #35926: a relationship field's boolean `inlineEdit`, refused by the enum's own error map.
+  'field-inline-edit-boolean-removed': [
+    refusal(
+      'field.inlineEdit: true',
+      () => FieldSchema.safeParse({ type: 'master_detail', reference: 'order', inlineEdit: true }),
+      'inlineEdit',
+    ),
+    refusal(
+      'field.inlineEdit: false',
+      () => FieldSchema.safeParse({ type: 'lookup', reference: 'order', inlineEdit: false }),
+      'inlineEdit',
+    ),
   ],
   'declared-index-unique-scope': [
     refusal('indexes[].unique: true', () => IndexSchema.safeParse({ fields: ['code'], unique: true })),

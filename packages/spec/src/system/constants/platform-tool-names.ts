@@ -142,7 +142,11 @@ export const PLATFORM_PROVIDED_TOOL_NAMES: ReadonlySet<string> = new Set(
  * `import_object`, under `metadata:write` only), the dataset pair, the
  * app-docs pair (`search_package_docs`, `read_package_doc`: the same names the
  * cloud `service-ai` group registers, served at the door over the docs-audience
- * gate) and `validate_expression`.
+ * gate), `search_knowledge` (where the kernel holds a `knowledge` service: the
+ * knowledge service's one definition and executor, searching only the sources
+ * whose `aiExposed` is not `false`, as the caller), `get_record_context` (where
+ * the kernel holds a `record-context` service: one record read through its
+ * context pack, as the caller — ADR-0160 D4) and `validate_expression`.
  *
  * Some names are also cloud registrations (`get_record`, `query_records`,
  * `describe_object`, …) and are in {@link PLATFORM_PROVIDED_TOOL_NAMES} as
@@ -167,6 +171,8 @@ export const MCP_DOOR_TOOL_NAMES: readonly string[] = [
   'delete_records',
   'describe_object',
   'get_record',
+  // [ADR-0160 D4] One record through its context pack (`@objectstack/service-record-context`).
+  'get_record_context',
   'import_object',
   'list_actions',
   'list_datasets',
@@ -178,6 +184,7 @@ export const MCP_DOOR_TOOL_NAMES: readonly string[] = [
   'read_package_doc',
   'resume_run',
   'run_action',
+  'search_knowledge',
   'search_package_docs',
   'update_record',
   'validate_expression',

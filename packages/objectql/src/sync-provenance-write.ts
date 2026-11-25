@@ -154,6 +154,11 @@ export function snapshotSyncKeys(row: unknown): ReadonlyMap<string, unknown> {
  * caller judged clean the snapshot is empty, so any `_sync_` key is a hook's;
  * on the pull's write it holds the pull's stamps, which must reach the driver
  * as written.
+ *
+ * The comparison is by identity (`Object.is`), so a hook that replaced the
+ * payload with a deep copy would be refused if a stamp were held as an object
+ * such as a `Date`; the pull hands every stamp in as a string, and the error
+ * errs toward refusing, so nothing is stored wrongly.
  */
 export function refuseHookSyncProvenanceWrite(
   object: string,

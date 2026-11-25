@@ -21,7 +21,9 @@ The Knowledge Protocol contract and the `service-knowledge` orchestrator are ope
 framework mechanisms. The AI **consumer** that wires the `search_knowledge` tool
 into an in-product chat loop (shown below) ships in
 **ObjectOS**. On the open-source framework, reach your data through `@objectstack/mcp`
-(BYO-AI) instead.
+(BYO-AI) instead: its door serves the same `search_knowledge` tool wherever the
+knowledge service is installed, searching only the sources whose `aiExposed` is
+not `false`, as the caller.
 </Callout>
 
 This document describes the **why**, the **contract**, the **plugin
@@ -50,7 +52,7 @@ distinctive value to add **around** them:
    caller's `ExecutionContext` so RLS naturally applies — the same
    policy that protects REST and ObjectQL queries also protects what
    the LLM can read.
-3. **Realtime sync.** ObjectQL `record.*` events drive incremental
+3. **Realtime sync.** ObjectQL `data.record.*` events drive incremental
    reindex without manual cron jobs.
 4. **Unified audit + observability.** Knowledge searches participate in
    the same trace / audit pipeline as REST, ObjectQL, and tool calls.
@@ -156,7 +158,12 @@ registers itself with that name. Adapter config (endpoint, dataset id,
 Canonical shapes shared by every adapter:
 
 - `KnowledgeDocument` — one logical document (`id`, `sourceId`,
-  `sourceRecordId?`, `content`, `metadata`, `permissions?`).
+  `sourceRecordId?`, `content`, `metadata`, `permissions?`, `docHash?`).
+  `docHash` is a hash of the assembled document — content, title and
+  metadata, in a stable key order, behind a version prefix (`v1:`). The
+  service computes it on every document it hands an adapter, and
+  `indexDocument` refuses a document that already carries one; the adapter
+  stores it and returns it as stored, and never computes or alters it.
 - `KnowledgeChunk` — adapter-produced chunk of a document. The framework
   does **not** chunk; adapters do.
 - `KnowledgeHit` — a search result (`chunkId`, `documentId`, `score`,
@@ -198,7 +205,8 @@ interface IKnowledgeService {
 the all-important `executionContext` (from the permission-aware tool
 execution work — see `actions-as-tools.mdx`). `KnowledgeReindexOptions`
 accepts `dryRun` and `limit`; `reindexSource` returns a
-`KnowledgeReindexResult` (`indexed`, `discovered`, `ok`, …).
+`KnowledgeReindexResult` (`indexed`, `discovered`, `skipped`, `purged`,
+`ok`, …) — see [Reindex: skip and purge](#reindex-skip-and-purge).
 
 ### 3.4 `IKnowledgeAdapter` (implemented by plugins)
 
@@ -208,6 +216,10 @@ interface IKnowledgeAdapter {
   upsert(docs: KnowledgeDocument[], ctx: AdapterContext): Promise<void>;
   search(query: string, opts: AdapterSearchOptions): Promise<KnowledgeHit[]>;
   delete(documentIds: string[], ctx: AdapterContext): Promise<void>;
+  listDocuments?(
+    ctx: AdapterContext,
+    opts: { cursor?: string; limit: number },
+  ): Promise<{ documents: { documentId: string; docHash?: string }[]; nextCursor?: string }>;
   healthCheck?(): Promise<{ ok: boolean; message?: string }>;
 }
 ```
@@ -216,6 +228,34 @@ The adapter surface is **deliberately minimal**: no embedding
 management, no chunk strategy, no rerank toggles. Those are the
 adapter's private concerns. Adapters that need extra knobs expose them
 in their plugin options.
+
+Every member past `upsert` / `search` / `delete` is optional (ADR-0161
+K8): an adapter that lacks one keeps working, and the service does what it
+did before that member existed. `listDocuments` lists the documents the
+adapter holds for a source, a page of at most `limit` entries at a time, each
+with the `docHash` it was stored with; `nextCursor` is absent once the
+listing is complete. A document written while a listing runs may be missing
+from it — the safe direction, since a missing entry is never purged.
+
+**The contract test suite.** Every adapter package runs the same suite
+against its own factory:
+
+```ts
+import { runKnowledgeAdapterContract } from '@objectstack/service-knowledge/testing';
+
+runKnowledgeAdapterContract({
+  name: 'my-adapter',
+  makeAdapter: () => new MyAdapter(/* a fresh, empty store */),
+  implements: { listDocuments: true },
+});
+```
+
+It covers upsert / search / delete, `listDocuments` page boundaries and
+`docHash` round-trips, and — through a real `KnowledgeService` — the skip and
+the purge below. `implements` declares the optional members, and the suite
+checks the declaration against the adapter. `./testing` is a test-only,
+ESM-only entry that imports `vitest`; nothing in the runtime entry reaches it.
+`knowledge-memory` runs it as the reference implementation.
 
 ---
 
@@ -268,6 +308,9 @@ search_knowledge tool
    ▼
 IKnowledgeService.search(q, { executionContext, sourceIds })
    │
+   ├─► per object source: may U reach it? (exposure + field-level rules,
+   │       see below) ── a refused source is not searched for U
+   │
    ├─► adapter.search(q, …)  ──► returns raw hits with sourceRecordId
    │
    ├─► group hits by underlying object
@@ -286,6 +329,50 @@ This is the same pattern as the existing permission-aware data tools
 No matter how aggressive an adapter's retrieval is, the user never
 sees a chunk extracted from a record they can't read.
 
+### Source admission: exposure and field-level rules
+
+A passage is built at index time, under a system context, from every
+`contentFields` member of its source, the record `title` and the source's
+`metadataFields`. A row re-check alone would therefore serve a caller the text
+of a field a field-level rule hides from them. So before an `object` source is
+searched for a non-system caller, the service asks, once per object per search:
+
+- **Disabled package** — an object whose owning package is disabled is not
+  searched.
+- **API exposure** — the spec's one exposure decision for the `search`
+  operation, the one the cross-object search asks: `enable.apiEnabled: false`,
+  or an `enable.apiMethods` whitelist that does not grant `search` (granting
+  `list` does), keeps the object's sources out of the search.
+- **System objects** — a `sys_*` object is searched only when it declares
+  `enable.aiReadable: true` (the AI read tools' posture).
+- **Field-level rules** — every field the source serves (each `contentFields`
+  member, `'*'` meaning every field the object declares except `id`; each `metadataFields`
+  member; `title`), less the credential-class and `internal: true` fields an
+  index never carries, must be one the caller may **query**, per the `security`
+  service's `getQueryableFields`. Without that answer: its `getReadableFields`
+  less every field declaring a `maskingRule`; with no `security` service at
+  all: every field except those declaring a `maskingRule`. Queryable, not
+  merely readable, because a passage carries the unmasked value.
+
+The answer is per **source**, not per field: when one served field is hidden
+from the caller, that source is not searched for them at all — its passages
+mix the hidden field's text into one unit that cannot be partially withheld.
+To keep a source searchable for restricted callers, declare its
+`contentFields` / `metadataFields` from fields every intended reader may query,
+and put sensitive fields in a separate source. Every gate fails closed: a
+lookup that throws — the `security` service lookup included, unless the kernel
+answers that no `security` service is registered — or a `security` service
+that answers neither field question, keeps the source out of that caller's
+search. The system context bypasses these gates as it bypasses the row
+re-check. A caller with no execution context, or a service with no data engine
+bound, is searched no `object` source at all; an `object` source's hit with no
+`sourceRecordId` cannot be re-checked and is dropped; and the service drops a
+hit whose reported `sourceId` names another source than the one searched. That
+check sees only the `sourceId` an adapter reports: an adapter that labels
+another source's passage with the searched source's id is not caught by it, so
+two sources must not share one adapter-side store. A restricted caller's empty
+answer is this narrowing, not a missing index.
+
 For `file` and `http` sources (no underlying ObjectQL record), the
 adapter is responsible for honouring an opaque `permissions` field on
 each document. Sources that need fine-grained ACLs should be declared
@@ -296,10 +383,57 @@ with a `permissions` mapping function at index time.
 ## 6. Sync model
 
 For `object` sources, `KnowledgeService` subscribes to the ObjectQL engine's
-`data.record.created`, `data.record.updated` and `data.record.deleted` events
-(the legacy unprefixed `record.*` shape is still accepted). Each event triggers
-a single `adapter.upsert` / `adapter.delete` call — the record body is read
-from the event's `after`, and a delete's id from its required `recordId`.
+`data.record.created`, `data.record.updated`, `data.record.restored` and
+`data.record.deleted` events. A bare `record.*` event is not part of the
+vocabulary: no producer emits one, and the subscription ignores it.
+
+A source's `where` decides which rows it indexes on every path — the event
+sync as well as `reindexSource`. For a created, updated or restored row, with a
+data engine bound, each source re-reads the row under the system context:
+`find(object, { where: { $and: [where, { id }] }, limit: 1 })` (just `{ id }`
+when the source has no `where`).
+
+- **A row comes back** — the document is built from the re-read row, not from
+  the event's `after`, so a write result that omits a field (a projected
+  result, a formula the write did not return) cannot leave the document
+  short. The same field rules as a reindex apply: the fields the source lists
+  and the record `title`, never a credential-class or `internal` field.
+- **No row comes back** — the row does not match (a draft, or a row that
+  stopped matching), and its document is deleted. Deleting an absent document
+  changes nothing.
+- **A restored row** (a recycle-bin restore) takes the same path, so it
+  re-enters the index only if it matches.
+- **No data engine bound** — nothing can be re-read: a source without `where`
+  builds the document from the event's `after`, and a source with `where` is
+  not synced, which the service logs once per source as a warning.
+
+A delete removes the document named by the event's required `recordId`. Syncs
+of one document run one after another in the process, so two events for the
+same row cannot interleave: each re-reads after the previous one finished, and
+the last leaves the index agreeing with the database. Because the sync is
+inline, a write's sync can wait behind an earlier in-flight sync of the same
+document (on a single-connection pool, up to the pool's acquire timeout); the
+index still ends consistent.
+
+**When the sync runs.** The engine publishes `data.record.created` and
+`data.record.updated` from inside the write, after its `after*` hooks — before
+any unit of work around the write commits (the write's own unit, opened when a
+metadata hook can abort it, or a caller's `engine.transaction(…)`). The
+in-process realtime service awaits each subscriber, so the re-read runs inside
+the same open transaction and sees the row the write just made. If that unit
+then rolls back, the index is wrong in one of two ways:
+
+- **The uncommitted row matched** — the document stays built from a row that
+  never committed.
+- **The uncommitted row did not match** — the document was deleted, so the
+  committed row, which may still match, is missing from the index.
+
+The row's next event or a `reindexSource` repairs a row that still exists. A
+document built from an **insert** that rolled back has no row left to repair it
+from; it stays until a complete reindex purges it (below).
+
+`data.record.restored` is
+published after the restore's own unit has committed.
 
 - **MVP (Phase 1):** synchronous, inline with the originating mutation.
   Fast for low-volume dev / demo. Indexing failures are logged but do
@@ -315,8 +449,53 @@ from the event's `after`, and a delete's id from its required `recordId`.
   than per-record events. A knowledge index is a per-record projection and
   `matched: 40` names no record, so there is no upsert or delete to derive —
   the service logs a warning naming the object and count instead of failing
-  silently. Repair such an index with an explicit `reindexSource`.
+  silently. A complete `reindexSource` refreshes the documents of rows that
+  still exist and match, and — over an adapter that implements
+  `listDocuments` — purges those of deleted rows and of rows that stopped
+  matching. Over an adapter that does not, they stay in the index.
 </Callout>
+
+### Reindex: skip and purge
+
+A `reindexSource` of an `object` source over an adapter that implements
+`listDocuments` first lists what the adapter holds for the source (document
+id → stored `docHash`), then walks the object's rows page by page:
+
+- **Skip.** A row whose document's computed `docHash` equals the listed one is
+  not written again; the result counts it in `skipped`. Every other document
+  is written (`indexed`). A listed entry without a `docHash` reads as changed.
+- **Purge.** After a **complete** walk — no `limit`, no `dryRun`, no failed
+  page — every document listed before the walk that the walk did not see is a
+  candidate. Each candidate is confirmed by the same re-read the event sync
+  makes (the source's `where` AND the record id, under the system context) and
+  deleted only when that finds no row. A row created or restored during the
+  walk keeps its document: if it was listed, the re-read finds it; if it was
+  not, it was never a candidate. The purge of a document waits for any
+  in-flight event sync of the same document. `purged` counts the deletions.
+- **Known limit: numeric record ids.** The purge reads the record id back from
+  the document id as text and re-reads by that text. On driver-mongodb and
+  driver-memory, which do not equate `'5'` with `5`, a row stored under a
+  caller-supplied numeric id is not found by that re-read; if such a row was
+  restored (or came back into `where`) after the walk read past it, its
+  document is deleted. The row itself is untouched, and its document returns at
+  the row's next event or the next complete reindex. Platform-minted ids are
+  text on every driver, so this needs a caller-supplied numeric id.
+- **`purged: null`** means no purge ran: a walk with a `limit` or a `dryRun`,
+  a failed walk, a source with `refresh.onRecordChange: false` (an external
+  indexer owns its index), or an adapter without `listDocuments` — which also
+  skips nothing, the walk otherwise unchanged. A listing that fails skips and
+  purges nothing either, and the result's `message` says why.
+- A listed document whose id is not one the source derives from a record
+  (`<sourceId>:<recordId>`) is never purged, since no row can confirm it; the
+  result's `message` counts such documents.
+
+A re-read or delete that fails stops the purge — a re-read that answers no
+list of rows counts as failed, never as "no row" — and the result is
+`ok: false`, `purged` counts the deletions made before it, and the `message`
+names the document. A walk page that answers no list of rows stops the walk
+the same way, with `purged: null`, rather than ending it as if the source were
+empty. The event sync shares that re-read: when it answers no list of rows, the
+sync leaves the document in place and logs a warning, rather than deleting it.
 
 ### Retention deletes are covered by a reap guard
 
@@ -345,9 +524,10 @@ returns the ids it confirms. Rows it does not confirm stay put.
   external indexer owns is never a reason to hold up another package's
   retention.
 
-Application-level predicate writes remain uncovered: de-indexing them needs an
-adapter-side enumeration capability that no adapter declares today, and that
-surface stays unbuilt until a real `object` source calls for it.
+Application-level predicate writes are not de-indexed as they happen. Their
+stale documents are removed by the next complete `reindexSource`, over an
+adapter that implements `listDocuments` ([Reindex: skip and
+purge](#reindex-skip-and-purge)); nothing runs that reindex on a schedule yet.
 
 `file` / `http` sources rely on explicit `reindexSource` calls
 (typically triggered by a cron job, a Console button, or a webhook).
@@ -367,7 +547,7 @@ up.
 | `KnowledgeSourceSchema` | ✅ | object / file / http kinds |
 | `KnowledgeDocument` / `Chunk` / `Hit` | ✅ | Canonical shapes |
 | `IKnowledgeService` contract | ✅ | search / index / delete / reindex |
-| `IKnowledgeAdapter` contract | ✅ | upsert / search / delete / healthCheck |
+| `IKnowledgeAdapter` contract | ✅ | upsert / search / delete / healthCheck; optional `listDocuments` with a contract test suite (`@objectstack/service-knowledge/testing`) |
 | `service-knowledge` orchestrator | ✅ | Adapter routing, RLS wrapper, sync |
 | `knowledge-memory` | ✅ | In-process; deterministic fake embedder |
 | `knowledge-ragflow` | ✅ | Minimal REST adapter (datasets + chunks + retrieval) |
@@ -383,7 +563,9 @@ up.
 ### 7.1 Non-goals for Phase 1
 
 - Reranker hooks, hybrid retrieval toggles, MMR — adapter-private.
-- Field-level masking — Phase 1 enforces row-level only.
+- Field-level masking inside a passage. A source serving a field the caller
+  may not query is not searched for that caller at all (§5, source
+  admission); a passage is never re-projected or redacted per caller.
 - Cost / quota enforcement — Phase 2.
 - Multi-tenant index isolation — defer to adapter capability matrix.
 
@@ -404,10 +586,13 @@ internally (RAGFlow, Dify, Vectara).
 
 ## 9. Open questions
 
-- **Where does chunk-level ACL live?** Currently the framework checks
-  row-level ACLs by re-querying via `dataEngine.find`. Field-level
-  masking would require either (a) re-running `select` projections or
-  (b) standardising a `redact` step. Deferred.
+- **Where does chunk-level ACL live?** The framework checks row-level
+  ACLs by re-querying via `dataEngine.find`, and field-level rules at
+  source granularity (§5): a source serving a field the caller may not
+  query is not searched for them. Finer grain — serving such a caller a
+  passage with the hidden field's text removed — would require either
+  (a) indexing one passage per field-visibility class or (b) standardising
+  a `redact` step. Deferred.
 - **Multiple adapters per source.** Useful for mirroring (e.g. write
   to RAGFlow and pgvector simultaneously) but adds significant
   complexity. Not in Phase 1.

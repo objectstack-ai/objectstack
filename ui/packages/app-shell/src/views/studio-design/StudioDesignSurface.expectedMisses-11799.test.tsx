@@ -130,6 +130,7 @@ vi.mock('@object-ui/react', async (importOriginal) => {
 // The console's preview and authoring code loads `@objectstack/lint` lazily;
 // warmed here so its first load is paid at import, not inside a test's clock.
 import '@objectstack/lint';
+import '@object-ui/plugin-detail';
 import { AutomationsPillar, DataPillar } from './StudioDesignSurface';
 import { registerMetadataPreview } from '../metadata-admin/preview-registry';
 import { DashboardPreview } from '../metadata-admin/previews/DashboardPreview';
@@ -183,7 +184,10 @@ function asked(type: string, name: string, suffix: '?state=draft' | '/layers'): 
 const misses = () => server.requests.filter((r) => r.status === 404).map((r) => `${r.path}${r.search}`);
 
 describe('Automations pillar — opening flows asks no 404 question (objectui#11799)', () => {
-  it('a saved flow with no draft reads its baseline and no draft; an unsaved flow reads its draft and no baseline', async () => {
+  // objectstack#36726 — an unsaved flow's layers are read too, for the Save's
+  // publish pin; an item with only a draft has layers (objectstack#30859), so
+  // the read is answered, never a miss.
+  it('a saved flow with no draft reads its baseline and no draft; an unsaved flow reads its draft and its layers, no miss', async () => {
     put(server.active, 'flow', 'p_flow', flow('p_flow'));
     put(server.drafts, 'flow', 'fresh_flow', flow('fresh_flow'));
     render(
@@ -198,7 +202,7 @@ describe('Automations pillar — opening flows asks no 404 question (objectui#11
     fireEvent.click((await screen.findAllByText('fresh_flow'))[0]);
     await waitFor(() => expect(asked('flow', 'fresh_flow', '?state=draft')).toBe(1));
     await settle();
-    expect(asked('flow', 'fresh_flow', '/layers')).toBe(0);
+    expect(asked('flow', 'fresh_flow', '/layers')).toBe(1);
     expect(misses()).toEqual([]);
   });
 });
@@ -207,16 +211,20 @@ describe('Data pillar — the draft read follows the ledger (objectui#11799)', (
   it('a saved object with no draft is not asked for one; an unsaved object is', async () => {
     put(server.active, 'object', 'acme_account', { name: 'acme_account', label: 'Account', fields: { title: { type: 'text' } } });
     put(server.drafts, 'object', 'acme_fresh', { name: 'acme_fresh', label: 'Fresh', fields: { title: { type: 'text' } } });
-    render(
-      <MemoryRouter initialEntries={[`/studio/${PKG}/data`]}>
-        <DataPillar packageId={PKG} />
-      </MemoryRouter>,
-    );
+    // objectstack#36904 — one object per page: each opens on its own address.
+    const open = (name: string) =>
+      render(
+        <MemoryRouter initialEntries={[`/studio/${PKG}/metadata/object/${name}`]}>
+          <DataPillar packageId={PKG} objectName={name} />
+        </MemoryRouter>,
+      );
+    open('acme_account');
     await waitFor(() => expect(asked('object', 'acme_account', '/layers')).toBe(1));
     await settle();
     expect(asked('object', 'acme_account', '?state=draft')).toBe(0);
+    cleanup();
 
-    fireEvent.click(await screen.findByText('acme_fresh'));
+    open('acme_fresh');
     await waitFor(() => expect(asked('object', 'acme_fresh', '?state=draft')).toBe(1));
   });
 });

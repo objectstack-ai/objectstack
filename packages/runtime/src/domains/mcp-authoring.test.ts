@@ -177,6 +177,8 @@ interface Served {
   grantReads: string[];
   protocolCalls: unknown[];
   warnings: unknown[][];
+  /** [#36856] The scope id each `automation` resolution was asked with. */
+  automationAsks: unknown[];
 }
 
 /**
@@ -191,6 +193,8 @@ async function serve(
     protocol?: OpenAuthoringProtocol;
     /** The `tenancy` service the walled refusal reads its posture from. */
     tenancy?: { posture: string };
+    /** [#36856] The automation service the door resolves for a flow's switch. */
+    automation?: unknown;
   } = {},
 ): Promise<Served> {
   const { ql, reads } = userQl(opts.systemPermissions ?? ADMIN);
@@ -208,8 +212,15 @@ async function serve(
       return new Response('{}', { status: 200, headers: { 'content-type': 'application/json' } });
     },
   };
+  const automationAsks: unknown[] = [];
   const deps = {
-    resolveService: async (_ctx: unknown, name: string) => (name === 'mcp' ? mcp : name === 'protocol' ? protocol : name === 'security' ? security : undefined),
+    resolveService: async (_ctx: unknown, name: string, scopeId?: unknown) => {
+      if (name === 'automation') {
+        automationAsks.push(scopeId);
+        return opts.automation;
+      }
+      return name === 'mcp' ? mcp : name === 'protocol' ? protocol : name === 'security' ? security : undefined;
+    },
     resolveServiceOrLoud: async (_ctx: unknown, name: string) => (name === 'tenancy' ? opts.tenancy : undefined),
     getObjectQL: async () => {
       if (opts.qlThrows) throw new Error('engine lookup failed');
@@ -234,6 +245,7 @@ async function serve(
     grantReads: reads,
     protocolCalls: calls,
     warnings,
+    automationAsks,
   };
 }
 
@@ -282,6 +294,21 @@ describe('the open draft door is served only where the token consents AND the us
     expect(refused.isError).toBe(true);
     expect(refused.body.error).toMatchObject({ code: 'PERMISSION_DENIED', status: 403 });
     expect(served.protocolCalls).toEqual([]);
+  });
+
+  // [#36856] The shipping assembly of the switch port, through the real domain:
+  // the door resolves the automation service for the request's environment.
+  it('the door resolves the automation service for this environment, and a flow read carries its switch', async () => {
+    const ec = await oauthEnvelope(['metadata:write'], ADMIN);
+    const automation = { getFlowRuntimeStates: () => [{ name: 'opportunity_approval', enabled: false, bound: true }] };
+    const served = await serve(ec, {
+      store: { flow: [{ name: 'opportunity_approval', label: 'Opportunity approval', status: 'active', nodes: [] }] },
+      automation,
+    });
+    const read = await call(served.authoring!, 'get_metadata_item', { type: 'flow', name: 'opportunity_approval' });
+    expect(read.isError).toBe(false);
+    expect(read.body.runtimeState).toEqual({ enabled: false });
+    expect(served.automationAsks).toEqual(['env_1']);
   });
 
   it('a metadata:write token whose user holds manage_metadata lists the five tools, and a read is served', async () => {
@@ -424,6 +451,71 @@ describe('the read tools answer from the metadata protocol\'s public reads', () 
     const { authoring } = admitted();
     const missing = await call(authoring, 'get_metadata_item', { type: 'flow', name: 'missing' });
     expect(missing.body.error).toMatchObject({ code: 'RESOURCE_NOT_FOUND', status: 404 });
+  });
+
+  // [#36856] An admin's switch leaves the definition (`status` included) as
+  // it was; the engine's reading rides beside the item so the agent can say a
+  // switched-off flow does not run.
+  describe('get_metadata_item carries a flow\'s switch from the engine\'s reading', () => {
+    const withAutomation = (rows: unknown) => {
+      const { protocol } = fakeProtocol({
+        flow: [{ name: 'opportunity_approval', label: 'Opportunity approval', status: 'active', nodes: [] }],
+        object: [{ name: 'opportunity', label: 'Opportunity', fields: {} }],
+      });
+      let reads = 0;
+      const automation = { getFlowRuntimeStates: () => { reads++; return rows; } };
+      const authoring: OpenAuthoringInjection = {
+        registry: createOpenAuthoringRegistry({
+          admitted: true, userId: 'u1', getProtocol: async () => protocol, readGate: AUTHOR_READ_GATE,
+          getAutomation: async () => automation,
+        }),
+        principal: { userId: 'u1', scopes: ['metadata:write'] },
+      };
+      return { authoring, reads: () => reads };
+    };
+
+    it('a switched-off flow answers runtimeState.enabled false beside its status: active item, ahead of the item', async () => {
+      const { authoring } = withAutomation([{ name: 'opportunity_approval', enabled: false, bound: true, status: 'active' }]);
+      const read = await call(authoring, 'get_metadata_item', { type: 'flow', name: 'opportunity_approval', state: 'active' });
+      expect(read.isError).toBe(false);
+      expect(read.body.runtimeState).toEqual({ enabled: false });
+      expect(read.body.item.status).toBe('active');
+      expect(Object.keys(read.body)).toEqual(['type', 'name', 'draft', 'runtimeState', 'item']);
+    });
+
+    it('a flow switched on answers enabled true; the plural type spelling reads the same switch', async () => {
+      const { authoring } = withAutomation([{ name: 'opportunity_approval', enabled: true, bound: true }]);
+      const read = await call(authoring, 'get_metadata_item', { type: 'flows', name: 'opportunity_approval' });
+      expect(read.body.runtimeState).toEqual({ enabled: true });
+    });
+
+    it('no single row for the name (none, or two holders) answers no runtimeState: unknown, never enabled', async () => {
+      const none = withAutomation([{ name: 'other_flow', enabled: false, bound: true }]);
+      const two = withAutomation([
+        { name: 'opportunity_approval', enabled: false, bound: true },
+        { name: 'opportunity_approval', enabled: true, bound: true },
+      ]);
+      for (const { authoring } of [none, two]) {
+        const read = await call(authoring, 'get_metadata_item', { type: 'flow', name: 'opportunity_approval' });
+        expect(read.isError).toBe(false);
+        expect('runtimeState' in read.body).toBe(false);
+      }
+    });
+
+    it('a non-flow item and a missing flow never read the engine', async () => {
+      const { authoring, reads } = withAutomation([{ name: 'opportunity', enabled: false, bound: true }]);
+      const object = await call(authoring, 'get_metadata_item', { type: 'object', name: 'opportunity' });
+      expect('runtimeState' in object.body).toBe(false);
+      const missing = await call(authoring, 'get_metadata_item', { type: 'flow', name: 'missing' });
+      expect(missing.body.error).toMatchObject({ code: 'RESOURCE_NOT_FOUND', status: 404 });
+      expect(reads()).toBe(0);
+    });
+
+    it('a registry handed no automation service answers the flow without runtimeState', async () => {
+      const { authoring } = admitted();
+      const read = await call(authoring, 'get_metadata_item', { type: 'flow', name: 'lead_intake' });
+      expect('runtimeState' in read.body).toBe(false);
+    });
   });
 
   it('list_drafts passes the package through as the protocol\'s packageId', async () => {

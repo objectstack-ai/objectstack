@@ -11,6 +11,13 @@
  */
 
 import type { InstalledPackageRow } from '../metadata-admin/PackagesPage.js';
+import { STUDIO_ROOT_PATH } from './studioAddress.js';
+import { createAuthenticatedFetch } from '@object-ui/auth';
+
+/** The console's authenticated fetch: the stored bearer token beside the session cookie. */
+function authFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+  return createAuthenticatedFetch()(input, init);
+}
 
 /**
  * One sonner id for EVERY `fetchPackages()` failure on this surface
@@ -25,7 +32,7 @@ import type { InstalledPackageRow } from '../metadata-admin/PackagesPage.js';
 export const PACKAGE_LIST_TOAST_ID = 'studio-package-list';
 
 /** objectui#12513 — the Studio landing (`BuilderLanding`). */
-export const STUDIO_LANDING_PATH = '/studio';
+export const STUDIO_LANDING_PATH = STUDIO_ROOT_PATH;
 
 /**
  * The record the standard detail/management sheet opens on: a package's full
@@ -35,7 +42,7 @@ export const STUDIO_LANDING_PATH = '/studio';
  * landing cards' Manage (objectstack#35196).
  */
 export async function fetchInstalledPackageRow(id: string): Promise<InstalledPackageRow | null> {
-  const res = await fetch('/api/v1/packages', {
+  const res = await authFetch('/api/v1/packages', {
     credentials: 'include',
     headers: { Accept: 'application/json' },
     cache: 'no-store',

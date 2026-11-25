@@ -17,10 +17,16 @@
         "types": "./dist/index.d.cts",
         "default": "./dist/index.cjs"
       }
+    },
+    "./testing": {
+      "import": {
+        "types": "./dist/testing.d.ts",
+        "default": "./dist/testing.js"
+      }
     }
   },
   "scripts": {
-    "build": "tsup --config ../../../tsup.config.ts && node ../../../scripts/check-dts-emitted.mjs",
+    "build": "rm -rf dist && tsup && node ../../../scripts/check-dts-emitted.mjs",
     "test": "vitest run",
     "typecheck": "tsc --noEmit && pnpm check:test-typecheck",
     "check:test-typecheck": "tsx ../../../scripts/check-test-typecheck.mts --self-test && tsx ../../../scripts/check-test-typecheck.mts --package packages/services/service-knowledge --project tsconfig.test.json"

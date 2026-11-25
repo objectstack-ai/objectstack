@@ -242,6 +242,7 @@ const JUDGED_FIXTURES: Record<OwnerStampJudgedCollection, { item: Record<string,
   agents: { item: { name: 'probe_agent', label: 'Agent', role: 'Assistant', instructions: 'Triage the request.' } },
   tools: { item: { name: 'probe_tool', label: 'Tool', description: 'tool', parameters: { type: 'object', properties: {} } } },
   skills: { item: { name: 'probe_skill', label: 'Skill', description: 'skill', instructions: 'x', tools: [] } },
+  aiContexts: { item: { name: 'probe_pack', label: 'Pack', object: 'probe_thing', fields: ['title'] } },
   apis: {
     item: { name: 'probe_api', description: 'api', path: '/api/v1/apps/crm/p1', method: 'GET', type: 'flow', target: 'probe_flow' },
     context: { flows: [probeFlow] },

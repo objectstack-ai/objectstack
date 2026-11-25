@@ -19,7 +19,10 @@ export function isRecordPagePath(pathname: string): boolean {
 /**
  * Is `pathname` one of an app's documentation pages, `/apps/APP/docs` and
  * everything under it (objectstack#35424)? A reader there has one navigation,
- * the docs' own, so the app's menu is not drawn beside it.
+ * the docs' own, so the app's menu is not drawn beside it: from 768 px up the
+ * shell sidebar's body carries the docs' navigation instead
+ * (objectstack#37150); on a phone the page keeps its own column and the app
+ * bar.
  */
 export function isAppDocsPath(pathname: string): boolean {
   return /^\/apps\/[^/]+\/docs(?:\/|$)/.test(pathname);

@@ -1,5 +1,6 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
+import { createHash } from 'node:crypto';
 import type {
   IDataEngine,
   IKnowledgeAdapter,
@@ -18,7 +19,16 @@ import type {
 import {
   collectCredentialWriteResponseFields,
   collectInternalWriteResponseFields,
+  registryObjectPackageDisabled,
 } from '@objectstack/core';
+import { createKnowledgeTools, type KnowledgeTools } from './knowledge-tools.js';
+import {
+  admitObject,
+  admitSourceFields,
+  type KnowledgeFieldSecurity,
+  type KnowledgeSourceAdmission,
+  type ObjectAdmission,
+} from './knowledge-source-admission.js';
 
 /**
  * Minimal logger shape; falls back to no-op when none is provided.
@@ -47,6 +57,15 @@ export interface KnowledgeServiceOptions {
   /** Optional structured logger. */
   logger?: KnowledgeLogger;
   /**
+   * The `security` service, resolved at search time, for the field gate
+   * (`knowledge-source-admission.ts`). Answers `undefined` when the host
+   * registers none: the contract's fallback then applies (every field
+   * declaring a `maskingRule` is not queryable). `KnowledgeServicePlugin`
+   * always wires it; omitted, the service reads as a host with no security
+   * service.
+   */
+  resolveSecurity?: () => KnowledgeFieldSecurity | undefined;
+  /**
    * Default top-K when callers don't specify. The adapter may cap
    * further; the service does not enforce an upper bound itself.
    * @default 10
@@ -61,6 +80,10 @@ export interface KnowledgeServiceOptions {
  * - Routes search / index calls to the right `IKnowledgeAdapter`.
  * - Re-checks every hit's `sourceRecordId` against the caller's
  *   `ExecutionContext` so row-level security is preserved end-to-end.
+ * - Searches an `object` source for a caller only when the caller's exposure
+ *   decision serves its object and every field it serves is one the caller
+ *   may query (`knowledge-source-admission.ts`), so field-level security and
+ *   the object's API exposure hold for passages too.
  * - Walks ObjectQL when reindexing an `object` source.
  *
  * Non-responsibilities (the parts plugins own):
@@ -70,6 +93,19 @@ export class KnowledgeService implements IKnowledgeService {
   private readonly adapters = new Map<string, IKnowledgeAdapter>();
   private readonly sources = new Map<string, KnowledgeSource>();
   private readonly defaultTopK: number;
+  /**
+   * The tail of each document's record-sync chain, keyed by document id
+   * (`${source.id}:${recordId}`) — see {@link serializeRecordSync}. A key
+   * lives only while a sync for it is pending.
+   */
+  private readonly recordSyncTails = new Map<string, Promise<void>>();
+  /**
+   * The tail of each source's reindex chain, keyed by source id — see
+   * {@link reindexSource}. A key lives only while a walk of it is pending.
+   */
+  private readonly reindexTails = new Map<string, Promise<void>>();
+  /** Sources whose `where` the no-engine sync path has already reported it cannot enforce. */
+  private readonly whereUnenforceableReported = new Set<string>();
 
   constructor(private readonly options: KnowledgeServiceOptions = {}) {
     this.defaultTopK = options.defaultTopK ?? 10;
@@ -125,7 +161,16 @@ export class KnowledgeService implements IKnowledgeService {
   async indexDocument(sourceId: string, doc: KnowledgeDocument): Promise<void> {
     const source = this.requireSource(sourceId);
     const adapter = this.getAdapter(source.adapter);
-    await adapter.upsert([doc], { source, reason: 'manual' });
+    // `docHash` is the service's to compute (ADR-0161 K8, item 2). A caller's
+    // own value is refused, never replaced in silence: a door that accepted it
+    // and stored something else would answer as if it had been honoured.
+    if (doc.docHash !== undefined) {
+      throw new Error(
+        `[knowledge] indexDocument refused document '${doc.id}': docHash is computed by the knowledge service ` +
+          'from the content, title and metadata; omit it.',
+      );
+    }
+    await adapter.upsert([{ ...doc, docHash: computeDocHash(doc) }], { source, reason: 'manual' });
   }
 
   async deleteDocument(sourceId: string, documentId: string): Promise<void> {
@@ -136,6 +181,70 @@ export class KnowledgeService implements IKnowledgeService {
 
   // ── Reindex ───────────────────────────────────────────────────────
 
+  /**
+   * Walk an `object` source and push its documents to the adapter.
+   *
+   * ## Paging
+   *
+   * The walk reads at most `REINDEX_PAGE_SIZE` (100) rows per `find`, in
+   * `id` order, each page continuing after the last id of the one before
+   * (`where AND id > cursor` — a keyset walk, so a page never re-reads or skips
+   * a row the way an offset does when rows land meanwhile), and upserts each
+   * page in its own adapter call before reading the next. Every `find` carries
+   * a `limit`, and no `upsert` holds more than one page. Each row goes through
+   * the same {@link recordToDocument} gate as the event sync.
+   *
+   * Only an EMPTY page ends the walk: a page may come back short of its
+   * `limit` with rows still after it (an `afterFind` hook may drop rows).
+   *
+   * `opts.limit` caps the TOTAL number of rows the walk reads (the last page is
+   * shortened to it; a fractional cap is floored, a negative or non-finite one
+   * is refused with `ok: false`); `opts.dryRun` asks `count` under the
+   * source's `where` instead of reading rows, and reports that count (capped
+   * by `limit`).
+   *
+   * ## Failure
+   *
+   * A page whose read, document build or upsert fails ends the walk: the
+   * result is `ok: false`, its `message` names the page (1-based) and the id
+   * it continued after, and `discovered` / `indexed` count the pages done
+   * before it. Pages already upserted stay in the index; nothing is rolled
+   * back.
+   *
+   * ## What is serialized, and what is not
+   *
+   * Walks of one source run one after another in this process (a per-source
+   * `chainAfter` chain): a second `reindexSource` of a source waits until the
+   * first has finished, so the two walks' pages never interleave. Walks of
+   * different sources run concurrently.
+   *
+   * Record events do NOT wait for a walk: the record sync has its own
+   * per-document chain. A row updated or deleted between a page's read and
+   * that page's upsert is written back from the older read — a deleted row's
+   * document then stays in the index as a ghost until the next complete walk
+   * purges it (below), or the row's next event repairs it.
+   *
+   * ## Skip and purge (ADR-0161 K8, items 1–2)
+   *
+   * When the adapter implements `listDocuments`, the walk first lists what the
+   * adapter holds for the source (document id → stored `docHash`). A row whose
+   * document's computed `docHash` equals the listed one is not upserted again
+   * (`skipped`); every other document is (`indexed`).
+   *
+   * After a COMPLETE walk — no `limit`, no `dryRun`, every page done — the
+   * documents listed before the walk that the walk did not see are purge
+   * candidates, handed to {@link purgeDocuments}: each is confirmed by the
+   * same re-read the event sync makes (`where` AND id) and deleted only when
+   * that re-read finds no row, so a row created or restored meanwhile keeps its
+   * document. A document written during the walk was not listed, and so is
+   * never a candidate. `purged` counts the deletions.
+   *
+   * `purged` is `null` when no purge ran: a walk with a `limit` or a `dryRun`,
+   * a failed walk, a source with `refresh.onRecordChange: false` (an external
+   * indexer owns its index), or an adapter without `listDocuments` — which
+   * also skips nothing, the walk otherwise as before. A listing that fails
+   * skips and purges nothing either; the result's `message` says so.
+   */
   async reindexSource(
     sourceId: string,
     opts: KnowledgeReindexOptions = {},
@@ -149,58 +258,223 @@ export class KnowledgeService implements IKnowledgeService {
         ok: false,
         discovered: 0,
         indexed: 0,
+        skipped: 0,
+        purged: null,
         message:
           `Reindex for kind=${source.source.kind} is not handled by KnowledgeService. ` +
           `Trigger ingestion through the adapter (${source.adapter}) directly.`,
       };
     }
 
-    if (!this.options.dataEngine) {
+    const engine = this.options.dataEngine;
+    if (!engine) {
       return {
         ok: false,
         discovered: 0,
         indexed: 0,
+        skipped: 0,
+        purged: null,
         message: 'KnowledgeService has no IDataEngine bound; cannot walk object source.',
       };
     }
 
-    const objSource = source.source as ObjectKnowledgeSource;
+    return chainAfter(this.reindexTails, source.id, () =>
+      this.walkObjectSource(source, source.source as ObjectKnowledgeSource, adapter, engine, opts),
+    );
+  }
+
+  /** The paged walk of {@link reindexSource}; runs inside that source's chain. */
+  private async walkObjectSource(
+    source: KnowledgeSource,
+    objSource: ObjectKnowledgeSource,
+    adapter: IKnowledgeAdapter,
+    engine: IDataEngine,
+    opts: KnowledgeReindexOptions,
+  ): Promise<KnowledgeReindexResult> {
+    const object = objSource.object;
+    // `limit` keeps its meaning: a cap on the TOTAL rows the walk takes. A
+    // fractional cap is floored; a negative or non-finite one is refused
+    // rather than read as "nothing to do".
+    if (opts.limit !== undefined && !(typeof opts.limit === 'number' && Number.isFinite(opts.limit) && opts.limit >= 0)) {
+      return {
+        ok: false,
+        object,
+        discovered: 0,
+        indexed: 0,
+        skipped: 0,
+        purged: null,
+        message: `reindex of source '${source.id}' refused: limit must be a non-negative finite number, got ${String(opts.limit)}.`,
+      };
+    }
+    const cap = opts.limit === undefined ? undefined : Math.floor(opts.limit);
     // RLS-bypassing system context — this is a server-side admin op.
-    const adminCtx: ExecutionContext = { positions: [], permissions: [], systemPermissions: [], isSystem: true };
-    const records = (await this.options.dataEngine.find(objSource.object, {
-      where: objSource.where,
-      limit: opts.limit,
-      context: adminCtx,
-    } as never)) as Array<Record<string, unknown>>;
+    const context = systemContext();
 
     if (opts.dryRun) {
+      const total = await engine.count(object, { where: objSource.where }, { context });
       return {
         ok: true,
-        object: objSource.object,
-        discovered: records.length,
+        object,
+        discovered: cap === undefined ? total : Math.min(total, cap),
         indexed: 0,
+        skipped: 0,
+        purged: null,
         message: 'dryRun=true; no documents pushed.',
       };
     }
 
-    const schema = this.schemaFor(objSource.object);
-    const docs = records.map((rec) => recordToDocument(source, objSource, rec, schema));
-    if (docs.length > 0) {
-      await adapter.upsert(docs, { source, reason: 'reindex' });
+    // What the adapter holds before the walk: the skip's hashes, and the
+    // purge's candidates once the walk is complete.
+    const listing = await listAdapterDocuments(source, adapter);
+    const listed = listing.ok ? listing.documents : undefined;
+    const listingNote = listing.ok || listing.reason === undefined
+      ? undefined
+      : `the adapter's document listing failed (${listing.reason}), so no document was skipped and none was purged.`;
+    if (listingNote) this.options.logger?.warn?.(`[knowledge] reindex of source '${source.id}': ${listingNote}`);
+
+    const schema = this.schemaFor(object);
+    const seen = new Set<string>();
+    let discovered = 0;
+    let indexed = 0;
+    let skipped = 0;
+    let cursor: string | number | undefined;
+    for (let page = 1; ; page++) {
+      const want = cap === undefined ? REINDEX_PAGE_SIZE : Math.min(REINDEX_PAGE_SIZE, cap - discovered);
+      if (!(want > 0)) break;
+      const after = cursor === undefined ? '' : ` (after id '${cursor}')`;
+      const stopped = (what: string): KnowledgeReindexResult => ({
+        ok: false,
+        object,
+        discovered,
+        indexed,
+        skipped,
+        purged: null,
+        message: `reindex of source '${source.id}' stopped at page ${page}${after}: ${what}`,
+      });
+
+      const byCursor = cursor === undefined ? undefined : { id: { $gt: cursor } };
+      let rows: Array<Record<string, unknown>>;
+      try {
+        rows = await engine.find(
+          object,
+          {
+            where:
+              byCursor === undefined
+                ? objSource.where
+                : objSource.where === undefined ? byCursor : { $and: [objSource.where, byCursor] },
+            orderBy: [{ field: 'id', order: 'asc' }],
+            limit: want,
+          },
+          { context },
+        );
+      } catch (err) {
+        return stopped(`the read failed: ${errorText(err)}`);
+      }
+      // Only an EMPTY page ends the walk. A short page does not: `find` does
+      // not promise `min(limit, remaining)` rows — an `afterFind` hook may drop
+      // rows from a page — so rows after a short page can still exist.
+      // A read that answers no list is a failed read, never the end of the
+      // source: read as an empty page it would make a complete walk of nothing
+      // and hand every listed document to the purge.
+      if (!Array.isArray(rows)) {
+        return stopped(`the read answered ${describeValue(rows)} instead of a list of rows.`);
+      }
+      if (rows.length === 0) break;
+
+      let docs: KnowledgeDocument[];
+      try {
+        docs = rows.map((row) => recordToDocument(source, objSource, row, schema));
+      } catch (err) {
+        return stopped(`building the page's documents failed: ${errorText(err)}`);
+      }
+      // A document whose computed hash equals the one the adapter listed for it
+      // is unchanged: it is not written again.
+      const changed = listed === undefined
+        ? docs
+        : docs.filter((doc) => {
+          const stored = listed.get(doc.id);
+          return stored === undefined || stored !== doc.docHash;
+        });
+      if (changed.length > 0) {
+        try {
+          await adapter.upsert(changed, { source, reason: 'reindex' });
+        } catch (err) {
+          return stopped(`the adapter upsert failed: ${errorText(err)}`);
+        }
+      }
+      for (const doc of docs) seen.add(doc.id);
+      discovered += rows.length;
+      indexed += changed.length;
+      skipped += docs.length - changed.length;
+
+      // The next page continues after this page's last id. A last row with no
+      // id, or one that did not move past the cursor (an engine that ignored
+      // the `id > cursor` condition), ends the walk rather than looping on it.
+      const lastId = rows[rows.length - 1].id;
+      if (!isRecordId(lastId)) {
+        return stopped('the page was indexed, but its last row carries no id, so the walk cannot continue after it.');
+      }
+      if (lastId === cursor) {
+        return stopped("the page was indexed, but its last row's id did not move past the cursor, so the walk cannot continue.");
+      }
+      cursor = lastId;
     }
-    return {
-      ok: true,
-      object: objSource.object,
-      discovered: records.length,
-      indexed: docs.length,
-    };
+
+    // The purge runs only after a COMPLETE walk: a `limit` walk saw part of
+    // the source, so "not seen" there means nothing (a failed page returned
+    // above; `dryRun` returned before the walk).
+    const done: KnowledgeReindexResult = { ok: true, object, discovered, indexed, skipped, purged: null };
+    if (listingNote) return { ...done, message: listingNote };
+    if (listed === undefined || cap !== undefined || (source.refresh?.onRecordChange ?? true) === false) return done;
+
+    const candidates = [...listed.keys()].filter((id) => !seen.has(id));
+    const purge = await purgeDocuments({
+      source,
+      objSource,
+      adapter,
+      engine,
+      candidates,
+      serialize: (documentId, task) => chainAfter(this.recordSyncTails, documentId, task),
+    });
+    if (purge.failure !== undefined) {
+      return {
+        ...done,
+        ok: false,
+        purged: purge.purged,
+        message:
+          `reindex of source '${source.id}' walked every page, but its purge stopped after ${purge.purged} ` +
+          `deletion(s): ${purge.failure}`,
+      };
+    }
+    if (purge.foreign > 0) {
+      return {
+        ...done,
+        purged: purge.purged,
+        message:
+          `${purge.foreign} listed document(s) carry an id that is not one this source derives from a record ` +
+          `('${source.id}:' and the record id); they were kept, because no row can confirm them.`,
+      };
+    }
+    return { ...done, purged: purge.purged };
+  }
+
+  // ── The `search_knowledge` AI tool (ADR-0149 D2) ──────────────────
+
+  /**
+   * The `search_knowledge` tool's one definition and executor, bound to this
+   * service ({@link createKnowledgeTools}). The MCP door finds it here, by
+   * structure, on the `knowledge` service the kernel holds, and registers the
+   * tool only where a service carries it.
+   */
+  knowledgeTools(): KnowledgeTools {
+    return createKnowledgeTools(this);
   }
 
   // ── Permission-aware search ───────────────────────────────────────
 
   async search(query: string, opts: KnowledgeSearchOptions = {}): Promise<KnowledgeHit[]> {
     const topK = opts.topK ?? this.defaultTopK;
-    const sources = this.resolveSearchTargets(opts.sourceIds);
+    const sources = await this.admitSources(this.resolveSearchTargets(opts.sourceIds), opts.executionContext);
     if (sources.length === 0) return [];
 
     const rawHits: KnowledgeHit[] = [];
@@ -218,7 +492,21 @@ export class KnowledgeService implements IKnowledgeService {
           topK,
           filter: opts.filter,
         });
-        for (const hit of hits) rawHits.push(hit);
+        // A hit is served as the source it was searched for. One whose
+        // `sourceId` names another source (an adapter answering from a store
+        // two sources share) is dropped: that source's admission was never
+        // asked for this hit, so serving it would skip the gates above.
+        let foreign = 0;
+        for (const hit of hits) {
+          if (hit.sourceId === source.id) rawHits.push(hit);
+          else foreign++;
+        }
+        if (foreign > 0) {
+          this.options.logger?.warn?.(
+            `[knowledge] adapter '${source.adapter}' answered ${foreign} hit(s) for source '${source.id}' that name ` +
+              'another source; dropped — a hit is served only as the source it was searched for.',
+          );
+        }
       } catch (err) {
         this.options.logger?.error?.(
           `[knowledge] adapter '${source.adapter}' search failed for source '${source.id}': ${(err as Error).message}`,
@@ -234,25 +522,134 @@ export class KnowledgeService implements IKnowledgeService {
   // ── Sync entrypoints (called by the host plugin's event bridge) ───
 
   /**
-   * Apply an ObjectQL `data.record.created` / `data.record.updated` event
-   * (the record body is the event payload's `after`) to every `object`
-   * source bound to the matching object. Failures are logged but never
-   * thrown — sync must not block writes.
+   * Apply an ObjectQL `data.record.created`, `data.record.updated` or
+   * `data.record.restored` event to every `object` source bound to the
+   * matching object. `record` is the event payload's `after`; its `id` names
+   * the row. Failures are logged but never thrown — sync must not block writes.
+   *
+   * ## What decides a document (ADR-0049: a declared key holds on every path)
+   *
+   * A source's `where` decides which rows it indexes, on the event path as on
+   * the reindex walk. So with a data engine bound, each source RE-READS the row
+   * under the system context — `find(object, { where: where AND id, limit: 1 })`
+   * — and the database answers, not the payload:
+   *
+   * - a row comes back → the document is built from THAT row, through the same
+   *   {@link recordToDocument} gate as the reindex walk: the fields the source
+   *   lists and the record `title`, never a credential-class or `internal`
+   *   field. A payload
+   *   missing a field (a projected write result, a formula the write did not
+   *   return) therefore cannot leave the document short;
+   * - nothing comes back → the row does not match (a draft, or a row that
+   *   stopped matching) and its document is deleted; deleting an absent
+   *   document is a no-op.
+   *
+   * With NO data engine nothing can be re-read: a source without `where` keeps
+   * building from `record`, and a source WITH `where` is skipped — its key
+   * cannot be judged against a payload — reported once per source at `warn`.
+   *
+   * ## When this runs, measured against the engine
+   *
+   * The engine publishes `data.record.created` / `data.record.updated` from
+   * inside the write's engine body (`insert` / `update`), after its `after*`
+   * hooks, and so BEFORE any unit of work around the write commits — the
+   * write's own unit (opened when a metadata hook can abort it) or a caller's
+   * `engine.transaction(…)`. The in-process realtime service awaits each
+   * subscriber in turn, so this handler runs inside the write's async context,
+   * and its system-context re-read rides the same open transaction through the
+   * engine's ambient transaction store: it sees the row the write just made.
+   * If that unit then rolls back, the index is wrong in one of two ways: on a
+   * match, the document stays built from a row that never committed; on a
+   * miss, the uncommitted row did not match and the document was deleted, so
+   * the committed row — which may still match — is missing from the index.
+   * The row's next event or a `reindexSource` repairs a row that still exists;
+   * a document built from an INSERT that rolled back has no row left to
+   * repair it from — it stays until a complete `reindexSource` purges it.
+   * `data.record.restored` is published after the restore's own unit has
+   * committed. Bulk events (`data.records.*`) carry a count, not records, and
+   * are not synced here — see the plugin's event bridge.
+   *
+   * Syncs of one document are serialized in this process
+   * ({@link serializeRecordSync}), so two opposite events for one row cannot
+   * interleave: each sync re-reads after the previous one finished, and the
+   * last one leaves the index agreeing with the database. The chain is awaited
+   * inline, so a write's sync can wait behind an earlier in-flight sync of the
+   * same document (on a single-connection pool, up to the pool's acquire
+   * timeout); the index still ends consistent.
    */
   async handleRecordUpsert(object: string, record: Record<string, unknown>): Promise<void> {
-    const targets = this.sourcesForObject(object);
-    for (const source of targets) {
-      try {
-        const objSource = source.source as ObjectKnowledgeSource;
-        const doc = recordToDocument(source, objSource, record, this.schemaFor(object));
-        const adapter = this.getAdapter(source.adapter);
-        await adapter.upsert([doc], { source, reason: 'event-sync' });
-      } catch (err) {
-        this.options.logger?.warn?.(
-          `[knowledge] event-sync upsert failed for source '${source.id}': ${(err as Error).message}`,
-        );
-      }
+    const recordId = record.id;
+    for (const source of this.sourcesForObject(object)) {
+      const sync = (): Promise<void> => this.syncRecord(source, object, recordId, record);
+      await (isRecordId(recordId)
+        ? this.serializeRecordSync(documentIdFor(source.id, String(recordId)), sync)
+        : sync());
     }
+  }
+
+  /**
+   * One source's sync of one row — see {@link handleRecordUpsert}. Never throws.
+   */
+  private async syncRecord(
+    source: KnowledgeSource,
+    object: string,
+    recordId: unknown,
+    payload: Record<string, unknown>,
+  ): Promise<void> {
+    const objSource = source.source as ObjectKnowledgeSource;
+    try {
+      const adapter = this.getAdapter(source.adapter);
+      const engine = this.options.dataEngine;
+      if (!engine) {
+        if (objSource.where !== undefined) {
+          this.reportWhereUnenforceable(source);
+          return;
+        }
+        const doc = recordToDocument(source, objSource, payload, this.schemaFor(object));
+        await adapter.upsert([doc], { source, reason: 'event-sync' });
+        return;
+      }
+      if (!isRecordId(recordId)) {
+        this.options.logger?.warn?.(
+          `[knowledge] event-sync skipped for source '${source.id}': the event's record names no id, ` +
+            'so the row cannot be re-read against the source.',
+        );
+        return;
+      }
+      const row = await rereadRow(engine, objSource, recordId);
+      if (row) {
+        const doc = recordToDocument(source, objSource, row, this.schemaFor(object));
+        await adapter.upsert([doc], { source, reason: 'event-sync' });
+      } else {
+        await adapter.delete([documentIdFor(source.id, String(recordId))], { source, reason: 'event-sync' });
+      }
+    } catch (err) {
+      this.options.logger?.warn?.(
+        `[knowledge] event-sync failed for source '${source.id}': ${(err as Error).message}`,
+      );
+    }
+  }
+
+  /** The no-engine path cannot judge `where`: say so once per source, never once per event. */
+  private reportWhereUnenforceable(source: KnowledgeSource): void {
+    if (this.whereUnenforceableReported.has(source.id)) return;
+    this.whereUnenforceableReported.add(source.id);
+    this.options.logger?.warn?.(
+      `[knowledge] source '${source.id}' declares a where filter and no data engine is bound: record events ` +
+        'for it are not synced, because the filter cannot be judged without re-reading the row. ' +
+        'Bind a data engine (the objectql service) to sync it.',
+    );
+  }
+
+  /**
+   * Run `task` after every earlier sync of the same document (`key`) has
+   * finished — an in-process promise chain per document, dropped once idle.
+   * Only the ORDER of syncs is held; each still re-reads the row itself, so a
+   * later sync never acts on what an earlier one read. A task that rejects
+   * does not break the chain (the sync paths never throw; this is a backstop).
+   */
+  private serializeRecordSync(key: string, task: () => Promise<void>): Promise<void> {
+    return chainAfter(this.recordSyncTails, key, task).catch(() => undefined);
   }
 
   /**
@@ -269,19 +666,26 @@ export class KnowledgeService implements IKnowledgeService {
     }
   }
 
-  /** Apply an ObjectQL `data.record.deleted` event (the id is the payload's `recordId`). */
+  /**
+   * Apply an ObjectQL `data.record.deleted` event (the id is the payload's
+   * `recordId`). Serialized with the upserts of the same document
+   * ({@link serializeRecordSync}), so a delete cannot land between another
+   * sync's re-read and its write.
+   */
   async handleRecordDelete(object: string, recordId: string): Promise<void> {
     const targets = this.sourcesForObject(object);
     for (const source of targets) {
-      try {
-        const docId = documentIdFor(source.id, recordId);
-        const adapter = this.getAdapter(source.adapter);
-        await adapter.delete([docId], { source, reason: 'event-sync' });
-      } catch (err) {
-        this.options.logger?.warn?.(
-          `[knowledge] event-sync delete failed for source '${source.id}': ${(err as Error).message}`,
-        );
-      }
+      const docId = documentIdFor(source.id, recordId);
+      await this.serializeRecordSync(docId, async () => {
+        try {
+          const adapter = this.getAdapter(source.adapter);
+          await adapter.delete([docId], { source, reason: 'event-sync' });
+        } catch (err) {
+          this.options.logger?.warn?.(
+            `[knowledge] event-sync delete failed for source '${source.id}': ${(err as Error).message}`,
+          );
+        }
+      });
     }
   }
 
@@ -310,14 +714,104 @@ export class KnowledgeService implements IKnowledgeService {
     return out;
   }
 
+  /**
+   * [ADR-0090 D10 rule 1] The sources this caller's search may reach: an
+   * `object` source over an object the caller's exposure decision refuses, or
+   * one serving a field the caller may not query, is not searched for that
+   * caller — see `knowledge-source-admission.ts` for the gates and why they are
+   * asked at source granularity. Computed once per (caller, object) per search.
+   *
+   * The system context bypasses, as it bypasses the row re-check. A caller
+   * with NO context, or a service with no data engine bound, cannot be judged
+   * and is served no `object` source at all — never searched, so no passage of
+   * one can reach the caller through a hit the row re-check cannot place (a
+   * hit with no `sourceRecordId`). Fails CLOSED: a gate that throws refuses
+   * every source over that object, reported once at `error`. The objects'
+   * admissions are asked concurrently.
+   */
+  private async admitSources(
+    sources: KnowledgeSource[],
+    ctx: ExecutionContext | undefined,
+  ): Promise<KnowledgeSource[]> {
+    if (ctx?.isSystem) return sources;
+    const engine = this.options.dataEngine;
+    if (!ctx || !engine) {
+      const kept = sources.filter((source) => source.source.kind !== 'object');
+      if (kept.length < sources.length) {
+        this.options.logger?.warn?.(
+          !ctx
+            ? '[knowledge] retrieval with no ExecutionContext — object sources are not searched: a missing ' +
+                'identity is not a grant of authority, so retrieval fails closed rather than searching the whole corpus unscoped. ' +
+                'Pass the caller identity (or an explicit system context) to retrieve object-backed knowledge.'
+            : '[knowledge] no IDataEngine bound — object sources are not searched, to stay safe.',
+        );
+      }
+      return kept;
+    }
+    const deps = {
+      readSchema: (object: string): unknown => {
+        const getSchema = (engine as { getSchema?: (name: string) => unknown }).getSchema;
+        return typeof getSchema === 'function' ? getSchema.call(engine, object) : undefined;
+      },
+      isObjectPackageDisabled: (object: string): boolean =>
+        registryObjectPackageDisabled((engine as { registry?: unknown }).registry)(object),
+      resolveSecurity: (): KnowledgeFieldSecurity | undefined => this.options.resolveSecurity?.(),
+    };
+    const byObject = new Map<string, Promise<ObjectAdmission | undefined>>();
+    for (const source of sources) {
+      if (source.source.kind !== 'object') continue;
+      const object = (source.source as ObjectKnowledgeSource).object;
+      if (byObject.has(object)) continue;
+      byObject.set(
+        object,
+        admitObject(object, ctx, deps).catch((err: unknown) => {
+          this.reportGateFailure(object, err instanceof Error ? err : new Error(String(err)));
+          return undefined;
+        }),
+      );
+    }
+    const out: KnowledgeSource[] = [];
+    for (const source of sources) {
+      if (source.source.kind !== 'object') {
+        out.push(source);
+        continue;
+      }
+      const objSource = source.source as ObjectKnowledgeSource;
+      const objectAdmission = await byObject.get(objSource.object);
+      if (!objectAdmission) continue; // the gate threw: reported once, refused.
+      const verdict: KnowledgeSourceAdmission = objectAdmission.refused
+        ? { admitted: false, reason: objectAdmission.refused, object: objSource.object }
+        : admitSourceFields(objSource, objectAdmission);
+      if (verdict.admitted) {
+        out.push(source);
+      } else {
+        this.options.logger?.debug?.(
+          `[knowledge] source '${source.id}' not searched for this caller: ${verdict.reason} ` +
+            `(object='${verdict.object}'${verdict.field ? `, field='${verdict.field}'` : ''}).`,
+        );
+      }
+    }
+    return out;
+  }
+
+  /** A gate lookup threw: every source over `object` is refused (fail-closed), reported once at `error`, `warn` as the fallback. */
+  private reportGateFailure(object: string, err: Error): void {
+    const report =
+      `[knowledge] the exposure or field-level read rules of object '${object}' could not be resolved ` +
+      `(${err.message}); no source over it is searched for this caller (fail-closed).`;
+    if (this.options.logger?.error) this.options.logger.error(report);
+    else this.options.logger?.warn?.(report);
+  }
+
   private sourcesForObject(object: string): KnowledgeSource[] {
     return objectSourcesFor([...this.sources.values()], object);
   }
 
   /**
    * Drop hits whose underlying ObjectQL record the caller can't read.
-   * For hits without a `sourceRecordId` (file/http sources) we keep
-   * them — adapter is responsible for any ACL enforcement there.
+   * Hits of a registered file / http source are kept — the adapter is
+   * responsible for any ACL enforcement there; an object-source hit with no
+   * `sourceRecordId` cannot be re-checked and is dropped.
    *
    * Identity handling (#2981): an **explicit** `isSystem` context (indexing /
    * trusted server jobs) passes every hit through — it is a deliberate,
@@ -334,20 +828,12 @@ export class KnowledgeService implements IKnowledgeService {
   ): Promise<KnowledgeHit[]> {
     // Explicit elevation → pass through (indexing / trusted jobs).
     if (ctx?.isSystem) return hits;
-    // No identity → fail closed on object-backed hits (keep file/http hits).
-    if (!ctx) {
-      this.options.logger?.warn?.(
-        '[knowledge] retrieval with no ExecutionContext — dropping object-source hits to stay safe: a missing ' +
-          'identity is not a grant of authority, so retrieval fails closed rather than searching the whole corpus unscoped. ' +
-          'Pass the caller identity (or an explicit system context) to retrieve object-backed knowledge.',
-      );
-      return hits.filter((h) => !h.sourceRecordId);
-    }
-    if (!this.options.dataEngine) {
-      this.options.logger?.warn?.(
-        '[knowledge] no IDataEngine bound — dropping object-source hits to stay safe.',
-      );
-      return hits.filter((h) => !h.sourceRecordId);
+    // No identity, or no engine to re-check with → keep only hits of a
+    // registered file / http source. `admitSources` already kept object
+    // sources out of the search; this holds the same line for any hit that
+    // still claims one (or claims no registered source at all).
+    if (!ctx || !this.options.dataEngine) {
+      return hits.filter((h) => this.isNonObjectSourceHit(h));
     }
 
     // Group hits by object so we make one query per object.
@@ -382,16 +868,52 @@ export class KnowledgeService implements IKnowledgeService {
     }
 
     return hits.filter((hit) => {
-      if (!hit.sourceRecordId) return true; // file / http hit
+      if (this.isNonObjectSourceHit(hit)) return true; // file / http hit
+      // An object-source hit the re-check cannot place — no record id, or a
+      // source nobody registered — is not provably readable: dropped.
       const source = this.sources.get(hit.sourceId);
-      if (!source || source.source.kind !== 'object') return true;
+      if (!source || !hit.sourceRecordId) return false;
       const objName = (source.source as ObjectKnowledgeSource).object;
       return allowed.has(`${objName}#${hit.sourceRecordId}`);
     });
   }
+
+  /** A hit of a REGISTERED source that is not an `object` source (file / http): the adapter owns its ACL. */
+  private isNonObjectSourceHit(hit: KnowledgeHit): boolean {
+    const source = this.sources.get(hit.sourceId);
+    return source !== undefined && source.source.kind !== 'object';
+  }
 }
 
 // ── Helpers ─────────────────────────────────────────────────────────
+
+/**
+ * Rows one reindex page reads, and so the most documents one reindex `upsert`
+ * carries. A memory and request-size bound for the walk, not an embedder
+ * limit: an embedder that caps inputs per request splits a larger upsert into
+ * several requests itself (`OpenAIEmbedder` does).
+ */
+export const REINDEX_PAGE_SIZE = 100;
+
+/**
+ * Run `task` after every earlier task chained on the same `key` has settled —
+ * an in-process promise chain per key, dropped from `tails` once idle.
+ * Answers `task`'s own outcome (rejection included); the chain itself never
+ * rejects, so a failed task does not break the tasks queued behind it.
+ */
+function chainAfter<T>(
+  tails: Map<string, Promise<void>>,
+  key: string,
+  task: () => Promise<T>,
+): Promise<T> {
+  const previous = tails.get(key) ?? Promise.resolve();
+  const outcome = previous.then(task);
+  const tail: Promise<void> = outcome.then(() => undefined, () => undefined).finally(() => {
+    if (tails.get(key) === tail) tails.delete(key);
+  });
+  tails.set(key, tail);
+  return outcome;
+}
 
 /**
  * The `object` sources whose per-record projection of `object` is kept in step
@@ -416,6 +938,222 @@ export function objectSourcesFor(sources: KnowledgeSource[], object: string): Kn
       (source.source as ObjectKnowledgeSource).object === object &&
       (source.refresh?.onRecordChange ?? true) !== false,
   );
+}
+
+/**
+ * The RLS-bypassing system context of the service's own reads: the reindex
+ * walk, the event sync's re-read and the purge's, which decide index
+ * MEMBERSHIP (`where`), never what a caller may read — search re-checks every
+ * hit as the caller.
+ */
+function systemContext(): ExecutionContext {
+  return { positions: [], permissions: [], systemPermissions: [], isSystem: true };
+}
+
+/**
+ * THE membership re-read: the row `recordId` names, read under the system
+ * context and the source's `where` — `find(object, { where: where AND id,
+ * limit: 1 })` — so the database answers whether the row belongs in the
+ * index, never an event payload or an earlier read. `undefined` when no row
+ * matches (none exists, or it does not match `where`). Throws what `find`
+ * throws, and throws when `find` answers no list: "no row" is a verdict the
+ * purge deletes on, so a malformed answer is never read as one.
+ *
+ * One definition for both of its readers, the event sync
+ * ({@link KnowledgeService.handleRecordUpsert}) and the purge
+ * ({@link purgeDocuments}): they decide the same question, and a second copy
+ * is how they would drift into answering it differently.
+ */
+async function rereadRow(
+  engine: IDataEngine,
+  objSource: ObjectKnowledgeSource,
+  recordId: string | number,
+): Promise<Record<string, unknown> | undefined> {
+  const byId = { id: recordId };
+  const rows = await engine.find(
+    objSource.object,
+    { where: objSource.where !== undefined ? { $and: [objSource.where, byId] } : byId, limit: 1 },
+    { context: systemContext() },
+  );
+  if (!Array.isArray(rows)) {
+    throw new Error(`the re-read of record '${String(recordId)}' answered ${describeValue(rows)} instead of a list of rows`);
+  }
+  return rows[0] as Record<string, unknown> | undefined;
+}
+
+/**
+ * Entries one `listDocuments` call asks for. A memory bound per call, not a
+ * contract limit: the adapter may answer fewer.
+ */
+export const LIST_DOCUMENTS_PAGE_SIZE = 500;
+
+/** What {@link listAdapterDocuments} learned: every listed id → its stored hash, or why there is no listing. */
+type AdapterListing =
+  | { ok: true; documents: Map<string, string | undefined> }
+  /** `reason` is absent when the adapter has no `listDocuments`; present when the listing failed. */
+  | { ok: false; reason?: string };
+
+/**
+ * Read every page of the adapter's `listDocuments` for `source`. Never throws:
+ * an adapter without the method answers `{ ok: false }` with no reason, and a
+ * listing that throws or answers a malformed page or a cursor it already gave
+ * (a listing that would never end) answers `{ ok: false, reason }`.
+ */
+async function listAdapterDocuments(source: KnowledgeSource, adapter: IKnowledgeAdapter): Promise<AdapterListing> {
+  if (typeof adapter.listDocuments !== 'function') return { ok: false };
+  const documents = new Map<string, string | undefined>();
+  const cursors = new Set<string>();
+  let cursor: string | undefined;
+  try {
+    for (;;) {
+      const page = await adapter.listDocuments(
+        { source, reason: 'reindex' },
+        cursor === undefined ? { limit: LIST_DOCUMENTS_PAGE_SIZE } : { cursor, limit: LIST_DOCUMENTS_PAGE_SIZE },
+      );
+      if (!page || !Array.isArray(page.documents)) return { ok: false, reason: 'a page carried no documents list' };
+      for (const entry of page.documents) {
+        if (typeof entry?.documentId !== 'string') return { ok: false, reason: 'an entry carried no documentId' };
+        documents.set(entry.documentId, typeof entry.docHash === 'string' ? entry.docHash : undefined);
+      }
+      if (page.nextCursor === undefined) return { ok: true, documents };
+      if (cursors.has(page.nextCursor)) {
+        return { ok: false, reason: `the cursor '${page.nextCursor}' came back twice, so the listing would never end` };
+      }
+      cursors.add(page.nextCursor);
+      cursor = page.nextCursor;
+    }
+  } catch (err) {
+    return { ok: false, reason: errorText(err) };
+  }
+}
+
+/** Input of {@link purgeDocuments}. */
+export interface PurgeDocumentsInput {
+  source: KnowledgeSource;
+  objSource: ObjectKnowledgeSource;
+  adapter: IKnowledgeAdapter;
+  engine: IDataEngine;
+  /** Document ids believed stale: listed by the adapter, not produced from a current row. */
+  candidates: Iterable<string>;
+  /**
+   * Runs one candidate's confirm-and-delete after every earlier sync of that
+   * document has finished, answering the task's own outcome — the service
+   * passes its per-document record-sync chain, so an event sync of the same
+   * row can never land between the purge's re-read and its delete.
+   */
+  serialize: <T>(documentId: string, task: () => Promise<T>) => Promise<T>;
+  /** Diagnostics tag on the adapter's `delete`. @default 'reindex' */
+  reason?: string;
+}
+
+/** Outcome of {@link purgeDocuments}. */
+export interface PurgeDocumentsOutcome {
+  /** Candidates deleted. */
+  purged: number;
+  /** Candidates whose row the re-read found: kept. */
+  kept: number;
+  /** Candidates whose id this source does not derive from a record id: kept, nothing can confirm them. */
+  foreign: number;
+  /** Why the purge stopped early (a re-read or a delete that threw); absent when it went through every candidate. */
+  failure?: string;
+}
+
+/**
+ * The index purge (ADR-0161 K8, item 1): delete the candidates whose row is
+ * gone. Each candidate is confirmed by {@link rereadRow} — the event sync's
+ * own re-read, `where` AND id under the system context — and deleted only
+ * when that finds no row, so a document whose row was created, restored or
+ * came back into `where` since the candidates were computed is kept. Stops at
+ * the first re-read or delete that throws (a re-read that answers no list
+ * included), counting what it did before.
+ *
+ * KNOWN LIMIT — numeric record ids. The record id is recovered from the
+ * document id as text, and the re-read asks for that text. A driver that does
+ * not equate `'5'` with `5` (driver-mongodb, driver-memory) does not find a
+ * row stored under a caller-supplied NUMERIC id, so if such a row's document
+ * is a candidate while the row exists (it was restored, or came back into
+ * `where`, after the walk read past it), the document is deleted. The row is
+ * untouched; its document returns at the row's next event or the next complete
+ * reindex. Asking again by the number is not done: on driver-sql the number
+ * is bound against the text `id` column, which MySQL compares numerically
+ * (`'05'` matches `5`) and SQL Server and Oracle reject outright, and the
+ * object schema does not say which ids are numeric. Platform-minted ids are
+ * text on every driver, so the limit needs a caller-supplied numeric id.
+ *
+ * The caller decides when a purge may run at all (a complete reindex walk;
+ * the scheduled reconcile reuses this function) and computes the candidates.
+ */
+export async function purgeDocuments(input: PurgeDocumentsInput): Promise<PurgeDocumentsOutcome> {
+  const { source, objSource, adapter, engine } = input;
+  const prefix = `${source.id}:`;
+  const outcome: PurgeDocumentsOutcome = { purged: 0, kept: 0, foreign: 0 };
+  for (const documentId of input.candidates) {
+    const recordId = documentId.startsWith(prefix) ? documentId.slice(prefix.length) : '';
+    if (recordId === '') {
+      outcome.foreign++;
+      continue;
+    }
+    try {
+      const deleted = await input.serialize(documentId, async () => {
+        if (await rereadRow(engine, objSource, recordId)) return false;
+        await adapter.delete([documentId], { source, reason: input.reason ?? 'reindex' });
+        return true;
+      });
+      if (deleted) outcome.purged++;
+      else outcome.kept++;
+    } catch (err) {
+      outcome.failure = `document '${documentId}': ${errorText(err)}`;
+      return outcome;
+    }
+  }
+  return outcome;
+}
+
+/**
+ * The version of the {@link computeDocHash} recipe, the hash's prefix. Bump it
+ * when what the hash covers or how it serializes changes: every stored hash
+ * then reads as changed, and the next complete reindex writes every document
+ * once.
+ */
+export const DOC_HASH_VERSION = 'v1';
+
+/**
+ * A document's `docHash` (ADR-0161 K8, item 2): SHA-256 over its content,
+ * title and metadata, serialized with object keys in a stable order, behind
+ * the {@link DOC_HASH_VERSION} prefix. The same assembled document gives the
+ * same hash on every machine, whatever order its metadata keys were built in.
+ */
+export function computeDocHash(doc: Pick<KnowledgeDocument, 'content' | 'title' | 'metadata'>): string {
+  const body = stableJson({ content: doc.content, title: doc.title ?? null, metadata: doc.metadata ?? {} });
+  return `${DOC_HASH_VERSION}:${createHash('sha256').update(body).digest('hex')}`;
+}
+
+/** `JSON.stringify` with every plain object's keys sorted, and a bigint as its decimal text. */
+function stableJson(value: unknown): string {
+  return JSON.stringify(value, (_key, v: unknown) => {
+    if (typeof v === 'bigint') return v.toString();
+    if (v !== null && typeof v === 'object' && !Array.isArray(v) && Object.getPrototypeOf(v) === Object.prototype) {
+      const sorted: Record<string, unknown> = {};
+      for (const k of Object.keys(v as Record<string, unknown>).sort()) sorted[k] = (v as Record<string, unknown>)[k];
+      return sorted;
+    }
+    return v;
+  });
+}
+
+/** How a non-list answer is named in a refusal: `null`, `undefined`, or its `typeof`. */
+function describeValue(value: unknown): string {
+  return value === null ? 'null' : value === undefined ? 'undefined' : `a value of type ${typeof value}`;
+}
+
+/** A thrown value's text: an `Error`'s message, anything else as a string. */
+function errorText(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
+}
+
+/** A record id the event sync can re-read by: a non-empty string or a finite number. */
+function isRecordId(value: unknown): value is string | number {
+  return (typeof value === 'string' && value !== '') || (typeof value === 'number' && Number.isFinite(value));
 }
 
 /** Deterministic document id derived from the source + record id. */
@@ -466,7 +1204,7 @@ export function recordToDocument(
     if (withheld.has(field)) continue;
     if (record[field] !== undefined) metadata[field] = record[field];
   }
-  return {
+  const doc: KnowledgeDocument = {
     id: documentIdFor(source.id, recordId || `unknown-${Date.now()}`),
     sourceId: source.id,
     sourceRecordId: recordId || undefined,
@@ -474,4 +1212,6 @@ export function recordToDocument(
     title: typeof record.title === 'string' && !withheld.has('title') ? record.title : undefined,
     metadata,
   };
+  doc.docHash = computeDocHash(doc);
+  return doc;
 }

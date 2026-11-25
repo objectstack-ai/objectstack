@@ -25,6 +25,7 @@ import {
   SECURITY_BOOK_AUDIENCE_UNKNOWN_SET,
   SECURITY_CBP_MASTER_REFERENCE_HIDDEN,
   SECURITY_CBP_OWNER_POLICY_WITHOUT_OPT_IN,
+  SECURITY_CROSS_SET_FIELD_REOPEN,
   SECURITY_MASTER_DETAIL_UNGRANTED,
   SECURITY_PRIVATE_NO_READSCOPE,
   SECURITY_SUPERUSER_FIELD_MASK_INERT,
@@ -149,6 +150,7 @@ const ADVISORY_RULES = [
   SECURITY_CBP_MASTER_REFERENCE_HIDDEN,
   SECURITY_UPDATE_POLICY_NO_CHECK,
   SECURITY_CBP_OWNER_POLICY_WITHOUT_OPT_IN,
+  SECURITY_CROSS_SET_FIELD_REOPEN,
 ];
 
 const TEXT = { name: { name: 'name', type: 'text', label: 'Name' } };
@@ -160,6 +162,18 @@ const OMD_DETAIL_FIELDS = {
 const omdDetail = (extra: Record<string, unknown> = {}) => ({
   name: 'omd_obligation', label: 'Obligation', sharingModel: 'controlled_by_parent', fields: OMD_DETAIL_FIELDS, ...extra,
 });
+/** A field one set hides or locks, and a second set whose object-wide bit re-opens it. */
+const reopenStack = (hidingRow: Record<string, unknown>, otherDeal: Record<string, unknown>) => ({
+  objects: [{ name: 'deal', label: 'Deal', sharingModel: 'private', fields: { margin: { type: 'number', label: 'Margin' } } }],
+  permissions: [
+    PermissionSetSchema.parse({ name: 'consultant', objects: { deal: { allowRead: true } }, fields: { 'deal.margin': hidingRow } }),
+    PermissionSetSchema.parse({ name: 'deal_lead', objects: { deal: otherDeal } }),
+  ],
+});
+const reopenParams = (bit: string, reopened: string) => ({
+  permissionSet: 'consultant', otherSet: 'deal_lead', field: 'deal.margin', object: 'deal', bit, reopened,
+});
+
 const omdStack = (detail: Record<string, unknown>, using: string) => ({
   objects: [OMD_MASTER, detail],
   permissions: [{
@@ -170,7 +184,7 @@ const omdStack = (detail: Record<string, unknown>, using: string) => ({
 
 /**
  * One stack per advisory push site, with the params each finding must carry
- * (the names its sentence interpolates). Every push site of the seven rule ids
+ * (the names its sentence interpolates). Every push site of the eight rule ids
  * is reached: the two owner-policy functions, and the second one in both of
  * its remedy states.
  */
@@ -296,6 +310,30 @@ const CASES: ReadonlyArray<{ label: string; rule: string; stack: Record<string, 
     stack: omdStack(omdDetail({ ownership: 'org' }), 'owner_id == current_user.id'),
     params: { permissionSet: 'omd_requester', policy: 'omd_obligation_updates', object: 'omd_obligation', remedy: 'add-owner-id' },
   },
+  {
+    label: 'a hidden field another set\'s View All re-opens',
+    rule: SECURITY_CROSS_SET_FIELD_REOPEN,
+    stack: reopenStack({ readable: false }, { allowRead: true, viewAllRecords: true }),
+    params: reopenParams('view-all', 'read'),
+  },
+  {
+    label: 'a hidden, locked field another set\'s Modify All re-opens',
+    rule: SECURITY_CROSS_SET_FIELD_REOPEN,
+    stack: reopenStack({ readable: false, editable: false }, { allowRead: true, allowEdit: true, modifyAllRecords: true }),
+    params: reopenParams('modify-all', 'both'),
+  },
+  {
+    label: 'a locked field another set\'s Modify All re-opens',
+    rule: SECURITY_CROSS_SET_FIELD_REOPEN,
+    stack: reopenStack({ readable: true, editable: false }, { allowRead: true, allowEdit: true, modifyAllRecords: true }),
+    params: reopenParams('modify-all', 'edit'),
+  },
+  {
+    label: 'a hidden field another set\'s View All Fields re-opens',
+    rule: SECURITY_CROSS_SET_FIELD_REOPEN,
+    stack: reopenStack({ readable: false }, { allowRead: true, viewAllFields: true }),
+    params: reopenParams('view-all-fields', 'read'),
+  },
 ];
 
 /** The one finding of `rule` the case's stack produces. */
@@ -308,11 +346,11 @@ const findingOf = (c: (typeof CASES)[number]): SecurityFinding => {
 /** The params that are NAMES the sentence must show (not the variant selectors). */
 const namesOf = (params: Record<string, string>): string[] =>
   Object.entries(params)
-    .filter(([key, value]) => key !== 'remedy' && key !== 'inert' && value !== '')
+    .filter(([key, value]) => !['remedy', 'inert', 'bit', 'reopened'].includes(key) && value !== '')
     .map(([, value]) => value);
 
 describe('security-posture user text · the catalog', () => {
-  it('holds a sentence for exactly the rule\'s seven advisory ids, in every platform locale and no other', () => {
+  it('holds a sentence for exactly the rule\'s eight advisory ids, in every platform locale and no other', () => {
     expect(Object.keys(SECURITY_POSTURE_USER_TEXT).sort()).toEqual([...ADVISORY_RULES].sort());
     for (const [rule, entry] of Object.entries(SECURITY_POSTURE_USER_TEXT)) {
       expect(Object.keys(entry).sort(), rule).toEqual([...PLATFORM_LOCALE_TAGS].sort());
@@ -334,6 +372,7 @@ describe('security-posture user text · the catalog', () => {
       'security-controlled-by-parent-master-reference-hidden',
       'security-update-policy-no-check',
       'security-controlled-by-parent-owner-policy-without-opt-in',
+      'security-cross-set-field-reopen',
     ]);
   });
 });
@@ -427,6 +466,21 @@ describe('security-posture user text · rendered from the rule\'s real findings'
       const [lock, both, mask] = findings.map((f) => findingUserMessage({ ...f, userTextParams: { ...f.userTextParams!, permissionSet: 'p', field: 'f', object: 'o' } }, [tag])!);
       expect(new Set([lock, both, mask]).size, tag).toBe(3);
     }
+  });
+
+  it('renders the four cross-set sentences apart, naming the second set\'s bit by its console label', () => {
+    const findings = CASES.filter((c) => c.rule === SECURITY_CROSS_SET_FIELD_REOPEN).map(findingOf);
+    for (const tag of PLATFORM_LOCALE_TAGS) {
+      const texts = findings.map((f) => findingUserMessage(f, [tag])!);
+      expect(new Set(texts).size, tag).toBe(findings.length);
+    }
+    // The bit is named by the console's label, never by its key.
+    const [viewAll, modifyBoth, modifyEdit, viewAllFields] = findings.map((f) => findingUserMessage(f, ['en'])!);
+    expect(viewAll).toContain('View All Records');
+    expect(modifyBoth).toContain('Modify All Records');
+    expect(modifyEdit).toContain('Modify All Records');
+    expect(viewAllFields).toContain('View All Fields');
+    for (const text of [viewAll, modifyBoth, modifyEdit, viewAllFields]) expect(text).not.toMatch(/viewAll|modifyAll/);
   });
 });
 

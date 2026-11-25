@@ -62,9 +62,24 @@ vi.mock('./StudioBundleItemEditor.js', () => ({
   ),
 }));
 
+/** objectstack#36905 — the permission set's full-screen page, a stub printing what the area handed it. */
+vi.mock('./StudioPermissionSetPage.js', () => ({
+  StudioPermissionSetPage: ({ packageId, name, readOnly }: { packageId: string; name: string; readOnly?: boolean }) => (
+    <div data-testid="permission-page" data-item={JSON.stringify({ packageId, name, readOnly: !!readOnly })}>
+      <PageStub page="permission-page" />
+    </div>
+  ),
+}));
+
 /** `GET /api/v1/packages` as the listed manifests read it: one writable, one read-only, one kernel. */
 let listed: Map<string, { id: string; name: string; writable: boolean; manifest: Record<string, unknown> }>;
 let listFails = false;
+// objectstack#36904 — the object designer, stubbed: only where the area mounts it is under test.
+vi.mock('./DataPillar.js', () => ({
+  DataPillar: (props: { packageId: string; objectName: string; readOnly?: boolean }) => (
+    <div data-testid="object-designer" data-package={props.packageId} data-object={props.objectName} data-readonly={String(!!props.readOnly)} />
+  ),
+}));
 vi.mock('./packages-io.js', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   fetchListedPackageManifests: vi.fn(async () => {
@@ -207,11 +222,85 @@ describe('the area mounts the metadata pages (objectstack#28561)', () => {
   });
 });
 
+/**
+ * objectstack#36897 — on a read-only base with its customization handed in,
+ * the create is the pair's: the ensure door is asked once and its answer's
+ * package opens the create; a walled door, or a refusal, never writes.
+ */
+describe("a read-only base's create opens in its .custom pair (objectstack#36897)", () => {
+  const PAIR = `${READ_ONLY}.custom`;
+  const customizationOf = (walled: boolean, ensurePackage: () => Promise<unknown>) =>
+    ({ base: READ_ONLY, baseLabel: 'HR', basedOn: null, walled, pairId: null, ensure: async () => PAIR, ensurePackage }) as any;
+  function mountCustomized(customization: unknown, at = `/studio/${READ_ONLY}/metadata/translation/new?package=${READ_ONLY}`) {
+    return render(
+      <MemoryRouter initialEntries={[at]}>
+        <Where />
+        <Routes>
+          <Route path={`/studio/${READ_ONLY}/metadata/*`} element={<StudioMetadataArea packageId={READ_ONLY} customization={customization as any} />} />
+          <Route path="/studio/:packageId/metadata/*" element={<PackageArea />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+  }
+
+  it("the ensure door's pair opens the create", async () => {
+    listed.set(PAIR, { id: PAIR, name: 'HR (customizations)', writable: true, manifest: {} });
+    const ensurePackage = vi.fn(async () => ({ basePackageId: READ_ONLY, packageId: PAIR, namespace: 'hrx', created: true, writable: true }));
+    mountCustomized(customizationOf(false, ensurePackage));
+    await waitFor(() => expect(where()).toBe(`/studio/${PAIR}/metadata/translation/new?package=${encodeURIComponent(PAIR)}`));
+    expect((await page()).page).toBe('create');
+    expect(ensurePackage).toHaveBeenCalledTimes(1);
+  });
+
+  it('a refusal is shown where the create was asked, and nothing opens', async () => {
+    const ensurePackage = vi.fn(async () => {
+      throw new Error('The customization package could not be created.');
+    });
+    mountCustomized(customizationOf(false, ensurePackage));
+    expect(await screen.findByTestId('studio-area-pair-create-refused')).toHaveTextContent('could not be created');
+    expect(where()).toBe(`/studio/${READ_ONLY}/metadata/translation/new?package=${READ_ONLY}`);
+  });
+
+  it("the list is told it may offer the create exactly where the area opens one in the pair", async () => {
+    const list = `/studio/${READ_ONLY}/metadata/translation?package=${READ_ONLY}`;
+    mountCustomized(customizationOf(false, vi.fn()), list);
+    expect((await page()).host).toMatchObject({ readOnly: true, pairCreate: true });
+    cleanup();
+    mountCustomized(customizationOf(true, vi.fn()), list);
+    expect((await page()).host).not.toHaveProperty('pairCreate');
+    cleanup();
+    mount(list);
+    expect((await page()).host).not.toHaveProperty('pairCreate');
+  });
+
+  it('a kernel package has no pair: no create is offered, and its create URL lands on the list', async () => {
+    const ensurePackage = vi.fn();
+    const kernelCustomization = { ...customizationOf(false, ensurePackage), base: KERNEL };
+    render(
+      <MemoryRouter initialEntries={[`/studio/${KERNEL}/metadata/agent/new?package=${KERNEL}`]}>
+        <Where />
+        <Routes>
+          <Route path={`/studio/${KERNEL}/metadata/*`} element={<StudioMetadataArea packageId={KERNEL} customization={kernelCustomization} />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+    const at = await page();
+    expect(at.page).toBe('list');
+    expect(at.host).not.toHaveProperty('pairCreate');
+    expect(ensurePackage).not.toHaveBeenCalled();
+  });
+
+  it('a walled door never asks, and lands on the list as before', async () => {
+    const ensurePackage = vi.fn();
+    mountCustomized(customizationOf(true, ensurePackage));
+    expect((await page()).page).toBe('list');
+    expect(ensurePackage).not.toHaveBeenCalled();
+  });
+});
+
 describe('a pillar type opened from the area opens its pillar', () => {
   for (const [type, pillar] of [
-    ['object', 'data'],
     ['flow', 'automations'],
-    ['permission', 'access'],
   ] as const) {
     it(`${type} → ${pillar}, with \`?surface=\``, async () => {
       mount(`/studio/${WRITABLE}/metadata/${type}/item_1?package=${WRITABLE}`);
@@ -221,6 +310,31 @@ describe('a pillar type opened from the area opens its pillar', () => {
       expect(url.searchParams.get('surface')).toBe(`${type}:item_1`);
     });
   }
+
+  // objectstack#36904 — an object opens its designer on its own address.
+  it('an object opens the object designer on its own address, bound to the package', async () => {
+    mount(`/studio/${WRITABLE}/metadata/object/item_1?package=${WRITABLE}`);
+    const designer = await screen.findByTestId('object-designer');
+    expect(designer).toHaveAttribute('data-package', WRITABLE);
+    expect(designer).toHaveAttribute('data-object', 'item_1');
+    expect(designer).toHaveAttribute('data-readonly', 'false');
+    expect(new URL(where(), 'http://x').pathname).toBe(`/studio/${WRITABLE}/metadata/object/item_1`);
+  });
+
+  // objectstack#36904 — the object's old history address is its designer's History tab.
+  it("an object's history address opens its designer on the History tab, the query kept", async () => {
+    mount(`/studio/${WRITABLE}/metadata/object/item_1/history?package=${WRITABLE}`);
+    const designer = await screen.findByTestId('object-designer');
+    expect(designer).toHaveAttribute('data-object', 'item_1');
+    expect(where()).toBe(`/studio/${WRITABLE}/metadata/object/item_1?package=${WRITABLE}&tab=history`);
+    expect(screen.queryByTestId('area-page')).toBeNull();
+  });
+
+  it('CONTROL: an object under `?review=1` keeps the generic page and its draft review', async () => {
+    mount(`/studio/${WRITABLE}/metadata/object/item_1?package=${WRITABLE}&review=1`);
+    expect((await page()).page).toBe('item');
+    expect(screen.queryByTestId('object-designer')).toBeNull();
+  });
 
   it('a type no pillar designs opens the generic page', async () => {
     mount(`/studio/${WRITABLE}/metadata/agent/support_bot?package=${WRITABLE}`);
@@ -259,6 +373,41 @@ describe('a pillar type opened from the area opens its pillar', () => {
     mount('/studio/~all/metadata/permission/admin_full_access?scope=environment');
     expect((await page()).page).toBe('item');
     expect(screen.queryByTestId('pillar')).toBeNull();
+  });
+});
+
+describe('a permission set opens its matrix full-screen at its metadata address (objectstack#36905)', () => {
+  const item = () => JSON.parse(screen.getByTestId('permission-page').getAttribute('data-item') ?? 'null');
+
+  it('on a writable package, in place: no pillar', async () => {
+    mount(`/studio/${WRITABLE}/metadata/permission/sales_rep?package=${WRITABLE}`);
+    expect((await page()).page).toBe('permission-page');
+    expect(item()).toEqual({ packageId: WRITABLE, name: 'sales_rep', readOnly: false });
+    expect(where()).toBe(`/studio/${WRITABLE}/metadata/permission/sales_rep?package=${WRITABLE}`);
+    expect(screen.queryByTestId('pillar')).toBeNull();
+  });
+
+  it('on a read-only package, under its gate', async () => {
+    mount(`/studio/${READ_ONLY}/metadata/permission/hr_viewer?package=${READ_ONLY}`);
+    expect((await page()).page).toBe('permission-page');
+    expect(item()).toEqual({ packageId: READ_ONLY, name: 'hr_viewer', readOnly: true });
+  });
+
+  it('CONTROL: the cross-package leg keeps the generic page (the matrix\'s environment presentation)', async () => {
+    mount('/studio/~all/metadata/permission/admin_full_access?scope=environment');
+    expect((await page()).page).toBe('item');
+    expect(screen.queryByTestId('permission-page')).toBeNull();
+  });
+
+  it('its old history address opens the page\'s History tab; the cross-package leg keeps the standalone page', async () => {
+    // As `builtinComponents` registers it: the matrix is the type's own editor.
+    registerMetadataResource({ type: 'permission', EditPage: () => null });
+    mount(`/studio/${WRITABLE}/metadata/permission/sales_rep/history?package=${WRITABLE}`);
+    expect((await page()).page).toBe('permission-page');
+    expect(where()).toBe(`/studio/${WRITABLE}/metadata/permission/sales_rep?package=${WRITABLE}&tab=history`);
+    cleanup();
+    mount('/studio/~all/metadata/permission/admin_full_access/history?scope=environment');
+    expect((await page()).page).toBe('history');
   });
 });
 

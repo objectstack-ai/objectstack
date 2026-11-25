@@ -48,11 +48,12 @@ import {
   type SortItem,
 } from '@object-ui/components';
 import type { DataSource } from '@object-ui/types';
+import { useDisplayLocale } from '@object-ui/i18n';
 import { ArrowUpDown, Check, ChevronLeft, GripVertical, Info, ListFilter, MoreHorizontal, Plus, X } from 'lucide-react';
 import { FieldList } from '../conditions/FieldList';
 import { isQuickRowApplied } from '../conditions/FilterValuePanel';
 import { FilterPanel, SortPanel, describeConditionValue, useLookupValueNames } from '../conditions/ListConditionControls';
-import { chipsAreIndependent, removeCondition, type ConditionField } from '../conditions/conditionModel';
+import { chipsAreIndependent, removeCondition, sortDirectionLabel, type ConditionField } from '../conditions/conditionModel';
 import { useListConditionTranslation } from '../conditions/conditionTranslations';
 
 // ---------------------------------------------------------------------------
@@ -315,8 +316,6 @@ function useStaged<T, S>(open: boolean, value: T, firstStep: S): [T, React.Dispa
 // Sort
 // ---------------------------------------------------------------------------
 
-const DATE_SORT_TYPES = new Set(['date', 'datetime']);
-
 /**
  * The phone sort sheet's levels (objectstack#35884): each level on two lines,
  * the field over its direction, with a handle a finger drags (pointer events:
@@ -357,9 +356,10 @@ function PhoneSortLevels({ fields, value, onChange, onChangeField }: {
       {value.map((item, index) => {
         const field = fields.find((f) => f.value === item.field);
         const label = field?.label ?? item.field;
-        const direction = DATE_SORT_TYPES.has(field?.type ?? '')
-          ? { asc: t('sortBuilder.oldestFirst'), desc: t('sortBuilder.newestFirst') }
-          : { asc: t('sortBuilder.ascending'), desc: t('sortBuilder.descending') };
+        const direction = {
+          asc: sortDirectionLabel(field?.type, 'asc', t),
+          desc: sortDirectionLabel(field?.type, 'desc', t),
+        };
         return (
           <div
             key={item.id}
@@ -575,6 +575,8 @@ export function PhoneFilterSheet({ open, onOpenChange, fields, shownFields, valu
   const [staged, setStaged, step, setStep] = useStaged<FilterBuilderRowGroup, FilterStep>(open, value, { kind: 'list' });
   const applied = (staged.conditions ?? []).filter(isQuickRowApplied);
   const nameOf = useLookupValueNames(dataSource, fields, applied);
+  // A date condition reads in the viewer's display locale, as the desktop chips do.
+  const locale = useDisplayLocale();
   const independent = chipsAreIndependent(staged);
   const toList = () => setStep({ kind: 'list' });
 
@@ -627,7 +629,7 @@ export function PhoneFilterSheet({ open, onOpenChange, fields, shownFields, valu
                 <button type="button" className="min-w-0 flex-1 text-left" onClick={() => setStep({ kind: 'edit', id: row.id })} data-testid="phone-filter-item-open">
                   <div className="truncate text-sm font-medium">{label}</div>
                   <div className="truncate text-xs text-muted-foreground" data-testid="phone-filter-item-condition">
-                    {describeConditionValue(field, row.operator, row.value, t, nameOf)}
+                    {describeConditionValue(field, row.operator, row.value, t, nameOf, locale)}
                   </div>
                 </button>
                 <DropdownMenu>

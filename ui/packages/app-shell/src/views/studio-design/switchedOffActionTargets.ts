@@ -7,8 +7,8 @@
  *
  *  - An action an object holds (its served `actions[]`, which carries the
  *    actions declared inside the object and the top-level ones bound to it by
- *    `objectName`) is switched on the object's Actions view in the Data
- *    pillar: `?surface=object:<object>&action=<name>` opens that view on it.
+ *    `objectName`) is switched on the object designer's Actions tab:
+ *    `/metadata/object/<object>?action=<name>` opens that tab on it.
  *    An action declared inside its object has no item of its own, so this is
  *    the only page that shows it.
  *  - Any other action (one bound to no object) is a standalone `action` item:
@@ -19,8 +19,8 @@
  * of the app, the same read the Data pillar lists its objects with.
  */
 
-import { DESIGNER_SURFACE_PARAM, formatSurfaceParam } from '../metadata-admin/nav-selection.js';
 import { DESIGNER_SURFACE_ACTION_PARAM } from './useSurfaceDeepLink.js';
+import { studioItemPath, studioMetadataTypePath } from './studioAddress.js';
 
 /** The slice of the metadata client the object read uses. */
 export interface ActionObjectClient {
@@ -56,17 +56,12 @@ export async function readActionObjects(client: ActionObjectClient, packageId: s
  * Actions view when `object` names one, else the action's own item page.
  */
 export function switchedOffActionPath(packageId: string, name: string, object: string | null | undefined): string {
-  const pkg = encodeURIComponent(packageId);
   if (object) {
-    const query = new URLSearchParams({
-      [DESIGNER_SURFACE_PARAM]: formatSurfaceParam({ type: 'object', name: object }),
-      [DESIGNER_SURFACE_ACTION_PARAM]: name,
-    });
-    return `/studio/${pkg}/data?${query.toString()}`;
+    // objectstack#36904 — `?action=` on the object designer's address.
+    return studioItemPath(packageId, 'object', object, { qualifiers: { [DESIGNER_SURFACE_ACTION_PARAM]: name } });
   }
-  return `/studio/${pkg}/metadata/action/${encodeURIComponent(name)}`;
+  return studioItemPath(packageId, 'action', name);
 }
 
 /** The app's action list in the "All metadata" area: where several switched-off actions are listed. */
-export const switchedOffActionListPath = (packageId: string): string =>
-  `/studio/${encodeURIComponent(packageId)}/metadata/action`;
+export const switchedOffActionListPath = (packageId: string): string => studioMetadataTypePath(packageId, 'action');

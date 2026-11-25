@@ -123,7 +123,7 @@ import {
   type ActingCaller,
 } from './approver-address.js';
 import { labelOrMachineName, requestDisplayLabels, slateLabelOf } from './display-labels.js';
-import { flowRoute, type RouteFlowGraph } from './approval-route.js';
+import { flowHostsChildRuns, flowRoute, type RouteFlowGraph } from './approval-route.js';
 import {
   ADMIN_RESCUE_NOTE_SNAPSHOT_KEY,
   adminRescueNoteOf,
@@ -168,7 +168,9 @@ import {
   type FieldVisibilitySource,
 } from './payload-redaction.js';
 import { APPROVAL_REQUEST_CHILD_OBJECTS, type RequestVisibilitySource } from './request-read-gate.js';
-import { detailRowHeldByLockingApproval, nodeConfigLocksRecord, recordHeldByLockingApproval } from './lifecycle-hooks.js';
+import {
+  detailRowHeldByLockingApproval, detailRowsHeldByLockingApproval, nodeConfigLocksRecord, recordHeldByLockingApproval,
+} from './lifecycle-hooks.js';
 import { PendingApproverReadGrantSource, type PendingApproverReadGrants } from './pending-approver-read-grant.js';
 // The ADR-0043 pages — the ONE copy of their text, rendered by the plugin's
 // self-hosted mount and by `handleActionPage` alike.
@@ -313,6 +315,15 @@ export interface ApprovalResumeSurface {
   getFlowSlot?(packageId: string | null, name: string): any | null;
   getRunFlow?(run: { flowName: string }): any | null;
   /**
+   * [#35863] A flow name's registrations, oldest first: each body and when it
+   * was registered. Read by {@link ApprovalService.attachFlowRoute} to tell
+   * whether a run ran the body armed now (`ranArmedBody`). ⚠️ Declares a
+   * method `AutomationEngine` ALREADY implements publicly
+   * (`getFlowVersionHistory`); it widens no engine surface. Optional: absent,
+   * no request is served "ended".
+   */
+  getFlowVersionHistory?(name: string): ReadonlyArray<{ version?: number; definition: unknown; createdAt: string }>;
+  /**
    * Terminally cancel a suspended run (ADR-0044). Used when a recall lands
    * during a revision window — the run is paused at the revise-window node,
    * which has no reject edge to resume down.
@@ -330,7 +341,7 @@ export interface ApprovalResumeSurface {
    * `null` — unknown run, evicted log, no durable store, no automation engine —
    * as "still alive".
    */
-  getRun?(runId: string): Promise<{ status?: string; flowName?: string } | null>;
+  getRun?(runId: string): Promise<{ status?: string; flowName?: string; startedAt?: string } | null>;
   /**
    * Whether a suspension still exists for `runId` — the pre-flight that keeps
    * a decision from being recorded against a run that can never advance
@@ -2229,6 +2240,23 @@ async function findChildRequestId(
  * so it calls the class's private rule rather than restating it.
  */
 const REQUEST_VISIBILITY = new WeakMap<ApprovalService, RequestVisibilitySource>();
+
+/**
+ * The answer both record-lock doors give a readable row
+ * (`IApprovalService.getRecordLock` / `getRecordLocks`, ruling 7148480184):
+ * which approval holds it, the master's winning when both do — a line of a held
+ * master refuses delete as well as edit, while a record held by its own request
+ * may be deleted, which cancels the request. One spelling, so the two doors
+ * cannot answer a row differently.
+ */
+function recordLockAnswer(
+  heldByMaster: boolean,
+  heldItself: boolean,
+): { locked: boolean; lockSource?: 'record' | 'master' } {
+  if (heldByMaster) return { locked: true, lockSource: 'master' };
+  if (heldItself) return { locked: true, lockSource: 'record' };
+  return { locked: false };
+}
 
 /**
  * [#23889] Each service's own slot labeller — the one its live writers label
@@ -5124,6 +5152,16 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
        * the flow's key, the body whose origin {@link flowPackageOf} answers.
        */
       node?: unknown;
+      /**
+       * [#35863] Whether `runId` is a root run (`true`) or a child of another
+       * run, a `subflow` body or a `map` item (`false`), as the approval
+       * executor reads the run's context. Stamped on the config snapshot
+       * (`__runRoot`, precedent: `__round`) for {@link attachFlowRoute}: only
+       * a root run's end is the end of the record's approval. Absent (a
+       * caller that does not say) stamps nothing, which reads as "not known
+       * to be a root run".
+       */
+      runRoot?: boolean;
     },
     context: ExecutionContext,
   ): Promise<ApprovalRequestRow | ApprovalNodeAutoOutcome> {
@@ -5491,6 +5529,9 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
       : undefined;
     if (exclusionNote) configSnapshot[SUBMITTER_EXCLUSION_NOTE_SNAPSHOT_KEY] = exclusionNote;
     if (noApproverNote) configSnapshot[NO_APPROVER_NOTE_SNAPSHOT_KEY] = noApproverNote;
+    // [#35863] Root run or child run, as the executor said; nothing when it
+    // did not say ({@link attachFlowRoute} reads absence as "not known").
+    if (typeof input.runRoot === 'boolean') configSnapshot.__runRoot = input.runRoot;
     // ADR-0044 round numbering: rounds of a revise loop share the run — count
     // this (run, node)'s prior requests; the new one is round N+1. Stamped on
     // the snapshot (precedent: __flowLabel), so no schema migration.
@@ -11303,11 +11344,29 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
 
   /**
    * `IApprovalService.getRecordLocks` — {@link getRecordLock} for a page of
-   * rows, in two reads whatever the page size: the caller's read of the ids
-   * (the same #8652 anchor, one `$in` read AS THE CALLER, so an unreadable row
-   * and a missing one both answer `null` and stay indistinguishable) and one
-   * pending-request lookup judged by the record-lock hook's own judgement
-   * ({@link recordsHeldByLockingApproval}). Entry `i` answers `recordIds[i]`.
+   * rows, in a bounded number of reads whatever the page size: the caller's
+   * read of the ids (the same #8652 anchor, one `$in` read AS THE CALLER, so an
+   * unreadable row and a missing one both answer `null` and stay
+   * indistinguishable), one pending-request lookup judged by the record-lock
+   * hook's own judgement ({@link recordsHeldByLockingApproval}) and — on a
+   * detail object only — the detail-row lock's batch form
+   * ({@link detailRowsHeldByLockingApproval}: one FK read plus one lookup per
+   * `master_detail` edge), so a line of a held master answers `true` here as
+   * it does at {@link getRecordLock}, with the same `lockSource`. Entry `i`
+   * answers `recordIds[i]`.
+   *
+   * ## Which rows count as readable — the row whose id IS the asked id
+   *
+   * A row is readable here when the caller's read hands back a row whose id
+   * IS the asked id, spelled as asked: one `$in` read cannot say which asked
+   * id a row the engine spells differently answers (a case-insensitive
+   * collation, a numeric id asked as `'07'`), so such an id answers `null`
+   * here. {@link getRecordLock} counts any row its read hands back, so for
+   * such an id the two doors differ, deliberately: the two doors keep
+   * different readability anchors on purpose, and aligning them would narrow
+   * a published answer (seat ruling 7152650156 on #37151). For an id spelled as the
+   * engine spells it — what a list holds — entry `i` is exactly the single
+   * door's answer.
    *
    * The cap is the door's to refuse loudly; here a blank id answers `null`.
    */
@@ -11315,7 +11374,7 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
     object: string,
     recordIds: readonly string[],
     context: ExecutionContext,
-  ): Promise<Array<{ locked: boolean } | null>> {
+  ): Promise<Array<{ locked: boolean; lockSource?: 'record' | 'master' } | null>> {
     const objectName = String(object ?? '').trim();
     const ids = recordIds.map((recordId) => String(recordId ?? '').trim());
     const asked = Array.from(new Set(ids.filter((id) => id !== '')));
@@ -11329,7 +11388,12 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
     const held = readableAsked.length > 0
       ? await recordsHeldByLockingApproval(this.engine, objectName, readableAsked)
       : new Set<string>();
-    return ids.map((id) => (readableIds.has(id) ? { locked: held.has(id) } : null));
+    // The single door's second half, asked of every readable row: a line held
+    // by its own request under a held master answers `'master'` there too.
+    const heldByMaster = readableAsked.length > 0
+      ? await detailRowsHeldByLockingApproval(this.engine, objectName, readableAsked)
+      : new Set<string>();
+    return ids.map((id) => (readableIds.has(id) ? recordLockAnswer(heldByMaster.has(id), held.has(id)) : null));
   }
 
   async getRequest(requestId: string, context: ExecutionContext): Promise<ApprovalRequestRow | null> {
@@ -11427,22 +11491,35 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
    * id, existing or not. ⚠️ Probing with {@link SYSTEM_CTX} here would admit
    * every authenticated user in the tenant.
    *
-   * ## What is answered — the lock, and nothing about the request
+   * Any row the read hands back counts, whatever spelling of the id the
+   * engine hands back (a case-insensitive collation, a numeric id asked as
+   * `'07'`); {@link getRecordLocks} counts only the row whose id IS the asked
+   * id. The two doors keep different readability anchors on purpose:
+   * aligning them would narrow a published answer (seat ruling 7152650156 on #37151).
+   * For such an id the master half below reads the row the engine found, but
+   * the row's own request is looked up by the id as asked
+   * ({@link recordHeldByLockingApproval}), so a record held by its own request
+   * may answer `{ locked: false }` under another spelling.
    *
-   * `{ locked }` only: no request id, node, participants or `pending`. Request
-   * content stays behind `approvalsVisibleToReaders` (#8652 ruling 5299823744,
-   * untouched). The judgement is the record-lock hook's own
-   * ({@link recordHeldByLockingApproval}), never a second copy of it — and,
-   * for a master-detail line, the detail-row lock's
-   * ({@link detailRowHeldByLockingApproval}): a locked record's lines are
-   * locked with it, so the read answers `true` for a line whose write the hook
-   * refuses.
+   * ## What is answered — the lock and its kind, nothing about the request
+   *
+   * `{ locked, lockSource }` (ruling 7148480184, option A): no request id,
+   * node, participants or `pending`. Request content stays behind
+   * `approvalsVisibleToReaders` (#8652 ruling 5299823744, untouched);
+   * `lockSource` is one kind bit. The judgement is the record-lock hook's own
+   * ({@link recordHeldByLockingApproval}), never a second copy of it —
+   * `lockSource: 'record'` — and, for a master-detail line, the detail-row
+   * lock's ({@link detailRowHeldByLockingApproval}): a locked record's lines
+   * are locked with it, so the read answers `true` for a line whose write the
+   * hook refuses — `lockSource: 'master'`, asked first because it wins when
+   * both hold: a line of a held master refuses delete too, a record held by
+   * its own request may be deleted (the delete cancels the request).
    */
   async getRecordLock(
     object: string,
     recordId: string,
     context: ExecutionContext,
-  ): Promise<{ locked: boolean } | null> {
+  ): Promise<{ locked: boolean; lockSource?: 'record' | 'master' } | null> {
     const objectName = String(object ?? '').trim();
     const id = String(recordId ?? '').trim();
     if (!objectName || !id) return null;
@@ -11451,9 +11528,8 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
       where: { id }, fields: ['id'], limit: 1, context,
     });
     if (!Array.isArray(readable) || readable.length === 0) return null;
-    const locked = await recordHeldByLockingApproval(this.engine, objectName, id)
-      || await detailRowHeldByLockingApproval(this.engine, objectName, id);
-    return { locked };
+    if (await detailRowHeldByLockingApproval(this.engine, objectName, id)) return recordLockAnswer(true, false);
+    return recordLockAnswer(false, await recordHeldByLockingApproval(this.engine, objectName, id));
   }
 
   private async loadRequest(
@@ -11612,7 +11688,7 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
       const flow: any = await this.requestFlow(raw, flowName);
       if (!flow?.nodes?.length) return;
       const nodesById = new Map<string, any>(flow.nodes.map((n: any) => [n.id, n]));
-      await this.attachFlowRoute(row, flowName, flow, nodesById, labels);
+      await this.attachFlowRoute(row, flowName, flow, nodesById, labels, raw);
       const steps: Array<{ id: string; label: string }> = [];
       const seen = new Set<string>();
       let cur: any = flow.nodes.find((n: any) => n.type === 'start');
@@ -11652,6 +11728,34 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
    * A step is named as `flow_steps` names it ([#24863]): the reader's label,
    * else the node's authored label; a node no longer in the graph by the
    * label its request stored. Display-only and best-effort.
+   *
+   * [#35863] A decided request's route carries `outcome`, where the record's
+   * approval stands now, off the same system read. So that read now serves
+   * more than the step labels `flow_steps` serves: for the run's latest later
+   * request, its step (node id and label) and its status, and whether the
+   * record's approval has ended. It serves that to every reader of THIS
+   * request, including one who cannot read the later request: within the
+   * request-visibility bound of ruling record 5299823744 (request content
+   * stays behind the read-visibility tier), as the seat ruled on PR #37148,
+   * because it tells only where the same approval went. The later request's
+   * id, approvers, comments and field values are never served here; a reader
+   * gets those only through that request's own read gate.
+   *
+   * "Ended" is asked of the run itself ({@link runHasEnded}, the dead-run
+   * sweep's {@link TERMINAL_RUN_STATUSES}), and only for a request its
+   * snapshot names a root run's (`__runRoot`, stamped at open): a `subflow`
+   * body or a `map` item is a child run, and its end is not the end of the
+   * record's approval, since the parent run goes on. Nor for a root run whose
+   * flow starts a child run anywhere ({@link flowHostsChildRuns}): a request
+   * a child run opened, after this one included, is filed under the child's
+   * run id and is not among the rows read here, so neither "ended here" nor
+   * "the last decision" can be known. "Its flow" is the body the run ran,
+   * and the read holds only the body armed NOW, so "ended" is also refused
+   * unless the run provably ran that body ({@link ranArmedBody}): a flow
+   * edited after the run, to drop its `subflow` say, is not judged by the
+   * edit. A request opened before the stamp, a child run's, a run of such a
+   * flow, a run not known to have run the armed body, or a run that cannot be
+   * read is never "ended": `ended: false` means "not known to have stopped".
    */
   private async attachFlowRoute(
     row: ApprovalRequestRow,
@@ -11659,6 +11763,7 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
     flow: RouteFlowGraph,
     nodesById: Map<string, any>,
     labels: ReaderLabels | undefined,
+    raw: any,
   ): Promise<void> {
     try {
       if (!row.flow_run_id || !row.flow_node_id) return;
@@ -11677,9 +11782,55 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
       }
       const label = (nodeId: string): string =>
         labels?.stepLabel(flowName, nodeId) ?? (nodesById.get(nodeId)?.label || stored.get(nodeId) || nodeId);
-      const route = flowRoute(row, flow, rows, label);
+      const runRoot = parseJson<any>(raw?.node_config_json, undefined)?.__runRoot === true;
+      const ended = row.status !== 'pending' && runRoot && !flowHostsChildRuns(flow)
+        && await this.runHasEnded(row.flow_run_id, flowName, flow);
+      const route = flowRoute(row, flow, rows, label, ended);
       if (route) (row as any).flow_route = route;
     } catch { /* display-only — never fail the read */ }
+  }
+
+  /**
+   * [#35863] Whether the flow run `runId` has stopped for good, having run
+   * `flow`: its status is one of {@link TERMINAL_RUN_STATUSES} and
+   * {@link ranArmedBody} holds for it. `false` when there is no `getRun`, no
+   * such run, or a read throws: display-only, so an unreadable run is only
+   * ever "not known to have ended", never a failed read.
+   */
+  private async runHasEnded(runId: string, flowName: string, flow: unknown): Promise<boolean> {
+    if (typeof this.automation?.getRun !== 'function') return false;
+    try {
+      const run = await this.automation.getRun(runId);
+      const status = run?.status;
+      return !!status && TERMINAL_RUN_STATUSES.has(status) && this.ranArmedBody(run?.startedAt, flowName, flow);
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * [#35863] Whether a run that started at `startedAt` provably ran `flow`,
+   * the body of `flowName` armed now: `flow` is the engine's NEWEST
+   * registration of the name (`getFlowVersionHistory`, the very object), and
+   * was registered strictly before the run started. A run starts on the body
+   * armed at its start and resumes pinned to it, so with nothing registered
+   * since, that body is `flow`.
+   *
+   * Every other case is "not known", never a guess: a body registered after
+   * the run started (an edit, or the registration a restart makes), a body
+   * armed without being the newest registration (a rollback re-arms an older
+   * one), no history for the name, or no start time. The run's `flowVersion`
+   * is not the witness: it is the author's number and an edit need not change
+   * it.
+   */
+  private ranArmedBody(startedAt: unknown, flowName: string, flow: unknown): boolean {
+    if (typeof startedAt !== 'string' || typeof this.automation?.getFlowVersionHistory !== 'function') return false;
+    const history = this.automation.getFlowVersionHistory(flowName);
+    const newest = Array.isArray(history) && history.length > 0 ? history[history.length - 1] : undefined;
+    if (!newest || newest.definition !== flow) return false;
+    const registered = Date.parse(newest.createdAt);
+    const started = Date.parse(startedAt);
+    return Number.isFinite(registered) && Number.isFinite(started) && registered < started;
   }
 
   async listActions(requestId: string, context: ExecutionContext): Promise<ApprovalActionRow[]> {

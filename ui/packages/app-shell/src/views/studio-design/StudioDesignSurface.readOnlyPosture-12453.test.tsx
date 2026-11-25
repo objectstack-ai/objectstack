@@ -18,6 +18,9 @@ import '@testing-library/jest-dom/vitest';
 // The surface's reach loads `@objectstack/lint` lazily; pay that load during
 // collection, not inside a case's clocked window (`check:test-source-alias`).
 import '@objectstack/lint';
+// objectstack#36900 — the surface mounts the command palette, which reaches the
+// record preview's `lazy()` detail entry: its first load is paid at collection too.
+import '@object-ui/plugin-detail';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
@@ -61,17 +64,22 @@ import { StudioDesignSurface } from './StudioDesignSurface';
 import { t } from '../metadata-admin/i18n';
 
 const answer = (body: unknown) => ({ ok: true, status: 200, json: async () => body });
-const PILLARS = ['data', 'automations', 'interfaces', 'access'] as const;
+// objectstack#36904 — an object opens its designer on its own address; the
+// old Data and Interfaces addresses land on the object list, which is no item.
+// objectstack#36905 — the sharing overview's own page took the Access pillar's place here.
+const PILLARS = ['metadata/object/fo_job', 'automations', 'owd'] as const;
 const READ_ONLY = t('engine.studio.pkg.readonly', 'en');
 
 function servePackage(writable: boolean) {
   vi.stubGlobal(
     'fetch',
-    vi.fn(async (input: unknown) =>
-      String(input) === '/api/v1/packages'
+    // The headers a real Response carries: the package list reads them through the authenticated fetch.
+    vi.fn(async (input: unknown) => ({
+      headers: new Headers(),
+      ...(String(input) === '/api/v1/packages'
         ? answer({ success: true, data: { packages: [{ manifest: { id: PACKAGE_ID, name: 'Field Ops' }, writable }] } })
-        : answer([]),
-    ),
+        : answer([])),
+    })),
   );
 }
 
@@ -79,6 +87,7 @@ function renderPillar(pillar: (typeof PILLARS)[number]) {
   render(
     <MemoryRouter initialEntries={[`/studio/${PACKAGE_ID}/${pillar}`]}>
       <Routes>
+        <Route path="/studio/:packageId/metadata/*" element={<StudioDesignSurface area="metadata" />} />
         <Route path="/studio/:packageId/:tab" element={<StudioDesignSurface />} />
       </Routes>
     </MemoryRouter>,

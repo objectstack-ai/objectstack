@@ -178,6 +178,7 @@ vi.mock('@object-ui/react', async (importOriginal) => {
 // The pillar reaches a dynamic `import('@objectstack/lint')`: pay its load at
 // collection, never inside a case's clocked window (`check:test-source-alias`).
 import '@objectstack/lint';
+import '@object-ui/plugin-detail';
 import { DataPillar, type StudioBaseCustomization } from './StudioDesignSurface';
 import { StudioSaveHarness, pressStudioCancel, pressStudioSave } from './__tests__/studioSaveHarness';
 import { createEmptyDataSource } from './__tests__/emptyDataSource';
@@ -234,7 +235,7 @@ afterEach(() => {
 async function mountOnActions(props: { readOnly: boolean; customization?: StudioBaseCustomization | null }) {
   render(
     <StudioSaveHarness><MemoryRouter initialEntries={[`/studio/${BASE}/data`]}>
-      <DataPillar packageId={BASE} readOnly={props.readOnly} customization={props.customization ?? null} />
+      <DataPillar objectName={OBJECT} packageId={BASE} readOnly={props.readOnly} customization={props.customization ?? null} />
     </MemoryRouter></StudioSaveHarness>,
   );
   // The first match is the flat tab (the passthrough menu draws a second).
@@ -281,8 +282,9 @@ describe('Studio adds an action to an installed app’s object, in its customiza
     expect(name).not.toBe(VENDOR.name);
     expect(body).toMatchObject({ name, objectName: OBJECT, operation: 'update', locations: ['record_header'] });
     expect(opts).toMatchObject({ mode: 'draft', packageId: PAIR, ifNoneMatch: '*' });
-    // Then that one action is published at the pair: live at once.
-    expect(mockClient.publish).toHaveBeenCalledWith('action', name, { packageId: PAIR });
+    // Then that one action is published at the pair: live at once, asserting
+    // no published action of its name (objectstack#36726).
+    expect(mockClient.publish).toHaveBeenCalledWith('action', name, { packageId: PAIR, ifNoneMatch: '*' });
     expect(mockClient.save.mock.invocationCallOrder[0]).toBeLessThan(mockClient.publish.mock.invocationCallOrder[0]);
     expect(ensure).toHaveBeenCalledTimes(1);
     expect(saves().filter(([type]) => type === 'object')).toHaveLength(0);

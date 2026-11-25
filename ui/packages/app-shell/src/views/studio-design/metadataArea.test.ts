@@ -11,11 +11,16 @@
 
 import { describe, it, expect } from 'vitest';
 import {
+  AREA_DESIGNER_PAGE_TYPES,
   AREA_PILLAR_FOR_TYPE,
   STUDIO_ALL_PACKAGES_SEGMENT,
+  areaDesignerItemOf,
+  areaItemAsksGenericPage,
+  areaItemOpensDesignerPage,
   areaItemOpensFormEditor,
   areaItemPillarPath,
   areaLocationRedirect,
+  dataPillarRedirect,
   isStudioAllPackagesScope,
   studioMetadataAreaPath,
 } from './metadataArea';
@@ -78,6 +83,13 @@ describe('areaLocationRedirect — the query names the leg', () => {
     expect(areaLocationRedirect(STUDIO_ALL_PACKAGES_SEGMENT, '', '')).toBeNull();
     expect(areaLocationRedirect(STUDIO_ALL_PACKAGES_SEGMENT, 'flow/f1', '?review=1')).toBeNull();
   });
+
+  it('the package-less scope is never written into `?package=`: it lands on its flows (objectstack#36899)', () => {
+    expect(areaLocationRedirect('~org', '', '')).toBe('/studio/~org/automations');
+    expect(areaLocationRedirect('~org', 'flow', '')).toBe('/studio/~org/automations');
+    expect(areaLocationRedirect(STUDIO_ALL_PACKAGES_SEGMENT, 'flow', '?package=~org')).toBe('/studio/~org/automations');
+    expect(areaLocationRedirect(PKG, 'flow', '?package=~org')).toBe('/studio/~org/automations');
+  });
 });
 
 describe('areaItemPillarPath — a pillar type opens its pillar', () => {
@@ -85,11 +97,11 @@ describe('areaItemPillarPath — a pillar type opens its pillar', () => {
   const open = (type: string, q = '', packageId: string | null = PKG) =>
     areaItemPillarPath({ packageId, type, name: 'n_1', search: search(q) });
 
-  it('object, flow and permission open their pillar with `?surface=`', () => {
+  it('flow opens its pillar with `?surface=`', () => {
+    // objectstack#36905, objectstack#36904 — a permission set and an object no
+    // longer do (`areaItemOpensDesignerPage`).
     const expected: Record<string, string> = {
-      object: 'data',
       flow: 'automations',
-      permission: 'access',
     };
     expect(AREA_PILLAR_FOR_TYPE).toEqual(expected);
     for (const [type, pillar] of Object.entries(expected)) {
@@ -103,17 +115,50 @@ describe('areaItemPillarPath — a pillar type opens its pillar', () => {
 
   it('every other type opens the generic item page', () => {
     // objectstack#36502 — page, dashboard, report and view lost their pillar with Interfaces.
-    for (const type of ['translation', 'email_template', 'agent', 'position', 'sharing_rule', 'app', 'page', 'dashboard', 'report', 'view']) {
+    // objectstack#36905, objectstack#36904 — a permission set and an object open their designer page instead.
+    for (const type of ['permission', 'object', 'translation', 'email_template', 'agent', 'position', 'sharing_rule', 'app', 'page', 'dashboard', 'report', 'view']) {
       expect(open(type), type).toBeNull();
     }
   });
 
   it('the cross-package leg, the environment scope and `?review=1` open the generic page', () => {
     expect(open('flow', '', null)).toBeNull();
-    expect(open('permission', '?scope=environment')).toBeNull();
+    expect(open('object', '?scope=environment')).toBeNull();
     expect(open('flow', '?review=1')).toBeNull();
     // Control: the same item without them opens the pillar.
     expect(open('flow', '?review=0')).not.toBeNull();
+  });
+});
+
+describe('areaItemOpensDesignerPage — a permission set opens its matrix full-screen (objectstack#36905)', () => {
+  it('on a package\'s leg only', () => {
+    expect(AREA_DESIGNER_PAGE_TYPES).toEqual(['permission', 'object']);
+    expect(areaItemOpensDesignerPage({ packageId: PKG, type: 'permission' })).toBe(true);
+    // The cross-package leg keeps the matrix's environment presentation.
+    expect(areaItemOpensDesignerPage({ packageId: null, type: 'permission' })).toBe(false);
+    // objectstack#36904 — and an object (pinned below, with the object designer).
+    for (const type of ['flow', 'position', 'view']) {
+      expect(areaItemOpensDesignerPage({ packageId: PKG, type }), type).toBe(false);
+    }
+  });
+
+  it('areaDesignerItemOf reads the item off a designer page\'s address, for the copilot', () => {
+    expect(areaDesignerItemOf(`/studio/${PKG}/metadata/permission/sales%20rep`, PKG)).toEqual({
+      type: 'permission',
+      name: 'sales rep',
+    });
+    expect(areaDesignerItemOf(`/studio/${PKG}/metadata/permission/sales_rep/history`, PKG)).toEqual({
+      type: 'permission',
+      name: 'sales_rep',
+    });
+    // Not a designer page: another type, a list, the cross-package leg, another package's path.
+    expect(areaDesignerItemOf(`/studio/${PKG}/metadata/hook/h1`, PKG)).toBeNull();
+    expect(areaDesignerItemOf(`/studio/${PKG}/metadata/permission`, PKG)).toBeNull();
+    // The create page is no item: `new` is its route segment, not a set's name.
+    expect(areaDesignerItemOf(`/studio/${PKG}/metadata/permission/new`, PKG)).toBeNull();
+    expect(areaDesignerItemOf('/studio/~all/metadata/permission/admin', '~all')).toBeNull();
+    expect(areaDesignerItemOf(`/studio/other/metadata/permission/a`, PKG)).toBeNull();
+    expect(areaDesignerItemOf(`/studio/${PKG}/metadata/permission/%E0%A4%A`, PKG)).toBeNull();
   });
 });
 
@@ -153,5 +198,62 @@ describe('areaItemOpensFormEditor — a read-only package’s dataset opens its 
     // CONTROL: a type no editor customizes stays on the generic page.
     expect(areaItemOpensFormEditor(at('flow', true))).toBe(false);
     expect(areaItemOpensFormEditor(at('object', true))).toBe(false);
+  });
+});
+
+describe('the object designer on its address, and the retired Data pillar (objectstack#36904)', () => {
+  const at = (q = '', packageId: string | null = PKG, type = 'object') =>
+    areaItemOpensDesignerPage({ packageId, type }) && !areaItemAsksGenericPage(new URLSearchParams(q));
+
+  it("an object opens its designer on a package's leg", () => {
+    expect(AREA_DESIGNER_PAGE_TYPES).toContain('object');
+    expect(at()).toBe(true);
+    expect(at('package=' + PKG + '&tab=hooks')).toBe(true);
+  });
+
+  it('keeps the generic page for the cross-package leg, the environment scope and the draft review', () => {
+    expect(at('', null)).toBe(false);
+    expect(at('scope=environment')).toBe(false);
+    expect(at('review=1')).toBe(false);
+    // CONTROL: another type never opens it.
+    expect(at('', PKG, 'flow')).toBe(false);
+  });
+
+  it('the old object address lands on its designer, keeping `?action=` and dropping `?view=` and `?nav=`', () => {
+    expect(dataPillarRedirect(PKG, '?surface=object%3Aaccount')).toBe(`/studio/${PKG}/metadata/object/account`);
+    expect(dataPillarRedirect(PKG, 'surface=object:account&view=account.all&nav=n1&action=approve')).toBe(
+      `/studio/${PKG}/metadata/object/account?action=approve`,
+    );
+    // A name the URL encodes stays one segment.
+    expect(dataPillarRedirect(PKG, `?surface=${encodeURIComponent('object:a/b')}`)).toBe(`/studio/${PKG}/metadata/object/a%2Fb`);
+  });
+
+  it('the old home and any other surface land on the object list, with the query kept (the draft review link)', () => {
+    expect(dataPillarRedirect(PKG, '')).toBe(`/studio/${PKG}/metadata/object`);
+    expect(dataPillarRedirect(PKG, '?changes=review')).toBe(`/studio/${PKG}/metadata/object?changes=review`);
+    expect(dataPillarRedirect(PKG, '?surface=flow%3Anotify')).toBe(`/studio/${PKG}/metadata/object`);
+  });
+});
+
+describe('areaDesignerItemOf — the item a designer page\'s address names, for the copilot (objectstack#36904)', () => {
+  it('names the object of its designer address, its history page included', () => {
+    expect(areaDesignerItemOf(`/studio/${PKG}/metadata/object/account`, PKG)).toEqual({ type: 'object', name: 'account' });
+    expect(areaDesignerItemOf(`/studio/${PKG}/metadata/object/a%2Fb/history`, PKG)).toEqual({ type: 'object', name: 'a/b' });
+  });
+
+  it('names nothing on the create page, a list, the directory, diagnostics, a generic item or another leg', () => {
+    for (const path of [
+      `/studio/${PKG}/metadata/object/new`,
+      `/studio/${PKG}/metadata/object`,
+      `/studio/${PKG}/metadata`,
+      `/studio/${PKG}/metadata/_diagnostics/x`,
+      `/studio/${PKG}/metadata/dashboard/sales`,
+      `/studio/${PKG}/automations`,
+    ]) {
+      expect(areaDesignerItemOf(path, PKG), path).toBeNull();
+    }
+    const all = `/studio/${STUDIO_ALL_PACKAGES_SEGMENT}/metadata/object/account`;
+    expect(areaDesignerItemOf(all, STUDIO_ALL_PACKAGES_SEGMENT)).toBeNull();
+    expect(areaDesignerItemOf(`/studio/${PKG}/metadata/object/account`, undefined)).toBeNull();
   });
 });

@@ -9,10 +9,12 @@
  *    the route hands it `area="metadata"`. `:packageId/:tab` matches one
  *    segment, so without this route an area URL such as
  *    `/studio/crm/metadata/flow` matched nothing.
- *  - The cross-package leg (`/studio/~all/metadata/*`) is the area alone, with
- *    no package, in the frame the landing draws. Every other `~all` URL lands
- *    on it, so none reaches the pillar builder as a package id.
- *  - The entry gate decides first, as for every Studio URL.
+ *  - The cross-package leg (`/studio/~all/metadata/*`) is the same builder
+ *    route with `~all` as its segment (objectstack#36899): the surface draws
+ *    the area alone, with no package, beside the left menu every Studio page
+ *    has. Every other `~all` URL lands on it, so none reaches a pillar.
+ *  - The entry gate decides first, as for every Studio URL, the left menu's
+ *    targets included.
  *
  * The builder module is mocked with markers (as in
  * `StudioRoute.lazyBuilder-11798.test.tsx`); the gate, the frame and the
@@ -139,28 +141,42 @@ describe('/studio — the "All metadata" area\'s routes (objectstack#28561)', ()
     expect(surface).toHaveAttribute('data-area', '');
   });
 
-  it('the cross-package leg is the area alone, with no package, in the landing\'s frame', async () => {
+  it('the cross-package leg is the builder with its area open on `~all` (objectstack#36899: one shell, one menu)', async () => {
     renderStudio('/studio/~all/metadata/permission?scope=environment');
-    const area = await screen.findByTestId('studio-metadata-area');
-    expect(area).toHaveAttribute('data-package', 'null');
-    expect(screen.queryByTestId('studio-pillar-builder')).toBeNull();
-    // The console's own top bar frames it; its brand links home.
-    expect(screen.getByRole('link', { name: 'ObjectOS home' })).toHaveAttribute('href', '/home');
+    const surface = await screen.findByTestId('studio-pillar-builder');
+    expect(surface).toHaveAttribute('data-package', '~all');
+    expect(surface).toHaveAttribute('data-area', 'metadata');
+    // The landing's frame (the console's top bar) no longer draws it.
+    // By its test id, not its name: the name depends on the width
+    // (objectstack#37163), and an absence asserted by an old name passes on
+    // a mark that is drawn.
+    expect(screen.queryByTestId('app-bar-product-home')).toBeNull();
+    expect(screen.queryByTestId('studio-metadata-area')).toBeNull();
     expect(location()).toBe('/studio/~all/metadata/permission?scope=environment');
   });
 
   it.each(['/studio/~all', '/studio/~all/data', '/studio/~all/flow/f1'])(
-    '%s lands on the cross-package area, never on the builder as a package id',
+    '%s lands on the cross-package area, never on a pillar',
     async (url) => {
       renderStudio(url);
-      expect(await screen.findByTestId('studio-metadata-area')).toBeInTheDocument();
+      const surface = await screen.findByTestId('studio-pillar-builder');
       expect(location()).toBe('/studio/~all/metadata');
-      expect(screen.queryByTestId('studio-pillar-builder')).toBeNull();
+      expect(surface).toHaveAttribute('data-area', 'metadata');
+      expect(surface).toHaveAttribute('data-package', '~all');
     },
   );
 
-  it.each(['/studio/~all/metadata', '/studio/com.example.crm/metadata'])(
-    'a principal the gate refuses gets neither leg: %s',
+  it.each([
+    '/studio/~all/metadata',
+    '/studio/com.example.crm/metadata',
+    // objectstack#36899 — the left menu's targets that are not an area list.
+    '/studio/~org/automations',
+    // objectstack#36905 — the sharing overview's own route, and the old address that redirects to it.
+    '/studio/com.example.crm/owd',
+    '/studio/com.example.crm/access?surface=owd%3Aoverview',
+    '/studio/com.example.crm/metadata/_diagnostics',
+  ])(
+    'a principal the gate refuses gets none of them: %s',
     async (url) => {
       permissionsFetch = answer(['setup.access']);
       renderStudio(url);

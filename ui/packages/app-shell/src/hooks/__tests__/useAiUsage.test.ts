@@ -19,7 +19,7 @@ const POOL = { planType: 'free', fraction: 0.5, unmetered: false, resetKind: 'we
 const RESP = { pool: POOL, breakdown: { build: 0.3, dataChat: 0.2 } };
 
 function okResponse(body: unknown) {
-  return { ok: true, status: 200, json: async () => body } as unknown as Response;
+  return { headers: new Headers(), ok: true, status: 200, json: async () => body } as unknown as Response;
 }
 
 describe('useAiUsage', () => {

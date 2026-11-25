@@ -43,8 +43,9 @@ import {
   type SortItem,
 } from '@object-ui/components';
 import { referencedRecordTitle } from '@object-ui/core';
+import { formatConditionDate } from './conditionDates';
 import type { DataSource } from '@object-ui/types';
-import { useSafeFieldLabel } from '@object-ui/i18n';
+import { useDisplayLocale, useSafeFieldLabel } from '@object-ui/i18n';
 import { ArrowDown, ArrowUp, ArrowUpDown, ListFilter, Lock, Plus, RotateCcw, SlidersHorizontal, X } from 'lucide-react';
 import { FieldList, type FieldListItem } from './FieldList';
 import { FilterValuePanel, isQuickRowApplied, quickDateWindowOf } from './FilterValuePanel';
@@ -59,7 +60,6 @@ import {
   relationPathOf,
   removeCondition,
   seedValueFor,
-  sortWording,
   upsertCondition,
   type ConditionField,
   type ViewConditionChip,
@@ -85,14 +85,17 @@ export type LookupValueName = (field: string, id: string) => string | undefined;
 /**
  * The value half of a chip: 「Negotiation, Proposal」, 「≥ 100」, 「Today」.
  * A lookup's value is the referenced record's name when `nameOf` has it, and
- * its id only when the name cannot be read.
+ * its id only when the name cannot be read. A date field's value reads as a
+ * date in `locale` (`formatConditionDate`), never as the stored ISO string.
  */
 export function describeConditionValue(
   field: ConditionField | undefined,
   operator: string,
   value: unknown,
   t: Translate,
-  nameOf?: LookupValueName,
+  nameOf: LookupValueName | undefined,
+  // Required, so no caller formats a date in the runtime's default locale by omission.
+  locale: string,
 ): string {
   const opLabel = quickOperatorLabel(operator, t);
   if (isValuelessOperator(operator)) return opLabel;
@@ -103,16 +106,17 @@ export function describeConditionValue(
   // A named window says what it is on its own: 「Today」, not 「between Today」.
   const window = family === 'date' && operator === 'between' ? quickDateWindowOf(value as FilterBuilderRow['value']) : undefined;
   if (window) return quickDateWindowLabel(window, t);
+  const shown = family === 'date' ? (v: unknown) => formatConditionDate(v, field?.type, locale) : String;
   if (family === 'boolean') {
     text = list.map((v) => (v === true || v === 'true' ? t('listConditions.filter.yes') : t('listConditions.filter.no'))).join(joiner);
   } else if (operator === 'between') {
-    text = list.map(String).join(' – ');
+    text = list.map(shown).join(' – ');
   } else if (family === 'option') {
     text = list.map((v) => optionLabel(field, v)).join(joiner);
   } else if (family === 'lookup' && field && nameOf) {
     text = list.map((v) => nameOf(field.value, String(v)) ?? String(v)).join(joiner);
   } else {
-    text = list.map(String).join(joiner);
+    text = list.map(shown).join(joiner);
   }
   // 「is any of」 is what a value list means on its own; every other operator is
   // named, and with no value it is the operator alone, never one with a trailing space.
@@ -126,11 +130,12 @@ function chipText(
   operator: string,
   value: unknown,
   t: Translate,
-  nameOf?: LookupValueName,
+  nameOf: LookupValueName | undefined,
+  locale: string,
 ) {
   return t('listConditions.chips.pattern', {
     field: field?.label ?? fieldName ?? '',
-    value: describeConditionValue(field, operator, value, t, nameOf),
+    value: describeConditionValue(field, operator, value, t, nameOf, locale),
   });
 }
 
@@ -138,11 +143,12 @@ function viewChipText(
   chip: ViewConditionChip,
   fields: ReadonlyArray<ConditionField>,
   t: Translate,
-  nameOf?: LookupValueName,
-  relatedFieldOf?: RelatedFieldOf,
+  nameOf: LookupValueName | undefined,
+  relatedFieldOf: RelatedFieldOf | undefined,
+  locale: string,
 ): string {
   if (chip.anyOf) {
-    return chip.anyOf.map((member) => viewChipText(member, fields, t, nameOf, relatedFieldOf)).join(t('listConditions.chips.or'));
+    return chip.anyOf.map((member) => viewChipText(member, fields, t, nameOf, relatedFieldOf, locale)).join(t('listConditions.chips.or'));
   }
   if (!chip.field || !chip.operator) return t('listConditions.chips.viewFilter');
   const path = relationPathOf(chip.field);
@@ -157,11 +163,11 @@ function viewChipText(
     });
     return t('listConditions.chips.pattern', {
       field: label,
-      value: describeConditionValue(related, chip.operator, chip.value, t),
+      value: describeConditionValue(related, chip.operator, chip.value, t, undefined, locale),
     });
   }
   const field = fields.find((f) => f.value === chip.field);
-  return chipText(field, chip.field, chip.operator, chip.value, t, nameOf);
+  return chipText(field, chip.field, chip.operator, chip.value, t, nameOf, locale);
 }
 
 // ---------------------------------------------------------------------------
@@ -358,18 +364,6 @@ export function useLookupValueNames(
     },
     [byTarget, fields],
   );
-}
-
-/** The words for one sort direction on a field of `type`: time, size or the alphabet. */
-export function sortDirectionLabel(type: string | undefined, order: 'asc' | 'desc', t: Translate): string {
-  switch (sortWording(type)) {
-    case 'time':
-      return order === 'asc' ? t('listConditions.sort.time_asc') : t('listConditions.sort.time_desc');
-    case 'size':
-      return order === 'asc' ? t('listConditions.sort.size_asc') : t('listConditions.sort.size_desc');
-    default:
-      return order === 'asc' ? t('listConditions.sort.alphabet_asc') : t('listConditions.sort.alphabet_desc');
-  }
 }
 
 // ---------------------------------------------------------------------------
@@ -672,6 +666,7 @@ export function ConditionChipRow({
   className,
 }: ConditionChipRowProps) {
   const { t } = useListConditionTranslation();
+  const locale = useDisplayLocale();
   const [openChip, setOpenChip] = React.useState<string | null>(null);
 
   // Keyed on the names, not on the array the host may rebuild every render.
@@ -786,7 +781,7 @@ export function ConditionChipRow({
       )}
 
       {viewChips.map((chip) => {
-        const text = viewChipText(chip, filterFields, t, nameOf, relatedFieldOf);
+        const text = viewChipText(chip, filterFields, t, nameOf, relatedFieldOf, locale);
         return (
           <span
             key={chip.key}
@@ -806,7 +801,7 @@ export function ConditionChipRow({
       {independent
         ? appliedRows.map((row) => {
             const field = fieldOf(filterFields, row.field);
-            const text = chipText(field, row.field, row.operator, row.value, t, nameOf);
+            const text = chipText(field, row.field, row.operator, row.value, t, nameOf, locale);
             return (
               <span
                 key={row.id}

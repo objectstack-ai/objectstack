@@ -271,6 +271,22 @@ export interface StdioDataBridgeDeps {
    */
   datasetTools?: StdioDatasetToolsService;
   /**
+   * [ADR-0149 D2] The `knowledge` service when it serves the knowledge tool's
+   * executor ({@link StdioKnowledgeToolsService}), resolved by the host once
+   * its services are registered. Present ⇒ the bridge carries
+   * `searchKnowledge` / `knowledgeToolDefinitions`; absent ⇒ neither, and
+   * `search_knowledge` does not register.
+   */
+  knowledgeTools?: StdioKnowledgeToolsService;
+  /**
+   * [ADR-0160 D4] The `record-context` service when it serves the
+   * `get_record_context` executor ({@link StdioRecordContextToolsService}),
+   * resolved by the host once its services are registered. Present ⇒ the
+   * bridge carries `getRecordContext` / `recordContextToolDefinitions`;
+   * absent ⇒ neither, and the tool does not register.
+   */
+  recordContextTools?: StdioRecordContextToolsService;
+  /**
    * [ADR-0149 D2 · #34872] The `i18n` service the saved datasets and the
    * object tools' labels and descriptions are localized with, resolved at each
    * use. `undefined`, or a resolver that throws, means none: they are then
@@ -296,6 +312,33 @@ export interface StdioDatasetToolsService {
     readonly definitions: ReadonlyArray<{ name: string; description: string }>;
     listDatasets(input: unknown, context?: unknown): Promise<ListDatasetsOutput>;
     queryDataset(input: unknown, context?: unknown): Promise<QueryDatasetOutput>;
+  };
+}
+
+/**
+ * [ADR-0149 D2] The face of the `knowledge` service `search_knowledge` calls:
+ * `knowledgeTools()` binds the service-knowledge executor to the service
+ * itself. Named structurally so this package stays free of knowledge code.
+ * The executor refuses by throwing an ADR-0112 coded error.
+ */
+export interface StdioKnowledgeToolsService {
+  knowledgeTools(): {
+    readonly definitions: ReadonlyArray<{ name: string; description: string; parameters: Record<string, unknown> }>;
+    searchKnowledge(input: unknown, context?: unknown): Promise<unknown>;
+  };
+}
+
+/**
+ * [ADR-0160 D4] The face of the `record-context` service `get_record_context`
+ * calls: `recordContextTools()` hands the one executor, which reads through
+ * the door the bridge builds for the principal. Named structurally so this
+ * package stays free of the service's code. The executor refuses by throwing
+ * an ADR-0112 coded error.
+ */
+export interface StdioRecordContextToolsService {
+  recordContextTools(): {
+    readonly definitions: ReadonlyArray<{ name: string; description: string }>;
+    getRecordContext(input: unknown, door: unknown): Promise<unknown>;
   };
 }
 
@@ -1804,6 +1847,50 @@ export function createStdioDataBridge(deps: StdioDataBridgeDeps): McpDataBridge 
     bridge.listDatasets = async (input) => executor().listDatasets(input, await resolvePrincipal());
     bridge.queryDataset = async (input, opts) => executor(opts.maxRows).queryDataset(input, await resolvePrincipal());
     bridge.datasetToolDefinitions = () => executor().definitions;
+  }
+
+  // [ADR-0149 D2] The knowledge members, only where the host handed the
+  // knowledge service's executor over. Each call runs AS the principal this
+  // transport resolves per call, so the service re-checks every object-source
+  // hit against that principal's row-level security.
+  if (deps.knowledgeTools) {
+    const service = deps.knowledgeTools;
+    bridge.searchKnowledge = async (input) => service.knowledgeTools().searchKnowledge(input, await resolvePrincipal());
+    bridge.knowledgeToolDefinitions = () => service.knowledgeTools().definitions;
+  }
+
+  // [ADR-0160 D3/D4] The record-context members, only where the host handed
+  // the record-context service's executor over. The door is this bridge's own
+  // read members, as the principal: `get` and `query` (each behind
+  // `enforceApiExposure`, as the record tools read), the object as the
+  // principal is served it in this transport's locale, the declaration whole
+  // (metadata only, to tell a hidden entry from an author defect), and the
+  // published packs. The tool layer hands its read guard over. No delegation
+  // probe: an API key is not delegated, so no narrowing is stated.
+  if (deps.recordContextTools) {
+    const service = deps.recordContextTools;
+    const self = bridge;
+    bridge.getRecordContext = async (input, opts) => service.recordContextTools().getRecordContext(input, {
+      readGuard: opts.readGuard,
+      assertApiExposed: async (object: string, action: 'get' | 'query') =>
+        enforceApiExposure(reads, object, action === 'get' ? GATED_ACTIONS.get : GATED_ACTIONS.query, await resolvePrincipal()),
+      servedObjectDefinitionOf: async (name: string) =>
+        ((await localizedView.getObject(name)) as Record<string, unknown> | undefined) ?? null,
+      publishedObjectDefinitionOf: async (name: string) =>
+        ((await readObjectDeclaration(reads, name)) as Record<string, unknown> | undefined) ?? null,
+      listContextPacks: async () => {
+        const protocolService = protocol?.();
+        if (protocolService && typeof protocolService.getMetaItems === 'function') {
+          return metaItemsArray(await protocolService.getMetaItems({ type: 'ai_context' }));
+        }
+        return (await metadataService.list('ai_context')) ?? [];
+      },
+      get: (object: string, id: string) => self.get(object, id),
+      query: (object: string, o: Parameters<McpDataBridge['query']>[1]) => self.query(object, o),
+      fieldVisibilityOf: (object: string) => self.fieldVisibilityOf!(object),
+      userTextLocales: () => self.userTextLocales!(),
+    });
+    bridge.recordContextToolDefinitions = () => service.recordContextTools().definitions;
   }
 
   if (typeof engine.aggregate === 'function') {

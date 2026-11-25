@@ -111,9 +111,9 @@ function serve(answer: () => Promise<{ ok: boolean; status: number; body: unknow
   vi.stubGlobal(
     'fetch',
     vi.fn(async (url: unknown) => {
-      if (!String(url).endsWith('/api/v1/packages')) return { ok: true, status: 200, json: async () => ({ data: [] }) };
+      if (!String(url).endsWith('/api/v1/packages')) return { headers: new Headers(), ok: true, status: 200, json: async () => ({ data: [] }) };
       const { ok, status, body } = await answer();
-      return { ok, status, json: async () => body };
+      return { headers: new Headers(), ok, status, json: async () => body };
     }),
   );
 }

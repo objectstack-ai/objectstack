@@ -1,13 +1,17 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, afterEach } from 'vitest';
 import { z } from 'zod';
 import { FieldErrorCode } from '@objectstack/spec/api';
+import { ObjectQL } from '@objectstack/objectql';
+import { SqlDriver } from '@objectstack/driver-sql';
+import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
+import { installDefaultOrganization } from './default-organization.testkit.js';
 // `.js` extension deliberately: under `moduleResolution: NodeNext` an
 // extensionless relative import does not resolve, every symbol it names becomes
 // `any`, and each callback over those symbols then reports TS7006 (AGENTS.md
 // §Build & Test). This is the same spelling `rest-server.ts` itself uses.
-import { zodIssuesToFields } from './rest-server.js';
+import { RestServer, zodIssuesToFields } from './rest-server.js';
 
 /**
  * `invalid_union` expansion on the wire (#5014).
@@ -50,12 +54,13 @@ describe('zodIssuesToFields — invalid_union expansion (#5014)', () => {
             const body = { object: 'account', query: { object: 'account', search: { fields: ['name'] } } };
             const fields = fieldsFor(FindDataRequestSchema as unknown as z.ZodType, body);
 
-            // The union's own entry is still there, unchanged — clients read it today.
-            expect(fields).toContainEqual({
+            // [#35433] The union's own bare entry is gone: the branch below
+            // explains it, so `fields[0]` is the located cause.
+            expect(fields).not.toContainEqual(expect.objectContaining({
                 field: 'query.search',
                 code: 'invalid_shape',
-                message: 'Invalid input',
-            });
+            }));
+            expect(fields[0]!.field).toBe('query.search.query');
 
             // …and now the branch that explains it reaches the author. `required`,
             // not `invalid_type`: the branch path is RELATIVE to the union, so the
@@ -146,11 +151,11 @@ describe('zodIssuesToFields — invalid_union expansion (#5014)', () => {
             const member = (n: number) => z.object({ [`k${n}`]: z.string() });
             const schema = z.object({ u: z.union([member(1), member(2), member(3), member(4), member(5)]) });
             const fields = fieldsFor(schema, { u: {} });
-            // 1 union anchor + exactly 3 of the 5 tied branches: an author fixing
-            // one shape does not need the other four spelled out, and an unbounded
-            // expansion is how a union with many members becomes unreadable.
-            expect(fields).toHaveLength(4);
-            expect(fields[0]).toEqual({ field: 'u', code: 'invalid_shape', message: 'Invalid input' });
+            // Exactly 3 of the 5 tied branches: an author fixing one shape does
+            // not need the other four spelled out, and an unbounded expansion is
+            // how a union with many members becomes unreadable. The explained
+            // bare union entry is not among them (#35433).
+            expect(fields.map((f) => f.field)).toEqual(['u.k1', 'u.k2', 'u.k3']);
         });
     });
 
@@ -196,12 +201,13 @@ describe('zodIssuesToFields — invalid_union expansion (#5014)', () => {
 
     describe('wire compatibility (ADR-0114)', () => {
         /**
-         * The expansion is ADDITIVE. Every entry the route emitted before still
-         * appears, in the same order, with the same `field`/`code`/`message`;
-         * branch entries are inserted after the union entry they explain. Nothing
-         * about `{field, code, message}` changes, which is what ADR-0114 requires
-         * of anything sharing `mapDataError`'s envelope — the array's LENGTH was
-         * never part of that contract.
+         * Branch entries take the place of the union entry they explain, and
+         * nothing about `{field, code, message}` changes, which is what ADR-0114
+         * requires of anything sharing `mapDataError`'s envelope — the array's
+         * LENGTH was never part of that contract. [#35433] The union entry
+         * itself — zod's bare `Invalid input`, `invalid_shape` — is dropped when
+         * an entry below explains it, and kept when nothing does; the
+         * expansion is no longer strictly additive, by the maintainer's ruling.
          */
         it('leaves non-union issues mapped exactly one-to-one', () => {
             const schema = z.object({ a: z.string(), b: z.number() });
@@ -212,18 +218,23 @@ describe('zodIssuesToFields — invalid_union expansion (#5014)', () => {
             ]);
         });
 
-        it('keeps the union entry first and unchanged among its expansion', () => {
+        it('puts the explanation where the explained union entry stood, and keeps an unexplained one', () => {
             const schema = z.object({
                 a: z.string(),
                 u: z.union([z.string(), z.object({ deep: z.string() })]),
-                z: z.number(),
+                z: z.string(),
             });
-            const fields = fieldsFor(schema, { a: 'ok', u: {}, z: 1 });
-            const idx = fields.findIndex((f) => f.field === 'u');
-            expect(fields[idx]).toEqual({ field: 'u', code: 'invalid_shape', message: 'Invalid input' });
-            // The independent `z`/`a` issues keep their own relative order.
-            expect(fields.filter((f) => f.field === 'u.deep')).toHaveLength(1);
-            expect(fields.findIndex((f) => f.field === 'u.deep')).toBe(idx + 1);
+            const fields = fieldsFor(schema, { a: 1, u: {}, z: 1 });
+            // [#35433] `u`'s bare entry is dropped; its one cause sits in its
+            // place, between the independent `a` and `z` issues.
+            expect(fields.map((f) => [f.field, f.code])).toEqual([
+                ['a', 'invalid_type'], ['u.deep', 'required'], ['z', 'invalid_type'],
+            ]);
+
+            // CONTROL — every branch a bare kind mismatch: nothing explains the
+            // union, so its own entry is the whole answer and stays.
+            const alone = fieldsFor(z.object({ u: z.union([z.string(), z.number()]) }), { u: {} });
+            expect(alone).toEqual([{ field: 'u', code: 'invalid_shape', message: 'Invalid input' }]);
         });
 
         it('still tolerates junk in place of an issue list', () => {
@@ -250,9 +261,11 @@ describe('zodIssuesToFields — invalid_union expansion (#5014)', () => {
  * 'Invalid key in record'}` — with the sentence naming the rule produced and
  * dropped, which is #5014 verbatim.
  *
- * The expansion is strictly ADDITIVE, same contract as #5014: the container's
- * own entry stays (it is the only one naming the slot, and existing clients
- * read it) and the leaf entries follow it. ADR-0114's `{field, code, message}`
+ * This expansion is strictly ADDITIVE: the container's own entry stays (its
+ * code is the only one saying a KEY was refused, and existing clients read it)
+ * and the leaf entries follow it. The union expansion (#5014) no longer is —
+ * since #35433 an explained union entry is dropped — so the two descents now
+ * differ on exactly this point. ADR-0114's `{field, code, message}`
  * shape is unchanged, and the container entry keeps mapping to `invalid_shape`.
  *
  * Every fixture drives a REAL `safeParse`, for the reason the file's header
@@ -318,5 +331,123 @@ describe('zodIssuesToFields — invalid_key / invalid_element descent (#5389)', 
             .toEqual([{ field: 'm.k', code: 'invalid_shape', message: 'Invalid key in record' }]);
         expect(zodIssuesToFields([{ code: 'invalid_element', path: ['m'], message: 'Invalid value', issues: 'nope' }]))
             .toEqual([{ field: 'm', code: 'invalid_shape', message: 'Invalid value' }]);
+    });
+});
+
+/**
+ * [#35500] `POST /api/v1/data/:object/query` with a `where` of the wrong kind,
+ * through the real route over a real engine and driver.
+ *
+ * `where` on that door is `z.union([FilterArraySchema, DataEngineFilterSchema])`,
+ * and both members are themselves unions. A number, a string or `null` used to
+ * answer one bare `{field: 'query.where', code: 'invalid_shape', message:
+ * 'Invalid input'}` per member and nothing that said what to send, so an AI
+ * caller had nothing to retry with. A member that is itself a bare union of
+ * kinds is now read as the kind mismatch it is, and the slot's own sentence
+ * names the two shapes it takes.
+ */
+describe('[#35500] POST /data/:object/query — a wrong-typed where answers one entry that names the shapes', () => {
+    const OBJECT = 'where_shape_35500';
+    const TASKS = {
+        name: OBJECT,
+        label: 'Where shape 35500',
+        fields: {
+            status: { name: 'status', type: 'text' as const },
+            amount: { name: 'amount', type: 'number' as const },
+        },
+    };
+    const ROWS = [
+        { id: 'r1', status: 'open', amount: 50 },
+        { id: 'r2', status: 'done', amount: 500 },
+    ];
+
+    const live: ObjectQL[] = [];
+    afterEach(async () => {
+        while (live.length) {
+            try { await live.pop()?.destroy(); } catch { /* noop */ }
+        }
+    });
+
+    const noop = () => {};
+    const mockServer = () => ({ get: noop, post: noop, put: noop, delete: noop, patch: noop, use: noop, listen: async () => {}, close: async () => {} });
+    const makeRes = () => {
+        const res: any = {
+            write: () => true, end: () => {},
+            header: () => res,
+            status: (code: number) => { res._status = code; return res; },
+            json: (body: any) => { res._json = body; return res; },
+        };
+        return res;
+    };
+
+    async function boot() {
+        const driver: any = new SqlDriver({ client: 'better-sqlite3', connection: { filename: ':memory:' }, useNullAsDefault: true });
+        const engine = new ObjectQL();
+        live.push(engine);
+        engine.registerDriver(driver, true);
+        await engine.init();
+        engine.registry.registerObject(TASKS as any);
+        await engine.syncSchemas();
+        await installDefaultOrganization(engine);
+        await engine.insert(OBJECT, ROWS as any);
+
+        const calls = { find: 0 };
+        const find = driver.find.bind(driver);
+        driver.find = (o: string, ...rest: unknown[]) => { if (o === OBJECT) calls.find += 1; return find(o, ...rest); };
+
+        const protocol = new ObjectStackProtocolImplementation(engine as any);
+        const rest = new RestServer(mockServer() as any, protocol as any, { api: { requireAuth: false } } as any);
+        (rest as any).resolveExecCtx = async () => ({ userId: 'test-user' });
+        rest.registerRoutes();
+        const route = rest.getRoutes().find((r: any) => r.method === 'POST' && r.path === '/api/v1/data/:object/query');
+        expect(route).toBeDefined();
+        const post = async (body: Record<string, unknown>) => {
+            const res = makeRes();
+            // What the wire carries: JSON.
+            await route!.handler({ params: { object: OBJECT }, body: JSON.parse(JSON.stringify(body)) } as any, res);
+            return res;
+        };
+        return { post, calls };
+    }
+
+    it.each([
+        ['42', 42],
+        ['a string', 'status = open'],
+        ['null', null],
+    ])('%s: 400 VALIDATION_FAILED with exactly one fields[] entry, before any read', async (_name, where) => {
+        const { post, calls } = await boot();
+        const res = await post({ where });
+        expect(res._status).toBe(400);
+        expect(res._json.code).toBe('VALIDATION_FAILED');
+        expect(res._json.fields.map((f: any) => [f.field, f.code])).toEqual([['query.where', 'invalid_shape']]);
+        // The entry names both accepted shapes instead of zod's bare default.
+        expect(res._json.fields[0].message).not.toBe('Invalid input');
+        expect(res._json.fields[0].message).toContain('condition object');
+        expect(res._json.fields[0].message).toContain('filter array');
+        expect(calls.find).toBe(0);
+    });
+
+    it('a malformed AST: 400 VALIDATION_FAILED with its located causes and no duplicate Invalid input', async () => {
+        const { post, calls } = await boot();
+        const res = await post({ where: [['status', '=', 'open'], 'and'] });
+        expect(res._status).toBe(400);
+        expect(res._json.code).toBe('VALIDATION_FAILED');
+        expect(res._json.fields).toEqual([
+            { field: 'query.where', code: 'min_items', message: expect.any(String) },
+            { field: 'query.where.1', code: 'invalid_shape', message: 'Invalid input' },
+        ]);
+        expect(calls.find).toBe(0);
+    });
+
+    it('CONTROL: a valid filter object and a valid filter array are still served', async () => {
+        const { post, calls } = await boot();
+        const asObject = await post({ where: { status: 'open' } });
+        expect(asObject._status ?? 200).toBe(200);
+        expect(asObject._json.records.map((r: any) => r.id)).toEqual(['r1']);
+
+        const asArray = await post({ where: ['amount', '>', 100] });
+        expect(asArray._status ?? 200).toBe(200);
+        expect(asArray._json.records.map((r: any) => r.id)).toEqual(['r2']);
+        expect(calls.find).toBe(2);
     });
 });

@@ -8,10 +8,22 @@ import type {
   SettingsListResponse,
   SettingsNamespacePayload,
 } from './types';
+import { createAuthenticatedFetch } from '@object-ui/auth';
 import { isPlatformManagedRefusal } from './platformManaged';
 
 const SERVER_URL = (import.meta.env.VITE_SERVER_URL || '').replace(/\/$/, '');
 const BASE = `${SERVER_URL}/api/settings`;
+
+/**
+ * The console's authenticated fetch: the stored bearer token beside the session
+ * cookie (`credentials: 'include'` is still passed on every call), the one every
+ * other console request goes through. A session held by its bearer token alone
+ * reads and writes settings like the rest of the console, and a `401` reaches
+ * the console's session-ended check.
+ */
+function authFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+  return createAuthenticatedFetch()(input, init);
+}
 
 /**
  * Unwrap the platform's declared success envelope, `{ success, data }`
@@ -42,8 +54,8 @@ const BASE = `${SERVER_URL}/api/settings`;
  *   server generation it was carrying, not a silent regression.
  *
  * This is deliberately a local copy rather than an import: the console talks to
- * `/api/settings` with raw `fetch` and does not construct an `ObjectStackClient`,
- * and `unwrapResponse` is private to it.
+ * `/api/settings` through its authenticated fetch and does not construct an
+ * `ObjectStackClient`, and `unwrapResponse` is private to it.
  */
 function unwrapEnvelope(body: unknown): unknown {
   if (
@@ -162,13 +174,13 @@ export function lockedKeyOf(apiError: unknown): string | undefined {
 }
 
 export async function listSettingsManifests(): Promise<SettingsListResponse> {
-  const res = await fetch(BASE, { credentials: 'include', headers: jsonHeaders() });
+  const res = await authFetch(BASE, { credentials: 'include', headers: jsonHeaders() });
   const body = await jsonOrThrow<SettingsListResponse>(res);
   return assertShape<SettingsListResponse>(body, ['manifests'], 'GET /api/settings');
 }
 
 export async function getSettingsNamespace(namespace: string): Promise<SettingsNamespacePayload> {
-  const res = await fetch(`${BASE}/${encodeURIComponent(namespace)}`, {
+  const res = await authFetch(`${BASE}/${encodeURIComponent(namespace)}`, {
     credentials: 'include',
     headers: jsonHeaders(),
   });
@@ -184,7 +196,7 @@ export async function saveSettingsNamespace(
   namespace: string,
   patch: Record<string, unknown>,
 ): Promise<{ values: SettingsNamespacePayload['values'] }> {
-  const res = await fetch(`${BASE}/${encodeURIComponent(namespace)}`, {
+  const res = await authFetch(`${BASE}/${encodeURIComponent(namespace)}`, {
     method: 'PUT',
     credentials: 'include',
     headers: jsonHeaders(),
@@ -206,7 +218,7 @@ export async function runSettingsAction(
   actionId: string,
   payload?: unknown,
 ): Promise<SettingsActionResult> {
-  const res = await fetch(`${BASE}/${encodeURIComponent(namespace)}/${encodeURIComponent(actionId)}`, {
+  const res = await authFetch(`${BASE}/${encodeURIComponent(namespace)}/${encodeURIComponent(actionId)}`, {
     method: 'POST',
     credentials: 'include',
     headers: jsonHeaders(),
@@ -280,7 +292,7 @@ export type JudgedClientAddressRoute = '/admin/client-address' | '/client-addres
  * decides what a failure shows.
  */
 export async function getJudgedClientAddress(route: JudgedClientAddressRoute): Promise<JudgedClientAddress> {
-  const res = await fetch(`${AUTH_BASE}${route}`, {
+  const res = await authFetch(`${AUTH_BASE}${route}`, {
     credentials: 'include',
     headers: { Accept: 'application/json' },
   });

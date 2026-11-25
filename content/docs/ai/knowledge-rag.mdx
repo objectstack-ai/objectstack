@@ -68,14 +68,50 @@ endpoints, and `aiService.chatWithTools` — is provided by the **ObjectOS**
 in-product runtime. The
 open-source framework has no built-in in-product chat, but everything else here — the Knowledge
 Protocol, adapters, embedder, and `KnowledgeService.search` — is open, so you can call
-`search` directly from your own code, agent, or MCP tool.
+`search` directly from your own code or agent. An MCP client gets it as the
+`search_knowledge` tool, which the MCP door serves wherever the knowledge service is
+installed ([Connect an MCP Client](/docs/ai/connect-mcp)).
 </Callout>
 
 ## What you get for free
 
-- **Permission-aware retrieval.** Every hit with a `sourceRecordId` is re-checked against the caller's `ExecutionContext` via `IDataEngine` — the same RLS that gates plain ObjectQL queries. A salesperson asking "find proposals about ACME" only sees the proposals they could already read directly. File / HTTP hits pass through (ACL is the adapter's problem).
+- **Permission-aware retrieval.** Every hit with a `sourceRecordId` is re-checked against the caller's `ExecutionContext` via `IDataEngine` — the same RLS that gates plain ObjectQL queries. A salesperson asking "find proposals about ACME" only sees the proposals they could already read directly. Before a source is searched, the caller's field-level read rules and the object's API exposure are asked too: a source serving a field the caller may not query is not searched for them (see [the protocol's source admission](/docs/protocol/knowledge#source-admission-exposure-and-field-level-rules)). File / HTTP hits pass through (ACL is the adapter's problem).
 - **Inline event sync.** When records on indexed objects change, the kernel's `IRealtimeService` events drive `KnowledgeService.handleRecordUpsert/Delete` automatically. No cron, no queue (yet — Phase 2).
 - **Adapter swap, zero caller changes.** Move from `memory` to `ragflow` to a custom adapter without touching your `search` calls, the `search_knowledge` tool, or any agent prompt.
+
+## Embedder input limits
+
+Every embedding model accepts a text up to some length, counted in tokens. A provider that is sent a longer text truncates it **without an error** — the tail is never embedded, so a search for it finds nothing. `@objectstack/embedder-openai` refuses such an input instead:
+
+- When a limit applies, `embed()` measures every input before it sends anything. When one is over the model's limit, the whole call fails with an error naming the input's index, the model, the estimate and the limit. Nothing is sent and nothing is truncated.
+- The limit comes from the known-model table, which carries each provider's documented per-input limit (OpenAI `text-embedding-3-*` 8192, DashScope `text-embedding-v3` 8192, BigModel `embedding-3` 3072, SiliconFlow `BAAI/bge-m3` 8192, `BAAI/bge-large-*-v1.5` 512, …). Set `maxInputTokens` to override it.
+- A model that is not in the table, with no `maxInputTokens`, has no limit — its inputs are sent at any length — and the embedder warns once when it is constructed.
+
+```ts
+new OpenAIEmbedder({
+  apiKey,
+  baseUrl: 'https://my-gateway.example.com/v1',
+  model: 'my-gateway-model',
+  maxInputTokens: 4096, // your gateway's documented limit
+});
+```
+
+### The shared token estimate
+
+No provider's tokenizer ships with the platform, so the length is an estimate: `estimateTokens(text)` from `@objectstack/spec/shared`. It is the one estimate the platform uses, and an app that sizes its own chunks should call the same function so it agrees with the embedder about what fits. Walking the text one character at a time, it adds:
+
+| Text | Counts |
+|:---|:---|
+| A CJK character or a full-width punctuation mark (`，。：（）「」`…) | 1.5 each |
+| A run of ASCII letters only | ceil(length / 4) per run — `OpenAI` 2, `internationalization` 5 |
+| A run of ASCII digits only | ceil(length / 3) per run — `8192` 2, a 16-digit number 6 |
+| A run mixing ASCII letters and digits (hashes, base64, UUID segments) | ceil(length / 2) per run — `v3` 1, a 32-character hex id 16 |
+| Any other punctuation mark or character | 1 each |
+| Whitespace, the ideographic space `U+3000` included | 0 |
+
+The sum is multiplied by 1.1 and rounded up. On the sampled classes — Chinese, mixed Chinese/English, and English-heavy text with long words, numbers, URLs and code — the estimate stays at or above OpenAI `cl100k` token counts (the sampled counts are recorded in the function's test); on Chinese text it runs about 1.4× those counts. It is deliberately conservative: a text whose real count is under a limit may be refused although the provider would have accepted it.
+
+Known residual: text made mostly of random hex or base64 — UUIDs, sha256 digests, encoded blobs — tokenizes at about 1–1.4 characters per token and can estimate below its real count. Emoji and rare ideographs (CJK Extension B and later) may also estimate low: `cl100k` spends two to four tokens on each. Other providers' tokenizers are not sampled.
 
 ## Why we did not build a vector DB
 

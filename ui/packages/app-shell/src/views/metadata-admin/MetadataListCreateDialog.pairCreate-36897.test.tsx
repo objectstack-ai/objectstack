@@ -1,0 +1,229 @@
+// Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
+
+/**
+ * objectstack#36897 — the metadata list's 「新建」 for an object and a flow.
+ *
+ *  - On a read-only base the item is written to the pair the ensure door
+ *    answers (ADR-0146 D3), never to the base, and an object does not try to
+ *    join an app menu (the pair has no app). On a writable package — the
+ *    control — the door is never knocked on, the item is written to the list's
+ *    package and the object joins the menu.
+ *  - The object carries the organization-wide default it was given.
+ *  - A flow is created from a starting point; one that watches an object
+ *    writes nothing until it has one.
+ *
+ * objectstack#36904 — the object designer has no 「新建」 of its own any more;
+ * this dialog is where an object is created, so the pins its old dialog held
+ * live here too: the default OWD is written explicitly, the stored name is
+ * previewed and saved as shown, and a taken identifier writes nothing.
+ */
+
+// Paid at collection, not inside a case's clock (check:test-source-alias).
+import '@objectstack/lint';
+import '@testing-library/jest-dom/vitest';
+import * as React from 'react';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+
+const save = vi.fn(async (..._args: unknown[]) => ({}));
+vi.mock('./useMetadata', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  useMetadataClient: () => ({ save }),
+}));
+
+const ensure = vi.fn(async (baseId: string) => ({
+  basePackageId: baseId,
+  packageId: `${baseId}.custom`,
+  namespace: 'hrx',
+  created: true,
+  writable: true,
+}));
+vi.mock('../studio-design/packages-io.js', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  ensureCustomizationPackage: (baseId: string) => ensure(baseId),
+  fetchPackages: async () => [
+    { id: 'com.vendor.hr', namespace: 'hr' },
+    { id: 'com.example.crm', namespace: 'crm' },
+    { id: 'com.example.bare', namespace: null },
+  ],
+}));
+const publish = vi.fn(async (..._args: unknown[]) => ({ ok: true }));
+vi.mock('../studio-design/studioSaveBar.js', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  publishSavedItem: (...args: unknown[]) => publish(...args),
+}));
+const taken = vi.fn(async (..._args: unknown[]): Promise<{ name: string; label: string } | null> => null);
+vi.mock('../studio-design/StudioPillarKit.js', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  findTakenIdentifier: (...args: unknown[]) => taken(...args),
+}));
+const joinMenu = vi.fn(async () => ({ kind: 'joined' }));
+vi.mock('../studio-design/newObjectJoinsAppMenu.js', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  addNewObjectToAppMenu: (...args: unknown[]) => joinMenu(...(args as [])),
+}));
+
+/** objectstack#36904 — the package's own objects, read when an identifier is taken. */
+const surfaces = vi.fn(async (..._args: unknown[]): Promise<Array<{ type: string; name: string }>> => []);
+vi.mock('../studio-design/packageSurfaces.js', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  loadPackageSurfaces: (...args: unknown[]) => surfaces(...args),
+}));
+
+import { MetadataListCreateDialog } from './MetadataListCreateDialog';
+import { publishCreated } from '../studio-design/studioSaveBar.js';
+import { t, tFormat } from './i18n';
+
+afterEach(() => {
+  cleanup();
+  vi.clearAllMocks();
+});
+
+const L = 'en-US' as const;
+
+function open(type: 'object' | 'flow', packageId: string, inPair: boolean, onOpenExisting?: (path: string) => void) {
+  const onCreated = vi.fn();
+  render(
+    <MetadataListCreateDialog
+      type={type}
+      open
+      onOpenChange={() => {}}
+      packageId={packageId}
+      inPair={inPair}
+      locale={L}
+      onCreated={onCreated}
+      onOpenExisting={onOpenExisting}
+    />,
+  );
+  return onCreated;
+}
+
+function fill(labelKey: string, idKey: string, label: string, id: string) {
+  fireEvent.change(screen.getByLabelText(t(labelKey, L)), { target: { value: label } });
+  fireEvent.change(screen.getByLabelText(t(idKey, L)), { target: { value: id } });
+  fireEvent.click(screen.getByRole('button', { name: t('engine.studio.createLive', L) }));
+}
+
+describe('list 「新建」 lands in the paired .custom package on a read-only base (objectstack#36897)', () => {
+  it('an object on a read-only base: the ensure door is asked, the pair is written, its namespace names it, no menu join', async () => {
+    const onCreated = open('object', 'com.vendor.hr', true);
+    fireEvent.keyDown(screen.getByTestId('create-object-owd'), { key: 'ArrowDown' });
+    fireEvent.click(await screen.findByRole('option', { name: t('engine.studio.settings.sharingPublicRead', L) }));
+    fill('engine.studio.data.nameLabel', 'engine.studio.data.idLabel', 'Leave request', 'leave_request');
+    await waitFor(() => expect(onCreated).toHaveBeenCalled());
+    expect(ensure).toHaveBeenCalledWith('com.vendor.hr');
+    expect(save).toHaveBeenCalledTimes(1);
+    const [type, name, body, opts] = save.mock.calls[0] as unknown as [string, string, any, any];
+    expect([type, name]).toEqual(['object', 'hrx_leave_request']);
+    expect(opts).toMatchObject({ mode: 'draft', packageId: 'com.vendor.hr.custom', ifNoneMatch: '*' });
+    expect(body).toHaveProperty('sharingModel', 'public_read');
+    expect(publish).toHaveBeenCalledWith(expect.anything(), { type: 'object', name: 'hrx_leave_request', packageId: 'com.vendor.hr.custom' }, false, publishCreated);
+    expect(onCreated).toHaveBeenCalledWith({ name: 'hrx_leave_request', packageId: 'com.vendor.hr.custom' });
+    expect(joinMenu).not.toHaveBeenCalled();
+  });
+
+  it('CONTROL — an object in a writable package: no ensure, the list package is written and the object joins its menu', async () => {
+    const onCreated = open('object', 'com.example.crm', false);
+    fill('engine.studio.data.nameLabel', 'engine.studio.data.idLabel', 'Lead', 'lead');
+    await waitFor(() => expect(onCreated).toHaveBeenCalledWith({ name: 'crm_lead', packageId: 'com.example.crm' }));
+    expect(ensure).not.toHaveBeenCalled();
+    expect(save.mock.calls[0]?.[3]).toMatchObject({ packageId: 'com.example.crm' });
+    await waitFor(() => expect(joinMenu).toHaveBeenCalledTimes(1));
+  });
+
+  it('a flow on a read-only base: from a starting point, written to the pair, born off', async () => {
+    const onCreated = open('flow', 'com.vendor.hr', true);
+    fireEvent.click(screen.getByTestId('create-flow-preset-manual'));
+    fill('engine.studio.auto.nameLabel', 'engine.studio.auto.idLabel', 'Escalate', 'escalate');
+    await waitFor(() => expect(onCreated).toHaveBeenCalledWith({ name: 'escalate', packageId: 'com.vendor.hr.custom' }));
+    expect(ensure).toHaveBeenCalledWith('com.vendor.hr');
+    const [type, , body, opts] = save.mock.calls[0] as unknown as [string, string, any, any];
+    expect(type).toBe('flow');
+    expect(opts).toMatchObject({ packageId: 'com.vendor.hr.custom' });
+    expect(body.status).toBe('obsolete');
+    expect(JSON.stringify(body)).toContain('"triggerType":"manual"');
+  });
+
+  it('a starting point that watches an object writes nothing until it has one', async () => {
+    const onCreated = open('flow', 'com.vendor.hr', true);
+    fireEvent.click(screen.getByTestId('create-flow-preset-record_created'));
+    fill('engine.studio.auto.nameLabel', 'engine.studio.auto.idLabel', 'On hire', 'on_hire');
+    expect(await screen.findByText(t('engine.studio.auto.preset.needsObject', L))).toBeInTheDocument();
+    expect(ensure).not.toHaveBeenCalled();
+    expect(save).not.toHaveBeenCalled();
+    expect(onCreated).not.toHaveBeenCalled();
+  });
+});
+
+describe('list 「新建」 for an object: the create the object designer no longer has (objectstack#36904)', () => {
+  it('writes the default record sharing explicitly when the author leaves it (objectui#5418)', async () => {
+    const onCreated = open('object', 'com.example.crm', false);
+    fill('engine.studio.data.nameLabel', 'engine.studio.data.idLabel', 'Visit', 'visit');
+    await waitFor(() => expect(onCreated).toHaveBeenCalled());
+    const [, , body, opts] = save.mock.calls[0] as unknown as [string, string, any, any];
+    expect(body).toHaveProperty('sharingModel', 'private');
+    expect(opts).toMatchObject({ mode: 'draft' });
+  });
+
+  it('previews `<namespace>_<identifier>` and saves exactly that name (objectui#11792)', async () => {
+    const onCreated = open('object', 'com.example.crm', false);
+    fireEvent.change(screen.getByLabelText(t('engine.studio.data.nameLabel', L)), { target: { value: 'Repair Ticket' } });
+    await waitFor(() => expect(screen.getByTestId('create-item-stored-name')).toHaveTextContent('crm_repair_ticket'));
+    fireEvent.click(screen.getByRole('button', { name: t('engine.studio.createLive', L) }));
+    await waitFor(() => expect(onCreated).toHaveBeenCalledWith({ name: 'crm_repair_ticket', packageId: 'com.example.crm' }));
+    expect(save.mock.calls[0]?.[1]).toBe('crm_repair_ticket');
+  });
+
+  // CONTROL: a package that declares no namespace previews, and saves, the bare identifier.
+  it('previews the bare identifier when the package has no namespace, and saves exactly that', async () => {
+    const onCreated = open('object', 'com.example.bare', false);
+    fireEvent.change(screen.getByLabelText(t('engine.studio.data.nameLabel', L)), { target: { value: 'Repair Ticket' } });
+    await waitFor(() => expect(screen.getByTestId('create-item-stored-name')).toHaveTextContent('repair_ticket'));
+    expect(screen.getByTestId('create-item-stored-name').textContent).not.toMatch(/_repair_ticket/);
+    fireEvent.click(screen.getByRole('button', { name: t('engine.studio.createLive', L) }));
+    await waitFor(() => expect(onCreated).toHaveBeenCalledWith({ name: 'repair_ticket', packageId: 'com.example.bare' }));
+    expect(save.mock.calls[0]?.[1]).toBe('repair_ticket');
+  });
+
+  it('a taken identifier is refused and nothing is written (objectstack#26917)', async () => {
+    taken.mockResolvedValueOnce({ name: 'crm_visit', label: 'Visit' });
+    const onCreated = open('object', 'com.example.crm', false);
+    fill('engine.studio.data.nameLabel', 'engine.studio.data.idLabel', 'Visit', 'visit');
+    await waitFor(() => expect(taken).toHaveBeenCalled());
+    const notice = await screen.findByTestId('object-create-taken');
+    expect(notice).toHaveTextContent('crm_visit');
+    expect(save).not.toHaveBeenCalled();
+    expect(publish).not.toHaveBeenCalled();
+    expect(onCreated).not.toHaveBeenCalled();
+    // CONTROL (objectstack#36904): held outside this package, it names the holder and offers no Open.
+    expect(notice).toHaveTextContent(
+      tFormat('engine.studio.data.createTakenElsewhere', L, { label: 'Visit', name: 'crm_visit' }),
+    );
+    expect(screen.queryByTestId('object-create-open-existing')).toBeNull();
+  });
+
+  // objectstack#36904 — the in-page create offered to open an object its rail held; the list's does too.
+  it('an identifier this package holds says so, and Open goes to that object\'s designer', async () => {
+    taken.mockResolvedValueOnce({ name: 'crm_visit', label: 'Visit' });
+    surfaces.mockResolvedValueOnce([{ type: 'object', name: 'crm_visit' }]);
+    const onOpenExisting = vi.fn();
+    const onCreated = open('object', 'com.example.crm', false, onOpenExisting);
+    fill('engine.studio.data.nameLabel', 'engine.studio.data.idLabel', 'Visit', 'visit');
+    const notice = await screen.findByTestId('object-create-taken');
+    expect(notice).toHaveTextContent(tFormat('engine.studio.data.createTaken', L, { label: 'Visit', name: 'crm_visit' }));
+    expect(surfaces).toHaveBeenCalledWith(expect.anything(), 'object', 'com.example.crm', L);
+    fireEvent.click(screen.getByTestId('object-create-open-existing'));
+    expect(onOpenExisting).toHaveBeenCalledWith('/studio/com.example.crm/metadata/object/crm_visit');
+    expect(save).not.toHaveBeenCalled();
+    expect(onCreated).not.toHaveBeenCalled();
+  });
+
+  // objectstack#36726 — as the flow create: no live row was there at the check, so the publish is `If-None-Match: *`.
+  it('publishes the created object pinned, so a row published under the name since is refused', async () => {
+    const onCreated = open('object', 'com.example.crm', false);
+    fill('engine.studio.data.nameLabel', 'engine.studio.data.idLabel', 'Visit', 'visit');
+    await waitFor(() => expect(onCreated).toHaveBeenCalled());
+    expect(publish).toHaveBeenCalledTimes(1);
+    expect(publish.mock.calls[0]?.[3]).toBe(publishCreated);
+  });
+});

@@ -964,12 +964,18 @@ const SECURITY_WILDCARD_VAMA_EXPLANATION: RuleExplanation = {
       'superuser over the whole deployment, objects other packages own included. Only the platform\'s own ' +
       'admin set may combine the two, and it lives outside every package, so the rule is an error on any ' +
       'set a stack authors.',
+    '`viewAllFields` on the `\'*\'` entry is reported the same way. It is the field half of the same superuser: ' +
+      'a read vote on every field of every object, other packages\' objects included, so a field another ' +
+      'package hides with `readable: false` is read by every holder of the set that also reaches the object. ' +
+      'The organization boundary refuses to distribute such a set as it refuses the two record bits, and the ' +
+      'platform\'s own admin set carries it on its wildcard. On an object entry the bit is not reported here.',
     'An app needs no wildcard of its own: platform admins already reach every installed package\'s objects ' +
       'through that platform set. An app-level admin (`crm_admin`, say) is an ordinary set that names the ' +
       'objects it needs and that the customer binds to a position of their own choosing (ADR-0090 D9), ' +
       'because "who runs this app" and "who runs the platform" are rarely the same people.',
     'To fix it, enumerate the objects the set really needs, with `viewAllRecords` / `modifyAllRecords` only ' +
-      'on the entries where the bypass is meant, or drop the two flags from the `\'*\'` entry.',
+      'on the entries where the bypass is meant (and `viewAllFields` on the entries whose every field the set ' +
+      'should read), or drop the flags from the `\'*\'` entry.',
   ],
 };
 
@@ -1012,14 +1018,50 @@ const SECURITY_SUPERUSER_FIELD_MASK_INERT_EXPLANATION: RuleExplanation = {
       'it binds as well.',
     'The set\'s bypass is read the way the runtime reads it: its own entry for the object when it has one, ' +
       'otherwise its `\'*\'` entry, as a lookup and never a merge. Only the set that declares the entry is ' +
-      'judged: a holder of two sets is unmasked by the other set\'s View All or Modify All too, but no ' +
-      'author wrote an inert entry there.',
+      'judged here. A holder of two sets is unmasked by the other set\'s View All, Modify All or ' +
+      '`viewAllFields` too; that is `security-cross-set-field-reopen`, which skips a row this rule reports, ' +
+      'so one row earns one finding.',
     'This is a warning, not an error: the pair is legal and no door refuses it. To fix it, decide which half ' +
       'is meant. If the field must stay hidden or read-only, remove `modifyAllRecords` from the object entry ' +
       'and reach every row another way, with `readScope: \'org\'` / `writeScope: \'org\'` on the entry or a ' +
       '`rowLevelSecurity` policy whose condition every row satisfies; the mask then binds. `viewAllRecords` ' +
       'may stay, since the set\'s own `readable: false` binds beside it. If the bypass is meant, delete the ' +
       'field entry, which never took effect.',
+  ],
+};
+
+const SECURITY_CROSS_SET_FIELD_REOPEN_EXPLANATION: RuleExplanation = {
+  rule: 'security-cross-set-field-reopen',
+  covers: 'why a field one set hides is still read through another set',
+  paragraphs: [
+    'Field permissions from every set a caller holds are merged as a union, with no deny. A set that holds ' +
+      '`viewAllRecords` (View All), `modifyAllRecords` (Modify All) or `viewAllFields` on an object votes ' +
+      '`readable: true` on every field of it, and Modify All votes `editable: true` as well. So when one set ' +
+      'hides a field (`readable: false`) or locks it (`editable: false`, or `editable` omitted, which parses ' +
+      'to false), a caller who also holds a second set with one of those bits on the object reads the field ' +
+      '(and, under Modify All, edits it). The first set still reads as protecting the field, and nothing ' +
+      'refuses the pair, which is why an author takes the field to be hidden.',
+    'The bits are read the way the runtime reads them: the second set\'s own entry for the object when it ' +
+      'has one, otherwise its `\'*\'` entry, as a lookup and never a merge. Inside one set the specific row ' +
+      'beats the general bit: a second set whose own row declares the field `readable: false` beside View ' +
+      'All or `viewAllFields` casts no read vote on it, so it is not reported. View All and `viewAllFields` ' +
+      'never vote an edit, so an edit lock beside them binds and is not reported either. A row its own set\'s ' +
+      'Modify All already unbinds is `security-superuser-field-mask-inert`, not this rule, so one row earns ' +
+      'one finding.',
+    'What is not reported: a field that declares `requiredPermissions` (ADR-0066 D3), because that AND-gate ' +
+      'is applied after the merge and no set\'s bit opens it to a caller without the capabilities; a key on ' +
+      'an object this stack does not define, or naming a field the object does not declare; and any field ' +
+      'judged by its name. The rule reads only the declared two-set shape.',
+    'This is a warning, not an error: the pair is legal and no door refuses it. To fix it, decide what the ' +
+      'second set means. If it should not read the field, drop the bit from its entry (reach the rows with ' +
+      '`readScope` / `writeScope` or a row-level policy instead of View All or Modify All), or give it its own ' +
+      '`readable: false` row on the field, which binds beside View All and `viewAllFields` but not beside ' +
+      'Modify All. If it really should read every field, say so with `viewAllFields: true` on its entry: that ' +
+      'read then survives the major release in which View All and Modify All stop voting on fields. A field ' +
+      'that must stay hidden from everyone without a capability, such as a salary or an ID number, is ' +
+      'protected on the field itself: declare `requiredPermissions` on it (ADR-0066 D3), and add a ' +
+      '`maskingRule` where a partial value is needed, so the rule no longer depends on which sets a caller ' +
+      'holds.',
   ],
 };
 
@@ -5836,6 +5878,13 @@ const AI_SKILL_TOOL_UNRESOLVED_EXPLANATION: RuleExplanation = {
       'it. To run an app action, bind `action_<name>` (or `action_*`) rather than `run_action`: the MCP ' +
       'door serves that entry through `run_action`, and the in-product agents call the action tool itself. ' +
       'Ignore the warning only if a runtime plugin outside the platform registry provides the name.',
+    // Held to the rule by its test: the verdict fires for the ask product's tools the door lacks, on a projected skill only.
+    'A name that resolves can still cost the skill its MCP prompt. The MCP door offers a skill that has ' +
+      '`instructions` only on a connection that serves every tool its `tools` names, and the `ask` product\'s ' +
+      'data tools missing from `MCP_DOOR_TOOL_NAMES` (`aggregate_data`, `query_data`, `visualize_data`) are ' +
+      'served by no MCP connection, so a skill offered over MCP that binds one is withheld from every ' +
+      '`prompts/list`; that is its own verdict, naming the tool. Bind only tools both doors serve, or set ' +
+      '`mcpPrompt: false` when the skill is written for the in-product agents.',
     'The runtime drops an unresolved name without a word, so the skill\'s instructions promise a ' +
       'capability the agent cannot call, and the assistant improvises or fails when asked to use it. ' +
       'A warning, not an error (ADR-0078\'s advisory-first ratchet): a runtime plugin outside the ' +
@@ -5955,6 +6004,61 @@ const PERMISSION_RETIRED_LIFECYCLE_RESIDUE_EXPLANATION: RuleExplanation = {
 };
 
 // ── Seed datasets (`validate-seed-state-machine.ts`) ──
+
+// ── Context packs (`validate-ai-context.ts`) ──
+
+const AI_CONTEXT_PACK_SILENCE =
+  'A warning, not a refusal: the pack loads and reads what resolves. `get_record_context` takes a name ' +
+  'the published definition lacks out of its plan and says nothing about it (ADR-0160 D3), so a caller ' +
+  'never learns what the author got wrong — which is why the author hears it here.';
+
+const AI_CONTEXT_OBJECT_UNKNOWN_EXPLANATION: RuleExplanation = {
+  rule: 'ai-context-object-unknown',
+  covers: 'why a context pack must name objects the stack defines',
+  paragraphs: [
+    'A context pack (`aiContexts`, ADR-0160) names a root `object` and the child objects of its `related` ' +
+      'lists. An object this stack does not define is read by nobody: a pack rooted on it is never selected ' +
+      'for a record the app has, and a related list on it is never read.',
+    'Name an object the stack defines (check the spelling), or remove the entry. A `sys_*` object is the ' +
+      'platform\'s and is not judged here.',
+    AI_CONTEXT_PACK_SILENCE,
+  ],
+};
+
+const AI_CONTEXT_FIELD_UNKNOWN_EXPLANATION: RuleExplanation = {
+  rule: 'ai-context-field-unknown',
+  covers: 'why each field a context pack lists must exist on its object',
+  paragraphs: [
+    'A pack lists the root\'s `fields`, each related list\'s `fields`, and a `body.field`. A name the object ' +
+      'does not define is left out of every answer: the assistant reads less about the record than the pack says.',
+    AI_CONTEXT_PACK_SILENCE,
+  ],
+};
+
+const AI_CONTEXT_RELATED_LINK_UNKNOWN_EXPLANATION: RuleExplanation = {
+  rule: 'ai-context-related-link-unknown',
+  covers: 'how a related list of a context pack finds its rows',
+  paragraphs: [
+    'A related list reads the child records whose reference field points at the root record, one level ' +
+      'deep. `field` names that reference field; omitted, the child\'s one reference field to the root is ' +
+      'used. A `field` that is not such a reference, a child with none, or a child with several and no ' +
+      '`field`, leaves the list unread.',
+    'Name the child\'s reference field to the root in `field`.',
+    AI_CONTEXT_PACK_SILENCE,
+  ],
+};
+
+const AI_CONTEXT_BODY_NOT_LONG_TEXT_EXPLANATION: RuleExplanation = {
+  rule: 'ai-context-body-not-long-text',
+  covers: 'which fields a context pack may read as a body',
+  paragraphs: [
+    'A pack\'s `body` is the one long-text field read whole, as an outline of its headings, or one section by ' +
+      'anchor. Only `textarea`, `markdown`, `html` and `richtext` fields are read as a body; any other field ' +
+      'named there is not read, and the answer carries no body.',
+    'Name a long-text field as the body, or list the field in `fields` instead.',
+    AI_CONTEXT_PACK_SILENCE,
+  ],
+};
 
 // ── Assignment rules (`validate-assignment-rules.ts`) ──
 
@@ -6941,6 +7045,10 @@ export const RULE_EXPLANATIONS: Readonly<Record<string, RuleExplanation>> = Obje
   [ORG_AXIS_PERMISSION_INHERITANCE_EXPLANATION.rule]: ORG_AXIS_PERMISSION_INHERITANCE_EXPLANATION,
   [ORG_AXIS_CROSS_ORG_BU_GRANT_EXPLANATION.rule]: ORG_AXIS_CROSS_ORG_BU_GRANT_EXPLANATION,
   [PERMISSION_RETIRED_LIFECYCLE_RESIDUE_EXPLANATION.rule]: PERMISSION_RETIRED_LIFECYCLE_RESIDUE_EXPLANATION,
+  [AI_CONTEXT_OBJECT_UNKNOWN_EXPLANATION.rule]: AI_CONTEXT_OBJECT_UNKNOWN_EXPLANATION,
+  [AI_CONTEXT_FIELD_UNKNOWN_EXPLANATION.rule]: AI_CONTEXT_FIELD_UNKNOWN_EXPLANATION,
+  [AI_CONTEXT_RELATED_LINK_UNKNOWN_EXPLANATION.rule]: AI_CONTEXT_RELATED_LINK_UNKNOWN_EXPLANATION,
+  [AI_CONTEXT_BODY_NOT_LONG_TEXT_EXPLANATION.rule]: AI_CONTEXT_BODY_NOT_LONG_TEXT_EXPLANATION,
   [ASSIGNMENT_RULE_USER_TARGET_EXPLANATION.rule]: ASSIGNMENT_RULE_USER_TARGET_EXPLANATION,
   [ASSIGNMENT_RULE_QUEUE_UNSTAFFED_EXPLANATION.rule]: ASSIGNMENT_RULE_QUEUE_UNSTAFFED_EXPLANATION,
   [SEED_VALUE_OUTSIDE_STATE_MACHINE_EXPLANATION.rule]: SEED_VALUE_OUTSIDE_STATE_MACHINE_EXPLANATION,
@@ -6981,6 +7089,7 @@ export const RULE_EXPLANATIONS: Readonly<Record<string, RuleExplanation>> = Obje
   [FLOW_CREATE_UPDATE_PAIR_EXPLANATION.rule]: FLOW_CREATE_UPDATE_PAIR_EXPLANATION,
   [STATE_MACHINE_NO_INITIAL_STATES_EXPLANATION.rule]: STATE_MACHINE_NO_INITIAL_STATES_EXPLANATION,
   [ACTION_NO_OBJECT_BINDING_EXPLANATION.rule]: ACTION_NO_OBJECT_BINDING_EXPLANATION,
+  [SECURITY_CROSS_SET_FIELD_REOPEN_EXPLANATION.rule]: SECURITY_CROSS_SET_FIELD_REOPEN_EXPLANATION,
 });
 
 /** The explanation for `rule`, or `undefined` when the rule has none. Exact id match. */

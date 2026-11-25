@@ -214,9 +214,10 @@ vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn(), info: vi.f
 
 // The source reaches a dynamic import of it: its first load is paid at collection (`check:test-source-alias`).
 import '@objectstack/lint';
+import '@object-ui/plugin-detail';
 import { DataPillar } from './StudioDesignSurface';
 import { StudioSaveHarness } from './__tests__/studioSaveHarness';
-import { addFieldFromFormToolbar, addFieldFromGrid, type AddFieldInput } from './__tests__/dataPillarAddField';
+import { addFieldFromGrid, type AddFieldInput } from './__tests__/dataPillarAddField';
 import { createEmptyDataSource } from './__tests__/emptyDataSource';
 import { readFields } from '../metadata-admin/previews/object-fields-io';
 
@@ -242,7 +243,7 @@ function openEditor(): HTMLElement {
   const { container } = render(
     <StudioSaveHarness>
       <MemoryRouter initialEntries={[`/studio/${PKG}/data`]}>
-        <DataPillar packageId={PKG} />
+        <DataPillar objectName="acme_task" packageId={PKG} />
       </MemoryRouter>
     </StudioSaveHarness>,
   );
@@ -399,32 +400,9 @@ describe('Data pillar — a draft saved elsewhere is not overwritten in silence 
   });
 });
 
-describe('Data pillar — a create sends If-None-Match: * (objectui#11773)', () => {
-  it('the new object\'s skeleton is sent with the first-write pin; it is live at once, so each Save after the load asserts no draft', async () => {
-    server.active.clear();
-    const a = openEditor();
-    fireEvent.click(await within(a).findByTestId('empty-state-new-object', undefined, { timeout: 8000 }));
-    const dialog = await screen.findByRole('dialog');
-    fireEvent.change(dialog.querySelectorAll('input')[0]!, { target: { value: 'Ticket' } });
-    fireEvent.click(within(dialog).getByRole('button', { name: /^create$/i }));
-    await waitFor(() => expect(server.saves).toHaveLength(1), { timeout: 8000 });
-    expect([server.saves[0]!.ifMatch, server.saves[0]!.ifNoneMatch]).toEqual([undefined, '*']);
-
-    await loaded(a, '1 field');
-    fireEvent.click(within(a).getAllByRole('button', { name: 'Field layout' })[0]!);
-    await addFieldAndSave(a, addFieldFromFormToolbar);
-    await addFieldAndSave(a, addFieldFromFormToolbar, SECOND);
-    // The skeleton's draft, which the create publishes at once (objectstack#36511):
-    // no draft is left, so each Save after the load asserts none.
-    expect(mockClient.publish).toHaveBeenCalledWith('object', expect.stringMatching(/ticket$/), expect.anything());
-    expect(server.saves.map((s) => [s.ifMatch, s.ifNoneMatch])).toEqual([
-      [undefined, '*'],
-      [undefined, '*'],
-      [undefined, '*'],
-    ]);
-  });
-});
-
+// objectstack#36904 — the object designer has no 「新建」: the create's first-write
+// pin is pinned on the list's dialog (`MetadataListCreateDialog.pairCreate-36897`,
+// `ifNoneMatch: '*'`), and each later Save asserting no draft by the case above.
 describe('Data pillar — two Saves over one published object are not last-writer-wins (objectstack#36601)', () => {
   /** The live row's version both editors open at. */
   const LIVE = 'hmac-sha256:live0';
@@ -542,5 +520,60 @@ describe('Data pillar — two Saves over one published object are not last-write
     await loaded(a, '2 fields');
     await addFieldAndSave(a);
     expect(server.publishes.map((p) => [p.ifMatch, p.ifNoneMatch])).toEqual([[undefined, undefined]]);
+  });
+});
+
+describe('Data pillar — a reload over a pending draft does not pin its publish to the fresh read (objectstack#36726)', () => {
+  const LIVE = 'hmac-sha256:live0';
+  const MOVED = 'hmac-sha256:moved';
+
+  /**
+   * The residual the draft pin cannot stop: a draft is pending before the
+   * Save (a copilot's), and another writer moves the live row without
+   * touching it (a direct active save, a rollback). The Save writes into the
+   * pending draft, its publish is refused, and the author reloads: the draft,
+   * which the Save never discards, is re-read carrying the page's edit.
+   */
+  async function reloadOverPendingDraft(): Promise<HTMLElement> {
+    server.servesPublishedVersion = true;
+    server.activeVersions.set(`object/${OBJECT.name}`, LIVE);
+    servePendingDraft();
+    const a = openEditor();
+    await loaded(a, '2 fields');
+    server.active.set(`object/${OBJECT.name}`, { ...JSON.parse(JSON.stringify(OBJECT)), label: 'Task (moved)' });
+    server.activeVersions.set(`object/${OBJECT.name}`, MOVED);
+    await addFieldFromGrid(a);
+    await saveIn(a);
+    await screen.findByTestId('draft-conflict-dialog', undefined, { timeout: 8000 });
+    expect(server.saves[server.saves.length - 1]!.ifMatch).toBe(PENDING);
+    fireEvent.click(screen.getByTestId('draft-conflict-reload'));
+    await waitFor(() => expect(screen.queryByTestId('draft-conflict-dialog')).toBeNull(), { timeout: 8000 });
+    await loaded(a, '3 fields');
+    expect(server.drafts.size).toBe(1);
+    return a;
+  }
+
+  it('the next Save is asked again, pinned to the version the conflict was raised on', async () => {
+    const a = await reloadOverPendingDraft();
+    const publishesBefore = server.publishes.length;
+    await addFieldFromGrid(a, SECOND);
+    await saveIn(a);
+    await screen.findByTestId('draft-conflict-dialog', undefined, { timeout: 8000 });
+    expect(server.publishes.slice(publishesBefore).map((p) => p.ifMatch)).toEqual([LIVE]);
+    expect(server.active.get(`object/${OBJECT.name}`)!.label).toBe('Task (moved)');
+    expect(liveFields()).toEqual(['title', 'status']);
+  });
+
+  it('asked again, "overwrite" is the re-confirmation: it publishes over the moved row, pinned to it', async () => {
+    const a = await reloadOverPendingDraft();
+    await addFieldFromGrid(a, SECOND);
+    await saveIn(a);
+    await screen.findByTestId('draft-conflict-dialog', undefined, { timeout: 8000 });
+    fireEvent.click(screen.getByTestId('draft-conflict-overwrite'));
+    await act(async () => {
+      fireEvent.click(await screen.findByTestId('draft-conflict-overwrite-confirm'));
+    });
+    await waitFor(() => expect(liveFields()).toEqual(['title', 'status', 'new_field', 'second_field']), { timeout: 8000 });
+    expect(server.publishes[server.publishes.length - 1]!.ifMatch).toBe(MOVED);
   });
 });

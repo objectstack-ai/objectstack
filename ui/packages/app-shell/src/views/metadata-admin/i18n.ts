@@ -178,15 +178,22 @@ const TYPE_LABELS_ZH: Record<string, string> = {
   picklist: '选项列表',
 };
 
+/**
+ * The group name each registered metadata `domain` is drawn with, everywhere a
+ * domain is named: the Studio menu, the All metadata directory's headings and
+ * chips, and the domain badge on a type or item page (Setup's datasource pages
+ * included). `system` is Platform / 平台 and `security` is Access / 访问, the
+ * names objectstack ADR-0084 (amended 2026-11-24) gives those two groups.
+ */
 const DOMAIN_LABELS_EN: Record<string, string> = {
   data: 'Data',
   ui: 'UI',
   automation: 'Automation',
   ai: 'AI',
-  system: 'System',
+  system: 'Platform',
   platform: 'Platform',
   identity: 'Identity',
-  security: 'Security',
+  security: 'Access',
   other: 'Other',
 };
 
@@ -195,10 +202,10 @@ const DOMAIN_LABELS_ZH: Record<string, string> = {
   ui: '界面',
   automation: '自动化',
   ai: 'AI',
-  system: '系统',
+  system: '平台',
   platform: '平台',
   identity: '身份',
-  security: '安全',
+  security: '访问',
   other: '其他',
 };
 

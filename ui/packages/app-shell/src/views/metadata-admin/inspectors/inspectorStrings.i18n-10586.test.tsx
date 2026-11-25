@@ -100,8 +100,8 @@ vi.stubGlobal(
   'fetch',
   (async (url: string) =>
     String(url).includes('/api/v1/automation/connectors')
-      ? { ok: true, json: async () => ({ data: { connectors: CONNECTORS } }) }
-      : { ok: false, json: async () => null }) as unknown as typeof globalThis.fetch,
+      ? { headers: new Headers(), ok: true, json: async () => ({ data: { connectors: CONNECTORS } }) }
+      : { headers: new Headers(), ok: false, json: async () => null }) as unknown as typeof globalThis.fetch,
 );
 
 type Lang = 'en' | 'zh';

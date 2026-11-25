@@ -247,6 +247,18 @@ const CALLERS: Record<string, Classification> = {
       'then expanded by `findData`, which asks its exposure) and checks that a `related` link field points at the parent ' +
       'record; each related list is a `findData` read of the child it names, judged by that door as any list.',
   },
+  // [#37140] `get_record_context` (ADR-0160 D4): the read set and the executor's lookups.
+  'packages/services/service-record-context/src/read-set.ts': {
+    kind: 'executes',
+    read:
+      "`get_record_context`'s lookup display names: each lookup the pack lists is read as an `expand` of the caller's " +
+      "own `query` on the record's object, through the data door, whose `servedExpand` decides each expansion target",
+    decidedIn: 'packages/metadata-protocol/src/protocol-query-validation.ts',
+    also:
+      'reads no record: `lookupTargetOf` names the object a listed lookup points at, for the read set and so the ' +
+      'executor asks that target of the read guard before any read, and checks that a `related` link field points at ' +
+      'the root; each related list is a `query` of the child it names, judged by that door as any list.',
+  },
   'packages/core/src/utils/relation-condition-sites.ts': {
     kind: 'not-a-served-read',
     reason:
@@ -277,6 +289,11 @@ const CALLERS: Record<string, Classification> = {
     reason: 'authoring-time static analysis of metadata; reads no record',
   },
   'packages/lint/src/validate-object-references.ts': {
+    kind: 'not-a-served-read',
+    reason: 'authoring-time static analysis of metadata; reads no record',
+  },
+  // [#37140] A context pack's `related` link judged against the child's declared references.
+  'packages/lint/src/validate-ai-context.ts': {
     kind: 'not-a-served-read',
     reason: 'authoring-time static analysis of metadata; reads no record',
   },

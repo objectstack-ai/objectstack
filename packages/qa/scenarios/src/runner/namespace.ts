@@ -92,6 +92,9 @@ export function namespacedScenario(scenario: LoadedScenario): LoadedScenario {
       operations: c.run.operations.map((op) => ({
         ...op,
         object: o(op.object),
+        // `via` names one of the card's agent actions, which carry the prefix below: a bare `via`
+        // would never match the action the build declares.
+        ...(op.via !== undefined ? { via: o(op.via) } : {}),
         outcome: op.outcome.kind === 'applied' ? { ...op.outcome, state: op.outcome.state.map((s) => ({ ...s, object: o(s.object) })) } : op.outcome,
       })),
       guardrails: c.run.guardrails.map((g) => ({

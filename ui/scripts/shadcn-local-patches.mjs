@@ -157,12 +157,64 @@ const sidebarCookieReadPatches = [
       'the first render, not applied after one expanded paint. Precedence is ' +
       'cookie > `defaultOpen`; the controlled `open` prop still wins, because ' +
       'it is applied downstream of this state (`openProp ?? _open`). ' +
-      'SIDEBAR_COOKIE_NAME is passed in so the cookie name keeps exactly one ' +
-      'spelling — the write side\'s.',
+      'The provider\'s `cookieName` (default SIDEBAR_COOKIE_NAME, the ' +
+      '`sidebar-cookie-name-*` patches below) is passed in so the read and the ' +
+      'write name the same cookie.',
     find: 'const [_open, _setOpen] = React.useState(defaultOpen)',
     replace:
-      'const [_open, _setOpen] = React.useState(() => readSidebarStateCookie(SIDEBAR_COOKIE_NAME) ?? defaultOpen)',
-    marker: 'readSidebarStateCookie(SIDEBAR_COOKIE_NAME)',
+      'const [_open, _setOpen] = React.useState(() => readSidebarStateCookie(cookieName) ?? defaultOpen)',
+    marker: 'readSidebarStateCookie(cookieName)',
+    occurrences: 1,
+  },
+];
+
+/**
+ * The sidebar cookie-name patches (objectstack#36899).
+ *
+ * `SidebarProvider` reads and writes ONE cookie, `sidebar_state`, so a second
+ * provider in the same console (Studio's left menu) would share the app
+ * sidebar's collapse state: collapsing one collapsed the other on the next
+ * load. A `cookieName` prop, defaulting to `SIDEBAR_COOKIE_NAME`, lets a
+ * provider keep its own; every existing provider passes none and is unchanged.
+ * The read above takes the same prop.
+ *
+ * @type {LocalPatch[]}
+ */
+const sidebarCookieNamePatches = [
+  {
+    id: 'sidebar-cookie-name-prop',
+    issue: 'objectstack#36899',
+    reason: 'Declares the provider\'s optional `cookieName` prop beside `onOpenChange`.',
+    find: '    onOpenChange?: (open: boolean) => void\n',
+    replace: '    onOpenChange?: (open: boolean) => void\n    cookieName?: string\n',
+    marker: '    cookieName?: string\n',
+    occurrences: 1,
+  },
+  {
+    id: 'sidebar-cookie-name-destructure',
+    issue: 'objectstack#36899',
+    reason: 'Reads the prop, defaulting to the one name every existing provider uses.',
+    find: '      onOpenChange: setOpenProp,\n',
+    replace: '      onOpenChange: setOpenProp,\n      cookieName = SIDEBAR_COOKIE_NAME,\n',
+    marker: 'cookieName = SIDEBAR_COOKIE_NAME,',
+    occurrences: 1,
+  },
+  {
+    id: 'sidebar-cookie-name-write',
+    issue: 'objectstack#36899',
+    reason: 'Writes the collapse state under the provider\'s own cookie name.',
+    find: 'document.cookie = `${SIDEBAR_COOKIE_NAME}=${openState}',
+    replace: 'document.cookie = `${cookieName}=${openState}',
+    marker: '`${cookieName}=${openState}',
+    occurrences: 1,
+  },
+  {
+    id: 'sidebar-cookie-name-write-deps',
+    issue: 'objectstack#36899',
+    reason: 'The write\'s callback depends on the name it writes.',
+    find: '      [setOpenProp, open]\n',
+    replace: '      [setOpenProp, open, cookieName]\n',
+    marker: '[setOpenProp, open, cookieName]',
     occurrences: 1,
   },
 ];
@@ -323,6 +375,67 @@ const sidebarOffcanvasStateQualifierPatches = [
   marker: replace,
   occurrences: 1,
 }));
+
+/**
+ * The sidebar phone-drawer accessible-name patches (objectstack#37018).
+ *
+ * Below the mobile breakpoint `Sidebar` renders a Sheet, a dialog whose `sr-only`
+ * header upstream fills with the English literals "Sidebar" and "Displays the
+ * mobile sidebar.", so a screen reader in a zh / ja / es workspace announced
+ * English on opening a drawer whose every visible row is translated.
+ *
+ * As with the close-label family, the payload stays OUT of `src/ui/`: the
+ * translated title lives in `packages/components/src/lib/sidebar-drawer-label.tsx`
+ * (`console.nav.menuLabel`, the name the app menu inside the drawer already
+ * announces, with an English fallback), and the primitive gets three anchored
+ * edits. The description has no counterpart in the locale packs, so it is
+ * dropped and Radix is told so with `aria-describedby={undefined}`, the spelling
+ * that keeps its missing-description warning quiet. Every `find` is written from
+ * `scripts/__tests__/fixtures/shadcn-registry/sidebar.registry.txt` after
+ * `rewriteRegistryImports`.
+ *
+ * @type {LocalPatch[]}
+ */
+const sidebarDrawerLabelPatches = [
+  {
+    id: 'sidebar-drawer-label-import',
+    issue: 'objectstack#37018',
+    reason:
+      'Imports the translated drawer title and drops `SheetDescription` from the ' +
+      'sheet import, since the header below no longer renders one.',
+    find: '  SheetDescription,\n  SheetHeader,\n  SheetTitle,\n} from "./sheet"\n',
+    replace:
+      '  SheetHeader,\n  SheetTitle,\n} from "./sheet"\n' +
+      'import { SidebarDrawerTitle } from "../lib/sidebar-drawer-label"\n',
+    marker: '  SheetTitle,\n} from "./sheet"\nimport { SidebarDrawerTitle } from "../lib/sidebar-drawer-label"\n',
+    occurrences: 1,
+  },
+  {
+    id: 'sidebar-drawer-label-no-description',
+    issue: 'objectstack#37018',
+    reason:
+      'Declares that the phone drawer has no description, so Radix does not warn ' +
+      'about a missing `Description` once the English one is dropped.',
+    find: '            data-mobile="true"\n',
+    replace: '            data-mobile="true"\n            aria-describedby={undefined}\n',
+    marker: '            data-mobile="true"\n            aria-describedby={undefined}\n',
+    occurrences: 1,
+  },
+  {
+    id: 'sidebar-drawer-label-title',
+    issue: 'objectstack#37018',
+    reason:
+      "The drawer dialog's accessible name: `console.nav.menuLabel` for the session " +
+      'locale, "App navigation" when no I18nProvider is mounted, in place of the ' +
+      'English "Sidebar" title and its English description.',
+    find:
+      '              <SheetTitle>Sidebar</SheetTitle>\n' +
+      '              <SheetDescription>Displays the mobile sidebar.</SheetDescription>\n',
+    replace: '              <SheetTitle><SidebarDrawerTitle /></SheetTitle>\n',
+    marker: '              <SheetTitle><SidebarDrawerTitle /></SheetTitle>\n',
+    occurrences: 1,
+  },
+];
 
 /**
  * Upstream's thumb class list, spelled exactly once.
@@ -956,9 +1069,11 @@ export const LOCAL_PATCHES = {
     'import * as AlertDialogPrimitive from "@radix-ui/react-alert-dialog"',
   ),
   sidebar: [
+    ...sidebarCookieNamePatches,
     ...sidebarCookieReadPatches,
     ...sidebarOptionalContextPatches,
     ...sidebarOffcanvasStateQualifierPatches,
+    ...sidebarDrawerLabelPatches,
   ],
   slider: sliderThumbPassThroughPatches,
   calendar: calendarDisplayLocalePatches,

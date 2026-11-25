@@ -28,7 +28,7 @@
  * prose vs `{field, code, message}` entries — so the comparable projection is
  * the ordered list of `(path, message)` pairs each one visited. The
  * normalisation below removes exactly three formatting facts and asserts the
- * only deliberate asymmetry rather than hiding it:
+ * two deliberate asymmetries rather than hiding them:
  *
  * 1. the renderer's indent and `✗` glyph;
  * 2. its `(root)` spelling of the empty path, which the wire writes as `''`;
@@ -37,6 +37,12 @@
  *    carry a catalog code; an omission count has neither). §4 pins that this
  *    line is present on the prose side and absent on the wire side for a capped
  *    fixture — the asymmetry is asserted, not normalised away silently.
+ * 4. [#35433] an explained bare union head — zod's `"Invalid input"` followed
+ *    by the entries that explain it. The renderer keeps it as the parent line of
+ *    its indented tree; the wire drops it, as the metadata envelope does since
+ *    #35400. {@link withoutExplainedBareHeads} projects exactly those heads out
+ *    of the prose side, and the asymmetry describe below asserts it directly,
+ *    with a kept unexplained head as its control.
  *
  * Everything else — which branches were selected, in which order, with which
  * messages, to which depth — must match pair for pair.
@@ -45,11 +51,12 @@
 import { describe, expect, it } from 'vitest';
 import { z } from 'zod';
 import { formatZodIssue } from './error-map.zod';
-import { zodIssuesToFields } from '../api/zod-issues-to-fields';
+import { ZOD_UNION_DEFAULT_MESSAGE, zodIssuesToFields } from '../api/zod-issues-to-fields';
 import {
   CONTAINER_ISSUE_CODES,
   NESTED_EXPANSION_DEPTH_LIMIT,
   UNION_BRANCH_SELECTION_LIMIT,
+  isKindMismatchOnly,
   selectUnionBranches,
 } from './union-branch-policy';
 import * as SharedBarrel from './index';
@@ -81,6 +88,21 @@ function wirePairs(issues: readonly unknown[], input: unknown): Visited[] {
     field: entry.field,
     message: entry.message,
   })).map(({ field, message }) => ({ path: field, message }));
+}
+
+/**
+ * [#35433] The renderer's pairs minus the union heads the wire drops: a pair
+ * whose message is zod's bare default and whose NEXT pair sits at or under its
+ * slot — the first entry of its own expansion. A head nothing follows (every
+ * branch a bare kind mismatch, or the depth bound) is kept, as the wire keeps it.
+ */
+function withoutExplainedBareHeads(pairs: readonly Visited[]): Visited[] {
+  const under = (head: string, path: string) =>
+    head === '' || path === head || path.startsWith(`${head}.`);
+  return pairs.filter((pair, i) => {
+    const next = pairs[i + 1];
+    return !(pair.message === ZOD_UNION_DEFAULT_MESSAGE && next !== undefined && under(pair.path, next.path));
+  });
 }
 
 /** Every renderer line, including the ones §4 asserts are prose-only. */
@@ -180,13 +202,18 @@ const FIXTURES: Array<[string, { safeParse: (v: unknown) => any }, unknown]> = [
     }),
     { u: { fields: { 'Bad Key': 1 } } },
   ],
+  [
+    'a member that is itself a bare union of kinds is a kind mismatch — the union stands alone',
+    z.object({ u: z.union([z.union([z.string(), z.number()]), z.union([z.boolean(), z.array(z.string())])]) }),
+    { u: {} },
+  ],
 ];
 
 describe('the two walks reach the same union-branch verdict', () => {
   for (const [name, schema, value] of FIXTURES) {
     it(`agrees pair for pair — ${name}`, () => {
       const issues = issuesFor(schema, value);
-      expect(wirePairs(issues, value)).toEqual(renderedPairs(issues));
+      expect(wirePairs(issues, value)).toEqual(withoutExplainedBareHeads(renderedPairs(issues)));
     });
 
     it(`…and is deterministic across runs — ${name}`, () => {
@@ -211,7 +238,7 @@ describe('the two walks reach the same union-branch verdict', () => {
   });
 });
 
-describe('the ONE deliberate asymmetry, asserted rather than assumed', () => {
+describe('the deliberate asymmetries, asserted rather than assumed', () => {
   const [, cappedSchema, cappedValue] = FIXTURES.find(
     ([name]) => name.startsWith('the branch cap'),
   )!;
@@ -238,7 +265,55 @@ describe('the ONE deliberate asymmetry, asserted rather than assumed', () => {
     const { selected, omitted } = selectUnionBranches(union.errors as any[][]);
     expect(selected).toHaveLength(UNION_BRANCH_SELECTION_LIMIT);
     expect(omitted).toBe(2);
-    expect(wirePairs(issues, cappedValue)).toEqual(renderedPairs(issues));
+    expect(wirePairs(issues, cappedValue)).toEqual(withoutExplainedBareHeads(renderedPairs(issues)));
+  });
+
+  it('[#35433] the renderer keeps an explained bare union head; the wire drops it', () => {
+    const issues = issuesFor(cappedSchema, cappedValue);
+    const head = { path: 'u', message: ZOD_UNION_DEFAULT_MESSAGE };
+    expect(renderedPairs(issues)[0]).toEqual(head);
+    expect(wirePairs(issues, cappedValue)).not.toContainEqual(head);
+
+    // CONTROL — a bare head nothing below explains is kept by both.
+    const [, aloneSchema, aloneValue] = FIXTURES.find(([name]) => name.startsWith('all branches kind-mismatch'))!;
+    const aloneIssues = issuesFor(aloneSchema, aloneValue);
+    expect(renderedPairs(aloneIssues)).toEqual([head]);
+    expect(wirePairs(aloneIssues, aloneValue)).toEqual([head]);
+  });
+});
+
+describe('[#35500] a member that is itself a bare union of kinds', () => {
+  const [, nestedSchema, nestedValue] = FIXTURES.find(([name]) => name.startsWith('a member that is itself'))!;
+
+  it('both walks say the union once — no line, no entry, per member', () => {
+    const issues = issuesFor(nestedSchema, nestedValue);
+    const head = { path: 'u', message: ZOD_UNION_DEFAULT_MESSAGE };
+    expect(renderedPairs(issues)).toEqual([head]);
+    expect(wirePairs(issues, nestedValue)).toEqual([head]);
+    expect(selectUnionBranches((issues[0] as any).errors)).toEqual({ selected: [], omitted: 0 });
+  });
+
+  it('the rule recurses, so the nesting depth does not matter', () => {
+    const kinds = z.union([z.union([z.string(), z.number()]), z.boolean()]);
+    const issues = issuesFor(z.object({ u: z.union([kinds, z.array(z.number())]) }), { u: {} });
+    expect(selectUnionBranches((issues[0] as any).errors).selected).toEqual([]);
+    expect(wirePairs(issues, { u: {} })).toEqual([{ path: 'u', message: ZOD_UNION_DEFAULT_MESSAGE }]);
+    expect(isKindMismatchOnly([{
+      path: [], code: 'invalid_union', message: ZOD_UNION_DEFAULT_MESSAGE,
+      errors: [[{ path: [], code: 'invalid_union', message: ZOD_UNION_DEFAULT_MESSAGE, errors: [[{ path: [], code: 'invalid_type' }]] }]],
+    }])).toBe(true);
+  });
+
+  it('a nested union carrying its schema\'s own sentence stays informative', () => {
+    const sentence = 'Write a string or a number.';
+    const schema = z.object({ u: z.union([z.union([z.string(), z.number()], { error: sentence }), z.boolean()]) });
+    const issues = issuesFor(schema, { u: {} });
+    expect(selectUnionBranches((issues[0] as any).errors).selected).toHaveLength(1);
+    expect(wirePairs(issues, { u: {} })).toEqual([{ path: 'u', message: sentence }]);
+  });
+
+  it('a nested union with no branches keeps the reading it always had', () => {
+    expect(isKindMismatchOnly([{ path: [], code: 'invalid_union', message: ZOD_UNION_DEFAULT_MESSAGE, errors: [] }])).toBe(false);
   });
 });
 
@@ -270,6 +345,7 @@ describe('⛔ the policy stays package-internal', () => {
     'CONTAINER_ISSUE_CODES',
     'NESTED_EXPANSION_DEPTH_LIMIT',
     'UNION_BRANCH_SELECTION_LIMIT',
+    'ZOD_UNION_DEFAULT_MESSAGE',
   ];
 
   it('no policy symbol reaches the `shared` entry point', () => {

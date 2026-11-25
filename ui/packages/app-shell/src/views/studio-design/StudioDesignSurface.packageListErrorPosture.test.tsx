@@ -19,6 +19,7 @@ import '@testing-library/jest-dom/vitest';
 // The surface's reach loads `@objectstack/lint` lazily; pay that load during
 // collection, not inside a case's clocked window (`check:test-source-alias`).
 import '@objectstack/lint';
+import '@object-ui/plugin-detail';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
@@ -116,6 +117,7 @@ function renderSurface(tab = 'data') {
   return render(
     <MemoryRouter initialEntries={[`/studio/${PACKAGE_ID}/${tab}`]}>
       <Routes>
+        <Route path="/studio/:packageId/metadata/*" element={<StudioDesignSurface area="metadata" />} />
         <Route path="/studio/:packageId/:tab" element={<StudioDesignSurface />} />
         <Route path="/home" element={<div data-testid="home-page" />} />
       </Routes>
@@ -129,8 +131,10 @@ describe('Studio top bar — package-list fetch failure is reported, not swallow
     renderSurface();
 
     await waitFor(() => expect(toastError).toHaveBeenCalled());
-    // The rest of the header survived the failure.
-    expect(screen.getByRole('link', { name: 'Automations' })).toBeInTheDocument();
+    // The rest of the chrome survived the failure: the menu toggle and, since
+    // objectstack#36899, the left menu that replaced the pillar links.
+    expect(screen.getByTestId('studio-menu-toggle')).toBeInTheDocument();
+    expect(screen.getByRole('navigation', { name: 'Studio menu' })).toBeInTheDocument();
     // …and its way out still works (objectstack#36501): no app is known, so
     // it goes to the console's landing.
     fireEvent.click(screen.getByTestId('studio-back-to-app'));
@@ -138,13 +142,14 @@ describe('Studio top bar — package-list fetch failure is reported, not swallow
   });
 
   it('one outage is one toast: every call site reports on the same sonner id', async () => {
-    // The `data` tab mounts both `fetchPackages()` callers at once — the
-    // writability courtesy gate and the namespace lookup.
+    // objectstack#36904 — the Studio home mounts one `fetchPackages()` caller
+    // now, the writability courtesy gate: the namespace lookup left with the
+    // object designer's own 「新建」. Every report it makes rides the one id.
     fetchPackagesMock.mockRejectedValue(new Error('Service Unavailable'));
     renderSurface('data');
 
-    await waitFor(() => expect(fetchPackagesMock.mock.calls.length).toBeGreaterThanOrEqual(2));
-    await waitFor(() => expect(toastError.mock.calls.length).toBeGreaterThanOrEqual(2));
+    await waitFor(() => expect(fetchPackagesMock).toHaveBeenCalled());
+    await waitFor(() => expect(toastError).toHaveBeenCalled());
 
     // Sonner collapses same-id toasts into one, so the rejections of one
     // endpoint surface as a single message rather than a stack.

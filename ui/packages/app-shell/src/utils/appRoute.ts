@@ -15,6 +15,8 @@
  *   framework-owned, app-independent page for this user (see below).
  */
 
+import { studioHomePath, studioItemPath, studioMetadataItemAddress } from '../views/studio-design/studioAddress.js';
+
 /**
  * The minimal app shape THESE ROUTE HELPERS read.
  *
@@ -260,7 +262,7 @@ export function appStudioDesignPath(
   if (!isWorkspaceAdmin) return null;
   const packageId = studioPackageId(app);
   if (!packageId) return null;
-  return `/studio/${encodeURIComponent(packageId)}/data`;
+  return studioHomePath(packageId);
 }
 
 /**
@@ -284,20 +286,18 @@ export function appStudioSurfacePath(
   const type = surface?.type;
   const name = surface?.name;
   if (!type || !name) return null;
-  return `/studio/${encodeURIComponent(packageId)}/metadata/${encodeURIComponent(type)}/${encodeURIComponent(name)}`;
+  // The area's item page for every type, explicitly: not `studioItemPath`,
+  // which sends a pillar type to its pillar.
+  return studioMetadataItemAddress(packageId, type, name);
 }
 
 /**
- * Deep-link from a running app straight to a specific **object's** design
- * surface in Studio's Data pillar — e.g. viewing the `account` records page
- * opens `/studio/:packageId/data?surface=object:account`, which the Data
- * pillar's `?surface=` restore honors (see `DataPillar` in
- * `StudioDesignSurface`). Same admin/package guards as
- * {@link appStudioDesignPath}; returns null when the object name is missing so
- * the caller can fall back to the plain Data tab.
- *
- * The `surface` param value is `object:<name>`; only the name is
- * percent-encoded (`object` is a fixed keyword).
+ * Deep-link from a running app straight to a specific **object's** designer
+ * in Studio — e.g. viewing the `account` records page opens
+ * `/studio/:packageId/metadata/object/account`, the object designer
+ * full-screen on its own address (objectstack#36904). Same admin/package
+ * guards as {@link appStudioDesignPath}; returns null when the object name is
+ * missing so the caller can fall back.
  */
 export function appStudioObjectPath(
   app: AppRouteLike | null | undefined,
@@ -308,8 +308,7 @@ export function appStudioObjectPath(
   const packageId = studioPackageId(app);
   if (!packageId) return null;
   if (!objectName) return null;
-  const value = `object:${encodeURIComponent(objectName)}`;
-  return `/studio/${encodeURIComponent(packageId)}/data?surface=${value}`;
+  return studioItemPath(packageId, 'object', objectName);
 }
 
 /**

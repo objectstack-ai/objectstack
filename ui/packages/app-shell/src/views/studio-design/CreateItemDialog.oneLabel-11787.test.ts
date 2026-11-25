@@ -66,8 +66,12 @@ function createDialogSites(): Site[] {
 const DRAFT_LABEL = "t('engine.studio.createDraft', locale)";
 const LIVE_LABEL = "t('engine.studio.createLive', locale)";
 
-/** The dialogs of the live editors, by their title key (objectstack#36511). */
-const LIVE_TITLES = ['engine.studio.data.newObject', 'engine.studio.auto.newTitle', 'engine.studio.access.new'];
+/**
+ * The dialogs of the live editors, by their title key (objectstack#36511).
+ * objectstack#36905 — the Access pillar's went with the pillar: a permission
+ * set is created from its type's list.
+ */
+const LIVE_TITLES = ['engine.studio.data.newObject', 'engine.studio.auto.newTitle'];
 
 const titleKeyOf = (site: Site): string | undefined => site.props.match(/title=\{t\('([^']+)'/)?.[1];
 
@@ -81,9 +85,12 @@ describe('Studio create dialogs say what the create does (objectui#11787, object
     }
   });
 
-  it('CONTROL — the enumeration reaches each live dialog once, the New permission set one included', () => {
+  it('CONTROL — the enumeration reaches each live dialog, the New permission set one included', () => {
     const live = createDialogSites().filter((site) => LIVE_TITLES.includes(titleKeyOf(site) ?? ''));
-    expect(live.map(titleKeyOf).sort()).toEqual([...LIVE_TITLES].sort());
+    // An object and a flow are created from their pillar AND from the metadata
+    // list (objectstack#36897, `MetadataListCreateDialog.tsx`): each title is
+    // reached, by one site or more.
+    expect([...new Set(live.map(titleKeyOf))].sort()).toEqual([...LIVE_TITLES].sort());
     for (const site of live) expect(site.submitLabel).toBe(LIVE_LABEL);
   });
 

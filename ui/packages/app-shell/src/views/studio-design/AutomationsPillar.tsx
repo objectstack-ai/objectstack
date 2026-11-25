@@ -86,7 +86,7 @@ import {
   useRegisteredMetadataInspectorTypes,
 } from '../metadata-admin/inspector-registry.js';
 import { useMetadataClient } from '../metadata-admin/useMetadata.js';
-import { readDraftForSave, useDraftSaveGuard } from '../metadata-admin/DraftConflictDialog.js';
+import { isPublishConflictKeptEditing, readDraftForSave, useDraftSaveGuard } from '../metadata-admin/DraftConflictDialog.js';
 import {
   DraftVerdictContext,
   draftEnvelopeDiagnostics,
@@ -95,7 +95,7 @@ import {
   type ServerDiagnostics,
 } from '../metadata-admin/draftVerdict.js';
 import { emitMetadataRefresh } from '../../assistant/assistantBus.js';
-import { publishSavedItem, STUDIO_SAVE_TOAST_ID, useStudioSaveEntry, type StudioSaveResult } from './studioSaveBar.js';
+import { publishSavedItem, publishCreated, publishedPinOfLayers, STUDIO_SAVE_TOAST_ID, useStudioSaveEntry, type StudioSaveResult } from './studioSaveBar.js';
 import {
   flowHeldEdit,
   flowSaveRefusal,
@@ -158,6 +158,12 @@ import {
 } from './StudioCustomizeControls.js';
 import { SavedToCustomizationNote } from '../../preview/savedToCustomization.js';
 import { toast } from 'sonner';
+import { createAuthenticatedFetch } from '@object-ui/auth';
+
+/** The console's authenticated fetch: the stored bearer token beside the session cookie. */
+function authFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+  return createAuthenticatedFetch()(input, init);
+}
 
 /**
  * objectstack#34818 — the names of the flows that have a published version in
@@ -378,6 +384,9 @@ export function AutomationsPillar({
   const {
     save: saveFlowDraft,
     recordRead: recordFlowRead,
+    // objectstack#36726 — and the published flow the buffer was loaded at, for the Save's publish.
+    recordPublished: recordFlowPublished,
+    publish: publishFlow,
     dialog: flowConflictDialog,
   } = useDraftSaveGuard(client, reloadFlowDraft);
   const [selection, setSelection] = React.useState<MetadataSelection | null>(null);
@@ -536,7 +545,7 @@ export function AutomationsPillar({
     let cancelled = false;
     (async () => {
       try {
-        const res = await fetch('/api/v1/automation/_status', { credentials: 'include', headers: { Accept: 'application/json' } });
+        const res = await authFetch('/api/v1/automation/_status', { credentials: 'include', headers: { Accept: 'application/json' } });
         if (!res.ok) return;
         const payload = (await res.json().catch(() => null)) as { data?: { flows?: FlowRuntimeState[] }; flows?: FlowRuntimeState[] } | null;
         const list = payload?.data?.flows ?? payload?.flows ?? [];
@@ -693,9 +702,16 @@ export function AutomationsPillar({
         });
         // objectstack#36511 — and published at once, switched off as it was
         // born: no draft is left for a package publish, and the switch arms it.
-        const live = await publishSavedItem(client, { type: 'flow', name, packageId: target ?? railPackageId }, false);
+        // objectstack#36726 — pinned `If-None-Match: *`: a flow another writer
+        // published under the name since the check above is refused, not replaced.
+        const live = await publishSavedItem(
+          client,
+          { type: 'flow', name, packageId: target ?? railPackageId },
+          false,
+          publishCreated,
+        );
         if (!live.ok) {
-          setError(plainRefusal(live.error));
+          if ('error' in live) setError(plainRefusal(live.error));
           return;
         }
         const item: Surface = target === null ? { type: 'flow', name, label } : { type: 'flow', name, label, addedIn: target };
@@ -740,6 +756,21 @@ export function AutomationsPillar({
         // read-only base's flow: its pair, when one is listed.
         const pair = flowCustomizing && !current.addedIn ? (customizationRef.current?.pairId ?? null) : null;
         const readAt = pair ?? draftPackageId;
+        // objectstack#36726 — the published flow's layers at the address the
+        // Save's publish writes, read FIRST (the server's order for the
+        // version and the body): a publish landing between this and the reads
+        // below leaves the pin older than the buffer, so the next Save is
+        // asked about, never published over it. At the drafts' own package it
+        // is also the baseline read below.
+        const baselineScope = draftPackageId ? { packageId: draftPackageId } : {};
+        const layAtReadAt = await client
+          .layered<Record<string, unknown>>('flow', current.name, readAt ? { packageId: readAt } : {})
+          .then(
+            (lay) => ({ ok: true as const, lay }),
+            (err: unknown) => ({ ok: false as const, err }),
+          );
+        if (cancelled) return;
+        const publishedAt = layAtReadAt.ok ? publishedPinOfLayers(layAtReadAt.lay) : null;
         const draftRead = await readDraftForSave<Record<string, unknown>>(client, 'flow', current.name, readAt);
         if (cancelled) return;
         // objectstack#29148 — a flow draft the server refused to read is no
@@ -760,13 +791,16 @@ export function AutomationsPillar({
         // ADR-0048 — at the package the flow saves write, its owner here; with
         // none, the read names none, and a name two packages hold is refused
         // with the server's own sentence, shown as the load's error.
-        const layRaw = draftBody
-          ? null
-          : await client.layered<Record<string, unknown>>(
-              'flow',
-              current.name,
-              draftPackageId ? { packageId: draftPackageId } : {},
-            );
+        let layRaw: unknown = null;
+        if (!draftBody) {
+          if (readAt === draftPackageId) {
+            // The read above, at this same address: its refusal is the load's error, as it always was.
+            if (!layAtReadAt.ok) throw layAtReadAt.err;
+            layRaw = layAtReadAt.lay;
+          } else {
+            layRaw = await client.layered<Record<string, unknown>>('flow', current.name, baselineScope);
+          }
+        }
         if (cancelled) return;
         const lay = layRaw as { effective?: Record<string, unknown>; code?: Record<string, unknown> } | null;
         const baseline = (lay?.effective ?? lay?.code ?? {}) as Record<string, unknown>;
@@ -784,6 +818,8 @@ export function AutomationsPillar({
         );
         // objectui#11773 — the next save is pinned to what the draft read served.
         recordFlowRead('flow', current.name, readAt, draftRead.pin);
+        // objectstack#36726 — …and its publish to the published flow the layers served there.
+        recordFlowPublished('flow', current.name, readAt, publishedAt);
         flowReadAtRef.current = { key: `flow:${current.name}`, at: readAt };
         setHasDraft(!!draftBody);
         setFlowDraftChanges(draftBody ? readDraftChanges(draftRead.answer) : null);
@@ -803,7 +839,7 @@ export function AutomationsPillar({
       // `loading` it raised, as in InterfacesPillar's draft load.
       if (!settled) setLoading(false);
     };
-  }, [client, current, draftPackageId, publishNonce, flowReloadNonce, recordFlowRead, flowCustomizing]);
+  }, [client, current, draftPackageId, publishNonce, flowReloadNonce, recordFlowRead, recordFlowPublished, flowCustomizing]);
 
   // objectui#5813 — local dirty flag: auto-save arms only after a real edit.
   const [autoDirty, setAutoDirty] = React.useState(false);
@@ -860,6 +896,9 @@ export function AutomationsPillar({
         const key = `flow:${current.name}`;
         if (!(flowReadAtRef.current?.key === key && flowReadAtRef.current.at === pair)) {
           recordFlowRead('flow', current.name, pair, { ifNoneMatch: '*' });
+          // objectstack#36726 — and to hold no live row of it: one published
+          // there meanwhile is asked about, never replaced.
+          recordFlowPublished('flow', current.name, pair, { ifNoneMatch: '*' });
           flowReadAtRef.current = { key, at: pair };
         }
         entering = !flowInPairRef.current;
@@ -875,17 +914,24 @@ export function AutomationsPillar({
       // The badge reads the declaration the server now serves.
       if (entering) setServedNonce((n) => n + 1);
       setSaving('publish');
+      // objectstack#36726 — pinned to the published flow this buffer was loaded at.
       const live = await publishSavedItem(
         client,
         { type: 'flow', name: current.name, packageId: target.packageId ?? null },
         hadDraft,
+        publishFlow,
       );
+      // The published flow moved and the author chose to reload: the load replaces the buffer.
+      if (!live.ok && 'reloaded' in live) return { kind: 'declined' };
       if (!live.ok) {
         setHasDraft(!live.draftDiscarded);
         if (live.draftDiscarded) recordFlowRead('flow', current.name, target.packageId, { ifNoneMatch: '*' });
         // objectstack#26858 — what the pending draft now says, or the live flow's verdict.
         rereadFlowVerdict(current.name, target.packageId);
-        const refusal = publishRefusal(publishFailureOf('flow', current.name, live.error), 'flow', target.body, locale);
+        // The published flow moved and the author kept editing: read as the draft conflict's "not saved".
+        const refusal = isPublishConflictKeptEditing(live.error)
+          ? flowSaveRefusal(live.error, target.body, locale)
+          : publishRefusal(publishFailureOf('flow', current.name, live.error), 'flow', target.body, locale);
         setError(refusal);
         return { kind: 'refused', reason: refusal.message };
       }
@@ -909,7 +955,7 @@ export function AutomationsPillar({
     } finally {
       setSaving(false);
     }
-  }, [saveFlowDraft, client, current, draft, hasDraft, draftPackageId, locale, rereadFlowVerdict, readOnly, pairForFlow, recordFlowRead]);
+  }, [saveFlowDraft, publishFlow, client, current, draft, hasDraft, draftPackageId, locale, rereadFlowVerdict, readOnly, pairForFlow, recordFlowRead, recordFlowPublished]);
   // objectui#11786 — an edit that leaves a step's required input out (a step
   // just added, before it is filled in) is held, not sent: the server would
   // refuse the flow with a 422 naming that input. The step's inspector hints the
@@ -1020,12 +1066,24 @@ export function AutomationsPillar({
       // objectui#11773 — a reload replaced the buffer the flip was taken on.
       if ((await saveFlowDraft('flow', flowName, stored, { mode: 'draft', packageId: draftPackageId, surface: 'studio' })) === 'reloaded') return;
       setSaving('publish');
-      const live = await publishSavedItem(client, { type: 'flow', name: flowName, packageId: draftPackageId ?? null }, hadDraft);
+      // objectstack#36726 — pinned to the published flow this buffer was loaded at, as the Save is.
+      const live = await publishSavedItem(
+        client,
+        { type: 'flow', name: flowName, packageId: draftPackageId ?? null },
+        hadDraft,
+        publishFlow,
+      );
+      // The author chose to reload: the load replaces the buffer, the switch with it.
+      if (!live.ok && 'reloaded' in live) return;
       if (!live.ok) {
         setHasDraft(!live.draftDiscarded);
         if (live.draftDiscarded) recordFlowRead('flow', flowName, draftPackageId, { ifNoneMatch: '*' });
         rollBack();
-        setError(publishRefusal(publishFailureOf('flow', flowName, live.error), 'flow', stored, locale));
+        setError(
+          isPublishConflictKeptEditing(live.error)
+            ? flowSaveRefusal(live.error, stored, locale)
+            : publishRefusal(publishFailureOf('flow', flowName, live.error), 'flow', stored, locale),
+        );
         return;
       }
       setHasDraft(false);
@@ -1040,7 +1098,7 @@ export function AutomationsPillar({
     } finally {
       setSaving(false);
     }
-  }, [saveFlowDraft, client, current, draft, draftFor, hasDraft, draftPackageId, locale, readOnly, recordFlowRead, rereadFlowVerdict]);
+  }, [saveFlowDraft, publishFlow, client, current, draft, draftFor, hasDraft, draftPackageId, locale, readOnly, recordFlowRead, rereadFlowVerdict]);
 
   // The rail's "+" — and the empty block's button, which runs this same
   // handler (objectui#12514). objectui#11553 — no "New" in the package-less

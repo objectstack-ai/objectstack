@@ -4627,5 +4627,90 @@ export const koObjects: NonNullable<TranslationData['objects']> = {
         }
       }
     }
+  },
+  sys_task: {
+    label: "작업",
+    pluralLabel: "작업",
+    description: "담당자와 마감 시간이 있는 할 일.",
+    fields: {
+      title: {
+        label: "제목"
+      },
+      description: {
+        label: "설명"
+      },
+      status: {
+        label: "상태",
+        options: {
+          todo: "할 일",
+          in_progress: "진행 중",
+          done: "완료"
+        }
+      },
+      due_at: {
+        label: "마감"
+      },
+      assignee_id: {
+        label: "담당자"
+      },
+      completed_at: {
+        label: "완료 시간",
+        help: "상태가 '완료'가 되면 플랫폼이 기록하고, '완료'에서 벗어나면 지웁니다."
+      },
+      owner_id: {
+        label: "소유자"
+      }
+    },
+    _views: {
+      assigned_to_me: {
+        label: "나에게 할당됨",
+        emptyState: {
+          title: "할당된 작업이 없습니다",
+          message: "나에게 할당된 미완료 작업이 여기에 표시됩니다."
+        }
+      },
+      created_by_me: {
+        label: "내가 만든 작업",
+        emptyState: {
+          title: "아직 작업이 없습니다",
+          message: "내가 만든 작업이 여기에 표시됩니다."
+        }
+      },
+      all: {
+        label: "모든 작업"
+      }
+    }
+  },
+  sys_note: {
+    label: "메모",
+    pluralLabel: "메모",
+    description: "메모: 제목과 서식 있는 본문.",
+    fields: {
+      title: {
+        label: "제목"
+      },
+      body: {
+        label: "본문"
+      },
+      heading: {
+        label: "표시 제목",
+        help: "제목이며, 제목이 비어 있으면 본문의 첫 줄입니다. 플랫폼이 관리합니다."
+      },
+      owner_id: {
+        label: "소유자"
+      }
+    },
+    _views: {
+      mine: {
+        label: "내 메모",
+        emptyState: {
+          title: "아직 메모가 없습니다",
+          message: "내가 작성한 메모가 여기에 표시됩니다."
+        }
+      },
+      all: {
+        label: "모든 메모"
+      }
+    }
   }
 };

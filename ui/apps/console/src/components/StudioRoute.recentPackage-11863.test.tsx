@@ -199,6 +199,14 @@ describe('/studio/PKG/TAB records the package as a recent entry (objectui#11863)
     expect(persisted()).toBeNull();
   });
 
+  it('the cross-package leg is not a package either, now the builder draws it (objectstack#36899)', async () => {
+    renderStudio('/studio/~all/metadata/permission?scope=environment');
+    await screen.findByTestId('studio-pillar-builder');
+
+    expect(recent()).toEqual([]);
+    expect(persisted()).toBeNull();
+  });
+
   it('a principal the entry gate refuses records nothing: the visit is recorded behind the gate', async () => {
     permissionsFetch = async () => jsonResponse({ authenticated: true, systemPermissions: ['setup.access'] });
     renderStudio('/studio/com.acme.crm/data');
