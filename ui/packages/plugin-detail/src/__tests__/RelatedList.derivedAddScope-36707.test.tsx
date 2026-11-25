@@ -198,6 +198,16 @@ describe('relatedCreateSeedOf — a related New seeds the dependsOn fields from 
     expect(relatedCreateSeedOf(byParam, 'opportunity', { id: 'O-1', customer: { id: 'A-9', name: 'Contoso' }, account: 'A-1' })).toEqual({ account: 'A-9' });
   });
 
+  it('a two-entry dependsOn seeds both fields; one the parent does not answer seeds neither, as the picker offers none', () => {
+    const twoEntries = {
+      ...CONTRACT_FIELDS,
+      opportunity: { type: 'lookup', reference: 'opportunity', dependsOn: ['account', { field: 'region', param: 'sales_region' }] },
+    };
+    expect(relatedCreateSeedOf(twoEntries, 'opportunity', { id: 'O-1', account: 'A-1', sales_region: 'R-1' })).toEqual({ account: 'A-1', region: 'R-1' });
+    expect(relatedCreateSeedOf(twoEntries, 'opportunity', { id: 'O-1', account: 'A-1', sales_region: null })).toEqual({});
+    expect(derivedAddOf(twoEntries, 'opportunity', 'contract', { id: 'O-1', account: 'A-1', sales_region: null })).toBeUndefined();
+  });
+
   it('a lookupFilters comparand reading $record does not stop the seed (the form still applies it)', () => {
     const fields = {
       ...CONTRACT_FIELDS,

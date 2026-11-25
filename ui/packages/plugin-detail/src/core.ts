@@ -16,8 +16,10 @@
  *
  * ⛔ Nothing exported here may import a detail renderer, `./index` or a module
  * that registers a component, directly or through a neighbour: the subpath is
- * only worth having while its closure stays these helpers. The same names are
- * still exported from the package root, unchanged. A module added to this
+ * only worth having while its closure stays these helpers. The names this
+ * subpath split off the root are still exported from the package root,
+ * unchanged; a helper added for the console alone (`relatedCreateSeedOf`,
+ * objectstack#37246) is published here only. A module added to this
  * file's closure also joins the console's `plugin-detail-core` chunk group
  * (`apps/console/vite.config.ts`).
  *
