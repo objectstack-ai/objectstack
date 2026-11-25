@@ -48,6 +48,7 @@ import { bucketKeyToCalendarRange } from '@objectstack/core';
 import { AnalyticsService } from '../analytics-service.js';
 import {
   alignedCompareBucketKey,
+  NO_CURRENT_COUNTERPART,
   bucketKeyAtOrdinal,
   bucketOrdinalOfDay,
   type DateGranularityValue,
@@ -587,11 +588,14 @@ describe('#6007 — scoped to the broken shape, and no wider', () => {
     ]);
   });
 
-  it('the #4870 pin still holds: a fake that ignores the window merges as it always did', async () => {
-    // `dataset-selection-window.test.ts`'s fake returns `2026-06` on BOTH passes.
-    // That key is not one the shift-back maps FROM, so the alignment declines and
-    // the row keeps it — which is exactly what that test asserts. Restated here
-    // so the interaction is visible from this side too.
+  it('a comparison key that names a current bucket it was not aligned to does not merge onto it', async () => {
+    // A fake that ignores the window answers `2026-06` on BOTH passes. The
+    // shifted window is 2026-05-02 … 2026-05-31, so `2026-06` shifts back to
+    // `2026-07`, outside June: it has no counterpart. Keeping its own key used
+    // to merge it onto the current `2026-06` — the collision in its smallest
+    // form. It is dropped, so June honestly reads no comparison value.
+    // (`dataset-selection-window.test.ts`'s #4870 pin now answers each pass in
+    // the window it filtered to, which is what a GROUP BY does.)
     let call = 0;
     const service = new AnalyticsService({
       queryCapabilities: () => ({ nativeSql: false, objectqlAggregate: true, inMemory: false }),
@@ -607,7 +611,7 @@ describe('#6007 — scoped to the broken shape, and no wider', () => {
       },
       CTX,
     );
-    expect(result.rows).toEqual([{ close_date: '2026-06', opp_count: 1, opp_count__compare: 2 }]);
+    expect(result.rows).toEqual([{ close_date: '2026-06', opp_count: 1, opp_count__compare: 0 }]);
   });
 });
 
@@ -682,13 +686,14 @@ describe('#6007 — alignedCompareBucketKey declines rather than guessing', () =
     expect(alignedCompareBucketKey('2025-13', 'month', 'previousYear', CUR, PREV)).toBeNull();
   });
 
-  it('returns null when the shifted-back bucket falls outside the current window', () => {
+  it('answers NO_CURRENT_COUNTERPART when the shifted-back bucket falls outside the current window', () => {
     // Two equal-length day windows can tile into different bucket counts, so the
     // ordinal rule can have a last bucket with no counterpart. Moving it to a
-    // bucket the caller never asked for would swap a visibly foreign row for a
-    // plausible-looking wrong one; it keeps its own key and appends instead.
-    expect(alignedCompareBucketKey('2025-03', 'month', 'previousYear', CUR, PREV)).toBeNull();
-    expect(alignedCompareBucketKey('2024-12', 'month', 'previousYear', CUR, PREV)).toBeNull();
+    // bucket the caller never asked for would be a plausible-looking wrong
+    // answer, and keeping its own key merges it onto a bucket it was not aligned
+    // to or appends it outside the window: the caller drops the row.
+    expect(alignedCompareBucketKey('2025-03', 'month', 'previousYear', CUR, PREV)).toBe(NO_CURRENT_COUNTERPART);
+    expect(alignedCompareBucketKey('2024-12', 'month', 'previousYear', CUR, PREV)).toBe(NO_CURRENT_COUNTERPART);
   });
 
   it('previousPeriod shifts by the ordinal distance between the two window starts', () => {
@@ -696,7 +701,154 @@ describe('#6007 — alignedCompareBucketKey declines rather than guessing', () =
     const prev: [string, string] = ['2026-05-01', '2026-05-03'];
     expect(alignedCompareBucketKey('2026-05-01', 'day', 'previousPeriod', cur, prev)).toBe('2026-05-04');
     expect(alignedCompareBucketKey('2026-05-03', 'day', 'previousPeriod', cur, prev)).toBe('2026-05-06');
-    // one bucket past the window — declined
-    expect(alignedCompareBucketKey('2026-05-04', 'day', 'previousPeriod', cur, prev)).toBeNull();
+    // one bucket past the window — no counterpart
+    expect(alignedCompareBucketKey('2026-05-04', 'day', 'previousPeriod', cur, prev)).toBe(NO_CURRENT_COUNTERPART);
+  });
+});
+
+// ── 7) a comparison bucket with no current-window counterpart ──────────────
+
+/**
+ * `previousPeriod` aligns by bucket ordinal, and two equal-length day windows
+ * can tile into different bucket counts: the previous window then has a bucket
+ * whose shifted-back ordinal falls past the end of the current one. That row
+ * has no counterpart. Keeping its OWN key let the merge either write its value
+ * onto a current bucket it was never aligned to (the key happens to name one)
+ * or append it as a row outside the window the caller asked for. It is dropped.
+ */
+describe('a comparison bucket with no counterpart in the current window is dropped', () => {
+  it('this month by week (December 2026): no compare value lands on a week it was not aligned to', async () => {
+    // December 2026 is Tue 1 … Thu 31, i.e. ISO 2026-W49 … 2026-W53. Its
+    // previous period is the 31 days Sat 31 Oct … Mon 30 Nov: 2026-W44 … 2026-W49,
+    // six weeks against five. Ordinal alignment maps W44 → W49 … W48 → W53, and
+    // the previous window's own W49 (the single day 30 Nov) has no counterpart —
+    // yet its key is the current window's first week.
+    for (const [key, start] of [
+      ['2026-W44', '2026-10-26'],
+      ['2026-W48', '2026-11-23'],
+      ['2026-W49', '2026-11-30'],
+      ['2026-W53', '2026-12-28'],
+    ] as const) {
+      expect(bucketKeyToCalendarRange(key, 'week')?.start, key).toBe(start);
+    }
+    const filters: string[] = [];
+    const service = new AnalyticsService({
+      queryCapabilities: () => ({ nativeSql: false, objectqlAggregate: true, inMemory: false }),
+      executeAggregate: async (_object: string, options: Record<string, unknown>) => {
+        const from = String(
+          ((options as AggOptions).filter as Record<string, Record<string, unknown>>).close_date.$gte,
+        );
+        filters.push(from);
+        return from === '2026-12-01'
+          ? [49, 50, 51, 52, 53].map((w) => ({ close_date: `2026-W${w}`, opp_count: w }))
+          : [44, 45, 46, 47, 48, 49].map((w) => ({ close_date: `2026-W${w}`, opp_count: w * 100 }));
+      },
+    });
+    const result = await service.queryDataset(
+      dataset,
+      {
+        dimensions: ['close_date'],
+        measures: ['opp_count'],
+        dateGranularity: 'week',
+        timeDimensions: [{ dimension: 'close_date', dateRange: ['2026-12-01', '2026-12-31'] }],
+        compareTo: { kind: 'previousPeriod', dimension: 'close_date' },
+      },
+      CTX,
+    );
+    // The precondition: the comparison pass really queried the 31 days before.
+    expect(filters).toEqual(['2026-12-01', '2026-10-31']);
+    expect(result.rows).toEqual([
+      { close_date: '2026-W49', opp_count: 49, opp_count__compare: 4400 },
+      { close_date: '2026-W50', opp_count: 50, opp_count__compare: 4500 },
+      { close_date: '2026-W51', opp_count: 51, opp_count__compare: 4600 },
+      { close_date: '2026-W52', opp_count: 52, opp_count__compare: 4700 },
+      { close_date: '2026-W53', opp_count: 53, opp_count__compare: 4800 },
+    ]);
+  });
+
+  it('this month by month (December 2026): no extra November row outside the window', async () => {
+    // Previous period: 2026-10-31 … 2026-11-30, two month buckets against one.
+    // 2026-10 (the one day 31 Oct) is the first bucket and aligns onto 2026-12;
+    // 2026-11 has no counterpart.
+    const { service, calls } = svcOver([
+      ...opps('2026-10-31', 1),
+      ...opps('2026-11-15', 5),
+      ...opps('2026-12-10', 2),
+    ]);
+    const result = await service.queryDataset(
+      dataset,
+      {
+        dimensions: ['close_date'],
+        measures: ['opp_count'],
+        timeDimensions: [{ dimension: 'close_date', dateRange: ['2026-12-01', '2026-12-31'] }],
+        compareTo: { kind: 'previousPeriod', dimension: 'close_date' },
+      },
+      CTX,
+    );
+    expect(calls[1].filter).toMatchObject({ close_date: { $gte: '2026-10-31', $lte: '2026-11-30' } });
+    expect(result.rows).toEqual([{ close_date: '2026-12', opp_count: 2, opp_count__compare: 1 }]);
+  });
+
+  it('this quarter by month (Q2 2026): no row is added outside the current window', async () => {
+    // Q2 2026 is 91 days, so the previous period is 2025-12-31 … 2026-03-31:
+    // four month buckets against three. 2025-12 → 2026-04, 2026-01 → 2026-05,
+    // 2026-02 → 2026-06, and 2026-03 has no counterpart.
+    const { service, calls } = svcOver([
+      ...opps('2025-12-31', 1),
+      ...opps('2026-01-10', 2),
+      ...opps('2026-02-10', 3),
+      ...opps('2026-03-10', 4),
+      ...opps('2026-04-10', 10),
+      ...opps('2026-05-10', 20),
+      ...opps('2026-06-10', 30),
+    ]);
+    const result = await service.queryDataset(
+      dataset,
+      {
+        dimensions: ['close_date'],
+        measures: ['opp_count'],
+        timeDimensions: [{ dimension: 'close_date', dateRange: ['2026-04-01', '2026-06-30'] }],
+        compareTo: { kind: 'previousPeriod', dimension: 'close_date' },
+      },
+      CTX,
+    );
+    expect(calls[1].filter).toMatchObject({ close_date: { $gte: '2025-12-31', $lte: '2026-03-31' } });
+    expect(result.rows).toEqual([
+      { close_date: '2026-04', opp_count: 10, opp_count__compare: 1 },
+      { close_date: '2026-05', opp_count: 20, opp_count__compare: 2 },
+      { close_date: '2026-06', opp_count: 30, opp_count__compare: 3 },
+    ]);
+  });
+
+  it('the empty bucket still merges with its counterpart: only an unalignable CALENDAR bucket is dropped', async () => {
+    // A null key is not a calendar position (#3839); both passes key their empty
+    // bucket the same way, so it keeps merging exactly as before.
+    let call = 0;
+    const service = new AnalyticsService({
+      queryCapabilities: () => ({ nativeSql: false, objectqlAggregate: true, inMemory: false }),
+      executeAggregate: async () => {
+        call += 1;
+        return call === 1
+          ? [{ close_date: '2026-12', opp_count: 2 }, { close_date: null, opp_count: 7 }]
+          : [{ close_date: '2026-10', opp_count: 1 }, { close_date: null, opp_count: 9 }];
+      },
+    });
+    const result = await service.queryDataset(
+      dataset,
+      {
+        dimensions: ['close_date'],
+        measures: ['opp_count'],
+        timeDimensions: [{ dimension: 'close_date', dateRange: ['2026-12-01', '2026-12-31'] }],
+        compareTo: { kind: 'previousPeriod', dimension: 'close_date' },
+      },
+      CTX,
+    );
+    expect(result.rows).toEqual(
+      expect.arrayContaining([
+        { close_date: '2026-12', opp_count: 2, opp_count__compare: 1 },
+        { close_date: null, opp_count: 7, opp_count__compare: 9 },
+      ]),
+    );
+    expect(result.rows).toHaveLength(2);
   });
 });

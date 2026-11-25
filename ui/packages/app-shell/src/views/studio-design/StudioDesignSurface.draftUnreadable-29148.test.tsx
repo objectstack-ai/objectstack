@@ -139,6 +139,10 @@ import { registerMetadataPreview, getMetadataPreview } from '../metadata-admin/p
 // The source under test reaches dynamic imports of `@objectstack/lint`; their first
 // load is paid here, at collection, never inside a case's clock (`check:test-source-alias`).
 import '@objectstack/lint';
+// The source under test reaches these dynamic imports (the command palette's
+// record preview, the drafts panel's lint, the code editor): their first load
+// is paid here, at collection, never inside a case's clock (`check:test-source-alias`).
+import '@object-ui/plugin-detail';
 
 const dataSource = createEmptyDataSource();
 failOnAbsorbedFetchError();
@@ -214,7 +218,7 @@ function renderData() {
   render(
     <MemoryRouter initialEntries={[`/studio/${PKG}/data`]}>
       <SurfaceDeepLinkProvider>
-        <DataPillar packageId={PKG} />
+        <DataPillar objectName="crm_contact" packageId={PKG} />
       </SurfaceDeepLinkProvider>
     </MemoryRouter>,
   );
@@ -228,8 +232,8 @@ async function openSettings() {
 
 function renderAutomations() {
   render(
-    <MemoryRouter initialEntries={[`/studio/${PKG}/automations`]}>
-      <AutomationsPillar packageId={PKG} />
+    <MemoryRouter initialEntries={[`/studio/${PKG}/metadata/flow/${PUBLISHED_FLOW.name}`]}>
+      <AutomationsPillar packageId={PKG} flowName={PUBLISHED_FLOW.name} />
     </MemoryRouter>,
   );
 }

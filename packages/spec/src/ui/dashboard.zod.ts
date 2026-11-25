@@ -65,7 +65,9 @@ export const WidgetColorVariantSchema = lazySchema(() => z.enum([
  *
  * Derived rather than restated: a type added to `ActionType` is dispatchable
  * from a header action the moment the runner implements it, with no second list
- * to remember.
+ * to remember. The one member a header cannot serve — `ask_ai`, which runs on
+ * a record (ADR-0160 D7) — stays in the vocabulary and is refused by
+ * `DashboardHeaderActionSchema` with the reason, not by a narrower enum.
  */
 export const WidgetActionTypeSchema = lazySchema(() => ActionType.describe('Widget action type'));
 
@@ -109,6 +111,28 @@ function refuseUnopenableHeaderActionUrl(
   if (data.actionType !== undefined && data.actionType !== 'url') return;
   const refusal = navigationTargetRefusal(data.actionUrl, HEADER_ACTION_URL_SUBJECT);
   if (refusal !== undefined) ctx.addIssue({ code: 'custom', path: ['actionUrl'], message: refusal });
+}
+
+/**
+ * ADR-0160 D7 — `ask_ai` is an action on ONE record: it focuses the in-app
+ * assistant on the record it runs on. A dashboard header runs on no record,
+ * so the runner could only refuse the click ("select a row first"), and the
+ * button would parse clean and never work. Refused here, on the one member of
+ * the derived vocabulary a header cannot serve; the rest stay derived.
+ */
+function refuseRecordlessAskAi(
+  data: { actionType?: string },
+  ctx: z.core.$RefinementCtx,
+): void {
+  if (data.actionType !== 'ask_ai') return;
+  ctx.addIssue({
+    code: 'custom',
+    path: ['actionType'],
+    message:
+      "A dashboard header action cannot be `actionType: 'ask_ai'`: that type focuses the in-app assistant on "
+      + 'the one record an action runs on, and a dashboard header runs on none. Put an `ask_ai` action on the '
+      + "object (`locations: ['record_header']` or `['record_more']`), where it runs on the record shown.",
+  });
 }
 
 /**
@@ -157,7 +181,7 @@ export const DashboardHeaderActionSchema = lazySchema(() => strictObject({
 
   /** Icon identifier */
   icon: z.string().optional().describe('Icon identifier for the action button').meta({ title: 'Icon' }),
-}).superRefine(refuseUnopenableHeaderActionUrl).describe('Dashboard header action'));
+}).superRefine(refuseUnopenableHeaderActionUrl).superRefine(refuseRecordlessAskAi).describe('Dashboard header action'));
 
 /**
  * Dashboard Header Schema

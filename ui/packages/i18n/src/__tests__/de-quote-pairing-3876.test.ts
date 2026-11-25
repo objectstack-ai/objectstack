@@ -490,7 +490,10 @@ describe('objectui#3876 — de pack closes „ with “ and not with a straight 
     // checklist's name, language, timezone and currency rows into one
     // `organizationBasics` row: the old `organizationName.todo` („{{name}}“)
     // and `timezone.todo` („heute“) lines went with them, two spans fewer.
-    expect(okSpans, 'correctly paired spans').toBe(132);
+    // 133 once objectstack-ai/objectstack#36999 added `console.ai.focus.switchPrompt`,
+    // the offer to ask about the record in view instead („{{target}}“) — one
+    // interpolated span.
+    expect(okSpans, 'correctly paired spans').toBe(133);
   });
 
   it('keeps the count identity that replaces the card’s count(„) === count(“)', () => {
@@ -632,7 +635,8 @@ describe('objectui#3876 — de pack closes „ with “ and not with a straight 
     // 134 / 134 / 0 after objectstack-ai/objectstack#35399 added `console.assignedWork.ownerKept`.
     // 132 / 132 / 0 after objectstack-ai/objectstack#36739 removed the
     // checklist's `organizationName.todo` and `timezone.todo`, two pairs fewer.
-    expect({ open, close, rdq }).toEqual({ open: 132, close: 132, rdq: 0 });
+    // 133 / 133 / 0 after objectstack-ai/objectstack#36999 added `console.ai.focus.switchPrompt`.
+    expect({ open, close, rdq }).toEqual({ open: 133, close: 133, rdq: 0 });
     // The durable shape: every „ closed by a “, every surplus “ an English
     // opener answered by a ”. Survived translating the two English values.
     expect(close).toBe(open + rdq);

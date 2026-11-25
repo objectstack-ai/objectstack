@@ -23,9 +23,10 @@ import { DraftPreviewBar } from '../preview/DraftPreviewBar.js';
 import { UnpublishedAppBar } from '../preview/UnpublishedAppBar.js';
 import { ConsoleNotificationBanners } from './ConsoleNotificationBanners.js';
 import { UnifiedSidebar } from './UnifiedSidebar.js';
-import { PhoneAppNavBar, isPhoneTabRoute } from './PhoneAppNavBar.js';
+import { PhoneAppNavBar, isPhoneTabRoute, phoneTabOf } from './PhoneAppNavBar.js';
 import { PhoneAppHomeSlotProvider } from './PhoneAppHome.js';
 import { PhonePageBarProvider } from './PhonePageBar.js';
+import { SidebarDocsNavSlotProvider } from './sidebarDocsNavSlot.js';
 import { useLastApp } from '../context/LastAppProvider.js';
 import { rememberAppReturnPage } from '../utils/appReturnPage.js';
 import { useMetadata } from '../providers/MetadataProvider.js';
@@ -194,9 +195,24 @@ export function ConsoleLayout({
   // the top left goes back. The route slot leaves the bar's height free at its
   // end.
   const phoneNavBar = phone && isPhoneTabRoute(location.pathname);
-  // objectstack#35424 — a docs page draws its own left column (the app's
-  // books and a way back to the app), so the app menu is not mounted there.
+  // objectstack#36792 — the inset's end padding only scrolls when it follows
+  // in-flow content: a page taller than an `h-full` route slot overflows the
+  // slot, and the scroll ends at the page's bottom, under the bar. So on the
+  // bar's home and approvals pages the slot grows with its page (at least the
+  // inset's height, so a short page or an empty state still fills it) and the
+  // padding ends the scroll above the bar. The inbox list keeps the fixed slot:
+  // it is an object list page, which bounds itself and scrolls its rows in its
+  // own box (objectui#12463), and a growing slot would unbound a long one.
+  const phoneSlotGrows = phoneNavBar && phoneTabOf(location.pathname) !== 'notifications';
+  // objectstack#35424 — a docs page has one navigation, the docs' own (the
+  // app's books and a way back to the app), so the app's menu is not drawn
+  // there. objectstack#37150 (ruling 7142354097 on objectstack#36107) — from
+  // 768 px up the page still draws in the app shell like every other app page:
+  // the sidebar is mounted, its head and foot as everywhere, and its body
+  // carries the docs' navigation in the menu's place. A phone keeps what it
+  // had: no sidebar, the app bar, and the column in the page.
   const docsPage = isAppDocsPath(location.pathname);
+  const phoneDocsPage = phone && docsPage;
   // objectstack#35881 — the app this person last had open, where a phone
   // lands after sign-in. Recorded at every width: it is the person's last app.
   const { rememberApp } = useLastApp();
@@ -273,27 +289,31 @@ export function ConsoleLayout({
     <PhoneAppHomeSlotProvider>
     {/* objectstack#35883 — a page's own phone top row, drawn by the app bar. */}
     <PhonePageBarProvider>
+    {/* objectstack#37150 — the sidebar's place for an app's docs navigation,
+        shared by the sidebar (which holds it) and the docs page (which draws
+        its column into it). */}
+    <SidebarDocsNavSlotProvider>
     <DesignModeProvider value={designMode}>
     <AppShell
       sidebar={
-        docsPage ? undefined : (
+        phoneDocsPage ? undefined : (
          <UnifiedSidebar
            activeAppName={activeAppName}
            onAppChange={onAppChange}
            railOverlay
+           docsNav={docsPage}
          />
         )
       }
       // objectstack#36112 — from 768 px up an app draws no top bar: the app
       // menu, search, bell and account are the sidebar's, the page's buttons
-      // its own header's. A phone keeps its bar (and its record page draws its
-      // own instead, objectstack#28483). An app's docs pages keep it at every
-      // width: they mount no sidebar (objectstack#35424), so the bar is still
-      // where their account, search and bell are.
+      // its own header's. An app's docs pages are no exception
+      // (objectstack#37150). A phone keeps its bar (and its record page draws
+      // its own instead, objectstack#28483).
       //
       // objectstack#36362 — while the design mode is on, its bar takes the
       // top slot instead, across the whole window, on every route.
-      showHeader={designMode.active || ((phone || docsPage) && !recordPageOwnsTopBar)}
+      showHeader={designMode.active || (phone && !recordPageOwnsTopBar)}
       navbar={
         designMode.active ? (
           <DesignModeBar mode={designMode} />
@@ -345,7 +365,7 @@ export function ConsoleLayout({
         {/* objectstack#36111 — the pages under the shell draw its top-right
             button group; objectstack#36112 — and the sidebar's expand button
             at their headers' left edge while it is collapsed. */}
-        <ShellPageActionsScope sidebarExpand={!docsPage}>
+        <ShellPageActionsScope sidebarExpand={!phoneDocsPage}>
         {/* ADR-0037: unmistakable watermark while rendering the draft overlay
             (?preview=draft) — with one-click exit and one-click Publish. */}
         {/* objectui#12463 — the banners sit in one non-shrinking box, so in
@@ -355,8 +375,7 @@ export function ConsoleLayout({
             (impersonation, read rate, storage) and the connection notice sit
             here, the content's width, since no top bar carries them. */}
         {!phone && <ChromeBannerHost />}
-        {/* A docs page's bar draws the connection state itself. */}
-        {!phone && !docsPage && <ConnectionBanner state={connectionState} />}
+        {!phone && <ConnectionBanner state={connectionState} />}
         <DraftPreviewBar />
         {/* ADR-0045: materialized-but-unlisted app — real and interactive,
             invisible to end users until the Publish visibility flip. */}
@@ -383,7 +402,14 @@ export function ConsoleLayout({
           ref={mainContentRef}
           tabIndex={-1}
           data-testid="console-route"
-          className="h-full lg:min-h-0 focus:outline-none"
+          className={cn(
+            'h-full lg:min-h-0 focus:outline-none',
+            // objectstack#36792 — a one-track grid: its row stretches to the
+            // `min-h-full` floor, so a page's `h-full` root still resolves
+            // against it, and grows past it with a taller page. The track's
+            // `minmax(0,1fr)` keeps a wide page from widening the slot.
+            phoneSlotGrows && 'grid h-auto min-h-full grid-cols-[minmax(0,1fr)]',
+          )}
         >
         <ShellSidebarExpandFallback />
         {children}
@@ -398,6 +424,7 @@ export function ConsoleLayout({
       {chatDock.sheet}
     </AppShell>
     </DesignModeProvider>
+    </SidebarDocsNavSlotProvider>
     </PhonePageBarProvider>
     </PhoneAppHomeSlotProvider>
     </CommandPaletteProvider>

@@ -179,6 +179,7 @@
   "include": [
     "test/**/*",
     "vitest.config.ts",
+    "vitest-slices.ts",
     "vitest-tiers.ts",
     "vitest-tiers.fixtures.ts"
   ],

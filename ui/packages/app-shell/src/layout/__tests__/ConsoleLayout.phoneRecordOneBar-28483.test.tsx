@@ -31,7 +31,11 @@ vi.mock('../../hooks/useAiSurface', () => ({
   useAiSurfaceEnabled: () => ({ enabled: false, isLoading: false }),
 }));
 vi.mock('../UnifiedSidebar', () => ({
-  UnifiedSidebar: () => <nav aria-label="App menu" data-testid="sidebar-stub" />,
+  // `docsNav`: the body holds the docs' navigation instead of the app's menu
+  // (objectstack#37150); the sidebar's own face is `UnifiedSidebar`'s suites'.
+  UnifiedSidebar: ({ docsNav }: { docsNav?: boolean }) => (
+    <nav aria-label="App menu" data-testid="sidebar-stub" data-docs-nav={docsNav ? 'true' : 'false'} />
+  ),
 }));
 // The bar's own face is `PhoneAppNavBar.fixedTabs-35882`'s; here only where
 // the layout mounts it, with the real route rule (`isPhoneTabRoute`).
@@ -224,23 +228,107 @@ describe('the phone bottom bar is drawn on its three pages only (objectstack#358
   });
 });
 
-describe('an app\'s docs pages draw no app menu (objectstack#35424)', () => {
-  const appMenu = () => screen.queryByTestId('sidebar-stub');
+/**
+ * objectstack#36792 — a scroll container's end padding scrolls only after its
+ * in-flow content. While the bar is drawn the inset (the element that scrolls)
+ * keeps the bar's height as end padding, so on the bar's home and approvals
+ * pages, which grow with their content, the route slot grows with its page
+ * (a one-track grid at least the inset's height): the slot is the inset's
+ * in-flow content and the padding lands after the page's last row. A fixed
+ * `h-full` slot there let a tall page overflow it, and the scroll ended at the
+ * page's bottom, under the bar. The inbox list, an object list page that
+ * bounds itself, keeps the fixed slot; so does every route without the bar.
+ */
+describe('a phone bar page\'s end inset scrolls with its content (objectstack#36792)', () => {
+  const slot = () => screen.getByTestId('console-route');
+  const slotGrows = () => {
+    const c = slot().classList;
+    return c.contains('grid') && c.contains('min-h-full') && c.contains('h-auto') && !c.contains('h-full');
+  };
+  const slotFixed = () => {
+    const c = slot().classList;
+    return c.contains('h-full') && !c.contains('min-h-full') && !c.contains('grid');
+  };
+  const scrollerPadsEnd = () => {
+    const scroller = slot().parentElement!;
+    return (
+      scroller.classList.contains('overflow-y-auto') &&
+      scroller.classList.contains('!pb-[calc(3.5rem+env(safe-area-inset-bottom))]')
+    );
+  };
 
-  it('at 1440 px a docs index, a book and an article draw no app menu, and keep the app bar (the one bar a desktop app still draws, objectstack#36112)', () => {
-    for (const path of ['/apps/crm/docs', '/apps/crm/docs/crm_manual', '/apps/crm/docs/crm_manual/crm_quotes']) {
-      mountAt(path, 1440);
-      expect(appMenu(), path).toBeNull();
+  it('at 375 px the app home and the approvals inbox grow the slot inside the padded scroller', () => {
+    for (const path of ['/apps/crm', '/apps/crm/', '/apps/crm/system/approvals']) {
+      mountAt(path, 375);
+      expect(slotGrows(), path).toBe(true);
+      expect(scrollerPadsEnd(), path).toBe(true);
+      // The track never widens the slot past the inset.
+      expect(slot().classList.contains('grid-cols-[minmax(0,1fr)]'), path).toBe(true);
+      cleanup();
+    }
+  });
+
+  it('at 375 px the inbox list keeps the fixed slot: it bounds itself above the bar', () => {
+    mountAt('/apps/crm/sys_inbox_message', 375);
+    expect(slotFixed()).toBe(true);
+    expect(scrollerPadsEnd()).toBe(true);
+  });
+
+  it('CONTROL — routes without the bar, and every route from 768 px up, keep the fixed slot', () => {
+    for (const [path, width] of [
+      ['/apps/crm/crm_lead', 375],
+      [RECORD, 375],
+      ['/apps/crm/page/home', 375],
+      ['/apps/crm', 768],
+      ['/apps/crm/system/approvals', 1440],
+    ] as const) {
+      mountAt(path, width);
+      expect(slotFixed(), `${width} px ${path}`).toBe(true);
+      cleanup();
+    }
+  });
+});
+
+describe('an app\'s docs pages draw in the app shell from 768 px up (objectstack#37150), and no app menu (objectstack#35424)', () => {
+  const sidebar = () => screen.queryByTestId('sidebar-stub');
+  const DOCS_PATHS = [
+    '/apps/crm/docs',
+    '/apps/crm/docs/',
+    '/apps/crm/docs/crm_manual',
+    '/apps/crm/docs/crm_quotes',
+    '/apps/crm/docs/crm_manual/crm_quotes',
+  ];
+
+  it('at 768 px and 1440 px a docs index, a book, a flat permalink and an article draw the sidebar, its body the docs\' navigation, and no top bar', () => {
+    for (const width of [768, 1440]) {
+      for (const path of DOCS_PATHS) {
+        mountAt(path, width);
+        expect(sidebar(), `${width} px ${path}`).not.toBeNull();
+        expect(sidebar(), `${width} px ${path}`).toHaveAttribute('data-docs-nav', 'true');
+        expect(document.querySelectorAll('header'), `${width} px ${path}`).toHaveLength(0);
+        expect(screen.queryByTestId('app-bar'), `${width} px ${path}`).toBeNull();
+        cleanup();
+      }
+    }
+  });
+
+  it('PHONE CONTROL — at 390 px a docs page is unchanged: no sidebar, and the app bar', () => {
+    for (const path of DOCS_PATHS) {
+      mountAt(path, 390);
+      expect(sidebar(), path).toBeNull();
+      expect(document.querySelectorAll('header'), path).toHaveLength(1);
       expect(screen.getByTestId('app-bar'), path).toBeInTheDocument();
       cleanup();
     }
   });
 
-  it('control: every other app route keeps the app menu', () => {
-    for (const path of ['/apps/crm', '/apps/crm/crm_lead', '/apps/crm/dashboard/sales', '/apps/crm/docsearch']) {
-      mountAt(path, 1440);
-      expect(appMenu(), path).not.toBeNull();
-      cleanup();
+  it('control: every other app route keeps the app menu in the sidebar\'s body', () => {
+    for (const width of [390, 1440]) {
+      for (const path of ['/apps/crm', '/apps/crm/crm_lead', '/apps/crm/dashboard/sales', '/apps/crm/docsearch']) {
+        mountAt(path, width);
+        expect(sidebar(), `${width} px ${path}`).toHaveAttribute('data-docs-nav', 'false');
+        cleanup();
+      }
     }
   });
 

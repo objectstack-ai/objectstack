@@ -214,9 +214,10 @@ vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn(), info: vi.f
 
 // The source reaches a dynamic import of it: its first load is paid at collection (`check:test-source-alias`).
 import '@objectstack/lint';
+import '@object-ui/plugin-detail';
 import { DataPillar } from './StudioDesignSurface';
 import { StudioSaveHarness } from './__tests__/studioSaveHarness';
-import { addFieldFromFormToolbar, addFieldFromGrid, type AddFieldInput } from './__tests__/dataPillarAddField';
+import { addFieldFromGrid, type AddFieldInput } from './__tests__/dataPillarAddField';
 import { createEmptyDataSource } from './__tests__/emptyDataSource';
 import { readFields } from '../metadata-admin/previews/object-fields-io';
 
@@ -242,7 +243,7 @@ function openEditor(): HTMLElement {
   const { container } = render(
     <StudioSaveHarness>
       <MemoryRouter initialEntries={[`/studio/${PKG}/data`]}>
-        <DataPillar packageId={PKG} />
+        <DataPillar objectName="acme_task" packageId={PKG} />
       </MemoryRouter>
     </StudioSaveHarness>,
   );
@@ -399,32 +400,9 @@ describe('Data pillar — a draft saved elsewhere is not overwritten in silence 
   });
 });
 
-describe('Data pillar — a create sends If-None-Match: * (objectui#11773)', () => {
-  it('the new object\'s skeleton is sent with the first-write pin; it is live at once, so each Save after the load asserts no draft', async () => {
-    server.active.clear();
-    const a = openEditor();
-    fireEvent.click(await within(a).findByTestId('empty-state-new-object', undefined, { timeout: 8000 }));
-    const dialog = await screen.findByRole('dialog');
-    fireEvent.change(dialog.querySelectorAll('input')[0]!, { target: { value: 'Ticket' } });
-    fireEvent.click(within(dialog).getByRole('button', { name: /^create$/i }));
-    await waitFor(() => expect(server.saves).toHaveLength(1), { timeout: 8000 });
-    expect([server.saves[0]!.ifMatch, server.saves[0]!.ifNoneMatch]).toEqual([undefined, '*']);
-
-    await loaded(a, '1 field');
-    fireEvent.click(within(a).getAllByRole('button', { name: 'Field layout' })[0]!);
-    await addFieldAndSave(a, addFieldFromFormToolbar);
-    await addFieldAndSave(a, addFieldFromFormToolbar, SECOND);
-    // The skeleton's draft, which the create publishes at once (objectstack#36511):
-    // no draft is left, so each Save after the load asserts none.
-    expect(mockClient.publish).toHaveBeenCalledWith('object', expect.stringMatching(/ticket$/), expect.anything());
-    expect(server.saves.map((s) => [s.ifMatch, s.ifNoneMatch])).toEqual([
-      [undefined, '*'],
-      [undefined, '*'],
-      [undefined, '*'],
-    ]);
-  });
-});
-
+// objectstack#36904 — the object designer has no 「新建」: the create's first-write
+// pin is pinned on the list's dialog (`MetadataListCreateDialog.pairCreate-36897`,
+// `ifNoneMatch: '*'`), and each later Save asserting no draft by the case above.
 describe('Data pillar — two Saves over one published object are not last-writer-wins (objectstack#36601)', () => {
   /** The live row's version both editors open at. */
   const LIVE = 'hmac-sha256:live0';

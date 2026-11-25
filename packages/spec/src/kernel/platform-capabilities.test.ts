@@ -7,6 +7,7 @@ import {
   PLATFORM_ALWAYS_ON_CAPABILITIES,
   classifyRequiredCapability,
 } from './platform-capabilities';
+import { defineStack } from '../stack.zod';
 
 // framework#3265 — one capability vocabulary across the standalone serve path
 // and cloud's objectos-runtime loader, canonical spelling kebab-case. The
@@ -385,6 +386,64 @@ describe('push — the mobile push capability', () => {
     });
     expect(classifyRequiredCapability('push', (pkg) => pkg === '@objectstack/service-push').status).toBe('ok');
   });
+});
+
+// Record context (ADR-0160 D5) — the `record-context` token is the door
+// `requires: ['record-context']` opens for `RecordContextServicePlugin`, which
+// serves `get_record_context` from the app's `aiContexts` packs. Its provider is
+// an open-edition package the CLI and `@objectstack/verify` depend on (the CLI's
+// `serve-capability-vocabulary.test.ts` holds the serve resolver to the same
+// package). Requested, never appended to every app: exposing a read tool is the
+// app's declaration, not a side effect of shipping packs.
+describe('record-context — the context-pack service', () => {
+  type Envelope = Error & { code?: string; status?: number; issues?: readonly string[] };
+  const refusalOf = (requires: string[]): Envelope | null => {
+    try {
+      defineStack({ requires });
+      return null;
+    } catch (e) {
+      return e as Envelope;
+    }
+  };
+
+  it('is a vocabulary token, provided by @objectstack/service-record-context in the open edition', () => {
+    expect(PLATFORM_CAPABILITY_TOKENS).toContain('record-context');
+    expect(isKnownPlatformCapability('record-context')).toBe(true);
+    expect(PLATFORM_CAPABILITY_PROVIDERS['record-context']).toEqual({
+      package: '@objectstack/service-record-context',
+      edition: 'open',
+    });
+  });
+
+  it('is requested, never on the always-on slate', () => {
+    expect(PLATFORM_ALWAYS_ON_CAPABILITIES).not.toContain('record-context');
+  });
+
+  it('classifies as an installable open package when absent, and ok when installed', () => {
+    expect(classifyRequiredCapability('record-context', () => false)).toMatchObject({
+      status: 'installable',
+      provider: { package: '@objectstack/service-record-context', edition: 'open' },
+    });
+    expect(
+      classifyRequiredCapability('record-context', (pkg) => pkg === '@objectstack/service-record-context').status,
+    ).toBe('ok');
+  });
+
+  it("defineStack accepts requires: ['record-context'] and passes it through untouched", () => {
+    expect(refusalOf(['record-context'])).toBeNull();
+    expect(defineStack({ requires: ['record-context'] }).requires).toEqual(['record-context']);
+  });
+
+  it.each([['record_context'], ['recordContext'], ['record-contexts'], ['context']])(
+    'defineStack still refuses the near miss %s as an unknown capability',
+    (token) => {
+      const refused = refusalOf([token]);
+      expect(refused).toBeInstanceOf(Error);
+      expect(refused?.code).toBe('STACK_CAPABILITY_UNKNOWN');
+      expect(refused?.status).toBe(422);
+      expect(refused?.issues).toHaveLength(1);
+    },
+  );
 });
 
 // The cloud runtime loader resolves a closed set of tokens this repository

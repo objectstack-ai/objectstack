@@ -110,6 +110,8 @@ vi.mock('./studio-design/packages-io', async (importOriginal) => ({
 import { ObjectView } from './ObjectView';
 import { ExpressionProvider } from '../providers/ExpressionProvider';
 import { listDraftScope, readListDraft, resetListDraftStoreForTests } from './listDraftStore';
+import { DesignModeProvider, useDesignModeController } from '../layout/designMode';
+import { DesignModeBar } from '../layout/DesignModeBar';
 
 const OBJECT = 'showcase_task';
 const SHIPPED_PACKAGE = 'com.example.showcase';
@@ -141,7 +143,7 @@ const PACKAGES = [
   { id: CUSTOM_PACKAGE, name: 'Showcase (custom)', writable: true, namespace: 'showcase' },
 ];
 
-function mount(viewId: string) {
+function mount(viewId: string, wrap: (page: React.ReactNode) => React.ReactNode = (page) => page) {
   const dataSource = {
     find: vi.fn(async (resource: string) =>
       resource === 'sys_personal_view' ? { data: [PERSONAL], total: 1 } : { data: [], total: 0 }),
@@ -156,22 +158,24 @@ function mount(viewId: string) {
   render(
     <ExpressionProvider user={{ id: 'u1', name: 'Ada', profile: 'admin' }}>
       <MemoryRouter initialEntries={[`/apps/demo/${OBJECT}/view/${encodeURIComponent(viewId)}`]}>
-        <Routes>
-          <Route
-            path="/apps/:appName/:objectName/view/:viewId"
-            element={
-              <ObjectView
-                dataSource={dataSource as never}
-                objects={[{
-                  name: OBJECT,
-                  label: 'Task',
-                  fields: { name: { type: 'text', label: 'Name' }, amount: { type: 'number', label: 'Amount' } },
-                }]}
-                onEdit={() => {}}
-              />
-            }
-          />
-        </Routes>
+        {wrap(
+          <Routes>
+            <Route
+              path="/apps/:appName/:objectName/view/:viewId"
+              element={
+                <ObjectView
+                  dataSource={dataSource as never}
+                  objects={[{
+                    name: OBJECT,
+                    label: 'Task',
+                    fields: { name: { type: 'text', label: 'Name' }, amount: { type: 'number', label: 'Amount' } },
+                  }]}
+                  onEdit={() => {}}
+                />
+              }
+            />
+          </Routes>
+        )}
       </MemoryRouter>
     </ExpressionProvider>,
   );
@@ -340,5 +344,41 @@ describe('objectstack#36195 — a view the reader cannot change in place: the pi
     expect(screen.queryByTestId('list-draft-save-to-view')).toBeNull();
     expect(screen.getByTestId('list-draft-save-as')).toBeInTheDocument();
     expect(writes).toEqual([]);
+  });
+});
+
+/** The shell's design mode, entered for the app on mount, with its bar drawn above the page. */
+function DesignModeOn({ children }: { children: React.ReactNode }) {
+  const mode = useDesignModeController({ appName: 'demo', appBasePath: '/apps/demo', enabled: true });
+  const { enter } = mode;
+  React.useEffect(() => {
+    enter();
+  }, [enter]);
+  return (
+    <DesignModeProvider value={mode}>
+      {mode.active && <DesignModeBar mode={mode} />}
+      {children}
+    </DesignModeProvider>
+  );
+}
+
+describe('objectstack#36737 — the list draft\'s actions stay live while the design mode is on', () => {
+  it('under the mode\'s bar, the draft draws its own actions, and 「Save to this view」 writes the view, not the mode', async () => {
+    const page = mount(PERSONAL.id, (node) => <DesignModeOn>{node}</DesignModeOn>);
+    await settle();
+    await waitFor(() => expect(screen.getByTestId('design-mode-bar')).toBeInTheDocument());
+    await waitFor(() => expect(offersMenu()).toBe(true));
+    await pick('amount', 'max');
+    expect(screen.getByTestId('list-draft')).toBeInTheDocument();
+    expect(screen.getByTestId('list-draft-discard')).toBeEnabled();
+    // The view's change is no change of the mode's: its 「Save」 stays off.
+    expect(screen.getByTestId('design-mode-save')).toBeDisabled();
+
+    await openSave();
+    fireEvent.click(await screen.findByTestId('list-draft-save-to-view'));
+    await waitFor(() => expect(page.dataSource.update).toHaveBeenCalledTimes(1));
+    expect(page.dataSource.update.mock.calls[0].slice(0, 2)).toEqual(['sys_personal_view', PERSONAL.id]);
+    // Saved on its own: the mode is still on.
+    expect(screen.getByTestId('design-mode-bar')).toBeInTheDocument();
   });
 });

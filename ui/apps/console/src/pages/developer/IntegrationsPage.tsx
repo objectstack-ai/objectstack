@@ -32,6 +32,12 @@ import { Terminal, Copy, Check, Plug, Database, KeyRound } from 'lucide-react';
 
 import { AgentConnectSection } from './AgentConnectSection';
 import { SLOT, withSlots } from '../../lib/inlineSlots';
+import { createAuthenticatedFetch } from '@object-ui/auth';
+
+/** The console's authenticated fetch: the stored bearer token beside the session cookie. */
+function authFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+  return createAuthenticatedFetch()(input, init);
+}
 
 interface ConsoleObjectMeta {
   name: string;
@@ -101,7 +107,7 @@ function IntegrationsPageBody() {
     let cancelled = false;
     (async () => {
       try {
-        const res = await fetch('/api/v1/meta/object', { credentials: 'include' });
+        const res = await authFetch('/api/v1/meta/object', { credentials: 'include' });
         if (!res.ok) throw new Error(`meta/object ${res.status}`);
         const json = await res.json();
         const raw = (json?.data ?? json?.items ?? json ?? []) as Array<Record<string, unknown>>;

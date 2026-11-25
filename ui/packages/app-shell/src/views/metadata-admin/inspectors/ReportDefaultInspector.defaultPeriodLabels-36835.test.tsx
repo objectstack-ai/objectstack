@@ -27,7 +27,7 @@ import '@objectstack/lint';
 import { I18nProvider, en } from '@object-ui/i18n';
 import { reportForm } from '@objectstack/spec/ui';
 import { ReportDefaultInspector } from './ReportDefaultInspector';
-import { defaultPeriodLabelKey } from '../report-schema';
+import { defaultPeriodLabelKey } from '../default-period-labels';
 import type { DatasetCatalogEntry } from '../previews/useDatasetCatalog';
 import { loadStudioCatalogue } from '@object-ui/i18n/namespaces/studio';
 await loadStudioCatalogue('zh');

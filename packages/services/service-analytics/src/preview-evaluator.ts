@@ -9,7 +9,8 @@
 //
 // Scope (deliberately the dataset-query subset, not a general engine):
 //   • Mongo-style `where` filters ($eq implicit, $ne/$gt/$gte/$lt/$lte/
-//     $between/$in/$nin/$contains/$notContains/$null, $and/$or/$not)
+//     $between/$in/$nin/$contains/$notContains/$null, $and/$or/$not), and
+//     a `{ $field }` comparand under the six scalar operators (#36677)
 //   • timeDimensions date-range filtering + granularity bucketing
 //     (day/week/month/quarter/year)
 //   • group-by dimensions; count / count_distinct / sum / avg / min / max
@@ -62,6 +63,14 @@ import type { DurationMeasureSpec } from './strategies/types.js';
 import { invalidFilterError, normalizeWhereComparands } from './strategies/filter-normalizer.js';
 import { comparisonColumnClass, refusePreviewJsonColumnComparisons } from './json-column-comparison-refusal.js';
 import { isJsonStoredShape } from './contains-membership-sql.js';
+// [#36677] A `{ $field }` comparand: resolved against the row's own column
+// under the six scalar operators, and refused where the live faces refuse it.
+import { isFieldReference } from './comparand-shape.js';
+import {
+  assertPreviewFieldReferencesEvaluable,
+  fieldReferencePredicate,
+  refusePreviewFieldReferenceClasses,
+} from './preview-field-reference.js';
 import type { AnalyticsQuery, AnalyticsResult } from '@objectstack/spec/contracts';
 import { emptyGroupValueFor, lowerFilterCondition, type Cube, type FilterLoweringOptions, type ValueShapeFieldDef } from '@objectstack/spec/data';
 
@@ -404,6 +413,14 @@ export function matchesWhere(
     } else if (cond !== null && typeof cond === 'object' && !Array.isArray(cond)) {
       const shape = shapeOf?.(key);
       for (const [op, expected] of Object.entries(cond as Row)) {
+        // [#36677] A `{ $field }` comparand compares the row's two columns.
+        // It used to reach {@link matchOp} as a literal and be compared as the
+        // text `[object Object]`. See `preview-field-reference.ts`.
+        const byReference = fieldReferencePredicate(key, op, expected);
+        if (byReference) {
+          if (!byReference(row[key], row[(expected as { $field: string }).$field], compare)) return false;
+          continue;
+        }
         if (!matchOp(row[key], op, expected, key, shape)) return false;
       }
     } else if (!(row[key] === cond || String(row[key]) === String(cond))) {
@@ -781,7 +798,9 @@ function previewStorageComparands(node: Row | undefined, kindOf: PreviewTemporal
     } else {
       out[key] = Object.fromEntries(Object.entries(cond as Row).map(([op, expected]) => [
         op,
-        STORAGE_FORM_OPERATORS.has(op) && expected != null ? storageForm(expected, kind) : expected,
+        // [#36677] A `{ $field }` comparand names a column, not a value: the
+        // referent is read from the row, which is in its storage form already.
+        STORAGE_FORM_OPERATORS.has(op) && expected != null && !isFieldReference(expected) ? storageForm(expected, kind) : expected,
       ]));
     }
   }
@@ -903,6 +922,10 @@ export function lowerPreviewRowFilters(
   // text `'null'` or `'undefined'` — onto every driver's answer.
   const lowered = lowerFilterCondition(normalizeWhereComparands(query.where), lowering);
   assertPreviewCanEvaluate(lowered);
+  // [#36677] …and every `{ $field }` comparand where this face evaluates one
+  // (the six scalar operators, a same-object column, no offset), refused in
+  // the live faces' positions otherwise. Row-independent, so before any row.
+  assertPreviewFieldReferencesEvaluable(lowered);
   // [#36168] …then a scalar comparison on a field declared multi-valued or
   // JSON-stored, refused as the live faces refuse it: a drafted row holds the
   // list, which never equals a scalar, so `$in` matched no row and `$nin`
@@ -914,6 +937,13 @@ export function lowerPreviewRowFilters(
   if (declaredShape || storedJsonClass) {
     const classOf = (column: string) => comparisonColumnClass(declaredShape?.(column), storedJsonClass?.(column));
     refusePreviewJsonColumnComparisons(lowered, classOf, (member) => whereColumns?.[member] ?? member);
+  }
+  // [#36677] …then each `{ $field }` comparison's two columns, as the live
+  // faces judge them: both declared, one comparison class
+  // (`crossFieldComparisonVerdict`). A host that names no declaration is not
+  // judged, and its references are compared type-blind.
+  if (declaredShape) {
+    refusePreviewFieldReferenceClasses(lowered, (member) => declaredShape(whereColumns?.[member] ?? member), declaredShape);
   }
   // [#21505] …then each value comparison in the temporal STORAGE form, the
   // comparand here and the row value at the match (see {@link previewTemporalKind}).

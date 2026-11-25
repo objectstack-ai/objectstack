@@ -128,7 +128,7 @@ describe('the host asked, and the viewer is served one app (objectui#12913)', ()
 });
 
 describe('CONTROLS (objectui#12913)', () => {
-  it('a viewer served two apps keeps the switcher and its 「All apps」', async () => {
+  it('a viewer served two apps keeps the switcher and its way home', async () => {
     await serveRuntimeConfig({ hideSingleAppSwitcher: true });
     apps = [CLOUD, CLOUD_ADMIN, ACCOUNT];
     renderSwitcher('cloud_control');
@@ -138,7 +138,7 @@ describe('CONTROLS (objectui#12913)', () => {
     const menu = within(screen.getByTestId('app-switcher-menu'));
     expect(menu.getByTestId('app-switcher-row-cloud_control')).toBeInTheDocument();
     expect(menu.getByTestId('app-switcher-row-platform_admin')).toBeInTheDocument();
-    expect(menu.getByTestId('app-switcher-all-apps')).toHaveTextContent('All apps');
+    expect(menu.getByTestId('app-switcher-home')).toHaveTextContent('Back to app start page');
   });
 
   it('a viewer served Setup as well keeps the switcher and its 「Settings」 row', async () => {
@@ -160,7 +160,6 @@ describe('CONTROLS (objectui#12913)', () => {
     expect(screen.getByTestId('app-switcher-trigger')).toHaveAttribute('title', 'Cloud');
     const menu = within(screen.getByTestId('app-switcher-menu'));
     expect(menu.getByTestId('app-switcher-row-cloud_control')).toBeInTheDocument();
-    expect(menu.getByTestId('app-switcher-home')).toHaveTextContent('Back to home');
-    expect(menu.getByTestId('app-switcher-all-apps')).toHaveTextContent('All apps');
+    expect(menu.getByTestId('app-switcher-home')).toHaveTextContent('Back to app start page');
   });
 });

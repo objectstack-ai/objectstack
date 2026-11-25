@@ -119,7 +119,7 @@ import '@objectstack/lint';
 // record preview's `lazy()` detail entry: its first load is paid here too.
 import '@object-ui/plugin-detail';
 
-const answer = (body: unknown) => ({ ok: true, status: 200, json: async () => body });
+const answer = (body: unknown) => ({ headers: new Headers(), ok: true, status: 200, json: async () => body });
 
 /** The package list as the server serves it: one writable app package and one kernel package. */
 function servePackages() {
@@ -169,7 +169,7 @@ function renderAt(path: string) {
     <MemoryRouter initialEntries={[path]}>
       <Where />
       <Routes>
-        <Route path="/studio" element={<div data-testid="studio-landing" />} />
+        <Route path="/studio" element={<div data-testid="studio-entry" />} />
         <Route path="/studio/:packageId/metadata/*" element={<StudioDesignSurface area="metadata" />} />
         <Route path="/studio/:packageId/:tab" element={<StudioDesignSurface />} />
       </Routes>
@@ -293,15 +293,17 @@ describe('⌘K on the builder (objectstack#36900)', () => {
   const overlay = () => document.querySelector('[data-testid="overlay:command-palette"]');
   const paletteItem = (value: string) => document.querySelector(`[cmdk-item][data-value="${value}"]`);
 
-  it("on a package's pillar, Ctrl+K opens the palette with the menu's entries, and a pick opens through the surface", async () => {
+  it("on a package's page, Ctrl+K opens the palette with the menu's entries, and a pick opens through the surface", async () => {
     servePackages();
-    renderAt(`/studio/${PACKAGE_ID}/data`);
+    // objectstack#36904, objectstack#36903 — the Data and Automations pillars
+    // are retired: the package's object list in the area hosts the palette.
+    renderAt(`/studio/${PACKAGE_ID}/metadata/object?package=${PACKAGE_ID}`);
     await waitFor(() => menu().getByTestId('studio-menu-entry-type:flow'));
     expect(overlay()).toBeNull();
 
     fireEvent.keyDown(document, { key: 'k', ctrlKey: true });
     await waitFor(() => expect(overlay()).not.toBeNull());
-    expect(where()).toBe(`/studio/${PACKAGE_ID}/data?palette=1`);
+    expect(new URL(where(), 'http://x').searchParams.get('palette')).toBe('1');
     await waitFor(() => expect(paletteItem('studio-entry type:flow')).not.toBeNull());
     expect(paletteItem('studio-entry orgFlows')).not.toBeNull();
 
@@ -398,15 +400,17 @@ describe('⌘K and the header ask before they drop edits the item page holds (ob
     expect(confirmSpy).not.toHaveBeenCalled();
   });
 
-  it('Default sharing picked on the Access pillar remounts the pillar on its overview', async () => {
+  // objectstack#36905 — a permission set opens full-screen at its metadata address and the
+  // overview has its own route, so the pick leaves the set's page for the overview's.
+  it("Default sharing picked on a permission set's page opens the overview at its own route", async () => {
     itemPage.dirty = false;
     mockClient.list.mockImplementation(async (type?: string) =>
       type === 'permission' ? [{ name: 'sales_rep', label: 'Sales Rep', _packageId: PACKAGE_ID }] : [],
     );
     try {
       servePackages();
-      renderAt(`/studio/${PACKAGE_ID}/access?surface=permission%3Asales_rep`);
-      await screen.findByTestId('access-rail-set-sales_rep');
+      renderAt(`/studio/${PACKAGE_ID}/metadata/permission/sales_rep?package=${PACKAGE_ID}`);
+      await screen.findByTestId('studio-permission-set-page');
       expect(screen.queryByTestId('owd-overview')).toBeNull();
 
       fireEvent.keyDown(document, { key: 'k', ctrlKey: true });
@@ -414,7 +418,8 @@ describe('⌘K and the header ask before they drop edits the item page holds (ob
       fireEvent.click(paletteItem('studio-entry owd')!);
 
       expect(await screen.findByTestId('owd-overview')).toBeInTheDocument();
-      expect(where()).toBe(`/studio/${PACKAGE_ID}/access?surface=owd%3Aoverview`);
+      expect(where()).toBe(`/studio/${PACKAGE_ID}/owd`);
+      expect(screen.queryByTestId('studio-permission-set-page')).toBeNull();
       expect(overlay()).toBeNull();
       expect(confirmSpy).not.toHaveBeenCalled();
     } finally {

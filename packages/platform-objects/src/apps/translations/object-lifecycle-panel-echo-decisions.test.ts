@@ -1325,7 +1325,13 @@ describe('#19403 round 10 — the verdicts, on the live bundles', () => {
       // 824 since #35926: the field form offers the `inlineEdit` select (its
       // boolean arm retired, a select spells 'grid' / 'form') — one row label,
       // authored in all three locales.
-      expect(translated.length, `${locale} positive control`).toBe(824);
+      // 825 since #37140: the `ai_context` type's own label (ADR-0160 D1),
+      // authored in all three locales.
+      // 828 since #36949: the dashboard form declares the `dateRange`
+      // children — three row labels, authored in all three locales.
+      // 837 since #37143: the `ai_context` form (ADR-0160 D1 clause 2) — two
+      // section labels and seven row labels, authored in all three locales.
+      expect(translated.length, `${locale} positive control`).toBe(837);
     }
     // ⭐ DARK — the blindness, executable. On a synthetic two-locale catalog the
     // all-three predicate returns 0 while the per-locale one returns 1, so the

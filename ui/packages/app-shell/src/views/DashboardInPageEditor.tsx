@@ -67,7 +67,13 @@ export type DashboardEditRefusal = 'no-package' | 'walled' | 'no-version' | 'pen
 
 /** What opening a dashboard for editing found. */
 export type DashboardEditOpening =
-  | { kind: 'ready'; target: WritableDashboardEditTarget; doc: Record<string, unknown> }
+  | {
+      kind: 'ready';
+      target: WritableDashboardEditTarget;
+      doc: Record<string, unknown>;
+      /** The dashboard as its package ships it (the layered read's `code`), `null` when none ships. */
+      shipped: Record<string, unknown> | null;
+    }
   | { kind: 'refused'; reason: DashboardEditRefusal; detail?: string };
 
 /** The metadata client calls {@link openDashboardForEdit} makes. */
@@ -80,9 +86,12 @@ export interface DashboardEditReader {
   ): Promise<{ code: unknown; effective: unknown }>;
 }
 
+function recordOf(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : null;
+}
+
 function authoredDoc(layers: { code: unknown; effective: unknown } | null): Record<string, unknown> | null {
-  const doc = layers ? (layers.effective ?? layers.code) : null;
-  return doc && typeof doc === 'object' && !Array.isArray(doc) ? (doc as Record<string, unknown>) : null;
+  return layers ? recordOf(layers.effective ?? layers.code) : null;
 }
 
 /** What {@link openDashboardForEdit} is told besides the item. */
@@ -128,16 +137,20 @@ export async function openDashboardForEdit(
     if (at && unwrapDraftBody(await client.getDraft('dashboard', name, at))) {
       return { kind: 'refused', reason: 'pending-draft' };
     }
-    let doc = at ? authoredDoc(await client.layered('dashboard', name, at)) : null;
+    let layers = at ? await client.layered('dashboard', name, at) : null;
+    let doc = authoredDoc(layers);
     if (!doc && target.kind === 'customization') {
-      doc = authoredDoc(await client.layered('dashboard', name, { packageId: target.base }));
+      layers = await client.layered('dashboard', name, { packageId: target.base });
+      doc = authoredDoc(layers);
     }
     if (!doc) return { kind: 'refused', reason: 'load-failed' };
+    // What the package ships, for the panels to restore an undone change from.
+    const shipped = recordOf(layers?.code);
     // Studio's `noVersion`: no override declared yet, and no version to declare it at.
     if (target.kind === 'customization' && dashboardSaveBody(doc, target) === null) {
       return { kind: 'refused', reason: 'no-version', detail: target.base };
     }
-    return { kind: 'ready', target, doc };
+    return { kind: 'ready', target, doc, shipped };
   } catch (err) {
     return { kind: 'refused', reason: 'load-failed', detail: err instanceof Error ? err.message : String(err) };
   }
@@ -194,19 +207,53 @@ export function filtersSectionLabel(locale: SupportedLocale): string | null {
 }
 
 /**
+ * The narrowest window the edit state is offered in: Tailwind's `sm`, from
+ * which the page draws the side panel the edit state needs.
+ */
+export const DASHBOARD_EDIT_MIN_WIDTH = 640;
+
+/** Is the window at least {@link DASHBOARD_EDIT_MIN_WIDTH} wide right now? */
+function dashboardEditFitsNow(): boolean {
+  return typeof window === 'undefined' || window.innerWidth >= DASHBOARD_EDIT_MIN_WIDTH;
+}
+
+/**
+ * Whether the window is wide enough for the edit state (objectstack#36906).
+ * Read synchronously on the first render, as `usePhoneViewport` reads its
+ * answer, so a landing that asks for the edit state never sees a phone as wide.
+ */
+export function useDashboardEditFits(): boolean {
+  const [fits, setFits] = React.useState<boolean>(dashboardEditFitsNow);
+  React.useEffect(() => {
+    if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return;
+    const mql = window.matchMedia(`(min-width: ${DASHBOARD_EDIT_MIN_WIDTH}px)`);
+    const onChange = () => setFits(dashboardEditFitsNow());
+    mql.addEventListener('change', onChange);
+    // A width that moved between the first render and this effect.
+    onChange();
+    return () => mql.removeEventListener('change', onChange);
+  }, []);
+  return fits;
+}
+
+/**
  * Whether this principal is offered the Edit button for a dashboard
  * `ownerPackageId` owns: the gate of the app → Studio entries
  * (`useStudioEntryGate`: a workspace admin who may author metadata, on a
  * package Studio lists, writable or not; never a kernel package). A
  * read-only package's dashboard is edited through its customization package.
  * Not while the shell's design mode is on (objectstack#36692): the two are
- * separate entries, never open together.
+ * separate entries, never open together. Not on a phone either
+ * (objectstack#36906): the edit state needs its side panel, so a window
+ * narrower than {@link DASHBOARD_EDIT_MIN_WIDTH} is offered no edit, and a
+ * landing that asks for one (from Studio, from the design mode) opens none.
  */
 export function useDashboardEditOffered(ownerPackageId: string | null | undefined): boolean {
   const path = ownerPackageId ? studioPackagePath(ownerPackageId) : null;
   const gated = useStudioEntryGate(path) !== null;
   const designing = useDesignModeActive();
-  return gated && !designing;
+  const fits = useDashboardEditFits();
+  return gated && !designing && fits;
 }
 
 /** The page header's Edit button. */
@@ -288,6 +335,7 @@ export function DashboardEditPanel({
   onFiltersRevealed,
   served,
   published,
+  shipped = null,
 }: {
   name: string;
   draft: Record<string, unknown>;
@@ -295,6 +343,8 @@ export function DashboardEditPanel({
   served?: Record<string, unknown> | null;
   /** The stored document the edit state opened, before any change. */
   published?: Record<string, unknown> | null;
+  /** The dashboard as its package ships it: an undone opt-out restores its filter binding. */
+  shipped?: Record<string, unknown> | null;
   selection: MetadataSelection | null;
   onPatch: (patch: Record<string, unknown>) => void;
   onSelectionChange: (next: MetadataSelection | null) => void;
@@ -334,6 +384,7 @@ export function DashboardEditPanel({
           type="dashboard"
           name={name}
           draft={draft}
+          shipped={shipped}
           selection={selection}
           onPatch={onPatch}
           onClearSelection={() => onSelectionChange(null)}
@@ -370,6 +421,8 @@ export interface DashboardInPageEdit {
   draft: Record<string, unknown> | null;
   /** The stored document as the edit state opened it, before any change; `null` outside it. */
   published: Record<string, unknown> | null;
+  /** The dashboard as its package ships it, `null` when none ships or outside the edit state. */
+  shipped: Record<string, unknown> | null;
   opening: boolean;
   saving: boolean;
   dirty: boolean;
@@ -410,6 +463,7 @@ export function useDashboardInPageEdit({
     target: WritableDashboardEditTarget;
     draft: Record<string, unknown>;
     published: Record<string, unknown>;
+    shipped: Record<string, unknown> | null;
     dirty: boolean;
   } | null>(null);
   const [opening, setOpening] = React.useState(false);
@@ -434,7 +488,7 @@ export function useDashboardInPageEdit({
     try {
       const opened = await openDashboardForEdit(name, ownerPackageId, client, { doors, walled });
       if (opened.kind === 'refused') return opened;
-      setSession({ target: opened.target, draft: opened.doc, published: opened.doc, dirty: false });
+      setSession({ target: opened.target, draft: opened.doc, published: opened.doc, shipped: opened.shipped, dirty: false });
       setSelection(null);
       return null;
     } finally {
@@ -483,6 +537,7 @@ export function useDashboardInPageEdit({
   return {
     draft: session?.draft ?? null,
     published: session?.published ?? null,
+    shipped: session?.shipped ?? null,
     opening,
     saving,
     dirty: session?.dirty ?? false,

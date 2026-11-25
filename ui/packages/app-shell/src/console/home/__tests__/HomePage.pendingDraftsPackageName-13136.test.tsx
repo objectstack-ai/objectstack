@@ -127,6 +127,9 @@ vi.mock('../../../hooks/useInboxBell', () => ({ useInboxBell: () => ({ markRead:
 vi.mock('../../deployment-notice/DeploymentNotice', () => ({ DeploymentNotice: () => null }));
 
 import { HomePage } from '../HomePage';
+// The source under test reaches a dynamic `import('@objectstack/lint')`: pay its load at
+// collection, never inside a case's clocked window (`check:test-source-alias`).
+import '@objectstack/lint';
 
 const DRAFTS_ROUTE = '/api/v1/meta/_drafts';
 const PACKAGES_ROUTE = '/api/v1/packages';
@@ -172,13 +175,13 @@ beforeEach(() => {
     vi.fn(async (input: unknown) => {
       const url = String(input);
       fetchCalls.push(url);
-      if (routeOf(url) === DRAFTS_ROUTE) return { ok: true, status: 200, json: async () => ({ drafts }) };
+      if (routeOf(url) === DRAFTS_ROUTE) return { headers: new Headers(), ok: true, status: 200, json: async () => ({ drafts }) };
       if (routeOf(url) === PACKAGES_ROUTE) {
         if (packagesGate) await packagesGate;
         const { ok, status, body } = packagesAnswer;
-        return { ok, status, json: async () => body };
+        return { headers: new Headers(), ok, status, json: async () => body };
       }
-      return { ok: false, status: 404, json: async () => ({}) };
+      return { headers: new Headers(), ok: false, status: 404, json: async () => ({}) };
     }),
   );
 });

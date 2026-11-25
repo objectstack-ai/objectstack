@@ -17,7 +17,7 @@ import React, { forwardRef, useCallback, useMemo, useState } from 'react';
 import { ComponentRegistry } from '@object-ui/core';
 import type { ActionDef } from '@object-ui/core';
 import type { UIActionSchema } from '@object-ui/types';
-import { useAction } from '@object-ui/react';
+import { useAction, useDrawsAction } from '@object-ui/react';
 import { useCondition, toPredicateInput, usePredicateRecordContext } from '@object-ui/react';
 import { useObjectTranslation } from '@object-ui/i18n';
 import { Button } from '../../ui';
@@ -33,6 +33,7 @@ import { Loader2, MoreHorizontal } from 'lucide-react';
 import { resolveIcon } from './resolve-icon';
 import { hasDeclaredVisibilityGate } from './visibility-gate';
 import { useAutoTriggerOnce } from './auto-trigger';
+import { withRenderableLabel } from './renderable-label';
 import { readActionEntryParamValues } from './static-params';
 import { toButtonVariant, toRunnerVariant } from './runner-variant';
 import { DisabledReasonMenuLabel, menuItemReasonAria, useDisabledReason } from './disabled-reason';
@@ -129,7 +130,10 @@ export const ActionMenuItem: React.FC<{
   // and render it (objectui#3812) — the same gate `action:group`'s two member
   // leaves read. `false` short-circuits at the evaluation entry, so the
   // `throwOnError` posture above still only applies to real predicates.
+  // `ask_ai` is absent, not disabled, where no in-app assistant can take it (objectstack#37142).
+  const drawsAction = useDrawsAction();
   if (hasDeclaredVisibilityGate(action.visible) && !isVisible) return null;
+  if (!drawsAction(action)) return null;
 
   return (
     <DropdownMenuItem
@@ -210,7 +214,7 @@ ActionAutoTrigger.displayName = 'ActionAutoTrigger';
 // host-EVALUATED enablement verdict, declared rather than left to the index
 // signature, as `ActionButtonRendererProps` declares it (objectui#9131).
 const ActionMenuRenderer = forwardRef<HTMLButtonElement, { schema: ActionMenuSchema; className?: string }>(
-  ({ schema, className, ...props }: { schema: ActionMenuSchema; className?: string; disabled?: boolean; [key: string]: unknown } & RendererHostProps, ref) => {
+  ({ schema: declaredSchema, className, ...props }: { schema: ActionMenuSchema; className?: string; disabled?: boolean; [key: string]: unknown } & RendererHostProps, ref) => {
     const {
       'data-obj-id': dataObjId,
       'data-obj-type': dataObjType,
@@ -231,6 +235,17 @@ const ActionMenuRenderer = forwardRef<HTMLButtonElement, { schema: ActionMenuSch
       disabled: hostDisabled,
       ...rest
     } = props;
+
+    // Every label read in this menu goes through the shared guard (see
+    // `renderableLabel`): the trigger's own label here, and each member's below
+    // where `actions` is built, so the items, the runner's `label` and the
+    // auto-trigger's refusal notice all read a guarded one. A locale-map label
+    // used to throw "Objects are not valid as a React child" from the trigger.
+    const menuKey = dataObjId ?? 'action:menu';
+    const schema = useMemo(
+      () => withRenderableLabel(declaredSchema, menuKey, 'action:menu'),
+      [declaredSchema, menuKey],
+    );
 
     const { execute } = useAction();
     const [loading, setLoading] = useState(false);
@@ -354,7 +369,9 @@ const ActionMenuRenderer = forwardRef<HTMLButtonElement, { schema: ActionMenuSch
     // `ActionMenuSchema.actions` key used to say the legacy `ActionSchema`
     // while every item below was written against the modern one. The local
     // restates the declared type; both `.map()` callbacks still infer from it.
-    const actions: UIActionSchema[] = schema.actions || [];
+    const actions: UIActionSchema[] = (schema.actions || []).map((action, index) =>
+      withRenderableLabel(action, action.name ?? `${menuKey}#${index}`, 'action:menu'),
+    );
     if (actions.length === 0) return null;
 
     return (

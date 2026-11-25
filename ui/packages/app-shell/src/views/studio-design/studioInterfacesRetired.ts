@@ -9,7 +9,8 @@
  *
  * An old Interfaces URL — `/studio/<package>/interfaces`, with or without a
  * `?surface=` deep link — still opens: it lands on the package's Studio home
- * (the Data pillar) and says once, there, where interface editing went, with a
+ * (the retired Data pillar's address, which redirects to the package's object
+ * list, objectstack#36904) and says once, there, where interface editing went, with a
  * link back to the app. A `?changes=review` request travels with it, because
  * the Changes drawer it opens is the surface's, not the pillar's
  * (`studioChangesLink.ts`); the retired pillar's own parameters are dropped.

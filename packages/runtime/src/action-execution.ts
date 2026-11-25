@@ -56,7 +56,7 @@ import { markAppAutomationElevation } from '@objectstack/core';
 // Managing API keys is a signed-in-session act: the one rule this door's
 // per-object gate asks beside the exposure decision, shared with `RestServer`.
 import { apiKeyManagementCredentialRefusal } from '@objectstack/core';
-import type { UserMessageCaller } from '@objectstack/core';
+import { operationUserMessage, type UserMessageCaller } from '@objectstack/core';
 import {
     PackageScopedNameRefusedError,
     packageScopedHolderSource,
@@ -1360,6 +1360,9 @@ export function isHeadlessInvokableAction(_deps: ActionExecutionDeps, action: an
     // forwards it in-process to its declared `target` (see
     // {@link forwardApiAction}). An off-origin one stays browser-only.
     if (type === 'api') return isSameOriginApiTarget(action?.target);
+    // `url`, `modal`, `form` and `ask_ai` (ADR-0160 D7 — it focuses the
+    // console's assistant on a record and is never an AI tool) have no server
+    // dispatch.
     return false;
 }
 
@@ -2156,25 +2159,30 @@ export async function resolveInProcessRequest(
  * operator's: an environment's own kernel on a multi-kernel host owns no
  * socket, and the host's kernel, which registers `kernel-resolver`, is the one
  * whose door forwards for it.
+ *
+ * [#37273] The sentence is the operation-message catalog's
+ * (`action_forward_unavailable`, `_host` at the host door), in `caller`'s
+ * language: the request's `locale` (the dispatcher resolves it from the top
+ * `Accept-Language` tag), then its `workspaceLocale`, then `en`, the ladder
+ * every other refusal of this door reads. The console shows a refused
+ * action's wire `message` to whoever clicked it, so a print action clicked
+ * in a Chinese console while its forward is unavailable answered English
+ * before. Only the language moves: the English is byte-identical, the status
+ * stays `503`, and no `userMessage` is added. The action's name and its
+ * target are identifiers and stay as written.
  */
-export function apiActionForwardUnavailableError(action: any, door?: 'rest' | 'mcp' | 'host'): string {
-    const opening =
-        `Action '${action?.name ?? 'unknown'}' is a same-origin \`type: 'api'\` action whose \`target\` ` +
-        `(${typeof action?.target === 'string' ? `'${action.target}'` : 'endpoint'}) this door forwards to in-process, `;
-    if (door === 'host') {
-        return (
-            opening +
-            `but the kernel dispatchAction was handed exposes no in-process request path (IHttpServer.getRawApp). ` +
-            `Pass dispatchAction the kernel your HTTP door is served from: on a multi-kernel host, the kernel that ` +
-            `registers \`kernel-resolver\`, with the call's \`environmentId\` (an environment's own kernel owns no ` +
-            `socket). On a single kernel, run an HTTP server plugin that implements getRawApp. The action is not ` +
-            `dispatched around the door.`
-        );
-    }
-    return (
-        opening +
-        `but this deployment's HTTP server exposes no in-process request path (IHttpServer.getRawApp). ` +
-        `Operator: run an HTTP server plugin that implements getRawApp; the action is not dispatched around the door.`
+export function apiActionForwardUnavailableError(
+    action: any,
+    door?: 'rest' | 'mcp' | 'host',
+    caller?: UserMessageCaller | null,
+): string {
+    const target = typeof action?.target === 'string'
+        ? `'${action.target}'`
+        : operationUserMessage('action_forward_target_unnamed', caller);
+    return operationUserMessage(
+        door === 'host' ? 'action_forward_unavailable_host' : 'action_forward_unavailable',
+        caller,
+        { action: action?.name ?? 'unknown', target },
     );
 }
 
@@ -2497,6 +2505,16 @@ export function headlessActionTypeError(_deps: ActionExecutionDeps, action: any,
             `forward to it. Only a same-origin \`target\` (a path starting with \`/\`) is dispatched through ` +
             `this door. Call ${target ? `\`${target}\`` : 'its `target` endpoint'} directly` +
             `${typeof action?.method === 'string' ? ` (${action.method})` : ''}.`
+        );
+    }
+    if (type === 'ask_ai') {
+        // ADR-0160 D7: `ask_ai` names nothing and runs nothing server-side —
+        // the console focuses its in-app assistant on the record. The generic
+        // sentence below ("the renderer opens its `target`") would describe a
+        // key this type refuses at parse.
+        return (
+            `Action '${name}'${on} is \`type: 'ask_ai'\` — a client-side action with no server dispatch. ` +
+            `The console opens its in-app assistant focused on the record; there is nothing for the server to run.`
         );
     }
     return (
@@ -7405,7 +7423,7 @@ async function environmentItemAtOwnAddress(
  */
 export async function readMergedItems(
     protocol: Pick<MetadataProtocol, 'getMetaItems'> | undefined | null,
-    type: 'skill' | 'object' | 'action' | 'dataset',
+    type: 'skill' | 'object' | 'action' | 'dataset' | 'ai_context',
 ): Promise<unknown[] | undefined> {
     if (!protocol || typeof protocol.getMetaItems !== 'function') return undefined;
     const answer = await protocol.getMetaItems({ type });

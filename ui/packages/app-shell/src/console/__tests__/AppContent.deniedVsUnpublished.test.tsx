@@ -612,7 +612,8 @@ describe('AppContent — every screen here states what the probe measured (objec
 
     renderConsoleAt('/apps/finance');
     const home = await screen.findByTestId(`${testId}-home`);
-    expect(home).toHaveTextContent('Back to home');
+    // objectstack#37163 — a desktop's way home names the app start page it opens.
+    expect(home).toHaveTextContent('Back to app start page');
     expect(screen.getByTestId(`${testId}-retry`)).toBeInTheDocument();
     home.click();
 

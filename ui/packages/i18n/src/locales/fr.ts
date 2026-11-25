@@ -70,6 +70,9 @@ const fr = {
     autofillNoCurrency: '{{field}} n’a pas été rempli : le montant choisi est de {{amount}}, mais aucune devise n’est encore choisie ici. Choisissez la devise, puis saisissez {{field}}.',
     autofillCurrencyUnread: '{{field}} n’a pas été rempli : le montant choisi est de {{amount}}, mais la devise ici n’a pas pu être lue. Vérifiez la devise, puis saisissez {{field}}.',
     autofillKept: '{{field}} garde sa valeur précédente.',
+    autofillNowSameCurrency: '{{field}} n’a pas été rempli lors du choix. L’enregistrement est maintenant en {{to}} : choisissez à nouveau pour remplir {{amount}}.',
+    autofillNowSameCurrencyHeld: '{{field}} n’a pas été rempli lors du choix et garde sa valeur précédente. L’enregistrement est maintenant en {{to}} : videz {{field}}, puis choisissez à nouveau pour remplir {{amount}}.',
+    autofillCopiedUnder: '{{field}} a été copié comme {{amount}}, mais l’enregistrement est maintenant en {{to}}. Saisissez {{field}} en {{to}} s’il doit changer.',
   },
   common: {
     // objectui#13461 — a disclosure toggle's name (the tree-view node toggle).
@@ -691,6 +694,7 @@ const fr = {
       needsWholeRows:
         "Le regroupement a besoin de tous les enregistrements, mais cette grille n'en a reçu qu'une page : les groupes ne peuvent donc pas être comptés. Fournissez tous les enregistrements, ou laissez la grille les charger depuis une source de données qui implémente queryGroupHeaders.",
       draftOnly: "Non regroupé par {{fields}} : ce champ n'existe que dans le brouillon jusqu'à la publication.",
+      moreGroupsNotLoaded: "D'autres groupes n'ont pas été chargés : cette vue compte plus de groupes que le serveur n'en renvoie en une lecture, seuls certains sont donc affichés.",
     },
     // objectui#4024 — column-footer aggregate prefixes, keyed by the spec's
     // `ColumnSummary` vocabulary. `pattern` owns the label/value join so this
@@ -1829,6 +1833,12 @@ const fr = {
       noCategoryAxis: "Axe de catégories requis — un graphique lié à un objet n’en invente pas. Déclarez l’un des suivants :",
     },
   },
+  // objectstack#36906 — the × of an app page opened from a Studio list.
+  studioReturn: {
+    close: 'Retour à Studio',
+    closeLabel: 'Fermer et revenir à la liste de Studio',
+    leaveConfirm: 'Quitter sans enregistrer ? Les modifications non enregistrées seront perdues.',
+  },
   dashboard: {
     // objectui#7063 — the DEFAULT empty state every dashboard widget renders
     // when its query SUCCEEDED and returned nothing. It replaced the terse
@@ -2511,6 +2521,14 @@ const fr = {
       changesDrafted: "Enregistré comme brouillon",
       changesFailed: "Non appliqué",
       discussing: "Affiché : {{target}}",
+      focus: {
+        pin: "Continuer à poser des questions sur cet enregistrement",
+        pinned: "Questions sur : {{target}}",
+        remove: "Ne plus poser de questions sur cet enregistrement",
+        switchPrompt: "Poser plutôt des questions sur « {{target}} » ?",
+        switchAccept: "Changer",
+        switchDecline: "Conserver",
+      },
       changeVerb: {
         createObject: "Créer un objet",
         addField: "Ajouter un champ",
@@ -2555,6 +2573,7 @@ const fr = {
       unavailableTitle: "Assistant IA non disponible",
       unavailableDescription: "Cette instance n'a pas d'assistant IA activé. Tout le reste fonctionne normalement.",
       unavailableError: "Impossible de joindre le service IA. Il est peut-être temporairement hors ligne — réessayez, ou retournez à l'accueil.",
+      unavailableErrorDesktop: "Impossible de joindre le service IA. Il est peut-être temporairement hors ligne — réessayez, ou retournez à la page de démarrage de l'app.",
       unavailableRetry: "Réessayer",
       unavailableHome: "Retour à l'accueil",
       dock: {
@@ -2927,11 +2946,12 @@ const fr = {
       resetViewTitle: "Rétablit les filtres, la recherche, le tri, le regroupement, la disposition des colonnes, les champs masqués, la densité, la disposition, la couleur de ligne, les numéros de ligne et l’édition en ligne propres à cette vue. Les vues épinglées, les favoris et le mode d’ouverture des enregistrements ne changent pas. Seule votre liste change.",
       personalized: "Personnalisée",
       personalizedHeading: "Votre liste diffère de cette vue par",
-      // objectstack#35955 — a list's unsaved changes: Discard and Save.
+      // objectstack#35955 — a list's unsaved changes: Reset and Update view
+      // (objectstack#36737, the view's own actions, as Twenty's).
       draft: {
-        discard: "Abandonner",
+        discard: "Réinitialiser",
         discardTitle: "Remet la liste telle que la vue la définit : filtres, tri, regroupement, colonnes et disposition. La largeur des colonnes et la hauteur des lignes restent.",
-        save: "Enregistrer",
+        save: "Mettre à jour la vue",
         heading: "Modifications non enregistrées",
         partSeparator: ", ",
         saveToView: "Enregistrer dans cette vue",
@@ -3795,7 +3815,7 @@ const fr = {
     build: {
       title: "Créer une application",
       noCapability: "La création d'applications n'est pas disponible dans ce système : elle requiert l'autorisation « Gérer les métadonnées », que votre compte ne possède pas.",
-      inStudio: "Nouveau dans Studio",
+      inStudio: "Nouvelle application vierge",
     },
     template: {
       title: "Partir d'un modèle",
@@ -3936,7 +3956,7 @@ const fr = {
       allApps: "Toutes les applications",
       editAppInStudio: "Modifier {{app}} dans Studio",
       openAppInStudio: "Voir {{app}} dans Studio",
-      backToHome: "Retour à l'accueil",
+      backToHome: "Retour à la page de démarrage de l'app",
       settings: "Paramètres",
       productHome: "Accueil {{product}}",
       addApp: 'Ajouter une application',
@@ -4211,6 +4231,8 @@ const fr = {
       settings: "Paramètres du rapport",
       pendingDraft: "Ce rapport a des modifications non publiées. Publiez-les ou supprimez-les ci-dessus, puis enregistrez.",
       nameTaken: "Tous les identifiants dérivés de ce nom sont déjà pris. Donnez un autre nom au rapport, puis enregistrez.",
+      // objectstack#36906 — a report made from Studio's report list that could not be saved in the app's package.
+      savedOutsideApp: "Ce rapport a été enregistré hors du package de l’application, car le package de personnalisation de l’application ne peut pas être utilisé ici. La liste Studio ne l’affiche donc pas.",
       adminOnlyTitle: "Seuls les administrateurs de l’espace de travail peuvent créer des rapports",
       adminOnly: "Un rapport est partagé avec tout l’espace de travail ; c’est donc un administrateur qui le crée.",
       designModeOnTitle: "Terminez d’abord la conception de la mise en page",
@@ -4759,6 +4781,7 @@ const fr = {
     tool: {
       aggregate_data: "Synthétiser les données",
       get_record: "Lire l’enregistrement",
+      get_record_context: "Lire le contexte de l’enregistrement",
       list_datasets: "Consulter les indicateurs disponibles",
       query_data: "Interroger les données nécessaires",
       query_dataset: "Interroger un indicateur",
@@ -5086,6 +5109,10 @@ const fr = {
     actComment: 'Commentaire',
     actSystemNote: 'Note du système',
     stepProgress: 'Étapes d\'approbation',
+    outcomeWaiting: 'Passée à {{step}}, en attente d\'une décision',
+    outcomeNow: 'Passée à {{step}} : {{decision}}',
+    outcomeEndedAt: 'Passée à {{step}}, puis terminée : {{decision}}',
+    outcomeEndedHere: 'L\'approbation s\'est terminée ici',
     prevRequest: 'Précédente',
     nextRequest: 'Suivante',
     positionOf: 'Demande {{index}} sur {{total}}',
@@ -5244,7 +5271,12 @@ const fr = {
     bulkRejected_one: '{{count}} demande rejetée',
     bulkRejected_many: '{{count}} de demandes rejetées',
     bulkRejected_other: '{{count}} demandes rejetées',
-    bulkPartial: '{{ok}} réussies, {{fail}} échouées : {{which}}',
+    bulkPartialSummary: '{{ok}} réussies, {{fail}} échouées',
+    bulkFailureLine: '{{title}} : {{reason}}',
+    bulkFailuresShowAll: 'Tout afficher ({{n}})',
+    bulkFailuresTitle: 'Non traitées : {{n}}',
+    bulkFailuresBody: 'Ces demandes sont restées inchangées. Chacune indique la raison.',
+    close: 'Fermer',
     rejectOneTitle: 'Rejeter « {{title}} » ?',
     rejectOneBody: 'La demande sera rejetée et le demandeur notifié.',
     rejectTitle: 'Rejeter cette demande ?',
@@ -5451,6 +5483,10 @@ const fr = {
         skill_one: '{{count}} compétence d’IA',
         skill_many: '{{count}} de compétences d’IA',
         skill_other: '{{count}} compétences d’IA',
+        ai_context: '{{count}} packs de contexte IA',
+        ai_context_one: '{{count}} pack de contexte IA',
+        ai_context_many: '{{count}} de packs de contexte IA',
+        ai_context_other: '{{count}} packs de contexte IA',
         datasource: '{{count}} sources de données',
         datasource_one: '{{count}} source de données',
         datasource_many: '{{count}} de sources de données',

@@ -4,6 +4,8 @@ import type {
   IKnowledgeAdapter,
   IKnowledgeService,
   AdapterContext,
+  AdapterListDocumentsOptions,
+  AdapterListDocumentsPage,
   AdapterSearchOptions,
 } from '@objectstack/spec/contracts';
 import type {
@@ -13,59 +15,95 @@ import type {
 import { KNOWLEDGE_SERVICE } from '@objectstack/spec/contracts';
 
 /**
- * In-memory knowledge adapter. Stores per-source document maps,
- * chunks documents naively on paragraph boundaries (with a soft 800-char
- * cap), embeds each chunk as a sparse token-frequency vector, and
- * answers `search()` via brute-force cosine similarity.
+ * In-memory knowledge adapter. Stores per-source document maps, embeds each
+ * passage as a sparse token-frequency vector, and answers `search()` via
+ * brute-force cosine similarity.
+ *
+ * It does not split: it declares `capabilities.chunks` (ADR-0161 K8, item 5),
+ * so the knowledge service hands it every document already cut into passages
+ * by the service's one splitter, and it indexes each passage as given — one
+ * hit per passage, its `chunkId` the service's. A document handed to it
+ * without `chunks` (a direct call, not through the service) is indexed as one
+ * passage holding the whole text.
  *
  * Deterministic — same input always produces the same hits — so it's
  * great for tests and reference implementations. **Don't use in prod.**
+ *
+ * The reference implementation of `listDocuments` (ADR-0161 K8, item 1): it
+ * stores each document's `docHash` as given and lists it back as stored, in
+ * document-id order, the cursor being the last id of the page before. It runs
+ * the contract suite of `@objectstack/service-knowledge/testing`.
+ *
+ * The first reader of the organization filter (ADR-0161 K8, item 9): it
+ * stores each document's `organizationId` as given and, when a search is
+ * handed `organizationIds`, ranks only the documents whose organization is in
+ * that set — the filter runs before the scoring, so `topK` is filled from them
+ * alone. An empty set ranks nothing; a document stored without an
+ * organization is not ranked by a filtered search.
+ *
+ * Each hit carries its document's stored `docHash` (ADR-0161 K8, item 3),
+ * which the service's record-level freshness check compares, and the heading
+ * path of its passage when the passage has one (item 14).
  */
 export class KnowledgeMemoryAdapter implements IKnowledgeAdapter {
   readonly id: string;
-  private readonly store = new Map<string, ChunkRecord[]>();
+  readonly capabilities = { chunks: true } as const;
+  /** source id → document id → the stored document. */
+  private readonly store = new Map<string, Map<string, StoredDocument>>();
 
   constructor(id = 'memory') {
     this.id = id;
   }
 
   async upsert(docs: KnowledgeDocument[], ctx: AdapterContext): Promise<void> {
-    const sourceId = ctx.source.id;
-    const existing = this.store.get(sourceId) ?? [];
-    const byDoc = new Map<string, ChunkRecord[]>();
-    for (const c of existing) {
-      const arr = byDoc.get(c.documentId) ?? [];
-      arr.push(c);
-      byDoc.set(c.documentId, arr);
-    }
-    for (const doc of docs) {
-      byDoc.set(doc.id, chunkAndEmbed(doc));
-    }
-    this.store.set(sourceId, Array.from(byDoc.values()).flat());
+    const byDoc = this.store.get(ctx.source.id) ?? new Map<string, StoredDocument>();
+    for (const doc of docs) byDoc.set(doc.id, { docHash: doc.docHash, chunks: embedPassages(doc) });
+    this.store.set(ctx.source.id, byDoc);
   }
 
   async delete(documentIds: string[], ctx: AdapterContext): Promise<void> {
-    const sourceId = ctx.source.id;
-    const chunks = this.store.get(sourceId);
-    if (!chunks) return;
-    const dropSet = new Set(documentIds);
-    this.store.set(
-      sourceId,
-      chunks.filter((c) => !dropSet.has(c.documentId)),
-    );
+    const byDoc: Map<string, StoredDocument> | undefined = this.store.get(ctx.source.id);
+    if (!byDoc) return;
+    for (const id of documentIds) byDoc.delete(id);
+  }
+
+  async listDocuments(ctx: AdapterContext, opts: AdapterListDocumentsOptions): Promise<AdapterListDocumentsPage> {
+    if (!Number.isInteger(opts.limit) || opts.limit < 1) {
+      throw new RangeError(`listDocuments: limit must be a positive integer, got ${String(opts.limit)}`);
+    }
+    // In id order, so a cursor stays valid across writes.
+    const byDoc = this.store.get(ctx.source.id) ?? new Map<string, StoredDocument>();
+    const ids = [...byDoc.keys()]
+      .filter((id) => opts.cursor === undefined || id > opts.cursor)
+      .sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
+    const page = ids.slice(0, opts.limit);
+    return {
+      documents: page.map((documentId) => {
+        const docHash = byDoc.get(documentId)?.docHash;
+        return docHash === undefined ? { documentId } : { documentId, docHash };
+      }),
+      ...(ids.length > page.length ? { nextCursor: page[page.length - 1] } : {}),
+    };
   }
 
   async search(query: string, opts: AdapterSearchOptions): Promise<KnowledgeHit[]> {
-    const chunks = this.store.get(opts.source.id) ?? [];
+    const chunks = [...(this.store.get(opts.source.id)?.values() ?? [])].flatMap((d) => d.chunks);
     if (chunks.length === 0) return [];
     const qVec = embedTokens(tokenize(query));
     const qNorm = vectorNorm(qVec);
     if (qNorm === 0) return [];
 
+    // The organization filter first (ADR-0161 K8, item 9): absent → every
+    // document; present → only the documents of those organizations, so a
+    // document with none is out, and `[]` leaves nothing to rank.
+    const organizations = opts.organizationIds === undefined ? undefined : new Set(opts.organizationIds);
+    const inScope = organizations === undefined
+      ? chunks
+      : chunks.filter((c) => c.organizationId !== undefined && organizations.has(c.organizationId));
     const filter = opts.filter ?? {};
     const filtered = Object.keys(filter).length
-      ? chunks.filter((c) => matchesFilter(c.metadata, filter))
-      : chunks;
+      ? inScope.filter((c) => matchesFilter(c.metadata, filter))
+      : inScope;
 
     const scored = filtered.map((c) => ({
       chunk: c,
@@ -82,6 +120,8 @@ export class KnowledgeMemoryAdapter implements IKnowledgeAdapter {
       snippet: chunk.content,
       title: chunk.title,
       metadata: chunk.metadata,
+      ...(chunk.docHash === undefined ? {} : { docHash: chunk.docHash }),
+      ...(chunk.headingPath === undefined ? {} : { headingPath: [...chunk.headingPath] }),
     }));
   }
 
@@ -90,10 +130,22 @@ export class KnowledgeMemoryAdapter implements IKnowledgeAdapter {
   }
 }
 
+interface StoredDocument {
+  /** The document's `docHash`, stored as given (ADR-0161 K8, item 2). */
+  docHash?: string;
+  chunks: ChunkRecord[];
+}
+
 interface ChunkRecord {
   chunkId: string;
   documentId: string;
   sourceRecordId?: string;
+  /** The document's `organizationId`, stored as given (ADR-0161 K8, item 9). */
+  organizationId?: string;
+  /** The document's `docHash`, returned on each hit as stored (ADR-0161 K8, item 3). */
+  docHash?: string;
+  /** The passage's heading path, returned on its hits (ADR-0161 K8, item 14). */
+  headingPath?: string[];
   content: string;
   title?: string;
   metadata: Record<string, unknown>;
@@ -101,46 +153,31 @@ interface ChunkRecord {
   vectorNorm: number;
 }
 
-const CHUNK_TARGET = 800;
-
-function chunkAndEmbed(doc: KnowledgeDocument): ChunkRecord[] {
-  const paragraphs = doc.content
-    .split(/\n{2,}/)
-    .map((p) => p.trim())
-    .filter(Boolean);
-  const chunks: string[] = [];
-  let buf = '';
-  for (const p of paragraphs.length ? paragraphs : [doc.content]) {
-    if (buf && buf.length + p.length + 2 > CHUNK_TARGET) {
-      chunks.push(buf);
-      buf = '';
-    }
-    if (p.length > CHUNK_TARGET) {
-      if (buf) {
-        chunks.push(buf);
-        buf = '';
-      }
-      for (let i = 0; i < p.length; i += CHUNK_TARGET) {
-        chunks.push(p.slice(i, i + CHUNK_TARGET));
-      }
-    } else {
-      buf = buf ? `${buf}\n\n${p}` : p;
-    }
-  }
-  if (buf) chunks.push(buf);
-  return chunks.map((content, idx) => {
-    const vec = embedTokens(tokenize(content));
-    return {
-      chunkId: `${doc.id}#${idx}`,
-      documentId: doc.id,
-      sourceRecordId: doc.sourceRecordId,
-      content,
-      title: doc.title,
-      metadata: doc.metadata ?? {},
-      vector: vec,
-      vectorNorm: vectorNorm(vec),
-    };
-  });
+/**
+ * One record per passage the service cut (`doc.chunks`), as given; without
+ * `chunks`, one passage holding the whole text. Never split here.
+ */
+function embedPassages(doc: KnowledgeDocument): ChunkRecord[] {
+  const passages: Array<{ id: string; content: string; headingPath?: string[] }> =
+    doc.chunks ?? [{ id: `${doc.id}#0`, content: doc.content }];
+  return passages
+    .filter((p) => p.content.trim() !== '')
+    .map((p) => {
+      const vec = embedTokens(tokenize(p.content));
+      return {
+        chunkId: p.id,
+        documentId: doc.id,
+        sourceRecordId: doc.sourceRecordId,
+        organizationId: doc.organizationId,
+        docHash: doc.docHash,
+        headingPath: p.headingPath,
+        content: p.content,
+        title: doc.title,
+        metadata: doc.metadata ?? {},
+        vector: vec,
+        vectorNorm: vectorNorm(vec),
+      };
+    });
 }
 
 function tokenize(text: string): string[] {

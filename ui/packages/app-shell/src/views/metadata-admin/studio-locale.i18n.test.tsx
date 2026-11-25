@@ -43,7 +43,8 @@ const SAMPLE_KEYS = [
   'engine.studio.pkg.new',
   'engine.studio.data.newObject',
   'engine.studio.data.tab.records',
-  'engine.studio.auto.heading',
+  // objectstack#36903 — the flow designer's, now that the rail's heading is gone.
+  'engine.studio.auto.defaultOff',
   'engine.studio.access.title',
   'engine.appNav.heading',
   'engine.appNav.addItem',

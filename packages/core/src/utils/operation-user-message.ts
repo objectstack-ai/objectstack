@@ -34,8 +34,18 @@ interface CallerLocales {
  * For producers that hold no `i18n` service: no deployment `errors.<key>`
  * override is consulted. A producer that holds one renders through
  * `renderOperationMessage` with its `translate` instead.
+ *
+ * `params` fills a key's `{{name}}` placeholders, for the keys that take them
+ * (the `/actions` door's forward-unavailable `503` and the own-door bridge's
+ * `501` name an action, a slot or a package): the values are written as given,
+ * never translated, so a caller passes an identifier or a sentence fragment it
+ * already rendered in the same locale.
  */
-export function operationUserMessage(messageKey: string, caller?: UserMessageCaller | null): string {
+export function operationUserMessage(
+    messageKey: string,
+    caller?: UserMessageCaller | null,
+    params?: Record<string, unknown>,
+): string {
     const rungs = caller as CallerLocales | null | undefined;
     const locale = [rungs?.locale, rungs?.workspaceLocale].find(
         (candidate): candidate is string =>
@@ -43,5 +53,5 @@ export function operationUserMessage(messageKey: string, caller?: UserMessageCal
             candidate.length > 0 &&
             resolveBundleLocale(BUILTIN_OPERATION_MESSAGES, candidate) !== undefined,
     );
-    return renderOperationMessage({ messageKey }, { locale });
+    return renderOperationMessage({ messageKey, ...(params ? { params } : {}) }, { locale });
 }

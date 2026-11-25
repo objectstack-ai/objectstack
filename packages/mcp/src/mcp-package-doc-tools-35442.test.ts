@@ -236,6 +236,9 @@ describe('[#35442] initialize instructions — the answer-order rule follows the
     expect(open).toContain('read its real definition with get_metadata_item');
     expect(open).toContain('the definition is what runs');
     expect(open).not.toContain('was not checked');
+    // [#36856] The reader carries a flow's switch beside its item; the rule
+    // tells the agent a switched-off process does not run.
+    expect(open).toContain('runtimeState.enabled: false, the process is switched off and does not run');
 
     const both = await instructionsOf(runtime, makeBridge(), { grantedScopes, authoringTools: ['get_metadata_item', 'describe_metadata'] });
     expect(both).toContain('read its real definition with describe_metadata');
@@ -243,6 +246,8 @@ describe('[#35442] initialize instructions — the answer-order rule follows the
     // Control: a registry with no reader is "none listed", whatever else it lists.
     const writesOnly = await instructionsOf(runtime, makeBridge(), { grantedScopes, authoringTools: ['save_metadata_draft'] });
     expect(writesOnly).toContain('configured process was not checked');
+    // With no reader there is no answer to carry the switch, so no sentence names it.
+    expect(writesOnly).not.toContain('runtimeState');
   });
 
   it('a host\'s per-request text and a configured text stay whole: no rule appended', async () => {

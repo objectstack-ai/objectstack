@@ -23,6 +23,12 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { NODE_PALETTE, nodeCategory, type PaletteItem } from './flow-canvas-parts.js';
 import { apiBase } from '../../../utils/apiBase.js';
+import { createAuthenticatedFetch } from '@object-ui/auth';
+
+/** The console's authenticated fetch: the stored bearer token beside the session cookie. */
+function authFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+  return createAuthenticatedFetch()(input, init);
+}
 
 /** Minimal shape of an engine action descriptor we consume. */
 interface ActionDescriptorLite {
@@ -99,7 +105,7 @@ export function useActionDescriptors(): ActionDescriptorLite[] {
     const controller = new AbortController();
     (async () => {
       try {
-        const res = await fetch(`${apiBase()}/automation/actions`, {
+        const res = await authFetch(`${apiBase()}/automation/actions`, {
           credentials: 'include',
           headers: { 'Content-Type': 'application/json' },
           signal: controller.signal,

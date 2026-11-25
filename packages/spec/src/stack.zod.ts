@@ -100,6 +100,7 @@ import { retiredKey } from './shared/retired-key';
 // AI Protocol
 import { AgentSchema } from './ai/agent.zod';
 import { SkillSchema } from './ai/skill.zod';
+import { AiContextSchema } from './ai/ai-context.zod';
 import { ToolSchema } from './ai/tool.zod';
 
 // Data Protocol (additional)
@@ -1219,6 +1220,12 @@ const STACK_DEFINITION_COLLECTIONS_SHAPE = {
   agents: z.array(AgentSchema).optional().describe('AI Agents — platform-internal (ADR-0063 §2): the kernel ships exactly two (ask/build); third parties extend via skills, not agents'),
   tools: z.array(ToolSchema).optional().describe('AI Tool metadata records — optional refinement layer, never required: the default path is skills referencing platform tools or materialised action_<name> tools (ADR-0109)'),
   skills: z.array(SkillSchema).optional().describe('AI Skills (reusable capability bundles — the third-party AI extension primitive, ADR-0063)'),
+  /**
+   * [ADR-0160 D1] Context packs: which of one record's fields, related lists
+   * and body text are handed to a model, read as the caller by
+   * `get_record_context` (`@objectstack/service-record-context`).
+   */
+  aiContexts: z.array(AiContextSchema).optional().describe('AI context packs — the material of one record handed to a model, read as the caller by get_record_context (ADR-0160), which is served where `requires` includes `record-context`'),
 
   /**
    * ObjectQL: Data Extensions
@@ -1690,6 +1697,7 @@ export const COMPOSE_KEY_DISPOSITIONS = Object.freeze({
   agents: 'concat',
   tools: 'concat',
   skills: 'concat',
+  aiContexts: 'concat',
   hooks: 'concat',
   mappings: 'concat',
   analyticsCubes: 'concat',
@@ -3448,6 +3456,7 @@ const SAME_STACK_ENTRY_IDENTITY = Object.freeze({
   docs: lastWinsByName('Doc', 'docs'),
   tools: lastWinsByName('Tool', 'tools'),
   skills: lastWinsByName('Skill', 'skills'),
+  aiContexts: lastWinsByName('AI context pack', 'aiContexts'),
   views: {
     identity: (entry) =>
       isAggregatedViewContainer(entry)

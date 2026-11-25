@@ -1834,6 +1834,21 @@ const STUDIO_EN: Record<string, string> = {
   'engine.form.addFieldPlain': 'Add field',
   'engine.form.searchFields': 'Search fields…',
   'engine.form.allFieldsAdded': 'All fields added',
+  // objectstack#37143 — a context pack's related lists (the `related-list-entries`
+  // block under `ai_context`): the add picker, one entry's link and columns.
+  // `{max}` is the schema's bound, `{field}` a reference field's label, `{list}`
+  // the child object's name.
+  'engine.form.contextPack.addList': 'Add related list…',
+  'engine.form.contextPack.chooseRootFirst': 'Choose the root object first',
+  'engine.form.contextPack.noLinks': 'No object has a reference field that points at the root object',
+  'engine.form.contextPack.allListed': 'Every related list is added',
+  'engine.form.contextPack.listsFull': 'A pack reads at most {max} related lists',
+  'engine.form.contextPack.via': 'via {field}',
+  'engine.form.contextPack.notLinked': 'No reference field to the root: reported when saved',
+  'engine.form.contextPack.columnsDefault': 'No columns: each row is read by its name.',
+  'engine.form.contextPack.addColumn': 'Add column…',
+  'engine.form.contextPack.addColumnTo': 'Add a column to {list}',
+  'engine.form.contextPack.columnsFull': 'A related list reads at most {max} columns',
   // objectui#12126 — the `ref-multi:permission` picker's add control: its
   // accessible name, its placeholder, and the placeholder once every declared
   // permission set is picked.
@@ -1988,6 +2003,10 @@ const STUDIO_EN: Record<string, string> = {
   'engine.packages.create.failed': 'Failed to create package',
   'engine.packages.create.exists': 'A package with this id already exists.',
   'engine.packages.create.created': 'Created package “{name}”.',
+  // objectstack#37134 — the create dialog's 「同时创建应用」 choice, ticked by default.
+  'engine.packages.create.alsoApp': 'Also create an app',
+  'engine.packages.create.alsoAppHint': 'The package gets an app with the same name, ready to open. Untick this for a package that only holds objects or flows for other packages to use.',
+  'engine.packages.create.createdWithApp': 'Created package “{name}” and its app.',
   // objectstack#8270 — the server refuses package writes without the ADR-0066
   // `manage_metadata` capability, and its refusal is an English sentence that
   // reached a zh console verbatim. Deployments that withhold the capability do
@@ -2013,6 +2032,47 @@ const STUDIO_EN: Record<string, string> = {
   'engine.packages.detail.description': 'Description',
   'engine.packages.detail.browseMetadata': "Browse this package's metadata",
   'engine.packages.detail.openInStudio': 'Open in Studio',
+  // objectstack#36908 — an installed app's "Customizations in this environment",
+  // in its Setup → Packages detail (moved from the removed Studio home).
+  // "Customized" counts the pair's overrides, extensions and arrangements
+  // (objectstack#36833).
+  'engine.packages.customizations.heading': 'Customizations in this environment',
+  'engine.packages.customizations.customize': 'Customize in Studio',
+  'engine.packages.customizations.customizeTitle': 'Open this app in Studio, where its items are customized',
+  'engine.packages.customizations.loading': 'Reading customizations…',
+  'engine.packages.customizations.failed': 'Couldn’t read customizations',
+  'engine.packages.customizations.none': 'No changes in this environment yet',
+  'engine.packages.customizations.customized': '{count} customized',
+  'engine.packages.customizations.arranged': '{count} rearranged',
+  'engine.packages.customizations.separator': ', ',
+  'engine.packages.customizations.switchedOff': '{count} switched off',
+  'engine.packages.customizations.tab.all': 'All',
+  'engine.packages.customizations.tab.fields': 'New fields',
+  'engine.packages.customizations.tab.views': 'Forms and views',
+  'engine.packages.customizations.tab.flows': 'Flows',
+  'engine.packages.customizations.tab.arranged': 'Layouts',
+  'engine.packages.customizations.tab.switchedOff': 'Switched off',
+  'engine.packages.customizations.search': 'Search customizations',
+  'engine.packages.customizations.showAll': 'Show all {count}',
+  'engine.packages.customizations.noMatch': 'No customization matches.',
+  'engine.packages.customizations.mode.changed': 'Changed',
+  'engine.packages.customizations.mode.added': 'Added',
+  'engine.packages.customizations.mode.arranged': 'Rearranged',
+  'engine.packages.customizations.mode.switchedOff': 'Switched off',
+  'engine.packages.customizations.arrangement.fieldGroups': 'Field groups',
+  'engine.packages.customizations.arrangement.relatedLists': 'Tabs',
+  'engine.packages.customizations.arrangement.actionLayout': 'Action layout',
+  'engine.packages.customizations.type.object': 'Object',
+  'engine.packages.customizations.type.field': 'Field',
+  'engine.packages.customizations.type.validation': 'Validation rule',
+  'engine.packages.customizations.type.index': 'Index',
+  'engine.packages.customizations.type.view': 'View',
+  'engine.packages.customizations.type.flow': 'Flow',
+  'engine.packages.customizations.type.page': 'Page',
+  'engine.packages.customizations.type.dashboard': 'Dashboard',
+  'engine.packages.customizations.type.report': 'Report',
+  'engine.packages.customizations.type.action': 'Action',
+  'engine.packages.customizations.rowTitle': 'Open {name} in Studio',
   'engine.packages.detail.pendingChanges': 'Pending changes',
   'engine.packages.detail.pendingHint': 'Drafted, not yet published. Publish the whole app, or review each below.',
   'engine.packages.detail.publishApp': 'Publish app ({count})',
@@ -2672,7 +2732,6 @@ const STUDIO_EN: Record<string, string> = {
   'engine.studio.auto.nodeEnd': 'End',
   'engine.studio.auto.savedDraft': 'Automation “{label}” saved as draft',
   'engine.studio.auto.defaultOff': 'Off by default · review before enabling',
-  'engine.studio.auto.heading': 'Automations',
   'engine.studio.auto.deleteFlow': 'Delete flow',
   'engine.studio.auto.flowDeleted': 'Deleted flow "{item}"',
   // objectstack#28567 (ADR-0146 D4) — "New similar" on a flow: the clone door
@@ -2753,8 +2812,6 @@ const STUDIO_EN: Record<string, string> = {
   // objectstack#36742 — a new flow is published but born switched off: the create toast says so.
   'engine.studio.auto.createdOff': 'Created: {name} (switched off; it runs once you switch it on)',
   'engine.studio.auto.newTitle': 'New automation',
-  'engine.studio.auto.none': 'No automations yet — click “+” above to create one',
-  'engine.studio.auto.emptyMain': 'No automations in this package yet.',
   'engine.studio.auto.namePlaceholder': 'Name (e.g. Offer Notice)',
   'engine.studio.auto.idPlaceholder': 'Identifier (e.g. offer_notice)',
   // objectui#11861 — the New automation dialog's starting points (`flowPresets.ts`).
@@ -2770,14 +2827,6 @@ const STUDIO_EN: Record<string, string> = {
   'engine.studio.auto.emptyLine2': 'and its configuration appears here.',
   'engine.studio.auto.designersMissing':
     'No metadata designers are registered in this session, so this flow cannot be designed here.',
-  // objectui#12454 — the rail's groups and legend: a flow's trigger kind, and
-  // the trailing group of flows that name no object.
-  'engine.studio.auto.group.noObject': 'No object',
-  'engine.studio.auto.kind.record': 'Record-triggered',
-  'engine.studio.auto.kind.scheduled': 'Scheduled',
-  'engine.studio.auto.kind.screen': 'Screen',
-  'engine.studio.auto.kind.autolaunched': 'Autolaunched',
-  'engine.studio.auto.legend': 'Legend',
   // Access pillar
   'engine.studio.access.created': 'Permission set “{label}” created',
   'engine.studio.access.title': 'Permission matrix',
@@ -3461,14 +3510,17 @@ const STUDIO_EN: Record<string, string> = {
   'engine.studio.close': 'Close',
   'engine.studio.deselect': 'Clear selection',
   'engine.studio.toggleRail': 'Toggle sidebar',
-  // objectui#12513 — the header's first button and the package switcher's
-  // first row: both return to the Studio landing (`/studio`).
-  'engine.studio.landingHome': 'Studio home',
   // objectui#11795 — the one line a phone shows under the Studio header.
   'engine.studio.desktopHint': 'Studio is built for a desktop screen.',
   // objectstack#26708 — the builder's not-found states: a package id the
   // package list does not hold, and a pillar segment Studio has no pillar for.
   'engine.studio.notFound.package': 'Package not found. No package with the id "{id}" is installed here, so there is nothing to build in.',
+  // objectstack#36908 — the package-not-found state's way out: Setup → Packages,
+  // where Studio's entries that name no package land since the Studio home went.
+  'engine.studio.notFound.packageList': 'Open the package list',
+  // The same way out for a principal who may enter Studio but not open
+  // Setup → Packages: the "All metadata" area across packages.
+  'engine.studio.notFound.allMetadata': 'Open All metadata',
   'engine.studio.notFound.pillar': 'This page does not exist. Studio has no "{pillar}" section; pick Data, Automations, Interfaces, Access or All metadata above.',
   'engine.studio.aiCopilot': 'AI Assistant',
   // objectui#12725 — the Studio right slot: properties OR the copilot.
@@ -3504,6 +3556,9 @@ const STUDIO_EN: Record<string, string> = {
   'engine.studio.menu.owd': 'Default sharing',
   'engine.studio.menu.diagnostics': 'Diagnostics',
   'engine.studio.menu.environment': 'Positions and permissions',
+  // objectstack#37201 — the 「高级」 fold (ADR-0084, amended 2026-11-25), and a 常用 type with no item yet.
+  'engine.studio.menu.advanced': 'Advanced',
+  'engine.studio.menu.emptyType': 'None yet: open the list to make the first',
   // objectstack#36502 — the notice on a retired Interfaces link's landing.
   'engine.studio.interfacesRetired.sentence': 'Interface edits have moved into the app.',
   'engine.studio.interfacesRetired.backToApp': 'Back to the app',
@@ -3585,63 +3640,22 @@ const STUDIO_EN: Record<string, string> = {
   'engine.studio.interfaces.create.descriptionInPair':
     'Saved as a draft in this deployment’s customization of {baseName}, and opened on the canvas. The navigation of {baseName} stays as it was installed.',
   'engine.studio.app.scaffoldNav': "Add this package's objects as menu items",
-  'engine.studio.landing.title': 'App Builder',
-  'engine.studio.landing.description': 'Design objects, forms, automations and interfaces inside a writable package; edits save as drafts and the whole package publishes in one release. Code and installed packages are read-only: browse them here, and change their items with Customize or New similar, which save into the package’s .custom customization package.',
-  'engine.studio.landing.mineHeading': 'My packages (writable)',
-  'engine.studio.landing.noneWritable': 'No writable packages yet — create one to start.',
-  'engine.studio.landing.dup': 'Duplicate',
-  'engine.studio.landing.dupTitle': 'Duplicate this package into a new writable copy (like “duplicate base”)',
+  // The Packages page's Duplicate form; the keys keep the name of the Studio
+  // home that first drew the form (removed by objectstack#36908).
   'engine.studio.landing.dupDefaultName': '{name} copy',
   'engine.studio.landing.dupNamePlaceholder': 'Copy name',
   'engine.studio.landing.dupIdPlaceholder': 'Copy package ID',
-  'engine.studio.landing.dupGo': 'Duplicate and open the builder',
-  'engine.studio.landing.dupCreated': 'Duplicated into writable package “{name}”',
-  'engine.studio.landing.installedHeading': 'Installed (read-only · browsable)',
-  // The routes a read-only package does have (objectstack ADR-0146 D2, D3, D11):
-  // Customize or New similar into its paired `.custom` package, and the
-  // marketplace where the runtime has one. A package-less overlay is not one.
-  'engine.studio.landing.readonlyHint': 'Code and installed packages are read-only, so they are not edited or duplicated here. To change one, open an item and choose Customize or New similar: the change is saved in the package’s .custom customization package, and upgrades keep reaching the installed package.',
-  'engine.studio.landing.marketplace': 'Or install a template app from the marketplace',
-  // ADR-0146 D3 — a read-only base's card says what this deployment changed on
-  // it, from the server's per-package customization read.
-  'engine.studio.landing.customizations.customized': '{customized} customized',
-  'engine.studio.landing.customizations.separator': ', ',
-  'engine.studio.landing.customizations.switchedOff': '{switchedOff} switched off',
-  'engine.studio.landing.customizations.loading': 'Reading customizations…',
-  'engine.studio.landing.customizations.failed': 'Couldn’t read customizations',
-  'engine.studio.landing.customizations.pairTitle': 'Open the customization package {pair} in Studio',
-  'engine.studio.landing.customizations.switchedOffTitle': 'Open this package’s Automations, where its items are switched on and off',
-  'engine.studio.landing.customizations.switchedOffActionsLead': 'Actions: ',
-  'engine.studio.landing.customizations.switchedOffActionsMore': '+{count} more',
-  'engine.studio.landing.customizations.switchedOffActionsTitle': 'Open the switched-off actions: each one is switched on again on the action',
   // objectui#11553 — the package-less scope: the organization's own flows.
-  'engine.studio.landing.orgHeading': 'Not in a package',
   'engine.studio.org.name': 'Organization flows',
   'engine.studio.org.hint': 'Flows that belong to no package',
   'engine.studio.org.description': 'The organization’s own flows that belong to no package, such as a clone of a packaged flow. They open editable.',
   // ADR-0146 D11 — no link out: no Setup page copies a flow into this scope any more.
   'engine.studio.org.none': 'No flows outside a package. To change a packaged flow, open its package and use New similar.',
-  // objectstack#28561 — the "All metadata" area's cross-package leg: the
-  // environment catalog, entered from the landing.
-  'engine.studio.landing.envCatalog.name': 'Environment catalog',
-  'engine.studio.landing.envCatalog.description': 'Positions, capabilities, permission sets and sharing rules, across every package.',
-  // objectstack#34715 — the landing ordered by what the author came to do, in
-  // words that name no package mechanism.
-  'engine.studio.landing.lead': 'Change an installed app, or build an app of your own. Changes take effect when you press Save.',
-  'engine.studio.landing.appsHeading': 'Installed apps',
-  'engine.studio.landing.appsHint': 'Each app is upgraded by its vendor. Your changes are kept separately, so an upgrade does not overwrite them.',
-  'engine.studio.landing.marketplaceInstall': 'Install from the marketplace',
-  'engine.studio.landing.customizeTitle': 'Customize {name}',
-  'engine.studio.landing.manage': 'Manage',
-  'engine.studio.landing.manageTitle': 'Manage {name}: details, disable or enable, export',
-  'engine.studio.landing.allPackages': 'All packages',
-  'engine.studio.landing.allPackagesTitle': 'Every package in this environment, with its disable, enable and export actions',
-  'engine.studio.landing.customizations.none': 'No changes yet',
-  'engine.studio.landing.ownHeading': 'Your own apps',
-  'engine.studio.landing.newApp': 'New app of your own',
-  'engine.studio.landing.newAppDescription': 'Start from a blank app.',
-  // objectstack#36748 — the Studio landing's new-app door: one dialog creates
-  // the package and its app, worded for an app throughout.
+  // objectstack#36748 — the new-app step of the package dialog (`newAppDoor.ts`).
+  // The Studio home's app-worded dialog was removed (objectstack#36908); the
+  // create-package dialog's 「同时创建应用」 (objectstack#37134) runs the step
+  // and reads `nameTaken` and `appFailed`. The app-worded rows have no reader
+  // since; they stay as released rows.
   'engine.studio.newApp.title': 'New app',
   'engine.studio.newApp.description': 'Give your app a name; everything else is filled in for you. It opens as soon as it is created.',
   'engine.studio.newApp.advancedHint': 'App ID, namespace, version and type, filled in from the name.',
@@ -3660,41 +3674,6 @@ const STUDIO_EN: Record<string, string> = {
   'engine.studio.newApp.failed': 'Could not create the app',
   'engine.studio.newApp.nameTaken': 'The app “{label}” already uses the identifier “{name}”. Change the namespace under Advanced.',
   'engine.studio.newApp.appFailed': '“{name}” was created, but its app could not go live: {reason}. Use Create app in the Studio top bar to try again.',
-  'engine.studio.landing.outsideHeading': 'Outside any app',
-  'engine.studio.landing.rolesPermissions.name': 'Positions and permissions',
-  'engine.studio.landing.rolesPermissions.description': 'Positions, permission sets and sharing rules, shared by every app.',
-  'engine.studio.landing.unassignedFlows.name': 'Flows in no app',
-  'engine.studio.landing.unassignedFlows.description': 'Flows that belong to no app, such as a copy of an app’s flow. They open editable.',
-  // objectstack#34714 — the landing's "Customizations in this environment" panel.
-  'engine.studio.landing.envCustomizations.heading': 'Customizations in this environment',
-  'engine.studio.landing.envCustomizations.totalTitle': '{count} changes across the installed apps',
-  'engine.studio.landing.envCustomizations.loading': 'Reading what this environment changed…',
-  'engine.studio.landing.envCustomizations.empty': 'No installed app has been changed in this environment yet.',
-  'engine.studio.landing.envCustomizations.unreadable': '{name}: this app’s customizations could not be read.',
-  'engine.studio.landing.envCustomizations.tab.all': 'All',
-  'engine.studio.landing.envCustomizations.tab.fields': 'New fields',
-  'engine.studio.landing.envCustomizations.tab.views': 'Forms and views',
-  'engine.studio.landing.envCustomizations.tab.flows': 'Flows',
-  'engine.studio.landing.envCustomizations.tab.switchedOff': 'Switched off',
-  'engine.studio.landing.envCustomizations.search': 'Search customizations',
-  'engine.studio.landing.envCustomizations.groupByApp': 'Group by app',
-  'engine.studio.landing.envCustomizations.ungroup': 'One list',
-  'engine.studio.landing.envCustomizations.showAll': 'Show all {count}',
-  'engine.studio.landing.envCustomizations.noMatch': 'No customization matches.',
-  'engine.studio.landing.envCustomizations.mode.changed': 'Changed',
-  'engine.studio.landing.envCustomizations.mode.added': 'Added',
-  'engine.studio.landing.envCustomizations.mode.switchedOff': 'Switched off',
-  'engine.studio.landing.envCustomizations.type.object': 'Object',
-  'engine.studio.landing.envCustomizations.type.field': 'Field',
-  'engine.studio.landing.envCustomizations.type.validation': 'Validation rule',
-  'engine.studio.landing.envCustomizations.type.index': 'Index',
-  'engine.studio.landing.envCustomizations.type.view': 'View',
-  'engine.studio.landing.envCustomizations.type.flow': 'Flow',
-  'engine.studio.landing.envCustomizations.type.page': 'Page',
-  'engine.studio.landing.envCustomizations.type.dashboard': 'Dashboard',
-  'engine.studio.landing.envCustomizations.type.report': 'Report',
-  'engine.studio.landing.envCustomizations.type.action': 'Action',
-  'engine.studio.landing.envCustomizations.rowTitle': 'Open {name} in {app}',
   // objectstack#28561 — assignments are Setup's (ADR-0146 D7): the area links
   // the Setup page in place of the section.
   'engine.studio.area.assignments.position': 'The people who hold this position are assigned in Setup.',
@@ -4886,6 +4865,78 @@ const STUDIO_EN: Record<string, string> = {
   'engine.studio.itemTabs.history': 'History',
   'engine.studio.itemTabs.source': 'Source',
   'engine.studio.itemTabs.versions': 'Versions',
+  // objectstack#36908 removed the Studio home, the only reader of these keys.
+  // They ship in the released `@object-ui/i18n@18.6.0`, so they stay published,
+  // unread: removing a published key is a narrowing a separate change decides.
+  // (The home's four Manage / All packages keys never shipped and are gone.)
+  'engine.studio.landingHome': 'Studio home',
+  'engine.studio.landing.title': 'App Builder',
+  'engine.studio.landing.description': 'Design objects, forms, automations and interfaces inside a writable package; edits save as drafts and the whole package publishes in one release. Code and installed packages are read-only: browse them here, and change their items with Customize or New similar, which save into the package’s .custom customization package.',
+  'engine.studio.landing.mineHeading': 'My packages (writable)',
+  'engine.studio.landing.noneWritable': 'No writable packages yet — create one to start.',
+  'engine.studio.landing.dup': 'Duplicate',
+  'engine.studio.landing.dupTitle': 'Duplicate this package into a new writable copy (like “duplicate base”)',
+  'engine.studio.landing.dupGo': 'Duplicate and open the builder',
+  'engine.studio.landing.dupCreated': 'Duplicated into writable package “{name}”',
+  'engine.studio.landing.installedHeading': 'Installed (read-only · browsable)',
+  'engine.studio.landing.readonlyHint': 'Code and installed packages are read-only, so they are not edited or duplicated here. To change one, open an item and choose Customize or New similar: the change is saved in the package’s .custom customization package, and upgrades keep reaching the installed package.',
+  'engine.studio.landing.marketplace': 'Or install a template app from the marketplace',
+  'engine.studio.landing.customizations.customized': '{customized} customized',
+  'engine.studio.landing.customizations.separator': ', ',
+  'engine.studio.landing.customizations.switchedOff': '{switchedOff} switched off',
+  'engine.studio.landing.customizations.loading': 'Reading customizations…',
+  'engine.studio.landing.customizations.failed': 'Couldn’t read customizations',
+  'engine.studio.landing.customizations.pairTitle': 'Open the customization package {pair} in Studio',
+  'engine.studio.landing.customizations.switchedOffTitle': 'Open this package’s Automations, where its items are switched on and off',
+  'engine.studio.landing.customizations.switchedOffActionsLead': 'Actions: ',
+  'engine.studio.landing.customizations.switchedOffActionsMore': '+{count} more',
+  'engine.studio.landing.customizations.switchedOffActionsTitle': 'Open the switched-off actions: each one is switched on again on the action',
+  'engine.studio.landing.orgHeading': 'Not in a package',
+  'engine.studio.landing.envCatalog.name': 'Environment catalog',
+  'engine.studio.landing.envCatalog.description': 'Positions, capabilities, permission sets and sharing rules, across every package.',
+  'engine.studio.landing.lead': 'Change an installed app, or build an app of your own. Changes take effect when you press Save.',
+  'engine.studio.landing.appsHeading': 'Installed apps',
+  'engine.studio.landing.appsHint': 'Each app is upgraded by its vendor. Your changes are kept separately, so an upgrade does not overwrite them.',
+  'engine.studio.landing.marketplaceInstall': 'Install from the marketplace',
+  'engine.studio.landing.customizeTitle': 'Customize {name}',
+  'engine.studio.landing.customizations.none': 'No changes yet',
+  'engine.studio.landing.ownHeading': 'Your own apps',
+  'engine.studio.landing.newApp': 'New app of your own',
+  'engine.studio.landing.newAppDescription': 'Start from a blank app.',
+  'engine.studio.landing.outsideHeading': 'Outside any app',
+  'engine.studio.landing.rolesPermissions.name': 'Positions and permissions',
+  'engine.studio.landing.rolesPermissions.description': 'Positions, permission sets and sharing rules, shared by every app.',
+  'engine.studio.landing.unassignedFlows.name': 'Flows in no app',
+  'engine.studio.landing.unassignedFlows.description': 'Flows that belong to no app, such as a copy of an app’s flow. They open editable.',
+  'engine.studio.landing.envCustomizations.heading': 'Customizations in this environment',
+  'engine.studio.landing.envCustomizations.totalTitle': '{count} changes across the installed apps',
+  'engine.studio.landing.envCustomizations.loading': 'Reading what this environment changed…',
+  'engine.studio.landing.envCustomizations.empty': 'No installed app has been changed in this environment yet.',
+  'engine.studio.landing.envCustomizations.unreadable': '{name}: this app’s customizations could not be read.',
+  'engine.studio.landing.envCustomizations.tab.all': 'All',
+  'engine.studio.landing.envCustomizations.tab.fields': 'New fields',
+  'engine.studio.landing.envCustomizations.tab.views': 'Forms and views',
+  'engine.studio.landing.envCustomizations.tab.flows': 'Flows',
+  'engine.studio.landing.envCustomizations.tab.switchedOff': 'Switched off',
+  'engine.studio.landing.envCustomizations.search': 'Search customizations',
+  'engine.studio.landing.envCustomizations.groupByApp': 'Group by app',
+  'engine.studio.landing.envCustomizations.ungroup': 'One list',
+  'engine.studio.landing.envCustomizations.showAll': 'Show all {count}',
+  'engine.studio.landing.envCustomizations.noMatch': 'No customization matches.',
+  'engine.studio.landing.envCustomizations.mode.changed': 'Changed',
+  'engine.studio.landing.envCustomizations.mode.added': 'Added',
+  'engine.studio.landing.envCustomizations.mode.switchedOff': 'Switched off',
+  'engine.studio.landing.envCustomizations.type.object': 'Object',
+  'engine.studio.landing.envCustomizations.type.field': 'Field',
+  'engine.studio.landing.envCustomizations.type.validation': 'Validation rule',
+  'engine.studio.landing.envCustomizations.type.index': 'Index',
+  'engine.studio.landing.envCustomizations.type.view': 'View',
+  'engine.studio.landing.envCustomizations.type.flow': 'Flow',
+  'engine.studio.landing.envCustomizations.type.page': 'Page',
+  'engine.studio.landing.envCustomizations.type.dashboard': 'Dashboard',
+  'engine.studio.landing.envCustomizations.type.report': 'Report',
+  'engine.studio.landing.envCustomizations.type.action': 'Action',
+  'engine.studio.landing.envCustomizations.rowTitle': 'Open {name} in {app}',
 };
 
 export default STUDIO_EN;

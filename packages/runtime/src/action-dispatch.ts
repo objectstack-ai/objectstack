@@ -751,7 +751,7 @@ async function dispatchAdmittedAction(
             }
             const inject = await actionExec.resolveInProcessRequest(deps, requestContext, envId);
             if (!inject) {
-                return { kind: 'refused', refusal: { message: actionExec.apiActionForwardUnavailableError(actionDef, door), status: 503 } };
+                return { kind: 'refused', refusal: { message: actionExec.apiActionForwardUnavailableError(actionDef, door, ec), status: 503 } };
             }
             // [#28657] On a denied load the request is built from the
             // `recordId` alone — ⛔ never from a row the caller could not read.

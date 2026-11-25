@@ -76,6 +76,9 @@ const ar = {
     autofillNoCurrency: 'لم يُملأ {{field}}: المبلغ المختار هو {{amount}}، لكن لم تُختر عملة هنا بعد. اختر العملة، ثم أدخل {{field}}.',
     autofillCurrencyUnread: 'لم يُملأ {{field}}: المبلغ المختار هو {{amount}}، لكن تعذّرت قراءة العملة هنا. تحقّق من العملة، ثم أدخل {{field}}.',
     autofillKept: 'يحتفظ {{field}} بقيمته السابقة.',
+    autofillNowSameCurrency: 'لم يُملأ {{field}} عند الاختيار. السجل الآن بعملة {{to}}: اختر مرة أخرى لملء {{amount}}.',
+    autofillNowSameCurrencyHeld: 'لم يُملأ {{field}} عند الاختيار ويحتفظ بقيمته السابقة. السجل الآن بعملة {{to}}: امسح {{field}} ثم اختر مرة أخرى لملء {{amount}}.',
+    autofillCopiedUnder: 'نُسخ {{field}} بقيمة {{amount}}، لكن السجل الآن بعملة {{to}}. أدخل {{field}} بعملة {{to}} إذا لزم التغيير.',
   },
   common: {
     // objectui#13461 — a disclosure toggle's name (the tree-view node toggle).
@@ -736,6 +739,7 @@ const ar = {
       needsWholeRows:
         "يتطلب التجميع جميع السجلات، لكن هذه الشبكة تلقّت صفحة واحدة منها فقط، لذا لا يمكن عدّ المجموعات. مرّر جميع السجلات، أو دع الشبكة تجلبها من مصدر بيانات يطبّق queryGroupHeaders.",
       draftOnly: "لم يتم التجميع حسب {{fields}}: هذا الحقل موجود في المسودة فقط حتى تقوم بالنشر.",
+      moreGroupsNotLoaded: "لم يتم تحميل مجموعات أخرى: يحتوي هذا العرض على مجموعات أكثر مما يعيده الخادم في قراءة واحدة، لذا تُعرض بعضها فقط.",
     },
     // objectui#4024 — column-footer aggregate prefixes, keyed by the spec's
     // `ColumnSummary` vocabulary. `pattern` owns the label/value join so this
@@ -2005,6 +2009,12 @@ const ar = {
       noCategoryAxis: "محور فئات الرسم البياني مطلوب — الرسم البياني المرتبط بكائن لا يخترع محورًا. أعلن أحد التالي:",
     },
   },
+  // objectstack#36906 — the × of an app page opened from a Studio list.
+  studioReturn: {
+    close: 'العودة إلى Studio',
+    closeLabel: 'إغلاق والعودة إلى قائمة Studio',
+    leaveConfirm: 'هل تريد المغادرة دون حفظ؟ ستفقد التغييرات غير المحفوظة.',
+  },
   dashboard: {
     // objectui#7063 — the DEFAULT empty state every dashboard widget renders
     // when its query SUCCEEDED and returned nothing. It replaced the terse
@@ -2723,6 +2733,14 @@ const ar = {
       changesDrafted: "حُفظ كمسودة",
       changesFailed: "لم يُطبَّق",
       discussing: "قيد العرض: {{target}}",
+      focus: {
+        pin: "مواصلة السؤال عن هذا السجل",
+        pinned: "السؤال عن: {{target}}",
+        remove: "التوقف عن السؤال عن هذا السجل",
+        switchPrompt: "هل تريد السؤال عن «{{target}}» بدلاً من ذلك؟",
+        switchAccept: "تبديل",
+        switchDecline: "إبقاء",
+      },
       changeVerb: {
         createObject: "إنشاء كائن",
         addField: "إضافة حقل",
@@ -2767,6 +2785,7 @@ const ar = {
       unavailableTitle: "مساعد الذكاء الاصطناعي غير متاح",
       unavailableDescription: "لم يتم تمكين مساعد الذكاء الاصطناعي في هذا النشر. وكل شيء آخر يعمل كالمعتاد.",
       unavailableError: "تعذّر الوصول إلى خدمة الذكاء الاصطناعي. قد تكون غير متصلة مؤقتًا — أعد المحاولة أو عد إلى الرئيسية.",
+      unavailableErrorDesktop: "تعذّر الوصول إلى خدمة الذكاء الاصطناعي. قد تكون غير متصلة مؤقتًا — أعد المحاولة أو عد إلى صفحة بدء التطبيق.",
       unavailableRetry: "إعادة المحاولة",
       unavailableHome: "العودة إلى الرئيسية",
       dock: {
@@ -3151,11 +3170,12 @@ const ar = {
       resetViewTitle: "يعيد عوامل التصفية والبحث والترتيب والتجميع وترتيب الأعمدة والحقول المخفية والكثافة والتخطيط ولون الصف وأرقام الصفوف والتحرير المضمّن الخاصة بهذا العرض. تبقى طرق العرض المثبتة والمفضلة وطريقة فتح السجلات كما هي. تتغير قائمتك فقط.",
       personalized: "مخصّصة",
       personalizedHeading: "تختلف قائمتك عن هذا العرض في",
-      // objectstack#35955 — a list's unsaved changes: Discard and Save.
+      // objectstack#35955 — a list's unsaved changes: Reset and Update view
+      // (objectstack#36737, the view's own actions, as Twenty's).
       draft: {
-        discard: "تجاهل",
+        discard: "إعادة تعيين",
         discardTitle: "يعيد القائمة كما يحددها العرض: عوامل التصفية والفرز والتجميع والأعمدة والتخطيط. يبقى عرض الأعمدة وارتفاع الصفوف كما هما.",
-        save: "حفظ",
+        save: "تحديث العرض",
         heading: "تغييرات غير محفوظة",
         partSeparator: "، ",
         saveToView: "حفظ في هذا العرض",
@@ -4040,7 +4060,7 @@ const ar = {
     build: {
       title: "إنشاء تطبيق",
       noCapability: "إنشاء التطبيقات غير متاح في هذا النظام — فهو يتطلب إذن «إدارة البيانات الوصفية» الذي لا يملكه حسابك.",
-      inStudio: "إنشاء جديد في Studio",
+      inStudio: "تطبيق فارغ جديد",
     },
     template: {
       title: "ابدأ من قالب",
@@ -4187,7 +4207,7 @@ const ar = {
       allApps: "جميع التطبيقات",
       editAppInStudio: "تعديل {{app}} في Studio",
       openAppInStudio: "عرض {{app}} في Studio",
-      backToHome: "العودة إلى الرئيسية",
+      backToHome: "العودة إلى صفحة بدء التطبيق",
       settings: "الإعدادات",
       productHome: "الصفحة الرئيسية لـ {{product}}",
       addApp: 'إضافة تطبيق',
@@ -4483,6 +4503,8 @@ const ar = {
       settings: "إعدادات التقرير",
       pendingDraft: "يحتوي هذا التقرير على تغييرات غير منشورة. انشرها أو تجاهلها في الأعلى، ثم احفظ.",
       nameTaken: "كل المعرّفات المشتقة من هذا الاسم مستخدمة بالفعل. أعطِ التقرير اسمًا آخر ثم احفظ.",
+      // objectstack#36906 — a report made from Studio's report list that could not be saved in the app's package.
+      savedOutsideApp: "حُفظ هذا التقرير خارج حزمة التطبيق، لأنه لا يمكن استخدام حزمة تخصيص التطبيق هنا، لذا لا تعرضه قائمة Studio.",
       adminOnlyTitle: "يمكن لمسؤولي مساحة العمل فقط إنشاء التقارير",
       adminOnly: "التقرير مشترك مع الجميع في مساحة العمل، لذا ينشئه مسؤول.",
       designModeOnTitle: "أنهِ تصميم التخطيط أولاً",
@@ -5052,6 +5074,7 @@ const ar = {
     tool: {
       aggregate_data: "تجميع البيانات ذات الصلة",
       get_record: "قراءة هذا السجل",
+      get_record_context: "قراءة ملف سياق هذا السجل",
       list_datasets: "عرض المؤشرات المتاحة",
       query_data: "الاستعلام عن البيانات المطلوبة",
       query_dataset: "الاستعلام حسب المؤشر",
@@ -5418,6 +5441,10 @@ const ar = {
     actComment: 'تعليق',
     actSystemNote: 'ملاحظة من النظام',
     stepProgress: 'خطوات الموافقة',
+    outcomeWaiting: 'انتقلت إلى {{step}}، بانتظار قرار',
+    outcomeNow: 'انتقلت إلى {{step}}: {{decision}}',
+    outcomeEndedAt: 'انتقلت إلى {{step}} ثم انتهت: {{decision}}',
+    outcomeEndedHere: 'انتهت الموافقة هنا',
     prevRequest: 'السابق',
     nextRequest: 'التالي',
     positionOf: 'الطلب {{index}} من {{total}}',
@@ -5600,7 +5627,12 @@ const ar = {
     bulkRejected_few: 'تم رفض {{count}} طلبات',
     bulkRejected_many: 'تم رفض {{count}} طلبًا',
     bulkRejected_other: 'تم رفض {{count}} طلب',
-    bulkPartial: 'نجح {{ok}}، فشل {{fail}}: {{which}}',
+    bulkPartialSummary: 'نجح {{ok}}، فشل {{fail}}',
+    bulkFailureLine: '{{title}}: {{reason}}',
+    bulkFailuresShowAll: 'عرض الكل ({{n}})',
+    bulkFailuresTitle: 'لم يُبتّ فيها: {{n}}',
+    bulkFailuresBody: 'بقيت هذه الطلبات كما هي. يوضح كل منها السبب.',
+    close: 'إغلاق',
     rejectOneTitle: 'رفض "{{title}}"؟',
     rejectOneBody: 'سيتم رفض الطلب وإخطار مقدمه.',
     rejectTitle: 'رفض هذا الطلب؟',
@@ -5903,6 +5935,13 @@ const ar = {
         skill_few: 'مهارات ذكاء اصطناعي {{count}}',
         skill_many: 'مهارات ذكاء اصطناعي {{count}}',
         skill_other: 'مهارات ذكاء اصطناعي {{count}}',
+        ai_context: 'حزم سياق الذكاء الاصطناعي {{count}}',
+        ai_context_zero: 'حزم سياق الذكاء الاصطناعي {{count}}',
+        ai_context_one: 'حزمة سياق الذكاء الاصطناعي {{count}}',
+        ai_context_two: 'حزم سياق الذكاء الاصطناعي {{count}}',
+        ai_context_few: 'حزم سياق الذكاء الاصطناعي {{count}}',
+        ai_context_many: 'حزم سياق الذكاء الاصطناعي {{count}}',
+        ai_context_other: 'حزم سياق الذكاء الاصطناعي {{count}}',
         datasource: 'مصادر بيانات {{count}}',
         datasource_zero: 'مصادر بيانات {{count}}',
         datasource_one: 'مصدر بيانات {{count}}',

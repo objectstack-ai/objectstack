@@ -34,6 +34,13 @@
  * grid already says of the selected cell (its `aria-readonly`) follows the
  * lock without waiting for the reader to move: `isLocked`, and the value this
  * hook returns, are new exactly when the answers it reads changed.
+ *
+ * The door also says WHICH approval holds a locked row (`lockSource`): its own
+ * (`'record'`), or, for a master-detail line, its master's (`'master'`, which
+ * wins when both hold). `heldByMaster` reads that bit for the row menu: the
+ * server deletes a record held by its own approval and cancels the request,
+ * but the detail-row lock hook refuses a line's delete while its master is
+ * held (objectstack#37231).
  */
 import * as React from 'react';
 import { APPROVAL_RECORD_LOCKS_MAX_RECORD_IDS } from '@objectstack/spec/contracts';
@@ -53,7 +60,10 @@ export function __resetApprovalsServiceLatch(): void {
  * back to its `approval_status` column (fail open: the server still refuses a
  * write to a locked record).
  */
-type LockAnswer = { locked: boolean } | 'asking' | 'unanswered';
+type LockAnswer = { locked: boolean; lockSource?: ApprovalLockSource } | 'asking' | 'unanswered';
+
+/** Which approval holds a locked row: its own, or its master's (a master-detail line). */
+export type ApprovalLockSource = 'record' | 'master';
 
 export interface RowApprovalLocks {
   /**
@@ -63,6 +73,13 @@ export interface RowApprovalLocks {
   probe: (recordIds: readonly unknown[]) => void;
   /** Whether the row is locked by an approval, from what has answered so far. */
   isLocked: (recordId: unknown, row: any) => boolean;
+  /**
+   * Whether a read ANSWERED the row as held by its master's approval
+   * (`lockSource: 'master'`). Only an answer says so: a read refused (501),
+   * failed, answering `null`, or not yet asked answers `false`, and so does a
+   * row held by its own approval.
+   */
+  heldByMaster: (recordId: unknown) => boolean;
   /** The row's lock read while it is on the wire (it settles when it answers or fails), else `null`. */
   settling: (recordId: unknown) => Promise<void> | null;
 }
@@ -121,7 +138,10 @@ export function useRowApprovalLocks(objectName: string | undefined): RowApproval
               chunk.forEach((id, index) => {
                 const entry = records[index];
                 if (entry && entry.recordId === id && typeof entry.locked === 'boolean') {
-                  answered.set(id, { locked: entry.locked });
+                  const lockSource = entry.locked && (entry.lockSource === 'record' || entry.lockSource === 'master')
+                    ? entry.lockSource as ApprovalLockSource
+                    : undefined;
+                  answered.set(id, lockSource ? { locked: entry.locked, lockSource } : { locked: entry.locked });
                 }
               });
             }
@@ -154,10 +174,19 @@ export function useRowApprovalLocks(objectName: string | undefined): RowApproval
     }).locked;
   }, [answerSeq]);
 
+  const heldByMaster = React.useCallback((recordId: unknown) => {
+    void answerSeq;
+    const answer = recordId == null ? undefined : answersRef.current.get(String(recordId));
+    return typeof answer === 'object' && answer.locked && answer.lockSource === 'master';
+  }, [answerSeq]);
+
   const settling = React.useCallback(
     (recordId: unknown) => (recordId == null ? null : wiresRef.current.get(String(recordId)) ?? null),
     [],
   );
 
-  return React.useMemo(() => ({ probe, isLocked, settling }), [probe, isLocked, settling]);
+  return React.useMemo(
+    () => ({ probe, isLocked, heldByMaster, settling }),
+    [probe, isLocked, heldByMaster, settling],
+  );
 }

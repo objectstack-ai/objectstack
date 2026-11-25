@@ -25,7 +25,7 @@ import {
 } from './tool-call-interceptor.js';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
 import { wireBridgeTools, datasetToolsServed, packageDocToolsServed, grantsAuthoringTools, thrownRefusalEnvelope, dataDoorAnswerOf, dataDoorRefusalEnvelope } from './mcp-http-tools.js';
-import { isServerFault, logServerFault } from '@objectstack/types';
+import { FLOW_RUNTIME_STATE_KEY, isServerFault, logServerFault } from '@objectstack/types';
 import type {
   McpDataBridge,
   McpActionBridge,
@@ -1794,9 +1794,17 @@ function hostInstructions(
  * every grant (a `metadata:write`-only or `actions:execute`-only token lists
  * no data tool) and with or without a build door mounted, so it never
  * promises building to a deployment that has none.
+ * [#35778] It also says where the usage guide is: the teaching prose lives in
+ * the served SKILL.md, not in the tool descriptions, so a client that never
+ * fetches it is told where it went. The runtime dispatcher mounts the public
+ * `GET <prefix>/mcp/skill` beside `<prefix>/mcp`, from the same domain list,
+ * behind the same enable switch and for every grant (it is anonymous), so the
+ * sentence names it relative to this endpoint and gives the default prefix.
+ * The stdio default names no URL: a stdio server has no HTTP endpoint.
  */
 const DEFAULT_HTTP_INSTRUCTIONS =
-  'ObjectStack MCP Server. The tools this connection lists depend on what its credential was granted.';
+  'ObjectStack MCP Server. The tools this connection lists depend on what its credential was granted. '
+  + 'Usage guide (SKILL.md): GET this endpoint\'s path plus /skill (by default /api/v1/mcp/skill).';
 
 /**
  * [#34774] The authoring contract line (#34659 ruling D4 = A): the
@@ -1917,9 +1925,15 @@ function skillsInstallLine(version: string | undefined): string | undefined {
  * the reader its connection lists ({@link definitionReaderOf}) as a plain name.
  */
 export function packageDocAnswerRule(definitionReader?: string): string {
+  // [#36856] A switched-off flow keeps its definition, `status` included, so
+  // the definition alone says it runs. The readers carry the switch beside the
+  // item as `runtimeState` (`FLOW_RUNTIME_STATE_KEY`, `@objectstack/types`),
+  // and this sentence is what tells the agent to read it.
   const processStep = definitionReader
     ? `also read its real definition with ${definitionReader}; where the manual and the definition differ, the `
-      + 'definition is what runs: answer from it and name the difference.'
+      + 'definition is what runs: answer from it and name the difference. When that answer carries '
+      + `${FLOW_RUNTIME_STATE_KEY}.enabled: false, the process is switched off and does not run, whatever its `
+      + 'status reads: say that it is switched off.'
     : 'this connection lists no tool that reads its definition, so answer from the manual and say that the '
       + 'configured process was not checked.';
   return 'For a question about the apps installed here, read their manuals before you answer: call '

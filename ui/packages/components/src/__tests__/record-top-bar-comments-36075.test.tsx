@@ -8,9 +8,10 @@
 
 /**
  * objectstack#36075, item 2 — the record's comments switch sits in the record
- * row of the top bar, ahead of the record's button group, on the page and in
- * the drawer (`NavigationOverlay` hands it on); the one-row bar draws it
- * ahead of the button group too.
+ * row of the top bar, ahead of the record's button group, on the record page;
+ * the one-row bar draws it ahead of the button group too. The drawer
+ * (`NavigationOverlay`) no longer takes or hands on a comments switch
+ * (objectstack#36410); `navigation-overlay-bar-26679.test.tsx` pins that.
  */
 
 import * as React from 'react';

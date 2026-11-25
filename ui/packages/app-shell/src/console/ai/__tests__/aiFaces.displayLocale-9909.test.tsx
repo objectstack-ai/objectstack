@@ -122,7 +122,7 @@ const SURFACES: Surface[] = [
   {
     name: 'BuildDebugDrawer — token count',
     read: async (locale) => {
-      vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, status: 200, json: async () => REPORT })));
+      vi.stubGlobal('fetch', vi.fn(async () => ({ headers: new Headers(), ok: true, status: 200, json: async () => REPORT })));
       render(session(locale, <BuildDebugDrawer apiBase="/api/v1/ai" conversationId="conv_x" open onOpenChange={() => {}} />));
       const line = await screen.findByText(/tok/);
       const text = line.textContent ?? '';

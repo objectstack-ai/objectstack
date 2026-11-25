@@ -29,8 +29,41 @@ export interface KnowledgeSearchOptions {
    * source the caller is allowed to see is queried.
    */
   sourceIds?: string[];
-  /** Max number of hits to return. Adapters may cap further. */
+  /**
+   * Max number of hits to return. Adapters may cap further. Under
+   * `granularity: 'record'` it counts records (or `groupBy` groups), not
+   * passages.
+   */
   topK?: number;
+  /**
+   * What one hit stands for (ADR-0161 K1, record-level return).
+   *
+   * - `'chunk'` (the default): one hit per matching passage, as before.
+   * - `'record'`: one hit per record — the best-scoring passage of the
+   *   record, so `topK` counts records. Each hit returned is checked against
+   *   the record as it reads now: a record that was deleted, left the
+   *   source's `where`, or changed since it was indexed is not returned, and
+   *   its document is repaired in the background — except in a source with
+   *   `refresh.onRecordChange: false`, whose index an external indexer owns:
+   *   there the hit is only not returned. A `file` / `http` hit is grouped by
+   *   its document.
+   *
+   * The return type does not change: still `KnowledgeHit[]`.
+   */
+  granularity?: 'chunk' | 'record';
+  /**
+   * Group record-level hits by the value of this metadata field instead of by
+   * record — "which policies", not "which clauses" — keeping the best hit of
+   * each group; the group value is the hit's `metadata[groupBy]`, and hits
+   * with the same value form one group whichever source they come from. Implies
+   * `granularity: 'record'`; passing it with `granularity: 'chunk'` (or
+   * passing an empty name, or an unknown `granularity`) is refused with
+   * `code: 'VALIDATION_ERROR'`, `status: 400`. An `object` source that does not list the field in its
+   * `metadataFields` answers no hits for this search (never ungrouped), and
+   * neither does a record with no value for it; a `file` / `http` source
+   * groups by its document.
+   */
+  groupBy?: string;
   /** Adapter-specific filter (passed opaquely). */
   filter?: Record<string, unknown>;
   /**
@@ -63,6 +96,38 @@ export interface KnowledgeReindexResult {
   ok: boolean;
   /** Free-form diagnostics. */
   message?: string;
+  /**
+   * Documents the walk did not push because the adapter already holds them
+   * with the same `docHash` (ADR-0161 K8, item 2). `0` when the adapter has
+   * no `listDocuments`, whose walk pushes every document. Absent from a result
+   * of an implementation that predates the field.
+   */
+  skipped?: number;
+  /**
+   * Documents deleted by the purge that follows a complete walk: listed by
+   * the adapter before the walk, not seen in it, and confirmed gone by a
+   * re-read of their row (ADR-0161 K8, item 1). `null` when no purge ran:
+   * a source that is not an `object` source, no data engine bound, a refused
+   * `limit`, a walk with `limit` or `dryRun`, a failed walk, a source with
+   * `refresh.onRecordChange: false`, an adapter without `listDocuments`, or a
+   * listing that failed. A number, with `ok: false`, when the purge stopped
+   * part-way: the deletions made before it stopped. Absent from a result of an
+   * implementation that predates the field.
+   */
+  purged?: number | null;
+  /**
+   * Documents removed from the index instead of written, because they cannot
+   * be indexed as the source's split asks — today a `whole` document whose
+   * token estimate is over the embedder's input budget, which is never
+   * truncated. `0` when none was. Absent from a result of an implementation
+   * that predates the field.
+   */
+  failed?: number;
+  /**
+   * Which documents those were and why, in walk order, bounded by the
+   * service (`failed` counts them all). Absent when `failed` is absent.
+   */
+  failures?: Array<{ documentId: string; reason: string }>;
 }
 
 /**
