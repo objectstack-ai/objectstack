@@ -3152,42 +3152,42 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
     label: "AI コンテキストパック",
     sections: {
       basics: {
-        label: "Basics",
-        description: "The pack's identity and the object whose records it reads."
+        label: "基本情報",
+        description: "パックの識別情報と、レコードを読み取るオブジェクト。"
       },
       material: {
-        label: "Material",
-        description: "What of the record is handed to the model. Each picker offers the fields of the root object, or of the related list's own object."
+        label: "内容",
+        description: "レコードのどの内容をモデルに渡すか。各ピッカーはルートオブジェクトのフィールド、または関連リスト自身のオブジェクトのフィールドを表示します。"
       }
     },
     fields: {
       name: {
-        label: "Name",
-        helpText: "Unique identifier (snake_case). A skill's context key and the get_record_context tool name the pack by it."
+        label: "名前",
+        helpText: "一意の識別子（snake_case）。スキルの context キーと get_record_context ツールはこの名前でパックを指定します。"
       },
       label: {
-        label: "Label",
-        helpText: "Display name, the header of the tool answer. A pack has no description: write its purpose here."
+        label: "表示名",
+        helpText: "表示名。ツールの回答の見出しになります。パックには説明がないため、目的はここに書きます。"
       },
       object: {
-        label: "Root object",
-        helpText: "The root object: the pack reads one record of it."
+        label: "ルートオブジェクト",
+        helpText: "ルートオブジェクト：パックはそのレコードを 1 件読み取ります。"
       },
       fields: {
-        label: "Fields",
-        helpText: "The root object's fields handed to the model, in order (at most 30). A lookup among them is answered with the name of the record it points at."
+        label: "フィールド",
+        helpText: "モデルに渡すルートオブジェクトのフィールド（順序どおり、最大 30 個）。参照フィールドは参照先レコードの名前で答えます。"
       },
       related: {
-        label: "Related lists",
-        helpText: "Child lists that point at the record, one level deep (at most 3). Each list names its child object, the reference field that points at the root, and the columns read for each row (at most 10); with no columns a row is read by its name."
+        label: "関連リスト",
+        helpText: "このレコードを指す子リスト（1 階層のみ、最大 3 個）。各リストは子オブジェクト、ルートを指す参照フィールド、各行で読み取る列（最大 10 列）を指定します。列がなければ各行は名前だけを読み取ります。"
       },
       body: {
-        label: "Body",
-        helpText: "The one long-text field read as the record's body."
+        label: "本文",
+        helpText: "レコードの本文として読み取る、ただ 1 つの長文テキストフィールド。"
       },
       "body.field": {
-        label: "Body field",
-        helpText: "A long-text field of the root object (textarea, markdown, html, richtext). Any other field is reported when the pack is saved, and the pack then carries no body."
+        label: "本文フィールド",
+        helpText: "ルートオブジェクトの長文テキストフィールド（textarea、markdown、html、richtext）。それ以外のフィールドは保存時に報告され、パックは本文を持ちません。"
       }
     }
   }

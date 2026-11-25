@@ -3152,42 +3152,42 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
     label: "Paquete de contexto de IA",
     sections: {
       basics: {
-        label: "Basics",
-        description: "The pack's identity and the object whose records it reads."
+        label: "Datos básicos",
+        description: "La identidad del paquete y el objeto cuyos registros lee."
       },
       material: {
-        label: "Material",
-        description: "What of the record is handed to the model. Each picker offers the fields of the root object, or of the related list's own object."
+        label: "Contenido",
+        description: "Qué parte del registro se entrega al modelo. Cada selector ofrece los campos del objeto raíz, o del objeto propio de la lista relacionada."
       }
     },
     fields: {
       name: {
-        label: "Name",
-        helpText: "Unique identifier (snake_case). A skill's context key and the get_record_context tool name the pack by it."
+        label: "Nombre",
+        helpText: "Identificador único (snake_case). La clave context de una habilidad y la herramienta get_record_context nombran el paquete con él."
       },
       label: {
-        label: "Label",
-        helpText: "Display name, the header of the tool answer. A pack has no description: write its purpose here."
+        label: "Etiqueta",
+        helpText: "Nombre visible, el encabezado de la respuesta de la herramienta. Un paquete no tiene descripción: escriba aquí su propósito."
       },
       object: {
-        label: "Root object",
-        helpText: "The root object: the pack reads one record of it."
+        label: "Objeto raíz",
+        helpText: "El objeto raíz: el paquete lee un registro de él."
       },
       fields: {
-        label: "Fields",
-        helpText: "The root object's fields handed to the model, in order (at most 30). A lookup among them is answered with the name of the record it points at."
+        label: "Campos",
+        helpText: "Los campos del objeto raíz que se entregan al modelo, en orden (como máximo 30). Una búsqueda entre ellos se responde con el nombre del registro al que apunta."
       },
       related: {
-        label: "Related lists",
-        helpText: "Child lists that point at the record, one level deep (at most 3). Each list names its child object, the reference field that points at the root, and the columns read for each row (at most 10); with no columns a row is read by its name."
+        label: "Listas relacionadas",
+        helpText: "Listas hijas que apuntan al registro, un solo nivel (como máximo 3). Cada lista indica su objeto hijo, el campo de referencia que apunta a la raíz y las columnas que se leen en cada fila (como máximo 10); sin columnas, cada fila se lee por su nombre."
       },
       body: {
-        label: "Body",
-        helpText: "The one long-text field read as the record's body."
+        label: "Cuerpo",
+        helpText: "El único campo de texto largo que se lee como cuerpo del registro."
       },
       "body.field": {
-        label: "Body field",
-        helpText: "A long-text field of the root object (textarea, markdown, html, richtext). Any other field is reported when the pack is saved, and the pack then carries no body."
+        label: "Campo del cuerpo",
+        helpText: "Un campo de texto largo del objeto raíz (textarea, markdown, html, richtext). Cualquier otro campo se informa al guardar el paquete, y entonces el paquete no lleva cuerpo."
       }
     }
   }
