@@ -30,11 +30,13 @@
  *    existing, empty table.
  * 3. The constraint is enforced: an insert that leaves a `storage.notNull`
  *    column NULL is refused by the database, as it is locally.
- * 4. KNOWN ASYMMETRY — a populated table, no DEFAULT: the local face adds the
- *    column nullable and its differ reports `tighten_not_null` (#37258); this
- *    face still sends `ADD COLUMN … NOT NULL` and SQLite refuses it, naming the
- *    statement, with no nullable column slipped in. The remote face's own fix
- *    is a separate card; when it lands, align the remote half with the local.
+ * 4. A populated table, no DEFAULT its rows can take (none, or a runtime
+ *    token other than `NOW()`): both faces add the column nullable, through
+ *    each remote `ADD COLUMN` door, the multi-value JSON column included, and
+ *    each face's differ reports `tighten_not_null` (#37258 local, #37281
+ *    remote) — the `storage.notNull` contract's "destructive migration gated
+ *    by the schema-drift ceremony". The object stays writable. In one batch, a
+ *    populated table and an empty one each get their own answer.
  * 5. RECORDED ASYMMETRY — a `storage.notNull` field that also declares a
  *    literal `defaultValue`, added to a populated table: the local face emits
  *    the DEFAULT and accepts; this face emits no declared DEFAULT and refuses.
@@ -199,30 +201,50 @@ describe('ADD COLUMN on a populated table', () => {
     return { file, driver };
   }
 
-  it.each<Door>(['syncSchemasBatch', 'syncSchema'])(
-    'KNOWN ASYMMETRY with no DEFAULT: local adds it nullable and reports tighten_not_null; refused through %s, naming the statement',
-    async (door) => {
-      // Known asymmetry (#37258): the local face adds the column nullable and
-      // reports the drift; the remote face still refuses (its fix is its own card).
-      const local = await populated('local');
-      await local.driver.syncSchema('rows_t', WITH_ADDED(ADDED));
-      expect((await notNullFlags(local.file, 'rows_t')).added).toBe(0);
-      const drift = await local.driver.detectManagedDrift([WITH_ADDED(ADDED)]);
-      expect(drift.map((e) => `${e.op.type}:${e.column}`)).toContain('tighten_not_null:added');
+  /** The answer the sync gave `fields`: each column's `notnull` flag, and the differ's `tighten_not_null` columns. */
+  async function answer(face: { file: string; driver: TursoDriver }, object: { name: string; fields: object }) {
+    const flags = await notNullFlags(face.file, object.name);
+    const drift = await face.driver.detectManagedDrift([object as never]);
+    return {
+      flags: pick(flags, Object.keys(object.fields)),
+      tighten: drift.filter((e) => e.op.type === 'tighten_not_null').map((e) => e.column).sort(),
+    };
+  }
 
-      const remote = await populated('remote');
-      const refusal = SYNC[door](remote.driver, [WITH_ADDED(ADDED)]);
-      // The database's own refusal, passed through. Its `code` is a transport
-      // detail (`SQLITE_ERROR` over this `file:` client, `SQLITE_UNKNOWN` over
-      // a real sqld's Hrana), so the refusal is identified by SQLite's words.
-      await expect(refusal).rejects.toThrow(/Cannot add a NOT NULL column with default value NULL/);
-      if (door === 'syncSchema') {
-        // The engine's per-object report names the object only; the statement names the column.
-        await expect(refusal).rejects.toThrow('ALTER TABLE "rows_t" ADD COLUMN "added" TEXT NOT NULL');
-      }
-      expect(await notNullFlags(remote.file, 'rows_t')).not.toHaveProperty('added');
-    },
-  );
+  const TAGS = { type: 'select', multiple: true, options: [{ label: 'A', value: 'a' }], storage: { notNull: true } };
+  const NO_ROW_DEFAULT: Array<[string, object]> = [
+    ['no defaultValue', ADDED],
+    ['the current_user token', { ...ADDED, defaultValue: 'current_user' }],
+  ];
+
+  describe.each(NO_ROW_DEFAULT)('with %s: both faces add it nullable and report tighten_not_null', (_, added) => {
+    const declared = { name: 'rows_t', fields: { plain: { type: 'text' }, added, added_tags: TAGS } };
+    const expected = { flags: { plain: 0, added: 0, added_tags: 0 }, tighten: ['added', 'added_tags'] };
+
+    it.each<Door | 'local'>(['local', 'syncSchemasBatch', 'syncSchema'])('through %s', async (door) => {
+      const face = await populated(door === 'local' ? 'local' : 'remote');
+      if (door === 'local') await face.driver.syncSchema(declared.name, declared);
+      else await SYNC[door](face.driver, [declared]);
+
+      expect(await answer(face, declared)).toEqual(expected);
+      // The object is writable, and a row that provides the columns reads back.
+      await face.driver.create('rows_t', { id: 'r2', plain: 'y', added: 'v', added_tags: ['a'] });
+      expect((await face.driver.findOne('rows_t', { where: { id: 'r2' } }))?.added).toBe('v');
+    });
+  });
+
+  it('one batch answers per table: the populated table gets it nullable, the empty one NOT NULL', async () => {
+    const remote = await populated('remote');
+    const empty = { name: 'empty_t', fields: { plain: { type: 'text' } } };
+    await remote.driver.syncSchema(empty.name, empty);
+    const rows = WITH_ADDED(ADDED);
+    const emptyAdded = { name: 'empty_t', fields: { plain: { type: 'text' }, added: ADDED } };
+
+    await SYNC.syncSchemasBatch(remote.driver, [rows, emptyAdded]);
+
+    expect(await answer(remote, rows)).toEqual({ flags: { plain: 0, added: 0 }, tighten: ['added'] });
+    expect(await answer(remote, emptyAdded)).toEqual({ flags: { plain: 0, added: 1 }, tighten: [] });
+  });
 
   it('RECORDED ASYMMETRY: with a literal defaultValue the local face accepts and this face refuses', async () => {
     const withDefault = WITH_ADDED({ ...ADDED, defaultValue: 'd' });
