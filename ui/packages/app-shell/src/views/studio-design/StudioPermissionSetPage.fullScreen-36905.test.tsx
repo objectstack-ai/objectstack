@@ -549,3 +549,47 @@ describe('the sharing chip asks before it leaves a dirty matrix (objectstack#369
     expect(window.confirm).not.toHaveBeenCalled();
   });
 });
+
+// objectstack#37269 — a review link (`?review=1`) on a set's page opens the
+// draft review the generic item page opens (`DraftReviewSheet`): the set's
+// pending draft against the published set, with `?review=1` dropped once it is
+// open and the matrix still editable under it.
+describe('a review link opens the draft review on the matrix (objectstack#37269)', () => {
+  const reviewPanel = () => screen.findByTestId('draft-review-panel', undefined, { timeout: 8000 });
+  const SET_ADDRESS = `/studio/${CUSTOM_PKG}/metadata/permission/${SET}?package=${CUSTOM_PKG}`;
+
+  it('`?review=1` shows what the draft changes against the published set, then leaves the address', async () => {
+    clientImpl = makeClient([SET], draftOf('studio'));
+    mount(CUSTOM_PKG, '&review=1');
+    const panel = await reviewPanel();
+    // BODY is the published set; the draft relabels it, and nothing else.
+    expect(within(panel).getByText('label')).toBeInTheDocument();
+    expect(within(panel).getByText('Sales rep (AI)')).toBeInTheDocument();
+    expect(within(panel).queryByText('objects')).toBeNull();
+    expect(screen.getByText(en('designer.draftReview.title'))).toBeInTheDocument();
+    // Read at the page's package, as the matrix's own load reads it.
+    expect(clientImpl.layered).toHaveBeenCalledWith('permission', SET, { packageId: CUSTOM_PKG });
+    await waitFor(() => expect(where()).toBe(SET_ADDRESS));
+  });
+
+  it('editing stays: the review closes onto the matrix, whose rows still take an edit', async () => {
+    clientImpl = makeClient([SET], draftOf('studio'));
+    mount(CUSTOM_PKG, '&review=1');
+    await reviewPanel();
+    fireEvent.keyDown(document.activeElement ?? document.body, { key: 'Escape' });
+    await waitFor(() => expect(screen.queryByTestId('draft-review-panel')).toBeNull());
+    const bulk = await screen.findByTestId('perm-bulk-crm_lead');
+    for (const button of within(bulk).getAllByRole('button')) expect(button).toBeEnabled();
+  });
+
+  it('CONTROL: without `?review=1` a set with a pending draft opens no review', async () => {
+    clientImpl = makeClient([SET], draftOf('studio'));
+    mount(CUSTOM_PKG);
+    await screen.findByTestId('perm-row-crm_lead', undefined, { timeout: 8000 });
+    expect(screen.queryByTestId('draft-review-panel')).toBeNull();
+    expect(screen.queryByText(en('designer.draftReview.title'))).toBeNull();
+    // The matrix's own load is the one draft read: no review read was asked.
+    expect(clientImpl.getDraft).toHaveBeenCalledTimes(1);
+    expect(where()).toBe(SET_ADDRESS);
+  });
+});
