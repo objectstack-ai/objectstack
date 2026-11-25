@@ -22,6 +22,7 @@ import { z } from 'zod';
 import { FieldErrorCode } from './errors.zod';
 import { ZOD_UNION_DEFAULT_MESSAGE, zodIssuesToFields } from './zod-issues-to-fields';
 import { FlowSchema } from '../automation/flow.zod';
+import { FindDataRequestSchema } from './protocol.zod';
 
 /** Parse and map, asserting the fixture really fails — with the parsed input. */
 const fieldsFor = (schema: { safeParse: (v: unknown) => any }, value: unknown) => {
@@ -200,5 +201,65 @@ describe('zodIssuesToFields — an explained bare union head is dropped (#35433)
             ['m.Bad Key', 'invalid_shape', 'Invalid key in record'],
             ['m.Bad Key', 'invalid_format', 'Must be snake_case.'],
         ]);
+    });
+});
+
+describe('zodIssuesToFields — a wrong-typed query where answers one entry that names the shapes (#35500)', () => {
+    // adr0112-ok: D6 — a field-addressed FieldErrorCode in a fields[] entry
+    const SHAPE = 'invalid_shape';
+
+    /**
+     * The data API's own parse: `POST /data/:object/query` validates
+     * `{object, query}` against this schema and answers `fields[]` from this
+     * mapper. `where` there is `z.union([FilterArraySchema, DataEngineFilterSchema])`,
+     * and both members are unions, so a wrong kind used to answer one bare
+     * `Invalid input` entry per member and nothing that said what to send.
+     */
+    const doorFields = (slot: string, where: unknown) => {
+        const body = { object: 'account', query: { object: 'account', [slot]: where } };
+        return fieldsFor(FindDataRequestSchema, body);
+    };
+
+    it.each([
+        ['42', 42],
+        ['a string', 'status = open'],
+        ['null', null],
+        ['a boolean', true],
+    ])('%s is refused with exactly one entry, and it names both accepted shapes', (_name, where) => {
+        const fields = doorFields('where', where);
+        expect(fields.map((f) => [f.field, f.code])).toEqual([['query.where', SHAPE]]);
+        expect(fields[0]!.message).not.toBe(ZOD_UNION_DEFAULT_MESSAGE);
+        expect(fields[0]!.message).toContain('condition object');
+        expect(fields[0]!.message).toContain('filter array');
+    });
+
+    it('every spelling of the slot answers the same one entry ($filter shown)', () => {
+        const fields = doorFields('$filter', 42);
+        expect(fields.map((f) => [f.field, f.code])).toEqual([['query.$filter', SHAPE]]);
+        expect(fields[0]!.message).toBe(doorFields('where', 42)[0]!.message);
+    });
+
+    it('a malformed AST is refused with its located causes and no duplicate Invalid input', () => {
+        const fields = doorFields('where', [['status', '=', 'open'], 'and']);
+        expect(fields.map((f) => [f.field, f.code, f.message])).toEqual([
+            ['query.where', 'min_items', expect.any(String)],
+            ['query.where.1', SHAPE, ZOD_UNION_DEFAULT_MESSAGE],
+        ]);
+        // The kind sentence is for a value of the wrong kind; an array is the
+        // right kind, so its causes speak and the bare union head is dropped.
+        expect(fields.filter((f) => f.field === 'query.where' && f.code === SHAPE)).toEqual([]);
+    });
+
+    it('CONTROL — a valid filter object and a valid filter array are still accepted', () => {
+        for (const where of [{ status: 'open' }, ['status', '=', 'open'], ['and', ['status', '=', 'open'], ['amount', '>', 100]]]) {
+            const body = { object: 'account', query: { object: 'account', where } };
+            expect(FindDataRequestSchema.safeParse(body).success, JSON.stringify(where)).toBe(true);
+        }
+    });
+
+    it('a member that is itself a bare union of kinds explains nothing, at any depth', () => {
+        const kinds = z.union([z.union([z.string(), z.number()]), z.union([z.boolean(), z.array(z.string())])]);
+        expect(fieldsFor(z.object({ u: kinds }), { u: {} }))
+            .toEqual([{ field: 'u', code: SHAPE, message: ZOD_UNION_DEFAULT_MESSAGE }]);
     });
 });
