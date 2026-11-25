@@ -21,7 +21,6 @@
  */
 
 import * as React from 'react';
-import { useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
 import { customizationNamespace } from '@objectstack/spec/kernel';
 
@@ -58,6 +57,12 @@ export interface MetadataListCreateDialogProps {
   locale: SupportedLocale;
   /** The item is live: where it was created. */
   onCreated: (created: { name: string; packageId: string }) => void;
+  /**
+   * objectstack#36903 — open the item already holding the identifier, at its
+   * address (`studioItemPath`), when this package holds it. Without it the
+   * notice names the holder and offers no Open.
+   */
+  onOpenExisting?: (path: string) => void;
 }
 
 type Taken = { name: string; label: string };
@@ -214,9 +219,8 @@ function ObjectCreate({ open, onOpenChange, packageId, inPair, locale, onCreated
   );
 }
 
-function FlowCreate({ open, onOpenChange, packageId, inPair, locale, onCreated }: MetadataListCreateDialogProps) {
+function FlowCreate({ open, onOpenChange, packageId, inPair, locale, onCreated, onOpenExisting }: MetadataListCreateDialogProps) {
   const client = useMetadataClient();
-  const navigate = useNavigate();
   const startTrigger = React.useMemo(() => newFlowTriggerFields(locale), [locale]);
   const watchesObject = startTrigger.object?.showWhen?.equals ?? [];
   const [choice, setChoice] = React.useState<FlowPreset | 'advanced'>(FLOW_PRESETS[0]);
@@ -309,14 +313,7 @@ function FlowCreate({ open, onOpenChange, packageId, inPair, locale, onCreated }
                 { label: taken.label, name: taken.name },
               )}
               openLabel={tFormat('engine.studio.create.openExisting', locale, { label: taken.label })}
-              onOpen={
-                taken.here
-                  ? () => {
-                      onOpenChange(false);
-                      navigate(studioItemPath(packageId, 'flow', taken.name));
-                    }
-                  : undefined
-              }
+              onOpen={taken.here && onOpenExisting ? () => onOpenExisting(studioItemPath(packageId, 'flow', taken.name)) : undefined}
             />
           )}
           <fieldset className="space-y-2">

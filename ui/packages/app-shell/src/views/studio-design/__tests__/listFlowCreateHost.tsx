@@ -13,6 +13,7 @@
  */
 
 import * as React from 'react';
+import { useNavigate } from 'react-router-dom';
 import { MetadataListCreateDialog } from '../../metadata-admin/MetadataListCreateDialog.js';
 import { t, type SupportedLocale } from '../../metadata-admin/i18n.js';
 
@@ -29,6 +30,9 @@ export function ListFlowCreate({
 }): React.ReactElement {
   const [opened, setOpened] = React.useState(0);
   const [open, setOpen] = React.useState(false);
+  // As the list does: the dialog's Open on a taken identifier closes it and
+  // goes to the holder's address.
+  const navigate = useNavigate();
   const title = t('engine.studio.auto.newTitle', locale);
   return (
     <>
@@ -55,6 +59,10 @@ export function ListFlowCreate({
           onCreated={(created) => {
             setOpen(false);
             onCreated?.(created);
+          }}
+          onOpenExisting={(path) => {
+            setOpen(false);
+            navigate(path);
           }}
         />
       )}

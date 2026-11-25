@@ -1234,6 +1234,10 @@ function DefaultMetadataList({ type, appName }: { type: string; appName?: string
               refresh();
               navigate(`./${encodeURIComponent(name)}?package=${encodeURIComponent(packageId)}`);
             }}
+            onOpenExisting={(path) => {
+              setCreateOpen(false);
+              navigate(path);
+            }}
           />
         )}
         <CreatePackageDialog

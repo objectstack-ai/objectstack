@@ -221,7 +221,9 @@ describe('Studio home loop (objectui#12513)', () => {
     // with the switcher: the landing is reached from the app. objectstack#36899
     // — the left menu's show / hide control leads the bar, so the way out is
     // the button right after it.
-    renderAt(`/studio/${SHOWCASE}/access`);
+    // objectstack#36903, objectstack#36905 — on the Data pillar: the
+    // Automations and Access pillars' addresses redirect to the area now.
+    renderAt(`/studio/${SHOWCASE}/data`);
 
     const back = await screen.findByTestId('studio-back-to-app');
     const header = screen.getByTestId('studio-shell-header');
