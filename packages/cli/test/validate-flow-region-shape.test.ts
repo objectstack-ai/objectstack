@@ -34,6 +34,11 @@ import Validate from '../src/commands/validate';
 import { undeclaredFlowCycleMessage } from '@objectstack/metadata-core';
 import { FLOW_CYCLE_CORPUS } from '@objectstack/metadata-core/testing';
 import { defineStackSource, linkSpec } from './helpers/define-stack-fixture.js';
+// Pay the dynamic `import()`s the compile reach makes at MODULE LOAD, not inside a clocked case
+// (`scripts/check-test-source-alias.mjs`, the clocked-window rule).
+import '@objectstack/objectql/core';
+import '@objectstack/plugin-security';
+import '@objectstack/runtime';
 
 const CLI_ROOT = resolve(fileURLToPath(import.meta.url), '..', '..');
 
