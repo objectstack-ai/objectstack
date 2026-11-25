@@ -64,6 +64,7 @@ describe('the menu placement table holds the ruled order and tiers (objectstack#
       'job',
       'doc', 'book', 'email_template', 'translation', 'api', 'datasource', 'external_catalog',
       'position', 'assignment_rule', 'sharing_rule', 'queue', 'capability',
+      'ai_context',
     ]);
   });
 

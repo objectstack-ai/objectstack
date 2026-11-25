@@ -83,4 +83,6 @@ export const STUDIO_MENU_PLACEMENT: readonly StudioMenuPlacementRow[] = Object.f
   { type: 'sharing_rule', tier: 'advanced' },
   { type: 'queue', tier: 'advanced' },
   { type: 'capability', tier: 'advanced' },
+  // 高级 — ai
+  { type: 'ai_context', tier: 'advanced' },
 ] as const satisfies readonly StudioMenuPlacementRow[]);
