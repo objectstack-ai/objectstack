@@ -183,9 +183,14 @@ function AreaItemOpen({
     const at = { packageId: host?.packageId ?? null, type, search };
     // objectstack#36903 — the package-less scope's area holds its flows
     // alone, and a flow there opens the flow designer as on a package's leg.
+    // A review link (or the environment scope) asks the generic page, whose
+    // draft review it opens. A type whose item page is its own editor
+    // (`registerMetadataResource`'s `EditPage`: the permission set's matrix)
+    // has no such review there, so it keeps its designer page, as on main
+    // (objectstack#36905).
+    const genericPage = areaItemAsksGenericPage(search) && !getMetadataResource(type)?.EditPage;
     const designer =
-      (areaItemOpensDesignerPage(at) || (editor.orgScope === true && type === STUDIO_ORG_SCOPE_TYPE)) &&
-      !areaItemAsksGenericPage(search);
+      (areaItemOpensDesignerPage(at) || (editor.orgScope === true && type === STUDIO_ORG_SCOPE_TYPE)) && !genericPage;
     if (designer) return { designer: true, formEditor: false, pillarPath: null };
     if (areaItemOpensFormEditor({ ...at, readOnly: host?.readOnly === true })) return { designer: false, formEditor: true, pillarPath: null };
     return { designer: false, formEditor: false, pillarPath: areaItemPillarPath({ ...at, name }) };

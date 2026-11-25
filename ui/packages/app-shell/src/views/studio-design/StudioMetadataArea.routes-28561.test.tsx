@@ -392,6 +392,17 @@ describe('a permission set opens its matrix full-screen at its metadata address 
     expect(item()).toEqual({ packageId: READ_ONLY, name: 'hr_viewer', readOnly: true });
   });
 
+  // objectstack#36903 — a review link asks the generic page's draft review; a
+  // type whose item page is its own editor has none there, so the set keeps
+  // its matrix page (the flow's review opens the generic page, above).
+  it('`?review=1` keeps the matrix page: the set\'s item page is its own editor, with no generic review', async () => {
+    // As `builtinComponents` registers it: the matrix is the type's own editor.
+    registerMetadataResource({ type: 'permission', EditPage: () => null });
+    mount(`/studio/${WRITABLE}/metadata/permission/sales_rep?package=${WRITABLE}&review=1`);
+    expect((await page()).page).toBe('permission-page');
+    expect(item()).toEqual({ packageId: WRITABLE, name: 'sales_rep', readOnly: false });
+  });
+
   it('CONTROL: the cross-package leg keeps the generic page (the matrix\'s environment presentation)', async () => {
     mount('/studio/~all/metadata/permission/admin_full_access?scope=environment');
     expect((await page()).page).toBe('item');

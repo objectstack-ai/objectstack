@@ -92,7 +92,9 @@ export function StudioCopilotConversation({
     // scope's leg (`~org`) so does the flow designer.
     if (!tab && !artifact) {
       const item =
-        areaDesignerItemOf(copilotLocation.pathname, segment) ?? orgScopeFlowOf(copilotLocation.pathname, segment);
+        areaDesignerItemOf(copilotLocation.pathname, segment) ??
+        // Dormant today: the package-less scope mounts no copilot (objectui#11553); kept for when it does.
+        orgScopeFlowOf(copilotLocation.pathname, segment);
       if (item) {
         artifact = item;
         pillar = STUDIO_METADATA_AREA;
