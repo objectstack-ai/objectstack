@@ -17,6 +17,8 @@
  */
 import { describe, it, expect } from 'vitest';
 import { isHeadlessInvokableAction, headlessActionTypeError } from './action-execution.js';
+// Paid at collection, not inside a clocked case (check:test-source-alias).
+import '@objectstack/metadata';
 
 const NO_DEPS = {} as never;
 const ASK = { name: 'ask_about_account', type: 'ask_ai' };

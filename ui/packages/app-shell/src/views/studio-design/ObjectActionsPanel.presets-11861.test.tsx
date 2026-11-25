@@ -63,6 +63,9 @@ import { ACTION_PRESETS, TARGET_INPUT_KEYS, heldInputKey, type ActionPresetField
 import { ActionDefaultInspector } from '../metadata-admin/inspectors/ActionDefaultInspector';
 import { registerMetadataDefaultInspector } from '../metadata-admin/default-inspector-registry';
 import { t } from '../metadata-admin/i18n';
+// Paid at collection, not inside a clocked case (check:test-source-alias).
+import '@objectstack/formula';
+import '@objectstack/lint';
 
 // The real editor, as the console registers it.
 registerMetadataDefaultInspector('action', ActionDefaultInspector);
