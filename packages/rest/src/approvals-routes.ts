@@ -130,6 +130,23 @@ export function readRecordLocksBody(body: unknown): { recordIds: string[] } | { 
 }
 
 /**
+ * What both record-lock doors serve of a service's answer for a readable
+ * record: `locked`, and — on a locked record only — `lockSource`, `'record'`
+ * or `'master'` (ruling 7148480184). Built field by field, so whatever else an
+ * implementation hands back (a request id, a `pending` flag) is never served:
+ * the answer stays one lock bit plus one kind bit (#8652 ruling 5299823744).
+ * A locked answer from an implementation that names no kind is served
+ * `{ locked: true }` alone, never a guessed kind.
+ */
+function recordLockPayload(
+    lock: { locked: boolean; lockSource?: unknown },
+): { locked: boolean; lockSource?: 'record' | 'master' } {
+    if (lock.locked !== true) return { locked: false };
+    const source = lock.lockSource;
+    return source === 'record' || source === 'master' ? { locked: true, lockSource: source } : { locked: true };
+}
+
+/**
  * [#29880] Read `?status=` on `GET {basePath}/approvals/requests` against the
  * value set `sys_approval_request.status` declares.
  *
@@ -498,8 +515,11 @@ export function registerApprovalsEndpoints(this: ApprovalsRouteHost, basePath: s
     // `IApprovalService.getRecordLock` carries the rule: the record is read AS
     // THE CALLER, and an unreadable record answers `null`, the same as a
     // record id that does not exist — so this door answers both with the same
-    // 404, and the payload is `{ locked }` alone. Optional on the contract, so
-    // an implementation without it answers 501, never a guess.
+    // 404, and the payload is `{ locked }` plus, on a locked record only, its
+    // `lockSource` — `'record'` (its own approval) or `'master'` (the record a
+    // master-detail line belongs to; ruling 7148480184) — and nothing else
+    // (`recordLockPayload`). Optional on the contract, so an implementation
+    // without it answers 501, never a guess.
     this.routeManager.register({
         method: 'GET',
         path: `${dataPath}/approvals/records/:object/:recordId/lock`,
@@ -519,7 +539,7 @@ export function registerApprovalsEndpoints(this: ApprovalsRouteHost, basePath: s
                     sendEnvelopeError(res, 404, 'RECORD_NOT_FOUND', `No such '${object}' record`);
                     return;
                 }
-                sendOk(res, { locked: lock.locked === true });
+                sendOk(res, recordLockPayload(lock));
             } catch (error: any) {
                 handleRouteError(res, error);
             }
@@ -529,10 +549,10 @@ export function registerApprovalsEndpoints(this: ApprovalsRouteHost, basePath: s
 
     // The lock of a PAGE of records, in one request: what a list asks before it
     // opens a cell editor, so moving through the rows sends no request per row.
-    // Each entry is exactly the single-record door's answer for that id, the
-    // 404 folded to `locked: null` (unreadable or missing, told apart by
-    // nothing); a service without `getRecordLocks` answers 501, never one
-    // `getRecordLock` per id.
+    // Each entry is exactly the single-record door's answer for that id —
+    // `locked`, and `lockSource` on a locked row — the 404 folded to
+    // `locked: null` (unreadable or missing, told apart by nothing); a service
+    // without `getRecordLocks` answers 501, never one `getRecordLock` per id.
     this.routeManager.register({
         method: 'POST',
         path: `${dataPath}/approvals/records/:object/locks`,
@@ -552,10 +572,10 @@ export function registerApprovalsEndpoints(this: ApprovalsRouteHost, basePath: s
                 const { object } = req.params;
                 const answers = await svc.getRecordLocks(object, read.recordIds, context ?? {});
                 sendOk(res, {
-                    records: read.recordIds.map((recordId, index) => ({
-                        recordId,
-                        locked: answers[index] ? answers[index]!.locked === true : null,
-                    })),
+                    records: read.recordIds.map((recordId, index) => {
+                        const answer = answers[index];
+                        return answer ? { recordId, ...recordLockPayload(answer) } : { recordId, locked: null };
+                    }),
                 });
             } catch (error: any) {
                 handleRouteError(res, error);
