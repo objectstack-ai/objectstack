@@ -262,7 +262,8 @@ describe('PackageFormDialog with a new-app step: one confirm creates the package
     expect(draft.search.get('mode')).toBe('draft');
     expect(draft.body?.label).toBe('Visits');
     expect(publish.search.get('package')).toBe(packageId);
-    expect(toast.success).toHaveBeenCalledWith(expect.stringMatching(/^Created app “Visits”/));
+    // The package dialog's own voice (objectstack#37134): the package and its app.
+    expect(toast.success).toHaveBeenCalledWith('Created package “Visits” and its app.');
     expect(toast.error).not.toHaveBeenCalled();
 
     // The author lands in the new package's Studio; the header names the app.
