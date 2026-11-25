@@ -3806,7 +3806,6 @@ const es = {
   },
   home: {
     build: {
-      title: "Crear una aplicación",
       noCapability: "La creación de aplicaciones no está disponible en este sistema: requiere el permiso «Gestionar metadatos», que su cuenta no tiene.",
       inStudio: "Nuevo en Studio",
     },

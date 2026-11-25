@@ -21,8 +21,9 @@
  * From 768 px up the page is retired (objectstack#36732): the host redirects
  * `/home` into an app whenever the viewer has a product app, so a desktop
  * reaches this page only with none, and draws the no-apps empty state
- * ({@link DesktopNoApps}): build with AI, start from a template, the app
- * marketplace, for the viewers who may add an app.
+ * ({@link DesktopNoApps}): start from a template, the app marketplace, or a
+ * new package in Studio, for the viewers who may add an app. Neither 「Build
+ * with AI」 nor 「Build an app」 is drawn on this page (objectstack#37227).
  *
  * @module
  */
@@ -83,7 +84,7 @@ import {
   TooltipTrigger,
   cn,
 } from '@object-ui/components';
-import { Sparkles, MessageSquareText, Hammer, LayoutGrid } from 'lucide-react';
+import { MessageSquareText, Hammer, LayoutGrid } from 'lucide-react';
 import { usePendingDrafts } from '../../preview/usePendingDrafts.js';
 import { usePublishAllDrafts } from '../../preview/usePublishAllDrafts.js';
 import { fetchPackages } from '../../views/studio-design/packages-io.js';
@@ -93,7 +94,6 @@ import { STUDIO_NEW_PACKAGE_PATH } from '../../views/studio-design/studioNewPack
 import { useOpenAssistant } from '../../layout/chatDockControl.js';
 import { isProductApp } from '../../utils/homePath.js';
 import { useAddAppEntries, useMayAddApp } from '../../hooks/useAddAppEntries.js';
-import { studioLandingPath } from '../../views/studio-design/studioAddress.js';
 import { catalogServesBuild } from '../../hooks/surfaceAgent.js';
 
 /**
@@ -101,13 +101,14 @@ import { catalogServesBuild } from '../../hooks/surfaceAgent.js';
  * source of truth) — gated PER agent, because the community edition can be in
  * any of three states:
  *  - `askAvailable` — a data/query agent (`ask`/`data_chat`) is deployed → "Ask AI".
- *  - `buildAvailable` — a build/authoring agent is deployed → "Build with AI".
- *    That's a cloud / AI-Studio feature, ABSENT on open-source builds.
+ *  - `buildAvailable` — a build/authoring agent is deployed. That's a cloud /
+ *    AI-Studio feature, ABSENT on open-source builds. Home draws no build
+ *    button for it (objectstack#37227); it withholds "Ask AI" from a maker.
  *  - `aiEnabled` — any agent at all (AI is on here in some form).
  *  - `buildServed` — the catalog lists the build agent itself, alias-aware
- *    (`catalogServesBuild`, objectstack#36969): what the "Build an app" chip
- *    promises. Where in-app building is closed the catalog keeps `ask` and
- *    drops `build`, so `aiEnabled` alone would promise a build nothing serves.
+ *    (`catalogServesBuild`, objectstack#36969). Where in-app building is
+ *    closed the catalog keeps `ask` and drops `build`; there the builder chip
+ *    takes its Studio form, "New in Studio".
  * All false while the catalog loads or when AI isn't enabled, so nothing
  * flashes and no AI CTA appears where there's no agent to back it.
  *
@@ -143,8 +144,8 @@ function useHomeAiAvailability(): {
 
 /**
  * One 32 px builder chip at the greeting's right (objectui#12601): "Start with
- * a template" outlined, "Build an app" on the soft primary tint with its icon in
- * the primary colour. Admins only — the caller decides that.
+ * a template" outlined, "New in Studio" on the soft primary tint with its icon
+ * in the primary colour. Admins only — the caller decides that.
  *
  * Disabled (not hidden) when the session cannot use it: a vanished front door
  * reads as a broken page, while a dimmed one explains the deployment's
@@ -259,12 +260,21 @@ function DesktopNoApps({
   );
 }
 
+/** The 「Add app」 entry this page does not draw (see {@link NoAppsAddActions}). */
+const BUILD_WITH_AI_ENTRY = 'build-with-ai';
+
 /**
  * The 「Add app」 doors as the empty state's buttons. Its own component so
  * only a viewer who may add an app pays the agent-catalog read the list makes.
+ *
+ * Every door but 「Build with AI」 (objectstack#37227): the maintainer ruled it
+ * off the home page, so this page leaves it out of the shared list, which the
+ * sidebar's 「Add app」 menu reads unchanged. A way to start an app stays: the
+ * template entry where a marketplace is mounted, 「New in Studio」 where the
+ * catalog does not serve the build agent.
  */
 function NoAppsAddActions() {
-  const entries = useAddAppEntries();
+  const entries = useAddAppEntries().filter((entry) => entry.key !== BUILD_WITH_AI_ENTRY);
   if (entries.length === 0) return null;
   return (
     <div className="mt-6 flex flex-col items-center gap-3 sm:flex-row">
@@ -286,20 +296,17 @@ function NoAppsAddActions() {
 }
 
 /**
- * Home AI call-to-action(s). "Build with AI" only when a build agent is
- * deployed AND the session may author metadata; "Ask AI" only when a
- * data/query agent is deployed. Renders nothing when neither exists (AI off, or
- * only custom agents — those are reachable via the assistant launcher / FAB).
- * `layout="stack"` is used by the empty-state; the hero uses the default inline
- * row. Availability is passed in so the host fetches the catalog once.
+ * Home's AI call-to-action: "Ask AI", only when a data/query agent is
+ * deployed. Renders nothing when none is (AI off, or only custom agents —
+ * those are reachable via the assistant launcher / FAB). `layout="stack"` is
+ * used by the empty-state; the hero uses the default inline row. Availability
+ * is passed in so the host fetches the catalog once.
  *
- * "Build with AI" routes to the AI authoring studio, whose output is
- * draft metadata nobody without `manage_metadata` can publish — so it is one of
- * the "any other metadata-authoring CTA" the objectstack#8270 ruling covers.
- * It is HIDDEN rather than disabled: unlike the builder chips it is not the
- * page's structural front door, the chips beside it already carry the reason,
- * and a disabled hero button next to a live "Ask AI" would read as a transient
- * failure. "Ask AI" is read-only and never gated.
+ * There is no "Build with AI" button here any more (objectstack#37227): the
+ * maintainer ruled it off the home page. "Ask AI" keeps the gate it had beside
+ * it, the cloud#1674 maker convergence below: a session for which the build
+ * agent is deployed and that may author metadata is not offered "Ask AI",
+ * since the ask agent would converge that maker straight back onto build.
  */
 function HomeAiActions({
   askAvailable,
@@ -313,41 +320,29 @@ function HomeAiActions({
   buildAvailable: boolean;
   canAuthorMetadata: boolean;
   /** objectstack#34608 — opens the console's chat drawer on this agent, in place. */
-  openAssistant: (agent: 'build' | 'ask') => void;
+  openAssistant: (agent: 'ask') => void;
   t: (key: string, opts?: any) => string;
   layout?: 'row' | 'stack';
 }) {
-  const showBuild = buildAvailable && canAuthorMetadata;
-  if (!askAvailable && !showBuild) return null;
+  const maker = buildAvailable && canAuthorMetadata;
+  if (!askAvailable || maker) return null;
   const container =
     layout === 'stack'
       ? 'mt-6 flex flex-col sm:flex-row items-center gap-3'
       : 'flex shrink-0 items-center gap-2';
-  // In the greeting row the buttons take the builder chips' 32 px height;
+  // In the greeting row the button takes the builder chips' 32 px height;
   // below `sm` both layouts take the 44 px touch target.
   const buttonClass = layout === 'stack' ? 'max-sm:h-11' : 'h-8 px-3 text-sm max-sm:h-11';
   return (
     <div className={container}>
-      {showBuild && (
-        <Button onClick={() => openAssistant('build')} className={buttonClass} data-testid="home-build-with-ai">
-          <Sparkles className="mr-2 h-4 w-4" />
-          {t('home.buildWithAI', { defaultValue: 'Build with AI' })}
-        </Button>
-      )}
-      {/* cloud#1674 maker convergence: with the build CTA shown, "Ask AI" is
-          not a second door — the build composer answers data questions too
-          (data superset since cloud#1673), and the ask agent would converge a
-          maker straight back onto build. Non-authoring sessions keep it. */}
-      {askAvailable && !showBuild && (
-        <Button
-          onClick={() => openAssistant('ask')}
-          className={buttonClass}
-          data-testid="home-ask-ai"
-        >
-          <MessageSquareText className="mr-2 h-4 w-4" />
-          {t('home.askAI', { defaultValue: 'Ask AI' })}
-        </Button>
-      )}
+      <Button
+        onClick={() => openAssistant('ask')}
+        className={buttonClass}
+        data-testid="home-ask-ai"
+      >
+        <MessageSquareText className="mr-2 h-4 w-4" />
+        {t('home.askAI', { defaultValue: 'Ask AI' })}
+      </Button>
     </div>
   );
 }
@@ -470,7 +465,7 @@ export function HomePage({ checklist }: HomePageProps = {}) {
   // objectstack#34608 — the Home AI buttons open the same right-side drawer
   // every console page has (in place, no navigation).
   const openAssistant = useOpenAssistant();
-  const openHomeAssistant = (agent: 'build' | 'ask') => openAssistant({ agent });
+  const openHomeAssistant = (agent: 'ask') => openAssistant({ agent });
   const { t, language } = useObjectTranslation();
   const metadata = useMetadata();
   const { apps, loading } = metadata;
@@ -516,9 +511,9 @@ export function HomePage({ checklist }: HomePageProps = {}) {
   // every app mount) is the only "which app is the user in" signal available
   // here, and it is undefined on a cold landing straight at `/home`.
   const { currentAppName } = useNavigationContext();
-  // AI CTA gating, per agent: "Build with AI" only when a build agent is
-  // deployed (cloud / AI Studio); "Ask AI" only when a data agent is; neither
-  // when AI isn't enabled. Community builds typically land in the ask-only state.
+  // AI CTA gating, per agent: "Ask AI" only when a data agent is deployed,
+  // and not for a maker the build agent serves; nothing when AI isn't
+  // enabled. Home draws no "Build with AI" (objectstack#37227).
   const { aiResolved, askAvailable, buildAvailable, buildServed } = useHomeAiAvailability();
   // objectstack#8270 — the authoring CTAs below are gated on the SERVER's
   // capability answer, not on the admin ROLE: on the EE multi-tenant deploy an
@@ -965,24 +960,13 @@ export function HomePage({ checklist }: HomePageProps = {}) {
                     * since Studio is then the ONLY way to build, a session that
                     * may not author gets no chip rather than a dimmed one (the
                     * template chip beside it still carries the reason). With
-                    * agents present nothing changes. The chip waits for the
-                    * catalog's answer, so neither form flashes before the other.
-                    *
-                    * objectstack#36969 — the AI form is drawn only where the
-                    * catalog serves the build agent itself (`buildServed`), not
-                    * any agent: a deployment that closed in-app building still
-                    * serves `ask`, and there the chip takes this Studio form. */}
-                  {aiStudioEnabled && buildServed && (
-                    <BuilderChip
-                      icon={Hammer}
-                      label={t('home.build.title', { defaultValue: 'Build an app' })}
-                      tone="soft"
-                      onClick={() => navigate(studioLandingPath())}
-                      disabledReason={!canAuthorMetadata ? authoringGateReason : undefined}
-                      reasonId={authoringReasonId}
-                      testId="home-build-app"
-                    />
-                  )}
+                    * the build agent served, the chip's other form, "Build an
+                    * app" to bare `/studio`, is gone (objectstack#37227): the
+                    * maintainer ruled it off this page, with "Build with AI".
+                    * The Studio form waits for the catalog's answer, so it
+                    * never flashes, and is drawn only where the catalog does not
+                    * serve the build agent itself (`buildServed`,
+                    * objectstack#36969). */}
                   {aiStudioEnabled && aiResolved && !buildServed && canAuthorMetadata && (
                     <BuilderChip
                       icon={Hammer}
