@@ -48,7 +48,12 @@ kernel.use(new KnowledgeMemoryPlugin());
 Retrieval is a plain service call — no AI runtime required. Resolve the `knowledge`
 service and call `search`. Hits are re-checked against the caller's
 `ExecutionContext` (RLS), sorted by score, and capped at `topK` before they come
-back.
+back. Because the re-check runs after ranking, the service asks each object
+source for more hits than `topK`, and asks once more when too few survive, so a
+caller who may read few of the matching records still gets up to `topK` of them
+([the protocol](/docs/protocol/knowledge) gives the factors and
+the cap). A hit's `title` is the record's display name: the value of the
+object's display field (`nameField`).
 
 ```ts
 const knowledge = ctx.getService('knowledge');
