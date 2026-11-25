@@ -95,6 +95,7 @@ import {
 import { evalRowPredicate, isMultiValueRelationship, resolveAffordance, type ActionDef, type RowCrudPredicates } from '@object-ui/core';
 import { actionRendersAt, type ActionLocation } from '@object-ui/types';
 import { usePermissions } from '@object-ui/permissions';
+import { relatedCreateSeedOf } from '@object-ui/plugin-detail/core';
 import { servesRecordRead, type RecordReadPrincipal } from '../utils/recordReadServed.js';
 import { RECORD_FORM_PARAM, RECORD_FORM_OBJECT_PARAM, RECORD_FORM_LINK_PARAM, RECORD_TRAIL_PARAM, appendRecordTrail } from '../urlParams.js';
 import { documentHref } from './documentHref.js';
@@ -460,7 +461,11 @@ export function RelatedRecordActionsBridge({
   // object that is the full-page create route `AppContent`'s `handleEdit`
   // navigates to (`resolveRecordFormTarget`), not the overlay.
   const openChildForm = useCallback(
-    (opts: { objectName: string; recordId?: string; link?: { field: string; parentId: string | number } }) => {
+    (opts: {
+      objectName: string;
+      recordId?: string;
+      link?: { field: string; parentId: string | number; seed?: Record<string, string> };
+    }) => {
       if (opts.recordId == null && !opts.link) {
         const target = resolveRecordFormTarget({
           objectDef: objects.find((o: any) => o?.name === opts.objectName),
@@ -475,8 +480,16 @@ export function RelatedRecordActionsBridge({
       const sp = new URLSearchParams(window.location.search);
       sp.set(RECORD_FORM_PARAM, opts.recordId ?? 'new');
       sp.set(RECORD_FORM_OBJECT_PARAM, opts.objectName);
-      if (opts.link) sp.set(RECORD_FORM_LINK_PARAM, `${opts.link.field}:${opts.link.parentId}`);
-      else sp.delete(RECORD_FORM_LINK_PARAM);
+      sp.delete(RECORD_FORM_LINK_PARAM);
+      if (opts.link) {
+        // The parent link first, then the values it seeds beside it
+        // (objectstack#37246): one `formLink` pair each, all in the URL so a
+        // refresh reopens the form with them.
+        sp.append(RECORD_FORM_LINK_PARAM, `${opts.link.field}:${opts.link.parentId}`);
+        for (const [field, value] of Object.entries(opts.link.seed ?? {})) {
+          sp.append(RECORD_FORM_LINK_PARAM, `${field}:${value}`);
+        }
+      }
       setSearchParams(sp); // push → Back closes the overlay
     },
     [setSearchParams, objects, base, navigate],
@@ -666,10 +679,20 @@ export function RelatedRecordActionsBridge({
           handlers.onCreate = () => {
             const canLink =
               relationshipField && parentId != null && parentId !== '';
+            // objectstack#37246 — a relationship lookup scoped by the child's
+            // own fields (`dependsOn`) opens with them seeded from the parent,
+            // or the form gates the lookup (「Select Account first」) and its
+            // `lookupAutofill` empties it: the child saved without its parent.
+            // The parent record is this mount's own; a custom page's lists
+            // each name a parent of their own (`parentFromList`), which this
+            // bridge does not hold, so they seed the link alone.
+            const seed = canLink && !parentFromList && parentRecord
+              ? relatedCreateSeedOf(childDef.fields, relationshipField as string, parentRecord)
+              : undefined;
             openChildForm({
               objectName,
               link: canLink
-                ? { field: relationshipField as string, parentId: parentId as string | number }
+                ? { field: relationshipField as string, parentId: parentId as string | number, seed }
                 : undefined,
             });
           };
