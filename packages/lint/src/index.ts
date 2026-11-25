@@ -379,6 +379,15 @@ export {
 export type { ApprovalApproverFinding, ApprovalApproverSeverity, ValidateApprovalApproversOptions } from './validate-approval-approvers.js';
 
 export {
+  validateAiContext,
+  AI_CONTEXT_OBJECT_UNKNOWN,
+  AI_CONTEXT_FIELD_UNKNOWN,
+  AI_CONTEXT_RELATED_LINK_UNKNOWN,
+  AI_CONTEXT_BODY_NOT_LONG_TEXT,
+} from './validate-ai-context.js';
+export type { AiContextFinding, AiContextSeverity } from './validate-ai-context.js';
+
+export {
   validateAssignmentRules,
   ASSIGNMENT_RULE_USER_TARGET,
   ASSIGNMENT_RULE_QUEUE_UNSTAFFED,
