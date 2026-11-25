@@ -34,6 +34,9 @@ metadata:
 4. **Verify before reporting done.** `os validate`; CEL checks:
    **objectstack-formula** § Verify your work. Most traps below pass it.
 
+**Nothing to read yet?** Say so in a line, then still give the whole
+definition as code.
+
 ## Where to go
 
 Open the file for what you are writing before you write it.
@@ -141,7 +144,7 @@ fan-out.
 ### Filter operands (`config.filter`)
 
 Each operand is a value slot, evaluated before the query; a whole-string query
-placeholder (`{current_user_id}`) passes through verbatim. **An
+placeholder (`{today}`) passes through verbatim. **An
 operand that evaluates to `null` refuses the node** (a dropped condition
 widens a query). Route around the node with a `decision`; to match an empty
 field, write the literal `null`. A computed operand is a value, never a query

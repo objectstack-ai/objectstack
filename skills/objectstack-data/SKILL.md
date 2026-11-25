@@ -35,6 +35,9 @@ metadata:
    scaffolded project), then `os lint`
    ([its rules](./references/lint-rules.md)). Most traps below pass both.
 
+**Nothing to read yet?** Say so in a line, then still give the whole
+definition as code.
+
 ## Traps — each parses, then fails at run time
 
 1. **A changed field does not reach a database that already has rows.** The
@@ -56,7 +59,7 @@ metadata:
 
 ## Where to go
 
-Open the file for what you are writing before you write it.
+Open the file for your task first.
 
 | Authoring | Open first |
 |:--|:--|
@@ -92,8 +95,7 @@ Example and syntax: [Validation](./rules/validation.md#conditional-field-rules).
 
 ### Object Definition
 
-An **Object** maps to a database table and exposes automatic CRUD APIs. As JSON
-(in TypeScript the same literal goes inside `ObjectSchema.create({...})`):
+As JSON (in TypeScript the same literal goes inside `ObjectSchema.create({...})`):
 
 ```json
 { "name": "crm_account", "label": "Account", "pluralLabel": "Accounts", "icon": "building",
