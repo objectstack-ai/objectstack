@@ -30,7 +30,8 @@
  * Automations pillar for the package its `?package=` names, or the area's
  * cross-package flow list when it names none. And objectstack#34724: a
  * bookmark of Setup › Packaged Actions (`component/automation/packaged-actions`)
- * opens the named app's Data pillar, or the Studio landing.
+ * opens the named app's Data pillar, or, naming no package, Setup → Packages
+ * (objectstack#36908 removed the Studio home it opened before).
  *
  * The host's own aliases (`system/objects`, `system/metadata`,
  * `system/{roles,positions,permissions}`) are `apps/console`'s, pinned in
@@ -48,7 +49,7 @@ import React from 'react';
 // first load is paid here, at collection, never inside a case's clock
 // (`check:test-source-alias`).
 import '@objectstack/lint';
-import { render, screen } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter, Routes, Route, Navigate, useLocation, useParams } from 'react-router-dom';
 
 vi.mock('../../views/metadata-admin', () => ({
@@ -235,14 +236,26 @@ describe('a bookmark of the retired Setup › Packaged automation page opens Stu
 
 describe('a bookmark of the retired Setup › Packaged Actions page opens Studio (objectstack#34724)', () => {
   it.each([
-    ['/apps/setup/component/automation/packaged-actions', '/studio'],
     ['/apps/setup/component/automation/packaged-actions?package=crm', '/studio/crm/data?package=crm'],
-    ['/apps/crm/component/automation/packaged-actions?package=all', '/studio?package=all'],
   ])('%s → %s, in one hop', async (from, to) => {
     const chain = renderAt(from);
 
     expect(await screen.findByTestId('studio-probe')).toBeInTheDocument();
     expect(chain).toEqual([from, to]);
+  });
+
+  // Naming no package (or `all`), it opened the Studio home, which listed every
+  // installed app; objectstack#36908 removed that home, so the bookmark opens
+  // Setup → Packages on its admin face, the package list, and not Studio.
+  it.each([
+    ['/apps/setup/component/automation/packaged-actions'],
+    ['/apps/crm/component/automation/packaged-actions?package=all'],
+  ])('%s → Setup → Packages, in one hop', async (from) => {
+    const chain = renderAt(from);
+
+    await waitFor(() => expect(chain).toEqual([from, '/apps/setup/component/developer/packages?face=admin']));
+    expect(await screen.findByTestId('console-layout')).toBeInTheDocument();
+    expect(screen.queryByTestId('studio-probe')).not.toBeInTheDocument();
   });
 });
 
