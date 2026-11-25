@@ -175,10 +175,8 @@ rowLevelSecurity: [
 - A package's rule reads `value` as its package's queue, else the one
   holder in its declared `dependencies` closure plus `sys`, else (none
   declares it) an org's `sys_queue` row. Else it grants no one new, warned
-  `RESOURCE_CONFLICT`: `outside-closure` (only a non-dependency
-  or an environment item holds `support`),
-  `ambiguous-in-closure` (two dependencies do), `ambiguous-in-environment`
-  (the one it reaches and a non-dependency do).
+  `RESOURCE_CONFLICT`: `outside-closure`, `ambiguous-in-closure` (two
+  dependencies hold it), `ambiguous-in-environment`.
 
 ## Positions grant only what they name; portal users are `external`
 
@@ -190,7 +188,7 @@ rowLevelSecurity: [
   in its declared `dependencies` closure plus `sys`; else it is refused. It
   still loads; the boot's catalog reference report logs each refusal with every
   candidate, and the position grants nothing through that name (its other sets
-  still do). `outside-closure` / `ambiguous-in-closure` as for a queue above
+  still do). The two closure refusals are as for a queue above
   (the environment: a set authored in Setup; a second package shipping a name
   is refused at install). Fix: declare the dependency. Stored grants,
   environment-authored positions, admin overlays of a package position and the
@@ -351,9 +349,12 @@ switched off, or a disabled claimant.
 Beyond `SKILL.md` § Access depth: a scope
 widens the owner match declaratively instead of a hand-written RLS policy
 (ADR-0057 D1): it resolves at request time into an `owner_id IN (…)` set and
-AND-injects like RLS. The hierarchy-relative three are the open-core boundary
-(ADR-0016): the paid plugin goes in `plugins[]`. The CLI only advises on a missing or unwired plugin: `os validate`
-warns, `os verify --json` lists it in `capabilities`.
+AND-injects like RLS. Open-core boundary ADR-0016: the paid plugin goes in
+`plugins[]`, and `defineStack`, a save and a publish refuse a
+hierarchy-relative grant the stack does not declare
+(`STACK_HIERARCHY_SCOPE_CAPABILITY_REQUIRED`). The CLI only advises on a
+missing or unwired plugin: `os validate` warns, `os verify --json` lists it in
+`capabilities`.
 
 ## Ownership queues — park a record for a team to claim
 
