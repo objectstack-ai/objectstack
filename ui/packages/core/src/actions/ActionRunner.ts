@@ -2038,6 +2038,9 @@ export class ActionRunner {
    * (a list's bulk action bar), or `undefined` when it can. Only an `ask_ai`
    * action is refused (ADR-0160 D7): it focuses the assistant on ONE record,
    * so a per-row run would pin each row in turn and report every one done.
+   * Read on the type alone, as the list surfaces that leave it out read it: a
+   * host that registers its own `ask_ai` handler replaces the executor, not
+   * the one-record meaning of the type, so it is refused here too.
    */
   bulkRefusal(action: ActionDef): string | undefined {
     return isAskAiAction(action) ? this.runnerText(RUNNER_TEXT.askAiSeveralRecords) : undefined;

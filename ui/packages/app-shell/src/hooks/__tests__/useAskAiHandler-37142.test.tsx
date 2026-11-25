@@ -9,10 +9,15 @@
  *     off) → no handler, and the agent catalog is not even fetched.
  *  2. A drawer, but no catalog agent declaring `capabilities.focus` → no
  *     handler (the action stays absent).
- *  3. A drawer and a focus-honouring agent → a handler that pins the record
- *     through `setChatFocus` and opens the drawer ON that agent, so the
- *     drawer's pin control (which asks the active agent) is drawn; it sends
- *     nothing. An `ask` agent is preferred among several that honour it.
+ *  3. A drawer and a focus-honouring agent → a handler that opens the drawer
+ *     on a fresh thread OF that agent, so the drawer's pin control (which
+ *     asks the active agent) is drawn, then pins the record through
+ *     `setChatFocus` as a `follow` hand-off; it sends nothing. An `ask` agent
+ *     is preferred among several that honour it.
+ *
+ * What the hand-off does to a drawer already open on another conversation is
+ * pinned against the real host in `layout/__tests__/chatFocus-36999.test.tsx`
+ * (the objectstack#37142 block).
  */
 
 import { describe, it, expect, vi, beforeEach, type Mock } from 'vitest';
@@ -84,11 +89,15 @@ describe('useAskAiHandler (ADR-0160 D7)', () => {
     result.current!({ object: 'account', id: 'acc_1' });
 
     expect(harness.setChatFocus).toHaveBeenCalledTimes(1);
-    expect(harness.setChatFocus).toHaveBeenCalledWith({ object: 'account', id: 'acc_1' });
+    expect(harness.setChatFocus).toHaveBeenCalledWith({ object: 'account', id: 'acc_1' }, { follow: true });
     expect(control.open).toHaveBeenCalledTimes(1);
-    // On the agent that honours the focus, and with no hand-off message: the
-    // `ask` agent here does not declare it, so `custom` is opened.
-    expect(control.open).toHaveBeenCalledWith({ agent: 'custom' });
+    // On a fresh thread of the agent that honours the focus, and with no
+    // hand-off message: the `ask` agent here does not declare it, so `custom`.
+    expect(control.open).toHaveBeenCalledWith({ agent: 'custom', fresh: true });
+    // The chat moves first; the pin follows it.
+    expect(control.open.mock.invocationCallOrder[0]).toBeLessThan(
+      harness.setChatFocus.mock.invocationCallOrder[0],
+    );
     expect(control.toggle).not.toHaveBeenCalled();
   });
 
@@ -97,6 +106,6 @@ describe('useAskAiHandler (ADR-0160 D7)', () => {
     const control = dock();
     const { result } = renderWith(control);
     result.current!({ object: 'account', id: 'acc_1' });
-    expect(control.open).toHaveBeenCalledWith({ agent: 'ask' });
+    expect(control.open).toHaveBeenCalledWith({ agent: 'ask', fresh: true });
   });
 });

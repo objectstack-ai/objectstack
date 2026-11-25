@@ -95,6 +95,9 @@ import {
 } from '../chatFocus';
 import type { ChatSurfaceContext } from '../chatSurfaceContext';
 import type { ChatDockTarget } from '../chatDockTarget';
+import { ChatDockControlProvider, type ChatDockControl } from '../chatDockControl';
+import { useAskAiHandler } from '../../hooks/useAskAiHandler';
+import type { AssistantFocusHandler } from '@object-ui/core';
 
 window.matchMedia = ((query: string) => ({
   matches: false,
@@ -443,5 +446,100 @@ describe('the console dock — no flag leaves the page chip where it was (object
     await composerReady();
     expect(screen.getByTestId('frame-chip')).toHaveTextContent('Viewing: Account');
     expect(screen.queryByTestId('chat-focus-row')).toBeNull();
+  });
+});
+
+/**
+ * objectstack#37142 (ADR-0160 D7) — the `ask_ai` action's console handler
+ * (`useAskAiHandler`) against the REAL dock body and the REAL focus host: the
+ * drawer's handle moves its target the way `useConsoleChatDock`'s `open` does.
+ * The click opens a fresh thread and pins the record to IT; a conversation the
+ * drawer showed before keeps its own focus.
+ */
+const ask: { run?: AssistantFocusHandler } = {};
+function AskAiProbe() {
+  const handler = useAskAiHandler();
+  React.useEffect(() => {
+    ask.run = handler;
+  }, [handler]);
+  return null;
+}
+function AssistantDock({ initial }: { initial?: ChatSurfaceContext }) {
+  const [target, setTarget] = React.useState<ChatDockTarget | undefined>(undefined);
+  page.open = (next) => act(() => setTarget(next));
+  const control = React.useMemo<ChatDockControl>(
+    () => ({
+      expanded: true,
+      fullWindow: false,
+      toggle: () => {},
+      open: (next) => {
+        if (next === null) setTarget(undefined);
+        else if (next !== undefined) setTarget(next);
+      },
+    }),
+    [],
+  );
+  return (
+    <ChatDockControlProvider value={control}>
+      <AskAiProbe />
+      <ChatDockConversation
+        userId="u1"
+        apiBase="/api/v1/ai"
+        surfaceContext={initial}
+        surfaceArtifactLabel="Account"
+        target={target}
+        onTargetChange={setTarget}
+      />
+    </ChatDockControlProvider>
+  );
+}
+function mountAssistantDock(initial: ChatSurfaceContext): void {
+  render(
+    <I18nProvider config={{ defaultLanguage: 'en', detectBrowserLanguage: false }}>
+      <MemoryRouter initialEntries={['/apps/crm_app/account']}>
+        <AssistantDock initial={initial} />
+      </MemoryRouter>
+    </I18nProvider>,
+  );
+}
+
+describe('the `ask_ai` action — the pin follows the fresh thread it opens (objectstack#37142)', () => {
+  beforeEach(() => {
+    ask.run = undefined;
+  });
+
+  it('a drawer open on another conversation keeps that one\'s focus; the fresh thread takes the record', async () => {
+    const REC_9: ChatFocus = { object: 'account', id: 'rec_9' };
+    window.sessionStorage.setItem('ai-chat-focus:conv-old', JSON.stringify({ focus: REC_9, declined: false }));
+    mountAssistantDock(record('rec_2'));
+    await composerReady();
+    page.open({ agent: 'ask', conversationId: 'conv-old' });
+    await waitFor(() => expect(screen.getByTestId('chat-focus-chip')).toHaveTextContent('account · rec_9'));
+    await waitFor(() => expect(ask.run).toBeTypeOf('function'));
+
+    act(() => ask.run!(ACCOUNT_1));
+
+    await waitFor(() => expect(screen.getByTestId('chat-focus-chip')).toHaveTextContent('account · rec_1'));
+    // The conversation left behind is not pinned to the record.
+    expect(readStoredChatFocus('conv-old').focus).toEqual(REC_9);
+    await composerReady();
+    // The fresh thread's first send carries the record and mints the thread it pins.
+    expect((await send('what about it?')).focus).toEqual([ACCOUNT_1]);
+    expect(state.minted).toBe(1);
+    expect(readStoredChatFocus('conv-1').focus).toEqual(ACCOUNT_1);
+    expect(readStoredChatFocus('conv-old').focus).toEqual(REC_9);
+  });
+
+  it('a drawer on an unsent thread takes the record at once, and its first send carries it', async () => {
+    mountAssistantDock(record('rec_2'));
+    await composerReady();
+    await waitFor(() => expect(ask.run).toBeTypeOf('function'));
+
+    act(() => ask.run!(ACCOUNT_1));
+
+    await waitFor(() => expect(screen.getByTestId('chat-focus-chip')).toHaveTextContent('account · rec_1'));
+    await composerReady();
+    expect((await send('first')).focus).toEqual([ACCOUNT_1]);
+    expect(readStoredChatFocus('conv-1').focus).toEqual(ACCOUNT_1);
   });
 });

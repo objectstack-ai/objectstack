@@ -16,13 +16,16 @@
  * - the AI service advertises that it honours a focus (`capabilities.focus`
  *   on a catalog row, objectstack#36999).
  *
- * The handler does what the pin control does: it pins the record through the
- * one setter (`setChatFocus`), then opens the drawer on an agent that declares
- * the capability ({@link focusAgentName}), so the drawer's own pin control,
- * which asks the ACTIVE agent, is drawn on the pinned record. It
- * sends no message and makes no server call. A drawer that is closed has no
- * chat host yet; the setter holds the focus for the host that opening it
- * mounts.
+ * The handler does what the pin control does, on a conversation of its own:
+ * it opens the drawer on a FRESH thread of an agent that declares the
+ * capability ({@link focusAgentName}), so the drawer's own pin control, which
+ * asks the ACTIVE agent, is drawn, and pins the record to that thread through
+ * the one setter (`setChatFocus`). The pin is a `follow` hand-off: a drawer
+ * already open on another conversation keeps that conversation's focus, and
+ * the fresh thread it moves to takes the record (its first send carries it
+ * onto the id that send mints). A drawer that is closed has no chat host yet;
+ * the setter holds the focus for the host that opening it mounts. It sends no
+ * message and makes no server call; an unsent fresh thread creates nothing.
  */
 
 import { useMemo } from 'react';
@@ -43,8 +46,8 @@ export function useAskAiHandler(): AssistantFocusHandler | undefined {
     () =>
       open && agent
         ? (focus) => {
-            setChatFocus({ object: focus.object, id: focus.id });
-            open({ agent });
+            open({ agent, fresh: true });
+            setChatFocus({ object: focus.object, id: focus.id }, { follow: true });
           }
         : undefined,
     [open, agent],
