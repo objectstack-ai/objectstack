@@ -1,10 +1,7 @@
 ## Seed Data & Fixtures (`defineSeed()`)
 
-Object definition and seed data live together — a `*.object.ts` usually
-pairs with a `*.seed.ts`.
-
-> The factory is `defineSeed` — **not** `defineDataset`, which is the
-> unrelated ADR-0021 analytics semantic layer (`@objectstack/spec/ui`).
+> The factory is `defineSeed` — **not** `defineDataset`, the unrelated
+> analytics semantic layer (`@objectstack/spec/ui`).
 
 > ⛔ `sys_organization` is platform-bootstrapped — never a seed target; the
 > deployment posture decides how many exist (`rules/security.md`
@@ -13,7 +10,6 @@ pairs with a `*.seed.ts`.
 ### Quick start
 
 ```typescript
-// src/data/index.ts
 import { defineSeed } from '@objectstack/spec/data';
 import { Status } from '../objects/status.object';
 import { Category } from '../objects/category.object';
@@ -23,8 +19,8 @@ export const statusSeed = defineSeed(Status, {
   externalId: 'code',
   mode: 'upsert',
   records: [
-    { code: 'active',   label: 'Active',   color: '#2ecc71' },
-    { code: 'inactive', label: 'Inactive', color: '#95a5a6' },
+    { code: 'active',   label: 'Active' },
+    { code: 'inactive', label: 'Inactive' },
   ],
 });
 
@@ -45,8 +41,8 @@ export const SeedData = [statusSeed, categorySeed];
 | Field | Default | Purpose |
 |:------|:--------|:--------|
 | `object` | derived | Auto-set from `objectDef.name`; hand-written only in a runtime save (below) |
-| `externalId` | `'name'` | Stable business key (or field list) every mode matches on; required in every record (below) |
-| `mode` | `'ignore'` | Import strategy (see below) |
+| `externalId` | `'name'` | Stable business key (or field list) every mode matches on (below) |
+| `mode` | `'ignore'` | Import strategy (below) |
 | `columns` | — | Per-column write policy, keyed by field (below) |
 | `env` | `['prod','dev','test']` | Environments where the seed loads |
 | `locale` | — (every locale) | BCP-47 tags it loads for; a locale no set of the object names gets none |
@@ -78,7 +74,7 @@ A seed replays on each boot, install and re-publish. AppPlugin's boot and organi
 replays (not a publish or package install) do not re-insert a keyed row a
 person deleted; `seed-replayer` with `{ reseed: true }` restores it.
 
-### Columns the app owns after the first load — `columns.FIELD.applyOn`
+### Columns the app owns — `columns.FIELD.applyOn`
 
 For a column a job or an admin advances after the first load, declare
 `applyOn: 'create'`: written when the seed creates the row, left as the row
@@ -103,7 +99,8 @@ differ across environments.
 
 Every record carries a value for each `externalId` field (each field of a
 list; `name` when the seed names none). One left blank (no value, `null` or
-`''`; whitespace is a value) is refused at load in every mode: the result names
+`''`; whitespace is a value) fails `os validate` / `os build` and is refused
+at load in every mode: the result names
 the object, record index, field and fix, and the other records still load.
 
 | Scenario | Key |
@@ -121,14 +118,13 @@ only breaks ties).
 
 > If a lookup value matches no natural key, the loader falls back to
 > resolving it as the target's `id`. Rely on it only for records you didn't
-> seed (e.g. a system user).
+> seed.
 
 ```typescript
 const contacts = defineSeed(Contact, {
   externalId: 'email',
   records: [{
     email: 'john@acme.example.com',
-    first_name: 'John',
     account: 'Acme Corporation',
   }],
 });
@@ -140,8 +136,12 @@ object, one no dataset of the load seeds (misspelt, or `env`/`locale`-scoped
 out), or a cycle refuses the whole load; nothing is written.
 
 **Seed rows obey the object's validation rules** (all but `state_machine`); a
-refused row never lands. `os validate` does not run them on seed rows;
-`os verify` fails on each dropped row. A rule reading a parent roll-up
+refused row never lands. `os validate` / `os build` exit 1 (`--json` too) on
+each record a rule refuses, naming its location (`data[0].records[1]`), object,
+index and rule. A rule the record's literals cannot decide (it reads a
+reference, default, formula or roll-up; the object has a `beforeInsert` hook;
+an `update` set) is counted, never refused: the load judges it, and
+`os verify` fails on each dropped row. One reading a parent roll-up
 (`record.invoice.amount_paid`) sees the total earlier rows left, so children
 must fit in record order. ⛔ Never seed the roll-up: a seeded `amount_paid` is
 never stored (a warning per dataset); the child rows compute it.
@@ -149,9 +149,9 @@ never stored (a warning per dataset); the child rows compute it.
 ### Dynamic values (CEL)
 
 Any field value may be a CEL expression evaluated at install time against
-a single per-load pinned `now`. This is the **only** correct way to author
-time-based or identity-derived seed values — `new Date()` ships the package
-author's clock to every customer.
+a single per-load pinned `now`. The **only** correct way to author time-based
+or identity-derived values: `new Date()` ships the author's clock to every
+customer.
 
 ```typescript
 import { cel } from '@objectstack/spec';
@@ -180,9 +180,8 @@ In TypeScript use `defineSeed()`, never `SeedSchema.parse()`: it loses compile-t
 
 **Fictional is fine; malformed is not.** A seed row passes the same field
 validation as a user's insert; a refused value drops the row its siblings point at.
-`os validate` / `os build` refuse such a value first, at the
-record's field — run them before trusting the load. So never mask or
-placeholder a sample value: no `138****4207`,
+`os validate` / `os build` refuse such a value first, at the record's field.
+So never mask or placeholder a sample value: no `138****4207`,
 `***`, `XXX`, `N/A`, `—`, `TBD`. Invent a plausible well-formed one — `+86 138
 0013 8000` for a `phone`, `liyy@example.com` for an `email`,
 `https://example.com/a` for a `url`; a `select` value is an option `value`,
