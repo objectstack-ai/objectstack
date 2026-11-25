@@ -89,6 +89,10 @@ import { ObjectDataPage } from './ObjectDataPage';
 import { ExpressionProvider } from '../providers/ExpressionProvider';
 import { NULL_FILTER, EMPTY_FILTER } from './drillUrlFilters';
 
+// `ObjectDataPage` reaches a dynamic `import('@objectstack/lint')`: pay its load at
+// collection, never inside a case's clocked window (`check:test-source-alias`).
+import '@objectstack/lint';
+
 const h = React.createElement;
 const OBJECT_NAME = 'showcase_invoice';
 const FIELD = 'owner';
