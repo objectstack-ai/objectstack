@@ -185,10 +185,12 @@ returned.**
 
 The re-check runs after ranking, so the service asks for more than it
 answers. For a caller who is not the system identity, each `object`
-source is asked for `topK × 5` hits. When fewer than `topK` survive the
-re-check, every `object` source that answered as many hits as it was asked
-is asked once more, for `topK × 20`. That is the cap: a caller who may read
-fewer matching rows than survive within it gets fewer than `topK` hits. An
+source is asked for `topK × 5` hits. When the hits that survive the
+re-check name fewer than `topK` records (several passages of one record
+count once), every `object` source that answered as many hits as it was
+asked is asked once more, for `topK × 20`. That is the cap: a caller who may
+read fewer than `topK` of the rows within the cap gets fewer than `topK`
+hits. An
 adapter that answers fewer than it was asked (one that caps `topK`) is not
 asked again. A `file` or `http` source is asked for `topK` once, and so is
 every source for the system identity. The answer is at most `topK` hits.
@@ -200,7 +202,10 @@ A hit's `title` is the value of the object's display field (ADR-0079
 when the document is built. It is empty when that field is a
 credential-class or `internal` field, when the value is empty, and when
 the object resolves no display field. A source over an object with no
-registered definition reads a field named `title`.
+registered definition reads a field named `title`. Documents indexed
+before this rule carry the value of a field named `title` until a complete
+reindex writes them again, so the source admission below still asks about a
+declared `title` field as well as the display field.
 
 ### 3.3 `IKnowledgeService` (consumed by the ObjectOS AI runtime, REST, Console)
 
@@ -413,8 +418,8 @@ searched for a non-system caller, the service asks, once per object per search:
   `enable.aiReadable: true` (the AI read tools' posture).
 - **Field-level rules** — every field the source serves (each `contentFields`
   member, `'*'` meaning every field the object declares except `id`; each `metadataFields`
-  member; the display field the title is read from), less the
-  credential-class and `internal: true` fields an
+  member; the display field the title is read from, and a declared `title`
+  field), less the credential-class and `internal: true` fields an
   index never carries, must be one the caller may **query**, per the `security`
   service's `getQueryableFields`. Without that answer: its `getReadableFields`
   less every field declaring a `maskingRule`; with no `security` service at
