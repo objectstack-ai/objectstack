@@ -467,6 +467,27 @@ describe('[#26668] the approvals get serves the route a request takes, not the f
     expect((await get(next)).flow_route.outcome).toEqual({ status: 'approved', ended: true });
   });
 
+  it('[#35863] a rollback re-arms an older body: a run of the newer one is not judged by it', async () => {
+    const name = 'contract_rolled_back';
+    const { nodes, edges } = REVIEWED_THEN_LEGAL;
+    // Version 1 has no subflow; version 2, the one the run runs, adds legal in a child run.
+    automation.registerFlow(name, {
+      ...REVIEWED_THEN_LEGAL, name, version: 1,
+      nodes: nodes.filter((n) => n.id !== 'legal'),
+      edges: [...edges.filter((e) => e.source !== 'legal' && e.target !== 'legal'), { id: 'r5', source: 'manager_review', target: 'done', label: 'approve' }],
+    } as any);
+    automation.registerFlow(name, { ...REVIEWED_THEN_LEGAL, name, version: 2 } as any);
+    await new Promise((r) => setTimeout(r, 5));
+    const manager = await submit(name, {});
+    const legal = await approve(manager, 'u_mgr');
+    await reject(legal, 'u_legal');
+    expect((await automation.getRun(manager.flow_run_id))?.status, 'the root run has ended').toBe('completed');
+
+    // Version 1 armed again: a body with no subflow, registered before the run started, but not the body it ran.
+    automation.rollbackFlow(name, 1);
+    expect('outcome' in (await get(manager)).flow_route).toBe(false);
+  });
+
   it('[#35863] a request whose snapshot does not say its run is a root run is never served "ended"', async () => {
     const manager = await submit(LINEAR.name, {});
     const director = await approve(manager, 'u_mgr');
