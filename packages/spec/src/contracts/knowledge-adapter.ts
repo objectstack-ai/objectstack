@@ -50,10 +50,13 @@ export interface AdapterSearchOptions {
   /**
    * The record scope of this search (ADR-0161 K8, item 17, as its dated note
    * of 2026-11-25 shapes it): a list of {@link AdapterScopeTerm}s the knowledge
-   * service builds from `KnowledgeSearchOptions.scope` for this source — never
-   * taken from a caller's input as given, never `{ object, ids }`: turning an
-   * object into a field needs the object's registered definition, which is the
-   * platform's.
+   * service builds from `KnowledgeSearchOptions.scope` for this source. The
+   * term's shape is the service's, never the caller's `{ object, ids }`:
+   * turning an object into a field needs the object's registered definition,
+   * which is the platform's. A `metadata` term's `field` is a name from the
+   * source's `metadataFields`. A term's `ids` are the caller's strings as
+   * given, checked only against the bounds below, so an adapter binds them as
+   * query parameters and never splices them into a query's text.
    *
    * - **Absent** (`undefined`): no scope. Rank every document of the source,
    *   as before this member.

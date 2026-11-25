@@ -111,7 +111,7 @@ const hits = await knowledge.search('notice period', {
 });
 ```
 
-The adapter filters before it ranks, so the `topK` hits all come from inside the scope, and the service drops any hit outside it whatever the adapter does. A source the scope does not reach is not searched, and `scope: []` answers nothing, never everything. A scope narrows what is searched; each hit is still re-checked against the caller, so it never shows a record the caller could not read. Bounds, the parent-link rules and what an adapter must do are in [the protocol's record scope](/docs/protocol/knowledge#record-scope).
+An adapter that reads the scope filters before it ranks, so the `topK` hits all come from inside the scope. Whatever the adapter does, the service drops any hit outside the scope, so an adapter that ignores it may answer fewer than `topK`. A source the scope does not reach is not searched, and `scope: []` answers nothing, never everything. A scope narrows what is searched; each hit is still re-checked against the caller, so it never shows a record the caller could not read. Bounds, the parent-link rules and what an adapter must do are in [the protocol's record scope](/docs/protocol/knowledge#record-scope).
 
 ## What you get for free
 

@@ -156,7 +156,7 @@ function parentLinksOf(objSource: ObjectKnowledgeSource, schema: unknown): Map<s
     } catch {
       target = undefined;
     }
-    if (target === undefined || target === objSource.object) continue;
+    if (target === undefined) continue;
     const fields = links.get(target);
     if (fields) fields.push(field);
     else links.set(target, [field]);

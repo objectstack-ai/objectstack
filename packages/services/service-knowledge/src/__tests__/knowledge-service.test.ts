@@ -1743,6 +1743,51 @@ describe('KnowledgeService — search scope (ADR-0161 K8, item 17)', () => {
     for (const hit of out) expect(hit.metadata?.policy).toBe('p1');
   });
 
+  it('a parent scope asks the engine nothing about the parent object, and an adapter that changes the terms it was handed does not change the check', async () => {
+    const held = corpus('s1');
+    const handed: unknown[] = [];
+    // An adapter that widens the terms it is handed to every policy and every record, then ranks by them.
+    const search = vi.fn(async (_q: string, opts: { source: KnowledgeSource; topK: number; scope?: Term[] }) => {
+      handed.push(structuredClone(opts.scope));
+      const scope = opts.scope ?? [];
+      for (const term of scope) term.ids.push('p0', 'p2', 'p3');
+      scope.push({ kind: 'record', ids: held.map((h) => String(h.sourceRecordId)) });
+      return held.filter((h) => holds(h, scope)).slice(0, opts.topK);
+    });
+    // Every call the service makes on the engine, by method and arguments.
+    const asked: Array<{ method: string; args: unknown[] }> = [];
+    const inner = engineOver(() => true, { task: TASK_SCHEMA });
+    const engine = new Proxy(inner, {
+      get(target, prop, receiver) {
+        const value: unknown = Reflect.get(target, prop, receiver);
+        if (typeof value !== 'function') return value;
+        return (...args: unknown[]) => {
+          asked.push({ method: String(prop), args });
+          return (value as (...a: unknown[]) => unknown).apply(target, args);
+        };
+      },
+    });
+    const warn = vi.fn();
+    const svc = new KnowledgeService({ dataEngine: engine, logger: { warn, debug: vi.fn(), error: vi.fn() } });
+    svc.registerAdapter('memory', { id: 'memory', upsert: vi.fn(async () => undefined), delete: vi.fn(async () => undefined), search });
+    svc.registerSource(taskSource('s1'));
+    const scope = [{ object: 'policy', ids: ['p1'] }];
+
+    for (const executionContext of [SYSTEM, MEMBER]) {
+      const out = await svc.search('q', { topK: 5, scope, executionContext });
+      expect(out.length).toBeGreaterThan(0);
+      for (const hit of out) expect(hit.metadata?.policy).toBe('p1');
+    }
+    // Every round was handed the service's own terms, whatever the adapter did with the last ones.
+    expect(handed.length).toBeGreaterThan(2);
+    for (const terms of handed) expect(terms).toEqual([{ kind: 'metadata', field: 'policy', ids: ['p1'] }]);
+    expect(scope).toEqual([{ object: 'policy', ids: ['p1'] }]);
+    // The indexed object's definition was read; nothing of the parent object was asked.
+    expect(asked.some((c) => c.method === 'getSchema' && c.args[0] === 'task')).toBe(true);
+    expect(asked.filter((c) => c.args[0] === 'policy')).toEqual([]);
+    expect(warn.mock.calls.map(([m]) => String(m)).filter((m) => m.includes("outside the search's scope"))).toHaveLength(1);
+  });
+
   it('an object no searched source reaches: no adapter is asked, and the answer is empty', async () => {
     const { svc, adapter } = setup();
     expect(await svc.search('q', { topK: 5, scope: [{ object: 'invoice', ids: ['i1'] }], executionContext: MEMBER })).toEqual([]);
