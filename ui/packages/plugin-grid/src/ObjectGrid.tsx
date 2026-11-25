@@ -71,7 +71,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@object-ui/components';
-import { captureUpdateUndoData, resolveConditionalFormatting, declaredNameField, buildExportFileName, resolveAffordance, resolveAffordanceGrant, resolveFieldAffordance, isObjectExportOffered, type SchemaLike, isExpandableFieldType, isUnmaterializedFieldType, readObjectSortability, isPlatformSortableField, filterPlatformSortableSort, filterRefusalSubject, FilterOperatorError, resolveRecordSourceConfig, resolveRecordSourceObjectName, partitionRowsByPredicate, csvBlob, readActionPayload } from '@object-ui/core';
+import { captureUpdateUndoData, resolveConditionalFormatting, declaredNameField, collectPredicateFieldRefs, buildExportFileName, resolveAffordance, resolveAffordanceGrant, resolveFieldAffordance, isObjectExportOffered, type SchemaLike, isExpandableFieldType, isUnmaterializedFieldType, readObjectSortability, isPlatformSortableField, filterPlatformSortableSort, filterRefusalSubject, FilterOperatorError, resolveRecordSourceConfig, resolveRecordSourceObjectName, partitionRowsByPredicate, csvBlob, readActionPayload } from '@object-ui/core';
 import { usePermissions } from '@object-ui/permissions';
 import {
   RECORD_OVERLAY_DEFAULT_WIDTH,
@@ -86,7 +86,7 @@ import {
   type ConcurrentUpdateConflict,
 } from '@object-ui/plugin-detail';
 import { ChevronRight, ChevronLeft, ChevronsLeft, ChevronsRight, Download, Rows2, Rows3, Rows4, AlignJustify, Loader2, Check } from 'lucide-react';
-import { useRowColor } from './useRowColor';
+import { useRowColor, rowTintClass } from './useRowColor';
 import { GroupRow } from './GroupRow';
 import { resolveRowCrudAffordances, resolveRowRecordCrudAffordance } from './rowCrudAffordances';
 import { useRecordCrudVerdicts } from './hooks/useRecordCrudVerdicts';
@@ -379,6 +379,39 @@ export interface ObjectGridComponentProps extends ObjectGridExternalPaginationPr
    * composes, nothing an author writes, and no node key reaches it.
    */
   recordLinkAdornment?: (record: any) => React.ReactNode;
+  /**
+   * [objectstack#36897] Host-drawn cells, by column field: a shown column
+   * whose field is a key here draws what the host returns for the row, in
+   * place of the grid's own cell renderer. Called with the row's value at
+   * that field and the row record. A column whose field is not a key keeps
+   * the grid's own cell, and an absent prop changes nothing.
+   *
+   * For a host whose rows are not records of an object (the console's
+   * metadata list: a switch with a confirm, a lock, a clone button): the grid
+   * still owns the table, its header, sort arrows, paging and row clicks; the
+   * host owns what a cell says. Table view only: the phone's card rows keep
+   * the grid's own title and summary.
+   *
+   * The table keeps its columns as state, re-seeded after a change of their
+   * identity: a host whose cells draw from state of its own passes the same
+   * functions on every render and reads that state when called (a ref), so
+   * a change redraws at once.
+   *
+   * A RUNTIME prop, never authored metadata: it is a React node a host
+   * composes, nothing an author writes, and no node key reaches it.
+   */
+  hostCells?: Readonly<Record<string, (value: any, record: any) => React.ReactNode>>;
+  /**
+   * [objectstack#36897] A host-chosen tint for ONE row, as a colour name of
+   * the palette `rowColor` resolves (`red`, `amber`, …). `null`, `undefined`
+   * or a name outside the palette tints nothing; where it names one it wins
+   * over the row's authored `rowColor`. The tint reaches the row's sticky
+   * cells as `rowColor`'s does.
+   *
+   * A RUNTIME prop, never authored metadata: the host decides it, and no node
+   * key reaches it.
+   */
+  rowTint?: (record: any) => string | null | undefined;
   /**
    * [objectstack#33317] Whether a click on a row opens anything, as the HOST
    * that owns the row click knows it. `false` ⇒ the row's record-link cells
@@ -913,6 +946,8 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
   rowOperations,
   rowAdornment,
   recordLinkAdornment,
+  hostCells,
+  rowTint,
   rowOpensRecord,
   cellSelection: cellSelectionProp,
   headerMenu: hostHeaderMenu,
@@ -1450,7 +1485,29 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
   // object, an approval lock, the record — `cellReadOnlyKind`), what typing
   // does there and what pasted text stands for. `null` without the host's
   // ask, so every other grid keeps the table it had.
-  const approvalLocks = useRowApprovalLocks(hostCellSelection ? objectName : undefined);
+  //
+  // objectstack#36911 — the row menu reads the same locks: a row an approval
+  // locks offers no Edit, as the record page offers none (objectstack#35593).
+  // Delete stays for a record held by its own approval: the server deletes it
+  // and cancels its request. (The batch read reports only that case today, not
+  // a line held because its master is held, which refuses delete too; #37041.) So the hook also runs on a grid whose rows offer Edit. It still
+  // reads nothing until it is asked: by a cell being selected, or by a row's
+  // actions being reached for (`demandRowActions` below).
+  const rowMenuOffersEdit = canEdit && !!onEdit;
+  const approvalLocks = useRowApprovalLocks(hostCellSelection || rowMenuOffersEdit ? objectName : undefined);
+  /**
+   * objectstack#36911 — what reaching for a row's actions asks
+   * (`RowActionMenuProps.onActionsDemand`, objectstack#34208): the
+   * record-grained verdicts, and the approval locks of the rows on screen in
+   * one read (objectstack#35795), never on first paint. A repeat call is free:
+   * the hook asks only ids it has not asked yet.
+   */
+  const requestRecordVerdicts = recordVerdict.requestVerdicts;
+  const probeApprovalLocks = approvalLocks.probe;
+  const demandRowActions = useCallback(() => {
+    requestRecordVerdicts();
+    if (rowMenuOffersEdit) probeApprovalLocks(pageRecordIds);
+  }, [requestRecordVerdicts, probeApprovalLocks, rowMenuOffersEdit, pageRecordIds]);
   // objectstack#35956 — a cell change that makes other fields required asks
   // for them first, and saves them with it (`./objectGridRequiredPrompt`).
   const fieldLabelOf = (field: string): string => {
@@ -2383,8 +2440,8 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
   } = resolveObjectGridActionsColumn({
     schema, data, objectSchema, persistedColumns, operations, resolvedRowActionDefs,
     wantEditAction, wantDeleteAction, mayInvokeRowAction, rowOperations, canEdit, canDelete,
-    recordVerdict, predicateScope, onEdit, onDelete, editPredicates, deletePredicates, executeAction,
-    setRefreshKey, t, foldInlineRowActions: inlineActionFold.folded,
+    recordVerdict, approvalLocks, demandRowActions, predicateScope, onEdit, onDelete, editPredicates,
+    deletePredicates, executeAction, setRefreshKey, t, foldInlineRowActions: inlineActionFold.folded,
     drawRowControls: !listPageGrid,
   });
 
@@ -2894,6 +2951,11 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
     // nothing, so the executor counts it as refused, never as succeeded, and
     // lists it with this record's own sentence.
     if (res.refusal) return { refusal: { message: res.refusal.message } };
+    // A run paused at a screen started and waits for input: nothing says it
+    // will finish, so the executor counts it as waiting, never as succeeded
+    // (objectstack#36931). Its screen is the flow handler's to show; the
+    // console queues every paused record's screen, so each can be reached.
+    if (res.paused) return { paused: true };
   };
 
   // Whole-selection dispatcher for a def that opted into
@@ -2944,8 +3006,11 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
     // Only reset selection when the run actually changed something. A total
     // failure (0 succeeded — e.g. a "推计划" precondition error) leaves the data
     // untouched, so we keep the selection *and* the toolbar so the user can fix
-    // it and retry the same rows.
-    if (result && result.succeeded > 0) {
+    // it and retry the same rows. A run that paused at a screen changed
+    // something too (its steps before the screen may have written), and its
+    // record must not be re-run while its screen waits, so it resets and
+    // re-reads like a success (objectstack#36931).
+    if (result && (result.succeeded > 0 || (result.paused?.length ?? 0) > 0)) {
       resetSelection();
       // Trigger refresh via the same path used by single-record mutations.
       setRefreshKey(k => k + 1);
@@ -3563,15 +3628,24 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
   // objectui#13330 — the host's node beside each row's title (`rowAdornment`):
   // in the declared name field's column when one is shown, else the first
   // shown column. After the cell's own content, never in place of it.
+  // objectstack#36897 — the host's own cells (`hostCells`), by column field.
+  const hostCelledColumns = hostCells
+    ? (orderedColumns as any[]).map((c) => {
+        const draw = typeof c?.accessorKey === 'string' && Object.prototype.hasOwnProperty.call(hostCells, c.accessorKey)
+          ? hostCells[c.accessorKey]
+          : undefined;
+        return draw ? { ...c, cell: (value: any, row: any) => draw(value, row) } : c;
+      })
+    : orderedColumns;
   const tableColumns = (() => {
-    if (!rowAdornment) return orderedColumns;
+    if (!rowAdornment) return hostCelledColumns;
     const declaredTitle = declaredNameField(objectSchema);
-    const shown = (orderedColumns as any[]).filter((c) => c?.accessorKey !== '_actions');
+    const shown = (hostCelledColumns as any[]).filter((c) => c?.accessorKey !== '_actions');
     const titleColumn =
       (typeof declaredTitle === 'string' && declaredTitle !== ''
         ? shown.find((c) => c.accessorKey === declaredTitle)
         : undefined) ?? shown[0];
-    if (!titleColumn) return orderedColumns;
+    if (!titleColumn) return hostCelledColumns;
     const cell = titleColumn.cell;
     const adorned = {
       ...titleColumn,
@@ -3587,7 +3661,7 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
         );
       },
     };
-    return (orderedColumns as any[]).map((c) => (c === titleColumn ? adorned : c));
+    return (hostCelledColumns as any[]).map((c) => (c === titleColumn ? adorned : c));
   })();
 
   // objectstack#36290 — the card a cell's 「Change history」 item opened
@@ -4005,7 +4079,9 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
     // that verdict, which is what this adds.
     showAddRow: !!operations?.create && addRowGranted,
     onAddRecord: onAddRecord,
-    rowClassName: schema.rowColor ? (row: any, _idx: number) => getRowClassName(row) : undefined,
+    rowClassName: schema.rowColor || rowTint
+      ? (row: any, _idx: number) => rowTintClass(rowTint?.(row)) ?? getRowClassName(row)
+      : undefined,
     rowStyle: schema.conditionalFormatting?.length ? (row: any, _idx: number) => getRowStyle(row) : undefined,
     frozenColumns: effectiveFrozenColumns,
     onSelectionChange: (rows: any[]) => {
@@ -4406,6 +4482,21 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
     // that titles the card, so a first column the name field displaced (the
     // Owner above) reads as an ordinary body row.
     const bodyColumns = displayColumns.filter((c) => c !== titleCol);
+    // objectstack#37010 — a name field that is a FORMULA titles the card with
+    // the fields it reads (`case_number - subject`), and a view shows those
+    // parts as columns of their own, usually its leading ones, since a table
+    // has no use for the concatenation. So the subtitle also skips every
+    // shown column whose field the formula reads: it never repeats the
+    // title's parts and takes the next shown columns instead. The reads are
+    // the formula's `record.<field>` references as `collectPredicateFieldRefs`
+    // names them, the reader this grid's projection names a CEL expression's
+    // reads with; a read through a lookup (`record.account.name`) names the
+    // lookup, so the lookup's column is skipped too. A name field that is not
+    // a formula reads nothing here.
+    const nameFieldDef = nameFieldKey !== undefined ? objectFields?.[nameFieldKey] : undefined;
+    const titleReads = new Set<string>(
+      nameFieldDef?.type === 'formula' ? collectPredicateFieldRefs([nameFieldDef.expression]) : [],
+    );
 
     // objectui#10583 — a MASKED column (the rule that stamps `TableColumn.masked`)
     // is drawn only through its own `cell`, which draws the mask. The branches
@@ -4425,7 +4516,8 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
     // read), when a column shows it, drawn through that column's own cell as
     // the desktop row draws it. The subtitle joins the first two other shown
     // columns' display values, each through its own cell, and skips a masked
-    // or empty value rather than drawing it.
+    // or empty value rather than drawing it, and a column the title's formula
+    // reads (`titleReads` above).
     const statusKey = detectStatusField(objectSchema);
     const statusCol = statusKey !== null ? bodyColumns.find((c) => c.accessorKey === statusKey) : undefined;
     // objectstack#34615 — the card's AMOUNT is the first shown body column whose
@@ -4438,7 +4530,9 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
     const amountCol = bodyColumns.find(
       (c) => c !== statusCol && c.type === 'currency' && !isMaskedCardColumn(c.accessorKey),
     );
-    const subtitleColumns = bodyColumns.filter((c) => c !== statusCol && c !== amountCol).slice(0, 2);
+    const subtitleColumns = bodyColumns
+      .filter((c) => c !== statusCol && c !== amountCol && !titleReads.has(c.accessorKey))
+      .slice(0, 2);
     const isEmptyCardValue = (value: unknown) => value == null || value === '';
     const cardCell = (col: ObjectGridColumnDraft, row: any): React.ReactNode => {
       const value = row[col.accessorKey];

@@ -32,8 +32,10 @@
  * (`withDeclaredFlowsFallback`, `@object-ui/i18n`), where the flow-label
  * readers find them, so a flow label `lang` does not carry reads the fallback
  * locale's text, as the server's own reads do. A server that declares no chain
- * costs nothing more than the locale-list read: the answer is exactly what it
- * was. Either extra read failing degrades to that same answer.
+ * costs nothing more: the locale list is the page load's one shared read
+ * (`./localesRead.ts`, cloud#4964), the one `loadLocales` makes for the globe
+ * menu, and the answer is exactly what it was. Either extra read failing
+ * degrades to that same answer.
  */
 import {
   isSpecTranslationData,
@@ -44,6 +46,7 @@ import {
 } from '@object-ui/i18n';
 import { resolveLocaleAmong } from '@objectstack/spec/system';
 import { i18nFetch, whenSessionAnswered } from './i18nSession';
+import { readLocales } from './localesRead';
 
 const serverUrl = () => import.meta.env.VITE_SERVER_URL || '';
 
@@ -75,10 +78,16 @@ interface DeclaredChain {
  */
 async function fetchDeclaredChain(): Promise<DeclaredChain | null> {
   try {
-    const res = await i18nFetch(`${serverUrl()}/api/v1/i18n/locales`);
-    if (!res.ok) return null;
-    const json = await res.json();
-    const body = json?.data && typeof json.data === 'object' ? json.data : json;
+    // The page load's one `/i18n/locales` read, shared with `loadLocales`
+    // (`./localesRead.ts`, cloud#4964).
+    const answer = await readLocales();
+    if (!answer.ok) return null;
+    const json = answer.body as { data?: unknown } | null;
+    const body = (json?.data && typeof json.data === 'object' ? json.data : json) as {
+      fallbackChain?: unknown;
+      sourceLocale?: unknown;
+      locales?: unknown;
+    } | null;
     const chain: unknown[] = Array.isArray(body?.fallbackChain) ? body.fallbackChain : [];
     const fallbackChain = chain.filter((code): code is string => typeof code === 'string' && code.length > 0);
     if (fallbackChain.length === 0) return null;

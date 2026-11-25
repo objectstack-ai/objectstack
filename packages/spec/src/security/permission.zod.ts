@@ -744,7 +744,8 @@ const ObjectPermissionBaseSchema = lazySchema(() => strictObject(
    *   set does not name explicitly (the same lookup the super-user bits take).
    *
    * Today `viewAllRecords` / `modifyAllRecords` still vote on every field
-   * too, so on a set that carries either bit this key changes nothing; the
+   * too, so on an object entry that carries either bit (the set's own entry
+   * for the object, else its `'*'` entry) this key changes nothing; the
    * built-in admin sets carry it so they keep their field visibility when
    * those two bits stop voting on fields.
    *
@@ -1083,11 +1084,14 @@ const FIELD_PERMISSION_ROLLUP_REASON_ON_HIDDEN =
  * condition matches, the entry votes as declared; on any other row the entry
  * is absent, so the most-permissive merge
  * (`PermissionEvaluator.getFieldPermissions`) is unchanged. Beside the
- * declaring sets, a set holding the super-user bypass on the object votes on
- * every field of it, on every row (ADR-0066 ⑧ note of 2026-11-02, ruling of
- * record 6573563853): `viewAllRecords` votes `readable: true`,
- * `modifyAllRecords` votes `readable: true` and `editable: true`; View All
- * never grants an edit. One exception (ADR-0066 ⑧ note of 2026-11-15): a set
+ * declaring sets, a set holding the super-user bypass on the object, or
+ * carrying `viewAllFields` on it, votes on every field of it, on every row
+ * (ADR-0066 ⑧ note of 2026-11-02, ruling of record 6573563853; the field-axis
+ * split, ruling of record 6912661484): `viewAllRecords` votes
+ * `readable: true`, and so does `viewAllFields` (under the same exception as
+ * View All, below), `modifyAllRecords` votes `readable: true` and
+ * `editable: true`; View All and View All Fields
+ * never grant an edit. One exception (ADR-0066 ⑧ note of 2026-11-15): a set
  * holding View All without Modify All casts no read vote on a field its OWN
  * entry declares `readable: false`, so that row binds the set's own holders;
  * another set's vote, and the Modify All vote, are as before. Otherwise union

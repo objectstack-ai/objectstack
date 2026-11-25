@@ -3,7 +3,7 @@
 import { randomUUID } from 'node:crypto';
 import { coerceRow, type CoerceContext, type ReferenceMaster, type RefResolver, type RefMatch } from './import-coerce.js';
 import type { ExportFieldMeta } from './import-field-meta.js';
-import type { ValidationMessageTranslator } from '@objectstack/spec/system';
+import { renderValidationMessage, type ValidationMessageTranslator } from '@objectstack/spec/system';
 import {
   canServeApiOperation, isMultiValueField, isUniqueDeclared, isVirtualSearchField, referenceTargetOf, resolveDisplayField,
   STRUCTURED_JSON_TYPES,
@@ -832,11 +832,14 @@ const yieldToEventLoop = (): Promise<void> =>
  * map does not carry is judged by nobody, as cell coercion passes it through.
  *
  * One rule, two callers: the import door refuses the request with it
- * (`prepareImportRequest`, `400 INVALID_REQUEST`) before any row, and
- * {@link runImport} fails every row with it for a caller that reaches the
- * runner without that door (the connector pull writes a mapping's
- * `upsertKey` straight through), before any row is read or written.
- * `keyedBy` names what the caller read the key from.
+ * (`prepareImportRequest`, `400 INVALID_REQUEST`, this `message`) before any
+ * row, and {@link runImport} fails every row on its `fields` for a caller that
+ * reaches the runner without that door (the connector pull writes a mapping's
+ * `upsertKey` straight through), before any row is read or written. The row
+ * sentence is the runner's own catalog entry by field label
+ * (`validation.field.import_multi_value_match_key`), in the caller's locale
+ * when it passes one and English otherwise, as the other sentences of the row
+ * report are. `keyedBy` names what the door read the key from.
  */
 export function multiValueMatchKeyRefusal(
   matchFields: string[] | string[][],
@@ -1069,6 +1072,54 @@ export function runImport(opts: RunImportOptions): Promise<ImportRunSummary> {
     timezone: typeof context?.timezone === 'string' && context.timezone
       ? String(context.timezone) : undefined,
   };
+
+  /** A field's LABEL, or its API name where the field has none. */
+  const fieldLabel = (f: string): string => metaMap.get(f)?.label?.trim() || f;
+  /**
+   * The sentence a {@link rowsSharingKey} row is refused with, in the importing
+   * principal's locale through the same catalog and override hook as the cell
+   * failures beside it (`validation.field.import_duplicate_match_key`). The
+   * key set is named by field LABEL, the API name only where a field has none,
+   * as the cell failures name their column; the row numbers are kept. The API
+   * names ride along as `{{field}}` for a deployment override that wants them;
+   * no built-in sentence prints them.
+   */
+  const duplicateMatchKeyMessage = (rowNos: readonly number[], keySet: readonly string[]): string =>
+    renderValidationMessage(
+      {
+        messageKey: 'import_duplicate_match_key',
+        label: keySet.map(fieldLabel).join(' + '),
+        field: keySet.join(' + '),
+        params: { rows: rowNos.join(', ') },
+      },
+      { locale: coerceCtx.locale, translate: coerceCtx.translate },
+    );
+  /**
+   * The importer's two other ROW refusals, read the same way as
+   * {@link duplicateMatchKeyMessage}: a row blank on every ordered key set
+   * (`validation.field.import_blank_match_key`, the sets by label, a set's
+   * fields joined with ` + ` and the sets with `; `), and a match key naming a
+   * field that holds a list or a structured value
+   * (`validation.field.import_multi_value_match_key`, those fields by label,
+   * joined with `, `). `{{field}}` carries the same names as API names. The
+   * locale and the override hook are the caller's: a caller that passes no
+   * `context.locale` reads English, and one that passes no `translate` gets no
+   * deployment override (the connector and datasource pulls pass neither).
+   */
+  const blankMatchKeyMessage = (sets: readonly (readonly string[])[]): string =>
+    renderValidationMessage(
+      {
+        messageKey: 'import_blank_match_key',
+        label: sets.map((set) => set.map(fieldLabel).join(' + ')).join('; '),
+        field: sets.map((set) => set.join(' + ')).join('; '),
+      },
+      { locale: coerceCtx.locale, translate: coerceCtx.translate },
+    );
+  const multiValueMatchKeyMessage = (fields: readonly string[]): string =>
+    renderValidationMessage(
+      { messageKey: 'import_multi_value_match_key', label: fields.map(fieldLabel).join(', '), field: fields.join(', ') },
+      { locale: coerceCtx.locale, translate: coerceCtx.translate },
+    );
 
   /**
    * [#26133] The rows of this import that share a match key, each mapped to
@@ -1559,9 +1610,10 @@ export function runImport(opts: RunImportOptions): Promise<ImportRunSummary> {
     // here; this answers the callers that reach the runner without it.
     const refusedKey = writeMode === 'insert' ? undefined : multiValueMatchKeyRefusal(matchFields, metaMap);
     if (refusedKey) {
+      const error = multiValueMatchKeyMessage(refusedKey.fields);
       for (let i = 0; i < rows.length; i++) {
         results[i] = {
-          row: i + 1, ok: false, action: 'failed', field: refusedKey.fields[0], code: 'VALIDATION_ERROR', error: refusedKey.message,
+          row: i + 1, ok: false, action: 'failed', field: refusedKey.fields[0], code: 'VALIDATION_ERROR', error,
         };
       }
       errCount = rows.length;
@@ -1587,7 +1639,7 @@ export function runImport(opts: RunImportOptions): Promise<ImportRunSummary> {
           errCount++;
           results[i] = {
             row: rowNo, ok: false, action: 'failed', code: 'DUPLICATE_MATCH_KEY',
-            error: `Rows ${shared.rowNos.join(', ')} of this import have the same match key (${shared.keySet.join(' + ')}), so none of them was written: keep one row per key and import again`,
+            error: duplicateMatchKeyMessage(shared.rowNos, shared.keySet),
           };
         } else {
           // [#22183] This row's write context: the kept option values ride along.
@@ -1608,7 +1660,7 @@ export function runImport(opts: RunImportOptions): Promise<ImportRunSummary> {
               errCount++;
               results[i] = {
                 row: rowNo, ok: false, action: 'failed', code: 'BLANK_MATCH_KEY',
-                error: `The row has no match key: every key set in matchFields (${keySets.map((set) => set.join(' + ')).join('; ')}) has a blank field on it`,
+                error: blankMatchKeyMessage(keySets),
               };
               handled = true;
             } else if (existing === 'blank' && (skipBlankMatchKey || writeMode === 'update')) {

@@ -817,6 +817,10 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "関連リストの列",
         helpText: "親レコードの詳細ページに表示される、この関係の関連リストの列。このオブジェクト（子オブジェクト）のフィールド名で指定します（例：name、status）。未設定の場合は子オブジェクトから導出されます。名前のみを指定し、ラベル、セルの型、書式は子オブジェクトのフィールド定義から取られます。"
       },
+      inlineEdit: {
+        label: "インライン編集形式",
+        helpText: "親オブジェクトのフィールドグループがこの子を指定したとき（fieldGroups[].relatedList）、親フォームがこの子の行を編集する形式。未設定: このオブジェクトのフィールドから自動で選択。"
+      },
       inlineTitle: {
         label: "インライン表のタイトル",
         helpText: "親レコードに埋め込まれるマスター／ディテール表のタイトル。"
@@ -3143,5 +3147,8 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "値"
       }
     }
+  },
+  ai_context: {
+    label: "AI コンテキストパック"
   }
 };

@@ -8,7 +8,8 @@
  * stack is "good" exactly when it (a) parses against the canonical spec schema
  * and (b) is clean under the data-model lint rules. This is deterministic,
  * needs no LLM/API key, and runs in CI — yet it directly measures the
- * conventions we care about (master-detail, inlineEdit, roll-ups, selects,
+ * conventions we care about (master-detail, line items placed by a parent field
+ * group, roll-ups, selects,
  * naming, labels).
  *
  * `scoreMetadata(stack)` returns a 0–100 score plus a breakdown so callers can

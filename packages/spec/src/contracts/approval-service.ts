@@ -1112,7 +1112,10 @@ export interface IApprovalService {
    * - **What is answered:** `locked` only. `true` when a pending request on the
    *   record comes from a node whose `lockRecord` is not `false` — the same
    *   judgement, off the same snapshot, the record-lock `beforeUpdate` hook
-   *   enforces. ⛔ No request id, node, participants or `pending` flag: whether
+   *   enforces. Asked of a master-detail line, it also answers `true` while
+   *   a record the line belongs to is so held — the detail-row lock's judgement,
+   *   which refuses the line's writes.
+   *   ⛔ No request id, node, participants or `pending` flag: whether
    *   the caller may see the request is still `approvalsVisibleToReaders`'
    *   question, and this member does not answer it.
    *
@@ -1140,7 +1143,9 @@ export interface IApprovalService {
    * {@link getRecordLock} answers for that id: `{ locked }` when the caller
    * can read the record, `null` when it cannot or when it does not exist,
    * ⛔ never an entry that tells the two apart. The same judgement, off the
-   * same snapshot, the record-lock `beforeUpdate` hook enforces. A repeated id
+   * same snapshot, the record-lock `beforeUpdate` hook enforces — and, for a
+   * master-detail line, the detail-row lock's: a line answers `true` while a
+   * record it belongs to is so held. A repeated id
    * is answered at each of its positions. A caller refused the object's read
    * outright is refused the same way for every id.
    *
@@ -1391,18 +1396,29 @@ export interface IApprovalService {
    * What it serves, exactly as the plugin's self-hosted pages serve it today:
    *  - `GET` renders. It reads the raw token from the `token` query parameter
    *    and answers the confirm page — the request summary and a form that
-   *    `POST`s the token back — or, for a token that is invalid, expired,
-   *    consumed or no longer live, the explanatory result page. ⛔ A `GET`
+   *    `POST`s the token back (a reject link's form also carries a required
+   *    reason field, named `comment`) — or, for a token that is invalid,
+   *    expired, consumed or no longer live, the explanatory result page. ⛔ A `GET`
    *    never decides: mail gateways prefetch every link in a message, and a
    *    `GET` that executes gets requests approved by robots.
    *  - `POST` redeems. It reads the token from the `token` field of the form
-   *    body, runs ADR-0043's whole redemption chain (hash lookup, not
-   *    consumed, not expired, request still `pending`, approver still holding
-   *    the slot, consume, then decide AS that approver), and answers the
-   *    result page.
+   *    body and, for a reject link, the reason from its `comment` field (the
+   *    last of each when a field repeats). It runs ADR-0043's whole redemption
+   *    chain (hash lookup, not consumed, not expired, request still `pending`,
+   *    approver still holding the slot, consume, then decide AS that approver,
+   *    a reject recording that reason as its comment), and answers the result
+   *    page. An approve link reads no `comment` and records the fixed comment
+   *    "Via action link".
+   *  - A reject whose `comment` is missing, blank or not a string — judged by
+   *    the same rule every reject door applies — is refused before the token
+   *    is consumed: it answers the same confirm page again, carrying the
+   *    refusal, with status `400` (the redemption outcome `reason_required`).
+   *    Nothing is decided and the link stays live, so the approver can type a
+   *    reason and send the same link again. A dead link is judged first and
+   *    is still told on its result page.
    *  - Both answer an HTML page. A dead link is told on the page, never as an
    *    error status: ADR-0043 answers "this link is no longer valid", not an
-   *    error code.
+   *    error code. The `400` above refuses the input, not the link.
    *
    * **The token is the only credential.** This member takes no
    * {@link ExecutionContext} and reads no session, cookie or `Authorization`
@@ -1433,8 +1449,9 @@ export interface IApprovalService {
    * behind it.
    *
    * @param request - The forwarded request: on `GET` the token is in its query
-   *   string, on `POST` in its form body
-   * @returns The page to show the approver
+   *   string, on `POST` in its form body, beside a reject's `comment`
+   * @returns The page to show the approver: on `POST`, the result page, or
+   *   for a reject with no reason the confirm page again with status `400`
    */
   handleActionPage?(request: Request): Promise<Response>;
 }

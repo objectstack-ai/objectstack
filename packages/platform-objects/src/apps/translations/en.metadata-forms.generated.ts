@@ -817,6 +817,10 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "Related List Columns",
         helpText: "Columns of this relationship's related list on the parent's detail page, as field names of this (the child) object, e.g. name, status. Unset: derived from the child object. Names only — labels, cell types and formatting come from the child's field definitions."
       },
+      inlineEdit: {
+        label: "Inline Edit",
+        helpText: "How the parent's form edits this child's rows when a field group of the parent names this child (fieldGroups[].relatedList). Unset: picked from this object's fields."
+      },
       inlineTitle: {
         label: "Inline Title",
         helpText: "Title for the inline master-detail grid on the parent record."
@@ -3143,5 +3147,8 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "Value"
       }
     }
+  },
+  ai_context: {
+    label: "AI Context Pack"
   }
 };

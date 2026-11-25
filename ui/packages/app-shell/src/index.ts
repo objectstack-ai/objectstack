@@ -89,6 +89,27 @@ export {
 // console's first-run checklist, now that the desktop's home page retired).
 export { SetupFirstPageSlotProvider, type SetupFirstPageSlot } from './console/setupFirstPageSlot.js';
 
+// objectstack#36739 — what a host draws at the bottom of an app's sidebar (the
+// console's 「Get started n/m」 pill), and after the app's menu on a phone.
+export {
+  SidebarFooterSlotProvider,
+  type SidebarFooterSlot,
+  type SidebarFooterSlotPlace,
+} from './layout/sidebarFooterSlot.js';
+
+// objectstack#37150 — the shell sidebar's place for an app's docs navigation,
+// drawn by the console's docs pages (the provider and the target are the
+// shell's side, mounted by `ConsoleLayout` and `UnifiedSidebar`); and the page
+// header's two shell slots (the top-right button group and the sidebar's
+// expand button), for a docs page, which draws no `ConsolePageHeader`.
+export {
+  SidebarDocsNav,
+  SidebarDocsNavSlotProvider,
+  SidebarDocsNavTarget,
+  useSidebarDocsNavSlot,
+} from './layout/sidebarDocsNavSlot.js';
+export { useShellPageActionsSlot, useShellSidebarExpandSlot } from './layout/shellPageActionsSlot.js';
+
 // Host-app route policy (ADR-0048) — which app's `/apps/<segment>/…` URL a
 // framework-owned, app-INDEPENDENT page should build, and the two predicates it
 // is defined in terms of. Published from the package root (objectui#4280)
@@ -387,6 +408,9 @@ export {
   type ChatDockControl,
 } from './layout/chatDockControl.js';
 export type { ChatDockTarget } from './layout/chatDockTarget.js';
+// objectstack#36999 — the one setter every entry point pins a record through
+// (the page chip's pin, the record drawer, the `ask_ai` action); chat-free.
+export { setChatFocus, type ChatFocus } from './layout/chatFocus.js';
 // Conversation-history hydration helpers — reused by the public read-only
 // share page (`/s/:token`) so a shared transcript renders identically to the
 // live chat (tool cards included) instead of dumping raw envelopes.
@@ -611,6 +635,15 @@ export { StudioMetadataArea } from './views/studio-design/StudioMetadataArea.js'
 // area (the datasource's stays in Setup). A host whose legacy aliases forward
 // onto Setup's metadata routes lands them in one hop through this.
 export { setupMetadataStudioPath } from './views/studio-design/setupMetadataRedirect.js';
+// objectstack#36895 — the one builder of Studio addresses. A host that
+// declares the `/studio` routes, or links into them, spells every address
+// through these, never by hand (`studioAddress.guard.test.ts`).
+export {
+  STUDIO_ROOT_PATH,
+  STUDIO_HOME_PILLAR,
+  studioLandingPath,
+  studioPackagePath,
+} from './views/studio-design/studioAddress.js';
 
 
 // AI assistant bus — connects the metadata designers to the global chat.

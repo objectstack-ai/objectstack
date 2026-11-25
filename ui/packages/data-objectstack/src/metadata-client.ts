@@ -56,6 +56,7 @@ import type {
 // objectui#12929 — the batch publish door's request options are picked off the
 // client's declared `packages.publishDrafts` signature (type-only, erased).
 import type { ObjectStackClient } from '@objectstack/client';
+import type { MetadataProvenance } from '@objectstack/spec/kernel';
 
 /**
  * One advisory finding the framework's runtime authoring gate produced for a
@@ -636,6 +637,14 @@ export interface MetadataLayered<T = unknown> {
    */
   draft?: T | null;
   /**
+   * objectstack#36601 — the published row's version (spec
+   * `GetMetaItemLayeredResponseSchema.overlayVersion`): the token a pinned
+   * publish sends as `If-Match`, `null` when no published row is stored at the
+   * read's address. ABSENT when the server served none (a server from before
+   * the field): a caller then pins nothing. Forwarded only when served.
+   */
+  overlayVersion?: string | null;
+  /**
    * Load-time validation result for `effective` (server-computed via
    * the same Zod registry used at save time). Undefined for types
    * without a registered Zod schema. Surfaced by the Studio as a
@@ -652,8 +661,13 @@ export interface MetadataLayered<T = unknown> {
   lockSource?: 'artifact' | 'package' | 'overlay' | 'env-forced';
   /** Optional docs URL for the lock reason (rendered as "View docs →"). */
   lockDocsUrl?: string;
-  /** Origin of the item: `package` (loader) | `org` (tenant) | `env-forced`. */
-  provenance?: 'package' | 'org' | 'env-forced';
+  /**
+   * Origin of the item: `package` (loader) | `org` (tenant) | `env-forced` |
+   * `platform` (the platform's own boot registration, a store-slot marker).
+   * Typed from the spec's `MetadataProvenance`, so a value the spec adds is
+   * accepted here without a second edit (#37013).
+   */
+  provenance?: MetadataProvenance;
   /** Owning package id (denormalised from the loader tag). */
   packageId?: string;
   /** Owning package version. */
@@ -1851,6 +1865,8 @@ export class MetadataClient {
         effective: (envelope.effective ?? null) as T | null,
         // objectstack#29793 — the draft layer, forwarded only when served.
         ...('draft' in body ? { draft: (body.draft ?? null) as T | null } : {}),
+        // objectstack#36601 — the published version a pinned publish sends, forwarded only when served.
+        ...(envelope.overlayVersion !== undefined ? { overlayVersion: envelope.overlayVersion } : {}),
         ...(body._diagnostics ? { _diagnostics: body._diagnostics as MetadataDiagnostics } : {}),
         lock: envelope.lock,
         ...(envelope.lockReason !== undefined ? { lockReason: envelope.lockReason } : {}),
@@ -1884,6 +1900,7 @@ export class MetadataClient {
       overlayScope: body.overlayScope ?? null,
       effective: body.effective ?? null,
       ...('draft' in body ? { draft: (body.draft ?? null) as T | null } : {}),
+      ...(body.overlayVersion !== undefined ? { overlayVersion: body.overlayVersion as string | null } : {}),
       ...(body._diagnostics ? { _diagnostics: body._diagnostics as MetadataDiagnostics } : {}),
       ...(body.lock !== undefined ? { lock: body.lock as MetadataLayered['lock'] } : {}),
       ...(body.lockReason !== undefined ? { lockReason: body.lockReason as string } : {}),

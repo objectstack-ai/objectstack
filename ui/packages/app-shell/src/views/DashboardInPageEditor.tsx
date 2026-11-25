@@ -57,6 +57,7 @@ import { getDashboardForm } from './metadata-admin/dashboard-schema.js';
 import { useMetadataLocale, type SupportedLocale } from './metadata-admin/i18n.js';
 import type { MetadataSelection } from './metadata-admin/preview-registry.js';
 import { ServedWidgetTextContext, servedWidgetTextOf } from './studio-design/servedDashboardText.js';
+import { studioPackagePath } from './studio-design/studioAddress.js';
 
 /** Where the editor would save, as read at open (nothing is written to open). */
 export type WritableDashboardEditTarget = Exclude<DashboardEditTarget, { kind: 'refused' }>;
@@ -66,7 +67,13 @@ export type DashboardEditRefusal = 'no-package' | 'walled' | 'no-version' | 'pen
 
 /** What opening a dashboard for editing found. */
 export type DashboardEditOpening =
-  | { kind: 'ready'; target: WritableDashboardEditTarget; doc: Record<string, unknown> }
+  | {
+      kind: 'ready';
+      target: WritableDashboardEditTarget;
+      doc: Record<string, unknown>;
+      /** The dashboard as its package ships it (the layered read's `code`), `null` when none ships. */
+      shipped: Record<string, unknown> | null;
+    }
   | { kind: 'refused'; reason: DashboardEditRefusal; detail?: string };
 
 /** The metadata client calls {@link openDashboardForEdit} makes. */
@@ -79,9 +86,12 @@ export interface DashboardEditReader {
   ): Promise<{ code: unknown; effective: unknown }>;
 }
 
+function recordOf(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : null;
+}
+
 function authoredDoc(layers: { code: unknown; effective: unknown } | null): Record<string, unknown> | null {
-  const doc = layers ? (layers.effective ?? layers.code) : null;
-  return doc && typeof doc === 'object' && !Array.isArray(doc) ? (doc as Record<string, unknown>) : null;
+  return layers ? recordOf(layers.effective ?? layers.code) : null;
 }
 
 /** What {@link openDashboardForEdit} is told besides the item. */
@@ -127,16 +137,20 @@ export async function openDashboardForEdit(
     if (at && unwrapDraftBody(await client.getDraft('dashboard', name, at))) {
       return { kind: 'refused', reason: 'pending-draft' };
     }
-    let doc = at ? authoredDoc(await client.layered('dashboard', name, at)) : null;
+    let layers = at ? await client.layered('dashboard', name, at) : null;
+    let doc = authoredDoc(layers);
     if (!doc && target.kind === 'customization') {
-      doc = authoredDoc(await client.layered('dashboard', name, { packageId: target.base }));
+      layers = await client.layered('dashboard', name, { packageId: target.base });
+      doc = authoredDoc(layers);
     }
     if (!doc) return { kind: 'refused', reason: 'load-failed' };
+    // What the package ships, for the panels to restore an undone change from.
+    const shipped = recordOf(layers?.code);
     // Studio's `noVersion`: no override declared yet, and no version to declare it at.
     if (target.kind === 'customization' && dashboardSaveBody(doc, target) === null) {
       return { kind: 'refused', reason: 'no-version', detail: target.base };
     }
-    return { kind: 'ready', target, doc };
+    return { kind: 'ready', target, doc, shipped };
   } catch (err) {
     return { kind: 'refused', reason: 'load-failed', detail: err instanceof Error ? err.message : String(err) };
   }
@@ -202,7 +216,7 @@ export function filtersSectionLabel(locale: SupportedLocale): string | null {
  * separate entries, never open together.
  */
 export function useDashboardEditOffered(ownerPackageId: string | null | undefined): boolean {
-  const path = ownerPackageId ? `/studio/${encodeURIComponent(ownerPackageId)}` : null;
+  const path = ownerPackageId ? studioPackagePath(ownerPackageId) : null;
   const gated = useStudioEntryGate(path) !== null;
   const designing = useDesignModeActive();
   return gated && !designing;
@@ -287,6 +301,7 @@ export function DashboardEditPanel({
   onFiltersRevealed,
   served,
   published,
+  shipped = null,
 }: {
   name: string;
   draft: Record<string, unknown>;
@@ -294,6 +309,8 @@ export function DashboardEditPanel({
   served?: Record<string, unknown> | null;
   /** The stored document the edit state opened, before any change. */
   published?: Record<string, unknown> | null;
+  /** The dashboard as its package ships it: an undone opt-out restores its filter binding. */
+  shipped?: Record<string, unknown> | null;
   selection: MetadataSelection | null;
   onPatch: (patch: Record<string, unknown>) => void;
   onSelectionChange: (next: MetadataSelection | null) => void;
@@ -333,6 +350,7 @@ export function DashboardEditPanel({
           type="dashboard"
           name={name}
           draft={draft}
+          shipped={shipped}
           selection={selection}
           onPatch={onPatch}
           onClearSelection={() => onSelectionChange(null)}
@@ -369,6 +387,8 @@ export interface DashboardInPageEdit {
   draft: Record<string, unknown> | null;
   /** The stored document as the edit state opened it, before any change; `null` outside it. */
   published: Record<string, unknown> | null;
+  /** The dashboard as its package ships it, `null` when none ships or outside the edit state. */
+  shipped: Record<string, unknown> | null;
   opening: boolean;
   saving: boolean;
   dirty: boolean;
@@ -409,6 +429,7 @@ export function useDashboardInPageEdit({
     target: WritableDashboardEditTarget;
     draft: Record<string, unknown>;
     published: Record<string, unknown>;
+    shipped: Record<string, unknown> | null;
     dirty: boolean;
   } | null>(null);
   const [opening, setOpening] = React.useState(false);
@@ -433,7 +454,7 @@ export function useDashboardInPageEdit({
     try {
       const opened = await openDashboardForEdit(name, ownerPackageId, client, { doors, walled });
       if (opened.kind === 'refused') return opened;
-      setSession({ target: opened.target, draft: opened.doc, published: opened.doc, dirty: false });
+      setSession({ target: opened.target, draft: opened.doc, published: opened.doc, shipped: opened.shipped, dirty: false });
       setSelection(null);
       return null;
     } finally {
@@ -482,6 +503,7 @@ export function useDashboardInPageEdit({
   return {
     draft: session?.draft ?? null,
     published: session?.published ?? null,
+    shipped: session?.shipped ?? null,
     opening,
     saving,
     dirty: session?.dirty ?? false,

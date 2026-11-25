@@ -14,7 +14,11 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { buildEffectiveFieldPermissions, superuserFieldVote } from './effective-object-permissions.js';
+import {
+  buildEffectiveFieldPermissions,
+  buildEffectiveObjectPermissions,
+  superuserFieldVote,
+} from './effective-object-permissions.js';
 
 describe('a set\'s own readable: false row and that set\'s own super-user vote', () => {
   const viewAll = (
@@ -127,5 +131,30 @@ describe('[field-axis split, ruling 6912661484] viewAllFields: a read vote throu
       expect(buildEffectiveFieldPermissions([withBit, hider])).toEqual(buildEffectiveFieldPermissions([without, hider]));
       expect(superuserFieldVote([withBit], 'deal', 'amount')).toEqual(superuserFieldVote([without], 'deal', 'amount'));
     }
+  });
+});
+
+describe('[field-axis split, ruling 6912661484] a wildcard viewAllFields is posture-blind: it votes on a private object\'s fields and grants no object', () => {
+  // `vault` is private-posture, `deal` is public. The wildcard set carries a
+  // plain read grant and the bit: no super-user bit, so its `'*'` does not
+  // cover a private object.
+  const schemas = [{ name: 'vault', access: { default: 'private' } }, { name: 'deal' }];
+  const wildcard = { objects: { '*': { allowRead: true, viewAllFields: true } } };
+  // Another set grants `vault` by name and hides one field of it.
+  const hider = { objects: { vault: { allowRead: true } }, fields: { 'vault.pin': { readable: false, editable: false } } };
+
+  it('the object axis: the wildcard grants the public object and nothing on the private one', () => {
+    const objects = buildEffectiveObjectPermissions([wildcard], { allSchemas: () => schemas });
+    expect(objects.deal?.allowRead).toBe(true);
+    expect(objects.vault).toBeUndefined();
+  });
+
+  it('the field axis: the same wildcard still casts its read vote on the private object\'s field', () => {
+    expect(superuserFieldVote([wildcard], 'vault', 'pin')).toEqual({ readable: true, editable: false });
+    // Control: without the bit the field stays hidden, so the vote below is the bit's.
+    expect(buildEffectiveFieldPermissions([{ objects: { '*': { allowRead: true } } }, hider])).toEqual({
+      'vault.pin': { readable: false, editable: false },
+    });
+    expect(buildEffectiveFieldPermissions([wildcard, hider])).toEqual({ 'vault.pin': { readable: true, editable: false } });
   });
 });

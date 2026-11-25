@@ -98,10 +98,17 @@ export const APP_FACING_OBJECT_GROUPS: readonly { readonly title: string; readon
     rows: [
       { name: 'sys_file', builds: 'a file-storage table', reach: '`file` and `image` fields store its rows; uploads go through `/api/v1/storage`' },
       { name: 'sys_attachment', builds: 'an attachments table per object', reach: '`enable.files: true` on the object opens the Attachments panel; data API' },
-      { name: 'sys_comment', builds: 'a comments or notes table', reach: '`enable.feeds` (default on) gives every object a discussion thread; data API' },
+      { name: 'sys_comment', builds: 'a comments or record-notes table', reach: '`enable.feeds` (default on) gives every object a discussion thread; data API' },
       { name: 'sys_activity', builds: 'a record timeline or history table', reach: '`enable.activities` (default on) mirrors every write; data API read' },
       { name: 'sys_audit_log', builds: 'a change-log or audit table', reach: 'written on every write; data API read, `view_all_audit_log` for rows the caller cannot open' },
       { name: 'sys_recycle_bin', builds: 'an `is_deleted` flag with a restore', reach: 'a by-id delete lands here; `POST /api/v1/data/OBJECT/recycle-bin/ENTRY/restore`; no data API' },
+    ],
+  },
+  {
+    title: 'Tasks and notes',
+    rows: [
+      { name: 'sys_task', builds: 'a task or to-do object', reach: 'a `type: \'object\'` navigation entry with `objectName` and `requiresObject` both `sys_task`. Title, status, due time, assignee, platform-written `completed_at`. Neither it nor `sys_note` links to another record. Views `assigned_to_me`, `created_by_me`, `all`. Private: creator and assignee open a task; `member_default` grants read, create and edit, not delete, without widening that; data API' },
+      { name: 'sys_note', builds: 'a notes object', reach: 'as `sys_task`, naming `sys_note`. Title and rich-text body. Views `mine`, `all`. Private to its creator, under the same `member_default` grant; data API' },
     ],
   },
   {
@@ -111,7 +118,7 @@ export const APP_FACING_OBJECT_GROUPS: readonly { readonly title: string; readon
       { name: 'sys_inbox_message', builds: 'a per-user inbox with read state', reach: 'the in-app delivery of a notification; the Console bell reads it; data API read' },
       { name: 'sys_email', builds: 'an outbound-mail log', reach: 'every email sent is logged here; templates are `emailTemplates` on the stack; data API read' },
       { name: 'sys_mailbox', builds: 'an inbound-mailbox table', reach: 'engine-owned; data API read for `manage_mailboxes` holders. `requires: [\'mailbox\']` mounts the objects and the ingest seam and syncs nothing: rows exist only where the host composes the mailbox service with an IMAP account source (no Setup entry)' },
-      { name: 'sys_mail_message', builds: 'an inbound-mail mirror', reach: 'rows arrive only from the host\'s IMAP sync (the `sys_mailbox` row); `mailAssociation: true` on an email field links messages to records; data API read' },
+      { name: 'sys_mail_message', builds: 'an inbound-mail mirror', reach: 'rows as the `sys_mailbox` row says; `mailAssociation: true` on an email field links messages to records; data API read' },
     ],
   },
   {
@@ -120,7 +127,7 @@ export const APP_FACING_OBJECT_GROUPS: readonly { readonly title: string; readon
       { name: 'sys_exchange_rate', builds: 'an exchange-rate table', reach: '`currencyConfig.homeAmount` converts at write; Setup edits rates; data API' },
       { name: 'sys_unit', builds: 'a unit table or picklist', reach: '`unitConfig` on a `number` field (`unitMode: \'fixed\'` with `unit`, `\'record\'` with `unitField`) or a `text` field (`\'code\'`); a stored code is standard (UN/ECE Rec 20: `KGM`, `H87`) or a row added here in Setup; data API, no delete' },
       { name: 'sys_work_calendar', builds: 'a business-hours calendar', reach: 'kept per organization in Setup; an approval\'s `escalation.clock: \'working_time\'` and `addWorkingDays()`, `workingDaysBetween()`, `addWorkingHours()` read it; data API' },
-      { name: 'sys_work_calendar_exception', builds: 'a holiday table', reach: 'a calendar\'s holidays and make-up workdays, kept in Setup; data API' },
+      { name: 'sys_work_calendar_exception', builds: 'a holiday table', reach: 'a calendar\'s holidays and make-up workdays; data API' },
       { name: 'sys_import_job', builds: 'a bulk-import job table', reach: '`POST /api/v1/data/OBJECT/import/jobs`; data API read' },
       { name: 'sys_approval_request', builds: 'an approvals table', reach: 'a flow approval node opens it; `/api/v1/approvals` routes decide; data API read' },
       { name: 'sys_approval_action', builds: 'an approval decision trail', reach: 'written per decision; data API read' },

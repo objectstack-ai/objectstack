@@ -10,7 +10,7 @@
  * insert (not a metadata publish), the `metadata:reloaded` rebind pattern
  * never fires. The plugin now binds afterInsert/afterUpdate/afterDelete
  * triggers on `sys_sharing_rule` itself that unbind + re-bind the whole
- * rule-hook package from a fresh `listRules()`.
+ * rule-hook package from a fresh `listRuleHookObjects()`.
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
@@ -75,7 +75,7 @@ describe('SharingServicePlugin sys_sharing_rule data-change rebind (#2592)', () 
     plugin = new SharingServicePlugin();
     rules = [];
     ruleService = {
-      listRules: vi.fn(async () => rules),
+      listRuleHookObjects: vi.fn(async () => rules.map((r) => r.object_name)),
       evaluateRule: vi.fn(async () => ({ ruleId: 'r1', matchedRecords: 0, expandedUsers: 0, grantsCreated: 0, grantsUpdated: 0, grantsRevoked: 0 })),
       revokeRuleGrants: vi.fn(async () => 0),
     };
@@ -126,12 +126,12 @@ describe('SharingServicePlugin sys_sharing_rule data-change rebind (#2592)', () 
     expect(engine.boundFor(RULE_REBIND_TRIGGER_PACKAGE)).toHaveLength(3);
   });
 
-  it('keeps previous bindings and does not throw when listRules fails', async () => {
+  it('keeps previous bindings and does not throw when the object read fails', async () => {
     rules = [{ name: 'r1', object_name: 'project', active: true }];
     await engine.fire('afterInsert', 'sys_sharing_rule', {});
     expect(engine.boundFor(SHARING_RULE_HOOK_PACKAGE)).toHaveLength(RULE_HOOKS_PER_OBJECT);
 
-    ruleService.listRules = vi.fn(async () => { throw new Error('db gone'); });
+    ruleService.listRuleHookObjects = vi.fn(async () => { throw new Error('db gone'); });
     await expect(
       engine.fire('afterUpdate', 'sys_sharing_rule', {}),
     ).resolves.toBeUndefined(); // the write must not fail
@@ -144,13 +144,13 @@ describe('SharingServicePlugin sys_sharing_rule data-change rebind (#2592)', () 
     let release!: () => void;
     const gate = new Promise<void>((r) => { release = r; });
     let call = 0;
-    ruleService.listRules = vi.fn(async () => {
+    ruleService.listRuleHookObjects = vi.fn(async () => {
       call++;
       if (call === 1) {
         await gate; // first rebind stalls on its read
-        return [{ name: 'r1', object_name: 'alpha', active: true }];
+        return ['alpha'];
       }
-      return [{ name: 'r2', object_name: 'beta', active: true }];
+      return ['beta'];
     });
 
     const first = engine.fire('afterInsert', 'sys_sharing_rule', {});
@@ -181,7 +181,7 @@ describe('SharingServicePlugin reconciles grants on rule writes (#3821)', () => 
     engine = makeEngine();
     plugin = new SharingServicePlugin();
     ruleService = {
-      listRules: vi.fn(async () => []),
+      listRuleHookObjects: vi.fn(async () => []),
       evaluateRule: vi.fn(async () => ({ ruleId: 'r1', matchedRecords: 2, expandedUsers: 1, grantsCreated: 2, grantsUpdated: 0, grantsRevoked: 0 })),
       revokeRuleGrants: vi.fn(async () => 2),
       sweepOrphanedRuleGrants: vi.fn(async () => 0),
@@ -252,7 +252,7 @@ describe('SharingServicePlugin reconciles grants on rule writes (#3821)', () => 
 
   it('serializes reconciles behind the rebind chain', async () => {
     const order: string[] = [];
-    ruleService.listRules = vi.fn(async () => { order.push('rebind'); return []; });
+    ruleService.listRuleHookObjects = vi.fn(async () => { order.push('rebind'); return []; });
     ruleService.evaluateRule = vi.fn(async () => { order.push('reconcile'); return {} as any; });
 
     await engine.fire('afterInsert', 'sys_sharing_rule', { result: { id: 'r1' } });
@@ -279,7 +279,7 @@ describe('SharingServicePlugin defers reconciliation to the boot backfill (#4433
     engine = makeEngine();
     plugin = new SharingServicePlugin();
     ruleService = {
-      listRules: vi.fn(async () => []),
+      listRuleHookObjects: vi.fn(async () => []),
       evaluateRule: vi.fn(async () => ({ ruleId: 'r1', matchedRecords: 0, expandedUsers: 0, grantsCreated: 0, grantsUpdated: 0, grantsRevoked: 0 })),
       revokeRuleGrants: vi.fn(async () => 0),
       sweepOrphanedRuleGrants: vi.fn(async () => 0),
@@ -298,7 +298,7 @@ describe('SharingServicePlugin defers reconciliation to the boot backfill (#4433
     // Deferring the reconcile must not defer the binding — a rule seeded at
     // boot has to be enforceable for records written straight afterwards.
     await engine.fire('afterInsert', 'sys_sharing_rule', { result: { id: 'seeded' } });
-    expect(ruleService.listRules).toHaveBeenCalled();
+    expect(ruleService.listRuleHookObjects).toHaveBeenCalled();
   });
 
   it('reconciles every write once the backfill has run — user session', async () => {

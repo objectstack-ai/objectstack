@@ -138,6 +138,17 @@ const server = {
 };
 
 const apiFetch = async (_input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+  // objectstack#36911 — reaching a row's actions also reads the page's approval
+  // locks. This fake serves the explain engine: the lock door answers every row
+  // unlocked and is not counted among the explain calls these pins count.
+  if (String(_input).includes('/approvals/records/')) {
+    const ids: string[] = JSON.parse(String(init?.body ?? '{}')).recordIds ?? [];
+    return {
+      ok: true,
+      status: 200,
+      json: async () => ({ records: ids.map((recordId) => ({ recordId, locked: false })) }),
+    } as unknown as Response;
+  }
   const body = JSON.parse(String(init?.body ?? '{}')) as ExplainCall;
   server.calls.push(body);
   if (!server.network) throw new TypeError('Failed to fetch');

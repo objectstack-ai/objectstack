@@ -436,7 +436,7 @@
     {
       "id": 25,
       "prompt": "`quote_line` 通过 `master_detail` 字段 `quote` 归属 `quote`。新建报价单时要在表单里直接录明细，和报价单一起保存。该怎么声明？",
-      "expected_output": "On the PARENT `quote` object, a field group that names the child: `fieldGroups: [..., { key: 'lines', label: '明细', relatedList: 'quote_line' }]` (such a group holds no fields). The standard create/edit form of `quote` then enters the lines at that group and saves quote + lines in one atomic transaction, and the record page draws the same table there. Without the group nothing changes: `quote_line` is a tab and the form has no lines, whatever `inlineEdit` on `quote_line.quote` says; `inlineEdit` only picks how the rows are edited (`'grid'` / `'form'`, `true` or absent picks by the child's shape). No custom page and no form view is needed. If either object declares `enable.apiMethods`, it must list `'bulk'`.",
+      "expected_output": "On the PARENT `quote` object, a field group that names the child: `fieldGroups: [..., { key: 'lines', label: '明细', relatedList: 'quote_line' }]` (such a group holds no fields). The standard create/edit form of `quote` then enters the lines at that group and saves quote + lines in one atomic transaction, and the record page draws the same table there. Without the group nothing changes: `quote_line` is a tab and the form has no lines, whatever `inlineEdit` on `quote_line.quote` says; `inlineEdit` only picks how the rows are edited (`'grid'` / `'form'`; absent picks by the child's shape). No custom page and no form view is needed. If either object declares `enable.apiMethods`, it must list `'bulk'`.",
       "files": [],
       "assertions": {
         "must_contain": [
@@ -484,6 +484,21 @@
         "must_not_contain": [
           "name: 'crm_account'",
           "overrides:"
+        ]
+      }
+    },
+    {
+      "id": 28,
+      "prompt": "When a sales manager changes the owner of an `account`, the Change Owner dialog should offer to hand the account's `opportunity` records that the old owner owns to the new owner too. `opportunity.account` is a `lookup` to `account`. A colleague proposes a hook on `account` that rewrites `owner_id` on its opportunities. What do we declare instead, and where is that declaration refused?",
+      "expected_output": "No hook: declare the cascade on the child's reference field, beside `deleteBehavior`: on `opportunity`, `account: { type: 'lookup', reference: 'account', transferBehavior: 'cascade' }`. The account's Change Owner dialog then offers that relationship, and moves the opportunities the account's previous owner owns; the default `'none'` leaves them with their owner. The key is refused at parse on any type but `lookup` / `master_detail`; `cascade` is also refused on a reference to a `sys_*` object, on a `multiple: true` field, and on a child object that does not offer Change Owner itself, such as a `controlled_by_parent` detail.",
+      "files": [],
+      "assertions": {
+        "must_contain": [
+          "transferBehavior: 'cascade'",
+          "controlled_by_parent"
+        ],
+        "must_not_contain": [
+          "deleteBehavior: 'cascade'"
         ]
       }
     }

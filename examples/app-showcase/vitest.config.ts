@@ -74,11 +74,16 @@ export default defineConfig({
     // here: both rules are ADVISORY, so a `dist` merely BEHIND this checkout
     // raises nothing — it answers with the OLD rule and the pin passes. Aliased
     // to `src/`, that pin is a verdict about the rule in this tree.
+    //
+    // [ADR-0160] The stack tests load `objectstack.config.ts`, whose plugins
+    // include `RecordContextServicePlugin`: aliased so they boot the executor
+    // in this checkout, not a build of it.
     alias: [
       { find: /^@objectstack\/formula$/, replacement: path.resolve(__dirname, '../../packages/formula/src/index.ts') },
       { find: /^@objectstack\/plugin-email$/, replacement: path.resolve(__dirname, '../../packages/plugins/plugin-email/src/index.ts') },
       { find: /^@objectstack\/lint$/, replacement: path.resolve(__dirname, '../../packages/lint/src/index.ts') },
       { find: /^@objectstack\/service-print$/, replacement: path.resolve(__dirname, '../../packages/services/service-print/src/index.ts') },
+      { find: /^@objectstack\/service-record-context$/, replacement: path.resolve(__dirname, '../../packages/services/service-record-context/src/index.ts') },
     ],
   },
   test: {

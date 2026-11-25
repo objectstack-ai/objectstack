@@ -817,6 +817,10 @@ export const ptBRMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "Colunas da lista relacionada",
         helpText: "Colunas da lista relacionada deste relacionamento na página de detalhes do pai, como nomes de campos deste objeto (o filho), por exemplo name, status. Não definido: derivadas do objeto filho. Apenas nomes — rótulos, tipos de célula e formatação vêm das definições de campo do filho."
       },
+      inlineEdit: {
+        label: "Inline Edit",
+        helpText: "How the parent's form edits this child's rows when a field group of the parent names this child (fieldGroups[].relatedList). Unset: picked from this object's fields."
+      },
       inlineTitle: {
         label: "Título embutido",
         helpText: "Título da grade mestre-detalhe embutida no registro pai."
@@ -3143,5 +3147,8 @@ export const ptBRMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "Valor"
       }
     }
+  },
+  ai_context: {
+    label: "Pacote de contexto de IA"
   }
 };

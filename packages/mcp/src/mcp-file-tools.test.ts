@@ -352,6 +352,14 @@ describe('the tools the door registers are the ones a skill offered over MCP may
       ],
       searchPackageDocs: unused,
       readPackageDoc: unused,
+      searchKnowledge: unused,
+      knowledgeToolDefinitions: () => [
+        { name: 'search_knowledge', description: 'Search the knowledge sources.', parameters: { type: 'object', properties: { query: { type: 'string' } }, required: ['query'] } },
+      ],
+      getRecordContext: unused,
+      recordContextToolDefinitions: () => [
+        { name: 'get_record_context', description: 'Read one record through its context pack.', parameters: { type: 'object', properties: {} } },
+      ],
     });
   }
   const everyScope = [

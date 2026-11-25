@@ -5,14 +5,18 @@
  * app's name and the Studio mark; the Studio-home button, the package switcher
  * and the top-right Open app are gone.
  *
- *  1. Entered from an app (the app layout recorded the page, as
- *     `ConsoleLayout` does on every app route), the link names that app and
- *     returns to that very page, query included.
+ *  1. Entered from one of the package's apps (the app layout recorded the
+ *     page, as `ConsoleLayout` does on every app route), the link names that
+ *     app and returns to that very page, query included. A recorded page of
+ *     another package's app is not it: the epic's decision 5 (objectstack
+ *     #36890, #36899) names the current package's app, never the remembered
+ *     one, so the link reads as 2.
  *  2. Opened directly (no record), it names the package's published app and
  *     lands on its first screen; with several apps, the first, by its name.
  *  3. A package with no published app (none, or only a draft) goes to the
- *     console's default landing; with no app to name, the name slot names the
- *     package instead (objectstack#36748).
+ *     console's apps home (`useHomePath`, the launcher); with no app to name,
+ *     the name slot names the package instead (objectstack#36748, the
+ *     maintainer's decision-5 ruling on #36899).
  *
  * The REAL `StudioDesignSurface` and metadata client over a fetch stub that
  * serves the package list, the package's apps and objects. The running app is
@@ -27,6 +31,9 @@ import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
 // The surface's reach loads `@objectstack/lint` lazily; pay that load during
 // collection, not inside a case's clocked window (`check:test-source-alias`).
 import '@objectstack/lint';
+// objectstack#36900 — the surface mounts the command palette, which reaches the
+// record preview's `lazy()` detail entry: its first load is paid at collection too.
+import '@object-ui/plugin-detail';
 
 const OWN = 'com.example.sales';
 const FLAT_KERNEL = 'sys.env-artifact-cache';
@@ -161,14 +168,16 @@ describe('「‹ Back to app」 returns to the app page the author came from (ob
     expect(await screen.findByTestId('running-app')).toHaveTextContent(`/apps/${OWN}/opportunity?view=open`);
   });
 
-  it('an app other than the package\'s own is the one named and returned to', async () => {
+  it('a page of another package\'s app is not named: the current package\'s app is (decision 5, objectstack#36899)', async () => {
     rememberAppReturnPage({ path: '/apps/service/opportunity', app: 'service', label: 'Service desk' });
     renderAt(`/studio/${OWN}/data`);
     const link = await backLink();
     // Read the name while the header is still on screen; the click leaves Studio.
-    expect(within(header()).getByTestId('studio-back-app-name')).toHaveTextContent('Service desk');
+    await waitFor(() => expect(within(header()).getByTestId('studio-back-app-name')).toHaveTextContent('Sales'), {
+      timeout: 8000,
+    });
     fireEvent.click(link);
-    expect(await screen.findByTestId('running-app')).toHaveTextContent(/^\/apps\/service\/opportunity$/);
+    expect(await screen.findByTestId('running-app')).toHaveTextContent(new RegExp(`^/apps/${OWN.replace(/\./g, '\\.')}$`));
   });
 });
 
@@ -184,7 +193,7 @@ describe('opened directly, 「‹ Back to app」 lands on the package app\'s fir
 
   it('with several published apps, the first, addressed by its name', async () => {
     srv.apps = [SERVICE_APP, SALES_APP];
-    renderAt(`/studio/${OWN}/access`);
+    renderAt(`/studio/${OWN}/owd`);
     await waitFor(() => expect(within(header()).getByTestId('studio-back-app-name')).toHaveTextContent('Service desk'), {
       timeout: 8000,
     });
@@ -254,9 +263,14 @@ describe('studioBackTarget — the order of the three answers (objectstack#36501
   const sales = { name: 'sales', label: 'Sales' };
   const service = { name: 'service', label: { en: 'Service', 'zh-CN': '服务台' } };
   const base = { packageId: OWN, locale: 'en-US', landingPath: '/landing' };
-  it('a recorded page wins over the package app', () => {
-    const remembered = { path: '/apps/x/y?z=1', app: 'x', label: 'X app' };
-    expect(studioBackTarget({ ...base, remembered, apps: [sales] })).toEqual({ path: '/apps/x/y?z=1', appLabel: 'X app' });
+  it('a recorded page of one of the package\'s apps wins; one of another package\'s app does not (decision 5)', () => {
+    const own = { path: '/apps/sales/y?z=1', app: 'sales', label: 'Sales (recorded)' };
+    expect(studioBackTarget({ ...base, remembered: own, apps: [sales] })).toEqual({ path: '/apps/sales/y?z=1', appLabel: 'Sales' });
+    // The package id is the route key of a package's one app.
+    const byPackage = { path: `/apps/${OWN}/y`, app: OWN, label: 'Sales' };
+    expect(studioBackTarget({ ...base, remembered: byPackage, apps: [sales] })).toEqual({ path: `/apps/${OWN}/y`, appLabel: 'Sales' });
+    const foreign = { path: '/apps/x/y?z=1', app: 'x', label: 'X app' };
+    expect(studioBackTarget({ ...base, remembered: foreign, apps: [sales] })).toEqual({ path: `/apps/${OWN}`, appLabel: 'Sales' });
   });
   it('no record: the package id addresses its one app; the name addresses the first of several', () => {
     expect(studioBackTarget({ ...base, remembered: null, apps: [sales] })).toEqual({ path: `/apps/${OWN}`, appLabel: 'Sales' });
@@ -265,7 +279,9 @@ describe('studioBackTarget — the order of the three answers (objectstack#36501
       appLabel: 'Service',
     });
   });
-  it('no record and no app, or the package-less scope: the landing, unnamed', () => {
+  it('no app, or the package-less scope: the apps home, unnamed, whatever is recorded', () => {
+    const foreign = { path: '/apps/x/y', app: 'x', label: 'X app' };
+    expect(studioBackTarget({ ...base, remembered: foreign, apps: [] })).toEqual({ path: '/landing', appLabel: null });
     expect(studioBackTarget({ ...base, remembered: null, apps: [] })).toEqual({ path: '/landing', appLabel: null });
     expect(studioBackTarget({ ...base, packageId: null, remembered: null, apps: [sales] })).toEqual({
       path: '/landing',

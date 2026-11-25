@@ -379,6 +379,15 @@ export {
 export type { ApprovalApproverFinding, ApprovalApproverSeverity, ValidateApprovalApproversOptions } from './validate-approval-approvers.js';
 
 export {
+  validateAiContext,
+  AI_CONTEXT_OBJECT_UNKNOWN,
+  AI_CONTEXT_FIELD_UNKNOWN,
+  AI_CONTEXT_RELATED_LINK_UNKNOWN,
+  AI_CONTEXT_BODY_NOT_LONG_TEXT,
+} from './validate-ai-context.js';
+export type { AiContextFinding, AiContextSeverity } from './validate-ai-context.js';
+
+export {
   validateAssignmentRules,
   ASSIGNMENT_RULE_USER_TARGET,
   ASSIGNMENT_RULE_QUEUE_UNSTAFFED,
@@ -390,6 +399,23 @@ export {
   SEED_VALUE_OUTSIDE_STATE_MACHINE,
 } from './validate-seed-state-machine.js';
 export type { SeedStateMachineFinding, SeedStateMachineSeverity } from './validate-seed-state-machine.js';
+
+// Seed records the seed load refuses — a record its own object's validation
+// rule refuses, and a keyed record with a blank key field — judged before the
+// load with the write path's evaluator, which the calling door injects.
+export {
+  judgeSeedRowRefusals,
+  seedRowPairsNotJudged,
+  SEED_ROW_REFUSED_BY_VALIDATION_RULE,
+  SEED_RECORD_KEY_FIELD_BLANK,
+} from './seed-row-refusals.js';
+export type {
+  SeedRowRefusal,
+  SeedRowJudgement,
+  SeedRowJudgeInput,
+  SeedRowNotJudgedReason,
+  SeedRuleObjectSchema,
+} from './seed-row-refusals.js';
 
 export {
   validateSecurityPosture,
@@ -412,6 +438,7 @@ export {
   SECURITY_CBP_OWNER_POLICY_WITHOUT_OPT_IN,
   SECURITY_CBP_MASTER_REFERENCE_HIDDEN,
   SECURITY_SUPERUSER_FIELD_MASK_INERT,
+  SECURITY_CROSS_SET_FIELD_REOPEN,
   SECURITY_UPDATE_POLICY_NO_CHECK,
   holdsSuperuserBypass,
 } from './validate-security-posture.js';

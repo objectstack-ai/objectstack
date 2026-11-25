@@ -1,17 +1,20 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * 「Configure tabs」 on an installed object (objectstack#36499, card items 4
- * and 7): offered where Studio opens the base read-only and the customization
- * door does not wall this caller off; every tab moves (another package's list
- * and the built-in tabs too), a related tab hides, a built-in one does not;
- * each related tab names where it comes from; 「Save」 writes the paired
- * `.custom` extension's `relatedLists` through the ensure door's answer.
+ * The record page's tabs in the design mode, on an installed object
+ * (objectstack#36499, card items 4 and 7; objectstack#36737): drawn where
+ * Studio opens the base read-only and the customization door does not wall
+ * this caller off; every tab moves (another package's list and the built-in
+ * tabs too), a related tab hides, a built-in one does not; each related tab
+ * names where it comes from; the design mode's 「Save」 writes the paired
+ * `.custom` extension's `relatedLists` through the ensure door's answer, and
+ * its 「Cancel」 drops the draft and writes nothing.
  *
  * Real subjects: `useRecordTabsConfig`, `RecordTabsEditor`, `saveRecordTabs`,
- * `saveObjectExtensionArrangement`. Fakes: the gates' answers, the walled
- * verdict, the package list and the ensure door, the metadata client (it
- * records what is written) and the deployment's languages.
+ * `saveObjectExtensionArrangement`, `useDesignModeController`,
+ * `DesignModeBar`. Fakes: the gates' answers, the walled verdict, the package
+ * list and the ensure door, the metadata client (it records what is written)
+ * and the deployment's languages.
  */
 
 import '@testing-library/jest-dom/vitest';
@@ -98,6 +101,8 @@ vi.mock('../studio-design/packages-io', async (importOriginal) => ({
 
 import { useRecordTabsConfig } from '../RecordTabsConfig';
 import { __resetDefaultLocale } from '../../layout/designModeMenuSave';
+import { DesignModeProvider, useDesignModeController } from '../../layout/designMode';
+import { DesignModeBar } from '../../layout/DesignModeBar';
 
 const toLead = { type: 'lookup', reference: 'lead' };
 const OBJECTS: Record<string, unknown>[] = [
@@ -107,7 +112,7 @@ const OBJECTS: Record<string, unknown>[] = [
   { name: 'survey', label: 'Survey', _packageId: PAIR, fields: { lead: toLead } },
 ];
 
-function Harness() {
+function Page() {
   const config = useRecordTabsConfig({
     objectDef: OBJECTS[0],
     objects: OBJECTS,
@@ -115,15 +120,22 @@ function Harness() {
     titleOf: (list) => list.title || `${list.childLabel}s`,
   });
   return (
-    <MemoryRouter>
-      <span data-testid="offered">{String(config.offered)}</span>
-      {config.offered && !config.active && (
-        <button type="button" onClick={config.enter}>
-          enter
-        </button>
-      )}
-      {config.bar}
+    <>
+      <span data-testid="active">{String(config.active)}</span>
       {config.editor}
+    </>
+  );
+}
+
+/** The shell's hold on the design mode, its bar while it is on, and the record page under it. */
+function Harness() {
+  const mode = useDesignModeController({ appName: 'hotcrm', appBasePath: '/apps/hotcrm', enabled: true });
+  return (
+    <MemoryRouter>
+      <DesignModeProvider value={mode}>
+        {mode.active ? <DesignModeBar mode={mode} /> : <button type="button" onClick={mode.enter}>design</button>}
+        <Page />
+      </DesignModeProvider>
     </MemoryRouter>
   );
 }
@@ -150,8 +162,9 @@ afterEach(() => {
 
 async function open() {
   render(<Harness />);
-  fireEvent.click(screen.getByText('enter'));
-  await waitFor(() => expect(screen.getByTestId('record-tabs-config-bar')).toHaveAttribute('data-ready', 'true'));
+  fireEvent.click(screen.getByText('design'));
+  // The client, the stored list and the default language load with the editor.
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Hide Contacts' })).toBeEnabled());
   await flush();
 }
 
@@ -161,18 +174,20 @@ const shownTabs = () =>
   );
 
 describe('「Configure tabs」 on an installed object (objectstack#36499)', () => {
-  it('is offered where Studio opens the base read-only, and not where the customization door walls this caller off', () => {
-    render(<Harness />);
-    expect(screen.getByTestId('offered')).toHaveTextContent('true');
+  it('is drawn where Studio opens the base read-only, and not where the customization door walls this caller off', () => {
+    const designing = () => {
+      render(<Harness />);
+      fireEvent.click(screen.getByText('design'));
+      return screen.getByTestId('active').textContent;
+    };
+    expect(designing()).toBe('true');
     cleanup();
     session.walled = true;
-    render(<Harness />);
-    expect(screen.getByTestId('offered')).toHaveTextContent('false');
+    expect(designing()).toBe('false');
     cleanup();
     session.walled = false;
     session.view = false;
-    render(<Harness />);
-    expect(screen.getByTestId('offered')).toHaveTextContent('false');
+    expect(designing()).toBe('false');
   });
 
   it("every tab moves, another package's and the built-in ones too; a related tab hides, a built-in one does not; each related tab names its source", async () => {
@@ -189,13 +204,16 @@ describe('「Configure tabs」 on an installed object (objectstack#36499)', () =
     expect(tab('campaign_member.lead').querySelector('[data-record-tabs-source="package"]')).toHaveTextContent('From Marketing');
     expect(tab('survey.lead').querySelector('[data-record-tabs-source="environment"]')).toHaveTextContent('This environment');
   });
+});
 
-  it("Save writes the pair's extension of the object, through the ensure door's answer, and publishes it", async () => {
+describe("an installed object's tabs in the design mode (objectstack#36737)", () => {
+  it("the mode's 「Save」 writes the pair's extension of the object, through the ensure door's answer, publishes it and leaves the mode", async () => {
     await open();
     fireEvent.click(screen.getByRole('button', { name: 'Hide Campaign members' }));
     act(() => dragEnd.current?.({ active: { id: 'sys_activity' }, over: { id: 'contact.lead' } }));
     expect(shownTabs()).toEqual(['sys_activity', 'contact.lead', 'survey.lead', 'sys_approval_request']);
-    fireEvent.click(screen.getByTestId('record-tabs-config-save'));
+    expect(written).toEqual([]);
+    fireEvent.click(screen.getByTestId('design-mode-save'));
     await flush();
     await flush();
     expect(written).toEqual([
@@ -218,6 +236,16 @@ describe('「Configure tabs」 on an installed object (objectstack#36499)', () =
       ],
       ['publish', 'object_extension', 'lead', { packageId: PAIR }],
     ]);
-    expect(screen.queryByTestId('record-tabs-config-bar')).toBeNull();
+    expect(screen.queryByTestId('design-mode-bar')).toBeNull();
+    expect(screen.queryByTestId('record-tabs-editor')).toBeNull();
+  });
+
+  it("the mode's 「Cancel」 drops the draft: no ensure, no write", async () => {
+    await open();
+    fireEvent.click(screen.getByRole('button', { name: 'Hide Campaign members' }));
+    fireEvent.click(screen.getByTestId('design-mode-cancel'));
+    await flush();
+    expect(written).toEqual([]);
+    expect(screen.queryByTestId('record-tabs-editor')).toBeNull();
   });
 });
