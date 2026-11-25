@@ -83,7 +83,7 @@ describe('Studio automation pillar — zh copy is plain language (objectui#11659
     expect(INTERNAL_TOKENS[2].test('已 ON')).toBe(true);
   });
 
-  it('the en heading names the pillar without the metadata type', () => {
-    expect(t('engine.studio.auto.heading', 'en-US')).not.toMatch(/\bflow\b/i);
-  });
+  // objectstack#36903 — the pillar's en heading (`engine.studio.auto.heading`)
+  // went with the rail and is retired in 19.0.0 (ruling 7153171432), so its
+  // case went with it; the designer's rows above carry the plain-language pin.
 });
