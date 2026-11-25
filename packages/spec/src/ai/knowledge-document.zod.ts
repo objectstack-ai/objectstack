@@ -57,7 +57,11 @@ export const KnowledgeDocumentSchema = lazySchema(() => z.object({
    * caller-supplied value is refused by `indexDocument`. Stored by the adapter
    * and read by its search: when the search is handed
    * `AdapterSearchOptions.organizationIds`, only documents whose organization
-   * is in that set are ranked, so a document without one is not.
+   * is in that set are ranked, so a document without one is not. An adapter
+   * that stores `docHash` stores `organizationId` from the same version on:
+   * the hash already covers the organization, so an adapter that held only the
+   * hash would have every document skipped by a later complete reindex, and a
+   * walled search would never rank them.
    */
   organizationId: z.string().optional()
     .describe('Organization of the record the document was assembled from; set by the knowledge service under a walled tenancy posture'),

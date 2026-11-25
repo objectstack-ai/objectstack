@@ -1,6 +1,9 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { describe, it, expect, vi } from 'vitest';
+import { LiteKernel, ObjectKernel } from '@objectstack/core';
+import type { Plugin, PluginContext } from '@objectstack/core';
+import { KnowledgeServicePlugin } from '../knowledge-service-plugin.js';
 import {
   DOC_HASH_VERSION,
   KnowledgeService,
@@ -1371,5 +1374,95 @@ describe('KnowledgeService — search hands the adapter the caller\'s organizati
     expect(h.handed('s1')).toBeUndefined();
     expect(h.handed('web')).toBeDefined();
     expect(logger.error).toHaveBeenCalledWith(expect.stringContaining('tenancy posture could not be read'));
+  });
+});
+
+// The plugin's `resolveTenancyPosture` wiring is the only production reader of
+// the posture (ADR-0161 K8, item 9): broken, every deployment reads as
+// `single`, no document is stamped and no filter is handed, silently. So the
+// wiring is driven through real kernels with a `tenancy` service: `LiteKernel`
+// (no async accessor: the sync leg) and `ObjectKernel` (`getServiceAsync`).
+describe('KnowledgeServicePlugin reads the tenancy posture from the kernel (ADR-0161 K8, item 9)', () => {
+  const PERSON = {
+    userId: 'u1', tenantId: 'org_a', accessible_org_ids: ['org_a'], positions: [], permissions: [], systemPermissions: [], isSystem: false,
+  } as never;
+
+  class FakeHostPlugin implements Plugin {
+    name = 'test.fake.host';
+    version = '1.0.0';
+    type = 'standard' as const;
+    constructor(private readonly tenancy: unknown) {}
+    async init(ctx: PluginContext): Promise<void> {
+      ctx.registerService('objectql', { find: vi.fn(async () => []) });
+      if (this.tenancy !== undefined) ctx.registerService('tenancy', this.tenancy);
+    }
+  }
+
+  async function boot(Kernel: typeof LiteKernel | typeof ObjectKernel, tenancy: unknown) {
+    // `ObjectKernel` refuses to start without a `data` service; this harness composes none.
+    const kernel = Kernel === ObjectKernel
+      ? new ObjectKernel({ skipSystemValidation: true, logger: { level: 'silent' }, gracefulShutdown: false })
+      : new LiteKernel();
+    await kernel.use(new FakeHostPlugin(tenancy));
+    await kernel.use(new KnowledgeServicePlugin({ enableEventSync: false, sources: [objectSource('s1', 'task')] }));
+    await kernel.bootstrap();
+    const svc = kernel instanceof ObjectKernel
+      ? await kernel.getServiceAsync<KnowledgeService>('knowledge')
+      : kernel.getService<KnowledgeService>('knowledge');
+    const adapter = makeAdapter('memory');
+    svc.registerAdapter('memory', adapter);
+    return { kernel, svc, adapter };
+  }
+
+  it.each([
+    ['LiteKernel', LiteKernel],
+    ['ObjectKernel', ObjectKernel],
+  ] as const)('%s: a walled posture hands the adapter the caller\'s organizations', async (_name, Kernel) => {
+    const { kernel, svc, adapter } = await boot(Kernel, { posture: 'isolated' });
+    await svc.search('q', { executionContext: PERSON });
+    expect(adapter.searchSpy).toHaveBeenCalledOnce();
+    expect(adapter.searchSpy.mock.calls[0][1]).toMatchObject({ organizationIds: ['org_a'] });
+    await kernel.shutdown();
+  });
+
+  it('no `tenancy` service registered: no wall exists, and no filter is handed', async () => {
+    const { kernel, svc, adapter } = await boot(LiteKernel, undefined);
+    await svc.search('q', { executionContext: PERSON });
+    expect(adapter.searchSpy).toHaveBeenCalledOnce();
+    expect(adapter.searchSpy.mock.calls[0][1]).not.toHaveProperty('organizationIds');
+    await kernel.shutdown();
+  });
+
+  it('a `tenancy` service that is registered but cannot be read: no object source is searched', async () => {
+    const unreadable = Object.defineProperty({}, 'posture', {
+      get: () => {
+        throw new Error('tenancy store down');
+      },
+    });
+    const { kernel, svc, adapter } = await boot(LiteKernel, unreadable);
+    expect(await svc.search('q', { executionContext: PERSON })).toEqual([]);
+    expect(adapter.searchSpy).not.toHaveBeenCalled();
+    await kernel.shutdown();
+  });
+});
+
+describe('KnowledgeService — an event sync whose tenancy posture cannot be read (ADR-0161 K8, item 9)', () => {
+  it('logs at warn and leaves the stored document as it was: no upsert, no delete', async () => {
+    const adapter = makeAdapter('memory');
+    const row = { id: 'r1', title: 'A', notes: 'B', status: 'open', organization_id: 'org_a' };
+    const warn = vi.fn();
+    const svc = new KnowledgeService({
+      dataEngine: { find: vi.fn(async () => [row]) } as unknown as IDataEngine,
+      logger: { warn },
+      resolveTenancyPosture: async () => {
+        throw new Error('tenancy store down');
+      },
+    });
+    svc.registerAdapter('memory', adapter);
+    svc.registerSource(objectSource('s1', 'task'));
+    await svc.handleRecordUpsert('task', row);
+    expect(adapter.upsertSpy).not.toHaveBeenCalled();
+    expect(adapter.deleteSpy).not.toHaveBeenCalled();
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('tenancy store down'));
   });
 });
