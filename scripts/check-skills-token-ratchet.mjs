@@ -1433,17 +1433,19 @@ export const CEILINGS = new Map([
   // measurement. Same authority as the three rows above: cloud#3659 letter A
   // (ruling comment 6682024726); raise path 「A:先削重复,余额按实测提高」
   // (ruling record 6513306068).
-  // 2761 -> 3449 (#34770): RECEIVES SKILL.md § Conditional Field Rules (the checked example and
+  // 2761 -> 3466 (#34770): RECEIVES SKILL.md § Conditional Field Rules (the checked example and
   // its bullets, `showOnCreate` among them) and the run-time half of § Verify your work (what a
-  // bare field ref does in each predicate), no new teaching. PAID DOWN FIRST by restatement cut
+  // bare field ref does in each predicate), and into § State Machine Validation the clause of
+  // the entry's Validation Patterns that `transitions` keys and values are option values, never
+  // labels; no new teaching. PAID DOWN FIRST by restatement cut
   // on the way in: the invariant-or-transition-gate bullet is one line pointing at this file's
   // own Script Validation, Tool choice, which says the same; the `readonly: true` bullet keeps
   // only what the entry's bullet does not; the `visibleWhen` one-liner is gone. The file is
-  // 11031 -> 13796 bytes (+2765) -> 3449 tokens, the row's 3 tokens of
-  // headroom absorbed, ceiling +688, pinned AT the measurement. Authority as the
+  // 11031 -> 13861 bytes (+2830) -> 3466 tokens, the row's 3 tokens of
+  // headroom absorbed, ceiling +705, pinned AT the measurement. Authority as the
   // `references/examples-objects.md` row.
-  //   ceil($(wc -c < skills/objectstack-data/rules/validation.md) / 4) == ceil(13796 / 4)
-  ['skills/objectstack-data/rules/validation.md', 3449],
+  //   ceil($(wc -c < skills/objectstack-data/rules/validation.md) / 4) == ceil(13861 / 4)
+  ['skills/objectstack-data/rules/validation.md', 3466],
 
   // objectstack-platform
   ['skills/objectstack-platform/references/plugin-hooks.md', 2628],
@@ -1783,7 +1785,7 @@ export const CEILINGS = new Map([
   // each bound being a CEL envelope). 5957 -> 6170 bytes; the row moves +49, the
   // measured remainder, pinned AT the measurement.
   //   ceil($(wc -c < skills/objectstack-automation/references/examples-flows.md) / 4) == ceil(6170 / 4)
-  // 1543 -> 6552 (#34770): RECEIVES what the router split moved out of SKILL.md, no new
+  // 1543 -> 6551 (#34770): RECEIVES what the router split moved out of SKILL.md, no new
   // teaching: the CEL-envelope note, `## Flow Types`, `## A flow an installed package ships`,
   // `## Flow Node Types` (the Control Flow table whole; of the External Integration rows only
   // what the entry's rows no longer say), the remainder of § notify, § Failure routing & runAs,
@@ -1793,21 +1795,21 @@ export const CEILINGS = new Map([
   // under a new `## Long examples`, byte-identical, the hosted-served `### Time-relative
   // triggers — scheduled per-record date sweep` among them. PAID DOWN FIRST: each moved section
   // was cut to the complement of its SKILL.md section before it landed, so nothing is stated
-  // twice (the full-section copies measured 29784 bytes). The file is 6170 -> 26206 bytes
-  // (+20036) -> 6552 tokens, zero headroom before, ceiling +5009, pinned AT the measurement; the
-  // three objectstack-automation files this change touches are 2654 bytes larger together (44747
-  // -> 47401), the cost of the entry's first checks and routing table.
+  // twice (the full-section copies measured 29784 bytes). The file is 6170 -> 26203 bytes
+  // (+20033) -> 6551 tokens, zero headroom before, ceiling +5008, pinned AT the measurement; the
+  // three objectstack-automation files this change touches are 2651 bytes larger together (44747
+  // -> 47398), the cost of the entry's first checks and routing table.
   // Authority: the ruling of record that orders the entry file down to router size, decision
   // record 6943107981 S3 = A (this header: a ruling of record that orders text into a file
   // authorises its own measured delta), and the maintainer's ruling of 2026-11-24 on the seven
   // receiving rows of this change (ruling record 7128031203, fork 4 = A): a ceiling raised
   // because text MOVED between files is accepted when each raised row equals the measured bytes
   // moved in, with zero headroom, and the sum of ceilings does not rise. Both hold here: every
-  // row is pinned AT its measurement, and the nine rows this change moves sum to 34395 against
+  // row is pinned AT its measurement, and the nine rows this change moves sum to 34411 against
   // 34418 before it. Beside the standing 2026-10-27 ruling 「A:先削重复,余额按实测提高」 (record 6513306068);
   // as the objectstack-ui rows of part 1.
-  //   ceil($(wc -c < skills/objectstack-automation/references/examples-flows.md) / 4) == ceil(26206 / 4)
-  ['skills/objectstack-automation/references/examples-flows.md', 6552],
+  //   ceil($(wc -c < skills/objectstack-automation/references/examples-flows.md) / 4) == ceil(26203 / 4)
+  ['skills/objectstack-automation/references/examples-flows.md', 6551],
   // NEW FILE (card #27223): one recipe per integration archetype — OpenAPI with
   // a static key, remote MCP with a static header, plain REST, the vendor
   // callback, a hand-written document for a spec-less vendor — plus the two
@@ -1972,14 +1974,14 @@ export const CEILINGS = new Map([
   // `files`, `clone`; and `titleFormat`, which a save and `os validate` refuse by name. The file
   // is 6892 -> 14338 bytes (+7446) -> 3585 tokens, the row's 5 tokens of headroom absorbed,
   // ceiling +1857, pinned AT the measurement; the six objectstack-data files this change touches
-  // are 2663 bytes smaller together (92866 -> 90203).
+  // are 2598 bytes smaller together (92866 -> 90268).
   // Authority: the ruling of record that orders the entry file down to router size, decision
   // record 6943107981 S3 = A (this header: a ruling of record that orders text into a file
   // authorises its own measured delta), and the maintainer's ruling of 2026-11-24 on the seven
   // receiving rows of this change (ruling record 7128031203, fork 4 = A): a ceiling raised
   // because text MOVED between files is accepted when each raised row equals the measured bytes
   // moved in, with zero headroom, and the sum of ceilings does not rise. Both hold here: every
-  // row is pinned AT its measurement, and the nine rows this change moves sum to 34395 against
+  // row is pinned AT its measurement, and the nine rows this change moves sum to 34411 against
   // 34418 before it. Beside the standing 2026-10-27 ruling 「A:先削重复,余额按实测提高」 (record 6513306068);
   // as the objectstack-ui rows of part 1.
   //   ceil($(wc -c < skills/objectstack-data/references/examples-objects.md) / 4) == ceil(14338 / 4)

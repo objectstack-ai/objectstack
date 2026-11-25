@@ -102,7 +102,8 @@ driver layer. See [indexing.md](./indexing.md) for index options.
 A `validations[]` entry. `initialStates` holds the one state a record may be
 CREATED in; publish refuses a machine without it
 (`state-machine-no-initial-states`) unless it is update-only
-(`events: ['update']`). `[]` marks a terminal state:
+(`events: ['update']`). `[]` marks a terminal state; `transitions` keys and
+values are option `value`s, never labels:
 
 ```json
 {
