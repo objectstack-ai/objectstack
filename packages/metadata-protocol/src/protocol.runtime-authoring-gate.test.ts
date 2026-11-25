@@ -5703,6 +5703,39 @@ describe('ai_context author defects at save (ADR-0160 D1)', () => {
         });
     }
 
+    it('a pack saved under a package scope naming an installed object outside the closure is told so, with the closure remedy', async () => {
+        const { engine, rows } = makeStubEngine();
+        // `app.fx` is installed with no dependencies; `account` belongs to another installed package.
+        engine.registry.listItems = (type: string) => (type === 'object'
+            ? POLICY_OBJECTS.map((o) => ({ ...o, _packageId: o.name === 'account' ? 'com.example.pages' : 'app.fx' }))
+            : []);
+        const protocol = new ObjectStackProtocolImplementation(engine, () => new Map(), 'env_test') as any;
+
+        const result = await savePack(protocol, pack({ related: [{ object: 'account' }] }), { packageId: 'app.fx' });
+
+        expect(result.success).toBe(true);
+        expect(packRows(rows)).toHaveLength(1);
+        const advisories = (result.advisories ?? []) as Array<Record<string, unknown>>;
+        expect(advisories.map((a) => [a.rule, a.path]), `advisories: ${JSON.stringify(advisories)}`)
+            .toEqual([['ai-context-object-unknown', 'aiContexts[0].related[0].object']]);
+        expect(advisories[0]!.message).toContain('outside the closure of package "app.fx"');
+        expect(advisories[0]!.message).not.toContain('this stack does not define');
+        expect(advisories[0]!.hint).toBe(
+            'Declare a dependency on the package that defines "account" in the `dependencies` of "app.fx"\'s manifest, '
+            + 'or name an object inside that closure',
+        );
+    });
+
+    it('the same pack saved with no package keeps the os validate words', async () => {
+        const { protocol } = makePackProtocol();
+        const item = pack({ related: [{ object: 'polcy_revision' }] });
+        const result = await savePack(protocol, item);
+        const advisories = (result.advisories ?? []) as Array<Record<string, unknown>>;
+        expect(advisories.map((a) => ({ rule: a.rule, where: a.where, message: a.message, hint: a.hint })))
+            .toEqual(validateFindings(item));
+        expect(advisories[0]!.message).toContain('this stack does not define');
+    });
+
     it('a clean pack carries no advisories key at all', async () => {
         const { protocol, rows } = makePackProtocol();
         const result = await savePack(protocol, pack());

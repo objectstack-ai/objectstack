@@ -147,6 +147,39 @@ describe('validateAiContext on the runtime publish door (ADR-0160 D1)', () => {
     });
   }
 
+  it('under a stated package scope, an installed object outside the closure is worded for the closure, with the closure remedy', () => {
+    const scoped = objects.map((o) => ({ ...o, _packageId: o.name === 'account' ? 'com.other' : 'app.policy' }));
+    const body = pack({ related: [{ object: 'account' }] });
+    const verdict = runRuntimeAuthoringRules({
+      type: 'ai_context',
+      item: body,
+      context: { objects: scoped },
+      packageScope: { packageId: 'app.policy', dependencies: [] },
+    });
+    expect(verdict.errors, 'an advisory rule never refuses the write').toEqual([]);
+    expect(verdict.advisories.map((f) => [f.rule, f.path])).toEqual([[AI_CONTEXT_OBJECT_UNKNOWN, 'aiContexts[0].related[0].object']]);
+    const [finding] = verdict.advisories;
+    expect(finding!.message).toContain('outside the closure of package "app.policy"');
+    expect(finding!.message).not.toContain('this stack does not define');
+    expect(finding!.hint).toBe(
+      'Declare a dependency on the package that defines "account" in the `dependencies` of "app.policy"\'s manifest, '
+      + 'or name an object inside that closure',
+    );
+    // Non-vacuous: declaring the dependency brings the object into the closure, and the pack is clean.
+    expect(runRuntimeAuthoringRules({
+      type: 'ai_context',
+      item: body,
+      context: { objects: scoped },
+      packageScope: { packageId: 'app.policy', dependencies: ['com.other'] },
+    }).advisories.filter((f) => f.rule === AI_CONTEXT_OBJECT_UNKNOWN)).toEqual([]);
+  });
+
+  it('with no scope the object verdict keeps the words os validate prints', () => {
+    const [finding] = validateAiContext({ objects, aiContexts: [pack({ object: 'polcy', related: undefined, body: undefined })] });
+    expect(finding!.message).toBe("names object 'polcy', which this stack does not define, so the pack reads nothing of it");
+    expect(finding!.hint).toBe('Name an object the stack defines (check the spelling), or remove the entry');
+  });
+
   it('a pack that names only what the live objects define earns nothing at save', () => {
     const verdict = atSave(pack());
     expect(verdict.rulesRun).toContain('validateAiContext');
