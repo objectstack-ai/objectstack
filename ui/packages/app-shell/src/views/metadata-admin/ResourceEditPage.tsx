@@ -49,13 +49,6 @@ import { toast } from 'sonner';
 import { Button } from '@object-ui/components';
 import { Badge } from '@object-ui/components';
 import {
-  Sheet,
-  SheetContent,
-  SheetHeader,
-  SheetTitle,
-  SheetDescription,
-} from '@object-ui/components';
-import {
   ResizableHandle,
   ResizablePanel,
   ResizablePanelGroup,
@@ -96,7 +89,8 @@ import {
   type ItemToolTab,
 } from '../item-tools/ItemToolTabs.js';
 import { MetadataTypeActions } from './MetadataTypeActions.js';
-import { DraftReviewPanel, computeDraftChangeCount } from './DraftReviewPanel.js';
+import { computeDraftChangeCount } from './DraftReviewPanel.js';
+import { DraftReviewSheet, useDraftReviewArrival } from './DraftReviewSheet.js';
 import {
   SchemaForm,
   DRAWER_METADATA_ID_SCOPE,
@@ -684,7 +678,7 @@ function MetadataResourceEditPageImpl({
   embedded,
 }: MetadataResourceEditPageImplProps) {
   const navigate = useNavigate();
-  const [searchParams, setSearchParams] = useSearchParams();
+  const [searchParams] = useSearchParams();
   // ADR-0048 — the owning package of the item being edited, carried on the
   // edit URL as `?package=` (emitted by the metadata list links). Scopes the
   // layered/draft read so a same-name collision resolves to the right
@@ -1628,30 +1622,17 @@ function MetadataResourceEditPageImpl({
   // The draft review is the header's status chip (decision 8), opened here.
   const [reviewOpen, setReviewOpen] = React.useState(false);
 
-  // ADR-0033 Phase B — `?review=1` arrival (from the chat's "Review N change(s)"
-  // affordance). The AI may have drafted this item *after* the page mounted, so
-  // we first force a fresh fetch, then — once the draft is loaded — open the
-  // generic review/diff sheet and consume the query param (so a refresh/back
-  // doesn't re-trigger it). The same-item-already-open case is covered by the
-  // reload bump (the load effect keys off `reloadKey`, not the search string).
-  const reviewParam = searchParams.get('review');
-  const reviewBumpedRef = React.useRef(false);
-  React.useEffect(() => {
-    if (reviewParam !== '1' || createMode) return;
-    if (!reviewBumpedRef.current) {
-      reviewBumpedRef.current = true;
-      setReloadKey((k) => k + 1);
-      return; // wait for the reload to settle before reading hasDraft
-    }
-    if (!loading) {
-      if (hasDraft) setReviewOpen(true);
-      const next = new URLSearchParams(searchParams);
-      next.delete('review');
-      setSearchParams(next, { replace: true });
-      reviewBumpedRef.current = false;
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [reviewParam, createMode, loading, hasDraft]);
+  // ADR-0033 Phase B — `?review=1` arrival (the chat's "Review N change(s)"
+  // and the Packages page's per-draft link): read the item afresh, then open
+  // the review once the draft is loaded, and drop the query param
+  // (`useDraftReviewArrival`, shared with the permission set's matrix).
+  useDraftReviewArrival({
+    enabled: !createMode,
+    loading,
+    hasDraft,
+    reload: () => setReloadKey((k) => k + 1),
+    open: () => setReviewOpen(true),
+  });
 
   // Inspector tabs: properties form vs raw JSON source view. Source view
   // is for power users who need to edit fields the form doesn't expose
@@ -3981,24 +3962,16 @@ function MetadataResourceEditPageImpl({
 
       {/* ADR-0033 Phase B — generic draft↔published review/diff. Available for
           ANY type whenever a pending draft exists; opened by the chat's
-          "Review N change(s)" affordance (?review=1) or the toolbar button. */}
-      <Sheet open={reviewOpen} onOpenChange={setReviewOpen}>
-        <SheetContent side="right" className="w-[92vw] sm:max-w-[720px] p-0 flex flex-col gap-0">
-          <SheetHeader className="px-4 py-3 border-b">
-            <SheetTitle className="text-base">{t('designer.draftReview.title', locale)}</SheetTitle>
-            <SheetDescription className="text-xs">
-              {type} / {name} · {t('designer.canvas.reviewVsPublished', locale)}
-            </SheetDescription>
-          </SheetHeader>
-          <div className="flex-1 min-h-0 overflow-auto p-4">
-            <DraftReviewPanel
-              published={layered?.effective ?? null}
-              draft={draft}
-              locale={locale}
-            />
-          </div>
-        </SheetContent>
-      </Sheet>
+          "Review N change(s)" affordance (?review=1) or the header's chip. */}
+      <DraftReviewSheet
+        open={reviewOpen}
+        onOpenChange={setReviewOpen}
+        type={type}
+        name={name}
+        published={layered?.effective ?? null}
+        draft={draft}
+        locale={locale}
+      />
 
       <MetadataDetailDrawer
         target={relatedTarget}
