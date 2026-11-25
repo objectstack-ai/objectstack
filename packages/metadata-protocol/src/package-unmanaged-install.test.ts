@@ -1238,6 +1238,13 @@ describe('a namespace derived from the id, contradicted by the object names\' co
         }
     });
 
+    it('two refused groups in one body: every object of both is named, in manifest order', () => {
+        const err = refusedPlan(namespacelessBody(['beta_x', 'alpha_x', 'beta_y', 'alpha_y']));
+        expect([resolveThrownHttpError(err).status, resolveThrownHttpError(err).code]).toEqual([400, 'INVALID_REQUEST']);
+        expect(err.details.refused.map((r: any) => `${r.type}/${r.name}`))
+            .toEqual(['object/beta_x', 'object/alpha_x', 'object/beta_y', 'object/alpha_y']);
+    });
+
     it('the verb refuses the stray-object package before anything is written: no base, no row', async () => {
         const { protocol, writes, packages, table } = makeProtocol();
         const err = await refusalOf(() => protocol.importUnmanagedPackage({

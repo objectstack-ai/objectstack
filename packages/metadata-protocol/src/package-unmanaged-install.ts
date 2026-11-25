@@ -697,13 +697,15 @@ export function planUnmanagedImport(
  * carries no signal, so `demoasset_asset` alone copies as
  * `<target>_demoasset_asset`. Refused as one family with the group above: a
  * two-word short name its own package repeats (`purchase_order` beside
- * `purchase_item`), stray or not — `namespace` declared on the package lifts it.
+ * `purchase_item`), stray or not — `namespace` declared on the package, with
+ * every object named under it, lifts it.
  *
  * Object names only: ADR-0129 D2 puts the namespace on object names, while a
  * package's flows, datasets or reports may be named without it, and its
  * translation items are named by this planner. Without a rename the save
- * door's own prefix rule refuses the same names (`NAMESPACE_PREFIX`), so this
- * is asked only on the rename path.
+ * door's own prefix rule refuses the same names (`NAMESPACE_PREFIX`), and the
+ * stray beside a refused group with them, so this is asked only on the rename
+ * path.
  *
  * @returns one refusal per object of a shared prefix, or `undefined` when the
  *   names do not contradict the derived namespace.
@@ -727,10 +729,19 @@ function derivedNamespaceContradiction(
     const refused: UnmanagedImportRenameRefusal[] = [];
     for (const [segment, names] of bySegment) {
         if (names.length < 2) continue;
-        const sharing = names.length === objectNames.length
+        const whole = names.length === objectNames.length;
+        const sharing = whole
             ? `every one of its ${objectNames.length} object names begins '${segment}_'`
             : `${names.length} of its ${objectNames.length} object names `
                 + `(${names.map((n) => `'${n}'`).join(', ')}) begin '${segment}_'`;
+        // A declared namespace is held to every object name
+        // ({@link declaredNamespaceContradiction}), so where the group is not the
+        // whole package the remedy names the other objects too: declaring the
+        // group's prefix alone would be refused on the next attempt.
+        const remedy = whole
+            ? 'Declare `namespace` on the package, the prefix its object names carry, then install again.'
+            : 'Declare `namespace` on the package, the prefix its object names carry, and name every other '
+                + 'object under that namespace too, then install again.';
         for (const name of names) {
             refused.push({
                 type: 'object',
@@ -738,8 +749,7 @@ function derivedNamespaceContradiction(
                 reason: `Object '${name}' is not copied: package '${sourcePackageId}' declares no \`namespace\`, so its `
                     + `namespace was derived from its id as '${derivedNamespace}', but ${sharing} instead. Renamed `
                     + `into namespace '${targetNamespace}' it would be '${targetNamespace}_${name}', keeping a prefix `
-                    + 'the package never declared. Declare `namespace` on the package, the prefix its object names '
-                    + 'carry, then install again.',
+                    + `the package never declared. ${remedy}`,
             });
         }
     }
