@@ -275,7 +275,7 @@ The tiers belong to a package's menu. The package-less scope (`~org`) and the cr
 
 ### The rule that sorts a type
 
-The proposal's (§3.1), ruled as proposed. A type is **常用** only when all three hold; a type that fails one is **高级**:
+The rule is the proposal's (§3.1), ruled as proposed. A type is **常用** only when all three hold; a type that fails one is **高级**:
 
 1. **It has no parent object.** Its schema does not require one object. A type bound to one object is authored from that object.
 2. **A builder makes it directly, as a step of building an app.** It is not reference content, and not developer or operator work.
@@ -303,10 +303,10 @@ Merging accepts them; an objection names the number.
 
 1. **The order of the types the proposal's list does not write out.** Its ordered list (§3.4) is written out for the 数据 Data and 界面 UI types and stops there. The Order column takes the rest from the proposal's drawing of the open fold (§3.2) and, for a type that drawing does not show, from the row order of its per-type table (§2), reading a row that names several types left to right. That places `job` after `flow`; `translation` · `api` · `datasource` · `external_catalog`, in that order, after `email_template`; and `sharing_rule` · `queue` · `capability`, in that order, after `assignment_rule`.
 2. **Where `picklist` sits inside 高级.** The maintainer moved it between the tiers and named no place. It keeps the place the proposal's list gave it, second in 数据 Data, which makes it the first 高级 entry of that group.
-3. **Where the four entries that are not a type sit.** After the types of their group, as §3.4 leaves them. The proposal's per-type table (§2) lists the organization's own flows between `flow` and `job`; this record follows §3.4, so a package's `job` list is drawn above that entry.
+3. **Where the four entries that are not a type sit.** After the types of their group, as §3.4 leaves them. The proposal's per-type table (§2) lists the organization's own flows between `flow` and `job`; this record follows §3.4, so on a package that holds a `job`, that type's entry is drawn above the organization's flows.
 4. **The tiers' English names.** The ruling names the tiers in Chinese. This record writes Common and Advanced, after the two values of the proposal's list (§3.4).
 5. **The table's shape.** One row per type, so that each type carries its own order and tier. Order counts inside a group, because the order of the groups is the six-group table's.
 
-The ruling also carries, as proposed and not restated here: the menu's visual hierarchy (§3.3), the placement list and its two pins (§3.4), how the fold opens, closes and is searched (§3.5), and that no address changes (§3.9). Those are the work of #37200 and #37201.
+The ruling also carries, as proposed and not restated here: the menu's visual hierarchy (§3.3), the placement list and its two pins (§3.4), how the fold is opened, remembered and searched (§3.5), and that no address changes (§3.9). Those are the work of #37200 and #37201.
 
 Refs: decision card [#37192](https://github.com/objectstack-ai/objectstack/issues/37192) (the ruling record, comment 7151834490; the proposal, comment 7151777190; the adjustments, comment 7151811337); epic [#36890](https://github.com/objectstack-ai/objectstack/issues/36890) (decision 11: the six groups stand); card [#37199](https://github.com/objectstack-ai/objectstack/issues/37199) (this amendment); [#37200](https://github.com/objectstack-ai/objectstack/issues/37200) (the placement list and its pins), [#37201](https://github.com/objectstack-ai/objectstack/issues/37201) (the menu).
