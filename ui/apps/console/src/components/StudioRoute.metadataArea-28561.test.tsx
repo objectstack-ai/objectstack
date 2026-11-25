@@ -147,7 +147,10 @@ describe('/studio — the "All metadata" area\'s routes (objectstack#28561)', ()
     expect(surface).toHaveAttribute('data-package', '~all');
     expect(surface).toHaveAttribute('data-area', 'metadata');
     // The landing's frame (the console's top bar) no longer draws it.
-    expect(screen.queryByRole('link', { name: 'ObjectOS home' })).toBeNull();
+    // By its test id, not its name: the name depends on the width
+    // (objectstack#37163), and an absence asserted by an old name passes on
+    // a mark that is drawn.
+    expect(screen.queryByTestId('app-bar-product-home')).toBeNull();
     expect(screen.queryByTestId('studio-metadata-area')).toBeNull();
     expect(location()).toBe('/studio/~all/metadata/permission?scope=environment');
   });
