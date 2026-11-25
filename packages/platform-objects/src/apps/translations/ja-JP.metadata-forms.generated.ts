@@ -3161,6 +3161,46 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
     }
   },
   ai_context: {
-    label: "AI コンテキストパック"
+    label: "AI コンテキストパック",
+    sections: {
+      basics: {
+        label: "基本情報",
+        description: "パックの識別情報と、レコードを読み取るオブジェクト。"
+      },
+      material: {
+        label: "内容",
+        description: "レコードのどの内容をモデルに渡すか。各ピッカーはルートオブジェクトのフィールド、または関連リスト自身のオブジェクトのフィールドを表示します。"
+      }
+    },
+    fields: {
+      name: {
+        label: "名前",
+        helpText: "一意の識別子（snake_case）。スキルの context キーと get_record_context ツールはこの名前でパックを指定します。"
+      },
+      label: {
+        label: "表示名",
+        helpText: "表示名。ツールの回答の見出しになります。パックには説明がないため、目的はここに書きます。"
+      },
+      object: {
+        label: "ルートオブジェクト",
+        helpText: "ルートオブジェクト：パックはそのレコードを 1 件読み取ります。"
+      },
+      fields: {
+        label: "フィールド",
+        helpText: "モデルに渡すルートオブジェクトのフィールド（順序どおり、最大 30 個）。参照フィールドは参照先レコードの名前で答えます。"
+      },
+      related: {
+        label: "関連リスト",
+        helpText: "このレコードを指す子リスト（1 階層のみ、最大 3 個）。各リストは子オブジェクト、ルートを指す参照フィールド、各行で読み取る列（最大 10 列）を指定します。列がなければ各行は名前だけを読み取ります。"
+      },
+      body: {
+        label: "本文",
+        helpText: "レコードの本文として読み取る、ただ 1 つの長文テキストフィールド。"
+      },
+      "body.field": {
+        label: "本文フィールド",
+        helpText: "ルートオブジェクトの長文テキストフィールド（textarea、markdown、html、richtext）。それ以外のフィールドは保存時に報告され、パックは本文を持ちません。"
+      }
+    }
   }
 };

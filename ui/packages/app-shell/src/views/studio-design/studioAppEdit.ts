@@ -14,6 +14,10 @@
  *     (the package-less scope and the cross-package leg). The item then opens
  *     the generic item page (decision 3).
  *
+ * An item of a customization pair (`<base>.custom`) with no published app of
+ * its own is asked of its base: `packageId` and `apps` are then the base's,
+ * and the same three rules pick among them (`StudioAreaAppOpen`).
+ *
  * Rule 1's first half and rule 2 are the rule Studio's 「‹ Back to app」
  * applies (`studioBackTarget`), so both share {@link rememberedPackageApp} and
  * {@link packageAppSegment}. An app's segment is the one the console resolves:

@@ -155,7 +155,10 @@ const pathname = () => screen.getByTestId('pathname').textContent;
  * file's pin.
  */
 const NOTICE = 'You need Studio access to open Studio. An administrator can grant it with a permission set in Setup → Permission Set Assignment.';
-const WAY_HOME = 'Back to home';
+/** jsdom's window is 1024 px wide: a desktop, whose way home opens an app's start page. */
+const WAY_HOME = 'Back to app start page';
+/** A phone's way home, to its app list. */
+const PHONE_WAY_HOME = 'Back to home';
 
 /**
  * The refusal, said at the URL that was opened: the sentence is on screen, the
@@ -465,5 +468,32 @@ describe('/studio/* — the states that are not an answer', () => {
     expect(pathname()).toBe('/login?redirect=%2Fstudio%2Fhotcrm%2Fdata');
     expect(designSurface).not.toHaveBeenCalled();
     expect(screen.queryByText(NOTICE)).not.toBeInTheDocument();
+  });
+});
+
+describe('/studio refused: the way home names where it goes, by viewport', () => {
+  const desktopWidth = window.innerWidth;
+  function atWidth(px: number) {
+    Object.defineProperty(window, 'innerWidth', { configurable: true, writable: true, value: px });
+  }
+  afterEach(() => atWidth(desktopWidth));
+
+  it('on a desktop, where home is an app\'s start page, it reads as the app pill\'s row does', async () => {
+    atWidth(1280);
+    renderStudioDeepLink('/studio/hotcrm/data');
+
+    expect(await screen.findByText(NOTICE)).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: WAY_HOME })).toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: PHONE_WAY_HOME })).not.toBeInTheDocument();
+  });
+
+  it('CONTROL — on a phone, whose Home is still its app list, it keeps 「Back to home」', async () => {
+    atWidth(375);
+    renderStudioDeepLink('/studio/hotcrm/data');
+
+    expect(await screen.findByText(NOTICE)).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: PHONE_WAY_HOME })).toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: WAY_HOME })).not.toBeInTheDocument();
+    expect(designSurface).not.toHaveBeenCalled();
   });
 });

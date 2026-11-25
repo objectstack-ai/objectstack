@@ -68,13 +68,21 @@ vi.mock('./PackageFormDialog', () => ({
     open,
     mode,
     onSaved,
+    newApp,
   }: {
     open: boolean;
     mode: string;
     onSaved?: (r: { id: string }) => void;
+    newApp?: { reserve?: unknown; create?: unknown };
   }) =>
     open && mode === 'create' ? (
-      <button type="button" data-testid="stub-create-save" onClick={() => onSaved?.({ id: 'app.fresh' })}>
+      <button
+        type="button"
+        data-testid="stub-create-save"
+        // objectstack#37134 — whether the page handed the dialog the app step.
+        data-new-app={typeof newApp?.reserve === 'function' && typeof newApp?.create === 'function' ? 'step' : 'none'}
+        onClick={() => onSaved?.({ id: 'app.fresh' })}
+      >
         save
       </button>
     ) : null,
@@ -795,6 +803,40 @@ describe('Setup → Packages: the new-package deep link (objectstack#36908)', ()
 });
 
 // ---------------------------------------------------------------------------
+// objectstack#37134 — New Package, from the button and from the console's
+// new-package doors (`?new=package`), hands the dialog the app step, so it
+// offers 「同时创建应用」 (the dialog itself is pinned in
+// `PackageFormDialog.newAppStep-36748.test.tsx`).
+// ---------------------------------------------------------------------------
+
+describe('Setup → Packages: New Package offers 「同时创建应用」 (objectstack#37134)', () => {
+  it('the New Package button opens the dialog with the app step, and lands where it did', async () => {
+    await serve({ packages: [CODE] });
+    renderAt(ADMIN_URL);
+    await screen.findByTestId('pkg-row-com.acme.code');
+    fireEvent.click(screen.getByRole('button', { name: row('engine.packages.new') }));
+    const save = await screen.findByTestId('stub-create-save');
+    expect(save).toHaveAttribute('data-new-app', 'step');
+    fireEvent.click(save);
+    expect(await screen.findByTestId('where')).toHaveTextContent('/studio/app.fresh/data');
+  });
+
+  it('the `?new=package` door opens the dialog with the app step', async () => {
+    await serve({ packages: [CODE] });
+    renderAt(SETUP_NEW_PACKAGE_PATH);
+    expect(await screen.findByTestId('stub-create-save')).toHaveAttribute('data-new-app', 'step');
+  });
+
+  it('the development surface’s New Package does too', async () => {
+    await serve({ packages: [CODE] });
+    renderAt(STUDIO_URL);
+    await screen.findByTestId('pkg-row-com.acme.code');
+    fireEvent.click(screen.getByRole('button', { name: row('engine.packages.new') }));
+    expect(await screen.findByTestId('stub-create-save')).toHaveAttribute('data-new-app', 'step');
+  });
+});
+
+// ---------------------------------------------------------------------------
 // objectstack#36908 — the removed Studio home's "n customized, m switched off"
 // and its "Customizations in this environment" panel are drawn in a read-only
 // base's detail on this face (`PackageCustomizationsPanel.test.tsx` pins
@@ -827,7 +869,7 @@ async function settledSheet(sheet: HTMLElement) {
 }
 
 describe('Setup → Packages: a read-only base’s customizations in its detail (objectstack#36908)', () => {
-  it('a code package’s detail draws what this deployment changed on it, arrangements counted (objectstack#36833)', async () => {
+  it('a code package’s detail draws what this deployment changed on it, its arrangement named apart (objectstack#37236)', async () => {
     await serve({ packages: [CODE] });
     renderAt(ADMIN_URL);
     fireEvent.click(await screen.findByTestId('pkg-row-com.acme.code'));
@@ -835,7 +877,7 @@ describe('Setup → Packages: a read-only base’s customizations in its detail 
 
     const section = within(sheet).getByTestId('pkg-detail-customizations');
     await waitFor(() =>
-      expect(within(section).getByTestId('pkg-detail-customizations-summary')).toHaveTextContent('1 customized, 0 switched off'),
+      expect(within(section).getByTestId('pkg-detail-customizations-summary')).toHaveTextContent('0 customized, 1 rearranged, 0 switched off'),
     );
     expect(within(section).getByTestId('pkg-detail-customize')).toHaveAttribute('href', '/studio/com.acme.code/data');
   });

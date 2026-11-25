@@ -2507,6 +2507,7 @@ const ja = {
       unavailableTitle: "AI アシスタントを利用できません",
       unavailableDescription: "このデプロイでは AI アシスタントが有効になっていません。それ以外の機能は通常どおり動作します。",
       unavailableError: "AI サービスに接続できませんでした。一時的にオフラインの可能性があります — 再試行するか、ホームに戻ってください。",
+      unavailableErrorDesktop: "AI サービスに接続できませんでした。一時的にオフラインの可能性があります — 再試行するか、アプリのスタートページに戻ってください。",
       unavailableRetry: "再試行",
       unavailableHome: "ホームに戻る",
       dock: {
@@ -3736,7 +3737,6 @@ const ja = {
   },
   home: {
     build: {
-      title: "アプリを作る",
       noCapability: "このシステムではアプリの作成はできません — 「メタデータ管理」権限が必要ですが、お使いのアカウントにはありません。",
       inStudio: "空のアプリを新規作成",
     },
@@ -3744,13 +3744,11 @@ const ja = {
       title: "テンプレートから始める",
       marketplaceDisabled: "このランタイムにはアプリマーケットプレイスが設定されていないため、ここからインストールできるテンプレートはありません。",
     },
-    welcomeAdminDescription: "ビジネスを一文で説明してください — AI がオブジェクト、画面、API、エージェントツールを生成します。左のメニューから自分で設定することもできます。",
     welcomeAdminDescriptionNoBuild: "左の管理メニューから最初のアプリケーションを設定してください。データが入ると、AI アシスタントが分析を手伝えます。",
     welcomeAdminDescriptionNoAi: "左の管理メニューから最初のアプリケーションを設定してください。",
     noAppsTitle: "アプリケーションがまだありません",
     noAppsDescription: "システムを準備中です — 管理者が共有したアプリがここに表示されます。",
     noAppsAddDescription: "最初のアプリを作成するか、テンプレートやアプリマーケットプレイスから始めましょう。",
-    buildWithAI: "AI でビルド",
     askAI: "AI に質問",
     recoveryReminder: {
       message: "シングルサインオンが利用できないときでもサインインできるよう、リカバリーパスワードを設定してください。",

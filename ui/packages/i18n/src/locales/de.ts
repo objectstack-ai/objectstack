@@ -2505,6 +2505,7 @@ const de = {
       unavailableTitle: "KI-Assistent nicht verfügbar",
       unavailableDescription: "In dieser Bereitstellung ist kein KI-Assistent aktiviert. Alles andere funktioniert wie gewohnt.",
       unavailableError: "Der KI-Dienst war nicht erreichbar. Er ist möglicherweise vorübergehend offline — versuchen Sie es erneut, oder kehren Sie zur Startseite zurück.",
+      unavailableErrorDesktop: "Der KI-Dienst war nicht erreichbar. Er ist möglicherweise vorübergehend offline — versuchen Sie es erneut, oder kehren Sie zur Startseite der App zurück.",
       unavailableRetry: "Erneut versuchen",
       unavailableHome: "Zurück zur Startseite",
       dock: {
@@ -3734,7 +3735,6 @@ const de = {
   },
   home: {
     build: {
-      title: "App erstellen",
       noCapability: "Das Erstellen von Apps ist in diesem System nicht verfügbar — es erfordert die Berechtigung „Metadaten verwalten“, die Ihr Konto nicht besitzt.",
       inStudio: "Neue leere App",
     },
@@ -3742,13 +3742,11 @@ const de = {
       title: "Mit einer Vorlage starten",
       marketplaceDisabled: "Für diese Laufzeitumgebung ist kein App-Marktplatz konfiguriert, daher gibt es hier keine Vorlagen zum Installieren.",
     },
-    welcomeAdminDescription: "Beschreiben Sie Ihr Geschäft in einem Satz — die KI erzeugt die Objekte, Bildschirme, APIs und Agent-Tools. Oder richten Sie alles selbst über das Menü links ein.",
     welcomeAdminDescriptionNoBuild: "Richten Sie Ihre erste Anwendung über das Verwaltungsmenü links ein. Sobald Daten vorhanden sind, kann der KI-Assistent bei der Auswertung helfen.",
     welcomeAdminDescriptionNoAi: "Richten Sie Ihre erste Anwendung über das Verwaltungsmenü links ein.",
     noAppsTitle: "Noch keine Anwendungen",
     noAppsDescription: "Das System wird eingerichtet — Apps, die Ihr Administrator für Sie freigibt, erscheinen hier.",
     noAppsAddDescription: "Erstellen Sie Ihre erste App, oder beginnen Sie mit einer Vorlage oder dem App-Marktplatz.",
-    buildWithAI: "Mit KI erstellen",
     askAI: "KI fragen",
     recoveryReminder: {
       message: "Legen Sie ein Wiederherstellungspasswort fest, damit Sie sich auch anmelden können, wenn Single Sign-on einmal nicht verfügbar ist.",

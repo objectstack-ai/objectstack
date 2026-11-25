@@ -1628,6 +1628,18 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.form.addFieldPlain': '添加字段',
   'engine.form.searchFields': '搜索字段…',
   'engine.form.allFieldsAdded': '已添加全部字段',
+  // objectstack#37143 — 资料包的关联列表（`ai_context` 下的 `related-list-entries`）。
+  'engine.form.contextPack.addList': '添加关联列表…',
+  'engine.form.contextPack.chooseRootFirst': '请先选择根对象',
+  'engine.form.contextPack.noLinks': '没有对象的引用字段指向根对象',
+  'engine.form.contextPack.allListed': '关联列表已全部添加',
+  'engine.form.contextPack.listsFull': '一个资料包最多读取 {max} 个关联列表',
+  'engine.form.contextPack.via': '经由 {field}',
+  'engine.form.contextPack.notLinked': '没有指向根对象的引用字段：保存时会报告',
+  'engine.form.contextPack.columnsDefault': '未选列：每行只读取其名称。',
+  'engine.form.contextPack.addColumn': '添加列…',
+  'engine.form.contextPack.addColumnTo': '为 {list} 添加列',
+  'engine.form.contextPack.columnsFull': '一个关联列表最多读取 {max} 列',
   // objectui#12126 — zh half of the `ref-multi:permission` add control.
   'engine.form.addPermissionSetPlain': '添加权限集',
   'engine.form.addPermissionSet': '添加权限集…',
@@ -1769,6 +1781,10 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.packages.create.failed': '创建软件包失败',
   'engine.packages.create.exists': '已存在相同 ID 的软件包。',
   'engine.packages.create.created': '已创建软件包「{name}」。',
+  // objectstack#37134 — the create dialog's 「同时创建应用」 choice, ticked by default.
+  'engine.packages.create.alsoApp': '同时创建应用',
+  'engine.packages.create.alsoAppHint': '软件包会带一个同名应用，建好即可打开。只放对象、流程给别的软件包复用的，可以取消勾选。',
+  'engine.packages.create.createdWithApp': '已创建软件包「{name}」及其应用。',
   // objectstack#8270 — 这条正是在 zh 控制台里显示为英文原文的服务端拒绝信息。
   'engine.packages.noCapability': '你没有在本系统管理软件包的权限 — 该操作需要「管理元数据」权限。',
   'engine.packages.form.basics': '基本信息',
@@ -1823,6 +1839,7 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.packages.customizations.failed': '无法读取定制',
   'engine.packages.customizations.none': '本环境还没有改动',
   'engine.packages.customizations.customized': '已定制 {count} 项',
+  'engine.packages.customizations.arranged': '调整排列 {count} 处',
   'engine.packages.customizations.separator': '，',
   'engine.packages.customizations.switchedOff': '已停用 {count} 项',
   'engine.packages.customizations.tab.all': '全部',
@@ -3123,6 +3140,9 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.studio.menu.owd': '默认共享',
   'engine.studio.menu.diagnostics': '诊断',
   'engine.studio.menu.environment': '岗位与权限',
+  // objectstack#37201 — the 「高级」 fold (ADR-0084, amended 2026-11-25), and a 常用 type with no item yet.
+  'engine.studio.menu.advanced': '高级',
+  'engine.studio.menu.emptyType': '还没有：打开列表新建第一项',
   // objectstack#36502 — 旧「界面」链接落地时的提示。
   'engine.studio.interfacesRetired.sentence': '界面的修改已经搬到应用里',
   'engine.studio.interfacesRetired.backToApp': '回到应用',

@@ -6,8 +6,9 @@
  * The `/studio` entry gate used to send a non-holder home with no word of why,
  * so a missing capability read exactly like a broken link. It now says, at the
  * URL that was opened, that Studio access is needed (`console.studio.accessRequired`),
- * with a way home that reuses the app refusal screen's label
- * (`empty.appAccessDeniedHome`). `StudioRoute.test.tsx` pins the decision and
+ * with a way home that reuses the app refusal screen's label on a phone
+ * (`empty.appAccessDeniedHome`) and the app pill's row label from 768 px up
+ * (`layout.appSwitcher.backToHome`). `StudioRoute.test.tsx` pins the decision and
  * where the way home leads; this file pins the LANGUAGE.
  *
  * ## Why every pack, and why the expected text is read from the pack
@@ -93,8 +94,12 @@ const LANGUAGES = Object.keys(builtInLocales) as Language[];
 
 /** The refusal's sentence, as one pack writes it. */
 const sentenceIn = (lang: Language) => builtInLocales[lang].console.studio.accessRequired;
-/** The refusal's way home, as one pack writes it (the app refusal screen's label). */
-const wayHomeIn = (lang: Language) => builtInLocales[lang].empty.appAccessDeniedHome;
+/**
+ * The refusal's way home, as one pack writes it. jsdom's window is 1024 px, a
+ * desktop, where home is an app's start page: the app pill's row label. A
+ * phone keeps the app refusal screen's label; `StudioRoute.test.tsx` pins that.
+ */
+const wayHomeIn = (lang: Language) => builtInLocales[lang].layout.appSwitcher.backToHome;
 
 function LocationProbe() {
   const { pathname } = useLocation();

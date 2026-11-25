@@ -94,6 +94,8 @@ const result = KnowledgeChunkSchema.parse(data);
 | **snippet** | `string` | ✅ |  |
 | **title** | `string` | optional |  |
 | **metadata** | `Record<string, any>` | optional (default: `{}`) |  |
+| **docHash** | `string` | optional | Stored docHash of the hit's document, returned as stored by the adapter |
+| **headingPath** | `string[]` | optional | Headings the hit's chunk sits under, outermost first |
 
 
 ---

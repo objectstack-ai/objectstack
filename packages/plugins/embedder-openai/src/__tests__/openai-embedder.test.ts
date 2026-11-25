@@ -28,6 +28,16 @@ describe('OpenAIEmbedder', () => {
     expect(e.dimensions).toBe(1536);
   });
 
+  it('reports the model it sends as IEmbedder.model, for the knowledge index fingerprint (ADR-0161 K8, item 7)', async () => {
+    const fetchImpl = mockFetch({ data: [{ index: 0, embedding: [0.1, 0.2] }] });
+    expect(new OpenAIEmbedder({ apiKey: 'k', fetch: fetchImpl }).model).toBe('text-embedding-3-small');
+    const e = new OpenAIEmbedder({ apiKey: 'k', model: 'BAAI/bge-m3', fetch: fetchImpl });
+    expect(e.model).toBe('BAAI/bge-m3');
+    await e.embed(['x']);
+    const sent = JSON.parse(String((fetchImpl as unknown as ReturnType<typeof vi.fn>).mock.calls[0][1].body));
+    expect(sent.model).toBe(e.model);
+  });
+
   it('looks up dimensions for known Chinese models', () => {
     const e = new OpenAIEmbedder({
       apiKey: 'k',
