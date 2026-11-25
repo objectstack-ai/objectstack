@@ -185,9 +185,10 @@ export const ProjectViews = defineView({
       { name: 'project', label: 'Project', columns: 2, fields: ['name', 'account', 'status', 'health', 'owner'] },
       { name: 'budget_schedule', label: 'Budget & Schedule', columns: 2, fields: ['budget', 'spent', 'start_date', 'end_date'] },
     ],
-    // No subforms here: the Tasks subtable is derived from the data model —
-    // showcase_task.project declares `inlineEdit: true`, so every standard
-    // Project form auto-renders it. (A view could still add `subforms` to
-    // override the derived columns/order.)
+    // No subforms here, and no Tasks subtable either: a child is inlined in
+    // the parent's form only where a field group of the parent names it, and
+    // showcase_project names none for its tasks (showcase_task.project sets no
+    // `inlineEdit` either — tasks are added over time, not entered with the
+    // project). A view could still add `subforms` to inline them.
   },
 });

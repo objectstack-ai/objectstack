@@ -125,16 +125,17 @@ describe('the menu search', () => {
   });
 });
 
-describe('the group names: the menu\'s own, the shared dictionary unchanged', () => {
-  it('the menu names `system` Platform / 平台 and `security` Access / 访问; the other four as the dictionary does', () => {
+describe('the group names: one dictionary for the menu and the directory (ADR-0084, amended)', () => {
+  it('the menu names `system` Platform / 平台 and `security` Access / 访问', () => {
     expect(STUDIO_MENU_GROUPS.map((g) => studioMenuGroupLabel(g, 'en'))).toEqual(['Data', 'UI', 'Automation', 'Platform', 'Access', 'AI']);
     expect(STUDIO_MENU_GROUPS.map((g) => studioMenuGroupLabel(g, 'zh-CN'))).toEqual(['数据', '界面', '自动化', '平台', '访问', 'AI']);
   });
 
-  it('the shared dictionary keeps System / 系统 and Security / 安全 (Setup\'s datasource pages read it, `PageShell`\'s badge)', () => {
-    expect(translateMetadataDomain('system', 'en')).toBe('System');
-    expect(translateMetadataDomain('system', 'zh-CN')).toBe('系统');
-    expect(translateMetadataDomain('security', 'en')).toBe('Security');
-    expect(translateMetadataDomain('security', 'zh-CN')).toBe('安全');
+  it('the menu draws each group with the shared dictionary\'s word, in en and zh-CN', () => {
+    for (const locale of ['en', 'zh-CN']) {
+      for (const g of STUDIO_MENU_GROUPS) {
+        expect(studioMenuGroupLabel(g, locale), `${g} in ${locale}`).toBe(translateMetadataDomain(g, locale));
+      }
+    }
   });
 });

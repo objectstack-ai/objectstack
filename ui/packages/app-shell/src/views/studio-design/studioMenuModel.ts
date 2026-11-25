@@ -10,9 +10,9 @@
  *
  * Six, one per domain the spec registers a metadata type under, in the
  * amendment's order. A type's group is its served registry `domain`; the
- * group's name is the menu's own (`studioMenuGroupLabel`), which draws
- * `system` as Platform and `security` as Access (decision 11) while the shared
- * dictionary keeps System and Security.
+ * group's name is the shared domain dictionary's (`studioMenuGroupLabel`), which
+ * draws `system` as Platform and `security` as Access (decision 11), the same
+ * names as the directory's headings and chips and a type page's badge.
  *
  * ## Entries
  *

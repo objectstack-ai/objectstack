@@ -9,7 +9,9 @@
  *
  * The dropdown (objectui#12605): a 「Switch Application」 group of the
  * installed apps with the current one checked — the Setup app is not in it —
- * then 「Back to home」 with its `⌘⇧H` keycaps, 「All apps」, and 「Settings」 (the
+ * then 「Back to app start page」 with its `⌘⇧H` keycaps (where `/` lands from
+ * 768 px up, the platform home page being retired: objectstack#36732),
+ * 「All apps」, and 「Settings」 (the
  * Setup app, when the viewer's app list carries it). For the viewers the top
  * bar offers its Studio button to, 「Edit APP in Studio」 follows a second
  * divider; for a read-only package's app it is 「Open APP in Studio」 behind an
@@ -254,7 +256,7 @@ export function AppSwitcher({
               <Home className="size-4" />
             </span>
             <span className="flex-1 truncate">
-              {t('layout.appSwitcher.backToHome', { defaultValue: 'Back to home' })}
+              {t('layout.appSwitcher.backToHome', { defaultValue: 'Back to app start page' })}
             </span>
             <kbd className="pointer-events-none ml-auto font-mono text-xs text-muted-foreground">
               {shortcutKeycaps(GO_HOME_SHORTCUT.chord).join('')}
