@@ -57,10 +57,9 @@
 
 import { ENVIRONMENT_SCOPE_QUERY } from '../metadata-admin/catalog-scope.js';
 import { SETUP_DATASOURCES_PATH } from '../metadata-admin/metadataAreaHost.js';
-import { AREA_PILLAR_FOR_TYPE, isStudioAllPackagesScope } from './metadataArea.js';
+import { isStudioAllPackagesScope } from './metadataArea.js';
 import {
   STUDIO_ALL_PACKAGES_SEGMENT,
-  STUDIO_METADATA_AREA,
   STUDIO_OWD_SECTION,
   studioMetadataAreaAddress,
   studioMetadataAreaRoot,
@@ -223,20 +222,17 @@ export function studioMenuTiers(menu: readonly StudioMenuGroupModel[]): Record<S
   return { common: of('common'), advanced: of('advanced') };
 }
 
-/** The entry keys of the type each pillar designs (the transition's pillar pages). */
-const PILLAR_TYPE: Readonly<Record<string, string>> = Object.fromEntries(
-  Object.entries(AREA_PILLAR_FOR_TYPE).map(([type, pillar]) => [pillar, type]),
-);
-
 /**
  * The entry the open page is (`aria-current`), or `null` when it is none of
- * them (the area's type directory, a not-found pillar).
+ * them (the area's type directory, a not-found page).
  *
  *  - the package-less scope: its flows;
  *  - an area URL: its type, diagnostics, or on the cross-package leg's root
  *    the environment catalog;
- *  - the sharing overview's route: the OWD overview;
- *  - a pillar page: the type the pillar designs.
+ *  - the sharing overview's route: the OWD overview.
+ *
+ * objectstack#36909 — a retired pillar's address draws no page (it redirects,
+ * `studioPillarRedirect.ts`), so no entry is current on one.
  */
 export function studioMenuCurrentKey(input: { segment: string; pathname: string; search: string }): string | null {
   const { segment, pathname } = input;
@@ -250,11 +246,7 @@ export function studioMenuCurrentKey(input: { segment: string; pathname: string;
   }
   const prefix = `${studioPackagePath(segment)}/`;
   const raw = pathname.startsWith(prefix) ? pathname.slice(prefix.length) : '';
-  const pillar = raw.split('/')[0];
-  if (pillar === STUDIO_METADATA_AREA) return null;
-  if (pillar === STUDIO_OWD_SECTION) return 'owd';
-  const type = PILLAR_TYPE[pillar];
-  return type ? `type:${type}` : null;
+  return raw.split('/')[0] === STUDIO_OWD_SECTION ? 'owd' : null;
 }
 
 /** Whether `entry` matches a menu search, by its label or its type's machine name. */

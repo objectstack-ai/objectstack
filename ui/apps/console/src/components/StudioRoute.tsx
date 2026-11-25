@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * `/studio/*` — the ENTRY gate for the Studio pillar builder.
+ * `/studio/*` — the ENTRY gate for the Studio builder.
  *
  * The policy, and why its fail direction is inverted from every other capability
  * gate in this app, live in `./studioEntry`. This file is only the mapping from
@@ -42,12 +42,11 @@ import {
   LoadingFallback,
   LoadingScreen,
   STUDIO_ALL_PACKAGES_SEGMENT,
-  STUDIO_HOME_PILLAR,
   STUDIO_METADATA_AREA,
-  STUDIO_ORG_SCOPE_PILLAR,
   STUDIO_ORG_SCOPE_SEGMENT,
   StudioEntryPermissionsProvider,
   studioMetadataAreaPath,
+  studioOrgScopePath,
   studioPackagePath,
   useHomePath,
   usePhoneViewport,
@@ -62,10 +61,11 @@ import { holdsStudioAccess, useStudioEntry } from './studioEntry';
 /*
  * The builder screens load WITH THEIR ROUTE, not with the console
  * (objectui#11798). Imported statically, `StudioDesignSurface` (and the modules
- * only it reaches, such as the pillar panels and the form designer) sat in the
+ * only it reaches, such as the designers and the form designer) sat in the
  * eager closure of every console page, for every user, on deployments where
  * most principals can never enter Studio. Studio's entry
- * (`StudioEntryRedirect`) rides in the same chunk.
+ * (`StudioEntryRedirect`) and the retired pillar addresses' redirect
+ * (`StudioPillarRedirect`) ride in the same chunk.
  *
  * Only the builder is deferred. The gate above it (`StudioRoute` →
  * `RequireStudioAccess`) stays in this eager module on purpose: it decides
@@ -79,6 +79,9 @@ const StudioDesignSurface = lazy(() =>
 );
 const StudioEntryRedirect = lazy(() =>
   import('./studioBuilder').then((m) => ({ default: m.StudioEntryRedirect })),
+);
+const StudioPillarRedirect = lazy(() =>
+  import('./studioBuilder').then((m) => ({ default: m.StudioPillarRedirect })),
 );
 
 /**
@@ -204,16 +207,16 @@ function StudioEntry() {
 }
 
 /**
- * A package's pillar builder, which records the visit as a recent `package`
+ * A package's builder, which records the visit as a recent `package`
  * entry (objectui#11863), so Studio's entry (bare `/studio`, objectstack#36908)
  * can open the package an author was last in. `useTrackRouteAsRecent` reads `/apps/APP` routes only, and this
  * module owns the `/studio` subtree, so the record is made here, behind the
  * entry gate: a refused principal never mounts this element.
  *
  * The entry is the package's IDENTITY — its id, and `href` its bare route,
- * which lands on the Data pillar — and no label: a reader labels it from the
+ * which lands on its object list — and no label: a reader labels it from the
  * package list it loads (objectui#11678's shape). Keyed on the package, not the
- * pillar, so moving between pillars of one package leaves the list as it is,
+ * page, so moving between pages of one package leaves the list as it is,
  * and the provider writes nothing. The package-less scope (`~org`) and the
  * cross-package leg (`~all`) are not packages and record nothing.
  */
@@ -241,6 +244,19 @@ function StudioPackageBuilder({ area }: { area?: typeof STUDIO_METADATA_AREA }) 
 }
 
 /**
+ * objectstack#36909 — a retired pillar address (the bare package address
+ * included) redirects to the page that replaced it in one hop; any other
+ * segment renders `children`. The redirect rides in the builder's chunk.
+ */
+function StudioPillarAddress({ children }: { children?: ReactNode }) {
+  return (
+    <Suspense fallback={<LoadingFallback />}>
+      <StudioPillarRedirect>{children}</StudioPillarRedirect>
+    </Suspense>
+  );
+}
+
+/**
  * The whole `/studio` subtree (ADR-0080/0084), as ONE element `App.tsx` drops
  * into its `<Routes>` — the same shape `AppContent`'s `systemRoutes` uses.
  *
@@ -250,19 +266,19 @@ function StudioPackageBuilder({ area }: { area?: typeof STUDIO_METADATA_AREA }) 
  * agree with itself while `App.tsx` quietly mounted the builder ungated.
  *
  *   `/studio`                         Studio's entry: the last package, else the package list
- *   `/studio/~org`                    the package-less scope lands on its one pillar
+ *   `/studio/~org`                    the package-less scope lands on its flow list
  *   `/studio/~all/*`                  lands on the "All metadata" area across packages
- *   `/studio/:packageId`              a package lands on its Data pillar
+ *   `/studio/:packageId`              a package lands on its object list
  *   `/studio/:packageId/metadata/*`   a package's "All metadata" area, in the builder
- *   `/studio/:packageId/:tab`         the pillar builder (a recent-package visit)
+ *   `/studio/:packageId/:tab`         a retired pillar redirects; any other segment is
+ *                                     the builder (the sharing overview, `owd`, or
+ *                                     the not-found state)
  *
  * `~org` is the reserved segment for the organization's own, package-less
  * flows (objectui#11553; `studioScope.ts` in app-shell says why `~` can never
- * name a package). Its pillar URL is served by the generic `:packageId/:tab`
- * route — the SAME `StudioDesignSurface`, which reads the segment as "no
- * package" — so only its bare leg needs a route of its own: a static segment
- * outranks `:packageId`, and the generic leg would send it to a Data pillar the
- * scope does not have.
+ * name a package). A static segment outranks `:packageId`, so its bare leg
+ * needs a route of its own; its other addresses reach `:packageId/:tab` and
+ * redirect to its flow list (objectstack#36903).
  *
  * objectstack#28561 — the "All metadata" area (ADR-0146 D1) has routes of its
  * own because its pages nest below it (`StudioMetadataArea` declares them), and
@@ -271,33 +287,41 @@ function StudioPackageBuilder({ area }: { area?: typeof STUDIO_METADATA_AREA }) 
  * `metadata` segment outranks `:tab`. `~all` is the area's reserved
  * cross-package segment (`metadataArea.ts` in app-shell says why it is not
  * `~org`); every `~all` URL outside the area lands on it, so none reaches the
- * pillar builder as a package id.
+ * builder as a package id.
  *
  * objectstack#36899 — the cross-package leg (`/studio/~all/metadata/*`) is
- * served by the generic area route, as `~org`'s pillar is by the generic pillar
- * route: the SAME `StudioDesignSurface`, which reads `~all` as "no package"
- * and draws the area alone, under the left menu every Studio page draws. It
- * used to be the area in the landing's console frame, a second shell the
- * author flipped into from the menu's Access group. The more specific
- * `:packageId/metadata/*` outranks `~all/*` for an area URL; every other
- * `~all` URL still lands on the area.
+ * served by the generic area route: the SAME `StudioDesignSurface`, which
+ * reads `~all` as "no package" and draws the area alone, under the left menu
+ * every Studio page draws. The more specific `:packageId/metadata/*` outranks
+ * `~all/*` for an area URL; every other `~all` URL still lands on the area.
+ *
+ * objectstack#36909 — no pillar draws a page any more. Each retired pillar
+ * address (`data`, `automations`, `access`, `interfaces`, and the bare package
+ * address, which used to land on `data`) reaches the page that replaced it in
+ * ONE redirect (`StudioPillarRedirect`; its table is `studioPillarRedirect.ts`
+ * in app-shell), where it used to pass through the builder and the area's own
+ * `?package=` redirect first.
  */
 export const studioRoutes = (
   <Route path="/studio" element={<StudioRoute />}>
     <Route index element={<StudioEntry />} />
-    <Route
-      path={STUDIO_ORG_SCOPE_SEGMENT}
-      element={<Navigate to={STUDIO_ORG_SCOPE_PILLAR} replace />}
-    />
+    <Route path={STUDIO_ORG_SCOPE_SEGMENT} element={<Navigate to={studioOrgScopePath()} replace />} />
     <Route
       path={`${STUDIO_ALL_PACKAGES_SEGMENT}/*`}
       element={<Navigate to={studioMetadataAreaPath(STUDIO_ALL_PACKAGES_SEGMENT)} replace />}
     />
-    <Route path=":packageId" element={<Navigate to={STUDIO_HOME_PILLAR} replace />} />
+    <Route path=":packageId" element={<StudioPillarAddress />} />
     <Route
       path={`:packageId/${STUDIO_METADATA_AREA}/*`}
       element={<StudioPackageBuilder area={STUDIO_METADATA_AREA} />}
     />
-    <Route path=":packageId/:tab" element={<StudioPackageBuilder />} />
+    <Route
+      path=":packageId/:tab"
+      element={
+        <StudioPillarAddress>
+          <StudioPackageBuilder />
+        </StudioPillarAddress>
+      }
+    />
   </Route>
 );

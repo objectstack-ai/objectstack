@@ -8,26 +8,22 @@
  *
  * ## Why one builder first
  *
- * The epic moves objects, flows and permission sets from their pillar
+ * The epic moved objects, flows and permission sets from their pillar
  * addresses (`/studio/<package>/data?surface=object:<name>`) to metadata
- * addresses (`/studio/<package>/metadata/<type>/<name>`). Today the "All
- * metadata" area sends a pillar type back to its pillar
- * (`areaItemPillarPath`, read through {@link STUDIO_ITEM_PILLAR}), so
- * redirecting the pillar address to the metadata one first would make the two
- * rules bounce off each other. With every producer on this builder, a designer
- * card switches its type in ONE place, {@link STUDIO_ITEM_PILLAR}, in the same
- * PR that ships its full-screen designer: the producers and the area's
- * redirect move together, so there is never a loop.
+ * addresses (`/studio/<package>/metadata/<type>/<name>`), one designer card at
+ * a time, each switching every producer here in the PR that shipped its
+ * designer. objectstack#36909 — every type has moved, so an item address is
+ * always the metadata one ({@link studioItemPath}); the retired pillar
+ * addresses only redirect (`studioPillarRedirect.ts`).
  *
  * ## Today's addresses, byte for byte
  *
- * This module changes no address. The producers it replaced did not agree on
- * how to spell a `?surface=` value, and each spelling is kept, named by
- * {@link StudioSurfaceSpelling}, because a changed byte is a changed address
- * (a bookmark, a test pin, a link an AI was handed). The mapping table
+ * The producers this module replaced did not agree on how to spell a
+ * `?surface=` value; each spelling is named by {@link StudioSurfaceSpelling},
+ * because a changed byte is a changed address (a bookmark, a test pin, a link
+ * an AI was handed), and the redirects still read every one. The mapping table
  * (`studioAddressTable.ts`) lists every address family, every `?surface=`
- * spelling and every parameter carried verbatim, and is what the designer
- * cards switch from.
+ * spelling and every parameter, and what each became.
  *
  * ## The server's two addresses
  *
@@ -40,8 +36,6 @@
  *
  * Pure: no React, no router, so every rule is pinned without a render.
  */
-
-import { DESIGNER_SURFACE_PARAM, formatSurfaceParam } from '../metadata-admin/nav-selection.js';
 
 // ---------------------------------------------------------------------------
 // The vocabulary
@@ -61,13 +55,6 @@ export const STUDIO_ALL_PACKAGES_SEGMENT = '~all';
 
 /** The reserved `/studio/<segment>` value for the package-less scope (`studioScope.ts`). */
 export const STUDIO_ORG_SCOPE_SEGMENT = '~org';
-
-/**
- * The package-less scope's retired pillar segment. objectstack#36903 — the
- * scope's flows are listed and opened in its "All metadata" area
- * (`studioOrgScopePath`); this segment only redirects there.
- */
-export const STUDIO_ORG_SCOPE_PILLAR = 'automations';
 
 /**
  * objectstack#36903 — the one type the package-less scope's area serves: its
@@ -100,41 +87,11 @@ export const STUDIO_OWD_SECTION = 'owd';
 /** The query key that names the object the overview scrolls to and marks (`?object=<name>`). */
 export const STUDIO_OWD_OBJECT_PARAM = 'object';
 
-/** The pillar keys (`StudioDesignSurface`'s `PILLARS`). */
-export type StudioPillarKey = 'data' | 'automations' | 'access';
-
 /**
- * ADR-0146 D1 — "A pillar type opened from the directory opens its pillar".
- * Where an item of each type opens TODAY: the pillar that designs it. Every
- * type not listed opens the area's generic item page.
- *
- * ⭐ This is the per-type switch of the Studio redesign. A designer card that
- * moves a type to its metadata address deletes that type's row here, in the
- * PR that ships the designer: every producer that calls
- * {@link studioItemPath}, and the area's own pillar redirect
- * (`areaItemPillarPath`), then open the metadata address together.
- *
- * objectstack#36502 — pages, dashboards, reports and views have no pillar
- * since the Interfaces pillar retired.
- *
- * objectstack#36904 — an object opens its designer on its metadata address;
- * the old `/data?surface=object:<name>` redirects there (`dataPillarRedirect`).
- * objectstack#36905 — a permission set opens its metadata address, where the
- * area draws its matrix full-screen; the Access pillar's addresses redirect
- * (`accessPillarRedirect.ts`).
- *
- * objectstack#36903 — a flow opens its designer full-screen on its metadata
- * address; the old `/automations?surface=flow:<name>` redirects there
- * (`automationsPillarRedirect.ts`).
+ * The retired pillars' route segments. objectstack#36909 — no pillar draws a
+ * page any more: each address only redirects (`studioPillarRedirect.ts`).
  */
-export const STUDIO_ITEM_PILLAR: Readonly<Record<string, StudioPillarKey>> = Object.freeze({
-  // objectstack#36903 — the last pillar type left: every item opens its designer or the generic page.
-});
-
-/** The pillar an item of `type` opens in today, or `null` when it opens the area's generic item page. */
-export function studioItemPillar(type: string): StudioPillarKey | null {
-  return Object.prototype.hasOwnProperty.call(STUDIO_ITEM_PILLAR, type) ? STUDIO_ITEM_PILLAR[type] : null;
-}
+export type StudioPillarKey = 'data' | 'automations' | 'access';
 
 // ---------------------------------------------------------------------------
 // The one path builder
@@ -232,12 +189,13 @@ export function studioOwdOverviewPath(
 }
 
 // ---------------------------------------------------------------------------
-// The `?surface=` deep link
+// The retired `?surface=` deep link
 // ---------------------------------------------------------------------------
 
 /**
- * How a producer writes a `?surface=<type>:<name>` value. Three spellings
- * reach the same surface today, and each is kept byte for byte:
+ * How a producer wrote a retired pillar's `?surface=<type>:<name>` value.
+ * Three spellings reached the same surface, and every one still redirects
+ * (`studioPillarRedirect.ts` reads them all through `parseSurfaceParam`):
  *
  *  - `'component'`: the whole value through `encodeURIComponent`,
  *    `surface=object%3Aaccount`. The default; most producers.
@@ -250,53 +208,6 @@ export function studioOwdOverviewPath(
  *    (`+`) and for `!'()~`.
  */
 export type StudioSurfaceSpelling = 'component' | 'name' | 'form';
-
-/** The `?surface=` query of one item, in one {@link StudioSurfaceSpelling}, with optional qualifiers (`action`, `view`, `nav`). */
-export function studioSurfaceQuery(
-  item: { type: string; name: string },
-  spelling: StudioSurfaceSpelling = 'component',
-  qualifiers?: Readonly<Record<string, string>>,
-): string {
-  if (spelling === 'form') {
-    return new URLSearchParams({ [DESIGNER_SURFACE_PARAM]: formatSurfaceParam(item), ...qualifiers }).toString();
-  }
-  const value =
-    spelling === 'name'
-      ? `${item.type}:${encodeURIComponent(item.name)}`
-      : encodeURIComponent(formatSurfaceParam(item));
-  let query = `${DESIGNER_SURFACE_PARAM}=${value}`;
-  for (const [key, qualifier] of Object.entries(qualifiers ?? {})) {
-    query += `&${encodeURIComponent(key)}=${encodeURIComponent(qualifier)}`;
-  }
-  return query;
-}
-
-/** Options of an item address. */
-export interface StudioItemOptions {
-  /** How the `?surface=` value is written, when the item opens a pillar. Default `'component'`. */
-  spelling?: StudioSurfaceSpelling;
-  /**
-   * Qualifiers after `?surface=`, when the item opens a pillar: `action`,
-   * `view`, `nav`. On the metadata address they are its query
-   * (objectstack#36904: `?action=` opens the object designer's Actions tab on it).
-   */
-  qualifiers?: Readonly<Record<string, string>>;
-  /** How the scope segment is written. Default `'component'`. */
-  segmentEncoding?: StudioSegmentEncoding;
-}
-
-/** A pillar of a scope, opened on one item through its `?surface=` deep link. */
-export function studioPillarItemAddress(
-  segment: string,
-  pillar: string,
-  item: { type: string; name: string },
-  options: StudioItemOptions = {},
-): string {
-  return studioPath(segment, pillar, null, {
-    query: studioSurfaceQuery(item, options.spelling, options.qualifiers),
-    segmentEncoding: options.segmentEncoding,
-  });
-}
 
 // ---------------------------------------------------------------------------
 // The "All metadata" area
@@ -326,18 +237,23 @@ export function studioMetadataItemAddress(segment: string, type: string, name: s
 }
 
 // ---------------------------------------------------------------------------
-// The item address — what the designer cards switch
+// The item address
 // ---------------------------------------------------------------------------
 
+/** Options of an item address ({@link studioItemPath}). */
+export interface StudioItemOptions {
+  /** The metadata address's query (objectstack#36904: `?action=` opens the object designer's Actions tab on it). */
+  qualifiers?: Readonly<Record<string, string>>;
+  /** How the scope segment is written. Default `'component'`. */
+  segmentEncoding?: StudioSegmentEncoding;
+}
+
 /**
- * Where one item of a package opens today: its pillar on a `?surface=` deep
- * link when {@link STUDIO_ITEM_PILLAR} names one for its type, otherwise its
- * page in the "All metadata" area. `spelling` applies to the pillar address
- * only; `qualifiers` are the metadata address's query.
+ * Where one item of a package opens: its page in the "All metadata" area,
+ * where an object, a flow and a permission set open their designers
+ * full-screen. `qualifiers` are the address's query.
  */
 export function studioItemPath(packageId: string, type: string, name: string, options: StudioItemOptions = {}): string {
-  const pillar = studioItemPillar(type);
-  if (pillar) return studioPillarItemAddress(packageId, pillar, { type, name }, options);
   return studioMetadataItemAddress(packageId, type, name, {
     segmentEncoding: options.segmentEncoding,
     query: options.qualifiers ? new URLSearchParams(options.qualifiers as Record<string, string>) : null,

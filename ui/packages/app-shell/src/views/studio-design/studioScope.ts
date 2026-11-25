@@ -7,7 +7,7 @@
  * ADR-0126 §7.1 makes a clone of a packaged flow "an ordinary org/install-owned
  * flow", and the clone door strips the package envelope on purpose, so the
  * stored row names no package. Studio was routed per package
- * (`/studio/:packageId/:tab`) and every rail read a package-scoped list, so
+ * (`/studio/:packageId/<pillar>`) and every rail read a package-scoped list, so
  * such a flow matched no route and no rail: Setup's Packaged automation page
  * says "Editing happens in Studio", and Studio could not reach the copy.
  *
@@ -43,7 +43,8 @@
  * source (`classifyProvenance`, the reading {@link isPackageLessItem} gives
  * it), so the list shows the scope's flows and the designer's ‹ › walk them
  * and nothing else. The old `/studio/~org/automations` address redirects here
- * (`automationsPillarRedirect.ts`).
+ * (`automationsPillarRedirect.ts`), and every other `/studio/~org/...` URL to
+ * the list (`studioPillarRedirect.ts`).
  */
 
 import { canonicalMetaUrlType } from '@objectstack/spec/shared';
@@ -55,9 +56,9 @@ import {
   studioMetadataItemAddress,
 } from './studioAddress.js';
 
-// objectstack#36895 — the scope's reserved segment and its one pillar are
+// objectstack#36895 — the scope's reserved segment and its one type are
 // Studio address vocabulary, owned by `studioAddress.ts`; re-exported here.
-export { STUDIO_ORG_SCOPE_SEGMENT, STUDIO_ORG_SCOPE_PILLAR, STUDIO_ORG_SCOPE_TYPE } from './studioAddress.js';
+export { STUDIO_ORG_SCOPE_SEGMENT, STUDIO_ORG_SCOPE_TYPE } from './studioAddress.js';
 
 /**
  * objectstack#36903 — the list source the scope's addresses carry: the items
