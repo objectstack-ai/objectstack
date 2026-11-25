@@ -15,6 +15,7 @@ import { describe, it, expect, vi, afterEach } from 'vitest';
 import { render, screen, fireEvent, cleanup, within } from '@testing-library/react';
 import { z } from 'zod';
 import { AiContextSchema, aiContextForm } from '@objectstack/spec/ai';
+import { getMetadataTypeSchema } from '@objectstack/spec/kernel';
 
 /** The console's served objects: two children point at `policy`, one of them twice. */
 const OBJECTS = [
@@ -61,8 +62,36 @@ afterEach(() => {
 
 const Entries = WIDGETS['related-list-entries'];
 
-/** The `related` node of the JSON Schema the server serves for `ai_context`. */
-const PACK_SCHEMA = (z.toJSONSchema(AiContextSchema, { unrepresentable: 'any', io: 'input' }) as { properties: Record<string, any> }).properties;
+/**
+ * The JSON Schema `/meta/types` serves for a type: the OUTPUT derivation
+ * (`z.toJSONSchema(schema, { unrepresentable: 'any' })`, the call
+ * `toJsonSchemaSafe` makes first), where a key with `.default()` is listed as
+ * required and carries its `default`.
+ */
+function served(type: string): Record<string, any> {
+  return z.toJSONSchema(getMetadataTypeSchema(type)!, { unrepresentable: 'any' }) as Record<string, any>;
+}
+
+/** One top-level key's node in a served schema: through `$ref`s, and through the union branch that declares it. */
+function servedNode(type: string, key: string): Record<string, any> | undefined {
+  const root = served(type);
+  const defs = (root.$defs ?? {}) as Record<string, any>;
+  const deref = (n: any): any => (n?.$ref ? deref(defs[String(n.$ref).split('/').pop()!]) : n);
+  const find = (n: any, depth: number): any => {
+    n = deref(n);
+    if (!n || depth > 4) return undefined;
+    if (n.properties?.[key]) return deref(n.properties[key]);
+    for (const b of n.anyOf ?? n.oneOf ?? []) {
+      const hit = find(b, depth + 1);
+      if (hit) return hit;
+    }
+    return undefined;
+  };
+  return find(root, 0);
+}
+
+/** The pack's top-level nodes, as served. */
+const PACK_SCHEMA = served('ai_context').properties as Record<string, any>;
 const RELATED_SCHEMA = PACK_SCHEMA.related;
 
 function relatedRow(): Record<string, unknown> | undefined {
@@ -210,11 +239,38 @@ describe('an emptied root picker removes its key (objectstack#37143)', () => {
 
   it('choosing "None" for the body field removes `body`; a composite requiring nothing keeps {}', () => {
     expect(PACK_SCHEMA.body.required).toEqual(['field']);
+    expect('default' in PACK_SCHEMA.body.properties.field).toBe(false);
     const body = compositeWith({ field: 'summary' }, 'field', '', PACK_SCHEMA.body);
     expect(body).toBeUndefined();
     expect(AiContextSchema.safeParse({ name: 'p', label: 'P', object: 'policy', body }).success).toBe(true);
     expect(compositeWith({ field: 'summary' }, 'field', 'notes', PACK_SCHEMA.body)).toEqual({ field: 'notes' });
     expect(compositeWith({ a: 'x' }, 'a', undefined, { type: 'object', properties: { a: {} } })).toEqual({});
     expect(compositeWith({ a: 'x', b: 1 }, 'a', '', PACK_SCHEMA.body)).toEqual({ b: 1 });
+  });
+});
+
+/**
+ * L2 review S3 on #37315: the served derivation lists a defaulted key as
+ * required, so "requires a key" alone would drop a legal `{}` whose presence the
+ * renderer reads. Only a required key with no default makes `{}` no value.
+ * Swept over every composite row of the registered forms against the served
+ * derivation: these are the view's, the two the review confirmed and a third.
+ */
+describe('a composite whose required keys all carry a default keeps {} (objectstack#37143)', () => {
+  it.each([
+    ['pagination', { pageSize: 25 }, 'pageSize'],
+    ['selection', { type: 'multiple' }, 'type'],
+    ['gallery', { coverFit: 'contain' }, 'coverFit'],
+  ])('view `%s`: clearing its last key leaves {}', (key, stored, sub) => {
+    const node = servedNode('view', key)!;
+    expect(node.required).toContain(sub);
+    expect('default' in node.properties[sub]).toBe(true);
+    expect(compositeWith(stored, sub, undefined, node as never)).toEqual({});
+  });
+
+  it('view `kanban` (a required key with no default) is still removed when emptied', () => {
+    const node = servedNode('view', 'kanban')!;
+    expect(node.required).toContain('groupByField');
+    expect(compositeWith({ groupByField: 'status' }, 'groupByField', undefined, node as never)).toBeUndefined();
   });
 });
