@@ -35,6 +35,11 @@
  * closed the catalog keeps `ask` and drops `build`: the door gives way to 「New
  * in Studio」, the template and the marketplace stay. The real
  * `useAiSurfaceEnabled` reads a stubbed catalog (`useAgents`).
+ *
+ * objectstack#37197 — the docs portal's head (`SidebarDocsPortalMenu`): a
+ * neutral 「Documentation」 where an app's name is, opening the same list
+ * under 「Your apps」 with no row checked, and 「Add app」 only; no
+ * app-scoped row. Real subject added: `SidebarDocsPortalMenu`.
  */
 
 import '@testing-library/jest-dom/vitest';
@@ -115,7 +120,7 @@ vi.mock('../../runtime-config', async (importOriginal) => ({
 }));
 
 import { builtInLocales } from '@object-ui/i18n/locales';
-import { SidebarAppMenu, APP_MENU_SEARCH_FROM } from '../SidebarAppMenu';
+import { SidebarAppMenu, SidebarDocsPortalMenu, APP_MENU_SEARCH_FROM } from '../SidebarAppMenu';
 import { DesignModeProvider, useDesignModeController, useHoldDesignModeOut } from '../designMode';
 
 const CRM = { name: 'crm', label: 'CRM', icon: 'flame', _packageId: 'com.acme.crm' };
@@ -534,5 +539,58 @@ describe('「Design layout」 refuses while a dashboard or report editor is open
       expect(pack.designMode.editorOpen, locale).toBeTruthy();
     }
     expect(packs['zh-Hans'].designMode.editorOpen).toContain(packs['zh-Hans'].designMode.title);
+  });
+});
+
+describe('the docs portal\'s head names no app and only switches apps (objectstack#37197)', () => {
+  function renderPortalMenu(onAppChange = vi.fn()) {
+    render(
+      <MemoryRouter>
+        <SidebarDocsPortalMenu onAppChange={onAppChange} />
+      </MemoryRouter>,
+    );
+    return onAppChange;
+  }
+  const portalMenu = () => within(screen.getByTestId('sidebar-docs-portal-menu'));
+
+  it('reads 「Documentation」, not an app, and lists every app under 「Your apps」 with none checked', () => {
+    apps = [CRM, SERVICE, SETUP];
+    renderPortalMenu();
+    const trigger = screen.getByTestId('sidebar-docs-portal-menu-trigger');
+    expect(trigger).toHaveTextContent('Documentation');
+    for (const app of [CRM, SERVICE, SETUP]) expect(trigger).not.toHaveTextContent(app.label);
+    expect(portalMenu().getByText('Your apps')).toBeInTheDocument();
+    for (const name of ['crm', 'service', 'setup']) {
+      const row = portalMenu().getByTestId(`sidebar-app-menu-row-${name}`);
+      expect(row.querySelector('svg.lucide-check'), name).toBeNull();
+    }
+    // The app menu itself is not drawn here.
+    expect(screen.queryByTestId('sidebar-app-menu-trigger')).toBeNull();
+  });
+
+  it('choosing any app opens it by its address', () => {
+    apps = [CRM, SERVICE];
+    const onAppChange = renderPortalMenu();
+    fireEvent.click(portalMenu().getByTestId('sidebar-app-menu-row-crm'));
+    fireEvent.click(portalMenu().getByTestId('sidebar-app-menu-row-service'));
+    expect(onAppChange.mock.calls).toEqual([['com.acme.crm'], ['service']]);
+  });
+
+  it('a workspace admin who may author gets 「Add app」 and no app-scoped row', () => {
+    apps = [CRM];
+    admin = true;
+    renderPortalMenu();
+    expect(portalMenu().getByTestId('sidebar-app-menu-add')).toHaveTextContent('Add app');
+    for (const id of ['sidebar-app-menu-design-layout', 'sidebar-app-menu-edit-app', 'sidebar-app-menu-view-in-studio']) {
+      expect(portalMenu().queryByTestId(id), id).toBeNull();
+    }
+    for (const text of ['Design layout', 'Edit app', 'View in Studio']) expect(portalMenu().queryByText(text)).toBeNull();
+  });
+
+  it('control: a member gets the list and no 「Add app」', () => {
+    apps = [CRM];
+    renderPortalMenu();
+    expect(portalMenu().getByTestId('sidebar-app-menu-row-crm')).toBeInTheDocument();
+    expect(portalMenu().queryByTestId('sidebar-app-menu-add')).toBeNull();
   });
 });
