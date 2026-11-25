@@ -42,7 +42,7 @@
 
 import { useRef } from 'react';
 import { useAgents } from '@object-ui/plugin-chatbot/core';
-import { catalogServesBuild } from './surfaceAgent.js';
+import { catalogServesBuild, catalogServesFocus } from './surfaceAgent.js';
 
 /**
  * Resolve the AI service base URL, mirroring AiChatPage / the Home CTAs:
@@ -69,6 +69,14 @@ export interface AiSurfaceState {
    * (`build` persisted inactive, `ask` still served).
    */
   buildServed: boolean;
+  /**
+   * objectstack#37142 — true when the same catalog serves an agent that
+   * declares it honours a conversation focus (`capabilities.focus`,
+   * objectstack#36999). With `enabled`, the gate ADR-0160 D7 puts on the
+   * `ask_ai` action: it is drawn where the pin control can be. False while
+   * loading and on a server that declares no capabilities.
+   */
+  focusServed: boolean;
 }
 
 /**
@@ -90,6 +98,7 @@ export function useAiSurfaceEnabled(): AiSurfaceState {
   return {
     enabled,
     buildServed: catalogServesBuild(agents),
+    focusServed: catalogServesFocus(agents),
     // Agents present → resolved/available. Otherwise we're loading until a fetch
     // has both started and finished with an empty result.
     isLoading: enabled ? false : isLoading || !fetchStartedRef.current,

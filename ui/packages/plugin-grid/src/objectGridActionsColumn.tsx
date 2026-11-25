@@ -6,7 +6,7 @@
 
 import React from 'react';
 import type { ObjectGridSchema } from '@object-ui/types';
-import { useAction, usePredicateScope, useCapabilityGate } from '@object-ui/react';
+import { useAction, usePredicateScope, useCapabilityGate, type useDrawsAction } from '@object-ui/react';
 import { isActionSwitchedOff } from '@object-ui/core';
 import { PINNED_RIGHT_SEAM_SHADOW_CLASSES } from '@object-ui/components';
 import { resolveRowRecordCrudAffordance } from './rowCrudAffordances';
@@ -29,7 +29,7 @@ type RowCrudAffordances = ReturnType<typeof resolveRowCrudAffordances>;
  */
 export function resolveObjectGridActionsColumn({
   schema, data, objectSchema, persistedColumns, operations, resolvedRowActionDefs,
-  wantEditAction, wantDeleteAction, mayInvokeRowAction, rowOperations, canEdit, canDelete,
+  wantEditAction, wantDeleteAction, mayInvokeRowAction, drawsRowAction, rowOperations, canEdit, canDelete,
   recordVerdict, approvalLocks, demandRowActions, predicateScope, onEdit, onDelete, editPredicates,
   deletePredicates, executeAction, setRefreshKey, t, foldInlineRowActions = false, drawRowControls = true,
 }: {
@@ -42,6 +42,8 @@ export function resolveObjectGridActionsColumn({
   wantEditAction: boolean;
   wantDeleteAction: boolean;
   mayInvokeRowAction: ReturnType<typeof useCapabilityGate>;
+  /** [ADR-0160 D7] `useDrawsAction`'s answer: an `ask_ai` row action is absent without an in-app assistant. */
+  drawsRowAction: ReturnType<typeof useDrawsAction>;
   rowOperations: ObjectGridComponentProps['rowOperations'];
   canEdit: RowCrudAffordances['canEdit'];
   canDelete: RowCrudAffordances['canDelete'];
@@ -99,7 +101,7 @@ export function resolveObjectGridActionsColumn({
   // per-record predicates and the record-level verdicts are applied. Wiring
   // alone (`operations`, a declared list) used to draw an empty column over
   // rows that offer nothing. One row is enough, so the read stops at the first.
-  const rowActionDefsGated = (resolvedRowActionDefs as any[]).filter((d) => mayInvokeRowAction(d?.requiredPermissions) && !isActionSwitchedOff(d));
+  const rowActionDefsGated = (resolvedRowActionDefs as any[]).filter((d) => mayInvokeRowAction(d?.requiredPermissions) && !isActionSwitchedOff(d) && drawsRowAction(d));
   // NON-AUTHOR SURFACE — see the `maxInlineActions` prop below.
   const maxInlineRowActions: number = foldInlineRowActions ? 0 : ((schema as any).maxInlineRowActions ?? 1);
   /**

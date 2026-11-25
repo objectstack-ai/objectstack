@@ -92,6 +92,16 @@ export function catalogServesBuild(agents: readonly AgentDescriptor[]): boolean 
 }
 
 /**
+ * objectstack#37142 — does the live catalog serve an agent that declares it
+ * honours a conversation focus (`capabilities.focus`, objectstack#36999)? The
+ * second half of the gate ADR-0160 D7 puts on the `ask_ai` action (the first
+ * is the AI surface itself). An undeclared capability is off.
+ */
+export function catalogServesFocus(agents: readonly AgentDescriptor[]): boolean {
+  return agents.some((agent) => agent.capabilities?.focus === true);
+}
+
+/**
  * cloud#1674 — is this session on the CONVERGED maker surface? True when the
  * principal may author, the deployment offers authoring, and the catalog
  * actually serves a build agent. This is the ONE predicate the console's chat

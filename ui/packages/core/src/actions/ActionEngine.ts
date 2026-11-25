@@ -232,6 +232,9 @@ export class ActionEngine {
       // [objectstack#27504] An action this installation switched off is not
       // offered (the served activation state — see `utils/action-activation`).
       .filter(ra => !isActionSwitchedOff(ra.action))
+      // [ADR-0160 D7] An `ask_ai` action is absent where the runner has no
+      // in-app assistant to hand its record to.
+      .filter(ra => this.runner.drawsAction(ra.action))
       .filter(ra => {
         // [ADR-0066 D4] Capability gate (UI half — the server enforces the
         // source of truth). Hide an action whose `requiredPermissions` are not
@@ -308,7 +311,7 @@ export class ActionEngine {
   /** Get actions that support bulk operations */
   getBulkActions(): ActionDef[] {
     return Array.from(this.actions.values())
-      .filter(ra => ra.bulkEnabled && !isActionSwitchedOff(ra.action))
+      .filter(ra => ra.bulkEnabled && !isActionSwitchedOff(ra.action) && this.runner.drawsAction(ra.action))
       .sort((a, b) => (a.priority ?? 100) - (b.priority ?? 100))
       .map(ra => ra.action);
   }
