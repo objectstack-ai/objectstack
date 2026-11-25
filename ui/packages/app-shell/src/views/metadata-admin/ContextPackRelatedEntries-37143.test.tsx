@@ -32,9 +32,12 @@ const OBJECTS = [
   { name: 'account', label: 'Account', fields: { name: { type: 'text' } } },
 ];
 
+/** The object list's load status, as the metadata context reports it (`getTypeStatus('object')`). */
+const CATALOG = vi.hoisted(() => ({ status: 'ready' as string }));
+
 vi.mock('@object-ui/react', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
-  useMetadata: () => ({ objects: OBJECTS }),
+  useMetadata: () => ({ objects: CATALOG.status === 'ready' ? OBJECTS : [], getTypeStatus: () => CATALOG.status }),
 }));
 
 /** Each child's own fields, as the draft-overlaid object read serves them. */
@@ -48,14 +51,19 @@ vi.mock('./previews/useObjectFields.js', () => ({
 }));
 
 import { WIDGETS } from './widgets';
+import { compositeWith } from './SchemaForm';
 import { contextPackLinks, isContextPackEntrySchema } from './ContextPackRelatedEntries';
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  CATALOG.status = 'ready';
+});
 
 const Entries = WIDGETS['related-list-entries'];
 
 /** The `related` node of the JSON Schema the server serves for `ai_context`. */
-const RELATED_SCHEMA = (z.toJSONSchema(AiContextSchema, { unrepresentable: 'any', io: 'input' }) as { properties: Record<string, any> }).properties.related;
+const PACK_SCHEMA = (z.toJSONSchema(AiContextSchema, { unrepresentable: 'any', io: 'input' }) as { properties: Record<string, any> }).properties;
+const RELATED_SCHEMA = PACK_SCHEMA.related;
 
 function relatedRow(): Record<string, unknown> | undefined {
   for (const section of aiContextForm.sections ?? []) {
@@ -156,5 +164,57 @@ describe('context pack related lists (objectstack#37143)', () => {
   it('the add picker carries the host\'s id, so the row label names it', () => {
     renderBlock(undefined);
     expect(screen.getByTestId('context-pack-add-list')).toHaveAttribute('id', 'related');
+  });
+
+  it('while the object list loads, or after it failed, no stored entry is marked unlinked and the picker says why it is empty', () => {
+    for (const status of ['loading', 'idle', 'error']) {
+      CATALOG.status = status;
+      renderBlock([{ object: 'policy_revision', field: 'policy' }, { object: 'account' }]);
+      expect(screen.queryByTestId('context-pack-unlinked-account')).toBeNull();
+      expect(screen.queryByTestId('context-pack-unlinked-policy_revision')).toBeNull();
+      expect(screen.getByTestId('context-pack-add-list')).toBeDisabled();
+      expect(screen.getByTestId('context-pack-add-list').textContent).not.toContain('No reference field');
+      expect(screen.queryByTestId('context-pack-catalog-failed') !== null).toBe(status === 'error');
+      cleanup();
+    }
+    CATALOG.status = 'ready';
+    renderBlock([{ object: 'account' }]);
+    expect(screen.getByTestId('context-pack-unlinked-account')).toBeInTheDocument();
+  });
+});
+
+/**
+ * The two other pickers of the form, emptied: a pack whose `fields` is `[]` or
+ * whose `body` is `{ field: '' }` is refused at save with no way back in the
+ * form, so an emptied value removes its key (L2 review S1 on #37315).
+ */
+describe('an emptied root picker removes its key (objectstack#37143)', () => {
+  const FieldMulti = WIDGETS['field-multi'];
+  const loaded = { status: 'loaded', data: [{ name: 'title', label: 'Title', type: 'text' }] } as never;
+
+  it('removing the last root field of a pack writes no `fields`, and the pack parses', () => {
+    expect(PACK_SCHEMA.fields.minItems).toBe(1);
+    const onChange = vi.fn();
+    render(<FieldMulti schema={PACK_SCHEMA.fields} value={['title']} onChange={onChange} context={{ objectFields: loaded } as never} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Remove title' }));
+    expect(onChange).toHaveBeenLastCalledWith(undefined);
+    expect(AiContextSchema.safeParse({ name: 'p', label: 'P', object: 'policy', fields: onChange.mock.lastCall![0] }).success).toBe(true);
+  });
+
+  it('an array its schema lets be empty still writes []', () => {
+    const onChange = vi.fn();
+    render(<FieldMulti schema={{ type: 'array' }} value={['title']} onChange={onChange} context={{ objectFields: loaded } as never} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Remove title' }));
+    expect(onChange).toHaveBeenLastCalledWith([]);
+  });
+
+  it('choosing "None" for the body field removes `body`; a composite requiring nothing keeps {}', () => {
+    expect(PACK_SCHEMA.body.required).toEqual(['field']);
+    const body = compositeWith({ field: 'summary' }, 'field', '', PACK_SCHEMA.body);
+    expect(body).toBeUndefined();
+    expect(AiContextSchema.safeParse({ name: 'p', label: 'P', object: 'policy', body }).success).toBe(true);
+    expect(compositeWith({ field: 'summary' }, 'field', 'notes', PACK_SCHEMA.body)).toEqual({ field: 'notes' });
+    expect(compositeWith({ a: 'x' }, 'a', undefined, { type: 'object', properties: { a: {} } })).toEqual({});
+    expect(compositeWith({ a: 'x', b: 1 }, 'a', '', PACK_SCHEMA.body)).toEqual({ b: 1 });
   });
 });

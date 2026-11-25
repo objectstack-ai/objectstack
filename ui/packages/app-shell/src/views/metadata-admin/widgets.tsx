@@ -2206,13 +2206,19 @@ function ViewRefWidget({ id, ariaLabelledBy, required, value, onChange, readOnly
   );
 }
 
+/** True when the array's JSON Schema refuses an empty array (`minItems` of 1 or more). */
+export function emptyArrayRefused(schema: unknown): boolean {
+  const min = (schema as { minItems?: unknown } | undefined)?.minItems;
+  return typeof min === 'number' && min >= 1;
+}
+
 /**
  * Ordered multi object-field picker. Used for props that reference a list of
  * fields (kanban card `columns`, gallery `visibleFields`, chart
  * `yAxisFields`, `searchableFields`, …). Preserves order; supports reorder
  * and removal; values outside the catalog are retained.
  */
-function FieldRefMultiWidget({ value, onChange, readOnly, context, ariaLabelledBy, copilotAdded }: WidgetProps) {
+function FieldRefMultiWidget({ value, onChange, readOnly, context, ariaLabelledBy, copilotAdded, schema }: WidgetProps) {
   const locale = useMetadataLocale();
   const fieldsState = context?.objectFields ?? NOT_ASKED;
   // objectui#5228 — the failure is decided here, before the catalog is read:
@@ -2236,7 +2242,10 @@ function FieldRefMultiWidget({ value, onChange, readOnly, context, ariaLabelledB
   const removeAt = (i: number) => {
     const next = selected.slice();
     next.splice(i, 1);
-    onChange(next);
+    // objectstack#37143 — an array its schema bounds below (`minItems: 1`, a
+    // context pack's `fields`) has no empty value: removing the last chip
+    // removes the key, never writes `[]` the save door refuses.
+    onChange(next.length === 0 && emptyArrayRefused(schema) ? undefined : next);
   };
   const move = (i: number, dir: -1 | 1) => {
     const j = i + dir;

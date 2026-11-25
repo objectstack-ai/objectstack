@@ -237,6 +237,15 @@ function EntryColumns({
   );
 }
 
+/** What the object catalog behind the link list can say: an answer, not yet, or nothing. */
+export type ContextPackCatalogState = 'ready' | 'loading' | 'error';
+
+/** The metadata context's per-type status, read as the catalog's state (absent = ready). */
+export function catalogStateOf(status: string | undefined): ContextPackCatalogState {
+  if (status === undefined || status === 'ready') return 'ready';
+  return status === 'error' ? 'error' : 'loading';
+}
+
 export interface ContextPackRelatedEntriesProps {
   /** The naming props of the block's primary control (the host's `controlNaming`). */
   naming: { id?: string; 'aria-labelledby'?: string; 'aria-required'?: true };
@@ -253,7 +262,16 @@ export function ContextPackRelatedEntries({ naming, schema, root, value, onChang
   const locale = useMetadataLocale();
   const metadata = useMetadata();
   const objects = metadata.objects;
-  const links = React.useMemo(() => contextPackLinks(root, Array.isArray(objects) ? objects : []), [root, objects]);
+  // The link catalog is only an answer once the object list has loaded: while
+  // it is in flight, or after it failed, "nothing links here" would be false,
+  // so no stored entry is marked unlinked and the add picker says why it is
+  // empty. Read after `objects`, whose getter starts the load. A context with
+  // no `getTypeStatus` is always ready (the field's own contract).
+  const catalog = catalogStateOf(metadata.getTypeStatus?.('object'));
+  const links = React.useMemo(
+    () => (catalog === 'ready' ? contextPackLinks(root, Array.isArray(objects) ? objects : []) : []),
+    [root, objects, catalog],
+  );
   const entries = entriesOf(value);
   const maxLists = maxItemsOf(schema);
   const maxColumns = maxItemsOf(schema?.items?.properties?.fields);
@@ -279,7 +297,11 @@ export function ContextPackRelatedEntries({ naming, schema, root, value, onChang
 
   const placeholder = !root
     ? t('engine.form.contextPack.chooseRootFirst', locale)
-    : full
+    : catalog === 'loading'
+      ? t('engine.form.loadingOptions', locale)
+      : catalog === 'error'
+        ? t('engine.form.optionsLoadFailedTitle', locale)
+        : full
       ? tFormat('engine.form.contextPack.listsFull', locale, { max: String(maxLists) })
       : links.length === 0
         ? t('engine.form.contextPack.noLinks', locale)
@@ -288,7 +310,17 @@ export function ContextPackRelatedEntries({ naming, schema, root, value, onChang
           : t('engine.form.contextPack.addList', locale);
 
   return (
-    <div className="space-y-2" data-testid="context-pack-related">
+    <div className="space-y-2" data-testid="context-pack-related" data-catalog={catalog}>
+      {catalog === 'error' && (
+        <div
+          data-testid="context-pack-catalog-failed"
+          role="status"
+          className="rounded border border-amber-200 bg-amber-50 p-2 text-xs text-amber-900"
+        >
+          <div className="font-medium">{t('engine.form.optionsLoadFailedTitle', locale)}</div>
+          <p className="mt-1 text-amber-800">{t('engine.form.optionsLoadFailedDesc', locale)}</p>
+        </div>
+      )}
       {entries.map((raw, i) => {
         if (!isPackEntry(raw)) {
           // Not a pack entry at all: kept as stored, removable, judged at save.
@@ -323,7 +355,7 @@ export function ContextPackRelatedEntries({ naming, schema, root, value, onChang
                   <span className="ml-2 text-xs text-muted-foreground">
                     {tFormat('engine.form.contextPack.via', locale, { field: link.fieldLabel })}
                   </span>
-                ) : (
+                ) : catalog !== 'ready' ? null : (
                   <span
                     data-testid={`context-pack-unlinked-${raw.object}`}
                     className="ml-2 rounded bg-amber-50 px-1 text-[10px] text-amber-800"

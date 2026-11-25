@@ -2711,6 +2711,28 @@ function summariseComposite(obj: Record<string, unknown>, specs: FormFieldSpec[]
   return parts.join(' · ');
 }
 
+/**
+ * The composite's next value after one sub-field's change (objectstack#37143).
+ * A cleared sub-field (`undefined` or `''`) drops its key, as `setField` does at
+ * the top level; and a composite left empty while its schema requires a key is
+ * no value at all, so it is removed rather than written as `{}` or
+ * `{ field: '' }` (a context pack's `body` after "None"), which the save door
+ * refuses with no way back in the form. A composite whose schema requires
+ * nothing keeps `{}`.
+ */
+export function compositeWith(
+  obj: Record<string, unknown>,
+  key: string,
+  v: unknown,
+  schema: JsonSchema | undefined,
+): Record<string, unknown> | undefined {
+  const next: Record<string, unknown> = { ...obj, [key]: v };
+  if (v === undefined || v === '') delete next[key];
+  const required = Array.isArray(schema?.required) ? (schema!.required as unknown[]) : [];
+  if (Object.keys(next).length === 0 && required.length > 0) return undefined;
+  return next;
+}
+
 function CompositeField({
   value,
   fields,
@@ -2758,7 +2780,7 @@ function CompositeField({
         fieldSpec={spec}
         widgetContext={widgetContext}
         formData={obj}
-        onChange={(v) => onChange({ ...obj, [spec.field]: v })}
+        onChange={(v) => onChange(compositeWith(obj, spec.field, v, schema))}
       />
     );
   });
