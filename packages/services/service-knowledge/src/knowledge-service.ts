@@ -31,6 +31,7 @@ import {
 import {
   admitObject,
   admitSourceFields,
+  documentTitleField,
   type KnowledgeFieldSecurity,
   type KnowledgeSourceAdmission,
   type ObjectAdmission,
@@ -518,12 +519,92 @@ export class KnowledgeService implements IKnowledgeService {
 
   // ── Permission-aware search ───────────────────────────────────────
 
+  /**
+   * Search every source the caller is admitted to, re-check each object-source
+   * hit as the caller ({@link applyPermissionFilter}), and answer the best
+   * `topK` hits by score.
+   *
+   * ## The refill after the permission filter
+   *
+   * The re-check runs AFTER ranking, so a caller who may read few of the
+   * matching rows would be answered from what is left of `topK` ranked hits —
+   * the fewer rows a caller may read, the closer to empty. So when the re-check
+   * can remove hits (a caller who is not the system identity, with an engine to
+   * re-check with), each `object` source is asked for
+   * `topK × SEARCH_FIRST_ROUND_FACTOR` hits. When fewer than `topK` survive,
+   * the sources that answered as many hits as they were asked — the only ones
+   * that may hold more — are asked once more, for
+   * `topK × SEARCH_REFILL_FACTOR`; that round's hits replace the source's
+   * first-round hits (a source that fails it keeps them). At most two rounds,
+   * and each embeds the query once per source it asks. An adapter that caps
+   * `topK` below what it was asked answers fewer than asked, so it is never
+   * asked again.
+   *
+   * A `file` / `http` source is asked for `topK` once: the re-check never
+   * removes its hits. The system identity, and a caller the service cannot
+   * re-check (no context, no engine — object sources are then not searched at
+   * all), get one round of `topK`.
+   *
+   * The answer is at most `topK` hits (`KnowledgeSearchOptions.topK`), chunk-
+   * level as before. How many hits the re-check removed is logged at `debug`,
+   * never returned: the count is an oracle on rows the caller may not read.
+   */
   async search(query: string, opts: KnowledgeSearchOptions = {}): Promise<KnowledgeHit[]> {
     const topK = opts.topK ?? this.defaultTopK;
-    const sources = await this.admitSources(this.resolveSearchTargets(opts.sourceIds), opts.executionContext);
+    const ctx = opts.executionContext;
+    const sources = await this.admitSources(this.resolveSearchTargets(opts.sourceIds), ctx);
     if (sources.length === 0) return [];
 
-    const rawHits: KnowledgeHit[] = [];
+    const filtered = ctx !== undefined && ctx.isSystem !== true && this.options.dataEngine !== undefined;
+    const firstAsk = (source: KnowledgeSource): number =>
+      filtered && source.source.kind === 'object' ? topK * SEARCH_FIRST_ROUND_FACTOR : topK;
+    const first = await this.searchRound(query, sources, firstAsk, opts.filter);
+    const raw = [...first.values()].flatMap((answer) => answer.hits);
+    let kept = await this.applyPermissionFilter(raw, ctx);
+    let removed = raw.length - kept.length;
+
+    if (filtered && kept.length < topK) {
+      const saturated = sources.filter(({ source }) => {
+        const answer = first.get(source.id);
+        return source.source.kind === 'object' && answer !== undefined && answer.answered >= firstAsk(source);
+      });
+      if (saturated.length > 0) {
+        const refill = await this.searchRound(query, saturated, () => topK * SEARCH_REFILL_FACTOR, opts.filter);
+        // A refilled source's second answer is a superset of its first: its
+        // first-round survivors are dropped and the whole answer re-checked.
+        const refilledHits = [...refill.values()].flatMap((answer) => answer.hits);
+        const refilledKept = await this.applyPermissionFilter(refilledHits, ctx);
+        const firstRaw = raw.filter((hit) => refill.has(hit.sourceId)).length;
+        const firstKept = kept.filter((hit) => refill.has(hit.sourceId)).length;
+        kept = [...kept.filter((hit) => !refill.has(hit.sourceId)), ...refilledKept];
+        removed += refilledHits.length - refilledKept.length - (firstRaw - firstKept);
+      }
+    }
+
+    if (removed > 0) {
+      this.options.logger?.debug?.(
+        `[knowledge] the permission re-check removed ${removed} hit(s) this caller may not read; ` +
+          `${Math.min(kept.length, topK)} of topK=${topK} answered.`,
+      );
+    }
+    kept.sort((a, b) => b.score - a.score);
+    return kept.slice(0, topK);
+  }
+
+  /**
+   * One round of {@link search}: ask each source's adapter for `ask(source)`
+   * hits. Answers, per source that answered, the hits it serves and how many
+   * the adapter returned (`answered`, before a hit naming another source is
+   * dropped — what decides whether the adapter may hold more). A source whose
+   * adapter is unknown or throws is absent from the answer, logged.
+   */
+  private async searchRound(
+    query: string,
+    sources: Array<{ source: KnowledgeSource; organizationIds?: string[] }>,
+    ask: (source: KnowledgeSource) => number,
+    filter: Record<string, unknown> | undefined,
+  ): Promise<Map<string, { hits: KnowledgeHit[]; answered: number }>> {
+    const out = new Map<string, { hits: KnowledgeHit[]; answered: number }>();
     for (const { source, organizationIds } of sources) {
       const adapter = this.adapters.get(source.adapter);
       if (!adapter) {
@@ -535,35 +616,31 @@ export class KnowledgeService implements IKnowledgeService {
       try {
         const hits = await adapter.search(query, {
           source,
-          topK,
-          filter: opts.filter,
+          topK: ask(source),
+          filter,
           ...(organizationIds === undefined ? {} : { organizationIds }),
         });
         // A hit is served as the source it was searched for. One whose
         // `sourceId` names another source (an adapter answering from a store
         // two sources share) is dropped: that source's admission was never
         // asked for this hit, so serving it would skip the gates above.
-        let foreign = 0;
-        for (const hit of hits) {
-          if (hit.sourceId === source.id) rawHits.push(hit);
-          else foreign++;
-        }
+        const served: KnowledgeHit[] = [];
+        for (const hit of hits) if (hit.sourceId === source.id) served.push(hit);
+        const foreign = hits.length - served.length;
         if (foreign > 0) {
           this.options.logger?.warn?.(
             `[knowledge] adapter '${source.adapter}' answered ${foreign} hit(s) for source '${source.id}' that name ` +
               'another source; dropped — a hit is served only as the source it was searched for.',
           );
         }
+        out.set(source.id, { hits: served, answered: hits.length });
       } catch (err) {
         this.options.logger?.error?.(
           `[knowledge] adapter '${source.adapter}' search failed for source '${source.id}': ${(err as Error).message}`,
         );
       }
     }
-
-    const filtered = await this.applyPermissionFilter(rawHits, opts.executionContext);
-    filtered.sort((a, b) => b.score - a.score);
-    return filtered.slice(0, topK);
+    return out;
   }
 
   // ── Sync entrypoints (called by the host plugin's event bridge) ───
@@ -996,6 +1073,21 @@ export class KnowledgeService implements IKnowledgeService {
 export const REINDEX_PAGE_SIZE = 100;
 
 /**
+ * How many times `topK` a search asks each `object` source for in its first
+ * round, when the permission re-check can remove hits ({@link
+ * KnowledgeService.search}).
+ */
+export const SEARCH_FIRST_ROUND_FACTOR = 5;
+
+/**
+ * How many times `topK` the one refill round asks a source for, when fewer
+ * than `topK` hits survived the re-check — the cap on what a search reads:
+ * a caller who may read fewer matching rows than survive within it is
+ * answered fewer than `topK`.
+ */
+export const SEARCH_REFILL_FACTOR = 20;
+
+/**
  * Run `task` after every earlier task chained on the same `key` has settled —
  * an in-process promise chain per key, dropped from `tails` once idle.
  * Answers `task`'s own outcome (rejection included); the chain itself never
@@ -1268,6 +1360,27 @@ function isRecordId(value: unknown): value is string | number {
   return (typeof value === 'string' && value !== '') || (typeof value === 'number' && Number.isFinite(value));
 }
 
+/**
+ * A document's `title` (ADR-0161 K5): the value of the object's display field
+ * ({@link documentTitleField}), read from the record when it is non-empty text
+ * or a finite number. `undefined` when the field is withheld (credential-class
+ * or `internal`), empty, or not one of those values. Not
+ * `resolveRecordDisplayName`: its `Record #<id>` floor is a UI label, not
+ * index content.
+ */
+function documentTitle(
+  record: Record<string, unknown>,
+  schema: unknown,
+  withheld: ReadonlySet<string>,
+): string | undefined {
+  const field = documentTitleField(schema);
+  if (field === undefined || withheld.has(field)) return undefined;
+  const value = record[field];
+  if (typeof value === 'string') return value.trim().length > 0 ? value : undefined;
+  if (typeof value === 'number' && Number.isFinite(value)) return String(value);
+  return undefined;
+}
+
 /** Deterministic document id derived from the source + record id. */
 export function documentIdFor(sourceId: string, recordId: string): string {
   return `${sourceId}:${recordId}`;
@@ -1286,6 +1399,9 @@ export function documentIdFor(sourceId: string, recordId: string): string {
  * served to every reader the source admits, and a mask placeholder is no
  * content. Without a schema nothing is withheld here (the engine's event body
  * and read path still apply their own projection upstream).
+ *
+ * The `title` is the value of the object's display field ({@link
+ * documentTitle}); with no schema, of a field named `title`.
  *
  * `posture` (the deployment's effective tenancy posture) decides the
  * document's `organizationId` (ADR-0161 K8, item 9): the record's
@@ -1328,7 +1444,7 @@ export function recordToDocument(
     sourceId: source.id,
     sourceRecordId: recordId || undefined,
     content: contentParts.join('\n\n'),
-    title: typeof record.title === 'string' && !withheld.has('title') ? record.title : undefined,
+    title: documentTitle(record, schema, withheld),
     metadata,
   };
   const organizationId = documentOrganizationId(record, posture);
