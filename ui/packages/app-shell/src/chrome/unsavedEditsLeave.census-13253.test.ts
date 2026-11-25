@@ -84,15 +84,16 @@ describe('every shell departure in the four files goes through confirmUnsavedLea
     expect(bareCalls(code('chrome/CommandPalette.tsx'), 'onAppChange')).toEqual([]);
   });
 
-  it('UnifiedSidebar: its one read of onAppChange, the app menu\'s switch, goes through the seam (objectstack#36112)', () => {
-    // Declared on the props interface, destructured, and read once: the app
-    // menu in the sidebar's head hands it on wrapped (that line names it
-    // twice, the menu's prop and the call). A second read must be wrapped
-    // too, and this count makes it a visible change.
+  it('UnifiedSidebar: its two reads of onAppChange, the head menus\' switches, go through the seam (objectstack#36112, objectstack#37197)', () => {
+    // Declared on the props interface, destructured, and read twice: the app
+    // menu in the sidebar's head, and the docs portal's 「Documentation」 head
+    // in its place on `/docs` (objectstack#37197), each hand it on wrapped
+    // (each line names it twice, the menu's prop and the call). A third read
+    // must be wrapped too, and this count makes it a visible change.
     const sidebar = code('layout/UnifiedSidebar.tsx');
-    expect(sidebar.match(/\bonAppChange\b/g) ?? []).toHaveLength(4);
+    expect(sidebar.match(/\bonAppChange\b/g) ?? []).toHaveLength(6);
     expect(sidebar).toMatch(/onAppChange\?: \(name: string\) => void;/);
-    expect(sidebar).toMatch(/onAppChange=\{\(segment\) => confirmUnsavedLeave\(\(\) => onAppChange\?\.\(segment\)\)\}/);
+    expect(sidebar.match(/onAppChange=\{\(segment\) => confirmUnsavedLeave\(\(\) => onAppChange\?\.\(segment\)\)\}/g) ?? []).toHaveLength(2);
   });
 
   it('CONTROL: the census sees a bare call, and does not count a wrapped one or a commented one', () => {
