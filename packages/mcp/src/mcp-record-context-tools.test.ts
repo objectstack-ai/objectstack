@@ -205,7 +205,7 @@ describe('[ADR-0160 D4] get_record_context — transport parity (HTTP and stdio 
     });
     expect(http.isError).toBe(true);
     expect(stdio).toEqual(http);
-    expect(http.payload).toMatchObject({ code: 'RESOURCE_NOT_FOUND', status: 404 });
+    expect(http.payload.error).toMatchObject({ code: 'RESOURCE_NOT_FOUND', status: 404 });
   });
 
   it('an unknown record is answered exactly as get_record answers it, on both doors', async () => {
@@ -214,7 +214,7 @@ describe('[ADR-0160 D4] get_record_context — transport parity (HTTP and stdio 
     const record = await callBoth(stdioBridge(), 'get_record', args);
     expect(context.stdio).toEqual(context.http);
     expect(context.http).toEqual(record.http);
-    expect(context.http.payload).toMatchObject({ code: 'RECORD_NOT_FOUND', status: 404 });
+    expect(context.http.payload.error).toMatchObject({ code: 'RECORD_NOT_FOUND', status: 404 });
   });
 
   it('a root whose API exposure refuses the read is answered as get_record answers it', async () => {
@@ -222,8 +222,9 @@ describe('[ADR-0160 D4] get_record_context — transport parity (HTTP and stdio 
     const context = await callBoth(stdioBridge([{ ...PACK, name: 'closed', object: 'closed_revision', related: undefined, body: undefined, fields: ['version'] }]), GET_RECORD_CONTEXT_TOOL_NAME, args);
     const record = await callBoth(stdioBridge(), 'get_record', args);
     expect(context.stdio).toEqual(context.http);
-    expect(context.http.payload.code).toBe(record.http.payload.code);
-    expect(context.http.payload.status).toBe(record.http.payload.status);
+    expect(context.http.payload.error.code).toBe(record.http.payload.error.code);
+    expect(context.http.payload.error.code).toBe('OBJECT_API_DISABLED');
+    expect(context.http.payload.error.status).toBe(record.http.payload.error.status);
   });
 });
 
@@ -254,7 +255,7 @@ describe('[ADR-0160 D4] get_record_context — the gates the record tools put be
     const pack = { ...PACK, related: [{ object: 'sys_note', fields: ['body'] }] };
     const { http, stdio } = await callBoth(stdioBridge([pack]), GET_RECORD_CONTEXT_TOOL_NAME, { objectName: 'policy', recordId: 'p1' });
     expect(stdio).toEqual(http);
-    expect(http.payload).toMatchObject({ code: 'PERMISSION_DENIED', status: 403 });
+    expect(http.payload.error).toMatchObject({ code: 'PERMISSION_DENIED', status: 403 });
     expect(JSON.stringify(http.payload)).not.toContain('sys_note');
   });
 
@@ -262,7 +263,7 @@ describe('[ADR-0160 D4] get_record_context — the gates the record tools put be
     const pack = { ...PACK, related: [{ object: 'closed_revision', fields: ['version'] }] };
     const { http, stdio } = await callBoth(stdioBridge([pack]), GET_RECORD_CONTEXT_TOOL_NAME, { objectName: 'policy', recordId: 'p1' });
     expect(stdio).toEqual(http);
-    expect(http.payload).toMatchObject({ code: 'PERMISSION_DENIED', status: 403 });
-    expect(http.payload.error).toContain("'closed_revision'");
+    expect(http.payload.error).toMatchObject({ code: 'PERMISSION_DENIED', status: 403 });
+    expect(http.payload.error.message).toContain("'closed_revision'");
   });
 });
