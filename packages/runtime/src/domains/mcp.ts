@@ -1145,7 +1145,7 @@ export function buildMcpBridge(
         return describeServedObject(localized, declared);
     };
 
-    const bridge: any = {
+    const bridge = {
         listObjects: listObjectSummaries,
         /**
          * [#6504] The HTTP transport's half of the `list_objects` completeness
