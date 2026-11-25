@@ -699,6 +699,7 @@ const es = {
       needsWholeRows:
         "La agrupación necesita todos los registros, pero esta cuadrícula recibió solo una página de ellos, por lo que no se pueden contar los grupos. Entregue todos los registros o deje que la cuadrícula los obtenga de un origen de datos que implemente queryGroupHeaders.",
       draftOnly: "No agrupado por {{fields}}: solo existe en el borrador hasta que publique.",
+      moreGroupsNotLoaded: "No se cargaron más grupos: esta vista tiene más grupos de los que el servidor devuelve en una lectura, así que solo se muestran algunos.",
     },
     // objectui#4024 — column-footer aggregate prefixes, keyed by the spec's
     // `ColumnSummary` vocabulary. `pattern` owns the label/value join so this

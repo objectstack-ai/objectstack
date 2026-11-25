@@ -681,6 +681,7 @@ const ja = {
       needsWholeRows:
         "グループ化にはすべてのレコードが必要ですが、このグリッドにはその一部のページしか渡されていないため、グループの件数を数えられません。すべてのレコードを渡すか、queryGroupHeaders を実装したデータソースからグリッドに読み込ませてください。",
       draftOnly: "{{fields}} ではグループ化されていません：公開するまで下書きにのみ存在します。",
+      moreGroupsNotLoaded: "一部のグループは読み込まれていません：このビューのグループ数はサーバーが 1 回の読み取りで返す数を超えているため、一部のみ表示しています。",
     },
     // objectui#4024 — column-footer aggregate prefixes, keyed by the spec's
     // `ColumnSummary` vocabulary. `pattern` owns the label/value join so this

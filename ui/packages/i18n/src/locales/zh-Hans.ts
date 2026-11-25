@@ -657,6 +657,7 @@ const zh = {
       needsWholeRows:
         '分组需要全部记录，但此表格只收到其中一页，因此无法统计分组。请传入全部记录，或让表格从实现了 queryGroupHeaders 的数据源获取记录。',
       draftOnly: '未按 {{fields}} 分组：它仅存在于草稿中，发布后才生效。',
+      moreGroupsNotLoaded: '更多分组未加载：此视图的分组数超过服务器单次读取返回的数量，因此只列出了部分分组。',
     },
     // objectui#4024 — column-footer aggregate prefixes, keyed by the spec's
     // `ColumnSummary` vocabulary. `pattern` owns the label/value join so this
