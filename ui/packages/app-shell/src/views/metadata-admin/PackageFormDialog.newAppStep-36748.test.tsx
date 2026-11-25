@@ -34,6 +34,9 @@ import { MemoryRouter, Route, Routes, useLocation, useNavigate } from 'react-rou
 // The surface's reach loads `@objectstack/lint` lazily; pay that load during
 // collection, not inside a case's clocked window (`check:test-source-alias`).
 import '@objectstack/lint';
+// It also reaches `import('@object-ui/plugin-detail')` (the command palette's lazy
+// detail surfaces): paid here, at collection, never inside a test's clock.
+import '@object-ui/plugin-detail';
 import { loadStudioCatalogue } from '@object-ui/i18n/namespaces/studio';
 await loadStudioCatalogue('zh');
 
