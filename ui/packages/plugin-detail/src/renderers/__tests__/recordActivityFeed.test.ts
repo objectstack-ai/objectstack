@@ -706,7 +706,7 @@ describe('a `types` entry naming a kind nothing produces says so (objectui#5877)
     // the unproduced side, which is what the diagnostic warns about.
     // `approval` joined in objectstack#35723: plugin-approvals writes one
     // activity row per approval step, read as that kind.
-    expect(produced.slice().sort()).toEqual(['note', 'comment', 'event', 'field_change', 'system', 'task']);
+    expect(produced.slice().sort()).toEqual(['approval', 'comment', 'event', 'field_change', 'system', 'task']);
     for (const kind of [
       'call', 'email', 'file', 'note', 'record_create', 'record_delete', 'sharing',
     ]) {
