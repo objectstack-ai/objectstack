@@ -34,7 +34,7 @@ describe('the menu placement table agrees with the registry (objectstack#37200)'
   });
 
   it('every row names a registered type the directory lists', () => {
-    const registered = new Set(DEFAULT_METADATA_TYPE_REGISTRY.map((entry) => entry.type));
+    const registered = new Set<string>(DEFAULT_METADATA_TYPE_REGISTRY.map((entry) => entry.type));
     for (const row of STUDIO_MENU_PLACEMENT) {
       expect(registered.has(row.type), row.type).toBe(true);
       expect(HIDDEN_DIRECTORY_TYPES.has(row.type), row.type).toBe(false);
