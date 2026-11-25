@@ -3570,6 +3570,18 @@ const STUDIO_EN: Record<string, string> = {
   'engine.studio.backToAppTitle': 'Leave Studio and go back to {app}',
   'engine.studio.backToAppTitleNoApp': 'Leave Studio and go back to your apps',
   'engine.studio.mark': 'Studio',
+  // objectstack#37139 — the 「⋯」 package menu beside the app or package name:
+  // the development face's whole-package actions, for a manage_metadata holder.
+  'engine.studio.packageMenu.trigger': 'Package actions',
+  'engine.studio.packageMenu.editInfo': 'Edit package info',
+  'engine.studio.packageMenu.duplicate': 'Duplicate as a new package',
+  'engine.studio.packageMenu.revert': 'Revert to last publish',
+  'engine.studio.packageMenu.manageInSetup': 'Manage in Setup…',
+  'engine.studio.packageMenu.noChanges': 'Nothing has changed since the last publish.',
+  'engine.studio.packageMenu.duplicateTitle': 'Duplicate “{name}” as a new package',
+  'engine.studio.packageMenu.duplicateDescription': 'The copy is a new package you can change on its own. Its objects are renamed to the new package’s namespace.',
+  'engine.studio.packageMenu.revertTitle': 'Revert “{name}” to its last publish?',
+  'engine.studio.packageMenu.revertDescription': 'Every change made since the last publish is discarded, and the package goes back to its last published version. Discarded changes cannot be recovered.',
   'engine.studio.publishTitle': 'Review and publish every pending draft in this package together',
   'engine.studio.publishNoneTitle': 'No drafts pending publish',
   'engine.studio.publishedAll': 'Published all drafts in this package',
