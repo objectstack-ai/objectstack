@@ -40,11 +40,10 @@ import { ExistingTableAdoptionRefusal } from './existing-table-refusal.js';
 import { implicitReferenceIndexes, indexedKeyColumns, isUniqueScopeDeclared } from './schema-drift.js';
 import {
   AUDIT_TIMESTAMP_COLUMNS, MYSQL_DATETIME_PRECISION, NUMERIC_SCALAR_TYPES, declaredValueShapes,
-  isDeferredDdlLockWaitRefusal, isMultiValuedColumn, isNowDefaultValue,
+  declaresColumnNotNull, isDeferredDdlLockWaitRefusal, isMultiValuedColumn, isNowDefaultValue,
 } from './sql-driver-top-level.js';
 import type { SqlDriver } from './sql-driver.js';
 import { isInstantColumnType } from './date-on-instant-column.js';
-import { declaresColumnNotNull } from './sql-driver-top-level.js';
 import type { Knex } from 'knex';
 
 /**
