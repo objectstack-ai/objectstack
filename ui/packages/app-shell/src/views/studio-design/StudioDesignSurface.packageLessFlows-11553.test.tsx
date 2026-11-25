@@ -111,6 +111,11 @@ vi.mock('./packages-io', async (importOriginal) => {
     ...mod,
     // The stock showcase: its one installed package is read-only.
     fetchPackages: vi.fn(async () => [{ id: SHOWCASE, name: 'Showcase', writable: false, namespace: 'showcase' }]),
+    // objectstack#36903 — the same answer as the area reads it: a flow opens
+    // in the area now, whose courtesy gate reads the listed manifests.
+    fetchListedPackageManifests: vi.fn(
+      async () => new Map([[SHOWCASE, { id: SHOWCASE, name: 'Showcase', writable: false, manifest: { scope: 'installed' } }]]),
+    ),
   };
 });
 
@@ -262,6 +267,16 @@ describe('the package-less scope lists a package-less flow and opens it editable
   it('the old scope address lands on the scope\'s flow list', async () => {
     renderAt('/studio/~org/automations');
     await waitFor(() => expect(location()).toBe(ORG_LIST), { timeout: 8000 });
+  });
+
+  it('its flow list names its flows and offers no create: authoring stays package-first', async () => {
+    renderAt(ORG_LIST);
+    // Positive leg: the list rendered, with the scope's flow on it.
+    expect(await screen.findByText('qa_urgent_alert_clone', {}, { timeout: 8000 })).toBeInTheDocument();
+    // objectstack#36903 — the rail's New went to the list's create, which the
+    // scope's read-only area does not offer.
+    expect(screen.queryByRole('button', { name: /^(New|Create)$/ })).not.toBeInTheDocument();
+    expect(screen.queryByTitle('New automation')).not.toBeInTheDocument();
   });
 
   it('opens it editable, and an edit saves a draft bound to no package', async () => {

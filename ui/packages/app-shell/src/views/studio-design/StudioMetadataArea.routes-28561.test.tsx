@@ -62,6 +62,19 @@ vi.mock('./StudioBundleItemEditor.js', () => ({
   ),
 }));
 
+/**
+ * objectstack#36903 — the flow designer, full-screen on a flow's address: a
+ * stub printing the flow it is fixed on (the designer is pinned in the
+ * `AutomationsPillar.*` and `StudioDesignSurface.*` suites).
+ */
+vi.mock('./AutomationsPillar.js', () => ({
+  AutomationsPillar: ({ flowName, packageId }: { flowName: string; packageId: string | null }) => (
+    <div data-testid="flow-designer" data-item={JSON.stringify({ flowName, packageId })}>
+      <PageStub page="flow-designer" />
+    </div>
+  ),
+}));
+
 /** `GET /api/v1/packages` as the listed manifests read it: one writable, one read-only, one kernel. */
 let listed: Map<string, { id: string; name: string; writable: boolean; manifest: Record<string, unknown> }>;
 let listFails = false;
@@ -187,9 +200,15 @@ describe('the area mounts the metadata pages (objectstack#28561)', () => {
     expect((await page()).page).toBe('history');
     expect(where()).toBe(`/studio/${WRITABLE}/metadata/matrix_36901/m1/history?package=${WRITABLE}`);
     cleanup();
-    // So does an item a pillar's designer opens (a flow), which has no tab row yet.
-    mount(`/studio/${WRITABLE}/metadata/flow/f1/history?package=${WRITABLE}`);
+    // So does an item a pillar's designer opens (an object), which has no tab row yet.
+    mount(`/studio/${WRITABLE}/metadata/object/o1/history?package=${WRITABLE}`);
     expect((await page()).page).toBe('history');
+  });
+
+  it('a flow\'s history is its full-screen designer\'s History tab (objectstack#36903)', async () => {
+    mount(`/studio/${WRITABLE}/metadata/flow/f1/history?package=${WRITABLE}`);
+    expect((await page()).page).toBe('flow-designer');
+    expect(where()).toBe(`/studio/${WRITABLE}/metadata/flow/f1?package=${WRITABLE}&tab=history`);
   });
 
   it('create: a writable package opens it, a read-only package lands on the list', async () => {
@@ -286,7 +305,6 @@ describe("a read-only base's create opens in its .custom pair (objectstack#36897
 describe('a pillar type opened from the area opens its pillar', () => {
   for (const [type, pillar] of [
     ['object', 'data'],
-    ['flow', 'automations'],
     ['permission', 'access'],
   ] as const) {
     it(`${type} → ${pillar}, with \`?surface=\``, async () => {
@@ -297,6 +315,17 @@ describe('a pillar type opened from the area opens its pillar', () => {
       expect(url.searchParams.get('surface')).toBe(`${type}:item_1`);
     });
   }
+
+  it('a flow opens its designer full-screen on its own address, no pillar (objectstack#36903)', async () => {
+    mount(`/studio/${WRITABLE}/metadata/flow/item_1?package=${WRITABLE}`);
+    expect((await page()).page).toBe('flow-designer');
+    expect(JSON.parse(screen.getByTestId('flow-designer').getAttribute('data-item') ?? 'null')).toEqual({
+      flowName: 'item_1',
+      packageId: WRITABLE,
+    });
+    expect(where()).toBe(`/studio/${WRITABLE}/metadata/flow/item_1?package=${WRITABLE}`);
+    expect(screen.queryByTestId('pillar')).toBeNull();
+  });
 
   it('a type no pillar designs opens the generic page', async () => {
     mount(`/studio/${WRITABLE}/metadata/agent/support_bot?package=${WRITABLE}`);

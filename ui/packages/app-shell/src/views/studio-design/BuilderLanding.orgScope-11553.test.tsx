@@ -66,8 +66,8 @@ afterEach(() => {
 });
 
 function LocationProbe() {
-  const { pathname } = useLocation();
-  return <div data-testid="location">{pathname}</div>;
+  const { pathname, search } = useLocation();
+  return <div data-testid="location">{`${pathname}${search}`}</div>;
 }
 
 function renderLanding() {
@@ -77,6 +77,8 @@ function renderLanding() {
       <Routes>
         <Route path="/studio" element={<BuilderLanding />} />
         <Route path="/studio/:packageId/:tab" element={<div data-testid="pillar-builder" />} />
+        {/* objectstack#36903 — the scope's flows are its area's list. */}
+        <Route path="/studio/:packageId/metadata/*" element={<div data-testid="area-flow-list" />} />
       </Routes>
     </MemoryRouter>,
   );
@@ -97,7 +99,7 @@ describe('Studio home → the package-less scope (objectui#11553)', () => {
 
     fireEvent.click(entry);
     await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent('/studio/~org/metadata/flow?source=runtime'));
-    expect(screen.getByTestId('pillar-builder')).toBeInTheDocument();
+    expect(screen.getByTestId('area-flow-list')).toBeInTheDocument();
   });
 
   it('offers it beside writable packages too, and a package card still opens that package', async () => {

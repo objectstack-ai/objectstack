@@ -132,7 +132,17 @@ const mockClient = vi.hoisted(() => {
       server.drafts.set(k(type, name), body);
       return { type, name, item };
     }),
-    publish: vi.fn(async () => ({ success: true })),
+    // The draft goes live, as the server's publish does: objectstack#36903 —
+    // the list's create publishes, then opens the flow's address, which reads
+    // the live list.
+    publish: vi.fn(async (type: string, name: string) => {
+      const body = server.drafts.get(k(type, name));
+      if (body) {
+        server.active.set(k(type, name), body);
+        server.drafts.delete(k(type, name));
+      }
+      return { success: true };
+    }),
     reset: vi.fn(async () => ({})),
   };
 });
@@ -251,6 +261,8 @@ describe('the header Trigger pill reads the Start node (objectui#11779)', () => 
   it('a schedule flow reads as a schedule; a manual flow falls back to its type', async () => {
     await openFlow('Task due reminder', 'task_due_reminder');
     expect(headerPill('Trigger').value).toBe('Schedule');
+    // objectstack#36903 — another flow is another address: a fresh mount.
+    cleanup();
     await openFlow('Approve manually', 'approve_manually');
     expect(headerPill('Trigger').value).toBe('autolaunched');
   });

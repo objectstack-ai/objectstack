@@ -15,7 +15,7 @@ import * as React from 'react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, cleanup, waitFor, within } from '@testing-library/react';
 import { toast } from 'sonner';
-import { MemoryRouter } from 'react-router-dom';
+import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
 
 const PKG = 'com.acme.app';
 
@@ -86,10 +86,24 @@ beforeEach(() => {
 
 afterEach(cleanup);
 
+function Where() {
+  const { pathname, search } = useLocation();
+  return <div data-testid="where">{`${pathname}${search}`}</div>;
+}
+const where = () => screen.getByTestId('where').textContent;
+const LIST = `/studio/${PKG}/metadata/flow`;
+
 function mount(readOnly = false) {
   render(
-    <MemoryRouter initialEntries={[`/studio/${PKG}/metadata/flow/${FLOW.name}`]}>
-      <AutomationsPillar packageId={PKG} flowName={FLOW.name} readOnly={readOnly} />
+    <MemoryRouter initialEntries={[`${LIST}/${FLOW.name}?sort=label`]}>
+      <Where />
+      <Routes>
+        <Route
+          path={`${LIST}/:name`}
+          element={<AutomationsPillar packageId={PKG} flowName={FLOW.name} readOnly={readOnly} />}
+        />
+        <Route path={LIST} element={<div data-testid="flow-list" />} />
+      </Routes>
     </MemoryRouter>,
   );
 }
@@ -103,11 +117,10 @@ async function openConfirm(): Promise<HTMLElement> {
 const deleteFromMenu = async () => fireEvent.click(within(await openConfirm()).getByTestId('auto-delete-confirm-action'));
 
 describe('Automations — Delete flow (#27356 row 19)', () => {
-  it('asks naming the flow, discards its draft, deletes it at the package, and leaves the pillar on its empty state', async () => {
+  it('asks naming the flow, discards its draft, deletes it at the package, and returns to the flow list', async () => {
     server.draft = { ...FLOW, label: 'Approval' };
     mount();
     expect(await screen.findByTestId('auto-canvas-caption', undefined, { timeout: 8000 })).toHaveTextContent('Approval');
-    const listReads = mockClient.list.mock.calls.length;
 
     const dialog = await openConfirm();
     expect(dialog).toHaveTextContent('"Approval"');
@@ -120,19 +133,19 @@ describe('Automations — Delete flow (#27356 row 19)', () => {
       ['flow', 'approval', { state: 'draft', packageId: PKG }],
       ['flow', 'approval', { packageId: PKG }],
     ]);
-    await waitFor(() => expect(mockClient.list.mock.calls.length).toBeGreaterThan(listReads));
-    await waitFor(() => expect(screen.queryByText('Approval')).toBeNull());
-    expect(screen.getByText('Escalate')).toBeInTheDocument();
+    // objectstack#36903 — the flow list, as × opens it, its sort kept; no
+    // other flow is opened in the deleted one's place.
+    expect(await screen.findByTestId('flow-list')).toBeInTheDocument();
+    expect(where()).toBe(`${LIST}?sort=label`);
     expect(mockClient.layered.mock.calls.map(([, name]) => name)).not.toContain('escalate');
     expect(screen.queryByTestId('auto-canvas-caption')).toBeNull();
-    expect(screen.queryByTestId('studio-detail-more')).toBeNull();
     expect(toast.success).toHaveBeenCalledWith('Deleted flow "Approval"');
   });
 
   it('a flow with no pending draft is deleted with the one call', async () => {
     mount();
     await deleteFromMenu();
-    await waitFor(() => expect(screen.queryByTestId('auto-canvas-caption')).toBeNull());
+    expect(await screen.findByTestId('flow-list')).toBeInTheDocument();
     expect(mockClient.reset.mock.calls).toEqual([['flow', 'approval', { packageId: PKG }]]);
   });
 
