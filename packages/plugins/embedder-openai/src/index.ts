@@ -20,7 +20,7 @@
  */
 
 import type { IEmbedder } from '@objectstack/spec/contracts';
-import { resilientFetch } from '@objectstack/spec/shared';
+import { estimateTokens, resilientFetch } from '@objectstack/spec/shared';
 
 export interface OpenAIEmbedderOptions {
   /** Bearer token sent as `Authorization: Bearer <apiKey>`. Required. */
@@ -67,6 +67,19 @@ export interface OpenAIEmbedderOptions {
    * or gateway documents a different cap.
    */
   maxBatchSize?: number;
+  /**
+   * Longest single input the model accepts, in tokens. `embed()` measures
+   * every input with the shared `estimateTokens` from `@objectstack/spec/shared`
+   * before sending anything, and refuses the whole call when one input's
+   * estimate is over this limit — an over-limit input is never sent, so the
+   * provider never silently truncates it. Must be a positive integer.
+   *
+   * Defaults to the provider's documented limit for a model in the
+   * known-model table. For any other model there is no limit, with one
+   * warning per embedder instance. Set it when your provider or gateway
+   * documents a limit.
+   */
+  maxInputTokens?: number;
 }
 
 /**
@@ -106,6 +119,40 @@ const KNOWN_MAX_BATCH_SIZE: Record<string, number> = {
  * unknown model on any provider listed there is never rejected for its count.
  */
 const DEFAULT_MAX_BATCH_SIZE = 10;
+
+/**
+ * Documented per-input token limits (the longest single text one
+ * `/embeddings` input may be). A model listed here refuses an over-limit
+ * input; any other model has no limit unless `maxInputTokens` sets one. Only
+ * provider-documented limits belong here.
+ *
+ * Sources (read 2026-11-24):
+ *  - OpenAI: API reference, embeddings create — "The input must not exceed the
+ *    max input tokens for the model (8192 tokens for all embedding models)".
+ *  - 阿里通义 DashScope: text-embedding-synchronous-api — v3 "最长支持 8,192 Token",
+ *    v1 / v2 "最长支持 2,048 Token".
+ *  - 智谱 BigModel: 文本嵌入 API reference — "embedding-3 的单条请求最多支持
+ *    3072 个Tokens", "embedding-2 的单条请求最多支持 512 个Tokens".
+ *  - 硅基流动 SiliconFlow: create-embeddings — "BAAI/bge-m3: 8192",
+ *    "BAAI/bge-large-zh-v1.5, BAAI/bge-large-en-v1.5 …: 512".
+ */
+const KNOWN_MAX_INPUT_TOKENS: Record<string, number> = {
+  // OpenAI
+  'text-embedding-3-small': 8192,
+  'text-embedding-3-large': 8192,
+  'text-embedding-ada-002': 8192,
+  // 阿里通义
+  'text-embedding-v3': 8192,
+  'text-embedding-v2': 2048,
+  'text-embedding-v1': 2048,
+  // 智谱
+  'embedding-3': 3072,
+  'embedding-2': 512,
+  // 硅基流动 / BGE 家族
+  'BAAI/bge-m3': 8192,
+  'BAAI/bge-large-zh-v1.5': 512,
+  'BAAI/bge-large-en-v1.5': 512,
+};
 
 /**
  * Known dimensions for popular models. Used as the default when the
@@ -182,6 +229,7 @@ export class OpenAIEmbedder implements IEmbedder {
   private readonly requestedDims?: number;
   private readonly extraHeaders: Record<string, string>;
   private readonly maxBatchSize: number;
+  private readonly maxInputTokens: number | undefined;
 
   constructor(opts: OpenAIEmbedderOptions) {
     if (!opts.apiKey) throw new Error('OpenAIEmbedder: apiKey required');
@@ -199,6 +247,9 @@ export class OpenAIEmbedder implements IEmbedder {
         'OpenAIEmbedder: no fetch available; pass options.fetch or run on Node 18+ / a fetch-capable runtime',
       );
     }
+    // Once per instance, in ONE warning: the configuration is what is
+    // unknown, not any one call.
+    const unknown: string[] = [];
     if (opts.maxBatchSize !== undefined) {
       if (!Number.isInteger(opts.maxBatchSize) || opts.maxBatchSize < 1) {
         throw new Error(
@@ -210,11 +261,31 @@ export class OpenAIEmbedder implements IEmbedder {
       this.maxBatchSize = KNOWN_MAX_BATCH_SIZE[this.model];
     } else {
       this.maxBatchSize = DEFAULT_MAX_BATCH_SIZE;
-      // Once per instance: the configuration is what is unknown, not any one call.
+      unknown.push(
+        `not in the batch-size table: no documented per-request input cap, so sending at most ` +
+          `${DEFAULT_MAX_BATCH_SIZE} inputs per request (set options.maxBatchSize to your provider's cap)`,
+      );
+    }
+    if (opts.maxInputTokens !== undefined) {
+      if (!Number.isInteger(opts.maxInputTokens) || opts.maxInputTokens < 1) {
+        throw new Error(
+          `OpenAIEmbedder: maxInputTokens must be a positive integer, got ${String(opts.maxInputTokens)}`,
+        );
+      }
+      this.maxInputTokens = opts.maxInputTokens;
+    } else if (KNOWN_MAX_INPUT_TOKENS[this.model] !== undefined) {
+      this.maxInputTokens = KNOWN_MAX_INPUT_TOKENS[this.model];
+    } else {
+      this.maxInputTokens = undefined;
+      unknown.push(
+        'not in the input-limit table: no documented per-input token limit, so inputs are sent at any length ' +
+          `and the provider may truncate them (set options.maxInputTokens to your provider's limit)`,
+      );
+    }
+    if (unknown.length > 0) {
       console.warn(
-        `OpenAIEmbedder: no documented per-request input cap for model '${this.model}'; ` +
-          `sending at most ${DEFAULT_MAX_BATCH_SIZE} inputs per request. ` +
-          `Set options.maxBatchSize to your provider's cap to change this and silence the warning.`,
+        `OpenAIEmbedder: model '${this.model}' is ${unknown.join('; and ')}. ` +
+          'Setting the named option(s) silences this warning.',
       );
     }
   }
@@ -224,9 +295,29 @@ export class OpenAIEmbedder implements IEmbedder {
    * sent one after another. Vectors come back in input order. A failing batch
    * fails the whole call; the error names its 0-based batch index and input
    * range, and no later batch is sent.
+   *
+   * When a limit applies (a known model, or `maxInputTokens`), every input is
+   * measured with `estimateTokens` before any request; when one is over the
+   * limit the call is refused — nothing is sent and nothing is truncated. The
+   * error names the input's index, the model, the estimate and the limit. An
+   * unknown model with no `maxInputTokens` has no limit, and its inputs are
+   * not measured.
    */
   async embed(texts: string[]): Promise<number[][]> {
     if (texts.length === 0) return [];
+    if (this.maxInputTokens !== undefined) {
+      for (let i = 0; i < texts.length; i++) {
+        const estimate = estimateTokens(texts[i]);
+        if (estimate > this.maxInputTokens) {
+          throw new Error(
+            `OpenAIEmbedder: input ${i} (0-based) is estimated at ${estimate} tokens, over the ` +
+              `${this.maxInputTokens}-token input limit of model '${this.model}'; refused rather than ` +
+              'sent for the provider to truncate. Split the text below the limit, or set ' +
+              'options.maxInputTokens if your provider documents a higher one. Nothing was sent.',
+          );
+        }
+      }
+    }
     const batchCount = Math.ceil(texts.length / this.maxBatchSize);
     const vectors: number[][] = [];
     for (let index = 0; index < batchCount; index++) {
