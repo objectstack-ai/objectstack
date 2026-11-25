@@ -46,6 +46,9 @@ vi.mock('@object-ui/i18n', async (importOriginal) => ({
 }));
 
 import { DraftChangesPanel, computeChangeDetail } from '../DraftChangesPanel';
+// The source under test reaches a dynamic `import('@objectstack/lint')`: pay its load at
+// collection, never inside a case's clocked window (`check:test-source-alias`).
+import '@objectstack/lint';
 
 /** The read's zh-CN labels for the injected columns (`SYSTEM_FIELD_LABELS`). */
 const ZH_LABELS: Record<string, string> = {

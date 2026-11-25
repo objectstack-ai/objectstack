@@ -31,6 +31,9 @@ import { cleanup, render, screen, waitFor } from '@testing-library/react';
 import { createI18n, I18nProvider } from '@object-ui/i18n';
 
 import { DraftChangesPanel } from '../DraftChangesPanel';
+// The source under test reaches a dynamic `import('@objectstack/lint')`: pay its load at
+// collection, never inside a case's clocked window (`check:test-source-alias`).
+import '@objectstack/lint';
 
 afterEach(() => {
   cleanup();

@@ -44,6 +44,9 @@ vi.mock('@object-ui/auth', async (importOriginal) => ({
 
 import { CommandPalette } from './CommandPalette';
 import { CommandPaletteProvider } from '../context/CommandPaletteProvider';
+// The source under test reaches a dynamic `import('@object-ui/plugin-detail')`: pay its load at
+// collection, never inside a case's clocked window (`check:test-source-alias`).
+import '@object-ui/plugin-detail';
 
 /** `GET /api/v1/packages`: two app packages and a kernel one, in both served shapes. */
 const PACKAGES_PAYLOAD = {

@@ -4,6 +4,10 @@ import * as React from 'react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { EditPackageDialog, type InstalledPackageRow } from './PackagesPage';
+// The source under test reaches a dynamic `import('@objectstack/formula')` and `import('@objectstack/lint')`: pay its load at
+// collection, never inside a case's clocked window (`check:test-source-alias`).
+import '@objectstack/formula';
+import '@objectstack/lint';
 
 // EditPackageDialog is now a thin wrapper over the spec-driven PackageFormDialog
 // (edit mode). It renders the manifest form via SchemaForm and PATCHes name /

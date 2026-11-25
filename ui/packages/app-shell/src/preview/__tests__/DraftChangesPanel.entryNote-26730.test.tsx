@@ -24,6 +24,9 @@ vi.mock('@object-ui/i18n', async (importOriginal) => ({
 }));
 
 import { DraftChangesPanel, type DraftChangeEntry } from '../DraftChangesPanel';
+// The source under test reaches a dynamic `import('@objectstack/lint')`: pay its load at
+// collection, never inside a case's clocked window (`check:test-source-alias`).
+import '@objectstack/lint';
 
 // `flows`: a stored plural spelling, which the sheet folds before the host sees it.
 const DRAFT_ROWS = [

@@ -23,6 +23,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 
 import { PackageFormDialog, type ManifestRecord } from './PackageFormDialog';
+// The source under test reaches a dynamic `import('@objectstack/formula')` and `import('@objectstack/lint')`: pay its load at
+// collection, never inside a case's clocked window (`check:test-source-alias`).
+import '@objectstack/formula';
+import '@objectstack/lint';
 
 vi.mock('./i18n', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),

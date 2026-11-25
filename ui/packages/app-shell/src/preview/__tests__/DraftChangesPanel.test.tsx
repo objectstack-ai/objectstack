@@ -28,6 +28,9 @@ vi.mock('@object-ui/i18n', async (importOriginal) => {
 import { createI18n, I18nProvider } from '@object-ui/i18n';
 import { DraftChangesPanel, computeChangeDetail } from '../DraftChangesPanel';
 import { PACKAGE_EXPORT_COMMAND, customizationEnvironmentText } from '../savedToCustomization';
+// The source under test reaches a dynamic `import('@objectstack/lint')`: pay its load at
+// collection, never inside a case's clocked window (`check:test-source-alias`).
+import '@objectstack/lint';
 
 afterEach(() => {
   vi.restoreAllMocks();

@@ -24,6 +24,10 @@ import { ManifestSchema } from '@objectstack/spec/kernel';
 
 import { PackageDetailSheet, type InstalledPackageRow } from './PackagesPage';
 import { t, tFormat } from './i18n';
+// The source under test reaches a dynamic `import('@objectstack/formula')` and `import('@objectstack/lint')`: pay its load at
+// collection, never inside a case's clocked window (`check:test-source-alias`).
+import '@objectstack/formula';
+import '@objectstack/lint';
 
 const PKG_ID = 'com.acme.crm';
 const PKG: InstalledPackageRow = {

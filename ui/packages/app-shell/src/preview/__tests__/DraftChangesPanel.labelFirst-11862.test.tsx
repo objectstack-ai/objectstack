@@ -43,6 +43,9 @@ vi.mock('@object-ui/i18n', async (importOriginal) => ({
 }));
 
 import { DraftChangesPanel } from '../DraftChangesPanel';
+// The source under test reaches a dynamic `import('@objectstack/lint')`: pay its load at
+// collection, never inside a case's clocked window (`check:test-source-alias`).
+import '@objectstack/lint';
 
 const DRAFT_ROWS = [
   { type: 'permission', name: 'qa_readers', packageId: 'com.x', label: 'QA Readers' },

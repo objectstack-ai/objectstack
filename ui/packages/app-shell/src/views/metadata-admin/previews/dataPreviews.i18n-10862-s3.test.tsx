@@ -151,6 +151,9 @@ import type { ObjectFieldInfo } from './useObjectFields';
 // namespace, whose `zh` catalogue is fetched on demand (objectstack#25922).
 // Resident before any case, so the zh rows below read synchronously.
 import { loadStudioCatalogue } from '@object-ui/i18n/namespaces/studio';
+// The source under test reaches a dynamic `import('@objectstack/lint')`: pay its load at
+// collection, never inside a case's clocked window (`check:test-source-alias`).
+import '@objectstack/lint';
 await loadStudioCatalogue('zh');
 
 const realFetch = globalThis.fetch;

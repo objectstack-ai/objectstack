@@ -37,6 +37,9 @@ vi.mock('./packages-io', async (importOriginal) => {
 vi.mock('../metadata-admin/PackageFormDialog', () => ({ PackageFormDialog: () => null }));
 
 import { BuilderLanding } from './BuilderLanding';
+// The source under test reaches a dynamic `import('@objectstack/lint')`: pay its load at
+// collection, never inside a case's clocked window (`check:test-source-alias`).
+import '@objectstack/lint';
 
 type Call = { url: string; method: string; body: unknown };
 let calls: Call[];
