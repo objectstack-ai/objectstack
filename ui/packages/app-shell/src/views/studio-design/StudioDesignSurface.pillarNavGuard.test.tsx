@@ -14,11 +14,10 @@
  *   • dirty + a menu entry that leaves the pillar → confirm; cancel keeps the
  *     pillar and its edits,
  *   • dirty + 「‹ Back to app」 → same confirm; cancel stays, confirm leaves,
- *   • dirty OWD overview rows + leaving → same confirm (the pillar folds the
- *     overview's report into the same bit, objectui#2600 follow-up),
- *   • dirty + the menu's default-sharing entry, which re-enters the open
- *     Access pillar on another query (remounting it) → same confirm, once;
- *     cancel keeps the edit, confirm opens the overview,
+ *   • dirty OWD overview rows + leaving → same confirm (the overview reports
+ *     into the same bit, objectui#2600 follow-up),
+ *   • dirty + the menu's default-sharing entry → same confirm, once; cancel
+ *     keeps the edit, confirm opens the overview,
  *   • clean navigation never prompts,
  *   • a confirmed discard clears the guard (the pillar resets on unmount).
  *
@@ -29,16 +28,25 @@
  * window's URL is kept at the router's, as `BrowserRouter` keeps it, because
  * that guard reads the window's URL to skip a link to the page already shown.
  *
- * Rendered through the real StudioDesignSurface + AccessPillar +
- * PermissionMatrixEditPage stack (mocking only data I/O and heavy rail
- * siblings), so the dirty report crosses every real seam.
+ * objectstack#36905 — a permission set opens full-screen at its metadata
+ * address (`StudioPermissionSetPage` in the area), and the overview on its own
+ * route (`/studio/<package>/owd`); epic decision 12 keeps every departure
+ * above guarded there.
+ *
+ * Rendered through the real StudioDesignSurface + StudioMetadataArea +
+ * StudioPermissionSetPage + PermissionMatrixEditPage stack (mocking only data
+ * I/O, the area's other pages and heavy siblings), so the dirty report crosses
+ * every real seam.
  */
 
 import '@testing-library/jest-dom/vitest';
 // The source under test reaches these through dynamic imports: their first load is paid at collection.
 import '@objectstack/lint';
+// objectstack#36900 — the surface mounts the command palette, which reaches the
+// record preview's `lazy()` detail entry: its first load is paid at collection too.
+import '@object-ui/plugin-detail';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
 
 let clientImpl: any;
@@ -87,6 +95,14 @@ vi.mock('./StudioAiCopilot', () => ({
 }));
 vi.mock('../../preview/DraftChangesPanel', () => ({
   DraftChangesPanel: () => null,
+}));
+// The area's other pages: a type's list is where a menu entry lands.
+vi.mock('../metadata-admin/index.js', () => ({
+  MetadataDirectoryPage: () => <div data-testid="area-landed" />,
+  MetadataDiagnosticsPage: () => <div data-testid="area-landed" />,
+  MetadataResourceListPage: () => <div data-testid="area-landed" />,
+  MetadataResourceEditPage: () => <div data-testid="area-landed" />,
+  MetadataResourceHistoryPage: () => <div data-testid="area-landed" />,
 }));
 
 import { t } from '../metadata-admin/i18n';
@@ -193,32 +209,45 @@ function SearchProbe() {
   return <output data-testid="router-search">{useLocation().search}</output>;
 }
 
-async function renderSurfaceOnAccess() {
-  window.history.replaceState(null, '', '/studio/app.a/access');
+const SET_ADDRESS = '/studio/app.a/metadata/permission/set_a?package=app.a';
+
+async function renderSurfaceAt(url: string) {
+  window.history.replaceState(null, '', url);
   render(
-    <MemoryRouter initialEntries={['/studio/app.a/access']}>
+    <MemoryRouter initialEntries={[url]}>
       <Routes>
         <Route path="/studio/:packageId/:tab" element={<StudioDesignSurface />} />
         {/* objectstack#36899 — a menu type entry opens that type's area list. */}
-        <Route path="/studio/:packageId/metadata/*" element={<div data-testid="area-landed" />} />
+        <Route path="/studio/:packageId/metadata/*" element={<StudioDesignSurface area="metadata" />} />
         <Route path="/studio" element={<div data-testid="studio-landing-page" />} />
         <Route path="*" element={<div data-testid="left-studio" />} />
       </Routes>
       <SearchProbe />
     </MemoryRouter>,
   );
-  // First set auto-selects; wait for its matrix row so the whole editor (not
-  // just the breadcrumb) has loaded before a test flips a cell.
-  await screen.findByText('a_account');
+}
+
+/** objectstack#36905 — the set's full-screen page at its metadata address. */
+async function renderSurfaceOnSet() {
+  await renderSurfaceAt(SET_ADDRESS);
+  // Wait for its matrix row so the whole editor (not just the header) has
+  // loaded before a test flips a cell.
+  await screen.findByText('a_account', undefined, { timeout: 8000 });
+}
+
+/** objectstack#36905 — the overview's own route. */
+async function renderSurfaceOnOwd() {
+  await renderSurfaceAt('/studio/app.a/owd');
+  await screen.findByTestId('owd-internal-a_account', undefined, { timeout: 8000 });
 }
 
 
 /** objectstack#36899 — a left-menu entry: a real router Link. */
 const menuEntry = (key: string) => within(screen.getByTestId('studio-menu')).getByTestId(`studio-menu-entry-${key}`);
-/** The entry that leaves the Access pillar: the flows' list in the area. */
+/** The entry that leaves the page: the flows' list in the area. */
 const leave = () => fireEvent.click(menuEntry('type:flow'));
-/** The entry that re-enters the open Access pillar on its default-sharing overview. */
-const reenterOnOwd = () => fireEvent.click(menuEntry('owd'));
+/** The default-sharing overview's entry. */
+const openOwd = () => fireEvent.click(menuEntry('owd'));
 
 /** The departure is done and nothing is held: a shell departure goes at once. */
 async function leftAndGuardCleared(asked: number) {
@@ -231,21 +260,14 @@ async function leftAndGuardCleared(asked: number) {
 }
 
 /**
- * objectui#11862 — the rail shows each set's machine name as secondary text, so
- * an open set's name is on the page more than once. objectui#12456 — the open
- * set's api name is its item header's mono chip (the Delegated admin tab, kept
- * mounted, lists every set name too), so "the matrix shows set X" is asked of
- * that header alone.
+ * The open set's machine name is its header title's tooltip (the Delegated
+ * admin tab, kept mounted, lists every set name too), so "the matrix shows set
+ * X" is asked of that header alone.
  */
-const inSetHeader = () => within(screen.getByTestId('access-item-header'));
-// The header is re-queried on each retry: the pillar's own header stands in
-// while no set is open, and the set's header replaces it once the page loads.
-const findInSetHeader = (name: string) => waitFor(() => inSetHeader().getByTitle(name));
+const inSetHeader = () => within(screen.getByTestId('permission-detail-header'));
 
-/** Swap the main panel to the (real) OWD overview and edit a row. */
+/** Edit a row of the (real) OWD overview. */
 async function dirtyTheOwdOverview() {
-  fireEvent.click(screen.getByRole('button', { name: 'Who can see which records' }));
-  await screen.findByTestId('owd-internal-a_account');
   const owdPrivate = t('engine.studio.settings.sharingPrivate', 'en-US');
   fireEvent.keyDown(screen.getByTestId('owd-internal-a_account'), { key: 'ArrowDown' });
   const listbox = await screen.findByRole('listbox');
@@ -269,7 +291,7 @@ const matrixEditSurvived = () => {
 
 describe('Studio — unsaved pillar edits guard (#2600)', () => {
   it('asks before a menu entry leaves the pillar when dirty; cancel keeps the pillar and its edits', async () => {
-    await renderSurfaceOnAccess();
+    await renderSurfaceOnSet();
     dirtyTheMatrix();
 
     confirmSpy.mockReturnValueOnce(false);
@@ -288,7 +310,7 @@ describe('Studio — unsaved pillar edits guard (#2600)', () => {
   });
 
   it('gates leaving on dirty OWD overview rows (#2600 follow-up)', async () => {
-    await renderSurfaceOnAccess();
+    await renderSurfaceOnOwd();
     const owdPrivate = await dirtyTheOwdOverview();
 
     confirmSpy.mockReturnValueOnce(false);
@@ -304,40 +326,39 @@ describe('Studio — unsaved pillar edits guard (#2600)', () => {
   });
 
   it('leaves without prompting when clean', async () => {
-    await renderSurfaceOnAccess();
+    await renderSurfaceOnSet();
     leave();
     expect(confirmSpy).not.toHaveBeenCalled();
     await screen.findByTestId('area-landed');
   });
 
-  it('the default-sharing entry re-enters the open pillar: dirty, it asks once; cancel keeps the edit, confirm opens the overview', async () => {
-    await renderSurfaceOnAccess();
+  it('the default-sharing entry, from a dirty set: it asks once; cancel keeps the edit, confirm opens the overview', async () => {
+    await renderSurfaceOnSet();
     dirtyTheMatrix();
 
     confirmSpy.mockReturnValueOnce(false);
-    reenterOnOwd();
+    openOwd();
     expect(confirmSpy).toHaveBeenCalledTimes(1);
     expect(inSetHeader().getByTitle('set_a')).toBeInTheDocument();
     matrixEditSurvived();
 
     confirmSpy.mockReturnValueOnce(true);
-    reenterOnOwd();
+    openOwd();
     expect(confirmSpy).toHaveBeenCalledTimes(2);
-    await screen.findByTestId('owd-internal-a_account');
+    await screen.findByTestId('owd-internal-a_account', undefined, { timeout: 8000 });
     expect(menuEntry('owd')).toHaveAttribute('aria-current', 'page');
   });
 
   it('CONTROL: clean, the default-sharing entry opens the overview without asking', async () => {
-    await renderSurfaceOnAccess();
-    // As an author's click comes after it: the pillar has mirrored its open set.
-    await waitFor(() => expect(decodeURIComponent(screen.getByTestId('router-search').textContent ?? '')).toContain('permission:set_a'));
-    reenterOnOwd();
-    await screen.findByTestId('owd-internal-a_account');
+    await renderSurfaceOnSet();
+    openOwd();
+    await screen.findByTestId('owd-internal-a_account', undefined, { timeout: 8000 });
+    expect(screen.getByTestId('router-search').textContent).toBe('');
     expect(confirmSpy).not.toHaveBeenCalled();
   });
 
   it('gates 「‹ Back to app」; cancel stays, confirm leaves Studio (objectstack#36501)', async () => {
-    await renderSurfaceOnAccess();
+    await renderSurfaceOnSet();
     dirtyTheMatrix();
 
     confirmSpy.mockReturnValueOnce(false);
@@ -352,7 +373,7 @@ describe('Studio — unsaved pillar edits guard (#2600)', () => {
   });
 
   it('never prompts a clean 「‹ Back to app」', async () => {
-    await renderSurfaceOnAccess();
+    await renderSurfaceOnSet();
 
     fireEvent.click(screen.getByTestId('studio-back-to-app'));
 
@@ -363,7 +384,7 @@ describe('Studio — unsaved pillar edits guard (#2600)', () => {
 
 describe('a dirty pillar registers with the shell seam (objectui#13253)', () => {
   it('dirty OWD rows (only the surface registers them): a shell departure asks once; Cancel keeps the edit', async () => {
-    await renderSurfaceOnAccess();
+    await renderSurfaceOnOwd();
     const owdPrivate = await dirtyTheOwdOverview();
 
     confirmSpy.mockReturnValueOnce(false);
@@ -376,7 +397,7 @@ describe('a dirty pillar registers with the shell seam (objectui#13253)', () => 
   });
 
   it('a dirty matrix: a shell departure asks once, though the matrix and the surface both register', async () => {
-    await renderSurfaceOnAccess();
+    await renderSurfaceOnSet();
     dirtyTheMatrix();
 
     confirmSpy.mockReturnValueOnce(true);
@@ -387,7 +408,7 @@ describe('a dirty pillar registers with the shell seam (objectui#13253)', () => 
   });
 
   it('CONTROL: a clean pillar registers nothing — a shell departure goes at once', async () => {
-    await renderSurfaceOnAccess();
+    await renderSurfaceOnSet();
 
     const go = vi.fn();
     confirmUnsavedLeave(go);

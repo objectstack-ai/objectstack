@@ -5,8 +5,8 @@
  * at the window's top, the standing banners and the connection notice sit at
  * the top of the content area, the page header carries the sidebar's expand
  * button while the sidebar is collapsed, and a route with no shell header gets
- * that button at the content's corner. A phone keeps its bar, and so does an
- * app's docs page, which mounts no sidebar.
+ * that button at the content's corner. A phone keeps its bar. An app's docs
+ * pages are no exception from 768 px up (objectstack#37150).
  *
  * Harness: the real `ConsoleLayout` with its real `@object-ui/layout`
  * `AppShell` and the real `ShellPageActionsScope`; the sidebar, the app bar
@@ -106,8 +106,15 @@ describe('an app draws no top bar from 768 px up (objectstack#36112)', () => {
     }
   });
 
-  it('control: an app\'s docs pages, which mount no sidebar, keep the bar at every width', () => {
-    mountAt('/apps/crm/docs/crm_manual', 1440, <div>Manual</div>);
+  it('an app\'s docs pages are no exception (objectstack#37150): the sidebar and no bar from 768 px up; a phone keeps the bar', () => {
+    for (const width of [768, 1440]) {
+      mountAt('/apps/crm/docs/crm_manual', width, <div>Manual</div>);
+      expect(document.querySelectorAll('header'), `${width} px`).toHaveLength(0);
+      expect(screen.queryByTestId('app-bar'), `${width} px`).toBeNull();
+      expect(screen.getByTestId('sidebar-stub'), `${width} px`).toBeInTheDocument();
+      cleanup();
+    }
+    mountAt('/apps/crm/docs/crm_manual', 390, <div>Manual</div>);
     expect(screen.getByTestId('app-bar')).toBeInTheDocument();
     expect(screen.queryByTestId('sidebar-stub')).toBeNull();
   });

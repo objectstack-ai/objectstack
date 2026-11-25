@@ -904,6 +904,8 @@ const TYPE_COUNT: Readonly<Record<string, (t: Translate, count: number) => strin
     t('preview.changes.typeCount.capability', { count, defaultValue: '{{count}} capabilities' }),
   tool: (t, count) => t('preview.changes.typeCount.tool', { count, defaultValue: '{{count}} AI tools' }),
   skill: (t, count) => t('preview.changes.typeCount.skill', { count, defaultValue: '{{count}} AI skills' }),
+  ai_context: (t, count) =>
+    t('preview.changes.typeCount.ai_context', { count, defaultValue: '{{count}} AI context packs' }),
   datasource: (t, count) =>
     t('preview.changes.typeCount.datasource', { count, defaultValue: '{{count}} datasources' }),
 };

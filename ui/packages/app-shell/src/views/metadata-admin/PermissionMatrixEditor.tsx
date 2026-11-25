@@ -106,7 +106,7 @@ import { useDraftAutoSave, type DraftSend } from '../studio-design/useDraftAutoS
 // objectstack#36511 — in the Studio the set is sent by the top bar's Save, which makes it live.
 import { publishSavedItem, useStudioSaveEntry, type StudioSaveResult } from '../studio-design/studioSaveBar.js';
 import { publishFailureOf, publishRefusal } from '../studio-design/metadataError.js';
-// objectui#12456 — the Studio Access pillar's presentation draws the shared item header.
+// objectui#12456 — the Studio presentation draws the shared item header when no frame draws one.
 import { StudioItemHeader, StudioTab } from '../studio-design/StudioItemHeader.js';
 import type { CustomizationMarkKind } from '../studio-design/customizationMarks.js';
 import { useDisplayLocale } from '@object-ui/i18n';
@@ -139,7 +139,7 @@ import { holdingOfRead, holdingPackage, type PermissionSetHolding } from './perm
 import { isEnvironmentScope, useWalledCatalogReadOnly } from './catalog-scope.js';
 import { useCanAuthorMetadata, useCanReadAuthoringTrail } from '../../hooks/useCanAuthorMetadata.js';
 import { errorCodeIs } from '@object-ui/types';
-import { formatMetadataError, type MetadataError } from '@object-ui/data-objectstack';
+import { formatMetadataError, readDraftChanges, type DraftChange, type MetadataError } from '@object-ui/data-objectstack';
 import { PermissionSetCloneDialog } from './PermissionSetCloneDialog.js';
 import { isStudioHiddenSystemField } from '../studio-design/studioHiddenSystemField.js';
 import { permissionSetCloneNoticeText, type PermissionSetCloned } from './permission-set-clone.js';
@@ -520,9 +520,10 @@ function headersAbbreviate(actions: ReturnType<typeof getObjectActions>, locale:
 }
 
 /**
- * objectui#12456 — the five tabs of the Studio Access pillar's permission-set
- * page (epic objectui#12446, decision C): each holds one of the sections the
- * routed page stacks in one column.
+ * objectui#12456 — the five tabs of the Studio's permission-set page (epic
+ * objectui#12446, decision C; since objectstack#36905 the set's full-screen
+ * page, `StudioPermissionSetPage`): each holds one of the sections the routed
+ * page stacks in one column.
  */
 export type PermissionStudioTab = 'objects' | 'capabilities' | 'rls' | 'tabs' | 'admin';
 
@@ -534,26 +535,71 @@ export const PERMISSION_STUDIO_TABS: ReadonlyArray<{ key: PermissionStudioTab; l
   { key: 'admin', labelKey: 'engine.studio.access.tab.admin' },
 ];
 
-/** What the Studio Access pillar hands the page for its tabbed presentation. */
+/** What the Studio host (`StudioPermissionSetPage`) hands the page for its tabbed presentation. */
 export interface PermissionStudioChrome {
-  /** The open tab; the pillar holds it (default `objects`). */
+  /** The open tab; the host holds it (default `objects`). */
   tab: PermissionStudioTab;
   onTabChange: (tab: PermissionStudioTab) => void;
-  /** Before the header's icon tile (the pillar's mobile rail toggle). */
+  /** Before the header's icon tile. Drawn only without a {@link frame}. */
   leading?: React.ReactNode;
-  /** The pillar's draft / read-only note, at the right end of the tab row. */
+  /** A draft / read-only note at the right end of the tab row. Drawn only without a {@link frame}. */
   chips?: React.ReactNode;
-  /** Before History in the header's actions (the pillar's Explain access). */
+  /** Before History in the header's actions. Drawn only without a {@link frame}. */
   actions?: React.ReactNode;
   /**
    * objectstack#32774 — told, for the set `name` this editor shows, the
    * package the clone door must name to copy it (`holdingPackage` of the
    * holding this editor read): `undefined` where the name alone addresses it
-   * (one holder, the environment's own set) or no holder was read. The pillar
-   * hosts its own clone dialog ("New similar") and passes it as
+   * (one holder, the environment's own set) or no holder was read. The Studio
+   * host keeps its own clone dialog ("New similar") and passes it as
    * `sourcePackage`.
    */
   onCloneSourceRead?: (name: string, sourcePackage: string | undefined) => void;
+  /**
+   * objectstack#36905 — the full-screen item page's frame (`StudioPermissionSetPage`):
+   * the host draws the header (`StudioDetailHeader`) from the parts this page
+   * hands it, and its tab row carries the item tools (References, History,
+   * Source) after the five section tabs, so History is a tab there and this
+   * page draws no History button. Omitted, the page draws its own
+   * `StudioItemHeader`: no Studio host mounts it that way since the Access
+   * pillar was deleted (objectstack#36905), and only this page's own unit
+   * tests draw it; the pillar's leftovers go with objectstack#36909.
+   */
+  frame?: PermissionStudioFrame;
+}
+
+/** The pieces of the page's header a {@link PermissionStudioFrame} host composes. */
+export interface PermissionStudioHeaderParts {
+  /** The set's label, or its name before one is known. */
+  title: string;
+  /** The line under the title: provenance, default and lock labels. */
+  note: React.ReactNode;
+  /** The granted-object and field-override counts, once loaded. */
+  meta?: string;
+  /** The page's own actions: the save status, the environment's Save, the artifact tier's Clone. */
+  actions: React.ReactNode;
+  /** The page's own ⋯ items (`DropdownMenuItem`s): the name and label editor. */
+  menuItems: React.ReactNode;
+  /** The five section tabs (`StudioTab`s), none active while {@link PermissionStudioFrame.toolOpen}. */
+  sectionTabs: React.ReactNode;
+}
+
+export interface PermissionStudioFrame {
+  /** Draw the header from the page's parts. */
+  renderHeader: (parts: PermissionStudioHeaderParts) => React.ReactNode;
+  /**
+   * An item tool's panel is open in place of the sections: they stay mounted
+   * and hidden, so an edit survives the visit, and no section tab is active.
+   */
+  toolOpen?: boolean;
+  /** The open tool's panel, drawn in the body while {@link toolOpen}. */
+  toolPanel?: React.ReactNode;
+  /**
+   * Told, on every load, who wrote the set's pending draft: its per-key
+   * provenance (`draftChanges`), `null` with no draft or none recorded. The
+   * host draws the AI-draft notice from it (epic decision 1).
+   */
+  onDraftChangesRead?: (changes: DraftChange[] | null) => void;
 }
 
 export interface PermissionMatrixEditPageProps {
@@ -589,21 +635,20 @@ export interface PermissionMatrixEditPageProps {
   /**
    * objectui#2505 — when provided, the per-object OWD badge becomes a link that
    * opens the package-level Record Sharing Baseline (OWD) overview, scrolled to
-   * that object. Set only by the Studio Access pillar (which hosts the sibling
-   * overview surface); omitted at environment scope / metadata-admin, where the
-   * badge stays a plain read-only chip.
+   * that object. Set only by the Studio host (objectstack#36905: the overview
+   * is its own route, `/studio/<package>/owd`); omitted at environment scope /
+   * metadata-admin, where the badge stays a plain read-only chip.
    */
   onOpenOwd?: (objectName: string) => void;
   /**
    * Fires on every unsaved-edit transition (false → true → false). The Studio
-   * Access pillar keys this page per set (`key={name}`) and swaps it out for
-   * the OWD overview, so the HOST must know before a surface switch whether a
-   * remount would discard edits. Reset to `false` on unmount so a discarded
+   * host keys this page per set, so the HOST must know before a departure
+   * whether a remount would discard edits. Reset to `false` on unmount so a discarded
    * editor never leaves the host thinking edits are still pending.
    */
   onDirtyChange?: (dirty: boolean) => void;
   /**
-   * Host-level read-only gate — set by the Studio Access pillar when the
+   * Host-level read-only gate — set by the Studio host when the
    * surrounding PACKAGE is read-only. Independent of the TYPE-level
    * `allowEnvironmentOverlay` writability: either gate locks the matrix (checkboxes,
    * bulk buttons, name/label, facets), hides Save, and shows the read-only
@@ -612,17 +657,18 @@ export interface PermissionMatrixEditPageProps {
    */
   readOnly?: boolean;
   /**
-   * When true, the editor is hosted inside another surface (the Studio Access
-   * pillar) rather than the routed metadata admin. Relative navigation would
-   * resolve against the HOST's route (`/studio/:packageId/access/...`), where
-   * the metadata-admin routes don't exist — so History opens as an in-place
+   * When true, the editor is hosted inside another surface (the Studio's
+   * permission-set page) rather than the routed metadata admin. Relative
+   * navigation would resolve against the HOST's route, where the
+   * metadata-admin routes don't exist — so History opens as an in-place
    * sheet instead of navigating, and the PageShell breadcrumb loses its
    * `/metadata` links (same rule as MetadataResourceEditPage's `embedded`).
    */
   embedded?: boolean;
   /**
-   * objectui#12456 — the Studio Access pillar's presentation (set with
-   * `embedded`). The page draws the Studio item header (the set's label, api
+   * objectui#12456 — the Studio presentation (set with `embedded`; since
+   * objectstack#36905 by `StudioPermissionSetPage`, with a {@link
+   * PermissionStudioChrome.frame}). The page draws the Studio item header (the set's label, api
    * name, Package chip, granted / override counts, History and a more menu
    * holding the name / label editor) instead of the PageShell breadcrumb,
    * badge row and collapsible set header, and splits its sections into five
@@ -637,7 +683,7 @@ export interface PermissionMatrixEditPageProps {
    * draws for this set (`customizationMarks.ts`, the one rule): on a read-only
    * base, `'added'` for a set its `<base>.custom` pair holds (a New similar
    * copy or a set created there), `'customized'` for a served override of a
-   * base set. Set only by the Studio Access pillar; omitted (Setup, the
+   * base set. Set only by the Studio host; omitted (Setup, the
    * metadata admin) or `null` (no mark, or the read has not answered),
    * nothing changes. Read by the provenance badge alone.
    */
@@ -709,7 +755,7 @@ export function PermissionMatrixEditPage({ type, name, packageId, onDraftSaved, 
   //    the block below the state declaration for why the type tier alone is
   //    not the whole gate.
   //
-  //  • HOST gate — the package-level `readOnly` prop the Studio Access pillar
+  //  • HOST gate — the package-level `readOnly` prop the Studio host
   //    passes for a read-only package. UNCHANGED and still dominant: this is
   //    the "Studio 维持包级只读" half of the objectstack#5768 ruling, and a
   //    code-defined package stays locked here exactly as before.
@@ -836,6 +882,8 @@ export function PermissionMatrixEditPage({ type, name, packageId, onDraftSaved, 
   const cloneSourcePackage = holdingPackage(assignmentsHolding ?? undefined);
   const onCloneSourceReadRef = React.useRef(studio?.onCloneSourceRead);
   onCloneSourceReadRef.current = studio?.onCloneSourceRead;
+  const onDraftChangesReadRef = React.useRef(studio?.frame?.onDraftChangesRead);
+  onDraftChangesReadRef.current = studio?.frame?.onDraftChangesRead;
   React.useEffect(() => {
     onCloneSourceReadRef.current?.(name, cloneSourcePackage);
   }, [name, cloneSourcePackage]);
@@ -1119,6 +1167,7 @@ export function PermissionMatrixEditPage({ type, name, packageId, onDraftSaved, 
         }
         const pendingDraft = pendingRead?.answer ?? null;
         hadDraftRef.current = !!pendingDraft;
+        onDraftChangesReadRef.current?.(pendingDraft ? readDraftChanges(pendingDraft) : null);
         verdictReadSeq.current += 1;
         setServedVerdict(
           editedItemDiagnostics({
@@ -1627,7 +1676,7 @@ export function PermissionMatrixEditPage({ type, name, packageId, onDraftSaved, 
         // answers the 404 shape, which `MetadataClient.layered` resolves as
         // `{ effective: null, … }` — that arm keeps the `?? payload` base on
         // purpose: a set that exists only as a package draft (what the Studio
-        // Access pillar's "+ New" creates) has no published rows for anyone to
+        // create leaves before its first publish) has no published rows for anyone to
         // lose, and refusing there would block its first save.
         //
         // objectstack#26837 — and this door's save WRITES the pending draft, so
@@ -1670,7 +1719,7 @@ export function PermissionMatrixEditPage({ type, name, packageId, onDraftSaved, 
       // objectui#11773 — the guard pins the package door's DRAFT save; the
       // environment door's live write passes through it unpinned, as before.
       // objectui#12725 — the draft names its authoring surface only under the
-      // Studio host (`embedded`, the Access pillar), so a person's edit there
+      // Studio host (`embedded`, the set's Studio page), so a person's edit there
       // is recorded `studio`, not `api`. metadata-admin mounts this page with
       // neither `packageId` nor `embedded`, and states no surface.
       const outcome = await saveVersioned(type, payload.name, toSave, {
@@ -1976,7 +2025,7 @@ export function PermissionMatrixEditPage({ type, name, packageId, onDraftSaved, 
   );
 
   // objectui#12456 — the pieces both presentations draw: the routed page
-  // (PageShell) and the Studio Access pillar's tabbed one (`studio`).
+  // (PageShell) and the Studio's tabbed one (`studio`).
   const envSaveEl = (
     <>
       {/* ADR-0086 D7 — the environment door's explicit Save: a live write. */}
@@ -2417,33 +2466,64 @@ export function PermissionMatrixEditPage({ type, name, packageId, onDraftSaved, 
     // set's machine name is the title's tooltip, and the provenance, default
     // and lock labels are the line under it.
     const studioTitle = headerLabel || name;
+    const frame = chrome.frame;
+    const titleNoteEl = (
+      <span className="inline-flex items-center gap-1.5" data-testid="perm-studio-title-note">
+        {/* Same test id and the same answer as the page's badge. */}
+        {/* objectstack#35018 — in the builder's words: a set the app
+            brings reads 「随应用提供」, not the package term 「包内置」. */}
+        <span data-testid="perm-provenance-badge">
+          {shippedByPackage ? t('engine.studio.access.origin.app') : t('perm.badge.custom')}
+        </span>
+        {!!draft.isDefault && (
+          <>
+            <span aria-hidden="true">·</span>
+            <span>{t('perm.badge.default')}</span>
+          </>
+        )}
+        {/* A host-locked package says so in the host's note; the
+            other gates (type, artifact, wall) keep their own badge. */}
+        {!readOnly && lockBadgeEl}
+      </span>
+    );
+    const basicsItemEl = (
+      <DropdownMenuItem onSelect={() => setBasicsOpen((o) => !o)}>{t('perm.basics.editHint')}</DropdownMenuItem>
+    );
+    const sectionTabsEl = PERMISSION_STUDIO_TABS.map((tab) => (
+      <StudioTab
+        key={tab.key}
+        active={!frame?.toolOpen && chrome.tab === tab.key}
+        data-testid={`perm-tab-${tab.key}`}
+        onClick={() => chrome.onTabChange(tab.key)}
+      >
+        {t(tab.labelKey)}
+      </StudioTab>
+    ));
     return (
       <div className="flex h-full flex-col">
+        {frame ? (
+          frame.renderHeader({
+            title: studioTitle,
+            note: titleNoteEl,
+            meta,
+            actions: (
+              <>
+                {autosaveStatusEl}
+                {envSaveEl}
+                {lockedByArtifactTier && cloneButton}
+              </>
+            ),
+            menuItems: basicsItemEl,
+            sectionTabs: sectionTabsEl,
+          })
+        ) : (
         <StudioItemHeader
           testId="access-item-header"
           leading={chrome.leading}
           icon={Shield}
           title={studioTitle}
           titleProps={{ title: name, 'data-testid': 'perm-studio-title' }}
-          note={
-            <span className="inline-flex items-center gap-1.5" data-testid="perm-studio-title-note">
-              {/* Same test id and the same answer as the page's badge. */}
-              {/* objectstack#35018 — in the builder's words: a set the app
-                  brings reads 「随应用提供」, not the package term 「包内置」. */}
-              <span data-testid="perm-provenance-badge">
-                {shippedByPackage ? t('engine.studio.access.origin.app') : t('perm.badge.custom')}
-              </span>
-              {!!draft.isDefault && (
-                <>
-                  <span aria-hidden="true">·</span>
-                  <span>{t('perm.badge.default')}</span>
-                </>
-              )}
-              {/* A host-locked package says so in the pillar's note; the
-                  other gates (type, artifact, wall) keep their own badge. */}
-              {!readOnly && lockBadgeEl}
-            </span>
-          }
+          note={titleNoteEl}
           meta={meta}
           actions={
             <>
@@ -2475,26 +2555,13 @@ export function PermissionMatrixEditPage({ type, name, packageId, onDraftSaved, 
                     <MoreHorizontal className="h-4 w-4" />
                   </button>
                 </DropdownMenuTrigger>
-                <DropdownMenuContent align="end">
-                  <DropdownMenuItem onSelect={() => setBasicsOpen((o) => !o)}>
-                    {t('perm.basics.editHint')}
-                  </DropdownMenuItem>
-                </DropdownMenuContent>
+                <DropdownMenuContent align="end">{basicsItemEl}</DropdownMenuContent>
               </DropdownMenu>
             </>
           }
           tabs={
             <>
-              {PERMISSION_STUDIO_TABS.map((tab) => (
-                <StudioTab
-                  key={tab.key}
-                  active={chrome.tab === tab.key}
-                  data-testid={`perm-tab-${tab.key}`}
-                  onClick={() => chrome.onTabChange(tab.key)}
-                >
-                  {t(tab.labelKey)}
-                </StudioTab>
-              ))}
+              {sectionTabsEl}
               {/* The pillar's draft / read-only note, whole, at the tab row's
                   right: in the title row it squeezed the label and the counts
                   at the 1280 px design width. */}
@@ -2502,14 +2569,23 @@ export function PermissionMatrixEditPage({ type, name, packageId, onDraftSaved, 
             </>
           }
         />
+        )}
+        {frame?.toolOpen && <div className="min-h-0 flex-1 overflow-auto">{frame.toolPanel}</div>}
         {loading ? (
-          <div className="flex items-center gap-2 p-6 text-sm text-muted-foreground">
-            <Loader2 className="h-4 w-4 animate-spin" /> {t('perm.loading').replace('{name}', name)}
-          </div>
+          !frame?.toolOpen && (
+            <div className="flex items-center gap-2 p-6 text-sm text-muted-foreground">
+              <Loader2 className="h-4 w-4 animate-spin" /> {t('perm.loading').replace('{name}', name)}
+            </div>
+          )
         ) : draftRefusedEl ? (
-          draftRefusedEl
+          !frame?.toolOpen && draftRefusedEl
         ) : (
-          <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+          // objectstack#36905 — kept mounted under an open item tool, so an
+          // edit survives the visit.
+          <div
+            className={cn('flex min-h-0 flex-1 flex-col overflow-hidden', frame?.toolOpen && 'hidden')}
+            data-testid="perm-studio-sections"
+          >
             {noticesEl}
             {basicsOpen && (
               <div className="shrink-0 border-b pt-3" data-testid="perm-basics">

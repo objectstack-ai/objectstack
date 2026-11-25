@@ -25,6 +25,10 @@ import {
   organizationBasics,
   markDismissed,
   wasDismissed,
+  NOT_SHOWN_RECORD_TTL_MS,
+  markAnsweredNotShown,
+  notShownRecordKey,
+  wasAnsweredNotShown,
   type ChecklistStorage,
 } from '../firstRunChecklistLogic';
 import type { ResolvedSettingValue, SettingsManifest, Specifier } from '../types';
@@ -233,6 +237,62 @@ describe('hiding the checklist is a per-device record, per workspace and user', 
     expect(wasDismissed(broken, 'k')).toBe(false);
     expect(wasDismissed(undefined, 'k')).toBe(false);
     expect(markDismissed(broken, 'k')).toBe(false);
+  });
+});
+
+describe('"not shown" is a per-device answer, per workspace, user and capability set, for a day (objectstack#37182)', () => {
+  function memory(): ChecklistStorage & { data: Map<string, string> } {
+    const data = new Map<string, string>();
+    return { data, getItem: (k) => data.get(k) ?? null, setItem: (k, v) => void data.set(k, v) };
+  }
+  const HELD = 'setup.access\nsetup.write';
+  const T0 = Date.UTC(2026, 10, 25, 2, 0, 0);
+
+  it('keys the record on both ids, apart from the dismiss record, and reads it back for the same capability set', () => {
+    const storage = memory();
+    const key = notShownRecordKey('org_1', 'u_owner');
+    expect(key).toBe('os:first-run-checklist-not-shown:org_1:u_owner');
+    expect(key).not.toBe(dismissRecordKey('org_1', 'u_owner'));
+    expect(wasAnsweredNotShown(storage, key, HELD, T0)).toBe(false);
+    expect(markAnsweredNotShown(storage, key, HELD, T0)).toBe(true);
+    expect(wasAnsweredNotShown(storage, key, HELD, T0 + 1000)).toBe(true);
+    expect(wasAnsweredNotShown(storage, notShownRecordKey('org_2', 'u_owner'), HELD, T0 + 1000)).toBe(false);
+  });
+
+  it('a changed capability set reads again', () => {
+    const storage = memory();
+    const key = notShownRecordKey('org_1', 'u_owner');
+    markAnsweredNotShown(storage, key, HELD, T0);
+    expect(wasAnsweredNotShown(storage, key, `${HELD}\nmanage_platform_settings`, T0 + 1000)).toBe(false);
+    expect(wasAnsweredNotShown(storage, key, 'setup.access', T0 + 1000)).toBe(false);
+  });
+
+  it('stands for a day, then reads again; a record dated in the future reads again', () => {
+    const storage = memory();
+    const key = notShownRecordKey('org_1', 'u_owner');
+    markAnsweredNotShown(storage, key, HELD, T0);
+    expect(wasAnsweredNotShown(storage, key, HELD, T0 + NOT_SHOWN_RECORD_TTL_MS - 1)).toBe(true);
+    expect(wasAnsweredNotShown(storage, key, HELD, T0 + NOT_SHOWN_RECORD_TTL_MS)).toBe(false);
+    expect(wasAnsweredNotShown(storage, key, HELD, T0 - 1)).toBe(false);
+  });
+
+  it('storage that cannot be read, or a record that does not parse, reads again', () => {
+    const broken: ChecklistStorage = {
+      getItem: () => {
+        throw new Error('denied');
+      },
+      setItem: () => {
+        throw new Error('denied');
+      },
+    };
+    expect(wasAnsweredNotShown(broken, 'k', HELD, T0)).toBe(false);
+    expect(wasAnsweredNotShown(undefined, 'k', HELD, T0)).toBe(false);
+    expect(markAnsweredNotShown(broken, 'k', HELD, T0)).toBe(false);
+    const storage = memory();
+    for (const raw of ['not json', 'null', '2026-11-25T00:00:00.000Z', JSON.stringify({ held: HELD }), JSON.stringify({ held: HELD, at: 'x' })]) {
+      storage.data.set('k', raw);
+      expect(wasAnsweredNotShown(storage, 'k', HELD, T0)).toBe(false);
+    }
   });
 });
 
