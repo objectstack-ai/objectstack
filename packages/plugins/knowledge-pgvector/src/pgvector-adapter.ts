@@ -365,10 +365,12 @@ export class PgvectorKnowledgeAdapter implements IKnowledgeAdapter {
       content: string;
       title: string | null;
       metadata: Record<string, unknown> | null;
+      doc_hash: string | null;
+      heading_path: string[] | null;
       distance: number;
     }>(
       `SELECT * FROM (
-         SELECT chunk_id, document_id, source_record_id, content, title, metadata,
+         SELECT chunk_id, document_id, source_record_id, content, title, metadata, doc_hash, heading_path,
                 embedding OPERATOR(${ext}.<=>) $3::${ext}.vector AS distance
            FROM ${qualified(this.schema, vectorTable(generation.dim))}
           WHERE ${where.join(' AND ')}
@@ -387,6 +389,11 @@ export class PgvectorKnowledgeAdapter implements IKnowledgeAdapter {
       snippet: r.content,
       ...(r.title === null ? {} : { title: r.title }),
       metadata: r.metadata ?? {},
+      // The stored hash, as given (ADR-0161 K8, item 3): the service's
+      // record-level freshness check compares it with the record as it reads now.
+      ...(r.doc_hash === null ? {} : { docHash: r.doc_hash }),
+      // The passage's heading path, when the splitter gave it one (item 14).
+      ...(Array.isArray(r.heading_path) ? { headingPath: r.heading_path } : {}),
     }));
   }
 

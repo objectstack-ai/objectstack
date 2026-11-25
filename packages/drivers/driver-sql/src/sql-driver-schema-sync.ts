@@ -2843,9 +2843,17 @@ export function emitsDeclaredColumnDefault(field: any): boolean {
   return !isRuntimeDefaultToken(dv) && typeof dv !== 'object';
 }
 
-/** The body of `SqlDriver#applyDeclaredColumnDefault`; the method's docblock there is its contract. */
-export function applyDeclaredColumnDefault(this: Pick<SchemaSyncHost, 'nowColumnDefault'>, col: Knex.ColumnBuilder, field: any, type: string): void {
+/**
+ * The body of `SqlDriver#applyDeclaredColumnDefault`; the method's docblock there is its contract.
+ *
+ * [#37320] `expressionForm`: the literal is emitted parenthesised, `DEFAULT
+ * ('d')` — the only DEFAULT a MySQL TEXT column takes (MySQL 8.0.13+ /
+ * MariaDB 10.2+). `createColumn` asks for it on exactly that column, which it
+ * builds through `specificType` so knex does not strip the clause.
+ */
+export function applyDeclaredColumnDefault(this: Pick<SchemaSyncHost, 'knex' | 'nowColumnDefault'>, col: Knex.ColumnBuilder, field: any, type: string, expressionForm: boolean = false): void {
   if (!emitsDeclaredColumnDefault(field)) return;
   const dv = field.defaultValue;
-  col.defaultTo(isNowDefaultValue(dv) ? this.nowColumnDefault(type) : (dv as any));
+  if (isNowDefaultValue(dv)) col.defaultTo(this.nowColumnDefault(type));
+  else col.defaultTo(expressionForm ? this.knex.raw('(?)', [dv]) : (dv as any));
 }

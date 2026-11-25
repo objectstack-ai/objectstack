@@ -42,7 +42,12 @@
  * what the last complete build recorded, a write or a search under another
  * fingerprint is refused `KNOWLEDGE_REBUILD_REQUIRED` and never served from the
  * other generation, and — for an adapter that builds generations — a build
- * under a new fingerprint switches to it at its end.
+ * under a new fingerprint switches to it at its end; and
+ * what a hit carries back (ADR-0161 K8, items 3 and 14) — an adapter that
+ * stores `docHash` returns it on each hit as stored, which the service's
+ * record-level freshness check compares (pinned through a real
+ * `KnowledgeService`), and an adapter that takes chunks returns each
+ * passage's `headingPath`.
  *
  * Every optional member is DECLARED by the caller in `implements`, and the
  * suite asserts the declaration against the adapter: a member an adapter lacks
@@ -196,7 +201,10 @@ type Row = Record<string, unknown>;
  *
  * The permission re-read (`where: { id: { $in } }`, the caller's context in
  * the query) answers the rows `wall` admits for that context; without a
- * `wall`, every row.
+ * `wall`, every row. The record-level search's freshness check passes its
+ * system context in the trailing options, never in the query, so it is
+ * answered as any other read: the rows its `where` (`id: { $in }`, alone or
+ * under `$and`) matches, whole.
  */
 function rowsEngine(rows: Row[], wall?: (row: Row, context: ExecutionContext) => boolean): IDataEngine {
   const matches = (row: Row, where: Record<string, unknown> | undefined): boolean => {
@@ -210,6 +218,10 @@ function rowsEngine(rows: Row[], wall?: (row: Row, context: ExecutionContext) =>
       if (key.startsWith('$')) throw new Error(`engine double: operator ${key} is not implemented`);
       if (value !== null && typeof value === 'object') {
         const ops = Object.keys(value);
+        if (key === 'id' && ops.length === 1 && ops[0] === '$in' && Array.isArray((value as { $in: unknown }).$in)) {
+          if (!(value as { $in: unknown[] }).$in.map(String).includes(String(row.id))) return false;
+          continue;
+        }
         if (key !== 'id' || ops.length !== 1 || ops[0] !== '$gt') {
           throw new Error(`engine double: condition ${JSON.stringify(value)} on '${key}' is not implemented`);
         }
@@ -232,11 +244,14 @@ function rowsEngine(rows: Row[], wall?: (row: Row, context: ExecutionContext) =>
           .filter((r) => inIds.includes(r.id) && (wall === undefined || wall(r, ctx)))
           .map((r) => ({ id: r.id }));
       }
-      if (typeof query?.limit !== 'number' || !(query.limit > 0)) throw new Error('engine double: an unbounded find');
+      const pinsIds = JSON.stringify(query?.where ?? {}).includes('"$in"');
+      if (!pinsIds && (typeof query?.limit !== 'number' || !(query.limit > 0))) {
+        throw new Error('engine double: an unbounded find');
+      }
       return rows
         .filter((r) => matches(r, query.where))
         .sort((a, b) => (String(a.id) < String(b.id) ? -1 : String(a.id) > String(b.id) ? 1 : 0))
-        .slice(0, query.limit)
+        .slice(0, typeof query.limit === 'number' ? query.limit : undefined)
         .map((r) => ({ ...r }));
     },
     count: async (_object: string, query: { where?: Record<string, unknown> }) =>
@@ -588,6 +603,39 @@ export function runKnowledgeAdapterContract(opts: KnowledgeAdapterContractOption
         });
       });
 
+      describe('the stored hash on hits (ADR-0161 K8, item 3)', () => {
+        it("a hit carries its document's docHash as stored, and none for a document stored without one", async () => {
+          const adapter: IKnowledgeAdapter = await make();
+          const a = objectSource('a');
+          await adapter.upsert([doc(a, '1', 'basalt quarry', 'v1:opaque-as-given'), doc(a, '2', 'basalt cliffs')], ctxOf(a));
+          const hits = await adapter.search('basalt', { source: a, topK: 5 });
+          const byDoc = new Map(hits.map((h) => [h.documentId, h]));
+          expect(byDoc.get(`${a.id}:1`)?.docHash).toBe('v1:opaque-as-given');
+          expect(byDoc.get(`${a.id}:2`)).toBeDefined();
+          expect(byDoc.get(`${a.id}:2`)?.docHash).toBeUndefined();
+        });
+
+        it('a record-level search answers one hit per record, and none for a record that changed or left since it was indexed', async () => {
+          const rows: Row[] = [
+            { id: 'r1', body: 'lagoon reef lagoon', status: 'published' },
+            { id: 'r2', body: 'lagoon reef', status: 'published' },
+            { id: 'r3', body: 'lagoon shallows', status: 'published' },
+          ];
+          const source = objectSource('fresh', { where: { status: 'published' } });
+          const h = await serviceOver(make, rows, source);
+          expect(await h.svc.reindexSource(source.id)).toMatchObject({ ok: true, indexed: 3 });
+          const ask = () => h.svc.search('lagoon reef', { granularity: 'record', topK: 5, executionContext: SYSTEM });
+          expect((await ask()).map((x) => x.sourceRecordId).sort()).toEqual(['r1', 'r2', 'r3']);
+          rows[0].body = 'lagoon reef, rewritten after indexing';
+          rows[1].status = 'draft';
+          const out = await ask();
+          expect(out.map((x) => x.sourceRecordId)).toEqual(['r3']);
+          // The stale documents are repaired in the background: r1 rewritten, r2 removed.
+          await expect.poll(async () => (await ask()).map((x) => x.sourceRecordId).sort()).toEqual(['r1', 'r3']);
+          expect(h.upserted.flat().filter((id) => id === `${source.id}:r1`)).toHaveLength(2);
+        });
+      });
+
       describe('through KnowledgeService.reindexSource', () => {
         it('a second complete reindex skips every unchanged document and rewrites a changed one', async () => {
           const rows = rowsOf(3);
@@ -818,6 +866,27 @@ export function runKnowledgeAdapterContract(opts: KnowledgeAdapterContractOption
           const third = expected.chunks.find((c) => c.content.includes('Copper'))!;
           const hits = await h.adapter.search('copper wire electricity', { source, topK: 3 });
           expect(hits[0]).toMatchObject({ chunkId: third.id, documentId: sent.id, snippet: third.content });
+        });
+
+        it('a hit carries the heading path of its passage, and none for a passage without one', async () => {
+          const adapter: IKnowledgeAdapter = await make();
+          const a = objectSource('headings');
+          const id = `${a.id}:1`;
+          await adapter.upsert(
+            [{
+              id, sourceId: a.id, sourceRecordId: '1', content: 'fjord ferry timetable. fjord glacier', metadata: {},
+              chunks: [
+                { id: `${id}#0`, documentId: id, index: 0, content: 'fjord ferry timetable', headingPath: ['Travel', 'Ferries'] },
+                { id: `${id}#1`, documentId: id, index: 1, content: 'fjord glacier' },
+              ],
+            }],
+            ctxOf(a),
+          );
+          const hits = await adapter.search('fjord ferry glacier', { source: a, topK: 5 });
+          const byChunk = new Map(hits.map((x) => [x.chunkId, x]));
+          expect(byChunk.get(`${id}#0`)?.headingPath).toEqual(['Travel', 'Ferries']);
+          expect(byChunk.get(`${id}#1`)).toBeDefined();
+          expect(byChunk.get(`${id}#1`)?.headingPath).toBeUndefined();
         });
 
         it("a whole document over the embedder's budget is removed and reported, never truncated", async () => {

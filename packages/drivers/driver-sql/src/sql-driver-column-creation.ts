@@ -51,7 +51,7 @@ import {
 } from './sql-driver-top-level.js';
 import type { RowWidthContribution } from './sql-driver-top-level.js';
 import { emitsDeclaredColumnDefault } from './sql-driver-schema-sync.js';
-import { SqlDriverStatics as SqlDriver } from './sql-driver.js';
+import { isNowDefaultValue, SqlDriverStatics as SqlDriver } from './sql-driver.js';
 import type { SqlDriver as SqlDriverClass } from './sql-driver.js';
 
 /**
@@ -787,6 +787,31 @@ export class ColumnCreationFacet {
     if (!isDeclaredFieldType(field)) refuseUndeclaredFieldType(name);
     const type: string = field.type;
     let col: any;
+    // [#37320] An unbounded text column, on every branch below that builds one.
+    // knex's MySQL column compiler silently drops ANY default on a `text`
+    // builder (its `defaultTo` answers '' for a text/blob type, a raw
+    // expression included), and MySQL refuses a literal DEFAULT on a TEXT
+    // column anyway (`ER_BLOB_CANT_HAVE_DEFAULT`). So a declared literal
+    // `defaultValue` never reached the DDL there: `ALTER TABLE … ADD COLUMN …
+    // TEXT NOT NULL` on a populated table filled every existing row with the
+    // implicit '' instead of the declared value, and every insert that omitted
+    // the field was refused (`Field '…' doesn't have a default value`).
+    // MySQL 8.0.13+ (and MariaDB 10.2+, the floor `nowColumnDefault` already
+    // states) accepts the EXPRESSION form, `DEFAULT ('d')`, on TEXT — measured
+    // on MySQL 8.0.46: existing rows take it on ADD COLUMN and an omitting
+    // insert stores it. So the column is declared through `specificType`,
+    // which knex's compiler does not strip, and {@link applyDeclaredColumnDefault}
+    // is asked for the expression form. Only for a literal default: `NOW()`
+    // on a text column keeps the old behaviour (no DEFAULT), because
+    // `nowColumnDefault` has no text-column expression on MySQL.
+    let mysqlTextDefault = false;
+    const textColumn = () => {
+      if (this.isMysql && emitsDeclaredColumnDefault(field) && !isNowDefaultValue(field.defaultValue)) {
+        mysqlTextDefault = true;
+        return table.specificType(name, 'text');
+      }
+      return table.text(name);
+    };
     switch (type) {
       case 'string':
       case 'email':
@@ -825,7 +850,7 @@ export class ColumnCreationFacet {
         // untouched. What this removes is the permanent, self-inflicted drift
         // report a fresh table used to raise against itself.
         const declared = this.declaredVarcharLength(field);
-        col = declared === null ? table.text(name) : table.string(name, declared);
+        col = declared === null ? textColumn() : table.string(name, declared);
         break;
       }
       case 'text':
@@ -926,7 +951,7 @@ export class ColumnCreationFacet {
         //     {@link explainUnkeyableTextColumn} for what happens next, which is
         //     a named refusal and never a silently weaker constraint.
         const keyable = keyed ? this.keyableTextLength(field) : null;
-        col = keyable === null ? table.text(name) : table.string(name, keyable);
+        col = keyable === null ? textColumn() : table.string(name, keyable);
         break;
       }
       case 'integer':
@@ -1200,7 +1225,7 @@ export class ColumnCreationFacet {
       // added to a populated table with no DEFAULT its rows can take — see the
       // head of this method.
       if (notNull || tenantColumn) col.notNullable();
-      this.applyDeclaredColumnDefault(col, field, type);
+      this.applyDeclaredColumnDefault(col, field, type, mysqlTextDefault);
     }
   }
 }

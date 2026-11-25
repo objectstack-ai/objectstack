@@ -68,6 +68,7 @@ import { datasetSelectOptions } from './inspectors/dataset-picker-options.js';
 import type { DatasetCatalogEntry } from './previews/useDatasetCatalog.js';
 import { useMonacoFallback } from './useMonacoFallback.js';
 import { DraftChip } from '../studio-design/StudioDraftMark.js';
+import { ContextPackRelatedEntries, isContextPackEntrySchema } from './ContextPackRelatedEntries.js';
 import {
   type LoadState,
   isLoading,
@@ -1766,7 +1767,31 @@ function relatedListEntryChipName(entry: unknown): string | undefined {
  * chip shows its title and columns beside the name. Those are edited in
  * Studio's object settings (Record page tabs), which reads the relationships.
  */
-function RelatedListEntriesWidget({
+function RelatedListEntriesWidget(props: WidgetProps) {
+  // objectstack#37143 — the same block edits a context pack's `related`
+  // (`{ object, field?, fields? }` entries, ADR-0160 D1). Told apart by the
+  // entry schema it is handed, never by the type's name; the pack's root is
+  // the row its `dependsOn` names (`object`).
+  const { schema, fieldSpec, formData } = props;
+  if (isContextPackEntrySchema(schema)) {
+    const dep = (Array.isArray(fieldSpec?.dependsOn) ? fieldSpec!.dependsOn![0] : fieldSpec?.dependsOn) || 'object';
+    const rootValue = formData?.[dep];
+    return (
+      <ContextPackRelatedEntries
+        naming={controlNaming(props)}
+        schema={schema}
+        root={typeof rootValue === 'string' && rootValue ? rootValue : undefined}
+        value={props.value}
+        onChange={props.onChange}
+        readOnly={props.readOnly}
+      />
+    );
+  }
+  return <RelatedListNameEntries {...props} />;
+}
+
+/** The object form's `relatedLists` face: names and `{ list, … }` entries as chips. */
+function RelatedListNameEntries({
   id,
   ariaLabelledBy,
   required,
@@ -2181,13 +2206,19 @@ function ViewRefWidget({ id, ariaLabelledBy, required, value, onChange, readOnly
   );
 }
 
+/** True when the array's JSON Schema refuses an empty array (`minItems` of 1 or more). */
+export function emptyArrayRefused(schema: unknown): boolean {
+  const min = (schema as { minItems?: unknown } | undefined)?.minItems;
+  return typeof min === 'number' && min >= 1;
+}
+
 /**
  * Ordered multi object-field picker. Used for props that reference a list of
  * fields (kanban card `columns`, gallery `visibleFields`, chart
  * `yAxisFields`, `searchableFields`, …). Preserves order; supports reorder
  * and removal; values outside the catalog are retained.
  */
-function FieldRefMultiWidget({ value, onChange, readOnly, context, ariaLabelledBy, copilotAdded }: WidgetProps) {
+function FieldRefMultiWidget({ value, onChange, readOnly, context, ariaLabelledBy, copilotAdded, schema }: WidgetProps) {
   const locale = useMetadataLocale();
   const fieldsState = context?.objectFields ?? NOT_ASKED;
   // objectui#5228 — the failure is decided here, before the catalog is read:
@@ -2211,7 +2242,10 @@ function FieldRefMultiWidget({ value, onChange, readOnly, context, ariaLabelledB
   const removeAt = (i: number) => {
     const next = selected.slice();
     next.splice(i, 1);
-    onChange(next);
+    // objectstack#37143 — an array its schema bounds below (`minItems: 1`, a
+    // context pack's `fields`) has no empty value: removing the last chip
+    // removes the key, never writes `[]` the save door refuses.
+    onChange(next.length === 0 && emptyArrayRefused(schema) ? undefined : next);
   };
   const move = (i: number, dir: -1 | 1) => {
     const j = i + dir;

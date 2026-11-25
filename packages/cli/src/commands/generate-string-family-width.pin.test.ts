@@ -472,11 +472,21 @@ describe('#16091 — the character column both generators emit is the driver\'s'
     const arm = armContaining('text');
     expect(
       arm,
-      'driver-sql no longer builds its text family with `keyable === null ? table.text(name) : ' +
+      'driver-sql no longer builds its text family with `keyable === null ? textColumn() : ' +
       'table.string(name, keyable)`. This pin corrects the generators TOWARD the driver, so if ' +
       'the driver moved, re-read #16091 before touching generate.ts — the authority is the ' +
       'driver, not this file.',
-    ).toContain('col = keyable === null ? table.text(name) : table.string(name, keyable);');
+    ).toContain('col = keyable === null ? textColumn() : table.string(name, keyable);');
+    // `textColumn()` is createColumn's own unbounded-TEXT builder: `table.text(name)`,
+    // or on MySQL with a literal default the same `text` type via `specificType`
+    // (so the expression-form DEFAULT survives). Either way the column is TEXT.
+    const prologue = SQL_DRIVER_SOURCE.slice(
+      SQL_DRIVER_SOURCE.indexOf('protected createColumn('),
+      SQL_DRIVER_SOURCE.indexOf('switch (type)', SQL_DRIVER_SOURCE.indexOf('protected createColumn(')),
+    );
+    expect(prologue, 'createColumn no longer defines its textColumn() builder').toContain('const textColumn = () => {');
+    expect(prologue).toContain("return table.specificType(name, 'text');");
+    expect(prologue).toContain('return table.text(name);');
 
     // MEMBERSHIP is the driver's, swept rather than listed — a type that joins
     // or leaves this arm changes what is measured here without anyone editing it.
@@ -599,7 +609,7 @@ describe('#16091 — the character column both generators emit is the driver\'s'
   it('a KEYED text-family column takes keyableTextLength\'s width, in both generators', () => {
     const arm = armContaining('text');
     expect(arm).toContain('const keyable = keyed ? this.keyableTextLength(field) : null;');
-    expect(arm).toContain('col = keyable === null ? table.text(name) : table.string(name, keyable);');
+    expect(arm).toContain('col = keyable === null ? textColumn() : table.string(name, keyable);');
 
     for (const type of armMembers('text')) {
       // SIZED — the declared bound verbatim, up to the key-part ceiling.
@@ -741,7 +751,7 @@ describe('#16091 — the character column both generators emit is the driver\'s'
       arm,
       'driver-sql no longer sizes its string family from `declaredVarcharLength`. Re-read ' +
       '#16091 before trusting the generators\' widths — the authority is the driver.',
-    ).toContain('col = declared === null ? table.text(name) : table.string(name, declared);');
+    ).toContain('col = declared === null ? textColumn() : table.string(name, declared);');
     expect(arm).toContain('const declared = this.declaredVarcharLength(field);');
 
     const members = armMembers('email');

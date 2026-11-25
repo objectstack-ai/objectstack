@@ -22,6 +22,7 @@ interface Passage {
   chunkId: string;
   documentId: string;
   sourceRecordId?: string;
+  headingPath?: string[];
   text: string;
 }
 
@@ -51,6 +52,7 @@ function rank(passages: Passage[], query: string, opts: AdapterSearchOptions): K
       sourceRecordId: p.sourceRecordId,
       score,
       snippet: p.text,
+      ...(p.headingPath === undefined ? {} : { headingPath: p.headingPath }),
     }));
 }
 
@@ -72,6 +74,7 @@ class StubAdapter implements IKnowledgeAdapter {
           chunkId: c.id,
           documentId: doc.id,
           sourceRecordId: doc.sourceRecordId,
+          ...(c.headingPath === undefined ? {} : { headingPath: c.headingPath }),
           text: c.content,
         })));
       } else {

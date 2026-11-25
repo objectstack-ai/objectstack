@@ -10,6 +10,7 @@ import {
   LIST_DOCUMENTS_PAGE_SIZE,
   REINDEX_PAGE_SIZE,
   SEARCH_FIRST_ROUND_FACTOR,
+  SEARCH_FRESHNESS_ROUNDS,
   SEARCH_REFILL_FACTOR,
   computeDocHash,
   documentIdFor,
@@ -1678,5 +1679,385 @@ describe('recordToDocument reads the title from the object\'s display field', ()
     await svc.reindexSource('s1');
     const titles = adapter.upsertSpy.mock.calls.flatMap((c) => (c[0] as KnowledgeDocument[]).map((d) => d.title));
     expect(titles).toEqual(['Travel policy', 'Travel policy']);
+  });
+});
+
+// ADR-0161 K1 (record-level return), K8 items 3 and 14: `granularity: 'record'`
+// answers one hit per record, `groupBy` one per metadata value, and each hit
+// answered is checked against its record as it reads now.
+describe('KnowledgeService — record-level search (granularity, groupBy, freshness)', () => {
+  const MEMBER = { userId: 'u1', positions: ['member'], permissions: [], isSystem: false };
+  const SYSTEM = { positions: [], permissions: [], isSystem: true };
+
+  type Row = Record<string, unknown> & { id: string };
+
+  /** A clause source: content `body`, metadata `policy`, over object `clause`. */
+  function clauseSource(id: string, extra: Partial<ObjectKnowledgeSource> = {}): KnowledgeSource {
+    return {
+      id, label: id, adapter: 'memory',
+      source: { kind: 'object', object: 'clause', contentFields: ['body'], metadataFields: ['policy'], ...extra } as ObjectKnowledgeSource,
+    };
+  }
+
+  /** The hit an index would answer for `row`'s passage `n`, carrying the hash its document was indexed with. */
+  function hitOf(source: KnowledgeSource, row: Row, n: number, score: number, schema?: unknown): KnowledgeHit {
+    const doc = recordToDocument(source, source.source as ObjectKnowledgeSource, row, schema);
+    return {
+      chunkId: `${doc.id}#${n}`, documentId: doc.id, sourceId: source.id, sourceRecordId: row.id,
+      score, snippet: `${row.body as string} (${n})`, metadata: doc.metadata, docHash: doc.docHash,
+    };
+  }
+
+  /** An adapter answering the best `topK` of `corpus[sourceId]`. */
+  function rankingAdapter(corpus: Record<string, KnowledgeHit[]>) {
+    const searchSpy = vi.fn(async (_q: string, opts: { source: KnowledgeSource; topK: number }) =>
+      [...(corpus[opts.source.id] ?? [])].sort((a, b) => b.score - a.score).slice(0, opts.topK));
+    return {
+      id: 'memory', upsert: vi.fn(async () => undefined), delete: vi.fn(async () => undefined),
+      search: searchSpy, searchSpy,
+    };
+  }
+
+  /** Whether a recorded `find` call ran as the system identity (its context in the query or in the options). */
+  type FindCall = unknown[];
+  const isSystemCall = (c: FindCall): boolean =>
+    ((c[1] as { context?: { isSystem?: boolean } }).context ?? (c[2] as { context?: { isSystem?: boolean } } | undefined)?.context)
+      ?.isSystem === true;
+
+  /**
+   * An engine over `table`: a caller's re-read answers the `readable` ids,
+   * projected to the fields asked; a system read (context in the query or in
+   * the options: the freshness check, the event sync's re-read) answers the
+   * rows matching `where` (equality, `$and`, `id: { $in }`), projected to the
+   * fields asked when it asks any — so a projection that leaves out a field
+   * assembly reads changes the recomputed hash, as a real engine would.
+   */
+  function tableEngine(table: Row[], readable?: string[]) {
+    const matches = (row: Row, where: Record<string, unknown> | undefined): boolean =>
+      Object.entries(where ?? {}).every(([k, v]) => {
+        if (k === '$and') return (v as Record<string, unknown>[]).every((w) => matches(row, w));
+        if (k.startsWith('$')) throw new Error(`tableEngine: combinator ${k} is not implemented`);
+        if (v !== null && typeof v === 'object') {
+          const ops = Object.keys(v as object);
+          if (ops.length !== 1 || ops[0] !== '$in') throw new Error(`tableEngine: condition ${JSON.stringify(v)} is not implemented`);
+          return (v as { $in: string[] }).$in.includes(row[k] as string);
+        }
+        return row[k] === v;
+      });
+    const find = vi.fn(async (_obj: string, q: { where?: Record<string, unknown>; fields?: string[]; context?: { isSystem?: boolean } }, o?: { context?: { isSystem?: boolean } }) => {
+      const context = q.context ?? o?.context;
+      const rows = table.filter((r) => matches(r, q.where));
+      const project = (r: Row) => (q.fields ? Object.fromEntries(q.fields.filter((f) => f in r).map((f) => [f, r[f]])) : { ...r });
+      if (context?.isSystem) return rows.map(project);
+      return rows.filter((r) => readable === undefined || readable.includes(r.id)).map(project);
+    });
+    return { find } as unknown as IDataEngine & { find: typeof find };
+  }
+
+  function setup(opts: {
+    table: Row[];
+    sources: KnowledgeSource[];
+    corpus: (sources: Record<string, KnowledgeSource>) => Record<string, KnowledgeHit[]>;
+    readable?: string[];
+    engine?: boolean;
+  }) {
+    const byId = Object.fromEntries(opts.sources.map((s) => [s.id, s]));
+    const adapter = rankingAdapter(opts.corpus(byId));
+    const engine = opts.engine === false ? undefined : tableEngine(opts.table, opts.readable);
+    const logger = { debug: vi.fn(), warn: vi.fn(), error: vi.fn() };
+    const svc = new KnowledgeService({ ...(engine ? { dataEngine: engine } : {}), logger });
+    svc.registerAdapter('memory', adapter);
+    for (const s of opts.sources) svc.registerSource(s);
+    const asked = () => adapter.searchSpy.mock.calls.map((c) => [(c[1] as { source: KnowledgeSource }).source.id, (c[1] as { topK: number }).topK]);
+    const systemReads = () => (engine?.find.mock.calls ?? []).filter((c) => isSystemCall(c));
+    /** The freshness check's reads: system reads that pin ids with `$in` (the repair's re-read pins one id, `limit: 1`). */
+    const freshnessReads = () => systemReads().filter((c) => JSON.stringify((c[1] as { where?: unknown }).where ?? {}).includes('"$in"'));
+    return { svc, adapter, engine, logger, asked, systemReads, freshnessReads };
+  }
+
+  const policyRows = (): Row[] => [
+    { id: 'c1', body: 'leave clause one', policy: 'P_leave' },
+    { id: 'c2', body: 'leave clause two', policy: 'P_leave' },
+    { id: 'c3', body: 'travel clause', policy: 'P_travel' },
+    { id: 'c4', body: 'expense clause', policy: 'P_expense' },
+  ];
+
+  it('one record with three matching passages answers one hit, the best-scoring one', async () => {
+    const table = policyRows();
+    const h = setup({
+      table, sources: [clauseSource('s1')],
+      corpus: ({ s1 }) => ({ s1: [hitOf(s1, table[0], 0, 0.5), hitOf(s1, table[0], 1, 0.9), hitOf(s1, table[0], 2, 0.7), hitOf(s1, table[2], 0, 0.6)] }),
+    });
+    const out = await h.svc.search('q', { granularity: 'record', topK: 5, executionContext: MEMBER });
+    expect(out.map((x) => x.chunkId)).toEqual(['s1:c1#1', 's1:c3#0']);
+    expect(out[0].score).toBe(0.9);
+  });
+
+  it('the default stays chunk-level: every passage, no freshness read', async () => {
+    const table = policyRows();
+    const h = setup({
+      table, sources: [clauseSource('s1')],
+      corpus: ({ s1 }) => ({ s1: [hitOf(s1, table[0], 0, 0.5), hitOf(s1, table[0], 1, 0.9)] }),
+    });
+    const out = await h.svc.search('q', { topK: 5, executionContext: MEMBER });
+    expect(out.map((x) => x.chunkId)).toEqual(['s1:c1#1', 's1:c1#0']);
+    expect(h.systemReads()).toEqual([]);
+  });
+
+  it('topK counts records: three passages a record, topK 5 answers 5 records from one round of topK × 5', async () => {
+    const table: Row[] = Array.from({ length: 10 }, (_, i) => ({ id: `r${i}`, body: `body ${i}`, policy: 'P' }));
+    const h = setup({
+      table, sources: [clauseSource('s1')],
+      corpus: ({ s1 }) => ({ s1: table.flatMap((r, i) => [0, 1, 2].map((n) => hitOf(s1, r, n, 1 - i / 100 - n / 1000))) }),
+    });
+    const out = await h.svc.search('q', { granularity: 'record', topK: 5, executionContext: SYSTEM });
+    expect(out.map((x) => x.sourceRecordId)).toEqual(['r0', 'r1', 'r2', 'r3', 'r4']);
+    expect(h.asked()).toEqual([['s1', 25]]);
+  });
+
+  it('fewer records than topK within the refill cap: fewer are answered, refilled once, and logged', async () => {
+    const table: Row[] = [{ id: 'r0', body: 'only', policy: 'P' }, { id: 'r1', body: 'other', policy: 'P' }];
+    // 120 passages of r0 fill every round; r1's passage lies past the cap (topK × 20 = 100).
+    const h = setup({
+      table, sources: [clauseSource('s1')],
+      corpus: ({ s1 }) => ({ s1: [...Array.from({ length: 120 }, (_, n) => hitOf(s1, table[0], n, 1 - n / 1000)), hitOf(s1, table[1], 0, 0.1)] }),
+    });
+    const out = await h.svc.search('q', { granularity: 'record', topK: 5, executionContext: SYSTEM });
+    expect(out.map((x) => x.sourceRecordId)).toEqual(['r0']);
+    expect(h.asked()).toEqual([['s1', 25], ['s1', 100]]);
+    expect(h.logger.debug).toHaveBeenCalledWith(expect.stringContaining('answered 1 of topK=5 records'));
+  });
+
+  it("groupBy 'policy': one hit per policy, its best clause, the value in the hit's metadata", async () => {
+    const table = policyRows();
+    const h = setup({
+      table, sources: [clauseSource('s1')],
+      corpus: ({ s1 }) => ({ s1: [hitOf(s1, table[0], 0, 0.6), hitOf(s1, table[1], 0, 0.9), hitOf(s1, table[2], 0, 0.7), hitOf(s1, table[3], 0, 0.5)] }),
+    });
+    const out = await h.svc.search('q', { groupBy: 'policy', topK: 2, executionContext: MEMBER });
+    expect(out.map((x) => [x.sourceRecordId, x.metadata?.policy])).toEqual([['c2', 'P_leave'], ['c3', 'P_travel']]);
+  });
+
+  it('groupBy: a source that does not list the field is not searched; a record with no value is not answered', async () => {
+    const table: Row[] = [...policyRows(), { id: 'c5', body: 'orphan clause' }];
+    const noPolicy = clauseSource('s2', { metadataFields: ['status'] });
+    const h = setup({
+      table, sources: [clauseSource('s1'), noPolicy],
+      corpus: ({ s1, s2 }) => ({ s1: [hitOf(s1, table[4], 0, 0.99), hitOf(s1, table[2], 0, 0.5)], s2: [hitOf(s2, table[0], 0, 0.95)] }),
+    });
+    const out = await h.svc.search('q', { groupBy: 'policy', topK: 5, executionContext: MEMBER });
+    expect(out.map((x) => x.documentId)).toEqual(['s1:c3']);
+    expect(h.asked().map(([id]) => id)).not.toContain('s2');
+  });
+
+  it('groupBy across several sources: the same value is one group, the best hit of either source; a file source groups by document', async () => {
+    const table = policyRows();
+    const file: KnowledgeSource = { id: 'f1', label: 'f1', adapter: 'memory', source: { kind: 'file', prefix: 'docs/' } as KnowledgeSource['source'] };
+    const fileHit = (doc: string, n: number, score: number): KnowledgeHit =>
+      ({ chunkId: `${doc}#${n}`, documentId: doc, sourceId: 'f1', score, snippet: doc });
+    const h = setup({
+      table, sources: [clauseSource('s1'), clauseSource('s2'), file],
+      corpus: ({ s1, s2 }) => ({
+        s1: [hitOf(s1, table[0], 0, 0.6)],
+        s2: [hitOf(s2, table[1], 0, 0.8), hitOf(s2, table[2], 0, 0.3)],
+        f1: [fileHit('handbook.md', 0, 0.7), fileHit('handbook.md', 1, 0.65), fileHit('faq.md', 0, 0.2)],
+      }),
+    });
+    const out = await h.svc.search('q', { groupBy: 'policy', topK: 5, executionContext: MEMBER });
+    expect(out.map((x) => x.chunkId)).toEqual(['s2:c2#0', 'handbook.md#0', 's2:c3#0', 'faq.md#0']);
+  });
+
+  it("groupBy with granularity 'chunk', an empty groupBy and an unknown granularity are refused, coded VALIDATION_ERROR / 400", async () => {
+    const h = setup({ table: [], sources: [clauseSource('s1')], corpus: () => ({}) });
+    const coded = (message: RegExp) => expect.objectContaining({ code: 'VALIDATION_ERROR', status: 400, message: expect.stringMatching(message) });
+    await expect(h.svc.search('q', { groupBy: 'policy', granularity: 'chunk', executionContext: SYSTEM }))
+      .rejects.toEqual(coded(/cannot be combined with granularity 'chunk'/));
+    await expect(h.svc.search('q', { groupBy: '', executionContext: SYSTEM })).rejects.toEqual(coded(/must name a metadata field/));
+    await expect(h.svc.search('q', { granularity: 'passage' as never, executionContext: SYSTEM }))
+      .rejects.toEqual(coded(/granularity must be 'chunk' or 'record', got 'passage'/));
+    expect(h.adapter.searchSpy).not.toHaveBeenCalled();
+  });
+
+  it('freshness: a record deleted or out of where since indexing is not answered, and the next record moves up', async () => {
+    const table = policyRows();
+    const source = clauseSource('s1', { where: { policy: 'P_leave' } });
+    // Indexed while c3 and c4 were still in the source; c3 has since left `where`, c4 was deleted.
+    const indexed = [{ ...table[2], policy: 'P_leave' }, { id: 'c4', body: 'gone', policy: 'P_leave' }];
+    const h = setup({
+      table: table.filter((r) => r.id !== 'c4'), sources: [source],
+      corpus: ({ s1 }) => ({ s1: [hitOf(s1, indexed[0], 0, 0.9), hitOf(s1, indexed[1], 0, 0.8), hitOf(s1, table[0], 0, 0.7), hitOf(s1, table[1], 0, 0.6)] }),
+    });
+    const out = await h.svc.search('q', { granularity: 'record', topK: 2, executionContext: SYSTEM });
+    expect(out.map((x) => x.sourceRecordId)).toEqual(['c1', 'c2']);
+    // Round one read the two leads with the source's where; round two the two that moved up.
+    const reads = h.freshnessReads();
+    expect(reads.map((c) => (c[1] as { where: { $and: [unknown, { id: { $in: string[] } }] } }).where)).toEqual([
+      { $and: [{ policy: 'P_leave' }, { id: { $in: ['c3', 'c4'] } }] },
+      { $and: [{ policy: 'P_leave' }, { id: { $in: ['c1', 'c2'] } }] },
+    ]);
+  });
+
+  it('freshness: a record changed since indexing is not answered (no stale snippet), and is repaired once', async () => {
+    const table = policyRows();
+    const source = clauseSource('s1');
+    const before = { ...table[0], body: 'leave clause one, before the edit' };
+    const h = setup({
+      table, sources: [source],
+      corpus: ({ s1 }) => ({ s1: [hitOf(s1, before, 0, 0.9), hitOf(s1, table[2], 0, 0.5)] }),
+    });
+    const first = await h.svc.search('q', { granularity: 'record', topK: 5, executionContext: SYSTEM });
+    expect(first.map((x) => x.sourceRecordId)).toEqual(['c3']);
+    await vi.waitFor(() => expect(h.adapter.upsert).toHaveBeenCalledTimes(1));
+    const [[docs]] = h.adapter.upsert.mock.calls as unknown as [[KnowledgeDocument[]]];
+    expect(docs.map((d) => [d.id, d.content])).toEqual([['s1:c1', 'leave clause one']]);
+    // The index (this double) still answers the old hash: the next search drops it again, without a second repair.
+    await h.svc.search('q', { granularity: 'record', topK: 5, executionContext: SYSTEM });
+    await new Promise((r) => setTimeout(r, 0));
+    expect(h.adapter.upsert).toHaveBeenCalledTimes(1);
+  });
+
+  it('freshness: a hash that matches is answered and clears the repair, so a later change is repaired again', async () => {
+    const table = policyRows();
+    const source = clauseSource('s1');
+    const corpus: Record<string, KnowledgeHit[]> = { s1: [] };
+    const h = setup({ table, sources: [source], corpus: () => corpus });
+    corpus.s1 = [hitOf(source, { ...table[0], body: 'old' }, 0, 0.9)];
+    await h.svc.search('q', { granularity: 'record', executionContext: SYSTEM });
+    await vi.waitFor(() => expect(h.adapter.upsert).toHaveBeenCalledTimes(1));
+    corpus.s1 = [hitOf(source, table[0], 0, 0.9)];
+    expect((await h.svc.search('q', { granularity: 'record', executionContext: SYSTEM })).map((x) => x.sourceRecordId)).toEqual(['c1']);
+    table[0].body = 'edited again';
+    await h.svc.search('q', { granularity: 'record', executionContext: SYSTEM });
+    await vi.waitFor(() => expect(h.adapter.upsert).toHaveBeenCalledTimes(2));
+  });
+
+  it('freshness: a hit whose adapter stores no hash is checked for membership only', async () => {
+    const table = policyRows();
+    const h = setup({
+      table, sources: [clauseSource('s1')],
+      corpus: ({ s1 }) => ({ s1: [{ ...hitOf(s1, { ...table[0], body: 'old' }, 0, 0.9), docHash: undefined }] }),
+    });
+    const out = await h.svc.search('q', { granularity: 'record', executionContext: SYSTEM });
+    expect(out.map((x) => x.sourceRecordId)).toEqual(['c1']);
+    expect(h.adapter.upsert).not.toHaveBeenCalled();
+  });
+
+  it('freshness: a read that fails answers none of that source\'s checked hits, reported at warn', async () => {
+    const table = policyRows();
+    const h = setup({ table, sources: [clauseSource('s1')], corpus: ({ s1 }) => ({ s1: [hitOf(s1, table[0], 0, 0.9)] }) });
+    h.engine!.find.mockImplementation(async (_o, q, o) => {
+      if ((q.context ?? o?.context)?.isSystem) throw new Error('db down');
+      return [{ id: 'c1' }];
+    });
+    expect(await h.svc.search('q', { granularity: 'record', executionContext: MEMBER })).toEqual([]);
+    expect(h.logger.warn).toHaveBeenCalledWith(expect.stringContaining('could not read its records (db down)'));
+  });
+
+  it('the permission re-read stays one query as the caller, reads the display field too, and the hit carries the title as it reads now', async () => {
+    const table: Row[] = [{ id: 'c1', body: 'clause', policy: 'P', name: 'Leave policy (2026)' }];
+    const source = clauseSource('s1');
+    const h = setup({
+      table, sources: [source], readable: ['c1'],
+      corpus: ({ s1 }) => ({ s1: [{ ...hitOf(s1, table[0], 0, 0.9), title: 'Leave policy (2025)', docHash: undefined }] }),
+    });
+    (h.engine as unknown as { getSchema: (o: string) => unknown }).getSchema = () => ({
+      name: 'clause', nameField: 'name', fields: { body: { type: 'textarea' }, policy: { type: 'text' }, name: { type: 'text' } },
+    });
+    const out = await h.svc.search('q', { granularity: 'record', executionContext: MEMBER });
+    expect(out.map((x) => x.title)).toEqual(['Leave policy (2026)']);
+    const callerReads = h.engine!.find.mock.calls.filter((c) => !isSystemCall(c));
+    expect(callerReads).toHaveLength(1);
+    expect(callerReads[0][1]).toMatchObject({ where: { id: { $in: ['c1'] } }, fields: ['id', 'name'], context: MEMBER });
+    // The freshness read is projected to the fields assembly reads.
+    expect(h.freshnessReads()[0][1]).toEqual({ where: { id: { $in: ['c1'] } }, fields: ['id', 'body', 'policy', 'name'] });
+    expect(h.freshnessReads()[0][2]).toEqual({ context: expect.objectContaining({ isSystem: true }) });
+  });
+
+  it('a record the caller may not read is not answered; the system identity is answered without a caller re-read', async () => {
+    const table = policyRows();
+    const h = setup({
+      table, sources: [clauseSource('s1')], readable: ['c3'],
+      corpus: ({ s1 }) => ({ s1: [hitOf(s1, table[0], 0, 0.9), hitOf(s1, table[2], 0, 0.5)] }),
+    });
+    expect((await h.svc.search('q', { granularity: 'record', executionContext: MEMBER })).map((x) => x.sourceRecordId)).toEqual(['c3']);
+    h.engine!.find.mockClear();
+    expect((await h.svc.search('q', { granularity: 'record', executionContext: SYSTEM })).map((x) => x.sourceRecordId)).toEqual(['c1', 'c3']);
+    expect(h.engine!.find.mock.calls.every((c) => isSystemCall(c))).toBe(true);
+  });
+
+  it('freshness: a source an external indexer owns (refresh.onRecordChange: false) drops its stale hits and is never repaired', async () => {
+    const table = policyRows();
+    const external = clauseSource('s1', { where: { policy: 'P_leave' } });
+    const ext: KnowledgeSource = { ...external, refresh: { onRecordChange: false } } as KnowledgeSource;
+    const owned = clauseSource('s2');
+    // s1: c1 changed since indexing, c9 deleted. s2 (synced by the service): c3 changed.
+    const h = setup({
+      table, sources: [ext, owned],
+      corpus: ({ s1, s2 }) => ({
+        s1: [hitOf(s1, { ...table[0], body: 'old' }, 0, 0.9), hitOf(s1, { id: 'c9', body: 'gone', policy: 'P_leave' }, 0, 0.8), hitOf(s1, table[1], 0, 0.3)],
+        s2: [hitOf(s2, { ...table[2], body: 'old' }, 0, 0.7)],
+      }),
+    });
+    const out = await h.svc.search('q', { granularity: 'record', topK: 5, executionContext: SYSTEM });
+    expect(out.map((x) => `${x.sourceId}:${x.sourceRecordId}`)).toEqual(['s1:c2']);
+    await vi.waitFor(() => expect(h.adapter.upsert).toHaveBeenCalledTimes(1));
+    await new Promise((r) => setTimeout(r, 0));
+    const upserted = (h.adapter.upsert.mock.calls as unknown as [KnowledgeDocument[]][]).flatMap(([docs]) => docs.map((d) => d.id));
+    expect(upserted).toEqual(['s2:c3']);
+    expect(h.adapter.delete).not.toHaveBeenCalled();
+  });
+
+  it(`freshness: stale leads past ${SEARCH_FRESHNESS_ROUNDS} rounds leave the rest unanswered, read ${SEARCH_FRESHNESS_ROUNDS} times, logged as the round cap`, async () => {
+    const table: Row[] = Array.from({ length: 6 }, (_, i) => ({ id: `r${i}`, body: `body ${i}`, policy: 'P' }));
+    // r0–r3 changed since indexing; each round checks one lead (topK 1), so three rounds clear r0–r2 and r3 is still unchecked.
+    const h = setup({
+      table, sources: [clauseSource('s1')],
+      corpus: ({ s1 }) => ({ s1: table.map((r, i) => hitOf(s1, i < 4 ? { ...r, body: 'old' } : r, 0, 1 - i / 10)) }),
+    });
+    const out = await h.svc.search('q', { granularity: 'record', topK: 1, executionContext: SYSTEM });
+    expect(out).toEqual([]);
+    expect(h.freshnessReads().map((c) => (c[1] as { where: { id: { $in: string[] } } }).where.id.$in)).toEqual([['r0'], ['r1'], ['r2']]);
+    expect(h.logger.debug).toHaveBeenCalledWith(expect.stringContaining(`stopped checking freshness after ${SEARCH_FRESHNESS_ROUNDS} rounds; 1 unchecked hit(s) not answered`));
+    expect(h.logger.debug).not.toHaveBeenCalledWith(expect.stringContaining('no more within the refill cap'));
+  });
+
+  it('freshness: a source naming a field the object does not declare reads the whole row, so its record hashes as assembly did', async () => {
+    const table: Row[] = [{ id: 'c1', body: 'clause', policy: 'P', created_at: '2026-11-01' }];
+    const schema = { name: 'clause', fields: { body: { type: 'textarea' }, policy: { type: 'text' } } };
+    const source = clauseSource('s1', { metadataFields: ['policy', 'created_at'] });
+    // Assembly (the walk, the event sync) read the whole row, so the stored hash covers `created_at`.
+    const h = setup({ table, sources: [source], corpus: ({ s1 }) => ({ s1: [hitOf(s1, table[0], 0, 0.9, schema)] }) });
+    (h.engine as unknown as { getSchema: (o: string) => unknown }).getSchema = () => schema;
+    const out = await h.svc.search('q', { granularity: 'record', executionContext: SYSTEM });
+    expect(out.map((x) => x.sourceRecordId)).toEqual(['c1']);
+    expect(h.freshnessReads().map((c) => c[1])).toEqual([{ where: { id: { $in: ['c1'] } } }]);
+    await new Promise((r) => setTimeout(r, 0));
+    expect(h.adapter.upsert).not.toHaveBeenCalled();
+  });
+
+  it('freshness: a projected read recomputes the hash assembly stored, so an unchanged record is answered and not repaired', async () => {
+    const table: Row[] = [{ id: 'c1', body: 'clause', policy: 'P', name: 'Leave policy', notes: 'not indexed' }];
+    const schema = {
+      name: 'clause', nameField: 'name',
+      fields: { body: { type: 'textarea' }, policy: { type: 'text' }, name: { type: 'text' }, notes: { type: 'text' } },
+    };
+    const h = setup({ table, sources: [clauseSource('s1')], corpus: ({ s1 }) => ({ s1: [hitOf(s1, table[0], 0, 0.9, schema)] }) });
+    (h.engine as unknown as { getSchema: (o: string) => unknown }).getSchema = () => schema;
+    const out = await h.svc.search('q', { granularity: 'record', executionContext: SYSTEM });
+    expect(out.map((x) => x.sourceRecordId)).toEqual(['c1']);
+    // The double answers only the fields asked, as a real engine does.
+    expect(h.freshnessReads().map((c) => c[1])).toEqual([{ where: { id: { $in: ['c1'] } }, fields: ['id', 'body', 'policy', 'name'] }]);
+    await new Promise((r) => setTimeout(r, 0));
+    expect(h.adapter.upsert).not.toHaveBeenCalled();
+  });
+
+  it('a hit carries its passage heading path through', async () => {
+    const table = policyRows();
+    const h = setup({
+      table, sources: [clauseSource('s1')],
+      corpus: ({ s1 }) => ({ s1: [{ ...hitOf(s1, table[0], 0, 0.9), headingPath: ['Leave', 'Annual'] }] }),
+    });
+    const [hit] = await h.svc.search('q', { granularity: 'record', executionContext: SYSTEM });
+    expect(hit.headingPath).toEqual(['Leave', 'Annual']);
   });
 });

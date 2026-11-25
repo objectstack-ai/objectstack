@@ -182,7 +182,7 @@ export function getKnowledgeToolDefinitions(): readonly AIToolDefinition[] {
 }
 
 /** An ADR-0112 coded refusal: `code` and `status` on the thrown error, the message the caller reads. */
-function refusal(code: 'VALIDATION_ERROR' | 'NOT_FOUND', status: 400 | 404, message: string): Error {
+export function refusal(code: 'VALIDATION_ERROR' | 'NOT_FOUND', status: 400 | 404, message: string): Error {
   return Object.assign(new Error(message), { code, status });
 }
 

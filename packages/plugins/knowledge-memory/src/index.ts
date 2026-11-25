@@ -69,6 +69,10 @@ import { KNOWLEDGE_SERVICE } from '@objectstack/spec/contracts';
  *
  * It reports no `embedding` descriptor: its vectors are token counts, and its
  * index does not outlive the process (K7, rule 8).
+ *
+ * Each hit carries its document's stored `docHash` (ADR-0161 K8, item 3),
+ * which the service's record-level freshness check compares, and the heading
+ * path of its passage when the passage has one (item 14).
  */
 export class KnowledgeMemoryAdapter implements IKnowledgeAdapter {
   readonly id: string;
@@ -221,6 +225,8 @@ export class KnowledgeMemoryAdapter implements IKnowledgeAdapter {
       snippet: chunk.content,
       title: chunk.title,
       metadata: chunk.metadata,
+      ...(chunk.docHash === undefined ? {} : { docHash: chunk.docHash }),
+      ...(chunk.headingPath === undefined ? {} : { headingPath: [...chunk.headingPath] }),
     }));
   }
 
@@ -276,6 +282,10 @@ interface ChunkRecord {
   sourceRecordId?: string;
   /** The document's `organizationId`, stored as given (ADR-0161 K8, item 9). */
   organizationId?: string;
+  /** The document's `docHash`, returned on each hit as stored (ADR-0161 K8, item 3). */
+  docHash?: string;
+  /** The passage's heading path, returned on its hits (ADR-0161 K8, item 14). */
+  headingPath?: string[];
   content: string;
   title?: string;
   metadata: Record<string, unknown>;
@@ -288,7 +298,8 @@ interface ChunkRecord {
  * `chunks`, one passage holding the whole text. Never split here.
  */
 function embedPassages(doc: KnowledgeDocument): ChunkRecord[] {
-  const passages = doc.chunks ?? [{ id: `${doc.id}#0`, content: doc.content }];
+  const passages: Array<{ id: string; content: string; headingPath?: string[] }> =
+    doc.chunks ?? [{ id: `${doc.id}#0`, content: doc.content }];
   return passages
     .filter((p) => p.content.trim() !== '')
     .map((p) => {
@@ -298,6 +309,8 @@ function embedPassages(doc: KnowledgeDocument): ChunkRecord[] {
         documentId: doc.id,
         sourceRecordId: doc.sourceRecordId,
         organizationId: doc.organizationId,
+        docHash: doc.docHash,
+        headingPath: p.headingPath,
         content: p.content,
         title: doc.title,
         metadata: doc.metadata ?? {},
