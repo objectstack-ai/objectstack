@@ -109,6 +109,7 @@ import { getStudioCanvasPreview } from './studio-canvas-preview';
 // The source under test reaches dynamic imports of `@objectstack/lint`; their first
 // load is paid here, at collection, never inside a case's clock (`check:test-source-alias`).
 import '@objectstack/lint';
+import '@object-ui/plugin-detail';
 
 const dataSource = createEmptyDataSource();
 failOnAbsorbedFetchError();
@@ -214,7 +215,7 @@ describe('Data pillar field rail — a field click must never be a no-op (#6795 
 
     render(
       <MemoryRouter initialEntries={['/studio/com.example.showcase/data']}>
-        <DataPillar packageId="com.example.showcase" />
+        <DataPillar objectName="showcase_task" packageId="com.example.showcase" />
       </MemoryRouter>,
     );
     fireEvent.click(await screen.findByRole('button', { name: 'Field layout' }));

@@ -56,6 +56,7 @@ import {
   CONTAINER_ISSUE_CODES,
   NESTED_EXPANSION_DEPTH_LIMIT,
   UNION_BRANCH_SELECTION_LIMIT,
+  isKindMismatchOnly,
   selectUnionBranches,
 } from './union-branch-policy';
 import * as SharedBarrel from './index';
@@ -201,6 +202,11 @@ const FIXTURES: Array<[string, { safeParse: (v: unknown) => any }, unknown]> = [
     }),
     { u: { fields: { 'Bad Key': 1 } } },
   ],
+  [
+    'a member that is itself a bare union of kinds is a kind mismatch — the union stands alone',
+    z.object({ u: z.union([z.union([z.string(), z.number()]), z.union([z.boolean(), z.array(z.string())])]) }),
+    { u: {} },
+  ],
 ];
 
 describe('the two walks reach the same union-branch verdict', () => {
@@ -276,6 +282,41 @@ describe('the deliberate asymmetries, asserted rather than assumed', () => {
   });
 });
 
+describe('[#35500] a member that is itself a bare union of kinds', () => {
+  const [, nestedSchema, nestedValue] = FIXTURES.find(([name]) => name.startsWith('a member that is itself'))!;
+
+  it('both walks say the union once — no line, no entry, per member', () => {
+    const issues = issuesFor(nestedSchema, nestedValue);
+    const head = { path: 'u', message: ZOD_UNION_DEFAULT_MESSAGE };
+    expect(renderedPairs(issues)).toEqual([head]);
+    expect(wirePairs(issues, nestedValue)).toEqual([head]);
+    expect(selectUnionBranches((issues[0] as any).errors)).toEqual({ selected: [], omitted: 0 });
+  });
+
+  it('the rule recurses, so the nesting depth does not matter', () => {
+    const kinds = z.union([z.union([z.string(), z.number()]), z.boolean()]);
+    const issues = issuesFor(z.object({ u: z.union([kinds, z.array(z.number())]) }), { u: {} });
+    expect(selectUnionBranches((issues[0] as any).errors).selected).toEqual([]);
+    expect(wirePairs(issues, { u: {} })).toEqual([{ path: 'u', message: ZOD_UNION_DEFAULT_MESSAGE }]);
+    expect(isKindMismatchOnly([{
+      path: [], code: 'invalid_union', message: ZOD_UNION_DEFAULT_MESSAGE,
+      errors: [[{ path: [], code: 'invalid_union', message: ZOD_UNION_DEFAULT_MESSAGE, errors: [[{ path: [], code: 'invalid_type' }]] }]],
+    }])).toBe(true);
+  });
+
+  it('a nested union carrying its schema\'s own sentence stays informative', () => {
+    const sentence = 'Write a string or a number.';
+    const schema = z.object({ u: z.union([z.union([z.string(), z.number()], { error: sentence }), z.boolean()]) });
+    const issues = issuesFor(schema, { u: {} });
+    expect(selectUnionBranches((issues[0] as any).errors).selected).toHaveLength(1);
+    expect(wirePairs(issues, { u: {} })).toEqual([{ path: 'u', message: sentence }]);
+  });
+
+  it('a nested union with no branches keeps the reading it always had', () => {
+    expect(isKindMismatchOnly([{ path: [], code: 'invalid_union', message: ZOD_UNION_DEFAULT_MESSAGE, errors: [] }])).toBe(false);
+  });
+});
+
 describe('the policy constants are the ones both walks were pinned on', () => {
   it('depth limit 3, branch cap 3', () => {
     expect(NESTED_EXPANSION_DEPTH_LIMIT).toBe(3);
@@ -304,6 +345,7 @@ describe('⛔ the policy stays package-internal', () => {
     'CONTAINER_ISSUE_CODES',
     'NESTED_EXPANSION_DEPTH_LIMIT',
     'UNION_BRANCH_SELECTION_LIMIT',
+    'ZOD_UNION_DEFAULT_MESSAGE',
   ];
 
   it('no policy symbol reaches the `shared` entry point', () => {
