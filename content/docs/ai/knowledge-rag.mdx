@@ -64,8 +64,26 @@ const hits = await knowledge.search('proposals about ACME', {
   topK: 5,
   executionContext,  // the caller's context — retrieval drops any hit RLS would hide
 });
-// hits: KnowledgeHit[] — each { chunkId, documentId, sourceId, sourceRecordId?, score, snippet, title? }
+// hits: KnowledgeHit[] — each { chunkId, documentId, sourceId, sourceRecordId?, score, snippet, title?, docHash?, headingPath? }
 ```
+
+By default a hit is a passage, so one record with several matching passages
+can take several of the `topK` places. Pass `granularity: 'record'` to get one
+hit per record (its best passage), or `groupBy: '<metadata field>'` to get one
+hit per value of that field — "which policies", not "which clauses":
+
+```ts
+const policies = await knowledge.search('parental leave', {
+  groupBy: 'policy',   // a field the source lists in metadataFields; implies granularity: 'record'
+  topK: 5,             // counts groups, not passages
+  executionContext,
+});
+```
+
+A record-level hit is checked against its record as it reads now: a record
+deleted, out of the source's `where`, or changed since it was indexed is not
+returned (its index entry is repaired in the background). The rules are in
+[the protocol](/docs/protocol/knowledge#records-not-passages).
 
 <Callout type="info">
 **In-product chat ships in ObjectOS.** Exposing this retrieval to a chat UI as
