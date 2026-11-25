@@ -540,7 +540,10 @@ export async function detailRowHeldByLockingApproval(
   objectName: string,
   recordId: string,
 ): Promise<boolean> {
-  return (await detailRowsHeldByLockingApproval(engine, objectName, [recordId])).has(recordId);
+  // Asked of exactly one id, a non-empty answer is that row's: the set's member
+  // is the row's id as the engine spells it back, which need not be `recordId`'s
+  // spelling, so membership is never compared.
+  return (await detailRowsHeldByLockingApproval(engine, objectName, [recordId])).size > 0;
 }
 
 /**
@@ -552,6 +555,12 @@ export async function detailRowHeldByLockingApproval(
  * same judgement ({@link lockingRequestsForRecords}), so a page asked at once
  * and a row asked alone cannot disagree. An object with no `master_detail`
  * edge reads nothing.
+ *
+ * The join is not pushed down to the database: the judgement is made in-app
+ * over each request's `node_config_json` snapshot and must be the write hook's
+ * own ({@link lockingRequestsForRecords}), and the id list is bounded by the
+ * door's 200-id cap (`APPROVAL_RECORD_LOCKS_MAX_RECORD_IDS`), so `1 + edges`
+ * bounded reads is the whole cost.
  *
  * ⚠️ Like the one-row form, it answers for the rows, not for a caller, and the
  * FK read is SYSTEM.

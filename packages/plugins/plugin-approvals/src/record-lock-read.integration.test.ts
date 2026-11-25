@@ -44,6 +44,7 @@ import { SysApprovalAction } from './sys-approval-action.object.js';
 import { SysApprovalApprover } from './sys-approval-approver.object.js';
 import { SysApprovalDelegation } from './sys-approval-delegation.object.js';
 import { installDefaultOrganization } from './default-organization.testkit.js';
+import { detailRowHeldByLockingApproval, detailRowsHeldByLockingApproval } from './lifecycle-hooks.js';
 
 /** Its approval node locks the record. */
 const HELD = 'held_sheet';
@@ -400,5 +401,27 @@ describe('a locked record\'s lines are locked with it — the record-lock read a
     expect(await rig.svc.getRecordLock(LINE, recordB(LINE), asUser(SUBMITTER))).toEqual({ locked: true });
     expect(await rig.svc.getRecordLock(LINE, recordB(LINE), asUser(READER))).toBeNull();
     expect(await rig.svc.getRecordLock(LINE, MISSING, asUser(READER))).toBeNull();
+  });
+});
+
+describe('the one-row detail read answers from the row it found, not from how the engine spells its id', () => {
+  // A stand-in engine that answers the by-id read with the row's id spelled
+  // differently from the asked one (a driver that normalizes case, or hands a
+  // numeric id back as a number) — the master it names is held by a locking request.
+  const engine = {
+    getSchema: (name: string) => name === 'line'
+      ? { fields: { order: { name: 'order', type: 'master_detail', reference: 'order' } } }
+      : undefined,
+    find: async (name: string) => name === 'line'
+      ? [{ id: 'LINE-1', order: 'ord_1' }]
+      : name === 'sys_approval_request'
+        ? [{ record_id: 'ord_1', status: 'pending', node_config_json: '{}' }]
+        : [],
+  } as any;
+
+  it('a held line asked by an id the engine spells back differently answers true', async () => {
+    expect(await detailRowHeldByLockingApproval(engine, 'line', 'line-1')).toBe(true);
+    // The batch form keeps answering with the ids as the engine spells them.
+    expect([...await detailRowsHeldByLockingApproval(engine, 'line', ['line-1'])]).toEqual(['LINE-1']);
   });
 });
