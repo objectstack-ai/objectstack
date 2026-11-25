@@ -370,6 +370,40 @@ function sourcedMappingModeRefusal(source: string, mode: string): string {
 }
 
 /**
+ * [ADR-0153 D3] The refusal of an incremental source whose delete policy no
+ * pull could honour, or `undefined` when the block is honourable.
+ *
+ * An incremental pull reads only rows changed since its starting point, so it
+ * never sees a row the source no longer has: under `deletePolicy` absent
+ * (which reads as `'mark'`) or `'mark'` it learns of a delete only through
+ * `deletedField`. Without one the declared policy would mark nothing (ADR-0078),
+ * so the author states `deletedField` or `deletePolicy: 'ignore'`.
+ *
+ * Incremental is a `connectorSource` with a `watermark`, or a
+ * `datasourceSource` without `full: true`. Tolerant of an unparsed block: the
+ * pull (`@objectstack/service-automation`) asks the same question of a stored
+ * mapping at run time, with this sentence.
+ */
+export function incrementalSourceDeleteRefusal(
+  source: 'connectorSource' | 'datasourceSource',
+  block: unknown,
+): string | undefined {
+  if (block === null || typeof block !== 'object') return undefined;
+  const b = block as Record<string, unknown>;
+  const incremental = source === 'connectorSource' ? b.watermark !== undefined : b.full !== true;
+  if (!incremental) return undefined;
+  if (b.deletePolicy === 'ignore') return undefined;
+  if (typeof b.deletedField === 'string' && b.deletedField.length > 0) return undefined;
+  const why = source === 'connectorSource'
+    ? 'it declares a `watermark`, so each pull reads only the records changed since the last one'
+    : 'it does not declare `full: true`, so each pull reads on from the position the last one committed';
+  return `This \`${source}\` is incremental (${why}) and never sees a record the source no longer has, `
+    + `but its \`deletePolicy\` is ${b.deletePolicy === 'mark' ? "'mark'" : "absent, which reads as 'mark'"}: it would `
+    + 'mark nothing. Name the source field whose truthy value means the record was deleted '
+    + "(`deletedField`), or write `deletePolicy: 'ignore'` to leave a row the source deleted as it is.";
+}
+
+/**
  * Data Mapping Schema
  * Defines a reusable data mapping configuration for ETL operations.
  * 
@@ -442,9 +476,10 @@ export const MappingSchema = lazySchema(() => strictObject({
    * - **no conflict or direction policy** — a pull writes through this
    *   mapping's `mode` / `upsertKey`, which must be `upsert` with a key (the
    *   mapping's refinement below, ADR-0153 D4). What a source DELETE does is
-   *   `deletePolicy` / `deletedField` (ADR-0153 D3), and how the read action
-   *   pages is `paging` (D2): both declared spec-first, `planned` in the
-   *   liveness ledger until the P2 engine card's pull reads them.
+   *   `deletePolicy` / `deletedField` (ADR-0153 D3), read by the pull's
+   *   delete marking; how the read action pages is `paging` (D2), declared
+   *   spec-first and `planned` in the liveness ledger until the P2 engine
+   *   card's paging loop reads it.
    *
    * EXECUTED WHEN A JOB PULLS IT: `@objectstack/service-automation`'s
    * connector sync executor (`pullConnectorSource`, on the `automation`
@@ -601,9 +636,8 @@ export const MappingSchema = lazySchema(() => strictObject({
    * `fieldMapping` entry copies it unchanged onto a target field of its type
    * (`watermark_field_unmapped`); and the target is a `synced` object.
    *
-   * READ BY NOTHING YET: the windowed reader is the P2 engine card's
-   * (ADR-0153's children table), so the liveness row is `planned` and warns
-   * its author until that reader lands.
+   * READ BY `@objectstack/service-automation`'s datasource pull: the windowed
+   * read (D2), the read position (D7) and the delete marking (D3).
    */
   datasourceSource: strictObject({
     surface: 'this mapping’s datasource source',
@@ -663,8 +697,8 @@ export const MappingSchema = lazySchema(() => strictObject({
   ...MetadataProtectionFields,
   // ADR-0146 D2 — the override declaration (authored; travels with the item).
   ...OverrideDeclarationFields,
-// ADR-0153 D1 / D4 — the rules over a SOURCED mapping that the mapping alone
-// can judge, refused at parse on every door. The rules that need the objects
+// ADR-0153 D1 / D3 / D4 — the rules over a SOURCED mapping that the mapping
+// alone can judge, refused at parse on every door. The rules that need the objects
 // (a federated source, a `synced` target, the key and the watermark's types)
 // are `defineStack`'s, where the stack's objects are known. No arm in the
 // closed projection list states either rule, so the published JSON Schema
@@ -680,6 +714,11 @@ export const MappingSchema = lazySchema(() => strictObject({
     });
   }
   if (sources.length === 0) return;
+  // ADR-0153 D3 — the incremental-`mark` refusal, with the reader that marks.
+  for (const source of sources) {
+    const unhonourable = incrementalSourceDeleteRefusal(source, mapping[source]);
+    if (unhonourable) ctx.addIssue({ code: 'custom', path: [source, 'deletePolicy'], message: unhonourable });
+  }
   if (mapping.mode !== 'upsert') {
     ctx.addIssue({
       code: 'custom',

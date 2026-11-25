@@ -10,9 +10,13 @@
  * The dropdown (objectui#12605): a 「Switch Application」 group of the
  * installed apps with the current one checked — the Setup app is not in it —
  * then 「Back to app start page」 with its `⌘⇧H` keycaps (where `/` lands from
- * 768 px up, the platform home page being retired: objectstack#36732),
- * 「All apps」, and 「Settings」 (the
- * Setup app, when the viewer's app list carries it). For the viewers the top
+ * 768 px up, the platform home page being retired: objectstack#36732), and
+ * 「Settings」 (the Setup app, when the viewer's app list carries it). The
+ * dropdown is a desktop's alone, and a desktop has no page listing the apps
+ * any more: 「All apps」 opened the same app start page as the row above it,
+ * while the switch group at the top is the list of apps, so the menu carries
+ * no such row (objectstack#37163). A phone's 「All apps」 lives in its drawer
+ * (`UnifiedSidebar`) and opens its app list at `/home`. For the viewers the top
  * bar offers its Studio button to, 「Edit APP in Studio」 follows a second
  * divider; for a read-only package's app it is 「Open APP in Studio」 behind an
  * eye (#27356 row 12).
@@ -38,7 +42,7 @@ import {
   DropdownMenuLabel,
   DropdownMenuSeparator,
 } from '@object-ui/components';
-import { ChevronDown, ChevronsUpDown, Check, Eye, Home, LayoutGrid, Pencil, Settings } from 'lucide-react';
+import { ChevronDown, ChevronsUpDown, Check, Eye, Home, Pencil, Settings } from 'lucide-react';
 import { useMetadata } from '../providers/MetadataProvider.js';
 import { matchAppBySegment, appRouteSegment } from '../utils/index.js';
 import { appAddressSegment } from '../utils/appRoute.js';
@@ -98,15 +102,15 @@ export function AppSwitcher({
   const { apps: metadataApps } = useMetadata();
   // objectstack#35881 — on a phone the pill opens the app list as a bottom
   // sheet rather than a dropdown. Read before any return (rules of hooks).
-  // The sheet holds the list alone: 「Back to home」 and 「All apps」 would open
-  // that same list (a phone's `/home` is it), 「Settings」 is the Setup row in
+  // The sheet holds the list alone: a way home would open that same list (a
+  // phone's `/home` is it), 「Settings」 is the Setup row in
   // it, and 「Edit / Open APP in Studio」 stays a desktop entry.
   const phone = usePhoneViewport();
   const [sheetOpen, setSheetOpen] = React.useState(false);
   const { t } = useObjectTranslation();
   const { appLabel } = useServedAppLabel();
-  // objectui#7256 — 「All apps」 goes to the DECLARED home, like every other
-  // Home affordance in the chrome.
+  // objectui#7256 — the way out goes where every other Home affordance in the
+  // chrome goes (`useHomePath`): from 768 px up, the app start page `/` lands on.
   const homePath = useHomePath();
 
   const apps = metadataApps || [];
@@ -261,16 +265,6 @@ export function AppSwitcher({
             <kbd className="pointer-events-none ml-auto font-mono text-xs text-muted-foreground">
               {shortcutKeycaps(GO_HOME_SHORTCUT.chord).join('')}
             </kbd>
-          </Link>
-        </DropdownMenuItem>
-        <DropdownMenuItem asChild className="flex items-center gap-2.5 py-2">
-          <Link to={homePath} data-testid="app-switcher-all-apps">
-            <span className="flex size-[22px] shrink-0 items-center justify-center text-muted-foreground" aria-hidden>
-              <LayoutGrid className="size-4" />
-            </span>
-            <span className="flex-1 truncate">
-              {t('layout.appSwitcher.allApps', { defaultValue: 'All apps' })}
-            </span>
           </Link>
         </DropdownMenuItem>
         {setupApp && setupPath ? (

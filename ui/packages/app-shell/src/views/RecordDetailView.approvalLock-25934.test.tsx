@@ -34,11 +34,15 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, waitFor, cleanup } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 
-const authFetchSpy = vi.fn(async () =>
-  new Response(JSON.stringify({ data: {} }), {
-    status: 200,
-    headers: { 'content-type': 'application/json' },
-  }),
+// The approvals reads go out through the authenticated fetch too; they answer from
+// the file's wire double, as before.
+const authFetchSpy = vi.fn(async (url: string, init?: RequestInit) =>
+  String(url).includes('/approvals/')
+    ? fetch(url, init)
+    : new Response(JSON.stringify({ data: {} }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      }),
 );
 vi.mock('@object-ui/auth', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),

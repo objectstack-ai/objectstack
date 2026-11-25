@@ -40,7 +40,7 @@ describe('BuildDebugDrawer', () => {
   beforeEach(() => {
     vi.stubGlobal(
       'fetch',
-      vi.fn(async () => ({ ok: true, status: 200, json: async () => REPORT })),
+      vi.fn(async () => ({ headers: new Headers(), ok: true, status: 200, json: async () => REPORT })),
     );
   });
   afterEach(() => {
@@ -60,10 +60,14 @@ describe('BuildDebugDrawer', () => {
   });
 
   it('hits the debug endpoint for the conversation', async () => {
-    const spy = vi.fn(async () => ({ ok: true, status: 200, json: async () => REPORT }));
+    const spy = vi.fn(async () => ({ headers: new Headers(), ok: true, status: 200, json: async () => REPORT }));
     vi.stubGlobal('fetch', spy);
     renderDrawer();
     await screen.findByText(/Proposed but never applied/);
-    expect(spy).toHaveBeenCalledWith('/api/v1/ai/conversations/conv_x/debug', { credentials: 'include' });
+    // The authenticated fetch hands the wire a `Headers` (the bearer, when one is stored).
+    expect(spy).toHaveBeenCalledWith('/api/v1/ai/conversations/conv_x/debug', {
+      credentials: 'include',
+      headers: expect.any(Headers),
+    });
   });
 });

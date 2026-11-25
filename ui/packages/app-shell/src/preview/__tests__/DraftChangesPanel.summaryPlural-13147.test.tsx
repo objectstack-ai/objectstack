@@ -39,12 +39,12 @@ function stubFetch(rows: Row[], draftBody: Record<string, unknown> = { name: 'x'
     'fetch',
     vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
-      const ok = (body: unknown) => ({ ok: true, status: 200, json: async () => body });
+      const ok = (body: unknown) => ({ headers: new Headers(), ok: true, status: 200, json: async () => body });
       if (url.includes('/_drafts')) return ok({ drafts });
       if (url.includes('state=draft')) return ok(draftBody);
       // Every published-list read: nothing is published, so every row is New.
       if (/\/meta\/\w+(\?|$)/.test(url)) return ok([]);
-      return { ok: false, status: 404, json: async () => ({}) };
+      return { headers: new Headers(), ok: false, status: 404, json: async () => ({}) };
     }) as unknown as typeof fetch,
   );
 }

@@ -51,7 +51,7 @@ const ADVISORY_ZH =
 function mockRoutes(warnings: Array<{ path?: string; message: string }>) {
   const fetchMock = vi.fn(async (input: RequestInfo | URL, _init?: RequestInit) => {
     const url = String(input);
-    const ok = (body: unknown) => ({ ok: true, status: 200, json: async () => body });
+    const ok = (body: unknown) => ({ headers: new Headers(), ok: true, status: 200, json: async () => body });
     if (url.includes('/_drafts')) {
       return ok([{ type: 'flow', name: 'xin_huiyi_tixing', packageId: 'app.minutes', label: '会议提醒' }]);
     }
@@ -69,7 +69,7 @@ function mockRoutes(warnings: Array<{ path?: string; message: string }>) {
       });
     }
     if (/\/meta\/flow(\?|$)/.test(url)) return ok([]);
-    return { ok: false, status: 404, json: async () => ({}) };
+    return { headers: new Headers(), ok: false, status: 404, json: async () => ({}) };
   });
   global.fetch = fetchMock as unknown as typeof fetch;
   return fetchMock;
@@ -90,9 +90,10 @@ describe('DraftChangesPanel — the flow publish checks, before the publish (obj
     expect(block.textContent).not.toMatch(/flow-decision-unconditional-branch|xin_huiyi_tixing/);
     // The read that fed it stated the console's language.
     const draftCall = fetchMock.mock.calls.find(
-      ([u, init]) => String(u).includes('state=draft') && (init?.headers as Record<string, string> | undefined)?.['Accept-Language'],
+      ([u, init]) => String(u).includes('state=draft') && new Headers(init?.headers as HeadersInit | undefined).get('Accept-Language'),
     );
-    expect((draftCall![1]!.headers as Record<string, string>)['Accept-Language']).toBe('zh-CN');
+    // The authenticated fetch hands the wire a `Headers`; the language the read stated is read off it.
+    expect(new Headers(draftCall![1]!.headers as HeadersInit).get('Accept-Language')).toBe('zh-CN');
   });
 
   it('reports without blocking — the Publish button stays live', async () => {

@@ -56,6 +56,12 @@ import type { I18nLabel } from '@objectstack/spec/ui';
 import { customizationBasePackageId, customizationPackageId } from '@objectstack/spec/kernel';
 import { emitMetadataRefresh, subscribeMetadataRefresh } from '../assistant/assistantBus.js';
 import { isPollingSuspended } from '../hooks/hiddenTabPollStop.js';
+import { createAuthenticatedFetch } from '@object-ui/auth';
+
+/** The console's authenticated fetch: the stored bearer token beside the session cookie. */
+function authFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+  return createAuthenticatedFetch()(input, init);
+}
 
 export interface PendingDraftEntry {
   /** Raw stored type — callers that build `/meta` URLs must fold it themselves. */
@@ -172,7 +178,7 @@ function readDraftsAnswer(url: string): Promise<DraftsAnswer> {
   const pending = reads.get(url);
   if (pending) return pending;
   const read = (async (): Promise<DraftsAnswer> => {
-    const res = await fetch(url, {
+    const res = await authFetch(url, {
       credentials: 'include',
       headers: { Accept: 'application/json' },
       cache: 'no-store',

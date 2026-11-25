@@ -31,7 +31,8 @@ const MARKED = 'Publishing is temporarily unavailable. Nothing was changed.';
 function answer(response: { ok: boolean; status: number; json: () => Promise<unknown> }): void {
   vi.stubGlobal(
     'fetch',
-    vi.fn(async () => response),
+    // With the headers a real Response carries: the list read goes through the authenticated fetch.
+    vi.fn(async () => ({ headers: new Headers(), ...response })),
   );
 }
 const listOk = (packages: unknown[]) =>

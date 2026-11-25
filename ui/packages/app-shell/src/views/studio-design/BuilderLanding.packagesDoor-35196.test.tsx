@@ -65,7 +65,7 @@ vi.mock('../metadata-admin/PackageFormDialog', () => ({ PackageFormDialog: () =>
 import { BuilderLanding, STUDIO_ALL_PACKAGES_PATH } from './BuilderLanding';
 
 const json = (body: unknown, status = 200) =>
-  ({ ok: status < 400, status, json: async () => body, text: async () => JSON.stringify(body) }) as Response;
+  ({ headers: new Headers(), ok: status < 400, status, json: async () => body, text: async () => JSON.stringify(body) }) as Response;
 
 afterEach(() => {
   cleanup();

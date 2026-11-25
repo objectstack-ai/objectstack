@@ -52,7 +52,7 @@ import {
   ChartContainerConfig
 } from './ChartContainerImpl';
 import { mapScatterClick, mapTreemapClick, mapSankeyClick } from './chartDrillEvents';
-import { formatterFor, compactTickFormatter, valueTickExponent, domainFor, ticksFor, plotsWholeNumbers, wholeNumberTickCount, RENDERABLE, SINGLE_VALUE_CHART_TYPES, TABULAR_CHART_TYPES, effectiveChartFamily, comboBaseFamily, placeYAxes, type DeclaredChartFamily, type NormalizedAxis, type NormalizedSeries, type ValueAxisSlot, type YAxisPlacement } from './normalizeChartSchema';
+import { formatterFor, compactTickFormatter, measureTickFormatter, sharedMeasureFormat, valueTickExponent, domainFor, ticksFor, plotsWholeNumbers, wholeNumberTickCount, RENDERABLE, SINGLE_VALUE_CHART_TYPES, TABULAR_CHART_TYPES, effectiveChartFamily, comboBaseFamily, placeYAxes, type DeclaredChartFamily, type NormalizedAxis, type NormalizedSeries, type ValueAxisSlot, type YAxisPlacement } from './normalizeChartSchema';
 import { buildCategoryRank, chartRowBucketId, formatMonthBucketLabel, isRealCalendarDate, toDateInputValue, toDisplayDate, type ChartSegmentClickEvent } from '@object-ui/core';
 import { createSafeTranslation, useDisplayLocale, useSafeTranslate } from '@object-ui/i18n';
 
@@ -2593,18 +2593,24 @@ function AdvancedChartImplInner({
 
   /**
    * The tick formatter of one value axis: the author's `format` where it
-   * declares one, else the compact default (1,200,000 → `1.2M`) — either
-   * printed to the decimal place the axis' tick step needs, so two ticks never
-   * share a label (objectstack#36988; see `valueTickExponent`). The step is
-   * measured over the values plotted in the slot, with the tick count
-   * `yAxisSpecProps` hands recharts for it.
+   * declares one, else the units of the dataset measure its series plot
+   * (objectstack#37053: a percent at its own scale, a currency's symbol — see
+   * `measureTickFormatter`), else the compact default (1,200,000 → `1.2M`) —
+   * each printed to the decimal place the axis' tick step needs, so two ticks
+   * never share a label (objectstack#36988; see `valueTickExponent`). The step
+   * is measured over the values plotted in the slot, with the tick count
+   * `yAxisSpecProps` hands recharts for it. Data labels print with the same
+   * formatter (`valueTickFormatterOf`), so they carry the measure's units too.
    */
   const valueAxisTickFormatter = React.useCallback(
     (axis: NormalizedAxis | undefined, side: ValueAxisSlot) => {
+      const plotted = slotSeries(side);
       const values = axisValues(side);
-      const tickCount = plotsWholeNumbers(slotSeries(side)) ? wholeNumberTickCount(axis, values) : undefined;
+      const tickCount = plotsWholeNumbers(plotted) ? wholeNumberTickCount(axis, values) : undefined;
       const exponent = valueTickExponent(axis, values, tickCount);
-      return formatterFor(axis?.format, displayLocale, exponent) ?? compactTickFormatter(displayLocale, exponent);
+      return formatterFor(axis?.format, displayLocale, exponent)
+        ?? measureTickFormatter(sharedMeasureFormat(plotted), displayLocale, exponent)
+        ?? compactTickFormatter(displayLocale, exponent);
     },
     [axisValues, slotSeries, displayLocale],
   );

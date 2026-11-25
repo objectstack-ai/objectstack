@@ -37,6 +37,9 @@ vi.mock('./packages-io', async (importOriginal) => {
 vi.mock('../metadata-admin/PackageFormDialog', () => ({ PackageFormDialog: () => null }));
 
 import { BuilderLanding } from './BuilderLanding';
+// The source under test reaches a dynamic `import('@objectstack/lint')`: pay its load at
+// collection, never inside a case's clocked window (`check:test-source-alias`).
+import '@objectstack/lint';
 
 type Call = { url: string; method: string; body: unknown };
 let calls: Call[];
@@ -50,7 +53,7 @@ beforeEach(() => {
       const body = typeof init.body === 'string' && init.body ? JSON.parse(init.body) : undefined;
       calls.push({ url, method, body });
       const text = JSON.stringify({ success: true, data: { success: true, copiedCount: 3, failedCount: 0 } });
-      return { ok: true, status: 200, json: async () => JSON.parse(text), text: async () => text } as Response;
+      return { headers: new Headers(), ok: true, status: 200, json: async () => JSON.parse(text), text: async () => text } as Response;
     }),
   );
 });
