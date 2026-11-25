@@ -44,6 +44,8 @@ import {
   storedNameOf,
   storeKeysNamed,
   storeRemovalKeys,
+  storePlatformRemovalKeys,
+  isPlatformOrigin,
   storeWriteKey,
 } from '../package-slotted-store.js';
 
@@ -255,9 +257,13 @@ export class MemoryLoader implements MetadataLoader {
           ? storeKeysNamed(typeStore, type, name).filter((key) => slotPackageOf(key) === packageId)
           : options?.packagelessOnly === true
             ? storeKeysNamed(typeStore, type, name).filter((key) => slotPackageOf(key) === undefined)
-            : storeRemovalKeys(typeStore, type, name).keys;
+            : options?.platformOnly === true
+              ? storePlatformRemovalKeys(typeStore, type, name).keys
+              : storeRemovalKeys(typeStore, type, name).keys;
         for (const key of keys) typeStore.delete(key);
-      } else {
+      } else if (options?.platformOnly !== true || isPlatformOrigin(typeStore.get(name))) {
+        // [#37013] The platform's withdrawal takes the item only when the
+        // platform's registration wrote it.
         typeStore.delete(name);
       }
       if (typeStore.size === 0) {
