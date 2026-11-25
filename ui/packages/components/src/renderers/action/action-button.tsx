@@ -185,6 +185,13 @@ const ActionButtonRenderer = forwardRef<
     // Every read of the label below goes through this guard (see `renderableLabel`);
     // `data-obj-id` is the component id `SchemaRenderer` hands down.
     const label = renderableLabel(schema.label, dataObjId ?? schema.name ?? 'action:button');
+    // The auto-trigger reads the label for its refusal notice, so it is handed
+    // the guarded one too. Memoized for cost only: the hook's once-only refs
+    // make a fresh object harmless.
+    const autoTriggerSubject = React.useMemo(
+      () => (label === schema.label ? schema : { ...schema, label }),
+      [schema, label],
+    );
 
     // Record data may be passed from SchemaRenderer (e.g. DetailView passes
     // record data), bound the three canonical ways — `record.status`, bare
@@ -454,7 +461,7 @@ const ActionButtonRenderer = forwardRef<
     // It is handed this button's own `visible` verdict — the one the early
     // return below consults — because the action's declared gate outranks the
     // flag (objectui#4191): a hidden action is refused and reported, not run.
-    useAutoTriggerOnce(schema, isVisible, handleClick);
+    useAutoTriggerOnce(autoTriggerSubject, isVisible, handleClick);
 
     // A declared boolean `visible: false` is a verdict, not a missing gate —
     // truthiness classified it as "ungated" and rendered the action for

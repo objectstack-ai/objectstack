@@ -71,6 +71,7 @@ import { translatePage } from '@objectstack/spec/system';
 import { manifestFromConfigs, validateTree } from '@objectstack/sdui-parser';
 import type { SchemaElement } from '@objectstack/sdui-parser';
 import { buttonVariants } from '../../../ui/button';
+import { toast as sonnerToast } from '../../../ui/sonner';
 // Module-scope side-effect imports: the registry must hold both renderers when
 // `SchemaRenderer` resolves the type, and the light `dom` project does not load
 // the components graph. Module scope, not a `beforeAll`, per AGENTS.md 测试纪律.
@@ -644,6 +645,24 @@ describe('action:button — a non-string label renders no text and never throws 
       await waitFor(() => expect(run).toHaveBeenCalledTimes(1));
       expect((run.mock.calls[0][0] as ActionDef).label).toBeUndefined();
     } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it('an object label never reaches the auto-trigger refusal notice', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const notice = vi.spyOn(sonnerToast, 'warning').mockImplementation(() => 'id');
+    try {
+      mount(node('action:button', { id: 'label_guard_auto', label: LOCALE_MAP, autoTrigger: true, visible: false }));
+      await waitFor(() => expect(notice).toHaveBeenCalledTimes(1));
+      const [message, options] = notice.mock.calls[0] as [unknown, { id?: string } | undefined];
+      expect(String(message)).not.toContain('[object Object]');
+      expect(String(message)).toContain('probe_action');
+      expect(String(options?.id)).not.toContain('[object Object]');
+      expect(warn.mock.calls.some((args) => String(args[0]).includes('[object Object]'))).toBe(false);
+      expect(run).not.toHaveBeenCalled();
+    } finally {
+      notice.mockRestore();
       warn.mockRestore();
     }
   });
