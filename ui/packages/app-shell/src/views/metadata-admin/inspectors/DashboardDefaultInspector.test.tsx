@@ -1,7 +1,9 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { render, screen, fireEvent, cleanup } from '@testing-library/react';
+import { render, screen, fireEvent, cleanup, waitFor } from '@testing-library/react';
+import { I18nProvider } from '@object-ui/i18n';
+import { dashboardForm } from '@objectstack/spec/ui';
 import { DashboardDefaultInspector } from './DashboardDefaultInspector';
 import { t } from '../i18n';
 // The designer rows this suite reads in zh live in `@object-ui/i18n`'s `studio`
@@ -167,5 +169,71 @@ describe('DashboardDefaultInspector — the widgets list names each kind (object
       />,
     );
     expect(kindOf('not-a-catalogued-type')!.textContent).toBe('not-a-catalogued-type');
+  });
+});
+
+/**
+ * objectstack#36949 — the Default Period select (Filters → Date Range → Default
+ * Period) listed each option by its stored preset, `this_month`, in English and
+ * Chinese alike: the spec form's `dateRange` composite declared no children.
+ * It now offers the report form's named options, and a zh designer reads the
+ * names from the console's locale packs, as on the report inspector.
+ *
+ * POSITIVE CONTROL in the zh case: the row's own zh label (默认时间段, from the
+ * metadata-form overlay), so a dead locale channel cannot pass for "not
+ * relabelled".
+ */
+describe('DashboardDefaultInspector — the Default Period select names its periods (objectstack#36949)', () => {
+  function specOptions(): Array<{ label: string; value: string }> {
+    for (const section of dashboardForm.sections ?? []) {
+      for (const field of (section.fields ?? []) as any[]) {
+        if (field?.field !== 'dateRange') continue;
+        const child = (field.fields ?? []).find((c: any) => c?.field === 'defaultRange');
+        if (child?.options) return child.options;
+      }
+    }
+    throw new Error('dashboardForm declares no dateRange.defaultRange options');
+  }
+
+  function renderIn(language: string, locale: 'en-US' | 'zh-CN') {
+    return render(
+      <I18nProvider config={{ defaultLanguage: language, detectBrowserLanguage: false }} persistLanguage={false}>
+        <DashboardDefaultInspector
+          {...baseProps}
+          locale={locale}
+          draft={{ ...draftWithWidget, dateRange: { defaultRange: 'this_quarter' } }}
+          onPatch={vi.fn()}
+          readOnly={false}
+        />
+      </I18nProvider>,
+    );
+  }
+
+  async function openDefaultPeriod(sectionTitle: string, rowLabel: string): Promise<string[]> {
+    fireEvent.click(await screen.findByText(sectionTitle));
+    const trigger = await screen.findByRole('combobox', { name: rowLabel });
+    fireEvent.keyDown(trigger, { key: 'ArrowDown' });
+    await waitFor(() => expect(screen.queryAllByRole('option').length).toBeGreaterThan(0));
+    return screen.getAllByRole('option').map((o) => o.textContent ?? '');
+  }
+
+  it('en: every option reads the spec name, never a stored preset', async () => {
+    renderIn('en', 'en-US');
+    const offered = await openDefaultPeriod('Filters', 'Default Period');
+    expect(offered).toEqual(expect.arrayContaining(specOptions().map((o) => o.label)));
+    expect(offered).toContain('This quarter');
+    for (const { value } of specOptions()) expect(offered, value).not.toContain(value);
+  });
+
+  it('zh: every option reads the locale pack name', async () => {
+    renderIn('zh', 'zh-CN');
+    // POSITIVE CONTROL: the row label comes through the zh overlay.
+    const offered = await openDefaultPeriod('筛选', '默认时间段');
+    await waitFor(() => expect(offered).toContain('本季度'));
+    expect(offered).toEqual(expect.arrayContaining(['本月', '今天', '近 30 天', '自定义…']));
+    for (const { value, label } of specOptions()) {
+      expect(offered, value).not.toContain(value);
+      expect(offered, label).not.toContain(label);
+    }
   });
 });

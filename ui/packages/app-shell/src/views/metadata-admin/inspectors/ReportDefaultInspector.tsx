@@ -54,14 +54,14 @@ import {
   type DatasetMeasureInfo,
 } from '../previews/useDatasetCatalog.js';
 import { useStudioDatasetAuthoring } from '../../studio-design/datasetCreate.js';
-import { defaultPeriodLabelKey, getReportForm, getReportSchema, withDefaultPeriodLabels } from '../report-schema.js';
+import { getReportForm, getReportSchema } from '../report-schema.js';
+import { localizeDefaultPeriods } from '../default-period-labels.js';
 import { mergeServerFields } from '../mergeServerFields.js';
 import { t, tFormat } from '../i18n.js';
 import { mapLoaded } from '../loadState.js';
 import type { WidgetContext } from '../widgets.js';
 import { datasetPickerOptions, datasetLabelOptions } from './dataset-picker-options.js';
 import { pickLocalized, setLocalized, clearLocalized, useObjectTranslation } from '@object-ui/i18n';
-import { isZhLocale } from '../schema-field-label.js';
 import { WIDGET_TYPE_META } from '../previews/widget-types.js';
 import { shownLabel, writtenLabel, servedLabelNote, useLabelLanguage } from './servedLabel.js';
 import { useServedReportText } from '../../studio-design/servedReportText.js';
@@ -558,7 +558,7 @@ export function ReportDefaultInspector({
   // the running server (skew root-cure).
   // The Default Period options carry the spec's English names; a zh designer
   // reads them from the console's locale packs, the rows the report page's
-  // period chip shows (`withDefaultPeriodLabels`). Every other designer locale
+  // period chip shows (`localizeDefaultPeriods`). Every other designer locale
   // keeps the producer's English, like the rest of this panel.
   const { t: appT } = useObjectTranslation();
   const { schema, form } = React.useMemo(() => {
@@ -569,13 +569,7 @@ export function ReportDefaultInspector({
       excludeFields: REPORT_CURATED_FIELDS,
       sectionTitle: t('engine.inspector.moreFields', locale),
     });
-    if (!isZhLocale(locale)) return merged;
-    return {
-      ...merged,
-      form: withDefaultPeriodLabels(merged.form, (value, authored) =>
-        appT(defaultPeriodLabelKey(value), { defaultValue: authored }),
-      ),
-    };
+    return { ...merged, form: localizeDefaultPeriods(merged.form, locale, appT) };
     // `appT` changes with the app's language and when a locale pack lands, so
     // the names follow both.
   }, [serverSchema, locale, appT]);
