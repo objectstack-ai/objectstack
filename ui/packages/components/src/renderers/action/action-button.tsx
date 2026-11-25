@@ -42,6 +42,32 @@ function asRecord(value: unknown): Record<string, unknown> | undefined {
     : undefined;
 }
 
+/** Components already warned about a non-string label, so each warns once. */
+const warnedNonStringLabel = new Set<string>();
+
+/**
+ * The label this button may print: the contract's `label` is `z.string()`, and
+ * a string is returned as it came. Anything else — typically an inline locale
+ * map from metadata that never passed `validateComponentProps` — is returned as
+ * `undefined`, so the button renders no text instead of throwing "Objects are
+ * not valid as a React child" or printing `[object Object]`. The value is never
+ * translated here: localization is the translation bundle's entry for the
+ * component id, and a value the contract refuses is not given a meaning.
+ * A development build warns once per component.
+ */
+function renderableLabel(label: unknown, componentKey: string): string | undefined {
+  if (label == null || typeof label === 'string') return label ?? undefined;
+  if (process.env.NODE_ENV !== 'production' && !warnedNonStringLabel.has(componentKey)) {
+    warnedNonStringLabel.add(componentKey);
+    console.warn(
+      `[object-ui] action:button "${componentKey}" has a non-string label (${Array.isArray(label) ? 'array' : typeof label}); ` +
+        'the label was not rendered. The label must be a string: localize it through the translation bundle entry ' +
+        'pages.PAGE.components.COMPONENT_ID.label, not an inline locale map.',
+    );
+  }
+  return undefined;
+}
+
 /**
  * The static values this button hands the runner, with the record in scope
  * attached as the Undo baseline when the action is an `undoable` update of that
@@ -156,6 +182,8 @@ const ActionButtonRenderer = forwardRef<
 
     const { execute } = useAction();
     const [loading, setLoading] = useState(false);
+    // Every read of the label below goes through this guard (see `renderableLabel`).
+    const label = renderableLabel(schema.label, schema.id ?? schema.name ?? dataObjId ?? 'action:button');
 
     // Record data may be passed from SchemaRenderer (e.g. DetailView passes
     // record data), bound the three canonical ways — `record.status`, bare
@@ -179,7 +207,7 @@ const ActionButtonRenderer = forwardRef<
     // hide the action, not silently show one whose guard is broken.
     const isVisible = useCondition(toPredicateInput(schema.visible), recordData, {
       throwOnError: true,
-      label: `action "${schema.name ?? schema.label ?? 'action:button'}" (visible)`,
+      label: `action "${schema.name ?? label ?? 'action:button'}" (visible)`,
     });
     // Spec field is `disabled` (boolean | CEL predicate — disabled when TRUE).
     // It previously had zero consumers (the renderer only read a non-spec
@@ -292,7 +320,7 @@ const ActionButtonRenderer = forwardRef<
           // Forward the human label/description so a param-collection dialog
           // can title itself as the action ("Create Environment") instead of a
           // generic "Action parameters" prompt.
-          label: schema.label,
+          label,
           description: (schema as any).description,
           // The param dialog's submit-button verb, read by the same dialog.
           submitText: schema.submitText,
@@ -411,7 +439,7 @@ const ActionButtonRenderer = forwardRef<
       } finally {
         setLoading(false);
       }
-    }, [schema, execute, loading, localContext, recordInScope]);
+    }, [schema, label, execute, loading, localContext, recordInScope]);
 
     // Client-side auto-trigger (#844): a caller (e.g. a welcome-page CTA that
     // deep-links into "create") can mark an action `autoTrigger: true` to run
@@ -482,8 +510,8 @@ const ActionButtonRenderer = forwardRef<
         {...{ 'data-obj-id': dataObjId, 'data-obj-type': dataObjType, style }}
       >
         {loading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-        {!loading && Icon && <Icon className={cn('h-4 w-4', schema.label && 'mr-2')} />}
-        {schema.label}
+        {!loading && Icon && <Icon className={cn('h-4 w-4', label && 'mr-2')} />}
+        {label}
       </Button>
     );
     // A predicate-disabled button is wrapped in the trigger that carries its

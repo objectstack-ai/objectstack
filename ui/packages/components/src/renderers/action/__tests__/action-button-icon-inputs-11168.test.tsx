@@ -67,6 +67,7 @@ import {
   useAction,
 } from '@object-ui/react';
 import { ComponentPropsMap } from '@objectstack/spec/ui';
+import { translatePage } from '@objectstack/spec/system';
 import { manifestFromConfigs, validateTree } from '@objectstack/sdui-parser';
 import type { SchemaElement } from '@objectstack/sdui-parser';
 import { buttonVariants } from '../../../ui/button';
@@ -604,5 +605,75 @@ describe('action:button — `size` publishes the five sizes the spec row declare
       expect(diagnoseCodes({ type: 'action:button', size }), `validator refuses size ${size}`).not.toContain('invalid-enum');
     }
     expect(diagnoseCodes({ type: 'action:button', size: 'xl' })).toContain('invalid-enum');
+  });
+});
+
+describe('action:button — a non-string label renders no text and never throws (#36717)', () => {
+  // The contract's `label` is `z.string()`, localized through the translation
+  // bundle entry for the component id. A locale map reaches the renderer only
+  // from metadata that skipped `validateComponentProps`; it must not
+  // white-screen the page, print `[object Object]`, or be translated.
+  const LOCALE_MAP = { en: 'Buy credits', 'zh-CN': '购买额度' };
+
+  it('an object label renders the button with no text, and a development warning fires once', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      mount(node('action:button', { id: 'label_guard_object', label: LOCALE_MAP, icon: undefined }));
+      const button = screen.getByRole('button');
+      expect(button.textContent).toBe('');
+      expect(document.body.textContent).not.toContain('[object Object]');
+      expect(document.body.textContent).not.toContain('购买额度');
+      expect(document.body.textContent).not.toContain('Buy credits');
+      cleanup();
+      // The same component again: still no throw, and no second warning.
+      mount(node('action:button', { id: 'label_guard_object', label: LOCALE_MAP, icon: undefined }));
+      expect(screen.getByRole('button').textContent).toBe('');
+      const labelWarnings = warn.mock.calls.filter((args) => String(args[0]).includes('non-string label'));
+      expect(labelWarnings).toHaveLength(1);
+      expect(String(labelWarnings[0][0])).toContain('label_guard_object');
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it('an object label still runs the action, and the runner is handed no label', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      mount(node('action:button', { id: 'label_guard_press', label: LOCALE_MAP }));
+      press();
+      await waitFor(() => expect(run).toHaveBeenCalledTimes(1));
+      expect((run.mock.calls[0][0] as ActionDef).label).toBeUndefined();
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it('CONTROL: a string label renders as written, and the runner is handed it', async () => {
+    mount(node('action:button', { id: 'label_guard_string', label: 'Buy credits' }));
+    expect(screen.getByRole('button')).toHaveTextContent('Buy credits');
+    press();
+    await waitFor(() => expect(run).toHaveBeenCalledTimes(1));
+    expect((run.mock.calls[0][0] as ActionDef).label).toBe('Buy credits');
+  });
+
+  it('CONTROL: a string label translated through the bundle key for its component id renders translated', () => {
+    const page = {
+      name: 'billing',
+      label: 'Billing',
+      type: 'app' as const,
+      regions: [
+        {
+          name: 'main',
+          components: [
+            { id: 'buy_credits', type: 'action:button', properties: { label: 'Buy credits', actionType: 'run' } },
+          ],
+        },
+      ],
+    };
+    const bundle = { 'zh-CN': { pages: { billing: { components: { buy_credits: { label: '购买额度' } } } } } };
+    const translated = translatePage(page, bundle as never, { locale: 'zh-CN' });
+    const component = translated.regions[0].components[0] as Record<string, unknown>;
+    mount(component);
+    expect(screen.getByRole('button')).toHaveTextContent('购买额度');
   });
 });
