@@ -81,13 +81,13 @@ vi.mock('../../preview/DraftChangesPanel', () => ({ DraftChangesPanel: () => nul
 import { StudioDesignSurface } from './StudioDesignSurface';
 import { t, tFormat } from '../metadata-admin/i18n';
 
-const answer = (body: unknown) => ({ ok: true, status: 200, json: async () => body });
+const answer = (body: unknown) => ({ headers: new Headers(), ok: true, status: 200, json: async () => body });
 
 /** The package list as the server serves it: one app package and one kernel package. */
 function servePackages(opts: { fail?: boolean } = {}) {
   const fetchMock = vi.fn(async (input: unknown) => {
     if (String(input) !== '/api/v1/packages') return answer([]);
-    if (opts.fail) return { ok: false, status: 502, json: async () => null };
+    if (opts.fail) return { headers: new Headers(), ok: false, status: 502, json: async () => null };
     return answer({
       success: true,
       data: {

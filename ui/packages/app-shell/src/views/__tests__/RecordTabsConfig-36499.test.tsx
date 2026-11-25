@@ -154,7 +154,7 @@ beforeEach(() => {
   __resetDefaultLocale();
   vi.stubGlobal(
     'fetch',
-    vi.fn(async () => ({ ok: true, json: async () => ({ data: { locales: [{ code: session.defaultLocale, isDefault: true }] } }) })),
+    vi.fn(async () => ({ headers: new Headers(), ok: true, json: async () => ({ data: { locales: [{ code: session.defaultLocale, isDefault: true }] } }) })),
   );
 });
 afterEach(() => {

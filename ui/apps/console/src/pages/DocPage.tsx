@@ -9,14 +9,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, Navigate, useHref, useLocation, useNavigate, useParams } from 'react-router-dom';
 import { AlertCircle, ChevronDown, ChevronRight, FileQuestion, Layers, Loader2, Menu } from 'lucide-react';
-import { useAdapter } from '@object-ui/app-shell';
+import { useAdapter, useSidebarDocsNavSlot } from '@object-ui/app-shell';
 import { MarkdownRenderer, MermaidEnlargeContext, extractToc } from '@object-ui/plugin-markdown';
 import { useObjectTranslation } from '@object-ui/i18n';
 import { rewriteDocLinks } from './doc-links';
 import { conflictCandidates, readsByNameAfter } from './doc-address';
 import { DocShell } from './DocShell';
 import { useAppDocsBackTo } from './useAppDocsBackTo';
-import { DocsNav, type DocsNavBook } from './DocsNav';
+import { DocsNav, usePackageDocsNavBooks } from './DocsNav';
 import { DocRefusal } from './BookPage';
 import { useBookData } from './use-book-data';
 import { useActiveHeading } from './useActiveHeading';
@@ -249,17 +249,14 @@ export default function DocPage() {
   const docHref = useCallback((docName: string) => `${base}/${slug}/${docName}`, [base, slug]);
   // objectstack#35424 — the docs column lists every book of the package the
   // reader is in: the current book's package, else the route's app package.
-  const packageBooks = useMemo<DocsNavBook[]>(() => {
+  const readerPackage = useMemo(() => {
     const current = books.find((b) => bookSlug(b) === slug);
-    const pkg = current ? pkgOfBook(current) : appName;
-    if (!pkg) return [];
-    return books
-      .filter((b) => pkgOfBook(b) === pkg)
-      .map((b) => ({
-        slug: bookSlug(b),
-        book: labelUncategorized(resolveBookTree(b, allDocs, undefined, authoredBooks), uncategorizedLabel),
-      }));
-  }, [books, authoredBooks, allDocs, slug, appName, uncategorizedLabel]);
+    return current ? pkgOfBook(current) : appName;
+  }, [books, slug, appName]);
+  const packageBooks = usePackageDocsNavBooks(readerPackage);
+  // objectstack#37150 — inside an app from 768 px up the shell sidebar carries
+  // the column (`DocShell` draws it there); elsewhere the page draws it.
+  const sidebarNav = useSidebarDocsNavSlot() !== null;
   const neighbours = useMemo(
     () => (resolvedBook ? articleNeighbours(resolvedBook, name) : { previous: null, next: null }),
     [resolvedBook, name],
@@ -397,31 +394,35 @@ export default function DocPage() {
     ) : null;
   const docsLabel = t('help.documentation', { defaultValue: 'Documentation' });
 
+  const pageNav = sidebarNav ? null : docsNav;
+
   return (
-    <DocShell backLink={!docsNav}>
+    <DocShell backLink={!docsNav} nav={docsNav ?? undefined}>
       {/* objectstack#35424 — the docs column is the page's one navigation.
-        * Inside an app it sits where the app menu would, full height beside
-        * the article; on narrow screens it folds into a disclosure above it. */}
+        * Inside an app from 768 px up it is the shell sidebar's body, where the
+        * app menu would be (objectstack#37150); elsewhere it sits full height
+        * beside the article, and on narrow screens it folds into a disclosure
+        * above it. */}
       <div className="flex min-h-full" data-testid="doc-reader">
-        {docsNav ? (
+        {pageNav ? (
           <aside className="hidden w-72 shrink-0 border-r lg:block">
             <nav
               aria-label={t('help.docsNavigation', { defaultValue: 'Documentation navigation' })}
               className={`sticky overflow-auto px-4 py-6 ${appName ? 'top-0 max-h-[calc(100svh-3rem)]' : 'top-12 max-h-[calc(100svh-3rem)]'}`}
             >
-              {docsNav}
+              {pageNav}
             </nav>
           </aside>
         ) : null}
         <div className="min-w-0 flex-1">
-          {docsNav ? (
+          {pageNav ? (
             <details className="group mx-4 mt-4 sm:mx-6 lg:hidden">
               <summary className="flex cursor-pointer list-none items-center gap-2 rounded-md border bg-muted/30 px-3 py-2 text-sm font-medium [&::-webkit-details-marker]:hidden">
                 <Menu className="h-4 w-4 text-muted-foreground" />
                 <span className="truncate">{resolvedBook?.label ?? docsLabel}</span>
                 <ChevronDown className="ml-auto h-4 w-4 text-muted-foreground transition-transform group-open:rotate-180" />
               </summary>
-              <div className="mt-2 rounded-md border p-3">{docsNav}</div>
+              <div className="mt-2 rounded-md border p-3">{pageNav}</div>
             </details>
           ) : null}
           <div className="mx-auto flex max-w-[1080px] justify-center gap-10 px-4 py-6 sm:px-8 lg:py-8">

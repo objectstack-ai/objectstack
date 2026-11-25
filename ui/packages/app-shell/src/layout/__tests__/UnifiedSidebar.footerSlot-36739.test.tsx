@@ -145,6 +145,7 @@ import { SidebarProvider } from '@object-ui/components';
 import { UnifiedSidebar } from '../UnifiedSidebar';
 import { PhoneAppHome, PhoneAppHomeSlotProvider } from '../PhoneAppHome';
 import { SidebarFooterSlotProvider, type SidebarFooterSlotPlace } from '../sidebarFooterSlot';
+import { SidebarDocsNav, SidebarDocsNavSlotProvider } from '../sidebarDocsNavSlot';
 
 function setViewport(width: number, height: number) {
   Object.defineProperty(window, 'innerWidth', { configurable: true, writable: true, value: width });
@@ -208,5 +209,44 @@ describe('the host\'s element at the bottom of an app\'s sidebar (objectstack#36
     renderSidebar({ width: 375, slot: null });
     expect(screen.queryByTestId('host-footer-phoneAppHome')).toBeNull();
     expect(screen.getByTestId('phone-app-home-nav')).toBeInTheDocument();
+  });
+});
+
+describe('an app\'s docs page: the sidebar\'s body holds the docs\' navigation (objectstack#37150)', () => {
+  /** The sidebar as `ConsoleLayout` mounts it on a route, and a docs page drawing its column. */
+  function renderDocsRoute(docsNav: boolean) {
+    setViewport(1440, 812);
+    return render(
+      <MemoryRouter initialEntries={['/apps/sales/docs/manual/intro']}>
+        <SidebarProvider>
+          <SidebarDocsNavSlotProvider>
+            <UnifiedSidebar activeAppName="sales" railOverlay docsNav={docsNav} />
+            <SidebarDocsNav>
+              <nav aria-label="Documentation navigation" data-testid="page-docs-column">
+                Manual
+              </nav>
+            </SidebarDocsNav>
+          </SidebarDocsNavSlotProvider>
+        </SidebarProvider>
+      </MemoryRouter>,
+    );
+  }
+
+  it('the page\'s column is the body, in the app menu\'s place; the head and the foot stay', () => {
+    renderDocsRoute(true);
+    const column = screen.getByTestId('page-docs-column');
+    expect(column.closest('[data-sidebar="content"]')).not.toBeNull();
+    expect(screen.queryByRole('navigation', { name: 'App navigation' })).toBeNull();
+    expect(screen.queryByText('Leads')).toBeNull();
+    expect(screen.queryByText('Sales performance')).toBeNull();
+    expect(screen.getByTestId('sidebar-shell-head')).toBeInTheDocument();
+    expect(document.querySelector('[data-sidebar="footer"]')).not.toBeNull();
+  });
+
+  it('CONTROL — on any other route the body is the app menu, and a page has nowhere to draw a column', () => {
+    renderDocsRoute(false);
+    expect(screen.queryByTestId('page-docs-column')).toBeNull();
+    expect(screen.getByRole('navigation', { name: 'App navigation' })).toBeInTheDocument();
+    expect(screen.getByText('Leads')).toBeInTheDocument();
   });
 });

@@ -32,6 +32,9 @@ const WRITTEN = {
       `The text of ${field} was cut at the length this tool returns; what follows the cut is not given.`,
     relatedTruncated: (object: string, cap: number) =>
       `The related list on ${object} has more rows than the ${cap} given; the rest are not given.`,
+    outlineTruncated: (field: string, listed: number, total: number) =>
+      `The outline of ${field} lists ${listed} of its ${total} headings, shallowest levels first; the other `
+      + `${total - listed} are not listed. A listed section's text includes the headings under it.`,
     // Refusals.
     noPackNamed: (context: string, object: string) =>
       `No context pack named '${context}' reads object '${object}', so nothing was read. Omit 'context' to use the `
@@ -63,6 +66,9 @@ const WRITTEN = {
     bodyTruncated: (field: string) => `${field} 的文本在本工具返回的长度处被截断，截断之后的内容没有给出。`,
     relatedTruncated: (object: string, cap: number) =>
       `${object} 上的相关列表超过已给出的 ${cap} 行，其余的行没有给出。`,
+    outlineTruncated: (field: string, listed: number, total: number) =>
+      `${field} 的大纲只列出了全部 ${total} 个标题中的 ${listed} 个（先列层级较高的），其余 ${total - listed} 个没有列出。`
+      + '读取某个已列出的章节时，它下面的标题包含在该章节的文本中。',
     noPackNamed: (context: string, object: string) =>
       `没有名为 '${context}' 的资料包读取对象 '${object}'，因此没有读取任何内容。省略 'context' 以使用该对象唯一的资料包，或用 get_record 读取记录。`,
     noPack: (object: string) => `对象 '${object}' 没有资料包，因此没有读取任何内容。请用 get_record 读取记录。`,

@@ -96,7 +96,7 @@ const AT_THREE: Record<Lang, string> = Object.fromEntries(
 
 function mockCommits(itemCount: number) {
   global.fetch = vi.fn(async () => ({
-    ok: true,
+    headers: new Headers(), ok: true,
     status: 200,
     json: async () => [{ id: 'c1', operation: 'apply', message: 'M', itemCount }],
   })) as unknown as typeof fetch;

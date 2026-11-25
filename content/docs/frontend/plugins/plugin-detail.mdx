@@ -510,7 +510,7 @@ edited (`is_edited` on the row).
 
 ### Feed kinds with no producer
 
-`FeedItemType` publishes thirteen kinds. ObjectUI produces **five** of them:
+`FeedItemType` publishes thirteen kinds. ObjectUI produces **six** of them:
 
 | kind | produced by |
 |---|---|
@@ -519,22 +519,23 @@ edited (`is_edited` on the row).
 | `event` | `sys_activity` type `scheduled` |
 | `system` | `sys_activity` type `system`, **and** any author-extended type the map has never seen (it renders through the generic presentation rather than vanishing), **and** a `completed` row a milestone fired (`metadata.kind: 'milestone'`) |
 | `comment` | `sys_comment` rows, merged in by the console's record page and handed to the block through the discussion context |
+| `approval` | `sys_activity` type `system` with `metadata.kind: 'approval'` and `source_object: 'sys_approval_request'`, which plugin-approvals writes once per approval step (submitted, approved, rejected, recalled); served only to the users who can read the record's approvals |
 
-The other eight — `email`, `call`, `note`, `file`, `record_create`,
-`record_delete`, `approval`, `sharing` — have no producer on any ObjectUI
+The other seven — `email`, `call`, `note`, `file`, `record_create`,
+`record_delete`, `sharing` — have no producer on any ObjectUI
 surface. A `types` list of only such kinds renders a **permanently empty**
 timeline. Since objectui#5877 it also emits one `console.warn` per distinct
 kind, so the emptiness is diagnosable instead of looking like "a working
 feature with no data yet".
 
 Beside the default composer such a list is refused before it ever renders.
-`types: ['approval']` leaves out `'comment'` while `showCommentInput` defaults
+`types: ['call']` leaves out `'comment'` while `showCommentInput` defaults
 to `true`, so `os lint`, `os validate`, `os build`, the page save door and the
 console's schema mirror report it at error as `component-props-invalid` at
 `properties.showCommentInput` (`properties.feed.showCommentInput` on
 `record:chatter` / `record:discussion`). Add `'comment'` to `types` when the
 block should take comments, or set `showCommentInput: false` when it should
-stay comment-free; `types: ['approval']` with `showCommentInput: false` parses
+stay comment-free; `types: ['call']` with `showCommentInput: false` parses
 and renders the empty timeline above. A page already stored with the shape
 still loads; its next save is refused.
 

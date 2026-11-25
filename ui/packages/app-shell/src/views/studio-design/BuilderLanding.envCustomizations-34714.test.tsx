@@ -107,7 +107,7 @@ function stubWire(answers: Record<string, Answer>) {
       const answer = m ? answers[decodeURIComponent(m[1])] : undefined;
       if (!answer) throw new Error(`unexpected request ${url}`);
       return {
-        ok: answer.status >= 200 && answer.status < 300,
+        headers: new Headers(), ok: answer.status >= 200 && answer.status < 300,
         status: answer.status,
         json: async () => answer.body,
         text: async () => JSON.stringify(answer.body),
