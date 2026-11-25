@@ -15,7 +15,7 @@ import { ConversationsSidebar } from '../../console/ai/ConversationsSidebar.js';
 import { resolvePublicShareBase } from '../../console/organizations/resolveHomeUrl.js';
 import { AiUsageIndicator } from '../../layout/AiUsageIndicator.js';
 import { usePlanApprovalPendingCount } from '../../assistant/assistantBus.js';
-import { STUDIO_METADATA_AREA, areaDesignerItemOf } from './metadataArea.js';
+import { STUDIO_METADATA_AREA, areaDesignerItemOf, orgScopeFlowOf } from './metadataArea.js';
 
 /**
  * objectui#8219 — the display label of the artifact a pillar has open, tagged
@@ -86,11 +86,16 @@ export function StudioCopilotConversation({
         artifact = { type: raw.slice(0, idx), name: raw.slice(idx + 1) };
       }
     }
-    // objectstack#36905, objectstack#36904 — a designer that opens full-screen
-    // at its metadata address (the permission set's matrix, the object
-    // designer) carries its item in the path, under the area's segment.
+    // objectstack#36905, objectstack#36904, objectstack#36903 — a designer that
+    // opens full-screen at its metadata address (the permission set's matrix,
+    // the object designer, the flow designer) carries its item in the path,
+    // under the area's segment, not in a `?surface=`; on the package-less
+    // scope's leg (`~org`) so does the flow designer.
     if (!tab && !artifact) {
-      const item = areaDesignerItemOf(copilotLocation.pathname, segment);
+      const item =
+        areaDesignerItemOf(copilotLocation.pathname, segment) ??
+        // Dormant today: the package-less scope mounts no copilot (objectui#11553); kept for when it does.
+        orgScopeFlowOf(copilotLocation.pathname, segment);
       if (item) {
         artifact = item;
         pillar = STUDIO_METADATA_AREA;

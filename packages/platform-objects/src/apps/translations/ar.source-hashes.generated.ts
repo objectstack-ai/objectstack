@@ -18,6 +18,12 @@
  */
 
 export const arGeneratedSourceHashes: Readonly<Record<string, string>> = {
+  "metadataForms.dashboard.fields.dateRange.allowCustomRange.helpText": "1cdc93f55eefade7",
+  "metadataForms.dashboard.fields.dateRange.allowCustomRange.label": "a1fb0e1cf5fe5d8e",
+  "metadataForms.dashboard.fields.dateRange.defaultRange.helpText": "afff2187966a112f",
+  "metadataForms.dashboard.fields.dateRange.defaultRange.label": "c1f190468a0e2b35",
+  "metadataForms.dashboard.fields.dateRange.field.helpText": "bbd8025863a4481a",
+  "metadataForms.dashboard.fields.dateRange.field.label": "7cd8aace5973d40c",
   "metadataForms.email_template.fields.fromOverride.helpText": "c5e29fa12ee1525b",
   "metadataForms.email_template.fields.variables.helpText": "27197774c2cda633",
   "metadataForms.field.fields.inlineEdit.helpText": "1ce60e4c6d5fc0e1",

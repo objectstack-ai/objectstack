@@ -214,7 +214,7 @@ describe('the palette in the `studio` scope lists the Studio, not an app (object
     await studioListed();
     pick('studio-flow Onboard Account ');
     await waitFor(() =>
-      expect(locationNow()).toBe('/studio/com.acme.crm/automations?surface=flow%3Acrm_onboard'),
+      expect(locationNow()).toBe('/studio/com.acme.crm/metadata/flow/crm_onboard'),
     );
   });
 
@@ -222,7 +222,7 @@ describe('the palette in the `studio` scope lists the Studio, not an app (object
     mountStudio();
     await studioListed();
     pick('studio-flow Nightly Cleanup ');
-    await waitFor(() => expect(locationNow()).toBe('/studio/~org/automations?surface=flow%3Aorg_cleanup'));
+    await waitFor(() => expect(locationNow()).toBe('/studio/~org/metadata/flow/org_cleanup?source=runtime'));
   });
 
   it('matches an entry by its label or its machine name', async () => {

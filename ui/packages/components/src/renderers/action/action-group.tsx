@@ -21,7 +21,7 @@ import { ComponentRegistry } from '@object-ui/core';
 import type { ActionDef } from '@object-ui/core';
 import type { UIActionSchema, ActionLocation } from '@object-ui/types';
 import { ACTION_LOCATIONS, actionRendersAt } from '@object-ui/types';
-import { useAction } from '@object-ui/react';
+import { useAction, useDrawsAction } from '@object-ui/react';
 import { useCondition, toPredicateInput, usePredicateRecordContext } from '@object-ui/react';
 import { Button } from '../../ui';
 import {
@@ -150,7 +150,10 @@ const InlineActionButton: React.FC<{
 
   // A DECLARED gate decides; truthiness would read `visible: false` as ungated
   // and render it (objectui#3812) — see `hasDeclaredVisibilityGate`.
+  // `ask_ai` is absent, not disabled, where no in-app assistant can take it (objectstack#37142).
+  const drawsAction = useDrawsAction();
   if (hasDeclaredVisibilityGate(action.visible) && !isVisible) return null;
+  if (!drawsAction(action)) return null;
 
   const button = (
     <Button
@@ -233,7 +236,10 @@ export const DropdownActionItem: React.FC<{
   );
   // Same declared-gate rule as `InlineActionButton` above — one action cannot be
   // hidden in one display mode and shown in the other (objectui#3812).
+  // `ask_ai` is absent, not disabled, where no in-app assistant can take it (objectstack#37142).
+  const drawsAction = useDrawsAction();
   if (hasDeclaredVisibilityGate(action.visible) && !isVisible) return null;
+  if (!drawsAction(action)) return null;
   const Icon = resolveIcon(action.icon);
   // Declared-gate test, same definition as `InlineActionButton` above: one
   // action cannot be greyed out in one display mode and clickable in the other

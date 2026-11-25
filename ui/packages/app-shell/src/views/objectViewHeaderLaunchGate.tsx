@@ -29,6 +29,7 @@
 
 import { useCallback, useSyncExternalStore } from 'react';
 import { SchemaRenderer, useAction } from '@object-ui/react';
+import { isAskAiAction } from '@object-ui/core';
 import { useObjectTranslation } from '@object-ui/i18n';
 import type { ActionBarSchema, UIActionSchema } from '@object-ui/types';
 
@@ -51,6 +52,10 @@ function useListHeaderLaunchGate(actions: readonly UIActionSchema[] | undefined)
             : runner.launchRefusal(action as Parameters<typeof runner.launchRefusal>[0]);
         if (refusal === undefined) {
             gated.push(action);
+        } else if (isAskAiAction(action)) {
+            // [ADR-0160 D7] `ask_ai` is absent where no single record is held
+            // (no row, or several, selected), not greyed out (objectstack#37142).
+            continue;
         } else if (selectionAvailable !== false) {
             gated.push({ ...action, disabled: true, disabledReason: refusal });
         }

@@ -62,8 +62,18 @@ export const STUDIO_ALL_PACKAGES_SEGMENT = '~all';
 /** The reserved `/studio/<segment>` value for the package-less scope (`studioScope.ts`). */
 export const STUDIO_ORG_SCOPE_SEGMENT = '~org';
 
-/** The one pillar the package-less scope offers. */
+/**
+ * The package-less scope's retired pillar segment. objectstack#36903 — the
+ * scope's flows are listed and opened in its "All metadata" area
+ * (`studioOrgScopePath`); this segment only redirects there.
+ */
 export const STUDIO_ORG_SCOPE_PILLAR = 'automations';
+
+/**
+ * objectstack#36903 — the one type the package-less scope's area serves: its
+ * flows, the items that belong to no package (`studioScope.ts`).
+ */
+export const STUDIO_ORG_SCOPE_TYPE = 'flow';
 
 /** The retired Interfaces pillar's route segment (objectstack#36502). No pillar answers to it any more. */
 export const RETIRED_INTERFACES_SEGMENT = 'interfaces';
@@ -112,9 +122,13 @@ export type StudioPillarKey = 'data' | 'automations' | 'access';
  * objectstack#36905 — a permission set opens its metadata address, where the
  * area draws its matrix full-screen; the Access pillar's addresses redirect
  * (`accessPillarRedirect.ts`).
+ *
+ * objectstack#36903 — a flow opens its designer full-screen on its metadata
+ * address; the old `/automations?surface=flow:<name>` redirects there
+ * (`automationsPillarRedirect.ts`).
  */
 export const STUDIO_ITEM_PILLAR: Readonly<Record<string, StudioPillarKey>> = Object.freeze({
-  flow: 'automations',
+  // objectstack#36903 — the last pillar type left: every item opens its designer or the generic page.
 });
 
 /** The pillar an item of `type` opens in today, or `null` when it opens the area's generic item page. */
