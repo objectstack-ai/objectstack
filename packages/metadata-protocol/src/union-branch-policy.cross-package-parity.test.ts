@@ -45,7 +45,7 @@
  *
  * A parity test whose halves share a code path proves nothing. These do not,
  * and it is structural rather than a matter of care: §1 asserts that not one of
- * the seven policy symbols is reachable from ANY public entry point of
+ * the eight policy symbols is reachable from ANY public entry point of
  * `@objectstack/spec`, so `protocol.ts` cannot be importing the shared module
  * even if a future author wanted it to. Its copy is the only thing it can run.
  *
@@ -112,7 +112,7 @@ import { z } from 'zod';
 // renderer (#4971) and `/api`'s ADR-0114 wire mapper (#8124). Both delegate
 // branch selection to the package-internal policy module #8318 extracted.
 import { formatZodIssue } from '@objectstack/spec';
-import { zodIssuesToFields } from '@objectstack/spec/api';
+import { FindDataRequestSchema, zodIssuesToFields } from '@objectstack/spec/api';
 // This package's own copy of the ranking, at the surface every producer here
 // calls: `saveMetaItem`'s 422 (#5364) and `computeMetadataDiagnostics` (#5598).
 import { zodIssuesToMetadataIssues } from './protocol.js';
@@ -314,10 +314,27 @@ const FIXTURES: readonly Fixture[] = [
         expectedPaths: ['outer', 'outer.inner', 'outer.inner.a'],
         machinePaths: ['outer.inner.a'],
     },
+    {
+        // [#35500] Read as informative, each member emitted its own unexplained
+        // bare head: one identical entry per member, in all three walks.
+        rule: 'kind-mismatch drop, nested — a member that is itself a bare union of kinds is not selected',
+        schema: z.object({ u: z.union([z.union([z.string(), z.number()]), z.union([z.boolean(), z.array(z.string())])]) }),
+        value: { u: {} },
+        expectedPaths: ['u'],
+    },
+    {
+        // [#35500] The measured case: the data API's own query parse, `where`
+        // of the wrong kind. Its union carries the slot's own sentence, said
+        // once by all three walks.
+        rule: 'kind-mismatch drop, nested — a query where of the wrong kind is the slot\'s one sentence',
+        schema: FindDataRequestSchema as unknown as z.ZodTypeAny,
+        value: { object: 'account', query: { object: 'account', where: 42 } },
+        expectedPaths: ['query.where'],
+    },
 ];
 
 describe('#8660 §1 the two sides cannot be sharing an implementation', () => {
-    /** The seven symbols `spec/src/shared/union-branch-policy.ts` declares. */
+    /** The eight symbols `spec/src/shared/union-branch-policy.ts` declares. */
     const POLICY_SYMBOLS = [
         'selectUnionBranches',
         'isKindMismatchOnly',
@@ -326,6 +343,7 @@ describe('#8660 §1 the two sides cannot be sharing an implementation', () => {
         'CONTAINER_ISSUE_CODES',
         'NESTED_EXPANSION_DEPTH_LIMIT',
         'UNION_BRANCH_SELECTION_LIMIT',
+        'ZOD_UNION_DEFAULT_MESSAGE',
     ] as const;
 
     /**
@@ -422,7 +440,7 @@ describe('#8660 §3 the corpus cannot be passing vacuously', () => {
     });
 
     it('the corpus exercises expansion, not just the union head', () => {
-        // Six of the eight fixtures must reach BELOW the top-level issue; if a
+        // Six of the ten fixtures must reach BELOW the top-level issue; if a
         // future edit flattened them, every parity assertion above would still
         // pass while asserting nothing about branch selection.
         const expanded = FIXTURES.filter((f) => f.expectedPaths.length > 1);
