@@ -224,6 +224,11 @@ async function serviceOver(
   return { adapter, svc, upserted, searched };
 }
 
+/** The last element of `list`, or `undefined` when it is empty. */
+function lastOf<T>(list: readonly T[]): T | undefined {
+  return list.length === 0 ? undefined : list[list.length - 1];
+}
+
 /** Two organizations' rows in one source: `rb` (organization B) outranks `ra` (A) for {@link ORG_QUERY}. */
 const orgRows = (): Row[] => [
   { id: 'ra', body: 'alpine meadow harbour', status: 'published', organization_id: 'org_a' },
@@ -358,7 +363,7 @@ export function runKnowledgeAdapterContract(opts: KnowledgeAdapterContractOption
           const caller = posture === 'isolated' ? CALLER_A : CALLER_AC;
           const hits = await h.svc.search(ORG_QUERY, { topK: 1, executionContext: caller });
           // The service hands the adapter the caller's organizations, by the posture.
-          expect(h.searched.at(-1)?.organizationIds).toEqual(posture === 'isolated' ? ['org_a'] : ['org_a', 'org_c']);
+          expect(lastOf(h.searched)?.organizationIds).toEqual(posture === 'isolated' ? ['org_a'] : ['org_a', 'org_c']);
           expect(hits.map((x) => x.documentId)).not.toContain(`${source.id}:rb`);
           if (opts.implements.organizationIds) {
             // Filtered before ranking: B's better document does not take A's place.
@@ -373,7 +378,7 @@ export function runKnowledgeAdapterContract(opts: KnowledgeAdapterContractOption
         await h.svc.reindexSource(source.id);
         const nobody = { ...CALLER_A, tenantId: undefined, accessible_org_ids: [] } as ExecutionContext;
         expect(await h.svc.search(ORG_QUERY, { topK: 5, executionContext: nobody })).toEqual([]);
-        expect(h.searched.at(-1)?.organizationIds).toEqual([]);
+        expect(lastOf(h.searched)?.organizationIds).toEqual([]);
       });
 
       it('single posture and the system identity: no filter is handed, and the results are as before', async () => {
@@ -381,13 +386,13 @@ export function runKnowledgeAdapterContract(opts: KnowledgeAdapterContractOption
         const single = await serviceOver(make, orgRows(), source, { posture: () => 'single' });
         await single.svc.reindexSource(source.id);
         const hits = await single.svc.search(ORG_QUERY, { topK: 1, executionContext: CALLER_A });
-        expect(single.searched.at(-1)).not.toHaveProperty('organizationIds');
+        expect(lastOf(single.searched)).not.toHaveProperty('organizationIds');
         expect(hits.map((x) => x.documentId)).toEqual([`${source.id}:rb`]);
 
         const walled = await serviceOver(make, orgRows(), source, { posture: () => 'isolated', wall: wallOf('isolated') });
         await walled.svc.reindexSource(source.id);
         const asSystem = await walled.svc.search(ORG_QUERY, { topK: 1, executionContext: SYSTEM });
-        expect(walled.searched.at(-1)).not.toHaveProperty('organizationIds');
+        expect(lastOf(walled.searched)).not.toHaveProperty('organizationIds');
         expect(asSystem.map((x) => x.documentId)).toEqual([`${source.id}:rb`]);
       });
 

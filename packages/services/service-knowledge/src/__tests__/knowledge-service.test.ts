@@ -1188,3 +1188,189 @@ describe('KnowledgeService — the event sync on an unreadable re-read', () => {
     expect(String(warn.mock.calls[0][0])).toMatch(/event-sync failed for source 's1': the re-read of record 'r1' answered undefined instead of a list of rows/);
   });
 });
+
+// ADR-0161 K8, item 9: a document assembled from a record carries the record's
+// organization under a walled tenancy posture, and a search hands the adapter
+// the caller's organizations, computed by the service from the caller's
+// execution context and the deployment's posture (ADR-0105 D1).
+describe('KnowledgeService — documents carry their organization (ADR-0161 K8, item 9)', () => {
+  const src = objectSource('s1', 'task');
+  const objSrc = src.source as ObjectKnowledgeSource;
+  const row = { id: 'r1', title: 'A', notes: 'B', status: 'open', organization_id: 'org_a' };
+
+  it.each([
+    ['group', 'org_a'],
+    ['isolated', 'org_a'],
+    ['single', undefined],
+    [undefined, undefined],
+  ] as const)('recordToDocument under %s sets organizationId %s', (posture, expected) => {
+    const doc = recordToDocument(src, objSrc, row, undefined, posture);
+    expect(doc.organizationId).toBe(expected);
+    expect(doc.docHash).toBe(computeDocHash(doc));
+  });
+
+  it('a record with no organization gives a document with none, under a walled posture too', () => {
+    expect(recordToDocument(src, objSrc, { ...row, organization_id: null }, undefined, 'isolated')).not.toHaveProperty('organizationId');
+    expect(recordToDocument(src, objSrc, { ...row, organization_id: '' }, undefined, 'group')).not.toHaveProperty('organizationId');
+  });
+
+  it('the organization enters docHash only when set: a document without one hashes by the recipe it had before', async () => {
+    const { createHash } = await import('node:crypto');
+    const body = { content: 'Body', title: 'T', metadata: { status: 'open' } };
+    // The pre-organization recipe, spelled out: sorted keys, `v1:` prefix.
+    const before = `v1:${createHash('sha256').update(JSON.stringify({ content: 'Body', metadata: { status: 'open' }, title: 'T' })).digest('hex')}`;
+    expect(computeDocHash(body)).toBe(before);
+    expect(computeDocHash({ ...body, organizationId: undefined })).toBe(before);
+    expect(computeDocHash({ ...body, organizationId: 'org_a' })).not.toBe(before);
+    expect(computeDocHash({ ...body, organizationId: 'org_a' })).not.toBe(computeDocHash({ ...body, organizationId: 'org_b' }));
+  });
+
+  it('indexDocument refuses a caller-supplied organizationId, and writes nothing', async () => {
+    const adapter = makeAdapter('memory');
+    const svc = new KnowledgeService();
+    svc.registerAdapter('memory', adapter);
+    svc.registerSource(src);
+    await expect(
+      svc.indexDocument('s1', { id: 'd1', sourceId: 's1', content: 'x', organizationId: 'org_b' }),
+    ).rejects.toThrow(/organizationId/);
+    expect(adapter.upsertSpy).not.toHaveBeenCalled();
+  });
+
+  it('the reindex walk and the event sync stamp the organization under a walled posture', async () => {
+    const adapter = makeAdapter('memory');
+    const find = vi.fn(async (_o: string, q: { where?: Record<string, unknown> }) =>
+      (q.where && '$and' in q.where) || (q.where && 'id' in q.where && typeof q.where.id === 'object') ? [] : [row]);
+    const svc = new KnowledgeService({
+      dataEngine: { find, count: vi.fn() } as unknown as IDataEngine,
+      resolveTenancyPosture: async () => 'isolated',
+    });
+    svc.registerAdapter('memory', adapter);
+    svc.registerSource(src);
+    expect(await svc.reindexSource('s1')).toMatchObject({ ok: true, indexed: 1 });
+    expect((adapter.upsertSpy.mock.calls[0][0] as KnowledgeDocument[])[0].organizationId).toBe('org_a');
+    await svc.handleRecordUpsert('task', row);
+    expect((adapter.upsertSpy.mock.calls[adapter.upsertSpy.mock.calls.length - 1][0] as KnowledgeDocument[])[0].organizationId).toBe('org_a');
+  });
+
+  it('a reindex whose posture cannot be read writes nothing and says why', async () => {
+    const adapter = makeAdapter('memory');
+    const find = vi.fn(async () => [row]);
+    const svc = new KnowledgeService({
+      dataEngine: { find, count: vi.fn() } as unknown as IDataEngine,
+      resolveTenancyPosture: async () => {
+        throw new Error('tenancy store down');
+      },
+    });
+    svc.registerAdapter('memory', adapter);
+    svc.registerSource(src);
+    const result = await svc.reindexSource('s1');
+    expect(result).toMatchObject({ ok: false, indexed: 0, purged: null });
+    expect(result.message).toContain('tenancy posture');
+    expect(adapter.upsertSpy).not.toHaveBeenCalled();
+    expect(find).not.toHaveBeenCalled();
+  });
+});
+
+describe('KnowledgeService — search hands the adapter the caller\'s organizations (ADR-0161 K8, item 9)', () => {
+  const person = (extra: Record<string, unknown>) =>
+    ({ userId: 'u1', positions: [], permissions: [], systemPermissions: [], isSystem: false, ...extra }) as never;
+
+  function searchSetup(opts: {
+    posture?: () => Promise<'single' | 'group' | 'isolated' | undefined>;
+    schema?: unknown;
+    logger?: { warn: ReturnType<typeof vi.fn>; error: ReturnType<typeof vi.fn> };
+  } = {}) {
+    const adapter = makeAdapter('memory');
+    const engine = {
+      find: vi.fn(async () => []),
+      getSchema: vi.fn(() => opts.schema),
+    } as unknown as IDataEngine;
+    const svc = new KnowledgeService({
+      dataEngine: engine,
+      ...(opts.posture ? { resolveTenancyPosture: opts.posture } : {}),
+      ...(opts.logger ? { logger: opts.logger } : {}),
+    });
+    svc.registerAdapter('memory', adapter);
+    svc.registerSource(objectSource('s1', 'task'));
+    svc.registerSource({
+      id: 'web', label: 'Web', adapter: 'memory',
+      source: { kind: 'http', urls: ['https://x.test'] } as KnowledgeSource['source'],
+    });
+    const handed = (sourceId: string) =>
+      adapter.searchSpy.mock.calls.find(([, o]) => (o as { source: KnowledgeSource }).source.id === sourceId)?.[1] as
+        | Record<string, unknown>
+        | undefined;
+    return { svc, adapter, handed };
+  }
+
+  it('isolated: the caller\'s active organization, never their other memberships', async () => {
+    const h = searchSetup({ posture: async () => 'isolated' });
+    await h.svc.search('q', { executionContext: person({ tenantId: 'org_a', accessible_org_ids: ['org_a', 'org_b'] }) });
+    expect(h.handed('s1')?.organizationIds).toEqual(['org_a']);
+  });
+
+  it('group: every organization the caller holds a membership in, once each', async () => {
+    const h = searchSetup({ posture: async () => 'group' });
+    await h.svc.search('q', { executionContext: person({ tenantId: 'org_c', accessible_org_ids: ['org_a', 'org_c', 'org_a'] }) });
+    expect(h.handed('s1')?.organizationIds).toEqual(['org_a', 'org_c']);
+  });
+
+  it.each([
+    ['isolated with no active organization', 'isolated', { accessible_org_ids: ['org_a'] }],
+    ['group with no membership', 'group', { tenantId: 'org_a', accessible_org_ids: [] }],
+  ] as const)('%s: an empty set, never "no filter"', async (_label, posture, ctx) => {
+    const h = searchSetup({ posture: async () => posture });
+    await h.svc.search('q', { executionContext: person(ctx) });
+    expect(h.handed('s1')?.organizationIds).toEqual([]);
+  });
+
+  it.each([
+    ['the single posture', async () => 'single' as const, person({ tenantId: 'org_a', accessible_org_ids: ['org_a'] })],
+    ['no tenancy service', async () => undefined, person({ tenantId: 'org_a', accessible_org_ids: ['org_a'] })],
+    ['the system identity', async () => 'isolated' as const, { positions: [], permissions: [], isSystem: true } as never],
+  ])('%s: no filter is handed', async (_label, posture, ctx) => {
+    const h = searchSetup({ posture });
+    await h.svc.search('q', { executionContext: ctx });
+    expect(h.handed('s1')).toBeDefined();
+    expect(h.handed('s1')).not.toHaveProperty('organizationIds');
+  });
+
+  it('a file / http source is never handed a filter: its documents carry no organization', async () => {
+    const h = searchSetup({ posture: async () => 'isolated' });
+    await h.svc.search('q', { executionContext: person({ tenantId: 'org_a', accessible_org_ids: ['org_a'] }) });
+    expect(h.handed('web')).not.toHaveProperty('organizationIds');
+  });
+
+  it.each([
+    ['tenancy disabled', { name: 'task', tenancy: { enabled: false }, fields: { organization_id: {}, notes: {} } }],
+    ['no organization column', { name: 'task', fields: { notes: {}, title: {}, status: {} } }],
+  ])('an object outside the wall (%s) is handed no filter', async (_label, schema) => {
+    const h = searchSetup({ posture: async () => 'isolated', schema });
+    await h.svc.search('q', { executionContext: person({ tenantId: 'org_a', accessible_org_ids: ['org_a'] }) });
+    expect(h.handed('s1')).toBeDefined();
+    expect(h.handed('s1')).not.toHaveProperty('organizationIds');
+  });
+
+  it('a caller-supplied filter is passed opaquely and never becomes the organization set', async () => {
+    const h = searchSetup({ posture: async () => 'isolated' });
+    await h.svc.search('q', {
+      filter: { organizationIds: ['org_b'] },
+      executionContext: person({ tenantId: 'org_a', accessible_org_ids: ['org_a'] }),
+    });
+    expect(h.handed('s1')?.organizationIds).toEqual(['org_a']);
+  });
+
+  it('a posture that cannot be read leaves every object source unsearched, says so at error, and still searches file / http', async () => {
+    const logger = { warn: vi.fn(), error: vi.fn() };
+    const h = searchSetup({
+      posture: async () => {
+        throw new Error('tenancy store down');
+      },
+      logger,
+    });
+    await h.svc.search('q', { executionContext: person({ tenantId: 'org_a', accessible_org_ids: ['org_a'] }) });
+    expect(h.handed('s1')).toBeUndefined();
+    expect(h.handed('web')).toBeDefined();
+    expect(logger.error).toHaveBeenCalledWith(expect.stringContaining('tenancy posture could not be read'));
+  });
+});
