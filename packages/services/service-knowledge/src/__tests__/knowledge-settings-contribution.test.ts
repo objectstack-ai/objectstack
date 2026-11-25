@@ -17,12 +17,20 @@
  * knowledge page has exactly one sidebar entry exactly when the hub lists it.
  */
 
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi, afterEach } from 'vitest';
 import { LiteKernel } from '@objectstack/core';
 import type { Plugin, PluginContext } from '@objectstack/core';
 import { ObjectQL } from '@objectstack/objectql';
 import { SETUP_APP, SETUP_NAV_CONTRIBUTIONS } from '@objectstack/platform-objects';
-import type { IHttpRequest, IHttpResponse, IHttpServer, RouteHandler } from '@objectstack/spec/contracts';
+import { EMBEDDER_SERVICE, KNOWLEDGE_SERVICE } from '@objectstack/spec/contracts';
+import type {
+  IEmbedder,
+  IHttpRequest,
+  IHttpResponse,
+  IHttpServer,
+  IKnowledgeAdapter,
+  RouteHandler,
+} from '@objectstack/spec/contracts';
 import {
   SettingsServicePlugin,
   registerSettingsRoutes,
@@ -32,6 +40,7 @@ import {
   type SettingsService,
 } from '@objectstack/service-settings';
 import { KnowledgeServicePlugin } from '../knowledge-service-plugin.js';
+import type { KnowledgeService } from '../knowledge-service.js';
 
 const EMBEDDER_KEYS = aiEmbedderSettingsSpecifiers.map((s) => s.key).filter((k): k is string => !!k);
 const SETTINGS_PAGE = /^\/apps\/setup\/system\/settings\/([a-z_]+)$/;
@@ -191,5 +200,249 @@ describe('[#24769] the two buttons the knowledge service contributes, at the HTT
     expect(answer.status).toBe(200);
     expect(answer.body?.data?.ok).toBe(true);
     expect(answer.body?.data?.message).toContain('localhost:9380');
+  });
+});
+
+// ── The embedder the ai.embedder_* settings configure (#37094) ─────────────
+//
+// Booted the way a deployment boots: the settings are SAVED through the
+// settings service (a `kernel:ready` write, before the knowledge plugin reads
+// them at `kernel:bootstrapped`), the provider is reached through the global
+// `fetch` (stubbed), and the adapter below resolves `EMBEDDER_SERVICE` where it
+// embeds, as a vector adapter does. Nothing here hands the plugin an embedder.
+
+const API_KEY = 'sk-embedder-secret-37094';
+
+interface LoggedLine { level: string; line: string }
+
+/** Records every line the kernel's shared logger is handed. */
+class LogRecorder implements Plugin {
+  name = 'test.log-recorder';
+  version = '1.0.0';
+  type = 'standard' as const;
+  constructor(private readonly lines: LoggedLine[]) {}
+  async init(ctx: PluginContext): Promise<void> {
+    const logger = ctx.logger as unknown as Record<string, unknown>;
+    for (const level of ['debug', 'info', 'warn', 'error']) {
+      logger[level] = (msg: unknown) => {
+        this.lines.push({ level, line: String(msg) });
+      };
+    }
+  }
+}
+
+/** An adapter that embeds what it indexes and what it is asked. */
+class EmbeddingAdapterPlugin implements Plugin {
+  name = 'test.knowledge.embedding-adapter';
+  version = '1.0.0';
+  type = 'standard' as const;
+  dependencies = ['com.objectstack.service.knowledge'];
+  async init(ctx: PluginContext): Promise<void> {
+    const embedder = () => ctx.getService<IEmbedder>(EMBEDDER_SERVICE);
+    const adapter: IKnowledgeAdapter = {
+      id: 'vec',
+      async upsert(docs) {
+        await embedder().embed(docs.map((d) => d.content));
+      },
+      async search(query) {
+        await embedder().embed([query]);
+        return [];
+      },
+      async delete() {},
+    };
+    ctx.getService<KnowledgeService>(KNOWLEDGE_SERVICE).registerAdapter('vec', adapter);
+  }
+}
+
+/** Saves `ai` settings as an operator does, before the knowledge plugin reads them. */
+class SavedAiSettings implements Plugin {
+  name = 'test.saved-ai-settings';
+  version = '1.0.0';
+  type = 'standard' as const;
+  dependencies = ['com.objectstack.service.settings', 'com.objectstack.service.knowledge'];
+  constructor(private readonly values: Record<string, unknown>) {}
+  async init(): Promise<void> {}
+  async start(ctx: PluginContext): Promise<void> {
+    ctx.hook('kernel:ready', async () => {
+      await ctx.getService<SettingsService>('settings').setMany('ai', this.values);
+    });
+  }
+}
+
+/** A host's (or cloud `service-ai`'s) own embedder, registered at `phase`. */
+class HostEmbedderPlugin implements Plugin {
+  name = 'test.host-embedder';
+  version = '1.0.0';
+  type = 'standard' as const;
+  constructor(private readonly embedder: IEmbedder, private readonly phase: 'init' | 'kernel:ready') {}
+  async init(ctx: PluginContext): Promise<void> {
+    if (this.phase === 'init') ctx.registerService(EMBEDDER_SERVICE, this.embedder);
+  }
+  async start(ctx: PluginContext): Promise<void> {
+    if (this.phase === 'kernel:ready') {
+      ctx.hook('kernel:ready', async () => {
+        ctx.registerService(EMBEDDER_SERVICE, this.embedder);
+      });
+    }
+  }
+}
+
+interface ProviderRequest { url: string; authorization: string | null; model: unknown; inputs: string[] }
+
+/** Stubs the provider's `POST /embeddings` on the global `fetch`. */
+function stubProvider(): ProviderRequest[] {
+  const requests: ProviderRequest[] = [];
+  vi.stubGlobal('fetch', vi.fn(async (url: string | URL, init?: RequestInit) => {
+    const body = JSON.parse(String(init?.body)) as { model?: unknown; input: string[] };
+    requests.push({
+      url: String(url),
+      authorization: new Headers(init?.headers).get('authorization'),
+      model: body.model,
+      inputs: body.input,
+    });
+    return new Response(JSON.stringify({ data: body.input.map(() => ({ embedding: [0.6, 0.8] })) }), {
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+    });
+  }));
+  return requests;
+}
+
+async function bootEmbedder(opts: {
+  saved?: Record<string, unknown>;
+  host?: { embedder: IEmbedder; phase: 'init' | 'kernel:ready' };
+} = {}) {
+  const lines: LoggedLine[] = [];
+  const kernel = new LiteKernel();
+  kernel.use(new LogRecorder(lines));
+  if (opts.host) kernel.use(new HostEmbedderPlugin(opts.host.embedder, opts.host.phase));
+  kernel.use(new KnowledgeServicePlugin({
+    enableEventSync: false,
+    sources: [{ id: 'docs', label: 'Docs', adapter: 'vec', source: { kind: 'http', urls: ['https://docs.example.com/'] } }],
+  }));
+  kernel.use(new SettingsServicePlugin({ env: {}, registerRoutes: false }));
+  kernel.use(new EmbeddingAdapterPlugin());
+  if (opts.saved) kernel.use(new SavedAiSettings(opts.saved));
+  await kernel.bootstrap();
+  const knowledge = kernel.getService<KnowledgeService>(KNOWLEDGE_SERVICE);
+  const embedder = kernel.getService<IEmbedder>(EMBEDDER_SERVICE);
+  return { kernel, lines, knowledge, embedder };
+}
+
+const texts = (n: number) => Array.from({ length: n }, (_, i) => `chunk ${i}`);
+
+describe('#37094 — the open edition registers EMBEDDER_SERVICE from the ai.embedder_* settings', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('saved settings: an index write embeds through the configured provider', async () => {
+    const requests = stubProvider();
+    const { knowledge, embedder, lines } = await bootEmbedder({
+      saved: { embedder_provider: 'openai', embedder_api_key: API_KEY, embedder_model: 'text-embedding-3-small' },
+    });
+    expect(embedder.id).toBe('openai');
+    expect(requests).toHaveLength(0); // nothing is sent at boot
+
+    await knowledge.indexDocument('docs', { id: 'd1', sourceId: 'docs', content: 'hello embedder' });
+    expect(requests).toEqual([{
+      url: 'https://api.openai.com/v1/embeddings',
+      authorization: `Bearer ${API_KEY}`,
+      model: 'text-embedding-3-small',
+      inputs: ['hello embedder'],
+    }]);
+    // The key reaches the provider and nothing else.
+    expect(lines.filter((l) => l.line.includes(API_KEY))).toEqual([]);
+    expect(lines.some((l) => l.level === 'info' && l.line.includes(`registered '${EMBEDDER_SERVICE}' from the ai.embedder_* settings`))).toBe(true);
+  });
+
+  it('a custom endpoint takes the saved Base URL', async () => {
+    const requests = stubProvider();
+    const { embedder } = await bootEmbedder({
+      saved: {
+        embedder_provider: 'custom',
+        embedder_api_key: API_KEY,
+        embedder_model: 'my-gateway-model',
+        embedder_base_url: 'https://gateway.example.com/v1/',
+      },
+    });
+    await embedder.embed(['x']);
+    expect(requests.map((r) => [r.url, r.model])).toEqual([['https://gateway.example.com/v1/embeddings', 'my-gateway-model']]);
+  });
+
+  for (const phase of ['init', 'kernel:ready'] as const) {
+    it(`an embedder already registered at ${phase} is kept, not replaced, and the settings are not applied`, async () => {
+      const requests = stubProvider();
+      const own: IEmbedder = { id: 'host-own', dimensions: 3, embed: async (t) => t.map(() => [1, 0, 0]) };
+      const { embedder, knowledge, lines } = await bootEmbedder({
+        host: { embedder: own, phase },
+        saved: { embedder_provider: 'openai', embedder_api_key: API_KEY },
+      });
+      expect(embedder).toBe(own);
+      await knowledge.indexDocument('docs', { id: 'd1', sourceId: 'docs', content: 'hello' });
+      expect(requests).toHaveLength(0);
+      const kept = lines.filter((l) => l.line.includes('already registered') && l.line.includes('host-own'));
+      expect(kept).toHaveLength(1);
+      expect(kept[0].level).toBe('info');
+    });
+  }
+
+  it('an unsaved batch size leaves the model its own cap — the default 64 is not a saved value', async () => {
+    const requests = stubProvider();
+    // DashScope text-embedding-v3 documents at most 10 inputs per request.
+    const { embedder } = await bootEmbedder({
+      saved: { embedder_provider: 'dashscope', embedder_api_key: API_KEY, embedder_model: 'text-embedding-v3' },
+    });
+    await embedder.embed(texts(25));
+    expect(requests.map((r) => r.inputs.length)).toEqual([10, 10, 5]);
+    expect(requests[0].url).toBe('https://dashscope.aliyuncs.com/compatible-mode/v1/embeddings');
+  });
+
+  it('a saved batch size is the batch cap', async () => {
+    const requests = stubProvider();
+    const { embedder } = await bootEmbedder({
+      saved: {
+        embedder_provider: 'openai',
+        embedder_api_key: API_KEY,
+        embedder_model: 'text-embedding-3-small',
+        embedder_batch_size: 4,
+      },
+    });
+    await embedder.embed(texts(9));
+    expect(requests.map((r) => r.inputs.length)).toEqual([4, 4, 1]);
+  });
+
+  it('no settings: boot succeeds, and indexing and search answer an error naming the missing settings', async () => {
+    const requests = stubProvider();
+    const { knowledge, embedder, lines } = await bootEmbedder();
+    const named = /No embedder is configured[\s\S]*ai\.embedder_provider[\s\S]*restart/;
+
+    await expect(knowledge.indexDocument('docs', { id: 'd1', sourceId: 'docs', content: 'hello' })).rejects.toThrow(named);
+    // The adapter's search answers the error; the service's search reports it
+    // per source and answers no hits.
+    await expect(knowledge.getAdapter('vec').search('hello', { source: knowledge.getSource('docs')!, topK: 5 }))
+      .rejects.toThrow(named);
+    await expect(knowledge.search('hello', { sourceIds: ['docs'] })).resolves.toEqual([]);
+    expect(lines.some((l) => l.level === 'error' && named.test(l.line))).toBe(true);
+    // A vector column cannot be sized from it either.
+    expect(() => embedder.dimensions).toThrow(named);
+    expect(requests).toHaveLength(0);
+    // Nothing asked for an embedder, so the boot line is info, not warn.
+    expect(lines.some((l) => l.level === 'info' && l.line.includes('no embedder is configured'))).toBe(true);
+    expect(lines.some((l) => l.level === 'warn' && l.line.includes('no embedder is configured'))).toBe(false);
+  });
+
+  it("'none' saved: embeddings stay disabled, and the error says so", async () => {
+    stubProvider();
+    const { embedder } = await bootEmbedder({ saved: { embedder_provider: 'none' } });
+    await expect(embedder.embed(['x'])).rejects.toThrow(/ai\.embedder_provider is saved as 'none'/);
+  });
+
+  it('incomplete saved settings: the settings page\'s own check names what is missing, at warn', async () => {
+    const requests = stubProvider();
+    const { embedder, lines } = await bootEmbedder({ saved: { embedder_provider: 'siliconflow' } });
+    await expect(embedder.embed(['x'])).rejects.toThrow(/siliconflow embedder requires an API key/);
+    expect(lines.some((l) => l.level === 'warn' && l.line.includes('requires an API key'))).toBe(true);
+    expect(requests).toHaveLength(0);
   });
 });
