@@ -46,6 +46,7 @@ export { isWideFieldType } from './autoLayout';
 export { prefetchRelatedCounts, relatedCountTargetsIn } from './useRelatedCounts';
 export { COMPACT_RELATED_ROWS } from './relatedListCompact';
 export { normalizeSortSpec as normalizeRelatedListSort } from './relatedListSort';
+export { relatedCreateSeedOf } from './relatedParentScope';
 export { seedQueueClaimDecision } from './queueClaim';
 export { seedRecordFieldAccess } from './recordFieldAccess';
 export { seedRecordVerdict } from './useRecordEditable';

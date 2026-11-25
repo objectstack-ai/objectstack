@@ -45,6 +45,10 @@ import { NAV_RUN_ACTION_PARAM } from '@object-ui/layout';
  * |             | framework#2604 D3).                            |              |
  * | `formLink`  | `"<fkField>:<parentId>"` — create-mode parent  |              |
  * |             | pre-link for a child task; refresh-safe.       | with `form`  |
+ * |             | Repeats: further `"<field>:<value>"` pairs are |              |
+ * |             | values seeded beside the parent (the relation- |              |
+ * |             | ship lookup's `dependsOn` fields,              |              |
+ * |             | objectstack#37246).                            |              |
  * | `tab`       | Active record-detail tab (stable semantic      | replace      |
  * |             | values: `details` / `related:<child>` /        |              |
  * |             | `related` / `activity` / `history`,            |              |
@@ -106,7 +110,10 @@ export const RECORD_FORM_PARAM = 'form';
 /** Child-task object override for the record-form overlay (objectstack-ai/objectstack#2604 D3). */
 export const RECORD_FORM_OBJECT_PARAM = 'formObject';
 
-/** Child-task parent pre-link `"<fkField>:<parentId>"` (objectstack-ai/objectstack#2604 D3). */
+/**
+ * Child-task parent pre-link `"<fkField>:<parentId>"` (objectstack-ai/objectstack#2604 D3),
+ * repeated for each value seeded beside it (objectstack#37246).
+ */
 export const RECORD_FORM_LINK_PARAM = 'formLink';
 
 /** Active record-detail tab (objectui#2257; stable semantic values). */

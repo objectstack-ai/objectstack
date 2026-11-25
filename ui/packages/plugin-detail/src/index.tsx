@@ -187,6 +187,9 @@ export type { RelatedListProps } from './RelatedList';
 // objectstack#27627 — the order a related list's row read asks, for the record
 // page's payload to ask a compact card's first rows in.
 export { normalizeSortSpec as normalizeRelatedListSort } from './RelatedList';
+// objectstack#37246 — the values a related list's New opens with beside the
+// parent link (also on `/core`).
+export { relatedCreateSeedOf } from './relatedParentScope';
 export { COMPACT_RELATED_ROWS } from './relatedListCompact';
 export type { SectionGroupProps } from './SectionGroup';
 export type { HeaderHighlightProps } from './HeaderHighlight';

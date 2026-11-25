@@ -111,6 +111,7 @@ import { relatedCardId } from './synth/relatedArrangement';
 import { relatedTabConditionsChanged, useRelatedTabConditions } from './relatedTabConditions';
 import { RelatedCardMenu, RelatedPanelHandle } from './RelatedCardMenu';
 import { normalizeSortSpec } from './relatedListSort';
+import { dependsOnFromParent } from './relatedParentScope';
 import { detectStatusField } from '@object-ui/types';
 
 export interface RelatedListProps {
@@ -1168,38 +1169,19 @@ export function derivedAddOf(
  * picker of children (`derivedAddOf`), seen from the parent: `[]` when the
  * lookup is unscoped, `undefined` when the scope cannot be resolved here.
  *
- * `dependsOn` scopes the lookup's candidates by equality — a `{ field, param }`
- * entry (a bare string names both) sends the child's `field` value as the
- * parent object's `param` (`LookupField`'s `dependentFilter`). Reversed, a
- * child can name this parent only when its `field` equals the parent's
- * `param`, so each entry becomes `field equals <parent's param>`. With the
- * parent's value empty or not read yet no child could name it: no picker,
- * never an unscoped one. A `lookupFilters` comparand reading `$record` relates
- * the parent's columns to the child's by any operator, and this side does not
- * invert it: no picker either.
+ * Each `dependsOn` entry, read from the parent (`dependsOnFromParent`, the
+ * pairs a New on this tab also opens with, objectstack#37246), becomes
+ * `field equals <parent's param>`. With the parent's value empty or not read
+ * yet no child could name it: no picker, never an unscoped one. A
+ * `lookupFilters` comparand reading `$record` relates the parent's columns to
+ * the child's by any operator, and this side does not invert it: no picker
+ * either.
  */
 function parentScopeOf(rel: RelationFieldDef, parentRecord: Record<string, unknown> | undefined): ViewFilterElement[] | undefined {
   if (Array.isArray(rel.lookupFilters) && rel.lookupFilters.some(readsRecord)) return undefined;
-  if (!Array.isArray(rel.dependsOn) || rel.dependsOn.length === 0) return [];
-  const rules: ViewFilterElement[] = [];
-  for (const entry of rel.dependsOn) {
-    const field = typeof entry === 'string' ? entry : (entry as { field?: unknown } | null)?.field;
-    const param = typeof entry === 'string' ? entry : ((entry as { param?: unknown }).param ?? field);
-    if (typeof field !== 'string' || field === '' || typeof param !== 'string' || param === '') return undefined;
-    const value = referenceValueOf(parentRecord?.[param]);
-    if (value === undefined) return undefined;
-    rules.push({ field, operator: 'equals', value });
-  }
-  return rules;
-}
-
-/** A record field's value as a filter comparand: an expanded reference reads as its id. */
-function referenceValueOf(raw: unknown): string | number | boolean | undefined {
-  const value = raw && typeof raw === 'object' && !Array.isArray(raw)
-    ? ((raw as { id?: unknown; _id?: unknown }).id ?? (raw as { _id?: unknown })._id)
-    : raw;
-  if (typeof value === 'number' || typeof value === 'boolean') return value;
-  return typeof value === 'string' && value !== '' ? value : undefined;
+  return dependsOnFromParent(rel.dependsOn, parentRecord)?.map(
+    ([field, value]): ViewFilterElement => ({ field, operator: 'equals', value }),
+  );
 }
 
 /** Does this `lookupFilters` entry compare with a `{ $record }` value? */
