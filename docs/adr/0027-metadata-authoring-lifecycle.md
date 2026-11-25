@@ -398,6 +398,21 @@ production DDL later, collaboration last.
 | **M4 — Advanced migration & DX** | Zero-downtime prod changes; full surface parity | expand-contract migrations · data backfill expressions · drift detection / health checks · CLI/AI/Git surface parity · marketplace dependency resolution | high (zero-downtime correctness) | additive to M2 executor |
 | **M5 — Collaboration** | Multi-author teams | edit locks → branch + merge → concurrent drafts; **retire §9 flat `package_id` rows** (migrate to version-bound) | high (merge semantics) | final consolidation |
 
+> **Note (2026-11-24, [#36511](https://github.com/objectstack-ai/objectstack/issues/36511) of epic
+> [#36510](https://github.com/objectstack-ai/objectstack/issues/36510)).** Row M2's "explicit, batched publish" is no longer
+> how a person's edit goes live. The maintainer on the epic (2026-11-22), verbatim:
+> 「studio目前的设计是不是太技术，通常每个元数据修改完直接点保存不就行了吗？除了AI会批量改，人类通常是改一个确认一个，是否建议调整」.
+> In Studio's designers a person's Save writes the item's draft and then publishes that one item
+> (`POST /api/v1/meta/:type/:name/publish`), so the edit is live at once
+> (`ui/packages/app-shell/src/views/studio-design/studioSaveBar.tsx#publishSavedItem`; PRs
+> [#36597](https://github.com/objectstack-ai/objectstack/pull/36597),
+> [#36634](https://github.com/objectstack-ai/objectstack/pull/36634) and
+> [#36652](https://github.com/objectstack-ai/objectstack/pull/36652)). Drafts and the package's batch publish
+> (`POST /api/v1/packages/:id/publish-drafts`) remain, for an AI's changes. Studio's generic item page still has its
+> own Save and Publish; [ADR-0146](./0146-studio-designs-setup-administers-one-editor-per-item-paired-customize-package.md)
+> D1's amendment of 2026-11-24 declares its move to the same model. The table is left as written; read row M2 with
+> this note.
+
 **Recommended MVP cut:** **M0 + M1 + M2** is the smallest end-to-end product —
 it delivers the whole "edit → stage → preview → publish → live" loop a low-code
 user expects, defers all the genuinely hard parts (cross-env promotion,

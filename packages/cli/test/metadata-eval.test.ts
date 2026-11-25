@@ -26,7 +26,7 @@ describe('runMetadataEval — offline (golden corpus)', () => {
   it('the corpus exercises the key conventions', () => {
     const ids = DEFAULT_METADATA_EVAL_CORPUS.map((c) => c.id);
     expect(ids).toContain('invoice_with_line_items');
-    expect(ids).toContain('blog_post_with_comments'); // association (no inlineEdit)
+    expect(ids).toContain('blog_post_with_comments'); // association (no parent field group places it)
     expect(ids).toContain('crm_account_with_contacts'); // lookup (independent)
   });
 });
@@ -54,7 +54,7 @@ describe('runMetadataEval — live seam', () => {
         // A "clean" stack declares OWD — the D7 security linter (ADR-0090)
         // errors on custom objects with an unset sharingModel.
         { name: 'invoice', label: 'Invoice', sharingModel: 'private', fields: { name: { type: 'text', label: 'Name', required: true } } },
-        { name: 'invoice_line', label: 'Line', sharingModel: 'controlled_by_parent', fields: { invoice: { type: 'master_detail', label: 'Invoice', reference: 'invoice', required: true, deleteBehavior: 'cascade', inlineEdit: true }, amount: { type: 'currency', label: 'Amount', required: true } } },
+        { name: 'invoice_line', label: 'Line', sharingModel: 'controlled_by_parent', fields: { invoice: { type: 'master_detail', label: 'Invoice', reference: 'invoice', required: true, deleteBehavior: 'cascade' }, amount: { type: 'currency', label: 'Amount', required: true } } },
       ],
     });
     const report = await runMetadataEval(oneCase, { generate: goodGen });

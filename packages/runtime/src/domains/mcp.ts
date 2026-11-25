@@ -259,7 +259,16 @@ export async function handleMcpRequest(deps: DomainHandlerDeps, body: any, conte
     const packageDocs = !grantedScopes || grantedScopes.includes(MCP_OAUTH_SCOPE_DATA_READ)
         ? await resolveMcpPackageDocsProtocol(deps, context)
         : undefined;
-    const bridge = buildMcpBridge(deps, context, { recordFiles, datasetTools, packageDocs });
+    // [ADR-0149 D2] The knowledge seam: the bridge carries `search_knowledge`
+    // exactly where the kernel holds a `knowledge` service serving its
+    // executor and the grant reaches the read family (`data:read`, or no
+    // grant at all). The MCP runtime's `knowledgeToolDefinition` stays the
+    // authority on listing it; the gate is read here too so a token that
+    // cannot reach it never has the service resolved for it.
+    const knowledgeTools = !grantedScopes || grantedScopes.includes(MCP_OAUTH_SCOPE_DATA_READ)
+        ? await resolveMcpKnowledgeToolsService(deps, context)
+        : undefined;
+    const bridge = buildMcpBridge(deps, context, { recordFiles, datasetTools, packageDocs, knowledgeTools });
     // [#34766] The open draft door (design `docs/design/mcp-local-first-door.md`,
     // Design A): resolved per request, so the user's own `manage_metadata` is
     // read for every call. `undefined` for a grant without `metadata:write`
@@ -959,7 +968,12 @@ function actionDeclarationReads(deps: DomainHandlerDeps, context: HttpProtocolCo
 export function buildMcpBridge(
     deps: DomainHandlerDeps,
     context: HttpProtocolContext,
-    seams: { recordFiles?: McpRecordFileService; datasetTools?: McpDatasetToolsService; packageDocs?: PackageDocsProtocol } = {},
+    seams: {
+        recordFiles?: McpRecordFileService;
+        datasetTools?: McpDatasetToolsService;
+        packageDocs?: PackageDocsProtocol;
+        knowledgeTools?: McpKnowledgeToolsService;
+    } = {},
 ): any {
     const ec = context.executionContext;
     const envId = context.environmentId;
@@ -1625,7 +1639,30 @@ export function buildMcpBridge(
                         ?? (await deps.resolveService(context, 'objectql', envId)),
                 ),
                 locale: metaRequestLocale(mcpRequestHttp(context)),
+                // [#36854] A cited manual's name in the page's locale, by the
+                // `/meta/book` door's translation, ⛔ never a second routine.
+                translateBooks: async (books, locale) => {
+                    const translated = await translateMetaList(
+                        { ...metaTranslationSources(deps, context, getProtocol), requestLocale: () => locale },
+                        'book',
+                        [...books],
+                    );
+                    return Array.isArray(translated) ? translated : books;
+                },
             }))
+            : {}),
+        // [ADR-0149 D2] The knowledge seam (`search_knowledge`), carried only
+        // where the kernel's `knowledge` service serves its executor. Every
+        // call runs AS this request's caller ([ADR-0090 D10] on a delegated
+        // agent envelope, the delegating person's own reach): the service
+        // searches only `aiExposed` sources and re-checks every object-source
+        // hit against this execution context's row-level security.
+        ...(seams.knowledgeTools
+            ? {
+                searchKnowledge: async (input: Record<string, unknown>) =>
+                    seams.knowledgeTools!.knowledgeTools().searchKnowledge(input, ec),
+                knowledgeToolDefinitions: () => seams.knowledgeTools!.knowledgeTools().definitions,
+            }
             : {}),
     };
 }
@@ -1669,6 +1706,40 @@ export async function resolveMcpDatasetToolsService(
         return undefined;
     }
     return service && typeof service.datasetTools === 'function' ? (service as McpDatasetToolsService) : undefined;
+}
+
+/**
+ * [ADR-0149 D2] The face of the `knowledge` service `search_knowledge` calls:
+ * `knowledgeTools()` binds the service-knowledge executor to the service
+ * itself. Named structurally, as {@link McpDatasetToolsService} is, so this
+ * package takes no dependency on the knowledge package (it loads opt-in). The
+ * executor refuses by throwing an ADR-0112 coded error.
+ */
+export interface McpKnowledgeToolsService {
+    knowledgeTools(): {
+        readonly definitions: ReadonlyArray<{ name: string; description: string; parameters: Record<string, unknown> }>;
+        searchKnowledge(input: unknown, context?: unknown): Promise<unknown>;
+    };
+}
+
+/**
+ * [ADR-0149 D2] The `knowledge` service when it serves the knowledge tool's
+ * executor, else `undefined` (no knowledge service — it loads opt-in — or one
+ * without `knowledgeTools`). A lookup that throws is "not served": the tool
+ * is then not listed, as for {@link resolveMcpDatasetToolsService}.
+ */
+export async function resolveMcpKnowledgeToolsService(
+    deps: DomainHandlerDeps,
+    context: HttpProtocolContext,
+): Promise<McpKnowledgeToolsService | undefined> {
+    let service: Partial<McpKnowledgeToolsService> | undefined;
+    try {
+        service = (await deps.resolveService(context, 'knowledge', context.environmentId)) as unknown as
+            Partial<McpKnowledgeToolsService> | undefined;
+    } catch {
+        return undefined;
+    }
+    return service && typeof service.knowledgeTools === 'function' ? (service as McpKnowledgeToolsService) : undefined;
 }
 
 /**

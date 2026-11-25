@@ -71,6 +71,7 @@ import { ObjectDataPage } from './ObjectDataPage';
 import { useRecordPageReturn } from './recordDrawerStack';
 import { isRecordPagePushed } from './recordPagePush';
 import { ExpressionProvider } from '../providers/ExpressionProvider';
+import { ChatDockControlProvider, type ChatDockControl } from '../layout/chatDockControl';
 
 const OBJECT_NAME = 'demo_account';
 const DATA_PATH = `/apps/sales/${OBJECT_NAME}/data`;
@@ -184,7 +185,7 @@ afterEach(() => {
   window.history.replaceState(null, '', '/');
 });
 
-async function mountDataPage(apiOperations?: string[]) {
+async function mountDataPage(apiOperations?: string[], dock: ChatDockControl | null = null) {
   findOne = vi.fn(async () => null);
   const dataSource = {
     find: vi.fn(async () => ({ data: ROWS, total: MATCHED })),
@@ -200,10 +201,12 @@ async function mountDataPage(apiOperations?: string[]) {
       <I18nProvider instance={createI18n({ defaultLanguage: 'en', detectBrowserLanguage: false })}>
         <ExpressionProvider user={{ id: 'u1', name: 'Ada', profile: 'admin' }}>
           <MemoryRouter initialEntries={[`${DATA_PATH}${DATA_SEARCH}`]}>
-            <Routes>
-              <Route path="/apps/:appName/:objectName/data" element={<ObjectDataPage dataSource={dataSource} objects={OBJECTS} />} />
-              <Route path="/apps/:appName/:objectName/record/:recordId" element={<RecordPageProbe />} />
-            </Routes>
+            <ChatDockControlProvider value={dock}>
+              <Routes>
+                <Route path="/apps/:appName/:objectName/data" element={<ObjectDataPage dataSource={dataSource} objects={OBJECTS} />} />
+                <Route path="/apps/:appName/:objectName/record/:recordId" element={<RecordPageProbe />} />
+              </Routes>
+            </ChatDockControlProvider>
             <LocationProbe />
           </MemoryRouter>
         </ExpressionProvider>
@@ -345,6 +348,52 @@ describe('objectstack#36300 — the data page\'s side drawer draws ⤢ 「Open a
     expect(params.get('recordId')).toBeNull();
     await settle();
     expect(screen.queryByRole('dialog')).toBeNull();
+  });
+});
+
+/**
+ * objectstack#36998 — the data page's drawer is the modal sheet over the whole
+ * page, the top bar's robot included, so its bar carries the assistant's entry:
+ * drawn only under a dock handle (a layout hosting the assistant hands one only
+ * while the runtime serves AI); a click opens the record's full page, as ⤢
+ * does, then the assistant.
+ */
+describe('objectstack#36998 — the data page\'s side drawer opens the assistant', () => {
+  async function openDrawer(text: string, id: string): Promise<HTMLElement> {
+    fireEvent.click(within(rowOf(text)).getByTestId('record-open-in-panel'));
+    await waitFor(() => expect(new URLSearchParams(search() ?? '').get('recordId')).toBe(id));
+    return screen.findByRole('dialog', undefined, { timeout: 5000 });
+  }
+
+  it('with the assistant served, the bar draws the entry; a click lands on the record page with the assistant opened', async () => {
+    const calls: string[] = [];
+    const dock: ChatDockControl = {
+      expanded: false,
+      fullWindow: false,
+      toggle: () => calls.push('toggle'),
+      open: (...args) => calls.push(`open:${JSON.stringify(args)}`),
+    };
+    await mountDataPage(undefined, dock);
+    const drawer = await openDrawer('Globex', 'a2');
+    const entry = within(drawer).getByRole('button', { name: 'AI Assistant' });
+    expect(entry.getAttribute('data-testid')).toBe('record-pane-open-assistant');
+    fireEvent.click(entry);
+    await screen.findByTestId('record-page', undefined, { timeout: 5000 });
+    expect(pathname()).toBe(`/apps/sales/${OBJECT_NAME}/record/a2`);
+    // The same hop as ⤢: the page carries the data page as its origin.
+    expect(JSON.parse(screen.getByTestId('record-from').textContent ?? 'null')?.pathname)
+      .toBe(`${DATA_PATH}?${new URLSearchParams(DATA_SEARCH).toString()}`);
+    // The assistant opens on whatever it shows: the console reads the record page in view.
+    expect(calls).toEqual(['open:[]']);
+    await settle();
+    expect(screen.queryByRole('dialog')).toBeNull();
+  });
+
+  it('without the assistant (no dock handle), the drawer draws no entry', async () => {
+    await mountDataPage();
+    const drawer = await openDrawer('Acme', 'a1');
+    expect(within(drawer).getByTestId('record-pane-open-page')).toBeTruthy();
+    expect(within(drawer).queryByTestId('record-pane-open-assistant')).toBeNull();
   });
 });
 

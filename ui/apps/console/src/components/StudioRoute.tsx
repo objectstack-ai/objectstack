@@ -45,10 +45,12 @@ import {
   LoadingFallback,
   LoadingScreen,
   STUDIO_ALL_PACKAGES_SEGMENT,
+  STUDIO_HOME_PILLAR,
   STUDIO_METADATA_AREA,
   STUDIO_ORG_SCOPE_PILLAR,
   STUDIO_ORG_SCOPE_SEGMENT,
   studioMetadataAreaPath,
+  studioPackagePath,
   useHomePath,
   useRecentItems,
 } from '@object-ui/app-shell';
@@ -76,9 +78,6 @@ const StudioDesignSurface = lazy(() =>
 );
 const BuilderLanding = lazy(() =>
   import('./studioBuilder').then((m) => ({ default: m.BuilderLanding })),
-);
-const StudioMetadataArea = lazy(() =>
-  import('./studioBuilder').then((m) => ({ default: m.StudioMetadataArea })),
 );
 
 /**
@@ -219,7 +218,7 @@ function StudioLanding() {
 }
 
 /**
- * The console frame `/studio` screens without a package draw (objectui#11863):
+ * The console frame the `/studio` landing draws (objectui#11863):
  * the console's own top bar in its `studio` variant and the command palette in
  * its `studio` scope, around a body that loads with its route.
  */
@@ -245,21 +244,6 @@ function StudioConsoleFrame({ children }: { children: ReactNode }) {
 }
 
 /**
- * objectstack#28561 — the "All metadata" area's cross-package leg
- * (`/studio/~all/metadata/*`, ADR-0146 D1): the environment catalog, served
- * with no package. No package means no pillars, no package switcher and no
- * package publish, so it is not the pillar builder: it is the area alone, in
- * the frame the landing draws, which it is entered from.
- */
-function StudioAllPackagesMetadata() {
-  return (
-    <StudioConsoleFrame>
-      <StudioMetadataArea packageId={null} />
-    </StudioConsoleFrame>
-  );
-}
-
-/**
  * A package's pillar builder, which records the visit as a recent `package`
  * entry (objectui#11863), so the landing can list the packages an author was
  * last in. `useTrackRouteAsRecent` reads `/apps/APP` routes only, and this
@@ -270,19 +254,19 @@ function StudioAllPackagesMetadata() {
  * which lands on the Data pillar — and no label: the landing labels it from the
  * package list it loads (objectui#11678's shape). Keyed on the package, not the
  * pillar, so moving between pillars of one package leaves the list as it is,
- * and the provider writes nothing. The package-less scope (`~org`) is not a
- * package and records nothing.
+ * and the provider writes nothing. The package-less scope (`~org`) and the
+ * cross-package leg (`~all`) are not packages and record nothing.
  */
 function StudioPackageBuilder({ area }: { area?: typeof STUDIO_METADATA_AREA }) {
   const { packageId } = useParams();
   const { addRecentItem } = useRecentItems();
   useEffect(() => {
-    if (!packageId || packageId === STUDIO_ORG_SCOPE_SEGMENT) return;
+    if (!packageId || packageId === STUDIO_ORG_SCOPE_SEGMENT || packageId === STUDIO_ALL_PACKAGES_SEGMENT) return;
     addRecentItem({
       id: `package:${packageId}`,
       type: 'package',
       name: packageId,
-      href: `/studio/${encodeURIComponent(packageId)}`,
+      href: studioPackagePath(packageId),
     });
     // Driven by the package alone. `addRecentItem` is a `useCallback` result,
     // whose identity is not a dependency (AGENTS.md #10), as in
@@ -307,8 +291,7 @@ function StudioPackageBuilder({ area }: { area?: typeof STUDIO_METADATA_AREA }) 
  *
  *   `/studio`                         front door (pick / create a writable package)
  *   `/studio/~org`                    the package-less scope lands on its one pillar
- *   `/studio/~all/metadata/*`         the "All metadata" area across packages
- *   `/studio/~all/*`                  lands on that area
+ *   `/studio/~all/*`                  lands on the "All metadata" area across packages
  *   `/studio/:packageId`              a package lands on its Data pillar
  *   `/studio/:packageId/metadata/*`   a package's "All metadata" area, in the builder
  *   `/studio/:packageId/:tab`         the pillar builder (a recent-package visit)
@@ -329,6 +312,15 @@ function StudioPackageBuilder({ area }: { area?: typeof STUDIO_METADATA_AREA }) 
  * cross-package segment (`metadataArea.ts` in app-shell says why it is not
  * `~org`); every `~all` URL outside the area lands on it, so none reaches the
  * pillar builder as a package id.
+ *
+ * objectstack#36899 — the cross-package leg (`/studio/~all/metadata/*`) is
+ * served by the generic area route, as `~org`'s pillar is by the generic pillar
+ * route: the SAME `StudioDesignSurface`, which reads `~all` as "no package"
+ * and draws the area alone, under the left menu every Studio page draws. It
+ * used to be the area in the landing's console frame, a second shell the
+ * author flipped into from the menu's Access group. The more specific
+ * `:packageId/metadata/*` outranks `~all/*` for an area URL; every other
+ * `~all` URL still lands on the area.
  */
 export const studioRoutes = (
   <Route path="/studio" element={<StudioRoute />}>
@@ -338,14 +330,10 @@ export const studioRoutes = (
       element={<Navigate to={STUDIO_ORG_SCOPE_PILLAR} replace />}
     />
     <Route
-      path={`${STUDIO_ALL_PACKAGES_SEGMENT}/${STUDIO_METADATA_AREA}/*`}
-      element={<StudioAllPackagesMetadata />}
-    />
-    <Route
       path={`${STUDIO_ALL_PACKAGES_SEGMENT}/*`}
       element={<Navigate to={studioMetadataAreaPath(STUDIO_ALL_PACKAGES_SEGMENT)} replace />}
     />
-    <Route path=":packageId" element={<Navigate to="data" replace />} />
+    <Route path=":packageId" element={<Navigate to={STUDIO_HOME_PILLAR} replace />} />
     <Route
       path={`:packageId/${STUDIO_METADATA_AREA}/*`}
       element={<StudioPackageBuilder area={STUDIO_METADATA_AREA} />}

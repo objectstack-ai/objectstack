@@ -54,7 +54,7 @@ import {
 } from 'react';
 import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import { createPortal } from 'react-dom';
-import { ChevronRight } from 'lucide-react';
+import { Bot, ChevronRight } from 'lucide-react';
 import {
   NavigationOverlay,
   type NavigationOverlayMode,
@@ -62,9 +62,11 @@ import {
   RecordHeaderBarContext,
   type RecordHeaderBar,
   ObjectIconTile,
+  RecordTopBarButton,
   Skeleton,
 } from '@object-ui/components';
 import type { FieldContainerLike } from '@object-ui/core';
+import { useChatDockControl } from '../layout/chatDockControl.js';
 import { useObjectLabel, useObjectTranslation } from '@object-ui/i18n';
 import { servedObjectLabel, servedObjectPluralLabel } from '../hooks/servedObjectLabel.js';
 import { prefetchRelatedCounts, relatedCountTargetsIn } from '@object-ui/plugin-detail/core';
@@ -517,6 +519,25 @@ export function RecordStackDrawer({
     () => (onOpenAsPage ? { openAsPage: () => onOpenAsPage(path) } : null),
     [onOpenAsPage, path],
   );
+  // objectstack#36998 — the drawer card sits over the right end of the
+  // console's top bar, where the assistant's one standing entry (the robot)
+  // is, and over the assistant's drawer. So the bar carries the entry itself,
+  // drawn where the robot is (a layout hosting the assistant hands a dock
+  // handle only while the runtime serves AI): it opens the record shown as
+  // its full page, as ⤢ does, then opens the assistant beside it.
+  const dock = useChatDockControl();
+  const assistantEntry = dock && pane ? (
+    <RecordTopBarButton
+      label={t('topbar.aiAssistant', { defaultValue: 'AI Assistant' })}
+      onClick={() => {
+        pane.openAsPage();
+        dock.open();
+      }}
+      data-testid="record-pane-open-assistant"
+    >
+      <Bot className="h-3.5 w-3.5" />
+    </RecordTopBarButton>
+  ) : null;
   // The bar's slot for the record's ⊟, and the titles the records drawn
   // reported, by level key: the breadcrumb names the record, and an ancestor
   // that was not opened with a title is still named by the one it reported.
@@ -643,7 +664,12 @@ export function RecordStackDrawer({
       actionSlotRef={setHeaderActionSlot}
       recordRow={recordRow}
       onExpand={pane ? () => pane.openAsPage() : undefined}
-      toggles={<span ref={setToggleSlot} className="contents" data-record-pane-toggles="" />}
+      toggles={
+        <>
+          <span ref={setToggleSlot} className="contents" data-record-pane-toggles="" />
+          {assistantEntry}
+        </>
+      }
     >
       {() => (
         <RecordDrawerContext.Provider value={api}>

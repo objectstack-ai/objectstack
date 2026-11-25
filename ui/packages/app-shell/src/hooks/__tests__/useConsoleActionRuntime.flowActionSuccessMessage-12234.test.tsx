@@ -127,7 +127,7 @@ describe('objectui#12234 — a paused action-door launch completes with the acti
     const result = await click(DECLARED);
 
     // The pause: silent, as ruled — no toast of either colour yet.
-    expect(result).toEqual({ success: true, silent: true, handedOff: true });
+    expect(result).toEqual({ success: true, silent: true, handedOff: true, paused: { runId: 'run-1' } });
     expect((toast as any).success).not.toHaveBeenCalled();
 
     await submitWith(COMPLETED);

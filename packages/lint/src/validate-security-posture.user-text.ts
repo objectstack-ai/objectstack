@@ -26,6 +26,7 @@
  * | `security-superuser-field-mask-inert` | `permissionSet`, `field`, `object`, `inert` (`read` · `edit` · `both`) |
  * | `security-controlled-by-parent-master-reference-hidden` | `permissionSet`, `field` |
  * | `security-update-policy-no-check` | `permissionSet`, `policy` |
+ * | `security-cross-set-field-reopen` | `permissionSet` (the set that hides the field), `otherSet` (the set that re-opens it), `field`, `object`, `bit` (`view-all` · `modify-all` · `view-all-fields`), `reopened` (`read` · `edit` · `both`) |
  * | `security-controlled-by-parent-owner-policy-without-opt-in` | `permissionSet`, `policy`, `object`, `remedy` (`allow-owner-edit` · `key-owner-id` · `add-owner-id`) |
  *
  * Names in a sentence are the API names the rule saw (`crm_deal`, `owner_id`),
@@ -43,6 +44,7 @@ import {
   SECURITY_BOOK_AUDIENCE_UNKNOWN_SET,
   SECURITY_CBP_MASTER_REFERENCE_HIDDEN,
   SECURITY_CBP_OWNER_POLICY_WITHOUT_OPT_IN,
+  SECURITY_CROSS_SET_FIELD_REOPEN,
   SECURITY_MASTER_DETAIL_UNGRANTED,
   SECURITY_PRIVATE_NO_READSCOPE,
   SECURITY_SUPERUSER_FIELD_MASK_INERT,
@@ -670,6 +672,123 @@ export const SECURITY_POSTURE_USER_TEXT: UserTextCatalog = Object.freeze({
           `"${p.object}"에 레코드 소유자(owner_id)를 추가하고 정책 조건으로 지정하거나, 이 정책을 삭제하세요.`,
       }),
   },
+  // [Field-axis split, ruling of record 6912661484, step 2] Each sentence
+  // names the two sets, the field and the bit (by its console label), says
+  // what a holder of both can still do with the field, and gives the two
+  // fixes the rule's hint leads with: remove the bit, or protect the field on
+  // the field itself (Required permissions, ADR-0066 D3).
+  [SECURITY_CROSS_SET_FIELD_REOPEN]: {
+    en: (p) =>
+      crossSetReopenSentence(p, 'en', (b) => {
+        const opens = `"${p.otherSet}" has ${b} on "${p.object}", which opens every field of that object.`;
+        const hidden = `Remove ${b} from "${p.otherSet}", or, if the field must stay hidden from everyone without a specific permission, set required permissions on the field itself.`;
+        return {
+          read: `Field "${p.field}" is hidden in permission set "${p.permissionSet}", but anyone who also holds permission set "${p.otherSet}" can still read it: ${opens} ${hidden}`,
+          edit: `Field "${p.field}" is read-only in permission set "${p.permissionSet}", but anyone who also holds permission set "${p.otherSet}" can still edit it: ${opens} Remove ${b} from "${p.otherSet}", or, if no one should edit the field without a specific permission, set required permissions on the field itself.`,
+          both: `Field "${p.field}" is hidden and read-only in permission set "${p.permissionSet}", but anyone who also holds permission set "${p.otherSet}" can still read and edit it: ${opens} ${hidden}`,
+        };
+      }),
+    'zh-Hans': (p) =>
+      crossSetReopenSentence(p, 'zh-Hans', (b) => {
+        const opens = `“${p.otherSet}”对“${p.object}”拥有“${b}”，会开放该对象的每个字段。`;
+        const hidden = `请从“${p.otherSet}”移除“${b}”；如果该字段必须对所有没有特定权限的人隐藏，请直接在字段上设置所需权限。`;
+        return {
+          read: `字段“${p.field}”在权限集“${p.permissionSet}”中被隐藏，但同时持有权限集“${p.otherSet}”的人仍能读取它：${opens}${hidden}`,
+          edit: `字段“${p.field}”在权限集“${p.permissionSet}”中是只读的，但同时持有权限集“${p.otherSet}”的人仍能编辑它：${opens}请从“${p.otherSet}”移除“${b}”；如果没有特定权限的人都不应编辑该字段，请直接在字段上设置所需权限。`,
+          both: `字段“${p.field}”在权限集“${p.permissionSet}”中被隐藏且为只读，但同时持有权限集“${p.otherSet}”的人仍能读取和编辑它：${opens}${hidden}`,
+        };
+      }),
+    'zh-Hant': (p) =>
+      crossSetReopenSentence(p, 'zh-Hant', (b) => {
+        const opens = `「${p.otherSet}」對「${p.object}」擁有「${b}」，會開放該物件的每個欄位。`;
+        const hidden = `請從「${p.otherSet}」移除「${b}」；如果該欄位必須對所有沒有特定權限的人隱藏，請直接在欄位上設定所需權限。`;
+        return {
+          read: `欄位「${p.field}」在權限集「${p.permissionSet}」中被隱藏，但同時持有權限集「${p.otherSet}」的人仍能讀取它：${opens}${hidden}`,
+          edit: `欄位「${p.field}」在權限集「${p.permissionSet}」中是只讀的，但同時持有權限集「${p.otherSet}」的人仍能編輯它：${opens}請從「${p.otherSet}」移除「${b}」；如果沒有特定權限的人都不應編輯該欄位，請直接在欄位上設定所需權限。`,
+          both: `欄位「${p.field}」在權限集「${p.permissionSet}」中被隱藏且為只讀，但同時持有權限集「${p.otherSet}」的人仍能讀取和編輯它：${opens}${hidden}`,
+        };
+      }),
+    es: (p) =>
+      crossSetReopenSentence(p, 'es', (b) => {
+        const opens = `"${p.otherSet}" tiene "${b}" sobre "${p.object}", que abre todos los campos de ese objeto.`;
+        const hidden = `Quite "${b}" de "${p.otherSet}" o, si el campo debe permanecer oculto para todos los que no tengan un permiso específico, defina los permisos requeridos en el propio campo.`;
+        return {
+          read: `El campo "${p.field}" está oculto en el conjunto de permisos "${p.permissionSet}", pero quien también tenga el conjunto de permisos "${p.otherSet}" aún puede leerlo: ${opens} ${hidden}`,
+          edit: `El campo "${p.field}" es de solo lectura en el conjunto de permisos "${p.permissionSet}", pero quien también tenga el conjunto de permisos "${p.otherSet}" aún puede editarlo: ${opens} Quite "${b}" de "${p.otherSet}" o, si nadie debe editar el campo sin un permiso específico, defina los permisos requeridos en el propio campo.`,
+          both: `El campo "${p.field}" está oculto y es de solo lectura en el conjunto de permisos "${p.permissionSet}", pero quien también tenga el conjunto de permisos "${p.otherSet}" aún puede leerlo y editarlo: ${opens} ${hidden}`,
+        };
+      }),
+    ar: (p) =>
+      crossSetReopenSentence(p, 'ar', (b) => {
+        const opens = `لدى "${p.otherSet}" الإذن "${b}" على "${p.object}"، وهو يفتح كل حقول هذا الكائن.`;
+        const hidden = `أزل "${b}" من "${p.otherSet}"، أو إذا كان يجب أن يبقى الحقل مخفيًا عن كل من لا يملك إذنًا محددًا، فحدّد الأذونات المطلوبة على الحقل نفسه.`;
+        return {
+          read: `الحقل "${p.field}" مخفي في مجموعة الأذونات "${p.permissionSet}"، لكن من يحمل أيضًا مجموعة الأذونات "${p.otherSet}" لا يزال يستطيع قراءته: ${opens} ${hidden}`,
+          edit: `الحقل "${p.field}" للقراءة فقط في مجموعة الأذونات "${p.permissionSet}"، لكن من يحمل أيضًا مجموعة الأذونات "${p.otherSet}" لا يزال يستطيع تعديله: ${opens} أزل "${b}" من "${p.otherSet}"، أو إذا كان لا ينبغي لأحد تعديل الحقل دون إذن محدد، فحدّد الأذونات المطلوبة على الحقل نفسه.`,
+          both: `الحقل "${p.field}" مخفي وللقراءة فقط في مجموعة الأذونات "${p.permissionSet}"، لكن من يحمل أيضًا مجموعة الأذونات "${p.otherSet}" لا يزال يستطيع قراءته وتعديله: ${opens} ${hidden}`,
+        };
+      }),
+    fr: (p) =>
+      crossSetReopenSentence(p, 'fr', (b) => {
+        const opens = `« ${p.otherSet} » dispose de « ${b} » sur « ${p.object} », ce qui ouvre tous les champs de cet objet.`;
+        const hidden = `Retirez « ${b} » de « ${p.otherSet} » ou, si le champ doit rester masqué pour toute personne sans autorisation spécifique, définissez les autorisations requises sur le champ lui-même.`;
+        return {
+          read: `Le champ « ${p.field} » est masqué dans l’ensemble d’autorisations « ${p.permissionSet} », mais quiconque détient aussi l’ensemble d’autorisations « ${p.otherSet} » peut encore le lire : ${opens} ${hidden}`,
+          edit: `Le champ « ${p.field} » est en lecture seule dans l’ensemble d’autorisations « ${p.permissionSet} », mais quiconque détient aussi l’ensemble d’autorisations « ${p.otherSet} » peut encore le modifier : ${opens} Retirez « ${b} » de « ${p.otherSet} » ou, si personne ne doit modifier le champ sans autorisation spécifique, définissez les autorisations requises sur le champ lui-même.`,
+          both: `Le champ « ${p.field} » est masqué et en lecture seule dans l’ensemble d’autorisations « ${p.permissionSet} », mais quiconque détient aussi l’ensemble d’autorisations « ${p.otherSet} » peut encore le lire et le modifier : ${opens} ${hidden}`,
+        };
+      }),
+    'pt-BR': (p) =>
+      crossSetReopenSentence(p, 'pt-BR', (b) => {
+        const opens = `"${p.otherSet}" tem "${b}" em "${p.object}", o que abre todos os campos desse objeto.`;
+        const hidden = `Remova "${b}" de "${p.otherSet}" ou, se o campo precisa ficar oculto para todos que não têm uma permissão específica, defina as permissões exigidas no próprio campo.`;
+        return {
+          read: `O campo "${p.field}" está oculto no conjunto de permissões "${p.permissionSet}", mas quem também tem o conjunto de permissões "${p.otherSet}" ainda pode lê-lo: ${opens} ${hidden}`,
+          edit: `O campo "${p.field}" é somente leitura no conjunto de permissões "${p.permissionSet}", mas quem também tem o conjunto de permissões "${p.otherSet}" ainda pode editá-lo: ${opens} Remova "${b}" de "${p.otherSet}" ou, se ninguém deve editar o campo sem uma permissão específica, defina as permissões exigidas no próprio campo.`,
+          both: `O campo "${p.field}" está oculto e é somente leitura no conjunto de permissões "${p.permissionSet}", mas quem também tem o conjunto de permissões "${p.otherSet}" ainda pode lê-lo e editá-lo: ${opens} ${hidden}`,
+        };
+      }),
+    ru: (p) =>
+      crossSetReopenSentence(p, 'ru', (b) => {
+        const opens = `у «${p.otherSet}» есть «${b}» для «${p.object}», что открывает все поля этого объекта.`;
+        const hidden = `Уберите «${b}» из «${p.otherSet}» или, если поле должно оставаться скрытым от всех, у кого нет определённого разрешения, задайте требуемые разрешения в самом поле.`;
+        return {
+          read: `Поле «${p.field}» скрыто в наборе разрешений «${p.permissionSet}», но тот, у кого есть ещё и набор разрешений «${p.otherSet}», по-прежнему может его читать: ${opens} ${hidden}`,
+          edit: `Поле «${p.field}» доступно только для чтения в наборе разрешений «${p.permissionSet}», но тот, у кого есть ещё и набор разрешений «${p.otherSet}», по-прежнему может его изменять: ${opens} Уберите «${b}» из «${p.otherSet}» или, если никто не должен изменять поле без определённого разрешения, задайте требуемые разрешения в самом поле.`,
+          both: `Поле «${p.field}» скрыто и доступно только для чтения в наборе разрешений «${p.permissionSet}», но тот, у кого есть ещё и набор разрешений «${p.otherSet}», по-прежнему может его читать и изменять: ${opens} ${hidden}`,
+        };
+      }),
+    de: (p) =>
+      crossSetReopenSentence(p, 'de', (b) => {
+        const opens = `„${p.otherSet}“ hat „${b}“ auf „${p.object}“, was jedes Feld dieses Objekts öffnet.`;
+        const hidden = `Entfernen Sie „${b}“ aus „${p.otherSet}“, oder legen Sie, wenn das Feld für alle ohne eine bestimmte Berechtigung verborgen bleiben muss, die erforderlichen Berechtigungen am Feld selbst fest.`;
+        return {
+          read: `Das Feld „${p.field}“ ist im Berechtigungssatz „${p.permissionSet}“ ausgeblendet, aber wer zusätzlich den Berechtigungssatz „${p.otherSet}“ hat, kann es weiterhin lesen: ${opens} ${hidden}`,
+          edit: `Das Feld „${p.field}“ ist im Berechtigungssatz „${p.permissionSet}“ schreibgeschützt, aber wer zusätzlich den Berechtigungssatz „${p.otherSet}“ hat, kann es weiterhin bearbeiten: ${opens} Entfernen Sie „${b}“ aus „${p.otherSet}“, oder legen Sie, wenn niemand das Feld ohne eine bestimmte Berechtigung bearbeiten darf, die erforderlichen Berechtigungen am Feld selbst fest.`,
+          both: `Das Feld „${p.field}“ ist im Berechtigungssatz „${p.permissionSet}“ ausgeblendet und schreibgeschützt, aber wer zusätzlich den Berechtigungssatz „${p.otherSet}“ hat, kann es weiterhin lesen und bearbeiten: ${opens} ${hidden}`,
+        };
+      }),
+    ja: (p) =>
+      crossSetReopenSentence(p, 'ja', (b) => {
+        const opens = `「${p.otherSet}」は「${p.object}」に対して「${b}」を持ち、このオブジェクトのすべてのフィールドを開くためです。`;
+        const hidden = `「${p.otherSet}」から「${b}」を外すか、特定の権限を持たない全員からこのフィールドを隠す必要がある場合は、フィールド自体に必要な権限を設定してください。`;
+        return {
+          read: `フィールド「${p.field}」は権限セット「${p.permissionSet}」で非表示になっていますが、権限セット「${p.otherSet}」も持つユーザーは引き続き読み取れます。${opens}${hidden}`,
+          edit: `フィールド「${p.field}」は権限セット「${p.permissionSet}」で読み取り専用ですが、権限セット「${p.otherSet}」も持つユーザーは引き続き編集できます。${opens}「${p.otherSet}」から「${b}」を外すか、特定の権限なしに誰もこのフィールドを編集すべきでない場合は、フィールド自体に必要な権限を設定してください。`,
+          both: `フィールド「${p.field}」は権限セット「${p.permissionSet}」で非表示かつ読み取り専用ですが、権限セット「${p.otherSet}」も持つユーザーは引き続き読み取りと編集ができます。${opens}${hidden}`,
+        };
+      }),
+    ko: (p) =>
+      crossSetReopenSentence(p, 'ko', (b) => {
+        const opens = `"${p.otherSet}"이(가) "${p.object}"에 대해 "${b}"을(를) 가지고 있어 이 개체의 모든 필드를 열기 때문입니다.`;
+        const hidden = `"${p.otherSet}"에서 "${b}"을(를) 제거하거나, 특정 권한이 없는 모든 사람에게 이 필드를 계속 숨겨야 한다면 필드 자체에 필요한 권한을 설정하세요.`;
+        return {
+          read: `필드 "${p.field}"은(는) 권한 세트 "${p.permissionSet}"에서 숨겨져 있지만, 권한 세트 "${p.otherSet}"도 보유한 사람은 여전히 이 필드를 읽을 수 있습니다. ${opens} ${hidden}`,
+          edit: `필드 "${p.field}"은(는) 권한 세트 "${p.permissionSet}"에서 읽기 전용이지만, 권한 세트 "${p.otherSet}"도 보유한 사람은 여전히 이 필드를 편집할 수 있습니다. ${opens} "${p.otherSet}"에서 "${b}"을(를) 제거하거나, 특정 권한 없이는 아무도 이 필드를 편집하면 안 된다면 필드 자체에 필요한 권한을 설정하세요.`,
+          both: `필드 "${p.field}"은(는) 권한 세트 "${p.permissionSet}"에서 숨겨져 있고 읽기 전용이지만, 권한 세트 "${p.otherSet}"도 보유한 사람은 여전히 이 필드를 읽고 편집할 수 있습니다. ${opens} ${hidden}`,
+        };
+      }),
+  },
 });
 
 /**
@@ -699,4 +818,61 @@ type FieldMaskInert = 'read' | 'edit' | 'both';
 function fieldMaskSentence(p: UserTextParams, sentences: Readonly<Record<FieldMaskInert, string>>): string {
   if (p.inert === 'read' || p.inert === 'edit' || p.inert === 'both') return sentences[p.inert];
   return sentences.both;
+}
+
+/**
+ * The console's own label for each object-wide bit that
+ * `security-cross-set-field-reopen` reports, per locale; Modify All reuses
+ * {@link MODIFY_ALL_LABEL}. Translated where the console translates its own
+ * labels, kept as the console's English label elsewhere, as Modify All is.
+ */
+const VIEW_ALL_LABEL: Readonly<Record<keyof typeof MODIFY_ALL_LABEL, string>> = {
+  en: 'View All Records',
+  'zh-Hans': '查看所有记录',
+  'zh-Hant': '查看所有記錄',
+  es: 'View All Records',
+  ar: 'View All Records',
+  fr: 'View All Records',
+  'pt-BR': 'View All Records',
+  ru: 'View All Records',
+  de: 'View All Records',
+  ja: 'View All Records',
+  ko: 'View All Records',
+};
+
+const VIEW_ALL_FIELDS_LABEL: Readonly<Record<keyof typeof MODIFY_ALL_LABEL, string>> = {
+  en: 'View All Fields',
+  'zh-Hans': '查看所有字段',
+  'zh-Hant': '查看所有欄位',
+  es: 'View All Fields',
+  ar: 'View All Fields',
+  fr: 'View All Fields',
+  'pt-BR': 'View All Fields',
+  ru: 'View All Fields',
+  de: 'View All Fields',
+  ja: 'View All Fields',
+  ko: 'View All Fields',
+};
+
+/**
+ * The sentence of `security-cross-set-field-reopen`, by the two params its
+ * push site sets: `bit` picks the label of the second set's bit, `reopened`
+ * the half of the first set's restriction it re-opens (View All and View All
+ * Fields re-open only a hidden field; Modify All also an edit lock). A
+ * `reopened` the push site did not set reads as `read`, the half every one of
+ * the three bits re-opens; a `bit` it did not set reads as View All Records.
+ */
+function crossSetReopenSentence(
+  p: UserTextParams,
+  locale: keyof typeof MODIFY_ALL_LABEL,
+  sentences: (bitLabel: string) => Readonly<Record<FieldMaskInert, string>>,
+): string {
+  const label =
+    p.bit === 'modify-all'
+      ? modifyAllLabel(locale)
+      : p.bit === 'view-all-fields'
+        ? VIEW_ALL_FIELDS_LABEL[locale]
+        : VIEW_ALL_LABEL[locale];
+  const byHalf = sentences(label);
+  return p.reopened === 'edit' || p.reopened === 'both' ? byHalf[p.reopened] : byHalf.read;
 }

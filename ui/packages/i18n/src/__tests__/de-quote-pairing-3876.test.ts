@@ -483,7 +483,14 @@ describe('objectui#3876 — de pack closes „ with “ and not with a straight 
     // 133 once objectstack-ai/objectstack#36692 retired the design mode's
     // new-report flow, and with it `designMode.menu.newReportLeft` („{{name}}“)
     // — one interpolated span fewer.
-    expect(okSpans, 'correctly paired spans').toBe(133);
+    // 134 once objectstack-ai/objectstack#35399 added `console.assignedWork.ownerKept`,
+    // the ban dialog's line naming the action that is off („Besitzer ändern“) —
+    // one literal span.
+    // 132 once objectstack-ai/objectstack#36739 folded the first-run
+    // checklist's name, language, timezone and currency rows into one
+    // `organizationBasics` row: the old `organizationName.todo` („{{name}}“)
+    // and `timezone.todo` („heute“) lines went with them, two spans fewer.
+    expect(okSpans, 'correctly paired spans').toBe(132);
   });
 
   it('keeps the count identity that replaces the card’s count(„) === count(“)', () => {
@@ -622,7 +629,10 @@ describe('objectui#3876 — de pack closes „ with “ and not with a straight 
     // mode „Layout gestalten“ in `empty.appMenuEmptyDescription`, one more pair.
     // 133 / 133 / 0 after objectstack-ai/objectstack#36692 retired
     // `designMode.menu.newReportLeft`, one matched pair fewer.
-    expect({ open, close, rdq }).toEqual({ open: 133, close: 133, rdq: 0 });
+    // 134 / 134 / 0 after objectstack-ai/objectstack#35399 added `console.assignedWork.ownerKept`.
+    // 132 / 132 / 0 after objectstack-ai/objectstack#36739 removed the
+    // checklist's `organizationName.todo` and `timezone.todo`, two pairs fewer.
+    expect({ open, close, rdq }).toEqual({ open: 132, close: 132, rdq: 0 });
     // The durable shape: every „ closed by a “, every surplus “ an English
     // opener answered by a ”. Survived translating the two English values.
     expect(close).toBe(open + rdq);

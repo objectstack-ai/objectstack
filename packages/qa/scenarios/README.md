@@ -196,7 +196,7 @@ discrimination test; ⛔ never match by area prefix.
 | Tag | Passes when the built artifact… |
 |:---|:---|
 | `records-forms.lookup` | carries a lookup field, and every lookup field resolves to an object the build or the platform serves |
-| `records-forms.master-detail-inline-edit` | has every master-detail field resolving, and one of them edited inline on its master (`inlineEdit`) |
+| `records-forms.master-detail-inline-edit` | has every master-detail field resolving, and one of them edited inline on its master: a field group of the master places the child (`fieldGroups[].relatedList`) |
 | `records-forms.roll-up-summary` | carries a roll-up summary, each reading a child object that relates back and, unless it counts, a child field that exists |
 | `records-forms.select-options` | carries a single-choice option field (`select`, `radio`), each offering at least two options |
 | `records-forms.formula-field` | carries a computed field (a `formula` field, or a stored field with an `expression`), each expression compiling at `record` scope against its object's columns |

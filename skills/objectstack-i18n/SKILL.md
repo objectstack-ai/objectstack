@@ -22,8 +22,6 @@ metadata:
 
 ### Stack-Level I18n Config
 
-Configure i18n settings in your `objectstack.config.ts`:
-
 <!-- os:check -->
 ```typescript
 import { defineStack } from '@objectstack/spec';
@@ -160,11 +158,12 @@ All translatable content for a single object is aggregated under
 | Sub-key | Holds |
 |:--------|:------|
 | `label` / `pluralLabel` / `description` | Object-level text (every key optional) |
-| `fields.{field_name}` | `label`, `help`, `placeholder`, `options` (option value → label), `inlineTitle` (the heading of the inline child grid a `master_detail` field draws on its parent's form — the field lives on the child object, so the key is the child's; untranslated it keeps its authored text, never the child's plural label), `relatedListTitle` (the title of the related list a `lookup` or `master_detail` field draws on its parent's record page — the key is the child's too; untranslated it keeps its authored text, never the child's label) per field |
+| `fields.{field_name}` | `label`, `help`, `placeholder`, `options` (option value → label), `inlineTitle` (the heading of the inline child grid a `master_detail` field draws on its parent's form — the field lives on the child object, so the key is the child's; untranslated it keeps its authored text, never the child's plural label), `relatedListTitle` (likewise, the title of the related list a `lookup` or `master_detail` field draws on its parent's record page) per field |
 | `_views.{view_name}` | `label`, `description`, `title` (a form view's own heading — only a form that authors one is translated; a list view has none), `submitBehavior.title` / `submitBehavior.message` (the thank-you panel of a form whose `submitBehavior` is `kind: 'thank-you'`; only the copy the form authors is translated, and the other kinds carry none), `emptyState.title` / `emptyState.message`, `bulkActions.{def_name}` (`label`, `confirmText`, `confirmLabel`, `params`) |
 | `_actions.{action_name}` | `label`, `description`, `confirmText`, `submitText` (the param dialog's button verb — only under an action that declares `params`), `cancelText` (the dismiss button of the confirm or param dialog — only under an action that declares `confirmText` or a non-empty `params`), `successMessage`, `disabledReason` (the sentence a greyed action shows; absent keeps the console's default), `params.{param_name}` (and `.options.{value}` beneath it — an option's stored `value` in that param's inline `options`), `outcomeMessages.{outcome}` (an outcome the action's own `outcomeMessages` declares), `resultDialog.title` / `.description` / `.acknowledge` (only under an action that declares a `resultDialog`), `resultDialog.fields.{path}` (the literal `path` of a field in `resultDialog.fields[]`, dots included — `client.secret` is one key), `preflight.fields.{path}` (only under an action that declares `preflight`: a field's literal `path` in its `preflight.fields[]`, its value a plain string as under `resultDialog.fields`), `resultDialog.columns.{path}.{column_path}` / `preflight.columns.{path}.{column_path}` (a table's column headers, beside `fields`: the literal `path` of a `format: 'table'` field, then of one of its `columns[]`, each a plain string; `defineTranslationBundle` refuses any other key under `preflight`, a `title` included); the same keys hold under `globalActions.{action_name}` |
 | `_sections.{section_name}` | Form section `label`, `description`; `fields.{field_name}` — the `label`, `placeholder`, `helpText` an entry overrides for that form alone (`helpText` here, `help` under `fields.{field_name}` above: each spells what its source does) |
 | `_tabs.{tab_name}` | Filter-preset tab `label` (`ViewTabSchema.name`) |
+| `_relatedLists.{list}` | `label` of an object-form `relatedLists` entry on this (parent) object, by its literal `list` (`event.related_to` is one key); an entry with no `label` has no key and keeps the child field's `relatedListTitle`, else the child's plural label. Spelled `relatedLists`, the group is refused, naming this one |
 | `_validations.{rule_name}` | `message` only — the sentence a rejected write returns (replaces the retired `validationMessages`) |
 | `_actions.{action_name}.refusals.{CODE}` | `message`, and `reasons.{reason}.message` per declared reason — the sentences of the action's `refusals` catalogue (**objectstack-ui** → Actions), for a code and reason it declares (any other is `translation-target-unknown`); the same under `globalActions.{action_name}` |
 
@@ -183,16 +182,21 @@ book once carried stays retired), `mappings` (an import mapping's `label` by its
 `datasets.{dataset}.{dimensions,measures}.{member}` (a member's `synonyms` have no key: one
 authored list carries every language), and a joined report's block headings sit at
 `reports.{report}.blocks.{block_name}.{label,description}`, keyed by the block's required `name`.
-Three keys sit deeper than their group's `label`: a `page:tabs` item at
+Four keys sit deeper than their group's `label`: a `page:tabs` item at
 `pages.{page}.components.{tabs_id}.items.{value}.label` (by the item's `value`; an item without
-one has no key), an approval step at `flows.{flow}.approvals.{node_id}.label`, and the text a
+one has no key), an approval step at `flows.{flow}.approvals.{node_id}.label`, any other step's
+name at `flows.{flow}.nodes.{node_id}.label` (a screen is named by its heading,
+`flows.{flow}.screens.{node_id}.title`, and takes a `nodes` key only beside a `title` of its own;
+`os i18n check` asks for a flow's top-level steps, and for one of `FLOW_TECHNICAL_NODE_TYPES` —
+`script`, `http`, `connector_action`, `assignment`, `boundary_event`, the four `*_record` types —
+only where a decision's branch leads to it), and the text a
 `create_record` / `update_record` writes into a field marked `{ dialect: 'template', source }` at
 `flows.{flow}.records.{node_id}.fields.{field}`. That text, and each sentence a hook or a `script`
 action declares in `texts` and writes through `ctx.text` — `hooks.{hook}.texts.{key}.message`,
 `_actions.{action_name}.texts.{key}.message` (also under `globalActions`) — is picked in the
 organization's language (the Localization setting if set, else `i18n.defaultLocale`; never the caller's).
 `os i18n extract --no-objects-only` scaffolds every group above but `messages` and
-`settingsCommon`, all three keys included. The `inlineTitle`, report-block, table-column and
+`settingsCommon`, all four keys included. The `inlineTitle`, report-block, table-column and
 mapping keys, as the shipped `app-crm`, `app-showcase` and platform bundles spell them for `zh-CN`
 (`rows` is the table field's `path`, `error.message` one column's):
 
@@ -250,13 +254,13 @@ directory tree for you.
 |:--|:--|:--|
 | Bundled | one `crm.translation.ts` holding every locale | under 5 objects, 2-3 locales |
 | Per-locale (recommended) | `src/translations/{en,zh-CN,ja-JP}.ts` + `index.ts` | 5-20 objects, 3-5 locales |
-| Per-namespace | `i18n/{locale}/{object}.json`, assembled by your own imports | 20+ objects, 5+ locales |
+| Per-namespace | `i18n/{locale}/{object}.json` | 20+ objects, 5+ locales |
 
 ---
 
 ## Authoring at Runtime: the `translation` Item
 
-Translations do not have to ship as files. A **`translation` metadata item** — created in
+A **`translation` metadata item** — created in
 the Studio, through the metadata API, or by an agent — carries one locale's worth of the
 **same** `objects.*` groups documented above plus the `locale` it translates. `locale` is
 required, one locale per item, and published items load at boot and on every publish,
@@ -271,7 +275,7 @@ exact Zod shape is `TranslationItemSchema` in
 
 ### Simple Format (Default)
 
-Both shipped adapters (`FileI18nAdapter` and the in-memory fallback) substitute
+Both shipped adapters substitute
 **double-brace** `{{variable}}` placeholders only — single braces pass through
 unchanged. (The schema docstring mentions `{variable}` notation, but that is not
 what the runtime implements.)
@@ -295,8 +299,6 @@ was removed). To pluralize, select the form in application code before calling `
 ## Translation Coverage
 
 ### `os i18n check`
-
-The working coverage path is the CLI:
 
 ```bash
 os i18n check                          # every locale found in the config
@@ -324,15 +326,11 @@ os i18n extract <config> --locales=zh-CN,ja-JP --fill=default \
 fails if that differs from what is committed in `--out`, naming each stale or
 missing file and printing the regenerate command.
 
-**Use both gates — they answer different questions.** `os i18n check` asks *are
-the strings translated?* (coverage: human work). `extract --check` asks *are the
-generated bundles still what the schema produces?* (freshness: machine output).
-Renaming a label or removing a spec key leaves coverage at 100% while bundles go
-stale — how the platform's own ended up translating keys the schema had deleted.
+**Use both gates:** renaming a label or removing a spec key leaves coverage at
+100% while the bundles go stale.
 
 It runs in the same **merge mode** as a normal extract, so it never asks for
-re-translation: an up-to-date bundle re-extracts byte-identically. Requires
-`--out` — there is nothing to compare against without it.
+re-translation: an up-to-date bundle re-extracts byte-identically. Requires `--out`.
 
 ### Diff & Coverage Schemas
 
@@ -414,8 +412,6 @@ produced; a client renders it as received.
 
 ### 1. Extract Skeletons from Metadata
 
-Scaffold ready-to-edit translation files from your stack config:
-
 ```bash
 os i18n extract --locales=zh-CN --out=./src/translations
 ```
@@ -433,9 +429,8 @@ the rest: `--filter`, `--no-merge`, `--dry-run`, `--json`, …
 
 ### 2. Register
 
-A stack registers its bundles with `defineStack({ translations: [...] })`. A **package or
-plugin shipping its own generated bundle** — the most common shape in this repo — has one
-more step: a generated module exports an objects *subtree*
+A **package or plugin shipping its own generated bundle** has one more step than
+`defineStack({ translations: [...] })`: a generated module exports an objects *subtree*
 (`NonNullable<TranslationData['objects']>`), not a `TranslationData`, so it must be
 wrapped before it is a bundle at all.
 
