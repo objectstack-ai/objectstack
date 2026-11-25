@@ -7,13 +7,45 @@ import { lazySchema } from '../shared/lazy-schema';
  * Knowledge Document / Chunk / Hit — canonical shapes shared by every
  * `IKnowledgeAdapter` implementation.
  *
- * The framework does **not** prescribe chunk strategy or vector
- * format. Adapters are free to chunk however they like; the framework
- * only requires they round-trip these shapes when talking to the
- * `IKnowledgeService`.
+ * The knowledge service owns the structural split (ADR-0161 K1): it cuts a
+ * document into passages once, by the source's `split` key, and hands the
+ * passages to every adapter that declares `capabilities.chunks` as the
+ * document's `chunks`. An adapter that does not declare it receives whole
+ * documents and splits them itself. The framework never sees a vector.
  *
  * See `content/docs/protocol/knowledge.mdx` for the full design.
  */
+
+/**
+ * One passage of a document, cut by the knowledge service's splitter
+ * (ADR-0161 K8, item 5) and handed to an adapter that declares
+ * `capabilities.chunks`, as `KnowledgeDocument.chunks`. The adapter embeds and
+ * stores each chunk's `content` as given; it does not split a chunk again.
+ */
+export const KnowledgeChunkSchema = lazySchema(() => z.object({
+  /**
+   * Chunk id, set by the service to `${documentId}#${index}`, so a hit's
+   * `chunkId` is the same on every adapter.
+   */
+  id: z.string(),
+  /** Owning document. */
+  documentId: z.string(),
+  /** Index within the document (0-based). */
+  index: z.number().int().nonnegative(),
+  /**
+   * Chunk text: the text the adapter embeds and returns as a snippet. Under
+   * the `markdown` strategy it begins with the chunk's heading path.
+   */
+  content: z.string(),
+  /**
+   * The headings the chunk sits under, outermost first (the `markdown`
+   * strategy). Absent when the strategy reads no headings.
+   */
+  headingPath: z.array(z.string()).optional()
+    .describe('Headings the chunk sits under, outermost first (markdown strategy)'),
+  /** Optional metadata override (falls back to the document's). */
+  metadata: z.record(z.string(), z.unknown()).optional(),
+}));
 
 /**
  * One logical document submitted to an adapter for indexing.
@@ -59,24 +91,15 @@ export const KnowledgeDocumentSchema = lazySchema(() => z.object({
    */
   docHash: z.string().optional()
     .describe('Service-computed hash of the assembled document (content, title, metadata); stored and returned as stored by the adapter'),
-}));
-
-/**
- * Adapter-produced chunk of a document. The framework never sees the
- * vector — only the chunk text + metadata. Used for upserts that
- * pre-chunk on the caller side (rare; most adapters chunk internally).
- */
-export const KnowledgeChunkSchema = lazySchema(() => z.object({
-  /** Chunk id (typically `${documentId}#${index}`). */
-  id: z.string(),
-  /** Owning document. */
-  documentId: z.string(),
-  /** Index within the document (0-based). */
-  index: z.number().int().nonnegative(),
-  /** Chunk text. */
-  content: z.string(),
-  /** Optional metadata override (falls back to the document's). */
-  metadata: z.record(z.string(), z.unknown()).optional(),
+  /**
+   * The document's passages, cut by the knowledge service's splitter
+   * (ADR-0161 K8, item 5). Set by the service, and only on a document handed
+   * to an adapter that declares `capabilities.chunks`; a caller-supplied value
+   * is refused by `indexDocument`. Derived from `content`, so it is not part
+   * of `docHash`. An adapter that receives it indexes these passages as given.
+   */
+  chunks: z.array(KnowledgeChunkSchema).optional()
+    .describe('Service-cut passages of the document, handed to an adapter that declares capabilities.chunks'),
 }));
 
 /**

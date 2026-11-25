@@ -15,9 +15,11 @@ import type { KnowledgeSource } from '../ai/knowledge-source.zod';
  * registered with the host's `IKnowledgeService` via
  * `registerAdapter(id, this)` during the plugin's `start()` hook.
  *
- * The surface is **deliberately minimal**: no chunk strategy, no
- * embedding configuration, no rerank toggles. Adapters that need
- * extra knobs expose them via their plugin options object.
+ * The contract carries what an adapter REPORTS, never how it is configured
+ * (ADR-0161 K8, rule 4): no embedding configuration, no rerank toggles.
+ * Adapters that need extra knobs expose them via their plugin options
+ * object. The split belongs to the service (ADR-0161 K1): an adapter that
+ * declares `capabilities.chunks` receives the service's passages.
  *
  * See `content/docs/protocol/knowledge.mdx`.
  */
@@ -83,6 +85,40 @@ export interface AdapterListDocumentsPage {
 }
 
 /**
+ * What an adapter declares it accepts beyond whole documents (ADR-0161 K8,
+ * item 5). A method that is absent is the capability signal for everything
+ * else; this covers what a method cannot say.
+ */
+export interface AdapterCapabilities {
+  /**
+   * `true`: the adapter accepts the service's passages. Every document the
+   * service hands it carries `chunks`, cut once by the service's splitter,
+   * and the adapter indexes those passages as given — it does not split
+   * them again. Absent or `false`: it receives whole documents, without
+   * `chunks`, and splits them itself.
+   */
+  chunks?: boolean;
+}
+
+/**
+ * What an adapter reports about the embedder it calls (ADR-0161 K8, item 6).
+ * A report, not configuration. The service reads it each time it needs it
+ * and never keeps an answer taken during `init`, because the embedder may
+ * register later — so an adapter that resolves its embedder late serves it
+ * from a getter.
+ */
+export interface AdapterEmbeddingDescriptor {
+  /**
+   * Longest single input the adapter's embedder accepts, in tokens
+   * (`IEmbedder.maxInputTokens`). The service's splitter keeps every passage
+   * within 80% of it by the shared `estimateTokens`, and removes and reports
+   * a `whole` document over that budget. Absent: no limit is known, and none
+   * is checked.
+   */
+  maxInputTokens?: number;
+}
+
+/**
  * Plugin-implemented adapter. **One per backend**. Stateless across
  * source ids — the source is supplied per-call.
  *
@@ -95,6 +131,18 @@ export interface AdapterListDocumentsPage {
 export interface IKnowledgeAdapter {
   /** Stable adapter id used in `KnowledgeSource.adapter`. */
   readonly id: string;
+
+  /**
+   * What the adapter accepts beyond whole documents (ADR-0161 K8, item 5).
+   * Absent: whole documents only.
+   */
+  readonly capabilities?: AdapterCapabilities;
+
+  /**
+   * What the adapter reports about the embedder it calls (ADR-0161 K8,
+   * item 6). Read by the service at use, never cached from `init`.
+   */
+  readonly embedding?: AdapterEmbeddingDescriptor;
 
   /** Insert or replace documents in the adapter's backend. */
   upsert(docs: KnowledgeDocument[], ctx: AdapterContext): Promise<void>;

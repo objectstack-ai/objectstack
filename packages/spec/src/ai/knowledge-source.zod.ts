@@ -55,6 +55,51 @@ export const KnowledgeRefreshPolicySchema = lazySchema(() => z.object({
   ),
 }));
 
+/** The split strategies of the knowledge service's splitter (ADR-0161 K8, item 10). */
+export const KnowledgeSplitStrategySchema = lazySchema(() => z.enum(['whole', 'recursive', 'markdown']));
+
+/**
+ * How the knowledge service cuts this source's documents into passages
+ * (ADR-0161 K8, item 10). Read by the service's splitter, which hands the
+ * passages to an adapter that declares `capabilities.chunks`; an adapter
+ * that does not declare it receives whole documents and this key does not
+ * apply to it.
+ *
+ * - `whole` — one passage per document. A document whose token estimate is
+ *   over the embedder's input budget is removed from the index and reported,
+ *   never truncated.
+ * - `recursive` — cut at blank lines, then line breaks, then sentence ends
+ *   (`。？！`, and `. ? !` only before whitespace or the end of the text), then
+ *   semicolons, then characters, never inside a Markdown table or list item
+ *   while it fits; adjacent short pieces are merged up to `minChars`.
+ * - `markdown` — one section per heading; each passage carries its heading
+ *   path, which counts toward its length and is embedded with it.
+ *
+ * The effective `maxChars` is the smaller of this value (or the settings
+ * page's `knowledge.chunk_target`, or 800) and what fits in 80% of the
+ * embedder's input limit by the shared token estimate.
+ */
+export const KnowledgeSplitSchema = lazySchema(() => z.object({
+  /** Which splitter strategy cuts the documents. */
+  strategy: KnowledgeSplitStrategySchema.describe('Split strategy: whole, recursive or markdown'),
+  /**
+   * Longest passage, in characters. Wins over the settings page's
+   * `knowledge.chunk_target`; the embedder's input limit can lower it.
+   * Not read by `whole`.
+   */
+  maxChars: z.number().int().positive().optional()
+    .describe('Longest passage in characters; wins over the settings default, the embedder limit can lower it'),
+  /**
+   * Adjacent pieces shorter than this are merged, up to this length
+   * (`recursive` and `markdown`). Not above `maxChars`. @default 200
+   */
+  minChars: z.number().int().nonnegative().optional()
+    .describe('Adjacent pieces shorter than this are merged up to it (default 200); not above maxChars'),
+}).refine(
+  (split) => split.maxChars === undefined || split.minChars === undefined || split.minChars <= split.maxChars,
+  { message: 'split.minChars must not be above split.maxChars', path: ['minChars'] },
+));
+
 /** Source backed by an ObjectQL object — each record becomes a document. */
 export const ObjectKnowledgeSourceSchema = lazySchema(() => z.object({
   kind: z.literal('object'),
@@ -75,6 +120,13 @@ export const ObjectKnowledgeSourceSchema = lazySchema(() => z.object({
    * Uses ObjectQL `where` syntax.
    */
   where: z.record(z.string(), z.unknown()).optional(),
+  /**
+   * How the knowledge service cuts this object's documents into passages
+   * ({@link KnowledgeSplitSchema}). Omitted ⇒ `recursive` with the settings
+   * page's `knowledge.chunk_target` (or 800) as `maxChars`.
+   */
+  split: KnowledgeSplitSchema.optional()
+    .describe('How the service cuts this object\'s documents into passages; omitted means recursive'),
 }));
 
 /** Source backed by a folder in `IStorageService`. */
@@ -163,6 +215,8 @@ export const KnowledgeSourceSchema = lazySchema(() => z.object({
 export type KnowledgeRefreshPolicy = z.input<typeof KnowledgeRefreshPolicySchema>;
 /** Post-parse shape of {@link KnowledgeRefreshPolicy} — defaults applied, transforms run (ADR-0122): `cron` is the `{ dialect: 'cron', source }` envelope. */
 export type KnowledgeRefreshPolicyParsed = z.infer<typeof KnowledgeRefreshPolicySchema>;
+export type KnowledgeSplitStrategy = z.input<typeof KnowledgeSplitStrategySchema>;
+export type KnowledgeSplit = z.input<typeof KnowledgeSplitSchema>;
 export type ObjectKnowledgeSource = z.input<typeof ObjectKnowledgeSourceSchema>;
 export type FileKnowledgeSource = z.input<typeof FileKnowledgeSourceSchema>;
 export type HttpKnowledgeSource = z.input<typeof HttpKnowledgeSourceSchema>;

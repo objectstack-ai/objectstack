@@ -82,6 +82,19 @@ export interface KnowledgeReindexResult {
    * implementation that predates the field.
    */
   purged?: number | null;
+  /**
+   * Documents removed from the index instead of written, because they cannot
+   * be indexed as the source's split asks — today a `whole` document whose
+   * token estimate is over the embedder's input budget, which is never
+   * truncated. `0` when none was. Absent from a result of an implementation
+   * that predates the field.
+   */
+  failed?: number;
+  /**
+   * Which documents those were and why, in walk order, bounded by the
+   * service (`failed` counts them all). Absent when `failed` is absent.
+   */
+  failures?: Array<{ documentId: string; reason: string }>;
 }
 
 /**
