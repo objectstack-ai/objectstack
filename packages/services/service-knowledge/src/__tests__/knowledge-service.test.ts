@@ -1727,7 +1727,12 @@ describe('KnowledgeService — record-level search (granularity, groupBy, freshn
     const matches = (row: Row, where: Record<string, unknown> | undefined): boolean =>
       Object.entries(where ?? {}).every(([k, v]) => {
         if (k === '$and') return (v as Record<string, unknown>[]).every((w) => matches(row, w));
-        if (v !== null && typeof v === 'object' && '$in' in (v as object)) return (v as { $in: string[] }).$in.includes(row[k] as string);
+        if (k.startsWith('$')) throw new Error(`tableEngine: combinator ${k} is not implemented`);
+        if (v !== null && typeof v === 'object') {
+          const ops = Object.keys(v as object);
+          if (ops.length !== 1 || ops[0] !== '$in') throw new Error(`tableEngine: condition ${JSON.stringify(v)} is not implemented`);
+          return (v as { $in: string[] }).$in.includes(row[k] as string);
+        }
         return row[k] === v;
       });
     const find = vi.fn(async (_obj: string, q: { where?: Record<string, unknown>; fields?: string[]; context?: { isSystem?: boolean } }, o?: { context?: { isSystem?: boolean } }) => {
