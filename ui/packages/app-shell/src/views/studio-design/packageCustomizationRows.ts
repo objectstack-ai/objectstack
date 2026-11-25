@@ -20,8 +20,10 @@
  *
  * `contributions` (what OTHER packages bring to the app) are not this
  * deployment's changes and make no row. Nothing is folded or deduped, so the
- * rows match the counts {@link customizedCountOf} reads: every served list's
- * length.
+ * rows match the served counts: every served list's length. The section's
+ * "customized" count is `customizationTotal` (overrides + extensions, the one
+ * meaning every surface reads, objectstack#37236); arrangements are counted
+ * apart, under their own word.
  *
  * The answer carries names, not labels. A row's label is read from the app's
  * own published list of that type (one list per type that has rows); a
@@ -62,16 +64,6 @@ export interface CustomizationRow {
   labelKey: string;
   /** Where the row opens in Studio. */
   href: string;
-}
-
-/**
- * objectstack#36833 — what "customized" counts: every change the pair makes,
- * the served overrides, extensions AND arrangements. A package whose only
- * change is a tab arrangement is customized; the Studio home's count left the
- * arrangements out.
- */
-export function customizedCountOf({ counts }: Pick<PackageCustomizations, 'counts'>): number {
-  return counts.overrides + counts.extensions + counts.arrangements;
 }
 
 /** The address of one item on an app's metadata area; a pillar type opens its pillar from there. */

@@ -2505,6 +2505,7 @@ const ko = {
       unavailableTitle: "AI 어시스턴트를 사용할 수 없습니다",
       unavailableDescription: "이 배포에는 AI 어시스턴트가 활성화되어 있지 않습니다. 나머지 기능은 정상적으로 작동합니다.",
       unavailableError: "AI 서비스에 연결할 수 없습니다. 일시적으로 오프라인일 수 있습니다 — 다시 시도하거나 홈으로 돌아가세요.",
+      unavailableErrorDesktop: "AI 서비스에 연결할 수 없습니다. 일시적으로 오프라인일 수 있습니다 — 다시 시도하거나 앱 시작 페이지로 돌아가세요.",
       unavailableRetry: "다시 시도",
       unavailableHome: "홈으로 돌아가기",
       dock: {
@@ -3734,7 +3735,6 @@ const ko = {
   },
   home: {
     build: {
-      title: "앱 만들기",
       noCapability: "이 시스템에서는 앱 만들기를 사용할 수 없습니다 — ‘메타데이터 관리’ 권한이 필요하지만 계정에 해당 권한이 없습니다.",
       inStudio: "새 빈 앱 만들기",
     },
@@ -3742,13 +3742,11 @@ const ko = {
       title: "템플릿으로 시작",
       marketplaceDisabled: "이 런타임에는 앱 마켓플레이스가 구성되어 있지 않아 여기에서 설치할 템플릿이 없습니다.",
     },
-    welcomeAdminDescription: "비즈니스를 한 문장으로 설명해 주세요 — AI가 객체, 화면, API, 에이전트 도구를 생성합니다. 왼쪽 메뉴에서 직접 설정할 수도 있습니다.",
     welcomeAdminDescriptionNoBuild: "왼쪽 관리 메뉴에서 첫 애플리케이션을 설정하세요. 데이터가 쌓이면 AI 어시스턴트가 살펴보는 것을 도와줍니다.",
     welcomeAdminDescriptionNoAi: "왼쪽 관리 메뉴에서 첫 애플리케이션을 설정하세요.",
     noAppsTitle: "아직 애플리케이션이 없습니다",
     noAppsDescription: "시스템을 준비하고 있습니다 — 관리자가 공유한 앱이 여기에 표시됩니다.",
     noAppsAddDescription: "첫 앱을 만들거나, 템플릿이나 앱 마켓플레이스에서 시작하세요.",
-    buildWithAI: "AI로 빌드",
     askAI: "AI에게 질문",
     recoveryReminder: {
       message: "싱글 사인온을 사용할 수 없을 때도 로그인할 수 있도록 복구 비밀번호를 설정하세요.",

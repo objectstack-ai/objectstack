@@ -18,7 +18,7 @@ import {
 import { scopeDirectoryEntries } from '../metadata-admin/directoryScope.js';
 import { useMetadataRefreshNonce } from './useMetadataRefreshNonce.js';
 import {
-  STUDIO_MENU_DESIGNER_TYPES,
+  STUDIO_MENU_ALWAYS_TYPES,
   studioMenuScope,
   type StudioMenuEntry,
   type StudioMenuGroup,
@@ -52,6 +52,12 @@ export interface StudioMenuData {
   counts: Readonly<Record<string, number>>;
   /** Both reads have answered: the registry's types and the diagnostics sweep. */
   settled: boolean;
+  /**
+   * The diagnostics sweep answered with its counts (objectstack#37201): a type
+   * it counts nothing of holds none. False while it reads, and when it failed
+   * (a server without the sweep answers no counts, not "none of each").
+   */
+  countsAnswered: boolean;
 }
 
 /**
@@ -69,6 +75,7 @@ export function useStudioMenuTypes(segment: string): StudioMenuData {
     countsByType,
     packagesByType,
     loading: sweepLoading,
+    error: sweepError,
     reload,
   } = useGlobalDiagnostics(client, 'error', packageId ?? undefined);
   const refresh = useMetadataRefreshNonce();
@@ -83,9 +90,10 @@ export function useStudioMenuTypes(segment: string): StudioMenuData {
     environment: scope.kind !== 'package',
     packageId,
     packagesByType,
-    always: STUDIO_MENU_DESIGNER_TYPES,
+    always: STUDIO_MENU_ALWAYS_TYPES,
   });
-  return { segment, types, counts: countsByType, settled: !typesLoading && !sweepLoading };
+  const settled = !typesLoading && !sweepLoading;
+  return { segment, types, counts: countsByType, settled, countsAnswered: settled && !sweepError };
 }
 
 /**

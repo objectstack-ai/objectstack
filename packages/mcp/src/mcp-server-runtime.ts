@@ -1794,9 +1794,17 @@ function hostInstructions(
  * every grant (a `metadata:write`-only or `actions:execute`-only token lists
  * no data tool) and with or without a build door mounted, so it never
  * promises building to a deployment that has none.
+ * [#35778] It also says where the usage guide is: the teaching prose lives in
+ * the served SKILL.md, not in the tool descriptions, so a client that never
+ * fetches it is told where it went. The runtime dispatcher mounts the public
+ * `GET <prefix>/mcp/skill` beside `<prefix>/mcp`, from the same domain list,
+ * behind the same enable switch and for every grant (it is anonymous), so the
+ * sentence names it relative to this endpoint and gives the default prefix.
+ * The stdio default names no URL: a stdio server has no HTTP endpoint.
  */
 const DEFAULT_HTTP_INSTRUCTIONS =
-  'ObjectStack MCP Server. The tools this connection lists depend on what its credential was granted.';
+  'ObjectStack MCP Server. The tools this connection lists depend on what its credential was granted. '
+  + 'Usage guide (SKILL.md): GET this endpoint\'s path plus /skill (by default /api/v1/mcp/skill).';
 
 /**
  * [#34774] The authoring contract line (#34659 ruling D4 = A): the

@@ -93,6 +93,7 @@ import {
 } from '@object-ui/components';
 import { useMetadataLocale, t, tFormat } from './i18n.js';
 import { useMetadataClient } from './useMetadata.js';
+import { newAppStep } from '../studio-design/newAppDoor.js';
 import { PackageFormDialog } from './PackageFormDialog.js';
 import { readPackageRemovalContents, type PackageRemovalState } from './packageRemovalContents.js';
 import { PackageRemovalSummary } from './PackageRemovalSummary.js';
@@ -629,9 +630,17 @@ const studioPackagePath = (packageId: string) => studioHomePath(packageId);
 
 /**
  * CreatePackageDialog — thin wrapper over the spec-driven {@link PackageFormDialog}.
- * Kept as a named export so existing call sites (ResourceListPage, the Studio
- * package switcher) don't change. The form fields + validation now come from
- * the manifest spec (`package-schema`), not a hand-written field list.
+ * The one create-package dialog: Setup → Packages (its New Package button and
+ * the `?new=package` door the console's new-package entries open,
+ * objectstack#36908) and ResourceListPage's create-a-base-first prompt. The
+ * form fields + validation come from the manifest spec (`package-schema`),
+ * not a hand-written field list.
+ *
+ * objectstack#37134 — every opening offers 「同时创建应用」, ticked by
+ * default: the wrapper hands the dialog the app step (`newAppStep`,
+ * objectstack#36748), so a package created here comes with its app unless the
+ * author unticks it. `onCreated` still answers with the package id, so where
+ * each caller lands afterwards does not change.
  */
 export function CreatePackageDialog({
   open,
@@ -642,11 +651,15 @@ export function CreatePackageDialog({
   onOpenChange: (v: boolean) => void;
   onCreated: (id: string) => void;
 }) {
+  const client = useMetadataClient();
+  const locale = useMetadataLocale();
+  const newApp = React.useMemo(() => newAppStep(client, locale), [client, locale]);
   return (
     <PackageFormDialog
       mode="create"
       open={open}
       onOpenChange={onOpenChange}
+      newApp={newApp}
       onSaved={(r) => onCreated(r.id)}
     />
   );

@@ -2003,6 +2003,10 @@ const STUDIO_EN: Record<string, string> = {
   'engine.packages.create.failed': 'Failed to create package',
   'engine.packages.create.exists': 'A package with this id already exists.',
   'engine.packages.create.created': 'Created package “{name}”.',
+  // objectstack#37134 — the create dialog's 「同时创建应用」 choice, ticked by default.
+  'engine.packages.create.alsoApp': 'Also create an app',
+  'engine.packages.create.alsoAppHint': 'The package gets an app with the same name, ready to open. Untick this for a package that only holds objects or flows for other packages to use.',
+  'engine.packages.create.createdWithApp': 'Created package “{name}” and its app.',
   // objectstack#8270 — the server refuses package writes without the ADR-0066
   // `manage_metadata` capability, and its refusal is an English sentence that
   // reached a zh console verbatim. Deployments that withhold the capability do
@@ -2039,6 +2043,7 @@ const STUDIO_EN: Record<string, string> = {
   'engine.packages.customizations.failed': 'Couldn’t read customizations',
   'engine.packages.customizations.none': 'No changes in this environment yet',
   'engine.packages.customizations.customized': '{count} customized',
+  'engine.packages.customizations.arranged': '{count} rearranged',
   'engine.packages.customizations.separator': ', ',
   'engine.packages.customizations.switchedOff': '{count} switched off',
   'engine.packages.customizations.tab.all': 'All',
@@ -3551,6 +3556,9 @@ const STUDIO_EN: Record<string, string> = {
   'engine.studio.menu.owd': 'Default sharing',
   'engine.studio.menu.diagnostics': 'Diagnostics',
   'engine.studio.menu.environment': 'Positions and permissions',
+  // objectstack#37201 — the 「高级」 fold (ADR-0084, amended 2026-11-25), and a 常用 type with no item yet.
+  'engine.studio.menu.advanced': 'Advanced',
+  'engine.studio.menu.emptyType': 'None yet: open the list to make the first',
   // objectstack#36502 — the notice on a retired Interfaces link's landing.
   'engine.studio.interfacesRetired.sentence': 'Interface edits have moved into the app.',
   'engine.studio.interfacesRetired.backToApp': 'Back to the app',
@@ -3643,10 +3651,11 @@ const STUDIO_EN: Record<string, string> = {
   'engine.studio.org.description': 'The organization’s own flows that belong to no package, such as a clone of a packaged flow. They open editable.',
   // ADR-0146 D11 — no link out: no Setup page copies a flow into this scope any more.
   'engine.studio.org.none': 'No flows outside a package. To change a packaged flow, open its package and use New similar.',
-  // objectstack#36748 — the new-app step of the package dialog (`newAppDoor.ts`):
-  // one dialog creates the package and its app, worded for an app throughout.
-  // The Studio home that opened it was removed (objectstack#36908); the step
-  // stays for the create-package dialog's create-app choice (objectstack#37134).
+  // objectstack#36748 — the new-app step of the package dialog (`newAppDoor.ts`).
+  // The Studio home's app-worded dialog was removed (objectstack#36908); the
+  // create-package dialog's 「同时创建应用」 (objectstack#37134) runs the step
+  // and reads `nameTaken` and `appFailed`. The app-worded rows have no reader
+  // since; they stay as released rows.
   'engine.studio.newApp.title': 'New app',
   'engine.studio.newApp.description': 'Give your app a name; everything else is filled in for you. It opens as soon as it is created.',
   'engine.studio.newApp.advancedHint': 'App ID, namespace, version and type, filled in from the name.',

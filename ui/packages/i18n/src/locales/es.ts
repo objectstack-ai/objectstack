@@ -2577,6 +2577,7 @@ const es = {
       unavailableTitle: "Asistente de IA no disponible",
       unavailableDescription: "Esta implementación no tiene habilitado un asistente de IA. Todo lo demás funciona con normalidad.",
       unavailableError: "No se pudo contactar con el servicio de IA. Puede estar temporalmente sin conexión — reinténtelo o vuelva al inicio.",
+      unavailableErrorDesktop: "No se pudo contactar con el servicio de IA. Puede estar temporalmente sin conexión — reinténtelo o vuelva a la página inicial de la app.",
       unavailableRetry: "Reintentar",
       unavailableHome: "Volver al inicio",
       dock: {
@@ -3816,7 +3817,6 @@ const es = {
   },
   home: {
     build: {
-      title: "Crear una aplicación",
       noCapability: "La creación de aplicaciones no está disponible en este sistema: requiere el permiso «Gestionar metadatos», que su cuenta no tiene.",
       inStudio: "Nueva aplicación en blanco",
     },
@@ -3824,13 +3824,11 @@ const es = {
       title: "Empezar con una plantilla",
       marketplaceDisabled: "Este runtime no tiene un marketplace de aplicaciones configurado, por lo que no hay plantillas que instalar aquí.",
     },
-    welcomeAdminDescription: "Describa su negocio en una frase — la IA genera los objetos, las pantallas, las API y las herramientas del agente. O configúrelo usted mismo desde el menú de la izquierda.",
     welcomeAdminDescriptionNoBuild: "Configure su primera aplicación desde el menú de Administración de la izquierda. Cuando tenga datos, el asistente de IA podrá ayudarle a explorarlos.",
     welcomeAdminDescriptionNoAi: "Configure su primera aplicación desde el menú de Administración de la izquierda.",
     noAppsTitle: "Todavía no hay aplicaciones",
     noAppsDescription: "El sistema se está preparando — las aplicaciones que su administrador comparta aparecerán aquí.",
     noAppsAddDescription: "Cree su primera aplicación, o empiece con una plantilla o el mercado de aplicaciones.",
-    buildWithAI: "Crear con IA",
     askAI: "Preguntar a la IA",
     recoveryReminder: {
       message: "Establezca una contraseña de recuperación para poder iniciar sesión aunque el inicio de sesión único no esté disponible.",

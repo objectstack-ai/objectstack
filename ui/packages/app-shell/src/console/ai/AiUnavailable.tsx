@@ -50,6 +50,7 @@ export function AiUnavailable({
   // The way home names where it goes: a phone's Home is its app list; from
   // 768 px up the home page is retired (objectstack#36732) and `onHome` opens
   // an app's start page, named in the app pill's words (objectstack#37163).
+  // The error sentence that points at that button says the same on each side.
   const phone = usePhoneViewport();
   return (
     <div className="flex flex-1 items-center justify-center p-6" data-testid="ai-unavailable">
@@ -59,10 +60,15 @@ export function AiUnavailable({
         </EmptyTitle>
         <EmptyDescription>
           {hasError
-            ? t('console.ai.unavailableError', {
-                defaultValue:
-                  "Couldn't reach the AI service. It may be temporarily offline — try again, or head back home.",
-              })
+            ? phone
+              ? t('console.ai.unavailableError', {
+                  defaultValue:
+                    "Couldn't reach the AI service. It may be temporarily offline — try again, or head back home.",
+                })
+              : t('console.ai.unavailableErrorDesktop', {
+                  defaultValue:
+                    "Couldn't reach the AI service. It may be temporarily offline — try again, or go back to the app start page.",
+                })
             : t('console.ai.unavailableDescription', {
                 defaultValue:
                   "This deployment doesn't have an AI assistant enabled. Everything else works as usual.",

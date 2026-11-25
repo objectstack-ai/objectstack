@@ -51,3 +51,21 @@ describe('recordNotFoundError — the userMessage beside an unchanged envelope',
     expect(err.userMessage).toBe(BUILTIN_OPERATION_MESSAGES.en.record_not_found);
   });
 });
+
+describe('[#37273] operationUserMessage — a key with placeholders', () => {
+  it("fills them in the caller's language, the values written as given", () => {
+    const params = { door: 'X', slot: 'print', member: 'handlePrintDoor' };
+    expect(operationUserMessage('own_door_member_missing', { locale: 'zh-CN' }, params)).toBe(
+      'X不可用：已注册的 print 服务未实现 handlePrintDoor。',
+    );
+    expect(operationUserMessage('own_door_member_missing', null, params)).toBe(
+      'X is not available: the registered print service does not implement handlePrintDoor.',
+    );
+  });
+
+  it('without params, a placeholder-free key is unchanged', () => {
+    expect(operationUserMessage('record_not_found', { locale: 'zh-CN' }, undefined)).toBe(
+      BUILTIN_OPERATION_MESSAGES['zh-CN'].record_not_found,
+    );
+  });
+});

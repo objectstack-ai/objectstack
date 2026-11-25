@@ -12,10 +12,14 @@
  * that app's detail, one app at a time.
  *
  * The numbers and the rows are the server's per-package customization read
- * (`GET /api/v1/packages/:id/customizations`): "customized" counts the pair's
- * overrides, extensions and arrangements (objectstack#36833: an app whose only
- * change is a tab arrangement is customized), "switched off" the ledger's
- * switched-off items. Each row names the item (its label where the app's list
+ * (`GET /api/v1/packages/:id/customizations`): "customized" is
+ * `customizationTotal`, the pair's overrides and extensions, the one meaning
+ * the All metadata header and both lists' "customized" filter read
+ * (objectstack#37236). Arrangements are not customizations: they are named
+ * apart ("2 rearranged"), and only when there are any, so an app whose only
+ * change is a tab arrangement reads "0 customized" beside its arrangement
+ * count, never "No changes". "Switched off" counts the ledger's switched-off
+ * items. Each row names the item (its label where the app's list
  * gives one), what kind of item it is and how it changed, and opens the item
  * in Studio. Tabs narrow by kind and a search by text; the first rows show,
  * the rest behind "Show all". A read that fails says so, never "0".
@@ -29,9 +33,9 @@ import { t, tFormat } from '../metadata-admin/i18n.js';
 import { useMetadataClient } from '../metadata-admin/useMetadata.js';
 import { fetchPackageCustomizations } from './packageCustomizations-io.js';
 import { readActionObjects, type ActionObjects } from './switchedOffActionTargets.js';
+import { customizationTotal } from './customizationMarks.js';
 import {
   customizationRowsOf,
-  customizedCountOf,
   loadCustomizationLabels,
   type CustomizationRow,
 } from './packageCustomizationRows.js';
@@ -67,7 +71,7 @@ const K = 'engine.packages.customizations';
 type ReadState =
   | { status: 'loading' }
   | { status: 'failed'; message: string }
-  | { status: 'read'; rows: CustomizationRow[]; customized: number; switchedOff: number };
+  | { status: 'read'; rows: CustomizationRow[]; customized: number; arranged: number; switchedOff: number };
 
 export function PackageCustomizationsPanel({
   packageId,
@@ -97,7 +101,8 @@ export function PackageCustomizationsPanel({
         return {
           status: 'read' as const,
           rows: customizationRowsOf(packageId, read, actionObjects),
-          customized: customizedCountOf(read),
+          customized: customizationTotal(read),
+          arranged: read.counts.arrangements,
           switchedOff: read.counts.switchedOff,
         };
       })
@@ -187,13 +192,15 @@ export function PackageCustomizationsPanel({
       )}
       {state.status === 'read' && (
         <p data-testid="pkg-detail-customizations-summary" data-state="read" className="text-xs text-muted-foreground">
-          {state.customized === 0 && state.switchedOff === 0
+          {state.customized === 0 && state.arranged === 0 && state.switchedOff === 0
             ? t(`${K}.none`, locale)
-            : `${tFormat(`${K}.customized`, locale, { count: state.customized })}${t(`${K}.separator`, locale)}${tFormat(
-                `${K}.switchedOff`,
-                locale,
-                { count: state.switchedOff },
-              )}`}
+            : [
+                tFormat(`${K}.customized`, locale, { count: state.customized }),
+                // Arrangements are not customizations (objectstack#37236): their own
+                // segment, drawn only when there are any.
+                ...(state.arranged > 0 ? [tFormat(`${K}.arranged`, locale, { count: state.arranged })] : []),
+                tFormat(`${K}.switchedOff`, locale, { count: state.switchedOff }),
+              ].join(t(`${K}.separator`, locale))}
         </p>
       )}
 
