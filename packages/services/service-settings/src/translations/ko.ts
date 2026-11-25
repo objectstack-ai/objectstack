@@ -485,6 +485,7 @@ export const ko: PlatformTranslationData = {
         log_prompts: { label: '전체 프롬프트 기록', help: '추적 행에 메타데이터뿐 아니라 렌더링된 프롬프트도 포함합니다.' },
         embedder_provider: {
           label: '공급자',
+          help: '서버가 시작될 때 읽습니다. Embedder 설정을 저장한 변경 사항은 다음 재시작 후에 적용됩니다.',
           options: {
             none: '사용 안 함(임베딩 없음)',
             openai: 'OpenAI',

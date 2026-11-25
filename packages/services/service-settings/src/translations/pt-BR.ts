@@ -629,6 +629,7 @@ export const ptBR: PlatformTranslationData = {
         },
         embedder_provider: {
           label: 'Provedor',
+          help: 'Lido na inicialização do servidor: uma alteração salva em qualquer configuração do embedder entra em vigor após a próxima reinicialização.',
           options: {
             none: 'Desativado (sem embeddings)',
             openai: 'OpenAI',

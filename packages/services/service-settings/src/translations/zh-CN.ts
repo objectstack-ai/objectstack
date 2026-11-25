@@ -547,6 +547,7 @@ export const zhCN: PlatformTranslationData = {
         log_prompts: { label: '记录完整提示词', help: '在追踪记录中包含完整提示词,而非仅元数据。' },
         embedder_provider: {
           label: '提供商',
+          help: '服务启动时读取：任何向量化设置保存后，需重启服务才会生效。',
           options: {
             none: '禁用(不做向量化)',
             openai: 'OpenAI',

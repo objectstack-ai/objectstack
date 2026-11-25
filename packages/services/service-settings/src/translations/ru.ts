@@ -642,6 +642,7 @@ export const ru: PlatformTranslationData = {
         },
         embedder_provider: {
           label: 'Провайдер',
+          help: 'Считывается при запуске сервера: сохранённое изменение любой настройки эмбеддера вступает в силу после следующего перезапуска.',
           options: {
             none: 'Отключено (без эмбеддингов)',
             openai: 'OpenAI',

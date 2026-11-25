@@ -642,6 +642,7 @@ export const fr: PlatformTranslationData = {
         },
         embedder_provider: {
           label: 'Fournisseur',
+          help: 'Lu au démarrage du serveur : une modification enregistrée d’un paramètre de l’embedder prend effet au prochain redémarrage.',
           options: {
             none: 'Désactivé (aucun embedding)',
             openai: 'OpenAI',

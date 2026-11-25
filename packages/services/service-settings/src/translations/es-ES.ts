@@ -511,6 +511,7 @@ export const esES: PlatformTranslationData = {
           help: 'Incluye los prompts renderizados (no solo metadatos) en las filas de traza.' },
         embedder_provider: {
           label: 'Proveedor',
+          help: 'Se lee al iniciar el servidor: un cambio guardado en cualquier ajuste del embedder se aplica tras el siguiente reinicio.',
           options: {
             none: 'Deshabilitado (sin embeddings)',
             openai: 'OpenAI',

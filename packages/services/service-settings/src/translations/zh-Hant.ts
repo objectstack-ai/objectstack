@@ -430,6 +430,7 @@ export const zhHant: PlatformTranslationData = {
         log_prompts: { label: '記錄完整提示詞', help: '在追蹤記錄中包含完整的提示詞（不只是中繼資料）。' },
         embedder_provider: {
           label: '提供者',
+          help: '伺服器啟動時讀取：任何 Embedder 設定儲存後，需重新啟動伺服器才會生效。',
           options: {
             none: '停用（不產生向量）',
             openai: 'OpenAI',
