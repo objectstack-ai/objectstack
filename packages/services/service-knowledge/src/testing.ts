@@ -10,7 +10,7 @@
  * runKnowledgeAdapterContract({
  *   name: 'knowledge-memory',
  *   makeAdapter: () => new KnowledgeMemoryAdapter(),
- *   implements: { listDocuments: true, chunks: true },
+ *   implements: { listDocuments: true, chunks: true, organizationIds: true },
  * });
  * ```
  *
@@ -21,20 +21,27 @@
  * optional `listDocuments` (page boundaries at 0, one page and one page + 1;
  * `docHash` returned as stored); and, through a real `KnowledgeService` over a
  * small data-engine double, the skip of unchanged documents and the purge of
- * documents the source no longer has; and the chunk channel (ADR-0161 K8,
+ * documents the source no longer has; the chunk channel (ADR-0161 K8,
  * item 5) — an adapter that declares `capabilities.chunks` receives the
  * service's passages and indexes them as given, one that does not keeps
  * receiving whole documents, and a `whole` document over the embedder's
- * budget is removed and reported, never truncated.
+ * budget is removed and reported, never truncated; and the organization filter
+ * (ADR-0161 K8, item 9) — on the adapter alone, and through a real
+ * `KnowledgeService` under the `isolated`, `group` and `single` postures.
  *
  * Every optional member is DECLARED by the caller in `implements`, and the
  * suite asserts the declaration against the adapter: a member an adapter lacks
  * runs the case that pins the service's behaviour without it, never nothing.
+ * `organizationIds` is a search option, not a method, so its declaration is
+ * asserted by behaviour: the cases it turns on fail for an adapter that
+ * ignores the option.
  */
 
 import { describe, expect, it } from 'vitest';
-import type { IDataEngine, IKnowledgeAdapter, AdapterContext } from '@objectstack/spec/contracts';
+import type { IDataEngine, IKnowledgeAdapter, AdapterContext, AdapterSearchOptions } from '@objectstack/spec/contracts';
 import type { KnowledgeDocument, KnowledgeSource, ObjectKnowledgeSource } from '@objectstack/spec/ai';
+import type { ExecutionContext } from '@objectstack/spec/kernel';
+import type { TenancyPosture } from '@objectstack/spec/security';
 import { KnowledgeService } from './knowledge-service.js';
 import { resolveSplit, splitDocument } from './split/index.js';
 
@@ -53,6 +60,12 @@ export interface KnowledgeAdapterContractOptions {
     listDocuments: boolean;
     /** `capabilities.chunks === true`: the adapter takes the service's passages. */
     chunks: boolean;
+    /**
+     * The adapter's search honours `AdapterSearchOptions.organizationIds`
+     * (ADR-0161 K8, item 9): it ranks only the documents of the organizations
+     * it is handed, filtering before it ranks.
+     */
+    organizationIds: boolean;
   };
 }
 
@@ -77,7 +90,13 @@ function ctxOf(source: KnowledgeSource): AdapterContext {
  * whole text, as split `whole` gives it) when the adapter takes chunks.
  */
 function docFor(withChunks: boolean) {
-  return (source: KnowledgeSource, n: string, content: string, docHash?: string): KnowledgeDocument => {
+  return (
+    source: KnowledgeSource,
+    n: string,
+    content: string,
+    docHash?: string,
+    organizationId?: string,
+  ): KnowledgeDocument => {
     const id = `${source.id}:${n}`;
     return {
       id,
@@ -87,6 +106,7 @@ function docFor(withChunks: boolean) {
       title: `Title ${n}`,
       metadata: { status: 'published' },
       ...(docHash === undefined ? {} : { docHash }),
+      ...(organizationId === undefined ? {} : { organizationId }),
       ...(withChunks ? { chunks: [{ id: `${id}#0`, documentId: id, index: 0, content }] } : {}),
     };
   };
@@ -116,12 +136,16 @@ type Row = Record<string, unknown>;
 
 /**
  * A data-engine double serving `find` / `count` the way the knowledge service
- * calls them (the paged walk and the membership re-read), over rows the case
- * mutates directly. It refuses — by a throw — any `where` shape it does not
- * implement, so a service change it cannot answer turns the suite red rather
- * than being answered wrongly.
+ * calls them (the paged walk, the membership re-read and the search's
+ * permission re-read), over rows the case mutates directly. It refuses — by a
+ * throw — any `where` shape it does not implement, so a service change it
+ * cannot answer turns the suite red rather than being answered wrongly.
+ *
+ * The permission re-read (`where: { id: { $in } }`, the caller's context in
+ * the query) answers the rows `wall` admits for that context; without a
+ * `wall`, every row.
  */
-function rowsEngine(rows: Row[]): IDataEngine {
+function rowsEngine(rows: Row[], wall?: (row: Row, context: ExecutionContext) => boolean): IDataEngine {
   const matches = (row: Row, where: Record<string, unknown> | undefined): boolean => {
     if (!where) return true;
     for (const [key, value] of Object.entries(where)) {
@@ -144,7 +168,17 @@ function rowsEngine(rows: Row[]): IDataEngine {
     return true;
   };
   return {
-    find: async (_object: string, query: { where?: Record<string, unknown>; limit?: number }) => {
+    find: async (
+      _object: string,
+      query: { where?: Record<string, unknown>; limit?: number; context?: ExecutionContext },
+    ) => {
+      const inIds = (query?.where?.id as { $in?: unknown } | undefined)?.$in;
+      if (query?.context !== undefined && Array.isArray(inIds) && Object.keys(query.where ?? {}).length === 1) {
+        const ctx = query.context;
+        return rows
+          .filter((r) => inIds.includes(r.id) && (wall === undefined || wall(r, ctx)))
+          .map((r) => ({ id: r.id }));
+      }
       if (typeof query?.limit !== 'number' || !(query.limit > 0)) throw new Error('engine double: an unbounded find');
       return rows
         .filter((r) => matches(r, query.where))
@@ -157,20 +191,34 @@ function rowsEngine(rows: Row[]): IDataEngine {
   } as unknown as IDataEngine;
 }
 
+/** What {@link serviceOver} composes beside the adapter and the rows. */
+interface ServiceSetup {
+  /** The deployment's tenancy posture, read at each call; absent → no `tenancy` service. */
+  posture?: () => TenancyPosture | undefined;
+  /** The permission re-read's wall ({@link rowsEngine}). */
+  wall?: (row: Row, context: ExecutionContext) => boolean;
+  /**
+   * Stands in for the limit the adapter's embedder would report
+   * (`embedding.maxInputTokens`); omitted, the adapter's own report is used.
+   */
+  maxInputTokens?: number;
+}
+
 /**
  * A `KnowledgeService` over `adapter` and `rows`, with the adapter's `upsert`
- * counted and its documents kept. `maxInputTokens` stands in for the limit the
- * adapter's embedder would report; omitted, the adapter's own report is used.
+ * counted and its documents kept, and the options of every `search` it is
+ * handed recorded.
  */
 async function serviceOver(
   make: () => IKnowledgeAdapter | Promise<IKnowledgeAdapter>,
   rows: Row[],
   source: KnowledgeSource,
-  opts: { maxInputTokens?: number } = {},
+  setup: ServiceSetup = {},
 ) {
   const adapter: IKnowledgeAdapter = await make();
   const upserted: string[][] = [];
   const received: KnowledgeDocument[] = [];
+  const searched: AdapterSearchOptions[] = [];
   // Delegation, not a prototype proxy: an adapter with `#private` fields only
   // answers when its methods are called on the adapter itself. The
   // descriptors are read through on every access, as the service reads them.
@@ -180,23 +228,63 @@ async function serviceOver(
       return adapter.capabilities;
     },
     get embedding() {
-      return opts.maxInputTokens === undefined ? adapter.embedding : { maxInputTokens: opts.maxInputTokens };
+      return setup.maxInputTokens === undefined ? adapter.embedding : { maxInputTokens: setup.maxInputTokens };
     },
     upsert: async (docs, ctx) => {
       upserted.push(docs.map((d) => d.id));
       received.push(...docs);
       return adapter.upsert(docs, ctx);
     },
-    search: (query, searchOpts) => adapter.search(query, searchOpts),
+    search: (query, searchOpts) => {
+      searched.push(searchOpts);
+      return adapter.search(query, searchOpts);
+    },
     delete: (ids, ctx) => adapter.delete(ids, ctx),
     ...(typeof adapter.listDocuments === 'function'
       ? { listDocuments: (ctx: AdapterContext, listOpts: { cursor?: string; limit: number }) => adapter.listDocuments!(ctx, listOpts) }
       : {}),
   };
-  const svc = new KnowledgeService({ dataEngine: rowsEngine(rows) });
+  const posture = setup.posture;
+  const svc = new KnowledgeService({
+    dataEngine: rowsEngine(rows, setup.wall),
+    ...(posture === undefined ? {} : { resolveTenancyPosture: async () => posture() }),
+  });
   svc.registerAdapter('under_test', counting);
   svc.registerSource(source);
-  return { adapter, svc, upserted, received };
+  return { adapter, svc, upserted, received, searched };
+}
+
+/** The last element of `list`, or `undefined` when it is empty. */
+function lastOf<T>(list: readonly T[]): T | undefined {
+  return list.length === 0 ? undefined : list[list.length - 1];
+}
+
+/** Two organizations' rows in one source: `rb` (organization B) outranks `ra` (A) for {@link ORG_QUERY}. */
+const orgRows = (): Row[] => [
+  { id: 'ra', body: 'alpine meadow harbour', status: 'published', organization_id: 'org_a' },
+  { id: 'rb', body: 'alpine meadow alpine meadow', status: 'published', organization_id: 'org_b' },
+];
+const ORG_QUERY = 'alpine meadow';
+
+/** A person in organization A only, active there. */
+const CALLER_A: ExecutionContext = {
+  userId: 'u_a', tenantId: 'org_a', accessible_org_ids: ['org_a'], positions: [], permissions: [], systemPermissions: [], isSystem: false,
+} as ExecutionContext;
+/** A person in organizations A and C, active in C: under `group` they reach A; under `isolated` only C. */
+const CALLER_AC: ExecutionContext = {
+  userId: 'u_ac', tenantId: 'org_c', accessible_org_ids: ['org_a', 'org_c'], positions: [], permissions: [], systemPermissions: [], isSystem: false,
+} as ExecutionContext;
+const SYSTEM: ExecutionContext = { positions: [], permissions: [], systemPermissions: [], isSystem: true } as ExecutionContext;
+
+/**
+ * The wall each posture puts on the permission re-read (ADR-0105 D1), as the
+ * double's `wall`. The service never re-reads for the system identity, so the
+ * wall is asked about persons only.
+ */
+function wallOf(posture: TenancyPosture): (row: Row, context: ExecutionContext) => boolean {
+  if (posture === 'isolated') return (row, ctx) => row.organization_id === ctx.tenantId;
+  if (posture === 'group') return (row, ctx) => (ctx.accessible_org_ids ?? []).includes(String(row.organization_id));
+  return () => true;
 }
 
 const rowsOf = (n: number): Row[] =>
@@ -252,6 +340,110 @@ export function runKnowledgeAdapterContract(opts: KnowledgeAdapterContractOption
         const hits = await adapter.search('copper', { source: a, topK: 5 });
         expect(hits.map((h) => h.documentId)).toEqual([`${a.id}:2`]);
       });
+    });
+
+    if (opts.implements.organizationIds) {
+      describe('organizationIds (ADR-0161 K8, item 9)', () => {
+        /** B's document outranks A's; a third document carries no organization. */
+        async function seeded(): Promise<{ adapter: IKnowledgeAdapter; a: KnowledgeSource }> {
+          const adapter: IKnowledgeAdapter = await make();
+          const a = objectSource('org');
+          await adapter.upsert(
+            [
+              doc(a, 'a1', 'alpine meadow harbour', undefined, 'org_a'),
+              doc(a, 'b1', 'alpine meadow alpine meadow', undefined, 'org_b'),
+              doc(a, 'n1', 'alpine meadow', undefined),
+            ],
+            ctxOf(a),
+          );
+          return { adapter, a };
+        }
+
+        it("ranks only the documents of the organizations it is handed, filtering before it ranks", async () => {
+          const { adapter, a } = await seeded();
+          // topK 1: a filter applied after ranking would keep B's better hit and drop it, answering nothing.
+          const top = await adapter.search(ORG_QUERY, { source: a, topK: 1, organizationIds: ['org_a'] });
+          expect(top.map((h) => h.documentId)).toEqual([`${a.id}:a1`]);
+          const all = await adapter.search(ORG_QUERY, { source: a, topK: 5, organizationIds: ['org_a'] });
+          expect(all.map((h) => h.documentId)).toEqual([`${a.id}:a1`]);
+        });
+
+        it('ranks the documents of every organization in the set, and none stored without one', async () => {
+          const { adapter, a } = await seeded();
+          const hits = await adapter.search(ORG_QUERY, { source: a, topK: 5, organizationIds: ['org_a', 'org_b'] });
+          expect(hits.map((h) => h.documentId).sort()).toEqual([`${a.id}:a1`, `${a.id}:b1`]);
+        });
+
+        it('an empty set ranks nothing — it is never read as "no filter"', async () => {
+          const { adapter, a } = await seeded();
+          expect(await adapter.search(ORG_QUERY, { source: a, topK: 5, organizationIds: [] })).toEqual([]);
+        });
+
+        it('without the option every document is ranked, as before', async () => {
+          const { adapter, a } = await seeded();
+          const hits = await adapter.search(ORG_QUERY, { source: a, topK: 5 });
+          expect(hits.map((h) => h.documentId).sort()).toEqual([`${a.id}:a1`, `${a.id}:b1`, `${a.id}:n1`]);
+        });
+      });
+    }
+
+    describe('the organization filter through KnowledgeService.search', () => {
+      for (const posture of ['isolated', 'group'] as const) {
+        it(`${posture}: a search from organization A never ranks or returns B's documents`, async () => {
+          const rows = orgRows();
+          const source = objectSource(`org_${posture}`);
+          const h = await serviceOver(make, rows, source, { posture: () => posture, wall: wallOf(posture) });
+          expect(await h.svc.reindexSource(source.id)).toMatchObject({ ok: true, indexed: 2 });
+          const caller = posture === 'isolated' ? CALLER_A : CALLER_AC;
+          const hits = await h.svc.search(ORG_QUERY, { topK: 1, executionContext: caller });
+          // The service hands the adapter the caller's organizations, by the posture.
+          expect(lastOf(h.searched)?.organizationIds).toEqual(posture === 'isolated' ? ['org_a'] : ['org_a', 'org_c']);
+          expect(hits.map((x) => x.documentId)).not.toContain(`${source.id}:rb`);
+          if (opts.implements.organizationIds) {
+            // Filtered before ranking: B's better document does not take A's place.
+            expect(hits.map((x) => x.documentId)).toEqual([`${source.id}:ra`]);
+          }
+        });
+      }
+
+      it('isolated: a caller with no active organization is handed an empty set, and gets nothing', async () => {
+        const source = objectSource('org_none');
+        const h = await serviceOver(make, orgRows(), source, { posture: () => 'isolated', wall: wallOf('isolated') });
+        await h.svc.reindexSource(source.id);
+        const nobody = { ...CALLER_A, tenantId: undefined, accessible_org_ids: [] } as ExecutionContext;
+        expect(await h.svc.search(ORG_QUERY, { topK: 5, executionContext: nobody })).toEqual([]);
+        expect(lastOf(h.searched)?.organizationIds).toEqual([]);
+      });
+
+      it('single posture and the system identity: no filter is handed, and the results are as before', async () => {
+        const source = objectSource('org_single');
+        const single = await serviceOver(make, orgRows(), source, { posture: () => 'single' });
+        await single.svc.reindexSource(source.id);
+        const hits = await single.svc.search(ORG_QUERY, { topK: 1, executionContext: CALLER_A });
+        expect(lastOf(single.searched)).not.toHaveProperty('organizationIds');
+        expect(hits.map((x) => x.documentId)).toEqual([`${source.id}:rb`]);
+
+        const walled = await serviceOver(make, orgRows(), source, { posture: () => 'isolated', wall: wallOf('isolated') });
+        await walled.svc.reindexSource(source.id);
+        const asSystem = await walled.svc.search(ORG_QUERY, { topK: 1, executionContext: SYSTEM });
+        expect(lastOf(walled.searched)).not.toHaveProperty('organizationIds');
+        expect(asSystem.map((x) => x.documentId)).toEqual([`${source.id}:rb`]);
+      });
+
+      if (opts.implements.organizationIds) {
+        it('a document indexed without its organization is not ranked behind a wall until a complete reindex writes it again', async () => {
+          let posture: TenancyPosture = 'single';
+          const source = objectSource('org_upgrade');
+          const h = await serviceOver(make, orgRows(), source, { posture: () => posture, wall: wallOf('isolated') });
+          await h.svc.reindexSource(source.id); // under `single`: no document carries an organization
+          posture = 'isolated';
+          expect(await h.svc.search(ORG_QUERY, { topK: 5, executionContext: CALLER_A })).toEqual([]);
+          // The organization enters the hash, so the reindex writes both documents again rather than skipping them.
+          expect(await h.svc.reindexSource(source.id)).toMatchObject({ ok: true, indexed: 2, skipped: 0 });
+          const hits = await h.svc.search(ORG_QUERY, { topK: 5, executionContext: CALLER_A });
+          expect(hits.map((x) => x.documentId)).toEqual([`${source.id}:ra`]);
+        });
+      }
     });
 
     if (opts.implements.listDocuments) {

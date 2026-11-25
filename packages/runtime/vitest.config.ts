@@ -241,6 +241,16 @@ export default defineConfig({
         find: '@objectstack/service-package',
         replacement: path.resolve(__dirname, '../services/service-package/src/index.ts'),
       },
+      // Dev-only: mcp-record-context-tools-bridge.test.ts drives the `/mcp`
+      // route over the REAL MCP runtime and the REAL record-context executor
+      // (ADR-0160 D4), so the pack the door hands over is judged by the
+      // executor in the checkout, never a built copy of it. Anchored: each
+      // pin imports only the root entry.
+      { find: /^@objectstack\/mcp$/, replacement: path.resolve(__dirname, '../mcp/src/index.ts') },
+      {
+        find: /^@objectstack\/service-record-context$/,
+        replacement: path.resolve(__dirname, '../services/service-record-context/src/index.ts'),
+      },
     ],
   },
   test: {

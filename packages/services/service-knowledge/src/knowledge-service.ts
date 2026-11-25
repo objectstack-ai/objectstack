@@ -21,8 +21,14 @@ import {
   collectInternalWriteResponseFields,
   registryObjectPackageDisabled,
 } from '@objectstack/core';
+import type { TenancyPosture } from '@objectstack/spec/security';
 import { createKnowledgeTools, type KnowledgeTools } from './knowledge-tools.js';
 import { resolveSplit, splitDocument } from './split/index.js';
+import {
+  documentOrganizationId,
+  searchOrganizationIds,
+  type KnowledgeTenancyPostureResolver,
+} from './knowledge-organization-scope.js';
 import {
   admitObject,
   admitSourceFields,
@@ -76,6 +82,17 @@ export interface KnowledgeServiceOptions {
    * `settings` service.
    */
   resolveChunkTarget?: () => Promise<number | undefined>;
+  /**
+   * The deployment's effective tenancy posture (ADR-0105 D1), read at each
+   * assembly and each search (ADR-0161 K8, item 9): under `group` and
+   * `isolated` a document assembled from a record carries the record's
+   * organization, and a search hands the adapter the caller's organizations
+   * (`knowledge-organization-scope.ts`). Answers `undefined` where no
+   * `tenancy` service is composed, and throws where one is registered but
+   * cannot be read. `KnowledgeServicePlugin` always wires it; omitted, the
+   * service reads as a `single`-posture deployment.
+   */
+  resolveTenancyPosture?: KnowledgeTenancyPostureResolver;
   /**
    * Default top-K when callers don't specify. The adapter may cap
    * further; the service does not enforce an upper bound itself.
@@ -186,6 +203,16 @@ export class KnowledgeService implements IKnowledgeService {
       throw new Error(
         `[knowledge] indexDocument refused document '${doc.id}': docHash is computed by the knowledge service ` +
           'from the content, title and metadata; omit it.',
+      );
+    }
+    // `organizationId` is the service's too (ADR-0161 K8, item 9): it is the
+    // organization of the record a document was assembled from. A caller's own
+    // value would place a document inside an organization's ranking scope on
+    // the caller's word alone.
+    if (doc.organizationId !== undefined) {
+      throw new Error(
+        `[knowledge] indexDocument refused document '${doc.id}': organizationId is set by the knowledge service ` +
+          "from the record a document is assembled from; omit it.",
       );
     }
     // The passages are the service's too (ADR-0161 K1): one splitter cuts
@@ -416,6 +443,25 @@ export class KnowledgeService implements IKnowledgeService {
       };
     }
 
+    // The posture decides whether each document carries its record's
+    // organization (ADR-0161 K8, item 9); read once per walk. A posture that
+    // cannot be read stops the walk before any write: a document assembled
+    // without its organization would drop out of every walled search.
+    let posture: TenancyPosture | undefined;
+    try {
+      posture = await this.readTenancyPosture();
+    } catch (err) {
+      return {
+        ok: false,
+        object,
+        discovered: 0,
+        indexed: 0,
+        skipped: 0,
+        purged: null,
+        message: `reindex of source '${source.id}' refused: the tenancy posture could not be read (${errorText(err)}); nothing was written.`,
+      };
+    }
+
     // What the adapter holds before the walk: the skip's hashes, and the
     // purge's candidates once the walk is complete.
     const listing = await listAdapterDocuments(source, adapter);
@@ -483,7 +529,7 @@ export class KnowledgeService implements IKnowledgeService {
 
       let docs: KnowledgeDocument[];
       try {
-        docs = rows.map((row) => recordToDocument(source, objSource, row, schema));
+        docs = rows.map((row) => recordToDocument(source, objSource, row, schema, posture));
       } catch (err) {
         return stopped(`building the page's documents failed: ${errorText(err)}`);
       }
@@ -609,7 +655,7 @@ export class KnowledgeService implements IKnowledgeService {
     if (sources.length === 0) return [];
 
     const rawHits: KnowledgeHit[] = [];
-    for (const source of sources) {
+    for (const { source, organizationIds } of sources) {
       const adapter = this.adapters.get(source.adapter);
       if (!adapter) {
         this.options.logger?.warn?.(
@@ -622,6 +668,7 @@ export class KnowledgeService implements IKnowledgeService {
           source,
           topK,
           filter: opts.filter,
+          ...(organizationIds === undefined ? {} : { organizationIds }),
         });
         // A hit is served as the source it was searched for. One whose
         // `sourceId` names another source (an adapter answering from a store
@@ -736,7 +783,7 @@ export class KnowledgeService implements IKnowledgeService {
           this.reportWhereUnenforceable(source);
           return;
         }
-        const doc = recordToDocument(source, objSource, payload, this.schemaFor(object));
+        const doc = recordToDocument(source, objSource, payload, this.schemaFor(object), await this.readTenancyPosture());
         await this.writeSynced(source, adapter, doc, recordId);
         return;
       }
@@ -749,7 +796,7 @@ export class KnowledgeService implements IKnowledgeService {
       }
       const row = await rereadRow(engine, objSource, recordId);
       if (row) {
-        const doc = recordToDocument(source, objSource, row, this.schemaFor(object));
+        const doc = recordToDocument(source, objSource, row, this.schemaFor(object), await this.readTenancyPosture());
         await this.writeSynced(source, adapter, doc, recordId);
       } else {
         await adapter.delete([documentIdFor(source.id, String(recordId))], { source, reason: 'event-sync' });
@@ -890,15 +937,20 @@ export class KnowledgeService implements IKnowledgeService {
    * hit with no `sourceRecordId`). Fails CLOSED: a gate that throws refuses
    * every source over that object, reported once at `error`. The objects'
    * admissions are asked concurrently.
+   *
+   * Each admitted source carries the organizations its search hands the
+   * adapter ({@link scopeByOrganization}, ADR-0161 K8, item 9). The system
+   * context's bypass above covers that scope too: the system identity's
+   * search is handed no organization filter.
    */
   private async admitSources(
     sources: KnowledgeSource[],
     ctx: ExecutionContext | undefined,
-  ): Promise<KnowledgeSource[]> {
-    if (ctx?.isSystem) return sources;
+  ): Promise<Array<{ source: KnowledgeSource; organizationIds?: string[] }>> {
+    if (ctx?.isSystem) return sources.map((source) => ({ source }));
     const engine = this.options.dataEngine;
     if (!ctx || !engine) {
-      const kept = sources.filter((source) => source.source.kind !== 'object');
+      const kept = sources.filter((source) => source.source.kind !== 'object').map((source) => ({ source }));
       if (kept.length < sources.length) {
         this.options.logger?.warn?.(
           !ctx
@@ -953,7 +1005,7 @@ export class KnowledgeService implements IKnowledgeService {
         );
       }
     }
-    return out;
+    return this.scopeByOrganization(out, ctx);
   }
 
   /** A gate lookup threw: every source over `object` is refused (fail-closed), reported once at `error`, `warn` as the fallback. */
@@ -963,6 +1015,54 @@ export class KnowledgeService implements IKnowledgeService {
       `(${err.message}); no source over it is searched for this caller (fail-closed).`;
     if (this.options.logger?.error) this.options.logger.error(report);
     else this.options.logger?.warn?.(report);
+  }
+
+  /** The deployment's effective tenancy posture, or `undefined` when no resolver is wired. Throws what the resolver throws. */
+  private async readTenancyPosture(): Promise<TenancyPosture | undefined> {
+    return this.options.resolveTenancyPosture ? await this.options.resolveTenancyPosture() : undefined;
+  }
+
+  /**
+   * [ADR-0161 K8, item 9] Pair each source {@link admitSources} admitted for
+   * a caller that is NOT the system identity (admission's own bypass answers
+   * that one before this runs) with the organizations its search hands the
+   * adapter (`searchOrganizationIds`): computed here, from the caller's
+   * execution context and the deployment's posture, never from anything the
+   * caller passes. A `file` / `http` source gets none — its documents carry no
+   * organization, and the adapter owns its ACL.
+   *
+   * The posture is read once per search, and only when an `object` source is
+   * admitted. A posture that cannot be read leaves every `object` source
+   * unsearched for this call (fail-closed: whether a wall stands is unknown),
+   * reported at `error`, `warn` as the fallback.
+   */
+  private async scopeByOrganization(
+    sources: KnowledgeSource[],
+    ctx: ExecutionContext,
+  ): Promise<Array<{ source: KnowledgeSource; organizationIds?: string[] }>> {
+    if (!sources.some((source) => source.source.kind === 'object')) {
+      return sources.map((source) => ({ source }));
+    }
+    let posture: TenancyPosture | undefined;
+    try {
+      posture = await this.readTenancyPosture();
+    } catch (err) {
+      const report =
+        `[knowledge] the tenancy posture could not be read (${errorText(err)}); no object source is searched ` +
+        'for this caller (fail-closed).';
+      if (this.options.logger?.error) this.options.logger.error(report);
+      else this.options.logger?.warn?.(report);
+      return sources.filter((source) => source.source.kind !== 'object').map((source) => ({ source }));
+    }
+    return sources.map((source) => {
+      if (source.source.kind !== 'object') return { source };
+      const organizationIds = searchOrganizationIds(
+        ctx,
+        posture,
+        this.schemaFor((source.source as ObjectKnowledgeSource).object),
+      );
+      return organizationIds === undefined ? { source } : { source, organizationIds };
+    });
   }
 
   private sourcesForObject(object: string): KnowledgeSource[] {
@@ -1283,17 +1383,29 @@ export async function purgeDocuments(input: PurgeDocumentsInput): Promise<PurgeD
  * when what the hash covers or how it serializes changes: every stored hash
  * then reads as changed, and the next complete reindex writes every document
  * once.
+ *
+ * Not bumped for `organizationId` (ADR-0161 K8, item 9): the organization
+ * enters the hashed body only when the document carries one, so a document
+ * without one hashes as it did before, and only the documents that gained an
+ * organization read as changed — exactly the ones a complete reindex must
+ * write again for a walled search to rank them.
  */
 export const DOC_HASH_VERSION = 'v1';
 
 /**
  * A document's `docHash` (ADR-0161 K8, item 2): SHA-256 over its content,
- * title and metadata, serialized with object keys in a stable order, behind
+ * title and metadata — and its organization, when it carries one (item 9) —
+ * serialized with object keys in a stable order, behind
  * the {@link DOC_HASH_VERSION} prefix. The same assembled document gives the
  * same hash on every machine, whatever order its metadata keys were built in.
  */
-export function computeDocHash(doc: Pick<KnowledgeDocument, 'content' | 'title' | 'metadata'>): string {
-  const body = stableJson({ content: doc.content, title: doc.title ?? null, metadata: doc.metadata ?? {} });
+export function computeDocHash(doc: Pick<KnowledgeDocument, 'content' | 'title' | 'metadata' | 'organizationId'>): string {
+  const body = stableJson({
+    content: doc.content,
+    title: doc.title ?? null,
+    metadata: doc.metadata ?? {},
+    ...(doc.organizationId === undefined ? {} : { organizationId: doc.organizationId }),
+  });
   return `${DOC_HASH_VERSION}:${createHash('sha256').update(body).digest('hex')}`;
 }
 
@@ -1343,12 +1455,19 @@ export function documentIdFor(sourceId: string, recordId: string): string {
  * served to every reader the source admits, and a mask placeholder is no
  * content. Without a schema nothing is withheld here (the engine's event body
  * and read path still apply their own projection upstream).
+ *
+ * `posture` (the deployment's effective tenancy posture) decides the
+ * document's `organizationId` (ADR-0161 K8, item 9): the record's
+ * `organization_id` under `group` and `isolated`, none under `single` or with
+ * no posture — `documentOrganizationId`. The organization enters `docHash`
+ * only when the document carries one.
  */
 export function recordToDocument(
   source: KnowledgeSource,
   objSource: ObjectKnowledgeSource,
   record: Record<string, unknown>,
   schema?: unknown,
+  posture?: TenancyPosture,
 ): KnowledgeDocument {
   const withheld = new Set<string>([
     ...collectCredentialWriteResponseFields(schema),
@@ -1381,6 +1500,8 @@ export function recordToDocument(
     title: typeof record.title === 'string' && !withheld.has('title') ? record.title : undefined,
     metadata,
   };
+  const organizationId = documentOrganizationId(record, posture);
+  if (organizationId !== undefined) doc.organizationId = organizationId;
   doc.docHash = computeDocHash(doc);
   return doc;
 }

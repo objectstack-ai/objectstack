@@ -187,6 +187,9 @@ describe('search_knowledge — malformed arguments', () => {
     // (which would answer no passage, i.e. "nothing matched").
     [{ query: 'q', sourceIds: [] }, 'sourceIds'],
     [{ query: 'q', sources: ['policy_clauses'] }, 'sources'],
+    // The organizations a search is scoped to are the service's to compute
+    // from the caller's identity (ADR-0161 K8, item 9): never an argument.
+    [{ query: 'q', organizationIds: ['org_b'] }, 'organizationIds'],
   ])('refuses %j with VALIDATION_ERROR naming %s, and searches nothing', async (input, named) => {
     const { service, adapter } = setup();
     const err = await service.knowledgeTools().searchKnowledge(input, caller).catch((e) => e);
