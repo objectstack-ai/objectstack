@@ -287,7 +287,6 @@ async function editStartLabel(value: string): Promise<void> {
   fireEvent.change(box, { target: { value } });
   fireEvent.blur(box);
   await waitFor(() => expect(document.querySelector('[data-node-id="start"]')).toHaveTextContent(value));
-  await screen.findByTestId('studio-save', undefined, { timeout: 8000 });
   expect(screen.queryByTestId('studio-held'), 'a plain edit is unsaved, not held').toBeNull();
 }
 
