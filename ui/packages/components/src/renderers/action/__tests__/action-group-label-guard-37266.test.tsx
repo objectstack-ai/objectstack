@@ -18,7 +18,7 @@
  * prints no `[object Object]`, and does not translate the map.
  */
 
-import { describe, it, expect, vi, beforeEach, afterEach, type Mock } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach, type Mock, type MockInstance } from 'vitest';
 import { render, screen, fireEvent, waitFor, cleanup } from '@testing-library/react';
 import '@testing-library/jest-dom';
 import React from 'react';
@@ -31,7 +31,7 @@ import '../action-group';
 const LOCALE_MAP = { en: 'Approve', 'zh-CN': '批准' };
 
 let run: Mock<(action: ActionDef, ctx: ActionContext) => Promise<ActionResult>>;
-let warn: ReturnType<typeof vi.spyOn>;
+let warn: MockInstance<(...args: unknown[]) => void>;
 let consoleError: ReturnType<typeof vi.spyOn>;
 
 beforeEach(() => {
