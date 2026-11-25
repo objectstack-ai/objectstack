@@ -62,7 +62,7 @@ const PAYLOADS: Record<string, unknown> = {
 const fetchMock = vi.fn();
 
 function ok(body: unknown): Response {
-  return { ok: true, status: 200, statusText: 'OK', json: async () => body } as unknown as Response;
+  return { ok: true, status: 200, statusText: 'OK', headers: new Headers(), json: async () => body } as unknown as Response;
 }
 
 /** GET answers the namespace named in the URL; PUT answers the values it was sent. */

@@ -52,6 +52,9 @@ const objectDef = {
     seats: { name: 'seats', type: 'number', label: 'Seats' },
     rate: { name: 'rate', type: 'percent', label: 'Rate' },
     score: { name: 'score', type: 'formula', label: 'Score' },
+    close_date: { name: 'close_date', type: 'date', label: 'Close date' },
+    signed_at: { name: 'signed_at', type: 'datetime', label: 'Signed at' },
+    call_time: { name: 'call_time', type: 'time', label: 'Call time' },
   },
 };
 
@@ -160,5 +163,33 @@ describe('ListView on a board: the settings it offers (objectstack#36370)', () =
     // Without the host's key the schema's own id names the view; signed out reads `-`.
     mount({ schemaExtras: { id: 'board_view' } });
     expect(await collapseKey()).toBe(`-:${OBJECT}:board_view`);
+  });
+});
+
+/**
+ * objectstack#36880 — each lane statistic offers the fields the aggregate
+ * table's row for THAT function accepts (the verdict `@objectstack/lint` gives
+ * `kanban.summary`): a date, a date-time and a time have a minimum and a
+ * maximum, and neither a sum nor an average; a percent averages but does not
+ * add; a formula and a boolean are offered under none.
+ */
+describe('ListView on a board: each lane statistic offers its own fields (objectstack#36880)', () => {
+  const OFFERED: Record<string, string[]> = {
+    sum: ['amount', 'seats'],
+    avg: ['amount', 'seats', 'rate'],
+    min: ['amount', 'seats', 'rate', 'close_date', 'signed_at', 'call_time'],
+    max: ['amount', 'seats', 'rate', 'close_date', 'signed_at', 'call_time'],
+  };
+  const CANDIDATES = ['amount', 'seats', 'rate', 'score', 'closed', 'name', 'close_date', 'signed_at', 'call_time'];
+
+  it('offers min and max over the temporal fields, and every function only what its row accepts', async () => {
+    mount();
+    await waitFor(() => expect(screen.getByTestId('object-kanban-spy')).toBeTruthy());
+    fireEvent.click(await screen.findByTestId('toolbar-display-trigger'));
+    fireEvent.click(await screen.findByTestId('options-row-lane-summary'));
+    for (const [fn, offered] of Object.entries(OFFERED)) {
+      const shown = CANDIDATES.filter((name) => screen.queryByTestId(`options-lane-summary-${fn}:${name}`) !== null);
+      expect({ fn, shown }).toEqual({ fn, shown: offered });
+    }
   });
 });

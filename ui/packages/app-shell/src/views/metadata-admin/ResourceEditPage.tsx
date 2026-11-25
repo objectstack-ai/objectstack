@@ -1717,11 +1717,13 @@ function MetadataResourceEditPageImpl({
       document.body.style.overflow = prev;
     };
   }, [isFullscreen]);
-  // Escape exits fullscreen.
+  // Escape exits fullscreen. objectstack#36900 — not an Escape a dialog over
+  // the page (the command palette, a confirm) already took to close itself:
+  // Radix's dismissable layer marks the one it acts on `defaultPrevented`.
   React.useEffect(() => {
     if (typeof window === 'undefined' || !isFullscreen) return;
     function onKey(e: KeyboardEvent) {
-      if (e.key === 'Escape') {
+      if (e.key === 'Escape' && !e.defaultPrevented) {
         e.preventDefault();
         setIsFullscreen(false);
       }

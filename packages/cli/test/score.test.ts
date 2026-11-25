@@ -21,7 +21,7 @@ const GOOD_STACK = {
       label: 'Invoice Line',
       sharingModel: 'controlled_by_parent',
       fields: {
-        invoice: { type: 'master_detail', label: 'Invoice', reference: 'invoice', required: true, deleteBehavior: 'cascade', inlineEdit: true },
+        invoice: { type: 'master_detail', label: 'Invoice', reference: 'invoice', required: true, deleteBehavior: 'cascade' },
         product: { type: 'text', label: 'Product', required: true },
         amount: { type: 'currency', label: 'Amount', required: true },
       },
@@ -84,7 +84,7 @@ describe('scoreMetadata', () => {
     const onlySuggestions = scoreMetadata({
       objects: [
         { name: 'invoice', label: 'Invoice', sharingModel: 'private', fields: { name: { type: 'text', label: 'Name', required: true } } },
-        { name: 'invoice_line', label: 'Line', sharingModel: 'controlled_by_parent', fields: { invoice: { type: 'master_detail', label: 'Invoice', reference: 'invoice', required: true, inlineEdit: true } } },
+        { name: 'invoice_line', label: 'Line', sharingModel: 'controlled_by_parent', fields: { invoice: { type: 'master_detail', label: 'Invoice', reference: 'invoice', required: true } } },
       ],
     });
     // A warning: master_detail not required — on an object that is NOT

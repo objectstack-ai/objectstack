@@ -47,8 +47,9 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
   ObjectIconTile,
+  RecordTopBarButton,
 } from '@object-ui/components';
-import { Database, Lock, MoreHorizontal, Plus, RotateCcw, Save, X } from 'lucide-react';
+import { Bot, Database, Lock, MoreHorizontal, Plus, RotateCcw, Save, X } from 'lucide-react';
 import { toast } from 'sonner';
 import { formatMetadataError } from '@object-ui/data-objectstack';
 import { useObjectTranslation, useObjectLabel } from '@object-ui/i18n';
@@ -82,6 +83,7 @@ import {
   defaultGalleryFromObject,
 } from './InterfaceListPage.js';
 import { RecordDetailView } from './RecordDetailView.js';
+import { useChatDockControl } from '../layout/chatDockControl.js';
 import { OpenInSidePanelButton } from './objectViewOpenAsPage.js';
 import { listOriginOf, listShownRowsOf, type ListShownRows } from './objectViewRecordNavigation.js';
 import { usePhoneViewport } from '../hooks/usePhoneViewport.js';
@@ -664,6 +666,18 @@ export function ObjectDataPage({ dataSource, objects }: any) {
     closeRecordDrawer();
     openRecordPage(openedRecordId);
   }, [openedRecordId, closeRecordDrawer, openRecordPage]);
+  // objectstack#36998 — the drawer is the modal sheet over the whole page,
+  // the top bar's robot (the assistant's one standing entry) included. So
+  // its bar carries the entry beside ⤢, drawn where the robot is (a layout
+  // hosting the assistant hands a dock handle only while the runtime serves
+  // AI): the record's full page opens, as ⤢ opens it, with the assistant
+  // open beside it.
+  const dock = useChatDockControl();
+  const openDrawerRecordWithAssistant = React.useCallback(() => {
+    if (!openedRecordId || !dock) return;
+    openDrawerRecordAsPage();
+    dock.open();
+  }, [openedRecordId, dock, openDrawerRecordAsPage]);
   React.useEffect(() => {
     if (openedRecordId && !navOverlay.isOpen) navOverlay.open({ id: openedRecordId });
     else if (!openedRecordId && navOverlay.isOpen) navOverlay.close();
@@ -1122,6 +1136,15 @@ export function ObjectDataPage({ dataSource, objects }: any) {
           {...navOverlay}
           setIsOpen={(open: boolean) => { if (!open) closeRecordDrawer(); }}
           onExpand={openedRecordId ? openDrawerRecordAsPage : undefined}
+          toggles={openedRecordId && dock ? (
+            <RecordTopBarButton
+              label={t('topbar.aiAssistant', { defaultValue: 'AI Assistant' })}
+              onClick={openDrawerRecordWithAssistant}
+              data-testid="record-pane-open-assistant"
+            >
+              <Bot className="h-3.5 w-3.5" />
+            </RecordTopBarButton>
+          ) : undefined}
           title={servedObjectLabel(objectDef, language, objectLabel)}
         >
           {(record: any) => (

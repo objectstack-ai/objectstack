@@ -52,7 +52,7 @@ describe('lintDataModel — relationships', () => {
 
   // objectstack#35889: the parent's field group, not the FK's inlineEdit, inlines a child.
   it('suggests a parent field group for master_detail line-item children, inlineEdit or not', () => {
-    for (const inlineEdit of [undefined, true]) {
+    for (const inlineEdit of [undefined, 'grid']) {
       const issues = lintDataModel([
         { name: 'order', fields: { name: { type: 'text' } } },
         { name: 'order_line', fields: { order: { type: 'master_detail', reference: 'order', required: true, deleteBehavior: 'cascade', ...(inlineEdit ? { inlineEdit } : {}) } } },
@@ -119,7 +119,7 @@ describe('lintInlineEditBulk — relationship/inline-edit-needs-bulk', () => {
   });
   const hits = (objects: any[]) => lintInlineEditBulk(objects).filter((i) => i.rule === RULE);
 
-  it.each([undefined, true, 'grid', 'form'])('warns on the parent when a group places the lines (inlineEdit %s) and its apiMethods omit bulk', (inlineEdit) => {
+  it.each([undefined, 'grid', 'form'])('warns on the parent when a group places the lines (inlineEdit %s) and its apiMethods omit bulk', (inlineEdit) => {
     const [issue, ...rest] = hits([budget({ apiMethods: OPEN }), line(inlineEdit)]);
     expect(rest).toEqual([]);
     expect(issue?.severity).toBe('warning');
@@ -388,7 +388,7 @@ describe('lintConfig integration', () => {
           name: 'invoice_line',
           label: 'Invoice Line',
           fields: {
-            invoice: { type: 'master_detail', label: 'Invoice', reference: 'invoice', required: true, deleteBehavior: 'cascade', inlineEdit: true },
+            invoice: { type: 'master_detail', label: 'Invoice', reference: 'invoice', required: true, deleteBehavior: 'cascade' },
             product: { type: 'text', label: 'Product' },
             amount: { type: 'currency', label: 'Amount' },
           },

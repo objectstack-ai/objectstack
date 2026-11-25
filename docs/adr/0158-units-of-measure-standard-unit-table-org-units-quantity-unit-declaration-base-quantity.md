@@ -1,6 +1,6 @@
 # ADR-0158: Units of measure — a closed standard unit table in the spec, organization-owned units, a quantity field that names its unit, and a base quantity stored at write
 
-**Status**: Accepted — 2026-11-19, ruled on objectstack#35339 (ruling record [`7001193034`](https://github.com/objectstack-ai/objectstack/issues/35339#issuecomment-7001193034), maintainer 「先不考虑 hotsrm，先处理平台任务，你的意见我同意」); L1 picked by the maintainer the same day on a decision card, option A 「可改，只影响以后」 (ruling record [`7003532733`](https://github.com/objectstack-ai/objectstack/issues/35339#issuecomment-7003532733)), and the rest of L1 and L2 settled by the owning seat, per the analysis recommendation. `docs/adr/**` is Tier H (Prime Directive #14): this record lands by an authorised approval and the maintainer's merge. **This record declares; it implements nothing** — no schema, no code, no changeset. The R1 cards follow it, as the ruling's "Next" says. · **Amended** (2026-11-20, [#35489](https://github.com/objectstack-ai/objectstack/issues/35489) and [#35492](https://github.com/objectstack-ai/objectstack/issues/35492), under the owning seat's contract review): L3 records the `unitConfig` key as shipped, and Open items 3, 6, 8, 9, 11 and 12 carry the R1 settlements of the membership card and the backfill card.
+**Status**: Accepted — 2026-11-19, ruled on objectstack#35339 (ruling record [`7001193034`](https://github.com/objectstack-ai/objectstack/issues/35339#issuecomment-7001193034), maintainer 「先不考虑 hotsrm，先处理平台任务，你的意见我同意」); L1 picked by the maintainer the same day on a decision card, option A 「可改，只影响以后」 (ruling record [`7003532733`](https://github.com/objectstack-ai/objectstack/issues/35339#issuecomment-7003532733)), and the rest of L1 and L2 settled by the owning seat, per the analysis recommendation. `docs/adr/**` is Tier H (Prime Directive #14): this record lands by an authorised approval and the maintainer's merge. **This record declares; it implements nothing** — no schema, no code, no changeset. The R1 cards follow it, as the ruling's "Next" says. · **Amended** (2026-11-20, [#35489](https://github.com/objectstack-ai/objectstack/issues/35489) and [#35492](https://github.com/objectstack-ai/objectstack/issues/35492), under the owning seat's contract review): L3 records the `unitConfig` key as shipped, and Open items 3, 6, 8, 9, 11 and 12 carry the R1 settlements of the membership card and the backfill card. · **Amended** (2026-11-24, [#36086](https://github.com/objectstack-ai/objectstack/issues/36086)): a dated note under Open item 12 records the raw-aggregate set [#36060](https://github.com/objectstack-ai/objectstack/pull/36060) built. The item is left as written.
 
 - **Date**: 2026-11-19
 - **Decided by**: the maintainer, 2026-11-19T06:01:58Z, in the design discussion for #35339, verbatim and untranslated:
@@ -769,6 +769,25 @@ amended with each answer, the way ADR-0144's open items were.
       code.
 
     The aggregate half stays with [#35491](https://github.com/objectstack-ai/objectstack/issues/35491).
+
+    *Note (2026-11-24, [#36086](https://github.com/objectstack-ai/objectstack/issues/36086)):* the aggregate half is
+    settled on [#35491](https://github.com/objectstack-ai/objectstack/issues/35491) and built by
+    [#36060](https://github.com/objectstack-ai/objectstack/pull/36060). The raw aggregates are `sum`, `avg`, `min` and
+    `max` over a `record`-mode quantity. Each is refused unless the query groups by the quantity's own `unitField`.
+    - **ObjectQL aggregate.** Refused `INVALID_FIELD` / 400 before any driver is asked
+      (`packages/objectql/src/record-unit-aggregate-door.ts#assertRecordUnitAggregatesGrouped`).
+    - **`summary` field.** Refused `INVALID_METADATA` / 422 when the object is registered
+      (`packages/objectql/src/record-unit-aggregate-door.ts#RecordUnitSummaryRefusedError`). A roll-up has no group,
+      so R1 refuses every roll-up of a `record`-mode quantity, as L3 says.
+    - **Analytics cube measure.** Refused `INVALID_FIELD` / 400, judged on each query
+      (`packages/services/service-analytics/src/cube-record-unit-door.ts#assertRecordUnitAggregatesGrouped`). A query
+      is grouped when one of its dimensions is the unit field on the measure's own object. A filter that pins one
+      unit is not a grouping.
+    - **Not judged.** `count` and `count_distinct`, a `fixed`-mode quantity, and a number with no `unitConfig`.
+
+    No error code is added. A dataset is judged when it is queried, as currency is; the build-time guard for both
+    families is not built and is [#36083](https://github.com/objectstack-ai/objectstack/issues/36083). The sentence
+    above is left as written.
 
 ## Verification notes
 
