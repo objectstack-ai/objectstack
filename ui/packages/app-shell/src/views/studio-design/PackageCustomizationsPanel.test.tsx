@@ -77,7 +77,8 @@ function stubWire(status: number, data: unknown) {
         status === 200
           ? { success: true, data }
           : { success: false, error: { code: 'PERMISSION_DENIED', message: 'You may not read this package.' } };
-      return { ok: status === 200, status, json: async () => body } as Response;
+      // `headers`: a transport that reads them finds an empty set, not a throw.
+      return { ok: status === 200, status, headers: new Headers(), json: async () => body } as Response;
     }),
   );
 }

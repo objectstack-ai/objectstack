@@ -3902,7 +3902,7 @@ const zh = {
     build: {
       title: '构建应用',
       noCapability: '本系统不提供构建应用功能 — 它需要「管理元数据」权限,而你的账号没有该权限。',
-      inStudio: '在 Studio 中新建',
+      inStudio: '新建空白应用',
     },
     template: {
       title: '从模板开始',

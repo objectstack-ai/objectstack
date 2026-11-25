@@ -52,7 +52,7 @@ import { appAddressSegment, appStudioDesignPath } from '../utils/appRoute.js';
 import { useServedAppLabel } from '../hooks/useServedAppLabel.js';
 import { useLauncherApps } from '../hooks/useLauncherApps.js';
 import { useStudioEntryGate } from '../hooks/useStudioDesignGate.js';
-import { useAddAppEntries, useMayAddApp } from '../hooks/useAddAppEntries.js';
+import { useAddAppEntries, useMayAddApp, type AddAppEntry } from '../hooks/useAddAppEntries.js';
 import { AppMark } from './AppMark.js';
 import { useDesignMode } from './designMode.js';
 import { useAppStudioEntry } from './ShellPageActions.js';
@@ -129,9 +129,8 @@ function StudioAppItem({ entry }: { entry: StudioEntry }) {
 }
 
 /** 「Add app」 and its choices. */
-function AddAppSubmenu() {
+function AddAppSubmenu({ entries }: { entries: readonly AddAppEntry[] }) {
   const { t } = useObjectTranslation();
-  const entries = useAddAppEntries();
   return (
     <>
       <DropdownMenuSub>
@@ -169,6 +168,10 @@ export function SidebarAppMenu({ activeAppName, onAppChange }: SidebarAppMenuPro
   const apps = metadataApps || [];
   const { apps: launcherApps } = useLauncherApps(apps);
   const mayAddApp = useMayAddApp();
+  // objectstack#36908 — a menu with nothing to offer is not drawn: 「Add app」
+  // (and the separator above it) only when the list has an entry.
+  const addAppEntries = useAddAppEntries();
+  const offerAddApp = mayAddApp && addAppEntries.length > 0;
   const enterDesignMode = useEnterDesignMode(apps, activeAppName);
   const studioEntry = useAppStudioEntry(true, activeAppName).entry;
   const [query, setQuery] = React.useState('');
@@ -239,10 +242,10 @@ export function SidebarAppMenu({ activeAppName, onAppChange }: SidebarAppMenuPro
             </div>
           )}
         </div>
-        {(enterDesignMode || studioEntry || mayAddApp) && <DropdownMenuSeparator />}
+        {(enterDesignMode || studioEntry || offerAddApp) && <DropdownMenuSeparator />}
         {enterDesignMode && <DesignLayoutItem onEnter={enterDesignMode} />}
         {studioEntry && <StudioAppItem entry={studioEntry} />}
-        {mayAddApp && <AddAppSubmenu />}
+        {offerAddApp && <AddAppSubmenu entries={addAppEntries} />}
       </DropdownMenuContent>
     </DropdownMenu>
   );

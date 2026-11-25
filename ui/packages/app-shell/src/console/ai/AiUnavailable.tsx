@@ -69,7 +69,7 @@ export function AiUnavailable({
           {offerStudio && (
             <Button variant="outline" asChild>
               <Link to={SETUP_NEW_PACKAGE_PATH} data-testid="ai-unavailable-studio">
-                {t('home.build.inStudio', { defaultValue: 'New in Studio' })}
+                {t('home.build.inStudio', { defaultValue: 'New blank app' })}
               </Link>
             </Button>
           )}

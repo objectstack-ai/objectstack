@@ -4526,7 +4526,7 @@ const en = {
     build: {
       title: 'Build an app',
       noCapability: 'Building apps isn\'t available in this system — it requires the “Manage Metadata” permission, which your account doesn\'t have.',
-      inStudio: 'New in Studio',
+      inStudio: 'New blank app',
     },
     template: {
       title: 'Start with a template',
