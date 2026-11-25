@@ -219,9 +219,6 @@ function rowsEngine(rows: Array<Record<string, unknown>>) {
       const out = sorted.filter((r) => matches(r, query?.where));
       return query?.limit === undefined ? out : out.slice(0, query.limit);
     },
-    async findOne(_object: string, query: { where?: Record<string, unknown> }) {
-      return sorted.find((r) => matches(r, query?.where)) ?? null;
-    },
     async count(_object: string, query: { where?: Record<string, unknown> }) {
       return sorted.filter((r) => matches(r, query?.where)).length;
     },
