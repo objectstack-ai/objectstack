@@ -9,9 +9,10 @@
  *   no `branding.logo` — its `icon` on a tile, coloured by its own
  *   `branding.primaryColor` when that is a hex, else by the palette colour its
  *   name picks (objectstack#36157).
- * - The dropdown ends with the way back to Home, 「All apps」, and, for a
- *   viewer the top bar offers its Studio button to, 「Edit APP in Studio」 to
- *   the button's own target.
+ * - The dropdown ends with the way back to Home (「Back to app start page」;
+ *   the 「All apps」 row beside it is gone from a desktop, objectstack#37163)
+ *   and, for a viewer the top bar offers its Studio button to, 「Edit APP in
+ *   Studio」 to the button's own target.
  *
  * Real subjects: `AppSwitcher`, `AppMark` and its colour derivation
  * (`appTileColors`), the real
@@ -177,13 +178,12 @@ describe('every switcher row carries its app\'s glyph (objectui#12201)', () => {
 });
 
 describe('the dropdown ends with the way back to Home and the admin Studio row (objectui#12201)', () => {
-  it('「All apps」 links to the declared home', () => {
+  it('the way back to Home links to the declared home', () => {
     apps = [HOTCRM, { ...PROJECTS, isDefault: true }];
     renderSwitcher('hotcrm');
-    const allApps = menu().getByTestId('app-switcher-all-apps');
-    expect(allApps).toHaveTextContent('All apps');
+    const home = menu().getByTestId('app-switcher-home');
     // `useHomePath` — the app declared `isDefault`, not a literal launcher path.
-    expect(allApps).toHaveAttribute('href', '/apps/projects');
+    expect(home).toHaveAttribute('href', '/apps/projects');
   });
 
   it('with the bridge target, the LAST row is 「Edit APP in Studio」 to that very target', () => {
@@ -194,14 +194,14 @@ describe('the dropdown ends with the way back to Home and the admin Studio row (
     expect(last).toContainElement(studio);
     expect(studio).toHaveTextContent('Edit HotCRM in Studio');
     expect(studio).toHaveAttribute('href', '/studio/com.acme.hotcrm/data');
-    // 「All apps」 sits right before it.
-    expect(rows[rows.length - 2]).toContainElement(menu().getByTestId('app-switcher-all-apps'));
+    // The way back to Home sits right before it (no Setup app in this list).
+    expect(rows[rows.length - 2]).toContainElement(menu().getByTestId('app-switcher-home'));
   });
 
   it('without a bridge target (a member, or an app no package owns) there is no Studio row', () => {
     renderSwitcher('hotcrm', null);
     expect(menu().queryByTestId('app-switcher-edit-in-studio')).not.toBeInTheDocument();
-    expect(menu().getByTestId('app-switcher-all-apps')).toBeInTheDocument();
+    expect(menu().getByTestId('app-switcher-home')).toBeInTheDocument();
   });
 });
 

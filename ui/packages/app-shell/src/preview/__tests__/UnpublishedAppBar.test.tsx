@@ -82,7 +82,7 @@ function renderBar(path = '/apps/crm') {
 }
 
 function mockPutOk() {
-  global.fetch = vi.fn(async () => ({ ok: true, json: async () => ({}) })) as unknown as typeof fetch;
+  global.fetch = vi.fn(async () => ({ headers: new Headers(), ok: true, json: async () => ({}) })) as unknown as typeof fetch;
 }
 
 /** The single `PUT /api/v1/meta/app/:name` the Publish button fires. */

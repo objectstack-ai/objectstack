@@ -24,6 +24,10 @@ import { ManifestSchema } from '@objectstack/spec/kernel';
 
 import { PackageDetailSheet, type InstalledPackageRow } from './PackagesPage';
 import { t, tFormat } from './i18n';
+// The source under test reaches a dynamic `import('@objectstack/formula')` and `import('@objectstack/lint')`: pay its load at
+// collection, never inside a case's clocked window (`check:test-source-alias`).
+import '@objectstack/formula';
+import '@objectstack/lint';
 
 const PKG_ID = 'com.acme.crm';
 const PKG: InstalledPackageRow = {
@@ -40,7 +44,7 @@ let calls: Call[];
 function respond(body: unknown, status = 200) {
   const text = JSON.stringify(body);
   return {
-    ok: status >= 200 && status < 300,
+    headers: new Headers(), ok: status >= 200 && status < 300,
     status,
     text: async () => text,
     json: async () => JSON.parse(text),

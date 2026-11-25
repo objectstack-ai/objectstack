@@ -39,6 +39,12 @@ import {
 } from '@objectstack/spec/kernel';
 import { readEnvelopeFailureText } from '../../utils/apiErrorEnvelope.js';
 import { whenQuiet } from '../../observability/settleSignal.js';
+import { createAuthenticatedFetch } from '@object-ui/auth';
+
+/** The console's authenticated fetch: the stored bearer token beside the session cookie. */
+function authFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+  return createAuthenticatedFetch()(input, init);
+}
 
 export interface PkgEntry {
   id: string;
@@ -279,7 +285,7 @@ export interface EnsuredCustomizationPackage {
  * else in the app announces it.
  */
 export async function ensureCustomizationPackage(baseId: string): Promise<EnsuredCustomizationPackage> {
-  const res = await fetch(`/api/v1/packages/${encodeURIComponent(baseId)}/ensure-customization`, {
+  const res = await authFetch(`/api/v1/packages/${encodeURIComponent(baseId)}/ensure-customization`, {
     method: 'POST',
     credentials: 'include',
     headers: { Accept: 'application/json' },
@@ -389,7 +395,7 @@ function readPackagesPayload(): Promise<unknown> {
   const pending = pendingPackageReads.get(transport);
   if (pending) return pending;
   const read = (async () => {
-    const res = await fetch('/api/v1/packages', {
+    const res = await authFetch('/api/v1/packages', {
       credentials: 'include',
       headers: { Accept: 'application/json' },
       cache: 'no-store',
@@ -576,7 +582,7 @@ export async function duplicatePackage(sourceId: string, targetId: string, targe
   // before it, so a read asked after it must not join that one, nor be answered
   // by the session's held list (objectstack#29119). Forgotten however
   // the write ends: a failed duplicate may still have copied part of a package.
-  const res = await fetch(`/api/v1/packages/${encodeURIComponent(sourceId)}/duplicate`, {
+  const res = await authFetch(`/api/v1/packages/${encodeURIComponent(sourceId)}/duplicate`, {
     method: 'POST',
     credentials: 'include',
     headers: { 'Content-Type': 'application/json', Accept: 'application/json' },

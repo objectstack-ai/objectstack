@@ -31,7 +31,8 @@ import { MemoryRouter } from 'react-router-dom';
 vi.mock('@object-ui/auth', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   useAuth: () => ({ user: { id: 'u1', name: 'Ada', image: null }, activeOrganization: null }),
-  createAuthenticatedFetch: () => vi.fn(),
+  // The wire is the global `fetch` this file stubs; the authenticated fetch hands its requests to it.
+  createAuthenticatedFetch: () => (input: RequestInfo | URL, init?: RequestInit) => fetch(input, init),
 }));
 
 vi.mock('@object-ui/collaboration', async (importOriginal) => ({

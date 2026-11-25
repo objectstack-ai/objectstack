@@ -53,8 +53,25 @@
  * step (the keyed upsert makes that harmless). A position that cannot be
  * stored stops the pull (`run_record_unavailable`).
  *
- * Delete marking (D3), the provenance columns (D4) and drift (D6) are later
- * changes; their keys stay `planned` in the liveness ledger.
+ * ## Deletes (ADR-0153 D3)
+ *
+ * Under `deletePolicy` absent or `'mark'` the pull marks rows the source
+ * deleted (`./sync-delete-mark.ts`): through `deletedField` on every run that
+ * declares it, and by absence on a `full: true` run whose read was complete.
+ * The read is complete when the windows read to their end from
+ * `watermark.start` (on either read path, a window that does not answer stops
+ * the run) and no source row's watermark is NULL: a NULL-watermark row is in
+ * no window and would read as absent, so the run counts them (D2 invariant 11,
+ * under the organization predicate; through a plugin driver's cap, a count
+ * above it is the cap plus one) and marks nothing by absence when any exist.
+ * The absence mark judges only rows the read could have read: rows of this
+ * mapping whose copied watermark is non-NULL and at or above
+ * `watermark.start`. A row whose watermark moved backwards during the run can
+ * be marked wrongly for that run; the next full run that reads it clears it.
+ * An incremental source under `'mark'` with no `deletedField` is refused
+ * before anything is read (`delete_policy_unhonourable`), as its parse is.
+ *
+ * Drift (D6) is a later change.
  *
  * ## Every read names its own `limit`
  *
@@ -80,12 +97,14 @@ import {
 import { markSyncPullWrite, needsExternalDriverFloor, resolveExternalRowCap } from '@objectstack/objectql';
 import { EXTERNAL_SCOPE_REMEDY, externalOrganizationScopeOf } from '@objectstack/core';
 import { postureEnforcesWall } from '@objectstack/spec/security';
+import { incrementalSourceDeleteRefusal } from '@objectstack/spec/data';
 import { resolveQueryReadLimits, resolveTenancyPosture } from '@objectstack/types';
 import type { ConnectorPullDeps, ConnectorPullOptions, SyncRunHandle } from './connector-pull.js';
 import {
     BUILTIN_PAGE_SIZE,
     canonOf,
     canonOfStart,
+    overCapOf,
     readSourceInWindows,
     spellCanon,
     type SyncReadPath,
@@ -98,6 +117,18 @@ import {
 import { refuseBlankMatchKeys } from './connector-pull.js';
 import { ConnectorPullError, type ConnectorPullRefusalReason } from './pull-refusal.js';
 import { carriesSyncProvenanceColumns, mappedSyncProvenanceTarget, stampSyncProvenance } from './sync-provenance-stamp.js';
+import { SyncDeleteMarker, syncDeletePolicyOf, syncDeletePolicyRefusal, type SyncDeletesNote } from './sync-delete-mark.js';
+
+/** [ADR-0153 D3] What one pull did about deletes: the run record's `deletes` and counts. */
+export interface SyncPullDeletes {
+    note: SyncDeletesNote;
+    /** Rows stamped `_sync_deleted_at`. */
+    marked: number;
+    /** Rows whose mark was cleared because the source sent them again. */
+    cleared: number;
+    /** A datasource pull: source rows whose watermark is NULL (D2 invariant 11). */
+    skippedNullWatermark?: number;
+}
 
 /** A datasource source's pull: the federated object, its read path and the window positions. */
 export interface DatasourcePullResult {
@@ -113,6 +144,8 @@ export interface DatasourcePullResult {
     watermark: { field: string; from: string | number; committed?: string | number };
     /** Rows the windows answered. */
     pulled: number;
+    /** [ADR-0153 D3] What the run did about deletes. */
+    deletes: SyncPullDeletes;
     /**
      * The import runner's counters for every batch, summed. `results` holds at
      * most {@link REFUSED_ROW_SAMPLE} refused rows, never one result per row read.
@@ -207,6 +240,10 @@ export async function pullDatasourceSource(
         return refuse('UNSUPPORTED_TRANSFORM', 400, 'unsupported_transform',
             `Mapping "${mapping}" uses transform "javascript", which a pull does not execute (no server-side sandbox)`);
     }
+    // [ADR-0153 D3] The incremental-`mark` refusal, judged again for a mapping no parse saw.
+    const deletePolicy = syncDeletePolicyOf(ds);
+    const unhonourable = syncDeletePolicyRefusal(ds) ?? incrementalSourceDeleteRefusal('datasourceSource', ds);
+    if (unhonourable) return invalid('delete_policy_unhonourable', unhonourable);
 
     // The target: a `synced` object (D4), its fields the import door's.
     const target = await readObject(deps, targetObject, environmentId);
@@ -230,6 +267,9 @@ export async function pullDatasourceSource(
             + 'remove that entry.');
     }
     const stampsProvenance = carriesSyncProvenanceColumns(target);
+    if (deletePolicy.policy === 'mark' && !stampsProvenance) {
+        return invalid('mapping_target_refused', targetWithoutSyncColumns(targetObject));
+    }
     const refusedTarget = refuseUnknownMappingTargets(artifact, targetObject, target);
     if (refusedTarget) {
         return refuse(refusedTarget.code, refusedTarget.status, 'mapping_target_refused', `Mapping "${mapping}": ${refusedTarget.error}`);
@@ -285,16 +325,25 @@ export async function pullDatasourceSource(
     }
 
     // D3: the watermark is copied unchanged onto a target field of its type.
-    const copied = artifact.fieldMapping.some((entry) => {
-        if ((entry?.transform ?? 'none') !== 'none' || single(entry.source) !== wmName) return false;
+    // The copy is what the delete mark's range is judged on.
+    let copied: string | undefined;
+    for (const entry of artifact.fieldMapping) {
+        if ((entry?.transform ?? 'none') !== 'none' || single(entry.source) !== wmName) continue;
         const name = single(entry.target);
-        return name !== undefined && !name.includes('.') && fieldOf(target, name)?.type === wmField?.type;
-    });
+        if (name !== undefined && !name.includes('.') && fieldOf(target, name)?.type === wmField?.type) { copied = name; break; }
+    }
     if (!copied) {
         return invalid('watermark_field_unmapped',
             `watermark_field_unmapped — no fieldMapping entry copies watermark.field '${wmName}' unchanged (transform `
             + `none) onto a ${String(wmField?.type)} field of '${targetObject}'. Every pulled row carries its watermark `
             + `value; add { source: '${wmName}', target: FIELD } to fieldMapping, FIELD naming such a field.`);
+    }
+
+    // [D3] `deletedField` names a field of the source object, or the pull could never read it.
+    if (deletePolicy.deletedField !== undefined && !fieldOf(source, deletePolicy.deletedField)) {
+        return invalid('source_binding_invalid',
+            `deletedField '${deletePolicy.deletedField}' is not a field of ${at}, so the pull could never read which rows `
+            + 'the source deleted. Name the source field whose truthy value means the row was deleted.');
     }
 
     // [D8] Whose rows the pull reads: the job's organization's, or every row of a shared source.
@@ -335,6 +384,7 @@ export async function pullDatasourceSource(
                 object: sourceObject,
                 where: query.where,
                 ...(query.orderBy ? { orderBy: query.orderBy } : {}),
+                ...(query.fields ? { fields: query.fields } : {}),
                 limit: query.limit ?? windowLimit,
                 // [S3] The pull reads `records` only. Without this the data door
                 // runs `engine.count` over the same `where` beside every read that
@@ -359,6 +409,12 @@ export async function pullDatasourceSource(
     // caller handed no context (as the reads do): the provenance columns are
     // `readonly`, which only a system write keeps.
     const writeContext = stampsProvenance ? markSyncPullWrite(context ?? { isSystem: true }) : context;
+    // [ADR-0153 D3] Taken before the first write: every row this run writes is stamped at or after it.
+    const runStartedAt = new Date().toISOString();
+    const marker = new SyncDeleteMarker({
+        protocol, ...(environmentId ? { environmentId } : {}), mapping, targetObject, policy: deletePolicy,
+        readContext, writeContext, runStartedAt,
+    });
     const write = async (rows: Rec[]): Promise<boolean[]> => {
         const applied = applyMappingToRows(rows, artifact, { objectSchema: target, trimWhitespace });
         if (!applied.ok) {
@@ -385,12 +441,16 @@ export async function pullDatasourceSource(
         });
         const batch = refuseBlankMatchKeys(ran, mapping, matchFields).summary;
         addBatch(summary, batch);
+        const written = rows.map((_, i) => isWritten(batch.results[i]));
+        // [D3] `deletedField` marks and clears, row by row.
+        await marker.afterBatch(rows, stamped, written);
         // [D7] What a run that stops part-way is closed with.
         run.progress.read += rows.length;
         run.progress.created = summary.created;
         run.progress.updated = summary.updated;
         run.progress.refused = summary.errors;
-        return rows.map((_, i) => isWritten(batch.results[i]));
+        run.progress.marked = marker.marked;
+        return written;
     };
     // [D7, invariant 8] Called only at a window's end: the position is stored
     // before the next window is read, so a run that stops keeps it.
@@ -404,6 +464,21 @@ export async function pullDatasourceSource(
     const report = await readSourceInWindows(windowSource, { find, write, commit }, {
         path: readPath, from, pageSize,
     });
+
+    // [D2 invariant 11, D3] The read reached its end: count the rows no window
+    // holds, then judge deletes by absence on a full run.
+    const nullWhere: Rec = scope ? { $and: [scope, { [wmName]: { $null: true } }] } : { [wmName]: { $null: true } };
+    const skippedNullWatermark = await countNullWatermarks(nullWhere, readPath, find, protocol, sourceObject, readContext, environmentId, pageSize);
+    let note: SyncDeletesNote;
+    if (deletePolicy.policy === 'ignore') note = 'ignored';
+    else if (ds.full !== true) note = 'by deletedField';
+    else if (skippedNullWatermark > 0) note = 'unjudged, null watermark';
+    else if (!marker.canMarkAbsent()) note = 'unjudged, rows refused';
+    else {
+        await marker.markAbsent({ field: copied, start: spellCanon(kind, start) });
+        note = 'judged';
+    }
+    run.progress.marked = marker.marked;
 
     return {
         source: 'datasource',
@@ -419,7 +494,68 @@ export async function pullDatasourceSource(
         },
         pulled: report.read,
         summary,
+        deletes: { note, marked: marker.marked, cleared: marker.cleared, skippedNullWatermark },
     };
+}
+
+/**
+ * [ADR-0153 D3] The refusal of a target that withholds the provenance columns
+ * (`systemFields: false`) under `deletePolicy` absent or `'mark'`: no row of it
+ * can carry the mark, so the declared policy could never be honoured.
+ */
+export function targetWithoutSyncColumns(targetObject: string): string {
+    return `targetObject '${targetObject}' carries no sync-in provenance columns (it declares systemFields: false), so `
+        + "no row of it can be marked deleted, and deletePolicy, absent or 'mark', marks a row the source deleted "
+        + "(ADR-0153 D3). Let the platform add its columns to the object, or write deletePolicy: 'ignore' on the source.";
+}
+
+/**
+ * [ADR-0153 D2 invariant 11, D3] The source rows whose watermark is NULL,
+ * under the organization predicate (`where` carries it). Through a plugin
+ * driver's floor the count is a read the floor caps: over the cap it is
+ * recorded as the cap plus one. On a built-in driver it is the door's count,
+ * or, from a door that answers none, the rows counted page by page.
+ */
+async function countNullWatermarks(
+    where: Rec,
+    readPath: SyncReadPath,
+    find: (query: SyncWindowQuery) => Promise<Rec[]>,
+    protocol: ConnectorPullDeps['protocol'],
+    object: string,
+    context: unknown,
+    environmentId: string | undefined,
+    pageSize: number,
+): Promise<number> {
+    if (readPath === 'floored') {
+        try {
+            // [review N3] The floor answers rows, not a count: read the key only.
+            return (await find({ where: where as SyncWindowQuery['where'], fields: ['id'] })).length;
+        } catch (error) {
+            const cap = overCapOf(error);
+            if (cap !== undefined) return cap + 1;
+            throw error;
+        }
+    }
+    const res = await protocol.findData({
+        object,
+        query: { object, where, limit: 1, count: true },
+        context,
+        ...(environmentId ? { environmentId } : {}),
+    } as never) as { total?: unknown } | undefined;
+    if (typeof res?.total === 'number') return res.total;
+    let count = 0;
+    let cursor: unknown;
+    for (;;) {
+        const page = await find({
+            where: (cursor === undefined ? where : { $and: [where, { id: { $gt: cursor } }] }) as SyncWindowQuery['where'],
+            orderBy: [{ field: 'id', order: 'asc' }],
+            limit: pageSize,
+            fields: ['id'],
+        });
+        count += page.length;
+        if (page.length < pageSize) return count;
+        cursor = page[page.length - 1].id;
+    }
 }
 
 /**

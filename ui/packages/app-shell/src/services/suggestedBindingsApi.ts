@@ -18,7 +18,12 @@
  * marketplaceApi raw-fetch pattern: Bearer token + `credentials: 'include'`.
  */
 
-import { TokenStorage } from '@object-ui/auth';
+import { createAuthenticatedFetch, TokenStorage } from '@object-ui/auth';
+
+/** The console's authenticated fetch: the stored bearer token beside the session cookie. */
+function authFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+  return createAuthenticatedFetch()(input, init);
+}
 
 const SERVER_URL = (import.meta.env.VITE_SERVER_URL || '').replace(/\/$/, '');
 const API_BASE = `${SERVER_URL}/api/v1/security/suggested-bindings`;
@@ -90,7 +95,7 @@ export async function listSuggestedBindings(filter: {
   if (filter.status) params.set('status', filter.status);
   if (filter.packageId) params.set('packageId', filter.packageId);
   const qs = params.toString();
-  const res = await fetch(`${API_BASE}${qs ? `?${qs}` : ''}`, {
+  const res = await authFetch(`${API_BASE}${qs ? `?${qs}` : ''}`, {
     credentials: 'include',
     headers: authHeaders(),
   });
@@ -107,7 +112,7 @@ export async function listSuggestedBindings(filter: {
  * signal that tells an acceptance in force from one merely recorded.
  */
 export async function confirmSuggestedBinding(id: string): Promise<SuggestedBindingAcceptance> {
-  const res = await fetch(`${API_BASE}/${encodeURIComponent(id)}/confirm`, {
+  const res = await authFetch(`${API_BASE}/${encodeURIComponent(id)}/confirm`, {
     method: 'POST',
     credentials: 'include',
     headers: authHeaders({ 'Content-Type': 'application/json' }),
@@ -122,7 +127,7 @@ export async function confirmSuggestedBinding(id: string): Promise<SuggestedBind
  * without the set. A row the baseline names is refused with a 409.
  */
 export async function dismissSuggestedBinding(id: string): Promise<SuggestedBinding> {
-  const res = await fetch(`${API_BASE}/${encodeURIComponent(id)}/dismiss`, {
+  const res = await authFetch(`${API_BASE}/${encodeURIComponent(id)}/dismiss`, {
     method: 'POST',
     credentials: 'include',
     headers: authHeaders({ 'Content-Type': 'application/json' }),
@@ -141,7 +146,7 @@ export async function dismissSuggestedBinding(id: string): Promise<SuggestedBind
  * thrown with the server's message, as the other calls do.
  */
 export async function reopenSuggestedBinding(id: string): Promise<SuggestedBinding> {
-  const res = await fetch(`${API_BASE}/${encodeURIComponent(id)}/reopen`, {
+  const res = await authFetch(`${API_BASE}/${encodeURIComponent(id)}/reopen`, {
     method: 'POST',
     credentials: 'include',
     headers: authHeaders({ 'Content-Type': 'application/json' }),

@@ -81,14 +81,14 @@ function stubApi(detail: unknown, opts: { detailStatus?: number } = {}) {
       gets.push(u);
       if (/\/approvals\/requests\/[^?]+$/.test(u)) {
         if (opts.detailStatus) {
-          return { ok: false, status: opts.detailStatus, json: async () => ({ error: 'nope' }) } as any;
+          return { headers: new Headers(), ok: false, status: opts.detailStatus, json: async () => ({ error: 'nope' }) } as any;
         }
-        return { ok: true, json: async () => detail } as any;
+        return { headers: new Headers(), ok: true, json: async () => detail } as any;
       }
       const list = (detail as any)?.id === PER_GROUP_DETAIL.id
         ? { ...LIST_ROW, id: PER_GROUP_DETAIL.id }
         : LIST_ROW;
-      return { ok: true, json: async () => ({ data: [list] }) } as any;
+      return { headers: new Headers(), ok: true, json: async () => ({ data: [list] }) } as any;
     }),
   );
 }
@@ -156,7 +156,7 @@ describe('useRecordApprovals — quorum progress (objectstack#4478)', () => {
       'fetch',
       vi.fn(async (url: string) => {
         gets.push(String(url));
-        return { ok: true, json: async () => ({ data: [{ ...LIST_ROW, status: 'approved' }] }) } as any;
+        return { headers: new Headers(), ok: true, json: async () => ({ data: [{ ...LIST_ROW, status: 'approved' }] }) } as any;
       }),
     );
     const { result } = mount();

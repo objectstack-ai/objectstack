@@ -60,7 +60,25 @@
 export interface UnionBranchIssue {
   readonly path?: unknown;
   readonly code?: unknown;
+  /** Read for a nested `invalid_union` only — see {@link isKindMismatchOnly}. */
+  readonly message?: unknown;
+  /** A nested `invalid_union`'s own branches — see {@link isKindMismatchOnly}. */
+  readonly errors?: unknown;
 }
+
+/**
+ * zod's own message for a failed union — the text a union issue carries when
+ * its schema declared no `error` of its own.
+ *
+ * Read here by {@link isKindMismatchOnly}, so a nested union that carries the
+ * schema's own sentence is never mistaken for a bare kind mismatch, and by the
+ * wire mapper's head rule (`../api/zod-issues-to-fields.ts`). A literal, so the
+ * rules are only as good as its match with zod's current wording:
+ * `zod-issues-to-fields.test.ts` pins it against a real failed union parse, so
+ * a zod upgrade that rewords the default fails that test instead of silently
+ * turning both rules off.
+ */
+export const ZOD_UNION_DEFAULT_MESSAGE = 'Invalid input';
 
 /**
  * How many levels of nested issues are expanded below a top-level issue —
@@ -139,13 +157,41 @@ export function unionIssuePath(issue: UnionBranchIssue | undefined): Array<strin
  * `view.zod.ts`'s `submitBehavior` reach for `discriminatedUnion`. An empty
  * branch (the `invalid_union` "matched multiple" variant carries `errors: []`)
  * counts as uninformative too — `every` on an empty list is `true`.
+ *
+ * [#35500] A branch that is itself a union counts the same way when that union
+ * only says "not my kind" either: one `invalid_union` at the branch root,
+ * carrying zod's bare {@link ZOD_UNION_DEFAULT_MESSAGE}, whose every branch is
+ * in turn kind-mismatch-only (judged by this same rule, so the nesting depth
+ * does not matter). A query's `where` is the measured case:
+ * `z.union([FilterArraySchema, DataEngineFilterSchema])`, both members unions,
+ * handed `42`. Read as informative, each member was selected and emitted its
+ * own unexplained bare head, so the wire answered one identical
+ * `Invalid input` entry per member and the renderer one line per member —
+ * noise with no cause, the exact failure this predicate exists to stop. A
+ * nested union that declared its own `error` sentence is NOT swallowed: that
+ * sentence is a prescription, so the branch stays informative and is
+ * expanded. Nor is a nested union with no branches at all (`errors: []`),
+ * which keeps the reading it always had.
  */
 export function isKindMismatchOnly(issues: readonly UnionBranchIssue[]): boolean {
   return issues.every(
     (issue) =>
       unionIssuePath(issue).length === 0
-      && (issue?.code === 'invalid_type' || issue?.code === 'invalid_value'),
+      && (issue?.code === 'invalid_type' || issue?.code === 'invalid_value'
+        || isKindMismatchOnlyUnion(issue)),
   );
+}
+
+/**
+ * True for an `invalid_union` with zod's bare default message whose branches
+ * are all kind-mismatch-only — the nested half of {@link isKindMismatchOnly}.
+ */
+function isKindMismatchOnlyUnion(issue: UnionBranchIssue | undefined): boolean {
+  if (issue?.code !== 'invalid_union' || issue.message !== ZOD_UNION_DEFAULT_MESSAGE) return false;
+  const branches = issue.errors;
+  return Array.isArray(branches)
+    && branches.length > 0
+    && branches.every((branch) => Array.isArray(branch) && isKindMismatchOnly(branch));
 }
 
 /** True when a branch carries the #4001 campaign's unknown-key prescription. */

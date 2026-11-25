@@ -21,6 +21,7 @@
 
 import { describe, it, expect, vi, beforeAll, afterAll, afterEach } from 'vitest';
 import { render, cleanup, waitFor } from '@testing-library/react';
+import { formatMeasure } from '@object-ui/core';
 // Registers `chart`, which the `SchemaRenderer` inside `DatasetWidget`
 // resolves. Imported at module scope so the cold transform is not billed to a
 // bounded test budget (AGENTS.md's flaky-test discipline, objectui#3010).
@@ -148,5 +149,116 @@ describe('objectui#11681 — non-integer measures are unchanged (controls)', () 
       [countField('task_count', 'Tasks'), { name: 'project_count', type: 'number', label: 'Projects', aggregate: 'sum' }],
     );
     await expectDecimals(c, 'a count beside a sum');
+  });
+});
+
+/**
+ * objectstack#37053 — a dashboard chart widget over a percent measure prints
+ * its value axis in percent, as its table prints the measure.
+ *
+ * The widget hands the chart one series per measure and, since
+ * `@objectstack/spec` 17.5.0, no authored axis at all (`chartConfig.yAxis` is
+ * refused on a widget), so nothing told the value axis what the measure's
+ * numbers mean: a `percentScale: 'whole'` rate of 33.3 drew bare `0` … `36`
+ * ticks. Each series now carries its measure's `{ format, currency,
+ * percentScale }` (`series[].measureFormat`, renderer-internal beside
+ * `aggregate`), and the axis prints that measure's units through the table's
+ * own `formatMeasure`.
+ *
+ * The chain is this file's: real end to end, the plot box stubbed. A new
+ * top-level `describe` in this value-axis harness, beside the `aggregate`
+ * carrier's pins (objectui#11681).
+ */
+describe('objectstack#37053 — a dashboard chart widget’s value axis prints its measure’s units', () => {
+  const ROWS = [
+    { priority: 'High', rate: 100 / 3, revenue: 12000 },
+    { priority: 'Medium', rate: 0, revenue: 4500 },
+    { priority: 'Low', rate: 0, revenue: 0 },
+  ];
+  const PRIORITIES = new Set(ROWS.map((r) => r.priority));
+
+  /** The value tick labels the chart's left axis draws, in order. */
+  const axisTicks = (c: HTMLElement) =>
+    [...c.querySelectorAll('text.recharts-cartesian-axis-tick-value')]
+      .filter((t) => t.getAttribute('orientation') === 'left')
+      .map((t) => (t.textContent ?? '').trim())
+      .filter((t) => !PRIORITIES.has(t));
+
+  async function drawWidget(measure: string, facts: Record<string, unknown>) {
+    const src = {
+      queryDataset: vi.fn(async () => ({
+        rows: ROWS,
+        fields: [
+          { name: 'priority', type: 'text', label: 'Priority' },
+          { name: measure, type: 'number', label: 'Measure', ...facts },
+        ],
+      })),
+    };
+    const widget = { id: 'by_priority', type: 'bar', dataset: 'metrics', dimensions: ['priority'], values: [measure] };
+    const view = render(<DatasetWidget widget={widget} dataSource={src} />);
+    await waitFor(() => expect(axisTicks(view.container).length).toBeGreaterThanOrEqual(3), { timeout: 15000 });
+    return axisTicks(view.container);
+  }
+
+  it('SUBJECT: a whole-scale percent measure’s ticks read percents, in the table’s own format', async () => {
+    const ticks = await drawWidget('rate', { format: '0.0%', percentScale: 'whole' });
+    expect(ticks).toEqual(['0.0%', '9.0%', '18.0%', '27.0%', '36.0%']);
+    expect(ticks).toEqual([0, 9, 18, 27, 36].map((t) => formatMeasure(t, '0.0%', undefined, 'whole', 'en')));
+  });
+
+  it('a fixed-currency measure’s ticks carry its symbol', async () => {
+    const ticks = await drawWidget('revenue', { format: '0,0.00', currency: 'CNY' });
+    expect(ticks).toEqual(['CN¥0', 'CN¥3K', 'CN¥6K', 'CN¥9K', 'CN¥12K']);
+  });
+
+  it('CONTROL: a per-row currency measure keeps distinct plain-number ticks', async () => {
+    const ticks = await drawWidget('revenue', { format: '0,0.00', currency: 'CNY', currencyField: 'currency_code' });
+    expect(ticks).toEqual(['0', '3K', '6K', '9K', '12K']);
+  });
+
+  // ── The producer's other two branches (objectstack#37053) ──
+  const WHOLE = { format: '0.0%', percentScale: 'whole' };
+  const rateField = (name: string, facts: Record<string, unknown>) => ({ name, type: 'number', label: name, ...facts });
+  const settledTicks = async (c: HTMLElement) => {
+    await waitFor(() => expect(axisTicks(c).length).toBeGreaterThanOrEqual(3), { timeout: 15000 });
+    return axisTicks(c);
+  };
+
+  it('a dimensionless chart of two measures that format alike: the transposed series carries their shared format', async () => {
+    const c = await renderChart(
+      { id: 'rates', type: 'bar', dataset: 'metrics', values: ['rate_a', 'rate_b'] },
+      [{ rate_a: 100 / 3, rate_b: 12 }],
+      [rateField('rate_a', WHOLE), rateField('rate_b', WHOLE)],
+    );
+    expect(await settledTicks(c)).toEqual(['0.0%', '9.0%', '18.0%', '27.0%', '36.0%']);
+  });
+
+  it('CONTROL: a dimensionless chart mixing a percent and a currency carries no format, so the axis keeps plain numbers', async () => {
+    const c = await renderChart(
+      { id: 'mixed', type: 'bar', dataset: 'metrics', values: ['rate_a', 'revenue'] },
+      [{ rate_a: 100 / 3, revenue: 12 }],
+      [rateField('rate_a', WHOLE), rateField('revenue', { format: '0,0.00', currency: 'CNY' })],
+    );
+    const ticks = await settledTicks(c);
+    expect(ticks.some((t) => /[%¥]/.test(t)), JSON.stringify(ticks)).toBe(false);
+  });
+
+  it('the comparison overlay (`compareColumn`) carries its measure’s format, so the axis keeps the percent', async () => {
+    const c = await renderChart(
+      {
+        id: 'by_priority',
+        type: 'bar',
+        dataset: 'metrics',
+        dimensions: ['priority'],
+        values: ['rate'],
+        filter: { created: { $gte: '2026-04-01', $lte: '2026-06-30' } },
+        compareTo: { kind: 'previousYear' },
+      },
+      ROWS.map((r, i) => ({ priority: r.priority, rate: r.rate, rate__compare: [20, 10, 5][i] })),
+      [{ name: 'priority', type: 'text', label: 'Priority' }, rateField('rate', WHOLE)],
+    );
+    // The overlay is drawn: its three non-zero bars beside the current window's one.
+    await waitFor(() => expect(c.querySelectorAll('.recharts-bar-rectangle').length).toBeGreaterThanOrEqual(4), { timeout: 15000 });
+    expect(await settledTicks(c)).toEqual(['0.0%', '9.0%', '18.0%', '27.0%', '36.0%']);
   });
 });

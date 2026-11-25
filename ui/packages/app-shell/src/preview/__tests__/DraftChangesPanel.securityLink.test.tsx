@@ -62,7 +62,7 @@ const OWD_LESS_VISIT = {
 function mockRoutes() {
   global.fetch = vi.fn(async (input: RequestInfo | URL) => {
     const url = String(input);
-    const ok = (body: unknown) => ({ ok: true, status: 200, json: async () => body });
+    const ok = (body: unknown) => ({ headers: new Headers(), ok: true, status: 200, json: async () => body });
     if (url.includes('/_drafts')) {
       return ok([{ type: 'object', name: 'crmext_visit', packageId: 'com.test.crmext' }]);
     }
@@ -70,7 +70,7 @@ function mockRoutes() {
       return ok({ type: 'object', name: 'crmext_visit', item: OWD_LESS_VISIT });
     }
     if (/\/meta\/object(\?|$)/.test(url)) return ok([]);
-    return { ok: false, status: 404, json: async () => ({}) };
+    return { headers: new Headers(), ok: false, status: 404, json: async () => ({}) };
   }) as unknown as typeof fetch;
 }
 
