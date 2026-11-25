@@ -1,23 +1,20 @@
 ---
 '@object-ui/app-shell': patch
 '@object-ui/console': patch
-'@object-ui/i18n': patch
 '@objectstack/platform-objects': patch
 ---
 
-feat(studio): remove the Studio home page; `/studio` opens the last package or the package list, and an installed app's customizations show in Setup → Packages
+feat(studio): Studio no longer has a home page; opening Studio takes you to the package you were last in, or to the package list
 
 Clause-②: no
 Metadata-protocol: none
 
-The package-card page at bare `/studio` is gone. Studio is opened from an app or from Setup → Packages. Every entry that page carried now has another home:
+The package-card page Studio used to open on is gone. Studio is opened from an app or from Setup → Packages, and everything that page offered has another place:
 
-- **`/studio`** opens the package you were last in, provided the package list still has it. Otherwise it opens Setup → Packages (`/apps/setup/component/developer/packages?face=admin`). A user who may enter Studio but not that Setup page goes to Studio's "All metadata" area across packages (`/studio/~all/metadata`) instead. The 「应用构建」 (`studio:builder`) entry of the `@objectstack/studio` app goes to the same place.
-- **New package.** Home's and the `/ai` screen's 「New in Studio」 and the 「Add app」 menu open Setup → Packages with New Package already open (`?new=package`). After the package is created you land in Studio on it. An old `/studio?new=package` bookmark goes there too. Creating the package and its app in one step is the subject of a separate card; for now this flow creates the package only.
-- **What this environment changed on an installed app.** The home page showed "n customized, m switched off" and a "Customizations in this environment" panel. Both are now in the app's detail in Setup → Packages, together with a 「在 Studio 中定制」 / "Customize in Studio" link. The count now includes tab, field-group and action-layout arrangements, so an app whose only change is a tab arrangement shows as customized.
+- **Opening Studio** takes you to the package you were last in, if it is still installed. Otherwise an administrator lands on Setup → Packages, and a developer who cannot open that Setup page lands on the All metadata area. The 应用构建 entry of the Studio app goes to the same place.
+- **New package.** 「New in Studio」 on Home and on the AI-unavailable screen, and the 「Add app」 menu, open Setup → Packages with the New Package dialog already open. After the package is created you land in Studio on it. An old bookmark to Studio's new-package page goes there too, or to the All metadata area for a developer who cannot open Setup → Packages. Creating a package and its app in one step comes with a later change; for now this creates the package only.
+- **What this environment changed on an installed app.** The "n customized, m switched off" line and the "Customizations in this environment" panel are now in the app's detail in Setup → Packages, with a 「Customize in Studio」 link. The count now includes tab, field-group and action-layout arrangements, so an app whose only change is a tab arrangement shows as customized. The list across all installed apps at once is now shown one app at a time.
 - **Organization flows and the environment catalog** are in Studio's left menu.
-- **A package Studio cannot find**, and a retired Setup page whose URL names no package, now go to Setup → Packages.
+- **A package Studio cannot find** offers a way to Setup → Packages, or to the All metadata area for a developer who cannot open that page. A retired Setup page whose address names no package opens Setup → Packages.
 
-The Packages page's development view (import, publish, revert, adopt loose items) is still at its address. Its menu entry is added by a separate card.
-
-`@object-ui/app-shell` is private. It no longer exports `BuilderLanding`, and it now exports `StudioEntryRedirect` and `SETUP_PACKAGES_PATH`. In `@object-ui/i18n`, the `engine.studio.landing.*` strings and `engine.studio.landingHome` that shipped in 18.6.0 stay in the studio namespace (`en`, `zh`), no longer read; no published key is removed. Four landing strings added after 18.6.0 and never released are removed. The `engine.packages.customizations.*` strings are added. `@objectstack/platform-objects` changes a code comment only.
+The Packages page's developer view (import, publish, revert, adopt loose items) still opens at its address; its menu entry comes with a later change.

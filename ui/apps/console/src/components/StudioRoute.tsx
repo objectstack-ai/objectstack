@@ -34,7 +34,7 @@
  * Studio exists for. The gate belongs here, in this app's router.
  */
 
-import { createContext, lazy, Suspense, useContext, useEffect, type ReactNode } from 'react';
+import { lazy, Suspense, useEffect, type ReactNode } from 'react';
 import { Link, Navigate, Outlet, Route, useParams } from 'react-router-dom';
 import { Lock } from 'lucide-react';
 import { Button, Empty, EmptyTitle } from '@object-ui/components';
@@ -46,10 +46,12 @@ import {
   STUDIO_METADATA_AREA,
   STUDIO_ORG_SCOPE_PILLAR,
   STUDIO_ORG_SCOPE_SEGMENT,
+  StudioEntryPermissionsProvider,
   studioMetadataAreaPath,
   studioPackagePath,
   useHomePath,
   useRecentItems,
+  useStudioEntryPermissions,
 } from '@object-ui/app-shell';
 import { useObjectTranslation } from '@object-ui/i18n';
 
@@ -77,12 +79,6 @@ const StudioDesignSurface = lazy(() =>
 const StudioEntryRedirect = lazy(() =>
   import('./studioBuilder').then((m) => ({ default: m.StudioEntryRedirect })),
 );
-
-/**
- * The capability set the entry gate read, for the screens below it that choose
- * by it (Studio's entry, objectstack#36908). Provided only around a holder.
- */
-const StudioEntryPermissions = createContext<string[] | undefined>(undefined);
 
 /**
  * What a principal without `studio.access` sees, at the Studio URL they opened
@@ -164,7 +160,10 @@ export function RequireStudioAccess({
   }
 
   return (
-    <StudioEntryPermissions.Provider value={entry.systemPermissions}>{children}</StudioEntryPermissions.Provider>
+    // The capability set this gate read, for the Studio screens below it that
+    // choose a destination by it: Studio's entry and the package-not-found
+    // state's way out (objectstack#36908). Provided only around a holder.
+    <StudioEntryPermissionsProvider value={entry.systemPermissions}>{children}</StudioEntryPermissionsProvider>
   );
 }
 
@@ -188,7 +187,7 @@ export function StudioRoute() {
  * entered from an app or from Setup → Packages.
  */
 function StudioEntry() {
-  const systemPermissions = useContext(StudioEntryPermissions);
+  const systemPermissions = useStudioEntryPermissions();
   return (
     <Suspense fallback={<LoadingFallback />}>
       <StudioEntryRedirect systemPermissions={systemPermissions} pending={<LoadingFallback />} />

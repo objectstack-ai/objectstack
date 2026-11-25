@@ -52,7 +52,7 @@ const ALLOWED = new Set([
 ]);
 
 /** The root's names, as a composed path would start from them. */
-const ROOT_NAMES = new Set(['STUDIO_ROOT_PATH', 'STUDIO_LANDING_PATH']);
+const ROOT_NAMES = new Set(['STUDIO_ROOT_PATH']);
 
 const SKIP_DIRS = new Set(['node_modules', 'dist', 'build', 'coverage', '.turbo', '__tests__', '__mocks__']);
 

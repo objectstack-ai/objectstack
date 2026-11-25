@@ -6,7 +6,7 @@
  * list; otherwise the package list: Setup → Packages for a principal who may
  * open it, the "All metadata" area across packages for one who may only enter
  * Studio. The retired `/studio?new=package` bookmark lands on Setup's New
- * Package.
+ * Package for the first, and on that same "All metadata" area for the second.
  *
  * The recent store and the list read are stubbed at their modules: what is
  * measured is where the entry SENDS the author, read off the router's
@@ -28,11 +28,13 @@ vi.mock('./packages-io.js', () => ({
   fetchListedPackageIds: () => listed.read(),
 }));
 
-import { StudioEntryRedirect, studioEntryFallbackPath } from './StudioEntryRedirect';
+import { StudioEntryRedirect, studioEntryFallbackPath, studioNewPackageEntryPath } from './StudioEntryRedirect';
 
 const SETUP_PACKAGES = '/apps/setup/component/developer/packages?face=admin';
 const ALL_METADATA = '/studio/~all/metadata';
 const ADMIN = ['studio.access', 'setup.access', 'manage_platform_settings'];
+/** May enter Studio and author metadata; holds neither capability Setup → Packages is shown under. */
+const STUDIO_ONLY = ['studio.access', 'manage_metadata'];
 
 function Where() {
   const { pathname, search } = useLocation();
@@ -126,10 +128,26 @@ describe("Studio's entry: the package list (objectstack#36908)", () => {
 });
 
 describe('the retired `/studio?new=package` bookmark (objectstack#36908)', () => {
-  it("lands on Setup's New Package, whatever is remembered", async () => {
+  it("CONTROL — an administrator lands on Setup's New Package, whatever is remembered", async () => {
     recent.items = [pkg('com.acme.crm')];
     listed.read = async () => new Set(['com.acme.crm']);
     renderEntry('/studio?new=package');
     expect(await screen.findByTestId('where')).toHaveTextContent(`${SETUP_PACKAGES}&new=package`);
+  });
+
+  it('a principal who may enter Studio but not Setup → Packages is never sent to Setup: the "All metadata" area', async () => {
+    recent.items = [pkg('com.acme.crm')];
+    listed.read = async () => new Set(['com.acme.crm']);
+    renderEntry('/studio?new=package', STUDIO_ONLY);
+    const where = await screen.findByTestId('where');
+    expect(where).toHaveTextContent(new RegExp(`^${ALL_METADATA}$`));
+    expect(where.textContent).not.toContain('/apps/setup');
+  });
+
+  it('the forward reads the same two capabilities as the fallback, and holds nothing for no answer', () => {
+    expect(studioNewPackageEntryPath(ADMIN)).toBe(`${SETUP_PACKAGES}&new=package`);
+    expect(studioNewPackageEntryPath(['studio.access', 'manage_platform_settings'])).toBe(ALL_METADATA);
+    expect(studioNewPackageEntryPath(['studio.access', 'setup.access'])).toBe(ALL_METADATA);
+    expect(studioNewPackageEntryPath(undefined)).toBe(ALL_METADATA);
   });
 });

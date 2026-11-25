@@ -63,6 +63,8 @@ import {
 } from './flowGrouping.js';
 import { StudioRefusalStrip } from './StudioRefusalStrip.js';
 import { PACKAGE_LIST_TOAST_ID } from './PackageSwitcher.js';
+import { studioEntryFallbackPath } from './StudioEntryRedirect.js';
+import { useStudioEntryPermissions } from './studioEntryPermissions.js';
 import { SETUP_PACKAGES_PATH } from '../metadata-admin/packageSource.js';
 import { StudioBackToApp, type StudioAppTarget } from './StudioBackToApp.js';
 import {
@@ -909,6 +911,10 @@ function StudioDesignSurfaceBody({ aiSlot, area }: StudioDesignSurfaceProps): Re
   // is 「‹ Back to app」 at the left (`StudioBackToApp`, objectstack#36501), in
   // the same tab, mirroring the app bar's Edit app.
   const shellNavigate = useNavigate();
+  // objectstack#36908 — where the package-not-found state's way out leads:
+  // Setup → Packages for a principal who may open it, the "All metadata" area
+  // for a Studio-only author (the same choice as Studio's entry).
+  const notFoundExit = studioEntryFallbackPath(useStudioEntryPermissions());
   React.useEffect(() => {
     openAccessRef.current = () => {
       if (confirmLeavePillar()) shellNavigate(studioPillarPath(scopeSegment, 'access', { segmentEncoding: 'verbatim' }));
@@ -1511,10 +1517,13 @@ function StudioDesignSurfaceBody({ aiSlot, area }: StudioDesignSurfaceProps): Re
                 testId="studio-package-not-found"
                 sentence={tFormat('engine.studio.notFound.package', locale, { id: packageId })}
                 action={
-                  // objectstack#36908 — Setup → Packages: Studio's home, its
-                  // old way out, was removed.
-                  <Button type="button" size="sm" variant="outline" onClick={() => shellNavigate(SETUP_PACKAGES_PATH)}>
-                    {t('engine.studio.notFound.packageList', locale)}
+                  // objectstack#36908 — Setup → Packages, or the "All metadata"
+                  // area for one who may not open it: Studio's home, its old
+                  // way out, was removed.
+                  <Button type="button" size="sm" variant="outline" onClick={() => shellNavigate(notFoundExit)}>
+                    {notFoundExit === SETUP_PACKAGES_PATH
+                      ? t('engine.studio.notFound.packageList', locale)
+                      : t('engine.studio.notFound.allMetadata', locale)}
                   </Button>
                 }
               />

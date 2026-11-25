@@ -7,8 +7,9 @@
  * writable builder (New object, Create app, Publish) for a package that does
  * not exist, and every save there went to a phantom package. It now renders
  * "package not found", with no menu and no package actions, and a way out
- * to Setup → Packages, the package list (objectstack#36908: the Studio home
- * it used to walk back to was removed). And `/studio/<pkg>/<segment>` for a segment no pillar
+ * to Setup → Packages, the package list, or to the "All metadata" area for a
+ * principal who may not open that Setup page (objectstack#36908: the Studio
+ * home it used to walk back to was removed). And `/studio/<pkg>/<segment>` for a segment no pillar
  * has fell through to the Interfaces pillar with nothing highlighted; it now
  * renders a not-found state, the left menu (objectstack#36899, which replaced
  * the pillars above it) still beside it, nothing in it current. (The
@@ -80,6 +81,7 @@ vi.mock('./StudioAiCopilot', () => ({ StudioChatDock: () => <div data-testid="st
 vi.mock('../../preview/DraftChangesPanel', () => ({ DraftChangesPanel: () => null }));
 
 import { StudioDesignSurface } from './StudioDesignSurface';
+import { StudioEntryPermissionsProvider } from './studioEntryPermissions';
 import { t, tFormat } from '../metadata-admin/i18n';
 
 const answer = (body: unknown) => ({ ok: true, status: 200, json: async () => body });
@@ -109,14 +111,35 @@ function SetupPackages() {
   return <div data-testid="setup-packages">{search}</div>;
 }
 
-function renderAt(path: string, surface: React.ReactElement = <StudioDesignSurface />) {
+/** The "All metadata" area across packages. */
+function AllMetadata() {
+  return <div data-testid="all-metadata" />;
+}
+
+/** Holds the two capabilities Setup → Packages is shown under. */
+const ADMIN = ['studio.access', 'setup.access', 'manage_platform_settings', 'manage_metadata'];
+/** May enter Studio and author metadata; holds neither capability Setup → Packages is shown under. */
+const STUDIO_ONLY = ['studio.access', 'manage_metadata'];
+
+/**
+ * The surface under the capability set Studio's entry gate read, as the
+ * console's `RequireStudioAccess` provides it.
+ */
+function renderAt(
+  path: string,
+  surface: React.ReactElement = <StudioDesignSurface />,
+  systemPermissions: readonly string[] = ADMIN,
+) {
   render(
-    <MemoryRouter initialEntries={[path]}>
-      <Routes>
-        <Route path="/apps/setup/component/developer/packages" element={<SetupPackages />} />
-        <Route path="/studio/:packageId/:tab" element={surface} />
-      </Routes>
-    </MemoryRouter>,
+    <StudioEntryPermissionsProvider value={systemPermissions}>
+      <MemoryRouter initialEntries={[path]}>
+        <Routes>
+          <Route path="/apps/setup/component/developer/packages" element={<SetupPackages />} />
+          <Route path="/studio/~all/metadata" element={<AllMetadata />} />
+          <Route path="/studio/:packageId/:tab" element={surface} />
+        </Routes>
+      </MemoryRouter>
+    </StudioEntryPermissionsProvider>,
   );
 }
 
@@ -174,12 +197,22 @@ describe('Studio: a package id no package has renders "package not found" (objec
     expect(packageListReads(fetchMock)).toBe(1);
   });
 
-  it('its one action opens Setup → Packages, on its administration face', async () => {
+  it('CONTROL — for an administrator, its one action opens Setup → Packages, on its administration face', async () => {
     servePackages();
     renderAt(`/studio/${PHANTOM}/data`);
     const notFound = await screen.findByTestId('studio-package-not-found');
     within(notFound).getByRole('button', { name: t('engine.studio.notFound.packageList', 'en') }).click();
     expect(await screen.findByTestId('setup-packages')).toHaveTextContent('?face=admin');
+  });
+
+  it('for a principal who may enter Studio but not Setup → Packages, it opens the "All metadata" area, never Setup (objectstack#36908)', async () => {
+    servePackages();
+    renderAt(`/studio/${PHANTOM}/data`, <StudioDesignSurface />, STUDIO_ONLY);
+    const notFound = await screen.findByTestId('studio-package-not-found');
+    expect(within(notFound).queryByRole('button', { name: t('engine.studio.notFound.packageList', 'en') })).toBeNull();
+    within(notFound).getByRole('button', { name: t('engine.studio.notFound.allMetadata', 'en') }).click();
+    expect(await screen.findByTestId('all-metadata')).toBeInTheDocument();
+    expect(screen.queryByTestId('setup-packages')).toBeNull();
   });
 
   it('CONTROL — a listed package renders its builder', async () => {

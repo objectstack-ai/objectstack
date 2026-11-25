@@ -81,7 +81,7 @@ vi.mock('./PackageFormDialog', () => ({
 }));
 
 import { resolveHref } from '@object-ui/layout';
-import { PackagesPage, type InstalledPackageRow } from './PackagesPage';
+import { PackageDetailSheet, PackagesPage, type InstalledPackageRow } from './PackagesPage';
 import { t } from './i18n';
 import { SETUP_NEW_PACKAGE_PATH } from './packageSource';
 // The page's package form reaches the CEL authoring helpers, which load these
@@ -160,6 +160,8 @@ let catalogReads: string[] = [];
 let writes: string[] = [];
 /** How many times the list door was read. */
 let packagesReads = 0;
+/** The package ids whose customizations door was read (objectstack#36908). */
+let customizationReads: string[] = [];
 
 /** Boot the real runtime config, then serve the package, install and catalog doors. */
 async function serve({
@@ -182,6 +184,7 @@ async function serve({
   catalogReads = [];
   writes = [];
   packagesReads = 0;
+  customizationReads = [];
   vi.stubGlobal(
     'fetch',
     vi.fn(async (input: unknown, init?: { method?: string }) => {
@@ -205,6 +208,7 @@ async function serve({
       // deployment changed on it: one tab arrangement, for every base.
       const customized = /^\/api\/v1\/packages\/([^/]+)\/customizations$/.exec(path);
       if (customized) {
+        customizationReads.push(decodeURIComponent(customized[1]));
         const arrangements = [{ object: 'acme_task', key: 'relatedLists' }];
         return reply(200, {
           success: true,
@@ -797,6 +801,31 @@ describe('Setup → Packages: the new-package deep link (objectstack#36908)', ()
 // the panel itself).
 // ---------------------------------------------------------------------------
 
+/** A code base's paired customization package, served read-only (`isCustomizationPackage`). */
+const CODE_PAIR: InstalledPackageRow = {
+  manifest: { id: 'com.acme.code.custom', name: 'Code App customizations', version: '1.0.0', type: 'app', scope: 'project' },
+  enabled: true,
+  source: 'code',
+  writable: false,
+};
+
+/** The detail sheet alone, on the administration face. */
+function renderSheet(pkg: InstalledPackageRow) {
+  return render(
+    <I18nProvider config={{ defaultLanguage: 'en', detectBrowserLanguage: false }}>
+      <MemoryRouter initialEntries={[ADMIN_URL]}>
+        <PackageDetailSheet pkg={pkg} face="admin" open onOpenChange={() => {}} onChanged={() => {}} />
+      </MemoryRouter>
+    </I18nProvider>,
+  );
+}
+
+/** The sheet's own reads have had a turn to start: its info block is drawn. */
+async function settledSheet(sheet: HTMLElement) {
+  await waitFor(() => expect(within(sheet).getAllByText(/1\.0\.0/).length).toBeGreaterThan(0));
+  await new Promise((r) => setTimeout(r, 50));
+}
+
 describe('Setup → Packages: a read-only base’s customizations in its detail (objectstack#36908)', () => {
   it('a code package’s detail draws what this deployment changed on it, arrangements counted (objectstack#36833)', async () => {
     await serve({ packages: [CODE] });
@@ -825,5 +854,34 @@ describe('Setup → Packages: a read-only base’s customizations in its detail 
     fireEvent.click(await screen.findByTestId('pkg-row-com.acme.code'));
     const sheet = await screen.findByRole('dialog');
     expect(within(sheet).queryByTestId('pkg-detail-customizations')).toBeNull();
+  });
+
+  it('a read-only `.custom` pair’s detail draws no section and reads no customizations: it is read through its base', async () => {
+    await serve({ packages: [CODE_PAIR] });
+    renderAt(ADMIN_URL);
+    fireEvent.click(await screen.findByTestId(`pkg-row-${CODE_PAIR.manifest.id}`));
+    const sheet = await screen.findByRole('dialog');
+    await settledSheet(sheet);
+    expect(within(sheet).queryByTestId('pkg-detail-customizations')).toBeNull();
+    expect(customizationReads).toEqual([]);
+  });
+
+  // The administration face lists no kernel package (pinned above), so its
+  // detail is opened directly: the sheet's own gate is what is measured.
+  it('a kernel package’s detail draws no section and reads no customizations: it takes no customization', async () => {
+    await serve({ packages: [PLATFORM] });
+    renderSheet(PLATFORM);
+    const sheet = await screen.findByRole('dialog');
+    await settledSheet(sheet);
+    expect(within(sheet).queryByTestId('pkg-detail-customizations')).toBeNull();
+    expect(customizationReads).toEqual([]);
+  });
+
+  it('CONTROL: the same direct render of a code package’s detail draws the section and reads its customizations once', async () => {
+    await serve({ packages: [CODE] });
+    renderSheet(CODE);
+    const sheet = await screen.findByRole('dialog');
+    await waitFor(() => expect(within(sheet).getByTestId('pkg-detail-customizations')).toBeInTheDocument());
+    await waitFor(() => expect(customizationReads).toEqual(['com.acme.code']));
   });
 });

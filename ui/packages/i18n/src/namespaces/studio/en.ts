@@ -3509,6 +3509,9 @@ const STUDIO_EN: Record<string, string> = {
   // objectstack#36908 — the package-not-found state's way out: Setup → Packages,
   // where Studio's entries that name no package land since the Studio home went.
   'engine.studio.notFound.packageList': 'Open the package list',
+  // The same way out for a principal who may enter Studio but not open
+  // Setup → Packages: the "All metadata" area across packages.
+  'engine.studio.notFound.allMetadata': 'Open All metadata',
   'engine.studio.notFound.pillar': 'This page does not exist. Studio has no "{pillar}" section; pick Data, Automations, Interfaces, Access or All metadata above.',
   'engine.studio.aiCopilot': 'AI Assistant',
   // objectui#12725 — the Studio right slot: properties OR the copilot.

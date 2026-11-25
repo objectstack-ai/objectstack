@@ -598,6 +598,13 @@ export {
 // author was last in, else the package list. A host that declares the
 // `/studio` routes mounts it as their index.
 export { StudioEntryRedirect } from './views/studio-design/StudioEntryRedirect.js';
+// The capability set that host's Studio entry gate read, provided around the
+// `/studio` subtree so every Studio exit that names no package lands where the
+// principal may go (Setup → Packages, else the "All metadata" area).
+export {
+  StudioEntryPermissionsProvider,
+  useStudioEntryPermissions,
+} from './views/studio-design/studioEntryPermissions.js';
 // The one Studio scope that is not a package (objectui#11553): the
 // organization's own package-less flows, at `/studio/~org/automations`. A host
 // that declares the `/studio` routes reads the reserved segment from here.

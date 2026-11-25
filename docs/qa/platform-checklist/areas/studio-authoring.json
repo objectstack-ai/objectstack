@@ -5184,7 +5184,7 @@
         {
           "revision": 4,
           "date": "2026-11-24",
-          "change": "the line moved from the removed Studio home to the read-only base's detail in Setup → Packages (#36908): title, steps[1], steps[4], acceptance[0] and [2], automated.ref and source re-pointed; acceptance[0] now counts counts.arrangements in n (#36833, closed into #36908). The All metadata half is unchanged",
+          "change": "the line moved from the removed Studio home to the read-only base's detail in Setup → Packages (#36908): title, steps[1], steps[4], acceptance[0] and [2], automated.ref and source re-pointed; acceptance[0] now counts counts.arrangements in n (#36833's requirement; that card was closed as not planned, and #36908 delivers it in the panel's new home). The All metadata half is unchanged",
           "ref": "#36908"
         }
       ]

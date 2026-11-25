@@ -18,7 +18,10 @@
  *     Setup page ({@link studioEntryFallbackPath}).
  *
  * The retired `/studio?new=package` bookmark is forwarded to Setup's New
- * Package (`studioNewPackage.ts`).
+ * Package (`studioNewPackage.ts`) for a principal who may open Setup →
+ * Packages, and to the same fallback as (2) for anyone else
+ * ({@link studioNewPackageEntryPath}): a Studio-only author is never sent to a
+ * Setup page that refuses them.
  *
  * A package deleted since the visit is passed over: the recent store is the
  * user's, the list the active organization's, so an entry the list no longer
@@ -42,6 +45,12 @@ import { STUDIO_NEW_PACKAGE_VALUE, STUDIO_NEW_PARAM } from './studioNewPackage.j
  */
 const SETUP_PACKAGES_CAPABILITIES = ['setup.access', 'manage_platform_settings'] as const;
 
+/** `undefined` (no answer reported) holds nothing. */
+function holdsSetupPackages(systemPermissions: readonly string[] | undefined): boolean {
+  const held = new Set(systemPermissions ?? []);
+  return SETUP_PACKAGES_CAPABILITIES.every((c) => held.has(c));
+}
+
 /**
  * Where Studio's entry goes when no remembered package opens: Setup → Packages
  * for a holder of {@link SETUP_PACKAGES_CAPABILITIES}, else the "All metadata"
@@ -49,10 +58,18 @@ const SETUP_PACKAGES_CAPABILITIES = ['setup.access', 'manage_platform_settings']
  * `undefined` (no answer reported) holds nothing.
  */
 export function studioEntryFallbackPath(systemPermissions: readonly string[] | undefined): string {
-  const held = new Set(systemPermissions ?? []);
-  return SETUP_PACKAGES_CAPABILITIES.every((c) => held.has(c))
+  return holdsSetupPackages(systemPermissions)
     ? SETUP_PACKAGES_PATH
     : studioMetadataAreaPath(STUDIO_ALL_PACKAGES_SEGMENT);
+}
+
+/**
+ * Where the retired `/studio?new=package` bookmark goes: Setup's New Package
+ * for a holder of {@link SETUP_PACKAGES_CAPABILITIES}, else
+ * {@link studioEntryFallbackPath}'s answer for that principal.
+ */
+export function studioNewPackageEntryPath(systemPermissions: readonly string[] | undefined): string {
+  return holdsSetupPackages(systemPermissions) ? SETUP_NEW_PACKAGE_PATH : studioEntryFallbackPath(systemPermissions);
 }
 
 export function StudioEntryRedirect({
@@ -94,7 +111,7 @@ export function StudioEntryRedirect({
     // Keyed on the primitives it reads (ui/AGENTS.md #10).
   }, [forwardNew, rememberedKey, fallback]);
 
-  if (forwardNew) return <Navigate to={SETUP_NEW_PACKAGE_PATH} replace />;
+  if (forwardNew) return <Navigate to={studioNewPackageEntryPath(systemPermissions)} replace />;
   if (!rememberedKey) return <Navigate to={fallback} replace />;
   if (target === null) return <>{pending}</>;
   return <Navigate to={target} replace />;
