@@ -3123,6 +3123,9 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.studio.menu.owd': '默认共享',
   'engine.studio.menu.diagnostics': '诊断',
   'engine.studio.menu.environment': '岗位与权限',
+  // objectstack#37201 — the 「高级」 fold (ADR-0084, amended 2026-11-25), and a 常用 type with no item yet.
+  'engine.studio.menu.advanced': '高级',
+  'engine.studio.menu.emptyType': '还没有：打开列表新建第一项',
   // objectstack#36502 — 旧「界面」链接落地时的提示。
   'engine.studio.interfacesRetired.sentence': '界面的修改已经搬到应用里',
   'engine.studio.interfacesRetired.backToApp': '回到应用',

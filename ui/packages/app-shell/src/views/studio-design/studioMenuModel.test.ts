@@ -5,16 +5,26 @@
  * groups in the amendment's order, a type in the group of its served domain,
  * the four entries that open no type's list in the groups of what they hold,
  * and the entry each Studio page marks current.
+ *
+ * objectstack#37201 — the menu reads the placement table (ADR-0084, amended
+ * 2026-11-25): each group's entries in the table's order, each stamped with
+ * its tier, the four entries that are not a type in 高级, a 常用 type the
+ * settled sweep counts none of marked empty, and the 常用 types always listed.
  */
 
 import { describe, expect, it } from 'vitest';
 import {
+  STUDIO_MENU_ADVANCED_COOKIE,
+  STUDIO_MENU_ALWAYS_TYPES,
   STUDIO_MENU_GROUPS,
   buildStudioMenu,
+  readStudioMenuAdvancedCookie,
   studioMenuCurrentKey,
   studioMenuEntryMatches,
   studioMenuScope,
+  studioMenuTiers,
 } from './studioMenuModel';
+import { STUDIO_MENU_PLACEMENT } from './studioMenuPlacement';
 import { studioMenuGroupLabel } from './studioMenuGroupLabel';
 import { translateMetadataDomain } from '../metadata-admin/i18n';
 // The zh rows of the menu's own names live in `@object-ui/i18n`'s lazily loaded `studio` namespace.
@@ -62,10 +72,15 @@ describe('the menu groups (objectstack#36899, ADR-0084 amended)', () => {
     expect(entry('environment').to).toBe('/studio/~all/metadata');
   });
 
-  it('a package draws all six groups, an empty one included', () => {
+  // objectstack#37201 — rewritten on purpose: a group is drawn only where it holds an entry
+  // (ADR-0084, amended 2026-11-25, §3.3). It was "a package draws all six groups, an empty one included".
+  it('a package draws a group only where it holds an entry: with no type served, the groups of the entries that are not a type', () => {
     const menu = buildStudioMenu({ scope: studioMenuScope(PKG), types: [], counts: {} });
-    expect(menu.map((g) => g.group)).toEqual(STUDIO_MENU_GROUPS);
-    expect(keysOf(menu).data).toEqual([]);
+    expect(keysOf(menu)).toEqual({
+      automation: ['orgFlows'],
+      system: ['diagnostics'],
+      security: ['owd', 'environment'],
+    });
   });
 
   it.each(['~org', '~all'])('%s: the environment\'s menu, only the groups that hold an entry', (segment) => {
@@ -74,13 +89,160 @@ describe('the menu groups (objectstack#36899, ADR-0084 amended)', () => {
       { type: 'permission', domain: 'security' },
     ];
     const menu = buildStudioMenu({ scope: studioMenuScope(segment), types, counts: {} });
+    // objectstack#37201 — the table's order, not the served one: permission set (常用) before position (高级).
     expect(keysOf(menu)).toEqual({
       automation: ['orgFlows'],
-      security: ['type:position', 'type:permission', 'environment'],
+      security: ['type:permission', 'type:position', 'environment'],
     });
     expect(menu.flatMap((g) => g.entries).find((e) => e.key === 'type:position')!.to).toBe(
       '/studio/~all/metadata/position?scope=environment',
     );
+  });
+});
+
+/** A package's served types in the server's order: by domain, then alphabetically by type. */
+const SERVED = [
+  { type: 'hook', domain: 'data' },
+  { type: 'mapping', domain: 'data' },
+  { type: 'object', domain: 'data' },
+  { type: 'picklist', domain: 'data' },
+  { type: 'zz_unplaced', domain: 'data' },
+  { type: 'action', domain: 'ui' },
+  { type: 'app', domain: 'ui' },
+  { type: 'dashboard', domain: 'ui' },
+  { type: 'page', domain: 'ui' },
+  { type: 'report', domain: 'ui' },
+  { type: 'view', domain: 'ui' },
+  { type: 'flow', domain: 'automation' },
+  { type: 'job', domain: 'automation' },
+  { type: 'book', domain: 'system' },
+  { type: 'doc', domain: 'system' },
+  { type: 'email_template', domain: 'system' },
+  { type: 'assignment_rule', domain: 'security' },
+  { type: 'permission', domain: 'security' },
+  { type: 'position', domain: 'security' },
+  { type: 'agent', domain: 'ai' },
+  { type: 'skill', domain: 'ai' },
+  { type: 'tool', domain: 'ai' },
+];
+
+describe('the menu reads the placement table (objectstack#37201, ADR-0084 amended 2026-11-25)', () => {
+  const menu = buildStudioMenu({ scope: studioMenuScope(PKG), types: SERVED, counts: {} });
+  const entries = menu.flatMap((g) => g.entries);
+
+  it("orders each group by the table, an unplaced type after the placed ones, then the entries that are not a type", () => {
+    expect(keysOf(menu)).toEqual({
+      data: ['type:object', 'type:picklist', 'type:hook', 'type:mapping', 'type:zz_unplaced'],
+      ui: ['type:app', 'type:page', 'type:dashboard', 'type:report', 'type:view', 'type:action'],
+      automation: ['type:flow', 'type:job', 'orgFlows'],
+      system: ['type:doc', 'type:book', 'type:email_template', 'diagnostics'],
+      security: ['type:permission', 'type:position', 'type:assignment_rule', 'owd', 'environment'],
+      ai: ['type:agent', 'type:tool', 'type:skill'],
+    });
+  });
+
+  it("stamps each type with its row's tier, and 高级 on a type with no row", () => {
+    const tierOf = new Map(STUDIO_MENU_PLACEMENT.map((row) => [row.type, row.tier]));
+    for (const e of entries.filter((x) => x.kind === 'type')) {
+      expect(e.tier, e.key).toBe(e.type === 'zz_unplaced' ? 'advanced' : tierOf.get(e.type!));
+    }
+    expect(entries.find((e) => e.key === 'type:object')!.tier).toBe('common');
+    expect(entries.find((e) => e.key === 'type:picklist')!.tier).toBe('advanced');
+  });
+
+  it('the four entries that are not a type are 高级 on a package', () => {
+    for (const key of ['orgFlows', 'diagnostics', 'owd', 'environment']) {
+      expect(entries.find((e) => e.key === key)!.tier, key).toBe('advanced');
+    }
+  });
+
+  it('splits into the 常用 groups and the 高级 fold, a group in a tier only where it holds an entry of that tier', () => {
+    const tiers = studioMenuTiers(menu);
+    expect(Object.fromEntries(tiers.common.map((g) => [g.group, g.entries.map((e) => e.key)]))).toEqual({
+      data: ['type:object'],
+      ui: ['type:app', 'type:page', 'type:dashboard', 'type:report'],
+      automation: ['type:flow'],
+      security: ['type:permission'],
+      ai: ['type:agent', 'type:tool', 'type:skill'],
+    });
+    // 平台 Platform holds no 常用 entry: its label is drawn inside the fold alone; AI holds no 高级 one here.
+    expect(tiers.common.map((g) => g.group)).not.toContain('system');
+    expect(tiers.advanced.map((g) => g.group)).toEqual(['data', 'ui', 'automation', 'system', 'security']);
+    expect(tiers.advanced.find((g) => g.group === 'security')!.entries.map((e) => e.key)).toEqual([
+      'type:position',
+      'type:assignment_rule',
+      'owd',
+      'environment',
+    ]);
+  });
+
+  it('keeps every address and entry key: only the order and the tier are new', () => {
+    for (const e of entries.filter((x) => x.kind === 'type' && x.type !== 'datasource')) {
+      expect(e.key).toBe(`type:${e.type}`);
+      expect(e.to).toBe(`/studio/${PKG}/metadata/${e.type}?package=${PKG}`);
+    }
+  });
+});
+
+describe('the 常用 types are always listed on a package (objectstack#37201)', () => {
+  it('the list the directory rule keeps regardless of the sweep is the table\'s 常用 rows, in order', () => {
+    expect(STUDIO_MENU_ALWAYS_TYPES).toEqual(STUDIO_MENU_PLACEMENT.filter((r) => r.tier === 'common').map((r) => r.type));
+    expect(STUDIO_MENU_ALWAYS_TYPES).toEqual(['object', 'app', 'page', 'dashboard', 'report', 'flow', 'permission', 'agent', 'tool', 'skill']);
+  });
+
+  it("a new package's directory rule lists them though the sweep has none of them", async () => {
+    const { scopeDirectoryEntries } = await import('../metadata-admin/directoryScope');
+    const listed = scopeDirectoryEntries(SERVED, {
+      environment: false,
+      packageId: PKG,
+      packagesByType: {},
+      always: STUDIO_MENU_ALWAYS_TYPES,
+    }).map((e) => e.type);
+    expect(listed.sort()).toEqual(['agent', 'app', 'dashboard', 'flow', 'object', 'page', 'permission', 'report', 'skill', 'tool']);
+  });
+});
+
+describe('an empty 常用 type means the sweep answered none, not "not answered yet" (objectstack#37201)', () => {
+  const types = [
+    { type: 'object', domain: 'data' },
+    { type: 'app', domain: 'ui' },
+    { type: 'hook', domain: 'data' },
+  ];
+  const empty = (opts: { settled?: boolean; counts?: Record<string, number>; segment?: string }) =>
+    buildStudioMenu({ scope: studioMenuScope(opts.segment ?? PKG), types, counts: opts.counts ?? {}, settled: opts.settled })
+      .flatMap((g) => g.entries)
+      .filter((e) => e.empty)
+      .map((e) => e.key);
+
+  it('settled: a 常用 type with no count, or a count of 0, is empty; one with items is not', () => {
+    expect(empty({ settled: true, counts: { object: 2, app: 0 } })).toEqual(['type:app']);
+    expect(empty({ settled: true, counts: {} })).toEqual(['type:object', 'type:app']);
+  });
+
+  it('not settled: nothing is empty', () => {
+    expect(empty({ settled: false, counts: {} })).toEqual([]);
+    expect(empty({ counts: {} })).toEqual([]);
+  });
+
+  it('a 高级 type is never marked empty, nor anything on ~org or ~all', () => {
+    expect(empty({ settled: true })).not.toContain('type:hook');
+    expect(empty({ settled: true, segment: '~all' })).toEqual([]);
+    expect(empty({ settled: true, segment: '~org' })).toEqual([]);
+  });
+});
+
+describe('the 高级 fold\'s cookie (objectstack#37201)', () => {
+  it('is its own name, apart from the menu\'s collapse cookie', () => {
+    expect(STUDIO_MENU_ADVANCED_COOKIE).toBe('studio_menu_advanced');
+  });
+
+  it('reads open only from the literal the menu writes; closed by default', () => {
+    expect(readStudioMenuAdvancedCookie('')).toBe(false);
+    expect(readStudioMenuAdvancedCookie('studio_menu_state=true')).toBe(false);
+    expect(readStudioMenuAdvancedCookie('a=1; studio_menu_advanced=true')).toBe(true);
+    expect(readStudioMenuAdvancedCookie('studio_menu_advanced=false')).toBe(false);
+    expect(readStudioMenuAdvancedCookie('studio_menu_advanced=1')).toBe(false);
+    expect(readStudioMenuAdvancedCookie('xstudio_menu_advanced=true')).toBe(false);
   });
 });
 
