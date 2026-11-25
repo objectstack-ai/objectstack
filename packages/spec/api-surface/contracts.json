@@ -270,6 +270,7 @@
     "MetadataExportOptions (interface)",
     "MetadataImportOptions (interface)",
     "MetadataImportResult (interface)",
+    "MetadataPackageBinding (interface)",
     "MetadataRoundTripCase (interface)",
     "MetadataRoundTripExpectation (type)",
     "MetadataRoundTripRemoval (interface)",

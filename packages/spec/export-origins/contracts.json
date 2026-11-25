@@ -270,6 +270,7 @@
     "MetadataExportOptions": "src/contracts/metadata-service.ts#MetadataExportOptions (interface)",
     "MetadataImportOptions": "src/contracts/metadata-service.ts#MetadataImportOptions (interface)",
     "MetadataImportResult": "src/contracts/metadata-service.ts#MetadataImportResult (interface)",
+    "MetadataPackageBinding": "src/contracts/metadata-service.ts#MetadataPackageBinding (interface)",
     "MetadataRoundTripCase": "src/contracts/metadata-service-roundtrip-conformance.ts#MetadataRoundTripCase (interface)",
     "MetadataRoundTripExpectation": "src/contracts/metadata-service-roundtrip-conformance.ts#MetadataRoundTripExpectation (type)",
     "MetadataRoundTripRemoval": "src/contracts/metadata-service-roundtrip-conformance.ts#MetadataRoundTripRemoval (interface)",
