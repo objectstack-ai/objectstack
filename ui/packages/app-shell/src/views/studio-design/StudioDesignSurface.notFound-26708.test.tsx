@@ -226,9 +226,13 @@ describe('Studio: a package id no package has renders "package not found" (objec
     renderAt(`/studio/${PACKAGE_ID}/data`);
     await listAnswered(fetchMock);
     expect(screen.queryByTestId('studio-package-not-found')).toBeNull();
-    // objectstack#36899 — the left menu, its six groups drawn.
-    for (const group of ['data', 'ui', 'automation', 'system', 'security', 'ai']) {
+    // objectstack#36899 — the left menu drawn. objectstack#37201 — the 常用 groups of the served
+    // types (object, flow, permission), and the 「高级」 fold holding the four entries that are not a type.
+    for (const group of ['data', 'automation', 'security']) {
       expect(within(menu()).getByTestId(`studio-menu-group-${group}`)).toBeInTheDocument();
+    }
+    for (const group of ['automation', 'system', 'security']) {
+      expect(within(menu()).getByTestId(`studio-menu-advanced-group-${group}`)).toBeInTheDocument();
     }
   });
 
