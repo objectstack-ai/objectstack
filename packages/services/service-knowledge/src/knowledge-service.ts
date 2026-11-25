@@ -531,7 +531,9 @@ export class KnowledgeService implements IKnowledgeService {
    * the fewer rows a caller may read, the closer to empty. So when the re-check
    * can remove hits (a caller who is not the system identity, with an engine to
    * re-check with), each `object` source is asked for
-   * `topK × SEARCH_FIRST_ROUND_FACTOR` hits. When fewer than `topK` survive,
+   * `topK × SEARCH_FIRST_ROUND_FACTOR` hits. When the survivors name fewer
+   * than `topK` records ({@link distinctRecords}: several passages of one
+   * record count once),
    * the sources that answered as many hits as they were asked — the only ones
    * that may hold more — are asked once more, for
    * `topK × SEARCH_REFILL_FACTOR`; that round's hits replace the source's
@@ -563,7 +565,7 @@ export class KnowledgeService implements IKnowledgeService {
     let kept = await this.applyPermissionFilter(raw, ctx);
     let removed = raw.length - kept.length;
 
-    if (filtered && kept.length < topK) {
+    if (filtered && distinctRecords(kept) < topK) {
       const saturated = sources.filter(({ source }) => {
         const answer = first.get(source.id);
         return source.source.kind === 'object' && answer !== undefined && answer.answered >= firstAsk(source);
@@ -1172,10 +1174,10 @@ export const LIST_DOCUMENTS_PAGE_SIZE = 500;
 export const SEARCH_FIRST_ROUND_FACTOR = 5;
 
 /**
- * How many times `topK` the one refill round asks a source for, when fewer
- * than `topK` hits survived the re-check — the cap on what a search reads:
- * a caller who may read fewer matching rows than survive within it is
- * answered fewer than `topK`.
+ * How many times `topK` the one refill round asks a source for, when the
+ * survivors of the re-check name fewer than `topK` records — the cap on what a
+ * search reads: a caller who may read fewer than `topK` of the rows within the
+ * cap gets fewer than `topK` hits.
  */
 export const SEARCH_REFILL_FACTOR = 20;
 
@@ -1379,6 +1381,20 @@ function documentTitle(
   if (typeof value === 'string') return value.trim().length > 0 ? value : undefined;
   if (typeof value === 'number' && Number.isFinite(value)) return String(value);
   return undefined;
+}
+
+/**
+ * How many records `hits` name — what {@link KnowledgeService.search} counts
+ * toward `topK` when it decides whether to refill: several passages of one
+ * record count once. An object-source hit is its source and record id; any
+ * other hit is its document.
+ */
+function distinctRecords(hits: KnowledgeHit[]): number {
+  const keys = new Set<string>();
+  for (const hit of hits) {
+    keys.add(hit.sourceRecordId !== undefined ? `record:${hit.sourceId}#${hit.sourceRecordId}` : `document:${hit.documentId}`);
+  }
+  return keys.size;
 }
 
 /** Deterministic document id derived from the source + record id. */

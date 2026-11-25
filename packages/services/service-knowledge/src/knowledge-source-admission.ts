@@ -35,9 +35,10 @@
  *
  * Then, per source, the **field gate**: every field the source serves (each
  * `contentFields` member — `'*'` meaning every field the object declares — each
- * `metadataFields` member, and the title field — `documentTitleField`), less
- * the credential-class and `internal` fields the index never carries, must be
- * QUERYABLE by the caller.
+ * `metadataFields` member, the title field — `documentTitleField` — and,
+ * while the index may hold documents assembled under the earlier title rule, a
+ * declared `title`), less the credential-class and `internal` fields the index
+ * never carries, must be QUERYABLE by the caller.
  * Queryable, not merely readable: a passage carries the value the index read
  * under a system context, unmasked, and the search matches on it — a field the
  * caller is served masked is readable and not queryable, exactly the fields
@@ -261,6 +262,14 @@ export function servedFieldsOf(objSource: ObjectKnowledgeSource, schema: unknown
   // `recordToDocument` serves the title field's value whatever the source names.
   const titleField = documentTitleField(schema);
   if (titleField !== undefined) served.add(titleField);
+  // A document indexed before the title became the display field carries the
+  // value of a field named `title`, and stays in the index until a complete
+  // reindex writes it again. So `title` stays a served field whenever the
+  // object declares one (or its fields cannot be enumerated), as it was.
+  // Retire this arm once the index is proven rebuilt under the display-field
+  // rule: the recipe hash that names the title rule (ADR-0161 K7) and the
+  // rebuild of a stale source.
+  if (!declared || declared.some(([name]) => name === 'title')) served.add('title');
   for (const field of withheld) served.delete(field);
   return served;
 }

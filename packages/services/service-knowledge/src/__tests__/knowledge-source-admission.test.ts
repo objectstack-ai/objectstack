@@ -393,9 +393,20 @@ describe('field gate — the title field is the object\'s display field', () => 
     expect(searched()).toEqual([]);
   });
 
-  it('preservation: hiding a `title` field that is not the display field does not refuse the source', async () => {
+  // A document indexed before the title became the display field carries the
+  // value of the field named `title`, and stays in the index until a complete
+  // reindex writes it again: the gate still asks about a declared `title`.
+  it('refusal: a declared `title` the caller may not query still refuses the source — a stored hit may carry its value', async () => {
     const hideTitle = makeSecurity(() => ['id', 'name', 'body']);
-    const { svc } = setup({ objects: [ACCOUNT], sources: [objectSource('s', 'account', ['body'])], security: hideTitle });
+    const { svc, adapter, searched } = setup({ objects: [ACCOUNT], sources: [objectSource('s', 'account', ['body'])], security: hideTitle });
+    adapter.searchSpy.mockImplementation(async () => [{ ...hitFor('s'), title: 'synthetic-old-rule-title-4e1a' }]);
+    expect(await svc.search('q', { executionContext: MEMBER })).toEqual([]);
+    expect(searched()).toEqual([]);
+  });
+
+  it('preservation: a caller who may query both the display field and `title` gets the hit', async () => {
+    const all = makeSecurity(() => ['id', 'name', 'title', 'body']);
+    const { svc } = setup({ objects: [ACCOUNT], sources: [objectSource('s', 'account', ['body'])], security: all });
     expect(ids(await svc.search('q', { executionContext: MEMBER }))).toEqual(['s']);
   });
 });

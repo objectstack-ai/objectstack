@@ -1554,6 +1554,19 @@ describe('KnowledgeService — search refills after the permission filter', () =
     expect(asked()).toEqual([['s1', 25], ['s2', 25], ['s1', 100]]);
   });
 
+  it('the refill decision counts records, not passages: two passages of one record leave a slot another source can refill', async () => {
+    // topK 3. s2 answers two passages of one readable record; s1's readable
+    // rec_15 lies past its first round (15) and outranks both of them.
+    const s2: KnowledgeHit[] = [
+      { chunkId: 's2-a', documentId: 's2:r', sourceId: 's2', sourceRecordId: 'r', score: 0.5, snippet: 'a' },
+      { chunkId: 's2-b', documentId: 's2:r', sourceId: 's2', sourceRecordId: 'r', score: 0.49, snippet: 'b' },
+    ];
+    const { svc, asked } = setup({ s1: rankedHits('s1', 100), s2 }, ['rec_0', 'rec_15', 'r'], { sources: ['s1', 's2'] });
+    const out = await svc.search('q', { topK: 3, executionContext: MEMBER });
+    expect(out.map((h) => h.chunkId)).toEqual(['s1-c0', 's1-c15', 's2-a']);
+    expect(asked()).toEqual([['s1', 15], ['s2', 15], ['s1', 60]]);
+  });
+
   it('a refill the adapter fails keeps the source\'s round-one survivors', async () => {
     const { svc, adapter } = setup({ s1: rankedHits('s1', 100) }, ['rec_2']);
     const first = adapter.searchSpy.getMockImplementation()!;
