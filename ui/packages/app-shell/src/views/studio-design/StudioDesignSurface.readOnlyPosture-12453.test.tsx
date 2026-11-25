@@ -60,18 +60,20 @@ vi.mock('../../preview/DraftChangesPanel', () => ({ DraftChangesPanel: () => nul
 import { StudioDesignSurface } from './StudioDesignSurface';
 import { t } from '../metadata-admin/i18n';
 
-const answer = (body: unknown) => ({ headers: new Headers(), ok: true, status: 200, json: async () => body });
+const answer = (body: unknown) => ({ ok: true, status: 200, json: async () => body });
 const PILLARS = ['data', 'automations', 'interfaces', 'access'] as const;
 const READ_ONLY = t('engine.studio.pkg.readonly', 'en');
 
 function servePackage(writable: boolean) {
   vi.stubGlobal(
     'fetch',
-    vi.fn(async (input: unknown) =>
-      String(input) === '/api/v1/packages'
+    // The headers a real Response carries: the package list reads them through the authenticated fetch.
+    vi.fn(async (input: unknown) => ({
+      headers: new Headers(),
+      ...(String(input) === '/api/v1/packages'
         ? answer({ success: true, data: { packages: [{ manifest: { id: PACKAGE_ID, name: 'Field Ops' }, writable }] } })
-        : answer([]),
-    ),
+        : answer([])),
+    })),
   );
 }
 
