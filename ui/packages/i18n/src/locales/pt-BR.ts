@@ -2934,11 +2934,12 @@ const pt = {
       resetViewTitle: "Restaura os filtros, a pesquisa, a ordenação, o agrupamento, a disposição das colunas, os campos ocultos, a densidade, o layout, a cor da linha, os números de linha e a edição em linha próprios desta exibição. Exibições fixadas, favoritos e a forma de abrir registros não mudam. Apenas a sua lista muda.",
       personalized: "Personalizada",
       personalizedHeading: "Sua lista difere desta exibição em",
-      // objectstack#35955 — a list's unsaved changes: Discard and Save.
+      // objectstack#35955 — a list's unsaved changes: Reset and Update view
+      // (objectstack#36737, the view's own actions, as Twenty's).
       draft: {
-        discard: "Descartar",
+        discard: "Redefinir",
         discardTitle: "Devolve a lista ao que a exibição define: filtros, ordenação, agrupamento, colunas e layout. A largura das colunas e a altura das linhas continuam.",
-        save: "Salvar",
+        save: "Atualizar exibição",
         heading: "Alterações não salvas",
         partSeparator: ", ",
         saveToView: "Salvar nesta exibição",

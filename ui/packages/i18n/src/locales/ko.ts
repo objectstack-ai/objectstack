@@ -2863,11 +2863,12 @@ const ko = {
       resetViewTitle: "이 보기 자체의 필터, 검색, 정렬, 그룹, 열 배치, 숨긴 필드, 밀도, 레이아웃, 행 색상, 행 번호, 인라인 편집으로 되돌립니다. 고정한 보기, 즐겨찾기, 레코드 열기 방식은 그대로 유지됩니다. 본인의 목록만 변경됩니다.",
       personalized: "개인 설정됨",
       personalizedHeading: "이 보기와 다른 항목",
-      // objectstack#35955 — a list's unsaved changes: Discard and Save.
+      // objectstack#35955 — a list's unsaved changes: Reset and Update view
+      // (objectstack#36737, the view's own actions, as Twenty's).
       draft: {
-        discard: "변경 취소",
+        discard: "초기화",
         discardTitle: "목록을 보기에 정의된 상태로 되돌립니다: 필터, 정렬, 그룹, 열, 레이아웃. 열 너비와 행 높이는 그대로입니다.",
-        save: "저장",
+        save: "보기 업데이트",
         heading: "저장되지 않은 변경",
         partSeparator: ", ",
         saveToView: "이 보기에 저장",

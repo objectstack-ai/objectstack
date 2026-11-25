@@ -2935,11 +2935,12 @@ const fr = {
       resetViewTitle: "Rétablit les filtres, la recherche, le tri, le regroupement, la disposition des colonnes, les champs masqués, la densité, la disposition, la couleur de ligne, les numéros de ligne et l’édition en ligne propres à cette vue. Les vues épinglées, les favoris et le mode d’ouverture des enregistrements ne changent pas. Seule votre liste change.",
       personalized: "Personnalisée",
       personalizedHeading: "Votre liste diffère de cette vue par",
-      // objectstack#35955 — a list's unsaved changes: Discard and Save.
+      // objectstack#35955 — a list's unsaved changes: Reset and Update view
+      // (objectstack#36737, the view's own actions, as Twenty's).
       draft: {
-        discard: "Abandonner",
+        discard: "Réinitialiser",
         discardTitle: "Remet la liste telle que la vue la définit : filtres, tri, regroupement, colonnes et disposition. La largeur des colonnes et la hauteur des lignes restent.",
-        save: "Enregistrer",
+        save: "Mettre à jour la vue",
         heading: "Modifications non enregistrées",
         partSeparator: ", ",
         saveToView: "Enregistrer dans cette vue",
