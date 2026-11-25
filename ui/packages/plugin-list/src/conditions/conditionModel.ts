@@ -163,13 +163,29 @@ export function addSortLevel(items: readonly SortItem[], field: string, order: '
   return [...items, { id, field, order }];
 }
 
-/** The direction words a sort chip uses, by field type: time, size or the alphabet. */
-export type SortWording = 'time' | 'size' | 'alphabet';
-
-export function sortWording(type: string | undefined): SortWording {
-  if (type && DATE_TYPES.has(type)) return 'time';
-  if (type && (NUMBER_TYPES.has(type) || type === 'boolean')) return 'size';
-  return 'alphabet';
+/**
+ * The words for one sort direction on a field of `type`: time for the date
+ * family, size for the numeric family and `boolean`, the alphabet otherwise.
+ * The phone sort sheet's levels read it.
+ *
+ * Twin: `sortWording` / `sortDirectionLabel` in
+ * `ui/packages/components/src/custom/sort-builder.tsx` word `SortBuilder`'s
+ * levels by the same three-way rule over the same `listConditions.sort.*`
+ * rows. That copy stays module-local because sharing it would add a published
+ * export to `@object-ui/components`; change both together.
+ */
+export function sortDirectionLabel(
+  type: string | undefined,
+  order: 'asc' | 'desc',
+  t: (key: string) => string,
+): string {
+  if (type && DATE_TYPES.has(type)) {
+    return order === 'asc' ? t('listConditions.sort.time_asc') : t('listConditions.sort.time_desc');
+  }
+  if (type && (NUMBER_TYPES.has(type) || type === 'boolean')) {
+    return order === 'asc' ? t('listConditions.sort.size_asc') : t('listConditions.sort.size_desc');
+  }
+  return order === 'asc' ? t('listConditions.sort.alphabet_asc') : t('listConditions.sort.alphabet_desc');
 }
 
 /** One condition of the view's own filter, read for a locked chip. */

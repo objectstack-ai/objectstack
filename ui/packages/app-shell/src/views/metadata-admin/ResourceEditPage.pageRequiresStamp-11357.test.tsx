@@ -40,13 +40,15 @@
  * objectui#12486).
  *
  * Everything on the client side is shipping code: the page resource config
- * registered at load, `MetadataResourceEditPage` with its Save and Publish
- * doors and its post-save refresh, and the real `PagePreview`, which mounts
+ * registered at load, `MetadataResourceEditPage` with its Save (which
+ * publishes the item since objectstack#36902) and its post-save refresh, and the real `PagePreview`, which mounts
  * the real `SourcePageEditor` for an html page. A wrapper around `PagePreview`
  * only prints the draft it is handed, so the read-back is observable.
  */
 
 import '@testing-library/jest-dom/vitest';
+// The source under test reaches a dynamic import of this module: its first load is paid here, at collection, never inside a case's clock (`check:test-source-alias`).
+import '@objectstack/lint';
 import * as React from 'react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, cleanup, waitFor } from '@testing-library/react';
@@ -277,10 +279,8 @@ async function editSourceAndSave(source: string, saveCount: number) {
   await waitFor(() => expect(mockClient.getDraft.mock.calls.length).toBeGreaterThanOrEqual(saveCount + 1), { timeout: 8000 });
 }
 
+/** The Save itself publishes the item (objectstack#36902): wait for that publish, or its refusal. */
 async function publish() {
-  const button = (await screen.findAllByRole('button', { name: /^Publish$/ }, { timeout: 8000 }))[0]!;
-  await waitFor(() => expect(button).toBeEnabled(), { timeout: 8000 });
-  fireEvent.click(button);
   await waitFor(() => expect(server.publishes.length + server.refusals.length).toBeGreaterThan(0), { timeout: 8000 });
 }
 
@@ -319,6 +319,7 @@ describe('page editor — the save body carries no `requires`; the server stamps
 
     await publish();
     expect(server.refusals).toEqual([]);
+    expect(server.publishes).toEqual(['page/pipeline_board', 'page/pipeline_board']);
     expect(server.active.get(key('page', 'pipeline_board'))!.requires).toEqual(['ui']);
   });
 

@@ -3314,11 +3314,50 @@ export class TursoDriver extends SqlDriver {
       // [#21226] The rows are narrowed to the caller's tenant scope before they
       // are grouped, as `SqlDriver.aggregate` scopes its builder.
       const scope = this.remoteTenantScope(object, options);
-      return this.remoteReadExit(object, query, () =>
-        this.remoteTransport!.aggregate(object, this.toRemoteQuery(object, query, options), table, scope),
+      return this.presentRemoteGroupKeys(
+        object,
+        query,
+        await this.remoteReadExit(object, query, () =>
+          this.remoteTransport!.aggregate(object, this.toRemoteQuery(object, query, options), table, scope),
+        ),
       );
     }
     return super.aggregate(object, query, options);
+  }
+
+  /**
+   * [#37133] Present the group-key columns of a remote `aggregate()` answer
+   * with the presenter `find()` applies to the same column, so a group over a
+   * declared boolean answers `true` / `false`, never the stored `1` / `0`.
+   *
+   * The remote transport hands back raw libSQL columns, and the local face of
+   * this driver presents every group key through `SqlDriver.presentReadColumns`
+   * (keyed by the OUTPUT column, `alias ?? field`, with the kind
+   * `readPresentationKind` gives the FIELD). This applies those same two
+   * inherited members, so the faces cannot disagree on what a group key is.
+   * The presentation registries are keyed by object name on this face, as
+   * {@link formatRemoteRow} and `distinct()` read them.
+   *
+   * Measures are deliberately left as the transport answers them: a count or a
+   * total is already a number from libSQL, and `min` / `max` over a boolean are
+   * the ruled numeric domain (`SqlDriver.aggregate` [#11152]). A date-bucketed
+   * key never reaches here — the transport refuses it before anything is read.
+   */
+  private presentRemoteGroupKeys(
+    object: string,
+    query: DriverQuery,
+    rows: Record<string, unknown>[],
+  ): Record<string, unknown>[] {
+    const groupBy = Array.isArray(query?.groupBy) ? query.groupBy : [];
+    const columns = new Map(
+      groupBy.flatMap((g) => {
+        const field = typeof g === 'string' ? g : g?.field;
+        if (typeof field !== 'string') return [];
+        const kind = this.readPresentationKind(object, field);
+        return kind ? [[typeof g === 'string' ? g : (g.alias ?? field), kind] as const] : [];
+      }),
+    );
+    return this.presentReadColumns(rows, columns);
   }
 
   // ===================================

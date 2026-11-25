@@ -76,12 +76,22 @@ import {
 } from '@object-ui/components';
 import { LookupField, getLazyFieldWidget, objectRefOptionLabel } from '@object-ui/fields';
 import { RecordPointerCell } from '@object-ui/plugin-grid';
-import { ConsolePageHeader, useAdapter, useMetadata } from '@object-ui/app-shell';
+import { ConsolePageHeader, readEnvelopeFailureText, useAdapter, useMetadata } from '@object-ui/app-shell';
+import { createAuthenticatedFetch } from '@object-ui/auth';
 import { Search, X, AlertCircle, ScrollText, ExternalLink } from 'lucide-react';
 import { actionBadgeVariant, actionFilterOptionsOf, actionLabelOf } from './auditLogActions';
 
 const SERVER_URL = (import.meta.env.VITE_SERVER_URL || '').replace(/\/$/, '');
 const API_BASE = `${SERVER_URL}/api/v1`;
+
+/**
+ * The console's authenticated fetch: the stored bearer token beside the session
+ * cookie, as every other console data read sends it; a `401` reaches the
+ * console's session-ended check.
+ */
+function authFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+  return createAuthenticatedFetch()(input, init);
+}
 
 interface AuditRow {
   id: string;
@@ -440,12 +450,15 @@ export function AuditLogPage() {
       params.set('$top', String(PAGE_SIZE + 1));  // +1 to detect hasMore
       params.set('$skip', String(page * PAGE_SIZE));
 
-      const res = await fetch(`${API_BASE}/data/sys_audit_log?${params.toString()}`, {
+      const res = await authFetch(`${API_BASE}/data/sys_audit_log?${params.toString()}`, {
         credentials: 'include',
       });
       if (!res.ok) {
-        const body = await res.text().catch(() => '');
-        throw new Error(`HTTP ${res.status}: ${body.slice(0, 200) || res.statusText}`);
+        // The refusal's own sentence when the envelope carries one; otherwise
+        // an empty message, which the alert draws as the page's own failure
+        // text. Never the raw body or a bare machine code.
+        const body = await res.json().catch(() => null);
+        throw new Error(readEnvelopeFailureText(body) ?? '');
       }
       const json = await res.json();
       // REST envelope: { object, records, total, hasMore }
@@ -460,7 +473,7 @@ export function AuditLogPage() {
       setRows(items.slice(0, PAGE_SIZE));
     } catch (err: any) {
       console.warn('[AuditLogPage] load failed:', err);
-      setError(err?.message || '');
+      setError(typeof err?.message === 'string' ? err.message : '');
       setRows([]);
       setHasMore(false);
     } finally {
@@ -673,7 +686,9 @@ export function AuditLogPage() {
         </Alert>
       )}
 
-      {/* Table */}
+      {/* Table — a read that failed is not "no audit entries": the alert above
+          says why, and the empty state is drawn only for a read that answered. */}
+      {(error === null || loading || rows.length > 0) && (
       <Card>
         <CardContent className="p-0">
           {loading && rows.length === 0 ? (
@@ -744,6 +759,7 @@ export function AuditLogPage() {
           )}
         </CardContent>
       </Card>
+      )}
 
       {/* Pagination */}
       {(rows.length > 0 || page > 0) && (

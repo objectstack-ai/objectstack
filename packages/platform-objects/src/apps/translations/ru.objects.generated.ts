@@ -4627,5 +4627,90 @@ export const ruObjects: NonNullable<TranslationData['objects']> = {
         }
       }
     }
+  },
+  sys_task: {
+    label: "Задача",
+    pluralLabel: "Задачи",
+    description: "Дела с исполнителем и сроком.",
+    fields: {
+      title: {
+        label: "Заголовок"
+      },
+      description: {
+        label: "Описание"
+      },
+      status: {
+        label: "Статус",
+        options: {
+          todo: "К выполнению",
+          in_progress: "В работе",
+          done: "Выполнена"
+        }
+      },
+      due_at: {
+        label: "Срок"
+      },
+      assignee_id: {
+        label: "Исполнитель"
+      },
+      completed_at: {
+        label: "Дата выполнения",
+        help: "Заполняется платформой, когда статус становится «Выполнена», и очищается, когда он меняется."
+      },
+      owner_id: {
+        label: "Владелец"
+      }
+    },
+    _views: {
+      assigned_to_me: {
+        label: "Назначенные мне",
+        emptyState: {
+          title: "Вам ничего не назначено",
+          message: "Здесь появляются назначенные вам незавершённые задачи."
+        }
+      },
+      created_by_me: {
+        label: "Созданные мной",
+        emptyState: {
+          title: "Задач пока нет",
+          message: "Здесь появляются созданные вами задачи."
+        }
+      },
+      all: {
+        label: "Все задачи"
+      }
+    }
+  },
+  sys_note: {
+    label: "Заметка",
+    pluralLabel: "Заметки",
+    description: "Заметки: заголовок и форматированный текст.",
+    fields: {
+      title: {
+        label: "Заголовок"
+      },
+      body: {
+        label: "Текст"
+      },
+      heading: {
+        label: "Отображаемый заголовок",
+        help: "Заголовок, а если он пуст, первая строка текста. Поддерживается платформой."
+      },
+      owner_id: {
+        label: "Владелец"
+      }
+    },
+    _views: {
+      mine: {
+        label: "Мои заметки",
+        emptyState: {
+          title: "Заметок пока нет",
+          message: "Здесь появляются ваши заметки."
+        }
+      },
+      all: {
+        label: "Все заметки"
+      }
+    }
   }
 };

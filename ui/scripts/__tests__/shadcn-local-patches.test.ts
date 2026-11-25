@@ -376,9 +376,32 @@ describe('shadcn local patches — application to fresh upstream (objectstack#55
     ]);
   });
 
-  it('sidebar declares no patch outside those four families', () => {
+  /**
+   * The ninth family: the phone drawer's accessible name (objectstack#37018).
+   * All three halves are listed because the title swap without the import
+   * leaves an unresolved component, and the description drop without
+   * `aria-describedby={undefined}` makes Radix warn on every open.
+   */
+  it('sidebar declares the drawer-label patches', () => {
+    const ids = LOCAL_PATCHES.sidebar
+      .filter((p: { issue: string }) => p.issue === 'objectstack#37018')
+      .map((p: { id: string }) => p.id);
+    expect(ids).toEqual([
+      'sidebar-drawer-label-import',
+      'sidebar-drawer-label-no-description',
+      'sidebar-drawer-label-title',
+    ]);
+  });
+
+  it('sidebar declares no patch outside those five families', () => {
     const issues = [...new Set(LOCAL_PATCHES.sidebar.map((p: { issue: string }) => p.issue))].sort();
-    expect(issues).toEqual(['objectstack#36899', 'objectui#10859', 'objectui#11464', 'objectui#4234']);
+    expect(issues).toEqual([
+      'objectstack#36899',
+      'objectstack#37018',
+      'objectui#10859',
+      'objectui#11464',
+      'objectui#4234',
+    ]);
   });
 
   /**

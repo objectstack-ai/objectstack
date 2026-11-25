@@ -46,7 +46,12 @@ import { uiRoot } from '../scripts/ui-root.mjs';
  * FIXTURES: the rows and fields are literals; the main area is a frame beside
  * a 256 px block standing in for the open sidebar (edges are measured from the
  * frame, so the sidebar's own width is not an input); icons are 16 px boxes;
- * the switcher's and footer's contents are short literals. Fonts are
+ * the switcher's content is a short literal. The footer's count at 1280 is
+ * the grid's own summary row (`data-table-summary-lead`), drawn the way the
+ * list asks for it (`residentSummaryRow`, `summaryRowLead`), with a declared
+ * calculation on the first column (objectstack#37028: a stand-in footer here
+ * once let a count at 52 pass); on a phone, where the grid draws cards and no
+ * summary row, it is the list's record-count bar holding a literal. Fonts are
  * Chromium's fallbacks: the assertions are edges and widths of boxes, not of
  * glyphs.
  *
@@ -218,11 +223,20 @@ createRoot(document.getElementById('root')).render(
                 schema: {
                   type: 'object-grid',
                   objectName: 'contact',
-                  columns: c.columns.map((field) => ({ field, label: LABELS[field] })),
+                  // The first column declares a calculation, so its figure
+                  // shares the summary row's first cell with the lead.
+                  columns: c.columns.map((field, i) => ({ field, label: LABELS[field], ...(i === 0 ? { summary: 'count_filled' } : {}) })),
                   selection: { type: 'multiple' },
                 },
+                // objectstack#37028: the list's own footer posture (ListView's
+                // resident summary row), so the count measured below is the
+                // real summary row's lead, not a stand-in.
+                residentSummaryRow: true,
+                summaryRowLead: (count) => count + ' records',
               })),
-            h('div', { id: 'footer', className: c.footerClass },
+            // Below 768 the grid draws cards and no summary row; the list then
+            // draws its record-count bar (ListView), whose class is read above.
+            c.viewport < 768 && h('div', { id: 'footer', className: c.footerClass },
               h('span', { id: 'footer-text', className: 'shrink-0 font-medium text-foreground/80' }, '12 records'))))))),
 );
 `;
@@ -347,12 +361,19 @@ interface Reading {
     chartViewIcon: number;
     headerCheckbox: number;
     rowCheckboxes: number[];
+    /** The summary row's lead, the record count (objectstack#37028). */
     footerText: number;
     firstHeaderText: number;
     firstCellText: number;
   };
   /** Right edges, from the main area's right (distance in): ⋮ (the bar's last button) and the view bar's cluster. */
-  right: { pageAction: number; viewCluster: number; footer: number; scrollBox: number };
+  right: { pageAction: number; viewCluster: number; scrollBox: number };
+  /**
+   * The first column's calculated figure, in the summary row's first cell
+   * (objectstack#35548: each figure in its column's cell): its box, the first
+   * column's header cell, and the lead's right edge, from the main area's left.
+   */
+  firstFigure: { left: number; right: number; columnLeft: number; columnRight: number; leadRight: number };
   /** The right padding of the list's view bar and of the chart view's (objectstack#35729). */
   barPaddingRight: { list: number; chart: number };
   /** The selection column's header cell: width and drawn left, from the main area. */
@@ -404,16 +425,25 @@ async function readEdges(page: Page): Promise<Reading> {
         chartViewIcon: x(document.getElementById('chart-view-icon')),
         headerCheckbox: x(document.querySelector('thead [role="checkbox"]')),
         rowCheckboxes: rowBoxes.map((b) => x(b)),
-        footerText: x(document.getElementById('footer-text')),
+        footerText: x(document.querySelector('[data-testid="data-table-summary-lead"]')),
         firstHeaderText: Math.round((textOf(firstData).left - main.left) * 10) / 10,
         firstCellText: Math.round((textOf(firstCell).left - main.left) * 10) / 10,
       },
       right: {
         pageAction: inRight(document.getElementById('page-more')),
         viewCluster: inRight(document.getElementById('cluster')),
-        footer: Math.round((main.right - r(document.getElementById('footer-text')!.parentElement).right) * 10) / 10,
         scrollBox: inRight(box),
       },
+      firstFigure: (() => {
+        const leadEl = document.querySelector('[data-testid="data-table-summary-lead"]');
+        const figure = leadEl?.nextElementSibling ?? null;
+        const at = (n: number) => Math.round((n - main.left) * 10) / 10;
+        return {
+          left: at(r(figure).left), right: at(r(figure).right),
+          columnLeft: at(r(firstData).left), columnRight: at(r(firstData).right),
+          leadRight: at(r(leadEl).right),
+        };
+      })(),
       barPaddingRight: {
         list: parseFloat(getComputedStyle(document.getElementById('viewbar')!).paddingRight),
         chart: parseFloat(getComputedStyle(document.getElementById('chartbar')!).paddingRight),
@@ -426,15 +456,20 @@ async function readEdges(page: Page): Promise<Reading> {
 }
 
 /** Scroll the table to its far right, read the selection column, scroll back. */
-async function scrollRoundTrip(page: Page): Promise<{ far: { width: number; left: number; checkbox: number }; back: { width: number; left: number } }> {
+async function scrollRoundTrip(page: Page): Promise<{ far: { width: number; left: number; checkbox: number; count: number }; back: { width: number; left: number; count: number } }> {
   return page.evaluate(async () => {
     const main = document.getElementById('main')!.getBoundingClientRect();
     const box = document.querySelector<HTMLElement>('[data-table-scroll-box]')!;
     const lead = document.querySelector('thead tr')!.children[0] as HTMLElement;
     const frame = () => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    const count = document.querySelector('[data-testid="data-table-summary-lead"]')!;
     const read = () => {
       const lr = lead.getBoundingClientRect();
-      return { width: Math.round(lr.width * 10) / 10, left: Math.round((lr.left - main.left) * 10) / 10 };
+      return {
+        width: Math.round(lr.width * 10) / 10,
+        left: Math.round((lr.left - main.left) * 10) / 10,
+        count: Math.round((count.getBoundingClientRect().left - main.left) * 10) / 10,
+      };
     };
     box.scrollLeft = box.scrollWidth;
     await frame();
@@ -496,6 +531,12 @@ test.describe('the list page draws one left edge (objectstack#35663)', () => {
       expect(r.selection.left).toBeCloseTo(0, 0);
       // The first column's header label and its cells start on one line.
       expect(Math.abs(r.left.firstHeaderText - r.left.firstCellText), `header text ${r.left.firstHeaderText} vs cell text ${r.left.firstCellText}`).toBeLessThanOrEqual(1);
+      // objectstack#37028 / #35548: the count on the edge, and the first
+      // column's figure still inside its column, clear of the count.
+      const f = r.firstFigure;
+      expect(f.left, `the first column's figure starts at ${f.left}, left of its column (${f.columnLeft})`).toBeGreaterThanOrEqual(f.columnLeft - 0.5);
+      expect(f.right, `the first column's figure ends at ${f.right}, right of its column (${f.columnRight})`).toBeLessThanOrEqual(f.columnRight + 0.5);
+      expect(f.left, `the first column's figure (${f.left}) overlaps the count (ends ${f.leadRight})`).toBeGreaterThanOrEqual(f.leadRight);
       // No row numbers; every row's checkbox shows without a hover.
       expect(r.rowNumbers, 'the grid draws row numbers').toBe(0);
       expect(r.rowCheckboxOpacity.length).toBe(12);
@@ -523,6 +564,10 @@ test.describe('the list page draws one left edge (objectstack#35663)', () => {
       expect(leg.left).toBeCloseTo(0, 0);
     }
     expect(Math.abs(trip.far.checkbox - EDGE)).toBeLessThanOrEqual(1);
+    // The footer's count is frozen with the selection column (objectstack#37028).
+    for (const leg of [trip.far, trip.back]) {
+      expect(Math.abs(leg.count - EDGE), `the footer count starts at ${leg.count} after scrolling, not ${EDGE}`).toBeLessThanOrEqual(1);
+    }
     expect(gap, 'a strip between the frozen cells shows the scrolled content').toBeLessThanOrEqual(0.5);
   });
 

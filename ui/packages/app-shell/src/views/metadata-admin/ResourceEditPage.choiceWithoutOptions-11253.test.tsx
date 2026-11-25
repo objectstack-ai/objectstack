@@ -15,11 +15,13 @@
  * canvas and field inspector. The client is a real `MetadataClient`, whose
  * `save` is the door that runs the object write guard; only its transport and
  * the mount's reads are doubles. So the claim is read off the WIRE: no PUT
- * carries a choice field without options, the held autosave says why and names
- * the field, and one option lets the next autosave go (the control).
+ * carries a choice field without options, the held Save says why and names
+ * the field, and one option lets the next Save go (the control).
  */
 
 import '@testing-library/jest-dom/vitest';
+// The source under test reaches a dynamic import of this module: its first load is paid here, at collection, never inside a case's clock (`check:test-source-alias`).
+import '@objectstack/lint';
 import * as React from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { render, screen, fireEvent, cleanup, waitFor, act } from '@testing-library/react';
@@ -46,6 +48,13 @@ const OBJECT_ENTRY = {
 const puts: Array<{ url: string; body: Record<string, unknown> }> = [];
 
 const fetchImpl = vi.fn(async (url: string, init?: RequestInit) => {
+  // The Save's own publish and a refused publish's take-back (objectstack#36902).
+  if (init?.method === 'POST' || init?.method === 'DELETE') {
+    return new Response(JSON.stringify({ success: true }), {
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+    });
+  }
   if (init?.method === 'PUT') {
     puts.push({ url, body: JSON.parse(String(init.body)) as Record<string, unknown> });
     return new Response(JSON.stringify({ success: true }), {
@@ -125,10 +134,11 @@ function choiceWithoutOptions(): WireField[] {
   );
 }
 
-/** Past the autosave's 1.5 s debounce. */
-async function outlastDebounce(): Promise<void> {
+/** Press Save (a held Save is a disabled button, so the press sends nothing), and let any write leave. */
+async function pressSaveAndSettle(): Promise<void> {
+  fireEvent.click(screen.getByTestId('resource-save'));
   await act(async () => {
-    await new Promise((r) => setTimeout(r, 2300));
+    await new Promise((r) => setTimeout(r, 300));
   });
 }
 
@@ -137,7 +147,7 @@ describe('metadata-admin object editor — a new choice field is not sent withou
     ['select', 'Picklist', 'status'],
     ['radio', 'Radio', 'radio'],
   ] as const) {
-    it(`add a \`${type}\` from the palette, wait out the autosave: no request carries it without options`, async () => {
+    it(`add a \`${type}\` from the palette, press Save: no request carries it without options`, async () => {
       render(
         <MemoryRouter initialEntries={['/metadata/object/acme_task']}>
           <MetadataResourceEditPage type="object" name="acme_task" />
@@ -145,21 +155,23 @@ describe('metadata-admin object editor — a new choice field is not sent withou
       );
       fireEvent.click(await screen.findByRole('button', { name: 'Add field' }, { timeout: 8000 }));
       fireEvent.click(await screen.findByRole('button', { name: paletteLabel }));
-      await outlastDebounce();
+      await pressSaveAndSettle();
 
       // Held: the seeded `options: []` never reached the wire.
       expect(choiceWithoutOptions()).toEqual([]);
-      const banner = await screen.findByText(new RegExp(`\`${seededName}\``));
-      expect(banner).toHaveTextContent(/no options/);
+      const named = await screen.findAllByText(new RegExp(`\`${seededName}\``));
+      expect(named.some((el) => /no options/.test(el.textContent ?? ''))).toBe(true);
 
-      // CONTROL: one option lets the next autosave go, and the banner clears.
+      // CONTROL: one option lets the next Save go, and the banner clears.
       fireEvent.change(await screen.findByPlaceholderText('value'), { target: { value: 'open' } });
+      await waitFor(() => expect(screen.getByTestId('resource-save')).toBeEnabled(), { timeout: 4000 });
+      fireEvent.click(screen.getByTestId('resource-save'));
       await waitFor(() => expect(puts.length).toBeGreaterThan(0), { timeout: 4000 });
       const sent = wireFields(puts[puts.length - 1].body).find((f) => f.name === seededName);
       expect(sent?.type).toBe(type);
       expect(sent?.options).toEqual([expect.objectContaining({ value: 'open' })]);
       expect(choiceWithoutOptions()).toEqual([]);
-      await waitFor(() => expect(screen.queryByText(new RegExp(`\`${seededName}\``))).toBeNull());
+      await waitFor(() => expect(screen.queryAllByText(new RegExp(`\`${seededName}\``))).toHaveLength(0));
     });
   }
 });
