@@ -535,10 +535,24 @@ export async function publishRuntimeMetadata(
   type: RuntimeArtifactType,
   name: string,
   ctx: RuntimePersistCtx,
+  draftVersion?: string,
 ): Promise<void> {
-  await ctx.metadataClient.publish(type, name);
+  // objectstack#36350 — pinned to the draft the bar showed when its caller
+  // has that draft's version: a draft another writer changed since is refused
+  // `409 METADATA_CONFLICT` and nothing is published. Without one, whichever
+  // draft is pending is published, as before.
+  await ctx.metadataClient.publish(type, name, draftVersion ? { draftVersion } : {});
   invalidateViewCaches(type, name, ctx);
   announceDraftLedgerWrite();
+}
+
+/**
+ * The version token a draft save's receipt carries (`version`), or
+ * `undefined` when it carries none: the publish is then unpinned, as before.
+ */
+function receiptVersion(receipt: unknown): string | undefined {
+  const version = (receipt as { version?: unknown } | null | undefined)?.version;
+  return typeof version === 'string' && version.length > 0 ? version : undefined;
 }
 
 /** What {@link saveAndPublishRuntimeMetadata} did. */
@@ -555,7 +569,13 @@ export type SaveAndPublishOutcome = 'published' | 'pending-draft';
  * door does not say who did — and nothing is written: resolves
  * `'pending-draft'`. That draft is never published on its saver's behalf.
  *
- * A publish the server refuses leaves no draft of this call behind: the draft
+ * objectstack#36350 — the publish is pinned to the draft this call wrote (its
+ * receipt's version, `draftVersion`). When another writer's draft write lands
+ * between the two, the server refuses the publish `409 METADATA_CONFLICT` and
+ * publishes nothing; the moved draft is left pending, never discarded, and
+ * this resolves `'pending-draft'`.
+ *
+ * Any other publish refusal leaves no draft of this call behind: the draft
  * it wrote is discarded (it was the only one, by the pin) and the refusal is
  * rethrown. Any other refusal is rethrown as it came.
  *
@@ -575,13 +595,15 @@ export async function saveAndPublishRuntimeMetadata(
 ): Promise<SaveAndPublishOutcome> {
   const app = type === 'view' ? ctx.app : null;
   const packageId = app?.packageId ? await resolveRuntimeCreatePackage(app.packageId, type) : null;
+  let draftVersion: string | undefined;
   try {
-    await ctx.metadataClient.save(
+    const receipt = await ctx.metadataClient.save(
       type,
       name,
       body,
       packageId ? { mode: 'draft', ifNoneMatch: '*', packageId } : { mode: 'draft', ifNoneMatch: '*' },
     );
+    draftVersion = receiptVersion(receipt);
   } catch (err) {
     if (isDraftVersionConflict(err)) {
       return 'pending-draft';
@@ -589,8 +611,22 @@ export async function saveAndPublishRuntimeMetadata(
     throw err;
   }
   try {
-    await ctx.metadataClient.publish(type, name);
+    // objectstack#36350 — the publish is pinned to the draft this call wrote
+    // (`draftVersion`, its receipt's version). Another writer's draft write
+    // landing in between (a rename, pin or set-default on the same view) moves
+    // the draft, and the server refuses the publish `409 METADATA_CONFLICT`
+    // rather than publishing that writer's unreviewed change on their behalf.
+    await ctx.metadataClient.publish(type, name, draftVersion ? { draftVersion } : {});
   } catch (err) {
+    if (isDraftVersionConflict(err)) {
+      // The draft moved: it now holds the other writer's change on top of
+      // this call's body, so it is no longer this call's own — ⛔ never
+      // discarded here. It stays pending for the draft bar's review, exactly
+      // as a draft found pending before the write does.
+      invalidateViewCaches(type, name, ctx);
+      announceDraftLedgerWrite();
+      return 'pending-draft';
+    }
     try {
       await ctx.metadataClient.reset(type, name, { state: 'draft' });
     } catch (discardErr) {

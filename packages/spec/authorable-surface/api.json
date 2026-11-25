@@ -1520,6 +1520,7 @@
     "api/PublicFormSubmitResponse:fields",
     "api/PublicFormSubmitResponse:id",
     "api/PublishMetaItemRequest:actor",
+    "api/PublishMetaItemRequest:draftVersion",
     "api/PublishMetaItemRequest:member",
     "api/PublishMetaItemRequest:message",
     "api/PublishMetaItemRequest:name",

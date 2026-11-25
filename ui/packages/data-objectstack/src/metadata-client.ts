@@ -2040,11 +2040,20 @@ export class MetadataClient {
    * A stale pin is refused `409 METADATA_CONFLICT` with the current version as
    * `currentVersion`, and nothing is promoted. Neither, the publish is
    * unpinned, as before. ⛔ Never both: refused before any request.
+   *
+   * objectstack#36350 — `draftVersion` pins the DRAFT this publish promotes:
+   * the version a draft save's receipt returned (or the draft read's
+   * `version`), sent as the `draftVersion` body member beside `message`. A
+   * draft another writer changed since is refused `409 METADATA_CONFLICT`
+   * with the draft's current version as `currentVersion` (`null` when no
+   * draft is pending any more), and nothing is promoted. It pins the draft
+   * only and is sent beside `ifMatch`, which keeps pinning the active row.
+   * Omitted, whichever draft is pending is promoted, as before.
    */
   async publish<T = unknown>(
     type: string,
     name: string,
-    options: { message?: string; packageId?: string; member?: string; ifMatch?: string; ifNoneMatch?: '*' } = {},
+    options: { message?: string; packageId?: string; member?: string; ifMatch?: string; ifNoneMatch?: '*'; draftVersion?: string } = {},
   ): Promise<T> {
     if (options.ifMatch && options.ifNoneMatch) {
       throw new Error(
@@ -2079,7 +2088,10 @@ export class MetadataClient {
     const res = await this.sendWrite(url, {
       method: 'POST',
       headers,
-      body: JSON.stringify(options.message ? { message: options.message } : {}),
+      body: JSON.stringify({
+        ...(options.message ? { message: options.message } : {}),
+        ...(options.draftVersion !== undefined ? { draftVersion: options.draftVersion } : {}),
+      }),
     });
     if (!res.ok) throw await parseError(res);
     const body = await res.json();
