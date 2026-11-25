@@ -2802,18 +2802,22 @@ export const RelatedList: React.FC<RelatedListProps> = ({
    * opens it — the picker's first row is 「新建」 when New is offered too —
    * and with none it creates a new row directly (New). `null` when neither is
    * offered.
+   *
+   * objectstack#37251 — the entry is named for what it does: 「添加」 / Add
+   * (or the authored `add.label`) only where it opens a picker; where it can
+   * only create (a `master_detail` child with no catalog, since
+   * objectstack#36704) it reads 「新建」 / New, the create form's own name.
    */
   const pickerOffered = !!add && !!add.picker?.object && !!dataSource && addGranted && addBatchable;
-  const addFallbackLabel = t('detail.add', { defaultValue: 'Add' });
   const addEntry: { label: string; disabled: boolean; onClick: () => void } | null = pickerOffered
     ? {
-        label: add!.label || addFallbackLabel,
+        label: add!.label || t('detail.add', { defaultValue: 'Add' }),
         disabled: addBusy,
         onClick: () => { setAddError(null); setPickerOpen(true); },
       }
     : onNew
       ? {
-          label: addFallbackLabel,
+          label: t('detail.new', { defaultValue: 'New' }),
           disabled: !!newDisabled,
           onClick: () => onNew(),
         }
