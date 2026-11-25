@@ -25,7 +25,7 @@
  * an empty body table draws its headers and one empty row with the add entry.
  */
 import { describe, it, expect, vi, beforeAll, afterAll, afterEach } from 'vitest';
-import { render, screen, waitFor, fireEvent } from '@testing-library/react';
+import { act, render, screen, waitFor, fireEvent } from '@testing-library/react';
 import '@testing-library/jest-dom';
 import React from 'react';
 import { RecordContextProvider } from '@object-ui/react';
@@ -748,7 +748,7 @@ describe('RelatedList — a body table in the record preview drawer settles its 
   const updateDepthErrors = (errors: { mock: { calls: unknown[][] } }) =>
     errors.mock.calls.filter((call: unknown[]) => /Maximum update depth|#185/.test(call.map(String).join(' ')));
 
-  it('in the 326 px details column of the 460 px preview: the table draws, and the cap settles on the leading columns that fit', async () => {
+  it('in the 326 px details column of the 460 px preview: the table draws, and the cap settles on a leading run of the columns', async () => {
     const errors = renderLines();
     await waitFor(() => expect(document.querySelector('[data-body-table-columns-omitted]')).not.toBeNull());
     // Let every read the table's re-draws trigger run out.
@@ -761,6 +761,28 @@ describe('RelatedList — a body table in the record preview drawer settles its 
     const keys = Object.keys(lineFields);
     expect(headerKeys()).toEqual(keys.slice(0, keys.length - omitted));
     expect(screen.getAllByText('License').length).toBeGreaterThan(0);
+  });
+
+  it('a column hidden from the header menu is the table\'s own choice: a later narrowing is still read (cap and overflow cue)', async () => {
+    boxPx = 1052;
+    renderLines();
+    await waitFor(() => expect(headerKeys()).toEqual(Object.keys(lineFields)));
+    const total = document.querySelector('thead th[data-column-key="total"]') as HTMLElement;
+    fireEvent.contextMenu(total);
+    fireEvent.click(await screen.findByText('Hide column'));
+    await waitFor(() => expect(headerKeys()).toEqual(['product', 'tier', 'quantity']));
+    const host = document.querySelector('[data-body-table-overflow]') as HTMLElement;
+    expect(host.hasAttribute('data-body-table-columns-omitted')).toBe(false);
+    // Narrowed to the drawer's details column. jsdom reports no resize; a
+    // change of the box's content asks the read the same question.
+    boxPx = 326;
+    const box = document.querySelector('[data-table-scroll-box]') as HTMLElement;
+    act(() => {
+      box.appendChild(document.createElement('span'));
+    });
+    await waitFor(() => expect(host.getAttribute('data-body-table-columns-omitted')).not.toBeNull());
+    expect(headerKeys().length).toBeLessThan(3);
+    expect(host.getAttribute('data-body-table-overflow')).toBe('true');
   });
 
   it('CONTROL — the full page\'s wide details column: every column drawn, none left out, no error', async () => {
