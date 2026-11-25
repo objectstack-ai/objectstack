@@ -26,7 +26,6 @@ import {
   studioMetadataAreaPath,
 } from './metadataArea';
 import { STUDIO_ORG_SCOPE_SEGMENT } from './studioScope';
-import { parseSurfaceParam } from '../metadata-admin/nav-selection';
 
 const PKG = 'com.example.crm';
 
