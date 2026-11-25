@@ -35,7 +35,7 @@ import { askModeRefusal, buildPassed, doorHarnessGap, confirmationAmbiguous, con
 import { derivedFields, RESTORE_UNCOMPARED, rowDrift } from '../../src/runner/seed.js';
 import { askCostText, askSpend, askTimeText, buildDenialFindings, cardScorecard, cardStampOf, confirmationTally, datasetTally, confirmedWriteTally, elapsedText, guardrailTally, kindCell, kindTally, modelTally, opsTally, renderScorecard, repeatTally, runRecord, type AskSpend } from '../../src/runner/scorecard.js';
 import { askKindCounts } from '../../src/ask-kinds.js';
-import { ASK_KINDS } from '../../src/schema.js';
+import { ASK_KINDS, PersonaSchema } from '../../src/schema.js';
 import type { PackageSource } from '../../src/runner/packages.js';
 import { buildPrompt, CONFIRMATION_WORDS, doorBuildPrompt, confirmPrompt, iteratePrompt, MissingLanguageError, promptLanguageGaps, promptLanguageRefusal, questionPrompt } from '../../src/runner/prompts.js';
 import type { ParsedTurn } from '../../src/runner/transcript.js';
@@ -1567,6 +1567,75 @@ describe('rollupSourceCharges — an acknowledged roll-up over a child the card 
     // Control: the same build without the reasons is charged for exactly the same roll-ups.
     const strip = (cs: typeof charges) => cs.map((c) => [c.persona, c.rollup, c.child, c.withheld]);
     expect(strip(charges)).toEqual(strip(rollupSourceCharges(scenario, artifact(false))));
+  });
+});
+
+describe('rollupSourceCharges — a roll-up the card allows a persona is not charged once acknowledged (ruling B on #37257)', () => {
+  const scenario = namespacedScenario(load(resolve(HERE, '../../../../../docs/qa/scenarios/order_to_cash.json')));
+  const p = (name: string) => `demoorder_${name}`;
+  const REASON = 'a rep follows what their invoices have been paid';
+
+  /**
+   * order_to_cash: the card withholds `payment` from the sales rep and allows
+   * the rep `invoice.amount_paid` (a sum over payment.amount). The rep's set
+   * reads invoice and not payment, so the rule finds each invoice roll-up;
+   * `ack` names the roll-up columns the set acknowledges.
+   */
+  const artifact = (ack: string[]) => ({
+    manifest: { id: 'com.example.demoorder', namespace: 'demoorder' },
+    objects: [
+      {
+        name: p('invoice'),
+        fields: {
+          amount: { type: 'currency' },
+          amount_paid: { type: 'summary', summaryOperations: { object: p('payment'), function: 'sum', field: 'amount' } },
+          payment_count: { type: 'summary', summaryOperations: { object: p('payment'), function: 'count' } },
+        },
+      },
+      { name: p('payment'), fields: { amount: { type: 'currency' }, invoice: { type: 'lookup', reference: p('invoice') } } },
+    ],
+    permissions: [
+      {
+        name: p('sales_rep'),
+        objects: { [p('invoice')]: { allowRead: true } },
+        fields: Object.fromEntries(ack.map((c) => [`${p('invoice')}.${c}`, { rollupSourceUnreadableReason: REASON }])),
+      },
+    ],
+  });
+  const charged = (s: LoadedScenario, built: unknown) => rollupSourceCharges(s, built).map((c) => [c.persona, c.rollup, c.withheld]);
+  const withoutKey: LoadedScenario = {
+    ...scenario,
+    card: { ...scenario.card, run: { ...scenario.card.run, personas: scenario.card.run.personas.map(({ allowedRollups: _, ...rest }) => rest) } },
+  };
+
+  it('the card allows the sales rep invoice.amount_paid, in its own bare names', () => {
+    expect(scenario.card.run.personas.find((x) => x.id === 'sales_rep')!.allowedRollups).toEqual([{ object: 'invoice', field: 'amount_paid' }]);
+  });
+
+  it('an acknowledged finding on the allowed roll-up is not charged; an acknowledged one on another roll-up is', () => {
+    expect(charged(scenario, artifact(['amount_paid', 'payment_count']))).toEqual([['sales_rep', p('invoice.payment_count'), { object: p('payment') }]]);
+  });
+
+  it('the same build is charged for both once the card names no allowed roll-up', () => {
+    expect(charged(withoutKey, artifact(['amount_paid', 'payment_count']))).toEqual([
+      ['sales_rep', p('invoice.amount_paid'), { object: p('payment') }],
+      ['sales_rep', p('invoice.payment_count'), { object: p('payment') }],
+    ]);
+  });
+
+  it('an UNacknowledged finding on the allowed roll-up is charged', () => {
+    expect(charged(scenario, artifact([]))).toEqual([
+      ['sales_rep', p('invoice.amount_paid'), { object: p('payment') }],
+      ['sales_rep', p('invoice.payment_count'), { object: p('payment') }],
+    ]);
+  });
+
+  it('the schema refuses an allowed roll-up the persona\'s hidden withholds', () => {
+    const base = { id: 'rep', role: 'Rep', hidden: { objects: ['payment'], fields: [{ object: 'product', field: 'unit_cost' }] } };
+    expect(PersonaSchema.safeParse({ ...base, allowedRollups: [{ object: 'invoice', field: 'amount_paid' }] }).success).toBe(true);
+    const refused = PersonaSchema.safeParse({ ...base, allowedRollups: [{ object: 'product', field: 'unit_cost' }] });
+    expect(refused.success).toBe(false);
+    expect(refused.error!.issues.map((i) => i.path)).toEqual([['allowedRollups', 0]]);
   });
 });
 
