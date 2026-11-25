@@ -96,6 +96,8 @@ export interface SyncWindowQuery {
     where: FilterCondition;
     orderBy?: SortNode[];
     limit?: number;
+    /** The fields to read, when not every one: a count reads the key only. */
+    fields?: string[];
 }
 
 /** What the windowed read reads from: one federated object, as the mapping names it. */
@@ -570,6 +572,19 @@ class WindowRun {
     private refuse(code: string, status: number, reason: ConnectorPullRefusalReason, message: string): never {
         throw new ConnectorPullError({ code, status, reason, mapping: this.source.mapping }, message);
     }
+}
+
+/**
+ * [ADR-0153 D3] The row cap of the floor's over-cap refusal `error`, or
+ * `undefined` for any other error: how a count read through the floor learns
+ * that more rows than the cap match.
+ */
+export function overCapOf(error: unknown): number | undefined {
+    const e = error as Partial<RowCapRefusal> | null | undefined;
+    if (!e || e.code !== EXTERNAL_ROW_CAP_EXCEEDED_CODE) return undefined;
+    const cap = e.details?.cap;
+    if (typeof cap === 'number') return cap;
+    return typeof e.returnedRowCount === 'number' && e.returnedRowCount > 0 ? e.returnedRowCount - 1 : undefined;
 }
 
 function capOf(refusal: RowCapRefusal): number {

@@ -85,6 +85,59 @@ patchedDependencies:
   # it was keyed unversioned in ui/package.json's ignored `pnpm` field.
   '@radix-ui/react-focus-scope@1.1.16': patches/@radix-ui__react-focus-scope.patch
 
+# Type dependencies the packages below leave undeclared. Each one ships `.d.ts`
+# files that `import ... from 'react'` (react-router and next also import
+# 'react-dom'), but none lists `@types/react` in its own dependencies or
+# peers, and React 19 itself ships no types. In pnpm's layout a package sees
+# only what it declares, so from its store directory those imports resolved
+# only through pnpm's hidden hoist (node_modules/.pnpm/node_modules). An
+# install without that hoist (`hoist=false`, or a pnpm whose layout differs)
+# left every React type in their typings unresolved: TypeScript reported no
+# error for the library itself (skipLibCheck) and degraded each React type to
+# `any` or `{}` instead, so `useContext(I18nContext)` in @object-ui/i18n became
+# `{}` (TS2339 on `.i18n`), `LucideProps` lost `className`, and the console
+# build stopped in its first tsc-built package. Declaring the peer here makes
+# pnpm link the workspace's own `@types/react` into each package's store
+# directory, so the types resolve the same way under every hoist setting.
+# A peer, never a dependency: the peer resolves to the version the importer
+# already has (one `@types/react` in the lockfile), where a dependency would
+# resolve on its own and could install a second copy, splitting React's types.
+# The list is every package in the lockfile whose shipped typings import
+# 'react' without declaring `@types/react`; a package that starts declaring it
+# upstream can drop its line. `ui/packages/i18n` pins react-i18next's line.
+packageExtensions:
+  '@ai-sdk/react': { peerDependencies: { '@types/react': '*' } }
+  '@dnd-kit/core': { peerDependencies: { '@types/react': '*' } }
+  '@dnd-kit/sortable': { peerDependencies: { '@types/react': '*' } }
+  '@dnd-kit/utilities': { peerDependencies: { '@types/react': '*' } }
+  '@floating-ui/react-dom': { peerDependencies: { '@types/react': '*' } }
+  '@monaco-editor/react': { peerDependencies: { '@types/react': '*' } }
+  '@reduxjs/toolkit': { peerDependencies: { '@types/react': '*' } }
+  '@sentry/react': { peerDependencies: { '@types/react': '*' } }
+  '@tanstack/react-router': { peerDependencies: { '@types/react': '*' } }
+  '@vis.gl/react-mapbox': { peerDependencies: { '@types/react': '*' } }
+  '@vis.gl/react-maplibre': { peerDependencies: { '@types/react': '*' } }
+  better-auth: { peerDependencies: { '@types/react': '*' } }
+  cmdk: { peerDependencies: { '@types/react': '*' } }
+  framer-motion: { peerDependencies: { '@types/react': '*' } }
+  input-otp: { peerDependencies: { '@types/react': '*' } }
+  lucide-react: { peerDependencies: { '@types/react': '*' } }
+  next: { peerDependencies: { '@types/react': '*', '@types/react-dom': '*' } }
+  next-themes: { peerDependencies: { '@types/react': '*' } }
+  react-draggable: { peerDependencies: { '@types/react': '*' } }
+  react-grid-layout: { peerDependencies: { '@types/react': '*' } }
+  react-hook-form: { peerDependencies: { '@types/react': '*' } }
+  react-i18next: { peerDependencies: { '@types/react': '*' } }
+  react-map-gl: { peerDependencies: { '@types/react': '*' } }
+  react-resizable-panels: { peerDependencies: { '@types/react': '*' } }
+  react-router: { peerDependencies: { '@types/react': '*', '@types/react-dom': '*' } }
+  recharts: { peerDependencies: { '@types/react': '*' } }
+  streamdown: { peerDependencies: { '@types/react': '*' } }
+  styled-jsx: { peerDependencies: { '@types/react': '*' } }
+  swr: { peerDependencies: { '@types/react': '*' } }
+  use-stick-to-bottom: { peerDependencies: { '@types/react': '*' } }
+  vaul: { peerDependencies: { '@types/react': '*' } }
+
 # Transitive-dependency version pins. pnpm v10 reads `overrides` from THIS file
 # — the `pnpm.overrides` block in package.json is silently ignored — so all
 # pins must live here (previously orphaned in package.json: minimatch, tar).

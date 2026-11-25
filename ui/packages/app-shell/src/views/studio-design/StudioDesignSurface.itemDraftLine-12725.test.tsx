@@ -106,6 +106,9 @@ vi.mock('../../preview/DraftChangesPanel', () => ({
 // The console's preview and authoring code loads `@objectstack/lint` lazily;
 // warmed here so its first load is paid at import, not inside a test's clock.
 import '@objectstack/lint';
+// The surface mounts the command palette, whose record preview reaches the
+// `lazy()` detail entry: its first load is paid here too, not in a test's clock.
+import '@object-ui/plugin-detail';
 import { StudioDesignSurface } from './StudioDesignSurface';
 import { t, tFormat } from '../metadata-admin/i18n';
 import { emitMetadataRefresh } from '../../assistant/assistantBus';
@@ -113,7 +116,7 @@ import { createEmptyDataSource } from './__tests__/emptyDataSource';
 
 const dataSource = createEmptyDataSource();
 
-const answer = (body: unknown) => ({ ok: true, status: 200, json: async () => body });
+const answer = (body: unknown) => ({ headers: new Headers(), ok: true, status: 200, json: async () => body });
 
 beforeEach(() => {
   server.drafts = [];
@@ -159,17 +162,18 @@ const COPILOT_DRAFTS = [
   { type: 'view', name: `${OBJECT.name}.board`, label: 'Board', packageId: PACKAGE_ID, updatedAt: null, updatedBy: 'u1' },
 ];
 
-/** Open the Data pillar on the Task object, with an empty ledger. */
+/** Open the object designer on the Task object, with an empty ledger. */
 async function openTask() {
   render(
-    <MemoryRouter initialEntries={[`/studio/${PACKAGE_ID}/data`]}>
+    <MemoryRouter initialEntries={[`/studio/${PACKAGE_ID}/metadata/object/acme_task`]}>
       <Routes>
+        <Route path="/studio/:packageId/metadata/*" element={<StudioDesignSurface area="metadata" />} />
         <Route path="/studio/:packageId/:tab" element={<StudioDesignSurface />} />
       </Routes>
     </MemoryRouter>,
   );
-  fireEvent.click(await screen.findByRole('button', { name: /Task/ }, SLOW));
-  await waitFor(() => expect(within(header()).getByText('Task')).toBeInTheDocument(), SLOW);
+  // objectstack#36904 — the object designer opens on the object's address.
+  await waitFor(() => expect(within(header()).getAllByText('Task')[0]).toBeInTheDocument(), SLOW);
   expect(headerStatus()).toBeNull();
   expect(screen.queryByTestId('studio-changes-count')).toBeNull();
 }
@@ -243,13 +247,13 @@ describe('the item header\'s draft line after the copilot\'s undo, the object op
     server.objectDraft = { ...OBJECT, description: 'copilot draft' };
     server.drafts = COPILOT_DRAFTS;
     render(
-      <MemoryRouter initialEntries={[`/studio/${PACKAGE_ID}/data`]}>
+      <MemoryRouter initialEntries={[`/studio/${PACKAGE_ID}/metadata/object/acme_task`]}>
         <Routes>
+          <Route path="/studio/:packageId/metadata/*" element={<StudioDesignSurface area="metadata" />} />
           <Route path="/studio/:packageId/:tab" element={<StudioDesignSurface />} />
         </Routes>
       </MemoryRouter>,
     );
-    fireEvent.click(await screen.findByRole('button', { name: /Task/ }, SLOW));
     await waitFor(() => expect(headerStatus()).toHaveTextContent(draftLine(2)), SLOW);
     const before = objectDraftReads();
     expect(before).toBeGreaterThan(0);

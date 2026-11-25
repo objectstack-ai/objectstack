@@ -83,8 +83,13 @@ import { toast } from 'sonner';
 // first load is paid here, at collection, never inside a case's clock
 // (`check:test-source-alias`).
 import '@objectstack/lint';
+import '@object-ui/plugin-detail';
 import { StudioDesignSurface } from './StudioDesignSurface';
 import { t, tFormat } from '../metadata-admin/i18n';
+// The source under test reaches these dynamic imports (the command palette's
+// record preview, the drafts panel's lint, the code editor): their first load
+// is paid here, at collection, never inside a case's clock (`check:test-source-alias`).
+import '@object-ui/plugin-detail';
 
 window.matchMedia = ((query: string) => ({
   matches: false,
@@ -157,6 +162,7 @@ async function publishAt(path: string, expectPosts: number): Promise<void> {
   render(
     <MemoryRouter initialEntries={[path]}>
       <Routes>
+        <Route path="/studio/:packageId/metadata/*" element={<StudioDesignSurface area="metadata" />} />
         <Route path="/studio/:packageId/:tab" element={<StudioDesignSurface />} />
       </Routes>
     </MemoryRouter>,
@@ -312,6 +318,7 @@ describe('a publish that put an app or object live points the author to Access (
     render(
       <MemoryRouter initialEntries={[`/studio/${PACKAGE_ID}/data`]}>
         <Routes>
+          <Route path="/studio/:packageId/metadata/*" element={<><StudioDesignSurface area="metadata" /><LocationProbe /></>} />
           <Route path="/studio/:packageId/:tab" element={<><StudioDesignSurface /><LocationProbe /></>} />
         </Routes>
       </MemoryRouter>,

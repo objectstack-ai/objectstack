@@ -28,6 +28,7 @@ export default defineConfig({
       { find: /^@objectstack\/spec\/contracts$/, replacement: path.resolve(__dirname, '../../spec/src/contracts/index.ts') },
       { find: /^@objectstack\/spec\/kernel$/, replacement: path.resolve(__dirname, '../../spec/src/kernel/index.ts') },
       { find: /^@objectstack\/spec\/ui$/, replacement: path.resolve(__dirname, '../../spec/src/ui/index.ts') },
+      { find: /^@objectstack\/spec\/system$/, replacement: path.resolve(__dirname, '../../spec/src/system/index.ts') },
       { find: /^@objectstack\/types$/, replacement: path.resolve(__dirname, '../../types/src/index.ts') },
     ],
   },

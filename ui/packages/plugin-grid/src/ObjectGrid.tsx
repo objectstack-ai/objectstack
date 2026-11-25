@@ -24,7 +24,7 @@
 import React, { useEffect, useState, useCallback, useMemo } from 'react';
 import type { ObjectGridSchema, DataSource, ViewData, TableSortItem, DataTableSchema, ListViewExportFormat, RecordNavigateAction } from '@object-ui/types';
 import { isSystemManagedField, detectStatusField } from '@object-ui/types';
-import { SchemaRenderer, isPermissionError, useDataScope, useNavigationOverlay, useAction, useSafeFieldLabel, usePredicateScope, useCapabilityGate, useRelatedRecordActions, notifyDataChanged, useMetadata, claimAnswerWarnings, toastRecordSave, useOwnWrites, createOwnWrites, type AnswerWarningClaim, type RecordSaveFeedback } from '@object-ui/react';
+import { SchemaRenderer, isPermissionError, useDataScope, useNavigationOverlay, useAction, useSafeFieldLabel, usePredicateScope, useCapabilityGate, useDrawsAction, useRelatedRecordActions, notifyDataChanged, useMetadata, claimAnswerWarnings, toastRecordSave, useOwnWrites, createOwnWrites, type AnswerWarningClaim, type RecordSaveFeedback } from '@object-ui/react';
 // objectui#8920 — the grid reaches a cell renderer through THIS module and
 // nowhere else. `getCellRenderer` / `resolveCellRendererType` are deliberately
 // NOT imported here: six sites spelling the resolve three different ways is
@@ -71,7 +71,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@object-ui/components';
-import { captureUpdateUndoData, resolveConditionalFormatting, declaredNameField, buildExportFileName, resolveAffordance, resolveAffordanceGrant, resolveFieldAffordance, isObjectExportOffered, type SchemaLike, isExpandableFieldType, isUnmaterializedFieldType, readObjectSortability, isPlatformSortableField, filterPlatformSortableSort, filterRefusalSubject, FilterOperatorError, resolveRecordSourceConfig, resolveRecordSourceObjectName, partitionRowsByPredicate, csvBlob, readActionPayload } from '@object-ui/core';
+import { captureUpdateUndoData, resolveConditionalFormatting, declaredNameField, collectPredicateFieldRefs, buildExportFileName, resolveAffordance, resolveAffordanceGrant, resolveFieldAffordance, isObjectExportOffered, type SchemaLike, isExpandableFieldType, isUnmaterializedFieldType, readObjectSortability, isPlatformSortableField, filterPlatformSortableSort, filterRefusalSubject, FilterOperatorError, resolveRecordSourceConfig, resolveRecordSourceObjectName, partitionRowsByPredicate, csvBlob, readActionPayload } from '@object-ui/core';
 import { usePermissions } from '@object-ui/permissions';
 import {
   RECORD_OVERLAY_DEFAULT_WIDTH,
@@ -1485,7 +1485,31 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
   // object, an approval lock, the record — `cellReadOnlyKind`), what typing
   // does there and what pasted text stands for. `null` without the host's
   // ask, so every other grid keeps the table it had.
-  const approvalLocks = useRowApprovalLocks(hostCellSelection ? objectName : undefined);
+  //
+  // objectstack#36911 — the row menu reads the same locks: a row an approval
+  // locks offers no Edit, as the record page offers none (objectstack#35593).
+  // Delete stays for a record held by its own approval: the server deletes it
+  // and cancels its request. objectstack#37231 — a master-detail line held
+  // because its MASTER is held (the read's `lockSource: 'master'`) offers no
+  // Delete either: the detail-row lock hook refuses it with `RECORD_LOCKED`.
+  // So the hook also runs on a grid whose rows offer Edit or Delete. It still
+  // reads nothing until it is asked: by a cell being selected, or by a row's
+  // actions being reached for (`demandRowActions` below).
+  const rowMenuReadsLocks = (canEdit && !!onEdit) || (canDelete && !!onDelete);
+  const approvalLocks = useRowApprovalLocks(hostCellSelection || rowMenuReadsLocks ? objectName : undefined);
+  /**
+   * objectstack#36911 — what reaching for a row's actions asks
+   * (`RowActionMenuProps.onActionsDemand`, objectstack#34208): the
+   * record-grained verdicts, and the approval locks of the rows on screen in
+   * one read (objectstack#35795), never on first paint. A repeat call is free:
+   * the hook asks only ids it has not asked yet.
+   */
+  const requestRecordVerdicts = recordVerdict.requestVerdicts;
+  const probeApprovalLocks = approvalLocks.probe;
+  const demandRowActions = useCallback(() => {
+    requestRecordVerdicts();
+    if (rowMenuReadsLocks) probeApprovalLocks(pageRecordIds);
+  }, [requestRecordVerdicts, probeApprovalLocks, rowMenuReadsLocks, pageRecordIds]);
   // objectstack#35956 — a cell change that makes other fields required asks
   // for them first, and saves them with it (`./objectGridRequiredPrompt`).
   const fieldLabelOf = (field: string): string => {
@@ -1985,6 +2009,8 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
   // applies per row, read here too so the Actions column's verdict (below the
   // early returns, where no hook may sit) sees the same declared set.
   const mayInvokeRowAction = useCapabilityGate();
+  // [ADR-0160 D7] …and the provider's answer for an `ask_ai` row action.
+  const drawsRowAction = useDrawsAction();
   const getRowStyle = useCallback((row: Record<string, unknown>): React.CSSProperties | undefined => {
     const rules = schema.conditionalFormatting;
     if (!rules || rules.length === 0) return undefined;
@@ -2404,6 +2430,21 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
     </p>
   ) : null;
 
+  // objectstack#37278 — the server answered only PART of the view's groups
+  // (`hasMore` on a header answer: the deployment's default page size cut
+  // them). The groups drawn keep their exact counts, so nothing is withheld
+  // and this is no panel: one line in the draft note's strip, saying the list
+  // of groups is not the whole set.
+  const groupsPartialNote = serverGroupedFetch && groupHeaders.partial ? (
+    <p
+      role="status"
+      className="px-3 sm:px-4 py-1.5 text-xs text-muted-foreground border-b bg-muted/40"
+      data-testid="grid-grouping-more-groups-not-loaded"
+    >
+      {t('grid.grouping.moreGroupsNotLoaded')}
+    </p>
+  ) : null;
+
   // The generated columns, enriched and folded, with the persisted widths and
   // order applied (`./objectGridPersistedColumns`).
   const { persistedColumns } = resolveObjectGridPersistedColumns({
@@ -2417,9 +2458,9 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
     pinnedRightCols, unpinnedCols, rightPinnedClasses, rightPinnedCellClasses, userLeftPinnedCount,
   } = resolveObjectGridActionsColumn({
     schema, data, objectSchema, persistedColumns, operations, resolvedRowActionDefs,
-    wantEditAction, wantDeleteAction, mayInvokeRowAction, rowOperations, canEdit, canDelete,
-    recordVerdict, predicateScope, onEdit, onDelete, editPredicates, deletePredicates, executeAction,
-    setRefreshKey, t, foldInlineRowActions: inlineActionFold.folded,
+    wantEditAction, wantDeleteAction, mayInvokeRowAction, drawsRowAction, rowOperations, canEdit, canDelete,
+    recordVerdict, approvalLocks, demandRowActions, predicateScope, onEdit, onDelete, editPredicates,
+    deletePredicates, executeAction, setRefreshKey, t, foldInlineRowActions: inlineActionFold.folded,
     drawRowControls: !listPageGrid,
   });
 
@@ -2904,6 +2945,10 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
       resultDialog: _resultDialog,
       ...rest
     } = stripCollectedActionKeys(source);
+    // [ADR-0160 D7] An action that runs on ONE record (`ask_ai`) is refused
+    // here rather than run once per row, each run pinning a different row.
+    const bulkRefusal = actionRunner.bulkRefusal?.(rest as any);
+    if (bulkRefusal) throw new Error(bulkRefusal);
     // Dispatched with `reportsRefusal` for this one call (the runner's
     // `callContext`): a handler that meets a refusal answers it on
     // `res.refusal` and opens no notice of its own, because the result panel
@@ -2929,6 +2974,11 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
     // nothing, so the executor counts it as refused, never as succeeded, and
     // lists it with this record's own sentence.
     if (res.refusal) return { refusal: { message: res.refusal.message } };
+    // A run paused at a screen started and waits for input: nothing says it
+    // will finish, so the executor counts it as waiting, never as succeeded
+    // (objectstack#36931). Its screen is the flow handler's to show; the
+    // console queues every paused record's screen, so each can be reached.
+    if (res.paused) return { paused: true };
   };
 
   // Whole-selection dispatcher for a def that opted into
@@ -2979,8 +3029,11 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
     // Only reset selection when the run actually changed something. A total
     // failure (0 succeeded — e.g. a "推计划" precondition error) leaves the data
     // untouched, so we keep the selection *and* the toolbar so the user can fix
-    // it and retry the same rows.
-    if (result && result.succeeded > 0) {
+    // it and retry the same rows. A run that paused at a screen changed
+    // something too (its steps before the screen may have written), and its
+    // record must not be re-run while its screen waits, so it resets and
+    // re-reads like a success (objectstack#36931).
+    if (result && (result.succeeded > 0 || (result.paused?.length ?? 0) > 0)) {
       resetSelection();
       // Trigger refresh via the same path used by single-record mutations.
       setRefreshKey(k => k + 1);
@@ -4452,6 +4505,21 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
     // that titles the card, so a first column the name field displaced (the
     // Owner above) reads as an ordinary body row.
     const bodyColumns = displayColumns.filter((c) => c !== titleCol);
+    // objectstack#37010 — a name field that is a FORMULA titles the card with
+    // the fields it reads (`case_number - subject`), and a view shows those
+    // parts as columns of their own, usually its leading ones, since a table
+    // has no use for the concatenation. So the subtitle also skips every
+    // shown column whose field the formula reads: it never repeats the
+    // title's parts and takes the next shown columns instead. The reads are
+    // the formula's `record.<field>` references as `collectPredicateFieldRefs`
+    // names them, the reader this grid's projection names a CEL expression's
+    // reads with; a read through a lookup (`record.account.name`) names the
+    // lookup, so the lookup's column is skipped too. A name field that is not
+    // a formula reads nothing here.
+    const nameFieldDef = nameFieldKey !== undefined ? objectFields?.[nameFieldKey] : undefined;
+    const titleReads = new Set<string>(
+      nameFieldDef?.type === 'formula' ? collectPredicateFieldRefs([nameFieldDef.expression]) : [],
+    );
 
     // objectui#10583 — a MASKED column (the rule that stamps `TableColumn.masked`)
     // is drawn only through its own `cell`, which draws the mask. The branches
@@ -4471,7 +4539,8 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
     // read), when a column shows it, drawn through that column's own cell as
     // the desktop row draws it. The subtitle joins the first two other shown
     // columns' display values, each through its own cell, and skips a masked
-    // or empty value rather than drawing it.
+    // or empty value rather than drawing it, and a column the title's formula
+    // reads (`titleReads` above).
     const statusKey = detectStatusField(objectSchema);
     const statusCol = statusKey !== null ? bodyColumns.find((c) => c.accessorKey === statusKey) : undefined;
     // objectstack#34615 — the card's AMOUNT is the first shown body column whose
@@ -4484,7 +4553,9 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
     const amountCol = bodyColumns.find(
       (c) => c !== statusCol && c.type === 'currency' && !isMaskedCardColumn(c.accessorKey),
     );
-    const subtitleColumns = bodyColumns.filter((c) => c !== statusCol && c !== amountCol).slice(0, 2);
+    const subtitleColumns = bodyColumns
+      .filter((c) => c !== statusCol && c !== amountCol && !titleReads.has(c.accessorKey))
+      .slice(0, 2);
     const isEmptyCardValue = (value: unknown) => value == null || value === '';
     const cardCell = (col: ObjectGridColumnDraft, row: any): React.ReactNode => {
       const value = row[col.accessorKey];
@@ -4747,6 +4818,7 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
         >
         {gridDescription}
         {groupingDraftOnlyNote}
+        {groupsPartialNote}
         <div className="space-y-2 p-2">
           {data.map(renderMobileCard)}
         </div>
@@ -5375,6 +5447,7 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
       )}
       {gridDescription}
       {groupingDraftOnlyNote}
+      {groupsPartialNote}
       {gridToolbar}
       <GridHeaderMenuProvider value={hostHeaderMenu === true}>
         <GridCellSelectionProvider value={gridCellSelection}>{renderedGridContent}</GridCellSelectionProvider>

@@ -109,8 +109,9 @@ describe('the console boot fallback (objectstack#35981)', () => {
     // draws is taken away when the chrome lands: from 768 px up no top bar,
     // and the sidebar's head (app menu, search, bell) and foot (account)
     // (objectstack#36112); a phone keeps the bar, but not on a record page
-    // (objectstack#28483); a docs page has no sidebar and keeps the bar at
-    // every width (objectstack#35424).
+    // (objectstack#28483); an app's docs page is drawn like every other app
+    // page from 768 px up (objectstack#37150), and on a phone has no sidebar
+    // and keeps the bar (objectstack#35424).
     const width = window.innerWidth;
     const setWidth = (w: number) =>
       Object.defineProperty(window, 'innerWidth', { value: w, configurable: true, writable: true });
@@ -120,7 +121,7 @@ describe('the console boot fallback (objectstack#35981)', () => {
     const foot = () => shell()!.querySelector('[data-boot-sidebar-foot]');
     try {
       setWidth(1440);
-      for (const path of [RECORD, '/apps/crm/account', '/apps/crm/docsearch']) {
+      for (const path of [RECORD, '/apps/crm/account', '/apps/crm/docsearch', '/apps/crm/docs/manual/intro']) {
         at(path, <ConsoleBootShell />);
         expect(header(), path).toBeNull();
         expect(sidebar(), path).not.toBeNull();
@@ -128,13 +129,16 @@ describe('the console boot fallback (objectstack#35981)', () => {
         expect(foot(), path).not.toBeNull();
         cleanup();
       }
-      for (const w of [1440, 375]) {
-        setWidth(w);
-        at('/apps/crm/docs/manual/intro', <ConsoleBootShell />);
-        expect(sidebar(), `docs @${w}`).toBeNull();
-        expect(header(), `docs @${w}`).not.toBeNull();
-        cleanup();
-      }
+      setWidth(768);
+      at('/apps/crm/docs/manual/intro', <ConsoleBootShell />);
+      expect(header(), 'docs @768').toBeNull();
+      expect(head(), 'docs @768').not.toBeNull();
+      cleanup();
+      setWidth(375);
+      at('/apps/crm/docs/manual/intro', <ConsoleBootShell />);
+      expect(sidebar(), 'docs @375').toBeNull();
+      expect(header(), 'docs @375').not.toBeNull();
+      cleanup();
 
       setWidth(375);
       at(RECORD, <ConsoleBootShell />);

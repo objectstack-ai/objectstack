@@ -631,7 +631,9 @@ function refuseRemoteDeferredDdl(): never {
  * drift. A table this face's schema sync (`RemoteTransport`) created before
  * #23847 has no NOT NULL constraint for the fields that declare one: the sync
  * creates it now, but an additive sync never tightens a column that already
- * exists. So such a table reads as `tighten_not_null`
+ * exists. Nor does it impose one on a column it adds to a table that already
+ * holds rows, where every row holds NULL (#37281): that column is added
+ * nullable. So such a table reads as `tighten_not_null`
  * (destructive) against its own declaration. Nor does every destructive entry
  * have a remedy on this transport: `os migrate apply --allow-destructive` runs
  * here [#23848] and applies the column drops and index entries this face can
@@ -646,7 +648,8 @@ function refuseRemoteDeferredDdl(): never {
 /** [#23816] {@link TursoDriver.driftReportCaveat} on the REMOTE face. */
 const REMOTE_DRIFT_REPORT_CAVEAT =
   'a table the Turso REMOTE transport\'s schema sync created in an earlier release has no NOT NULL ' +
-  'constraint on the fields that declare one (the sync creates it now, but never tightens an existing column), so ' +
+  'constraint on the fields that declare one (the sync creates it now, but never tightens an existing column, and adds a ' +
+  'new column to a table that already holds rows without it), so ' +
   'this driver\'s drift report can name a tightening its own sync produced, and a destructive entry has no ' +
   'remedy on this transport but a column drop or an index change (`os migrate apply --allow-destructive` applies ' +
   'those and names the rest as not applied). The report is for reading; nothing is ' +
@@ -3314,11 +3317,50 @@ export class TursoDriver extends SqlDriver {
       // [#21226] The rows are narrowed to the caller's tenant scope before they
       // are grouped, as `SqlDriver.aggregate` scopes its builder.
       const scope = this.remoteTenantScope(object, options);
-      return this.remoteReadExit(object, query, () =>
-        this.remoteTransport!.aggregate(object, this.toRemoteQuery(object, query, options), table, scope),
+      return this.presentRemoteGroupKeys(
+        object,
+        query,
+        await this.remoteReadExit(object, query, () =>
+          this.remoteTransport!.aggregate(object, this.toRemoteQuery(object, query, options), table, scope),
+        ),
       );
     }
     return super.aggregate(object, query, options);
+  }
+
+  /**
+   * [#37133] Present the group-key columns of a remote `aggregate()` answer
+   * with the presenter `find()` applies to the same column, so a group over a
+   * declared boolean answers `true` / `false`, never the stored `1` / `0`.
+   *
+   * The remote transport hands back raw libSQL columns, and the local face of
+   * this driver presents every group key through `SqlDriver.presentReadColumns`
+   * (keyed by the OUTPUT column, `alias ?? field`, with the kind
+   * `readPresentationKind` gives the FIELD). This applies those same two
+   * inherited members, so the faces cannot disagree on what a group key is.
+   * The presentation registries are keyed by object name on this face, as
+   * {@link formatRemoteRow} and `distinct()` read them.
+   *
+   * Measures are deliberately left as the transport answers them: a count or a
+   * total is already a number from libSQL, and `min` / `max` over a boolean are
+   * the ruled numeric domain (`SqlDriver.aggregate` [#11152]). A date-bucketed
+   * key never reaches here — the transport refuses it before anything is read.
+   */
+  private presentRemoteGroupKeys(
+    object: string,
+    query: DriverQuery,
+    rows: Record<string, unknown>[],
+  ): Record<string, unknown>[] {
+    const groupBy = Array.isArray(query?.groupBy) ? query.groupBy : [];
+    const columns = new Map(
+      groupBy.flatMap((g) => {
+        const field = typeof g === 'string' ? g : g?.field;
+        if (typeof field !== 'string') return [];
+        const kind = this.readPresentationKind(object, field);
+        return kind ? [[typeof g === 'string' ? g : (g.alias ?? field), kind] as const] : [];
+      }),
+    );
+    return this.presentReadColumns(rows, columns);
   }
 
   // ===================================

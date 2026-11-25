@@ -1893,6 +1893,20 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
       + 'rejections at publish from this major.',
   },
   {
+    id: 'field-inline-edit-boolean-retired',
+    order: 124,
+    text:
+      'It also retires the boolean arm of a relationship field\'s `inlineEdit` (ADR-0049 '
+      + 'enforce-or-remove; the maintainer\'s field-group ruling of objectstack#35889). A field group of '
+      + 'the parent (`fieldGroups[].relatedList`) now decides whether the parent\'s form inlines a child, '
+      + 'and `inlineEdit` only picks the form factor of a placed one; every reader of the key passes '
+      + 'anything but `\'grid\'` and `\'form\'` as absent, so `true` and `false` both read as no key. The '
+      + 'arm leaves the vocabulary, refused at the parse with the prescription. The D2 conversion '
+      + '`field-inline-edit-boolean-removed` deletes a boolean from `objects[]` and `objectExtensions[]` '
+      + 'field maps as a pure lossless delete, retired from the load path so authors are refused at parse; '
+      + 'its D3 record is the semantic entry `field-inline-edit-boolean-retired`.',
+  },
+  {
     id: 'field-reference-to-spelling-retired',
     order: 21,
     text:
@@ -2240,6 +2254,17 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
       + 'upgrade members no provider implemented and the `plan` member of the unrouted '
       + '`PackageUpgradeResponse`. The `UpgradePlan.estimatedDuration` tombstone leaves with its '
       + 'def\'s source and its RETIRED_KEYS_BY_MAJOR[18] entry stays as history.',
+  },
+  {
+    id: 'knowledge-chunk-metadata-retired',
+    order: 125,
+    text:
+      'It removes `metadata` from the knowledge chunk (ADR-0049 enforce-or-remove), as ADR-0161 '
+      + 'K8 item 5 asks of the splitter that gives the chunk its first producer: the service cuts '
+      + 'every passage and sets no per-passage metadata, no adapter read one, and a passage takes its '
+      + 'document\'s `metadata`. A chunk is a runtime contract shape, never stored in stack metadata, '
+      + 'so there is no D2 conversion; the schema tombstones the key, and its D3 record is the '
+      + 'semantic entry `knowledge-chunk-metadata-retired`.',
   },
   {
     id: 'list-view-filterable-fields-retired',

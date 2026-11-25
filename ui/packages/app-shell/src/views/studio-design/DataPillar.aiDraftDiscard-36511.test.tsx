@@ -75,6 +75,7 @@ vi.mock('@object-ui/react', async (importOriginal) => {
 });
 
 import '@objectstack/lint';
+import '@object-ui/plugin-detail';
 import { DataPillar } from './StudioDesignSurface';
 import { createEmptyDataSource, failOnAbsorbedFetchError } from './__tests__/emptyDataSource';
 import { addFieldFromFormToolbar } from './__tests__/dataPillarAddField';
@@ -116,7 +117,7 @@ function renderPillar(onDraftSaved = vi.fn()): { onDraftSaved: ReturnType<typeof
   render(
     <MemoryRouter initialEntries={[`/studio/${PACKAGE}/data`]}>
       <StudioSaveHarness locale="en-US">
-        <DataPillar packageId={PACKAGE} onDraftSaved={onDraftSaved} />
+        <DataPillar objectName="showcase_task" packageId={PACKAGE} onDraftSaved={onDraftSaved} />
       </StudioSaveHarness>
     </MemoryRouter>,
   );

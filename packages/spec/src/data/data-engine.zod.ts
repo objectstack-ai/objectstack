@@ -844,8 +844,27 @@ export const QUERY_TRANSPORT_DOLLAR_PARAMS: readonly string[] = [
  * transport maintains two filter compilers, was rejected. That negative is
  * pinned in `filter-array-declaration.test.ts`. So the sugar is accepted HERE,
  * at the transport boundary, and lowered before the AST is produced.
+ *
+ * [#35500] A value of the wrong KIND — a number, a string, a boolean, `null` —
+ * is refused with {@link TRANSPORT_FILTER_KIND_MESSAGE}, the one sentence that
+ * names both accepted shapes. Every member says only "not my kind" then, so
+ * nothing below the union explains it and this union's own entry is the whole
+ * answer; zod's bare "Invalid input" there told the caller nothing to retry
+ * with. An array or an object keeps zod's default message, because its located
+ * causes (an unknown operator, a short tuple, a bad comparand) are said by the
+ * entries below, and the bare head is dropped in their favour.
  */
-const TransportFilterValueSchema = lazySchema(() => z.union([FilterArraySchema, DataEngineFilterSchema]));
+const TransportFilterValueSchema = lazySchema(() => z.union([FilterArraySchema, DataEngineFilterSchema], {
+  error: (issue) => (issue.input === null || typeof issue.input !== 'object' ? TRANSPORT_FILTER_KIND_MESSAGE : undefined),
+}));
+
+/**
+ * The refusal a wrong-kind filter value answers on every spelling of the
+ * `where` slot. Printed AT the caller, so it carries no tracker number.
+ */
+const TRANSPORT_FILTER_KIND_MESSAGE =
+  'A filter is a condition object, such as { "status": "open" } or { "amount": { "$gt": 100 } }, '
+  + 'or a filter array, such as ["status", "=", "open"] or ["and", ["status", "=", "open"], ["amount", ">", 100]].';
 
 /**
  * The value set the `count` spellings accept: the boolean, or the two strings

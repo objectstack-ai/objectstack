@@ -285,3 +285,165 @@ describe('report chart series presentation — the #4229 split, series half (obj
     expect(schema.series).toEqual([{ dataKey: 'amount', label: 'Amount' }]);
   });
 });
+
+/**
+ * objectstack#36988 — the value axis of a report chart over a PERCENT measure.
+ *
+ * The card's report (HotCRM `sla_performance`): a measure averaging a boolean
+ * with `format: '0.0%'`, charted by priority, one bucket at 1/3 and the rest 0.
+ * The table beside the chart printed `33.3%`; the chart was handed no axis
+ * format at all, so its value axis printed the raw fractions. The pattern now
+ * reaches the chart on its own value-axis key, `yAxis[0].format` — which
+ * `AdvancedChartImpl.axisLabels.test.tsx` (plugin-charts) draws, through the
+ * same `normalizeChartSchema` translation, as `0.0%` … `34.0%`.
+ *
+ * The controls are the measures that key cannot carry faithfully, which keep
+ * the chart's default axis rather than a wrong one: a percent already in
+ * percentage points (`percentScale: 'whole'`), a currency measure, and a plain
+ * numeral pattern.
+ */
+describe('report chart value axis — a percent measure’s format reaches the chart (objectstack#36988)', () => {
+  const SLA_ROWS = [
+    { priority: 'urgent', avg_sla_violated: 1 / 3 },
+    { priority: 'high', avg_sla_violated: 0 },
+    { priority: 'medium', avg_sla_violated: 0 },
+    { priority: 'low', avg_sla_violated: 0 },
+  ];
+  const SLA_REPORT = {
+    name: 'sla_performance',
+    type: 'tabular',
+    dataset: 'sla_metrics',
+    rows: ['priority'],
+    values: ['avg_sla_violated'],
+    chart: { type: 'column', xAxis: 'priority', yAxis: 'avg_sla_violated' },
+  };
+
+  async function slaSchema(measure: Record<string, unknown>) {
+    const result = {
+      rows: SLA_ROWS,
+      fields: [
+        { name: 'priority', type: 'text', label: 'Priority' },
+        { name: 'avg_sla_violated', type: 'number', label: 'SLA violation rate', ...measure },
+      ],
+    };
+    render(<DatasetReportRenderer report={SLA_REPORT as never} dataSource={sourceOf(result) as never} />);
+    await waitFor(() => expect(captured?.schema?.data?.length).toBe(SLA_ROWS.length));
+    return captured!.schema;
+  }
+
+  it('hands the chart the measure’s percent pattern as its value-axis format, beside the table’s 33.3%', async () => {
+    const schema = await slaSchema({ format: '0.0%' });
+    expect(schema.yAxis).toEqual([{ format: '0.0%' }]);
+    // The table beside it reads the same pattern through `formatMeasure`.
+    expect(await screen.findByText('33.3%')).toBeInTheDocument();
+    // Presentation only: the plotted column is still the series, unchanged.
+    expect(schema.series.map((s: { dataKey: string }) => s.dataKey)).toEqual(['avg_sla_violated']);
+  });
+
+  it('a percent already in percentage points keeps the default axis (`percentScale: whole`)', async () => {
+    const schema = await slaSchema({ format: '0.0%', percentScale: 'whole' });
+    expect(schema).not.toHaveProperty('yAxis');
+  });
+
+  it('a currency measure keeps the default axis', async () => {
+    const schema = await slaSchema({ format: '0,0.00', currency: 'CNY' });
+    expect(schema).not.toHaveProperty('yAxis');
+  });
+
+  it('a plain numeral pattern keeps the default axis', async () => {
+    const schema = await slaSchema({ format: '0,0.00' });
+    expect(schema).not.toHaveProperty('yAxis');
+  });
+});
+
+/**
+ * objectstack#37053 — a report chart hands its chart the measure's format
+ * facts, so the value axis prints the measure's units beside the table.
+ *
+ * objectstack#36988 passed a fraction-scale percent pattern on the chart's
+ * value-axis `format` key, and left three measures on the chart's default axis
+ * because that key (a d3-style pattern) cannot say what the table prints for
+ * them: a percent already in percentage points (`percentScale: 'whole'`), a
+ * declared currency, and a per-row currency (`currencyField`). Each series now
+ * carries the measure's `{ format, currency, percentScale }` as the chart
+ * renderer's internal `series[].measureFormat` (beside `aggregate`), which
+ * the objectstack#37053 describe in `AdvancedChartImpl.axisLabels.test.tsx`
+ * (plugin-charts) draws as `…%` and `CN¥…` ticks. The currency is the one the table prints a cell
+ * with no row of its own in (`measureCellCurrency`), so a per-row currency
+ * column hands none and its axis keeps plain numbers.
+ *
+ * This pin stops at the schema the registered chart component receives, as
+ * the objectstack#36988 pin above does: `plugin-report` does not depend on
+ * `plugin-charts`.
+ */
+describe('report chart series carry the measure’s format facts (objectstack#37053)', () => {
+  const ROWS = [
+    { priority: 'urgent', measure: 100 / 3, currency_code: 'CNY' },
+    { priority: 'high', measure: 0, currency_code: 'USD' },
+    { priority: 'low', measure: 0, currency_code: 'CNY' },
+  ];
+
+  const REPORT = {
+    name: 'by_priority',
+    type: 'tabular',
+    dataset: 'metrics',
+    rows: ['priority'],
+    values: ['measure'],
+    chart: { type: 'column', xAxis: 'priority', yAxis: 'measure' },
+  };
+
+  async function chartSchema(measure: Record<string, unknown>, report: Record<string, unknown> = REPORT) {
+    const result = {
+      rows: ROWS,
+      fields: [
+        { name: 'priority', type: 'text', label: 'Priority' },
+        { name: 'measure', type: 'number', label: 'Measure', ...measure },
+      ],
+    };
+    render(<DatasetReportRenderer report={report as never} dataSource={sourceOf(result) as never} />);
+    await waitFor(() => expect(captured?.schema?.data?.length).toBe(ROWS.length));
+    return captured!.schema;
+  }
+
+  it('SUBJECT: a whole-scale percent measure hands its pattern and scale, beside the table’s 33.3%', async () => {
+    const schema = await chartSchema({ format: '0.0%', percentScale: 'whole' });
+    expect(schema.series.map((s: { measureFormat?: unknown }) => s.measureFormat)).toEqual([
+      { format: '0.0%', percentScale: 'whole' },
+    ]);
+    // Still no value-axis `format`: that key would read the points as a fraction.
+    expect(schema).not.toHaveProperty('yAxis');
+    expect(await screen.findByText('33.3%')).toBeInTheDocument();
+  });
+
+  it('SUBJECT: a fixed-currency measure hands its currency', async () => {
+    const schema = await chartSchema({ format: '0,0.00', currency: 'CNY' });
+    expect(schema.series.map((s: { measureFormat?: unknown }) => s.measureFormat)).toEqual([
+      { format: '0,0.00', currency: 'CNY' },
+    ]);
+  });
+
+  it('CONTROL: a per-row currency measure hands no currency — the axis has no single one', async () => {
+    const schema = await chartSchema({ format: '0,0.00', currency: 'CNY', currencyField: 'currency_code' });
+    expect(schema.series.map((s: { measureFormat?: unknown }) => s.measureFormat)).toEqual([{ format: '0,0.00' }]);
+  });
+
+  it('every series of a `seriesBy` split carries the one measure’s facts', async () => {
+    const schema = await chartSchema(
+      { format: '0.0%', percentScale: 'whole' },
+      { ...REPORT, rows: ['priority', 'currency_code'], chart: { ...REPORT.chart, seriesBy: 'currency_code' } },
+    );
+    expect(schema.series.length).toBeGreaterThanOrEqual(2);
+    for (const s of schema.series) expect(s.measureFormat).toEqual({ format: '0.0%', percentScale: 'whole' });
+  });
+
+  it('a fraction-scale percent keeps its value-axis `format` (objectstack#36988) beside the carrier', async () => {
+    const schema = await chartSchema({ format: '0.0%' });
+    expect(schema.yAxis).toEqual([{ format: '0.0%' }]);
+    expect(schema.series[0].measureFormat).toEqual({ format: '0.0%' });
+  });
+
+  it('a measure stating no format facts hands no carrier', async () => {
+    const schema = await chartSchema({});
+    expect(schema.series[0]).not.toHaveProperty('measureFormat');
+  });
+});

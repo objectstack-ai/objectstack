@@ -45,7 +45,7 @@
  *
  * A parity test whose halves share a code path proves nothing. These do not,
  * and it is structural rather than a matter of care: §1 asserts that not one of
- * the seven policy symbols is reachable from ANY public entry point of
+ * the eight policy symbols is reachable from ANY public entry point of
  * `@objectstack/spec`, so `protocol.ts` cannot be importing the shared module
  * even if a future author wanted it to. Its copy is the only thing it can run.
  *
@@ -93,14 +93,15 @@
  *   "… and N more branches rejected this value"; both machine-readable walks
  *   emit nothing, because an entry there must name a slot and carry a code and
  *   an omission count has neither. §4 pins that asymmetry in both directions.
- * - **[#35400] An explained bare union head.** This package's envelope drops a
- *   union's own entry when it is zod's bare `"Invalid input"` and an entry below
- *   explains it; the terminal renderer keeps it as the parent line of its
- *   indented tree, and the data API's `fields[]` keeps it as `invalid_shape`
- *   (whether that one follows is #35433's call). §2 compares the spec walks
- *   with exactly those heads projected out ({@link withoutExplainedBareHeads}),
- *   so branch SELECTION is still compared across all three; §4 asserts the
- *   asymmetry itself.
+ * - **[#35400/#35433] An explained bare union head.** Both machine-read lists
+ *   drop a union's own entry when it is zod's bare `"Invalid input"` and an
+ *   entry below explains it — this package's envelope since #35400, the data
+ *   API's `fields[]` since #35433, by the maintainer's ruling that the two say
+ *   the same thing — while the terminal renderer keeps it as the parent line of
+ *   its indented tree. §2 compares the two machine lists pair for pair, and
+ *   compares them with the renderer once exactly those heads are projected out
+ *   ({@link withoutExplainedBareHeads}), so branch SELECTION is still compared
+ *   across all three; §4 asserts the asymmetry itself.
  */
 
 // Pays the lint root's first load at collection, never inside a clocked case.
@@ -111,7 +112,7 @@ import { z } from 'zod';
 // renderer (#4971) and `/api`'s ADR-0114 wire mapper (#8124). Both delegate
 // branch selection to the package-internal policy module #8318 extracted.
 import { formatZodIssue } from '@objectstack/spec';
-import { zodIssuesToFields } from '@objectstack/spec/api';
+import { FindDataRequestSchema, zodIssuesToFields } from '@objectstack/spec/api';
 // This package's own copy of the ranking, at the surface every producer here
 // calls: `saveMetaItem`'s 422 (#5364) and `computeMetadataDiagnostics` (#5598).
 import { zodIssuesToMetadataIssues } from './protocol.js';
@@ -178,12 +179,12 @@ function prosePairs(issues: readonly unknown[]): Visited[] {
 }
 
 /**
- * [#35400] A spec walk's pairs minus the union heads this package's envelope
- * drops: a pair whose message is zod's bare default and whose NEXT pair sits at
- * or under its slot — the first entry of its own expansion. The spec walks keep
+ * [#35400/#35433] The renderer's pairs minus the union heads both machine lists
+ * drop: a pair whose message is zod's bare default and whose NEXT pair sits at
+ * or under its slot — the first entry of its own expansion. The renderer keeps
  * every head; this projection is that asymmetry, stated once, and a head that
  * nothing follows (every branch a bare kind mismatch, or the depth bound) is
- * kept by it exactly as the envelope keeps it.
+ * kept by it exactly as the two machine lists keep it.
  */
 function withoutExplainedBareHeads(pairs: readonly Visited[]): Visited[] {
     const under = (head: string, path: string) =>
@@ -231,15 +232,17 @@ interface Fixture {
      * The ordered paths the verdict visits — a THIRD, hand-authored statement
      * of the rule, so the corpus still says something if both sides ever drift
      * the same way, and so each fixture's name is checkable rather than
-     * decorative. These are the SPEC walks' paths, every union head included.
+     * decorative. These are the prose renderer's paths, every union head
+     * included.
      */
     readonly expectedPaths: readonly string[];
     /**
-     * [#35400] The paths this package's envelope visits, when they differ from
+     * [#35400/#35433] The paths both machine lists visit — this package's
+     * envelope and the data API's `fields[]` — when they differ from
      * {@link expectedPaths}: the same verdict without the explained bare union
      * heads. Hand-authored for the same reason.
      */
-    readonly metadataPaths?: readonly string[];
+    readonly machinePaths?: readonly string[];
 }
 
 const FIXTURES: readonly Fixture[] = [
@@ -248,7 +251,7 @@ const FIXTURES: readonly Fixture[] = [
         schema: z.object({ u: z.union([z.string(), strictMember('a')]) }),
         value: { u: {} },
         expectedPaths: ['u', 'u.a'],
-        metadataPaths: ['u.a'],
+        machinePaths: ['u.a'],
     },
     {
         rule: 'every branch a bare kind mismatch — nothing is selected, the union stands alone',
@@ -261,7 +264,7 @@ const FIXTURES: readonly Fixture[] = [
         schema: z.object({ u: z.union([looseMember('a'), looseMember('b', 'c', 'd')]) }),
         value: { u: { a: 1 } },
         expectedPaths: ['u', 'u.a'],
-        metadataPaths: ['u.a'],
+        machinePaths: ['u.a'],
     },
     {
         rule: 'unrecognized_keys breaks a tie at equal issue counts — the curated prose wins',
@@ -270,14 +273,14 @@ const FIXTURES: readonly Fixture[] = [
         // Both branches produce two issues; only the strict one carries the
         // #4001 unknown-key prescription, so it is the one that is emitted.
         expectedPaths: ['u', 'u.a', 'u'],
-        metadataPaths: ['u.a', 'u'],
+        machinePaths: ['u.a', 'u'],
     },
     {
         rule: 'declaration order breaks a full tie, and every tied branch is emitted',
         schema: z.object({ u: z.union([looseMember('a'), looseMember('b'), looseMember('c')]) }),
         value: { u: {} },
         expectedPaths: ['u', 'u.a', 'u.b', 'u.c'],
-        metadataPaths: ['u.a', 'u.b', 'u.c'],
+        machinePaths: ['u.a', 'u.b', 'u.c'],
     },
     {
         rule: 'the branch cap keeps three of five tied branches',
@@ -289,7 +292,7 @@ const FIXTURES: readonly Fixture[] = [
         }),
         value: { u: {} },
         expectedPaths: ['u', 'u.a', 'u.b', 'u.c'],
-        metadataPaths: ['u.a', 'u.b', 'u.c'],
+        machinePaths: ['u.a', 'u.b', 'u.c'],
     },
     {
         rule: 'the depth limit stops the descent after three levels of nested union',
@@ -302,19 +305,36 @@ const FIXTURES: readonly Fixture[] = [
         expectedPaths: ['u', 'u.next', 'u.next.next', 'u.next.next.next'],
         // The fourth union is a head nothing below explains, so the envelope
         // keeps it — and only it: the three above it are explained by it.
-        metadataPaths: ['u.next.next.next'],
+        machinePaths: ['u.next.next.next'],
     },
     {
         rule: 'a union one level down has its branch paths resolved against the union above it',
         schema: z.object({ outer: z.union([z.object({ inner: z.union([strictMember('a'), strictMember('b')]) }).strict(), z.number()]) }),
         value: { outer: { inner: { a: 1 } } },
         expectedPaths: ['outer', 'outer.inner', 'outer.inner.a'],
-        metadataPaths: ['outer.inner.a'],
+        machinePaths: ['outer.inner.a'],
+    },
+    {
+        // [#35500] Read as informative, each member emitted its own unexplained
+        // bare head: one identical entry per member, in all three walks.
+        rule: 'kind-mismatch drop, nested — a member that is itself a bare union of kinds is not selected',
+        schema: z.object({ u: z.union([z.union([z.string(), z.number()]), z.union([z.boolean(), z.array(z.string())])]) }),
+        value: { u: {} },
+        expectedPaths: ['u'],
+    },
+    {
+        // [#35500] The measured case: the data API's own query parse, `where`
+        // of the wrong kind. Its union carries the slot's own sentence, said
+        // once by all three walks.
+        rule: 'kind-mismatch drop, nested — a query where of the wrong kind is the slot\'s one sentence',
+        schema: FindDataRequestSchema as unknown as z.ZodTypeAny,
+        value: { object: 'account', query: { object: 'account', where: 42 } },
+        expectedPaths: ['query.where'],
     },
 ];
 
 describe('#8660 §1 the two sides cannot be sharing an implementation', () => {
-    /** The seven symbols `spec/src/shared/union-branch-policy.ts` declares. */
+    /** The eight symbols `spec/src/shared/union-branch-policy.ts` declares. */
     const POLICY_SYMBOLS = [
         'selectUnionBranches',
         'isKindMismatchOnly',
@@ -323,6 +343,7 @@ describe('#8660 §1 the two sides cannot be sharing an implementation', () => {
         'CONTAINER_ISSUE_CODES',
         'NESTED_EXPANSION_DEPTH_LIMIT',
         'UNION_BRANCH_SELECTION_LIMIT',
+        'ZOD_UNION_DEFAULT_MESSAGE',
     ] as const;
 
     /**
@@ -393,16 +414,19 @@ describe('#8660 §2 one verdict, three implementations, one fixture corpus', () 
 
         // The hand-authored statement of the rule, so both sides drifting the
         // same way is still a failure.
-        expect(wire.map((v) => v.path)).toEqual([...fixture.expectedPaths]);
-        expect(mine.map((v) => v.path)).toEqual([...(fixture.metadataPaths ?? fixture.expectedPaths)]);
+        expect(prose.map((v) => v.path)).toEqual([...fixture.expectedPaths]);
+        const machinePaths = [...(fixture.machinePaths ?? fixture.expectedPaths)];
+        expect(wire.map((v) => v.path)).toEqual(machinePaths);
+        expect(mine.map((v) => v.path)).toEqual(machinePaths);
 
         // The parity assertions themselves: same slots, same messages, same
-        // order. The two spec walks agree head for head; this envelope agrees
-        // with them once the heads it drops on purpose (#35400) are projected
-        // out — so branch selection is still one verdict in all three.
-        expect(prose).toEqual(wire);
-        expect(mine).toEqual(withoutExplainedBareHeads(wire));
+        // order. The two machine lists agree entry for entry (#35433 aligned
+        // the data API on this envelope's #35400 rule); both agree with the
+        // renderer once the heads they drop on purpose are projected out — so
+        // branch selection is still one verdict in all three.
+        expect(wire).toEqual(mine);
         expect(mine).toEqual(withoutExplainedBareHeads(prose));
+        expect(wire).toEqual(withoutExplainedBareHeads(prose));
     });
 });
 
@@ -416,7 +440,7 @@ describe('#8660 §3 the corpus cannot be passing vacuously', () => {
     });
 
     it('the corpus exercises expansion, not just the union head', () => {
-        // Six of the eight fixtures must reach BELOW the top-level issue; if a
+        // Six of the ten fixtures must reach BELOW the top-level issue; if a
         // future edit flattened them, every parity assertion above would still
         // pass while asserting nothing about branch selection.
         const expanded = FIXTURES.filter((f) => f.expectedPaths.length > 1);
@@ -467,29 +491,30 @@ describe('#8660 §4 the deliberate asymmetries, asserted rather than normalised 
 
         const fixture = FIXTURES[0]!;
         const issues = issuesFor(fixture.schema, fixture.value);
+        // The same one entry, `u.a`, in each vocabulary: both lists drop the
+        // explained bare head (#35400, #35433), so only the code differs.
         expect(zodIssuesToMetadataIssues(issues).map((e) => e.code)).toEqual(['invalid_type']);
-        // The wire's first entry is the explained bare head this envelope drops.
-        expect(zodIssuesToFields(issues, fixture.value).map((e) => e.code))
-            .toEqual(['invalid_shape', 'required']);
+        expect(zodIssuesToFields(issues, fixture.value).map((e) => e.code)).toEqual(['required']);
     });
 
     /**
-     * [#35400] The intended asymmetry, recorded: the maintainer's ruling on
-     * #35400 drops an explained bare union head from THIS envelope only. The
-     * terminal renderer keeps it as the parent row of its indented tree, and
-     * the data API's `fields[]` keeps it unchanged (#35433 tracks whether it
-     * follows). If either spec walk starts dropping it too, this goes red and
-     * §2's projection should be revisited, not widened.
+     * [#35400/#35433] The intended asymmetry, recorded: the maintainer's rulings
+     * drop an explained bare union head from BOTH machine lists — this envelope
+     * (#35400) and the data API's `fields[]` (#35433, ruled to say the same
+     * thing) — while the terminal renderer keeps it as the parent row of its
+     * indented tree. If either machine list starts keeping it again, or the
+     * renderer starts dropping it, this goes red and §2's projection should be
+     * revisited, not widened.
      */
-    it('the machine list drops an explained bare union head; the terminal and the data API keep it', () => {
+    it('both machine lists drop an explained bare union head; the terminal keeps it', () => {
         const fixture = FIXTURES[0]!;
         const issues = issuesFor(fixture.schema, fixture.value);
         const head = { path: 'u', message: ZOD_UNION_DEFAULT_MESSAGE };
 
         expect(metadataPairs(issues)).not.toContainEqual(head);
+        expect(wirePairs(issues, fixture.value)).not.toContainEqual(head);
+        expect(zodIssuesToFields(issues, fixture.value).map((e) => e.code)).not.toContain('invalid_shape');
         expect(prosePairs(issues)[0]).toEqual(head);
-        expect(zodIssuesToFields(issues, fixture.value)[0])
-            .toMatchObject({ field: 'u', code: 'invalid_shape', message: ZOD_UNION_DEFAULT_MESSAGE });
 
         // CONTROL — a bare head nothing below explains is kept by all three.
         const alone = FIXTURES.find((f) => f.rule.startsWith('every branch a bare kind mismatch'))!;

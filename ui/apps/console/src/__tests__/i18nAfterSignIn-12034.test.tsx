@@ -84,7 +84,7 @@ vi.mock('@object-ui/app-shell', async (importOriginal) => ({
   DefaultAcceptInvitationPage: stub('accept-invitation-page'),
   AiAddressRedirect: stub('ai-chat-page'),
   StudioDesignSurface: stub('studio-design-surface'),
-  BuilderLanding: stub('builder-landing'),
+  StudioEntryRedirect: stub('studio-entry'),
   getProductName: () => 'ObjectOS',
   getFaviconUrl: () => '',
   // `ProtectedRoute` stays real; the shell it mounts is cut down to its
@@ -158,6 +158,7 @@ import { TokenStorage, type AuthClient, type AuthPublicConfig, type AuthUser } f
 import { App } from '../App';
 import { loadLanguage } from '../loadLanguage';
 import { loadLocales } from '../loadLocales';
+import { __resetLocalesRead } from '../localesRead';
 
 const zh = builtInLocales['zh-Hans'];
 const TOKEN = 'tok-12034';
@@ -325,6 +326,8 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  // One /i18n/locales read per page load (cloud#4964): each case is its own page load.
+  __resetLocalesRead();
   cleanup();
   vi.unstubAllGlobals();
   vi.restoreAllMocks();

@@ -300,6 +300,16 @@ const TYPE_TO_STACK_KEY: Readonly<Record<string, string>> = {
   // entry onto its target in `objects` (as served, without the written
   // package's own extension), so it needs no context collection either.
   object_extension: 'objectExtensions',
+  // [ADR-0160 D1] `ai_context` — `allowRuntimeCreate: true`, so Studio, REST
+  // `/meta` and an MCP/AI author mint context packs at runtime, and the ADR
+  // says a pack's author defects are reported at save as well as by
+  // `os validate`. ⛔ NOT a mapping ahead of its rule: `validateAiContext`
+  // crosses with this row and opens on `stack.aiContexts`, the key
+  // `ObjectStackDefinitionSchema` gives the collection. Not a context row
+  // either, for the `position` / `app` reason above: the rule resolves a
+  // pack's names into `objects`, which every snapshot carries, and nothing
+  // into a sibling pack.
+  ai_context: 'aiContexts',
 };
 
 /**

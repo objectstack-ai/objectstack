@@ -67,6 +67,7 @@ import { captureStoredExpressionChange, fillStoredExpressionChange } from './pro
 import type { RuntimeAuthoringIssue } from './runtime-authoring-gate.js';
 import type { ProtocolHost } from './protocol-host.js';
 import { packagelessHolderRefusal, packagelessRowHeldBaseAddress } from './protocol-save.js';
+import { isPlatformOrigin } from '@objectstack/metadata';
 
 /**
  * [#33308] The row slot a `sys_metadata` row is: its bound package, or `null`
@@ -788,13 +789,29 @@ export class ProtocolDiffDeleteLoadFacet {
                 // below nor its "already at artifact default" / "nothing to
                 // delete" claim holds. A delete naming none never lands here:
                 // it addresses a row the read above found.
-                if (!current && request.packageId != null && (rowsAtAddress.candidates.length > 0 || rowsAtAddress.unbound)) {
+                //
+                // [#35524, epic ruling 6781691009, contract review S2 option
+                // (b)] …and a draft discard naming no package at the row-held
+                // base's draft address over a stored package-unbound draft
+                // ({@link packagelessRowHeldBaseDraftAddress}): it addresses the
+                // base's draft, as the discard naming the base does, so with no
+                // base draft it answers that discard's receipt, naming the
+                // package-unbound draft still stored, never "No pending draft"
+                // while one is. Only that address is `none` with a
+                // package-unbound draft stored: `packagelessDraftAddress` makes
+                // a stored package-unbound draft the address itself (`draft`,
+                // key `null`) wherever it does not move to a base.
+                const receiptPackageId = request.packageId
+                    ?? (draftAddress?.kind === 'none' && draftAddress.into !== null && rowsAtAddress.unbound
+                        ? draftAddress.into
+                        : null);
+                if (!current && receiptPackageId != null && (rowsAtAddress.candidates.length > 0 || rowsAtAddress.unbound)) {
                     return {
                         success: true,
                         reset: false,
                         message: targetState === 'draft'
-                            ? `No pending draft of ${request.type}/${request.name} is bound to package '${request.packageId}', so nothing was discarded: ${remainingRowsPhrase(rowsAtAddress.candidates, rowsAtAddress.unbound, 'draft')}.`
-                            : `No row of ${request.type}/${request.name} is bound to package '${request.packageId}', so nothing was deleted: ${remainingRowsPhrase(rowsAtAddress.candidates, rowsAtAddress.unbound, 'row')}.`,
+                            ? `No pending draft of ${request.type}/${request.name} is bound to package '${receiptPackageId}', so nothing was discarded: ${remainingRowsPhrase(rowsAtAddress.candidates, rowsAtAddress.unbound, 'draft')}.`
+                            : `No row of ${request.type}/${request.name} is bound to package '${receiptPackageId}', so nothing was deleted: ${remainingRowsPhrase(rowsAtAddress.candidates, rowsAtAddress.unbound, 'row')}.`,
                     };
                 }
                 // [#23495] …and a draft discard naming no package, of an item
@@ -1321,8 +1338,14 @@ export class ProtocolDiffDeleteLoadFacet {
                         const recordName = String(record.name);
                         const perShipperType = ['flow', 'action'].includes(canonicalMetaType(normalizedType))
                             || servesSealedOverrideRow(normalizedType);
+                        // [#37013] …nor the platform's own record: a package-less
+                        // row whose body carries the platform's mark, which the
+                        // metadata service keeps beside the shipping package's
+                        // item in a slot of its own. It overlays nothing, so a
+                        // line prescribing its deletion would name the wrong row.
                         if (
                             !host.isHostCodeDatasource(normalizedType, recordName)
+                            && !isPlatformRecordRow(record)
                             && !(perShipperType
                                 ? someShipperOf(host, normalizedType, recordName, servedOverrideOf)
                                 : servedOverrideOf(host.packagedArtifactOwner({ type: normalizedType, name: recordName })))
@@ -1833,4 +1856,23 @@ export class ProtocolDiffDeleteLoadFacet {
 
         return { references: out };
     }
+}
+
+/**
+ * [#37013] Whether a stored `sys_metadata` row is the platform's own record:
+ * bound to no package by its column, and its body carries the platform's mark
+ * where the metadata service reads it (`isPlatformOrigin`,
+ * `@objectstack/metadata`). A body that does not parse is not.
+ */
+function isPlatformRecordRow(record: { package_id?: unknown; metadata?: unknown }): boolean {
+    if (typeof record.package_id === 'string' && record.package_id !== '') return false;
+    let body: unknown = record.metadata;
+    if (typeof body === 'string') {
+        try {
+            body = JSON.parse(body);
+        } catch {
+            return false;
+        }
+    }
+    return isPlatformOrigin(body);
 }

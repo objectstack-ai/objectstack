@@ -129,6 +129,8 @@ Discussion after the proposal surfaced the integration question: the AI's design
 
 All write paths converge on the same draft rows; **Publish remains the single commit gate** shared by every surface.
 
+> **Note (2026-11-24, [#36511](https://github.com/objectstack-ai/objectstack/issues/36511) of epic [#36510](https://github.com/objectstack-ai/objectstack/issues/36510); built by [#36597](https://github.com/objectstack-ai/objectstack/pull/36597), [#36634](https://github.com/objectstack-ai/objectstack/pull/36634) and [#36652](https://github.com/objectstack-ai/objectstack/pull/36652)).** A person's Save in Studio's designers still writes the item's draft row, and the item still goes live only through a publish. That publish is now the item's own, issued by the Save itself (`ui/packages/app-shell/src/views/studio-design/studioSaveBar.tsx#publishSavedItem`): a person editing sees no separate Publish step. The top bar's Publish, the package's batch gate, is drawn only while a draft is pending: an AI's draft, or a person's from Studio's generic item page, which still saves drafts until [ADR-0146](./0146-studio-designs-setup-administers-one-editor-per-item-paired-customize-package.md) D1's amendment of 2026-11-24 is built. So Publish remains the commit gate for those drafts, and is no longer a step of a person's edit in a designer. The sentence above is left as written; read "the single commit gate shared by every surface" with this note.
+
 **Boundary rules (each one is a "we will NOT build"):**
 
 1. **One truth.** The canvas has NO store of its own — no "AI workspace" parallel repository. It renders the same `sys_metadata` rows Studio edits.

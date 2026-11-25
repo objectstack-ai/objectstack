@@ -50,6 +50,12 @@ import { useObjectTranslation } from '@object-ui/i18n';
 
 import { SLOT, withSlots } from '../../lib/inlineSlots';
 import { renderObjectStackSkill } from './objectstack-skill';
+import { createAuthenticatedFetch } from '@object-ui/auth';
+
+/** The console's authenticated fetch: the stored bearer token beside the session cookie. */
+function authFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+  return createAuthenticatedFetch()(input, init);
+}
 
 interface GeneratedKey {
   id?: string;
@@ -109,7 +115,7 @@ export function AgentConnectSection() {
     let cancelled = false;
     (async () => {
       try {
-        const res = await fetch('/api/v1/discovery', { credentials: 'include' });
+        const res = await authFetch('/api/v1/discovery', { credentials: 'include' });
         const json = await res.json().catch(() => ({}));
         const route: string | undefined = json?.data?.routes?.mcp ?? json?.routes?.mcp;
         if (cancelled) return;
@@ -135,7 +141,7 @@ export function AgentConnectSection() {
     setGenerating(true);
     setError(null);
     try {
-      const res = await fetch('/api/v1/keys', {
+      const res = await authFetch('/api/v1/keys', {
         method: 'POST',
         credentials: 'include',
         headers: { 'content-type': 'application/json' },

@@ -71,10 +71,12 @@ export interface KanbanColumnSummary {
    * objectstack#36520 — each lane's `sum` / `avg` / `min` / `max` figure, from
    * the server lane read, by lane id (`laneFigureOf` reads one). `null` while
    * the read is pending, or when it cannot be answered (no door, a refusal, a
-   * filter the read cannot lower): no figure is drawn. Absent when the board
-   * does not query its cards itself (a host hands them in, or the document
-   * carries them): the board has no query to ask, so a `sum` adds the cards it
-   * was handed — the host's whole answer — and the other three draw nothing.
+   * filter the read cannot lower): no figure is drawn. Present too when a
+   * host hands the board its cards together with their query
+   * (`laneStatisticQuery`, objectstack#36871). Absent when the board has no
+   * query to ask (a host hands its cards in without one, or the document
+   * carries them): a `sum` adds the cards it was handed — the host's whole
+   * answer — and the other three draw nothing.
    */
   figures?: Readonly<Record<string, LaneFigure>> | null;
 }

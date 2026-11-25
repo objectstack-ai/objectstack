@@ -87,8 +87,8 @@ describe('InlineActionSchema is derived from ActionSchema, not restated', () => 
 
   it('shares ActionType, so a new action type is inline-authorable for free', () => {
     for (const type of ActionType.options) {
-      const needsTarget = type !== 'script';
-      const body = needsTarget ? { type, target: '/x' } : { type, target: 'fn_name' };
+      const needsTarget = type !== 'script' && type !== 'ask_ai';
+      const body = type === 'ask_ai' ? { type } : needsTarget ? { type, target: '/x' } : { type, target: 'fn_name' };
       expect(InlineActionSchema.safeParse(body).success, `type "${type}" rejected`).toBe(true);
     }
   });

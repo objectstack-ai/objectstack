@@ -32,6 +32,14 @@ export interface IEmbedder {
    */
   readonly dimensions: number;
   /**
+   * Longest single input the model accepts, in tokens, as measured by the
+   * shared `estimateTokens` (`@objectstack/spec/shared`). Absent when the
+   * embedder knows no limit. A knowledge adapter reports it to the knowledge
+   * service (`IKnowledgeAdapter.embedding.maxInputTokens`), whose splitter
+   * keeps every passage within it (ADR-0161 K8, item 6).
+   */
+  readonly maxInputTokens?: number;
+  /**
    * Embed a batch of strings. Output order matches input order.
    * Implementations SHOULD handle empty input by returning `[]`.
    */

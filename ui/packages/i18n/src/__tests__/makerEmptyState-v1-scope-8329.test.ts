@@ -44,8 +44,7 @@
  * ⚠️ Scope note — this suite guards the AI-AUTHORING promise, not the word
  * "automation". The platform's manual automation surfaces are real and are
  * deliberately NOT covered: `home.build.subtitle` (its card opens Studio, which
- * genuinely authors flows), `engine.studio.landing.description`,
- * `packagedAutomation.*`, the marketplace
+ * genuinely authors flows), `packagedAutomation.*`, the marketplace
  * `automation` category, and the approvals / flow-runner groups.
  *
  * REVERT the wording (and relax this suite) when ADR-0112 v2 re-adds flows and

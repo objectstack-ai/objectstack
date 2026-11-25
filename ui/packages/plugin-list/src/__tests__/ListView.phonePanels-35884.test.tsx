@@ -57,7 +57,16 @@ function stubPhone() {
   })));
 }
 
-function mount(schema: Partial<ListViewSchema> = {}, props: Record<string, unknown> = {}) {
+const OBJECT_FIELDS: Record<string, { type: string; label: string }> = {
+  name: { type: 'text', label: 'Name' },
+  stage: { type: 'text', label: 'Stage' },
+};
+
+function mount(
+  schema: Partial<ListViewSchema> = {},
+  props: Record<string, unknown> = {},
+  objectFields: Record<string, { type: string; label: string }> = OBJECT_FIELDS,
+) {
   const dataSource = {
     find: vi.fn().mockResolvedValue({ data: RECORDS, total: 1 }),
     findOne: vi.fn(),
@@ -66,7 +75,7 @@ function mount(schema: Partial<ListViewSchema> = {}, props: Record<string, unkno
     delete: vi.fn(),
     getObjectSchema: vi.fn().mockResolvedValue({
       name: 'account',
-      fields: { name: { type: 'text', label: 'Name' }, stage: { type: 'text', label: 'Stage' } },
+      fields: objectFields,
     }),
   };
   render(
@@ -324,5 +333,44 @@ describe('the phone sort levels (objectstack#35884)', () => {
     pressOn(document.activeElement as HTMLElement, 'ArrowUp');
     expect(fields()).toEqual(['Name', 'Stage']);
     await waitFor(() => expect(handleOf(0)).toHaveFocus());
+  });
+});
+
+describe('the phone sort levels word a direction by the field\'s type', () => {
+  const TYPED = {
+    name: { type: 'text', label: 'Name' },
+    due: { type: 'date', label: 'Due' },
+    hours: { type: 'number', label: 'Hours' },
+    progress: { type: 'progress', label: 'Progress' },
+    done: { type: 'percent', label: 'Done' },
+    budget: { type: 'currency', label: 'Budget' },
+    active: { type: 'boolean', label: 'Active' },
+    starts: { type: 'time', label: 'Starts' },
+  };
+  const directionOf = async (field: string) => {
+    mount({ fields: Object.keys(TYPED) }, {}, TYPED);
+    await screen.findByTestId('grid-stub');
+    await addSortLevel(field);
+    return screen.getByTestId('sort-builder-row-direction').textContent;
+  };
+
+  for (const field of ['hours', 'progress', 'done', 'budget']) {
+    it(`a ${TYPED[field as keyof typeof TYPED].type} level reads "Low → High"`, async () => {
+      expect(await directionOf(field)).toContain('Low → High');
+    });
+  }
+
+  it('a boolean level reads as size', async () => {
+    expect(await directionOf('active')).toContain('Low → High');
+  });
+
+  it('a time level reads as time', async () => {
+    expect(await directionOf('starts')).toContain('Oldest → Newest');
+  });
+
+  it('CONTROL: a date level reads as time, a text level as the alphabet', async () => {
+    expect(await directionOf('due')).toContain('Oldest → Newest');
+    cleanup();
+    expect(await directionOf('name')).toContain('A → Z');
   });
 });

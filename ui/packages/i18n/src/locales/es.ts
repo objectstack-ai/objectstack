@@ -70,6 +70,9 @@ const es = {
     autofillNoCurrency: 'No se rellenó {{field}}: el importe elegido es {{amount}}, pero aquí aún no se ha elegido moneda. Elija la moneda y luego introduzca {{field}}.',
     autofillCurrencyUnread: 'No se rellenó {{field}}: el importe elegido es {{amount}}, pero no se pudo leer la moneda de aquí. Compruebe la moneda y luego introduzca {{field}}.',
     autofillKept: '{{field}} conserva su valor anterior.',
+    autofillNowSameCurrency: 'No se rellenó {{field}} al elegirlo. El registro ahora está en {{to}}: vuelva a elegirlo para rellenar {{amount}}.',
+    autofillNowSameCurrencyHeld: 'No se rellenó {{field}} al elegirlo y conserva su valor anterior. El registro ahora está en {{to}}: vacíe {{field}} y vuelva a elegirlo para rellenar {{amount}}.',
+    autofillCopiedUnder: '{{field}} se copió como {{amount}}, pero el registro ahora está en {{to}}. Introduzca {{field}} en {{to}} si debe cambiar.',
   },
   common: {
     // objectui#13461 — a disclosure toggle's name (the tree-view node toggle).
@@ -654,6 +657,8 @@ const es = {
       notConfirmedRecords: "La acción no informó sobre estos registros. Compruebe sus valores actuales:",
       resultRefused: " · Rechazados {{count}}",
       refusedRecords: "La acción rechazó estos registros:",
+      resultPaused: " · Esperando datos {{count}}",
+      pausedRecords: "Estos registros esperan datos. Sus pantallas se abren una tras otra:",
       aggregateUnreadable: "La acción terminó, pero no se pudo leer su resultado, así que no se sabe qué registros se modificaron. Al cerrar, la lista muestra sus valores actuales.",
       retry: "Reintentar",
       downloadErrorCsv: "Descargar CSV de errores",
@@ -694,6 +699,7 @@ const es = {
       needsWholeRows:
         "La agrupación necesita todos los registros, pero esta cuadrícula recibió solo una página de ellos, por lo que no se pueden contar los grupos. Entregue todos los registros o deje que la cuadrícula los obtenga de un origen de datos que implemente queryGroupHeaders.",
       draftOnly: "No agrupado por {{fields}}: solo existe en el borrador hasta que publique.",
+      moreGroupsNotLoaded: "No se cargaron más grupos: esta vista tiene más grupos de los que el servidor devuelve en una lectura, así que solo se muestran algunos.",
     },
     // objectui#4024 — column-footer aggregate prefixes, keyed by the spec's
     // `ColumnSummary` vocabulary. `pattern` owns the label/value join so this
@@ -1831,6 +1837,12 @@ const es = {
       noCategoryAxis: "Se requiere el eje de categorías del gráfico — un gráfico vinculado a un objeto no lo inventa. Declare uno de:",
     },
   },
+  // objectstack#36906 — the × of an app page opened from a Studio list.
+  studioReturn: {
+    close: 'Volver a Studio',
+    closeLabel: 'Cerrar y volver a la lista de Studio',
+    leaveConfirm: '¿Salir sin guardar? Se perderán los cambios no guardados.',
+  },
   dashboard: {
     // objectui#7063 — the DEFAULT empty state every dashboard widget renders
     // when its query SUCCEEDED and returned nothing. It replaced the terse
@@ -2513,6 +2525,14 @@ const es = {
       changesDrafted: "Guardado como borrador",
       changesFailed: "No aplicado",
       discussing: "Viendo: {{target}}",
+      focus: {
+        pin: "Seguir preguntando sobre este registro",
+        pinned: "Preguntando sobre: {{target}}",
+        remove: "Dejar de preguntar sobre este registro",
+        switchPrompt: "¿Preguntar sobre «{{target}}» en su lugar?",
+        switchAccept: "Cambiar",
+        switchDecline: "Mantener",
+      },
       changeVerb: {
         createObject: "Crear objeto",
         addField: "Añadir campo",
@@ -2557,6 +2577,7 @@ const es = {
       unavailableTitle: "Asistente de IA no disponible",
       unavailableDescription: "Esta implementación no tiene habilitado un asistente de IA. Todo lo demás funciona con normalidad.",
       unavailableError: "No se pudo contactar con el servicio de IA. Puede estar temporalmente sin conexión — reinténtelo o vuelva al inicio.",
+      unavailableErrorDesktop: "No se pudo contactar con el servicio de IA. Puede estar temporalmente sin conexión — reinténtelo o vuelva a la página inicial de la app.",
       unavailableRetry: "Reintentar",
       unavailableHome: "Volver al inicio",
       dock: {
@@ -2667,36 +2688,32 @@ const es = {
       description: "Lo que conviene configurar antes de que empiecen sus compañeros. Cada elemento se puede cambiar más tarde en Configuración.",
       progress: "{{done}} de {{total}} completados",
       dismiss: "Ocultar lista",
+      // objectstack#36739 — the popover's own action: hides the pill and Home's card here; its X only closes.
+      hideHere: "Ocultar en este dispositivo",
       showDone: "Mostrar completados ({{done}})",
-      showDoneSplit: "Mostrar completados ({{required}} obligatorios · {{optional}} opcionales)",
       hideDone: "Ocultar completados",
       optional: "Opcional",
       set: "Configurar",
       change: "Cambiar",
       view: "Ver",
-      confirm: "Confirmar",
       cancel: "Cancelar",
       continue: "Continuar",
-      prefilled: "Los valores aún sin configurar se sugieren a partir de su navegador. No se guarda nada hasta que confirme.",
-      organizationName: {
-        title: "Asigne un nombre a su organización",
-        todo: "Aún tiene el nombre con el que se creó: «{{name}}».",
-        action: "Cambiar nombre",
+      showList: "Ver lista",
+      // objectstack#36739 — the one required platform row: one form, one save.
+      organizationBasics: {
+        title: "Datos básicos de la organización",
+        todo: "Nombre, idioma y país predeterminados, zona horaria y moneda, guardados de una vez.",
+        name: "Nombre de la organización",
+        nameRequired: "Introduzca un nombre para su organización.",
+        prefilled: "Los valores aún sin configurar se sugieren a partir de su navegador. No se guarda nada hasta que pulse Guardar.",
+        save: "Guardar",
+        saved: "Datos básicos de la organización guardados",
       },
-      languageCountry: {
-        title: "Idioma y país predeterminados",
-        todo: "Actualmente {{language}} y {{country}}. Confírmelos o elija otros.",
-        saved: "Idioma y país predeterminados guardados",
-      },
-      timezone: {
-        title: "Zona horaria del sistema",
-        todo: "Sigue siendo la predeterminada de la plataforma, {{current}}. Determina qué significa «hoy» en las fórmulas y cómo los informes agrupan las fechas.",
-        saved: "Zona horaria del sistema establecida en {{zone}}",
-      },
-      currency: {
-        title: "Moneda predeterminada",
-        todo: "Aún sin configurar, por lo que los importes se muestran sin símbolo de moneda.",
-        saved: "Moneda predeterminada establecida en {{currency}}",
+      // The sidebar's progress pill, in every app (objectstack#36739).
+      pill: {
+        label: "Primeros pasos",
+        count: "{{done}}/{{total}}",
+        aria: "Primeros pasos: {{done}} de {{total}} completados",
       },
       mail: {
         title: "Envío de correo",
@@ -2933,11 +2950,12 @@ const es = {
       resetViewTitle: "Restaura los filtros, la búsqueda, la ordenación, la agrupación, la disposición de columnas, los campos ocultos, la densidad, el diseño, el color de fila, los números de fila y la edición en línea propios de esta vista. Las vistas fijadas, los favoritos y la forma de abrir los registros no cambian. Solo cambia su lista.",
       personalized: "Personalizada",
       personalizedHeading: "Su lista difiere de esta vista en",
-      // objectstack#35955 — a list's unsaved changes: Discard and Save.
+      // objectstack#35955 — a list's unsaved changes: Reset and Update view
+      // (objectstack#36737, the view's own actions, as Twenty's).
       draft: {
-        discard: "Descartar",
+        discard: "Restablecer",
         discardTitle: "Devuelve la lista a como la define su vista: filtros, orden, agrupación, columnas y diseño. El ancho de las columnas y el alto de las filas se mantienen.",
-        save: "Guardar",
+        save: "Actualizar vista",
         heading: "Cambios sin guardar",
         partSeparator: ", ",
         saveToView: "Guardar en esta vista",
@@ -3801,7 +3819,7 @@ const es = {
     build: {
       title: "Crear una aplicación",
       noCapability: "La creación de aplicaciones no está disponible en este sistema: requiere el permiso «Gestionar metadatos», que su cuenta no tiene.",
-      inStudio: "Nuevo en Studio",
+      inStudio: "Nueva aplicación en blanco",
     },
     template: {
       title: "Empezar con una plantilla",
@@ -3942,7 +3960,7 @@ const es = {
       allApps: "Todas las aplicaciones",
       editAppInStudio: "Editar {{app}} en Studio",
       openAppInStudio: "Ver {{app}} en Studio",
-      backToHome: "Volver al inicio",
+      backToHome: "Volver a la página inicial de la app",
       settings: "Configuración",
       productHome: "Inicio de {{product}}",
       addApp: 'Añadir aplicación',
@@ -4217,6 +4235,8 @@ const es = {
       settings: "Configuración del informe",
       pendingDraft: "Este informe tiene cambios sin publicar. Publícalos o descártalos arriba y luego guarda.",
       nameTaken: "Todos los identificadores derivados de este nombre ya están en uso. Ponle otro nombre al informe y guarda.",
+      // objectstack#36906 — a report made from Studio's report list that could not be saved in the app's package.
+      savedOutsideApp: "Este informe se guardó fuera del paquete de la app, porque aquí no se puede usar el paquete de personalización de la app, así que la lista de Studio no lo muestra.",
       adminOnlyTitle: "Solo los administradores del espacio de trabajo pueden crear informes",
       adminOnly: "Un informe se comparte con todo el espacio de trabajo, así que lo crea un administrador.",
       designModeOnTitle: "Termina primero de diseñar la disposición",
@@ -4765,6 +4785,7 @@ const es = {
     tool: {
       aggregate_data: "Resumir los datos",
       get_record: "Leer el registro",
+      get_record_context: "Leer el contexto del registro",
       list_datasets: "Ver las métricas disponibles",
       query_data: "Consultar los datos necesarios",
       query_dataset: "Consultar por métrica",
@@ -5092,6 +5113,10 @@ const es = {
     actComment: 'Comentó',
     actSystemNote: 'Nota del sistema',
     stepProgress: 'Pasos de aprobación',
+    outcomeWaiting: 'Pasó a {{step}}, a la espera de una decisión',
+    outcomeNow: 'Pasó a {{step}}: {{decision}}',
+    outcomeEndedAt: 'Pasó a {{step}} y terminó: {{decision}}',
+    outcomeEndedHere: 'La aprobación terminó aquí',
     prevRequest: 'Anterior',
     nextRequest: 'Siguiente',
     positionOf: 'Solicitud {{index}} de {{total}}',
@@ -5250,7 +5275,12 @@ const es = {
     bulkRejected_one: '{{count}} solicitud rechazada',
     bulkRejected_many: '{{count}} de solicitudes rechazadas',
     bulkRejected_other: '{{count}} solicitudes rechazadas',
-    bulkPartial: '{{ok}} con éxito, {{fail}} fallidas: {{which}}',
+    bulkPartialSummary: '{{ok}} con éxito, {{fail}} fallidas',
+    bulkFailureLine: '{{title}}: {{reason}}',
+    bulkFailuresShowAll: 'Ver todas ({{n}})',
+    bulkFailuresTitle: 'Sin decidir: {{n}}',
+    bulkFailuresBody: 'Estas solicitudes quedaron sin cambios. Cada una indica el motivo.',
+    close: 'Cerrar',
     rejectOneTitle: '¿Rechazar "{{title}}"?',
     rejectOneBody: 'Se rechaza la solicitud y se notifica al solicitante.',
     rejectTitle: '¿Rechazar esta solicitud?',
@@ -5457,6 +5487,10 @@ const es = {
         skill_one: '{{count}} habilidad de IA',
         skill_many: '{{count}} de habilidades de IA',
         skill_other: '{{count}} habilidades de IA',
+        ai_context: '{{count}} paquetes de contexto de IA',
+        ai_context_one: '{{count}} paquete de contexto de IA',
+        ai_context_many: '{{count}} de paquetes de contexto de IA',
+        ai_context_other: '{{count}} paquetes de contexto de IA',
         datasource: '{{count}} orígenes de datos',
         datasource_one: '{{count}} origen de datos',
         datasource_many: '{{count}} de orígenes de datos',

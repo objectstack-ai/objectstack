@@ -817,6 +817,10 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "相关列表列",
         helpText: "父记录详情页上此关系的相关列表的列，写作本对象（即子对象）的字段名，例如 name、status。未设置：从子对象推导。只写名称——标签、单元格类型和格式都来自子对象的字段定义。"
       },
+      inlineEdit: {
+        label: "内嵌编辑方式",
+        helpText: "父对象的字段分组指向此子对象（fieldGroups[].relatedList）时，父对象表单编辑此子对象各行的方式。未设置：根据本对象的字段自动选择。"
+      },
       inlineTitle: {
         label: "内嵌表格标题",
         helpText: "父记录上内嵌主从表格的标题。"
@@ -1775,6 +1779,18 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       dateRange: {
         label: "日期范围",
         helpText: "打开仪表盘时默认的时间段，以及查看者能否自选日期。"
+      },
+      "dateRange.field": {
+        label: "日期字段",
+        helpText: "时间段筛选所依据的日期字段。留空则按创建日期筛选。"
+      },
+      "dateRange.defaultRange": {
+        label: "默认时间段",
+        helpText: "打开仪表盘时显示的时间段。"
+      },
+      "dateRange.allowCustomRange": {
+        label: "允许自定义范围",
+        helpText: "允许查看者自己选择开始和结束日期。"
       },
       globalFilters: {
         label: "全局筛选",
@@ -3141,6 +3157,49 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       "triggerConditions.value": {
         label: "值"
+      }
+    }
+  },
+  ai_context: {
+    label: "AI 上下文包",
+    sections: {
+      basics: {
+        label: "基本信息",
+        description: "资料包的标识，以及它读取哪个对象的记录。"
+      },
+      material: {
+        label: "资料内容",
+        description: "把记录的哪些内容交给模型。每个选择器列出根对象的字段，或该关联列表自身对象的字段。"
+      }
+    },
+    fields: {
+      name: {
+        label: "名称",
+        helpText: "唯一标识（snake_case）。技能的 context 键和 get_record_context 工具都按它指名资料包。"
+      },
+      label: {
+        label: "显示名称",
+        helpText: "显示名称，即工具回答的标题。资料包没有描述：用途写在这里。"
+      },
+      object: {
+        label: "根对象",
+        helpText: "根对象：资料包读取它的一条记录。"
+      },
+      fields: {
+        label: "字段",
+        helpText: "交给模型的根对象字段，按顺序（最多 30 个）。其中的查找字段以它指向的记录名称作答。"
+      },
+      related: {
+        label: "关联列表",
+        helpText: "指向这条记录的子列表，只读一层（最多 3 个）。每个列表指明子对象、指向根对象的引用字段，以及每行读取的列（最多 10 列）；不选列时每行只读取其名称。"
+      },
+      body: {
+        label: "正文",
+        helpText: "作为记录正文读取的那一个长文本字段。"
+      },
+      "body.field": {
+        label: "正文字段",
+        helpText: "根对象的一个长文本字段（textarea、markdown、html、richtext）。选其他字段会在保存时报告，资料包也就不带正文。"
       }
     }
   }

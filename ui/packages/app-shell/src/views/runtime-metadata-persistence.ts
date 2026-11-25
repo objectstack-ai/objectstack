@@ -200,6 +200,8 @@ const PACKAGE_DOORS: RuntimeCreatePackageDoors = {
  */
 export async function resolveRuntimeCreatePackage(
   appPackageId: string | null | undefined,
+  /** The metadata type being created, named in the warning when the package-less fallback is taken. */
+  type: string,
   doors: RuntimeCreatePackageDoors = PACKAGE_DOORS,
 ): Promise<string | null> {
   if (!appPackageId) return null;
@@ -211,7 +213,7 @@ export async function resolveRuntimeCreatePackage(
     return pair.writable ? pair.packageId : null;
   } catch (err) {
     console.warn(
-      `[runtime-metadata] the customization package of "${appPackageId}" could not be had; the view is saved naming no package:`,
+      `[runtime-metadata] the customization package of "${appPackageId}" could not be had; the ${type} is saved naming no package:`,
       err,
     );
     return null;
@@ -469,7 +471,7 @@ export async function createRuntimeMetadata(
     );
   }
   const app = type === 'view' ? ctx.app : null;
-  const packageId = app?.packageId ? await resolveRuntimeCreatePackage(app.packageId) : null;
+  const packageId = app?.packageId ? await resolveRuntimeCreatePackage(app.packageId, type) : null;
   // objectstack#36137 — the first-write pin: a create over a name that already
   // holds a pending draft is refused `409 METADATA_CONFLICT`, never written over it.
   await ctx.metadataClient.save(
@@ -572,7 +574,7 @@ export async function saveAndPublishRuntimeMetadata(
   ctx: RuntimePersistCtx,
 ): Promise<SaveAndPublishOutcome> {
   const app = type === 'view' ? ctx.app : null;
-  const packageId = app?.packageId ? await resolveRuntimeCreatePackage(app.packageId) : null;
+  const packageId = app?.packageId ? await resolveRuntimeCreatePackage(app.packageId, type) : null;
   try {
     await ctx.metadataClient.save(
       type,
@@ -606,49 +608,55 @@ export async function saveAndPublishRuntimeMetadata(
 }
 
 /**
- * objectstack#36372 — where a dashboard edited on its own page would be
- * saved, as read when the edit state opens: the package that owns it when
- * that package is writable, else the app's customization package
- * `<base>.custom` (ADR-0146 D2/D3), the layer Studio's Customize writes.
- * `refused` when the owner is not listed (or the list cannot be read).
+ * objectstack#36372 — where an item edited on its own page (a dashboard, or
+ * a report in the report builder, objectstack#36716) would be saved, as read
+ * when the editor opens: the package that owns it when that package is
+ * writable, else the app's customization package `<base>.custom` (ADR-0146
+ * D2/D3), the layer Studio's Customize writes. `refused` when the owner is not
+ * listed (or the list cannot be read).
  *
  * Read only: opening writes nothing. A customization target names the pair
  * only when the package list already lists it (`listedCustomizationPairOf`,
  * the read Studio makes of a pair); the pair is asked of the ensure door,
  * which creates it on first use, at Save and never before
- * ({@link ensureDashboardSaveTarget}).
+ * ({@link ensureInPlaceSaveTarget}).
  *
- * `unbound` is a dashboard that names no package: it is saved where it lives,
+ * `unbound` is an item that names no package: it is saved where it lives,
  * naming none.
  */
-export type DashboardEditTarget =
+export type InPlaceEditTarget =
   | { kind: 'unbound' }
   | { kind: 'package'; packageId: string }
   | { kind: 'customization'; base: string; basedOn: string | null; pair: string | null }
   | { kind: 'refused'; reason: string };
 
 /** Where a save lands, once the ensure door has answered for a customization. */
-export type DashboardSaveTarget =
+export type InPlaceSaveTarget =
   | { kind: 'unbound' }
   | { kind: 'package'; packageId: string }
   | { kind: 'customization'; packageId: string; base: string; basedOn: string | null };
 
-/** The two package doors the in-page editor asks: the list to read, the ensure door to write. */
-export interface DashboardSaveTargetDoors {
+/** The two package doors an in-page editor asks: the list to read, the ensure door to write. */
+export interface InPlaceSaveTargetDoors {
   listPackages: () => Promise<ReadonlyMap<string, Pick<ListedPackageManifest, 'writable' | 'manifest'>>>;
   ensureCustomization: (basePackageId: string) => Promise<{ packageId: string; writable: boolean }>;
 }
 
-const DASHBOARD_TARGET_DOORS: DashboardSaveTargetDoors = {
+/** The dashboard editor's names for the shared targets above. */
+export type DashboardEditTarget = InPlaceEditTarget;
+export type DashboardSaveTarget = InPlaceSaveTarget;
+export type DashboardSaveTargetDoors = InPlaceSaveTargetDoors;
+
+const IN_PLACE_TARGET_DOORS: InPlaceSaveTargetDoors = {
   listPackages: fetchListedPackageManifests,
   ensureCustomization: ensureCustomizationPackage,
 };
 
-/** {@link DashboardEditTarget} for a dashboard `ownerPackageId` owns. Reads the package list only. */
-export async function resolveDashboardEditTarget(
+/** {@link InPlaceEditTarget} for an item `ownerPackageId` owns. Reads the package list only. */
+export async function resolveInPlaceEditTarget(
   ownerPackageId: string | null | undefined,
-  doors: Pick<DashboardSaveTargetDoors, 'listPackages'> = DASHBOARD_TARGET_DOORS,
-): Promise<DashboardEditTarget> {
+  doors: Pick<InPlaceSaveTargetDoors, 'listPackages'> = IN_PLACE_TARGET_DOORS,
+): Promise<InPlaceEditTarget> {
   if (!ownerPackageId) return { kind: 'unbound' };
   let listed: ReadonlyMap<string, Pick<ListedPackageManifest, 'writable' | 'manifest'>>;
   try {
@@ -668,34 +676,40 @@ export async function resolveDashboardEditTarget(
   };
 }
 
+/** The dashboard editor's name for {@link resolveInPlaceEditTarget}. */
+export const resolveDashboardEditTarget = resolveInPlaceEditTarget;
+
 /**
- * The {@link DashboardSaveTarget} a save writes to. A customization asks the
+ * The {@link InPlaceSaveTarget} a save writes to. A customization asks the
  * ensure door for the pair here, at Save, the first write of the edit (the
  * door creates the pair on first use, as Studio's first saved customization
  * does). Throws the door's refusal, or when the pair it answers is not
  * writable: nothing has been written then.
  */
-export async function ensureDashboardSaveTarget(
-  target: Exclude<DashboardEditTarget, { kind: 'refused' }>,
-  doors: Pick<DashboardSaveTargetDoors, 'ensureCustomization'> = DASHBOARD_TARGET_DOORS,
-): Promise<DashboardSaveTarget> {
+export async function ensureInPlaceSaveTarget(
+  target: Exclude<InPlaceEditTarget, { kind: 'refused' }>,
+  doors: Pick<InPlaceSaveTargetDoors, 'ensureCustomization'> = IN_PLACE_TARGET_DOORS,
+): Promise<InPlaceSaveTarget> {
   if (target.kind !== 'customization') return target;
   const pair = await doors.ensureCustomization(target.base);
   if (!pair.writable) throw new Error(`The customization package '${pair.packageId}' is not writable.`);
   return { kind: 'customization', packageId: pair.packageId, base: target.base, basedOn: target.basedOn };
 }
 
+/** The dashboard editor's name for {@link ensureInPlaceSaveTarget}. */
+export const ensureDashboardSaveTarget = ensureInPlaceSaveTarget;
+
 /**
- * The body an in-page dashboard save writes: `doc` without its top-level `_`
- * keys (the read's decorations belong to the served item), and, into a
- * customization package, declaring the override of its base
- * (`overrideDraftBody`, the body Studio's Customize writes). `null` when an
- * override is owed and there is no version to declare it at: the edit state
- * is refused up front for that (`'no-version'`), as Studio's Customize is.
+ * The body an in-page save writes: `doc` without its top-level `_` keys (the
+ * read's decorations belong to the served item), and, into a customization
+ * package, declaring the override of its base (`overrideDraftBody`, the body
+ * Studio's Customize writes). `null` when an override is owed and there is no
+ * version to declare it at: the editor is refused up front for that
+ * (`'no-version'`), as Studio's Customize is.
  */
-export function dashboardSaveBody(
+export function inPlaceSaveBody(
   doc: Record<string, unknown>,
-  target: Exclude<DashboardEditTarget, { kind: 'refused' }> | DashboardSaveTarget,
+  target: Exclude<InPlaceEditTarget, { kind: 'refused' }> | InPlaceSaveTarget,
 ): Record<string, unknown> | null {
   if (target.kind === 'customization') return overrideDraftBody(doc, target.base, target.basedOn);
   const body: Record<string, unknown> = {};
@@ -705,23 +719,37 @@ export function dashboardSaveBody(
   return body;
 }
 
+/** The dashboard editor's name for {@link inPlaceSaveBody}. */
+export const dashboardSaveBody = inPlaceSaveBody;
+
 /**
- * objectstack#36372 — save a dashboard edited on its page so everyone sees it
- * at once: staged as its draft in `target`'s package and published from it in
+ * objectstack#36372 — save an item edited on its page so everyone sees it at
+ * once: staged as its draft in `target`'s package and published from it in
  * the same act ({@link saveAndPublishRuntimeMetadata}, the confirmed-save door
  * of ruling record 7058616478). One item's publish: no package-wide
  * publish-drafts. Over a draft already pending there nothing is written
  * (`'pending-draft'`), so a Studio draft is never published on its saver's
  * behalf.
  */
-export async function saveDashboardInPlace(
+export async function saveInPlace(
+  type: RuntimeArtifactType,
+  name: string,
+  body: Record<string, unknown>,
+  target: InPlaceSaveTarget,
+  ctx: RuntimePersistCtx,
+): Promise<SaveAndPublishOutcome> {
+  if (target.kind === 'unbound') return saveAndPublishRuntimeMetadata(type, name, body, ctx);
+  return saveAndPublishInPackage(type, name, body, target.packageId, ctx);
+}
+
+/** {@link saveInPlace} for a dashboard. */
+export function saveDashboardInPlace(
   name: string,
   body: Record<string, unknown>,
   target: DashboardSaveTarget,
   ctx: RuntimePersistCtx,
 ): Promise<SaveAndPublishOutcome> {
-  if (target.kind === 'unbound') return saveAndPublishRuntimeMetadata('dashboard', name, body, ctx);
-  return saveAndPublishInPackage('dashboard', name, body, target.packageId, ctx);
+  return saveInPlace('dashboard', name, body, target, ctx);
 }
 
 /**

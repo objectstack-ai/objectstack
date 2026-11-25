@@ -64,7 +64,8 @@ describe('useConversationList', () => {
     expect(result.current.conversations[0]?.title).toBeUndefined();
     expect(fetchMock).toHaveBeenCalledWith(
       `${API_BASE}/conversations/conv-a`,
-      { credentials: 'include' },
+      // The authenticated fetch hands the wire a `Headers` (the bearer, when one is stored).
+      { credentials: 'include', headers: expect.any(Headers) },
     );
   });
 });

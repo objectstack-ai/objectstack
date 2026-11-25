@@ -724,3 +724,42 @@ describe('operation message catalog — not found, unreadable query field, deleg
     expect(renderOperationMessage({ messageKey: 'record_not_found' }, { locale: 'zh-CN', translate })).toBe('记录不见了');
   });
 });
+
+describe('operation message catalog — the print door\'s own 5xx sentences', () => {
+  const KEYS = ['print_engine_unavailable', 'print_timed_out', 'print_failed', 'print_caller_unresolved'] as const;
+
+  it('every locale defines all four, placeholder-free', () => {
+    for (const [locale, catalog] of Object.entries(BUILTIN_OPERATION_MESSAGES)) {
+      for (const key of KEYS) {
+        expect(catalog[key], `${locale} defines ${key}`).toBeTypeOf('string');
+        expect(catalog[key].match(/\{\{\w+\}\}/g) ?? [], `${locale}.${key}`).toEqual([]);
+      }
+    }
+  });
+
+  it('names no wire code, engine or host vocabulary — in every locale', () => {
+    for (const [locale, catalog] of Object.entries(BUILTIN_OPERATION_MESSAGES)) {
+      for (const key of KEYS) {
+        expect(catalog[key], `${locale}.${key}`).not.toMatch(/SERVICE_UNAVAILABLE|TIMEOUT|INTERNAL_ERROR|Chromium|OS_PRINT|\//);
+      }
+    }
+  });
+
+  it('renders the caller locale, matches a base language, and falls back to en for a locale the catalog lacks', () => {
+    for (const key of KEYS) {
+      expect(renderOperationMessage({ messageKey: key }, { locale: 'zh-CN' })).toBe(BUILTIN_OPERATION_MESSAGES['zh-CN'][key]);
+      expect(renderOperationMessage({ messageKey: key }, { locale: 'zh-CN' })).not.toBe(BUILTIN_OPERATION_MESSAGES.en[key]);
+      expect(renderOperationMessage({ messageKey: key }, { locale: 'es' })).toBe(BUILTIN_OPERATION_MESSAGES['es-ES'][key]);
+      expect(renderOperationMessage({ messageKey: key }, { locale: 'de-DE' })).toBe(BUILTIN_OPERATION_MESSAGES.en[key]);
+    }
+  });
+
+  it('each says something different from every other key, in every locale', () => {
+    for (const [locale, catalog] of Object.entries(BUILTIN_OPERATION_MESSAGES)) {
+      for (const key of KEYS) {
+        const others = Object.entries(catalog).filter(([k]) => k !== key).map(([, v]) => v);
+        expect(others, `${locale}.${key}`).not.toContain(catalog[key]);
+      }
+    }
+  });
+});

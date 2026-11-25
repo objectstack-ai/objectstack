@@ -857,7 +857,20 @@ export const CEILINGS = new Map([
   // no longer lists the retired modes `insert` and `replace`. 24649 -> 24591
   // priced bytes; the row follows the measurement down, zero headroom.
   //   ceil(($(wc -c < skills/objectstack-platform/SKILL.md) - 20) / 4) == ceil(24591 / 4)
-  ['skills/objectstack-platform/SKILL.md', 6148],
+  // 6148 -> 6149 (card #37189): the enumeration row for the new `record-context`
+  // capability token — the token joins the `@objectstack/service-` + token cell
+  // of the `requires:` table, which `check:skill-identifier-liveness` holds
+  // exhaustive over `PLATFORM_CAPABILITY_TOKENS`. The standing enumeration-row
+  // case: ruling A on #32584 (record 6819475461), made standing by #32673
+  // letter A (record 6840575378). Raised by the row's own measured delta and
+  // by no more; nothing else in the file is cut and nothing rides along.
+  // Arithmetic in priced bytes (stamp line excluded): on the base the text was
+  // 24577 bytes (6145 tokens, headroom 3); the row adds 17 bytes, so the
+  // LANDED priced text is 24594 bytes -> 6149 tokens: the 3 tokens of headroom
+  // are absorbed and the ceiling moves 6148 -> 6149 (+1). Pinned AT the
+  // measurement.
+  //   ceil(($(wc -c < skills/objectstack-platform/SKILL.md) - 20) / 4) == ceil(24594 / 4)
+  ['skills/objectstack-platform/SKILL.md', 6149],
   // `skills/objectstack-pm-dispatch/SKILL.md` (9708) and its
   // `rules/dev-template.md` (1838) left this table on 2026-09-10 with the files:
   // the maintainer deleted the published PM skill whole (verbatim:
@@ -1540,7 +1553,21 @@ export const CEILINGS = new Map([
   // before, ceiling +378, the measured remainder only, pinned AT the measurement. Same ruling
   // (2026-10-27, tap A): 「A:先削重复,余额按实测提高」 (ruling record 6513306068, letter B).
   //   ceil($(wc -c < skills/objectstack-ui/rules/actions.md) / 4) == ceil(14843 / 4)
-  ['skills/objectstack-ui/rules/actions.md', 3711],
+  // 3711 -> 3880 (#36630): one section after the `locations` table, "Button Order
+  // (`actionLayout`)": the object key's arms and parts, the limit of 3 pinned, which placements
+  // each arm takes and where the `record` arm is drawn, the list page's `$import` / `$export` as
+  // pinned-only built-ins, that `os validate` refuses a name the arm's scope does not place, and
+  // that on an installed object only the paired `.custom` package's extension writes it. PAID
+  // DOWN FIRST by 49 bytes of restatement in this file: " (`'Choose the new owner of
+  // {{ record.name }}.'`)" beside `description` on the copy-holes bullet (the `helpText` bullet
+  // right below it and the Reassign Lead block's `successMessage` show the `{{ record.name }}`
+  // spelling). Nothing else in the file restates another passage (see the 2777 -> 2808 note
+  // above), so the same ruling's second half carries the rest. Arithmetic: the text adds 726
+  // bytes, the cut removes 49, so the file is 14842 -> 15519 bytes -> 3880 tokens, zero headroom
+  // before, ceiling +169, the measured remainder only, pinned AT the measurement. Same ruling
+  // (2026-10-27, tap A): 「A:先削重复,余额按实测提高」 (ruling record 6513306068, letter B).
+  //   ceil($(wc -c < skills/objectstack-ui/rules/actions.md) / 4) == ceil(15519 / 4)
+  ['skills/objectstack-ui/rules/actions.md', 3880],
   // 6090 -> 6252 (#19715, card item 4): a 5-line table of contents at the top,
   // anchors to the file's existing headings, nothing else changed. +162 tokens,
   // zero headroom to absorb any of it, ceiling +162. Maintainer ruling

@@ -7,6 +7,7 @@
 **Builds on**: [ADR-0063](./0063-two-kernel-agents-skills-are-the-extension-primitive.md) (two agents bound by surface; skill ↔ agent affinity), [ADR-0033](./0033-ai-assisted-metadata-authoring.md) (draft-gated authoring tools)
 **Resolves**: [ADR-0040 §4](./0040-unified-assistant-and-agent-binding.md) ("tools are registry-global; a custom agent can change persona but not constrain capability") — the named follow-up contract.
 **Consumers**: `@objectstack/service-ai` (ToolRegistry, AgentRuntime), `../cloud/service-ai-studio` (authoring tools), `@objectstack/spec` (no schema change required)
+**Cloud record**: cloud ADR-0118, "App-package skills load on `ask`; their tools are intersected with an allow-set" ([`cloud/docs/adr/0118-app-package-skills-on-ask-tool-allow-set`](https://github.com/objectstack-ai/cloud/blob/main/docs/adr/0118-app-package-skills-on-ask-tool-allow-set.md)), records the allow-set an app-package skill's tools are intersected with on `ask`.
 
 ---
 

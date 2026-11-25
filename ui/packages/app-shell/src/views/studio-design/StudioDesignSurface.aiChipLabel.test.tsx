@@ -110,7 +110,14 @@ vi.mock('../metadata-admin/AccessExplainPanel', () => ({ AccessExplainPanel: () 
 // The source loads `@objectstack/lint` lazily; paid here, at collection, not
 // inside a case's clock (check:test-source-alias).
 import '@objectstack/lint';
+// objectstack#36900 — the surface mounts the command palette, which reaches the
+// record preview's `lazy()` detail entry: its first load is paid at collection too.
+import '@object-ui/plugin-detail';
 import { StudioDesignSurface } from './StudioDesignSurface';
+// The source under test reaches these dynamic imports (the command palette's
+// record preview, the drafts panel's lint, the code editor): their first load
+// is paid here, at collection, never inside a case's clock (`check:test-source-alias`).
+import '@object-ui/plugin-detail';
 
 window.matchMedia = ((query: string) => ({
   matches: false,
@@ -188,7 +195,10 @@ function renderStudio(entry = `/studio/${PACKAGE_ID}/interfaces`) {
     <I18nProvider config={{ defaultLanguage: 'zh', detectBrowserLanguage: false }}>
       <MemoryRouter initialEntries={[entry]}>
         <Routes>
+          <Route path="/studio/:packageId/metadata/*" element={<StudioDesignSurface area="metadata" />} />
           <Route path="/studio/:packageId/:tab" element={<StudioDesignSurface />} />
+          {/* objectstack#36905 — a permission set opens at its metadata address. */}
+          <Route path="/studio/:packageId/metadata/*" element={<StudioDesignSurface area="metadata" />} />
         </Routes>
       </MemoryRouter>
     </I18nProvider>,
@@ -202,24 +212,33 @@ const agentSurface = () =>
 // item's label too: the chip reads the rail's word and the label, as the Data
 // rail's 「会议 · 记录」 does — never the type word (`permission` / `flow`) or
 // the machine name, which stay on the tooltip and in the agent's data.
+// objectstack#36905 — a permission set now opens full-screen at its metadata
+// address, and keeps its chip there: the agent reads the item off the path.
 describe('objectstack#35018 — 正在看 on the Access and Automations rails reads a label', () => {
   it('Access: 「正在看：权限 · 组织成员」, no type word, no machine name', async () => {
-    renderStudio(`/studio/${PACKAGE_ID}/access?surface=permission:${SET}`);
+    renderStudio(`/studio/${PACKAGE_ID}/metadata/permission/${SET}?package=${PACKAGE_ID}`);
     await waitFor(() => expect(chip.surfaceContextLabel).toBe('正在看：权限 · 组织成员'), { timeout: 6000 });
     expect(String(chip.surfaceContextLabel)).not.toContain('permission');
     expect(String(chip.surfaceContextLabel)).not.toContain(SET);
     // CONTROL: the identity stays reachable on the tooltip, and the agent's data is the URL's.
     expect(chip.surfaceContextTitle).toBe(`permission · ${SET}`);
     expect(JSON.stringify(agentSurface())).toBe(
-      JSON.stringify({ pillar: 'access', artifact: { type: 'permission', name: SET } }),
+      JSON.stringify({ pillar: 'metadata', artifact: { type: 'permission', name: SET } }),
     );
   });
 
   it('Automations: 「正在看：流程 · 新会议提醒」, no type word, no machine name', async () => {
-    renderStudio(`/studio/${PACKAGE_ID}/automations?surface=flow:${FLOW}`);
+    // objectstack#36903 — the flow designer, full-screen on the flow's address.
+    renderStudio(`/studio/${PACKAGE_ID}/metadata/flow/${FLOW}`);
     await waitFor(() => expect(chip.surfaceContextLabel).toBe('正在看：流程 · 新会议提醒'), { timeout: 6000 });
     expect(String(chip.surfaceContextLabel)).not.toContain('flow');
     expect(String(chip.surfaceContextLabel)).not.toContain(FLOW);
     expect(chip.surfaceContextTitle).toBe(`flow · ${FLOW}`);
+    // The agent's data is the URL's: the address names the flow, with no
+    // `?surface=`, under the metadata area — the shape every designer on its
+    // metadata address sends (objectstack#36904, objectstack#36905).
+    expect(JSON.stringify(agentSurface())).toBe(
+      JSON.stringify({ pillar: 'metadata', artifact: { type: 'flow', name: FLOW } }),
+    );
   });
 });

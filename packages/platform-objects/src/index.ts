@@ -13,6 +13,7 @@
  *   @objectstack/platform-objects/integration  — (empty; sys_webhook moved to @objectstack/plugin-webhooks per ADR-0029)
  *   @objectstack/platform-objects/metadata     — sys_metadata, sys_metadata_history
  *   @objectstack/platform-objects/apps         — built-in platform Apps (Setup, ...)
+ *   (root only)                                — sys_task, sys_note: built-in tasks and notes
  *
  * Note: control-plane / cloud-only objects (sys_environment*, sys_package*, sys_app)
  * live in @objectstack/service-tenant per ADR-0003.
@@ -26,6 +27,7 @@ export * from './metadata/index.js';
 export * from './system/index.js';
 export * from './apps/index.js';
 export * from './pages/index.js';
+export * from './work/index.js';
 
 /** Runtime plugin contributing platform-default translation bundles. */
 export { PlatformObjectsPlugin, createPlatformObjectsPlugin } from './plugin.js';

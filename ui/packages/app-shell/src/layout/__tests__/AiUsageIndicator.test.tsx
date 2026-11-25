@@ -190,7 +190,7 @@ describe('AiUsageIndicator', () => {
   // The wire payload through the REAL parser into the component — the path
   // that went blank when the endpoint became one pool (objectui#8524).
   describe('through the real hook', () => {
-    const okResponse = (body: unknown) => ({ ok: true, status: 200, json: async () => body }) as unknown as Response;
+    const okResponse = (body: unknown) => ({ headers: new Headers(), ok: true, status: 200, json: async () => body }) as unknown as Response;
     // What the real hook last handed the component — read to know the fetch has
     // settled, so an empty DOM is a reading and not the pre-fetch first frame.
     let last: ReturnType<typeof realUseAiUsage> | undefined;
@@ -322,7 +322,7 @@ describe('AiUsageIndicator — declared upgradeUrl (objectstack#34622)', () => {
 
   async function serveRuntimeConfig(payload: Record<string, unknown>) {
     const realFetch = globalThis.fetch;
-    globalThis.fetch = vi.fn(async () => ({ ok: true, json: async () => payload })) as unknown as typeof fetch;
+    globalThis.fetch = vi.fn(async () => ({ headers: new Headers(), ok: true, json: async () => payload })) as unknown as typeof fetch;
     try {
       await initRuntimeConfig();
     } finally {

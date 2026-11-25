@@ -1,17 +1,20 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import type { Plugin, PluginContext } from '@objectstack/core';
+import { classifyAdmissionTenancyPosture } from '@objectstack/core';
 import type {
   IDataEngine,
   IRealtimeService,
 } from '@objectstack/spec/contracts';
 import type { KnowledgeSource } from '@objectstack/spec/ai';
 import { KNOWLEDGE_SERVICE } from '@objectstack/spec/contracts';
+import { RECORD_RESTORED_EVENT } from '@objectstack/spec/data';
 import { KnowledgeService } from './knowledge-service.js';
 import type { KnowledgeLogger } from './knowledge-service.js';
 import type { KnowledgeFieldSecurity } from './knowledge-source-admission.js';
 import { createKnowledgeReapGuard, guardedObjectsFor } from './knowledge-reap-guard.js';
 import { contributeKnowledgeSettings } from './knowledge-settings-contribution.js';
+import { UnknownKeyError, UnknownNamespaceError } from '@objectstack/service-settings';
 
 /**
  * Whether `err` is the kernel's refusal for a service NOTHING registered under
@@ -41,9 +44,15 @@ export interface KnowledgeServicePluginOptions {
   sources?: KnowledgeSource[];
   /**
    * Subscribe to ObjectQL `data.record.created` / `data.record.updated` /
-   * `data.record.deleted` events from `IRealtimeService` for `object`
-   * sources. Defaults to `true`. Set to `false` to disable inline event
-   * sync (e.g. when an external indexer drives upserts).
+   * `data.record.restored` / `data.record.deleted` events from
+   * `IRealtimeService` for `object` sources. Defaults to `true`. Set to
+   * `false` to disable inline event sync (e.g. when an external indexer drives
+   * upserts).
+   *
+   * A created, updated or restored row is re-read against each source's
+   * `where` (with a data engine bound): a matching row is indexed from the
+   * re-read row, and a row that does not match has its document removed —
+   * see `KnowledgeService.handleRecordUpsert`.
    *
    * The aggregate `data.records.updated` / `data.records.deleted` events a
    * predicate write (`multi: true`) publishes carry a count, not records:
@@ -159,6 +168,53 @@ export class KnowledgeServicePlugin implements Plugin {
           throw err;
         }
       },
+      // The settings page's `knowledge.chunk_target`, the splitter's
+      // `maxChars` under a source's own `split.maxChars` (#37098). Read each
+      // time the service splits, never here: the settings service may hold a
+      // value saved after boot. No settings service, or none serving the
+      // `knowledge` namespace (it is contributed below only where one
+      // exists), reads as unset.
+      resolveChunkTarget: async () => {
+        let settings: { get?(ns: string, key: string): Promise<{ value?: unknown } | undefined> } | undefined;
+        try {
+          settings = ctx.getService('settings');
+        } catch (err) {
+          if (isServiceNotRegisteredError(err, 'settings')) return undefined;
+          throw err;
+        }
+        if (typeof settings?.get !== 'function') return undefined;
+        let resolved: { value?: unknown } | undefined;
+        try {
+          resolved = await settings.get('knowledge', 'chunk_target');
+        } catch (err) {
+          // A host's own settings service without this namespace or key:
+          // nothing is configured there. Any other failure is the service's
+          // to report (it warns and splits by the source's own value).
+          if (err instanceof UnknownNamespaceError || err instanceof UnknownKeyError) return undefined;
+          throw err;
+        }
+        const value = resolved?.value;
+        return typeof value === 'number' && Number.isInteger(value) && value > 0 ? value : undefined;
+      },
+      // [ADR-0161 K8, item 9] The EFFECTIVE tenancy posture, read per assembly
+      // and per search from the kernel's `tenancy` service, classified the way
+      // every admission seam classifies it: never registered → `undefined` (no
+      // wall exists); registered and unreadable → a throw, which the service
+      // answers fail-closed. The async accessor first, so a factory-registered
+      // service resolves; the sync leg serves a `LiteKernel`-shaped host.
+      resolveTenancyPosture: () =>
+        classifyAdmissionTenancyPosture(async () => {
+          const kernel = typeof ctx.getKernel === 'function' ? ctx.getKernel() : undefined;
+          if (kernel && typeof kernel.getServiceAsync === 'function') {
+            return kernel.getServiceAsync<{ posture?: string; isolationActive?: boolean }>('tenancy');
+          }
+          try {
+            return ctx.getService<{ posture?: string; isolationActive?: boolean }>('tenancy');
+          } catch (err) {
+            if (isServiceNotRegisteredError(err, 'tenancy')) return undefined;
+            throw err;
+          }
+        }),
     });
 
     for (const source of this.options.sources ?? []) {
@@ -215,14 +271,19 @@ export class KnowledgeServicePlugin implements Plugin {
         // `{ recordId, after }` as if it were the row (a document with none of
         // the record's fields), and a delete never resolves an id at all.
         //
-        // These three are the only per-record names the ObjectQL engine
-        // publishes. There is deliberately no `record.created|updated|deleted`
+        // These four are the only per-record names the ObjectQL engine
+        // publishes: created, updated, deleted, and `data.record.restored`
+        // (`RECORD_RESTORED_EVENT`, one per row a recycle-bin restore writes
+        // back — a restore is never a create, ADR-0148 D2). A restored row
+        // takes the upsert path: it is re-read against each source's `where`
+        // like any other written row, so it re-enters the index only if it
+        // matches. There is deliberately no `record.created|updated|deleted`
         // branch: no producer emits those names (the spec's `RealtimeEventType`
         // dropped them for the same reason), so a branch for them is dead code
         // plus a `payload.record ?? payload` fallback for a shape nobody sends.
         // An event type this handler does not name — those, and `metadata.*`
         // too — falls through without a sync.
-        if (type === 'data.record.created' || type === 'data.record.updated') {
+        if (type === 'data.record.created' || type === 'data.record.updated' || type === RECORD_RESTORED_EVENT) {
           const record = payload.after as Record<string, unknown> | undefined;
           if (record && typeof record === 'object') {
             await service.handleRecordUpsert(object, record);
@@ -258,6 +319,10 @@ export class KnowledgeServicePlugin implements Plugin {
         // half-claimed, and stays so until a real object source justifies the
         // adapter-enumeration surface it would need (#4606's enforced-first
         // rule). Reporting it accurately is the whole job of this branch.
+        // A complete reindexSource refreshes the rows that still exist and
+        // match and, over an adapter that lists its documents, purges the
+        // documents of rows that are gone or no longer match — the warning
+        // says so, and names the adapter case it cannot repair.
         if (type === 'data.records.updated' || type === 'data.records.deleted') {
           const matched = payload.matched;
           ctx.logger.warn?.(
@@ -267,7 +332,10 @@ export class KnowledgeServicePlugin implements Plugin {
               'may now be stale and cannot be repaired from the event stream. ' +
               'Retention-sweep deletes are covered separately: the lifecycle reap guard de-indexes those rows ' +
               'before they are deleted; ' +
-              'application-level predicate writes are not, and need an explicit reindexSource.',
+              'application-level predicate writes are not. A complete reindexSource (no limit, no dryRun) refreshes ' +
+              'the documents of rows that still exist and match, and purges the documents of rows that are gone or ' +
+              'no longer match when the source\'s adapter lists its documents; over an adapter that does not, they ' +
+              'stay in the index.',
             { object, type, matched },
           );
           return;

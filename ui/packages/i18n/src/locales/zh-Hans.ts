@@ -78,6 +78,9 @@ const zh = {
     autofillNoCurrency: '未填入{{field}}：所选金额为 {{amount}}，但此处尚未选择币种。请先选择币种，再填写{{field}}。',
     autofillCurrencyUnread: '未填入{{field}}：所选金额为 {{amount}}，但无法读取此处的币种。请先确认币种，再填写{{field}}。',
     autofillKept: '{{field}}仍保留原来的值。',
+    autofillNowSameCurrency: '选取时未填入{{field}}。记录现已改为 {{to}}：重新选取即可填入 {{amount}}。',
+    autofillNowSameCurrencyHeld: '选取时未填入{{field}}，且仍保留原来的值。记录现已改为 {{to}}：请先清空{{field}}，再重新选取即可填入 {{amount}}。',
+    autofillCopiedUnder: '{{field}}按 {{amount}} 带入，但记录现已改为 {{to}}。如需调整，请按 {{to}} 填写{{field}}。',
   },
   common: {
     // objectui#13461 — a disclosure toggle's name (the tree-view node toggle).
@@ -654,6 +657,7 @@ const zh = {
       needsWholeRows:
         '分组需要全部记录，但此表格只收到其中一页，因此无法统计分组。请传入全部记录，或让表格从实现了 queryGroupHeaders 的数据源获取记录。',
       draftOnly: '未按 {{fields}} 分组：它仅存在于草稿中，发布后才生效。',
+      moreGroupsNotLoaded: '更多分组未加载：此视图的分组数超过服务器单次读取返回的数量，因此只列出了部分分组。',
     },
     // objectui#4024 — column-footer aggregate prefixes, keyed by the spec's
     // `ColumnSummary` vocabulary. `pattern` owns the label/value join so this
@@ -892,6 +896,8 @@ const zh = {
       notConfirmedRecords: '操作未报告这些记录的结果，请检查它们的当前值：',
       resultRefused: ' · 被拒绝 {{count}}',
       refusedRecords: '操作拒绝了以下记录：',
+      resultPaused: ' · 等待输入 {{count}}',
+      pausedRecords: '以下记录正在等待输入，它们的界面会依次打开：',
       aggregateUnreadable: '操作已完成，但无法读取其结果，因此不知道哪些记录被修改了。关闭后列表会显示它们的当前值。',
       retry: '重试',
       downloadErrorCsv: '下载错误 CSV',
@@ -1852,6 +1858,8 @@ const zh = {
       settings: '报表设置',
       pendingDraft: '这张报表有一份还没发布的修改。先在上方发布或丢弃它，再保存。',
       nameTaken: '由这个名称生成的标识都已被占用。请给报表换个名称再保存。',
+      // objectstack#36906 — a report made from Studio's report list that could not be saved in the app's package.
+      savedOutsideApp: '这份报表没有存进应用的包：此处无法使用应用的定制包，所以 Studio 列表里看不到它。',
       adminOnlyTitle: '只有系统管理员能搭建报表',
       adminOnly: '报表对工作区里所有人生效，所以由系统管理员搭建。',
       designModeOnTitle: '请先完成布局设计',
@@ -1900,6 +1908,12 @@ const zh = {
         grouping: '选一个分组字段',
       },
     },
+  },
+  // objectstack#36906 — the × of an app page opened from a Studio list.
+  studioReturn: {
+    close: '返回 Studio',
+    closeLabel: '关闭并返回 Studio 列表',
+    leaveConfirm: '不保存就离开吗？未保存的修改将会丢失。',
   },
   dashboard: {
     total: '总计',
@@ -2396,36 +2410,32 @@ const zh = {
       description: '同事开始使用之前，先设置好这几项。每一项之后都可以在系统设置中修改。',
       progress: '已完成 {{done}}/{{total}}',
       dismiss: '隐藏清单',
+      // objectstack#36739 — the popover's own action: hides the pill and Home's card here; its X only closes.
+      hideHere: '在本机隐藏',
       showDone: '显示已完成的项（{{done}}）',
-      showDoneSplit: '显示已完成的项（必做 {{required}} · 可选 {{optional}}）',
       hideDone: '收起已完成的项',
       optional: '可选',
       set: '设置',
       change: '修改',
       view: '查看',
-      confirm: '确认',
       cancel: '取消',
       continue: '继续',
-      prefilled: '尚未设置的项已按你的浏览器给出建议。确认之前不会保存任何内容。',
-      organizationName: {
-        title: '为组织命名',
-        todo: '组织仍在使用创建时的名称“{{name}}”。',
-        action: '重命名',
+      showList: '查看清单',
+      // objectstack#36739 — the one required platform row: one form, one save.
+      organizationBasics: {
+        title: '组织基本信息',
+        todo: '组织名称、默认语言和国家/地区、时区、货币，一次保存。',
+        name: '组织名称',
+        nameRequired: '请填写组织名称。',
+        prefilled: '尚未设置的项已按你的浏览器给出建议。点“保存”之前不会保存任何内容。',
+        save: '保存',
+        saved: '组织基本信息已保存',
       },
-      languageCountry: {
-        title: '默认语言和国家/地区',
-        todo: '当前为{{language}}、{{country}}。请确认，或改选其他值。',
-        saved: '默认语言和国家/地区已保存',
-      },
-      timezone: {
-        title: '系统时区',
-        todo: '仍为平台默认时区 {{current}}。系统时区决定公式中“今天”的含义，以及报表如何按日期分组。',
-        saved: '系统时区已设置为 {{zone}}',
-      },
-      currency: {
-        title: '默认货币',
-        todo: '尚未设置，金额暂不显示币种。',
-        saved: '默认货币已设置为 {{currency}}',
+      // The sidebar's progress pill, in every app (objectstack#36739).
+      pill: {
+        label: '开始使用',
+        count: '{{done}}/{{total}}',
+        aria: '开始使用：已完成 {{done}}/{{total}}',
       },
       mail: {
         title: '邮件发送',
@@ -2746,6 +2756,14 @@ const zh = {
       changesDrafted: '已暂存为草稿',
       changesFailed: '未生效',
       discussing: '正在看：{{target}}',
+      focus: {
+        pin: '钉住这条记录，换页后仍问它',
+        pinned: '正在问：{{target}}',
+        remove: '不再问这条记录',
+        switchPrompt: '改为问《{{target}}》？',
+        switchAccept: '改为问它',
+        switchDecline: '不用',
+      },
       changesConfirmMessage: '确认修改，应用你刚才提议的改动。',
       changeVerb: {
         createObject: '新建对象',
@@ -2845,6 +2863,7 @@ const zh = {
       unavailableTitle: 'AI 助手不可用',
       unavailableDescription: '当前部署未启用 AI 助手。其他功能一切正常。',
       unavailableError: '无法连接 AI 服务。它可能暂时离线 — 请重试，或返回首页。',
+      unavailableErrorDesktop: '无法连接 AI 服务。它可能暂时离线 — 请重试，或返回应用起始页。',
       unavailableRetry: '重试',
       unavailableHome: '返回首页',
       dock: {
@@ -3007,11 +3026,12 @@ const zh = {
       resetViewTitle: '恢复此视图自身的筛选、搜索、排序、分组、列布局、隐藏字段、密度、布局、行颜色、行号和行内编辑。固定的视图、收藏和记录的打开方式保持不变。只影响你自己的列表。',
       personalized: '已个性化',
       personalizedHeading: '你的列表与此视图不同之处',
-      // objectstack#35955 — a list's unsaved changes: Discard and Save.
+      // objectstack#35955 — a list's unsaved changes: Reset and Update view
+      // (objectstack#36737, the view's own actions, as Twenty's).
       draft: {
-        discard: '放弃',
+        discard: '重置',
         discardTitle: '把列表恢复成视图本来的样子：筛选、排序、分组、列和布局。列宽和行高不变。',
-        save: '保存',
+        save: '更新视图',
         heading: '未保存的改动',
         partSeparator: '、',
         saveToView: '保存到这个视图',
@@ -3895,7 +3915,7 @@ const zh = {
     build: {
       title: '构建应用',
       noCapability: '本系统不提供构建应用功能 — 它需要「管理元数据」权限,而你的账号没有该权限。',
-      inStudio: '在 Studio 中新建',
+      inStudio: '新建空白应用',
     },
     template: {
       title: '从模板开始',
@@ -3990,7 +4010,7 @@ const zh = {
       allApps: '所有应用',
       editAppInStudio: '在 Studio 中编辑 {{app}}',
       openAppInStudio: '在 Studio 中查看 {{app}}',
-      backToHome: '返回首页',
+      backToHome: '返回应用起始页',
       settings: '系统设置',
       productHome: '{{product}} 首页',
       addApp: '添加应用',
@@ -4253,6 +4273,9 @@ const zh = {
         skill: 'AI 技能 {{count}}',
         skill_one: 'AI 技能 {{count}}',
         skill_other: 'AI 技能 {{count}}',
+        ai_context: 'AI 上下文包 {{count}}',
+        ai_context_one: 'AI 上下文包 {{count}}',
+        ai_context_other: 'AI 上下文包 {{count}}',
         datasource: '数据源 {{count}}',
         datasource_one: '数据源 {{count}}',
         datasource_other: '数据源 {{count}}',
@@ -4926,6 +4949,7 @@ const zh = {
     tool: {
       aggregate_data: '汇总相关数据',
       get_record: '读取这条记录',
+      get_record_context: '读取记录资料',
       list_datasets: '查看指标',
       query_data: '查询所需数据',
       query_dataset: '按指标查询',
@@ -5241,6 +5265,10 @@ const zh = {
     actComment: '评论',
     actSystemNote: '系统说明',
     stepProgress: '审批步骤',
+    outcomeWaiting: '已流转到「{{step}}」，等待审批',
+    outcomeNow: '已流转到「{{step}}」：{{decision}}',
+    outcomeEndedAt: '已流转到「{{step}}」，审批结束：{{decision}}',
+    outcomeEndedHere: '审批在此结束',
     prevRequest: '上一条',
     nextRequest: '下一条',
     positionOf: '第 {{index}} / {{total}} 条请求',
@@ -5391,7 +5419,12 @@ const zh = {
     bulkRejected: '已驳回 {{count}} 条请求',
     bulkRejected_one: '已驳回 {{count}} 条请求',
     bulkRejected_other: '已驳回 {{count}} 条请求',
-    bulkPartial: '{{ok}} 条成功，{{fail}} 条失败：{{which}}',
+    bulkPartialSummary: '{{ok}} 条成功，{{fail}} 条失败',
+    bulkFailureLine: '{{title}}：{{reason}}',
+    bulkFailuresShowAll: '查看全部（{{n}}）',
+    bulkFailuresTitle: '未处理：{{n}} 条',
+    bulkFailuresBody: '以下请求保持原状，每条都附有原因。',
+    close: '关闭',
     rejectOneTitle: '驳回“{{title}}”？',
     rejectOneBody: '将驳回该请求并通知申请人。',
     rejectTitle: '驳回该请求？',

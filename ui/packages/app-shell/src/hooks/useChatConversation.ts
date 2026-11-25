@@ -25,6 +25,12 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react
 import { chartAnswerParts, detectPendingApproval } from '@object-ui/plugin-chatbot/core';
 // Type-only, so it is erased and pulls no barrel closure into the hook.
 import type { AnswerSource } from '@object-ui/plugin-chatbot';
+import { createAuthenticatedFetch } from '@object-ui/auth';
+
+/** The console's authenticated fetch: the stored bearer token beside the session cookie. */
+function authFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+  return createAuthenticatedFetch()(input, init);
+}
 
 /** Minimal UIMessage shape compatible with `@ai-sdk/react`'s `useChat`. */
 export interface HydratedUIMessagePart {
@@ -854,7 +860,7 @@ export function aiMessageRowsToServerMessages(rows: RawAiMessageRow[] | undefine
 }
 
 export async function fetchConversation(apiBase: string, id: string): Promise<ServerConversation | null> {
-  const res = await fetch(`${apiBase}/conversations/${encodeURIComponent(id)}`, {
+  const res = await authFetch(`${apiBase}/conversations/${encodeURIComponent(id)}`, {
     credentials: 'include',
   });
   if (res.status === 404 || res.status === 403) return null;
@@ -863,7 +869,7 @@ export async function fetchConversation(apiBase: string, id: string): Promise<Se
 }
 
 async function createConversation(apiBase: string): Promise<ServerConversation> {
-  const res = await fetch(`${apiBase}/conversations`, {
+  const res = await authFetch(`${apiBase}/conversations`, {
     method: 'POST',
     credentials: 'include',
     headers: { 'Content-Type': 'application/json' },
@@ -879,7 +885,7 @@ function notSentCreateError(message: string, status?: number): Error {
 }
 
 async function deleteConversation(apiBase: string, id: string): Promise<void> {
-  await fetch(`${apiBase}/conversations/${encodeURIComponent(id)}`, {
+  await authFetch(`${apiBase}/conversations/${encodeURIComponent(id)}`, {
     method: 'DELETE',
     credentials: 'include',
   }).catch(() => {

@@ -319,8 +319,33 @@ function detectDestructiveObjectChanges(prev: any, next: any): Array<{
         // quantity among its declarers, the blanks beside it and the `""`
         // entry, so this one is not raised. Lifted by the same `force`,
         // reading no row.
+        //
+        // The same debt, raised under the same code: a stored `record`-mode
+        // quantity whose `unitField` is re-pointed at a field that held no
+        // stored unit before the save (new in it, or unstored before it).
+        // Every stored row then holds its quantity beside a blank there. The
+        // re-point onto a field that already was a unit code field converts
+        // nothing and strands no blank the save made, so it raises nothing:
+        // the sibling of `currency_field_repointed`, out of R1 (ADR-0158 Open
+        // item 9). The re-point onto a stored text field is
+        // `unit_code_field_declared`'s, under the same once-only rule.
         const unitField = recordUnitFieldOf(nextField);
-        if (
+        const prevUnitField = recordUnitFieldOf(prevField);
+        const repointedOntoBlank = prevUnitField !== undefined
+            && unitField !== undefined
+            && prevUnitField !== unitField
+            && !prevUnitCodeFields.has(unitField);
+        if (repointedOntoBlank && isStored(prevField) && !declaredUnitCodeFields.has(unitField)) {
+            issues.push({
+                code: 'unit_mode_to_record',
+                field: fname,
+                message: `Field '${fname}' re-pointed its unitField from '${prevUnitField}' to '${unitField}' — '${unitField}' held no `
+                    + `stored unit before this save (it is new, or was not stored), so every row already stored holds its quantity `
+                    + `beside a blank '${unitField}', and no longer reads the unit '${prevUnitField}' holds; editing the quantity there `
+                    + 'is refused until the row holds a unit code; once saved, write those blanks from a "" entry in the mapping of '
+                    + unitCodeBackfillRemedy(objectName, unitField),
+            });
+        } else if (
             isStored(prevField)
             && unitField !== undefined
             && unitModeOf(prevField) !== 'record'

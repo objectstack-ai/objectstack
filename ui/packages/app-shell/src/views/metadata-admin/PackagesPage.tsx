@@ -93,6 +93,7 @@ import {
 } from '@object-ui/components';
 import { useMetadataLocale, t, tFormat } from './i18n.js';
 import { useMetadataClient } from './useMetadata.js';
+import { newAppStep } from '../studio-design/newAppDoor.js';
 import { PackageFormDialog } from './PackageFormDialog.js';
 import { readPackageRemovalContents, type PackageRemovalState } from './packageRemovalContents.js';
 import { PackageRemovalSummary } from './PackageRemovalSummary.js';
@@ -105,7 +106,7 @@ import { RefusalMessage } from '../../components/RefusalMessage.js';
 import { emitMetadataRefresh } from '../../assistant/assistantBus.js';
 import { duplicatePackage, forgetPackageListReads, isSpecPackageId } from '../studio-design/packages-io.js';
 import { PackageIdInput } from '../studio-design/PackageIdInput.js';
-import { useWorkspaceAdminStatus } from '@object-ui/auth';
+import { createAuthenticatedFetch, useWorkspaceAdminStatus } from '@object-ui/auth';
 import { getRuntimeConfig, isMarketplaceEnabled } from '../../runtime-config.js';
 import {
   getMarketplacePackage,
@@ -123,10 +124,14 @@ import type { InstalledPackageAtEitherStage } from '@objectstack/spec/api-assemb
 import type { PackagePublishResult } from '@objectstack/spec/system';
 import type { ReassignOrphanedMetadataResponse } from '@objectstack/spec/api';
 import { studioHomePath } from '../studio-design/studioAddress.js';
+import { PackageCustomizationsPanel } from '../studio-design/PackageCustomizationsPanel.js';
+import { isCustomizationPackage } from '@objectstack/spec/kernel';
 import {
   PACKAGE_SOURCES,
   PACKAGES_ADMIN_FACE,
   PACKAGES_FACE_PARAM,
+  PACKAGES_NEW_PACKAGE_VALUE,
+  PACKAGES_NEW_PARAM,
   PACKAGES_SOURCE_PARAM,
   PackageSourceRefusal,
   readPackagesFace,
@@ -223,6 +228,11 @@ type UncheckedPackageRow = Omit<InstalledPackageRow, 'source' | 'writable'> & {
 
 const API = '/api/v1/packages';
 
+/** The console's authenticated fetch: the stored bearer token beside the session cookie. */
+function authFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+  return createAuthenticatedFetch()(input, init);
+}
+
 /**
  * The code `PATCH /packages/:id/disable` answers, with `409`, while a
  * validation rule of an enabled package reads a field the package adds through
@@ -237,7 +247,7 @@ async function apiJson<T>(path: string, init?: RequestInit): Promise<T> {
   // list reads from before it are forgotten however it ends, the session's
   // held list the app → Studio entries read included.
   const writes = (init?.method ?? 'GET').toUpperCase() !== 'GET';
-  const res = await fetch(path, {
+  const res = await authFetch(path, {
     credentials: 'include',
     headers: { Accept: 'application/json', ...(init?.headers || {}) },
     ...init,
@@ -608,8 +618,7 @@ function InstalledAppUpdateCell({ rowId, read }: { rowId: string; read: UpdateRe
 }
 
 /**
- * A package's Studio address, the one the Studio landing's package card opens
- * (`BuilderLanding`'s `open`): the builder on the package's Data pillar. The
+ * A package's Studio address: the builder on the package's Data pillar. The
  * administration face's create lands here, and its "Open in Studio" link
  * points here (objectstack#36834).
  */
@@ -621,9 +630,17 @@ const studioPackagePath = (packageId: string) => studioHomePath(packageId);
 
 /**
  * CreatePackageDialog — thin wrapper over the spec-driven {@link PackageFormDialog}.
- * Kept as a named export so existing call sites (ResourceListPage, the Studio
- * package switcher) don't change. The form fields + validation now come from
- * the manifest spec (`package-schema`), not a hand-written field list.
+ * The one create-package dialog: Setup → Packages (its New Package button and
+ * the `?new=package` door the console's new-package entries open,
+ * objectstack#36908) and ResourceListPage's create-a-base-first prompt. The
+ * form fields + validation come from the manifest spec (`package-schema`),
+ * not a hand-written field list.
+ *
+ * objectstack#37134 — every opening offers 「同时创建应用」, ticked by
+ * default: the wrapper hands the dialog the app step (`newAppStep`,
+ * objectstack#36748), so a package created here comes with its app unless the
+ * author unticks it. `onCreated` still answers with the package id, so where
+ * each caller lands afterwards does not change.
  */
 export function CreatePackageDialog({
   open,
@@ -634,11 +651,15 @@ export function CreatePackageDialog({
   onOpenChange: (v: boolean) => void;
   onCreated: (id: string) => void;
 }) {
+  const client = useMetadataClient();
+  const locale = useMetadataLocale();
+  const newApp = React.useMemo(() => newAppStep(client, locale), [client, locale]);
   return (
     <PackageFormDialog
       mode="create"
       open={open}
       onOpenChange={onOpenChange}
+      newApp={newApp}
       onSaved={(r) => onCreated(r.id)}
     />
   );
@@ -718,7 +739,8 @@ export function PackageDetailSheet({
    * View info, Disable / Enable and Delete, plus "Open in Studio" on an
    * authored package. Edit, Publish, Revert, Export, Duplicate, Adopt loose
    * items and the pending changes' Publish / Discard stay on the development
-   * face, which every other caller (Studio's landing and switcher) opens.
+   * face. On the administration face a read-only base also draws what this
+   * deployment changed on it (objectstack#36908).
    */
   face?: PackagesFace;
   open: boolean;
@@ -873,7 +895,7 @@ export function PackageDetailSheet({
   // title shows.
   const displayName = pkg.manifest.name || id;
   const deleteArmed = deleteMode !== '' && deleteTyped.trim() === displayName.trim();
-  // The spec's id rule (`isSpecPackageId`), the one the landing's duplicate form
+  // The spec's id rule (`isSpecPackageId`), the one the package id input
   // and the duplicate route judge by, not a second one (objectui#11855).
   const dupArmed = dupName.trim().length > 0 && isSpecPackageId(dupId.trim());
 
@@ -1106,7 +1128,7 @@ export function PackageDetailSheet({
   };
 
   // ADR-0070 D4 — duplicate this base into a NEW writable package
-  // (re-namespaced). The Studio landing's inline duplicate form, on this sheet
+  // (re-namespaced). An inline duplicate form, on this sheet
   // (objectui#11784): the same id input (`PackageIdInput`), the same id rule
   // (`isSpecPackageId`) and the same call (`duplicatePackage`, which also refuses
   // a 200 whose verdict is `success: false`), instead of a `window.prompt`.
@@ -1249,6 +1271,20 @@ export function PackageDetailSheet({
               <ExternalLink className="h-3.5 w-3.5" />
               {t('engine.packages.detail.openInStudio', locale)}
             </Link>
+          </>
+        )}
+
+        {/* objectstack#36908 — what this deployment changed on an installed
+            app, and the way into Studio to change it: the removed Studio
+            home's per-app line and "Customizations in this environment" panel,
+            drawn where an administrator now looks the app up. A read-only
+            base only: an authored package is changed in place, a `.custom`
+            pair is read through its base, and a kernel package takes no
+            customization. */}
+        {!authoring && !writable && !isKernel && !isCustomizationPackage(id) && (
+          <>
+            <Separator className="my-4" />
+            <PackageCustomizationsPanel key={id} packageId={id} locale={locale} onNavigate={() => onOpenChange(false)} />
           </>
         )}
 
@@ -1853,6 +1889,26 @@ export function PackagesPage() {
   // development surface Studio opens (this page with no `face`).
   const adminFace = sourceFilter.face === 'admin';
 
+  // objectstack#36908 — the console's new-package doors land here with New
+  // Package open (`SETUP_NEW_PACKAGE_PATH`, `?new=package` on this face), the
+  // way they used to land on the Studio home's create dialog. Read on arrival
+  // and dropped from the address with a replace, so a refresh or Back does not
+  // open the dialog again. The effect is keyed on the primitives it reads
+  // (ui/AGENTS.md #10).
+  const newParam = searchParams.get(PACKAGES_NEW_PARAM);
+  React.useEffect(() => {
+    if (newParam !== PACKAGES_NEW_PACKAGE_VALUE) return;
+    if (adminFace) setCreateOpen(true);
+    setSearchParams(
+      (prev) => {
+        const next = new URLSearchParams(prev);
+        next.delete(PACKAGES_NEW_PARAM);
+        return next;
+      },
+      { replace: true },
+    );
+  }, [newParam, adminFace, setSearchParams]);
+
   const filtered = React.useMemo(() => {
     const q = query.trim().toLowerCase();
     return rows.filter((r) => {
@@ -2409,8 +2465,8 @@ export function PackagesPage() {
         onOpenChange={setCreateOpen}
         onCreated={async (id) => {
           // objectstack#36834 — created from Setup, the empty package is
-          // designed next: straight into Studio on it, through the address the
-          // Studio landing's package card opens. The development surface stays
+          // designed next: straight into Studio on it, on its Data pillar.
+          // The development surface stays
           // where it is and shows the new row.
           if (adminFace) {
             forgetPackageListReads();

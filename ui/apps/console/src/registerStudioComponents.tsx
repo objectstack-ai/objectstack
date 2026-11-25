@@ -3,59 +3,30 @@
 /**
  * Studio builder component registration.
  *
- * Binds the `studio:builder` registry key (referenced from the framework's
- * Studio app navigation — the 「应用构建」 entry) to the builder landing page,
- * so the application builder is reachable from the moment a user logs in:
- * Home → Studio app → 应用构建 → pick/create a writable package → the
- * full-screen pillar builder at `/studio/:packageId/:tab`.
+ * Binds the `studio:builder` registry key, referenced from the framework's
+ * Studio app navigation (the 「应用构建」 entry,
+ * `/apps/<app>/component/studio/builder`), to Studio's entry.
  *
- * URL shape resolved by `ComponentNavView`:
- *   studio:builder → /apps/<app>/component/studio/builder
+ * It used to draw the Studio home's package cards inside the app shell. That
+ * home was removed (objectstack#36908, epic #36890 decision 9): Studio is
+ * entered from an app or from Setup → Packages. The entry stays reachable from
+ * this nav item by forwarding to bare `/studio`, whose ONE owner
+ * (`StudioRoute`) decides where it opens: the package the author was last in,
+ * else the package list. A second copy of that decision here would drift from
+ * it.
  *
- * The standalone `/studio` route renders the same landing full-screen.
- *
- * ## Why `BuilderLanding` arrives through `lazy()`, and why that is real now
- *
- * This registration used to read `lazy(() => import('@object-ui/app-shell')
- * .then((m) => ({ default: m.BuilderLanding })))`, and that laziness never
- * existed (objectui#5486): the `import()` named the barrel this file and
- * `App.tsx` already imported statically, so it could not move a module into
- * another chunk. objectui#5486 made the registration truthful by importing the
- * component directly, and left making the builder GENUINELY lazy to a separate
- * measured card, because it meant taking the `/studio` route off the static
- * import too.
- *
- * objectui#11798 is that card. The route and this entry now both reach the
- * builder through `./components/studioBuilder`, a console-local module that
- * nothing imports statically, so the `import()` is a boundary the bundler
- * honours: `BuilderLanding`, `StudioDesignSurface` and what only they reach load
- * when a Studio screen first renders. The PR records the eager closure before
- * and after, read from the build's own `dist/eager-closure.json`.
- *
- * The registry still holds `studio:builder` from the moment the console boots,
- * so `ComponentNavView` finds it as before; the entry renders a loading line
- * until the chunk arrives, the way the sibling `registerAccountComponents.tsx`
- * does for its lazy profile page.
+ * The registry holds `studio:builder` from the moment the console boots, so
+ * `ComponentNavView` finds it as before. Forwarding costs no chunk: the
+ * builder loads with the `/studio` route (objectui#11798).
  */
 
-import { lazy, Suspense } from 'react';
-import { registerAppComponent } from '@object-ui/app-shell';
-
-import { StudioBuilderLoading } from './components/StudioRoute';
-
-const BuilderLanding = lazy(() =>
-  import('./components/studioBuilder').then((m) => ({ default: m.BuilderLanding })),
-);
+import { Navigate } from 'react-router-dom';
+import { registerAppComponent, studioLandingPath } from '@object-ui/app-shell';
 
 registerAppComponent({
   ref: 'studio:builder',
   label: '应用构建',
   source: '@object-ui/console',
-  // `BuilderLanding` takes no props, so the query props `ComponentNavView`
-  // passes are not forwarded; it ignored them when it was registered directly.
-  component: () => (
-    <Suspense fallback={<StudioBuilderLoading />}>
-      <BuilderLanding />
-    </Suspense>
-  ),
+  // Takes no props: the query props `ComponentNavView` passes are not forwarded.
+  component: () => <Navigate to={studioLandingPath()} replace />,
 });

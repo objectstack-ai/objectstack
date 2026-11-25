@@ -50,6 +50,7 @@ import {
     CONTAINER_ISSUE_CODES,
     NESTED_EXPANSION_DEPTH_LIMIT,
     selectUnionBranches,
+    ZOD_UNION_DEFAULT_MESSAGE,
 } from '../shared/union-branch-policy';
 
 /**
@@ -131,32 +132,72 @@ function valueAtPath(input: unknown, path: unknown): unknown {
 }
 
 /**
+ * [#35433] zod's own message for a failed union — the text a union head carries
+ * when its schema declared no `error` of its own. {@link collectIssueFields}
+ * drops an explained head only when its message is exactly this, so a head
+ * carrying the schema's own sentence is never mistaken for filler.
+ *
+ * [#35500] Declared in `../shared/union-branch-policy.ts`, because the branch
+ * selection reads it too (a nested bare union of kinds is a kind mismatch);
+ * re-exported here, unchanged, for the pin in `zod-issues-to-fields.test.ts`,
+ * which holds it against a real failed union parse. The `/api` barrel
+ * re-exports `zodIssuesToFields` alone.
+ *
+ * The same literal and the same predicate as `@objectstack/metadata-protocol`'s
+ * `collectMetadataIssues` (#35400). They are two declarations rather than one
+ * import because that package can reach only `@objectstack/spec`'s public
+ * surface, and making this constant public is a contract decision neither card
+ * made; `union-branch-policy.cross-package-parity.test.ts` holds the two walks
+ * to the same drop instead.
+ */
+export { ZOD_UNION_DEFAULT_MESSAGE };
+
+/**
  * One issue → its `fields[]` entries, appended to `out`.
  *
- * An ordinary issue is one entry. An `invalid_union` is its own entry (zod's
- * bare `"Invalid input"`, mapped to `invalid_shape`) FOLLOWED by the entries of
- * the branches that explain it, with `field` resolved against the union's own
+ * An ordinary issue is one entry. An `invalid_union` is followed by the entries
+ * of the branches that explain it, with `field` resolved against the union's own
  * path — branch paths are relative to it.
  *
- * [#5389] An `invalid_key` / `invalid_element` behaves the same way one property
- * name over: its own entry (zod's `"Invalid key in record"`, also
+ * [#35433] The union's own entry — the head, `invalid_shape` — is DROPPED when
+ * two things hold together: the expansion appended at least one entry, and the
+ * head's message is exactly {@link ZOD_UNION_DEFAULT_MESSAGE}, zod's bare
+ * default for a failed union. Such a head says nothing the entries below it do
+ * not say better, so a refusal's `fields[]` holds located causes, read by
+ * `field` and `code`, never by position — at every depth, so a root head and a
+ * nested one go alike. The head is KEPT, ahead of what it explains, in every
+ * other case:
+ *
+ * - nothing below explains it — every branch a bare kind mismatch (since
+ *   #35500 that includes a member that is itself a bare union of kinds, so a
+ *   wrong-typed `where` answers ONE entry, not one per member), zod's
+ *   "matched multiple" `errors: []`, or the depth bound reached — so it is the
+ *   whole answer, and the only entry naming the slot the client sent;
+ * - its message is the schema's own sentence (a union declared with an `error`).
+ *   That sentence is a prescription, and it is often said nowhere else in the
+ *   list, so dropping the head would drop the fix.
+ *
+ * This is the rule the metadata envelope took on #35400, by the maintainer's
+ * ruling on #35433, so the two machine-read lists say the same thing about one
+ * value. It reverses the "strictly additive" design #5014 shipped, under which
+ * the head was always kept and only newly accompanied. The prose renderer
+ * (`formatZodIssue`) still keeps every head, as the parent line of its indented
+ * tree; `union-branch-policy.parity.test.ts` records that asymmetry.
+ *
+ * [#5389] An `invalid_key` / `invalid_element` descends the same way one
+ * property name over: its own entry (zod's `"Invalid key in record"`, also
  * `invalid_shape`) followed by the entries on `issue.issues`, whose paths are
- * likewise relative. The one difference from a union: those issues are not
+ * likewise relative. Two differences from a union: those issues are not
  * competing candidates, so they are NOT ranked or capped — every one of them is
  * a true statement about the value, and dropping any would be dropping a real
- * diagnosis rather than declining to guess.
- *
- * The union's entry is kept rather than replaced: it is the only entry naming
- * the slot the client sent, existing clients already read it, and when every
- * branch is uninformative it is still the whole answer. So the expansion is
- * strictly ADDITIVE — no entry that shipped before this changed is gone or
- * renumbered, only newly accompanied (ADR-0114: same `{field, code, message}`
- * shape as rest's `mapDataError`, which has never bounded the array's length).
+ * diagnosis rather than declining to guess; and the container's own entry is
+ * always KEPT, because its code is the one place that says the KEY was refused
+ * rather than the value under it.
  *
  * `seen` de-duplicates entries *within one top-level issue*: two branches that
- * reject the same key with the same words say it once. Union entries themselves
- * are exempt, since two same-path `"Invalid input"` entries can head genuinely
- * different sub-trees.
+ * reject the same key with the same words say it once. Expanded heads — union
+ * and container alike — are exempt, since two same-path wrapper entries can
+ * head genuinely different sub-trees.
  *
  * Deliberate divergence from the spec-side renderer: where it prints a trailing
  * "… and N more branches rejected this value", this emits nothing. That line is
@@ -210,23 +251,29 @@ function collectIssueFields(
         const key = JSON.stringify([entry.field, entry.code, entry.message]);
         if (seen.has(key)) return;
         seen.add(key);
+        out.push(entry);
+        return;
     }
-    out.push(entry);
-    if (!expandable) return;
 
     if (branches.length > 0) {
         // `omitted` is deliberately unread here — see the note above. The
         // renderer turns it into a trailing prose line; the wire has nowhere to
         // put a count that names no field.
         const { selected } = selectUnionBranches(branches);
+        const below: Array<{ field: string; code: FieldErrorCode; message: string; hint?: string }> = [];
         for (const branch of selected) {
             for (const nested of branch) {
-                collectIssueFields(nested, path, depth + 1, seen, input, inputProvided, out);
+                collectIssueFields(nested, path, depth + 1, seen, input, inputProvided, below);
             }
         }
+        // The head stays ahead of what it explains unless BOTH hold: something
+        // below explains it, and it says nothing of its own (see the docblock).
+        if (below.length === 0 || message !== ZOD_UNION_DEFAULT_MESSAGE) out.push(entry);
+        out.push(...below);
         return;
     }
 
+    out.push(entry);
     for (const nested of contained) {
         collectIssueFields(nested, path, depth + 1, seen, input, inputProvided, out);
     }
@@ -255,6 +302,10 @@ function collectIssueFields(
  * code: 'invalid_shape', message: 'Invalid input'}` on the wire while the branch
  * that says WHICH key is wrong — required-property and unknown-key prescriptions
  * alike — was produced and dropped. See {@link collectIssueFields}.
+ *
+ * [#35433] That bare head is now dropped wherever an entry below explains it,
+ * so `fields[0]` of such a refusal is the first located cause, not the
+ * `invalid_shape` line. Read entries by `field` and `code`, never by index.
  */
 export function zodIssuesToFields(
     issues: unknown,

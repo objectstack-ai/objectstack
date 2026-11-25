@@ -29,9 +29,12 @@ import {
   renderCapabilityMessage,
 } from '../utils/capability-preflight.js';
 import { collectAndLintDocs, type DocIssue } from '../utils/collect-docs.js';
-import { collectSeedFiles } from '../utils/bundle-seed-files.js';
+import { collectSeedFiles, datasetsOf } from '../utils/bundle-seed-files.js';
 import { collectConnectorSpecFiles } from '../utils/bundle-connector-spec-files.js';
 import { judgeSeedRecordValues } from '../utils/seed-record-values.js';
+import { evaluateValidationRules } from '@objectstack/objectql';
+import { resolveTenantFieldName } from '@objectstack/core';
+import { judgeSeedRowRefusals, seedRowPairsNotJudged } from '@objectstack/lint';
 import {
   printHeader,
   printKV,
@@ -1209,6 +1212,48 @@ export default class Validate extends Command {
         printError(`Seed record values the seed load refuses (${seedValueIssues.length} issue${seedValueIssues.length > 1 ? 's' : ''})`);
         for (const issue of seedValueIssues) console.log(chalk.red(`  ✗ ${issue.location}: ${issue.message} (${issue.code})`));
         this.exit(1);
+      }
+
+      // 3d-quater. [#35653] Seed RECORDS the seed load refuses — a record its own
+      //     object's validation rule refuses, and (#35486) a keyed record with
+      //     a blank key field — judged by the write path's own evaluator
+      //     (`evaluateValidationRules`, `@objectstack/objectql`), injected into
+      //     the walk (`judgeSeedRowRefusals`, `@objectstack/lint`). Graded as
+      //     the seed values above are: the load drops each such record, so the
+      //     config is refused here, naming the record and the rule. A pair the
+      //     record's own values cannot decide is counted, never refused.
+      //     `os build` runs the same call at its step 4a-0-bis.
+      const seedRowStack = authoringRuleUnionStack(result.data as Record<string, unknown>);
+      const seedRows = judgeSeedRowRefusals({
+        datasets: datasetsOf(result.data as Record<string, unknown>),
+        stack: seedRowStack,
+        evaluateValidationRules,
+        resolveTenantFieldName,
+      });
+      if (seedRows.refusals.length > 0) {
+        if (flags.json) {
+          await emitJson({
+            valid: false,
+            errors: seedRows.refusals,
+            warnings: warningsSoFar(),
+            conversions: conversionNotices,
+            duration: timer.elapsed(),
+          });
+          this.exit(1);
+        }
+        // One line per refusal; the heading counts records (a record two rules refuse is one record).
+        const n = new Set(seedRows.refusals.map((refusal) => refusal.location)).size;
+        console.log('');
+        printError(`Seed records the seed load refuses (${n} record${n > 1 ? 's' : ''})`);
+        for (const refusal of seedRows.refusals) console.log(chalk.red(`  ✗ ${refusal.location}: ${refusal.message}`));
+        this.exit(1);
+      }
+      const seedPairsNotJudged = seedRowPairsNotJudged(seedRows);
+      if (seedPairsNotJudged > 0 && !flags.json) {
+        console.log(chalk.dim(
+          `  ${seedPairsNotJudged} seed record × validation rule pair(s) not judged here: the rule reads a value ` +
+            'the load decides (a reference, a default, a formula or roll-up, a hook, the stored row); the load still judges them',
+        ));
       }
 
       // 3e. ADR-0141 D2, author side — every `manifest.dependencies` range of

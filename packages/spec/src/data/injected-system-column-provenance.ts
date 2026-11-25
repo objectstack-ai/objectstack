@@ -251,8 +251,9 @@ export const SYNC_PROVENANCE_FIELD_DEFS = {
     readonly: true,
     system: true,
     description:
-      'When a pull found this row gone from the source (ADR-0153 D3). Not written yet: the delete marking that '
-      + 'stamps it has not landed, so it is empty on every row.',
+      'When a pull found this row deleted at the source (ADR-0153 D3): gone from a complete full read, or carrying '
+      + "the source's deletedField value. Cleared when a later pull reads the row again; empty under deletePolicy "
+      + "'ignore'. Written by the pull only.",
   },
 } satisfies Record<SyncProvenanceColumn, Record<string, unknown>>;
 

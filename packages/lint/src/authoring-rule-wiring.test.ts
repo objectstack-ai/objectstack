@@ -152,6 +152,12 @@ const LINT_IMPORT_RATCHET: Readonly<Record<string, string>> = {
     'Reads the table; runs nothing.',
   splitBySeverity:
     'Pure partition of a finding list into gating vs advisory. Carries no rule identity at all.',
+  judgeSeedRowRefusals:
+    'The seed-record walk `os validate` / `os build` run beside the seed-value judge: it needs the ' +
+    "write path's evaluator (`evaluateValidationRules`, `@objectstack/objectql`), which only a door " +
+    'that may import the runtime can inject, so it is not a registry entry. Gating like the seed values.',
+  seedRowPairsNotJudged:
+    'Pure count over `judgeSeedRowRefusals` output, for the counted note. Carries no rule identity.',
   lintDataModel:
     "`os lint`'s data-model best-practice sweep — see DIRECT_CALL_RATCHET above for why it is " +
     'deliberately lint-only. It relocated into `@objectstack/lint` with the rest of the rules in ' +

@@ -473,6 +473,9 @@ const ordersPull: Mapping = {
     input: { method: 'GET', path: '/orders' },
     recordsPath: 'body.items',
     watermark: { field: 'updated_at', param: 'updated_since' },
+    // An incremental pull never sees an absent record: it states how it learns of
+    // a delete (a soft-delete field it reads, or deletePolicy: 'ignore').
+    deletedField: 'is_deleted',
   },
 };
 

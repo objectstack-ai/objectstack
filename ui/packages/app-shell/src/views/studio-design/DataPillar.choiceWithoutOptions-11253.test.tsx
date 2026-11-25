@@ -96,6 +96,7 @@ vi.mock('@object-ui/react', async (importOriginal) => {
 
 // The source reaches a dynamic import of it: its first load is paid at collection (`check:test-source-alias`).
 import '@objectstack/lint';
+import '@object-ui/plugin-detail';
 import { DataPillar } from './StudioDesignSurface';
 import { StudioSaveHarness, pressStudioSave } from './__tests__/studioSaveHarness';
 import { addFieldFromFormToolbar } from './__tests__/dataPillarAddField';
@@ -154,7 +155,7 @@ function heldOptionsLine(label: string): string {
 async function addFieldAndType(typeLabel: RegExp): Promise<string> {
   render(
     <StudioSaveHarness><MemoryRouter initialEntries={['/studio/com.example.showcase/data']}>
-      <DataPillar packageId="com.example.showcase" />
+      <DataPillar objectName="showcase_task" packageId="com.example.showcase" />
     </MemoryRouter></StudioSaveHarness>,
   );
   fireEvent.click(await screen.findByRole('button', { name: 'Field layout' }));
@@ -207,7 +208,7 @@ describe('Studio data page — an object that already stores an empty select (ob
     served = storedEmptySelect;
     render(
       <StudioSaveHarness><MemoryRouter initialEntries={['/studio/com.example.showcase/data']}>
-        <DataPillar packageId="com.example.showcase" />
+        <DataPillar objectName="showcase_task" packageId="com.example.showcase" />
       </MemoryRouter></StudioSaveHarness>,
     );
     fireEvent.click(await screen.findByRole('button', { name: 'Field layout' }));

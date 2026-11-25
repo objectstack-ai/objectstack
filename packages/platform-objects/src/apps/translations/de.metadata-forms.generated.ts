@@ -817,6 +817,10 @@ export const deMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "Spalten der verknüpften Liste",
         helpText: "Spalten der verknüpften Liste dieser Beziehung auf der Detailseite des übergeordneten Datensatzes, als Feldnamen dieses (untergeordneten) Objekts, z. B. name, status. Nicht gesetzt: vom untergeordneten Objekt abgeleitet. Nur Namen – Bezeichnungen, Zelltypen und Formatierung stammen aus den Felddefinitionen des untergeordneten Objekts."
       },
+      inlineEdit: {
+        label: "Inline Edit",
+        helpText: "How the parent's form edits this child's rows when a field group of the parent names this child (fieldGroups[].relatedList). Unset: picked from this object's fields."
+      },
       inlineTitle: {
         label: "Inline-Titel",
         helpText: "Titel des Inline-Master-Detail-Rasters im übergeordneten Datensatz."
@@ -1775,6 +1779,18 @@ export const deMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       dateRange: {
         label: "Datumsbereich",
         helpText: "Der Zeitraum, mit dem das Dashboard öffnet, und ob Betrachter selbst einen Zeitraum wählen dürfen."
+      },
+      "dateRange.field": {
+        label: "Date Field",
+        helpText: "The date field the period filters on. Leave it empty to use the creation date."
+      },
+      "dateRange.defaultRange": {
+        label: "Default Period",
+        helpText: "The period the dashboard opens with."
+      },
+      "dateRange.allowCustomRange": {
+        label: "Allow Custom Range",
+        helpText: "Let viewers pick their own start and end dates."
       },
       globalFilters: {
         label: "Globale Filter",
@@ -3141,6 +3157,49 @@ export const deMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       "triggerConditions.value": {
         label: "Wert"
+      }
+    }
+  },
+  ai_context: {
+    label: "KI-Kontextpaket",
+    sections: {
+      basics: {
+        label: "Basics",
+        description: "The pack's identity and the object whose records it reads."
+      },
+      material: {
+        label: "Material",
+        description: "What of the record is handed to the model. Each picker offers the fields of the root object, or of the related list's own object."
+      }
+    },
+    fields: {
+      name: {
+        label: "Name",
+        helpText: "Unique identifier (snake_case). A skill's context key and the get_record_context tool name the pack by it."
+      },
+      label: {
+        label: "Label",
+        helpText: "Display name, the header of the tool answer. A pack has no description: write its purpose here."
+      },
+      object: {
+        label: "Root object",
+        helpText: "The root object: the pack reads one record of it."
+      },
+      fields: {
+        label: "Fields",
+        helpText: "The root object's fields handed to the model, in order (at most 30). A lookup among them is answered with the name of the record it points at."
+      },
+      related: {
+        label: "Related lists",
+        helpText: "Child lists that point at the record, one level deep (at most 3). Each list names its child object, the reference field that points at the root, and the columns read for each row (at most 10); with no columns a row is read by its name."
+      },
+      body: {
+        label: "Body",
+        helpText: "The one long-text field read as the record's body."
+      },
+      "body.field": {
+        label: "Body field",
+        helpText: "A long-text field of the root object (textarea, markdown, html, richtext). Any other field is reported when the pack is saved, and the pack then carries no body."
       }
     }
   }

@@ -69,6 +69,9 @@ const ja = {
     autofillNoCurrency: '{{field}}は入力されませんでした。選択した金額は {{amount}} ですが、ここではまだ通貨が選択されていません。通貨を選択してから{{field}}を入力してください。',
     autofillCurrencyUnread: '{{field}}は入力されませんでした。選択した金額は {{amount}} ですが、ここでの通貨を読み取れませんでした。通貨を確認してから{{field}}を入力してください。',
     autofillKept: '{{field}}は以前の値のままです。',
+    autofillNowSameCurrency: '選択時に{{field}}は入力されませんでした。レコードは現在 {{to}} です。もう一度選択すると {{amount}} が入力されます。',
+    autofillNowSameCurrencyHeld: '選択時に{{field}}は入力されず、以前の値のままです。レコードは現在 {{to}} です。{{field}}を空にしてからもう一度選択すると {{amount}} が入力されます。',
+    autofillCopiedUnder: '{{field}}は {{amount}} として入力されましたが、レコードは現在 {{to}} です。必要に応じて {{to}} で{{field}}を入力してください。',
   },
   common: {
     // objectui#13461 — a disclosure toggle's name (the tree-view node toggle).
@@ -636,6 +639,8 @@ const ja = {
       notConfirmedRecords: "これらのレコードについて操作からの報告がありません。現在の値を確認してください:",
       resultRefused: " · 拒否 {{count}}",
       refusedRecords: "操作はこれらのレコードを拒否しました:",
+      resultPaused: " · 入力待ち {{count}}",
+      pausedRecords: "これらのレコードは入力を待っています。画面が順番に開きます:",
       aggregateUnreadable: "操作は終了しましたが、結果を読み取れなかったため、どのレコードが変更されたかは不明です。閉じると、一覧に現在の値が表示されます。",
       retry: "再試行",
       downloadErrorCsv: "エラー CSV をダウンロード",
@@ -676,6 +681,7 @@ const ja = {
       needsWholeRows:
         "グループ化にはすべてのレコードが必要ですが、このグリッドにはその一部のページしか渡されていないため、グループの件数を数えられません。すべてのレコードを渡すか、queryGroupHeaders を実装したデータソースからグリッドに読み込ませてください。",
       draftOnly: "{{fields}} ではグループ化されていません：公開するまで下書きにのみ存在します。",
+      moreGroupsNotLoaded: "一部のグループは読み込まれていません：このビューのグループ数はサーバーが 1 回の読み取りで返す数を超えているため、一部のみ表示しています。",
     },
     // objectui#4024 — column-footer aggregate prefixes, keyed by the spec's
     // `ColumnSummary` vocabulary. `pattern` owns the label/value join so this
@@ -1771,6 +1777,12 @@ const ja = {
       noCategoryAxis: "チャートのカテゴリ軸が必要です — オブジェクト連携チャートは軸を推測しません。次のいずれかを宣言してください：",
     },
   },
+  // objectstack#36906 — the × of an app page opened from a Studio list.
+  studioReturn: {
+    close: 'Studio に戻る',
+    closeLabel: '閉じて Studio の一覧に戻る',
+    leaveConfirm: '保存せずに移動しますか？保存していない変更は失われます。',
+  },
   dashboard: {
     // objectui#7063 — the DEFAULT empty state every dashboard widget renders
     // when its query SUCCEEDED and returned nothing. It replaced the terse
@@ -2443,6 +2455,14 @@ const ja = {
       changesDrafted: "下書きとして保存",
       changesFailed: "未適用",
       discussing: "表示中: {{target}}",
+      focus: {
+        pin: "このレコードについて質問し続ける",
+        pinned: "質問対象: {{target}}",
+        remove: "このレコードについての質問をやめる",
+        switchPrompt: "代わりに「{{target}}」について質問しますか？",
+        switchAccept: "切り替える",
+        switchDecline: "このまま",
+      },
       changeVerb: {
         createObject: "オブジェクトを作成",
         addField: "項目を追加",
@@ -2487,6 +2507,7 @@ const ja = {
       unavailableTitle: "AI アシスタントを利用できません",
       unavailableDescription: "このデプロイでは AI アシスタントが有効になっていません。それ以外の機能は通常どおり動作します。",
       unavailableError: "AI サービスに接続できませんでした。一時的にオフラインの可能性があります — 再試行するか、ホームに戻ってください。",
+      unavailableErrorDesktop: "AI サービスに接続できませんでした。一時的にオフラインの可能性があります — 再試行するか、アプリのスタートページに戻ってください。",
       unavailableRetry: "再試行",
       unavailableHome: "ホームに戻る",
       dock: {
@@ -2595,36 +2616,32 @@ const ja = {
       description: "同僚が使い始める前に設定しておく項目です。どの項目も後から「セットアップ」で変更できます。",
       progress: "{{total}} 件中 {{done}} 件完了",
       dismiss: "チェックリストを非表示",
+      // objectstack#36739 — the popover's own action: hides the pill and Home's card here; its X only closes.
+      hideHere: "このデバイスで非表示にする",
       showDone: "完了した項目を表示（{{done}}）",
-      showDoneSplit: "完了した項目を表示（必須 {{required}} · 任意 {{optional}}）",
       hideDone: "完了した項目を折りたたむ",
       optional: "任意",
       set: "設定",
       change: "変更",
       view: "表示",
-      confirm: "確定",
       cancel: "キャンセル",
       continue: "続ける",
-      prefilled: "未設定の項目にはブラウザーから推測した値が入っています。確定するまで何も保存されません。",
-      organizationName: {
-        title: "組織に名前を付ける",
-        todo: "作成時の名前「{{name}}」のままです。",
-        action: "名前を変更",
+      showList: "リストを表示",
+      // objectstack#36739 — the one required platform row: one form, one save.
+      organizationBasics: {
+        title: "組織の基本情報",
+        todo: "組織名、既定の言語と国/地域、タイムゾーン、通貨をまとめて保存します。",
+        name: "組織名",
+        nameRequired: "組織名を入力してください。",
+        prefilled: "未設定の項目はブラウザーの設定から提案しています。「保存」を押すまで何も保存されません。",
+        save: "保存",
+        saved: "組織の基本情報を保存しました",
       },
-      languageCountry: {
-        title: "既定の言語と国",
-        todo: "現在は {{language}}、{{country}} です。確定するか、別の値を選んでください。",
-        saved: "既定の言語と国を保存しました",
-      },
-      timezone: {
-        title: "システムのタイムゾーン",
-        todo: "プラットフォームの既定値 {{current}} のままです。数式での「今日」の意味や、レポートで日付をまとめる方法を決めます。",
-        saved: "システムのタイムゾーンを {{zone}} に設定しました",
-      },
-      currency: {
-        title: "既定の通貨",
-        todo: "未設定のため、金額は通貨記号なしで表示されます。",
-        saved: "既定の通貨を {{currency}} に設定しました",
+      // The sidebar's progress pill, in every app (objectstack#36739).
+      pill: {
+        label: "はじめに",
+        count: "{{done}}/{{total}}",
+        aria: "はじめに: {{total}} 件中 {{done}} 件完了",
       },
       mail: {
         title: "メール配信",
@@ -2859,11 +2876,12 @@ const ja = {
       resetViewTitle: "このビュー本来のフィルター、検索、並べ替え、グループ、列の配置、非表示フィールド、密度、レイアウト、行の色、行番号、インライン編集に戻します。ピン留めしたビュー、お気に入り、レコードの開き方は変わりません。変わるのはあなたのリストだけです。",
       personalized: "個人設定あり",
       personalizedHeading: "このビューと異なる項目",
-      // objectstack#35955 — a list's unsaved changes: Discard and Save.
+      // objectstack#35955 — a list's unsaved changes: Reset and Update view
+      // (objectstack#36737, the view's own actions, as Twenty's).
       draft: {
-        discard: "破棄",
+        discard: "リセット",
         discardTitle: "一覧をビュー本来の状態に戻します：フィルター、並べ替え、グループ化、列、レイアウト。列幅と行の高さはそのままです。",
-        save: "保存",
+        save: "ビューを更新",
         heading: "未保存の変更",
         partSeparator: "、",
         saveToView: "このビューに保存",
@@ -3721,7 +3739,7 @@ const ja = {
     build: {
       title: "アプリを作る",
       noCapability: "このシステムではアプリの作成はできません — 「メタデータ管理」権限が必要ですが、お使いのアカウントにはありません。",
-      inStudio: "Studio で新規作成",
+      inStudio: "空のアプリを新規作成",
     },
     template: {
       title: "テンプレートから始める",
@@ -3860,7 +3878,7 @@ const ja = {
       allApps: "すべてのアプリ",
       editAppInStudio: "Studio で {{app}} を編集",
       openAppInStudio: "Studio で {{app}} を表示",
-      backToHome: "ホームに戻る",
+      backToHome: "アプリのスタートページに戻る",
       settings: "システム設定",
       productHome: "{{product}} ホーム",
       addApp: 'アプリを追加',
@@ -4129,6 +4147,8 @@ const ja = {
       settings: "レポート設定",
       pendingDraft: "このレポートには未公開の変更があります。上で公開または破棄してから保存してください。",
       nameTaken: "この名前から作れる識別子はすべて使用済みです。レポートに別の名前を付けてから保存してください。",
+      // objectstack#36906 — a report made from Studio's report list that could not be saved in the app's package.
+      savedOutsideApp: "アプリのカスタマイズパッケージをここでは使用できないため、このレポートはアプリのパッケージの外に保存されました。そのため Studio の一覧には表示されません。",
       adminOnlyTitle: "レポートを作成できるのはワークスペース管理者のみです",
       adminOnly: "レポートはワークスペースの全員に共有されるため、管理者が作成します。",
       designModeOnTitle: "先にレイアウトのデザインを終えてください",
@@ -4670,6 +4690,7 @@ const ja = {
     tool: {
       aggregate_data: "関連データを集計する",
       get_record: "このレコードを読み込む",
+      get_record_context: "このレコードの資料を読む",
       list_datasets: "利用できる指標を確認する",
       query_data: "必要なデータを照会する",
       query_dataset: "指標で照会する",
@@ -4984,6 +5005,10 @@ const ja = {
     actComment: 'コメント',
     actSystemNote: 'システムからのお知らせ',
     stepProgress: '承認ステップ',
+    outcomeWaiting: '「{{step}}」に進み、判断待ちです',
+    outcomeNow: '「{{step}}」に進みました：{{decision}}',
+    outcomeEndedAt: '「{{step}}」に進み、承認は終了しました：{{decision}}',
+    outcomeEndedHere: '承認はここで終了しました',
     prevRequest: '前へ',
     nextRequest: '次へ',
     positionOf: 'リクエスト {{index}} / {{total}} 件',
@@ -5134,7 +5159,12 @@ const ja = {
     bulkRejected: '{{count}} 件を却下しました',
     bulkRejected_one: '{{count}} 件を却下しました',
     bulkRejected_other: '{{count}} 件を却下しました',
-    bulkPartial: '{{ok}} 件成功、{{fail}} 件失敗：{{which}}',
+    bulkPartialSummary: '{{ok}} 件成功、{{fail}} 件失敗',
+    bulkFailureLine: '{{title}}：{{reason}}',
+    bulkFailuresShowAll: 'すべて表示（{{n}}）',
+    bulkFailuresTitle: '未処理：{{n}} 件',
+    bulkFailuresBody: '以下のリクエストは変更されていません。それぞれに理由が表示されています。',
+    close: '閉じる',
     rejectOneTitle: '「{{title}}」を却下しますか？',
     rejectOneBody: 'リクエストを却下し、申請者に通知します。',
     rejectTitle: 'このリクエストを却下しますか？',
@@ -5309,6 +5339,9 @@ const ja = {
         skill: 'AI スキル {{count}}',
         skill_one: 'AI スキル {{count}}',
         skill_other: 'AI スキル {{count}}',
+        ai_context: 'AI コンテキストパック {{count}}',
+        ai_context_one: 'AI コンテキストパック {{count}}',
+        ai_context_other: 'AI コンテキストパック {{count}}',
         datasource: 'データソース {{count}}',
         datasource_one: 'データソース {{count}}',
         datasource_other: 'データソース {{count}}',

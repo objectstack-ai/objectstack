@@ -12,6 +12,9 @@
  * affordances it draws from the grid's authoring context.
  */
 
+// Paid at collection, not inside a case's clock (check:test-source-alias).
+import '@objectstack/lint';
+import '@object-ui/plugin-detail';
 import '@testing-library/jest-dom/vitest';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 // Module scope as well as in the `vi.mock` factory below: the cold transform is paid
@@ -102,7 +105,7 @@ async function renderPillar(object: Record<string, unknown>) {
   servedObject = object;
   render(
     <MemoryRouter initialEntries={['/studio/com.example.plan/data']}>
-      <DataPillar packageId="com.example.plan" />
+      <DataPillar packageId="com.example.plan" objectName={String(object.name)} />
     </MemoryRouter>,
   );
   await waitFor(() => expect(screen.getByTestId('records-panel')).toBeInTheDocument(), { timeout: 8000 });
