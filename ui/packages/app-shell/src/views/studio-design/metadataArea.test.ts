@@ -13,6 +13,8 @@ import { describe, it, expect } from 'vitest';
 import {
   AREA_PILLAR_FOR_TYPE,
   STUDIO_ALL_PACKAGES_SEGMENT,
+  areaDesignerItemOf,
+  areaItemOpensDesignerPage,
   areaItemOpensFormEditor,
   areaItemPillarPath,
   areaLocationRedirect,
@@ -80,10 +82,26 @@ describe('areaLocationRedirect — the query names the leg', () => {
   });
 
   it('the package-less scope is never written into `?package=`: it lands on its flows (objectstack#36899)', () => {
-    expect(areaLocationRedirect('~org', '', '')).toBe('/studio/~org/automations');
-    expect(areaLocationRedirect('~org', 'flow', '')).toBe('/studio/~org/automations');
-    expect(areaLocationRedirect(STUDIO_ALL_PACKAGES_SEGMENT, 'flow', '?package=~org')).toBe('/studio/~org/automations');
-    expect(areaLocationRedirect(PKG, 'flow', '?package=~org')).toBe('/studio/~org/automations');
+    // objectstack#36903 — on its own leg of the area, with the scope's source filter.
+    const LIST = '/studio/~org/metadata/flow?source=runtime';
+    expect(areaLocationRedirect('~org', '', '')).toBe(LIST);
+    expect(areaLocationRedirect('~org', 'flow', '')).toBe(LIST);
+    expect(areaLocationRedirect('~org', 'object', '?source=runtime')).toBe(LIST);
+    expect(areaLocationRedirect('~org', 'flow/new', '?source=runtime')).toBe(LIST);
+    expect(areaLocationRedirect(STUDIO_ALL_PACKAGES_SEGMENT, 'flow', '?package=~org')).toBe(LIST);
+    expect(areaLocationRedirect(PKG, 'flow', '?package=~org')).toBe(LIST);
+    expect(areaLocationRedirect(PKG, 'flow/f1', '?package=~org&tab=history')).toBe('/studio/~org/metadata/flow/f1?tab=history&source=runtime');
+  });
+
+  it('objectstack#36903 — the scope\'s leg settles on its flows, and re-roots a link naming a package', () => {
+    expect(areaLocationRedirect('~org', 'flow', '?source=runtime')).toBeNull();
+    expect(areaLocationRedirect('~org', 'flow/f1', '?source=runtime&tab=source')).toBeNull();
+    expect(areaLocationRedirect('~org', 'flow/f1/history', '?source=runtime')).toBeNull();
+    // The filter is the scope's meaning: a URL without it gets it.
+    expect(areaLocationRedirect('~org', 'flow/f1', '')).toBe('/studio/~org/metadata/flow/f1?source=runtime');
+    // A packaged row reached by clearing the filter opens in its package.
+    expect(areaLocationRedirect('~org', 'flow/f1', `?package=${PKG}`)).toBe(`/studio/${PKG}/metadata/flow/f1?package=${PKG}`);
+    expect(areaLocationRedirect('~org', 'flow', '?package=all')).toBe('/studio/~all/metadata/flow?package=all');
   });
 });
 
@@ -92,10 +110,10 @@ describe('areaItemPillarPath — a pillar type opens its pillar', () => {
   const open = (type: string, q = '', packageId: string | null = PKG) =>
     areaItemPillarPath({ packageId, type, name: 'n_1', search: search(q) });
 
-  it('object, flow and permission open their pillar with `?surface=`', () => {
+  it('object and permission open their pillar with `?surface=`', () => {
+    // objectstack#36903 — a flow opens its designer on its own address.
     const expected: Record<string, string> = {
       object: 'data',
-      flow: 'automations',
       permission: 'access',
     };
     expect(AREA_PILLAR_FOR_TYPE).toEqual(expected);
@@ -110,17 +128,17 @@ describe('areaItemPillarPath — a pillar type opens its pillar', () => {
 
   it('every other type opens the generic item page', () => {
     // objectstack#36502 — page, dashboard, report and view lost their pillar with Interfaces.
-    for (const type of ['translation', 'email_template', 'agent', 'position', 'sharing_rule', 'app', 'page', 'dashboard', 'report', 'view']) {
+    for (const type of ['flow', 'translation', 'email_template', 'agent', 'position', 'sharing_rule', 'app', 'page', 'dashboard', 'report', 'view']) {
       expect(open(type), type).toBeNull();
     }
   });
 
   it('the cross-package leg, the environment scope and `?review=1` open the generic page', () => {
-    expect(open('flow', '', null)).toBeNull();
+    expect(open('object', '', null)).toBeNull();
     expect(open('permission', '?scope=environment')).toBeNull();
-    expect(open('flow', '?review=1')).toBeNull();
+    expect(open('object', '?review=1')).toBeNull();
     // Control: the same item without them opens the pillar.
-    expect(open('flow', '?review=0')).not.toBeNull();
+    expect(open('object', '?review=0')).not.toBeNull();
   });
 });
 
@@ -160,5 +178,41 @@ describe('areaItemOpensFormEditor — a read-only package’s dataset opens its 
     // CONTROL: a type no editor customizes stays on the generic page.
     expect(areaItemOpensFormEditor(at('flow', true))).toBe(false);
     expect(areaItemOpensFormEditor(at('object', true))).toBe(false);
+  });
+});
+
+describe('areaItemOpensDesignerPage — a flow opens its designer full-screen (objectstack#36903)', () => {
+  const at = (type: string, q = '', packageId: string | null = PKG, orgScope = false) =>
+    areaItemOpensDesignerPage({ packageId, type, search: new URLSearchParams(q), orgScope });
+
+  it('a flow on a package\'s leg, and on the package-less scope\'s', () => {
+    expect(at('flow')).toBe(true);
+    expect(at('flow', '?source=runtime', null, true)).toBe(true);
+  });
+
+  it('not the cross-package leg, the environment scope or a draft review; not another type', () => {
+    expect(at('flow', '', null)).toBe(false);
+    expect(at('flow', '?scope=environment')).toBe(false);
+    expect(at('flow', '?review=1')).toBe(false);
+    expect(at('object')).toBe(false);
+    expect(at('object', '', null, true)).toBe(false);
+    // Control: a review value other than the one the item page acts on.
+    expect(at('flow', '?review=0')).toBe(true);
+  });
+});
+
+describe('areaDesignerItemOf — the copilot reads the open flow off its address (objectstack#36903)', () => {
+  it('names the flow of a package\'s or the scope\'s designer address, its `/history` too', () => {
+    expect(areaDesignerItemOf(`/studio/${PKG}/metadata/flow/f_1`, PKG)).toEqual({ type: 'flow', name: 'f_1' });
+    expect(areaDesignerItemOf(`/studio/${PKG}/metadata/flow/f_1/history`, PKG)).toEqual({ type: 'flow', name: 'f_1' });
+    expect(areaDesignerItemOf('/studio/~org/metadata/flow/a%3Ab', '~org')).toEqual({ type: 'flow', name: 'a:b' });
+  });
+
+  it('names nothing for a list, another type, the cross-package leg or a pillar', () => {
+    expect(areaDesignerItemOf(`/studio/${PKG}/metadata/flow`, PKG)).toBeNull();
+    expect(areaDesignerItemOf(`/studio/${PKG}/metadata/dashboard/d`, PKG)).toBeNull();
+    expect(areaDesignerItemOf('/studio/~all/metadata/flow/f_1', '~all')).toBeNull();
+    expect(areaDesignerItemOf(`/studio/${PKG}/data`, PKG)).toBeNull();
+    expect(areaDesignerItemOf(`/studio/${PKG}/metadata/flow/f_1`, undefined)).toBeNull();
   });
 });

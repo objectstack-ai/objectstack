@@ -18,6 +18,11 @@
  * whose `_packageId` equals it, and the unscoped list returns every row. Each
  * package-less case has its packaged control (the read-only package below
  * stays read-only, as objectui#11124 pins at the pillar).
+ *
+ * objectstack#36903 — the scope's flows live in its own leg of the "All
+ * metadata" area: the list at `/studio/~org/metadata/flow?source=runtime`, a
+ * flow full-screen at `/studio/~org/metadata/flow/<name>?source=runtime`; the
+ * old `/studio/~org/automations` addresses redirect there.
  */
 
 import '@testing-library/jest-dom/vitest';
@@ -210,7 +215,7 @@ function LocationProbe() {
 /** A route change into the package-less scope, the surface left mounted. */
 function OrgScopeDoor() {
   const navigate = useNavigate();
-  return <button type="button" aria-label="test door: package-less scope" data-testid="org-scope-door" onClick={() => navigate('/studio/~org/automations')} />;
+  return <button type="button" aria-label="test door: package-less scope" data-testid="org-scope-door" onClick={() => navigate(ORG_CLONE)} />;
 }
 
 function renderAt(url: string) {
@@ -219,6 +224,7 @@ function renderAt(url: string) {
       <LocationProbe />
       <OrgScopeDoor />
       <Routes>
+        <Route path="/studio/:packageId/metadata/*" element={<StudioDesignSurface area="metadata" />} />
         <Route path="/studio/:packageId/:tab" element={<StudioDesignSurface />} />
       </Routes>
     </MemoryRouter>,
@@ -226,6 +232,10 @@ function renderAt(url: string) {
 }
 
 const location = () => screen.getByTestId('location').textContent ?? '';
+
+/** objectstack#36903 — the scope's list and the clone's designer, on the scope's leg of the area. */
+const ORG_LIST = '/studio/~org/metadata/flow?source=runtime';
+const ORG_CLONE = '/studio/~org/metadata/flow/qa_urgent_alert_clone?source=runtime';
 
 /**
  * The canvas's own status pill. With the `_status` probe answered "absent" it
@@ -241,20 +251,21 @@ async function openedFlow(name: string): Promise<void> {
 }
 
 describe('the package-less scope lists a package-less flow and opens it editable (objectui#11553)', () => {
-  it('lists the clone and none of the packaged flows', async () => {
-    renderAt('/studio/~org/automations');
+  it('opens the clone on its address, read unscoped: a package-scoped read cannot see a package-less row', async () => {
+    renderAt(ORG_CLONE);
     await openedFlow('qa_urgent_alert_clone');
 
-    expect(screen.getByRole('button', { name: /QA urgent alert clone/ })).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: /Urgent task alert/ })).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: /Daily digest/ })).not.toBeInTheDocument();
-    // The unscoped reads: a package-scoped one cannot see a package-less row.
     expect(mockClient.list).toHaveBeenCalledWith('flow');
     expect(mockClient.list).not.toHaveBeenCalledWith('flow', expect.objectContaining({ packageId: expect.anything() }));
   });
 
-  it('opens it editable, and an edit saves a draft bound to no package', async () => {
+  it('the old scope address lands on the scope\'s flow list', async () => {
     renderAt('/studio/~org/automations');
+    await waitFor(() => expect(location()).toBe(ORG_LIST), { timeout: 8000 });
+  });
+
+  it('opens it editable, and an edit saves a draft bound to no package', async () => {
+    renderAt(ORG_CLONE);
     await openedFlow('qa_urgent_alert_clone');
 
     const toggle = screen.getByRole('switch');
@@ -271,17 +282,18 @@ describe('the package-less scope lists a package-less flow and opens it editable
   });
 
   it('offers its one page, no Create app, no package copilot, and names the scope beside 「‹ Back to app」', async () => {
-    renderAt('/studio/~org/automations');
+    renderAt(ORG_CLONE);
     await openedFlow('qa_urgent_alert_clone');
 
     // objectstack#36899 — the left menu: the scope's flows are its current
     // entry; no package pillar, area or Interfaces page is offered.
     const menu = within(screen.getByTestId('studio-menu'));
     const flows = menu.getByTestId('studio-menu-entry-orgFlows');
-    expect(flows).toHaveAttribute('href', '/studio/~org/automations');
+    expect(flows).toHaveAttribute('href', ORG_LIST);
     expect(flows).toHaveAttribute('aria-current', 'page');
     for (const a of menu.getAllByRole('link')) {
-      expect(a.getAttribute('href')).not.toMatch(/^\/studio\/~org\/(data|access|interfaces|metadata)/);
+      expect(a.getAttribute('href')).not.toMatch(/^\/studio\/~org\/(data|access|interfaces|automations)/);
+      expect(a.getAttribute('href')).not.toMatch(/^\/studio\/~org\/metadata\/(?!flow)/);
     }
     expect(menu.queryByTestId('studio-menu-entry-owd')).toBeNull();
     expect(menu.queryByTestId('studio-menu-entry-diagnostics')).toBeNull();
@@ -294,10 +306,9 @@ describe('the package-less scope lists a package-less flow and opens it editable
     expect(screen.queryByTitle('New automation')).not.toBeInTheDocument();
   });
 
-  it('a package-less scope URL on another pillar lands on its one pillar', async () => {
+  it('a package-less scope URL on another pillar lands on its flow list', async () => {
     renderAt('/studio/~org/data');
-    await waitFor(() => expect(location()).toBe('/studio/~org/automations'));
-    await openedFlow('qa_urgent_alert_clone');
+    await waitFor(() => expect(location()).toBe(ORG_LIST), { timeout: 8000 });
   });
 });
 
@@ -308,38 +319,33 @@ describe('the deep link to a package-less flow opens that flow, not another (obj
 
     await openedFlow('qa_urgent_alert_clone');
     expect(screen.queryByTitle('API name: aa_first_org_flow')).not.toBeInTheDocument();
-    expect(location()).toBe('/studio/~org/automations?surface=flow%3Aqa_urgent_alert_clone');
+    expect(location()).toBe(ORG_CLONE);
   });
 
   it('the measured link, through the showcase pillar: lands on the package-less scope, the clone open and editable', async () => {
     renderAt(`/studio/${SHOWCASE}/automations?surface=flow%3Aqa_urgent_alert_clone`);
 
-    await waitFor(() => expect(location()).toBe('/studio/~org/automations?surface=flow%3Aqa_urgent_alert_clone'), {
-      timeout: 8000,
-    });
+    await waitFor(() => expect(location()).toBe(ORG_CLONE), { timeout: 8000 });
     await openedFlow('qa_urgent_alert_clone');
     expect(screen.getByRole('switch')).toBeEnabled();
     // The defect's own signature: the package's first flow was opened instead.
     expect(mockClient.layered).not.toHaveBeenCalledWith('flow', 'showcase_urgent_task_alert');
   });
 
-  it('a link naming a flow no rail holds opens no other flow, and says so', async () => {
+  it('a link naming a flow nowhere held opens no other flow, and says so', async () => {
     renderAt(`/studio/${SHOWCASE}/automations?surface=flow%3Anobody_has_this`);
 
     await screen.findByText('The link names flow “nobody_has_this”, which is not here.', undefined, { timeout: 8000 });
-    expect(location()).toBe(`/studio/${SHOWCASE}/automations?surface=flow%3Anobody_has_this`);
+    expect(location()).toBe(`/studio/${SHOWCASE}/metadata/flow/nobody_has_this?package=${SHOWCASE}`);
     expect(mockClient.layered).not.toHaveBeenCalled();
-    // The rail still lists the package's flows to pick from.
-    expect(screen.getByRole('button', { name: /Urgent task alert/ })).toBeInTheDocument();
   });
 });
 
 describe('the packaged control: a read-only package stays read-only (objectui#11124)', () => {
-  it('lists the package’s flows, not the clone, and offers no edit', async () => {
-    renderAt(`/studio/${SHOWCASE}/automations`);
+  it('opens the package’s flow and offers no edit', async () => {
+    renderAt(`/studio/${SHOWCASE}/metadata/flow/showcase_urgent_task_alert`);
     await openedFlow('showcase_urgent_task_alert');
 
-    expect(screen.queryByRole('button', { name: /QA urgent alert clone/ })).not.toBeInTheDocument();
     await waitFor(() => expect(screen.getByRole('switch')).toBeDisabled());
     expect(screen.queryAllByRole('button', { name: 'Add connected node' })).toHaveLength(0);
   });
@@ -349,13 +355,13 @@ describe('the packaged control: a read-only package stays read-only (objectui#11
     // showcase got is still in hand when the package-less scope renders. The
     // switch used to be the package switcher's entry, removed by
     // objectstack#36501; the route change is the same without it.
-    renderAt(`/studio/${SHOWCASE}/automations`);
+    renderAt(`/studio/${SHOWCASE}/metadata/flow/showcase_urgent_task_alert`);
     await openedFlow('showcase_urgent_task_alert');
     await waitFor(() => expect(screen.getByRole('switch')).toBeDisabled());
 
     fireEvent.click(screen.getByTestId('org-scope-door'));
 
-    await waitFor(() => expect(location()).toBe('/studio/~org/automations'));
+    await waitFor(() => expect(location()).toBe(ORG_CLONE));
     await openedFlow('qa_urgent_alert_clone');
     expect(screen.getByRole('switch')).toBeEnabled();
   });
@@ -371,13 +377,13 @@ describe('the package-less scope reviews and publishes exactly its own drafts (o
   });
 
   it('counts only package-less flow drafts', async () => {
-    renderAt('/studio/~org/automations');
+    renderAt(ORG_CLONE);
     await openedFlow('qa_urgent_alert_clone');
     await waitFor(() => expect(screen.getByRole('button', { name: /Changes · 1$/ })).toBeInTheDocument());
   });
 
   it('hands the sheet a filter that keeps only package-less flow drafts', async () => {
-    renderAt('/studio/~org/automations');
+    renderAt(ORG_CLONE);
     await openedFlow('qa_urgent_alert_clone');
 
     const include = panelProps()?.include as ((e: { type: string; name: string; packageId: string | null }) => boolean) | undefined;
@@ -386,13 +392,13 @@ describe('the package-less scope reviews and publishes exactly its own drafts (o
     // Control: a package's sheet is not narrowed.
     cleanup();
     panel.props = null;
-    renderAt(`/studio/${SHOWCASE}/automations`);
+    renderAt(`/studio/${SHOWCASE}/metadata/flow/showcase_urgent_task_alert`);
     await openedFlow('showcase_urgent_task_alert');
     expect(panelProps()?.include).toBeUndefined();
   });
 
   it('publishes each package-less flow draft by reference, and nothing through the package batch door', async () => {
-    renderAt('/studio/~org/automations');
+    renderAt(ORG_CLONE);
     await openedFlow('qa_urgent_alert_clone');
 
     const onPublish = panelProps()?.onPublish as (() => Promise<void>) | undefined;
@@ -430,7 +436,6 @@ describe('a deep-link miss and an empty list show no "no designers" notice (obje
     expect(screen.getByText('Visual orchestration · click a node to configure')).toBeInTheDocument();
     // No flow was opened in the missing one's place.
     expect(mockClient.layered).not.toHaveBeenCalled();
-    expect(screen.getByRole('button', { name: /QA urgent alert clone/ })).toBeInTheDocument();
   });
 
   it('a package page’s miss, too', async () => {
@@ -441,27 +446,18 @@ describe('a deep-link miss and an empty list show no "no designers" notice (obje
     expect(document.body.textContent).not.toContain(NO_DESIGNERS);
   });
 
-  it('an empty list shows the rail’s own empty state — no miss, no "no designers" notice', async () => {
+  it('an empty scope lands on its list — no miss, no "no designers" notice, no flow read', async () => {
     server.active.delete('flow/qa_urgent_alert_clone');
     renderAt('/studio/~org/automations');
 
-    // ADR-0146 D11 — the sentence names Studio's New similar, not the
-    // retired Setup › Packaged automation page.
-    await screen.findByText(
-      'No flows outside a package. To change a packaged flow, open its package and use New similar.',
-      undefined,
-      { timeout: 8000 },
-    );
-    // objectui#12514 — the sentence is the content column's one block now.
-    expect(screen.getByTestId('auto-empty')).toHaveTextContent('No flows outside a package.');
-    expect(getMetadataPreview('flow')).toBe(FlowPreview);
+    await waitFor(() => expect(location()).toBe(ORG_LIST), { timeout: 8000 });
     expect(document.body.textContent).not.toContain(NO_DESIGNERS);
     expect(document.body.textContent).not.toContain('The link names flow');
     expect(mockClient.layered).not.toHaveBeenCalled();
   });
 
   it('control: an open flow on the same page reads the same chip', async () => {
-    renderAt('/studio/~org/automations');
+    renderAt(ORG_CLONE);
     await openedFlow('qa_urgent_alert_clone');
 
     expect(screen.getByText('Visual orchestration · click a node to configure')).toBeInTheDocument();

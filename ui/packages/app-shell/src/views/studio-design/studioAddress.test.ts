@@ -97,7 +97,8 @@ describe("today's addresses, byte for byte", () => {
 
   it('an item opens its pillar today when the table names one, else its "All metadata" page', () => {
     expect(studioItemPath('crm', 'object', 'account')).toBe('/studio/crm/data?surface=object%3Aaccount');
-    expect(studioItemPath('crm', 'flow', 'notify')).toBe('/studio/crm/automations?surface=flow%3Anotify');
+    // objectstack#36903 — a flow opens its designer on its metadata address.
+    expect(studioItemPath('crm', 'flow', 'notify')).toBe('/studio/crm/metadata/flow/notify');
     expect(studioItemPath('crm', 'permission', 'admin')).toBe('/studio/crm/access?surface=permission%3Aadmin');
     expect(studioItemPath('crm', 'dashboard', 'sales')).toBe('/studio/crm/metadata/dashboard/sales');
     expect(studioItemPath('crm', 'action', 'approve')).toBe('/studio/crm/metadata/action/approve');
@@ -138,8 +139,9 @@ describe("today's addresses, byte for byte", () => {
   });
 
   it('the repointed module builders keep their addresses', () => {
-    expect(studioOrgScopePath()).toBe('/studio/~org/automations');
-    expect(studioOrgScopePath({ type: 'flow', name: 'a:b' })).toBe('/studio/~org/automations?surface=flow%3Aa%3Ab');
+    // objectstack#36903 — the package-less scope's flows, on its leg of the area.
+    expect(studioOrgScopePath()).toBe('/studio/~org/metadata/flow?source=runtime');
+    expect(studioOrgScopePath({ type: 'flow', name: 'a:b' })).toBe('/studio/~org/metadata/flow/a%3Ab?source=runtime');
     expect(studioPillarItemPath('crm', 'access', { type: 'permission', name: 'p' })).toBe('/studio/crm/access?surface=permission%3Ap');
     expect(studioMetadataItemPath('crm', { type: 'object', name: 'account' })).toBe('/studio/crm/metadata/object/account');
     expect(
