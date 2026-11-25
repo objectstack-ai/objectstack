@@ -8960,9 +8960,10 @@ export class SqlDriver implements IDataDriver {
     field: any,
     keyed?: { unique: boolean },
     tenantColumn: boolean = false,
+    addedToPopulatedTable: boolean = false,
   ): void {
     // [#29520 codemod] The body moved to `sql-driver-column-creation.ts` (see `ColumnCreationHost`).
-    return ColumnCreationFacet.createColumn.call(columnCreationHost.of(this), table, name, field, keyed, tenantColumn);
+    return ColumnCreationFacet.createColumn.call(columnCreationHost.of(this), table, name, field, keyed, tenantColumn, addedToPopulatedTable);
   }
 
   /**
