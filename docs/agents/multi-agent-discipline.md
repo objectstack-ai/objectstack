@@ -134,8 +134,10 @@ A check outside those eleven is advisory and rides through, and an advisory red
    of wall per queue entry (median, 2026-11-05); `main`'s scheduled (4-hourly) and push runs
    carry the full battery — dogfood, e2e, `Temporal Conformance (live PG + MySQL)` — read by the publish lane before
    any approval. Queue runs also carry the three `Dogfood Regression Gate` shards (ruling record
-   6663883327), so a dogfood red shows on the queue build; `Dogfood Verify CLI`,
-   Temporal Conformance and `UI Published Artifacts` stay full-battery only. The `Dogfood Regression
+   6663883327), so a dogfood red shows on the queue build; `Dogfood Verify CLI` and
+   `UI Published Artifacts` stay full-battery only. One exception: Temporal Conformance also runs on a queue
+   entry whose diff hits `ci.yml`'s `temporal_live` paths (ruling record 7146156389); it is not a required
+   context, so that run is advisory and a red lands on `main`. The `Dogfood Regression
    Gate` context is in the required set again (ruling record 6669982756), so a dogfood red ejects the entry.
 
 **A push run borrows what the queue ran** (#31519). Every commit the queue lands was tested there on the same

@@ -817,6 +817,10 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "相关列表列",
         helpText: "父记录详情页上此关系的相关列表的列，写作本对象（即子对象）的字段名，例如 name、status。未设置：从子对象推导。只写名称——标签、单元格类型和格式都来自子对象的字段定义。"
       },
+      inlineEdit: {
+        label: "内嵌编辑方式",
+        helpText: "父对象的字段分组指向此子对象（fieldGroups[].relatedList）时，父对象表单编辑此子对象各行的方式。未设置：根据本对象的字段自动选择。"
+      },
       inlineTitle: {
         label: "内嵌表格标题",
         helpText: "父记录上内嵌主从表格的标题。"
