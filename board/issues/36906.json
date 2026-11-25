@@ -2,8 +2,8 @@
   "number": 36906,
   "kind": "issue",
   "title": "Studio 重构（3-4）：Studio 列表点仪表盘、报表，直接进应用里的编辑状态；× 回 Studio 列表；报表「新建」进 /apps/<应用>/reports/new",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "os-support-ai",
@@ -14,7 +14,6 @@
     "area:ux",
     "domain:ui",
     "enhancement",
-    "pm:dispatched",
     "priority:p2"
   ],
   "assignees": [
@@ -23,11 +22,15 @@
   "milestone": null,
   "type": "Feature",
   "created_at": "2026-11-24T08:08:38Z",
-  "updated_at": "2026-11-25T05:56:38Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-25T12:52:42Z",
+  "closed_at": "2026-11-25T12:51:16Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 6,
+  "comments": 11,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/36906",
   "body": "repo:objectstack#3 · os-support-ai · session_01WGufzufqmKuir7GiTdwGd3Z\n\n③ topic child · Source: topic #36890. Maintainer: 「报表、仪表盘这些开发好的，可以页显示列表，点击之后直接弹出前端的设计页面吗？」; decisions 3, 6, 13, 15. Part of #36890.\n\n## 今天（读代码确认，主干 0819cab1）\n\n- 仪表盘：`AS/layout/designModeArrival.ts` 的导航状态 + `DashboardView` 到达即进编辑；路由 `/apps/<应用>/dashboard/:name`（`AS/console/AppContent.tsx:1692`）。报表：`AS/views/reportBuilderArrival.ts` 同一种机制，`ReportView` 到达即开构建器。Studio 和应用在同一个 `BrowserRouter` 里，带状态的 `navigate` 两者都能直接用（不需要另造报表入口）。\n- 编辑按钮的门：`useDashboardEditOffered(ownerPackageId)`（`AS/views/DashboardInPageEditor.tsx:196-199`），不属于任何包的不给编辑，手机上不提供。\n- `SD/StudioBackToApp.tsx:54-73` 第一优先是「作者来的那个应用页面」，不看它属于哪个包（从设置进来时是设置）。\n- 元数据区今天把仪表盘、报表转去界面分区（`AREA_PILLAR_FOR_TYPE`）；#36502 之后变成通用详情。\n\n## 要做的\n\n1. 在 `AreaItemOpen`（`SD/StudioMetadataArea.tsx`）加「转到应用编辑态」一支：仪表盘带 `designModeArrival` 状态、报表带 `reportBuilderArrival` 状态打开 `/apps/<应用>/dashboard|report/:name`。\n2. 「在哪个应用里打开」按决定 6：① 记住的应用属于当前包（或它的菜单里有这一项）用它；② 否则当前包发布的第一个应用；③ 都没有或不属于任何包，退回通用详情（决定 3）。\n3. 「从 Studio 来」放进地址参数（决定 15）：编辑态页头加 ×，回 Studio 列表；刷新后仍在。\n4. 报表列表的「新建」→ `/apps/<应用>/reports/new`（决定 13；#36692 / PR #36848 之后唯一的新建入口）。仪表盘「新建」另一张卡做。\n5. 安装来的应用上保存仪表盘要写到 `.custom`：在 HotCRM 上确认一次（报表已有 #36716 这类缺陷）。\n\n## 验收\n\n- HotCRM 和自建应用各走一次：Studio 仪表盘列表点一项 → 应用里编辑态 → × 回 Studio 列表；报表同样；刷新编辑页后 × 仍回 Studio。\n- 从设置进 Studio 再点仪表盘，打开的是当前包的应用，不是设置。\n- #36848 之后「设计模式开着时报表『编辑』不显示」的互斥，从 Studio 过来时验证一次。\n\nBlocked-by: #36899\nBlocked-by: #36692\nBlocked-by: #36716\n\nGrading: `area:ux · Feature · Studio ↔ runtime editing round trip · builders, often · evidence: read from code`. Maintainer-sourced topic child ⇒ p2.\nDedupe: covered by #36890; touches #36692 / PR #36848 and #36716 (prerequisites).\nReader: seat repo:objectstack#3, one os-dev card. Size M (the plan's 3-4 and 3-5 merged into one card per the review). `Metadata-protocol: none`. Wave 3."

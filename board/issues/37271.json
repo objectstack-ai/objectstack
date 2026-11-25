@@ -1,0 +1,37 @@
+{
+  "number": 37271,
+  "kind": "pull_request",
+  "title": "feat(scenarios): a card may name a roll-up a persona is meant to read over withheld rows",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "os-justin"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-25T10:13:14Z",
+  "updated_at": "2026-11-25T11:14:01Z",
+  "closed_at": "2026-11-25T11:13:59Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-25T11:13:58Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/37271",
+  "body": "repo:objectstack#4 · os-justin · session_01QSeKYo86w1wqy2z2fMrryr\nFixes #37257\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 用户无感:订单到收款场景卡的评分里,销售代表看到自己发票的已收金额、余额和状态不再被扣分;看不到一笔笔收款记录的要求不变。\n- 落实你对「销售代表能否看到发票已收金额」那张决策卡的裁决 B,解开订单到收款那轮重跑和它挡住的评测卡。\n- 只影响评测打分:卡上点名允许、且搭建写明了理由的那一个汇总不扣分,其余汇总照扣;撤回即恢复全部扣分。\n- 无\n\n## What changes\n\n- **Card key.** A persona may carry `allowedRollups` (`FieldRefSchema[]`, the card's bare names, optional, absent by default) in `packages/qa/scenarios/src/schema.ts`. The persona schema refuses an allowed roll-up that the persona's own `hidden` names.\n- **Reader.** `rollupSourceCharges` (`packages/qa/scenarios/src/runner/orchestrate.ts`) skips a `security-rollup-source-unreadable` finding that is acknowledged (the rule's `info` arm, i.e. `rollupSourceUnreadableReason` on the set) AND whose roll-up the persona's `allowedRollups` names. The card's names are prefixed with the card namespace before the comparison (`invoice.amount_paid` reads as `demoorder_invoice.amount_paid`, the build's name). An unacknowledged finding on the allowed roll-up, and every other roll-up over withheld data, is still charged.\n- **Card.** `docs/qa/scenarios/order_to_cash.json`: the prompt sentence (zh and en kept in step) now says the rep sees their invoices' 已收金额 / 余额 / 状态 but not the individual payment rows; the sales-rep persona carries `allowedRollups: [{ object: invoice, field: amount_paid }]`. `hidden` is unchanged (`payment`, `product.unit_cost`).\n- **README** § Roll-ups over withheld data: one sentence states the key and the exception.\n- **Changeset** `@objectstack/scenarios` patch (the package is published and ships the card library).\n\n## Tests\n\nPin: new top-level `describe` in `packages/qa/scenarios/test/runner/orchestrate.test.ts` on the real `order_to_cash` card, namespaced:\n- acknowledged `amount_paid` + acknowledged `payment_count`, card allows `amount_paid` → only `payment_count` charged;\n- the same build with the key removed from the card → both charged;\n- neither acknowledged → both charged (the unacknowledged finding on the allowed roll-up stays charged);\n- the schema refuses an allowed roll-up the persona hides.\n\nAblation (once, after commit): the reader line deleted through `scripts/ablation-replace.mjs` (anchor 1 → 0, blob 9f7c6d1acc4f → 38300e4a41a0) → `Tests 1 failed | 4 passed` (the allowed-roll-up case red: `demoorder_invoice.amount_paid` charged); restored, blob == HEAD 9f7c6d1acc4f, `git diff HEAD` empty. The test imports `src/` directly, so no dist rebuild sits in the path.\n\n## Acceptance notes\n\n- The persona schema refuses an allowed roll-up the persona hides, but the loader's cross-reference checks (object in `expect.objects`, the seed carries the field) are not applied to `allowedRollups`: the loader is outside this claim's file surface. A misspelt entry fails closed (never matches, so the finding stays charged).\n- `namespacedScenario` (`runner/namespace.ts`, also outside the surface) passes `allowedRollups` through bare; the reader prefixes idempotently, so it matches either a bare or a namespaced card.\n- The build prompt's persona line (`runner/prompts.ts`) still lists only what the persona must not read; the intent reaches the builder through the card prompt sentence.\n\n## Verification\n\nTwo minutes: `pnpm --filter @objectstack/scenarios exec vitest run --maxWorkers=2 test/runner/orchestrate.test.ts -t 'allows a persona'` → 5 passed.\n\nRead first: `packages/qa/scenarios/src/runner/orchestrate.ts` (the one skip in `rollupSourceCharges`), `packages/qa/scenarios/src/schema.ts` (`allowedRollups` + refine), `docs/qa/scenarios/order_to_cash.json` (prompt sentence).\n\n<details><summary>Local readings at d1750933e2</summary>\n\n- `pnpm --filter @objectstack/scenarios build && … test && … typecheck` under the verify lock: `VERDICT command-exit 0`; Test Files 42 passed (42), Tests 1336 passed (1336).\n- `node scripts/pm/dispatch-gates.mjs --repo objectstack-ai/objectstack --ran …`: 69 derived, 68 run (all exit 0), 1 NOT-MEASURED (`pnpm check:dual-build-cjs-loads` exit 3, PREREQUISITE NOT MET: needs a full build; left to CI), 0 UNRUN.\n- `node scripts/pm/overlap-check.mjs --branch=HEAD`: VERDICT clean exit 0.\n\n</details>\n"
+}

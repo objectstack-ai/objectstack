@@ -1,0 +1,37 @@
+{
+  "number": 37275,
+  "kind": "pull_request",
+  "title": "fix(components)!: NavigationOverlay drops its unused comments prop",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "pm:awaiting-merge",
+    "size/s",
+    "tooling"
+  ],
+  "assignees": [
+    "os-justin"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-25T10:31:37Z",
+  "updated_at": "2026-11-25T11:43:48Z",
+  "closed_at": "2026-11-25T11:43:46Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-11-25T11:43:46Z",
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/37275",
+  "body": "Fixes #36410\n\nrepo:objectstack#4 · os-justin · session_01QSeKYnagJvGbCtNg2PhvgW\n\nClause-②: yes (narrowing)\nMetadata-protocol: none\nSkills-docs: none — no skill, docs page or README names the NavigationOverlay comments prop; the changeset carries the FROM-TO line\n\n## 维护者速读\n\n- 用户能看到什么变化:用户无感;只是记录侧边抽屉组件删掉了一个早已没人传入的评论按钮入口。\n- 为什么做:收尾「评论通知直达评论」这张卡的第二项清理,上一项已在之前的合并里完成。\n- 出错会怎样:只有自己写代码向抽屉传评论按钮的集成方会编译报错,删掉该参数即可;可直接撤回。\n- 要你做什么:无\n\n## What changes\n\nItem 2 of the card, the last open item (item 1 landed earlier; see the card's release comment).\n\n- `@object-ui/components` `NavigationOverlay` drops its `comments` prop: the `NavigationOverlayProps.comments` declaration, its destructure, and the pass-through into the drawer's `RecordTopBar`.\n- `RecordTopBar` keeps its own `comments` slot. It is still filled by the record page: `ui/packages/app-shell/src/views/RecordDetailView.tsx` passes `comments={phoneCommentsButton}` on the phone bar and `comments={shellActions ? undefined : commentsButton}` on the desktop bar.\n- Changeset `.changeset/36410-navigation-overlay-comments-prop.md`: `@object-ui/components` patch, BREAKING banner, ADR-0087 disposition `not-required (runtime-export-retired @object-ui/components#NavigationOverlayProps.comments)`, and the FROM-TO line, in the shape of the earlier `NavigationOverlayProps.maximizable` removal.\n\nPremise, measured on `origin/main` 9171bed0a before the change: no caller passes `comments` to `NavigationOverlay`. Every render site under `ui/`, `examples/`, `packages/` and `apps/` was read (27 sites, including the e2e harness `ui/e2e/toast-under-modal.spec.ts`, which passes mode, isOverlay, isOpen, selectedRecord, close, setIsOpen, width, title, onExpand, expandLabel, children). The spread sites spread `useNavigationOverlay`'s result (no `comments` in the hook) or ObjectGrid's `recordOverlayShellProps` (storageKey, legacyStorageKey, width).\n\n## Read first\n\n1. `ui/packages/components/src/custom/navigation-overlay.tsx`: the three removals and the bar comment.\n2. `ui/packages/components/src/__tests__/navigation-overlay-bar-26679.test.tsx`: the new top-level describe (type pin plus render check).\n3. `.changeset/36410-navigation-overlay-comments-prop.md`: the disposition marker and FROM-TO line.\n\n## Two-minute check\n\n`pnpm --filter @object-ui/components exec vitest run --maxWorkers=2 src/__tests__/navigation-overlay-bar-26679.test.tsx`: expect all tests to pass, including \"the drawer bar takes no comments switch\".\n\n## Tests\n\n- The pin goes into the existing drawer bar harness: a `@ts-expect-error` on a partial `NavigationOverlayProps` object carrying `comments` (compiled by the package's `tsconfig.test.json`), and a render check that a stray `comments` is not drawn in the bar.\n- `record-top-bar-comments-36075.test.tsx`: docblock only. It no longer says the drawer hands the switch on.\n\nEvery reading below is on head `8acc3c0e7`.\n\n<details><summary>Package test, type-check and pin ablation</summary>\n\n- `pnpm --filter @object-ui/components test` (under the verify lock): `Test Files 510 passed | 1 skipped (511)`, `Tests 4967 passed | 24 skipped (4991)`, `VERDICT command-exit 0`.\n- `pnpm --filter @object-ui/components type-check` (`tsc --noEmit && tsc -p tsconfig.test.json`): `VERDICT command-exit 0`.\n- Ablation of the type pin (one-time, through `scripts/ablation-replace.mjs`): putting `comments?: React.ReactNode;` back into `NavigationOverlayProps` landed (anchor 1 to 0, blob a7cb247c to dbcac407), and `tsc -p tsconfig.test.json` failed with `navigation-overlay-bar-26679.test.tsx(129,5): error TS2578: Unused '@ts-expect-error' directive.` The file was restored to the HEAD blob a7cb247c, and `git diff HEAD` was empty. A first attempt was a no-op: the tool refused it because the replacement text contained its anchor, and no command ran.\n\n</details>\n\n<details><summary>Dogfood battery (bang title and narrowing arm)</summary>\n\n`pnpm --filter '@objectstack/dogfood^...' build && pnpm --filter @objectstack/dogfood test` under the verify lock, with no shard and no path: `Test Files 487 passed | 3 skipped (490)`, `Tests 4128 passed | 68 skipped (4196)`, `VERDICT command-exit 0`.\n\n</details>\n\n## Acceptance notes\n\n- `RecordTopBar.comments` stays, so this is the only published surface that narrows.\n- The e2e harness and the examples pass no `comments`, so no e2e or example text changes.\n\n## Verification\n\n<details><summary>Derived gates, local subset</summary>\n\n`node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack` derived 38 families from the 4-path change set (merge base 9171bed0a). Each family was run and its exit code captured before any pipe, and all 38 exited 0. Among them: `check-adr-0087-registration --base origin/main` verified `not-required (runtime-export-retired) -- verified: @object-ui/components#NavigationOverlayProps.comments (member, ui/packages/components/src/custom/navigation-overlay.tsx)`, plus `check-changeset-no-major`, `check-empty-changeset`, `check:type-check-debt`, `check:type-check-coverage`, `check:nul-bytes` and `pnpm --dir ui exec vitest run scripts/` (172 files passed). Reconciliation: `Run reconciliation — 38 derived, 38 run, 0 NOT-MEASURED, 0 UNRUN` (a derived zero: all 38 recorded an exit code).\n\n`scripts/pm/overlap-check.mjs` before each push: `VERDICT clean exit 0`, and origin/main merges cleanly. `test:repo` and the repo-wide lint belong to CI.\n\n</details>\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01QSeKYnagJvGbCtNg2PhvgW)_\n"
+}

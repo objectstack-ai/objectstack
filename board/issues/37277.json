@@ -1,0 +1,37 @@
+{
+  "number": 37277,
+  "kind": "pull_request",
+  "title": "fix(ui): queryGroupHeaders hands on the server's hasMore, and a cut lane read draws no lane figure",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "os-justin"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-25T10:48:58Z",
+  "updated_at": "2026-11-25T11:43:49Z",
+  "closed_at": "2026-11-25T11:43:46Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-25T11:43:46Z",
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/37277",
+  "body": "repo:objectstack#4 · os-justin · session_01QSeKYnagJvGbCtNg2PhvgW\n\nFixes #36870\n\nClause-②: yes (widening)\nMetadata-protocol: none\n\n## 维护者速读\n\n- 用户能看到什么变化:在限制了默认分页大小的部署上,看板泳道底部的合计、平均、最小、最大值,在服务器分组答案被截断时不再显示错误数字(如「合计 0」或少算),而是不显示;答案完整时照常显示。\n- 为什么做:补上上一张卡评审记录(7124305685)里点名的两个残余情形(折叠泳道的部分合计、单次查询看板的「合计 0」)。这一族还有后续:列表里看板的单页合计和分组表格、币种读取的截断,另有卡承接。\n- 出错会怎样:最坏是本该显示的泳道统计不显示,不会显示错误数字;分组表格与币种读取不受影响,可直接撤回。\n- 要你做什么:无\n\n## What changes\n\n- `@object-ui/types`: new exported type `ListViewGroupHeaderAnswer` = `ListViewGroupHeaderRow[] & { hasMore?: boolean }`; `DataSource.queryGroupHeaders` now answers it. `hasMore: true` means the answer is partial (the door cut the groups). A source returning a plain array still satisfies the member, and a caller reading the answer as an array is unchanged.\n- `@object-ui/data-objectstack`: `queryGroupHeaders` sets `hasMore = true` on the returned rows array when `POST /data/:object/query` answers `hasMore: true` (the grouped branch in `protocol-data-crud.ts` slices to the default page size and answers it). A whole answer carries no `hasMore`.\n- `@object-ui/plugin-kanban`: new `readLaneStatistic(answer, reading)` answers `null` (no figure for ANY lane) for a partial answer, else `readLaneFigures`. `ObjectKanban` reads the lane read through it. Covers both residual cases of scope note 7124305685: the folded \"Uncategorized\" lane's partial figure, and \"Sum 0\" on a board of one query whose lane group was cut. The `laneFigureOf` comment that said the flag is not handed on is corrected.\n- The grouped grid (`useServerGrouping`), the whole-set footer (`useWholeSetSummary`) and `usedCurrencyCodes` are untouched and read the same array.\n\nClause-② measurement: after `@object-ui/types` build, `dist/index.d.ts` carries 1 hit and `dist/data.d.ts` 3 hits of `ListViewGroupHeaderAnswer`; `git grep -c ListViewGroupHeaderAnswer 9171bed0a -- ui/` answers 0 hits (exit 1). `dist/data.d.ts:956` now types the member's return as a Promise of `ListViewGroupHeaderAnswer`. One new exported name plus an optional field on the return: widening. A tsc probe (`--strict`) shows a plain `Row[]` is assignable to the new answer type, so no implementer is narrowed. The claim carried `Clause-②: no`; this PR declares what was measured.\n\n## Tests\n\n<details><summary>Targeted pins (new)</summary>\n\n- `ui/packages/data-objectstack/src/queryGroupHeaders-7189.test.ts`, new describe: a door capped at a default page size of 2 over 5 groups gives `rows.hasMore === true`, rows still an array of the first 2; CONTROL page size 100: `hasMore` undefined, all 5 rows.\n- `ui/packages/plugin-kanban/src/ObjectKanban.laneStatistic-36370.test.tsx`, new top-level describe `a cut lane read draws no lane figure (objectstack#36870)` (the shared harness file): a lane door that cuts to `pageSize` rows and sets `hasMore`.\n  - paged board, page size 3 (open, won, empty group of 4 groups): the answer's `hasMore` is true and no `[data-kanban-lane-statistic]` is drawn anywhere, Uncategorized included;\n  - board of one query (`limit: 10`), page size 1: no \"Sum 0\" on Won, no figure anywhere;\n  - CONTROL page size 4 (whole): Open 2415, Won 10, Lost 0, Uncategorized 4.\n\n</details>\n\n<details><summary>Ablations (scripts/ablation-replace.mjs, mutation proven on disk, restored to HEAD)</summary>\n\n- Deleted the partial check line in `readLaneStatistic`: anchor 1 -> 0, blob b0d377196 -> 74ec141db; the two 36870 kanban pins went red (a lane statistic element was drawn where null was expected), CONTROL stayed green (2 failed, 1 passed). Restored: blob == HEAD, `git diff HEAD` empty.\n- Deleted the `answer.hasMore = true` line in the adapter: anchor 1 -> 0; `sets hasMore on an answer capped by a small default page size` red, 5 others green. Restored: blob == HEAD, `git diff HEAD` empty.\n- Both test files import the source directly (relative `./KanbanLaneStatistic`, `./index`), so no `dist/` is involved.\n\n</details>\n\n<details><summary>Package suites and type-check (head 3696758df)</summary>\n\n- `vitest run packages/plugin-kanban/ packages/data-objectstack/ packages/types/` under the verify lock: Test Files 604 passed (604), Tests 12516 passed (12516), VERDICT command-exit 0.\n- Consumer tests naming `queryGroupHeaders` (40 files across plugin-grid, components, plugin-list, console): Test Files 40 passed (40), Tests 569 passed (569).\n- `pnpm --filter @object-ui/types --filter @object-ui/data-objectstack --filter @object-ui/plugin-kanban run type-check`: exit 0. `... --filter @object-ui/plugin-grid --filter @object-ui/components run type-check`: exit 0. Declared narrowing: these two type-check runs ran outside the verify lock after three 540 s queue timeouts behind a 37-minute dogfood holder; tsc --noEmit writes nothing.\n\n</details>\n\n<details><summary>Derived gates</summary>\n\n`dispatch-gates --commands`: 40 commands; all 40 run with exit codes recorded; `--ran` reconciliation: 40 derived, 40 run, 0 NOT-MEASURED, 0 UNRUN. `pnpm check:type-check-debt` first answered exit 3 (lock queue timeout, never acquired), re-run exit 0. `pnpm --dir ui exec vitest run scripts/`: Test Files 172 passed, 2 skipped. Type-check lanes, the wide-population families and the full farm are CI's.\n\n</details>\n\n## Acceptance notes\n\n- The grouped grid (`useServerGrouping`) and `usedCurrencyCodes` do not read the new flag: if their grouped read is cut, a grid could list fewer groups than exist and the currency read could miss a code. Read from code only, not run, so no reach is measured here; carrier: #37278 (Blocked-by #36870), filed at the seat's direction. Both callers keep working exactly as before, as the card asks.\n- `laneFigureOf`'s `holdsRecords` guard stays: over a whole answer it still catches a board count and an answer that disagree (a write between the two reads).\n\n## Verification\n\nRead first:\n1. `ui/packages/plugin-kanban/src/KanbanLaneStatistic.ts`, `readLaneStatistic`: the one line that turns a partial answer into no figures.\n2. `ui/packages/data-objectstack/src/index.ts`, `queryGroupHeaders`: where `hasMore` is set on the rows array.\n3. `ui/packages/types/src/data.ts`, `ListViewGroupHeaderAnswer`: the published shape.\n\nTwo-minute check: `cd ui && npx vitest run --root . packages/plugin-kanban/src/ObjectKanban.laneStatistic-36370.test.tsx -t 36870` should show 3 passed.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01QSeKYnagJvGbCtNg2PhvgW)_\n"
+}

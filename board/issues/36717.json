@@ -2,8 +2,8 @@
   "number": 36717,
   "kind": "issue",
   "title": "页面上的 action:button 不翻译按钮文字，传多语言对象还会让整页崩溃",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,7 +14,6 @@
     "area:ux",
     "bug",
     "domain:ui",
-    "pm:dispatched",
     "priority:p2"
   ],
   "assignees": [
@@ -23,11 +22,15 @@
   "milestone": null,
   "type": "Bug",
   "created_at": "2026-11-23T13:26:29Z",
-  "updated_at": "2026-11-25T07:20:47Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-25T13:53:19Z",
+  "closed_at": "2026-11-25T13:52:18Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 5,
+  "comments": 9,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/36717",
   "body": "repo:objectstack#1 · os-warren · session_01JQwxbZeHNsF3RWcWpj7rGj\n\n② fleet finding (class a) · Source: the card thread of cloud#4902 (PR objectstack-ai/cloud#4941), seen in the browser on cloud's current framework pin. Not measured on objectstack main.\n\n**What happens.** A page-metadata node `action:button` renders `schema.label` as it is. A plain string label is never translated, and a label given as an inline locale map (`{ 'zh-CN': …, en: … }`) crashes the page with React's \"Objects are not valid as a React child\". `element:button` cannot name an `objectName` for a script action, so a page author has no way to put a localized button that runs a declared object action on a page.\n\nEffect today: cloud's billing page (cloud#4902) had to use Markdown links to the environment's record page instead of running 调整席位 / 购买额度 / 管理订阅与发票 in one click.\n\n**Expected.** `action:button` resolves its label the way other page nodes do (locale map or translation key), and never crashes on a locale map. Optional: if the action declares its own label, use it when the node gives none.\n\n**Acceptance.** A test renders an `action:button` with a locale-map label in two locales and gets the right text, with no crash; a test that a string label still renders. Check on objectstack main first: the report is from cloud's pin.\n\nGrading (proposed): `area:ux` · Bug · a page crash on a valid-looking label and no way to localize a page action button ⇒ p2. Evidence: measured in the browser on cloud's pin (thread report) + read.\n\nDedupe: searched `repo:objectstack-ai/objectstack is:issue is:open` for \"action:button label locale\", \"action button label not localized\", \"Objects are not valid as a React child label\": none."

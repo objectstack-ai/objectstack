@@ -1,0 +1,36 @@
+{
+  "number": 37264,
+  "kind": "pull_request",
+  "title": "fix(fields): the fill-in dialog judges option visibleWhen on the record the write would leave",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tooling"
+  ],
+  "assignees": [
+    "os-justin"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-25T09:05:55Z",
+  "updated_at": "2026-11-25T11:43:49Z",
+  "closed_at": "2026-11-25T11:43:46Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-25T11:43:46Z",
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/37264",
+  "body": "repo:objectstack#4 · os-justin · session_01QSeKYpEsWWE9Y5YtSsDgqZ\nFixes #37250\n\nClause-②: yes (widening) — the exported `RequiredWhenPromptField` of `@object-ui/fields` gains one optional member, `record?: Record<string, unknown>`\nMetadata-protocol: none\n\n## 维护者速读\n\n- 用户能看到什么变化：在记录上就地改动（改阶段、改列表单元格、行内编辑、看板拖动）弹出「补填必填字段」时，弹窗里的下拉、单选、级联选择、关联查找和金额币种，都按这次改动后的记录来显示；比如商机改为「失败」后，丢单原因会列出该有的选项，不再显示「暂无可选项」。\n- 为什么做：补填弹窗之前根本没把记录交给里面的控件，凡是要读记录的控件都按一条空记录判断，于是有的选项被藏掉、要先选上级的列表一直停在「请先选择」，改动保存不了。\n- 出错会怎样：影响补填弹窗里各控件如何读取记录（选项显示、级联、关联查找的过滤、金额跟随的币种）；若有误，最多是弹窗里某些选项多显示或少显示，可直接撤回本次改动，不涉及数据。\n- 要你做什么：无\n\n## What changes\n\nThe required-fields fill-in dialog rendered each control with no record at all, so an option `visibleWhen` reading `record.*` was judged on an empty record. An option list whose every option reads the field the change writes (hotcrm's `crm_opportunity.loss_reason`, shown only while `stage == \"closed_lost\"`) offered nothing: the select drew its empty state and the change could not be saved.\n\n- `collectRequiredWhenPromptFields` already judges the prompt on one merge, the stored record with the change (`next = { ...record, ...changes }`). Each field it returns now carries that record as `record` (new optional member of `RequiredWhenPromptField`).\n- `RequiredFieldsDialog` hands every control `dependentValues` = that record with the values typed into the dialog on top, i.e. the record the write would leave. A row a host builds itself (a refusal-named field) reads the same record whenever any shown field carries one.\n- `requiredWhen` / field `visibleWhen` / `readonlyWhen`: already judged on `next` by the collector (unchanged); the new collector assertion pins that the carried record is that same merge.\n\n## Tests\n\n`ui/packages/fields/src/__tests__/RequiredFieldsDialog.inPlace-35956.test.tsx`, new top-level describe (objectstack#37250), five cases: the collector carries the merged record; a select whose options read the changed field offers them instead of the empty state; a radio offers exactly the options visible on the merged record (a won-only option stays hidden); a value typed into the dialog joins the record the other rows read; the mirror case, a select whose options are won-only, offers them on a move to closed-won.\n\n## Acceptance notes\n\n- Same family, outside this card's file surface, not changed here: the hosts' `refusalField` rows are built as `{ name, def }` with no record. With at least one collected field shown they now read the dialog's record; with zero collected fields (the record header's stage menu opening the dialog as a pure confirmation) a refusal-added option row reads only the typed values. Hosts: `ui/packages/plugin-detail/src/renderers/recordPathStageChange.tsx`, `ui/packages/plugin-detail/src/InlineEditSaveBar.tsx`, `ui/packages/plugin-grid/src/objectGridRequiredPrompt.tsx` (kanban passes no `refusalField`).\n- `ui/packages/plugin-timesheet/src/ObjectTimesheet.tsx` add-row dialog renders `FieldEditWidget` with no `dependentValues`, so an option `visibleWhen` reading a sibling row field is judged on an empty record there too. Not a pending-change case; noted only.\n\n## Verification\n\nTwo-minute check: `cd ui && pnpm --filter @object-ui/fields exec vitest run --root ../.. --maxWorkers=2 packages/fields/src/__tests__/RequiredFieldsDialog.inPlace-35956.test.tsx` — expect 12/12 passed.\n\nRead first: `ui/packages/fields/src/RequiredFieldsDialog.tsx` (the `liveRecord` memo and the `dependentValues` prop), then `ui/packages/fields/src/requiredWhenPrompt.ts` (`record: next`).\n\n## Rework round 1 (head `f731d2461f2`)\n\nPer the seat L1 7158746595: M1 — the widening is declared here and in the changeset; S1 — the changeset now states the condition as \"the dialog handed its controls no record\" and names what now resolves (option visibility, `dependsOn` gates, dependent-lookup filters, a money field's followed currency); N1 — a `win_reason` mirror pin. Dialog file 12/12; `@object-ui/fields` 5021 passed; type-check 0; 38/38 derived gates exit 0. Follow-up for host refusal rows: #37270.\n\nHost refusal rows (refusal-named fields with no `record`) are carried by #37270.\n\n## Provenance\n\nOpened by seat repo:objectstack#4 on the maintainer's authorization in the seat session (「#37250（推送被拦）：放行」). The seat's os-dev subagent's first push was refused by its permission check; it stopped without retrying. Branch `claude/issue-37250-fill-in-dialog-pending-values` @ `57e988ac224`.\n\n---\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01QSeKYpEsWWE9Y5YtSsDgqZ\n\n\n"
+}

@@ -12,18 +12,20 @@
   },
   "labels": [
     "area:build",
-    "pm:blocked",
+    "pm:dispatched",
     "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-alice"
+  ],
   "milestone": null,
   "type": "Feature",
   "created_at": "2026-11-24T22:35:05Z",
-  "updated_at": "2026-11-25T03:07:48Z",
+  "updated_at": "2026-11-25T14:00:05Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 0,
+  "comments": 3,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/37143",
   "body": "repo:cloud#1 · os-warren · session_01JQwxbZSA7o5vcLjQjM1myV\n\nFiling gate: ③ maintainer-directed. Source: topic #36996. Key words (maintainer, 2026-11-24 19:17Z, handing the epic to this seat): 「36996 你接手整个专题的任务，现在就开专区派发」.\nGrading: area:build · Feature · p2 (topic child at the epic's level) · reach: n/a (new capability) · evidence: read.\n\n## 维护者速读\n\n- 做什么：应用作者在 Studio 里新建和编辑资料包，用法和编辑技能一样：选根对象，选字段，选关联列表及其列，选正文字段，然后发布。\n- 谁受益：不写代码的应用作者。ADR-0088 准入条件 2（运行时可编辑）要靠它兑现。\n- 不做会怎样：资料包只能写在代码包里。\n- 需要你做的：无。\n\n## What\n\nImplements ADR-0160 D1, clause 2 (runtime authoring):\n\n1. A spec form file for `ai_context`, by the precedent of `packages/spec/src/ai/skill.form.ts`. The epic's lane says ui; ADR-0160's split note says the form is a spec file.\n   - Root-object fields use the generic `field-multi` block with `dependsOn: 'object'` (precedent: `page.form.ts`).\n   - The related lists use `related-list-entries` (precedent: `object.form.ts`).\n2. The Studio authoring surface for the kind (list, create, edit, publish) through the metadata API. Field pickers are scoped to the root object and, for each related entry, to that child object. D1's author-defect reports show at save; #37176 builds the at-save validation.\n\n## Acceptance\n\n- Expected `Metadata-protocol: none`: no new key. If the PR adds one, it declares it.\n- An author creates a pack in Studio, and `get_record_context` serves it. This needs a host that mounts the service: hand-mounted in tests, or through #37189's `requires: ['record-context']`.\n\n## Dependencies (added 2026-11-25)\n\nAdded by the maintainer's session (`maintainer · os-bob · session_012dn2AecKpLaYkUtNRiqtby`) after an independent Fable review of rows 5–10, which the maintainer accepted: 「同意你的建议」.\n\n- #37176 builds the at-save author-defect reports this card shows, and says it lands before this card.\n- Soft dependency: #37180. Which app package a pack created in Studio belongs to waits on that card's ruling.\n\nBlocked-by: #37140\nBlocked-by: #37176\n\nParent: #36996 (row 7). Reader: the epic's owning seat (repo:cloud#1), which dispatches it when row 5 merges.\nDedupe (objectstack, is:issue, open and closed): `ai_context` 3 (#36996, #36997, #37001; none on authoring) · `\"context pack\"` 11 (no Studio card on it)."

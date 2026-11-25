@@ -1,0 +1,34 @@
+{
+  "number": 37274,
+  "kind": "issue",
+  "title": "看板折叠列的列名把中文整体旋转 90°，字横躺着读不出（应为竖排、字立着）",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "area:ux",
+    "bug",
+    "domain:ui",
+    "pm:dispatched",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-lizheng"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-25T10:21:26Z",
+  "updated_at": "2026-11-25T13:41:25Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/37274",
+  "body": "### 环境\n云端 os-46jxg5，平台 18.6.0，hotcrm 6.6.0，zh-CN（2026-11-25，Irene 截图）。\n\n### 现象\n订单 → 视图「订单看板」：没有卡片的一列（「已取消」）被自动折叠成一条竖栏。竖栏里的列名「已取消」被整体旋转 90°，每个汉字都横躺着，看起来像乱码，读不出是哪一列。\n\n### 期望\n折叠列的列名对中日韩文字使用竖排（例如 CSS `writing-mode: vertical-rl; text-orientation: upright`），字一个个立着从上往下排；只有拉丁文字才整体旋转。\n\n\n"
+}

@@ -1,0 +1,35 @@
+{
+  "number": 37267,
+  "kind": "issue",
+  "title": "Page action:menu, action:group and action:icon render a non-string label raw: action:menu white-screens on a locale-map label (the #36717 family beyond action:button)",
+  "state": "closed",
+  "state_reason": "duplicate",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ux",
+    "bug",
+    "domain:ui",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-25T09:13:50Z",
+  "updated_at": "2026-11-25T09:19:26Z",
+  "closed_at": "2026-11-25T09:18:53Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/37267",
+  "body": "repo:objectstack#4 · os-justin · session_01QSeKYmRepQK9DkZeU7F53D\n\nFiling gate: ① a product defect with named locations (one card for one family) · Source: fleet (L1 record 7157997155 on PR #37262 / card #36717's family; the seat repo:objectstack#4 asked that it be filed as one follow-up card)\n\n## What happens\n\nRuling A on #36717 (7118756694, the maintainer's 「保持走翻译包」) keeps every page action component's `label` a `z.string()`, localized through the translation bundle key for its component id. PR #37262 guards `action:button` so that a non-string label (for example a locale map from code-registered metadata that skipped `validateComponentProps`) renders no text instead of throwing.\n\nThe sibling page action components still read `schema.label` raw. At `origin/main` 9171bed0:\n\n- `ui/packages/components/src/renderers/action/action-menu.tsx`: `{schema.label && <span>{schema.label}</span>}` (~414), `aria-label={schema.label || …}` (~404), the icon spacing (~413) and the diagnostic label (~246). The L1 probe measured that `action:menu` with a locale-map label throws \"Objects are not valid as a React child\", which white-screens the page.\n- `ui/packages/components/src/renderers/action/action-group.tsx`: `{schema.label || 'Actions'}` (~451) and the diagnostic label (~314).\n- `ui/packages/components/src/renderers/action/action-icon.tsx`: `schema.label?.charAt(0)` (~314; a locale map has no `charAt`, so it throws), `aria-label` (~301), the runner forward (~175) and the diagnostic label (~112).\n\nreach: L1 probe measurement for `action:menu`; read from code for the other two. Reached by any page whose metadata skipped validation and carries a non-string label on these nodes.\n\n## Expected\n\nThe same render guard as `action:button` (PR #37262), per ruling A:\n- never throw on a non-string label;\n- render no text (or the fallback each component already has);\n- log one development warning per component;\n- never translate the map, and never print `[object Object]`.\n- A string label renders and translates exactly as today.\n\nReuse PR #37262's `renderableLabel` if it can be shared, rather than a third copy.\n\n## Acceptance\n\n- One pin per site (menu, group, icon), each as a top-level `describe` in that component's existing harness. An object label renders without crashing and shows no `[object Object]`; a string-label control and a bundle-key translation control stay green.\n- Ablate once per site.\n- `Clause-②: no`, `Metadata-protocol: none`; one `patch` changeset for `@object-ui/components`.\n\nBlocked-by: #37262\n\nGrading: area:ux · Bug · moderate (a page white-screens on an invalid but unvalidated label) · reach: measured for `action:menu` by the L1 probe · evidence measured or read → p2, size S; triage to confirm.\n\nBusiness reason: a code-registered page with a localized menu or icon action crashes the whole page instead of drawing the action without text, exactly as #36717 was for buttons.\n\nReader: zone a4-U, after PR #37262 lands, which provides the shared guard.\n\nDedupe: `action-menu label locale` (open) → 6 hits, none on this; #36717 (the button half, PR #37262) is the parent."
+}

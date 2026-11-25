@@ -2,8 +2,8 @@
   "number": 36792,
   "kind": "issue",
   "title": "手机应用首页：页面较长时最底下约 33 像素被底部导航栏挡住，滚不出来",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,7 +14,6 @@
     "area:ux",
     "bug",
     "domain:ui",
-    "pm:dispatched",
     "priority:p2"
   ],
   "assignees": [
@@ -23,11 +22,15 @@
   "milestone": null,
   "type": "Bug",
   "created_at": "2026-11-23T23:14:24Z",
-  "updated_at": "2026-11-25T07:24:24Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-25T08:46:52Z",
+  "closed_at": "2026-11-25T08:46:10Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 3,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/36792",
   "body": "repo:objectstack#1 · os-warren · session_01JQwxbZeHNsF3RWcWpj7rGj\n\n① product defect · Source: the #36739 card thread (session `session_01JQwxbY2FR4RafB2fexxeuA`), measured in the browser on the showcase stack, iPhone 13 emulation, zh-CN, while building PR #36791. Not fixed there: outside that card's surface.\n\n## What\nOn a phone, the console route slot in `ConsoleLayout` is `h-full`, and a natural-height page such as `PhoneAppHome` overflows it. The inset's end padding (`!pb-[calc(3.5rem+safe-area)]`) is on the slot, not on the scrolled content, so it does not scroll with the page. The last ~33 px of a long phone app home stays under the bottom bar.\n\nMeasured: scroller scrollHeight 2981 equals the page height (no end padding inside the scroll); the bottom bar spans 607–664 on a 664 px viewport.\n\n## Expected\nA phone page that scrolls can bring its last row fully above the bottom bar (and the safe area), on the app home and on any other natural-height console route.\n\n## Acceptance\n- A test (or a layout pin) that the end padding is inside the scrolled content on phone.\n- A browser reading on a phone viewport: scrolled to the end, the last row's bottom is above the bar's top.\n\nGrading: `area:ux` · Bug · Cosmetic to impeded (the last row's tap target can sit under the bar) · phone users, often ⇒ p2. Effort S. Evidence: measured (thread browser reading).\n\nDedupe: no open card names the phone bottom-bar end padding or `PhoneAppHome` overflow."

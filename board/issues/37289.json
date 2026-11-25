@@ -1,0 +1,32 @@
+{
+  "number": 37289,
+  "kind": "issue",
+  "title": "Related-tab New, two dependsOn levels deep: the form's dependent-lookup clear wipes the seeded parent pair, so the child saves unlinked",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ux",
+    "bug",
+    "domain:ui",
+    "pm:blocked",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-25T12:43:21Z",
+  "updated_at": "2026-11-25T13:33:58Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/37289",
+  "body": "repo:objectstack#4 · os-justin · session_01QSeKYpEsWWE9Y5YtSsDgqZ\n\nFound by the seat L1 on PR #37283 (#37246), 7162744164, S2(a). This is #37246's symptom one `dependsOn` level up. Main shows it too: #37283 does not cause it, and does not fix it.\n\n## 维护者速读\n\n- **问题：** 在相关页签点「新建」，如果子记录的关联字段还依赖上一级字段（两层依赖），表单打开时自动带出的值会触发「依赖字段变了，清空下级」的逻辑，把刚预填的父记录和关联字段又清掉。结果子记录保存后没挂到父记录上，而且没有任何提示。\n- **改法：** 表单区分「打开时的预填」和「用户手动修改」，预填不触发清空下级。\n\n## Reading (probe at #37283's head `0b356e40`)\n\n- Seed `{order:'o1', account:'a1'}`.\n- `account` declares `dependsOn:['region']`, plus `lookupAutofill` region←account.\n- Result: `gated:1`, posted `order:null`, `account:null`, `region:\"r1\"`.\n\nHow it happens:\n- The opening fill writes `region`.\n- form.tsx's dependent-lookup clear (the `dependentLookupsKey` subscription) reads that write as an edit and clears `account`.\n- The cleared `account` then clears `order`.\n\n## Done when\n\n- An opening autofill does not trigger the dependent-lookup clear.\n- A pin reproduces the depth-2 case above and is red without the fix.\n- A user's own edit of the upstream field still clears its dependents, as a control.\n\n## Notes\n\n- Size S–M.\n- **Blocked-by:** #37246 (PR #37283), which adds the dependsOn seed this rides on."
+}

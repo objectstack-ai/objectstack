@@ -13,18 +13,18 @@
   "labels": [
     "area:ux",
     "domain:ui",
-    "pm:blocked",
+    "pm:queue",
     "priority:p2"
   ],
   "assignees": [],
   "milestone": null,
   "type": "Feature",
   "created_at": "2026-11-25T05:45:35Z",
-  "updated_at": "2026-11-25T06:36:55Z",
+  "updated_at": "2026-11-25T13:39:24Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 1,
+  "comments": 2,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/37237",
   "body": "repo:objectstack#4 · os-justin · session_01QSeKYkkwuF6UuFtu85Yd5H\n\n④ sub-issue of #36890 · Source: #36906's os-dev report 7153618697, open question 1. Seat repo:objectstack#4 ruled 「B: file a follow-up card」. Part of #36890.\n\n## 维护者速读\n\n- #36906（PR #37226）之后，在 Studio 列表里点仪表盘或报表，会直接进它所在应用的编辑状态。\n- 例外：Studio 以 `.custom` 配对包打开时（比如 HotCRM 的定制都在 `hotcrm.custom`），配对包自己没有发布的应用，于是这些仪表盘和报表仍然停在通用条目页。\n- 改法：配对包找不到应用时，改为读基础包已发布的应用，用那个应用来打开。只多一次读取。\n\n## What\n\n- In #36906's decision-6 rule (`studioAppEdit.ts`, the area's step `StudioAreaAppOpen.tsx`), when the open package is a `.custom` pair with no app of its own, read the base package's published apps and pick the one that serves the pair's items, by the same rule.\n- A pin covers: the pair opens through the base app; a pair whose base has no app keeps the generic item page; a plain package is unchanged.\n- The dev estimated about 30 lines plus the pin.\n\n## Done when\n\n- A dashboard and a report of `hotcrm.custom` (or a fixture shaped like it) open in the base app's edit state and builder, and × returns to the Studio list.\n\n## Notes\n\n- Size S.\n- **Blocked-by:** #36906 (PR #37226).\n- Confirm on claim that the pair-as-scope case is reachable from Studio's new menu. The dev's report asked for this confirmation."

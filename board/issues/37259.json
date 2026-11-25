@@ -2,8 +2,8 @@
   "number": 37259,
   "kind": "issue",
   "title": "Data surface URL filter chip shows a select field's raw option value (产品类别 = software) instead of its label",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "sunhaolin",
@@ -16,15 +16,21 @@
     "domain:ui",
     "priority:p1"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-justin"
+  ],
   "milestone": null,
-  "type": null,
+  "type": "Bug",
   "created_at": "2026-11-25T08:07:14Z",
-  "updated_at": "2026-11-25T08:07:14Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-25T13:05:57Z",
+  "closed_at": "2026-11-25T13:05:02Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 0,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/37259",
   "body": "## What happens\n\nOn the bare data surface `/:objectName/data?filter[...]` (ADR-0055), a URL filter chip on a **select** field shows the option's raw stored **value** instead of its **label**. In zh-CN the chip reads `产品类别 = software`, when the field's option label is `软件`. Every other place on the same screen (the grid cell, the field's filter panel, the dashboard the user came from) draws `软件`.\n\nThis is the screen a dashboard drill's **Open in list / 在列表中打开** lands on, so it is the normal path from any chart grouped by a select field, not a hand-typed URL.\n\n## Repro (HotCRM, local dev, @objectstack 18.6.0)\n\n- Open the **Product Catalog** dashboard (`product_catalog_dashboard`) → widget **top_products** (bar chart, dimension `category`, a select field on `crm_product`).\n- Click the **软件** bar → the drill dialog lists the right products → **在列表中打开**.\n- It navigates to `/crm_product/data?filter[list_price][null]=false&filter[category]=software`.\n- The list itself is correct (6 rows). The chip row shows `标价 不为 null` (correct: prose through the operator key) and `产品类别 = software` (wrong: raw value).\n\n## Where\n\n- `ui/packages/app-shell/src/views/drillUrlFilters.ts` → `groupFilterChips`: the plain-equality branch returns `{ field, text }` with `text = String(comparand)`. Membership/negation operators also join the raw comparands with `comparand.map(String).join(', ')`.\n- `ui/packages/app-shell/src/views/ObjectDataPage.tsx` (the chip row, around `filterChips.map(({ field, text, textKey }) => …)`): the field half goes through `fieldLabel(objectDef.name, field, field)`, but `text` is drawn bare. Nothing maps a comparand on a `select` / `multiselect` / `radio` field through the field's `options` (and the option-label translation the grid already uses).\n\n## Expected\n\nFor a field that has `options`, each comparand in the chip is drawn as its option's (translated) label, the same text the grid cell shows for that value. A comparand that matches no option stays as the raw value, so a stale or hand-edited URL is still visible as what it is.\n\nBoolean and lookup comparands probably want the same treatment (`Yes`/`No`, the referenced record's name) but are out of scope here.\n\n## Why p1\n\nThe drill-to-list path is how users get from every chart grouped by a select field to the records behind it, and the one chip that tells them what they are looking at shows an internal code. In non-English locales it reads as a different language mid-sentence.\n"

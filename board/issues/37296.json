@@ -1,0 +1,32 @@
+{
+  "number": 37296,
+  "kind": "pull_request",
+  "title": "fix(plugin-grid): the row menu offers no Delete on a line whose master is held",
+  "state": "open",
+  "state_reason": null,
+  "draft": true,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tooling"
+  ],
+  "assignees": [
+    "os-justin"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-25T13:16:44Z",
+  "updated_at": "2026-11-25T13:43:17Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/37296",
+  "body": "Fixes #37231\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 用户能看到什么变化:列表页和相关列表里,主单正在审批中的明细行(如费用报销明细),行菜单和选中栏不再出现「删除」;自身在审批中的记录仍可删除。\n- 为什么做:审批锁定的列表收口工作的一部分,服务端早已拒绝这种删除,界面现在提前不提供。\n- 出错会怎样:最坏情况是某行该删的「删除」被隐藏或仍然出现;只影响按钮显示,不写数据,可直接撤回。\n- 要你做什么:无\n\n## What changes\n\n- `useRowApprovalLocks` now keeps the batch lock door's `lockSource` (`'record'` or `'master'`) for a row answered `locked: true`, and exposes `heldByMaster(recordId)`. It answers `true` only for a row a read answered `lockSource: 'master'`. A 501, a `null` entry, a failed or unasked read, and a record-held row all answer `false`.\n- The grid's row CRUD verdict (`objectGridActionsColumn.tsx`) ANDs `!heldByMaster` into `canDelete`. The row menu, the row context menu and the list page's single-row selection bar all read the same `rowActionMenuProps`, so they all drop Delete on a master-held line. A record-held row keeps Delete and loses Edit, as before (#13568).\n- `ObjectGrid.tsx`: the lock hook is also enabled, and the demand probe also sent, on a grid whose rows offer Delete but no Edit (`rowMenuReadsLocks = (canEdit && onEdit) || (canDelete && onDelete)`). Without this, a Delete-only grid never read the lock and kept Delete on a master-held line. The read is still sent only on demand, never on first paint.\n- The column docblock and the `ObjectGrid.tsx` hook comment no longer say that a master-held line keeps Edit and Delete.\n- One `patch` changeset for `@object-ui/plugin-grid`.\n\nRead first, in order of risk:\n1. `ui/packages/plugin-grid/src/ObjectGrid.tsx`, the `rowMenuReadsLocks` hunk: a Delete-only grid now sends a lock read when a row's actions are reached for.\n2. `ui/packages/plugin-grid/src/hooks/useRowApprovalLocks.ts`, the `answered.set` hunk: `lockSource` is kept only on a `locked: true` entry, and only for one of the two values.\n3. `ui/packages/plugin-grid/src/objectGridActionsColumn.tsx`, the `canDelete` line.\n\nTwo-minute check: `cd ui && pnpm exec vitest run packages/plugin-grid/src/__tests__/rowMenuApprovalLock-36911.test.tsx` should report 10 passed, including the three tests under `objectstack#37231`.\n\n## Tests\n\nThe new pins are a top-level `describe` in the existing harness `rowMenuApprovalLock-36911.test.tsx`:\n- A master-held line offers neither Edit nor Delete. A record-held sibling offers no Edit and keeps Delete. An open sibling offers both (the control).\n- A grid with `onDelete` and no `onEdit` reads the lock on demand and drops Delete on the master-held line. The open row keeps Delete.\n- On the list page selection bar, a master-held line offers neither. A record-held sibling keeps Delete, and there is one lock read in total.\n- The 501, `null` and failed-read controls now include a master-held line, and each leaves its menu unchanged.\n\n## Acceptance notes\n\n- The cell-select path (`describeCell` → `approvalLocked`) still reads only the boolean. Both lock kinds refuse an update, so the boolean is enough there.\n- A `locked: true` entry with no `lockSource` (an older server) reads as record-held, which is the behaviour before this PR.\n- Not measured in a browser against the showcase expense lines. The pins drive the real `ObjectGrid` against a fake lock door.\n- The ablation proves only the master arm in the column verdict. The `rowMenuReadsLocks` widening has no ablation of its own. Its pin is the Delete-only test, which went red under the column ablation only because that ablation removes the downstream effect.\n\n## Verification\n\nAll readings below were taken at commit 929d5f0d68 in objectstack.\n\n<details><summary>Harness file, plugin-grid suite, type-check</summary>\n\n```text\nharness: cd ui && vitest run packages/plugin-grid/src/__tests__/rowMenuApprovalLock-36911.test.tsx\n Test Files  1 passed (1)\n      Tests  10 passed (10)\nos-verify-lock: VERDICT command-exit 0\n\nplugin-grid suite: cd ui && vitest run --maxWorkers=2 packages/plugin-grid/\n Test Files  313 passed (313)\n      Tests  2786 passed (2786)\nos-verify-lock: VERDICT command-exit 0\n\npnpm --filter @object-ui/plugin-grid type-check\nos-verify-lock: VERDICT command-exit 0\n```\n\n</details>\n\n<details><summary>Ablation: drop the master arm</summary>\n\n```text\nnode scripts/ablation-replace.mjs --file ui/packages/plugin-grid/src/objectGridActionsColumn.tsx --anchor \" && !heldByMasterAnswered(row)\" --delete -- (vitest on the harness file)\nablation-replace: ok mutation landed: anchor 1 -> 0, blob d9d2a5403f50 -> 2fcebc3668cf\n     x a master-held line offers neither Edit nor Delete; a record-held sibling offers no Edit and keeps Delete\n     x a grid whose rows offer Delete but no Edit still reads the lock, and drops Delete on the master-held line\n     x the list page selection bar: a selected master-held line offers neither; a selected record-held sibling keeps Delete\n      Tests  3 failed | 7 passed (10)\nablation-replace: ok restored: blob == HEAD (d9d2a5403f50) and `git diff HEAD` is empty\n```\nTwo earlier attempts were refused or invalid and are not counted. The first used the anchor with a trailing comma and the replacement `,`: the tool refused it as a no-op and restored the file before any test ran. The second deleted the comma along with the anchor: that broke the syntax, so the file collected no tests.\n\n\n</details>\n\n---\n\n_Generated by [Claude Code](https://claude.ai/code/session_01QSeKYmRepQK9DkZeU7F53D)_\n"
+}

@@ -2,8 +2,8 @@
   "number": 37250,
   "kind": "issue",
   "title": "「补填必填字段」弹窗按改动前的记录算选项可见性：商机改为「失败」时丢单原因显示「暂无可选项」，无法保存",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "huangyiirene",
@@ -14,7 +14,6 @@
     "area:ux",
     "bug",
     "domain:ui",
-    "pm:dispatched",
     "priority:p1"
   ],
   "assignees": [
@@ -23,11 +22,15 @@
   "milestone": null,
   "type": "Bug",
   "created_at": "2026-11-25T07:12:21Z",
-  "updated_at": "2026-11-25T07:36:44Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-25T11:45:17Z",
+  "closed_at": "2026-11-25T11:43:48Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 2,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/37250",
   "body": "### 环境\n云端，平台 18.6.0，hotcrm 6.6.0（2026-11-25，Irene 操作；Claude 读取了元数据核对原因）。\n\n### 现象\n商机详情页「销售流程」区块，直接把「阶段」从「谈判」改为「失败」。#35956 的「补填必填字段」弹窗弹出，要求补填「丢单原因 *」，但下拉显示「**暂无可选项**」，无法填写，改动也就保存不了。\n\n### 原因\n`crm_opportunity.loss_reason` 的每个选项都带 `visibleWhen`（hotcrm#2592 的修复）：\n\n```\n(has(record.stage) && record.stage == \"closed_lost\") || (has(record.requested_status) && record.requested_status == \"closed_lost\")\n```\n\n补填弹窗计算选项可见性时，用的是**改动前**的记录（stage 仍为「谈判」），没有把这次待保存的改动（stage → closed_lost）合进去，于是所有选项都被判为不可见。选「成交」补填「赢单原因」时 `win_reason` 同理，很可能同样为空。\n\n### 期望\n补填弹窗评估 `visibleWhen` / `requiredWhen` 等条件时，使用「原记录 + 本次改动」合并后的值；本例应列出全部丢单原因选项。\n\n### 相关\n- #35956（补填必填字段弹窗）\n- objectstack-ai/hotcrm#2592（给丢单 / 赢单原因选项加了按阶段显示的条件）\n\n优先级：priority:p1（产品负责人 Irene 要求）。\n"

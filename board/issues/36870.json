@@ -2,8 +2,8 @@
   "number": 36870,
   "kind": "issue",
   "title": "分组表头查询被分页截断时丢掉 hasMore：看板泳道合计可能显示「合计 0」或少算，且没有任何提示",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,18 +14,23 @@
     "area:ux",
     "bug",
     "domain:ui",
-    "pm:queue",
     "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-justin"
+  ],
   "milestone": null,
   "type": "Bug",
   "created_at": "2026-11-24T05:55:39Z",
-  "updated_at": "2026-11-24T08:33:32Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-25T11:54:48Z",
+  "closed_at": "2026-11-25T11:43:49Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 3,
+  "comments": 7,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/36870",
   "body": "triage#1 · os-warren · session_01JQwxbZKP5YM48rWMWTS7wE\n\nFiling gate: ① a defect with a named location, filed by triage at repo:objectstack#3's request (mailbox #36743, comment 7123381260, item 1). Source: L2 record 7123350562 on PR #36857 (#36520), item S3, outside that diff.\n\n## What happens\n\nOn a deployment that sets `OS_DATA_DEFAULT_PAGE_SIZE` or `OS_DATA_MAX_PAGE_SIZE`, a grouped read without a `limit` is cut to the default page size. The server answers `hasMore: true` (`protocol-data-crud.ts` ~644–678, `packages/types/src/query-read-limits.ts` ~255).\n\n`queryGroupHeaders` in `ui/packages/data-objectstack/src/index.ts` (~7700–7715, main 76bff41f) returns `records` alone, so the caller cannot tell a cut answer from a whole one.\n\nThe kanban lane statistic from PR #36857 then reads an absent group as an empty lane (`laneFigureOf` in `KanbanLaneStatistic.ts`). When the filtered set holds more distinct lane values than one page, a lane with records can draw \"Sum 0\", and \"Uncategorized\" can draw an understated total, with no marker.\n\nreach: read from code by the L2, not run. It reaches boards with a `sum` summary on deployments that cap the page size, where lanes come from the data (lookup lanes) or the field has many values outside the lanes.\n\n## Expected\n\nA grouped answer that the server cut says so. A board then draws no figure for an answer it knows is partial, rather than a wrong total.\n\n## Acceptance\n\n- `queryGroupHeaders` hands back the server's `hasMore`, or an equivalent \"partial\" flag, beside `records`. Its callers keep working: the grouped grid, `usedCurrencyCodes` and the kanban lane statistic.\n- The kanban lane statistic draws no figure, for any lane, when the grouped answer is partial.\n- A test drives a grouped read capped by a small default page size and asserts that the flag is set and that no lane figure is drawn.\n\n## Order\n\nAfter PR #36857 merges. The lane statistic that reads the flag lands there.\n\nBlocked-by: #36857\n\nDedupe: open issues for `queryGroupHeaders hasMore` and for a grouped read truncated by page size return none. #36520 is the parent card."

@@ -2,9 +2,9 @@
   "number": 37210,
   "kind": "pull_request",
   "title": "feat(ai): get_record_context joins the service-ai platform tool group, with its chat label (ADR-0160 row 9)",
-  "state": "open",
+  "state": "closed",
   "state_reason": null,
-  "draft": true,
+  "draft": false,
   "author": {
     "login": "os-warren",
     "id": 318460043,
@@ -23,11 +23,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-25T03:47:34Z",
-  "updated_at": "2026-11-25T04:57:39Z",
-  "closed_at": null,
-  "closed_by": null,
-  "merged_at": null,
-  "comments": 4,
+  "updated_at": "2026-11-25T13:16:52Z",
+  "closed_at": "2026-11-25T13:16:49Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-25T13:16:49Z",
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/pull/37210",
   "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-warren\"} -->\n_Requested by **Warren** · [project thread](https://claude.ai/code/project/chan_01U5RdnAAmkSQmZbqh6FtqZ8?thread=cmsg_01U5RdnAAmkSQmZbqh6FtqZ84wsrfBFiVrUB868HPtFvKC)_\n\nFixes #37190\n\n## 维护者速读\n\n- 做什么：平台的「云端注册了哪些工具」清单加上 `get_record_context`；11 个语言包加上它在对话里显示的步骤名（中文「读取记录资料」）。\n- 为什么：这是 cloud#4978（应用内助手注册这个工具）在本仓的一半，两边要一起落地。\n- 出错会怎样：只影响清单注释与一条 lint 提示；作者写的东西不变。\n- 要你做什么：无。**按卡上的落地顺序，本 PR 保持草稿，等 cloud#4978 的 PR（cloud#4987）就绪再合，然后由 cloud#4987 自己把 pin 前移过本 PR 的合并提交。**\n\n## What changes\n\n- `packages/spec/src/system/constants/platform-tool-names.ts#PLATFORM_TOOLS_BY_PACKAGE`: `get_record_context` joins the `service-ai` group (cloud `@objectstack/service-ai` registers it for the in-app assistant from the same definition the MCP door serves, delegating to the same `record-context` executor, ADR-0160 D4). The group's docblock says so. It stays in `MCP_DOOR_TOOL_NAMES` too.\n- `chatbot.tool.get_record_context` in all eleven packs under `ui/packages/i18n/src/locales/` (en \"Read the record context\", zh-Hans 读取记录资料, zh-Hant 讀取記錄資料, …), placed after `get_record`.\n- The `skill.tools[]` lint rule (`packages/lint/src/validate-ai-tool-references.ts`) now resolves `get_record_context` for a skill kept out of MCP (`mcpPrompt: false`), so the expected report ADR-0160's implementation split note describes ends. No rule code changes: the name resolving through `PLATFORM_PROVIDED_TOOL_NAMES` is what ends it.\n- Pins: `platform-tool-names.test.ts` (in the `service-ai` group, at the door, not in `service-ai-studio`); `validate-ai-tool-references.test.ts` (resolves on `mcpPrompt: false`, `true` and unset, with a neighbour spelling as the control).\n- Changeset: `@objectstack/spec` patch, `@object-ui/i18n` patch.\n\n## Why\n\nThe registry's maintenance contract: a group is the exact set one cloud package registers, so the name joins with cloud's registration (cloud#4978, PR objectstack-ai/cloud#4987) and not before (card's *Order with cloud*). Cloud's `platform-tool-names-conformance.test.ts` asserts the `service-ai` group exactly, and cloud#4987 adds `get_record_context` to it: merge this first, then cloud#4987 carries the pin move past this merge sha (an unrelated cloud pin bump past it would turn that test red).\n\n## Verification\n\nContainer, worktree on `29f1280d` + this commit:\n- `pnpm --filter @objectstack/spec build` then `pnpm --filter @objectstack/spec check:generated`: all 14 artifacts up to date.\n- `packages/spec`: `vitest run src/system/constants/platform-tool-names.test.ts` → 12 passed.\n- `packages/lint`: `vitest run src/validate-ai-tool-references.test.ts` → 30 passed.\n- `ui`: `vitest run` of `plugin-chatbot/.../toolLabels-locale-parity-7481.test.ts`, `ChatbotEnhanced.answerSource-31868.test.tsx`, `i18n/.../all-locales-key-parity.test.ts` → all passed (94 tests).\n- Cloud side, against this head's framework build: cloud#4987's `platform-tool-names-conformance.test.ts` green with `get_record_context` in the group.\n\nClause-②: yes (widening) — `PLATFORM_TOOLS_BY_PACKAGE` and `PLATFORM_PROVIDED_TOOL_NAMES` gain `get_record_context`, so `ai-skill-tool-unresolved` stops reporting it on a `mcpPrompt: false` skill; nothing that resolved before is reported\nMetadata-protocol: none\nSkills-docs: none — `skills/objectstack-ai/SKILL.md` points at the registry file and names no tool\n\n## Human Minimum\n\n- [x] 1. Schemas start as Zod; `packages/spec` holds no runtime logic.\n- [x] 2. Every name I added uses the casing for its kind.\n- [x] 3. No formatter ran; `pnpm lint` passes.\n- [x] 4. One issue, one branch off an up-to-date `main`, one pull request.\n- [x] 5. A change that publishes carries a changeset, and both declaration lines are filled in here and in the changeset.\n- [x] 6. `packages/spec` touched: its generated artifacts are regenerated and committed.\n- [x] 7. No hand edits to `content/docs/references/`, `packages/*/CHANGELOG.md` or `content/docs/releases/`.\n- [x] 8. Title, body and comments are in English.\n- [x] The *Before Submitting* list in CONTRIBUTING.md is done."

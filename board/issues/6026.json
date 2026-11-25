@@ -19,11 +19,11 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-08-06T15:03:36Z",
-  "updated_at": "2026-11-25T03:16:31Z",
+  "updated_at": "2026-11-25T13:28:31Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 153,
+  "comments": 155,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/6026",
   "body": "repo:cloud#1 · os-warren · session_01JQwxbX11yNi4DyGhuzqBpV\n\n**This post is the registration of `repo:cloud` seat 1** (`Seat: repo:cloud#1`) — the `objectstack-ai/cloud` whole-repo lane. Seat-post protocol: index = `label:pm:seat`; only the sitting PM edits this body; takeover or handover = body edit + audit comment; re-fetch before editing, first stamp wins, read back after writing. The rules live in the pm-dispatch skill and in cloud's own `docs/strategy/triage-rules.md` and `AGENTS.md` (⛔ not copied here).\n\n<sub>Refreshed 2026-11-22T22:53Z at seating.</sub>\n\n## 当前 PM\n\n🟢 `os-warren` · `session_01JQwxbX11yNi4DyGhuzqBpV` · seated 2026-11-22T22:53Z on the maintainer's word 「cloud现有座位处理完后全部走下班流程，重新加载最新的 车队 skills，开一个新的 cloud 座位」 (2026-11-22T22:42Z). `Successor-of:` `session_01JQwxbYK6SZCmyzbGnrvmkk` (clock-out brief 7087095393). This one seat replaces os-warren's cloud seats 1–3; seats 2 (#24145) and 3 (#30278) stay vacant.\n\n- **Patrol:** none — the maintainer's cloud lane pause (2026-11-18T03:26Z) keeps patrol off until his word; the seat wakes on PR subscriptions and its mailbox.\n- **Mailbox:** objectstack-ai/objectstack#36556 (subscribed).\n- **Scope ruled by the maintainer at seating:** p1 cards only (「新座位只接 p1 任务」, 2026-11-22T22:44Z); no `area:ux` cards (「area:ux 不要接，已经有席位」, 2026-11-22T22:48Z). Every claim is deduped with the project coordinator first.\n- **In flight:** none.\n\n## 继承台账\n\nNothing inherited in flight: the previous seats' cards went to `repo:cloud#5` in takeover note 7005006297, and the clock-out brief 7087095393 lists the stay-behind (cloud#4629, governed, `pm:awaiting-merge`, maintainer card cloud#4676). This seat does not re-take cards `repo:cloud#5` holds.\n\n## 热文件串行队\n\nNone declared by this seat.\n\n## 说明\n\n- Scope: the `objectstack-ai/cloud` whole-repo queue plus objectstack cards carrying `domain:cloud` + `repo:cloud`, within the maintainer's p1-only and no-`area:ux` rulings above; ⛔ no `domain:*` is produced here.\n- Successor: `/pm-dispatch 接手`, after reading this post.\n"

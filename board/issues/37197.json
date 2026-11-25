@@ -2,8 +2,8 @@
   "number": 37197,
   "kind": "issue",
   "title": "Docs portal `/docs…` in an app-less variant of the app shell on desktop: neutral 「文档」 head with the app switcher, docs tree in the sidebar, no top bar, every URL kept (#37150 item 2)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,7 +13,6 @@
   "labels": [
     "area:ux",
     "domain:ui",
-    "pm:dispatched",
     "priority:p2"
   ],
   "assignees": [
@@ -22,11 +21,15 @@
   "milestone": null,
   "type": "Task",
   "created_at": "2026-11-25T03:15:18Z",
-  "updated_at": "2026-11-25T07:51:35Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-25T08:53:54Z",
+  "closed_at": "2026-11-25T08:46:11Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 9,
+  "comments": 10,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/37197",
   "body": "repo:objectstack#4 · os-justin · session_01QSeKYnagJvGbCtNg2PhvgW\n\nFiling gate ③ — maintainer ruling. Source: #37150 item 2, ruling recorded on #37150 (comment 7151721568). The maintainer, verbatim, in seat repo:objectstack#4's session: 「B：做一个不属于任何应用的外壳变体（推荐）」. It implements ruling A on #36107 phase 3 (record 7142354097: 「统一成一种外观，两个入口和旧链接都保留」).\n\n**Business reason.** After PR #37193, from 768 px up an app's manual (`/apps/APP/docs…`) draws in the app shell: sidebar, no top bar. The docs portal (`/docs…`), which names no app, still draws in Home's frame with the docs bar (`DefaultHomeLayout variant=\"docs\"`, `ui/apps/console/src/App.tsx:228-235`, route at `:441`). A reader moving between the two entry points sees two different frames for the same documents, and the portal is the last desktop page that still draws a top bar. The shell cannot simply be mounted around it: `ConsoleLayout` is app-scoped, and guessing an app for an app-less route is what objectui#4280 refused for `/forms/:name`.\n\n**Change.** On desktop (≥ 768 px), `/docs…` renders in an app-less variant of the same AppShell and sidebar frame:\n- the sidebar's usual chrome (search, bell, account footer), and no top bar;\n- in place of an app's menu head, a neutral 「文档」 head with the app switcher;\n- the sidebar body is the docs tree, with 「全部文档」 first, reusing the docs-navigation slot PR #37193 added (`sidebarDocsNavSlot`);\n- no app is guessed, and nothing is written into shared navigation state (last app, current app);\n- every URL form stays as it is. That includes the old forms #37193 pins (book NAME, book NAME/DOC, a doc name that is also a book name, canonical SLUG/DOC) and their redirects (ADR-0046 §6).\nPhone is unchanged.\n\n**Two stages (maintainer, verbatim, recorded on #37150: 「docs 新外壳先画设计图给我看」).**\n1. **Design first.** The cloud session produces mockups of the app-less shell: the real AppShell and sidebar components on a scratch branch, screenshotted, or a static page. Views:\n   - the desktop `/docs` landing;\n   - one doc open;\n   - the 「文档」 head with the app switcher open;\n   - the sidebar collapsed;\n   - phone, unchanged.\n\n   Each view gets a one-line note on what differs from the app shell. The images or links go to seat repo:objectstack#4, which puts them in front of the maintainer.\n2. **Build** only after the maintainer approves the design on this card. Until then there is no implementation PR for this card.\n\n**Acceptance (stage 2).**\n- At 768 and 1440 px, `/docs`, `/docs/<book>` and `/docs/<book>/<name>` show the app-less shell with the 「文档」 head and the docs tree, and no top bar.\n- At phone width the current portal is unchanged, as the control.\n- Old URL forms resolve as before.\n- Opening `/docs` cold does not change the last-used app.\n- Pins at desktop and phone width; an ablation of the variant switch turns them red.\n\nGrade: area:ux · Task · the last desktop page still drawing the top bar, and a second frame for the same documents · p2 (epic grade, as #37150). Size L (new app-shell structure).\nMode: `mode:cloud`. It runs in its own cloud session, per the maintainer's rule for large cards.\nReader: zone a4-C of seat repo:objectstack#4 dispatches stage 1 when a slot is free and stage 2 once PR #37193 lands, because the two share `ConsoleLayout.tsx`, `UnifiedSidebar.tsx`, `sidebarDocsNavSlot.tsx` and the docs pages.\nStage 2 is blocked by #37193 and by the maintainer's approval of the design. Stage 1 (mockups on a scratch branch, no PR) is not blocked and does not conflict with #37193.\nDedupe: `\"docs portal\" app-less shell` (open objectstack issues) → 1 hit (#37150, the parent card). `docs app shell variant` → 7, none on the portal frame. `DefaultHomeLayout docs` → 2 (#37150, #36107).\n"
