@@ -1,0 +1,39 @@
+{
+  "number": 37132,
+  "kind": "pull_request",
+  "title": "skills(project): platform catalog lists the built-in sys_task and sys_note objects",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "pm:awaiting-merge",
+    "security",
+    "size/s",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "os-justin"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-24T21:50:18Z",
+  "updated_at": "2026-11-25T00:49:55Z",
+  "closed_at": "2026-11-25T00:49:53Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-11-25T00:49:53Z",
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/37132",
+  "body": "repo:objectstack#4 · os-justin · session_01QSeKYo86w1wqy2z2fMrryr\n\nFixes #37058\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 用户能看到什么变化:做应用的 AI 助手在「平台已自带什么」目录里能查到内置的任务和备忘两个对象,需要待办或备忘时直接用平台的,不再自己另建一套。\n- 为什么做:平台新带了任务和备忘,目录没跟上,属于起步应用这条线上技能说明的补漏。\n- 出错会怎样:写错的话助手会被引到不存在的视图或权限说法上;只动说明文字和一条测评,撤回这一个合并即可。\n- 要你做什么:批准合并。只改技能说明文字、一条测评和生成器测试的文本上限;因为教到行级可见性和 `member_default` 授权,契约审核判它「涉及权限」,按需人工批准处理。另有一处小事随批准认可:生成器测试的手写文本上限 1581→1719,先删 47 字节真重复,余额按实测提高(依裁决 6513306068 的 A 路线)。契约审核 PASS:记录 7145995541,Head-sha `1239e77fd649ba695a64a4217bfc9f7cefae3f04`。\n\n## What changes\n\n- `packages/spec/scripts/lib/platform-catalog.ts`: a new group, \"Tasks and notes\", with one row each for `sys_task` and `sys_note`. The task row spells the navigation entry with `objectName` and `requiresObject` both `sys_task` (`defineStack` refuses a `type: 'object'` entry naming an object the stack does not declare without `requiresObject`); the note row reuses it, naming `sys_note`. The `sys_comment` row's cell reads \"a comments or record-notes table\" (notes kept on a record still land there; `sys_note` links to no record). Two same-file restatement cuts: `sys_mail_message` points at the `sys_mailbox` row instead of restating it, and `sys_work_calendar_exception` drops \", kept in Setup\" (said on `sys_work_calendar`).\n- `skills/objectstack-project/references/platform-catalog.md`: regenerated with `pnpm --filter @objectstack/spec gen:skill-refs`, never hand-edited.\n- `skills/objectstack-project/evals/project-process.json`: eval case 10, a to-do request answered with a navigation entry on `sys_task` carrying `requiresObject`, and no new object.\n- `packages/spec/scripts/platform-catalog.test.ts`: the hand-written-text ceiling moves from 1581 to 1719 tokens (arithmetic below).\n- `.changeset/37058-skills-catalog-sys-task-note.md`: `@objectstack/skills` patch. `@objectstack/spec` is not in it: its `files` list ships no `scripts/` path.\n\nEvery fact in the two rows was read from the merged code at `63ab4794eb`:\n\n| Fact in the row | Source |\n|:--|:--|\n| task holds title, status, due time, assignee, platform-written `completed_at` | `packages/platform-objects/src/work/sys-task.object.ts` fields; `work/hooks.ts` writes the stamp |\n| note holds a title and a rich-text body | `work/sys-note.object.ts` fields |\n| no link to another record | both object docblocks; neither declares a target column |\n| task views `assigned_to_me`, `created_by_me`, `all` | `sys-task.object.ts` `listViews` |\n| note views `mine`, `all` | `sys-note.object.ts` `listViews` |\n| a task is opened by its creator and its assignee | `sharingModel: 'private'` plus the `sys_task_assignee` rule in `work/sharing-rules.ts` |\n| a note is read by its creator | `sharingModel: 'private'` |\n| `member_default` grants read, create and edit, not delete | `packages/plugins/plugin-security/src/objects/default-permission-sets.ts`, the `sys_task` and `sys_note` lines |\n| the nav entry needs `requiresObject` | `packages/spec/src/stack.zod.ts` app-navigation cross-ref; pin in `packages/lint/src/validate-object-references.test.ts` |\n| data API | neither object declares `enable.apiMethods` |\n| mounted on every boot | derived by the generator from `PLATFORM_OBJECTS_BY_PACKAGE` |\n\n### Size readings (`skills/**`)\n\n| Reading | Before | After |\n|:--|:--|:--|\n| `references/platform-catalog.md`, lines | 152 | 159 |\n| `references/platform-catalog.md`, tokens (`check-skills-token-ratchet`) | 2677 | 2859 |\n| `evals/project-process.json`, lines | 159 | 176 |\n| all eval fixtures, tokens | 83745 | 84068 |\n| every `SKILL.md` in the bundle, lines | 4937 | 4937 |\n| bundle total, tokens | 296366 | 296871 |\n\n### The ceiling move, and the ruling it rests on\n\nThe page is generator-owned, so the token ratchet does not price it; its hand-written text has its own shrink-only ceiling in the generator test, and that sat at one token of headroom.\n\n- base: 6320 bytes, 1580 tokens, ceiling 1581\n- cut first: 47 bytes of restatement (the `sys_mail_message` and `sys_work_calendar_exception` cells above; \"no link to another record\" said once for both new rows)\n- added: 602 bytes (the group title, the two rows, the `requiresObject` spelling, \"record-notes\")\n- now: 6875 bytes, ceil(6875 / 4) = 1719; the ceiling is pinned at that measurement, 0 headroom\n\nThe raise follows the path the test's own comment and the ratchet header name, the maintainer's standing ruling 「A:先削重复,余额按实测提高」 (ruling record 6513306068). The remainder is the card's ordered facts, which deletion cannot pay without cutting other rows' teaching.\n\n## Review history\n\n- Contract review 7145761197 at `261221ef1b`: FAIL — M1 (the nav entry lacked `requiresObject`), S1 (the `sys_comment` cut lost record notes), nits N1–N4; `Security-touching: yes`, so `security` was added (7145774656) and this PR is Tier H.\n- Fix round at `1239e77fd6`: M1 and S1 fixed, N2 and N3 folded in, N1 and N4 left; delta review on that head follows on this PR.\n\n## Tests\n\nAt head `1239e77fd6`: `pnpm --filter @objectstack/spec exec vitest run --project local --maxWorkers=2 scripts/platform-catalog.test.ts` — 20 passed; `pnpm --filter @objectstack/spec build && check:generated` — all 14 generated artifacts up to date; exit 0 for `check:skill-refs`, `check-skills-token-ratchet.mjs`, `check:doc-authoring`, `check:skill-links`, `check:skill-identifier-liveness`, `check:nul-bytes`, `check:issue-citations`, `check:pm-skill-id-lint`, `check-empty-changeset.mjs --base origin/main`; `overlap-check` clean. Every other derived family is left to CI on this head.\n\nNo ablation: the diff changes generator data, a pin and an eval fixture, and no behaviour a test holds.\n\n## Verification\n\nRead first, by risk:\n\n1. `packages/spec/scripts/lib/platform-catalog.ts`, the \"Tasks and notes\" group: every clause against the table above.\n2. `packages/spec/scripts/platform-catalog.test.ts`, the `HAND_WRITTEN_CEILING_TOKENS` hunk: the one number that moved up.\n3. `skills/objectstack-project/evals/project-process.json`, case 10.\n\nTwo minutes: `pnpm --filter @objectstack/spec check:skill-refs` exits 0, and `grep -c 'requiresObject' skills/objectstack-project/references/platform-catalog.md` prints at least 1.\n\n---\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01QSeKYo86w1wqy2z2fMrryr\n\n<!-- signed: repo:objectstack#4 · os-justin · session_01QSeKYpEsWWE9Y5YtSsDgqZ -->\n"
+}

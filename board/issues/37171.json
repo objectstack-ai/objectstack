@@ -1,0 +1,33 @@
+{
+  "number": 37171,
+  "kind": "pull_request",
+  "title": "feat(embedder-openai): an over-limit input is refused, not truncated (known-model input limits, one shared token estimate)",
+  "state": "open",
+  "state_reason": null,
+  "draft": true,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "os-justin"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-25T01:06:40Z",
+  "updated_at": "2026-11-25T01:20:49Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/37171",
+  "body": "repo:objectstack#4 · os-justin · session_01QSeKYpEsWWE9Y5YtSsDgqZ\nFixes #37093\n\nClause-②: yes\nMetadata-protocol: none\n\n## 维护者速读\n- 用户能看到什么变化：接 OpenAI 兼容嵌入服务的应用，文本超过模型输入上限时会直接报错（写明第几条、模型、估算长度和上限），不再被服务商悄悄截断。\n- 为什么做：属于「知识检索平台化」专题，解决长文本后半段搜不到却没有任何提示的问题。\n- 出错会怎样：估算偏保守，接近上限的文本可能被多拒一些；可通过配置项放宽，直接撤回本改动也安全。\n- 要你做什么：无。\n\n## What changes\n\nOpened by the seat session on the maintainer's authorization (「#37093：开 PR 放行。你应该使用 pm-dispatch 技能审核和落地pr，该放行的都放行」); the developer's own `pr_create` in its session (`session_01QSeKYpJCg2rG1RGK4BwAKx`) was refused by a permission check. Body below is the developer's, verbatim apart from this paragraph and the formula note in Acceptance notes.\n\n1. **Known-model input limits** — `packages/plugins/embedder-openai/src/index.ts` gains `KNOWN_MAX_INPUT_TOKENS`; `OpenAIEmbedderOptions.maxInputTokens?` (positive integer) overrides it.\n2. **Refused, not truncated** — `embed()` measures every input before any request. An input whose estimate is over the limit fails the whole call with an error naming its 0-based index, the model, the estimate and the limit; nothing is sent. An input at or under the limit is sent unchanged.\n3. **Unknown model, no option** — no limit, one warning per embedder instance, folded into the existing batch-size warning (one warning naming every missing option).\n4. **One shared estimate** — module `packages/spec/src/shared/token-estimate.ts`, exported on `@objectstack/spec/shared` as `estimateTokens(text)` plus `TOKEN_ESTIMATE_MARGIN` (1.1). Formula: CJK characters and full-width punctuation 1.5 each; an ASCII letter/digit run ceil(length / 4) (ruling 「A」, comment 7149124439; exported constant `ASCII_RUN_CHARS_PER_TOKEN` = 4); other punctuation 1; × 1.1; whitespace 0; any other non-whitespace character 1; rounded up. Documented on the docblock and in `content/docs/ai/knowledge-rag.mdx` (\"Embedder input limits\").\n5. `IEmbedder` is not changed.\n\n### Why the estimate lives in `@objectstack/spec`\n\n`embedder-openai`'s only dependency is `@objectstack/spec`; `service-knowledge` depends on `core`, `service-settings` and `spec`. The intersection is `spec` alone. `spec/shared` already exports pure runtime helpers of the same class (`resilientFetch`, used by `embedder-openai`; `currencyForLocale`). A pure, dependency-free text measure is in that class — no policy, no I/O, no state.\n\n### Input limits — provider sources (read 2026-11-24)\n\n| Model | Limit | Source |\n|:---|---:|:---|\n| `text-embedding-3-small`, `-3-large`, `-ada-002` | 8192 | OpenAI embeddings API reference (\"8192 tokens for all embedding models\") |\n| `text-embedding-v3` | 8192 | Alibaba Model Studio text-embedding API |\n| `text-embedding-v2`, `-v1` | 2048 | same page |\n| `embedding-3` | 3072 | BigModel embeddings API reference |\n| `embedding-2` | 512 | same page |\n| `BAAI/bge-m3` | 8192 | SiliconFlow embeddings API reference |\n| `BAAI/bge-large-zh-v1.5`, `-en-v1.5` | 512 | same page |\n\nNot documented, so left out (no limit, warning): `doubao-embedding-*`, `nomic-embed-text`, `embo-01`, Ollama `bge-m3`, `BAAI/bge-base-zh-v1.5`, `BAAI/bge-small-zh-v1.5`.\n\n## Tests\n\n- `packages/spec/src/shared/token-estimate.test.ts` — the formula term by term, and the cl100k acceptance test: 5 Chinese regulation-like samples and 5 mixed Chinese/English samples, each asserting `estimateTokens(text) >= cl100k` against recorded fixtures (sampled with `js-tiktoken` 1.0.21 outside the repo; no dependency added), plus 8 English-heavy cl100k fixtures (long words, SQL identifiers, code, URL, numbers, 12- and 8-digit runs, prose); 26 cases in total.\n- `packages/plugins/embedder-openai/src/__tests__/openai-embedder.test.ts` — \"input limit (refused, not truncated)\": over-limit refused naming index/model/estimate/limit with fetch never called; at-limit sent unchanged; per-model limits; explicit `maxInputTokens` wins; non-positive-integer option refused; unknown model → no limit, one warning.\n\nLocal readings at head `1660e96b`: embedder-openai 27 passed, typecheck 0; spec typecheck 0; `check:generated` all 14 up to date; a 45-command gate subset 45/45 exit 0; ablation 1 (refusal disabled) → 3 input-limit tests red; ablation 2 (ASCII-run rule back to 1 per run) → 9 red (6 of 8 English pins + 3 formula cases); both restored blob-equal. Full spec suite last run at `2724c5e4` (984 files / 29879 passed); only `token-estimate.ts` / its test changed under `spec/src` since. At `2724c5e4`: `dispatch-gates --ran` 112 derived, 108 exit 0, 4 NOT MEASURED (prerequisite; CI runs them); `overlap-check` clean.\n\n## Acceptance notes\n\n- Deviation: `pr_create` refused in the dev session; opened by the seat session on the maintainer's authorization.\n- **Formula ruling A applied** (record 7149124439 on #37093, the maintainer: 「A」): an ASCII letter/digit run counts ceil(length / 4), so English-heavy text errs high too.\n- Under ruling A, long random strings still estimate below cl100k: a 16–20 digit run 35 vs 36, a URL with a 32-hex id 57 vs 58, sha256 hex plus base64 38 vs 81, a UUID 19 vs 40. Not pinned; the docs state the limitation. A follow-up formula question goes to the maintainer.\n- `IEmbedder.maxInputTokens?` / the service learning the limit (#37098) and `IEmbedder.model?` (#37100) are out of scope.\n- The merged unknown-model warning: an app that set only `maxBatchSize` for an unknown model now warns again (stated in the changeset).\n\n## Verification\n\nTwo-minute check: `pnpm --filter @objectstack/embedder-openai test` — the six \"input limit\" cases pass.\n\n---\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01QSeKYpEsWWE9Y5YtSsDgqZ\n\n<!-- signed: repo:objectstack#4 · os-justin · session_01QSeKYpEsWWE9Y5YtSsDgqZ -->\n"
+}

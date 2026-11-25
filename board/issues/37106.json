@@ -11,7 +11,7 @@
     "type": "User"
   },
   "labels": [
-    "area:devpath",
+    "area:build",
     "pm:dispatched",
     "priority:p1"
   ],
@@ -21,11 +21,11 @@
   "milestone": null,
   "type": "Task",
   "created_at": "2026-11-24T19:39:05Z",
-  "updated_at": "2026-11-24T19:43:25Z",
+  "updated_at": "2026-11-24T21:59:40Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 1,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/37106",
   "body": "maintainer · os-bob · session_012dn2AecKpLaYkUtNRiqtby\n\nFiling gate: ③ maintainer-directed. Source: maintainer 2026-11-24, 「同时立卡评估 os dev 默认的 SQLite 能否改为 Turso」. This carries the accepted design decision D12: 「默认数据库改 libSQL，放到最后做」. Context: epic #37000 phase 2 now moves `knowledge-turso` into this repo so that `os dev` gets vector search on a local libSQL file.\nGrading: area:devpath · Task · p3 (an evaluation; it blocks nothing — phase 2's turso store runs on its own libSQL file whatever the default is) · reach: every `os dev` user · evidence: read.\n\n## 维护者速读\n- 做什么：评估 `os dev` 的默认数据库能不能从现在的 SQLite（better-sqlite3）换成本地 libSQL 文件（driver-turso），只出评估报告和建议，不改默认值。\n- 为什么：托管云用的是 libSQL，本地和云端用同一种引擎更一致；本地的向量检索也能和业务数据放在同一个库里。\n- 结果怎么用：报告给出「换 / 不换 / 有条件换」和迁移路径；真要换另立卡，按 D12 放在知识平台之后做。\n- 需要你做的：看报告，拍板。\n\n## Facts (main at filing)\n- The default is SQLite through better-sqlite3 at `.objectstack/data/objectstack.db`. `packages/cli/src/utils/storage-driver.ts` (`SqliteFamilyEngine = 'better-sqlite3' | 'sqlite-wasm' | 'memory'`) covers this, and `better-sqlite3` is a CLI dependency.\n- `@objectstack/driver-turso` is an optional peer of the CLI. It already accepts `file:./data/objectstack.db` for a local libSQL file (`storage-driver.ts:150-152`). URL resolution was fixed in #5602 / #5820.\n- On the remote transport, driver-turso declares no transaction members (`packages/drivers/driver-turso/src/remote-transport.ts:2081`, #18063). Real transactions on remote libSQL are a paused epic (#32500, decision #32481). Local `file:` libSQL is a different transport; whether it gives real transactions is one of the questions below.\n\n## Questions the report answers\n1. **Parity.** Run the driver and engine suites that run on better-sqlite3 against driver-turso on a `file:` URL. List what passes, what fails and why: transactions, schema sync and migrations, JSON and boolean coercion, pagination tie-breaks, the remote-only backfills.\n2. **Transactions.** Does local `file:` libSQL run real transactions through driver-turso today? If not, what would it take, and how does that relate to #32500?\n3. **Install and startup.** Install size and native binaries per platform (macOS arm64/x64, Linux glibc/musl, Windows), compared with better-sqlite3. Cold start time. `npx` / `create-objectstack` first-run experience.\n4. **Existing projects.** What happens to a project that already has `.objectstack/data/objectstack.db` written by better-sqlite3? Can libSQL open the file as is, or does it need a one-time conversion? Is the change reversible?\n5. **Other users of the default.** Name every code path that assumes better-sqlite3: tests, `os migrate`, backups and export, `@objectstack/verify`, the docs, the skills.\n6. **Vector search in the same file.** If the default becomes libSQL, can `knowledge-turso` share the platform database file instead of its own? What does that cost (locking, file size, backup)?\n7. **Recommendation.** Switch / don't switch / switch on conditions, with the migration path and the cards it would need.\n\n## Acceptance\n- A report under `docs/` (or as a comment here if the repo's docs rules say so) that answers 1–7 with measured numbers and test output, not guesses.\n- No change to the default in this card.\n\n## Out of scope\n- Changing the default (a later card, after the knowledge platform, per D12).\n- Remote Turso transactions (#32500).\n- The hosted product (it already runs on libSQL).\n\nBlocked-by: none.\nRelated: #37000 (phase 2 turso move), #32500, #32481, #5602, #5820.\nReader: the data / drivers lane.\nDedupe: `default database turso` 251 (none on the dev default; nearest #32500, remote transactions) · `os dev libsql default` 109 (same) · `5602` 19 (#5602 / #5820 closed: URL resolution, not the default)."

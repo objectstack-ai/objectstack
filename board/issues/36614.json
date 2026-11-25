@@ -12,18 +12,18 @@
   },
   "labels": [
     "area:fleet",
-    "pm:blocked",
+    "pm:queue",
     "priority:p2"
   ],
   "assignees": [],
   "milestone": null,
   "type": "Task",
   "created_at": "2026-11-23T03:29:36Z",
-  "updated_at": "2026-11-24T15:51:24Z",
+  "updated_at": "2026-11-24T22:41:05Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 3,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/36614",
   "body": "repo:objectstack#1 · os-warren · session_01JQwxbZeHNsF3RWcWpj7rGj\n\nFiling gate ① · Source: fleet · found by seat repo:objectstack#1 on #36596 (main red after PR #36564); named as out-of-scope in that card thread's os-dev-report.\n\n## What happened\n`Temporal Conformance (live PG + MySQL)` is the only CI job that runs the `driver-sql` suite against real Postgres and MySQL servers. By design it runs on main pushes only (`if: … github.event_name != 'pull_request' && github.event_name != 'merge_group'`, \"full battery only\", #22998). So PR #36564 merged green and its new live MySQL cases first ran on main, which stayed red from 00:50Z to 03:28Z on 2026-11-23 until PR #36600 landed. The card thread's local evidence was MariaDB 10.11, which does not share MySQL 8's `DROP DEFAULT` behaviour.\n\n## The question (maintainer's call: CI time budget)\nShould a PR whose diff touches `packages/drivers/driver-sql/**` (or a narrower DDL path set) also run this job on the PR, or in the merge queue? Today the cost lands on main as a red window instead.\nOptions to weigh:\n- A. Leave as is: devs paste in-container live MySQL 8 + PG 16 output on driver-sql DDL PRs (already the fleet habit since #36596).\n- B. Run the job on `merge_group` when `driver-sql` changed: one live run per landing driver-sql PR, never on ordinary PRs.\n- C. Run it on `pull_request` when `driver-sql` changed: earliest signal, highest runner time.\n\n## Done when\n- The maintainer picks A, B or C (or another). For B/C, a governed `ci.yml` PR (Tier H) implements the filter, and one driver-sql PR shows the job running in the chosen event.\n\nreach: every `driver-sql` PR; last miss cost main about 2.5 hours red.\nBusiness reason: main red blocks every PR's base; a live-DB regression should be caught before it lands.\nReader: CI owners (`.github/workflows/ci.yml`, the filter job and THE TWO SPEEDS).\nDedupe: `Temporal Conformance pull_request`, `live MySQL PR CI`, `driver-sql merge_group` → none.\nGrade suggestion: p2. Triage decides; the choice is the maintainer's."

@@ -1,0 +1,36 @@
+{
+  "number": 37118,
+  "kind": "pull_request",
+  "title": "fix(plugin-list): lane statistic picker offers min/max over date, datetime and time fields",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tooling"
+  ],
+  "assignees": [
+    "os-justin"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-24T20:18:51Z",
+  "updated_at": "2026-11-24T21:21:01Z",
+  "closed_at": "2026-11-24T21:20:58Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-24T21:20:58Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/37118",
+  "body": "Fixes #36880\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n- 看板视图的「列汇总」设置里，最小值、最大值现在也能选日期、日期时间和时间字段；以前只列数字字段。\n- 属于看板泳道统计的后续：让设置面板与校验规则保持一致，替搭建看板的人补上本已支持的选项。\n- 选错字段时泳道底部不显示数字，不会写坏数据；改动只在设置面板，可直接撤回。\n- 无\n\n## What changes\n\n- `ui/packages/plugin-list/src/ListView.tsx`: the board's lane-statistic field list is now built **per function** (`sum`, `avg`, `min`, `max`) from the spec's aggregate × field-type table (`isAggregateCompatibleWithFieldType`, imported from `@objectstack/spec/data`, the import this file already had), less the spec's boolean class, keeping the existing filters (not multiple, not hidden, readable by the caller). Before, all four functions offered the `sum` row's list.\n- `ui/packages/plugin-list/src/components/ViewSettingsPopover.tsx`: the internal `ViewSettingsKanban.summary` takes `fields` (one list per function, new internal type `ViewSettingsKanbanSummaryFields`) in place of `numberFields`, and the 「Column summary」 level offers each function its own fields. Neither type is exported from the package index (`src/index.tsx`), so no published surface moves.\n- No runtime change on the board: the lane read already asks the server for a date's `max` / `min` and folds the answer in ISO order (`KanbanLaneStatistic.ts`), and the lane foot already draws the figure through the field's own cell renderer (`ObjectKanban.tsx`, `renderTotal`). A new test pins both.\n- `.changeset/36880-lane-stat-date-minmax.md`: `patch` for `@object-ui/plugin-list`.\n\n## Tests\n\n- `ListView.kanbanSettings-36370.test.tsx`: new top-level `describe` (objectstack#36880). For each function, the fields offered: `sum` = amount, seats; `avg` = + rate (percent); `min` / `max` = + close_date (date), signed_at (datetime), call_time (time). Never a formula, a boolean or a text field.\n- `ViewSettingsPopover.kanban-36370.test.tsx`: new top-level `describe`. A date is offered under min and max only, and picking its max writes `{ type: 'max', field: 'close_date' }`. The existing harness moves to the `fields` shape.\n- `ObjectKanban.laneStatistic-36370.test.tsx`: new top-level `describe`. A `max` over a `date` field with `format: 'short'` draws the lane read's latest day at the foot in that face (`'25`, never the stored `2025-03-15`). The card shows the same day with the same text.\n\n## Acceptance notes\n\n- Reading per function from the table also puts a **percent** field under `avg`, `min` and `max`: the table's `avg` / `min` / `max` rows admit `percent`, and only the `sum` row excludes it (\"a rate does not add\"). The lint already accepts those pairs, so the picker now matches it.\n- The lane foot draws a date in the face the field's cards use: its declared `format`, else the cell's relative default (\"Yesterday\", \"In 3 days\" within a week). The grid footer draws a date min / max in the absolute face. Both follow their own cell. Noted here, not changed.\n- The picker words stay 「Minimum」 / 「Maximum」 over a date. The grid footer says 「Earliest」 / 「Latest」. Noted here, not changed.\n\n## Verification\n\nTwo-minute check: open a kanban view on an object with a date field → 视图设置 → 「Column summary」. `Maximum · DATE_FIELD` is listed, and `Sum · DATE_FIELD` is not. Pick it, and each lane's foot shows its latest date.\n\nRead first: ① `ListView.tsx` `boardStatisticFields` and `laneStatisticAccepts` (the table read). ② `ViewSettingsPopover.tsx` (the `laneSummary` page options and `summaryText`).\n\n<details><summary>Readings</summary>\n\nAll readings are on objectstack-ai/objectstack, branch head `54b1bb4a` (base `159113f4`), unless a line names another head.\n\n- Touched suites, under the verify lock: `cd ui && pnpm exec vitest run --maxWorkers=2 packages/plugin-list/ packages/plugin-kanban/` gave `Test Files 273 passed (273)` and `Tests 2623 passed (2623)`, VERDICT command-exit 0.\n- Type check: `pnpm exec turbo run type-check --continue --filter=@object-ui/plugin-list --filter=@object-ui/plugin-kanban` gave `Tasks: 56 successful, 56 total`, VERDICT command-exit 0. The first run at `8e61cabf` was red on a stub typing in the new kanban test (TS2493). Commit `54b1bb4a` fixes it.\n- `pnpm --dir ui exec vitest run --maxWorkers=2 scripts/` (the seven `@objectstack` packages built first, as Test UI builds them) gave `Test Files 172 passed / 2 skipped (174)` and `Tests 5130 passed / 2 skipped`, VERDICT command-exit 0.\n- Ablation, one leg: `node scripts/ablation-replace.mjs` replaced `isAggregateCompatibleWithFieldType(fn, type)` with the old `('sum', type)` (anchor 1 to 0, blob `f8a22ca4` to `41080fc2`). The new ListView pin went red: `× offers min and max over the temporal fields, and every function only what its row accepts`, `Tests 1 failed / 4 passed`. Restore: blob equals HEAD and `git diff HEAD` is empty.\n- Derived gate families: `dispatch-gates --commands` listed 38. All exited 0 (36 run at `8e61cabf`; `check:duration-unit-keys` and the ui `scripts/` run at `54b1bb4a`). `check:nul-bytes`, `check:undeclared-dep-imports`, `check:test-source-alias` and `check:cross-package-test-inputs` were run again at `54b1bb4a` and exited 0.\n- `overlap-check --branch=claude/issue-36880-lane-stat-date-minmax` reported `VERDICT clean exit 0` (0 open PR heads overlap).\n\n\n</details>\n"
+}

@@ -2,8 +2,8 @@
   "number": 37109,
   "kind": "issue",
   "title": "控制台偏好写入等首读返回，不再单独补查一次",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -12,20 +12,23 @@
   },
   "labels": [
     "area:cloud",
-    "pm:dispatched",
     "priority:p1"
   ],
   "assignees": [
     "os-warren"
   ],
   "milestone": null,
-  "type": null,
+  "type": "Bug",
   "created_at": "2026-11-24T19:46:19Z",
-  "updated_at": "2026-11-24T20:04:26Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-24T21:33:58Z",
+  "closed_at": "2026-11-24T21:21:01Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/37109",
   "body": "repo:cloud#1 · os-warren · session_01JQwxbX11yNi4DyGhuzqBpV\n\nFiling gate: ① regression found by a cloud gate. Source: cloud `console-boots` call budget (cloud#2914) on pin PR objectstack-ai/cloud#4975 (card objectstack-ai/cloud#4974, p1), job 138720631611: page/pricing 26 calls against 25, 0 duplicate URLs; trace on that PR. Dedupe: searched open issues for `ui.recent` / preference save race, none.\n\nGrading: area:cloud (it blocks the p1 cloud pin round's `console-boots`, maintainer rule 2026-11-24 03:50Z) · Bug · p1 (blocks a p1) · evidence: measured (CI call list) + read (code path below).\n\n## 维护者速读\n\n- 问题：控制台打开页面时，会先一次性读出用户的偏好（最近访问、收藏等）。如果这次读还没返回、页面就要记录「最近访问」，就会再单独查一次自己的那条记录，多一次请求。\n- 影响：功能正常；慢环境下每次打开多一次请求，云端的启动请求预算因此时红时绿。\n- 修法：写入先等这次读返回，直接用读到的记录去更新。\n- 需要你做的：无。\n\n## What\n\n`ui/packages/data-objectstack/src/userState.ts`, `createObjectStackUserStateAdapter`: `load()` joins the shared preference read (one request for every slot, objectui#12187) and calls `writer.remember(row.id)` when it answers. `save()` chains `writer.upsert(items)` onto `saveChain` only. When a save runs before the load has answered (the recents flush is debounced 500 ms after the page records itself, `RecentItemsProvider`), `cachedRowId` is still null and `upsert` sends `findExisting()`, the per-key read `sys_user_preference?$top=1&key=<key>`, although the shared read is about to return the same row.\n\nCI call list (cloud PR #4975, warm open of page/pricing): the shared read `sys_user_preference?top=204` (with `ui.recent` in its `$in`) at position 11, then `sys_user_preference?top=1&key=ui.recent` at 19, then `PATCH sys_user_preference/<id>`.\n\n## Change\n\nA save waits for the adapter's in-flight load (if any) before it upserts, so the remembered row id is used. A failed or absent load leaves today's behaviour (find, then update or create). Same for the key-family writer if it has the same shape.\n\n## Acceptance\n\n- Unit test: a save issued while the load is pending sends no per-key read and updates the row the load returned; ablation (remove the wait) goes red.\n- Existing upsert behaviours unchanged: no row → create; UNIQUE race → re-find + update; concurrent saves still serialize.\n- Not in scope: the debounce, the recents provider, or the call budget number."

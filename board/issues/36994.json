@@ -12,18 +12,18 @@
   },
   "labels": [
     "area:ai",
-    "pm:blocked",
+    "pm:queue",
     "priority:p3"
   ],
   "assignees": [],
   "milestone": null,
   "type": "Bug",
   "created_at": "2026-11-24T14:13:56Z",
-  "updated_at": "2026-11-24T19:15:48Z",
+  "updated_at": "2026-11-24T21:32:14Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 2,
+  "comments": 3,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/36994",
   "body": "maintainer · os-bob · session_012dn2AecKpLaYkUtNRiqtby\n\nFiling gate: ① product defect. Source: topic #36990.\nGrading: area:ai · Bug · Impeded · rare (apps that mount `service-knowledge`) · evidence: read.\n\n## 维护者速读\n- 问题：命中结果的标题只取名为 title 的字段；对象的名称字段叫别的名字时，命中没有标题。\n- 修法：按对象定义找出它的名称字段再取值。\n- 需要你做的：无。\n\n## What\n1. `knowledge-service.ts` `recordToDocument`: pick the field with `resolveDisplayField(schema)` (`packages/spec/src/data/display-name.ts`), then read `record[field]`. Empty or withheld (credential / internal) → `title` undefined.\n2. Do not call `resolveRecordDisplayName`: its `Record #<id>` floor is a UI label, not index content.\n3. No object definition → fall back to `title` as today.\n\n## Acceptance\n- Name field is a formula / autonumber; name field withheld; no object definition.\n- Container run per AGENTS.md.\n\nBlocked-by: #36991 (same file), #36839 (its readability check uses the same resolution)\nParent: #36990. Reader: the server lane for `service-knowledge`.\nDedupe: `knowledge hit title` 179 (none on this mechanism)."

@@ -2,8 +2,8 @@
   "number": 37041,
   "kind": "issue",
   "title": "Approvals batch lock read answers \"not locked\" for a master-detail line of a locked master, unlike the single-record read it claims to equal",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,18 +14,23 @@
     "area:workflow",
     "bug",
     "domain:server",
-    "pm:queue",
     "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-support-ai"
+  ],
   "milestone": null,
   "type": "Bug",
   "created_at": "2026-11-24T16:44:22Z",
-  "updated_at": "2026-11-24T16:52:46Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-25T01:54:08Z",
+  "closed_at": "2026-11-25T01:49:30Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/37041",
   "body": "repo:objectstack#4 · os-justin · session_01QSeKYmRepQK9DkZeU7F53D\n\nFiling gate: ① a contract defect with named locations · Source: fleet (out-of-scope finding F1 of the #36911 dev report 7138000944; filed by zone a4-U on seat repo:objectstack#4's authorization; this seat does not claim it — `domain:server` is outside its intake).\n\n## What happens\n\nThe approvals service has two lock reads. The single-record read (`GET /api/v1/approvals/records/:object/:recordId/lock`, `IApprovalService.getRecordLock`) answers `locked: true` for a record held by a locking approval **and** for a master-detail line whose master is held. The batch read (`POST /api/v1/approvals/records/:object/locks`, `getRecordLocks`) answers only the first half: a line of a held master comes back `locked: false`, and the next write to that line is refused `RECORD_LOCKED`.\n\n- `packages/plugins/plugin-approvals/src/approval-service.ts:11330` — `getRecordLocks` asks `recordsHeldByLockingApproval` only.\n- `packages/plugins/plugin-approvals/src/approval-service.ts:11455` — the single read also asks `detailRowHeldByLockingApproval`.\n- The contract text says they agree: `packages/rest/src/approvals-routes.ts:532`, \"Each entry is exactly the single-record door's answer for that id\", and the service doc calls `getRecordLocks` \"`getRecordLock` for a page of rows\" (`approval-service.ts:11305`).\n\nreach: named real consumer — `ui/packages/plugin-grid/src/hooks/useRowApprovalLocks.ts` reads the batch door for the list page's select-first cells. On a master-detail line object (showcase `showcase_expense_line` under a locked `showcase_expense_report`) it reads \"not locked\", the cell editor opens, and the save is refused `RECORD_LOCKED` by the detail-row lock hook. Measured at the service layer by the #36911 dev with a one-off probe in plugin-approvals' integration rig (`record-lock-read.integration.test.ts` copy, since deleted), at `origin/main` 8e4ac50d: `single={locked:true}`, `batch=[{locked:false}]`, `write=RECORD_LOCKED`. Not measured over HTTP; the route maps the service answer 1:1.\n\n## Expected\n\nThe batch read answers each id exactly as the single read does, detail lines of a held master included — the contract text already says so.\n\n## Acceptance\n\n- `getRecordLocks` reports a master-detail line of a held master as locked, as `getRecordLock` does, without one read per row (the batch door exists to keep a list page to one request).\n- A test pins single/batch parity for a record held itself, a line of a held master, and an unheld record.\n\nGrading: area:workflow · Bug · Moderate (a list offers an edit the server then refuses; no data is written wrong) · reach named (grid cell lock read, showcase expense lines) · evidence measured at the service layer → p2. Triage confirms area, grade and routing.\n\nBusiness reason: anyone editing lines of an expense report or order under approval in the list page is offered an editor that fails on save; the batch door was built so lists can warn first (#35795) and currently cannot for lines.\n\nDedupe: `getRecordLocks` → 3 hits (#36911 open, the consumer card that surfaced this; #35795 closed, the batch door's origin; #34366 a seat post); \"batch lock detail\" and \"record locks master detail\" → no card on this defect."

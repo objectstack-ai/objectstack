@@ -1,0 +1,35 @@
+{
+  "number": 37133,
+  "kind": "issue",
+  "title": "driver-turso remote: aggregate group keys over a boolean field come back as 1/0 instead of true/false",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-bob",
+    "id": 353326562,
+    "type": "User"
+  },
+  "labels": [
+    "area:data",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-bob"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-24T21:59:36Z",
+  "updated_at": "2026-11-24T23:45:23Z",
+  "closed_at": "2026-11-24T23:44:25Z",
+  "closed_by": {
+    "login": "os-bob",
+    "id": 353326562,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/37133",
+  "body": "maintainer · os-bob · session_012dn2AecKpLaYkUtNRiqtby\n\nFiling gate: ① product defect. Source: out-of-scope finding of the #37106 evaluation (PR #37120, measured 2026-11-24); maintainer 2026-11-24: 「立 Bug 卡，托管云布尔分组那个」.\nGrading: area:data · Bug · Wrong result · reach: every hosted environment (the remote face of driver-turso) that groups by a boolean field in an aggregate — reports, charts, dashboards, `aggregate_records` · evidence: measured at the engine API; the HTTP door on a hosted deployment is not yet measured.\n\n## 维护者速读\n- 问题：托管云用的远程 libSQL 驱动，按布尔字段分组统计时，分组值返回 1/0（空值 null），本地驱动返回 true/false。托管云上报表、图表、问数里按「是否完成」这类字段分组，可能显示成 0/1。\n- 修法：远程聚合的返回结果也走和普通读取同一套布尔转换，保证两种连接方式的值一致。\n- 需要你做的：无。\n\n## Evidence\n- Measured through `ObjectQL.aggregate`, grouping by a boolean `done`:\n  - SqlDriver and driver-turso local mode: `false` / `true`.\n  - The hosted construction `TursoDriver({ url: 'libsql://…', client: createClient({ url: 'file:…' }) })`: `[{done:null,c:1},{done:0,c:1},{done:1,c:2}]`.\n- `packages/drivers/driver-turso/src/turso-driver.ts`:\n  - `aggregate()` (around line 3285) returns `remoteTransport.aggregate(...)` rows from its remote branch (around lines 3309–3318) without the read presentation that the other remote reads apply.\n  - The helpers' own contract text (around line 3328) says: \"These helpers run the SAME formatOutput() on remote rows so both transports agree on what a value *is*\".\n- Precedent: #34974 fixed the same symptom on driver-sql (`presentReadValue` had no boolean kind).\n\n## What\n1. In the remote branch of `TursoDriver.aggregate`, present the group-key columns with the same read presentation as remote `find` (boolean, and any other kind the shared presenter covers). Measures (counts, sums) are untouched.\n2. Check the other remote read paths that return grouped or projected rows (`distinct`, if remote) for the same gap.\n\n## Acceptance\n- A remote-mode test running on the real libSQL engine (not the better-sqlite3 stub): grouping by a boolean answers `true` / `false` / `null`, and its output equals local mode on the same data.\n- One check of the HTTP door `/api/v1/data/:object/aggregate` on a hosted-shaped boot, noted in the PR.\n- Container run per AGENTS.md.\n\n## Out of scope\n- Changing `os dev`'s default database (decided against on #37106).\n- The wider point that remote-mode suites mostly run on a better-sqlite3 stub (switch condition 4 in the #37106 report).\n\nBlocked-by: none.\nRelated: #37106, PR #37120, #34974.\nReader: the data / drivers lane.\nDedupe: `turso remote aggregate boolean` 65 (none open on this; nearest closed #34974, driver-sql) · `aggregate boolean group key` 149 (same) · `remote aggregate formatOutput` 6 (none on this)."
+}

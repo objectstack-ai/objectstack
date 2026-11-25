@@ -11,20 +11,20 @@
     "type": "Bot"
   },
   "labels": [
-    "area:build",
+    "area:ai",
     "domain:skills",
     "pm:blocked",
     "priority:p2"
   ],
   "assignees": [],
   "milestone": null,
-  "type": null,
+  "type": "Task",
   "created_at": "2026-11-24T19:38:32Z",
-  "updated_at": "2026-11-24T19:38:32Z",
+  "updated_at": "2026-11-24T20:40:20Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 0,
+  "comments": 1,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/37105",
   "body": "repo:objectstack#4 · os-justin · session_01QSeKYpEsWWE9Y5YtSsDgqZ\n\nSource: ADR-0159 (PR #36957), Execution plan row ④ and D5 (\"Skills and docs teach the new shape from card ④\"). Parent: #36868, card ④ of five, the published-skill part, cut from #37088 because an implementation card's surface never includes `skills/**`.\n\nBlocked-by: #37086\nBlocked-by: #37087\nMetadata-protocol: none\nClause-②: no\n\nGrading: `area:build` · Enhancement · the published skill teaches `forms:` as the one way to declare a form and `views:` as lists · AI authors and app authors who build from the skill · evidence: `git grep -lE \"formViews|viewKind: 'form'\" -- skills` at `main` `254e396a29e` names three files, all under `skills/objectstack-ui`: `SKILL.md`, `rules/list-views.md`, `evals/views-apps-actions-pages.json`. p2.\n\nGoverned surface: `skills/**` is Tier H. The PR is pushed, opened and left awaiting its tier's record; ⛔ no AI seat merges, queues or arms auto-merge on it.\n\n## Why this waits for card ③\n\nUntil card ③ lands the shipped console reads forms from `view`. A skill that teaches `forms:` before then teaches an action-opened form that answers not found and a public form Setup does not list. ⛔ Do not start this card beside card ③.\n\n## What to do\n\n1. In `skills/objectstack-ui`, teach one way to declare a form: a `form` item in `forms:`, with `name` (`OBJECT.KEY`, the part before the last segment equal to `object`), `object`, and the form body at the top level (no `viewKind`, no `config`, no `data`). `defineForm` is this type's factory. `views:` is lists.\n2. Teach what is `form` content and what is not (ADR-0159 D1): a public form (it declares a `sharing.publicLink`) or a form an action of type `form` opens. The record create and edit form is the object's `fieldGroups` and is ⛔ never a `form` item.\n3. Teach the two refusals an author meets: a public address another form holds is refused, naming both forms (a switched-off form that keeps its link still holds its address); `data` on a `form` item is refused with \"bind the form with `object`\".\n4. Teach translations under the `forms` family (`forms.NAME.title`, `.label`, `.description`, `.submitBehavior.*`, `.sections.*`), with `objects.OBJECT._sections.SECTION` as the section default.\n5. Remove every example that authors a form inside a view (`formViews`, a `viewKind: 'form'` item, a container's `form:` member). ⛔ Do not teach the old shapes as an alternative; one sentence may say they are refused and name `os migrate meta`.\n6. Update `rules/list-views.md` and the eval file so the evals exercise a `form` item and no eval expects an old shape.\n\n## Done when\n\n- `git grep -nE \"formViews|viewKind: 'form'\" -- skills` returns nothing but the one migration sentence, quoted in the PR. No skill example keeps a `form:` member in a `defineView` container (the grep does not match that shape; read each example).\n- Every `form` example in the skill parses with the `FormSchema` card ② added (run the skill's example check, or parse each by hand and paste the result).\n- The two size readings a `skills/` diff owes are in the PR (whole file and whole pack, before and after); growth is paid by deletion.\n- The skill's evals pass, and at least one exercises a public `form` item and one an action-opened `form` item.\n- The gates `node scripts/pm/dispatch-gates.mjs` names for this file surface are green, listed in the PR.\n\n## Not in this card\n\n- Examples and docs pages (#37088). HotCRM's sources (its own card).\n- No spec, server or console change.\n- Any file under `ui/skills/**` that teaches forms: name it in the report for the seat; it is not edited here.\n\nDedupe words: skills forms teaching, objectstack-ui skill forms collection, defineForm skill."

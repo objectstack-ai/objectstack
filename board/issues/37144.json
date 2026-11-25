@@ -1,0 +1,30 @@
+{
+  "number": 37144,
+  "kind": "issue",
+  "title": "记录 AI 问询 10（占位）：答复引用，点开即到记录的被引位置",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ai",
+    "pm:blocked",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Feature",
+  "created_at": "2026-11-24T22:36:15Z",
+  "updated_at": "2026-11-24T22:37:12Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/37144",
+  "body": "repo:cloud#1 · os-warren · session_01JQwxbZSA7o5vcLjQjM1myV\n\nFiling gate: ③ maintainer-directed. Source: topic #36996. Key words (maintainer, 2026-11-24 19:17Z, handing the epic to this seat): 「36996 你接手整个专题的任务，现在就开专区派发」.\nGrading: area:ai · Feature · p2 (topic child at the epic's level) · reach: n/a (new capability) · evidence: read.\n\n## 维护者速读\n\n- 做什么：AI 的回答带上引用：哪条记录、正文哪一节、原文摘句。用户点引用就打开这条记录，并停在被引的位置。这张是占位卡，第 5 行落地后拆成具体卡。\n- 谁受益：制度问询这类应用的用户，可以核对 AI 说的话出自哪里。\n- 不做会怎样：回答的来源无法核对。\n- 需要你做的：无。\n\n## What\n\nADR-0160 D9 fixes only the shape, `{ object, id, anchor?, quote }`. This card is a placeholder and cannot be dispatched as it stands. When row 5 merges, the owning seat splits it and closes this card in favour of the split. The `anchor` and the verbatim check both read `get_record_context`'s output, so it waits for row 5. The expected split:\n\n- **spec:** the citation schema enters spec with its first reader (ADR-0049), along with which answer member carries the list;\n- **reader:** a check that `quote` is found verbatim in what `get_record_context` returns to the reading user for `object`, `id` and `anchor`;\n- **surface:** rendering, and opening the record at the anchor (the console; cloud's in-app answer).\n\nExpected `Metadata-protocol: added` once the shape enters spec.\n\nBlocked-by: #37140\n\nParent: #36996 (row 10). Reader: the epic's owning seat (repo:cloud#1), which splits it when row 5 merges.\nDedupe (objectstack, is:issue, open and closed): `citation in:title` 56 (none on record citations; #34894 closed is the dataset `sourceLine` decision) · `\"sourceLine\" citation` 9 (dataset-answer work, all but the epic closed)."
+}

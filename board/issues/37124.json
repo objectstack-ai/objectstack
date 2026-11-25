@@ -1,0 +1,37 @@
+{
+  "number": 37124,
+  "kind": "pull_request",
+  "title": "fix(ui): the list footer's record count starts on the 16px left edge",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "os-justin"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-24T20:40:29Z",
+  "updated_at": "2026-11-24T22:08:04Z",
+  "closed_at": "2026-11-24T22:08:02Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-24T22:08:02Z",
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/37124",
+  "body": "Fixes #37028\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 用户在每个列表页底部看到的「N 条记录」左边缘从 52px 挪到 16px,和全选框、页头图标对成一条线;合计数字仍在各自列下。\n- 属于「列表页重做」这一 epic 的验收收尾:页面只有一条左边缘的承诺此前在页脚这一处没兑现。\n- 若出错,只是页脚第一格的排版错位(计数或第一列合计挤位),不影响数据,改动可直接撤回。\n- 无。\n\n## What changes\n\n- `ui/packages/components/src/renderers/complex/data-table.tsx`, the summary row (`data-testid=\"data-table-summary-row\"`): where the table draws a leading cell (selection or row numbers) and the row has a `lead`, the first column's summary cell now spans the leading cell (`colSpan`) and takes the leading cell's 16px inset (`pl-4`) instead of an empty 40px cell followed by the first column's `px-3`. The lead (the list's record count) therefore starts at 16px, on the one left edge of #35663, and the first column's figure keeps ending at its column's right edge (#35548: each figure in its column's cell). Frozen: both the leading cell and the first column are frozen whenever `frozenColumns > 0`, so the spanning cell keeps the leading cell's `left: 0`. Unchanged: a row without a lead, a table without a leading cell, and a right-pinned first column (all keep the old cells).\n- `ui/e2e/list-left-edge-35663.spec.ts`: the footer half now measures the real summary row's lead. The grid is mounted the way the list mounts it (`residentSummaryRow`, `summaryRowLead`), with a declared calculation on the first column. The stand-in footer (a span reading `12 records` under the record-count bar's class) is kept only at phone width, where the grid draws cards and no summary row and the list really draws that bar. New assertions: the count at 16 on the wide and the narrow list, at 16 after scrolling to the far right and back, and the first column's figure inside its column's header box and clear of the count.\n- `ui/packages/components/src/__tests__/data-table-summary-lead-edge-37028.test.tsx`: jsdom pin of the row structure (span, inset, frozen `left: 0`, the figure in the same cell, every column covered once, and the unspanned cases).\n- `.changeset/37028-footer-count-left-edge.md`: `@object-ui/components` patch.\n\n## Tests\n\nRead first (by risk):\n1. `data-table.tsx`, the summary row hunk: `leadSpansLeading` and the `left: 0` for the frozen spanning cell.\n2. `list-left-edge-35663.spec.ts`, the fixture's `residentSummaryRow` / `summaryRowLead` and the `firstFigure` reading.\n\nTwo-minute check: open any list page (for example `showcase_task`) at 1280 wide. The footer's 「10 条记录」 starts on the same vertical line as the select-all box above it.\n\nAll readings are against the tree named on each line, in this repository (`objectstack-ai/objectstack`).\n\n- Unit pin, `pnpm exec vitest run packages/components/src/__tests__/data-table-summary-lead-edge-37028.test.tsx` (from `ui/`): at `9a56330a0` Test Files 1 passed, Tests 6 passed. With `data-table.tsx` put back to `a68b475bb` (the rest at `614d23050`): Tests 4 failed, 2 passed (`an empty cell precedes the lead: expected null to be 'name'`; frozen `left` `''` vs `0px`). Restored with `git checkout HEAD --`; the file's hash equals the HEAD blob (`3b6d3d8f`).\n- Left-edge spec, `e2e/list-left-edge-35663.spec.ts` (chromium, a local config without the preview server; the spec mounts its own page): at `9a56330a0` 4 passed. Footer count at 16 on the wide list (scrolls sideways) and the narrow list (fits); 16 at the far right and back; first column's figure 100.6 to 150 inside its column 40 to 162, the count ends at 78.7. With `data-table.tsx` at `a68b475bb`: 3 failed, 1 passed: `footer count starts at 52, not 16` (wide, narrow) and `the footer count starts at 52 after scrolling, not 16`. So the pin fails on the defect it once let through.\n- `pnpm --filter @object-ui/components test` at `e70b80df2`: Test Files 509 passed, 1 skipped (510); Tests 4958 passed, 24 skipped.\n- Summary-row consumers (plugin-grid footer suites, plugin-detail body-table suites, `ListView.test.tsx`, app-shell `recordCountFooter-10636`), 9 files at `e70b80df2`: 9 passed, 330 tests passed.\n- `pnpm --filter @object-ui/components type-check` (after building its closure) at `e70b80df2`: exit 0. `tsc -p tsconfig.e2e.json` (ui): exit 0.\n- Derived gate families (`dispatch-gates.mjs --commands`, 38): 36 exit 0. `check:test-source-alias` was red on the new test file and is green after the module-top import it prescribes. `pnpm --dir ui exec vitest run scripts/` had 1 failure, a 15 s timeout in `js-comment-mask-returns-interpolation-9424.test.ts` (a `tsc` program build), run on a loaded shared box; no file in this diff is under `ui/scripts/`. The rerun under the lock was cut off by the foreground limit: NOT MEASURED here, CI runs it.\n\n## Acceptance notes\n\n- The checklist item `records-forms.list-view-capabilities` acceptance[11] already states the 16px promise for the footer count; nothing is re-pointed there (a separate card owns checklist re-points).\n- The browser check on the running showcase app is reported under Verification.\n- Visible side effect: the summary row's first cell is now wider by the selection column, so a first column whose own width came from the footer text (the count plus a picker) can come out up to about 24px narrower. In the showcase the first column's header and body text stay at 52, as before.\n\n## Verification\n\nBrowser check on the running showcase app (`pnpm dev -- --fresh`, Console from this branch's `ui/` source through Vite, Chromium 1280x800, locale zh-CN), measured from `record-list-host` (left 256):\n\n| list | footer count | select-all | row 1 checkbox | page-bar tile | selection column | footer cell colspan |\n|---|---|---|---|---|---|---|\n| `showcase_task` 「10 条记录」 | 16 | 16 | 16 | 16 | 40 | 2 |\n| `showcase_project` 「5 条记录」 | 16 | 16 | 16 | 16 | 40 | 2 |\n\nThe issue measured the count at 52 on both before this change.\n\n---\n\n_Generated by [Claude Code](https://claude.ai/code/session_01QSeKYnagJvGbCtNg2PhvgW)_\n"
+}

@@ -1,0 +1,37 @@
+{
+  "number": 37146,
+  "kind": "issue",
+  "title": "右侧 AI 助手：只有一个智能体时不显示顶部「提问」那一行",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:cloud",
+    "bug",
+    "domain:ui",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-24T22:39:44Z",
+  "updated_at": "2026-11-25T00:54:51Z",
+  "closed_at": "2026-11-25T00:53:35Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/37146",
+  "body": "triage#1 · os-warren · session_01JQwxbZKP5YM48rWMWTS7wE\n\nFiling gate: ③ maintainer direct order · Source: maintainer, 2026-11-24, relayed by the project coordinator. It follows the AI-build close line (#36969, cloud#4950).\n\n## 维护者速读\n\n- 问题：右侧 AI 助手顶部有一行只写着「提问」。这一行本来是切换智能体用的（提问 / 搭建）。AI 搭建入口关闭后，目录里只剩「提问」一个，这一行没有东西可切，只是占地方。\n- 改法：只有一个智能体时不显示这个名字。这一行如果因此没有别的内容，就整行不画。有两个及以上智能体时，切换器照旧。\n- 要你做的：无。\n\n## 维护者原话（按先后）\n\n- 「右侧助手，顶部提问那一行是不是有点多余了」\n- 「立卡派发删除？」\n\n## What is on main\n\n- The pane's header row is `headerSlot` in `ui/packages/app-shell/src/console/ai/AiChatPage.tsx` (~2748).\n- `showAgentLauncher` is `launcherAgents.length > 1` (~1858). With one agent, the `else` arm still draws a `<span>` with `activeAgentLabel` (~2808), which is 「提问」 from `PLATFORM_AGENT_LABEL_KEYS.ask` (`console.ai.agentLabels.ask`, ~513).\n- In the right-side drawer, Share and the Build Doctor already moved to the drawer's title bar (`ChatDockConversation.tsx`, `onActionsChange`, objectstack#35445). So on that surface the header row holds only the agent name.\n\n## Expected\n\n- With one launchable agent, the header shows no agent name. When nothing else is left in the row (no build package chip, no Share or Doctor button), the row is not drawn, and no empty band or border is left.\n- With two or more agents, the Tabs or Select switcher is unchanged.\n- The full-page assistant follows the same rule. Its Share and Doctor buttons stay where they are.\n\n## Acceptance\n\n- A unit test: one agent → no `ai-chat-agent-picker` and no agent-name span; drawer host with actions lifted → no header row. Two agents → the switcher renders.\n- A screenshot of the right-side drawer at desktop width, before and after."
+}

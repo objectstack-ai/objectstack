@@ -1,0 +1,37 @@
+{
+  "number": 37121,
+  "kind": "pull_request",
+  "title": "fix(studio): one name per group — the directory and a type page's badge say Platform / Access, like the menu",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "os-justin"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-24T20:28:00Z",
+  "updated_at": "2026-11-24T22:48:25Z",
+  "closed_at": "2026-11-24T22:48:22Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-24T22:48:22Z",
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/37121",
+  "body": "Fixes #37082\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- Studio 里「全部元数据」目录页的分组标题、筛选标签和类型页头部的分组徽标，从「系统 / 安全」改成和左侧菜单一样的「平台 / 访问」；系统设置里数据源页面的徽标也随之改为「平台」。\n- 属于 Studio 重构的收尾：同一个 Studio 里同一组不再有两种叫法，组名以修订后的 Studio 信息架构决策为准。\n- 出错只会让分组名称显示不对，不影响数据和权限，直接撤回这个改动即可恢复。\n- 请确认系统设置里数据源页面的徽标显示「平台 / Platform」可以接受（它在决策里就属于「平台」这一组）。\n\n## What changes\n\n- **Route (a): the shared dictionary is renamed.** `DOMAIN_LABELS_EN` / `DOMAIN_LABELS_ZH` in `ui/packages/app-shell/src/views/metadata-admin/i18n.ts` (read through `translateMetadataDomain`) now draw `system` as Platform / 平台 and `security` as Access / 访问, the group names of ADR-0084 as amended. The dictionary carries exactly two locales (en, zh); both changed.\n- **The menu reads the dictionary.** `studioMenuGroupLabel` now returns `translateMetadataDomain(group, locale)`; its two menu-only keys `engine.studio.menu.groupSystem` / `engine.studio.menu.groupSecurity` are removed from the `studio` namespace (en and zh), since nothing reads them any more. The function stays as the menu's named seam, so `StudioMenu.tsx` is untouched.\n- `studioMenuModel.ts`: one doc comment that said the dictionary keeps System / Security is corrected (this change made it false).\n\n### Route choice and the readers, before and after\n\nEvery reader of `translateMetadataDomain`, measured on `origin/main` 9d707686 (`git grep` over the whole monorepo, plus a GitHub code search across the org: no hit outside this repo; `@object-ui/app-shell` is `private`, so the re-export at `metadata-admin/index.ts` has no external consumer):\n\n| Reader | Surface | Before | After |\n|---|---|---|---|\n| `DirectoryPage.tsx` chips | Studio, All metadata | System / 系统, Security / 安全 | Platform / 平台, Access / 访问 |\n| `DirectoryPage.tsx` group headings | Studio, All metadata | System / 系统, Security / 安全 | Platform / 平台, Access / 访问 |\n| `PageShell.tsx` badge (list header and compact item header) | Studio type and item pages | System / 系统, Security / 安全 | Platform / 平台, Access / 访问 |\n| `PageShell.tsx` badge | **Setup's datasource pages** (the one kept type: `SETUP_KEPT_METADATA_TYPE = 'datasource'`, rendered in place by `MetadataResourceEditPage`) | System / 系统 | Platform / 平台 |\n| `studioMenuGroupLabel` | Studio left menu | Platform / 平台, Access / 访问 (own keys) | unchanged words, now from the dictionary |\n\nThe only non-Studio surface is Setup's datasource badge. It names the same group: the badge shows the type's registered domain, and ADR-0084's amendment says in its type-to-group table and its third reading that a `datasource` is **found under 平台 Platform** (its item opens in Setup per ADR-0146 D1, but its group is Platform). So route (a) changes what that surface says to the group name the ADR gives it, not to a different concept; route (b) would keep two words for one group, the inconsistency this card closes. No `security`-domain type is kept in Setup, so Access appears on Studio surfaces only.\n\n## Tests\n\n- New pin `ui/packages/app-shell/src/views/metadata-admin/DirectoryPage.groupNames-37082.test.tsx`, over the real directory page and the real `PageShell`, for **en and zh-CN** (`describe.each`): the directory's group headings, the domain chips, the type page badge (list header) and the item page badge (compact header, the one Setup's datasource item page draws). Each word is compared with the menu's own (`studioMenuGroupLabel`) and with the literal Platform / 平台, Access / 访问; CONTROL: `data` stays Data / 数据, and System / 系统, Security / 安全 are drawn nowhere.\n- `studioMenuModel.test.ts`: the old \"dictionary keeps System / Security\" case is replaced by \"the menu draws each group with the dictionary's word, en and zh-CN\".\n- Two existing pins read the old words and are updated: `PageShell.narrowHeader-12306.test.tsx` (badge text Security to Access) and `StudioDesignSurface.accessSegment-12452.test.tsx` (the Access label now from `translateMetadataDomain`, since the removed key is gone).\n- Ablation (one-time, through `scripts/ablation-replace.mjs`, restored to the HEAD blob): the zh `system` value set back to 系统 turned 6 cases red (the five zh-CN cases of the new pin and the menu case in `studioMenuModel.test.ts`), en stayed green; restore verified blob == HEAD and `git diff HEAD` empty.\n\n## Acceptance notes\n\n- `DOMAIN_LABELS_*` also carry a UI-local `platform` key that already read Platform / 平台. No producer sets `domain: 'platform'` (the spec's `domain` enum is data, ui, automation, system, security, ai; `git grep` finds no UI registration with it), so the two cannot meet in one directory today. Noted, not changed.\n- File surface: beyond the claim's list, two existing test files that pin the old words (above) and one doc comment in `studioMenuModel.ts` were edited, because this change made them false.\n\n## Verification\n\nTwo-minute check: open Studio, All metadata, in zh-CN. The left menu, the chips and the section headings all read 平台 and 访问; open a permission set and its header badge reads 访问 (Access in en).\n\nRead first, by risk:\n1. `ui/packages/app-shell/src/views/metadata-admin/i18n.ts`, the two renamed values in each `DOMAIN_LABELS_*` table (the change that reaches Setup's datasource badge).\n2. `ui/packages/app-shell/src/views/studio-design/studioMenuGroupLabel.ts`, the menu now reading the dictionary.\n3. `ui/packages/app-shell/src/views/metadata-admin/DirectoryPage.groupNames-37082.test.tsx`, the en and zh-CN pin.\n\n<details><summary>Local readings on head b5fb87598</summary>\n\n- Targeted tests (from `ui/`, under the verify lock): the new pin, `PageShell.narrowHeader-12306`, `DirectoryPage.stateVocabulary-29705` and all of `packages/app-shell/src/views/studio-design/`: `Test Files 303 passed (303)`, `Tests 2299 passed (2299)`, `VERDICT command-exit 0`.\n- `pnpm --filter @object-ui/app-shell --filter @object-ui/i18n run type-check`: both packages echoed `type-check`, `VERDICT command-exit 0`.\n- `node scripts/pm/dispatch-gates.mjs --commands`: 38 derived families, all exit 0; `--ran` reconciliation: `38 derived, 38 run, 0 NOT-MEASURED, 0 UNRUN` (a derived zero, every line with its exit code). Among them `pnpm --dir ui exec vitest run scripts/`: `Test Files 172 passed | 2 skipped (174)`.\n- Also run: `pnpm --dir ui run check:i18n-dead-keys`, `check:i18n-keys`, `check:i18n-drift`: exit 0 each.\n- `node scripts/pm/overlap-check.mjs`: `VERDICT clean exit 0` (merges cleanly with origin/main and with #37089, which shares three studio-design files).\n- Lint, the full UI suite and the type-check lanes are CI's.\n\n</details>\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01QSeKYkkwuF6UuFtu85Yd5H)_\n"
+}

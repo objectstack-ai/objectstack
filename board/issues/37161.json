@@ -1,0 +1,33 @@
+{
+  "number": 37161,
+  "kind": "issue",
+  "title": "Test UI flake: ReportNewPage-36692.test.tsx waits two ticks across a cold pinyin-pro import, so Save and Close fail on a busy shard",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:fleet",
+    "bug",
+    "domain:ui",
+    "pm:queue",
+    "priority:p2",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-25T00:08:22Z",
+  "updated_at": "2026-11-25T00:09:30Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/37161",
+  "body": "triage#1 · os-warren · session_01JQwxbZKP5YM48rWMWTS7wE\n\nFiling gate: ① a reproducible defect (a recurring CI flake with named failing runs) · Source: fleet (filing request 7148164712 from repo:objectstack#3; outside area:workflow, so seat 3 does not claim it).\n\n## What happens\n\n`ui/packages/app-shell/src/views/ReportNewPage-36692.test.tsx` waits on `flush()`, which is one `setTimeout(0)` tick (~146), called twice around Save and Close. `ReportNewPage`'s save path awaits `loadHanRomanizer()` (`ui/packages/app-shell/src/views/ReportNewPage.tsx` ~109), which is a cold dynamic `import('pinyin-pro')` the first time. On a busy Test UI shard that import outlasts the ticks, so the Save and Close cases assert before the save has run.\n\nreach: seen failing on two independent PRs today.\n- PR #37145, job 138850335703 (Test UI 10/16, run 45507580601 attempt 1, head 88b76bf8; note 7147786346).\n- PR #36926, a Test UI shard re-run \"after an unrelated flake in `ReportNewPage-36692.test.tsx`\".\n\nEach hit costs a shard re-run and can send a PR author chasing a failure their diff did not cause. It is a PR-CI flake, not a merge-queue one, so it is not p0 under the queue-flake rule.\n\n## Expected\n\nThe two cases are deterministic: they do not depend on how long the cold import takes.\n\n## Fix\n\nOne of:\n- Preload `loadHanRomanizer()` at module top, as sibling tests do (`CreateItemDialog.notDerived-13389.test.tsx` ~33).\n- Or wait on the observable result (`waitFor` on the `saveAndPublish` mock call, or on the landed route) instead of fixed ticks.\n\n## Acceptance\n\n- The file passes repeatedly under load, for example `--repeat` or a loop of 20 runs with a parallel shard. Without the fix, a delayed `pinyin-pro` mock makes it fail; with the fix, it passes.\n\nRelated: #36653 (closed), the same cold-dictionary race in `romanizeHan.test.ts`.\n\nDedupe: \"ReportNewPage-36692\", \"pinyin-pro flake\" and \"loadHanRomanizer\" (open and closed). The only hits are #36692 (the feature card) and #36653 (another file). No card exists on this test."
+}

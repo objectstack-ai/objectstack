@@ -1,0 +1,36 @@
+{
+  "number": 37170,
+  "kind": "pull_request",
+  "title": "docs(skills): stop teaching a boolean inlineEdit on a master-detail relationship",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tooling"
+  ],
+  "assignees": [
+    "os-justin"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-25T01:00:25Z",
+  "updated_at": "2026-11-25T01:52:57Z",
+  "closed_at": "2026-11-25T01:52:55Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-25T01:52:55Z",
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/37170",
+  "body": "repo:objectstack#4 · os-justin · session_01QSeKYo86w1wqy2z2fMrryr\nFixes #37042\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 用户能看到什么变化：用户无感；读「数据建模」和「界面」技能的 AI 助手不再写已被拒收的 `inlineEdit: true`，主从明细的录入方式只写 `'grid'` / `'form'`，或者不写（按明细的字段自动选）。\n- 为什么做：PR #36802 已退役布尔写法（解析时拒收），技能文字还在教它；这张卡必须在带上 #36802 的那次发版之前合并，否则发出去的技能会教 AI 写出被拒收的元数据。\n- 出错会怎样：只改说明文字和一条测评，撤回这一个合并即可。\n- 要你做什么：无。Tier S（低风险 skills 档，契约审核 7149350343 判 `Security-touching: no`），本区在 CI 全绿后落地。\n\n## What changes\n\nOpened by the seat on the maintainer's authorization in seat repo:objectstack#4's session (「#37093：开 PR 放行。你应该使用 pm-dispatch 技能审核和落地pr，该放行的都放行」; 「#37042：放行」); the developer's own `pr_create` in zone a4-A's session was refused by a permission check. Branch `claude/issue-37042-skills-inline-edit-boolean` @ `bc01139be8`, implemented by zone a4-A's dispatch.\n\n- `skills/objectstack-data/rules/relationships.md`, \"Inline-edit form factor\": the `inlineEdit: true // auto (default)` line is removed; the smart default is described as what an omitted key gets, noting that a boolean is refused.\n- `skills/objectstack-data/evals/objects-fields-relationships.json` case 25: the expected answer no longer offers `true`.\n- `skills/objectstack-ui/rules/list-views.md`, Master-Detail Forms: the pointer to that section no longer lists `true` beside `'grid'` and `'form'` (added in the fix round for contract-review finding M1).\n- One `@objectstack/skills` patch changeset naming both skills.\n\nSince PR #36802 merged, the spec parse refuses `true` / `false` on a relationship field's `inlineEdit`; only `'grid'` and `'form'` are accepted, and an omitted key picks the form factor from the child's shape. Release-coupled: this lands before the release that ships #36802.\n\nToken readings: `relationships.md` 4199 → 4192 (ceiling 4203); `list-views.md` 4444 → 4442 (ceiling 4448); no ceiling moved, the ratchet script is not in the diff. Merges cleanly with the open PR #36158. A sweep of every `inlineEdit` under `skills/**` finds no other relationship-field boolean; `objectstack-ui/references/react-blocks.md` line 76 is the view-level key, untouched.\n\n## Review history\n\n- Contract review 7149242271 at `1787e54e67`: FAIL on M1 (the `list-views.md` pointer still listed `true`).\n- Fix round at `bc01139be8`; delta review 7149350343: PASS, `M1: closed`, `Security-touching: no`.\n\n## Tests\n\nNo package source changes. The contract review and L1 read the gate check-runs on this head.\n\n---\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01QSeKYo86w1wqy2z2fMrryr\n"
+}

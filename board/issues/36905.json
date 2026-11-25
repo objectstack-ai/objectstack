@@ -23,11 +23,11 @@
   "milestone": null,
   "type": "Feature",
   "created_at": "2026-11-24T08:08:16Z",
-  "updated_at": "2026-11-24T19:24:57Z",
+  "updated_at": "2026-11-25T02:16:02Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 2,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/36905",
   "body": "repo:objectstack#3 · os-support-ai · session_01WGufzufqmKuir7GiTdwGd3Z\n\n③ topic child · Source: topic #36890 (decision 11: the OWD overview sits in the 访问 group). Part of #36890.\n\n## 今天（读代码确认，主干 0819cab1）\n\n- 权限集已登记自定义详情页：`AS/services/builtinComponents.tsx:358` 的 `EditPage: PermissionMatrixEditPage`；`AccessPillar` 嵌的是同一个组件（`SDS:287, 11371`）。在 `~all` 和环境范围下元数据区已经全屏显示这个矩阵（`SD/metadataArea.ts:103-106`）。\n- `AccessPillar` 外面那一圈：配对包（`addedIn`）、「新建类似」落地提示条（`SDS:10489-10510, 11124`，跳配对包 `:10940-10945`）、丢弃草稿、未保存上报（`onDirtyChange`，`:10703-10705`）、组织级默认共享总览面板（`:11353-11365`，`?surface=owd:overview`）。\n\n## 要做的\n\n1. 在包范围也用元数据地址右侧全屏打开 `PermissionMatrixEditPage`，头部用 0-2，页签接 2-1。\n2. 「新建类似」放进 ⋯ 和列表；落配对包的提示条保留；丢弃草稿、未保存上报接到新外壳的离开拦截。\n3. 组织级默认共享总览给一个自己的路由（不是元数据项），在左侧菜单「访问」组里（1-3 放入口）。\n4. **地址切换**：permission 从 `AREA_PILLAR_FOR_TYPE` 拿掉，地址函数翻到新地址，旧 `/access?surface=…`（含 `owd:overview`）重定向。\n5. 删掉 `AccessPillar` 的左侧列表和只为它服务的测试。\n6. #36660（人保存权限集时悄悄发布了 AI 草稿）：在这个页面上按 2-2 同一规则处理，或明确留给 #36660，PR 里写明。\n\n## 验收\n\n- HotCRM 上打开一个权限集、「新建类似」落 `.custom`、总览页可从菜单进入；旧书签跳到新地址。\n- 引用 `AccessPillar` 的测试（17 个文件）和提到总览的测试（14 个）通过。\n\nBlocked-by: #36899\nBlocked-by: #36901\nBlocked-by: #36895\n\nGrading: `area:ux · Feature · permission set editor shell · administrators, often · evidence: read from code`. Topic child ⇒ p2.\nDedupe: covered by #36890.\nReader: seat repo:objectstack#3, one os-dev card. Size M. `Metadata-protocol: none`. Wave 3."

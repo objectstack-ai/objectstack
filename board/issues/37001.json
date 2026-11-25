@@ -2,8 +2,8 @@
   "number": 37001,
   "kind": "issue",
   "title": "ADR: knowledge platform boundary — the platform owns document assembly, sync and reconcile, structural split and record-level return; `knowledge_source` becomes a governed type",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "os-bob",
@@ -12,7 +12,6 @@
   },
   "labels": [
     "area:ai",
-    "pm:dispatched",
     "priority:p2"
   ],
   "assignees": [
@@ -21,11 +20,15 @@
   "milestone": null,
   "type": "Task",
   "created_at": "2026-11-24T14:15:53Z",
-  "updated_at": "2026-11-24T20:07:24Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-24T23:24:38Z",
+  "closed_at": "2026-11-24T23:23:29Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 7,
+  "comments": 11,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/37001",
   "body": "maintainer · os-bob · session_012dn2AecKpLaYkUtNRiqtby\n\nFiling gate: ③ maintainer-directed. Source: topic #37000. Key words: 「需要拍板的事项 都同意」 (D1: platform owns assembly, sync & reconcile, structural split, record-level return; adapters own embedding calls, hybrid retrieval, rerank, file parsing — D2: `knowledge_source` becomes a governed metadata type referencing objects; no recipe on the object — D5: a source lists its content fields explicitly).\nGrading: area:ai · Task · p3 · reach: n/a · evidence: read.\n\n## 维护者速读\n- 做什么：一份决定记录，改掉「平台不做 RAG 引擎」的旧定位：平台负责把记录组成文档、同步与核对、简单的结构化切分、按记录返回；嵌入调用、混合检索、重排、文件解析仍归适配器。知识源变成受管理的元数据。\n- 需要你做的：手工合并。\n\n## What\nOne ADR in `docs/adr/` with `## Provenance` naming objectstack-ai/cloud#4960. It records:\n1. The new boundary, and the texts it revises: `content/docs/protocol/knowledge.mdx` (\"does not ship its own RAG engine\"; \"stored as metadata\" vs the schema's \"not a governed metadata type\"), `packages/spec/src/ai/embedding.zod.ts` (chunking removed in v1), `packages/spec/src/contracts/knowledge-adapter.ts` (deliberately minimal), `knowledge-service.ts` / `knowledge-document.zod.ts` class notes.\n2. What it supersedes, each by name: #4606's three judgements and its restart condition (BrightRule is the real object-source consumer), the adapter-list deferral in `knowledge-service-plugin.ts`, #4672's no-reconcile option, the 2026-11-15 words on #33933.\n3. `knowledge_source` admission under ADR-0088 (own lifecycle, declarable governance, a real consumer); v1 keys = only those with an enforcer; the fate of the runtime-registration `file` / `http` shapes that `knowledge-ragflow` uses (one strict contract, AGENTS.md).\n4. ADR-0087 dispositions for the renames and retirements (`id→name`, `contentFields→content`; `embedding`, `vectorStore`, `refresh.cron` removed).\n5. One index fingerprint (model + dimensions + split config + split algorithm version + content recipe); a changed fingerprint means a new generation.\n6. The adapter contract additions as a list, each tied to the child that is its first reader.\n7. One `search_knowledge` definition for every transport (ADR-0149 D2); `aiExposed` stays at the tool layer (#36650).\n\n## Acceptance\n- PR open, Status Proposed. Governed surface: the maintainer merges by hand.\n\nBlocked-by: objectstack-ai/cloud#4960\nParent: #37000. Reader: the seat that takes spec ADR text.\nDedupe: `knowledge_source` 0 · `is:open metadata type admission ADR-0088` 3 (#36868: precedent)."

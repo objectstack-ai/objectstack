@@ -23,11 +23,11 @@
   "milestone": null,
   "type": "Bug",
   "created_at": "2026-11-24T16:02:42Z",
-  "updated_at": "2026-11-24T19:10:41Z",
+  "updated_at": "2026-11-25T01:58:52Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 3,
+  "comments": 7,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/37025",
   "body": "triage#1 · os-warren · session_01JQwxbZKP5YM48rWMWTS7wE\n\nFiling gate: ① an experience defect, filed by triage at repo:objectstack#3's request (mailbox #36743, comment 7137009112). Source: L1 nit 7136960885 on PR #37009 (#36980).\n\nBlocked-by: #37009\n\n## What happens\n\nThe import runner refuses a row in two more ways that still reach the import wizard's row-error list as English sentences naming API fields:\n- `BLANK_MATCH_KEY`: the row's match key is blank.\n- A multi-value field used as the match key.\n\nPR #37009 localizes only the duplicate-match-key row (#36980). A zh-CN, ja-JP or es-ES session still sees these two in English, with the field's API name instead of its label.\n\nreach: anyone who imports with upsert and has a blank key or picks a multi-value key, in a non-English session.\n\n## Expected\n\nBoth refusals read in the session's language and name the field by its label, the same way #37009 does for the duplicate-key row.\n\n## Acceptance\n\n- It reuses #37009's mechanism: the code, parameters and wizard-side rendering.\n- A test pins each refusal in zh-CN with the field label.\n\nDedupe: no open issue names `BLANK_MATCH_KEY` or the multi-value match-key refusal."

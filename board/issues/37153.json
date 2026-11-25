@@ -1,0 +1,37 @@
+{
+  "number": 37153,
+  "kind": "pull_request",
+  "title": "docs(spec,adr): the action-page contract and ADR-0043 name the reject link's required reason",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "pm:awaiting-merge",
+    "size/s",
+    "tooling"
+  ],
+  "assignees": [
+    "os-support-ai"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-24T22:57:41Z",
+  "updated_at": "2026-11-25T00:49:55Z",
+  "closed_at": "2026-11-25T00:49:53Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-11-25T00:49:53Z",
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/37153",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-support-ai\"} -->\n_Requested by **Yibo Wang** · [project thread](https://claude.ai/code/project/chan_01BVUyyPie8gHwoPM18iABwB?thread=cmsg_01BVUyyPie8gHwoPM18iABwBEaJzgBWzjWCNjBjkVoeRto)_\n\nFixes #36709\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 用户能看到什么变化:用户无感;只改审批\"邮件一键处理链接\"的接口说明和对应架构决策记录的补充说明,让它们写明驳回时必须填写理由、不填会被退回确认页。\n- 为什么做:属于\"审批流程\"这一块;上一轮已让邮件链接驳回必须填写理由,但对外发布的接口说明和决策记录还停留在旧说法,会误导读这些文字的开发者和 AI。\n- 出错会怎样:只是文字,不改任何行为;写错最多是说明不准,可以直接撤回。\n- 要你做什么:本次含一条架构决策记录的补充说明,而该记录没有\"决策/状态\"小节,自动判定只能归为需要审批人合并的一档,请按该档处理。\n\n## What changes\n\nText only, no behaviour change. PR #36695 made the email action-link reject require a typed reason; contract review 7101851923 on it (nit N1) found two texts still describing the old POST.\n\n- `packages/spec/src/contracts/approval-service.ts`, the `IApprovalService.handleActionPage` docblock only:\n  - `GET`: a reject link's confirm form also carries a required reason field, named `comment`.\n  - `POST`: reads `token` and, for a reject link, `comment` (the last of each when a field repeats); a reject records that reason as its comment; an approve reads no `comment` and records the fixed \"Via action link\".\n  - New bullet: a reject whose `comment` is missing, blank or not a string is refused before the token is consumed and answered the same confirm page again, carrying the refusal, with status `400` (redemption outcome `reason_required`). A dead link is judged first and still gets its `200` result page. The existing \"never as an error status\" sentence gains \"The `400` above refuses the input, not the link.\"\n  - `@param` / `@returns` say the same.\n  Each statement is read off the implementation on `origin/main` 517e4153 (`ApprovalService.handleActionPage`, `redeemActionToken`, `actionRedemptionPage` in `packages/plugins/plugin-approvals/src/approval-service.ts`), not off the card.\n- `docs/adr/0043-actionable-approval-links.md`: one ADD-ONLY paragraph after the Non-goals list. No existing line edited or removed; the first Non-goals bullet stands as written for v1.\n- `.changeset/36709-action-page-contract-reject-reason.md`: `@objectstack/spec` patch. Measured, not assumed: the docblock ships. After `pnpm --filter @objectstack/spec build`, the new sentence \"refuses the input, not the link\" is found in `dist/contracts/index.d.ts` and `.d.mts`, both inside `files[]` (`dist`). Positive control: the existing \"The token is the only credential\" sentence is found in the same two files. So `skip-changeset` would be wrong, and `Check Changeset` needs either a changeset or that label.\n\nRead first (by risk): (1) the new `400` bullet in the docblock, since it is the contract sentence an AI caller reads; (2) the ADR paragraph, for add-only shape; (3) the changeset.\n\n## Tests\n\nNo behaviour moved, so no test was added and no ablation applies (docblock and ADR text).\n\n<details><summary>Local runs on 5d4cdbc2</summary>\n\n- `pnpm --filter @objectstack/spec build`: lock VERDICT command-exit 0.\n- `pnpm --filter @objectstack/spec typecheck`: lock VERDICT command-exit 0; `check:test-typecheck: OK`.\n- `pnpm --filter @objectstack/spec test`: lock VERDICT command-exit 0; `Test Files  889 passed (889)`, `Tests  28273 passed | 1 todo (28274)`.\n\n</details>\n\n## Acceptance notes\n\n- **Landing tier.** The ADR row's add-only arm cannot apply to this ADR, whatever the note says. `addOnlyNoteReasons` from `scripts/pm/check-governed-merges.mjs`, run on this diff at full context, returns exactly one reason: \"`docs/adr/0043-actionable-approval-links.md` names no decision or status heading, so where a note sits cannot be judged\". ADR-0043's headings are TL;DR, Mechanics, Non-goals (v1) and Consequences, and its Status is a bold line, not a heading. An add-only diff cannot add such a heading to the base side, so this PR reads Tier H. The note's own lines pass every other test the reader applies (no removed line, plain-prose allowlist, no status line, no header-block line).\n- Contract review N2 to N5 on PR #36695 stay outside this card, as that review placed them.\n\n## Verification\n\n<details><summary>Derived gate families (dispatch-gates, tree a48e05f9 then 5d4cdbc2)</summary>\n\n`node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack` derived 85 commands with the changeset present. 82 exited 0. Three exited 3 (PREREQUISITE NOT MET), left to CI and recorded as NOT MEASURED:\n\n- `node scripts/check-plugin-teardown-shape.mjs --self-test`: the fixture is pinned to a commit a shallow checkout cannot reach.\n- `pnpm check:dual-build-cjs-loads`: needs the whole workspace built.\n- `pnpm check:lean-entry-closure`: needs `@objectstack/objectql` built.\n\n`pnpm --filter @objectstack/lint run check:doc-formula-expressions` first exited 3 (unbuilt `@objectstack/formula`); after building formula and lint it exited 0.\n\n`--ran` reconciliation: \"85 derived, 82 run, 3 NOT-MEASURED, 0 UNRUN\" (3 derived from a recorded exit 3).\n\nOverlap: `node scripts/pm/overlap-check.mjs --branch=claude/issue-36709-approval-action-page-docs` reported `VERDICT clean exit 0` before each push. The in-flight branch `claude/issue-37041-batch-lock-detail-lines` (a77035329e) does not touch `packages/spec/src/contracts/approval-service.ts`, and this diff stays inside the `handleActionPage` docblock.\n\n</details>\n\nTwo-minute check: `git diff origin/main...HEAD -- docs/adr/0043-actionable-approval-links.md` shows only `+` lines (ten of them). `grep -n \"reason_required\" packages/spec/src/contracts/approval-service.ts` hits the docblock once.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01WGufzg3KqwSpt61Y8ovKK7)_\n\n<!-- signed: repo:objectstack#3 · os-support-ai · session_01WGufzg3KqwSpt61Y8ovKK7 -->\n"
+}

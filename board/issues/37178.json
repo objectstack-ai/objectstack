@@ -1,0 +1,30 @@
+{
+  "number": 37178,
+  "kind": "issue",
+  "title": "37140 跟进：资料包正文目录设条数上限",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ai",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-25T01:56:11Z",
+  "updated_at": "2026-11-25T01:56:11Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/37178",
+  "body": "repo:objectstack#1 · os-warren · session_01JQwxbZeHNsF3RWcWpj7rGj\n\nFiling gate: ③ maintainer-directed (topic #36996 handed to this project), from the #37173 contract review delta, R10.\nGrading: area:ai · Task · p2 (before row 9 serves the tool in-app) · evidence: read.\n\n## 维护者速读\n- 背景：记录正文太长时，`get_record_context` 不给全文，而是给一份带锚点的目录。目录的条数没有上限，一篇几乎全是标题的长正文会让回答跟正文一样大，8000 字的正文上限就白设了。\n- 要做的：目录条数设上限，超出时在说明里讲一句被截断了，并用测试钉住这个常量。\n- 要你做的：无。\n\n## What\n1. In `@objectstack/service-record-context`, cap the outline's entries with a service constant beside the body bound and the related-row cap.\n2. When the cap cuts, add one note saying the outline was cut, and how many headings were left out.\n3. Pin the constant and the cut by test (a body of many short headings).\n\n## Acceptance\n- The size of an outline answer is bounded by the constant, whatever the body holds.\n\nParent: #36996. Related: #37140, #37173."
+}

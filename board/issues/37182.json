@@ -1,0 +1,33 @@
+{
+  "number": 37182,
+  "kind": "issue",
+  "title": "首次使用清单：不能看到清单的会话不再发设置读取",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:cloud",
+    "domain:ui",
+    "pm:dispatched",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-25T02:18:20Z",
+  "updated_at": "2026-11-25T02:20:07Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/37182",
+  "body": "repo:cloud#1 · os-warren · session_01JQwxbZaRxCTLgg8LsLBuFb\n\nFiling gate: ① reproducible defect. Source: cloud pin round cloud#4982 (PR cloud#4983, framework pin 95734fef), whose `console-boots` call budget read `page/pricing` at 26 calls against a budget of 25.\nGrading: area:cloud · Bug · p2 (graded by the coordinator, 2026-11-25 02:18Z; the maintainer raised the cloud budget to 26 to ship that pin, so this no longer blocks it) · reach: every console open by a session that is not shown the checklist · evidence: read.\n\n## 维护者速读\n\n- 问题：#36791 之后，「开始使用」清单的读取挂在每个应用之上；凡是有任意权限的会话，首屏后都会多发一次 `GET /api/settings`，哪怕它根本看不到清单（普通成员；控制面上的普通组织所有者）。\n- 影响：控制面计费页的请求数从 25 变 26，cloud 抄版本的冒烟预算变红。\n- 修法：会话第一次被服务端答成「不显示清单」后，在本机记住这个答案（按组织、用户、权限集合，有效 24 小时）；之后打开控制台不再发这次读取。管理员照旧每次都读。\n- 需要你做的：无。\n\n## What\n\n`FirstRunChecklistProvider` (`ui/apps/console/src/pages/settings/firstRunChecklistState.tsx`, mounted above every app route since #36791) calls `readChecklistSettings` after the first paint for every session whose `systemPermissions` is non-empty. That function's first request, `GET /api/settings`, is what decides whether the session may write `localization`; for a session that may not, the checklist is never drawn, so the request buys nothing on every open.\n\nTwo sessions measured or read as paying it for nothing:\n\n- an ordinary organization owner on the cloud control plane: it holds `setup.write`, but the plane re-registers `localization` with `writePermission: manage_platform_settings` (cloud `packages/service-cloud/src/control-plane-settings.ts`, `CONTROL_PLANE_SETTINGS_WRITE_PERMISSION`), so the list answers \"not writable\" on every open;\n- a plain member of a tenant environment (holds e.g. `setup.access`, not `setup.write`).\n\nA capability check before the request cannot tell the first case apart: the client does not know which permission a deployment's `localization` manifest asks for until the list answers, and naming one in the console would be a second copy of the manifest's declaration.\n\n## Done when\n\n- A session the server has answered \"not shown\" sends no `/api/settings` request on later opens in the same browser for the same organization, user and capability set, for a bounded time.\n- An administrator's reads are unchanged; a changed capability set, another user or organization, an expired record, or a failed read (no answer) reads again.\n- The cloud control plane's `page/pricing` warm open returns to 25 calls (`scripts/dev-local/verify-console-pin.mjs` call budget in cloud).\n- In the next cloud pin round after this merges, that script's `page/pricing` `maxCalls` is set back to 25, with the reading recorded on cloud#2914.\n\n## Responsibility\n\n- Whose code: objectstack `ui/apps/console` (the provider added by #36791).\n- Platform path that already covers it: none.\n- Who reaches it: every non-admin console session, today.\n"
+}

@@ -1,0 +1,36 @@
+{
+  "number": 37160,
+  "kind": "pull_request",
+  "title": "fix(console): AI pane names no lone agent; the drawer drops the empty header row",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tooling"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-25T00:02:41Z",
+  "updated_at": "2026-11-25T00:53:36Z",
+  "closed_at": "2026-11-25T00:53:33Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-25T00:53:33Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/37160",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-warren\"} -->\n_Requested by **Warren** · [project thread](https://claude.ai/code/project/chan_01U5RdnAAmkSQmZbqh6FtqZ8?thread=cmsg_01U5RdnAAmkSQmZbqh6FtqZ8Ew4Ge2RjXufCRJ9pCgKWSC)_\n\nFixes #37146\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 用户能看到什么变化：右侧 AI 助手只有一个智能体时，顶部不再出现只写着「提问」的那一行，对话区直接从标题栏下面开始；有两个及以上智能体时，切换器照旧。\n- 为什么做：AI 搭建入口关闭后，目录里只剩「提问」一个，这一行没有东西可切，只是占地方（卡上你的原话）。\n- 出错会怎样：只影响助手顶部这一行画不画；不改请求、不改数据，可直接整体撤回。\n- 要你做什么：无。\n\n## What changes\n\n`ui/packages/app-shell/src/console/ai/AiChatPage.tsx`, the pane's `headerSlot`:\n\n- With one launchable agent (`showAgentLauncher` false) the row no longer draws a `span` with the agent's name. The switcher arms (Tabs for up to three agents, Select above) are unchanged.\n- `headerHasContent` = a switcher, or the build package chip (`isBuildSurface`), or Share/Doctor still in the row (`!actionsInHost`), or the offline note (`agentsError`). When none holds, `ChatPane` passes no `headerSlot`, so `ChatbotEnhanced` draws no wrapper, no band and no border. That is the drawer case: its host lifts Share and the Build Doctor into the drawer's title bar (`actionsInHost`, objectstack#35445).\n- The full-page assistant follows the same rule. It keeps its row because Share (and the Doctor where offered) sit there, now with no agent name beside them.\n- The row gets `data-testid=\"ai-chat-header\"` so the test can name it.\n\nChangeset: `.changeset/37146-ai-pane-lone-agent-header.md` (`@object-ui/app-shell` patch).\n\n## Why\n\nSince the in-app build entry closed, the catalog usually serves only the ask agent. The row had nothing to switch and read only 「提问」.\n\n## Verification\n\nNew `ui/packages/app-shell/src/console/ai/__tests__/AiChatPage.loneAgentHeader-37146.test.tsx` renders the real `ChatPane` and the real `ChatbotEnhanced`. Only the chat transport, the models list and the metadata and adapter providers are stand-ins:\n\n- drawer (actions lifted), one agent: no `ai-chat-agent-picker`, no agent-name span, no header row;\n- full page, one agent: no picker, the row holds Share, and no \"Ask\" text;\n- drawer and full page, two agents: the switcher renders;\n- drawer, one agent on the build surface: the row stays for the package chip.\n\nScreenshots, right-side drawer at 1280×720, zh-CN, one `ask` agent served. These are a scratch dev-server fixture (the real `ChatDockPanel` + `ChatDockConversation`, with the AI endpoints answered in the browser) and are not committed. The project thread carries the image files:\n\n1. Before (main `6f3a8da2`): under the 「AI 助手」 title bar, a bordered row holding only 「提问」.\n2. After: the empty state starts right under the title bar, with no row.\n\n<details><summary>Readings (head b0c6e50f)</summary>\n\n- `pnpm --dir ui exec vitest run packages/app-shell/src/console/ai/__tests__/AiChatPage.loneAgentHeader-37146.test.tsx` → 5 passed.\n- Ablation: `AiChatPage.tsx` back to main's `headerSlot` (testid kept) → the two one-agent cases go red (2 failed, 3 passed); the fixed file restored → 5 passed.\n- `pnpm --dir ui exec vitest run packages/app-shell/src/console/ai/ packages/app-shell/src/layout/` → Test Files 221 passed, Tests 1805 passed.\n- `pnpm exec turbo run type-check --filter=@object-ui/app-shell` → 69/69 tasks successful.\n- `node scripts/pm/dispatch-gates.mjs --commands` (merge base 6f3a8da2, 3 paths) → 38 commands, all 38 exit 0 (incl. `pnpm --dir ui exec vitest run scripts/`, `check:type-check-debt`, `check:changeset-gate-self-tests`).\n\n</details>\n\n## Human Minimum\n\n- [x] 1. Schemas start as Zod; `packages/spec` holds no runtime logic. (untouched)\n- [x] 2. Every name I added uses the casing for its kind.\n- [x] 3. No formatter ran; `pnpm lint` passes.\n- [x] 4. One issue, one branch off an up-to-date `main`, one pull request.\n- [x] 5. A change that publishes carries a changeset, and both declaration lines are filled in here and in the changeset.\n- [x] 6. `packages/spec` touched: n/a.\n- [x] 7. No hand edits to `content/docs/references/`, `packages/*/CHANGELOG.md` or `content/docs/releases/`.\n- [x] 8. Title, body and comments are in English.\n- [x] The *Before Submitting* list in CONTRIBUTING.md is done.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01JQwxbWzzVHDadsqECHsTmd)_\n\n<!-- signed: repo:cloud#1 · os-warren · session_01JQwxbWzzVHDadsqECHsTmd -->\n"
+}

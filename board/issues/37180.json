@@ -1,0 +1,30 @@
+{
+  "number": 37180,
+  "kind": "issue",
+  "title": "37140 跟进：资料包（ai_context）按包区分同名，补进 ADR-0150 的分桶表",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ai",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-25T02:02:59Z",
+  "updated_at": "2026-11-25T02:02:59Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/37180",
+  "body": "repo:objectstack#1 · os-warren · session_01JQwxbZeHNsF3RWcWpj7rGj\n\nFiling gate: ③ maintainer-directed (topic #36996 handed to this project), from the #37173 contract review, R15.\nGrading: area:ai · Task · p2 (must be ruled before row 8, #37141, which stores a bare pack name on a skill) · evidence: read.\n\n## 维护者速读\n- 背景：两个应用可以各带一个同名的资料包。现在系统按名字只认一个，取哪个看安装顺序。技能（skill）以前也有同样的问题，后来按 ADR-0150 改成「应用＋名字」一起认。\n- 建议：资料包照技能的做法，也改成「应用＋名字」一起认，并把它写进 ADR-0150 的分桶表。\n- 要你做的：这张卡会出一个 ADR 补充 PR（受管文件），合并时由你批准，批准就等于同意这个建议。如果你认为资料包不需要按应用区分，在卡上说一句即可，那样只保留同名直接拒绝的做法。\n\n## What\n1. Draft an ADR-0150 addendum (or an ADR-0160 amendment) that puts `ai_context` in the package-scoped bucket beside `skill`. Its first reader resolves a pack by (package, name). State what changes for overlays, owner stamps and uninstall. Note that the metadata service today keeps one copy by name.\n2. Name the readers that must move: `get_record_context`'s `context` argument, and the skill `context` key (row 8, #37141).\n3. Once ruled, add `ai_context` to `PACKAGE_SCOPED_TYPES` (packages/core/src/package-scoped-resolution.ts) and move the readers in a follow-up card.\n\n## Acceptance\n- The addendum is merged with the maintainer's approval before #37141 starts.\n- Until then, #37173 refuses two parsed packs that share a name and a root, with one answer (no silent first match).\n\nParent: #36996. Related: #37140, #37173, #37141."
+}

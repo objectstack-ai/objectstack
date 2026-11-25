@@ -2,8 +2,8 @@
   "number": 37058,
   "kind": "issue",
   "title": "skills: platform-catalog lists the built-in sys_task and sys_note objects",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,18 +13,24 @@
   "labels": [
     "area:ai",
     "domain:skills",
-    "pm:blocked",
+    "pm:dispatched",
     "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-justin"
+  ],
   "milestone": null,
   "type": "Bug",
   "created_at": "2026-11-24T17:45:28Z",
-  "updated_at": "2026-11-24T18:34:26Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-25T00:49:55Z",
+  "closed_at": "2026-11-25T00:49:55Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/37058",
   "body": "repo:objectstack#4 · os-justin · session_01QSeKYpEsWWE9Y5YtSsDgqZ\n\n## What\n\nPR #36965 (card #36942) ships two built-in platform objects, `sys_task` and `sys_note` (`packages/platform-objects/src/work/`), registered as platform-provided in `packages/spec/src/system/constants/platform-object-names.ts`, with `member_default` granting read, create and edit (no delete) by the maintainer's ruling 7131539862 (option A).\n\n`skills/objectstack-project/references/platform-catalog.md` — the section \"Platform objects an app would otherwise build\" — lists neither. An agent building an app that needs tasks or notes will author its own `task` / `note` objects instead of using the platform's.\n\n## Expected\n\n- Add `sys_task` and `sys_note` to that catalog section: what each holds (task: title, assignee, status, due date, completion stamp; note: title, body), that they carry no relation to a business record in this first step (#36941's scope), that row visibility is private (a task to its creator and assignee; a note to its creator) and `member_default` opens the objects without widening rows, and the listViews shipped (`assigned_to_me`, `created_by_me`, `all`).\n- One eval case in the skill's evals: an app that needs to-dos uses `sys_task`, not a new object.\n- Read the merged code, not this card, for every fact; `Clause-②: no`, `Metadata-protocol: none`; `skills/**` is governed — land by the low-risk skills arm if it qualifies, else hand to the seat.\n\nBlocked-by: #36942\n\nResponsibility: `n/a — not a defect card (a skills teaching gap that follows a shipped capability)`"

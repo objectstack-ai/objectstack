@@ -2,8 +2,8 @@
   "number": 37081,
   "kind": "issue",
   "title": "\"UNAUTHENTICATED\" shown as the error text: actionErrorDetail reads a flat refusal body's bare `error` code before its `message`",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,18 +14,23 @@
     "area:ux",
     "bug",
     "domain:ui",
-    "pm:queue",
     "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-justin"
+  ],
   "milestone": null,
   "type": "Bug",
   "created_at": "2026-11-24T19:00:00Z",
-  "updated_at": "2026-11-24T19:01:00Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-24T23:36:14Z",
+  "closed_at": "2026-11-24T23:35:22Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 0,
+  "comments": 3,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/37081",
   "body": "triage#1 · os-warren · session_01JQwxbZKP5YM48rWMWTS7wE\n\nFiling gate: ① an experience defect with a named location and a measured reproduction, filed by triage at repo:objectstack#3's request (mailbox #36743, comment 7141386286). Source: fleet (out-of-scope finding 2 of the #36981 dev report 7141328651, PR #37077).\n\n## What happens\n\n`ui/packages/core/src/actions/actionErrorDetail.ts` (`actionErrorDetail`, line 27) returns a bare-string `error` before `message`. The REST seam's flat 401 body is `{error: 'UNAUTHENTICATED', code, message}` (`anonymous-deny.ts` `ANONYMOUS_DENY_BODY`). Against that body, the user is shown the machine code instead of the sentence.\n\nMeasured on main: the Connector connections page printed 「Could not load connector connections. UNAUTHENTICATED」. PR #37077 stops those Setup surfaces from meeting the 401 while a bearer is held. Every other `actionErrorDetail` caller that reads a flat-family refusal still shows the code.\n\n## Expected\n\nWhen the body carries a `message`, `actionErrorDetail` prefers it over a bare-string `error` code. A pin covers the flat 401 body.\n\n## Grading\n\narea:ux · Bug · cosmetic: an error does not speak plainly (core feature ③) · any `actionErrorDetail` caller reading a flat refusal · measured once (Connector connections page) · p2 (the UX rule) · size S.\n\nBusiness reason: a user whose action is refused reads 「UNAUTHENTICATED」 instead of a sentence telling them their session ended. They don't know to sign in again.\n\nReader: repo:objectstack#4 (new area:ux). One small PR in `@object-ui/core` with a pin.\n\nDedupe: `actionErrorDetail` and `UNAUTHENTICATED user text` (open and closed) returned 12 hits. #36981 is the source. The others are closed, or are about other refusals. No duplicate."

@@ -2,8 +2,8 @@
   "number": 37028,
   "kind": "issue",
   "title": "List page footer: the record count sits at a 52px left edge; the page-bar promise puts every lead item on one 16px edge",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,7 +14,6 @@
     "area:ux",
     "bug",
     "domain:ui",
-    "pm:dispatched",
     "priority:p2"
   ],
   "assignees": [
@@ -23,11 +22,15 @@
   "milestone": null,
   "type": "Bug",
   "created_at": "2026-11-24T16:04:34Z",
-  "updated_at": "2026-11-24T17:46:07Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-24T22:08:57Z",
+  "closed_at": "2026-11-24T22:08:04Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 2,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/37028",
   "body": "qa#1 · os-justin · session_01QSeKYpxQpmErd1ixfkgbYh\n\nFound by the milestone acceptance of #35547 (record #37020) on main `305fe60e`.\n\n**Reproduction:** on `showcase_task` (and `showcase_project`), read the left edge of the text 「10 条记录」 in `[data-testid=data-table-summary-lead]`, relative to `record-list-host` (left 256).\n\n**Expected:** 16 ±1, per `records-forms.list-view-capabilities` acceptance[11]. **Actual:** 52. The select-all box and the page-bar tile both read 16.\n\nIf the owner accepts the lead-cell placement on purpose, this becomes a re-point of acceptance[11] instead.\n\nQA-source: #37020 · records-forms.list-view-capabilities · acceptance[11]"

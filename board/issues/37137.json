@@ -1,0 +1,37 @@
+{
+  "number": 37137,
+  "kind": "pull_request",
+  "title": "fix(runtime): the MCP doc tools name a page's manual in the request's locale",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-24T22:25:51Z",
+  "updated_at": "2026-11-24T23:22:44Z",
+  "closed_at": "2026-11-24T23:22:42Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-24T23:22:42Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/37137",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-warren\"} -->\n_Requested by **Warren** · [project thread](https://claude.ai/code/project/chan_01U5RdnAAmkSQmZbqh6FtqZ8?thread=cmsg_01U5RdnAAmkSQmZbqh6FtqZ8HaZKB3oyHkN7hYoUHf2Qma)_\n\nFixes #36854\n\n## 维护者速读\n\n- 问题：外接 AI 读应用手册时，页面标题按语言翻译了，手册名却还是英文。\n- 改了什么：两个文档工具返回的手册名，改用 `/meta/book` 同一套翻译（`books.<手册>.label`），语言与页面一致；没有译文时保留原名。\n- 不变的：手册归属、地址、可见性规则都不动。\n- 要你做什么：暂无，等 L1 复核。\n\n## What changes\n\n- `packages/runtime/src/domains/mcp-package-docs.ts`: `PackageDocsSources` gains an optional `translateBooks(books, locale)`. A new `bookLabelsIn` asks it once per call and `addressOf` serves `book.label` from it by manual name, falling back to the authored label. `search_package_docs` uses the request's locale; `read_package_doc` uses the locale the page is served in (`input.locale ?? request locale`), so the manual name and the page title speak one language.\n- `packages/runtime/src/domains/mcp.ts`: the docs seam wires `translateBooks` to `translateMetaList(..., 'book', ...)`, the routine `GET /meta/book` runs (`translateBook` in the spec's translator table), with this request's i18n service and protocol (`metaTranslationSources`) and the page's locale. ⛔ No second translation routine.\n- The home manual is still picked from the manuals as listed: only the label is read from the translation, so a translation never moves a page to another manual or changes its URL.\n\n## Why\n\nA HotCRM user in zh-CN asking 「什么是回款？」 got the page title in Chinese and the manual cited as \"HotCRM Order to Cash Manual\", although HotCRM ships `books.crm_o2c_manual.label` = 「HotCRM 订单与回款手册」. Found in the #35442 acceptance run (comment 7122547546 on #36843).\n\n## Verification\n\n- `pnpm --filter @objectstack/runtime exec vitest run --maxWorkers=2 src/domains/mcp-package-docs.test.ts`: 21/21 pass. The new `[#36854]` block pins: zh-CN search and read both serve `book.label` = 销售手册; a manual the bundle does not name keeps its authored label and its address; no locale, or a read asking for `en`, serves the authored label.\n- Red before the fix: with the two source files reverted, the zh-CN case fails (1 failed, 20 passed).\n- `pnpm --filter @objectstack/runtime exec vitest run --maxWorkers=2 src/domains/mcp`: 10 files, 343 tests pass.\n- `pnpm --filter @objectstack/runtime typecheck`: OK.\n- The derived gate families (`dispatch-gates.mjs --commands`) run in CI on this PR.\n\nClause-②: no\nMetadata-protocol: none\n\n## Acceptance notes\n\n- Edge left as is: when two manuals of a package share `order`, the Console sorts the translated list by label while this door picks the home manual from the untranslated list. Only a tie on `order` can make them differ; not filed (no reproduction in a shipped app).\n\n## Human Minimum\n\n- [x] 1. Schemas start as Zod; `packages/spec` holds no runtime logic.\n- [x] 2. Every name I added uses the casing for its kind.\n- [x] 3. No formatter ran; `pnpm lint` passes.\n- [x] 4. One issue, one branch off an up-to-date `main`, one pull request.\n- [x] 5. A change that publishes carries a changeset, and both declaration lines are filled in here and in the changeset.\n- [x] 6. `packages/spec` touched: its generated artifacts are regenerated and committed. (not touched)\n- [x] 7. No hand edits to `content/docs/references/`, `packages/*/CHANGELOG.md` or `content/docs/releases/`.\n- [x] 8. Title, body and comments are in English.\n- [x] The *Before Submitting* list in CONTRIBUTING.md is done.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01JQwxbWWn67Rkeb2aJYgqpN\n"
+}

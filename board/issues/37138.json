@@ -1,0 +1,37 @@
+{
+  "number": 37138,
+  "kind": "pull_request",
+  "title": "fix(core): actionErrorDetail shows a flat refusal's message, not its bare error code",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "os-justin"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-24T22:28:52Z",
+  "updated_at": "2026-11-24T23:35:23Z",
+  "closed_at": "2026-11-24T23:35:20Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-24T23:35:20Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/37138",
+  "body": "Fixes #37081\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 用户能看到什么变化：在控制台里，会话失效后某个操作或设置页被拒时，报错不再显示「UNAUTHENTICATED」这个代号，而是显示一句「需要登录才能访问」的英文说明。\n- 为什么做：属于“报错要说人话”的体验改进，替所有读这类拒绝答复的设置页与操作按钮解决同一个问题。\n- 出错会怎样：最坏是某条报错显示的句子与以前不同（仍是服务器给的原句），不影响数据；可以直接撤回。\n- 要你做什么：无。\n\n## What changes\n\n`actionErrorDetail` (`@object-ui/core`) returned a bare-string `error` before it read `message`. The REST seam's flat 401 body (`ANONYMOUS_DENY_BODY`, `packages/core/src/security/anonymous-deny.ts`) is `{error: 'UNAUTHENTICATED', code: 'UNAUTHENTICATED', message: 'Authentication is required to access this endpoint.'}`, so every caller showed the user the machine code.\n\nNow, when the body carries both a non-empty string `error` and a non-empty string `message`, the message wins. Everything else keeps today's order:\n\n- `{error: 'sentence'}` alone still returns the sentence (the legacy `/actions` shape).\n- `{error: {message}}` (the ADR-0112 nested envelope) is read as before, and still ahead of a top-level `message`. No body shape on the platform was found that carries both a nested `error.message` and a different top-level `message`, so that order is kept.\n- An empty or non-string `message` beside a string `error` returns the `error`; nothing readable returns the caller's fallback.\n\nCallers (all read through this one function, none changed): `useConsoleActionRuntime.tsx`, `FlowItemMoreMenu.tsx`, `sharing-rule-catalog.ts`, `catalog-activation.ts`, `permission-set-clone.ts`, `packagedActionLedger.ts`, `connectorConnections.ts`, `connectorCredentials.ts`, `packagedFlowLedger.ts`, `flowResponse.ts` (app-shell) and `actionResponse.ts` (core).\n\nFiles to read first:\n1. `ui/packages/core/src/actions/actionErrorDetail.ts` — the one changed branch (the bare-string `error` case).\n2. `ui/packages/core/src/actions/__tests__/actionErrorDetail-37081.test.ts` — the pins.\n\nTwo-minute verification: `cd ui && pnpm exec vitest run packages/core/src/actions/__tests__/actionErrorDetail-37081.test.ts` — expect 5 passed.\n\n## Tests\n\nNew file `actionErrorDetail-37081.test.ts` (no existing harness pins `actionErrorDetail` directly), five cases: the flat 401 body returns its message; `{error: 'sentence'}` alone returns the sentence; empty or non-string `message` returns the `error`; the nested envelope is unchanged and still beats a top-level `message`; lone `message` and the fallback are unchanged.\n\nFlipped pins: none. No existing test asserted the code-over-message order. Two checks: a static scan of every `ui/**` test for an object literal carrying both a string `error` and a string `message` found 8 hits, none routed through `actionErrorDetail` (the `data-objectstack` and `AuditLogPage` / `PackagesPage` fixtures use their own readers); and the 113 test files that name a caller module or the code `UNAUTHENTICATED` in app-shell / console all pass with the change.\n\n<details><summary>Readings at 39f1bca4</summary>\n\n- `cd ui && pnpm exec vitest run packages/core/` — Test Files 247 passed (247), Tests 4774 passed, 27 skipped; exit 0.\n- `cd ui && pnpm exec vitest run` over the 113 caller test files — Test Files 113 passed (113), Tests 1564 passed; exit 0.\n- `pnpm exec turbo run type-check --filter=@object-ui/core` — `@object-ui/core:type-check` executed (cache miss), Tasks 4 successful; exit 0.\n- `pnpm --dir ui exec vitest run scripts/` after the seven-package Test UI build — Test Files 172 passed, 2 skipped; Tests 5131 passed; lock VERDICT command-exit 0.\n- Ablation (fix committed first; `scripts/ablation-replace.mjs --delete` on the new `return b.message` line, anchor 1 -> 0, blob 03bc8286 -> 7c90c74a): the flat 401 pin went red, `Expected: \"Authentication is required to access this endpoint.\" Received: \"UNAUTHENTICATED\"`, 1 failed / 4 passed; restore verified blob == HEAD, `git diff HEAD` empty.\n\n</details>\n\n## Acceptance notes\n\n- `@object-ui/core` does not depend on `@objectstack/core`, so the pin copies `ANONYMOUS_DENY_BODY` field for field and names its source file.\n\n## Verification\n\nDerived gate families (`dispatch-gates --commands` at 39f1bca4, 38): 37 run locally with exit 0, including `pnpm --dir ui exec vitest run scripts/` after the seven-package Test UI build. `pnpm check:type-check-debt` is NOT MEASURED locally: its first run exited 3 (PREREQUISITE NOT MET, its closure build got no turn on the shared verify lock) and two locked retries timed out in the queue (exit 99). It runs in CI under Lint and Repo Gates; read it there. `dispatch-gates --ran` reconciles 38 of 38. `overlap-check`: clean. Repo-wide families run in CI.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01QSeKYmRepQK9DkZeU7F53D)_\n"
+}

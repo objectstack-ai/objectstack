@@ -1,0 +1,37 @@
+{
+  "number": 37147,
+  "kind": "pull_request",
+  "title": "fix(mcp,runtime): a definition reader says when an admin switched a flow off",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-24T22:40:35Z",
+  "updated_at": "2026-11-25T01:08:33Z",
+  "closed_at": "2026-11-25T01:08:31Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-25T01:08:31Z",
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/37147",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-warren\"} -->\n_Requested by **Warren** · [project thread](https://claude.ai/code/project/chan_01U5RdnAAmkSQmZbqh6FtqZ8?thread=cmsg_01U5RdnAAmkSQmZbqh6FtqZ8D2keLWBgJTLex7bMfNy4yR)_\n\nPart of #36856 (this PR: the answer-order text and the open draft door's reader; the cloud build door's `describe_metadata` is the cloud half, objectstack-ai/cloud PR linked from the card)\n\nClause-②: yes (widening) — `@objectstack/types` gains root exports (`FLOW_RUNTIME_STATE_KEY`, `flowRuntimeStateOf`, `FlowRuntimeStateAnswer`), and the open door's `get_metadata_item` answer on a flow gains the key `runtimeState`; nothing that was accepted is refused, and no key a caller sends is added\nMetadata-protocol: none\n\nLevels (AGENTS.md Post-Task Checklist step 3): the level follows the `Metadata-protocol:` kind alone, and a non-protocol change, widening or breaking, ships `patch`; this diff changes nothing a metadata author can write (`none`), so every package stays `patch`.\n\n## 维护者速读\n\n- 用户能看到什么变化：管理员关掉某个流程后，外接 AI 读流程定义时会看到「已停用」，回答时会说这个流程现在不运行。\n- 为什么做：记录范围 AI 问询专题里的验收发现，关掉的审批流程被 AI 说成「默认会走审批」。\n- 出错会怎样：只多带一个开关读数，读不到时不带，回答照旧；可直接撤回。\n- 要你做什么：无。\n\n## What changes\n\nAn admin's switch (`POST /automation/NAME/toggle`) moves only the activation ledger's bit; the flow's definition, `status: 'active'` included, stays as it was. A definition reader that answered the definition alone therefore told an MCP agent that a switched-off approval still runs.\n\n- `@objectstack/types`: `FLOW_RUNTIME_STATE_KEY` (`'runtimeState'`) and `flowRuntimeStateOf(automation, name)`, which reads the flow's `enabled` bit off `IAutomationService.getFlowRuntimeStates()` (the reading `GET /automation/_status` serves). Exactly one row for the name or nothing: no service, a throwing read, no row, or two rows (a name two packages hold, ADR-0150 D4) answer `undefined`, never \"enabled\".\n- `@objectstack/runtime` open draft door: `get_metadata_item` on a flow answers `runtimeState: { enabled }` beside the item, placed ahead of `item` so a reply a budget cuts short still carries it, and read only after the item gate admitted the item. The tool description says what `runtimeState.enabled: false` means.\n- `@objectstack/mcp` `packageDocAnswerRule` (the app-docs answer order sent on `initialize`, also used verbatim by the cloud host): when a definition reader is listed, it now adds that an answer carrying `runtimeState.enabled: false` means the process is switched off and does not run whatever its `status` reads, and the agent says so. No reader listed: no such sentence.\n\n## Tests\n\n- `packages/types/src/flow-runtime-state.test.ts` (new, 4): one row answers its bit; two rows / no row / no `enabled` / non-array / throwing read / no service answer `undefined`; the read is called as a method.\n- `packages/runtime/src/domains/mcp-authoring.test.ts` (+5 in a new block): switched-off flow answers `runtimeState: { enabled: false }` beside `item.status: 'active'`, key order `type, name, draft, runtimeState, item`; enabled flow and the plural `flows` spelling; no single row → no key; a non-flow item and a 404 flow never read the engine; a registry with no automation port → no key.\n- L2 R1/R2 (7305a38f): the door's own assembly is pinned through the real domain (`resolveOpenAuthoringInjection` resolves `automation` for `env_1` and a flow read carries `runtimeState`); ablation dropping the env id reds that test (1 failed), restored blob == HEAD; runtime file 56/56, typecheck exit 0. The tool description now says \"switched off\", not \"an admin switched it off\" (a packaged flow can ship off, and an `obsolete`/`invalid` status reads off too).\n- `packages/mcp/src/mcp-package-doc-tools-35442.test.ts`: the reader-listed text contains the switched-off sentence; the no-reader text names no `runtimeState`.\n\n<details><summary>Local runs (head 83e30667)</summary>\n\n- Build closure `pnpm --filter '@objectstack/runtime^...' --filter '@objectstack/mcp^...' build`: VERDICT command-exit 0.\n- `types` flow-runtime-state.test.ts 4/4; `runtime` mcp-authoring.test.ts 55/55; `mcp` mcp-package-doc-tools-35442 + package-doc-answer-rule-barrel-35633 13/13; VERDICT command-exit 0.\n- Typecheck `types`, `mcp`, `runtime`: VERDICT command-exit 0.\n- Ablation (committed fix, `scripts/ablation-replace.mjs --delete` of the `runtimeState` spread in `mcp-authoring.ts`): 2 failed / 53 passed, the two switch tests red; restored, blob == HEAD, `git diff HEAD` empty.\n- `dispatch-gates.mjs --commands`: 69 derived commands run; all exit 0 except two NOT MEASURED for the container, not the diff: `check-plugin-teardown-shape.mjs --self-test` (shallow clone cannot read its pinned fixture commit) and `check:dual-build-cjs-loads` (PREREQUISITE NOT MET: unbuilt `dist/` of packages outside the closure). Both run in CI.\n</details>\n\n## Acceptance notes\n\n- The cloud build door's `describe_metadata` carries the same key in the cloud PR; until the cloud pin moves past this PR, the cloud host sends the older answer-order text, and its reader's `runtimeState` stands on its own.\n\n## Verification\n\nRead first: `packages/runtime/src/domains/mcp-authoring.ts` (the `get_metadata_item` arm), `packages/types/src/flow-runtime-state.ts`.\nTwo-minute check: `pnpm --filter @objectstack/runtime exec vitest run src/domains/mcp-authoring.test.ts -t \"switch\"` shows 5 passing tests.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01JQwxbWYrbvgUpdQsPmGqF9\n\n<!-- signed: repo:cloud#1 · os-warren · session_01JQwxbWYrbvgUpdQsPmGqF9 -->\n"
+}

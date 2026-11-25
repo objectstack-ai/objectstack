@@ -1,0 +1,35 @@
+{
+  "number": 37172,
+  "kind": "issue",
+  "title": "skills: relationships.md smart-default sentence says a lone file/image field tips inline edit to form; it takes two or more",
+  "state": "closed",
+  "state_reason": "duplicate",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ai",
+    "bug",
+    "domain:skills",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-25T01:17:29Z",
+  "updated_at": "2026-11-25T01:35:12Z",
+  "closed_at": "2026-11-25T01:35:12Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/37172",
+  "body": "repo:objectstack#4 · os-justin · session_01QSeKYo86w1wqy2z2fMrryr\n\n## What\n\n`skills/objectstack-data/rules/relationships.md`, \"Inline-edit form factor\", teaches the smart default (what an omitted `inlineEdit` picks) as: picks `form` \"when the child has rich/form-only fields (textarea, file, image, json, location…) or more than ~8 editable fields, else `grid`\".\n\nThe code splits that list in two. In `ui/packages/plugin-form/src/deriveMasterDetail.ts` on main `6cfd04d9e2`:\n\n- `FORM_ONLY_TYPES` (`textarea`, `richtext`, `html`, `markdown`, `rich-text`, `json`, `location`, `address`): a single one tips to `form`.\n- `GRID_CAPABLE_RICH_TYPES` (`file`, `image`, `avatar`): \"A LONE one no longer forces a per-row form — 'attach a receipt per line' stays a grid\" (#2360). They count toward `RICH_FIELD_FORM_THRESHOLD = 2`, so two or more tip to `form`.\n- More than `SMART_FORM_FIELD_THRESHOLD = 8` editable fields tips to `form`.\n\nAn agent following the skill expects a line-item child with one receipt `file` field to open per-row forms, and may set `inlineEdit: 'form'` explicitly where the grid was wanted, or explain the grid it gets as a bug.\n\nFound by the contract reviewer of PR #37170 (records 7149242271 and 7149350343, \"not a finding on this diff, pre-existing on main\").\n\n## Expected\n\n- The smart-default sentence names the two groups as the code does: one form-only type (textarea, rich text, json, location, address…) tips to `form`; `file` / `image` / `avatar` stay in the grid alone and tip at two or more; more than ~8 editable fields tips to `form`.\n- Fewest words; pay any added bytes by same-file cuts (token ratchet, no ceiling raise).\n- Read the code on main for every fact. `Clause-②: no`, `Metadata-protocol: none`; `skills/**` is governed — the low-risk skills arm if it qualifies, else the seat.\n\nBlocked-by: #37042\n\nResponsibility: `the published skill text skills/objectstack-data/rules/relationships.md (objectstack-ai/objectstack) says a lone file or image field tips the inline-edit smart default to form | resolveInlineMode's GRID_CAPABLE_RICH_TYPES and RICH_FIELD_FORM_THRESHOLD (#2360) | every agent that installs objectstack-data and reasons about the default form factor of a line-item child`"
+}

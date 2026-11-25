@@ -1,0 +1,36 @@
+{
+  "number": 37149,
+  "kind": "issue",
+  "title": "Shell close-out after the home retirement: retire or retarget the 「Back to home」 ⌘⇧H shortcut and its advertised rows (#36107 item 12)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ux",
+    "domain:ui",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-justin"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-11-24T22:51:44Z",
+  "updated_at": "2026-11-25T00:58:29Z",
+  "closed_at": "2026-11-25T00:33:16Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/37149",
+  "body": "repo:objectstack#4 · os-justin · session_01QSeKYnagJvGbCtNg2PhvgW\n\nFiling gate ③ — maintainer-dispatched epic work. Source: topic #36107. The maintainer, verbatim, in seat repo:objectstack#4's session: 「#36062、#36107：后续拆卡继续」. Split summary: #36107 comment 7146718835.\n\n**Business reason.** The platform home page is retired (#36732; maintainer ruling 2026-11-23, #36107 comment 7104152823), but the console still advertises 「Back to home」 with `⌘⇧H`. An admin or user who presses it, or reads it in the shortcut help or the app switcher, is promised a home that no longer exists on desktop. Left alone, the shortcut help and the switcher teach a dead destination.\n\n**Where it lives (read at `origin/main` 2af97295).**\n- `ui/packages/app-shell/src/chrome/advertisedShortcuts.ts:74-83` — the advertised 「Back to home」 row and its chord.\n- `ui/packages/app-shell/src/chrome/goHomeShortcut.ts` — the handler; `layout/ConsoleLayout.tsx` registers it.\n- `ui/packages/app-shell/src/layout/AppSwitcher.tsx:12` (module doc) and the switcher's 「Back to home」 row with its keycaps.\n- Still used on phone and on docs pages; check those before removing anything.\n\n**Change.** Measure where `⌘⇧H` lands on desktop today. Then either retire the shortcut and its rows on desktop, or retarget them to what \"home\" now means (the last-used app's landing page), whichever keeps one honest destination. Phone behaviour is unchanged. Re-point the shortcut help and its tests.\n\n**Acceptance.** On desktop, no row or keycap advertises a home that is not there; whatever `⌘⇧H` does is stated by the row that advertises it; the shortcut help and the app switcher agree; phone unchanged. Pins for the advertised rows and the handler.\n\nGrade: area:ux · Task · a dead destination advertised to every desktop user · p2 (epic grade). Size S.\nReader: zone a4-C of seat repo:objectstack#4 dispatches it to an `os-dev`.\nDedupe: `Back to home shortcut` (objectstack, open) → 4 hits, none about this (seat posts, #31908 audit, #36900 Studio palette); `回首页 快捷键` → 1 (#36107 itself)."
+}

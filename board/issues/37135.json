@@ -1,0 +1,37 @@
+{
+  "number": 37135,
+  "kind": "pull_request",
+  "title": "fix(scenarios): credit master-detail inline edit by the master's field groups, not inlineEdit: true",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "os-justin"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-24T22:15:50Z",
+  "updated_at": "2026-11-24T23:41:32Z",
+  "closed_at": "2026-11-24T23:41:30Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-24T23:41:30Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/37135",
+  "body": "repo:objectstack#4 · os-justin · session_01QSeKYo86w1wqy2z2fMrryr\n\nFixes #37127\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n- 用户无感:只改场景卡评分器;主从子表「在主记录表单内联编辑」这一项,改为只看主对象的字段分组是否放置了子表。\n- 为什么做:主从子表的内联由主对象字段分组决定(「一律只看分组」),评分器却仍按已退役的布尔开关给分,按正规方式内联的构建反被判不合格。\n- 出错会怎样:只影响场景评测分数,不影响任何运行中的应用;可直接回退本次改动。\n- 要你做什么:无。\n\n## What changes\n\n`records-forms.master-detail-inline-edit` (`packages/qa/scenarios/src/score/scenario-tags.ts`) credits a master-detail child as edited inline ONLY when a field group of its MASTER (the FK's `reference`) names it in `fieldGroups[].relatedList` (by child object name or `object.field`) and the FK is one a group may place. This is the runtime's own test, with the same two spec predicates: objectui `attachInlineSubforms` (`ui/packages/app-shell/src/providers/MetadataProvider.tsx`, lines 773-774) inlines a child only when `isGroupPlaceableRelationship(fk) && fieldGroupsPlaceRelationship(groupsOf(fk.reference), child, fk)` (`packages/spec/src/data/related-list-body-table.ts`, lines 80 and 110). `inlineEdit` takes no part. The `asserts` sentence and `packages/qa/scenarios/README.md` (the tag table) say the same.\n\n## Deviation from the card\n\nThe card asks to credit a child also \"when `inlineEdit` is `'grid'` / `'form'`\". This PR does not. It follows the maintainer's field-group ruling on #35889 (record 7046311205, 「一律只看分组」), which outranks the card's wording: the runtime inlines nothing without a placing field group (MetadataProvider.tsx L773-775; `inlineEdit` only feeds `resolveInlineMode`, the form factor). A scorer that credited it would pass a build that inlines nothing. Decided by the PM (zone a4-A).\n\n## Tests\n\n`packages/qa/scenarios/test/score/scenario-tags.test.ts`:\n\n- The rich fixture inlines the tasks the supported way: a `project` field group naming `task`, no `inlineEdit` on the FK.\n- The degradation table pins two failing shapes: no placing group, and a lone retired `inlineEdit: true`.\n- A `describe` pins: field-group placement credits, by child name and by `object.field`; a group on the CHILD, or a group naming an FK with `relatedList: true`, does not credit; `inlineEdit: true` alone does not credit; `'grid'` and `'form'` with no placing group do not credit; a placed child credits under either form factor.\n\n## Acceptance notes\n\n- **Serial: lands after #36802** (merged at 22:27Z; `main` merged into this branch since). Its `corpus.ts` places the golden corpus control cards' children (`invoice_with_line_items`, `project_with_tasks`) with field groups; before it, those two `scenario-cards.test.ts` pins read red under the corrected tag. Measured green with #36802's `corpus.ts` in place at head `2c1f1e68fa`: 137/137 across `scenario-cards.test.ts` and `scenario-tags.test.ts`. The CI run on the merged head is the verdict.\n\n## Verification\n\nTwo-minute check: `pnpm --filter @objectstack/scenarios exec vitest run --maxWorkers=2 test/score/` should pass, including the `master-detail inline edit` describe and both control cards.\n\nFiles to read first:\n\n1. `packages/qa/scenarios/src/score/scenario-tags.ts`, the tag's `run`. The risk is the master lookup: `rawObject(f, field.reference)` is matched by normalised name.\n2. `packages/qa/scenarios/test/score/scenario-tags.test.ts`, the rich fixture edit in `richArtifact`. Every other tag scores this fixture.\n\nReadings: the dev reports on #37127 (round 1 and fix round 7146536492).\n\n---\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01QSeKYo86w1wqy2z2fMrryr\n"
+}

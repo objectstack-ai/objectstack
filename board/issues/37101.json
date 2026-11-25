@@ -12,17 +12,19 @@
   },
   "labels": [
     "area:ai",
+    "domain:server",
+    "pm:blocked",
     "priority:p2"
   ],
   "assignees": [],
   "milestone": null,
   "type": "Feature",
   "created_at": "2026-11-24T19:37:46Z",
-  "updated_at": "2026-11-24T19:40:35Z",
+  "updated_at": "2026-11-24T20:37:06Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 0,
+  "comments": 1,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/37101",
   "body": "maintainer · os-bob · session_012dn2AecKpLaYkUtNRiqtby\n\nFiling gate: ③ maintainer-directed (topic child). Source: topic #37000 (phase 2 row 8, its generation half); maintainer 2026-11-24 「用fable评审，并分拆第二阶段的任务」. Reviewed by an independent Fable pass before filing.\nGrading: area:ai · Feature · p2 (topic) · reach: PostgreSQL deployments that change embedding model or split settings · evidence: read.\n\n## 维护者速读\n- 做什么：换了嵌入模型或切分设置后，pgvector 自动建一套新索引；建好后切过去，旧的分批删掉。新旧两套不混用，因为不同模型的向量没法比较。\n- 要知道的：建新索引期间检索返回「重建中」，不会返回错的结果。\n- 需要你做的：无。\n\n## What\n1. When #37100 marks a source as needing a rebuild, the build (#37099's trigger) writes into a new generation; event-sync writes during the build go to the new generation only.\n2. When the walk ends: #37096's purge reconciles once, the new generation becomes active, the old one is deleted in batches.\n3. One builder at a time per source (PostgreSQL advisory lock); a crashed build is resumable or restartable (state which).\n4. Search during the build answers the \"rebuilding\" error.\n\n## Acceptance\n- Same dimension, model changed → new generation built, old one takes no part in search, then deleted.\n- Writes during the build are present after the switch.\n- Two concurrent build attempts → one builds.\n- Container run per AGENTS.md, on CI PostgreSQL with pgvector.\n\n## Out of scope\n- Hot replacement of the embedder on settings change (a restart re-reads settings, #37094).\n- turso's generations (#37107 carries them).\n\nBlocked-by: #37100, #37099.\nParent: #37000. Reader: `domain:server` lane (`packages/plugins/knowledge-*`).\nDedupe: `knowledge generation fingerprint` 12 (open: #37000, #37001, a seat post)."

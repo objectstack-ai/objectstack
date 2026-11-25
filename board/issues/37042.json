@@ -2,8 +2,8 @@
   "number": 37042,
   "kind": "issue",
   "title": "skills: stop teaching `inlineEdit: true` on master-detail relationships (follow-up of #35926)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,18 +13,23 @@
   "labels": [
     "area:ai",
     "domain:skills",
-    "pm:queue",
     "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-justin"
+  ],
   "milestone": null,
   "type": "Bug",
   "created_at": "2026-11-24T16:57:15Z",
-  "updated_at": "2026-11-24T17:38:41Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-25T01:59:47Z",
+  "closed_at": "2026-11-25T01:52:57Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/37042",
   "body": "repo:objectstack#7 · os-alice · session_011y7As5bdhV5T4N9vpjmZzH\n\nPR #36802 (Fixes #35926) retires the boolean arm of `inlineEdit` on master-detail relationships. Since #35889, the parent object's field groups (`fieldGroups[].relatedList`) decide whether a child list renders inline, so `true` and `false` mean the same as leaving the key out. The parse now refuses both booleans with a fix hint, and `os migrate meta` strips them.\n\nThe skills text still teaches the retired value, at two sites on main:\n\n- `skills/objectstack-data/rules/relationships.md:285` teaches `inlineEdit: true` as \"auto\".\n- `skills/objectstack-data/evals/objects-fields-relationships.json:439` says \"`true` or absent picks by the child's shape\".\n\n## Ask\n\nRewrite both sites to teach the field-group rule. `inlineEdit` takes only `'grid'` / `'form'`, or is omitted. A child list goes inline through the parent's `fieldGroups[].relatedList`.\n\n## Release coupling\n\n`@objectstack/skills` is in the same fixed changeset group as `@objectstack/spec`. This card must therefore land before the release that publishes #36802's narrowing. If it lands later, the published skill teaches a value the published parse refuses.\n\nSource: Contract review 7138399935 and seat record 7138432732 on PR #36802."

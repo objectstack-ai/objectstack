@@ -2,9 +2,9 @@
   "number": 37117,
   "kind": "pull_request",
   "title": "fix(data-objectstack): a preference save waits for the in-flight load instead of reading its row again",
-  "state": "open",
+  "state": "closed",
   "state_reason": null,
-  "draft": true,
+  "draft": false,
   "author": {
     "login": "objectstack-fleet[bot]",
     "id": 332303061,
@@ -22,11 +22,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-24T20:04:24Z",
-  "updated_at": "2026-11-24T20:05:39Z",
-  "closed_at": null,
-  "closed_by": null,
-  "merged_at": null,
-  "comments": 0,
+  "updated_at": "2026-11-24T21:21:01Z",
+  "closed_at": "2026-11-24T21:20:58Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-24T21:20:58Z",
+  "comments": 1,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/pull/37117",
   "body": "Fixes #37109\nPart of objectstack-ai/cloud#4974\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 用户无感：控制台打开页面时，偏好写入（如记录最近访问）不再在首读未返回时多发一次单独查询，直接更新首读拿到的那条记录。\n- 为云端发版前的控制台启动检查解决请求数超预算、时红时绿的问题。\n- 出错时只是多一次或少一次请求，写入照常成功；可直接撤回本次改动。\n- 无。\n\n## What changes\n\n`ui/packages/data-objectstack/src/userState.ts`\n\n- New `LoadGate` (module-private): an adapter tracks its in-flight `load()`; `settled()` resolves once that load has settled and never rejects (the load reports its own errors).\n- `createObjectStackUserStateAdapter`: each `save()` link on `saveChain` now waits for `loadGate.settled()` before `writer.upsert(items)`, so a save issued while the shared preference read is pending writes the row id the load remembers instead of sending `findExisting()` (the per-key `sys_user_preference` read with `$top=1` and the key filter).\n- `createObjectStackUserPreferenceFamily` had the same shape (its load seeds each key writer via `remember`, its save chains only per key) and gets the same wait.\n- Unchanged upsert paths: no remembered id falls through to find, then update or create; a create that loses the UNIQUE race re-finds and updates; saves still serialize on their chain. A failed or empty load leaves today's behaviour (find, then update or create).\n- Module header's \"`save()` does not use it\" paragraph updated to say what a save now does.\n\nRead first (by risk):\n\n1. `userState.ts`, the `save()` of `createObjectStackUserStateAdapter`: the `.then(() => loadGate.settled())` link and its place on `saveChain`.\n2. `userState.ts`, `createLoadGate`: `inFlight` is cleared only when the settled promise is still the current one, so an older load finishing cannot drop a newer one.\n3. `userState.ts`, the family `save()`: the same link on the per-key chain.\n\n## Tests\n\nNew top-level describe in `userState.family-12418.test.ts` (that file's held-request harness records bodies and imports both factories), driven through the real `ObjectStackAdapter` and client with held responses:\n\n- a key adapter: two loads share one read (`key in (...)`), a `save` issued while it is pending sends nothing until the read answers, then sends exactly one `PATCH .../sys_user_preference/rec` and no per-key read;\n- a family key: the same, `PATCH .../sys_user_preference/acc`;\n- a failed shared read: the waiting save then sends its own per-key read and, on no row, a `POST` create.\n\n<details><summary>Local runs (head 2 commits above merge base 1b3b1b47873)</summary>\n\n- `pnpm --dir ui exec vitest run packages/data-objectstack/src/userState`: Test Files 4 passed (4), Tests 33 passed (33).\n- `pnpm --dir ui exec vitest run packages/data-objectstack/`: Test Files 127 passed (127), Tests 1427 passed (1427).\n- `pnpm --filter @object-ui/data-objectstack run type-check`: exit 0 (its program lists all four `userState*.test.ts` files).\n- `pnpm --filter @object-ui/data-objectstack run lint`: exit 0, 0 errors (warnings pre-existing).\n\n</details>\n\n<details><summary>Ablation (one-off, not kept)</summary>\n\nMutations through `scripts/ablation-replace.mjs`, each verified on disk (anchor 1 to 0, blob changed) and restored to the HEAD blob with `git diff HEAD` empty. The subject is imported from `./userState` source, so no build leg.\n\n- Remove the wait in the key adapter's `save()`: `a key adapter writes the row the shared read returned, and sends no per-key read` goes red (`expected [...] to have a length of 1 but got 2`: the per-key read was sent); Tests 1 failed, 32 passed.\n- Remove the wait in the family's `save()`: `a family key writes the row the shared read returned, and sends no per-key read` goes red the same way; Tests 1 failed, 32 passed.\n- First attempt at the key leg was a no-op refused by the tool before any test ran (the replacement text was a substring of the anchor); rerun with a marker replacement as above.\n\n</details>\n\n## Acceptance notes\n\n- The evidence is the cloud `console-boots` call list on objectstack-ai/cloud#4975 (job 138720631611): the shared read, then a per-key `ui.recent` read, then the PATCH. This PR removes the middle request when the flush beats the read; the debounce, the recents provider and the call budget are untouched, as the card scopes.\n- A save now waits for a load in flight even if that load was issued after the save was queued (the wait is read when the link runs). The load never rejects, so a save cannot be stuck behind a failed read; it waits as long as the read's request takes.\n\n## Verification\n\nTwo minutes: `pnpm --dir ui exec vitest run packages/data-objectstack/src/userState.family-12418.test.ts` from the repo root; expect the three `a save issued while the load is in flight waits for it` cases green.\n\n---\n\n_Generated by [Claude Code](https://claude.ai/code/session_01JQwxbX11yNi4DyGhuzqBpV)_\n"

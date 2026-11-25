@@ -2,8 +2,8 @@
   "number": 36942,
   "kind": "issue",
   "title": "平台内置任务、备忘对象（第一步：不挂关联）",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,7 +13,6 @@
   "labels": [
     "area:data",
     "domain:server",
-    "pm:dispatched",
     "priority:p1"
   ],
   "assignees": [
@@ -22,11 +21,15 @@
   "milestone": null,
   "type": "Feature",
   "created_at": "2026-11-24T10:07:27Z",
-  "updated_at": "2026-11-24T19:35:23Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-24T21:34:03Z",
+  "closed_at": "2026-11-24T21:21:00Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 11,
+  "comments": 12,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/36942",
   "body": "director#1 · os-warren · session_01JQwxbZPWs72rvmFQAcYF9A\n\nFiling gate: ③ maintainer-directed. Source: topic (parent epic, see below). Key words (maintainer, 2026-11-24, strategy thread): 「起步模版可以这样设计 公司、人员、任务、备忘，其中任务备忘不挂关联。」 「但是任务和备忘应该是未来平台的核心能力啊」 「任务和备忘并不应该影响原始记录的权限。」 「同意，立卡」 「立卡派发，并且考虑新创建的云环境是否应该预置这个应用，以及开发人员用命令行启动的的开发环境是否也应该包含」 「应该立一张专题卡吧？」\n\nGrading: area:data · Feature · p1 (maintainer-directed, dispatch now) · reach: n/a (new capability) · evidence: read.\n\n## 维护者速读\n\n- 做什么：平台新增「任务」「备忘」两个内置对象，所有环境自带，可以加字段、建视图；任何应用的菜单都能放它们。\n- 这一步不挂关联，权限各自独立。\n- 需要你做的：无。\n\n## What\n\nDesign source: #35947 §5 (任务) and §6 (备忘), **minus** everything about links (`sys_task_target`, `sys_note_target`, \"关联记录\", permission-follows-parent, \"备注至少要挂一条记录\").\n\n1. `sys_task`: 标题 (text, required), 说明 (rich text), 状态 (待办/进行中/完成, default 待办), 到期时间 (datetime), 负责人 (user, default creator), 完成时间 (read-only, written when 状态 becomes 完成). Nothing else (no priority, recurrence, subtasks).\n2. `sys_note`: 标题 (optional; list shows the body's first line when empty), 正文 (rich text). A note needs no record.\n3. Both are ordinary customizable objects: tenants add fields and views; comments and attachments work on them as on any object.\n4. Permissions: the object's own sharing only. Default: a task is visible to its creator and assignee; a note to its creator; widened only through the existing sharing / permission-set machinery. Nothing derives from or grants access to another record.\n5. Default views shipped by the platform: 任务 — 分配给我的 (open, by due date), 我创建的, 全部 (kanban by 状态); 备忘 — 我的, 全部.\n6. An app's navigation can point at both (`type: 'object'`, `objectName: 'sys_task' | 'sys_note'`) from any package: confirm the lint/build path accepts it (`packages/lint/src/validate-object-references.ts` known-platform list) and add a test.\n7. Labels zh 任务 / 备忘, en Task / Note, plus the platform's other locales.\n\nWhere they live: with the platform's other built-in business objects (the dev names the package in the PR; no new `plugin-*` package).\n\n## Out of scope\n\nLinks to records, reverse lists, the cross-object picker, assignment notifications, activity entries — all stay in #35947 (on hold). The home page entry is its own card (sibling).\n\n## Acceptance\n\n- Container run per AGENTS.md, counts in the PR body.\n- Tests: both objects register in a fresh runtime; status → 完成 writes 完成时间 and back clears it; a second user without a share cannot read another user's task or note; an app in a separate package with nav entries for both passes validate.\n\nParent: objectstack-ai/objectstack#36941."

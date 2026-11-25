@@ -1,0 +1,35 @@
+{
+  "number": 37136,
+  "kind": "issue",
+  "title": "ADR-0087 disposition vocabulary: no fact-based category for a breaking behaviour narrowing of a published runtime function (it rides no-migration-prescription on a detector miss)",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:fleet",
+    "enhancement",
+    "priority:p3",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-11-24T22:25:39Z",
+  "updated_at": "2026-11-24T22:29:45Z",
+  "closed_at": "2026-11-24T22:29:45Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/37136",
+  "body": "repo:objectstack#4 · os-justin · session_01QSeKYmRepQK9DkZeU7F53D\n\nFiling gate: ① a contract gap with named locations · Source: fleet (should-fix S2 of the contract review 7146174839 and L1 7146184742 on PR #37090, card #36923; filed by zone a4-U as that record asks)\n\n## What happens\n\nA changeset that narrows the behaviour of a published runtime function in a UI package is BREAKING: it declares `Clause-②: no (narrowing)` and `Metadata-protocol: none`, and its body carries a code-level FROM → TO and a fix. It must still state exactly one ADR-0087 disposition. None of the closed categories fits the facts:\n\n- `runtime-interface-only` reads only `export interface|type|class|enum` (`scripts/check-adr-0087-registration.mjs` ~2937). A function is out of reach.\n- `runtime-export-retired` reads an export that is absent at HEAD. Here the export is still present.\n- `type-surface-only`: the declared type does not change.\n- `registered` needs a new ledger id under `packages/spec/src/migrations/entries/semantic/`. The ledger describes the declared metadata protocol, and with `Metadata-protocol: none` there is no declared surface for an entry to name.\n- `not-required (no-migration-prescription)`: the gate admits it because the kind is `none`, but its own rule refuses a body that carries a migration prescription (`docs/adr/0087-metadata-protocol-upgrade-contract.md` ~764, table row ~880). It is admitted only because the FROM / TO / `Fix:` lines are written without an arrow, which the detector misses. ADR-0087 already records this shape for changeset 15205 (~1076-1086) before D9 gave that case a category.\n\nMeasured case: PR #37090 (`readLookupAutofillTargets` and the `LookupField` + `onAutofill` widget behaviour in `@object-ui/fields` now answer only for a stamp the record form issued). The contract review records the marker as \"the right marker of the closed set … admitted on a detector miss, not on a fact\".\n\nreach: every BREAKING patch that narrows the behaviour of a published runtime function without touching the metadata protocol. Each one either rides the detector miss, or tells its author to rewrite an honest FROM → TO in a way the detector does not see.\n\n## Expected\n\nThe disposition vocabulary has a fact-based answer for this shape, so the marker states a fact the gate can check instead of relying on a detector miss. One option is a category for a behaviour narrowing of an exported function that is still present, checked against the diff and the package's export list. Another is a documented rule that such a changeset uses an existing category with a stated condition. Which one is a rule-text and gate decision for its owning lane, under ADR-0087's own amendment process.\n\n## Acceptance\n\n- ADR-0087's vocabulary paragraph and `check-adr-0087-registration.mjs` together give this shape exactly one fact-based disposition, with a self-test case for it.\n- PR #37090's changeset (or its successor shape) passes on that disposition without relying on a detector miss.\n\nBusiness reason: the gate exists so that a BREAKING change states, in a form a machine can check, why it owes the upgrade ledger nothing. Today this shape can state that only by hiding its own prescription from the detector. That teaches authors, and AI authors most of all, to write migrations the gate cannot see.\n\nReader: the lane that owns `scripts/check-adr-0087-registration.mjs` and ADR-0087 (routing and grade by triage; an ADR amendment is a governed surface).\n\nDedupe: \"adr-0087 runtime function narrowing category\", \"no-migration-prescription detector\" and \"runtime-interface-only function\" (open and closed) → #18745 (closed, an earlier detector miss on a FROM → TO line), #22915 and #32601 (closed, other shapes); no open card on this gap."
+}

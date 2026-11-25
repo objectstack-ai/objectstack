@@ -1,0 +1,36 @@
+{
+  "number": 37122,
+  "kind": "pull_request",
+  "title": "docs(skills): objectstack-ui says where os validate judges actionLayout names",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tooling"
+  ],
+  "assignees": [
+    "os-justin"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-24T20:30:24Z",
+  "updated_at": "2026-11-24T21:49:00Z",
+  "closed_at": "2026-11-24T21:48:58Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-24T21:48:58Z",
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/37122",
+  "body": "repo:objectstack#4 · os-justin · session_01QSeKYo86w1wqy2z2fMrryr\n\nRefs #37057 (item 1)\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 用户能看到什么变化:用户无感;装了界面技能包的 AI 助手读到的「按钮顺序」一节,现在说清了校验命令只检查本应用自己定义的对象上的按钮名。\n- 为什么做:原句让助手以为给已安装对象写的定制扩展里写错按钮名也会被校验拦下,实际不会,只是按钮不显示。\n- 出错会怎样:只改了一句说明文字、几行示例和一处注释,写错了最多是助手读到不准确的说明;撤回这一个改动即可恢复。\n- 要你做什么:无。\n\n## What changes\n\n`skills/objectstack-ui/rules/actions.md`, section \"Button Order (`actionLayout`)\". Before:\n\n> `os validate` refuses a name the arm's scope does not place. On an installed object only its paired `.custom` package's extension writes it (as `fieldGroups`, objectstack-data), each arm whole.\n\nAfter:\n\n> `os validate` refuses a name the arm's scope does not place, on the object or an extension of one the same stack defines. On an installed object only its paired `.custom` package's extension writes it (as `fieldGroups`, objectstack-data), each arm whole, not judged there: a wrong name draws nothing.\n\nWhat the code does, read at `b49a264a10`:\n\n- `validateObjectActionLayout` (`packages/lint/src/validate-object-action-layout.ts`, docblock): \"Both object positions are judged: an object's own `actionLayout`, and an `objectExtensions` entry's, against the object it extends. An extension of an object this stack does not define is not judged\". Its pin is the test \"judges an extension against the object it extends, and skips one whose object the stack does not define\".\n- `arrangedHeaderActions` (`ui/packages/types/src/ui-action.ts`, docblock): \"A name naming none of `actions` ... is skipped: it draws nothing, and no other action takes a pinned one's place.\"\n\nPaid for in the same file, no ceiling raised and `scripts/check-skills-token-ratchet.mjs` not edited. Four cuts that repeat what the file already shows are removed (107 bytes):\n\n- Add to Campaign `icon` (the Convert Lead block shows the key);\n- Add to Campaign `successMessage` (the Convert Lead and Reassign Lead blocks show it, and the `successMessage` / `errorMessage` bullet describes it);\n- Add to Campaign `refreshAfter: true` (the Convert Lead and Add Line blocks show it; this body inserts a `campaign_member` rather than writing the current record);\n- the gloss \"(the handler's answer)\" after `result` on the copy-holes bullet (the `resultDialog` bullet above it says the dialog shows the server answer).\n\nThe Convert Lead block keeps its `successMessage`, byte-identical to `main`: eval case 3 of `skills/objectstack-ui/evals/views-apps-actions-pages.json` expects it (contract review S1, record 7144254679). A grep of `skills/objectstack-ui/evals/**` finds no `must_contain` token whose teaching the four cuts remove.\n\nItem 2 of the card (`skills/objectstack-data/SKILL.md`) is not in this PR: that file conflicts with open PR #36158, so the card is released with item 2 behind it after this lands.\n\nChangeset: `@objectstack/skills` patch.\n\n### skills readings (lines, then tokens as `check-skills-token-ratchet` counts them)\n\n| Reading | Before (`b49a264a10`) | After (`e799ec7699`) |\n|:--|:--|:--|\n| `rules/actions.md`, whole file | 268 lines · 15519 bytes · 3880 tokens (ceiling 3880, headroom 0) | 267 lines · 15519 bytes · 3880 tokens (ceiling 3880, headroom 0) |\n| all `skills/*/SKILL.md` summed | 4937 lines | 4937 lines |\n| whole shipped bundle | 23066 lines · 296366 tokens | 23065 lines · 296366 tokens |\n\nNet lines in `skills/**`: -1 (5 added, 6 removed), inside the +2 budget.\n\n## Tests\n\nNo code changed, so no test changed and nothing was ablated. The 47-command `dispatch-gates --commands` sweep was taken at `fa749f9d3b` (43 exit 0; four dist-reading gates NOT MEASURED locally, exit 3, CI runs them). Rerun at `e799ec7699`, each exit 0: `node scripts/check-skills-token-ratchet.mjs` (\"skills/objectstack-ui/rules/actions.md is 3880 tokens (ceiling 3880; headroom 0)\"), `check:skill-examples` (\"350 prose examples type-check across 3 surface(s)\"), `check:doc-formula-expressions`, `check:skill-links`, `check:skill-identifier-liveness`, `check:doc-authoring`, `check:nul-bytes`; `overlap-check`: \"VERDICT clean exit 0\".\n\n## Acceptance notes\n\n- \"draws nothing\" is the run-time reader's own wording. The design mode's Save checks names before it writes (the lint rule's docblock), so the unjudged path is a hand-written extension.\n- Contract review nit N1 (\"not judged there\" has a loose subject) is left as is: the file has no bytes to spare and both readings are true.\n\n## Verification\n\nRead first:\n\n1. `skills/objectstack-ui/rules/actions.md`, the hunk at line 37: the risk is the new sentence claiming more or less than the rule does.\n2. The Add to Campaign example hunk and the copy-holes bullet: check that each removed piece is still shown elsewhere in the file.\n\nTwo-minute check: `node scripts/check-skills-token-ratchet.mjs`, and expect the `rules/actions.md` line to read 3880 tokens against ceiling 3880, exit 0.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01QSeKYo86w1wqy2z2fMrryr)_\n"
+}

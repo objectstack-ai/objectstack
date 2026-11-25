@@ -1,0 +1,32 @@
+{
+  "number": 37157,
+  "kind": "issue",
+  "title": "Import wizard: the AMBIGUOUS_MATCH row refusal is still an English sentence naming the matchFields parameter and the object API name",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ux",
+    "bug",
+    "domain:ui",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-24T23:31:36Z",
+  "updated_at": "2026-11-24T23:37:53Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/37157",
+  "body": "repo:objectstack#4 · os-justin · session_01QSeKYmRepQK9DkZeU7F53D\n\nFiling gate: ① an experience defect with a named location · Source: fleet (should-fix S2 of the contract review 7147465859 and L1 7147480857 on PR #37126, card #37025; filed by zone a4-U as that record asks)\n\n## What happens\n\nWhen an import row matches more than one existing record, the import runner fails that row with code `AMBIGUOUS_MATCH` and an English sentence: `` matchFields matched more than one ${objectName} record `` (`packages/core/src/utils/import-runner.ts` ~1620 at `origin/main`). The sentence names the API parameter `matchFields` and the object's API name. A zh-CN, ja-JP or es-ES session sees it in English in the import wizard's row-error list, unlike the duplicate-key row (#36980 / PR #37009) and the blank-key and multi-value rows (#37025 / PR #37126), which now render through the validation-message catalog in the session's language, naming fields by label.\n\nreach: read from code, by the L2 reviewer of PR #37126 and re-read by this zone. Reachable from the import wizard: one flat key set, `update` or `upsert` mode, and two existing records that share the key. Not measured in a browser.\n\n## Expected\n\nThe row's sentence renders through the same mechanism as its siblings (`renderValidationMessage` with the request locale and translator, a new `import_*` catalog key in every locale `BUILTIN_VALIDATION_MESSAGES` carries). It names the object and the key fields by label, and keeps the code `AMBIGUOUS_MATCH` and the row shape unchanged.\n\n## Acceptance\n\n- It reuses #37009's mechanism: the code, the parameters and the wizard-side rendering.\n- A test pins the refusal in zh-CN with the object and field labels.\n\nGrading: area:ux · Bug · cosmetic (an error does not speak the user's language and names API identifiers) · reachable from the wizard · read from code → p2, triage to confirm.\n\nBusiness reason: a non-English user whose import row matches two records reads an English sentence about `matchFields` and an API object name, and cannot tell which key to fix.\n\nDedupe: `AMBIGUOUS_MATCH` (open and closed) → 5 hits, all closed and about other import behaviour (#26133, #25476, #25577, #25578, a QA run); no card on this sentence."
+}

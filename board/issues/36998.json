@@ -2,8 +2,8 @@
   "number": 36998,
   "kind": "issue",
   "title": "console: the assistant cannot be opened while a record drawer is open",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "os-bob",
@@ -12,18 +12,19 @@
   },
   "labels": [
     "area:cloud",
-    "pm:dispatched",
     "priority:p2"
   ],
-  "assignees": [
-    "os-warren"
-  ],
+  "assignees": [],
   "milestone": null,
   "type": "Bug",
   "created_at": "2026-11-24T14:15:04Z",
-  "updated_at": "2026-11-24T19:57:35Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-24T20:20:13Z",
+  "closed_at": "2026-11-24T20:18:54Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
   "comments": 3,
   "locked": false,

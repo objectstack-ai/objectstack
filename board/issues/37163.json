@@ -1,0 +1,33 @@
+{
+  "number": 37163,
+  "kind": "issue",
+  "title": "Shell close-out after the home retirement: desktop 「All apps」, 「Back to home」 and 「{product} home」 still name a home page that is gone (#36107 wrap-up)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ux",
+    "domain:ui",
+    "pm:dispatched",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-justin"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-11-25T00:11:07Z",
+  "updated_at": "2026-11-25T02:01:27Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/37163",
+  "body": "repo:objectstack#4 · os-justin · session_01QSeKYnagJvGbCtNg2PhvgW\n\nFiling gate ③ — maintainer-dispatched epic work. Source: topic #36107. The maintainer, verbatim, in seat repo:objectstack#4's session: 「#36062、#36107：后续拆卡继续」. Found by the dev of #37149 (PR #37159) and routed here by the seat's L1 ACCEPT (PR #37159 comment 7148187259): one card for the family, under #36107's wrap-up.\n\n**Business reason.** From 768 px up the platform home page is retired (#36732): `useHomePath()` answers `resolveDesktopHomePath`, the last-used app's start page. Several desktop surfaces still promise a home page or a list of apps there. A user who clicks 「All apps」 expects to choose an app and lands back in the app they came from. A user stranded on a not-found or access-denied page is offered 「Back to home」 and lands on an app's start page, a destination that button never names. Left alone, these labels teach a destination that no longer exists, which is what #37149 fixed for the `⌘⇧H` row.\n\n**Where it lives (read at `origin/main` 49c8e0f06).**\n- `ui/packages/app-shell/src/layout/AppSwitcher.tsx:270`: the pill's 「All apps」 row links to `homePath`, the same `useHomePath()` target as the 「Back to app start page」 row above it. `AppSwitcher.homeMenu-12605` pins that href at `/apps/com.acme.hotcrm` on a desktop.\n- `ui/packages/app-shell/src/components/NotFoundState.tsx:67`: `BackToHomeButton`, used by `console/AppContent.tsx:1324` (access denied), `:1401` (verdict screens), `:2277` (route not found) and by `views/RecordDetailView.tsx`, each given `to={homePath}`.\n- `ui/packages/app-shell/src/console/ai/AiUnavailable.tsx`: its 「Back to home」 action (`onHome`, from `ConsoleShell.tsx:540` and `ai/AiChatPage.tsx:1581`).\n- `ui/packages/app-shell/src/layout/AppHeader.tsx:728`: the product mark's accessible name `layout.appSwitcher.productHome` 「{product} home」.\n- Phone is out of scope. A phone's Home is still its app list at `/home`, and `UnifiedSidebar.tsx:794`'s 「All apps」 there is honest.\n\n**Change.** On a desktop, make each surface name the destination it opens, or open what it names. 「All apps」 should either open a real list of apps (whatever surface #36107 phase 3 gives that list) or be removed where the switcher's 「Switch Application」 group already lists them. The 「Back to home」 buttons and the product mark should use the wording #37159 settled for the same destination (`layout.appSwitcher.backToHome`, 「Back to app start page」), or a wording the dev measures fits better. Phone behaviour is unchanged. If a key must be added or removed in the published `@object-ui/i18n` pack, measure it and state the `Clause-②:` line from that.\n\n**Acceptance.** On a desktop, no row, button or accessible name promises a home page or an app list it does not open. Each surface's label matches where it navigates. Phone wording and targets are unchanged. Pins per surface at desktop and at phone width, with the phone as the control.\n\nGrade: area:ux · Task · a stale destination named on every desktop dead-end page and in the app pill · p2 (epic grade, as #37149). Size S–M.\nReader: zone a4-C of seat repo:objectstack#4 dispatches it to an `os-dev` after PR #37159 lands, because the two share `AppSwitcher.tsx` and the locale packs.\nBlocked-by: #37149\nDedupe: `\"All apps\" desktop` (objectstack issues) → 14 hits, none about this (#37149 is the ⌘⇧H row only; the rest are closed phone or launcher cards). `Back to home desktop` → 58, of which the open ones are #37149, #36107, #36410 and #36737, none about these surfaces. `BackToHomeButton` → 2 (#37149, closed #32021). `productHome` → 0."
+}

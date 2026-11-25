@@ -2,8 +2,8 @@
   "number": 37013,
   "kind": "issue",
   "title": "技能元数据：平台注册的技能要能与同名应用技能并存，平台写入和撤回不碰应用的槽位",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -23,9 +23,13 @@
   "milestone": null,
   "type": "Bug",
   "created_at": "2026-11-24T15:31:15Z",
-  "updated_at": "2026-11-24T16:58:07Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-25T00:53:36Z",
+  "closed_at": "2026-11-25T00:53:36Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
   "merged_at": null,
   "comments": 4,
   "locked": false,

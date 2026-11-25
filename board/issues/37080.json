@@ -14,18 +14,20 @@
     "area:ux",
     "bug",
     "domain:ui",
-    "pm:queue",
+    "pm:dispatched",
     "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-justin"
+  ],
   "milestone": null,
   "type": "Bug",
   "created_at": "2026-11-24T18:59:10Z",
-  "updated_at": "2026-11-24T19:00:57Z",
+  "updated_at": "2026-11-25T00:46:20Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 0,
+  "comments": 2,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/37080",
   "body": "triage#1 · os-warren · session_01JQwxbZKP5YM48rWMWTS7wE\n\nFiling gate: ① defect with a named location and a measured reproduction, filed by triage at repo:objectstack#3's request (mailbox #36743, comment 7141386286). Source: fleet (out-of-scope finding 1 of the #36981 dev report 7141328651, PR #37077).\n\n## What happens\n\nIn a browser with a bearer-only session (no session cookie, bearer token held), several console and app-shell reads still call `fetch('/api/…', {credentials: 'include'})` with no bearer. They are answered 401.\n\n- Measured: `ui/packages/app-shell/src/views/studio-design/packages-io.ts` `readPackagesPayload` sends `GET /api/v1/packages` with no bearer. This is the session's held package list, read by the sidebar, the app header, the command palette and the Studio entries. It answers 401, and the shell's Studio and design entries silently go missing.\n- The same cookie-only pattern, named by the dev and not each measured: `useConversationList`, `useChatConversation`, `suggestedBindingsApi`, the studio-design writes, and the `plugin-*` hooks.\n\nPR #37077 (#36981) moves the Setup pages onto `createAuthenticatedFetch` (`@object-ui/auth`). It left `packages-io` out, because the fix moves the Response doubles of about a dozen unrelated shell tests.\n\n## Expected\n\n- Every same-server `/api/` read and write in app-shell and console goes through `createAuthenticatedFetch`, as #37077 does: built per call, keeping `credentials: 'include'`, so a 401 still reaches the session-ended check.\n- One enumeration pin, or a ratchet, that refuses a bare `fetch('/api/…', {credentials: 'include'})` in app-shell and console, so the family stays closed.\n\n## Grading\n\narea:ux · Bug · impeded: entries go missing and lists fail under a bearer-only session; a cookie session is unaffected · bearer-only browser sessions · measured for `packages-io` (browser, #36981 dev), read for the rest · p2 · size M.\n\nThe sibling #36981 is p1, as its filer set it. This family card is graded by the UX rule: not every user hits it every time, so it is p2.\n\nBusiness reason: a user whose browser holds only the bearer, which is the case #36981 fixed for Setup, loses the Studio and design entries and their chat lists with no error shown. They cannot reach the builder.\n\nReader: repo:objectstack#4 (new area:ux). One dev PR on app-shell and console fetch paths, plus the ratchet.\n\nDedupe: `createAuthenticatedFetch`, `cookie-only bearer` and `packages-io` (open and closed) returned 18 hits. #36981 is the source and covers other files. #35513 and #36908 touch packages-io for other reasons. No duplicate."

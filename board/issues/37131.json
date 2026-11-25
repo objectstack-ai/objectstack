@@ -1,0 +1,37 @@
+{
+  "number": 37131,
+  "kind": "pull_request",
+  "title": "docs(spec): userActions.transfer description names the offboarding hand-over as its second consumer",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "protocol:data",
+    "size/s",
+    "tooling"
+  ],
+  "assignees": [
+    "os-alice"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-24T21:45:04Z",
+  "updated_at": "2026-11-24T23:22:45Z",
+  "closed_at": "2026-11-24T23:22:42Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-24T23:22:42Z",
+  "comments": 9,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/37131",
+  "body": "Fixes #36917\n\nClause-②: no\nMetadata-protocol: none\nSkills-docs: none — no file under `skills/` states what the object switch `userActions.transfer` gates (`git grep -in 'userActions\\|change owner\\|assigned-work' -- skills` hits only the `transferBehavior` cascade teaching and list-view / interface `userActions`, a different key)\n\n## 维护者速读\n\n- 用户无感:只改了对象“更改负责人”开关的说明文字(发布的模式与参考文档),说明它也决定离职交接是否移交该对象记录的负责人。\n- 属于“记录负责人变更与离职交接”专题:开关的含义早已变宽,说明还停在旧含义,作者和 AI 会读到更窄的意思。\n- 若文字写错,只会误导读说明的人,运行行为不变;可直接撤回。\n- 无\n\n## What changes\n\nThe published description of an object's Change Owner switch (`userActions.transfer`) still said it gates only the Change Owner action. Since the offboarding hand-over change merged (commit bfd1049f22f), the same resolution also decides whether the hand-over moves the object's `owner_id`. Prose only; no shape, accept-set or default change.\n\n- `packages/spec/src/data/object.zod.ts` — the `userActions.transfer` `.describe()` now also says: on the objects eligible for Change Owner, the switch decides whether the offboarding hand-over of a user's assigned work moves `owner_id`; off, those records are counted as held and keep their owner; the hand-over reads only on or off, not the predicates; an `owner_id` the platform does not provide is handed over like any other user field. The closing sentence reads \"Gates the action and the hand-over's owner_id, not a plain owner_id write.\"\n- `packages/spec/src/data/user-action-transfer.ts` — module text: the opening line names the hand-over as a third reader of the resolution; \"The switch gates the dedicated action … and not the raw write\" now names both consumers and says what the hand-over does where an eligible object's switch resolves off (count reports `transfer_off`, transfer leaves the owner), that an `owner_id` the platform does not provide is handed over like any other user field, and that a read-only `owner_id` is neither handed over nor counted; the `resolveUserActionTransfer` docblock says \"three readers\" and names the hand-over.\n- `content/docs/references/data/object.mdx` — regenerated (`gen:schema && gen:docs`); the only line that moves is the `transfer` row.\n- `.changeset/36917-transfer-describe-offboarding.md` — `@objectstack/spec` patch.\n\nMeasured against the merged code: `packages/core/src/security/user-assigned-work.ts` `ownerTransferOff(obj)` is `isTransferEligible(obj) && !resolveUserActionTransfer(obj).enabled`, so the hold applies only on an eligible object (the resolver answers off for every ineligible one, and `user-assigned-work.test.ts` pins that an `owner_id` the platform does not provide is moved); read-only user fields are skipped before counting; `userAssignedWorkFields` gives only the `owner_id` field `reason: 'transfer_off'` / `transferable: false`, and `transferUserAssignedWork` moves only `transferable` rows. The hand-over reads `.enabled` only, never `predicates`, which is why the sentence says so. Other user fields on the object are not touched by the switch, and the sentence names only `owner_id`.\n\n## Tests\n\nRework round (contract review FAIL M1, seat REWORK): the hand-over sentence is scoped to eligible objects in the `.describe()`, the module paragraph and the changeset; `origin/main` merged in (merge commit e23a3a80315). Readings below are on head eddb22176d7.\n\n<details><summary>spec build, regen, targeted tests, typecheck (head eddb22176d7)</summary>\n\n- `pnpm --filter @objectstack/spec build && gen:schema && gen:docs` under the verify lock: `VERDICT command-exit 0`.\n- `pnpm --filter @objectstack/spec check:generated`: `VERDICT command-exit 0`, \"All 14 generated artifacts are up to date\".\n- `vitest run src/data/user-action-transfer.test.ts src/data/object.test.ts`: Test Files 2 passed (2), Tests 253 passed (253).\n- `pnpm --filter @objectstack/spec typecheck`: exit 0.\n- Re-run after the final commit: changeset gates (`check-adr-0087-registration`, `check-changeset-no-major`, `check-empty-changeset`), `check-nul-bytes`, `check-issue-citations`, `check:doc-authoring`: all exit 0.\n- No ablation: no tested behaviour changed (prose only).\n\n</details>\n\n## Acceptance notes\n\n- The TSDoc above `userActions` in `object.zod.ts` lists the endpoint and the console as readers and does not name the hand-over. It is not false (it says nothing about \"only\") and is outside this card's file surface; it is not edited here.\n- `test:repo` is not run locally (owned by CI's `Test Core`).\n\n## Verification\n\n<details><summary>derived gate families (dispatch-gates --commands, 110; first round, head 79e98ffc3b8)</summary>\n\n- 104 exit 0.\n- 6 exit 3, PREREQUISITE NOT MET (other packages not built in this worktree), NOT MEASURED locally, left to CI: `@objectstack/lint check:doc-formula-expressions`, `@objectstack/lint check:doc-security-posture`, `@objectstack/spec check:skill-examples`, `check:docs-transcript-drift`, `check:dual-build-cjs-loads`, `check:lean-entry-closure`.\n- `dispatch-gates --ran`: \"110 derived famil(ies) accounted for — 104 run, 6 NOT-MEASURED (6 DERIVED from a recorded exit 3)\".\n- `check-nul-bytes`: OK.\n\n</details>\n\nRead first: the `.describe()` string in `packages/spec/src/data/object.zod.ts` (the `transfer:` key in `userActions`), then the \"## The switch\" paragraph of `user-action-transfer.ts`.\n\nTwo-minute check: `git grep -n \"offboarding hand-over\" -- packages/spec/src/data content/docs/references/data/object.mdx` shows the sentence in the schema, the module text and the generated reference.\n\n<!-- signed: repo:objectstack#7 · os-alice · session_011y7As5bdhV5T4N9vpjmZzH -->\n"
+}
