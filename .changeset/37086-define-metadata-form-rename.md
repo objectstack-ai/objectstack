@@ -1,6 +1,9 @@
 ---
 '@objectstack/spec': patch
 '@objectstack/lint': patch
+'@objectstack/cli': patch
+'@objectstack/metadata-protocol': patch
+'@objectstack/platform-objects': patch
 ---
 
 refactor(spec)!: the Studio metadata-form helper `defineForm` is renamed `defineMetadataForm`, and its modules move from `*.form.ts` to `*.metadata-form.ts`, so the name and the suffix are free for the `form` metadata type (ADR-0159)
@@ -19,3 +22,4 @@ ADR-0159 makes `form` a metadata type of its own, and the maintainer ruled that 
 - **The fix:** rename the import and the call; rename a module that builds one to `*.metadata-form.ts`. The compiler names every call site (`TS2305` / `TS2724`).
 - **Outside use, read before the rename:** no import or call of `defineForm` in any public repository of the organization, nor in the cloud repository.
 - `@objectstack/lint`: the explanation of `visibility-root-mislayered` and the `data`-root message of the field-rule check name the Studio modules by their new suffix (`*.metadata-form.ts`); what each rule reports is unchanged.
+- `@objectstack/cli`, `@objectstack/metadata-protocol`, `@objectstack/platform-objects`: comments and docblocks that cite the Studio modules name them by their new file names; no behaviour changes.
