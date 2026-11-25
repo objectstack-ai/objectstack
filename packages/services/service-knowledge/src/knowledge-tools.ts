@@ -80,12 +80,32 @@ export interface SearchKnowledgeHit {
   record?: { object: string; id: string };
 }
 
+/**
+ * A source that could not be searched for this call (ADR-0161 K7, rule 5):
+ * its index needs a rebuild, or is being rebuilt, or its store refused for
+ * another coded reason. Its passages are missing from `hits` — not absent
+ * from the source.
+ */
+export interface SearchKnowledgeRefusedSource {
+  sourceId: string;
+  /** The refusal's ADR-0112 code, e.g. `KNOWLEDGE_REBUILD_REQUIRED`. */
+  code: string;
+  /** What the store said. */
+  message: string;
+}
+
 /** A `search_knowledge` answer. */
 export interface SearchKnowledgeOutput {
   /** The passages, most relevant first, at most `topK`. */
   hits: SearchKnowledgeHit[];
   /** Every source this tool may search; `sourceIds` takes their `id`s. */
   sources: SearchKnowledgeSourceSummary[];
+  /**
+   * The searched sources that refused this call, each with its code; absent
+   * when none did. When every searched source refuses, the call itself is
+   * refused with the first refusal's code.
+   */
+  refused?: SearchKnowledgeRefusedSource[];
 }
 
 /** The executor {@link createKnowledgeTools} binds. */
@@ -111,7 +131,9 @@ const SEARCH_KNOWLEDGE_DESCRIPTION =
   + `${SEARCH_KNOWLEDGE_DEFAULT_TOP_K}, at most ${SEARCH_KNOWLEDGE_MAX_TOP_K}). Only passages the caller may read `
   + 'are returned: a passage indexed from a record the caller cannot read is dropped; on an OAuth connection, the '
   + 'person\'s own permissions decide, never more. No passage means nothing the caller may read matched: say so '
-  + 'rather than answer from general knowledge.';
+  + 'rather than answer from general knowledge. A source listed in `refused` could not be searched (its index is '
+  + 'being rebuilt, for example): its passages are missing, not absent, so say that this source could not be '
+  + 'searched rather than that it holds nothing.';
 
 const SEARCH_KNOWLEDGE_PARAMETERS: Record<string, unknown> = Object.freeze({
   type: 'object',
@@ -238,6 +260,18 @@ function hitOf(hit: KnowledgeHit, sources: ReadonlyMap<string, KnowledgeSource>)
   };
 }
 
+/** A knowledge service that also answers the sources that refused a search (`KnowledgeService.searchWithRefusals`). */
+interface RefusalReportingService {
+  searchWithRefusals(
+    query: string,
+    opts: Parameters<IKnowledgeService['search']>[1],
+  ): Promise<{ hits: KnowledgeHit[]; refused: Array<{ sourceId: string; code: string; message: string }> }>;
+}
+
+function hasRefusalReport(service: IKnowledgeService): service is IKnowledgeService & RefusalReportingService {
+  return typeof (service as Partial<RefusalReportingService>).searchWithRefusals === 'function';
+}
+
 /**
  * Bind the `search_knowledge` executor to a knowledge service. The service is
  * read per call (`service` may be a getter), so the sources a call searches
@@ -270,14 +304,24 @@ export function createKnowledgeTools(service: IKnowledgeService | (() => IKnowle
       if (targets.length === 0) return { hits: [], sources: summaries };
       // [ADR-0090 D10] As the caller: the service re-checks every object-source
       // hit against this context's row-level security.
-      const hits = await knowledge.search(query, {
+      const searchOpts = {
         sourceIds: targets,
         topK: topK ?? SEARCH_KNOWLEDGE_DEFAULT_TOP_K,
         ...(context ? { executionContext: context } : {}),
-      });
+      };
+      // [ADR-0161 K7, rule 5] A refused source is named, never answered as
+      // empty: the knowledge service's report carries the refusals beside the
+      // hits; a service without it answers hits alone, as before.
+      const report = hasRefusalReport(knowledge)
+        ? await knowledge.searchWithRefusals(query, searchOpts)
+        : { hits: await knowledge.search(query, searchOpts), refused: [] };
+      const refused = report.refused
+        .filter((r) => byId.has(r.sourceId))
+        .map((r) => ({ sourceId: r.sourceId, code: r.code, message: r.message }));
       return {
-        hits: hits.filter((hit) => byId.has(hit.sourceId)).map((hit) => hitOf(hit, byId)),
+        hits: report.hits.filter((hit) => byId.has(hit.sourceId)).map((hit) => hitOf(hit, byId)),
         sources: summaries,
+        ...(refused.length > 0 ? { refused } : {}),
       };
     },
   };
