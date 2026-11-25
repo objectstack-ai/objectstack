@@ -322,7 +322,7 @@ The epic holds the contract shut until this record merges ("No new adapter-contr
 >
 > - **Why.** A document that gains an organization, loses it or moves to another one gets a new hash, so a complete reindex never leaves a stale organization on a stored document. The other answer kept the parenthesis and bumped the version. It leaves a later change of organization to the events alone, and missed events are the hole reconcile exists to close (K1).
 > - **A later optional member that assembly sets** enters the hash the same way, left out when it is absent, or the version is bumped.
-> - **An adapter that stores `docHash` stores `organizationId` from the same version of the adapter on.** Otherwise, once it starts to read item 9, a complete reindex skips its documents, because the hashes match, and a search filtered by organization never ranks them.
+> - **What an adapter stores.** An adapter that stores `docHash` stores `organizationId` from the same version on; otherwise, once it starts reading this field, a complete reindex skips its documents and a walled search never ranks them.
 >
 > Item 9's first reader, #37097, is built by PR #37256, and this change to item 2 lands with it. The reasoning is contract review [`7157191417`](https://github.com/objectstack-ai/objectstack/pull/37256#issuecomment-7157191417) on that PR (its M1 and S2). The table is left as written; read items 2 and 9 with this note.
 
