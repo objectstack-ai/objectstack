@@ -966,21 +966,23 @@ function actionDeclarationReads(deps: DomainHandlerDeps, context: HttpProtocolCo
 }
 
 /**
- * [#33712, #34325] What the MCP action tools hand the bridge beside a call
- * (`McpActionCallDoor`, `@objectstack/mcp`, which this package does not
- * depend on): the person's client as an elicitor, or the fact that the door
- * would have asked a client that supports confirmation.
+ * [#33712] The door the MCP action tools hand the bridge when the client can be
+ * elicited (`McpActionCallDoor`, `@objectstack/mcp`, which this package does
+ * not depend on). [#34325] And, without one, the door's facts
+ * (`McpActionCallDoorFacts`), the fourth argument: the door would have asked a
+ * client that supports confirmation.
  */
-type McpActionCallDoorFacts = {
-    elicitConfirmation?: actionExec.ActionConfirmationElicitor;
-    elicitsCapableClients?: boolean;
-};
+type McpActionCallDoor = { elicitConfirmation?: actionExec.ActionConfirmationElicitor };
+type McpActionCallDoorFacts = { elicitsCapableClients?: boolean };
 
-/** The door's facts as `invokeBusinessAction` / `resumeActionRun` wiring: each only when the door set it. */
-function actionCallDoorWiring(door: McpActionCallDoorFacts | undefined): McpActionCallDoorFacts {
+/** The door and its facts as `invokeBusinessAction` / `resumeActionRun` wiring: each only when the tool set it. */
+function actionCallDoorWiring(
+    door: McpActionCallDoor | undefined,
+    facts: McpActionCallDoorFacts | undefined,
+): { elicitConfirmation?: actionExec.ActionConfirmationElicitor; elicitsCapableClients?: boolean } {
     return {
         ...(typeof door?.elicitConfirmation === 'function' ? { elicitConfirmation: door.elicitConfirmation } : {}),
-        ...(door?.elicitsCapableClients === true ? { elicitsCapableClients: true } : {}),
+        ...(facts?.elicitsCapableClients === true ? { elicitsCapableClients: true } : {}),
     };
 }
 
@@ -1592,12 +1594,14 @@ export function buildMcpBridge(
             input: { objectName?: string; namespace?: string; recordId?: string; params?: Record<string, unknown> } & AIActionConfirmation,
             // [#33712] The door's channel to the person's client, set by the
             // tool only when the client can be elicited (`McpActionCallDoor`).
-            // [#34325] Or, without one, `elicitsCapableClients`: the door
-            // would have asked a client that supports confirmation.
-            door?: McpActionCallDoorFacts,
+            door?: McpActionCallDoor,
+            // [#34325] Set by the tool only without `door`: the door would
+            // have asked a client that supports confirmation
+            // (`McpActionCallDoorFacts`).
+            facts?: McpActionCallDoorFacts,
         ) => actionExec.invokeBusinessAction(deps, context, name, input ?? {}, {
             driver, envId, ec, getMeta, readObjects: readServedObjects, readActions: readServedActions, callData,
-            ...actionCallDoorWiring(door),
+            ...actionCallDoorWiring(door, facts),
         }),
         // [#15705] `resume_run`: continue the caller's own paused screen run.
         // Admitted by the same gates as `run_action`; see
@@ -1605,10 +1609,11 @@ export function buildMcpBridge(
         resumeRun: async (
             runId: string,
             input: { values?: Record<string, unknown> } & AIActionConfirmation,
-            door?: McpActionCallDoorFacts,
+            door?: McpActionCallDoor,
+            facts?: McpActionCallDoorFacts,
         ) => resumeActionRun(deps, context, runId, input ?? {}, {
             driver, envId, ec, getMeta, readObjects: readServedObjects, readActions: readServedActions, callData,
-            ...actionCallDoorWiring(door),
+            ...actionCallDoorWiring(door, facts),
         }),
         // ── Federation surface (McpFederationBridge, #27745) ───────
         // The `external-datasource` service Studio's datasource page reaches

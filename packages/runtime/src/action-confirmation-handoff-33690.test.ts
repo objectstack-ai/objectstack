@@ -867,10 +867,11 @@ describe('[#34515] a resume approval is bound to the screen it was given on', ()
  * the door that asked. Every door: a person performs it in the app, and the
  * caller makes no such change through another tool (an agent that read only
  * "in the app" completed the change with a raw record update). The stdio door
- * for a client without `elicitation` (`door.elicitsCapableClients`, set by
- * `@objectstack/mcp`'s `actionCallDoorFor`) also names a client that supports
- * confirmation (step 3); the Streamable HTTP door, which asks no client and
- * passes no door, does not, since that sentence would be false there. The
+ * for a client without `elicitation` (no door, and the fourth argument
+ * `facts.elicitsCapableClients`, set by `@objectstack/mcp`'s
+ * `actionCallDoorFor`) also names a client that supports confirmation
+ * (step 3); the Streamable HTTP door, which asks no client and passes
+ * neither, does not, since that sentence would be false there. The
  * envelope is unchanged: same code, status and details on both doors.
  */
 describe('[#34325] the no_confirmation_service refusal names the route that works on the door that asked', () => {
@@ -883,14 +884,14 @@ describe('[#34325] the no_confirmation_service refusal names the route that work
         return started.runId;
     }
 
-    /** Each tool's no-service refusal through the real bridge, with the door the tool would pass (or none). */
-    async function refusedAt(tool: 'run_action' | 'resume_run', door: Record<string, unknown> | undefined) {
+    /** Each tool's no-service refusal through the real bridge, with the facts the tool would pass after an undefined door (or neither). */
+    async function refusedAt(tool: 'run_action' | 'resume_run', facts: Record<string, unknown> | undefined) {
         const h = makeHarness();
         const bridge = h.bridgeAs(PERSON);
         const args: unknown[] = tool === 'run_action'
             ? [GATED.name, { recordId: 'lead_1' }]
             : [await pausedRun(h), { values: { reason: 'x' } }];
-        if (door) args.push(door);
+        if (facts) args.push(undefined, facts);
         const refused = await refusalOf(tool === 'run_action' ? bridge.runAction(...args) : bridge.resumeRun(...args));
         expect({ code: refused.code, status: refused.status }, tool).toEqual({ code: 'ACTION_CONFIRMATION_REQUIRED', status: 428 });
         expect(refused.details?.reason, tool).toBe('no_confirmation_service');
@@ -922,7 +923,7 @@ describe('[#34325] the no_confirmation_service refusal names the route that work
     it('CONTROL: the door fact is never handed to the host\'s service (the hand-off is the contract\'s shape)', async () => {
         const service = makeConfirmationService();
         const h = makeHarness({ service });
-        await h.bridgeAs(PERSON).runAction(GATED.name, { recordId: 'lead_1' }, STDIO_NO_ELICITATION);
+        await h.bridgeAs(PERSON).runAction(GATED.name, { recordId: 'lead_1' }, undefined, STDIO_NO_ELICITATION);
         expect((service.submit.mock.calls[0] as any[])[0]).toEqual({
             actionName: GATED.name, objectName: OBJECT, recordId: 'lead_1', params: {}, door: 'mcp',
         });

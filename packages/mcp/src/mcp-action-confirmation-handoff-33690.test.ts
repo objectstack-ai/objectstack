@@ -43,6 +43,7 @@ import {
   actionConfirmationElicitorFor,
   actionConfirmationQuestion,
   type McpActionCallDoor,
+  type McpActionCallDoorFacts,
 } from './action-confirmation-elicitation.js';
 
 const GATED = 'archive_account';
@@ -272,9 +273,9 @@ async function openStdioClient(server: McpServer, opts: { elicitation: boolean; 
 
 /** A bridge double for the stdio door: runs the step-1 half the runtime owns, through whatever `door` the tool handed it. */
 function elicitingBridge() {
-  const calls: Array<{ tool: string; door: McpActionCallDoor | undefined; argCount: number }> = [];
+  const calls: Array<{ tool: string; door: McpActionCallDoor | undefined; facts?: McpActionCallDoorFacts; argCount: number }> = [];
   const confirmWith = async (door: McpActionCallDoor | undefined, name: string) => {
-    if (!door?.elicitConfirmation) return pendingOf(1);
+    if (!door) return pendingOf(1);
     const answer = await door.elicitConfirmation({
       actionName: name, actionLabel: 'Archive Account', objectName: 'account', recordId: 'a1', recordTitle: 'Acme',
     });
@@ -288,12 +289,12 @@ function elicitingBridge() {
   const bridge = {
     ...makeBridge('service'),
     calls,
-    async runAction(name: string, _input: any, door?: McpActionCallDoor) {
-      calls.push({ tool: 'run_action', door, argCount: arguments.length });
+    async runAction(name: string, _input: any, door?: McpActionCallDoor, facts?: McpActionCallDoorFacts) {
+      calls.push({ tool: 'run_action', door, ...(facts !== undefined ? { facts } : {}), argCount: arguments.length });
       return confirmWith(door, name);
     },
-    async resumeRun(_runId: string, _input: any, door?: McpActionCallDoor) {
-      calls.push({ tool: 'resume_run', door, argCount: arguments.length });
+    async resumeRun(_runId: string, _input: any, door?: McpActionCallDoor, facts?: McpActionCallDoorFacts) {
+      calls.push({ tool: 'resume_run', door, ...(facts !== undefined ? { facts } : {}), argCount: arguments.length });
       return confirmWith(door, GATED);
     },
   };
@@ -356,13 +357,13 @@ describe('[#33712] stdio: a client that advertises elicitation is asked in place
     expect(JSON.parse(declined.result.content[0].text).error.details.reason).toBe('declined');
   });
 
-  it('a client WITHOUT the capability is never asked: the bridge gets no elicitor and hands off', async () => {
+  it('a client WITHOUT the capability is never asked: the bridge gets no door and hands off', async () => {
     const { result, calls } = await stdioCall({ elicitation: false });
     expect(result.isError).toBeFalsy();
     expect(JSON.parse(result.content[0].text)).toEqual(pendingOf(1));
-    // [#34325] The door's one fact for this call: it would have asked a
-    // client that supports confirmation. No elicitor rides beside it.
-    expect(calls).toEqual([{ tool: 'run_action', door: { elicitsCapableClients: true }, argCount: 3 }]);
+    // [#34325] No door, as before; the door's facts ride as a fourth,
+    // additive argument a bridge may ignore.
+    expect(calls).toEqual([{ tool: 'run_action', door: undefined, facts: { elicitsCapableClients: true }, argCount: 4 }]);
   });
 });
 
@@ -536,24 +537,28 @@ describe('[#35778] run_action names the next step on a no_confirmation_service r
  * `packages/runtime/src/action-confirmation-handoff-33690.test.ts`). The
  * long-lived stdio server read the client's `initialize`, so for a client
  * without `elicitation` it says it would have asked a client that supports
- * confirmation (`elicitsCapableClients`), on both tools. The per-request
+ * confirmation (`facts.elicitsCapableClients`, the fourth argument; the door
+ * argument stays as on main), on both tools. The per-request
  * Streamable HTTP server asks no client and says nothing: the bridge is
  * called exactly as before, even for a client that advertised the capability
  * at `initialize`, so the refusal keeps the in-app route alone there.
  */
-describe('[#34325] the door the action tools hand the bridge names whether a client that supports confirmation is asked here', () => {
+describe('[#34325] the door facts the action tools hand the bridge name whether a client that supports confirmation is asked here', () => {
   for (const tool of ['run_action', 'resume_run'] as const) {
-    it(`stdio, a client without elicitation: ${tool} hands the bridge elicitsCapableClients and no elicitor`, async () => {
+    it(`stdio, a client without elicitation: ${tool} hands the bridge no door and the facts { elicitsCapableClients: true }`, async () => {
       const { calls, asked } = await stdioCall({ elicitation: false }, tool);
       expect(asked).toEqual([]);
       expect(calls).toHaveLength(1);
-      expect(calls[0].argCount).toBe(3);
-      expect(calls[0].door).toStrictEqual({ elicitsCapableClients: true });
+      expect(calls[0].argCount).toBe(4);
+      expect(calls[0].door).toBeUndefined();
+      expect(calls[0].facts).toStrictEqual({ elicitsCapableClients: true });
     });
 
-    it(`CONTROL stdio, a client with elicitation: ${tool} hands the bridge the elicitor and not the flag`, async () => {
+    it(`CONTROL stdio, a client with elicitation: ${tool} hands the bridge main's door (the elicitor alone) and no facts`, async () => {
       const { calls } = await stdioCall({ elicitation: true, answer: { action: 'accept' } }, tool);
       expect(Object.keys(calls[0].door ?? {})).toEqual(['elicitConfirmation']);
+      expect(calls[0].argCount).toBe(3);
+      expect(calls[0]).not.toHaveProperty('facts');
     });
 
     it(`Streamable HTTP, after an initialize that advertised elicitation: ${tool} calls the bridge with no door at all`, async () => {
@@ -569,7 +574,7 @@ describe('[#34325] the door the action tools hand the bridge names whether a cli
       const req = mcpRequest(body);
       req.headers.set('mcp-protocol-version', '2025-11-25');
       await runtime.handleHttpRequest(req, { bridge, parsedBody: body });
-      expect(bridge.calls).toEqual([{ tool, door: undefined, argCount: 2 }]);
+      expect(bridge.calls).toStrictEqual([{ tool, door: undefined, argCount: 2 }]);
     });
   }
 });

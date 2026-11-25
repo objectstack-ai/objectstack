@@ -137,7 +137,7 @@ import {
 } from './metadata-completeness.js';
 // [#30892] The file seam and what `read_file` renders from it.
 import { READ_FILE_MAX_BYTES, ReadFileExtractionBusyError, renderReadFile, type McpFileBridge } from './file-content.js';
-import { actionCallDoorFor, type McpActionCallDoor } from './action-confirmation-elicitation.js';
+import { actionCallDoorFor, type McpActionCallDoor, type McpActionCallDoorFacts } from './action-confirmation-elicitation.js';
 import type { McpLatestPer } from './types.js';
 // [#35145] `expand` and `related`: the relation reads, judged before any read.
 import {
@@ -683,10 +683,11 @@ export interface McpActionBridge {
    * `elicitation` on a door that can carry a request to it), the host asks
    * the person through `door.elicitConfirmation` first, once every admission
    * gate has passed: `accept` runs the call, any other answer refuses it, and
-   * nothing is handed off. Without an elicitor the call is handed off as
-   * above. [#34325] `door.elicitsCapableClients` (no elicitor beside it) says
+   * nothing is handed off. Without `door` the call is handed off as above.
+   * [#34325] `facts.elicitsCapableClients`, passed only without `door`, says
    * this door would have asked a client that advertised `elicitation`: the
-   * `no_confirmation_service` refusal then names that route too.
+   * `no_confirmation_service` refusal then names that route too. A bridge
+   * that does not read `facts` answers exactly as before.
    */
   runAction(
     name: string,
@@ -702,6 +703,7 @@ export interface McpActionBridge {
       params?: Record<string, unknown>;
     } & AIActionConfirmation,
     door?: McpActionCallDoor,
+    facts?: McpActionCallDoorFacts,
   ): Promise<unknown>;
   /**
    * [#30771] The capability refusal `runAction` would throw for an action on
@@ -730,7 +732,8 @@ export interface McpActionBridge {
    * gated action resolves to `ActionConfirmationPending` instead, as
    * {@link runAction} does, and the run stays parked. [#33712] `door` as on
    * {@link runAction}: an elicited `accept` resumes the run, any other
-   * answer refuses it and the run stays parked.
+   * answer refuses it and the run stays parked. [#34325] `facts` as on
+   * {@link runAction}.
    *
    * OPTIONAL, like {@link McpDataBridge.aggregate}. A host that cannot resume
    * runs omits it, and `resume_run` is then not registered.
@@ -739,6 +742,7 @@ export interface McpActionBridge {
     runId: string,
     input: { values?: Record<string, unknown> } & AIActionConfirmation,
     door?: McpActionCallDoor,
+    facts?: McpActionCallDoorFacts,
   ): Promise<unknown>;
 }
 
@@ -5102,13 +5106,15 @@ export function registerActionTools(
         // advertised `elicitation` on a server that read its `initialize` (the
         // stdio door) is asked in place. Otherwise the bridge hands a gated
         // call off. [#34325] On that door a client without the capability is
-        // named to the bridge (`elicitsCapableClients`), so a no-service
+        // named to the bridge (`facts.elicitsCapableClients`), so a no-service
         // refusal names the client route; the per-request HTTP server calls
         // the bridge exactly as before.
-        const door = actionCallDoorFor(server, extra);
+        const { door, facts } = actionCallDoorFor(server, extra);
         const result = door
           ? await bridge.runAction(actionName, request, door)
-          : await bridge.runAction(actionName, request);
+          : facts
+            ? await bridge.runAction(actionName, request, undefined, facts)
+            : await bridge.runAction(actionName, request);
         return textResult(result);
       } catch (err) {
         return landedWriteResultOrError(
@@ -5195,10 +5201,12 @@ export function registerActionTools(
           const request = { values };
           // [#33712] As `run_action`: asked in place where the client can be.
           // [#34325] And the same door facts for a no-service refusal.
-          const door = actionCallDoorFor(server, extra);
+          const { door, facts } = actionCallDoorFor(server, extra);
           const result = door
             ? await resumeRun(runId, request, door)
-            : await resumeRun(runId, request);
+            : facts
+              ? await resumeRun(runId, request, undefined, facts)
+              : await resumeRun(runId, request);
           return textResult(result);
         } catch (err) {
           return errorResultFromThrown(err, `resume_run ${runId}`);

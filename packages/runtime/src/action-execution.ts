@@ -3363,8 +3363,8 @@ export async function resolveActionConfirmationService(
 /**
  * [#34325] What the door that asked knows about its caller's client, passed
  * beside the hand-off and never on it (the host's service is not told).
- * Structurally the `elicitsCapableClients` half of `McpActionCallDoor`
- * (`@objectstack/mcp`), which this package does not depend on.
+ * Structurally `McpActionCallDoorFacts` (`@objectstack/mcp`), which this
+ * package does not depend on.
  */
 export interface ActionConfirmationDoor {
     /**
