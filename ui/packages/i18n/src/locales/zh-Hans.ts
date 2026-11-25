@@ -2744,6 +2744,14 @@ const zh = {
       changesDrafted: '已暂存为草稿',
       changesFailed: '未生效',
       discussing: '正在看：{{target}}',
+      focus: {
+        pin: '钉住这条记录，换页后仍问它',
+        pinned: '正在问：{{target}}',
+        remove: '不再问这条记录',
+        switchPrompt: '改为问《{{target}}》？',
+        switchAccept: '改为问它',
+        switchDecline: '不用',
+      },
       changesConfirmMessage: '确认修改，应用你刚才提议的改动。',
       changeVerb: {
         createObject: '新建对象',
@@ -3988,7 +3996,7 @@ const zh = {
       allApps: '所有应用',
       editAppInStudio: '在 Studio 中编辑 {{app}}',
       openAppInStudio: '在 Studio 中查看 {{app}}',
-      backToHome: '返回首页',
+      backToHome: '返回应用起始页',
       settings: '系统设置',
       productHome: '{{product}} 首页',
       addApp: '添加应用',

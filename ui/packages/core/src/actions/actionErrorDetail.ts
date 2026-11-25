@@ -20,6 +20,13 @@
  * Handles, in order: `{error: 'msg'}`, `{error: {message: 'msg'}}`,
  * `{message: 'msg'}`, else the caller's fallback.
  *
+ * One exception to that order: a bare-string `error` beside a non-empty
+ * `message` is a machine code, not a sentence. The REST seam's flat 401 body
+ * (`ANONYMOUS_DENY_BODY` in `@objectstack/core`) is
+ * `{error: 'UNAUTHENTICATED', code, message}`, and returning `error` there
+ * showed the user the code. So when both are strings, `message` wins; a body
+ * carrying only `{error: 'sentence'}` still returns that sentence.
+ *
  * Moved here from `@object-ui/app-shell` (`utils/actionErrorDetail`) by
  * objectui#2904 so `createServerActionHandler` — the core dispatch every
  * consumer registers — can own the rule.
@@ -27,7 +34,10 @@
 export function actionErrorDetail(body: unknown, fallback: string): string {
   const b = body as { error?: unknown; message?: unknown } | null;
   const err = b?.error;
-  if (typeof err === 'string' && err.length > 0) return err;
+  if (typeof err === 'string' && err.length > 0) {
+    if (typeof b?.message === 'string' && b.message.length > 0) return b.message;
+    return err;
+  }
   const nested = (err as { message?: unknown } | null)?.message;
   if (typeof nested === 'string' && nested.length > 0) return nested;
   if (typeof b?.message === 'string' && b.message.length > 0) return b.message;

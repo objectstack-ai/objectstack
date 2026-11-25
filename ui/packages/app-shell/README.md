@@ -1424,11 +1424,32 @@ record search. Its open state and the command that opens it are provided by
 
 `CommandPalette` has two scopes. Inside an app it takes `apps`, `activeApp`,
 `objects`, `onAppChange` and an optional `dataSource`, and searches that app.
-`<CommandPalette scope="studio" />` takes no other prop: it is the palette of the
-`/studio` landing, a frame outside every app, which the console mounts under its
-own `CommandPaletteProvider`. It leaves out every app-scoped group and the
-full-search command (their links start with `/apps/APP`), and lists the Studio's
-packages, their objects and their flows, each opening its Studio page. The
+`<CommandPalette scope="studio" />` is the palette of Studio, outside every app.
+It leaves out every app-scoped group and the full-search command (their links
+start with `/apps/APP`), and lists the Studio's packages, their objects and their
+flows, each opening its Studio page. On the `/studio` landing the console mounts
+it with no other prop, under its own `CommandPaletteProvider`.
+
+On a Studio design page, `StudioDesignSurface` mounts it itself, with an optional
+`surface` prop (a `StudioPaletteSurface`; objectstack#36900). The surface mounts
+its own `CommandPaletteProvider` unless a host above it already mounts one.
+
+- `renderGroups({ query, open, onLoadingChange })` returns the page's own groups:
+  `StudioPaletteGroups`, which draws the left menu's six groups (the menu's data
+  shared through `StudioMenuDataProvider`, read once per page). On a package each
+  group also holds every item of its types, read from the type's list as its
+  list page reads it. They are drawn above the packages and mounted only while
+  the palette is open. `open` closes the palette and opens a Studio address;
+  `onLoadingChange` keeps the empty result on "Searching…" while a list is read.
+- `packageScope: true` (a package's page) drops every package's objects and
+  flows: the page's groups list that package's items instead.
+- `open(to)` is the page's departure (`openStudioPaletteAddress`). It asks the
+  shell's unsaved-edits seam (`confirmUnsavedLeave`), so every registered editor
+  is asked about, the "All metadata" item page included, then navigates. A pick
+  of the page already open on another query re-enters it once the router shows
+  that query; a pick of the page already shown only closes the palette.
+
+The
 header's search trigger is drawn wherever a provider is mounted, so `AppHeader`
 with `variant="studio"` shows it there. Inside an app, on every route
 (`system/*` included) from the `lg` breakpoint up, `AppHeader` draws it as the

@@ -1639,6 +1639,16 @@ export function buildMcpBridge(
                         ?? (await deps.resolveService(context, 'objectql', envId)),
                 ),
                 locale: metaRequestLocale(mcpRequestHttp(context)),
+                // [#36854] A cited manual's name in the page's locale, by the
+                // `/meta/book` door's translation, ⛔ never a second routine.
+                translateBooks: async (books, locale) => {
+                    const translated = await translateMetaList(
+                        { ...metaTranslationSources(deps, context, getProtocol), requestLocale: () => locale },
+                        'book',
+                        [...books],
+                    );
+                    return Array.isArray(translated) ? translated : books;
+                },
             }))
             : {}),
         // [ADR-0149 D2] The knowledge seam (`search_knowledge`), carried only

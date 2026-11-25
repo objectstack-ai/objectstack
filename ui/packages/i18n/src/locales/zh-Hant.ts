@@ -2744,6 +2744,14 @@ const zhHant = {
       changesDrafted: '已暫存為草稿',
       changesFailed: '未生效',
       discussing: '正在看：{{target}}',
+      focus: {
+        pin: '釘住這條記錄，換頁後仍問它',
+        pinned: '正在問：{{target}}',
+        remove: '不再問這條記錄',
+        switchPrompt: '改為問《{{target}}》？',
+        switchAccept: '改為問它',
+        switchDecline: '不用',
+      },
       // changesConfirmMessage: gate-only, read from zh-Hans (GATE_ONLY_KEYS, scripts/zh-hant.mjs).
       changeVerb: {
         createObject: '新建物件',
@@ -3988,7 +3996,7 @@ const zhHant = {
       allApps: '所有應用',
       editAppInStudio: '在 Studio 中編輯 {{app}}',
       openAppInStudio: '在 Studio 中檢視 {{app}}',
-      backToHome: '返回首頁',
+      backToHome: '返回應用起始頁',
       settings: '系統設定',
       productHome: '{{product}} 首頁',
       addApp: '新增應用',
