@@ -68,6 +68,7 @@ import { datasetSelectOptions } from './inspectors/dataset-picker-options.js';
 import type { DatasetCatalogEntry } from './previews/useDatasetCatalog.js';
 import { useMonacoFallback } from './useMonacoFallback.js';
 import { DraftChip } from '../studio-design/StudioDraftMark.js';
+import { ContextPackRelatedEntries, isContextPackEntrySchema } from './ContextPackRelatedEntries.js';
 import {
   type LoadState,
   isLoading,
@@ -1766,7 +1767,31 @@ function relatedListEntryChipName(entry: unknown): string | undefined {
  * chip shows its title and columns beside the name. Those are edited in
  * Studio's object settings (Record page tabs), which reads the relationships.
  */
-function RelatedListEntriesWidget({
+function RelatedListEntriesWidget(props: WidgetProps) {
+  // objectstack#37143 — the same block edits a context pack's `related`
+  // (`{ object, field?, fields? }` entries, ADR-0160 D1). Told apart by the
+  // entry schema it is handed, never by the type's name; the pack's root is
+  // the row its `dependsOn` names (`object`).
+  const { schema, fieldSpec, formData } = props;
+  if (isContextPackEntrySchema(schema)) {
+    const dep = (Array.isArray(fieldSpec?.dependsOn) ? fieldSpec!.dependsOn![0] : fieldSpec?.dependsOn) || 'object';
+    const rootValue = formData?.[dep];
+    return (
+      <ContextPackRelatedEntries
+        naming={controlNaming(props)}
+        schema={schema}
+        root={typeof rootValue === 'string' && rootValue ? rootValue : undefined}
+        value={props.value}
+        onChange={props.onChange}
+        readOnly={props.readOnly}
+      />
+    );
+  }
+  return <RelatedListNameEntries {...props} />;
+}
+
+/** The object form's `relatedLists` face: names and `{ list, … }` entries as chips. */
+function RelatedListNameEntries({
   id,
   ariaLabelledBy,
   required,

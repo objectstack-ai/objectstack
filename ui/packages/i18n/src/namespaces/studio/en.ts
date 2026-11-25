@@ -1834,6 +1834,21 @@ const STUDIO_EN: Record<string, string> = {
   'engine.form.addFieldPlain': 'Add field',
   'engine.form.searchFields': 'Search fields…',
   'engine.form.allFieldsAdded': 'All fields added',
+  // objectstack#37143 — a context pack's related lists (the `related-list-entries`
+  // block under `ai_context`): the add picker, one entry's link and columns.
+  // `{max}` is the schema's bound, `{field}` a reference field's label, `{list}`
+  // the child object's name.
+  'engine.form.contextPack.addList': 'Add related list…',
+  'engine.form.contextPack.chooseRootFirst': 'Choose the root object first',
+  'engine.form.contextPack.noLinks': 'No object has a reference field that points at the root object',
+  'engine.form.contextPack.allListed': 'Every related list is added',
+  'engine.form.contextPack.listsFull': 'A pack reads at most {max} related lists',
+  'engine.form.contextPack.via': 'via {field}',
+  'engine.form.contextPack.notLinked': 'No reference field to the root: reported when saved',
+  'engine.form.contextPack.columnsDefault': 'No columns: each row is read by its name.',
+  'engine.form.contextPack.addColumn': 'Add column…',
+  'engine.form.contextPack.addColumnTo': 'Add a column to {list}',
+  'engine.form.contextPack.columnsFull': 'A related list reads at most {max} columns',
   // objectui#12126 — the `ref-multi:permission` picker's add control: its
   // accessible name, its placeholder, and the placeholder once every declared
   // permission set is picked.

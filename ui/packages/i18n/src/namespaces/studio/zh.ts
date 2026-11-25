@@ -1628,6 +1628,18 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.form.addFieldPlain': '添加字段',
   'engine.form.searchFields': '搜索字段…',
   'engine.form.allFieldsAdded': '已添加全部字段',
+  // objectstack#37143 — 资料包的关联列表（`ai_context` 下的 `related-list-entries`）。
+  'engine.form.contextPack.addList': '添加关联列表…',
+  'engine.form.contextPack.chooseRootFirst': '请先选择根对象',
+  'engine.form.contextPack.noLinks': '没有对象的引用字段指向根对象',
+  'engine.form.contextPack.allListed': '关联列表已全部添加',
+  'engine.form.contextPack.listsFull': '一个资料包最多读取 {max} 个关联列表',
+  'engine.form.contextPack.via': '经由 {field}',
+  'engine.form.contextPack.notLinked': '没有指向根对象的引用字段：保存时会报告',
+  'engine.form.contextPack.columnsDefault': '未选列：每行只读取其名称。',
+  'engine.form.contextPack.addColumn': '添加列…',
+  'engine.form.contextPack.addColumnTo': '为 {list} 添加列',
+  'engine.form.contextPack.columnsFull': '一个关联列表最多读取 {max} 列',
   // objectui#12126 — zh half of the `ref-multi:permission` add control.
   'engine.form.addPermissionSetPlain': '添加权限集',
   'engine.form.addPermissionSet': '添加权限集…',
