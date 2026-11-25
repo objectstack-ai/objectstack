@@ -30,6 +30,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { CAPABILITY_PROVIDERS } from '@objectstack/core';
 import { composeStacks, defineStack } from '@objectstack/spec';
 import { bootStack, type VerifyStack } from './harness.js';
+import { constructServedProviders } from './required-providers.js';
 import { warmUpBoot } from './boot-warm-up.testkit.js';
 
 // The boot's first load, paid during collection rather than in the first
@@ -147,4 +148,95 @@ describe('every provider the table names is a dependency of this package', () =>
     expect(packages.length).toBeGreaterThan(0);
     expect(packages.filter((pkg) => !(pkg in manifest.dependencies))).toEqual([]);
   });
+});
+
+/**
+ * ADR-0160 D5 — `requires: ['record-context']` mounts `RecordContextServicePlugin`,
+ * so `get_record_context` is served over MCP from the app's `aiContexts` packs
+ * with no hand wiring; without the token there is no tool and no service; a host
+ * that mounts the plugin itself keeps its own instance. The MCP server is
+ * declared as `requires: ['mcp']` (`serve` mounts it as a host default; this
+ * boot takes none), so both providers come from the table `serve` reads.
+ */
+describe("requires: ['record-context'] — get_record_context over MCP", () => {
+  const RECORD_CONTEXT = 'com.objectstack.service.record-context';
+  /** The service name the plugin registers and the MCP doors resolve. */
+  const RECORD_CONTEXT_SERVICE = 'record-context';
+  const policy = {
+    name: 'rqp_policy', label: 'Policy', pluralLabel: 'Policies', sharingModel: 'public_read_write',
+    fields: { title: { name: 'title', type: 'text', label: 'Title', required: true } },
+  };
+  const pack = { name: 'rqp_policy_brief', label: 'Policy brief', object: 'rqp_policy', fields: ['title'] };
+  const withPack = (extra: Bag = {}): Bag =>
+    defineStack({ manifest: appManifest, objects: [policy], aiContexts: [pack], ...extra } as never) as unknown as Bag;
+
+  /** One MCP JSON-RPC call over the live `/mcp` transport, as the seeded admin. */
+  const rpc = async (s: VerifyStack, method: string, params: Record<string, unknown>) => {
+    const bearer = await s.signIn();
+    const res = await s.api('/mcp', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Accept: 'application/json, text/event-stream',
+        Authorization: `Bearer ${bearer}`,
+      },
+      body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }),
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { result?: any; error?: unknown };
+    expect(body.error, JSON.stringify(body.error)).toBeUndefined();
+    return body.result;
+  };
+  const toolNames = async (s: VerifyStack): Promise<string[]> =>
+    ((await rpc(s, 'tools/list', {}))?.tools ?? []).map((t: { name: string }) => t.name);
+
+  it('the token and one pack: tools/list carries get_record_context, and a call answers the pack', async () => {
+    stack = await bootStack(withPack({ requires: ['mcp', 'record-context'] }));
+    expect(stack.kernel.hasPlugin(RECORD_CONTEXT)).toBe(true);
+    const names = await toolNames(stack);
+    // Anti-vacuity: the MCP door is up and lists the record tools.
+    expect(names).toContain('get_record');
+    expect(names).toContain('get_record_context');
+
+    const ql = await stack.kernel.getServiceAsync<any>('objectql');
+    const row = await ql.insert('rqp_policy', { title: 'Travel policy RQP' }, { context: { isSystem: true } });
+    const result = await rpc(stack, 'tools/call', {
+      name: 'get_record_context',
+      arguments: { objectName: 'rqp_policy', recordId: String(row.id) },
+    });
+    const text = String(result?.content?.[0]?.text ?? '');
+    expect(result?.isError, text).not.toBe(true);
+    expect(text).toContain('Travel policy RQP');
+    expect(text).toContain('Policy brief');
+  }, 120_000);
+
+  it('control — the same app without the token: no provider, no service, no tool', async () => {
+    stack = await bootStack(withPack({ requires: ['mcp'] }));
+    expect(stack.kernel.hasPlugin(RECORD_CONTEXT)).toBe(false);
+    const names = await toolNames(stack);
+    expect(names).toContain('get_record');
+    expect(names).not.toContain('get_record_context');
+  }, 120_000);
+
+  it("a host that mounts the plugin itself keeps its own: the boot constructs no second one", async () => {
+    // A stand-in registered under the provider's real name, whose service is
+    // marked: had the boot mounted the real plugin too, the service would be
+    // the real one's.
+    const marker = { recordContextTools: () => ({ definitions: [], getRecordContext: async () => ({}) }), host: true };
+    class HostRecordContext {
+      readonly name = RECORD_CONTEXT;
+      readonly version = '0.0.0';
+      readonly type = 'standard';
+      async init(ctx: { registerService(name: string, service: unknown): void }): Promise<void> {
+        ctx.registerService(RECORD_CONTEXT_SERVICE, marker);
+      }
+    }
+    const host = new HostRecordContext();
+    expect(
+      await constructServedProviders({ config: withPack({ requires: ['record-context'] }), held: [host], packageRoot: process.cwd() }),
+    ).not.toContainEqual(expect.objectContaining({ name: RECORD_CONTEXT }));
+
+    stack = await bootStack(withPack({ requires: ['record-context'], plugins: [host] }));
+    expect(await stack.kernel.getServiceAsync(RECORD_CONTEXT_SERVICE)).toBe(marker);
+  }, 120_000);
 });
