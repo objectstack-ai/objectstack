@@ -4,9 +4,11 @@
  * objectstack#36748 — `PackageFormDialog` handed a `newApp` step
  * (`newAppStep`, `studio-design/newAppDoor.ts`) ends with an app.
  *
- *  1. The dialog is titled 「新建应用」/"New app" and worded for an app: a
- *     no-code author reads 「应用」, never 「软件包」, on this door (the
- *     maintainer's ruling).
+ *  1. (objectstack#37134) The step is offered as 「同时创建应用」 / "Also
+ *     create an app", ticked by default, on the create-package dialog's own
+ *     face: the app-worded dialog went with the Studio home's 「新建应用」
+ *     door (objectstack#36908), and the one create-package dialog now
+ *     carries the choice.
  *  2. One confirm creates the package AND its app: the package `POST`, the
  *     app's draft under the first-write pin, then that one app's publish
  *     (objectstack#36511: a human-created item is live at once). The author
@@ -20,6 +22,12 @@
  * moved off the home onto the dialog itself, mounted as that home mounted it:
  * create mode, `newApp={newAppStep(client, locale)}`, and Studio on the new
  * package after save.
+ *
+ * objectstack#37134 — the create-package dialog (`CreatePackageDialog`, the
+ * one every create-package door mounts) hands the dialog that step, so its
+ * cases below mount the REAL wrapper: ticked creates the package and its app,
+ * unticked the package alone, and a taken app name surfaces as above. The
+ * last describe pins that every door mounts that wrapper.
  *
  * The REAL `PackageFormDialog`, `newAppStep`, metadata client and
  * `StudioDesignSurface` over a fetch stub that keeps the server's state:
@@ -59,7 +67,11 @@ vi.mock('../studio-design/StudioAiCopilot', () => ({ StudioChatDock: () => null 
 vi.mock('../../preview/DraftChangesPanel', () => ({ DraftChangesPanel: () => null }));
 
 import { toast } from 'sonner';
+import { readFileSync, readdirSync, statSync } from 'node:fs';
+import { dirname, join, relative, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { PackageFormDialog } from './PackageFormDialog';
+import { CreatePackageDialog } from './PackagesPage';
 import { useMetadataClient } from './useMetadata';
 import { t, useMetadataLocale } from './i18n';
 import { newAppStep } from '../studio-design/newAppDoor';
@@ -206,18 +218,23 @@ const nameInput = (dialog: HTMLElement) =>
 
 const describeWrite = (w: Write) => `${w.method} ${w.path}`;
 
-describe('PackageFormDialog with a new-app step: one dialog worded for an app (objectstack#36748)', () => {
-  it('titled 「新建应用」, its submit 「创建应用」, and no 「软件包」 anywhere on its face', async () => {
+describe('PackageFormDialog with a new-app step: offered as 「同时创建应用」, ticked (objectstack#37134)', () => {
+  it('the create-package dialog, with 「同时创建应用」 ticked under the name', async () => {
     localeFixture = 'zh-CN';
     renderDoor();
     const dialog = await openNewAppDialog();
-    expect(within(dialog).getByRole('heading', { name: '新建应用' })).toBeInTheDocument();
+    expect(within(dialog).getByRole('heading', { name: '新建软件包' })).toBeInTheDocument();
+    const box = within(dialog).getByRole('checkbox', { name: '同时创建应用' });
+    expect(box).toHaveAttribute('data-state', 'checked');
     fireEvent.change(nameInput(dialog), { target: { value: 'Visits' } });
-    expect(within(dialog).getByTestId('package-form-submit')).toHaveTextContent('创建应用');
-    // Advanced opened too: its rows say 「应用 ID」.
-    fireEvent.click(within(dialog).getByTestId('package-form-advanced-toggle'));
-    expect(within(dialog).getByText('应用 ID')).toBeInTheDocument();
-    expect(dialog.textContent).not.toMatch(/软件包/);
+    expect(within(dialog).getByTestId('package-form-submit')).toHaveTextContent('创建软件包');
+  });
+
+  it('CONTROL: without a step the dialog offers no app', async () => {
+    render(<PackageFormDialog mode="create" open onOpenChange={() => {}} />);
+    const dialog = await screen.findByRole('dialog');
+    expect(within(dialog).queryByTestId('package-form-also-app')).toBeNull();
+    expect(within(dialog).queryByRole('checkbox')).toBeNull();
   });
 });
 
@@ -245,7 +262,8 @@ describe('PackageFormDialog with a new-app step: one confirm creates the package
     expect(draft.search.get('mode')).toBe('draft');
     expect(draft.body?.label).toBe('Visits');
     expect(publish.search.get('package')).toBe(packageId);
-    expect(toast.success).toHaveBeenCalledWith(expect.stringMatching(/^Created app “Visits”/));
+    // The package dialog's own voice (objectstack#37134): the package and its app.
+    expect(toast.success).toHaveBeenCalledWith('Created package “Visits” and its app.');
     expect(toast.error).not.toHaveBeenCalled();
 
     // The author lands in the new package's Studio; the header names the app.
@@ -278,5 +296,189 @@ describe('PackageFormDialog with a new-app step: one confirm creates the package
     fireEvent.click(within(dialog).getByTestId('package-form-submit'));
     expect(await within(dialog).findByText(/already uses the identifier/)).toHaveTextContent('Other visits');
     expect(srv.writes).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// objectstack#37134 — the create-package dialog every door mounts
+// (`CreatePackageDialog`) offers 「同时创建应用」, ticked by default.
+// ---------------------------------------------------------------------------
+
+/** `CreatePackageDialog` as Setup → Packages mounts it: Studio on the new package after create. */
+function CreatePackageHost() {
+  const navigate = useNavigate();
+  const [open, setOpen] = React.useState(false);
+  return (
+    <>
+      <button type="button" data-testid="open-new-app" onClick={() => setOpen(true)}>
+        new package
+      </button>
+      <CreatePackageDialog open={open} onOpenChange={setOpen} onCreated={(id) => navigate(studioHomePath(id))} />
+    </>
+  );
+}
+
+function renderCreatePackage() {
+  return render(
+    <MemoryRouter initialEntries={['/host']}>
+      <Routes>
+        <Route path="/host" element={<CreatePackageHost />} />
+        <Route path="/studio/:packageId/metadata/*" element={<StudioDesignSurface area="metadata" />} />
+        <Route path="/studio/:packageId/:tab" element={<StudioDesignSurface />} />
+        <Route path="/apps/*" element={<RunningApp />} />
+      </Routes>
+    </MemoryRouter>,
+  );
+}
+
+const alsoAppBox = (dialog: HTMLElement) =>
+  within(dialog).getByRole('checkbox', { name: t('engine.packages.create.alsoApp', localeFixture) });
+
+async function nameAndWait(dialog: HTMLElement, name: string) {
+  fireEvent.change(nameInput(dialog), { target: { value: name } });
+  await waitFor(() => expect(within(dialog).getByTestId('package-form-submit')).toBeEnabled());
+}
+
+describe('CreatePackageDialog: 「同时创建应用」 is offered, ticked by default (objectstack#37134)', () => {
+  it.each(['en-US', 'zh-CN'] as const)('%s: the box is there and ticked on every opening', async (locale) => {
+    localeFixture = locale;
+    renderCreatePackage();
+    let dialog = await openNewAppDialog();
+    const label = locale === 'zh-CN' ? '同时创建应用' : 'Also create an app';
+    expect(within(dialog).getByRole('checkbox', { name: label })).toHaveAttribute('data-state', 'checked');
+    // Unticked, closed and opened again: ticked again.
+    fireEvent.click(within(dialog).getByRole('checkbox', { name: label }));
+    expect(within(dialog).getByRole('checkbox', { name: label })).toHaveAttribute('data-state', 'unchecked');
+    fireEvent.click(within(dialog).getByRole('button', { name: t('engine.cancel', locale) }));
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    dialog = await openNewAppDialog();
+    expect(within(dialog).getByRole('checkbox', { name: label })).toHaveAttribute('data-state', 'checked');
+  });
+});
+
+describe('CreatePackageDialog: ticked creates the package and its app; unticked only the package (objectstack#37134)', () => {
+  it('ticked: package, app draft, app publish — then the Studio header names the app', async () => {
+    renderCreatePackage();
+    const dialog = await openNewAppDialog();
+    await nameAndWait(dialog, 'Visits');
+    fireEvent.click(within(dialog).getByTestId('package-form-submit'));
+
+    await waitFor(() => expect(srv.writes).toHaveLength(3), { timeout: 8000 });
+    const manifest = srv.writes[0].body?.manifest as Record<string, unknown>;
+    const packageId = String(manifest.id);
+    const namespace = String(manifest.namespace);
+    expect(srv.writes.map(describeWrite)).toEqual([
+      'POST /api/v1/packages',
+      `PUT /api/v1/meta/app/${namespace}`,
+      `POST /api/v1/meta/app/${namespace}/publish`,
+    ]);
+    expect(srv.writes[1].search.get('package')).toBe(packageId);
+    expect(srv.apps.map((a) => a.name)).toEqual([namespace]);
+    expect(toast.success).toHaveBeenCalledWith('Created package “Visits” and its app.');
+    expect(toast.error).not.toHaveBeenCalled();
+
+    // Where the wrapper lands does not change (Studio on the new package),
+    // and with an app the header names it.
+    const header = await screen.findByTestId('studio-shell-header', undefined, { timeout: 8000 });
+    await waitFor(
+      () => expect(within(header).getByTestId('studio-back-app-name')).toHaveAttribute('data-names', 'app'),
+      { timeout: 8000 },
+    );
+    expect(within(header).getByTestId('studio-back')).toHaveTextContent(/^Back to app·Visits·Studio$/);
+  });
+
+  it('unticked: only the package is created, as before', async () => {
+    renderCreatePackage();
+    const dialog = await openNewAppDialog();
+    await nameAndWait(dialog, 'Shared parts');
+    fireEvent.click(alsoAppBox(dialog));
+    expect(alsoAppBox(dialog)).toHaveAttribute('data-state', 'unchecked');
+    fireEvent.click(within(dialog).getByTestId('package-form-submit'));
+
+    await waitFor(() => expect(toast.success).toHaveBeenCalledWith('Created package “Shared parts”.'));
+    expect(srv.writes.map(describeWrite)).toEqual(['POST /api/v1/packages']);
+    expect(srv.apps).toEqual([]);
+    expect(srv.appDrafts).toEqual([]);
+    // The same landing: Studio on the new package, which has no app to name.
+    const header = await screen.findByTestId('studio-shell-header', undefined, { timeout: 8000 });
+    const packageId = String((srv.writes[0].body?.manifest as Record<string, unknown>).id);
+    expect(await screen.findByTestId('studio-back-app-name', undefined, { timeout: 8000 })).toHaveAttribute(
+      'data-names',
+      'package',
+    );
+    expect(header).toBeInTheDocument();
+    expect(packageId).toMatch(/shared-parts$/);
+  });
+
+  it('ticked, an app name already taken refuses the confirm and writes nothing; unticked, the package goes through', async () => {
+    renderCreatePackage();
+    const dialog = await openNewAppDialog();
+    await nameAndWait(dialog, 'Visits');
+    const namespace = (within(dialog).getByTestId('package-form-derived-summary').textContent ?? '').match(
+      /will start with (\w+?)_\./,
+    )?.[1];
+    expect(namespace, 'the derived namespace is read off the dialog').toBeTruthy();
+    srv.apps = [
+      { name: namespace, label: 'Other visits' },
+      { name: `${namespace}_app`, label: 'Other visits app' },
+    ];
+    fireEvent.click(within(dialog).getByTestId('package-form-submit'));
+    expect(await within(dialog).findByTestId('package-form-error')).toHaveTextContent(
+      `The app “Other visits” already uses the identifier “${namespace}”.`,
+    );
+    expect(srv.writes).toEqual([]);
+    // The namespace it names sits behind Advanced, which opened.
+    expect(within(dialog).getByTestId('package-form-advanced-toggle')).toHaveAttribute('data-state', 'open');
+
+    // The author may keep the package and drop the app instead.
+    fireEvent.click(alsoAppBox(dialog));
+    expect(within(dialog).queryByTestId('package-form-error')).toBeNull();
+    fireEvent.click(within(dialog).getByTestId('package-form-submit'));
+    await waitFor(() => expect(srv.writes.map(describeWrite)).toEqual(['POST /api/v1/packages']));
+  });
+});
+
+// ---------------------------------------------------------------------------
+// objectstack#37134 — every create-package door mounts `CreatePackageDialog`,
+// so every one of them offers the box. Read off the source: a create-mode
+// `PackageFormDialog` mounted anywhere else, or a door that stops mounting
+// the wrapper, reds here.
+// ---------------------------------------------------------------------------
+
+const HERE = dirname(fileURLToPath(import.meta.url));
+const SRC = resolve(HERE, '../..');
+
+function sourceFiles(dir: string): string[] {
+  return readdirSync(dir).flatMap((entry) => {
+    const entryFile = join(dir, entry);
+    if (statSync(entryFile).isDirectory()) return sourceFiles(entryFile);
+    return /\.tsx?$/.test(entry) && !/\.test\.tsx?$/.test(entry) ? [entryFile] : [];
+  });
+}
+
+/** Every JSX mount of `component` in app-shell's source, as `file: <opening tag>`. */
+function mounts(component: string): string[] {
+  const tag = new RegExp(`<${component}\\b[^>]*>`, 'g');
+  return sourceFiles(SRC).flatMap((file) =>
+    [...readFileSync(file, 'utf8').matchAll(tag)].map((m) => `${relative(SRC, file)}: ${m[0].replace(/\s+/g, ' ')}`),
+  );
+}
+
+describe('every create-package door offers 「同时创建应用」 (objectstack#37134)', () => {
+  it('Setup → Packages (its button and the `?new=package` door) and the resource list mount CreatePackageDialog', () => {
+    const doors = mounts('CreatePackageDialog').map((m) => m.split(':')[0]);
+    expect(doors.sort()).toEqual(['views/metadata-admin/PackagesPage.tsx', 'views/metadata-admin/ResourceListPage.tsx']);
+  });
+
+  it('no create-mode PackageFormDialog is mounted outside CreatePackageDialog, and that one passes the step', () => {
+    const creates = mounts('PackageFormDialog').filter((m) => !/mode="(edit|view)"/.test(m));
+    expect(creates).toHaveLength(1);
+    expect(creates[0]).toMatch(/^views\/metadata-admin\/PackagesPage\.tsx: <PackageFormDialog mode="create"/);
+    const wrapper = readFileSync(join(SRC, 'views/metadata-admin/PackagesPage.tsx'), 'utf8').match(
+      /export function CreatePackageDialog\([\s\S]*?\n}\n/,
+    )?.[0];
+    expect(wrapper, 'CreatePackageDialog is read off PackagesPage.tsx').toBeTruthy();
+    expect(wrapper).toMatch(/newApp=\{newApp\}/);
+    expect(wrapper).toMatch(/newAppStep\(client, locale\)/);
   });
 });

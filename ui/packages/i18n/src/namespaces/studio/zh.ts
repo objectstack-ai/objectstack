@@ -1781,6 +1781,10 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.packages.create.failed': '创建软件包失败',
   'engine.packages.create.exists': '已存在相同 ID 的软件包。',
   'engine.packages.create.created': '已创建软件包「{name}」。',
+  // objectstack#37134 — the create dialog's 「同时创建应用」 choice, ticked by default.
+  'engine.packages.create.alsoApp': '同时创建应用',
+  'engine.packages.create.alsoAppHint': '软件包会带一个同名应用，建好即可打开。只放对象、流程给别的软件包复用的，可以取消勾选。',
+  'engine.packages.create.createdWithApp': '已创建软件包「{name}」及其应用。',
   // objectstack#8270 — 这条正是在 zh 控制台里显示为英文原文的服务端拒绝信息。
   'engine.packages.noCapability': '你没有在本系统管理软件包的权限 — 该操作需要「管理元数据」权限。',
   'engine.packages.form.basics': '基本信息',

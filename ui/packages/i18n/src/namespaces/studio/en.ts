@@ -2003,6 +2003,10 @@ const STUDIO_EN: Record<string, string> = {
   'engine.packages.create.failed': 'Failed to create package',
   'engine.packages.create.exists': 'A package with this id already exists.',
   'engine.packages.create.created': 'Created package “{name}”.',
+  // objectstack#37134 — the create dialog's 「同时创建应用」 choice, ticked by default.
+  'engine.packages.create.alsoApp': 'Also create an app',
+  'engine.packages.create.alsoAppHint': 'The package gets an app with the same name, ready to open. Untick this for a package that only holds objects or flows for other packages to use.',
+  'engine.packages.create.createdWithApp': 'Created package “{name}” and its app.',
   // objectstack#8270 — the server refuses package writes without the ADR-0066
   // `manage_metadata` capability, and its refusal is an English sentence that
   // reached a zh console verbatim. Deployments that withhold the capability do
@@ -3643,10 +3647,11 @@ const STUDIO_EN: Record<string, string> = {
   'engine.studio.org.description': 'The organization’s own flows that belong to no package, such as a clone of a packaged flow. They open editable.',
   // ADR-0146 D11 — no link out: no Setup page copies a flow into this scope any more.
   'engine.studio.org.none': 'No flows outside a package. To change a packaged flow, open its package and use New similar.',
-  // objectstack#36748 — the new-app step of the package dialog (`newAppDoor.ts`):
-  // one dialog creates the package and its app, worded for an app throughout.
-  // The Studio home that opened it was removed (objectstack#36908); the step
-  // stays for the create-package dialog's create-app choice (objectstack#37134).
+  // objectstack#36748 — the new-app step of the package dialog (`newAppDoor.ts`).
+  // The Studio home's app-worded dialog was removed (objectstack#36908); the
+  // create-package dialog's 「同时创建应用」 (objectstack#37134) runs the step
+  // and reads `nameTaken` and `appFailed`. The app-worded rows have no reader
+  // since; they stay as released rows.
   'engine.studio.newApp.title': 'New app',
   'engine.studio.newApp.description': 'Give your app a name; everything else is filled in for you. It opens as soon as it is created.',
   'engine.studio.newApp.advancedHint': 'App ID, namespace, version and type, filled in from the name.',
