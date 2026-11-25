@@ -59,4 +59,13 @@ export interface RecordContextDoor {
   diagnoseDelegation?(objectName: string): Promise<{ narrowed: boolean; statement?: string } | undefined>;
   /** The caller's locale ladder for the executor's sentences. OPTIONAL: `en`. */
   userTextLocales?(): Promise<readonly string[]>;
+  /**
+   * [ADR-0150 D6, addendum 2026-11-25] The manifest namespace of the
+   * installed package `packageId` names — what a package's pack is spelt by
+   * where its name crosses the AI face (`NS-NAME`, `deriveAiFaceName`): the
+   * `context` argument and the candidates a refusal lists. `undefined` for an
+   * id the host cannot place. OPTIONAL: a door without it spells every pack by
+   * its bare name, as an environment pack is spelt.
+   */
+  packageNamespace?(packageId: string): string | undefined | Promise<string | undefined>;
 }

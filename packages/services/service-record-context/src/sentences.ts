@@ -15,6 +15,42 @@ import { pickSentenceLocale } from '@objectstack/core';
 export const SENTENCE_LOCALES = ['en', 'zh-Hans'] as const;
 type Locale = (typeof SENTENCE_LOCALES)[number];
 
+/** One pack of the "several" answer: its AI face and its label. */
+export interface PackListing {
+  face: string;
+  label: string;
+}
+
+/** One candidate a refusal names: its AI face, and its holder (absent for an environment pack). */
+export interface PackCandidate {
+  face: string;
+  packageId?: string;
+}
+
+/**
+ * [ADR-0160 D4 step 3, as amended 2026-11-25] A pack of the "several" answer:
+ * its face (`NS-NAME` for a package's pack, ADR-0150's addendum) with its
+ * `label` — a machine name alone does not tell a model which audience a pack
+ * serves. The fallback: a pack with no label (blank) is listed by its face
+ * alone. `AiContextSchema` requires a label, so no parsed pack reaches it
+ * today; the fallback keeps the sentence whole should that change.
+ */
+const listed = (packs: readonly PackListing[], spell: (face: string, label: string) => string) =>
+  packs.map((p) => (p.label.trim() !== '' ? spell(p.face, p.label) : p.face)).join(', ');
+
+/** Every candidate's face; each holder named only where two candidates derive one face. */
+const candidatesOf = (
+  candidates: readonly PackCandidate[],
+  holder: (face: string, packageId: string | undefined) => string,
+) => {
+  const counts = new Map<string, number>();
+  for (const c of candidates) counts.set(c.face, (counts.get(c.face) ?? 0) + 1);
+  return candidates.map((c) => ((counts.get(c.face) ?? 0) > 1 ? holder(c.face, c.packageId) : c.face)).join(', ');
+};
+
+/** Whether every candidate derives its own face, so `context` can name each. */
+const facesApart = (candidates: readonly PackCandidate[]) => new Set(candidates.map((c) => c.face)).size === candidates.length;
+
 export type Sentences = ReturnType<typeof sentencesFor>;
 
 const WRITTEN = {
@@ -41,12 +77,17 @@ const WRITTEN = {
       + 'object\'s one pack, or read the record with get_record.',
     noPack: (object: string) =>
       `Object '${object}' has no context pack, so nothing was read. Read the record with get_record.`,
-    severalPacks: (object: string, names: readonly string[]) =>
-      `Object '${object}' has several context packs (${names.join(', ')}): name the one to read with 'context'. `
-      + 'Nothing was read.',
-    duplicatePack: (object: string, name: string) =>
-      `Object '${object}' has more than one context pack named '${name}', so none of them was read. `
-      + 'Name another of its packs with \'context\', or read the record with get_record.',
+    severalPacks: (object: string, packs: readonly PackListing[]) =>
+      `Object '${object}' has several context packs: ${listed(packs, (face, label) => `${face} ("${label}")`)}. `
+      + 'Name the one to read with \'context\', spelt as listed here. Nothing was read.',
+    duplicatePack: (object: string, name: string, candidates: readonly PackCandidate[]) =>
+      facesApart(candidates)
+        ? `Object '${object}' has more than one context pack named '${name}' `
+          + `(${candidatesOf(candidates, (face) => face)}), so none of them was read. Name the one to read with `
+          + '\'context\', spelt as listed here.'
+        : `Object '${object}' has more than one context pack named '${name}' (${candidatesOf(candidates, (face, id) =>
+          `${face} of ${id === undefined ? 'the environment' : `package ${id}`}`)}), so none of them was read. `
+          + 'Name another of its packs with \'context\', or read the record with get_record.',
     objectRefusedNamed: (pack: string, root: string, object: string) =>
       `Context pack '${pack}' on '${root}' reads object '${object}', which this door does not serve you, so the `
       + 'pack cannot be read for you. Nothing was returned. Read the record with get_record.',
@@ -72,10 +113,16 @@ const WRITTEN = {
     noPackNamed: (context: string, object: string) =>
       `没有名为 '${context}' 的资料包读取对象 '${object}'，因此没有读取任何内容。省略 'context' 以使用该对象唯一的资料包，或用 get_record 读取记录。`,
     noPack: (object: string) => `对象 '${object}' 没有资料包，因此没有读取任何内容。请用 get_record 读取记录。`,
-    severalPacks: (object: string, names: readonly string[]) =>
-      `对象 '${object}' 有多个资料包（${names.join(', ')}）：请用 'context' 指定要读取的那个。没有读取任何内容。`,
-    duplicatePack: (object: string, name: string) =>
-      `对象 '${object}' 有不止一个名为 '${name}' 的资料包，因此一个都没有读取。请用 'context' 指定它的另一个资料包，或用 get_record 读取记录。`,
+    severalPacks: (object: string, packs: readonly PackListing[]) =>
+      `对象 '${object}' 有多个资料包：${listed(packs, (face, label) => `${face}（“${label}”）`)}。`
+      + '请用 \'context\' 按这里列出的写法指定要读取的那个。没有读取任何内容。',
+    duplicatePack: (object: string, name: string, candidates: readonly PackCandidate[]) =>
+      facesApart(candidates)
+        ? `对象 '${object}' 有不止一个名为 '${name}' 的资料包（${candidatesOf(candidates, (face) => face)}），`
+          + '因此一个都没有读取。请用 \'context\' 按这里列出的写法指定要读取的那个。'
+        : `对象 '${object}' 有不止一个名为 '${name}' 的资料包（${candidatesOf(candidates, (face, id) =>
+          `${face}（${id === undefined ? '环境的' : `包 ${id} 的`}）`)}），因此一个都没有读取。`
+          + '请用 \'context\' 指定它的另一个资料包，或用 get_record 读取记录。',
     objectRefusedNamed: (pack: string, root: string, object: string) =>
       `'${root}' 上的资料包 '${pack}' 会读取对象 '${object}'，而本入口不向你提供它，因此无法为你读取这个资料包。没有返回任何内容。请用 get_record 读取记录。`,
     objectRefusedUnnamed: (pack: string, root: string) =>
