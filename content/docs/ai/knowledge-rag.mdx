@@ -79,6 +79,21 @@ Protocol, adapters, embedder, and `KnowledgeService.search` — is open, so you 
 installed ([Connect an MCP Client](/docs/ai/connect-mcp)).
 </Callout>
 
+## Searching inside chosen records
+
+Pass `scope` to search only inside some records: the records an object source indexes, or a parent record that source reaches through a lookup it lists in `metadataFields`.
+
+```ts
+// Only the clauses of one policy: the clause source lists its `policy` lookup in metadataFields.
+const hits = await knowledge.search('notice period', {
+  topK: 5,
+  scope: [{ object: 'policy', ids: [policyId] }],
+  executionContext,
+});
+```
+
+The adapter filters before it ranks, so the `topK` hits all come from inside the scope, and the service drops any hit outside it whatever the adapter does. A source the scope does not reach is not searched, and `scope: []` answers nothing, never everything. A scope narrows what is searched; each hit is still re-checked against the caller, so it never shows a record the caller could not read. Bounds, the parent-link rules and what an adapter must do are in [the protocol's record scope](/docs/protocol/knowledge#record-scope).
+
 ## What you get for free
 
 - **Permission-aware retrieval.** Every hit with a `sourceRecordId` is re-checked against the caller's `ExecutionContext` via `IDataEngine` — the same RLS that gates plain ObjectQL queries. A salesperson asking "find proposals about ACME" only sees the proposals they could already read directly. Before a source is searched, the caller's field-level read rules and the object's API exposure are asked too: a source serving a field the caller may not query is not searched for them (see [the protocol's source admission](/docs/protocol/knowledge#source-admission-exposure-and-field-level-rules)). File / HTTP hits pass through (ACL is the adapter's problem).

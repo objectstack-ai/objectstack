@@ -40,6 +40,7 @@
     "AdapterListDocumentsOptions": "src/contracts/knowledge-adapter.ts#AdapterListDocumentsOptions (interface)",
     "AdapterListDocumentsPage": "src/contracts/knowledge-adapter.ts#AdapterListDocumentsPage (interface)",
     "AdapterListedDocument": "src/contracts/knowledge-adapter.ts#AdapterListedDocument (interface)",
+    "AdapterScopeTerm": "src/contracts/knowledge-adapter.ts#AdapterScopeTerm (type)",
     "AdapterSearchOptions": "src/contracts/knowledge-adapter.ts#AdapterSearchOptions (interface)",
     "AnalyticsDriverCapabilities": "src/contracts/analytics-service.ts#AnalyticsDriverCapabilities (interface)",
     "AnalyticsQuery": "src/data/analytics.zod.ts#AnalyticsQuery (type)",
