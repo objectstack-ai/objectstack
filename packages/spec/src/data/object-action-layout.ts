@@ -19,7 +19,10 @@ import { strictObject } from '../shared/strict-object';
  * - `record`: the actions that act on one record, drawn in the record page's
  *   header (placed at `record_header` or `record_more`). The same arm orders
  *   every surface that draws that header: the record page, the side preview
- *   and a phone's bottom action bar.
+ *   and a phone's bottom action bar. It also orders a grid row's ⋮ menu and
+ *   its right-click menu: the actions `pinned` names first, then those `more`
+ *   names, then the rest as before; which action a row draws as its button
+ *   does not change.
  *
  * An arm is a scope, not a page: one arm arranges one set of actions wherever
  * that set is drawn. The key only re-arranges, so it sits on the object as a
@@ -203,7 +206,10 @@ export const OBJECT_ACTION_LAYOUT_SCHEMA = strictObject(
       .optional()
       .describe(
         "The record scope's arrangement: actions of the object placed at `record_header` or `record_more`, as " +
-          "drawn in the record header (record page, side preview, a phone's bottom bar). Omit to draw it as before.",
+          "drawn in the record header (record page, side preview, a phone's bottom bar). The same order leads a " +
+          "grid row's ⋮ menu and its right-click menu: the actions `pinned` names first, then those `more` names, " +
+          'then the rest as before; which action a row draws as its button does not change. Omit to draw each as ' +
+          'before.',
       ),
   },
 )
