@@ -55,7 +55,8 @@ export * from './epoch.zod';
 // subpath and neither widens the root entry.
 export * from './duration.zod';
 // The ONE token estimate (`estimateTokens`): a conservative, tokenizer-free
-// upper estimate of a text's length in tokens, read by the embedders (refusing
-// an input over a model's limit) and by knowledge chunking, so the two never
-// measure the same text differently. Pure; imports nothing.
+// upper estimate of a text's length in tokens, read by embedder-openai to
+// refuse an input over a model's limit (knowledge chunking is to read it too,
+// #37098), so no two readers measure the same text differently. Pure; imports
+// nothing.
 export * from './token-estimate';

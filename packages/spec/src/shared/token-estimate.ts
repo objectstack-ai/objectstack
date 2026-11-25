@@ -2,16 +2,21 @@
 
 /**
  * `estimateTokens` — the ONE token estimate shared by the platform and the
- * apps built on it, so an embedder that refuses an over-limit input and a
- * knowledge service that sizes its chunks never disagree about how long a
- * text is.
+ * apps built on it, so every reader measures a text's length the same way.
+ * `@objectstack/embedder-openai` reads it to refuse an input over a model's
+ * limit; knowledge chunking is to read it too (#37098).
  *
  * It is a conservative upper estimate, not a tokenizer: no provider's
  * vocabulary ships with the platform, and the embedders it talks to
- * (OpenAI, DashScope, BigModel, BGE…) each tokenize differently. It is built
- * to sit at or above OpenAI `cl100k` counts on Chinese, mixed
- * Chinese/English and English-heavy text (long words, numbers, URLs, code,
- * hashes and other identifiers).
+ * (OpenAI, DashScope, BigModel, BGE…) each tokenize differently. On the
+ * sampled classes — Chinese, mixed Chinese/English, and English-heavy text
+ * with long words, numbers, URLs and code — it sits at or above OpenAI
+ * `cl100k` counts; on Chinese text it runs about 1.4× those counts.
+ *
+ * Known residual: text made mostly of random hex or base64 (UUIDs, sha256
+ * digests, encoded blobs) estimates BELOW its `cl100k` count — `cl100k`
+ * spends about one token per one to one and a half such characters. Emoji
+ * and rare ideographs (CJK Extension B and later) may estimate low too.
  *
  * ## Formula
  *
@@ -31,7 +36,7 @@
  *       id 16) — hashes, base64 and UUID segments;
  *  - **1** for each other punctuation mark or character (ASCII punctuation,
  *    non-ASCII letters, symbols, emoji);
- *  - **0** for whitespace.
+ *  - **0** for whitespace, the ideographic space `U+3000` included.
  *
  * Multiply the sum by **1.1** and round up. An empty or all-whitespace text
  * estimates 0.
@@ -55,9 +60,12 @@ export function estimateTokens(text: string): number {
     sum += asciiRunTokens(letters, digits);
     letters = 0;
     digits = 0;
+    // Whitespace first: the ideographic space U+3000 sits inside the CJK
+    // Symbols and Punctuation range below, and is whitespace, not a mark.
+    if (/\s/u.test(ch)) continue;
     if (isCjkOrFullWidth(cp)) {
       sum += 1.5;
-    } else if (!/\s/u.test(ch)) {
+    } else {
       sum += 1;
     }
   }
@@ -73,17 +81,17 @@ export function estimateTokens(text: string): number {
  * {@link estimateTokens}, by what the run holds: a run of `n` counts
  * `ceil(n / chars)`.
  */
-export const ASCII_RUN_CHARS_PER_TOKEN = Object.freeze({
+export const ASCII_RUN_CHARS_PER_TOKEN: Readonly<{
   /** A run of letters only. */
-  letters: 4,
+  letters: number;
   /** A run of digits only. */
-  digits: 3,
+  digits: number;
   /** A run mixing letters and digits (hashes, base64, UUID segments). */
-  mixed: 2,
-} as const);
+  mixed: number;
+}> = Object.freeze({ letters: 4, digits: 3, mixed: 2 });
 
 /** The safety factor {@link estimateTokens} multiplies its sum by. */
-export const TOKEN_ESTIMATE_MARGIN = 1.1;
+export const TOKEN_ESTIMATE_MARGIN: number = 1.1;
 
 /** The tokens one ASCII run of `letters` letters and `digits` digits counts (0 for no run). */
 function asciiRunTokens(letters: number, digits: number): number {

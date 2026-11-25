@@ -9,6 +9,13 @@ describe('estimateTokens — the formula', () => {
     expect(estimateTokens(' \n\t  ')).toBe(0);
   });
 
+  it('counts the ideographic space U+3000 as whitespace, 0', () => {
+    expect(estimateTokens('\u3000')).toBe(0);
+    expect(estimateTokens('\u3000\u3000 \n')).toBe(0);
+    // 第七条(4.5) + 纳税人(4.5), the indent between them 0 → 9 → 9.9 → 10
+    expect(estimateTokens('第七条\u3000纳税人')).toBe(10);
+  });
+
   it('counts a CJK character 1.5, then × 1.1 rounded up', () => {
     // 2 × 1.5 = 3 → 3.3 → 4
     expect(estimateTokens('数据')).toBe(4);

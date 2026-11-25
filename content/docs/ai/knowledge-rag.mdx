@@ -107,9 +107,11 @@ No provider's tokenizer ships with the platform, so the length is an estimate: `
 | A run of ASCII digits only | ceil(length / 3) per run — `8192` 2, a 16-digit number 6 |
 | A run mixing ASCII letters and digits (hashes, base64, UUID segments) | ceil(length / 2) per run — `v3` 1, a 32-character hex id 16 |
 | Any other punctuation mark or character | 1 each |
-| Whitespace | 0 |
+| Whitespace, the ideographic space `U+3000` included | 0 |
 
-The sum is multiplied by 1.1 and rounded up. On Chinese regulation-like text, mixed Chinese/English text and English-heavy text (long words, identifiers, code, URLs, figures, long numbers, a URL carrying a hex id) the estimate stays at or above OpenAI `cl100k` token counts (the sampled counts are recorded in the function's test). Text made mostly of random hex or base64 — UUIDs, sha256 digests, encoded blobs — tokenizes at one to one and a half characters per token and can still be estimated below its real count. It is deliberately conservative: a text near a limit may be refused although the provider would have accepted it. Other providers' tokenizers are not sampled.
+The sum is multiplied by 1.1 and rounded up. On the sampled classes — Chinese, mixed Chinese/English, and English-heavy text with long words, numbers, URLs and code — the estimate stays at or above OpenAI `cl100k` token counts (the sampled counts are recorded in the function's test); on Chinese text it runs about 1.4× those counts. It is deliberately conservative: a text whose real count is under a limit may be refused although the provider would have accepted it.
+
+Known residual: text made mostly of random hex or base64 — UUIDs, sha256 digests, encoded blobs — tokenizes at one to one and a half characters per token and estimates below its real count. Emoji and rare ideographs (CJK Extension B and later) may also estimate low: `cl100k` spends two to four tokens on each. Other providers' tokenizers are not sampled.
 
 ## Why we did not build a vector DB
 

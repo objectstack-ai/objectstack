@@ -302,6 +302,61 @@ describe('OpenAIEmbedder input limit (refused, not truncated)', () => {
     }
   });
 
+  it('applies every documented limit in the table, exactly', async () => {
+    // Every row of KNOWN_MAX_INPUT_TOKENS: a text estimated at the limit is
+    // sent, one estimated just over it is refused naming that limit.
+    const TABLE: ReadonlyArray<readonly [model: string, limit: number]> = [
+      ['text-embedding-3-small', 8192],
+      ['text-embedding-3-large', 8192],
+      ['text-embedding-ada-002', 8192],
+      ['text-embedding-v3', 8192],
+      ['text-embedding-v2', 2048],
+      ['text-embedding-v1', 2048],
+      ['embedding-3', 3072],
+      ['embedding-2', 512],
+      ['BAAI/bge-m3', 8192],
+      ['BAAI/bge-large-zh-v1.5', 512],
+      ['BAAI/bge-large-en-v1.5', 512],
+    ];
+    // `k` one-letter runs estimate ceil(k × 1.1): the largest k at or under the limit, then k + 1.
+    const words = (k: number) => 'x '.repeat(k);
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      for (const [model, limit] of TABLE) {
+        let k = Math.floor(limit / 1.1);
+        while (estimateTokens(words(k + 1)) <= limit) k++;
+        while (estimateTokens(words(k)) > limit) k--;
+        const f = okFetch();
+        const e = new OpenAIEmbedder({ apiKey: 'k', model, maxBatchSize: 1, fetch: f as unknown as typeof fetch });
+        await e.embed([words(k)]);
+        await expect(e.embed([words(k + 1)]), model).rejects.toThrow(`${limit}-token input limit of model '${model}'`);
+        expect(f, model).toHaveBeenCalledTimes(1);
+      }
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it('names the table a model is missing from in its warning', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      // embedding-2 has a documented input limit but no batch cap.
+      new OpenAIEmbedder({ apiKey: 'k', model: 'embedding-2', fetch: okFetch() as unknown as typeof fetch });
+      expect(warn).toHaveBeenCalledTimes(1);
+      const msg = String(warn.mock.calls[0][0]);
+      expect(msg).toContain('batch-size table');
+      expect(msg).not.toContain('input-limit table');
+      // An unknown model with neither option is named in both, in one warning.
+      new OpenAIEmbedder({ apiKey: 'k', model: 'my-gateway-model', fetch: okFetch() as unknown as typeof fetch });
+      expect(warn).toHaveBeenCalledTimes(2);
+      const both = String(warn.mock.calls[1][0]);
+      expect(both).toContain('batch-size table');
+      expect(both).toContain('input-limit table');
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
   it('sets no limit for an unknown model, with one warning per instance', async () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     try {

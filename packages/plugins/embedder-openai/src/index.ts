@@ -262,8 +262,8 @@ export class OpenAIEmbedder implements IEmbedder {
     } else {
       this.maxBatchSize = DEFAULT_MAX_BATCH_SIZE;
       unknown.push(
-        `no documented per-request input cap, so sending at most ${DEFAULT_MAX_BATCH_SIZE} inputs per request ` +
-          `(set options.maxBatchSize to your provider's cap)`,
+        `not in the batch-size table: no documented per-request input cap, so sending at most ` +
+          `${DEFAULT_MAX_BATCH_SIZE} inputs per request (set options.maxBatchSize to your provider's cap)`,
       );
     }
     if (opts.maxInputTokens !== undefined) {
@@ -278,14 +278,14 @@ export class OpenAIEmbedder implements IEmbedder {
     } else {
       this.maxInputTokens = undefined;
       unknown.push(
-        'no documented per-input token limit, so inputs are sent at any length and the provider may truncate them ' +
-          `(set options.maxInputTokens to your provider's limit)`,
+        'not in the input-limit table: no documented per-input token limit, so inputs are sent at any length ' +
+          `and the provider may truncate them (set options.maxInputTokens to your provider's limit)`,
       );
     }
     if (unknown.length > 0) {
       console.warn(
-        `OpenAIEmbedder: model '${this.model}' is not in the known-model table: ${unknown.join('; ')}. ` +
-          'Setting the option(s) silences this warning.',
+        `OpenAIEmbedder: model '${this.model}' is ${unknown.join('; and ')}. ` +
+          'Setting the named option(s) silences this warning.',
       );
     }
   }
