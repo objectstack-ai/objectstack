@@ -113,11 +113,44 @@ vi.mock('@object-ui/plugin-chatbot/core', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   useAgents: () => ({ agents: catalog, isLoading: false, error: undefined, refetch: () => {} }),
 }));
+/** The deployment's posture: metadata authoring offered, a marketplace mounted. */
+let aiStudio = true;
+let marketplace = true;
 vi.mock('../../runtime-config', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
-  isAiStudioEnabled: () => true,
-  isMarketplaceEnabled: () => true,
+  isAiStudioEnabled: () => aiStudio,
+  isMarketplaceEnabled: () => marketplace,
 }));
+/** Whether the session holds the Setup → Packages pair (`setup.access` + `manage_platform_settings`). */
+let setupPair = true;
+vi.mock('@object-ui/permissions', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@object-ui/permissions')>();
+  return {
+    ...actual,
+    usePermissions: () => {
+      const real = actual.usePermissions();
+      return {
+        ...real,
+        hasCapabilities: (required: string[]) =>
+          required.includes('setup.access') || required.includes('manage_platform_settings')
+            ? setupPair
+            : real.hasCapabilities(required),
+      };
+    },
+  };
+});
+/** When set, what the 「Add app」 list answers instead of the real hook (the empty-list guard). */
+let entriesOverride: unknown[] | null = null;
+vi.mock('../../hooks/useAddAppEntries', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../hooks/useAddAppEntries')>();
+  return {
+    ...actual,
+    useAddAppEntries: () => {
+      const real = actual.useAddAppEntries();
+      return entriesOverride ?? real;
+    },
+  };
+});
 
 import { builtInLocales } from '@object-ui/i18n/locales';
 import { SidebarAppMenu, SidebarDocsPortalMenu, APP_MENU_SEARCH_FROM } from '../SidebarAppMenu';
@@ -167,6 +200,10 @@ afterEach(() => {
   admin = false;
   canAuthor = true;
   catalog = [{ name: 'build' }, { name: 'ask' }];
+  aiStudio = true;
+  marketplace = true;
+  entriesOverride = null;
+  setupPair = true;
   authOverride = {};
   toastError.mockReset();
   vi.unstubAllGlobals();
@@ -221,13 +258,13 @@ describe('the sidebar app menu only switches apps (objectstack#36112)', () => {
     expect(menu().getByTestId('sidebar-app-menu-empty')).toBeInTheDocument();
   });
 
-  it('「Add app」 is offered to a workspace admin who may author: AI, a template, the marketplace', () => {
+  it('「Add app」 is offered to a workspace admin who may author: a blank app, a template, the marketplace', () => {
     apps = [CRM];
     admin = true;
     renderMenu('crm');
     expect(menu().getByTestId('sidebar-app-menu-add')).toHaveTextContent('Add app');
     const choices = within(screen.getByTestId('add-app-choices'));
-    expect(choices.getByTestId('sidebar-app-menu-add-build-with-ai')).toHaveAttribute('href', '/studio');
+    expect(choices.getByTestId('sidebar-app-menu-add-new-in-studio')).toHaveAttribute('href', '/apps/setup/component/developer/packages?face=admin&new=package');
     expect(choices.getByTestId('sidebar-app-menu-add-template')).toHaveAttribute('href', '/apps/setup/system/marketplace');
     expect(choices.getByTestId('sidebar-app-menu-add-marketplace')).toHaveAttribute('href', '/apps/setup/system/marketplace');
   });
@@ -244,42 +281,80 @@ describe('the sidebar app menu only switches apps (objectstack#36112)', () => {
   });
 });
 
-describe('「Add app」 offers building with AI only where the catalog serves build (objectstack#36969)', () => {
+describe('「Add app」 offers 「New blank app」 whatever the catalog serves, and no 「Build with AI」 (objectstack#36908)', () => {
+  // objectstack#36969 drew a build-with-AI door where the catalog served the
+  // build agent and the Studio door elsewhere. The maintainer ruled 「Build with
+  // AI」 off this menu and 「New blank app」 always shown (ruling records
+  // 7153161067, 7153400210): the catalog no longer decides either.
   function addChoices() {
     apps = [CRM];
     admin = true;
     renderMenu('crm');
     return within(screen.getByTestId('add-app-choices'));
   }
+  const choiceIds = () =>
+    Array.from(screen.getByTestId('add-app-choices').querySelectorAll('a')).map((a) => a.getAttribute('data-testid'));
 
-  it('in-app building closed (`ask` served, `build` not): no build-with-AI door; Studio, a template, the marketplace', () => {
-    catalog = [{ name: 'ask' }];
+  it.each([
+    ['build and ask served', [{ name: 'build' }, { name: 'ask' }]],
+    ['the legacy build id served', [{ name: 'metadata_assistant' }, { name: 'data_chat' }]],
+    ['in-app building closed (`ask` only)', [{ name: 'ask' }]],
+    ['other agents only', [{ name: 'custom_helper' }]],
+    ['no agent at all', []],
+  ])('%s: 「New blank app」 to New Package, a template, the marketplace — never 「Build with AI」', (_case, served) => {
+    catalog = served;
     const choices = addChoices();
+    expect(choices.getByTestId('sidebar-app-menu-add-new-in-studio')).toHaveAttribute(
+      'href',
+      '/apps/setup/component/developer/packages?face=admin&new=package',
+    );
+    expect(choices.getByTestId('sidebar-app-menu-add-new-in-studio')).toHaveTextContent('New blank app');
     expect(choices.queryByTestId('sidebar-app-menu-add-build-with-ai')).toBeNull();
-    expect(choices.getByTestId('sidebar-app-menu-add-new-in-studio')).toHaveAttribute('href', '/studio?new=package');
-    expect(choices.getByTestId('sidebar-app-menu-add-template')).toHaveAttribute('href', '/apps/setup/system/marketplace');
-    expect(choices.getByTestId('sidebar-app-menu-add-marketplace')).toHaveAttribute('href', '/apps/setup/system/marketplace');
+    expect(choices.queryByText('Build with AI')).toBeNull();
+    expect(choiceIds()).toEqual([
+      'sidebar-app-menu-add-new-in-studio',
+      'sidebar-app-menu-add-template',
+      'sidebar-app-menu-add-marketplace',
+    ]);
   });
 
-  it('a catalog of other agents only offers no build-with-AI door either', () => {
-    catalog = [{ name: 'custom_helper' }];
+  it('an author who may enter Studio but not Setup → Packages is sent to the "All metadata" area, never Setup (objectstack#36908)', () => {
+    setupPair = false;
     const choices = addChoices();
-    expect(choices.queryByTestId('sidebar-app-menu-add-build-with-ai')).toBeNull();
-    expect(choices.getByTestId('sidebar-app-menu-add-new-in-studio')).toBeInTheDocument();
+    expect(choices.getByTestId('sidebar-app-menu-add-new-in-studio')).toHaveAttribute('href', '/studio/~all/metadata');
   });
 
   it.each([
-    ['build', [{ name: 'build' }, { name: 'ask' }]],
-    ['its legacy id', [{ name: 'metadata_assistant' }, { name: 'data_chat' }]],
-  ])('regression: with %s served the door is unchanged, to Studio', (_served, served) => {
-    catalog = served;
-    const choices = addChoices();
-    expect(choices.getByTestId('sidebar-app-menu-add-build-with-ai')).toHaveAttribute('href', '/studio');
-    expect(choices.getByTestId('sidebar-app-menu-add-build-with-ai')).toHaveTextContent('Build with AI');
-    expect(choices.queryByTestId('sidebar-app-menu-add-new-in-studio')).toBeNull();
-    expect(
-      Array.from(screen.getByTestId('add-app-choices').querySelectorAll('a')).map((a) => a.getAttribute('data-testid')),
-    ).toEqual(['sidebar-app-menu-add-build-with-ai', 'sidebar-app-menu-add-template', 'sidebar-app-menu-add-marketplace']);
+    ['metadata authoring offered, no marketplace', true, false, ['sidebar-app-menu-add-new-in-studio']],
+    ['a marketplace, no metadata authoring', false, true, ['sidebar-app-menu-add-template', 'sidebar-app-menu-add-marketplace']],
+  ])('never empty for an admitted viewer — %s', (_case, ai, market, expected) => {
+    aiStudio = ai;
+    marketplace = market;
+    addChoices();
+    expect(menu().getByTestId('sidebar-app-menu-add')).toBeInTheDocument();
+    expect(choiceIds()).toEqual(expected);
+  });
+
+  it('control: with neither offered, the viewer is not admitted, and the menu draws no 「Add app」', () => {
+    aiStudio = false;
+    marketplace = false;
+    apps = [CRM];
+    admin = true;
+    renderMenu('crm');
+    expect(menu().queryByTestId('sidebar-app-menu-add')).toBeNull();
+  });
+
+  it('guard: an admitted viewer handed no entries gets no 「Add app」 and no separator for it', () => {
+    entriesOverride = [];
+    apps = [CRM];
+    admin = true;
+    renderMenu('crm');
+    expect(menu().queryByTestId('sidebar-app-menu-add')).toBeNull();
+    expect(screen.queryByTestId('add-app-choices')).toBeNull();
+    // 「Design layout」 and 「Edit app」 read the package list, which has not
+    // answered on this first frame, so nothing else asks for the separator.
+    expect(menu().queryByRole('separator')).toBeNull();
+    expect(screen.getByTestId('sidebar-app-menu').querySelector('hr')).toBeNull();
   });
 });
 
@@ -592,5 +667,40 @@ describe('the docs portal\'s head names no app and only switches apps (objectsta
     renderPortalMenu();
     expect(portalMenu().getByTestId('sidebar-app-menu-row-crm')).toBeInTheDocument();
     expect(portalMenu().queryByTestId('sidebar-app-menu-add')).toBeNull();
+  });
+
+  // objectstack#36908 — the portal's 「Add app」 is the app menu's list, under
+  // the same rule (ruling records 7153161067, 7153400210).
+  it('its 「Add app」 offers 「New blank app」 and no 「Build with AI」, with the build agent served', () => {
+    apps = [CRM];
+    admin = true;
+    renderPortalMenu();
+    const choices = within(screen.getByTestId('add-app-choices'));
+    expect(choices.getByTestId('sidebar-app-menu-add-new-in-studio')).toHaveTextContent('New blank app');
+    expect(choices.getByTestId('sidebar-app-menu-add-new-in-studio')).toHaveAttribute(
+      'href',
+      '/apps/setup/component/developer/packages?face=admin&new=package',
+    );
+    expect(choices.queryByTestId('sidebar-app-menu-add-build-with-ai')).toBeNull();
+    expect(choices.queryByText('Build with AI')).toBeNull();
+  });
+
+  it('an author who may not open Setup → Packages gets 「New blank app」 to the "All metadata" area', () => {
+    setupPair = false;
+    apps = [CRM];
+    admin = true;
+    renderPortalMenu();
+    expect(
+      within(screen.getByTestId('add-app-choices')).getByTestId('sidebar-app-menu-add-new-in-studio'),
+    ).toHaveAttribute('href', '/studio/~all/metadata');
+  });
+
+  it('guard: handed no entries, it draws no 「Add app」 and no separator for it', () => {
+    entriesOverride = [];
+    apps = [CRM];
+    admin = true;
+    renderPortalMenu();
+    expect(portalMenu().queryByTestId('sidebar-app-menu-add')).toBeNull();
+    expect(screen.getByTestId('sidebar-docs-portal-menu').querySelector('hr')).toBeNull();
   });
 });

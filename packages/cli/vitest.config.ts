@@ -987,6 +987,15 @@ export default defineConfig({
         find: /^@objectstack\/service-push$/,
         replacement: path.resolve(__dirname, '../services/service-push/src/index.ts'),
       },
+      // `serve-capability-identity.test.ts` imports the package as the
+      // `record-context` provider and constructs `RecordContextServicePlugin`
+      // to read its registered name. Resolved to source for the reason its
+      // neighbours give; its own value imports (`@objectstack/spec`,
+      // `@objectstack/core`) are already in this package's ledger entry.
+      {
+        find: /^@objectstack\/service-record-context$/,
+        replacement: path.resolve(__dirname, '../services/service-record-context/src/index.ts'),
+      },
       // `setup-integrations-order.pin.test.ts` reads `SLACK_SETUP_UI_BUNDLE`,
       // the Setup › Integrations › Slack contribution. Resolved to source for
       // the reason its neighbours give. `check:test-source-alias` names this

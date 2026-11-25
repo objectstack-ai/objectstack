@@ -34,10 +34,22 @@ import type { SettingsActionHandler } from '../settings-service.types.js';
  * knowledge plugins; this manifest is the canonical settings surface
  * for "what knowledge backend is wired" and saves operators from
  * grepping defineStack() during onboarding / incident response.
+ *
+ * `chunk_target` is read by the knowledge service's splitter (#37098): the
+ * longest passage, in characters, beneath a knowledge source's own
+ * `split.maxChars`, and lowered further by the embedder's input limit. It
+ * applies to every adapter that takes the service's passages, the in-memory
+ * one included. `chunk_overlap` was offered here until #37098 and nothing
+ * ever read it; the splitter cuts without overlap, so it was retired rather
+ * than implemented. Removing it is why `version` is 2 (the spec's
+ * `SettingsManifest.version` contract: "increment when keys are
+ * renamed/removed"). A `sys_setting` row stored for it is kept, never
+ * deleted; the service no longer resolves it, and a write naming the key is
+ * refused `400 UNKNOWN_KEY`, the answer every undeclared key gets.
  */
 const manifest = {
   namespace: 'knowledge',
-  version: 1,
+  version: 2,
   label: 'Knowledge',
   icon: 'BookOpen',
   description:
@@ -100,16 +112,10 @@ const manifest = {
 
     // ── Indexing defaults ─────────────────────────────────────────
     { type: 'group', id: 'indexing', label: 'Indexing defaults', required: false,
-      description: 'A value set on a knowledge source itself wins over these defaults.',
-      visible: "${data.adapter !== 'memory'}" },
+      description: 'A value set on a knowledge source itself wins over these defaults.' },
     { type: 'number', key: 'chunk_target', label: 'Target chunk size (chars)',
       required: false, default: 800, min: 64, max: 8192,
-      description: 'Soft cap on chunk size in characters before token-aware splitting kicks in.',
-      visible: "${data.adapter !== 'memory'}" },
-    { type: 'number', key: 'chunk_overlap', label: 'Chunk overlap (chars)',
-      required: false, default: 80, min: 0, max: 2048,
-      description: 'Characters retained from the previous chunk so context survives the boundary.',
-      visible: "${data.adapter !== 'memory'}" },
+      description: "Longest passage, in characters, when the knowledge service splits a document. A size set on a knowledge source itself wins; the embedding model's input limit can lower it." },
     { type: 'number', key: 'over_fetch', label: 'Over-fetch multiplier',
       required: false, default: 4, min: 1, max: 20,
       description: 'Search fetches this many times the requested number of results, so enough are left to return after they are filtered by document details.',

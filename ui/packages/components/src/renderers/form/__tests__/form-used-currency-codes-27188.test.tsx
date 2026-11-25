@@ -18,6 +18,10 @@ import { render, cleanup, waitFor } from '@testing-library/react';
 import { ComponentRegistry } from '@object-ui/core';
 import { SchemaRendererContext } from '@object-ui/react';
 import '../../../renderers';
+// The renderers reach a dynamic `import('@object-ui/react-runtime')`; pay its
+// first load at collection, never inside a case's clocked window
+// (`check:test-source-alias`).
+import '@object-ui/react-runtime';
 import {
   currencyCodeFieldNames,
   readUsedCurrencyCodes,
@@ -146,5 +150,56 @@ describe('form renderer — used currency codes on the code field', () => {
     await waitFor(() => expect(queryGroupHeaders).toHaveBeenCalled());
     await new Promise((r) => setTimeout(r, 0));
     expect(seen.currency_code?.field?.usedCurrencyCodes).toBeUndefined();
+  });
+});
+
+/**
+ * objectstack#37278 — a grouped read cut to a deployment's default page size.
+ * The double answers the used-codes header query the way the platform's
+ * `POST /data/:object/query` does under `OS_DATA_DEFAULT_PAGE_SIZE`: every
+ * group of the stored rows, sliced to the page, with `hasMore` on the answer
+ * when the slice dropped a group (as `queryGroupHeaders` hands it on). The
+ * control is the same store under a page that holds every group.
+ */
+describe('form renderer — a partial used-codes answer (objectstack#37278)', () => {
+  const STORED = ['USD', 'EUR', 'GBP', 'USD', null];
+
+  function cappedDataSource(defaultPageSize: number) {
+    const queryGroupHeaders = vi.fn(async (_object: string, query: { groupBy?: string[] }) => {
+      const field = query.groupBy?.[0] as string;
+      const counts = new Map<unknown, number>();
+      for (const code of STORED) counts.set(code, (counts.get(code) ?? 0) + 1);
+      const groups = [...counts.entries()].map(([code, count]) => ({ [field]: code, count }));
+      const answer = groups.slice(0, defaultPageSize) as Array<Record<string, unknown>> & { hasMore?: boolean };
+      if (answer.length < groups.length) answer.hasMore = true;
+      return answer;
+    });
+    return { find: async () => ({ data: [] }), queryGroupHeaders };
+  }
+
+  it('a cut answer hands down no used codes — never the groups it happened to list', async () => {
+    const ds = cappedDataSource(2);
+    renderForm(ds, 'deal');
+    await waitFor(() => expect(ds.queryGroupHeaders).toHaveBeenCalledTimes(1));
+    const answer = await ds.queryGroupHeaders.mock.results[0].value;
+    // The cut is real: two of four groups, flagged.
+    expect(answer).toHaveLength(2);
+    expect(answer.hasMore).toBe(true);
+    await new Promise((r) => setTimeout(r, 0));
+    expect(seen.currency_code?.field?.usedCurrencyCodes).toBeUndefined();
+  });
+
+  it('control: a page that holds every group hands every used code down', async () => {
+    const ds = cappedDataSource(10);
+    renderForm(ds, 'deal');
+    await waitFor(() => expect(seen.currency_code?.field?.usedCurrencyCodes).toEqual(['EUR', 'GBP', 'USD']));
+    const answer = await ds.queryGroupHeaders.mock.results[0].value;
+    expect(answer.hasMore).toBeUndefined();
+  });
+
+  it('readUsedCurrencyCodes reads a partial answer as no codes, a whole one as its codes', () => {
+    const rows = [{ currency_code: 'USD', count: 2 }, { currency_code: 'EUR', count: 1 }];
+    expect(readUsedCurrencyCodes(rows, 'currency_code')).toEqual(['EUR', 'USD']);
+    expect(readUsedCurrencyCodes(Object.assign([...rows], { hasMore: true }), 'currency_code')).toEqual([]);
   });
 });

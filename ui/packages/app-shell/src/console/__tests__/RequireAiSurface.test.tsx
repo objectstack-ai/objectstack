@@ -123,7 +123,7 @@ describe('RequireAiSurface', () => {
     renderGuardedAi();
     const studio = screen.getByTestId('ai-unavailable-studio');
     expect(studio).toHaveTextContent('«home.build.inStudio»');
-    expect(studio).toHaveAttribute('href', '/studio?new=package');
+    expect(studio).toHaveAttribute('href', '/apps/setup/component/developer/packages?face=admin&new=package');
   });
 
   it.each([
