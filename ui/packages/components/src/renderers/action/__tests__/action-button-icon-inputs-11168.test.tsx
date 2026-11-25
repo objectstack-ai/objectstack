@@ -653,7 +653,20 @@ describe('action:button — a non-string label renders no text and never throws 
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const notice = vi.spyOn(sonnerToast, 'warning').mockImplementation(() => 'id');
     try {
-      mount(node('action:button', { id: 'label_guard_auto', label: LOCALE_MAP, autoTrigger: true, visible: false }));
+      // `SchemaRenderer`'s node gate hides the node before the renderer mounts, so
+      // the refusal path is reached the way `action:bar` reaches it: the renderer
+      // mounted directly, its own `visible` gate failing.
+      const Renderer = ComponentRegistry.get('action:button') as React.ComponentType<Record<string, unknown>>;
+      render(
+        <ActionProvider handlers={{ run }} onToast={toast} onNavigate={nav} onConfirm={confirm}>
+          <PredicateScopeProvider scope={{ data: DATA }}>
+            <Renderer
+              schema={{ ...node('action:button', { label: LOCALE_MAP, autoTrigger: true, visible: false }) }}
+              data-obj-id="label_guard_auto"
+            />
+          </PredicateScopeProvider>
+        </ActionProvider>,
+      );
       await waitFor(() => expect(notice).toHaveBeenCalledTimes(1));
       const [message, options] = notice.mock.calls[0] as [unknown, { id?: string } | undefined];
       expect(String(message)).not.toContain('[object Object]');
