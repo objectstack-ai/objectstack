@@ -3863,7 +3863,7 @@ const ko = {
       allApps: "모든 앱",
       editAppInStudio: "Studio에서 {{app}} 편집",
       openAppInStudio: "Studio에서 {{app}} 보기",
-      backToHome: "홈으로 돌아가기",
+      backToHome: "앱 시작 페이지로 돌아가기",
       settings: "시스템 설정",
       productHome: "{{product}} 홈",
       addApp: '앱 추가',

@@ -4038,7 +4038,7 @@ const ru = {
       allApps: "Все приложения",
       editAppInStudio: "Редактировать {{app}} в Studio",
       openAppInStudio: "Открыть {{app}} в Studio",
-      backToHome: "Вернуться на главную",
+      backToHome: "Вернуться на стартовую страницу приложения",
       settings: "Настройки",
       productHome: "Главная {{product}}",
       addApp: 'Добавить приложение',

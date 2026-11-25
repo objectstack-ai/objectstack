@@ -4624,7 +4624,7 @@ const en = {
       allApps: 'All apps',
       editAppInStudio: 'Edit {{app}} in Studio',
       openAppInStudio: 'Open {{app}} in Studio',
-      backToHome: 'Back to home',
+      backToHome: 'Back to app start page',
       settings: 'Settings',
       productHome: '{{product}} home',
       addApp: 'Add app',

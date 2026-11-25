@@ -3944,7 +3944,7 @@ const fr = {
       allApps: "Toutes les applications",
       editAppInStudio: "Modifier {{app}} dans Studio",
       openAppInStudio: "Voir {{app}} dans Studio",
-      backToHome: "Retour à l'accueil",
+      backToHome: "Retour à la page de démarrage de l'app",
       settings: "Paramètres",
       productHome: "Accueil {{product}}",
       addApp: 'Ajouter une application',

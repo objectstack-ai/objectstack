@@ -3948,7 +3948,7 @@ const es = {
       allApps: "Todas las aplicaciones",
       editAppInStudio: "Editar {{app}} en Studio",
       openAppInStudio: "Ver {{app}} en Studio",
-      backToHome: "Volver al inicio",
+      backToHome: "Volver a la página inicial de la app",
       settings: "Configuración",
       productHome: "Inicio de {{product}}",
       addApp: 'Añadir aplicación',

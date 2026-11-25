@@ -3943,7 +3943,7 @@ const pt = {
       allApps: "Todos os aplicativos",
       editAppInStudio: "Editar {{app}} no Studio",
       openAppInStudio: "Ver {{app}} no Studio",
-      backToHome: "Voltar ao início",
+      backToHome: "Voltar à página inicial do app",
       settings: "Configurações",
       productHome: "Início do {{product}}",
       addApp: 'Adicionar aplicativo',
