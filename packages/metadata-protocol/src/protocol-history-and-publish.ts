@@ -737,6 +737,13 @@ export class ProtocolHistoryAndPublishFacet {
              */
             parentVersion?: string | null;
             /**
+             * [#36350] `PublishMetaItemRequestSchema.draftVersion`: the
+             * caller's pin on the draft this promotion reads — a token, absent
+             * for unpinned. Stated by the per-item publish only; a package
+             * publish pins nothing.
+             */
+            draftVersion?: string;
+            /**
              * [ADR-0144 D2 and D6, amended] The registry question this
              * promotion asks before the row goes live, stated by every producer
              * ({@link PROMOTION_REGISTRY_QUESTION}, `registry-question.ts`): the
@@ -908,10 +915,69 @@ export class ProtocolHistoryAndPublishFacet {
             { verb: 'publish' },
         );
         if (unboundBase) throw unboundBase;
+        // [#21207] A conflict refused at this door, keyed values or none in
+        // the text and attributes, carrying its audit row. `draft-pin` is the
+        // caller's `draftVersion` refused; `promotion` is the store's own
+        // refusal at `repo.promoteDraft` (the judged draft moved, or the
+        // caller's `parentVersion` on the active row did not hold).
+        const publishConflictRefusal = async (err: ConflictError, at: 'draft-pin' | 'promotion'): Promise<Error> => {
+            const subject = `${request.type}/${request.name}`;
+            const conflict = await host.metadataConflictRefusal(
+                err,
+                subject,
+                at === 'draft-pin'
+                    ? `${subject} draft changed since the version this publish pinned (draftVersion), so nothing was `
+                        + `published. Re-read the draft and publish again to promote what it holds now.`
+                    : err instanceof DraftConflictError
+                        ? `${subject} draft changed after this publish judged it, so nothing was `
+                            + `published. Publish again to judge and promote the current draft.`
+                        : `${subject} published row advanced while you held the draft.`,
+                // [#36601] A publish pinned "no active row here" is told so, as the save door's first-write pin is.
+                at === 'promotion' && request.parentVersion === null && !(err instanceof DraftConflictError) ? 'active' : undefined,
+            );
+            // [#8594] Attached, not written — same reason as the lock gate
+            // above. The repository's own transaction has already unwound by
+            // the time the caller's `catch` runs, but the BATCH caller's has not.
+            return withPendingAudit(
+                conflict,
+                host.optimisticConflictAuditEntry({
+                    type: request.type,
+                    name: request.name,
+                    operation: 'publish',
+                    ...(request.actor ? { actor: request.actor } : {}),
+                    source: 'protocol.publishMetaItem',
+                    expectedParent: err.expectedParent,
+                    actualHead: err.actualHead,
+                }),
+            );
+        };
         const draftForGate = await repo.get(
             { type: singularType, name: request.name, org: 'env' } as Parameters<typeof repo.get>[0],
             { state: 'draft', packageId: draftKey, ...memberOption(request.member) },
         );
+        // [ruling 7168616260 on #36350] The caller's pin on the DRAFT this
+        // promotion reads (`PublishMetaItemRequestSchema.draftVersion`),
+        // judged before any rule judges the draft: a token is matched in keyed
+        // form against the draft row just read ({@link storedParentForToken},
+        // the save door's comparison), and a draft that moved since the
+        // caller wrote or read it — or is no longer pending — is refused 409
+        // `METADATA_CONFLICT` naming the draft's current token, with nothing
+        // promoted. Held through the write by `expectedDraftHash` below, which
+        // locks the promotion to this same row. `parentVersion` pins the
+        // active row; the two judge different rows and may be sent together.
+        // Absent, any pending draft is promoted, as before.
+        if (request.draftVersion !== undefined) {
+            try {
+                await host.storedParentForToken(
+                    { type: singularType, name: request.name, org: 'env' },
+                    request.draftVersion,
+                    draftForGate?.hash ?? null,
+                );
+            } catch (err: unknown) {
+                if (err instanceof ConflictError) throw await publishConflictRefusal(err, 'draft-pin');
+                throw err;
+            }
+        }
         // [ADR-0150 D4, ruling 6902014292] The environment's own action
         // draft is promoted into the one package-unbound active row of the
         // name: when that row is a holder's customization, the publish would
@@ -1397,34 +1463,7 @@ export class ProtocolHistoryAndPublishFacet {
                 ...(draftForGate ? { promotedDraft: { body: draftForGate.body, hash: draftForGate.hash } } : {}),
             };
         } catch (err: any) {
-            if (err instanceof ConflictError) {
-                // [#21207] Keyed values or none in the text and attributes.
-                const conflict = await host.metadataConflictRefusal(
-                    err,
-                    `${request.type}/${request.name}`,
-                    err instanceof DraftConflictError
-                        ? `${request.type}/${request.name} draft changed after this publish judged it, so nothing was `
-                            + `published. Publish again to judge and promote the current draft.`
-                        : `${request.type}/${request.name} published row advanced while you held the draft.`,
-                    // [#36601] A publish pinned "no active row here" is told so, as the save door's first-write pin is.
-                    request.parentVersion === null && !(err instanceof DraftConflictError) ? 'active' : undefined,
-                );
-                // [#8594] Attached, not written — same reason as the lock gate
-                // above. The repository's own transaction has already unwound by
-                // the time this `catch` runs, but the BATCH caller's has not.
-                throw withPendingAudit(
-                    conflict,
-                    host.optimisticConflictAuditEntry({
-                        type: request.type,
-                        name: request.name,
-                        operation: 'publish',
-                        ...(request.actor ? { actor: request.actor } : {}),
-                        source: 'protocol.publishMetaItem',
-                        expectedParent: err.expectedParent,
-                        actualHead: err.actualHead,
-                    }),
-                );
-            }
+            if (err instanceof ConflictError) throw await publishConflictRefusal(err, 'promotion');
             throw err;
         }
     }

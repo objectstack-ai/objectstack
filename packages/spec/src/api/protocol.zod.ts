@@ -1636,7 +1636,23 @@ export const PublishMetaItemRequestSchema = lazySchema(() => z.object({
     + '`If-None-Match: *`, which takes `*` alone and never beside `If-Match`), '
     + 'refused 409 when one exists; an ABSENT key is unpinned and promotes over '
     + 'whatever is live, as before. It pins the active row only — which draft is '
-    + 'promoted is the address\'s, as without it.',
+    + 'promoted is the address\'s, as without it; the draft\'s own pin is '
+    + '`draftVersion`.',
+  ),
+  draftVersion: z.string().optional().describe(
+    'ADR-0008 optimistic-concurrency pin on the DRAFT this publish promotes: '
+    + 'the version token of the pending draft row the caller wrote or loaded '
+    + 'and means to publish (on the REST door, the `draftVersion` member of the '
+    + 'publish body, beside `message`; a draft save\'s receipt `version` and the '
+    + 'draft read\'s `version` serve it). A token that is not the current draft '
+    + 'row\'s at the address the promotion reads is refused 409 '
+    + '`METADATA_CONFLICT`, whose `currentVersion` names the draft\'s current '
+    + 'token (`null` when no draft is pending), and nothing is promoted: a draft '
+    + 'another writer changed after the caller wrote or read it is never '
+    + 'published on that writer\'s behalf. ABSENT is unpinned and promotes '
+    + 'whichever draft is pending, as before. It pins the draft only — the active '
+    + 'row the promotion replaces is `parentVersion`\'s (`If-Match`), and the two '
+    + 'may be sent together.',
   ),
   userTextLocales: userTextLocalesMember(),
 }));

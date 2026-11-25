@@ -124,9 +124,11 @@ async function boot() {
     /** `PUT /meta/view/case_grid` — active unless `mode: 'draft'`. */
     const save = (body: unknown, query: Record<string, string> = {}, headers: Record<string, string> = {}) =>
         call('PUT', `${META}/:type/:name`, { path, params: item, query, headers, body });
-    /** `POST /meta/view/case_grid/publish`. */
-    const publish = (headers: Record<string, string> = {}) =>
-        call('POST', `${META}/:type/:name/publish`, { path: `${path}/publish`, params: item, headers, body: {} });
+    /** `GET /meta/view/case_grid?state=draft` — the strict draft read. */
+    const readDraft = () => call('GET', `${META}/:type/:name`, { path, params: item, query: { state: 'draft' } });
+    /** `POST /meta/view/case_grid/publish`, with the body given (`{}` when none). */
+    const publish = (headers: Record<string, string> = {}, body: Record<string, unknown> = {}) =>
+        call('POST', `${META}/:type/:name/publish`, { path: `${path}/publish`, params: item, headers, body });
     /** One Studio Save: the draft over "no draft", then that item's publish, pinned as given. */
     const studioSave = async (label: string, publishHeaders: Record<string, string> = {}) => {
         ok(await save(view(label), { mode: 'draft' }, { 'if-none-match': '*' }));
@@ -139,7 +141,7 @@ async function boot() {
         return (rows ?? []).map((r: any) => JSON.parse(String(r.metadata)).label as string);
     };
 
-    return { protocol, layers, read, save, publish, studioSave, stored };
+    return { protocol, layers, read, readDraft, save, publish, studioSave, stored };
 }
 
 const ok = (res: any) => {
@@ -282,3 +284,114 @@ describe('[#36601] the publish door\'s precondition headers, as the save door re
     }
 });
 
+
+/**
+ * [#36350, ruling 7168616260] The per-item publish takes a pin on the DRAFT
+ * it promotes: `draftVersion` in the publish body, beside `message`. "Save to
+ * this view" writes a draft and then publishes it; a draft write by someone
+ * else landing in between (the view's rename / pin / set-default, which is
+ * `ObjectStackAdapter.updateView`'s draft branch) is refused at the publish
+ * instead of going live under Save's name: an unpublished draft is never
+ * published on someone else's behalf (ruling 7058616478). `If-Match` keeps its
+ * shipped meaning, the active row's token, and the two are sent together.
+ */
+describe('[#36350] the publish door\'s draft pin (`draftVersion`)', () => {
+    /** "Save to this view" up to its publish: the draft over "no draft", and the active token it loaded. */
+    const saveToThisViewDraft = async (h: Awaited<ReturnType<typeof boot>>, label: string) => {
+        const loaded = ok(await h.layers()).overlayVersion as string;
+        const receipt = ok(await h.save(view(label), { mode: 'draft' }, { 'if-none-match': '*' }));
+        return { loaded, draftVersion: receipt.version as string };
+    };
+
+    it('acceptance: an updateView draft write inside the window is refused at Save\'s publish — 409, nothing unreviewed is published', async () => {
+        const h = await boot();
+        ok(await h.save(view('live')));
+        const saved = await saveToThisViewDraft(h, 'save to this view');
+        expect(saved.draftVersion).toMatch(KEYED);
+
+        // updateView's draft branch, inside the window: it reads the pending
+        // draft (Save's own), merges, and writes it back pinned to what it read.
+        const read = ok(await h.readDraft());
+        expect(read.version).toBe(saved.draftVersion);
+        const renamed = ok(await h.save(
+            { ...view('save to this view'), label: 'renamed, meant as a draft' },
+            { mode: 'draft' },
+            { 'if-match': read.version },
+        ));
+
+        // Save's publish, pinned to both rows it knows.
+        const refused = refusedConflict(await h.publish({ 'if-match': saved.loaded }, { draftVersion: saved.draftVersion }));
+        // The refusal names the DRAFT's current token, which the draft read serves.
+        expect(refused.currentVersion).toBe(renamed.version);
+        expect(ok(await h.readDraft()).version).toBe(refused.currentVersion);
+        expect(MetadataConflictErrorSchema.parse(refused).currentVersion).toBe(renamed.version);
+        // Nothing promoted: the live row is untouched and the rename stays a pending draft.
+        expect(await h.stored('active')).toEqual(['live']);
+        expect(await h.stored('draft')).toEqual(['renamed, meant as a draft']);
+    }, 60_000);
+
+    it('acceptance: an UNPINNED updateView draft write inside the window is refused the same way', async () => {
+        const h = await boot();
+        ok(await h.save(view('live')));
+        const saved = await saveToThisViewDraft(h, 'save to this view');
+        ok(await h.save({ ...view('save to this view'), label: 'renamed, meant as a draft' }, { mode: 'draft' }));
+
+        refusedConflict(await h.publish({ 'if-match': saved.loaded }, { draftVersion: saved.draftVersion }));
+        expect(await h.stored('active')).toEqual(['live']);
+        expect(await h.stored('draft')).toEqual(['renamed, meant as a draft']);
+    }, 60_000);
+
+    it('control: with no write in the window the pinned publish promotes Save\'s draft', async () => {
+        const h = await boot();
+        ok(await h.save(view('live')));
+        const saved = await saveToThisViewDraft(h, 'save to this view');
+        const published = ok(await h.publish({ 'if-match': saved.loaded }, { draftVersion: saved.draftVersion }));
+        expect(await h.stored('active')).toEqual(['save to this view']);
+        expect(await h.stored('draft')).toEqual([]);
+        expect(ok(await h.layers()).overlayVersion).toBe(published.version);
+    }, 60_000);
+
+    it('absent `draftVersion` is unpinned, as before: the publish promotes whichever draft is pending', async () => {
+        const h = await boot();
+        ok(await h.save(view('live')));
+        const saved = await saveToThisViewDraft(h, 'save to this view');
+        ok(await h.save({ ...view('save to this view'), label: 'renamed, meant as a draft' }, { mode: 'draft' }));
+        ok(await h.publish({ 'if-match': saved.loaded }));
+        expect(await h.stored('active')).toEqual(['renamed, meant as a draft']);
+    }, 60_000);
+
+    it('a pinned draft no longer pending is refused 409 with `currentVersion: null`, promoting nothing', async () => {
+        const h = await boot();
+        ok(await h.save(view('live')));
+        const saved = await saveToThisViewDraft(h, 'save to this view');
+        // Someone else publishes the draft first; it is no longer pending.
+        const theirs = ok(await h.publish());
+        const refused = refusedConflict(await h.publish({}, { draftVersion: saved.draftVersion }));
+        expect(refused.currentVersion).toBeNull();
+        expect(ok(await h.layers()).overlayVersion).toBe(theirs.version);
+    }, 60_000);
+
+    it('the draft pin and the active pin judge different rows: a draft token sent as `If-Match` still answers the active row\'s refusal', async () => {
+        const h = await boot();
+        ok(await h.save(view('live')));
+        const saved = await saveToThisViewDraft(h, 'save to this view');
+        // If-Match keeps its shipped meaning (ruling 7168616260, item 2).
+        const refused = refusedConflict(await h.publish({ 'if-match': saved.draftVersion }, { draftVersion: saved.draftVersion }));
+        expect(refused.currentVersion).toBe(saved.loaded);
+        expect(await h.stored('active')).toEqual(['live']);
+        expect(await h.stored('draft')).toEqual(['save to this view']);
+    }, 60_000);
+
+    for (const [label, draftVersion] of Object.entries({ 'a number': 42, 'null': null, 'an object': { v: 'x' } })) {
+        it(`a \`draftVersion\` that is ${label} is refused 400 VALIDATION_ERROR, never read as unpinned`, async () => {
+            const h = await boot();
+            ok(await h.save(view('live')));
+            ok(await h.save(view('pending'), { mode: 'draft' }));
+            const res = await h.publish({}, { draftVersion });
+            expect(res.statusCode, JSON.stringify(res.body)).toBe(400);
+            expect(res.body.error.code).toBe('VALIDATION_ERROR');
+            expect(await h.stored('active')).toEqual(['live']);
+            expect(await h.stored('draft')).toEqual(['pending']);
+        }, 60_000);
+    }
+});
