@@ -192,4 +192,75 @@ describe('a related list\'s count across a refetch (objectstack#36822)', () => {
     watch.stop();
     expect(watch.seen.filter((v) => v !== '2' && v !== '0')).toEqual([]);
   });
+
+  /** A `find` whose current read is answered or refused by hand. */
+  function heldFind() {
+    let settle = { resolve: (_: unknown) => {}, reject: (_: unknown) => {} };
+    const find = vi.fn(
+      () => new Promise((resolve, reject) => {
+        settle = { resolve, reject };
+      }),
+    );
+    return {
+      find,
+      answer: (rows: unknown[]) => act(async () => { settle.resolve({ data: rows, total: rows.length }); }),
+      fail: () => act(async () => { settle.reject(new Error('network down')); }),
+    };
+  }
+
+  it('a read that fails after rows were known draws no count while Retry reads, never a false 0', async () => {
+    const quiet = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const read = heldFind();
+    renderList(read.find);
+    await waitFor(() => expect(read.find).toHaveBeenCalledTimes(1));
+    await read.answer(ROWS);
+    await waitFor(() => expect(headBadge()).toBe('2'));
+
+    await refetch();
+    await waitFor(() => expect(read.find).toHaveBeenCalledTimes(2));
+    await read.fail();
+    const retry = await waitFor(() => {
+      const button = document.querySelector('[data-testid="related-list-load-failed-retry"]');
+      expect(button).not.toBeNull();
+      return button as HTMLElement;
+    });
+    await act(async () => { retry.click(); });
+    await waitFor(() => expect(read.find).toHaveBeenCalledTimes(3));
+    await flush();
+    // Retry's read is held in flight: the failed read emptied the rows, so
+    // their count is not known and the badge waits.
+    expect(document.querySelector('[data-related-list-head]')).not.toBeNull();
+    expect(headBadge()).toBeNull();
+    await read.answer([]);
+    await waitFor(() => expect(headBadge()).toBe('0'));
+    quiet.mockRestore();
+  });
+
+  it('a list with no scope on its first render draws no count during its first real read', async () => {
+    const read = heldFind();
+    const list = (parentId: string | null) => (
+      <RelatedList
+        title="Contacts"
+        type="table"
+        api="contact"
+        objectName="contact"
+        referenceField="account"
+        parentId={parentId as any}
+        columns={[{ accessorKey: 'name', header: 'Name' }]}
+        dataSource={{ find: read.find } as any}
+      />
+    );
+    // The parent is still loading: no scope, so nothing is read.
+    const view = render(list(null));
+    await flush();
+    expect(read.find).not.toHaveBeenCalled();
+    // The parent lands: the first real read is held in flight.
+    view.rerender(list('ACC-1'));
+    await waitFor(() => expect(read.find).toHaveBeenCalledTimes(1));
+    await flush();
+    expect(document.querySelector('[data-related-list-head]')).not.toBeNull();
+    expect(headBadge()).toBeNull();
+    await read.answer(ROWS);
+    await waitFor(() => expect(headBadge()).toBe('2'));
+  });
 });
