@@ -12,6 +12,10 @@
  *    the environment scope, and its permission list is the registry's whole
  *    list, as Setup's catalog is.
  *  - The datasource tile opens Setup's Datasources page.
+ *  - objectstack#36905 — a read-only base's list offers "New similar" on the
+ *    base's own rows (not on its pair's), the copy opens at its metadata
+ *    address in the package the clone door names, an answer naming no
+ *    package opens nothing and says so; a writable package offers none.
  */
 
 import '@testing-library/jest-dom/vitest';
@@ -20,7 +24,8 @@ import '@testing-library/jest-dom/vitest';
 import '@objectstack/lint';
 import * as React from 'react';
 import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
-import { render, screen, cleanup, waitFor } from '@testing-library/react';
+import { render, screen, cleanup, fireEvent, waitFor, within } from '@testing-library/react';
+import { toast } from 'sonner';
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
 // The switch column waits on `audienceAnchorsOf`'s dynamic import of this exact
 // specifier (see `ResourceListPage.environmentScope-7611.test.tsx`).
@@ -38,6 +43,9 @@ const PERMISSION_SETS = [
   { name: 'env_authored_set', label: 'Environment Set' },
 ];
 
+/** Sets a case adds to the served list (a base's pair's, for "New similar"), emptied after each case. */
+const EXTRA_SETS: Array<Record<string, unknown>> = [];
+
 const CLIENT = {
   list: async (type: string) =>
     type === 'package'
@@ -46,7 +54,7 @@ const CLIENT = {
           { manifest: { id: PROJECT, scope: 'project', name: 'CRM' } },
         ]
       : type === 'permission'
-        ? PERMISSION_SETS
+        ? [...PERMISSION_SETS, ...EXTRA_SETS]
         : [],
 };
 
@@ -97,7 +105,7 @@ vi.mock('../../hooks/useCanAuthorMetadata', async (importOriginal) => ({
 
 import { MetadataDirectoryPage } from './DirectoryPage';
 import { MetadataResourceListPage } from './ResourceListPage';
-import { t } from './i18n';
+import { t, tFormat } from './i18n';
 
 beforeEach(() => {
   vi.stubGlobal(
@@ -115,6 +123,8 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
+  vi.restoreAllMocks();
+  EXTRA_SETS.length = 0;
 });
 
 const crmArea = (readOnly = false): MetadataAreaHost => ({
@@ -234,5 +244,95 @@ describe('the list under the area', () => {
       expect(rowLink(container, name)?.getAttribute('href')).toBe(`/studio/~all/metadata/permission/${name}?scope=environment`);
     }
     expect(where()).toBe('/studio/~all/metadata/permission?scope=environment');
+  });
+});
+
+/**
+ * objectstack#36905 (card item 2) — "New similar" on the rows of a read-only
+ * base's list of sets: the row action the Access pillar's rail had, on the
+ * REAL list page, over the REAL clone dialog and clone door (`fetch`).
+ */
+describe('"New similar" on a read-only base\'s rows (objectstack#36905)', () => {
+  const PAIR = `${PROJECT}.custom`;
+  const LIST_URL = `/studio/${PROJECT}/metadata/permission?package=${PROJECT}`;
+  const newSimilar = (name: string) => screen.queryByTestId(`list-new-similar-${name}`);
+
+  /** The clone door answers `data`; every other read answers as the harness does. */
+  function serveClone(data: Record<string, unknown>) {
+    const calls: string[] = [];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string) => {
+        const json = (status: number, body: unknown) =>
+          new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
+        if (String(url).includes('/security/permission-sets/')) {
+          calls.push(String(url));
+          return json(200, { success: true, data });
+        }
+        if (String(url).startsWith('/api/v1/data/sys_metadata_activation')) {
+          return json(200, { object: 'sys_metadata_activation', records: [], hasMore: false });
+        }
+        return json(404, { success: false });
+      }),
+    );
+    return calls;
+  }
+
+  async function openBaseList() {
+    EXTRA_SETS.push({ name: 'crm_rep_copy', label: 'CRM Rep copy', _packageId: PAIR, _provenance: 'package' });
+    const view = mount(crmArea(true), LIST_URL, <MetadataResourceListPage type="permission" />);
+    await waitFor(() => expect(rowLink(view.container, 'crm_rep')).not.toBeNull());
+    await waitFor(() => expect(rowLink(view.container, 'crm_rep_copy')).not.toBeNull());
+    return view;
+  }
+
+  async function copyFrom(name: string) {
+    fireEvent.click(newSimilar(name)!);
+    const dialog = await screen.findByRole('dialog');
+    fireEvent.change(within(dialog).getByLabelText(t('perm.clone.name', 'en-US')), { target: { value: 'my_rep' } });
+    fireEvent.change(within(dialog).getByLabelText(t('perm.clone.label', 'en-US')), { target: { value: 'My rep' } });
+    fireEvent.click(within(dialog).getByRole('button', { name: t('perm.clone.confirm', 'en-US') }));
+  }
+
+  const rowLink = (container: HTMLElement, name: string) => container.querySelector<HTMLAnchorElement>(`a[href*="/${name}?"]`);
+
+  it("the base's own row offers it; its pair's row does not", async () => {
+    serveClone({});
+    await openBaseList();
+    expect(newSimilar('crm_rep')).toBeInTheDocument();
+    expect(newSimilar('crm_rep_copy')).toBeNull();
+  });
+
+  it('the copy opens at its metadata address in the package the clone door names', async () => {
+    const calls = serveClone({ permissionSet: { name: 'my_rep', label: 'My rep' }, package: PAIR, notice: 'Saved.' });
+    await openBaseList();
+    await copyFrom('crm_rep');
+    await waitFor(() =>
+      expect(where()).toBe(`/studio/${PAIR}/metadata/permission/my_rep?package=${encodeURIComponent(PAIR)}`),
+    );
+    expect(calls).toHaveLength(1);
+    expect(calls[0]).toContain('/security/permission-sets/crm_rep/clone');
+  });
+
+  it('an answer naming no package opens nothing and says so', async () => {
+    const warning = vi.spyOn(toast, 'warning');
+    serveClone({ permissionSet: { name: 'my_rep', label: 'My rep' }, notice: 'Saved.' });
+    await openBaseList();
+    await copyFrom('crm_rep');
+    await waitFor(() =>
+      expect(warning).toHaveBeenCalledWith(
+        tFormat('engine.studio.access.newSimilar.noPackage', 'en-US', { name: 'my_rep' }),
+        expect.anything(),
+      ),
+    );
+    expect(where()).toBe(LIST_URL);
+  });
+
+  it('CONTROL: a writable package offers no New similar, and offers create', async () => {
+    serveClone({});
+    const { container } = mount(crmArea(), LIST_URL, <MetadataResourceListPage type="permission" />);
+    await waitFor(() => expect(rowLink(container, 'crm_rep')).not.toBeNull());
+    expect(newSimilar('crm_rep')).toBeNull();
+    expect(screen.getByTestId('metadata-list-create')).toBeInTheDocument();
   });
 });
