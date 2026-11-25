@@ -32,6 +32,9 @@ export default defineConfig({
         find: /^@objectstack\/service-knowledge\/testing$/,
         replacement: path.resolve(__dirname, '../../services/service-knowledge/src/testing.ts'),
       },
+      // The real-driver reindex case (#37100) runs ObjectQL over SqlDriver from source, as every other verdict here.
+      { find: /^@objectstack\/driver-sql$/, replacement: path.resolve(__dirname, '../../drivers/driver-sql/src/index.ts') },
+      { find: /^@objectstack\/objectql$/, replacement: path.resolve(__dirname, '../../objectql/src/index.ts') },
       {
         find: /^@objectstack\/service-knowledge$/,
         replacement: path.resolve(__dirname, '../../services/service-knowledge/src/index.ts'),
