@@ -13,7 +13,7 @@ feat(actions): `type: 'ask_ai'` — an action that opens the in-app assistant fo
 
 Clause-②: yes (widening: a new `ActionType` member `ask_ai`, refused beside `target`, `ai.exposed: true` and on a dashboard header)
 Metadata-protocol: added
-Skills-docs: updated here — skills/objectstack-ui/SKILL.md; follow-up owed — skills/objectstack-ai/SKILL.md
+Skills-docs: updated here — skills/objectstack-ui/SKILL.md; follow-up #37217
 
 ADR-0160 D7. An author can now put an "Ask AI" button on a record:
 
