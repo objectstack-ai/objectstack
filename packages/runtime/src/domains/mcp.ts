@@ -268,7 +268,14 @@ export async function handleMcpRequest(deps: DomainHandlerDeps, body: any, conte
     const knowledgeTools = !grantedScopes || grantedScopes.includes(MCP_OAUTH_SCOPE_DATA_READ)
         ? await resolveMcpKnowledgeToolsService(deps, context)
         : undefined;
-    const bridge = buildMcpBridge(deps, context, { recordFiles, datasetTools, packageDocs, knowledgeTools });
+    // [ADR-0160 D4] The record-context seam: the bridge carries
+    // `get_record_context` exactly where the kernel holds a `record-context`
+    // service and the grant reaches the read family. The MCP runtime's
+    // `recordContextToolDefinition` stays the authority on listing it.
+    const recordContextTools = !grantedScopes || grantedScopes.includes(MCP_OAUTH_SCOPE_DATA_READ)
+        ? await resolveMcpRecordContextToolsService(deps, context)
+        : undefined;
+    const bridge = buildMcpBridge(deps, context, { recordFiles, datasetTools, packageDocs, knowledgeTools, recordContextTools });
     // [#34766] The open draft door (design `docs/design/mcp-local-first-door.md`,
     // Design A): resolved per request, so the user's own `manage_metadata` is
     // read for every call. `undefined` for a grant without `metadata:write`
@@ -973,6 +980,7 @@ export function buildMcpBridge(
         datasetTools?: McpDatasetToolsService;
         packageDocs?: PackageDocsProtocol;
         knowledgeTools?: McpKnowledgeToolsService;
+        recordContextTools?: McpRecordContextToolsService;
     } = {},
 ): any {
     const ec = context.executionContext;
@@ -1137,7 +1145,7 @@ export function buildMcpBridge(
         return describeServedObject(localized, declared);
     };
 
-    return {
+    const bridge = {
         listObjects: listObjectSummaries,
         /**
          * [#6504] The HTTP transport's half of the `list_objects` completeness
@@ -1664,6 +1672,100 @@ export function buildMcpBridge(
                 knowledgeToolDefinitions: () => seams.knowledgeTools!.knowledgeTools().definitions,
             }
             : {}),
+    };
+    // [ADR-0160 D4] The record-context seam (`get_record_context`), carried
+    // only where the kernel's `record-context` service serves its executor.
+    // Its door is THIS bridge's own read members, bound to this request's
+    // caller: nothing it reads is read any other way.
+    if (seams.recordContextTools) {
+        Object.assign(bridge, recordContextMembers(seams.recordContextTools, bridge, {
+            assertApiExposed: (object, action) =>
+                actionExec.refuseUnexposedDataAction(deps, context, action, object, envId, ec, 'refuse'),
+            servedObjectDefinitionOf: async (name) => {
+                const def: any = await readObjectForCaller(name);
+                if (!def) return null;
+                const [localized] = await inCallerLocale([def]);
+                return (localized ?? def) as Record<string, unknown>;
+            },
+            publishedObjectDefinitionOf: async (name) => ((await readServedObject(name)) ?? null) as Record<string, unknown> | null,
+            listContextPacks: async () => {
+                const merged = await actionExec.readMergedItems(await getProtocol(), 'ai_context');
+                if (merged !== undefined) return merged;
+                const meta: any = await getMeta();
+                const listed = typeof meta?.list === 'function' ? await meta.list('ai_context') : [];
+                return Array.isArray(listed) ? listed : [];
+            },
+        }));
+    }
+    return bridge;
+}
+
+/**
+ * [ADR-0160 D4] The face of the `record-context` service `get_record_context`
+ * calls: `recordContextTools()` hands the one executor
+ * (`@objectstack/service-record-context`, `createRecordContextTools`). Named
+ * here structurally, as {@link McpKnowledgeToolsService} is, so this package
+ * takes no dependency on the service package (it loads opt-in). The executor
+ * refuses by throwing an ADR-0112 coded error.
+ */
+export interface McpRecordContextToolsService {
+    recordContextTools(): {
+        readonly definitions: ReadonlyArray<{ name: string; description: string; parameters?: unknown }>;
+        getRecordContext(input: unknown, door: unknown): Promise<unknown>;
+    };
+}
+
+/**
+ * [ADR-0160 D4] The `record-context` service when it serves the executor,
+ * else `undefined` (no service — it loads opt-in — or one without
+ * `recordContextTools`). A lookup that throws is "not served".
+ */
+export async function resolveMcpRecordContextToolsService(
+    deps: DomainHandlerDeps,
+    context: HttpProtocolContext,
+): Promise<McpRecordContextToolsService | undefined> {
+    let service: Partial<McpRecordContextToolsService> | undefined;
+    try {
+        service = (await deps.resolveService(context, 'record-context', context.environmentId)) as unknown as
+            Partial<McpRecordContextToolsService> | undefined;
+    } catch {
+        return undefined;
+    }
+    return service && typeof service.recordContextTools === 'function' ? (service as McpRecordContextToolsService) : undefined;
+}
+
+/**
+ * [ADR-0160 D3/D4] The bridge's two record-context members. The door handed
+ * to the executor is built per call from the bridge's own members — `get`,
+ * `query` ({@link callData}, as the caller), `fieldVisibilityOf`,
+ * `diagnoseDelegation`, `userTextLocales` — plus the tool layer's read guard
+ * (the system-object refusal and its AI-read attestation) and the data door's
+ * own API-exposure gate. It adds no gate of its own and skips none.
+ */
+function recordContextMembers(
+    service: McpRecordContextToolsService,
+    bridge: any,
+    reads: {
+        assertApiExposed(object: string, action: 'get' | 'query'): Promise<void>;
+        servedObjectDefinitionOf(name: string): Promise<Record<string, unknown> | null>;
+        publishedObjectDefinitionOf(name: string): Promise<Record<string, unknown> | null>;
+        listContextPacks(): Promise<readonly unknown[]>;
+    },
+) {
+    return {
+        getRecordContext: async (
+            input: Record<string, unknown>,
+            opts: { readGuard: (objectName: string) => Promise<string | undefined> },
+        ) => service.recordContextTools().getRecordContext(input, {
+            readGuard: opts.readGuard,
+            ...reads,
+            get: (object: string, id: string) => bridge.get(object, id),
+            query: (object: string, o: unknown) => bridge.query(object, o),
+            fieldVisibilityOf: (object: string) => bridge.fieldVisibilityOf(object),
+            diagnoseDelegation: (object: string) => bridge.diagnoseDelegation(object),
+            userTextLocales: () => bridge.userTextLocales(),
+        }),
+        recordContextToolDefinitions: () => service.recordContextTools().definitions,
     };
 }
 

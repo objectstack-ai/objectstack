@@ -21,6 +21,8 @@
  */
 
 import { describe, it, expect } from 'vitest';
+// Paid during collection, not inside a clocked case: `plugin.ts` `import()`s it in a function body (`scripts/check-test-source-alias.mjs`).
+import '@objectstack/metadata-fs';
 import { composeStacks, defineStack, ObjectStackDefinitionSchema } from '@objectstack/spec';
 import { OWNER_STAMP_JUDGED_COLLECTIONS, type OwnerStampJudgedCollection } from '@objectstack/spec/kernel';
 import { MetadataPlugin, unclaimedTopLevel } from './plugin.js';
@@ -96,6 +98,7 @@ const JUDGED_FIXTURES: Record<OwnerStampJudgedCollection, { item: Record<string,
     agents: { item: { name: 'probe_agent', label: 'Agent', role: 'Assistant', instructions: 'Triage the request.' } },
     tools: { item: { name: 'probe_tool', label: 'Tool', description: 'tool', parameters: { type: 'object', properties: {} } } },
     skills: { item: { name: 'probe_skill', label: 'Skill', description: 'skill', instructions: 'x', tools: [] } },
+    aiContexts: { item: { name: 'probe_context', label: 'Context', object: 'probe_thing', fields: ['title'] } },
     apis: {
         item: { name: 'probe_api', description: 'api', path: '/api/v1/apps/probeorders/p1', method: 'GET', type: 'flow', target: 'probe_flow' },
         context: { flows: [probeFlow] },

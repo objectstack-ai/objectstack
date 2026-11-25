@@ -4565,6 +4565,9 @@ const METADATA_ARRAY_KEYS = [
   // AI Protocol. (`ragPipelines` was retired from this list under ADR-0049:
   // the stack schema never declared it, so no stack could ship one.)
   'agents', 'tools', 'skills',
+  // [ADR-0160 D1] Context packs — read by the record-context service from
+  // the registry, so a declaration lands here with its package stamped.
+  'aiContexts',
   // API Protocol
   'apis',
   // Data Extensions

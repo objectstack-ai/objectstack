@@ -4,14 +4,15 @@
  * objectui#12725 (the remainder, item 1) — the permission matrix names its
  * authoring surface only under the Studio host.
  *
- * `PermissionMatrixEditPage` serves two hosts: Studio's Access pillar mounts it
+ * `PermissionMatrixEditPage` serves two hosts: Studio's permission set page
+ * (objectstack#36905; the Access pillar before it) mounts it
  * with `packageId` and `embedded`, and its draft save is a person's edit in
  * Studio, so it sends `?surface=studio` (recorded as `by: 'studio'` in the
  * draft's `draftChanges`, objectstack#24395). metadata-admin mounts it through
  * the resource registry with only `type` and `name`: its save is the
  * environment door's live write and states no surface.
  *
- * Both hosts are the REAL ones (`AccessPillar`, `MetadataResourceEditPage`
+ * Both hosts are the REAL ones (`StudioPermissionSetPage`, `MetadataResourceEditPage`
  * through the built-in registration), and the save goes through a REAL
  * `MetadataClient` whose transport records each `PUT`, so the pins read the
  * query string the server would read.
@@ -89,7 +90,7 @@ vi.mock('../studio-design/StudioAiCopilot', () => ({ StudioChatDock: () => null 
 
 import '../../services/builtinComponents.js';
 import { MetadataResourceEditPage } from './ResourceEditPage';
-import { AccessPillar } from '../studio-design/StudioDesignSurface';
+import { StudioPermissionSetPage } from '../studio-design/StudioPermissionSetPage';
 import { StudioSaveHarness, pressStudioSave } from '../studio-design/__tests__/studioSaveHarness';
 
 window.matchMedia = ((query: string) => ({
@@ -115,11 +116,11 @@ beforeEach(() => {
 afterEach(cleanup);
 
 describe('the permission matrix states `surface` only under the Studio host (objectui#12725)', () => {
-  it('Studio’s Access pillar: the draft save sends `?surface=studio`, once', async () => {
+  it('Studio’s permission set page: the draft save sends `?surface=studio`, once', async () => {
     render(
       <StudioSaveHarness>
         <MemoryRouter>
-          <AccessPillar packageId={PKG} />
+          <StudioPermissionSetPage packageId={PKG} name={SET.name} />
         </MemoryRouter>
       </StudioSaveHarness>,
     );

@@ -1,22 +1,29 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * objectui#12514 — the Automations and Access pillars of a package that holds
- * no flow, or no permission set, show one centered block in the content
- * column: the pillar's icon, one sentence, and a primary button that opens the
- * create dialog the rail's "+" opens, through the same handler.
+ * objectui#12514 — the Automations pillar of a package that holds no flow
+ * shows one centered block in the content column: the pillar's icon, one
+ * sentence, and a primary button that opens the create dialog the rail's "+"
+ * opens, through the same handler. (The Access pillar's block went with the
+ * pillar, objectstack#36905: an empty package's permission sets are its
+ * type's empty list.)
  *
  *  - Automations: no aside while there is nothing to select, and the rail's
  *    empty sentence names the "+" it points at.
- *  - Access: the rail's empty sentence names the "+" too.
  *  - Read-only: the block's sentence stands alone — no button, no "+", and no
  *    rail sentence pointing at a control that is not there.
  *
- * The REAL `AutomationsPillar` and `AccessPillar`, over a client that lists
+ * The REAL `AutomationsPillar`, over a client that lists
  * nothing.
  */
 
 import '@testing-library/jest-dom/vitest';
+// The source under test reaches a dynamic `import('@objectstack/lint')`; its first load is paid
+// here, at collection, never inside a case's clock (`check:test-source-alias`).
+import '@objectstack/lint';
+// objectstack#36900 — the surface mounts the command palette, which reaches the
+// record preview's `lazy()` detail entry: its first load is paid at collection too.
+import '@object-ui/plugin-detail';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
@@ -59,7 +66,7 @@ vi.mock('../../components/SuggestedBindingsPanel', () => ({ SuggestedBindingsPan
 vi.mock('../metadata-admin/AccessExplainPanel', () => ({ AccessExplainPanel: () => null }));
 vi.mock('./StudioAiCopilot', () => ({ StudioChatDock: () => null }));
 
-import { AccessPillar, AutomationsPillar } from './StudioDesignSurface';
+import { AutomationsPillar } from './StudioDesignSurface';
 import { createEmptyDataSource, failOnAbsorbedFetchError } from './__tests__/emptyDataSource';
 import { t } from '../metadata-admin/i18n';
 
@@ -95,14 +102,6 @@ function renderAutomations(readOnly = false) {
   render(
     <MemoryRouter initialEntries={[`/studio/${PKG}/automations`]}>
       <AutomationsPillar packageId={PKG} readOnly={readOnly} />
-    </MemoryRouter>,
-  );
-}
-
-function renderAccess(readOnly = false) {
-  render(
-    <MemoryRouter>
-      <AccessPillar packageId={PKG} readOnly={readOnly} />
     </MemoryRouter>,
   );
 }
@@ -143,37 +142,5 @@ describe('objectui#12514 — Automations with no flow', () => {
     expect(screen.queryByTestId('auto-empty-new')).toBeNull();
     expect(screen.queryByTestId('studio-rail-add')).toBeNull();
     expect(screen.queryByText(t('engine.studio.auto.none', 'en'))).toBeNull();
-  });
-});
-
-describe('objectui#12514 — Access with no permission set', () => {
-  it('one block in the content column, and a rail sentence that names its "+"', async () => {
-    renderAccess();
-    const block = await screen.findByTestId('access-empty', undefined, { timeout: 8000 });
-    expect(block).toHaveTextContent(t('engine.studio.access.emptyMain', 'en'));
-    expect(within(block).getByTestId('access-empty-new')).toHaveTextContent(t('engine.studio.access.new', 'en'));
-    const rail = screen.getByTestId('studio-rail-access');
-    expect(within(rail).getByText(t('engine.studio.access.none', 'en'))).toBeInTheDocument();
-    expect(t('engine.studio.access.none', 'en')).toContain('“+”');
-  });
-
-  it('the button opens the dialog the rail’s "+" opens', async () => {
-    renderAccess();
-    fireEvent.click(await screen.findByTestId('access-empty-new', undefined, { timeout: 8000 }));
-    const fromEmpty = await screen.findByRole('dialog', { name: t('engine.studio.access.new', 'en') });
-    fireEvent.keyDown(fromEmpty, { key: 'Escape' });
-    expect(screen.queryByRole('dialog')).toBeNull();
-
-    fireEvent.click(screen.getByTestId('studio-rail-add'));
-    expect(await screen.findByRole('dialog', { name: t('engine.studio.access.new', 'en') })).toBeInTheDocument();
-  });
-
-  it('read-only: the sentence alone — no button, no "+", no rail pointer', async () => {
-    renderAccess(true);
-    const block = await screen.findByTestId('access-empty', undefined, { timeout: 8000 });
-    expect(block).toHaveTextContent(t('engine.studio.access.emptyMain', 'en'));
-    expect(screen.queryByTestId('access-empty-new')).toBeNull();
-    expect(screen.queryByTestId('studio-rail-add')).toBeNull();
-    expect(screen.queryByText(t('engine.studio.access.none', 'en'))).toBeNull();
   });
 });

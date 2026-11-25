@@ -213,6 +213,12 @@ export const KIND_COVERAGE: Record<MetadataType, KindCoverage> = {
       'Deferred with the AI examples iteration — tools are the third-party AI extension primitive (ADR-0063) and belong here once the BYO-AI (MCP) verification story is worked out.',
     issue: ISSUE.aiDeferred,
   },
+  ai_context: {
+    status: 'demonstrated',
+    files: ['src/ai/record-context.ai-context.ts'],
+    notes:
+      'Two context packs (ADR-0160): a project brief (own fields, a lookup read through to the account, tasks as a related list) and a task with its notes as a body (whole, or an outline read by anchor). Read by `get_record_context` over MCP; the service is wired in objectstack.config.ts plugins.',
+  },
   skill: {
     status: 'waived',
     reason:
