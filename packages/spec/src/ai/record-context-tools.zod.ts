@@ -138,7 +138,9 @@ export const RecordContextBodySchema = lazySchema(() => z.object({
   text: z.string().optional().describe('The body text, or the one section `anchor` asked for'),
   anchor: z.string().optional().describe('The section `text` holds, when the call named one'),
   outline: z.array(RecordContextOutlineEntrySchema).optional().describe(
-    'The body\'s headings in order, when the body is past the bound and is not carried whole',
+    'The body\'s headings in order, when the body is past the bound and is not carried whole. Held to the '
+    + 'service\'s outline bounds: a cut leaves out the deepest headings first and is stated by an '
+    + '`outline_truncated` note',
   ),
   truncated: z.literal(true).optional().describe(
     'Present when `text` was cut at the bound: a long body with no headings, or a section past the bound',
@@ -170,6 +172,9 @@ export const RecordContextDataSchema = lazySchema(() => z.object({
  *   the caller and must not be treated as empty or absent (names nothing);
  * - `body_outline` — the body is past the bound and carried as an outline;
  * - `body_truncated` — the body (or a section) was cut at the bound;
+ * - `outline_truncated` — the outline was cut at the service's outline bounds:
+ *   its sentence says how many headings are not listed (every heading's anchor
+ *   still reads its section);
  * - `related_truncated` — the related list on `object` was cut at the row cap;
  * - `narrowed` — the agent ceiling narrows what the caller reads on `object`
  *   (the security service's sentence, relayed as the probe returns it).
@@ -179,6 +184,7 @@ export const RecordContextNoteKind = z.enum([
   'not_visible',
   'body_outline',
   'body_truncated',
+  'outline_truncated',
   'related_truncated',
   'narrowed',
 ]);
