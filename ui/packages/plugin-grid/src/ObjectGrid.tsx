@@ -1489,12 +1489,14 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
   // objectstack#36911 — the row menu reads the same locks: a row an approval
   // locks offers no Edit, as the record page offers none (objectstack#35593).
   // Delete stays for a record held by its own approval: the server deletes it
-  // and cancels its request. (The batch read reports only that case today, not
-  // a line held because its master is held, which refuses delete too; #37041.) So the hook also runs on a grid whose rows offer Edit. It still
+  // and cancels its request. objectstack#37231 — a master-detail line held
+  // because its MASTER is held (the read's `lockSource: 'master'`) offers no
+  // Delete either: the detail-row lock hook refuses it with `RECORD_LOCKED`.
+  // So the hook also runs on a grid whose rows offer Edit or Delete. It still
   // reads nothing until it is asked: by a cell being selected, or by a row's
   // actions being reached for (`demandRowActions` below).
-  const rowMenuOffersEdit = canEdit && !!onEdit;
-  const approvalLocks = useRowApprovalLocks(hostCellSelection || rowMenuOffersEdit ? objectName : undefined);
+  const rowMenuReadsLocks = (canEdit && !!onEdit) || (canDelete && !!onDelete);
+  const approvalLocks = useRowApprovalLocks(hostCellSelection || rowMenuReadsLocks ? objectName : undefined);
   /**
    * objectstack#36911 — what reaching for a row's actions asks
    * (`RowActionMenuProps.onActionsDemand`, objectstack#34208): the
@@ -1506,8 +1508,8 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
   const probeApprovalLocks = approvalLocks.probe;
   const demandRowActions = useCallback(() => {
     requestRecordVerdicts();
-    if (rowMenuOffersEdit) probeApprovalLocks(pageRecordIds);
-  }, [requestRecordVerdicts, probeApprovalLocks, rowMenuOffersEdit, pageRecordIds]);
+    if (rowMenuReadsLocks) probeApprovalLocks(pageRecordIds);
+  }, [requestRecordVerdicts, probeApprovalLocks, rowMenuReadsLocks, pageRecordIds]);
   // objectstack#35956 — a cell change that makes other fields required asks
   // for them first, and saves them with it (`./objectGridRequiredPrompt`).
   const fieldLabelOf = (field: string): string => {

@@ -49,11 +49,12 @@ export function resolveObjectGridActionsColumn({
   /**
    * objectstack#36911 — the approval locks of the rows on screen, the read the
    * select-first cells ask (`useRowApprovalLocks`). A row a read ANSWERED as
-   * locked offers no Edit. Delete is untouched, which is right only while the
-   * read answers for a record held by ITS OWN approval: the server deletes such
-   * a record and cancels its request. A line held because its MASTER is held
-   * refuses delete too; if the read ever reports those lines, it must tell
-   * the two apart before this menu reads it (#37041).
+   * locked offers no Edit. objectstack#37231 — the read says which approval
+   * holds it (`lockSource`): a record held by ITS OWN approval keeps Delete,
+   * because the server deletes such a record and cancels its request; a
+   * master-detail line held because its MASTER is held (`lockSource:
+   * 'master'`) offers no Delete either, because the detail-row lock hook
+   * refuses that delete with `RECORD_LOCKED`.
    */
   approvalLocks: RowApprovalLocks;
   /**
@@ -103,9 +104,9 @@ export function resolveObjectGridActionsColumn({
   // NON-AUTHOR SURFACE — see the `maxInlineActions` prop below.
   const maxInlineRowActions: number = foldInlineRowActions ? 0 : ((schema as any).maxInlineRowActions ?? 1);
   /**
-   * objectstack#36911 — is this row held by its own locking approval, by a lock
-   * read that ANSWERED? (The batch read answers for the record's own approval
-   * only, not for a line under a held master; see `approvalLocks` above.) The row is handed to the hook as no row at all, so its
+   * objectstack#36911 — is this row held by a locking approval (its own, or,
+   * for a master-detail line, its master's), by a lock read that ANSWERED? The
+   * row is handed to the hook as no row at all, so its
    * `approval_status` column does not stand in: a read refused (501), failed,
    * answering `null` (a row the reader cannot read) or not yet asked leaves
    * Edit where the menu had it. An answer arriving re-renders the grid. The
@@ -113,6 +114,13 @@ export function resolveObjectGridActionsColumn({
    * offers what the server is known to refuse, never less on a guess.
    */
   const approvalLockAnswered = (row: any): boolean => approvalLocks.isLocked(rowRecordId(row), null);
+  /**
+   * objectstack#37231 — and is the lock its MASTER's (`lockSource: 'master'`)?
+   * Then Delete goes too: the server refuses a line's delete while its master
+   * is held. A row held by its own approval keeps Delete; only an answer takes
+   * it away, as above.
+   */
+  const heldByMasterAnswered = (row: any): boolean => approvalLocks.heldByMaster(rowRecordId(row));
   const rowCrudVerdicts = (row: any) => {
     // [objectui#8674] The CALLER's answer for this one row, ANDed in below.
     const rowOps = rowOperations?.(row);
@@ -121,7 +129,10 @@ export function resolveObjectGridActionsColumn({
         canEdit && rowOps?.update !== false && !approvalLockAnswered(row),
         recordVerdict(rowRecordId(row), 'update'),
       ),
-      canDelete: resolveRowRecordCrudAffordance(canDelete && rowOps?.delete !== false, recordVerdict(rowRecordId(row), 'delete')),
+      canDelete: resolveRowRecordCrudAffordance(
+        canDelete && rowOps?.delete !== false && !heldByMasterAnswered(row),
+        recordVerdict(rowRecordId(row), 'delete'),
+      ),
     };
   };
   const rowOffersAction = (row: any): boolean => {
