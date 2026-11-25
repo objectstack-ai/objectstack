@@ -87,8 +87,10 @@ vi.mock('./useMetadata', async (importOriginal) => {
 });
 
 import { MetadataResourceEditPage } from './ResourceEditPage';
+import { registerDefaultMetadataSchemas } from './default-schemas';
 
 client.current = new MetadataClient({ baseUrl: '', fetch: vi.fn(serve) as unknown as typeof fetch });
+registerDefaultMetadataSchemas();
 
 const PKG = 'com.acme.crm';
 const AREA: MetadataAreaHost = { packageId: PKG, readOnly: false, basePath: `/studio/${PKG}/metadata` };
@@ -117,7 +119,7 @@ function Landed() {
 
 /**
  * Open `type`'s create form (under `host` when one is given, else as Setup
- * mounts it), label it "Pipeline", and press Save.
+ * mounts it), name it `pipeline`, and press Save.
  */
 async function createAndSave(type: 'dashboard' | 'view', host: MetadataAreaHost | null) {
   const base = host ? host.basePath : '/apps/setup/metadata';
@@ -139,6 +141,7 @@ async function createAndSave(type: 'dashboard' | 'view', host: MetadataAreaHost 
     return el!;
   }, { timeout: 8000 });
   fireEvent.change(label, { target: { value: 'Pipeline' } });
+  fireEvent.change(document.getElementById('mdf-name') as HTMLInputElement, { target: { value: 'pipeline' } });
   await waitFor(() => expect((document.getElementById('mdf-name') as HTMLInputElement).value).toBe('pipeline'));
   fireEvent.click(screen.getByRole('button', { name: /Save \(⌘S\)/ }));
   return `${base}/${type}/pipeline`;

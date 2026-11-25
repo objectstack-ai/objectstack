@@ -114,7 +114,6 @@ import '@objectstack/lint';
 import { ReportNewPage } from './ReportNewPage';
 import { DesignModeProvider, useDesignModeController } from '../layout/designMode';
 import { loadHanRomanizer } from './metadata-admin/romanizeHan';
-import { builtInLocales } from '@object-ui/i18n/locales';
 
 // Save first awaits the Han romanizer, a cold dynamic import: its first load is
 // paid here, at collection, never inside a case's clock. The save cases also
@@ -432,7 +431,8 @@ describe("opened from Studio's report list (objectstack#36906, decision 13)", ()
       );
       // The author is told the report is not where the Studio list looks.
       expect(toastInfo).toHaveBeenCalledTimes(1);
-      expect(toastInfo).toHaveBeenCalledWith(builtInLocales.en.report.builder.savedOutsideApp);
+      // (This harness registers no locale pack, so `t` answers the key itself.)
+      expect(toastInfo).toHaveBeenCalledWith('report.builder.savedOutsideApp');
       // The developer-console line names the type it saved, not a view.
       expect(warn).toHaveBeenCalledWith(expect.stringContaining('the report is saved naming no package'), expect.anything());
     } finally {
