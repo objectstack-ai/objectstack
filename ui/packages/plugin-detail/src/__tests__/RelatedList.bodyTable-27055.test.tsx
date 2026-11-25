@@ -729,10 +729,12 @@ describe('RelatedList — a body table in the record preview drawer settles its 
             referenceField="opportunity"
             parentId="o1"
             columns={Object.keys(lineFields).map((field) => ({ field, label: (lineFields as any)[field].label }))}
-            data={lineRows}
             onRowEdit={vi.fn()}
             dataSource={{
-              find: vi.fn(async () => lineRows),
+              // The rows arrive from the data source after the schema, as in
+              // the drawer: the table first draws them in the commit whose
+              // read first measures it.
+              find: vi.fn(() => new Promise((resolve) => setTimeout(() => resolve(lineRows), 20))),
               getObjectSchema: vi.fn(async () => ({ name: 'opportunity_line_item', fields: lineFields })),
             } as any}
           />
