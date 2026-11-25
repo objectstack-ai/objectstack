@@ -115,15 +115,13 @@ export function areaItemPillarPath(input: {
 }
 
 /**
- * The query a pillar type's item honours on the generic item page rather than
- * its designer: the environment scope (which names no package to design in)
- * and `?review=1` (the generic page's draft review). {@link areaItemPillarPath}
- * keeps a pillar type there under it; objectstack#36903 — a designer page does
- * too, so a review link (`studioItemReviewPath`) still opens the review.
+ * The query that asks an item's generic page on a package's leg, whatever its
+ * type opens otherwise: the environment scope (its catalog item is the
+ * environment's, by name) and `?review=1` (the draft review the console's
+ * review links name).
  */
 export function areaItemAsksGenericPage(search: URLSearchParams): boolean {
-  if (search.get(CATALOG_SCOPE_PARAM) === ENVIRONMENT_SCOPE) return true;
-  return search.get(STUDIO_ITEM_REVIEW_PARAM) === STUDIO_ITEM_REVIEW_VALUE;
+  return search.get(CATALOG_SCOPE_PARAM) === ENVIRONMENT_SCOPE || search.get(STUDIO_ITEM_REVIEW_PARAM) === STUDIO_ITEM_REVIEW_VALUE;
 }
 
 /**

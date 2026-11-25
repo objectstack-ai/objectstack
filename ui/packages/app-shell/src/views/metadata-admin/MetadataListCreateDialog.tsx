@@ -21,6 +21,7 @@
  */
 
 import * as React from 'react';
+import { useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
 import { customizationNamespace } from '@objectstack/spec/kernel';
 
@@ -32,6 +33,8 @@ import { OWD_OPTION_DESC_KEY, OWD_OPTION_LABEL_KEY } from '../studio-design/Data
 import { buildFlowSkeleton, buildObjectSkeleton } from '../studio-design/skeletons.js';
 import { ensureCustomizationPackage, fetchPackages, prefixObjectName } from '../studio-design/packages-io.js';
 import { publishCreated, publishSavedItem } from '../studio-design/studioSaveBar.js';
+import { loadPackageSurfaces } from '../studio-design/packageSurfaces.js';
+import { studioItemPath } from '../studio-design/studioAddress.js';
 import { plainRefusal, type StudioRefusal } from '../studio-design/metadataError.js';
 import { addNewObjectToAppMenu } from '../studio-design/newObjectJoinsAppMenu.js';
 import { FLOW_PRESETS, flowPresetTrigger, type FlowPreset } from '../studio-design/flowPresets.js';
@@ -213,6 +216,7 @@ function ObjectCreate({ open, onOpenChange, packageId, inPair, locale, onCreated
 
 function FlowCreate({ open, onOpenChange, packageId, inPair, locale, onCreated }: MetadataListCreateDialogProps) {
   const client = useMetadataClient();
+  const navigate = useNavigate();
   const startTrigger = React.useMemo(() => newFlowTriggerFields(locale), [locale]);
   const watchesObject = startTrigger.object?.showWhen?.equals ?? [];
   const [choice, setChoice] = React.useState<FlowPreset | 'advanced'>(FLOW_PRESETS[0]);
@@ -221,7 +225,9 @@ function FlowCreate({ open, onOpenChange, packageId, inPair, locale, onCreated }
   const [needs, setNeeds] = React.useState<string | null>(null);
   const [busy, setBusy] = React.useState(false);
   const [error, setError] = React.useState<StudioRefusal | null>(null);
-  const [taken, setTaken] = React.useState<Taken | null>(null);
+  // `here`: the flow holding the identifier is this package's own (published or
+  // a draft), so the notice offers to open it, as the Automations pillar's did.
+  const [taken, setTaken] = React.useState<(Taken & { here: boolean }) | null>(null);
   const group = React.useId();
   React.useEffect(() => {
     if (!open) return;
@@ -240,7 +246,8 @@ function FlowCreate({ open, onOpenChange, packageId, inPair, locale, onCreated }
     try {
       const held = await findTakenIdentifier(client, 'flow', name, locale);
       if (held) {
-        setTaken(held);
+        const own = await loadPackageSurfaces(client, 'flow', packageId, locale).catch(() => []);
+        setTaken({ ...held, here: own.some((flow) => flow.name === name) });
         return;
       }
       // Born switched off (`obsolete`, what the switch writes for Off):
@@ -296,7 +303,20 @@ function FlowCreate({ open, onOpenChange, packageId, inPair, locale, onCreated }
           {taken && (
             <CreateTakenNotice
               scope="flow"
-              sentence={tFormat('engine.studio.auto.createTakenElsewhere', locale, { label: taken.label, name: taken.name })}
+              sentence={tFormat(
+                taken.here ? 'engine.studio.auto.createTaken' : 'engine.studio.auto.createTakenElsewhere',
+                locale,
+                { label: taken.label, name: taken.name },
+              )}
+              openLabel={tFormat('engine.studio.create.openExisting', locale, { label: taken.label })}
+              onOpen={
+                taken.here
+                  ? () => {
+                      onOpenChange(false);
+                      navigate(studioItemPath(packageId, 'flow', taken.name));
+                    }
+                  : undefined
+              }
             />
           )}
           <fieldset className="space-y-2">

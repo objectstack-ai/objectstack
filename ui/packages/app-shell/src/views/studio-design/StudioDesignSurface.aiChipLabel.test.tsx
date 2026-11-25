@@ -227,7 +227,11 @@ describe('objectstack#35018 — 正在看 on the Access and Automations rails re
     expect(String(chip.surfaceContextLabel)).not.toContain('flow');
     expect(String(chip.surfaceContextLabel)).not.toContain(FLOW);
     expect(chip.surfaceContextTitle).toBe(`flow · ${FLOW}`);
-    // The agent's data is the URL's: the address names the flow, with no `?surface=`.
-    expect(JSON.stringify(agentSurface())).toBe(JSON.stringify({ artifact: { type: 'flow', name: FLOW } }));
+    // The agent's data is the URL's: the address names the flow, with no
+    // `?surface=`, under the metadata area — the shape every designer on its
+    // metadata address sends (objectstack#36904, objectstack#36905).
+    expect(JSON.stringify(agentSurface())).toBe(
+      JSON.stringify({ pillar: 'metadata', artifact: { type: 'flow', name: FLOW } }),
+    );
   });
 });

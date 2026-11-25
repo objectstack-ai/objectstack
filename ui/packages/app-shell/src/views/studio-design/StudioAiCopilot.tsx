@@ -15,7 +15,7 @@ import { ConversationsSidebar } from '../../console/ai/ConversationsSidebar.js';
 import { resolvePublicShareBase } from '../../console/organizations/resolveHomeUrl.js';
 import { AiUsageIndicator } from '../../layout/AiUsageIndicator.js';
 import { usePlanApprovalPendingCount } from '../../assistant/assistantBus.js';
-import { areaDesignerItemOf, orgScopeFlowOf } from './metadataArea.js';
+import { STUDIO_METADATA_AREA, areaDesignerItemOf, orgScopeFlowOf } from './metadataArea.js';
 
 /**
  * objectui#8219 — the display label of the artifact a pillar has open, tagged
@@ -79,24 +79,28 @@ export function StudioCopilotConversation({
   const surfaceContext = React.useMemo(() => {
     const raw = new URLSearchParams(copilotLocation.search).get('surface');
     let artifact: { type: string; name: string } | undefined;
+    let pillar = tab;
     if (raw) {
       const idx = raw.indexOf(':');
       if (idx > 0 && idx < raw.length - 1) {
         artifact = { type: raw.slice(0, idx), name: raw.slice(idx + 1) };
       }
     }
-    // objectstack#36903 — a designer open full-screen on its metadata
-    // address (the flow designer, on a package's leg or the package-less
-    // scope's) is named by the address itself.
-    if (!artifact) {
-      artifact =
-        areaDesignerItemOf(copilotLocation.pathname, segment) ??
-        orgScopeFlowOf(copilotLocation.pathname, segment) ??
-        undefined;
+    // objectstack#36903, objectstack#36904, objectstack#36905 — a designer that
+    // opens full-screen at its metadata address carries its item in the path,
+    // under the area's segment, not in a `?surface=`; on the package-less
+    // scope's leg (`~org`) so does the flow designer.
+    if (!tab && !artifact) {
+      const item =
+        areaDesignerItemOf(copilotLocation.pathname, segment) ?? orgScopeFlowOf(copilotLocation.pathname, segment);
+      if (item) {
+        artifact = item;
+        pillar = STUDIO_METADATA_AREA;
+      }
     }
-    if (!tab && !artifact) return undefined;
-    return { ...(tab ? { pillar: tab } : {}), ...(artifact ? { artifact } : {}) };
-  }, [tab, segment, copilotLocation.search, copilotLocation.pathname]);
+    if (!pillar && !artifact) return undefined;
+    return { ...(pillar ? { pillar } : {}), ...(artifact ? { artifact } : {}) };
+  }, [tab, segment, copilotLocation.pathname, copilotLocation.search]);
   // objectui#8219 — the chip's display label, read beside the context rather
   // than inside it. Shown only when it labels the artifact the URL names: the
   // URL stays the single source of WHAT is discussed, so a label that lags or

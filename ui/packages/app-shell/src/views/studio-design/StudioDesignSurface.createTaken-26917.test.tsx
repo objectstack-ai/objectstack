@@ -31,7 +31,7 @@ import '@testing-library/jest-dom/vitest';
 import * as React from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import { MemoryRouter, Route, Routes } from 'react-router-dom';
+import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
 
 const PKG = 'com.acme.app';
 const OTHER_PKG = 'com.other.app';
@@ -211,12 +211,17 @@ function submitCreate(dialog: HTMLElement, label: string) {
  * objectstack#36903 — a flow is created from the list's 「新建」
  * (`MetadataListCreateDialog`): the Automations pillar's New went with its
  * rail. A taken identifier is refused there, naming the flow that holds it;
- * the list it opens over is where that flow is opened.
+ * one this package holds is offered to open, at the flow's own address.
  */
 describe('objectstack#26917 — Automations: New automation over a taken identifier', () => {
+  function Where() {
+    const { pathname } = useLocation();
+    return <output data-testid="where">{pathname}</output>;
+  }
   async function openNewAutomation() {
     render(
       <MemoryRouter initialEntries={[`/studio/${PKG}/metadata/flow`]}>
+        <Where />
         <ListFlowCreate packageId={PKG} />
       </MemoryRouter>,
     );
@@ -227,7 +232,7 @@ describe('objectstack#26917 — Automations: New automation over a taken identif
     return dialog;
   }
 
-  it("a published flow in this package: refused, nothing written, the holder named", async () => {
+  it('a published flow in this package: refused, nothing written, and Open opens it at its address', async () => {
     publish('flow', PKG, FLOW_ALPHA);
     publish('flow', PKG, FLOW_ESCALATE);
     const before = publishedBody('flow', 'escalate');
@@ -236,11 +241,16 @@ describe('objectstack#26917 — Automations: New automation over a taken identif
 
     const taken = await within(dialog).findByTestId('flow-create-taken');
     expect(taken).toHaveTextContent(
-      tFormat('engine.studio.auto.createTakenElsewhere', 'en', { name: 'escalate', label: 'Escalate' }),
+      tFormat('engine.studio.auto.createTaken', 'en', { name: 'escalate', label: 'Escalate' }),
     );
     expect(save).not.toHaveBeenCalled();
     expect(door.drafts.size).toBe(0);
     expect(door.published.get('flow/escalate')!.body).toEqual(before);
+
+    fireEvent.click(within(taken).getByTestId('flow-create-open-existing'));
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    expect(screen.getByTestId('where')).toHaveTextContent(`/studio/${PKG}/metadata/flow/escalate`);
+    expect(save).not.toHaveBeenCalled();
   });
 
   it('a published flow another package holds: refused, nothing written, and no Open', async () => {
