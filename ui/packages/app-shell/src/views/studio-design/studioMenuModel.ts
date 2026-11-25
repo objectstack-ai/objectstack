@@ -232,7 +232,7 @@ export function studioMenuTiers(menu: readonly StudioMenuGroupModel[]): Record<S
  *  - the sharing overview's route: the OWD overview.
  *
  * objectstack#36909 — a retired pillar's address draws no page (it redirects,
- * `studioPillarRedirect.ts`), so no entry is current on one.
+ * `studioPillarRedirectModel.ts`), so no entry is current on one.
  */
 export function studioMenuCurrentKey(input: { segment: string; pathname: string; search: string }): string | null {
   const { segment, pathname } = input;

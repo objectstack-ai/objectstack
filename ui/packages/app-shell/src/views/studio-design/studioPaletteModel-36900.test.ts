@@ -17,7 +17,7 @@
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { registerUnsavedEdits } from '../../chrome/unsavedEdits';
-import { STUDIO_ITEM_PILLAR, studioItemPath, studioMetadataItemAddress } from './studioAddress';
+import { studioMetadataItemAddress } from './studioAddress';
 import { buildStudioMenu, studioMenuScope } from './studioMenuModel';
 import {
   buildStudioPaletteGroups,
@@ -71,10 +71,7 @@ describe("a package's palette lists its items and its pair's (ADR-0146 D3)", () 
 });
 
 describe('an item opens through the one address builder (#36895)', () => {
-  it('opens a type a pillar designs in that pillar, as studioItemPath does', () => {
-    for (const type of Object.keys(STUDIO_ITEM_PILLAR)) {
-      expect(studioPaletteItemAddress(PKG, { type, name: 'x', packageId: PAIR })).toBe(studioItemPath(PKG, type, 'x'));
-    }
+  it('opens an object on its designer\'s address, scoped to its owner (no pillar, objectstack#36909)', () => {
     // objectstack#36904 — an object opens its designer on its own address, scoped to its owner.
     expect(studioPaletteItemAddress(PKG, { type: 'object', name: 'crm_account', packageId: PKG })).toBe(
       '/studio/com.acme.crm/metadata/object/crm_account?package=com.acme.crm',

@@ -133,6 +133,7 @@ import { I18nProvider } from '@object-ui/i18n';
 import '@objectstack/lint';
 import '@object-ui/plugin-detail';
 import { StudioDesignSurface } from './StudioDesignSurface';
+import { StudioPillarRedirect } from './StudioPillarRedirect';
 import { subscribeMetadataRefresh } from '../../assistant/assistantBus';
 
 window.matchMedia = ((query: string) => ({
@@ -260,7 +261,7 @@ function renderStudio(entry = `/studio/${PACKAGE_ID}/data?surface=object%3Ahcpl_
       <LocationProbe />
       <Routes>
         <Route path="/studio/:packageId/metadata/*" element={<StudioDesignSurface area="metadata" />} />
-        <Route path="/studio/:packageId/:tab" element={<StudioDesignSurface />} />
+        <Route path="/studio/:packageId/:tab" element={<StudioPillarRedirect><StudioDesignSurface /></StudioPillarRedirect>} />
       </Routes>
     </MemoryRouter>,
   );
@@ -329,7 +330,7 @@ describe('the Studio copilot\'s composer (objectui#12725 Target item 4)', () => 
         <MemoryRouter initialEntries={[`/studio/${PACKAGE_ID}/data?surface=object%3Ahcpl_borrowing`]}>
           <Routes>
             <Route path="/studio/:packageId/metadata/*" element={<StudioDesignSurface area="metadata" />} />
-            <Route path="/studio/:packageId/:tab" element={<StudioDesignSurface />} />
+            <Route path="/studio/:packageId/:tab" element={<StudioPillarRedirect><StudioDesignSurface /></StudioPillarRedirect>} />
           </Routes>
         </MemoryRouter>
       </I18nProvider>,

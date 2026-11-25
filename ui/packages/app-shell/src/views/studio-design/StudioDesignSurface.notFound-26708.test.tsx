@@ -81,6 +81,7 @@ vi.mock('./StudioAiCopilot', () => ({ StudioChatDock: () => <div data-testid="st
 vi.mock('../../preview/DraftChangesPanel', () => ({ DraftChangesPanel: () => null }));
 
 import { StudioDesignSurface } from './StudioDesignSurface';
+import { StudioPillarRedirect } from './StudioPillarRedirect';
 import { StudioEntryPermissionsProvider } from './studioEntryPermissions';
 import { t, tFormat } from '../metadata-admin/i18n';
 // The source under test reaches these dynamic imports (the command palette's
@@ -142,7 +143,7 @@ function renderAt(
           <Route path="/studio/~all/metadata" element={<AllMetadata />} />
           {/* objectstack#36904, objectstack#36903 — `/data` and `/automations` land on the area's object and flow lists. */}
           <Route path="/studio/:packageId/metadata/*" element={React.cloneElement(surface as React.ReactElement<{ area?: 'metadata' }>, { area: 'metadata' })} />
-          <Route path="/studio/:packageId/:tab" element={surface} />
+          <Route path="/studio/:packageId/:tab" element={<StudioPillarRedirect>{surface}</StudioPillarRedirect>} />
         </Routes>
       </MemoryRouter>
     </StudioEntryPermissionsProvider>,

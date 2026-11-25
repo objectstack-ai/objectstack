@@ -44,7 +44,7 @@
  * it), so the list shows the scope's flows and the designer's ‹ › walk them
  * and nothing else. The old `/studio/~org/automations` address redirects here
  * (`automationsPillarRedirect.ts`), and every other `/studio/~org/...` URL to
- * the list (`studioPillarRedirect.ts`).
+ * the list (`studioPillarRedirectModel.ts`).
  */
 
 import { canonicalMetaUrlType } from '@objectstack/spec/shared';

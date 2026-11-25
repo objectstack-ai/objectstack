@@ -7,7 +7,7 @@
  * surface at a time, captured the `?surface=` target once at mount, and
  * mirrored the open surface back to the URL. objectstack#36909 — every pillar
  * retired: an item opens its designer on its own metadata address, and the
- * pillar addresses only redirect (`studioPillarRedirect.ts`), so the capture
+ * pillar addresses only redirect (`studioPillarRedirectModel.ts`), so the capture
  * and mirror hooks had no reader left and went. What stays:
  *
  *  - the qualifier keys the redirects drop and the address table names

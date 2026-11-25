@@ -107,6 +107,7 @@ vi.mock('../../preview/DraftChangesPanel', async () => {
 import '@objectstack/lint';
 import '@object-ui/plugin-detail';
 import { StudioDesignSurface } from './StudioDesignSurface';
+import { StudioPillarRedirect } from './StudioPillarRedirect';
 import { fetchListedPackageManifests } from './packages-io';
 import { addFieldFromFormToolbar } from './__tests__/dataPillarAddField';
 import { createEmptyDataSource } from './__tests__/emptyDataSource';
@@ -185,7 +186,7 @@ async function openTask(): Promise<void> {
         {/* objectstack#36904 — the pair's own object address (the request's landing on a read-only base). */}
         <Route path={`/studio/${PAIR}/metadata/object/:name`} element={<output data-testid="pair-landed" />} />
         <Route path="/studio/:packageId/metadata/*" element={<StudioDesignSurface area="metadata" />} />
-        <Route path="/studio/:packageId/:tab" element={<StudioDesignSurface />} />
+        <Route path="/studio/:packageId/:tab" element={<StudioPillarRedirect><StudioDesignSurface /></StudioPillarRedirect>} />
       </Routes>
     </MemoryRouter>,
   );

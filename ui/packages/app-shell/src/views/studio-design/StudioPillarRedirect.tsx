@@ -3,7 +3,7 @@
 /**
  * objectstack#36909 — the route element for `/studio/:packageId` and
  * `/studio/:packageId/:tab`: a retired pillar address redirects, in one hop,
- * to the page that replaced it (`studioPillarRedirect.ts` holds the table);
+ * to the page that replaced it (`studioPillarRedirectModel.ts` holds the table);
  * any other segment renders `children`, the page that answers to it (the
  * builder, which draws the sharing overview or the not-found state).
  *
@@ -14,7 +14,7 @@
 import * as React from 'react';
 import { Navigate, useLocation, useParams } from 'react-router-dom';
 import { AccessPillarLanding } from './accessPillarLanding.js';
-import { studioPillarRedirect } from './studioPillarRedirect.js';
+import { studioPillarRedirect } from './studioPillarRedirectModel.js';
 
 export function StudioPillarRedirect({ children }: { children?: React.ReactNode }): React.ReactElement | null {
   const { packageId, tab } = useParams<{ packageId?: string; tab?: string }>();

@@ -118,6 +118,7 @@ vi.mock('../../preview/DraftChangesPanel', () => ({
 import '@objectstack/lint';
 import '@object-ui/plugin-detail';
 import { StudioDesignSurface } from './StudioDesignSurface';
+import { StudioPillarRedirect } from './StudioPillarRedirect';
 import { registerMetadataPreview } from '../metadata-admin/preview-registry';
 
 window.matchMedia = ((query: string) => ({
@@ -253,7 +254,7 @@ function renderWorkbench() {
     <MemoryRouter initialEntries={[`/studio/${BASE}/interfaces`]}>
       <Routes>
         <Route path="/studio/:packageId/metadata/*" element={<StudioDesignSurface area="metadata" />} />
-        <Route path="/studio/:packageId/:tab" element={<StudioDesignSurface />} />
+        <Route path="/studio/:packageId/:tab" element={<StudioPillarRedirect><StudioDesignSurface /></StudioPillarRedirect>} />
       </Routes>
     </MemoryRouter>,
   );

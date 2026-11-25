@@ -14,7 +14,7 @@
  * a time, each switching every producer here in the PR that shipped its
  * designer. objectstack#36909 — every type has moved, so an item address is
  * always the metadata one ({@link studioItemPath}); the retired pillar
- * addresses only redirect (`studioPillarRedirect.ts`).
+ * addresses only redirect (`studioPillarRedirectModel.ts`).
  *
  * ## Today's addresses, byte for byte
  *
@@ -89,7 +89,7 @@ export const STUDIO_OWD_OBJECT_PARAM = 'object';
 
 /**
  * The retired pillars' route segments. objectstack#36909 — no pillar draws a
- * page any more: each address only redirects (`studioPillarRedirect.ts`).
+ * page any more: each address only redirects (`studioPillarRedirectModel.ts`).
  */
 export type StudioPillarKey = 'data' | 'automations' | 'access';
 
@@ -195,7 +195,7 @@ export function studioOwdOverviewPath(
 /**
  * How a producer wrote a retired pillar's `?surface=<type>:<name>` value.
  * Three spellings reached the same surface, and every one still redirects
- * (`studioPillarRedirect.ts` reads them all through `parseSurfaceParam`):
+ * (`studioPillarRedirectModel.ts` reads them all through `parseSurfaceParam`):
  *
  *  - `'component'`: the whole value through `encodeURIComponent`,
  *    `surface=object%3Aaccount`. The default; most producers.

@@ -298,7 +298,7 @@ function StudioPillarAddress({ children }: { children?: ReactNode }) {
  * objectstack#36909 — no pillar draws a page any more. Each retired pillar
  * address (`data`, `automations`, `access`, `interfaces`, and the bare package
  * address, which used to land on `data`) reaches the page that replaced it in
- * ONE redirect (`StudioPillarRedirect`; its table is `studioPillarRedirect.ts`
+ * ONE redirect (`StudioPillarRedirect`; its table is `studioPillarRedirectModel.ts`
  * in app-shell), where it used to pass through the builder and the area's own
  * `?package=` redirect first.
  */
