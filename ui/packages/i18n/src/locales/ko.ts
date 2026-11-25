@@ -2443,6 +2443,14 @@ const ko = {
       changesDrafted: "초안으로 저장됨",
       changesFailed: "적용되지 않음",
       discussing: "보는 중: {{target}}",
+      focus: {
+        pin: "이 레코드에 대해 계속 질문",
+        pinned: "질문 대상: {{target}}",
+        remove: "이 레코드에 대한 질문 중지",
+        switchPrompt: "대신 \"{{target}}\"에 대해 질문할까요?",
+        switchAccept: "전환",
+        switchDecline: "유지",
+      },
       changeVerb: {
         createObject: "객체 생성",
         addField: "필드 추가",
@@ -3855,7 +3863,7 @@ const ko = {
       allApps: "모든 앱",
       editAppInStudio: "Studio에서 {{app}} 편집",
       openAppInStudio: "Studio에서 {{app}} 보기",
-      backToHome: "홈으로 돌아가기",
+      backToHome: "앱 시작 페이지로 돌아가기",
       settings: "시스템 설정",
       productHome: "{{product}} 홈",
       addApp: '앱 추가',

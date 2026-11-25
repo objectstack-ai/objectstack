@@ -1,7 +1,9 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * `⌘⇧H` / `Ctrl+Shift+H` — home from any app page. The app layout installs
+ * `⌘⇧H` / `Ctrl+Shift+H` — Home from any app page: on a phone its app list,
+ * from 768 px up the last-used app's start page, where `/` lands now the
+ * platform home page is retired (objectstack#36732). The app layout installs
  * it (`ConsoleLayout`), at every width, so it does not depend on a top bar
  * being drawn.
  * @module
@@ -9,8 +11,14 @@
 
 import { useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { GO_HOME_SHORTCUT, useAdvertiseShortcut, type ShortcutChord } from './advertisedShortcuts.js';
+import {
+  GO_HOME_SHORTCUT,
+  GO_TO_APP_START_SHORTCUT,
+  useAdvertiseShortcut,
+  type ShortcutChord,
+} from './advertisedShortcuts.js';
 import { confirmUnsavedLeave } from './unsavedEdits.js';
+import { usePhoneViewport } from '../hooks/usePhoneViewport.js';
 
 /**
  * Whether a keydown is `chord`: ⌘ or Ctrl exactly when the chord has `mod`
@@ -40,10 +48,12 @@ function isTypingTarget(target: EventTarget | null): boolean {
 }
 
 /**
- * `⌘⇧H` / `Ctrl+Shift+H` goes home from any app page, as a PUSH so the
- * browser's Back returns to the page (objectui#12605). Advertised beside the
- * listener, under the same gate, so the keyboard-shortcuts dialog lists it
- * exactly where it fires (objectui#11674).
+ * `⌘⇧H` / `Ctrl+Shift+H` goes to `homePath` from any app page, as a PUSH so
+ * the browser's Back returns to the page (objectui#12605). Advertised beside
+ * the listener, under the same gate, so the keyboard-shortcuts dialog lists it
+ * exactly where it fires (objectui#11674), and named for where it goes: 「Back
+ * to home」 on a phone, the last-used app's start page from 768 px up, where
+ * `useHomePath()` no longer names a home page (objectstack#36732).
  */
 export function useGoHomeShortcut(enabled: boolean, homePath: string): void {
   const navigate = useNavigate();
@@ -60,6 +70,7 @@ export function useGoHomeShortcut(enabled: boolean, homePath: string): void {
     document.addEventListener('keydown', onKeyDown);
     return () => document.removeEventListener('keydown', onKeyDown);
   }, [enabled, homePath, navigate]);
-  useAdvertiseShortcut(GO_HOME_SHORTCUT, enabled);
+  const phone = usePhoneViewport();
+  useAdvertiseShortcut(phone ? GO_HOME_SHORTCUT : GO_TO_APP_START_SHORTCUT, enabled);
 }
 

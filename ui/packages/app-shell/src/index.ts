@@ -408,6 +408,9 @@ export {
   type ChatDockControl,
 } from './layout/chatDockControl.js';
 export type { ChatDockTarget } from './layout/chatDockTarget.js';
+// objectstack#36999 — the one setter every entry point pins a record through
+// (the page chip's pin, the record drawer, the `ask_ai` action); chat-free.
+export { setChatFocus, type ChatFocus } from './layout/chatFocus.js';
 // Conversation-history hydration helpers — reused by the public read-only
 // share page (`/s/:token`) so a shared transcript renders identically to the
 // live chat (tool cards included) instead of dumping raw envelopes.

@@ -134,8 +134,14 @@ vi.mock('../../hooks/useLauncherApps', async (importOriginal) => ({
 
 import { AppHeader } from '../AppHeader';
 import { CommandPaletteProvider } from '../../context/CommandPaletteProvider';
-import { GO_HOME_SHORTCUT, useAdvertisedShortcuts, type ShortcutChord } from '../../chrome/advertisedShortcuts';
+import {
+  GO_HOME_SHORTCUT,
+  useAdvertisedShortcuts,
+  type ShortcutChord,
+  type ShortcutLabelTranslate,
+} from '../../chrome/advertisedShortcuts';
 import { getProductName } from '../../runtime-config';
+import { en } from '@object-ui/i18n';
 import { useGoHomeShortcut } from '../../chrome/goHomeShortcut';
 
 const MEMBER: MePermissionsAuthenticatedResponse = {
@@ -333,5 +339,47 @@ describe('CONTROL — the home page draws the same mark and leaves the chord alo
     const trigger = screen.getByTestId('sidebar-trigger-stub');
     expect(trigger.className.split(/\s+/)).toEqual(expect.arrayContaining(['shrink-0', 'mr-1']));
     expect(trigger.nextElementSibling).toBe(mark());
+  });
+});
+
+describe('the advertised ⌘⇧H row names where the chord goes (objectstack#37149)', () => {
+  /** The English catalogue the shipped console reads, looked up by dotted key. */
+  const english: ShortcutLabelTranslate = (key) =>
+    String(key.split('.').reduce<unknown>((node, part) => (node as Record<string, unknown> | undefined)?.[part], en) ?? key);
+
+  /** The row the keyboard-shortcuts dialog draws for the chord, in English. */
+  function LabelReading() {
+    const row = useAdvertisedShortcuts().find((s) => s.id === GO_HOME_SHORTCUT.id);
+    return <output data-testid="go-home-row" data-label={row ? row.label(english) : ''} />;
+  }
+
+  const realWidth = window.innerWidth;
+  function mountAt(width: number) {
+    Object.defineProperty(window, 'innerWidth', { configurable: true, writable: true, value: width });
+    render(
+      <MemoryRouter initialEntries={['/apps/crm/lead']}>
+        <GoHomeShortcut />
+        <LabelReading />
+      </MemoryRouter>,
+    );
+    return screen.getByTestId('go-home-row').dataset.label;
+  }
+  afterEach(() => {
+    Object.defineProperty(window, 'innerWidth', { configurable: true, writable: true, value: realWidth });
+  });
+
+  // From 768 px up the platform home page is retired: the chord opens where
+  // `/` lands, the last-used app's start page, and the row says so in the
+  // app pill's own words, so the dialog and the pill name one destination.
+  it('on a desktop the row names the app start page, in the app pill\'s words, not a home page', () => {
+    const label = mountAt(1280);
+    expect(label).toBe(english('layout.appSwitcher.backToHome'));
+    expect(label).toBe('Back to app start page');
+    expect(label).not.toMatch(/home/i);
+  });
+
+  it('CONTROL — on a phone, whose Home is still its app list, the row keeps 「Back to home」', () => {
+    expect(mountAt(375)).toBe(english('console.shortcuts.goHome'));
+    expect(english('console.shortcuts.goHome')).toBe('Back to home');
   });
 });

@@ -66,6 +66,16 @@ GET-executes design gets requests approved by robots.
   brute force is not the threat — leaked links are, and those die on
   first use / decision / reassign / expiry).
 
+Note (2026-11-24): comment capture on the confirm page has shipped for
+reject, in PR #36695. A reject link's confirm page carries a required
+reason field, posted as `comment` beside the token, and the decision
+records that text as its comment. A POST whose `comment` is missing, blank
+or not a string is answered the same confirm page again with status `400`:
+nothing is decided and the token is not consumed, so the approver can type
+a reason and send the same link again. An approve link is unchanged: its
+page has no comment field and the decision records the fixed comment "Via
+action link". The first Non-goals bullet above stands as written for v1.
+
 ## Consequences
 
 - The remind nudge becomes genuinely actionable — one tap from the
