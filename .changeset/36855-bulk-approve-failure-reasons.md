@@ -7,6 +7,7 @@ fix(console): a partly failed bulk approve or reject in the Approval Center says
 
 Clause-②: yes (narrowing)
 Metadata-protocol: none
+Skills-docs: none — no page under `skills/` or `content/docs/` names the Approval Center's bulk-failure string or teaches overriding it
 
 <!-- adr-0087: not-required (no-migration-prescription) the narrowing is one console string retired from the approvalsInbox locale namespace of @object-ui/i18n; no packages/spec schema, registered node type, stored row or metadata key names it, nothing a metadata author writes changes, and a host that overrode it has nothing to rewrite: its override is simply no longer shown -->
 
