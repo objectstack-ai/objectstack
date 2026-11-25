@@ -15,7 +15,7 @@ Metadata-protocol: none
 - A condition can read `appName`, `objectName`, `recordId`, `selectionKind` and `userRole`.
 - The client sends all five. A `triggerConditions` entry on any of them, `userRole` included, is routing, never access control: the turn's tools still run under the caller's own permissions.
 
-Paid for in part by deletion in the same file, with the token ceiling unchanged (6801): four passages that restated text the file keeps elsewhere are cut. They are the one-sentence definition of a skill under *Skill Configuration*, the "extend the platform with skills" sentence under *Platform agents*, three restated clauses of the open-edition sentence under the built-in skills table, and the tail of the blueprint's *Central registration* row.
+Paid for in part by deletion in the same file, with the token ceiling unchanged (6801): three passages that restated text the file keeps elsewhere are cut. They are the one-sentence definition of a skill under *Skill Configuration*, the "extend the platform with skills" sentence under *Platform agents*, and three restated clauses of the open-edition sentence under the built-in skills table.
 
 `evals/skills-tools-knowledge.json`, eval 5: its `expected_output` now says the in-app `ask` assistant picks the skill up by surface for the app the user is in, and names the allow-set. Its assertions are unchanged.
 

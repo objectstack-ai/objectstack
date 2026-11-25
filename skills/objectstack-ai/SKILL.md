@@ -132,13 +132,13 @@ a coercion (`packages/spec/src/ai/skill.zod.ts:37-51, 139-202`):
 Nothing matches phrases: write routing as `triggerConditions` and
 natural-language intent in `description` / `instructions`, where the model reads it.
 
-**In the in-app `ask` assistant ☁️** a package skill with `surface` `ask` or
-`both` loads for the app the user is in (the `build` side is not served while
-in-app build is closed), and a tool it names outside the allow-set is dropped
-with a diagnostic. A condition can read `appName`, `objectName`, `recordId`,
+**In-app `ask` assistant ☁️:** a package skill with `surface` `ask` or `both`
+loads for the app the user is in (the `build` side is not served while in-app
+build is closed), and a tool it names outside the allow-set is dropped with a
+diagnostic. A condition can read `appName`, `objectName`, `recordId`,
 `selectionKind` and `userRole`. The client sends all five, so a condition on
-any of them, `userRole` included, is routing, never access control: the turn's
-tools still run under the caller's own permissions.
+any, `userRole` included, is routing, never access control: the turn's tools
+still run under the caller's own permissions.
 
 ---
 
@@ -375,7 +375,7 @@ there is **no top-level `temperature` / `maxTokens`** on an agent
 |:--|:--|:--|
 | Reusable skill | `src/skills/lead-qualification.skill.ts` | `defineSkill` — `instructions` + trigger conditions + a toolset where every name resolves; pick a `surface` |
 | Knowledge source | `src/knowledge/sales-kb.ts` | `KnowledgeSourceSchema` metadata, registered at boot via `KnowledgeServicePlugin({ sources })` |
-| Central registration | `defineStack({ skills: [...] })` | `agents` / `tools` / `skills` are the only AI stack collections — knowledge sources have none |
+| Central registration | `defineStack({ skills: [...] })` | `agents` / `tools` / `skills` are the only AI stack collections — knowledge sources have none, agents are platform-supplied, and `tools` is not the default path |
 
 ---
 
