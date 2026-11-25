@@ -2,6 +2,7 @@
   "description": "Which SOURCE DECLARATION each name exported by one public entry point of @objectstack/spec resolves to, after its alias chain is unwound: `<src path>#<declared name> (<kind>)`. Two exports share an origin string iff they are the same declaration — so equal origins across two entries are a harmless re-export, and different origins under one name are the #4411 dual-source trap. Generated from src/ (no build needed) and read by the export-surface pin tests, which compare against it instead of each building their own ts.createProgram — that was ~55s of compilation per CI lap and a non-deterministic timeout that ejected unrelated PRs from the merge queue (#4796). Sharded by entry point (#5837) so two retirement PRs never share a file. Carries NO line numbers: the pins asserted the line as `\\d+`, and recording it would rewrite this artifact on every edit that shifts a line in any .zod.ts. Regenerate with `pnpm --filter @objectstack/spec gen:export-origins` and read the diff.",
   "entry": "./shared",
   "exports": {
+    "ASCII_RUN_CHARS_PER_TOKEN": "src/shared/token-estimate.ts#ASCII_RUN_CHARS_PER_TOKEN (const)",
     "ApplyProtectionContext": "src/shared/protection.zod.ts#ApplyProtectionContext (interface)",
     "BaseMetadataRecord": "src/shared/metadata-types.zod.ts#BaseMetadataRecord (type)",
     "BaseMetadataRecordSchema": "src/shared/metadata-types.zod.ts#BaseMetadataRecordSchema (const)",
@@ -89,6 +90,7 @@
     "StrictUnknownKeyErrorOptions": "src/shared/suggestions.zod.ts#StrictUnknownKeyErrorOptions (interface)",
     "SystemIdentifier": "src/shared/identifiers.zod.ts#SystemIdentifier (type)",
     "SystemIdentifierSchema": "src/shared/identifiers.zod.ts#SystemIdentifierSchema (const)",
+    "TOKEN_ESTIMATE_MARGIN": "src/shared/token-estimate.ts#TOKEN_ESTIMATE_MARGIN (const)",
     "TYPED_EXPRESSION_DIALECT_ONLY": "src/shared/expression.zod.ts#TYPED_EXPRESSION_DIALECT_ONLY (const)",
     "TYPED_EXPRESSION_SOURCE_REQUIRED": "src/shared/expression.zod.ts#TYPED_EXPRESSION_SOURCE_REQUIRED (const)",
     "TemplateExpressionInput": "src/shared/expression.zod.ts#TemplateExpressionInput (type)",
@@ -102,6 +104,7 @@
     "cel": "src/shared/expression.zod.ts#cel (function)",
     "cron": "src/shared/expression.zod.ts#cron (function)",
     "currencyForLocale": "src/shared/region-currency.ts#currencyForLocale (function)",
+    "estimateTokens": "src/shared/token-estimate.ts#estimateTokens (function)",
     "expression": "src/shared/expression.zod.ts#expression (function)",
     "findClosestMatches": "src/shared/rename-guess.ts#findClosestMatches (function)",
     "formatSuggestion": "src/shared/suggestions.zod.ts#formatSuggestion (function)",

@@ -37,6 +37,7 @@ export const META_URL_TO_SINGULAR: Readonly<Record<string, string>> = Object.fre
   "agents": "agent",
   "tools": "tool",
   "skills": "skill",
+  "aiContexts": "ai_context",
   "hooks": "hook",
   "mappings": "mapping",
   "picklists": "picklist",
@@ -57,6 +58,7 @@ export const META_URL_TO_SINGULAR: Readonly<Record<string, string>> = Object.fre
   "email_templates": "email_template",
   "sharing_rules": "sharing_rule",
   "assignment_rules": "assignment_rule",
+  "ai_contexts": "ai_context",
 });
 
 /**
@@ -96,4 +98,5 @@ export const REGISTRY_DECLARED_META_TYPES: ReadonlyArray<string> = Object.freeze
   "agent",
   "tool",
   "skill",
+  "ai_context",
 ]);

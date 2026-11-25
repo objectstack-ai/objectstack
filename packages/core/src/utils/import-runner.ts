@@ -1120,6 +1120,18 @@ export function runImport(opts: RunImportOptions): Promise<ImportRunSummary> {
       { messageKey: 'import_multi_value_match_key', label: fields.map(fieldLabel).join(', '), field: fields.join(', ') },
       { locale: coerceCtx.locale, translate: coerceCtx.translate },
     );
+  /**
+   * The ROW refusal for a row whose match key finds more than one stored
+   * record (`AMBIGUOUS_MATCH`), read the same way as its siblings above:
+   * `validation.field.import_ambiguous_match`, the key set the row was matched
+   * by in `{{label}}` (field LABELS joined with ` + `) and its API names in
+   * `{{field}}`. Like the siblings, it names no object.
+   */
+  const ambiguousMatchMessage = (keySet: readonly string[]): string =>
+    renderValidationMessage(
+      { messageKey: 'import_ambiguous_match', label: keySet.map(fieldLabel).join(' + '), field: keySet.join(' + ') },
+      { locale: coerceCtx.locale, translate: coerceCtx.translate },
+    );
 
   /**
    * [#26133] The rows of this import that share a match key, each mapped to
@@ -1652,7 +1664,7 @@ export function runImport(opts: RunImportOptions): Promise<ImportRunSummary> {
             ({ match: existing, keySet: matchedKeySet } = await findExisting(data));
             if (existing === 'ambiguous') {
               errCount++;
-              results[i] = { row: rowNo, ok: false, action: 'failed', code: 'AMBIGUOUS_MATCH', error: `matchFields matched more than one ${objectName} record` };
+              results[i] = { row: rowNo, ok: false, action: 'failed', code: 'AMBIGUOUS_MATCH', error: ambiguousMatchMessage(matchedKeySet) };
               handled = true;
             } else if (existing === 'blank' && blankKeyIsRowError) {
               // Ordered key sets: a row no set can identify is an error, never

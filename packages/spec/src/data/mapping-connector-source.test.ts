@@ -49,6 +49,8 @@ const FULL_PULL = {
 const INCREMENTAL_PULL = {
   ...FULL_PULL,
   watermark: { field: 'updated_at', param: 'updated_since' },
+  // [ADR-0153 D3] An incremental pull never sees an absent record: it states how deletes are read.
+  deletedField: 'is_deleted',
 } as const;
 
 function issues(input: unknown) {
@@ -113,6 +115,7 @@ describe('mapping.connectorSource — the shape', () => {
         connector: 'orders_api',
         action: 'request',
         watermark: { field: 'updated_at', param: 'updated_since' },
+        deletePolicy: 'ignore',
       },
     };
     expect(MappingSchema.safeParse(mapping).success).toBe(true);
@@ -188,7 +191,7 @@ describe('mapping.connectorSource — the closed door and what it does not carry
 describe('mapping.connectorSource — executed when a job\'s `pull` drives it: the ledger and the schema say so', () => {
   const LEDGER = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../liveness/mapping.json');
 
-  it('every executed key of the binding is `live`, citing the executor, with no author warning; the ADR-0153 keys are `planned` and warn', () => {
+  it('every executed key of the binding is `live`, citing the executor, with no author warning; `paging` is `planned` and warns', () => {
     type Row = { status: string; evidence?: string; authorWarn?: boolean; authorHint?: string; children?: Record<string, Row> };
     const ledger = JSON.parse(fs.readFileSync(LEDGER, 'utf8')) as { props: Record<string, Row> };
     const EXECUTOR = 'packages/services/service-automation/src/connector-pull.ts#pullConnectorSource';
@@ -209,13 +212,15 @@ describe('mapping.connectorSource — executed when a job\'s `pull` drives it: t
       }
     };
     walk({ connectorSource: row! }, '');
-    // [ADR-0153 D2/D3] Declared spec-first: the P2 engine card's pull reads
-    // them, so each is `planned` and warns its author until then (a `planned`
-    // row may warn; only a `live` one may not).
-    const PLANNED = ['deletePolicy', 'deletedField', 'paging'];
+    // [ADR-0153 D2] Declared spec-first: the paging loop reads it, so it is
+    // `planned` and warns its author until then (a `planned` row may warn;
+    // only a `live` one may not). D3's `deletePolicy` / `deletedField` are
+    // live since the delete marking landed.
+    const PLANNED = ['paging'];
     expect(warned.sort(), 'only the planned rows warn').toEqual(PLANNED.map((k) => `connectorSource.${k}`));
     const children = row!.children!;
-    expect(Object.keys(children).sort()).toEqual(['action', 'connector', 'input', 'recordsPath', 'watermark', ...PLANNED].sort());
+    expect(Object.keys(children).sort())
+      .toEqual(['action', 'connector', 'deletePolicy', 'deletedField', 'input', 'recordsPath', 'watermark', ...PLANNED].sort());
     for (const [key, child] of Object.entries(children)) {
       if (PLANNED.includes(key)) {
         expect(child.status, key).toBe('planned');

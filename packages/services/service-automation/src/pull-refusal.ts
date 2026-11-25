@@ -56,6 +56,16 @@ export type ConnectorPullRefusalReason =
     | 'source_organization_scope_unstated'
     | 'job_organization_missing'
     /**
+     * [ADR-0153 D3] An incremental source (a connector source with a
+     * `watermark`, a datasource source without `full: true`) under
+     * `deletePolicy` absent or `'mark'` with no `deletedField`: it never sees
+     * a row the source deleted, so the policy could mark nothing. Refused
+     * before anything is read, with the sentence its parse refuses it with.
+     * Also a stored `deletePolicy` outside `'mark'` / `'ignore'`, which the
+     * parse refuses as well.
+     */
+    | 'delete_policy_unhonourable'
+    /**
      * [ADR-0153 D7] The run record (`sys_sync_run`) failed the pull, in one of
      * four places. Before any read, so nothing was read: the run row could not
      * be opened (before the mapping is read), could not be told what the pull

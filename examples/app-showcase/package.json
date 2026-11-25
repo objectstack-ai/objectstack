@@ -35,6 +35,7 @@
     "@objectstack/service-datasource": "workspace:*",
     "@objectstack/service-i18n": "workspace:*",
     "@objectstack/service-print": "workspace:*",
+    "@objectstack/service-record-context": "workspace:*",
     "@objectstack/spec": "workspace:*"
   },
   "devDependencies": {

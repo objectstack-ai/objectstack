@@ -6,15 +6,16 @@
  * LICENSE file in the root directory of this source tree.
  */
 
-import { useId, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { useCallback, useId, useMemo, useState, type ReactNode } from 'react';
+import { Link, useParams } from 'react-router-dom';
 import { ArrowRight, ChevronDown, ChevronRight, Search } from 'lucide-react';
 import { useObjectTranslation } from '@object-ui/i18n';
 import { AppDocsBackLink } from './AppDocsBackLink';
-import type { AppDocsBackTo } from './useAppDocsBackTo';
+import { useAppDocsBackTo, type AppDocsBackTo } from './useAppDocsBackTo';
 import { BookSidebar } from './BookSidebar';
 import { bookArticles, filterBookArticles } from './docs-reading';
-import type { ResolvedBook } from './book-nav';
+import { bookSlug, labelUncategorized, pkgOfBook, resolveBookTree, type ResolvedBook } from './book-nav';
+import { useBookData } from './use-book-data';
 
 /** One book of the column: its resolved spine and its URL segment. */
 export interface DocsNavBook {
@@ -126,5 +127,57 @@ export function DocsNav({
         </Link>
       </div>
     </div>
+  );
+}
+
+/**
+ * Every book of package `pkg`, resolved for the column (objectstack#35424):
+ * the reader's books, and those of an app's other docs pages. Empty with no
+ * package.
+ */
+export function usePackageDocsNavBooks(pkg: string | undefined): DocsNavBook[] {
+  const { t } = useObjectTranslation();
+  const { books, authoredBooks, docs } = useBookData();
+  const uncategorizedLabel = t('help.uncategorized', { defaultValue: 'Uncategorized' });
+  return useMemo(() => {
+    if (!pkg) return [];
+    return books
+      .filter((b) => pkgOfBook(b) === pkg)
+      .map((b) => ({
+        slug: bookSlug(b),
+        book: labelUncategorized(resolveBookTree(b, docs, undefined, authoredBooks), uncategorizedLabel),
+      }));
+  }, [books, authoredBooks, docs, pkg, uncategorizedLabel]);
+}
+
+/**
+ * The column as the shell sidebar carries it (objectstack#37150): the same
+ * column, under its own navigation landmark.
+ */
+export function DocsNavLandmark({ children }: { children: ReactNode }) {
+  const { t } = useObjectTranslation();
+  return (
+    <nav aria-label={t('help.docsNavigation', { defaultValue: 'Documentation navigation' })} className="pt-2">
+      {children}
+    </nav>
+  );
+}
+
+/**
+ * The column of an app's docs page other than the reader (the app's docs
+ * index, a book with no articles, a book or doc not found): the app's books,
+ * the way back to the app and all documentation. The reader builds its own,
+ * from the book its article is in.
+ */
+export function AppDocsNav() {
+  const { appName, slug } = useParams<{ appName?: string; slug?: string }>();
+  const books = usePackageDocsNavBooks(appName);
+  const backTo = useAppDocsBackTo();
+  const docHref = useCallback(
+    (bookSegment: string, doc: string) => `/apps/${appName}/docs/${bookSegment}/${doc}`,
+    [appName],
+  );
+  return (
+    <DocsNav books={books} currentSlug={slug} docHref={docHref} backTo={backTo} allDocsHref="/docs" />
   );
 }

@@ -5,11 +5,14 @@
  * the real engine and a real run, is pinned in `flow-route.integration.test.ts`;
  * these are the cases a real run reaches rarely or slowly: rounds, other runs,
  * outcomes that are not a pass, and each kind of branch the walk refuses to
- * decide.
+ * decide. [#35863] Then where a decided request's approval stands now
+ * (`routeOutcome`): what the run's later rows and its end say, and the cases
+ * where they say nothing; and which flows can start a child run, whose
+ * requests those rows never hold (`flowHostsChildRuns`).
  */
 
 import { describe, it, expect } from 'vitest';
-import { flowRoute, passedSteps, stepsAhead, type RouteFlowGraph } from './approval-route.js';
+import { flowHostsChildRuns, flowRoute, passedSteps, routeOutcome, stepsAhead, type RouteFlowGraph } from './approval-route.js';
 
 const label = (id: string) => id.toUpperCase();
 const row = (flow_node_id: string, status: string, created_at: string, id = `${flow_node_id}@${created_at}`) =>
@@ -144,5 +147,103 @@ describe('flowRoute — the whole route', () => {
 
   it('a row with no node has no route', () => {
     expect(flowRoute({ id: 'x', status: 'pending' }, LINE, runRows, label)).toBeUndefined();
+  });
+});
+
+describe('[#35863] routeOutcome — where the record\'s approval stands after a decided request', () => {
+  const decided = (status: string, created_at = at(2)) => ({ id: `a@${created_at}`, status, created_at });
+
+  it('a later request pending: the approval went on to that step and waits, whatever the run says', () => {
+    const rows = [row('a', 'approved', at(2)), row('b', 'pending', at(3))];
+    expect(routeOutcome(decided('approved'), rows, false, label)).toEqual({
+      step: { id: 'b', label: 'B' }, status: 'pending', ended: false,
+    });
+  });
+
+  it('the last step decided and the run ended: the approval ended with that step\'s decision', () => {
+    for (const status of ['approved', 'rejected'] as const) {
+      const rows = [row('a', 'approved', at(2)), row('b', status, at(3))];
+      expect(routeOutcome(decided('approved'), rows, true, label), status).toEqual({
+        step: { id: 'b', label: 'B' }, status, ended: true,
+      });
+    }
+  });
+
+  it('no later request and the run ended: the approval ended at this request, with its own decision', () => {
+    for (const status of ['approved', 'rejected', 'recalled', 'cancelled'] as const) {
+      expect(routeOutcome(decided(status), [row('a', status, at(2))], true, label), status).toEqual({ status, ended: true });
+    }
+  });
+
+  it('no later request and the run not ended: nothing is known past this request, so no outcome', () => {
+    expect(routeOutcome(decided('returned'), [row('a', 'returned', at(2))], false, label)).toBeUndefined();
+    expect(routeOutcome(decided('approved'), [], false, label)).toBeUndefined();
+  });
+
+  it('a later round of the same node counts: a returned request resubmitted waits at its own step again', () => {
+    const rows = [row('a', 'returned', at(2)), row('a', 'pending', at(3))];
+    expect(routeOutcome(decided('returned'), rows, false, label)).toEqual({
+      step: { id: 'a', label: 'A' }, status: 'pending', ended: false,
+    });
+  });
+
+  it('a pending later request wins over a decided one opened after it; else the latest decided one', () => {
+    const rows = [row('b', 'pending', at(3)), row('c', 'rejected', at(4))];
+    expect(routeOutcome(decided('approved'), rows, false, label)?.step?.id).toBe('b');
+    const decidedOnly = [row('c', 'approved', at(4)), row('b', 'approved', at(3))];
+    expect(routeOutcome(decided('approved'), decidedOnly, true, label)?.step?.id).toBe('c');
+  });
+
+  it('several later requests pending at once (parallel steps): no single step, no outcome', () => {
+    const rows = [row('b', 'pending', at(3)), row('c', 'pending', at(3))];
+    expect(routeOutcome(decided('approved'), rows, false, label)).toBeUndefined();
+  });
+
+  it('earlier rows, the request itself, and rows with no node, time or status are not later requests', () => {
+    const rows = [
+      row('z', 'pending', at(1)),
+      { id: 'a@' + at(2), flow_node_id: 'a', status: 'pending', created_at: at(5) },
+      { id: 'n1', status: 'pending', created_at: at(3) },
+      { id: 'n2', flow_node_id: 'b', status: 'pending' },
+      { id: 'n3', flow_node_id: 'b', created_at: at(3) },
+    ];
+    expect(routeOutcome(decided('approved'), rows, false, label)).toBeUndefined();
+    expect(routeOutcome({ id: 'x', status: 'approved' }, [row('b', 'pending', at(3))], false, label)).toBeUndefined();
+  });
+
+  it('flowRoute carries it on a decided request only, and only when one is known', () => {
+    const rows = [row('a', 'approved', at(2)), row('b', 'pending', at(3))];
+    expect(flowRoute({ id: 'a@' + at(2), flow_node_id: 'a', created_at: at(2), status: 'approved' }, LINE, rows, label)).toEqual({
+      steps: [{ id: 'a', label: 'A', state: 'done' }],
+      ahead: 'decided',
+      outcome: { step: { id: 'b', label: 'B' }, status: 'pending', ended: false },
+    });
+    // A pending request is never handed an outcome, even with the run's rows and an ended run.
+    const pending = flowRoute({ id: 'b@' + at(3), flow_node_id: 'b', created_at: at(3), status: 'pending' }, LINE, rows, label, true);
+    expect(pending && 'outcome' in pending).toBe(false);
+  });
+});
+
+describe('[#35863] flowHostsChildRuns — a flow whose run may file requests under a child run', () => {
+  const node = (id: string, type: string, config?: Record<string, unknown>) => ({ id, type, label: id, ...(config ? { config } : {}) });
+  const region = (...nodes: unknown[]) => ({ nodes, edges: [] });
+
+  it('a subflow or a map node at the top level', () => {
+    expect(flowHostsChildRuns({ nodes: [node('s', 'start'), node('legal', 'subflow'), node('e', 'end')] })).toBe(true);
+    expect(flowHostsChildRuns({ nodes: [node('s', 'start'), node('each', 'map'), node('e', 'end')] })).toBe(true);
+  });
+
+  it('a subflow or a map node inside a container\'s region, at any depth', () => {
+    const inLoop = { nodes: [node('l', 'loop', { body: region(node('legal', 'subflow')) })] } as RouteFlowGraph;
+    const inBranch = { nodes: [node('p', 'parallel', { branches: [region(node('a', 'approval')), region(node('each', 'map'))] })] } as RouteFlowGraph;
+    const inCatch = { nodes: [node('t', 'try_catch', { try: region(node('a', 'approval')), catch: region(node('legal', 'subflow')) })] } as RouteFlowGraph;
+    const nested = { nodes: [node('l', 'loop', { body: region(node('t', 'try_catch', { try: region(node('legal', 'subflow')) })) })] } as RouteFlowGraph;
+    for (const flow of [inLoop, inBranch, inCatch, nested]) expect(flowHostsChildRuns(flow)).toBe(true);
+  });
+
+  it('no such node anywhere: approvals, gateways and in-run containers only', () => {
+    expect(flowHostsChildRuns({ nodes: [node('s', 'start'), node('a', 'approval'), node('d', 'decision'), node('e', 'end')] })).toBe(false);
+    expect(flowHostsChildRuns({ nodes: [node('l', 'loop', { body: region(node('a', 'approval')) })] } as RouteFlowGraph)).toBe(false);
+    expect(flowHostsChildRuns({})).toBe(false);
   });
 });

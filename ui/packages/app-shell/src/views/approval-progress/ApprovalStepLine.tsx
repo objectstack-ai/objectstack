@@ -8,7 +8,7 @@
 
 import * as React from 'react';
 import { cn } from '@object-ui/components';
-import { Check, Minus, Undo2, X } from 'lucide-react';
+import { Check, CornerDownRight, Minus, Undo2, X } from 'lucide-react';
 import { useObjectTranslation } from '@object-ui/react';
 import type { ApprovalRequestLite } from '../../hooks/useRecordApprovals.js';
 
@@ -37,6 +37,15 @@ import type { ApprovalRequestLite } from '../../hooks/useRecordApprovals.js';
  * step in progress. One step is then enough to draw: the first step of a flow,
  * or a one-step flow, decided, is still the answer to "where did it stop".
  *
+ * ## Where the approval stands after it (objectstack#35863)
+ *
+ * The decided route stops at the request's own step, so the server adds
+ * `flow_route.outcome`: the run's latest request past this one and whether the
+ * run has ended. The caller hands it in as `outcome`, and one line under the
+ * decided step says it: went on to a later step and waits there, went on and
+ * stands at that step's decision, went on and ended with it, or ended here.
+ * Nothing is drawn when the server serves no outcome: the line never guesses.
+ *
  * ## Vertical, at every step count (objectui#5554)
  *
  * The strip used to be a horizontal row. A row's intrinsic width grows without
@@ -58,11 +67,16 @@ import type { ApprovalRequestLite } from '../../hooks/useRecordApprovals.js';
 /** One approval step of a request's route: its node id, its label and where it stands. */
 export type ApprovalFlowStep = NonNullable<ApprovalRequestLite['flow_route']>['steps'][number];
 
+/** Where the record's approval stands after a decided request (`flow_route.outcome`). */
+export type ApprovalRouteOutcome = NonNullable<NonNullable<ApprovalRequestLite['flow_route']>['outcome']>;
+
 export interface ApprovalStepLineProps {
   /** The served route's steps (`flow_route.steps`), in route order. Fewer than two draws nothing, unless `decided`. */
   steps: ReadonlyArray<ApprovalFlowStep> | null | undefined;
   /** The request's status when its route is decided (`flow_route.ahead === 'decided'`); else absent. */
   decided?: string;
+  /** The served outcome past a decided request (`flow_route.outcome`); drawn only with `decided`. */
+  outcome?: ApprovalRouteOutcome;
 }
 
 /** Whether {@link ApprovalStepLine} draws anything for these props: the one gate on step count. */
@@ -79,7 +93,7 @@ const DECISION_MARKER: Readonly<Record<string, { icon: typeof Check; tint: strin
   cancelled: { icon: Minus, tint: 'bg-muted text-muted-foreground border' },
 };
 
-export const ApprovalStepLine: React.FC<ApprovalStepLineProps> = ({ steps, decided }) => {
+export const ApprovalStepLine: React.FC<ApprovalStepLineProps> = ({ steps, decided, outcome }) => {
   const { t } = useObjectTranslation();
   if (!steps || !stepLineDraws({ steps, decided })) return null;
   // Literal keys, so the call-site i18n gate checks every one.
@@ -93,7 +107,24 @@ export const ApprovalStepLine: React.FC<ApprovalStepLineProps> = ({ steps, decid
       default: return null;
     }
   };
-  return (
+  // The line under the decided step, or null when there is nothing to say.
+  const outcomeText = (o: ApprovalRouteOutcome | undefined): string | null => {
+    if (!decided || !o) return null;
+    const decision = decisionWord(o.status);
+    if (!o.step) {
+      return o.ended ? String(t('approvalsInbox.outcomeEndedHere', { defaultValue: 'The approval ended here' })) : null;
+    }
+    const step = o.step.label;
+    if (o.status === 'pending') {
+      return String(t('approvalsInbox.outcomeWaiting', { step, defaultValue: 'Went on to {{step}}, waiting for a decision' }));
+    }
+    if (!decision) return null;
+    return o.ended
+      ? String(t('approvalsInbox.outcomeEndedAt', { step, decision, defaultValue: 'Went on to {{step}}, then ended: {{decision}}' }))
+      : String(t('approvalsInbox.outcomeNow', { step, decision, defaultValue: 'Went on to {{step}}: {{decision}}' }));
+  };
+  const after = outcomeText(outcome);
+  const list = (
     <ol
       className="flex flex-col"
       aria-label={String(t('approvalsInbox.stepProgress', { defaultValue: 'Approval steps' }))}
@@ -132,5 +163,18 @@ export const ApprovalStepLine: React.FC<ApprovalStepLineProps> = ({ steps, decid
         );
       })}
     </ol>
+  );
+  if (!after) return list;
+  // Outside the list, so assistive tech never counts it as a step.
+  return (
+    <div className="flex flex-col gap-1">
+      {list}
+      <p className="flex items-start gap-2" data-testid="approval-step-outcome" data-outcome={outcome?.status}>
+        <span className="flex w-5 justify-center pt-0.5">
+          <CornerDownRight className="h-3 w-3 text-muted-foreground" aria-hidden />
+        </span>
+        <span className="min-w-0 flex-1 pt-0.5 text-xs text-muted-foreground break-words">{after}</span>
+      </p>
+    </div>
   );
 };
