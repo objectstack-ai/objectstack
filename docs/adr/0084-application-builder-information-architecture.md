@@ -156,7 +156,7 @@ The group's name is decision 11's, not the domain's dictionary word: `system` is
 
 ### Type → group {#type-to-group}
 
-Every type the spec registers, enumerated at `origin/main` `151e8123` from `packages/spec/src/kernel/metadata-plugin.zod.ts#DEFAULT_METADATA_TYPE_REGISTRY` — 32 entries, the same 32 names as the enum `packages/spec/src/kernel/metadata-plugin.zod.ts#MetadataTypeSchema`:
+Every type the spec registers, enumerated at `origin/main` `151e8123` from `packages/spec/src/kernel/metadata-plugin.zod.ts#DEFAULT_METADATA_TYPE_REGISTRY` — 32 entries, the same 32 names as the enum `packages/spec/src/kernel/metadata-plugin.zod.ts#MetadataTypeSchema` *(33 at the 2026-11-25 reading, in the note under the table)*:
 
 | Group | `domain` | Order | Registered type | Tier |
 |---|---|---|---|---|
@@ -192,8 +192,9 @@ Every type the spec registers, enumerated at `origin/main` `151e8123` from `pack
 | **AI** | `ai` | 1 | `agent` 智能体 | 常用 |
 | **AI** | `ai` | 2 | `tool` 工具 | 常用 |
 | **AI** | `ai` | 3 | `skill` 技能 | 常用 |
+| **AI** | `ai` | 4 | `ai_context` *(registered after the ruling — [item 6](#amendment-2026-11-25-silent))* | 高级 |
 
-*(Amended 2026-11-25: the table is redrawn one row per type and gains two columns, **Order** and **Tier** — [Amendment (2026-11-25)](#amendment-2026-11-25). No type changed group, and each group holds the count it held: 数据 Data 7 · 界面 UI 7 · 自动化 Automation 2 · 平台 Platform 7 · 访问 Access 6 · AI 3. Read again at `origin/main` `893eac8b0c`: the same 32 entries, each in the same domain.)*
+*(Amended 2026-11-25: the table is redrawn one row per type and gains two columns, **Order** and **Tier** — [Amendment (2026-11-25)](#amendment-2026-11-25). Read again at `origin/main` `a33691e567`: 33 entries — the 32 of the first reading, each in the domain it had, and `ai_context`, registered `ai` on 2026-11-25 ([ADR-0160](./0160-record-scoped-ai-inquiry.md) D1). No type changed group, and the rows count 数据 Data 7 · 界面 UI 7 · 自动化 Automation 2 · 平台 Platform 7 · 访问 Access 6 · AI 4.)*
 
 The rows are in the menu's order: by group, then by **Order**, which counts inside a group. **Tier** is 常用 Common or 高级 Advanced. The Chinese word beside a registered name is the one the ruling or its proposal uses for that type; a type neither names in Chinese has none. `field` carries no order and no tier because it draws no row (the second reading below).
 
@@ -267,7 +268,7 @@ The six groups of decision 11 stand, and so does the rule that a type's group is
   - AI: 智能体 `agent` · 工具 `tool` · 技能 `skill` — the last visible group
 - **高级 Advanced** — one collapsed fold under the 常用 groups. It holds every other type and every entry that is not a type, each under its group's label, in the order of the [type → group table](#type-to-group). The ruling names three of them: 选项列表 `picklist`, 邮件模板 `email_template`, and 默认共享, the default sharing overview. A 高级 type is drawn by the area's existing rule, when the package holds one.
 
-A group's label is drawn in a tier only where the group has an entry in that tier (§3.3). 平台 Platform holds no 常用 type, so its label is drawn inside the fold alone; AI holds no 高级 type, so it is drawn above the fold alone, the last of the five groups there.
+A group's label is drawn in a tier only where the group has an entry in that tier (§3.3). 平台 Platform holds no 常用 type, so its label is drawn inside the fold alone. AI is the last of the five groups drawn above the fold, and its label is drawn again inside the fold only where a package holds an `ai_context` ([item 6](#amendment-2026-11-25-silent)).
 
 The four [entries that are not a type](#entries-not-a-type) are 高级 on a package. Each is drawn after the types of its group, the default sharing overview before the cross-package directory — where the menu adds them today (§3.4).
 
@@ -292,12 +293,12 @@ The rule sorts the next type; the table records what was ruled. Where the mainta
 | The 2026-11-24 amendment, at "Audience routing" and in [its own table](#amendment-stands): "the menu draws no audience tier" | Replaced: the menu draws two tiers. The sentence beside it stands — the line between audiences runs between Studio and Setup (ADR-0146 D1). |
 | The menu's drawing: six groups, flat | Stands as the six groups and their order. On a package they are drawn in two tiers. |
 | "A type's group is its registered `domain`"; one type, one group; a seventh group is a seventh `domain` value | Stand. A tier is not a group, and no type is listed twice. |
-| The type → group table | Redrawn one row per type, with the Order and Tier columns. No type changed group. |
+| The type → group table | Redrawn one row per type, with the Order and Tier columns. No type changed group. One row is new: `ai_context`, registered that day ([item 6](#amendment-2026-11-25-silent)). |
 | "Which rows the menu draws stays the area's existing rule" | Narrowed: on a package a 常用 type is always drawn. The area's rule stays for the 高级 types, and `field` still draws no row. |
 | The 2026-07-01 "Advanced" — the Settings area's technical tier (TL;DR 5 and 6) | Not brought back. It was an area outside the pillars, and the 2026-11-24 amendment replaced it. 高级 is a fold of the one menu, and every type in it keeps its group. |
 | [ADR-0146](./0146-studio-designs-setup-administers-one-editor-per-item-paired-customize-package.md) D1 | Not edited: it defers the menu to this record. |
 
-### Written here where the ruling was silent (for the approver's merge)
+### Written here where the ruling was silent (for the approver's merge) {#amendment-2026-11-25-silent}
 
 Merging accepts them; an objection names the number.
 
@@ -306,6 +307,7 @@ Merging accepts them; an objection names the number.
 3. **Where the four entries that are not a type sit.** After the types of their group, as §3.4 leaves them. The proposal's per-type table (§2) lists the organization's own flows between `flow` and `job`; this record follows §3.4, so on a package that holds a `job`, that type's entry is drawn above the organization's flows.
 4. **The tiers' English names.** The ruling names the tiers in Chinese. This record writes Common and Advanced, after the two values of the proposal's list (§3.4).
 5. **The table's shape.** One row per type, so that each type carries its own order and tier. Order counts inside a group, because the order of the groups is the six-group table's.
+6. **A type registered after the ruling was written: `ai_context`.** The proposal and the ruling were made on a registry of 32 types. `ai_context`, the context pack of [ADR-0160](./0160-record-scoped-ai-inquiry.md) D1, was registered under `ai` the same day, after both. The maintainer's words on AI are 「AI 应该提到第一层分类，放在最下面」, and the ruling record lists the group's 常用 types as 智能体 · 工具 · 技能: three types, and not this one. Three ruled sentences place it, and they agree: its schema requires one root object, so the first test of the rule sorts it 高级; 高级 holds every type the ruling does not list as 常用; and a type with no row is drawn at the end of its group. The table writes that down as a row — last in AI, 高级 — so that the placement list has a row to mirror. If every AI type is meant to be 常用, the tier of this one row is the word to change.
 
 The ruling also carries, as proposed and not restated here: the menu's visual hierarchy (§3.3), the placement list and its two pins (§3.4), how the fold is opened, remembered and searched (§3.5), and that no address changes (§3.9). Those are the work of #37200 and #37201.
 
