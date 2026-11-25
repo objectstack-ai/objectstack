@@ -44,8 +44,8 @@ are `manifest`, `packages`, `objects`, `objectExtensions`, `picklists`,
 There is deliberately **no** top-level `workflows` or `approvals` collection:
 an approval is a flow with Approval nodes, and record
 state machines are a `state_machine` validation rule on each object.
-A phantom key like `roles:` or `policies:` is **not** a silent
-no-op — the top level refuses it and the stack fails to load.
+A phantom key like `roles:` or `policies:` is refused: the stack
+fails to load.
 
 `queues` declares ownership queues (`defineQueue`, `@objectstack/spec/security`;
 objectstack-data): named sets of people a new record of an `ownership: 'user'`
