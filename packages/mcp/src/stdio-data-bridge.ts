@@ -1418,6 +1418,23 @@ function droppedFieldsMember(dropped: DroppedFieldsEvent[]): { droppedFields?: D
  * bridge produces — the graceful-degradation contract `McpDataBridge` declares,
  * honoured rather than re-decided.
  */
+/**
+ * [ADR-0150 D2/D6, addendum 2026-11-25] The manifest namespace of the package
+ * `packageId` names, from the engine's registry (`getPackage`), or `undefined`:
+ * an engine with no registry, or an id with no package record. A pack whose
+ * package cannot be placed is then spelt by its bare name.
+ */
+function installedPackageNamespaceOf(engine: unknown, packageId: string): string | undefined {
+  let manifest: { namespace?: unknown } | undefined;
+  try {
+    const registry = (engine as { registry?: { getPackage?(id: string): unknown } } | undefined)?.registry;
+    manifest = (registry?.getPackage?.(packageId) as { manifest?: { namespace?: unknown } } | undefined)?.manifest;
+  } catch {
+    return undefined;
+  }
+  return typeof manifest?.namespace === 'string' && manifest.namespace !== '' ? manifest.namespace : undefined;
+}
+
 export function createStdioDataBridge(deps: StdioDataBridgeDeps): McpDataBridge {
   const { engine, metadataService, protocol, resolvePrincipal, keyedDigest, security, schemaReadDelegates } = deps;
   // [#25138] One definition source for the gate, the relation-target gate and
@@ -1893,6 +1910,10 @@ export function createStdioDataBridge(deps: StdioDataBridgeDeps): McpDataBridge 
         }
         return ((await metadataService.list('ai_context')) ?? []).map(stripReadDecorations);
       },
+      // [ADR-0150 D6, addendum 2026-11-25] A package's pack is spelt by its
+      // face `NS-NAME`, as a package-held skill's prompt name is: the engine
+      // here is the `objectql` service, whose registry places the package.
+      packageNamespace: (packageId: string) => installedPackageNamespaceOf(engine, packageId),
       get: (object: string, id: string) => self.get(object, id),
       query: (object: string, o: Parameters<McpDataBridge['query']>[1]) => self.query(object, o),
       fieldVisibilityOf: (object: string) => self.fieldVisibilityOf!(object),

@@ -1,0 +1,38 @@
+[
+  {
+    "id": "doc#0",
+    "documentId": "doc",
+    "index": 0,
+    "content": "本系统支持 OpenAI 的 text-embedding-3-small 模型（版本 v3.2）。"
+  },
+  {
+    "id": "doc#1",
+    "documentId": "doc",
+    "index": 1,
+    "content": "Its input limit is 8192 tokens, e.g. about 12 pages of English text."
+  },
+  {
+    "id": "doc#2",
+    "documentId": "doc",
+    "index": 2,
+    "content": "中文文本的估算偏高，大约是实际值的 1.4 倍。\n他说：“这个限制不会截断文档。”然后又补充道，超出上限的整篇文档会被移出索引并报告失败。"
+  },
+  {
+    "id": "doc#3",
+    "documentId": "doc",
+    "index": 3,
+    "content": "Is that a problem? No! It is the safe direction (see the doc page.) for every adapter."
+  },
+  {
+    "id": "doc#4",
+    "documentId": "doc",
+    "index": 4,
+    "content": "配置项 split.maxChars 优先于设置页的 chunk_target；两者都未设置时取 800。"
+  },
+  {
+    "id": "doc#5",
+    "documentId": "doc",
+    "index": 5,
+    "content": "The token budget is 80% of the limit; the character cap still applies."
+  }
+]

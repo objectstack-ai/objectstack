@@ -678,6 +678,9 @@ importers:
       '@objectstack/service-realtime':
         specifier: workspace:*
         version: link:../services/service-realtime
+      '@objectstack/service-record-context':
+        specifier: workspace:*
+        version: link:../services/service-record-context
       '@objectstack/service-settings':
         specifier: workspace:*
         version: link:../services/service-settings
@@ -3744,6 +3747,9 @@ importers:
       '@objectstack/service-realtime':
         specifier: workspace:*
         version: link:../services/service-realtime
+      '@objectstack/service-record-context':
+        specifier: workspace:*
+        version: link:../services/service-record-context
       '@objectstack/service-settings':
         specifier: workspace:*
         version: link:../services/service-settings

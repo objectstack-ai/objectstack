@@ -2753,6 +2753,8 @@ const HISTORY_PACKAGE_SELECTOR_DESCRIPTION =
 export const PACKAGE_SLOTTED_METADATA_TYPES: readonly string[] = Object.freeze([
   'api', 'agent', 'skill', 'action', 'email_template', 'permission', 'flow', 'picklist', 'mapping', 'dataset',
   'webhook', 'tool', 'connector',
+  // [ADR-0150 addendum 2026-11-25] the context pack, one slot per (package, name).
+  'ai_context',
 ]);
 
 /**

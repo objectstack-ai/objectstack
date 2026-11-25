@@ -44,9 +44,6 @@ skill reaches tools by naming them.
 
 ## Skill Configuration
 
-A **Skill** is a named bundle of tools with dedicated instructions and trigger
-conditions.
-
 | Required | Type | Description |
 |:---------|:-----|:------------|
 | `name` | `snake_case` | Unique skill id (`/^[a-z_][a-z0-9_]*$/`) |
@@ -134,6 +131,14 @@ a coercion (`packages/spec/src/ai/skill.zod.ts:37-51, 139-202`):
 
 Nothing matches phrases: write routing as `triggerConditions` and
 natural-language intent in `description` / `instructions`, where the model reads it.
+
+**In-app `ask` assistant ☁️:** a package skill with `surface` `ask` or `both`
+loads for the app the user is in (the `build` side is not served while in-app
+build is closed), and a tool it names outside the allow-set is dropped with a
+diagnostic. A condition can read `appName`, `objectName`, `recordId`,
+`selectionKind` and `userRole`. The client sends all five, so a condition on
+any, `userRole` included, is routing, never access control: the turn's tools
+still run under the caller's own permissions.
 
 ---
 
@@ -379,8 +384,7 @@ there is **no top-level `temperature` / `maxTokens`** on an agent
 The `agent` type is **closed** to third parties (`allowRuntimeCreate:false`,
 `allowEnvironmentOverlay:false`; ADR-0063 §2) and `os g agent` is retired: a
 stack-authored agent is filtered out of `listAgents()`, refused outright by
-`loadAgent()`, and 404s on chat. You extend the platform with **skills**, never
-by adding an agent. `AgentSchema`'s full field list is in
+`loadAgent()`, and 404s on chat. `AgentSchema`'s full field list is in
 [references/_index.md](./references/_index.md).
 
 The runtime ships **exactly two** agents, bound by *surface* — the user never
@@ -410,10 +414,9 @@ every agent referencing it. The built-in skills:
 | `actions_executor` | `ask` | `action_*` (the business actions an object exposes) |
 | `metadata_authoring` + `solution_design` | `build` | metadata draft / verify / publish + blueprint propose / apply |
 
-All four are cloud-runtime skills — none resolves on the open edition, so
-`surface` / `triggerConditions` on your own skills are authored for cloud and
-inert there; their `instructions` are what MCP serves. `tools` binds nothing
-there but is read: `registerSkillPrompts` offers a skill on `prompts/list` /
+None of the four resolves on the open edition, where `surface` /
+`triggerConditions` on your own skills are inert and `tools` binds nothing but
+is read: `registerSkillPrompts` offers a skill on `prompts/list` /
 `prompts/get` only when its server lists every tool the skill binds — a plain
 name by that tool, a wildcard by any match, an `action_*` entry also by
 `run_action`. That covers the HTTP door and any host server that calls it; the

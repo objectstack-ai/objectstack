@@ -169,7 +169,7 @@ function renderAt(path: string) {
     <MemoryRouter initialEntries={[path]}>
       <Where />
       <Routes>
-        <Route path="/studio" element={<div data-testid="studio-landing" />} />
+        <Route path="/studio" element={<div data-testid="studio-entry" />} />
         <Route path="/studio/:packageId/metadata/*" element={<StudioDesignSurface area="metadata" />} />
         <Route path="/studio/:packageId/:tab" element={<StudioDesignSurface />} />
       </Routes>

@@ -9031,12 +9031,12 @@ export class SqlDriver implements IDataDriver {
    * not reading `options` either. Pinned by
    * `sql-driver-option-default-ddl.test.ts`.
    */
-  protected applyDeclaredColumnDefault(col: Knex.ColumnBuilder, field: any, type: string): void {
+  protected applyDeclaredColumnDefault(col: Knex.ColumnBuilder, field: any, type: string, expressionForm: boolean = false): void {
     // [#25521 cut 19] The body moved to `sql-driver-schema-sync.ts` (see `SchemaSyncHost`).
     const host: ThisParameterType<typeof applyDeclaredColumnDefault> = {
-      nowColumnDefault: (...a) => this.nowColumnDefault(...a),
+      knex: this.knex, nowColumnDefault: (...a) => this.nowColumnDefault(...a),
     };
-    return applyDeclaredColumnDefault.call(host, col, field, type);
+    return applyDeclaredColumnDefault.call(host, col, field, type, expressionForm);
   }
 
   // ── Database helpers ────────────────────────────────────────────────────────

@@ -18,6 +18,7 @@ import {
   getRecordContextToolDefinitions,
   recordContextReadSet,
 } from '../index.js';
+import { sentencesFor } from '../sentences.js';
 import { fakeDoor, policyApp, type FakeApp } from './fake-door.js';
 
 const CALL = { objectName: 'policy', recordId: 'p1' };
@@ -175,11 +176,11 @@ describe('get_record_context — the order of judgement (ADR-0160 D4)', () => {
     expect(refused.message).toContain('get_record');
   });
 
-  it('3. several packs on the object are refused, naming them', async () => {
+  it('3. several packs on the object are refused, naming each by its name with its label', async () => {
     const second = { name: 'policy_brief', label: 'Brief', object: 'policy', fields: ['title'] };
     const refused = await refusalOf(run(policyApp({ packs: [...policyApp().packs, second] })));
     expect(refused).toMatchObject({ code: 'VALIDATION_ERROR', status: 400 });
-    expect(refused.message).toContain('policy_brief, policy_document');
+    expect(refused.message).toContain('policy_brief ("Brief"), policy_document ("Policy document")');
   });
 
   it('3. two packs of one name on the object are refused with one answer, named or not, and nothing is read', async () => {
@@ -195,12 +196,17 @@ describe('get_record_context — the order of judgement (ADR-0160 D4)', () => {
     expect(await recordContextReadSet({ objectName: 'policy', context: 'policy_document' }, door)).toEqual({ objects: ['policy'] });
   });
 
-  it('3. a duplicated name beside another pack is listed once; naming another pack still reads it', async () => {
+  it('3. a duplicated name beside another pack: the several answer lists each pack; naming another pack still reads it', async () => {
     const twin = { ...(policyApp().packs[0] as Record<string, unknown>), label: 'Twin' };
     const brief = { name: 'policy_brief', label: 'Brief', object: 'policy', fields: ['title'] };
     const app = policyApp({ packs: [...policyApp().packs, twin, brief] });
     const several = await refusalOf(run(app));
-    expect(several.message).toContain('(policy_brief, policy_document)');
+    expect(several).toMatchObject({ code: 'VALIDATION_ERROR', status: 400 });
+    for (const listed of ['policy_brief ("Brief")', 'policy_document ("Policy document")', 'policy_document ("Twin")']) {
+      expect(several.message).toContain(listed);
+    }
+    const twins = await refusalOf(run(app, { ...CALL, context: 'policy_document' }));
+    expect(twins).toMatchObject({ code: 'RESOURCE_CONFLICT', status: 409 });
     const read = await executeGetRecordContext({ ...CALL, context: 'policy_brief' }, fakeDoor(app));
     expect(read.data).toBeDefined();
   });
@@ -549,5 +555,113 @@ describe('get_record_context — the read set (ADR-0160 D4 ③)', () => {
     const door = fakeDoor(app);
     await executeGetRecordContext(CALL, door).catch(() => undefined);
     for (const { object } of door.asked) expect(objects).toContain(object);
+  });
+});
+
+/**
+ * [ADR-0150 addendum 2026-11-25, reader 1] A pack is identified by
+ * `(package, name)` (bucket 3, beside `skill`). Among the packs rooted on
+ * `objectName`, `context` is read as a skill prompt's name is: a face
+ * (`NS-NAME`) answers its one pack; a bare name resolves by ADR-0150 D3 for a
+ * caller with no package — the environment's own pack, else the one package
+ * holder, else `409` naming each candidate by its face. With `context`
+ * omitted, the several answer lists each pack by its face with its label
+ * (ADR-0160 D4 step 3, as amended 2026-11-25).
+ */
+describe('get_record_context — pack selection by (package, name) (ADR-0150 addendum 2026-11-25)', () => {
+  const CRM = 'com.acme.crm';
+  const HR = 'com.acme.hr';
+  const NAMESPACES = { [CRM]: 'crm', [HR]: 'hr' };
+  const brief = (packageId: string | undefined, label: string, object = 'policy') => ({
+    name: 'brief',
+    label,
+    object,
+    fields: ['title'],
+    ...(packageId !== undefined ? { _packageId: packageId } : {}),
+  });
+  const twoHolders = (overrides: Partial<FakeApp> = {}) =>
+    policyApp({ packs: [brief(CRM, 'Sales brief'), brief(HR, 'People brief')], namespaces: NAMESPACES, ...overrides });
+
+  it('two packages each ship a pack of one name on one root: each is reached by its face', async () => {
+    const crm = await run(twoHolders(), { ...CALL, context: 'crm-brief' });
+    const hr = await run(twoHolders(), { ...CALL, context: 'hr-brief' });
+    expect(crm.data.pack).toEqual({ name: 'brief', label: 'Sales brief' });
+    expect(hr.data.pack).toEqual({ name: 'brief', label: 'People brief' });
+  });
+
+  it('the bare name two packages hold is refused 409, naming both faces, and nothing is read', async () => {
+    const door = fakeDoor(twoHolders());
+    const refused = await refusalOf(executeGetRecordContext({ ...CALL, context: 'brief' }, door));
+    expect(refused).toMatchObject({ code: 'RESOURCE_CONFLICT', status: 409 });
+    expect(refused.message).toContain('crm-brief');
+    expect(refused.message).toContain('hr-brief');
+    expect(door.reads).toEqual([]);
+  });
+
+  it('uninstalling one holder keeps the other: its face and the bare name both reach it', async () => {
+    const left = policyApp({ packs: [brief(CRM, 'Sales brief')], namespaces: NAMESPACES });
+    expect((await run(left, { ...CALL, context: 'crm-brief' })).data.pack.label).toBe('Sales brief');
+    expect((await run(left, { ...CALL, context: 'brief' })).data.pack.label).toBe('Sales brief');
+    expect(await refusalOf(run(left, { ...CALL, context: 'hr-brief' }))).toMatchObject({ code: 'RESOURCE_NOT_FOUND', status: 404 });
+  });
+
+  it('the bare name resolves to the environment\'s own pack first; the package\'s is reached by its face', async () => {
+    const app = policyApp({ packs: [brief(CRM, 'Sales brief'), brief(undefined, 'Our brief')], namespaces: NAMESPACES });
+    expect((await run(app, { ...CALL, context: 'brief' })).data.pack.label).toBe('Our brief');
+    expect((await run(app, { ...CALL, context: 'crm-brief' })).data.pack.label).toBe('Sales brief');
+  });
+
+  it('a package-less row\'s `sys_metadata` stamp is the environment, not a package', async () => {
+    const app = policyApp({
+      packs: [brief(CRM, 'Sales brief'), { ...brief(undefined, 'Our brief'), _packageId: 'sys_metadata' }],
+      namespaces: NAMESPACES,
+    });
+    expect((await run(app, { ...CALL, context: 'brief' })).data.pack.label).toBe('Our brief');
+  });
+
+  it('the root narrows before D3 picks: a holder whose pack roots on another object is no candidate', async () => {
+    const app = policyApp({ packs: [brief(CRM, 'Sales brief'), brief(HR, 'People brief', 'claim')], namespaces: NAMESPACES });
+    expect((await run(app, { ...CALL, context: 'brief' })).data.pack.label).toBe('Sales brief');
+    const elsewhere = await refusalOf(run(app, { ...CALL, context: 'hr-brief' }));
+    const nowhere = await refusalOf(run(app, { ...CALL, context: 'nowhere-brief' }));
+    expect({ ...elsewhere, message: undefined }).toEqual({ ...nowhere, message: undefined });
+    expect(elsewhere).toMatchObject({ code: 'RESOURCE_NOT_FOUND', status: 404 });
+  });
+
+  it('with `context` omitted, the several answer spells each pack as its face, with its label', async () => {
+    const refused = await refusalOf(run(twoHolders()));
+    expect(refused).toMatchObject({ code: 'VALIDATION_ERROR', status: 400 });
+    expect(refused.message).toContain('crm-brief ("Sales brief"), hr-brief ("People brief")');
+  });
+
+  it('the several answer in zh-Hans names each pack by its face with its label', async () => {
+    const refused = await refusalOf(run(twoHolders({ locales: ['zh-CN'] })));
+    expect(refused).toMatchObject({ code: 'VALIDATION_ERROR', status: 400 });
+    expect(refused.message).toContain('crm-brief（“Sales brief”）, hr-brief（“People brief”）');
+  });
+
+  it('a pack with no label is listed by its face alone, in both locales (the fallback)', () => {
+    const packs = [{ face: 'crm-brief', label: 'Sales brief' }, { face: 'hr-brief', label: ' ' }];
+    const en = sentencesFor(['en']).severalPacks('policy', packs);
+    const zh = sentencesFor(['zh-Hans']).severalPacks('policy', packs);
+    expect(en).toContain('crm-brief ("Sales brief"), hr-brief.');
+    expect(zh).toContain('crm-brief（“Sales brief”）, hr-brief。');
+  });
+
+  it('a door that cannot place a package spells every pack by its bare name: a face two holders derive names each holder', async () => {
+    const app = policyApp({ packs: [brief(CRM, 'Sales brief'), brief(HR, 'People brief')] });
+    const named = await refusalOf(run(app, { ...CALL, context: 'brief' }));
+    const omitted = await refusalOf(run(app));
+    for (const refused of [named, omitted]) {
+      expect(refused).toMatchObject({ code: 'RESOURCE_CONFLICT', status: 409 });
+      expect(refused.message).toContain(CRM);
+      expect(refused.message).toContain(HR);
+    }
+  });
+
+  it('the read set names the selected pack by its face', async () => {
+    const door = fakeDoor(twoHolders());
+    expect(await recordContextReadSet({ objectName: 'policy', context: 'hr-brief' }, door)).toEqual({ pack: 'hr-brief', objects: ['policy'] });
+    expect(await recordContextReadSet({ objectName: 'policy', context: 'brief' }, door)).toEqual({ objects: ['policy'] });
   });
 });

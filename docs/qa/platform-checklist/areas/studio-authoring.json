@@ -9,7 +9,7 @@
       "title": "The first-run authoring loop closes: package → object → record → app → publish → end-user, zero code, zero restarts",
       "since": "v16",
       "status": "active",
-      "revision": 15,
+      "revision": 16,
       "priority": "P0",
       "surface": "mixed",
       "personas": ["admin (seeded admin@objectos.ai)", "end user (same account driving the published app)"],
@@ -27,7 +27,7 @@
       },
       "steps": [
         "boot the showcase example (objectstack dev --ui --seed-admin -p <port> -d file:/tmp/<run>/data.db), sign in as admin@objectos.ai/admin123, and note the boot timestamp in the server log (the zero-restart clause reads it later). Run steps[0] to [8] once per locale leg (fixtures.requires[0]): the en leg, then the zh-CN leg, each switched with the avatar-menu language switcher right after sign-in",
-        "Home → the build chip → create a NEW writable package (维修中心 / com.example.repairs, namespace repairs) via the new-package wizard. Type the identifier yourself: since #29734 a Chinese display name derives its id through pinyin (维修中心 gives com.ORG.weixiu-zhongxin, deriveCreatePackageId in ui/packages/app-shell/src/views/metadata-admin/PackageFormDialog.tsx), which is not the id the later steps name, and the namespace derives from the id you type. The build chip has two forms (ui/packages/app-shell/src/console/home/HomePage.tsx): with an agent catalog it reads 'Build an app' (data-testid home-build-app) and opens the Studio landing, where New package opens the wizard; with none it reads 'New in Studio' (home-build-in-studio) and opens Studio with the New package dialog already open, the form QA run #27481 met on the stock showcase. Record which",
+        "Home → the build chip → create a NEW writable package (维修中心 / com.example.repairs, namespace repairs) via the new-package wizard. Type the identifier yourself: since #29734 a Chinese display name derives its id through pinyin (维修中心 gives com.ORG.weixiu-zhongxin, deriveCreatePackageId in ui/packages/app-shell/src/views/metadata-admin/PackageFormDialog.tsx), which is not the id the later steps name, and the namespace derives from the id you type. The build chip has two forms (ui/packages/app-shell/src/console/home/HomePage.tsx): where the agent catalog serves the build agent it reads 'Build an app' (data-testid home-build-app) and opens Studio on the last package you worked in, or Setup → Packages when there is none, where New package opens the wizard; otherwise it reads 'New blank app' (home-build-in-studio) and opens Setup → Packages with the New package dialog already open (the form QA run #27481 met on the stock showcase, then labelled 'New in Studio'). A sign-in without Setup access (setup.access + manage_platform_settings) is sent to Studio's All metadata area instead, which creates no package; use the dev admin. Either way the create lands in Studio on the new package. Record which",
         "Data pillar → new object 'Repair Ticket' (the identifier auto-suggests repair_ticket from the display name, and the dialog PREFIXES it with the package namespace, so the object is named repairs_repair_ticket — the name every later step and clause uses (framework#2694, objectui StudioDesignSurface prefixObjectName). The dialog also carries an OWD (sharing model) choice, pre-selected to the platform's recommended baseline: confirm or change it, then click 'Save as draft', the dialog's confirm button (engine.studio.createDraft; no Studio create dialog has a button named Create)) → add a picklist field Status with 3 values. After a navigation the object surface opens on its Records tab (the Data pillar's default view, ui/packages/app-shell/src/views/studio-design/StudioDesignSurface.tsx); Add field is the Field layout tab's (字段布局, formerly Form) button (where QA run #28545 found it; the Records grid's add-column header carries it too). Each option's stored value derives from its label as you type it — 'In Repair' stores in_repair (ui/packages/app-shell/src/views/metadata-admin/inspectors/ObjectFieldInspector.tsx OptionsEditor) — so overwrite the value wherever the run wants a different one (a short code such as wip), and note the three stored values: acceptance[1] and acceptance[2] read them. There is no Save draft button: the designer autosaves, and a picklist field is held unsaved until it has at least one option (the status line reads 'Not saved yet: the field “Status” needs at least one option'), so add the field and fill its options, and the draft save fires",
         "open the Changes panel and Publish, then confirm with 'Publish all' in the review sheet; the toast names the count — 'Published N items in this package' (N = the drafts promoted), 'Published 1 item in this package' for one (engine.studio.publishedAllCount / publishedAllCountOne, objectui#11807; 'Published all drafts in this package' is the fallback when the count is unknown) — and, because the publish puts an object live, it adds 'Members can use it once a permission set grants them access.' with an 'Open Access' action (StudioDesignSurface.tsx)",
         "create a record in the runtime-faithful Records grid with a Status value chosen",
@@ -101,7 +101,8 @@
         { "revision": 12, "date": "2026-11-04", "change": "acceptance[0].verify re-pointed: the Studio package switcher, which declares the studio-pkg-chip testid, moved unchanged from ui/packages/app-shell/src/views/studio-design/StudioDesignSurface.tsx to PackageSwitcher.tsx beside it (#29988 slice 2, a move-only split). Re-read at base f7aab8958. No clause changed", "ref": "#29988" },
         { "revision": 13, "date": "2026-11-04", "change": "fixtures.knownGaps[3] corrected from QA run #29877 (W5-P0, at 589049b0; the list of record is comment 6600018008 on #27377): the zh-CN leg's acceptance[2] failure is fixed by PR #29790 (#29673 closed), and the run read that leg passing acceptance[2] and [3], so the instruction to score it FAIL citing #29673 is withdrawn and the row is a regression row. Read at base f68b47ca", "ref": "#29906" },
         { "revision":  14, "date":  "2026-11-24", "change":  "steps[5] and knownGaps[1] no longer route through Studio's Interfaces pillar, retired by #36502: the Create-app scaffold (box on) is the nav item, the dialog stays on the Data pillar, and a hand-wired entry is the running app's design-mode menu editor. No clause changed", "ref":  "#36502" },
-        { "revision": 15, "date": "2026-11-24", "change": "steps name the object page tab by its new name, Field layout (字段布局, formerly Form; card #36505).", "ref": "#36505" }
+        { "revision": 15, "date": "2026-11-24", "change": "steps name the object page tab by its new name, Field layout (字段布局, formerly Form; card #36505).", "ref": "#36505" },
+        { "revision": 16, "date": "2026-11-25", "change": "steps[1]: the Studio home is removed (#36908). 'Build an app' opens Studio on the last package, or Setup → Packages when there is none; the other chip reads 'New blank app' and opens Setup → Packages with New package open. There is no Studio landing. Read from source at PR head (HomePage.tsx, useNewPackageDoorPath, studioEntryPermissions.ts). No clause changed", "ref": "#36908" }
       ]
     },
     {
@@ -2270,7 +2271,7 @@
       "title": "Studio asks before an unsent edit is left behind: a held (incomplete) or dirty edit in any pillar survives a pillar switch, a rail switch, the package switcher, Home and a reload — or is discarded only after the author confirms",
       "since": "v18",
       "status": "active",
-      "revision": 11,
+      "revision": 12,
       "priority": "P1",
       "surface": "browser",
       "personas": [
@@ -2280,7 +2281,7 @@
         "app": "showcase",
         "requires": [
           "a fresh boot of the showcase on its own port and DB (dogfood §0) with OS_PORT exported, signed in as the seeded admin, and a console built from this tree with `pnpm console:build` — the root `pnpm build` does not refresh packages/console/dist (QA run #26715 needed the console build on every card)",
-          "a writable package created from the Studio landing (New package) holding one published object with a few fields, one flow, an app whose navigation names one dashboard, and one permission set"
+          "a writable package created from Setup → Packages (New package) holding one published object with a few fields, one flow, an app whose navigation names one dashboard, and one permission set"
         ]
       },
       "steps": [
@@ -2396,7 +2397,8 @@
           "date": "2026-11-24",
           "change": "steps name the object page tab by its new name, Field layout (字段布局, formerly Form; card #36505).",
           "ref": "#36505"
-        }
+        },
+        { "revision": 12, "date": "2026-11-25", "change": "fixtures.requires[1]: the writable package is created from Setup → Packages (New package); the Studio landing it named is removed (#36908). steps[2]'s studio-home departure is unchanged here. No clause changed", "ref": "#36908" }
       ]
     },
     {
@@ -2720,7 +2722,7 @@
       "title": "Flows outside any package have their own Studio scope: /studio/~org offers only the Automations pillar, lists only package-less flows, opens them editable, saves drafts bound to no package and publishes each by reference",
       "since": "v18",
       "status": "active",
-      "revision": 4,
+      "revision": 5,
       "priority": "P2",
       "surface": "mixed",
       "personas": [
@@ -2734,7 +2736,7 @@
         ]
       },
       "steps": [
-        "with no package-less flow yet, open /_console/studio: the landing draws no 'Flows in no app' entry (it is drawn only when there is at least one such flow, with the count); open /_console/studio/~org/automations directly: it offers one pillar only, no Create app, and an empty state that names the way to change a packaged flow ('No flows outside a package. To change a packaged flow, open its package and use New similar.', engine.studio.org.none) with no action and no link out of Studio (StudioDesignSurface.tsx, the auto-empty state: since ADR-0146 D11 no Setup page copies into this scope)",
+        "with no package-less flow yet, open /_console/studio/~org/automations directly (the Studio left menu carries its entry under Automations since #36899; the Studio home that drew a 'Flows in no app' card was removed by #36908): it offers one pillar only, no Create app, and an empty state that names the way to change a packaged flow ('No flows outside a package. To change a packaged flow, open its package and use New similar.', engine.studio.org.none) with no action and no link out of Studio (StudioDesignSurface.tsx, the auto-empty state: since ADR-0146 D11 no Setup page copies into this scope)",
         "write the package-less flow (fixtures.requires[1]); reload: the rail lists qa_org_raw and none of the showcase's packaged flows; GET /api/v1/meta/flow?package=com.example.showcase omits it, the unscoped list includes it",
         "open it: the canvas and the Enabled switch are editable; change a node label; let the autosave land; read GET /api/v1/meta/_drafts?type=flow — the draft row carries no package",
         "Publish → the review sheet lists only package-less flow drafts → Publish all; capture the network trace",
@@ -2770,7 +2772,7 @@
       ],
       "automated": {
         "kind": "unit",
-        "ref": "ui/packages/app-shell/src/views/studio-design/StudioDesignSurface.packageLessFlows-11553.test.tsx (lists the clone only, opens it editable, one pillar, publishes by reference and nothing through the batch door) + BuilderLanding.orgScope-11553.test.tsx: jsdom evidence for all three clauses at the component layer; the live server reads stay the run's"
+        "ref": "ui/packages/app-shell/src/views/studio-design/StudioDesignSurface.packageLessFlows-11553.test.tsx (lists the clone only, opens it editable, one pillar, publishes by reference and nothing through the batch door): jsdom evidence for all three clauses at the component layer; the live server reads stay the run's"
       },
       "source": [
         "ui/packages/app-shell/src/views/studio-design/StudioDesignSurface.tsx (readOnly is false for the package-less scope, objectui#11553; doPublish promotes package-less flow drafts one by one through publishDraft)",
@@ -2792,7 +2794,8 @@
           "ref": "#28345"
         },
         { "revision": 3, "date": "2026-11-03", "change": "fixtures.requires[1] names a fixture that still makes a package-less flow, and steps[0], steps[1], steps[4], acceptance[0].verify and source[1] follow it. Since #28149 (ADR-0146 D4) the clone door lands its copy in the source's pair <base>.custom, so QA run #29672's clone of showcase_urgent_task_alert answered packageId com.example.showcase.custom and made no package-less flow; the run substituted PUT /api/v1/meta/flow/qa_org_raw naming no package (200) and passed every clause on it. Read at base 339f63da30: ADR-0146 D11 closes a package-less write only onto an item a code package ships (packagelessOverlayWriteRefusal), so a fresh name stays writable, and a PUT with no ?mode= is an active save (meta-save-request.ts). The same run found steps[0]'s empty state stale: it now reads engine.studio.org.none with no Open in Setup link (StudioDesignSurface.tsx). The clauses are unchanged. Card #29679, from QA run #29672", "ref": "#29679" },
-        { "revision": 4, "date": "2026-11-17", "change": "steps[0] no longer opens a landing entry when there is no package-less flow: since #34715 the Studio landing draws its 'Flows in no app' entry (formerly 'Organization flows') only when at least one such flow exists, with the count, so the step reads the entry's absence and opens the scope by its URL. The clauses are unchanged. Card #34715", "ref": "#34715" }
+        { "revision": 4, "date": "2026-11-17", "change": "steps[0] no longer opens a landing entry when there is no package-less flow: since #34715 the Studio landing draws its 'Flows in no app' entry (formerly 'Organization flows') only when at least one such flow exists, with the count, so the step reads the entry's absence and opens the scope by its URL. The clauses are unchanged. Card #34715", "ref": "#34715" },
+        { "revision": 5, "date": "2026-11-24", "change": "steps[0] opens the scope by its URL alone and names its menu entry: the Studio home, whose 'Flows in no app' card it read, was removed (#36908), and the left menu carries the entry since #36899. automated.ref drops the deleted home pin. The clauses are unchanged. Card #36908", "ref": "#36908" }
       ]
     },
     {
@@ -5096,10 +5099,10 @@
     },
     {
       "id": "studio-authoring.package-customization-counts-and-marks",
-      "title": "The Studio landing says 'n customized, m switched off' for each read-only base, and the All metadata lists mark the pair's items 'Customized' or 'Added' with an 'only customizations' filter — every number read from GET /packages/:id/customizations",
+      "title": "Setup → Packages says 'n customized, m switched off' in each read-only base's detail, and the All metadata lists mark the pair's items 'Customized' or 'Added' with an 'only customizations' filter — every number read from GET /packages/:id/customizations",
       "since": "v18",
       "status": "active",
-      "revision": 3,
+      "revision": 4,
       "priority": "P2",
       "surface": "mixed",
       "personas": [
@@ -5118,17 +5121,17 @@
       },
       "steps": [
         "GET /api/v1/packages/com.example.showcase/customizations and record counts.overrides, counts.extensions and counts.switchedOff and the listed items",
-        "open /_console/studio and read the read-only showcase card's line (data-testid studio-landing-customizations, data-state read), its pair link (studio-landing-customizations-pair) and its switched-off link (studio-landing-customizations-switched-off)",
+        "open /_console/apps/setup/component/developer/packages?face=admin, open the showcase row's detail and read its customizations section (data-testid pkg-detail-customizations-summary, data-state read), its rows (pkg-detail-customization, data-mode changed / added / arranged / switchedOff) and its Customize in Studio link (pkg-detail-customize)",
         "open /_console/studio/com.example.showcase/metadata: read the directory total (directory-customizations-total) and the per-type tile counts",
         "open the dashboard list of that area: read the mark on the overridden dashboard and on the pair's added item (customization-mark), then switch on the 'only customizations' filter (metadata-only-customizations) and read what remains",
-        "control: open the landing and a writable package's All metadata area with the network panel recording — the landing asks for no writable card, and the area's read of the writable package draws no line, no mark and no filter; and GET /api/v1/packages/com.example.showcase.custom/customizations"
+        "control: open an authored (writable) package's detail on the same page and a writable package's All metadata area with the network panel recording — the detail draws no customizations section and asks nothing, and the area's read of the writable package draws no line, no mark and no filter; and GET /api/v1/packages/com.example.showcase.custom/customizations"
       ],
       "acceptance": [
         {
-          "clause": "the landing line reads 'n customized, m switched off' where n = counts.overrides + counts.extensions and m = counts.switchedOff of the served read — no number of the console's own",
+          "clause": "the detail's line reads 'n customized, m switched off' where n = counts.overrides + counts.extensions + counts.arrangements (#36833: an arrangement is a customization) and m = counts.switchedOff of the served read — no number of the console's own",
           "oracle": "dom",
           "verify": "after a screenshot confirms the card rendered, the line's numbers equal step 1's served counts (fetchPackageCustomizations computes none); the pair link's href names com.example.showcase.custom, and following it lands on the base's Studio (/_console/studio/com.example.showcase/data: Studio redirects a pair URL to its base, customizationPairBaseOf, ADR-0146 D3), whatever its title 'Open the customization package … in Studio' says; the switched-off link opens the Automations pillar",
-          "evidence": "the served read + the landing DOM read"
+          "evidence": "the served read + the detail DOM read"
         },
         {
           "clause": "the All metadata area marks the pair's items — an override 'Customized', an item the pair adds 'Added' — and the 'only customizations' filter leaves exactly those; the directory's total and tiles match the served read",
@@ -5137,9 +5140,9 @@
           "evidence": "the directory and list DOM reads beside step 1"
         },
         {
-          "clause": "a failed read draws no number and no mark — never a '0' — the landing asks for read-only bases only, a package with nothing customized draws nothing, and a pair id is never asked",
+          "clause": "a failed read draws no number and no mark — never a '0' — the detail asks for read-only bases only, a package with nothing customized draws nothing, and a pair id is never asked",
           "oracle": "network",
-          "verify": "step 5: the landing sends no customizations request for a writable card; the All metadata area of a writable package reads its customizations (usePackageCustomizations asks every package but a pair; metadataAreaHost.customizations-28568 pins that read for a package with no pair) and, the counts being zero, draws no total, no mark and no filter; the pair id answers 400 VALIDATION_ERROR naming its base (the console refuses it before sending). A failed read shows the muted couldn't-read line with the server's sentence, never a count — not staged live: BuilderLanding.customizationCounts-28566 and metadataAreaHost.customizations-28568 pin it",
+          "verify": "step 5: the detail sends no customizations request for a writable package; the All metadata area of a writable package reads its customizations (usePackageCustomizations asks every package but a pair; metadataAreaHost.customizations-28568 pins that read for a package with no pair) and, the counts being zero, draws no total, no mark and no filter; the pair id answers 400 VALIDATION_ERROR naming its base (the console refuses it before sending). A failed read shows the muted couldn't-read line with the server's sentence, never a count — not staged live: PackageCustomizationsPanel.test.tsx and metadataAreaHost.customizations-28568 pin it",
           "evidence": "the network trace + the pair-id refusal body"
         }
       ],
@@ -5153,10 +5156,10 @@
       ],
       "automated": {
         "kind": "unit",
-        "ref": "ui/packages/app-shell/src/views/studio-design/BuilderLanding.customizationCounts-28566.test.tsx + customizationMarks.test.ts + ui/packages/app-shell/src/views/metadata-admin/metadataAreaHost.customizations-28568.test.tsx (jsdom against a mocked read: acceptance[0]–[2]'s console half) + packages/runtime/src/domains/packages-customizations.test.ts (the route's three lists and counts, and the AGREEMENT that every listed override is the layered read's overlay). No pin reads a live deployment, and the live spec of #28579 slice 3 (ui/e2e/live/studio-customize-journey.spec.ts) does not read the counts or the marks, so every browser and api clause is the run's live leg"
+        "ref": "ui/packages/app-shell/src/views/studio-design/PackageCustomizationsPanel.test.tsx + customizationMarks.test.ts + ui/packages/app-shell/src/views/metadata-admin/metadataAreaHost.customizations-28568.test.tsx (jsdom against a mocked read: acceptance[0]–[2]'s console half) + packages/runtime/src/domains/packages-customizations.test.ts (the route's three lists and counts, and the AGREEMENT that every listed override is the layered read's overlay). No pin reads a live deployment, and the live spec of #28579 slice 3 (ui/e2e/live/studio-customize-journey.spec.ts) does not read the counts or the marks, so every browser and api clause is the run's live leg"
       },
       "source": [
-        "ui/packages/app-shell/src/views/studio-design/packageCustomizations-io.ts#fetchPackageCustomizations (GET /api/v1/packages/:id/customizations, judged by GetPackageCustomizationsResponseSchema; a pair id refused before a request) + ui/packages/app-shell/src/views/studio-design/BuilderLanding.tsx#BuilderLanding (the card's line)",
+        "ui/packages/app-shell/src/views/studio-design/packageCustomizations-io.ts#fetchPackageCustomizations (GET /api/v1/packages/:id/customizations, judged by GetPackageCustomizationsResponseSchema; a pair id refused before a request) + ui/packages/app-shell/src/views/studio-design/PackageCustomizationsPanel.tsx#PackageCustomizationsPanel (the detail's line and rows)",
         "ui/packages/app-shell/src/views/studio-design/customizationMarks.ts#customizationMarkOf + ui/packages/app-shell/src/views/studio-design/CustomizationMark.tsx#CustomizationMark + ui/packages/app-shell/src/views/metadata-admin/ResourceListPage.tsx (the only-customizations filter) + ui/packages/app-shell/src/views/metadata-admin/DirectoryPage.tsx (the total and the tile counts)",
         "docs/adr/0146-studio-designs-setup-administers-one-editor-per-item-paired-customize-package.md D3 (one line per package on the landing) and D8 item 4 (the per-package customization read)",
         "#28566 (N-24) landed by PR #28634; #28568 (N-26b) by PR #28667; the read #28411 (N-15)"
@@ -5179,6 +5182,12 @@
           "date": "2026-11-04",
           "change": "acceptance[0].verify and fixtures.requires[2] corrected from QA run #29893 (W5-STUDIO, at 589049b0): the pair link's href names the pair, but Studio redirects a pair URL to its base (customizationPairBaseOf), and the pair-added fixture item may be written by API. Read at base f68b47ca",
           "ref": "#29906"
+        },
+        {
+          "revision": 4,
+          "date": "2026-11-24",
+          "change": "the line moved from the removed Studio home to the read-only base's detail in Setup → Packages (#36908): title, steps[1], steps[4], acceptance[0] and [2], automated.ref and source re-pointed; acceptance[0] now counts counts.arrangements in n (#36833's requirement; that card was closed as not planned, and #36908 delivers it in the panel's new home). The All metadata half is unchanged",
+          "ref": "#36908"
         }
       ]
     },

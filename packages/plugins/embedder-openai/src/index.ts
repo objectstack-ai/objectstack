@@ -229,7 +229,14 @@ export class OpenAIEmbedder implements IEmbedder {
   private readonly requestedDims?: number;
   private readonly extraHeaders: Record<string, string>;
   private readonly maxBatchSize: number;
-  private readonly maxInputTokens: number | undefined;
+  /**
+   * `IEmbedder.maxInputTokens`: the longest input this embedder sends, in
+   * tokens by the shared `estimateTokens` — the `maxInputTokens` option, else
+   * the model's documented limit from the known-model table, else absent (no
+   * limit known). A knowledge adapter reports it to the knowledge service,
+   * whose splitter keeps every passage within it (ADR-0161 K8, item 6).
+   */
+  readonly maxInputTokens?: number;
 
   constructor(opts: OpenAIEmbedderOptions) {
     if (!opts.apiKey) throw new Error('OpenAIEmbedder: apiKey required');

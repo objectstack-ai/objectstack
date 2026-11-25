@@ -133,7 +133,7 @@ vi.mock('@object-ui/app-shell', async (importOriginal) => ({
   // they render at phone width.
   usePhoneViewport: () => true,
   DefaultAppContent: () => null,
-  BuilderLanding: () => null,
+  StudioEntryRedirect: () => null,
   StudioDesignSurface: () => null,
   getProductName: () => 'ObjectOS',
   getFaviconUrl: () => '',

@@ -1,0 +1,32 @@
+[
+  {
+    "id": "doc#0",
+    "documentId": "doc",
+    "index": 0,
+    "content": "The allowance table below applies to every trip that starts after the policy date."
+  },
+  {
+    "id": "doc#1",
+    "documentId": "doc",
+    "index": 1,
+    "content": "| City tier | Lodging per night | Meals per day | Notes |\n| --- | --- | --- | --- |\n| Tier 1 | 600 | 100 | Beijing, Shanghai, Guangzhou, Shenzhen |\n| Tier 2 | 450 | 80 | Provincial capitals and planned cities |\n| Tier 3 | 350 | 60 | Every other prefecture-level city |"
+  },
+  {
+    "id": "doc#2",
+    "documentId": "doc",
+    "index": 2,
+    "content": "| City tier | Lodging per night | Meals per day | Notes |\n| --- | --- | --- | --- |\n| Overseas A | 1800 | 300 | North America, Western Europe, Japan |\n| Overseas B | 1200 | 220 | Southeast Asia, Eastern Europe |\n| Overseas C | 900 | 180 | Every other country and region |"
+  },
+  {
+    "id": "doc#3",
+    "documentId": "doc",
+    "index": 3,
+    "content": "- Receipts are required for lodging. A missing receipt is reimbursed at half the tier rate, with a written explanation signed by the traveller."
+  },
+  {
+    "id": "doc#4",
+    "documentId": "doc",
+    "index": 4,
+    "content": "- Meal allowances are paid per calendar day, without receipts.\n\nClaims are filed within thirty days of return."
+  }
+]

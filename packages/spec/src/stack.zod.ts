@@ -1225,7 +1225,7 @@ const STACK_DEFINITION_COLLECTIONS_SHAPE = {
    * and body text are handed to a model, read as the caller by
    * `get_record_context` (`@objectstack/service-record-context`).
    */
-  aiContexts: z.array(AiContextSchema).optional().describe('AI context packs — the material of one record handed to a model, read as the caller by get_record_context (ADR-0160)'),
+  aiContexts: z.array(AiContextSchema).optional().describe('AI context packs — the material of one record handed to a model, read as the caller by get_record_context (ADR-0160), which is served where `requires` includes `record-context`'),
 
   /**
    * ObjectQL: Data Extensions

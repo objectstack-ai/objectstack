@@ -7,8 +7,13 @@
  * the two places:
  *
  *  1. It reads the open package's published apps and, when the author came
- *     from an app outside the package, that app's menu.
- *  2. It picks the app (decision 6, `studioAppEditSegment`).
+ *     from an app outside the package, that app's menu. A dashboard or a
+ *     report of a customization pair (`<base>.custom`) with no published app
+ *     of its own reads its base's apps instead, one read more: the pair has
+ *     no surface of its own (ADR-0146 D3), and the base's app is the one that
+ *     shows the pair's items.
+ *  2. It picks the app (decision 6, `studioAppEditSegment`), by the same rule
+ *     over the base's apps on the pair leg.
  *  3. It replaces the Studio address with the app's. A dashboard or a report
  *     carries its arrival in the navigation state, so the page opens the
  *     dashboard's edit state or the report's builder as its Edit does, and
@@ -39,6 +44,7 @@ import { ITEM_ONLY_PARAMS, detailListHref } from '../metadata-admin/ResourceDeta
 import { useMetadataAreaHost } from '../metadata-admin/metadataAreaHost.js';
 import { t, useMetadataLocale } from '../metadata-admin/i18n.js';
 import { withStudioReturn } from './studioAddress.js';
+import { customizationPairBaseOf } from './StudioRailCustomizations.js';
 import {
   appItemPath,
   appNewReportPath,
@@ -95,19 +101,30 @@ export function StudioAreaAppOpen({
           return;
         }
       }
-      let apps: StudioAppTarget[];
-      try {
-        const listed = (await client.list('app', { packageId })) as Array<Record<string, unknown>>;
-        apps = (listed || [])
-          .filter((a) => typeof a?.name === 'string' && a.name)
-          .map((a) => ({ name: String(a.name), label: (a.label ?? a.name) as StudioAppTarget['label'] }));
-      } catch {
-        apps = [];
+      const readApps = async (scope: string): Promise<StudioAppTarget[]> => {
+        try {
+          const listed = (await client.list('app', { packageId: scope })) as Array<Record<string, unknown>>;
+          return (listed || [])
+            .filter((a) => typeof a?.name === 'string' && a.name)
+            .map((a) => ({ name: String(a.name), label: (a.label ?? a.name) as StudioAppTarget['label'] }));
+        } catch {
+          return [];
+        }
+      };
+      // The package whose apps the item opens in: the open package, or, for
+      // an item of a pair with no app of its own, the pair's base.
+      let appPackageId = packageId;
+      let apps = await readApps(packageId);
+      const pairBase = target.kind === 'item' && apps.length === 0 ? customizationPairBaseOf(packageId) : null;
+      if (pairBase !== null) {
+        if (cancelled) return;
+        appPackageId = pairBase;
+        apps = await readApps(pairBase);
       }
       // The remembered app's own menu counts only for an item, and only when
       // the app is not one of the package's: the package's own apps win first.
       let rememberedMenu: unknown;
-      if (target.kind === 'item' && remembered && !rememberedPackageApp(remembered, packageId, apps)) {
+      if (target.kind === 'item' && remembered && !rememberedPackageApp(remembered, appPackageId, apps)) {
         try {
           const app = (await client.get('app', remembered.app)) as { navigation?: unknown } | null;
           rememberedMenu = app?.navigation;
@@ -118,7 +135,7 @@ export function StudioAreaAppOpen({
       if (cancelled) return;
       const segment =
         target.kind === 'item'
-          ? studioAppEditSegment({ packageId, apps, remembered, rememberedMenu, type, name })
+          ? studioAppEditSegment({ packageId: appPackageId, apps, remembered, rememberedMenu, type, name })
           : studioAppCreateSegment({ packageId, apps, remembered });
       if (!segment) {
         setAnswer('fallback');

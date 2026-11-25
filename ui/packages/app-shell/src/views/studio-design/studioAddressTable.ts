@@ -65,12 +65,17 @@ export interface StudioAddressFamily {
 }
 
 export const STUDIO_ADDRESS_FAMILIES: readonly StudioAddressFamily[] = Object.freeze([
-  { id: 'landing', today: '/studio', builder: 'studioLandingPath', meaning: 'The front door: pick or create a writable package.' },
+  {
+    id: 'landing',
+    today: '/studio',
+    builder: 'studioLandingPath',
+    meaning: "Studio's entry, no page of its own: the package last opened, else the package list (StudioEntryRedirect).",
+  },
   {
     id: 'landing-new-package',
     today: `/studio?${STUDIO_NEW_PARAM}=${STUDIO_NEW_PACKAGE_VALUE}`,
     builder: 'studioLandingPath',
-    meaning: 'The front door with its create-package dialog open.',
+    meaning: "A retired bookmark: Studio's entry forwards it to Setup → Packages with New Package open.",
   },
   { id: 'package', today: '/studio/<package>', builder: 'studioPackagePath', meaning: `A package's Studio; the route lands it on its home, \`${STUDIO_HOME_PILLAR}\`, which redirects to the package's object list (objectstack#36904).` },
   { id: 'pillar', today: '/studio/<package>/<pillar>', builder: 'studioPillarPath', meaning: 'One pillar of a package: data, automations or access.' },
@@ -281,7 +286,7 @@ export const STUDIO_QUERY_PARAMS: readonly StudioQueryParamRow[] = Object.freeze
   {
     key: STUDIO_NEW_PARAM,
     values: STUDIO_NEW_PACKAGE_VALUE,
-    meaning: "The landing's create dialog. Landing only.",
+    meaning: "The retired new-package bookmark; Studio's entry forwards it to Setup's New Package. Entry only.",
     onMetadataAddress: 'verbatim',
     keptOnRetiredInterfaces: false,
   },

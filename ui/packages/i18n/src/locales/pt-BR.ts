@@ -70,6 +70,9 @@ const pt = {
     autofillNoCurrency: '{{field}} não foi preenchido: o valor escolhido é {{amount}}, mas ainda não há moeda escolhida aqui. Escolha a moeda e depois informe {{field}}.',
     autofillCurrencyUnread: '{{field}} não foi preenchido: o valor escolhido é {{amount}}, mas não foi possível ler a moeda aqui. Verifique a moeda e depois informe {{field}}.',
     autofillKept: '{{field}} mantém o valor anterior.',
+    autofillNowSameCurrency: '{{field}} não foi preenchido na escolha. O registro agora está em {{to}}: escolha novamente para preencher {{amount}}.',
+    autofillNowSameCurrencyHeld: '{{field}} não foi preenchido na escolha e mantém o valor anterior. O registro agora está em {{to}}: limpe {{field}} e escolha novamente para preencher {{amount}}.',
+    autofillCopiedUnder: '{{field}} foi copiado como {{amount}}, mas o registro agora está em {{to}}. Informe {{field}} em {{to}} se precisar mudar.',
   },
   common: {
     // objectui#13461 — a disclosure toggle's name (the tree-view node toggle).
@@ -691,6 +694,7 @@ const pt = {
       needsWholeRows:
         "O agrupamento precisa de todos os registros, mas esta grade recebeu apenas uma página deles, portanto os grupos não podem ser contados. Entregue todos os registros ou deixe a grade buscá-los em uma fonte de dados que implemente queryGroupHeaders.",
       draftOnly: "Não agrupado por {{fields}}: existe apenas no rascunho até você publicar.",
+      moreGroupsNotLoaded: "Mais grupos não foram carregados: esta visualização tem mais grupos do que o servidor retorna em uma leitura, então apenas alguns são listados.",
     },
     // objectui#4024 — column-footer aggregate prefixes, keyed by the spec's
     // `ColumnSummary` vocabulary. `pattern` owns the label/value join so this
@@ -2568,6 +2572,7 @@ const pt = {
       unavailableTitle: "Assistente de IA indisponível",
       unavailableDescription: "Esta implantação não tem um assistente de IA habilitado. Todo o resto funciona normalmente.",
       unavailableError: "Não foi possível acessar o serviço de IA. Ele pode estar temporariamente off-line — tente novamente ou volte ao início.",
+      unavailableErrorDesktop: "Não foi possível acessar o serviço de IA. Ele pode estar temporariamente off-line — tente novamente ou volte à página inicial do app.",
       unavailableRetry: "Tentar novamente",
       unavailableHome: "Voltar ao início",
       dock: {
@@ -3809,7 +3814,7 @@ const pt = {
     build: {
       title: "Criar um aplicativo",
       noCapability: "A criação de aplicativos não está disponível neste sistema — ela exige a permissão “Gerenciar metadados”, que sua conta não possui.",
-      inStudio: "Novo no Studio",
+      inStudio: "Novo aplicativo em branco",
     },
     template: {
       title: "Comece com um modelo",
@@ -5265,7 +5270,12 @@ const pt = {
     bulkRejected_one: '{{count}} solicitação rejeitada',
     bulkRejected_many: '{{count}} de solicitações rejeitadas',
     bulkRejected_other: '{{count}} solicitações rejeitadas',
-    bulkPartial: '{{ok}} com sucesso, {{fail}} falharam: {{which}}',
+    bulkPartialSummary: '{{ok}} com sucesso, {{fail}} falharam',
+    bulkFailureLine: '{{title}}: {{reason}}',
+    bulkFailuresShowAll: 'Mostrar todas ({{n}})',
+    bulkFailuresTitle: 'Não decididas: {{n}}',
+    bulkFailuresBody: 'Estas solicitações ficaram como estavam. Cada uma informa o motivo.',
+    close: 'Fechar',
     rejectOneTitle: 'Rejeitar "{{title}}"?',
     rejectOneBody: 'A solicitação será rejeitada e o solicitante notificado.',
     rejectTitle: 'Rejeitar esta solicitação?',

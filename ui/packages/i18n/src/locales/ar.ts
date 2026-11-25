@@ -76,6 +76,9 @@ const ar = {
     autofillNoCurrency: 'لم يُملأ {{field}}: المبلغ المختار هو {{amount}}، لكن لم تُختر عملة هنا بعد. اختر العملة، ثم أدخل {{field}}.',
     autofillCurrencyUnread: 'لم يُملأ {{field}}: المبلغ المختار هو {{amount}}، لكن تعذّرت قراءة العملة هنا. تحقّق من العملة، ثم أدخل {{field}}.',
     autofillKept: 'يحتفظ {{field}} بقيمته السابقة.',
+    autofillNowSameCurrency: 'لم يُملأ {{field}} عند الاختيار. السجل الآن بعملة {{to}}: اختر مرة أخرى لملء {{amount}}.',
+    autofillNowSameCurrencyHeld: 'لم يُملأ {{field}} عند الاختيار ويحتفظ بقيمته السابقة. السجل الآن بعملة {{to}}: امسح {{field}} ثم اختر مرة أخرى لملء {{amount}}.',
+    autofillCopiedUnder: 'نُسخ {{field}} بقيمة {{amount}}، لكن السجل الآن بعملة {{to}}. أدخل {{field}} بعملة {{to}} إذا لزم التغيير.',
   },
   common: {
     // objectui#13461 — a disclosure toggle's name (the tree-view node toggle).
@@ -736,6 +739,7 @@ const ar = {
       needsWholeRows:
         "يتطلب التجميع جميع السجلات، لكن هذه الشبكة تلقّت صفحة واحدة منها فقط، لذا لا يمكن عدّ المجموعات. مرّر جميع السجلات، أو دع الشبكة تجلبها من مصدر بيانات يطبّق queryGroupHeaders.",
       draftOnly: "لم يتم التجميع حسب {{fields}}: هذا الحقل موجود في المسودة فقط حتى تقوم بالنشر.",
+      moreGroupsNotLoaded: "لم يتم تحميل مجموعات أخرى: يحتوي هذا العرض على مجموعات أكثر مما يعيده الخادم في قراءة واحدة، لذا تُعرض بعضها فقط.",
     },
     // objectui#4024 — column-footer aggregate prefixes, keyed by the spec's
     // `ColumnSummary` vocabulary. `pattern` owns the label/value join so this
@@ -2781,6 +2785,7 @@ const ar = {
       unavailableTitle: "مساعد الذكاء الاصطناعي غير متاح",
       unavailableDescription: "لم يتم تمكين مساعد الذكاء الاصطناعي في هذا النشر. وكل شيء آخر يعمل كالمعتاد.",
       unavailableError: "تعذّر الوصول إلى خدمة الذكاء الاصطناعي. قد تكون غير متصلة مؤقتًا — أعد المحاولة أو عد إلى الرئيسية.",
+      unavailableErrorDesktop: "تعذّر الوصول إلى خدمة الذكاء الاصطناعي. قد تكون غير متصلة مؤقتًا — أعد المحاولة أو عد إلى صفحة بدء التطبيق.",
       unavailableRetry: "إعادة المحاولة",
       unavailableHome: "العودة إلى الرئيسية",
       dock: {
@@ -4055,7 +4060,7 @@ const ar = {
     build: {
       title: "إنشاء تطبيق",
       noCapability: "إنشاء التطبيقات غير متاح في هذا النظام — فهو يتطلب إذن «إدارة البيانات الوصفية» الذي لا يملكه حسابك.",
-      inStudio: "إنشاء جديد في Studio",
+      inStudio: "تطبيق فارغ جديد",
     },
     template: {
       title: "ابدأ من قالب",
@@ -5622,7 +5627,12 @@ const ar = {
     bulkRejected_few: 'تم رفض {{count}} طلبات',
     bulkRejected_many: 'تم رفض {{count}} طلبًا',
     bulkRejected_other: 'تم رفض {{count}} طلب',
-    bulkPartial: 'نجح {{ok}}، فشل {{fail}}: {{which}}',
+    bulkPartialSummary: 'نجح {{ok}}، فشل {{fail}}',
+    bulkFailureLine: '{{title}}: {{reason}}',
+    bulkFailuresShowAll: 'عرض الكل ({{n}})',
+    bulkFailuresTitle: 'لم يُبتّ فيها: {{n}}',
+    bulkFailuresBody: 'بقيت هذه الطلبات كما هي. يوضح كل منها السبب.',
+    close: 'إغلاق',
     rejectOneTitle: 'رفض "{{title}}"؟',
     rejectOneBody: 'سيتم رفض الطلب وإخطار مقدمه.',
     rejectTitle: 'رفض هذا الطلب؟',

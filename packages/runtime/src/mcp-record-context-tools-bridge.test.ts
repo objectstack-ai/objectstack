@@ -19,6 +19,12 @@
  * the protocol's served listing decorates with the read path's `_diagnostics`,
  * is the pack `get_record_context` answers through on the `/mcp` route — the
  * door hands the executor the authored pack, not the serving envelope.
+ *
+ * And the two doors over one real kernel for one caller (the last `describe`):
+ * the `/mcp` route and the real `MCPServerPlugin` stdio session, through the
+ * real `record-context` service, answer every case with the same bytes —
+ * refusals included — and a pack saved at run time to the metadata registry
+ * is read as a shipped one is.
  */
 
 import { afterAll, beforeAll, describe, it, expect, vi } from 'vitest';
@@ -31,8 +37,10 @@ import { ObjectQL } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
 import { SecurityPlugin } from '@objectstack/plugin-security';
 import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
-import { MCPServerRuntime } from '@objectstack/mcp';
-import { createRecordContextTools } from '@objectstack/service-record-context';
+import { assembleExecutionContext, resolveAuthzContext } from '@objectstack/core';
+import type { ExecutionContext } from '@objectstack/spec/kernel';
+import { MCPServerPlugin, MCPServerRuntime } from '@objectstack/mcp';
+import { createRecordContextTools, RecordContextServicePlugin } from '@objectstack/service-record-context';
 import { HttpDispatcher } from './http-dispatcher.js';
 import {
     buildMcpBridge,
@@ -107,6 +115,7 @@ describe('[ADR-0160 D4] the MCP bridge\'s record-context members', () => {
             'fieldVisibilityOf',
             'get',
             'listContextPacks',
+            'packageNamespace',
             'publishedObjectDefinitionOf',
             'query',
             'readGuard',
@@ -282,6 +291,383 @@ describe('[ADR-0160 D4] the /mcp route answers through a package pack the real p
         const answer = JSON.parse(result.content[0].text);
         expect(answer.data.pack.name).toBe('rcd_policy_document');
         expect(answer.data.fields.map((f: { name: string; value: unknown }) => [f.name, f.value])).toEqual([
+            ['title', 'Fire cover'],
+            ['status', 'active'],
+        ]);
+    });
+
+    it('[ADR-0150 addendum 2026-11-25] two packages\' packs of one name on one root: each is reached by its face, and the bare name is refused naming both', async () => {
+        for (const [id, namespace, label] of [['com.acme.rcd_sales', 'rcds', 'Sales brief'], ['com.acme.rcd_people', 'rcdp', 'People brief']]) {
+            engine.registerApp({
+                id, name: id, version: '1.0.0', type: 'plugin', scope: 'system', namespace,
+                aiContexts: [{ name: 'rcd_brief', label, object: 'rcd_policy', fields: ['title'] }],
+            } as never);
+        }
+        const dispatcher = new HttpDispatcher(kernel, undefined, { enforceProjectMembership: false });
+        const call = async (context: string) => {
+            const body = {
+                jsonrpc: '2.0', id: 1, method: 'tools/call',
+                params: { name: 'get_record_context', arguments: { objectName: 'rcd_policy', recordId: 'p1', context } },
+            };
+            const res = await dispatcher.handleMcp(body, {
+                request: new Request('http://localhost/api/v1/mcp', {
+                    method: 'POST',
+                    headers: { 'content-type': 'application/json', accept: 'application/json, text/event-stream' },
+                    body: JSON.stringify(body),
+                }),
+                response: {},
+                environmentId: undefined,
+                executionContext: { userId: 'usr_member', tenantId: 'org_1', positions: [], permissions: [], systemPermissions: [] },
+            } as any);
+            expect(res.response?.status).toBe(200);
+            const result = (res.response?.body as any)?.result;
+            return { isError: result?.isError === true, payload: JSON.parse(result.content[0].text) };
+        };
+        const sales = await call('rcds-rcd_brief');
+        expect(sales.isError, JSON.stringify(sales.payload)).toBe(false);
+        expect(sales.payload.data.pack).toEqual({ name: 'rcd_brief', label: 'Sales brief' });
+        const people = await call('rcdp-rcd_brief');
+        expect(people.isError, JSON.stringify(people.payload)).toBe(false);
+        expect(people.payload.data.pack).toEqual({ name: 'rcd_brief', label: 'People brief' });
+        const bare = await call('rcd_brief');
+        expect(bare.isError).toBe(true);
+        expect(bare.payload.error).toMatchObject({ code: 'RESOURCE_CONFLICT', status: 409 });
+        expect(bare.payload.error.message).toContain('rcds-rcd_brief');
+        expect(bare.payload.error.message).toContain('rcdp-rcd_brief');
+    });
+});
+
+/**
+ * [ADR-0149 D7 · ADR-0160 D3/D4] The two MCP doors over ONE real kernel, for
+ * ONE caller: the `/mcp` route (`HttpDispatcher.handleMcp` into the real
+ * `MCPServerRuntime`, this package's HTTP data bridge) and the long-lived
+ * stdio session of the real `MCPServerPlugin` (`createStdioDataBridge`),
+ * both answering through the real `record-context` service
+ * (`RecordContextServicePlugin`) over a real `ObjectQL` on `SqlDriver`, the
+ * real `SecurityPlugin` and the real protocol. Nothing of the metadata plane,
+ * the data plane or the executor is a double.
+ *
+ * The caller is one identity: the stdio session resolves its
+ * `OS_MCP_STDIO_API_KEY` through `resolveAuthzContext` and
+ * `assembleExecutionContext`, and the `/mcp` request is handed the context
+ * those same two calls assemble for the same key. Every case below asks both
+ * doors the same call and requires the same bytes back, refusals included.
+ *
+ * Where `main` differs from ADR-0160 as amended 2026-11-25 (a related child
+ * THIS caller is not served is left out and stated, not refused), the case
+ * pins what the executor does today and says so in its title.
+ */
+describe('[ADR-0149 D7 · ADR-0160 D4] get_record_context over one real kernel: the /mcp door and the stdio door answer one caller with the same bytes', () => {
+    const PKG = 'com.objectstack.qa.record-context-parity';
+    const OFF_PKG = 'com.objectstack.qa.record-context-parity-off';
+    const KEY = 'osk_rc_parity_key_000000000000000000000000';
+    const READ_ALL = { allowRead: true, allowCreate: true, allowEdit: true, allowDelete: true };
+    const READ_NONE = { allowRead: false, allowCreate: false, allowEdit: false, allowDelete: false };
+    let engine: ObjectQL;
+    let protocol: ObjectStackProtocolImplementation;
+    let dispatcher: HttpDispatcher;
+    let caller: ExecutionContext;
+    let rpc: (method: string, params?: unknown) => Promise<any>;
+    /** The execution context the stdio door handed the engine, per object read. */
+    const stdioReads: Array<{ object: string; context: any }> = [];
+
+    beforeAll(async () => {
+        vi.stubEnv('OS_MCP_STDIO_API_KEY', KEY);
+        engine = new ObjectQL();
+        const driver = new SqlDriver({ client: 'better-sqlite3', connection: { filename: ':memory:' }, useNullAsDefault: true } as any);
+        const store = [SysMetadataObject, SysMetadataHistoryObject, SysMetadataAuditObject] as any[];
+        await driver.initObjects(store);
+        engine.registerDriver(driver as any, true);
+        await engine.init();
+        for (const o of store) engine.registry.registerObject(o, '@objectstack/platform-objects');
+        const child = (name: string, label: string, extra: Record<string, unknown> = {}) => ({
+            name, label, nameField: 'version', sharingModel: 'public_read_write', ...extra,
+            fields: {
+                version: { name: 'version', type: 'text', label: 'Version' },
+                policy: { name: 'policy', type: 'lookup', reference: 'rc_policy', label: 'Policy' },
+            },
+        });
+        engine.registerApp({
+            id: PKG, name: 'record context parity', version: '1.0.0', type: 'plugin', scope: 'system',
+            objects: [
+                {
+                    name: 'rc_policy', label: 'Policy', nameField: 'title', sharingModel: 'public_read_write',
+                    fields: {
+                        title: { name: 'title', type: 'text', label: 'Title' },
+                        status: { name: 'status', type: 'select', label: 'Status', options: [{ value: 'active', label: 'Active' }] },
+                        secret_note: { name: 'secret_note', type: 'text', label: 'Secret note' },
+                        vault: { name: 'vault', type: 'lookup', reference: 'rc_vault', label: 'Vault' },
+                        content: { name: 'content', type: 'markdown', label: 'Content' },
+                    },
+                },
+                child('rc_revision', 'Revision'),
+                child('rc_closed', 'Closed', { enable: { apiEnabled: false } }),
+                child('rc_hidden', 'Hidden'),
+                {
+                    name: 'rc_vault', label: 'Vault', sharingModel: 'public_read_write', enable: { apiEnabled: false },
+                    fields: { label: { name: 'label', type: 'text', label: 'Label' } },
+                },
+            ],
+            aiContexts: [
+                {
+                    name: 'rc_main', label: 'Policy document', object: 'rc_policy',
+                    fields: ['title', 'status', 'secret_note', 'vault'],
+                    related: [{ object: 'rc_revision', fields: ['version'] }],
+                    body: { field: 'content' },
+                },
+                { name: 'rc_unserved_child', label: 'Unserved child', object: 'rc_policy', fields: ['title'], related: [{ object: 'rc_hidden', fields: ['version'] }] },
+                { name: 'rc_exposure_child', label: 'Exposure child', object: 'rc_policy', fields: ['title'], related: [{ object: 'rc_closed', fields: ['version'] }] },
+                { name: 'rc_disabled_child', label: 'Disabled child', object: 'rc_policy', fields: ['title'], related: [{ object: 'rc_off', fields: ['version'] }] },
+            ],
+        } as never);
+        engine.registerApp({
+            id: OFF_PKG, name: 'record context parity (off)', version: '1.0.0', type: 'plugin', scope: 'system',
+            objects: [child('rc_off', 'Off')],
+        } as never);
+        await engine.syncSchemas();
+        const sys = { context: { isSystem: true } } as never;
+        await engine.insert('rc_vault', { id: 'v1', label: 'Vault 1', organization_id: 'org_1' }, sys);
+        await engine.insert('rc_policy', {
+            id: 'p1', title: 'Fire cover', status: 'active', secret_note: 'hush', vault: 'v1',
+            content: '# Scope\nCovers fire.\n# Exclusions\nFlood.', organization_id: 'org_1',
+        }, sys);
+        await engine.insert('rc_revision', { id: 'r1', version: 'v1', policy: 'p1', owner_id: 'usr_member', organization_id: 'org_1' }, sys);
+        await engine.insert('rc_revision', { id: 'r2', version: 'v2', policy: 'p1', owner_id: 'usr_other', organization_id: 'org_1' }, sys);
+        await engine.insert('rc_hidden', { id: 'h1', version: 'h', policy: 'p1', organization_id: 'org_1' }, sys);
+        engine.registry.disablePackage(OFF_PKG);
+
+        const sets = [PermissionSetSchema.parse({
+            name: 'rc_member', label: 'Member', isDefault: true,
+            objects: { '*': READ_ALL, rc_hidden: READ_NONE },
+            fields: { 'rc_policy.secret_note': { readable: false, editable: false } },
+            rowLevelSecurity: [{ name: 'rc_own_revisions', object: 'rc_revision', operation: 'select', using: 'owner_id == current_user.id' }],
+        })];
+        const services: Record<string, any> = {
+            manifest: { register: vi.fn() },
+            objectql: engine,
+            metadata: {
+                get: async (type: string, name: string) =>
+                    (type === 'permission' ? sets.find((s) => s.name === name) : engine.getSchema(name)) ?? null,
+                list: async (type: string) => (type === 'permission' ? sets : []),
+            },
+        };
+        const ctx = {
+            logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
+            registerService: vi.fn((name: string, service: unknown) => { services[name] = service; }),
+            getService: (name: string) => {
+                if (!(name in services)) throw new Error(`service not registered: ${name}`);
+                return services[name];
+            },
+        };
+        const security = new SecurityPlugin({ fallbackPermissionSet: 'rc_member' });
+        await security.init(ctx as never);
+        await security.start(ctx as never);
+        await new RecordContextServicePlugin().init(ctx as never);
+        protocol = new ObjectStackProtocolImplementation(engine as any);
+
+        // The key's auth tables (`sys_api_key`, `sys_user`, `sys_member`) are
+        // not part of this kernel: these answers stand in for them, for the one
+        // key (owner `usr_member`, active in `org_1`); every other read is the
+        // engine's, and the stdio door's are recorded with their context.
+        const keyedQl = new Proxy(engine as any, {
+            get(target, prop, receiver) {
+                if (prop === 'update') {
+                    return async (object: string, data: unknown, options?: unknown) =>
+                        object === 'sys_api_key' ? {} : target.update(object, data, options);
+                }
+                if (prop === 'find') {
+                    return async (object: string, query?: any, options?: any) => {
+                        if (object === 'sys_api_key') {
+                            return [{ id: 'k1', user_id: 'usr_member', revoked: false, active_organization_id: 'org_1' }];
+                        }
+                        if (object === 'sys_user') return query?.where?.id === 'usr_member' ? [{ id: 'usr_member' }] : [];
+                        if (object === 'sys_member') return [{ id: 'm1', user_id: 'usr_member', organization_id: 'org_1', role: 'member' }];
+                        if (object.startsWith('sys_') && !target.registry.getObject(object)) return [];
+                        stdioReads.push({ object, context: query?.context ?? options?.context });
+                        return target.find(object, query, options);
+                    };
+                }
+                const value = Reflect.get(target, prop, receiver);
+                return typeof value === 'function' ? value.bind(target) : value;
+            },
+        });
+        caller = assembleExecutionContext({
+            authz: await resolveAuthzContext({ ql: keyedQl, headers: { 'x-api-key': KEY }, tenancyPosture: undefined, client: { transport: 'stdio' } } as never),
+            oauth: undefined, localization: undefined, requestLocale: undefined, accessToken: undefined,
+        } as never) as ExecutionContext;
+
+        // The stdio door: the real plugin's long-lived session, over an in-process transport.
+        const stdioServices = new Map<string, unknown>(Object.entries({
+            metadata: services.metadata, protocol, objectql: keyedQl, security: services.security,
+            'record-context': services['record-context'],
+        }));
+        const sctx: any = {
+            registerService: vi.fn((name: string, service: unknown) => stdioServices.set(name, service)),
+            getService: vi.fn((name: string) => {
+                if (!stdioServices.has(name)) throw new Error(`Service "${name}" not found`);
+                return stdioServices.get(name);
+            }),
+            replaceService: vi.fn(),
+            getServices: vi.fn(() => stdioServices),
+            hook: vi.fn(),
+            trigger: vi.fn(async () => {}),
+            logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
+            getKernel: vi.fn(() => ({})),
+        };
+        const plugin = new MCPServerPlugin({ autoStart: true });
+        await plugin.init(sctx);
+        const stdioRuntime = stdioServices.get('mcp') as MCPServerRuntime;
+        vi.spyOn(stdioRuntime, 'start').mockResolvedValue(undefined);
+        await plugin.start(sctx);
+        const waiting = new Map<number, (frame: any) => void>();
+        let nextId = 1;
+        const transport: any = {
+            async start() {},
+            async close() { transport.onclose?.(); },
+            async send(message: any) {
+                const resolve = typeof message?.id === 'number' ? waiting.get(message.id) : undefined;
+                if (resolve) { waiting.delete(message.id); resolve(message); }
+            },
+        };
+        rpc = (method, params) => new Promise<any>((resolve) => {
+            const id = nextId++;
+            waiting.set(id, resolve);
+            transport.onmessage?.({ jsonrpc: '2.0', id, method, ...(params ? { params } : {}) });
+        });
+        await stdioRuntime.server.connect(transport as never);
+        await rpc('initialize', { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'parity', version: '0' } });
+        transport.onmessage?.({ jsonrpc: '2.0', method: 'notifications/initialized' });
+
+        // The /mcp door: the dispatcher over the same kernel's services and a fresh MCP runtime per request.
+        const httpRuntime = new MCPServerRuntime({ name: 'objectstack', version: '0.0.0' });
+        const served: Record<string, any> = {
+            ...services,
+            protocol,
+            mcp: { handleHttpRequest: (req: Request, o: any) => httpRuntime.handleHttpRequest(req, o) },
+        };
+        const get = (n: string) => served[n] ?? null;
+        dispatcher = new HttpDispatcher({ getService: get, getServiceAsync: async (n: string) => get(n), context: { getService: get } } as any, undefined, { enforceProjectMembership: false });
+    }, 60_000);
+
+    afterAll(async () => {
+        vi.unstubAllEnvs();
+        try { await engine?.destroy(); } catch { /* best effort */ }
+    });
+
+    interface DoorAnswer { isError: boolean; text: string }
+
+    const overHttp = async (args: Record<string, unknown>, tool = 'get_record_context'): Promise<DoorAnswer> => {
+        const body = { jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: tool, arguments: args } };
+        const res = await dispatcher.handleMcp(body, {
+            request: new Request('http://localhost/api/v1/mcp', {
+                method: 'POST',
+                headers: { 'content-type': 'application/json', accept: 'application/json, text/event-stream' },
+                body: JSON.stringify(body),
+            }),
+            response: {},
+            environmentId: undefined,
+            executionContext: caller,
+        } as any);
+        expect(res.response?.status).toBe(200);
+        const result = (res.response?.body as any)?.result;
+        return { isError: result?.isError === true, text: result?.content?.[0]?.text };
+    };
+    const overStdio = async (args: Record<string, unknown>, tool = 'get_record_context'): Promise<DoorAnswer> => {
+        const frame = await rpc('tools/call', { name: tool, arguments: args });
+        return { isError: frame?.result?.isError === true, text: frame?.result?.content?.[0]?.text };
+    };
+    /** Both doors, one call: the same bytes, or the case fails here. */
+    const both = async (args: Record<string, unknown>, tool = 'get_record_context') => {
+        const http = await overHttp(args, tool);
+        const stdio = await overStdio(args, tool);
+        expect(typeof http.text).toBe('string');
+        expect(stdio).toEqual(http);
+        return { isError: http.isError, text: http.text, payload: JSON.parse(http.text) };
+    };
+
+    it('precondition: the stdio session reads as the caller the /mcp request carries', async () => {
+        expect(caller).toMatchObject({ userId: 'usr_member', tenantId: 'org_1' });
+        stdioReads.length = 0;
+        await overStdio({ objectName: 'rc_policy', recordId: 'p1', context: 'rc_main' });
+        const root = stdioReads.find((r) => r.object === 'rc_policy');
+        expect(root?.context).toMatchObject({
+            userId: caller.userId, tenantId: caller.tenantId, permissions: caller.permissions, positions: caller.positions,
+        });
+    });
+
+    it('a record through its package pack: a hidden field stated, an unopenable lookup not shown, an unreadable related row absent', async () => {
+        const answer = await both({ objectName: 'rc_policy', recordId: 'p1', context: 'rc_main' });
+        expect(answer.isError).toBe(false);
+        const { data, notes } = answer.payload;
+        expect(data.pack).toEqual({ name: 'rc_main', label: 'Policy document' });
+        expect(data.record).toEqual({ object: 'rc_policy', id: 'p1', displayName: 'Fire cover' });
+        // The hidden field (FLS) is not carried and not named; the notes state it.
+        expect(data.fields.map((f: { name: string }) => f.name)).toEqual(['title', 'status', 'vault']);
+        expect(answer.text).not.toContain('secret_note');
+        expect(answer.text).not.toContain('hush');
+        expect(notes.map((n: { kind: string }) => n.kind)).toEqual(['not_visible']);
+        // [card amendment 4] The door decides an expansion target's API exposure:
+        // `rc_vault` is `apiEnabled: false`, so its row is never expanded or named.
+        expect(data.fields.find((f: { name: string }) => f.name === 'vault')).toEqual({ name: 'vault', label: 'Vault', notVisible: true });
+        expect(answer.text).not.toContain('Vault 1');
+        // The related list is read as the caller: the row its row rule refuses is absent.
+        expect(data.related).toHaveLength(1);
+        expect(data.related[0]).toMatchObject({ object: 'rc_revision', field: 'policy' });
+        expect(data.related[0].rows.map((r: { id: string }) => r.id)).toEqual(['r1']);
+        expect(data.body).toEqual({ field: 'content', label: 'Content', text: '# Scope\nCovers fire.\n# Exclusions\nFlood.' });
+    });
+
+    it('a root the caller may not read is refused before any pack is looked up, as get_record refuses it', async () => {
+        const answer = await both({ objectName: 'rc_hidden', recordId: 'h1', context: 'rc_main' });
+        expect(answer.isError).toBe(true);
+        expect(answer.payload.error).toMatchObject({ code: 'PERMISSION_DENIED', status: 403 });
+        expect(answer.text).not.toContain('rc_main');
+        const record = await both({ objectName: 'rc_hidden', recordId: 'h1' }, 'get_record');
+        expect(record.isError).toBe(true);
+        expect(answer.payload.error).toEqual(record.payload.error);
+    });
+
+    it('[today; ADR-0160 as amended says left out and stated] a related child this caller is not served refuses the call, unnamed', async () => {
+        const answer = await both({ objectName: 'rc_policy', recordId: 'p1', context: 'rc_unserved_child' });
+        expect(answer.isError).toBe(true);
+        expect(answer.payload.error).toMatchObject({ code: 'PERMISSION_DENIED', status: 403 });
+        expect(answer.text).not.toContain('rc_hidden');
+    });
+
+    it('a related child its API exposure refuses refuses the call, named (the caller\'s schema shows it)', async () => {
+        const answer = await both({ objectName: 'rc_policy', recordId: 'p1', context: 'rc_exposure_child' });
+        expect(answer.isError).toBe(true);
+        expect(answer.payload.error).toMatchObject({ code: 'PERMISSION_DENIED', status: 403 });
+        expect(answer.payload.error.message).toContain("'rc_closed'");
+    });
+
+    it('a related child whose package is disabled (OBJECT_PACKAGE_DISABLED) refuses the call, unnamed', async () => {
+        await expect(protocol.getMetaItemForExecution({ type: 'object', name: 'rc_off' } as never)).rejects.toMatchObject({ code: 'OBJECT_PACKAGE_DISABLED' });
+        const answer = await both({ objectName: 'rc_policy', recordId: 'p1', context: 'rc_disabled_child' });
+        expect(answer.isError).toBe(true);
+        expect(answer.payload.error).toMatchObject({ code: 'PERMISSION_DENIED', status: 403 });
+        expect(answer.text).not.toContain('rc_off');
+    });
+
+    it('an anchor the body does not resolve is one coded answer', async () => {
+        const answer = await both({ objectName: 'rc_policy', recordId: 'p1', context: 'rc_main', anchor: 'nowhere' });
+        expect(answer.isError).toBe(true);
+        expect(answer.payload.error).toMatchObject({ code: 'RESOURCE_NOT_FOUND', status: 404 });
+    });
+
+    it('a pack served from the metadata registry (saved at run time, not shipped by the stack) is read', async () => {
+        await protocol.saveMetaItem({
+            type: 'ai_context', name: 'rc_registry',
+            item: { name: 'rc_registry', label: 'Registry brief', object: 'rc_policy', fields: ['title', 'status'] },
+        } as never);
+        const listed: any = await protocol.getMetaItems({ type: 'ai_context' });
+        const row = listed.items.find((p: { name?: string }) => p.name === 'rc_registry');
+        expect(row).toBeDefined();
+        expect(row?._packageId).toBeUndefined();
+        const answer = await both({ objectName: 'rc_policy', recordId: 'p1', context: 'rc_registry' });
+        expect(answer.isError).toBe(false);
+        expect(answer.payload.data.pack).toEqual({ name: 'rc_registry', label: 'Registry brief' });
+        expect(answer.payload.data.fields.map((f: { name: string; value: unknown }) => [f.name, f.value])).toEqual([
             ['title', 'Fire cover'],
             ['status', 'active'],
         ]);

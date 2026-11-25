@@ -7,6 +7,7 @@
 **Supersedes**: [ADR-0040](./0040-unified-assistant-and-agent-binding.md) — its core decision (a *single* unified assistant selected by *per-turn intent classification*) is **reversed**. ADR-0040's UX win ("the end user never picks from a roster") is **kept** but re-grounded: the *surface* binds the agent, not a classifier and not a dropdown. §3 (custom tenant agents) is withdrawn; §4 (tool-scoping) is handed to [ADR-0064](./0064-tool-scoping-to-agent.md).
 **Builds on**: [ADR-0033](./0033-ai-assisted-metadata-authoring.md) (draft → verify → publish), [ADR-0038](./0038-build-verification-loop.md) (verify-fix-reverify discipline carried by skills)
 **Consumers**: `@objectstack/spec` (agent/skill types), `@objectstack/service-ai` (the open-source `ask` agent), `../cloud/service-ai-studio` (the cloud-only `build` agent), `../objectui` (chat surfaces)
+**Cloud record**: cloud ADR-0118, "App-package skills load on `ask`; their tools are intersected with an allow-set" ([`cloud/docs/adr/0118-app-package-skills-on-ask-tool-allow-set`](https://github.com/objectstack-ai/cloud/blob/main/docs/adr/0118-app-package-skills-on-ask-tool-allow-set.md)), implements §2 of this ADR on `ask`.
 
 **Premise**: pre-launch, no back-compat debt beyond the alias table — specify the target end-state directly.
 

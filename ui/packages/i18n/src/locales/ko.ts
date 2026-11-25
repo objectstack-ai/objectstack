@@ -69,6 +69,9 @@ const ko = {
     autofillNoCurrency: '{{field}}이(가) 입력되지 않았습니다. 선택한 금액은 {{amount}}이지만 여기에는 아직 통화가 선택되지 않았습니다. 통화를 선택한 후 {{field}}을(를) 입력하세요.',
     autofillCurrencyUnread: '{{field}}이(가) 입력되지 않았습니다. 선택한 금액은 {{amount}}이지만 여기의 통화를 읽을 수 없습니다. 통화를 확인한 후 {{field}}을(를) 입력하세요.',
     autofillKept: '{{field}}은(는) 이전 값을 유지합니다.',
+    autofillNowSameCurrency: '선택 시 {{field}}이(가) 입력되지 않았습니다. 레코드는 이제 {{to}} 기준입니다. 다시 선택하면 {{amount}}이(가) 입력됩니다.',
+    autofillNowSameCurrencyHeld: '선택 시 {{field}}이(가) 입력되지 않았고 이전 값을 유지합니다. 레코드는 이제 {{to}} 기준입니다. {{field}}을(를) 비운 뒤 다시 선택하면 {{amount}}이(가) 입력됩니다.',
+    autofillCopiedUnder: '{{field}}은(는) {{amount}}(으)로 입력되었지만 레코드는 이제 {{to}} 기준입니다. 필요하면 {{to}}(으)로 {{field}}을(를) 입력하세요.',
   },
   common: {
     // objectui#13461 — a disclosure toggle's name (the tree-view node toggle).
@@ -678,6 +681,7 @@ const ko = {
       needsWholeRows:
         "그룹화에는 모든 레코드가 필요하지만 이 그리드에는 한 페이지만 전달되어 그룹 개수를 셀 수 없습니다. 모든 레코드를 전달하거나 queryGroupHeaders를 구현하는 데이터 소스에서 그리드가 불러오도록 하세요.",
       draftOnly: "{{fields}}(으)로 그룹화되지 않았습니다: 게시할 때까지 초안에만 존재합니다.",
+      moreGroupsNotLoaded: "더 많은 그룹이 로드되지 않았습니다: 이 보기의 그룹 수가 서버가 한 번의 읽기로 반환하는 수보다 많아 일부만 표시됩니다.",
     },
     // objectui#4024 — column-footer aggregate prefixes, keyed by the spec's
     // `ColumnSummary` vocabulary. `pattern` owns the label/value join so this
@@ -2501,6 +2505,7 @@ const ko = {
       unavailableTitle: "AI 어시스턴트를 사용할 수 없습니다",
       unavailableDescription: "이 배포에는 AI 어시스턴트가 활성화되어 있지 않습니다. 나머지 기능은 정상적으로 작동합니다.",
       unavailableError: "AI 서비스에 연결할 수 없습니다. 일시적으로 오프라인일 수 있습니다 — 다시 시도하거나 홈으로 돌아가세요.",
+      unavailableErrorDesktop: "AI 서비스에 연결할 수 없습니다. 일시적으로 오프라인일 수 있습니다 — 다시 시도하거나 앱 시작 페이지로 돌아가세요.",
       unavailableRetry: "다시 시도",
       unavailableHome: "홈으로 돌아가기",
       dock: {
@@ -3732,7 +3737,7 @@ const ko = {
     build: {
       title: "앱 만들기",
       noCapability: "이 시스템에서는 앱 만들기를 사용할 수 없습니다 — ‘메타데이터 관리’ 권한이 필요하지만 계정에 해당 권한이 없습니다.",
-      inStudio: "Studio에서 새로 만들기",
+      inStudio: "새 빈 앱 만들기",
     },
     template: {
       title: "템플릿으로 시작",
@@ -5151,7 +5156,12 @@ const ko = {
     bulkRejected: '{{count}}개 요청을 거부했습니다',
     bulkRejected_one: '{{count}}개 요청을 거부했습니다',
     bulkRejected_other: '{{count}}개 요청을 거부했습니다',
-    bulkPartial: '{{ok}}개 성공, {{fail}}개 실패: {{which}}',
+    bulkPartialSummary: '{{ok}}개 성공, {{fail}}개 실패',
+    bulkFailureLine: '{{title}}: {{reason}}',
+    bulkFailuresShowAll: '모두 보기 ({{n}})',
+    bulkFailuresTitle: '처리되지 않음: {{n}}',
+    bulkFailuresBody: '다음 요청은 그대로 남아 있습니다. 각 요청에 이유가 표시됩니다.',
+    close: '닫기',
     rejectOneTitle: '"{{title}}"을(를) 거부할까요?',
     rejectOneBody: '요청을 거부하고 신청자에게 알립니다.',
     rejectTitle: '이 요청을 거부할까요?',

@@ -78,6 +78,9 @@ const zhHant = {
     autofillNoCurrency: '未填入{{field}}：所選金額為 {{amount}}，但此處尚未選擇幣種。請先選擇幣種，再填寫{{field}}。',
     autofillCurrencyUnread: '未填入{{field}}：所選金額為 {{amount}}，但無法讀取此處的幣種。請先確認幣種，再填寫{{field}}。',
     autofillKept: '{{field}}仍保留原來的值。',
+    autofillNowSameCurrency: '選取時未填入{{field}}。記錄現已改為 {{to}}：重新選取即可填入 {{amount}}。',
+    autofillNowSameCurrencyHeld: '選取時未填入{{field}}，且仍保留原來的值。記錄現已改為 {{to}}：請先清空{{field}}，再重新選取即可填入 {{amount}}。',
+    autofillCopiedUnder: '{{field}}按 {{amount}} 帶入，但記錄現已改為 {{to}}。如需調整，請按 {{to}} 填寫{{field}}。',
   },
   common: {
     // objectui#13461 — a disclosure toggle's name (the tree-view node toggle).
@@ -654,6 +657,7 @@ const zhHant = {
       needsWholeRows:
         '分組需要全部記錄，但此表格只收到其中一頁，因此無法統計分組。請傳入全部記錄，或讓表格從實現了 queryGroupHeaders 的資料來源獲取記錄。',
       draftOnly: '未按 {{fields}} 分組：它僅存在於草稿中，釋出後才生效。',
+      moreGroupsNotLoaded: '更多分組未載入：此檢視的分組數超過伺服器單次讀取返回的數量，因此只列出了部分分組。',
     },
     // objectui#4024 — column-footer aggregate prefixes, keyed by the spec's
     // `ColumnSummary` vocabulary. `pattern` owns the label/value join so this
@@ -2859,6 +2863,7 @@ const zhHant = {
       unavailableTitle: 'AI 助手不可用',
       unavailableDescription: '當前部署未啟用 AI 助手。其他功能一切正常。',
       unavailableError: '無法連線 AI 服務。它可能暫時離線 — 請重試，或返回首頁。',
+      unavailableErrorDesktop: '無法連線 AI 服務。它可能暫時離線 — 請重試，或返回應用起始頁。',
       unavailableRetry: '重試',
       unavailableHome: '返回首頁',
       dock: {
@@ -3910,7 +3915,7 @@ const zhHant = {
     build: {
       title: '構建應用',
       noCapability: '本系統不提供構建應用功能 — 它需要「管理中繼資料」權限,而你的賬號沒有該權限。',
-      inStudio: '在 Studio 中新建',
+      inStudio: '新建空白應用',
     },
     template: {
       title: '從模板開始',
@@ -5414,7 +5419,12 @@ const zhHant = {
     bulkRejected: '已駁回 {{count}} 條請求',
     bulkRejected_one: '已駁回 {{count}} 條請求',
     bulkRejected_other: '已駁回 {{count}} 條請求',
-    bulkPartial: '{{ok}} 條成功，{{fail}} 條失敗：{{which}}',
+    bulkPartialSummary: '{{ok}} 條成功，{{fail}} 條失敗',
+    bulkFailureLine: '{{title}}：{{reason}}',
+    bulkFailuresShowAll: '檢視全部（{{n}}）',
+    bulkFailuresTitle: '未處理：{{n}} 條',
+    bulkFailuresBody: '以下請求保持原狀，每條都附有原因。',
+    close: '關閉',
     rejectOneTitle: '駁回“{{title}}”？',
     rejectOneBody: '將駁回該請求並通知申請人。',
     rejectTitle: '駁回該請求？',

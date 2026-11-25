@@ -14,6 +14,7 @@ import type { KnowledgeLogger } from './knowledge-service.js';
 import type { KnowledgeFieldSecurity } from './knowledge-source-admission.js';
 import { createKnowledgeReapGuard, guardedObjectsFor } from './knowledge-reap-guard.js';
 import { contributeKnowledgeSettings } from './knowledge-settings-contribution.js';
+import { UnknownKeyError, UnknownNamespaceError } from '@objectstack/service-settings';
 
 /**
  * Whether `err` is the kernel's refusal for a service NOTHING registered under
@@ -166,6 +167,34 @@ export class KnowledgeServicePlugin implements Plugin {
           if (isServiceNotRegisteredError(err, 'security')) return undefined;
           throw err;
         }
+      },
+      // The settings page's `knowledge.chunk_target`, the splitter's
+      // `maxChars` under a source's own `split.maxChars` (#37098). Read each
+      // time the service splits, never here: the settings service may hold a
+      // value saved after boot. No settings service, or none serving the
+      // `knowledge` namespace (it is contributed below only where one
+      // exists), reads as unset.
+      resolveChunkTarget: async () => {
+        let settings: { get?(ns: string, key: string): Promise<{ value?: unknown } | undefined> } | undefined;
+        try {
+          settings = ctx.getService('settings');
+        } catch (err) {
+          if (isServiceNotRegisteredError(err, 'settings')) return undefined;
+          throw err;
+        }
+        if (typeof settings?.get !== 'function') return undefined;
+        let resolved: { value?: unknown } | undefined;
+        try {
+          resolved = await settings.get('knowledge', 'chunk_target');
+        } catch (err) {
+          // A host's own settings service without this namespace or key:
+          // nothing is configured there. Any other failure is the service's
+          // to report (it warns and splits by the source's own value).
+          if (err instanceof UnknownNamespaceError || err instanceof UnknownKeyError) return undefined;
+          throw err;
+        }
+        const value = resolved?.value;
+        return typeof value === 'number' && Number.isInteger(value) && value > 0 ? value : undefined;
       },
       // [ADR-0161 K8, item 9] The EFFECTIVE tenancy posture, read per assembly
       // and per search from the kernel's `tenancy` service, classified the way
