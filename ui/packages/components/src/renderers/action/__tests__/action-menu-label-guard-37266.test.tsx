@@ -81,7 +81,11 @@ describe('action:menu — a non-string label renders no text and never throws (#
     const item = screen.getByRole('menuitem');
     expect(item).toHaveTextContent('approve');
     expect(menu.textContent).not.toContain('[object Object]');
-    expect(document.body.innerHTML).not.toContain('[object Object]');
+    // Text and accessible names only: the host's undeclared-prop spread writes every
+    // node key onto the DOM as an attribute (`actions="[object Object]"` on main for
+    // any menu), which is not a label read and is out of this guard's reach.
+    expect(document.body.textContent).not.toContain('[object Object]');
+    expect(trigger.getAttribute('aria-label')).toBe('More actions');
     expect(document.body.textContent).not.toContain('批准');
     expect(document.body.textContent).not.toContain('Approve');
 

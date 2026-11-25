@@ -64,7 +64,13 @@ async function openMenu(trigger: HTMLElement) {
 const labelWarnings = () => warn.mock.calls.filter((args) => String(args[0]).includes('non-string label'));
 
 const assertNothingLeaked = () => {
-  expect(document.body.innerHTML).not.toContain('[object Object]');
+  // Text and accessible names only: the host's undeclared-prop spread writes every
+  // node key onto the DOM as an attribute (`actions="[object Object]"` on main for
+  // any group), which is not a label read and is out of this guard's reach.
+  expect(document.body.textContent).not.toContain('[object Object]');
+  for (const el of document.querySelectorAll('[aria-label]')) {
+    expect(el.getAttribute('aria-label')).not.toContain('[object Object]');
+  }
   expect(document.body.textContent).not.toContain('批准');
   expect(document.body.textContent).not.toContain('Approve');
 };
