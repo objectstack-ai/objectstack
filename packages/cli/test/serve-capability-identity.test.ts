@@ -131,6 +131,7 @@ const EXPECTED_PROVIDER_NAME: Record<string, string> = {
   approvals: 'com.objectstack.service.approvals',
   settings: 'com.objectstack.service.settings',
   webhooks: 'com.objectstack.plugin-webhook-outbox',
+  'record-context': 'com.objectstack.service.record-context',
 };
 
 describe('#7652: every registered provider is still recognised (the other direction)', () => {
