@@ -574,4 +574,5 @@ describe('objectstack#37289 — an opening autofill is not a parent switch', () 
     expect(payload.depot).toBe('d2');
     expect(payload.region).toBe('r2');
     expect(payload.site).toBeNull();
+  });
 });
