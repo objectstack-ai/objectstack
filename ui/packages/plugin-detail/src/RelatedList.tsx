@@ -4028,7 +4028,17 @@ export const RelatedList: React.FC<RelatedListProps> = ({
   // the 0 an empty first read holds: while the first rows are in flight (or a
   // card out of view has not asked) and no count answers for them, the badge
   // waits. A refetch over rows already drawn keeps their count.
-  const countPending = !countAnswers && loading && relatedData.length === 0 && !(windowed && total != null);
+  // objectstack#36822 — and so does a refetch over a list that already
+  // answered 0: once a read has settled the count is known, so a later read
+  // in flight keeps drawing the last answer instead of blanking the badge.
+  // A failed or refused read answers no count, so it never marks one known.
+  const [countKnown, setCountKnown] = React.useState(false);
+  const readSettled = !loading && !loadFailure && !filterRefusal;
+  React.useEffect(() => {
+    if (readSettled) setCountKnown(true);
+  }, [readSettled]);
+  const countPending =
+    !countAnswers && loading && !countKnown && relatedData.length === 0 && !(windowed && total != null);
   // In windowed mode an empty page beyond page 0 is a transient overflow (the
   // step-back effect above corrects it), not an empty collection.
   // A failed read is never empty: it draws its own line (objectstack#26415).

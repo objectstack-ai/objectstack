@@ -134,3 +134,62 @@ describe('a related list\'s count before it is known (objectstack#36235)', () =>
     await waitFor(() => expect(cardCount()).toBe('2'));
   });
 });
+
+/**
+ * objectstack#36822 — a refetch over a list whose count is already known keeps
+ * drawing that count. A list that answered 0 used to blank its badge for the
+ * length of the refetch, because an empty list in flight read as a first read.
+ */
+describe('a related list\'s count across a refetch (objectstack#36822)', () => {
+  /** Every badge reading the DOM goes through, from now until `stop()`. */
+  function watchBadge() {
+    const seen: Array<string | null> = [headBadge()];
+    const observer = new MutationObserver(() => seen.push(headBadge()));
+    observer.observe(document.body, { subtree: true, childList: true, characterData: true, attributes: true });
+    return { seen, stop: () => observer.disconnect() };
+  }
+
+  const refetch = () =>
+    act(async () => {
+      window.dispatchEvent(new CustomEvent('objectui:related-changed', { detail: { objectName: 'contact' } }));
+    });
+
+  it('a list that answered 0 keeps drawing 0 through a refetch that answers no rows', async () => {
+    const read = deferredFind();
+    renderList(read.find);
+    await waitFor(() => expect(read.find).toHaveBeenCalledTimes(1));
+    await read.answer([]);
+    await waitFor(() => expect(headBadge()).toBe('0'));
+
+    const watch = watchBadge();
+    await refetch();
+    await waitFor(() => expect(read.find).toHaveBeenCalledTimes(2));
+    await flush();
+    // The refetch is held in flight here: the badge still reads 0.
+    expect(headBadge()).toBe('0');
+    await read.answer([]);
+    await flush();
+    watch.stop();
+    expect(headBadge()).toBe('0');
+    expect(watch.seen.length).toBeGreaterThan(1);
+    expect(watch.seen.filter((v) => v !== '0')).toEqual([]);
+  });
+
+  it('a list that answered rows draws their count through a refetch, then the 0 it answers', async () => {
+    const read = deferredFind();
+    renderList(read.find);
+    await waitFor(() => expect(read.find).toHaveBeenCalledTimes(1));
+    await read.answer(ROWS);
+    await waitFor(() => expect(headBadge()).toBe('2'));
+
+    const watch = watchBadge();
+    await refetch();
+    await waitFor(() => expect(read.find).toHaveBeenCalledTimes(2));
+    await flush();
+    expect(headBadge()).toBe('2');
+    await read.answer([]);
+    await waitFor(() => expect(headBadge()).toBe('0'));
+    watch.stop();
+    expect(watch.seen.filter((v) => v !== '2' && v !== '0')).toEqual([]);
+  });
+});
