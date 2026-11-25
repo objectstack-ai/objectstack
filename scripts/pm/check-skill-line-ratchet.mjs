@@ -81,11 +81,11 @@ const REPO_ROOT = new URL('../../', import.meta.url);
 // moves a row later says why in its body; the row carries a one-line comment
 // only when a reader needs the ruling at the row.
 export const CEILINGS = new Map([
-  ['.claude/skills/pm-dispatch/SKILL.md', 33919], // lowered 33934 → 33872 by the re-basing PR's own edit; raised 33872 → 33881 (+9) by ruling record 7076338827, the addendum to 7076315104 (the simple-question exception is said on each of the three lines of 升级与决策 it qualifies: 「不一定要写成文件吧？简单的问题是不是直接和我沟通就可以」); raised 33881 → 33919 (+38) by ruling record 7076338827 (the simple-question exception on the decision-thread line; that it names seats and triage only is the seat's reading, the ruling's words do not say who asks)
+  ['.claude/skills/pm-dispatch/SKILL.md', 33243], // lowered 33919 → 33243 by the entry-file slimming PR: five recommendation-order lines moved to references/decision-analysis.md (the declared cross-file move below) and the blocker-grade line dropped as a restatement of references/state-machine.md; before that: lowered 33934 → 33872 by the re-basing PR's own edit; raised 33872 → 33881 (+9) by ruling record 7076338827, the addendum to 7076315104 (the simple-question exception is said on each of the three lines of 升级与决策 it qualifies: 「不一定要写成文件吧？简单的问题是不是直接和我沟通就可以」); raised 33881 → 33919 (+38) by ruling record 7076338827 (the simple-question exception on the decision-thread line; that it names seats and triage only is the seat's reading, the ruling's words do not say who asks)
   ['.claude/skills/pm-dispatch/references/dispatch-runbook.md', 20483], // raised 20070 → 20354 (+284) by ruling record 7075909669 (#36203 items 1-5: 「同意五条都改」): a card thread confirms Actions started after each push; the seat reads pr-state of every in-flight card PR; lowered 20354 → 20344 by the PR that moved the tier and effort values to the one home; raised 20344 → 20483 (+139) by ruling record 7076315104 (Q13, the decision card 「定一下：五条新增规则要不要写进技能」: 「五条都写」): the thread's first report carries the served tier and the seat writes it into the claim
   ['.claude/skills/pm-dispatch/references/state-machine.md', 4189],
   ['.claude/skills/pm-dispatch/references/contract-review.md', 6419],
-  ['.claude/skills/pm-dispatch/references/decision-analysis.md', 5023], // raised 4892 → 5023 (+131) by ruling record 7076338827, the addendum to 7076315104 (a simple question goes to the maintainer in chat after the at-tier analysis: 「不一定要写成文件吧？简单的问题是不是直接和我沟通就可以」)
+  ['.claude/skills/pm-dispatch/references/decision-analysis.md', 5619], // raised 5023 → 5619 (+596) by the declared cross-file move from SKILL.md (CROSS_FILE_MOVES below); before that: raised 4892 → 5023 (+131) by ruling record 7076338827, the addendum to 7076315104 (a simple question goes to the maintainer in chat after the at-tier analysis: 「不一定要写成文件吧？简单的问题是不是直接和我沟通就可以」)
   ['.claude/skills/pm-dispatch/references/platform-readings.md', 1082],
   ['.claude/skills/pm-dispatch/references/readings-queue.md', 9074],
   ['.claude/skills/pm-dispatch/references/readings-channels.md', 7138],
@@ -117,6 +117,8 @@ export const CEILINGS = new Map([
   ['.claude/skills/pm-dispatch/references/filing-gate.md', 9124], // raised 9096 → 9101 (+5) by ruling record 7075909669 (#36203 items 1-5: 「同意五条都改」): same-epic order is the later card's Blocked-by; raised 8386 → 9096 (+710, the landed bytes) by the rulings whose rows are written in it: the rule card's body ruling (row 1, a dedupe hit on an open same-mechanism card ends in a comment: 「感觉你的第二种方案也很好啊」) and ruling record 7032145340 (row 6, the weekly sweep card entry rule and triage's move at first touch: 「同意」); review record 7038100802 triggered the quota line's pointer to row 1 (fix round 1) and is a trigger, not a ruling; lowered 9101 → 9089 by the PR that moved the tier and effort values to the one home; raised 9089 → 9124 (+35, the landed bytes) by ruling record 7135874506 (item A1: 「照推荐：采纳 5 条」)
   ['.claude/skills/pm-dispatch/references/project-forms.md', 4889], // raised 4669 → 4889 (+220 B, the two project-memory lines less 48 B of restatement cuts) by ruling record 7046610679 「同意，立卡派发」 under ruling record 6184799323, letter B
   ['.claude/skills/pm-dispatch/references/app-platform-boundary.md', 3928],
+  ['.claude/skills/pm-dispatch/references/dev-traps.md', 2627], // new row, landed size, headroom 0: three one-path blocks of .claude/agents/os-dev.md moved here verbatim by the entry-file slimming PR, which lowers that row by more
+  ['.claude/skills/pm-dispatch/references/dev-ablation.md', 3555], // new row, landed size, headroom 0: the reverse-verification and ablation procedure of .claude/agents/os-dev.md moved here verbatim by the same PR
   ['.claude/skills/pm-dispatch/references/lanes/server.md', 4830],
   ['.claude/skills/pm-dispatch/references/lanes/devx.md', 2533],
   ['.claude/skills/pm-dispatch/references/lanes/skills.md', 2656], // lowered 2682 → 2666 by the re-basing PR's own edit; lowered 2666 → 2656 by the PR that moved the tier and effort values to the one home
@@ -134,8 +136,10 @@ export const CEILINGS = new Map([
   ['.claude/skills/pm-dispatch/references/lanes/queue.md', 2003],
   ['.claude/skills/pm-dispatch/references/lanes/cloud.md', 1232],
   ['.claude/skills/pm-dispatch/references/lanes/objectstack.md', 2540], // raised 2270 → 2540 by the ruled text (one seat per lane by default; a new `area:*` is a partition of that seat), ruling record 7030459053
-  ['.claude/agents/os-dev.md', 38986], // lowered 39008 → 38848 by the re-basing PR's own edit; raised 38848 → 38986 (+138) by ruling record 7076315104 (Q13, the decision card 「定一下：五条新增规则要不要写进技能」: 「五条都写」): a card thread's first step reads the tier it is served and compares it with the order
-  ['.claude/skills/checklist-test/SKILL.md', 19558],
+  ['.claude/agents/os-dev.md', 33504], // lowered 38986 → 33504 by the entry-file slimming PR (four one-path blocks moved verbatim to references/dev-traps.md and references/dev-ablation.md, one pointer line left for each); before that: lowered 39008 → 38848 by the re-basing PR's own edit; raised 38848 → 38986 (+138) by ruling record 7076315104 (Q13, the decision card 「定一下：五条新增规则要不要写进技能」: 「五条都写」): a card thread's first step reads the tier it is served and compares it with the order
+  ['.claude/skills/checklist-test/SKILL.md', 14209], // lowered 19558 → 14209 by the entry-file slimming PR (the bodies of §5 and §6 moved verbatim to the two reference files below, one pointer line left in each section)
+  ['.claude/skills/checklist-test/references/closure.md', 4553], // new row, landed size, headroom 0
+  ['.claude/skills/checklist-test/references/standing-regression.md', 1261], // new row, landed size, headroom 0
   ['.claude/skills/checklist-author/SKILL.md', 3574],
   ['.claude/skills/dogfood-verification/SKILL.md', 9526],
   ['.claude/skills/spec-property-retirement/SKILL.md', 26922],
@@ -188,7 +192,13 @@ export const RULING_CITATION = '#14685 item 5 (comment 5520452691)';
  * into the nine `readings-*.md` files rather than deleted; it goes with the rest.
  * The next move writes a fresh declaration, in bytes.
  */
-export const CROSS_FILE_MOVES = new Map([]);
+export const CROSS_FILE_MOVES = new Map([
+  ['.claude/skills/pm-dispatch/references/decision-analysis.md', {
+    ruling: `five recommendation-order lines of SKILL.md 〈升级与决策〉 moved here verbatim — ${RULING_CITATION}`,
+    was: 5023,
+    sources: [['.claude/skills/pm-dispatch/SKILL.md', 33919]],
+  }],
+]);
 
 /**
  * Per-file MAX TABLE ROW BYTES — a second meter beside the byte ceiling, kept by
@@ -274,6 +284,8 @@ export const MAX_TABLE_ROW_BYTES = new Map([
   ['.claude/skills/pm-dispatch/references/filing-gate.md', 0],
   ['.claude/skills/pm-dispatch/references/project-forms.md', 0],
   ['.claude/skills/pm-dispatch/references/app-platform-boundary.md', 219],
+  ['.claude/skills/pm-dispatch/references/dev-traps.md', 0],
+  ['.claude/skills/pm-dispatch/references/dev-ablation.md', 0],
   ['.claude/skills/pm-dispatch/references/lanes/server.md', 0],
   ['.claude/skills/pm-dispatch/references/lanes/devx.md', 0],
   ['.claude/skills/pm-dispatch/references/lanes/skills.md', 0],
@@ -293,6 +305,9 @@ export const MAX_TABLE_ROW_BYTES = new Map([
   ['.claude/skills/pm-dispatch/references/lanes/cloud.md', 0],
   ['.claude/agents/os-dev.md', 0],
   ['.claude/skills/checklist-test/SKILL.md', 221],
+  // The 214-byte row is the fail-disposition table's widest, moved with the table from the SKILL.md above.
+  ['.claude/skills/checklist-test/references/closure.md', 214],
+  ['.claude/skills/checklist-test/references/standing-regression.md', 0],
   ['.claude/skills/checklist-author/SKILL.md', 0],
   ['.claude/skills/dogfood-verification/SKILL.md', 0],
   ['.claude/skills/spec-property-retirement/SKILL.md', 326],
