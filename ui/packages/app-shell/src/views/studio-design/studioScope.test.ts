@@ -22,7 +22,6 @@ import {
   studioOrgScopePath,
 } from './studioScope';
 import { isSpecPackageId, sanitizePackageId } from './packages-io';
-import { parseSurfaceParam } from '../metadata-admin/nav-selection';
 
 describe('the reserved segment cannot name a package (objectui#11553)', () => {
   it('is refused by the spec manifest-id rule and by the predicate this app judges ids by', () => {
@@ -45,17 +44,19 @@ describe('the reserved segment cannot name a package (objectui#11553)', () => {
   });
 });
 
-describe('studioOrgScopePath', () => {
-  it('lands on the scope’s one pillar', () => {
-    expect(studioOrgScopePath()).toBe(`/studio/${STUDIO_ORG_SCOPE_SEGMENT}/${STUDIO_ORG_SCOPE_PILLAR}`);
+describe('studioOrgScopePath (objectstack#36903: the scope\'s leg of the area)', () => {
+  it('lands on the scope’s flow list, filtered to the items of no package', () => {
+    expect(studioOrgScopePath()).toBe(`/studio/${STUDIO_ORG_SCOPE_SEGMENT}/metadata/flow?source=runtime`);
+    // The retired pillar segment only redirects now.
     expect(STUDIO_ORG_SCOPE_PILLAR).toBe('automations');
   });
 
-  it('carries a flow as the pillar’s own `?surface=` deep link, round-tripping', () => {
+  it('opens a flow full-screen on its address, round-tripping its name', () => {
     const path = studioOrgScopePath({ type: 'flow', name: 'qa_urgent_alert_clone' });
-    expect(path).toBe('/studio/~org/automations?surface=flow%3Aqa_urgent_alert_clone');
-    const value = new URL(path, 'http://x').searchParams.get('surface');
-    expect(parseSurfaceParam(value)).toEqual({ type: 'flow', name: 'qa_urgent_alert_clone' });
+    expect(path).toBe('/studio/~org/metadata/flow/qa_urgent_alert_clone?source=runtime');
+    const url = new URL(path, 'http://x');
+    expect(decodeURIComponent(url.pathname.split('/').pop()!)).toBe('qa_urgent_alert_clone');
+    expect(url.searchParams.get('source')).toBe('runtime');
   });
 });
 

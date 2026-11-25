@@ -1,15 +1,28 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * The Automations pillar — the flow rail, the flow canvas and its inspectors,
- * the New automation dialog — with the published-flow-names read only it makes,
- * moved out of `StudioDesignSurface.tsx` unchanged by objectstack#36893 (the
- * move-only split's pillar slice; the surface re-exports it).
+ * The flow designer — one flow, full-screen on its metadata address
+ * (`/studio/<package>/metadata/flow/<name>`, or the package-less scope's
+ * `/studio/~org/metadata/flow/<name>`; objectstack#36903, epic
+ * objectstack#36890; ADR-0146 D1 as amended): the item header (× back to the
+ * flow list, ‹ › through it), the designer's tabs with the item tools after
+ * them (`flowDesignerTabs.ts`), the flow canvas and its inspectors — with the
+ * published-flow-names read only it makes.
+ *
+ * It has no flow list of its own and no New: the list is the area's
+ * (`ResourceListPage`), and its 「新建」 creates a flow on the starting points
+ * (`MetadataListCreateDialog`). Another flow opens through ×, ‹ › or ⌘K
+ * (decision 7); a copy made with New similar opens on its own address. The
+ * area mounts it (`StudioMetadataArea`); the old
+ * `/automations?surface=flow:<name>` address redirects there
+ * (`automationsPillarRedirect.ts`).
+ *
+ * Kept under its pillar-era name: the surface and its pins import it by it.
  */
 
 import * as React from 'react';
 import { createPortal } from 'react-dom';
-import { useNavigate, useLocation } from 'react-router-dom';
+import { useNavigate, useLocation, useSearchParams } from 'react-router-dom';
 import { extractDraftBody, formatMetadataError, readDraftChanges, type DraftChange } from '@object-ui/data-objectstack';
 import type { MetadataClient } from '@object-ui/data-objectstack';
 import { type StudioSurfaceLabel } from './StudioAiCopilot.js';
@@ -19,44 +32,29 @@ import { STUDIO_FOLD_LABEL } from './studio-tokens.js';
 import { StudioInspector } from './StudioInspector.js';
 import { isAgentDraftSurface } from './StudioDraftMark.js';
 import { StudioAiDraftNotice } from './StudioAiDraftNotice.js';
-import { StudioItemHeader, StudioTab } from './StudioItemHeader.js';
-import { StudioItemTools } from '../item-tools/StudioItemTools.js';
+import { StudioTab } from './StudioItemHeader.js';
+import { ResourceDetailHeader, detailListHref } from '../metadata-admin/ResourceDetailHeader.js';
+import { ItemToolTabPanel, ItemToolTabStrip } from '../item-tools/ItemToolTabs.js';
+import { FLOW_DESIGNER_TOOL_TABS, useFlowDesignerTab } from './flowDesignerTabs.js';
 import { useStudioItemDraftStatus } from './studioItemDraftStatus.js';
-import { FlowItemMoreMenu, flowCloneNoticeText, type FlowCopied } from './FlowItemMoreMenu.js';
+import { useFlowItemMenu, flowCloneNoticeText, type FlowCopied } from './FlowItemMoreMenu.js';
 import { FlowLedgerSwitch } from './FlowLedgerSwitch.js';
 import { requestFlowToggle, useFlowLedgerWalledReadOnly } from '../setup/packagedFlowLedger.js';
 import { activationReading } from '../setup/packagedFlows.js';
-import { StudioRail, StudioRailGroup, StudioRailRow } from './StudioRail.js';
-import { StudioEmptyState, StudioEmptyStateAction } from './StudioEmptyState.js';
-import { FLOW_TRIGGER_GLYPHS, flowTriggerGlyph, groupFlowsByObject } from './flowGrouping.js';
+import { StudioEmptyState } from './StudioEmptyState.js';
 import { StudioRefusalStrip } from './StudioRefusalStrip.js';
-import { StudioPicker } from './StudioPicker.js';
 import {
   FLOW_COPIED_ARRIVAL_STATE,
-  FLOW_GLYPH_ICON,
-  FLOW_GLYPH_LABEL_KEY,
   type FlowCopiedStrip,
-  flowDotClass,
   type FlowRailState,
   flowRailState,
-  flowRailStatus,
   type FlowRuntimeState,
-  FlowStatusDot,
-  type NewFlowTrigger,
-  newFlowTriggerFields,
-  NO_OBJECT_GROUP_KEY,
-  NO_OBJECT_ORDER,
   pairIdOf,
   readFlowCopiedArrival,
-  readFlowDefinitions,
   readFlowRegistrations,
-  readObjectLabels,
-  withStartTrigger,
 } from './AutomationsFlowRail.js';
 import {
   confirmDropUnsavedWork,
-  CreateTakenNotice,
-  findTakenIdentifier,
   type StudioBaseCustomization,
   StudioHeldNotice,
   StudioReadOnlyLink,
@@ -65,7 +63,6 @@ import {
   useShowInputFocus,
 } from './StudioPillarKit.js';
 import {
-  useIsMobile,
   Sheet,
   SheetContent,
   SheetHeader,
@@ -75,7 +72,7 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from '@object-ui/components';
-import { Ban, Workflow, SlidersHorizontal, MousePointer2, Loader2, Lock, Menu } from 'lucide-react';
+import { Ban, FileQuestion, Workflow, SlidersHorizontal, MousePointer2, Loader2, Lock } from 'lucide-react';
 import {
   useRegisteredMetadataPreview,
   useRegisteredMetadataPreviewTypes,
@@ -95,7 +92,7 @@ import {
   type ServerDiagnostics,
 } from '../metadata-admin/draftVerdict.js';
 import { emitMetadataRefresh } from '../../assistant/assistantBus.js';
-import { publishSavedItem, publishCreated, publishedPinOfLayers, STUDIO_SAVE_TOAST_ID, useStudioSaveEntry, type StudioSaveResult } from './studioSaveBar.js';
+import { publishSavedItem, publishedPinOfLayers, useStudioSaveEntry, type StudioSaveResult } from './studioSaveBar.js';
 import {
   flowHeldEdit,
   flowSaveRefusal,
@@ -109,19 +106,15 @@ import {
   loadPackageSurfaces,
 } from './packageSurfaces.js';
 import { studioOrgScopePath } from './studioScope.js';
-import { studioPillarItemPath } from './metadataArea.js';
-import { useCanAuthorMetadata } from '../../hooks/useCanAuthorMetadata.js';
+import { studioItemPath } from './studioAddress.js';
+import { useCanAuthorMetadata, useCanReadAuthoringTrail } from '../../hooks/useCanAuthorMetadata.js';
 import { useMetadataRefreshNonce } from './useMetadataRefreshNonce.js';
 import { type Surface } from './navSurface.js';
-import { useSurfaceDeepLink, resolveSurfaceDeepLink } from './useSurfaceDeepLink.js';
-import { buildFlowSkeleton } from './skeletons.js';
-import { t, tFormat, translateValidationMessage, useMetadataLocale } from '../metadata-admin/i18n.js';
-import { ObjectPicker } from '../metadata-admin/inspectors/ObjectPicker.js';
+import { t, tFormat, translateMetadataType, translateValidationMessage, useMetadataLocale } from '../metadata-admin/i18n.js';
 import {
   FlowRegistrationContext,
   FlowRuntimeContext,
   deriveFlowRunStatus,
-  type FlowRunStatus,
 } from '../metadata-admin/previews/flow-problems.js';
 import {
   FlowMetaPills,
@@ -132,22 +125,9 @@ import {
   type FlowProblemTally,
 } from '../metadata-admin/previews/FlowPreview.js';
 import { InspectorShellHostProvider } from '../metadata-admin/inspectors/_shared.js';
-import { useFlowLabelOf, useFlowLabelTranslations } from '../metadata-admin/previews/flow-label-translations.js';
+import { useFlowLabelTranslations } from '../metadata-admin/previews/flow-label-translations.js';
 import type { FlowRegistration } from '@objectstack/spec/api';
-import { CreateItemDialog } from './CreateItemDialog.js';
-import { FLOW_PRESETS, flowPresetTrigger, type FlowPreset } from './flowPresets.js';
-import {
-  ContributedRailRow,
-  RailCustomizationFilter,
-  RailCustomizationMark,
-  StudioPairItemChip,
-  contributedItemTitle,
-  railCustomizationsOf,
-  useOpenContributor,
-  useRailCustomizationsOnly,
-  withPairItems,
-} from './StudioRailCustomizations.js';
-import { baseContributionsOf, withContributedFlowGroups, type ContributedOnObject } from './contributionRows.js';
+import { StudioPairItemChip, withPairItems } from './StudioRailCustomizations.js';
 import {
   StudioCustomizeButton,
   StudioOverrideChip,
@@ -191,10 +171,13 @@ async function readPublishedFlowNames(
   }
 }
 
-/** Automations pillar — flows: list → FlowPreview (default OFF / review-then-enable). */
+/**
+ * The flow designer (objectstack#36903): one flow, named by its address, read
+ * at its package (or the package-less scope), drawn full-screen.
+ */
 export function AutomationsPillar({
-  packageId: railPackageId,
-  objectOrder = NO_OBJECT_ORDER,
+  packageId: scopePackageId,
+  flowName,
   publishNonce = 0,
   onDraftSaved,
   readOnly: packageReadOnly = false,
@@ -203,23 +186,18 @@ export function AutomationsPillar({
   onSurfaceLabelChange,
 }: {
   /**
-   * The package whose flows the rail lists, or `null` for the package-less
-   * scope (objectui#11553, `studioScope.ts`): every flow that belongs to no
-   * package, saved as package-less drafts.
+   * The package whose flow this is, or `null` for the package-less scope
+   * (objectui#11553, `studioScope.ts`): a flow that belongs to no package,
+   * saved as a package-less draft.
    */
   packageId: string | null;
-  /**
-   * objectui#12612 — the objects the package app's navigation lists, in its
-   * order (`navigationObjectOrder`): the rail's groups follow it. The shell
-   * reads it with the package's app; none (the package-less scope, a package
-   * without an app) leaves every group ordered by its flow count.
-   */
-  objectOrder?: readonly string[];
+  /** objectstack#36903 — the one flow this page designs: the name in its metadata address. */
+  flowName: string;
   publishNonce?: number;
   onDraftSaved?: (saved?: StudioSavedDraft) => void;
   /** Courtesy gate: hide/disable flow-authoring affordances. */
   readOnly?: boolean;
-  /** objectstack#28572 — on a read-only base, its pair: the rail lists the pair's flows too, and New lands there. */
+  /** objectstack#28572 — on a read-only base, its pair: a flow the pair adds opens writable at the pair. */
   customization?: StudioBaseCustomization | null;
   /** objectui#11786 — the clause of the edit the autosave holds unsent, for the surface's Publish. */
   onHeldEditChange?: (clause: string | null) => void;
@@ -233,58 +211,35 @@ export function AutomationsPillar({
   const locale = useMetadataLocale();
   const navigate = useNavigate();
   const location = useLocation();
-  // objectstack#28572 (ADR-0146 D3) — the rail is the base's; on a read-only
-  // base it lists the flows its pair adds too, and New lands in the pair.
+  const [searchParams] = useSearchParams();
+  // objectstack#28572 (ADR-0146 D3) — on a read-only base its pair is read
+  // too: a flow the pair adds opens here writable, at the pair.
+  const railPackageId = scopePackageId;
   const railPairId = packageReadOnly && railPackageId !== null && customization ? customization.pairId : null;
-  const railMarks = railPackageId === null ? null : railCustomizationsOf(customization?.marks, railPackageId);
-  const [onlyCustomized, toggleOnlyCustomized] = useRailCustomizationsOnly();
-  const newInPair = packageReadOnly && railPackageId !== null && customization !== null && !customization.walled;
   // objectstack#28567 — "New similar" (`FlowItemMoreMenu`): the strip that
   // shows the copy the clone door saved, with the door's sentence that it is
-  // switched off, as sent. The copy usually opens in ANOTHER package (a
-  // read-only base's pair), which remounts this pillar (keyed by package), so
-  // the landing rides the navigation's state and is read once here.
+  // switched off, as sent. The copy opens on its own address (objectstack#36903),
+  // which mounts a new designer, so the landing rides the navigation's state
+  // and is read once here.
   const [flowCopied, setFlowCopied] = React.useState<FlowCopiedStrip | null>(
     () =>
       readFlowCopiedArrival(location.state, railPackageId) ??
-      // objectstack#28572 — a copy that landed in the base's pair arrives on
-      // the base's surface (the pair's URL lands there). Matched by the spec's
-      // pairing rule: a read of where the copy went, never a write target.
+      // objectstack#28572 — a copy that landed in the base's pair. Matched by
+      // the spec's pairing rule: a read of where the copy went, never a write target.
       (railPackageId !== null ? readFlowCopiedArrival(location.state, pairIdOf(railPackageId)) : null),
   );
-  // The copy to open once the rail re-reads, when it landed in THIS package.
-  const openAfterListRef = React.useRef<string | null>(null);
   const canAuthorFlows = useCanAuthorMetadata();
-  // See DataPillar's rail — same mobile-overlay treatment for the flow list.
-  const isMobile = useIsMobile();
-  const [railOpen, setRailOpen] = React.useState(false);
   // objectui#11795 — on a row too narrow for the Configuration aside to sit
   // beside the canvas (`AUTOMATIONS_CONFIG_FOLD_WIDTH`), the aside folds away
   // and a selection opens the same configuration as a drawer over the canvas,
   // so the canvas keeps the row's width. Wider rows keep the aside as it was.
   const layoutRowRef = React.useRef<HTMLDivElement>(null);
   const configFolded = useIsNarrowerThan(layoutRowRef, AUTOMATIONS_CONFIG_FOLD_WIDTH);
-  const [flows, setFlows] = React.useState<Surface[]>([]);
-  // objectui#11794 — the rail's search: a case-insensitive match on the label
-  // or the machine name. Ephemeral (AGENTS.md #8): nobody expects it back.
-  const [railQuery, setRailQuery] = React.useState('');
-  const railNeedle = railQuery.trim().toLowerCase();
-  // objectstack#35319 — a row names its flow as the open flow's header does:
-  // the package's `flows.NAME.label` in the console's language, else the
-  // authored label. The search matches that name, the authored label and the
-  // machine name, so what the row shows is always searchable.
-  const flowLabelOf = useFlowLabelOf();
-  const railLabel = (f: Surface) => flowLabelOf(f.name) || f.label;
-  const flowMatches = (f: Surface) =>
-    [railLabel(f), f.label, f.name].some((text) => text.toLowerCase().includes(railNeedle));
-  // objectstack#28572 — "only customizations" keeps the marked rows.
-  const flowShown = (f: Surface) =>
-    (!railNeedle || flowMatches(f)) && (!onlyCustomized || railMarks?.markOf(f) != null);
-  const shownFlows = flows.filter(flowShown);
-  const markedFlows = railMarks ? flows.filter((f) => railMarks.markOf(f) !== null).length : 0;
-  // objectui#7255 — same live-pulse subscription as the sibling rails; this
-  // one only replaces the flow LIST, so it needs no edit-buffer hold either.
+  // objectui#7255 — the live pulse (the copilot's edits, another tab's save)
+  // re-reads the scope's flows, which names this one and its registration.
   const metadataRefreshNonce = useMetadataRefreshNonce();
+  // The open flow, once the scope's read names it: `null` while it reads and
+  // when it does not hold the flow (`flowMissing`).
   const [current, setCurrent] = React.useState<Surface | null>(null);
   // objectstack#28572 — a flow the pair adds (`current.addedIn`) opens
   // writable, read and saved at the pair: every read and write of the OPEN
@@ -365,12 +320,8 @@ export function AutomationsPillar({
   // The package the open flow's draft read was asked at (`flow:NAME`): the
   // address the pin it recorded describes.
   const flowReadAtRef = React.useRef<{ key: string; at: string | undefined } | null>(null);
-  // `?surface=flow:<name>` capture + mirror — shared plumbing (see
-  // useSurfaceDeepLink). No producer emits this link yet; honoring it keeps
-  // the pillars uniform so a future "design this flow" bridge just works.
-  const initialSurface = useSurfaceDeepLink(current);
-  // objectui#11553 — the package-less probe for a deep-linked flow this
-  // package does not hold runs once per mount, not on every list re-read.
+  // objectui#11553 — the package-less probe for an address naming a flow this
+  // package does not hold runs once per mount, not on every re-read.
   const deepLinkProbedRef = React.useRef(false);
   const [draft, setDraft] = React.useState<Record<string, unknown>>({});
   // objectui#11272 — the flow `draft` was loaded for, `flow:NAME`: written
@@ -454,35 +405,13 @@ export function AutomationsPillar({
   // objectui#11785 — a load failure as it was (`plainRefusal`), a refused save
   // as an author sentence naming the step and its input, raw text behind Details.
   const [error, setError] = React.useState<StudioRefusal | null>(null);
-  // Tells "still fetching the list" apart from "fetched, package has no flows"
-  // — without it the empty rail showed an endless "Loading…" for a fresh package.
+  // Whether the scope's read has answered: until it has, the page neither
+  // opens the flow nor says it is not here.
   const [listed, setListed] = React.useState(false);
-  // The flow a deep link named that this rail, once listed, does not hold.
-  const missingFlow =
-    listed && initialSurface?.type === 'flow' && !flows.some((f) => f.name === initialSurface.name)
-      ? initialSurface.name
-      : null;
-  // Inline create — a fresh package starts with zero flows, so the pillar must
-  // offer a way to author the first one (mirrors the object/app creators).
-  const [creating, setCreating] = React.useState(false);
-  const [createBusy, setCreateBusy] = React.useState(false);
-  // objectui#11788 — the trigger the New dialog asks for (unset = choose it
-  // later on the Start node), and the object a record trigger watches. The
-  // New button empties both each time it opens the dialog, as the dialog
-  // empties its own inputs.
-  const [newTrigger, setNewTrigger] = React.useState('');
-  const [newTriggerObject, setNewTriggerObject] = React.useState('');
-  const startTrigger = React.useMemo(() => newFlowTriggerFields(locale), [locale]);
-  // objectui#11861 — the dialog opens on the starting points of
-  // `flowPresets.ts`; the trigger form above is the *Advanced* choice. A
-  // record preset waits for its object: `newNeeds` is the line the dialog
-  // shows while Create holds it.
-  const [newChoice, setNewChoice] = React.useState<FlowPreset | 'advanced'>(FLOW_PRESETS[0]);
-  const [newNeeds, setNewNeeds] = React.useState<string | null>(null);
-  // objectstack#26917 — a create refused because the identifier is taken:
-  // which flow holds it, and whether it is on this rail, so it can be opened.
-  const [createTaken, setCreateTaken] = React.useState<{ name: string; label: string; here: boolean } | null>(null);
-  const newChoiceGroup = React.useId();
+  // objectstack#36903 — the address named a flow this scope, once read, does
+  // not hold: said on the canvas, and nothing else opens in its place
+  // (objectui#11553's rule for a deep link).
+  const flowMissing = listed && !current && !error;
   // objectui#12303 — the read-only reason the header's status switch is described by.
   const toggleReadOnlyReasonId = React.useId();
   // objectui#12454 — the canvas hint the header used to print describes the Canvas tab.
@@ -511,7 +440,7 @@ export function AutomationsPillar({
 
   // Runtime enable/bound state per flow (GET /automation/_status). Persisted
   // `status` is intent; this is what's actually live in the engine — the truth
-  // behind the rail's status dots. Refetched after a publish (publishNonce);
+  // behind the header's Status pill. Refetched after a publish (publishNonce);
   // degrades silently on an older backend / offline (dots just don't render).
   const [flowStatus, setFlowStatus] = React.useState<Record<string, FlowRailState>>({});
   // objectui#11779 — whether `flowStatus` holds an answer from the engine. With
@@ -523,20 +452,23 @@ export function AutomationsPillar({
   // list's `registrations` (served beside the items, keyed by name). A flow
   // with no entry is one no engine judged, which reads as before.
   const [flowRegistrations, setFlowRegistrations] = React.useState<Record<string, FlowRegistration>>({});
-  // objectstack#34818 — the flows of the rail's scope that have a published
+  // objectstack#34818 — the flows of the designer's scope that have a published
   // version, so the Runs tab can tell "not published yet" from "the engine is
   // not answering". `null` until read, and after a failed read: unknown.
   const [publishedFlowNames, setPublishedFlowNames] = React.useState<ReadonlySet<string> | null>(null);
-  // objectui#12454 — the rail groups flows by the object each is about and
-  // marks each with its trigger kind, both read off the flow's definition as
-  // served (`flowGrouping.ts`), with the scope's objects naming the groups.
-  const [flowDefinitions, setFlowDefinitions] = React.useState<ReadonlyMap<string, unknown>>(() => new Map());
-  const [objectLabels, setObjectLabels] = React.useState<ReadonlyMap<string, string>>(() => new Map());
-  // Which groups the author folded. Ephemeral (AGENTS.md #8), as the search is.
-  const [foldedGroups, setFoldedGroups] = React.useState<ReadonlySet<string>>(() => new Set());
   // objectui#12454 — the tab the item header's tab row has open over the flow,
   // and the problem tally its Problems tab carries (reported by the preview).
-  const [flowSection, setFlowSection] = React.useState<FlowPreviewSection>('canvas');
+  // objectstack#36903 — in the address (`?tab=`), with the item tools after
+  // the designer's own sections (`flowDesignerTabs.ts`).
+  const canReadTrail = useCanReadAuthoringTrail();
+  const toolTabs = React.useMemo(
+    () => FLOW_DESIGNER_TOOL_TABS.filter((tab) => tab !== 'history' || canReadTrail),
+    [canReadTrail],
+  );
+  const designerTab = useFlowDesignerTab(toolTabs);
+  const toolTab = designerTab.location.tool;
+  const flowSection: FlowPreviewSection = designerTab.location.section;
+  const setFlowSection = designerTab.selectSection;
   const [problemTally, setProblemTally] = React.useState<FlowProblemTally>({ count: 0, errors: 0 });
   // ADR-0146 D4 — bumped after a ledger toggle the server accepted: its answer
   // carries the flag alone, and the flip can move what the engine armed.
@@ -563,10 +495,13 @@ export function AutomationsPillar({
     };
   }, [publishNonce, statusNonce]);
 
-  // #27356 row 19 — a delete re-reads the rail (`flowListNonce`) and leaves
-  // the pillar on its empty state: that one re-read opens no other flow.
-  const [flowListNonce, setFlowListNonce] = React.useState(0);
-  const keepEmptyAfterDeleteRef = React.useRef(false);
+  // objectstack#36903 — the scope's read: the flows of the package (with its
+  // pair's, on a read-only base) or of the package-less scope, the engine's
+  // registrations, and the published names. It names the open flow (its label,
+  // and on a read-only base whether the pair adds it); the flow's own body is
+  // the load below. Re-read on a publish and on the live pulse (the copilot's
+  // edits): the open flow keeps its identity across those reads, so a re-read
+  // never reloads the buffer an author is editing.
   React.useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -574,71 +509,49 @@ export function AutomationsPillar({
         // Published flows ∪ pending DRAFT flows — `list()` only sees
         // published/active metadata, so a just-authored flow that hasn't been
         // published yet (or a fresh writable-base package whose flows are all
-        // drafts) would render an empty rail even though "Changes · N" shows the
-        // draft exists. Mirrors the Data / Interfaces / Access pillars, which all
-        // merge their drafts. Keyed on `publishNonce` too so drafts that go live
-        // collapse back into the published rail after a package publish.
-        // objectui#11862 — a draft-only flow reads as the label its `_drafts`
-        // row carries, resolved in the designer locale.
-        const packageId = railPackageId;
+        // drafts) would not be found although "Changes · N" shows the draft
+        // exists. objectui#11862 — a draft-only flow reads as the label its
+        // `_drafts` row carries, resolved in the designer locale.
+        const scope = railPackageId;
         // objectstack#28572 — on a read-only base with a pair, the pair's
-        // flows too: the ones the base's list does not hold are the flows the
-        // pair adds, grouped and dotted from the pair's own reads. A failed
-        // pair read lists none of them.
+        // flows too: one the base's list does not hold is a flow the pair adds,
+        // read from the pair's own registrations. A failed pair read holds none.
         const pairId = railPairId;
         const readPair = async () =>
           pairId === null
             ? null
-            : Promise.all([
-                loadPackageSurfaces(client, 'flow', pairId, locale),
-                readFlowRegistrations(client, pairId),
-                readFlowDefinitions(client, pairId),
-                readObjectLabels(client, pairId, locale),
-              ]);
-        const [baseItems, registrations, definitions, objects, pair, publishedNames] = await Promise.all([
-          packageId === null
-            ? loadPackageLessSurfaces(client, 'flow', locale)
-            : loadPackageSurfaces(client, 'flow', packageId, locale),
-          readFlowRegistrations(client, packageId),
-          readFlowDefinitions(client, packageId),
-          readObjectLabels(client, packageId, locale),
+            : Promise.all([loadPackageSurfaces(client, 'flow', pairId, locale), readFlowRegistrations(client, pairId)]);
+        const [baseItems, registrations, pair, publishedNames] = await Promise.all([
+          scope === null ? loadPackageLessSurfaces(client, 'flow', locale) : loadPackageSurfaces(client, 'flow', scope, locale),
+          readFlowRegistrations(client, scope),
           readPair().catch(() => null),
-          readPublishedFlowNames(client, [packageId, ...(pairId === null ? [] : [pairId])]),
+          readPublishedFlowNames(client, [scope, ...(pairId === null ? [] : [pairId])]),
         ]);
         if (cancelled) return;
         const items: Surface[] = withPairItems<Surface>(baseItems, pair?.[0] ?? [], pairId);
-        setFlows(items);
         setPublishedFlowNames(publishedNames);
         setFlowRegistrations(pair ? { ...pair[1], ...registrations } : registrations);
-        setFlowDefinitions(pair ? new Map([...pair[2], ...definitions]) : definitions);
-        setObjectLabels(pair ? new Map([...pair[3], ...objects]) : objects);
-        const deepLinked = resolveSurfaceDeepLink(items, initialSurface, 'flow');
-        // objectui#11553 — a deep link that NAMES a flow this rail does not
-        // hold opens no other flow in its place: the first flow under the name
-        // of the one asked for is how the clone's link "redirected to another
-        // flow". A package-less flow named from a package's pillar is found in
-        // the package-less scope and opened there, once per mount.
-        const named = initialSurface?.type === 'flow' ? initialSurface.name : null;
-        if (named && !deepLinked && packageId !== null && !deepLinkProbedRef.current) {
+        const named = items.find((f) => f.name === flowName) ?? null;
+        // objectui#11553 — a package's address naming a package-less flow
+        // opens it in the package-less scope, once per mount.
+        if (!named && scope !== null && !deepLinkProbedRef.current) {
           deepLinkProbedRef.current = true;
           const packageLess = await loadPackageLessSurfaces(client, 'flow', locale).catch(() => []);
           if (cancelled) return;
-          if (packageLess.some((f) => f.name === named)) {
-            navigate(studioOrgScopePath({ type: 'flow', name: named }), { replace: true });
+          if (packageLess.some((f) => f.name === flowName)) {
+            navigate(studioOrgScopePath({ type: 'flow', name: flowName }), { replace: true });
             return;
           }
         }
-        const keepEmpty = keepEmptyAfterDeleteRef.current;
-        keepEmptyAfterDeleteRef.current = false;
-        // objectstack#28567 — a copy "New similar" saved in this package opens.
-        const copied = openAfterListRef.current;
-        openAfterListRef.current = null;
-        const copiedFlow = copied ? items.find((f) => f.name === copied) : undefined;
-        if (copiedFlow) {
-          setCurrent(copiedFlow);
-          return;
-        }
-        setCurrent((c) => (keepEmpty ? c : (c ?? deepLinked ?? (named ? null : items[0]) ?? null)));
+        // The open flow keeps its object while it is the same flow at the same
+        // package: the load below is keyed on it.
+        setCurrent((c) =>
+          named && c && c.name === named.name && c.addedIn === named.addedIn
+            ? c.label === named.label
+              ? c
+              : { ...c, label: named.label }
+            : named,
+        );
       } catch (e) {
         if (!cancelled) setError(plainRefusal(e));
       } finally {
@@ -648,101 +561,18 @@ export function AutomationsPillar({
     return () => {
       cancelled = true;
     };
-  }, [client, railPackageId, railPairId, publishNonce, metadataRefreshNonce, locale, flowListNonce]);
+  }, [client, railPackageId, railPairId, publishNonce, metadataRefreshNonce, locale, flowName, navigate]);
 
-  const doCreateFlow = React.useCallback(
-    async (label: string, name: string, trigger: NewFlowTrigger | null) => {
-      setCreateBusy(true);
-      setError(null);
-      setCreateTaken(null);
-      try {
-        // A name a flow already holds, published or as a draft, in this
-        // package or any other, is refused here and nothing is written: over
-        // a published flow the first-write pin below would write this blank
-        // skeleton as its pending draft (`findTakenIdentifier`).
-        const taken = await findTakenIdentifier(client, 'flow', name, locale);
-        if (taken) {
-          setCreateTaken({ ...taken, here: flows.some((f) => f.name === name) });
-          return;
-        }
-        // Minimal valid, autolaunched skeleton: start → end. The designer fills in
-        // the trigger + nodes; publishing it is a separate, user-initiated step.
-        //
-        // objectui#11779 — and it is born switched OFF, as the bar above the
-        // rail promises ("Off by default · review before enabling"). With no
-        // `status` the spec's default is `draft`, which the engine arms like
-        // `active`: the switch read "Enabled" on a flow nobody had reviewed, and
-        // a package publish armed it as soon as it had a trigger. `obsolete` is
-        // what the switch itself writes for Off; enabling it is the author's
-        // own flip.
-        const skeleton = withStartTrigger(
-          {
-            ...buildFlowSkeleton(
-              name,
-              label,
-              t('engine.studio.auto.nodeStart', locale),
-              t('engine.studio.auto.nodeEnd', locale),
-            ),
-            status: 'obsolete',
-          },
-          trigger,
-        );
-        // objectstack#28572 (ADR-0146 D3) — on a read-only base the flow is
-        // created in its pair, which the ensure door answers (creating it on
-        // first use, without a prompt).
-        const target = packageReadOnly && customization ? (await customization.ensurePackage()).packageId : null;
-        // objectui#11773 — and the door refuses a draft row too (the
-        // first-write pin), for one that lands between the check above and
-        // this save.
-        await client.save('flow', name, skeleton, {
-          mode: 'draft',
-          packageId: target ?? railPackageId ?? undefined,
-          ifNoneMatch: '*',
-          surface: 'studio',
-        });
-        // objectstack#36511 — and published at once, switched off as it was
-        // born: no draft is left for a package publish, and the switch arms it.
-        // objectstack#36726 — pinned `If-None-Match: *`: a flow another writer
-        // published under the name since the check above is refused, not replaced.
-        const live = await publishSavedItem(
-          client,
-          { type: 'flow', name, packageId: target ?? railPackageId },
-          false,
-          publishCreated,
-        );
-        if (!live.ok) {
-          if ('error' in live) setError(plainRefusal(live.error));
-          return;
-        }
-        const item: Surface = target === null ? { type: 'flow', name, label } : { type: 'flow', name, label, addedIn: target };
-        setFlows((fs) => [...fs.filter((f) => f.name !== name), item]);
-        // objectstack#36742 — the engine's row for the new flow is read, as
-        // after a Save: the snapshot held was taken before the flow existed,
-        // and its missing row read as 「未发布草稿」 over a published flow.
-        setStatusNonce((n) => n + 1);
-        // objectstack#28572 — the rail reads again after the save, so the
-        // pair's list it reads holds the new flow.
-        if (target !== null) setFlowListNonce((n) => n + 1);
-        // objectui#12454 — and groups by what it was born with.
-        setFlowDefinitions((m) => new Map([...m, [name, skeleton]]));
-        setCurrent(item);
-        setHasDraft(false);
-        setCreating(false);
-        // objectstack#36742 — its own words: the flow is published, but born
-        // switched off, so 「已保存并生效」 would promise a run it will not do.
-        toast.success(tFormat('engine.studio.auto.createdOff', locale, { name: label }), { id: STUDIO_SAVE_TOAST_ID });
-      } catch (e) {
-        // Shown in the create dialog, which prints the message only: kept whole.
-        setError(plainRefusal(e));
-      } finally {
-        setCreateBusy(false);
-      }
-    },
-    [client, railPackageId, packageReadOnly, customization, locale, flows],
+  // The open flow as the load reads it: its name and the package it is read
+  // at. A re-read that only renames it (its label) is not a new flow.
+  const openFlowName = current?.name;
+  const openFlowAddedIn = current?.addedIn;
+  const openFlow = React.useMemo(
+    () => (openFlowName === undefined ? null : { name: openFlowName, addedIn: openFlowAddedIn }),
+    [openFlowName, openFlowAddedIn],
   );
-
   React.useEffect(() => {
-    if (!current) return;
+    if (!openFlow) return;
     let cancelled = false;
     // objectui#11331 — whether this run's load has settled (see the cleanup).
     let settled = false;
@@ -754,7 +584,7 @@ export function AutomationsPillar({
         // objectui#11773 — read at the address the flow saves write, so the
         // version it serves pins the first of them. objectstack#28570 — a
         // read-only base's flow: its pair, when one is listed.
-        const pair = flowCustomizing && !current.addedIn ? (customizationRef.current?.pairId ?? null) : null;
+        const pair = flowCustomizing && !openFlow.addedIn ? (customizationRef.current?.pairId ?? null) : null;
         const readAt = pair ?? draftPackageId;
         // objectstack#36726 — the published flow's layers at the address the
         // Save's publish writes, read FIRST (the server's order for the
@@ -764,14 +594,14 @@ export function AutomationsPillar({
         // is also the baseline read below.
         const baselineScope = draftPackageId ? { packageId: draftPackageId } : {};
         const layAtReadAt = await client
-          .layered<Record<string, unknown>>('flow', current.name, readAt ? { packageId: readAt } : {})
+          .layered<Record<string, unknown>>('flow', openFlow.name, readAt ? { packageId: readAt } : {})
           .then(
             (lay) => ({ ok: true as const, lay }),
             (err: unknown) => ({ ok: false as const, err }),
           );
         if (cancelled) return;
         const publishedAt = layAtReadAt.ok ? publishedPinOfLayers(layAtReadAt.lay) : null;
-        const draftRead = await readDraftForSave<Record<string, unknown>>(client, 'flow', current.name, readAt);
+        const draftRead = await readDraftForSave<Record<string, unknown>>(client, 'flow', openFlow.name, readAt);
         if (cancelled) return;
         // objectstack#29148 — a flow draft the server refused to read is no
         // absence: no buffer is installed over it (see InterfacesPillar's leaf
@@ -798,7 +628,7 @@ export function AutomationsPillar({
             if (!layAtReadAt.ok) throw layAtReadAt.err;
             layRaw = layAtReadAt.lay;
           } else {
-            layRaw = await client.layered<Record<string, unknown>>('flow', current.name, baselineScope);
+            layRaw = await client.layered<Record<string, unknown>>('flow', openFlow.name, baselineScope);
           }
         }
         if (cancelled) return;
@@ -807,7 +637,7 @@ export function AutomationsPillar({
         // Served draft as-is, baseline only without one (objectui#10765).
         setDraft(draftBody ?? baseline);
         flowStoredRef.current = draftBody ?? baseline;
-        setDraftFor(`flow:${current.name}`);
+        setDraftFor(`flow:${openFlow.name}`);
         flowVerdictSeq.current += 1;
         setFlowVerdict(
           editedItemDiagnostics({
@@ -817,10 +647,10 @@ export function AutomationsPillar({
           }),
         );
         // objectui#11773 — the next save is pinned to what the draft read served.
-        recordFlowRead('flow', current.name, readAt, draftRead.pin);
+        recordFlowRead('flow', openFlow.name, readAt, draftRead.pin);
         // objectstack#36726 — …and its publish to the published flow the layers served there.
-        recordFlowPublished('flow', current.name, readAt, publishedAt);
-        flowReadAtRef.current = { key: `flow:${current.name}`, at: readAt };
+        recordFlowPublished('flow', openFlow.name, readAt, publishedAt);
+        flowReadAtRef.current = { key: `flow:${openFlow.name}`, at: readAt };
         setHasDraft(!!draftBody);
         setFlowDraftChanges(draftBody ? readDraftChanges(draftRead.answer) : null);
       } catch (e) {
@@ -839,7 +669,7 @@ export function AutomationsPillar({
       // `loading` it raised, as in InterfacesPillar's draft load.
       if (!settled) setLoading(false);
     };
-  }, [client, current, draftPackageId, publishNonce, flowReloadNonce, recordFlowRead, recordFlowPublished, flowCustomizing]);
+  }, [client, openFlow, draftPackageId, publishNonce, flowReloadNonce, recordFlowRead, recordFlowPublished, flowCustomizing]);
 
   // objectui#5813 — local dirty flag: auto-save arms only after a real edit.
   const [autoDirty, setAutoDirty] = React.useState(false);
@@ -1100,30 +930,11 @@ export function AutomationsPillar({
     }
   }, [saveFlowDraft, publishFlow, client, current, draft, draftFor, hasDraft, draftPackageId, locale, readOnly, recordFlowRead, rereadFlowVerdict]);
 
-  // The rail's "+" — and the empty block's button, which runs this same
-  // handler (objectui#12514). objectui#11553 — no "New" in the package-less
-  // scope: new authoring stays package-first, and this scope reaches flows
-  // that already exist without a package.
-  const openCreateFlow =
-    (!packageReadOnly || newInPair) && railPackageId !== null
-      ? () => {
-          // objectstack#26845 — the created flow opens at once, and its load
-          // replaces the buffer a held step lives in: asked before the dialog
-          // opens, so Cancel costs nothing and the create itself asks nothing.
-          if (!confirmDropUnsavedWork(flowUnsaved, locale)) return;
-          setError(null);
-          setNewTrigger('');
-          setNewTriggerObject('');
-          setNewChoice(FLOW_PRESETS[0]);
-          setNewNeeds(null);
-          setCreateTaken(null);
-          setCreating(true);
-        }
-      : undefined;
   // #27356 row 19 — Delete flow (`FlowItemMoreMenu`): the autosave disarmed,
   // the draft (so none is left to publish the flow back) and then the flow
-  // deleted at the drafts' package, then the empty state over a re-read rail.
-  // A refusal shows the door's sentence and keeps the flow open.
+  // deleted at the drafts' package. objectstack#36903 — then the flow list, as
+  // × opens it (the list's filters kept). A refusal shows the door's sentence
+  // and keeps the flow open.
   const deleteOpenFlow = React.useCallback(async () => {
     if (!current || packageId === null) return;
     const flow = current;
@@ -1139,13 +950,10 @@ export function AutomationsPillar({
       setError(plainRefusal(e));
       return;
     }
-    keepEmptyAfterDeleteRef.current = true;
-    setCurrent(null);
-    setFlows((fs) => fs.filter((f) => f.name !== flow.name));
-    setFlowListNonce((n) => n + 1);
     onDraftSaved?.({ type: 'flow', name: flow.name });
     toast.success(tFormat('engine.studio.auto.flowDeleted', locale, { item: flow.label || flow.name }));
-  }, [client, current, packageId, hasDraft, onDraftSaved, locale]);
+    navigate(detailListHref(location.pathname, searchParams));
+  }, [client, current, packageId, hasDraft, onDraftSaved, locale, navigate, location.pathname, searchParams]);
   // objectstack#28570 (ADR-0146 D2) — "Restore package original" on a flow
   // the pair overrides: the pair's draft of the flow, then its row, deleted
   // at the pair. The pair is the door's answer this flow's saves named, else
@@ -1189,10 +997,10 @@ export function AutomationsPillar({
     );
   }, [client, current, reloadFlowDraft, onDraftSaved, locale]);
   // objectstack#28567 (ADR-0146 D4) — "New similar" saved a copy. It opens
-  // only where the door's answer says it landed: in this pillar after a
-  // re-read when that is this package, else that package's Automations pillar
-  // on the copy (a read-only base's pair, `<base>.custom`). An answer naming
-  // no package opens nothing and says so; the landing is never derived here.
+  // only where the door's answer says it landed: objectstack#36903 — on the
+  // copy's own address in that package (this one, or a read-only base's pair,
+  // `<base>.custom`), the strip riding the navigation. An answer naming no
+  // package opens nothing and says so; the landing is never derived here.
   const onFlowCopied = React.useCallback(
     (copy: FlowCopied) => {
       setError(null);
@@ -1208,24 +1016,11 @@ export function AutomationsPillar({
         noticeCode: copy.noticeCode,
       };
       onDraftSaved?.({ type: 'flow', name: copy.name });
-      // objectstack#28572 — the pair's flows are this surface's too.
-      if (copy.packageId === railPackageId || (railPairId !== null && copy.packageId === railPairId)) {
-        setFlowCopied(landed);
-        openAfterListRef.current = copy.name;
-        setFlowListNonce((n) => n + 1);
-        // The door stored the copy live and the engine already holds its row;
-        // the `_status` snapshot this pillar holds predates it, so it is read
-        // once more, or the copy's header reads the row it lacks as an
-        // unpublished draft. The other landing remounts the pillar keyed by
-        // package, and that mount reads `_status` itself.
-        setStatusNonce((n) => n + 1);
-        return;
-      }
-      navigate(studioPillarItemPath(copy.packageId, 'automations', { type: 'flow', name: copy.name }), {
+      navigate(studioItemPath(copy.packageId, 'flow', copy.name), {
         state: { [FLOW_COPIED_ARRIVAL_STATE]: landed },
       });
     },
-    [railPackageId, railPairId, navigate, onDraftSaved],
+    [navigate, onDraftSaved],
   );
   // A landing is shown on its copy; an answer that names no package, on any flow.
   const flowCopiedShown =
@@ -1269,20 +1064,6 @@ export function AutomationsPillar({
       }),
     );
   }, [current, ledgerOn, ledgerWalled, locale]);
-  // objectstack#26917 — the refusal's way out: the flow holding the identifier
-  // is on this rail, so it opens instead of a second one being made. The New
-  // button already asked about a held step (objectstack#26845).
-  const openTakenFlow = (name: string) => {
-    const flow = flows.find((f) => f.name === name);
-    if (!flow) return;
-    setCreating(false);
-    setCreateTaken(null);
-    setCurrent(flow);
-  };
-  // objectui#12514 — a listed package with no flow: one centered block in the
-  // content column, and no aside while there is nothing to select.
-  const flowsEmpty = listed && !error && flows.length === 0;
-
   // objectui#12725 — the surface's right slot hosts the Configuration
   // (`useStudioRightSlot`); `null` in the package-less scope and under an
   // injected `aiSlot`, where the aside beside the canvas (or, on a folded
@@ -1294,8 +1075,8 @@ export function AutomationsPillar({
   const inSlot = slot !== null;
   const claimSlotProps = slot?.claimProps;
   React.useEffect(
-    () => (claimSlotProps && !flowsEmpty ? claimSlotProps() : undefined),
-    [claimSlotProps, flowsEmpty],
+    () => (claimSlotProps && !flowMissing ? claimSlotProps() : undefined),
+    [claimSlotProps, flowMissing],
   );
   const flowSelectionKey = selection ? `${selection.kind}:${selection.id}` : '';
   const showSlotProps = slot?.showProps;
@@ -1476,75 +1257,6 @@ export function AutomationsPillar({
         })()
       : null;
 
-  // objectui#12454 — the open flow groups and reads by the draft on screen, so
-  // an edit to its Start node moves its row as it moves the header's Trigger.
-  const liveFlowDefinitions = React.useMemo(() => {
-    if (!current || draftFor !== `flow:${current.name}`) return flowDefinitions;
-    return new Map<string, unknown>([...flowDefinitions, [current.name, draft]]);
-  }, [flowDefinitions, current, draftFor, draft]);
-  const railGroups = React.useMemo(
-    () =>
-      groupFlowsByObject(flows, liveFlowDefinitions, objectLabels, {
-        noObjectLabel: t('engine.studio.auto.group.noObject', locale),
-        objectOrder,
-        locale,
-      }),
-    [flows, liveFlowDefinitions, objectLabels, objectOrder, locale],
-  );
-  // objectstack#29786 — the flows other packages ship on the base's objects,
-  // from the base's one customization read, each in its object's group.
-  const customizationMarks = customization?.marks;
-  const contributedFlows = React.useMemo(() => baseContributionsOf(customizationMarks), [customizationMarks]);
-  const railGroupsShown = React.useMemo(
-    () =>
-      withContributedFlowGroups(railGroups, contributedFlows, (object) => ({
-        key: object,
-        objectName: object,
-        label: objectLabels.get(object) || object,
-        items: [] as Surface[],
-      })),
-    [railGroups, contributedFlows, objectLabels],
-  );
-  const openContributor = useOpenContributor();
-  const contributedFlowShown = (f: ContributedOnObject) =>
-    !onlyCustomized &&
-    (!railNeedle || f.name.toLowerCase().includes(railNeedle) || f.packageName.toLowerCase().includes(railNeedle));
-
-  // The legend under the rail: the four trigger glyphs and the dots. Off and
-  // Refused are named only while some flow in the rail reads so.
-  const railStatusKinds = new Set(
-    flows.map((f) => flowRailStatus(flowStatus[f.name], flowRegistrations[f.name], locale)?.status.kind),
-  );
-  const legendDot = (kind: FlowRunStatus, words: string) => (
-    <span key={kind.kind} className="inline-flex items-center gap-1">
-      <span aria-hidden className={'h-1.5 w-1.5 rounded-full ' + flowDotClass(kind)} />
-      {words}
-    </span>
-  );
-  const railLegend =
-    flows.length > 0 ? (
-      <div
-        role="note"
-        aria-label={t('engine.studio.auto.legend', locale)}
-        data-testid="auto-rail-legend"
-        className="flex flex-wrap gap-x-2.5 gap-y-1 text-[10px] text-muted-foreground"
-      >
-        {FLOW_TRIGGER_GLYPHS.map((glyph) => {
-          const Glyph = FLOW_GLYPH_ICON[glyph];
-          return (
-            <span key={glyph} className="inline-flex items-center gap-1">
-              <Glyph aria-hidden className="h-3 w-3" />
-              {t(FLOW_GLYPH_LABEL_KEY[glyph], locale)}
-            </span>
-          );
-        })}
-        {legendDot({ kind: 'on' }, t('engine.studio.auto.on', locale))}
-        {legendDot({ kind: 'not-running' }, t('engine.studio.auto.notRunning', locale))}
-        {railStatusKinds.has('off') && legendDot({ kind: 'off' }, t('engine.studio.auto.off', locale))}
-        {railStatusKinds.has('refused') && legendDot({ kind: 'refused', message: '' }, t('engine.studio.auto.refused', locale))}
-      </div>
-    ) : undefined;
-
   // objectui#12454 — the item header's meta and tab row over the open flow.
   // The Status the meta shows is the one the preview's Problems note reads
   // (objectui#11779): the runtime row while one is in, the draft otherwise.
@@ -1562,8 +1274,10 @@ export function AutomationsPillar({
   ) => (
     <StudioTab
       key={key}
-      active={section === key}
-      onClick={() => setFlowSection(key)}
+      active={!toolTab && section === key}
+      onClick={() => {
+        if (toolTab || key !== section) setFlowSection(key);
+      }}
       title={extra?.title}
       aria-describedby={extra?.describedBy}
       data-testid={`auto-tab-${key}`}
@@ -1582,40 +1296,81 @@ export function AutomationsPillar({
     ) : null;
   /** The flow's ⋯ menu is drawn (objectstack#28567): the header folds into it (objectstack#29693). */
   const flowMoreShown = !!current && flowLoaded && packageId !== null;
+  // objectstack#36903 — the tool tabs need the flow's own buffer (Source edits
+  // it), so the row waits for the load, as the switch does; the designer's
+  // sections need its canvas too.
+  const tabsShown = !!current && flowLoaded;
   const flowTabsEl =
-    flowOpen ? (
+    tabsShown ? (
       <>
-        {flowTab('canvas', t('engine.studio.if.tabCanvas', locale), {
-          title: t('engine.studio.auto.canvasHint', locale),
-          describedBy: canvasHintId,
-        })}
-        {flowTab('variables', t('engine.flowPreview.variables', locale))}
-        {flowHasRuns && flowTab('runs', t('engine.flowPreview.runs', locale), { title: t('engine.flowPreview.runsTitle', locale) })}
-        {flowTab('problems', t('engine.flowPreview.problems', locale), {
-          title: t('engine.flowPreview.problemsTitle', locale),
-          badge:
-            problemTally.count > 0 ? (
-              <span
-                data-testid="auto-problems-count"
-                className={
-                  'inline-flex h-[18px] min-w-[18px] items-center justify-center rounded-full px-[5px] text-[11px] font-semibold ' +
-                  (problemTally.errors > 0
-                    ? 'bg-destructive/15 text-destructive'
-                    : 'bg-amber-500/15 text-amber-700 dark:text-amber-300')
-                }
-              >
-                {problemTally.count}
-              </span>
-            ) : undefined,
-        })}
-        {flowTab('debug', t('engine.flowPreview.debug', locale))}
+        {flowOpen && (
+          <>
+            {flowTab('canvas', t('engine.studio.if.tabCanvas', locale), {
+              title: t('engine.studio.auto.canvasHint', locale),
+              describedBy: canvasHintId,
+            })}
+            {flowTab('variables', t('engine.flowPreview.variables', locale))}
+            {flowHasRuns && flowTab('runs', t('engine.flowPreview.runs', locale), { title: t('engine.flowPreview.runsTitle', locale) })}
+            {flowTab('problems', t('engine.flowPreview.problems', locale), {
+              title: t('engine.flowPreview.problemsTitle', locale),
+              badge:
+                problemTally.count > 0 ? (
+                  <span
+                    data-testid="auto-problems-count"
+                    className={
+                      'inline-flex h-[18px] min-w-[18px] items-center justify-center rounded-full px-[5px] text-[11px] font-semibold ' +
+                      (problemTally.errors > 0
+                        ? 'bg-destructive/15 text-destructive'
+                        : 'bg-amber-500/15 text-amber-700 dark:text-amber-300')
+                    }
+                  >
+                    {problemTally.count}
+                  </span>
+                ) : undefined,
+            })}
+            {flowTab('debug', t('engine.flowPreview.debug', locale))}
+          </>
+        )}
+        {/* objectstack#36903 (decision 8) — the item tools are tabs of the
+            same row: References, History, Source. */}
+        <ItemToolTabStrip
+          tabs={toolTabs}
+          active={toolTab?.tab ?? 'details'}
+          onSelect={(tab) => {
+            setSelection(null);
+            designerTab.selectTool({ tab });
+          }}
+          locale={locale}
+        />
         {autoReadOnlyLinkEl && <span className="ml-auto flex items-center self-center pl-3">{autoReadOnlyLinkEl}</span>}
       </>
     ) : undefined;
+  // objectstack#28567 — New similar on a read-only package's flow and on a
+  // writable one's (the door picks the pair for a read-only base; a writable
+  // package is the target); Delete on a writable package's flow only. The
+  // package-less scope has no pair and no package to name. objectstack#36903 —
+  // in the header's ⋯, which also takes what a narrow header folds.
+  const flowMenu = useFlowItemMenu({
+    name: current?.name ?? flowName,
+    label: current?.label ?? flowName,
+    locale,
+    disabled: !!saving,
+    onDelete: readOnly ? undefined : () => void deleteOpenFlow(),
+    newSimilar: {
+      target: readOnly ? undefined : (packageId ?? undefined),
+      blocked: canAuthorFlows ? null : t('engine.edit.capabilityReadOnly', locale),
+      // The copy opens in place of this flow, which drops a held edit; asked
+      // before the dialog.
+      confirmOpen: () => confirmDropUnsavedWork(flowUnsaved, locale),
+      onCopied: onFlowCopied,
+    },
+  });
+  const flowTitle = current ? flowLabels?.flowLabel || current.label || current.name : flowName;
 
   return (
     <div className="flex h-full flex-col">
       {flowConflictDialog}
+      {flowMenu.dialogs}
       {/* objectstack#28570 — Restore's confirmation, outside the menu that opens it. */}
       <StudioRestoreOriginalDialog
         open={restoreOpen && flowInPair}
@@ -1628,143 +1383,29 @@ export function AutomationsPillar({
         onConfirm={() => void restoreFlow()}
       />
       <div ref={layoutRowRef} data-testid="auto-layout-row" className="relative flex min-h-0 flex-1">
-        {isMobile && railOpen && (
-          <div
-            className="absolute inset-0 z-10 bg-black/30"
-            onClick={() => setRailOpen(false)}
-            aria-hidden="true"
-          />
-        )}
-        <StudioRail
-          testId="studio-rail-automations"
-          heading={t('engine.studio.auto.heading', locale)}
-          count={flows.length}
-          onAdd={openCreateFlow}
-          addLabel={t('engine.studio.auto.newTitle', locale)}
-          addTestId="studio-rail-add"
-          search={{
-            value: railQuery,
-            onChange: setRailQuery,
-            placeholder: t('engine.studio.designer.search', locale),
-            testId: 'auto-rail-search',
-            matchCount: shownFlows.length,
-          }}
-          filters={
-            <RailCustomizationFilter
-              marks={railMarks}
-              marked={markedFlows}
-              on={onlyCustomized}
-              onToggle={toggleOnlyCustomized}
-              locale={locale}
-            />
-          }
-          footer={railLegend}
-          isMobile={isMobile}
-          open={railOpen}
-        >
-          {/* objectui#12454 — grouped by the object each flow is about, in the
-              order of the objects' labels, "No object" last; a search filters
-              within the groups and shows every group that holds a match,
-              folded or not. Each row: its trigger glyph, its label on one
-              line (the row's title holds it whole, with its trigger kind and
-              status words — the redesign trades objectui#11794's wrap for the
-              32 px row), and its status dot. */}
-          {railGroupsShown.map(({ group, contributed: contributedAll }) => {
-            const items = railNeedle || onlyCustomized ? group.items.filter(flowShown) : group.items;
-            const contributed = contributedAll.filter(contributedFlowShown);
-            if (items.length === 0 && contributed.length === 0) return null;
-            const groupKey = group.key || NO_OBJECT_GROUP_KEY;
-            return (
-              <StudioRailGroup
-                key={groupKey}
-                testId={`auto-rail-group-${group.key || 'none'}`}
-                label={group.label}
-                count={items.length + contributed.length}
-                collapsed={!railNeedle && !onlyCustomized && foldedGroups.has(groupKey)}
-                onToggle={() =>
-                  setFoldedGroups((folded) => {
-                    const next = new Set(folded);
-                    if (!next.delete(groupKey)) next.add(groupKey);
-                    return next;
-                  })
-                }
-              >
-                {items.map((f) => {
-                  const active = current?.name === f.name;
-                  const glyph = flowTriggerGlyph(liveFlowDefinitions.get(f.name));
-                  const Glyph = FLOW_GLYPH_ICON[glyph];
-                  const reading = flowRailStatus(flowStatus[f.name], flowRegistrations[f.name], locale);
-                  return (
-                    <StudioRailRow
-                      key={f.name}
-                      indent
-                      active={active}
-                      data-testid={`auto-rail-row-${f.name}`}
-                      data-trigger={glyph}
-                      title={[railLabel(f), t(FLOW_GLYPH_LABEL_KEY[glyph], locale), reading?.view.label].filter(Boolean).join(' · ')}
-                      onClick={() => {
-                        // objectstack#26705 — another flow's load replaces the
-                        // buffer the held step lives in; the open one keeps it.
-                        if (!active && !confirmDropUnsavedWork(flowUnsaved, locale)) return;
-                        setCurrent(f);
-                        if (isMobile) setRailOpen(false);
-                      }}
-                      icon={<Glyph aria-hidden className={'h-3.5 w-3.5 shrink-0' + (active ? '' : ' text-muted-foreground')} />}
-                      trailing={
-                        <>
-                          <RailCustomizationMark row={f} marks={railMarks} locale={locale} />
-                          <FlowStatusDot state={flowStatus[f.name]} registration={flowRegistrations[f.name]} locale={locale} />
-                        </>
-                      }
-                    >
-                      {railLabel(f)}
-                    </StudioRailRow>
-                  );
-                })}
-                {/* objectstack#29786 — the flows another package ships on this
-                    object: greyed, with the package, opening it there. */}
-                {contributed.map((f) => (
-                  <ContributedRailRow
-                    key={`${f.packageId}:${f.name}`}
-                    item={f}
-                    indent
-                    icon={<Workflow aria-hidden className="h-3.5 w-3.5 shrink-0" />}
-                    title={contributedItemTitle(f, locale)}
-                    onOpen={() =>
-                      openContributor(studioPillarItemPath(f.packageId, 'automations', { type: 'flow', name: f.name }))
-                    }
-                    locale={locale}
-                  />
-                ))}
-              </StudioRailGroup>
-            );
-          })}
-          {flows.length === 0 && (contributedFlows?.flows.length ?? 0) === 0 && !creating && (error || !listed || openCreateFlow) && (
-            <p className="px-2 py-3 text-[11px] text-muted-foreground">
-              {error
-                ? t('engine.studio.loadFailed', locale)
-                : !listed
-                  ? t('engine.studio.loading', locale)
-                  : t('engine.studio.auto.none', locale)}
-            </p>
-          )}
-        </StudioRail>
-
         <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
-          {/* objectui#11665 — the header names the open flow by its LABEL,
-              the string its rail row prints, never by `flow · NAME`: the
-              metadata type word was developer vocabulary inside the
-              author's own copy (objectui#11659 ruling 6). The API name
-              moves to the tooltip for the authors who need it, as the
-              Interfaces caption keeps its internal id (objectui#7254). A
-              label that resolves to nothing falls back to the name. */}
-          <StudioItemHeader
+          {/* objectstack#36903 — the one header of a full-screen item
+              (`ResourceDetailHeader`): × back to the flow list, ‹ › through
+              it, the tab row; the address carries the open tab to a
+              neighbour. objectui#11665 — it names the flow by its LABEL, the
+              API name in the tooltip and beside it. */}
+          <ResourceDetailHeader
             testId="auto-flow-header"
-            // objectstack#29693 — the chips and the item tools fold into the
-            // flow's ⋯ menu (or the header's own, where the flow has none).
-            foldMenu={
-              flowMoreShown ? 'pillar' : { label: t('engine.studio.if.more', locale), testId: 'auto-flow-header-more' }
+            type="flow"
+            name={flowName}
+            tabAddress={designerTab.address}
+            locale={locale}
+            icon={Workflow}
+            label={
+              <span data-testid="auto-canvas-caption" title={`${t('designer.field.apiName', locale)}: ${flowName}`}>
+                {flowTitle}
+              </span>
             }
+            apiName={flowName}
+            typeLabel={translateMetadataType('flow', locale, 'Flow')}
+            packageLabel={packageId ?? undefined}
+            // Esc with a node selected deselects it first (the slot's own Esc, the aside's ✕).
+            closeOnEscape={!selection}
             // objectstack#29691 (ADR-0146 D3) — a flow the pair adds, overrides
             // or is unlocked to customize saves to the base's pair.
             note={
@@ -1772,31 +1413,11 @@ export function AutomationsPillar({
                 <SavedToCustomizationNote baseLabel={customizeBaseLabel} pairId={customizeNotePair} testId="auto-flow-saved-to" />
               ) : undefined
             }
-            leading={
-              <button
-                type="button"
-                onClick={() => setRailOpen((v) => !v)}
-                aria-label={t('engine.studio.toggleRail', locale)}
-                className="-ml-1 rounded-md p-1 text-muted-foreground hover:bg-muted hover:text-foreground md:hidden"
-              >
-                <Menu className="h-4 w-4" />
-              </button>
-            }
-            icon={current ? Workflow : undefined}
-            title={current ? flowLabels?.flowLabel || current.label || current.name : t('engine.studio.auto.heading', locale)}
-            titleProps={
-              current
-                ? { 'data-testid': 'auto-canvas-caption', title: `${t('designer.field.apiName', locale)}: ${current.name}` }
-                : { className: 'text-[13px] font-normal text-muted-foreground' }
-            }
             // objectui#12454 — the open flow's Trigger, Status, Run as and
-            // version, as the designer's info bar reads them. The canvas hint
-            // the row printed stays in it for a reader (visually hidden; the
-            // Canvas tab's description and title), so the row still reads it
-            // whole as objectui#11665 pins. Without designers the line says
-            // so, and yields to the label on a narrow row as it did.
-            // objectstack#36745 — the meta wrapper is a block-level flex, so
-            // the give-way row inside it reads the slot's whole width.
+            // version, as the designer's info bar reads them: objectstack#36903
+            // — the run status a builder reads here, the list having no column
+            // for it. The canvas hint stays in it for a reader (visually
+            // hidden; the Canvas tab's description and title).
             meta={
               isEditable ? (
                 <>
@@ -1813,23 +1434,8 @@ export function AutomationsPillar({
                 <span className="hidden 2xl:inline">{t('engine.studio.auto.designersMissing', locale)}</span>
               )
             }
-            chips={
-              current?.addedIn ? (
-                <StudioPairItemChip pairId={current.addedIn} locale={locale} />
-              ) : flowCustomizable && flowServed.declaration ? (
-                // objectstack#28570 — the override the server serves, never a computation.
-                <StudioOverrideChip
-                  baseLabel={customizeBaseLabel}
-                  basedOn={flowServed.declaration.basedOn}
-                  locale={locale}
-                  // objectstack#29692 — Restore lives on the mark that names the customization.
-                  onRestore={flowInPair ? () => setRestoreOpen(true) : undefined}
-                  restoreDisabled={restoring || !!saving}
-                />
-              ) : undefined
-            }
             status={flowDraftStatus}
-            actions={
+            primaryAction={
               <>
                 {/* objectstack#36511 — a Save or a switch flip in flight. */}
                 {saving === 'draft' && (
@@ -1838,6 +1444,19 @@ export function AutomationsPillar({
                     {t('engine.studio.autoSaving', locale)}
                   </span>
                 )}
+                {current?.addedIn ? (
+                  <StudioPairItemChip pairId={current.addedIn} locale={locale} />
+                ) : flowCustomizable && flowServed.declaration ? (
+                  // objectstack#28570 — the override the server serves, never a computation.
+                  <StudioOverrideChip
+                    baseLabel={customizeBaseLabel}
+                    basedOn={flowServed.declaration.basedOn}
+                    locale={locale}
+                    // objectstack#29692 — Restore lives on the mark that names the customization.
+                    onRestore={flowInPair ? () => setRestoreOpen(true) : undefined}
+                    restoreDisabled={restoring || !!saving}
+                  />
+                ) : null}
                 {/* objectstack#28570 — Customize unlocks the flow's editors; nothing is saved until an edit. */}
                 {current && flowLoaded && flowCustomizable && !flowUnlocked && !flowInPair && (
                   <StudioCustomizeButton
@@ -1850,51 +1469,10 @@ export function AutomationsPillar({
                   />
                 )}
                 {flowSwitchEl}
-                {/* objectstack#28239 — the item tools Setup's item page opens. */}
-                {current && flowLoaded && (
-                  <StudioItemTools
-                    type="flow"
-                    name={current.name}
-                    packageId={packageId}
-                    readOnly={readOnly}
-                    source={{
-                      value: draft,
-                      onChange: isEditable
-                        ? (next) => {
-                            setDraft(next);
-                            setAutoDirty(true);
-                          }
-                        : undefined,
-                    }}
-                    onRolledBack={() => setFlowReloadNonce((n) => n + 1)}
-                    locale={locale}
-                  />
-                )}
                 {!flowTabsEl && autoReadOnlyLinkEl}
-                {/* objectstack#28567 — New similar on a read-only package's
-                    flow and on a writable one's (the door picks the pair for
-                    a read-only base; a writable package is the target);
-                    Delete on a writable package's flow only. The
-                    package-less scope has no pair and no package to name. */}
-                {flowMoreShown && current && (
-                  <FlowItemMoreMenu
-                    name={current.name}
-                    label={current.label}
-                    locale={locale}
-                    disabled={!!saving}
-                    onDelete={readOnly ? undefined : () => void deleteOpenFlow()}
-                    newSimilar={{
-                      target: readOnly ? undefined : packageId,
-                      blocked: canAuthorFlows ? null : t('engine.edit.capabilityReadOnly', locale),
-                      // The copy opens in place of this flow, which drops a
-                      // held edit; asked before the dialog, as New is.
-                      confirmOpen: () => confirmDropUnsavedWork(flowUnsaved, locale),
-                      onCopied: onFlowCopied,
-                    }}
-                  />
-                )}
               </>
             }
+            menu={flowMoreShown ? (flowMenu.items ?? undefined) : undefined}
             tabs={flowTabsEl}
           />
           {/* objectui#12454 — the body is the flow, flush under the tab row:
@@ -1972,42 +1550,49 @@ export function AutomationsPillar({
                 )}
               </div>
             )}
-            {/* `flex-1 min-h-0` so the canvas fills the pillar's full remaining
+            {/* `flex-1 min-h-0` so the canvas fills the page's full remaining
               * height instead of shrinking to FlowCanvas's intrinsic content height. */}
             <div className="min-h-0 flex-1">
-              {!current ? (
-                missingFlow ? (
-                  <div className="py-16 text-center text-sm text-muted-foreground">
-                    {/* objectui#11553 — a deep link that named a flow this rail
-                        does not hold says so, instead of opening another. */}
-                    {tFormat('engine.studio.auto.deepLinkMissing', locale, { name: missingFlow })}
-                  </div>
-                ) : flowsEmpty ? (
+              {toolTab && current && flowLoaded ? (
+                // objectstack#36903 — References, History and Source, as on
+                // every item page; Source edits the same buffer the Save sends.
+                <ItemToolTabPanel
+                  tab={toolTab.tab as 'references' | 'history' | 'source'}
+                  view={toolTab.view}
+                  onViewChange={(view) => designerTab.selectTool({ tab: toolTab.tab, view })}
+                  type="flow"
+                  name={current.name}
+                  packageId={packageId}
+                  source={{
+                    value: draft,
+                    onChange:
+                      isEditable && !editLocked
+                        ? (next) => {
+                            setDraft(next);
+                            setAutoDirty(true);
+                          }
+                        : undefined,
+                  }}
+                  onRolledBack={!readOnly && canAuthorFlows ? () => setFlowReloadNonce((n) => n + 1) : undefined}
+                  locale={locale}
+                  className="h-full min-h-0 overflow-auto p-6"
+                />
+              ) : !current ? (
+                flowMissing ? (
                   <div className="flex h-full">
+                    {/* objectui#11553 — an address that named a flow this scope
+                        does not hold says so, instead of opening another. */}
                     <StudioEmptyState
-                      testId="auto-empty"
-                      icon={Workflow}
-                      sentence={t(packageId === null ? 'engine.studio.org.none' : 'engine.studio.auto.emptyMain', locale)}
-                      action={
-                        packageId === null ? (
-                          // objectui#12513 — the package-less scope creates
-                          // nothing, and since ADR-0146 D11 no Setup page
-                          // copies into it: the sentence says so, with no
-                          // link out of Studio.
-                          undefined
-                        ) : (
-                          openCreateFlow && (
-                            <StudioEmptyStateAction
-                              data-testid="auto-empty-new"
-                              label={t('engine.studio.auto.newTitle', locale)}
-                              onClick={openCreateFlow}
-                            />
-                          )
-                        )
-                      }
+                      testId="auto-flow-missing"
+                      icon={FileQuestion}
+                      sentence={tFormat('engine.studio.auto.deepLinkMissing', locale, { name: flowName })}
                     />
                   </div>
-                ) : null
+                ) : error ? null : (
+                  <div className="flex items-center justify-center gap-2 py-16 text-sm text-muted-foreground">
+                    <Loader2 className="h-4 w-4 animate-spin" /> {t('engine.studio.loading', locale)}
+                  </div>
+                )
               ) : loading || !flowLoaded ? (
                 // objectui#11272 — nothing of another flow's buffer under this
                 // one; after a failed load, the error above says why.
@@ -2018,7 +1603,7 @@ export function AutomationsPillar({
                 )
               ) : Preview ? (
                 // objectui#11779 — the open flow's runtime row, so the flow
-                // header and its Problems panel read the run status this rail
+                // header and its Problems panel read the run status the header
                 // reads: the row, `null` when the engine has none for this flow,
                 // nothing while no runtime answer is in.
                 <FlowRuntimeContext.Provider value={flowStatusRead ? (flowStatus[current.name] ?? null) : undefined}>
@@ -2069,7 +1654,9 @@ export function AutomationsPillar({
             aside's width; in the right slot the simulator is drawn in the
             slot itself (the chrome's `debugTarget`). The selection is kept,
             so leaving Debug brings the aside back as it was. */}
-        {flowsEmpty || section === 'debug' ? null : configFolded && !inSlot ? (
+        {/* objectstack#36903 — nor beside an item tool's tab, which has no
+            node to configure, nor over a flow the scope does not hold. */}
+        {flowMissing || toolTab || section === 'debug' ? null : configFolded && !inSlot ? (
           // objectui#11795 — the folded row: no aside reserving width beside
           // the canvas; the selection's configuration opens over it, and
           // closing the drawer clears the selection, as the aside's ✕ does.
@@ -2137,158 +1724,6 @@ export function AutomationsPillar({
         })()
         )}
       </div>
-
-      <CreateItemDialog
-        open={creating}
-        onOpenChange={setCreating}
-        title={t('engine.studio.auto.newTitle', locale)}
-        labelFieldLabel={t('engine.studio.auto.nameLabel', locale)}
-        labelPlaceholder={t('engine.studio.auto.namePlaceholder', locale)}
-        idFieldLabel={t('engine.studio.auto.idLabel', locale)}
-        idPlaceholder={t('engine.studio.auto.idPlaceholder', locale)}
-        submitLabel={t('engine.studio.createLive', locale)}
-        submittingLabel={t('engine.studio.creating', locale)}
-        busy={createBusy}
-        error={newNeeds ?? error?.message ?? null}
-        locale={locale}
-        extra={
-          /* objectui#11861 — the dialog opens on starting points in plain
-             words (`flowPresets.ts`), the first one chosen. Each is one of the
-             Start node's trigger choices, written by the same create path. A
-             record one asks for its object right under it, with the Start
-             node's own Object field, and Create holds it until one is named.
-             *Advanced* is the trigger form below, unchanged: it writes what
-             it wrote. */
-          <>
-            {createTaken && (
-              <CreateTakenNotice
-                scope="flow"
-                sentence={tFormat(
-                  createTaken.here ? 'engine.studio.auto.createTaken' : 'engine.studio.auto.createTakenElsewhere',
-                  locale,
-                  { label: createTaken.label, name: createTaken.name },
-                )}
-                openLabel={tFormat('engine.studio.create.openExisting', locale, { label: createTaken.label })}
-                onOpen={createTaken.here ? () => openTakenFlow(createTaken.name) : undefined}
-              />
-            )}
-            <fieldset className="space-y-2">
-              <legend className="mb-1 block text-sm font-medium">{t('engine.studio.auto.presets', locale)}</legend>
-              {FLOW_PRESETS.map((p) => (
-                <div key={p.id}>
-                  <label className="flex items-center gap-2 text-sm">
-                    <input
-                      type="radio"
-                      name={newChoiceGroup}
-                      value={p.id}
-                      checked={newChoice === p}
-                      data-testid={`create-flow-preset-${p.id}`}
-                      onChange={() => {
-                        setNewChoice(p);
-                        setNewNeeds(null);
-                      }}
-                    />
-                    {t(p.labelKey, locale)}
-                  </label>
-                  {newChoice === p && startTrigger.object?.showWhen?.equals.includes(p.triggerType) && (
-                    <div className="ml-6 mt-1.5">
-                      {/* objectstack#30038 — no expression is legal here: a typed
-                          prefix is never saved as the trigger object. */}
-                      <ObjectPicker
-                        label={startTrigger.object.label}
-                        value={newTriggerObject}
-                        objectsOnly
-                        onCommit={(v) => {
-                          setNewTriggerObject(v);
-                          setNewNeeds(null);
-                        }}
-                        locale={locale}
-                      />
-                    </div>
-                  )}
-                </div>
-              ))}
-              <div>
-                <label className="flex items-center gap-2 text-sm">
-                  <input
-                    type="radio"
-                    name={newChoiceGroup}
-                    value="advanced"
-                    checked={newChoice === 'advanced'}
-                    data-testid="create-flow-advanced"
-                    onChange={() => {
-                      setNewChoice('advanced');
-                      setNewNeeds(null);
-                    }}
-                  />
-                  {/* The Validations and Actions menus' own word for the full form. */}
-                  {t('engine.studio.rules.advanced', locale)}
-                </label>
-                {/* objectui#11788 — the trigger, asked for here rather than found
-                    later inside the Start node. The choices, their labels and
-                    which of them watch an object are the Start node's own
-                    trigger field (`fieldsForNodeType('start')`), so the two can
-                    never offer different triggers; what is chosen is written
-                    where that field writes it. */}
-                {newChoice === 'advanced' && startTrigger.trigger && (
-                  <div className="ml-6 mt-1.5 space-y-3">
-                    <label className="block">
-                      <span className="mb-1 block text-sm font-medium">{startTrigger.trigger.label}</span>
-                      <StudioPicker
-                        value={newTrigger}
-                        options={[
-                          { value: '', label: t('engine.studio.newAutoTrigger.later', locale) },
-                          ...(startTrigger.trigger.options ?? []).map((o) => ({ value: o.value, label: o.label })),
-                        ]}
-                        onPick={setNewTrigger}
-                        className="h-auto rounded px-2 py-1.5 text-sm"
-                        testId="create-flow-trigger"
-                      />
-                    </label>
-                    {startTrigger.trigger.help && (
-                      <p className="-mt-2 text-[11px] text-muted-foreground">{startTrigger.trigger.help}</p>
-                    )}
-                    {startTrigger.object && newTrigger && startTrigger.object.showWhen?.equals.includes(newTrigger) && (
-                      <ObjectPicker
-                        label={startTrigger.object.label}
-                        value={newTriggerObject}
-                        objectsOnly
-                        onCommit={setNewTriggerObject}
-                        locale={locale}
-                      />
-                    )}
-                  </div>
-                )}
-              </div>
-            </fieldset>
-          </>
-        }
-        onSubmit={({ label, name }) => {
-          if (newChoice === 'advanced') {
-            void doCreateFlow(
-              label,
-              name,
-              newTrigger
-                ? {
-                    triggerType: newTrigger,
-                    objectName:
-                      startTrigger.object?.showWhen?.equals.includes(newTrigger) && newTriggerObject.trim()
-                        ? newTriggerObject.trim()
-                        : undefined,
-                  }
-                : null,
-            );
-            return;
-          }
-          // A preset: its trigger, or nothing sent while it waits for its object.
-          const trigger = flowPresetTrigger(newChoice, startTrigger.object?.showWhen?.equals ?? [], newTriggerObject);
-          if (!trigger) {
-            setNewNeeds(t('engine.studio.auto.preset.needsObject', locale));
-            return;
-          }
-          void doCreateFlow(label, name, trigger);
-        }}
-      />
     </div>
   );
 }

@@ -56,6 +56,12 @@ export interface MetadataAreaHost {
    * customization to create with, or the ensure door refuses this caller.
    */
   pairCreate?: boolean;
+  /**
+   * objectstack#36903 — what an empty list of the area says under its title in
+   * place of the type's own hint: the package-less scope's flow list says how a
+   * packaged flow is changed instead (ADR-0146 D11). Absent elsewhere.
+   */
+  emptyListHint?: string;
 }
 
 export const MetadataAreaHostContext = React.createContext<MetadataAreaHost | null>(null);

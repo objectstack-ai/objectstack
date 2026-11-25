@@ -107,6 +107,11 @@ vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
 
 import { AutomationsPillar } from './StudioDesignSurface';
 import { createEmptyDataSource } from './__tests__/emptyDataSource';
+// The source under test reaches these dynamic imports (the command palette's
+// record preview, the drafts panel's lint, the code editor): their first load
+// is paid here, at collection, never inside a case's clock (`check:test-source-alias`).
+import '@objectstack/lint';
+import '@object-ui/plugin-detail';
 
 const dataSource = createEmptyDataSource();
 
@@ -158,8 +163,8 @@ afterEach(cleanup);
 
 function mount(readOnly = true) {
   render(
-    <MemoryRouter initialEntries={[`/studio/${PKG}/automations`]}>
-      <AutomationsPillar packageId={PKG} readOnly={readOnly} />
+    <MemoryRouter initialEntries={[`/studio/${PKG}/metadata/flow/${FLOW.name}`]}>
+      <AutomationsPillar packageId={PKG} flowName={FLOW.name} readOnly={readOnly} />
     </MemoryRouter>,
   );
 }
@@ -297,7 +302,7 @@ describe('Automations — the ledger switch on a read-only package (ADR-0146 D4)
     fireEvent.click(sw);
     await new Promise((r) => setTimeout(r, 50));
     expect(calls('/toggle')).toHaveLength(0);
-    fireEvent.pointerDown(await screen.findByTestId('auto-item-more'), { button: 0, ctrlKey: false });
+    fireEvent.pointerDown(await screen.findByTestId('studio-detail-more'), { button: 0, ctrlKey: false });
     expect(await screen.findByTestId('auto-item-delete')).toBeInTheDocument();
   });
 });

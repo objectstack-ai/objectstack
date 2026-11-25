@@ -62,6 +62,19 @@ vi.mock('./StudioBundleItemEditor.js', () => ({
   ),
 }));
 
+/**
+ * objectstack#36903 — the flow designer, full-screen on a flow's address: a
+ * stub printing the flow it is fixed on (the designer is pinned in the
+ * `AutomationsPillar.*` and `StudioDesignSurface.*` suites).
+ */
+vi.mock('./AutomationsPillar.js', () => ({
+  AutomationsPillar: ({ flowName, packageId }: { flowName: string; packageId: string | null }) => (
+    <div data-testid="flow-designer" data-item={JSON.stringify({ flowName, packageId })}>
+      <PageStub page="flow-designer" />
+    </div>
+  ),
+}));
+
 /** objectstack#36905 — the permission set's full-screen page, a stub printing what the area handed it. */
 vi.mock('./StudioPermissionSetPage.js', () => ({
   StudioPermissionSetPage: ({ packageId, name, readOnly }: { packageId: string; name: string; readOnly?: boolean }) => (
@@ -195,16 +208,25 @@ describe('the area mounts the metadata pages (objectstack#28561)', () => {
     expect(where()).toBe(`/studio/${WRITABLE}/metadata/hook/h1?package=${WRITABLE}&tab=history`);
   });
 
-  it('CONTROL: a type whose item page is its own editor, or a designer\'s, keeps the standalone history page', async () => {
+  it('CONTROL: a type whose item page is its own editor keeps the standalone history page; a designer type does not', async () => {
     // The permission set's matrix editor links `./history`; it has no tabs.
     registerMetadataResource({ type: 'matrix_36901', EditPage: () => null });
     mount(`/studio/${WRITABLE}/metadata/matrix_36901/m1/history?package=${WRITABLE}`);
     expect((await page()).page).toBe('history');
     expect(where()).toBe(`/studio/${WRITABLE}/metadata/matrix_36901/m1/history?package=${WRITABLE}`);
     cleanup();
-    // So does an item a pillar's designer opens (a flow), which has no tab row yet.
+    // objectstack#36903 — the designer-item exemption is gone with the last
+    // pillar type: an object's old history address opens its designer's
+    // History tab (and a flow's, below), no longer the standalone page.
+    mount(`/studio/${WRITABLE}/metadata/object/o1/history?package=${WRITABLE}`);
+    expect(await screen.findByTestId('object-designer')).toHaveAttribute('data-object', 'o1');
+    expect(where()).toBe(`/studio/${WRITABLE}/metadata/object/o1?package=${WRITABLE}&tab=history`);
+  });
+
+  it('a flow\'s history is its full-screen designer\'s History tab (objectstack#36903)', async () => {
     mount(`/studio/${WRITABLE}/metadata/flow/f1/history?package=${WRITABLE}`);
-    expect((await page()).page).toBe('history');
+    expect((await page()).page).toBe('flow-designer');
+    expect(where()).toBe(`/studio/${WRITABLE}/metadata/flow/f1?package=${WRITABLE}&tab=history`);
   });
 
   it('create: a writable package opens it, a read-only package lands on the list', async () => {
@@ -298,18 +320,18 @@ describe("a read-only base's create opens in its .custom pair (objectstack#36897
   });
 });
 
-describe('a pillar type opened from the area opens its pillar', () => {
-  for (const [type, pillar] of [
-    ['flow', 'automations'],
-  ] as const) {
-    it(`${type} → ${pillar}, with \`?surface=\``, async () => {
-      mount(`/studio/${WRITABLE}/metadata/${type}/item_1?package=${WRITABLE}`);
-      await screen.findByTestId('pillar');
-      const url = new URL(where(), 'http://x');
-      expect(url.pathname).toBe(`/studio/${WRITABLE}/${pillar}`);
-      expect(url.searchParams.get('surface')).toBe(`${type}:item_1`);
+// objectstack#36903 — the last pillar type gone: no item of the area opens a pillar.
+describe('a designer type opened from the area opens its designer page, no pillar', () => {
+  it('a flow opens its designer full-screen on its own address, no pillar (objectstack#36903)', async () => {
+    mount(`/studio/${WRITABLE}/metadata/flow/item_1?package=${WRITABLE}`);
+    expect((await page()).page).toBe('flow-designer');
+    expect(JSON.parse(screen.getByTestId('flow-designer').getAttribute('data-item') ?? 'null')).toEqual({
+      flowName: 'item_1',
+      packageId: WRITABLE,
     });
-  }
+    expect(where()).toBe(`/studio/${WRITABLE}/metadata/flow/item_1?package=${WRITABLE}`);
+    expect(screen.queryByTestId('pillar')).toBeNull();
+  });
 
   // objectstack#36904 — an object opens its designer on its own address.
   it('an object opens the object designer on its own address, bound to the package', async () => {
@@ -391,6 +413,17 @@ describe('a permission set opens its matrix full-screen at its metadata address 
     mount(`/studio/${READ_ONLY}/metadata/permission/hr_viewer?package=${READ_ONLY}`);
     expect((await page()).page).toBe('permission-page');
     expect(item()).toEqual({ packageId: READ_ONLY, name: 'hr_viewer', readOnly: true });
+  });
+
+  // objectstack#36903 — a review link asks the generic page's draft review; a
+  // type whose item page is its own editor has none there, so the set keeps
+  // its matrix page (the flow's review opens the generic page, above).
+  it('`?review=1` keeps the matrix page: the set\'s item page is its own editor, with no generic review', async () => {
+    // As `builtinComponents` registers it: the matrix is the type's own editor.
+    registerMetadataResource({ type: 'permission', EditPage: () => null });
+    mount(`/studio/${WRITABLE}/metadata/permission/sales_rep?package=${WRITABLE}&review=1`);
+    expect((await page()).page).toBe('permission-page');
+    expect(item()).toEqual({ packageId: WRITABLE, name: 'sales_rep', readOnly: false });
   });
 
   it('CONTROL: the cross-package leg keeps the generic page (the matrix\'s environment presentation)', async () => {
