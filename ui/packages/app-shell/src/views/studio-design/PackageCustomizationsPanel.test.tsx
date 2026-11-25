@@ -4,8 +4,10 @@
  * objectstack#36908 — an installed app's "Customizations in this environment"
  * in its Setup → Packages detail: the removed Studio home's panel
  * (objectstack#34714) and its card line (ADR-0146 D3), one app at a time.
- * objectstack#36833 — "customized" counts the pair's arrangements too: an app
- * whose only change is a tab arrangement is customized.
+ * objectstack#37236 — "customized" means overrides + extensions everywhere
+ * (`customizationTotal`); arrangements are not customizations and are named
+ * apart, so an app whose only change is a tab arrangement reads "0 customized"
+ * beside its arrangement count.
  *
  * The real panel and the real customization reader (`packageCustomizations-io`)
  * run under a real router; the wire of the customization route and the
@@ -34,7 +36,7 @@ vi.mock('../metadata-admin/useMetadata.js', async (importOriginal) => ({
 }));
 
 import { PACKAGE_CUSTOMIZATION_ROWS_SHOWN, PackageCustomizationsPanel } from './PackageCustomizationsPanel';
-import { customizationRowsOf, customizedCountOf, loadCustomizationLabels } from './packageCustomizationRows';
+import { customizationRowsOf, loadCustomizationLabels } from './packageCustomizationRows';
 import { t } from '../metadata-admin/i18n';
 import type { PackageCustomizations } from './packageCustomizations-io';
 
@@ -131,7 +133,8 @@ describe('Setup → Packages: an installed app’s customizations (objectstack#3
     renderPanel();
 
     await waitFor(() => expect(summary()).toHaveAttribute('data-state', 'read'));
-    expect(summary()).toHaveTextContent('3 customized, 1 switched off');
+    // objectstack#37236: the arrangement is named apart, not counted as customized.
+    expect(summary()).toHaveTextContent('2 customized, 1 rearranged, 1 switched off');
     expect(rows().map((r) => r.getAttribute('data-mode'))).toEqual(['changed', 'added', 'arranged', 'switchedOff']);
     await waitFor(() => expect(rows()[0]).toHaveTextContent('All accounts'));
     expect(within(rows()[2]).getByTestId('pkg-detail-customization-meta')).toHaveTextContent('Rearranged · Tabs');
@@ -139,13 +142,31 @@ describe('Setup → Packages: an installed app’s customizations (objectstack#3
     expect(lists.asked.sort()).toEqual([`flow@${APP}`, `object@${APP}`, `view@${APP}`]);
   });
 
-  it('objectstack#36833: an app whose only change is a tab arrangement is customized, on its own tab', async () => {
-    stubWire(200, served({ arrangements: [{ object: 'account', key: 'relatedLists' }] }));
+  it('objectstack#37236: an arrangement-only app reads 0 customized beside its arrangement count, its rows still listed', async () => {
+    stubWire(
+      200,
+      served({
+        arrangements: [
+          { object: 'account', key: 'relatedLists' },
+          { object: 'account', key: 'fieldGroups' },
+        ],
+      }),
+    );
     renderPanel();
 
-    await waitFor(() => expect(summary()).toHaveTextContent('1 customized, 0 switched off'));
-    expect(tab('arranged')).toHaveTextContent('1');
-    expect(rows()).toHaveLength(1);
+    await waitFor(() => expect(summary()).toHaveAttribute('data-state', 'read'));
+    expect(summary().textContent).toBe('0 customized, 2 rearranged, 0 switched off');
+    // The rows are unchanged: both arrangements are listed, on their own tab.
+    expect(tab('arranged')).toHaveTextContent('2');
+    expect(rows().map((r) => r.getAttribute('data-mode'))).toEqual(['arranged', 'arranged']);
+  });
+
+  it('objectstack#37236: no arrangement, no arrangement segment', async () => {
+    stubWire(200, served({ overrides: [{ type: 'view', name: 'account_list' }] }));
+    renderPanel();
+
+    await waitFor(() => expect(summary()).toHaveAttribute('data-state', 'read'));
+    expect(summary().textContent).toBe('1 customized, 0 switched off');
   });
 
   it('with no change the section says so in one line and draws no list', async () => {
@@ -219,10 +240,11 @@ describe('Setup → Packages: an installed app’s customizations (objectstack#3
     expect(rows()).toHaveLength(PACKAGE_CUSTOMIZATION_ROWS_SHOWN + 2);
   });
 
-  it('zh-CN: the section speaks the card’s words', async () => {
+  it('zh-CN: the section speaks the card’s words; an arrangement-only app is 已定制 0 项 beside 调整排列', async () => {
     stubWire(200, served({ arrangements: [{ object: 'account', key: 'relatedLists' }] }));
     renderPanel('zh');
-    await waitFor(() => expect(summary()).toHaveTextContent('已定制 1 项，已停用 0 项'));
+    await waitFor(() => expect(summary()).toHaveAttribute('data-state', 'read'));
+    expect(summary().textContent).toBe('已定制 0 项，调整排列 1 处，已停用 0 项');
     expect(screen.getByText('本环境的定制')).toBeInTheDocument();
     expect(within(rows()[0]).getByTestId('pkg-detail-customization-meta')).toHaveTextContent('重新排列 · 页签');
   });
@@ -244,10 +266,6 @@ describe('the section’s rows, count and labels (objectstack#36908)', () => {
       'arranged:object:account:fieldGroups',
       'arranged:object:account:relatedLists',
     ]);
-  });
-
-  it('objectstack#36833: "customized" is overrides + extensions + arrangements', () => {
-    expect(customizedCountOf(read)).toBe(3);
   });
 
   it('a switched-off action with no object read opens its own page', () => {
