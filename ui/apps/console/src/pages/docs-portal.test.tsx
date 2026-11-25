@@ -1063,6 +1063,22 @@ describe('objectstack#37150 — from 768 px up an app\'s docs pages draw in the 
       expect(within(column).getByRole('button', { name: /Leads Book/ })).toBeInTheDocument();
       expect(within(column).queryByRole('button', { name: /Alpha Manual/ })).toBeNull();
     });
+
+    // The package container's other URL forms (objectui#11197): a book NAME,
+    // a book NAME with its doc, and a segment that is both a doc's name and a
+    // book's name each land where they did, now in the shell.
+    it.each([
+      ['a book NAME', '/apps/com.example.showcase/docs/showcase_manual', '/apps/com.example.showcase/docs/manual/showcase_index', 'INDEX BODY'],
+      ['a book NAME with its doc', '/apps/com.example.showcase/docs/showcase_manual/showcase_lead_guide', '/apps/com.example.showcase/docs/manual/showcase_lead_guide', 'LEAD BODY'],
+      ['a doc name that is also a book name (the doc permalink wins)', '/apps/com.example.showcase/docs/showcase_lead_guide', '/apps/com.example.showcase/docs/manual/showcase_lead_guide', 'LEAD BODY'],
+      ['the canonical SLUG/DOC', '/apps/com.example.showcase/docs/manual/showcase_lead_guide', '/apps/com.example.showcase/docs/manual/showcase_lead_guide', 'LEAD BODY'],
+    ])('%s, %s, lands on %s in the shell', async (_what, entry, where, body) => {
+      render(<InShell entry={entry} />);
+      expect(await screen.findByTestId('doc-content')).toHaveTextContent(body);
+      expect(screen.getByTestId('where')).toHaveTextContent(where);
+      expect(within(sidebar()).getByTestId('docs-nav')).toBeInTheDocument();
+      expect(within(page()).queryByTestId('docs-nav')).toBeNull();
+    });
   });
 
   it('CONTROL — without the shell\'s sidebar (a phone; the /docs portal) the page draws its column and its back link itself', async () => {
