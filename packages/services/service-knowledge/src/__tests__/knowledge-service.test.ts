@@ -1788,6 +1788,18 @@ describe('KnowledgeService — search scope (ADR-0161 K8, item 17)', () => {
     expect(warn.mock.calls.map(([m]) => String(m)).filter((m) => m.includes("outside the search's scope"))).toHaveLength(1);
   });
 
+  it('a scope with groupBy, or with granularity record, over an adapter that ignores it: every round is handed the terms, and no out-of-scope record answers', async () => {
+    const scope = [{ object: 'task', ids: ['rec_1', 'rec_3'] }];
+    for (const shape of [{ groupBy: 'policy' }, { granularity: 'record' as const }]) {
+      const { svc, handed } = setup({ honours: false });
+      const out = await svc.search('q', { topK: 5, scope, executionContext: MEMBER, ...shape });
+      expect(out.length).toBeGreaterThan(0);
+      for (const record of records(out)) expect(['rec_1', 'rec_3']).toContain(record);
+      expect(handed().length).toBeGreaterThan(0);
+      for (const terms of handed()) expect(terms).toEqual([{ kind: 'record', ids: ['rec_1', 'rec_3'] }]);
+    }
+  });
+
   it('an object no searched source reaches: no adapter is asked, and the answer is empty', async () => {
     const { svc, adapter } = setup();
     expect(await svc.search('q', { topK: 5, scope: [{ object: 'invoice', ids: ['i1'] }], executionContext: MEMBER })).toEqual([]);
