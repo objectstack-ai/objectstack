@@ -1,6 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import type { Plugin, PluginContext } from '@objectstack/core';
+import { classifyAdmissionTenancyPosture } from '@objectstack/core';
 import type {
   IDataEngine,
   IRealtimeService,
@@ -13,6 +14,7 @@ import type { KnowledgeLogger } from './knowledge-service.js';
 import type { KnowledgeFieldSecurity } from './knowledge-source-admission.js';
 import { createKnowledgeReapGuard, guardedObjectsFor } from './knowledge-reap-guard.js';
 import { contributeKnowledgeSettings } from './knowledge-settings-contribution.js';
+import { UnknownKeyError, UnknownNamespaceError } from '@objectstack/service-settings';
 
 /**
  * Whether `err` is the kernel's refusal for a service NOTHING registered under
@@ -166,6 +168,53 @@ export class KnowledgeServicePlugin implements Plugin {
           throw err;
         }
       },
+      // The settings page's `knowledge.chunk_target`, the splitter's
+      // `maxChars` under a source's own `split.maxChars` (#37098). Read each
+      // time the service splits, never here: the settings service may hold a
+      // value saved after boot. No settings service, or none serving the
+      // `knowledge` namespace (it is contributed below only where one
+      // exists), reads as unset.
+      resolveChunkTarget: async () => {
+        let settings: { get?(ns: string, key: string): Promise<{ value?: unknown } | undefined> } | undefined;
+        try {
+          settings = ctx.getService('settings');
+        } catch (err) {
+          if (isServiceNotRegisteredError(err, 'settings')) return undefined;
+          throw err;
+        }
+        if (typeof settings?.get !== 'function') return undefined;
+        let resolved: { value?: unknown } | undefined;
+        try {
+          resolved = await settings.get('knowledge', 'chunk_target');
+        } catch (err) {
+          // A host's own settings service without this namespace or key:
+          // nothing is configured there. Any other failure is the service's
+          // to report (it warns and splits by the source's own value).
+          if (err instanceof UnknownNamespaceError || err instanceof UnknownKeyError) return undefined;
+          throw err;
+        }
+        const value = resolved?.value;
+        return typeof value === 'number' && Number.isInteger(value) && value > 0 ? value : undefined;
+      },
+      // [ADR-0161 K8, item 9] The EFFECTIVE tenancy posture, read per assembly
+      // and per search from the kernel's `tenancy` service, classified the way
+      // every admission seam classifies it: never registered → `undefined` (no
+      // wall exists); registered and unreadable → a throw, which the service
+      // answers fail-closed. The async accessor first, so a factory-registered
+      // service resolves; the sync leg serves a `LiteKernel`-shaped host.
+      resolveTenancyPosture: () =>
+        classifyAdmissionTenancyPosture(async () => {
+          const kernel = typeof ctx.getKernel === 'function' ? ctx.getKernel() : undefined;
+          if (kernel && typeof kernel.getServiceAsync === 'function') {
+            return kernel.getServiceAsync<{ posture?: string; isolationActive?: boolean }>('tenancy');
+          }
+          try {
+            return ctx.getService<{ posture?: string; isolationActive?: boolean }>('tenancy');
+          } catch (err) {
+            if (isServiceNotRegisteredError(err, 'tenancy')) return undefined;
+            throw err;
+          }
+        }),
     });
 
     for (const source of this.options.sources ?? []) {
@@ -270,9 +319,10 @@ export class KnowledgeServicePlugin implements Plugin {
         // half-claimed, and stays so until a real object source justifies the
         // adapter-enumeration surface it would need (#4606's enforced-first
         // rule). Reporting it accurately is the whole job of this branch.
-        // An explicit reindexSource refreshes the rows that still exist and
-        // match; it removes no documents, so a predicate DELETE stays stale
-        // until the index purge (#37096) — the warning says so.
+        // A complete reindexSource refreshes the rows that still exist and
+        // match and, over an adapter that lists its documents, purges the
+        // documents of rows that are gone or no longer match — the warning
+        // says so, and names the adapter case it cannot repair.
         if (type === 'data.records.updated' || type === 'data.records.deleted') {
           const matched = payload.matched;
           ctx.logger.warn?.(
@@ -282,9 +332,10 @@ export class KnowledgeServicePlugin implements Plugin {
               'may now be stale and cannot be repaired from the event stream. ' +
               'Retention-sweep deletes are covered separately: the lifecycle reap guard de-indexes those rows ' +
               'before they are deleted; ' +
-              'application-level predicate writes are not. An explicit reindexSource refreshes the documents of rows ' +
-              'that still exist and match; it removes none, so the documents of deleted rows stay in the index ' +
-              'until an index purge removes them.',
+              'application-level predicate writes are not. A complete reindexSource (no limit, no dryRun) refreshes ' +
+              'the documents of rows that still exist and match, and purges the documents of rows that are gone or ' +
+              'no longer match when the source\'s adapter lists its documents; over an adapter that does not, they ' +
+              'stay in the index.',
             { object, type, matched },
           );
           return;

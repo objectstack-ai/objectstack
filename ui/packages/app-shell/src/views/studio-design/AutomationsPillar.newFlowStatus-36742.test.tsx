@@ -4,6 +4,10 @@
  * objectstack#36742 — after a flow is created in Studio, the header reads the
  * engine's status for it, and the create toast says the flow is switched off.
  *
+ * objectstack#36903 — the flow is created from the list's 「新建」
+ * (`MetadataListCreateDialog`), and opens on its own address: the designer it
+ * mounts reads the engine once the flow exists.
+ *
  * - A new flow is published as it is created, born switched off. The header's
  *   Status pill reads the engine's row, so it says 「已停用」 (Switched off),
  *   not 「未发布草稿」 (Unpublished draft): the snapshot taken before the flow
@@ -117,6 +121,7 @@ vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn(), info: vi.f
 
 import { toast } from 'sonner';
 import { AutomationsPillar } from './StudioDesignSurface';
+import { MetadataListCreateDialog } from '../metadata-admin/MetadataListCreateDialog';
 import { createEmptyDataSource } from './__tests__/emptyDataSource';
 import { StudioSaveHarness } from './__tests__/studioSaveHarness';
 import { registerMetadataPreview } from '../metadata-admin/preview-registry';
@@ -125,6 +130,10 @@ import { FlowPreview } from '../metadata-admin/previews/FlowPreview';
 import { FlowInspector } from '../metadata-admin/inspectors/FlowInspector';
 import { t, tFormat } from '../metadata-admin/i18n';
 import { loadStudioCatalogue } from '@object-ui/i18n/namespaces/studio';
+// The source under test reaches these dynamic imports (the command palette's
+// record preview, the drafts panel's lint, the code editor): their first load
+// is paid here, at collection, never inside a case's clock (`check:test-source-alias`).
+import '@object-ui/plugin-detail';
 
 const dataSource = createEmptyDataSource();
 registerMetadataPreview('flow', FlowPreview);
@@ -174,11 +183,28 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+/** The list's create dialog, then the created flow's designer, as the list's `onCreated` opens it. */
+function CreateThenOpen(): React.ReactElement {
+  const [created, setCreated] = React.useState<string | null>(null);
+  if (created) return <AutomationsPillar packageId={PKG} flowName={created} />;
+  return (
+    <MetadataListCreateDialog
+      type="flow"
+      open
+      onOpenChange={() => {}}
+      packageId={PKG}
+      inPair={false}
+      locale="en-US"
+      onCreated={({ name }) => setCreated(name)}
+    />
+  );
+}
+
 function mount(): void {
   render(
     <StudioSaveHarness>
-      <MemoryRouter initialEntries={[`/studio/${PKG}/automations`]}>
-        <AutomationsPillar packageId={PKG} />
+      <MemoryRouter initialEntries={[`/studio/${PKG}/metadata/flow`]}>
+        <CreateThenOpen />
       </MemoryRouter>
     </StudioSaveHarness>,
   );
@@ -188,9 +214,7 @@ const statusValue = () => screen.getByText('Status:').nextElementSibling?.textCo
 
 async function createFlow(label: string): Promise<void> {
   mount();
-  await screen.findByTestId(`auto-rail-row-${FLOW.name}`, undefined, { timeout: 8000 });
-  fireEvent.click(screen.getByTitle(en('engine.studio.auto.newTitle')));
-  const dialog = await screen.findByRole('dialog');
+  const dialog = await screen.findByRole('dialog', undefined, { timeout: 8000 });
   fireEvent.click(within(dialog).getByTestId('create-flow-preset-manual'));
   fireEvent.change(dialog.querySelectorAll('input')[0], { target: { value: label } });
   fireEvent.click(within(dialog).getByRole('button', { name: en('engine.studio.createLive') }));
@@ -205,14 +229,14 @@ describe('a new flow — the header reads the engine, the toast says it is off (
     await screen.findByText('Status:', undefined, { timeout: 8000 });
     await waitFor(() => expect(statusValue()).toBe(en('engine.studio.auto.off')), { timeout: 8000 });
     expect(statusValue()).not.toBe(en('engine.studio.unpublishedDraft'));
-    // The status was read again after the publish, not only at mount.
-    expect(statusReads).toBeGreaterThan(1);
+    // The status was read after the publish: by the designer the create opened.
+    expect(statusReads).toBeGreaterThan(0);
   }, 40_000);
 
   it('the create toast is its own key, worded switched off until enabled', async () => {
     await createFlow('Escalate');
     await waitFor(() => expect(toast.success).toHaveBeenCalled(), { timeout: 8000 });
-    expect(toast.success).toHaveBeenCalledWith(tFormat('engine.studio.auto.createdOff', 'en', { name: 'Escalate' }), { id: 'studio-save' });
+    expect(toast.success).toHaveBeenCalledWith(tFormat('engine.studio.auto.createdOff', 'en', { name: 'Escalate' }));
     expect(toast.success).not.toHaveBeenCalledWith(tFormat('engine.studio.save.done', 'en', { items: 'Escalate' }), expect.anything());
     // The Chinese row, from the namespace's lazily loaded catalogue.
     const zh = await loadStudioCatalogue('zh-CN');

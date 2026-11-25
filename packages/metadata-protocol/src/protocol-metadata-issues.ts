@@ -137,13 +137,34 @@ function issuePathOf(issue: ZodIssueLike): Array<string | number> {
  * emitting it is the "N branches, N times the noise" failure. An empty branch
  * (zod's "matched multiple" variant carries `errors: []`) counts as
  * uninformative too — `every` on an empty list is `true`.
+ *
+ * [#35500] A branch that is itself a union counts the same way when that union
+ * only says "not my kind" either: one `invalid_union` at the branch root,
+ * carrying zod's bare {@link ZOD_UNION_DEFAULT_MESSAGE}, whose every branch is
+ * in turn kind-mismatch-only (this same rule, so the depth does not matter).
+ * Read as informative, each such member emitted its own unexplained bare head,
+ * one identical `Invalid input` entry per member. A nested union carrying its
+ * schema's own `error` sentence stays informative, and one with no branches
+ * keeps the reading it always had. The same rule as `isKindMismatchOnly` in
+ * `spec/src/shared/union-branch-policy.ts`, held equal by
+ * `union-branch-policy.cross-package-parity.test.ts` §2.
  */
 function isKindMismatchOnly(issues: readonly ZodIssueLike[]): boolean {
     return issues.every(
         (issue) =>
             issuePathOf(issue).length === 0
-            && (issue?.code === 'invalid_type' || issue?.code === 'invalid_value'),
+            && (issue?.code === 'invalid_type' || issue?.code === 'invalid_value'
+                || isKindMismatchOnlyUnion(issue)),
     );
+}
+
+/** The nested half of {@link isKindMismatchOnly}: a bare union of kinds. */
+function isKindMismatchOnlyUnion(issue: ZodIssueLike): boolean {
+    if (issue?.code !== 'invalid_union' || issue.message !== ZOD_UNION_DEFAULT_MESSAGE) return false;
+    const branches = issue.errors;
+    return Array.isArray(branches)
+        && branches.length > 0
+        && branches.every((branch) => Array.isArray(branch) && isKindMismatchOnly(branch as ZodIssueLike[]));
 }
 
 /** True when a branch carries the #4001 campaign's unknown-key prescription. */

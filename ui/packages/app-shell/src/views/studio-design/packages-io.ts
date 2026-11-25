@@ -23,11 +23,10 @@
  * why the client cannot compute this and a "missing scope means read-only" rule
  * would have flipped every Studio base read-only.
  *
- * Kernel packages (scope `system` / `cloud`) are hidden from the Studio
- * landing whatever their verdict says: that filter is about visibility, not
+ * Kernel packages (scope `system` / `cloud`) are not offered to an author
+ * whatever their verdict says: that filter is about visibility, not
  * writability. A manifest-scoped one is left out of this list; a flat-scoped
- * one stays in it, tagged `kernel`, and the landing hides it (`BuilderLanding`,
- * ADR-0016 §3.8).
+ * one stays in it, tagged `kernel`, for its readers to hide (ADR-0016 §3.8).
  */
 
 import { EnsureCustomizationPackageResponseSchema } from '@objectstack/spec/api';
@@ -70,8 +69,7 @@ export interface PkgEntry {
    * flat with a kernel `scope` (`system` / `cloud`) at the top level. Such a
    * row stays in the list, because the app → Studio entries read this tag to
    * draw nothing for it (`useStudioEntryGate`), as for the manifest-scoped
-   * kernel packages this list leaves out. The Studio landing does not offer
-   * it (`BuilderLanding`, ADR-0016 §3.8).
+   * kernel packages this list leaves out (ADR-0016 §3.8).
    */
   kernel?: true;
 }
@@ -100,8 +98,7 @@ export interface PkgEntry {
  *
  * `scope` is read in both positions, for two different answers: a manifest
  * kernel scope drops the row here, while a flat one keeps the row and tags it
- * `kernel` — the app → Studio entry gate reads that tag, and the Studio
- * landing hides the tagged row (`BuilderLanding`).
+ * `kernel` — the app → Studio entry gate reads that tag.
  */
 export function parsePackages(payload: unknown): PkgEntry[] {
   const root = (payload as { data?: unknown })?.data ?? payload;

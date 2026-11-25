@@ -16,6 +16,10 @@
  * (order of judgement, naming bound, field and row level, the body) are
  * pinned with the service, in `service-record-context`'s tests; the HTTP
  * bridge's door wiring in `packages/runtime/src/mcp-record-context-tools-bridge.test.ts`.
+ *
+ * And over the real protocol (no protocol double): a package pack the
+ * protocol's served listing decorates with `_diagnostics` is the pack the
+ * stdio door answers through — the door hands the executor the authored pack.
  */
 
 import { describe, expect, it, vi } from 'vitest';
@@ -24,6 +28,10 @@ import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import { GET_RECORD_CONTEXT_TOOL_NAME, MCP_OAUTH_SCOPE_DATA_READ, MCP_OAUTH_SCOPE_DATA_WRITE } from '@objectstack/spec/ai';
 import type { IDataEngine, IMetadataService } from '@objectstack/spec/contracts';
 import { createRecordContextTools } from '@objectstack/service-record-context';
+import { ObjectQL } from '@objectstack/objectql/core';
+import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
+import { SqlDriver } from '@objectstack/driver-sql';
+import { SysMetadataObject } from '@objectstack/metadata-core';
 import { MCPServerRuntime } from './mcp-server-runtime.js';
 import type { McpDataBridge } from './mcp-http-tools.js';
 import { createStdioDataBridge } from './stdio-data-bridge.js';
@@ -292,5 +300,100 @@ describe('[ADR-0160 D4] get_record_context — the gates the record tools put be
     expect(stdio).toEqual(http);
     expect(http.payload.error).toMatchObject({ code: 'PERMISSION_DENIED', status: 403 });
     expect(http.payload.error.message).toContain("'closed_revision'");
+  });
+});
+
+describe('[ADR-0160 D4] get_record_context — a package pack the real protocol serves', () => {
+  it('the served listing carries the read decoration, and both doors answer through the pack', async () => {
+    const engineOfRecord = new ObjectQL();
+    const store = new SqlDriver({ client: 'better-sqlite3', connection: { filename: ':memory:' }, useNullAsDefault: true } as never);
+    await store.initObjects([SysMetadataObject] as never);
+    engineOfRecord.registerDriver(store as never, true);
+    await engineOfRecord.init();
+    engineOfRecord.registry.registerObject(SysMetadataObject as never, '@objectstack/platform-objects');
+    engineOfRecord.registerApp({
+      id: 'com.objectstack.qa.record-context-stdio',
+      name: 'record context stdio',
+      version: '1.0.0',
+      type: 'plugin',
+      scope: 'system',
+      objects: [OBJECTS.policy, OBJECTS.policy_revision],
+      aiContexts: [PACK],
+    } as never);
+    const protocol = new ObjectStackProtocolImplementation(engineOfRecord as never);
+    try {
+      // Precondition: the protocol serves the pack decorated, as `/meta/ai_context` does.
+      // Were it served bare, this case could not tell a door that strips from one that does not.
+      const listed = (await protocol.getMetaItems({ type: 'ai_context' })) as { items: Array<Record<string, unknown>> };
+      const served = listed.items.find((p) => p.name === PACK.name);
+      expect(served?._packageId).toBe('com.objectstack.qa.record-context-stdio');
+      expect(served).toHaveProperty('_diagnostics');
+
+      // No pack on the metadata service: the only listing is the protocol's.
+      const bridge = stdioBridge([], true, protocol as unknown as Record<string, unknown>);
+      const { http, stdio } = await callBoth(bridge, GET_RECORD_CONTEXT_TOOL_NAME, {
+        objectName: 'policy',
+        recordId: 'p1',
+        context: PACK.name,
+      });
+      expect(http.isError, JSON.stringify(http.payload)).toBe(false);
+      expect(stdio).toEqual(http);
+      expect(http.payload.data.pack.name).toBe(PACK.name);
+      expect(http.payload.data.related[0].rows.map((r: { id: string }) => r.id)).toEqual(['r1', 'r2']);
+    } finally {
+      await engineOfRecord.destroy();
+    }
+  });
+});
+
+describe('[ADR-0150 addendum 2026-11-25] get_record_context — the stdio door places each pack\'s package', () => {
+  const ALPHA = 'com.acme.sales';
+  const BETA = 'com.acme.people';
+  const brief = (packageId: string, label: string) => ({
+    name: 'brief', label, object: 'policy', fields: ['title'], _packageId: packageId, _provenance: 'package',
+  });
+  /** The stdio bridge over two packages' same-name packs, its engine's registry placing `namespaces`. */
+  function placedBridge(namespaces: Record<string, string> | undefined): McpDataBridge {
+    const placed = engine() as IDataEngine & { registry?: unknown };
+    if (namespaces) {
+      placed.registry = { getPackage: (id: string) => (namespaces[id] ? { manifest: { namespace: namespaces[id] } } : undefined) };
+    }
+    const tools = createRecordContextTools();
+    return createStdioDataBridge({
+      engine: placed,
+      metadataService: {
+        getObject: async (name: string) => OBJECTS[name],
+        listObjects: async () => Object.values(OBJECTS),
+        list: async (type: string) => (type === 'ai_context' ? [brief(ALPHA, 'Sales brief'), brief(BETA, 'People brief')] : []),
+      } as unknown as IMetadataService,
+      resolvePrincipal: async () => ({ userId: 'u_key', isSystem: false }) as never,
+      recordContextTools: { recordContextTools: () => tools },
+    });
+  }
+  const call = (context: string) => ({ objectName: 'policy', recordId: 'p1', context });
+
+  it('two packages\' packs of one name on one root: each is reached by its face, alike on both transports', async () => {
+    const bridge = placedBridge({ [ALPHA]: 'sales', [BETA]: 'people' });
+    const sales = await callBoth(bridge, GET_RECORD_CONTEXT_TOOL_NAME, call('sales-brief'));
+    const people = await callBoth(bridge, GET_RECORD_CONTEXT_TOOL_NAME, call('people-brief'));
+    expect(sales.http.isError, JSON.stringify(sales.http.payload)).toBe(false);
+    expect(sales.stdio).toEqual(sales.http);
+    expect(sales.http.payload.data.pack).toEqual({ name: 'brief', label: 'Sales brief' });
+    expect(people.stdio).toEqual(people.http);
+    expect(people.http.payload.data.pack).toEqual({ name: 'brief', label: 'People brief' });
+  });
+
+  it('the bare name both packages hold is refused 409, naming each face', async () => {
+    const { http, stdio } = await callBoth(placedBridge({ [ALPHA]: 'sales', [BETA]: 'people' }), GET_RECORD_CONTEXT_TOOL_NAME, call('brief'));
+    expect(stdio).toEqual(http);
+    expect(http.payload.error).toMatchObject({ code: 'RESOURCE_CONFLICT', status: 409 });
+    expect(http.payload.error.message).toContain('sales-brief');
+    expect(http.payload.error.message).toContain('people-brief');
+  });
+
+  it('control: an engine whose registry cannot place the packages spells each pack by its bare name, so no face reaches one', async () => {
+    const { http } = await callBoth(placedBridge(undefined), GET_RECORD_CONTEXT_TOOL_NAME, call('sales-brief'));
+    expect(http.isError).toBe(true);
+    expect(http.payload.error).toMatchObject({ code: 'RESOURCE_NOT_FOUND', status: 404 });
   });
 });

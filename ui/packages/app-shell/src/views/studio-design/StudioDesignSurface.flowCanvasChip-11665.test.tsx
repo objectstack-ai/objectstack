@@ -92,6 +92,11 @@ import { registerMetadataPreview } from '../metadata-admin/preview-registry';
 import { registerMetadataInspector } from '../metadata-admin/inspector-registry';
 import { FlowPreview } from '../metadata-admin/previews/FlowPreview';
 import { FlowInspector } from '../metadata-admin/inspectors/FlowInspector';
+// The source under test reaches these dynamic imports (the command palette's
+// record preview, the drafts panel's lint, the code editor): their first load
+// is paid here, at collection, never inside a case's clock (`check:test-source-alias`).
+import '@objectstack/lint';
+import '@object-ui/plugin-detail';
 
 const dataSource = createEmptyDataSource();
 failOnAbsorbedFetchError();
@@ -128,17 +133,23 @@ function serve(label: string): void {
 function renderPillar(language: 'zh' | 'en') {
   return render(
     <I18nProvider config={{ defaultLanguage: language, detectBrowserLanguage: false }}>
-      <MemoryRouter initialEntries={[`/studio/${PKG}/automations`]}>
-        <AutomationsPillar packageId={PKG} />
+      <MemoryRouter initialEntries={[`/studio/${PKG}/metadata/flow/${API_NAME}`]}>
+        <AutomationsPillar packageId={PKG} flowName={API_NAME} />
       </MemoryRouter>
     </I18nProvider>,
   );
 }
 
-/** The canvas caption of the open flow, and the header strip that holds it. */
+/**
+ * The title of the open flow, and the header that holds it. objectstack#36903
+ * — the full-screen item header (`StudioDetailHeader`, epic decision 0-2)
+ * carries the type and the API name as chips beside the title, on every item
+ * page; the title itself stays the flow's label alone, the API name in its
+ * tooltip, as objectui#11665 asks.
+ */
 async function caption(): Promise<{ chip: HTMLElement; header: HTMLElement }> {
   const chip = await screen.findByTestId('auto-canvas-caption', undefined, { timeout: 8000 });
-  return { chip, header: chip.parentElement as HTMLElement };
+  return { chip, header: screen.getByTestId('auto-flow-header') };
 }
 
 /** The metadata type word, as a whole word in any case: `flow`, `Flow`, `FLOW`. */
@@ -157,8 +168,7 @@ describe('the automation canvas header names the open flow by its label (objectu
     await waitFor(() => expect(chip).toHaveAttribute('title', `API 名称: ${API_NAME}`));
     // The neighbouring chip is the real zh `canvasHint`, so the header read is the whole strip.
     expect(header).toHaveTextContent('点选画布上的节点即可配置');
-    expect(header.textContent ?? '').not.toMatch(TYPE_WORD);
-    expect(header.textContent ?? '').not.toContain(API_NAME);
+    expect(chip.textContent ?? '').not.toMatch(TYPE_WORD);
     expect(chip.getAttribute('title') ?? '').not.toMatch(TYPE_WORD);
   });
 
@@ -170,8 +180,7 @@ describe('the automation canvas header names the open flow by its label (objectu
     expect(chip).toHaveTextContent(/^Nightly digest$/);
     expect(chip).toHaveAttribute('title', `API name: ${API_NAME}`);
     expect(header).toHaveTextContent('Visual orchestration');
-    expect(header.textContent ?? '').not.toMatch(TYPE_WORD);
-    expect(header.textContent ?? '').not.toContain(API_NAME);
+    expect(chip.textContent ?? '').not.toMatch(TYPE_WORD);
     expect(chip.getAttribute('title') ?? '').not.toMatch(TYPE_WORD);
   });
 
@@ -181,7 +190,8 @@ describe('the automation canvas header names the open flow by its label (objectu
     const { chip, header } = await caption();
 
     expect(chip).toHaveTextContent(new RegExp(`^${API_NAME}$`));
-    expect(header.textContent ?? '').not.toMatch(TYPE_WORD);
+    expect(chip.textContent ?? '').not.toMatch(TYPE_WORD);
+    expect(header).toBeInTheDocument();
   });
 
   it('the type-word pattern sees what it is meant to catch (positive control)', () => {

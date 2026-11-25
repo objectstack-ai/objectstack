@@ -869,7 +869,16 @@ export class ProtocolSaveFacet {
                     host, 'save', request.type, writeType, request.name, itemDiscriminator(writeType, request.item), address,
                 );
                 if (holderRefusal) throw holderRefusal;
-                if (address.packageId !== null) request = { ...request, packageId: address.packageId };
+                // [#35524] …and a named non-canonical member only a dependent
+                // holds, where the read naming no package takes the row-held
+                // base's address: the base's row, as the save naming the base
+                // writes it ({@link packagelessRowHeldBaseAddress}), never the
+                // dependent's row the read does not serve there.
+                const base = address.candidates.length === 1
+                    ? await packagelessRowHeldBaseAddress(host, writeType, request.name, member)
+                    : undefined;
+                const resolved = base ?? address.packageId;
+                if (resolved !== null) request = { ...request, packageId: resolved };
             }
         }
 
@@ -901,8 +910,17 @@ export class ProtocolSaveFacet {
         // draft save's inherited package (the named-base rule and the late
         // override re-judgment): the base is judged exactly as the save
         // naming it is, an id no installed package has refused `422`.
+        // [#35524] …and the same where the active rows at the member are bound
+        // to the one dependent whose addition the read naming no package does
+        // not serve (it takes the base's address there): the base's draft,
+        // also over a stored package-unbound draft there (epic ruling
+        // 6781691009, contract review S2 option (b)). The named base is passed
+        // down, so the repository's orphan-draft adoption (a save naming no
+        // package) does not run: the package-unbound draft stays untouched, as
+        // the save naming the base leaves it, and the draft the next bare
+        // draft read, publish and discard reach is the one written here.
         let followedBase: string | undefined;
-        if (draftAddress?.kind === 'ambiguous') {
+        if (draftAddress !== undefined && (draftAddress.kind === 'ambiguous' || draftAddressFollowsRowHeldBase(draftAddress))) {
             const base = await packagelessRowHeldBaseAddress(
                 host, singularType, request.name, itemDiscriminator(singularType, request.item),
             );
@@ -3247,18 +3265,28 @@ export function disabledHoldersOnlyRefusal(
  * that base does, and every dependent's row stays where it is, read and
  * written at its own `?package=`.
  *
- * Asked only where those doors would refuse naming two or more packages, and
- * answered over the item's ACTIVE rows at `member`, as the read judges them:
+ * Asked where those doors would refuse naming two or more packages, and
+ * [#35524] by the save (publish and draft mode) and the draft doors'
+ * address ({@link packagelessRowHeldBaseDraftAddress}) where the rows are
+ * bound to one package; answered over the item's ACTIVE rows at `member`, as
+ * the read judges them:
  *
  *  - the base, when two or more packages hold a row there, none of them
  *    package-less (#33210: a package-less row beside them is a customization
  *    of no one holder, and the refusal stands), and one is the row-held base;
- *  - `undefined` otherwise, and the door refuses as before: a type with no
+ *  - [#35524] the base, when one dependent holds the only row there, at a
+ *    named non-canonical member the base holds no row of: the read takes the
+ *    base's address there (and answers 404 until the base holds a row), so
+ *    the bare save writes the base's row or draft, as the save naming the
+ *    base does, and the next bare read serves it. The canonical member stays
+ *    the dependent's, as the read serves it (#33210 contract review S1);
+ *  - `undefined` otherwise, and the door answers as before: a type with no
  *    members (#34441 contract review M1: no bundle additions), a name a
  *    package ships, holders with no base relation, a disabled holder (the
- *    served-holder judgment's), and a member the base holds no row of (the
- *    read takes the base's address there and answers 404; that cell is not
- *    moved here).
+ *    served-holder judgment's), and, of the one-holder cell, the base's own
+ *    row. The bare delete, history, diff and rollback ask only with two or
+ *    more holders, so at the one-holder cell they still act on the
+ *    dependent's row.
  *
  * FROM (`main` 8596c80eda): each of those doors refused `409
  * RESOURCE_CONFLICT` naming the base and the dependent while the read
@@ -3285,9 +3313,86 @@ export async function packagelessRowHeldBaseAddress(
         return undefined;
     }
     const address = await host.packagelessAddress(singular, name, member, 'active', activeRows);
-    if (address.candidates.length < 2 || address.unbound) return undefined;
+    if (address.candidates.length === 0 || address.unbound) return undefined;
     const base = await rowHeldBaseAddressOf(host, singular, name, member, activeRows);
-    return base !== undefined && address.candidates.includes(base) ? base : undefined;
+    if (base === undefined) return undefined;
+    // [#35524] Two or more holders at the member: the base is one of them. One
+    // holder: a dependent's addition the base holds no row of, where the read
+    // takes the base's address (`rowHeldBaseAddressOf`'s S1-guarded arm).
+    return address.candidates.includes(base) === address.candidates.length > 1 ? base : undefined;
+}
+
+/**
+ * [#35524] Whether a non-ambiguous draft address naming no package is one the
+ * row-held base's address may replace ({@link packagelessRowHeldBaseAddress}):
+ * bound to a package by the active rows (`into !== null`), whatever draft it
+ * names, the dependent's or [contract review S2 option (b)] the
+ * package-unbound one (`key === null`). Epic ruling 6781691009, "a write
+ * resolves its address exactly as the read at the same address resolves it":
+ * the read naming no package takes the base's address at that member however
+ * the drafts there are stored, so the draft save and the other draft doors
+ * take it too. Keeping the package-unbound draft's own address there (the
+ * contract review S1 option (a) this replaces) let the bare draft save adopt
+ * that draft into the dependent, after which the bare draft read missed the
+ * draft just saved. The one predicate the draft doors' address
+ * ({@link packagelessRowHeldBaseDraftAddress}) and the draft save's follow
+ * ask, so they cannot part.
+ */
+export function draftAddressFollowsRowHeldBase(address: { into: string | null }): boolean {
+    return address.into !== null;
+}
+
+/**
+ * [#35524, epic ruling 6781691009, #34348 ruling (b)] THE DRAFT ADDRESS the
+ * draft doors naming no package take (the draft save, the strict draft read,
+ * the per-item publish and the draft discard, through
+ * `packagelessDraftAddress`), at a named non-canonical member whose active
+ * rows are bound to one dependent only, where the read naming no package
+ * takes the row-held base's address ({@link packagelessRowHeldBaseAddress}):
+ * that base's draft, promoted into the base's row, as the same request naming
+ * the base addresses it. So the draft a bare draft save writes there is the
+ * draft the bare draft read, publish and discard act on, and the dependent's
+ * draft is read, published and discarded at its own `?package=`.
+ *
+ * [#35524 contract review S2 option (b), epic ruling 6781691009] That
+ * includes a PACKAGE-UNBOUND draft stored at the member (`key === null`: no
+ * draft of the dependent beside it, as a bare draft save at the member writes
+ * it while no package holds that member): the address is still the base's
+ * (`none` until the base holds a draft there), because the read naming no
+ * package takes the base's address there however the drafts are stored. So
+ * the bare draft save writes the base's draft (the package-unbound draft is
+ * left untouched, as the save naming the base leaves it), the bare draft read
+ * reads back what it saved, the bare per-item publish promotes the base's
+ * draft, and the bare draft discard with no base draft answers as the discard
+ * naming the base does, naming the remaining package-unbound draft
+ * (`protocol-diff-delete-load.ts`). With no base draft there, the bare draft
+ * read still serves the package-unbound draft, as the draft read naming the
+ * base does, while the bare publish and discard leave it stored, as the
+ * requests naming the base do.
+ *
+ * `pending` (the draft address the stored rows give) itself otherwise: an
+ * ambiguous address (the doors ask {@link packagelessRowHeldBaseAddress} for
+ * it themselves, #34681), an address not bound to a package by the active
+ * rows ({@link draftAddressFollowsRowHeldBase}), and every cell that judgment
+ * declines.
+ *
+ * FROM (`main` a73edb3cd7): the bare draft save wrote the dependent's draft
+ * there (or adopted a stored package-unbound draft into the dependent) and
+ * the bare publish promoted it into the dependent's row, while the bare read
+ * at the member answered 404 (the base's address).
+ */
+export async function packagelessRowHeldBaseDraftAddress(
+    host: Pick<ProtocolHost, 'declinesStoredRow' | 'engine' | 'packagelessAddress' | 'readItemActiveRows' | 'rethrowUnlessMetadataStoreUnprovisioned' | 'shippedArtifactsOf'>,
+    type: string,
+    name: string,
+    member: string | undefined,
+    pending: ReturnType<ProtocolHost['packagelessDraftAddress']>,
+): Promise<Awaited<ReturnType<ProtocolHost['packagelessDraftAddress']>>> {
+    const address = await pending;
+    if (address.kind === 'ambiguous' || !draftAddressFollowsRowHeldBase(address)) return address;
+    const base = await packagelessRowHeldBaseAddress(host, type, name, member);
+    if (base === undefined) return address;
+    return { kind: address.drafts.candidates.includes(base) ? 'draft' : 'none', key: base, into: base, drafts: address.drafts };
 }
 
 /**

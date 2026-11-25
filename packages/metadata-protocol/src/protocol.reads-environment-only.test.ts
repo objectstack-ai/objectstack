@@ -405,3 +405,37 @@ describe('§4 [ADR-0131 C7] the anonymous form doors\' legacy organization read 
         });
     }
 });
+
+/**
+ * [ADR-0150 addendum 2026-11-25, "Overlays"] The overlay consequence of a
+ * context pack, measured. `ai_context` opens no overlay channel (ADR-0160 D1)
+ * and is not among the sealed types whose declared override is served from
+ * its row, so a package-less row under a name a package ships is that
+ * holder's customization, never a second pack — today and with `ai_context`
+ * package-scoped. The rule is read at `(type, name)`, whatever the row's
+ * root: an environment pack rooted on one object stops being served when a
+ * package holding its name installs, though the package's pack roots on
+ * another object.
+ */
+describe('§5 [ADR-0150 addendum 2026-11-25] a package-less context pack under a name a package ships is not served, whatever its root', () => {
+    const shipped: Artifact = {
+        type: 'ai_context',
+        name: 'brief',
+        body: { name: 'brief', label: 'packaged', object: 'policy', fields: ['title'], _packageId: PKG },
+    };
+    const envPack = (name: string) => metaRow('ai_context', name, { label: 'environment', object: 'claim', fields: ['number'] });
+
+    it('the environment pack on another root is declined: the item and list reads serve the package\'s pack alone', async () => {
+        const { protocol } = harness({ sys_metadata: [envPack('brief')] }, [shipped]);
+        expect(protocol.declinesStoredRow('ai_context', 'brief')).toBe(true);
+        expect((await protocol.getMetaItem({ type: 'ai_context', name: 'brief' })).item?.label).toBe('packaged');
+        const listed = ((await protocol.getMetaItems({ type: 'ai_context' })).items as Row[]).filter((i) => i.name === 'brief');
+        expect(listed.map((i) => `${String(i.label)}@${String(i.object)}`)).toEqual(['packaged@policy']);
+    });
+
+    it('control: an environment pack under a name no package ships is served from its row', async () => {
+        const { protocol } = harness({ sys_metadata: [envPack('our_brief')] }, [shipped]);
+        expect(protocol.declinesStoredRow('ai_context', 'our_brief')).toBe(false);
+        expect((await protocol.getMetaItem({ type: 'ai_context', name: 'our_brief' })).item?.label).toBe('environment');
+    });
+});

@@ -2045,7 +2045,7 @@ function DatasetReportChart({
   // restates the earlier window's buckets in the current window's keys, so a
   // month axis pairs each month with the month one period before it.
   const comparisonAggregate = measureField(yAxis)?.aggregate;
-  const drawnSeries = compareTo && !seriesBy
+  const comparedSeries = compareTo && !seriesBy
     ? [
       ...chartSeries,
       {
@@ -2056,6 +2056,17 @@ function DatasetReportChart({
       },
     ]
     : chartSeries;
+  // objectstack#37053 — every series plots the one measure (its `seriesBy`
+  // split and its earlier window included), so each carries that measure's
+  // format facts, and the chart's value axis prints the measure's units: a
+  // `percentScale: 'whole'` measure's ticks read `33.3%` beside the table's
+  // `33.3%`, a `CNY` amount's carry `¥`. Renderer-internal, beside
+  // `aggregate`; nothing authored reaches it (`mergeAuthoredSeries` lowers
+  // presentation keys only).
+  const seriesMeasureFormat = measureFormatCarrier(measureField(yAxis));
+  const drawnSeries = seriesMeasureFormat
+    ? comparedSeries.map((s) => ({ ...s, measureFormat: seriesMeasureFormat }))
+    : comparedSeries;
 
   // The authored CHROME — `showLegend`, `showDataLabels`, `colors`, `subtitle`,
   // `description`, `annotations`, `interaction`, `height` — lowered by the same
@@ -2124,6 +2135,35 @@ function DatasetReportChart({
 }
 
 /**
+ * The value-format facts a report chart's series carry for the measure they
+ * plot (objectstack#37053) — the chart renderer's internal
+ * `series[].measureFormat`: the measure's `format` pattern, its
+ * `percentScale`, and the currency the table prints the column in when a cell
+ * has no row of its own (`measureCellCurrency` with no row). That is the one
+ * currency a value axis can print: a per-row currency column
+ * (`currencyField`, ADR-0144 D9) has none, so its axis keeps plain numbers.
+ * `undefined` when the measure states none of them.
+ *
+ * ⚠️ A second copy of this function lives in `plugin-dashboard`'s `DatasetWidget`, because
+ * the shared home (`@object-ui/core`) sits outside the change that wrote it;
+ * `DatasetReportRenderer.measureFormatCarrierParity-37053.test.ts`
+ * (plugin-report) holds the two byte-identical. Edit both, or move them to
+ * core together.
+ */
+export function measureFormatCarrier(
+  field: DatasetResultField | undefined,
+): { format?: string; currency?: string; percentScale?: 'fraction' | 'whole' } | undefined {
+  if (!field) return undefined;
+  const currency = measureCellCurrency(field);
+  const carrier = {
+    ...(typeof field.format === 'string' && field.format !== '' ? { format: field.format } : {}),
+    ...(currency ? { currency } : {}),
+    ...(field.percentScale ? { percentScale: field.percentScale } : {}),
+  };
+  return Object.keys(carrier).length > 0 ? carrier : undefined;
+}
+
+/**
  * The value-axis `format` a report chart hands its chart for the measure it
  * plots, or `undefined` to leave the axis on the chart's own default
  * (objectstack#36988).
@@ -2132,8 +2172,10 @@ function DatasetReportChart({
  * the table's: the chart's axis `format` (`formatterFor`, plugin-charts) reads
  * a `%` pattern as a 0–1 fraction printed ×100 — `formatMeasure`'s reading at
  * the `fraction` scale, which is also its reading of a column the server
- * leaves unannotated. Three measures keep the default instead, because that
- * key cannot carry what the table prints for them:
+ * leaves unannotated. Three measures are handed no `format`, because that
+ * key cannot carry what the table prints for them; their axis reads the
+ * series' `measureFormat` carrier instead (objectstack#37053, see
+ * `measureFormatCarrier`), which a declared axis `format` would outrank:
  *
  *  - `percentScale: 'whole'` — already percentage points; the axis would
  *    multiply them by 100 a second time;

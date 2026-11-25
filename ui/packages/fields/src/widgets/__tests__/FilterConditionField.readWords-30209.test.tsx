@@ -24,6 +24,7 @@ import { describe, it, expect, afterEach } from 'vitest';
 import { render, screen, cleanup } from '@testing-library/react';
 import '@testing-library/jest-dom';
 import { I18nProvider } from '@object-ui/i18n';
+import { builtInLocales } from '@object-ui/i18n/locales';
 import { SchemaRendererProvider } from '@object-ui/react';
 import { getCellRenderer, resolveCellRendererType } from '../../index';
 
@@ -77,5 +78,75 @@ describe('a `filter-condition` value reads as words (objectstack#30209)', () => 
     const { container } = renderCell(nested);
     await screen.findByText(nested);
     expect(container.querySelector('[data-filter-condition="words"]')).toBeNull();
+  });
+});
+
+/**
+ * objectstack#37288 (c) — the sentence says the object's TRANSLATED field and
+ * option labels, the way a record page draws the same field and option
+ * (`fieldLabel`, `translateOptions`), and falls back to the authored label
+ * where the bundle has none.
+ */
+describe('a `filter-condition` sentence says the translated labels (objectstack#37288)', () => {
+  const TICKET_SCHEMA = {
+    name: 'ticket',
+    fields: {
+      priority: {
+        name: 'priority',
+        label: 'Priority',
+        type: 'select',
+        options: [
+          { value: 'urgent', label: 'Urgent' },
+          { value: 'low', label: 'Low' },
+        ],
+      },
+      queue: { name: 'queue', label: 'Queue', type: 'text' },
+    },
+  };
+  /** An app bundle carrying the zh labels of `priority` and its `urgent` option only. */
+  const ZH_APP_BUNDLE = {
+    'zh-Hans': {
+      testapp: {
+        fields: { ticket: { priority: '优先级' } },
+        fieldOptions: { ticket: { priority: { urgent: '紧急' } } },
+      },
+    },
+  };
+  const equals = (language: string): unknown =>
+    ((builtInLocales as Record<string, any>)[language]?.filterBuilder?.operators?.equals);
+
+  function renderTicket(language: string, value: string) {
+    const ticketSource = { getObjectSchema: async () => TICKET_SCHEMA } as any;
+    const Cell = getCellRenderer(resolveCellRendererType(criteriaField));
+    return render(
+      <I18nProvider config={{ defaultLanguage: language, detectBrowserLanguage: false, resources: ZH_APP_BUNDLE }}>
+        <SchemaRendererProvider dataSource={ticketSource}>
+          <Cell value={value} field={criteriaField} dependentValues={{ object_name: 'ticket' }} />
+        </SchemaRendererProvider>
+      </I18nProvider>,
+    );
+  }
+
+  it('says the zh field and option labels, not the authored English', async () => {
+    renderTicket('zh-Hans', '{"priority":"urgent"}');
+    expect(await screen.findByText(`优先级 ${equals('zh-Hans')} 紧急`)).toBeInTheDocument();
+  });
+
+  it('says the authored en labels under en', async () => {
+    renderTicket('en', '{"priority":"urgent"}');
+    expect(await screen.findByText(`Priority ${equals('en')} Urgent`)).toBeInTheDocument();
+  });
+
+  it('CONTROL: an option and a field the bundle does not translate keep their authored labels', async () => {
+    renderTicket('zh-Hans', '{"$or":[{"priority":"low"},{"queue":"ops"}]}');
+    const or = (builtInLocales as Record<string, any>)['zh-Hans']?.filterBuilder?.or;
+    expect(
+      await screen.findByText(`优先级 ${equals('zh-Hans')} Low ${or} Queue ${equals('zh-Hans')} ops`),
+    ).toBeInTheDocument();
+  });
+
+  it('CONTROL: a value no option holds stays as stored', async () => {
+    renderTicket('zh-Hans', '{"priority":"legacy"}');
+    expect(await screen.findByText(`优先级 ${equals('zh-Hans')} legacy`)).toBeInTheDocument();
   });
 });

@@ -78,6 +78,9 @@ const en = {
     autofillNoCurrency: '{{field}} was not filled: the picked amount is {{amount}}, but no currency is chosen here yet. Choose the currency, then enter {{field}}.',
     autofillCurrencyUnread: '{{field}} was not filled: the picked amount is {{amount}}, but the currency here could not be read. Check the currency, then enter {{field}}.',
     autofillKept: '{{field}} still holds its earlier value.',
+    autofillNowSameCurrency: '{{field}} was not filled when it was picked. The record is now in {{to}}: pick again to fill {{amount}}.',
+    autofillNowSameCurrencyHeld: '{{field}} was not filled when it was picked and still holds its earlier value. The record is now in {{to}}: clear {{field}}, then pick again to fill {{amount}}.',
+    autofillCopiedUnder: '{{field}} was copied as {{amount}}, but the record is now in {{to}}. Enter {{field}} in {{to}} if it should change.',
   },
   common: {
     // objectui#13461 — a disclosure toggle's name (the tree-view node toggle).
@@ -921,6 +924,7 @@ const en = {
       needsWholeRows:
         'Grouping needs every record, but this grid was handed one page of them, so the groups cannot be counted. Hand in every record, or let the grid fetch them from a data source that implements queryGroupHeaders.',
       draftOnly: 'Not grouped by {{fields}}: it exists only in the draft until you publish.',
+      moreGroupsNotLoaded: 'More groups were not loaded: this view has more groups than the server returns in one read, so only some are listed.',
     },
     // Column-footer aggregate prefixes, keyed by the spec's `ColumnSummary`
     // vocabulary (objectui#4024). The footer already formatted its NUMBER
@@ -2220,6 +2224,8 @@ const en = {
       settings: 'Report settings',
       pendingDraft: 'This report has unpublished changes. Publish or discard them above, then save.',
       nameTaken: 'Every name made from this one is already taken. Give the report another name, then save.',
+      // objectstack#36906 — a report made from Studio's report list that could not be saved in the app's package.
+      savedOutsideApp: 'This report was saved outside the app’s package, because the app’s customization package cannot be used here, so the Studio list does not show it.',
       adminOnlyTitle: 'Only workspace admins can build reports',
       adminOnly: 'A report is shared with everyone in the workspace, so an admin builds it.',
       designModeOnTitle: 'Finish designing the layout first',
@@ -2273,6 +2279,12 @@ const en = {
     undo: 'Undo',
     redo: 'Redo',
     canvasMinimap: 'Canvas minimap',
+  },
+  // objectstack#36906 — the × of an app page opened from a Studio list.
+  studioReturn: {
+    close: 'Back to Studio',
+    closeLabel: 'Close and go back to the Studio list',
+    leaveConfirm: 'Leave without saving? Your unsaved changes will be lost.',
   },
   dashboard: {
     total: 'Total',
@@ -3120,8 +3132,7 @@ const en = {
       //
       // NOT the same thing as the platform's manual automation surfaces, which
       // are real and stay as they are: `home.build.subtitle` (that card opens
-      // Studio, which does author flows), `engine.studio.landing.description`,
-      // `packagedAutomation.*` and the
+      // Studio, which does author flows), `packagedAutomation.*` and the
       // marketplace `automation` category. The boundary is v1 AI AUTHORING, not
       // the word "automation".
       //
@@ -4527,7 +4538,7 @@ const en = {
     build: {
       title: 'Build an app',
       noCapability: 'Building apps isn\'t available in this system — it requires the “Manage Metadata” permission, which your account doesn\'t have.',
-      inStudio: 'New in Studio',
+      inStudio: 'New blank app',
     },
     template: {
       title: 'Start with a template',
@@ -5647,6 +5658,7 @@ const en = {
     tool: {
       aggregate_data: 'Aggregate the data',
       get_record: 'Read the record',
+      get_record_context: 'Read the record context',
       list_datasets: 'Check the available metrics',
       query_data: 'Query the data',
       query_dataset: 'Query by a metric',
@@ -6124,7 +6136,12 @@ const en = {
     bulkRejected: 'Rejected {{count}} requests',
     bulkRejected_one: 'Rejected {{count}} request',
     bulkRejected_other: 'Rejected {{count}} requests',
-    bulkPartial: '{{ok}} succeeded, {{fail}} failed: {{which}}',
+    bulkPartialSummary: '{{ok}} succeeded, {{fail}} failed',
+    bulkFailureLine: '{{title}}: {{reason}}',
+    bulkFailuresShowAll: 'Show all ({{n}})',
+    bulkFailuresTitle: 'Not decided: {{n}}',
+    bulkFailuresBody: 'These requests were left as they were. Each one says why.',
+    close: 'Close',
     rejectOneTitle: 'Reject "{{title}}"?',
     rejectOneBody: 'This rejects the request and notifies the submitter.',
     rejectTitle: 'Reject this request?',

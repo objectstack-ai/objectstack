@@ -104,12 +104,10 @@ export const STUDIO_APP: App = {
       icon: 'layout-dashboard',
       children: [
         {
-          // The application builder's front door (ADR-0080/0084): pick or
-          // create a writable base package, then design in the full-screen
-          // pillar builder (/studio/:packageId/:tab). The console binds
-          // `studio:builder` to the BuilderLanding page — this makes the
-          // builder reachable from login (Home → Studio → App Builder)
-          // instead of being a URL-only surface.
+          // The application builder's entry (ADR-0080/0084). The console
+          // binds `studio:builder` to Studio's entry, bare `/studio`, which
+          // opens the package the author was last in, else the package list
+          // (#36908: the package-card home it used to draw was removed).
           id: 'nav_app_builder',
           type: 'component',
           label: 'App Builder',

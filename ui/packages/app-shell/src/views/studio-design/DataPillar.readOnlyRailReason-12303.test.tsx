@@ -62,6 +62,7 @@ vi.mock('@object-ui/react', async (importOriginal) => {
 // The source under test reaches a dynamic import of `@objectstack/lint`: its first
 // load is paid here, at collection, never inside a case's clock (`check:test-source-alias`).
 import '@objectstack/lint';
+import '@object-ui/plugin-detail';
 import { DataPillar } from './StudioDesignSurface';
 import { createEmptyDataSource, failOnAbsorbedFetchError } from './__tests__/emptyDataSource';
 import { registerMetadataInspector } from '../metadata-admin/inspector-registry';
@@ -88,7 +89,7 @@ const describedBy = (el: HTMLElement) => {
 async function openRail(readOnly: boolean): Promise<HTMLElement> {
   render(
     <MemoryRouter initialEntries={['/studio/com.example.showcase/data']}>
-      <DataPillar packageId="com.example.showcase" readOnly={readOnly} />
+      <DataPillar objectName="showcase_task" packageId="com.example.showcase" readOnly={readOnly} />
     </MemoryRouter>,
   );
   fireEvent.click(await screen.findByRole('button', { name: L('engine.studio.data.tab.form') }));

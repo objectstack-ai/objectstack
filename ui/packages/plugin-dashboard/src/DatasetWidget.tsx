@@ -664,6 +664,35 @@ function declaredNullCategoryLabel(
 }
 
 /**
+ * The value-format facts a chart series carries for the measure it plots
+ * (objectstack#37053) — the chart renderer's internal `series[].measureFormat`,
+ * beside `aggregate`: the measure's `format` pattern, its `percentScale`, and
+ * the currency the table prints the column in when a cell has no row of its
+ * own (`measureCellCurrency` with no row). That is the one currency a value
+ * axis can print: a per-row currency column (`currencyField`, ADR-0144 D9) has
+ * none, so its axis keeps plain numbers. `undefined` when the measure states
+ * none of them.
+ *
+ * ⚠️ A second copy of this function lives in `plugin-report`'s `DatasetReportRenderer`, because
+ * the shared home (`@object-ui/core`) sits outside the change that wrote it;
+ * `DatasetReportRenderer.measureFormatCarrierParity-37053.test.ts`
+ * (plugin-report) holds the two byte-identical. Edit both, or move them to
+ * core together.
+ */
+export function measureFormatCarrier(
+  field: DatasetResultField | undefined,
+): { format?: string; currency?: string; percentScale?: 'fraction' | 'whole' } | undefined {
+  if (!field) return undefined;
+  const currency = measureCellCurrency(field);
+  const carrier = {
+    ...(typeof field.format === 'string' && field.format !== '' ? { format: field.format } : {}),
+    ...(currency ? { currency } : {}),
+    ...(field.percentScale ? { percentScale: field.percentScale } : {}),
+  };
+  return Object.keys(carrier).length > 0 ? carrier : undefined;
+}
+
+/**
  * Map a dashboard widget `type` to the advanced chart renderer's `chartType`.
  * Families the renderer doesn't draw distinctly fall back to their closest
  * relative (e.g. `spline`/`step-line` → line, `stacked-area` → area,
@@ -2382,9 +2411,31 @@ export function DatasetWidget({ widget, dataSource, heading, onForbidden, packag
   // document reaches here) is handed the one measure it renders, so its other
   // measures are not read as groups and the dropped-measure warning above
   // stays true. A pivot carries one measure, so nothing is dropped from it.
-  const chartSeries = SINGLE_SERIES_CHART_FAMILIES.has(chartType)
+  const measureFilteredSeries = SINGLE_SERIES_CHART_FAMILIES.has(chartType)
     ? comparedChartSeries.filter((s) => !droppedMeasures.includes(s.dataKey))
     : comparedChartSeries;
+  // objectstack#37053 — each series carries the format facts of the measure
+  // it plots, so the chart's value axis prints that measure's units (a
+  // `percentScale: 'whole'` rate reads `33.3%`, a `CNY` amount carries `¥`),
+  // as the flat table prints them. A pivot's series all plot its one measure;
+  // otherwise a series is its measure, or that measure's earlier window
+  // (`compareColumn`). The transposed series plots every measure, so it
+  // carries one only when they all format alike — the rule `aggregate` follows
+  // above. The chart applies a carrier only when every series on an axis
+  // states the same one.
+  const measureFormatOf = (measure: string): ReturnType<typeof measureFormatCarrier> =>
+    measureFormatCarrier(measureField(measure));
+  const measureAxisFormats = new Set(values.map((m) => JSON.stringify(measureFormatOf(m) ?? null)));
+  const seriesMeasureFormat = (dataKey: string): ReturnType<typeof measureFormatCarrier> => {
+    if (measuresOnAxis) return measureAxisFormats.size === 1 ? measureFormatOf(values[0]) : undefined;
+    if (pivotedSeries) return measureFormatOf(values[0]);
+    const measure = values.find((m) => m === dataKey || compareColumn(m) === dataKey);
+    return measure === undefined ? undefined : measureFormatOf(measure);
+  };
+  const chartSeries = measureFilteredSeries.map((s) => {
+    const measureFormat = seriesMeasureFormat(s.dataKey);
+    return measureFormat ? { ...s, measureFormat } : s;
+  });
 
   // Ordered-sequence charts (funnel/pyramid) need a DEFINED stage order.
   // `options.stageOrder` wins when the author states one explicitly; otherwise

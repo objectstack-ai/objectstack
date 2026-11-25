@@ -18,6 +18,7 @@ import React from 'react';
 import { FilterScopeProvider, RecordContextProvider } from '@object-ui/react';
 import { ComponentRegistry } from '@object-ui/core';
 import { RelatedList, derivedAddOf } from '../RelatedList';
+import { relatedCreateSeedOf } from '../relatedParentScope';
 import { resetRelatedTabConditionsForTests } from '../relatedTabConditions';
 import { RelatedListEnlargedContext } from '../relatedListCompact';
 
@@ -181,5 +182,58 @@ describe('the opportunity\'s 合同 tab picker (objectstack#36707)', () => {
     const dialog = await screen.findByTestId('record-picker-dialog');
     await within(dialog).findByTestId('record-row-k-own');
     expect(headerTexts(dialog)).not.toContain('Name');
+  });
+});
+
+/**
+ * objectstack#37246 — the related tab's New seeds the child with what the
+ * relationship lookup `dependsOn`, from the parent (`relatedCreateSeedOf`):
+ * the picker's scope above, read as values. The derived picker is the control:
+ * its scope stays as #36707 set it.
+ */
+describe('relatedCreateSeedOf — a related New seeds the dependsOn fields from the parent (objectstack#37246)', () => {
+  it('each dependsOn field takes the parent\'s value: string and { field, param } entries, an expanded reference as its id', () => {
+    expect(relatedCreateSeedOf(CONTRACT_FIELDS, 'opportunity', { id: 'O-1', account: 'A-1' })).toEqual({ account: 'A-1' });
+    const byParam = { ...CONTRACT_FIELDS, opportunity: { type: 'lookup', reference: 'opportunity', dependsOn: [{ field: 'account', param: 'customer' }] } };
+    expect(relatedCreateSeedOf(byParam, 'opportunity', { id: 'O-1', customer: { id: 'A-9', name: 'Contoso' }, account: 'A-1' })).toEqual({ account: 'A-9' });
+  });
+
+  it('a two-entry dependsOn seeds both fields; one the parent does not answer seeds neither, as the picker offers none', () => {
+    const twoEntries = {
+      ...CONTRACT_FIELDS,
+      opportunity: { type: 'lookup', reference: 'opportunity', dependsOn: ['account', { field: 'region', param: 'sales_region' }] },
+    };
+    expect(relatedCreateSeedOf(twoEntries, 'opportunity', { id: 'O-1', account: 'A-1', sales_region: 'R-1' })).toEqual({ account: 'A-1', region: 'R-1' });
+    expect(relatedCreateSeedOf(twoEntries, 'opportunity', { id: 'O-1', account: 'A-1', sales_region: null })).toEqual({});
+    expect(derivedAddOf(twoEntries, 'opportunity', 'contract', { id: 'O-1', account: 'A-1', sales_region: null })).toBeUndefined();
+  });
+
+  it('a lookupFilters comparand reading $record does not stop the seed (the form still applies it)', () => {
+    const fields = {
+      ...CONTRACT_FIELDS,
+      opportunity: { ...CONTRACT_FIELDS.opportunity, lookupFilters: [{ field: 'region', operator: 'eq', value: { $record: 'region' } }] },
+    };
+    expect(relatedCreateSeedOf(fields, 'opportunity', { id: 'O-1', account: 'A-1' })).toEqual({ account: 'A-1' });
+  });
+
+  it.each([
+    ['no dependsOn', { ...CONTRACT_FIELDS, opportunity: { type: 'lookup', reference: 'opportunity' } }, { id: 'O-1', account: 'A-1' }],
+    ['the parent has no value for it', CONTRACT_FIELDS, { id: 'O-1', account: null }],
+    ['the parent record is not read', CONTRACT_FIELDS, undefined],
+    ['a multi-valued relationship', { ...CONTRACT_FIELDS, opportunity: { ...CONTRACT_FIELDS.opportunity, multiple: true } }, { id: 'O-1', account: 'A-1' }],
+    ['a value that is not text', CONTRACT_FIELDS, { id: 'O-1', account: 7 }],
+  ] as const)('nothing to seed: %s', (_label, fields, parent) => {
+    expect(relatedCreateSeedOf(fields, 'opportunity', parent as any)).toEqual({});
+  });
+
+  it('control: the derived picker keeps its #36707 scope', () => {
+    expect(derivedAddOf(CONTRACT_FIELDS, 'opportunity', 'contract', { id: 'O-1', account: 'A-1' })).toEqual({
+      picker: {
+        object: 'contract',
+        filter: [{ field: 'opportunity', operator: 'is_empty' }, { field: 'account', operator: 'equals', value: 'A-1' }],
+      },
+    });
+    const scoped = { ...CONTRACT_FIELDS, opportunity: { ...CONTRACT_FIELDS.opportunity, lookupFilters: [{ field: 'region', operator: 'eq', value: { $record: 'region' } }] } };
+    expect(derivedAddOf(scoped, 'opportunity', 'contract', { id: 'O-1', account: 'A-1' })).toBeUndefined();
   });
 });

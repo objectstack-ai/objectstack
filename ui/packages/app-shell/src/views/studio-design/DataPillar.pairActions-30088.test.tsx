@@ -178,6 +178,7 @@ vi.mock('@object-ui/react', async (importOriginal) => {
 // The pillar reaches a dynamic `import('@objectstack/lint')`: pay its load at
 // collection, never inside a case's clocked window (`check:test-source-alias`).
 import '@objectstack/lint';
+import '@object-ui/plugin-detail';
 import { DataPillar, type StudioBaseCustomization } from './StudioDesignSurface';
 import { StudioSaveHarness, pressStudioCancel, pressStudioSave } from './__tests__/studioSaveHarness';
 import { createEmptyDataSource } from './__tests__/emptyDataSource';
@@ -234,7 +235,7 @@ afterEach(() => {
 async function mountOnActions(props: { readOnly: boolean; customization?: StudioBaseCustomization | null }) {
   render(
     <StudioSaveHarness><MemoryRouter initialEntries={[`/studio/${BASE}/data`]}>
-      <DataPillar packageId={BASE} readOnly={props.readOnly} customization={props.customization ?? null} />
+      <DataPillar objectName={OBJECT} packageId={BASE} readOnly={props.readOnly} customization={props.customization ?? null} />
     </MemoryRouter></StudioSaveHarness>,
   );
   // The first match is the flat tab (the passthrough menu draws a second).

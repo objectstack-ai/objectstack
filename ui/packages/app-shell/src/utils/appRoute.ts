@@ -292,16 +292,12 @@ export function appStudioSurfacePath(
 }
 
 /**
- * Deep-link from a running app straight to a specific **object's** design
- * surface in Studio's Data pillar — e.g. viewing the `account` records page
- * opens `/studio/:packageId/data?surface=object:account`, which the Data
- * pillar's `?surface=` restore honors (see `DataPillar` in
- * `StudioDesignSurface`). Same admin/package guards as
- * {@link appStudioDesignPath}; returns null when the object name is missing so
- * the caller can fall back to the plain Data tab.
- *
- * The `surface` param value is `object:<name>`; only the name is
- * percent-encoded (`object` is a fixed keyword).
+ * Deep-link from a running app straight to a specific **object's** designer
+ * in Studio — e.g. viewing the `account` records page opens
+ * `/studio/:packageId/metadata/object/account`, the object designer
+ * full-screen on its own address (objectstack#36904). Same admin/package
+ * guards as {@link appStudioDesignPath}; returns null when the object name is
+ * missing so the caller can fall back.
  */
 export function appStudioObjectPath(
   app: AppRouteLike | null | undefined,
@@ -312,9 +308,7 @@ export function appStudioObjectPath(
   const packageId = studioPackageId(app);
   if (!packageId) return null;
   if (!objectName) return null;
-  // The `'name'` spelling (`object:` as written, the name encoded), as this
-  // bridge has always spelled it.
-  return studioItemPath(packageId, 'object', objectName, { spelling: 'name' });
+  return studioItemPath(packageId, 'object', objectName);
 }
 
 /**

@@ -289,6 +289,31 @@ describe('backfillUnitCodes — free text stored before the field was a unit cod
     expect(d.finds.uom_material ?? 0).toBe(0);
   });
 
+  it('a mapping entry whose key the rows store as a unit code, and that no row used, is named in the report', async () => {
+    const report = await run({ mapping: { ...MAPPING, KGM: 'LBR' } });
+    expect(report.values.find((v) => v.value === 'KGM')).toEqual({ value: 'KGM', rows: 1, disposition: 'member', unusedEntry: 'LBR' });
+    // The entries rows did use name nothing.
+    expect(report.values.filter((v) => v.unusedEntry !== undefined).map((v) => v.value)).toEqual(['KGM']);
+    expect(formatUnitCodeBackfillReport(report)).toContain(
+      '⚠ The mapping entry "KGM" → LBR was not used: the rows holding "KGM" store it as a unit code, which is never rewritten.');
+    expect(formatUnitCodeBackfillReport(await run({ mapping: MAPPING })).some((l) => l.includes('was not used'))).toBe(false);
+  });
+
+  it('an apply run over a walk the cap cut short writes the rows examined, and the report says the rest were not judged', async () => {
+    // The cap stops after m1 and m2, both mapped: the unmatched 'kg ' and 'lbs' rows past it are not seen.
+    const report = await run({ mapping: { kg: 'KGM', '公斤': 'KGM' }, apply: true, maxRecords: 2 });
+    expect(report).toMatchObject({ scannedRecords: 2, mapped: 2, written: 2, unmatched: 0, truncated: true, applied: true });
+    expect(['m1', 'm2', 'm4', 'm8'].map(uom)).toEqual(['KGM', 'KGM', 'kg ', 'lbs']);
+    expect(unitCodeBackfillComplete(report)).toBe(false);
+    const lines = formatUnitCodeBackfillReport(report);
+    expect(lines).toContain('⚠ Walk incomplete — some rows were not examined; re-run without the cap to finish.');
+    expect(lines).toContain('  The rows past the cap were not judged: any of them may hold a value with no mapping entry, which this ' +
+      'run neither named nor refused, and it wrote the rows examined only.');
+    // Without the cap, the same apply run is refused over the values it now sees.
+    const err = await refusal(run({ mapping: { kg: 'KGM', '公斤': 'KGM' }, apply: true }));
+    expect(err).toMatchObject({ code: 'VALIDATION_ERROR', status: 400, field: 'mapping' });
+  });
+
   it('the dry-run report names each value, what it would write, and claims no row or table', async () => {
     const report = await run({ mapping: MAPPING });
     expect(formatUnitCodeBackfillReport(report)).toEqual([

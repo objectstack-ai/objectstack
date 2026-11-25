@@ -55,7 +55,7 @@ describe('the menu groups (objectstack#36899, ADR-0084 amended)', () => {
     expect(entry('type:view').count).toBeUndefined();
     // ADR-0146 D1 — runtime configuration is Setup's.
     expect(entry('type:datasource').to).toBe('/apps/setup/metadata/datasource');
-    expect(entry('orgFlows').to).toBe('/studio/~org/automations');
+    expect(entry('orgFlows').to).toBe('/studio/~org/metadata/flow?source=runtime');
     expect(entry('diagnostics').to).toBe(`/studio/${PKG}/metadata/_diagnostics`);
     // objectstack#36905 — the overview's own route.
     expect(entry('owd').to).toBe(`/studio/${PKG}/owd`);
@@ -98,8 +98,9 @@ describe('the current entry (aria-current)', () => {
   });
 
   it('a pillar page is the type it designs; the OWD overview\'s route is that entry', () => {
-    expect(current(PKG, `/studio/${PKG}/data?surface=object:account`)).toBe('type:object');
-    expect(current(PKG, `/studio/${PKG}/automations`)).toBe('type:flow');
+    // objectstack#36904, objectstack#36903 — the object and flow designers are area pages: their type.
+    expect(current(PKG, `/studio/${PKG}/metadata/object/account`)).toBe('type:object');
+    expect(current(PKG, `/studio/${PKG}/metadata/flow/notify`)).toBe('type:flow');
     // objectstack#36905 — a permission set and the overview have left the Access pillar.
     expect(current(PKG, `/studio/${PKG}/metadata/permission/admin`)).toBe('type:permission');
     expect(current(PKG, `/studio/${PKG}/owd`)).toBe('owd');
@@ -109,7 +110,8 @@ describe('the current entry (aria-current)', () => {
   });
 
   it('the package-less scope is its flows; the cross-package leg\'s root is the environment catalog', () => {
-    expect(current('~org', '/studio/~org/automations')).toBe('orgFlows');
+    expect(current('~org', '/studio/~org/metadata/flow')).toBe('orgFlows');
+    expect(current('~org', '/studio/~org/metadata/flow/f')).toBe('orgFlows');
     expect(current('~all', '/studio/~all/metadata')).toBe('environment');
     expect(current('~all', '/studio/~all/metadata/position')).toBe('type:position');
   });

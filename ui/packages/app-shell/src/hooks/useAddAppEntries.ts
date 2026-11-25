@@ -14,10 +14,8 @@ import { Hammer, LayoutGrid, Store } from 'lucide-react';
 import { useObjectTranslation } from '@object-ui/i18n';
 import { useWorkspaceAdminStatus } from '@object-ui/auth';
 import { useCanAuthorMetadata } from './useCanAuthorMetadata.js';
-import { useAiSurfaceEnabled } from './useAiSurface.js';
 import { isAiStudioEnabled, isMarketplaceEnabled } from '../runtime-config.js';
-import { STUDIO_NEW_PACKAGE_PATH } from '../views/studio-design/studioNewPackage.js';
-import { studioLandingPath } from '../views/studio-design/studioAddress.js';
+import { useNewPackageDoorPath } from './useNewPackageDoorPath.js';
 
 /** The marketplace, where templates and packages are installed from. */
 const MARKETPLACE_PATH = '/apps/setup/system/marketplace';
@@ -42,23 +40,31 @@ export function useMayAddApp(): boolean {
 }
 
 /**
- * The 「Add app」 choices: building with AI where the deployment offers AI
- * authoring and its agent catalog serves the build agent (objectstack#36969:
- * not merely any agent: where in-app building is closed the catalog keeps
- * `ask` and drops `build`), else a new package in Studio; templates and
- * the marketplace where a marketplace is mounted. Read only for a viewer
- * {@link useMayAddApp} lets in, so no one else pays the agent-catalog read.
+ * The 「Add app」 choices: 「新建空白应用」 / "New blank app" (a new package,
+ * opened in Studio once created; `useNewPackageDoorPath` sends an author who
+ * may not open Setup → Packages to the "All metadata" area) wherever the deployment offers metadata
+ * authoring, whether or not its agent catalog serves the build agent; templates
+ * and the marketplace where a marketplace is mounted.
+ *
+ * objectstack#36908 — the maintainer ruled 「Build with AI」 off this menu
+ * (ruling record 7153161067) and the blank-app entry always shown, agent or no
+ * agent (ruling record 7153400210). It stays inside the authoring gate: where
+ * `features.aiStudio` is `false` the runtime offers no metadata authoring at
+ * all, and a viewer {@link useMayAddApp} admits there is offered the
+ * marketplace's two entries instead, so the list is never empty for an
+ * admitted viewer. A host still draws no 「Add app」 for an empty list.
  */
 export function useAddAppEntries(): AddAppEntry[] {
   const { t } = useObjectTranslation();
-  const { buildServed } = useAiSurfaceEnabled();
+  const newPackagePath = useNewPackageDoorPath();
   const entries: AddAppEntry[] = [];
   if (isAiStudioEnabled()) {
-    entries.push(
-      buildServed
-        ? { key: 'build-with-ai', to: studioLandingPath(), label: t('home.buildWithAI', { defaultValue: 'Build with AI' }), icon: Hammer }
-        : { key: 'new-in-studio', to: STUDIO_NEW_PACKAGE_PATH, label: t('home.build.inStudio', { defaultValue: 'New in Studio' }), icon: Hammer },
-    );
+    entries.push({
+      key: 'new-in-studio',
+      to: newPackagePath,
+      label: t('home.build.inStudio', { defaultValue: 'New blank app' }),
+      icon: Hammer,
+    });
   }
   if (isMarketplaceEnabled()) {
     entries.push(

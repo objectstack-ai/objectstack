@@ -1,6 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { defineForm } from './view.zod';
+import { defaultPeriodOptions } from './default-period-options';
 
 export const dashboardForm = defineForm({
   schemaId: 'dashboard',
@@ -100,7 +101,27 @@ export const dashboardForm = defineForm({
       collapsible: true,
       collapsed: true,
       fields: [
-        { field: 'dateRange', type: 'composite', helpText: 'The period the dashboard opens with, and whether viewers may pick their own dates.' },
+        {
+          field: 'dateRange',
+          type: 'composite',
+          helpText: 'The period the dashboard opens with, and whether viewers may pick their own dates.',
+          // The children are ENUMERATED, all three (the console prefers a
+          // declared `fields` list over the schema-derived one), so the
+          // Default Period row can name its choices: with no options a select
+          // names them by their stored values. The options are the report
+          // form's (`defaultPeriodOptions`), so both forms name a period alike.
+          fields: [
+            { field: 'field', label: 'Date Field', helpText: 'The date field the period filters on. Leave it empty to use the creation date.' },
+            {
+              field: 'defaultRange',
+              type: 'select',
+              label: 'Default Period',
+              helpText: 'The period the dashboard opens with.',
+              options: defaultPeriodOptions(),
+            },
+            { field: 'allowCustomRange', label: 'Allow Custom Range', helpText: 'Let viewers pick their own start and end dates.' },
+          ],
+        },
         {
           field: 'globalFilters',
           type: 'repeater',

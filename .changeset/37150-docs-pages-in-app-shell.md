@@ -13,4 +13,4 @@ From 768 px up every app page lost the top bar and keeps the app menu, search, n
 
 The documentation still has one navigation, its own: the sidebar's body carries the docs column (「← Back to APP」, every book of the app with the current one open, a title filter and 「All documentation」) in place of the app's menu. The reader no longer draws that column inside the page there. The app's other docs pages (its docs index, a book with no articles, a book or doc that is not found) carry the same column in the sidebar instead of a back link above the page.
 
-Unchanged: every docs address resolves to the same page as before, and a phone keeps its app bar, no sidebar and the in-page column. The `/docs` portal is not changed by this release. Nothing to migrate.
+Unchanged: every docs address resolves to the same page as before, and a phone keeps its app bar, no sidebar and the in-page column. The `/docs` portal draws in the same frame from 768 px up too, in a variant that belongs to no app (its own entry describes it). Nothing to migrate.

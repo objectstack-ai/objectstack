@@ -25,8 +25,15 @@ export default defineConfig({
       { find: /^@objectstack\/core\/logger$/, replacement: path.resolve(__dirname, '../../core/src/logger.ts') },
       { find: '@objectstack/core/egress', replacement: path.resolve(__dirname, '../../core/src/egress.ts') },
       { find: '@objectstack/core', replacement: path.resolve(__dirname, '../../core/src/index.ts') },
+      // `./testing` (the adapter contract suite) BEFORE the bare package, and both
+      // anchored: a string `find` matches by PREFIX, so the bare entry would
+      // resolve the subpath to `…/src/index.ts/testing` — ENOTDIR at run time.
       {
-        find: '@objectstack/service-knowledge',
+        find: /^@objectstack\/service-knowledge\/testing$/,
+        replacement: path.resolve(__dirname, '../../services/service-knowledge/src/testing.ts'),
+      },
+      {
+        find: /^@objectstack\/service-knowledge$/,
         replacement: path.resolve(__dirname, '../../services/service-knowledge/src/index.ts'),
       },
       // #9457: ONE anchored rule for every `@objectstack/spec` namespace, in place

@@ -37,7 +37,13 @@ export interface RecordContextDoor {
    * by `os validate`, and silent here).
    */
   publishedObjectDefinitionOf(objectName: string): Promise<Record<string, unknown> | null>;
-  /** The published context packs (`ai_context` items). */
+  /**
+   * The published context packs (`ai_context` items), each the authored pack,
+   * not the serving envelope: the door removes the read path's decorations
+   * (`stripReadDecorations`, `@objectstack/spec/kernel`) before handing the
+   * listing over, because the executor parses every row with the closed
+   * `AiContextSchema` and a decorated row is no pack.
+   */
   listContextPacks(): Promise<readonly unknown[]>;
   /** The record, read as the caller; `null` (or a throw) when the caller cannot read it. */
   get(objectName: string, id: string): Promise<unknown>;
@@ -59,4 +65,13 @@ export interface RecordContextDoor {
   diagnoseDelegation?(objectName: string): Promise<{ narrowed: boolean; statement?: string } | undefined>;
   /** The caller's locale ladder for the executor's sentences. OPTIONAL: `en`. */
   userTextLocales?(): Promise<readonly string[]>;
+  /**
+   * [ADR-0150 D6, addendum 2026-11-25] The manifest namespace of the
+   * installed package `packageId` names — what a package's pack is spelt by
+   * where its name crosses the AI face (`NS-NAME`, `deriveAiFaceName`): the
+   * `context` argument and the candidates a refusal lists. `undefined` for an
+   * id the host cannot place. OPTIONAL: a door without it spells every pack by
+   * its bare name, as an environment pack is spelt.
+   */
+  packageNamespace?(packageId: string): string | undefined | Promise<string | undefined>;
 }

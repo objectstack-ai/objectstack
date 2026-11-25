@@ -96,7 +96,7 @@ vi.mock('@object-ui/app-shell', async (importOriginal) => {
     // the chat drawer on the address); the probe reports what it was routed with.
     AiAddressRedirect: AiChatPageProbe,
     StudioDesignSurface: stub('studio-design-surface'),
-    BuilderLanding: stub('builder-landing'),
+    StudioEntryRedirect: stub('studio-entry'),
     getProductName: () => 'ObjectOS',
     getFaviconUrl: () => '',
   };

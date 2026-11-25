@@ -280,6 +280,21 @@ export const LogTimeAction = defineAction({
 });
 
 /**
+ * ask_ai — open the in-app assistant focused on this task (ADR-0160 D7). It
+ * takes no `target`: what the assistant reads about the record is chosen by
+ * the record's context pack, not by the action. The console draws it only
+ * where its assistant honours a focus, and sends nothing on a click.
+ */
+export const AskAboutTaskAction = defineAction({
+  name: 'showcase_ask_about_task',
+  label: 'Ask AI',
+  icon: 'sparkles',
+  objectName: task,
+  type: 'ask_ai',
+  locations: ['record_header'],
+});
+
+/**
  * headless command action — "New Task" (`locations: []`).
  *
  * `type: 'form'` + an `<object>.<view>` FORM-view target, structurally
@@ -573,6 +588,7 @@ export const allActions = [
   RecalcEstimateAction,
   RecalcSelectionAction,
   LogTimeAction,
+  AskAboutTaskAction,
   NewTaskAction,
   SubmitForSignoffAction,
   GenerateInvoicePdfAction,

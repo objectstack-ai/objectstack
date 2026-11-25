@@ -78,6 +78,9 @@ const zhHant = {
     autofillNoCurrency: '未填入{{field}}：所選金額為 {{amount}}，但此處尚未選擇幣種。請先選擇幣種，再填寫{{field}}。',
     autofillCurrencyUnread: '未填入{{field}}：所選金額為 {{amount}}，但無法讀取此處的幣種。請先確認幣種，再填寫{{field}}。',
     autofillKept: '{{field}}仍保留原來的值。',
+    autofillNowSameCurrency: '選取時未填入{{field}}。記錄現已改為 {{to}}：重新選取即可填入 {{amount}}。',
+    autofillNowSameCurrencyHeld: '選取時未填入{{field}}，且仍保留原來的值。記錄現已改為 {{to}}：請先清空{{field}}，再重新選取即可填入 {{amount}}。',
+    autofillCopiedUnder: '{{field}}按 {{amount}} 帶入，但記錄現已改為 {{to}}。如需調整，請按 {{to}} 填寫{{field}}。',
   },
   common: {
     // objectui#13461 — a disclosure toggle's name (the tree-view node toggle).
@@ -654,6 +657,7 @@ const zhHant = {
       needsWholeRows:
         '分組需要全部記錄，但此表格只收到其中一頁，因此無法統計分組。請傳入全部記錄，或讓表格從實現了 queryGroupHeaders 的資料來源獲取記錄。',
       draftOnly: '未按 {{fields}} 分組：它僅存在於草稿中，釋出後才生效。',
+      moreGroupsNotLoaded: '更多分組未載入：此檢視的分組數超過伺服器單次讀取返回的數量，因此只列出了部分分組。',
     },
     // objectui#4024 — column-footer aggregate prefixes, keyed by the spec's
     // `ColumnSummary` vocabulary. `pattern` owns the label/value join so this
@@ -1854,6 +1858,8 @@ const zhHant = {
       settings: '報表設定',
       pendingDraft: '這張報表有一份還沒釋出的修改。先在上方釋出或丟棄它，再儲存。',
       nameTaken: '由這個名稱生成的標識都已被佔用。請給報表換個名稱再儲存。',
+      // objectstack#36906 — a report made from Studio's report list that could not be saved in the app's package.
+      savedOutsideApp: '這份報表沒有存進應用的包：此處無法使用應用的定製包，所以 Studio 列表裡看不到它。',
       adminOnlyTitle: '只有系統管理員能搭建報表',
       adminOnly: '報表對工作區裡所有人生效，所以由系統管理員搭建。',
       designModeOnTitle: '請先完成佈局設計',
@@ -1902,6 +1908,12 @@ const zhHant = {
         grouping: '選一個分組欄位',
       },
     },
+  },
+  // objectstack#36906 — the × of an app page opened from a Studio list.
+  studioReturn: {
+    close: '返回 Studio',
+    closeLabel: '關閉並返回 Studio 列表',
+    leaveConfirm: '不儲存就離開嗎？未儲存的修改將會丟失。',
   },
   dashboard: {
     total: '總計',
@@ -3902,7 +3914,7 @@ const zhHant = {
     build: {
       title: '構建應用',
       noCapability: '本系統不提供構建應用功能 — 它需要「管理中繼資料」權限,而你的賬號沒有該權限。',
-      inStudio: '在 Studio 中新建',
+      inStudio: '新建空白應用',
     },
     template: {
       title: '從模板開始',
@@ -4936,6 +4948,7 @@ const zhHant = {
     tool: {
       aggregate_data: '彙總相關資料',
       get_record: '讀取這條記錄',
+      get_record_context: '讀取記錄資料',
       list_datasets: '檢視指標',
       query_data: '查詢所需資料',
       query_dataset: '按指標查詢',
@@ -5405,7 +5418,12 @@ const zhHant = {
     bulkRejected: '已駁回 {{count}} 條請求',
     bulkRejected_one: '已駁回 {{count}} 條請求',
     bulkRejected_other: '已駁回 {{count}} 條請求',
-    bulkPartial: '{{ok}} 條成功，{{fail}} 條失敗：{{which}}',
+    bulkPartialSummary: '{{ok}} 條成功，{{fail}} 條失敗',
+    bulkFailureLine: '{{title}}：{{reason}}',
+    bulkFailuresShowAll: '檢視全部（{{n}}）',
+    bulkFailuresTitle: '未處理：{{n}} 條',
+    bulkFailuresBody: '以下請求保持原狀，每條都附有原因。',
+    close: '關閉',
     rejectOneTitle: '駁回“{{title}}”？',
     rejectOneBody: '將駁回該請求並通知申請人。',
     rejectTitle: '駁回該請求？',

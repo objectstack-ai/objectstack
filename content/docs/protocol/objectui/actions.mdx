@@ -41,7 +41,7 @@ refreshAfter: true
 
 ## Action Types
 
-The `type` field selects how an action is dispatched. The complete enum is **`script`, `url`, `modal`, `flow`, `api`, `form`** — there are no other types. `type` defaults to `script` when omitted.
+The `type` field selects how an action is dispatched. The complete enum is **`script`, `url`, `modal`, `flow`, `api`, `form`, `ask_ai`** — there are no other types. `type` defaults to `script` when omitted.
 
 | Type | Behavior | `target` required? |
 | --- | --- | --- |
@@ -51,6 +51,7 @@ The `type` field selects how an action is dispatched. The complete enum is **`sc
 | `modal` | Open a modal/page by name. | Yes |
 | `api` | Call an API endpoint (`method` defaults to `POST`). | Yes |
 | `form` | Open a FormView by name, routed to `/_console/forms/:name` **inside the console shell**; the submit lands on the created record. | Yes |
+| `ask_ai` | Open the console's in-app assistant on a fresh conversation focused on the one record the action runs on (ADR-0160 D7); a conversation the assistant showed before keeps its own focus. Sends no message and calls no server. It is not drawn with no in-app assistant, nor where no single record is held: never in a bulk bar or a related list's toolbar, and in a list toolbar only while exactly one row is selected. A dashboard header refuses it. Never an AI tool: `ai.exposed: true` beside it is refused. | No — a `target` is refused |
 
 The one thing that is not a type: the **declarative single-record field write**. It is spelled `operation: 'update'` + `patch` — the same words a list view's `bulkActionDefs` uses for the bulk form — and it rides the default `script` route: the platform action route performs the write on the data plane **as the caller** (never system-elevated), so the caller's permissions, the object's hooks and its validations fire exactly as for a user edit. Beside `operation: 'update'` an action carries no executor binding of its own — `target`, `body`, `method`, `bodyExtra` and any other explicit `type` are refused — and `patch` is merged under whatever the `params` dialog collects, so a fixed value can be declared without exposing it in the dialog. `undoable` has its anchor here: the capture is the prior value of every field the action writes — the merged bag, `patch` under `params`, not `patch` alone.
 
@@ -224,7 +225,7 @@ interface Action {
   order?: number;               // Sort order within a location group (lower = higher)
 
   // Behavior
-  type?: 'script' | 'url' | 'modal' | 'flow' | 'api' | 'form'; // default 'script'
+  type?: 'script' | 'url' | 'modal' | 'flow' | 'api' | 'form' | 'ask_ai'; // default 'script'
   target?: string;              // URL / script / flow / modal / endpoint
   operation?: 'update';         // Declarative single-record field write (rides the default script route)
   patch?: Record<string, unknown>; // Static field values for operation: 'update', merged under params

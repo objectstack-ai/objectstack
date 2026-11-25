@@ -4,7 +4,7 @@
  * PackageFormDialog — ONE modal for creating, editing, and viewing a package,
  * rendered from the spec-derived manifest form (`package-schema`) through the
  * generic {@link SchemaForm}. It replaces the three hand-rolled package forms
- * (CreatePackageDialog / EditPackageDialog / the BuilderLanding inline form),
+ * (CreatePackageDialog / EditPackageDialog / the old Studio home's inline form),
  * each of which carried its own field list and id-validation regex — a package
  * created on one surface was rejected by another.
  *

@@ -69,6 +69,9 @@ const ja = {
     autofillNoCurrency: '{{field}}は入力されませんでした。選択した金額は {{amount}} ですが、ここではまだ通貨が選択されていません。通貨を選択してから{{field}}を入力してください。',
     autofillCurrencyUnread: '{{field}}は入力されませんでした。選択した金額は {{amount}} ですが、ここでの通貨を読み取れませんでした。通貨を確認してから{{field}}を入力してください。',
     autofillKept: '{{field}}は以前の値のままです。',
+    autofillNowSameCurrency: '選択時に{{field}}は入力されませんでした。レコードは現在 {{to}} です。もう一度選択すると {{amount}} が入力されます。',
+    autofillNowSameCurrencyHeld: '選択時に{{field}}は入力されず、以前の値のままです。レコードは現在 {{to}} です。{{field}}を空にしてからもう一度選択すると {{amount}} が入力されます。',
+    autofillCopiedUnder: '{{field}}は {{amount}} として入力されましたが、レコードは現在 {{to}} です。必要に応じて {{to}} で{{field}}を入力してください。',
   },
   common: {
     // objectui#13461 — a disclosure toggle's name (the tree-view node toggle).
@@ -678,6 +681,7 @@ const ja = {
       needsWholeRows:
         "グループ化にはすべてのレコードが必要ですが、このグリッドにはその一部のページしか渡されていないため、グループの件数を数えられません。すべてのレコードを渡すか、queryGroupHeaders を実装したデータソースからグリッドに読み込ませてください。",
       draftOnly: "{{fields}} ではグループ化されていません：公開するまで下書きにのみ存在します。",
+      moreGroupsNotLoaded: "一部のグループは読み込まれていません：このビューのグループ数はサーバーが 1 回の読み取りで返す数を超えているため、一部のみ表示しています。",
     },
     // objectui#4024 — column-footer aggregate prefixes, keyed by the spec's
     // `ColumnSummary` vocabulary. `pattern` owns the label/value join so this
@@ -1772,6 +1776,12 @@ const ja = {
     unconfigured: {
       noCategoryAxis: "チャートのカテゴリ軸が必要です — オブジェクト連携チャートは軸を推測しません。次のいずれかを宣言してください：",
     },
+  },
+  // objectstack#36906 — the × of an app page opened from a Studio list.
+  studioReturn: {
+    close: 'Studio に戻る',
+    closeLabel: '閉じて Studio の一覧に戻る',
+    leaveConfirm: '保存せずに移動しますか？保存していない変更は失われます。',
   },
   dashboard: {
     // objectui#7063 — the DEFAULT empty state every dashboard widget renders
@@ -3728,7 +3738,7 @@ const ja = {
     build: {
       title: "アプリを作る",
       noCapability: "このシステムではアプリの作成はできません — 「メタデータ管理」権限が必要ですが、お使いのアカウントにはありません。",
-      inStudio: "Studio で新規作成",
+      inStudio: "空のアプリを新規作成",
     },
     template: {
       title: "テンプレートから始める",
@@ -4136,6 +4146,8 @@ const ja = {
       settings: "レポート設定",
       pendingDraft: "このレポートには未公開の変更があります。上で公開または破棄してから保存してください。",
       nameTaken: "この名前から作れる識別子はすべて使用済みです。レポートに別の名前を付けてから保存してください。",
+      // objectstack#36906 — a report made from Studio's report list that could not be saved in the app's package.
+      savedOutsideApp: "アプリのカスタマイズパッケージをここでは使用できないため、このレポートはアプリのパッケージの外に保存されました。そのため Studio の一覧には表示されません。",
       adminOnlyTitle: "レポートを作成できるのはワークスペース管理者のみです",
       adminOnly: "レポートはワークスペースの全員に共有されるため、管理者が作成します。",
       designModeOnTitle: "先にレイアウトのデザインを終えてください",
@@ -4677,6 +4689,7 @@ const ja = {
     tool: {
       aggregate_data: "関連データを集計する",
       get_record: "このレコードを読み込む",
+      get_record_context: "このレコードの資料を読む",
       list_datasets: "利用できる指標を確認する",
       query_data: "必要なデータを照会する",
       query_dataset: "指標で照会する",
@@ -5145,7 +5158,12 @@ const ja = {
     bulkRejected: '{{count}} 件を却下しました',
     bulkRejected_one: '{{count}} 件を却下しました',
     bulkRejected_other: '{{count}} 件を却下しました',
-    bulkPartial: '{{ok}} 件成功、{{fail}} 件失敗：{{which}}',
+    bulkPartialSummary: '{{ok}} 件成功、{{fail}} 件失敗',
+    bulkFailureLine: '{{title}}：{{reason}}',
+    bulkFailuresShowAll: 'すべて表示（{{n}}）',
+    bulkFailuresTitle: '未処理：{{n}} 件',
+    bulkFailuresBody: '以下のリクエストは変更されていません。それぞれに理由が表示されています。',
+    close: '閉じる',
     rejectOneTitle: '「{{title}}」を却下しますか？',
     rejectOneBody: 'リクエストを却下し、申請者に通知します。',
     rejectTitle: 'このリクエストを却下しますか？',

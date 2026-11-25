@@ -762,6 +762,11 @@ function DefaultMetadataList({ type, appName }: { type: string; appName?: string
       : {}),
   };
   const filtered = applyListState(scopedItems, listState, rowReader, locale);
+  // objectstack#36903 — a host that says what its empty list means (the
+  // package-less scope, whose list is its source filter's narrowing of the
+  // environment's rows) reads an unsearched, empty list as empty, not as a
+  // search with no match.
+  const hintedEmpty = !!host?.emptyListHint && !query.trim() && filtered.length === 0;
   // The list context every row link carries to its detail (decision 10).
   const listContext = listContextQuery(listState);
 
@@ -1224,6 +1229,10 @@ function DefaultMetadataList({ type, appName }: { type: string; appName?: string
             packageId={host.packageId}
             inPair={createInPair}
             locale={locale}
+            onOpenExisting={(path) => {
+              setCreateOpen(false);
+              navigate(path);
+            }}
             onCreated={({ name, packageId }) => {
               setCreateOpen(false);
               refresh();
@@ -1445,12 +1454,13 @@ function DefaultMetadataList({ type, appName }: { type: string; appName?: string
         {!loading && !error && !packagesPending && (envScope || !!host || (projectPackages?.length ?? 0) > 0) && filtered.length === 0 && (
           <Empty>
             <EmptyTitle>
-              {scopedItems.length === 0
+              {scopedItems.length === 0 || hintedEmpty
                 ? tFormat('engine.list.emptyType', locale, { type: typeLabel })
                 : tFormat('engine.list.emptyQuery', locale, { query })}
             </EmptyTitle>
             <EmptyDescription>
-              {config.emptyStateHint ??
+              {(scopedItems.length === 0 || hintedEmpty ? host?.emptyListHint : undefined) ??
+                config.emptyStateHint ??
                 (canCreate
                   ? tFormat('engine.list.createHint', locale, { type: typeLabel })
                   : t('engine.list.readOnlyHint', locale))}
