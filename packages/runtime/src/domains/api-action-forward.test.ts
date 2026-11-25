@@ -1901,7 +1901,7 @@ describe('[#37273] the forward-unavailable 503 follows the request\'s language',
             `Action '${BAN_LEAD.name}' is a same-origin \`type: 'api'\` action whose \`target\` ('${BAN_LEAD.target}') this door forwards to in-process, `
             + 'but this deployment\'s HTTP server exposes no in-process request path (IHttpServer.getRawApp). '
             + 'Operator: run an HTTP server plugin that implements getRawApp; the action is not dispatched around the door.';
-        for (const headers of [{ 'accept-language': 'en-US,en;q=0.9' }, {}]) {
+        for (const headers of [{ 'accept-language': 'en-US,en;q=0.9' }, {}] as Array<Record<string, string>>) {
             const res = await viaWire(headers);
             expect({ status: statusOf(res), code: codeOf(res) }, JSON.stringify(headers)).toEqual({ status: 503, code: 'SERVICE_UNAVAILABLE' });
             expect(messageOf(res), JSON.stringify(headers)).toBe(english);

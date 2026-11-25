@@ -403,7 +403,7 @@ describe('[#37273] the print door\'s 501 follows the request\'s language', () =>
     });
 
     it.each(SITES)('$name: the control — an English or absent accept-language keeps today\'s English, byte for byte', async (site) => {
-        for (const headers of [{ 'accept-language': 'en-US,en;q=0.9' }, {}]) {
+        for (const headers of [{ 'accept-language': 'en-US,en;q=0.9' }, {}] as Array<Record<string, string>>) {
             const { dispatcher } = makeDispatcher(site.services);
             const result = await dispatcher.dispatch(method, path, {}, {}, withHeaders(headers));
             expect(envelope(result), JSON.stringify(headers)).toEqual({ status: 501, code: 'NOT_IMPLEMENTED' });
