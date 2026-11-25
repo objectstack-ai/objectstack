@@ -264,6 +264,7 @@
     "VectorStoreProviderSchema": "src/ai/embedding.zod.ts#VectorStoreProviderSchema (const)",
     "VectorStoreSchema": "src/ai/embedding.zod.ts#VectorStoreSchema (const)",
     "agentForm": "src/ai/agent.form.ts#agentForm (const)",
+    "aiContextForm": "src/ai/ai-context.form.ts#aiContextForm (const)",
     "defineAgent": "src/ai/agent.zod.ts#defineAgent (function)",
     "defineSkill": "src/ai/skill.zod.ts#defineSkill (function)",
     "defineSolutionBlueprint": "src/ai/solution-blueprint.zod.ts#defineSolutionBlueprint (function)",

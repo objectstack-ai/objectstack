@@ -267,6 +267,7 @@
     "VectorStoreProviderSchema (const)",
     "VectorStoreSchema (const)",
     "agentForm (const)",
+    "aiContextForm (const)",
     "defineAgent (function)",
     "defineSkill (function)",
     "defineSolutionBlueprint (function)",
