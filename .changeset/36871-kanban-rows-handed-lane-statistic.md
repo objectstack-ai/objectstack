@@ -4,7 +4,7 @@
 '@objectstack/spec': patch
 ---
 
-fix(kanban): a list view board whose lanes come from a lookup field shows each lane's whole statistic, not one page's
+fix(kanban): a list view board whose lanes come from a lookup field shows each lane's whole sum, average, minimum and maximum, not one page's
 
 Clause-②: yes (widening)
 Metadata-protocol: none

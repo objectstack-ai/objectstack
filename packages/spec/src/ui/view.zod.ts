@@ -2387,9 +2387,10 @@ export const EmptyStateSchema = lazySchema(() => strictObject({
  * objectstack#36871: the list view hands a board whose lanes it cannot know
  * before the query (lanes over a lookup field) the page of records it fetched
  * AND the query of that page, so that board asks the same read and its four
- * aggregates cover every record of each lane too. Only a board handed its
- * cards without their query (records handed in whole) adds up a `sum` over
- * those cards, and draws none of the other three.
+ * aggregates cover every record of each lane too. Its `count` counts the
+ * page it was handed, as its lane header does. Only a board handed its cards
+ * without their query (records handed in whole) adds up a `sum` over those
+ * cards, and draws none of the other three.
  */
 export const KanbanLaneSummarySchema = lazySchema(() => z.discriminatedUnion('type', [
   strictObject({
@@ -2515,8 +2516,9 @@ export const KanbanConfigSchema = lazySchema(() => strictObject({
     + '`{ type: \'sum\', field: \'amount\' }` totals a number field over all of the lane records, '
     + '`avg` averages it, and `min` / `max` show its smallest / largest value, each computed by the query '
     + '(a field the reader may not read shows no figure); `{ type: \'none\' }` shows nothing. '
-    + 'A list view board whose lanes come from a lookup field draws one page of records, and its '
-    + 'statistic still covers every record of each lane. Only on a board handed its records whole, '
+    + 'A list view board whose lanes come from a lookup field draws one page of records: its `sum`, '
+    + '`avg`, `min` and `max` still cover every record of each lane, and its `count` counts that page. '
+    + 'Only on a board handed its records whole, '
     + 'without their query, does `sum` total the records handed in and the other three show nothing. '
     + 'Takes precedence over summarizeField. Omit to keep summarizeField\'s sum, or no statistic without it.',
   ),
