@@ -22,7 +22,7 @@
 import '@testing-library/jest-dom/vitest';
 import { describe, it, expect, vi, beforeEach, afterEach, afterAll } from 'vitest';
 import React from 'react';
-import { render, cleanup, waitFor, screen, within } from '@testing-library/react';
+import { render, cleanup, waitFor, screen, within, fireEvent } from '@testing-library/react';
 import { MemoryRouter, Routes, Route } from 'react-router-dom';
 import { registerAllFields } from '@object-ui/fields';
 
@@ -112,15 +112,66 @@ const AUTHORED = {
   },
 };
 const PLAIN = { name: 'crm_note', label: 'Note', fields: FIELDS, fieldGroups: FIELD_GROUPS };
-const OBJECTS = [AUTHORED, PLAIN];
+
+// objectstack#37246 — a child whose relationship lookup is scoped by the
+// child's own account (`dependsOn`), with and without a `lookupAutofill` that
+// fills that account from the parent.
+const ACCOUNT = { name: 'crm_account', label: 'Account', fields: { name: { type: 'text', label: 'Name' } } };
+const ORDER = {
+  name: 'crm_sales_order',
+  label: 'Sales Order',
+  fields: {
+    name: { type: 'text', label: 'Name' },
+    crm_account: { type: 'lookup', reference: 'crm_account', label: 'Account' },
+  },
+};
+const OPPORTUNITY = { ...ORDER, name: 'crm_opportunity', label: 'Opportunity' };
+const MILESTONE = {
+  name: 'crm_billing_milestone',
+  label: 'Billing Milestone',
+  fields: {
+    name: { type: 'text', label: 'Name' },
+    crm_sales_order: {
+      type: 'lookup',
+      reference: 'crm_sales_order',
+      label: 'Order',
+      dependsOn: ['crm_account'],
+      lookupAutofill: [{ target: 'crm_account', source: 'crm_account' }],
+    },
+    crm_account: { type: 'lookup', reference: 'crm_account', label: 'Account' },
+  },
+};
+const CONTRACT = {
+  name: 'crm_contract',
+  label: 'Contract',
+  fields: {
+    name: { type: 'text', label: 'Name' },
+    crm_account: { type: 'lookup', reference: 'crm_account', label: 'Account' },
+    crm_opportunity: { type: 'lookup', reference: 'crm_opportunity', label: 'Related Opportunity', dependsOn: ['crm_account'] },
+  },
+};
+const OBJECTS = [AUTHORED, PLAIN, ACCOUNT, ORDER, OPPORTUNITY, MILESTONE, CONTRACT];
+
+/** The records the #37246 lookups read for their labels and their fill. */
+const RECORDS: Record<string, Record<string, Record<string, unknown>>> = {
+  crm_account: { 'acc-1': { id: 'acc-1', name: 'Acme' } },
+  crm_sales_order: { 'so-1': { id: 'so-1', name: 'SO-0001', crm_account: 'acc-1' } },
+  crm_opportunity: { 'opp-1': { id: 'opp-1', name: 'Big Deal', crm_account: 'acc-1' } },
+};
 
 const dataSourceStub = {
   onConnectionStateChange: () => () => {},
   getConnectionState: () => 'connected',
   getObjectSchema: vi.fn(async (name: string) => OBJECTS.find((o) => o.name === name)),
-  findOne: vi.fn(async () => ({ id: 'r1' })),
-  find: vi.fn(async () => ({ data: [] })),
-  create: vi.fn(),
+  findOne: vi.fn(async (name: string, id: string) => {
+    const row = RECORDS[name]?.[id];
+    return row ? { ...row } : { id: 'r1' };
+  }),
+  find: vi.fn(async (name: string) => {
+    const rows = Object.values(RECORDS[name] ?? {});
+    return { data: rows.map((r) => ({ ...r })), total: rows.length };
+  }),
+  create: vi.fn(async (_object: string, data: Record<string, unknown>) => ({ id: 'new-1', ...data })),
   update: vi.fn(),
 };
 vi.mock('../../providers/AdapterProvider', async (importOriginal) => ({
@@ -237,5 +288,58 @@ describe('#36425 — the New / Edit dialog reads no internal form view', () => {
     const { objectName: _b, title: _tb, onSuccess: _sb, onCancel: _cb, onOpenChange: _ob, ...b } = plain;
     expect(Object.keys(a).sort()).toEqual(Object.keys(b).sort());
     expect(a.fields).toEqual(b.fields);
+  });
+});
+
+/**
+ * objectstack#37246 — a related tab's New on a child whose relationship
+ * lookup declares `dependsOn` (a milestone's order `dependsOn` its account): the
+ * pre-link carries the parent AND each `dependsOn` value the parent answers, as
+ * repeated `formLink` pairs (`RelatedRecordActionsBridge`). The dialog opens
+ * with all of them, so the lookup shows its parent instead of 「Select Account
+ * first」 or an emptied 「Select…」, and Create saves the parent.
+ */
+describe('#37246 — a related New pre-links the parent with its dependsOn values', () => {
+  const triggerText = (field: string) => screen.getByTestId(`lookup-trigger-${field}`).textContent ?? '';
+
+  async function createFrom(url: string, child: string) {
+    probe.realModal = true;
+    const schema = await openAt(url, child);
+    const dialog = await screen.findByRole('dialog', undefined, { timeout: 5000 });
+    return { schema, dialog };
+  }
+
+  it('with a lookupAutofill on the relationship: the order stays, the account is filled, Create saves both', async () => {
+    const { schema, dialog } = await createFrom(
+      '/apps/crm/crm_sales_order?form=new&formObject=crm_billing_milestone&formLink=crm_sales_order:so-1&formLink=crm_account:acc-1',
+      'crm_billing_milestone',
+    );
+    expect(schema.initialValues).toStrictEqual({ crm_sales_order: 'so-1', crm_account: 'acc-1' });
+    await waitFor(() => expect(triggerText('crm_sales_order')).toContain('SO-0001'), { timeout: 5000 });
+    await waitFor(() => expect(triggerText('crm_account')).toContain('Acme'), { timeout: 5000 });
+
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Create' }));
+    await waitFor(() => expect(dataSourceStub.create).toHaveBeenCalled(), { timeout: 5000 });
+    expect(dataSourceStub.create.mock.calls[0][0]).toBe('crm_billing_milestone');
+    expect(dataSourceStub.create.mock.calls[0][1]).toMatchObject({ crm_sales_order: 'so-1', crm_account: 'acc-1' });
+  });
+
+  it('with no lookupAutofill: the opportunity shows, never 「Select Account first」, and Create saves it', async () => {
+    const { schema, dialog } = await createFrom(
+      '/apps/crm/crm_opportunity?form=new&formObject=crm_contract&formLink=crm_opportunity:opp-1&formLink=crm_account:acc-1',
+      'crm_contract',
+    );
+    expect(schema.initialValues).toStrictEqual({ crm_opportunity: 'opp-1', crm_account: 'acc-1' });
+    await waitFor(() => expect(triggerText('crm_opportunity')).toContain('Big Deal'), { timeout: 5000 });
+    expect(screen.queryByTestId('lookup-trigger-gated')).toBeNull();
+
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Create' }));
+    await waitFor(() => expect(dataSourceStub.create).toHaveBeenCalled(), { timeout: 5000 });
+    expect(dataSourceStub.create.mock.calls[0][1]).toMatchObject({ crm_opportunity: 'opp-1', crm_account: 'acc-1' });
+  });
+
+  it('control: a lone parent pre-link still seeds just the parent', async () => {
+    const schema = await openAt('/apps/crm/crm_note?form=new&formObject=crm_case&formLink=account:acct-parent', 'crm_case');
+    expect(schema.initialValues).toStrictEqual({ account: 'acct-parent' });
   });
 });
