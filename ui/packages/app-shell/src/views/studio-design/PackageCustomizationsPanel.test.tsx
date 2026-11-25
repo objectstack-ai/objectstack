@@ -36,19 +36,16 @@ vi.mock('../metadata-admin/useMetadata.js', async (importOriginal) => ({
 import { PACKAGE_CUSTOMIZATION_ROWS_SHOWN, PackageCustomizationsPanel } from './PackageCustomizationsPanel';
 import { customizationRowsOf, customizedCountOf, loadCustomizationLabels } from './packageCustomizationRows';
 import { t } from '../metadata-admin/i18n';
+import type { PackageCustomizations } from './packageCustomizations-io';
 
 const APP = 'app.objectstack.hotcrm';
 
-type Lists = {
-  overrides?: Array<Record<string, unknown>>;
-  extensions?: Array<Record<string, unknown>>;
-  arrangements?: Array<Record<string, unknown>>;
-  switchedOff?: Array<Record<string, unknown>>;
-  contributions?: Array<Record<string, unknown>>;
-};
+type Lists = Partial<
+  Pick<PackageCustomizations, 'overrides' | 'extensions' | 'arrangements' | 'switchedOff' | 'contributions'>
+>;
 
 /** A served answer, its counts derived from its lists as the route derives them. */
-function served(l: Lists = {}) {
+function served(l: Lists = {}): PackageCustomizations {
   const data = {
     packageId: APP,
     overrides: l.overrides ?? [],
