@@ -155,6 +155,7 @@ beforeEach(() => {
   fetchMock = vi.fn(async (url: string) => {
     if (String(url).endsWith('/api/v1/packages')) {
       return {
+        headers: new Headers(),
         ok: true,
         status: 200,
         json: async () => ({
