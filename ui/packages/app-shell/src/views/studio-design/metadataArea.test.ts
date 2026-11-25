@@ -11,6 +11,7 @@
 
 import { describe, it, expect } from 'vitest';
 import {
+  AREA_DESIGNER_PAGE_TYPES,
   AREA_PILLAR_FOR_TYPE,
   STUDIO_ALL_PACKAGES_SEGMENT,
   AREA_DESIGNER_PAGE_TYPES,
@@ -113,11 +114,11 @@ describe('areaItemPillarPath — a pillar type opens its pillar', () => {
   const open = (type: string, q = '', packageId: string | null = PKG) =>
     areaItemPillarPath({ packageId, type, name: 'n_1', search: search(q) });
 
-  it('object and permission open their pillar with `?surface=`', () => {
-    // objectstack#36903 — a flow opens its designer on its own address.
+  it('object opens its pillar with `?surface=`', () => {
+    // objectstack#36905 — a permission set no longer does, nor (objectstack#36903)
+    // a flow (`areaItemOpensDesignerPage`).
     const expected: Record<string, string> = {
       object: 'data',
-      permission: 'access',
     };
     expect(AREA_PILLAR_FOR_TYPE).toEqual(expected);
     for (const [type, pillar] of Object.entries(expected)) {
@@ -131,17 +132,49 @@ describe('areaItemPillarPath — a pillar type opens its pillar', () => {
 
   it('every other type opens the generic item page', () => {
     // objectstack#36502 — page, dashboard, report and view lost their pillar with Interfaces.
-    for (const type of ['flow', 'translation', 'email_template', 'agent', 'position', 'sharing_rule', 'app', 'page', 'dashboard', 'report', 'view']) {
+    for (const type of ['flow', 'permission', 'translation', 'email_template', 'agent', 'position', 'sharing_rule', 'app', 'page', 'dashboard', 'report', 'view']) {
       expect(open(type), type).toBeNull();
     }
   });
 
   it('the cross-package leg, the environment scope and `?review=1` open the generic page', () => {
     expect(open('object', '', null)).toBeNull();
-    expect(open('permission', '?scope=environment')).toBeNull();
+    expect(open('object', '?scope=environment')).toBeNull();
     expect(open('object', '?review=1')).toBeNull();
     // Control: the same item without them opens the pillar.
     expect(open('object', '?review=0')).not.toBeNull();
+  });
+});
+
+describe('areaItemOpensDesignerPage — a permission set opens its matrix full-screen (objectstack#36905)', () => {
+  it('on a package\'s leg only', () => {
+    // objectstack#36903 — and the flow designer (below).
+    expect(AREA_DESIGNER_PAGE_TYPES).toEqual(['permission', 'flow']);
+    expect(areaItemOpensDesignerPage({ packageId: PKG, type: 'permission' })).toBe(true);
+    // The cross-package leg keeps the matrix's environment presentation.
+    expect(areaItemOpensDesignerPage({ packageId: null, type: 'permission' })).toBe(false);
+    for (const type of ['object', 'position', 'view']) {
+      expect(areaItemOpensDesignerPage({ packageId: PKG, type }), type).toBe(false);
+    }
+  });
+
+  it('areaDesignerItemOf reads the item off a designer page\'s address, for the copilot', () => {
+    expect(areaDesignerItemOf(`/studio/${PKG}/metadata/permission/sales%20rep`, PKG)).toEqual({
+      type: 'permission',
+      name: 'sales rep',
+    });
+    expect(areaDesignerItemOf(`/studio/${PKG}/metadata/permission/sales_rep/history`, PKG)).toEqual({
+      type: 'permission',
+      name: 'sales_rep',
+    });
+    // Not a designer page: another type, a list, the cross-package leg, another package's path.
+    expect(areaDesignerItemOf(`/studio/${PKG}/metadata/hook/h1`, PKG)).toBeNull();
+    expect(areaDesignerItemOf(`/studio/${PKG}/metadata/permission`, PKG)).toBeNull();
+    // The create page is no item: `new` is its route segment, not a set's name.
+    expect(areaDesignerItemOf(`/studio/${PKG}/metadata/permission/new`, PKG)).toBeNull();
+    expect(areaDesignerItemOf('/studio/~all/metadata/permission/admin', '~all')).toBeNull();
+    expect(areaDesignerItemOf(`/studio/other/metadata/permission/a`, PKG)).toBeNull();
+    expect(areaDesignerItemOf(`/studio/${PKG}/metadata/permission/%E0%A4%A`, PKG)).toBeNull();
   });
 });
 

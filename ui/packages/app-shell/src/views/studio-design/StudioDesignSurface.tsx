@@ -72,7 +72,6 @@ import {
 } from './StudioPillarKit.js';
 import { AutomationsPillar } from './AutomationsPillar.js';
 import { automationsPillarRedirect } from './automationsPillarRedirect.js';
-import { AccessPillar } from './AccessPillar.js';
 import { DataPillar, renderStudioGridList } from './DataPillar.js';
 import {
   cn,
@@ -129,6 +128,8 @@ import {
 import { STUDIO_METADATA_AREA, isStudioAllPackagesScope } from './metadataArea.js';
 import { StudioMenu, StudioMenuDataProvider, StudioMenuProvider, StudioMenuTrigger } from './StudioMenu.js';
 import { StudioMetadataArea } from './StudioMetadataArea.js';
+import { StudioOwdOverviewPage } from './StudioOwdOverviewPage.js';
+import { AccessPillarLanding } from './accessPillarLanding.js';
 import { useMetadataRefreshNonce } from './useMetadataRefreshNonce.js';
 import {
   type SurfaceTarget,
@@ -168,7 +169,7 @@ import {
   type DraftPublishOptions,
 } from '../../preview/DraftChangesPanel.js';
 import { toast } from 'sonner';
-import { studioItemPath, studioPillarItemAddress, studioPillarPath } from './studioAddress.js';
+import { STUDIO_OWD_SECTION, studioItemPath, studioPillarItemAddress, studioPillarPath } from './studioAddress.js';
 
 /** The batch door's `backfillApplied` receipt, by reference to what the client returns (objectui#12929). */
 type PublishBackfillReceipt = NonNullable<
@@ -1605,6 +1606,16 @@ function StudioDesignSurfaceBody({ aiSlot, area }: StudioDesignSurfaceProps): Re
                 onHeldEditChange={setHeldEdit}
                 onSurfaceLabelChange={setSurfaceLabel}
               />
+            ) : tab === STUDIO_OWD_SECTION ? (
+              // objectstack#36905 (decision 11) — the organization-wide default
+              // sharing overview's own route; its unsaved rows gate the header.
+              <StudioOwdOverviewPage
+                key={packageId}
+                packageId={packageId}
+                publishNonce={publishNonce}
+                readOnly={readOnly}
+                onDirtyChange={setPillarDirty}
+              />
             ) : !pillarKnown ? (
               <StudioEmptyState
                 icon={FileQuestion}
@@ -1627,20 +1638,15 @@ function StudioDesignSurfaceBody({ aiSlot, area }: StudioDesignSurfaceProps): Re
                 }}
               />
             ) : (
-              // objectstack#28573 — keyed by package like its siblings: "New
-              // similar" opens the copy in ANOTHER package's Access pillar
-              // (the base's `.custom`), and that route keeps this element
-              // mounted. Unkeyed, the open set, the rail and the `?surface=`
-              // capture stayed the base's.
-              <AccessPillar
-                key={`${packageId}:${pillarEntry}`}
+              // objectstack#36905 — the Access pillar draws no page: a set opens
+              // at its metadata address (a set the base's pair adds at the
+              // pair's), the sharing overview on its own route, and the bare
+              // pillar on the list of sets.
+              <AccessPillarLanding
+                key={`${packageId}${currentSearch}`}
                 packageId={packageId}
-                publishNonce={publishNonce}
-                onDraftSaved={onDraftSaved}
-                readOnly={readOnly}
-                customization={customization}
-                onDirtyChange={setPillarDirty}
-                onSurfaceLabelChange={setSurfaceLabel}
+                search={currentSearch}
+                state={landingState}
               />
             )}
             </StudioPendingDraftsContext.Provider>
@@ -1751,8 +1757,9 @@ function StudioDesignSurfaceBody({ aiSlot, area }: StudioDesignSurfaceProps): Re
 // objectstack#36903 — the rail's status dot went with the rail.
 export { type NewFlowTrigger };
 
-// objectstack#36893 — the Automations and Access pillars moved to their own modules; re-exported for their pins.
-export { AutomationsPillar, AccessPillar };
+// objectstack#36893 — the Automations pillar moved to its own module; re-exported for its pins.
+// objectstack#36905 — the Access pillar is gone: its addresses redirect (`accessPillarRedirect.ts`).
+export { AutomationsPillar };
 
 // objectstack#36893 — the Data pillar moved to its own module; re-exported for its pins.
 export { DataPillar, renderStudioGridList };

@@ -17,7 +17,9 @@
  *                              flow designer full-screen (#36903), or the
  *                              form editor of an email template or a
  *                              translation (`StudioBundleItemEditor`, #28569),
- *                              and of a read-only package's dataset (#30064)
+ *                              and of a read-only package's dataset (#30064),
+ *                              or a permission set's full-screen matrix
+ *                              (`StudioPermissionSetPage`, #36905)
  *   <root>/:type/:name/history the item's history: its History tab
  *                              (`?tab=history`), the old address redirected;
  *                              the history page for a type with an editor of
@@ -57,11 +59,12 @@ import { STUDIO_ORG_SCOPE_SEGMENT } from './studioScope.js';
 import { STUDIO_ORG_SCOPE_TYPE } from './studioAddress.js';
 import { StudioBundleItemEditor } from './StudioBundleItemEditor.js';
 import { AutomationsPillar } from './AutomationsPillar.js';
-import type { StudioSurfaceLabel } from './StudioAiCopilot.js';
+import { StudioPermissionSetPage } from './StudioPermissionSetPage.js';
 import { BUNDLE_MEMBER_PARAM, getMetadataResource } from '../metadata-admin/registry.js';
 import { ITEM_TOOL_TAB_PARAM } from '../item-tools/ItemToolTabs.js';
 import type { StudioBaseCustomization } from './StudioDesignSurface.js';
 import type { StudioRefusal } from './metadataError.js';
+import type { StudioSurfaceLabel } from './StudioAiCopilot.js';
 
 /*
  * The pages load with the area, through the specifier `AppContent` loads them
@@ -139,8 +142,9 @@ interface AreaEditorProps {
   publishRefusalFor?: (type: string, name: string) => StudioRefusal | null;
   /** objectstack#36903 — the area is the package-less scope's: its flows open writable, with no package. */
   orgScope?: boolean;
-  /** objectstack#36903 — the flow designer's reports to the surface: its held edit and the copilot's chip. */
+  /** objectstack#36903 — the flow designer's report to the surface: its held edit. */
   onHeldEditChange?: (clause: string | null) => void;
+  /** objectstack#36905, objectstack#36903 — a designer page's open item label, for the copilot's chip. */
   onSurfaceLabelChange?: (surface: StudioSurfaceLabel | null) => void;
 }
 
@@ -187,7 +191,7 @@ function AreaItemOpen({
     return { designer: false, formEditor: false, pillarPath: areaItemPillarPath({ ...at, name }) };
   });
   if (opens.pillarPath) return <Navigate to={opens.pillarPath} replace />;
-  if (opens.designer) {
+  if (opens.designer && type === 'flow') {
     // objectstack#36903 — the flow designer, full-screen on the flow's
     // address. The package-less scope's flows are the organization's own and
     // open writable (its area is read-only to the list's create alone).
@@ -204,6 +208,19 @@ function AreaItemOpen({
           onSurfaceLabelChange={editor.onSurfaceLabelChange}
         />
       </div>
+    );
+  }
+  // objectstack#36905 — a permission set opens its matrix full-screen here.
+  if (opens.designer && host?.packageId) {
+    return (
+      <StudioPermissionSetPage
+        packageId={host.packageId}
+        name={name}
+        readOnly={host.readOnly}
+        publishNonce={editor.publishNonce}
+        onDraftSaved={editor.onDraftSaved ? () => editor.onDraftSaved?.({ type, name }) : undefined}
+        onSurfaceLabelChange={editor.onSurfaceLabelChange}
+      />
     );
   }
   if (opens.formEditor && host?.packageId) {
@@ -232,18 +249,21 @@ function AreaItemOpen({
  * Cut from the path as it is spelled, so an encoded name stays encoded.
  *
  * A type whose item page is an editor of its own (`registerMetadataResource`'s
- * `EditPage`: the permission set's matrix) has no tabs, and its History button
- * opens this address: it keeps the standalone history page. So does an item
- * whose address opens a pillar's designer, until the designer mounts the tabs.
- * objectstack#36903 — a flow no longer does: its designer is on its address,
- * with History as a tab, so its `/history` opens that tab like every item's.
+ * `EditPage`: the permission set's matrix) has no tabs on the cross-package
+ * leg, and its History button opens this address there: it keeps the
+ * standalone history page. So does an item whose address opens a pillar's
+ * designer, until the designer mounts the tabs. objectstack#36905 — on a
+ * package's leg the permission set's full-screen page has them.
+ * objectstack#36903 — so does the flow designer, on its address with History
+ * as a tab: a flow's `/history` opens that tab like every item's.
  */
 function AreaHistoryRedirect(): React.ReactElement {
   const { type = '', name = '' } = useParams<{ type: string; name: string }>();
   const { pathname, search } = useLocation();
   const host = useMetadataAreaHost();
   const params = new URLSearchParams(search);
-  const ownEditor = !!getMetadataResource(type)?.EditPage;
+  const designerPage = areaItemOpensDesignerPage({ packageId: host?.packageId ?? null, type });
+  const ownEditor = !designerPage && !!getMetadataResource(type)?.EditPage;
   // An item a pillar's designer opens has no tab row yet (its tabs are the
   // designers' cards): its history keeps the standalone page too.
   const pillarItem = areaItemPillarPath({ packageId: host?.packageId ?? null, type, name, search: params }) !== null;
@@ -343,6 +363,11 @@ export interface StudioMetadataAreaProps {
   orgScope?: boolean;
   /** objectstack#36903 — handed to the flow designer (`AreaEditorProps`). */
   onHeldEditChange?: (clause: string | null) => void;
+  /**
+   * objectstack#36905, objectstack#36903 — told the open designer page's item
+   * label (the permission set's, the flow's), for the copilot's chip, as a
+   * pillar tells it.
+   */
   onSurfaceLabelChange?: (surface: StudioSurfaceLabel | null) => void;
 }
 

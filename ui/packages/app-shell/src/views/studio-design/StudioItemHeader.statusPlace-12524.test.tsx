@@ -17,8 +17,9 @@
  * the fourth until objectstack#36502 retired that pillar.)
  *
  * The REAL pillars against one server double that serves a pending draft
- * for the open object and the open flow. Access has no
- * item-level draft: its writable "saved as draft" note is the pillar's status.
+ * for the open object and the open flow. Access (since objectstack#36905 the
+ * permission set's full-screen page) has no item-level draft: its writable
+ * "saved as draft" note is the page's status.
  *
  * Pinned:
  *  - with a draft, the chip in all three headers is a child of the header's
@@ -114,7 +115,8 @@ vi.mock('../metadata-admin/AccessExplainPanel', () => ({ AccessExplainPanel: () 
 // The source under test reaches a dynamic import of `@objectstack/lint`: its first
 // load is paid here, at collection, never inside a case's clock (`check:test-source-alias`).
 import '@objectstack/lint';
-import { AccessPillar, AutomationsPillar, DataPillar } from './StudioDesignSurface';
+import { AutomationsPillar, DataPillar } from './StudioDesignSurface';
+import { StudioPermissionSetPage } from './StudioPermissionSetPage';
 import '../../services/builtinComponents.js';
 import { t } from '../metadata-admin/i18n';
 import { createEmptyDataSource, failOnAbsorbedFetchError } from './__tests__/emptyDataSource';
@@ -190,9 +192,10 @@ const CASES: PillarCase[] = [
     },
   },
   {
+    // objectstack#36905 — a permission set's full-screen page took the Access pillar's place.
     pillar: 'Access',
-    testId: 'access-item-header',
-    element: (readOnly) => <AccessPillar packageId={PKG} readOnly={readOnly} />,
+    testId: 'permission-detail-header',
+    element: (readOnly) => <StudioPermissionSetPage packageId={PKG} name="acme_rep" readOnly={readOnly} />,
     settled: async (header) => {
       await within(header).findByRole('button', { name: en('engine.studio.access.explain.open') }, { timeout: 8000 });
     },
@@ -271,7 +274,10 @@ describe('the status chip sits in the same place in every pillar’s item header
     expect(within(header).queryByTestId('studio-item-status')).toBeNull();
     const link = within(header).getByTestId('studio-readonly-link');
     const row = titleRow(header);
-    expect(link.parentElement).toBe(row.lastElementChild);
-    expect(link.parentElement).toHaveClass('ml-auto');
+    // A direct child of the page's primary action group, the group a direct
+    // child of the right-aligned actions slot: not merely somewhere inside it.
+    const slot = row.lastElementChild;
+    expect(slot).toHaveClass('ml-auto');
+    expect(link.parentElement!.parentElement).toBe(slot);
   });
 });

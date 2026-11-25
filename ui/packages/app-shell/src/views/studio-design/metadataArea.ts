@@ -125,18 +125,20 @@ export function areaItemAsksGenericPage(search: URLSearchParams): boolean {
 }
 
 /**
- * Studio redesign epic #36890 (ADR-0146 D1 as amended) — the types whose item,
- * on a package's leg, opens its designer full-screen in the area rather than
- * the generic item page. objectstack#36903: the flow designer
- * (`AutomationsPillar`, fixed on one flow). A designer card adds its type here
- * in the PR that deletes the type's row from `STUDIO_ITEM_PILLAR`.
+ * objectstack#36905, objectstack#36903 (Studio redesign epic #36890) — the
+ * types whose item, on a package's leg, opens its designer full-screen in the
+ * area rather than the generic item page: the permission set's matrix
+ * (`StudioPermissionSetPage`) and the flow designer (`AutomationsPillar`,
+ * fixed on one flow). A designer card adds its type here in the PR that
+ * deletes the type's row from `STUDIO_ITEM_PILLAR`.
  */
-export const AREA_DESIGNER_PAGE_TYPES: readonly string[] = Object.freeze(['flow']);
+export const AREA_DESIGNER_PAGE_TYPES: readonly string[] = Object.freeze(['permission', 'flow']);
 
 /**
  * Whether an item of the area opens its full-screen designer page: a
  * {@link AREA_DESIGNER_PAGE_TYPES} type on a package's leg. The cross-package
- * leg names no package to design in, so it keeps the generic item page.
+ * leg names no package to design in, so it keeps the generic item page (for
+ * the permission set: the matrix's environment presentation).
  */
 export function areaItemOpensDesignerPage(input: { packageId: string | null; type: string }): boolean {
   return input.packageId !== null && AREA_DESIGNER_PAGE_TYPES.includes(input.type);

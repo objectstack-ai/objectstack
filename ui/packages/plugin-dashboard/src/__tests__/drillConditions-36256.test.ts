@@ -57,6 +57,23 @@ describe('drillListConditions', () => {
     ]);
   });
 
+  it("writes a dataset month bucket's range as two date rows that compare exactly what the bucket counted (objectstack#37034)", () => {
+    // The dataset answer's drill range for 2026-10: `{ $gte, $lt }`, ISO
+    // instants (core's dataset-format). The list's chip reads each bound as a
+    // date (plugin-list `formatConditionDate`); the value stays the one the
+    // query compares. No date-family operator says "on or after", and `after`
+    // (>) would drop the records at the bound, so the lower bound keeps `>=`.
+    const { chips, rest } = drillListConditions(
+      { issued_on: { $gte: '2026-10-01T00:00:00.000Z', $lt: '2026-11-01T00:00:00.000Z' } },
+      { dateFields: new Set(['issued_on']) },
+    );
+    expect(rest).toBeUndefined();
+    expect(chips.conditions.map((c) => [c.field, c.operator, c.value])).toEqual([
+      ['issued_on', 'greater_than_or_equal', '2026-10-01T00:00:00.000Z'],
+      ['issued_on', 'before', '2026-11-01T00:00:00.000Z'],
+    ]);
+  });
+
   it("lowers a page block's rule array, and an AST node, to chips", () => {
     // HotCRM's 销售主页 KPI tile: the spec's rule-array form, handed as written.
     expect(drillListConditions([{ field: 'stage', operator: 'equals', value: 'closed_won' }]).chips.conditions

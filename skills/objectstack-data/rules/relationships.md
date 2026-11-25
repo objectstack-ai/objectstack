@@ -285,12 +285,11 @@ The rendering side: objectstack-ui → Master-Detail Forms.
 `inlineEdit` only picks how a placed child's rows are entered:
 
 ```typescript
-inlineEdit: true       // auto (default)
 inlineEdit: 'grid'     // editable line-item grid (fast bulk entry; thin children)
 inlineEdit: 'form'     // read-only list; "Add" / per-row edit opens the FULL form
 ```
 
-**`true`** / omitted — **smart default**: picks `form` when the child has
+Omitted (a boolean is refused) — **smart default**: picks `form` when the child has
 rich/form-only fields (textarea, file, image, json, location…) or more than ~8
 editable fields, else `grid`.
 

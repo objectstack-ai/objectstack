@@ -3,7 +3,7 @@
 /**
  * objectstack#26733 — a Studio rail search that matches nothing says so.
  *
- * Before: the Data and Access rails went blank under a query that matched no
+ * Before: the Data and Access rails (the Access rail retired by objectstack#36905) went blank under a query that matched no
  * row, so a mistyped search read as a list that failed to load; the
  * Automations rail printed its own sentence and offered no way back but the
  * keyboard. Now the shared `StudioRail` draws one state for all three, from the
@@ -69,7 +69,10 @@ vi.mock('./StudioAiCopilot', () => ({ StudioChatDock: () => null }));
 
 // The pillars reach `@objectstack/lint` through a dynamic import; paid here, at collection, not in a case's clock.
 import '@objectstack/lint';
-import { AccessPillar, DataPillar } from './StudioDesignSurface';
+// objectstack#36900 — the surface mounts the command palette, which reaches the
+// record preview's `lazy()` detail entry: its first load is paid at collection too.
+import '@object-ui/plugin-detail';
+import { DataPillar } from './StudioDesignSurface';
 import { StudioRail, StudioRailRow } from './StudioRail';
 import { railAbbreviation } from './railAbbreviation';
 import {
@@ -167,14 +170,8 @@ const CASES: RailCase[] = [
     pillar: () => <DataPillar packageId={PKG} />,
   },
   {
-    name: 'Access',
-    railTestId: 'studio-rail-access',
-    placeholderKey: 'engine.studio.access.search',
-    labels: ['Sales rep', 'Support agent'],
-    match: 'sales',
-    emptyKey: 'engine.studio.access.none',
-    pillar: () => <AccessPillar packageId={PKG} />,
-  },
+  // objectstack#36903, objectstack#36905 — the Automations and Access rails are
+  // gone: a flow and a permission set are chosen from their type's list.
 ];
 
 function renderRail(c: RailCase, language: 'en' | 'zh' = 'en') {

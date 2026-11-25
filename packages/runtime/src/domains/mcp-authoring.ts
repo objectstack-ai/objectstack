@@ -168,7 +168,7 @@ import type { AIToolDefinition } from '@objectstack/spec/contracts';
 import type { HttpProtocolContext } from '../http-dispatcher.js';
 import type { DomainHandlerDeps } from '../domain-handler-registry.js';
 import { readEffectiveTenancyPosture } from './activation-gate.js';
-import { studioChangesReviewLink, studioItemReviewLink } from '@objectstack/types';
+import { FLOW_RUNTIME_STATE_KEY, flowRuntimeStateOf, studioChangesReviewLink, studioItemReviewLink } from '@objectstack/types';
 
 /** The read tools' names, in the order the registry lists them. */
 export const OPEN_AUTHORING_READ_TOOL_NAMES = ['list_metadata_items', 'get_metadata_item', 'list_drafts'] as const;
@@ -278,7 +278,9 @@ const READ_TOOLS: readonly AIToolDefinition[] = Object.freeze([
         description:
             'Read one metadata item\'s full definition. Without `state`, a pending draft is read in place of '
             + 'the published version and the answer says `draft: true`. `state: "draft"` reads the pending '
-            + 'draft only and is refused when there is none; `state: "active"` reads the published version.',
+            + 'draft only and is refused when there is none; `state: "active"` reads the published version. '
+            + 'A flow\'s answer also carries `runtimeState.enabled`: `false` means the flow is switched off and '
+            + 'does not run, whatever its `status` reads.',
         parameters: {
             type: 'object',
             properties: {
@@ -478,6 +480,13 @@ export async function resolveOpenAuthoringInjection(
             admitted: reader !== undefined,
             userId,
             getProtocol: async () => (await deps.resolveService(context, 'protocol', context.environmentId)) as OpenAuthoringProtocol | undefined,
+            getAutomation: async () => {
+                try {
+                    return await deps.resolveService(context, 'automation', context.environmentId);
+                } catch {
+                    return undefined;
+                }
+            },
             ...(reader ? { readGate: openReadGateSources(deps, context, reader), writer: openWriter(deps, context, clientId) } : {}),
             logger: deps.logger,
         }),
@@ -619,13 +628,19 @@ export function createOpenAuthoringRegistry(opts: {
     admitted: boolean;
     userId: string;
     getProtocol: () => Promise<OpenAuthoringProtocol | undefined>;
+    /**
+     * [#36856] The automation service, whose reading says whether a flow runs
+     * now (`flowRuntimeStateOf`); without it a flow's answer carries no
+     * `runtimeState`, which reads as unknown.
+     */
+    getAutomation?: () => Promise<unknown>;
     /** The `/meta` read gates' ports; without them every read is refused. */
     readGate?: OpenAuthoringReadGateSources;
     /** The write tools' inputs; without them every write is refused. */
     writer?: OpenAuthoringWriter;
     logger?: { warn?: (...args: unknown[]) => void };
 }): OpenAuthoringRegistry {
-    const { admitted, userId, getProtocol, readGate, writer } = opts;
+    const { admitted, userId, getProtocol, getAutomation, readGate, writer } = opts;
     return {
         getAll: () => (admitted ? [...READ_TOOLS, ...WRITE_TOOLS] : []),
         async execute(toolCall, context) {
@@ -731,11 +746,20 @@ export function createOpenAuthoringRegistry(opts: {
                         }
                         const item = verdict.document;
                         const draft = state === 'draft' || (item as { _draft?: unknown })._draft === true;
+                        // [#36856] A flow's switch is not in its definition: an admin
+                        // who switched it off left `status: 'active'` on the item. The
+                        // engine's reading rides beside the item, ahead of it, so a
+                        // reply cut short still says it; read only after the gate
+                        // admitted the item, so it tells nothing about one withheld.
+                        const runtimeState = type === 'flow' && getAutomation
+                            ? flowRuntimeStateOf(await getAutomation(), read.name ?? name)
+                            : undefined;
                         return answer({
                             type: read.type ?? type,
                             name: read.name ?? name,
                             draft,
                             ...(read.version !== undefined ? { version: read.version } : {}),
+                            ...(runtimeState ? { [FLOW_RUNTIME_STATE_KEY]: runtimeState } : {}),
                             item,
                         });
                     }
