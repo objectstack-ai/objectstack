@@ -85,6 +85,25 @@ installed ([Connect an MCP Client](/docs/ai/connect-mcp)).
 - **Inline event sync.** When records on indexed objects change, the kernel's `IRealtimeService` events drive `KnowledgeService.handleRecordUpsert/Delete` automatically. No cron, no queue (yet — Phase 2).
 - **Adapter swap, zero caller changes.** Move from `memory` to `ragflow` to a custom adapter without touching your `search` calls, the `search_knowledge` tool, or any agent prompt.
 
+## Splitting documents into passages
+
+The knowledge service cuts each document into passages once, and every adapter that takes passages (`knowledge-memory` does) indexes the same ones. An object source chooses how with `split`:
+
+```ts
+source: {
+  kind: 'object',
+  object: 'policy',
+  contentFields: ['title', 'body'],
+  split: { strategy: 'markdown', maxChars: 600 },
+}
+```
+
+- `recursive` (the default) cuts at blank lines, then line breaks, then sentence ends, then semicolons, then characters. It reads Chinese and English sentence ends — 「3.2 条」 and 「400.50 元」 stay whole — and never cuts inside a Markdown table or list item that fits.
+- `markdown` cuts one section per heading; each passage begins with its heading path, which is embedded with it.
+- `whole` keeps each document as one passage.
+
+A passage is at most `split.maxChars` characters — else the **Knowledge → Target chunk size** setting, else 800 — and, when the adapter reports its embedder's input limit, within 80% of that limit by the shared token estimate below. A `whole` document over that budget is **removed from the index and reported** (`failed` and `failures` on the reindex result, an `error` log on the event sync), never truncated; because the estimate runs high, a `whole` document can use about 60% of the model's limit. The full rules are in [the protocol's split section](/docs/protocol/knowledge#35-the-split).
+
 ## Embedder input limits
 
 Every embedding model accepts a text up to some length, counted in tokens. A provider that is sent a longer text truncates it **without an error** — the tail is never embedded, so a search for it finds nothing. `@objectstack/embedder-openai` refuses such an input instead:
@@ -92,6 +111,7 @@ Every embedding model accepts a text up to some length, counted in tokens. A pro
 - When a limit applies, `embed()` measures every input before it sends anything. When one is over the model's limit, the whole call fails with an error naming the input's index, the model, the estimate and the limit. Nothing is sent and nothing is truncated.
 - The limit comes from the known-model table, which carries each provider's documented per-input limit (OpenAI `text-embedding-3-*` 8192, DashScope `text-embedding-v3` 8192, BigModel `embedding-3` 3072, SiliconFlow `BAAI/bge-m3` 8192, `BAAI/bge-large-*-v1.5` 512, …). Set `maxInputTokens` to override it.
 - A model that is not in the table, with no `maxInputTokens`, has no limit — its inputs are sent at any length — and the embedder warns once when it is constructed.
+- The embedder reports the limit it applies as `maxInputTokens` (`IEmbedder.maxInputTokens`), so a knowledge adapter can pass it on (`embedding.maxInputTokens`) and the service's passages fit it.
 
 ```ts
 new OpenAIEmbedder({
@@ -121,7 +141,7 @@ Known residual: text made mostly of random hex or base64 — UUIDs, sha256 diges
 
 ## Why we did not build a vector DB
 
-Mature OSS (RAGFlow, LlamaIndex, Dify) already nail chunking, embedding, hybrid retrieval, rerank, and OCR. ObjectStack's value is **the metadata-native source declaration + the permission-aware filter on top of those engines** — not yet-another-RAG-stack. Customers pick the retrieval engine that matches their data; we make sure it talks to ObjectStack the same way every time.
+Mature OSS (RAGFlow, LlamaIndex, Dify) already nail embedding, hybrid retrieval, rerank, and OCR. ObjectStack's value is **the metadata-native source declaration, one structural split for every adapter, and the permission-aware filter on top of those engines** — not yet-another-RAG-stack. Customers pick the retrieval engine that matches their data; we make sure it talks to ObjectStack the same way every time.
 
 ---
 

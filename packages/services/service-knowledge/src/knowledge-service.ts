@@ -23,6 +23,7 @@ import {
 } from '@objectstack/core';
 import type { TenancyPosture } from '@objectstack/spec/security';
 import { createKnowledgeTools, type KnowledgeTools } from './knowledge-tools.js';
+import { resolveSplit, splitDocument } from './split/index.js';
 import {
   documentOrganizationId,
   searchOrganizationIds,
@@ -72,6 +73,16 @@ export interface KnowledgeServiceOptions {
    * service.
    */
   resolveSecurity?: () => KnowledgeFieldSecurity | undefined;
+  /**
+   * The settings page's `knowledge.chunk_target`, read each time the service
+   * splits a batch of documents — never once at boot, so a value saved later
+   * applies to the next write. Answers `undefined` when nothing is stored or
+   * no settings service serves the namespace; the splitter then uses a
+   * source's own `split.maxChars`, else 800. A rejection is reported at `warn`
+   * and read as `undefined`. `KnowledgeServicePlugin` wires it to the
+   * `settings` service.
+   */
+  resolveChunkTarget?: () => Promise<number | undefined>;
   /**
    * The deployment's effective tenancy posture (ADR-0105 D1), read at each
    * assembly and each search (ADR-0161 K8, item 9): under `group` and
@@ -176,6 +187,13 @@ export class KnowledgeService implements IKnowledgeService {
 
   // ── Document mutations ────────────────────────────────────────────
 
+  /**
+   * Write one caller-built document. An adapter that declares
+   * `capabilities.chunks` receives it with the service's passages, split the
+   * way every other path splits ({@link prepareDocuments}). A `whole`
+   * document over the embedder's input budget is removed from the index and
+   * the call throws, naming the estimate and the budget.
+   */
   async indexDocument(sourceId: string, doc: KnowledgeDocument): Promise<void> {
     const source = this.requireSource(sourceId);
     const adapter = this.getAdapter(source.adapter);
@@ -198,7 +216,74 @@ export class KnowledgeService implements IKnowledgeService {
           "from the record a document is assembled from; omit it.",
       );
     }
-    await adapter.upsert([{ ...doc, docHash: computeDocHash(doc) }], { source, reason: 'manual' });
+    // The passages are the service's too (ADR-0161 K1): one splitter cuts
+    // every document, so a caller's own `chunks` are refused the same way.
+    if (doc.chunks !== undefined) {
+      throw new Error(
+        `[knowledge] indexDocument refused document '${doc.id}': chunks are cut by the knowledge service's ` +
+          "splitter from the content, by the source's split; omit them.",
+      );
+    }
+    const prepared = await this.prepareDocuments(source, adapter, [{ ...doc, docHash: computeDocHash(doc) }]);
+    if (prepared.failed.length > 0) {
+      const failure = prepared.failed[0];
+      await adapter.delete([doc.id], { source, reason: 'manual' });
+      throw new Error(
+        `[knowledge] indexDocument did not index document '${doc.id}' and removed it from the index: ${failure.reason}`,
+      );
+    }
+    await adapter.upsert(prepared.ready, { source, reason: 'manual' });
+  }
+
+  /**
+   * The ONE place documents are split before an adapter sees them (ADR-0161
+   * K1). An adapter that does not declare `capabilities.chunks` gets the
+   * documents as they are, without `chunks` — it splits them itself, as
+   * before. One that does gets each document with the passages of
+   * {@link splitDocument}, under the source's `split` (an object source's
+   * key; any other source splits `recursive`), the settings page's
+   * `knowledge.chunk_target`, and the adapter's reported
+   * `embedding.maxInputTokens` — both read now, for this batch, never cached.
+   * A document the split cannot index (a `whole` document over the budget)
+   * is answered in `failed`, never truncated; the caller removes it.
+   */
+  private async prepareDocuments(
+    source: KnowledgeSource,
+    adapter: IKnowledgeAdapter,
+    docs: KnowledgeDocument[],
+  ): Promise<{
+    ready: KnowledgeDocument[];
+    failed: Array<{ documentId: string; reason: string; estimate: number; budget: number }>;
+  }> {
+    if (adapter.capabilities?.chunks !== true || docs.length === 0) return { ready: docs, failed: [] };
+    const split = resolveSplit({
+      split: source.source.kind === 'object' ? (source.source as ObjectKnowledgeSource).split : undefined,
+      chunkTarget: await this.readChunkTarget(),
+      maxInputTokens: adapter.embedding?.maxInputTokens,
+    });
+    const ready: KnowledgeDocument[] = [];
+    const failed: Array<{ documentId: string; reason: string; estimate: number; budget: number }> = [];
+    for (const doc of docs) {
+      const out = splitDocument(doc, split);
+      if (out.ok) ready.push({ ...doc, chunks: out.chunks });
+      else failed.push({ documentId: doc.id, reason: out.reason, estimate: out.estimate, budget: out.budget });
+    }
+    return { ready, failed };
+  }
+
+  /** The settings page's `knowledge.chunk_target`, read now; `undefined` when unset or unreadable. */
+  private async readChunkTarget(): Promise<number | undefined> {
+    const resolve = this.options.resolveChunkTarget;
+    if (!resolve) return undefined;
+    try {
+      return await resolve();
+    } catch (err) {
+      this.options.logger?.warn?.(
+        `[knowledge] the settings page's knowledge.chunk_target could not be read (${errorText(err)}); ` +
+          "splitting by the source's own split.maxChars, else 800.",
+      );
+      return undefined;
+    }
   }
 
   async deleteDocument(sourceId: string, documentId: string): Promise<void> {
@@ -288,6 +373,8 @@ export class KnowledgeService implements IKnowledgeService {
         indexed: 0,
         skipped: 0,
         purged: null,
+        failed: 0,
+        failures: [],
         message:
           `Reindex for kind=${source.source.kind} is not handled by KnowledgeService. ` +
           `Trigger ingestion through the adapter (${source.adapter}) directly.`,
@@ -302,6 +389,8 @@ export class KnowledgeService implements IKnowledgeService {
         indexed: 0,
         skipped: 0,
         purged: null,
+        failed: 0,
+        failures: [],
         message: 'KnowledgeService has no IDataEngine bound; cannot walk object source.',
       };
     }
@@ -331,6 +420,8 @@ export class KnowledgeService implements IKnowledgeService {
         indexed: 0,
         skipped: 0,
         purged: null,
+        failed: 0,
+        failures: [],
         message: `reindex of source '${source.id}' refused: limit must be a non-negative finite number, got ${String(opts.limit)}.`,
       };
     }
@@ -347,6 +438,8 @@ export class KnowledgeService implements IKnowledgeService {
         indexed: 0,
         skipped: 0,
         purged: null,
+        failed: 0,
+        failures: [],
         message: 'dryRun=true; no documents pushed.',
       };
     }
@@ -384,6 +477,11 @@ export class KnowledgeService implements IKnowledgeService {
     let discovered = 0;
     let indexed = 0;
     let skipped = 0;
+    // Documents the split could not index (a `whole` document over the
+    // embedder's budget): removed from the index, counted, and the first
+    // MAX_REINDEX_FAILURES named.
+    let failed = 0;
+    const failures: Array<{ documentId: string; reason: string }> = [];
     let cursor: string | number | undefined;
     for (let page = 1; ; page++) {
       const want = cap === undefined ? REINDEX_PAGE_SIZE : Math.min(REINDEX_PAGE_SIZE, cap - discovered);
@@ -396,6 +494,8 @@ export class KnowledgeService implements IKnowledgeService {
         indexed,
         skipped,
         purged: null,
+        failed,
+        failures: [...failures],
         message: `reindex of source '${source.id}' stopped at page ${page}${after}: ${what}`,
       });
 
@@ -442,16 +542,32 @@ export class KnowledgeService implements IKnowledgeService {
           const stored = listed.get(doc.id);
           return stored === undefined || stored !== doc.docHash;
         });
-      if (changed.length > 0) {
+      // One split per changed document, for an adapter that takes chunks.
+      const prepared = await this.prepareDocuments(source, adapter, changed);
+      if (prepared.ready.length > 0) {
         try {
-          await adapter.upsert(changed, { source, reason: 'reindex' });
+          await adapter.upsert(prepared.ready, { source, reason: 'reindex' });
         } catch (err) {
           return stopped(`the adapter upsert failed: ${errorText(err)}`);
         }
       }
+      // A document the split cannot index is removed — an older passage of it
+      // must not keep answering for text the index no longer holds — and
+      // reported, never truncated.
+      if (prepared.failed.length > 0) {
+        try {
+          await adapter.delete(prepared.failed.map((f) => f.documentId), { source, reason: 'reindex' });
+        } catch (err) {
+          return stopped(`removing the page's documents that cannot be indexed failed: ${errorText(err)}`);
+        }
+        for (const f of prepared.failed) {
+          failed += 1;
+          if (failures.length < MAX_REINDEX_FAILURES) failures.push({ documentId: f.documentId, reason: f.reason });
+        }
+      }
       for (const doc of docs) seen.add(doc.id);
       discovered += rows.length;
-      indexed += changed.length;
+      indexed += prepared.ready.length;
       skipped += docs.length - changed.length;
 
       // The next page continues after this page's last id. A last row with no
@@ -470,8 +586,22 @@ export class KnowledgeService implements IKnowledgeService {
     // The purge runs only after a COMPLETE walk: a `limit` walk saw part of
     // the source, so "not seen" there means nothing (a failed page returned
     // above; `dryRun` returned before the walk).
-    const done: KnowledgeReindexResult = { ok: true, object, discovered, indexed, skipped, purged: null };
-    if (listingNote) return { ...done, message: listingNote };
+    const failedNote = failed === 0
+      ? undefined
+      : `${failed} document(s) cannot be indexed under the source's split and were removed from the index ` +
+        `(${failures.length === failed ? 'each' : `the first ${failures.length}`} named in failures).`;
+    const done: KnowledgeReindexResult = {
+      ok: true,
+      object,
+      discovered,
+      indexed,
+      skipped,
+      purged: null,
+      failed,
+      failures,
+      ...(failedNote === undefined ? {} : { message: failedNote }),
+    };
+    if (listingNote) return { ...done, message: failedNote === undefined ? listingNote : `${listingNote} ${failedNote}` };
     if (listed === undefined || cap !== undefined || (source.refresh?.onRecordChange ?? true) === false) return done;
 
     const candidates = [...listed.keys()].filter((id) => !seen.has(id));
@@ -490,7 +620,7 @@ export class KnowledgeService implements IKnowledgeService {
         purged: purge.purged,
         message:
           `reindex of source '${source.id}' walked every page, but its purge stopped after ${purge.purged} ` +
-          `deletion(s): ${purge.failure}`,
+          `deletion(s): ${purge.failure}${failedNote === undefined ? '' : ` ${failedNote}`}`,
       };
     }
     if (purge.foreign > 0) {
@@ -499,7 +629,8 @@ export class KnowledgeService implements IKnowledgeService {
         purged: purge.purged,
         message:
           `${purge.foreign} listed document(s) carry an id that is not one this source derives from a record ` +
-          `('${source.id}:' and the record id); they were kept, because no row can confirm them.`,
+          `('${source.id}:' and the record id); they were kept, because no row can confirm them.` +
+          (failedNote === undefined ? '' : ` ${failedNote}`),
       };
     }
     return { ...done, purged: purge.purged };
@@ -732,7 +863,7 @@ export class KnowledgeService implements IKnowledgeService {
           return;
         }
         const doc = recordToDocument(source, objSource, payload, this.schemaFor(object), await this.readTenancyPosture());
-        await adapter.upsert([doc], { source, reason: 'event-sync' });
+        await this.writeSynced(source, adapter, doc, recordId);
         return;
       }
       if (!isRecordId(recordId)) {
@@ -745,7 +876,7 @@ export class KnowledgeService implements IKnowledgeService {
       const row = await rereadRow(engine, objSource, recordId);
       if (row) {
         const doc = recordToDocument(source, objSource, row, this.schemaFor(object), await this.readTenancyPosture());
-        await adapter.upsert([doc], { source, reason: 'event-sync' });
+        await this.writeSynced(source, adapter, doc, recordId);
       } else {
         await adapter.delete([documentIdFor(source.id, String(recordId))], { source, reason: 'event-sync' });
       }
@@ -753,6 +884,37 @@ export class KnowledgeService implements IKnowledgeService {
       this.options.logger?.warn?.(
         `[knowledge] event-sync failed for source '${source.id}': ${(err as Error).message}`,
       );
+    }
+  }
+
+  /**
+   * The event sync's write of one document: split as every path splits
+   * ({@link prepareDocuments}) and upserted. A document the split cannot
+   * index (a `whole` document over the embedder's budget) is removed from the
+   * index and reported at `error`: the write that triggered the sync
+   * succeeded and search keeps answering, so nothing else shows that this
+   * record is no longer findable.
+   */
+  private async writeSynced(
+    source: KnowledgeSource,
+    adapter: IKnowledgeAdapter,
+    doc: KnowledgeDocument,
+    recordId: unknown,
+  ): Promise<void> {
+    const prepared = await this.prepareDocuments(source, adapter, [doc]);
+    if (prepared.ready.length > 0) await adapter.upsert(prepared.ready, { source, reason: 'event-sync' });
+    for (const f of prepared.failed) {
+      await adapter.delete([f.documentId], { source, reason: 'event-sync' });
+      const limit = adapter.embedding?.maxInputTokens;
+      const message =
+        `[knowledge] record '${String(recordId)}' of source '${source.id}' is no longer in the index and search ` +
+          `will not find it: its whole document estimates ${f.estimate} tokens, over the budget of ${f.budget} ` +
+          `(80% of the embedder's ${String(limit)}-token input limit), and split 'whole' does not truncate. ` +
+          `Fix: give source '${source.id}' split strategy 'recursive' or 'markdown', or shorten the record.`;
+      // `warn` is the guaranteed channel when a host injects no `error`.
+      const logger = this.options.logger;
+      if (logger?.error) logger.error(message);
+      else logger?.warn?.(message);
     }
   }
 
@@ -1073,6 +1235,13 @@ export class KnowledgeService implements IKnowledgeService {
  * several requests itself (`OpenAIEmbedder` does).
  */
 export const REINDEX_PAGE_SIZE = 100;
+
+/**
+ * The most documents one reindex result names in `failures`; `failed` counts
+ * them all. A source whose every document fails its split (a `whole` source
+ * over a small model's limit) answers a bounded result, not one entry per row.
+ */
+export const MAX_REINDEX_FAILURES = 20;
 
 /**
  * Run `task` after every earlier task chained on the same `key` has settled —

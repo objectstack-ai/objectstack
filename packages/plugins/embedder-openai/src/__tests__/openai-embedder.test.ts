@@ -294,6 +294,19 @@ describe('OpenAIEmbedder input limit (refused, not truncated)', () => {
     expect(f).not.toHaveBeenCalled();
   });
 
+  it('reports its input limit as IEmbedder.maxInputTokens: the option, else the known-model table, else none', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      expect(new OpenAIEmbedder({ apiKey: 'k' }).maxInputTokens).toBe(8192);
+      expect(new OpenAIEmbedder({ apiKey: 'k', model: 'text-embedding-v2' }).maxInputTokens).toBe(2048);
+      expect(new OpenAIEmbedder({ apiKey: 'k', model: 'BAAI/bge-large-zh-v1.5' }).maxInputTokens).toBe(512);
+      expect(new OpenAIEmbedder({ apiKey: 'k', maxInputTokens: 10 }).maxInputTokens).toBe(10);
+      expect(new OpenAIEmbedder({ apiKey: 'k', model: 'my-gateway-model', maxBatchSize: 5 }).maxInputTokens).toBeUndefined();
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
   it('refuses a maxInputTokens that is not a positive integer', () => {
     for (const bad of [0, -1, 1.5, Number.NaN]) {
       expect(() => new OpenAIEmbedder({ apiKey: 'k', maxInputTokens: bad })).toThrow(
