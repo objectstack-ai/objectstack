@@ -12,8 +12,11 @@
  *
  * An outline lists at most {@link RECORD_CONTEXT_OUTLINE_MAX_ENTRIES} headings,
  * and its listing serialized stays within {@link RECORD_CONTEXT_BODY_MAX_CHARS},
- * whatever the body holds; a cut is stated. The cap bounds the listing, not which
- * sections exist: every heading's anchor still reads its section.
+ * whatever the body holds; a cut is stated. The cap bounds one answer, not which
+ * headings are listed: an outline past it comes in pages, the next one listed
+ * by calling the tool again with the `outlineFrom` the cut answer gave, so every
+ * heading is listed, with its anchor, on exactly one page however many the body
+ * holds. Every heading's anchor reads its section, listed on this page or not.
  *
  * Which lines and elements are headings, and the anchor each one is read by,
  * are the spec's `headingsOf` (`@objectstack/spec/ai`, `record-body-anchor.ts`):
@@ -29,8 +32,9 @@ import { headingsOf, type BodyHeading } from '@objectstack/spec/ai';
 export const RECORD_CONTEXT_BODY_MAX_CHARS = 8000;
 
 /**
- * The most headings one outline lists. A body with more is listed shallowest
- * level first and says how many it left out ({@link boundedOutline}).
+ * The most headings one outline page lists. A body with more is listed in
+ * pages, shallowest level first, each page saying how many it left out and
+ * where the next starts ({@link boundedOutline}).
  *
  * Chosen by measurement: an entry serializes to about 95 characters on average
  * (the 543 Markdown documents of this repository past the body bound that have
@@ -66,23 +70,40 @@ export interface BodyOutlineEntry {
   level: number;
 }
 
+/** One page of an outline, and where the next page starts. */
+export interface BoundedOutline {
+  /** This page's headings, in body order. */
+  outline: BodyOutlineEntry[];
+  /** How many of the body's headings this page does not list (on earlier pages or later ones). */
+  omitted: number;
+  /** Where the next page starts, as `outlineFrom`: present only when headings remain past this page. */
+  next?: number;
+}
+
 /**
- * The outline of `headings`, held to {@link RECORD_CONTEXT_OUTLINE_MAX_ENTRIES}
- * entries and to {@link RECORD_CONTEXT_BODY_MAX_CHARS} serialized characters,
- * and how many headings it left out.
+ * One page of the outline of `headings`, held to
+ * {@link RECORD_CONTEXT_OUTLINE_MAX_ENTRIES} entries and to
+ * {@link RECORD_CONTEXT_BODY_MAX_CHARS} serialized characters.
  *
- * Headings are admitted shallowest level first, in body order within a level,
- * until the next would pass either bound; the admitted ones are listed in body
- * order. So a cut leaves out the deepest headings first, and a listed section's
- * text holds the headings under it. Every anchor is the one {@link headingsOf}
- * gave, so a listed anchor is the same whether or not the outline was cut.
+ * The pages run through every heading in one order: shallowest level first,
+ * in body order within a level. A page takes that order from position `from`
+ * (0, the first page, by default) until the next heading would pass either
+ * bound, and lists what it took in body order. So the first page of a nested
+ * body is its top levels, and a cut leaves out the deepest headings first; a
+ * flat body's pages are runs of it in body order. Each heading is on exactly
+ * one page, so following `next` from the first page lists every heading.
+ * Every anchor is the one {@link headingsOf} gave, so a listed anchor is the
+ * same on whichever page and whether or not the outline was cut.
+ *
+ * A heading too long to list on a page by itself ends the pages there: the
+ * page that would start with it lists nothing and gives no `next`.
  */
-export function boundedOutline(headings: readonly BodyHeading[]): { outline: BodyOutlineEntry[]; omitted: number } {
+export function boundedOutline(headings: readonly BodyHeading[], from = 0): BoundedOutline {
   const byLevel = headings.map((h, index) => ({ h, index })).sort((a, b) => a.h.level - b.h.level || a.index - b.index);
   const admitted: Array<{ entry: BodyOutlineEntry; index: number }> = [];
   // `[` and `]`, then one `,` between entries.
   let chars = 2;
-  for (const { h, index } of byLevel) {
+  for (const { h, index } of byLevel.slice(from)) {
     if (admitted.length >= RECORD_CONTEXT_OUTLINE_MAX_ENTRIES) break;
     const entry = { anchor: h.anchor, heading: h.heading, level: h.level };
     const cost = JSON.stringify(entry).length + (admitted.length > 0 ? 1 : 0);
@@ -90,8 +111,13 @@ export function boundedOutline(headings: readonly BodyHeading[]): { outline: Bod
     chars += cost;
     admitted.push({ entry, index });
   }
+  const end = from + admitted.length;
   admitted.sort((a, b) => a.index - b.index);
-  return { outline: admitted.map((a) => a.entry), omitted: headings.length - admitted.length };
+  return {
+    outline: admitted.map((a) => a.entry),
+    omitted: headings.length - admitted.length,
+    ...(admitted.length > 0 && end < headings.length ? { next: end } : {}),
+  };
 }
 
 /** `text` held to the bound: the text, and whether it was cut. */
