@@ -108,6 +108,47 @@ describe('rewriteObjectNamePrefix', () => {
     ).toContain("name: 'sys_user'");
   });
 
+  it('moves every reference to a name too: a lookup target, a related list, a view, a menu entry', () => {
+    // An object is reached by name from other metadata, and a reference left on
+    // the template's namespace points, in the scaffolded project, at an object
+    // that no longer exists. Every quoted `<ns>_…` literal moves.
+    const file = path.join(dir, 'src', 'objects', 'refs.ts');
+    fs.writeFileSync(
+      file,
+      [
+        "export const contact = { name: 'blank_contact', fields: { company: Field.lookup('blank_company', {}) } };",
+        'export const company = { relatedLists: [{ list: "blank_contact" }] };',
+        "export const view = { data: { provider: 'object', object: `blank_company` } };",
+        "export const nav = [{ id: 'nav_companies', type: 'object', objectName: 'blank_company' }];",
+        '',
+      ].join('\n'),
+    );
+    expect(rewriteObjectNamePrefix(path.join(dir, 'src'), 'blank', 'my_app')).toBe(5);
+    const after = fs.readFileSync(file, 'utf8');
+    expect(after).not.toMatch(/blank_/);
+    expect(after).toContain("Field.lookup('my_app_company'");
+    expect(after).toContain('list: "my_app_contact"');
+    expect(after).toContain('object: `my_app_company`');
+    expect(after).toContain("objectName: 'my_app_company'");
+    expect(findStaleNamespacePrefixes(path.join(dir, 'src'), 'blank', 'my_app')).toEqual([]);
+  });
+
+  it('leaves a literal that is not a whole namespaced name alone', () => {
+    // Only a WHOLE quoted literal under the template prefix is a name. A
+    // platform object, a navigation id, a longer string that merely contains
+    // the prefix, and a literal under another namespace are not rewritten.
+    const file = path.join(dir, 'src', 'objects', 'other.ts');
+    const text = [
+      "export const a = { objectName: 'sys_task', id: 'nav_blank_tasks' };",
+      "export const b = { label: 'blank_company is the old name', note: 'see blank_company' };",
+      "export const c = { list: 'crm_blank_contact', template: 'blank' };",
+      '',
+    ].join('\n');
+    fs.writeFileSync(file, text);
+    expect(rewriteObjectNamePrefix(path.join(dir, 'src'), 'blank', 'my_app')).toBe(0);
+    expect(fs.readFileSync(file, 'utf8')).toBe(text);
+  });
+
   it('is a no-op on a missing directory rather than throwing', () => {
     expect(rewriteObjectNamePrefix(path.join(dir, 'nope'), 'todo', 'my_app')).toBe(0);
   });

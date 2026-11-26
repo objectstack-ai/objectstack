@@ -241,7 +241,7 @@ describe('shipped template comments are followable by a stranger', () => {
 
   it('reads a real template tree (vacuity guard)', () => {
     expect(files).toContain('blank/objectstack.config.ts');
-    expect(files).toContain('blank/src/objects/note.object.ts');
+    expect(files).toContain('blank/src/objects/company.object.ts');
     expect(files.length).toBeGreaterThan(8);
   });
 
@@ -278,7 +278,7 @@ describe('shipped template comments are followable by a stranger', () => {
       ],
     },
     {
-      file: 'blank/src/objects/note.object.ts',
+      file: 'blank/src/objects/company.object.ts',
       facts: [
         { what: 'what the org-wide default means', re: /org-wide default|OWD/i },
         { what: 'that declaring it is required rather than optional', re: /required|refuses/i },
