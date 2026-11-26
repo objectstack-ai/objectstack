@@ -53,19 +53,24 @@ import { sentencesFor, type Sentences } from './sentences.js';
  *    caller they refuse gets `get_record`'s answer, the same whether or not a
  *    pack exists.
  * 3. Pack selection, with no fallback ({@link selectContextPack}).
- * 4. Each `related` child at object level (the same three gates); then the
- *    field-level projection onto the definitions as the caller is served them;
- *    then the surviving lookups' targets (the read guard `query_records`'
- *    `expand` puts before an expansion); then the reads.
+ * 4. Each `related` child at object level (the read guard, API exposure, then
+ *    whether this caller is served it); then the field-level projection onto
+ *    the definitions as the caller is served them; then the surviving lookups'
+ *    targets (the read guard `query_records`' `expand` puts before an
+ *    expansion); then the reads.
  *
- * ## Object level refuses the whole call; field level omits and states (D3)
+ * ## What refuses the whole call, and what omits and states (D3, as amended)
  *
- * A refused child or lookup target refuses the call with `PERMISSION_DENIED`
- * and no partial pack. The refusal names the pack and the root, and the
- * refused object only when the caller's served schema shows it (the naming
- * bound). A field the caller's served schema hides is not named: the entry, a
- * related section whose link it is, or the body, is left out, and the notes
- * carry one statement that some material is not visible. A field the served
+ * A gate that refuses everyone refuses the call with `PERMISSION_DENIED` and
+ * no partial pack: the read guard or API exposure (a disabled package
+ * included) on a related child, and any gate on a surviving lookup's target.
+ * The refusal names the pack and the root, and the refused object only when
+ * the caller's served schema shows it (the naming bound). A related child
+ * that passes both and that THIS caller is not served is left out: nothing of
+ * it is read again, its section is not named, and the notes carry the one
+ * not-visible statement. A field the caller's served schema hides is not
+ * named: the entry, a related section whose link it is, or the body, is left
+ * out, and the notes carry the same statement. A field the served
  * schema shows and field-level security withholds keeps its name and label,
  * carries no value and is marked `withheld` (#35137). A name the published
  * definition lacks is an author defect and states nothing.
@@ -74,7 +79,10 @@ import { sentencesFor, type Sentences } from './sentences.js';
  *
  * They run inside the one capped child query, as the caller: `where` joined
  * to the link filter with `$and`, `orderBy` as the order, `limit` (else the
- * row cap) as the cut, stated when it cuts. Before that query, each field
+ * row cap) as the cut, stated when it cuts. A door whose page cap
+ * ({@link RecordContextDoor.pageCap}) is below that cut plus the probe row is
+ * asked for at most its cap, and the list is cut one row under it and stated,
+ * so no door cuts or refuses a list the answer does not say was cut. Before that query, each field
  * they name is judged: one the child's published definition lacks, or an
  * `orderBy` field that definition does not offer as a sort (the sortability
  * projection's `sortable: false`: a formula, or `sortable: false` declared by
@@ -284,6 +292,18 @@ async function queryableAmong(
   return true;
 }
 
+/**
+ * [ADR-0160 D3] The door's page cap ({@link RecordContextDoor.pageCap}): a
+ * whole number of rows of at least one, else `undefined` (no member, no cap,
+ * or an answer that is no cap). A probe that throws fails the call, as the
+ * door's own read would.
+ */
+async function pageCapOf(door: RecordContextDoor): Promise<number | undefined> {
+  if (typeof door.pageCap !== 'function') return undefined;
+  const cap = await door.pageCap();
+  return typeof cap === 'number' && Number.isSafeInteger(cap) && cap >= 1 ? cap : undefined;
+}
+
 /** One `related` entry, planned after projection. */
 interface RelatedPlan {
   object: string;
@@ -368,33 +388,56 @@ export async function executeGetRecordContext(input: unknown, door: RecordContex
   let hidden = false;
 
   // 4a. Each related child at object level, before anything of it is read,
-  //     its published definition included: a child the caller is refused is
-  //     never asked about by name.
+  //     its published definition included. [ADR-0160 D3 "Object level", as
+  //     amended] The gates that apply to everyone come first and refuse the
+  //     whole call: the read guard (the system-object refusal), then API
+  //     exposure, whose refusals include a disabled package's
+  //     `OBJECT_PACKAGE_DISABLED` (a disabled package's object is not served
+  //     to anyone either, so judging exposure after the served definition
+  //     would read it as this caller's narrowing). A child that passes both
+  //     and that THIS caller is not served is left out: never named, never
+  //     read again, with the one not-visible statement.
   const childServed = new Map<string, Record<string, unknown>>();
+  const leftOut = new Set<string>();
   for (const entry of pack.related ?? []) {
+    if (childServed.has(entry.object) || leftOut.has(entry.object)) continue;
     const guarded = await door.readGuard(entry.object);
     if (guarded !== undefined) await refuseObject(entry.object, false);
+    try {
+      await door.assertApiExposed(entry.object, 'query');
+    } catch (err) {
+      // Only API exposure's own refusal is about the object itself, and it is
+      // named only when the caller's served schema shows the object (the
+      // naming bound); any other failure (a package gate, an outage) names
+      // nothing.
+      let shown = false;
+      if (API_EXPOSURE_REFUSALS.has(String((err as { code?: unknown } | null)?.code))) {
+        shown = (await door.servedObjectDefinitionOf(entry.object).catch(() => null)) != null;
+      }
+      await refuseObject(entry.object, shown);
+    }
     let served: Record<string, unknown> | null;
     try {
       served = await door.servedObjectDefinitionOf(entry.object);
     } catch {
-      served = null;
+      // A read that failed is no answer about this caller: it refuses, unnamed.
+      return refuseObject(entry.object, false);
     }
-    if (!served) await refuseObject(entry.object, false);
-    try {
-      await door.assertApiExposed(entry.object, 'query');
-    } catch (err) {
-      // Only API exposure's own refusal is about an object the caller's schema
-      // shows; any other failure (a package gate, an outage) names nothing.
-      await refuseObject(entry.object, API_EXPOSURE_REFUSALS.has(String((err as { code?: unknown } | null)?.code)));
+    if (!served) {
+      leftOut.add(entry.object);
+      hidden = true;
+      continue;
     }
-    childServed.set(entry.object, served as Record<string, unknown>);
+    childServed.set(entry.object, served);
   }
 
   // Every published-definition read from here on is of an object whose gates
   // already passed; one that still throws refuses the call unnamed, so no
   // door's own rendering of the failure can name what the caller is not shown.
+  // A child left out for this caller is never read, its definition included:
+  // the plan reads it as having no published definition.
   const publishedOf = async (name: string): Promise<Record<string, unknown> | null> => {
+    if (leftOut.has(name)) return null;
     try {
       return await door.publishedObjectDefinitionOf(name);
     } catch {
@@ -523,12 +566,20 @@ export async function executeGetRecordContext(input: unknown, door: RecordContex
   }
   for (const name of rootFields) if (rootWithheld.has(name)) withheldNames.push(name);
 
+  // [ADR-0160 D3] The door's page cap, asked once: a list is never read with
+  // more rows than one of the door's queries may ask for, so a door that would
+  // refuse or cut a larger page is asked for at most its cap, and the cut below
+  // it is stated like any other.
+  const doorCap = relatedPlans.length > 0 ? await pageCapOf(door) : undefined;
+
   const related: RecordContextRelatedList[] = [];
   for (const plan of relatedPlans) {
     // The one capped query, as the caller: the link filter joined with the
     // entry's `where` (so no `where` reaches another root's rows), its order,
-    // and one row past the cut to know whether the cut cut anything.
-    const probe = plan.cap + 1;
+    // and one row past the cut to know whether the cut cut anything. Below the
+    // door's page cap, the cut is one row under it, so the probe row still fits.
+    const cap = doorCap !== undefined ? Math.min(plan.cap, doorCap - 1) : plan.cap;
+    const probe = cap + 1;
     const projection = [...new Set(['id', ...(plan.displayField ? [plan.displayField] : []), ...plan.columns])];
     const linkWhere = { [plan.link]: plan.multiValueLink ? { $contains: recordId } : recordId };
     const rows = rowsOf(
@@ -540,8 +591,8 @@ export async function executeGetRecordContext(input: unknown, door: RecordContex
         limit: probe,
       }),
     );
-    const truncated = rows.length > plan.cap;
-    const kept = truncated ? rows.slice(0, plan.cap) : rows;
+    const truncated = rows.length > cap;
+    const kept = truncated ? rows.slice(0, cap) : rows;
     const childWithheld = await withheldAmong(door, plan.object, plan.columns);
     for (const c of plan.columns) if (childWithheld.has(c)) withheldNames.push(`${plan.object}.${c}`);
     const outRows: RecordContextRelatedRow[] = [];
@@ -565,7 +616,7 @@ export async function executeGetRecordContext(input: unknown, door: RecordContex
       ...(truncated ? { truncated: true as const } : {}),
     });
     if (truncated) {
-      notes.push({ kind: 'related_truncated', object: plan.object, text: say.relatedTruncated(plan.object, plan.cap) });
+      notes.push({ kind: 'related_truncated', object: plan.object, text: say.relatedTruncated(plan.object, cap) });
     }
     // [ADR-0090 D10] A list the agent ceiling narrowed carries the narrowing,
     // in the security service's own sentence. ⛔ The probe never fails the list.

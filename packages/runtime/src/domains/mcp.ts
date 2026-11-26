@@ -8,7 +8,7 @@
  * Fetch-Request normalization ride along as family helpers.
  */
 
-import { isMcpServerEnabled } from '@objectstack/types';
+import { isMcpServerEnabled, resolveQueryReadLimits } from '@objectstack/types';
 import { MCP_OAUTH_SCOPES, MCP_OAUTH_SCOPE_DATA_READ, deriveAiFaceName } from '@objectstack/spec/ai';
 import type { ErrorCode, MetadataProtocol } from '@objectstack/spec/api';
 import type { ISecurityService } from '@objectstack/spec/contracts';
@@ -1739,6 +1739,24 @@ export function buildMcpBridge(
             // [ADR-0150 D6, addendum 2026-11-25] A package's pack is spelt by
             // its face `NS-NAME`, as a package-held skill's prompt name is.
             packageNamespace: (packageId: string) => packageNamespaceOf(contextPackEngine, packageId),
+            // [ADR-0160 D3, second amendment] The fields this caller may query
+            // on: THIS request's security service's own answer
+            // (`getQueryableFields`), judged on the map its engine guard
+            // refuses a filter or sort with, so a related list's `where` or
+            // `orderBy` the guard would refuse is dropped and stated before
+            // the read. No security service, or one predating the method:
+            // `undefined`, and the executor takes the contract's fallback.
+            queryableFieldsOf: async (object: string) => {
+                const security = await deps.resolveService(context, 'security', envId) as
+                    Partial<ISecurityService> | undefined;
+                if (typeof security?.getQueryableFields !== 'function') return undefined;
+                return await security.getQueryableFields(object, ec);
+            },
+            // [ADR-0160 D3] The data door's page cap: `findData` refuses a
+            // read asking for more rows than the deployment's maximum page
+            // size or its row budget (`@objectstack/types`'
+            // `query-read-limits.ts`), so the executor asks for no more.
+            pageCap: () => recordContextPageCap(),
         }));
     }
     return bridge;
@@ -1779,6 +1797,20 @@ export async function resolveMcpRecordContextToolsService(
 }
 
 /**
+ * [ADR-0160 D3] The most rows one record-context read may ask the data door
+ * for, offset 0: the smaller of the deployment's maximum page size and its
+ * query row budget, `undefined` when neither is set. The data door refuses,
+ * never clamps, a read over either (`resolveQueryReadLimits`), so a related
+ * list asked for more would refuse the whole call instead of being cut and
+ * stated.
+ */
+function recordContextPageCap(): number | undefined {
+    const { maxPageSize, rowBudget } = resolveQueryReadLimits();
+    const caps = [maxPageSize, rowBudget].filter((n): n is number => n !== undefined);
+    return caps.length > 0 ? Math.min(...caps) : undefined;
+}
+
+/**
  * [ADR-0160 D3/D4] The bridge's two record-context members. The door handed
  * to the executor is built per call from the bridge's own members — `get`,
  * `query` ({@link callData}, as the caller), `fieldVisibilityOf`,
@@ -1795,6 +1827,8 @@ function recordContextMembers(
         publishedObjectDefinitionOf(name: string): Promise<Record<string, unknown> | null>;
         listContextPacks(): Promise<readonly unknown[]>;
         packageNamespace(packageId: string): string | undefined;
+        queryableFieldsOf(object: string): Promise<readonly string[] | undefined>;
+        pageCap(): number | undefined;
     },
 ) {
     return {
