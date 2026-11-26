@@ -250,13 +250,13 @@ function unitDimensionOf(config: unknown): string | undefined {
  * `unitField` of every `record`-mode quantity among them, mapped to the
  * quantity's `unitDimension` (ADR-0158: "the field a `record` quantity's
  * `unitField` names is a unit code field by that pointer, so it declares
- * nothing itself"). Each entry is a form field config, which carries its
- * metadata flat or on `.field`.
+ * nothing itself"). Each entry is a field's metadata (a form hands its
+ * fields' metadata, read off the config's `.field` stash where it has one).
  */
 export function quantityUnitCodePointers(fields: readonly unknown[] | null | undefined): Map<string, { unitDimension?: string }> {
   const pointers = new Map<string, { unitDimension?: string }>();
   for (const entry of fields ?? []) {
-    const meta = ((entry as { field?: unknown })?.field ?? entry) as UnitBearingField | null;
+    const meta = entry as UnitBearingField | null;
     const config = meta?.unitConfig as { unitMode?: unknown; unitField?: unknown } | undefined;
     if (meta?.type !== 'number' || config?.unitMode !== 'record' || typeof config.unitField !== 'string') continue;
     const dimension = unitDimensionOf(config);

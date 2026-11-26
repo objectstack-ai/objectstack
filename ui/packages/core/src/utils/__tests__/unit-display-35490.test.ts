@@ -192,7 +192,7 @@ describe('the unit picker (ADR-0158 Open item 8, objectstack#37471)', () => {
   it("names the unit field a record-mode quantity points at, with the quantity's dimension", () => {
     const pointers = quantityUnitCodePointers([
       { name: 'qty', type: 'number', unitConfig: { unitMode: 'record', unitField: 'unit_code', unitDimension: 'mass' } },
-      { name: 'w', field: { type: 'number', unitConfig: { unitMode: 'record', unitField: 'w_unit' } } },
+      { name: 'w', type: 'number', unitConfig: { unitMode: 'record', unitField: 'w_unit' } },
       { name: 'kg', type: 'number', unitConfig: { unitMode: 'fixed', unit: 'KGM' } },
     ]);
     expect([...pointers]).toEqual([['unit_code', { unitDimension: 'mass' }], ['w_unit', {}]]);

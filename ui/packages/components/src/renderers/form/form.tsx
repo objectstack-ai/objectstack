@@ -2579,7 +2579,10 @@ ComponentRegistry.register('form',
     const usedCurrencyCodes = useUsedCurrencyCodes(contextDataSource, schema.objectName, codeFieldNames);
     // The unit code fields a quantity on this form points at (ADR-0158 Open
     // item 8): each is drawn as the unit picker (`withUnitCodePointer`).
-    const unitCodePointers = React.useMemo(() => quantityUnitCodePointers(fields as unknown[]), [fields]);
+    const unitCodePointers = React.useMemo(
+      () => quantityUnitCodePointers((fields as Array<{ field?: unknown }>).map((f) => f?.field || f)),
+      [fields],
+    );
 
     // The record as each visible update action would leave it
     // (objectstack#28382). A declarative update action writes its static
