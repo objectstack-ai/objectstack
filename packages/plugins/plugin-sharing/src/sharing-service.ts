@@ -1467,8 +1467,14 @@ export class SharingService implements ISharingService {
     }
     if (awaitingBypass.length > 0) {
       // Step 7, once for the whole list: the probe asks about the object and
-      // the caller, never the record, and fails closed on its own.
-      const verdict: SharingWriteVerdict = (await this.hasModifyAllBypass(object, context)) ? 'allow' : 'deny';
+      // the caller, never the record. It fails closed on its own; a lookup of
+      // the security service that throws is a failed lookup like any other.
+      let verdict: SharingWriteVerdict;
+      try {
+        verdict = (await this.hasModifyAllBypass(object, context)) ? 'allow' : 'deny';
+      } catch (err) {
+        verdict = this.writeGateFailClosed(verb, object, awaitingBypass.map((i) => recordIds[i]), context, err);
+      }
       for (const i of awaitingBypass) verdicts[i] = verdict;
     }
     return verdicts;
