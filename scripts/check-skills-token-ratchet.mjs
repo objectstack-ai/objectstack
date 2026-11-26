@@ -882,7 +882,18 @@ export const CEILINGS = new Map([
   // headroom is absorbed and the ceiling moves 6149 -> 6151 (+2). Pinned AT
   // the measurement.
   //   ceil(($(wc -c < skills/objectstack-platform/SKILL.md) - 20) / 4) == ceil(24603 / 4)
-  ['skills/objectstack-platform/SKILL.md', 6151],
+  // 6151 -> 6156 (card #37304): the enumeration row for the new top-level
+  // collection `knowledgeSources` — the key joins the list of `defineStack()`
+  // top-level keys, which `check:skill-top-level-keys` holds exhaustive over
+  // `ObjectStackDefinitionSchema`. The standing enumeration-row case: ruling A
+  // on #32584 (record 6819475461), made standing by #32673 letter A (record
+  // 6840575378). Raised by the row's own measured delta and by no more;
+  // nothing else in the file is cut and nothing rides along. Arithmetic in
+  // priced bytes (stamp line excluded): on the base the text is 24603 bytes
+  // (6151 tokens, headroom 0); the row adds 20 bytes, so the LANDED priced
+  // text is 24623 bytes -> 6156 tokens: the ceiling moves 6151 -> 6156 (+5).
+  // Pinned AT the measurement.
+  ['skills/objectstack-platform/SKILL.md', 6156],
   // `skills/objectstack-pm-dispatch/SKILL.md` (9708) and its
   // `rules/dev-template.md` (1838) left this table on 2026-09-10 with the files:
   // the maintainer deleted the published PM skill whole (verbatim:

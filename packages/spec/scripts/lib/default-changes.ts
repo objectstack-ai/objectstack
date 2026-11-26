@@ -797,6 +797,8 @@ export const DEFAULT_CHANGES_BY_MAJOR: Readonly<Record<number, readonly Declared
         + 'which moved from `upsert` to `ignore` with `SeedSchema.mode`; every other member is unchanged. '
         + SEED_MODE_CREATE_ONLY_REASON,
     },
+  ],
+  19: [
     {
       key: 'ai/KnowledgeSource:refresh',
       from: '(none)',
