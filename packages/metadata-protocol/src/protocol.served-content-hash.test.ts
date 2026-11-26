@@ -766,12 +766,115 @@ describe('[#22114] the item read serves the version token the save door accepts'
         expect(((await p.getMetaItem({ ...READ })) as any).version).toBe(stale.currentVersion);
         expect(stale.message).toContain(`(current is ${v2.version})`);
 
-        // A draft pin with no draft row: the head is `null`, stated as such.
+        // [#37628] A first draft's stale pin: no draft row, so the head stated
+        // is the published one the draft would replace.
         const noDraft = await rejection(() =>
-            p.saveMetaItem({ ...ref, item: viewBody('d'), mode: 'draft', parentVersion: v2.version } as any));
+            p.saveMetaItem({ ...ref, item: viewBody('d'), mode: 'draft', parentVersion: v1.version } as any));
         expect(noDraft.code).toBe('METADATA_CONFLICT');
         expect(noDraft.status).toBe(409);
-        expect(noDraft).toHaveProperty('currentVersion', null);
+        expect(noDraft).toHaveProperty('currentVersion', v2.version);
+
+        // No row in either lifecycle: the head is `null`, stated as such.
+        const noRow = await rejection(() =>
+            p.saveMetaItem({ ...ref, name: 'never_saved', item: { ...viewBody('n'), name: 'never_saved' }, mode: 'draft', parentVersion: v2.version } as any));
+        expect(noRow.code).toBe('METADATA_CONFLICT');
+        expect(noRow.status).toBe(409);
+        expect(noRow).toHaveProperty('currentVersion', null);
+    });
+});
+
+/**
+ * [#37628] A FIRST draft of a published item, pinned with the `version` a read
+ * of the published row served (the MCP draft door's `ifMatch`, the REST draft
+ * save's `If-Match`). There is no draft row yet, so the token is compared with
+ * the published head the draft would replace: accepted when the published row
+ * is the one read, refused (`METADATA_CONFLICT` / 409, naming the current
+ * version) when it moved since or another caller's draft now stands there.
+ */
+describe('[#37628] a first draft pinned with the published version a read served', () => {
+    const draftRow = (h: ReturnType<typeof makeEngine>) =>
+        [...h.rows.values()].find((r) => r.name === 'case_grid' && r.state === 'draft');
+
+    it('accepted the first time: the draft is written over the unchanged published row', async () => {
+        const h = withReadRegistry(makeEngine());
+        const p = new ObjectStackProtocolImplementation(h.engine);
+        await p.saveMetaItem({ ...ref, item: viewBody('v1') } as any);
+        const published = activeHash(h);
+        const read: any = await p.getMetaItem({ ...READ, state: 'active' });
+        expect(read.version).toMatch(KEYED);
+
+        const saved: any = await p.saveMetaItem({ ...ref, item: viewBody('v1'), mode: 'draft', parentVersion: read.version } as any);
+        expect(saved.success).toBe(true);
+        expect(saved.version).toMatch(KEYED);
+        expect(draftRow(h)).toBeDefined();
+        expect(activeHash(h)).toBe(published);
+
+        // The draft's own version then pins the next draft save, as before.
+        const next: any = await p.saveMetaItem({ ...ref, item: viewBody('v1b'), mode: 'draft', parentVersion: saved.version } as any);
+        expect(next.success).toBe(true);
+    });
+
+    it('refused when the published row changed after the read, naming the current version — which is then accepted', async () => {
+        const h = withReadRegistry(makeEngine());
+        const p = new ObjectStackProtocolImplementation(h.engine);
+        await p.saveMetaItem({ ...ref, item: viewBody('v1') } as any);
+        const read: any = await p.getMetaItem({ ...READ, state: 'active' });
+        const moved: any = await p.saveMetaItem({ ...ref, item: viewBody('v2'), parentVersion: read.version } as any);
+
+        const stale = await rejection(() =>
+            p.saveMetaItem({ ...ref, item: viewBody('mine'), mode: 'draft', parentVersion: read.version } as any));
+        expect({ code: stale.code, status: stale.status }).toEqual({ code: 'METADATA_CONFLICT', status: 409 });
+        expect(stale.currentVersion).toBe(moved.version);
+        expect(String(stale.message)).toContain(`(current is ${moved.version})`);
+        expectNoStoredHash(stale, storedHashes(h));
+        expect(draftRow(h)).toBeUndefined();
+
+        const retried: any = await p.saveMetaItem({ ...ref, item: viewBody('mine'), mode: 'draft', parentVersion: stale.currentVersion } as any);
+        expect(retried.success).toBe(true);
+        expect(draftRow(h)).toBeDefined();
+    });
+
+    it('refused when another caller saved a draft after the read, naming that draft\'s version', async () => {
+        const h = withReadRegistry(makeEngine());
+        const p = new ObjectStackProtocolImplementation(h.engine);
+        await p.saveMetaItem({ ...ref, item: viewBody('v1') } as any);
+        const read: any = await p.getMetaItem({ ...READ, state: 'active' });
+        const theirs: any = await p.saveMetaItem({ ...ref, item: viewBody('theirs'), mode: 'draft' } as any);
+
+        const refused = await rejection(() =>
+            p.saveMetaItem({ ...ref, item: viewBody('mine'), mode: 'draft', parentVersion: read.version } as any));
+        expect({ code: refused.code, status: refused.status }).toEqual({ code: 'METADATA_CONFLICT', status: 409 });
+        expect(refused.currentVersion).toBe(theirs.version);
+        expect(JSON.parse(String(draftRow(h)?.metadata)).label).toBe('theirs');
+    });
+
+    it('a draft written between the head read and the write is still refused by the repository\'s lock', async () => {
+        const h = withReadRegistry(makeEngine());
+        const p = new ObjectStackProtocolImplementation(h.engine);
+        await p.saveMetaItem({ ...ref, item: viewBody('v1') } as any);
+        const read: any = await p.getMetaItem({ ...READ, state: 'active' });
+
+        // The other caller's draft lands after this save read its heads and
+        // before the repository's put: the put's lock judges the `null` parent.
+        const putOriginal = SysMetadataRepository.prototype.put;
+        let raced = false;
+        const spy = async function (this: SysMetadataRepository, ...args: Parameters<SysMetadataRepository['put']>) {
+            if (!raced && (args[2] as { state?: string } | undefined)?.state === 'draft') {
+                raced = true;
+                await putOriginal.call(this, args[0], viewBody('theirs') as never, { ...(args[2] as object), parentVersion: null } as never);
+            }
+            return putOriginal.apply(this, args);
+        };
+        SysMetadataRepository.prototype.put = spy as SysMetadataRepository['put'];
+        try {
+            const refused = await rejection(() =>
+                p.saveMetaItem({ ...ref, item: viewBody('mine'), mode: 'draft', parentVersion: read.version } as any));
+            expect({ code: refused.code, status: refused.status }).toEqual({ code: 'METADATA_CONFLICT', status: 409 });
+        } finally {
+            SysMetadataRepository.prototype.put = putOriginal;
+        }
+        expect(raced).toBe(true);
+        expect(JSON.parse(String(draftRow(h)?.metadata)).label).toBe('theirs');
     });
 });
 
