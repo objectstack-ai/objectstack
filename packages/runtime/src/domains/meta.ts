@@ -33,6 +33,8 @@ import {
     // `manage_metadata` (or `isSystem`), the one predicate the REST doors run
     // too. No `/meta` branch here carries an organization into a metadata
     // write or read: the per-organization overlay axis is retired.
+    KNOWLEDGE_SOURCE_ADMISSION_SERVICE,
+    authoredKnowledgeSourceRefusal,
     metaWriteCapabilityVerdict,
     // [ADR-0131 D3 · D12 items 7–8] …and, under a wall, the platform operator
     // alone: the walled refusal every environment-metadata write door asks.
@@ -1978,6 +1980,26 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
             // `saveMetaItem` disagreeing about what a bodyless metadata write
             // means was the actual defect; one answer, from one authority.
             const item = body ?? {};
+
+            // [ADR-0161 K4, guard two] Source admission at save: a
+            // `knowledge_source` is saved only when its author may themselves
+            // search what it would index — the knowledge service's search-time
+            // gates, asked for the author before anything is written
+            // (`authoredKnowledgeSourceRefusal`, the predicate `RestServer`'s
+            // `PUT` and the MCP draft save ask). Every other type passes
+            // untouched.
+            {
+                const refused = await authoredKnowledgeSourceRefusal({
+                    type,
+                    item,
+                    executionContext: _context.executionContext,
+                    resolveKnowledgeService: () =>
+                        deps.resolveService(_context, KNOWLEDGE_SOURCE_ADMISSION_SERVICE, _context.environmentId),
+                });
+                if (refused) {
+                    return { handled: true, response: deps.error(refused.message, refused.status) };
+                }
+            }
 
             // Try to get the protocol service directly
             const protocol = await resolveProtocol(deps, _context);

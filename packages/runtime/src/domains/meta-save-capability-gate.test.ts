@@ -272,6 +272,72 @@ describe('#7019 — dispatcher PUT /meta/:type/:name: the capability gate', () =
  * caller without `manage_metadata`; a `manage_metadata` caller's write carries
  * no organization whatever its active one.
  */
+/**
+ * [ADR-0161 K4, guard two] The dispatcher's twin of the REST pins: the save
+ * asks the environment's knowledge service whether the AUTHOR may search what
+ * the source would index (`authoredKnowledgeSourceRefusal`).
+ */
+describe('ADR-0161 K4 — dispatcher PUT asks the knowledge service to admit the source for its author', () => {
+    const SOURCE = { name: 'faq', label: 'FAQ', adapter: 'memory', source: { kind: 'object', object: 'article', content: ['body', 'salary'] } };
+    const AUTHOR = { userId: 'u_admin', systemPermissions: ['manage_metadata', 'manage_knowledge_sources'] };
+    const REFUSAL = {
+        admitted: false, status: 403, code: 'PERMISSION_DENIED',
+        message: "The knowledge source 'faq' was not saved: you may not query field 'salary' of object 'article'.",
+    };
+
+    function bootWith(admit?: (item: unknown, ctx: unknown) => unknown) {
+        const saveMetaItem = vi.fn(async ({ name }: any) => ({ success: true, name }));
+        const admitAuthoredSource = vi.fn(async (item: unknown, ctx: unknown) => admit!(item, ctx));
+        const services: Record<string, unknown> = { protocol: { saveMetaItem }, ...(admit ? { knowledge: { admitAuthoredSource } } : {}) };
+        const kernel = { context: { getService: (n: string) => services[n] ?? null } } as any;
+        return { dispatcher: new HttpDispatcher(kernel), saveMetaItem, admitAuthoredSource };
+    }
+    const put = (stack: ReturnType<typeof bootWith>, executionContext: any, path = '/knowledge_source/faq', body: unknown = copy(SOURCE)) =>
+        stack.dispatcher.handleMetadata(path, ctx(executionContext), 'PUT', body);
+
+    it('a source its author may not search is refused 403 PERMISSION_DENIED with the gate\'s sentence, and nothing is saved', async () => {
+        const stack = bootWith(() => REFUSAL);
+        const res = await put(stack, AUTHOR);
+        expect(res.response?.status).toBe(403);
+        expect(res.response?.body?.error?.code).toBe('PERMISSION_DENIED');
+        expect(res.response?.body?.error?.message).toBe(REFUSAL.message);
+        expect(stack.saveMetaItem).not.toHaveBeenCalled();
+        expect(stack.admitAuthoredSource).toHaveBeenCalledWith(SOURCE, AUTHOR);
+    });
+
+    it('fails closed: a verdict that throws is 503 SERVICE_UNAVAILABLE, and nothing is saved', async () => {
+        const stack = bootWith(() => { throw new Error('registry unavailable'); });
+        const res = await put(stack, AUTHOR);
+        expect(res.response?.status).toBe(503);
+        expect(res.response?.body?.error?.code).toBe('SERVICE_UNAVAILABLE');
+        expect(stack.saveMetaItem).not.toHaveBeenCalled();
+    });
+
+    it('CONTROL: an admitted source is saved; with no knowledge service the save goes on', async () => {
+        const admitted = bootWith(() => ({ admitted: true }));
+        expect((await put(admitted, AUTHOR)).response?.status).toBe(200);
+        expect(admitted.saveMetaItem).toHaveBeenCalledTimes(1);
+
+        const none = bootWith();
+        expect((await put(none, AUTHOR)).response?.status).toBe(200);
+        expect(none.saveMetaItem).toHaveBeenCalledTimes(1);
+    });
+
+    it('the gate is behind the capability gates, and is not asked for another type', async () => {
+        // `manage_metadata` without `manage_knowledge_sources`, and the reverse.
+        for (const systemPermissions of [['manage_metadata'], ['manage_knowledge_sources']]) {
+            const uncapable = bootWith(() => REFUSAL);
+            expect((await put(uncapable, { userId: 'u_half', systemPermissions })).response?.status).toBe(403);
+            expect(uncapable.admitAuthoredSource).not.toHaveBeenCalled();
+            expect(uncapable.saveMetaItem).not.toHaveBeenCalled();
+        }
+
+        const object = bootWith(() => REFUSAL);
+        expect((await put(object, AUTHOR, '/object/account', { name: 'account', label: 'Account', fields: {} })).response?.status).toBe(200);
+        expect(object.admitAuthoredSource).not.toHaveBeenCalled();
+    });
+});
+
 describe('ADR-0131 D6 — dispatcher PUT: an organization admin\'s metadata write is refused; writes carry no organization', () => {
     /**
      * The `boot()` double above, plus an auth service whose session carries an

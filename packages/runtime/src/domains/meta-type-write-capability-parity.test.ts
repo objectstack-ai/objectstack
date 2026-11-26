@@ -33,6 +33,12 @@ const CALLERS = {
     member: { userId: 'u_member', isSystem: false, systemPermissions: [] as string[] },
     author: { userId: 'u_author', isSystem: false, systemPermissions: ['manage_metadata', 'studio.access', 'setup.access'] },
     holder: { userId: 'u_settings', isSystem: false, systemPermissions: ['manage_platform_settings', 'manage_metadata'] },
+    // [ADR-0161 K4] The knowledge-source rows: full access to the indexed
+    // object's records and no capability; the capability without
+    // `manage_metadata`; and both.
+    'record-grant': { userId: 'u_editor', isSystem: false, systemPermissions: [] as string[], permissions: ['article_editor'], positions: ['editor'] },
+    'knowledge-only': { userId: 'u_half', isSystem: false, systemPermissions: ['manage_knowledge_sources'] },
+    'knowledge-author': { userId: 'u_admin', isSystem: false, systemPermissions: ['manage_knowledge_sources', 'manage_metadata'] },
 } as const;
 type CallerName = keyof typeof CALLERS;
 
@@ -160,5 +166,61 @@ describe('[#21124] both transports refuse a datasource write below the capabilit
         expect((await disp.send('PUT', '/meta/view/all_leads', edit)).status).toBe(200);
         expect(rest.store.view.all_leads.label).toBe('Leads (edited)');
         expect(disp.store.view.all_leads.label).toBe('Leads (edited)');
+    });
+});
+
+/**
+ * [ADR-0161 K4, guard one; ruled on #37304, Q2 = B] The same parity for the
+ * table's second row: a `knowledge_source` is written through either transport
+ * only beside `manage_knowledge_sources`. The MCP draft door asks the same
+ * predicate with the human as the caller (`mcp-authoring.test.ts`).
+ */
+describe('[ADR-0161 K4] both transports refuse a knowledge_source write below `manage_knowledge_sources`, alike, writing nothing', () => {
+    const FAQ = { name: 'faq', label: 'FAQ', adapter: 'memory', source: { kind: 'object', object: 'article', content: ['body'] } };
+
+    for (const spelling of ['knowledge_source', 'knowledge_sources', 'knowledgeSources']) {
+        for (const who of ['author', 'holder', 'record-grant'] as const) {
+            it(`PUT /meta/${spelling}/faq × ${who}`, async () => {
+                const rest = bootRest(who);
+                const disp = bootDispatcher(who);
+                const restBefore = clone(rest.store);
+                const dispBefore = clone(disp.store);
+                const viaRest = await rest.send('PUT', `/meta/${spelling}/faq`, FAQ);
+                const viaDispatcher = await disp.send('PUT', `/meta/${spelling}/faq`, FAQ);
+                expect(viaRest).toEqual({ status: 403, code: 'PERMISSION_DENIED' });
+                expect(viaDispatcher).toEqual(viaRest);
+                expect(rest.store).toEqual(restBefore);
+                expect(disp.store).toEqual(dispBefore);
+                expect(rest.calls()).toBe(0);
+                expect(disp.calls()).toBe(0);
+            });
+        }
+    }
+
+    it.each(['POST', 'PATCH', 'DELETE'])('dispatcher: %s on a knowledge_source path is judged at the entry — 403 with no store call', async (verb) => {
+        for (const path of ['/meta/knowledge_source', '/meta/knowledge_sources', '/meta/knowledge_source/faq']) {
+            const disp = bootDispatcher('author');
+            const answer = await disp.send(verb, path, {});
+            expect({ path, ...answer }).toEqual({ path, status: 403, code: 'PERMISSION_DENIED' });
+            expect(disp.calls()).toBe(0);
+        }
+    });
+
+    it('beside, never instead — the capability without `manage_metadata` writes nothing through either transport', async () => {
+        const rest = bootRest('knowledge-only');
+        const disp = bootDispatcher('knowledge-only');
+        expect((await rest.send('PUT', '/meta/knowledge_source/faq', FAQ)).status).toBe(403);
+        expect((await disp.send('PUT', '/meta/knowledge_source/faq', FAQ)).status).toBe(403);
+        expect(rest.store.knowledge_source).toBeUndefined();
+        expect(disp.store.knowledge_source).toBeUndefined();
+    });
+
+    it('a holder of both writes through both transports', async () => {
+        const rest = bootRest('knowledge-author');
+        const disp = bootDispatcher('knowledge-author');
+        expect((await rest.send('PUT', '/meta/knowledge_source/faq', FAQ)).status).toBe(200);
+        expect((await disp.send('PUT', '/meta/knowledge_source/faq', FAQ)).status).toBe(200);
+        expect(rest.store.knowledge_source.faq).toEqual(FAQ);
+        expect(disp.store.knowledge_source.faq).toEqual(FAQ);
     });
 });

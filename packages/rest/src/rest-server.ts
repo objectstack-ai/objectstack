@@ -102,6 +102,9 @@ import {
     // read folds the reason into — and [#22639] the list views the read gate
     // withheld — read only by the item read and its intake-reason helper, moved with
     // them to `meta-item-read-routes.ts` (#23050 slice 13b).
+    // [ADR-0161 K4, guard two] The service name the save door's source admission
+    // resolves (`resolveKnowledgeService`).
+    KNOWLEDGE_SOURCE_ADMISSION_SERVICE,
 } from '@objectstack/metadata-core';
 import { RouteManager, type RouteEntry } from './route-manager.js';
 import { presentedForwardCredential, redeemForwardCredential } from './forward-credential.js';
@@ -5771,6 +5774,7 @@ export class RestServer {
             walledCatalogRefusal: (...a) => this.walledCatalogRefusal(...a),
             resolveProtocol: (...a) => this.resolveProtocol(...a),
             resolveMetaWriteActor: (...a) => this.resolveMetaWriteActor(...a),
+            resolveKnowledgeService: (...a) => this.resolveKnowledgeService(...a),
         };
         registerMetaItemWriteRoutes.call(itemWriteHost, scope);
 
@@ -6203,6 +6207,30 @@ export class RestServer {
         } catch (err) {
             if (isServiceNotRegisteredError(err)) return undefined;
             throw new AuthzStoreUnavailableError('security', err);
+        }
+    }
+
+    /**
+     * [ADR-0161 K4, guard two] The request environment's `knowledge` service,
+     * for the save door's source admission (`authoredKnowledgeSourceRefusal`):
+     * `undefined` when none is registered (nothing loads a knowledge source
+     * there), a throw when one is registered and cannot be resolved (the door
+     * then refuses `503`, never proceeds). `unknown`, deliberately: the door
+     * reads the one member it asks structurally.
+     */
+    private async resolveKnowledgeService(
+        environmentId?: string,
+        req?: any,
+    ): Promise<unknown> {
+        if (!this.kernelServiceProvider) return undefined;
+        try {
+            return await this.kernelServiceProvider(
+                KNOWLEDGE_SOURCE_ADMISSION_SERVICE,
+                await this.resolveRequestEnvironmentId(environmentId, req),
+            );
+        } catch (err) {
+            if (isServiceNotRegisteredError(err)) return undefined;
+            throw err;
         }
     }
 
