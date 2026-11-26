@@ -144,16 +144,16 @@ export const frMetadataForms: NonNullable<TranslationData['metadataForms']> = {
           text: "Texte",
           textarea: "Zone de texte",
           email: "E-mail",
-          url: "URL",
+          url: "Adresse URL",
           phone: "Téléphone",
           password: "Mot de passe",
-          markdown: "Markdown",
-          html: "HTML",
+          markdown: "Texte Markdown",
+          html: "Contenu HTML",
           richtext: "Texte enrichi",
           number: "Nombre",
           currency: "Devise",
           percent: "Pourcentage",
-          date: "Date",
+          date: "Date (sans heure)",
           datetime: "Date et heure",
           time: "Heure",
           boolean: "Booléen",
@@ -165,11 +165,11 @@ export const frMetadataForms: NonNullable<TranslationData['metadataForms']> = {
           lookup: "Recherche (référence)",
           master_detail: "Maître–détail",
           tree: "Arborescence",
-          image: "Image",
+          image: "Fichier image",
           file: "Fichier",
-          avatar: "Avatar",
+          avatar: "Photo de profil",
           video: "Vidéo",
-          audio: "Audio",
+          audio: "Fichier audio",
           formula: "Formule (calculée)",
           summary: "Synthèse (cumul)",
           autonumber: "Numérotation automatique",
@@ -178,12 +178,12 @@ export const frMetadataForms: NonNullable<TranslationData['metadataForms']> = {
           record: "Enregistrement (table à clés)",
           location: "Emplacement (GPS)",
           address: "Adresse",
-          code: "Code",
-          json: "JSON",
+          code: "Code source",
+          json: "Données JSON",
           color: "Couleur",
           rating: "Note",
           slider: "Curseur",
-          signature: "Signature",
+          signature: "Signature manuscrite",
           qrcode: "QR / Code-barres",
           progress: "Progression",
           tags: "Étiquettes",
@@ -332,7 +332,7 @@ export const frMetadataForms: NonNullable<TranslationData['metadataForms']> = {
           text: "Texte",
           number: "Nombre",
           boolean: "Booléen",
-          date: "Date",
+          date: "Date (sans heure)",
           currency: "Devise",
           percent: "Pourcentage"
         }
@@ -533,7 +533,7 @@ export const frMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "Audiences autorisées",
         helpText: "Audiences qu’un nouveau lien peut désigner ; toute autre est refusée. Non défini : lien uniquement. Chaque audience nécessite toujours le lien lui-même : connecté nécessite en plus un utilisateur connecté, et e-mail nécessite en plus que l’adresse du destinataire figure sur la liste du lien.",
         options: {
-          public: "Public",
+          public: "Tout public",
           link_only: "Lien uniquement — toute personne disposant du lien",
           signed_in: "Connecté — utilisateurs connectés disposant du lien",
           email: "E-mail — destinataires listés disposant du lien"
@@ -1019,7 +1019,7 @@ export const frMetadataForms: NonNullable<TranslationData['metadataForms']> = {
           text: "Texte",
           number: "Nombre",
           boolean: "Booléen",
-          date: "Date",
+          date: "Date (sans heure)",
           currency: "Devise",
           percent: "Pourcentage"
         }
@@ -1183,7 +1183,7 @@ export const frMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "Langue",
         helpText: "expression = formule pure ; js = JavaScript en bac à sable",
         options: {
-          expression: "Expression (L1)",
+          expression: "Expression pure (L1)",
           js: "JavaScript (L2 en bac à sable)"
         }
       },
@@ -2216,7 +2216,7 @@ export const frMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "Langue",
         helpText: "expression = formule pure ; js = JavaScript en bac à sable",
         options: {
-          expression: "Expression (L1)",
+          expression: "Expression pure (L1)",
           js: "JavaScript (L2 en bac à sable)"
         }
       },
