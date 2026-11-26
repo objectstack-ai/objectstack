@@ -26,7 +26,6 @@ import {
   studioPaletteItemAddress,
   studioPaletteItemsOf,
   studioPalettePairId,
-  studioSamePageSearch,
 } from './studioPaletteModel';
 
 const PKG = 'com.acme.crm';
@@ -217,10 +216,5 @@ describe('a pick leaves through the shell seam, and re-enters through the host (
     openStudioPaletteAddress('/studio/com.acme.crm/metadata/hook/on_lead?package=com.acme.crm', at, { navigate, reenter });
     expect(navigate).not.toHaveBeenCalled();
     expect(reenter).not.toHaveBeenCalled();
-  });
-
-  it("the re-entry's query matches the router's once the palette's own key is gone, in any order", () => {
-    expect(studioSamePageSearch('?b=2&a=1&palette=1', '?a=1&b=2')).toBe(true);
-    expect(studioSamePageSearch('?package=com.acme.crm&tab=history', '?package=com.acme.crm')).toBe(false);
   });
 });

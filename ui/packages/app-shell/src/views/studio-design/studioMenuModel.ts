@@ -20,10 +20,10 @@
  * `scopeDirectoryEntries`), plus every 常用 Common type
  * ({@link STUDIO_MENU_ALWAYS_TYPES}), so a package that holds no app, page,
  * dashboard, report, flow, permission set or agent still shows where the
- * first is made. Each opens the type's list in the "All metadata" area; an
- * item opened there that a pillar designs still opens its pillar until the
- * pillars become full-screen pages (`areaItemPillarPath`). objectstack#36905
- * — a permission set already has.
+ * first is made. Each opens the type's list in the "All metadata" area,
+ * where an object, a flow and a permission set open their designers
+ * full-screen (objectstack#36903-36905; objectstack#36909 retired the last of
+ * the pillar redirects).
  *
  * And four entries that open no type's list, each in the group of what it
  * holds (the amendment's "Entries that are not a type"):

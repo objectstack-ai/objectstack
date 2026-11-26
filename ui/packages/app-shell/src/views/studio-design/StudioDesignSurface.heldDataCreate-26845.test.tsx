@@ -15,13 +15,16 @@
  * in `StudioDesignSurface.heldDataLeave-26705.test.tsx`; the sheet is a stand-in
  * that asks the host for an object exactly as its security block does
  * (`useSurfaceNavigator`).
+ *
+ * objectstack#36909 — the sheet can name a permission set too; the host opens
+ * its matrix's own address in the package that holds the draft (last describe).
  */
 
 import '@testing-library/jest-dom/vitest';
 import * as React from 'react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, cleanup, waitFor, within, act } from '@testing-library/react';
-import { MemoryRouter, Route, Routes } from 'react-router-dom';
+import { MemoryRouter, Route, Routes, useParams } from 'react-router-dom';
 
 const PKG = 'com.acme.app';
 
@@ -80,21 +83,26 @@ vi.mock('@object-ui/react', async (importOriginal) => {
 
 vi.mock('./StudioAiCopilot', () => ({ StudioChatDock: () => null }));
 // Stands in for the Pending changes sheet: its security block asks the host to
-// open the object a draft names, through the surface channel.
+// open the object (or permission set) a draft names, through the surface channel.
 vi.mock('../../preview/DraftChangesPanel', async () => {
   const { createElement } = await import('react');
   const { useSurfaceNavigator } = await import('./surfaceDeepLinkChannel');
   return {
     DraftChangesPanel: () => {
       const openSurface = useSurfaceNavigator();
+      const requests: Array<{ type: string; name: string }> = [
+        { type: 'object', name: 'acme_task' },
+        { type: 'object', name: 'acme_note' },
+        { type: 'permission', name: 'acme_sales_rep' },
+      ];
       return createElement(
         'div',
         null,
-        ['acme_task', 'acme_note'].map((name) =>
+        requests.map((target) =>
           createElement(
             'button',
-            { key: name, type: 'button', onClick: () => openSurface?.({ type: 'object', name }) },
-            `Pending object/${name}`,
+            { key: `${target.type}/${target.name}`, type: 'button', onClick: () => openSurface?.(target) },
+            `Pending ${target.type}/${target.name}`,
           ),
         ),
       );
@@ -166,6 +174,12 @@ afterEach(() => {
   window.history.replaceState(null, '', '/');
 });
 
+/** A landing marker that names the item it landed on. */
+function Landed({ testId }: { testId: string }) {
+  const { name } = useParams();
+  return <output data-testid={testId}>{name}</output>;
+}
+
 /** The object the header names: its machine name beside the label (objectstack#36904). */
 async function openObjectIs(name: string): Promise<void> {
   await waitFor(
@@ -185,6 +199,9 @@ async function openTask(): Promise<void> {
       <Routes>
         {/* objectstack#36904 — the pair's own object address (the request's landing on a read-only base). */}
         <Route path={`/studio/${PAIR}/metadata/object/:name`} element={<output data-testid="pair-landed" />} />
+        {/* objectstack#36909 — a permission set's matrix address, on the base and on its pair. */}
+        <Route path={`/studio/${PKG}/metadata/permission/:name`} element={<Landed testId="base-permission-landed" />} />
+        <Route path={`/studio/${PAIR}/metadata/permission/:name`} element={<Landed testId="pair-permission-landed" />} />
         <Route path="/studio/:packageId/metadata/*" element={<StudioDesignSurface area="metadata" />} />
         <Route path="/studio/:packageId/:tab" element={<StudioPillarRedirect><StudioDesignSurface /></StudioPillarRedirect>} />
       </Routes>
@@ -259,5 +276,35 @@ describe('a Pending changes request on a read-only base opens the pair\'s addres
     pendingRequest('acme_note');
     await screen.findByTestId('pair-landed', undefined, { timeout: 8000 });
     expect(confirmSpy).not.toHaveBeenCalled();
+  });
+});
+
+/*
+ * objectstack#36909 — a permission set the sheet names opens its matrix's own
+ * address, in the package that holds the draft (`draftScope`): the package on
+ * a writable base, the `.custom` pair on a read-only one. It used to go
+ * through the retired Access pillar's address.
+ */
+describe('a Pending changes request for a permission set opens its matrix address (objectstack#36909)', () => {
+  it('on a writable base: /studio/PKG/metadata/permission/NAME', async () => {
+    await openTask();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Pending permission/acme_sales_rep' }));
+    expect(await screen.findByTestId('base-permission-landed', undefined, { timeout: 8000 })).toHaveTextContent('acme_sales_rep');
+    expect(screen.queryByTestId('pair-permission-landed')).toBeNull();
+    expect(confirmSpy).not.toHaveBeenCalled();
+  });
+
+  it('on a read-only base with a pair: /studio/PAIR/metadata/permission/NAME', async () => {
+    pkgs.readOnlyBase = true;
+    await openTask();
+    await waitFor(() => expect(fetchListedPackageManifests).toHaveBeenCalled());
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 50));
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Pending permission/acme_sales_rep' }));
+    expect(await screen.findByTestId('pair-permission-landed', undefined, { timeout: 8000 })).toHaveTextContent('acme_sales_rep');
+    expect(screen.queryByTestId('base-permission-landed')).toBeNull();
   });
 });

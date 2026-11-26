@@ -174,11 +174,6 @@ export function studioPaletteDeparture(
   return pageQuery(cut < 0 ? '' : to.slice(cut + 1)) === pageQuery(at.search) ? 'stay' : 'reenter';
 }
 
-/** Whether two searches (`?` optional) name the same page, the palette's own keys and the order aside. */
-export function studioSamePageSearch(a: string, b: string): boolean {
-  return pageQuery(a) === pageQuery(b);
-}
-
 /**
  * Opens `to`, picked in the palette on the page at `at`, the way a menu entry
  * leaves (decision 12 of the Studio redesign): another page asks the shell's
