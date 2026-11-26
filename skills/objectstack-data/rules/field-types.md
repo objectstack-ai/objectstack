@@ -24,8 +24,8 @@ const fields = {
 };
 ```
 
-> **Config columns list only real `FieldSchema` keys.** Per-type display knobs
-> beyond these do **not** exist — an unknown field key is REFUSED at parse
+> **Config columns list only real `FieldSchema` keys.** No other per-type display
+> knob exists — an unknown field key is REFUSED at parse
 > (`unrecognized_keys`), so don't invent `theme`, `rows`,
 > `vectorConfig` or `fileAttachmentConfig`.
 
@@ -35,12 +35,12 @@ const fields = {
 |:-----|:------------|:-------|
 | `text` | Single-line strings (names, codes, titles) | `maxLength`, `minLength`, `defaultValue` |
 | `textarea` | Multi-line plain text (notes, descriptions) | `maxLength`, `minLength` |
-| `email` | Email addresses — built-in format validation | `required`, `unique` |
-| `url` | Web URLs — built-in format validation | `required` |
+| `email` | Email addresses — format validated | `required`, `unique` |
+| `url` | Web URLs — format validated | `required` |
 | `phone` | Phone numbers | `format` |
 | `password` | ⚠️ Masked-on-read input. On a generic object the value is stored **PLAINTEXT at rest**. Prefer `secret` for credentials; a generic `password` field triggers a build warning | `minLength`, `maxLength` |
 | `secret` | Reversible **encrypted-at-rest** credential (DB password, API key, token) — encrypted on write via `ICryptoProvider`, masked on read, fail-closed (ADR-0100) | — |
-| `markdown` | Markdown content | `maxLength` |
+| `markdown` | Markdown | `maxLength` |
 | `html` | Raw HTML | `maxLength` |
 | `richtext` | WYSIWYG editor | `maxLength` |
 
@@ -65,7 +65,7 @@ const fields = {
 | Type | When to Use | Config |
 |:-----|:------------|:-------|
 | `boolean` | Checkbox | `defaultValue` |
-| `toggle` | Toggle switch (distinct UI from checkbox) | `defaultValue` |
+| `toggle` | Switch (distinct UI from checkbox) | `defaultValue` |
 
 ## Selection
 
@@ -73,7 +73,7 @@ const fields = {
 |:-----|:------------|:-------|
 | `select` | Single-choice dropdown | `options` (value, label, color, default) |
 | `multiselect` | Tag-style multi-choice | `options`, `max` |
-| `radio` | Radio button group (fewer choices, always visible) | `options` |
+| `radio` | Radio group (fewer choices, always visible) | `options` |
 | `checkboxes` | Checkbox group | `options` |
 
 **Critical:** Every option must have lowercase `value` and human-readable `label`.
@@ -94,6 +94,9 @@ options: [
 | `tree` | Hierarchical self-reference | `reference` — optional; when written, this object's own name (any other object is refused at parse) |
 | `user` | Person picker — a lookup specialized to `sys_user` (reviewer, watchers). Stored identically to `lookup` | `multiple` (collaborators), `defaultValue: 'current_user'`, `deleteBehavior` (no default; declared, as on `lookup`: relationships.md → Delete Behaviors) |
 
+Only these four read `reference`; on any other type but `summary`, publish
+refuses it (`field/reference-on-non-reference-type`).
+
 **`lookupAutofill: [{ target, source, overwrite? }]`** (single-value only): a
 pick copies the picked record's `source` into this object's `target`
 (`unit_price` from a product's `list_price`), in the form and the line-item
@@ -110,15 +113,15 @@ is converted.
 
 | Type | When to Use | Config |
 |:-----|:------------|:-------|
-| `image` | Image files (PNG, JPG, GIF, WebP) | `multiple` |
-| `file` | File attachments | `multiple` |
+| `image` | Images (PNG, JPG, GIF, WebP) | `multiple` |
+| `file` | Attachments | `multiple` |
 | `avatar` | Profile picture | — |
-| `video` | Video files | — |
-| `audio` | Audio files | — |
+| `video` | Video | — |
+| `audio` | Audio | — |
 
 ## Embedded (JSON sub-objects)
 
-Stored as JSON on the parent row, no separate table/FK:
+JSON on the parent row, no separate table/FK:
 
 | Type | When to Use |
 |:-----|:------------|
@@ -141,7 +144,7 @@ Stored as JSON on the parent row, no separate table/FK:
 | `location` | Coordinates (lat/lng) | — |
 | `address` | Structured address (street, city, country) | — |
 | `code` | Syntax-highlighted code editor | `language` |
-| `json` | JSON data (untyped escape hatch) | — (validate with a `json_schema` validation rule on the object) |
+| `json` | JSON (untyped escape hatch) | — (validate with a `json_schema` validation rule on the object) |
 | `color` | Color picker | — |
 | `rating` | Star/heart rating | `max` (default 5) |
 | `slider` | Slider | `min`, `max`, `step` |
@@ -149,7 +152,7 @@ Stored as JSON on the parent row, no separate table/FK:
 | `qrcode` | QR code / barcode | — |
 | `progress` | Progress bar | `min`, `max` |
 | `tags` | Free-form tags | — |
-| `vector` | AI/ML embeddings (semantic search, RAG) | `dimensions` (flat sibling, e.g. `1536`) |
+| `vector` | Embeddings (semantic search, RAG) | `dimensions` (flat sibling, e.g. `1536`) |
 
 ## Common Field Configurations
 
@@ -264,7 +267,7 @@ The `format` is literal text interleaved with `{...}` tokens:
 
 **Rules — get these wrong and records mis-number silently or fail to save:**
 
-1. **Every `{field}` you interpolate must be `required: true`** and set before the record is created. An empty interpolated field makes the record number generation *throw* (the compile lint flags a non-existent field as an error, an optional one as a warning).
+1. **Every `{field}` you interpolate must be `required: true`** and set before the record is created. An empty one makes number generation *throw* (the compile lint flags a non-existent field as an error, an optional one as a warning).
 2. **Put a delimiter between adjacent variable tokens** — `{section}-{zone}{000}`, not `{section}{zone}{000}`. Without one, `('AB','C')` and `('A','BC')` both render prefix `ABC` and share a counter (to keep numbers unique).
 3. **Pad width is a MINIMUM, not a cap.** `{000}` → `001`…`999`, then `1000`.
 4. **Only known tokens are interpolated.** Date tokens are **case-sensitive** — `{yyyy}` parses as a `{field}` reference and renders **empty** (rule 1 applies). Only a spelling no field could have — `{ YYYY }`, `{YYYY-MM}` — is emitted **literally**.

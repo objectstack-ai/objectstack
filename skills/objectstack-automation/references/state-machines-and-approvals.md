@@ -28,7 +28,7 @@ const rule: StateMachineValidation = {
     open:      ['escalated', 'resolved'],
     escalated: ['open', 'resolved'],
     resolved:  ['open', 'closed'],
-    closed:    [],                 // final — no outgoing transitions
+    closed:    [],                 // final
   },
 };
 ```
@@ -123,15 +123,15 @@ the same literal goes inside `defineFlow(...)`, and `` cel`…` `` builds each
 
 ### Send-back for revision (ADR-0044)
 
-Approval centers also model **send back for revision** — distinct from
-`reject` (terminate) and from a comment thread (which keeps the request pending).
+**Send back for revision** is distinct from `reject` (terminate) and from a
+comment thread (the request stays pending).
 Send-back is a **flow movement**: the request finalizes as `returned`, the run
 walks a **`revise`** out-edge to an **`approval_revise`** node (the *revise
 window*) where the record unlocks and the submitter reworks it, and an explicit
 *resubmit* re-enters the approval node over a **declared back-edge**, opening
 round N+1 with a fresh approver slate.
 
-Three pieces author it:
+Three pieces:
 
 1. **`revise` out-edge** — a third branch label alongside `approve` / `reject`,
    targeting an **`approval_revise`** node. It must be that node type: the window
@@ -140,7 +140,7 @@ Three pieces author it:
    `resumeAuthority: 'any'`, so a raw run-resume would walk the back-edge
    unchecked. The node takes **no config** — there is no signal to wait on.
 2. **`type: 'back'` resubmit edge** — the edge from the revise window back into
-   the approval node MUST be typed `'back'`. This is the *only* thing that
+   the approval node MUST be typed `'back'`. Only this
    legalizes the cycle: `registerFlow` validates the graph **minus `back` edges**
    as a DAG, so an **unmarked** cycle is rejected. At
    run time a back-edge traverses normally.
@@ -369,8 +369,9 @@ These are wired on the **graph**, not in node config:
 
 1. **Set `approvalStatusField`** to mirror status onto the row — views and
    formulas can then filter on it without joining `sys_approval_request`.
-2. **Keep `lockRecord: true`** unless you have a strong reason to allow
-   edits while pending — otherwise approvers chase a moving target.
+2. **Keep `lockRecord: true`**, or approvers chase a moving target. It locks
+   the record and its `master_detail` child rows only: a `lookup` child drawn as
+   a body table stays editable (warning `approval-detail-editable-while-pending`).
 3. **Notify the submitter from downstream nodes** wired to the `approve` /
    `reject` edges. Opening already tells each resolved approver
    (`approval.requested`); ⛔ no `notify` node for the opening: it tells
