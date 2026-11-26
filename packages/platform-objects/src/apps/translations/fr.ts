@@ -80,6 +80,7 @@ export const fr: TranslationData = {
         // of `sys_scim_connection_credential.pluralLabel`.
         nav_scim_credentials: { label: 'Identifiants SCIM' },
         nav_api_keys: { label: 'Clés API' },
+        nav_access_directory: { label: 'Postes et autorisations' },
 
         // Centre d’approbations = the Approvals Inbox component (#7234) — the
         // surface with decision actions. The three below are the engine's raw
@@ -138,7 +139,7 @@ export const fr: TranslationData = {
       },
     },
     studio: {
-      label: 'Studio',
+      label: 'App Studio',
       description: 'Atelier de métadonnées pour les développeurs, les analystes et les intégrateurs',
       navigation: {
         group_overview: { label: 'Aperçu' },

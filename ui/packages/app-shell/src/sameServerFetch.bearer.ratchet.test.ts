@@ -25,7 +25,9 @@
  *
  * What counts as bare: a call whose transport is the global `fetch` (`fetch`,
  * `window.fetch`, `globalThis.fetch`, `self.fetch`, or one of those as the
- * fallback of `??` / `||`), and `sharedGetJson` without its transport argument
+ * fallback of `??` / `||`, or a local name bound to any of those, objectstack#37242:
+ * `const f = fetch` everywhere, and in app-shell and the console also `const
+ * doFetch = opts.fetchImpl ?? fetch`, the fallback form below), and `sharedGetJson` without its transport argument
  * (its default is the global `fetch`), when the init it is handed — written
  * inline, or a `const` of this file named as the argument — carries
  * `credentials: 'include'`. The URL is not judged there: a request to another
@@ -41,8 +43,10 @@
  * down as `SchemaRendererProvider`'s `apiFetch` (the console's is
  * `createAuthenticatedFetch({ sameOriginOnly: true })`), read straight off
  * `SchemaRendererContext` and falling back to the global `fetch` only in a host
- * that mounts none. App-shell and the console build `createAuthenticatedFetch`
- * per call.
+ * that mounts none — so there a local `const doFetch = apiFetch ?? fetch` is
+ * the channel, not a bare call. App-shell and the console build
+ * `createAuthenticatedFetch` per call, and a name bound to a `?? fetch`
+ * fallback there is the bare fetch under another name.
  *
  * If this fails on a new call: route it through the host's `apiFetch` (a
  * renderer package) or `createAuthenticatedFetch` (app-shell, the console;
@@ -128,10 +132,6 @@ const ALLOWED: Readonly<Record<string, { count: number; reason: string }>> = {
   'packages/app-shell/src/console/auth/bootstrapStatus.ts': {
     count: 1,
     reason: 'the bootstrap-status read, answered without a session.',
-  },
-  'packages/app-shell/src/console/ai/AiChatPage.tsx': {
-    count: 1,
-    reason: 'the object read of the AI chat page; an open pull request edits this file, so its call moves with that work.',
   },
   'packages/app-shell/src/console/marketplace/marketplaceApi.ts': {
     count: 5,
@@ -228,8 +228,13 @@ function defaultsCredentials(init: ts.Expression | undefined): boolean {
   );
 }
 
-/** The bare cookie-only calls in one source text, as `line :: call` strings. */
-function bareCookieOnlyCalls(fileName: string, text: string): string[] {
+/**
+ * The bare cookie-only calls in one source text, as `line :: call` strings.
+ * `builds` — the file sits in a tree that builds `createAuthenticatedFetch`
+ * (app-shell, the console), where a name bound to a `?? fetch` fallback is bare;
+ * in a renderer package that name is the host's `apiFetch` channel.
+ */
+function bareCookieOnlyCalls(fileName: string, text: string, builds = true): string[] {
   const sf = ts.createSourceFile(
     fileName,
     text,
@@ -246,7 +251,23 @@ function bareCookieOnlyCalls(fileName: string, text: string): string[] {
     }
     ts.forEachChild(n, collect);
   };
+  // objectstack#37242 — a local name bound to the global `fetch` is that
+  // transport under another name: `const f = fetch` anywhere, and `const doFetch
+  // = opts.fetchImpl ?? fetch` where the tree builds the authenticated fetch.
+  const fetchAliases = new Set<string>();
+  const collectAliases = (n: ts.Node): void => {
+    if (ts.isVariableDeclaration(n) && ts.isIdentifier(n.name) && n.initializer) {
+      const bound = unwrap(n.initializer);
+      if (GLOBAL_FETCH.has(bound.getText(sf)) || (builds && isGlobalFetchCallee(bound, sf))) fetchAliases.add(n.name.text);
+    }
+    ts.forEachChild(n, collectAliases);
+  };
   collect(sf);
+  collectAliases(sf);
+  const isBareTransport = (callee: ts.Expression): boolean => {
+    const c = unwrap(callee);
+    return isGlobalFetchCallee(c, sf) || (ts.isIdentifier(c) && fetchAliases.has(c.text));
+  };
   const initIncludes = (arg: ts.Expression | undefined): boolean => {
     if (!arg) return false;
     const a = unwrap(arg);
@@ -256,8 +277,8 @@ function bareCookieOnlyCalls(fileName: string, text: string): string[] {
   const visit = (n: ts.Node): void => {
     if (ts.isCallExpression(n)) {
       const bare =
-        (isGlobalFetchCallee(n.expression, sf) && initIncludes(n.arguments[1])) ||
-        (isGlobalFetchCallee(n.expression, sf) && namesApiPath(n.arguments[0]) && defaultsCredentials(n.arguments[1])) ||
+        (isBareTransport(n.expression) && initIncludes(n.arguments[1])) ||
+        (isBareTransport(n.expression) && namesApiPath(n.arguments[0]) && defaultsCredentials(n.arguments[1])) ||
         (unwrap(n.expression).getText(sf) === 'sharedGetJson' && n.arguments.length < 3 && initIncludes(n.arguments[1]));
       if (bare) {
         const line = sf.getLineAndCharacterOfPosition(n.getStart(sf)).line + 1;
@@ -302,8 +323,10 @@ function scan(): Map<string, string[]> {
   if (scanned) return scanned;
   const found = new Map<string, string[]>();
   const files = [...[...packageSourceRoots().values()].flatMap(sourceFiles), ...sourceFiles(CONSOLE_SRC)];
+  const inside = (root: string, file: string) => !path.relative(root, file).startsWith('..');
   for (const file of files) {
-    const calls = bareCookieOnlyCalls(file, readFileSync(file, 'utf8'));
+    const builds = inside(APP_SHELL_SRC, file) || inside(CONSOLE_SRC, file);
+    const calls = bareCookieOnlyCalls(file, readFileSync(file, 'utf8'), builds);
     if (calls.length) found.set(path.relative(UI_ROOT, file).split(path.sep).join('/'), calls);
   }
   scanned = found;
@@ -344,7 +367,22 @@ describe('cookie-only same-server fetch ratchet (every ui package + console)', (
       ["await fetch('https://cdn.example.com/a.json');", 0],
       ["await authFetch('/api/v1/x');", 0],
       ["await doFetch(`/api/v1/objects/${name}/fields`);", 0],
+      // A local name bound to the global fetch is that fetch (objectstack#37242).
+      ["const doFetch = opts.fetchImpl ?? fetch; await doFetch(`/api/v1/objects/${name}/fields`, { credentials: 'include' });", 1],
+      ["const doFetch = opts.fetchImpl || globalThis.fetch; await doFetch('/api/v1/x');", 1],
+      ["const f = window.fetch; await f(u, { credentials: 'include' });", 1],
+      ["const doFetch = opts.fetchImpl ?? createAuthenticatedFetch(); await doFetch('/api/v1/x', { credentials: 'include' });", 0],
+      ["const doFetch = createAuthenticatedFetch(); await doFetch('/api/v1/x');", 0],
     ];
+    // A renderer package's `?? fetch` name is the host's `apiFetch` channel; a plain alias is still bare.
+    const rendererCases: Array<[string, number]> = [
+      ["const doFetch = apiFetch ?? fetch; await doFetch(listUrl, { credentials: 'include' });", 0],
+      ["const f = fetch; await f('/api/v1/x', { credentials: 'include' });", 1],
+    ];
+    for (const [code, expected] of rendererCases) {
+      const found = bareCookieOnlyCalls('case.ts', `async function run() { ${code} }`, false).length;
+      expect({ code, found, renderer: true }).toEqual({ code, found: expected, renderer: true });
+    }
     for (const [code, expected] of cases) {
       // Inside an async function: at a script's top level `await (x)(…)` parses as a call of `await`.
       const found = bareCookieOnlyCalls('case.ts', `async function run() { ${code} }`).length;

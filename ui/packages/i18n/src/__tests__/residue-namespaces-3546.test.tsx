@@ -685,10 +685,11 @@ describe('objectui#3546 slice seven — the ratchet residue', () => {
     expect(at(builtInLocales.ko, 'detail.historyEmpty')).toBe('아직 기록이 없습니다');
 
     // `Edit in studio` — "<verb> in Studio", with each pack's own Edit verb. The
-    // product name stays Latin in all ten, which is why `Studio` shows up in the
-    // loanword check above.
-    expect(at(builtInLocales.en, 'topbar.designInStudio')).toBe('Design in Studio');
-    expect(at(builtInLocales['zh-Hans'], 'topbar.designInStudio')).toBe('在 Studio 中设计');
+    // product name stays Latin in the packs that keep it, which is why `Studio`
+    // shows up in the loanword check above. The top bar's door names the app by
+    // its display name (ADR-0084): App Studio, and 应用搭建 in a Chinese pack.
+    expect(at(builtInLocales.en, 'topbar.designInStudio')).toBe('Design in App Studio');
+    expect(at(builtInLocales['zh-Hans'], 'topbar.designInStudio')).toBe('在应用搭建中设计');
     expect(at(builtInLocales['zh-Hans'], 'common.edit')).toBe('编辑');
     expect(at(builtInLocales['zh-Hans'], 'common.editInStudio')).toBe('在 Studio 中编辑');
 

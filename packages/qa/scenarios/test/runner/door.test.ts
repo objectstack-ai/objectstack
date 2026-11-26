@@ -12,6 +12,7 @@ import { createHash } from 'node:crypto';
 import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 import { PLATFORM_TOOLS_BY_PACKAGE } from '@objectstack/spec/system';
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -21,6 +22,7 @@ import { makeDriver, parseArgs } from '../../src/runner/cli.js';
 import { BUILTIN_DOOR_RULES, doorArmText, DoorRulesRefusedError, omitSkills, readDoorRules, renderDoorRules } from '../../src/runner/door.js';
 import { DOOR_RULES_CORPUS } from '../../src/runner/door-rules-corpus.js';
 import { ClaudeCodeDriver, DOOR_DENIED_TOOLS, RecordedDriver, type AuthorTask, type DriverInfo } from '../../src/runner/driver.js';
+import { ExternalDriver } from '../../src/runner/drivers/external.js';
 import { renderSummaryTable, summaryTables, type SummaryRecord } from '../../src/runner/summary.js';
 import type { ParsedTurn } from '../../src/runner/transcript.js';
 
@@ -237,6 +239,15 @@ describe('the live driver’s door turn: the draft door, the arm, and no project
     expect(info.rules).toEqual(rules.info);
   });
 
+  it('an external command on contract `/2` given the same flags states the same skills arm, in the same shape', async () => {
+    const dir = skillsDir();
+    const fake = fileURLToPath(new URL('./fixtures/fake-external-driver.mjs', import.meta.url));
+    const external = new ExternalDriver({ command: `${process.execPath} ${fake}`, doorSkillsDir: dir, doorSkillOmit: ['build-app'] });
+    const claude = new ClaudeCodeDriver({ bin, doorSkillsDir: dir, doorSkillOmit: ['build-app'] });
+    expect(external.info().door).toEqual(claude.info().door);
+    expect(Object.keys(external.info().door!).sort()).toEqual(['skills', 'skillsOmitted']);
+  });
+
   it('⛔ an omission without a skills directory, or naming a skill it does not hold, is refused when the driver is made', () => {
     expect(() => new ClaudeCodeDriver({ bin, doorSkillOmit: ['x'] })).toThrow(/--door-skill-omit leaves skills out of --door-skills, which is not given/);
     expect(() => new ClaudeCodeDriver({ bin, doorSkillsDir: skillsDir(), doorSkillOmit: ['x'] })).toThrow(/--door-skill-omit names `x`/);
@@ -262,9 +273,9 @@ describe('door mode on the command line', () => {
     expect(() => parseArgs(['--modes', 'door', '--door-rules', '--modes'])).toThrow(/--door-rules takes a rules file/);
   });
 
-  it('⛔ Codex and an external command are given no door; a replay refuses every door flag as every live flag', () => {
+  it('⛔ Codex is given no door, an external command no rules arm; a replay refuses every door flag as every live flag', () => {
     expect(() => makeDriver('codex', { doorRules: '/r.json' })).toThrow(/door mode is driven by the live `claude` driver/);
-    expect(() => makeDriver('external:./agent.mjs', { doorSkills: '/s' })).toThrow(/door mode is driven by the live `claude` driver/);
+    expect(() => makeDriver('external:./agent.mjs', { doorRules: '/r.json' })).toThrow(/--door-rules applies to the live `claude` driver only/);
     expect(() => makeDriver('recorded:/nowhere.json', { doorSkills: '/s' })).toThrow(/--door-skills applies to the live driver only/);
     expect(() => makeDriver('claude', { doorRulesOmit: 'set-x' })).toThrow(/--door-rules-omit leaves rules out of --door-rules/);
   });

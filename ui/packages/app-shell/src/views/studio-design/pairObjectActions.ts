@@ -55,6 +55,7 @@ import { authoredBuffer, extractDraftBody, formatMetadataError, type AuthoredLay
 import { useMetadataClient } from '../metadata-admin/useMetadata.js';
 import { t as tStudio, tFormat, useMetadataLocale } from '../metadata-admin/i18n.js';
 import {
+  draftReceiptVersion,
   publishedPinOf,
   readDraftForSave,
   useDraftSaveGuard,
@@ -181,6 +182,8 @@ export function usePairObjectActions(
     // objectstack#36726 — the published action each row was loaded at, for the Save's publish.
     recordPublished,
     publish: publishGuarded,
+    // objectstack#37440 — the version a row's own Save wrote, which pins its publish.
+    heldDraftVersion,
     dialog,
   } = useDraftSaveGuard(client, reload);
   React.useEffect(() => {
@@ -416,19 +419,30 @@ export function usePairObjectActions(
         if (!row) continue;
         const isNew = created.has(name);
         try {
+          // objectstack#37440 — the version this row's own draft write returned, which pins its publish.
+          let draftVersion: string | undefined;
           if (isNew) {
             // objectui#11773 — a create is the first-write pin.
-            await client.save('action', name, row.body, { mode: 'draft', packageId: pair, ifNoneMatch: '*', surface: 'studio' });
+            draftVersion = draftReceiptVersion(
+              await client.save('action', name, row.body, { mode: 'draft', packageId: pair, ifNoneMatch: '*', surface: 'studio' }),
+            );
           } else if (
             (await saveGuarded('action', name, row.body, { mode: 'draft', packageId: pair, surface: 'studio' })) === 'reloaded'
           ) {
             reloaded = true;
             setEdited(new Set());
             continue;
+          } else {
+            draftVersion = heldDraftVersion('action', name, pair);
           }
           // objectstack#36726 — a new row's publish asserts no published action of its name.
           if (isNew) recordPublished('action', name, pair, { ifNoneMatch: '*' });
-          const outcome = await publishSavedItem(client, { type: 'action', name, packageId: pair }, row.draft, publishGuarded);
+          const outcome = await publishSavedItem(
+            client,
+            { type: 'action', name, packageId: pair, draftVersion },
+            row.draft,
+            publishGuarded,
+          );
           // The published action moved and the author chose to reload: the pair's read installs it.
           if (!outcome.ok && 'reloaded' in outcome) {
             reloaded = true;
@@ -486,7 +500,7 @@ export function usePairObjectActions(
       return { kind: 'refused', reason };
     }
     return reloaded ? { kind: 'declined' } : { kind: 'saved' };
-  }, [client, created, edited, removed, pairForWrite, saveGuarded, publishGuarded, recordRead, recordPublished, reload]);
+  }, [client, created, edited, removed, pairForWrite, saveGuarded, publishGuarded, heldDraftVersion, recordRead, recordPublished, reload]);
 
   const cancel = React.useCallback(() => {
     setError(null);

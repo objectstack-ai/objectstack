@@ -110,10 +110,12 @@
  * rendered) — the hop count is not part of their claim.
  */
 
+// Paid during collection: the pages' source reach loads it lazily (check:test-source-alias).
+import '@objectstack/lint';
 import '@testing-library/jest-dom/vitest';
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import React from 'react';
-import { render, screen } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
 import {
   MemoryRouter,
   Routes,
@@ -122,6 +124,28 @@ import {
   useLocation,
   useParams,
 } from 'react-router-dom';
+
+// objectstack#37565 — the viewer's capability set, as `usePermissions()` answers it: a holder of
+// Setup's entry capability unless a case says otherwise (`undefined`: no reported set).
+const HOLDER = ['studio.access', 'setup.access'];
+const held = vi.hoisted(() => ({ capabilities: ['studio.access', 'setup.access'] as string[] | undefined }));
+vi.mock('@object-ui/permissions', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@object-ui/permissions')>();
+  // One object per answer, as the hook's own identity is (objectui#6724).
+  const answers = new Map<string[] | undefined, ReturnType<typeof actual.usePermissions>>();
+  return {
+    ...actual,
+    usePermissions: () => {
+      const base = actual.usePermissions();
+      let answer = answers.get(held.capabilities);
+      if (!answer) answers.set(held.capabilities, (answer = { ...base, systemPermissions: held.capabilities }));
+      return answer;
+    },
+  };
+});
+afterEach(() => {
+  held.capabilities = HOLDER;
+});
 
 // ---------------------------------------------------------------------------
 // Mocks — everything that takes part in the routing decision (AppContent's
@@ -360,6 +384,8 @@ function renderConsoleAt(initialUrl: string) {
 }
 
 const pathname = () => screen.getByTestId('pathname').textContent;
+/** objectstack#37565 — the environment directory's Setup page. */
+const SETUP_DIRECTORY = '/apps/setup/component/security/access-directory';
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -408,10 +434,8 @@ describe('AppContent pseudo-routes — live input surface stays special (objectu
   });
 
   it.each([
-    ['/apps/ghost/metadata', '/studio/~all/metadata'],
     ['/apps/ghost/metadata/_diagnostics', '/studio/~all/metadata/_diagnostics'],
     ['/apps/ghost/metadata/object/sys_user', '/studio/~all/metadata/object/sys_user'],
-    ['/apps/ghost/component/metadata/directory', '/studio/~all/metadata'],
   ])('unresolved app segment: the retired Setup metadata URL %s still takes the metadata branch, into Studio', async (url, studio) => {
     // The metadata flag must still fire for these (the branch that redirects
     // them is the pseudo-route's), so they reach Studio and never "App not
@@ -422,6 +446,20 @@ describe('AppContent pseudo-routes — live input surface stays special (objectu
     expect(chain).toEqual([url, studio]);
     expect(screen.queryByTestId('app-not-available-retry')).not.toBeInTheDocument();
   });
+
+  // objectstack#37565 — the directory itself moved to Setup → Access Control →
+  // Positions and Permissions: still the metadata branch, still one hop.
+  it.each(['/apps/ghost/metadata', '/apps/ghost/component/metadata/directory'])(
+    'unresolved app segment: the retired Setup directory URL %s still takes the metadata branch, onto Setup\'s directory page',
+    async (url) => {
+      const chain = renderConsoleAt(url);
+
+      await waitFor(() => expect(chain[chain.length - 1]).toBe(SETUP_DIRECTORY));
+      expect(chain).toEqual([url, SETUP_DIRECTORY]);
+      expect(screen.queryByTestId('studio-probe')).not.toBeInTheDocument();
+      expect(screen.queryByTestId('app-not-available-retry')).not.toBeInTheDocument();
+    },
+  );
 
   it('unresolved app segment: the host rewrite reaches Studio in ONE hop', async () => {
     // Lifted out of the table above so the hop COUNT can be asserted, not just
@@ -503,7 +541,6 @@ describe('AppContent pseudo-routes — zero-app deployment (objectui#3638)', () 
     ['/apps/setup/system/marketplace', 'marketplace-page'],
     // Retired into Studio (objectstack ADR-0146 D1, N-28): still the
     // pseudo-route branch, which is what redirects them.
-    ['/apps/setup/metadata', 'studio-probe'],
     ['/apps/setup/metadata/object', 'studio-probe'],
     ['/apps/setup/metadata/datasource', 'metadata-resource-list-page'],
     ['/apps/setup/component/metadata/resource?type=datasource', 'metadata-resource-list-page'],
@@ -515,6 +552,16 @@ describe('AppContent pseudo-routes — zero-app deployment (objectui#3638)', () 
     expect(await screen.findByTestId(testid)).toBeInTheDocument();
     // Not the "no apps configured" empty state, and not a bounce to the host.
     expect(screen.queryByTestId('create-first-app-btn')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('root-landing')).not.toBeInTheDocument();
+  });
+
+  // objectstack#37565 — the directory is Setup's now: the pseudo-route branch still redirects it, in one hop.
+  it('with zero apps /apps/setup/metadata still reaches the pseudo-route branch, onto Setup\'s directory page', async () => {
+    metadataApps = [];
+    const chain = renderConsoleAt('/apps/setup/metadata');
+
+    await waitFor(() => expect(chain[chain.length - 1]).toBe(SETUP_DIRECTORY));
+    expect(chain).toEqual(['/apps/setup/metadata', SETUP_DIRECTORY]);
     expect(screen.queryByTestId('root-landing')).not.toBeInTheDocument();
   });
 });

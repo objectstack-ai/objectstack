@@ -4,8 +4,8 @@
  * [ADR-0066 ⑨] Authoring-time validation for capability references.
  *
  * `requiredPermissions` (on objects, fields, apps, actions, flows, list views
- * and dashboards) and `systemPermissions` (on permission sets) are free capability
- * strings. A typo
+ * and dashboards), a book's `audience.systemPermission` (ADR-0046 §6.7) and
+ * `systemPermissions` (on permission sets) are free capability strings. A typo
  * — `mange_users` for `manage_users` — is Zod-valid and fails CLOSED at runtime
  * (the caller is denied), which is the safe direction but UNDISCOVERABLE: nothing
  * tells the author the referenced capability exists nowhere. This rule closes
@@ -131,7 +131,7 @@ export function validateCapabilityReferences(stack: AnyRec): CapabilityRefFindin
     'Fix the capability name, or declare it with `defineCapability` (`stack.capabilities`) or on a ' +
     'permission set’s `systemPermissions`.';
 
-  const flag = (cap: string, where: string, path: string) => {
+  const flag = (cap: string, where: string, path: string, key = 'requiredPermissions') => {
     if (known.has(cap)) return;
     findings.push({
       severity: 'warning',
@@ -142,7 +142,7 @@ export function validateCapabilityReferences(stack: AnyRec): CapabilityRefFindin
       // positions walked and why it only warns is
       // `os explain capability-reference-unknown`.
       message:
-        `requiredPermissions names capability "${cap}", which no built-in, \`defineCapability\` ` +
+        `${key} names capability "${cap}", which no built-in, \`defineCapability\` ` +
         `or \`systemPermissions\` grant provides, so this gate fails closed`,
       hint,
     });
@@ -281,6 +281,19 @@ export function validateCapabilityReferences(stack: AnyRec): CapabilityRefFindin
     for (const cap of asCapArray(board.requiredPermissions)) {
       flag(cap, `dashboard "${bName}"`, `dashboards[${i}].requiredPermissions`);
     }
+  }
+
+  // ── [ADR-0046 §6.7] Books: a `{ systemPermission }` audience is the same
+  //    capability gate on a manual — the docs reads serve its pages only to a
+  //    caller holding the capability, so a misspelled one hides the manual
+  //    from everyone, silently. ──
+  for (const [i, book] of recordsOf(stack.books).entries()) {
+    const audience = book.audience;
+    if (!audience || typeof audience !== 'object' || Array.isArray(audience)) continue;
+    const cap = (audience as AnyRec).systemPermission;
+    if (typeof cap !== 'string' || cap.length === 0) continue;
+    const bName = typeof book.name === 'string' ? book.name : `(book ${i})`;
+    flag(cap, `book "${bName}"`, `books[${i}].audience.systemPermission`, 'audience.systemPermission');
   }
 
   return findings;

@@ -77,6 +77,7 @@ vi.mock('../metadata-admin/useMetadata', async (importOriginal) => {
 
 import { useAppShellBranding } from '@object-ui/layout';
 import { StudioMenu, StudioMenuProvider, StudioMenuTrigger } from './StudioMenu';
+import { StudioEntryPermissionsProvider } from './studioEntryPermissions';
 import { STUDIO_MENU_ADVANCED_COOKIE, STUDIO_MENU_COOKIE } from './studioMenuModel';
 import { STUDIO_ACCENT, STUDIO_ACCENT_HSL } from './studio-tokens';
 
@@ -125,12 +126,16 @@ function Shell({ segment }: { segment: string }) {
   );
 }
 
-function renderAt(path: string, segment = PKG) {
+/** `held`: the capability set Studio's entry gate read, when the test names one. */
+function renderAt(path: string, segment = PKG, held?: readonly string[]) {
+  const routes = (
+    <Routes>
+      <Route path="*" element={<Shell segment={segment} />} />
+    </Routes>
+  );
   return render(
     <MemoryRouter initialEntries={[path]}>
-      <Routes>
-        <Route path="*" element={<Shell segment={segment} />} />
-      </Routes>
+      {held ? <StudioEntryPermissionsProvider value={held}>{routes}</StudioEntryPermissionsProvider> : routes}
       <Where />
     </MemoryRouter>,
   );
@@ -275,9 +280,9 @@ describe('the group labels (objectstack#37201)', () => {
       'studio-menu-advanced-group-security',
     ]);
     // Inside the closed fold: out of the accessibility tree until it opens.
+    // objectstack#37565 — the environment directory left the menu for Setup.
     expect(within(screen.getByTestId('studio-menu-advanced-group-security')).getAllByRole('link', { hidden: true }).map((a) => a.getAttribute('data-testid'))).toEqual([
       'studio-menu-entry-owd',
-      'studio-menu-entry-environment',
     ]);
   });
 });
@@ -457,17 +462,22 @@ describe('the 「高级」 fold (objectstack#37201)', () => {
 describe('~org and ~all draw no fold (objectstack#37201)', () => {
   it.each([
     ['~org', '/studio/~org/metadata/flow?source=runtime'],
-    ['~all', '/studio/~all/metadata'],
+    // objectstack#37565 — the leg's root redirects to Setup; an item page is what still draws this menu.
+    ['~all', '/studio/~all/metadata/permission/admin?scope=environment'],
   ])('%s: its entries flat, in the table\'s order, under their groups\' labels', (segment, path) => {
-    renderAt(path, segment);
+    renderAt(path, segment, ['studio.access', 'setup.access']);
     expect(screen.queryByTestId('studio-menu-advanced-toggle')).toBeNull();
     expect(screen.queryByTestId('studio-menu-advanced')).toBeNull();
     const security = screen.getByTestId('studio-menu-group-security');
     expect(within(security).getAllByRole('link').map((a) => a.getAttribute('data-testid'))).toEqual([
       'studio-menu-entry-type:permission',
       'studio-menu-entry-type:position',
-      'studio-menu-entry-environment',
     ]);
+    // objectstack#37565 — each catalog row opens its list on Setup's directory page, for whoever may open Setup.
+    expect(within(security).getByTestId('studio-menu-entry-type:position')).toHaveAttribute(
+      'href',
+      '/apps/setup/component/security/access-directory/position?scope=environment',
+    );
     for (const a of within(security).getAllByRole('link')) expect(a).toBeVisible();
     expect(security.querySelector('[data-sidebar="group-label"]')).toHaveTextContent(/^Access$/);
     expect(screen.getByTestId('studio-menu-entry-orgFlows')).toBeVisible();
@@ -476,6 +486,24 @@ describe('~org and ~all draw no fold (objectstack#37201)', () => {
     expect(automation.querySelector('[data-sidebar="group-label"]')).toHaveTextContent(/^Automation$/);
     expect(screen.queryByTestId('studio-menu-group-count-automation')).toBeNull();
     expect(within(automation).getAllByRole('link').map((a) => a.getAttribute('data-testid'))).toEqual(['studio-menu-entry-orgFlows']);
+  });
+
+  // objectstack#37565 — Setup's page is no door for a principal who may not open Setup: the row keeps Studio's list.
+  it.each([
+    ['~org', '/studio/~org/metadata/flow?source=runtime', ['studio.access']],
+    ['~all', '/studio/~all/metadata/permission/admin?scope=environment', ['studio.access']],
+    ['~all', '/studio/~all/metadata/permission/admin?scope=environment', undefined],
+  ] as const)('%s on %s, holding %j: a catalog row keeps its list in Studio', (segment, path, held) => {
+    renderAt(path, segment, held);
+    const security = screen.getByTestId('studio-menu-group-security');
+    expect(within(security).getByTestId('studio-menu-entry-type:position')).toHaveAttribute(
+      'href',
+      '/studio/~all/metadata/position?scope=environment',
+    );
+    expect(within(security).getByTestId('studio-menu-entry-type:permission')).toHaveAttribute(
+      'href',
+      '/studio/~all/metadata/permission?scope=environment',
+    );
   });
 });
 

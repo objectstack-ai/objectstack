@@ -119,7 +119,9 @@ function grantQl() {
             { id: 'g2', user_id: 'ghost', permission_set_id: 'ps_crm_admin', permission_set: 'crm_admin', organization_id: 'orgA' },
             { id: 'g3', user_id: 'u1', permission_set_id: 'ps_crm_admin', permission_set: 'crm_admin', organization_id: 'orgB' },
         ],
-        sys_permission_set: [{ id: 'ps_crm_admin', name: 'crm_admin', object_permissions: '{}' }],
+        // `crm_admin` also grants the `crm.read_rules` capability a
+        // `{ systemPermission }` manual reads (ADR-0046 §6.7).
+        sys_permission_set: [{ id: 'ps_crm_admin', name: 'crm_admin', object_permissions: '{}', system_permissions: ['crm.read_rules'] }],
         sys_position: [], sys_position_permission_set: [], sys_user_position: [],
     };
     const match = (opts: any) => (row: any) => Object.entries(opts?.where ?? {}).every(([k, v]) =>
@@ -314,6 +316,65 @@ describe('[#35584] on an OAuth grant the audience reads the delegating person\'s
     it('an AI service account keeps its own sets', async () => {
         const account = { userId: 'svc_bot', isSystem: false, principalKind: 'agent', positions: [], permissions: ['crm_admin'] };
         expect(await reach(await bridgeFor(account))).toEqual(OPEN);
+    });
+});
+
+// [ADR-0046 §6.7] A `{ systemPermission }` manual: the same gate, read off the
+// caller's capabilities — through whichever set grants them — and, on an OAuth
+// grant, off the delegating person's, never the envelope's.
+describe('a manual gated on a capability: found and read by its holders only', () => {
+    const CAPABILITY_BOOKS = [BOOKS[0], { ...BOOKS[1], audience: { systemPermission: 'crm.read_rules' } }];
+    const items = { doc: DOCS, book: CAPABILITY_BOOKS };
+    const member = (systemPermissions: unknown) => ({ userId: 'u1', isSystem: false, permissions: [], systemPermissions });
+
+    it('a session holding the capability finds and reads the page; one without it neither finds nor reads it', async () => {
+        expect(await reach(await bridgeFor(member(['crm.read_rules']), items))).toEqual(OPEN);
+        expect(await reach(await bridgeFor(member(['api.read']), items))).toEqual(CLOSED);
+    });
+
+    it('the capability is not a set: a session holding a SET named crm_admin, and no capability, stays closed', async () => {
+        expect(await reach(await bridgeFor({ ...member([]), permissions: ['crm_admin'] }, items))).toEqual(CLOSED);
+    });
+
+    it('fails closed when the caller carries no capability list', async () => {
+        expect(await reach(await bridgeFor({ userId: 'u1', isSystem: false, permissions: [] }, items))).toEqual(CLOSED);
+    });
+
+    it('OAuth: the delegating person\'s own grants decide — the holder opens it, a non-holder does not', async () => {
+        expect(await reach(await bridgeFor(await oauthEnvelope('admin', ['data:read']), items))).toEqual(OPEN);
+        expect(await reach(await bridgeFor(await oauthEnvelope('u1', ['data:read']), items))).toEqual(CLOSED);
+    });
+
+    it('OAuth, no union: the envelope carrying the capability opens nothing the person does not hold', async () => {
+        const envelope = { ...(await oauthEnvelope('u1', ['data:read'])), systemPermissions: ['crm.read_rules'] };
+        expect(await reach(await bridgeFor(envelope, items))).toEqual(CLOSED);
+    });
+
+    // A stored doc bound to no package carries no `_packageId`, and so is in
+    // every package scope: a manual claiming by namespace leaves it alone, a
+    // catch-all would gate it on the manual's capability.
+    const LOOSE = { name: 'loose_payment_note', label: '回款备注', content: '# 回款备注\n\n回款登记后核对。\n' };
+    const SETUP_MANUAL = (include: string) => ({
+        name: 'setup_manual',
+        slug: 'setup',
+        label: 'Setup',
+        audience: { systemPermission: 'setup.access' },
+        _packageId: 'com.objectstack.setup',
+        groups: [{ key: 'all', label: 'Documentation', include }],
+    });
+    const looseReach = async (include: string) => {
+        const bridge = await bridgeFor(member(['api.read']), { doc: [...DOCS, LOOSE], book: [...BOOKS, SETUP_MANUAL(include)] });
+        const found = (await bridge.searchPackageDocs({ terms: ['回款'] }, MAX)).results.map((r: any) => r.name);
+        const reads = await bridge.readPackageDoc({ name: 'loose_payment_note' }).then(() => true, () => false);
+        return { found: found.includes('loose_payment_note'), reads };
+    };
+
+    it('an unstamped doc no other manual claims stays found and read by a member beside a namespaced manual', async () => {
+        expect(await looseReach('setup_*')).toEqual({ found: true, reads: true });
+    });
+
+    it('control: a catch-all manual would claim that doc and shut the member out', async () => {
+        expect(await looseReach('*')).toEqual({ found: false, reads: false });
     });
 });
 

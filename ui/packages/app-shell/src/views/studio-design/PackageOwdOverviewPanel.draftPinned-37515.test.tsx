@@ -72,6 +72,10 @@ interface Server {
   draftReadPackages: Array<string | undefined>;
   /** Run once when the Save reads `name`'s layers: another writer acting in the Save's own window. */
   onSaveLayers: Map<string, () => void>;
+  /** objectstack#37440 — run once right before `name`'s next publish reaches the door: another writer in between. */
+  onPublish: Map<string, () => void>;
+  /** objectstack#37440 — the `draftVersion` each publish named, in order. */
+  publishDraftPins: Array<string | undefined>;
   /** Held list reads, released by the test (the load-sequencing case). */
   listGates: Deferred[];
   seq: number;
@@ -113,6 +117,8 @@ function newServer(): Server {
     resets: [],
     draftReadPackages: [],
     onSaveLayers: new Map(),
+    onPublish: new Map(),
+    publishDraftPins: [],
     listGates: [],
     seq: 0,
   };
@@ -163,8 +169,16 @@ function makeClient(server: Server, saving: { on: boolean }) {
       server.draftVersions.set(name, version);
       return { success: true, version, state: 'draft' };
     },
-    publish: async (_t: string, name: string, opts?: { ifMatch?: string; ifNoneMatch?: '*' }) => {
+    publish: async (_t: string, name: string, opts?: { ifMatch?: string; ifNoneMatch?: '*'; draftVersion?: string }) => {
       server.publishes.push({ name, ifMatch: opts?.ifMatch, ifNoneMatch: opts?.ifNoneMatch });
+      server.publishDraftPins.push(opts?.draftVersion);
+      const between = server.onPublish.get(name);
+      server.onPublish.delete(name);
+      between?.();
+      // objectstack#37440 — the door judges the draft pin first, against the draft row.
+      if (opts?.draftVersion !== undefined && opts.draftVersion !== (server.draftVersions.get(name) ?? null)) {
+        throw await conflictRefusal(name, server.draftVersions.get(name) ?? null);
+      }
       const head = server.published.has(name) ? (server.publishedVersions.get(name) ?? null) : null;
       if (opts?.ifMatch !== undefined && opts.ifMatch !== head) throw await conflictRefusal(name, head);
       if (opts?.ifNoneMatch !== undefined && head !== null) throw await conflictRefusal(name, head);
@@ -179,8 +193,10 @@ function makeClient(server: Server, saving: { on: boolean }) {
       server.draftVersions.delete(name);
       return { success: true, version };
     },
-    reset: async (_t: string, name: string, opts?: { state?: string }) => {
+    reset: async (_t: string, name: string, opts?: { state?: string; ifMatch?: string }) => {
       if (opts?.state === 'draft') {
+        const head = server.draftVersions.get(name) ?? null;
+        if (opts.ifMatch !== undefined && opts.ifMatch !== head) throw await conflictRefusal(name, head);
         server.resets.push(name);
         server.drafts.delete(name);
         server.draftVersions.delete(name);
@@ -466,5 +482,39 @@ describe('the OWD overview — loads are sequenced (objectstack#37515)', () => {
     await nextDialog();
     expect(pins(server.publishes.slice(before))).toEqual([['a_alpha', 'pub:alpha0', undefined]]);
     expect(liveSharing(server, 'a_alpha')).toBe('public_read');
+  });
+});
+
+describe('the OWD overview — a row\'s publish promotes only the draft its own save wrote (objectstack#37440)', () => {
+  it('PIN: another writer\'s draft lands between the row\'s draft save and its publish: nothing goes live, their draft is kept, nothing is asked', async () => {
+    const { saving } = renderPanel(server);
+    await pick('b_beta', PUBLIC_READ);
+    let theirs = '';
+    server.onPublish.set('b_beta', () => {
+      theirs = anotherWriterSavesDraft(server, 'b_beta', { description: 'in between' });
+    });
+
+    await save(saving);
+    // The row reads as refused (the door's own refusal), edits on the page.
+    expect(await screen.findByText(/^Beta: /, undefined, WAIT)).toBeInTheDocument();
+    // The publish named the draft this Save wrote: its own receipt.
+    expect(server.publishDraftPins).toEqual(['draft:mine1']);
+    expect(liveSharing(server, 'b_beta')).toBe('private');
+    // Their draft stands, never taken back as if it were this Save's.
+    expect(server.draftVersions.get('b_beta')).toBe(theirs);
+    expect(server.drafts.get('b_beta')).toMatchObject({ description: 'in between' });
+    expect(server.resets).toEqual([]);
+    expect(screen.queryByTestId('draft-conflict-dialog')).toBeNull();
+    expect(screen.getByTestId('owd-dirty-b_beta')).toBeInTheDocument();
+  });
+
+  it('CONTROL: with no other writer in between, the row\'s draft goes live', async () => {
+    const { saving } = renderPanel(server);
+    await pick('b_beta', PUBLIC_READ);
+
+    await save(saving);
+    await waitFor(() => expect(liveSharing(server, 'b_beta')).toBe('public_read'), WAIT);
+    expect(server.drafts.has('b_beta')).toBe(false);
+    expect(server.resets).toEqual([]);
   });
 });

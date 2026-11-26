@@ -59,7 +59,8 @@
 
 import { PLATFORM_ALWAYS_ON_CAPABILITIES } from '@objectstack/spec/kernel';
 import { readEnvWithDeprecation } from '@objectstack/types';
-import { CAPABILITY_PROVIDERS } from './capability-providers.js';
+import { CAPABILITY_PROVIDERS, KNOWLEDGE_STORE_PROVIDERS } from './capability-providers.js';
+import type { CapabilityIdentities, KnowledgeStoreSpec } from './capability-providers.js';
 import { resolveStackCollection } from './stack-collections.js';
 
 type Bag = Record<string, unknown>;
@@ -153,6 +154,19 @@ export interface CapabilityArgumentInput {
   readonly providerModule?: Readonly<Record<string, unknown>>;
   /** The environment the mail and SMS readers read. Defaults to `process.env`. */
   readonly env?: Readonly<Record<string, string | undefined>>;
+  /**
+   * The platform database this boot resolved, when it resolved one itself:
+   * its driver kind (`postgres`, `sqlite`, `turso`, …) and URL. Read by the
+   * `knowledge` store choice ({@link resolveKnowledgeStore}); absent, the
+   * choice reads `OS_DATABASE_URL`, else `DATABASE_URL`, from `env`.
+   */
+  readonly database?: CapabilityDatabase;
+}
+
+/** The platform database a boot resolved, as {@link CapabilityArgumentInput.database} carries it. */
+export interface CapabilityDatabase {
+  readonly driver?: string;
+  readonly url?: string;
 }
 
 /** One provider's constructor argument. */
@@ -240,6 +254,102 @@ export function resolveCapabilityArgument(token: string, input: CapabilityArgume
     return { argument: storage.options, localStorageRoot: storage.localRoot };
   }
   return { argument: undefined };
+}
+
+// ── extras ────────────────────────────────────────────────────────────────
+
+/** One extra provider a served boot mounts after a token's main provider, and what it is built with. */
+export interface CapabilityExtra {
+  readonly pkg: string;
+  readonly export: string;
+  readonly identities: CapabilityIdentities;
+  /** Construct the provider with this, or with no argument when `undefined`. */
+  readonly argument?: unknown;
+  /**
+   * The package is an optional dependency of the boots that mount it: one
+   * that cannot import it warns and goes on without it, on `os serve` and on
+   * the verification handle alike.
+   */
+  readonly optional?: boolean;
+}
+
+/**
+ * The extra providers a served boot mounts for `token` after its main
+ * provider, each with its constructor argument — the rule `os serve` and the
+ * handle both read in place of a row's `extras`.
+ *
+ *  - `knowledge`: the one vector store {@link resolveKnowledgeStore} chooses
+ *    for the platform database.
+ *  - any other token: its row's `extras`, each with no argument.
+ *
+ * Each boot skips an extra it already holds (`providesCapability`), as it
+ * does for a row's `extras`.
+ */
+export function resolveCapabilityExtras(token: string, input: CapabilityArgumentInput): CapabilityExtra[] {
+  if (token === 'knowledge') {
+    const { store, argument } = resolveKnowledgeStore(input);
+    return [
+      { pkg: store.pkg, export: store.export, identities: store.identities, argument, ...(store.optional ? { optional: true } : {}) },
+    ];
+  }
+  return (CAPABILITY_PROVIDERS[token]?.extras ?? []).map((extra) => ({ ...extra }));
+}
+
+// ── knowledge ─────────────────────────────────────────────────────────────
+
+/** A PostgreSQL URL, as the pgvector store reads one. */
+const POSTGRES_URL = /^postgres(ql)?:\/\//i;
+
+/**
+ * The vector store `requires: ['knowledge']` mounts beside the knowledge
+ * service, and what it is constructed with (ADR-0161):
+ *
+ *  - the platform database is PostgreSQL — its resolved driver is `postgres`,
+ *    or its URL is a `postgres://` / `postgresql://` one — ⇒ `pgvector`
+ *    (`@objectstack/knowledge-pgvector`), handed that URL, so the store's
+ *    tables live in the platform's own database, in a schema of their own;
+ *  - any other database ⇒ `turso` (`@objectstack/knowledge-turso`), a libSQL
+ *    file of its own: `knowledge.db` in the directory the boot keeps the
+ *    default platform database in, and never that database's file —
+ *    `<OS_HOME>/data/` when `OS_HOME` is set (`os start --home` sets it),
+ *    else the app's `.objectstack/data/`. A database named by URL does not
+ *    move it. The operator can name another store in the `knowledge.turso_url`
+ *    setting, which the store holds to that data directory and refuses when
+ *    it carries a NUL byte, written out or percent-encoded, before it reaches
+ *    the libSQL client. An in-memory platform database (`:memory:`, or the
+ *    `memory` driver) gets an in-memory store (`:memory:`).
+ *
+ * The database is the one the boot resolved ({@link CapabilityArgumentInput.database});
+ * a boot that resolved none (a host whose own plugin provides the driver)
+ * is judged by `OS_DATABASE_URL`, else `DATABASE_URL` — the variables the
+ * pgvector store reads its URL from.
+ */
+export function resolveKnowledgeStore(input: CapabilityArgumentInput): {
+  store: KnowledgeStoreSpec;
+  argument: Record<string, unknown>;
+} {
+  const env = input.env ?? (typeof process !== 'undefined' ? process.env : {});
+  const url = input.database
+    ? input.database.url?.trim()
+    : (env.OS_DATABASE_URL?.trim() || env.DATABASE_URL?.trim() || undefined);
+  const postgres = input.database?.driver === 'postgres' || (url !== undefined && POSTGRES_URL.test(url));
+  if (postgres) {
+    return {
+      store: KNOWLEDGE_STORE_PROVIDERS.pgvector,
+      argument: url !== undefined && POSTGRES_URL.test(url) ? { url } : {},
+    };
+  }
+  // An in-memory platform database keeps nothing past the process, and its
+  // store keeps nothing either: a file beside it would outlive every row it
+  // indexes (the verification handle boots an in-memory SQLite).
+  if (url === ':memory:' || input.database?.driver === 'memory') {
+    return { store: KNOWLEDGE_STORE_PROVIDERS.turso, argument: { url: ':memory:' } };
+  }
+  const home = env.OS_HOME?.trim();
+  return {
+    store: KNOWLEDGE_STORE_PROVIDERS.turso,
+    argument: { projectRoot: input.packageRoot, ...(home ? { stateDir: home } : {}), urlFromSettings: true },
+  };
 }
 
 // ── storage ───────────────────────────────────────────────────────────────

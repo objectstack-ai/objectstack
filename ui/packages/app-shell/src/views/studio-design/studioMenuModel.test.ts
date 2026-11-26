@@ -59,14 +59,16 @@ describe('the menu groups (objectstack#36899, ADR-0084 amended)', () => {
     expect(STUDIO_MENU_GROUPS).toEqual(['data', 'ui', 'automation', 'system', 'security', 'ai']);
   });
 
-  it('a package: every type in its domain\'s group, and the four entries that are not a type', () => {
+  // objectstack#37565 — rewritten on purpose: the fourth entry that is not a type, the cross-package
+  // environment directory, left the menu for Setup (ADR-0084, amended 2026-11-26, question 5).
+  it('a package: every type in its domain\'s group, and the three entries that are not a type', () => {
     const menu = buildStudioMenu({ scope: studioMenuScope(PKG), types: TYPES, counts: { object: 4 } });
     expect(keysOf(menu)).toEqual({
       data: ['type:object'],
       ui: ['type:view'],
       automation: ['type:flow', 'orgFlows'],
       system: ['type:datasource', 'diagnostics'],
-      security: ['type:permission', 'owd', 'environment'],
+      security: ['type:permission', 'owd'],
       ai: ['type:agent'],
     });
     const entry = (key: string) => menu.flatMap((g) => g.entries).find((e) => e.key === key)!;
@@ -78,7 +80,9 @@ describe('the menu groups (objectstack#36899, ADR-0084 amended)', () => {
     expect(entry('diagnostics').to).toBe(`/studio/${PKG}/metadata/_diagnostics`);
     // objectstack#36905 — the overview's own route.
     expect(entry('owd').to).toBe(`/studio/${PKG}/owd`);
-    expect(entry('environment').to).toBe('/studio/~all/metadata');
+    // objectstack#37565 — no entry opens the cross-package leg's directory any more.
+    expect(menu.flatMap((g) => g.entries).map((e) => e.kind)).not.toContain('environment');
+    expect(menu.flatMap((g) => g.entries).some((e) => e.to.startsWith('/studio/~all/'))).toBe(false);
   });
 
   // objectstack#37201 — rewritten on purpose: a group is drawn only where it holds an entry
@@ -88,7 +92,7 @@ describe('the menu groups (objectstack#36899, ADR-0084 amended)', () => {
     expect(keysOf(menu)).toEqual({
       automation: ['orgFlows'],
       system: ['diagnostics'],
-      security: ['owd', 'environment'],
+      security: ['owd'],
     });
   });
 
@@ -97,15 +101,32 @@ describe('the menu groups (objectstack#36899, ADR-0084 amended)', () => {
       { type: 'position', domain: 'security' },
       { type: 'permission', domain: 'security' },
     ];
-    const menu = buildStudioMenu({ scope: studioMenuScope(segment), types, counts: {} });
+    const menu = buildStudioMenu({ scope: studioMenuScope(segment), types, counts: {}, setupDirectory: true });
     // objectstack#37201 — the table's order, not the served one: permission set, then position.
     expect(keysOf(menu)).toEqual({
       automation: ['orgFlows'],
-      security: ['type:permission', 'type:position', 'environment'],
+      security: ['type:permission', 'type:position'],
     });
+    // objectstack#37565 — the environment catalog's lists are Setup's page now: the row opens it there.
     expect(menu.flatMap((g) => g.entries).find((e) => e.key === 'type:position')!.to).toBe(
-      '/studio/~all/metadata/position?scope=environment',
+      '/apps/setup/component/security/access-directory/position?scope=environment',
     );
+  });
+
+  // objectstack#37565 — a principal who may not open Setup keeps the list on Studio's cross-package leg.
+  it.each([
+    ['~org', false, '/studio/~all/metadata/position?scope=environment'],
+    ['~all', false, '/studio/~all/metadata/position?scope=environment'],
+    ['~org', undefined, '/studio/~all/metadata/position?scope=environment'],
+    ['~all', true, '/apps/setup/component/security/access-directory/position?scope=environment'],
+  ] as const)('%s, may open Setup: %s → the catalog row opens %s', (segment, setupDirectory, to) => {
+    const menu = buildStudioMenu({
+      scope: studioMenuScope(segment),
+      types: [{ type: 'position', domain: 'security' }],
+      counts: {},
+      ...(setupDirectory === undefined ? {} : { setupDirectory }),
+    });
+    expect(menu.flatMap((g) => g.entries).find((e) => e.key === 'type:position')!.to).toBe(to);
   });
 });
 
@@ -146,7 +167,7 @@ describe('the menu reads the placement table (objectstack#37201, ADR-0084 amende
       ui: ['type:app', 'type:page', 'type:dashboard', 'type:report', 'type:view', 'type:action'],
       automation: ['type:flow', 'type:job', 'orgFlows'],
       system: ['type:doc', 'type:book', 'type:email_template', 'diagnostics'],
-      security: ['type:permission', 'type:position', 'type:assignment_rule', 'owd', 'environment'],
+      security: ['type:permission', 'type:position', 'type:assignment_rule', 'owd'],
       ai: ['type:agent', 'type:tool', 'type:skill'],
     });
   });
@@ -163,8 +184,8 @@ describe('the menu reads the placement table (objectstack#37201, ADR-0084 amende
     expect(entries.find((e) => e.key === 'type:position')!.tier).toBe('common');
   });
 
-  it('the four entries that are not a type are 高级 on a package', () => {
-    for (const key of ['orgFlows', 'diagnostics', 'owd', 'environment']) {
+  it('the three entries that are not a type are 高级 on a package', () => {
+    for (const key of ['orgFlows', 'diagnostics', 'owd']) {
       expect(entries.find((e) => e.key === key)!.tier, key).toBe('advanced');
     }
   });
@@ -185,7 +206,6 @@ describe('the menu reads the placement table (objectstack#37201, ADR-0084 amende
     expect(tiers.advanced.find((g) => g.group === 'security')!.entries.map((e) => e.key)).toEqual([
       'type:assignment_rule',
       'owd',
-      'environment',
     ]);
   });
 
@@ -294,10 +314,11 @@ describe('the current entry (aria-current)', () => {
     expect(current(PKG, `/studio/${PKG}/bogus`)).toBeNull();
   });
 
-  it('the package-less scope is its flows; the cross-package leg\'s root is the environment catalog', () => {
+  // objectstack#37565 — rewritten on purpose: the leg's root redirects to Setup's directory, so no entry is it.
+  it('the package-less scope is its flows; the cross-package leg\'s root is no entry', () => {
     expect(current('~org', '/studio/~org/metadata/flow')).toBe('orgFlows');
     expect(current('~org', '/studio/~org/metadata/flow/f')).toBe('orgFlows');
-    expect(current('~all', '/studio/~all/metadata')).toBe('environment');
+    expect(current('~all', '/studio/~all/metadata')).toBeNull();
     expect(current('~all', '/studio/~all/metadata/position')).toBe('type:position');
   });
 });

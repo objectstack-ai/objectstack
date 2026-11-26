@@ -191,7 +191,10 @@ describe('pricing — the hand-written text is ratcheted, shrink-only', () => {
   //   and by no more, nothing else cut, under the standing enumeration-row case of the skills
   //   ratchet — ruling A on #32584, record 6819475461, made standing by #32673 letter A,
   //   record 6840575378)
-  const HAND_WRITTEN_CEILING_TOKENS = 1726;
+  //   6939 bytes -> ceil(6939 / 4) = 1735 (the PR that adds the `knowledge` token: its one
+  //   CAPABILITY_ROWS line, 37 bytes, at zero headroom; raised by that row's measured delta
+  //   and by no more, nothing else cut, under the same standing enumeration-row case)
+  const HAND_WRITTEN_CEILING_TOKENS = 1735;
 
   it('measures every hand-written string the page carries and nothing derived', () => {
     const page = renderPlatformCatalog();

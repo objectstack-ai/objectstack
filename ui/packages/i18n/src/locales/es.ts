@@ -2203,7 +2203,7 @@ const es = {
   },
   console: {
     studio: {
-      title: "Studio",
+      title: "App Studio",
       accessRequired: "Necesita acceso a Studio para abrir Studio. Un administrador puede concedérselo con un conjunto de permisos en Configuración → Asignación de conjuntos de permisos.",
     },
     saveAdvisoryTitle: "Guardado: la comprobación de creación generó {{count}} recomendación(es)",
@@ -3812,11 +3812,11 @@ const es = {
       tooltip: "Esta plataforma está en versión preliminar — las funciones pueden cambiar.",
     },
     aiAssistant: "Asistente de IA",
-    designInStudio: "Diseñar en Studio",
+    designInStudio: "Diseñar en App Studio",
     designLayout: "Diseñar la disposición",
     editApp: "Editar aplicación",
-    openAppInStudio: "Ver {{app}} en Studio",
-    viewInStudio: "Ver en Studio",
+    openAppInStudio: "Ver {{app}} en App Studio",
+    viewInStudio: "Ver en App Studio",
   },
   home: {
     build: {
@@ -3958,8 +3958,8 @@ const es = {
       backToAppHome: "Volver al menú de la aplicación",
       appsAvailable: "{{count}} aplicaciones disponibles",
       allApps: "Todas las aplicaciones",
-      editAppInStudio: "Editar {{app}} en Studio",
-      openAppInStudio: "Ver {{app}} en Studio",
+      editAppInStudio: "Editar {{app}} en App Studio",
+      openAppInStudio: "Ver {{app}} en App Studio",
       backToHome: "Volver a la página inicial de la app",
       settings: "Configuración",
       productHome: "Inicio de {{product}}",
@@ -5782,6 +5782,8 @@ const es = {
     completed: 'Flujo «{{flow}}» completado',
     alreadySubmitted: 'Su envío anterior se completó. El flujo ha avanzado a este paso.',
     noLongerWaiting: 'Es posible que este paso ya se haya procesado. Cierre este cuadro de diálogo y revise el registro antes de volver a intentarlo.',
+    invalidScreenInput: 'Algunos valores de este paso no se aceptaron. Revíselos e inténtelo de nuevo.',
+    fieldNotAccepted: '{{field}}: este valor no se acepta',
   },
   appManagement: {
     title: "Aplicaciones",

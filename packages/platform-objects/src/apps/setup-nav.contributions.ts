@@ -119,6 +119,23 @@ export const SETUP_NAV_CONTRIBUTIONS: NavigationContribution[] = [
   {
     app: 'setup',
     group: 'group_access_control',
+    // [ADR-0084, amended 2026-11-26, question 5] The environment directory —
+    // positions, capabilities, permission sets and sharing rules across every
+    // package — left Studio's menu for this group: Setup holds what is global.
+    // Priority 100 keeps it first, where plugin-security's catalog entries were.
+    // Gate: `studio.access`, the Studio entry that admitted a principal to the
+    // directory before it moved, so moving it widens nobody's view; the Setup
+    // app's `setup.access` applies on top. Its items still open in Studio
+    // (ADR-0146 D1). The console binds the ref to its page (app-shell
+    // `builtinComponents`).
+    priority: 100,
+    items: [
+      { id: 'nav_access_directory', type: 'component', label: 'Positions and Permissions', componentRef: 'security:access-directory', icon: 'key-round', requiredPermissions: ['studio.access'] },
+    ],
+  },
+  {
+    app: 'setup',
+    group: 'group_access_control',
     // Priority 300 keeps API Keys after plugin-security's Positions / Permission
     // Sets (100) and plugin-sharing's Sharing Rules / Record Shares (200),
     // preserving the original menu order.

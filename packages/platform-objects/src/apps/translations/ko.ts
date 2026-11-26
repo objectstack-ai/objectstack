@@ -80,6 +80,7 @@ export const ko: TranslationData = {
         // of `sys_scim_connection_credential.pluralLabel`.
         nav_scim_credentials: { label: 'SCIM 자격 증명' },
         nav_api_keys: { label: 'API 키' },
+        nav_access_directory: { label: '직위 및 권한' },
 
         // 승인 받은편지함 = the Approvals Inbox component (#7234) — the surface
         // with decision actions. The three below are the engine's raw tables;
@@ -137,7 +138,7 @@ export const ko: TranslationData = {
       },
     },
     studio: {
-      label: 'Studio',
+      label: 'App Studio',
       description: '개발자, 분석가, 구현 담당자를 위한 메타데이터 작업대',
       navigation: {
         group_overview: { label: '개요' },

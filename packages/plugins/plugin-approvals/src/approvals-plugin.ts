@@ -39,6 +39,7 @@ import { bindSnapshotRedactionMiddleware } from './payload-redaction-middleware.
 import { bindSnapshotPredicateGuard } from './payload-predicate-guard.js';
 import { bindRequestChildReadGates, bindRequestReadGate } from './request-read-gate.js';
 import { bindReaderLocaleLabelsMiddleware } from './reader-locale-labels-middleware.js';
+import { bindActionLocaleMiddleware } from './action-locale-middleware.js';
 import {
   bindApprovalActivityFeed,
   bindApprovalActivityLocale,
@@ -457,6 +458,10 @@ export class ApprovalsServicePlugin implements Plugin {
       // Bound beside the gate, not behind `disableAutoHooks`, for the gate's
       // reason: the approvals door localizes whenever the service runs.
       bindReaderLocaleLabelsMiddleware(engine as any, i18nService, ctx.logger);
+      // [#37531] …and an action row's step label and system note, by the render
+      // the approvals door's timeline is served by (`action-locale-middleware.ts`).
+      const service = this.service;
+      bindActionLocaleMiddleware(engine as any, i18nService, (rows, readContext) => service.localizeActionRows(rows, readContext), ctx.logger);
       // [#35723] …and the approval entries on a record's activity stream: one
       // `sys_activity` row per approval step, served only to a caller this
       // service would serve the request (`approval-activity-feed.ts`). The

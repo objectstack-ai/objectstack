@@ -336,7 +336,8 @@ describe('Data pillar — a draft saved elsewhere is not overwritten in silence 
     // The draft was read at the package the saves write.
     expect(mockClient.getDraft).toHaveBeenCalledWith('object', OBJECT.name, { packageId: PKG });
     expect(server.saves.every((s) => s.packageId === PKG)).toBe(true);
-    expect(mockClient.publish).toHaveBeenCalledWith('object', OBJECT.name, { packageId: PKG });
+    // objectstack#37440 — each publish is pinned to the draft its own Save wrote (its receipt).
+    expect(mockClient.publish).toHaveBeenCalledWith('object', OBJECT.name, { packageId: PKG, draftVersion: expect.any(String) });
     expect(liveFields()).toEqual(['title', 'status', 'new_field', 'second_field']);
     expect(screen.queryByTestId('draft-conflict-dialog')).toBeNull();
   });

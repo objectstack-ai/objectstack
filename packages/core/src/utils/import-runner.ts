@@ -816,6 +816,19 @@ const yieldToEventLoop = (): Promise<void> =>
   });
 
 /**
+ * [#36794] Whether a scoped lookup read was refused because its scope names a
+ * target field the caller cannot read: the field-predicate guard's
+ * `PermissionDeniedError` (`details.reason: 'field_predicate_denied'`, the one
+ * reason every such guard answers) naming at least one scope field. Read off
+ * the error's declared `details`, never its message.
+ */
+function isScopeFieldDenial(e: unknown, scope: Readonly<Record<string, unknown>>): boolean {
+  const details = (e as { details?: { reason?: unknown; fields?: unknown } } | null)?.details;
+  if (details?.reason !== 'field_predicate_denied' || !Array.isArray(details.fields)) return false;
+  return details.fields.some((f) => typeof f === 'string' && Object.prototype.hasOwnProperty.call(scope, f));
+}
+
+/**
  * [#27465] The refusal of a match key naming a field that holds a list or a
  * structured value, or `undefined` when every named field can be a key.
  *
@@ -997,7 +1010,14 @@ export function runImport(opts: RunImportOptions): Promise<ImportRunSummary> {
           if (recs.length === 0) continue;
           if (recs.length > 1) { match = { ambiguous: true, matchedField: f }; break; }
           if (recs[0]?.id != null) { match = { id: String(recs[0].id), matchedField: f }; break; }
-        } catch { /* field absent on target object — try the next candidate */ }
+        } catch (e) {
+          // [#36794] A scope naming a target field the caller cannot read is
+          // refused by the field-predicate guard, so this miss says nothing
+          // about where the value lives: report it as such, never as a record
+          // that lives under another parent.
+          if (scope && isScopeFieldDenial(e, scope)) { match = { scopeDenied: true }; break; }
+          /* field absent on target object — try the next candidate */
+        }
       }
       return match;
     };
@@ -1644,7 +1664,7 @@ export function runImport(opts: RunImportOptions): Promise<ImportRunSummary> {
           errCount++;
           results[i] = {
             row: rowNo, ok: false, action: 'failed', field: first.field, code: first.code, error: first.message,
-            errors: errors.map(({ field, code, message }) => ({ field, code, message })),
+            errors: errors.map(({ field, code, message, scope }) => ({ field, code, message, ...(scope ? { scope } : {}) })),
           };
         } else if (shared) {
           // [#26133] Another row of this import carries the same key.

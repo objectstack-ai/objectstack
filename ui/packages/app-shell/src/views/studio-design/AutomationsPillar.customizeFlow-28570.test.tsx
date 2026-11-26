@@ -359,7 +359,10 @@ describe('Customize a read-only base’s flow into its pair (objectstack#28570)'
     // Then that one flow is published at the pair: the override is live. Read
     // at the base, the Save takes the pair to hold no live flow of the name,
     // and its publish asserts so (objectstack#36726).
-    await waitFor(() => expect(srv.publishes).toEqual([{ name: FLOW_NAME, opts: { packageId: PAIR, ifNoneMatch: '*' } }]));
+    await waitFor(() => expect(srv.publishes).toEqual([
+      // objectstack#37440 — and to the draft this Save wrote (its receipt).
+      { name: FLOW_NAME, opts: { packageId: PAIR, ifNoneMatch: '*', draftVersion: expect.any(String) } },
+    ]));
     expect(srv.ensure).toEqual([201]);
     const [saved] = srv.saves;
     expect(saved!.name).toBe(FLOW_NAME);

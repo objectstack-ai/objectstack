@@ -48,15 +48,17 @@ import {
   registerSkillPrompts,
   skillPromptFaces,
   skillPromptListEntry,
+  skillPromptRecordArgument,
   skillPromptRefusalError,
   skillPromptResult,
   skillPromptWithdrawn,
+  SKILL_PROMPT_RECORD_ARGUMENT,
   type McpSkillBridge,
   type SkillPrompt,
 } from './skill-prompts.js';
 import { ErrorCode, McpError } from '@modelcontextprotocol/sdk/types.js';
 import { describePackageScopedHolder } from '@objectstack/core';
-import { deriveAiFaceName } from '@objectstack/spec/ai';
+import { deriveAiFaceName, GET_RECORD_CONTEXT_TOOL_NAME } from '@objectstack/spec/ai';
 import { z } from 'zod';
 // [#28715] The engine's own reading of "this field declares options" (its
 // `label()` map is built from it), never a second spelling here.
@@ -1204,11 +1206,13 @@ function routeBareSkillPromptNames(
   const sdkGet = map.get('prompts/get');
   if (!sdkGet) return;
   map.set('prompts/get', async (request, extra) => {
-    const wanted = (request as { params?: { name?: unknown } } | null | undefined)?.params?.name;
+    const params = (request as { params?: { name?: unknown; arguments?: Record<string, unknown> } } | null | undefined)?.params;
+    const wanted = params?.name;
     if (typeof wanted === 'string' && !registered.has(wanted)) {
       const lookup = lookupSkillPrompt(await listSkills(), wanted);
       if (lookup.status === 'refused') throw skillPromptRefusalError(lookup);
-      if (lookup.status === 'found') return skillPromptResult(lookup.prompt);
+      // [ADR-0160 D8] The record argument, as on the face's own get.
+      if (lookup.status === 'found') return skillPromptResult(lookup.prompt, params?.arguments);
     }
     return sdkGet(request, extra);
   });
@@ -2257,6 +2261,16 @@ export class MCPServerRuntime {
    * tool and its source; never a boot failure and never a second
    * registration under the name (the SDK refuses one by throwing).
    */
+  /**
+   * [ADR-0160 D8] Whether this long-lived server registers a tool of this
+   * name now: a native data tool ({@link bridgeDataTools}) or one bridged from
+   * the AI registry ({@link bridgeTools}). Read by {@link bridgePrompts}, so a
+   * host bridges its tools before its prompts (`plugin.ts` does).
+   */
+  private servesTool(name: string): boolean {
+    return this.nativeToolNames.has(name) || this.bridgedTools.has(name);
+  }
+
   private yieldBridgedTool(name: string): void {
     const bridged = this.bridgedTools.get(name);
     if (!bridged) return;
@@ -2559,6 +2573,13 @@ export class MCPServerRuntime {
      * from (`NS-NAME`). Omitted, every face is the item's bare name.
      */
     packageNamespace?: (packageId: string) => string | undefined,
+    /**
+     * [ADR-0150 D3 step 2, ADR-0160 D8] A package's resolution closure, which a
+     * package-held skill's `context` resolves through
+     * (`McpSkillBridge.packageResolutionClosure`). Omitted, such a skill
+     * resolves only its own package's pack.
+     */
+    packageResolutionClosure?: (packageId: string) => ReadonlySet<string>,
   ): Promise<void> {
     const logger = this.config.logger;
 
@@ -2654,6 +2675,20 @@ export class MCPServerRuntime {
     let skillListVerdict: { degraded: boolean; errors: string[] } = { degraded: false, errors: [] };
     const skillBridge: McpSkillBridge = {
       ...(packageNamespace ? { packageNamespace } : {}),
+      ...(packageResolutionClosure ? { packageResolutionClosure } : {}),
+      // [ADR-0160 D8] The packs a skill's `context` resolves against: the
+      // merged listing, the one the stdio bridge's `get_record_context` reads
+      // its packs from, so the face a prompt hands on is one the tool selects.
+      // Only where THIS server registers `get_record_context` (natively or
+      // bridged from the AI registry), read now: without the listing no skill
+      // resolves a pack, so none lists the record argument and none carries
+      // the line telling the model to call a tool this server does not serve.
+      // This door has no general binding filter (that is #37609); this is the
+      // one tool the platform's own line names. The HTTP bridge gates the same
+      // member on its record-context seam (`packages/runtime/src/domains/mcp.ts`).
+      ...(this.servesTool(GET_RECORD_CONTEXT_TOOL_NAME)
+        ? { listContextPacks: async () => (await mergedDiagnosedList(metadataService, mergedRead, 'ai_context')).items }
+        : {}),
       listSkills: async () => {
         // The verdict of the READ, recorded as the read happens. `listSkills`
         // is also the per-call re-read behind each registered prompt's body, so
@@ -2715,40 +2750,54 @@ export class MCPServerRuntime {
       }
       if (entry.prompts.length > 1) logger?.warn(`[MCP] ${duplicateSkillFaceMessage(entry)}`);
       const listed = skillPromptListEntry(entry);
-      this.mcpServer.registerPrompt(
-        entry.face,
-        {
-          ...(listed.title ? { title: listed.title } : {}),
-          ...(listed.description ? { description: listed.description } : {}),
-        },
-        async () => {
-          // Re-read at call time so an edited skill serves fresh instructions.
-          // One read: the projection and the withdrawal check below see the same rows.
-          const rows = (await skillBridge.listSkills()) ?? [];
-          const lookup = lookupSkillPrompt(
-            await listSkillPrompts({ ...skillBridge, listSkills: async () => rows }),
-            entry.face,
-          );
-          if (lookup.status === 'refused') throw skillPromptRefusalError(lookup);
-          if (lookup.status === 'found') return skillPromptResult(lookup.prompt);
-          if (entry.prompts.length === 1) {
-            // [#34167] Withdrawn since the snapshot (`mcpPrompt: false`):
-            // answered as the SDK answers a name it never registered. This
-            // server's list is a boot snapshot and keeps the name until
-            // restart; the get stops serving it at once.
-            if (skillPromptWithdrawn(rows, entry.prompts[0])) {
-              throw new McpError(ErrorCode.InvalidParams, `Prompt ${entry.face} not found`);
-            }
-            // Gone since the snapshot: the snapshot's one skill, as before.
-            return skillPromptResult(entry.prompts[0]);
+      // [ADR-0160 D8] A skill whose `context` resolved to a pack at this
+      // snapshot lists the record argument; the SDK hands a get its value.
+      const recordArgument = listed.arguments ? skillPromptRecordArgument() : undefined;
+      const serve = async (args?: Record<string, unknown>) => {
+        // Re-read at call time so an edited skill serves fresh instructions.
+        // One read: the projection and the withdrawal check below see the same rows.
+        const rows = (await skillBridge.listSkills()) ?? [];
+        const lookup = lookupSkillPrompt(
+          await listSkillPrompts({ ...skillBridge, listSkills: async () => rows }),
+          entry.face,
+        );
+        if (lookup.status === 'refused') throw skillPromptRefusalError(lookup);
+        if (lookup.status === 'found') return skillPromptResult(lookup.prompt, args);
+        if (entry.prompts.length === 1) {
+          // [#34167] Withdrawn since the snapshot (`mcpPrompt: false`):
+          // answered as the SDK answers a name it never registered. This
+          // server's list is a boot snapshot and keeps the name until
+          // restart; the get stops serving it at once.
+          if (skillPromptWithdrawn(rows, entry.prompts[0])) {
+            throw new McpError(ErrorCode.InvalidParams, `Prompt ${entry.face} not found`);
           }
-          throw skillPromptRefusalError({
-            status: 'refused',
-            message: duplicateSkillFaceMessage(entry),
-            candidates: entry.prompts.map((p) => p.face),
-          });
-        },
-      );
+          // Gone since the snapshot: the snapshot's one skill, as before.
+          return skillPromptResult(entry.prompts[0], args);
+        }
+        throw skillPromptRefusalError({
+          status: 'refused',
+          message: duplicateSkillFaceMessage(entry),
+          candidates: entry.prompts.map((p) => p.face),
+        });
+      };
+      const config = {
+        ...(listed.title ? { title: listed.title } : {}),
+        ...(listed.description ? { description: listed.description } : {}),
+      };
+      if (recordArgument) {
+        this.mcpServer.registerPrompt(
+          entry.face,
+          {
+            ...config,
+            argsSchema: {
+              [SKILL_PROMPT_RECORD_ARGUMENT]: z.string().optional().describe(recordArgument.description),
+            },
+          },
+          async (args) => serve(args),
+        );
+      } else {
+        this.mcpServer.registerPrompt(entry.face, config, async () => serve());
+      }
       registeredNames.add(entry.face);
       bridged++;
     }

@@ -265,7 +265,6 @@ describe("on a package, the palette lists the left menu and the package's items 
       'studio-entry type:permission',
       'studio-entry type:position',
       'studio-entry owd',
-      'studio-entry environment',
       'studio-entry type:agent',
     ]);
     // Another package's object, and the datasource (Setup's), are not items.
@@ -416,14 +415,14 @@ describe("on a package, the palette lists the left menu and the package's items 
 
 describe('on the cross-package leg, the menu joins every package\'s objects and flows (objectstack#36900)', () => {
   it("lists the environment menu's entries, reads no item list, and keeps the landing's groups", async () => {
-    const { cacheReads } = mount('~all', { at: '/studio/~all/metadata?palette=1', packageScope: false });
+    // objectstack#37565 — the leg's root redirects to Setup; an item page still opens on the leg.
+    const { cacheReads } = mount('~all', { at: '/studio/~all/metadata/permission/admin?scope=environment&palette=1', packageScope: false });
     await waitFor(() => expect(values('studio-object ').length).toBeGreaterThan(0));
 
     expect(values('studio-entry ')).toEqual([
       'studio-entry orgFlows',
       'studio-entry type:permission',
       'studio-entry type:position',
-      'studio-entry environment',
     ]);
     expect(values('studio-item ')).toEqual([]);
     expect(reads.state.calls).toEqual([]);
