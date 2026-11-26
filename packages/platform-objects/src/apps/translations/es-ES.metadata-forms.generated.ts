@@ -3202,5 +3202,8 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         helpText: "Un campo de texto largo del objeto raíz (textarea, markdown, html, richtext). Cualquier otro campo se informa al guardar el paquete, y entonces el paquete no lleva cuerpo."
       }
     }
+  },
+  knowledge_source: {
+    label: "Fuente de conocimiento"
   }
 };

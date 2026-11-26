@@ -3202,5 +3202,8 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         helpText: "ルートオブジェクトの長文テキストフィールド（textarea、markdown、html、richtext）。それ以外のフィールドは保存時に報告され、パックは本文を持ちません。"
       }
     }
+  },
+  knowledge_source: {
+    label: "ナレッジソース"
   }
 };

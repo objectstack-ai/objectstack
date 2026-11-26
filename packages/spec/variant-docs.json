@@ -75,13 +75,6 @@
       ]
     },
     {
-      "key": "kind:file|http|object",
-      "label": "knowledge source kind",
-      "docs": [
-        "content/docs/protocol/knowledge.mdx"
-      ]
-    },
-    {
       "key": "type:cron|interval|once",
       "label": "job schedule",
       "exempt": "generated-reference-only",

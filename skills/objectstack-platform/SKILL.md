@@ -103,10 +103,10 @@ Every stack needs a `manifest`:
 ```typescript
 import { defineStack } from '@objectstack/spec';
 export default defineStack({ manifest: {
-  id: 'com.example.crm', // Reverse-domain ID
+  id: 'com.example.crm', // Reverse domain unique ID
   version: '1.0.0', // Semver
   type: 'app', // app | plugin | driver | module | ...
-  name: 'Acme CRM', // Display name
+  name: 'Acme CRM', // Human-readable display name
   description: 'CRM system', // Optional
   engines: { protocol: '^19' },
 } });
