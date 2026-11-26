@@ -49,7 +49,7 @@
  *   failure directly.
  */
 
-import type { ActionFieldError } from '@object-ui/types';
+import type { ActionFieldError, ActionRefusalLine } from '@object-ui/types';
 import { actionErrorDetail } from './actionErrorDetail.js';
 
 export interface ActionResponseOutcome {
@@ -66,6 +66,11 @@ export interface ActionResponseOutcome {
      * when it carried one. Only on a failure; `error` stays the whole text.
      */
     userMessage?: string;
+    /**
+     * The reasons of a refusal that names several (`error.details.refusals`),
+     * when it carried such a list. Only on a failure.
+     */
+    refusals?: ActionRefusalLine[];
     /**
      * The ACTION ENVELOPE (`body.data`) — `{ success, data }`. Kept as-is
      * because `ActionResult.data` has always carried this level and
@@ -132,6 +137,7 @@ export function interpretActionResponse(
         // crashes the page, React #31).
         const fieldErrors = refusalFieldErrors(innerFailed ? envelope : json);
         const userMessage = refusalUserMessage(innerFailed ? envelope : json);
+        const refusals = refusalLines(innerFailed ? envelope : json);
         return {
             ok: false,
             error: innerFailed
@@ -139,6 +145,7 @@ export function interpretActionResponse(
                 : actionErrorDetail(json, `${label} failed (HTTP ${res.status})`),
             ...(fieldErrors ? { fieldErrors } : {}),
             ...(userMessage !== undefined ? { userMessage } : {}),
+            ...(refusals ? { refusals } : {}),
         };
     }
 
@@ -159,6 +166,29 @@ export function refusalUserMessage(body: unknown): string | undefined {
     const b = body as { error?: { userMessage?: unknown } } | null | undefined;
     const raw = b?.error && typeof b.error === 'object' ? b.error.userMessage : undefined;
     return typeof raw === 'string' && raw.trim() ? raw : undefined;
+}
+
+/**
+ * The reasons of a refusal that names several (objectstack#36877), as
+ * `ActionResult.refusals` carries them: `error.details.refusals`, each element
+ * `{ reason, message }` with both members strings, the reason's sentence
+ * already rendered in the request's locale. The list is read whole or not at
+ * all — an empty list, or one with any element of another shape, is no list —
+ * the same rule the server's own reader applies before it answers one, so a
+ * list this returns is one the server built. Each element is copied to
+ * exactly those two members.
+ */
+export function refusalLines(body: unknown): ActionRefusalLine[] | undefined {
+    const b = body as { error?: { details?: { refusals?: unknown } } } | null | undefined;
+    const raw = b?.error && typeof b.error === 'object' ? b.error.details?.refusals : undefined;
+    if (!Array.isArray(raw) || raw.length === 0) return undefined;
+    const out: ActionRefusalLine[] = [];
+    for (const entry of raw) {
+        const e = entry as { reason?: unknown; message?: unknown } | null;
+        if (!e || typeof e !== 'object' || typeof e.reason !== 'string' || typeof e.message !== 'string') return undefined;
+        out.push({ reason: e.reason, message: e.message });
+    }
+    return out;
 }
 
 /**

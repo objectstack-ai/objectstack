@@ -234,3 +234,31 @@ describe('ActionParamDialog — a refused run keeps the typed input (objectui#13
     expect(confirmButton()).not.toBeDisabled();
   });
 });
+
+/**
+ * A refused run whose refusal names several reasons (objectstack#36877) hands
+ * the reasons the runner relayed (`ActionResult.refusals`) to the refusal box,
+ * which lists every one with the closing sentence last (objectstack#37403).
+ */
+describe('ActionParamDialog — a refusal with several reasons lists them in the box (objectstack#37403)', () => {
+  it('every reason in order, the closing sentence last, in the one alert box', async () => {
+    const refusals = [
+      { reason: 'on_report', message: 'Expense Taxi 12 is already on an expense report.' },
+      { reason: 'approved', message: 'Expense Hotel 7 is already approved.' },
+    ];
+    const text = `${refusals[0].message}\n${refusals[1].message}\nNothing was submitted.`;
+    const run = vi.fn(async (): Promise<ActionResult> => ({ success: false, error: text, userMessage: text, refusals }));
+    openWith({ run });
+
+    await type('Email', 'ada@example.com');
+    fireEvent.click(confirmButton());
+
+    const alert = await screen.findByTestId('action-param-refusal');
+    expect(within(alert).getAllByTestId('refusal-line').map((li) => li.textContent)).toEqual([
+      refusals[0].message,
+      refusals[1].message,
+      'Nothing was submitted.',
+    ]);
+    expect(within(alert).queryByTestId('refusal-more')).toBeNull();
+  });
+});
