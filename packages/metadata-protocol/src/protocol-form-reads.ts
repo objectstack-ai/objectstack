@@ -196,9 +196,40 @@ export async function readEffectiveForms(
     request: { type: string; packageId?: string; names?: readonly string[]; previewDrafts?: boolean },
     audience: 'served' | 'execution',
 ): Promise<unknown[]> {
+    return (await readEffectiveFormList(host, request, audience)).items;
+}
+
+/**
+ * {@link readEffectiveForms}, with the envelope of the generic `form` list it
+ * read (`type`, the served decorations): the list faces answer it without a
+ * second generic read.
+ *
+ * - **`names` is pushed down** into both generic reads (`GetMetaItemsRequest.names`,
+ *   kept once every source is merged): every reading below judges an item by
+ *   its own name, and a projected form carries the name of the `view` item it
+ *   is read from, so the named items resolve exactly as the whole list would.
+ *   The stored rows of step 3 are read whole: a container row's `name` is not
+ *   the name its expansion writes, so no row predicate can select them by the
+ *   form's name.
+ * - **`packageId` is NOT pushed down**, and is applied to the resolved list:
+ *   the effective `form` read is resolved per address over both types, and a
+ *   list scoped to a package reads another address than its own. Step 1
+ *   re-keys a declared `form` override onto its base's address from the
+ *   base's projected `view` item, which a list scoped to the pair never holds,
+ *   and a `view` list scoped to a package seats the package-less rows in that
+ *   package's slots (#21817), which would be projected as the package's own
+ *   forms ahead of the served-row order step 3 asks. Filtered after, the
+ *   answer at `packageId` is the item the unscoped resolution serves there.
+ */
+export async function readEffectiveFormList(
+    host: FormReadHost,
+    request: { type: string; packageId?: string; names?: readonly string[]; previewDrafts?: boolean },
+    audience: 'served' | 'execution',
+): Promise<{ type: string; items: unknown[] } & Record<string, unknown>> {
     const { packageId: scope, names, ...rest } = request;
-    const unscoped = { ...rest, type: 'form' };
-    const generic = (await host.readFlattenedMetaItems(unscoped, audience)).items as unknown[];
+    const unscoped = { ...rest, type: 'form', ...(names !== undefined ? { names } : {}) };
+    const genericList = await host.readFlattenedMetaItems(unscoped, audience) as { items: unknown[] } & Record<string, unknown>;
+    const generic = genericList.items;
     const views = (await host.readFlattenedMetaItems({ ...unscoped, type: 'view' }, audience)).items as unknown[];
     const installed = installedManifestsOfEngine(host.engine);
 
@@ -255,9 +286,27 @@ export async function readEffectiveForms(
     let places: StoredFormPlace[] | undefined;
     const placesOf = async (): Promise<StoredFormPlace[]> => (places ??= await storedFormPlaces(host));
 
+    // [D5, one address holds one definition] A package's address that still
+    // authors its form as an old shape is resolved by the `view` merge (step
+    // 2), and a package-less stored `form` row of the name is in that
+    // address's served-row order too. Such a row is judged at each of those
+    // addresses below, before it is listed on its own.
+    const projectedAddressesOf = new Map<string, string[]>();
+    for (const key of projectedOrder) {
+        const pkg = packageOf(projected.get(key));
+        const name = String(projected.get(key)!.name);
+        if (pkg === undefined || genericByKey.has(key) || leftView(pkg, name)) continue;
+        projectedAddressesOf.set(name, [...(projectedAddressesOf.get(name) ?? []), pkg]);
+    }
+    const packagelessFormRows = new Map<string, { key: string; item: unknown }>();
+
     for (const [key, item] of genericByKey) {
         const name = String((item as { name?: unknown }).name);
         const pkg = packageOf(item);
+        if (pkg === undefined && projectedAddressesOf.has(name)) {
+            packagelessFormRows.set(name, { key, item });
+            continue;
+        }
         if (!leftView(pkg, name)) {
             put(key, item);
             continue;
@@ -279,6 +328,7 @@ export async function readEffectiveForms(
     // Step 2's items, where no generic item holds the same address. An
     // authored item shadows a projected one of the same package and name.
     const genericNames = new Set([...genericByKey.values()].map((item) => String((item as { name?: unknown }).name)));
+    const standingIn = new Set<string>();
     for (const key of projectedOrder) {
         if (genericByKey.has(key)) continue;
         const item = projected.get(key)!;
@@ -289,16 +339,34 @@ export async function readEffectiveForms(
         // A package-less projection stands in for the addresses of the name
         // that step 1 resolved (they read it as a candidate): never listed twice.
         if (pkg === undefined && genericNames.has(name)) continue;
+        // [D5] A package-less stored `form` row of the name: the served-row
+        // order at this address decides between it and the `view` row the
+        // projection read. A stored `form` row wins over a stored `view` row at
+        // the same place, so where the order picks it the address serves its
+        // body, under the address's envelope, and the projection is not served.
+        const packageless = pkg !== undefined ? packagelessFormRows.get(name) : undefined;
+        if (packageless !== undefined) {
+            const served = servedFormHolding(await placesOf(), name, pkg!, installed);
+            if (served?.place.type === 'form' && served.place.packageId === undefined) {
+                put(key, { ...(packageless.item as object), _packageId: pkg });
+                standingIn.add(name);
+                continue;
+            }
+        }
         put(key, item);
     }
+    // …and a package-less `form` row that stood in at no such address is
+    // listed as its own item, as the generic list serves it.
+    for (const [name, { key, item }] of packagelessFormRows) if (!standingIn.has(name)) put(key, item);
 
     let items = order.map((key) => out.get(key));
     if (scope !== undefined) items = items.filter((item) => packageOf(item) === scope);
+    // The read pushed `names` down; a projection names only what its item names, kept exact here.
     if (names !== undefined) {
         const wanted = new Set(names);
         items = items.filter((item) => wanted.has(String((item as { name?: unknown }).name)));
     }
-    return items;
+    return { ...genericList, type: 'form', items };
 }
 
 /** The rows {@link readUnreadableFormBodies} has reported, so each is said once per process. */

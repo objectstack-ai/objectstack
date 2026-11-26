@@ -157,6 +157,28 @@ export async function formAddressClashRefusal(
     return err;
 }
 
+/**
+ * [ADR-0159 card ② items 5 and 7] The two `form`-type write refusals, asked
+ * together by the doors that write a body the save door did not judge at its
+ * own moment: the publish of a draft (`promoteDraftForPublish`) and the
+ * restore writer (`restoredBodyWriter`). Each asks the save door's own
+ * predicate with its own envelope: {@link packagelessListOverFormRefusal}
+ * (`400 VALIDATION_ERROR`) and {@link formAddressClashRefusal}
+ * (`409 FORM_ADDRESS_TAKEN`), so a draft saved before a holder took the
+ * address, and a version restored onto it, leave no two open forms on one
+ * address (ruled question 3 = A).
+ */
+export async function formTypeWriteRefusal(
+    host: FormReadHost & Pick<ProtocolHost, 'expandRuntimeViewContainer' | 'isWritablePackage' | 'shippedArtifactsOf'>,
+    type: string,
+    item: unknown,
+    name: string,
+    packageId: string | null | undefined,
+): Promise<Error | undefined> {
+    return packagelessListOverFormRefusal(host, type, item, name, packageId)
+        ?? await formAddressClashRefusal(host, type, item, name, packageId);
+}
+
 /** One write the `form` door makes to the old-shape row carrying a form at its address. */
 export type OldShapeFormRowRemoval =
     | { readonly kind: 'delete'; readonly row: { readonly name: string; readonly packageId: string | null } }

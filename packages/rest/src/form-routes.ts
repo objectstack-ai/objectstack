@@ -82,7 +82,6 @@ import {
     formIntakeLayer,
     openFormAt,
     projectViewForms,
-    projectedFormsOf,
     thankYouRecordFieldNames,
     type FormIntakeLayer,
     type UnreadableFormBody,
@@ -308,14 +307,11 @@ export function registerFormEndpoints(this: FormRouteHost, basePath: string): vo
                 : []);
         const formsRequest: TransportScopedMetaRequest<GetMetaItemsRequest> = { ...viewsRequest, type: 'form' };
         const views = listOf(await p.getMetaItems(viewsRequest));
-        // [ADR-0159 D5] The candidates are the effective `form` read, which
-        // projects the old shapes itself. A protocol that serves no `form`
-        // item at all (one older than the type) serves its forms only as old
-        // shapes, and the doors read them through THE same projection; where
-        // the protocol serves the type, an empty `form` read is the same
-        // projection of the same `view` read, so nothing is added.
-        const servedForms = listOf(await p.getMetaItems(formsRequest));
-        const forms = servedForms.length > 0 ? servedForms : projectedFormsOf(views);
+        // [ADR-0159 D5, D6 rules 1 and 3] The candidates are the effective
+        // `form` read, which projects the old shapes itself: ONE read, and no
+        // second candidate source inside the door. A protocol that serves no
+        // `form` item serves no candidate.
+        const forms = listOf(await p.getMetaItems(formsRequest));
         // [#28409] The per-package layers, where the protocol serves them: a
         // server-only extension, feature-detected like the other extensions
         // the doors read. A protocol without it serves no narrower list than

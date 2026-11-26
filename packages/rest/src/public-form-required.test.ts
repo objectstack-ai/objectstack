@@ -30,6 +30,7 @@
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { projectedFormsOf } from '@objectstack/spec/ui';
 import { ObjectQL } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
 import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
@@ -134,8 +135,8 @@ describe('[#24131] POST /forms/:slug/submit enforces the form\'s own `required`'
     const protocol: any = new ObjectStackProtocolImplementation(engine as any);
     const realGetMetaItems = protocol.getMetaItems.bind(protocol);
     protocol.getMetaItems = async (request: any) => {
-      // [ADR-0159 D5] No `form` item is injected: the doors read the injected old shape through the projection.
-      if (request?.type === 'form') return [];
+      // [ADR-0159 D5] The `form` read, as the protocol serves it for the injected old shape: its projection.
+      if (request?.type === 'form') return projectedFormsOf([FORM]);
       if (request?.type === 'view') return [FORM];
       if (request?.type === 'object') return [LEAD];
       return realGetMetaItems(request);

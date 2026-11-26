@@ -34,7 +34,7 @@ import {
 } from './protocol-authoring-refusals.js';
 import { shippingPackageIds } from './protocol-environment-rows.js';
 import type { ProtocolHost } from './protocol-host.js';
-import { readEffectiveForms, type FormReadHost } from './protocol-form-reads.js';
+import { readEffectiveFormList, type FormReadHost } from './protocol-form-reads.js';
 import { canonicalizeMetaRequestType } from './protocol-meta-type-schema.js';
 import { mergePackageAwareOverlay, servedViewExpansion, withoutServedRowName } from './protocol-overlay-merge.js';
 import {
@@ -60,6 +60,22 @@ import {
     pairMemberWithheldAt,
 } from './protocol-exact-qualifier.js';
 
+/**
+ * [ADR-0159 D5] The `form` list face: the items {@link readEffectiveFormList}
+ * resolves, in the envelope of the generic list of the same request. Unscoped,
+ * that is the envelope the resolution itself read; a list scoped to a package
+ * takes the scoped generic list's envelope, as before.
+ */
+async function effectiveFormList(
+    host: FormReadHost,
+    request: { type: string; packageId?: string; names?: readonly string[]; previewDrafts?: boolean },
+    audience: 'served' | 'execution',
+) {
+    const resolved = await readEffectiveFormList(host, request, audience);
+    if (request.packageId === undefined) return resolved;
+    return { ...(await host.readFlattenedMetaItems(request, audience)), items: resolved.items };
+}
+
 /** The body of `ObjectStackProtocolImplementation#getMetaItems`; the method's docblock there is its contract. */
 export async function getMetaItems(host: FormReadHost, request: { type: string; packageId?: string; names?: readonly string[]; previewDrafts?: boolean }) {
     // #4432 — CANONICAL TYPE KEY. See {@link canonicalMetaType}. This one
@@ -73,11 +89,9 @@ export async function getMetaItems(host: FormReadHost, request: { type: string; 
     // each face's boundary, so the shared body only ever sees the canonical
     // key.
     const canonical = canonicalizeMetaRequestType(request);
-    // [ADR-0159 D5] The `form` list is resolved over both types.
-    if (canonical.type === 'form') {
-        const list = await host.readFlattenedMetaItems(canonical, 'served');
-        return { ...list, items: await readEffectiveForms(host, canonical, 'served') };
-    }
+    // [ADR-0159 D5] The `form` list is resolved over both types, in one
+    // generic read where the list names no package (`readEffectiveFormList`).
+    if (canonical.type === 'form') return effectiveFormList(host, canonical, 'served');
     return host.readFlattenedMetaItems(canonical, 'served');
 }
 
@@ -85,10 +99,7 @@ export async function getMetaItems(host: FormReadHost, request: { type: string; 
 export async function getMetaItemsForExecution(host: FormReadHost, request: { type: string; packageId?: string; previewDrafts?: boolean }) {
     // The same #4432 fold {@link getMetaItems} applies, for the same reason.
     const canonical = canonicalizeMetaRequestType(request);
-    if (canonical.type === 'form') {
-        const list = await host.readFlattenedMetaItems(canonical, 'execution');
-        return { ...list, items: await readEffectiveForms(host, canonical, 'execution') };
-    }
+    if (canonical.type === 'form') return effectiveFormList(host, canonical, 'execution');
     return host.readFlattenedMetaItems(canonical, 'execution');
 }
 

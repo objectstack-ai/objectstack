@@ -693,13 +693,14 @@ async function readEffectiveFormItem(
     request: { type: string; name: string; packageId?: string; member?: string; userTextLocales?: readonly string[] },
 ): Promise<any> {
     const generic: any = await host.readMetaItemFace(request, 'served');
-    const listedAt = (packageId: string | undefined) => readEffectiveForms(host, {
-        type: 'form',
-        names: [request.name],
-        ...(packageId !== undefined ? { packageId } : {}),
-    }, 'served');
-    const listed = await listedAt(request.packageId);
+    // ONE effective read of the name, unscoped: the list scoped to a package
+    // is the same resolution filtered to that address (`readEffectiveFormList`),
+    // so the address's answer and every address's are both read off it.
+    const everywhere = await readEffectiveForms(host, { type: 'form', names: [request.name] }, 'served');
     const pkgOf = (item: unknown): unknown => (item as { _packageId?: unknown } | null)?._packageId;
+    const listed = request.packageId === undefined
+        ? everywhere
+        : everywhere.filter((item) => pkgOf(item) === request.packageId);
     const fromView = (item: unknown): boolean => (item as Record<string, unknown> | null)?.[PROJECTED_FORM_SOURCE_KEY] === 'view';
     const envelope = generic && typeof generic === 'object' ? generic : { type: 'form', name: request.name };
     const genericItem = generic?.item;
@@ -709,7 +710,7 @@ async function readEffectiveFormItem(
         ?? (request.packageId !== undefined ? listed.find(fromView) : undefined);
     if (projected !== undefined) return { ...envelope, item: projected };
     if (matching !== undefined || listed.length > 0) return generic;
-    if (request.packageId !== undefined && (await listedAt(undefined)).some((item) => pkgOf(item) === pkgOf(genericItem))) return generic;
+    if (request.packageId !== undefined && everywhere.some((item) => pkgOf(item) === pkgOf(genericItem))) return generic;
     const { item: _item, ...rest } = envelope;
     return rest;
 }

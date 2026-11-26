@@ -47,7 +47,7 @@ import { RestServer } from './rest-server';
 import { installDefaultOrganization } from './default-organization.testkit.js';
 
 // [#10126] Pay the first transform of this dist-resolved workspace dep at module load.
-import '@objectstack/spec/ui';
+import { projectedFormsOf } from '@objectstack/spec/ui';
 
 const PARENT = 'qsf_parent';
 const CHILD = 'qsf_child';
@@ -142,7 +142,7 @@ beforeAll(async () => {
       if (prop === 'getUnreadableFormBodies') return async () => [];
       if (prop === 'getMetaItems') {
         // The engine holds the objects; this harness registers no metadata service.
-        return async (req: any) => (req?.type === 'view' ? [FORM_VIEW] : req?.type === 'form' ? [] : req?.type === 'object' ? [CHILD_OBJECT, PARENT_OBJECT] : target.getMetaItems(req));
+        return async (req: any) => (req?.type === 'view' ? [FORM_VIEW] : req?.type === 'form' ? projectedFormsOf([FORM_VIEW]) : req?.type === 'object' ? [CHILD_OBJECT, PARENT_OBJECT] : target.getMetaItems(req));
       }
       const v = Reflect.get(target, prop, receiver);
       return typeof v === 'function' ? v.bind(target) : v;

@@ -23,7 +23,7 @@
  * not move.
  */
 
-import { applyOldShapeFormRowRemovals, healOldShapeFormRowRemovals, packagelessListOverFormRefusal, type OldShapeFormRowRemoval } from './protocol-form-writes.js';
+import { applyOldShapeFormRowRemovals, formTypeWriteRefusal, healOldShapeFormRowRemovals, type OldShapeFormRowRemoval } from './protocol-form-writes.js';
 import { stampHtmlPageRequires } from './runtime-authoring-gate.js';
 import type { RuntimeAuthoringIssue, RuntimePendingDeclarations } from './runtime-authoring-gate.js';
 import { DraftConflictError, packagelessAddressAmbiguityRefusal } from './sys-metadata-repository.js';
@@ -675,7 +675,7 @@ export class ProtocolHistoryAndPublishFacet {
      * `recordPendingDenialAudit`, rethrow. Skip it and the refusal is silent
      * again — the pre-#7748 state, not merely a worse one.
      */
-    static async promoteDraftForPublish(host: Pick<ProtocolHost, 'anonymousElevatedFlowRefusal' | 'applyRegistryWriteThrough' | 'readActiveOverlayRows' | 'restoreArtifactRegistryView' | 'storedOverlayEntries' | 'assertRuntimeAuthoringRules' | 'classifyObjectContribution' | 'credentialChannelFor' | 'declinesStoredRow' | 'defaultRecordPageSaveRefusal' | 'engine' | 'ensureOverlayIndex' | 'expandRuntimeViewContainer' | 'externalBindingSaveRefusal' | 'getOverlayRepo' | 'isArtifactBacked' | 'isOverlayAllowed' | 'isRuntimeCreateAllowed' | 'isSealedManagedItem' | 'isWritablePackage' | 'lockWriteRefusal' | 'metadataConflictRefusal' | 'namedBaseOverlayWriteRefusal' | 'objectExtensionItemRefusal' | 'objectNamespaceObjectNameClash' | 'objectNamespacePrefixViolation' | 'objectRegistrationRefusal' | 'optimisticConflictAuditEntry' | 'overlayPackageMismatchError' | 'overrideWriteVerdict' | 'packagelessAddress' | 'packagelessDraftAddress' | 'permissionSetNameCollisionRefusal' | 'readItemActiveRows' | 'resolveSduiManifest' | 'rethrowUnlessMetadataStoreUnprovisioned' | 'seedExternalIdSaveRefusal' | 'shippedArtifactsOf' | 'storedParentForToken' | 'uninstalledNamedBaseRefusal' | 'unknownDatasourceSaveRefusal' | 'unknownGrantObjectSaveRefusal' | 'unknownPicklistBindingSaveRefusal'>, request: {
+    static async promoteDraftForPublish(host: Pick<ProtocolHost, 'anonymousElevatedFlowRefusal' | 'applyRegistryWriteThrough' | 'expandStoredViewContainers' | 'readFlattenedMetaItems' | 'readActiveOverlayRows' | 'restoreArtifactRegistryView' | 'storedOverlayEntries' | 'assertRuntimeAuthoringRules' | 'classifyObjectContribution' | 'credentialChannelFor' | 'declinesStoredRow' | 'defaultRecordPageSaveRefusal' | 'engine' | 'ensureOverlayIndex' | 'expandRuntimeViewContainer' | 'externalBindingSaveRefusal' | 'getOverlayRepo' | 'isArtifactBacked' | 'isOverlayAllowed' | 'isRuntimeCreateAllowed' | 'isSealedManagedItem' | 'isWritablePackage' | 'lockWriteRefusal' | 'metadataConflictRefusal' | 'namedBaseOverlayWriteRefusal' | 'objectExtensionItemRefusal' | 'objectNamespaceObjectNameClash' | 'objectNamespacePrefixViolation' | 'objectRegistrationRefusal' | 'optimisticConflictAuditEntry' | 'overlayPackageMismatchError' | 'overrideWriteVerdict' | 'packagelessAddress' | 'packagelessDraftAddress' | 'permissionSetNameCollisionRefusal' | 'readItemActiveRows' | 'resolveSduiManifest' | 'rethrowUnlessMetadataStoreUnprovisioned' | 'seedExternalIdSaveRefusal' | 'shippedArtifactsOf' | 'storedParentForToken' | 'uninstalledNamedBaseRefusal' | 'unknownDatasourceSaveRefusal' | 'unknownGrantObjectSaveRefusal' | 'unknownPicklistBindingSaveRefusal'>, request: {
             type: string; name: string; actor?: string; message?: string;
             /**
              * [#8907] ADR-0048 — the package binding of the draft being promoted,
@@ -1196,17 +1196,19 @@ export class ProtocolHistoryAndPublishFacet {
             );
             if (nameCollision) throw nameCollision;
         }
-        // [ADR-0159 card ② item 5] …and a package-less view draft that would
-        // store a list at the name a read-only package authors as a `form`:
-        // the save door refuses that body (`VALIDATION_ERROR`, 400), and a
-        // draft saved before the gate is refused here with the same sentence
-        // before `repo.promoteDraft` writes. See
-        // {@link packagelessListOverFormRefusal}.
+        // [ADR-0159 card ② items 5 and 7] …and the save door's two `form`-type
+        // refusals, judged again on the draft's body and the package it is
+        // promoted into before `repo.promoteDraft` writes: a package-less view
+        // draft that would store a list at the name a read-only package
+        // authors as a `form` (`VALIDATION_ERROR`, 400), and a `form` draft
+        // left open on a public address another form has taken since the
+        // draft was saved (`FORM_ADDRESS_TAKEN`, 409). See
+        // {@link formTypeWriteRefusal}.
         if (draftForGate) {
-            const listOverForm = packagelessListOverFormRefusal(
+            const formRefusal = await formTypeWriteRefusal(
                 host, singularType, draftForGate.body, request.name, promoteInto,
             );
-            if (listOverForm) throw listOverForm;
+            if (formRefusal) throw formRefusal;
         }
         // [#28905, ADR-0146 D1, D11] …and the promotion INTO the read-only
         // base itself, of an item of one of the five overlay types it ships:

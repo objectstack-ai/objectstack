@@ -1,6 +1,6 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
-import { packagelessListOverFormRefusal } from './protocol-form-writes.js';
+import { formTypeWriteRefusal } from './protocol-form-writes.js';
 import { readUnreadableFormBodies } from './protocol-form-reads.js';
 import type { UnreadableFormBody } from '@objectstack/spec/ui';
 import type {
@@ -1591,9 +1591,9 @@ export class ObjectStackProtocolImplementation implements
         return restoredBodyDerivation.call(host, type);
     }
 
-    /** [ADR-0159 card ② item 5] {@link packagelessListOverFormRefusal}, asked of a restored body against its binding. */
-    private listOverFormRefusal(type: string, item: unknown, name: string, binding: string | null): Error | undefined {
-        return packagelessListOverFormRefusal(protocolHost(this), type, item, name, binding);
+    /** [ADR-0159 card ② items 5 and 7] {@link formTypeWriteRefusal}, asked of a restored body against its binding. */
+    private formRestoreRefusal(type: string, item: unknown, name: string, binding: string | null): Promise<Error | undefined> {
+        return formTypeWriteRefusal(protocolHost(this), type, item, name, binding);
     }
 
     /**
@@ -1631,7 +1631,7 @@ export class ObjectStackProtocolImplementation implements
     private restoredBodyWriter(type: string, name: string, binding: string | null, source: string): (historyBody: unknown) => Promise<unknown> {
         // [#25467 cut 8] The body moved to `protocol-authoring-gate.ts` (see `AuthoringGateHost`).
         const host: ThisParameterType<typeof restoredBodyWriter> = {
-            listOverFormRefusal: (...a) => this.listOverFormRefusal(...a),
+            formRestoreRefusal: (...a) => this.formRestoreRefusal(...a),
             objectExtensionItemRefusal: (...a) => this.objectExtensionItemRefusal(...a),
             refuseRestoredBodyTheSaveDoorRefuses: (...a) => this.refuseRestoredBodyTheSaveDoorRefuses(...a),
             restoredBodyDerivation: (...a) => this.restoredBodyDerivation(...a),

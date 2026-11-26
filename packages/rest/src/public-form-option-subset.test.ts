@@ -31,6 +31,7 @@
  */
 
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
+import { projectedFormsOf } from '@objectstack/spec/ui';
 import { ObjectQL } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
 import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
@@ -171,8 +172,8 @@ describe('[#27606] POST /forms/:slug/submit: a form row\'s `options` subset is e
     const protocol: any = new ObjectStackProtocolImplementation(engine as any);
     const realGetMetaItems = protocol.getMetaItems.bind(protocol);
     protocol.getMetaItems = async (request: any) => {
-      // [ADR-0159 D5] No `form` item is injected: the doors read the injected old shape through the projection.
-      if (request?.type === 'form') return [];
+      // [ADR-0159 D5] The `form` read, as the protocol serves it for the injected old shape: its projection.
+      if (request?.type === 'form') return projectedFormsOf([FORM, WIDE_FORM, LOOSE_FORM]);
       if (request?.type === 'view') return [FORM, WIDE_FORM, LOOSE_FORM];
       if (request?.type === 'object') return [CASE];
       return realGetMetaItems(request);

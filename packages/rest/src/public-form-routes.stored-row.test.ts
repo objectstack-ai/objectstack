@@ -64,6 +64,7 @@ import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protoco
 // it reports TS7006 — one broken extension reading as two type errors in this
 // package's TEST_DEBT re-measure.
 import { RestServer } from './rest-server.js';
+import { projectedFormsOf } from '@objectstack/spec/ui';
 
 // ─── the real save path ──────────────────────────────────────────────────────
 
@@ -172,6 +173,7 @@ function routesOver(storedView: any) {
         getDiscovery: vi.fn().mockResolvedValue({ version: 'v0', routes: { data: '', metadata: '' } }),
         getMetaTypes: vi.fn().mockResolvedValue([]),
         getMetaItems: vi.fn(async ({ type }: { type: string }) => {
+            if (type === 'form') return projectedFormsOf([storedView]);
             if (type === 'view') return [storedView];
             if (type === 'object') return [leadObject];
             return [];
