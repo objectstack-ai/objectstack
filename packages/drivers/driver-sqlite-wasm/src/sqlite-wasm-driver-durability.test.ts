@@ -126,3 +126,115 @@ describe('SqliteWasmDriver durability & resilience', () => {
     expect(rows[0].note).toBeNull();
   });
 });
+
+/**
+ * `disconnect()` is the durability boundary: when it returns, the committed
+ * image is on disk, however long the final flush takes. The connection's own
+ * final flush runs as the Knex pool's destroyer, and tarn stops waiting for a
+ * destroyer after `destroyTimeoutMillis` (5 s by default). At that point it
+ * resolves anyway. A whole-image fsync on a loaded disk can take longer than
+ * that. A short pool timeout and a slowed fsync stand in for the loaded disk
+ * here. Measured: a refused boot's rollback returned before its schema sync
+ * was on disk, and the dogfood ownership-upgrade test read the v17 bytes.
+ */
+describe('SqliteWasmDriver disconnect waits for its final flush', () => {
+  let dir: string | undefined;
+  let restoreSync: (() => void) | undefined;
+
+  afterEach(() => {
+    restoreSync?.();
+    restoreSync = undefined;
+    if (dir) rmSync(dir, { recursive: true, force: true });
+    dir = undefined;
+  });
+
+  /**
+   * Replace `FileHandle#sync` for this worker until `restoreSync` runs. The
+   * patch is worker-wide, which is safe only because vitest isolates each test
+   * file: under `isolate: false` it would reach the neighbouring files.
+   */
+  async function patchSync(file: string, body: (sync: () => Promise<void>) => Promise<void>): Promise<void> {
+    const { open } = await import('node:fs/promises');
+    const probe = await open(file, 'r');
+    const proto = Object.getPrototypeOf(probe) as { sync: (...args: unknown[]) => Promise<void> };
+    await probe.close();
+    const sync = proto.sync;
+    proto.sync = function (this: unknown, ...args: unknown[]) {
+      return body(() => sync.apply(this, args));
+    };
+    restoreSync = () => {
+      proto.sync = sync;
+    };
+  }
+
+  /** A driver over a fresh file whose pool stops waiting for a destroyer after 50 ms, with one row written. */
+  async function driverWithPendingRow(): Promise<{ driver: SqliteWasmDriver; file: string }> {
+    dir = mkdtempSync(join(tmpdir(), 'wasm-dur-disconnect-'));
+    const file = join(dir, 'slow.db');
+    const driver = new SqliteWasmDriver({
+      filename: file,
+      persist: 'on-disconnect',
+      pool: { min: 1, max: 1, destroyTimeoutMillis: 50 },
+    });
+    await driver.initObjects([{ name: 'acct', fields: { name: { type: 'string' } } }]);
+    // The premise: the pool really carries the short destroy timeout.
+    expect((driver as any).knex.client.pool.destroyTimeoutMillis).toBe(50);
+    await (driver as any).flush();
+    await (driver as any).knex('acct').insert({ id: 'a1', name: 'A' });
+    return { driver, file };
+  }
+
+  it('a write committed before disconnect() is on disk when it returns, even when the flush outlasts the pool destroy timeout', async () => {
+    const { driver, file } = await driverWithPendingRow();
+    // Every fsync from here on takes 400 ms, eight times the pool's destroy timeout.
+    await patchSync(file, async (sync) => {
+      await new Promise((r) => setTimeout(r, 400));
+      return sync();
+    });
+
+    await driver.disconnect();
+
+    const reopened = new SqliteWasmDriver({ filename: file, persist: 'on-disconnect' });
+    try {
+      const rows = await (reopened as any).knex('acct');
+      expect(rows.map((r: { id: string }) => r.id)).toEqual(['a1']);
+    } finally {
+      restoreSync?.();
+      restoreSync = undefined;
+      await reopened.disconnect();
+    }
+  });
+
+  it('a final flush that fails rejects disconnect() with that error, and the pool is released first', async () => {
+    const { driver, file } = await driverWithPendingRow();
+    const failure = new Error('fsync refused (test)');
+    await patchSync(file, async () => {
+      throw failure;
+    });
+
+    await expect(driver.disconnect()).rejects.toBe(failure);
+    // Released: Knex drops its pool once `destroy()` has run.
+    expect((driver as any).knex.client.pool).toBeUndefined();
+  });
+
+  it('a second disconnect() during the first one waits for that same teardown, not for an acquire timeout', async () => {
+    const { driver } = await driverWithPendingRow();
+    const client = (driver as any).knex.client;
+    const pool = client.pool;
+    // Hold the pool's destroyer for 300 ms, so the pool sits in `destroyed`
+    // with the connection still in its free list (tarn clears that last).
+    const destroyRaw = client.destroyRawConnection.bind(client);
+    client.destroyRawConnection = async (conn: unknown) => {
+      await new Promise((r) => setTimeout(r, 300));
+      return destroyRaw(conn);
+    };
+
+    const first = driver.disconnect();
+    while (!pool.destroyed) await new Promise((r) => setTimeout(r, 5));
+    const started = Date.now();
+    const second = driver.disconnect();
+    await Promise.all([first, second]);
+    // Settles with the first teardown (about 300 ms), not after Knex's 60 s acquire timeout.
+    expect(Date.now() - started).toBeLessThan(2_000);
+  }, 10_000);
+});
