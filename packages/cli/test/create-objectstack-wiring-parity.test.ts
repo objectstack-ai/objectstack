@@ -171,6 +171,9 @@ describe('[#20333] the blank template ships every wired barrel', () => {
       return readFileSync(join(BLANK, file), 'utf8').slice((b!.init as string).length).split('\n').filter(Boolean);
     };
     expect(appendedTo('src/apps/index.ts')).toEqual(["export { default as main } from './main.app';"]);
-    expect(appendedTo('src/views/index.ts')).toEqual(["export { default as note } from './note.view';"]);
+    expect(appendedTo('src/views/index.ts')).toEqual([
+      "export { default as company } from './company.view';",
+      "export { default as contact } from './contact.view';",
+    ]);
   });
 });

@@ -44,7 +44,7 @@
  * ## What it does NOT read — named in the footer of every run
  *
  * The maintainer's direct dispatch (the first leg of 取卡全序, three provenance pieces), the contract-surface leg
- * (`references/lanes/spec.md`), a `tooling` card's three-gate admission (triage's reading: only one gate is a
+ * (`references/domains/spec.md`), a `tooling` card's three-gate admission (triage's reading: only one gate is a
  * machine line), the multi-seat odd/even alternation, batching a p3 onto a PR that touches the same files (rule
  * ④'s "or batched", a judgement over a diff), lane ownership (a `domain:*` card outside the seat's lane, a cloud
  * card or a security card is listed but may not be claimed; each row prints its `domain:*` so the seat can read it)
@@ -133,7 +133,7 @@ export const RULE_PHRASES = Object.freeze([
 export const DUTIES_PATH = '.claude/skills/pm-dispatch/references/execution-duties.md';
 export const DUTIES_PHRASES = Object.freeze([
   '候选 = open、未 assign、无 `needs-user-decision`、无 `pm:retriage`',
-  '取卡全序:维护者直派插队卡(出处三件)> 契约面卡(判据见 `references/lanes/spec.md`)> 标签序',
+  '取卡全序:维护者直派插队卡(出处三件)> 契约面卡(判据见 `references/domains/spec.md`)> 标签序',
   '同级先非车队卡(作者非 `Bot` 且首行非席位签名),再 `Bug`、卡龄',
   '本车道开放卡现读 `card-pick.mjs --order <序>`',
   '开放 = 未派发(无 `pm:dispatched`、无 assignee)',
@@ -149,7 +149,7 @@ export const LIFECYCLE_PHRASES = Object.freeze(['无分诊审计、他席 `Claim
 /** The legs this file cannot read, printed under every run. */
 export const UNREAD_LEGS = Object.freeze([
   "the maintainer's direct dispatch (取卡全序 leg 1, three provenance pieces) — not on the board as a label",
-  'the contract-surface leg (取卡全序 leg 2, `references/lanes/spec.md`) — a judgement over the diff, not a label',
+  'the contract-surface leg (取卡全序 leg 2, `references/domains/spec.md`) — a judgement over the diff, not a label',
   "a `tooling` card's three-gate admission — triage's reading; flagged on the row, not judged",
   'multi-seat odd/even alternation — the seat applies it to this list',
   "batching a p3 onto a PR that touches the same files (rule ④'s \"or batched\") — a judgement over a diff; here every area p3 ranks as its close-out",

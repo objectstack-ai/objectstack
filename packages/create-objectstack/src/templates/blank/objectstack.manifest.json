@@ -2,6 +2,6 @@
   "$schema": "https://schemas.objectstack.dev/template-manifest.json",
   "namespace": "blank",
   "displayName": "Blank Starter",
-  "description": "Minimal ObjectStack environment with a single object — a clean slate for building.",
+  "description": "ObjectStack environment that starts with companies and contacts, with tasks and notes from the platform in the menu.",
   "readmePath": "README.md"
 }

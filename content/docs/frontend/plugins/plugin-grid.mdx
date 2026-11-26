@@ -208,16 +208,16 @@ verdict.
 
 ### Row callbacks are component props
 
-`onRowClick`, `onRowSelect`, `onCellChange`, `onRowSave`, `onBatchSave`,
+`onRowClick`, `onRowSelect`, `onCellChange`, `onRowSave`,
 `onEdit`, `onDelete`, `onBulkDelete` and `onAddRecord` are React props on
 `ObjectGridComponentProps`. They are functions, so no metadata document can hold
 them, and writing one of them into a schema does nothing at all: the grid builds
-the inner table's handlers itself and never reads any of these nine off the
+the inner table's handlers itself and never reads any of these eight off the
 schema.
 
 The one callback the grid does read off the schema is `onNavigate`, declared on
 `ObjectGridSchema` for programmatic callers only. It is a function value too, so
-it is no more authorable than the nine — it is deliberately absent from the
+it is no more authorable than the eight — it is deliberately absent from the
 manifest and the designer panel, and prefer passing it as a prop
 (objectui#5234, maintainer ruling of 2026-08-19).
 
@@ -411,16 +411,12 @@ retired (objectstack#36270): `@objectstack/spec` refuses it, and
   definition**, not by a column key — a field marked `readonly`, and
   computed/binary field types (formula, autonumber, file, …), never open an
   editor. There is no `editable` key on `ListColumn`.
-- **Rich text edits in a panel** (objectstack#36023): on a select-first grid
-  (`cellSelection`), a `markdown`, `html` or `richtext` cell opens the record
+- **Rich text edits in a panel** (objectstack#36023): a `markdown`, `html` or `richtext` cell opens the record
   form's text box over the stored source in a panel under the cell, at least as
   wide as the column, while the cell keeps showing its value. Enter there is a
-  new line, Ctrl/Cmd+Enter saves, Esc discards and a click outside saves. A grid
-  without `cellSelection` opens the text box over the cell on one click: Enter
-  is a new line, Ctrl/Cmd+Enter does nothing, Esc discards and a click outside
-  keeps the text as a pending change for the grid's save buttons.
-- **Visual feedback**: editable cells show a hover state, and the input is
-  focused and selected when editing begins
+  new line, Ctrl/Cmd+Enter saves, Esc discards and a click outside saves.
+- **Visual feedback**: the selected cell is ringed, and the editor opens with
+  the caret after the value
 - **The editor floats over its cell** (objectstack#35688): it opens on a layer
   anchored to the cell's top-left corner, at least as wide as the column and
   wider where its field type needs it (an address form, a record picker), so
@@ -449,9 +445,10 @@ page, the grid an `object-view` draws, and an authored `object-grid`. There is
 no inline-edit mode and no toggle. On the list page the grid is editable
 wherever the reader may edit the object and the view does not declare
 `userActions.editInline: false`; elsewhere it is editable where `editable` is
-set and the reader may edit the object. A React host can pass the
-`cellSelection` component prop (not a schema key) as `false` to keep the staged
-model described under [Batch Editing](#batch-editing--multi-row-save).
+set and the reader may edit the object. There is no other editing model: the
+staged one (click-to-edit, a pending-changes bar and "Save All") is retired, and
+so is the React host's `cellSelection={false}` that kept it (objectstack#35827) —
+see [Owning persistence](#owning-persistence-onrowsave).
 
 - **A click selects** a cell (a ring around it); it neither edits nor opens the
   record. Only the name link keeps its own click (it opens the record). Every
@@ -612,22 +609,16 @@ WAI-ARIA grid pattern (objectui#11068):
   `editable` *and* the viewer's permission to update the object, the same value
   inline editing obeys — because that grid selects a cell first and moves the
   selection with these keys; `false` does not turn it off there
-  (objectstack#36270), except where a React host keeps the staged model with
-  `cellSelection={false}` (see Batch Editing below). A read-only grid keeps every
-  cell its own Tab stop unless you write `true`.
+  (objectstack#36270). A read-only grid keeps every cell its own Tab stop unless
+  you write `true`.
 - While it is on, the table is exposed to assistive technology as a `grid`. A
   grouped grid navigates within each group's table; the mobile card layout has
   no cells and is unaffected.
 
-### Batch Editing & Multi-Row Save
+### Owning persistence: `onRowSave`
 
-Edit multiple cells across multiple rows and save them individually or all at
-once. This is the staged model, which no metadata selects: since
-objectstack#36270 every grid that renders editable saves each cell as it is
-committed (above). A React host that draws `ObjectGrid` itself opts back into
-it by passing `cellSelection={false}`; then a click opens a cell's editor, and
-the save/cancel affordances appear on their own once a row has pending
-changes:
+An editable grid needs no prop to edit: it selects a cell first and saves each
+committed cell as it goes.
 
 ```tsx
 import { ObjectGrid, type ObjectGridComponentProps } from '@object-ui/plugin-grid';
@@ -636,7 +627,6 @@ declare const dataSource: NonNullable<ObjectGridComponentProps['dataSource']>;
 
 export const ProductsGrid = () => (
   <ObjectGrid
-    cellSelection={false}
     dataSource={dataSource}
     schema={{
       type: 'object-grid',
@@ -653,15 +643,16 @@ export const ProductsGrid = () => (
 );
 ```
 
-Left alone, saving goes through the host's data source. A React host that needs
-to own persistence supplies `onRowSave` / `onBatchSave` as **component props** —
-and because they are props, they take the adapter from the host's own scope
-rather than from anything in the schema:
+Each committed cell is written through the host's data source. A React host that
+needs to own persistence supplies `onRowSave` as a **component prop** — and
+because it is a prop, it takes the adapter from the host's own scope rather than
+from anything in the schema. It is called once per commit, with every edit that
+record still holds:
 
 ```tsx
 import type { ObjectGridComponentProps } from '@object-ui/plugin-grid';
 
-type Persistence = Pick<ObjectGridComponentProps, 'onRowSave' | 'onBatchSave'>;
+type Persistence = Pick<ObjectGridComponentProps, 'onRowSave'>;
 
 const persistence = (
   dataSource: NonNullable<ObjectGridComponentProps['dataSource']>,
@@ -669,33 +660,22 @@ const persistence = (
   onRowSave: async (rowIndex, changes, row) => {
     await dataSource.update('products', row.id, changes);
   },
-  onBatchSave: async (allChanges) => {
-    await Promise.all(
-      allChanges.map(({ row, changes }) => dataSource.update('products', row.id, changes)),
-    );
-  },
 });
 ```
 
-**Features:**
-- **Pending changes tracking**: edit multiple cells across rows before saving; a
-  cell edited back to the value it loaded with is not a pending change, and its
-  row is no longer counted as modified
-- **Visual indicators**: modified rows highlighted in amber, modified cells in bold
-- **Row-level save/cancel**: individual row save and cancel buttons
-- **Batch operations**: Save All and Cancel All buttons for bulk actions
-- **Flexible callbacks** — all three are `ObjectGridComponentProps`, never schema
-  keys: `onRowSave` for a single row, `onBatchSave` for many, `onCellChange` for
-  each committed cell edit, including one that leaves the value as loaded (only a
-  real change is staged). `onBatchSave` is `@deprecated`: only this staged model calls it;
-  on a select-first grid each cell saves through `onRowSave` (or the grid's own
-  write) and `onBatchSave` is never called
-- **A concurrent write is refused, not overwritten**: the default saves send each
+`cellSelection` takes only `true`: it asks for the select-first model on a grid
+that renders read-only. **Upgrading from the staged model** (objectstack#35827):
+drop `cellSelection={false}`; move a batch `onBatchSave(allChanges)` handler to a
+per-record `onRowSave(rowIndex, changes, row)`, or drop it and let the grid write
+through its data source.
+
+- **A refused save keeps the edit**: the cell keeps what was typed and says the
+  server's reason; the record's next commit sends it again with the new cell.
+- **A concurrent write is refused, not overwritten**: the default save sends the
   row's `updated_at` as `If-Match`, and an editable grid asks for that column even
   when no column shows it. A row someone else saved after it was read answers
   `409`, which opens the record page's conflict dialog (Reload latest, Overwrite
-  anyway, Cancel). "Save All" reports each row on its own: a refused row stays
-  pending and flagged, and the rows that saved are cleared.
+  anyway, Cancel).
 
 ## TypeScript Support
 

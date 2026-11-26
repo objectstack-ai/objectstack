@@ -13,6 +13,58 @@
  */
 
 /**
+ * Studio's accent: graphite, a neutral of Studio's own (objectstack#37452).
+ * Studio is the development surface of an app, not the app, so it never takes
+ * the app's theme colour; only the app's logo keeps that colour. The values
+ * are HSL triples, the format the theme's `--primary` holds, for the light
+ * and the dark theme; the dark one is a light graphite, so it reads on the
+ * dark sidebar.
+ */
+export const STUDIO_ACCENT_HSL = { light: '220 9% 23%', dark: '220 9% 83%' } as const;
+/** Text drawn on the accent, light and dark. */
+export const STUDIO_ACCENT_FOREGROUND_HSL = { light: '0 0% 100%', dark: '220 13% 9%' } as const;
+/**
+ * The theme's `--accent` is its hover and highlight tint (a ghost button's or
+ * a menu item's hover), not a strong colour, so Studio rebinds it to a faint
+ * graphite tint, not to graphite itself; the app's branding writes it from
+ * the app's `accentColor`.
+ */
+export const STUDIO_ACCENT_TINT_HSL = { light: '220 9% 94%', dark: '220 9% 18%' } as const;
+/** Text drawn on the tint, light and dark. */
+export const STUDIO_ACCENT_TINT_FOREGROUND_HSL = { light: '220 13% 9%', dark: '220 9% 96%' } as const;
+
+/**
+ * The class that makes Studio's accent the theme's primary inside an
+ * element: everything under it that the app's theme colour would tint (the
+ * selected menu entry's pill and left bar, focus rings, `bg-primary` /
+ * `text-primary`) draws graphite instead, whatever colour the app's branding
+ * wrote on the page root. It rebinds every theme token that branding
+ * writes: `--primary`, `--ring`, `--sidebar-primary`, `--sidebar-ring` and
+ * the foreground to {@link STUDIO_ACCENT_HSL} and
+ * {@link STUDIO_ACCENT_FOREGROUND_HSL}, and `--accent` with its foreground to
+ * {@link STUDIO_ACCENT_TINT_HSL} and {@link STUDIO_ACCENT_TINT_FOREGROUND_HSL},
+ * light and dark. It re-derives Tailwind's `--color-*` from them on the same
+ * element, because those are computed once on the page root and inherited
+ * with the app's colour already in them.
+ *
+ * The selected entry's hover deepens the same graphite pill; any other
+ * entry's hover is the sidebar primitive's neutral `--sidebar-accent`, which
+ * branding never writes.
+ *
+ * A literal class string: Tailwind finds a class by scanning source, so the
+ * values are spelled here again; `studio-tokens.test.ts` holds them equal to
+ * the four constants above.
+ */
+export const STUDIO_ACCENT =
+  '[--primary:220_9%_23%] [--primary-foreground:0_0%_100%] [--ring:220_9%_23%] [--sidebar-primary:220_9%_23%] [--sidebar-ring:220_9%_23%] ' +
+  '[--accent:220_9%_94%] [--accent-foreground:220_13%_9%] ' +
+  'dark:[--primary:220_9%_83%] dark:[--primary-foreground:220_13%_9%] dark:[--ring:220_9%_83%] dark:[--sidebar-primary:220_9%_83%] dark:[--sidebar-ring:220_9%_83%] ' +
+  'dark:[--accent:220_9%_18%] dark:[--accent-foreground:220_9%_96%] ' +
+  '[--color-primary:hsl(var(--primary))] [--color-primary-foreground:hsl(var(--primary-foreground))] [--color-ring:hsl(var(--ring))] ' +
+  '[--color-sidebar-primary:hsl(var(--sidebar-primary))] [--color-sidebar-ring:hsl(var(--sidebar-ring))] ' +
+  '[--color-accent:hsl(var(--accent))] [--color-accent-foreground:hsl(var(--accent-foreground))]';
+
+/**
  * Shell header (objectui#12509). One 48 px row at every width, two columns:
  * the left menu's control and the way back to the app at the left, the
  * package actions at the right. The right column never drops below its

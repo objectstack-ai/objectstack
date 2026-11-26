@@ -211,14 +211,19 @@
 
 import {
   API_TRIGGER_SECRET_REF_KEY,
+  FLOW_NODE_EXPRESSION_PATHS,
   TimeRelativeTriggerSchema,
   apiTriggerSecretRefOf,
   apiTriggerSignatureRefusals,
   apiTriggerVerifierOf,
+  collectFlowGraphs,
   resolveFlowTriggerKind,
+  type FlowEdgeParsed,
+  type FlowNodeParsed,
 } from '@objectstack/spec/automation';
 import { resolvePackageClosure } from '@objectstack/metadata-core';
-import { walkFlowNodes } from './flow-walk.js';
+import { flowNodeLabel, walkFlowNodes } from './flow-walk.js';
+import { collectFlowVariableNames, collectScreenFieldNames } from './flow-variable-scope.js';
 import {
   closureDependencyRemedy,
   indexServedObjectGraph,
@@ -227,7 +232,14 @@ import {
   suggestName,
   type ObjectGraph,
 } from './object-graph.js';
-import { indexSelectOptions, optionLabelComparisons, type SelectOptions } from './flow-select-options.js';
+import {
+  TRIGGER_RECORD_READS,
+  indexSelectOptions,
+  optionLabelComparisons,
+  optionLabelOperands,
+  type FieldReads,
+  type SelectOptions,
+} from './flow-select-options.js';
 import type { UserTextParams } from './finding-user-text.js';
 
 export type FlowTriggerReadinessSeverity = 'error' | 'warning';
@@ -413,6 +425,25 @@ export const FLOW_TRIGGER_OBJECT_MISSING = 'flow-trigger-object-missing';
  * where the field stores the option's VALUE (`closed_lost`). The row holds
  * the value, so the comparison is always false (or always true for `!=`) and
  * the condition never tells one record from another.
+ *
+ * [#36964] One id for the one mistake wherever the flow compares the field,
+ * read by {@link optionLabelsBeyondStart}: an edge condition and a `decision`
+ * branch (on the trigger record, or on a row a `get_record` step bound to a
+ * variable), and a query filter's operand (`get_record` / `update_record` /
+ * `delete_record` `filter`, a time-relative sweep's `filter`). A flow filter
+ * is handed to the data engine as written, never resolved label → value
+ * (ADR-0061 D4 resolves labels for the query surfaces, not for an authored
+ * flow), so the label matches no row: the read finds nothing, the update or
+ * delete acts on nothing, the branch is never taken, and the run still
+ * reports success. Not the write rule's id (`flow-node-write-unknown-option`):
+ * that one's verdict is a write the record validator refuses, and a filter
+ * operand is refused by nothing.
+ *
+ * `error` at every position, the start condition's severity, on #5762's
+ * question: the label, the field's inline options and the object are all in
+ * this stack, and nothing installed changes what the row stores. A filter
+ * that means to find rows still holding a label (a clean-up after an options
+ * change) spells the operand as a CEL value envelope, which is not judged.
  */
 export const FLOW_CONDITION_OPTION_LABEL = 'flow-condition-option-label';
 /**
@@ -689,6 +720,210 @@ function conditionSourceOf(raw: unknown): string {
 }
 
 /**
+ * [#36964] The node types whose `config.filter` is a query filter of the
+ * node's own object — read off the spec's expression ledger (the entries that
+ * declare `filterOperands`), so a node type that gains the filter shape there
+ * is read here without a second list.
+ */
+const FILTER_NODE_TYPES: ReadonlySet<string> = new Set(
+  FLOW_NODE_EXPRESSION_PATHS.filter((entry) => entry.filterOperands && entry.path === 'filter').map((entry) => entry.nodeType),
+);
+
+/** A literal, non-empty object name; a templated one (`{…}`) is resolved at run time. */
+function literalObjectName(raw: unknown): string | undefined {
+  return typeof raw === 'string' && raw.trim() !== '' && !raw.includes('{') ? raw : undefined;
+}
+
+/** A graph's key path in this file's path spelling: `['nodes', 1, 'config', 'body']` → `.nodes[1].config.body`. */
+function graphPathText(path: readonly (string | number)[]): string {
+  return path.map((segment) => (typeof segment === 'number' ? `[${segment}]` : `.${segment}`)).join('');
+}
+
+/** The object holding a graph's `nodes` / `edges` as AUTHORED, so an index names the author's list. */
+function graphHolder(flow: AnyRec, path: readonly (string | number)[]): AnyRec | undefined {
+  let at: unknown = flow;
+  for (const segment of path) {
+    if (!at || typeof at !== 'object') return undefined;
+    at = (at as Record<string | number, unknown>)[segment];
+  }
+  return at && typeof at === 'object' && !Array.isArray(at) ? (at as AnyRec) : undefined;
+}
+
+/**
+ * [#36964] `flow-condition-option-label` past the start condition (1-iv):
+ *
+ *  - a query FILTER's operand — every node in {@link FILTER_NODE_TYPES}, at any
+ *    region depth, against its own literal `objectName`, and a time-relative
+ *    start's `timeRelative.filter` against the swept object;
+ *  - an EDGE condition and a `decision` node's `conditions[].expression`, in
+ *    every graph of the flow, against the rows the condition can name: the
+ *    trigger record (`record.F`, `previous.F`, bare `F` unless a binding of the
+ *    same name shadows it) on a record-change or time-relative flow, and the
+ *    row a single-row `get_record` step bound to its `outputVariable`
+ *    (`deal.F`). A variable bound by anything else as well — another step, a
+ *    declared variable, a node id, a screen field — is not judged: which value
+ *    it holds when the condition runs is the run's. Likewise a `record` /
+ *    `previous` root the flow itself binds (a step's `outputVariable`, a loop's
+ *    `iteratorVariable`, an assignment target): after that binding `record.F`
+ *    is another row's field, so the root is not read as the trigger record.
+ */
+function optionLabelsBeyondStart(
+  flow: AnyRec,
+  flowIndex: number,
+  flowName: string,
+  start: { node: AnyRec; index: number } | undefined,
+  startConfig: AnyRec,
+  optionsIndex: () => ReadonlyMap<string, ReadonlyMap<string, SelectOptions>>,
+): FlowTriggerReadinessFinding[] {
+  const findings: FlowTriggerReadinessFinding[] = [];
+
+  const filterFindings = (filter: unknown, objectName: string, where: string, path: string): void => {
+    const options = optionsIndex().get(objectName);
+    if (!options) return;
+    for (const hit of optionLabelOperands(filter, options)) {
+      findings.push({
+        severity: 'error',
+        rule: FLOW_CONDITION_OPTION_LABEL,
+        where,
+        path: path + graphPathText(hit.path),
+        message:
+          `filters '${objectName}.${hit.field}' on '${hit.label}', which is that option's label; the field stores ` +
+          `the value '${hit.value}', so no record holds '${hit.label}' and the filter ` +
+          (hit.negated ? 'excludes no record' : 'matches no record'),
+        hint: `Filter on the option's value: write '${hit.value}' in place of '${hit.label}'`,
+      });
+    }
+  };
+
+  // Query filters: the CRUD nodes, nested regions included.
+  for (const { node, path, regionTrail } of walkFlowNodes(flow, `flows[${flowIndex}]`)) {
+    if (typeof node.type !== 'string' || !FILTER_NODE_TYPES.has(node.type)) continue;
+    const cfg = node.config;
+    if (!cfg || typeof cfg !== 'object' || Array.isArray(cfg)) continue;
+    const objectName = literalObjectName((cfg as AnyRec).objectName);
+    if (!objectName || (cfg as AnyRec).filter === undefined) continue;
+    const label = flowNodeLabel(node, Number(path.slice(path.lastIndexOf('[') + 1, -1)));
+    const where = `flow "${flowName}" › ${regionTrail ? `${regionTrail} › ` : ''}node "${label}"`;
+    filterFindings((cfg as AnyRec).filter, objectName, where, `${path}.config.filter`);
+  }
+
+  // The sweep's own filter, on the swept object.
+  const timeRelative = startConfig.timeRelative;
+  const sweptObject =
+    timeRelative && typeof timeRelative === 'object' && !Array.isArray(timeRelative)
+      ? literalObjectName((timeRelative as AnyRec).object)
+      : undefined;
+  if (start && sweptObject && (timeRelative as AnyRec).filter !== undefined) {
+    filterFindings(
+      (timeRelative as AnyRec).filter,
+      sweptObject,
+      `flow "${flowName}" › start node`,
+      `flows[${flowIndex}].nodes[${start.index}].config.timeRelative.filter`,
+    );
+  }
+
+  // Conditions: which rows they can name, then every edge and decision branch.
+  const graphs = collectFlowGraphs({
+    ...flow,
+    nodes: recordsOf(flow.nodes) as unknown as FlowNodeParsed[],
+    edges: recordsOf(flow.edges) as unknown as FlowEdgeParsed[],
+  });
+  const triggerType = typeof startConfig.triggerType === 'string' ? startConfig.triggerType : undefined;
+  const triggerObject = triggerType?.startsWith('record-')
+    ? literalObjectName(startConfig.objectName)
+    : sweptObject;
+
+  // A single-row `get_record` binds its row to `outputVariable` (the `findOne`
+  // branch: `limit` absent or 1); a name bound by anything else as well is
+  // ambiguous and dropped.
+  const rowVariables = new Map<string, string | null>();
+  const rowReaders = new Set<unknown>();
+  for (const graph of graphs) {
+    for (const node of graph.nodes as unknown as AnyRec[]) {
+      if (node.type !== 'get_record' || !node.config || typeof node.config !== 'object') continue;
+      const cfg = node.config as AnyRec;
+      const variable = typeof cfg.outputVariable === 'string' && cfg.outputVariable ? cfg.outputVariable : undefined;
+      const objectName = literalObjectName(cfg.objectName);
+      if (!variable || !objectName || variable === 'record' || variable === 'previous') continue;
+      if (cfg.limit !== undefined && cfg.limit !== 1) continue;
+      rowReaders.add(node);
+      const prior = rowVariables.get(variable);
+      rowVariables.set(variable, prior === undefined || prior === objectName ? objectName : null);
+    }
+  }
+  const screenNames = collectScreenFieldNames(graphs);
+  const boundElsewhere = collectFlowVariableNames(
+    flow,
+    graphs.map((graph) => ({ nodes: graph.nodes.filter((node) => !rowReaders.has(node)) })),
+  );
+  const readers: Array<{ objectName: string; reads: FieldReads }> = [];
+  if (triggerObject) {
+    const shadowed = new Set([...collectFlowVariableNames(flow, graphs), ...screenNames]);
+    // A trigger root the flow rebinds names another row from then on: drop it.
+    const roots = TRIGGER_RECORD_READS.roots.filter((root) => !shadowed.has(root));
+    readers.push({ objectName: triggerObject, reads: { roots, bare: TRIGGER_RECORD_READS.bare, shadowed } });
+  }
+  for (const [variable, objectName] of rowVariables) {
+    if (objectName === null || boundElsewhere.has(variable) || screenNames.has(variable)) continue;
+    readers.push({ objectName, reads: { roots: [variable], bare: false } });
+  }
+  if (readers.length === 0) return findings;
+
+  const conditionFindings = (raw: unknown, where: string, path: string): void => {
+    const src = conditionSourceOf(raw);
+    if (!src) return;
+    for (const { objectName, reads } of readers) {
+      const options = optionsIndex().get(objectName);
+      if (!options) continue;
+      for (const hit of optionLabelComparisons(src, options, reads)) {
+        findings.push({
+          severity: 'error',
+          rule: FLOW_CONDITION_OPTION_LABEL,
+          where,
+          path,
+          message:
+            `compares '${objectName}.${hit.field}' with '${hit.label}', which is that option's label; the ` +
+            `field stores the value '${hit.value}', so the comparison never matches a record`,
+          hint: `Compare with the option's value: write '${hit.value}' in place of '${hit.label}'`,
+        });
+      }
+    }
+  };
+
+  for (const graph of graphs) {
+    const holder = graphHolder(flow, graph.path);
+    if (!holder) continue;
+    const base = `flows[${flowIndex}]${graphPathText(graph.path)}`;
+    const scope = graph.scope ? `${graph.scope} › ` : '';
+    if (Array.isArray(holder.edges)) {
+      holder.edges.forEach((edge: unknown, edgeIndex: number) => {
+        if (!edge || typeof edge !== 'object' || Array.isArray(edge)) return;
+        const e = edge as AnyRec;
+        const id = typeof e.id === 'string' && e.id ? e.id : `#${edgeIndex}`;
+        conditionFindings(e.condition, `flow "${flowName}" › ${scope}edge "${id}"`, `${base}.edges[${edgeIndex}].condition`);
+      });
+    }
+    if (Array.isArray(holder.nodes)) {
+      holder.nodes.forEach((node: unknown, nodeIndex: number) => {
+        if (!node || typeof node !== 'object' || Array.isArray(node)) return;
+        const n = node as AnyRec;
+        const cfg = n.config as AnyRec | undefined;
+        if (n.type !== 'decision' || !cfg || typeof cfg !== 'object' || !Array.isArray(cfg.conditions)) return;
+        cfg.conditions.forEach((branch: unknown, branchIndex: number) => {
+          if (!branch || typeof branch !== 'object' || Array.isArray(branch)) return;
+          conditionFindings(
+            (branch as AnyRec).expression,
+            `flow "${flowName}" › ${scope}node "${flowNodeLabel(n, nodeIndex)}"`,
+            `${base}.nodes[${nodeIndex}].config.conditions[${branchIndex}].expression`,
+          );
+        });
+      });
+    }
+  }
+  return findings;
+}
+
+/**
  * [#35143] The cron expression of a `config.schedule` that names no
  * `timezone`, read in the shapes the schedule trigger's `normalizeSchedule`
  * reads: a bare cron string, or `{ type: 'cron', expression }` (`cron` is the
@@ -880,6 +1115,14 @@ export function validateFlowTriggerReadiness(
         }
       }
     }
+
+    // 1-iv. [#36964] The same label, compared everywhere else the flow
+    //     compares a select field: a query filter's operand, an edge
+    //     condition, a `decision` branch. Built lazily: a flow with none of
+    //     them never pays for the options index.
+    findings.push(
+      ...optionLabelsBeyondStart(flow, flowIndex, flowName, start, config, () => (selectOptions ??= indexSelectOptions(stack))),
+    );
 
     // 1b. Two facts about the same `config.timeRelative` descriptor, from the two
     //     places that can decide them. The split is what keeps them from

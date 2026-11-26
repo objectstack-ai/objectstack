@@ -25,6 +25,7 @@ import React from 'react';
 import { ComponentRegistry } from '@object-ui/core';
 import { PredicateScopeProvider } from '@object-ui/react';
 import { DropdownMenuItem } from '../../../ui/dropdown-menu';
+import { GridCellSelectionProvider } from '../../../context/gridCellSelection';
 import '../data-table';
 
 const ROWS = [
@@ -50,14 +51,21 @@ const RELATED_LIST_SCHEMA = {
   onRowActionDef: () => {},
 };
 
+/**
+ * An editable table is mounted select-first with a per-cell save, the one way
+ * it edits (objectstack#35827); a read-only one is mounted bare.
+ */
 function renderTable(schema: Record<string, unknown>) {
   const DataTable = ComponentRegistry.get('data-table') as any;
   if (!DataTable) throw new Error('data-table not registered');
-  return render(
-    <PredicateScopeProvider scope={{}}>
-      <DataTable schema={{ ...BASE_SCHEMA, ...schema }} />
-    </PredicateScopeProvider>,
-  );
+  const table = schema.editable
+    ? (
+      <GridCellSelectionProvider value={{}}>
+        <DataTable schema={{ ...BASE_SCHEMA, onRowSave: () => Promise.resolve(), ...schema }} />
+      </GridCellSelectionProvider>
+    )
+    : <DataTable schema={{ ...BASE_SCHEMA, ...schema }} />;
+  return render(<PredicateScopeProvider scope={{}}>{table}</PredicateScopeProvider>);
 }
 
 const cellOf = (name: string) => screen.getByText(name).closest('td') as HTMLElement;

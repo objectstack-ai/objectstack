@@ -468,23 +468,19 @@ export const zhHant: PlatformTranslationData = {
       groups: {
         adapter: { title: '後端', description: '選擇文件分塊及其向量的存放位置。' },
         turso: { title: 'Turso / libSQL', description: '可搭配託管 Turso、本機檔案或記憶體使用。' },
-        ragflow: { title: 'RAGFlow', description: '外部 RAGFlow 部署。自行架設說明見 https://ragflow.io。' },
         indexing: { title: '索引預設值', description: '在知識來源本身設定的值優先於這些預設值。' },
         permissions: { title: '權限' },
       },
       keys: {
         adapter: {
           label: '轉接器',
-          options: { memory: '記憶體（僅限開發／測試）', turso: 'Turso / libSQL（雲端或本機）', ragflow: 'RAGFlow（外部）' },
+          options: { memory: '記憶體（僅限開發／測試）', turso: 'Turso / libSQL（雲端或本機）' },
         },
         turso_url: {
           label: '連線 URL',
           help: '範例：libsql://your-tenant.turso.io · file:./.objectstack/data/knowledge.db · :memory:',
         },
         turso_auth_token: { label: '驗證權杖', help: '僅託管 Turso URL 需要。' },
-        ragflow_base_url: { label: 'Base URL', help: '範例：http://localhost:9380' },
-        ragflow_api_key: { label: 'API 金鑰' },
-        ragflow_default_dataset: { label: '預設資料集 ID', help: '知識來源未指定自己的 RAGFlow 資料集時使用。' },
         chunk_target: { label: '目標區塊大小（字元）', help: '知識服務切分文件時每個片段的最大字元數。知識來源自身設定的大小優先；嵌入模型的輸入上限可能將其調低。' },
         over_fetch: { label: '超量擷取倍數', help: '搜尋時取回所要求結果數的這個倍數，以便依文件資訊篩選後仍有足夠結果可傳回。' },
         enforce_rls: { label: '搜尋時強制套用 RLS', help: '依呼叫者的記錄層級權限重新檢查每一筆命中結果。' },

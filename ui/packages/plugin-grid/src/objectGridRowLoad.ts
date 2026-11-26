@@ -12,7 +12,7 @@ import React, { useEffect } from 'react';
 import type { ObjectGridSchema, DataSource, DependsOnInput, ViewData } from '@object-ui/types';
 import { useDataInvalidation, type OwnWrites } from '@object-ui/react';
 import { recordCurrencyReadField } from '@object-ui/i18n';
-import { resolveDependsOnFields, declaredNameField, buildExpandFields, columnIdentity, collectPredicateFieldRefs, collectGroupingFieldRefs, listViewPredicates, isProjectableField, convertSortToQueryParams, normalizeSortEntries, readWithheldFieldNames, refersToWithheldField, type QuerySortEntry } from '@object-ui/core';
+import { resolveDependsOnFields, shownQuantityUnitReads, declaredNameField, buildExpandFields, columnIdentity, collectPredicateFieldRefs, collectGroupingFieldRefs, listViewPredicates, isProjectableField, convertSortToQueryParams, normalizeSortEntries, readWithheldFieldNames, refersToWithheldField, type QuerySortEntry } from '@object-ui/core';
 import type { usePermissions } from '@object-ui/permissions';
 import { findParamsSignature } from './objectGridQuery';
 import { normalizeColumns } from './objectGridColumns';
@@ -499,6 +499,16 @@ export function useObjectGridRowLoad({
                   .filter((f) => isProjectableField(f, declared as Record<string, unknown>))
                   .filter((f) => passesProjectionGate(f))
               : [];
+            // [ADR-0158] A shown QUANTITY's unit: a `record`-mode quantity's
+            // code field, and the row's organization, which picks the unit's
+            // display decimal places. The cell reads both off the ROW
+            // (`useQuantityUnit`), so a grid not showing the code drew the
+            // number with no unit. The same two gates as the harvests above.
+            const quantityUnitFields = declared
+              ? shownQuantityUnitReads(shownColumns.filter(passesProjectionGate), declared as Record<string, unknown>)
+                  .filter((f) => isProjectableField(f, declared as Record<string, unknown>))
+                  .filter((f) => passesProjectionGate(f))
+              : [];
             // [objectui#13107] The object's DECLARED name field. The bulk
             // confirm step names each affected record from the row this
             // projection fetched (`getRecordDisplayName`, ADR-0079), so a
@@ -515,7 +525,7 @@ export function useObjectGridRowLoad({
               : [];
             // A UNION, never an append: a grouping field that IS also a column
             // must not produce a duplicate `$select` entry.
-            const extraFields = [...predicateFields, ...groupingFields, ...concurrencyFields, ...rowColorFields, ...deadlineFields, ...referenceViaFields, ...dependsOnFields, ...nameFields, ...recordCurrencyFields];
+            const extraFields = [...predicateFields, ...groupingFields, ...concurrencyFields, ...rowColorFields, ...deadlineFields, ...referenceViaFields, ...dependsOnFields, ...nameFields, ...recordCurrencyFields, ...quantityUnitFields];
             const withHarvestedFields = (list: any[]): any[] => {
               if (extraFields.length === 0) return list;
               const names = new Set(list.map((f: any) => columnIdentity(f)));

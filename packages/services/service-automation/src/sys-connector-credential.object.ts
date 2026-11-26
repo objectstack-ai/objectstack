@@ -99,7 +99,7 @@ export const SysConnectorCredential = ObjectSchema.create({
       description: 'The packages that declared those instances when this reference was last set, comma-separated. Informational.',
     }),
 
-    status: Field.select(['set', 'rejected'], {
+    status: Field.select(['set', { label: 'rejected', value: 'rejected', color: 'red' }], {
       label: 'Status',
       required: true,
       defaultValue: 'set',

@@ -9,8 +9,8 @@ import type { KnowledgeSource } from '../ai/knowledge-source.zod';
 /**
  * `IKnowledgeAdapter` — plugin-side contract.
  *
- * Each backend (RAGFlow, LlamaIndex, Dify, Vectara, an in-memory
- * cosine adapter, a custom pgvector adapter, …) ships as its own
+ * Each backend (an in-memory cosine adapter, PostgreSQL + pgvector, a
+ * libSQL file, an adapter over an external engine, …) ships as its own
  * plugin package and implements this interface. The adapter is then
  * registered with the host's `IKnowledgeService` via
  * `registerAdapter(id, this)` during the plugin's `start()` hook.

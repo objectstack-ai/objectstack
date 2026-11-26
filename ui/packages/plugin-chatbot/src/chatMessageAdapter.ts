@@ -91,7 +91,7 @@ import type {
  */
 type RuntimeOnlyMessageKeys = Pick<
   RuntimeChatMessage,
-  'buildProgress' | 'blueprintProgress' | 'charts'
+  'buildProgress' | 'blueprintProgress' | 'charts' | 'recordCitations'
 >;
 
 /**

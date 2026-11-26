@@ -3,4 +3,5 @@
 // export of this file to the stack, so a view exported here is part of it,
 // and a view file this index does not export is never loaded.
 export {};
-export { default as note } from './note.view';
+export { default as company } from './company.view';
+export { default as contact } from './contact.view';

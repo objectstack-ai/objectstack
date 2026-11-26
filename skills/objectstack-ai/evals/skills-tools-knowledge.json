@@ -23,8 +23,8 @@
     },
     {
       "id": 3,
-      "prompt": "Index our `kb_article` records (title and body) so the assistant can answer from them with RAG. Only published articles, and we want to filter by `category` at search time. We run RAGFlow.",
-      "expected_output": "Emits a `KnowledgeSourceSchema.parse({...})` record with `adapter: 'ragflow'` and `source: { kind: 'object', object: 'kb_article', contentFields: ['title', 'body'], metadataFields: ['category'], where: { published: true } }`, `refresh: { onRecordChange: true }`, registered at boot through `KnowledgeServicePlugin({ sources })`. Top-K and rerankers are not source metadata, and no `split` key is written: the RAGFlow adapter receives whole documents, so `split` would have no effect.",
+      "prompt": "Index our `kb_article` records (title and body) so the assistant can answer from them with RAG. Only published articles, and we want to filter by `category` at search time. We run PostgreSQL with pgvector.",
+      "expected_output": "Emits a `KnowledgeSourceSchema.parse({...})` record with `adapter: 'pgvector'` and `source: { kind: 'object', object: 'kb_article', contentFields: ['title', 'body'], metadataFields: ['category'], where: { published: true } }`, `refresh: { onRecordChange: true }`, registered at boot through `KnowledgeServicePlugin({ sources })`. Top-K and rerankers are not source metadata, and no `split` key is written: the pgvector adapter takes the service's passages, and the default `recursive` split fits article prose.",
       "files": [],
       "assertions": {
         "must_contain": ["KnowledgeSourceSchema", "contentFields", "metadataFields", "where", "KnowledgeServicePlugin"],

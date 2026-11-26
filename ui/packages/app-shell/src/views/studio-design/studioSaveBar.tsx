@@ -1,9 +1,10 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * The Studio top bar's Save and Cancel: one pair for every editor on the open
- * page, at the right of the top bar where Publish used to be (objectstack#36511,
- * the maintainer's placement ruling on that card).
+ * The Studio page's Save and Cancel: one pair for every editor on the open
+ * page (objectstack#36511). They sat at the right of the top bar where Publish
+ * used to be; objectstack#37455 moved them to the page's item header, at the
+ * end of its actions (`studioTitleRow.tsx`), unchanged.
  *
  * An editor that saves explicitly holds its edits on the page and sends
  * nothing until Save is pressed. It registers one {@link StudioSaveEntry} per
@@ -406,7 +407,7 @@ export async function publishSavedItem(
   return { ok: true };
 }
 
-/** The top bar's Cancel and Save, drawn while the page holds unsaved edits. */
+/** The page's Cancel and Save, drawn while it holds unsaved edits (in its item header, objectstack#37455). */
 export function StudioSaveControls({
   coordinator,
   locale,

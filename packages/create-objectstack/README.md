@@ -28,7 +28,7 @@ npx create-objectstack my-app --skip-install
 
 | Template | Source | Description |
 | --- | --- | --- |
-| `blank` *(default)* | bundled (offline) | Minimal starter — one object, REST API, ready to extend |
+| `blank` *(default)* | bundled (offline) | Companies and contacts, with platform tasks and notes in the menu — ready to extend |
 
 `blank` is bundled inside the npm package, so scaffolding never needs network
 access.
@@ -55,8 +55,8 @@ you so rather than failing as an unknown template.
    `package.json` name, `objectstack.manifest.json` name/displayName, the
    `objectstack.config.ts` manifest literals, and the README title. A
    **namespace** is derived from the project name (`my-app` → `my_app`) and
-   every object name in the template is re-prefixed to match
-   (`blank_note` → `my_app_note`).
+   every name in the template is re-prefixed to match, the references to
+   them included (`blank_company` → `my_app_company`).
 2. Installs dependencies (pnpm if available, otherwise npm). They include
    `@objectstack/skills`, the ObjectStack AI skills catalog, at the same
    version as `@objectstack/spec`.
@@ -85,14 +85,16 @@ my-app/
 ├── README.md
 ├── AGENTS.md                    # conventions for coding agents
 └── src/
-    ├── objects/
-    │   ├── index.ts
-    │   └── note.object.ts
-    ├── views/index.ts           # an empty barrel for each directory
-    ├── actions/index.ts         # `objectstack generate` writes into,
-    ├── flows/index.ts           # already wired into objectstack.config.ts
-    ├── dashboards/index.ts
-    ├── apps/index.ts
+    ├── objects/                 # companies and contacts: the platform's
+    │   ├── index.ts             # Starter app, as source
+    │   ├── company.object.ts
+    │   └── contact.object.ts
+    ├── views/                   # a grid and a board for each
+    ├── apps/main.app.ts         # the menu: companies, contacts, and the
+    │                            # platform's tasks and notes
+    ├── actions/index.ts         # an empty barrel for each directory
+    ├── flows/index.ts           # `objectstack generate` writes into,
+    ├── dashboards/index.ts      # already wired into objectstack.config.ts
     ├── skills/index.ts
     ├── picklists/index.ts
     ├── security/index.ts        # permission sets

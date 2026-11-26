@@ -54,7 +54,7 @@ function renderTyped(type: string) {
   return render(
     <ActionProvider>
       <ObjectGrid
-        cellSelection={false}
+       
         schema={{
           type: 'object-grid',
           // objectui#8348 — the DECLARED inline-rows spelling. `object-grid`'s published
@@ -77,6 +77,7 @@ function editorTypeFor(type: string): string | null {
   const view = renderTyped(type);
   const cell = screen.getAllByText('100')[0]!.closest('td') as HTMLElement;
   fireEvent.click(cell);
+  fireEvent.doubleClick(cell); // select-first: a click selects, a double-click edits (objectstack#35827)
   const input = view.container.querySelector('tbody input') as HTMLInputElement | null;
   const result = input ? input.getAttribute('type') : null;
   view.unmount();

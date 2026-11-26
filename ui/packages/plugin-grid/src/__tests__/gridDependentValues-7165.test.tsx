@@ -56,7 +56,7 @@
  * key — the shape objectui#6875 established and objectui#7154 reused.
  */
 import { describe, it, expect, vi, beforeAll, beforeEach, afterEach } from 'vitest';
-import { render, screen, waitFor, fireEvent, within, cleanup } from '@testing-library/react';
+import { render, screen, waitFor, fireEvent, within, cleanup, act } from '@testing-library/react';
 import '@testing-library/jest-dom';
 import React from 'react';
 
@@ -161,7 +161,7 @@ function renderGrid(ds: any, rows: any[]) {
   return render(
     <ActionProvider>
       <SchemaRendererProvider dataSource={ds}>
-        <ObjectGrid cellSelection={false} schema={schema} dataSource={ds} />
+        <ObjectGrid schema={schema} dataSource={ds} />
       </SchemaRendererProvider>
     </ActionProvider>,
   );
@@ -182,6 +182,7 @@ function cellAt(container: HTMLElement, rowIndex: number, index: number): HTMLEl
  */
 async function openEditor(cell: HTMLElement): Promise<HTMLElement> {
   fireEvent.click(cell);
+  fireEvent.doubleClick(cell); // select-first: a click selects, a double-click edits (objectstack#35827)
   return await waitFor(() => {
     const panel = cell.querySelector('[data-testid="lookup-in-cell"]');
     expect(panel).toBeTruthy();
@@ -279,49 +280,51 @@ describe('objectui#7165 — the grid feeds the inline editor its row as dependen
     expect(within(openPanel).getByTestId('browse-all-records')).not.toBeDisabled();
   });
 
-  it('4 — ⭐ objectui#7188: a STAGED parent re-scopes the child before anything is saved', async () => {
-    // Under option A (objectui#7165) this test pinned the OPPOSITE as current
-    // behaviour: `dependentValues={ctx.row}` is the SAVED record, so staging
-    // `region: 'south'` in this same row left the child scoped by the persisted
-    // 'north'. objectui#7188 carries the staged record across the seam —
-    // `data-table` passes `pendingRow` (the row merged with its `pendingChanges`
-    // entry) and the grid scopes by `ctx.pendingRow ?? ctx.row` — so this is
-    // the assertion that goes RED if anyone "simplifies" B back to A. Tests 1–3
-    // cannot see that regression: their rows carry no staged edits, so
-    // `pendingRow` and `row` coincide there.
+  it('4 — ⭐ objectui#7188: a committed parent whose save is still on the wire re-scopes the child', async () => {
+    // `dependentValues={ctx.row}` would be the SAVED record, so a new
+    // `region: 'south'` in this same row would leave the child scoped by the
+    // persisted 'north'. objectui#7188 carries the edited record across the
+    // seam — `data-table` passes `pendingRow` (the row merged with its
+    // `pendingChanges` entry) and the grid scopes by `ctx.pendingRow ??
+    // ctx.row` — so this is the assertion that goes RED if anyone
+    // "simplifies" B back to A. Since the staged model is retired
+    // (objectstack#35827) the parent's commit saves at once, so the save is
+    // held open here: while it is on the wire the row still reads 'north'
+    // and only the pending entry says 'south'.
     const rows = [ROW_NORTH];
     const ds = makeDataSource(rows);
+    let landSave!: () => void;
+    ds.update.mockImplementation((_o: string, _id: string, changes: any) =>
+      new Promise((resolve) => { landSave = () => resolve(changes); }));
     const { container } = renderGrid(ds, rows);
     await waitFor(() => expect(screen.getByText('Task one')).toBeInTheDocument());
 
-    // Stage a new parent WITHOUT saving. `region` is a `text` field, so its
-    // widget is `TextField` and is NOT in `DISCRETE_EDIT_TYPES` — its `onChange`
-    // routes to `ctx.stage`, which writes `pendingChanges` without closing.
+    // A new parent, committed with Enter.
     const regionCell = cellAt(container, 0, 1);
     fireEvent.click(regionCell);
-    const regionInput = await waitFor(() => {
-      const el = regionCell.querySelector('input');
-      expect(el).toBeTruthy();
-      return el as HTMLInputElement;
-    });
-    fireEvent.change(regionInput, { target: { value: 'south' } });
+    fireEvent.doubleClick(regionCell);
+    // The editor sits on the cell's overlay layer (objectstack#35688), which
+    // mounts after the double-click: read the input off that layer.
+    const editorInput = () => container.querySelector<HTMLInputElement>('[data-slot="cell-editor-overlay"] input');
+    await waitFor(() => expect(editorInput()).toBeTruthy());
+    await act(async () => {});
+    fireEvent.change(editorInput()!, { target: { value: 'south' } });
+    fireEvent.keyDown(editorInput()!, { key: 'Enter' });
+    await waitFor(() => expect(ds.update).toHaveBeenCalledTimes(1));
 
-    // Open the child. Clicking another cell moves the edit; the staged value
-    // stays in `pendingChanges`.
     await openEditor(cellAt(container, 0, 3));
     await waitFor(() => expect(screen.getByText('Person 07')).toBeInTheDocument());
 
-    // ⭐ PROOF THE STAGING LANDED AND NOTHING WAS SAVED. Without the first half
-    // this test could pass for a trivial reason (nothing staged, the saved
-    // parent honoured as in test 2); without the second, a save would make the
-    // staged and persisted parents coincide and the test could not tell A from
-    // B. The region cell renders its PENDING value ('south') while the saved
-    // record still says 'north' and the data source saw no write.
+    // ⭐ PROOF THE SAVE IS STILL OUT. The region cell draws 'south' while the
+    // record the grid read still says 'north' and its write has not landed;
+    // a landed save would make the two coincide and the test could not tell
+    // A from B.
     await waitFor(() => {
       expect(cellAt(container, 0, 1).textContent).toMatch(/south/);
     });
     expect(rows[0].region).toBe('north');
-    expect(ds.update).not.toHaveBeenCalled();
+    expect(ds.update).toHaveBeenCalledTimes(1);
+    expect(ds.update.mock.calls[0][2]).toEqual({ region: 'south' });
 
     // Scoped by the STAGED 'south', not the saved 'north': Person 07 is south
     // (offered); Person 01 is north (not offered). The query carried the staged
@@ -329,5 +332,6 @@ describe('objectui#7165 — the grid feeds the inline editor its row as dependen
     expect(screen.queryByText('Person 01')).not.toBeInTheDocument();
     expect(ds.refQueries.some((q: any) => q?.$filter?.region === 'south')).toBe(true);
     expect(ds.refQueries.some((q: any) => q?.$filter?.region === 'north')).toBe(false);
+    await act(async () => { landSave(); });
   });
 });

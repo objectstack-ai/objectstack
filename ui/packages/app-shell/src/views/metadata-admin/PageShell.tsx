@@ -26,6 +26,7 @@ import { environmentScopeSuffix } from './catalog-scope.js';
 import { useMetadataAreaHost } from './metadataAreaHost.js';
 import { isStudioCustomizeType } from '../studio-design/StudioCustomizeControls.js';
 import { AREA_CUSTOMIZE_EDITOR_TYPES, AREA_FORM_EDITOR_TYPES } from '../studio-design/metadataArea.js';
+import { StudioTitleRowEnd } from '../studio-design/studioTitleRow.js';
 
 export interface PageShellProps {
   /** The type entry from `/meta/types` (or a synthesized stub). */
@@ -321,6 +322,10 @@ export function PageShell({
                 </div>
               ))}
               {actions}
+              {/* objectstack#37455 — under Studio, the page's Save and the AI
+                  assistant end the title row (nothing elsewhere, nor embedded
+                  in another page). */}
+              {!embedded && <StudioTitleRowEnd />}
             </div>
           </div>
         </div>
@@ -376,6 +381,8 @@ export function PageShell({
                 </div>
               ))}
               {actions}
+              {/* objectstack#37455 — under Studio, the page's Save and the AI assistant end the title row. */}
+              {!embedded && <StudioTitleRowEnd />}
             </div>
           </div>
         </div>

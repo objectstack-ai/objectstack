@@ -119,11 +119,11 @@ export const CEILINGS = new Map([
   ['.claude/skills/pm-dispatch/references/app-platform-boundary.md', 3928],
   ['.claude/skills/pm-dispatch/references/dev-traps.md', 2627], // new row, landed size, headroom 0: three one-path blocks of .claude/agents/os-dev.md moved here verbatim by the entry-file slimming PR, which lowers that row by more
   ['.claude/skills/pm-dispatch/references/dev-ablation.md', 3555], // new row, landed size, headroom 0: the reverse-verification and ablation procedure of .claude/agents/os-dev.md moved here verbatim by the same PR
-  ['.claude/skills/pm-dispatch/references/lanes/server.md', 4830],
-  ['.claude/skills/pm-dispatch/references/lanes/devx.md', 2533],
-  ['.claude/skills/pm-dispatch/references/lanes/skills.md', 2656], // lowered 2682 → 2666 by the re-basing PR's own edit; lowered 2666 → 2656 by the PR that moved the tier and effort values to the one home
-  ['.claude/skills/pm-dispatch/references/lanes/spec.md', 3299],
-  ['.claude/skills/pm-dispatch/references/lanes/ui.md', 1041],
+  ['.claude/skills/pm-dispatch/references/domains/server.md', 4830],
+  ['.claude/skills/pm-dispatch/references/domains/devx.md', 2533],
+  ['.claude/skills/pm-dispatch/references/domains/skills.md', 2656], // lowered 2682 → 2666 by the re-basing PR's own edit; lowered 2666 → 2656 by the PR that moved the tier and effort values to the one home
+  ['.claude/skills/pm-dispatch/references/domains/spec.md', 3299],
+  ['.claude/skills/pm-dispatch/references/domains/ui.md', 1041],
   ['.claude/skills/pm-dispatch/references/lanes/hotcrm.md', 1320],
   ['.claude/skills/pm-dispatch/references/lanes/mobile.md', 3990],
   ['.claude/skills/pm-dispatch/references/lanes/security.md', 4241], // raised 4194 → 4241 (+47) by ruling record 7121202500 (N4 → B: 「以上都同意」): the low-severity advisory batch is not counted against the default fold's ≤5 cap and is bounded by the release-line and PR-size line alone
@@ -286,11 +286,11 @@ export const MAX_TABLE_ROW_BYTES = new Map([
   ['.claude/skills/pm-dispatch/references/app-platform-boundary.md', 219],
   ['.claude/skills/pm-dispatch/references/dev-traps.md', 0],
   ['.claude/skills/pm-dispatch/references/dev-ablation.md', 0],
-  ['.claude/skills/pm-dispatch/references/lanes/server.md', 0],
-  ['.claude/skills/pm-dispatch/references/lanes/devx.md', 0],
-  ['.claude/skills/pm-dispatch/references/lanes/skills.md', 0],
-  ['.claude/skills/pm-dispatch/references/lanes/spec.md', 0],
-  ['.claude/skills/pm-dispatch/references/lanes/ui.md', 0],
+  ['.claude/skills/pm-dispatch/references/domains/server.md', 0],
+  ['.claude/skills/pm-dispatch/references/domains/devx.md', 0],
+  ['.claude/skills/pm-dispatch/references/domains/skills.md', 0],
+  ['.claude/skills/pm-dispatch/references/domains/spec.md', 0],
+  ['.claude/skills/pm-dispatch/references/domains/ui.md', 0],
   ['.claude/skills/pm-dispatch/references/lanes/hotcrm.md', 0],
   ['.claude/skills/pm-dispatch/references/lanes/mobile.md', 0],
   ['.claude/skills/pm-dispatch/references/lanes/security.md', 0],

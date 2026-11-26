@@ -112,7 +112,6 @@ function renderGrid(ds: any) {
     type: 'object-grid',
     objectName: OBJECT,
     editable: true,
-    singleClickEdit: true,
     columns: [
       { field: 'name', label: 'Name' },
       { field: 'owner', label: 'Owner' },

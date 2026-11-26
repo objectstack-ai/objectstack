@@ -113,8 +113,8 @@ export const SysTask = ObjectSchema.create({
       defaultValue: 'todo',
       options: [
         { label: 'To Do', value: 'todo' },
-        { label: 'In Progress', value: 'in_progress' },
-        { label: 'Done', value: TASK_DONE_STATUS },
+        { label: 'In Progress', value: 'in_progress', color: 'blue' },
+        { label: 'Done', value: TASK_DONE_STATUS, color: 'green' },
       ],
     }),
 

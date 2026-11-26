@@ -692,10 +692,6 @@ export const de: PlatformTranslationData = {
           title: 'Turso / libSQL',
           description: 'Funktioniert mit verwaltetem Turso, lokaler Datei oder im Arbeitsspeicher.',
         },
-        ragflow: {
-          title: 'RAGFlow',
-          description: 'Externe RAGFlow-Bereitstellung. Anleitung zum Selbsthosten unter https://ragflow.io.',
-        },
         indexing: {
           title: 'Standardwerte für die Indexierung',
           description: 'Ein an der Wissensquelle selbst gesetzter Wert hat Vorrang vor diesen Standardwerten.',
@@ -708,7 +704,6 @@ export const de: PlatformTranslationData = {
           options: {
             memory: 'Im Arbeitsspeicher (nur Entwicklung / Test)',
             turso: 'Turso / libSQL (Cloud oder lokal)',
-            ragflow: 'RAGFlow (extern)',
           },
         },
         turso_url: {
@@ -716,12 +711,6 @@ export const de: PlatformTranslationData = {
           help: 'Beispiele: libsql://your-tenant.turso.io · file:./.objectstack/data/knowledge.db · :memory:',
         },
         turso_auth_token: { label: 'Auth-Token', help: 'Nur für verwaltete Turso-URLs erforderlich.' },
-        ragflow_base_url: { label: 'Base URL', help: 'Beispiel: http://localhost:9380' },
-        ragflow_api_key: { label: 'API-Schlüssel' },
-        ragflow_default_dataset: {
-          label: 'Standard-Dataset-ID',
-          help: 'Wird verwendet, wenn eine Wissensquelle kein eigenes RAGFlow-Dataset nennt.',
-        },
         chunk_target: {
           label: 'Ziel-Chunkgröße (Zeichen)',
           help: 'Längste Passage in Zeichen, wenn der Wissensdienst ein Dokument aufteilt. Eine an der Wissensquelle selbst gesetzte Größe hat Vorrang; das Eingabelimit des Embedding-Modells kann den Wert senken.',

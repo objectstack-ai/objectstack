@@ -4774,6 +4774,9 @@ const pt = {
       metrics: 'Métricas',
       noAddedFilter: 'Nenhum filtro adicionado à definição do conjunto de dados',
     },
+    recordCitations: {
+      title: 'Citado de registros',
+    },
     tool: {
       aggregate_data: "Resumir os dados",
       get_record: "Ler o registro",

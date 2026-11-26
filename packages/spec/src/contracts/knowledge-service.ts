@@ -14,7 +14,7 @@ import type { IKnowledgeAdapter } from './knowledge-adapter';
  * `@objectstack/service-knowledge`.
  *
  * The service routes requests to one of many `IKnowledgeAdapter`
- * plugins (RAGFlow, LlamaIndex, Dify, …), wraps search results with a
+ * plugins (in-memory, pgvector, libSQL, …), wraps search results with a
  * permission-aware filter that uses the caller's `ExecutionContext`,
  * and drives event-based sync from ObjectQL.
  *

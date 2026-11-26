@@ -1,7 +1,7 @@
 import { defineConfig } from 'vitest/config';
 
 // `pnpm test` runs every `*.test.ts` in this project. A test that boots the
-// app (see note.test.ts) runs the real engine in this process, so two settings
+// app (see starter.test.ts) runs the real engine in this process, so two settings
 // differ from vitest's defaults.
 export default defineConfig({
   test: {

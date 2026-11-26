@@ -306,13 +306,13 @@ describe('objectui#6459 — the schema slot annotation is an instrument, not a d
   /**
    * The strip is HOMOMORPHIC — declared members survive with their exact
    * shapes: required stays required (`columns`), optional stays optional and
-   * typed (`singleClickEdit`). A strip that dropped or widened members would
+   * typed (`resizableColumns`). A strip that dropped or widened members would
    * compile the seam annotation trivially and check nothing.
    */
   it('declared members survive the strip with modifiers intact', () => {
     type _ColumnsSurvive = Expect<DeclaredDataTableSchema['columns'] extends TableColumn[] ? true : false>;
-    type _SingleClickTyped = Expect<
-      DeclaredDataTableSchema['singleClickEdit'] extends boolean | undefined ? true : false
+    type _ResizableTyped = Expect<
+      DeclaredDataTableSchema['resizableColumns'] extends boolean | undefined ? true : false
     >;
     // @ts-expect-error objectui#6459 — `columns` is required; the mapped type must not have made it optional.
     const missing: ObjectGridDataTableSchema = { type: 'data-table', data: [] };

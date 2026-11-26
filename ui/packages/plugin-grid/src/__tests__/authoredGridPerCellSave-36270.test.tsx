@@ -12,7 +12,7 @@
  * renderer) that edits (`editable: true`) edits as the list page's grid does:
  * a click selects a cell, Enter opens its editor, and the committed cell saves
  * on its own. No pending-changes bar and no "Save All" is drawn. A read-only
- * node keeps click-to-open, and a host that says `cellSelection` itself wins.
+ * node keeps click-to-open unless its host asks for `cellSelection`.
  *
  * Rendered through `SchemaRenderer` and the registry, the path an authored
  * node takes, never by importing `ObjectGrid` directly.
@@ -129,12 +129,13 @@ describe('objectstack#36270 — an authored editable object-grid saves each cell
     expect(catcher()).toBeNull();
   });
 
-  it("CONTROL: a host's own `cellSelection` wins over the node's `editable`", async () => {
+  it("a host's `cellSelection` asks for the model on a read-only node too", async () => {
+    // objectstack#35827 — `true` is the prop's only value: the staged opt-out
+    // (`cellSelection: false` on an editable node) is retired.
     const { ds } = makeDataSource();
-    mount({ editable: true }, ds, { cellSelection: false });
+    mount({}, ds, { cellSelection: true });
     await screen.findByText('Beta');
     fireEvent.click(screen.getByText('Alpha').closest('td') as HTMLElement);
-    await new Promise((r) => setTimeout(r, 50));
-    expect(catcher()).toBeNull();
+    await waitFor(() => expect(catcher()).toBeTruthy());
   });
 });

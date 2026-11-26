@@ -519,8 +519,9 @@ export const DataTableSchema = BaseSchema.extend({
   //   - `onAddRecord`     `ObjectGrid` puts its own `onAddRecord` React prop on
   //                       the `data-table` node it builds; `ObjectManager` and
   //                       `FieldDesigner` are the hosts that supply it.
-  //   - `onBatchSave`     `ObjectGrid`'s `onBatchSave ?? defaultBatchSave` —
-  //                       the left limb is `ObjectGridComponentProps.onBatchSave`.
+  //   - `onBatchSave`     was one of the seven until objectstack#35827 RETIRED
+  //                       the staged editing model it served: no renderer reads
+  //                       it any more, so it is refused as `'retired'` below.
   //   - `onCellChange`    `ObjectGrid` forwards `ObjectGridComponentProps.onCellChange`.
   //   - `onColumnResize`  ⚠️ a DIFFERENT channel from its six siblings, and the
   //                       reason "six of them were" is not evidence: no host prop
@@ -540,7 +541,7 @@ export const DataTableSchema = BaseSchema.extend({
   //   - `onRowSave`       `ObjectGrid`'s `onRowSave ?? defaultRowSave` — the left
   //                       limb is `ObjectGridComponentProps.onRowSave`.
   onAddRecord: handlerKeyRefusal('onAddRecord', 'runtime-slot', 'Add record handler'),
-  onBatchSave: handlerKeyRefusal('onBatchSave', 'runtime-slot', 'Batch save handler'),
+  onBatchSave: handlerKeyRefusal('onBatchSave', 'retired', 'Batch save handler'),
   onCellChange: handlerKeyRefusal('onCellChange', 'runtime-slot', 'Cell value change handler'),
   onColumnResize: handlerKeyRefusal('onColumnResize', 'runtime-slot', 'Column resize handler'),
   onRowActionDef: handlerKeyRefusal('onRowActionDef', 'runtime-slot', 'Row action handler'),
@@ -589,7 +590,7 @@ export const DataTableSchema = BaseSchema.extend({
     + 'TypeScript type checker across all 24 registering packages, no renderer read consumes `body` or '
     + '`children` for this node, and `SchemaRenderer` strips both out of the props bag it spreads. An '
     + 'authored value therefore rendered NOTHING — no render-time error or warning and no element; only the parser tier\'s `not-a-container` warning (objectui#9910) noticed it. '
-    + 'What it renders instead: `emptyAction`, `isRowEditable`, `onAddRecord`, `onBatchSave`, `onCellChange`, '
+    + 'What it renders instead: `emptyAction`, `isRowEditable`, `onAddRecord`, `onCellChange`, '
     + '`onColumnResize`, `onColumnsReorder`, `onRowActionDef`, `onRowClick`, `onRowDelete`, '
     + '`onRowEdit`, `onRowSave`, `onSelectionChange`, `renderCellEditor`, `renderRowContextMenu`, `rowActionDefs`, '
     + '`rowDeletePredicates`, `rowEditPredicates`.',
@@ -599,7 +600,7 @@ export const DataTableSchema = BaseSchema.extend({
     + 'TypeScript type checker across all 24 registering packages, no renderer read consumes `body` or '
     + '`children` for this node, and `SchemaRenderer` strips both out of the props bag it spreads. An '
     + 'authored value therefore rendered NOTHING — no render-time error or warning and no element; only the parser tier\'s `not-a-container` warning (objectui#9910) noticed it. '
-    + 'What it renders instead: `emptyAction`, `isRowEditable`, `onAddRecord`, `onBatchSave`, `onCellChange`, '
+    + 'What it renders instead: `emptyAction`, `isRowEditable`, `onAddRecord`, `onCellChange`, '
     + '`onColumnResize`, `onColumnsReorder`, `onRowActionDef`, `onRowClick`, `onRowDelete`, '
     + '`onRowEdit`, `onRowSave`, `onSelectionChange`, `renderCellEditor`, `renderRowContextMenu`, `rowActionDefs`, '
     + '`rowDeletePredicates`, `rowEditPredicates`.',

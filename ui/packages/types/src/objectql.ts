@@ -1337,7 +1337,8 @@ export interface ObjectGridSchema extends BaseSchema {
    * `?: never`, not a deletion — this package's tombstone convention (see
    * `resizableColumns` above). Lockstep with the Zod twin
    * (`zod/objectql.zod.ts`, `retirementTombstone()`). `DataTableSchema`'s own
-   * `singleClickEdit`, a flag a host sets in code, is unchanged.
+   * `singleClickEdit`, a flag a host set in code, left with the staged model
+   * (objectstack#35827).
    *
    * @deprecated RETIRED (objectstack#36270) — delete the key; `editable` decides
    * whether the grid edits.
@@ -1386,10 +1387,10 @@ export interface ObjectGridSchema extends BaseSchema {
    * `inlineEditable` is the authored `editable` AND the viewer's write verdict on
    * the object — the one value the grid's inline editing itself obeys. A grid
    * that renders read-only keeps its Tab behaviour unless this is `true`. A grid
-   * that renders editable is select-first by default (objectstack#36270), and
-   * the select-first model always keeps navigation on, so `false` has no effect
-   * there. Only a host that keeps the staged model (`cellSelection={false}` on
-   * `ObjectGrid`) lets `false` turn it off on an editable grid.
+   * that renders editable is select-first (objectstack#36270, and with no
+   * staged model left to opt back into since objectstack#35827), and the
+   * select-first model always keeps navigation on, so `false` has no effect
+   * there.
    * @default true when the grid renders editable
    */
   keyboardNavigation?: boolean;
@@ -1442,11 +1443,11 @@ export interface ObjectGridSchema extends BaseSchema {
    * key. Writing it into a stored document does nothing at all.
    *
    * Programmatic callers should prefer `ObjectGridComponentProps`
-   * (`@object-ui/plugin-grid`), which declares ten callbacks: this one, as a
+   * (`@object-ui/plugin-grid`), which declares nine callbacks: this one, as a
    * prop since objectui#9547 — and the prop wins when both are supplied — and
-   * the nine siblings `onRowClick`, `onRowSelect`, `onCellChange`,
-   * `onRowSave`, `onBatchSave`, `onEdit`, `onDelete`, `onBulkDelete`,
-   * `onAddRecord`, which live and only live there, for exactly this reason.
+   * the eight siblings `onRowClick`, `onRowSelect`, `onCellChange`,
+   * `onRowSave`, `onEdit`, `onDelete`, `onBulkDelete`, `onAddRecord`, which
+   * live and only live there, for exactly this reason.
    *
    * The declaration is kept rather than removed: with the key explicitly
    * published, removing it is a breaking public type change plus a deprecation

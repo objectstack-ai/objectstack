@@ -14,8 +14,8 @@
  *  5. Focus order: the toggle, then the search, then the entries.
  *
  * objectstack#37201 — the two tiers (ADR-0084, amended 2026-11-25):
- *  6. Group labels are muted, with no count and no link; an entry's muted
- *     number is its items; an empty 常用 type is dimmed, numberless, a link.
+ *  6. Group labels carry no count and no link; an entry's muted number is
+ *     its items; an empty 常用 type is dimmed, numberless, a link.
  *  7. The 「高级」 fold: closed by default, remembered under
  *     `studio_menu_advanced`, open by itself on one of its pages without
  *     writing the cookie, ignored by the search, a button with
@@ -28,11 +28,23 @@
  *     opens the area's type directory and is current there. CONTROL: a 高级
  *     type the package holds none of is still not in the fold.
  *
+ * objectstack#37452 — drawn as the app's menu:
+ * 11. A group is the app menu's collapsible group: its label is a disclosure
+ *     button, open by default; closing it hides its entries; a search opens
+ *     every group it lists, chevron included, and holds it open; in the phone
+ *     drawer the label is the app menu's 44 px tap target.
+ * 12. An entry draws a bare line icon before its name; the current entry is
+ *     the primitive's active row (the pill and left bar).
+ * 13. The selected entry is tinted by Studio's graphite accent whatever the
+ *     app's theme colours are: every theme token the app's branding writes
+ *     (primary and accent) is rebound over it.
+ *
  * The provider, the sidebar primitive and the router are real; only the
  * metadata reads are doubled.
  */
 
 import '@testing-library/jest-dom/vitest';
+import type { ReactNode } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
@@ -63,8 +75,10 @@ vi.mock('../metadata-admin/useMetadata', async (importOriginal) => {
   };
 });
 
+import { useAppShellBranding } from '@object-ui/layout';
 import { StudioMenu, StudioMenuProvider, StudioMenuTrigger } from './StudioMenu';
 import { STUDIO_MENU_ADVANCED_COOKIE, STUDIO_MENU_COOKIE } from './studioMenuModel';
+import { STUDIO_ACCENT, STUDIO_ACCENT_HSL } from './studio-tokens';
 
 const PKG = 'com.acme.app';
 
@@ -234,13 +248,12 @@ describe('the current entry and the search', () => {
 });
 
 describe('the group labels (objectstack#37201)', () => {
-  it('are muted headings: no count, no link, not focusable', () => {
+  it('carry no count and no link: the label is the group\'s name', () => {
     renderAt(`/studio/${PKG}/data`);
     const group = screen.getByTestId('studio-menu-group-data');
     const label = group.querySelector('[data-sidebar="group-label"]')!;
     expect(label).toHaveTextContent(/^Data$/);
-    expect(label).toHaveClass('text-muted-foreground');
-    expect(label.querySelector('a, button, [tabindex]')).toBeNull();
+    expect(label.querySelector('a')).toBeNull();
     expect(label.closest('a')).toBeNull();
   });
 
@@ -407,7 +420,7 @@ describe('~org and ~all draw no fold (objectstack#37201)', () => {
   it.each([
     ['~org', '/studio/~org/metadata/flow?source=runtime'],
     ['~all', '/studio/~all/metadata'],
-  ])('%s: its entries flat, in the table\'s order, under muted labels', (segment, path) => {
+  ])('%s: its entries flat, in the table\'s order, under their groups\' labels', (segment, path) => {
     renderAt(path, segment);
     expect(screen.queryByTestId('studio-menu-advanced-toggle')).toBeNull();
     expect(screen.queryByTestId('studio-menu-advanced')).toBeNull();
@@ -418,7 +431,7 @@ describe('~org and ~all draw no fold (objectstack#37201)', () => {
       'studio-menu-entry-environment',
     ]);
     for (const a of within(security).getAllByRole('link')) expect(a).toBeVisible();
-    expect(security.querySelector('[data-sidebar="group-label"]')).toHaveClass('text-muted-foreground');
+    expect(security.querySelector('[data-sidebar="group-label"]')).toHaveTextContent(/^Access$/);
     expect(screen.getByTestId('studio-menu-entry-orgFlows')).toBeVisible();
     // objectstack#37211 — no count above Organization flows (it read "0 types" over the group's one entry).
     const automation = screen.getByTestId('studio-menu-group-automation');
@@ -484,5 +497,171 @@ describe('全部类型 All types (objectstack#37360, ADR-0084 amended 2026-11-25
     renderAt(path, segment);
     expect(screen.queryByTestId('studio-menu-entry-allTypes')).toBeNull();
     expect(screen.queryByTestId('studio-menu-all-types')).toBeNull();
+  });
+});
+
+describe('drawn as the app\'s menu (objectstack#37452)', () => {
+  const groupLabel = (testId: string) =>
+    screen.getByTestId(testId).querySelector<HTMLElement>('[data-sidebar="group-label"]')!;
+
+  it('a group\'s label is the app menu\'s disclosure button: open by default, closing it hides its entries', () => {
+    renderAt(`/studio/${PKG}/data`);
+    const label = groupLabel('studio-menu-group-data');
+    expect(label.tagName).toBe('BUTTON');
+    expect(label).toHaveAccessibleName('Data');
+    expect(label).toHaveAttribute('aria-expanded', 'true');
+    // The group's list is named by its label.
+    expect(entry('type:object').closest('ul')).toHaveAttribute('aria-labelledby', label.id);
+    expect(entry('type:object')).toBeVisible();
+
+    fireEvent.click(label);
+    expect(label).toHaveAttribute('aria-expanded', 'false');
+    expect(screen.queryByTestId('studio-menu-entry-type:object')).toBeNull();
+    // CONTROL: the other groups stay open.
+    expect(entry('type:flow')).toBeVisible();
+    // No count is drawn on a closed group: a number in this menu is an entry's items.
+    expect(label).toHaveTextContent(/^Data$/);
+
+    fireEvent.click(label);
+    expect(entry('type:object')).toBeVisible();
+  });
+
+  // On ~all the groups are drawn flat with and without a search, so the
+  // group the author closed is the same group the search lists into.
+  it('a search lists its matches in a group the author closed', () => {
+    renderAt('/studio/~all/metadata', '~all');
+    const label = groupLabel('studio-menu-group-security');
+    fireEvent.click(label);
+    expect(label).toHaveAttribute('aria-expanded', 'false');
+    expect(screen.queryByTestId('studio-menu-entry-type:position')).toBeNull();
+    fireEvent.change(screen.getByTestId('studio-menu-search'), { target: { value: 'position' } });
+    expect(entry('type:position')).toBeVisible();
+    expect(groupLabel('studio-menu-group-security')).toHaveAttribute('aria-expanded', 'true');
+    // Drawn open, chevron included: the chevron is turned down as on any open group.
+    const chevron = () => groupLabel('studio-menu-group-security').querySelector('svg')!;
+    expect(chevron()).toHaveClass('rotate-90');
+    // A click while the search holds it open changes nothing.
+    fireEvent.click(groupLabel('studio-menu-group-security'));
+    expect(groupLabel('studio-menu-group-security')).toHaveAttribute('aria-expanded', 'true');
+    expect(chevron()).toHaveClass('rotate-90');
+    expect(entry('type:position')).toBeVisible();
+    // The author's choice is kept: clearing the search closes it again.
+    fireEvent.change(screen.getByTestId('studio-menu-search'), { target: { value: '' } });
+    expect(screen.queryByTestId('studio-menu-entry-type:position')).toBeNull();
+    expect(chevron()).not.toHaveClass('rotate-90');
+  });
+
+  it('a click on an open group\'s label during a search is not taken: the group is still open once the search is cleared', () => {
+    renderAt('/studio/~all/metadata', '~all');
+    fireEvent.change(screen.getByTestId('studio-menu-search'), { target: { value: 'position' } });
+    fireEvent.click(groupLabel('studio-menu-group-security'));
+    expect(groupLabel('studio-menu-group-security')).toHaveAttribute('aria-expanded', 'true');
+    fireEvent.change(screen.getByTestId('studio-menu-search'), { target: { value: '' } });
+    expect(groupLabel('studio-menu-group-security')).toHaveAttribute('aria-expanded', 'true');
+    expect(entry('type:position')).toBeVisible();
+  });
+
+  it('in the phone drawer a group\'s label is the app menu\'s 44 px tap target; CONTROL: docked it is not', async () => {
+    setWidth(390);
+    renderAt(`/studio/${PKG}/data`);
+    fireEvent.click(toggle());
+    const drawer = await screen.findByRole('dialog');
+    const label = within(drawer).getByTestId('studio-menu-group-data').querySelector('[data-sidebar="group-label"]')!;
+    expect(label).toHaveClass('min-h-[44px]');
+    cleanup();
+    setWidth(1280);
+    renderAt(`/studio/${PKG}/data`);
+    expect(groupLabel('studio-menu-group-data')).not.toHaveClass('min-h-[44px]');
+  });
+
+  it('an entry draws a bare line icon before its name, on the app menu\'s row', () => {
+    renderAt(`/studio/${PKG}/data`);
+    for (const key of ['type:object', 'type:flow', 'type:permission']) {
+      const icon = screen.getByTestId(`studio-menu-icon-${key}`);
+      expect(icon.tagName.toLowerCase()).toBe('svg');
+      expect(icon).toHaveAttribute('aria-hidden', 'true');
+      // No tile: the icon is the row's own child, the first one.
+      expect(icon.parentElement).toBe(entry(key));
+      expect(entry(key).firstElementChild).toBe(icon);
+      expect(entry(key)).toHaveAttribute('data-sidebar', 'menu-button');
+    }
+    // A type and an entry that is not one each draw an icon, the fold's too.
+    fireEvent.click(fold());
+    expect(screen.getByTestId('studio-menu-icon-type:hook').tagName.toLowerCase()).toBe('svg');
+    expect(screen.getByTestId('studio-menu-icon-owd').tagName.toLowerCase()).toBe('svg');
+  });
+
+  it('the current entry is the primitive\'s active row (the pill and its left bar), and only it', () => {
+    renderAt(`/studio/${PKG}/metadata/flow?package=${PKG}`);
+    expect(entry('type:flow')).toHaveAttribute('data-active', 'true');
+    expect(entry('type:object')).toHaveAttribute('data-active', 'false');
+    // Its count is not muted: it reads with the selected name.
+    expect(screen.getByTestId('studio-menu-count-type:flow')).not.toHaveClass('text-muted-foreground');
+  });
+
+  describe('the selected entry is tinted by Studio\'s graphite whatever the app\'s theme colour is', () => {
+    const ROOT_TOKENS = ['--primary', '--primary-foreground', '--ring', '--sidebar-primary', '--sidebar-ring', '--accent', '--accent-foreground'];
+
+    function Branded({ children }: { children: ReactNode }) {
+      // A non-default app theme: a rose primary and an amber accent, written on the page root by the app shell's own hook.
+      useAppShellBranding({ primaryColor: '#e11d48', accentColor: '#f59e0b' });
+      return <>{children}</>;
+    }
+
+    afterEach(() => {
+      for (const token of ROOT_TOKENS) document.documentElement.style.removeProperty(token);
+      for (const token of ['--brand-primary', '--brand-primary-hsl', '--brand-accent', '--brand-accent-hsl']) document.documentElement.style.removeProperty(token);
+    });
+
+    /** The declarations a class string makes: `[--x:a_b]` and `dark:[--x:a_b]`, underscores read as spaces. */
+    function declarations(classes: string, dark: boolean): Map<string, string> {
+      const out = new Map<string, string>();
+      for (const cls of classes.split(/\s+/)) {
+        const m = /^(dark:)?\[(--[\w-]+):(.+)\]$/.exec(cls);
+        if (m && !!m[1] === dark) out.set(m[2], m[3].replace(/_/g, ' '));
+      }
+      return out;
+    }
+
+    it('every theme token the app\'s branding writes on the page root is rebound to graphite over the selected entry, light and dark', () => {
+      render(
+        <MemoryRouter initialEntries={[`/studio/${PKG}/metadata/flow?package=${PKG}`]}>
+          <Branded>
+            <Routes>
+              <Route path="*" element={<Shell segment={PKG} />} />
+            </Routes>
+          </Branded>
+        </MemoryRouter>,
+      );
+      // CONTROL: the app's theme is not the default — its colour is on the page root.
+      const root = document.documentElement.style;
+      const written = [...Array.from({ length: root.length }, (_, i) => root.item(i))].filter(
+        // `--brand-*` are the hook's hex aliases; no sidebar or menu class reads them.
+        (token) => token.startsWith('--') && !token.startsWith('--brand-'),
+      );
+      expect(written).toContain('--primary');
+      expect(written).toContain('--accent');
+      expect(root.getPropertyValue('--primary').trim()).not.toBe(STUDIO_ACCENT_HSL.light);
+
+      // The selected entry is the active row, and it sits inside Studio's accent scope.
+      const selected = entry('type:flow');
+      expect(selected).toHaveAttribute('data-active', 'true');
+      const scope = selected.closest<HTMLElement>('[data-studio-accent]');
+      expect(scope).not.toBeNull();
+      for (const cls of STUDIO_ACCENT.split(/\s+/)) expect(scope).toHaveClass(cls);
+      // Nothing between the scope and the entry writes a theme token back.
+      for (let el: HTMLElement | null = selected; el && el !== scope; el = el.parentElement) {
+        for (const token of written) expect(el.style.getPropertyValue(token), `${token} on ${el.tagName}`).toBe('');
+      }
+
+      const light = declarations(STUDIO_ACCENT, false);
+      const dark = declarations(STUDIO_ACCENT, true);
+      for (const token of written) {
+        expect(light.has(token), `${token} rebound in the light theme`).toBe(true);
+        expect(dark.has(token), `${token} rebound in the dark theme`).toBe(true);
+      }
+      expect(light.get('--primary')).toBe(STUDIO_ACCENT_HSL.light);
+      expect(dark.get('--primary')).toBe(STUDIO_ACCENT_HSL.dark);
+    });
   });
 });

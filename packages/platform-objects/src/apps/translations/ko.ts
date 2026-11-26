@@ -2,12 +2,15 @@
 
 import type { TranslationData } from '@objectstack/spec/system';
 import { koObjects } from './ko.objects.generated.js';
+import { standardUnitMessages } from './standard-unit-names.js';
 
 /**
  * 한국어 (ko) — Setup App Translations
  */
 export const ko: TranslationData = {
   objects: koObjects,
+  // ADR-0158 L2 (2A): each standard unit code's name (`standard-unit-names.ts`).
+  messages: standardUnitMessages('ko'),
   apps: {
     account: {
       label: '계정',

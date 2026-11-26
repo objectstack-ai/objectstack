@@ -614,7 +614,7 @@ gh label create status:parked -R objectstack-ai/objectui    -c cfd3d7 -d "Parked
 # repo label OBJECT. Since objectui moved into this repository's ui/ tree
 # (objectstack#25677), domain:ui is also a main-repo lane, in the loop above
 # and SKILL.md's domain table. Named consumer: the objectui execution seat's candidate query
-# (.claude/skills/pm-dispatch/references/lanes/ui.md). Re-laning the open
+# (.claude/skills/pm-dispatch/references/domains/ui.md). Re-laning the open
 # objectui backlog onto domain:ui was triage's act on the ruling's day, by
 # file-path evidence — not this script's.
 gh label create domain:ui -R objectstack-ai/objectui -c bfd4f2 -d "objectui ui lane: all objectui code — library, apps, packages/types, .github/, scripts/, docs" 2>/dev/null || true
