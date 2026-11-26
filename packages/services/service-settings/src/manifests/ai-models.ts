@@ -153,7 +153,10 @@ export type AiModelRule =
 /** One way a model configuration breaks the save rule, with the keys it involves. */
 export interface AiModelRuleBreach {
   rule: AiModelRule;
-  /** The keys whose change can cause this breach; a save is refused at the ones it changes. */
+  /**
+   * The keys whose change can cause this breach, the chosen model or provider
+   * first. A save is refused at the first of them it changes, once.
+   */
   keys: string[];
   provider?: AiProviderId;
   model?: string;
@@ -169,13 +172,13 @@ export function aiModelRuleBreaches(values: Readonly<Record<string, unknown>>): 
   const defaultProvider = providerOf(values.provider);
   const defaultModel = text(values.default_model);
   if (defaultModel && !defaultProvider) {
-    breaches.push({ rule: 'default_model_without_provider', keys: ['provider', 'default_model'], model: defaultModel });
+    breaches.push({ rule: 'default_model_without_provider', keys: ['default_model', 'provider'], model: defaultModel });
   } else if (defaultModel && defaultProvider) {
     const models = aiProviderModels(values, defaultProvider);
     if (!models.includes(defaultModel)) {
       breaches.push({
         rule: 'default_model_not_listed',
-        keys: ['provider', 'default_model', `${defaultProvider}_model`, `${defaultProvider}_models`],
+        keys: ['default_model', 'provider', `${defaultProvider}_model`, `${defaultProvider}_models`],
         provider: defaultProvider,
         model: defaultModel,
         models,
@@ -189,7 +192,7 @@ export function aiModelRuleBreaches(values: Readonly<Record<string, unknown>>): 
   if (namedProvider && !isAiProviderEnabled(values, namedProvider)) {
     breaches.push({
       rule: 'structured_output_provider_off',
-      keys: ['structured_output_provider', 'provider', `${namedProvider}_enabled`],
+      keys: ['structured_output_provider', `${namedProvider}_enabled`, 'provider'],
       provider: namedProvider,
     });
   } else if (structuredModel && !structuredProvider) {
@@ -429,14 +432,20 @@ export type AiSettingReader = (
   ctx: SettingsWritePredicateInput['ctx'],
 ) => Promise<{ value?: unknown; source?: string } | undefined>;
 
+/** Two setting values compared as stored: `undefined` is `null`, objects by their JSON. */
+const sameValue = (a: unknown, b: unknown): boolean => JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
+
 /**
  * The write predicate shared by {@link AI_MODEL_RULE_KEYS}. It judges the state
  * after the whole save: each rule key the save sets is read from the save (a
  * cleared key as its manifest default), unless an environment override is in
- * force for it, which wins; every other rule key is read as it stands. It
- * refuses at the key being judged when a breach involves that key, so a save
- * that leaves the configuration as broken as it found it through keys it does
- * not set is not refused for them.
+ * force for it, which wins; every other rule key is read as it stands.
+ *
+ * A breach is refused once, at the first of its keys ({@link AiModelRuleBreach.keys},
+ * the chosen model or provider first) that the save changes: a save that fills
+ * the whole page is told about its default model, not about every list beside
+ * it. A save that leaves a breach as it found it, through keys it does not
+ * change, is not refused for it.
  */
 export function aiModelRulePredicate(
   read: AiSettingReader,
@@ -445,15 +454,17 @@ export function aiModelRulePredicate(
   return async (input) => {
     const batch = input.batch ?? { [input.key]: input.next };
     const values: Record<string, unknown> = {};
+    const changed = new Set<string>();
     for (const key of AI_MODEL_RULE_KEYS) {
       const now = await read(key, input.ctx);
       if (now?.source === 'env' || !Object.prototype.hasOwnProperty.call(batch, key)) {
         values[key] = now?.value;
-      } else {
-        values[key] = batch[key] ?? defaults[key];
+        continue;
       }
+      values[key] = batch[key] ?? defaults[key];
+      if (!sameValue(values[key], now?.value)) changed.add(key);
     }
-    const breach = aiModelRuleBreaches(values).find((b) => b.keys.includes(input.key));
+    const breach = aiModelRuleBreaches(values).find((b) => b.keys.find((k) => changed.has(k)) === input.key);
     return breach ? aiModelRuleRefusal(breach, input.locale) : undefined;
   };
 }
