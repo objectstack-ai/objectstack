@@ -524,12 +524,20 @@ describe('drawn as the app\'s menu (objectstack#37452)', () => {
     expect(entry('type:object')).toBeVisible();
   });
 
+  // On ~all the groups are drawn flat with and without a search, so the
+  // group the author closed is the same group the search lists into.
   it('a search lists its matches in a group the author closed', () => {
-    renderAt(`/studio/${PKG}/data`);
-    fireEvent.click(groupLabel('studio-menu-group-automation'));
-    expect(screen.queryByTestId('studio-menu-entry-type:flow')).toBeNull();
-    fireEvent.change(screen.getByTestId('studio-menu-search'), { target: { value: 'flow' } });
-    expect(entry('type:flow')).toBeVisible();
+    renderAt('/studio/~all/metadata', '~all');
+    const label = groupLabel('studio-menu-group-security');
+    fireEvent.click(label);
+    expect(label).toHaveAttribute('aria-expanded', 'false');
+    expect(screen.queryByTestId('studio-menu-entry-type:position')).toBeNull();
+    fireEvent.change(screen.getByTestId('studio-menu-search'), { target: { value: 'position' } });
+    expect(entry('type:position')).toBeVisible();
+    expect(groupLabel('studio-menu-group-security')).toHaveAttribute('aria-expanded', 'true');
+    // The author's choice is kept: clearing the search closes it again.
+    fireEvent.change(screen.getByTestId('studio-menu-search'), { target: { value: '' } });
+    expect(screen.queryByTestId('studio-menu-entry-type:position')).toBeNull();
   });
 
   it('an entry draws a bare line icon before its name, on the app menu\'s row', () => {
