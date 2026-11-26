@@ -66,6 +66,11 @@ import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protoco
 import { RestServer } from './rest-server.js';
 import { projectedFormsOf } from '@objectstack/spec/ui';
 
+// Pay the first transform of `@objectstack/objectql`, which the route source
+// reaches through a dynamic `import()`, at MODULE LOAD rather than inside a
+// clocked `it()` body (`scripts/check-test-source-alias.mjs`).
+import '@objectstack/objectql';
+
 // ─── the real save path ──────────────────────────────────────────────────────
 
 /** The slice of the engine the `sys_metadata` write path touches. */

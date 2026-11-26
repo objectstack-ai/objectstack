@@ -30,6 +30,7 @@ import {
   SysMetadataObject,
   hashSpec,
 } from '@objectstack/metadata-core';
+import { readFileSync } from 'node:fs';
 import { RestServer } from './rest-server';
 
 const BASE = 'com.example.forms37086';
@@ -93,7 +94,7 @@ function makeRes() {
 
 interface Answer { status: number; body: any }
 
-async function boot(ships: { forms?: unknown[]; views?: unknown[] }, opts: { i18n?: unknown } = {}) {
+async function boot(ships: { forms?: unknown[]; views?: unknown[]; objects?: unknown[] }, opts: { i18n?: unknown } = {}) {
   const driver = new SqlDriver({ client: 'better-sqlite3', connection: { filename: ':memory:' }, useNullAsDefault: true } as any);
   const engine = new ObjectQL();
   engine.registerDriver(driver, true);
@@ -106,7 +107,7 @@ async function boot(ships: { forms?: unknown[]; views?: unknown[] }, opts: { i18
     name: 'forms37086',
     version: '1.0.0',
     namespace: 'ftt',
-    objects: [INQUIRY],
+    objects: [INQUIRY, ...(ships.objects ?? [])],
     ...(ships.forms ? { forms: ships.forms } : {}),
     ...(ships.views ? { views: ships.views } : {}),
   } as any);
@@ -173,7 +174,15 @@ async function boot(ships: { forms?: unknown[]; views?: unknown[] }, opts: { i18
     await item.handler({ method: 'GET', path: `/api/v1/meta/${type}/${name}`, params: { type, name }, query: {}, body: {}, headers } as any, res);
     return { status: res._status ?? 200, body: res._json };
   };
-  return { engine, protocol, rest, get, post, records, install, saveInto, saveBeforeTheGate, seedRow, meta };
+  /** `GET /api/v1/meta/:type` as a caller who holds no capability. */
+  const metaList = async (type: string): Promise<Answer> => {
+    (rest as any).resolveExecCtx = async () => ({ userId: 'u_reader', systemPermissions: [] });
+    const list = route('GET', '/api/v1/meta/:type');
+    const res = makeRes();
+    await list.handler({ method: 'GET', path: `/api/v1/meta/${type}`, params: { type }, query: {}, body: {}, headers: {} } as any, res);
+    return { status: res._status ?? 200, body: res._json };
+  };
+  return { engine, protocol, rest, get, post, records, install, saveInto, saveBeforeTheGate, seedRow, meta, metaList };
 }
 
 type Booted = Awaited<ReturnType<typeof boot>>;
@@ -892,5 +901,68 @@ describe('[ADR-0159 card ② item 2, D5, ADR-0029 D9.2a] the `/meta/form` read: 
     // An override that keeps the base's title is served the translation.
     await b.saveInto('form', PAIR, formItem(true, { ...overrides, title: 'Contact us' }));
     expect((await b.get(SLUG, de)).body?.form?.title).toBe('Kontaktieren Sie uns');
+  });
+});
+
+/**
+ * [ADR-0159 D5, card ② "Done when"] What the old shapes serve, held byte-equal
+ * with a fixture TAKEN BEFORE the `form` type: `form-old-shape-before.json` was
+ * written by these same fixtures run against the tree under this change (the
+ * rename-only head `cb854ea4d`, which serves no `form` type), and is never
+ * regenerated from this tree.
+ */
+const BEFORE: Record<string, Answer> = JSON.parse(readFileSync(new URL('./form-old-shape-before.json', import.meta.url), 'utf8'));
+/**
+ * An answer as the wire carries it: a JSON round trip (an `undefined` member is
+ * not on the wire), with each `changedAt` stamp written as `TIME` — the clock
+ * a row was saved at is the one value two runs cannot share. The keys stay:
+ * which items carry a stamp is part of the answer.
+ */
+const wire = (answer: unknown): unknown => JSON.parse(JSON.stringify(answer), function (key, value) {
+  return key !== 'changedAt' || value === null || typeof value !== 'object'
+    ? value
+    : Object.fromEntries(Object.keys(value).map((name) => [name, 'TIME']));
+});
+const LEAD = { name: 'ftt_lead', label: 'Lead', fields: { name: { name: 'name', type: 'text' as const, label: 'Name' }, email: { name: 'email', type: 'text' as const, label: 'Email' } } };
+/** The three old shapes: a container's `form`, a `formViews` entry, and (stored) a `viewKind: 'form'` item. */
+const threeShapes = () => ({
+  views: [{
+    object: OBJECT,
+    form: { type: 'simple', sections: [{ fields: ['name'] }], sharing: sharing(true, 'whole-37086'), data: { provider: 'object', object: OBJECT } },
+    formViews: { contact: { ...body(true), data: { provider: 'object', object: OBJECT } } },
+  }],
+});
+const STANDALONE = `${OBJECT}.standalone`;
+/** A container on {@link OBJECT} whose `formViews` entry binds ANOTHER object through `data.object`. */
+const otherObjectForm = () => ({
+  objects: [LEAD],
+  views: [{ object: OBJECT, formViews: { contact: { ...body(true), data: { provider: 'object', object: 'ftt_lead' } } } }],
+});
+
+describe('[ADR-0159 D5] the old shapes answer what they answered before the type (fixture taken before the change)', () => {
+  const engines: ObjectQL[] = [];
+  afterAll(async () => {
+    for (const engine of engines) await engine.destroy().catch(() => {});
+  });
+
+  it('a stack that authors the three old shapes: `GET /api/v1/meta/view` answers exactly the fixture, and each form is also served as a `form` item of the same name', async () => {
+    const b = await boot(threeShapes());
+    engines.push(b.engine);
+    await b.saveInto('view', undefined, { ...viewItem(true, {}, 'standalone-37086'), name: STANDALONE }, STANDALONE);
+    const list = await b.metaList('view');
+    expect(JSON.stringify(wire(list))).toBe(JSON.stringify(wire(BEFORE['meta-view-list'])));
+    const forms = ((await b.protocol.getMetaItems({ type: 'form' })).items as any[]).map((f) => [f.name, f._formDefinedIn]).sort();
+    const viewForms = ((list.body?.items ?? list.body?.data?.items ?? list.body) as any[])
+      .filter((v) => v?.viewKind === 'form').map((v) => [v.name, 'view']).sort();
+    expect(viewForms.length).toBeGreaterThanOrEqual(3);
+    expect(forms).toEqual(viewForms);
+  });
+
+  it('an old-shape form whose `data.object` differs from its container\'s object answers both doors as before, byte-equal on the resolve door (ablate: parse projected items with FormSchema)', async () => {
+    const b = await boot(otherObjectForm());
+    engines.push(b.engine);
+    expect(JSON.stringify(wire(await b.get()))).toBe(JSON.stringify(wire(BEFORE['data-object-resolve'])));
+    const submitted = await b.post();
+    expect([submitted.status, submitted.body?.code]).toEqual([BEFORE['data-object-submit'].status, BEFORE['data-object-submit'].body?.code]);
   });
 });

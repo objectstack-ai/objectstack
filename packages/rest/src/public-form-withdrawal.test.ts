@@ -33,6 +33,11 @@ import { RestServer } from './rest-server';
 // MODULE LOAD rather than inside a clocked `it()` body.
 import { projectedFormsOf } from '@objectstack/spec/ui';
 
+// Pay the first transform of `@objectstack/objectql`, which the route source
+// reaches through a dynamic `import()`, at MODULE LOAD rather than inside a
+// clocked `it()` body (`scripts/check-test-source-alias.mjs`).
+import '@objectstack/objectql';
+
 const ORG = 'org_alpha';
 
 function mockServer() {

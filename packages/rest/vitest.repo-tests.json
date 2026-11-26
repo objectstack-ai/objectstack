@@ -3,5 +3,6 @@
   "src/error-response-sandbox-arm-message.test.ts",
   "src/error-response-structured-arm-door-parity.test.ts",
   "src/meta-state-route-doc-spelling.test.ts",
+  "src/public-form-app-crm-byte-equal.test.ts",
   "src/rest-server-canonical-query-ast.test.ts"
 ]

@@ -24,6 +24,11 @@ import { RestServer } from './rest-server';
 // where the same shape cost 30 ejected merge-queue builds in one night.
 import { projectedFormsOf } from '@objectstack/spec/ui';
 
+// Pay the first transform of `@objectstack/objectql`, which the route source
+// reaches through a dynamic `import()`, at MODULE LOAD rather than inside a
+// clocked `it()` body (`scripts/check-test-source-alias.mjs`).
+import '@objectstack/objectql';
+
 function mockServer() {
   return {
     get: vi.fn(), post: vi.fn(), put: vi.fn(), delete: vi.fn(), patch: vi.fn(),
