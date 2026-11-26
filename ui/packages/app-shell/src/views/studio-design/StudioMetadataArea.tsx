@@ -57,7 +57,7 @@ import {
   studioMetadataAreaPath,
 } from './metadataArea.js';
 import { STUDIO_ORG_SCOPE_SEGMENT } from './studioScope.js';
-import { studioAllLegSetupRedirect } from '../setup/accessDirectory.js';
+import { studioAddressAfterSetupMove, studioAllLegSetupRedirect } from '../setup/accessDirectory.js';
 import { STUDIO_ORG_SCOPE_TYPE } from './studioAddress.js';
 import { StudioBundleItemEditor } from './StudioBundleItemEditor.js';
 import { AutomationsPillar } from './AutomationsPillar.js';
@@ -484,10 +484,11 @@ export function StudioMetadataArea({
   // The query names the leg (`areaLocationRedirect`). Settled before any page
   // mounts, so no page reads a scope the URL is about to change.
   const rest = pathname.startsWith(basePath) ? pathname.slice(basePath.length).replace(/^\/+/, '') : '';
-  const redirect = areaLocationRedirect(segment, rest, search);
-  if (redirect) return <Navigate to={redirect} replace />;
   // objectstack#37565 — the cross-package leg's directory is Setup's page now
-  // (ADR-0084, amended 2026-11-26): its addresses land there, once.
+  // (ADR-0084, amended 2026-11-26): its addresses land there, once, whether
+  // the URL is on the leg or the leg is where its query sends it.
+  const redirect = areaLocationRedirect(segment, rest, search);
+  if (redirect) return <Navigate to={studioAddressAfterSetupMove(redirect)} replace />;
   const moved = segment === STUDIO_ALL_PACKAGES_SEGMENT ? studioAllLegSetupRedirect(rest, search) : null;
   if (moved) return <Navigate to={moved} replace />;
   // A page must not offer a write before the package's state is known.

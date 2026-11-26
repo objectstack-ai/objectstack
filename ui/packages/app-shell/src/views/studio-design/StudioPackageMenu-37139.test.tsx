@@ -331,7 +331,8 @@ describe('no 「⋯」 without a current package or without manage_metadata (obj
     expect(within(header()).queryByTestId('studio-package-menu')).toBeNull();
     cleanup();
 
-    renderAt('/studio/~all/metadata');
+    // objectstack#37565 — the leg's root redirects to Setup; a page the leg still draws.
+    renderAt('/studio/~all/metadata/permission/admin?scope=environment');
     await waitFor(() => expect(within(header()).getByTestId('studio-back-app-name')).toHaveTextContent(t('engine.studio.menu.environment', locale)), {
       timeout: 8000,
     });

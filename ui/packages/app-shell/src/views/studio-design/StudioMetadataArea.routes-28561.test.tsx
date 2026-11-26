@@ -141,6 +141,7 @@ function mount(url: string) {
         <Route path="/studio/:packageId/metadata/*" element={<PackageArea />} />
         <Route path="/studio/:packageId/:tab" element={<div data-testid="pillar" />} />
         <Route path="/apps/setup/metadata/datasource" element={<div data-testid="setup-datasources" />} />
+        <Route path="/apps/setup/component/security/access-directory/*" element={<div data-testid="setup-directory" />} />
       </Routes>
     </MemoryRouter>,
   );
@@ -182,13 +183,27 @@ describe('the area mounts the metadata pages (objectstack#28561)', () => {
     expect((await page()).host.readOnly).toBe(false);
   });
 
-  it('the cross-package leg: no package, and the environment-scope permission list', async () => {
-    mount('/studio/~all/metadata/permission?scope=environment');
+  // objectstack#37565 — rewritten on purpose: the environment-scope list was the leg's page; it is
+  // Setup's directory page now (ADR-0084, amended 2026-11-26). The leg still serves the cross-package list.
+  it('the cross-package leg: no package, and the cross-package permission list', async () => {
+    mount('/studio/~all/metadata/permission?package=all');
     expect(await page()).toEqual({
       page: 'list',
       host: { packageId: null, readOnly: false, basePath: '/studio/~all/metadata' },
     });
-    expect(where()).toBe('/studio/~all/metadata/permission?scope=environment');
+    expect(where()).toBe('/studio/~all/metadata/permission?package=all');
+  });
+
+  it.each([
+    ['/studio/~all/metadata', '/apps/setup/component/security/access-directory'],
+    ['/studio/~all/metadata/permission?scope=environment', '/apps/setup/component/security/access-directory/permission?scope=environment'],
+    // A package's leg that names the environment scope lands on Setup in one hop, not via the leg.
+    [`/studio/${WRITABLE}/metadata/position?scope=environment&package=${WRITABLE}`, '/apps/setup/component/security/access-directory/position?scope=environment'],
+  ])('the environment directory %s lands on Setup\'s page: %s', async (from, to) => {
+    mount(from);
+    expect(await screen.findByTestId('setup-directory')).toBeInTheDocument();
+    expect(where()).toBe(to);
+    expect(screen.queryByTestId('area-page')).toBeNull();
   });
 
   it('the environment scope opened under a package moves to the cross-package leg', async () => {

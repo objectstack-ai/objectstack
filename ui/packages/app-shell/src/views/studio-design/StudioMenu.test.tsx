@@ -274,9 +274,9 @@ describe('the group labels (objectstack#37201)', () => {
       'studio-menu-advanced-group-security',
     ]);
     // Inside the closed fold: out of the accessibility tree until it opens.
+    // objectstack#37565 — the environment directory left the menu for Setup.
     expect(within(screen.getByTestId('studio-menu-advanced-group-security')).getAllByRole('link', { hidden: true }).map((a) => a.getAttribute('data-testid'))).toEqual([
       'studio-menu-entry-owd',
-      'studio-menu-entry-environment',
     ]);
   });
 });
@@ -419,7 +419,8 @@ describe('the 「高级」 fold (objectstack#37201)', () => {
 describe('~org and ~all draw no fold (objectstack#37201)', () => {
   it.each([
     ['~org', '/studio/~org/metadata/flow?source=runtime'],
-    ['~all', '/studio/~all/metadata'],
+    // objectstack#37565 — the leg's root redirects to Setup; an item page is what still draws this menu.
+    ['~all', '/studio/~all/metadata/permission/admin?scope=environment'],
   ])('%s: its entries flat, in the table\'s order, under their groups\' labels', (segment, path) => {
     renderAt(path, segment);
     expect(screen.queryByTestId('studio-menu-advanced-toggle')).toBeNull();
@@ -428,8 +429,12 @@ describe('~org and ~all draw no fold (objectstack#37201)', () => {
     expect(within(security).getAllByRole('link').map((a) => a.getAttribute('data-testid'))).toEqual([
       'studio-menu-entry-type:permission',
       'studio-menu-entry-type:position',
-      'studio-menu-entry-environment',
     ]);
+    // objectstack#37565 — each catalog row opens its list on Setup's directory page.
+    expect(within(security).getByTestId('studio-menu-entry-type:position')).toHaveAttribute(
+      'href',
+      '/apps/setup/component/security/access-directory/position?scope=environment',
+    );
     for (const a of within(security).getAllByRole('link')) expect(a).toBeVisible();
     expect(security.querySelector('[data-sidebar="group-label"]')).toHaveTextContent(/^Access$/);
     expect(screen.getByTestId('studio-menu-entry-orgFlows')).toBeVisible();

@@ -153,7 +153,6 @@ beforeEach(() => {
 /** [Setup URL, the Studio URL it lands on in one hop] */
 const TO_STUDIO: Array<[string, string]> = [
   // canonical routes
-  ['/metadata', '/studio/~all/metadata'],
   ['/metadata/_diagnostics', '/studio/~all/metadata/_diagnostics'],
   ['/metadata/object', '/studio/~all/metadata/object'],
   ['/metadata/object/new', '/studio/~all/metadata/object/new'],
@@ -162,17 +161,28 @@ const TO_STUDIO: Array<[string, string]> = [
   // the query is carried, and names the leg
   ['/metadata/object/account?package=crm', '/studio/crm/metadata/object/account?package=crm'],
   ['/metadata/object?package=all', '/studio/~all/metadata/object?package=all'],
-  ['/metadata/position?scope=environment', '/studio/~all/metadata/position?scope=environment'],
-  ['/metadata/sharing_rule?scope=environment&package=crm', '/studio/~all/metadata/sharing_rule?scope=environment'],
+  ['/metadata/position/manager?scope=environment', '/studio/~all/metadata/position/manager?scope=environment'],
   ['/metadata/object/account?review=1', '/studio/~all/metadata/object/account?review=1'],
   ['/metadata/object/account?package=crm&review=1', '/studio/crm/metadata/object/account?package=crm&review=1'],
   ['/metadata/object/account#fields', '/studio/~all/metadata/object/account#fields'],
   // the pre-refactor aliases, straight to Studio (not via the canonical route)
-  ['/component/metadata/directory', '/studio/~all/metadata'],
   ['/component/metadata/resource?type=object', '/studio/~all/metadata/object'],
   ['/component/metadata/resource/account?type=object', '/studio/~all/metadata/object/account'],
   ['/component/metadata/resource/account?type=object&package=crm', '/studio/crm/metadata/object/account?package=crm'],
-  ['/component/metadata/resource?type=position&scope=environment', '/studio/~all/metadata/position?scope=environment'],
+];
+
+/**
+ * objectstack#37565 — [Setup URL, where it lands in one hop]: the environment
+ * directory and its lists, which left Studio's cross-package leg for Setup →
+ * Access control (ADR-0084, amended 2026-11-26). Before, each landed on the leg.
+ */
+const SETUP_DIRECTORY = '/apps/setup/component/security/access-directory';
+const TO_SETUP_DIRECTORY: Array<[string, string]> = [
+  ['/metadata', SETUP_DIRECTORY],
+  ['/metadata/position?scope=environment', `${SETUP_DIRECTORY}/position?scope=environment`],
+  ['/metadata/sharing_rule?scope=environment&package=crm', `${SETUP_DIRECTORY}/sharing_rule?scope=environment`],
+  ['/component/metadata/directory', SETUP_DIRECTORY],
+  ['/component/metadata/resource?type=position&scope=environment', `${SETUP_DIRECTORY}/position?scope=environment`],
 ];
 
 /** [Setup URL, the page it keeps rendering, where it settles] */
@@ -200,6 +210,16 @@ describe.each([
     expect(chain).toEqual([`${base}${from}`, to]);
     expect(screen.queryByTestId('metadata-resource-list-page')).not.toBeInTheDocument();
     expect(screen.queryByTestId('metadata-resource-edit-page')).not.toBeInTheDocument();
+  });
+
+  it.each(TO_SETUP_DIRECTORY)(`${base}%s → %s, in one hop`, async (from, to) => {
+    metadataApps = [...apps];
+    const chain = renderAt(`${base}${from}`);
+
+    await waitFor(() => expect(chain[1]).toBe(to));
+    expect(chain[0]).toBe(`${base}${from}`);
+    expect(chain.some((entry) => entry.startsWith('/studio'))).toBe(false);
+    expect(screen.queryByTestId('studio-probe')).not.toBeInTheDocument();
   });
 
   it.each(STAYS)(`${base}%s stays in Setup on %s`, async (from, testid, settles) => {

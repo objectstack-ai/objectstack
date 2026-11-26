@@ -345,7 +345,10 @@ describe('system-hub entries reach the framework system objects (objectui#3655)'
   });
 });
 
-describe('the catalog entries reach the catalog, in Studio (objectui#7611, ADR-0146 D1)', () => {
+/** objectstack#37565 — Setup → Access control → Positions and Permissions. */
+const SETUP_DIRECTORY = '/apps/setup/component/security/access-directory';
+
+describe('the catalog entries reach the catalog, on Setup\'s directory page (objectui#7611, objectstack#37565)', () => {
   /**
    * `roles`, `positions` and `permissions` name the security CATALOG, which
    * ADR-0131 D3 moves into the environment registry, so they land on the
@@ -354,24 +357,26 @@ describe('the catalog entries reach the catalog, in Studio (objectui#7611, ADR-0
    * `sys_role` -> `sys_position`), and `permissions` still means the
    * permission-set surface (objectui#3655 decision A).
    *
-   * Setup carries no metadata catalog since objectstack ADR-0146 D1 (N-28):
-   * the list is Studio's "All metadata" area's, on its cross-package leg, and
-   * the URL goes there directly rather than through Setup's own redirect.
+   * The environment directory left Studio's cross-package leg for Setup →
+   * Access control (ADR-0084, amended 2026-11-26; objectstack#37565): the list
+   * is that page's, and the URL goes there directly. It landed on the leg, in
+   * one hop, before.
    */
   it.each([
-    ['/apps/setup/system/roles', '/studio/~all/metadata/position?scope=environment'],
-    ['/apps/setup/system/positions', '/studio/~all/metadata/position?scope=environment'],
-    ['/apps/setup/system/permissions', '/studio/~all/metadata/permission?scope=environment'],
+    ['/apps/setup/system/roles', `${SETUP_DIRECTORY}/position?scope=environment`],
+    ['/apps/setup/system/positions', `${SETUP_DIRECTORY}/position?scope=environment`],
+    ['/apps/setup/system/permissions', `${SETUP_DIRECTORY}/permission?scope=environment`],
     // Outside every app, so the app prefix is not part of the target.
-    ['/apps/my-app/system/permissions', '/studio/~all/metadata/permission?scope=environment'],
+    ['/apps/my-app/system/permissions', `${SETUP_DIRECTORY}/permission?scope=environment`],
   ])('%s reaches %s in ONE hop', async (url, target) => {
     renderConsoleAt(url);
 
-    expect(await screen.findByTestId('studio-probe')).toBeInTheDocument();
-    expect(chain).toEqual([url, target]);
-    // Never the row page the URL used to land on, nor Setup's catalog list.
+    await waitFor(() => expect(chain[1]).toBe(target));
+    expect(chain[0]).toBe(url);
+    expect(chain.some((entry) => entry.startsWith('/studio'))).toBe(false);
+    // Never the row page the URL used to land on: the type's environment list, on Setup's page.
     expect(screen.queryByTestId('object-view')).not.toBeInTheDocument();
-    expect(screen.queryByTestId('metadata-resource-list-page')).not.toBeInTheDocument();
+    expect(await screen.findByTestId('metadata-resource-list-page')).toHaveTextContent(new URL(target, 'http://x').pathname.split('/').pop()!);
   });
 
   /**
@@ -380,14 +385,14 @@ describe('the catalog entries reach the catalog, in Studio (objectui#7611, ADR-0
    * to land on, which end at the "No Apps Configured" guard there.
    */
   it.each([
-    ['/apps/setup/system/positions', '/studio/~all/metadata/position?scope=environment'],
-    ['/apps/setup/system/permissions', '/studio/~all/metadata/permission?scope=environment'],
+    ['/apps/setup/system/positions', `${SETUP_DIRECTORY}/position?scope=environment`],
+    ['/apps/setup/system/permissions', `${SETUP_DIRECTORY}/permission?scope=environment`],
   ])('with no apps, %s still reaches the catalog', async (url, target) => {
     metadataApps = [];
     renderConsoleAt(url);
 
-    expect(await screen.findByTestId('studio-probe')).toBeInTheDocument();
-    expect(chain).toEqual([url, target]);
+    await waitFor(() => expect(chain[1]).toBe(target));
+    expect(chain[0]).toBe(url);
   });
 });
 
