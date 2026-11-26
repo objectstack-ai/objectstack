@@ -37,7 +37,7 @@ import {
   SysMetadata,
   SysMetadataHistoryObject,
 } from './metadata/index.js';
-import { SysExchangeRate, SysSecret, SysSetting, SysUnit, SysWorkCalendar, SysWorkCalendarException } from './system/index.js';
+import { SysExchangeRate, SysSecret, SysSetting, SysStandardUnitSetting, SysUnit, SysWorkCalendar, SysWorkCalendarException } from './system/index.js';
 import { ACCOUNT_APP, SETUP_APP, SETUP_NAV_CONTRIBUTIONS, STUDIO_APP } from './apps/index.js';
 import { AppSchema } from '@objectstack/spec/ui';
 import { resolveEffectiveApiMethods, isApiOperationAllowed, canServeApiOperation } from '@objectstack/spec/data';
@@ -606,6 +606,7 @@ describe('@objectstack/platform-objects', () => {
         sys_oauth_application: SysOauthApplication,
         sys_organization: SysOrganization,
         sys_session: SysSession,
+        sys_standard_unit_setting: SysStandardUnitSetting,
         sys_team: SysTeam,
         sys_unit: SysUnit,
         sys_user: SysUser,

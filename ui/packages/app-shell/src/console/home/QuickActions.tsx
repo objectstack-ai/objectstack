@@ -28,8 +28,9 @@ export function QuickActions() {
   const navigate = useNavigate();
   const { t } = useObjectTranslation();
 
-  // Manual "Create App" deprecated — the AI-first builder (Build with AI on
-  // /home) is the path to a new application. No "Manage Objects" card either
+  // Manual "Create App" deprecated — and no build entry of any kind: Home
+  // offers neither "Build with AI" nor "Build an app" (objectstack#37227); a
+  // new app starts from a template or in Studio. No "Manage Objects" card either
   // (objectstack ADR-0146 D1): objects are designed in Studio, which Home
   // opens from its own cover.
   const actions: QuickAction[] = [

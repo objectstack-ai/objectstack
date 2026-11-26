@@ -4505,6 +4505,42 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       }
     }
   },
+  sys_standard_unit_setting: {
+    label: "标准单位设置",
+    pluralLabel: "标准单位设置",
+    description: "本组织中以标准计量单位（KGM、H87 等）表示的数量显示几位小数，组织设置过的每个标准单位一行。",
+    fields: {
+      id: {
+        label: "ID"
+      },
+      code: {
+        label: "标准单位",
+        help: "标准单位编码（UN/ECE 第 20 号建议），须为大写，例如千克 KGM、克 GRM、件 H87。本组织自己的单位在「计量单位」中各自设置小数位。设置创建后不能更改编码。"
+      },
+      decimal_places: {
+        label: "小数位",
+        help: "以此单位表示的数量默认显示几位小数。它不会对已存储的值做舍入，字段自身的小数位仍限制存储和显示的位数。删除这条设置即可清除。"
+      }
+    },
+    _views: {
+      all_settings: {
+        label: "全部",
+        description: "本组织中以标准单位表示的数量显示的小数位。字段自身的小数位仍限制存储和显示的位数。",
+        emptyState: {
+          title: "暂无标准单位设置",
+          message: "标准单位按存放数量的字段的小数位显示。添加一条设置，可以为克、千克等标准单位指定自己的小数位。"
+        }
+      }
+    },
+    _validations: {
+      standard_unit_setting_code_standard: {
+        message: "请输入大写的标准单位编码，例如 KGM 或 H87。本组织自己的单位在「计量单位」中各自设置小数位。"
+      },
+      standard_unit_setting_code_immutable: {
+        message: "设置创建后不能更改单位。请删除它，再为另一个单位添加设置。"
+      }
+    }
+  },
   sys_work_calendar: {
     label: "工作日历",
     pluralLabel: "工作日历",

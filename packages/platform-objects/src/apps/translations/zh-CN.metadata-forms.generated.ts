@@ -2231,8 +2231,8 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         description: "标识与报表类型"
       },
       dataset_binding: {
-        label: "数据集绑定",
-        description: "本报表渲染的语义层数据集。度量与行分别来自该数据集的度量与维度"
+        label: "数据来源绑定",
+        description: "报表的数字从哪里来、如何分组和排序，以及点击某一行时打开哪些记录"
       },
       joined_blocks: {
         label: "joined 报表分块",
@@ -2264,19 +2264,19 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         helpText: "报表类型：tabular / summary / matrix / joined"
       },
       dataset: {
-        label: "数据集",
-        helpText: "要绑定的数据集（度量/维度来自其语义层）"
+        label: "数据来源",
+        helpText: "报表从这里取数；每个人只能看到自己有权限的记录"
       },
       values: {
-        label: "度量",
-        helpText: "要展示的度量名（来自该数据集）"
+        label: "指标",
+        helpText: "要展示的指标，例如合计、计数、平均值或比率（来自数据来源）"
       },
       rows: {
-        label: "行",
-        helpText: "用于分组行的维度名（来自该数据集）"
+        label: "分组",
+        helpText: "按哪些字段分组（来自数据来源）"
       },
       columns: {
-        label: "列",
+        label: "列分组",
         helpText: "横向展开的维度名（仅 matrix 报表）"
       },
       order: {
@@ -2291,7 +2291,7 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       drilldown: {
         label: "下钻",
-        helpText: "点击聚合后的行/单元格，打开其底层记录"
+        helpText: "点击汇总后的行或单元格，打开其中的记录"
       },
       blocks: {
         label: "分块",
@@ -2310,16 +2310,16 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "分块类型"
       },
       "blocks.dataset": {
-        label: "数据集"
+        label: "数据来源"
       },
       "blocks.rows": {
-        label: "行"
+        label: "分组"
       },
       "blocks.columns": {
-        label: "列"
+        label: "列分组"
       },
       "blocks.values": {
-        label: "度量"
+        label: "指标"
       },
       "blocks.runtimeFilter": {
         label: "运行时筛选"
@@ -2329,7 +2329,7 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       runtimeFilter: {
         label: "运行时筛选",
-        helpText: "渲染时的范围筛选，在查询时以 AND 方式并入"
+        helpText: "每次显示报表时都会应用的筛选，叠加在数据来源自身的条件之上"
       },
       chart: {
         label: "图表",

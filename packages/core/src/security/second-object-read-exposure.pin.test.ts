@@ -266,6 +266,16 @@ const CALLERS: Record<string, Classification> = {
       "each target the decision before the engine reads it: the data door's `refuseUnservedRelationTarget`, the MCP " +
       "stdio data bridge's `enforceRelationTargetExposure` and the runtime `callData`'s `refuseUnservedRelationTargets`",
   },
+  // [#37308] A knowledge search's record scope (ADR-0161 K8, item 17).
+  'packages/services/service-knowledge/src/knowledge-search-scope.ts': {
+    kind: 'not-a-served-read',
+    reason:
+      "names the object a knowledge source's listed lookup points at, only to turn a search scope entry that names " +
+      "that parent into a filter on the source's own stored lookup value; it reads no record of the parent and serves " +
+      "nothing of it. The hits are the source's own documents, each re-read as the caller (`applyPermissionFilter`). " +
+      'Pinned by `packages/services/service-knowledge/src/__tests__/knowledge-service.test.ts` (a parent-scoped ' +
+      'search makes no engine call naming the parent object) and `knowledge-search-scope.test.ts`',
+  },
   'packages/qa/scenarios/src/score/scenario-graph.ts': {
     kind: 'not-a-served-read',
     reason:

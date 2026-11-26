@@ -3913,7 +3913,6 @@ const zh = {
     addApp: '添加应用',
     appOpened: '{{time}}打开',
     build: {
-      title: '构建应用',
       noCapability: '本系统不提供构建应用功能 — 它需要「管理元数据」权限,而你的账号没有该权限。',
       inStudio: '新建空白应用',
     },
@@ -3924,13 +3923,11 @@ const zh = {
     open: '打开',
     loading: '加载中…',
     welcome: '用 AI 搭建你的业务系统',
-    welcomeAdminDescription: '用一句话描述你的业务，AI 会为你生成对象、界面、API 和智能体工具；也可以从左侧菜单自行搭建。',
     welcomeAdminDescriptionNoBuild: '从左侧的「管理」菜单创建你的第一个应用。有了数据后，AI 助手可以帮你查询和分析。',
     welcomeAdminDescriptionNoAi: '从左侧的「管理」菜单创建你的第一个应用。',
     noAppsTitle: '还没有应用',
     noAppsDescription: '系统正在准备中——管理员共享给你的应用会显示在这里。',
     noAppsAddDescription: '搭建你的第一个应用，或者从模板、应用市场开始。',
-    buildWithAI: '用 AI 搭建',
     askAI: '问 AI',
     recoveryReminder: {
       message: '建议设置一个备用密码，这样即使单点登录不可用，你仍能直接登录。',
@@ -5133,6 +5130,7 @@ const zh = {
   },
   chatbotQuota: {
     title: '需要升级',
+    limitTitle: 'AI 额度已用尽',
     fallbackMessage: 'AI 额度已用完。',
     buyCredits: '购买额度包',
     upgradePlan: '升级方案',

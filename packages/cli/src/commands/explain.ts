@@ -289,7 +289,7 @@ export const SCHEMAS: Record<string, SchemaInfo> = {
     ],
     optional: [
       { name: 'description', type: 'string', description: 'Dashboard description' },
-      { name: 'columns', type: 'number (1-24)', description: 'Number of grid columns (default 12)' },
+      { name: 'columns', type: 'number (1-24)', description: 'Number of grid columns. When absent, inferred from the widgets: 12 if any widget layout reaches past column 4 (x + w > 4), otherwise 4' },
       { name: 'gap', type: 'number', description: 'Space between widgets, in steps of 0.25rem (4 = 1rem)' },
       // There is no dashboard-level `layout` template — the key is rejected by
       // name. Positioning is per-widget: `layout: { x, y, w, h }`, and a widget
