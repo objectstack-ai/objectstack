@@ -61,8 +61,11 @@ export interface DatasetGrade {
  *   - `asked-back` 3: a request phrase (请确认, `please confirm`) after a
  *     clause mark (`，` `,` `；` `;` `：` `:`) asks, as it did after a
  *     sentence's end.
+ *   - `asked-back` 4: a list marker markdown wraps at a line's start
+ *     (`**1.** X`, `**1. X**`, `1.**X**`, `> 1.`, `### 1.`) is no figure, as
+ *     a bare `1.` already was.
  */
-export const DATASET_GRADER_REVISIONS: Readonly<Partial<Record<DatasetGrader, number>>> = { 'asked-back': 3 };
+export const DATASET_GRADER_REVISIONS: Readonly<Partial<Record<DatasetGrader, number>>> = { 'asked-back': 4 };
 
 /**
  * The app tools that answer a question from object records: the MCP door's
@@ -125,8 +128,23 @@ const REQUEST_PHRASE = String.raw`(?:please (?:confirm|clarify|specify|tell me|l
  */
 const ASKS = new RegExp(String.raw`[?？]|(?:^|[.。!！\n,，;；:：]\s*)${REQUEST_PHRASE}|(?:^|[.。!！\n]\s*)which (?:one|of)`, 'i');
 
-/** Numbered-list markers (`1.`, `2)`, `3、`) at a line's start: an option list's numbering, never a figure. */
-const LIST_MARKER = /^[ \t]*(?:[-*][ \t]+)?\(?\d{1,2}(?:[.)][ \t]+|、[ \t]*)/gm;
+/** Markdown emphasis around a list marker: `*`, `**`, `_` or `__`. */
+const EMPHASIS = String.raw`(?:\*{1,2}|_{1,2})`;
+
+/**
+ * Numbered-list markers (`1.`, `2)`, `(3)`, `3、`) at a line's start: an
+ * option list's numbering, never a figure. Markdown may wrap the line or the
+ * marker: a blockquote (`> 1.`), a heading (`### 1.`), a bullet (`- 1.`) and
+ * emphasis around the marker or the whole item (`**1.** Claimed amount`,
+ * `**1. Claimed amount**`, `1.**Claimed amount**`). Only the marker goes: a
+ * figure after it (`1. 1,234 claims`) stays a figure. A marker inside a
+ * sentence (`… 1. claimed amount or 2. estimated spend?`) is not at a line's
+ * start and stays a figure. A circled number (`①`) has no digit to read.
+ */
+const LIST_MARKER = new RegExp(
+  String.raw`^[ \t]*(?:>[ \t]*)*(?:#{1,6}[ \t]+)?(?:[-*+][ \t]+)?${EMPHASIS}?\(?\d{1,2}(?:[.)]${EMPHASIS}?(?:[ \t]+|(?=[*_]))|、${EMPHASIS}?[ \t]*)`,
+  'gm',
+);
 
 /** A number's edges: no digit, decimal or thousands separator, percent or currency sign touches it. */
 const NUMBER_BEFORE = String.raw`(?<![\d$¥￥€£]|\d[.,，])`;

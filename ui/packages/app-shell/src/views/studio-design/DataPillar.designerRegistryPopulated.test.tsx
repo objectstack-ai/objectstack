@@ -117,6 +117,7 @@ vi.mock('@object-ui/react', async (importOriginal) => {
 
 // The source reaches a dynamic `import('@objectstack/lint')`: its first load is paid at collection (`check:test-source-alias`).
 import '@objectstack/lint';
+import '@object-ui/plugin-detail';
 import { DataPillar } from './StudioDesignSurface';
 import { createEmptyDataSource, failOnAbsorbedFetchError } from './__tests__/emptyDataSource';
 import { registerBuiltinInspectors } from '../metadata-admin/inspectors';
@@ -161,7 +162,7 @@ function expectNoEmptyStateSentence(): void {
 function renderPillar() {
   render(
     <MemoryRouter initialEntries={['/studio/com.example.showcase/data']}>
-      <DataPillar packageId="com.example.showcase" />
+      <DataPillar objectName="showcase_task" packageId="com.example.showcase" />
     </MemoryRouter>,
   );
 }

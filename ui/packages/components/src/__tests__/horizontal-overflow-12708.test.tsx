@@ -13,7 +13,7 @@
  * `data-table-scroll-shadow-12463` stubs it.
  */
 
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, afterEach, vi } from 'vitest';
 import { render, fireEvent, act } from '@testing-library/react';
 import '@testing-library/jest-dom';
 import React from 'react';
@@ -83,5 +83,79 @@ describe('HorizontalOverflowBox (objectui#12708)', () => {
   it('hasOverflowRight keeps one pixel of slack', () => {
     expect(hasOverflowRight({ scrollLeft: 0, clientWidth: 700, scrollWidth: 701 })).toBe(false);
     expect(hasOverflowRight({ scrollLeft: 0, clientWidth: 700, scrollWidth: 702 })).toBe(true);
+  });
+});
+
+/**
+ * objectstack#37239 — a `<table>` inside a full-width wrapper (the shadcn
+ * `Table`'s container, `overflow-visible`, as the approvals inbox mounts it)
+ * widens past the box while the wrapper and the box keep their size. The box
+ * re-reads its overflow when that table resizes. jsdom's `ResizeObserver` is an
+ * inert polyfill, so a recording one stands in: `resize(el)` calls back only
+ * the observers watching `el`, as a browser does when only `el` changed size.
+ */
+describe('HorizontalOverflowBox follows a table that widens inside a wrapper (objectstack#37239)', () => {
+  const observed = new Map<Element, Set<ResizeObserverCallback>>();
+  class RecordingResizeObserver {
+    private readonly targets = new Set<Element>();
+    constructor(private readonly callback: ResizeObserverCallback) {}
+    observe(el: Element) {
+      this.targets.add(el);
+      if (!observed.has(el)) observed.set(el, new Set());
+      observed.get(el)!.add(this.callback);
+    }
+    unobserve(el: Element) {
+      this.targets.delete(el);
+      observed.get(el)?.delete(this.callback);
+    }
+    disconnect() {
+      for (const el of this.targets) observed.get(el)?.delete(this.callback);
+      this.targets.clear();
+    }
+  }
+  function resize(el: Element) {
+    act(() => {
+      for (const callback of Array.from(observed.get(el) ?? [])) callback([], {} as ResizeObserver);
+    });
+  }
+  function setWidths(box: HTMLElement, scrollWidth: number, clientWidth: number) {
+    Object.defineProperty(box, 'scrollWidth', { configurable: true, value: scrollWidth });
+    Object.defineProperty(box, 'clientWidth', { configurable: true, value: clientWidth });
+  }
+  function renderWrapped() {
+    return render(
+      <HorizontalOverflowBox data-testid="box">
+        <div className="relative w-full overflow-visible" data-testid="wrapper">
+          <table><tbody><tr><td>wide</td></tr></tbody></table>
+        </div>
+      </HorizontalOverflowBox>,
+    );
+  }
+
+  beforeAll(() => { vi.stubGlobal('ResizeObserver', RecordingResizeObserver); });
+  afterEach(() => { observed.clear(); });
+  afterAll(() => { vi.unstubAllGlobals(); });
+
+  it('shows the shadow once the wrapped table alone grows past the box', () => {
+    const { getByTestId, queryByTestId, container } = renderWrapped();
+    const box = getByTestId('box');
+    const table = container.querySelector('table')!;
+    setWidths(box, 718, 718);
+    resize(table);
+    expect(queryByTestId('horizontal-overflow-shadow')).toBeNull();
+
+    setWidths(box, 1071, 718);
+    resize(table);
+    expect(getByTestId('horizontal-overflow-shadow')).toBeInTheDocument();
+    expect(box).toHaveAttribute('data-overflow-right', 'true');
+  });
+
+  it('CONTROL: a resize of the wrapper itself still re-reads, as it did before', () => {
+    const { getByTestId, queryByTestId } = renderWrapped();
+    const box = getByTestId('box');
+    setWidths(box, 1071, 718);
+    // The wrapper was watched before this fix; the pin above is about the table.
+    resize(getByTestId('wrapper'));
+    expect(queryByTestId('horizontal-overflow-shadow')).not.toBeNull();
   });
 });

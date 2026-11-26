@@ -83,6 +83,10 @@ import {
   type ListDatasetsOutput,
   type QueryDatasetInput,
   type QueryDatasetOutput,
+  // [ADR-0160 D4] `get_record_context`'s name and input shape, declared once
+  // in spec; the description is the record-context service's definition.
+  GET_RECORD_CONTEXT_TOOL_NAME,
+  GetRecordContextInputSchema,
 } from '@objectstack/spec/ai';
 // [#15942 / #16293] The confirmation member the delete tools require. Imported,
 // never hand-spelled: the gate that refuses and the client that retries have to
@@ -133,7 +137,7 @@ import {
 } from './metadata-completeness.js';
 // [#30892] The file seam and what `read_file` renders from it.
 import { READ_FILE_MAX_BYTES, ReadFileExtractionBusyError, renderReadFile, type McpFileBridge } from './file-content.js';
-import { actionConfirmationElicitorFor, type McpActionCallDoor } from './action-confirmation-elicitation.js';
+import { actionCallDoorFor, type McpActionCallDoor, type McpActionCallDoorFacts } from './action-confirmation-elicitation.js';
 import type { McpLatestPer } from './types.js';
 // [#35145] `expand` and `related`: the relation reads, judged before any read.
 import {
@@ -464,6 +468,29 @@ export interface McpDataBridge {
    * {@link searchKnowledge}.
    */
   knowledgeToolDefinitions?(): ReadonlyArray<Pick<AIToolDefinition, 'name' | 'description' | 'parameters'>>;
+  /**
+   * [ADR-0160 D4] `get_record_context`: one record through its context pack,
+   * read AS the principal by the record-context service's one executor
+   * (`@objectstack/service-record-context`, `executeGetRecordContext`). The
+   * bridge builds the executor's door from its own read members and the
+   * tool layer's read guard (`opts.readGuard`, the system-object refusal and
+   * its AI-read attestation, the guard every read tool asks), so the tool
+   * adds no gate and skips none. Refuses by throwing an ADR-0112 coded error.
+   *
+   * OPTIONAL: a host with no `record-context` service omits both members
+   * ({@link getRecordContext}, {@link recordContextToolDefinitions}) and the
+   * tool does not register.
+   */
+  getRecordContext?(
+    input: Record<string, unknown>,
+    opts: { readGuard: (objectName: string) => Promise<string | undefined> },
+  ): Promise<unknown>;
+  /**
+   * [ADR-0160 D4] The tool's `AIToolDefinition`, as the record-context service
+   * defines it: the tool registers under that definition's description, so
+   * `packages/mcp` holds no second copy. OPTIONAL — see {@link getRecordContext}.
+   */
+  recordContextToolDefinitions?(): ReadonlyArray<Pick<AIToolDefinition, 'name' | 'description'>>;
 }
 
 /** [#35442] Where a manual page lives: its name, app, title, manual and the console address to cite. */
@@ -657,6 +684,10 @@ export interface McpActionBridge {
    * the person through `door.elicitConfirmation` first, once every admission
    * gate has passed: `accept` runs the call, any other answer refuses it, and
    * nothing is handed off. Without `door` the call is handed off as above.
+   * [#34325] `facts.elicitsCapableClients`, passed only without `door`, says
+   * this door would have asked a client that advertised `elicitation`: the
+   * `no_confirmation_service` refusal then names that route too. A bridge
+   * that does not read `facts` answers exactly as before.
    */
   runAction(
     name: string,
@@ -672,6 +703,7 @@ export interface McpActionBridge {
       params?: Record<string, unknown>;
     } & AIActionConfirmation,
     door?: McpActionCallDoor,
+    facts?: McpActionCallDoorFacts,
   ): Promise<unknown>;
   /**
    * [#30771] The capability refusal `runAction` would throw for an action on
@@ -700,7 +732,8 @@ export interface McpActionBridge {
    * gated action resolves to `ActionConfirmationPending` instead, as
    * {@link runAction} does, and the run stays parked. [#33712] `door` as on
    * {@link runAction}: an elicited `accept` resumes the run, any other
-   * answer refuses it and the run stays parked.
+   * answer refuses it and the run stays parked. [#34325] `facts` as on
+   * {@link runAction}.
    *
    * OPTIONAL, like {@link McpDataBridge.aggregate}. A host that cannot resume
    * runs omits it, and `resume_run` is then not registered.
@@ -709,6 +742,7 @@ export interface McpActionBridge {
     runId: string,
     input: { values?: Record<string, unknown> } & AIActionConfirmation,
     door?: McpActionCallDoor,
+    facts?: McpActionCallDoorFacts,
   ): Promise<unknown>;
 }
 
@@ -1447,6 +1481,7 @@ type DataDoorTool =
   | 'query_records'
   | 'aggregate_records'
   | 'get_record'
+  | 'get_record_context'
   | 'create_record'
   | 'update_record'
   | 'delete_record';
@@ -1815,7 +1850,7 @@ async function notRecordedMembersOf(
 async function recordReadErrorResult(
   bridge: McpDataBridge,
   err: unknown,
-  tool: 'query_records' | 'aggregate_records' | 'get_record',
+  tool: 'query_records' | 'aggregate_records' | 'get_record' | 'get_record_context',
   objectName: string,
   sentFields: readonly string[],
 ) {
@@ -3491,6 +3526,23 @@ export function knowledgeToolDefinition(
 }
 
 /**
+ * [ADR-0160 D4] The `get_record_context` definition this bridge registers, or
+ * `undefined`: a bridge missing either record-context member, or one whose
+ * service defines no such tool, registers nothing. The grant's gate is the
+ * read family's (`data:read`), applied where the tool registers.
+ */
+export function recordContextToolDefinition(
+  bridge: Partial<McpDataBridge> | undefined,
+): Pick<AIToolDefinition, 'name' | 'description'> | undefined {
+  if (!bridge) return undefined;
+  if (typeof bridge.getRecordContext !== 'function' || typeof bridge.recordContextToolDefinitions !== 'function') {
+    return undefined;
+  }
+  const definition = bridge.recordContextToolDefinitions().find((d) => d.name === GET_RECORD_CONTEXT_TOOL_NAME);
+  return definition?.description ? definition : undefined;
+}
+
+/**
  * [ADR-0149 D2] Register `search_knowledge` over the bridge's knowledge
  * members: the app's knowledge sources, searched by meaning.
  *
@@ -4544,6 +4596,34 @@ export function registerObjectTools(
         }
       },
     );
+    // [ADR-0160 D4] `get_record_context`, beside `get_record`, where the
+    // bridge carries the record-context members and defines the tool.
+    const contextDefinition = recordContextToolDefinition(bridge);
+    if (contextDefinition) {
+      const readContext = bridge.getRecordContext!.bind(bridge);
+      server.registerTool(
+        note(GET_RECORD_CONTEXT_TOOL_NAME),
+        {
+          description: contextDefinition.description,
+          inputSchema: GetRecordContextInputSchema,
+          annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
+        },
+        async (args: { objectName: string; recordId: string; context?: string; anchor?: string }) => {
+          // The root's read guard first, as `get_record` asks it: a caller it
+          // refuses gets `get_record`'s answer, whether or not a pack exists.
+          const bad = await readGuard(args.objectName);
+          if (bad) return errorResult(bad);
+          try {
+            return textResult(await readContext(args, { readGuard }));
+          } catch (err) {
+            // The record tools' renderer: a root the caller is not served is
+            // answered as `get_record` answers it, and every coded refusal of
+            // the executor keeps its code, sentence and status.
+            return recordReadErrorResult(bridge, err, GET_RECORD_CONTEXT_TOOL_NAME, args.objectName, []);
+          }
+        },
+      );
+    }
   } // end canRead (data:read)
 
   if (canWrite) {
@@ -4904,6 +4984,10 @@ export function registerActionTools(
         'you are answered status "pending_confirmation" with a pendingId: do not retry, tell the user to approve ' +
         'it. A refusal ACTION_CONFIRMATION_REQUIRED (declined, cancelled, timed out, or no confirmation service) ' +
         'means nothing ran; do not retry unless the user asks. ' +
+        // [#35778] The no-service reason's next step, door-neutral: true
+        // whether or not the client could have confirmed in place.
+        'On details.reason "no_confirmation_service" a person performs it in the app: do not make the same change ' +
+        'with another tool. ' +
         // [ADR-0151 D3 rule 3] An AI service account is refused, never handed off.
         'Under an AI service account\'s own key the call is refused whatever it sends: hand the action to a ' +
         'person, or its author declares ai.requiresConfirmation: false when it is safe unattended. ' +
@@ -5020,12 +5104,17 @@ export function registerActionTools(
         };
         // [#33712] Step 1 of the amended confirmation contract: a client that
         // advertised `elicitation` on a server that read its `initialize` (the
-        // stdio door) is asked in place. Otherwise the bridge is called
-        // exactly as before and hands a gated call off.
-        const elicitConfirmation = actionConfirmationElicitorFor(server, extra);
-        const result = elicitConfirmation
-          ? await bridge.runAction(actionName, request, { elicitConfirmation })
-          : await bridge.runAction(actionName, request);
+        // stdio door) is asked in place. Otherwise the bridge hands a gated
+        // call off. [#34325] On that door a client without the capability is
+        // named to the bridge (`facts.elicitsCapableClients`), so a no-service
+        // refusal names the client route; the per-request HTTP server calls
+        // the bridge exactly as before.
+        const { door, facts } = actionCallDoorFor(server, extra);
+        const result = door
+          ? await bridge.runAction(actionName, request, door)
+          : facts
+            ? await bridge.runAction(actionName, request, undefined, facts)
+            : await bridge.runAction(actionName, request);
         return textResult(result);
       } catch (err) {
         return landedWriteResultOrError(
@@ -5111,10 +5200,13 @@ export function registerActionTools(
           // at the closed input, as on `run_action`.
           const request = { values };
           // [#33712] As `run_action`: asked in place where the client can be.
-          const elicitConfirmation = actionConfirmationElicitorFor(server, extra);
-          const result = elicitConfirmation
-            ? await resumeRun(runId, request, { elicitConfirmation })
-            : await resumeRun(runId, request);
+          // [#34325] And the same door facts for a no-service refusal.
+          const { door, facts } = actionCallDoorFor(server, extra);
+          const result = door
+            ? await resumeRun(runId, request, door)
+            : facts
+              ? await resumeRun(runId, request, undefined, facts)
+              : await resumeRun(runId, request);
           return textResult(result);
         } catch (err) {
           return errorResultFromThrown(err, `resume_run ${runId}`);

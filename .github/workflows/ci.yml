@@ -128,14 +128,18 @@ concurrency:
 # carries it rather than first on `main`'s push run after it, and the red
 # ejects that entry: the context is in the required set again (below).
 # `main`'s 4-hourly `schedule` run, its `push` runs and an on-demand
-# `workflow_dispatch` carry the FULL BATTERY: all of that plus the three jobs
+# `workflow_dispatch` carry the FULL BATTERY: all of that plus the jobs
 # below that spell
 #
 #     github.event_name != 'pull_request' && github.event_name != 'merge_group'
 #
-# in their `if:` — `temporal-conformance`, `dogfood-verify` and
-# `ui-published-artifacts`. Nothing is deleted: the jobs moved off the per-PR
-# path, the last one never had one (#26717). A red in one of them is a main-red
+# in their `if:` — `dogfood-verify` and `ui-published-artifacts` — and
+# `temporal-conformance`, which since ruling record 7146156389 (#37095)
+# also runs on a `merge_group` entry whose diff hits the filter's
+# `temporal_live` paths (never on `pull_request`). It is NOT in the required
+# set, so that queue run is advisory: a red does not eject the entry, it
+# lands and shows on `main`. Nothing is deleted: the jobs moved off the per-PR
+# path, `ui-published-artifacts` never had one (#26717). A red in one of them is a main-red
 # for the owning lane, and the publish lane reads the full battery before its
 # approval (release.yml's `full-battery` job,
 # `scripts/ci/scheduled-full-run.mjs --release-gate`). ⛔ No affected-only
@@ -331,7 +335,7 @@ jobs:
       #
       # On merge_group the step RUNS (the diff is the queue base_sha against
       # the group head, see the step below), but only the three ui outputs
-      # read it. `docs`, `core` and `crosspkg` stay 'true' there through the
+      # and `temporal_live` (#37095) read it. `docs`, `core` and `crosspkg` stay 'true' there through the
       # `github.event_name != 'merge_group' &&` guard: the queue build is the
       # last validation before main, and those jobs run on every entry, as
       # they did before the step ran on this event. On any other event the
@@ -340,12 +344,19 @@ jobs:
       docs: ${{ github.event_name != 'merge_group' && steps.changes.outputs.docs || 'true' }}
       # Read by `test-plan`, `test` (ORed with `crosspkg`) and `build-core`,
       # on merge_group / push / schedule by `dogfood`, and on push / schedule
-      # by `dogfood-verify` and `temporal-conformance` — see the `core` filter
-      # below and each job's `if:`.
+      # by `dogfood-verify` and `temporal-conformance` (which on merge_group
+      # reads `temporal_live` instead, #37095) — see the `core` filter below
+      # and each job's `if:`.
       core: ${{ github.event_name != 'merge_group' && steps.changes.outputs.core || 'true' }}
       # Gates the `test` job ONLY, ORed with `core` — see the `crosspkg`
       # filter below and the `test` job's `if:` (#9829, #10015).
       crosspkg: ${{ github.event_name != 'merge_group' && steps.changes.outputs.crosspkg || 'true' }}
+      # [#37095] Read by `temporal-conformance` on merge_group ONLY: the queue
+      # build runs that job when the merged diff touches the paths in the
+      # `temporal_live` filter below (ruling record 7146156389, which revises
+      # #22998 for this one job). Every other event ignores it. Fail-open like
+      # the ui outputs: a queue build whose step failed reads '' → 'true'.
+      temporal_live: ${{ steps.changes.outputs.temporal_live || 'true' }}
       # The objectui tree under `ui/` (objectstack#25677). Three outputs, read
       # together by the five `* UI` jobs at the bottom of this file (Type Check
       # UI, Test UI, Lint UI, Build & E2E UI and Live E2E UI):
@@ -445,8 +456,10 @@ jobs:
       # THE FILTER CONTRACT's half 1 instead: the step is skipped, its outputs
       # are the empty string, `|| 'true'` fills them in, and everything runs.
       #
-      # `merge_group` joined the list for the ui outputs alone (#25867; the
-      # three core-side outputs above ignore the step on that event). Its
+      # `merge_group` joined the list for the ui outputs (#25867; the
+      # three core-side outputs above ignore the step on that event), and
+      # `temporal_live` reads it there too since ruling record 7146156389
+      # (#37095: `temporal-conformance` runs on a queue entry that hits it). Its
       # `continue-on-error` is the fail-open half there: a queue build whose
       # base cannot be fetched reads as "run every ui job", never as a red
       # `filter` job. On pull_request and push a failure stays red, as before.
@@ -770,6 +783,48 @@ jobs:
               - 'packages/lint/**'
               - 'packages/sdui-parser/**'
               - 'packages/types/**'
+            # [#37095] What makes the merge queue run `temporal-conformance`
+            # (ruling record 7146156389): the pgvector store, the driver whose
+            # whole suite that job runs against the live servers, the
+            # live-server files its filtered steps select (the two
+            # metadata-protocol globs spell that step's `live-mysql
+            # live-postgres` substrings), the service-analytics files whose
+            # live-PostgreSQL cells key on OS_TEST_POSTGRES_URL (#21564; no glob
+            # selects exactly these, so they are listed: a NEW such file must
+            # be added here by hand), and this file.
+            temporal_live:
+              - 'packages/plugins/knowledge-pgvector/**'
+              # [#37100] The adapter contract suite the pgvector store runs
+              # against the live PostgreSQL: a change to it is a change to that
+              # step's verdict.
+              - 'packages/services/service-knowledge/src/testing.ts'
+              - 'packages/drivers/driver-sql/**'
+              - 'packages/metadata-protocol/src/**/*live-mysql*'
+              - 'packages/metadata-protocol/src/**/*live-postgres*'
+              - 'packages/runtime/src/**/cascade-delete-multivalue-lookup-real-driver*'
+              - 'packages/services/service-analytics/src/__tests__/analytics-faces-one-lowering.test.ts'
+              - 'packages/services/service-analytics/src/__tests__/cube-measure-field-type-door.test.ts'
+              - 'packages/services/service-analytics/src/__tests__/cube-measure-relationship-path-type.test.ts'
+              - 'packages/services/service-analytics/src/__tests__/dataset-duration-measure.test.ts'
+              - 'packages/services/service-analytics/src/__tests__/dataset-tools.test.ts'
+              - 'packages/services/service-analytics/src/__tests__/home-amount-consolidated-measure.test.ts'
+              - 'packages/services/service-analytics/src/__tests__/json-stored-door-live-drivers.test.ts'
+              - 'packages/services/service-analytics/src/__tests__/json-stored-door-undeclared-join.test.ts'
+              - 'packages/services/service-analytics/src/__tests__/list-at-scalar-operator-both-faces.test.ts'
+              - 'packages/services/service-analytics/src/__tests__/native-sql-aggregate-policies.test.ts'
+              - 'packages/services/service-analytics/src/__tests__/native-sql-base-column-qualify.test.ts'
+              - 'packages/services/service-analytics/src/__tests__/native-sql-boolean-comparand-door.test.ts'
+              - 'packages/services/service-analytics/src/__tests__/native-sql-empty-sum-order-window.test.ts'
+              - 'packages/services/service-analytics/src/__tests__/native-sql-measure-number-presentation.test.ts'
+              - 'packages/services/service-analytics/src/__tests__/native-sql-number-comparand-door.test.ts'
+              - 'packages/services/service-analytics/src/__tests__/native-sql-offset-only-window.test.ts'
+              - 'packages/services/service-analytics/src/__tests__/objectql-echo-bucket-enumeration.test.ts'
+              - 'packages/services/service-analytics/src/__tests__/objectql-echo-date-bucket.test.ts'
+              - 'packages/services/service-analytics/src/__tests__/objectql-echo-offset-only-window.test.ts'
+              - 'packages/services/service-analytics/src/__tests__/objectql-face-order-limit.test.ts'
+              - 'packages/services/service-analytics/src/__tests__/order-key-selected.test.ts'
+              - 'packages/services/service-analytics/src/__tests__/read-scope-temporal-coercion.test.ts'
+              - '.github/workflows/ci.yml'
 
   # ── WHICH TEST CORE SHARDS START (#26084) ─────────────────────────────
   # The `test` matrix used to be the literal 1..8, so every Test Core run
@@ -2427,22 +2482,35 @@ jobs:
     name: Temporal Conformance (live PG + MySQL)
     needs: filter
     # See THE FILTER CONTRACT on the filter job's outputs (#4928). Full battery
-    # only: see THE TWO SPEEDS above `jobs:` (#22998).
-    if: ${{ !cancelled() && needs.filter.outputs.core != 'false' && github.event_name != 'pull_request' && github.event_name != 'merge_group' }}
+    # (see THE TWO SPEEDS above `jobs:`, #22998), plus the merge queue when the
+    # entry's diff hits the `temporal_live` paths ([#37095], ruling record
+    # 7146156389). Never on pull_request.
+    if: ${{ !cancelled() && needs.filter.outputs.core != 'false' && github.event_name != 'pull_request' && (github.event_name != 'merge_group' || needs.filter.outputs.temporal_live != 'false') }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
       contents: read
 
     # Both service images are pulled from mirror.gcr.io, Google's cache of
-    # Docker Hub: the same official image, tag and index digest. Pulled from
+    # Docker Hub: the same image, tag and index digest. Pulled from
     # Docker Hub directly they ride its anonymous per-IP quota, which shared
     # runner IPs exhaust, and `Initialize containers` then fails before any
     # step runs. A Docker Hub login is no fix: secrets never reach fork PRs
     # (#22541).
     services:
       postgres:
-        image: mirror.gcr.io/library/postgres:16
+        # [#37095] pgvector's image, not the plain official one: it is
+        # `postgres:16` (same major, entrypoint, `pg_isready`, `psql`) with the
+        # `vector` extension built in, so the pgvector-backed knowledge store
+        # has a real server here. An EXACT tag (pgvector 0.8.7 on PG 16), not
+        # the moving `pg16`, AND its index digest (read 2026-11-24, the same on
+        # mirror.gcr.io and Docker Hub): with `tag@digest` Docker pulls by the
+        # digest, so a re-pushed tag cannot change the server under this job;
+        # a new pgvector release reaches it only by a reviewed edit of both.
+        # Pinned by `driver-sql`'s sql-driver-37095-pgvector-extension test,
+        # which the driver-sql step below runs: an image without the extension
+        # fails its CREATE EXTENSION.
+        image: mirror.gcr.io/pgvector/pgvector:0.8.7-pg16@sha256:484e838076e04939d27d3e176e91c86eea96236126023be8d3059761122e579f
         env:
           POSTGRES_PASSWORD: postgres
         ports:
@@ -2504,11 +2572,11 @@ jobs:
             ${{ runner.os }}-turbo-build-core-${{ github.ref_name }}-
             ${{ runner.os }}-turbo-build-core-
 
-      # Turbo remote cache (#22077), on all four of this job's build steps: the
+      # Turbo remote cache (#22077), on all five of this job's build steps: the
       # four TURBO_* lines are Build Core's, verbatim, and Build Core's "Turbo
       # remote cache (#21186)" comment holds the write rule, the signing and the
       # PINS. Each of these plans is all `build` tasks with Build Core's hashes
-      # (8, 18, 14 and 31 nodes, measured). The suites between them run vitest
+      # (8, 18, 14, 31 and 20 nodes, measured). The suites between them run vitest
       # through `pnpm --filter`, not turbo, and carry no credentials.
       - name: Build driver-sql and its dependencies
         env:
@@ -2733,6 +2801,32 @@ jobs:
         run: |
           pnpm --filter @objectstack/runtime exec vitest run --project local \
             cascade-delete-multivalue-lookup-real-driver
+
+      # ── The pgvector knowledge store, on the live PostgreSQL (#37100) ──
+      #
+      # The service image above is pgvector's for this package: the
+      # `IKnowledgeAdapter` contract suite (`@objectstack/service-knowledge/testing`),
+      # the card's acceptance cases (a 3072-wide model, two organizations, no
+      # re-embedding, a refused fingerprint) and a complete reindex over a real
+      # ObjectQL + SqlDriver, each in a schema of its own. Without a URL these
+      # files are a named skip; the flag turns that into a red, as on the legs
+      # above. The positional is a SUBSTRING, not a glob (see the
+      # metadata-protocol step): it selects the three `*.live-postgres.test.ts`
+      # files; the unit file runs in Test Core.
+      - name: Build knowledge-pgvector and its dependencies
+        env:
+          TURBO_CACHE: ${{ (github.event_name == 'merge_group' || ((github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main')) && 'local:rw,remote:rw' || 'local:rw,remote:r' }}
+          TURBO_TOKEN: ${{ (github.event_name == 'merge_group' || github.ref == 'refs/heads/main') && secrets.TURBO_REMOTE_CACHE_SIGNATURE_KEY != '' && secrets.TURBO_TOKEN || '' }}
+          TURBO_TEAM: ${{ vars.TURBO_TEAM }}
+          TURBO_REMOTE_CACHE_SIGNATURE_KEY: ${{ (github.event_name == 'merge_group' || github.ref == 'refs/heads/main') && secrets.TURBO_REMOTE_CACHE_SIGNATURE_KEY || '' }}
+        run: pnpm exec turbo run build --filter=@objectstack/knowledge-pgvector... --concurrency=4
+
+      - name: Run the pgvector knowledge store against live PostgreSQL
+        env:
+          OS_TEST_POSTGRES_URL: postgres://postgres:postgres@127.0.0.1:5432/postgres
+          OS_EXPECT_LIVE_DIALECT_MATRIX: '1'
+        run: |
+          pnpm --filter @objectstack/knowledge-pgvector exec vitest run live-postgres
 
   dogfood:
     # Sharded 3-way: the suite is ~60 independent test files, each booting its

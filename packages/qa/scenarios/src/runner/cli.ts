@@ -142,7 +142,7 @@
 import { execSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, join, resolve } from 'node:path';
+import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { formatRefusal, libraryOf, loadScenarios, readCapabilityAreas, type LoadedScenario } from '../loader.js';
@@ -470,6 +470,46 @@ export function loadedCardStamp(loaded: Pick<LoadedScenario, 'fileSha256' | 'car
   return { id: loaded.card.id, sha256: loaded.fileSha256 };
 }
 
+/** The provenance file beside a verified build: `builds/F.json` → `builds/F.provenance.json` (`docs/qa/scenarios/README.md`, Verified builds). */
+export function templateProvenancePath(path: string): string {
+  return path.replace(/(\.json)?$/, '.provenance.json');
+}
+
+/**
+ * The line `run` prints when the `--template` file's provenance names another
+ * card file than the one the run grades: its `cardSha256` is the sha256 of the
+ * card file's bytes, the hash the record stamps (`CardStamp`), and it changes
+ * by PR with the card. Undefined when the two agree, when the template has no
+ * provenance file beside it, or when the provenance is another card's. A
+ * warning, never a refusal: the run still grades the card it loaded.
+ */
+export function templateProvenanceWarning(
+  path: string,
+  card: CardStamp,
+  read: (provenancePath: string) => string | undefined = (p) => {
+    try {
+      return readFileSync(p, 'utf8');
+    } catch {
+      return undefined;
+    }
+  },
+): string | undefined {
+  const provenancePath = templateProvenancePath(path);
+  const text = read(provenancePath);
+  if (text === undefined) return undefined;
+  const file = basename(provenancePath);
+  let provenance: { card?: unknown; cardSha256?: unknown };
+  try {
+    provenance = JSON.parse(text);
+  } catch {
+    return `template provenance: ${file} is not JSON, so nothing says which card the template was verified against`;
+  }
+  if (typeof provenance.card === 'string' && provenance.card !== card.id) return undefined;
+  if (typeof provenance.cardSha256 !== 'string') return `template provenance: ${file} names no cardSha256, so nothing says which ${card.id} card the template was verified against`;
+  if (provenance.cardSha256 === card.sha256) return undefined;
+  return `template provenance: ${file} names card ${card.id} sha256 ${provenance.cardSha256.slice(0, 12)}, but the card this run grades is sha256 ${card.sha256.slice(0, 12)} — refresh its cardSha256 by PR`;
+}
+
 export async function main(argv: readonly string[]): Promise<number> {
   // `summary` reads records back; it runs nothing (`summary.ts`).
   if (argv[0] === 'summary') return summaryMain(argv.slice(1));
@@ -592,11 +632,14 @@ export async function main(argv: readonly string[]): Promise<number> {
     if (loaded.card.asOf !== undefined && loaded.card.asOf !== scenario.card.asOf) {
       console.log(`dates: the card's ${loaded.card.asOf} is run as ${scenario.card.asOf}, every card date moved by the same days`);
     }
+    // The card file the run graded, as it was loaded (`CardStamp`): the record and the scorecard name its hash.
+    const card = loadedCardStamp(loaded);
+    // A verified build's provenance names the card file it was verified against; one that names another is stale.
+    const staleProvenance = args.template ? templateProvenanceWarning(args.template, card) : undefined;
+    if (staleProvenance) console.log(`warning: ${staleProvenance}`);
     publishedVersions = new Set();
     const cardRun = await runCard(scenario, driver, ops, { modes: args.modes, iterateRun: args.iterateRun, admin: ADMIN, ...(template ? { templateArtifact: template } : {}), ...(args.askRepeats !== undefined ? { askRepeats: args.askRepeats } : {}), ...(promptChoice ? { promptChoice } : {}), ...(schemaMasking === 'off' ? { schemaMasking } : {}) });
     const packages: PackageSource = workspace ? workspace.source : { source: 'published', versions: [...publishedVersions].sort() };
-    // The card file the run graded, as it was loaded (`CardStamp`): the record and the scorecard name its hash.
-    const card = loadedCardStamp(loaded);
     const record = withSuppliedTemplate(runRecord({ run: `${date}-scenario-${scenario.card.id}`, date, ...(framework ? { framework } : {}), packages, driver: info, runner: 'scenario-runner', evidenceDir: work, card, ...(schemaMasking === 'off' ? { schemaMasking: 'off' as const } : {}) }, cardRun), cardRun, supplied);
     const file = join(outDir, `${date}-scenario-${scenario.card.id}.json`);
     writeFileSync(file, JSON.stringify(record, null, 2));

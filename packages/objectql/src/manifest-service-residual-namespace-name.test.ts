@@ -69,6 +69,8 @@ const item = (type: NamespaceUniqueType, name: string, tag: string): Record<stri
       return { name, title: label, sql: 'select 1', measures: {}, dimensions: {} };
     case 'tool':
       return { name, label, description: 'A tool', parameters: {} };
+    case 'ai_context':
+      return { name, label, object: 'crm_account' };
     default:
       return { name, label };
   }

@@ -17,12 +17,17 @@
  * for it ({@link flowLedgerWalledReadOnly}), never a client copy of its sentence.
  */
 
-import { useAuth } from '@object-ui/auth';
+import { createAuthenticatedFetch, useAuth } from '@object-ui/auth';
 import type { TenancyPosture } from '@object-ui/auth';
 import { actionErrorDetail } from '@object-ui/core';
 import { postureHasOrgWall, useTenancyPosture } from '../../hooks/useTenancyPosture.js';
 import { apiBase } from '../../utils/apiBase.js';
 import { envelopeData, envelopeRefused } from './packagedFlows.js';
+
+/** The console's authenticated fetch: the stored bearer token beside the session cookie. */
+function authFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+  return createAuthenticatedFetch()(input, init);
+}
 
 const JSON_HEADERS = { Accept: 'application/json', 'Content-Type': 'application/json' } as const;
 
@@ -57,7 +62,7 @@ export async function requestFlowToggle(
   fallbacks: FlowDoorFallbacks,
 ): Promise<FlowToggleOutcome> {
   try {
-    const res = await fetch(`${apiBase()}/automation/${encodeURIComponent(name)}/toggle`, {
+    const res = await authFetch(`${apiBase()}/automation/${encodeURIComponent(name)}/toggle`, {
       method: 'POST',
       credentials: 'include',
       headers: JSON_HEADERS,

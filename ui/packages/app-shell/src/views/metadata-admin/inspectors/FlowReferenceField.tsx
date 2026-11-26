@@ -66,6 +66,12 @@ import {
   type RegistryAndDataValueSource,
 } from '../../../utils/approverValueSources.js';
 import { isStudioHiddenSystemField } from '../../studio-design/studioHiddenSystemField.js';
+import { createAuthenticatedFetch } from '@object-ui/auth';
+
+/** The console's authenticated fetch: the stored bearer token beside the session cookie. */
+function authFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+  return createAuthenticatedFetch()(input, init);
+}
 
 /** Context the reference picker needs to resolve dynamic option sources. */
 export interface FlowReferenceContext {
@@ -526,7 +532,7 @@ function useConnectorActionOptions(connectorName: string | undefined): { options
     }
     let cancelled = false;
     setState((s) => ({ ...s, loading: true }));
-    fetch('/api/v1/automation/connectors', { credentials: 'include', headers: { Accept: 'application/json' } })
+    authFetch('/api/v1/automation/connectors', { credentials: 'include', headers: { Accept: 'application/json' } })
       .then((r) => (r.ok ? r.json() : null))
       .then((payload) => {
         if (cancelled) return;
@@ -564,7 +570,7 @@ function useConnectorListOptions(enabled: boolean, locale: SupportedLocale): { o
       return;
     }
     let cancelled = false;
-    fetch('/api/v1/automation/connectors', { credentials: 'include', headers: { Accept: 'application/json' } })
+    authFetch('/api/v1/automation/connectors', { credentials: 'include', headers: { Accept: 'application/json' } })
       .then((r) => (r.ok ? r.json() : null))
       .then((payload) => {
         if (cancelled) return;

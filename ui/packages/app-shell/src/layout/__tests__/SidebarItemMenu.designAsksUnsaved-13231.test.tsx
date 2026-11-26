@@ -52,7 +52,7 @@ import { registerUnsavedEdits } from '../../chrome/unsavedEdits';
 const BASE_PATH = '/apps/crm';
 const APP = { name: 'crm', _packageId: 'com.acme.crm' };
 const LEADS = { id: 'nav_leads', type: 'object', objectName: 'crm_lead', label: 'Leads' } as NavigationItem;
-const STUDIO = '/studio/com.acme.crm/data?surface=object:crm_lead';
+const STUDIO = '/studio/com.acme.crm/metadata/object/crm_lead';
 const QUESTION = 'You have unsaved changes. Are you sure you want to leave?';
 
 function Where() {
@@ -114,7 +114,7 @@ beforeEach(() => {
   vi.stubGlobal(
     'fetch',
     vi.fn(async (url: unknown) => ({
-      ok: true,
+      headers: new Headers(), ok: true,
       status: 200,
       json: async () =>
         String(url).endsWith('/api/v1/packages')

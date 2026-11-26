@@ -109,6 +109,10 @@ import { t } from '../metadata-admin/i18n';
 import { createEmptyDataSource } from './__tests__/emptyDataSource';
 import { registerMetadataPreview } from '../metadata-admin/preview-registry';
 import { FlowPreview } from '../metadata-admin/previews/FlowPreview';
+// The source under test reaches these dynamic imports (the command palette's
+// record preview, the drafts panel's lint, the code editor): their first load
+// is paid here, at collection, never inside a case's clock (`check:test-source-alias`).
+import '@object-ui/plugin-detail';
 
 const dataSource = createEmptyDataSource();
 // The flow header's meta (its Status pill) draws only over a registered flow preview.
@@ -172,17 +176,20 @@ function Where() {
   return <span data-testid="where">{`${loc.pathname}${loc.search}`}</span>;
 }
 
-/** The Studio's package route, the pillar keyed by package as the surface mounts it. */
+/**
+ * The flow's address in a package's area, the designer keyed by package and
+ * flow as the area mounts it (objectstack#36903).
+ */
 function PackageRoute({ readOnlyIds }: { readOnlyIds: readonly string[] }) {
-  const { pkg = '' } = useParams();
-  return <AutomationsPillar key={pkg} packageId={pkg} readOnly={readOnlyIds.includes(pkg)} />;
+  const { pkg = '', name = '' } = useParams();
+  return <AutomationsPillar key={`${pkg}/${name}`} packageId={pkg} flowName={name} readOnly={readOnlyIds.includes(pkg)} />;
 }
 
 function mount(packageId: string, readOnlyIds: readonly string[] = [], lang: 'en' | 'zh' = 'en') {
   const tree = (
-    <MemoryRouter initialEntries={[`/studio/${packageId}/automations`]}>
+    <MemoryRouter initialEntries={[`/studio/${packageId}/metadata/flow/approval`]}>
       <Routes>
-        <Route path="/studio/:pkg/automations" element={<><PackageRoute readOnlyIds={readOnlyIds} /><Where /></>} />
+        <Route path="/studio/:pkg/metadata/flow/:name" element={<><PackageRoute readOnlyIds={readOnlyIds} /><Where /></>} />
       </Routes>
     </MemoryRouter>
   );
@@ -197,7 +204,7 @@ function mount(packageId: string, readOnlyIds: readonly string[] = [], lang: 'en
 /** Open the ⋯ menu on the open flow. */
 async function openMenu(): Promise<void> {
   expect(await screen.findByTestId('auto-canvas-caption', undefined, { timeout: 8000 })).toHaveTextContent('Approval');
-  fireEvent.pointerDown(await screen.findByTestId('auto-item-more'), { button: 0, ctrlKey: false });
+  fireEvent.pointerDown(await screen.findByTestId('studio-detail-more'), { button: 0, ctrlKey: false });
 }
 
 /** Pick New similar: its dialog. */
@@ -231,7 +238,7 @@ describe('Automations — New similar on a flow (#28567)', () => {
     expect(cloneBody()).toEqual({ name: 'approval_copy', label: 'Approval (copy)' });
 
     await waitFor(() =>
-      expect(screen.getByTestId('where')).toHaveTextContent(`/studio/${PAIR}/automations?surface=flow%3Aapproval_copy`),
+      expect(screen.getByTestId('where')).toHaveTextContent(`/studio/${PAIR}/metadata/flow/approval_copy`),
     );
     expect(await screen.findByTestId('auto-canvas-caption', undefined, { timeout: 8000 })).toHaveTextContent('Approval (copy)');
     const strip = await screen.findByTestId('auto-new-similar-strip');
@@ -243,7 +250,7 @@ describe('Automations — New similar on a flow (#28567)', () => {
     expect(screen.queryByTestId('auto-new-similar-dialog')).toBeNull();
   });
 
-  it('on a writable package sends that package as the target, and opens the copy here after a re-read', async () => {
+  it('on a writable package sends that package as the target, and opens the copy on its own address', async () => {
     server.clone = landedIn(WRITABLE);
     mount(WRITABLE);
     await openMenu();
@@ -258,14 +265,12 @@ describe('Automations — New similar on a flow (#28567)', () => {
       body: { success: true, data: { flow: { ...FLOW, name: 'approval_escalation', label: 'Escalation approval' }, packageId: WRITABLE, notice: NOTICE } },
     };
     server.flows[WRITABLE] = [...server.flows[WRITABLE], { name: 'approval_escalation', label: 'Escalation approval' }];
-    const listReads = mockClient.list.mock.calls.length;
     fireEvent.click(within(dialog).getByTestId('auto-new-similar-submit'));
 
     await waitFor(() => expect(cloneCalls()).toHaveLength(1));
     expect(cloneBody()).toEqual({ name: 'approval_escalation', label: 'Escalation approval', package: WRITABLE });
-    await waitFor(() => expect(mockClient.list.mock.calls.length).toBeGreaterThan(listReads));
+    await waitFor(() => expect(screen.getByTestId('where')).toHaveTextContent(`/studio/${WRITABLE}/metadata/flow/approval_escalation`));
     await waitFor(() => expect(mockClient.layered.mock.calls.map(([, n]) => n)).toContain('approval_escalation'));
-    expect(screen.getByTestId('where')).toHaveTextContent(`/studio/${WRITABLE}/automations`);
     expect(await screen.findByTestId('auto-new-similar-strip')).toHaveTextContent(
       `Saved the copy approval_escalation in package ${WRITABLE}.`,
     );
@@ -281,7 +286,7 @@ describe('Automations — New similar on a flow (#28567)', () => {
     expect(within(dialog).getByTestId('auto-new-similar-refusal').textContent).toBe(TAKEN);
     expect(screen.getByTestId('auto-new-similar-dialog')).toBeInTheDocument();
     expect(within(dialog).getByTestId('auto-new-similar-name')).toHaveValue('approval_copy');
-    expect(screen.getByTestId('where')).toHaveTextContent(`/studio/${BASE}/automations`);
+    expect(screen.getByTestId('where')).toHaveTextContent(`/studio/${BASE}/metadata/flow/approval`);
     expect(screen.queryByTestId('auto-new-similar-strip')).toBeNull();
   });
 
@@ -302,7 +307,7 @@ describe('Automations — New similar on a flow (#28567)', () => {
     const strip = await screen.findByTestId('auto-new-similar-strip');
     expect(strip).toHaveTextContent('does not name the package it landed in, so nothing was opened');
     expect(screen.getByTestId('auto-new-similar-notice').textContent).toBe(NOTICE);
-    expect(screen.getByTestId('where')).toHaveTextContent(`/studio/${BASE}/automations`);
+    expect(screen.getByTestId('where')).toHaveTextContent(`/studio/${BASE}/metadata/flow/approval`);
     expect(screen.getByTestId('auto-canvas-caption')).toHaveTextContent('Approval');
   });
 
@@ -323,12 +328,12 @@ describe('Automations — New similar on a flow (#28567)', () => {
     mockClient.list.mockImplementation(async () => [{ name: 'approval', label: 'Approval' }]);
     try {
       render(
-        <MemoryRouter initialEntries={['/studio/~org/automations']}>
-          <AutomationsPillar packageId={null} />
+        <MemoryRouter initialEntries={['/studio/~org/metadata/flow/approval?source=runtime']}>
+          <AutomationsPillar packageId={null} flowName="approval" />
         </MemoryRouter>,
       );
       expect(await screen.findByTestId('auto-canvas-caption', undefined, { timeout: 8000 })).toHaveTextContent('Approval');
-      expect(screen.queryByTestId('auto-item-more')).toBeNull();
+      expect(screen.queryByTestId('studio-detail-more')).toBeNull();
     } finally {
       mockClient.list.mockImplementation(async (_type: string, opts?: { packageId?: string }) =>
         opts?.packageId ? server.flows[opts.packageId] ?? [] : [],
@@ -357,7 +362,7 @@ describe('Automations — New similar: the copy notice in the reader\'s language
     fireEvent.click(within(dialog).getByTestId('auto-new-similar-submit'));
     // The copy opens in the pair, so the code rides the navigation to it.
     await waitFor(() =>
-      expect(screen.getByTestId('where')).toHaveTextContent(`/studio/${PAIR}/automations?surface=flow%3Aapproval_copy`),
+      expect(screen.getByTestId('where')).toHaveTextContent(`/studio/${PAIR}/metadata/flow/approval_copy`),
     );
     await screen.findByTestId('auto-new-similar-strip', undefined, { timeout: 8000 });
     return screen.getByTestId('auto-new-similar-notice');
@@ -380,19 +385,16 @@ describe('Automations — New similar: the copy notice in the reader\'s language
 });
 
 /**
- * A copy that opens in this pillar reads its runtime state at once: the door
- * stores the copy live and switched off, and the engine's `_status` already
- * holds its row, so the pillar reads `_status` once more after the copy lands.
- * CONTROL: a flow the engine holds no row for still reads as an unpublished
- * draft after that same read. The other landing remounts the pillar keyed by
- * package (the first `#28567` pin), and that mount reads `_status` itself.
+ * objectstack#28567 — the copy reads its runtime state without a reload: the
+ * door stores the copy live and switched off, and the engine's `_status`
+ * already holds its row. objectstack#36903 — the copy opens on its own
+ * address, and the designer that mounts there reads `_status` itself, once.
  */
 describe('Automations — New similar: the copy reads its runtime state without a reload', () => {
   /** The header Status pill's value. */
   const headerStatus = () => screen.getByText('Status:').nextElementSibling?.textContent ?? '';
 
-  it('the copy opened here reads "Switched off" from one more `_status` read; a flow with no row still reads unpublished', async () => {
-    server.flows[WRITABLE] = [...server.flows[WRITABLE], { name: 'intake', label: 'Intake' }];
+  it('the copy opened on its address reads "Switched off" from one `_status` read of its own', async () => {
     server.status = [{ name: 'approval', enabled: true, bound: true }];
     mount(WRITABLE);
     await openMenu();
@@ -410,14 +412,8 @@ describe('Automations — New similar: the copy reads its runtime state without 
     expect(screen.getByTestId('auto-canvas-caption')).toHaveTextContent('Approval (copy)');
     await waitFor(() => expect(headerStatus()).toBe(t('engine.studio.auto.off', 'en')), { timeout: 8000 });
     expect(headerStatus()).not.toBe(t('engine.studio.unpublishedDraft', 'en'));
-    // One read per copy, not one per render.
+    // One read for the copy's designer, not one per render.
     await new Promise((r) => setTimeout(r, 100));
-    expect(statusReads()).toBe(readsBefore + 1);
-
-    // CONTROL: a flow the engine has no row for reads as before.
-    fireEvent.click(await screen.findByRole('button', { name: /Intake/ }));
-    await waitFor(() => expect(screen.getByTestId('auto-canvas-caption')).toHaveTextContent('Intake'), { timeout: 8000 });
-    await waitFor(() => expect(headerStatus()).toBe(t('engine.studio.unpublishedDraft', 'en')), { timeout: 8000 });
     expect(statusReads()).toBe(readsBefore + 1);
   });
 });

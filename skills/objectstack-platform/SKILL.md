@@ -36,16 +36,16 @@ are `manifest`, `packages`, `objects`, `objectExtensions`, `picklists`,
 `datasets`, `actions`, `flows`, `jobs`,
 `emailTemplates`, `docs`, `books`, `positions`, `permissions`,
 `capabilities`, `sharingRules`, `queues`, `assignmentRules`, `apis`, `webhooks`, `api`, `server`,
-`agents`, `tools`, `skills`, `hooks`, `functions`, `mappings`,
+`agents`, `tools`, `skills`, `aiContexts`, `hooks`, `functions`, `mappings`,
 `analyticsCubes`, `connectors`, `data` (seed), `datasources`,
 `datasourceMapping`, `translations`, `i18n`, `plugins`, `devPlugins`,
 `devHint`, `devLogins`, `demoStaff`, `requires`, `tiers`, `onEnable`, `appName`, `email`, `sms`, `push`.
 
-There is deliberately **no** top-level `workflows` or `approvals` collection:
+There is **no** top-level `workflows` or `approvals` collection:
 an approval is a flow with Approval nodes, and record
 state machines are a `state_machine` validation rule on each object.
-A phantom key like `roles:` or `policies:` is **not** a silent
-no-op — the top level refuses it and the stack fails to load.
+A phantom key (`roles:`, `policies:`) is no silent no-op:
+the top level refuses it and the stack fails to load.
 
 `queues` declares ownership queues (`defineQueue`, `@objectstack/spec/security`;
 objectstack-data): named sets of people a new record of an `ownership: 'user'`
@@ -301,7 +301,7 @@ token through the `CAPABILITY_PROVIDERS` registry in
 | Token | Provider package |
 |:--|:--|
 | `automation` | `@objectstack/service-automation` — flows, and any declarative `connectors:` entry |
-| `analytics`° `cache`° `storage`° `queue`° `job`° `messaging`° `realtime` `settings`° `sms`° `push` | `@objectstack/service-` + the token ([the `push` block](./references/operations.md#mobile-push)) |
+| `analytics`° `cache`° `storage`° `queue`° `job`° `messaging`° `realtime` `settings`° `sms`° `push` `record-context` | `@objectstack/service-` + the token ([the `push` block](./references/operations.md#mobile-push)) |
 | `mailbox` | `@objectstack/service-mailbox` — inbound mail |
 | `marketplace` `package-registry`° | `@objectstack/service-package` |
 | `audit` `email`° `sharing`° `approvals` `webhooks` | `@objectstack/plugin-` + the token |

@@ -272,11 +272,6 @@ export interface NavigationOverlayProps {
    */
   toggles?: React.ReactNode;
   /**
-   * The record's comment switch (objectstack#36075), drawn in the bar before
-   * the record's button group (`RecordTopBar`'s `comments`).
-   */
-  comments?: React.ReactNode;
-  /**
    * The record header's one-row bar (objectstack#35593): handed the bar's
    * element the record's button group is drawn into, after the step pair.
    */
@@ -523,7 +518,6 @@ export const NavigationOverlay: React.FC<NavigationOverlayProps> = ({
   trail,
   stepper,
   toggles,
-  comments,
   actionSlotRef,
   stepperHidden = false,
   recordRow,
@@ -634,7 +628,9 @@ export const NavigationOverlay: React.FC<NavigationOverlayProps> = ({
      right end the counter and ↓ ↑, the host's panel switches, then ⤢ and ✕.
      With a `recordRow` it is two rows (objectstack#35853): ✕, `←`, the
      breadcrumb, ↑ ↓ and the counter over the record, ⤢ at the right of the
-     first (✕ moved to the left by objectstack#36557). */
+     first (✕ moved to the left by objectstack#36557). The bar carries no
+     comments switch: the record's comments live on its full page, whose own
+     bar draws the switch (objectstack#36410). */
   const bar = (
     <RecordTopBar
       leadingTestId="record-drawer-leading"
@@ -652,7 +648,6 @@ export const NavigationOverlay: React.FC<NavigationOverlayProps> = ({
       actionSlotRef={actionSlotRef}
       record={recordRow}
       toggles={toggles}
-      comments={comments}
       frame={
         onExpand ? (
           <RecordTopBarButton label={resolvedExpandLabel} onClick={() => onExpand()} data-testid="record-pane-open-page">

@@ -36,6 +36,7 @@ import {
   useAdapter,
   useAction,
   useActionTextLocalizer,
+  useDrawsAction,
   useDataInvalidation,
   useElementDataSource,
   useFilterScope,
@@ -424,6 +425,11 @@ function ElementButtonRenderer({ schema }: { schema: any }) {
       setRunning(false);
     }
   }, [declaredAction, execute, localizeActionTexts, running]);
+
+  // [ADR-0160 D7] A button whose inline action is `ask_ai` is absent — not
+  // inert — where the provider has no in-app assistant to hand the record to.
+  const drawsAction = useDrawsAction();
+  if (declaredAction && !drawsAction(declaredAction)) return null;
 
   return (
     <Button

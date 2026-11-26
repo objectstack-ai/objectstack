@@ -50,6 +50,7 @@ import {
     CONTAINER_ISSUE_CODES,
     NESTED_EXPANSION_DEPTH_LIMIT,
     selectUnionBranches,
+    ZOD_UNION_DEFAULT_MESSAGE,
 } from '../shared/union-branch-policy';
 
 /**
@@ -136,11 +137,11 @@ function valueAtPath(input: unknown, path: unknown): unknown {
  * drops an explained head only when its message is exactly this, so a head
  * carrying the schema's own sentence is never mistaken for filler.
  *
- * A literal, so the rule is only as good as its match with zod's current
- * wording: `zod-issues-to-fields.test.ts` pins this value against a real failed
- * union parse, so a zod upgrade that rewords the default fails that test instead
- * of silently turning the drop off. Exported for that pin only; the `/api`
- * barrel re-exports `zodIssuesToFields` alone.
+ * [#35500] Declared in `../shared/union-branch-policy.ts`, because the branch
+ * selection reads it too (a nested bare union of kinds is a kind mismatch);
+ * re-exported here, unchanged, for the pin in `zod-issues-to-fields.test.ts`,
+ * which holds it against a real failed union parse. The `/api` barrel
+ * re-exports `zodIssuesToFields` alone.
  *
  * The same literal and the same predicate as `@objectstack/metadata-protocol`'s
  * `collectMetadataIssues` (#35400). They are two declarations rather than one
@@ -149,7 +150,7 @@ function valueAtPath(input: unknown, path: unknown): unknown {
  * made; `union-branch-policy.cross-package-parity.test.ts` holds the two walks
  * to the same drop instead.
  */
-export const ZOD_UNION_DEFAULT_MESSAGE = 'Invalid input';
+export { ZOD_UNION_DEFAULT_MESSAGE };
 
 /**
  * One issue → its `fields[]` entries, appended to `out`.
@@ -167,7 +168,9 @@ export const ZOD_UNION_DEFAULT_MESSAGE = 'Invalid input';
  * nested one go alike. The head is KEPT, ahead of what it explains, in every
  * other case:
  *
- * - nothing below explains it — every branch a bare kind mismatch, zod's
+ * - nothing below explains it — every branch a bare kind mismatch (since
+ *   #35500 that includes a member that is itself a bare union of kinds, so a
+ *   wrong-typed `where` answers ONE entry, not one per member), zod's
  *   "matched multiple" `errors: []`, or the depth bound reached — so it is the
  *   whole answer, and the only entry naming the slot the client sent;
  * - its message is the schema's own sentence (a union declared with an `error`).

@@ -131,6 +131,9 @@ import {
   redactStoredMetadataRow,
   STORED_METADATA_BODY_COLUMN,
   STORED_METADATA_TYPE_COLUMN,
+  // [ADR-0160 D4] The read path's own decorations, removed from the
+  // context-pack listing before the record-context executor parses it.
+  stripReadDecorations,
 } from '@objectstack/spec/kernel';
 import type { IDataEngine, IMetadataService } from '@objectstack/spec/contracts';
 import { resolveObjectSortability } from '@objectstack/spec/api';
@@ -279,6 +282,14 @@ export interface StdioDataBridgeDeps {
    */
   knowledgeTools?: StdioKnowledgeToolsService;
   /**
+   * [ADR-0160 D4] The `record-context` service when it serves the
+   * `get_record_context` executor ({@link StdioRecordContextToolsService}),
+   * resolved by the host once its services are registered. Present ⇒ the
+   * bridge carries `getRecordContext` / `recordContextToolDefinitions`;
+   * absent ⇒ neither, and the tool does not register.
+   */
+  recordContextTools?: StdioRecordContextToolsService;
+  /**
    * [ADR-0149 D2 · #34872] The `i18n` service the saved datasets and the
    * object tools' labels and descriptions are localized with, resolved at each
    * use. `undefined`, or a resolver that throws, means none: they are then
@@ -317,6 +328,20 @@ export interface StdioKnowledgeToolsService {
   knowledgeTools(): {
     readonly definitions: ReadonlyArray<{ name: string; description: string; parameters: Record<string, unknown> }>;
     searchKnowledge(input: unknown, context?: unknown): Promise<unknown>;
+  };
+}
+
+/**
+ * [ADR-0160 D4] The face of the `record-context` service `get_record_context`
+ * calls: `recordContextTools()` hands the one executor, which reads through
+ * the door the bridge builds for the principal. Named structurally so this
+ * package stays free of the service's code. The executor refuses by throwing
+ * an ADR-0112 coded error.
+ */
+export interface StdioRecordContextToolsService {
+  recordContextTools(): {
+    readonly definitions: ReadonlyArray<{ name: string; description: string }>;
+    getRecordContext(input: unknown, door: unknown): Promise<unknown>;
   };
 }
 
@@ -1393,6 +1418,23 @@ function droppedFieldsMember(dropped: DroppedFieldsEvent[]): { droppedFields?: D
  * bridge produces — the graceful-degradation contract `McpDataBridge` declares,
  * honoured rather than re-decided.
  */
+/**
+ * [ADR-0150 D2/D6, addendum 2026-11-25] The manifest namespace of the package
+ * `packageId` names, from the engine's registry (`getPackage`), or `undefined`:
+ * an engine with no registry, or an id with no package record. A pack whose
+ * package cannot be placed is then spelt by its bare name.
+ */
+function installedPackageNamespaceOf(engine: unknown, packageId: string): string | undefined {
+  let manifest: { namespace?: unknown } | undefined;
+  try {
+    const registry = (engine as { registry?: { getPackage?(id: string): unknown } } | undefined)?.registry;
+    manifest = (registry?.getPackage?.(packageId) as { manifest?: { namespace?: unknown } } | undefined)?.manifest;
+  } catch {
+    return undefined;
+  }
+  return typeof manifest?.namespace === 'string' && manifest.namespace !== '' ? manifest.namespace : undefined;
+}
+
 export function createStdioDataBridge(deps: StdioDataBridgeDeps): McpDataBridge {
   const { engine, metadataService, protocol, resolvePrincipal, keyedDigest, security, schemaReadDelegates } = deps;
   // [#25138] One definition source for the gate, the relation-target gate and
@@ -1835,6 +1877,49 @@ export function createStdioDataBridge(deps: StdioDataBridgeDeps): McpDataBridge 
     const service = deps.knowledgeTools;
     bridge.searchKnowledge = async (input) => service.knowledgeTools().searchKnowledge(input, await resolvePrincipal());
     bridge.knowledgeToolDefinitions = () => service.knowledgeTools().definitions;
+  }
+
+  // [ADR-0160 D3/D4] The record-context members, only where the host handed
+  // the record-context service's executor over. The door is this bridge's own
+  // read members, as the principal: `get` and `query` (each behind
+  // `enforceApiExposure`, as the record tools read), the object as the
+  // principal is served it in this transport's locale, the declaration whole
+  // (metadata only, to tell a hidden entry from an author defect), and the
+  // published packs. The tool layer hands its read guard over. No delegation
+  // probe: an API key is not delegated, so no narrowing is stated.
+  if (deps.recordContextTools) {
+    const service = deps.recordContextTools;
+    const self = bridge;
+    bridge.getRecordContext = async (input, opts) => service.recordContextTools().getRecordContext(input, {
+      readGuard: opts.readGuard,
+      assertApiExposed: async (object: string, action: 'get' | 'query') =>
+        enforceApiExposure(reads, object, action === 'get' ? GATED_ACTIONS.get : GATED_ACTIONS.query, await resolvePrincipal()),
+      servedObjectDefinitionOf: async (name: string) =>
+        ((await localizedView.getObject(name)) as Record<string, unknown> | undefined) ?? null,
+      publishedObjectDefinitionOf: async (name: string) =>
+        ((await readObjectDeclaration(reads, name)) as Record<string, unknown> | undefined) ?? null,
+      // The authored packs, not the serving envelope: the protocol's served
+      // listing stamps every item with `_diagnostics`, which the executor's
+      // closed `AiContextSchema` refuses, dropping every pack. The read
+      // decorations go (`stripReadDecorations`); the protection envelope the
+      // schema declares stays.
+      listContextPacks: async () => {
+        const protocolService = protocol?.();
+        if (protocolService && typeof protocolService.getMetaItems === 'function') {
+          return metaItemsArray(await protocolService.getMetaItems({ type: 'ai_context' })).map(stripReadDecorations);
+        }
+        return ((await metadataService.list('ai_context')) ?? []).map(stripReadDecorations);
+      },
+      // [ADR-0150 D6, addendum 2026-11-25] A package's pack is spelt by its
+      // face `NS-NAME`, as a package-held skill's prompt name is: the engine
+      // here is the `objectql` service, whose registry places the package.
+      packageNamespace: (packageId: string) => installedPackageNamespaceOf(engine, packageId),
+      get: (object: string, id: string) => self.get(object, id),
+      query: (object: string, o: Parameters<McpDataBridge['query']>[1]) => self.query(object, o),
+      fieldVisibilityOf: (object: string) => self.fieldVisibilityOf!(object),
+      userTextLocales: () => self.userTextLocales!(),
+    });
+    bridge.recordContextToolDefinitions = () => service.recordContextTools().definitions;
   }
 
   if (typeof engine.aggregate === 'function') {

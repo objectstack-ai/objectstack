@@ -18,7 +18,8 @@
  */
 
 import { STUDIO_ALL_PACKAGES_SEGMENT, areaLocationRedirect } from './metadataArea.js';
-import { studioHomePath, studioLandingPath, studioMetadataAreaAddress, studioPillarPath } from './studioAddress.js';
+import { studioHomePath, studioMetadataAreaAddress, studioPillarPath } from './studioAddress.js';
+import { SETUP_PACKAGES_PATH } from '../metadata-admin/packageSource.js';
 
 /** The one metadata type whose Setup pages stay in Setup (ADR-0146 D1). */
 export const SETUP_KEPT_METADATA_TYPE = 'datasource';
@@ -81,13 +82,15 @@ export function packagedAutomationStudioPath(search: string, hash = ''): string 
  *
  * With `?package=<id>` (not `all`), that app's Data pillar, whose objects'
  * Actions views carry the switch, the query kept. With no package named (the
- * page listed every package's actions), the Studio landing, which lists each
- * installed app with its switched-off count.
+ * page listed every package's actions), Setup → Packages, the package list,
+ * which opens each app (objectstack#36908: the Studio home that listed every
+ * installed app with its switched-off count was removed). That page reads its
+ * own query, so the retired page's is not carried.
  */
 export function packagedActionsStudioPath(search: string, hash = ''): string {
   const params = new URLSearchParams(search);
   const query = params.toString();
   const pkg = params.get('package');
   if (pkg && pkg !== 'all') return studioHomePath(pkg, { query, hash });
-  return studioLandingPath({ query, hash });
+  return SETUP_PACKAGES_PATH;
 }

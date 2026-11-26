@@ -27,11 +27,12 @@
 // Warmed at module top so the first load of the console's lazily loaded
 // authoring code is paid during collection, not inside a test's clock.
 import '@objectstack/lint';
+import '@object-ui/plugin-detail';
 import '@testing-library/jest-dom/vitest';
 import * as React from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import { MemoryRouter, Route, Routes } from 'react-router-dom';
+import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
 
 const PKG = 'com.acme.app';
 const OTHER_PKG = 'com.other.app';
@@ -123,9 +124,15 @@ vi.mock('../metadata-admin/AccessExplainPanel', () => ({ AccessExplainPanel: () 
 vi.mock('./StudioAiCopilot', () => ({ StudioChatDock: () => null }));
 vi.mock('../../preview/DraftChangesPanel', () => ({ DraftChangesPanel: () => null }));
 
-import { AutomationsPillar, DataPillar, StudioDesignSurface } from './StudioDesignSurface';
+import { StudioDesignSurface } from './StudioDesignSurface';
+import { ListFlowCreate } from './__tests__/listFlowCreateHost';
+import { MetadataListCreateDialog } from '../metadata-admin/MetadataListCreateDialog';
 import { createEmptyDataSource } from './__tests__/emptyDataSource';
 import { t, tFormat } from '../metadata-admin/i18n';
+// The source under test reaches these dynamic imports (the command palette's
+// record preview, the drafts panel's lint, the code editor): their first load
+// is paid here, at collection, never inside a case's clock (`check:test-source-alias`).
+import '@object-ui/plugin-detail';
 
 const dataSource = createEmptyDataSource();
 
@@ -202,22 +209,32 @@ function submitCreate(dialog: HTMLElement, label: string) {
   );
 }
 
+/**
+ * objectstack#36903 — a flow is created from the list's 「新建」
+ * (`MetadataListCreateDialog`): the Automations pillar's New went with its
+ * rail. A taken identifier is refused there, naming the flow that holds it;
+ * one this package holds is offered to open, at the flow's own address.
+ */
 describe('objectstack#26917 — Automations: New automation over a taken identifier', () => {
+  function Where() {
+    const { pathname } = useLocation();
+    return <output data-testid="where">{pathname}</output>;
+  }
   async function openNewAutomation() {
     render(
-      <MemoryRouter initialEntries={[`/studio/${PKG}/automations`]}>
-        <AutomationsPillar packageId={PKG} />
+      <MemoryRouter initialEntries={[`/studio/${PKG}/metadata/flow`]}>
+        <Where />
+        <ListFlowCreate packageId={PKG} />
       </MemoryRouter>,
     );
-    await screen.findByTestId('auto-rail-row-alpha_intake', undefined, { timeout: 8000 });
-    fireEvent.click(screen.getByTitle(en('engine.studio.auto.newTitle')));
+    fireEvent.click(await screen.findByTitle(en('engine.studio.auto.newTitle'), undefined, { timeout: 8000 }));
     const dialog = await screen.findByRole('dialog');
     // The manual preset: the record ones hold Create until an object is named.
     fireEvent.click(within(dialog).getByTestId('create-flow-preset-manual'));
     return dialog;
   }
 
-  it("a published flow on this package's rail: refused, nothing written, and Open opens it", async () => {
+  it('a published flow in this package: refused, nothing written, and Open opens it at its address', async () => {
     publish('flow', PKG, FLOW_ALPHA);
     publish('flow', PKG, FLOW_ESCALATE);
     const before = publishedBody('flow', 'escalate');
@@ -232,10 +249,9 @@ describe('objectstack#26917 — Automations: New automation over a taken identif
     expect(door.drafts.size).toBe(0);
     expect(door.published.get('flow/escalate')!.body).toEqual(before);
 
-    expect(getDraft.mock.calls.some(([, name]) => name === 'escalate')).toBe(false);
     fireEvent.click(within(taken).getByTestId('flow-create-open-existing'));
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
-    await waitFor(() => expect(getDraft.mock.calls.some(([, name]) => name === 'escalate')).toBe(true));
+    expect(screen.getByTestId('where')).toHaveTextContent(`/studio/${PKG}/metadata/flow/escalate`);
     expect(save).not.toHaveBeenCalled();
   });
 
@@ -274,14 +290,16 @@ describe('objectstack#26917 — Automations: New automation over a taken identif
   });
 });
 
+// objectstack#36904 — New object is the object list's create dialog; the
+// designer has no object list, so an identifier this package holds is refused
+// the same way as one another package holds.
 describe('objectstack#26917 — Data: New object over a taken identifier', () => {
   async function openNewObject() {
     render(
-      <MemoryRouter initialEntries={[`/studio/${PKG}/data`]}>
-        <DataPillar packageId={PKG} />
+      <MemoryRouter>
+        <MetadataListCreateDialog type="object" open onOpenChange={() => {}} packageId={PKG} inPair={false} locale="en-US" onCreated={() => {}} />
       </MemoryRouter>,
     );
-    fireEvent.click(await screen.findByRole('button', { name: en('engine.studio.data.newObject') }, { timeout: 8000 }));
     const dialog = await screen.findByRole('dialog');
     // The identifier is stored with the package's namespace prefix
     // (`prefixObjectName`): wait until the dialog previews it.
@@ -309,24 +327,6 @@ describe('objectstack#26917 — Data: New object over a taken identifier', () =>
     expect(door.published.get('object/acme_ticket')!.body).toEqual(before);
   });
 
-  it("an object on this package's rail: refused, nothing written, and Open opens it", async () => {
-    publish('object', PKG, OBJ_ACCOUNT);
-    publish('object', PKG, OBJ_TICKET);
-    const dialog = await openNewObject();
-    submitCreate(dialog, 'Ticket');
-
-    const taken = await within(dialog).findByTestId('object-create-taken');
-    expect(taken).toHaveTextContent(
-      tFormat('engine.studio.data.createTaken', 'en', { name: 'acme_ticket', label: 'Ticket' }),
-    );
-    expect(save).not.toHaveBeenCalled();
-
-    fireEvent.click(within(taken).getByTestId('object-create-open-existing'));
-    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
-    await waitFor(() => expect(getDraft.mock.calls.some(([type, name]) => type === 'object' && name === 'acme_ticket')).toBe(true));
-    expect(save).not.toHaveBeenCalled();
-  });
-
   it('a fresh identifier is created as before, under the first-write pin', async () => {
     publish('object', PKG, OBJ_ACCOUNT);
     const dialog = await openNewObject();
@@ -344,8 +344,11 @@ describe('objectstack#26917 — Data: New object over a taken identifier', () =>
 
 describe('objectstack#26917 — Create app over a taken identifier', () => {
   async function openCreateApp() {
+    // objectstack#36903, objectstack#36904 — the Automations and Data pillars
+    // are retired (their addresses redirect to the area); the sharing
+    // overview's page hosts the toolbar's Create app.
     render(
-      <MemoryRouter initialEntries={[`/studio/${PKG}/automations`]}>
+      <MemoryRouter initialEntries={[`/studio/${PKG}/owd`]}>
         <Routes>
           <Route path="/studio/:packageId/:tab" element={<StudioDesignSurface />} />
         </Routes>
@@ -394,12 +397,11 @@ describe('objectstack#30038 — Automations: New automation never saves a typed 
     publish('object', PKG, OBJ_ACCOUNT);
     publish('object', PKG, OBJ_TICKET);
     render(
-      <MemoryRouter initialEntries={[`/studio/${PKG}/automations`]}>
-        <AutomationsPillar packageId={PKG} />
+      <MemoryRouter initialEntries={[`/studio/${PKG}/metadata/flow`]}>
+        <ListFlowCreate packageId={PKG} />
       </MemoryRouter>,
     );
-    await screen.findByTestId('auto-rail-row-alpha_intake', undefined, { timeout: 8000 });
-    fireEvent.click(screen.getByTitle(en('engine.studio.auto.newTitle')));
+    fireEvent.click(await screen.findByTitle(en('engine.studio.auto.newTitle'), undefined, { timeout: 8000 }));
     const dialog = await screen.findByRole('dialog');
     fireEvent.click(within(dialog).getByTestId('create-flow-preset-record_updated'));
     const picker = within(dialog).getByRole('combobox');

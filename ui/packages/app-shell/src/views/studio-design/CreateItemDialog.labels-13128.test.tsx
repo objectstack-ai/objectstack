@@ -15,6 +15,9 @@
  * not on the copy.
  */
 
+// Paid at collection, not inside a case's clock (check:test-source-alias).
+import '@objectstack/lint';
+import '@object-ui/plugin-detail';
 import '@testing-library/jest-dom/vitest';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
@@ -44,7 +47,8 @@ vi.mock('./packages-io', async (importOriginal) => {
 vi.mock('./StudioAiCopilot', () => ({ StudioChatDock: () => null }));
 vi.mock('../../preview/DraftChangesPanel', () => ({ DraftChangesPanel: () => null }));
 
-import { DataPillar, StudioDesignSurface } from './StudioDesignSurface';
+import { StudioDesignSurface } from './StudioDesignSurface';
+import { MetadataListCreateDialog } from '../metadata-admin/MetadataListCreateDialog';
 import { t } from '../metadata-admin/i18n';
 
 window.matchMedia = ((query: string) => ({
@@ -93,12 +97,12 @@ function expectBound(dialog: HTMLElement, labelText: string): HTMLInputElement {
 
 describe('Studio create dialogs bind each label to its input (objectui#13128)', () => {
   it('New object: "Object name" and "Identifier" each find their input', async () => {
+    // objectstack#36904 — New object is the object list's create dialog.
     render(
-      <MemoryRouter initialEntries={['/studio/app.a/data']}>
-        <DataPillar packageId="app.a" />
+      <MemoryRouter>
+        <MetadataListCreateDialog type="object" open onOpenChange={() => {}} packageId="app.a" inPair={false} locale="en-US" onCreated={() => {}} />
       </MemoryRouter>,
     );
-    fireEvent.click(await screen.findByTestId('empty-state-new-object'));
     const dialog = await screen.findByRole('dialog');
 
     const nameInput = expectBound(dialog, t('engine.studio.data.nameLabel', 'en'));
@@ -111,8 +115,9 @@ describe('Studio create dialogs bind each label to its input (objectui#13128)', 
   });
 
   it('Create app (a sibling dialog on the same component): "App name" and "Identifier" each find their input', async () => {
+    // objectstack#36903 — the Automations pillar is retired; the sharing overview's page hosts the toolbar.
     render(
-      <MemoryRouter initialEntries={['/studio/app.a/interfaces']}>
+      <MemoryRouter initialEntries={['/studio/app.a/owd']}>
         <Routes>
           <Route path="/studio/:packageId/:tab" element={<StudioDesignSurface />} />
         </Routes>

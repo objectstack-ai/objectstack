@@ -27,6 +27,9 @@
         "platform-core.bare-name-one-holder-refusal"
       ]
     },
+    "ai_context": {
+      "waived": "WAIVED 2026-11-25 — the kind is new (ADR-0160 row 5, #37140) and no item has been run against it yet. What exists: the showcase declares two context packs (examples/app-showcase/src/ai/record-context.ai-context.ts) and mounts the record-context service, so a booted showcase serves `get_record_context` over MCP; the executor's rules (order of judgement, the naming bound, field- and row-level omission, the body outline and anchors, the read set) are pinned in packages/services/service-record-context/src/__tests__/record-context-tools.test.ts, and the tool on both MCP transports in packages/mcp/src/mcp-record-context-tools.test.ts. WHAT RETIRES THIS WAIVER — the next coverage sweep authors an `ai.` item that boots the showcase, calls `get_record_context` for a project (the brief pack) and a task (the notes pack, outline then one anchor) with an admin and a member osk_ key, and reads the answer against REST; the same edit replaces this waiver with `items` naming it."
+    },
     "analytics_cube": {
       "items": [
         "dashboards.cube-query"

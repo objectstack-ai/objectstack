@@ -901,6 +901,7 @@ export type PhysicalDefault =
 
 const BARE_NUMBER = /^[+-]?(\d+(\.\d*)?|\.\d+)([eE][+-]?\d+)?$/;
 const EXPRESSION_KEYWORD = /^(current_timestamp|current_date|current_time|localtimestamp|localtime|now|sysdate|uuid|gen_random_uuid|nextval)\b/i;
+const MYSQL_INTRODUCED_STRING = /^_[A-Za-z0-9]+\\'[\s\S]*\\'$/;
 const TRAILING_CAST = /^::\s*[A-Za-z_][\w\s"]*(\(\s*\d+(\s*,\s*\d+)?\s*\))?(\[\])?$/;
 
 /** See {@link PhysicalDefault}. */
@@ -936,6 +937,15 @@ export function physicalDefaultLiteral(raw: unknown): PhysicalDefault {
   if (BARE_NUMBER.test(s)) return { kind: 'literal', text: s };
   if (/^(true|false)$/i.test(s)) return { kind: 'literal', text: s.toLowerCase() };
   if (s.includes('(') || EXPRESSION_KEYWORD.test(s)) return { kind: 'expression' };
+  // [#37320] MySQL 8 reports an EXPRESSION default over a string — the
+  // `DEFAULT ('d')` `createColumn` gives a TEXT column, the only DEFAULT such a
+  // column takes — as the charset-introduced, backslash-escaped `_utf8mb4\'d\'`
+  // (`EXTRA = DEFAULT_GENERATED`; measured on 8.0.46). It is an expression to
+  // MySQL and is read as one here, so neither literal arm acts on it: the
+  // restating `ALTER COLUMN … SET DEFAULT` is refused on a TEXT column
+  // (`ER_BLOB_CANT_HAVE_DEFAULT`, measured, the parenthesised form included),
+  // and read as a bare literal it compared unequal to every declaration.
+  if (MYSQL_INTRODUCED_STRING.test(s)) return { kind: 'expression' };
   // MySQL 8 reports a string literal bare; anything else bare is a keyword
   // this module does not know, which is not worth guessing at.
   return /\s/.test(s) || /^[A-Z_]+$/.test(s) ? { kind: 'expression' } : { kind: 'literal', text: s };
@@ -1491,7 +1501,10 @@ export function diffManagedTable(args: {
     // token (`NOW()` has its own expression, the app-resolved ones the arm
     // above), an object, a multi-value column (no scalar DEFAULT at all) and a
     // physical EXPRESSION are left alone, and so is a column with no DEFAULT
-    // under a declared one (on MySQL a TEXT column cannot carry the literal).
+    // under a declared one (on MySQL a TEXT column cannot carry the literal;
+    // since #37320 a fresh one carries the EXPRESSION form, read as an
+    // expression by `physicalDefaultLiteral`, and one an earlier release
+    // created carries no DEFAULT at all).
     {
       const dv = field.defaultValue;
       const physical = physicalDefaultLiteral(col.defaultValue);

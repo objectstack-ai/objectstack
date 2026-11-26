@@ -18,7 +18,9 @@ import {
   useGroupedDataInOptionOrder, usableGroupingFields,
   type GroupAggregationConfig, type GroupOptionRanks, type ServerGroupSource, type TemporalAggregateFaces,
 } from './useGroupedData';
-import { groupSearchOf, useServerGroupHeaders, useServerGroupRows, type ServerGroupLeaf } from './useServerGrouping';
+import {
+  groupSearchOf, useServerGroupHeaders, useServerGroupRows, type ServerGroupHeaders, type ServerGroupLeaf,
+} from './useServerGrouping';
 import { useLookupTargetDefs } from './lookupGroupTargets';
 import { normalizeColumns } from './objectGridColumns';
 import { honestGroupAggregations, honestGroupAggregationsByDepth } from './recordCurrencyAggregates';
@@ -80,6 +82,20 @@ function temporalFacesOfAggregations(
     if (face) out.push([field, face]);
   }
   return out;
+}
+
+/**
+ * The records a server-grouped grid matches: its top-level group counts
+ * summed. `undefined` with no answer in hand; `null` — no total — when the
+ * answer is partial (`hasMore`, objectstack#37278): it lists only some of the
+ * groups, so their sum is not the total.
+ */
+export function serverGroupTotalOf(
+  groupHeaders: Pick<ServerGroupHeaders, 'headers' | 'partial'>,
+): number | null | undefined {
+  if (!groupHeaders.headers) return undefined;
+  if (groupHeaders.partial) return null;
+  return (groupHeaders.headers[0] ?? []).reduce((sum, row) => sum + (Number(row.count) || 0), 0);
 }
 
 export function useObjectGridGrouping({
@@ -457,12 +473,11 @@ export function useObjectGridGrouping({
     if (outstanding && pages.some((page) => (page?.rows.length ?? 0) > 0)) return;
     setData(outstanding ? [] : pages.flatMap((page) => page?.rows ?? []));
   }, [serverGroupedFetch, serverLeafKeys, groupRows.pages]);
-  // …and the match total is the QUERY's: the top-level group counts summed.
-  const serverGroupTotal = serverGroupedFetch && groupHeaders.headers
-    ? (groupHeaders.headers[0] ?? []).reduce((sum, row) => sum + (Number(row.count) || 0), 0)
-    : undefined;
+  // …and the match total is the QUERY's: the top-level group counts summed —
+  // over a WHOLE answer only (`serverGroupTotalOf`).
+  const serverGroupTotal = serverGroupedFetch ? serverGroupTotalOf(groupHeaders) : undefined;
   useEffect(() => {
-    if (serverGroupTotal !== undefined) setTotalMatching(serverGroupTotal);
+    if (serverGroupTotal !== undefined) setTotalMatching(serverGroupTotal ?? undefined);
   }, [serverGroupTotal]);
 
   return {

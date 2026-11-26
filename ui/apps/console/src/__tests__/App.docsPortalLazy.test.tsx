@@ -98,6 +98,8 @@ vi.mock('@object-ui/app-shell', async (importOriginal) => ({
   RequireOrganization: passthrough,
   SystemRedirect: () => null,
   DefaultHomeLayout: passthrough,
+  // objectstack#37197: the portal's frame, around the lazy docs layout.
+  DocsPortalShell: passthrough,
   DefaultHomePage: stub('home-page'),
   DefaultOrganizationsLayout: passthrough,
   DefaultOrganizationsPage: stub('organizations-page'),
@@ -108,7 +110,7 @@ vi.mock('@object-ui/app-shell', async (importOriginal) => ({
   DefaultAcceptInvitationPage: stub('accept-invitation-page'),
   AiAddressRedirect: stub('ai-chat-page'),
   StudioDesignSurface: stub('studio-design-surface'),
-  BuilderLanding: stub('builder-landing'),
+  StudioEntryRedirect: stub('studio-entry'),
   getProductName: () => 'ObjectOS',
   getFaviconUrl: () => '',
 }));

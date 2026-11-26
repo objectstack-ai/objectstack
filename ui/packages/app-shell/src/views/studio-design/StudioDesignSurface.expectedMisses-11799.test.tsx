@@ -29,7 +29,7 @@
 import '@testing-library/jest-dom/vitest';
 import * as React from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, render, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 // Module-scope import of the lazily loaded dashboard renderer (AGENTS.md,
 // flaky-test discipline).
@@ -130,10 +130,15 @@ vi.mock('@object-ui/react', async (importOriginal) => {
 // The console's preview and authoring code loads `@objectstack/lint` lazily;
 // warmed here so its first load is paid at import, not inside a test's clock.
 import '@objectstack/lint';
+import '@object-ui/plugin-detail';
 import { AutomationsPillar, DataPillar } from './StudioDesignSurface';
 import { registerMetadataPreview } from '../metadata-admin/preview-registry';
 import { DashboardPreview } from '../metadata-admin/previews/DashboardPreview';
 import { createEmptyDataSource, failOnAbsorbedFetchError } from './__tests__/emptyDataSource';
+// The source under test reaches these dynamic imports (the command palette's
+// record preview, the drafts panel's lint, the code editor): their first load
+// is paid here, at collection, never inside a case's clock (`check:test-source-alias`).
+import '@object-ui/plugin-detail';
 
 const dataSource = createEmptyDataSource();
 failOnAbsorbedFetchError();
@@ -189,16 +194,22 @@ describe('Automations pillar — opening flows asks no 404 question (objectui#11
   it('a saved flow with no draft reads its baseline and no draft; an unsaved flow reads its draft and its layers, no miss', async () => {
     put(server.active, 'flow', 'p_flow', flow('p_flow'));
     put(server.drafts, 'flow', 'fresh_flow', flow('fresh_flow'));
-    render(
-      <MemoryRouter initialEntries={[`/studio/${PKG}/automations`]}>
-        <AutomationsPillar packageId={PKG} />
+    const view = render(
+      <MemoryRouter initialEntries={[`/studio/${PKG}/metadata/flow/p_flow`]}>
+        <AutomationsPillar packageId={PKG} flowName="p_flow" />
       </MemoryRouter>,
     );
     await waitFor(() => expect(asked('flow', 'p_flow', '/layers')).toBe(1));
     await settle();
     expect(asked('flow', 'p_flow', '?state=draft')).toBe(0);
 
-    fireEvent.click((await screen.findAllByText('fresh_flow'))[0]);
+    // objectstack#36903 — the unsaved flow opens on its own address.
+    view.unmount();
+    render(
+      <MemoryRouter initialEntries={[`/studio/${PKG}/metadata/flow/fresh_flow`]}>
+        <AutomationsPillar packageId={PKG} flowName="fresh_flow" />
+      </MemoryRouter>,
+    );
     await waitFor(() => expect(asked('flow', 'fresh_flow', '?state=draft')).toBe(1));
     await settle();
     expect(asked('flow', 'fresh_flow', '/layers')).toBe(1);
@@ -210,16 +221,20 @@ describe('Data pillar — the draft read follows the ledger (objectui#11799)', (
   it('a saved object with no draft is not asked for one; an unsaved object is', async () => {
     put(server.active, 'object', 'acme_account', { name: 'acme_account', label: 'Account', fields: { title: { type: 'text' } } });
     put(server.drafts, 'object', 'acme_fresh', { name: 'acme_fresh', label: 'Fresh', fields: { title: { type: 'text' } } });
-    render(
-      <MemoryRouter initialEntries={[`/studio/${PKG}/data`]}>
-        <DataPillar packageId={PKG} />
-      </MemoryRouter>,
-    );
+    // objectstack#36904 — one object per page: each opens on its own address.
+    const open = (name: string) =>
+      render(
+        <MemoryRouter initialEntries={[`/studio/${PKG}/metadata/object/${name}`]}>
+          <DataPillar packageId={PKG} objectName={name} />
+        </MemoryRouter>,
+      );
+    open('acme_account');
     await waitFor(() => expect(asked('object', 'acme_account', '/layers')).toBe(1));
     await settle();
     expect(asked('object', 'acme_account', '?state=draft')).toBe(0);
+    cleanup();
 
-    fireEvent.click(await screen.findByText('acme_fresh'));
+    open('acme_fresh');
     await waitFor(() => expect(asked('object', 'acme_fresh', '?state=draft')).toBe(1));
   });
 });

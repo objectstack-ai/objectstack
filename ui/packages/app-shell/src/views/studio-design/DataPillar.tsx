@@ -1,11 +1,18 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * The Data pillar — the object rail, the object canvas (Records, Field
- * layout, Settings and the other tabs) and the New object dialog — with the
- * records-grid slot and the object draft-save shape only it uses, moved out
- * of `StudioDesignSurface.tsx` unchanged by objectstack#36893 (the move-only
- * split's pillar slice; the surface re-exports it).
+ * The object designer — one object, full-screen on its metadata address
+ * (`/studio/<package>/metadata/object/<name>`, objectstack#36904, epic
+ * objectstack#36890; ADR-0146 D1 as amended): the item header (× back to the
+ * object list, ‹ › through it), the tabs in #36513's order with the item
+ * tools after them (`objectDesignerTabs.ts`), and the object canvas — with the
+ * records-grid slot and the object draft-save shape only it uses.
+ *
+ * It has no object list of its own and no New: the list is the area's
+ * (`ResourceListPage`), and its 「新建」 creates an object
+ * (`MetadataListCreateDialog`). Another object opens through ×, ‹ › or ⌘K
+ * (decision 7). The area mounts it (`StudioMetadataArea`); the old
+ * `/data?surface=object:<name>` address redirects there (`dataPillarRedirect`).
  */
 
 import * as React from 'react';
@@ -20,24 +27,32 @@ import {
   type DraftChange,
 } from '@object-ui/data-objectstack';
 import { resolveI18nLabel, type I18nLabel } from '@objectstack/spec/ui';
-import { customizationNamespace } from '@objectstack/spec/kernel';
 import { type StudioSurfaceLabel } from './StudioAiCopilot.js';
 import { useStudioRightSlot } from './studioRightSlotState.js';
 import { StudioInspector } from './StudioInspector.js';
 import { agentDraftMarkOf, DraftChip, DraftSourceLine, isAgentDraftSurface } from './StudioDraftMark.js';
-import {
-  StudioItemHeader,
-  StudioTab,
-} from './StudioItemHeader.js';
-import { StudioItemTools } from '../item-tools/StudioItemTools.js';
+import { StudioTab } from './StudioItemHeader.js';
+import { ResourceDetailHeader } from '../metadata-admin/ResourceDetailHeader.js';
+import { ItemToolTabPanel, ItemToolTabStrip } from '../item-tools/ItemToolTabs.js';
+import { useCanAuthorMetadata, useCanReadAuthoringTrail } from '../../hooks/useCanAuthorMetadata.js';
 import { useStudioItemDraftStatus } from './studioItemDraftStatus.js';
-import { DATA_CONTENT_CONTAINER, DATA_TAB_FLAT_ONLY, DATA_TAB_FOLDED_ONLY } from './dataTabsFold.js';
+import {
+  DATA_CONTENT_CONTAINER,
+  DATA_TAB_FLAT_ONLY,
+  DATA_TAB_FLAT_WIDE_ONLY,
+  DATA_TAB_FOLDED_FIRST_ONLY,
+  DATA_TAB_FOLDED_ONLY,
+} from './dataTabsFold.js';
+import {
+  OBJECT_DESIGNER_ALWAYS_FLAT,
+  OBJECT_DESIGNER_FOLD_FIRST,
+  OBJECT_DESIGNER_TOOL_TABS,
+  OBJECT_DESIGNER_VIEWS,
+  useObjectDesignerTab,
+  type ObjectDesignerView,
+} from './objectDesignerTabs.js';
 import { RECORDS_SCROLLBAR_VISIBLE, revealColumn } from './recordsGridChrome.js';
-import { StudioRail, StudioRailRow } from './StudioRail.js';
 import { StudioRefusalStrip } from './StudioRefusalStrip.js';
-import { StudioPicker } from './StudioPicker.js';
-import { PACKAGE_LIST_TOAST_ID } from './PackageSwitcher.js';
-import { addNewObjectToAppMenu } from './newObjectJoinsAppMenu.js';
 import { pairIdOf } from './AutomationsFlowRail.js';
 import {
   addedExtensionFieldName,
@@ -48,16 +63,11 @@ import {
   formFieldNames,
   formPreviewSource,
   isCelPanelTab,
-  OWD_OPTION_DESC_KEY,
-  OWD_OPTION_LABEL_KEY,
   panelItemCelStamp,
   panelItemOf,
   STUDIO_SYSTEM_FIELD_NAMES,
 } from './DataPillarHelpers.js';
 import {
-  confirmDropUnsavedWork,
-  CreateTakenNotice,
-  findTakenIdentifier,
   type StudioBaseCustomization,
   StudioHeldNotice,
   StudioReadOnlyLink,
@@ -74,7 +84,6 @@ import {
   AlertDialogTitle,
   GridFieldAuthoringProvider,
   cn,
-  useIsMobile,
   Button,
   DropdownMenu,
   DropdownMenuTrigger,
@@ -85,12 +94,11 @@ import {
   TooltipContent,
   TooltipProvider,
   TooltipTrigger,
-  ObjectIconTile,
 } from '@object-ui/components';
 import { ObjectView as PluginObjectView } from '@object-ui/plugin-view';
 import { ListView } from '@object-ui/plugin-list';
 import { ObjectForm } from '@object-ui/plugin-form';
-import { Ban, Loader2, Plus, ChevronDown, Menu, Sparkles } from 'lucide-react';
+import { Ban, Loader2, Plus, ChevronDown, Sparkles } from 'lucide-react';
 import {
   type MetadataSelection,
 } from '../metadata-admin/preview-registry.js';
@@ -114,7 +122,7 @@ import {
   type ServerDiagnostics,
 } from '../metadata-admin/draftVerdict.js';
 import { emitMetadataRefresh } from '../../assistant/assistantBus.js';
-import { publishSavedItem, readPublishedPin, STUDIO_SAVE_TOAST_ID, useStudioSaveEntry, type StudioSaveResult } from './studioSaveBar.js';
+import { publishSavedItem, readPublishedPin, useStudioSaveEntry, type StudioSaveResult } from './studioSaveBar.js';
 import { irreversibleFieldChanges } from './objectSaveConfirm.js';
 import {
   destructiveFindings,
@@ -128,16 +136,10 @@ import {
 } from './metadataError.js';
 import { useMetadataRefreshNonce } from './useMetadataRefreshNonce.js';
 import { type Surface } from './navSurface.js';
-import { useSurfaceDeepLink, useSurfaceActionDeepLink, resolveSurfaceDeepLink } from './useSurfaceDeepLink.js';
-import { useRequestedSurface } from './surfaceDeepLinkChannel.js';
-import { buildObjectSkeleton } from './skeletons.js';
-import { OWD_CREATE_MODELS, OWD_DEFAULT, type OwdCreateModel } from './owd-sharing.js';
-import { t, tFormat, useMetadataLocale } from '../metadata-admin/i18n.js';
+import { useSurfaceActionDeepLink } from './useSurfaceDeepLink.js';
+import { t, tFormat, translateMetadataType, useMetadataLocale } from '../metadata-admin/i18n.js';
 import { InspectorShellHostProvider } from '../metadata-admin/inspectors/_shared.js';
 import type { DestructiveChangeIssue } from '@objectstack/spec/api';
-import {
-  navItemLabelText,
-} from '../metadata-admin/previews/navItemLabel.js';
 import {
   readFields,
   writeFields,
@@ -153,7 +155,6 @@ import {
   readExternalBinding,
   useExternalWriteState,
 } from '../metadata-admin/previews/external-object.js';
-import { CreateItemDialog } from './CreateItemDialog.js';
 import { AddFieldPopover } from './AddFieldPopover.js';
 import { StudioGridAddFieldButton, StudioGridAddFieldProvider, type StudioGridAddFieldValue } from './StudioGridAddField.js';
 import { FormToolbar, ObjectFormDesigner } from './ObjectFormDesigner.js';
@@ -168,17 +169,7 @@ import { useObjectHooksBuffer } from './objectHooksBuffer.js';
 import { usePairObjectActions, type PairActionsDoor } from './pairObjectActions.js';
 import { ObjectActionsPanel } from './ObjectActionsPanel.js';
 import { getIcon } from '../../utils/getIcon.js';
-import { fetchPackages, prefixObjectName } from './packages-io.js';
-import {
-  RailCustomizationFilter,
-  RailCustomizationMark,
-  StudioPairItemChip,
-  contributedItemTitle,
-  railCustomizationsOf,
-  useDeepLinkFallback,
-  useRailCustomizationsOnly,
-  withPairItems,
-} from './StudioRailCustomizations.js';
+import { contributedItemTitle, railCustomizationsOf } from './StudioRailCustomizations.js';
 import {
   baseContributionsOf,
   contributedFieldsOf,
@@ -288,10 +279,10 @@ interface ObjDraftSend {
   body: Record<string, unknown>;
 }
 
-// Exported for tests (StudioDesignSurface.emptyPackage.test.tsx) — the empty-
-// package behavior (no forced creator modal, empty-state CTA) lives here.
+// Exported for tests and for the area's object page (`StudioMetadataArea`).
 export function DataPillar({
-  packageId: railPackageId,
+  packageId,
+  objectName,
   publishNonce = 0,
   onDraftSaved,
   readOnly: packageReadOnly = false,
@@ -301,6 +292,8 @@ export function DataPillar({
   onReviewChanges,
 }: {
   packageId: string;
+  /** objectstack#36904 — the one object this page designs: the name in its metadata address. */
+  objectName: string;
   publishNonce?: number;
   onDraftSaved?: (saved?: StudioSavedDraft) => void;
   /** objectstack#34725 — the open object's display label and tab, for the copilot's chip (see the Interfaces pillar's prop). */
@@ -309,7 +302,7 @@ export function DataPillar({
   onReviewChanges?: () => void;
   /** Courtesy gate: hide/disable metadata-authoring affordances (records stay usable). */
   readOnly?: boolean;
-  /** objectstack#28572 — on a read-only base, its pair: the rail lists the pair's objects too, and New lands there. */
+  /** objectstack#28575 — on a read-only base, its pair: a base object's new fields and layout land there. */
   customization?: StudioBaseCustomization | null;
   /** objectui#11786 — the clause of the edit the autosave holds unsent, for the surface's Publish. */
   onHeldEditChange?: (clause: string | null) => void;
@@ -333,60 +326,18 @@ export function DataPillar({
     for (const e of metaTypes) idx[e.type] = e.form;
     return idx;
   }, [metaTypes]);
-  // Below the mobile breakpoint the Objects rail overlays the canvas instead
-  // of a permanent 208px column (which otherwise squeezed the grid/form
-  // canvas down to almost nothing on phones) — closed by default, toggled by
-  // the header's Menu button.
-  const isMobile = useIsMobile();
-  const [railOpen, setRailOpen] = React.useState(false);
-  const [objects, setObjects] = React.useState<Surface[]>([]);
-  const [objectsLoaded, setObjectsLoaded] = React.useState(false);
-  // objectstack#28572 — bumped after a New lands in the pair: the rail reads
-  // again, after the save, so the new object is in the pair's list it reads.
-  const [railNonce, setRailNonce] = React.useState(0);
-  // objectui#7255 — the copilot dock shares this document; a turn that staged
-  // or published metadata re-reads this rail in place. No hold is needed: the
-  // rail load only replaces the LIST (the per-object edit buffer is loaded by
-  // its own `loadedNameRef`-guarded effect and is never touched here).
-  const metadataRefreshNonce = useMetadataRefreshNonce();
-  const [current, setCurrent] = React.useState<Surface | null>(null);
-  // objectstack#28572 (ADR-0146 D3) — one surface for a read-only base and its
-  // pair. The rail is the base's (`railPackageId`); an object the pair adds
-  // (`current.addedIn`) opens writable, read and saved at the pair, so every
-  // read and write of the OPEN object below names `packageId` and asks
-  // `readOnly`, the open object's own. The rail's reads, its New and its
-  // namespace stay the base's.
-  const packageId = current?.addedIn ?? railPackageId;
-  const readOnly = packageReadOnly && !current?.addedIn;
+  // objectstack#36904 — the object is the address's: its label, icon and
+  // colour are the loaded object's as it is being edited (its draft when it
+  // has one, a draft-only object's included, else as served; set where the
+  // object loads), its machine name until it has loaded.
+  const [served, setServed] = React.useState<{ label?: string; icon?: string; color?: string }>({});
+  const current = React.useMemo<Surface>(
+    () => ({ type: 'object', name: objectName, label: served.label || objectName, icon: served.icon, color: served.color }),
+    [objectName, served],
+  );
+  const readOnly = packageReadOnly;
   const railPairId = packageReadOnly && customization ? customization.pairId : null;
-  const railMarks = railCustomizationsOf(customization?.marks, railPackageId);
-  const [onlyCustomized, toggleOnlyCustomized] = useRailCustomizationsOnly();
-  // New on a read-only base lands in its pair, through the ensure door.
-  const newInPair = packageReadOnly && customization !== null && !customization.walled;
-  // `?surface=object:<name>` capture + mirror — the app→Studio bridge
-  // (ADR-0080, `appStudioObjectPath`) lands here with a specific object;
-  // shared plumbing (see useSurfaceDeepLink).
-  const initialSurface = useSurfaceDeepLink(current);
-  // objectstack#28572 — see `useDeepLinkFallback`.
-  const deepLinkUpgrade = useDeepLinkFallback();
-  const currentRef = React.useRef(current);
-  React.useLayoutEffect(() => {
-    currentRef.current = current;
-  });
-  // The LIVE half of the same plumbing (see surfaceDeepLinkChannel): a
-  // producer already inside this mounted pillar — the pending-changes sheet's
-  // security block, naming the object the publish door would refuse — asks for
-  // an object long after the capture ref above was read.
-  //
-  // Applied AT MOST ONCE, by id. A standing request re-resolved on every rail
-  // reload (publish, package switch) would drag the author back off whatever
-  // they had since selected, which is the regression the mount-time ref exists
-  // to prevent — so the id is marked spent as soon as the loaded rail has been
-  // consulted, whether or not it held a match.
-  //
-  // Applied below `objHeld`, which it asks about (objectstack#26845).
-  const requestedSurface = useRequestedSurface();
-  const appliedRequestRef = React.useRef(0);
+  const railMarks = railCustomizationsOf(customization?.marks, packageId);
   const [objDraft, setObjDraft] = React.useState<Record<string, unknown>>({});
   // objectstack#28575 (ADR-0146 D10) — a base object of a read-only base takes
   // fields as an extension in the base's pair, never in its own buffer: the
@@ -395,7 +346,7 @@ export function DataPillar({
   // served (which already folds the pair's PUBLISHED extension), and what the
   // pillar shows is `shownDraft`, the two folded. `published` names the
   // fields the published extension declares, so one the draft drops is gone.
-  const extendsBase = packageReadOnly && customization !== null && current !== null && !current.addedIn;
+  const extendsBase = packageReadOnly && customization !== null;
   const [ext, setExt] = React.useState<{
     for: string;
     body: ObjectExtensionBody;
@@ -517,11 +468,22 @@ export function DataPillar({
   const [hasDraft, setHasDraft] = React.useState(false);
   const [saving, setSaving] = React.useState<false | 'draft' | 'publish'>(false);
   const [gridVer, setGridVer] = React.useState(0);
-  // Records grid ⇄ Form ⇄ Validations ⇄ Settings — four views of the SAME
+  // Records grid ⇄ Field layout ⇄ Validations ⇄ … — views of the SAME
   // object. Grid/Form are the runtime renderer (same-renderer principle);
   // Validations edits `validations` rules; Settings edits object basics +
   // the ADR-0085 semantic roles. All patch the one `objDraft`.
-  const [viewMode, setViewMode] = React.useState<'grid' | 'form' | 'rules' | 'settings' | 'hooks' | 'actions' | 'api'>('grid');
+  // objectstack#36904 — the open tab is in the address (`objectDesignerTabs.ts`),
+  // and the item tools are tabs after the views (epic decision 8): History
+  // only for a caller the authoring-trail doors admit, as on every item page.
+  const canReadTrail = useCanReadAuthoringTrail();
+  const canAuthor = useCanAuthorMetadata();
+  const toolTabs = React.useMemo(
+    () => OBJECT_DESIGNER_TOOL_TABS.filter((tab) => tab !== 'history' || canReadTrail),
+    [canReadTrail],
+  );
+  const designerTab = useObjectDesignerTab(toolTabs);
+  const viewMode = designerTab.location.view;
+  const toolTab = designerTab.location.tool;
   // objectstack#34725 — lift the open object's label to the copilot's chip,
   // with the tab in view: 「正在看：会议 · 记录」, never the machine name. The
   // Interfaces pillar's report (objectui#8219) is the same seam; keyed on
@@ -530,9 +492,14 @@ export function DataPillar({
   React.useEffect(() => {
     onSurfaceLabelChangeRef.current = onSurfaceLabelChange;
   });
-  const currentObjectName = current?.type === 'object' ? current.name : undefined;
-  const currentObjectLabel = current?.type === 'object' ? current.label : undefined;
-  const viewModeLabel = t(`engine.studio.data.tab.${viewMode === 'grid' ? 'records' : viewMode}`, locale);
+  const currentObjectName = current.name;
+  const currentObjectLabel = current.label;
+  const viewModeLabel = t(
+    toolTab
+      ? `engine.studio.itemTabs.${toolTab.tab}`
+      : (OBJECT_DESIGNER_VIEWS.find((v) => v.view === viewMode)?.label ?? 'engine.studio.data.tab.records'),
+    locale,
+  );
   React.useEffect(() => {
     onSurfaceLabelChangeRef.current?.(
       currentObjectName && currentObjectLabel
@@ -551,9 +518,9 @@ export function DataPillar({
   // goes, and its blocking count expires with it (see `blockingReport`). Left
   // open, a Records/Form selection stayed beside Validations, Hooks, Actions,
   // API and Settings, where nothing on screen is that field.
-  const selectViewMode = (next: typeof viewMode) => {
-    if (next !== viewMode) setFieldSel(null);
-    setViewMode(next);
+  const selectViewMode = (next: ObjectDesignerView) => {
+    if (next !== viewMode || toolTab) setFieldSel(null);
+    designerTab.selectView(next);
   };
   // objectstack#26736 — the action a refusal or a held line names, opened by
   // its "Show me": a fresh object per press, so pressing it again re-selects
@@ -574,10 +541,10 @@ export function DataPillar({
     }
     setFieldSel({ kind: target.kind, id: target.id });
   };
-  // objectstack#34724 — `?surface=object:<name>&action=<action>` opens the
-  // deep-linked object's Actions view on that action (Studio's landing links a
-  // switched-off action that lives in its object's `actions[]` here).
-  useSurfaceActionDeepLink(initialSurface, current, (name) => showObjTarget({ kind: 'action', id: name }));
+  // objectstack#34724 — `?action=<action>` on the object's address opens its
+  // Actions view on that action (Studio's landing links a switched-off action
+  // that lives in its object's `actions[]` here; `switchedOffActionPath`).
+  useSurfaceActionDeepLink(current, current, (name) => showObjTarget({ kind: 'action', id: name }));
   // objectstack#26730 — a refusal's "Show me" also ends on the input it names:
   // in the field inspector, or in the actions panel for an action.
   const fieldInspectorBodyRef = React.useRef<HTMLDivElement>(null);
@@ -747,25 +714,6 @@ export function DataPillar({
   React.useLayoutEffect(() => {
     extReadPairRef.current = customization?.pairId ?? null;
   });
-  // Left-rail search + inline "new object" creator (design §4: rail = search + New).
-  const [query, setQuery] = React.useState('');
-  const [creating, setCreating] = React.useState(false);
-  // The OWD the create dialog will author (`7a90afdf9`). Pre-selected to the
-  // platform's own recommended baseline; the author sees it and can change it
-  // before the object exists. Reset by `openCreateDialog` below rather than by
-  // an effect on `creating` — the effect spelling re-renders the dialog a
-  // second time on every open purely to undo a previous session's pick.
-  const [createOwd, setCreateOwd] = React.useState<OwdCreateModel>(OWD_DEFAULT);
-  // objectstack#26917 — a create refused because the identifier is taken:
-  // which object holds it, and whether it is on this rail, so it can be opened.
-  const [createTaken, setCreateTaken] = React.useState<{ name: string; label: string; here: boolean } | null>(null);
-  const openCreateDialog = React.useCallback(() => {
-    setError(null);
-    setCreateTaken(null);
-    setCreateOwd(OWD_DEFAULT);
-    setCreating(true);
-  }, []);
-  const [createBusy, setCreateBusy] = React.useState(false);
   // Whether the selected object exists beyond the draft (published/code baseline).
   // A draft-only object has NO physical table yet (DDL lands at publish), so the
   // Records grid must not fire data SQL against it.
@@ -789,148 +737,6 @@ export function DataPillar({
   // another package folds on). The buffer holds what the author wrote; these
   // keep the header count and the records grid on the server's object.
   const [servedOnly, setServedOnly] = React.useState<FieldEntry[]>([]);
-  // The package's object-name namespace (framework#2694). New objects are
-  // auto-prefixed with `<namespace>_` so an author can never draft a prefix-less
-  // object that publish would later reject (code NAMESPACE_PREFIX).
-  const [namespace, setNamespace] = React.useState<string | null>(null);
-  const pairNamespace = customizationNamespace(namespace);
-  const newObjectNamespace = packageReadOnly ? (pairNamespace.ok ? pairNamespace.value : null) : namespace;
-
-  React.useEffect(() => {
-    let cancelled = false;
-    fetchPackages()
-      .then((list) => {
-        if (!cancelled) setNamespace(list.find((p) => p.id === railPackageId)?.namespace ?? null);
-      })
-      .catch((e: unknown) => {
-        // The namespace stays best-effort and publish still enforces the
-        // prefix server-side — but silently losing it means the author drafts
-        // prefix-less objects now and hears about it only at publish. Report
-        // it at the moment it breaks (objectui#7368), on the shared toast id.
-        if (cancelled) return;
-        toast.error(formatMetadataError(e), { id: PACKAGE_LIST_TOAST_ID });
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [railPackageId]);
-
-  React.useEffect(() => {
-    let cancelled = false;
-    const packageId = railPackageId;
-    (async () => {
-      try {
-        // Published objects + pending DRAFT objects, merged. `list()` only
-        // sees published/active metadata, so a freshly-created writable base
-        // whose objects are all drafts would render an empty (previously:
-        // forever-"loading") rail.
-        //
-        // objectui#11843 — written when a draft header carried no label (since
-        // objectstack-ai/objectstack#22200 the `_drafts` row carries one; this
-        // read predates it and still works, objectui#11862), a draft-only
-        // object takes its label from the draft-overlaid list
-        // (`GET /meta/object?package=…&preview=draft`), which serves each
-        // pending draft of the package with its own label and a `_draft` mark.
-        // That list is read for labels ONLY:
-        //  - the rail's members are still the published list plus the draft
-        //    headers, in that order;
-        //  - a published object keeps its published label, even when a pending
-        //    draft of it declares another one;
-        //  - a draft that declares no label, a caller the server answers the
-        //    published list (pending drafts are not served to everyone), and a
-        //    failed read all leave a draft-only object on its name, as before.
-        //    The read is an async function so that even a throw before it is
-        //    sent rejects, and the rail never fails on it.
-        const readDraftLabels = async (): Promise<Map<string, string>> => {
-          const overlaid = await client
-            .withPreviewDrafts(true)
-            .list<Record<string, unknown>>('object', { packageId });
-          const labels = new Map<string, string>();
-          for (const o of overlaid || []) {
-            if (!o || o._draft !== true || typeof o.name !== 'string') continue;
-            if (typeof o.label === 'string' && o.label.trim()) labels.set(o.name, o.label);
-          }
-          return labels;
-        };
-        // objectstack#28572 — and, on a read-only base with a pair, the pair's
-        // published and draft objects: the ones the base's list does not hold
-        // are the objects the pair adds. A failed pair read lists none of them.
-        const readPair = async (): Promise<Surface[]> => {
-          if (railPairId === null) return [];
-          const [pairList, pairDrafts] = await Promise.all([
-            client.list('object', { packageId: railPairId }) as Promise<Array<Record<string, unknown>>>,
-            client.listDrafts({ packageId: railPairId, type: 'object' }).catch(() => []),
-          ]);
-          const rows: Surface[] = (pairList || [])
-            .map((o) => ({
-              type: 'object',
-              name: String(o.name ?? ''),
-              label: String(o.label ?? o.name ?? ''),
-              icon: o.icon ? String(o.icon) : undefined,
-              color: typeof o.color === 'string' ? o.color : undefined,
-            }))
-            .filter((o) => o.name);
-          const seen = new Set(rows.map((o) => o.name));
-          for (const d of pairDrafts as Array<{ name?: string | null; label?: I18nLabel | null }>) {
-            if (d.name && !seen.has(d.name)) {
-              rows.push({ type: 'object', name: d.name, label: resolveI18nLabel(d.label ?? undefined, locale)?.trim() || d.name });
-              seen.add(d.name);
-            }
-          }
-          return rows;
-        };
-        const [list, draftHeaders, draftLabels, pairRows] = await Promise.all([
-          client.list('object', { packageId }) as Promise<Array<Record<string, unknown>>>,
-          client.listDrafts({ packageId, type: 'object' }).catch(() => []),
-          readDraftLabels().catch(() => new Map<string, string>()),
-          readPair().catch(() => [] as Surface[]),
-        ]);
-        if (cancelled) return;
-        const baseItems: Surface[] = (list || [])
-          .map((o) => ({
-            type: 'object',
-            name: String(o.name ?? ''),
-            label: String(o.label ?? o.name ?? ''),
-            icon: o.icon ? String(o.icon) : undefined,
-            color: typeof o.color === 'string' ? o.color : undefined,
-          }))
-          .filter((o) => o.name);
-        const known = new Set(baseItems.map((o) => o.name));
-        for (const d of draftHeaders) {
-          if (d.name && !known.has(d.name)) {
-            baseItems.push({ type: 'object', name: d.name, label: draftLabels.get(d.name) ?? d.name, icon: undefined });
-          }
-        }
-        const items = withPairItems(baseItems, pairRows, railPairId);
-        setObjects(items);
-        // Honor a `?surface=object:<name>` deep-link when it names an object we
-        // actually have; otherwise open the first object as before.
-        const deepLinked = resolveSurfaceDeepLink(items, initialSurface, 'object');
-        // objectstack#28572 — an object the pair adds is listed once the pair
-        // is known (`useDeepLinkFallback`).
-        if (deepLinked && deepLinkUpgrade.take(currentRef.current?.name ?? null, deepLinked.name)) {
-          setCurrent(deepLinked);
-        } else {
-          if (!deepLinked && initialSurface?.type === 'object' && currentRef.current === null) {
-            deepLinkUpgrade.note(items[0]?.name ?? null);
-          }
-          setCurrent((c) => c ?? deepLinked ?? items[0] ?? null);
-        }
-        // An empty writable package does NOT auto-open the creator dialog —
-        // it used to, which forced an unrequested modal on EVERY visit to an
-        // empty package (dogfood #2555). The empty-state panel carries the
-        // create CTA instead.
-      } catch (e) {
-        if (!cancelled) setError(plainRefusal(e));
-      } finally {
-        if (!cancelled) setObjectsLoaded(true);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [client, railPackageId, packageReadOnly, railPairId, locale, metadataRefreshNonce, railNonce]);
-
   React.useEffect(() => {
     if (!current) return;
     // Load once per selected object. Bail if this object's baseline is already
@@ -1031,6 +837,16 @@ export function DataPillar({
         setObjVerdict(editedItemDiagnostics({ hasDraft: !!draftBody, draftDiagnostics: draftVerdict, layered: lay }));
         setObjVerdictBody(draftBody && draftVerdict ? draftBody : lay.effective);
         setObjDraftFor(`object:${current.name}`);
+        // objectstack#36904 — the header's label, icon and colour: the draft
+        // when there is one (a draft-only object's own label, objectui#11843),
+        // else the object as served.
+        const shown = (draftBody ?? baseline) as { label?: I18nLabel; icon?: unknown; color?: unknown };
+        const next = {
+          label: resolveI18nLabel(shown.label, locale)?.trim() || undefined,
+          icon: typeof shown.icon === 'string' ? shown.icon : undefined,
+          color: typeof shown.color === 'string' ? shown.color : undefined,
+        };
+        setServed((prev) => (prev.label === next.label && prev.icon === next.icon && prev.color === next.color ? prev : next));
         setObjDraftChanges(draftBody ? readDraftChanges(draftRead.answer) : null);
         // objectui#11773 — the next save is pinned to what the draft read served.
         recordObjRead('object', current.name, packageId, draftRead.pin);
@@ -1322,108 +1138,6 @@ export function DataPillar({
     setDirty(true);
   }, []);
 
-  // "+ new object": create a fresh object in this package (runtime create —
-  // same path the classic Studio editor uses), seeded with one text field so
-  // the form/grid isn't empty, and land on Form · Layout. objectstack#36511 —
-  // it is written as a draft, then that one object is published, so it is
-  // live at once like every Save in Studio: no draft is left for a package
-  // publish, and Changes and Publish stay for the AI assistant's drafts.
-  const doCreateObject = React.useCallback(
-    async (label: string, rawName: string, sharingModel: OwdCreateModel) => {
-      if (packageReadOnly && !newInPair) return;
-      setCreateBusy(true);
-      setError(null);
-      setCreateTaken(null);
-      try {
-        // objectstack#28572 (ADR-0146 D3) — on a read-only base the object is
-        // created in its pair, which the ensure door answers (creating it on
-        // first use, without a prompt): its id and its namespace come from
-        // that answer, never from a spelling here.
-        const target =
-          packageReadOnly && customization
-            ? await customization.ensurePackage()
-            : { packageId: railPackageId, namespace };
-        // Auto-prefix with the package namespace (framework#2694) so a prefix-less
-        // object can't be authored; the rule lives in packages-io/spec.
-        const name = prefixObjectName(rawName, target.namespace);
-        // A name an object already holds, published or as a draft, on this
-        // rail or in any other package, is refused here and nothing is
-        // written: over a published object the first-write pin below would
-        // write this blank skeleton as its pending draft
-        // (`findTakenIdentifier`). The namespace prefix makes a clash with
-        // another package's object rarer, not impossible.
-        const onRail = objects.find((o) => o.name === name);
-        const taken = onRail
-          ? { name, label: onRail.label || name }
-          : await findTakenIdentifier(client, 'object', name, locale);
-        if (taken) {
-          setCreateTaken({ ...taken, here: onRail !== undefined });
-          return;
-        }
-        const body = buildObjectSkeleton(name, label, t('engine.studio.data.nameFieldLabel', locale), sharingModel);
-        // objectui#11773 — and the door refuses a draft row too (the
-        // first-write pin), for one that lands between the check above and
-        // this save.
-        await client.save('object', name, body, {
-          mode: 'draft',
-          packageId: target.packageId,
-          ifNoneMatch: '*',
-          surface: 'studio',
-        });
-        // objectstack#36511 — and published at once. A refused publish takes
-        // back the draft it wrote, so nothing is created, and says why.
-        const live = await publishSavedItem(client, { type: 'object', name, packageId: target.packageId }, false);
-        if (!live.ok) {
-          setError(plainRefusal(live.error));
-          return;
-        }
-        const surface: Surface =
-          target.packageId === railPackageId ? { type: 'object', name, label } : { type: 'object', name, label, addedIn: target.packageId };
-        setObjects((prev) => [...prev, surface]);
-        if (surface.addedIn) setRailNonce((n) => n + 1);
-        setCurrent(surface);
-        setViewMode('form');
-        setFormMode('layout');
-        setCreating(false);
-        toast.success(tFormat('engine.studio.save.done', locale, { items: label }), { id: STUDIO_SAVE_TOAST_ID });
-        // objectstack#36748 — and it joins the menu of its package's one app,
-        // so an app made before its objects does not open empty. Only in the
-        // rail's own package (not a customization pair); a failure keeps the
-        // object and says the menu was left as it was.
-        if (target.packageId === railPackageId && !packageReadOnly) {
-          const join = await addNewObjectToAppMenu(
-            client as unknown as Parameters<typeof addNewObjectToAppMenu>[0],
-            { packageId: target.packageId, objectName: name },
-            {
-              notListed: t('engine.studio.data.appMenu.unreadable', locale),
-              pendingDraft: t('engine.studio.data.appMenu.pendingDraft', locale),
-              noVersion: t('engine.studio.data.appMenu.unreadable', locale),
-              notWritable: t('engine.studio.data.appMenu.unreadable', locale),
-            },
-          );
-          if (join.kind === 'failed') {
-            const reason = plainRefusal(join.error).message;
-            toast.warning(
-              join.app
-                ? tFormat('engine.studio.data.appMenu.failed', locale, {
-                    object: label,
-                    app: navItemLabelText(join.app.label, locale) || join.app.name,
-                    reason,
-                  })
-                : tFormat('engine.studio.data.appMenu.failedNoApp', locale, { object: label, reason }),
-            );
-          }
-        }
-      } catch (e) {
-        // Shown in the create dialog, which prints the message only: kept whole.
-        setError(plainRefusal(e));
-      } finally {
-        setCreateBusy(false);
-      }
-    },
-    [objects, client, railPackageId, packageReadOnly, newInPair, customization, locale, namespace],
-  );
-
   // objectstack#34931 — a save the door refused `409 DESTRUCTIVE_CHANGE`, held
   // for the author's answer: what it would lose, and the save itself.
   const [destructive, setDestructive] = React.useState<ObjDraftSend & {
@@ -1551,6 +1265,11 @@ export function DataPillar({
 
   // objectui#11272 — the buffer is the open object's own once its load installed it.
   const objLoaded = current !== null && objDraftFor === `object:${current.name}`;
+  // objectstack#36904 — the address names the object, so it can name one that
+  // is not there (a deleted object's bookmark, a mistyped link): loaded with
+  // neither a stored object nor a draft, it says so rather than offering an
+  // "unpublished new object" to design. A draft-only object has its draft.
+  const objMissing = objLoaded && !hasBaseline && !hasDraft;
 
   // objectstack#28575 — the ensure door's answer for this base's extension
   // writes: asked by the first add (no prompt), once per base, and again only
@@ -1729,16 +1448,6 @@ export function DataPillar({
   }, [dirty, celHeldField, celHeldLabel, celHeldPanelTab, celHeldPanelItem, celHeldPanelLabel, locale]);
   // Only the open object's own buffer is held (objectui#11272).
   const objHeld = objLoaded ? (objIncomplete ?? objCelHeld) : null;
-  // objectstack#26917 — the refusal's way out: the object holding the
-  // identifier is on this rail, so it opens instead of a second one being
-  // made. The New button already asked about a held edit (objectstack#26845).
-  const openTakenObject = (name: string) => {
-    const object = objects.find((o) => o.name === name);
-    if (!object) return;
-    setCreating(false);
-    setCreateTaken(null);
-    setCurrent(object);
-  };
   // objectui#12725 — the copilot's mark on the selected field: its key path is
   // `["fields", NAME]` in the object body, and only a `copilot` write answers —
   // or, objectstack#27176, an `mcp` one: an agent through the MCP build door.
@@ -1799,32 +1508,37 @@ export function DataPillar({
   // which drops every pending draft of the package, the author's own too; the
   // confirm says so. There is no per-turn undo.
   const [discardingDrafts, setDiscardingDrafts] = React.useState(false);
+  // objectstack#36904 — what the discard refused, kept apart from `error`:
+  // the discard re-reads the object, and a load clears `error` as it starts,
+  // so the refusal set here was wiped by the very read it asked for.
+  const [discardRefusal, setDiscardRefusal] = React.useState<StudioRefusal | null>(null);
   const discardAllDrafts = React.useCallback(async () => {
     if (!adapter || !window.confirm(t('engine.studio.copilotChanges.discardConfirm', locale))) return;
     setDiscardingDrafts(true);
+    setDiscardRefusal(null);
     try {
       const result = await adapter.getClient().packages.discardDrafts(packageId);
       if (!result.success || result.failedCount > 0) {
         // The sentence names each item as the rail does (its label, else its
         // name); the server's own words stay behind Details, never in it.
         const labelOf = (f: { type: string; name: string }) =>
-          (f.type === 'object' && objects.find((o) => o.type === 'object' && o.name === f.name)?.label) || f.name;
+          (f.type === 'object' && f.name === current.name ? current.label : '') || f.name;
         const items = [...new Set(result.failed.map(labelOf))].join(
           t('engine.studio.copilotChanges.itemSeparator', locale),
         );
-        setError({
+        setDiscardRefusal({
           message: tFormat('engine.studio.copilotChanges.discardFailed', locale, { items }),
           detail: result.failed.map((f) => `${f.type}/${f.name}: ${f.error}`).join('\n') || undefined,
         });
       }
     } catch (e) {
-      setError(plainRefusal(e));
+      setDiscardRefusal(plainRefusal(e));
     } finally {
       setDiscardingDrafts(false);
       reloadObjDraft();
       emitMetadataRefresh();
     }
-  }, [adapter, locale, objects, packageId, reloadObjDraft]);
+  }, [adapter, locale, current, packageId, reloadObjDraft]);
   useHeldEditReport(onHeldEditChange, objHeld?.clause ?? null);
   // objectstack#36511 — the object page's buffers, saved and cancelled by the
   // top bar's one Save and Cancel: the object (its fields, rules, actions and
@@ -1872,9 +1586,6 @@ export function DataPillar({
     disabled: readOnly,
     publishNonce,
   });
-  // objectstack#36511 — opening another object replaces the buffers the open
-  // object's unsaved edits live in, so the author is asked first, as every
-  // departure asks (objectstack#26705); nothing is sent by the switch.
   // objectstack#30088 — a base object's new actions are items of the pair;
   // objectstack#36511 — read and buffered here, as the hooks are.
   const pairDoor: PairActionsDoor | null =
@@ -1889,35 +1600,6 @@ export function DataPillar({
         }
       : null;
   const pairActions = usePairObjectActions(pairDoor, current?.name ?? '', viewMode === 'actions');
-  const pageDirty = dirty || extDirty || hooksBuffer.dirty || pairActions.dirty;
-  const openObject = React.useCallback(
-    (next: Surface): boolean => {
-      if (next.name !== current?.name && !confirmDropUnsavedWork(pageDirty, locale)) return false;
-      setCurrent(next);
-      return true;
-    },
-    [current, pageDirty, locale],
-  );
-  // The live request's apply (see `requestedSurface` above). objectstack#26845
-  // — another object's load replaces the buffer a held edit lives in, so it
-  // goes through the rail's own switch (`openObject`): an unsent edit is sent
-  // first, or the author is asked; declined, the request is spent and the
-  // edit stays. A request for the open object drops nothing and asks nothing.
-  React.useEffect(() => {
-    if (!requestedSurface || !objectsLoaded) return;
-    if (requestedSurface.id === appliedRequestRef.current) return;
-    appliedRequestRef.current = requestedSurface.id;
-    const match = resolveSurfaceDeepLink(objects, requestedSurface.target, 'object');
-    if (!match) return;
-    openObject(match);
-  }, [requestedSurface, objects, objectsLoaded, openObject]);
-  // objectstack#26845 — a created object opens at once, and its load replaces
-  // the buffer a held edit lives in: asked before the dialog opens, so Cancel
-  // costs nothing and the create itself asks nothing.
-  const openCreateObject = () => {
-    if (!confirmDropUnsavedWork(objHeld !== null, locale)) return;
-    openCreateDialog();
-  };
   // objectui#12725 — the header's draft line reads the badge's ledger.
   const objDraftStatus = useStudioItemDraftStatus(
     current ? { type: 'object', name: current.name } : null,
@@ -2101,30 +1783,20 @@ export function DataPillar({
   const hostFieldRail = (rail: React.ReactElement): React.ReactNode =>
     inSlot ? slotPropsTarget && createPortal(rail, slotPropsTarget) : rail;
 
-  // The object-level tabs (Data pillar): underline tabs in the item header.
-  // objectui#5813 — the 90% path is Records / Form (fields ARE the grid's
-  // columns, so a separate fields tab would ADD a surface, not remove one).
-  // objectui#12450 — the five power panels are flat tabs beside them when the
-  // content column has room, and fold back into one "Advanced" menu when it
-  // does not (maintainer ruling 2026-10-15, decision B of epic objectui#12446;
-  // the rule lives in `dataTabsFold.ts`).
-  const dataTabs: ReadonlyArray<{ key: typeof viewMode; label: string }> = [
-    { key: 'grid', label: t('engine.studio.data.tab.records', locale) },
-    { key: 'form', label: t('engine.studio.data.tab.form', locale) },
-  ];
-  const advancedDataTabs: ReadonlyArray<{ key: typeof viewMode; label: string }> = [
-    { key: 'rules', label: t('engine.studio.data.tab.rules', locale) },
-    { key: 'hooks', label: t('engine.studio.data.tab.hooks', locale) },
-    { key: 'actions', label: t('engine.studio.data.tab.actions', locale) },
-    { key: 'api', label: t('engine.studio.data.tab.api', locale) },
-    { key: 'settings', label: t('engine.studio.data.tab.settings', locale) },
-  ];
-  const activeAdvancedTab = advancedDataTabs.find((tabDef) => tabDef.key === viewMode);
+  // The object's tabs, in #36513's order (`objectDesignerTabs.ts`):
+  // underline tabs in the item header. objectui#5813 — the 90% path is
+  // Records / Field layout (fields ARE the grid's columns). objectui#12450 —
+  // the five power panels are flat tabs beside them when the content column
+  // has room, and fold into "Advanced" when it does not, Hooks and API first
+  // (the rule lives in `dataTabsFold.ts`).
+  const dataTabs = OBJECT_DESIGNER_VIEWS.map((v) => ({ key: v.view, label: t(v.label, locale) }));
+  const advancedDataTabs = dataTabs.filter((tab) => !OBJECT_DESIGNER_ALWAYS_FLAT.includes(tab.key));
+  const foldFirstTabs = advancedDataTabs.filter((tab) => OBJECT_DESIGNER_FOLD_FIRST.includes(tab.key));
   // objectui#12450 — the Records grid draws flush with the content column.
-  const recordsFlush = Boolean(current) && objLoaded && viewMode === 'grid' && hasBaseline;
+  const recordsFlush = !toolTab && objLoaded && viewMode === 'grid' && hasBaseline;
   // objectui#12451 — so does the Form tab: its one toolbar row spans the
   // column, and the canvas below it carries its own padding.
-  const formFlush = Boolean(current) && objLoaded && viewMode === 'form';
+  const formFlush = !toolTab && objLoaded && viewMode === 'form';
   const bodyFlush = recordsFlush || formFlush;
   // objectui#12451 — the Form tab's compact Layout / Preview control (24 px
   // items). The caption that used to trail it is each item's title.
@@ -2213,37 +1885,24 @@ export function DataPillar({
   // the console's menu draws for it; the draft's, as it is being edited.
   const headerColor = objLoaded && typeof objDraft.color === 'string' ? (objDraft.color as string) : current?.color;
 
-  // objectui#12459 — the object's tab row lives in the item header (the
-  // skeleton's scaffold). objectui#12450 — seven flat tabs at a content column
-  // of `DATA_TABS_FOLD_WIDTH` and wider; narrower, the five power panels fold
-  // into "Advanced". Both forms are rendered and a container query on the
-  // content column displays exactly one of them (see `dataTabsFold.ts`).
-  // Folded, the trigger keeps its own name whichever panel is open
-  // (objectui#11794): renamed to the panel ("Validations ▾") it hid the one
-  // word that says sibling panels sit behind it. Where you are still shows
-  // twice — the trigger takes the active look while one of its panels is
-  // open, and the menu marks that panel as the checked radio item.
-  const dataTabRowEl = current ? (
-    <>
-      {dataTabs.map((tab) => (
-        <StudioTab key={tab.key} active={viewMode === tab.key} onClick={() => selectViewMode(tab.key)}>
-          {tab.label}
-        </StudioTab>
-      ))}
-      {advancedDataTabs.map((tab) => (
-        <StudioTab
-          key={tab.key}
-          data-testid={`data-tab-flat-${tab.key}`}
-          active={viewMode === tab.key}
-          onClick={() => selectViewMode(tab.key)}
-          className={DATA_TAB_FLAT_ONLY}
-        >
-          {tab.label}
-        </StudioTab>
-      ))}
+  // objectui#12459 — the object's tab row lives in the item header.
+  // objectui#12450 — every view flat at a wide content column; narrower,
+  // Hooks and API fold into "Advanced", then the other three panels too. Every
+  // form is rendered and a container query on the content column displays
+  // exactly one of each (see `dataTabsFold.ts`); each trigger's menu holds what
+  // is folded at its width. Folded, the trigger keeps its own name whichever
+  // panel is open (objectui#11794): renamed to the panel ("Validations ▾") it
+  // hid the one word that says sibling panels sit behind it. Where you are
+  // still shows twice — the trigger takes the active look while one of its
+  // panels is open, and the menu marks that panel as the checked radio item.
+  // objectstack#36904 — the item tools follow as tabs (`ItemToolTabStrip`).
+  const viewActive = (key: ObjectDesignerView) => !toolTab && viewMode === key;
+  const advancedMenu = (tabs: typeof advancedDataTabs, testId: string, className: string) => {
+    const open = tabs.find((tab) => viewActive(tab.key));
+    return (
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
-          <StudioTab data-testid="data-tabs-advanced" active={Boolean(activeAdvancedTab)} className={DATA_TAB_FOLDED_ONLY}>
+          <StudioTab data-testid={testId} active={Boolean(open)} className={className}>
             {t('engine.studio.data.tab.advanced', locale)}
             <ChevronDown className="h-3 w-3" />
           </StudioTab>
@@ -2251,8 +1910,8 @@ export function DataPillar({
         <DropdownMenuContent align="start">
           {/* The group only marks which item is checked; each item
               selects its own panel, as the plain items did. */}
-          <DropdownMenuRadioGroup value={activeAdvancedTab?.key ?? ''}>
-            {advancedDataTabs.map((tab) => (
+          <DropdownMenuRadioGroup value={open?.key ?? ''}>
+            {tabs.map((tab) => (
               <DropdownMenuRadioItem key={tab.key} value={tab.key} onSelect={() => selectViewMode(tab.key)}>
                 {tab.label}
               </DropdownMenuRadioItem>
@@ -2260,16 +1919,39 @@ export function DataPillar({
           </DropdownMenuRadioGroup>
         </DropdownMenuContent>
       </DropdownMenu>
+    );
+  };
+  const dataTabRowEl = (
+    <>
+      {dataTabs.map((tab) =>
+        OBJECT_DESIGNER_ALWAYS_FLAT.includes(tab.key) ? (
+          <StudioTab key={tab.key} active={viewActive(tab.key)} onClick={() => selectViewMode(tab.key)}>
+            {tab.label}
+          </StudioTab>
+        ) : (
+          <StudioTab
+            key={tab.key}
+            data-testid={`data-tab-flat-${tab.key}`}
+            active={viewActive(tab.key)}
+            onClick={() => selectViewMode(tab.key)}
+            className={OBJECT_DESIGNER_FOLD_FIRST.includes(tab.key) ? DATA_TAB_FLAT_WIDE_ONLY : DATA_TAB_FLAT_ONLY}
+          >
+            {tab.label}
+          </StudioTab>
+        ),
+      )}
+      {advancedMenu(foldFirstTabs, 'data-tabs-advanced-first', DATA_TAB_FOLDED_FIRST_ONLY)}
+      {advancedMenu(advancedDataTabs, 'data-tabs-advanced', DATA_TAB_FOLDED_ONLY)}
+      <ItemToolTabStrip
+        tabs={toolTabs}
+        active={toolTab?.tab ?? 'details'}
+        onSelect={(tab) => {
+          setFieldSel(null);
+          designerTab.selectTool({ tab });
+        }}
+        locale={locale}
+      />
     </>
-  ) : undefined;
-
-  const objectNeedle = query.trim().toLowerCase();
-  // objectstack#28572 — "only customizations" narrows the rail to its marked rows.
-  const markedObjects = railMarks ? objects.filter((o) => railMarks.markOf(o) !== null).length : 0;
-  const shownObjects = objects.filter(
-    (o) =>
-      (!objectNeedle || o.label.toLowerCase().includes(objectNeedle) || o.name.toLowerCase().includes(objectNeedle)) &&
-      (!onlyCustomized || railMarks?.markOf(o) != null),
   );
 
   return (
@@ -2315,79 +1997,28 @@ export function DataPillar({
       </AlertDialog>
       {extConflictDialog}
       <div className="relative flex min-h-0 flex-1">
-        {isMobile && railOpen && (
-          <div
-            className="absolute inset-0 z-10 bg-black/30"
-            onClick={() => setRailOpen(false)}
-            aria-hidden="true"
-          />
-        )}
-        <StudioRail
-          testId="studio-rail-data"
-          heading={t('engine.studio.data.objects', locale)}
-          count={objects.length}
-          onAdd={packageReadOnly && !newInPair ? undefined : openCreateObject}
-          addLabel={t('engine.studio.data.newObject', locale)}
-          addTestId="studio-rail-add"
-          search={{
-            value: query,
-            onChange: setQuery,
-            placeholder: t('engine.studio.data.searchObjects', locale),
-            matchCount: shownObjects.length,
-          }}
-          filters={
-            <RailCustomizationFilter
-              marks={railMarks}
-              marked={markedObjects}
-              on={onlyCustomized}
-              onToggle={toggleOnlyCustomized}
-              locale={locale}
-            />
-          }
-          isMobile={isMobile}
-          open={railOpen}
-        >
-          {objects.length === 0 && (
-            <p className="px-2 py-3 text-[11px] text-muted-foreground">
-              {error ? t('engine.studio.loadFailed', locale) : objectsLoaded ? t('engine.studio.data.noObjects', locale) : t('engine.studio.loading', locale)}
-            </p>
-          )}
-          {shownObjects.map((o) => {
-            const Icon = getIcon(o.icon);
-            return (
-              <StudioRailRow
-                key={o.name}
-                active={current?.name === o.name}
-                onClick={() => {
-                  // objectstack#26705, objectstack#27511 — another object's load
-                  // replaces the buffer the open one's edits live in: they are
-                  // sent first, or the author is asked (`openObject`).
-                  if (openObject(o) && isMobile) setRailOpen(false);
-                }}
-                icon={<ObjectIconTile glyph={Icon} color={o.color} />}
-                trailing={<RailCustomizationMark row={o} marks={railMarks} locale={locale} />}
-              >
-                {o.label}
-              </StudioRailRow>
-            );
-          })}
-        </StudioRail>
-
         <div className={cn('flex min-w-0 flex-1 flex-col overflow-hidden', DATA_CONTENT_CONTAINER)} data-testid="data-content-column">
-          {/* objectui#12459 — the object header sits inside the content column,
-              over the thing it names, instead of spanning the rail. */}
-          <StudioItemHeader
+          {/* objectstack#36904 — the one header of a full-screen item
+              (`ResourceDetailHeader`): × back to the object list, ‹ › through
+              it, the tab row; the address carries the open tab to a neighbour. */}
+          <ResourceDetailHeader
             testId="data-object-header"
-            // objectstack#29693 — the header has no ⋯ of its own (objectui#12511),
-            // so on a narrow row it draws one for the chips and the item tools.
-            foldMenu={{ label: t('engine.studio.if.more', locale), testId: 'data-object-header-more' }}
-            // objectstack#29691 (ADR-0146 D3) — an object the pair adds, or a
-            // base object the pair extends, saves to the base's pair. Named
-            // by the base's label: `packageId` names the pair for a pair's object.
+            type="object"
+            name={current.name}
+            tabAddress={designerTab.address}
+            locale={locale}
+            icon={HeaderIcon}
+            objectTile={{ color: headerColor }}
+            label={current.label}
+            apiName={current.name}
+            typeLabel={translateMetadataType('object', locale, 'Object')}
+            packageLabel={packageId}
+            // objectui#11781 — Esc with a field open closes the field first.
+            closeOnEscape={!inspectorOpen}
+            // objectstack#29691 (ADR-0146 D3) — a base object the pair extends
+            // saves to the base's pair, named by the base's label.
             note={
-              customization !== null &&
-              (!!current?.addedIn ||
-                (extOpen !== null && (extOpen.published.size > 0 || extHasDraft || extDirty))) ? (
+              customization !== null && extOpen !== null && (extOpen.published.size > 0 || extHasDraft || extDirty) ? (
                 <SavedToCustomizationNote
                   baseLabel={customization.baseLabel}
                   pairId={customization.pairId ?? pairIdOf(customization.base)}
@@ -2395,62 +2026,18 @@ export function DataPillar({
                 />
               ) : undefined
             }
-            leading={
-              <button
-                type="button"
-                onClick={() => setRailOpen((v) => !v)}
-                aria-label={t('engine.studio.toggleRail', locale)}
-                className="-ml-1 rounded-md p-1 text-muted-foreground hover:bg-muted hover:text-foreground md:hidden"
-              >
-                <Menu className="h-4 w-4" />
-              </button>
-            }
-            icon={current ? HeaderIcon : undefined}
-            objectTile={current ? { color: headerColor } : undefined}
-            title={current ? current.label : t('engine.studio.data.objects', locale)}
-            // objectstack#34794 — the object's machine name is the title's
-            // tooltip, not a chip beside it: the header reads as the label
-            // the app shows, and the name stays one hover away.
-            titleProps={current ? { title: current.name } : { className: 'text-[13px] font-normal text-muted-foreground' }}
-            chips={current?.addedIn ? <StudioPairItemChip pairId={current.addedIn} locale={locale} /> : undefined}
-            meta={current && objLoaded ? fieldCountText : undefined}
+            meta={objLoaded ? fieldCountText : undefined}
             status={objDraftStatus}
-            actions={
+            primaryAction={
               <>
-                {/* objectstack#28239 — the item tools Setup's item page opens. */}
-                {current && objLoaded && (
-                  <StudioItemTools
-                    type="object"
-                    name={current.name}
-                    packageId={packageId}
-                    readOnly={readOnly}
-                    source={{
-                      value: objDraft,
-                      onChange: objIsExternal
-                        ? undefined
-                        : (next) => {
-                            setObjDraft(next);
-                            setDirty(true);
-                          },
-                    }}
-                    onRolledBack={() => setObjReloadNonce((n) => n + 1)}
-                    locale={locale}
-                  />
-                )}
                 {/* objectui#12511 — the header holds no actions of its own, so
-                    it reads the same on every tab. Object settings retired: the
-                    Settings tab is that control. Add field is a field action,
+                    it reads the same on every tab. Add field is a field action,
                     offered where fields are laid out: the Form toolbar, the
                     Records toolbar (objectstack#34794) and the Records grid's
-                    own "+" column, all opening the Add field popover that
-                    runs `addField` (objectui#12516). The
-                    More menu went with it, since the header has no object-level
-                    action left to put in one. */}
-                {/* objectui#12453 — on the Form tab it carries the layout's
-                    read-only sentence the Layout control no longer does. */}
+                    own "+" column (objectui#12516). The item tools are tabs. */}
                 {/* objectstack#28575 — the ensure door refuses this caller: Add
                     field draws disabled, in the console's own sentence. */}
-                {extendsBase && extWalled && objLoaded && !objIsExternal && (viewMode === 'grid' || viewMode === 'form') && (
+                {extendsBase && extWalled && objLoaded && !objIsExternal && !toolTab && (viewMode === 'grid' || viewMode === 'form') && (
                   <span
                     tabIndex={0}
                     title={t('engine.studio.customize.walled', locale)}
@@ -2471,11 +2058,13 @@ export function DataPillar({
                     </span>
                   </span>
                 )}
+                {/* objectui#12453 — on the Form tab it carries the layout's
+                    read-only sentence the Layout control no longer does. */}
                 {readOnly && (
                   <StudioReadOnlyLink
                     item={current}
                     title={
-                      viewMode === 'form' && !layoutWritable
+                      viewMode === 'form' && !toolTab && !layoutWritable
                         ? t('engine.studio.data.form.layoutBadgeReadOnly', locale)
                         : t('engine.studio.pkg.readonlyHint', locale)
                     }
@@ -2495,34 +2084,39 @@ export function DataPillar({
             onClick={clearFieldSelOnEmpty}
             className={cn('flex min-h-0 flex-1 flex-col overflow-hidden', bodyFlush ? null : 'px-6 py-4')}
           >
-          {!current ? (
-            objectsLoaded && objects.length === 0 ? (
-              /* Fresh package: the first act is creating an object — say so and
-               * offer the creator right here (no auto-opened modal, dogfood #2555). */
-              <div className="flex flex-col items-center gap-2 py-16 text-center">
-                <p className="text-sm font-medium">{t('engine.studio.data.firstObjectTitle', locale)}</p>
-                <p className="max-w-sm text-[11px] leading-5 text-muted-foreground">
-                  {t('engine.studio.data.firstObjectHint', locale)}
-                </p>
-                {!(packageReadOnly && !newInPair) && (
-                  <button
-                    type="button"
-                    data-testid="empty-state-new-object"
-                    onClick={openCreateObject}
-                    className="mt-2 inline-flex items-center gap-1.5 rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground hover:bg-primary/90"
-                  >
-                    <Plus className="h-3.5 w-3.5" /> {t('engine.studio.data.newObject', locale)}
-                  </button>
-                )}
-              </div>
-            ) : (
-              <div className="py-16 text-center text-sm text-muted-foreground">{t('engine.studio.data.pickObject', locale)}</div>
-            )
+          {toolTab ? (
+            // objectstack#36904 — References, History and Source, as on every
+            // item page; Source edits the same buffer the Save sends.
+            <ItemToolTabPanel
+              tab={toolTab.tab as 'references' | 'history' | 'source'}
+              view={toolTab.view}
+              onViewChange={(view) => designerTab.selectTool({ tab: toolTab.tab, view })}
+              type="object"
+              name={current.name}
+              packageId={packageId}
+              source={
+                objLoaded
+                  ? {
+                      value: objDraft,
+                      onChange:
+                        objIsExternal || readOnly
+                          ? undefined
+                          : (next) => {
+                              setObjDraft(next);
+                              setDirty(true);
+                            },
+                    }
+                  : undefined
+              }
+              onRolledBack={!readOnly && canAuthor ? () => setObjReloadNonce((n) => n + 1) : undefined}
+              locale={locale}
+              className="min-h-0 flex-1 overflow-auto"
+            />
           ) : (
             <>
-              {error && (
+              {(error ?? discardRefusal) && (
                 <StudioRefusalStrip
-                  refusal={error}
+                  refusal={(error ?? discardRefusal)!}
                   locale={locale}
                   // objectui#11785 — "Show me" opens the named field's inspector,
                   // or (objectstack#26736) the named action, and (objectstack#26730)
@@ -2621,6 +2215,15 @@ export function DataPillar({
                     <Loader2 className="h-4 w-4 animate-spin" /> {t('engine.studio.loading', locale)}
                   </div>
                 )
+              ) : objMissing ? (
+                <div
+                  role="status"
+                  data-testid="data-object-not-found"
+                  className={cn('flex flex-col items-center justify-center gap-1 py-16 text-sm text-muted-foreground', bodyFlush && 'mx-6')}
+                >
+                  <span className="font-medium text-foreground">{t('engine.form.objectNotFound', locale)}</span>
+                  <span className="font-mono text-xs">{current.name}</span>
+                </div>
               ) : viewMode === 'rules' ? (
                 <DraftVerdictContext.Provider value={objVerdict}>
                   <DraftVerdictBodyContext.Provider value={objVerdictBody}>
@@ -3089,73 +2692,6 @@ export function DataPillar({
           </StudioInspector>
         )}
       </div>
-
-      <CreateItemDialog
-        open={creating}
-        onOpenChange={setCreating}
-        title={t('engine.studio.data.newObject', locale)}
-        labelFieldLabel={t('engine.studio.data.nameLabel', locale)}
-        labelPlaceholder={t('engine.studio.data.labelPlaceholder', locale)}
-        idFieldLabel={t('engine.studio.data.idLabel', locale)}
-        idPlaceholder={t('engine.studio.data.idPlaceholder', locale)}
-        submitLabel={t('engine.studio.createLive', locale)}
-        submittingLabel={t('engine.studio.creating', locale)}
-        busy={createBusy}
-        error={error?.message ?? null}
-        locale={locale}
-        // objectui#11792 — preview the name `doCreateObject` saves: the same
-        // `prefixObjectName` over the same `namespace` state, so the dialog
-        // shows `repairs_repair_ticket`, not the bare identifier.
-        // objectstack#28572 — on a read-only base the preview names the pair's
-        // namespace by the spec's pairing rule; the save prefixes with the
-        // namespace the ensure door answers.
-        storedName={(identifier) => prefixObjectName(identifier, newObjectNamespace)}
-        extra={
-          <>
-            {createTaken && (
-              <CreateTakenNotice
-                scope="object"
-                sentence={tFormat(
-                  createTaken.here ? 'engine.studio.data.createTaken' : 'engine.studio.data.createTakenElsewhere',
-                  locale,
-                  { label: createTaken.label, name: createTaken.name },
-                )}
-                openLabel={tFormat('engine.studio.create.openExisting', locale, { label: createTaken.label })}
-                onOpen={createTaken.here ? () => openTakenObject(createTaken.name) : undefined}
-              />
-            )}
-            {/* Record sharing (OWD) — the third thing `New object` must ask for
-               (`7a90afdf9`). Without it the object saves as a draft happily and
-               is then REFUSED at Publish → Publish all by `security-owd-unset`, a
-               wall the author meets only after building the whole object. The
-               gloss is the SAME string the Settings tab shows for each model, so
-               the two surfaces cannot describe one baseline two ways.
-
-               `controlled_by_parent` is absent on purpose — see OWD_CREATE_MODELS:
-               a just-created object has no master-detail field for it to derive
-               access from. */}
-            <label className="block">
-              <span className="mb-1 block text-[11px] text-muted-foreground">
-                {t('engine.studio.data.owdLabel', locale)}
-              </span>
-              <StudioPicker
-                value={createOwd}
-                options={OWD_CREATE_MODELS.map((m) => ({ value: m, label: t(OWD_OPTION_LABEL_KEY[m], locale) }))}
-                onPick={(m) => setCreateOwd(m as OwdCreateModel)}
-                className="h-auto rounded px-2 py-1 text-[12px]"
-                testId="create-object-owd"
-              />
-              <span className="mt-1 block text-[11px] text-muted-foreground">
-                {t(OWD_OPTION_DESC_KEY[createOwd], locale)}
-              </span>
-              <span className="mt-1 block text-[11px] text-muted-foreground">
-                {t('engine.studio.data.owdHint', locale)}
-              </span>
-            </label>
-          </>
-        }
-        onSubmit={({ label, name }) => void doCreateObject(label, name, createOwd)}
-      />
     </div>
   );
 }

@@ -18,6 +18,10 @@ import { uiRoot } from '../scripts/ui-root.mjs';
  * full width, still collapsed after a reload (Studio's own cookie, on a real
  * http origin), and a drawer over the page at phone width.
  *
+ * objectstack#37201 — the 「高级」 fold laid out: closed by default with its
+ * groups out of sight, opened by a click, and still open after a reload under
+ * its own cookie (`studio_menu_advanced`), the collapse cookie untouched.
+ *
  * REAL: `StudioMenuProvider`, `StudioMenuTrigger`, `StudioMenu` and everything
  * they import (the sidebar primitive, the menu model, the i18n), bundled by
  * Vite from source, and the real Tailwind theme compiled for the classes on
@@ -65,7 +69,7 @@ const ENTRIES = [
 ];
 export const useMetadataClient = () => ({});
 export const useMetadataTypes = () => ({ loading: false, error: null, entries: ENTRIES });
-export const useGlobalDiagnostics = () => ({ countsByType: { object: 12 }, packagesByType: {}, reload: () => {} });
+export const useGlobalDiagnostics = () => ({ loading: false, error: null, countsByType: { object: 12 }, packagesByType: {}, reload: () => {} });
 `;
     },
   };
@@ -175,8 +179,11 @@ test.beforeAll(async ({ browser }) => {
     )).forEach((c) => c && seen.add(c));
   await open(page, 1280);
   await collect();
+  await page.getByTestId('studio-menu-advanced-toggle').click();
+  await collect();
   await page.getByTestId('studio-menu-toggle').click();
   await collect();
+  await page.context().clearCookies();
   await open(page, 390);
   await page.getByTestId('studio-menu-toggle').click();
   await page.waitForSelector('[role="dialog"]');
@@ -186,7 +193,7 @@ test.beforeAll(async ({ browser }) => {
 });
 
 test.describe('Studio left menu (objectstack#36899)', () => {
-  test('wide: docked at the left, six groups, the content beside it', async ({ page }, testInfo) => {
+  test('wide: docked at the left, the 常用 groups shown, the content beside it', async ({ page }, testInfo) => {
     await open(page, 1280);
     const panel = await rect(page, PANEL);
     const content = await rect(page, '#content');
@@ -195,10 +202,41 @@ test.describe('Studio left menu (objectstack#36899)', () => {
     expect(panel.width).toBeGreaterThanOrEqual(255);
     expect(panel.width).toBeLessThanOrEqual(256);
     expect(content.left).toBeGreaterThanOrEqual(panel.right - 1);
-    for (const g of ['data', 'ui', 'automation', 'system', 'security', 'ai']) {
+    // objectstack#37201 — the served 常用 types' groups; 平台 Platform holds only 高级 entries.
+    for (const g of ['data', 'automation', 'security']) {
       await expect(page.getByTestId(`studio-menu-group-${g}`)).toBeVisible();
     }
+    await expect(page.getByTestId('studio-menu-group-system')).toHaveCount(0);
     await testInfo.attach('wide', { body: await page.screenshot(), contentType: 'image/png' });
+  });
+
+  test('the 高级 fold: closed, then opened by a click, and a reload keeps it open (objectstack#37201)', async ({ page }, testInfo) => {
+    await open(page, 1280);
+    const fold = page.getByTestId('studio-menu-advanced-toggle');
+    await expect(fold).toBeVisible();
+    await expect(fold).toHaveAttribute('aria-expanded', 'false');
+    await expect(page.getByTestId('studio-menu-advanced-group-system')).toBeHidden();
+    await expect(page.getByTestId('studio-menu-entry-diagnostics')).toBeHidden();
+    await testInfo.attach('advanced-closed', { body: await page.screenshot(), contentType: 'image/png' });
+
+    await fold.click();
+    await expect(fold).toHaveAttribute('aria-expanded', 'true');
+    for (const g of ['automation', 'system', 'security']) {
+      await expect(page.getByTestId(`studio-menu-advanced-group-${g}`)).toBeVisible();
+    }
+    await expect(page.getByTestId('studio-menu-entry-diagnostics')).toBeVisible();
+    // Below the 常用 entries, inside the docked panel.
+    const below = await page.getByTestId('studio-menu-entry-diagnostics').evaluate((el) => el.getBoundingClientRect().top);
+    const above = await page.getByTestId('studio-menu-entry-type:permission').evaluate((el) => el.getBoundingClientRect().top);
+    expect(below).toBeGreaterThan(above);
+    const cookies = await page.context().cookies(ORIGIN);
+    expect(cookies.find((c) => c.name === 'studio_menu_advanced')?.value).toBe('true');
+    expect(cookies.find((c) => c.name === 'studio_menu_state')).toBeUndefined();
+    await testInfo.attach('advanced-open', { body: await page.screenshot(), contentType: 'image/png' });
+
+    await page.reload();
+    await page.waitForSelector('[data-testid="studio-menu-advanced-toggle"]');
+    await expect(page.getByTestId('studio-menu-advanced-toggle')).toHaveAttribute('aria-expanded', 'true');
   });
 
   test('collapsed: off the canvas, the content takes the full width, and a reload keeps it', async ({ page }, testInfo) => {

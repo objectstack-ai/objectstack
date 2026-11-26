@@ -39,9 +39,6 @@ import { Link, Navigate, Outlet, Route, useParams } from 'react-router-dom';
 import { Lock } from 'lucide-react';
 import { Button, Empty, EmptyTitle } from '@object-ui/components';
 import {
-  AppHeader,
-  CommandPalette,
-  CommandPaletteProvider,
   LoadingFallback,
   LoadingScreen,
   STUDIO_ALL_PACKAGES_SEGMENT,
@@ -49,10 +46,13 @@ import {
   STUDIO_METADATA_AREA,
   STUDIO_ORG_SCOPE_PILLAR,
   STUDIO_ORG_SCOPE_SEGMENT,
+  StudioEntryPermissionsProvider,
   studioMetadataAreaPath,
   studioPackagePath,
   useHomePath,
+  usePhoneViewport,
   useRecentItems,
+  useStudioEntryPermissions,
 } from '@object-ui/app-shell';
 import { useObjectTranslation } from '@object-ui/i18n';
 
@@ -60,11 +60,12 @@ import { ProtectedRoute } from './ProtectedRoute';
 import { holdsStudioAccess, useStudioEntry } from './studioEntry';
 
 /*
- * The two builder screens load WITH THEIR ROUTE, not with the console
- * (objectui#11798). Imported statically, `StudioDesignSurface` and
- * `BuilderLanding` (and the modules only they reach, such as the pillar panels
- * and the form designer) sat in the eager closure of every console page, for
- * every user, on deployments where most principals can never enter Studio.
+ * The builder screens load WITH THEIR ROUTE, not with the console
+ * (objectui#11798). Imported statically, `StudioDesignSurface` (and the modules
+ * only it reaches, such as the pillar panels and the form designer) sat in the
+ * eager closure of every console page, for every user, on deployments where
+ * most principals can never enter Studio. Studio's entry
+ * (`StudioEntryRedirect`) rides in the same chunk.
  *
  * Only the builder is deferred. The gate above it (`StudioRoute` →
  * `RequireStudioAccess`) stays in this eager module on purpose: it decides
@@ -76,8 +77,8 @@ import { holdsStudioAccess, useStudioEntry } from './studioEntry';
 const StudioDesignSurface = lazy(() =>
   import('./studioBuilder').then((m) => ({ default: m.StudioDesignSurface })),
 );
-const BuilderLanding = lazy(() =>
-  import('./studioBuilder').then((m) => ({ default: m.BuilderLanding })),
+const StudioEntryRedirect = lazy(() =>
+  import('./studioBuilder').then((m) => ({ default: m.StudioEntryRedirect })),
 );
 
 /**
@@ -91,10 +92,13 @@ const BuilderLanding = lazy(() =>
  * (`empty.appAccessDenied`): said in place, as the permanent decision it is, so
  * no Retry; and the URL stays, so the caller can send it to an administrator
  * and reload once access is granted. No header frames this screen, so the way
- * home is its own button, as there, and it reuses that screen's label.
+ * home is its own button, as there, and it reuses that screen's labels.
  */
 function StudioAccessRequired({ home }: { home: string }) {
   const { t } = useObjectTranslation();
+  // A phone's Home is its app list; from 768 px up `home` opens an app's start
+  // page, so the button says so, as the shell's other way-home buttons do.
+  const phone = usePhoneViewport();
   return (
     <div className="flex h-screen items-center justify-center p-4">
       <Empty data-testid="studio-access-required">
@@ -108,7 +112,11 @@ function StudioAccessRequired({ home }: { home: string }) {
         </EmptyTitle>
         <div className="mt-4">
           <Button asChild>
-            <Link to={home}>{t('empty.appAccessDeniedHome', { defaultValue: 'Back to home' })}</Link>
+            <Link to={home}>
+              {phone
+                ? t('empty.appAccessDeniedHome', { defaultValue: 'Back to home' })
+                : t('layout.appSwitcher.backToHome', { defaultValue: 'Back to app start page' })}
+            </Link>
           </Button>
         </div>
       </Empty>
@@ -159,7 +167,12 @@ export function RequireStudioAccess({
     return <StudioAccessRequired home={homeTo ?? homePath} />;
   }
 
-  return <>{children}</>;
+  return (
+    // The capability set this gate read, for the Studio screens below it that
+    // choose a destination by it: Studio's entry and the package-not-found
+    // state's way out (objectstack#36908). Provided only around a holder.
+    <StudioEntryPermissionsProvider value={entry.systemPermissions}>{children}</StudioEntryPermissionsProvider>
+  );
 }
 
 /** Route element for the `/studio` subtree: auth, then entry capability, then children. */
@@ -174,84 +187,31 @@ export function StudioRoute() {
 }
 
 /**
- * What a Studio builder screen shows INSIDE an already-painted frame while its
- * chunk loads (objectui#11798): the `/studio` landing under its console header,
- * and the `studio:builder` registry entry inside the app shell. One line of the
- * shared `common.loading` text, as `registerAccountComponents` shows for its own
- * lazy page. The full-screen pillar builder has no frame of its own, so it
- * falls back to `LoadingFallback`, the splash the gate's pending state already
- * shows, and the two waits read as one. `role="status"` lets assistive
- * technology announce the wait, and it is what the tests find the line by.
+ * Bare `/studio` (objectstack#36908, epic #36890 decision 9): Studio's entry,
+ * which draws no page. It opens the package the author was last in, else the
+ * package list: Setup → Packages for a principal who may open it, the "All
+ * metadata" area across packages otherwise (`StudioEntryRedirect` in
+ * app-shell). The package-card home it used to draw was removed; Studio is
+ * entered from an app or from Setup → Packages.
  */
-export function StudioBuilderLoading() {
-  const { t } = useObjectTranslation();
+function StudioEntry() {
+  const systemPermissions = useStudioEntryPermissions();
   return (
-    <div role="status" className="p-6 text-sm text-muted-foreground">
-      {t('common.loading', { defaultValue: 'Loading…' })}
-    </div>
-  );
-}
-
-/**
- * The `/studio` front door: pick or create a writable package, or open the
- * organization's package-less flows.
- *
- * Its header is the console's own (objectui#11863): `AppHeader`'s `studio`
- * variant, as `/home` mounts the `home` one, with the same account menu, inbox
- * and help, and the brand, then a fixed Studio crumb. The brand links to
- * `useHomePath()`, so the landing is never a navigation dead end, and it names
- * the same home as `StudioDesignSurface`'s Home button one route apart
- * (objectui#7256, objectui#7373).
- *
- * The frame mounts the command palette in its `studio` scope (objectui#11863):
- * no app is active here, so it lists the Studio's packages, objects and flows
- * instead of an app's entries. Under its `CommandPaletteProvider` the header
- * draws the search trigger, as it does wherever a palette is mounted
- * (objectui#11912), and `⌘K` opens it.
- */
-function StudioLanding() {
-  return (
-    <StudioConsoleFrame>
-      <BuilderLanding />
-    </StudioConsoleFrame>
-  );
-}
-
-/**
- * The console frame the `/studio` landing draws (objectui#11863):
- * the console's own top bar in its `studio` variant and the command palette in
- * its `studio` scope, around a body that loads with its route.
- */
-function StudioConsoleFrame({ children }: { children: ReactNode }) {
-  return (
-    <CommandPaletteProvider>
-      <div className="flex min-h-screen flex-col bg-background text-foreground">
-        {/* The console top bar, 48 px like every console frame's
-            (objectui#12639): `@object-ui/app-shell` spells the class as
-            `CONSOLE_TOP_BAR`, and its `consoleTopBar.height-12639` test holds
-            this copy equal to it. */}
-        <header className="sticky top-0 z-30 flex h-12 w-full shrink-0 items-center gap-2 border-b bg-background px-2 sm:px-4">
-          <AppHeader variant="studio" />
-        </header>
-        <CommandPalette scope="studio" />
-        <div className="min-h-0 flex-1 overflow-auto">
-          {/* The frame above stays painted while the body's chunk loads. */}
-          <Suspense fallback={<StudioBuilderLoading />}>{children}</Suspense>
-        </div>
-      </div>
-    </CommandPaletteProvider>
+    <Suspense fallback={<LoadingFallback />}>
+      <StudioEntryRedirect systemPermissions={systemPermissions} pending={<LoadingFallback />} />
+    </Suspense>
   );
 }
 
 /**
  * A package's pillar builder, which records the visit as a recent `package`
- * entry (objectui#11863), so the landing can list the packages an author was
- * last in. `useTrackRouteAsRecent` reads `/apps/APP` routes only, and this
+ * entry (objectui#11863), so Studio's entry (bare `/studio`, objectstack#36908)
+ * can open the package an author was last in. `useTrackRouteAsRecent` reads `/apps/APP` routes only, and this
  * module owns the `/studio` subtree, so the record is made here, behind the
  * entry gate: a refused principal never mounts this element.
  *
  * The entry is the package's IDENTITY — its id, and `href` its bare route,
- * which lands on the Data pillar — and no label: the landing labels it from the
+ * which lands on the Data pillar — and no label: a reader labels it from the
  * package list it loads (objectui#11678's shape). Keyed on the package, not the
  * pillar, so moving between pillars of one package leaves the list as it is,
  * and the provider writes nothing. The package-less scope (`~org`) and the
@@ -289,7 +249,7 @@ function StudioPackageBuilder({ area }: { area?: typeof STUDIO_METADATA_AREA }) 
  * REAL tree instead of a transcription of it — a transcription would be free to
  * agree with itself while `App.tsx` quietly mounted the builder ungated.
  *
- *   `/studio`                         front door (pick / create a writable package)
+ *   `/studio`                         Studio's entry: the last package, else the package list
  *   `/studio/~org`                    the package-less scope lands on its one pillar
  *   `/studio/~all/*`                  lands on the "All metadata" area across packages
  *   `/studio/:packageId`              a package lands on its Data pillar
@@ -324,7 +284,7 @@ function StudioPackageBuilder({ area }: { area?: typeof STUDIO_METADATA_AREA }) 
  */
 export const studioRoutes = (
   <Route path="/studio" element={<StudioRoute />}>
-    <Route index element={<StudioLanding />} />
+    <Route index element={<StudioEntry />} />
     <Route
       path={STUDIO_ORG_SCOPE_SEGMENT}
       element={<Navigate to={STUDIO_ORG_SCOPE_PILLAR} replace />}

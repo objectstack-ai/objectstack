@@ -35,12 +35,17 @@
  *   `resetOnSubmit` reset; a change of an unrelated field; a lookup holding
  *   nothing (never written to); and a `dependsOn` the picker does not scope
  *   by.
+ * - OPENING-FILL rows (objectstack#37289) — a lookup's opening fill of its own
+ *   parent keeps a create form's seeded pair two levels deep; the user's own
+ *   change of either level, and a fill a pick makes, still clear.
  *
  * These components tests never load `@object-ui/fields`, so `field:lookup` is
  * served by a probe that renders a plain input and calls `onChange` with the
  * id typed into it — the value channel the real `LookupField` uses when a
  * record is picked (`onChange(option.value)`) or its chip removed
- * (`onChange(null)`). The rule under test reads the FIELD CONFIG and the
+ * (`onChange(null)`) — and, for a field a case lists in `FILLS`, writes its
+ * siblings through `onAutofill` as the real widget's opening fill and pick
+ * fill do. The rule under test reads the FIELD CONFIG and the
  * form's values; nothing else can move a value in this environment.
  */
 
@@ -50,20 +55,49 @@ import { render, screen, cleanup, fireEvent, waitFor } from '@testing-library/re
 import { ComponentRegistry } from '@object-ui/core';
 // Module-scope import (not `beforeAll`) — objectui#3010/#3021.
 import '../../../renderers';
+// The renderers reach a dynamic `@object-ui/react-runtime` import; its first
+// load is paid here, during collection, not inside a case's clock
+// (`check:test-source-alias`).
+import '@object-ui/react-runtime';
 
 interface LookupProbeProps {
   name: string;
   value?: unknown;
   onChange: (next: string | null) => void;
+  onAutofill?: (patch: Record<string, unknown>, options?: { opening?: boolean }) => void;
+  openingValue?: unknown;
 }
 
+/**
+ * The sibling writes a probe makes, by field and record id — the stand-in for
+ * the real `LookupField`'s `lookupAutofill` plan (objectstack#37289). Empty
+ * unless a case fills it, so every other case runs the probe exactly as before.
+ */
+const FILLS: Record<string, Record<string, Record<string, unknown>>> = {};
+
 function LookupProbe(props: LookupProbeProps) {
-  const value = props.value;
+  const { value, onAutofill, openingValue } = props;
+  // The opening fill (objectstack#35050), as `LookupField` makes it: once per
+  // opening value, while the field still holds that value, flagged `opening`.
+  const openingFilled = React.useRef(false);
+  React.useEffect(() => {
+    if (openingFilled.current || !onAutofill || openingValue == null || value !== openingValue) return;
+    const patch = FILLS[props.name]?.[String(openingValue)];
+    if (!patch) return;
+    openingFilled.current = true;
+    onAutofill(patch, { opening: true });
+  }, [onAutofill, openingValue, value, props.name]);
   return (
     <input
       data-testid={`lookup-${props.name}`}
       value={Array.isArray(value) ? value.join(',') : value == null ? '' : String(value)}
-      onChange={(e) => props.onChange(e.target.value === '' ? null : e.target.value)}
+      onChange={(e) => {
+        const next = e.target.value === '' ? null : e.target.value;
+        props.onChange(next);
+        // A pick's fill, as `LookupField` makes it: after the value, no flag.
+        const patch = next == null ? undefined : FILLS[props.name]?.[next];
+        if (patch && onAutofill) onAutofill(patch);
+      }}
     />
   );
 }
@@ -119,6 +153,7 @@ function wireKeys(payload: Rec): string[] {
 afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
+  for (const key of Object.keys(FILLS)) delete FILLS[key];
 });
 
 describe('objectui#11631 — a dependent lookup is cleared when its parent moves', () => {
@@ -430,5 +465,123 @@ describe('objectui#11631 — what does NOT clear a dependent lookup', () => {
     pick('account', 'contoso');
     save();
     expect((await payloadOf(onSubmit)).contact).toBe('prospect-18');
+  });
+});
+
+/**
+ * objectstack#37289 — a related tab's New two `dependsOn` levels deep.
+ *
+ * The New seeds the child relationship lookup and the lookup it is scoped by
+ * (`{order: 'o1', account: 'a1'}`). `account` is itself scoped by `region`
+ * and fills `region` from the account record (`lookupAutofill`). That fill is
+ * made by the value the form OPENED with, flagged `opening`; read as an edit
+ * of `region`, it cleared `account`, and the cleared `account` cleared
+ * `order` — the child saved unlinked, with no error. An opening fill joins the
+ * opening values, so it moves no parent; a user's change of either level
+ * still does.
+ */
+describe('objectstack#37289 — an opening autofill is not a parent switch', () => {
+  /** The related-tab New's child form, two `dependsOn` levels deep. */
+  const DEPTH_TWO_FIELDS = [
+    {
+      name: 'region',
+      label: 'Region',
+      type: 'field:lookup',
+      field: { name: 'region', type: 'lookup', reference: 'showcase_region' },
+    },
+    {
+      name: 'account',
+      label: 'Account',
+      type: 'field:lookup',
+      field: { name: 'account', type: 'lookup', reference: 'showcase_account', dependsOn: ['region'] },
+    },
+    {
+      name: 'order',
+      label: 'Order',
+      type: 'field:lookup',
+      field: { name: 'order', type: 'lookup', reference: 'showcase_order', dependsOn: ['account'] },
+    },
+  ];
+  const SEED = { order: 'o1', account: 'a1' };
+
+  it('the seeded pair survives the fill the seeded account makes of its region', async () => {
+    FILLS.account = { a1: { region: 'r1' } };
+    const onSubmit = vi.fn();
+    renderForm({ fields: DEPTH_TWO_FIELDS, defaultValues: SEED, onSubmit });
+
+    await waitFor(() =>
+      expect((screen.getByTestId('lookup-region') as HTMLInputElement).value).toBe('r1'),
+    );
+    save();
+    const payload = await payloadOf(onSubmit);
+    expect(payload.region).toBe('r1');
+    expect(payload.account).toBe('a1');
+    expect(payload.order).toBe('o1');
+  });
+
+  it("CONTROL — the user's own change of the upstream field still clears both levels", async () => {
+    FILLS.account = { a1: { region: 'r1' } };
+    const onSubmit = vi.fn();
+    renderForm({ fields: DEPTH_TWO_FIELDS, defaultValues: SEED, onSubmit });
+    await waitFor(() =>
+      expect((screen.getByTestId('lookup-region') as HTMLInputElement).value).toBe('r1'),
+    );
+
+    pick('region', 'r2');
+    save();
+    const payload = await payloadOf(onSubmit);
+    expect(payload.region).toBe('r2');
+    expect(payload.account).toBeNull();
+    expect(payload.order).toBeNull();
+    expect(wireKeys(payload)).toEqual(expect.arrayContaining(['account', 'order']));
+  });
+
+  it("CONTROL — the user's own change of the seeded account still clears the order", async () => {
+    FILLS.account = { a1: { region: 'r1' } };
+    const onSubmit = vi.fn();
+    renderForm({ fields: DEPTH_TWO_FIELDS, defaultValues: SEED, onSubmit });
+    await waitFor(() =>
+      expect((screen.getByTestId('lookup-region') as HTMLInputElement).value).toBe('r1'),
+    );
+
+    pick('account', 'a2');
+    save();
+    const payload = await payloadOf(onSubmit);
+    expect(payload.account).toBe('a2');
+    expect(payload.order).toBeNull();
+  });
+
+  it("CONTROL — a pick's fill of a parent is the user's change, and clears what that parent scopes", async () => {
+    // Only the OPENING fill joins the opening values: a fill a pick makes is
+    // part of the user's edit, so a lookup scoped by the field it fills is
+    // cleared exactly as if the user had changed that field by hand.
+    FILLS.depot = { d2: { region: 'r2' } };
+    const onSubmit = vi.fn();
+    renderForm({
+      fields: [
+        DEPTH_TWO_FIELDS[0],
+        {
+          name: 'site',
+          label: 'Site',
+          type: 'field:lookup',
+          field: { name: 'site', type: 'lookup', reference: 'showcase_site', dependsOn: ['region'] },
+        },
+        {
+          name: 'depot',
+          label: 'Depot',
+          type: 'field:lookup',
+          field: { name: 'depot', type: 'lookup', reference: 'showcase_depot' },
+        },
+      ],
+      defaultValues: { region: 'r1', site: 's1' },
+      onSubmit,
+    });
+
+    pick('depot', 'd2');
+    save();
+    const payload = await payloadOf(onSubmit);
+    expect(payload.depot).toBe('d2');
+    expect(payload.region).toBe('r2');
+    expect(payload.site).toBeNull();
   });
 });

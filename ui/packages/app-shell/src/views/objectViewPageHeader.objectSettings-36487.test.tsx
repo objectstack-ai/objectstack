@@ -121,7 +121,7 @@ beforeEach(() => {
   vi.stubGlobal(
     'fetch',
     vi.fn(async (url: unknown) => ({
-      ok: true,
+      headers: new Headers(), ok: true,
       status: 200,
       json: async () => (String(url).endsWith('/api/v1/packages') ? PACKAGES : { data: [] }),
     })),
@@ -175,7 +175,7 @@ describe('the list page\'s ⋮ More leads with Object settings (objectstack#3648
     fireEvent.keyDown(screen.getByTestId('object-view-more-actions'), { key: 'Enter' });
     fireEvent.click(await screen.findByRole('menuitem', { name: 'Object settings' }));
     await waitFor(() =>
-      expect(screen.getByTestId('where')).toHaveTextContent('/studio/com.example.my_base/data?surface=object:account'),
+      expect(screen.getByTestId('where')).toHaveTextContent('/studio/com.example.my_base/metadata/object/account'),
     );
   });
 
@@ -185,7 +185,7 @@ describe('the list page\'s ⋮ More leads with Object settings (objectstack#3648
     await openMore('app.objectstack.hotcrm');
     fireEvent.click(screen.getByRole('menuitem', { name: 'Object settings' }));
     await waitFor(() =>
-      expect(screen.getByTestId('where')).toHaveTextContent('/studio/app.objectstack.hotcrm/data?surface=object:account'),
+      expect(screen.getByTestId('where')).toHaveTextContent('/studio/app.objectstack.hotcrm/metadata/object/account'),
     );
     expect(confirm).not.toHaveBeenCalled();
   });

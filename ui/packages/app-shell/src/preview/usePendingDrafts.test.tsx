@@ -24,7 +24,7 @@ import { __resetHiddenTabClock } from '../hooks/hiddenTabPollStop.js';
 const draftsRow = { type: 'object', name: 'task', packageId: 'app.k9qk' };
 
 function stubFetch(payload: unknown, ok = true) {
-  const fn = vi.fn(async () => ({ ok, status: ok ? 200 : 500, json: async () => payload }));
+  const fn = vi.fn(async () => ({ headers: new Headers(), ok, status: ok ? 200 : 500, json: async () => payload }));
   vi.stubGlobal('fetch', fn);
   return fn;
 }
@@ -120,7 +120,7 @@ describe('a change made outside the tab reaches the hook without a reload (objec
     document.dispatchEvent(new Event('visibilitychange'));
   }
   function stubLedger() {
-    const fn = vi.fn(async () => ({ ok: true, status: 200, json: async () => ({ drafts: ledger }) }));
+    const fn = vi.fn(async () => ({ headers: new Headers(), ok: true, status: 200, json: async () => ({ drafts: ledger }) }));
     vi.stubGlobal('fetch', fn);
     return fn;
   }

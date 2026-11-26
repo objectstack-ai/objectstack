@@ -436,12 +436,13 @@ describe('AppContent — the unmatched-URL state offers two ways out (objectstac
     vi.clearAllMocks();
   });
 
-  it('Back to home opens Home', async () => {
+  // objectstack#37163 — on a desktop the button names the app start page.
+  it('the way home (「Back to app start page」 on a desktop) opens Home', async () => {
     renderConsoleAt('/apps/setup/system/no-such-page');
 
     const state = await screen.findByTestId('route-not-found');
     expect(state).toHaveTextContent('Page not found');
-    fireEvent.click(screen.getByRole('button', { name: 'Back to home' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Back to app start page' }));
     expect(await screen.findByTestId('home-launcher')).toBeInTheDocument();
     expect(pathname()).toBe('/home');
   });

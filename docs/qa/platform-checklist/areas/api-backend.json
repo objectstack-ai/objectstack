@@ -4200,6 +4200,78 @@
           "ref": "#32020"
         }
       ]
+    },
+    {
+      "id": "api-backend.openapi-paths-answer-live",
+      "title": "The served OpenAPI document describes the live server: every built-in path it lists answers its documented method under the deployment's own API prefix, a declared api endpoint appears in it, and no documented operation answers the routing 404 or a 405",
+      "since": "v18",
+      "status": "active",
+      "revision": 1,
+      "priority": "P1",
+      "surface": "api",
+      "personas": [
+        "seeded admin with a session or personal key (GET /openapi.json is behind the anonymous floor since v18: access-security.anonymous-floor-v18-doors)"
+      ],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "a booted showcase with a bundled spec, so /openapi.json answers 200 rather than 503 OPENAPI_UNAVAILABLE",
+          "at least one metadata-declared api endpoint (api-backend.declarative-endpoint-execution names the showcase's)"
+        ]
+      },
+      "steps": [
+        "GET /api/v1/openapi.json as the admin; record the status and the paths keys",
+        "for each documented operation under the API prefix, call its method on the live server with path parameters filled from seeded rows (an object name, a record id); record each status",
+        "for the data family, record which verb the document lists for a record update, and call PUT and PATCH on one record",
+        "find the declared api endpoint's URL in the document and call it as documented",
+        "call one path the document does not list, as the routing-404 control"
+      ],
+      "acceptance": [
+        {
+          "clause": "every documented path begins with the deployment's served API prefix",
+          "oracle": "api",
+          "verify": "every built-in path key starts with the prefix the server mounts (/api/v1 on a stock boot); none is the bare /api form (packages/rest/src/openapi-builtin-paths.ts#buildBuiltinPaths reads the routes the server mounted)",
+          "evidence": "the document's paths keys"
+        },
+        {
+          "clause": "no documented operation answers the routing 404 or a 405",
+          "oracle": "api",
+          "verify": "each call of steps[1] answers something other than the control's routing-404 body and other than 405; a refusal of the request itself (400, 403, 404 for a missing record) still proves the route",
+          "evidence": "the per-operation status table and the control trace"
+        },
+        {
+          "clause": "the document lists the verb the server answers for an update, and only it",
+          "oracle": "api",
+          "verify": "the record-update operation is documented as PATCH and PATCH succeeds; PUT is not documented for it",
+          "evidence": "the document excerpt and both calls"
+        },
+        {
+          "clause": "a metadata-declared api endpoint appears in the document and answers as documented",
+          "oracle": "api",
+          "verify": "the endpoint's path and method are in paths (packages/rest/src/openapi-endpoints.ts#enrichOpenApiWithEndpoints) and the documented call answers",
+          "evidence": "the excerpt and the call"
+        }
+      ],
+      "negative": [
+        "a documented operation that answers the routing 404 is a FAIL: a client generated from the document gets one 404 per call",
+        "do not tick this from the static artifact or a unit test: the evidence is the document the running server serves and live calls against it"
+      ],
+      "source": [
+        "docs/NORTH-STAR.md, Product areas, area:workflow core feature 3: the API works as documented",
+        "packages/rest/src/discovery-routes.ts#registerOpenApiEndpoints",
+        "packages/rest/src/openapi-builtin-paths.ts#buildBuiltinPaths",
+        "packages/rest/src/openapi-endpoints.ts#enrichOpenApiWithEndpoints",
+        "packages/spec/scripts/openapi-self-consistency.test.ts",
+        "the route-ledger half (what code declares versus what is mounted) is api-backend.route-ledger-live-parity"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-11-25",
+          "change": "initial — maps the documented-API half of North Star core feature workflow 3 to an item; read from source at 49c8e0f0, no live run made",
+          "ref": "#35212"
+        }
+      ]
     }
   ]
 }

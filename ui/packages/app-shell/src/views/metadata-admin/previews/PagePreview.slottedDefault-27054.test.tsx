@@ -77,9 +77,9 @@ function stubFetch(schemaGate?: Promise<void>) {
   vi.stubGlobal('fetch', vi.fn(async (url: string) => {
     if (url.startsWith('/api/v1/meta/object/')) {
       if (schemaGate) await schemaGate;
-      return { json: async () => ({ item: { name: OBJECT, fields: FIELDS } }) } as any;
+      return { headers: new Headers(), json: async () => ({ item: { name: OBJECT, fields: FIELDS } }) } as any;
     }
-    return { json: async () => ({ records: [] }) } as any;
+    return { headers: new Headers(), json: async () => ({ records: [] }) } as any;
   }));
 }
 
@@ -221,6 +221,7 @@ describe('PagePreview — Convert to full page heads the ungrouped bucket, trans
 
   function stubGroupedFetch() {
     vi.stubGlobal('fetch', vi.fn(async (url: string) => ({
+      headers: new Headers(),
       json: async () => (url.startsWith('/api/v1/meta/object/') ? { item: GROUPED } : { records: [] }),
     }) as any));
   }
@@ -285,6 +286,7 @@ describe('PagePreview — Convert to full page heads More details, translated (o
 
   function stubFlatFetch() {
     vi.stubGlobal('fetch', vi.fn(async (url: string) => ({
+      headers: new Headers(),
       json: async () => (url.startsWith('/api/v1/meta/object/') ? { item: FLAT } : { records: [] }),
     }) as any));
   }

@@ -7,7 +7,7 @@
  */
 
 import { pickLocalized } from '@object-ui/i18n';
-import { isIntegerAggregate } from '@object-ui/core';
+import { formatMeasure, isIntegerAggregate } from '@object-ui/core';
 import type { ObjectChartSchema } from '@object-ui/types';
 
 /**
@@ -272,6 +272,63 @@ export interface NormalizedSeries {
    * so an author cannot claim integer ticks for a currency sum.
    */
   aggregate?: string;
+  /**
+   * How the measure this series plots is formatted — renderer-internal, like
+   * {@link aggregate}: a dataset-bound producer (the report chart, the
+   * dashboard widget) fills it from the answer's `fields[]` facts, and no
+   * author writes it (objectstack#37053). A value axis whose series all carry
+   * the same one prints its ticks in the measure's units (see
+   * `measureTickFormatter`).
+   */
+  measureFormat?: MeasureValueFormat;
+}
+
+/**
+ * The facts a value axis needs to print a dataset measure's ticks in the
+ * measure's units, the way the table beside it prints the measure
+ * (objectstack#37053): its numeral `format` pattern, the ONE `currency` every
+ * cell of the column shows, and the `percentScale` its stored number is at. A
+ * per-row currency column (`currencyField`, ADR-0144 D9) has no single
+ * currency, so its producer leaves `currency` out and the axis keeps its
+ * plain numbers.
+ */
+export interface MeasureValueFormat {
+  format?: string;
+  currency?: string;
+  percentScale?: 'fraction' | 'whole';
+}
+
+/**
+ * Read one series' {@link MeasureValueFormat} carrier, keeping only the keys
+ * of its shape; `undefined` when it states none.
+ */
+function measureValueFormat(raw: unknown): MeasureValueFormat | undefined {
+  if (!isRec(raw)) return undefined;
+  const out: MeasureValueFormat = {};
+  const format = str(raw.format);
+  if (format) out.format = format;
+  const currency = str(raw.currency);
+  if (currency) out.currency = currency;
+  if (raw.percentScale === 'fraction' || raw.percentScale === 'whole') out.percentScale = raw.percentScale;
+  return Object.keys(out).length > 0 ? out : undefined;
+}
+
+/**
+ * The {@link MeasureValueFormat} a value axis plotting `series` prints its
+ * ticks with (objectstack#37053): the carrier every one of them states, when
+ * they all state the same one, and it names a unit the axis can print — a
+ * currency, or a `%` pattern. A series with none, two measures formatted
+ * differently, or a plain numeral pattern leave the axis on its default, the
+ * same all-or-nothing rule {@link plotsWholeNumbers} reads `aggregate` by.
+ */
+export function sharedMeasureFormat(series: readonly NormalizedSeries[]): MeasureValueFormat | undefined {
+  const [first] = series;
+  const shared = first?.measureFormat;
+  if (!shared) return undefined;
+  const same = (m: MeasureValueFormat | undefined): boolean =>
+    m?.format === shared.format && m?.currency === shared.currency && m?.percentScale === shared.percentScale;
+  if (!series.every((s) => same(s.measureFormat))) return undefined;
+  return shared.currency || shared.format?.includes('%') ? shared : undefined;
 }
 
 /**
@@ -505,6 +562,9 @@ function normalizeSeries(raw: unknown, language: string | null | undefined): Nor
   // the authoring face refuses it by name, see `NormalizedSeries.aggregate`.
   const aggregate = str(raw.aggregate);
   if (aggregate) out.aggregate = aggregate;
+  // Renderer-internal too (objectstack#37053), see `NormalizedSeries.measureFormat`.
+  const measureFormat = measureValueFormat(raw.measureFormat);
+  if (measureFormat) out.measureFormat = measureFormat;
   return out;
 }
 
@@ -1000,8 +1060,14 @@ export function valueTickExponent(
  * (`roundingPriority: 'morePrecision'`), so no label prints fewer digits than
  * before; with no exponent (nothing to measure, a log scale) it is the whole
  * rule, as it always was.
+ *
+ * `currency` is a measure's one ISO 4217 code (objectstack#37053, see
+ * {@link measureTickFormatter}): the same compact number, carrying the
+ * locale's symbol for that currency (`CN¥1.2M`, `¥120万`). A code `Intl`
+ * refuses prints the plain compact number, as `formatMeasure` falls back to a
+ * plain number for it.
  */
-export function compactTickFormatter(locale: string, tickExponent?: number): (value: any) => string {
+export function compactTickFormatter(locale: string, tickExponent?: number, currency?: string): (value: any) => string {
   return (value: any): string => {
     if (value == null || value === '') return '';
     const num = typeof value === 'number' ? value : Number(value);
@@ -1017,11 +1083,76 @@ export function compactTickFormatter(locale: string, tickExponent?: number): (va
       maximumFractionDigits: 1,
       ...(significant !== undefined ? { maximumSignificantDigits: significant, roundingPriority: 'morePrecision' } : {}),
     };
+    // A currency's own minor-unit width (CNY 2) is the width of a cell, not
+    // of a compact tick: `minimumFractionDigits: 0` keeps `¥30万` from
+    // reading `¥30.00万`.
+    const money: Intl.NumberFormatOptions | undefined = currency
+      ? { ...opts, style: 'currency', currency, minimumFractionDigits: 0 }
+      : undefined;
     try {
-      return new Intl.NumberFormat(locale, opts).format(num);
+      return new Intl.NumberFormat(locale, money ?? opts).format(num);
     } catch {
+      if (money) {
+        try {
+          return new Intl.NumberFormat(locale, opts).format(num);
+        } catch {
+          // Fall through to the bare number, as with no currency.
+        }
+      }
       return String(num);
     }
+  };
+}
+
+/**
+ * The tick formatter a value axis prints a dataset measure's ticks with —
+ * the measure's units on the axis, beside a table printing the same measure
+ * (objectstack#37053) — or `undefined` when the measure names no unit the
+ * axis can print, which leaves the axis on its default.
+ *
+ * `measure` is the axis' {@link sharedMeasureFormat}. Two units travel:
+ *
+ *  - **A percent pattern** prints through `formatMeasure` (`@object-ui/core`),
+ *    the function the table prints the column with, at the column's own
+ *    `percentScale`: a `whole` column's `33.3` reads `33.3%` as it does in the
+ *    table, which the axis' `format` key could not say — `formatterFor` reads
+ *    a `%` pattern as a 0–1 fraction and would print `3,330%`. The pattern's
+ *    places are a floor and grow to the axis' {@link valueTickExponent} (at
+ *    the displayed scale: a fraction's step is 100× smaller than its points),
+ *    the rule {@link formatterFor} applies to a declared pattern, so two ticks
+ *    never share a label.
+ *  - **A currency** prints the compact default with the currency's symbol
+ *    ({@link compactTickFormatter}). Not `formatMeasure`'s full amount: that
+ *    is the width of a cell (`CN¥1,200,000.00`), and a value axis is drawn
+ *    48 px wide, where the leading symbol is the part cut off. The compact
+ *    reading is the one the axis already gives every amount.
+ *
+ * A currency wins over a percent pattern, as it does in `formatMeasure`.
+ */
+export function measureTickFormatter(
+  measure: MeasureValueFormat | undefined,
+  locale: string,
+  tickExponent?: number,
+): ((value: any) => string) | undefined {
+  if (!measure) return undefined;
+  if (measure.currency) return compactTickFormatter(locale, tickExponent, measure.currency);
+  const format = measure.format;
+  if (!format?.includes('%')) return undefined;
+  const scale = measure.percentScale ?? 'fraction';
+  // `formatMeasure`'s own count of the pattern's places.
+  const patternPlaces = format.split('.')[1]?.match(/0/g)?.length ?? 0;
+  const stepPlaces = tickExponent === undefined
+    ? 0
+    : Math.max(0, -tickExponent - (scale === 'fraction' ? 2 : 0));
+  const places = Math.min(MAX_FRACTION_DIGITS, Math.max(patternPlaces, stepPlaces));
+  // The measure's pattern at the places the step needs: `formatMeasure` reads
+  // a pattern's places and its `%`, and groups on its own.
+  const pattern = `0${places > 0 ? `.${'0'.repeat(places)}` : ''}%`;
+  return (value: any): string => {
+    if (value == null || value === '') return '';
+    const num = typeof value === 'number' ? value : Number(value);
+    if (!Number.isFinite(num)) return String(value);
+    return formatMeasure(num, pattern, undefined, scale, locale);
   };
 }
 

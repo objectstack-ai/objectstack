@@ -51,7 +51,41 @@ import { laneKeyOf } from './kanbanReferenceLanes';
  * lane query does; a board of one query matches it without case, as it buckets
  * its cards (`index.tsx`). A board whose lanes come from the data draws one
  * lane per key, so only the empty key is "Uncategorized".
+ *
+ * ## A partial answer
+ *
+ * The door cuts a grouped read to the deployment's default page size and says
+ * so (`hasMore`). A cut answer draws no figure for any lane
+ * ({@link readLaneStatistic}, objectstack#36870).
+ *
+ * ## A board its host hands its cards to
+ *
+ * Such a board asks the same read when its host also hands it the query those
+ * cards came from ({@link KanbanLaneStatisticRequest}, objectstack#36871): the
+ * node's `filter` is then the host's effective filter, and the request carries
+ * the host's search pair and refresh signal. `ListView` does so for the board
+ * whose lanes it does not know before the query (lanes over a lookup field),
+ * to which it hands one page of rows: the figures cover every record of each
+ * lane, not that page. A host that hands cards without its query (rows handed
+ * in whole) gets a `sum` added up over them and no other figure.
  */
+
+/**
+ * The host's query, for the lane read of a board it hands its cards to
+ * (objectstack#36871): the search pair its own fetch sent and the signal that
+ * moves when it refetches. The filter is the node's own `filter`, which the
+ * host sets to the effective filter of that fetch.
+ *
+ * A HOST channel, never an authoring key.
+ */
+export interface KanbanLaneStatisticRequest {
+  /** The host's search term (ADR-0061), sent as the read's `search`. */
+  search?: string;
+  /** The fields the term may match, sent beside it. */
+  searchFields?: readonly string[];
+  /** Moves when the host refetches its rows: the read is asked again. */
+  reloadKey?: string | number;
+}
 
 /** The lane statistics answered by the server lane read. */
 export type KanbanLaneAggregate = 'sum' | 'avg' | 'min' | 'max';
@@ -229,16 +263,36 @@ export function readLaneFigures(rows: unknown, reading: LaneFigureReading): Reco
 }
 
 /**
+ * Every lane's figure from the lane read's ANSWER, or `null` — no figure for
+ * any lane — when the answer is partial (objectstack#36870).
+ *
+ * The grouped read can be cut: under a deployment's default page size the
+ * door slices the group rows and answers `hasMore`, which
+ * `DataSource.queryGroupHeaders` hands on as the answer's `hasMore`. A cut
+ * answer is not every lane's groups: a lane that folds several groups (the
+ * trailing "Uncategorized" lane) would total only the groups answered, and a
+ * lane whose group was dropped would read as empty — `0` for a sum. Neither is
+ * a figure the board can draw, and the answer does not say which lanes it cut,
+ * so no lane draws one.
+ */
+export function readLaneStatistic(
+  answer: unknown,
+  reading: LaneFigureReading,
+): Record<string, LaneFigure> | null {
+  if (Array.isArray(answer) && (answer as { hasMore?: unknown }).hasMore === true) return null;
+  return readLaneFigures(answer, reading);
+}
+
+/**
  * One lane's figure: what the read answered for it, else the figure of a lane
  * that holds no record — `0` for a sum, none for an average, a minimum or a
  * maximum.
  *
  * A lane the board knows holds records (`holdsRecords`: its count is above
- * zero) that no group answered for draws NO figure. The grouped read can be
- * cut: under a deployment's default page size the door slices the group rows
- * and answers `hasMore`, which `queryGroupHeaders` does not hand on. Such a
- * lane's group was dropped, not empty, and a `0` there would be a wrong figure
- * in place of a missing one.
+ * zero) that no group answered for draws NO figure: the board's count and the
+ * whole answer disagree (a write landed between the two reads), and a `0`
+ * there would be a wrong figure in place of a missing one. A PARTIAL answer
+ * never reaches here — {@link readLaneStatistic} answers no figures for it.
  */
 export function laneFigureOf(
   figures: Readonly<Record<string, LaneFigure>>,

@@ -133,6 +133,10 @@ const METADATA_FORM_BUNDLE: TranslationBundle = {
           'header.actions': { label: '操作按钮', helpText: '显示在页眉里的操作按钮' },
           widgets: { label: '组件', helpText: '仪表盘上的图表、数字和表格，以及每一项所在的位置。' },
           dateRange: { label: '日期范围', helpText: '打开仪表盘时默认的时间段，以及查看者能否自选日期。' },
+          // All three children of the `dateRange` composite — see the ⛔ note above.
+          'dateRange.field': { label: '日期字段', helpText: '时间段筛选所依据的日期字段。留空则按创建日期筛选。' },
+          'dateRange.defaultRange': { label: '默认时间段', helpText: '打开仪表盘时显示的时间段。' },
+          'dateRange.allowCustomRange': { label: '允许自定义范围', helpText: '允许查看者自己选择开始和结束日期。' },
           globalFilters: { label: '全局筛选', helpText: '查看者可用来一次筛选全部组件，或只筛选你指定组件的筛选条件。' },
         },
       },

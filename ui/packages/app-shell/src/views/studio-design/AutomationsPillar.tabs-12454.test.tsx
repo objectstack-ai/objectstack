@@ -98,6 +98,11 @@ import { registerMetadataInspector } from '../metadata-admin/inspector-registry'
 import { FlowPreview } from '../metadata-admin/previews/FlowPreview';
 import { FlowInspector } from '../metadata-admin/inspectors/FlowInspector';
 import { t } from '../metadata-admin/i18n';
+// The source under test reaches these dynamic imports (the command palette's
+// record preview, the drafts panel's lint, the code editor): their first load
+// is paid here, at collection, never inside a case's clock (`check:test-source-alias`).
+import '@objectstack/lint';
+import '@object-ui/plugin-detail';
 
 const dataSource = createEmptyDataSource();
 failOnAbsorbedFetchError();
@@ -123,10 +128,10 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-async function renderOpenFlow(): Promise<void> {
+async function renderOpenFlow(search = ''): Promise<void> {
   render(
-    <MemoryRouter initialEntries={[`/studio/${PKG}/automations`]}>
-      <AutomationsPillar packageId={PKG} />
+    <MemoryRouter initialEntries={[`/studio/${PKG}/metadata/flow/${FLOW.name}${search}`]}>
+      <AutomationsPillar packageId={PKG} flowName={FLOW.name} />
     </MemoryRouter>,
   );
   await screen.findByTestId('auto-tab-canvas', undefined, { timeout: 8000 });
@@ -134,22 +139,6 @@ async function renderOpenFlow(): Promise<void> {
 
 /** The section the preview body shows. */
 const sectionShown = () => screen.getByTestId('flow-preview-section').getAttribute('data-section');
-
-describe('the Automations rail groups by object (objectui#12454)', () => {
-  it('the flow sits under its object’s group, with its count, its trigger glyph and a legend', async () => {
-    await renderOpenFlow();
-    const group = await screen.findByTestId('auto-rail-group-crm_lead', undefined, { timeout: 8000 });
-    expect(within(group).getByRole('button', { name: /Lead\s*1/ })).toHaveAttribute('aria-expanded', 'true');
-    const row = within(group).getByTestId(`auto-rail-row-${FLOW.name}`);
-    expect(row).toHaveAttribute('data-trigger', 'record');
-    expect(row.getAttribute('title')).toBe(`Route new lead · ${en('engine.studio.auto.kind.record')}`);
-    expect(screen.getByTestId('auto-rail-legend')).toHaveTextContent(en('engine.studio.auto.kind.scheduled'));
-
-    // Folding the group hides its row; the count stays on the header.
-    fireEvent.click(within(group).getByRole('button', { name: /Lead\s*1/ }));
-    expect(within(group).queryByTestId(`auto-rail-row-${FLOW.name}`)).toBeNull();
-  });
-});
 
 describe('the item header’s tab row over the open flow (objectui#12454)', () => {
   it('offers the five tabs, Canvas open, and the Problems tab carries the problem count as a pill', async () => {
@@ -211,5 +200,29 @@ describe('the item header’s tab row over the open flow (objectui#12454)', () =
     fireEvent.click(screen.getByTestId('auto-tab-debug'));
     expect(sectionShown()).toBe('debug');
     expect(document.querySelector('[data-node-id="start"]')).not.toBeNull();
+  });
+});
+
+// objectstack#36903 — the open tab is in the address (`?tab=`): a refresh, a
+// shared link or ‹ › reopens it on the real designer.
+describe('the designer opens the tab its address names (objectstack#36903)', () => {
+  it('?tab=runs opens the Runs section', async () => {
+    await renderOpenFlow('?tab=runs');
+    await waitFor(() => expect(sectionShown()).toBe('runs'), { timeout: 8000 });
+    expect(screen.getByTestId('auto-tab-runs')).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByTestId('auto-tab-canvas')).toHaveAttribute('aria-pressed', 'false');
+  });
+
+  it('?tab=history opens the History tab’s panel', async () => {
+    await renderOpenFlow('?tab=history');
+    expect(await screen.findByTestId('item-tab-panel-history', undefined, { timeout: 8000 })).toBeInTheDocument();
+    expect(screen.getByTestId('auto-tab-canvas')).toHaveAttribute('aria-pressed', 'false');
+  });
+
+  // CONTROL: no `?tab=` opens the Canvas, and no tool panel.
+  it('CONTROL: with no tab in the address, the Canvas is open', async () => {
+    await renderOpenFlow();
+    expect(sectionShown()).toBe('canvas');
+    expect(screen.queryByTestId('item-tab-panel-history')).toBeNull();
   });
 });

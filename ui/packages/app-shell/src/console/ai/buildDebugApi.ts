@@ -8,8 +8,15 @@
  * This fetches the server-side reconciliation — agent-CLAIMED vs LIVE
  * `sys_metadata` — so a signed-in admin can diagnose a build that "went wrong"
  * from the browser, with no DB credentials. Mirrors `fetchConversation`'s
- * same-origin cookie auth.
+ * same-origin cookie auth, and sends the stored bearer token beside it.
  */
+
+import { createAuthenticatedFetch } from '@object-ui/auth';
+
+/** The console's authenticated fetch: the stored bearer token beside the session cookie. */
+function authFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+  return createAuthenticatedFetch()(input, init);
+}
 
 export interface ArtifactRef {
   type: string;
@@ -77,7 +84,7 @@ export interface BuildDebugReport {
  * empty state instead of throwing.
  */
 export async function fetchBuildDebug(apiBase: string, conversationId: string): Promise<BuildDebugReport | null> {
-  const res = await fetch(`${apiBase}/conversations/${encodeURIComponent(conversationId)}/debug`, {
+  const res = await authFetch(`${apiBase}/conversations/${encodeURIComponent(conversationId)}/debug`, {
     credentials: 'include',
   });
   if (res.status === 404 || res.status === 403 || res.status === 401) return null;

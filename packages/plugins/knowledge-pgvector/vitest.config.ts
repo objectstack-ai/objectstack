@@ -1,0 +1,71 @@
+// Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
+
+import { defineConfig } from 'vitest/config';
+import path from 'path';
+
+export default defineConfig({
+  test: {
+    // A late console.* must not redden a green suite (#10374): vitest's worker
+    // forwards console output over RPC and discards the promise, and a write
+    // landing after teardown's rpcDone() snapshot is rejected into an unhandled
+    // error — a fully green run that exits 1. Disarming removes the mechanism.
+    // Mechanism + measured costs: examples/app-showcase/vitest.config.ts.
+    // Enforced repo-wide by scripts/check-console-intercept-disarm.mjs.
+    disableConsoleIntercept: true,
+    globals: true,
+    environment: 'node',
+  },
+  resolve: {
+    alias: [
+      // Subpath BEFORE the bare package: `@objectstack/core` is a PREFIX match with a
+      // FILE replacement, so without this entry it swallows the published `./logger`
+      // subpath and resolves it to `…/core/src/index.ts/logger` — ENOTDIR at run time.
+      // Pinned by the published-subpath rule in `scripts/check-test-source-alias.mjs`,
+      // which derives the population from `@objectstack/core`'s own `exports` map.
+      { find: /^@objectstack\/core\/logger$/, replacement: path.resolve(__dirname, '../../core/src/logger.ts') },
+      { find: '@objectstack/core/egress', replacement: path.resolve(__dirname, '../../core/src/egress.ts') },
+      { find: '@objectstack/core', replacement: path.resolve(__dirname, '../../core/src/index.ts') },
+      // `./testing` (the adapter contract suite) BEFORE the bare package, and both
+      // anchored: a string `find` matches by PREFIX, so the bare entry would
+      // resolve the subpath to `…/src/index.ts/testing` — ENOTDIR at run time.
+      {
+        find: /^@objectstack\/service-knowledge\/testing$/,
+        replacement: path.resolve(__dirname, '../../services/service-knowledge/src/testing.ts'),
+      },
+      // The real-driver reindex case (#37100) runs ObjectQL over SqlDriver from source, as every other verdict here.
+      { find: /^@objectstack\/driver-sql$/, replacement: path.resolve(__dirname, '../../drivers/driver-sql/src/index.ts') },
+      { find: /^@objectstack\/objectql$/, replacement: path.resolve(__dirname, '../../objectql/src/index.ts') },
+      {
+        find: /^@objectstack\/service-knowledge$/,
+        replacement: path.resolve(__dirname, '../../services/service-knowledge/src/index.ts'),
+      },
+      // #9457: ONE anchored rule for every `@objectstack/spec` namespace, in place
+      // of the hand-maintained list of the subpaths this package's tests happened
+      // to reach. A string `find` matches by PREFIX, so with a FILE replacement the
+      // bare `@objectstack/spec` entry also swallowed every published namespace the
+      // list had not reached — `cloud`, `integration` and `studio` among them — and
+      // resolved it to `…/spec/src/index.ts/<ns>`: `ENOTDIR`, at run time, from a
+      // config that reads as correct, naming whichever module performed the import
+      // rather than this table.
+      //
+      // spec's export map is UNIFORM — every published namespace is
+      // `src/<ns>/index.ts`, with no FILE-shaped subpath of the kind
+      // `@objectstack/platform-objects/plugin` is — so one rule covers all of them
+      // and cannot go stale as tests reach new namespaces. Same shape as
+      // `packages/qa/downstream-contract` (PR #8129), `service-knowledge`,
+      // `service-settings` and `plugin-audit`; `packages/runtime` carries the pin
+      // over the rule (`src/spec-subpath-alias-coverage.pin.test.ts`).
+      //
+      // Kept from the enumeration because the reasons outlive it: `security` is
+      // reached transitively via `@objectstack/types` ([ADR-0105 D1] tenancy
+      // posture) and `shared` via `@objectstack/core`'s plural→singular fold
+      // (`pluralToSingular`, #7378). Neither is a reason to keep listing
+      // namespaces by hand.
+      {
+        find: /^@objectstack\/spec\/([a-z-]+)$/,
+        replacement: path.join(path.resolve(__dirname, '../..'), 'spec/src/$1/index.ts'),
+      },
+      { find: /^@objectstack\/spec$/, replacement: path.resolve(__dirname, '../../spec/src/index.ts') },
+    ],
+  },
+});
