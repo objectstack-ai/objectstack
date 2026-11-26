@@ -109,7 +109,7 @@ describe('objectstack#37365 — locateSection finds the drawn heading', () => {
     const body = ['Scope', '=====', '', 'x', '', '# Scope', '', 'y'].join('\n');
     expect(headingsOf(body, false).map((h) => h.anchor)).toEqual(['scope']);
     const candidates = sectionCandidates(FIELDS, { content: body }, 'scope');
-    expect(candidates).toEqual([{ field: 'content', face: 'markdown', reading: 'scope', ordinal: 0, count: 1, unlisted: 0 }]);
+    expect(candidates).toEqual([{ field: 'content', face: 'markdown', reading: 'scope', ordinal: 0, count: 1, unlisted: 1 }]);
     document.body.innerHTML = row('content', '<h1 id="setext">Scope</h1><p>x</p><h1 id="atx">Scope</h1><p>y</p>');
     const target = locateSection(document.body, candidates);
     expect(target?.field.getAttribute('data-detail-field')).toBe('content');
