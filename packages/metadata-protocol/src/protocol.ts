@@ -9800,6 +9800,8 @@ export class ObjectStackProtocolImplementation implements
         userTextLocales?: readonly (string | undefined)[];
         /** [#36601] The caller's pin on the active row this promotion replaces (`PublishMetaItemRequestSchema.parentVersion`). */
         parentVersion?: string | null;
+        /** [#36350] The caller's pin on the draft this promotion reads (`PublishMetaItemRequestSchema.draftVersion`). */
+        draftVersion?: string;
         /** The registry question this promotion asks (`registry-question.ts`). */
         registryQuestion: RegistryQuestion;
         /** [#32396] Judge every refusal, write nothing: the answer then carries no `result`. */

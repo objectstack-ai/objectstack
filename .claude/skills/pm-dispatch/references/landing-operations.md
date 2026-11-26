@@ -71,7 +71,7 @@
 - ② enable-auto-merge 调用根本没落地,重发与效果验证序列见 `readings-queue.md`。
 - ③ PR 碰 `.github/workflows/**`:令牌常驻 `workflows: write`,仍拒即授权漂移。
 - MERGED 同笔收口:`Fixes` 卡代关亦摘标;`Part of` 卡剩余物落其车道一态并清 assignee。
-- 一态 = `pm:queue`+其车道 `domain:*`(归他车道即改域)/`pm:blocked`+`Blocked-by:`/hold+`Restart-when:`。
+- 一态 = `pm:queue`/`pm:blocked`+`Blocked-by:`/hold+`Restart-when:`。
 - 同笔评论写清交付了什么、剩下归谁;摘态不补态由写门拒收(`state-machine.md` 跨状态通则)。
 - 每次合并后重拉一次车道盘点与预期状态对账,⛔ 不留给下轮巡检。
 - 预期外从 open 消失的即被闭合关键词静默误关的卡;每次合并读 `sweep-closed-cards.mjs --pr N`。

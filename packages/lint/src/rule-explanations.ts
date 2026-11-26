@@ -6685,6 +6685,79 @@ const FIELD_LABEL_DUPLICATE_EXPLANATION: RuleExplanation = {
   ],
 };
 
+// ── Change Owner cascades that can never run (`validate-transfer-cascades.ts`) ──
+
+/** What every transfer-cascade id shares: where the verdict comes from and why it refuses. */
+const TRANSFER_CASCADE_SHARED =
+  'A `transferBehavior: \'cascade\'` on a lookup or master_detail field asks a Change Owner of the ' +
+  'referenced (parent) record to move the records here that point at it, and that the parent\'s previous ' +
+  'owner holds, to the new owner too. The Change Owner endpoint re-judges every relationship on every call ' +
+  'and offers only the ones that can act, so nothing wrong happens at run time; but a declaration it never ' +
+  'offers is a key nothing honours (ADR-0049), and the author would never be told. The verdicts come from ' +
+  'the same spec predicates the endpoint reads (`resolveUserActionTransfer`, ' +
+  '`transferCascadeIneligibilityReason`, `apiExposureDenialReason` in `@objectstack/spec/data`), on the ' +
+  'objects as the registry serves them, every object extension\'s fields folded in. An object this stack ' +
+  'does not declare cannot be judged, on either side of the relationship, and is skipped.';
+
+/**
+ * Where these ids run, and what the field parse already refuses. The runtime publish gate crossing is
+ * follow-up #37397; the number stays in this comment, since an author is shown the text and it carries no
+ * tracker number (`rule-explanations.test.ts`, `pnpm check:doc-authoring`).
+ */
+const TRANSFER_CASCADE_SCOPE =
+  'Judged by `os validate`, `os build` and `os lint`, not yet at the runtime publish gate (its objects are ' +
+  'served definitions carrying the injected owner_id, which the eligibility predicate reads; crossing ' +
+  'waits on a measurement). The field parse refuses the other shapes with their own prescription: ' +
+  '`transferBehavior` off a lookup or master_detail field, `\'cascade\'` on a multi-value reference or ' +
+  'on a reference to a `sys_` object; and `ObjectSchema` refuses a cascade on a field the object declares ' +
+  'itself when the object cannot take one. Those are not reported again here.';
+
+const TRANSFER_CASCADE_PARENT_WITHOUT_CHANGE_OWNER_EXPLANATION: RuleExplanation = {
+  rule: 'transfer-cascade-parent-without-change-owner',
+  covers: 'why a cascade needs a parent that offers Change Owner',
+  paragraphs: [
+    TRANSFER_CASCADE_SHARED,
+    'The cascade runs inside a Change Owner of the parent and nowhere else, and the endpoint refuses the ' +
+      'whole call on an object that does not offer the action. A parent does not offer it when it is not ' +
+      'structurally eligible (ownership `business_unit`, `org` or `none`, any `managedBy`, ' +
+      '`systemFields: false`, an `owner_id` declared readonly, an external object with no provable owner) or ' +
+      'when its `userActions.transfer` is off, by the author or by the `controlled_by_parent` default. The ' +
+      'message names which; where the parent can be changed to offer the action, the reason ends with that ' +
+      'change. Otherwise the fix is on the field: set it to `none` or remove it.',
+    TRANSFER_CASCADE_SCOPE,
+  ],
+};
+
+const TRANSFER_CASCADE_EXTENSION_CHILD_INELIGIBLE_EXPLANATION: RuleExplanation = {
+  rule: 'transfer-cascade-extension-child-ineligible',
+  covers: 'why an extension field cannot cascade onto this object',
+  paragraphs: [
+    TRANSFER_CASCADE_SHARED,
+    'A cascade moves the records of the object that declares the field, by the same Change Owner action, ' +
+      'so that object must offer the action itself: structurally eligible, not a `controlled_by_parent` ' +
+      'detail (its access already follows its master), and its `userActions.transfer` not off. `ObjectSchema` ' +
+      'refuses a cascade on a field the object declares itself, but a field an object extension ' +
+      '(`objectExtensions[].fields`) adds never passes through that parse, so this rule judges it on the ' +
+      'extended object. An extension\'s `fieldPatches` cannot carry `transferBehavior` at all: a patch sets ' +
+      'display properties only, and its schema refuses the key.',
+    TRANSFER_CASCADE_SCOPE,
+  ],
+};
+
+const TRANSFER_CASCADE_CHILD_UPDATE_UNEXPOSED_EXPLANATION: RuleExplanation = {
+  rule: 'transfer-cascade-child-update-unexposed',
+  covers: 'why a cascading object must serve update',
+  paragraphs: [
+    TRANSFER_CASCADE_SHARED,
+    'The cascade reads and writes the child\'s rows as a second object of the call, each move the caller\'s ' +
+      'own update, so the child is asked its own declared API exposure for `update`, the operation the data ' +
+      'route judges. An object with `enable.apiEnabled: false`, or an `enable.apiMethods` list that does not ' +
+      'grant update, is left out of the cascades Change Owner offers. Either open update on the child or set ' +
+      'the field to `none`.',
+    TRANSFER_CASCADE_SCOPE,
+  ],
+};
+
 // ── Publish-time refusals of metadata that parses and does nothing ──────────
 // (`validate-flow-node-executors.ts`, `lint-flow-patterns.ts`,
 // `validate-inert-object-declarations.ts`, `validate-action-object-binding.ts`)
@@ -7153,6 +7226,9 @@ export const RULE_EXPLANATIONS: Readonly<Record<string, RuleExplanation>> = Obje
   [STORED_EXPRESSION_CROSS_RECORD_INPUT_EXPLANATION.rule]: STORED_EXPRESSION_CROSS_RECORD_INPUT_EXPLANATION,
   [STORED_EXPRESSION_VOLATILE_INPUT_EXPLANATION.rule]: STORED_EXPRESSION_VOLATILE_INPUT_EXPLANATION,
   [FIELD_LABEL_DUPLICATE_EXPLANATION.rule]: FIELD_LABEL_DUPLICATE_EXPLANATION,
+  [TRANSFER_CASCADE_PARENT_WITHOUT_CHANGE_OWNER_EXPLANATION.rule]: TRANSFER_CASCADE_PARENT_WITHOUT_CHANGE_OWNER_EXPLANATION,
+  [TRANSFER_CASCADE_EXTENSION_CHILD_INELIGIBLE_EXPLANATION.rule]: TRANSFER_CASCADE_EXTENSION_CHILD_INELIGIBLE_EXPLANATION,
+  [TRANSFER_CASCADE_CHILD_UPDATE_UNEXPOSED_EXPLANATION.rule]: TRANSFER_CASCADE_CHILD_UPDATE_UNEXPOSED_EXPLANATION,
   [FLOW_NODE_TYPE_NO_EXECUTOR_EXPLANATION.rule]: FLOW_NODE_TYPE_NO_EXECUTOR_EXPLANATION,
   [FLOW_APPROVAL_DECISION_UNROUTED_EXPLANATION.rule]: FLOW_APPROVAL_DECISION_UNROUTED_EXPLANATION,
   [FLOW_HTTP_TIMEOUT_MISSING_EXPLANATION.rule]: FLOW_HTTP_TIMEOUT_MISSING_EXPLANATION,
