@@ -85,7 +85,6 @@ import {
   toInclusiveEndDay,
 } from '@object-ui/core';
 import {
-  getSemanticColorName,
   getSemanticHex,
   humanizeLabel,
   formatDate,
@@ -1513,35 +1512,21 @@ export const ObjectGantt: React.FC<ObjectGanttProps> = ({
       // plugin-timeline and plugin-calendar via `createFieldColorResolver`:
       //   1. the field's own option `color` for this record's value —
       //      the colour the author actually declared;
-      //   2. the value itself when it already IS a colour literal;
-      //   3. the semantic-token derivation, which also maps a palette NAME
-      //      ('red') to that palette's hex — what the key's contract has always
-      //      promised ("hex or semantic name").
-      // Only when `colorField` is absent or its value is empty do we fall back
-      // to the record's status / state / priority so the chart reflects the
-      // same colour story as list/kanban; if neither exists GanttView paints
-      // the platform default blue.
+      //   2. the value itself when it already IS a colour literal.
+      // Nothing else: no colour is derived from a value, by a lookup table, a
+      // hash or the record's status / state / priority (objectstack#36882,
+      // ruled option A). With neither rung answering, `color` stays undefined
+      // and GanttView paints its default bar colour. Declaring `colorField`
+      // asks the chart to read the colours declared on that field's options,
+      // not to invent them.
       //
-      // ⛔ The raw value must never reach `color` again. That was this card's
-      // defect: `backgroundColor: "open"` is not a colour, so the browser
-      // dropped the declaration and every bar rendered identically — DECLARING
-      // the documented key was strictly worse than omitting it, silently.
+      // ⛔ The raw value must never reach `color` again. That was
+      // objectui#7243's defect: `backgroundColor: "open"` is not a colour, so
+      // the browser dropped the declaration and every bar rendered
+      // identically — DECLARING the documented key was strictly worse than
+      // omitting it, silently.
       const colorValue = colorField ? record[colorField] : undefined;
-      let color = resolveColorFieldValue(colorValue);
-      if (!color && colorValue != null && colorValue !== '') {
-        // Rung 3 for the declared field's own value. `getSemanticColorName`
-        // always answers for a non-empty value (semantic map, else its stable
-        // hash), so a declared `colorField` always paints something real.
-        color = getSemanticHex(getSemanticColorName(String(colorValue), colorValue));
-      }
-      if (!color) {
-        const fallbackVal =
-          record.status ?? record.state ?? record.priority ?? record.severity;
-        if (fallbackVal != null && fallbackVal !== '') {
-          const name = getSemanticColorName(undefined, fallbackVal);
-          if (name) color = getSemanticHex(name);
-        }
-      }
+      const color = resolveColorFieldValue(colorValue);
       // Alert stroke: the option colour first (same rung 1 as the bar — an
       // authored option colour is an authored option colour whichever slot it
       // paints), then today's behaviour: semantic palette names map to their

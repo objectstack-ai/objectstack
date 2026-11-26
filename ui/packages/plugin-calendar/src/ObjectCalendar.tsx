@@ -1106,12 +1106,11 @@ export const ObjectCalendar: React.FC<ObjectCalendarComponentProps> = ({
       const startDate = record[startDateField];
       const endDate = endDateField ? record[endDateField] : null;
       const title = resolveTitle(record);
-      // Last rung stays where it was: a value no option colours is handed on
-      // RAW, so `CalendarView.resolveEventColor` still recognises a Tailwind
-      // utility string and still hashes a plain category label onto its
-      // theme-aware 8-stop palette. Retiring that would repaint every existing
-      // calendar whose `colorField` points at a plain categorical field, which
-      // is well beyond this fix.
+      // A value no option colours is handed on RAW, so
+      // `CalendarView.resolveEventColor` still recognises a Tailwind utility
+      // string or a palette family name; a plain category label gets the
+      // default event colour there (objectstack#36882: no colour is derived
+      // from a value).
       const colorRaw = colorField ? record[colorField] : undefined;
       const color = resolveColorFieldValue(colorRaw) ?? colorRaw;
       const id = record.id || record._id || `event-${index}`;
