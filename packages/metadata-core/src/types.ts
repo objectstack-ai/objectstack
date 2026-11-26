@@ -37,6 +37,7 @@ export const MetadataTypeSchema = z.enum([
   'tool',
   'skill',
   'ai_context',
+  'knowledge_source',
   'report',
   'translation',
   'role',

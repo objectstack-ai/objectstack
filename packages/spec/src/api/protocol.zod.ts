@@ -2786,6 +2786,8 @@ export const PACKAGE_SLOTTED_METADATA_TYPES: readonly string[] = Object.freeze([
   'webhook', 'tool', 'connector',
   // [ADR-0150 addendum 2026-11-25] the context pack, one slot per (package, name).
   'ai_context',
+  // [ADR-0150 addendum 2026-11-25] the knowledge source, one slot per (package, name).
+  'knowledge_source',
 ]);
 
 /**

@@ -136,6 +136,9 @@ import { currencyConfigPrecisionRemoved } from './entries/18/currency-config-pre
 import { permissionModifyAllAllowDeleteFalseToTrue } from './entries/18/permission-modify-all-allow-delete-false-to-true.js';
 import { permissionRlsTagsRemoved } from './entries/18/permission-rls-tags-removed.js';
 import { flowDecisionModeInclusiveExplicit } from './entries/18/flow-decision-mode-inclusive-explicit.js';
+import { knowledgeSourceContentFieldsToContent } from './entries/19/knowledge-source-content-fields-to-content.js';
+import { knowledgeSourceIdToName } from './entries/19/knowledge-source-id-to-name.js';
+import { knowledgeSourceInertKeysRemoved } from './entries/19/knowledge-source-inert-keys-removed.js';
 
 /**
  * One conversion of an OPEN major, with its place in that major's application
@@ -302,6 +305,23 @@ const MAJOR_18_CONVERSIONS: readonly OrderedConversion[] = [
 ];
 
 /**
+ * Major 19's conversions, one entry per conversion — the shape
+ * {@link MAJOR_18_CONVERSIONS} documents, opened with the major's first
+ * conversions (ADR-0161 K6, the knowledge source's renames and removals).
+ *
+ * ⚠️ SORTED BY THE CONVERSION'S IDENTIFIER, NOT BY APPLICATION ORDER, for the
+ * reason given there: two retirements in flight then insert into different
+ * gaps. `order` says where a conversion applies. To add one, follow the five
+ * steps listed on {@link MAJOR_18_CONVERSIONS}, with `./entries/19/` as the
+ * directory.
+ */
+const MAJOR_19_CONVERSIONS: readonly OrderedConversion[] = [
+  { conversion: knowledgeSourceContentFieldsToContent, order: 2 },
+  { conversion: knowledgeSourceIdToName, order: 1 },
+  { conversion: knowledgeSourceInertKeysRemoved, order: 3 },
+];
+
+/**
  * Every conversion, grouped by the major that introduced its canonical shape
  * (`toMajor`), each major's list in APPLICATION order: {@link ALL_CONVERSIONS}
  * concatenates them by ascending major and the loader runs it in sequence.
@@ -352,6 +372,7 @@ export const CONVERSIONS_BY_MAJOR: Readonly<Record<number, readonly MetadataConv
     inlineActionApiParamsToBodyExtra,
   ],
   18: /* @__PURE__ */ inApplicationOrder(MAJOR_18_CONVERSIONS),
+  19: /* @__PURE__ */ inApplicationOrder(MAJOR_19_CONVERSIONS),
 };
 
 /**

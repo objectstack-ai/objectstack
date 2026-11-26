@@ -207,6 +207,11 @@ export const MetadataTypeSchema = lazySchema(() => z.enum([
   // and body text are handed to a model. Its reader is the render service
   // behind `get_record_context` (`@objectstack/service-record-context`).
   'ai_context',  // AI context packs (AiContextSchema, ADR-0160 D1)
+  // [ADR-0161 K4] A knowledge source: which object's records the knowledge
+  // service indexes, which fields leave the row store as content, and which
+  // adapter holds the index. Its reader is the knowledge service's loader
+  // (`@objectstack/service-knowledge`), which lands with the type.
+  'knowledge_source',  // Knowledge sources (KnowledgeSourceSchema, ADR-0161 K4)
 ]));
 
 export type MetadataType = z.input<typeof MetadataTypeSchema>;
@@ -1386,6 +1391,11 @@ export const DEFAULT_METADATA_TYPE_REGISTRY: MetadataTypeRegistryEntryParsed[] =
   // row's reason: a behavioural contract an author ships or creates at run
   // time, and never overlaid per environment (ADR-0005's ai row).
   { type: 'ai_context', label: 'AI Context Pack', filePatterns: ['**/*.ai-context.ts', '**/*.ai-context.yml'], supportsOverlay: true, allowEnvironmentOverlay: false, allowRuntimeCreate: true, supportsVersioning: false, executionPinned: false, loadOrder: 89, domain: 'ai' },
+  // [ADR-0161 K4, clause 2] `knowledge_source` ships in a package or is
+  // created at run time, is versioned, and takes no environment overlay until
+  // a ruling opens that channel (ADR-0005). The `ai_context` row's flags, with
+  // version history on, as the clause says.
+  { type: 'knowledge_source', label: 'Knowledge Source', filePatterns: ['**/*.knowledge-source.ts', '**/*.knowledge-source.yml'], supportsOverlay: true, allowEnvironmentOverlay: false, allowRuntimeCreate: true, supportsVersioning: true, executionPinned: false, loadOrder: 90, domain: 'ai' },
 ];
 
 // ==========================================

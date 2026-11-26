@@ -1,10 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import type { ExecutionContext } from '../kernel/execution-context.zod';
-import type {
-  KnowledgeDocument,
-  KnowledgeHit,
-} from '../ai/knowledge-document.zod';
+import type { KnowledgeHit } from '../ai/knowledge-document.zod';
 import type { KnowledgeSource } from '../ai/knowledge-source.zod';
 import type { IKnowledgeAdapter } from './knowledge-adapter';
 
@@ -45,8 +42,7 @@ export interface KnowledgeSearchOptions {
    *   source's `where`, or changed since it was indexed is not returned, and
    *   its document is repaired in the background — except in a source with
    *   `refresh.onRecordChange: false`, whose index an external indexer owns:
-   *   there the hit is only not returned. A `file` / `http` hit is grouped by
-   *   its document.
+   *   there the hit is only not returned.
    *
    * The return type does not change: still `KnowledgeHit[]`.
    */
@@ -60,8 +56,7 @@ export interface KnowledgeSearchOptions {
    * passing an empty name, or an unknown `granularity`) is refused with
    * `code: 'VALIDATION_ERROR'`, `status: 400`. An `object` source that does not list the field in its
    * `metadataFields` answers no hits for this search (never ungrouped), and
-   * neither does a record with no value for it; a `file` / `http` source
-   * groups by its document.
+   * neither does a record with no value for it.
    */
   groupBy?: string;
   /** Adapter-specific filter (passed opaquely). */
@@ -88,8 +83,7 @@ export interface KnowledgeSearchOptions {
    *   parent two hops away is not reached either.
    *
    * Several entries are a union: a document is searched when any entry holds
-   * for it. A source no entry reaches is not searched, and a `file` / `http`
-   * source answers nothing under a scope.
+   * for it. A source no entry reaches is not searched.
    *
    * - **Absent**: no scope, as before this option.
    * - **Empty** (`[]`), or an entry whose `ids` is empty: nothing is in scope,
@@ -138,7 +132,7 @@ export interface KnowledgeReindexResult {
    * Documents deleted by the purge that follows a complete walk: listed by
    * the adapter before the walk, not seen in it, and confirmed gone by a
    * re-read of their row (ADR-0161 K8, item 1). `null` when no purge ran:
-   * a source that is not an `object` source, no data engine bound, a refused
+   * no data engine bound, a refused
    * `limit`, a walk with `limit` or `dryRun`, a failed walk, a source with
    * `refresh.onRecordChange: false`, an adapter without `listDocuments`, or a
    * listing that failed. A number, with `ok: false`, when the purge stopped
@@ -166,7 +160,11 @@ export interface KnowledgeReindexResult {
  *
  * Every adapter plugin calls `registerAdapter(id, this)` during its
  * `start()` hook. Sources reference adapters by id; unknown ids cause
- * `search` / `indexDocument` to throw early with a clear error.
+ * `search` / `reindexSource` to throw early with a clear error.
+ *
+ * There is no member that pushes a document (ADR-0161 K1): the service
+ * assembles every document itself, from the records of the object a source
+ * names, on a record change and on a reindex.
  */
 export interface IKnowledgeService {
   /** Register (or replace) an adapter under the given id. */
@@ -185,15 +183,9 @@ export interface IKnowledgeService {
   /** Look up a single source. Returns `undefined` when not registered. */
   getSource(sourceId: string): KnowledgeSource | undefined;
 
-  /** Index (insert or replace) a document into the source's adapter. */
-  indexDocument(sourceId: string, doc: KnowledgeDocument): Promise<void>;
-  /** Remove a document from the source's adapter. */
-  deleteDocument(sourceId: string, documentId: string): Promise<void>;
-
   /**
-   * Bulk reindex a source from its declared origin. Object sources
-   * walk the underlying object via `IDataEngine`; file / http sources
-   * delegate to the adapter's own ingestion.
+   * Bulk reindex a source: walk the object it names via `IDataEngine` and
+   * hand every assembled document to its adapter.
    */
   reindexSource(sourceId: string, opts?: KnowledgeReindexOptions): Promise<KnowledgeReindexResult>;
 

@@ -4568,6 +4568,10 @@ const METADATA_ARRAY_KEYS = [
   // [ADR-0160 D1] Context packs — read by the record-context service from
   // the registry, so a declaration lands here with its package stamped.
   'aiContexts',
+  // [ADR-0161 K4] Knowledge sources — the knowledge service's loader reads
+  // them back with the package that ships each one stamped, which is the
+  // coordinate its registry and index keys carry (ADR-0150 D4).
+  'knowledgeSources',
   // API Protocol
   'apis',
   // Data Extensions

@@ -3718,16 +3718,25 @@ const step18: MigrationStep = {
  * load-time handshake (ADR-0087 D1) refuses a manifest whose range admits only
  * 18. That refusal is this step's first semantic entry, and the one every
  * upgrading author meets first. Later retirements on the v19 line add their
- * entries as files; a major-19 conversion, once one exists, graduates here the
- * way step 18's do.
+ * entries as files, and its conversions graduate here the way step 18's do
+ * (the first are the knowledge source's, ADR-0161 K6).
  */
 const step19: MigrationStep = {
   toMajor: 19,
   rationale:
     'Protocol 19 moves the load-time handshake: a manifest whose `engines.protocol` range admits '
     + 'protocol 18 and not 19 is refused before any of its metadata loads, so each manifest an app '
-    + 'or package declares moves its range to `^19`, together with its `@objectstack/*` versions.',
-  conversionIds: [],
+    + 'or package declares moves its range to `^19`, together with its `@objectstack/*` versions. '
+    + 'It also admits the knowledge source as a metadata type (`knowledge_source`, ADR-0161 K4) and '
+    + 'settles its keys on the way in: `id` becomes `name` and `source.contentFields` becomes '
+    + '`source.content`, a list of field names in which `\'*\'` is refused, because each listed field '
+    + 'is sent to the embedding provider; `embedding`, `vectorStore`, `adapterConfig` and '
+    + '`refresh.cron`, which nothing read, are removed; and the `file` and `http` source kinds leave '
+    + 'with their four keys, so a source indexes the records of one object.',
+  // Derived, not listed, as step 18's: every major-19 conversion graduates
+  // into this step in the order `CONVERSIONS_BY_MAJOR[19]` applies them. Add a
+  // conversion there, never here.
+  conversionIds: CONVERSIONS_BY_MAJOR[19]!.map((c) => c.id),
   semantic: [
     // One file per entry under `entries/semantic/`, concatenated here sorted by
     // entry id by `gen:migration-registry` (#7297). Add an entry by adding a
@@ -3896,6 +3905,14 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // <os-generated retired-key:18>
     // </os-generated retired-key:18>
   ],
+  // Protocol 19's retirements, registered at the major they ship in.
+  19: [
+    // One file per entry under `entries/retired-keys/`, concatenated here sorted by
+    // entry id by `gen:migration-registry` (#7297). Add an entry by adding a
+    // FILE — never by editing between the markers, which is generated.
+    // <os-generated retired-key:19>
+    // </os-generated retired-key:19>
+  ],
 };
 
 /**
@@ -4024,5 +4041,13 @@ export const RETIRED_DEFS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // FILE — never by editing between the markers, which is generated.
     // <os-generated retired-def:18>
     // </os-generated retired-def:18>
+  ],
+  // Protocol 19's whole-def removals, registered at the major they ship in.
+  19: [
+    // One file per entry under `entries/retired-defs/`, concatenated here sorted by
+    // entry id by `gen:migration-registry` (#7297). Add an entry by adding a
+    // FILE — never by editing between the markers, which is generated.
+    // <os-generated retired-def:19>
+    // </os-generated retired-def:19>
   ],
 };

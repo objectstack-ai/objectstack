@@ -367,6 +367,9 @@ export const OVERRIDE_TYPE_CLASSIFICATION = {
   // [ADR-0160 D1] A context pack does not join D2's list ("an override of a
   // packaged pack" is later work): excluded on the `skill` row's basis.
   ai_context: behaviouralSwitchFirst,
+  // [ADR-0150 addendum 2026-11-25, Overlays] A knowledge source joins no
+  // declared-override list: excluded on the `skill` row's basis.
+  knowledge_source: behaviouralSwitchFirst,
 } as const satisfies Record<MetadataType, OverrideTypeClassification>;
 
 /** The metadata types a declared override applies to (`disposition: 'overridable'`). */

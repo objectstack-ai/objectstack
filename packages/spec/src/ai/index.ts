@@ -16,7 +16,7 @@
  * - Tool            — Zod-typed callable surface
  * - Conversation    — message persistence + short/long-term memory
  * - Model Registry  — multi-provider LLM configuration
- * - Embedding       — embedding model + vector store references
+ * - Knowledge source — the `knowledge_source` kind the knowledge service indexes from (ADR-0161 K4)
  * - Usage           — token accounting + per-call cost
  * - MCP             — references and bindings to external MCP servers
  * - AI face name    — the derived flat name an item is listed under (ADR-0150 D6)
@@ -36,7 +36,6 @@ export { skillForm } from './skill.form';
 export { aiContextForm } from './ai-context.form';
 export * from './conversation.zod';
 export * from './model-registry.zod';
-export * from './embedding.zod';
 export * from './usage.zod';
 export * from './mcp.zod';
 export * from './face-name';
