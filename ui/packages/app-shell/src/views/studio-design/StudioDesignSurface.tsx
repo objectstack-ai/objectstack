@@ -14,6 +14,16 @@
  *
  * Open-core boundary: the left AI copilot is NOT part of the open-source
  * surface — it is an injected slot (`aiSlot`) the cloud edition fills.
+ *
+ * objectstack#37553 — this file composes; each responsibility lives beside it:
+ * the scope (`studioSurfaceScope.ts`), the unsaved work and its departure
+ * question (`studioSurfaceSave.ts`), the drafts ledger and the Pending
+ * changes sheet (`studioSurfaceDrafts.tsx`), the publish
+ * (`studioSurfacePublish.ts`), the right slot (`studioSurfaceRightSlot.tsx`),
+ * the navigation and the palette (`studioSurfaceNavigation.tsx`), the frame
+ * (`StudioSurfaceFrame.tsx`) and the page beside the menu
+ * (`StudioSurfacePage.tsx`). The hooks are called in the order their lines
+ * stood here, so the effects run in that order too.
  */
 
 import * as React from 'react';
