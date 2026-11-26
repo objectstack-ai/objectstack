@@ -16,6 +16,8 @@ import { describe, it, expect, beforeAll } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { ComponentRegistry } from '@object-ui/core';
 import '../../../renderers';
+// Paid at collection, not inside a clocked case (check-test-source-alias).
+import '@object-ui/react-runtime';
 
 function NumberProbe(props: any) {
   return <div data-testid="number-probe">{JSON.stringify(props.dependentValues ?? null)}</div>;
