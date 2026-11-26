@@ -11,7 +11,9 @@
  *    open public address another form already holds.
  *  - {@link oldShapeFormRowRemovals} — what a `form` save, reset or delete at
  *    `(package, name)` removes of the old-shape row that carries that form at
- *    that address, in the same transaction.
+ *    that address, in the same transaction; and
+ *    {@link restoreOldShapeFormRowRemovals}, which puts those rows back when
+ *    the write that removed them is undone.
  *
  * Each judges bodies through THE projection ({@link projectViewForms}), never
  * by re-reading `formViews` by hand.
@@ -185,6 +187,16 @@ export type OldShapeFormRowRemoval =
     | { readonly kind: 'resave'; readonly row: { readonly name: string; readonly packageId: string | null }; readonly body: Record<string, unknown> };
 
 /**
+ * [ADR-0159 D5] An {@link OldShapeFormRowRemoval} as it was applied: with the
+ * history version the row stood at before the write (the stored row's
+ * `version`, `null` when the row carried none), so a door that undoes the
+ * `form` write puts the row back at that version
+ * ({@link restoreOldShapeFormRowRemovals}), and a package commit records it as
+ * a row the publish edited (the commit's revert restores it).
+ */
+export type AppliedOldShapeFormRowRemoval = OldShapeFormRowRemoval & { readonly replacedVersion: number | null };
+
+/**
  * [ADR-0159 D5, card ② item 5] What a `form` save, reset or delete at
  * `(packageId, name)` does to the stored old-shape row that carries that form
  * at the same address (the same `package_id`): an item-shaped `view` row that
@@ -244,22 +256,27 @@ export function oldShapeFormRowRemovals(
  * that carries the form, through the repository the `form` write wrote with.
  * Called INSIDE the `form` write's transaction, so a `form` write that fails
  * leaves both rows as they were (the repository's own `withTxn` joins the
- * ambient one, ADR-0067 D2). Returns the rows it changed, for the registry
- * heal the caller runs once the transaction has committed.
+ * ambient one, ADR-0067 D2). Returns the rows it changed, each with the
+ * version it replaced, for the registry heal the caller runs once the
+ * transaction has committed, and for the undo of that write.
  */
 export async function applyOldShapeFormRowRemovals(
     host: Pick<ProtocolHost, 'getOverlayRepo' | 'isArtifactBacked' | 'readActiveOverlayRows' | 'storedOverlayEntries'>,
     args: { name: string; packageId: string | null; actor: string | null; source: string },
-): Promise<OldShapeFormRowRemoval[]> {
+): Promise<AppliedOldShapeFormRowRemoval[]> {
     const rows = await host.readActiveOverlayRows({ type: 'view' });
-    const at: Array<{ name: string; data: unknown; hash: string | null }> = [];
+    const at: Array<{ name: string; data: unknown; hash: string | null; version: number | null }> = [];
     for (const row of rows) {
         if (((row?.package_id ?? null) || null) !== (args.packageId || null)) continue;
         const entry = host.storedOverlayEntries({ type: 'view' }, [row])[0];
         if (entry === undefined) continue;
-        at.push({ name: entry.name, data: entry.data, hash: typeof row?.checksum === 'string' ? row.checksum : null });
+        at.push({
+            name: entry.name, data: entry.data, hash: typeof row?.checksum === 'string' ? row.checksum : null,
+            version: typeof row?.version === 'number' ? row.version : null,
+        });
     }
-    const removals = oldShapeFormRowRemovals(at, args.name, args.packageId);
+    const removals: AppliedOldShapeFormRowRemoval[] = oldShapeFormRowRemovals(at, args.name, args.packageId)
+        .map((removal) => ({ ...removal, replacedVersion: at.find((row) => row.name === removal.row.name)?.version ?? null }));
     if (removals.length === 0) return removals;
     const repo = host.getOverlayRepo();
     for (const removal of removals) {
@@ -299,5 +316,43 @@ export async function healOldShapeFormRowRemovals(
                 packageId: removal.row.packageId, organizationId: null,
             });
         }
+    }
+}
+
+/**
+ * [ADR-0159 D5, ADR-0067 D2] Put back each old-shape row a `form` write removed
+ * or re-saved ({@link applyOldShapeFormRowRemovals}), when that write is undone
+ * by hand: a refused package publish on a runtime that cannot roll back
+ * (`undoLandedPromotions`). Newest first, each row is restored to the version
+ * it stood at before the write, written again when it was deleted, under the
+ * package it was bound to, and the registry is healed from what the store then
+ * serves. The removal and its undo are one pair: the old-shape row stands
+ * again exactly as it stood, whatever it held (a form, or that form switched
+ * off), so the undone write leaves the address answering what it answered
+ * before.
+ *
+ * Throws on the first row it cannot put back (no recorded version, or the
+ * store's refusal), so the caller reports the item as not undone.
+ */
+export async function restoreOldShapeFormRowRemovals(
+    host: Pick<ProtocolHost, 'isArtifactBacked' | 'restoreArtifactRegistryView'>,
+    repo: Pick<ReturnType<ProtocolHost['getOverlayRepo']>, 'restoreVersion'>,
+    removals: readonly AppliedOldShapeFormRowRemoval[],
+    options: { actor: string | null; source: string; message: string },
+): Promise<void> {
+    for (const removal of [...removals].reverse()) {
+        if (removal.replacedVersion === null) {
+            throw new Error(
+                `the old-shape view row '${removal.row.name}' the form write ${removal.kind === 'delete' ? 'removed' : 're-saved'} `
+                + 'was recorded at no version, so it cannot be put back',
+            );
+        }
+        const ref = { type: 'view', name: removal.row.name, org: 'env' } as Parameters<typeof repo.restoreVersion>[0];
+        await repo.restoreVersion(ref, removal.replacedVersion, {
+            ...options,
+            intent: host.isArtifactBacked('view', removal.row.name) ? 'override-artifact' : 'runtime-only',
+            packageId: removal.row.packageId,
+        });
+        await host.restoreArtifactRegistryView('view', removal.row.name, null, removal.row.packageId);
     }
 }

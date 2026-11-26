@@ -182,6 +182,8 @@ const WRITES: ReadonlyArray<{ readonly member: string; readonly verb: string; re
     // its name in the same transaction; each door heals the registry from the rows handed back.
     { member: 'applyOldShapeFormRowRemovals', verb: 'repo.delete(', route: { handedTo: 'module callers', then: 'healOldShapeFormRowRemovals' } },
     { member: 'applyOldShapeFormRowRemovals', verb: 'repo.put(', route: { handedTo: 'module callers', then: 'healOldShapeFormRowRemovals' } },
+    // [ADR-0159 D5] …and the undo of that write on a runtime that cannot roll back puts each row back, healed.
+    { member: 'restoreOldShapeFormRowRemovals', verb: 'repo.restoreVersion(', route: { sameMember: 'restoreArtifactRegistryView' } },
 ];
 
 /** The verb as `WRITES` spells it: no whitespace after its open paren, [#29985] the class as `this`. */

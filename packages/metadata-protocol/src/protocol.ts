@@ -9825,8 +9825,8 @@ export class ObjectStackProtocolImplementation implements
          * discipline — per the maintainer's ruling, no parallel top-level map.
          */
         advisories: RuntimeAuthoringIssue[];
-        /** What the promotion wrote. Absent exactly when `judgeOnly` was stated. */
-        result?: { version: string; seq: number; item: MetadataItem; packageId: string | null };
+        /** What the promotion wrote (with a `form`'s removed old-shape rows). Absent exactly when `judgeOnly` was stated. */
+        result?: { version: string; seq: number; item: MetadataItem; packageId: string | null; removedOldShapeRows?: readonly import('./protocol-form-writes.js').AppliedOldShapeFormRowRemoval[] };
         /** [#32396] The draft row the promotion consumed. Absent when nothing was written. */
         promotedDraft?: { body: unknown; hash: string };
         /** [#32369] What a judge-only call judged: the draft body and the package it would go live in. */
