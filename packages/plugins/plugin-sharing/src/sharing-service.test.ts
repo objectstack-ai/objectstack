@@ -2469,15 +2469,34 @@ function makeVerdictEngine(schemas: Record<string, any>, inert: ReadonlySet<stri
   const shares: Record<string, unknown>[] = [];
   const reads: Record<string, number> = {};
   const poisoned = new Set<string>();
+  /** A scalar as a row key; anything else is no key at all. */
+  const keyOf = (value: unknown): string | null =>
+    typeof value === 'string' || typeof value === 'number' || typeof value === 'bigint' ? String(value) : null;
+  const listOf = (wanted: unknown): string[] => {
+    const members = wanted != null && typeof wanted === 'object' ? (wanted as { $in?: unknown }).$in : [wanted];
+    return Array.isArray(members) ? members.map(keyOf).filter((k): k is string => k !== null) : [];
+  };
   const valueMatches = (actual: unknown, wanted: unknown): boolean => {
-    if (wanted != null && typeof wanted === 'object' && Array.isArray((wanted as any).$in)) {
-      return (wanted as any).$in.map(String).includes(String(actual));
+    if (wanted != null && typeof wanted === 'object') {
+      const key = keyOf(actual);
+      return key !== null && listOf(wanted).includes(key);
     }
     return actual === wanted;
   };
-  const rowMatches = (row: Record<string, unknown>, where: Record<string, unknown>) =>
-    Object.entries(where).every(([key, wanted]) => valueMatches(row[key], wanted));
-  return {
+  /** Counts the read, and fails it when it names a poisoned id. */
+  const noteRead = (object: string, where: Record<string, unknown>) => {
+    const seen = reads[object];
+    reads[object] = (typeof seen === 'number' ? seen : 0) + 1;
+    const named = (k: string) => (where[k] === undefined ? [] : listOf(where[k]));
+    if ([...named('id'), ...named('record_id')].some((id) => poisoned.has(id))) throw new Error('store unavailable');
+  };
+  /** The object's rows a `where` on `id` can match, by lookup; every row when it names no id. */
+  const rowsNamed = (object: string, where: Record<string, unknown>): Record<string, unknown>[] => {
+    const table = tables[object] ?? new Map<string, Record<string, unknown>>();
+    if (where.id === undefined) return [...table.values()];
+    return listOf(where.id).map((k) => table.get(k)).filter((row): row is Record<string, unknown> => row !== undefined);
+  };
+  const double = {
     reads,
     poisoned,
     insert(object: string, rows: Record<string, unknown>[]) {
@@ -2490,27 +2509,22 @@ function makeVerdictEngine(schemas: Record<string, any>, inert: ReadonlySet<stri
       ? { name: 'mongo-like', supports: {} }
       : { name: 'sql', supports: { fixedReadLeaves: ['SharedRecordIds'] } }),
     fixedReadLeafClassOf: () => null,
-    async find(object: string, options: any = {}) {
-      reads[object] = (reads[object] ?? 0) + 1;
-      const where = (options.where ?? {}) as Record<string, unknown>;
-      const named = (k: string) => {
-        const v = where[k];
-        return v != null && typeof v === 'object' ? ((v as any).$in as unknown[]).map(String) : v == null ? [] : [String(v)];
-      };
-      if ([...named('id'), ...named('record_id')].some((id) => poisoned.has(id))) throw new Error('store unavailable');
-      let out: Record<string, unknown>[];
-      if (object === 'sys_record_share') {
-        out = shares.filter((row) => rowMatches(row, where));
-      } else {
-        const table = tables[object] ?? new Map();
-        const { id, ...rest } = where;
-        const candidates = id === undefined ? [...table.values()] : named('id').map((k) => table.get(k)).filter(Boolean);
-        out = (candidates as Record<string, unknown>[]).filter((row) => rowMatches(row, rest));
-      }
-      return out.slice(0, options.limit ?? Infinity);
+    /** The double's reads, counted and failed where told to — {@link storeFind} answers them. */
+    async find(object: string, options?: any) {
+      noteRead(object, (options?.where ?? {}) as Record<string, unknown>);
+      return storeFind(object, options);
     },
     async insertOne() { return {}; },
   };
+  return double;
+
+  /** The store's answer: the rows the `where` matches, then the caller's bound, applied only when one is given. */
+  async function storeFind(object: string, options?: any) {
+    const where = (options?.where ?? {}) as Record<string, unknown>;
+    const source = object === 'sys_record_share' ? shares : rowsNamed(object, where);
+    const out = source.filter((row) => Object.entries(where).every(([key, wanted]) => valueMatches(row[key], wanted)));
+    return typeof options?.limit === 'number' ? out.slice(0, options.limit) : out;
+  }
 }
 
 const VERDICT_ORG = 'org_v';
