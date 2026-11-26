@@ -138,6 +138,7 @@ import { usePermissions } from '@object-ui/permissions';
 import {
   omitServerResolvedDefaults,
   optionListDefault,
+  resolveColSpan,
   resolveSectionGroupReferences,
   sectionedGridLayout,
 } from '@object-ui/plugin-form/core';
@@ -936,7 +937,28 @@ export function buildSections(
         maxSize: def.maxSize,
         // objectui#10177 — the authored render hint, view over object.
         widget: override.widget ?? def.widget,
-        colSpan: override.colSpan ?? 1,
+        // The cell count, resolved by the record form's own resolver
+        // (`resolveColSpan`) against this section's column count: `span:
+        // 'full'` first, then an authored `colSpan` (clamped to the grid),
+        // then the `span: 'auto'` wide-type default — the FormFieldSchema
+        // `span` contract. This row read `colSpan` alone, so `span: 'full'`
+        // and a textarea rendered one cell wide on this page.
+        // `FormFieldSpec` does not declare `span`; the served entry carries it.
+        colSpan: resolveColSpan(
+          {
+            name: override.field,
+            type: mapFieldTypeToFormType(def.type ?? 'text', {
+              multiple: override.multiple ?? def.multiple,
+            }),
+            colSpan: override.colSpan,
+            span: (override as { span?: 'auto' | 'full' }).span,
+            // The wide default reads the OBJECT field's own `multiple`, as the
+            // spec and the record form (`sectionFields.ts`) do; a form-level
+            // `multiple` changes the widget above, not the default width.
+            field: { multiple: def.multiple },
+          },
+          cols,
+        ) as 1 | 2 | 3 | 4,
         // Carried whole for the widget — see `RenderableField.meta`. Only the
         // served object field, never a synthesized stand-in: the `text`
         // fallback above describes a missing definition, not metadata.
