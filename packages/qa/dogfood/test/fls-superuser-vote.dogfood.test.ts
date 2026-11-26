@@ -1,14 +1,16 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 //
-// [ADR-0066 D2 ⑧ — ruling of record 6573563853, letter A] A permission set
-// holding the super-user bypass on an object votes on every field of that
-// object in the field-permission merge, so an app set's `readable: false`
-// narrows only a caller who holds no wider set.
+// [ADR-0066 D2 ⑧ — ruling of record 6573563853, letter A; v19 #36055] A set
+// carrying `viewAllFields` on an object (the shipped `admin_full_access` does,
+// on its `'*'`) votes readable on every field of that object, so an app set's
+// `readable: false` narrows only a caller who holds no such set. From v19 View
+// All and Modify All cast no field vote, so the vote is read-only: the admin
+// no longer edits a field the app set locks.
 //
 // The card's measurement, on a real boot: an app set grants `sys_business_unit`
 // read and withholds every field but `name`; the seeded platform admin also
 // holds it, beside `admin_full_access` (`'*'` with `viewAllRecords` /
-// `modifyAllRecords`, no field entries). The admin's list came back `name`
+// `modifyAllRecords` / `viewAllFields`, no field entries). The admin's list came back `name`
 // only, `sort=code` was refused 403, and Setup → Business Units rendered empty
 // columns, because a set that declares no field entry cast no vote.
 //
@@ -46,7 +48,7 @@ const recordOf = (b: any) => b?.record ?? b?.data ?? b;
 const rowsOf = (b: any) => b?.records ?? b?.data ?? (Array.isArray(b) ? b : []);
 const has = (row: any, key: string) => Object.prototype.hasOwnProperty.call(row ?? {}, key);
 
-describe('[ruling 6573563853] a super-user set reads every field an app set masks; the member stays masked', () => {
+describe('[ruling 6573563853, v19 #36055] the admin\'s viewAllFields reads every field an app set masks; the member stays masked', () => {
   let stack: VerifyStack;
   let ql: any;
   let adminTok: string;
@@ -105,9 +107,9 @@ describe('[ruling 6573563853] a super-user set reads every field an app set mask
   });
 
   // ── /auth/me/permissions — the row-blind merge ─────────────────────────────
-  it('/auth/me/permissions: every masked field is readable and editable for the admin', async () => {
+  it('/auth/me/permissions: every masked field is readable for the admin, and from v19 not editable', async () => {
     const { fields } = await mePermissions(adminTok);
-    for (const f of MASKED) expect(fields?.[`${OBJ}.${f}`], f).toEqual({ readable: true, editable: true });
+    for (const f of MASKED) expect(fields?.[`${OBJ}.${f}`], f).toEqual({ readable: true, editable: false });
   });
 
   it('[control] /auth/me/permissions: the member is still told every masked field is unreadable', async () => {

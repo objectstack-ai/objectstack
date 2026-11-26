@@ -26,6 +26,12 @@
  *   (`os migrate meta --stored --apply`) on a release that still carries
  *   the row's conversions, before the deployment moves to the release that
  *   drops them.
+ * - **Except the default flips a stored row must never take.** A DEFAULT
+ *   FLIP's old shape still parses and still means something, so replaying it
+ *   over a row is a reinterpretation, sound only where "this row predates the
+ *   flip" is a fact — and nothing about a stored row says when it was saved.
+ *   {@link STORED_ROWS_NOT_REWRITTEN} names those entries, and this seam
+ *   refuses them by id on every read and in `os migrate meta --stored`.
  * - **Idempotent by construction.** Conversions only rewrite shapes they
  *   positively recognize, so re-converting an already-canonical item is a
  *   no-op — seams may safely stack (e.g. a row converted here and again at
@@ -83,6 +89,32 @@ const STORED_ONLY_COLLECTIONS: Readonly<Record<string, string>> = {
 };
 
 /**
+ * ADR-0087 entries this seam NEVER replays over a stored row, whatever window
+ * it opens: the default flips whose stored reading a ruling decided. Each id
+ * owes its reason beside it. Merged into the caller's own
+ * `excludeConversionIds`, so no rehydration seam — the database loader, the
+ * ObjectQL stored-row read, the metadata-protocol read, the stored-metadata
+ * migration pass — can opt back in. Module-local on purpose, as the artifact
+ * door's `DEFAULT_FLIPS_NOT_REPLAYED_HERE` is: this is the seam's own refusal,
+ * not a fact about the registry.
+ *
+ * - `permission-view-all-fields-beside-record-bypass` (protocol 19, ruling of
+ *   record 7177446075, option A): writes `viewAllFields: true` beside
+ *   `viewAllRecords: true` / `modifyAllRecords: true` so a SOURCE written while
+ *   those bits voted on every field keeps its reads. A permission set stored in
+ *   `sys_metadata` is read with the 19 meaning instead — View All and Modify
+ *   All widen records and cast no field vote — and the row is never rewritten:
+ *   Studio saves sets today, so a stored View All set is not evidence of a
+ *   pre-19 author, and the rewrite would hand it a field bypass it may never
+ *   have meant. The error direction is fewer fields read, never a field
+ *   opened; the fix is adding `viewAllFields: true` to the entry through the
+ *   metadata API.
+ */
+const STORED_ROWS_NOT_REWRITTEN: readonly string[] = [
+  'permission-view-all-fields-beside-record-bypass',
+];
+
+/**
  * Options for {@link applyConversionsToStoredItem} — everything
  * {@link ApplyConversionsOptions} offers except `includeRetired`, which this
  * seam pins to `true` (the whole point of the stored pass; see module doc).
@@ -130,7 +162,11 @@ export function applyConversionsToStoredItem<T>(
   if (!collection) return item;
   const converted = applyConversions(
     { [collection]: [item as Record<string, unknown>] },
-    { ...options, includeRetired: true },
+    {
+      ...options,
+      includeRetired: true,
+      excludeConversionIds: [...STORED_ROWS_NOT_REWRITTEN, ...(options.excludeConversionIds ?? [])],
+    },
   );
   const items = converted[collection];
   return Array.isArray(items) && items.length > 0 ? (items[0] as T) : item;

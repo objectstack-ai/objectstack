@@ -1110,7 +1110,9 @@ describe('[#32605] the bare save of a name an enabled and a disabled package hol
     const E_SHIPS = ['e_only_dash', 'e_authored_drow_dash', 'e_unbound_drow_dash', 'e_two_authored_dash'];
     // [#33955] Names two ENABLED packages ship (neither disabled), and [#34144] names only D ships.
     const TWO_SHIP = ['two_none_dash', 'two_erow_dash', 'two_drow_dash', 'two_rows_dash', 'two_unbound_dash', 'two_draft_dash', 'two_del_dash', 'two_norow_dash'];
-    const D_SHIPS = ['d_none_dash', 'd_drow_dash', 'd_unbound_dash', 'd_draft_dash', 'd_del_dash', 'd_norow_dash'];
+    const D_SHIPS = ['d_none_dash', 'd_drow_dash', 'd_unbound_dash', 'd_draft_dash', 'd_del_dash', 'd_norow_dash',
+        // [ADR-0150 D3, the 2026-11-26 note] Names only D ships, each with a package-unbound row or draft stored.
+        'd_unbound_hidden_draft_dash', 'd_unbound_draft_only_dash', 'd_unbound_drow_dash'];
     const MAIL = 'save_beta_welcome';
     const mailAt = (locale: string, subject: string) => ({ name: MAIL, label: 'Welcome', locale, subject, bodyHtml: `<p>${subject}</p>` });
     const savePackageOf = (id: string) => ({
@@ -1120,7 +1122,15 @@ describe('[#32605] the bare save of a name an enabled and a disabled package hol
         ...(id === CODE_D ? { emailTemplates: [mailAt('en-US', 'D en')] } : {}),
     });
 
-    interface SaveBooted extends Booted { put(name: string, label: string, query?: Record<string, string>): Promise<{ status: number | undefined; body: any }> }
+    interface SaveBooted extends Booted {
+        put(name: string, label: string, query?: Record<string, string>): Promise<{ status: number | undefined; body: any }>;
+        /**
+         * The delete (`state: 'draft'`: the draft discard) naming no package. The REST door is
+         * `DELETE /api/v1/meta/:type/:name`; the dispatcher mounts no `DELETE` on a metadata item
+         * (it answers 405), so on that arm this is the protocol call the REST door makes.
+         */
+        del(name: string, state?: 'draft'): Promise<{ status: number | undefined; body: any }>;
+    }
 
     async function bootSaveKernel(order: readonly string[], transport: 'dispatcher' | 'rest'): Promise<SaveBooted> {
         const kernel = new ObjectKernel({ logger: { level: 'silent' }, gracefulShutdown: false });
@@ -1147,6 +1157,14 @@ describe('[#32605] the bare save of a name an enabled and a disabled package hol
         if (transport === 'dispatcher') {
             return {
                 kernel, engine, root,
+                del: async (name, state) => {
+                    try {
+                        return { status: 200, body: await kernel.getService<any>('protocol').deleteMetaItem({ type: 'dashboard', name, ...(state ? { state } : {}) }) };
+                    } catch (e) {
+                        const thrown = resolveThrownHttpError(e);
+                        return { status: thrown.status, body: { error: { code: thrown.code, message: String((e as Error)?.message ?? '') } } };
+                    }
+                },
                 put: async (name, label, query = {}) => {
                     const dispatcher = new HttpDispatcher(kernel as any, undefined, { enforceProjectMembership: false });
                     (dispatcher as any).timedResolveExecutionContext = async () => ({ ...CALLER });
@@ -1170,24 +1188,31 @@ describe('[#32605] the bare save of a name an enabled and a disabled package hol
         rest.registerRoutes();
         const route = rest.getRoutes().find((r: any) => r.method === 'PUT' && r.path === '/api/v1/meta/:type/:name');
         if (!route) throw new Error('PUT /api/v1/meta/:type/:name is not registered');
+        const deleteRoute = rest.getRoutes().find((r: any) => r.method === 'DELETE' && r.path === '/api/v1/meta/:type/:name');
+        if (!deleteRoute) throw new Error('DELETE /api/v1/meta/:type/:name is not registered');
         rest.resolveExecCtx = async () => ({ ...CALLER });
+        const answerOf = async (handler: (req: any, res: any) => Promise<void>, req: Record<string, unknown>) => {
+            const res: any = { statusCode: 200, body: undefined, headers: {} as Record<string, string> };
+            res.status = (code: number) => { res.statusCode = code; return res; };
+            res.json = (payload: any) => { res.body = payload; return res; };
+            res.send = () => res;
+            res.end = () => res;
+            res.header = (k: string, v: string) => { res.headers[k] = v; return res; };
+            res.setHeader = () => {};
+            res.write = () => true;
+            await handler(req, res);
+            return { status: res.statusCode as number, body: res.body };
+        };
         return {
             kernel, engine, root,
-            put: async (name, label, query = {}) => {
-                const res: any = { statusCode: 200, body: undefined, headers: {} as Record<string, string> };
-                res.status = (code: number) => { res.statusCode = code; return res; };
-                res.json = (payload: any) => { res.body = payload; return res; };
-                res.send = () => res;
-                res.end = () => res;
-                res.header = (k: string, v: string) => { res.headers[k] = v; return res; };
-                res.setHeader = () => {};
-                res.write = () => true;
-                await route.handler({
-                    method: 'PUT', path: `/api/v1/meta/dashboard/${name}`, params: { type: 'dashboard', name },
-                    headers: {}, query, body: body(name, label),
-                }, res);
-                return { status: res.statusCode, body: res.body };
-            },
+            put: (name, label, query = {}) => answerOf(route.handler, {
+                method: 'PUT', path: `/api/v1/meta/dashboard/${name}`, params: { type: 'dashboard', name },
+                headers: {}, query, body: body(name, label),
+            }),
+            del: (name, state) => answerOf(deleteRoute.handler, {
+                method: 'DELETE', path: `/api/v1/meta/dashboard/${name}`, params: { type: 'dashboard', name },
+                headers: {}, query: state ? { state } : {},
+            }),
         };
     }
 
@@ -1217,6 +1242,25 @@ describe('[#32605] the bare save of a name an enabled and a disabled package hol
         expect(JSON.stringify(answer.body)).toContain('?package=');
         for (const id of ids) expect(JSON.stringify(answer.body)).not.toContain(id);
     };
+    /**
+     * [ADR-0150 D3, the 2026-11-26 note] Refused with the ENABLE as the remedy, leading with it, never
+     * the `?package=` remedy of the refusal above (its lead), and naming none of `ids`.
+     */
+    const expectRefusedEnableFirst = (answer: { status: number | undefined; body: any }, ids: readonly string[]) => {
+        expect([answer.status, codeOf(answer.body)], JSON.stringify(answer.body)).toEqual([409, 'RESOURCE_CONFLICT']);
+        // The REST door answers a thrown refusal `{ error: <message>, code }`; the dispatcher nests it.
+        const message = String(typeof answer.body?.error === 'string' ? answer.body.error : answer.body?.error?.message ?? '');
+        // …and the door cuts a client message at 500 characters: the remedy arrives whole.
+        expect([message.startsWith('Enable the package that holds dashboard '), message.endsWith('…')], JSON.stringify(answer.body)).toEqual([true, false]);
+        for (const id of ids) expect(JSON.stringify(answer.body)).not.toContain(id);
+    };
+    /** Every stored row of the dashboard, active and draft, with its stored bytes: what a refused write must leave as it was. */
+    const everyRowBytes = async (engine: ObjectQL, name: string) => ((await engine.find('sys_metadata', { where: { type: 'dashboard', name }, context: { isSystem: true } } satisfies EngineQueryOptions)) as any[])
+        .map((row) => JSON.stringify([row.state, row.package_id ?? null, row.metadata, row.version, row.checksum ?? null])).sort();
+    const layDraft = (engine: ObjectQL, name: string, packageId: string | null, label: string) => engine.insert('sys_metadata', {
+        type: 'dashboard', name, namespace: 'default', package_id: packageId, scope: 'platform', strategy: 'merge', state: 'draft', version: 1,
+        metadata: JSON.stringify({ name, label, widgets: [] }),
+    }, { context: { isSystem: true } } as any);
     /** Every stored row of the dashboard, active and draft: `state:binding:label`. */
     const everyRow = async (engine: ObjectQL, name: string) => ((await engine.find('sys_metadata', { where: { type: 'dashboard', name }, context: { isSystem: true } } satisfies EngineQueryOptions)) as any[])
         .map((row) => `${row.state}:${row.package_id ?? null}:${JSON.parse(String(row.metadata)).label}`).sort();
@@ -1440,16 +1484,89 @@ describe('[#32605] the bare save of a name an enabled and a disabled package hol
             });
         });
 
-        it('CONTROL: the environment\'s own items save as before beside a disabled D: a name no package holds, and the package-unbound row of a name only D ships (which the bare read withholds)', async () => {
+        it('CONTROL: the environment\'s own item, of a name no package holds, saves, drafts, discards and deletes as before beside a disabled D', async () => {
             await layRow(booted!.engine, 'env_only_dash', null, 'environment row');
-            await layRow(booted!.engine, 'd_unbound_dash', null, 'environment row');
             await withDisabled(CODE_D, async () => {
-                for (const name of ['env_only_dash', 'd_unbound_dash']) {
-                    const saved = await booted!.put(name, 'edited');
-                    expect(saved.status, JSON.stringify(saved.body)).toBe(200);
-                    const rows = await storedRows(booted!.engine, name);
-                    expect([Object.keys(rows), rows.null?.label]).toEqual([['null'], 'edited']);
-                }
+                const saved = await booted!.put('env_only_dash', 'edited');
+                expect(saved.status, JSON.stringify(saved.body)).toBe(200);
+                const rows = await storedRows(booted!.engine, 'env_only_dash');
+                expect([Object.keys(rows), rows.null?.label]).toEqual([['null'], 'edited']);
+                const drafted = await booted!.put('env_only_dash', 'drafted', { mode: 'draft' });
+                expect(drafted.status, JSON.stringify(drafted.body)).toBe(200);
+                expect(await everyRow(booted!.engine, 'env_only_dash')).toEqual(['active:null:edited', 'draft:null:drafted']);
+                const discarded = await booted!.del('env_only_dash', 'draft');
+                expect(discarded.status, JSON.stringify(discarded.body)).toBe(200);
+                expect(await everyRow(booted!.engine, 'env_only_dash')).toEqual(['active:null:edited']);
+                const deleted = await booted!.del('env_only_dash');
+                expect(deleted.status, JSON.stringify(deleted.body)).toBe(200);
+                expect(await everyRow(booted!.engine, 'env_only_dash')).toEqual([]);
+            });
+        });
+
+        // [ADR-0150 D3, the 2026-11-26 note] A package-unbound row of a name
+        // only D ships is D's customization. With D disabled every read
+        // withholds it, and so does every write naming no package: each was
+        // answered 200 (`main` 5dbcc02b: the save edited the hidden row, the
+        // draft save stored a draft no read reaches, the draft discard
+        // removed it, and the delete removed the row, so the next enable
+        // served D's item without its customization). Each is refused with
+        // the enable as its remedy, and the row comes back as it was.
+        it('the package-unbound row of a name only the disabled D ships is hidden with it: the bare save, draft save, delete and draft discard are refused with the enable as the remedy, and re-enabled the row is served byte-identical (CONTROL: it then saves as before)', async () => {
+            await layRow(booted!.engine, 'd_unbound_dash', null, 'customization row');
+            const before = await everyRowBytes(booted!.engine, 'd_unbound_dash');
+            // CONTROL: enabled, the row is served.
+            expect(await bareLabel(booted!, 'd_unbound_dash')).toEqual([200, 'customization row']);
+            await withDisabled(CODE_D, async () => {
+                expect((await get(booted!.kernel, '/meta/dashboard/d_unbound_dash')).status).toBe(404);
+                expectRefusedEnableFirst(await booted!.put('d_unbound_dash', 'edited'), [CODE_D, CODE_E]);
+                expectRefusedEnableFirst(await booted!.put('d_unbound_dash', 'drafted', { mode: 'draft' }), [CODE_D, CODE_E]);
+                expectRefusedEnableFirst(await booted!.del('d_unbound_dash'), [CODE_D, CODE_E]);
+                // No draft is stored: the discard still answers the enable, never `?package=`.
+                expectRefusedEnableFirst(await booted!.del('d_unbound_dash', 'draft'), [CODE_D, CODE_E]);
+                expect((await get(booted!.kernel, '/meta/dashboard/d_unbound_dash')).status).toBe(404);
+                expect(await everyRowBytes(booted!.engine, 'd_unbound_dash')).toEqual(before);
+            });
+            expect(await bareLabel(booted!, 'd_unbound_dash')).toEqual([200, 'customization row']);
+            expect(await everyRowBytes(booted!.engine, 'd_unbound_dash')).toEqual(before);
+            // CONTROL: re-enabled, the bare save edits the row and the bare delete removes it, as before.
+            const saved = await booted!.put('d_unbound_dash', 'edited');
+            expect(saved.status, JSON.stringify(saved.body)).toBe(200);
+            expect(await everyRow(booted!.engine, 'd_unbound_dash')).toEqual(['active:null:edited']);
+            expect((await booted!.del('d_unbound_dash')).status).toBe(200);
+            expect(await everyRow(booted!.engine, 'd_unbound_dash')).toEqual([]);
+        });
+
+        it.each([
+            { stored: 'beside the package-unbound row', name: 'd_unbound_hidden_draft_dash', active: true },
+            { stored: 'alone', name: 'd_unbound_draft_only_dash', active: false },
+        ])('a package-unbound draft of a name only the disabled D ships, stored $stored, is hidden with it: the bare draft discard and draft save are refused with the enable as the remedy; re-enabled, the discard removes it as before (CONTROL)', async ({ name, active }) => {
+            if (active) await layRow(booted!.engine, name, null, 'customization row');
+            await layDraft(booted!.engine, name, null, 'customization draft');
+            const before = await everyRowBytes(booted!.engine, name);
+            await withDisabled(CODE_D, async () => {
+                expectRefusedEnableFirst(await booted!.del(name, 'draft'), [CODE_D, CODE_E]);
+                expectRefusedEnableFirst(await booted!.put(name, 'redrafted', { mode: 'draft' }), [CODE_D, CODE_E]);
+                expect(await everyRowBytes(booted!.engine, name)).toEqual(before);
+            });
+            const discarded = await booted!.del(name, 'draft');
+            expect(discarded.status, JSON.stringify(discarded.body)).toBe(200);
+            expect(await everyRow(booted!.engine, name)).toEqual(active ? ['active:null:customization row'] : []);
+        });
+
+        it.each([
+            { holder: 'D ships it and holds a row', name: 'd_unbound_drow_dash', id: CODE_D },
+            { holder: 'an authored D holds only a row', name: 'authored_d_unbound_dash', id: AUTH_D },
+        ])('a package-unbound row beside the disabled holder\'s own row ($holder) is hidden with it: every bare write is refused with the enable as the remedy and both rows are byte-unchanged', async ({ name, id }) => {
+            await layRow(booted!.engine, name, id, 'disabled row');
+            await layRow(booted!.engine, name, null, 'customization row');
+            const before = await everyRowBytes(booted!.engine, name);
+            await withDisabled(id, async () => {
+                expect((await get(booted!.kernel, `/meta/dashboard/${name}`)).status).toBe(404);
+                expectRefusedEnableFirst(await booted!.put(name, 'edited'), [id, CODE_E]);
+                expectRefusedEnableFirst(await booted!.put(name, 'drafted', { mode: 'draft' }), [id, CODE_E]);
+                expectRefusedEnableFirst(await booted!.del(name), [id, CODE_E]);
+                expectRefusedEnableFirst(await booted!.del(name, 'draft'), [id, CODE_E]);
+                expect(await everyRowBytes(booted!.engine, name)).toEqual(before);
             });
         });
 

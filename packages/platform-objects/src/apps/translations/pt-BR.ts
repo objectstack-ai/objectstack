@@ -80,6 +80,7 @@ export const ptBR: TranslationData = {
         // of `sys_scim_connection_credential.pluralLabel`.
         nav_scim_credentials: { label: 'Credenciais SCIM' },
         nav_api_keys: { label: 'Chaves de API' },
+        nav_access_directory: { label: 'Cargos e permissões' },
 
         // Central de aprovações = the Approvals Inbox component (#7234) — the
         // surface with decision actions. The three below are the engine's raw

@@ -136,6 +136,9 @@ import { currencyConfigPrecisionRemoved } from './entries/18/currency-config-pre
 import { permissionModifyAllAllowDeleteFalseToTrue } from './entries/18/permission-modify-all-allow-delete-false-to-true.js';
 import { permissionRlsTagsRemoved } from './entries/18/permission-rls-tags-removed.js';
 import { flowDecisionModeInclusiveExplicit } from './entries/18/flow-decision-mode-inclusive-explicit.js';
+// Major 19: imported after every major-18 conversion, in `MAJOR_19_CONVERSIONS`'s
+// identifier order.
+import { permissionViewAllFieldsBesideRecordBypass } from './entries/19/permission-view-all-fields-beside-record-bypass.js';
 
 /**
  * One conversion of an OPEN major, with its place in that major's application
@@ -302,14 +305,28 @@ const MAJOR_18_CONVERSIONS: readonly OrderedConversion[] = [
 ];
 
 /**
+ * Major 19's conversions, in {@link MAJOR_18_CONVERSIONS}'s shape and under
+ * its rules: one `{ conversion, order }` entry per conversion, SORTED BY THE
+ * CONVERSION'S IDENTIFIER, `order` saying where it applies (ascending, ties by
+ * `id`). Each is DEFINED in a module of its own, `./entries/19/<id>.ts`, the
+ * file named for its `id`, and imported after every major-18 conversion in
+ * this list's order. Step 19's `conversionIds` read
+ * `CONVERSIONS_BY_MAJOR[19]`, which is this list in `order`.
+ */
+const MAJOR_19_CONVERSIONS: readonly OrderedConversion[] = [
+  { conversion: permissionViewAllFieldsBesideRecordBypass, order: 1 },
+];
+
+/**
  * Every conversion, grouped by the major that introduced its canonical shape
  * (`toMajor`), each major's list in APPLICATION order: {@link ALL_CONVERSIONS}
  * concatenates them by ascending major and the loader runs it in sequence.
  *
  * A released major's list is a plain array, closed with its release. The major
  * that retirements still add to is authored as sorted entries with an explicit
- * `order` ({@link MAJOR_18_CONVERSIONS}), so two retirements in flight do not
- * conflict here; the next major takes the same shape when it opens.
+ * `order` ({@link MAJOR_18_CONVERSIONS}, {@link MAJOR_19_CONVERSIONS}), so two
+ * retirements in flight do not conflict here; the next major takes the same
+ * shape when it opens.
  *
  * ⚠️ EVERY CALL THIS TABLE AND {@link ALL_CONVERSIONS} MAKE AT MODULE LOAD
  * CARRIES AN `@__PURE__` ANNOTATION — a major's `inApplicationOrder(…)` and
@@ -352,6 +369,7 @@ export const CONVERSIONS_BY_MAJOR: Readonly<Record<number, readonly MetadataConv
     inlineActionApiParamsToBodyExtra,
   ],
   18: /* @__PURE__ */ inApplicationOrder(MAJOR_18_CONVERSIONS),
+  19: /* @__PURE__ */ inApplicationOrder(MAJOR_19_CONVERSIONS),
 };
 
 /**

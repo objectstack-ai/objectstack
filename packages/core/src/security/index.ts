@@ -433,10 +433,11 @@ export {
   // field-permission entry's vote under its row condition (`when`).
   buildEffectiveFieldPermissions,
   fieldPermissionVote,
-  // [ADR-0066 ⑧, ruling of record 6573563853] The one super-user predicate
-  // (row bypass and field vote alike) and the field merge's super-user vote.
+  // [ADR-0066 ⑧] The one super-user predicate (the row bypass), and the field
+  // merge's one "all fields" vote, `viewAllFields` (the field-axis split,
+  // ruling of record 6912661484: View All / Modify All cast no field vote).
   holdsSuperuserBypass,
-  superuserFieldVote,
+  viewAllFieldsReadVote,
   type FieldConditionVerdict,
   type FieldPermissionEntryLike,
   type EffectiveFieldPermissionsInputSet,

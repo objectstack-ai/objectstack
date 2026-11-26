@@ -23,6 +23,7 @@ import { CONNECTOR_CREDENTIALS_REF } from '../views/setup/connectorCredentials.j
 import { CONNECTOR_CONNECTIONS_REF } from '../views/setup/connectorConnections.js';
 import { PERMISSION_SET_ASSIGNMENT_REF, POSITION_HOLDERS_REF } from '../views/setup/peopleAssignments.js';
 import { RECYCLE_BIN_REF } from '../views/setup/recycleBin.js';
+import { ACCESS_DIRECTORY_REF } from '../views/setup/accessDirectoryRef.js';
 import { PUBLIC_FORMS_REF } from '../views/setup/publicFormsRef.js';
 import {
   isAggregatedViewContainer,
@@ -133,6 +134,9 @@ const PositionHoldersPage = lazyPage('position holders', () =>
 );
 const PermissionSetAssignmentPage = lazyPage('permission set assignments', () =>
   import('../views/setup/PermissionSetAssignmentPage.js').then((m) => m.PermissionSetAssignmentPage),
+);
+const AccessDirectoryPage = lazyPage('positions and permissions', () =>
+  import('../views/setup/AccessDirectoryPage.js').then((m) => m.AccessDirectoryPage),
 );
 const RecycleBinPage = lazyPage('recycle bin', () =>
   import('../views/setup/RecycleBinPage.js').then((m) => m.RecycleBinPage),
@@ -266,6 +270,19 @@ registerAppComponent({
   label: 'Permission Set Assignment',
   source: '@object-ui/app-shell',
   component: PermissionSetAssignmentPage,
+});
+
+/**
+ * Setup → Access control → Positions and permissions (ADR-0084, amendment of
+ * 2026-11-26): the environment directory, moved out of Studio's menu. The entry
+ * naming this ref is `@objectstack/platform-objects`' Setup navigation
+ * contribution; the shell declares no entry for it.
+ */
+registerAppComponent({
+  ref: ACCESS_DIRECTORY_REF,
+  label: 'Positions and Permissions',
+  source: '@object-ui/app-shell',
+  component: AccessDirectoryPage,
 });
 
 /**

@@ -3519,8 +3519,9 @@ const STUDIO_EN: Record<string, string> = {
   // where Studio's entries that name no package land since the Studio home went.
   'engine.studio.notFound.packageList': 'Open the package list',
   // The same way out for a principal who may enter Studio but not open
-  // Setup → Packages: the "All metadata" area across packages.
-  'engine.studio.notFound.allMetadata': 'Open All metadata',
+  // Setup → Packages: the organization's flows (`~org`), which every
+  // principal who may enter Studio may open (objectstack#37565).
+  'engine.studio.notFound.allMetadata': 'Open organization flows',
   'engine.studio.notFound.pillar': 'This page does not exist. Studio has no "{pillar}" section; pick Data, Automations, Interfaces, Access or All metadata above.',
   'engine.studio.aiCopilot': 'AI Assistant',
   // objectui#12725 — the Studio right slot: properties OR the copilot.
@@ -3555,6 +3556,7 @@ const STUDIO_EN: Record<string, string> = {
   'engine.studio.menu.owd': 'Default sharing',
   'engine.studio.menu.diagnostics': 'Diagnostics',
   'engine.studio.menu.environment': 'Positions and permissions',
+  'engine.setup.accessDirectory.notAllowed': 'Opening this page needs the {capability} capability, the one Studio asks.',
   // objectstack#37201 — the 「高级」 fold (ADR-0084, amended 2026-11-25), and a 常用 type with no item yet.
   'engine.studio.menu.advanced': 'Advanced',
   'engine.studio.menu.emptyType': 'None yet: open the list to make the first',
