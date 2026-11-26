@@ -375,3 +375,58 @@ describe('[#35384] a renamed packaged object is named by its rename, as /meta na
     expect(ctx.result[0].summary).toBe('创建了 商机 "Acme"');
   });
 });
+
+describe('composeActivitySummary — a fired milestone (#37524)', () => {
+  const MILESTONE_DEFS: Record<string, any> = {
+    biz_deal: {
+      ...DEFS.biz_deal,
+      activityMilestones: [{ field: 'stage', value: 'won', summary: 'Deal won: {name} ({stage})' }],
+    },
+  };
+  const WON: ActivitySummaryMessage = {
+    key: 'activityMilestone',
+    object: 'biz_deal',
+    field: 'stage',
+    value: 'won',
+    tokens: { name: { text: 'Acme' }, stage: { text: 'Won', option: 'won' } },
+  };
+  function milestoneI18n() {
+    const i18n = makeI18n();
+    i18n.loadTranslations('zh-CN', {
+      objects: { biz_deal: { _milestones: { stage: { won: { summary: '赢单：{name}（{stage}）{extra}' } } } } },
+    });
+    return i18n;
+  }
+
+  it('composes the translated template, a select token by the reader\'s option label, an unstored token empty', () => {
+    const locale = readerSummaryLocale(milestoneI18n(), 'zh-CN', (n) => MILESTONE_DEFS[n] ?? null)!;
+    expect(composeActivitySummary(WON, locale)).toBe('赢单：Acme（赢单）');
+  });
+
+  it('composes nothing — the stored sentence stands — for a locale with no entry, and on the writer\'s locale', () => {
+    const ja = readerSummaryLocale(milestoneI18n(), 'ja-JP', (n) => MILESTONE_DEFS[n] ?? null)!;
+    expect(composeActivitySummary(WON, ja)).toBeUndefined();
+    const { milestoneSummary: _none, ...writer } = ja;
+    expect(composeActivitySummary(WON, writer)).toBeUndefined();
+  });
+
+  it('keeps a tenant\'s rewording of a packaged milestone (ADR-0029 D9.2a)', () => {
+    const reworded = { biz_deal: { ...MILESTONE_DEFS.biz_deal, activityMilestones: [{ field: 'stage', value: 'won', summary: 'Closed! {name}' }] } };
+    const packaged = (n: string) => MILESTONE_DEFS[n];
+    const tenant = readerSummaryLocale(milestoneI18n(), 'zh-CN', (n) => (reworded as any)[n] ?? null, packaged)!;
+    expect(composeActivitySummary(WON, tenant)).toBeUndefined();
+    const untouched = readerSummaryLocale(milestoneI18n(), 'zh-CN', (n) => MILESTONE_DEFS[n] ?? null, packaged)!;
+    expect(composeActivitySummary(WON, untouched)).toBe('赢单：Acme（赢单）');
+    // An empty served summary is no rewording: the resolver's one predicate
+    // reads it as nothing to protect, so the catalog still applies.
+    const blank = { biz_deal: { ...MILESTONE_DEFS.biz_deal, activityMilestones: [{ field: 'stage', value: 'won', summary: '' }] } };
+    const emptied = readerSummaryLocale(milestoneI18n(), 'zh-CN', (n) => (blank as any)[n] ?? null, packaged)!;
+    expect(composeActivitySummary(WON, emptied)).toBe('赢单：Acme（赢单）');
+  });
+
+  it('reads the stored code back, and refuses a malformed one', () => {
+    expect(readActivitySummaryMessage(WON)).toEqual(WON);
+    expect(readActivitySummaryMessage({ ...WON, tokens: { name: 'Acme' } })).toBeNull();
+    expect(readActivitySummaryMessage({ ...WON, value: 1 })).toBeNull();
+  });
+});

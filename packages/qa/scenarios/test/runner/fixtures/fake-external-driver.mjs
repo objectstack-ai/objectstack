@@ -6,8 +6,15 @@
  * the runner's tests: it speaks the stdin/stdout contract and reports what it
  * saw of the persona's key — never the key itself.
  *
- *   - `info`: `{ name: 'fake-agent', version: '1.2.3' }`, or, by
+ *   - `info` (always sent as `objectstack-scenario-driver/1`):
+ *     `{ name: 'fake-agent', version: '1.2.3', contract: '…/2' }`, or, by
  *     `FAKE_DRIVER_INFO`, an exit 4 (`crash`) or a non-JSON answer (`garbage`).
+ *     `FAKE_DRIVER_CONTRACT=1` makes it a `/1` command (its answer names no
+ *     contract); any other value is named in the answer as given. Every later
+ *     call must carry the contract it named, or it exits 2.
+ *   - A door `author` call (contract `/2`, `door` on the input) reports what
+ *     it saw of the door's token, as an ask reports the key, and the skills it
+ *     found in `door.skillsDir`.
  *   - With `FAKE_DRIVER_SCRIPT=DIR`, an `author` or `ask` call answers the turn
  *     the test wrote for its step (`DIR/<encoded step key>.json`).
  *   - Otherwise the prompt's first word decides: `HANG` waits to be killed
@@ -28,7 +35,7 @@
  * run's few keys apart.
  */
 
-import { appendFileSync, readFileSync, statSync } from 'node:fs';
+import { appendFileSync, existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 
 process.on('SIGTERM', () => {
@@ -48,7 +55,9 @@ let raw = '';
 process.stdin.on('data', (d) => (raw += d));
 process.stdin.on('end', () => {
   const call = JSON.parse(raw);
-  if (call.contract !== 'objectstack-scenario-driver/1') {
+  const speaks = process.env.FAKE_DRIVER_CONTRACT === undefined ? 'objectstack-scenario-driver/2' : process.env.FAKE_DRIVER_CONTRACT === '1' ? 'objectstack-scenario-driver/1' : process.env.FAKE_DRIVER_CONTRACT;
+  const expected = call.kind === 'info' ? 'objectstack-scenario-driver/1' : speaks;
+  if (call.contract !== expected) {
     process.stderr.write(`fake: unknown contract ${call.contract}\n`);
     process.exit(2);
   }
@@ -62,24 +71,35 @@ process.stdin.on('end', () => {
       process.stdout.write('fake-agent, version one\n');
       process.exit(0);
     }
-    out({ name: 'fake-agent', version: '1.2.3' });
+    out({ name: 'fake-agent', version: '1.2.3', ...(speaks === 'objectstack-scenario-driver/1' ? {} : { contract: speaks }) });
     return;
   }
 
-  let seen;
-  if (call.kind === 'ask') {
-    const file = call.mcp.configFile;
+  /** What a call saw of the secret in its 0600 MCP config file: never the secret itself. */
+  const sawSecret = (mcp) => {
+    const file = mcp.configFile;
     const config = JSON.parse(readFileSync(file, 'utf8'));
     const key = config.mcpServers.app.headers.Authorization.replace(/^Bearer /, '');
-    seen = {
+    return {
       configFile: file,
       fileMode: (statSync(file).mode & 0o777).toString(8),
-      urlMatches: config.mcpServers.app.url === call.mcp.url,
+      urlMatches: config.mcpServers.app.url === mcp.url,
       runsInConfigDir: process.cwd() === dirname(file),
       keyPrint: keyPrint(key),
       keyOnArgv: process.argv.some((a) => a.includes(key)),
       keyInEnv: Object.values(process.env).some((v) => typeof v === 'string' && v.includes(key)),
       keyOnStdin: raw.includes(key),
+    };
+  };
+  let seen;
+  if (call.kind === 'ask') seen = sawSecret(call.mcp);
+  if (call.kind === 'author' && call.door) {
+    const dir = call.door.skillsDir;
+    seen = {
+      ...sawSecret(call.door.mcp),
+      runsInCwd: process.cwd() === call.cwd,
+      skills: dir !== undefined && existsSync(dir) ? readdirSync(dir).sort() : [],
+      skillMdOf: dir !== undefined && existsSync(dir) ? readdirSync(dir).sort().map((n) => existsSync(join(dir, n, 'SKILL.md'))) : [],
     };
   }
   if (process.env.FAKE_DRIVER_LOG) appendFileSync(process.env.FAKE_DRIVER_LOG, `${JSON.stringify({ kind: call.kind, step: call.step, ...(seen ? { seen } : {}) })}\n`);

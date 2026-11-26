@@ -276,7 +276,7 @@ import {
   pageTabItemKey,
   walkAddressedPageComponents,
 } from '@objectstack/spec/system';
-import { isRecordPageBuiltinTab, relatedListEntryHidden } from '@objectstack/spec/data';
+import { isRecordPageBuiltinTab, relatedListEntryHidden, relatedListEntryName, relatedListNameCovers } from '@objectstack/spec/data';
 import { walkFlowNodes } from './flow-walk.js';
 import { objectExtensionsByTarget, packagesOf, recordsOf, suggestName } from './object-graph.js';
 import { walkPageComponents } from './page-walk.js';
@@ -478,6 +478,12 @@ interface ObjectFacts {
    */
   validations: Set<string>;
   /**
+   * `_milestones` addresses — per watched `field`, the `value`s an
+   * `activityMilestones` entry of this object fires on (#37524).
+   * `objects.<obj>._milestones.<field>.<value>.summary` is keyed by that pair.
+   */
+  milestones: Map<string, Set<string>>;
+  /**
    * `_tabs` names — the filter-preset tabs declared for this object, from
    * `page.interfaceConfig.userFilters.tabs[].name`. See {@link collectPageTabs}
    * for why that is the only carrier and how the object binding is resolved.
@@ -501,6 +507,12 @@ interface ObjectFacts {
    * only to say so.
    */
   relatedListHidden: Set<string>;
+  /**
+   * The lists whose label (from the owner or a placement) a `.custom`
+   * arrangement entry replaced with none: the tab shows, untitled by any
+   * `label` — read only to name the arrangement in the finding.
+   */
+  relatedListStripped: Set<string>;
 }
 
 /** Everything a `flows.<name>.screens.<node_id>` key may legally name. */
@@ -667,10 +679,12 @@ function emptyFacts(): ObjectFacts {
     sections: new Set(),
     sectionEntries: new Map(),
     validations: new Set(),
+    milestones: new Map(),
     tabs: new Set(),
     relatedListLabels: new Set(),
     relatedListNames: new Set(),
     relatedListHidden: new Set(),
+    relatedListStripped: new Set(),
   };
 }
 
@@ -1338,6 +1352,15 @@ function buildUniverse(stack: AnyRec): Universe {
     for (const rule of recordsOf(obj.validations)) {
       collectValidationRuleNames(rule, facts.validations);
     }
+    // #37524: `_milestones.<field>.<value>` is keyed by the pair a milestone fires on.
+    for (const milestone of recordsOf(obj.activityMilestones)) {
+      const field = strName(milestone.field);
+      const value = typeof milestone.value === 'string' && milestone.value.length > 0 ? milestone.value : undefined;
+      if (!field || !value) continue;
+      let values = facts.milestones.get(field);
+      if (!values) facts.milestones.set(field, (values = new Set()));
+      values.add(value);
+    }
     // `_relatedLists.<list>` is keyed by an object-form `relatedLists` entry's
     // literal `list` (`object.field` is one key), and resolves only over an
     // entry that authors a `label`: `translateObject` overlays that label and
@@ -1424,25 +1447,59 @@ function buildUniverse(stack: AnyRec): Universe {
         const key = strName(group.key);
         if (key) facts.sections.add(key);
       }
-      // `_relatedLists.<list>` is keyed by a labelled entry's `list`: a
-      // `.custom` arrangement's `relatedLists` entry (ADR-0146 D10) and a
-      // list placement's `place` entry each title a tab of the target, and
-      // where the target declares `relatedLists` the served target carries
-      // that entry, which `translateObject` translates as it does the
-      // target's own (a placed entry is part of the packaged base it is
-      // compared with, `getPackagedObjectBase`). A placement on a target
-      // that declares none is not applied, and its key is accepted here all
-      // the same: this fold does not read whether the target declares the
-      // list. An arrangement entry with `hidden: true` titles no tab.
+      // `_relatedLists.<list>` is keyed by a labelled entry's `list`: a list
+      // placement's `place` entry titles a tab of the target, and where the
+      // target declares `relatedLists` the served target carries that entry,
+      // which `translateObject` translates as it does the target's own (a
+      // placed entry is part of the packaged base it is compared with,
+      // `getPackagedObjectBase`). A placement on a target that declares none
+      // is not applied, and its key is accepted here all the same: this fold
+      // does not read whether the target declares the list. The `.custom`
+      // arrangement's entries are folded after every placement, below.
+      const arranged = new Set<unknown>(extension.relatedListArrangement ?? []);
       for (const entry of extension.relatedListEntries) {
+        if (arranged.has(entry)) continue;
         const list = strName(entry.list);
         if (!list) continue;
         facts.relatedListNames.add(list);
-        if (relatedListEntryHidden(entry)) {
-          facts.relatedListHidden.add(list);
-          continue;
-        }
         if (typeof entry.label === 'string' && entry.label.length > 0) facts.relatedListLabels.add(list);
+      }
+    }
+    // [#36595] The `.custom` arrangement (ADR-0146 D10) is applied after the
+    // owner's list and every placement, as the registry applies it
+    // (`registry-custom-arrangement.ts`): each of its entries REPLACES every
+    // entry it covers (`relatedListNameCovers`: the same list, or a bare child
+    // for each list of that child). So a labelled entry titles the tab, a
+    // bare name or an unlabelled entry leaves it the child FK's
+    // `relatedListTitle`, and `{ list, hidden: true }` leaves no tab, whatever
+    // label the owner or a placement gave the lists it covers. Lists it does
+    // not cover keep what they had.
+    //
+    // Two passes per arrangement, as the registry reads one: it collects the
+    // arrangement's entries first and only then drops what they cover from the
+    // tab list steps 1–2 gave, so one entry never strips a label or a `hidden`
+    // a sibling entry of the SAME arrangement wrote, in either order.
+    for (const extension of extensions) {
+      const arrangement = (extension.relatedListArrangement ?? [])
+        .map((entry) => ({ entry, list: relatedListEntryName(entry) }))
+        .filter((e): e is { entry: unknown; list: string } => typeof e.list === 'string' && e.list !== '');
+      for (const { list } of arrangement) {
+        facts.relatedListNames.add(list);
+        for (const labelled of [...facts.relatedListLabels]) {
+          if (!relatedListNameCovers(list, labelled)) continue;
+          facts.relatedListLabels.delete(labelled);
+          facts.relatedListStripped.add(labelled);
+        }
+        for (const hidden of [...facts.relatedListHidden]) {
+          if (relatedListNameCovers(list, hidden)) facts.relatedListHidden.delete(hidden);
+        }
+      }
+      for (const { entry, list } of arrangement) {
+        if (relatedListEntryHidden(entry)) facts.relatedListHidden.add(list);
+        else if (isRec(entry) && typeof entry.label === 'string' && entry.label.length > 0) {
+          facts.relatedListLabels.add(list);
+          facts.relatedListStripped.delete(list);
+        }
       }
     }
   }
@@ -2156,11 +2213,18 @@ export function validateTranslationReferences(stack: AnyRec): TranslationRefFind
               `Drop this key: a built-in tab takes no \`label\` here.`);
             continue;
           }
-          if (facts.relatedListHidden.has(listName)) {
+          if ([...facts.relatedListHidden].some((hidden) => relatedListNameCovers(hidden, listName))) {
             orphan(listWhere, listPath,
               `Related list "${listName}" of object "${objectName}" is hidden by the \`.custom\` ` +
               `arrangement (\`hidden: true\`), so no tab shows a title from this key.`,
-              `Drop this key, or show the tab (drop \`hidden\`) and give the entry a \`label\`.`);
+              `Drop this key, or show the tab (drop \`hidden\`) with the owner's \`label\` on the entry.`);
+            continue;
+          }
+          if (facts.relatedListStripped.has(listName)) {
+            orphan(listWhere, listPath,
+              `Related list "${listName}" of object "${objectName}" carries no \`label\` in the \`.custom\` ` +
+              `arrangement, which replaces the owner's entry, so no title reads this key.`,
+              `Drop this key, or re-state the arrangement's entry with the owner's \`label\` ({ list, label }).`);
             continue;
           }
           const named = facts.relatedListNames.has(listName);
@@ -2199,6 +2263,31 @@ export function validateTranslationReferences(stack: AnyRec): TranslationRefFind
             `Match the key to the rule's \`name\`, or drop it if the rule was renamed or ` +
               `removed.`,
           );
+        }
+
+        // _milestones.<field>.<value>
+        //
+        // A milestone's summary template, keyed by the pair that fires it. A
+        // key over a pair no milestone declares is never read: the row keeps
+        // its authored sentence.
+        for (const [field, rawValues] of Object.entries(asRecord(rawNode._milestones))) {
+          for (const value of Object.keys(asRecord(rawValues))) {
+            if (facts.milestones.get(field)?.has(value)) continue;
+            const declared = facts.milestones.get(field);
+            orphan(
+              `${inLocale} · object "${objectName}" · milestone "${field}" → "${value}"`,
+              `${objPath}._milestones${memberPath(field)}${memberPath(value)}`,
+              declared
+                ? `Translations are keyed to a milestone of field "${field}" firing on "${value}", ` +
+                  `which object "${objectName}" does not declare, so no timeline row reads this key.` +
+                  suggest(value, declared)
+                : `Translations are keyed to a milestone watching field "${field}", which no ` +
+                  `\`activityMilestones\` entry of object "${objectName}" watches, so no timeline row ` +
+                  `reads this key.`,
+              `Match the key to the milestone's \`field\` and \`value\`, or drop it if the milestone ` +
+                `was changed or removed.`,
+            );
+          }
         }
 
         // _actions.<name>[.params.<name>[.options.<value>] | .outcomeMessages.<outcome>

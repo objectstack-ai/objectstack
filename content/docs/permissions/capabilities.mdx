@@ -147,8 +147,8 @@ plain names. Three consequences worth internalising before you pick one:
   capability name; it is simply held by nobody, so the caller is denied. That is
   the safe direction, but nothing about the denial says the name exists nowhere.
   The authoring lint `validateCapabilityReferences` (ADR-0066 ⑨) closes part of
-  this gap: it resolves every `requiredPermissions` reference against the
-  capabilities known at author time and **warns** on the unresolved ones. It
+  this gap: it resolves every `requiredPermissions` reference, and every book's
+  `audience: { systemPermission }`, against the capabilities known at author time and **warns** on the unresolved ones. It
   reads every package of the artifact being built, so a grant in a sibling
   package of the same artifact counts, as it does at run time. It is a warning,
   not an error, because the lint cannot see capabilities declared by packages

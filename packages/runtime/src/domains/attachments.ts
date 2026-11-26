@@ -36,6 +36,8 @@ export const ATTACHMENTS_BRIDGE: OwnDoorBridge = Object.freeze({
     noun: 'the attachment removal and rename doors',
     // [#37352] The catalog key of `noun`: the bridge's `501` follows the request's language.
     nounKey: 'own_door_attachment_mutate',
+    // [#37610] Two doors: the `501` says "are".
+    nounPlural: true,
     tag: 'attachments',
 });
 

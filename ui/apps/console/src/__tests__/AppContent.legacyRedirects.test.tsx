@@ -53,11 +53,33 @@
  */
 
 import '@testing-library/jest-dom/vitest';
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi, afterEach } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import { MemoryRouter, Routes, Route, useLocation, useParams } from 'react-router-dom';
 
 import { systemRoutes } from '../AppContent';
+
+// objectstack#37565 — the viewer's capability set, as `usePermissions()` answers it: a holder of
+// Setup's entry capability unless a case says otherwise (`undefined`: no reported set).
+const HOLDER = ['studio.access', 'setup.access'];
+const held = vi.hoisted(() => ({ capabilities: ['studio.access', 'setup.access'] as string[] | undefined }));
+vi.mock('@object-ui/permissions', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@object-ui/permissions')>();
+  // One object per answer, as the hook's own identity is (objectui#6724).
+  const answers = new Map<string[] | undefined, ReturnType<typeof actual.usePermissions>>();
+  return {
+    ...actual,
+    usePermissions: () => {
+      const base = actual.usePermissions();
+      let answer = answers.get(held.capabilities);
+      if (!answer) answers.set(held.capabilities, (answer = { ...base, systemPermissions: held.capabilities }));
+      return answer;
+    },
+  };
+});
+afterEach(() => {
+  held.capabilities = HOLDER;
+});
 
 /**
  * Records every distinct location the router settles on. `<Navigate replace>`
@@ -97,6 +119,8 @@ function renderAt(url: string): string[] {
           <Route path="component/metadata/directory" element={<Probe id="alias-directory" />} />
           <Route path="component/metadata/resource/*" element={<Probe id="alias-resource" />} />
           <Route path="component/metadata/resource" element={<Probe id="alias-resource" />} />
+          {/* objectstack#37565 — Setup → Access control's environment directory. */}
+          <Route path="component/security/access-directory/*" element={<Probe id="setup-directory" />} />
         </Route>
         {/* The Studio app the host mounts beside `/apps/*` (objectstack ADR-0146 D1). */}
         <Route path="/studio/*" element={<Probe id="studio" />} />
@@ -128,7 +152,6 @@ describe('console host legacy redirects → Studio\'s All metadata area, in ONE 
   it.each([
     ['/apps/x/system/metadata/object', '/studio/~all/metadata/object'],
     ['/apps/x/system/metadata/object/account', '/studio/~all/metadata/object/account'],
-    ['/apps/x/system/metadata', '/studio/~all/metadata'],
     ['/apps/x/system/objects/account', '/studio/~all/metadata/object/account'],
     ['/apps/x/system/objects', '/studio/~all/metadata/object'],
     ['/apps/my-app/system/metadata/permission/admin', '/studio/~all/metadata/permission/admin'],
@@ -138,7 +161,7 @@ describe('console host legacy redirects → Studio\'s All metadata area, in ONE 
 
   it.each([
     ['/apps/x/system/metadata/object?package=crm', '/studio/crm/metadata/object?package=crm'],
-    ['/apps/x/system/metadata/position?scope=environment', '/studio/~all/metadata/position?scope=environment'],
+    ['/apps/x/system/metadata/position/manager?scope=environment', '/studio/~all/metadata/position/manager?scope=environment'],
     ['/apps/x/system/metadata/object/account?review=1', '/studio/~all/metadata/object/account?review=1'],
     ['/apps/x/system/objects/account?package=crm#fields', '/studio/crm/metadata/object/account?package=crm#fields'],
     ['/apps/x/system/metadata/object?keep=me#frag', '/studio/~all/metadata/object?keep=me#frag'],
@@ -150,12 +173,33 @@ describe('console host legacy redirects → Studio\'s All metadata area, in ONE 
     expectStudioInOneHop(renderAt(from), from, to);
   });
 
+  // objectstack#37565 — the environment directory and its lists left Studio's cross-package leg for
+  // Setup → Access control (ADR-0084, amended 2026-11-26): these landed on the leg before, in one hop.
   it.each([
-    ['/apps/x/system/positions', '/studio/~all/metadata/position?scope=environment'],
-    ['/apps/x/system/roles', '/studio/~all/metadata/position?scope=environment'],
-    ['/apps/x/system/permissions', '/studio/~all/metadata/permission?scope=environment'],
-  ])('the retired catalog page %s opens the catalog in Studio', (from, to) => {
+    ['/apps/x/system/metadata', '/apps/setup/component/security/access-directory'],
+    ['/apps/x/system/metadata/position?scope=environment', '/apps/setup/component/security/access-directory/position?scope=environment'],
+    ['/apps/x/system/positions', '/apps/setup/component/security/access-directory/position?scope=environment'],
+    ['/apps/x/system/roles', '/apps/setup/component/security/access-directory/position?scope=environment'],
+    ['/apps/x/system/permissions', '/apps/setup/component/security/access-directory/permission?scope=environment'],
+  ])('the environment directory %s opens on Setup\'s page, in one hop', (from, to) => {
+    const chain = renderAt(from);
+    expect(chain).toEqual([from, to]);
+    expect(screen.getByTestId('setup-directory')).toBeInTheDocument();
+    expect(screen.queryByTestId('studio')).not.toBeInTheDocument();
+    expectNoAliasAnywhere(chain);
+  });
+
+  // objectstack#37565 — for a principal who may not open Setup, or with no reported set, they stay on the leg.
+  it.each([
+    [['studio.access'], '/apps/x/system/metadata', '/studio/~all/metadata'],
+    [['studio.access'], '/apps/x/system/positions', '/studio/~all/metadata/position?scope=environment'],
+    [['studio.access'], '/apps/x/system/permissions', '/studio/~all/metadata/permission?scope=environment'],
+    [undefined, '/apps/x/system/metadata/position?scope=environment', '/studio/~all/metadata/position?scope=environment'],
+    [undefined, '/apps/x/system/roles', '/studio/~all/metadata/position?scope=environment'],
+  ] as const)('holding %j, the environment directory %s stays on Studio\'s leg: %s', (capabilities, from, to) => {
+    held.capabilities = capabilities === undefined ? undefined : [...capabilities];
     expectStudioInOneHop(renderAt(from), from, to);
+    expect(screen.queryByTestId('setup-directory')).not.toBeInTheDocument();
   });
 
   it('a datasource stays in Setup: the canonical route, the app prefix preserved', () => {

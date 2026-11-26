@@ -714,7 +714,7 @@ export const fr: PlatformTranslationData = {
         },
         turso_url: {
           label: 'URL de connexion',
-          help: 'Exemples : libsql://your-tenant.turso.io · file:./.objectstack/knowledge.db · :memory:',
+          help: 'Exemples : libsql://your-tenant.turso.io · file:./.objectstack/data/knowledge.db · :memory:',
         },
         turso_auth_token: {
           label: 'Jeton d’authentification',

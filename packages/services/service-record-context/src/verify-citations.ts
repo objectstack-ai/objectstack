@@ -10,7 +10,7 @@ import {
 } from '@objectstack/spec/ai';
 import { isHtmlBodyType } from './body-outline.js';
 import type { RecordContextDoor } from './door.js';
-import { executeGetRecordContext } from './record-context-tools.js';
+import { executeGetRecordContext, isCodedRefusal } from './record-context-tools.js';
 
 /**
  * [ADR-0160 D9, third amendment] The citation verifier: which citations of an
@@ -48,11 +48,14 @@ import { executeGetRecordContext } from './record-context-tools.js';
  *   refusal and a fault; a driver errno also arrives on `.code`, so the
  *   string alone cannot tell.
  *
- *   That holds at this function's boundary only. The executor itself turns
- *   some failures into a refusal so that it names nothing: a related object's
- *   definition read, or a published-definition read, that throws arrives here
- *   as `PERMISSION_DENIED` 403, and is dropped without a report (#37463).
- *   The whole 4xx band is a refusal, so a door that declared a coded 408 or
+ *   The executor draws the same line with the same reader
+ *   (`isCodedRefusal`) at the object-level reads of a related object it
+ *   judges, and at its child list query asks the `/data` door's classifier
+ *   (`doorAnswersItself`), so an uncoded failure there is no refusal either:
+ *   it arrives here as `INTERNAL_ERROR` (500), naming nothing, with the
+ *   original error on its `cause`, and is reported. A fault the door codes
+ *   there (`ERR_DATASOURCE_UNAVAILABLE` 503) arrives as the door reads it,
+ *   with no 4xx, and is reported too. The whole 4xx band is a refusal, so a door that declared a coded 408 or
  *   429 would have a transient condition dropped without a report; no door on
  *   the read path declares one today.
  * - **What a quote is matched against** — the strings of the data member, and
@@ -153,32 +156,9 @@ export interface VerifyingCall {
   anchor?: string;
 }
 
-/**
- * Whether a throw is an ADR-0112 refusal: a non-empty string `code` and a
- * declared 4xx status. Anything else is a failure.
- */
-function isRefusal(err: unknown): boolean {
-  if (err == null || typeof err !== 'object') return false;
-  const { code } = err as { code?: unknown };
-  const status = declaredStatusOf(err);
-  return typeof code === 'string' && code.length > 0 && status !== undefined && status >= 400 && status < 500;
-}
-
-/**
- * The status a throw declares, read as ADR-0112's reader reads it:
- * `.status`, then `.statusCode` (`resolveThrownHttpError`'s `declaredStatus`,
- * `@objectstack/types`). Both spellings are produced in this repo.
- */
-function declaredStatusOf(err: object): number | undefined {
-  const { status, statusCode } = err as { status?: unknown; statusCode?: unknown };
-  if (typeof status === 'number') return status;
-  if (typeof statusCode === 'number') return statusCode;
-  return undefined;
-}
-
 /** Hand a failure to the host; a callback that throws changes nothing. */
 function report(onError: VerifyRecordCitationsOptions['onError'], err: unknown, c: RecordCitationParsed): void {
-  if (onError === undefined || isRefusal(err)) return;
+  if (onError === undefined || isCodedRefusal(err)) return;
   const call: VerifyingCall = {
     object: c.object,
     id: c.id,

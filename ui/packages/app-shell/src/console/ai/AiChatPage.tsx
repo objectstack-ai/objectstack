@@ -170,34 +170,13 @@ import {
   type OutboundAgentTextKey,
 } from './outboundAgentText.js';
 import { resolveApiBase } from './resolveApiBase.js';
+import { appOfObject } from './appOfObject.js';
 import { RECORD_SECTION_OPENED_STATE, RECORD_SECTION_PARAM } from '../../urlParams.js';
 import { AiUnavailable } from './AiUnavailable.js';
 import { recordWriteFormTarget } from '../../utils/recordFormAiDraft.js';
 import { useUpload } from '@object-ui/fields';
 import { isSpreadsheetAttachment, uploadChatAttachments, chatAttachmentNotes } from './chatAttachments.js';
 import { studioHomePath } from '../../views/studio-design/studioAddress.js';
-
-/**
- * The app segment a record of `objectName` lives under: the object's owning
- * package, read from `/api/v1/meta/object/<name>` (`_packageId`), with `setup`
- * as the fallback shell for an object no package claims. Best-effort: a failed
- * read still lands on the record. Shared by the record hand-off (cloud#1658)
- * and the record-write card's form hand-off (cloud#3565).
- */
-async function appOfObject(objectName: string): Promise<string> {
-  try {
-    const r = await fetch(`/api/v1/meta/object/${encodeURIComponent(objectName)}`, {
-      credentials: 'include',
-    });
-    if (r.ok) {
-      const j = (await r.json()) as { item?: { _packageId?: unknown } };
-      if (typeof j?.item?._packageId === 'string' && j.item._packageId) return j.item._packageId;
-    }
-  } catch {
-    /* resolution is best-effort; the caller's fallback still lands on the record */
-  }
-  return 'setup';
-}
 
 /**
  * objectstack#31869 — the console address of the list a chat list link names:

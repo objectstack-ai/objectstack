@@ -2198,7 +2198,7 @@ const pt = {
   },
   console: {
     studio: {
-      title: "Studio",
+      title: "App Studio",
       accessRequired: "Você precisa de acesso ao Studio para abrir o Studio. Um administrador pode concedê-lo com um conjunto de permissões em Configuração → Atribuição de conjuntos de permissões.",
     },
     saveAdvisoryTitle: "Salvo — a verificação de criação gerou {{count}} recomendação(ões)",
@@ -3807,11 +3807,11 @@ const pt = {
       tooltip: "Esta plataforma está em pré-visualização — os recursos podem mudar.",
     },
     aiAssistant: "Assistente de IA",
-    designInStudio: "Projetar no Studio",
+    designInStudio: "Projetar no App Studio",
     designLayout: "Projetar layout",
     editApp: "Editar aplicativo",
-    openAppInStudio: "Ver {{app}} no Studio",
-    viewInStudio: "Ver no Studio",
+    openAppInStudio: "Ver {{app}} no App Studio",
+    viewInStudio: "Ver no App Studio",
   },
   home: {
     build: {
@@ -3953,8 +3953,8 @@ const pt = {
       backToAppHome: "Voltar ao menu do aplicativo",
       appsAvailable: "{{count}} aplicativos disponíveis",
       allApps: "Todos os aplicativos",
-      editAppInStudio: "Editar {{app}} no Studio",
-      openAppInStudio: "Ver {{app}} no Studio",
+      editAppInStudio: "Editar {{app}} no App Studio",
+      openAppInStudio: "Ver {{app}} no App Studio",
       backToHome: "Voltar à página inicial do app",
       settings: "Configurações",
       productHome: "Início do {{product}}",
@@ -5777,6 +5777,8 @@ const pt = {
     completed: 'Fluxo "{{flow}}" concluído',
     alreadySubmitted: 'Seu envio anterior foi concluído. O fluxo avançou para esta etapa.',
     noLongerWaiting: 'Esta etapa pode já ter sido processada. Feche esta caixa de diálogo e verifique o registro antes de tentar novamente.',
+    invalidScreenInput: 'Alguns valores desta etapa não foram aceitos. Verifique-os e tente novamente.',
+    fieldNotAccepted: '{{field}}: este valor não é aceito',
   },
   appManagement: {
     title: "Aplicativos",

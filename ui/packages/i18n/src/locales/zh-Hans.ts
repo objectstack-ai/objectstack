@@ -2275,7 +2275,7 @@ const zh = {
   },
   console: {
     studio: {
-      title: 'Studio',
+      title: '应用搭建',
       accessRequired: '你需要 Studio 访问权限才能打开 Studio。管理员可以在“设置 → 权限集分配”中通过权限集授予。',
     },
     saveAdvisoryTitle: '已保存 — 编辑检查提出了 {{count}} 条建议',
@@ -3861,11 +3861,11 @@ const zh = {
   },
   topbar: {
     aiAssistant: 'AI 助手',
-    designInStudio: '在 Studio 中设计',
+    designInStudio: '在应用搭建中设计',
     designLayout: '设计布局',
     editApp: '编辑应用',
-    openAppInStudio: '在 Studio 中查看 {{app}}',
-    viewInStudio: '在 Studio 中查看',
+    openAppInStudio: '在应用搭建中查看 {{app}}',
+    viewInStudio: '在应用搭建中查看',
     openAssistant: '打开{{name}}助手',
     offline: '离线',
     usersOnline: '当前在线用户',
@@ -4008,8 +4008,8 @@ const zh = {
       backToAppHome: '返回应用菜单',
       appsAvailable: '共 {{count}} 个可用应用',
       allApps: '所有应用',
-      editAppInStudio: '在 Studio 中编辑 {{app}}',
-      openAppInStudio: '在 Studio 中查看 {{app}}',
+      editAppInStudio: '在应用搭建中编辑 {{app}}',
+      openAppInStudio: '在应用搭建中查看 {{app}}',
       backToHome: '返回应用起始页',
       settings: '系统设置',
       productHome: '{{product}} 首页',
@@ -5678,6 +5678,8 @@ const zh = {
     completed: '流程「{{flow}}」已完成',
     alreadySubmitted: '上一步已提交成功，流程已进入当前步骤。',
     noLongerWaiting: '这一步可能已经处理完成。请关闭对话框，确认记录后再重试。',
+    invalidScreenInput: '这一步有些值未被接受。请检查后重试。',
+    fieldNotAccepted: '{{field}}：此值不被接受',
   },
   appManagement: {
     title: '应用',

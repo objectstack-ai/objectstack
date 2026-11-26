@@ -409,3 +409,112 @@ describe('[#23658] the real publish door: the only draft is another package\'s',
         expect(publishRequests[1].packageId).toBe(OTHER_PKG);
     }, 60_000);
 });
+
+// ---------------------------------------------------------------------------
+// Part 3 — [#37440] the two pins: `draftVersion` (the draft) and
+// `parentVersion` (the live row)
+// ---------------------------------------------------------------------------
+
+describe('[#37440] meta.publishItem pins — what reaches the wire', () => {
+    it('`draftVersion` rides the body beside `message`; `parentVersion` rides `If-Match`', async () => {
+        const { client, fetchMock } = createMockClient(PUBLISH_OK);
+        await client.meta.publishItem('view', 'shared_grid', {
+            message: 'ship it',
+            packageId: PKG,
+            draftVersion: 'draft-token',
+            parentVersion: 'live-token',
+        });
+        expect(bodyOfCall(fetchMock)).toEqual({ message: 'ship it', draftVersion: 'draft-token' });
+        const headers = fetchMock.mock.calls[0][1].headers as Record<string, string>;
+        expect(headers['If-Match']).toBe('live-token');
+        expect(headers).not.toHaveProperty('If-None-Match');
+        // A body member and a header: neither is put on the query string.
+        expect(new URL(String(fetchMock.mock.calls[0][0])).search).toBe(`?package=${PKG}`);
+    });
+
+    it('`parentVersion: null` asserts no live row: `If-None-Match: *`, never beside `If-Match`', async () => {
+        const { client, fetchMock } = createMockClient(PUBLISH_OK);
+        await client.meta.publishItem('view', 'shared_grid', { parentVersion: null });
+        const headers = fetchMock.mock.calls[0][1].headers as Record<string, string>;
+        expect(headers['If-None-Match']).toBe('*');
+        expect(headers).not.toHaveProperty('If-Match');
+        expect(bodyOfCall(fetchMock)).toEqual({});
+    });
+
+    it('CONTROL: unset (or empty) pins send nothing — the request an unpinned publish always sent', async () => {
+        const { client, fetchMock } = createMockClient(PUBLISH_OK);
+        await client.meta.publishItem('view', 'shared_grid', { draftVersion: '', parentVersion: '' });
+        await client.meta.publishItem('view', 'shared_grid', { draftVersion: undefined, parentVersion: undefined });
+        for (let i = 0; i < 2; i++) {
+            expect(String(fetchMock.mock.calls[i][0])).toBe(PUBLISH_URL);
+            expect(bodyOfCall(fetchMock, i)).toEqual({});
+            const headers = fetchMock.mock.calls[i][1].headers as Record<string, string>;
+            expect(headers).not.toHaveProperty('If-Match');
+            expect(headers).not.toHaveProperty('If-None-Match');
+        }
+    });
+});
+
+describe('[#37440] the real publish door: a draft another writer changed in between is never published', () => {
+    /**
+     * The caller's draft write (its receipt is its pin), then ANOTHER writer's
+     * draft write to the same address, landing before the caller's publish.
+     */
+    async function interleaved(client: ObjectStackClient, name: string) {
+        await client.meta.saveItem('view', name, VIEW(name, 'live'), { packageId: PKG });
+        const mine = await client.meta.saveItem('view', name, VIEW(name, 'mine'), { packageId: PKG, mode: 'draft' });
+        await client.meta.saveItem('view', name, VIEW(name, 'theirs'), { packageId: PKG, mode: 'draft' });
+        return (mine as { version?: string }).version;
+    }
+
+    it('REPRODUCTION — unpinned (all the SDK could send before): the other writer\'s draft goes live', async () => {
+        const { engine, client } = await bootDoor();
+        await interleaved(client, 'interleaved_unpinned');
+        await client.meta.publishItem('view', 'interleaved_unpinned', { packageId: PKG });
+        expect(await rowsOf(engine, 'interleaved_unpinned')).toEqual([`${PKG}:active:theirs`]);
+    }, 60_000);
+
+    it('PIN — `draftVersion` = the caller\'s own receipt: refused 409 METADATA_CONFLICT, nothing promoted', async () => {
+        const { engine, client, publishRequests } = await bootDoor();
+        const mine = await interleaved(client, 'interleaved_pinned');
+        expect(typeof mine).toBe('string');
+        const err = await refusalOf(client.meta.publishItem('view', 'interleaved_pinned', { packageId: PKG, draftVersion: mine }));
+        expect(err.code).toBe('METADATA_CONFLICT');
+        expect(err.httpStatus).toBe(409);
+        // The live row stands; the moved draft (the other writer's) stays pending, unpublished.
+        expect(await rowsOf(engine, 'interleaved_pinned')).toEqual([`${PKG}:active:live`, `${PKG}:draft:theirs`].sort());
+        expect(publishRequests[0].draftVersion).toBe(mine);
+    }, 60_000);
+
+    it('CONTROL — no interleave: the same pinned publish promotes the caller\'s draft', async () => {
+        const { engine, client } = await bootDoor();
+        await client.meta.saveItem('view', 'uninterleaved', VIEW('uninterleaved', 'live'), { packageId: PKG });
+        const mine = await client.meta.saveItem('view', 'uninterleaved', VIEW('uninterleaved', 'mine'), {
+            packageId: PKG,
+            mode: 'draft',
+        });
+        const published = await client.meta.publishItem('view', 'uninterleaved', {
+            packageId: PKG,
+            draftVersion: (mine as { version?: string }).version,
+        });
+        expect(published.success).toBe(true);
+        expect(await rowsOf(engine, 'uninterleaved')).toEqual([`${PKG}:active:mine`]);
+    }, 60_000);
+
+    it('`parentVersion` pins the live row: a stale token is refused 409, the live token promotes', async () => {
+        const { engine, client, publishRequests } = await bootDoor();
+        const first = await client.meta.saveItem('view', 'live_pinned', VIEW('live_pinned', 'live'), { packageId: PKG });
+        const liveToken = (first as { version?: string }).version;
+        await client.meta.saveItem('view', 'live_pinned', VIEW('live_pinned', 'mine'), { packageId: PKG, mode: 'draft' });
+        // `null` asserts no live row — one is stored, so it is refused.
+        const err = await refusalOf(client.meta.publishItem('view', 'live_pinned', { packageId: PKG, parentVersion: null }));
+        expect(err.code).toBe('METADATA_CONFLICT');
+        expect(err.httpStatus).toBe(409);
+        expect(await rowsOf(engine, 'live_pinned')).toEqual([`${PKG}:active:live`, `${PKG}:draft:mine`].sort());
+        expect(publishRequests[0].parentVersion).toBeNull();
+        const published = await client.meta.publishItem('view', 'live_pinned', { packageId: PKG, parentVersion: liveToken });
+        expect(published.success).toBe(true);
+        expect(await rowsOf(engine, 'live_pinned')).toEqual([`${PKG}:active:mine`]);
+        expect(publishRequests[1].parentVersion).toBe(liveToken);
+    }, 60_000);
+});

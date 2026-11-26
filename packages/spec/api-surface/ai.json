@@ -300,6 +300,7 @@
     "getRecordContextToolJsonSchemas (function)",
     "headingsOf (function)",
     "scopesToAgentPermissionSets (function)",
+    "skillBindsRecordContextTool (function)",
     "skillForm (const)",
     "stripBodyTags (function)",
     "toolForm (const)"

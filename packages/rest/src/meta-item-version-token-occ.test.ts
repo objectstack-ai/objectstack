@@ -228,15 +228,31 @@ describe('[#22114] the item read serves the version token the save door pins wit
         expect(refused.error).not.toContain('since you loaded it');
     }, 60_000);
 
-    it('after a publish (no draft row): a held `If-Match` is refused 409 with `currentVersion: null`; `If-None-Match: *` writes the next draft', async () => {
+    // [#37628] With no draft row, a held `If-Match` is judged against the
+    // published row the next draft would replace.
+    it('after a publish (no draft row): a held `If-Match` naming the published body writes the next draft', async () => {
         const h = await boot();
         const draft = ok(await h.save(view('d1'), { mode: 'draft' }));
         ok(await h.publish());
         expect(await h.stored('draft')).toEqual([]);
 
+        // The draft was published unchanged, so its token names the live row.
+        ok(await h.save(view('d2 pinned'), { mode: 'draft' }, { 'if-match': draft.version }));
+        expect(await h.stored('draft')).toEqual(['d2 pinned']);
+        expect(await h.stored('active')).toEqual(['d1']);
+    }, 60_000);
+
+    it('after a publish (no draft row): a held `If-Match` the published row moved past is refused 409 naming it; `If-None-Match: *` writes the next draft', async () => {
+        const h = await boot();
+        const draft = ok(await h.save(view('d1'), { mode: 'draft' }));
+        ok(await h.publish());
+        const moved = ok(await h.save(view('live, moved')));
+        expect(await h.stored('draft')).toEqual([]);
+
         const stale = refusedConflict(await h.save(view('d2 pinned'), { mode: 'draft' }, { 'if-match': draft.version }));
-        expect(stale.currentVersion).toBeNull();
-        expect(MetadataConflictErrorSchema.parse(stale).currentVersion).toBeNull();
+        expect(stale.currentVersion).toBe(moved.version);
+        expect(MetadataConflictErrorSchema.parse(stale).currentVersion).toBe(moved.version);
+        expect(stale.error).toContain(`(current is ${moved.version})`);
         expect(await h.stored('draft')).toEqual([]);
 
         ok(await h.save(view('d2'), { mode: 'draft' }, { 'if-none-match': '*' }));

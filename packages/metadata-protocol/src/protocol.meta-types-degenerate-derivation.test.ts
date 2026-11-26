@@ -409,9 +409,11 @@ describe('#17501 — /meta/types serves a real schema for `action`, and moves no
     // referenced record can cascade along the reference.
     // [#36806] `field` 87 → 89: `uiReadonly` and `uiReadonlyWhen`, the hand
     // lock (no person edits the field at the console; writes keep it).
+    // [#37141] `skill` 17 → 18: `context`, the context pack a skill works
+    // from (ADR-0160 D8), which gives its MCP prompt a record argument.
     const CARD_PROPERTY_COUNTS: Record<string, number> = {
         agent: 24, app: 24, dashboard: 21, dataset: 17, field: 89, flow: 24,
-        hook: 24, object: 52, page: 28, position: 14, report: 24, skill: 17, tool: 14,
+        hook: 24, object: 52, page: 28, position: 14, report: 24, skill: 18, tool: 14,
     };
 
     it.each(Object.entries(CARD_PROPERTY_COUNTS))(

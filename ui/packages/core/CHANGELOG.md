@@ -1,5 +1,595 @@
 # @object-ui/core
 
+## 19.0.0-next.0
+
+### Minor Changes
+
+- f98f18c: feat: an object's `userActions.exportCsv: false` hides the console's Export entry
+  
+  Clause-②: yes
+  Metadata-protocol: semantic
+  
+  `userActions.exportCsv` on an object now does what the Studio object form says it does. Set to `false`, the console offers no Export entry for downloading that object's data, in any of its formats (CSV, XLSX, JSON):
+  
+  - the object grid hides its toolbar Export menu, and the table's own CSV button that `operations.export: true` turns on;
+  - the list view hides Export in both toolbar forms, the wide toolbar's button and the Display panel's export footer;
+  - a dataset report hides its Export control when the dataset's base object sets it.
+  
+  A view's export of the picture it draws is not covered: a Gantt view's PNG and PDF buttons stay.
+  
+  Every surface reads one verdict, the new `isObjectExportOffered(objectSchema, effectiveApiOperations)` from `@object-ui/core`: the authored `exportCsv` over the object's `managedBy` default, ANDed with the caller's effective `export` API operation. Before this change the grid's toolbar menu, the list view and the report read the effective operation but not the object's bit, and the grid's table CSV button read neither half (only `operations.export`), so `exportCsv: false` changed nothing. Export is a read, so the verdict is not a row of `AFFORDANCE_GRANTS` and asks no `can(object, verb)`: the caller's export grant reaches the console through the effective `export` operation, which the server derives from `list` and `allowExport`.
+  
+  An object that does not author the key keeps its Export entries, since every `managedBy` bucket still defaults `exportCsv` to `true` (ADR-0103), with one change: the grid's table CSV button (`operations.export: true`) now also follows the effective `export` operation, as the toolbar menu beside it already did. So a viewer whose effective operations exclude `export` no longer sees that button, even on an object that authors nothing. The setting hides the entry and is not a permission: no export request is refused because of it, and who may export is still the permission set's `allowExport`. The report reads the base object's definition through the report's data source, and a report whose source cannot serve one keeps its Export control.
+  
+  The spec's `exportCsv` description and the Studio form's help text now say this; the form's English help text bundle in `@objectstack/platform-objects` is regenerated to match, and the translated locales keep their wording. The liveness ledger grades `userActions.exportCsv` `live`, so an authored `exportCsv: true` no longer raises the `liveness-dead-property` warning at `os lint` / `os validate`. Nothing needs migrating.
+- 811858c: feat(list): a list's cells are selected by a click and edited by a double-click, Enter or typing, with no inline-edit toggle
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: semantic
+  Skills-docs: none — `skills/objectstack-ui/rules/list-views.md` already teaches that inline editing is on by default for a user who may update the object, with `userActions: { editInline: false }` as the opt-out, which the list page now does with no toggle; no skill teaches the toggle or a single-click edit.
+  
+  **The list page (`ListView`) has no inline-edit mode and no toggle.** Its grid is editable in place wherever the reader may update the object and the view does not declare `userActions.editInline: false`; a view's boolean `inlineEdit` still folds into that switch, so `inlineEdit: false` reads off and `inlineEdit: true` reads on. Before, a view that declared neither opened read-only with an "Edit inline" toggle in the toolbar and in the Display menu, the mode lasted for the session, and a click on a cell edited it. Both toggles are gone, and `ListViewProps.onInlineEditChange` is deprecated and never called; the console stops passing it.
+  
+  **The select-first cell model** (`data-table`, behind the new `GridCellSelectionProvider` in `@object-ui/components`; `ObjectGrid` mounts it when its host passes the new `cellSelection` prop, and `ListView` passes it for every `object-grid` view it draws, on the hosts listed below):
+  
+  - A click selects a cell (a ring around it) and neither edits it nor opens the record. A link the cell draws (the name, a lookup, a phone or an email) keeps its own click. A touch tap opens the record and never edits in place.
+  - Double-click, Enter or F2 edits, keeping the value with the caret at its end; typing a character replaces the value with it (a picker or a date opens instead); Backspace or Delete clears the cell and saves at once, and a required field keeps its value and says it is required (objectstack#36023).
+  - While editing, Enter commits and stays on the cell (objectstack#36023), Tab and Shift+Tab commit and move right and left, Escape cancels and keeps the cell selected; in a multi-line editor Enter is a new line and Ctrl/Cmd+Enter commits. Commits are the grid's staged edits, saved by the row's Save and Save All as before.
+  - On the selected cell the arrows and Tab move the selection, Space opens the record (a checkbox cell flips and commits instead, as a second click on it does), Ctrl/Cmd+C copies, Ctrl/Cmd+V converts the text to the field's type and commits it, and Escape clears the selection.
+  - An input method's composition is kept whole: keys pressed while composing, and the 229 Enter Safari raises after it, never commit, cancel or move, and a composition started on a selected cell opens the editor with the composed text. This guard applies to every `data-table` editor.
+  - A cell that opens no editor says why on the cell: the field is read-only, calculated or not editable in a list, the reader may not edit the field, these records or this record, the view turned editing off, or the record is locked by an approval. The approval lock is read from the approvals service's per-record lock when a cell of the row is selected, through the record page's rule (`resolveApprovalLock`); until it answers, the row's `approval_status` stands in only where the view fetches that column, which a view that authors its columns does only when a column, a row predicate or a grouping names it.
+  
+  Every grid a `ListView` draws has this model, because `ListView` passes `cellSelection` to each `object-grid` view: the console's object list pages, interface list pages, the object data page (`/apps/:app/:object/data`), the Studio Data pillar's records artboard, and every `list-view` block, whether an SDUI page node or a `ListView` on a `kind: 'react'` page; a grid no `ListView` draws mounts no provider and keeps its click-to-edit (`singleClickEdit`) and click-to-open behaviour unchanged: an authored `object-grid` node, `ObjectView`'s own grid (the `object-view` block, or a host that passes no `renderListView`), a related list, a dashboard table, the record picker and the designer's grids.
+  
+  On every `ListView` grid (the select-first model) the table's trailing edit column, which holds a changed row's Cancel and Save, is drawn only while a row has changes, so the list at rest ends on its last data column. `@object-ui/core` exports `resolveAffordanceGrant`, the grant half of `resolveAffordance`, which the list cell's read-only reason reads.
+  
+  New locale keys, in every pack: `table.cellReadOnly` and `grid.readOnlyReason.*` (nine reasons). No key is removed: `list.inlineEditShort` and `list.inlineEditLabel`, the toggle's words, stay in every pack, though the list no longer draws the toggle.
+- 021524c: feat(spec,ui): a field can be read-only by hand at the console while actions, imports, the API and flows keep writing it (`uiReadonly` / `uiReadonlyWhen`)
+  
+  Clause-②: yes (widening: two new optional authorable keys `Field.uiReadonly` and `Field.uiReadonlyWhen`)
+  Metadata-protocol: added
+  Skills-docs: follow-up #37405
+  
+  A status column that only moves through actions, or a field an integration fills, used to have no honest declaration: `readonly: true` also strips every client write, so the action, the import and the API lost the field too. Fields now carry two lock tiers:
+  
+  | | server lock: no client writes | hand lock: no person edits at the console |
+  |:--|:--|:--|
+  | always | `readonly` | `uiReadonly` |
+  | conditional | `readonlyWhen` | `uiReadonlyWhen` (CEL, the same scope as `readonlyWhen`) |
+  
+  - **`uiReadonly: true` / `uiReadonlyWhen`.** These console surfaces lock the field: the create and edit dialogs (the field is left off them and out of the payload they submit, so a create from the console lands on the field's `defaultValue`, and a `required` field therefore needs one), the record page's inline edit and stage path, the highlight-strip chip, grid inline edit and its multi-row save, kanban drag between columns grouped by the field, calendar drag, and the line-item grid (a `uiReadonly` child field is not a derived column, and an authored column over it is locked; a `uiReadonlyWhen` one locks its cell per row). The Gantt, the timesheet cell, the kanban swimlane drag and the in-app assistant do not read the keys yet. The engine never reads either key, so REST, import, declarative and script actions, and flows write the field, and the object's validations (a `state_machine`, for one) judge each write.
+  - **`uiReadonlyWhen` is judged on an existing record only** (the create dialog does not read it, nor does a new line-item row), over the host's predicate scope on every surface. Grids and list views fetch the operands of a shown or dragged field's lock predicates. A predicate that cannot be evaluated LOCKS the field (no server judges the hand lock), the edit dialog refuses to submit until it is fixed, and `os validate` checks it as it checks `readonlyWhen`.
+  - **Refused: `uiReadonly: true` beside `readonly: true`** (at `['uiReadonly']`, at every door that parses a field: `defineStack`, `os validate`, metadata save). Keep one: `readonly` when no client may write the field, `uiReadonly` when people at the console may not. `uiReadonlyWhen` beside `readonlyWhen` is accepted.
+  - **Kanban: a `readonly` lane field no longer drags.** The board read no field lock before, so a card grouped by a `readonly` field could be dragged and its PATCH was silently stripped. The board now reads both locks.
+  - **`@object-ui/core` exports the one verdict:** `fieldReadOnlyByHand(def, record?, context?)`, `fieldStaticallyReadOnlyByHand(def)`, `fieldHasConditionalHandLock(def)`. `resolveFieldRuleState` takes `uiReadonlyWhen` in its rules and `uiReadonly` in its statics. The import wizard's target mapping and the Studio/designer reads stay on the raw `readonly`.
+  - **MCP `describe_object`** reports `uiReadonly` and `uiReadonlyWhen` as their own keys where set (never folded into `readonly`, which tells an agent to leave the field out of a write), on the HTTP and the stdio transport, and the tool description names them.
+  - **Censuses and Studio.** The FLS reference scrub classifies both keys (`@objectstack/metadata-core`: `uiReadonly` kept, `uiReadonlyWhen` an expression position). A caller denied a field the `uiReadonlyWhen` reads is served the field with `uiReadonly: true` in place of the predicate, so the lock never opens for them. The Studio field form offers both rows beside Read-only and Read-only when, with their labels and help translated in every metadata-forms locale pack (`@objectstack/platform-objects`).
+- b7dee0e: feat(actions): `type: 'ask_ai'` — an action that opens the in-app assistant focused on the record it runs on
+  
+  Clause-②: yes (widening: a new `ActionType` member `ask_ai`, refused beside `target`, `ai.exposed: true` and on a dashboard header)
+  Metadata-protocol: added
+  Skills-docs: follow-up #37217
+  
+  ADR-0160 D7. An author can now put an "Ask AI" button on a record:
+  
+  ```ts
+  actions: [{ name: 'ask_about_account', label: 'Ask AI', type: 'ask_ai', locations: ['record_header'] }]
+  ```
+  
+  - **Spec.** `ActionType` gains `ask_ai`. It takes no `target`: the parse refuses one (and its inline spelling `to`) at the `target` path, because what the assistant reads about the record is chosen by the record's context pack, not by the action. It is never an AI tool: `ai.exposed: true` beside it is refused at `ai.exposed` (`false` parses). A dashboard header action cannot be `actionType: 'ask_ai'` (a header runs on no record); `WidgetActionTypeSchema` stays derived from `ActionType` and the header refuses that one member with the reason.
+  - **Runtime.** `ask_ai` has no server dispatch. `isHeadlessInvokableAction` answers `false` for it, so MCP `list_actions` skips it and the AI action door refuses it, and the REST action door answers with a sentence about the in-app assistant.
+  - **Console.** A click focuses the in-app assistant on the record (`setChatFocus`) and opens the drawer. It sends no message and makes no server call. The record is the page record, the row a row surface hands over, or the one selected row; with none, or several selected, the click is refused before any `confirmText`. New in `@object-ui/core`: `ActionRunner.setAssistantFocusHandler`, `ActionRunner.drawsAction`, `isAskAiAction`, and the `AssistantFocus` / `AssistantFocusHandler` types; `ActionEngine` leaves undrawn actions out of `getActionsForLocation` and `getBulkActions`. New in `@object-ui/react`: `<ActionProvider onAskAi>` and `useDrawsAction()`. `@object-ui/app-shell` installs the handler (`useAskAiHandler`) only when the layout hosts the assistant drawer, the AI surface is on, and an agent in the catalog advertises `capabilities.focus`.
+  - **Absent, not disabled.** Where no in-app assistant can take it, an `ask_ai` action is not drawn on any action surface (record header, action bars, row menus, related lists, page action renderers). Where no single record is held it is absent too: the bulk bar never offers it, a related list's toolbar leaves it out (its rows draw it), and a list toolbar draws it only while exactly one row is selected. A launch that reaches the runner anyway is refused, not reported done; `ActionRunner.bulkRefusal` refuses a per-row run over a selection, and `ActionEngine.getBulkActions` / `executeBulk` leave it out.
+  - **The conversation it opens.** The click opens the drawer on a fresh thread of an agent that declares `capabilities.focus` (an `ask` agent first), so the drawer's own pin control is drawn on the record, and pins the record to that thread; its first send carries the focus and creates the conversation, and an unsent one creates nothing. A conversation the drawer showed before keeps its own focus. So does a history conversation the user opens before the first send: the dock's focus host now drops a hand-off's carry when the drawer is asked for another target. New in `@object-ui/app-shell`: `setChatFocus(focus, { follow: true })`, a pin for the conversation the caller moves the chat to in the same event.
+
+### Patch Changes
+
+- 4ffe9d3: feat(actions): an action writes the sentences it declares in the organization's language
+  
+  Clause-②: yes (widening: a new optional authorable key `ActionSchema.texts`, and new translation keys)
+  Metadata-protocol: added
+  Skills-docs: follow-up owed — skills/objectstack-ui/rules/actions.md, skills/objectstack-i18n/SKILL.md
+  
+  A `script` action's `js` body can now write a sentence into a record in the organization's language, the way a hook does: declare it under `texts`, keyed by a snake_case key, and ask for it by key — `texts: { email_subject: { message: 'Email: {{ subject }}', params: ['subject'] } }`, then `await ctx.text('email_subject', { subject })` where the body used to write `'Email: ' + subject`. The answer is in the organization's language, because everyone in the organization reads the record: the Localization setting (`localization.locale`) when somebody set it, else the app's declared `i18n.defaultLocale`. It is never the language of the person who ran the action. The translation is picked first, then its `{{ }}` holes are filled from `params`. The entry is the hook text's, built by the same shared factory.
+  
+  - The translation sits beside the action's other copy: `objects.<object>._actions.<action>.texts.<key>.message` for an action bound to an object, `globalActions.<action>.texts.<key>.message` for an object-less one. `os i18n extract` scaffolds the keys and the existing coverage check counts them; `objectstack validate` refuses a translation over a key the action does not declare.
+  - A missing translation, or no language to pick, answers the declared sentence, and the action goes on. A Localization setting that cannot be read rejects the call.
+  - Only declared text is translated: a string the body builds itself is written as it is. A key `texts` does not declare is refused when the action is saved if the body asks for it literally (`ctx.text('key')`), otherwise when it runs, as a fault naming the action and the key.
+  - `texts` is read only for a `type: 'script'` action with a `js` body (an inline `target` function is lowered to one by `os build`); on any other action, or with no body, it is refused at save. A `flow` action's record writes are the flow's own, marked and translated there (`flows.<flow>.records.…`).
+  - A text with `params` is compiled like a hook's: a hole over another name is refused when the action is saved, and `objectstack validate`, `compile` and the publish gate refuse a hole holding logic, an unknown formatter, an empty hole and `{{ amount | currency }}` with no code. A translation whose holes do not render at run time is dropped for the declared sentence, filled.
+  - Text is picked when it is written. Records already written are not changed. An action without `texts` runs exactly as before.
+  
+  `@object-ui/core` lists `texts` among the spec's declared action keys, so an action carrying them is not reported as having an unknown key; the console reads nothing new, because the body stores the sentence already picked.
+  
+  New exports: `@objectstack/spec` adds `ActionTextSchema` and the `ActionText` type (`ui`), `actionTextMessageKey` (`system`), and `ACTION_TEXT_MESSAGE_HOLE_REFUSED`, `actionTextsWithoutRunnableCode`, `undeclaredActionTextKeyAtSave` and `undeclaredActionTextAtRun` (`data`); `@objectstack/runtime` adds none. Nothing that was accepted before is refused.
+- 89364b4: feat(spec, core, ui): `{current_iso_week}` defaults a week-keyed filter to the current ISO week
+  
+  Clause-②: yes (widening: the closed filter-placeholder vocabulary gains one token)
+  Metadata-protocol: added
+  
+  A dashboard whose rows carry a text week key (`cost_week: '2026-W47'`) could only default its week filter to a fixed week, which went stale the next Monday. Write the placeholder instead and the filter opens on the current week each time:
+  
+  ```ts
+  globalFilters: [
+    { field: 'cost_week', label: 'Week', type: 'text', defaultValue: '{current_iso_week}' },
+  ],
+  ```
+  
+  - It resolves to the ISO-8601 week key of today, `YYYY-Www`: Monday-start weeks, week 1 is the week that holds the year's first Thursday, and the year is the ISO week-numbering year, so 2027-01-01 is `2026-W53` and 2025-12-29 is `2026-W01`. "Today" is the day in the workspace time zone, on the server and in the browser alike; the label is the one the analytics week bucket already uses.
+  - It is a period key, not a date. It lives in its own closed list, `PERIOD_KEY_TOKENS`, beside `DATE_MACRO_TOKENS` and not inside it, so a date filter default and a calendar `initialDate` still refuse it. `classifyFilterToken` answers a new kind, `period-key`, and `isKnownFilterToken` knows it, so lint, flow filter operands and the server resolver accept it wherever a filter placeholder is accepted. A consumer that switches exhaustively on `kind` gets a compile error until it handles the new kind.
+  - The server resolves it in `resolveFilterTokens`; the browser resolves it in `resolveFilterPlaceholders` and in the dashboard filter defaults (every filter type except `date` and `dateRange`), so the filter box opens showing the resolved key. A literal `2026-W47` default keeps working and stays fixed.
+  - Every filter and default written before parses and resolves exactly as before. Only the whole value is a placeholder: `'week {current_iso_week}'` is left as written. A near spelling such as `{currentIsoWeek}` is still refused as an unknown token.
+  - Use it only on a field that stores week keys. On a date, datetime or time field the placeholder is refused (`INVALID_FILTER` / 400), as the literal key is; filter those with the `this_week` preset or `{current_week_start}` / `{current_week_end}`.
+- eed422e: fix(core): a relationship-path dashboard drill is sent as one nested-relation condition, so the server joins it in the database instead of the app reading related ids first
+  
+  Clause-②: yes (narrowing)
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No schema key, accepted value or metadata type is added, removed or renamed, and nothing stored is rewritten: the narrowed input is the in-memory filter a host hands ValueDataSource at runtime, and the comparand it now refuses, a plain object with no $ key under a scalar operator, is one the spec's own comparand door already refuses and ViewFilterRuleSchema.value cannot hold. No metadata an author can save changes meaning, so there is nothing for objectstack migrate meta to do. -->
+  
+  **BREAKING** for a host that filters a `ValueDataSource` (the in-memory `provider: 'value'` source) with a comparison whose comparand is a plain object (prototype `Object.prototype` or `null`) with no `$` key, such as `['account', '!=', { owner: 'u1' }]`, under `!=`, `not_contains` or an ordering operator (`>`, `>=`, `<`, `<=`).
+  
+  - FROM: `!=` served every other row (every row but one holding the caller's own object) and `not_contains` every row, and an ordering operator compared each value with the text `[object Object]` and served the string values that happened to sort past it. That holds for an object whose prototype is `Object.prototype`. A `null`-prototype object has no `toString` or `valueOf`, so an ordering operator threw `TypeError: Cannot convert object to primitive value` and `find` rejected; `not_contains` threw as soon as it reached a row holding a string, and served every row when none did.
+  - TO: the condition is refused by name. It excludes every row and logs the sentence the object form `{ account: { owner: 'u1' } }` already logs. `=` compared by reference, so it matched no row unless a row held the caller's own object (stored through `create` or `update`, which copy shallowly), and that row matched; it matches none now and gains the log line.
+  - The spec's comparand door already refuses an object comparand under these operators, so the rows served before were a wrong answer. Spell a relation condition only against a server-backed source, whose server joins it; a value source holds flat rows, so filter there on the row's own fields.
+  
+  `convertFiltersToAST` now lowers the nested-relation form the spec declares on `FilterCondition` (`{ account: { owner: 'u1' } }`, a plain object with no `$` key beneath a field) to one equality node, `['account', '=', { owner: 'u1' }]`, which the spec's `parseFilterAST` reads back as the same nested condition. It used to refuse that shape as an unknown operator. The condition travels as written, deeper relations included; whether the field is a relationship is judged by the server, which answers `INVALID_FILTER` / 400 for such a condition under a field that stores a scalar or a structured-JSON value, and, under a relationship, for a condition key the related object does not declare, a dotted key, or a relation nested past the hop limit. A map that mixes `$` operators with plain keys is still refused.
+  
+  `ValueDataSource` (the in-memory `provider: 'value'` source) does not descend into relations, and it now says so for the lowered node too: a comparison whose comparand is a plain object with no `$` key, such as `['account', '=', { owner: 'u1' }]`, excludes every row and logs the same sentence the object form `{ account: { owner: 'u1' } }` already logged, for `=`, `!=` and every other operator that reads the comparand. Before this, `=` compared the object by reference and matched no row without a word, unless a row held the caller's own object, and `!=` matched every other row. A class instance is not refused as a relation, even one with keys of its own such as a moment, luxon or decimal object: it is a value. An ordering operator compares it through its `valueOf` when that returns a primitive, otherwise as its text; under an equality, membership or text operator it is refused, in a sentence of its own.
+  
+  `resolveDatasetDrillFilter` uses it: a dataset dimension whose field is a relationship path (`account.owner`, up to three hops) drills as `{ account: { owner: VALUE } }`, nested one level per hop, instead of reading up to 200 related ids per hop and filtering on `$in` them. No related record is read, nothing is capped, and the `too-many` answer is no longer produced; `DATASET_DRILL_RELATED_ID_CAP` and the `too-many` member of `DatasetDrillResolution` stay exported, marked deprecated. The schema reads that check each hop is a single-valued relationship, the hop limit and the empty-bucket refusal are unchanged.
+  
+  One visible consequence: the drawer's "Open in list" escape hatch is not offered for a relationship-path drill, because the list page's `filter[...]` URL dialect has no spelling for a nested condition; the drill drawer itself lists the records.
+- 55020c3: fix(form): formula fields are recomputed from the live inputs before the field rules are judged
+  
+  Clause-②: yes (widening) — one new member on the `@object-ui/core` package entry, `planObjectFormulas` (with its `ObjectFormulaPlan` type); nothing removed or renamed
+  Metadata-protocol: none
+  
+  A required field whose `visibleWhen` reads a `formula` field was judged on the formula value the form last read, or on nothing on a create. On a create form the field stayed hidden whatever was typed, or, when the formula was not drawn on the form, the rule faulted on the missing key and every submit was refused. On an edit that moved the inputs across the condition, the field stayed hidden while the server required it. In both cases the user could not save.
+  
+  The object form renderer and the console's form-view page now compute the object's formula fields over the record being edited, in the platform's read order, with the canonical `@objectstack/formula` engine, and judge `visibleWhen`, `requiredWhen` and `readonlyWhen` over that record. The formulas are computed for the signed-in user as the server computes them: `current_user` (also `user` and `ctx.user`) carries the user's id and positions. A formula that faults the way a read faults (an operator over an empty operand, an undeclared key, a cycle, a scope root the server does not bind for a formula, such as `previous`) reads `null`, and the rule is judged on that `null`. A formula the form cannot compute is one that reads through a reference, calls `label()` or `current_user.can()`, reads `os`, reads the user when nobody is signed in, is served without its expression, or reads such a formula. A field whose `visibleWhen` reads one is shown and keeps its `required` flag, with one console warning, and the form does not refuse the submit for that rule; the server, which judges the write, decides. Computed values are used for the rules only and are never sent in the write.
+- 99a0e4f: fix(ui): grouping headers and the filter value picker name a lookup by its target's `nameField`, and the empty group is translated
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  A lookup with no `displayField` is now named by the target object's declared `nameField`, the default the spec states for `displayField` ("the referenced object's name/title"). This is the same title the lookup's grid cell and the record header already show. Before, three places guessed a `name`, `label` or `title` key, and showed the raw record id when the target had none, for example a target titled by an autonumber such as `DEAL-2026-0001`:
+  
+  - **Group headers of a list grouped by the lookup**, both server-grouped and client-grouped.
+  - **Filter builder value picker options** for the lookup, and the chip of the chosen value.
+  
+  An explicit `displayField` on the lookup still wins. Grouping and filtering stay keyed by record id, so two records with the same title stay separate groups and separate options. The picker reads the target object's definition once per picker. The ObjectStack adapter serves later reads of it from its metadata cache.
+  
+  The group of rows with no value now reads the grid's own empty-value string (`grid.empty`, for example "Empty" in English and "空" in Chinese) instead of the untranslated `(empty)`. It keeps its place in the group order: first when ascending and last when descending.
+  
+  `@object-ui/core` adds `referencedRecordTitle(targetDef, record, displayField?)` to its public entry, a new export. It gives the title of a referenced record using the lookup's `displayField`, then the record-title ladder of `getRecordDisplayName`, and returns `undefined` instead of the `Record #<id>` floor.
+- 3d6dea2: feat(formula): `addWorkingDays()`, `workingDaysBetween()` and `addWorkingHours()` count with the organization's working calendar (ADR-0157 D4)
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: added — a formula field's or a stored field's `expression` may now call `addWorkingDays(...)`, `workingDaysBetween(...)` and `addWorkingHours(...)`
+  Skills-docs: updated here — skills/objectstack-formula/SKILL.md teaches the three functions and eval 8 of skills/objectstack-project/evals/project-process.json exercises them (the card's order names both)
+  
+  Not released alone: it ships in the same release as the working calendar service and objects (#35355) and the approval escalation's working-time clock (#35357), ADR-0157 D4.
+  
+  - **Three formula functions** (`@objectstack/formula`). `addWorkingDays(day, n[, code])` answers the calendar day `n` working days after `day` (before it, for a negative `n`); `day` itself never counts and `0` answers `day`. `workingDaysBetween(start, end[, code])` counts the working days after `start` up to and including `end`, negative when `end` is earlier, and is the inverse of `addWorkingDays`. `addWorkingHours(start, hours[, code])` answers the instant `hours` of working time after `start`, counted as elapsed time in the calendar's time zone (D11); a start outside working time begins at the next working period. All three step over the calendar's weekends and holidays and onto its make-up working days. Without `code` a call counts with the organization's default calendar; `code` names a calendar and is written as a quoted literal. They join the advertised standard library (`CEL_STDLIB_FUNCTIONS`).
+  - **Where they count** (`@objectstack/objectql`). A `formula` field and a stored field's `expression` count with the record's own organization's calendars, which the engine loads through the calendar service before it evaluates them: only the calendars the expressions name, once per organization per read, from the service's cache. A formula field counts again on its next read after a calendar edit; a stored due time keeps the value of its last write.
+  - **When the calendar cannot answer** (D8). With no default calendar in the organization, a code the organization has no calendar for, or a count that reaches past the span the calendar is maintained for, the formula reads `null` and the server logs one line naming the object, the field and the reason. A stored field's `expression` stores blank and the write goes through; the blank stays until that record's next write, and a write made while the calendar refuses blanks a value that was valid before. Nothing counts on the weekly pattern or the wall clock instead.
+  - **No calendar arithmetic as a filter.** A query filter, a sharing rule's condition and every filter compiled from CEL refuse the three functions with a message that prescribes the stored due-time field (D6).
+  - **Build refusals** (`@objectstack/lint`). `os build` / `os validate` refuse the three functions at every expression site but a formula field's and a stored field's `expression` (validation rules, visibility, action conditions, flow conditions and values, sharing rules, a field's expression `defaultValue` and a seed value), and refuse a calendar code that is not a quoted literal, with a branch between literal calls as the way to pick a calendar per record.
+  - **Forms** (`@object-ui/core`). A form does not compute a formula that calls one of the three: its calendar is loaded for the server's read, never handed to the form, so the field is unservable there as on the server's write-path check.
+  - **Teaching** (`@objectstack/skills`). objectstack-formula documents the three functions; the platform catalog moves working-day formulas from Planned into what the platform ships; the project-process eval for business-hours SLAs now expects the functions.
+- 285ad8d: fix(core): a chart's compare-to no longer repeats the current week when its filter uses `{current_iso_week}`
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  `previousPeriod` now compares with last week's ISO key (week 1 steps back to the previous ISO year's W52/W53), and `previousYear` with the key of the same day one year earlier. The trend label reads "vs last week".
+- f71d488: feat(fields): a quantity displays with its unit's label and display decimal places in grid, form and detail (ADR-0158 R1 display)
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: added
+  
+  A `number` field that declares `unitConfig` now draws its unit beside the number on every face: grid and list cells, the record page (sections, highlights, the quick-look panel, related lists), and the form, both read-only and beside the edited box. A `fixed` quantity shows its one unit; a `record` quantity shows the unit its row's code field holds, and the list, grid and related-list reads fetch that field (and the row's organization) even when no column shows it. A `text` field declaring `unitConfig: { unitMode: 'code' }` shows the code's label.
+  
+  - A standard code (`KGM`, `H87`, …) shows the platform's name for it in the reader's locale; an organization code shows its `sys_unit` label. `@objectstack/spec` now exports the English base name of every standard code, `STANDARD_UNIT_NAMES` and `standardUnitName(code)`, beside `STANDARD_UNITS`. `@objectstack/platform-objects` serves each locale's names through the i18n service, as `messages.standardUnit<CODE>` in every platform bundle, and a reader without a translation falls back to the English base.
+  - Decimal places: a standard code takes its organization's `sys_standard_unit_setting` row, an organization code its `sys_unit.decimal_places`. The row is the record's own organization's, never merely the first one returned. The field's `scale` is the ceiling (ADR-0158 L4). The number is drawn at that fixed width, rounded half away from zero (ADR-0158 Open item 6, ruled A): `1.5` beside a unit of 0 places reads `2`. Only the display rounds; nothing is rounded at write, and footers, exports and the API keep the exact value.
+  - A retired organization unit, and a unit whose row the reader may not read (an external member holds no `sys_unit` read), show the bare code, never an error.
+  - One resolver (`resolveQuantityUnit` in `@object-ui/core`) and one formatter (`formatQuantity` in `@object-ui/fields`) serve every face.
+  - `@object-ui/types`: `unitConfig` is now an authorable key on `FormField` and `FormFieldSchema` (by reference to the spec's `FieldSchema.unitConfig`, beside `currencyConfig`), so `objectui validate` accepts it on a hand-authored form field. The tolerant face now checks its value against the spec's `UnitConfigSchema`, where before it passed as an unknown key. On the form face the `number` widget reads it, and on a `text` field `unitMode: 'code'` makes the text widget the unit picker.
+  - A unit code field is chosen, never typed (ADR-0158 Open item 8): a `text` field declaring `unitMode: 'code'`, and the `unitField` a `record` quantity on the same form points at, draw a searchable picker (`UnitCodeField`) of the organization's non-retired units and the standard codes, each by name and restricted to the declared `unitDimension`. It stores the code; read-only, it shows the unit's name. `@object-ui/core` exports the option list (`unitPickerOptions`) and the pointer helpers (`quantityUnitCodePointers`, `withUnitCodePointer`, `declaresUnitCode`).
+- ccded86: fix(core)!: the value data source refuses a plain-object comparand with no `$` key, empty or not, in both filter dialects
+  
+  Clause-②: no (narrowing)
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any schema is added, removed, renamed or re-shaped, and no export changes shape. What moves is the row set `ValueDataSource.find` answers, in its object and its AST dialect, for a filter whose comparand the spec's doors already refuse: no stored row, registry key or authored value changes, so there is nothing for a migration to rewrite and no tombstone. -->
+  
+  **BREAKING** for `ValueDataSource` (the in-memory `provider: 'value'` data source) given a filter whose comparand is a plain object (prototype `Object.prototype` or `null`) with no `$` key, NON-EMPTY such as `{ owner: { $ne: { id: 'u1' } } }` or EMPTY such as `{ owner: { $ne: {} } }`, as the whole comparand or as a member of an `$in` / `$nin` / `$between` list, in either dialect.
+  
+  - FROM: such an object was compared as a value, by reference or as the text `[object Object]`.
+    - Whole comparand: `$ne` and `$notContains` answered every row; `$gt` / `$gte` answered the rows whose value sorts after `[object Object]` and `$lt` / `$lte` the rows sorting before it; `$eq`, `$in`, `$nin`, `$between`, `$contains`, `$startsWith` and `$endsWith` answered no row, with nothing logged.
+    - List member: `$nin` answered every row; `$in` answered the rows its other members matched; `$between` read the object as the text `[object Object]` and answered the rows in the text range up to its other endpoint (`[{ id: 'u1' }, 'zzz']` answers a `'zeta'` row).
+    - The AST dialect answered the same for a list member (`['owner', 'nin', [{ id: 'u1' }]]` every row, `in` and `between` likewise), and for an empty object as the whole comparand (`['owner', '!=', {}]` every row).
+  - TO: both dialects refuse it, for every operator of the spec's `FILTER_OPERATORS` except the three flag operators (`$null`, `$exists`, `$empty`). The rows are excluded and the reason is logged once. A non-empty object gets `filter condition on field 'owner' carries the non-operator key 'id'; the in-memory matcher does not descend into a nested relation constraint`; an empty one, which has no key to name, gets `filter comparand on field 'owner' is an empty object ({}), which is neither a comparison value nor a nested relation constraint`. A server-backed source already refused these filters with `INVALID_FILTER`: the spec's comparand door (`normalizeFilterComparandTypes`) refuses the object as a scalar operator's comparand and as a list member, and `assertListComparandShapes` refuses a whole object under a list operator.
+  - A class instance given as a field's whole condition, such as `{ created: someMomentDate }`, is now read as a value, not as an operator map. The whole filter is refused up front in the filter converter's words (`The filter on field 'created' carries a Moment instance (…) in comparand position`, the class name and the value's text), as the zero-key condition `{ created: {} }` is and as the server refuses it. Before, each of its own keys was refused as a nested relation per row, so on its own it answered no row, but inside `$or` the other branches still answered: `{ $or: [{ owner: 'Alpha' }, { created: someMomentDate }] }` answered the `'Alpha'` rows, and now answers none.
+  
+  **Not moved.** A scalar, a `Date`, a `{ $field }` reference and a class instance under an operator (a moment or luxon date, a decimal object under `$gt`, compared through its `valueOf`) are still compared. `{ owner: {} }` as a field's WHOLE condition keeps the converter's empty-operator-map refusal. `$empty` keeps its own boolean-flag refusal, `$null` / `$exists` still read their flag's truthiness, and a key outside `FILTER_OPERATORS` keeps the refusal it had.
+  
+  The fix for a caller: a filter on a related record's field is not executed by the in-memory source. Filter on a scalar column of the row itself, or compare with a scalar, a `Date` or a `{ $field }` reference.
+- c9b0a23: feat(service-storage): rename an attachment through a door by the attachment delete rule, and the Attachments tab names the uploader of other people's files
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  Two additions, no answer narrowed:
+  
+  - **The rename door.** `PATCH /api/v1/attachments/:id` with `{ "file_name": "..." }` sets the name one `sys_attachment` row is listed under, by the attachment delete rule: the caller who uploaded it, or a caller the attachment update gate admits as an editor of the record it is attached to. The door reads the row as the caller first, so every attachment read rule applies; the uploader's rename is written on the caller's behalf with no edit grant, as the uploader's removal door does; anyone else's goes through the data engine as the caller, so the object's edit grant and the update gate judge it. It answers `{ id, file_name }` (200), and refuses `UNAUTHENTICATED` (401), `VALIDATION_ERROR` (400: a query parameter, a blank name, or any body key besides `file_name`), `RECORD_NOT_FOUND` (404: an attachment the caller cannot read answers as one that does not exist) and the update gate's `RECORD_NOT_ACCESSIBLE` (403) for a caller who can read the record but not edit it. Only the attachment row's name changes: the stored file, its bytes and the name a download carries are untouched. The package's exports are unchanged; `StorageServicePlugin` mounts the door beside the removal door.
+  - **The uploader, expanded.** The record page payload's `attachments` part (`POST /api/v1/data/:object/:id/page`) now asks its `sys_attachment` read with `uploaded_by` expanded, as the `activity` part expands its actor, and the Attachments panel's own list read does the same. The expansion is a read of `sys_user` as the caller: a reader who may read the uploader gets that user's row (its name), and a reader who may not keeps the stored id. A consumer of that part that compared `uploaded_by` with a user id now reads `uploaded_by.id` where the reader may read the user.
+  
+  The record Attachments tab shows the uploader's name on every row whose uploader the reader may read, and never shows a bare id. Its row menu offers Rename beside Delete, on the reader's own uploads and, to a reader who also holds the edit grant on `sys_attachment`, on every row, opening a name prompt; the new name is the one the list shows after a reload.
+  
+  `@object-ui/core`: the affordance-to-grant map gains the `attachmentRename` row (the edit grant on `sys_attachment`), which the panel asks for a row the caller did not upload.
+- 6b360ab: fix(core)!: a non-boolean `$null` / `$exists` flag is refused in the filter converter and the value data source, and so are the object comparands the value data source cannot compare
+  
+  Clause-②: no (narrowing)
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any schema is added, removed, renamed or re-shaped, and no export changes shape. What moves is what convertFiltersToAST lowers and what ValueDataSource.find answers for filters the spec already refuses (a non-boolean $null / $exists flag, a plain object of another realm, a plain object with a $ key that is not a { $field } reference such as { $foo: 1 }, a class instance under an equality, membership or text operator) or that this in-memory face cannot evaluate (a { $now, addDays } anchor): no stored row, registry key or authored value changes, so there is nothing for a migration to rewrite and no tombstone. -->
+  
+  **BREAKING** for `convertFiltersToAST` and `ValueDataSource` (the in-memory `provider: 'value'` data source), for four filter shapes.
+  
+  1. **A `$null` / `$exists` flag that is not a boolean**, such as `{ owner: { $null: 'no' } }`, `{ owner: { $exists: 1 } }` or `{ owner: { $null: { id: 'u1' } } }`.
+     - FROM: the flag was read for its truthiness. `convertFiltersToAST` lowered `{ owner: { $null: 'no' } }` to `['owner', 'is_null', true]` and `{ owner: { $exists: 'no' } }` to `['owner', 'is_not_null', true]`, so a server-backed source answered the null-ness rows and its own door never saw the flag; the value data source answered the same rows (`'no'`, `1` and an object read as `true`; `0` and `null` as `false`).
+     - TO: both refuse it, as they already refused a non-boolean `$empty` flag. The converter throws `FilterOperatorError` (`INVALID_FILTER` / 400) with `The '$null' filter operator on field 'owner' takes a boolean flag (true or false); received "no"`, and the value data source excludes every row and logs `filter operator '$null' on field 'owner' takes a boolean flag (true or false); received "no"`. `true` and `false` lower and match exactly as before. The spec's `FilterConditionSchema` and every query face already refused these flags.
+     - The AST null-ness operators (`is_null`, `is_not_null` and their spellings) carry no flag and are not moved: direction comes from the operator name and the value slot is not read, as the spec's `parseFilterAST` reads it.
+  2. **A plain object of another realm** (an iframe, a `vm` context), whose prototype is that realm's `Object.prototype`.
+     - FROM: `convertFiltersToAST` read it as an operator map, so `{ age: foreignObject }` with `$gte: 18` lowered to `['age', '>=', 18]`, and the value data source answered it with the right rows, the ones with `age >= 18`: that is the answer this change takes away. One with no `$` key lowered to the nested-relation node `['owner', '=', foreignObject]`. In comparand position the value data source compared it as a value: by reference under `$eq` / `=` and as an `$in` member, so no row matched unless a row held the caller's own object (stored through `create` or `update`, which copy shallowly), and that row did; `$ne` / `!=` and `$nin` served every other row; and under an ordering operator it compared as the text `[object Object]`, serving the string values that sort past that text.
+     - TO: it is a comparand, as the spec's filter walk and the engine's `isNoOperatorObject` read it: the converter refuses it as the field's whole condition in a sentence of its own (`The filter on field 'age' is a plain object from another realm (an iframe, a vm context). Only a plain object of this realm (prototype Object.prototype or null) is read as an operator map or a nested condition here…`), and the value data source refuses it in comparand position under every operator (`filter comparand on field 'owner' is a plain object from another realm, which is neither a comparison value nor filter structure here`). The server refused it already when the object reached it in process; sent as JSON, it arrives as a plain object of the server's realm.
+     - Also moved, by the same prototype test (the operator-map test no longer takes a second prototype hop): an object whose prototype is a `null`-prototype object, such as `Object.create(Object.create(null))`. FROM: `convertFiltersToAST` read it as an operator map (with no own key it was refused as an empty operator map; with `$` keys it lowered). In comparand position the value data source compared it by reference under `$eq` and as an `$in` member, so no row matched unless a row held the caller's own object, and `$ne` / `!=` and `$nin` served every other row: these are the rows this change takes away. It has no text of its own, so under an ordering operator, `$between`, and a text operator on a row holding a string, the comparison threw `TypeError: Cannot convert object to primitive value` and `find` rejected, unless its prototype defines a `valueOf` or `toString` that returns a primitive, which it then compared through; with no row holding a string, `$contains`, `$startsWith` and `$endsWith` served no row and `$notContains` every row. TO: both faces refuse it as `an object of an unrecognised type`: the converter as the field's whole condition, and the value data source in comparand position under every operator.
+  3. **A plain object with a `$` key that is not a `{ $field }` reference**, in comparand position on the value data source, the spec's `{ $now, addDays }` date anchor among them, such as `{ due: { $lt: { $now: true, addDays: 7 } } }`.
+     - FROM: compared as a value: by reference under `$eq` and as an `$in` member, so no row matched unless a row held the caller's own object (stored through `create` or `update`), and that row did; `$ne` and `$nin` served every other row, and `$notContains` every row; under an ordering operator it compared as the text `[object Object]`, so `$lt` answered the rows sorting before that text. A `null`-prototype one has no text: under an ordering operator, `$between`, and a text operator on a row holding a string, the comparison threw `TypeError: Cannot convert object to primitive value` and `find` rejected.
+     - TO: refused under every operator that reads a comparand, whole or as a list member, in both dialects. The anchor (by the spec's test: `$now` is `true` or a string) gets `filter comparand on field 'due' is a { $now, addDays } date anchor, which the in-memory matcher does not resolve…`, ending in the remedy `compare with a concrete Date or ISO string here`: the platform resolves it in the compared column's temporal form, and this source has no field types to read a form from, the reason it already refuses a `{ $field, addDays }` offset. Any other one gets `filter comparand on field 'owner' is an object carrying the key '$foo', which is neither a comparison value nor a { $field } reference`, the comparand the spec's door refuses. `convertFiltersToAST` still lowers the anchor verbatim for a server-backed source, which resolves it.
+  4. **A class instance** (a moment or luxon date, a decimal object, a `RegExp`, a `Map`) as the comparand of an equality, membership or text operator on the value data source: `$eq`, `$ne`, an `$in` / `$nin` member, `$contains`, `$notContains`, `$startsWith`, `$endsWith`, and their AST spellings.
+     - FROM: compared by reference or as its text. `$eq` / `=` and `$in` answered no row unless a row held the caller's own instance (stored through `create` or `update`), and that row matched; `$ne` and `$nin` served every other row. `$contains`, `$startsWith` and `$endsWith` matched on the instance's `String()` text and served rows (a `new String('ab')`, a class with a `toString`), and `$notContains` served their complement.
+     - TO: refused, in both dialects, with `filter comparand on field 'age' is a Amount instance, which the in-memory matcher compares only by order…`. The spec's comparand door refuses it at these operators.
+     - Not moved: under `$gt` / `$gte` / `$lt` / `$lte` / `$between` it is still compared through its `valueOf` when that returns a primitive; otherwise as its text. `$icontains` keeps its own text-comparand refusal.
+  
+  **Not moved.** A scalar, a `Date` and a `{ $field }` reference are compared as before; `$empty` keeps its boolean-flag refusal, with the converter's sentence now built by the same helper as `$null` / `$exists`; a `null`-prototype object of this realm is still an operator map.
+  
+  The fix for a caller: write the flag as the boolean itself (`{ owner: { $null: true } }`, `{ owner: { $exists: false } }`); compare with a scalar, a `Date` or a `{ $field }` reference; rebuild a filter object from another realm in this one (`{ ...condition }` per operator map, or `structuredClone(filter)`); filter a relative date on a server-backed source, or compare a value source with a concrete `Date` or ISO string; and convert a class-instance comparand to its primitive (`moment.toDate()`, `decimal.toNumber()`) before filtering.
+- 78f7160: fix(core): a date macro inside a longer string is a literal on the client too
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  `resolveDateMacros` resolves a filter value only when the whole value is one placeholder (`'{today}'`, `'${today}'`, `'{7_days_ago}'`). A value that merely contains one, such as `'from {today} on'`, is now returned as written. Before, the client replaced the macro inside the string while the server's resolver left it literal, so the same filter matched different rows in the console and on the server. This is the reading the spec declares for filter placeholders: a value that merely contains braces is untouched.
+  
+  A previous-period comparison (`shiftFilterByCompareTo`) follows the same reading: it renames only whole-value tokens, so the comparison query filters on the same literal as the current one.
+- 8807dcb: feat(ui): a record page's related tab is the child object's full list
+  
+  Clause-②: yes (widening) — a new export `ListConditionsBlock` (`@object-ui/plugin-list`, the condition row as a host element, not a registered node type) and its `ListConditionsHostProps`; a new slot `RelatedListConditionsSlotContext` and its `RelatedListConditionsProps` (`@object-ui/plugin-detail`), which the record page fills (`@object-ui/app-shell`); new exports `ConditionDiscardButton` and its type `ConditionDiscardButtonProps` (`@object-ui/plugin-list`) and `withHeaderSortPick` (`@object-ui/core`); new i18n keys in every `@object-ui/i18n` locale pack (`listConditions.chips.discard`, `listConditions.chips.discardHint`, `detail.relatedNoMatches`, `detail.deleteRowsTitle`, and the count family `detail.deleteRowsConfirmation` with its plural slots `_zero`, `_one`, `_two`, `_few`, `_many`, `_other` as each pack needs them); nothing removed or renamed
+  Metadata-protocol: none
+  
+  On a record page, a related list opened as its own tab now works like the object's list page:
+  
+  - The first row names the child list (its tile and title) on the left and keeps **+ Add** on the right. The **Open in list** button is gone.
+  - The second row is the list page's own condition row: **Sort** (several levels) and **Filter**, with no view switch, view settings or search. On a narrow tab or in the drawer their labels fold to icons.
+  - The table is the list page's grid: the column menu, cell editing as on the list page wherever the reader may edit the child object, row selection with the floating bulk bar (bulk delete asks once, deletes the selection in one batch call where the data source has one, and says how many rows went and how many did not), and the footer row, whose calculations cover every matching row, not just the loaded ones. A tab grouped by status draws no footer row.
+  - Rows load as the page scrolls instead of in pages.
+  - The tab title still counts every child; the footer counts the rows the filter keeps.
+  - What the reader changes (sort, filter, footer calculations) lasts while they stay on the record, for that reader only, across its tabs and between its page and its drawer, and is gone after a reload or on another record. **Discard** appears once something changed and puts the tab back; there is no Save. The list page's Discard and this one are one button.
+  
+  Upgrade note: the header sort and the column widths and order that an earlier version remembered for a related tab in a reader's record-page preference (`sys_user_preference`) no longer apply: the tab opens in its declared order, and its column widths and order are now kept in the reader's browser, as the list page's are, so they start from the default once. Nothing stored is deleted. The default sort and columns of every related list are unchanged.
+  
+  `@object-ui/core` adds `withHeaderSortPick`, the list page's rule for how a header sort joins an existing multi-level sort, now shared with the related tab. `@object-ui/app-shell`'s list Discard is drawn by `ConditionDiscardButton`; it looks and behaves as before.
+- 9ed18a5: fix(ui): danger colours render red in both themes, and light danger text clears 4.5:1
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - The grid and list views' export-error line, and the Markdown caution alert's border and title, set their colour to a bare `var(--destructive)`. That variable holds an HSL triplet, not a colour, so the browser dropped the declaration and the text rendered in the inherited colour. The export-error line now uses the `text-destructive` utility and the caution alert reads `hsl(var(--destructive-text, var(--destructive)))`. The Markdown theme's heading anchors, quote and meta tokens and blockquote border and background had the same defect with other theme variables and now wrap them in `hsl()` too.
+  - The flow preview's invalid-edge stroke and arrowhead paint with the danger text colour, so they stay readable on the dark theme.
+  - The light theme now sets its own `--destructive-text`, red-700 (`#b91c1c`, `0 73.7% 41.8%`), so `text-destructive` reads at 6.47:1 on white instead of 3.76:1. `--destructive`, the brand red used for button and badge fills, is unchanged. The same value is in the stylesheet that `objectui init` generates.
+  - A theme's `error` colour applied through the theme engine still sets `--destructive`, and now also derives a danger text colour for each mode from it (same hue, lightness moved until it reads at 4.5:1 on that mode's surfaces), written as `--destructive-text-light` and `--destructive-text-dark`. The shipped stylesheets read those into `--destructive-text` in their light and dark blocks, so a custom red drives danger text and stays readable in both modes. A host stylesheet that overrides `--destructive` by hand should set `--destructive-text` beside it in each mode.
+- f3d0a9f: fix(dashboard): a global filter bound to a field holding several values is sent as `$contains`, not `=` / `$in`
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  A dashboard `select` / `lookup` global filter bound to a field that holds several values (`multiple: true` on a select, lookup or user field, or a `multiselect` / `checkboxes` / `tags` field) used to be sent as `field = value`, or `$in` for several values. The server refuses both on such a field: the data query answers `400 INVALID_FILTER`, and the dataset query answers `200` with a count of 0, so the dashboard showed no data. The filter is now sent as `{ field: { $contains: value } }`, and several chosen values as `$or` over one `$contains` each, which the server answers with the matching rows. Single-value fields keep `=` / `$in`.
+  
+  To know whether the bound field holds several values, the dashboard reads the field's definition before it sends the widget's query:
+  
+  - `@object-ui/types`: `DataSource` has a new optional member, `getDataset(name, { callerPackage })`. It reads a dataset definition and resolves `null` when no such dataset is served; a failed read rejects.
+  - `@object-ui/data-objectstack`: `ObjectStackAdapter.getDataset` reads `GET /api/v1/meta/dataset/:name`, sending the reader's package as `callerPackage`, and caches the answer like the adapter's other metadata reads.
+  - `@object-ui/core`: `buildWidgetScopedFilter` takes an optional fifth argument, the operators each bound field takes when it is stored as a JSON column, and lowers a `select` / `lookup` filter on such a field to `$contains`. `boundMemberFilterNames` names the active `select` / `lookup` filters that bind a widget.
+  - `@object-ui/plugin-dashboard`: `DashboardRenderer` reads a dataset-bound widget's base object through `getDataset`, and a `provider: 'object'` widget's own object, through `getObjectSchema`. While that read is in flight, a widget that a `select` / `lookup` filter with a value binds draws a skeleton and sends no query. The operators come from `jsonColumnFilterOperators`, the helper the list quick filter and the filter builder use.
+  
+  A data source without `getDataset`, or a dataset the server does not serve, keeps the `=` / `$in` lowering, and the dashboard logs a console warning that names the filter.
+- d12ac84: feat(comments): a member resolves and reopens any thread they can read, and deletes their own comments
+  
+  Clause-②: yes (widening) — `@objectstack/plugin-audit`'s `AuditPlugin` mounts two new HTTP routes, `PUT /api/v1/comments/:id/resolution` and `DELETE /api/v1/comments/:id`, and the stamp of who resolved a thread now reads a system write's `provenance.attributedUserId`. `@objectstack/core`'s `OwnRowDeleteDoor` adds an optional member, `refuseRemoval(row, engine, context)`, asked after the owner check. `@object-ui/react`'s `DiscussionContextValue` adds the optional `ownCommentDeletesOnly`; `@object-ui/plugin-detail`'s `RecordCommentsData` adds the optional `ownDeletesOnly`, and `RecordCommentThreadProps['comments']` may carry it; `@object-ui/core`'s affordance-to-grant map adds the row `feedCommentDeleteOwn`. Nothing existing is removed or re-typed.
+  Metadata-protocol: none
+  
+  Two server doors carry the maintainer's comment permission rulings past the platform's row floor (`owner_only_writes`, which lets a rank-and-file member update only the rows they created) and past the delete grant no every-member set may hold (ADR-0090 D5). Neither changes the floor, `sys_comment_moderation` or any permission set, and the data API answers exactly what it answered before.
+  
+  - **Resolve and reopen: `PUT /api/v1/comments/:id/resolution`** with the body `{ "resolved": true }` or `{ "resolved": false }` and nothing else. Whoever can read the thread and may post a comment on it may, external members included (ruling record 7063285032, option A: anyone who can see the record, the same gate as posting a comment): the door reads the comment as the caller (a comment they cannot read answers `404 RECORD_NOT_FOUND`, as an unknown id does), refuses a caller who reads comments but may not post one (`403 PERMISSION_DENIED`), refuses a reply (`400 VALIDATION_ERROR`) and then writes `is_resolved` alone, attributed to the caller. `resolved_by` names the caller. It answers `200` with `{ id, is_resolved, resolved_by, resolved_at }`. Any other query parameter or body is `400 VALIDATION_ERROR`; a signed-out request is `401`.
+  - **Delete your own comment: `DELETE /api/v1/comments/:id`.** It removes a comment the caller wrote (`author_id`), with no delete grant needed, on the platform's shared own-row delete door. Another member's comment is `403 PERMISSION_DENIED` and stays, even for a record editor: moderating someone else's comment stays the data API's, behind the delete grant. A comment that has replies stays too, whoever wrote them, `409 DELETE_RESTRICTED`, because removing it would turn each reply into a thread of its own (ruling record 7069889899: no one deletes or rewrites someone else's comment); its author may still edit its text. It answers `200` with `{ id, deleted: true }`.
+  - **Unchanged:** comment text stays its author's alone; a member's data-API update of a colleague's comment, `is_resolved` included, and a member's data-API delete are still `403`; administrators keep the data API for resolving, editing and deleting anyone's comment.
+  
+  The desktop comment panel follows the doors:
+  
+  - ✓ is on every thread, the viewer's and anyone else's, for a viewer holding the `sys_comment` create grant, and writes through the resolution door. It no longer asks the explain engine; that probe now gates only Edit on someone else's comment.
+  - A viewer without the `sys_comment` delete grant (an ordinary member) is offered Delete on their own comments that have no reply, and it goes through the own-comment delete door; a viewer with the grant deletes through the data API as before, others' comments included where they may edit the record.
+  
+  Corrections to two earlier notes of this release, which stay as written:
+  
+  - A rank-and-file member now resolves and reopens a colleague's thread through the resolution door; this replaces the #36071 note's line "This is the one widening: an update that changes nothing but `is_resolved` is admitted without the author-or-record-editor rule", because the platform's row floor (`owner_only_writes`) runs first, so through the data API such a member still resolves only the threads they started and an administrator resolves any.
+  - The desktop comment panel offers ✓ on every thread to a viewer who may post a comment and writes it through the resolution door; this replaces the #36075 note's line "✓ is offered under the `sys_comment` update grant: on a thread the viewer started, and on anyone's only where the explain engine admits …", and its "Unchanged" line's "a deployment without the explain service shows ✓ and Edit on the viewer's own rows only" now holds for Edit alone.
+- 8a741ab: feat(console): a dashboard is edited on its own page by the people who may design its package, and every card marks the page filters it does not follow
+  
+  Clause-②: yes (widening) — one new exported function (`dashboardFiltersNotApplied` in `@object-ui/core`), two new optional `DashboardRenderer` props (`onWidgetResize`, `onAddFilter`), and new `@object-ui/i18n` keys (`dashboard.inPageEdit.*`, `dashboard.filters.notApplied`, `dashboard.filters.addFilter`); nothing is removed or renamed
+  Metadata-protocol: none
+  
+  A dashboard page draws an **Edit** button for a workspace admin who may author metadata, on a package Studio lists (the gate of the app's Studio entries). Edit opens the dashboard as stored (never the translated copy the page shows) in an edit state: the header says **Editing**, with **Add card**, **Discard** and **Save**; every card draws a dashed outline and can be dragged to move it, resized from its corner by whole grid tracks (or with the arrow keys on the corner handle) and clicked to select it. The panel at the right is Studio's own dashboard panels, as they stand: a selected card's (its data, its "follow page filters" switches, Remove) and otherwise the dashboard's (label, cards, filters, layout). The filter bar's **Add filter** opens the panel's Filters section. Add card appends a card at the end and selects it.
+  
+  Save writes where Studio's Customize would and publishes that one item in the same act, so everyone sees the change at once without the app's package being published: into the owning package when it is writable, else into the app's customization package (`<base>.custom`, declaring `overrides: { package, basedOn }`), so an installed app's dashboard is edited too. Opening the edit state writes nothing: the pair is asked of the ensure door, which creates it on first use, at Save only. As with Studio's Customize, an installed app's dashboard is not opened where that door is walled for the caller or the package list gives no installed version to declare the override at. A dashboard with a draft already pending there (a Studio edit not yet published) is not opened for editing, and a save over one writes nothing: that draft is never published on its saver's behalf. Discard drops every change and writes nothing.
+  
+  Every card, in every mode, carries a small mark naming the page filters that do not reach it ("Not filtered by Region"), asked of the same binding its query is built from (`dashboardFiltersNotApplied` over `resolveBoundField`): a filter the card opts out of, or one whose `targetWidgets` leaves it out (an explicit string binding wins over `targetWidgets`). A card every filter reaches carries none.
+- 49c6bf3: fix(fields): an action's lookup param honours the borrowed field's `allowCreate: false`, and a record created in a filtered picker that fails the filters is not selected
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  - **A field-backed lookup param reads the field's `allowCreate`.** A param written `{ field, objectOverride }` already took the field's `lookupFilters`, `lookupColumns`, `lookupPageSize` and `descriptionField`, but not `allowCreate`. As a result, a field declaring `allowCreate: false` still showed "+ New" in an action's picker. `resolveActionParams` now copies it, app-shell's `paramToField` forwards it to the record-header dialog's picker, and the selection toolbar's dialog carries it through `resolvePromotedBulkParams`. Both the desktop popover and the phone drawer honour it. `@object-ui/core`'s `ActionParamDef` gains the optional `allowCreate` member it travels on. An author who writes `allowCreate` on a raw param is warned by name in development, like the other inherited picker keys: the spec's `ActionParamSchema` does not declare it.
+  - **A quick-created record is selected only if the picker could have offered it.** The create form accepts whatever the user enters, so the new record can fail the field's `lookupFilters`, for example a `draft` where the field asks for `approved`. The picker used to select it anyway, and the save or action that read the field then refused it. The picker now re-reads the new id through its own filter, the field's `lookupFilters` and `dependsOn` scope combined with the id. If the server does not return the record, it is not selected, and the picker reopens with the line `lookup.createdOutsideFilters` ("The record was created, but it does not match this field's filters, so it cannot be chosen here."), in every shipped locale. If the check itself fails, the record is not selected either, and the line `lookup.createdUnchecked` says the record was created but could not be checked, so the user searches for it instead of creating a duplicate. A picker with no filter selects the new record as before, without the extra read.
+  - **A create notice no longer hides the candidate list.** A create notice (the two lines above, or a failed inline create) now sits above the list instead of replacing it, so the user can pick an existing record straight away. Closing the picker clears it. Before, a failed inline create hid the list and its create entry until the widget was remounted.
+- 6ddb97b: fix(core): a refusal that carries a `message` beside a bare-string `error` code shows the message
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  `actionErrorDetail` returned a bare-string `error` before it read `message`. Against the REST seam's flat 401 body, `{error: 'UNAUTHENTICATED', code, message}`, every caller showed the user the code `UNAUTHENTICATED` instead of the sentence. Now, when the body has both a non-empty string `error` and a non-empty string `message`, the message is returned. A body with only `{error: 'sentence'}` still returns that sentence, the nested `{error: {message}}` envelope is read as before (still ahead of a top-level `message`), and the fallback is unchanged.
+- c385d3b: feat(console): a refusal that names several reasons lists every one in its alert box
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  The widening: `@object-ui/types` adds the export `ActionRefusalLine` and the optional member `ActionResult.refusals`, and `@object-ui/core` adds the optional member `ActionResponseOutcome.refusals`. Nothing is narrowed; every package ships `patch`.
+  
+  - **Every reason is shown.** When a refusal names several reasons (the server answers each reason's sentence on `error.details.refusals`), the action dialog's refusal box lists every reason in the order the server sent them, then the refusal's closing sentence, with no "More" toggle hiding any of them. A refusal without such a list renders as before.
+  - **The reasons come from the list, not from the text.** The closing sentence is read from the end of the refusal text only when that text still starts with exactly the listed reasons; when the text was cut short, every reason is still shown and the closing sentence is left out.
+  - **New: `ActionResult.refusals`** (`@object-ui/types`, with its element type `ActionRefusalLine`) **and `ActionResponseOutcome.refusals`** (`@object-ui/core`): the reasons a failed result's refusal listed, read from the `/actions` response by `interpretActionResponse` and set by the server action handler beside `userMessage`. `RefusalMessage` (`@object-ui/app-shell`) takes them as `lines`.
+- 3aa008d: fix(gantt): a gantt opens on a host that sets a maximum page size, instead of showing the refusal
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The gantt read its whole filtered result set, up to its 10,000-row ceiling, as ONE read of 10,001 rows (the ceiling plus the probe row that makes a cut detectable). A host that sets a maximum page size (`OS_DATA_MAX_PAGE_SIZE`; the hosted plane sets 5,000) refuses any read over it before running the query, so on every such host the gantt drew "Query parameter 'top' asks for 10001 rows; this deployment's maximum page size is 5000…" in place of the chart, for an empty object as much as a full one.
+  
+  The gantt now asks no single read for more than 2,001 rows, the one read the calendar, map, tree and timesheet already send. A result set that fits that read is one read, as before. A larger one is walked from the top in steps of that size under a unique order (the authored sort with `id` appended as the tie-breaker) and kept once per row, so a step can neither repeat nor skip a row; the walk stops at the first short answer or one row past the ceiling. The ceiling, the footnote that names a cut, and the rule that an authored `pagination.pageSize` or `limit` never reaches the read are unchanged.
+- Updated dependencies [8236d9b]
+- Updated dependencies [1d28405]
+- Updated dependencies [b02484e]
+- Updated dependencies [7a3f86c]
+- Updated dependencies [52a2398]
+- Updated dependencies [1c05546]
+- Updated dependencies [42b4d09]
+- Updated dependencies [4ffe9d3]
+- Updated dependencies [b38e133]
+- Updated dependencies [f796089]
+- Updated dependencies [8f49499]
+- Updated dependencies [8b550f8]
+- Updated dependencies [c809deb]
+- Updated dependencies [b68f9ae]
+- Updated dependencies [2e9e1ac]
+- Updated dependencies [8e46424]
+- Updated dependencies [f4dbcc2]
+- Updated dependencies [9c29d73]
+- Updated dependencies [0739dee]
+- Updated dependencies [89364b4]
+- Updated dependencies [dfc6bbf]
+- Updated dependencies [97b9d1e]
+- Updated dependencies [0f29688]
+- Updated dependencies [5ecf937]
+- Updated dependencies [2df9691]
+- Updated dependencies [f19e6c6]
+- Updated dependencies [feb9b79]
+- Updated dependencies [b7d2474]
+- Updated dependencies [50f85e9]
+- Updated dependencies [c0716ed]
+- Updated dependencies [7bd5d28]
+- Updated dependencies [9062756]
+- Updated dependencies [cdb327f]
+- Updated dependencies [6ffa816]
+- Updated dependencies [09ba0c7]
+- Updated dependencies [b863d2b]
+- Updated dependencies [e75a528]
+- Updated dependencies [5dd856f]
+- Updated dependencies [5dd856f]
+- Updated dependencies [61722e9]
+- Updated dependencies [f6902e9]
+- Updated dependencies [df81f4c]
+- Updated dependencies [ed906d5]
+- Updated dependencies [3d6dea2]
+- Updated dependencies [e6fa510]
+- Updated dependencies [99ece3c]
+- Updated dependencies [2495486]
+- Updated dependencies [16a96ac]
+- Updated dependencies [f4de1de]
+- Updated dependencies [53c9575]
+- Updated dependencies [7411f9b]
+- Updated dependencies [e114324]
+- Updated dependencies [f71d488]
+- Updated dependencies [f44758b]
+- Updated dependencies [f7b172f]
+- Updated dependencies [a0b01fa]
+- Updated dependencies [5d2ce34]
+- Updated dependencies [59392ed]
+- Updated dependencies [e01b8be]
+- Updated dependencies [c99156e]
+- Updated dependencies [c8e9bec]
+- Updated dependencies [7ee7a61]
+- Updated dependencies [9b6db73]
+- Updated dependencies [f98f18c]
+- Updated dependencies [401eb44]
+- Updated dependencies [29f1280]
+- Updated dependencies [eb7ad70]
+- Updated dependencies [de25d58]
+- Updated dependencies [0585797]
+- Updated dependencies [fe19096]
+- Updated dependencies [4fb7169]
+- Updated dependencies [d953558]
+- Updated dependencies [af566c2]
+- Updated dependencies [cedc094]
+- Updated dependencies [bb1c55d]
+- Updated dependencies [d7c257e]
+- Updated dependencies [40e22f1]
+- Updated dependencies [5dbcc02]
+- Updated dependencies [bc9ace2]
+- Updated dependencies [d6be99d]
+- Updated dependencies [0a1b69c]
+- Updated dependencies [2e07e61]
+- Updated dependencies [643fe3b]
+- Updated dependencies [0a3dd40]
+- Updated dependencies [6b51822]
+- Updated dependencies [f3c9d42]
+- Updated dependencies [8df7bf2]
+- Updated dependencies [170ca48]
+- Updated dependencies [d33bf5a]
+- Updated dependencies [236c804]
+- Updated dependencies [c261a7c]
+- Updated dependencies [f548bdc]
+- Updated dependencies [e72f2aa]
+- Updated dependencies [9f6f306]
+- Updated dependencies [f2a990b]
+- Updated dependencies [a23164e]
+- Updated dependencies [f3d0a9f]
+- Updated dependencies [8c5a81e]
+- Updated dependencies [6db1dc2]
+- Updated dependencies [78437e2]
+- Updated dependencies [ed4d322]
+- Updated dependencies [4ab2c82]
+- Updated dependencies [0628e08]
+- Updated dependencies [b7fe94a]
+- Updated dependencies [0b2118f]
+- Updated dependencies [ad65d82]
+- Updated dependencies [cb5a975]
+- Updated dependencies [92e0475]
+- Updated dependencies [ad92dfd]
+- Updated dependencies [bb89b2d]
+- Updated dependencies [8da2b7e]
+- Updated dependencies [7c9b22b]
+- Updated dependencies [9742142]
+- Updated dependencies [f3a8a13]
+- Updated dependencies [bbc7e03]
+- Updated dependencies [543585d]
+- Updated dependencies [7e89bc6]
+- Updated dependencies [70194ff]
+- Updated dependencies [f2ef7d8]
+- Updated dependencies [0002eaf]
+- Updated dependencies [7a5ae65]
+- Updated dependencies [70d07fd]
+- Updated dependencies [73f2cf4]
+- Updated dependencies [60e79ed]
+- Updated dependencies [595844b]
+- Updated dependencies [28588d0]
+- Updated dependencies [3b58921]
+- Updated dependencies [c45dd80]
+- Updated dependencies [48c5484]
+- Updated dependencies [cb2d6aa]
+- Updated dependencies [d463c46]
+- Updated dependencies [7501d0c]
+- Updated dependencies [45ef94e]
+- Updated dependencies [573a376]
+- Updated dependencies [cbc06ff]
+- Updated dependencies [8f141a2]
+- Updated dependencies [d24e4ab]
+- Updated dependencies [f66340a]
+- Updated dependencies [fed637c]
+- Updated dependencies [7a7ab47]
+- Updated dependencies [08f4bad]
+- Updated dependencies [70f454a]
+- Updated dependencies [8644ce7]
+- Updated dependencies [8aecf6d]
+- Updated dependencies [8ddadc1]
+- Updated dependencies [a03bc4e]
+- Updated dependencies [021524c]
+- Updated dependencies [129e637]
+- Updated dependencies [13f5466]
+- Updated dependencies [ff6f976]
+- Updated dependencies [00aa574]
+- Updated dependencies [d95d34f]
+- Updated dependencies [76eea0f]
+- Updated dependencies [84b1e0c]
+- Updated dependencies [151e812]
+- Updated dependencies [4ed453d]
+- Updated dependencies [6210a08]
+- Updated dependencies [81c1ae9]
+- Updated dependencies [51b67f1]
+- Updated dependencies [66452df]
+- Updated dependencies [4f9a3f8]
+- Updated dependencies [1cda7ea]
+- Updated dependencies [5078f2f]
+- Updated dependencies [57445a6]
+- Updated dependencies [01967c3]
+- Updated dependencies [5078f2f]
+- Updated dependencies [1f3e9f6]
+- Updated dependencies [8b1841f]
+- Updated dependencies [012f0a1]
+- Updated dependencies [227e952]
+- Updated dependencies [422df61]
+- Updated dependencies [06c1f54]
+- Updated dependencies [489d9fe]
+- Updated dependencies [c349576]
+- Updated dependencies [c063734]
+- Updated dependencies [0439a04]
+- Updated dependencies [5bf7242]
+- Updated dependencies [f92d271]
+- Updated dependencies [3d4f423]
+- Updated dependencies [d7f299c]
+- Updated dependencies [f9fda2a]
+- Updated dependencies [91138ec]
+- Updated dependencies [9981f27]
+- Updated dependencies [3801775]
+- Updated dependencies [40570d6]
+- Updated dependencies [2a6f26a]
+- Updated dependencies [b7dee0e]
+- Updated dependencies [68250f6]
+- Updated dependencies [fd462c5]
+- Updated dependencies [d15e439]
+- Updated dependencies [6831e04]
+- Updated dependencies [efaafe3]
+- Updated dependencies [875ae40]
+- Updated dependencies [da50177]
+- Updated dependencies [7e9c50c]
+- Updated dependencies [5cf9941]
+- Updated dependencies [204356a]
+- Updated dependencies [59571b2]
+- Updated dependencies [c94191d]
+- Updated dependencies [ebac615]
+- Updated dependencies [2d18ba8]
+- Updated dependencies [98b17fe]
+- Updated dependencies [8d60333]
+- Updated dependencies [db46566]
+- Updated dependencies [c385d3b]
+- Updated dependencies [2776e88]
+- Updated dependencies [083e040]
+- Updated dependencies [66c854d]
+- Updated dependencies [372ce7c]
+- Updated dependencies [7d50dc8]
+- Updated dependencies [595e9cb]
+- Updated dependencies [20d025f]
+- Updated dependencies [64b278e]
+- Updated dependencies [695b9db]
+- Updated dependencies [d280de9]
+- Updated dependencies [f9dd033]
+- Updated dependencies [6296909]
+- Updated dependencies [660e7cd]
+  - @objectstack/spec@19.0.0-next.0
+  - @object-ui/types@19.0.0-next.0
+  - @objectstack/formula@19.0.0-next.0
+
 ## 18.6.0
 
 ### Minor Changes

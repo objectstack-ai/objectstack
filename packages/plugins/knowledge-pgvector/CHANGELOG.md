@@ -1,0 +1,266 @@
+# @objectstack/knowledge-pgvector
+
+## 19.0.0-next.0
+
+### Patch Changes
+
+- 9981f27: feat(knowledge): an open vector store on PostgreSQL with pgvector, and the index fingerprint every knowledge index is built under
+  
+  Clause-②: yes
+  Metadata-protocol: none
+  
+  ADR-0161 Execution row 8a and K8 item 8 (#37100).
+  
+  - **New package `@objectstack/knowledge-pgvector`.** `KnowledgePgvectorPlugin` registers a `PgvectorKnowledgeAdapter` (adapter id `pgvector`): passages and vectors in PostgreSQL with the pgvector extension, in a schema of its own (`os_knowledge`, option `schema`) — a generation table `knowledge_generation` and one passage table per vector width, `knowledge_vec_d<width>` — so no table collides with an object table or is read as schema drift. The database is the `url` option when given, else the platform's when `OS_DATABASE_URL` is PostgreSQL; the plugin keeps its own small pool (`poolMax`, default 4; `connectTimeoutMs`, default 5000, so an unreachable host does not hold boot), no pooled connection waits on the embedder, and the kernel's embedder is read at each call. Two deployments sharing one database set their own `schema`. Search is an exact cosine scan (a 3072-wide model works); the organization filter and the metadata `filter` run in the same `WHERE`, before ranking. A passage whose text is unchanged is not embedded again; one whose row a concurrent write removed is embedded and written, not lost. `queryPrefix` is put before every query before it is embedded. Without the `vector` extension, or the right to create it or the schema, the plugin still registers and boot goes on: it creates nothing, warns with the SQL to run, `healthCheck` answers `ok: false` with that SQL, and every call answers `503 SERVICE_UNAVAILABLE` until it has run; a database it cannot reach is reported as unreachable, with no SQL. A caller reads one sentence; the driver's text and the SQL travel in the error's `remedy`, for the operator. The store does not yet build a second generation beside the first: `beginBuild` under a new fingerprint is refused, and the reindex result carries the exact statements that clear the source (passages, then the generation row); a first generation never takes over passage rows left behind. An approximate (HNSW) index is an operator's step, documented with the package.
+  - **The index fingerprint (ADR-0161 K7).** The knowledge service computes, per source and adapter, a fingerprint over the embedding model and dimensions the adapter reports, the resolved split and the splitter's version, and the content recipe; and a recipe hash over `where`, `metadataFields`, the title rule and the withheld fields. New exports from `@objectstack/service-knowledge`: `computeIndexFingerprint`, `computeRecipeHash`, `indexExpectation`, `INDEX_FINGERPRINT_VERSION`, `RECIPE_HASH_VERSION`, `ASSEMBLY_RULE_VERSION`, `TITLE_RULE_VERSION`, `SPLIT_ALGORITHM_VERSION`. Every adapter call carries them: `AdapterContext.index` and `AdapterSearchOptions.index` (`@objectstack/spec/contracts`).
+  - **Adapter contract members (all optional).** `AdapterEmbeddingDescriptor` gains `model`, `dimensions` and `variant`; `IKnowledgeAdapter` gains `indexStatus`, and `beginBuild` / `completeBuild` as a pair: a complete reindex calls `beginBuild` before it lists or writes, and `completeBuild` once every row is written and the purge is done. `IEmbedder` gains `model`; `OpenAIEmbedder` reports the model it sends.
+  - **A refused source is named, never read as empty.** A write or a search under another fingerprint is refused `409 KNOWLEDGE_REBUILD_REQUIRED` (registered in the error-code ledger). `KnowledgeService.search` over several sources answers from the searchable ones and logs each refused one with the adapter's `remedy`; a source that refuses the refill round is refused for the whole search, its first-round hits dropped; it throws the refusal (code, status, and `refused` naming every source) only when none could be searched. A caller is given the code and the adapter's one-sentence message, never its `remedy`; a reindex result carries the `remedy`. `KnowledgeService.searchWithRefusals` returns both, and the `search_knowledge` tool adds `refused` to its output when a source is refused.
+  - **`knowledge-memory` is the reference.** It keeps an active generation and, while a build of another fingerprint runs, one under construction, switching at `completeBuild`.
+  - **Contract suite.** `runKnowledgeAdapterContract`'s `implements` gains `indexStatus`, `builds`, `refusesOtherFingerprint` and `generations`, with cases for each. `knowledge-pgvector` runs the suite, the card's acceptance cases and a complete reindex over a real ObjectQL + SqlDriver against a live PostgreSQL in the `Temporal Conformance` job.
+- fc7bdeb: feat(knowledge-pgvector): a changed fingerprint builds a new generation beside the active one and switches to it
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  ADR-0161 K7, rules 1 to 4, for the PostgreSQL store.
+  
+  - **A new generation, built beside the old one.** Before, a complete reindex under a new index fingerprint (another embedding model, other dimensions, another split) was refused, and its result carried the statements that clear the source by hand. Now `beginBuild` opens a generation under construction beside the active one. The walk writes into it, and so do the event-sync writes that arrive during the build: they carry the new fingerprint. Nothing is written into the active generation under another fingerprint.
+  - **Search during the build** is refused `KNOWLEDGE_REBUILD_REQUIRED` (409) with the message that the source is being rebuilt. It is never answered from the old generation. `indexStatus` answers `building: true` while a generation is under construction.
+  - **The switch.** `completeBuild`, after the walk and its single purge, makes the new generation active and retires the old one in one transaction. The old one's passages are then deleted in batches of 1,000 rows (`deleteBatchSize` on the adapter), and its row last. A deletion that stops part-way is finished by the source's next build; a retired generation is never searched. A search that meets the switch reads the new generation.
+  - **One builder per source.** `beginBuild` takes a PostgreSQL session advisory lock on the source, on a connection of its own outside the pool (`PgPoolLike.connectSession`, which `poolFromPg` provides), and holds it until `completeBuild`. A second build from another process is refused `LOCK_CONFLICT` (409) before it reads or writes anything. The lock is freed when the build completes, when the process or its connection dies, or after 15 minutes without a call of the build itself (`buildLockIdleMs` on the adapter). Event-sync writes do not extend it. The plugin frees every lock it holds when it is destroyed. The lock is a session advisory lock: the store needs a direct or session-mode PostgreSQL connection, never a transaction-mode pooler. A release whose session no longer held the lock is logged at `warn`.
+  - **New exports, all optional (widening).** On the adapter's options: `buildLockIdleMs`, `deleteBatchSize` and `logger`. On `PgPoolLike`: `connectSession`. On the adapter: `close()`.
+  - **A build that stops is resumable.** The generation under construction is kept with what it holds. The next `beginBuild` under the same fingerprint takes it up, and the walk skips every document it already holds unchanged. A build under a third fingerprint abandons the unfinished generation and deletes it.
+  - The refusal's `remedy` no longer carries SQL: a complete reindex is the remedy. The generation table gains two unique partial indexes (one active and one building generation per source), created with `IF NOT EXISTS` on the next boot.
+- 98b17fe: feat(service-knowledge): a knowledge search can be held to chosen records, or to the records under one parent, and the adapter filters before it ranks
+  
+  Clause-②: yes
+  Metadata-protocol: none
+  
+  A knowledge search can now look only inside chosen records, for example only inside one policy, and every one of the `topK` hits comes from inside that scope. A scope only narrows what is searched; each hit is still re-read as the caller, as before.
+  
+  New, both optional, in `@objectstack/spec` (types only, no metadata key):
+  
+  - `KnowledgeSearchOptions.scope?: Array<{ object: string; ids: string[] }>`. An entry naming the object a source indexes holds that source to those records. An entry naming another object reaches a source that lists, in its `metadataFields`, a `lookup` or `master_detail` field pointing at that object, and holds it to the documents whose stored value of that field is one of the ids. Entries are a union. A source no entry reaches is not searched, and a `file` / `http` source answers nothing under a scope. `scope: []`, or an entry with no ids, answers no hits; it never means "no scope". At most 10 entries, each with at most 500 ids, every `object` and id a non-empty string, no other key on an entry; past those bounds `search` refuses before any adapter is called, with an error carrying `code: 'VALIDATION_ERROR'` and `status: 400` and naming the bound.
+  - `AdapterSearchOptions.scope?: AdapterScopeTerm[]`, and the exported type `AdapterScopeTerm` (`{ kind: 'record', ids }` or `{ kind: 'metadata', field, ids }`). The knowledge service builds it per source from `KnowledgeSearchOptions.scope`; an adapter that reads it ranks only the documents some term holds for, filtering before it ranks, comparing values as strings (a list value matches when any element does).
+  
+  `KnowledgeService` checks every hit after the adapter answers and drops a hit no term holds for, including a hit that does not carry the value, so an adapter returns the document's `metadata` on its hits. An adapter that ignores the member keeps working: its scoped searches may answer fewer than `topK`, and the service logs that once per adapter at `warn`. A source that lists two or more lookups to the scoped object is not reached by that entry, logged once at `warn` naming the fields. A `user` field is not a parent link, and a parent two hops away is not reached. How many hits the scope removed is logged, never returned.
+  
+  `@objectstack/knowledge-memory` applies `scope` before ranking, and `@objectstack/knowledge-pgvector` applies it in the same SQL `WHERE` as the organization filter, ids and field names as bound parameters. `runKnowledgeAdapterContract` (from `@objectstack/service-knowledge/testing`) now requires `implements.scope`. It adds scope cases for the adapter alone, for each term kind, and cases through a real `KnowledgeService`, including one over the adapter with the member stripped.
+  
+  What to do: an adapter package reads `scope` in its search, returns each document's `metadata` on its hits, and passes `implements.scope` to the contract suite. A source that should be searchable inside one parent record lists the lookup to that parent in `metadataFields`; documents indexed before the lookup was listed are in no parent scope until a complete reindex writes them again.
+- Updated dependencies [8236d9b]
+- Updated dependencies [1d28405]
+- Updated dependencies [b02484e]
+- Updated dependencies [7a3f86c]
+- Updated dependencies [52a2398]
+- Updated dependencies [1c05546]
+- Updated dependencies [42b4d09]
+- Updated dependencies [4ffe9d3]
+- Updated dependencies [b38e133]
+- Updated dependencies [f796089]
+- Updated dependencies [8f49499]
+- Updated dependencies [b68f9ae]
+- Updated dependencies [2e9e1ac]
+- Updated dependencies [8e46424]
+- Updated dependencies [f4dbcc2]
+- Updated dependencies [9c29d73]
+- Updated dependencies [0739dee]
+- Updated dependencies [89364b4]
+- Updated dependencies [dfc6bbf]
+- Updated dependencies [97b9d1e]
+- Updated dependencies [0f29688]
+- Updated dependencies [5ecf937]
+- Updated dependencies [2df9691]
+- Updated dependencies [f19e6c6]
+- Updated dependencies [feb9b79]
+- Updated dependencies [b7d2474]
+- Updated dependencies [50f85e9]
+- Updated dependencies [4b1eb0e]
+- Updated dependencies [c0716ed]
+- Updated dependencies [7bd5d28]
+- Updated dependencies [8856afc]
+- Updated dependencies [9062756]
+- Updated dependencies [cdb327f]
+- Updated dependencies [6ffa816]
+- Updated dependencies [09ba0c7]
+- Updated dependencies [b863d2b]
+- Updated dependencies [e75a528]
+- Updated dependencies [5dd856f]
+- Updated dependencies [5dd856f]
+- Updated dependencies [61722e9]
+- Updated dependencies [8384d18]
+- Updated dependencies [f6902e9]
+- Updated dependencies [df81f4c]
+- Updated dependencies [ed906d5]
+- Updated dependencies [e6fa510]
+- Updated dependencies [99ece3c]
+- Updated dependencies [3cfa5bc]
+- Updated dependencies [bfd1049]
+- Updated dependencies [2495486]
+- Updated dependencies [16a96ac]
+- Updated dependencies [f4de1de]
+- Updated dependencies [53c9575]
+- Updated dependencies [7411f9b]
+- Updated dependencies [e114324]
+- Updated dependencies [f71d488]
+- Updated dependencies [f44758b]
+- Updated dependencies [f7b172f]
+- Updated dependencies [a0b01fa]
+- Updated dependencies [5d2ce34]
+- Updated dependencies [59392ed]
+- Updated dependencies [c99156e]
+- Updated dependencies [c8e9bec]
+- Updated dependencies [7ee7a61]
+- Updated dependencies [9b6db73]
+- Updated dependencies [7c122ff]
+- Updated dependencies [f98f18c]
+- Updated dependencies [401eb44]
+- Updated dependencies [29f1280]
+- Updated dependencies [eb7ad70]
+- Updated dependencies [de25d58]
+- Updated dependencies [fe19096]
+- Updated dependencies [4fb7169]
+- Updated dependencies [d953558]
+- Updated dependencies [af566c2]
+- Updated dependencies [cedc094]
+- Updated dependencies [bb1c55d]
+- Updated dependencies [d7c257e]
+- Updated dependencies [40e22f1]
+- Updated dependencies [5dbcc02]
+- Updated dependencies [bc9ace2]
+- Updated dependencies [d6be99d]
+- Updated dependencies [0a1b69c]
+- Updated dependencies [2e07e61]
+- Updated dependencies [643fe3b]
+- Updated dependencies [0a3dd40]
+- Updated dependencies [6b51822]
+- Updated dependencies [f3c9d42]
+- Updated dependencies [8df7bf2]
+- Updated dependencies [170ca48]
+- Updated dependencies [d33bf5a]
+- Updated dependencies [236c804]
+- Updated dependencies [c261a7c]
+- Updated dependencies [f548bdc]
+- Updated dependencies [e72f2aa]
+- Updated dependencies [f2a990b]
+- Updated dependencies [a23164e]
+- Updated dependencies [8c5a81e]
+- Updated dependencies [6db1dc2]
+- Updated dependencies [78437e2]
+- Updated dependencies [ed4d322]
+- Updated dependencies [0628e08]
+- Updated dependencies [b7fe94a]
+- Updated dependencies [0b2118f]
+- Updated dependencies [81eae2b]
+- Updated dependencies [ad65d82]
+- Updated dependencies [cb5a975]
+- Updated dependencies [92e0475]
+- Updated dependencies [d12ac84]
+- Updated dependencies [ad92dfd]
+- Updated dependencies [bb89b2d]
+- Updated dependencies [8da2b7e]
+- Updated dependencies [ec545de]
+- Updated dependencies [7c9b22b]
+- Updated dependencies [9742142]
+- Updated dependencies [f3a8a13]
+- Updated dependencies [543585d]
+- Updated dependencies [70194ff]
+- Updated dependencies [0002eaf]
+- Updated dependencies [7a5ae65]
+- Updated dependencies [70d07fd]
+- Updated dependencies [73f2cf4]
+- Updated dependencies [60e79ed]
+- Updated dependencies [595844b]
+- Updated dependencies [28588d0]
+- Updated dependencies [3b58921]
+- Updated dependencies [c45dd80]
+- Updated dependencies [48c5484]
+- Updated dependencies [cb2d6aa]
+- Updated dependencies [d463c46]
+- Updated dependencies [7501d0c]
+- Updated dependencies [45ef94e]
+- Updated dependencies [573a376]
+- Updated dependencies [cbc06ff]
+- Updated dependencies [8f141a2]
+- Updated dependencies [d24e4ab]
+- Updated dependencies [f66340a]
+- Updated dependencies [fed637c]
+- Updated dependencies [7a7ab47]
+- Updated dependencies [08f4bad]
+- Updated dependencies [70f454a]
+- Updated dependencies [8644ce7]
+- Updated dependencies [8aecf6d]
+- Updated dependencies [8ddadc1]
+- Updated dependencies [a03bc4e]
+- Updated dependencies [021524c]
+- Updated dependencies [129e637]
+- Updated dependencies [13f5466]
+- Updated dependencies [ff6f976]
+- Updated dependencies [00aa574]
+- Updated dependencies [d95d34f]
+- Updated dependencies [76eea0f]
+- Updated dependencies [84b1e0c]
+- Updated dependencies [151e812]
+- Updated dependencies [6210a08]
+- Updated dependencies [81c1ae9]
+- Updated dependencies [51b67f1]
+- Updated dependencies [66452df]
+- Updated dependencies [4f9a3f8]
+- Updated dependencies [1cda7ea]
+- Updated dependencies [5078f2f]
+- Updated dependencies [01967c3]
+- Updated dependencies [5078f2f]
+- Updated dependencies [8b1841f]
+- Updated dependencies [012f0a1]
+- Updated dependencies [227e952]
+- Updated dependencies [422df61]
+- Updated dependencies [06c1f54]
+- Updated dependencies [489d9fe]
+- Updated dependencies [c349576]
+- Updated dependencies [c063734]
+- Updated dependencies [0439a04]
+- Updated dependencies [5bf7242]
+- Updated dependencies [f92d271]
+- Updated dependencies [3d4f423]
+- Updated dependencies [d7f299c]
+- Updated dependencies [f9fda2a]
+- Updated dependencies [91138ec]
+- Updated dependencies [9981f27]
+- Updated dependencies [3801775]
+- Updated dependencies [40570d6]
+- Updated dependencies [2a6f26a]
+- Updated dependencies [b7dee0e]
+- Updated dependencies [68250f6]
+- Updated dependencies [fd462c5]
+- Updated dependencies [d15e439]
+- Updated dependencies [6831e04]
+- Updated dependencies [efaafe3]
+- Updated dependencies [875ae40]
+- Updated dependencies [da50177]
+- Updated dependencies [7e9c50c]
+- Updated dependencies [5cf9941]
+- Updated dependencies [204356a]
+- Updated dependencies [59571b2]
+- Updated dependencies [c94191d]
+- Updated dependencies [ebac615]
+- Updated dependencies [98b17fe]
+- Updated dependencies [8d60333]
+- Updated dependencies [db46566]
+- Updated dependencies [2776e88]
+- Updated dependencies [083e040]
+- Updated dependencies [66c854d]
+- Updated dependencies [372ce7c]
+- Updated dependencies [df8a1b8]
+- Updated dependencies [75925e1]
+- Updated dependencies [7d50dc8]
+- Updated dependencies [595e9cb]
+- Updated dependencies [20d025f]
+- Updated dependencies [64b278e]
+- Updated dependencies [695b9db]
+- Updated dependencies [ecd4b2b]
+- Updated dependencies [d280de9]
+- Updated dependencies [f9dd033]
+- Updated dependencies [6296909]
+- Updated dependencies [660e7cd]
+  - @objectstack/spec@19.0.0-next.0
+  - @objectstack/core@19.0.0-next.0

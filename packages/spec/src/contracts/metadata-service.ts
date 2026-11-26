@@ -459,7 +459,9 @@ export interface IMetadataService {
      * not be read leaves the set partial. A row loader whose rows could not be
      * read leaves an item it holds answering `'registration'` unless the item
      * is a copy the registry primed from that loader's rows, which still
-     * answers `'row'` and the column it was read with. Either way a consumer
+     * answers `'row'` and its row's column as the registry last knew it: the
+     * column the boot priming pass wrote when that pass bound the row, else
+     * the column it was read with. Either way a consumer
      * that gates on the binding treats a degraded answer as unknown.
      *
      * Optional, like {@link listDiagnosed}: a service without it cannot tell a

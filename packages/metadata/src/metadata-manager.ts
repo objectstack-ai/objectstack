@@ -1827,7 +1827,8 @@ export class MetadataManager implements IMetadataService {
    * reads it.
    *
    * Uncached: it walks the loaders as {@link list} does, then once more for
-   * the rows. A row loader that cannot be read is reported as {@link list}
+   * the rows, skipping a loader the first walk lost (named once in `errors`).
+   * A row loader that cannot be read is reported as {@link list}
    * reports a loader, and makes the answer `degraded`. [#37130 N2] So does a
    * loader of stored rows (`datasource:`) that offers no
    * {@link MetadataLoader.loadRowBindings}, named in `errors`: its items
@@ -1835,11 +1836,15 @@ export class MetadataManager implements IMetadataService {
    */
   async listPackageBindings(type: string): Promise<{ items: MetadataPackageBinding[]; degraded: boolean; errors: string[] }> {
     const canonical = canonicalMetadataServiceType(type);
-    const { items, degraded: listDegraded, errors } = await this.readListKeyed(canonical);
+    const { items, degraded: listDegraded, errors, lostLoaders } = await this.readListKeyed(canonical);
     const slotted = PACKAGE_SLOTTED_STORE_TYPES.has(canonical);
     const rowColumns = new Map<string, string | null>();
     let degraded = listDegraded;
     for (const loader of this.loaders.values()) {
+      // [#37604] A loader the list walk above already lost is named once in
+      // `errors` and reported once: none of its items is listed, so its rows'
+      // columns bind nothing, and it is not read a second time.
+      if (lostLoaders.has(loader.contract.name)) continue;
       if (typeof loader.loadRowBindings !== 'function') {
         // [#37130 N2] A loader of stored rows that reads no package column
         // leaves every item it holds answering its registration's binding:
@@ -2144,7 +2149,7 @@ export class MetadataManager implements IMetadataService {
    * item {@link list} answers, under the key the store holds it by, in store
    * order (the registry's, then each loader's in loader order).
    */
-  private async readListKeyed(type: string): Promise<{ items: Map<string, unknown>; degraded: boolean; errors: string[] }> {
+  private async readListKeyed(type: string): Promise<{ items: Map<string, unknown>; degraded: boolean; errors: string[]; lostLoaders: Set<string> }> {
     const items = new Map<string, unknown>();
 
     // From in-memory registry
@@ -2167,6 +2172,9 @@ export class MetadataManager implements IMetadataService {
     // alongside the set.
     let degraded = false;
     const errors: string[] = [];
+    // [#37604] The loaders this read lost, by name: `listPackageBindings`
+    // walks the loaders again and names each lost one only once.
+    const lostLoaders = new Set<string>();
     for (const loader of this.loaders.values()) {
       try {
         await this.admitLoaderItems(loader, type, items);
@@ -2182,12 +2190,13 @@ export class MetadataManager implements IMetadataService {
           throw e;
         }
         degraded = true;
+        lostLoaders.add(loader.contract.name);
         errors.push(`${loader.contract.name}: ${e instanceof Error ? e.message : String(e)}`);
         this.reportLoaderReadFailure(loader.contract.name, type, e);
       }
     }
 
-    return { items, degraded, errors };
+    return { items, degraded, errors, lostLoaders };
   }
 
   /**

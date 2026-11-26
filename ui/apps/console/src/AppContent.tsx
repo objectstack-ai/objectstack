@@ -11,9 +11,9 @@
 
 import { lazy, Suspense, useEffect, useMemo, type ReactNode } from 'react';
 import { Route, useParams, useLocation, Navigate } from 'react-router-dom';
-import { DefaultAppContent, ENVIRONMENT_SCOPE_QUERY, LauncherAppsProvider, LoadingFallback, LoadingScreen, SetupFirstPageSlotProvider, SidebarFooterSlotProvider, setupMetadataStudioPath, useAdapter, type SidebarFooterSlotPlace } from '@object-ui/app-shell';
+import { DefaultAppContent, ENVIRONMENT_SCOPE_QUERY, LauncherAppsProvider, LoadingFallback, LoadingScreen, SetupFirstPageSlotProvider, SidebarFooterSlotProvider, holdsSetupAccess, setupMetadataStudioPath, useAdapter, type SidebarFooterSlotPlace } from '@object-ui/app-shell';
 import { AdapterCtx } from '@object-ui/react';
-import { MePermissionsProvider, ServerReadScope, releaseMePermissionsRequest, startMePermissionsRequest } from '@object-ui/permissions';
+import { MePermissionsProvider, ServerReadScope, releaseMePermissionsRequest, startMePermissionsRequest, usePermissions } from '@object-ui/permissions';
 import { createAuthenticatedFetch, useAuth } from '@object-ui/auth';
 import type { DataSource } from '@object-ui/types';
 import { LocalizationFetchProvider } from './LocalizationFetchProvider';
@@ -103,8 +103,10 @@ function MetadataRedirect() {
       ? `${encodeURIComponent(metadataType)}/${itemName}`
       : encodeURIComponent(metadataType);
   // objectstack ADR-0146 D1 — straight to Studio's "All metadata" area, query
-  // kept; a datasource stays on Setup's own route.
-  const target = setupMetadataStudioPath(rest, location.search, location.hash);
+  // kept; a datasource stays on Setup's own route. objectstack#37565 — the
+  // environment directory is Setup's page only for whoever may open Setup.
+  const setupAccess = holdsSetupAccess(usePermissions().systemPermissions);
+  const target = setupMetadataStudioPath(rest, location.search, location.hash, setupAccess);
   return <Navigate to={target ?? `${prefix}/metadata/${rest}`} replace />;
 }
 
@@ -178,8 +180,10 @@ function SystemObjectRedirect({ objectName }: { objectName: string }) {
  */
 function SystemCatalogRedirect({ type }: { type: 'position' | 'permission' }) {
   // objectstack ADR-0146 D1 — the catalog is Studio's, in the "All metadata"
-  // area's cross-package leg.
-  return <Navigate to={setupMetadataStudioPath(type, ENVIRONMENT_SCOPE_QUERY) ?? SETUP_PACKAGES_PATH} replace />;
+  // area's cross-package leg; objectstack#37565 — Setup's directory page, for
+  // whoever may open Setup.
+  const setupAccess = holdsSetupAccess(usePermissions().systemPermissions);
+  return <Navigate to={setupMetadataStudioPath(type, ENVIRONMENT_SCOPE_QUERY, '', setupAccess) ?? SETUP_PACKAGES_PATH} replace />;
 }
 
 /**

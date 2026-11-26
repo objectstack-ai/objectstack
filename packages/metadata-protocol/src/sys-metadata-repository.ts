@@ -1944,7 +1944,8 @@ export class SysMetadataRepository implements MetadataRepository {
        * platform's own record (`refusePlatformRecordRestore`,
        * `@objectstack/metadata`: `409 RESOURCE_CONFLICT`, the metadata
        * service's `rollback` prescription), read where the write reads it,
-       * before anything is written. The protocol's two restore doors
+       * before anything is written. [#37604] So is a version the platform
+       * registered, restored into a package's row. The protocol's two restore doors
        * (`rollbackMetaItem`, the restore limb of `revertCommit`) state it.
        * Omitted → no such check: an undo write puts back what the same
        * operation found, byte for byte.
@@ -2022,8 +2023,16 @@ export class SysMetadataRepository implements MetadataRepository {
       where: this.whereFor(ref, 'active', 'packageId' in opts ? (opts.packageId ?? null) : undefined, member),
       context: { isSystem: true },
     });
-    // [#37130] The row this restore writes, judged before the write.
-    if (opts.refusePlatformRecord === true) refusePlatformRecordRestore(ref.type, ref.name, activeRow as Record<string, unknown> | null);
+    // [#37130] The row this restore writes, judged before the write. [#37604]
+    // …and the version it writes: one the platform registered is never
+    // written into a package's row.
+    if (opts.refusePlatformRecord === true) {
+      refusePlatformRecordRestore(ref.type, ref.name, activeRow as Record<string, unknown> | null, {
+        historyRow: row as Record<string, unknown>,
+        version: targetVersion,
+        intoPackageId: 'packageId' in opts ? (opts.packageId ?? null) : ((activeRow as { package_id?: string | null } | null)?.package_id ?? null),
+      });
+    }
     const activePackageId =
       (activeRow as { package_id?: string | null } | null)?.package_id ?? null;
     const currentActive = activeRow ? this.rowToItem(ref, activeRow) : null;
