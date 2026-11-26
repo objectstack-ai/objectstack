@@ -7,7 +7,7 @@ fix(lint)!: a `_relatedLists` translation key over a list the `.custom` arrangem
 Clause-②: no (narrowing)
 Metadata-protocol: narrowed
 
-<!-- adr-0087: not-required (no-migration-prescription) No schema key, accepted value or metadata type is added, removed or renamed, and nothing stored is rewritten: what moved is which `objects.<object>._relatedLists.<list>` translation keys `translation-target-unknown` accepts. The key it now refuses is read by nothing, so the fix is to drop it, or to give the `.custom` arrangement's entry a `label` and keep it; which is meant is the author's call, so there is nothing for `objectstack migrate meta` to rewrite. -->
+<!-- adr-0087: registered translation-related-list-key-under-arrangement-refused -->
 
 **BREAKING** for a translation bundle that carries `objects.<object>._relatedLists.<list>` over a list the object's owner labels but the paired `.custom` package's `relatedLists` (ADR-0146 D10) re-states. `objectstack validate` and the other doors that run `translation-target-unknown` now report such a key as an error, where 18.x accepted it. Drop the key, or give the arrangement's entry a `label` (`{ list, label }`) and keep it.
 
