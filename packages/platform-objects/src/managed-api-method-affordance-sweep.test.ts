@@ -143,7 +143,8 @@ const PACKAGES_DIR = join(REPO_ROOT, 'packages');
  * a silent skip is how a sweep keeps passing over the objects it stopped seeing.
  */
 const SCAFFOLDING_TEMPLATES: readonly string[] = [
-  'packages/create-objectstack/src/templates/blank/src/objects/note.object.ts',
+  'packages/create-objectstack/src/templates/blank/src/objects/company.object.ts',
+  'packages/create-objectstack/src/templates/blank/src/objects/contact.object.ts',
 ];
 
 /** Every `*.object.ts` under `packages/`, skipping build output, deps and tests. */

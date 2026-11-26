@@ -8,6 +8,21 @@ import {
   APPROVAL_CANCEL_REASONS,
   APPROVAL_CANCEL_REASON_LABELS,
 } from '@objectstack/spec/contracts';
+import type { ApprovalStatus } from '@objectstack/spec/contracts';
+
+/**
+ * The badge colour each request status declares. A select option is coloured
+ * only when its author declares a colour (objectstack#36882), so the statuses
+ * the renderer used to colour from its value table declare that colour here.
+ * `recalled` and `returned` were never in that table (only the retired hash
+ * coloured them), so they render neutral.
+ */
+const APPROVAL_STATUS_COLORS: Partial<Record<ApprovalStatus, string>> = {
+  pending: 'yellow',
+  approved: 'green',
+  rejected: 'red',
+  cancelled: 'red',
+};
 
 /**
  * sys_approval_request — Live approval instance.
@@ -356,7 +371,11 @@ export const SysApprovalRequest = ObjectSchema.create({
       // authored English label per entry lives beside it in
       // `APPROVAL_STATUS_LABELS` (#8543) — mapped here, never re-typed, so the
       // `en` bundle regenerates from the contract's own text.
-      APPROVAL_STATUSES.map((value) => ({ value, label: APPROVAL_STATUS_LABELS[value] })),
+      APPROVAL_STATUSES.map((value) => ({
+        value,
+        label: APPROVAL_STATUS_LABELS[value],
+        ...(APPROVAL_STATUS_COLORS[value] ? { color: APPROVAL_STATUS_COLORS[value] } : {}),
+      })),
       {
         label: 'Status',
         required: true,

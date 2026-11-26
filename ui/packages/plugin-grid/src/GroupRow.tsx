@@ -41,7 +41,8 @@ export interface GroupRowProps {
    * or the header and the cell under it disagree on one option's colour
    * (objectui#5183): prefer `getBadgeHexAppearance(color)` from
    * `@object-ui/fields` and use its `className`, falling back to
-   * `getBadgeColorClasses(color, value)` when it returns `undefined`. When
+   * `getBadgeColorClasses(color)` (the declared family, else the neutral
+   * badge) when it returns `undefined`. When
    * omitted, the label renders as plain text with a subtle muted background.
    */
   labelColorClass?: string;

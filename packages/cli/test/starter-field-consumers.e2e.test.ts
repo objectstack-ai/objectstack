@@ -41,7 +41,8 @@
  *
  * A zero alone cannot tell a placed field from a rule that never ran, or a
  * `--json` that stopped carrying warnings. So each leg whose starter places a
- * field then strips every `group` line from its `src/objects/*.object.ts` and
+ * field then strips every `group` line and every field group's `fields` list
+ * (#36945) from its `src/objects/*.object.ts` and
  * runs both commands again — with any view the STARTER ships unwired too, since
  * its columns display the same fields (#32152: the blank starter ships a list of
  * its sample object) — : each must now report `field-no-consumers`, and
@@ -98,10 +99,18 @@ type Gate = (typeof GATES)[number];
 
 /** A `group: '<key>',` line exactly as the starters write one. */
 const GROUP_LINE = /^[ \t]*group: '[a-z_][a-z0-9_]*',\r?\n/gm;
+/**
+ * A field group's own `fields: [...]` list, the other placement ADR-0085 §5
+ * allows: how the platform's Starter app, and so the blank starter, places
+ * every field (#36945). Stripped with the `group` lines, so the control
+ * un-places the fields whichever way the starter wrote them.
+ */
+const FIELD_GROUP_FIELDS = /, fields: \[[^\]\n]*\]/g;
 /** A views-barrel line wiring one view file, as `os g view` appends it. */
 const VIEW_EXPORT = /^export \{ default as \w+ \} from '\.\/[\w.-]+';$/;
 /** Whether an object source places any field in a group (non-global: `test` keeps no state). */
-const placesAField = (source: string): boolean => new RegExp(GROUP_LINE.source, 'm').test(source);
+const placesAField = (source: string): boolean =>
+  new RegExp(GROUP_LINE.source, 'm').test(source) || new RegExp(FIELD_GROUP_FIELDS.source).test(source);
 
 interface Run {
   code: number;
@@ -237,7 +246,7 @@ beforeAll(async () => {
     for (const file of readdirSync(objectsDir).filter((f) => f.endsWith('.object.ts'))) {
       const path = join(objectsDir, file);
       const before = readFileSync(path, 'utf8');
-      const after = before.replace(GROUP_LINE, '');
+      const after = before.replace(GROUP_LINE, '').replace(FIELD_GROUP_FIELDS, '');
       if (after === before) continue;
       writeFileSync(path, after);
       stripped += after;

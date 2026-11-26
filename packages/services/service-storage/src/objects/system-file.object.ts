@@ -168,7 +168,7 @@ export const SystemFile = ObjectSchema.create({
       required: true,
       readonly: true,
       options: [
-        { label: 'Pending Upload', value: 'pending' },
+        { label: 'Pending Upload', value: 'pending', color: 'yellow' },
         { label: 'Committed', value: 'committed' },
         { label: 'Deleted', value: 'deleted' },
       ],

@@ -415,6 +415,38 @@ describe('FilterValuePanel', () => {
   });
 });
 
+describe('FilterValuePanel — option chips are coloured only when declared (objectstack#36882)', () => {
+  it('an undeclared option chip is neutral (light and dark), a declared family keeps its classes', () => {
+    const field: ConditionField = {
+      value: 'stage',
+      label: 'Stage',
+      type: 'select',
+      options: [
+        // `won` and `critical` were coloured by the retired value table.
+        { value: 'won', label: 'Won' },
+        { value: 'critical', label: 'Critical', color: 'red' },
+      ],
+    };
+    render(
+      <FilterValuePanel
+        field={field}
+        row={{ id: 'r', field: 'stage', operator: 'in', value: [] }}
+        onChange={() => {}}
+      />,
+    );
+    const chip = (label: string) =>
+      Array.from(document.querySelectorAll<HTMLElement>('span.rounded-full')).find(
+        (el) => el.textContent?.trim() === label,
+      )!;
+    expect(chip('Won').className).toContain('bg-muted text-muted-foreground border-border');
+    expect(chip('Won').className).not.toMatch(
+      /(^|\s)(dark:)?(bg|text|border)-(gray|red|orange|yellow|green|blue|indigo|purple|pink)-\d/,
+    );
+    expect(chip('Critical').className).toContain('bg-red-50');
+    expect(chip('Critical').className).toContain('dark:bg-red-950/40');
+  });
+});
+
 describe('multi-value fields — the quick filter and the advanced panel offer only what the server accepts', () => {
   const OPTIONS = [
     { value: 'quality_lead', label: 'Quality lead' },

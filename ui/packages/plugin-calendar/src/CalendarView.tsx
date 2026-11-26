@@ -25,53 +25,56 @@ import {
 } from "@object-ui/components"
 import { createSafeTranslation, firstDayOfWeek, useDisplayLocale, type WeekdayIndex } from "@object-ui/i18n"
 import { getMonthDays, getWeekStart } from "./visibleDays"
+import { isTailwindColorToken } from "./eventColorToken"
 
 const DEFAULT_EVENT_COLOR = "bg-blue-100 text-blue-900 border border-blue-200"
 const STABLE_DEFAULT_DATE = new Date()
 
-// Curated 8-stop palette for categorical event colors. Soft tinted backgrounds
-// (`bg-*-100`) with darker readable text (`text-*-900`) keep the calendar
-// visually quiet — matching the same tonal range used by list/grid badges
-// (see `getBadgeColorClasses` in `@object-ui/fields`). Avoids the harsh,
-// over-saturated solid palette that competes with the rest of the chrome.
-const CATEGORICAL_PALETTE: ReadonlyArray<string> = [
-  "bg-blue-100 text-blue-900 border border-blue-200",
-  "bg-emerald-100 text-emerald-900 border border-emerald-200",
-  "bg-amber-100 text-amber-900 border border-amber-200",
-  "bg-rose-100 text-rose-900 border border-rose-200",
-  "bg-violet-100 text-violet-900 border border-violet-200",
-  "bg-cyan-100 text-cyan-900 border border-cyan-200",
-  "bg-orange-100 text-orange-900 border border-orange-200",
-  "bg-fuchsia-100 text-fuchsia-900 border border-fuchsia-200",
-]
+// The tint of each palette family an author can declare on an option
+// (`SelectOption.color`, the families `getBadgeColorClasses` in
+// `@object-ui/fields` knows). Soft tinted backgrounds (`bg-*-100`) with
+// darker readable text (`text-*-900`) keep the calendar visually quiet.
+const FAMILY_EVENT_COLORS: Readonly<Record<string, string>> = {
+  gray: "bg-gray-100 text-gray-900 border border-gray-200",
+  red: "bg-red-100 text-red-900 border border-red-200",
+  orange: "bg-orange-100 text-orange-900 border border-orange-200",
+  yellow: "bg-yellow-100 text-yellow-900 border border-yellow-200",
+  green: "bg-green-100 text-green-900 border border-green-200",
+  blue: DEFAULT_EVENT_COLOR,
+  indigo: "bg-indigo-100 text-indigo-900 border border-indigo-200",
+  purple: "bg-purple-100 text-purple-900 border border-purple-200",
+  pink: "bg-pink-100 text-pink-900 border border-pink-200",
+}
 
-// Hex colors (#abc, #aabbcc) are treated as direct values via inline style.
+// Colour literals painted as direct values via inline style: hex (#abc,
+// #aabbcc, #aabbccdd) and the rgb() / hsl() functions (with their `a` forms),
+// the literals `colorField`'s ladder hands on (objectstack#36882, S5).
 const HEX_COLOR_RE = /^#([0-9a-f]{3}|[0-9a-f]{6}|[0-9a-f]{8})$/i
-// Recognize tokens that already look like Tailwind color utilities so we
-// don't re-hash them. Covers `bg-*-500`, `bg-blue-500`, `text-*`, etc.
-const TAILWIND_TOKEN_RE = /(^|\s)(bg|text|from|to|via)-/
+const COLOR_FUNCTION_RE = /^(rgb|hsl)a?\(.*\)$/i
 
 /**
- * Resolve a raw `event.color` value into a stable Tailwind class string.
+ * Resolve a raw `event.color` value into a Tailwind class string.
  *
- * - `#aabbcc` and `#abc` are returned as-is (rendered via inline style).
+ * - `#aabbcc`, `#abc`, `rgb(…)` and `hsl(…)` are returned as-is (rendered via
+ *   inline style).
  * - Strings that already look like Tailwind utilities (e.g. `bg-blue-500
  *   text-white`) pass through unchanged.
- * - Any other value (e.g. a category label like `"email"` or `"digital"`)
- *   is hashed deterministically onto the 8-stop palette so the same value
- *   always gets the same color — matching how Notion/Linear assign labels.
- * - `undefined` / `null` / empty → `DEFAULT_EVENT_COLOR`.
+ * - A palette family name (`green`, `red`, …) — the colour an author declares
+ *   on an option — paints that family's tint.
+ * - Anything else (e.g. a category label like `"email"` that no option
+ *   colours) and `undefined` / `null` / empty → `DEFAULT_EVENT_COLOR`.
+ *
+ * No colour is derived from a value: an event is coloured if and only if a
+ * colour was declared for it (objectstack#36882, ruled option A).
  */
 function resolveEventColor(raw: string | undefined | null): { className: string; inlineColor?: string } {
   if (!raw) return { className: DEFAULT_EVENT_COLOR }
-  if (HEX_COLOR_RE.test(raw)) return { className: "text-white", inlineColor: raw }
-  if (TAILWIND_TOKEN_RE.test(raw)) return { className: raw }
-  // Categorical fallback: deterministic hash over the string.
-  let hash = 0
-  for (let i = 0; i < raw.length; i++) {
-    hash = ((hash << 5) - hash + raw.charCodeAt(i)) | 0
-  }
-  return { className: CATEGORICAL_PALETTE[Math.abs(hash) % CATEGORICAL_PALETTE.length] }
+  if (HEX_COLOR_RE.test(raw) || COLOR_FUNCTION_RE.test(raw)) return { className: "text-white", inlineColor: raw }
+  if (isTailwindColorToken(raw)) return { className: raw }
+  const family = Object.prototype.hasOwnProperty.call(FAMILY_EVENT_COLORS, raw)
+    ? FAMILY_EVENT_COLORS[raw]
+    : undefined
+  return { className: family ?? DEFAULT_EVENT_COLOR }
 }
 
 // Default English translations for fallback when I18nProvider is not available
