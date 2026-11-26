@@ -1054,7 +1054,6 @@ export type {
 
 export {
   validateAiToolReferences,
-  validateAiSkillContext,
   AI_SKILL_TOOL_UNRESOLVED,
   AI_SKILL_CONTEXT_UNKNOWN,
   AI_SKILL_CONTEXT_OMITTED,
