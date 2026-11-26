@@ -20,6 +20,7 @@ import { FUNCTIONAL_COMPLETENESS_RULES } from '@objectstack/spec/kernel';
 import { runAuthoringRules, splitBySeverity } from './authoring-rules.js';
 import { explainRule } from './rule-explanations.js';
 import { validateFunctionalCompleteness } from './validate-functional-completeness.js';
+import { runRuntimeAuthoringRules } from './runtime-gate.js';
 
 const bareSummary = { type: 'summary' };
 
@@ -481,5 +482,26 @@ describe('every completeness rule id has an `os explain` entry carrying what its
     expect(explanation, `no \`os explain ${rule}\` entry`).toBeDefined();
     const text = explanation!.paragraphs.join('\n');
     for (const fact of MOVED[rule]) expect(text, `${rule} explanation names ${fact}`).toContain(fact);
+  });
+});
+
+// #35143: the Data model family's line "a formula reading a summary field that has no
+// configuration" is this rule's. The summary the formula reads is refused at its root.
+describe('a formula reading a summary with no configuration — covered by field/summary-without-operations', () => {
+  it('the gate refuses the bare summary the formula reads, so the formula never ships reading a zero', () => {
+    const item = {
+      name: 'venue',
+      label: 'Venue',
+      fields: {
+        name: { type: 'text', label: 'Name' },
+        capacity: { type: 'number', label: 'Capacity' },
+        booked: { type: 'summary', label: 'Booked' },
+        occupancy: { type: 'formula', label: 'Occupancy', expression: 'record.booked / record.capacity' },
+      },
+    };
+    const verdict = runRuntimeAuthoringRules({ type: 'object', item, context: { objects: [] } });
+    const hit = verdict.errors.filter((f) => f.rule === 'field/summary-without-operations');
+    expect(hit).toHaveLength(1);
+    expect(hit[0].path).toContain('booked');
   });
 });
