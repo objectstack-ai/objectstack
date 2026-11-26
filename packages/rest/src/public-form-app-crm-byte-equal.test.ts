@@ -14,13 +14,20 @@
  */
 import { afterAll, describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { ObjectQL } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
 import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
 import { SysMetadataAuditObject, SysMetadataCommitObject, SysMetadataHistoryObject, SysMetadataObject } from '@objectstack/metadata-core';
 import { RestServer } from './rest-server';
-import * as CRM_OBJECTS from '../../../examples/app-crm/src/objects/index';
-import { LeadViews } from '../../../examples/app-crm/src/views/lead.view';
+
+// The example's two sources, loaded by path: a static import would put them in
+// this package's `tsconfig.test.json` zone, whose `rootDir` is `packages/`.
+// Both are declared as `@objectstack/rest#test:repo` inputs in the cross-package test-input registry.
+const CRM_OBJECTS_SOURCE = new URL('../../../examples/app-crm/src/objects/index.ts', import.meta.url);
+const CRM_LEAD_VIEWS_SOURCE = new URL('../../../examples/app-crm/src/views/lead.view.ts', import.meta.url);
+const CRM_OBJECTS: Record<string, unknown> = await import(fileURLToPath(CRM_OBJECTS_SOURCE));
+const { LeadViews } = (await import(fileURLToPath(CRM_LEAD_VIEWS_SOURCE))) as { LeadViews: unknown };
 
 const BEFORE = JSON.parse(readFileSync(new URL('./form-old-shape-before.json', import.meta.url), 'utf8'));
 
