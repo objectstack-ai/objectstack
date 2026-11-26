@@ -458,13 +458,21 @@ export interface SectionedGridLayout {
   columns: 1 | 2 | 3 | 4;
   /** The field container's grid classes; `undefined` for a one-column form. */
   fieldContainerClass: string | undefined;
+  /**
+   * How many fields per row ONE section draws, given its DECLARED `columns`
+   * (`undefined` when none): its own count, else the form's, else the
+   * undeclared count, clamped to {@link columns}. A host that draws each
+   * section on a grid of its own reads this instead of the shared field grid.
+   */
+  sectionColumns: (sectionColumns?: unknown) => number;
   /** Lay one section's fields out at that section's DECLARED `columns` (`undefined` when none). */
   layOut: (fields: FormField[], sectionColumns?: unknown) => FormField[];
 }
 
 /**
  * The ONE layout rule of a sectioned form — `ModalForm`, `ObjectForm`,
- * `TabbedForm` and `WizardForm` all call it (objectui#12548).
+ * `TabbedForm` and `WizardForm` all call it (objectui#12548), and the
+ * console's named and public form page reads its {@link SectionedGridLayout.sectionColumns}.
  *
  * Every section shares the form's single field grid (one form, one
  * react-hook-form instance — #2153/#2959), and every authored section must
@@ -518,6 +526,7 @@ export function sectionedGridLayout(
     return {
       columns: grid,
       fieldContainerClass: containerGridColsFor(grid),
+      sectionColumns: density,
       layOut: (fields, declared) =>
         grid > 1 ? applyAutoColSpan(fields, grid, density(declared)) : fields,
     };
@@ -526,6 +535,7 @@ export function sectionedGridLayout(
   return {
     columns: grid,
     fieldContainerClass: TWELVE_TRACK_GRID_COLS,
+    sectionColumns: density,
     layOut: (fields, declared) => {
       const d = density(declared);
       return fields.map((field) => {
