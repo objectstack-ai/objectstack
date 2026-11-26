@@ -173,10 +173,12 @@ export function refusalUserMessage(body: unknown): string | undefined {
  * `ActionResult.refusals` carries them: `error.details.refusals`, each element
  * `{ reason, message }` with both members strings, the reason's sentence
  * already rendered in the request's locale. The list is read whole or not at
- * all — an empty list, or one with any element of another shape, is no list —
- * the same rule the server's own reader applies before it answers one, so a
- * list this returns is one the server built. Each element is copied to
- * exactly those two members.
+ * all: an empty list, or one with any element of another shape, is no list.
+ * That is the element rule the server's own reader (`declaredRefusalLines`)
+ * applies before it answers one; the server also requires a declared
+ * `userMessage` beside the list, which this reader does not re-check because
+ * it reads only what the server answered. Each element is copied to exactly
+ * those two members.
  */
 export function refusalLines(body: unknown): ActionRefusalLine[] | undefined {
     const b = body as { error?: { details?: { refusals?: unknown } } } | null | undefined;
