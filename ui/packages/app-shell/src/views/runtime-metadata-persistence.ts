@@ -39,6 +39,7 @@
  */
 
 import { stripReadDecorations } from '@objectstack/spec/kernel';
+import { MetadataConflictErrorSchema } from '@objectstack/spec/api';
 import { emitMetadataRefresh } from '../assistant/assistantBus.js';
 import { slugify } from './metadata-admin/createDerive.js';
 import {
@@ -576,6 +577,17 @@ function receiptVersion(receipt: unknown): string | undefined {
   return typeof version === 'string' && version.length > 0 ? version : undefined;
 }
 
+/**
+ * objectstack#36350 — a publish refused `409 METADATA_CONFLICT` whose
+ * `currentVersion` is `null` (read through the spec's
+ * `MetadataConflictErrorSchema`): the pinned draft is no longer pending, so
+ * there is nothing left to publish or to review.
+ */
+function isNothingPendingConflict(err: unknown): boolean {
+  const body = MetadataConflictErrorSchema.safeParse((err as { body?: unknown } | null | undefined)?.body);
+  return body.success && body.data.currentVersion === null;
+}
+
 /** What {@link saveAndPublishRuntimeMetadata} did. */
 export type SaveAndPublishOutcome = 'published' | 'pending-draft';
 
@@ -594,7 +606,9 @@ export type SaveAndPublishOutcome = 'published' | 'pending-draft';
  * receipt's version, `draftVersion`). When another writer's draft write lands
  * between the two, the server refuses the publish `409 METADATA_CONFLICT` and
  * publishes nothing; the moved draft is left pending, never discarded, and
- * this resolves `'pending-draft'`.
+ * this resolves `'pending-draft'`. When the refusal says no draft is pending
+ * any more (`currentVersion: null`: another writer published or discarded it),
+ * there is nothing to review, and the refusal is rethrown.
  *
  * Any other publish refusal leaves no draft of this call behind: the draft
  * it wrote is discarded (it was the only one, by the pin) and the refusal is
@@ -641,12 +655,16 @@ export async function saveAndPublishRuntimeMetadata(
     else await ctx.metadataClient.publish(type, name);
   } catch (err) {
     if (isDraftVersionConflict(err)) {
+      invalidateViewCaches(type, name, ctx);
+      announceDraftLedgerWrite();
+      // `currentVersion: null`: no draft is pending any more — another writer
+      // published or discarded it inside the window. There is no draft to
+      // review, so the refusal itself is the answer, rethrown as it came.
+      if (isNothingPendingConflict(err)) throw err;
       // The draft moved: it now holds the other writer's change on top of
       // this call's body, so it is no longer this call's own — ⛔ never
       // discarded here. It stays pending for the draft bar's review, exactly
       // as a draft found pending before the write does.
-      invalidateViewCaches(type, name, ctx);
-      announceDraftLedgerWrite();
       return 'pending-draft';
     }
     try {

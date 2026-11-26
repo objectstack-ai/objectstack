@@ -967,6 +967,19 @@ export class ProtocolHistoryAndPublishFacet {
         // active row; the two judge different rows and may be sent together.
         // Absent, any pending draft is promoted, as before.
         if (request.draftVersion !== undefined) {
+            // Off-type from an in-process caller (`null`, a number) is no pin:
+            // `storedParentForToken` reads `null` as "nothing pinned", which
+            // would publish unpinned exactly the draft the caller meant to
+            // guard. The REST door refuses it `400` before it gets here.
+            if (typeof request.draftVersion !== 'string') {
+                const err: any = new Error(
+                    `${request.type}/${request.name}: draftVersion must be a string — the version token of the draft `
+                        + `this publish promotes. Leave it out to publish whichever draft is pending.`,
+                );
+                err.code = 'VALIDATION_ERROR';
+                err.status = 400;
+                throw err;
+            }
             try {
                 await host.storedParentForToken(
                     { type: singularType, name: request.name, org: 'env' },

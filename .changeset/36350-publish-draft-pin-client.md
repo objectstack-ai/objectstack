@@ -5,7 +5,7 @@
 feat(data-objectstack): `MetadataClient.publish` sends `draftVersion`; `updateView` pins its draft write to the draft it read
 
 Clause-②: yes (widening)
-Metadata-protocol: none
+Metadata-protocol: added
 
 `MetadataClient.publish(type, name, options)` takes an optional `draftVersion` and sends it in the publish body beside `message`, pinning the promotion to that draft (`409 METADATA_CONFLICT` when the draft moved). Omitted, the body carries no such key and the publish is unpinned, as before.
 

@@ -64,6 +64,15 @@ export interface RuntimeDraftBarProps {
    * dependence on the fire-and-forget write's timing.
    */
   savedSignal?: number;
+  /**
+   * objectstack#36350 — the version the host's own save returned (its
+   * receipt's `version`), given with each {@link savedSignal} bump. The bar's
+   * Publish after that save is pinned to it (`draftVersion`): the draft the
+   * bar now shows is the one that save wrote, so a draft another writer
+   * changed since is refused instead of published on their behalf. Absent (a
+   * host that does not know it), the Publish after the save goes unpinned.
+   */
+  savedDraftVersion?: string;
 }
 
 /**
@@ -90,6 +99,7 @@ export function RuntimeDraftBar({
   onResume,
   onAfterChange,
   savedSignal,
+  savedDraftVersion,
 }: RuntimeDraftBarProps) {
   const locale = useMetadataLocale();
   const refusalTitles = useRefusalTitles();
@@ -146,12 +156,14 @@ export function RuntimeDraftBar({
     if (savedSignal === lastSavedSignal.current) return;
     lastSavedSignal.current = savedSignal;
     if (savedSignal) {
-      // The host's own save moved the draft past the one this bar read, and
-      // the bar has not read the new one: its Publish goes unpinned, as before.
-      shownDraftVersionRef.current = undefined;
+      // The host's own save moved the draft past the one this bar read: the
+      // draft it shows now is that save's, pinned by that save's receipt. ⛔
+      // Never a re-read here: after another writer's write it would pin THEIR
+      // draft, which this bar never showed.
+      shownDraftVersionRef.current = savedDraftVersion;
       setHasDraft(true);
     }
-  }, [savedSignal]);
+  }, [savedSignal, savedDraftVersion]);
 
   const handlePublish = useCallback(async () => {
     if (!name) return;

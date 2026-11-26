@@ -141,7 +141,11 @@ async function boot() {
         return (rows ?? []).map((r: any) => JSON.parse(String(r.metadata)).label as string);
     };
 
-    return { protocol, layers, read, readDraft, save, publish, studioSave, stored };
+    /** The decision-audit rows of the item, as stored. */
+    const audits = async () =>
+        (await engine.find('sys_metadata_audit', { where: { type: 'view', name: 'case_grid' } })) ?? [];
+
+    return { protocol, layers, read, readDraft, save, publish, studioSave, stored, audits };
 }
 
 const ok = (res: any) => {
@@ -328,6 +332,9 @@ describe('[#36350] the publish door\'s draft pin (`draftVersion`)', () => {
         // Nothing promoted: the live row is untouched and the rename stays a pending draft.
         expect(await h.stored('active')).toEqual(['live']);
         expect(await h.stored('draft')).toEqual(['renamed, meant as a draft']);
+        // The refusal leaves its decision-audit row, as the other publish conflicts do.
+        const denied = (await h.audits()).filter((a: any) => a.code === 'metadata_conflict'); // adr0112-ok: D6b persisted audit column
+        expect(denied.map((a: any) => [a.operation, a.outcome])).toEqual([['publish', 'denied']]);
     }, 60_000);
 
     it('acceptance: an UNPINNED updateView draft write inside the window is refused the same way', async () => {
@@ -380,6 +387,19 @@ describe('[#36350] the publish door\'s draft pin (`draftVersion`)', () => {
         expect(refused.currentVersion).toBe(saved.loaded);
         expect(await h.stored('active')).toEqual(['live']);
         expect(await h.stored('draft')).toEqual(['save to this view']);
+    }, 60_000);
+
+    it('in process, an off-type `draftVersion` is refused 400 VALIDATION_ERROR by the protocol, never read as unpinned', async () => {
+        const h = await boot();
+        ok(await h.save(view('live')));
+        ok(await h.save(view('pending'), { mode: 'draft' }));
+        const refused: any = await h.protocol
+            .publishMetaItem({ type: 'view', name: 'case_grid', draftVersion: null } as never)
+            .then(() => null, (err: unknown) => err);
+        expect(refused?.code).toBe('VALIDATION_ERROR');
+        expect(refused?.status).toBe(400);
+        expect(await h.stored('active')).toEqual(['live']);
+        expect(await h.stored('draft')).toEqual(['pending']);
     }, 60_000);
 
     for (const [label, draftVersion] of Object.entries({ 'a number': 42, 'null': null, 'an object': { v: 'x' } })) {

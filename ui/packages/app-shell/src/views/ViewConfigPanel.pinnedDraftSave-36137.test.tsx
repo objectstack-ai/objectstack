@@ -28,7 +28,14 @@ import { describe, it, expect, vi } from 'vitest';
 import { render, screen, fireEvent, act, waitFor, cleanup } from '@testing-library/react';
 import { MetadataClient } from '@object-ui/data-objectstack';
 
-vi.mock('./RuntimeDraftBar', () => ({ RuntimeDraftBar: () => null }));
+// The draft bar renders nothing here; its props are kept so a pin can read what the panel hands it.
+const bar = vi.hoisted(() => ({ props: null as Record<string, unknown> | null }));
+vi.mock('./RuntimeDraftBar', () => ({
+  RuntimeDraftBar: (props: Record<string, unknown>) => {
+    bar.props = props;
+    return null;
+  },
+}));
 
 // One control: an edit of the view's label, as the real inspector's label field patches it.
 vi.mock('./metadata-admin/inspectors/ViewVariantInspector', () => ({
@@ -422,5 +429,39 @@ describe('a view create carries the first-write pin (objectstack#36137)', () => 
     const env = viewEnvelope(OBJECT, { type: 'grid', columns: ['name'] }, { name: 'mine', label: 'Mine' });
     await expect(createRuntimeMetadata('view', env.name, env, { metadataClient: door.client })).resolves.toBe(env.name);
     expect(door.puts).toEqual([expect.objectContaining({ name: `${OBJECT}.mine`, ifNoneMatch: '*', status: 200 })]);
+  });
+});
+
+/**
+ * objectstack#36350 (ruling 7168616260 item 3) — the draft bar's Publish after
+ * the panel's own save is pinned to the draft that save wrote: the panel hands
+ * the bar that save's receipt version (`savedDraftVersion`, the `If-Match` its
+ * guard now holds) with the `savedSignal` bump. Another writer's draft write
+ * between the save and the Publish then moves the draft away from it, and the
+ * door refuses the Publish (`RuntimeDraftBar.test.tsx` pins the bar's half).
+ */
+describe('the draft bar\'s Publish after a view settings save is pinned to that save\'s receipt (objectstack#36350)', () => {
+  it('each landed save hands the bar its own receipt version', async () => {
+    const door = viewDoor();
+    const { outcomes } = mountPanel(door);
+    await loadedAndEdited();
+    await act(async () => {
+      fireEvent.click(saveButton());
+    });
+    await waitFor(() => expect(outcomes).toEqual(['saved']));
+    const first = door.draftOf(VIEW_ID)!.version;
+    await waitFor(() => expect(bar.props?.savedSignal).toBe(1));
+    expect(bar.props?.savedDraftVersion).toBe(first);
+
+    fireEvent.click(screen.getByTestId('mock-inspector-label'));
+    await act(async () => {
+      fireEvent.click(saveButton());
+    });
+    await waitFor(() => expect(outcomes).toEqual(['saved', 'saved']));
+    const second = door.draftOf(VIEW_ID)!.version;
+    expect(second).not.toBe(first);
+    await waitFor(() => expect(bar.props?.savedSignal).toBe(2));
+    expect(bar.props?.savedDraftVersion).toBe(second);
+    cleanup();
   });
 });

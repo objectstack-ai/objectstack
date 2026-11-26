@@ -392,7 +392,13 @@ describe('saveAndPublishRuntimeMetadata — a confirmed save everyone sees at on
  */
 describe('the publish is pinned to the draft it means (objectstack#36350)', () => {
   const RECEIPT = { success: true, version: 'hmac-sha256:draft-v1' };
-  const moved = () => Object.assign(new Error('draft changed'), { status: 409, code: 'METADATA_CONFLICT' });
+  const refusal = (currentVersion: string | null) =>
+    Object.assign(new Error('draft changed'), {
+      status: 409,
+      code: 'METADATA_CONFLICT',
+      body: { error: 'view/task.all draft changed', code: 'METADATA_CONFLICT', currentVersion },
+    });
+  const moved = () => refusal('hmac-sha256:moved');
 
   it('Save to this view sends its own draft receipt\'s version as `draftVersion`', async () => {
     const metadataClient = makeMetadataClient();
@@ -407,6 +413,16 @@ describe('the publish is pinned to the draft it means (objectstack#36350)', () =
     metadataClient.publish.mockRejectedValue(moved());
     await expect(saveAndPublishRuntimeMetadata('view', 'task.all', {}, { metadataClient })).resolves.toBe('pending-draft');
     // The draft now holds the other writer's change: ⛔ never discarded on their behalf.
+    expect(metadataClient.reset).not.toHaveBeenCalled();
+  });
+
+  it('a pinned draft no longer pending (`currentVersion: null`) rethrows the refusal: there is no draft to review', async () => {
+    const metadataClient = makeMetadataClient();
+    metadataClient.save.mockResolvedValue(RECEIPT);
+    const gone = refusal(null);
+    metadataClient.publish.mockRejectedValue(gone);
+    await expect(saveAndPublishRuntimeMetadata('view', 'task.all', {}, { metadataClient })).rejects.toBe(gone);
+    // Nothing of this call's is left to take back: the draft is no longer there.
     expect(metadataClient.reset).not.toHaveBeenCalled();
   });
 
