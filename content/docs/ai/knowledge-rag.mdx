@@ -113,6 +113,29 @@ const hits = await knowledge.search('notice period', {
 
 An adapter that reads the scope filters before it ranks, so the `topK` hits all come from inside the scope. Whatever the adapter does, the service drops any hit outside the scope, so an adapter that ignores it may answer fewer than `topK`. A source the scope does not reach is not searched, and `scope: []` answers nothing, never everything. A scope narrows what is searched; each hit is still re-checked against the caller, so it never shows a record the caller could not read. Bounds, the parent-link rules and what an adapter must do are in [the protocol's record scope](/docs/protocol/knowledge#record-scope).
 
+## The `search_knowledge` tool
+
+An AI client searches through one tool, `search_knowledge`, defined once by the knowledge service. The MCP door (HTTP and stdio) and the in-product agent serve that one definition unchanged, so every client is offered the same arguments and gets the same answer. It searches only sources whose `aiExposed` is not `false`, and reads as the person asking.
+
+| Argument | What it does |
+|:--|:--|
+| `query` | What to look for, in plain words. Required. |
+| `sourceIds` | Only these sources, by the ids every answer lists in `sources`. Omit to search them all. |
+| `topK` | At most this many hits, 1 to 20, default 5. Counts records or groups in the two modes below. |
+| `granularity` | `"chunk"` (the default): one hit per passage. `"record"`: one hit per record, its best passage. |
+| `groupBy` | One hit per value of a field the source lists in `metadataFields`, such as `policy`: "which policies", not "which clauses". Implies `"record"`; refused with `"chunk"`. A source that does not list the field answers nothing for that call. |
+| `scope` | Only inside these records: a list of `{ object, ids }`, as `KnowledgeSearchOptions.scope` reads it above. At most 10 entries of at most 500 ids. |
+
+Each hit carries `sourceId`, `documentId`, `title`, `snippet`, `score`, and for an indexed record `record: { object, id }`, which the record tools read. It also carries `headingPath`, the headings its passage sits under, where the document has headings, and under `groupBy` the group's value as `groupValue`. The answer also lists the searchable `sources`, and in `refused` any source that could not be searched.
+
+The tool is stricter than the service in a few places, so that a mistake is reported instead of being answered as "nothing matched":
+
+- An empty `scope`, an entry with no ids, and an empty `sourceIds` are refused, not answered with no hits.
+- An object name, record id or field name over 255 characters, or one holding a NUL character, is refused.
+- Each malformed argument is refused `VALIDATION_ERROR` (400), naming the argument.
+
+The answer never says how many hits the permission re-check or the scope removed. A `scope` entry or `groupBy` field that only a withheld source would answer gets the same empty answer as one that no source answers, so the answer never shows that a withheld source exists.
+
 ## What you get for free
 
 - **Permission-aware retrieval.** Every hit with a `sourceRecordId` is re-checked against the caller's `ExecutionContext` via `IDataEngine` — the same RLS that gates plain ObjectQL queries. A salesperson asking "find proposals about ACME" only sees the proposals they could already read directly. Before a source is searched, the caller's field-level read rules and the object's API exposure are asked too: a source serving a field the caller may not query is not searched for them (see [the protocol's source admission](/docs/protocol/knowledge#source-admission-exposure-and-field-level-rules)). File / HTTP hits pass through (ACL is the adapter's problem).

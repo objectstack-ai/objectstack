@@ -14,10 +14,23 @@
  * in `prompts/list` where the tool is served and withheld, with a debug line
  * naming the tool, where it is not; and the stdio bridge runs each call as the
  * principal it resolves for that call.
+ *
+ * And over the knowledge service's REAL definition and executor (ADR-0161 K9,
+ * rules 1, 2 and 4): `tools/list` over HTTP and over stdio answer the same
+ * `search_knowledge` definition, byte for byte, carrying `scope`,
+ * `granularity` and `groupBy` (the definition converts to the SDK's input
+ * schema whole: a definition that did not would register no tool at all); and
+ * a call over either door answers one hit per record, one per group with its
+ * value, and only the scoped records' hits.
  */
 
 import { describe, it, expect, vi } from 'vitest';
+import { Client } from '@modelcontextprotocol/sdk/client/index.js';
+import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import { MCP_OAUTH_SCOPE_DATA_READ, MCP_OAUTH_SCOPE_DATA_WRITE } from '@objectstack/spec/ai';
+import type { KnowledgeHit, KnowledgeSource, ObjectKnowledgeSource } from '@objectstack/spec/ai';
+import type { IDataEngine, IKnowledgeAdapter } from '@objectstack/spec/contracts';
+import { KnowledgeService, getKnowledgeToolDefinitions, recordToDocument } from '@objectstack/service-knowledge';
 import { MCPServerRuntime } from './mcp-server-runtime.js';
 import { SEARCH_KNOWLEDGE_TOOL_NAME, type McpDataBridge } from './mcp-http-tools.js';
 import type { McpSkillBridge } from './skill-prompts.js';
@@ -233,5 +246,124 @@ describe('[ADR-0149 D2] search_knowledge on the stdio bridge', () => {
     expect(bridge.knowledgeToolDefinitions!()).toEqual([DEFINITION]);
     expect(await bridge.searchKnowledge!({ query: 'refund' })).toBe(ANSWER);
     expect(searchKnowledge).toHaveBeenCalledWith({ query: 'refund' }, principal);
+  });
+});
+
+describe('[ADR-0161 K9] search_knowledge over the real definition — every transport serves it unchanged', () => {
+  type Row = Record<string, unknown> & { id: string };
+  const CLAUSES: Row[] = [
+    { id: 'c1', body: 'annual leave', policy: 'P_leave' },
+    { id: 'c2', body: 'sick leave', policy: 'P_leave' },
+    { id: 'c3', body: 'travel', policy: 'P_travel' },
+  ];
+  const SOURCE: KnowledgeSource = {
+    id: 'clauses',
+    label: 'Clauses',
+    adapter: 'memory',
+    source: { kind: 'object', object: 'clause', contentFields: ['body'], metadataFields: ['policy'] } as ObjectKnowledgeSource,
+  };
+
+  function indexHit(row: Row, n: number, score: number): KnowledgeHit {
+    const doc = recordToDocument(SOURCE, SOURCE.source as ObjectKnowledgeSource, row);
+    return {
+      chunkId: `${doc.id}#${n}`, documentId: doc.id, sourceId: SOURCE.id, sourceRecordId: row.id,
+      score, snippet: `${row.body as string} (${n})`, metadata: doc.metadata, docHash: doc.docHash,
+    };
+  }
+
+  /** A stdio bridge over a real knowledge service: one clause source, an adapter ranking the index's hits, an engine over CLAUSES. */
+  function realBridge(): McpDataBridge {
+    const corpus = [indexHit(CLAUSES[0], 0, 0.9), indexHit(CLAUSES[0], 1, 0.8), indexHit(CLAUSES[1], 0, 0.7), indexHit(CLAUSES[2], 0, 0.6)];
+    const adapter = {
+      id: 'memory',
+      upsert: async () => undefined,
+      delete: async () => undefined,
+      search: async (_q: string, opts: { topK: number }) => corpus.slice(0, opts.topK),
+    } as unknown as IKnowledgeAdapter;
+    const matches = (row: Row, where: Record<string, unknown> = {}): boolean =>
+      Object.entries(where).every(([k, v]) => {
+        if (k === '$and') return (v as Record<string, unknown>[]).every((w) => matches(row, w));
+        if (v !== null && typeof v === 'object') return (v as { $in: string[] }).$in.includes(row[k] as string);
+        return row[k] === v;
+      });
+    const engine = {
+      find: async (_object: string, q: { where?: Record<string, unknown>; fields?: string[] }) =>
+        CLAUSES.filter((r) => matches(r, q.where))
+          .map((r) => (q.fields ? Object.fromEntries(q.fields.filter((f) => f in r).map((f) => [f, r[f]])) : { ...r })),
+    } as unknown as IDataEngine;
+    const service = new KnowledgeService({ dataEngine: engine, logger: { warn: () => undefined, debug: () => undefined } });
+    service.registerAdapter('memory', adapter);
+    service.registerSource(SOURCE);
+    return createStdioDataBridge({
+      engine: {} as never,
+      metadataService: { list: async () => [], getObject: async () => undefined } as never,
+      resolvePrincipal: async () => ({ userId: 'u_key_owner', isSystem: false }) as never,
+      knowledgeTools: service,
+    });
+  }
+
+  async function overStdio<T>(bridge: McpDataBridge, use: (client: Client) => Promise<T>): Promise<T> {
+    const runtime = new MCPServerRuntime({ name: 't', version: '1.0.0' });
+    runtime.bridgeDataTools(bridge);
+    const [clientSide, serverSide] = InMemoryTransport.createLinkedPair();
+    await runtime.server.connect(serverSide);
+    const client = new Client({ name: 't', version: '1.0.0' });
+    await client.connect(clientSide);
+    try {
+      return await use(client);
+    } finally {
+      await client.close();
+    }
+  }
+
+  async function callBoth(args: Record<string, unknown>) {
+    const http = (await callTool(realBridge(), args)).result!;
+    const stdio = (await overStdio(realBridge(), (c) => c.callTool({ name: SEARCH_KNOWLEDGE_TOOL_NAME, arguments: args }))) as {
+      content: Array<{ text: string }>;
+      isError?: boolean;
+    };
+    expect(http.isError).toBeFalsy();
+    expect(stdio.isError).toBeFalsy();
+    expect(stdio.content[0].text).toBe(http.content[0].text);
+    return JSON.parse(http.content[0].text) as { hits: Array<{ record?: { id: string }; groupValue?: unknown }> };
+  }
+
+  it('tools/list over HTTP and over stdio answer byte-identical definitions, carrying scope, granularity and groupBy', async () => {
+    const http = knowledgeTool(await listTools(realBridge()));
+    const stdio = knowledgeTool((await overStdio(realBridge(), (c) => c.listTools())).tools as ListedTool[]);
+    expect(http).toBeDefined();
+    expect(JSON.stringify(stdio)).toBe(JSON.stringify(http));
+    const [definition] = getKnowledgeToolDefinitions();
+    expect(http!.description).toBe(definition.description);
+    expect(Object.keys(http!.inputSchema.properties).sort()).toEqual(['granularity', 'groupBy', 'query', 'scope', 'sourceIds', 'topK']);
+    // The nested scope schema reaches the client whole, bounds included.
+    expect(http!.inputSchema.properties.scope).toMatchObject({
+      type: 'array', minItems: 1, maxItems: 10,
+      items: { type: 'object', required: ['object', 'ids'], additionalProperties: false, properties: { ids: { maxItems: 500 } } },
+    });
+    expect(http!.inputSchema.properties.granularity.enum).toEqual(['chunk', 'record']);
+  });
+
+  it("granularity 'record' answers one hit per record over both doors", async () => {
+    const answer = await callBoth({ query: 'leave', granularity: 'record' });
+    expect(answer.hits.map((h) => h.record?.id)).toEqual(['c1', 'c2', 'c3']);
+  });
+
+  it('groupBy answers one hit per group, with its value, over both doors', async () => {
+    const answer = await callBoth({ query: 'leave', groupBy: 'policy' });
+    expect(answer.hits.map((h) => [h.record?.id, h.groupValue])).toEqual([['c1', 'P_leave'], ['c3', 'P_travel']]);
+  });
+
+  it('scope answers only the named records over both doors', async () => {
+    const answer = await callBoth({ query: 'leave', scope: [{ object: 'clause', ids: ['c3'] }] });
+    expect(answer.hits.map((h) => h.record?.id)).toEqual(['c3']);
+  });
+
+  it('a scope past its bound is refused before the bridge is asked', async () => {
+    const bridge = realBridge();
+    const search = vi.spyOn(bridge, 'searchKnowledge');
+    const json = await callTool(bridge, { query: 'q', scope: Array.from({ length: 11 }, () => ({ object: 'clause', ids: ['c1'] })) });
+    expect(Boolean(json.error) || json.result?.isError === true).toBe(true);
+    expect(search).not.toHaveBeenCalled();
   });
 });
