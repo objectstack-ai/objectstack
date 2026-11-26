@@ -255,6 +255,20 @@ describe('a build that stalls is cancelled at the bound', () => {
     expect(calls.completeBuild).toBe(1);
   });
 
+  it('a call outside the page loop that never answers (here completeBuild) is cancelled at the bound too', async () => {
+    vi.useFakeTimers();
+    const db = makeEngine(rows(10));
+    const { adapter } = makeAdapter();
+    adapter.completeBuild = () => new Promise<void>(() => {});
+    const { lock, state } = makeLock();
+    const { service } = makeService(db.engine, adapter, lock);
+
+    const pending = service.rebuildSource('kb', { trigger: 'operator' });
+    await vi.advanceTimersByTimeAsync(BUILD_STALL_LIMIT_MS + 1_000);
+    expect((await pending).status).toBe('timed-out');
+    expect(state.released).toBe(1);
+  });
+
   it('applies with no cluster service too (one node): the bound needs no lock', async () => {
     vi.useFakeTimers();
     const db = makeEngine(rows(10));
