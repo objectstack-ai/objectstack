@@ -28,7 +28,6 @@ import {
   SECURITY_CROSS_SET_FIELD_REOPEN,
   SECURITY_MASTER_DETAIL_UNGRANTED,
   SECURITY_PRIVATE_NO_READSCOPE,
-  SECURITY_SUPERUSER_FIELD_MASK_INERT,
   SECURITY_UPDATE_POLICY_NO_CHECK,
   validateSecurityPosture,
   type SecurityFinding,
@@ -146,7 +145,6 @@ const ADVISORY_RULES = [
   SECURITY_PRIVATE_NO_READSCOPE,
   SECURITY_MASTER_DETAIL_UNGRANTED,
   SECURITY_BOOK_AUDIENCE_UNKNOWN_SET,
-  SECURITY_SUPERUSER_FIELD_MASK_INERT,
   SECURITY_CBP_MASTER_REFERENCE_HIDDEN,
   SECURITY_UPDATE_POLICY_NO_CHECK,
   SECURITY_CBP_OWNER_POLICY_WITHOUT_OPT_IN,
@@ -162,7 +160,7 @@ const OMD_DETAIL_FIELDS = {
 const omdDetail = (extra: Record<string, unknown> = {}) => ({
   name: 'omd_obligation', label: 'Obligation', sharingModel: 'controlled_by_parent', fields: OMD_DETAIL_FIELDS, ...extra,
 });
-/** A field one set hides or locks, and a second set whose object-wide bit re-opens it. */
+/** A field one set hides, and a second set whose `viewAllFields` re-opens it. */
 const reopenStack = (hidingRow: Record<string, unknown>, otherDeal: Record<string, unknown>) => ({
   objects: [{ name: 'deal', label: 'Deal', sharingModel: 'private', fields: { margin: { type: 'number', label: 'Margin' } } }],
   permissions: [
@@ -170,8 +168,8 @@ const reopenStack = (hidingRow: Record<string, unknown>, otherDeal: Record<strin
     PermissionSetSchema.parse({ name: 'deal_lead', objects: { deal: otherDeal } }),
   ],
 });
-const reopenParams = (bit: string, reopened: string) => ({
-  permissionSet: 'consultant', otherSet: 'deal_lead', field: 'deal.margin', object: 'deal', bit, reopened,
+const reopenParams = () => ({
+  permissionSet: 'consultant', otherSet: 'deal_lead', field: 'deal.margin', object: 'deal',
 });
 
 const omdStack = (detail: Record<string, unknown>, using: string) => ({
@@ -184,7 +182,7 @@ const omdStack = (detail: Record<string, unknown>, using: string) => ({
 
 /**
  * One stack per advisory push site, with the params each finding must carry
- * (the names its sentence interpolates). Every push site of the eight rule ids
+ * (the names its sentence interpolates). Every push site of the seven rule ids
  * is reached: the two owner-policy functions, and the second one in both of
  * its remedy states.
  */
@@ -221,42 +219,6 @@ const CASES: ReadonlyArray<{ label: string; rule: string; stack: Record<string, 
       books: [{ name: 'crm_admin_guide', audience: { permissionSet: 'crm_admn' }, groups: [] }],
     },
     params: { book: 'crm_admin_guide', permissionSet: 'crm_admn' },
-  },
-  {
-    label: 'field lock under Modify All',
-    rule: SECURITY_SUPERUSER_FIELD_MASK_INERT,
-    stack: {
-      permissions: [PermissionSetSchema.parse({
-        name: 'deal_manager', label: 'Deal manager',
-        objects: { deal: { allowRead: true, allowEdit: true, modifyAllRecords: true } },
-        fields: { 'deal.restricted_note': { readable: true, editable: false } },
-      })],
-    },
-    params: { permissionSet: 'deal_manager', field: 'deal.restricted_note', object: 'deal', inert: 'edit' },
-  },
-  {
-    label: 'field mask and lock under Modify All',
-    rule: SECURITY_SUPERUSER_FIELD_MASK_INERT,
-    stack: {
-      permissions: [PermissionSetSchema.parse({
-        name: 'deal_manager', label: 'Deal manager',
-        objects: { deal: { allowRead: true, allowEdit: true, modifyAllRecords: true } },
-        fields: { 'deal.margin': { readable: false, editable: false } },
-      })],
-    },
-    params: { permissionSet: 'deal_manager', field: 'deal.margin', object: 'deal', inert: 'both' },
-  },
-  {
-    label: 'field mask alone under Modify All',
-    rule: SECURITY_SUPERUSER_FIELD_MASK_INERT,
-    stack: {
-      permissions: [PermissionSetSchema.parse({
-        name: 'directory_masked',
-        objects: { sys_user: { allowRead: true, allowEdit: true, modifyAllRecords: true } },
-        fields: { 'sys_user.email': { readable: false, editable: true } },
-      })],
-    },
-    params: { permissionSet: 'directory_masked', field: 'sys_user.email', object: 'sys_user', inert: 'read' },
   },
   {
     label: 'hidden master reference',
@@ -311,28 +273,10 @@ const CASES: ReadonlyArray<{ label: string; rule: string; stack: Record<string, 
     params: { permissionSet: 'omd_requester', policy: 'omd_obligation_updates', object: 'omd_obligation', remedy: 'add-owner-id' },
   },
   {
-    label: 'a hidden field another set\'s View All re-opens',
-    rule: SECURITY_CROSS_SET_FIELD_REOPEN,
-    stack: reopenStack({ readable: false }, { allowRead: true, viewAllRecords: true }),
-    params: reopenParams('view-all', 'read'),
-  },
-  {
-    label: 'a hidden, locked field another set\'s Modify All re-opens',
-    rule: SECURITY_CROSS_SET_FIELD_REOPEN,
-    stack: reopenStack({ readable: false, editable: false }, { allowRead: true, allowEdit: true, modifyAllRecords: true }),
-    params: reopenParams('modify-all', 'both'),
-  },
-  {
-    label: 'a locked field another set\'s Modify All re-opens',
-    rule: SECURITY_CROSS_SET_FIELD_REOPEN,
-    stack: reopenStack({ readable: true, editable: false }, { allowRead: true, allowEdit: true, modifyAllRecords: true }),
-    params: reopenParams('modify-all', 'edit'),
-  },
-  {
     label: 'a hidden field another set\'s View All Fields re-opens',
     rule: SECURITY_CROSS_SET_FIELD_REOPEN,
     stack: reopenStack({ readable: false }, { allowRead: true, viewAllFields: true }),
-    params: reopenParams('view-all-fields', 'read'),
+    params: reopenParams(),
   },
 ];
 
@@ -346,11 +290,11 @@ const findingOf = (c: (typeof CASES)[number]): SecurityFinding => {
 /** The params that are NAMES the sentence must show (not the variant selectors). */
 const namesOf = (params: Record<string, string>): string[] =>
   Object.entries(params)
-    .filter(([key, value]) => !['remedy', 'inert', 'bit', 'reopened'].includes(key) && value !== '')
+    .filter(([key, value]) => !['remedy'].includes(key) && value !== '')
     .map(([, value]) => value);
 
 describe('security-posture user text · the catalog', () => {
-  it('holds a sentence for exactly the rule\'s eight advisory ids, in every platform locale and no other', () => {
+  it('holds a sentence for exactly the rule\'s seven advisory ids, in every platform locale and no other', () => {
     expect(Object.keys(SECURITY_POSTURE_USER_TEXT).sort()).toEqual([...ADVISORY_RULES].sort());
     for (const [rule, entry] of Object.entries(SECURITY_POSTURE_USER_TEXT)) {
       expect(Object.keys(entry).sort(), rule).toEqual([...PLATFORM_LOCALE_TAGS].sort());
@@ -368,7 +312,6 @@ describe('security-posture user text · the catalog', () => {
       'security-private-no-readscope',
       'security-master-detail-ungranted',
       'security-book-audience-unknown-set',
-      'security-superuser-field-mask-inert',
       'security-controlled-by-parent-master-reference-hidden',
       'security-update-policy-no-check',
       'security-controlled-by-parent-owner-policy-without-opt-in',
@@ -430,57 +373,14 @@ describe('security-posture user text · rendered from the rule\'s real findings'
     expect(addOwner).toContain('Give "omd_obligation" a record owner (owner_id)');
   });
 
-  it('names the one bypass the rule reports, Modify All, and never View All', () => {
-    const sentences = CASES.filter((c) => c.rule === SECURITY_SUPERUSER_FIELD_MASK_INERT)
-      .map((c) => findingUserMessage(findingOf(c), ['en'])!);
-    expect(sentences).toHaveLength(3);
-    for (const sentence of sentences) {
-      expect(sentence).toContain('Modify All Records');
-      expect(sentence).not.toContain('View All Records');
-    }
-  });
-
-  it('calls ineffective only the half of the field restriction Modify All unbinds, as the rule\'s message does', () => {
-    const [modifyLock, modifyBoth, modifyMask] = CASES.filter((c) => c.rule === SECURITY_SUPERUSER_FIELD_MASK_INERT)
-      .map((c) => findingUserMessage(findingOf(c), ['en'])!);
-    // Modify All beside a read mask on an editable row: only the mask is
-    // inert, so the sentence neither names a read-only half nor prescribes
-    // deleting the restriction.
-    expect(modifyMask).toContain('hiding field "sys_user.email" has no effect');
-    expect(modifyMask).not.toContain('read-only');
-    expect(modifyMask).not.toContain('delete the field restriction');
-    expect(modifyMask).toContain('let the set read the field');
-    // Modify All beside an edit lock alone: the lock is inert.
-    expect(modifyLock).toContain('making field "deal.restricted_note" read-only has no effect');
-    expect(modifyLock).not.toContain('hiding');
-    expect(modifyLock).toContain('delete the field restriction');
-    // Modify All beside both: both halves are inert.
-    expect(modifyBoth).toContain('hiding field "deal.margin" and making it read-only have no effect');
-    expect(modifyBoth).toContain('delete the field restriction');
-  });
-
-  it('renders the three field-restriction sentences apart in every platform locale', () => {
-    // Same names, so only `inert` tells the three apart.
-    const findings = CASES.filter((c) => c.rule === SECURITY_SUPERUSER_FIELD_MASK_INERT).map(findingOf);
-    for (const tag of PLATFORM_LOCALE_TAGS) {
-      const [lock, both, mask] = findings.map((f) => findingUserMessage({ ...f, userTextParams: { ...f.userTextParams!, permissionSet: 'p', field: 'f', object: 'o' } }, [tag])!);
-      expect(new Set([lock, both, mask]).size, tag).toBe(3);
-    }
-  });
-
-  it('renders the four cross-set sentences apart, naming the second set\'s bit by its console label', () => {
-    const findings = CASES.filter((c) => c.rule === SECURITY_CROSS_SET_FIELD_REOPEN).map(findingOf);
-    for (const tag of PLATFORM_LOCALE_TAGS) {
-      const texts = findings.map((f) => findingUserMessage(f, [tag])!);
-      expect(new Set(texts).size, tag).toBe(findings.length);
-    }
-    // The bit is named by the console's label, never by its key.
-    const [viewAll, modifyBoth, modifyEdit, viewAllFields] = findings.map((f) => findingUserMessage(f, ['en'])!);
-    expect(viewAll).toContain('View All Records');
-    expect(modifyBoth).toContain('Modify All Records');
-    expect(modifyEdit).toContain('Modify All Records');
-    expect(viewAllFields).toContain('View All Fields');
-    for (const text of [viewAll, modifyBoth, modifyEdit, viewAllFields]) expect(text).not.toMatch(/viewAll|modifyAll/);
+  it('[v19 #36055] names only View All Fields as the re-opening bit, by its console label, in every locale', () => {
+    const [finding] = CASES.filter((c) => c.rule === SECURITY_CROSS_SET_FIELD_REOPEN).map(findingOf);
+    for (const tag of PLATFORM_LOCALE_TAGS) expect(findingUserMessage(finding!, [tag]), tag).toBeTruthy();
+    const text = findingUserMessage(finding!, ['en'])!;
+    expect(text).toContain('View All Fields');
+    expect(text).not.toContain('View All Records');
+    expect(text).not.toContain('Modify All Records');
+    expect(text).not.toMatch(/viewAll|modifyAll/);
   });
 });
 

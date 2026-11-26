@@ -310,54 +310,38 @@ describe('explainAccess — fls reports partial masking (#9127)', () => {
     expect(fls.detail).toContain(`amount (locked when status == 'approved', set "hr_user")`);
   });
 
-  // [#29610 / ruling of record 6573563853, letter A] A set holding Modify All
-  // on the object votes editable on every field after the per-entry vote, under
-  // every `when` verdict, so for that caller a conditioned lock binds on no row.
-  // The report reads the SAME vote (`superuserFieldVote` through
-  // `conditionedFieldEntries`), never a second copy of it.
+  // [#29610, v19 #36055] Up to v18 a set holding Modify All on the object voted
+  // editable on every field, so the report called a conditioned lock
+  // "superseded". From v19 Modify All casts no field vote: the lock binds per
+  // row for that caller too, and the report says so.
   const CONDITIONED_AMOUNT = {
     'leave_request.amount': { readable: true, editable: false, when: "status == 'approved'" },
   };
 
-  it('[#29610] a Modify All set supersedes a row-conditioned lock: the entry is reported as binding on no row', async () => {
-    const fls = await flsOf({
-      sets: [
-        {
-          name: 'hr_user',
-          objects: { leave_request: { allowRead: true, allowEdit: true } },
-          fields: CONDITIONED_AMOUNT,
-        },
-        {
-          name: 'hr_admin',
-          objects: { leave_request: { allowRead: true, allowEdit: true, viewAllRecords: true, modifyAllRecords: true } },
-        },
-      ] as any,
+  for (const [label, bits] of [
+    ['Modify All', { allowEdit: true, viewAllRecords: true, modifyAllRecords: true }],
+    ['View All', { viewAllRecords: true }],
+    ['viewAllFields', { viewAllFields: true }],
+  ] as const) {
+    it(`[#36055] a ${label} set does not supersede a row-conditioned lock: the lock still binds per row`, async () => {
+      const fls = await flsOf({
+        sets: [
+          {
+            name: 'hr_user',
+            objects: { leave_request: { allowRead: true, allowEdit: true } },
+            fields: CONDITIONED_AMOUNT,
+          },
+          {
+            name: 'hr_admin',
+            objects: { leave_request: { allowRead: true, ...bits } },
+          },
+        ] as any,
+      });
+      expect(fls.detail).toContain('1 field permission(s) carry a row condition — judged per row by the write gate');
+      expect(fls.detail).toContain(`amount (locked when status == 'approved', set "hr_user")`);
+      expect(fls.detail).not.toContain('superseded');
     });
-    expect(fls.verdict).toBe('not_applicable');
-    expect(fls.detail).not.toContain('judged per row by the write gate');
-    expect(fls.detail).toContain('1 row-conditioned field permission(s) are superseded by the Modify All Data field vote [hr_admin]');
-    expect(fls.detail).toContain('binds on no row');
-    expect(fls.detail).toContain(`amount (locked when status == 'approved', set "hr_user")`);
-  });
-
-  it('[#29610] a View All set does NOT supersede it: the edit lock still binds per row (read-side control)', async () => {
-    const fls = await flsOf({
-      sets: [
-        {
-          name: 'hr_user',
-          objects: { leave_request: { allowRead: true, allowEdit: true } },
-          fields: CONDITIONED_AMOUNT,
-        },
-        {
-          name: 'hr_auditor',
-          objects: { leave_request: { allowRead: true, viewAllRecords: true } },
-        },
-      ] as any,
-    });
-    expect(fls.detail).toContain('1 field permission(s) carry a row condition — judged per row by the write gate');
-    expect(fls.detail).toContain(`amount (locked when status == 'approved', set "hr_user")`);
-    expect(fls.detail).not.toContain('superseded');
-  });
+  }
 
   it('[#29610] a caller without the vote keeps the row-conditioned sentence as before (control)', async () => {
     const fls = await flsOf({

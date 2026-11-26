@@ -183,6 +183,86 @@ function colorEnabled(stream: { isTTY?: boolean } | undefined): boolean {
     return Boolean(stream?.isTTY);
 }
 
+/** How many `cause` links an error record prints before it says it stopped. */
+const CAUSE_DEPTH_LIMIT = 5;
+
+/**
+ * An error as a log record carries it: message and stack, and the `cause`
+ * chain under it, outermost first.
+ *
+ * A wrapper thrown with the original on `cause` (`new Error(say, { cause })`)
+ * used to log as the wrapper alone, so the root cause of a wrapped fault was
+ * missing from the line. Each link is its message and stack. Bounded both
+ * ways: a cycle stops at the first repeat, a chain past
+ * {@link CAUSE_DEPTH_LIMIT} stops there, and either says so in a last link;
+ * a link whose read throws ends the chain in a marker link too.
+ *
+ * The same shape as `faultCauseChain` in `@objectstack/types`, which the 5xx
+ * fault log prints on its console fallback. A copy rather than an import:
+ * this entry is browser-safe and `@objectstack/client` bundles it without
+ * depending on `@objectstack/types`, whose root entry would come along with
+ * `@objectstack/spec` behind it. `logger-error-cause.test.ts` pins the two to one output,
+ * the field-name rule for object causes included (the types copy carries this
+ * file's whole-word matcher for its default list).
+ */
+function renderError(
+    error: Error,
+    isRedacted: (key: string) => boolean,
+): { message: string; stack?: string; causes?: Array<{ message: string; stack?: string }> } {
+    const causes: Array<{ message: string; stack?: string }> = [];
+    const seen = new Set<unknown>([error]);
+    let current = causeOf(error);
+    while (current !== undefined && current !== null) {
+        if (seen.has(current)) {
+            causes.push({ message: '[cause chain cycle: this link repeats an earlier one]' });
+            break;
+        }
+        if (causes.length >= CAUSE_DEPTH_LIMIT) {
+            causes.push({ message: `[cause chain truncated after ${CAUSE_DEPTH_LIMIT} links]` });
+            break;
+        }
+        seen.add(current);
+        try {
+            causes.push(causeLine(current, isRedacted));
+        } catch {
+            // A link whose name, message or stack read throws (a hostile getter, a Proxy)
+            // ends the chain in a marker; it must not cost the whole line.
+            causes.push({ message: '[cause chain link unreadable: reading it threw]' });
+            break;
+        }
+        current = causeOf(current);
+    }
+    return { message: error.message, stack: error.stack, ...(causes.length > 0 ? { causes } : {}) };
+}
+
+function causeOf(value: unknown): unknown {
+    if (typeof value !== 'object' || value === null) return undefined;
+    try {
+        return (value as { cause?: unknown }).cause;
+    } catch {
+        // A throwing `cause` getter ends the chain; it must not cost the record.
+        return undefined;
+    }
+}
+
+/**
+ * One link as text. A non-Error object cause is serialized with the logger's
+ * own redaction applied key by key, the same rule the record's fields get.
+ * A read that throws is the caller's to catch (`renderError` ends the chain).
+ */
+function causeLine(cause: unknown, isRedacted: (key: string) => boolean): { message: string; stack?: string } {
+    if (cause instanceof Error) {
+        return { message: `${cause.name}: ${cause.message}`, ...(cause.stack ? { stack: cause.stack } : {}) };
+    }
+    if (typeof cause === 'string') return { message: cause };
+    try {
+        const text = JSON.stringify(cause, (key, value) => (key !== '' && isRedacted(key) ? '***REDACTED***' : value));
+        return { message: text ?? String(cause) };
+    } catch {
+        return { message: String(cause) };
+    }
+}
+
 /**
  * Resolve a Node builtin without putting it in this module's import graph.
  *
@@ -340,7 +420,7 @@ export class ObjectLogger implements Logger {
         const context = this.redactSensitive({
             ...this.bindings,
             ...meta,
-            ...(error ? { error: { message: error.message, stack: error.stack } } : {}),
+            ...(error ? { error: renderError(error, (key) => this.isRedactedFieldName(key)) } : {}),
         });
 
         const hasContext = Object.keys(context).length > 0;

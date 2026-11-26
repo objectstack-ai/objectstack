@@ -2870,10 +2870,10 @@ describe('PermissionEvaluator', () => {
       'task.title': { readable: true, editable: true, when: 'done == false' } as any,
     });
     expect(evaluator.conditionedFieldEntries('contact', [ps])).toEqual([
-      { field: 'email', set: 'hr', when: "status == 'approved'", editable: false, supersededBy: [] },
+      { field: 'email', set: 'hr', when: "status == 'approved'", editable: false },
     ]);
     expect(evaluator.conditionedFieldEntries('task', [ps])).toEqual([
-      { field: 'title', set: 'hr', when: 'done == false', editable: true, supersededBy: [] },
+      { field: 'title', set: 'hr', when: 'done == false', editable: true },
     ]);
   });
 

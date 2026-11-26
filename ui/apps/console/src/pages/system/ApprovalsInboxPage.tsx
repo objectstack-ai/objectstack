@@ -138,6 +138,19 @@ const BULK_FAILURES_IN_TOAST = 3;
  */
 const BULK_FAILURES_STATE_KEY = 'approvalsBulkFailures';
 
+/**
+ * Every mounted inbox's "reload my list and badge" (objectstack#37548). A
+ * bulk run outlives the inbox it started on: when it settles it tells every
+ * inbox mounted then — itself if the user stayed, a fresh one if they left
+ * and came back — and an inbox mounted at no point sees nothing reloaded.
+ */
+const bulkRunSettledListeners = new Set<() => void>();
+
+/** A bulk run settled: every mounted inbox reloads its list and badge once. */
+function announceBulkRunSettled(): void {
+  for (const listener of [...bulkRunSettledListeners]) listener();
+}
+
 /** The failed rows a navigation handed this inbox, or `null` when it handed none. */
 function handedBulkFailures(state: unknown): BulkFailure[] | null {
   if (!state || typeof state !== 'object') return null;
@@ -1159,6 +1172,14 @@ function ApprovalsQueue() {
       for (const id of raised) toast.dismiss(id);
     };
   }, []);
+  // A bulk run, this page's or one an earlier inbox started, settled while
+  // this page is mounted: reload its list and badge (objectstack#37548).
+  const reloadAfterBulkRun = useRef<() => void>(() => {});
+  useEffect(() => {
+    const listener = () => reloadAfterBulkRun.current();
+    bulkRunSettledListeners.add(listener);
+    return () => { bulkRunSettledListeners.delete(listener); };
+  }, []);
   // A run that settled after the inbox unmounted handed its failed rows back
   // through the navigation its toast's "Show all" made: open the dialog on
   // them once per navigation, then drop them from the history entry so a
@@ -1311,6 +1332,12 @@ function ApprovalsQueue() {
       .then(res => setMyPendingCount(res.data.length))
       .catch(() => { /* best-effort */ });
   }, [identities]);
+  useEffect(() => {
+    reloadAfterBulkRun.current = () => {
+      void load();
+      refreshBadge();
+    };
+  }, [load, refreshBadge]);
 
   /** Unique process labels present in current rows. */
   const rowProcesses = useMemo(() => {
@@ -1583,7 +1610,8 @@ function ApprovalsQueue() {
       }
     }
     // The user may have left while the run was going: an unmounted page's
-    // state is not touched, and its list and badge count are not reloaded.
+    // state is not touched. The list and badge reload in whichever inbox is
+    // mounted now (`announceBulkRunSettled`), this one or a fresh one.
     const live = mounted.current;
     if (live) {
       setBulkRunning(false);
@@ -1630,12 +1658,9 @@ function ApprovalsQueue() {
       });
       if (live && toastId != null) bulkFailureToasts.current.add(toastId);
     }
-    if (live) {
-      void load();
-      refreshBadge();
-    }
+    announceBulkRunSettled();
   }, [
-    actionableSelectedRows, identities, user?.id, load, refreshBadge, humanizeError, tr,
+    actionableSelectedRows, identities, user?.id, humanizeError, tr,
     location.pathname, location.search, navigate,
   ]);
 

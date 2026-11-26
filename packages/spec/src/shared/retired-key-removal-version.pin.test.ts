@@ -78,6 +78,7 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
 import { ALL_CONVERSIONS } from '../conversions/registry';
+import { MIGRATIONS_BY_MAJOR } from '../migrations/registry';
 import { TimeUpdateInterval } from '../data/analytics.zod';
 import { CurrencyConfigSchema, FieldSchema } from '../data/field.zod';
 import { IndexSchema, ObjectSchema } from '../data/object.zod';
@@ -235,6 +236,23 @@ const todo = (where: string, id: string, stack: Record<string, unknown>): Render
   conversion.apply(stack, () => {}, { reportTodo: (detail) => reasons.push(detail.reason) });
   expect(reasons.length, `${where} must be reported`).toBeGreaterThan(0);
   return reasons.map((text) => ({ where, text }));
+};
+
+/**
+ * The D3 entry `os migrate meta` prints for a DEFAULT FLIP, read by its `id`:
+ * the old shape still parses and now means something else, so there is no
+ * refusal or tombstone to read, and the semantic entry that judges the
+ * conversion's edits (its `conversionIds`) is the prescription an author and
+ * an operator meet. Its `reason` and `acceptanceCriteria` are the two texts.
+ */
+const semantic = (where: string, id: string, conversionId: string): Renderer => () => {
+  const found = Object.values(MIGRATIONS_BY_MAJOR).flatMap((step) => step.semantic).find((e) => e.id === id);
+  if (!found) throw new Error(`${where}: no semantic entry \`${id}\``);
+  expect(found.conversionIds ?? [], `${where} judges \`${conversionId}\``).toContain(conversionId);
+  return [
+    { where: `${where} (reason)`, text: found.reason },
+    { where: `${where} (acceptanceCriteria)`, text: found.acceptanceCriteria },
+  ];
 };
 
 const ELEMENTS: readonly (readonly [unknown, string, readonly string[]])[] = [
@@ -660,6 +678,16 @@ const JOIN: Readonly<Record<string, readonly Renderer[]>> = {
     tombstone(KnowledgeSourceSchema, 'knowledge_source', 'vectorStore'),
     tombstone(KnowledgeSourceSchema, 'knowledge_source', 'adapterConfig'),
     tombstone(KnowledgeRefreshPolicySchema, 'knowledge_source.refresh', 'cron'),
+  ],
+  // Protocol 19's View All / Modify All field-axis split, a default flip: View
+  // All without `viewAllFields` still parses and now casts no field vote, so the
+  // D3 entry is what an author and an operator meet.
+  'permission-view-all-fields-beside-record-bypass': [
+    semantic(
+      'D3 permission-view-all-modify-all-cast-no-field-vote',
+      'permission-view-all-modify-all-cast-no-field-vote',
+      'permission-view-all-fields-beside-record-bypass',
+    ),
   ],
 };
 

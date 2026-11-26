@@ -24,8 +24,18 @@
  *     in `limits`; the command may ignore them. The timeout is the runner's
  *     own: a call still running at `limits.timeoutMs` is killed (SIGTERM).
  *   - At start the runner makes one `info` call: the command names itself and
- *     its version, which every record and gallery page states. A command that
- *     cannot answer it is refused before any card runs.
+ *     its version, which every record and gallery page states, and the
+ *     contract it speaks ({@link EXTERNAL_DRIVER_CONTRACTS}). A command that
+ *     cannot answer it is refused before any card runs. The `info` input is
+ *     the one input every version shares and always carries the first name
+ *     ({@link EXTERNAL_DRIVER_CONTRACT}), so a command of either version
+ *     answers it; every later input carries the name the command answered.
+ *   - Door mode (contract `/2` only): an `author` call may carry `door`
+ *     ({@link ExternalDoorInput}), the app's MCP draft door and nothing of a
+ *     project. The door's OAuth token travels as the persona's key does — in a
+ *     0600 file of the same shape, outside the call's directory, deleted when
+ *     the call returns. A `/1` command is never sent a door: the run is refused
+ *     before any card runs ({@link ExternalDriver.assertDoor}), naming why.
  *
  * The runner cannot see an external command's login, so the record says so
  * (`authMethod`); every billing variable the runner knows is removed from the
@@ -40,14 +50,35 @@ import { join, resolve } from 'node:path';
 import { z } from 'zod';
 
 import { SCENARIO_TIERS, type ScenarioTier } from '../../schema.js';
-import { API_BILLING_ENV, DEFAULT_AUTHOR_TIMEOUT_MIN, snapshotSources, type AgentDriver, type AskTask, type AuthorResult, type AuthorTask, type DriverInfo, type StepRef } from '../driver.js';
+import { placeAskSkills, type AskSkillsBundle } from '../ask-skills.js';
+import { API_BILLING_ENV, DEFAULT_AUTHOR_TIMEOUT_MIN, snapshotSources, type AgentDriver, type AskTask, type AuthorResult, type AuthorTask, type DoorClient, type DriverInfo, type StepRef } from '../driver.js';
 import { toolNameOf, type ParsedTurn, type RunnerToolCall } from '../transcript.js';
 import { CODEX_API_BILLING_ENV } from './codex.js';
 import { noResult, runTurnProcess } from './process.js';
-import { doorModeRefusal } from '../door.js';
+import { readDoorArm, type DoorArm } from '../door.js';
 
-/** The contract's name and version, the first key of every input. A command checks it and refuses one it does not know. */
+/**
+ * The contract's first version: `info`, `author` (a project in `cwd`) and
+ * `ask`. Every `info` input carries this name, and every later input to a
+ * command whose `info` answer names no contract. Its value never changes: a
+ * command that pins it (a literal schema, a type check against
+ * {@link ExternalInfoInput}) keeps answering this runner. A command checks the
+ * name and refuses one it does not know.
+ */
 export const EXTERNAL_DRIVER_CONTRACT = 'objectstack-scenario-driver/1';
+
+/**
+ * The second version: `/1` plus door mode (`door` on an `author` input,
+ * {@link ExternalDoorInput}). The first key of every input after `info`, for
+ * a command whose `info` answer names it.
+ */
+export const EXTERNAL_DRIVER_CONTRACT_V2 = 'objectstack-scenario-driver/2';
+
+/** Every contract version this runner speaks, oldest first. */
+export const EXTERNAL_DRIVER_CONTRACTS = [EXTERNAL_DRIVER_CONTRACT, EXTERNAL_DRIVER_CONTRACT_V2] as const;
+export type ExternalContract = (typeof EXTERNAL_DRIVER_CONTRACTS)[number];
+
+const isExternalContract = (c: string): c is ExternalContract => (EXTERNAL_DRIVER_CONTRACTS as readonly string[]).includes(c);
 
 /** The run's limits, as the flags set them; a command may ignore any of them. */
 export interface ExternalLimits {
@@ -66,20 +97,42 @@ export interface ExternalLimits {
   effort?: string;
 }
 
+/** The one input every contract version shares, so it always carries the first name. */
 export interface ExternalInfoInput {
   contract: typeof EXTERNAL_DRIVER_CONTRACT;
   kind: 'info';
 }
 
-/** Build or iterate an app: edit the project in `cwd` with shell and file tools. The call runs in `cwd`. */
+/**
+ * Door mode's half of an `author` input (contract `/2`): the booted app's MCP
+ * draft door, and nothing of a project. `mcp.configFile` is a 0600 file
+ * outside `cwd`, `{"mcpServers":{"app":{"type":"http","url":…,"headers":{"Authorization":"Bearer …"}}}}`,
+ * the one place the door's OAuth token is (scoped to the authoring tools,
+ * `DOOR_TOKEN_SCOPE`). `skillsDir`, when the run gives skills
+ * (`--door-skills`, less `--door-skill-omit`), is `cwd/.claude/skills`, one
+ * directory per skill holding its `SKILL.md`.
+ */
+export interface ExternalDoorInput {
+  mcp: { url: string; configFile: string };
+  skillsDir?: string;
+}
+
+/**
+ * Build or iterate an app. Without `door`: edit the project in `cwd` with
+ * shell and file tools. With `door` (contract `/2`, `step.mode` `door`): build
+ * through the door alone; `cwd` is an empty directory of the call's own
+ * (holding only the skills, when given) and no file in it is graded. The call
+ * runs in `cwd`.
+ */
 export interface ExternalAuthorInput {
-  contract: typeof EXTERNAL_DRIVER_CONTRACT;
+  contract: ExternalContract;
   kind: 'author';
   step: StepRef;
   prompt: string;
   cwd: string;
   tier: ScenarioTier;
   limits: ExternalLimits;
+  door?: ExternalDoorInput;
 }
 
 /**
@@ -89,7 +142,7 @@ export interface ExternalAuthorInput {
  * the one place the persona's key is. The call runs in the file's directory.
  */
 export interface ExternalAskInput {
-  contract: typeof EXTERNAL_DRIVER_CONTRACT;
+  contract: ExternalContract;
   kind: 'ask';
   step: StepRef;
   prompt: string;
@@ -97,10 +150,15 @@ export interface ExternalAskInput {
   limits: ExternalLimits;
 }
 
-/** The `info` answer: `name` becomes the record's driver (`external:NAME`), `version` its version. */
+/**
+ * The `info` answer: `name` becomes the record's driver (`external:NAME`),
+ * `version` its version, `contract` the contract it speaks (absent ⇒
+ * {@link EXTERNAL_DRIVER_CONTRACT}, the answer every `/1` command gives).
+ */
 export const ExternalInfoSchema = z.strictObject({
   name: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]*$/, 'a name of letters, digits, `.`, `_` and `-`'),
   version: z.string().min(1),
+  contract: z.string().min(1).optional(),
 });
 
 /** One tool call of the turn, in the order made. An MCP tool may be named bare (`query_records`) or prefixed (`mcp__app__query_records`). */
@@ -166,6 +224,9 @@ const issueText = (e: z.ZodError): string => {
   return `${first.path.length ? `\`${first.path.join('.')}\`: ` : ''}${first.message}${e.issues.length > 1 ? ` (+${e.issues.length - 1} more)` : ''}`;
 };
 
+/** A 0600 MCP config file's content: the app's endpoint under the name `app`, the bearer the one secret in it. */
+const mcpConfigText = (url: string, bearer: string): string => JSON.stringify({ mcpServers: { app: { type: 'http', url, headers: { Authorization: `Bearer ${bearer}` } } } });
+
 /** Read one JSON object of `schema` off stdout, or say why not. */
 function readAnswer<T>(stdout: string, schema: z.ZodType<T>): { ok: true; value: T } | { ok: false; why: string } {
   const text = stdout.trim();
@@ -199,16 +260,28 @@ export interface ExternalDriverOptions {
   askEffort?: string;
   /** Relative command words resolve against this; default the runner's working directory. */
   base?: string;
+  /** Door mode's skills (`--door-skills`), read once here (`readDoorArm`) and placed in each door turn's `cwd`. */
+  doorSkillsDir?: string;
+  /** Skill names left out of {@link doorSkillsDir} (`--door-skill-omit`). */
+  doorSkillOmit?: readonly string[];
 }
 
 export class ExternalDriver implements AgentDriver {
   private readonly argv: string[];
   private readonly name: string;
   private readonly version: string;
+  /** The contract the command answered in `info`: every later input carries it. */
+  readonly contract: ExternalContract;
+  private readonly doorSkills: AskSkillsBundle | undefined;
+  private readonly door: DoorArm | undefined;
 
   /** Makes the `info` call; a command that cannot answer it is refused here, before any card runs. */
   constructor(private readonly opts: ExternalDriverOptions) {
     this.argv = parseExternalCommand(opts.command, opts.base);
+    // Read before any process starts: an omission naming no skill is refused, and every door turn gets these bytes.
+    const door = readDoorArm(opts);
+    this.doorSkills = door.skills;
+    this.door = door.arm;
     const input: ExternalInfoInput = { contract: EXTERNAL_DRIVER_CONTRACT, kind: 'info' };
     const run = spawnSync(this.argv[0]!, this.argv.slice(1), { input: JSON.stringify(input), encoding: 'utf8', timeout: opts.infoTimeoutMs ?? 30_000, env: externalEnv() });
     const stderr = (run.stderr ?? '').trim();
@@ -219,6 +292,29 @@ export class ExternalDriver implements AgentDriver {
     if (!info.ok) throw refused(info.why);
     this.name = info.value.name;
     this.version = info.value.version;
+    const contract = info.value.contract ?? EXTERNAL_DRIVER_CONTRACT;
+    if (!isExternalContract(contract)) {
+      throw new Error(`--driver external:${opts.command}: the command's \`info\` answer names the contract \`${contract}\`, which this runner does not speak (it speaks ${EXTERNAL_DRIVER_CONTRACTS.map((k) => `\`${k}\``).join(', ')})`);
+    }
+    this.contract = contract;
+  }
+
+  /** Does the command take a door (contract `/2`)? */
+  get speaksDoor(): boolean {
+    return this.contract !== EXTERNAL_DRIVER_CONTRACT;
+  }
+
+  /**
+   * Refuse door mode for a command that does not take a door, naming why:
+   * the runner calls it before any card runs, and {@link author} again before
+   * it would send a door, so a `/1` command is never handed one.
+   */
+  assertDoor(): void {
+    if (!this.speaksDoor) {
+      throw new Error(
+        `--driver external:${this.opts.command}: \`${this.name}\` speaks \`${this.contract}\`, which has no door; door mode hands an external command the app's MCP draft door on \`${EXTERNAL_DRIVER_CONTRACT_V2}\` only (its \`info\` answer names that contract)`,
+      );
+    }
   }
 
   private get authorTimeoutMs(): number {
@@ -256,6 +352,7 @@ export class ExternalDriver implements AgentDriver {
       ...(this.askModel ? { askModel: this.askModel } : {}),
       ...(this.authorEffort ? { authorEffort: this.authorEffort } : {}),
       ...(this.askEffort ? { askEffort: this.askEffort } : {}),
+      ...(this.door ? { door: this.door } : {}),
     };
   }
 
@@ -303,10 +400,9 @@ export class ExternalDriver implements AgentDriver {
   }
 
   async author(task: AuthorTask): Promise<AuthorResult> {
-    // Door mode hands the client an MCP door and no project; only the `claude` driver is given one (`doorMode` in `orchestrate.ts`).
-    if (task.door) throw new Error(doorModeRefusal('an external driver'));
+    if (task.door) return this.doorAuthor(task, task.door);
     const input: ExternalAuthorInput = {
-      contract: EXTERNAL_DRIVER_CONTRACT,
+      contract: this.contract,
       kind: 'author',
       step: stepOf(task),
       prompt: task.prompt,
@@ -318,18 +414,44 @@ export class ExternalDriver implements AgentDriver {
     return { turn, files: snapshotSources(task.cwd) };
   }
 
+  /**
+   * A door mode authoring call (contract `/2`): run in the task's own empty
+   * directory with the arm's skills under `.claude/skills/`, the door's token
+   * in a 0600 file outside it (never on argv, in the environment or on
+   * stdin), deleted when the call returns. It records no files: there is no
+   * project.
+   */
+  private async doorAuthor(task: AuthorTask, door: DoorClient): Promise<AuthorResult> {
+    this.assertDoor();
+    const dir = mkdtempSync(join(tmpdir(), 'scenario-external-door-'));
+    const configFile = join(dir, 'mcp.json');
+    writeFileSync(configFile, mcpConfigText(door.mcp.url, door.mcp.token), { mode: 0o600 });
+    try {
+      if (this.doorSkills) placeAskSkills(this.doorSkills, task.cwd);
+      const input: ExternalAuthorInput = {
+        contract: this.contract,
+        kind: 'author',
+        step: stepOf(task),
+        prompt: task.prompt,
+        cwd: task.cwd,
+        tier: task.tier,
+        limits: this.limits(this.authorTimeoutMs, this.opts.authorMaxTurns, this.authorModel, this.authorEffort),
+        door: { mcp: { url: door.mcp.url, configFile }, ...(this.doorSkills ? { skillsDir: join(task.cwd, '.claude', 'skills') } : {}) },
+      };
+      return { turn: await this.call(input, task.cwd) };
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }
+
   async ask(task: AskTask): Promise<ParsedTurn> {
     // The key lives in a 0600 file for the duration of the call; the input names the file, never the key.
     const dir = mkdtempSync(join(tmpdir(), 'scenario-external-'));
     const configFile = join(dir, 'mcp.json');
-    writeFileSync(
-      configFile,
-      JSON.stringify({ mcpServers: { app: { type: 'http', url: task.mcp.url, headers: { Authorization: `Bearer ${task.mcp.apiKey}` } } } }),
-      { mode: 0o600 },
-    );
+    writeFileSync(configFile, mcpConfigText(task.mcp.url, task.mcp.apiKey), { mode: 0o600 });
     try {
       const input: ExternalAskInput = {
-        contract: EXTERNAL_DRIVER_CONTRACT,
+        contract: this.contract,
         kind: 'ask',
         step: stepOf(task),
         prompt: task.prompt,

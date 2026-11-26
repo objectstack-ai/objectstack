@@ -37,6 +37,9 @@ export const skillForm = defineForm({
       fields: [
         { field: 'instructions', widget: 'textarea', helpText: 'Instructions for AI — tell it how to use these tools together' },
         { field: 'tools', widget: 'string-tags', required: true, helpText: 'Tool names (supports wildcard: action_*)' },
+        // [ADR-0160 D8] `context` names the context pack the skill works from
+        // (#19331's precedent: a declared key gets its control).
+        { field: 'context', helpText: 'Context pack this skill works from (its name). Requires get_record_context in Tools. Over MCP the prompt then takes an optional record id' },
       ],
     },
     {

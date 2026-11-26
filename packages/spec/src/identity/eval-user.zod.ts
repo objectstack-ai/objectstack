@@ -122,10 +122,11 @@ export const ADMIN_FULL_ACCESS_CAPABILITIES: Pick<PermissionSet, 'objects' | 'sy
       viewAllRecords: true,
       modifyAllRecords: true,
       // [Field-axis split, ruling of record 6912661484, letter A] The
-      // read-only "every field" vote, said explicitly. Today it duplicates the
-      // vote the two record bits already cast on every field, so nothing
-      // answers differently; it keeps the platform administrator reading every
-      // field once those bits stop voting on fields. A field vote only: the
+      // read-only "every field" vote. From protocol 19 the two record bits
+      // above widen records only and cast no field vote, so this bit is what
+      // keeps the platform administrator reading every field, one another set
+      // hides included. It votes read, never edit: a field another set locks
+      // stays locked for a holder of both. A field vote only: the
       // PLATFORM_ADMIN posture (ADR-0095 D3) still derives from the two record
       // bits, never from this one.
       viewAllFields: true,

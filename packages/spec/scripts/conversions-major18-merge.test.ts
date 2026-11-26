@@ -348,13 +348,11 @@ describe('major 18 in the conversions registry — the shape the merge needs (#2
     const ids = new Map(definitionsOf(SOURCE).map((d) => [d.ident, d.id]));
     expect(order).not.toEqual(IDENTS.map((i) => ids.get(i)));
     expect(APPLIED).toEqual(order);
-    // Major 19 opened with its own conversions (#37304), so major 18's are no
-    // longer the tail of the loader's list: they are one unbroken run of it,
-    // in this order, with every later major's after them.
-    const loaded = ALL_CONVERSIONS.map((c) => ({ id: c.id, major: c.toMajor }));
-    const first = loaded.findIndex((c) => c.major === 18);
-    expect(loaded.slice(first, first + order.length).map((c) => c.id)).toEqual(order);
-    expect(loaded.slice(first + order.length).every((c) => c.major > 18)).toBe(true);
+    // Major 18's run inside the loader's sequence: after every earlier major's,
+    // before any later major's (19 opened with its own list).
+    const first18 = ALL_CONVERSIONS.findIndex((c) => c.toMajor === 18);
+    expect(ALL_CONVERSIONS.slice(first18, first18 + order.length).map((c) => c.id)).toEqual(order);
+    expect(ALL_CONVERSIONS.slice(first18 + order.length).every((c) => c.toMajor > 18)).toBe(true);
     expect(MIGRATIONS_BY_MAJOR[18]!.conversionIds).toEqual(order);
   });
 

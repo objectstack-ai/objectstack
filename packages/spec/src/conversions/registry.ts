@@ -136,9 +136,12 @@ import { currencyConfigPrecisionRemoved } from './entries/18/currency-config-pre
 import { permissionModifyAllAllowDeleteFalseToTrue } from './entries/18/permission-modify-all-allow-delete-false-to-true.js';
 import { permissionRlsTagsRemoved } from './entries/18/permission-rls-tags-removed.js';
 import { flowDecisionModeInclusiveExplicit } from './entries/18/flow-decision-mode-inclusive-explicit.js';
+// Major 19: imported after every major-18 conversion, in `MAJOR_19_CONVERSIONS`'s
+// identifier order.
 import { knowledgeSourceContentFieldsToContent } from './entries/19/knowledge-source-content-fields-to-content.js';
 import { knowledgeSourceIdToName } from './entries/19/knowledge-source-id-to-name.js';
 import { knowledgeSourceInertKeysRemoved } from './entries/19/knowledge-source-inert-keys-removed.js';
+import { permissionViewAllFieldsBesideRecordBypass } from './entries/19/permission-view-all-fields-beside-record-bypass.js';
 
 /**
  * One conversion of an OPEN major, with its place in that major's application
@@ -305,20 +308,23 @@ const MAJOR_18_CONVERSIONS: readonly OrderedConversion[] = [
 ];
 
 /**
- * Major 19's conversions, one entry per conversion — the shape
- * {@link MAJOR_18_CONVERSIONS} documents, opened with the major's first
- * conversions (ADR-0161 K6, the knowledge source's renames and removals).
+ * Major 19's conversions, in {@link MAJOR_18_CONVERSIONS}'s shape and under
+ * its rules: one `{ conversion, order }` entry per conversion, SORTED BY THE
+ * CONVERSION'S IDENTIFIER, `order` saying where it applies (ascending, ties by
+ * `id`). Each is DEFINED in a module of its own, `./entries/19/<id>.ts`, the
+ * file named for its `id`, and imported after every major-18 conversion in
+ * this list's order. Step 19's `conversionIds` read
+ * `CONVERSIONS_BY_MAJOR[19]`, which is this list in `order`.
  *
- * ⚠️ SORTED BY THE CONVERSION'S IDENTIFIER, NOT BY APPLICATION ORDER, for the
- * reason given there: two retirements in flight then insert into different
- * gaps. `order` says where a conversion applies. To add one, follow the five
- * steps listed on {@link MAJOR_18_CONVERSIONS}, with `./entries/19/` as the
- * directory.
+ * The knowledge source's three (ADR-0161 K6) apply in the order rename the
+ * name, rename the content list, drop the inert keys; they touch no type the
+ * permission conversion touches, so the tie at `order: 1` is settled by `id`.
  */
 const MAJOR_19_CONVERSIONS: readonly OrderedConversion[] = [
   { conversion: knowledgeSourceContentFieldsToContent, order: 2 },
   { conversion: knowledgeSourceIdToName, order: 1 },
   { conversion: knowledgeSourceInertKeysRemoved, order: 3 },
+  { conversion: permissionViewAllFieldsBesideRecordBypass, order: 1 },
 ];
 
 /**
@@ -328,8 +334,9 @@ const MAJOR_19_CONVERSIONS: readonly OrderedConversion[] = [
  *
  * A released major's list is a plain array, closed with its release. The major
  * that retirements still add to is authored as sorted entries with an explicit
- * `order` ({@link MAJOR_18_CONVERSIONS}), so two retirements in flight do not
- * conflict here; the next major takes the same shape when it opens.
+ * `order` ({@link MAJOR_18_CONVERSIONS}, {@link MAJOR_19_CONVERSIONS}), so two
+ * retirements in flight do not conflict here; the next major takes the same
+ * shape when it opens.
  *
  * ⚠️ EVERY CALL THIS TABLE AND {@link ALL_CONVERSIONS} MAKE AT MODULE LOAD
  * CARRIES AN `@__PURE__` ANNOTATION — a major's `inApplicationOrder(…)` and

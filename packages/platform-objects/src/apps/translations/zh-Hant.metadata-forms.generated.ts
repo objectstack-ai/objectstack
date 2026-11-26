@@ -114,7 +114,12 @@ export const zhHantMetadataForms: NonNullable<TranslationData['metadataForms']> 
       },
       "fieldGroups.collapse": {
         label: "摺疊",
-        helpText: "該分割區能否摺疊。輸入表單依設定執行；預設記錄頁面上讀者可以摺疊每個有標題的分組，因此那裡只決定初始狀態：collapsed 先收合，其餘先展開。未設定：none。"
+        helpText: "該分割區能否摺疊。輸入表單依設定執行；預設記錄頁面上讀者可以摺疊每個有標題的分組，因此那裡只決定初始狀態：collapsed 先收合，其餘先展開。未設定：none。",
+        options: {
+          none: "無 — 輸入表單上始終展開，不可切換",
+          expanded: "展開 — 可摺疊，初始展開",
+          collapsed: "收合 — 可摺疊，初始收合"
+        }
       },
       "fieldGroups.visibleWhen": {
         label: "可見條件",
@@ -134,7 +139,56 @@ export const zhHantMetadataForms: NonNullable<TranslationData['metadataForms']> 
       },
       "fields.type": {
         label: "類型",
-        helpText: "欄位類型"
+        helpText: "欄位類型",
+        options: {
+          text: "文字",
+          textarea: "多行文字",
+          email: "電子郵件",
+          url: "網址（URL）",
+          phone: "電話",
+          password: "密碼",
+          markdown: "Markdown 文字",
+          html: "HTML 內容",
+          richtext: "RTF 文字",
+          number: "數字",
+          currency: "貨幣",
+          percent: "百分比",
+          date: "日期",
+          datetime: "日期時間",
+          time: "時間",
+          boolean: "布林值",
+          toggle: "開關",
+          select: "單選",
+          multiselect: "多選",
+          radio: "選項按鈕",
+          checkboxes: "核取方塊組",
+          lookup: "查閱（參照）",
+          master_detail: "主從",
+          tree: "樹狀",
+          image: "圖片",
+          file: "檔案",
+          avatar: "頭像",
+          video: "影片",
+          audio: "音訊",
+          formula: "公式（計算）",
+          summary: "彙總（上捲）",
+          autonumber: "自動編號",
+          composite: "複合（嵌入）",
+          repeater: "重複項（嵌入陣列）",
+          record: "記錄（鍵值對應）",
+          location: "位置（GPS）",
+          address: "地址",
+          code: "程式碼",
+          json: "JSON 資料",
+          color: "顏色",
+          rating: "評分",
+          slider: "滑桿",
+          signature: "簽名",
+          qrcode: "QR 碼 / 條碼",
+          progress: "進度",
+          tags: "標籤",
+          vector: "向量嵌入"
+        }
       },
       "fields.description": {
         label: "描述",
@@ -186,7 +240,12 @@ export const zhHantMetadataForms: NonNullable<TranslationData['metadataForms']> 
       },
       "fields.valueDomain": {
         label: "值域",
-        helpText: "寫入值必須歸屬的標準；寫入非成員值將被拒絕"
+        helpText: "寫入值必須歸屬的標準；寫入非成員值將被拒絕",
+        options: {
+          iana_time_zone: "IANA 時區",
+          iso_4217_currency: "ISO 4217 幣別代碼",
+          iso_3166_alpha2: "ISO 3166-1 alpha-2 國家代碼"
+        }
       },
       "fields.rows": {
         label: "列數",
@@ -226,7 +285,12 @@ export const zhHantMetadataForms: NonNullable<TranslationData['metadataForms']> 
       },
       "fields.options.kind": {
         label: "類型",
-        helpText: "生命週期類別（僅限單值下拉 / 單選）:進行中的一步、成功的終點或失敗的終點。階段欄位的每個選項都必須宣告。"
+        helpText: "生命週期類別（僅限單值下拉 / 單選）:進行中的一步、成功的終點或失敗的終點。階段欄位的每個選項都必須宣告。",
+        options: {
+          open: "進行中",
+          won: "贏單",
+          lost: "輸單"
+        }
       },
       "fields.reference": {
         label: "參照物件",
@@ -238,11 +302,20 @@ export const zhHantMetadataForms: NonNullable<TranslationData['metadataForms']> 
       },
       "fields.deleteBehavior": {
         label: "刪除行為",
-        helpText: "被參照記錄刪除時的處理方式"
+        helpText: "被參照記錄刪除時的處理方式",
+        options: {
+          set_null: "設為空值",
+          cascade: "串聯（刪除子記錄）",
+          restrict: "限制（阻止刪除）"
+        }
       },
       "fields.transferBehavior": {
         label: "轉移行為",
-        helpText: "變更被引用記錄的負責人時，是否也可一併轉移透過此欄位指向它的記錄"
+        helpText: "變更被引用記錄的負責人時，是否也可一併轉移透過此欄位指向它的記錄",
+        options: {
+          none: "無（保留在原擁有者名下）",
+          cascade: "串聯（提議隨被參照記錄一起轉移）"
+        }
       },
       "fields.multiple": {
         label: "多選",
@@ -254,7 +327,15 @@ export const zhHantMetadataForms: NonNullable<TranslationData['metadataForms']> 
       },
       "fields.returnType": {
         label: "傳回類型",
-        helpText: "公式結果類型"
+        helpText: "公式結果類型",
+        options: {
+          text: "文字",
+          number: "數字",
+          boolean: "布林值",
+          date: "日期",
+          currency: "貨幣",
+          percent: "百分比"
+        }
       },
       "fields.summaryOperations": {
         label: "彙總操作",
@@ -270,7 +351,14 @@ export const zhHantMetadataForms: NonNullable<TranslationData['metadataForms']> 
       },
       "fields.summaryOperations.function": {
         label: "函式",
-        helpText: "聚合函式"
+        helpText: "聚合函式",
+        options: {
+          count: "計數",
+          sum: "加總",
+          avg: "平均值",
+          min: "最小值",
+          max: "最大值"
+        }
       },
       "fields.autonumberFormat": {
         label: "自動編號格式",
@@ -375,15 +463,31 @@ export const zhHantMetadataForms: NonNullable<TranslationData['metadataForms']> 
       },
       "indexes.unique": {
         label: "唯一",
-        helpText: "唯一性範圍（ADR-0120）。未設定：不唯一。已棄用的裸 true（等同於 global）不在選項中；帶有它的索引會保留該值，直到你選擇一個範圍。"
+        helpText: "唯一性範圍（ADR-0120）。未設定：不唯一。已棄用的裸 true（等同於 global）不在選項中；帶有它的索引會保留該值，直到你選擇一個範圍。",
+        options: {
+          global: "全域 — 整個安裝內僅一筆，恰好依這些欄",
+          organization: "組織 — 每個組織僅一筆（驅動程式會在前面加上組織欄）"
+        }
       },
       ownership: {
         label: "歸屬模型",
-        helpText: "記錄歸屬模型。留空依 user 處理。"
+        helpText: "記錄歸屬模型。留空依 user 處理。",
+        options: {
+          user: "使用者 — 可改派的 owner_id 加 owning_business_unit_id",
+          business_unit: "業務單位 — 僅 owning_business_unit_id，無 owner_id",
+          org: "組織",
+          none: "無 — 無逐筆記錄擁有者，兩個錨點都沒有"
+        }
       },
       sharingModel: {
         label: "共用模型",
-        helpText: "面向內部使用者的組織級預設記錄可見性（OWD）。自訂物件若不宣告，執行時依 private 處理（ADR-0090 D1）。"
+        helpText: "面向內部使用者的組織級預設記錄可見性（OWD）。自訂物件若不宣告，執行時依 private 處理（ADR-0090 D1）。",
+        options: {
+          private: "私有 — 僅擁有者",
+          public_read: "公開唯讀 — 所有人可讀，擁有者可寫",
+          public_read_write: "公開讀寫 — 所有人可讀可寫",
+          controlled_by_parent: "由父記錄控制 — 繼承自主記錄"
+        }
       },
       sharing: {
         label: "共用",
@@ -407,7 +511,11 @@ export const zhHantMetadataForms: NonNullable<TranslationData['metadataForms']> 
       },
       "access.default": {
         label: "預設暴露級別",
-        helpText: "public：被 '*' 通配授權覆蓋。private：需要顯式的逐物件授權，並且不受通配列級安全策略約束。"
+        helpText: "public：被 '*' 通配授權覆蓋。private：需要顯式的逐物件授權，並且不受通配列級安全策略約束。",
+        options: {
+          public: "公開 — 受萬用（*）授權涵蓋",
+          private: "私有 — 需要明確的逐物件授權"
+        }
       },
       requiredPermissions: {
         label: "所需權限",
@@ -423,11 +531,22 @@ export const zhHantMetadataForms: NonNullable<TranslationData['metadataForms']> 
       },
       "publicSharing.allowedAudiences": {
         label: "允許的受眾",
-        helpText: "新連結可以指定的受眾；其他受眾會被拒絕。未設定：僅限連結。每種受眾都仍需要連結本身：signed in 還需要一位已登入的使用者，email 還需要收件者地址在該連結的名單上。"
+        helpText: "新連結可以指定的受眾；其他受眾會被拒絕。未設定：僅限連結。每種受眾都仍需要連結本身：signed in 還需要一位已登入的使用者，email 還需要收件者地址在該連結的名單上。",
+        options: {
+          public: "公開",
+          link_only: "僅連結 — 持有連結的任何人",
+          signed_in: "已登入 — 持有連結的已登入使用者",
+          email: "電子郵件 — 名單上持有連結的收件人"
+        }
       },
       "publicSharing.allowedPermissions": {
         label: "允許的權限",
-        helpText: "新連結可以授予的權限級別；其他級別會被拒絕。未設定：僅檢視。"
+        helpText: "新連結可以授予的權限級別；其他級別會被拒絕。未設定：僅檢視。",
+        options: {
+          view: "檢視",
+          comment: "評論",
+          edit: "編輯"
+        }
       },
       "publicSharing.maxExpiryDays": {
         label: "最長有效天數",
@@ -487,7 +606,11 @@ export const zhHantMetadataForms: NonNullable<TranslationData['metadataForms']> 
       },
       editMode: {
         label: "編輯方式",
-        helpText: "該物件記錄的編輯互動意圖。留空則由呈現端自行選擇預設方式。這是跨呈現端的意圖宣告，不是樣式。"
+        helpText: "該物件記錄的編輯互動意圖。留空則由呈現端自行選擇預設方式。這是跨呈現端的意圖宣告，不是樣式。",
+        options: {
+          modal: "彈出視窗 — 在目前檢視上以對話框開啟編輯表單",
+          page: "頁面 — 跳轉到專用的整頁編輯路由"
+        }
       },
       fileAccessDelegate: {
         label: "檔案存取委託服務",
@@ -499,7 +622,14 @@ export const zhHantMetadataForms: NonNullable<TranslationData['metadataForms']> 
       },
       "lifecycle.class": {
         label: "生命週期類別",
-        helpText: "本物件資料的持久化契約"
+        helpText: "本物件資料的持久化契約",
+        options: {
+          record: "記錄（業務事實 — 永久）",
+          audit: "稽核（合規台帳 — 保留 → 封存 → 刪除）",
+          telemetry: "遙測（高頻日誌 — 短期保留）",
+          transient: "暫時（短暫狀態 — 依 TTL 到期）",
+          event: "事件（匯流排訊息 — 極短 TTL）"
+        }
       },
       "lifecycle.retention": {
         label: "保留期",
@@ -527,7 +657,10 @@ export const zhHantMetadataForms: NonNullable<TranslationData['metadataForms']> 
       },
       "lifecycle.storage.strategy": {
         label: "策略",
-        helpText: "儲存策略"
+        helpText: "儲存策略",
+        options: {
+          rotation: "輪替（依時間分片 + 捨棄最舊）"
+        }
       },
       "lifecycle.storage.shards": {
         label: "分片數",
@@ -535,7 +668,12 @@ export const zhHantMetadataForms: NonNullable<TranslationData['metadataForms']> 
       },
       "lifecycle.storage.unit": {
         label: "分片單位",
-        helpText: "單個分片的時間寬度"
+        helpText: "單個分片的時間寬度",
+        options: {
+          day: "天",
+          week: "週",
+          month: "月"
+        }
       },
       "lifecycle.archive": {
         label: "封存",
@@ -666,7 +804,11 @@ export const zhHantMetadataForms: NonNullable<TranslationData['metadataForms']> 
       },
       percentDisplay: {
         label: "百分比顯示",
-        helpText: "唯讀時的顯示方式（清單儲存格與記錄頁）。未設定：百分比旁顯示進度條。條形：始終顯示進度條，用於進度。純數字：只顯示百分比，用於比率或機率。"
+        helpText: "唯讀時的顯示方式（清單儲存格與記錄頁）。未設定：百分比旁顯示進度條。條形：始終顯示進度條，用於進度。純數字：只顯示百分比，用於比率或機率。",
+        options: {
+          bar: "進度條",
+          plain: "純數字"
+        }
       },
       currencyConfig: {
         label: "貨幣設定",
@@ -674,7 +816,12 @@ export const zhHantMetadataForms: NonNullable<TranslationData['metadataForms']> 
       },
       "currencyConfig.currencyMode": {
         label: "貨幣模式",
-        helpText: "dynamic（預設）：欄位本身沒有貨幣，金額以租用戶預設貨幣顯示（localization.currency 設定）。fixed：欄位只有一種貨幣，即 defaultCurrency。record：每筆記錄有自己的貨幣，儲存在 currencyField 指向的欄位中。"
+        helpText: "dynamic（預設）：欄位本身沒有貨幣，金額以租用戶預設貨幣顯示（localization.currency 設定）。fixed：欄位只有一種貨幣，即 defaultCurrency。record：每筆記錄有自己的貨幣，儲存在 currencyField 指向的欄位中。",
+        options: {
+          dynamic: "動態 — 租戶預設幣別",
+          fixed: "固定 — 該欄位使用一種幣別",
+          record: "記錄 — 每筆記錄指定自己的幣別"
+        }
       },
       "currencyConfig.currencyField": {
         label: "幣別欄位",
@@ -771,11 +918,19 @@ export const zhHantMetadataForms: NonNullable<TranslationData['metadataForms']> 
       },
       deleteBehavior: {
         label: "刪除行為",
-        helpText: "被參照記錄刪除時的處理方式"
+        helpText: "被參照記錄刪除時的處理方式",
+        options: {
+          cascade: "串聯（刪除子記錄）",
+          restrict: "限制（阻止刪除）"
+        }
       },
       transferBehavior: {
         label: "轉移行為",
-        helpText: "變更被引用記錄的負責人時，是否也可一併轉移透過此欄位指向它的記錄"
+        helpText: "變更被引用記錄的負責人時，是否也可一併轉移透過此欄位指向它的記錄",
+        options: {
+          none: "無（保留在原擁有者名下）",
+          cascade: "串聯（提議隨被參照記錄一起轉移）"
+        }
       },
       relatedListFilter: {
         label: "關聯清單篩選",
@@ -819,7 +974,11 @@ export const zhHantMetadataForms: NonNullable<TranslationData['metadataForms']> 
       },
       inlineEdit: {
         label: "Inline Edit",
-        helpText: "How the parent's form edits this child's rows when a field group of the parent names this child (fieldGroups[].relatedList). Unset: picked from this object's fields."
+        helpText: "How the parent's form edits this child's rows when a field group of the parent names this child (fieldGroups[].relatedList). Unset: picked from this object's fields.",
+        options: {
+          grid: "表格（在表格中編輯各列）",
+          form: "表單（在完整表單中開啟每列）"
+        }
       },
       inlineTitle: {
         label: "內嵌表格標題",
@@ -855,7 +1014,15 @@ export const zhHantMetadataForms: NonNullable<TranslationData['metadataForms']> 
       },
       returnType: {
         label: "公式傳回類型",
-        helpText: "公式宣告的值類型，依推斷出的 CEL 類型寫入。消費方直接讀它，無需重新解析運算式。貨幣：一筆金額，其貨幣由此欄位的貨幣設定宣告（未設定時為 dynamic）。"
+        helpText: "公式宣告的值類型，依推斷出的 CEL 類型寫入。消費方直接讀它，無需重新解析運算式。貨幣：一筆金額，其貨幣由此欄位的貨幣設定宣告（未設定時為 dynamic）。",
+        options: {
+          text: "文字",
+          number: "數字",
+          boolean: "布林值",
+          date: "日期",
+          currency: "貨幣",
+          percent: "百分比"
+        }
       },
       summaryOperations: {
         label: "彙總操作",
@@ -867,7 +1034,14 @@ export const zhHantMetadataForms: NonNullable<TranslationData['metadataForms']> 
       },
       "summaryOperations.function": {
         label: "函式",
-        helpText: "聚合函式"
+        helpText: "聚合函式",
+        options: {
+          count: "計數",
+          sum: "加總",
+          min: "最小值",
+          max: "最大值",
+          avg: "平均值"
+        }
       },
       "summaryOperations.field": {
         label: "欄位",
@@ -1007,7 +1181,11 @@ export const zhHantMetadataForms: NonNullable<TranslationData['metadataForms']> 
       },
       "body.language": {
         label: "語言",
-        helpText: "expression = 純公式；js = 沙箱 JavaScript"
+        helpText: "expression = 純公式；js = 沙箱 JavaScript",
+        options: {
+          expression: "運算式（L1）",
+          js: "JavaScript（L2 沙箱）"
+        }
       },
       "body.source": {
         label: "原始碼",
@@ -1070,7 +1248,11 @@ export const zhHantMetadataForms: NonNullable<TranslationData['metadataForms']> 
         helpText: "在背景執行，不阻塞目前交易"
       },
       onError: {
-        label: "錯誤處理"
+        label: "錯誤處理",
+        options: {
+          abort: "中止",
+          log: "記錄日誌"
+        }
       },
       timeoutMs: {
         label: "逾時（毫秒）",
@@ -1078,7 +1260,12 @@ export const zhHantMetadataForms: NonNullable<TranslationData['metadataForms']> 
       },
       runAs: {
         label: "執行身分",
-        helpText: "ctx.api 資料操作的身分：inherit 繼承觸發寫入的上下文（預設）、system 提權、user 釘到觸發使用者"
+        helpText: "ctx.api 資料操作的身分：inherit 繼承觸發寫入的上下文（預設）、system 提權、user 釘到觸發使用者",
+        options: {
+          inherit: "繼承（觸發寫入）",
+          system: "系統（提權）",
+          user: "使用者（觸發使用者）"
+        }
       },
       condition: {
         label: "條件",
@@ -1516,7 +1703,14 @@ export const zhHantMetadataForms: NonNullable<TranslationData['metadataForms']> 
       },
       type: {
         label: "類型",
-        helpText: "頁面種類。\"List / Interface\" 把來源檢視繫結為經過編排的介面——它的展現形式（grid / kanban / calendar / …）是在 Interface 中設定的視覺化，不是頁面類型。"
+        helpText: "頁面種類。\"List / Interface\" 把來源檢視繫結為經過編排的介面——它的展現形式（grid / kanban / calendar / …）是在 Interface 中設定的視覺化，不是頁面類型。",
+        options: {
+          list: "清單 / 介面頁",
+          record: "記錄頁",
+          home: "首頁",
+          app: "應用頁",
+          utility: "工具面板"
+        }
       },
       template: {
         label: "範本",
@@ -1629,7 +1823,12 @@ export const zhHantMetadataForms: NonNullable<TranslationData['metadataForms']> 
       },
       "interfaceConfig.recordAction": {
         label: "記錄操作",
-        helpText: "點選記錄時如何開啟其詳細資料"
+        helpText: "點選記錄時如何開啟其詳細資料",
+        options: {
+          drawer: "抽屜（右側預覽）",
+          page: "整頁",
+          none: "不可點擊"
+        }
       },
       "interfaceConfig.showRecordCount": {
         label: "顯示記錄數",
@@ -1794,7 +1993,26 @@ export const zhHantMetadataForms: NonNullable<TranslationData['metadataForms']> 
       },
       "dateRange.defaultRange": {
         label: "Default Period",
-        helpText: "The period the dashboard opens with."
+        helpText: "The period the dashboard opens with.",
+        options: {
+          today: "今天",
+          yesterday: "昨天",
+          this_week: "本週",
+          last_week: "上週",
+          this_month: "本月",
+          last_month: "上月",
+          next_month: "下月",
+          this_quarter: "本季度",
+          last_quarter: "上季度",
+          next_quarter: "下季度",
+          this_year: "今年",
+          last_year: "去年",
+          last_7_days: "近 7 天",
+          last_30_days: "近 30 天",
+          last_90_days: "近 90 天",
+          next_30_days: "未來 30 天",
+          custom: "自定義…"
+        }
       },
       "dateRange.allowCustomRange": {
         label: "Allow Custom Range",
@@ -1970,7 +2188,13 @@ export const zhHantMetadataForms: NonNullable<TranslationData['metadataForms']> 
       },
       mode: {
         label: "語義模式",
-        helpText: "該動作的語義模式。目前只有 AI 人工確認（HITL）啟發式會讀它——沒有任何呈現端依它分支。"
+        helpText: "該動作的語義模式。目前只有 AI 人工確認（HITL）啟發式會讀它——沒有任何呈現端依它分支。",
+        options: {
+          create: "建立",
+          edit: "編輯",
+          delete: "刪除",
+          custom: "自訂"
+        }
       },
       order: {
         label: "排序權重",
@@ -1990,7 +2214,11 @@ export const zhHantMetadataForms: NonNullable<TranslationData['metadataForms']> 
       },
       "body.language": {
         label: "語言",
-        helpText: "expression = 純公式；js = 沙箱 JavaScript"
+        helpText: "expression = 純公式；js = 沙箱 JavaScript",
+        options: {
+          expression: "運算式（L1）",
+          js: "JavaScript（L2 沙箱）"
+        }
       },
       "body.source": {
         label: "原始碼",
@@ -2107,7 +2335,10 @@ export const zhHantMetadataForms: NonNullable<TranslationData['metadataForms']> 
       },
       operation: {
         label: "宣告式寫入",
-        helpText: "對單筆記錄的宣告式欄位寫入：'update' 會把 `patch`（合併在已收集的 `params` 之下）套用到目前記錄，並且以呼叫方的身分執行——絕不提權，因此呼叫方的權限、物件的掛鉤與驗證都會像使用者手動編輯那樣觸發。"
+        helpText: "對單筆記錄的宣告式欄位寫入：'update' 會把 `patch`（合併在已收集的 `params` 之下）套用到目前記錄，並且以呼叫方的身分執行——絕不提權，因此呼叫方的權限、物件的掛鉤與驗證都會像使用者手動編輯那樣觸發。",
+        options: {
+          update: "更新目前記錄"
+        }
       },
       patch: {
         label: "靜態欄位值（patch）",
@@ -2353,7 +2584,26 @@ export const zhHantMetadataForms: NonNullable<TranslationData['metadataForms']> 
       },
       "dateRange.defaultRange": {
         label: "Default Period",
-        helpText: "The period the report opens with."
+        helpText: "The period the report opens with.",
+        options: {
+          today: "今天",
+          yesterday: "昨天",
+          this_week: "本週",
+          last_week: "上週",
+          this_month: "本月",
+          last_month: "上月",
+          next_month: "下月",
+          this_quarter: "本季度",
+          last_quarter: "上季度",
+          next_quarter: "下季度",
+          this_year: "今年",
+          last_year: "去年",
+          last_7_days: "近 7 天",
+          last_30_days: "近 30 天",
+          last_90_days: "近 90 天",
+          next_30_days: "未來 30 天",
+          custom: "自定義…"
+        }
       },
       "dateRange.allowCustomRange": {
         label: "Allow Custom Range",
@@ -3026,7 +3276,11 @@ export const zhHantMetadataForms: NonNullable<TranslationData['metadataForms']> 
       },
       surface: {
         label: "繫結產品介面",
-        helpText: "該 AI 代理繫結的產品介面（ADR-0063 §1）。只有自身介面與之相符、或宣告為 'both' 的技能才會掛載，而該 AI 代理的工具集就是這些技能工具的並集。預設 'ask'。"
+        helpText: "該 AI 代理繫結的產品介面（ADR-0063 §1）。只有自身介面與之相符、或宣告為 'both' 的技能才會掛載，而該 AI 代理的工具集就是這些技能工具的並集。預設 'ask'。",
+        options: {
+          ask: "Ask（對話介面）",
+          build: "Build（創作介面）"
+        }
       },
       instructions: {
         label: "指令",
@@ -3038,7 +3292,7 @@ export const zhHantMetadataForms: NonNullable<TranslationData['metadataForms']> 
       },
       planning: {
         label: "規劃",
-        helpText: "自主推理設定：代理停止前的最大推理迭代次數（1–100，預設 10）。"
+        helpText: "自主推理設定：防止失控迴圈的保險絲，按模型呼叫次數計（一次模型呼叫加上它發起的一批工具呼叫），達到後代理停止（1–1000，預設 10）。"
       },
       memory: {
         label: "記憶",
@@ -3143,7 +3397,12 @@ export const zhHantMetadataForms: NonNullable<TranslationData['metadataForms']> 
       },
       surface: {
         label: "繫結 AI 代理介面",
-        helpText: "該技能繫結的 AI 代理介面（ADR-0063 §3）。把它掛到介面不相符的 AI 代理上會在解析時直接回報錯誤，而不是悄悄跳過。預設 'ask'。"
+        helpText: "該技能繫結的 AI 代理介面（ADR-0063 §3）。把它掛到介面不相符的 AI 代理上會在解析時直接回報錯誤，而不是悄悄跳過。預設 'ask'。",
+        options: {
+          ask: "Ask（對話介面）",
+          build: "Build（創作介面）",
+          both: "兩者"
+        }
       },
       instructions: {
         label: "指令",
@@ -3152,6 +3411,10 @@ export const zhHantMetadataForms: NonNullable<TranslationData['metadataForms']> 
       tools: {
         label: "工具",
         helpText: "工具名（支援萬用字元：action_*）"
+      },
+      context: {
+        label: "上下文包",
+        helpText: "此技能使用的上下文包（填名稱）。工具中須包含 get_record_context。透過 MCP 呼叫時，提示詞可額外接收一個可選的記錄 ID"
       },
       triggerConditions: {
         label: "觸發條件",

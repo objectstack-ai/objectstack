@@ -41,7 +41,6 @@ import '@objectstack/metadata';
 import { HttpDispatcher } from '../http-dispatcher.js';
 import type { HttpProtocolContext, KernelResolver } from '../http-dispatcher.js';
 import { BUILTIN_OPERATION_MESSAGES } from '@objectstack/spec/system';
-import { handleOwnDoorBridgeRequest } from './own-door-bridge.js';
 import { PERSONAL_VIEWS_BRIDGE } from './personal-views.js';
 import { ATTACHMENTS_BRIDGE } from './attachments.js';
 import { PRINT_BRIDGE } from './print.js';
@@ -377,7 +376,7 @@ describe.each(FAMILIES)('[#36506] $prefix forwards its doors to the $slot member
 // [#37273] The bridge's two `501` sentences are the operation-message
 // catalog's, in the request's top `Accept-Language` tag, for a bridge that
 // names its noun's key (the print door). Code and status are unchanged, no
-// `userMessage` is added, and a bridge that names no noun key keeps English.
+// `userMessage` is added.
 describe('[#37273] the print door\'s 501 follows the request\'s language', () => {
     const [method, path, body] = ['POST', '/print/records', { app: 'sales', object: 'invoice', recordId: 'inv_1', page: 'invoice_document' }] as const;
     const withHeaders = (headers: Record<string, string>) => {
@@ -416,27 +415,8 @@ describe('[#37273] the print door\'s 501 follows the request\'s language', () =>
         }
     });
 
-    it('a bridge that names no noun key keeps its English sentence under zh-CN: never half translated', async () => {
-        // [#37352] Every shipped bridge names its noun key now, so the control is
-        // a shipped bridge with the key taken off, handed to the bridge directly.
-        const deps = {
-            routeNotFound: vi.fn(),
-            getRequestKernelService: async () => undefined,
-            error: (message: string, status: number) => ({ status, body: { error: { code: 'NOT_IMPLEMENTED', message } } }),
-        } as any;
-        const request = new Request(`${ORIGIN}/api/v1/personal-views/pv_1`, { method: 'DELETE', headers: { ...JSON_HEADERS, 'accept-language': 'zh-CN' } });
-        const result = await handleOwnDoorBridgeRequest(
-            deps,
-            { ...PERSONAL_VIEWS_BRIDGE, nounKey: undefined },
-            { method: 'DELETE', path: '/personal-views/pv_1', body: {}, query: {} },
-            ctx(request),
-        );
-        expect(envelope(result)).toEqual({ status: 501, code: 'NOT_IMPLEMENTED' });
-        expect(result.response?.body?.error?.message).toBe(
-            'The personal view delete door is not available: no personal-views service is registered on this kernel. '
-            + '@objectstack/plugin-auth (AuthPlugin) registers it.',
-        );
-    });
+    // [#37610] The English-only arm is gone: `nounKey` is required, so no
+    // bridge can ship a `501` that stays English under another language.
 });
 
 // [#37352] The personal-view and attachment doors sit on the same bridge as the
@@ -469,16 +449,16 @@ describe('[#37352] the personal-view and attachment doors\' 501s follow the requ
             ...AT,
             requests: [['DELETE', '/attachments/att_1'], ['PATCH', '/attachments/att_1', { file_name: 'renamed.pdf' }]] as Array<[string, string, unknown?]>,
             unregistered: {
-                en: 'The attachment removal and rename doors is not available: no file-attachments service is registered on this kernel. @objectstack/service-storage (StorageServicePlugin) registers it.',
+                en: 'The attachment removal and rename doors are not available: no file-attachments service is registered on this kernel. @objectstack/service-storage (StorageServicePlugin) registers it.',
                 'zh-CN': '附件删除和重命名接口不可用：此内核上未注册 file-attachments 服务。该服务由 @objectstack/service-storage (StorageServicePlugin) 注册。',
                 'ja-JP': '添付ファイルの削除・名前変更エンドポイントは利用できません。このカーネルには file-attachments サービスが登録されていません。このサービスは @objectstack/service-storage (StorageServicePlugin) が登録します。',
-                'es-ES': 'El punto de acceso para eliminar y renombrar adjuntos no está disponible: no hay ningún servicio file-attachments registrado en este kernel. Lo registra @objectstack/service-storage (StorageServicePlugin).',
+                'es-ES': 'Los puntos de acceso para eliminar y renombrar adjuntos no están disponibles: no hay ningún servicio file-attachments registrado en este kernel. Lo registra @objectstack/service-storage (StorageServicePlugin).',
             },
             memberMissing: {
-                en: 'The attachment removal and rename doors is not available: the registered file-attachments service does not implement handleAttachmentDoor.',
+                en: 'The attachment removal and rename doors are not available: the registered file-attachments service does not implement handleAttachmentDoor.',
                 'zh-CN': '附件删除和重命名接口不可用：已注册的 file-attachments 服务未实现 handleAttachmentDoor。',
                 'ja-JP': '添付ファイルの削除・名前変更エンドポイントは利用できません。登録されている file-attachments サービスは handleAttachmentDoor を実装していません。',
-                'es-ES': 'El punto de acceso para eliminar y renombrar adjuntos no está disponible: el servicio file-attachments registrado no implementa handleAttachmentDoor.',
+                'es-ES': 'Los puntos de acceso para eliminar y renombrar adjuntos no están disponibles: el servicio file-attachments registrado no implementa handleAttachmentDoor.',
             },
         },
     ];
@@ -521,8 +501,8 @@ describe('[#37352] the personal-view and attachment doors\' 501s follow the requ
     }
 
     it('the English the catalog keys carry is each bridge\'s noun, byte for byte', () => {
-        expect(BUILTIN_OPERATION_MESSAGES.en[PERSONAL_VIEWS_BRIDGE.nounKey!]).toBe(PERSONAL_VIEWS_BRIDGE.noun);
-        expect(BUILTIN_OPERATION_MESSAGES.en[ATTACHMENTS_BRIDGE.nounKey!]).toBe(ATTACHMENTS_BRIDGE.noun);
-        expect(BUILTIN_OPERATION_MESSAGES.en[PRINT_BRIDGE.nounKey!]).toBe(PRINT_BRIDGE.noun);
+        expect(BUILTIN_OPERATION_MESSAGES.en[PERSONAL_VIEWS_BRIDGE.nounKey]).toBe(PERSONAL_VIEWS_BRIDGE.noun);
+        expect(BUILTIN_OPERATION_MESSAGES.en[ATTACHMENTS_BRIDGE.nounKey]).toBe(ATTACHMENTS_BRIDGE.noun);
+        expect(BUILTIN_OPERATION_MESSAGES.en[PRINT_BRIDGE.nounKey]).toBe(PRINT_BRIDGE.noun);
     });
 });

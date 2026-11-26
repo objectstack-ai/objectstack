@@ -5783,6 +5783,8 @@ const fr = {
     completed: 'Flux « {{flow}} » terminé',
     alreadySubmitted: 'Votre envoi précédent a abouti. Le flux est passé à cette étape.',
     noLongerWaiting: 'Cette étape a peut-être déjà été traitée. Fermez cette boîte de dialogue et vérifiez l’enregistrement avant de réessayer.',
+    invalidScreenInput: 'Certaines valeurs de cette étape n’ont pas été acceptées. Vérifiez-les et réessayez.',
+    fieldNotAccepted: '{{field}} : cette valeur n’est pas acceptée',
   },
   appManagement: {
     title: "Applications",
