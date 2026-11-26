@@ -1469,6 +1469,9 @@ export const ruMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       }
     }
   },
+  form: {
+    label: "Форма"
+  },
   page: {
     label: "Страница",
     sections: {

@@ -1469,6 +1469,9 @@ export const zhHantMetadataForms: NonNullable<TranslationData['metadataForms']> 
       }
     }
   },
+  form: {
+    label: "表單"
+  },
   page: {
     label: "頁面",
     sections: {

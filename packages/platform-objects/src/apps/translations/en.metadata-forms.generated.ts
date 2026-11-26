@@ -1469,6 +1469,9 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       }
     }
   },
+  form: {
+    label: "Form"
+  },
   page: {
     label: "Page",
     sections: {

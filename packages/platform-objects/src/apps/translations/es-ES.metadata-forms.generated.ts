@@ -1469,6 +1469,9 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       }
     }
   },
+  form: {
+    label: "Formulario"
+  },
   page: {
     label: "Página",
     sections: {

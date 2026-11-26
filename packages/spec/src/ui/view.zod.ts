@@ -5409,7 +5409,7 @@ function checkFormViewBody(view: any, ctx: z.RefinementCtx): void {
   // {@link foldFormGroupsIntoSections} — so every check here must keep
   // reading BOTH buckets (`sections` AND the legacy `groups` alias).
   for (const [key, sections] of [['sections', view.sections], ['groups', view.groups]] as const) {
-    sections?.forEach((section, index) => {
+    sections?.forEach((section: any, index: number) => {
       // The `features.*` scope-root exclusion (ruled 2026-08-27, objectui#6262
       // — see {@link checkFormViewPredicateFeaturesRoot}): every predicate
       // this form view carries — section-level, field-level at any depth,
@@ -5419,7 +5419,7 @@ function checkFormViewBody(view: any, ctx: z.RefinementCtx): void {
       if (sectionRefusal) {
         ctx.addIssue({ code: 'custom', path: [key, index, 'visibleWhen'], message: sectionRefusal });
       }
-      section?.fields?.forEach((field, fieldIndex) => {
+      section?.fields?.forEach((field: any, fieldIndex: number) => {
         refineFormFieldFeaturesRoot(field, [key, index, 'fields', fieldIndex], ctx);
       });
       // [#13704] Wizard steps carry no predicate slot and do not collapse —
