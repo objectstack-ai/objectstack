@@ -217,6 +217,13 @@ export function extractTranslations(config: any, opts: ExtractOptions = {}): Ext
         const existingValue = lookupDeep(existing[locale], entry.path);
         if (existingValue !== undefined && existingValue !== '') {
           value = String(existingValue);
+        } else if (entry.fallbackPath !== undefined) {
+          // [ADR-0159 D8] A translation at the address the translator falls
+          // back to already translates the string: no value is scaffolded at
+          // the first address, where an empty or `[TODO]` one would be read
+          // ahead of it.
+          const fallbackValue = lookupDeep(existing[locale], entry.fallbackPath);
+          if (fallbackValue !== undefined && fallbackValue !== '') continue;
         }
       }
       if (value === undefined) {

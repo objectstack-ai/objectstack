@@ -295,6 +295,12 @@ interface ExpectedKey {
   source: CoverageIssue['source'];
   /** Lookup path expressed as an array of segments. */
   path: string[];
+  /**
+   * [ADR-0159 D8] The address the translator reads when a bundle has no value
+   * at {@link path} (the walker's `ExpectedEntry.fallbackPath`): a value there
+   * translates the string too.
+   */
+  fallbackPath?: string[];
   /** Friendly display key (joined with dots). */
   displayKey: string;
   /** Description shown in the issue message when the key is missing. */
@@ -517,6 +523,7 @@ function collectExpectedKeys(config: any): ExpectedKey[] {
     return {
       source,
       path: entry.path,
+      ...(entry.fallbackPath ? { fallbackPath: entry.fallbackPath } : {}),
       displayKey: entry.path.join('.'),
       context: describeEntry(entry, source),
       inline: entry.inline,
@@ -735,7 +742,8 @@ export function computeI18nCoverage(config: any, opts: CoverageOptions = {}): Co
     (key) =>
       key.inline !== undefined
       || inlineLocaleAny(key.inlineLocales) !== undefined
-      || authoredInBundle(key.path),
+      || authoredInBundle(key.path)
+      || (key.fallbackPath !== undefined && authoredInBundle(key.fallbackPath)),
   );
 
   // The platform baseline is dropped from the POPULATION, not from the issue
@@ -772,7 +780,9 @@ export function computeI18nCoverage(config: any, opts: CoverageOptions = {}): Co
       //    text a reader of the default locale sees, so `inlineLocaleAny`
       //    stands in for `inline` when the author wrote a map instead of a
       //    string.
+      // [ADR-0159 D8] 1b. The address the translator falls back to.
       const value = lookupKey(data, key.path)
+        ?? (key.fallbackPath !== undefined ? lookupKey(data, key.fallbackPath) : undefined)
         ?? inlineLocaleText(key.inlineLocales, locale)
         ?? (locale === defaultLocale ? (key.inline ?? inlineLocaleAny(key.inlineLocales)) : undefined);
       if (value !== undefined) {

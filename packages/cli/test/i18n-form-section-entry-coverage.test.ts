@@ -121,3 +121,71 @@ describe('i18n walker — a form section entry\'s copy, `_sections.<section>.fie
     expect(covered).toEqual([]);
   });
 });
+
+// [ADR-0159 D8] An authored `form` item's section copy is read at the form's
+// own node, `forms.<name>.sections.<section>…`, and at the object-level
+// default `objects.<object>._sections.<section>…` for each key the node lacks.
+describe('i18n walker — a `form` item\'s sections, `forms.<name>.sections.<section>…`', () => {
+  const FORM = 'crm_case.intake';
+  const formConfig = (translations: unknown[] = []) => ({
+    i18n: { defaultLocale: 'en', supportedLocales: ['en', 'zh-CN'] },
+    objects: [{
+      name: 'crm_case',
+      label: 'Case',
+      fields: { subject: { type: 'text', label: 'Subject' }, contact_name: { type: 'text', label: 'Contact name' } },
+    }],
+    forms: [{
+      name: FORM,
+      object: 'crm_case',
+      type: 'simple',
+      sections: [
+        { name: 'about', label: 'About you', description: 'Who is asking', fields: [{ field: 'contact_name', label: 'Your name', helpText: 'As on your ID' }, 'subject'] },
+        { label: 'Nameless', fields: ['subject'] },
+      ],
+    }],
+    translations,
+  });
+  const formKeys = (config: any) => collectExpectedEntries(config)
+    .map((e) => e.path.join('.'))
+    .filter((p) => p.startsWith(`forms.${FORM}.sections.`) || p.includes('._sections.'));
+  const zhMissing = (translations: unknown[]) => computeI18nCoverage(formConfig(translations)).issues
+    .filter((i) => i.locale === 'zh-CN' && (i.key.includes('.sections.') || i.key.includes('._sections.')))
+    .map((i) => i.key)
+    .sort();
+
+  it('emits each named section\'s authored copy at the form\'s own node, with the object-level slot as its fallback', () => {
+    expect(formKeys(formConfig()).sort()).toEqual([
+      `forms.${FORM}.sections.about.description`,
+      `forms.${FORM}.sections.about.fields.contact_name.helpText`,
+      `forms.${FORM}.sections.about.fields.contact_name.label`,
+      `forms.${FORM}.sections.about.label`,
+    ]);
+    const label = collectExpectedEntries(formConfig()).find((e) => e.path.join('.') === `forms.${FORM}.sections.about.label`);
+    expect(label?.fallbackPath?.join('.')).toBe('objects.crm_case._sections.about.label');
+  });
+
+  it('the coverage gate counts the section translated at either address, and reports it untranslated at neither', () => {
+    expect(zhMissing([{ 'zh-CN': { objects: { crm_case: { label: '工单' } } } }])).toEqual([
+      `forms.${FORM}.sections.about.description`,
+      `forms.${FORM}.sections.about.fields.contact_name.helpText`,
+      `forms.${FORM}.sections.about.fields.contact_name.label`,
+      `forms.${FORM}.sections.about.label`,
+    ]);
+    const atTheFormsNode = { label: '关于您', description: '提问者', fields: { contact_name: { label: '您的姓名', helpText: '与证件一致' } } };
+    expect(zhMissing([{ 'zh-CN': { objects: { crm_case: { label: '工单' } }, forms: { [FORM]: { sections: { about: atTheFormsNode } } } } }])).toEqual([]);
+    expect(zhMissing([{ 'zh-CN': { objects: { crm_case: { label: '工单', _sections: { about: atTheFormsNode } } } } }])).toEqual([]);
+  });
+
+  it('`os i18n extract` writes the form\'s own node, and no translated-locale value over a translation the object-level slot holds', () => {
+    const en: any = extractTranslations(formConfig(), { locales: ['en'] }).bundles.en;
+    expect(en?.forms?.[FORM]?.sections?.about?.label).toBe('About you');
+    expect(en?.objects?.crm_case?._sections).toBeUndefined();
+    const zh: any = extractTranslations(
+      formConfig([{ 'zh-CN': { objects: { crm_case: { _sections: { about: { label: '关于您' } } } } } }]),
+      { locales: ['zh-CN'], fill: 'todo' },
+    ).bundles['zh-CN'];
+    expect(zh?.forms?.[FORM]?.sections?.about?.label).toBeUndefined();
+    // CONTROL: a key the object-level slot does not hold is scaffolded at the form's node.
+    expect(zh?.forms?.[FORM]?.sections?.about?.description).toBe('[TODO] Who is asking');
+  });
+});
