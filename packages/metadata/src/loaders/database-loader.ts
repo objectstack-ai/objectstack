@@ -1256,7 +1256,7 @@ export class DatabaseLoader implements MetadataLoader {
       for (const row of rows) {
         const data = this.rowToData(row);
         if (data === null) continue;
-        this.readRowColumns.set(data, storedRowColumnPackageId(row));
+        this.recordRowColumn(data, storedRowColumnPackageId(row));
         const name = row.name;
         const packageId = PACKAGE_SLOTTED_STORE_TYPES.has(type) ? storedRowPackageId(row) : undefined;
         const member = PACKAGE_SLOTTED_STORE_TYPES.has(type) ? storedRowMemberOf(type, data, row.bundle_member) : undefined;
@@ -1300,9 +1300,19 @@ export class DatabaseLoader implements MetadataLoader {
    */
   private handOut(entry: StoredTypeRow): Record<string, unknown> {
     const copy = { ...entry.data };
-    this.readRowColumns.set(copy, entry.rowPackageId);
+    this.recordRowColumn(copy, entry.rowPackageId);
     if (entry.legacyRowId !== undefined && entry.packageId !== undefined) this.legacyReadRows.set(copy, { id: entry.legacyRowId, packageId: entry.packageId });
     return copy;
+  }
+
+  /**
+   * [#37039] Record `column` as the package column of the row `item` was read
+   * from ({@link rowPackageIdOf}). A row whose stored body is a JSON primitive
+   * is not an object a column can be recorded against: it is skipped, so its
+   * neighbours' read still answers.
+   */
+  private recordRowColumn(item: unknown, column: string | null): void {
+    if (item !== null && typeof item === 'object') this.readRowColumns.set(item, column);
   }
 
   /**
@@ -1352,6 +1362,9 @@ export class DatabaseLoader implements MetadataLoader {
     if (owned) await this.nameUnnamedRows(type, name, unnamedRowsOf(type, ofPackage, (of) => this.rowToData(of)));
     const naming = owned && typeof target === 'string' && row.bundle_member !== target ? { bundle_member: target } : {};
     await this._update(this.tableName, read.id, { package_id: read.packageId, ...naming });
+    // [#37039] The handed-out body answers the column as this update left it, not as the
+    // read found it; `invalidate` drops the cached rows, so a later read agrees.
+    this.recordRowColumn(item, read.packageId);
     this.invalidate(type, name);
   }
 

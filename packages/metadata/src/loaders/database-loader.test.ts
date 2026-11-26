@@ -4836,4 +4836,45 @@ describe('[#37039] a stored row\'s package binding is read from its package colu
     expect(read.errors.some((error) => error.includes('sys_metadata unreachable'))).toBe(true);
     expect(read.items.map((entry) => [entry.name, entry.packageId, entry.source])).toEqual([['legacy', null, 'row']]);
   });
+
+  /**
+   * The `[#31699 R7-A]` scenario above, then read: the priming pass binds the
+   * legacy row's empty column to the package its own body names, and the primed
+   * copy answers the column as the pass left it. BEFORE: the copy answered the
+   * column as the plural read found it (`null`) for the rest of the process.
+   */
+  it('listPackageBindings(agent) after the boot pass bound a legacy row\'s column: the primed copy answers the bound package, `row`', async () => {
+    await driver.create('sys_metadata', {
+      id: 'legacy', type: 'agent', name: 'helper', state: 'active', version: 1, checksum: 'legacy', source: 'database',
+      package_id: null, metadata: JSON.stringify({ name: 'helper', label: 'Helper', packageId: ALPHA }),
+    });
+    const manager = new MetadataManager({ formats: ['json'], loaders: [new DatabaseLoader({ driver })] });
+    for (const item of await manager.loadMany<Record<string, unknown>>('agent')) {
+      await manager.register('agent', item.name as string, item, { notify: false, skipSourceLoader: true });
+    }
+    expect(vi.mocked(driver.update).mock.calls).toEqual([['sys_metadata', 'legacy', { package_id: ALPHA }]]);
+    const read = await manager.listPackageBindings('agent');
+    expect(read.degraded).toBe(false);
+    expect(read.items.map((entry) => [entry.name, entry.packageId, entry.source])).toEqual([['helper', ALPHA, 'row']]);
+    // A later plural read of the row agrees with the column it now holds.
+    expect((await new DatabaseLoader({ driver }).loadRowBindings('agent')).map((entry) => [entry.name, entry.rowPackageId])).toEqual([['helper', ALPHA]]);
+  });
+
+  /**
+   * A row whose stored body is a JSON primitive is not an object the loader can
+   * record a column against. The plural read serves the other rows as before
+   * the column was recorded. BEFORE: recording it threw, and the whole type's
+   * read failed.
+   */
+  it('a row whose body is a JSON primitive does not fail the plural read: the other row is still served', async () => {
+    await driver.create('sys_metadata', {
+      id: 'skill_primitive', type: 'skill', name: 'primitive', state: 'active', version: 1, checksum: 'skill_primitive', source: 'database',
+      package_id: null, metadata: '42',
+    });
+    await seed('normal', ALPHA, null);
+    const loader = new DatabaseLoader({ driver });
+    expect(await loader.loadMany<Record<string, unknown>>('skill')).toContainEqual({ name: 'normal', label: 'normal', instructions: 'normal' });
+    const manager = new MetadataManager({ formats: ['json'], loaders: [new DatabaseLoader({ driver })] });
+    expect(await manager.list('skill')).toContainEqual({ name: 'normal', label: 'normal', instructions: 'normal' });
+  });
 });

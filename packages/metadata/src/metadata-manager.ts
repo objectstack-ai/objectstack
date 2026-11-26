@@ -1857,7 +1857,8 @@ export class MetadataManager implements IMetadataService {
       const name = slotted ? storedNameOf(key) : key;
       const readColumn = this.readRowColumnOf(data);
       if (readColumn !== undefined) return { name, data, packageId: readColumn, source: 'row' };
-      if (rowColumns.has(key)) return { name, data, packageId: rowColumns.get(key)!, source: 'row' };
+      const keyedColumn: string | null | undefined = rowColumns.has(key) ? rowColumns.get(key) : undefined;
+      if (keyedColumn !== undefined) return { name, data, packageId: keyedColumn, source: 'row' };
       const registered = slotted ? slotPackageOf(key) : indexedItemPackageId(data);
       return { name, data, packageId: registered ?? null, source: 'registration' };
     });
