@@ -4,6 +4,8 @@
 '@objectstack/lint': major
 '@objectstack/spec': major
 '@objectstack/scenarios': patch
+'@objectstack/cli': patch
+'@objectstack/service-automation': patch
 ---
 
 feat(security)!: View All and Modify All stop opening fields; `viewAllFields` is the one "every field" bit
@@ -35,3 +37,4 @@ Also in this change:
 - `@objectstack/lint`: the warning `security-superuser-field-mask-inert` is retired, since a set's own field rows now bind beside its own View All or Modify All. `security-cross-set-field-reopen` now reports only a field one set hides that another set's `viewAllFields` re-opens. `security-controlled-by-parent-master-reference-hidden` and the roll-up source-visibility rules now judge a mask beside Modify All like any other mask.
 - `@objectstack/core`: `superuserFieldVote` is replaced by `viewAllFieldsReadVote(sets, object, field)`, which answers whether a set's `viewAllFields` reads the field. `holdsSuperuserBypass` is unchanged and answers the record bypass only.
 - `@objectstack/scenarios`: the persona-grant scoring no longer treats Modify All as overriding a field lock.
+- `@objectstack/cli` and `@objectstack/service-automation`: test comments only, restated for the 19 meaning.
