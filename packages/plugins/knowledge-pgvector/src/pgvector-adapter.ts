@@ -804,6 +804,10 @@ export class PgvectorKnowledgeAdapter implements IKnowledgeAdapter {
         ext = await this.findExtension(pool);
       } catch (err) {
         refusal = err;
+        // Another session may have created it at the same moment: `IF NOT
+        // EXISTS` does not hold between two concurrent CREATEs, and the loser
+        // fails on the catalogue's unique key. What counts is whether it exists now.
+        ext = await this.findExtension(pool).catch(() => undefined);
       }
       if (!ext) {
         throw notReady(
