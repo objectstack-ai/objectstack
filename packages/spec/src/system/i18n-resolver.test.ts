@@ -6908,3 +6908,69 @@ describe('resolveFlowApprovalStepLabel — an approval step label from the `flow
       .toBeUndefined();
   });
 });
+
+describe('resolveMetadataFormLabels — select option names (metadataForms.<type>.fields.<path>.options)', () => {
+  const bundle: TranslationBundle = {
+    'zh-CN': {
+      metadataForms: {
+        object: {
+          fields: {
+            sharingModel: { label: '共享模型', options: { private: '私有 — 仅所有者' } },
+            'fields.deleteBehavior': { options: { cascade: '级联（删除子记录）' } },
+          },
+        },
+      },
+    },
+  };
+  const form = {
+    sections: [
+      {
+        name: 'security',
+        fields: [
+          {
+            field: 'sharingModel',
+            type: 'select',
+            options: [
+              { label: 'Private — owner only', value: 'private' },
+              { label: 'Public read — everyone reads, owner writes', value: 'public_read' },
+            ],
+          },
+          {
+            field: 'fields',
+            type: 'repeater',
+            fields: [
+              {
+                field: 'deleteBehavior',
+                type: 'select',
+                options: [
+                  { label: 'Cascade (delete children)', value: 'cascade' },
+                  { label: 'Restrict (block the delete)', value: 'restrict' },
+                ],
+              },
+            ],
+          },
+        ],
+      },
+    ],
+  };
+
+  it('names a choice by the translation keyed by its value, and keeps the rest of the option', () => {
+    const out: any = resolveMetadataFormLabels(form, 'object', bundle, { locale: 'zh-CN' });
+    const sharing = out.sections[0].fields[0];
+    expect(sharing.label).toBe('共享模型');
+    expect(sharing.options[0]).toEqual({ label: '私有 — 仅所有者', value: 'private' });
+    // No translation for this value: its own English label stays.
+    expect(sharing.options[1]).toEqual({ label: 'Public read — everyone reads, owner writes', value: 'public_read' });
+  });
+
+  it('reaches a nested row through its dot path', () => {
+    const out: any = resolveMetadataFormLabels(form, 'object', bundle, { locale: 'zh-CN' });
+    const deleteBehavior = out.sections[0].fields[1].fields[0];
+    expect(deleteBehavior.options.map((o: any) => o.label)).toEqual(['级联（删除子记录）', 'Restrict (block the delete)']);
+  });
+
+  it('leaves the input form untouched', () => {
+    resolveMetadataFormLabels(form, 'object', bundle, { locale: 'zh-CN' });
+    expect((form.sections[0].fields[0] as any).options[0].label).toBe('Private — owner only');
+  });
+});

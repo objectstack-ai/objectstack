@@ -114,7 +114,12 @@ export const deMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       "fieldGroups.collapse": {
         label: "Einklappen",
-        helpText: "Ob der Abschnitt eingeklappt werden kann. Das Eingabeformular folgt der Einstellung. Auf der Standard-Datensatzseite kann der Leser jede Gruppe mit Titel einklappen; dort legt die Einstellung nur den Anfangszustand fest: Collapsed beginnt eingeklappt, die anderen offen. Nicht gesetzt: nein."
+        helpText: "Ob der Abschnitt eingeklappt werden kann. Das Eingabeformular folgt der Einstellung. Auf der Standard-Datensatzseite kann der Leser jede Gruppe mit Titel einklappen; dort legt die Einstellung nur den Anfangszustand fest: Collapsed beginnt eingeklappt, die anderen offen. Nicht gesetzt: nein.",
+        options: {
+          none: "Keine — im Eingabeformular immer geöffnet, ohne Umschalter",
+          expanded: "Ausgeklappt — einklappbar, startet geöffnet",
+          collapsed: "Eingeklappt — einklappbar, startet geschlossen"
+        }
       },
       "fieldGroups.visibleWhen": {
         label: "Sichtbar wenn",
@@ -134,7 +139,56 @@ export const deMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       "fields.type": {
         label: "Typ",
-        helpText: "Feldtyp"
+        helpText: "Feldtyp",
+        options: {
+          text: "Textfeld",
+          textarea: "Textbereich",
+          email: "E-Mail",
+          url: "URL-Adresse",
+          phone: "Telefon",
+          password: "Passwort",
+          markdown: "Markdown-Text",
+          html: "HTML-Inhalt",
+          richtext: "Formatierter Text",
+          number: "Zahl",
+          currency: "Währung",
+          percent: "Prozent",
+          date: "Datum",
+          datetime: "Datum und Uhrzeit",
+          time: "Uhrzeit",
+          boolean: "Boolesch",
+          toggle: "Umschalter",
+          select: "Auswahl",
+          multiselect: "Mehrfachauswahl",
+          radio: "Optionsfeld",
+          checkboxes: "Kontrollkästchen",
+          lookup: "Nachschlagen (Referenz)",
+          master_detail: "Master-Detail-Beziehung",
+          tree: "Baum",
+          image: "Bild",
+          file: "Datei",
+          avatar: "Profilbild",
+          video: "Videodatei",
+          audio: "Audiodatei",
+          formula: "Formel (berechnet)",
+          summary: "Zusammenfassung (Rollup)",
+          autonumber: "Automatische Nummer",
+          composite: "Zusammengesetzt (eingebettet)",
+          repeater: "Wiederholung (eingebettetes Array)",
+          record: "Datensatz (Schlüssel-Map)",
+          location: "Standort (GPS)",
+          address: "Adresse",
+          code: "Quellcode",
+          json: "JSON-Daten",
+          color: "Farbe",
+          rating: "Bewertung",
+          slider: "Schieberegler",
+          signature: "Unterschrift",
+          qrcode: "QR-Code / Strichcode",
+          progress: "Fortschritt",
+          tags: "Schlagwörter",
+          vector: "Vektor-Embedding"
+        }
       },
       "fields.description": {
         label: "Beschreibung",
@@ -186,7 +240,12 @@ export const deMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       "fields.valueDomain": {
         label: "Wertebereich",
-        helpText: "Standard, dem der geschriebene Wert angehören muss; ein Schreibvorgang mit einem Wert außerhalb wird abgelehnt"
+        helpText: "Standard, dem der geschriebene Wert angehören muss; ein Schreibvorgang mit einem Wert außerhalb wird abgelehnt",
+        options: {
+          iana_time_zone: "IANA-Zeitzone",
+          iso_4217_currency: "Währungscode nach ISO 4217",
+          iso_3166_alpha2: "Ländercode nach ISO 3166-1 alpha-2"
+        }
       },
       "fields.rows": {
         label: "Zeilen",
@@ -226,7 +285,12 @@ export const deMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       "fields.options.kind": {
         label: "Art",
-        helpText: "Lebenszykluskategorie (nur Einfachauswahl / Optionsfeld): ein Schritt auf dem Weg, das erfolgreiche Ende oder das erfolglose Ende. Für jede Option des Phasenfelds erforderlich."
+        helpText: "Lebenszykluskategorie (nur Einfachauswahl / Optionsfeld): ein Schritt auf dem Weg, das erfolgreiche Ende oder das erfolglose Ende. Für jede Option des Phasenfelds erforderlich.",
+        options: {
+          open: "Offen",
+          won: "Gewonnen",
+          lost: "Verloren"
+        }
       },
       "fields.reference": {
         label: "Referenz",
@@ -238,11 +302,20 @@ export const deMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       "fields.deleteBehavior": {
         label: "Verhalten beim Löschen",
-        helpText: "Was geschieht, wenn der referenzierte Datensatz gelöscht wird"
+        helpText: "Was geschieht, wenn der referenzierte Datensatz gelöscht wird",
+        options: {
+          set_null: "Auf null setzen",
+          cascade: "Kaskadieren (untergeordnete löschen)",
+          restrict: "Einschränken (Löschen blockieren)"
+        }
       },
       "fields.transferBehavior": {
         label: "Verhalten beim Inhaberwechsel",
-        helpText: "Ob „Inhaber ändern“ am referenzierten Datensatz auch die Datensätze mitnehmen kann, die über dieses Feld auf ihn verweisen"
+        helpText: "Ob „Inhaber ändern“ am referenzierten Datensatz auch die Datensätze mitnehmen kann, die über dieses Feld auf ihn verweisen",
+        options: {
+          none: "Keine (bleiben bei ihrem Besitzer)",
+          cascade: "Kaskadieren (Mitverschieben mit dem referenzierten Datensatz anbieten)"
+        }
       },
       "fields.multiple": {
         label: "Mehrfach",
@@ -254,7 +327,15 @@ export const deMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       "fields.returnType": {
         label: "Rückgabetyp",
-        helpText: "Ergebnistyp für Formeln"
+        helpText: "Ergebnistyp für Formeln",
+        options: {
+          text: "Zeichenfolge",
+          number: "Zahl",
+          boolean: "Boolesch",
+          date: "Datum",
+          currency: "Währung",
+          percent: "Prozent"
+        }
       },
       "fields.summaryOperations": {
         label: "Zusammenfassungsoperationen",
@@ -270,7 +351,14 @@ export const deMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       "fields.summaryOperations.function": {
         label: "Funktion",
-        helpText: "Aggregationsfunktion"
+        helpText: "Aggregationsfunktion",
+        options: {
+          count: "Anzahl",
+          sum: "Summe",
+          avg: "Durchschnitt",
+          min: "Minimum",
+          max: "Maximum"
+        }
       },
       "fields.autonumberFormat": {
         label: "Format der automatischen Nummerierung",
@@ -375,15 +463,31 @@ export const deMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       "indexes.unique": {
         label: "Eindeutiger Index",
-        helpText: "Eindeutigkeitsbereich (ADR-0120). Nicht gesetzt: nicht eindeutig. Das veraltete bloße true (es bedeutet global) wird nicht angeboten; ein Index, der es trägt, behält es, bis Sie einen Bereich wählen."
+        helpText: "Eindeutigkeitsbereich (ADR-0120). Nicht gesetzt: nicht eindeutig. Das veraltete bloße true (es bedeutet global) wird nicht angeboten; ein Index, der es trägt, behält es, bis Sie einen Bereich wählen.",
+        options: {
+          global: "Global — ein Inhaber in der gesamten Installation, über genau diese Spalten",
+          organization: "Organisation — ein Inhaber pro Organisation (der Treiber stellt die Organisationsspalte voran)"
+        }
       },
       ownership: {
         label: "Eigentümerschaft",
-        helpText: "Modell der Datensatz-Eigentümerschaft. Fehlt es, gilt user."
+        helpText: "Modell der Datensatz-Eigentümerschaft. Fehlt es, gilt user.",
+        options: {
+          user: "Benutzer — neu zuweisbarer owner_id plus owning_business_unit_id",
+          business_unit: "Geschäftseinheit — nur owning_business_unit_id, kein owner_id",
+          org: "Organisation",
+          none: "Keine — kein Besitzer pro Datensatz, keiner der beiden Anker"
+        }
       },
       sharingModel: {
         label: "Freigabemodell",
-        helpText: "Organisationsweite Standardsichtbarkeit von Datensätzen für interne Benutzer. Ein benutzerdefiniertes Objekt, das es weglässt, gilt zur Laufzeit als private (ADR-0090 D1)."
+        helpText: "Organisationsweite Standardsichtbarkeit von Datensätzen für interne Benutzer. Ein benutzerdefiniertes Objekt, das es weglässt, gilt zur Laufzeit als private (ADR-0090 D1).",
+        options: {
+          private: "Privat — nur Besitzer",
+          public_read: "Öffentlich lesbar — alle lesen, der Besitzer schreibt",
+          public_read_write: "Öffentlich lesen/schreiben — alle lesen und schreiben",
+          controlled_by_parent: "Vom übergeordneten Datensatz gesteuert — vom Master-Datensatz abgeleitet"
+        }
       },
       sharing: {
         label: "Freigabe",
@@ -407,7 +511,11 @@ export const deMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       "access.default": {
         label: "Standard",
-        helpText: "public: durch Platzhalterzuweisungen '*' abgedeckt. private: benötigt eine ausdrückliche Zuweisung pro Objekt und ist von der Platzhalter-Sicherheit auf Zeilenebene ausgenommen."
+        helpText: "public: durch Platzhalterzuweisungen '*' abgedeckt. private: benötigt eine ausdrückliche Zuweisung pro Objekt und ist von der Platzhalter-Sicherheit auf Zeilenebene ausgenommen.",
+        options: {
+          public: "Öffentlich — durch Platzhalter-Berechtigungen (*) abgedeckt",
+          private: "Privat — erfordert eine explizite Berechtigung pro Objekt"
+        }
       },
       requiredPermissions: {
         label: "Erforderliche Berechtigungen",
@@ -423,11 +531,22 @@ export const deMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       "publicSharing.allowedAudiences": {
         label: "Zulässige Zielgruppen",
-        helpText: "Zielgruppen, die ein neuer Link nennen darf; jede andere wird abgelehnt. Nicht gesetzt: nur Link. Jede Zielgruppe benötigt dennoch den Link selbst: angemeldet erfordert zusätzlich einen angemeldeten Benutzer, E-Mail zusätzlich die Adresse des Empfängers auf der Liste des Links."
+        helpText: "Zielgruppen, die ein neuer Link nennen darf; jede andere wird abgelehnt. Nicht gesetzt: nur Link. Jede Zielgruppe benötigt dennoch den Link selbst: angemeldet erfordert zusätzlich einen angemeldeten Benutzer, E-Mail zusätzlich die Adresse des Empfängers auf der Liste des Links.",
+        options: {
+          public: "Öffentlich",
+          link_only: "Nur Link — jeder mit dem Link",
+          signed_in: "Angemeldet — angemeldete Benutzer mit dem Link",
+          email: "E-Mail — aufgeführte Empfänger mit dem Link"
+        }
       },
       "publicSharing.allowedPermissions": {
         label: "Zulässige Berechtigungen",
-        helpText: "Berechtigungsstufen, die ein neuer Link gewähren darf; jede andere wird abgelehnt. Nicht gesetzt: nur Ansehen."
+        helpText: "Berechtigungsstufen, die ein neuer Link gewähren darf; jede andere wird abgelehnt. Nicht gesetzt: nur Ansehen.",
+        options: {
+          view: "Ansehen",
+          comment: "Kommentieren",
+          edit: "Bearbeiten"
+        }
       },
       "publicSharing.maxExpiryDays": {
         label: "Maximale Ablauftage",
@@ -487,7 +606,11 @@ export const deMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       editMode: {
         label: "Bearbeitungsmodus",
-        helpText: "Absicht der Bearbeitungsinteraktion für Datensätze dieses Objekts. Fehlt sie, wählt der Renderer seinen eigenen Standard. Rendererübergreifende Absicht, keine Gestaltung."
+        helpText: "Absicht der Bearbeitungsinteraktion für Datensätze dieses Objekts. Fehlt sie, wählt der Renderer seinen eigenen Standard. Rendererübergreifende Absicht, keine Gestaltung.",
+        options: {
+          modal: "Modal — Bearbeitungsformular als Dialog über der aktuellen Ansicht",
+          page: "Seite — zu einer eigenen ganzseitigen Bearbeitungsroute wechseln"
+        }
       },
       fileAccessDelegate: {
         label: "Delegat für Dateizugriff",
@@ -499,7 +622,14 @@ export const deMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       "lifecycle.class": {
         label: "Klasse",
-        helpText: "Persistenzvertrag für die Zeilen dieses Objekts"
+        helpText: "Persistenzvertrag für die Zeilen dieses Objekts",
+        options: {
+          record: "Datensatz (geschäftliche Wahrheit — dauerhaft)",
+          audit: "Audit (Compliance-Journal — aufbewahren → archivieren → löschen)",
+          telemetry: "Telemetrie (hochfrequentes Protokoll — kurze Aufbewahrung)",
+          transient: "Flüchtig (kurzlebiger Zustand — Ablauf per TTL)",
+          event: "Ereignis (Bus-Nachrichten — sehr kurze TTL)"
+        }
       },
       "lifecycle.retention": {
         label: "Aufbewahrung",
@@ -527,7 +657,10 @@ export const deMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       "lifecycle.storage.strategy": {
         label: "Strategie",
-        helpText: "Speicherstrategie"
+        helpText: "Speicherstrategie",
+        options: {
+          rotation: "Rotation (Zeit-Shards + älteste verwerfen)"
+        }
       },
       "lifecycle.storage.shards": {
         label: "Shards",
@@ -535,7 +668,12 @@ export const deMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       "lifecycle.storage.unit": {
         label: "Einheit",
-        helpText: "Zeitbreite eines Shards"
+        helpText: "Zeitbreite eines Shards",
+        options: {
+          day: "Tag",
+          week: "Woche",
+          month: "Monat"
+        }
       },
       "lifecycle.archive": {
         label: "Archiv",
@@ -666,7 +804,11 @@ export const deMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       percentDisplay: {
         label: "Prozentanzeige",
-        helpText: "Wie der Wert schreibgeschützt in Listenzellen und auf der Datensatzseite angezeigt wird. Nicht gesetzt: ein Fortschrittsbalken neben dem Prozentwert. Balken: immer der Fortschrittsbalken, für Fortschritt. Einfach: nur der Prozentwert, für eine Rate oder eine Wahrscheinlichkeit."
+        helpText: "Wie der Wert schreibgeschützt in Listenzellen und auf der Datensatzseite angezeigt wird. Nicht gesetzt: ein Fortschrittsbalken neben dem Prozentwert. Balken: immer der Fortschrittsbalken, für Fortschritt. Einfach: nur der Prozentwert, für eine Rate oder eine Wahrscheinlichkeit.",
+        options: {
+          bar: "Balken",
+          plain: "Einfach"
+        }
       },
       currencyConfig: {
         label: "Währungskonfiguration",
@@ -674,7 +816,12 @@ export const deMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       "currencyConfig.currencyMode": {
         label: "Währungsmodus",
-        helpText: "dynamic (Standard): Das Feld hat keine eigene Währung, und Beträge werden in der Standardwährung des Mandanten angezeigt (Einstellung localization.currency). fixed: Das Feld hat eine Währung, defaultCurrency. record: Jeder Datensatz hat seine eigene Währung, gespeichert in dem Feld, das currencyField nennt."
+        helpText: "dynamic (Standard): Das Feld hat keine eigene Währung, und Beträge werden in der Standardwährung des Mandanten angezeigt (Einstellung localization.currency). fixed: Das Feld hat eine Währung, defaultCurrency. record: Jeder Datensatz hat seine eigene Währung, gespeichert in dem Feld, das currencyField nennt.",
+        options: {
+          dynamic: "Dynamisch — die Standardwährung des Mandanten",
+          fixed: "Fest — eine Währung für dieses Feld",
+          record: "Datensatz — jeder Datensatz nennt seine Währung"
+        }
       },
       "currencyConfig.currencyField": {
         label: "Währungsfeld",
@@ -771,11 +918,19 @@ export const deMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       deleteBehavior: {
         label: "Verhalten beim Löschen",
-        helpText: "Was geschieht, wenn der referenzierte Datensatz gelöscht wird"
+        helpText: "Was geschieht, wenn der referenzierte Datensatz gelöscht wird",
+        options: {
+          cascade: "Kaskadieren (untergeordnete löschen)",
+          restrict: "Einschränken (Löschen blockieren)"
+        }
       },
       transferBehavior: {
         label: "Verhalten beim Inhaberwechsel",
-        helpText: "Ob „Inhaber ändern“ am referenzierten Datensatz auch die Datensätze mitnehmen kann, die über dieses Feld auf ihn verweisen"
+        helpText: "Ob „Inhaber ändern“ am referenzierten Datensatz auch die Datensätze mitnehmen kann, die über dieses Feld auf ihn verweisen",
+        options: {
+          none: "Keine (bleiben bei ihrem Besitzer)",
+          cascade: "Kaskadieren (Mitverschieben mit dem referenzierten Datensatz anbieten)"
+        }
       },
       relatedListFilter: {
         label: "Filter der verknüpften Liste",
@@ -819,7 +974,11 @@ export const deMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       inlineEdit: {
         label: "Inline Edit",
-        helpText: "How the parent's form edits this child's rows when a field group of the parent names this child (fieldGroups[].relatedList). Unset: picked from this object's fields."
+        helpText: "How the parent's form edits this child's rows when a field group of the parent names this child (fieldGroups[].relatedList). Unset: picked from this object's fields.",
+        options: {
+          grid: "Raster (Zeilen in einer Tabelle bearbeiten)",
+          form: "Formular (jede Zeile im vollständigen Formular öffnen)"
+        }
       },
       inlineTitle: {
         label: "Inline-Titel",
@@ -855,7 +1014,15 @@ export const deMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       returnType: {
         label: "Rückgabetyp",
-        helpText: "Deklarierter Werttyp der Formel, gesetzt aus dem abgeleiteten CEL-Typ. Verbraucher lesen ihn, statt den Ausdruck erneut zu parsen. Currency: ein Geldbetrag in der Währung, die die Währungskonfiguration dieses Felds deklariert (dynamisch, wenn nicht gesetzt)."
+        helpText: "Deklarierter Werttyp der Formel, gesetzt aus dem abgeleiteten CEL-Typ. Verbraucher lesen ihn, statt den Ausdruck erneut zu parsen. Currency: ein Geldbetrag in der Währung, die die Währungskonfiguration dieses Felds deklariert (dynamisch, wenn nicht gesetzt).",
+        options: {
+          text: "Zeichenfolge",
+          number: "Zahl",
+          boolean: "Boolesch",
+          date: "Datum",
+          currency: "Währung",
+          percent: "Prozent"
+        }
       },
       summaryOperations: {
         label: "Zusammenfassungsoperationen",
@@ -867,7 +1034,14 @@ export const deMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       "summaryOperations.function": {
         label: "Funktion",
-        helpText: "Aggregationsfunktion"
+        helpText: "Aggregationsfunktion",
+        options: {
+          count: "Anzahl",
+          sum: "Summe",
+          min: "Minimum",
+          max: "Maximum",
+          avg: "Durchschnitt"
+        }
       },
       "summaryOperations.field": {
         label: "Feld",
@@ -1007,7 +1181,11 @@ export const deMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       "body.language": {
         label: "Sprache",
-        helpText: "expression = reine Formel; js = JavaScript in einer Sandbox"
+        helpText: "expression = reine Formel; js = JavaScript in einer Sandbox",
+        options: {
+          expression: "Ausdruck (L1)",
+          js: "JavaScript (L2, in der Sandbox)"
+        }
       },
       "body.source": {
         label: "Quelle",
@@ -1070,7 +1248,11 @@ export const deMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         helpText: "Im Hintergrund ausführen, die Transaktion nicht blockieren"
       },
       onError: {
-        label: "Bei Fehler"
+        label: "Bei Fehler",
+        options: {
+          abort: "Abbrechen",
+          log: "Protokollieren"
+        }
       },
       timeoutMs: {
         label: "Timeout (ms)",
@@ -1078,7 +1260,12 @@ export const deMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       runAs: {
         label: "Ausführen als",
-        helpText: "Identität für Datenoperationen über ctx.api: die auslösende Schreiboperation übernehmen (Standard), system (erhöht) oder user (der auslösende Benutzer)"
+        helpText: "Identität für Datenoperationen über ctx.api: die auslösende Schreiboperation übernehmen (Standard), system (erhöht) oder user (der auslösende Benutzer)",
+        options: {
+          inherit: "Erben (auslösender Schreibvorgang)",
+          system: "System (erhöht)",
+          user: "Benutzer (auslösender Benutzer)"
+        }
       },
       condition: {
         label: "Bedingung",
@@ -1516,7 +1703,14 @@ export const deMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       type: {
         label: "Typ",
-        helpText: "Seitenart. „Liste / Oberfläche“ bindet eine Quellansicht an eine kuratierte Oberfläche – wie sie aussieht (Raster / Kanban / Kalender / …), ist eine unter „Oberfläche“ festgelegte Visualisierung, kein Seitentyp."
+        helpText: "Seitenart. „Liste / Oberfläche“ bindet eine Quellansicht an eine kuratierte Oberfläche – wie sie aussieht (Raster / Kanban / Kalender / …), ist eine unter „Oberfläche“ festgelegte Visualisierung, kein Seitentyp.",
+        options: {
+          list: "Listen- / Interface-Seite",
+          record: "Datensatzseite",
+          home: "Startseite",
+          app: "App-Seite",
+          utility: "Dienstprogrammleiste"
+        }
       },
       template: {
         label: "Vorlage",
@@ -1629,7 +1823,12 @@ export const deMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       "interfaceConfig.recordAction": {
         label: "Datensatzaktion",
-        helpText: "Wie ein Klick auf einen Datensatz dessen Details öffnet"
+        helpText: "Wie ein Klick auf einen Datensatz dessen Details öffnet",
+        options: {
+          drawer: "Seitenleiste (Vorschau rechts)",
+          page: "Ganze Seite",
+          none: "Nicht anklickbar"
+        }
       },
       "interfaceConfig.showRecordCount": {
         label: "Anzahl der Datensätze anzeigen",
@@ -1794,7 +1993,26 @@ export const deMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       "dateRange.defaultRange": {
         label: "Default Period",
-        helpText: "The period the dashboard opens with."
+        helpText: "The period the dashboard opens with.",
+        options: {
+          today: "Heute",
+          yesterday: "Gestern",
+          this_week: "Diese Woche",
+          last_week: "Letzte Woche",
+          this_month: "Dieser Monat",
+          last_month: "Letzter Monat",
+          next_month: "Nächster Monat",
+          this_quarter: "Dieses Quartal",
+          last_quarter: "Letztes Quartal",
+          next_quarter: "Nächstes Quartal",
+          this_year: "Dieses Jahr",
+          last_year: "Letztes Jahr",
+          last_7_days: "Letzte 7 Tage",
+          last_30_days: "Letzte 30 Tage",
+          last_90_days: "Letzte 90 Tage",
+          next_30_days: "Nächste 30 Tage",
+          custom: "Benutzerdefiniert…"
+        }
       },
       "dateRange.allowCustomRange": {
         label: "Allow Custom Range",
@@ -1970,7 +2188,13 @@ export const deMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       mode: {
         label: "Modus",
-        helpText: "Semantischer Modus der Aktion. Wird derzeit nur von der KI-Heuristik für menschliche Beteiligung gelesen – kein Renderer verzweigt danach."
+        helpText: "Semantischer Modus der Aktion. Wird derzeit nur von der KI-Heuristik für menschliche Beteiligung gelesen – kein Renderer verzweigt danach.",
+        options: {
+          create: "Erstellen",
+          edit: "Bearbeiten",
+          delete: "Löschen",
+          custom: "Benutzerdefiniert"
+        }
       },
       order: {
         label: "Reihenfolge",
@@ -1990,7 +2214,11 @@ export const deMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       "body.language": {
         label: "Sprache",
-        helpText: "expression = reine Formel; js = JavaScript in einer Sandbox"
+        helpText: "expression = reine Formel; js = JavaScript in einer Sandbox",
+        options: {
+          expression: "Ausdruck (L1)",
+          js: "JavaScript (L2, in der Sandbox)"
+        }
       },
       "body.source": {
         label: "Quelle",
@@ -2107,7 +2335,10 @@ export const deMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       operation: {
         label: "Vorgang",
-        helpText: "Deklaratives Schreiben von Feldern eines einzelnen Datensatzes: 'update' wendet `patch`, unter den gesammelten `params` zusammengeführt, auf den aktuellen Datensatz ALS AUFRUFER an – nie mit erhöhten Systemrechten, sodass Berechtigungen des Aufrufers, Hooks und Validierungen des Objekts wie bei einer Benutzerbearbeitung greifen."
+        helpText: "Deklaratives Schreiben von Feldern eines einzelnen Datensatzes: 'update' wendet `patch`, unter den gesammelten `params` zusammengeführt, auf den aktuellen Datensatz ALS AUFRUFER an – nie mit erhöhten Systemrechten, sodass Berechtigungen des Aufrufers, Hooks und Validierungen des Objekts wie bei einer Benutzerbearbeitung greifen.",
+        options: {
+          update: "Aktuellen Datensatz aktualisieren"
+        }
       },
       patch: {
         label: "Patch",
@@ -2353,7 +2584,26 @@ export const deMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       "dateRange.defaultRange": {
         label: "Default Period",
-        helpText: "The period the report opens with."
+        helpText: "The period the report opens with.",
+        options: {
+          today: "Heute",
+          yesterday: "Gestern",
+          this_week: "Diese Woche",
+          last_week: "Letzte Woche",
+          this_month: "Dieser Monat",
+          last_month: "Letzter Monat",
+          next_month: "Nächster Monat",
+          this_quarter: "Dieses Quartal",
+          last_quarter: "Letztes Quartal",
+          next_quarter: "Nächstes Quartal",
+          this_year: "Dieses Jahr",
+          last_year: "Letztes Jahr",
+          last_7_days: "Letzte 7 Tage",
+          last_30_days: "Letzte 30 Tage",
+          last_90_days: "Letzte 90 Tage",
+          next_30_days: "Nächste 30 Tage",
+          custom: "Benutzerdefiniert…"
+        }
       },
       "dateRange.allowCustomRange": {
         label: "Allow Custom Range",
@@ -3026,7 +3276,11 @@ export const deMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       surface: {
         label: "Oberfläche",
-        helpText: "Produktoberfläche, an die dieser Agent gebunden ist (ADR-0063 §1). Nur Fähigkeiten, deren eigene Oberfläche übereinstimmt – oder 'both' ist –, werden angehängt, und der Werkzeugsatz des Agenten ist die Vereinigung der Werkzeuge dieser Fähigkeiten. Standard 'ask'."
+        helpText: "Produktoberfläche, an die dieser Agent gebunden ist (ADR-0063 §1). Nur Fähigkeiten, deren eigene Oberfläche übereinstimmt – oder 'both' ist –, werden angehängt, und der Werkzeugsatz des Agenten ist die Vereinigung der Werkzeuge dieser Fähigkeiten. Standard 'ask'.",
+        options: {
+          ask: "Ask (Konversationsoberflächen)",
+          build: "Build (Erstellungsoberflächen)"
+        }
       },
       instructions: {
         label: "Anweisungen",
@@ -3143,7 +3397,12 @@ export const deMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       surface: {
         label: "Oberfläche",
-        helpText: "Agentenoberfläche, an die diese Fähigkeit gebunden ist (ADR-0063 §3). Sie an einen Agenten mit abweichender Oberfläche zu binden, ist beim Auflösen ein harter Fehler, kein stilles Überspringen. Standard 'ask'."
+        helpText: "Agentenoberfläche, an die diese Fähigkeit gebunden ist (ADR-0063 §3). Sie an einen Agenten mit abweichender Oberfläche zu binden, ist beim Auflösen ein harter Fehler, kein stilles Überspringen. Standard 'ask'.",
+        options: {
+          ask: "Ask (Konversationsoberflächen)",
+          build: "Build (Erstellungsoberflächen)",
+          both: "Beide"
+        }
       },
       instructions: {
         label: "Anweisungen",

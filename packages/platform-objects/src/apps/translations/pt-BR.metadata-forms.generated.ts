@@ -114,7 +114,12 @@ export const ptBRMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       "fieldGroups.collapse": {
         label: "Recolher",
-        helpText: "Se a seção pode ser recolhida. O formulário de entrada segue a configuração. Na página de registro padrão, o leitor pode recolher qualquer grupo com título, então ali ela define só o estado inicial: Collapsed começa recolhida e as demais, abertas. Não definido: nenhuma."
+        helpText: "Se a seção pode ser recolhida. O formulário de entrada segue a configuração. Na página de registro padrão, o leitor pode recolher qualquer grupo com título, então ali ela define só o estado inicial: Collapsed começa recolhida e as demais, abertas. Não definido: nenhuma.",
+        options: {
+          none: "Nenhum — sempre aberto no formulário de entrada, sem alternância",
+          expanded: "Expandido — recolhível, começa aberto",
+          collapsed: "Recolhido — recolhível, começa fechado"
+        }
       },
       "fieldGroups.visibleWhen": {
         label: "Visível quando",
@@ -134,7 +139,56 @@ export const ptBRMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       "fields.type": {
         label: "Tipo",
-        helpText: "Tipo de campo"
+        helpText: "Tipo de campo",
+        options: {
+          text: "Texto",
+          textarea: "Área de texto",
+          email: "E-mail",
+          url: "Endereço URL",
+          phone: "Telefone",
+          password: "Senha",
+          markdown: "Texto Markdown",
+          html: "Conteúdo HTML",
+          richtext: "Texto formatado",
+          number: "Número",
+          currency: "Moeda",
+          percent: "Porcentagem",
+          date: "Data",
+          datetime: "Data e hora",
+          time: "Hora",
+          boolean: "Booleano",
+          toggle: "Alternância",
+          select: "Seleção",
+          multiselect: "Seleção múltipla",
+          radio: "Botão de opção",
+          checkboxes: "Caixas de seleção",
+          lookup: "Pesquisa (referência)",
+          master_detail: "Mestre–detalhe",
+          tree: "Árvore",
+          image: "Imagem",
+          file: "Arquivo",
+          avatar: "Foto de perfil",
+          video: "Vídeo",
+          audio: "Áudio",
+          formula: "Fórmula (calculada)",
+          summary: "Resumo (consolidação)",
+          autonumber: "Numeração automática",
+          composite: "Composto (incorporado)",
+          repeater: "Repetidor (array incorporado)",
+          record: "Registro (mapa com chaves)",
+          location: "Localização (GPS)",
+          address: "Endereço",
+          code: "Código",
+          json: "Dados JSON",
+          color: "Cor",
+          rating: "Avaliação",
+          slider: "Controle deslizante",
+          signature: "Assinatura",
+          qrcode: "QR / Código de barras",
+          progress: "Progresso",
+          tags: "Etiquetas",
+          vector: "Embedding vetorial"
+        }
       },
       "fields.description": {
         label: "Descrição",
@@ -186,7 +240,12 @@ export const ptBRMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       "fields.valueDomain": {
         label: "Domínio de valores",
-        helpText: "Padrão ao qual o valor gravado deve pertencer; uma gravação com um valor fora dele é recusada"
+        helpText: "Padrão ao qual o valor gravado deve pertencer; uma gravação com um valor fora dele é recusada",
+        options: {
+          iana_time_zone: "Fuso horário IANA",
+          iso_4217_currency: "Código de moeda ISO 4217",
+          iso_3166_alpha2: "Código de país ISO 3166-1 alfa-2"
+        }
       },
       "fields.rows": {
         label: "Linhas",
@@ -226,7 +285,12 @@ export const ptBRMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       "fields.options.kind": {
         label: "Tipo",
-        helpText: "Categoria do ciclo de vida (somente seleção de valor único / botão de opção): uma etapa no caminho, o fim bem-sucedido ou o fim malsucedido. Obrigatória em todas as opções do campo de etapa."
+        helpText: "Categoria do ciclo de vida (somente seleção de valor único / botão de opção): uma etapa no caminho, o fim bem-sucedido ou o fim malsucedido. Obrigatória em todas as opções do campo de etapa.",
+        options: {
+          open: "Aberto",
+          won: "Ganho",
+          lost: "Perdido"
+        }
       },
       "fields.reference": {
         label: "Referência",
@@ -238,11 +302,20 @@ export const ptBRMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       "fields.deleteBehavior": {
         label: "Comportamento na exclusão",
-        helpText: "O que acontece quando o registro referenciado é excluído"
+        helpText: "O que acontece quando o registro referenciado é excluído",
+        options: {
+          set_null: "Definir como nulo",
+          cascade: "Cascata (excluir os filhos)",
+          restrict: "Restringir (bloquear a exclusão)"
+        }
       },
       "fields.transferBehavior": {
         label: "Comportamento na troca de proprietário",
-        helpText: "Indica se “Alterar proprietário” no registro referenciado também pode mover os registros que apontam para ele por este campo"
+        helpText: "Indica se “Alterar proprietário” no registro referenciado também pode mover os registros que apontam para ele por este campo",
+        options: {
+          none: "Nenhum (permanecem com o proprietário)",
+          cascade: "Cascata (oferecer mover junto com o registro referenciado)"
+        }
       },
       "fields.multiple": {
         label: "Múltiplo",
@@ -254,7 +327,15 @@ export const ptBRMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       "fields.returnType": {
         label: "Tipo de retorno",
-        helpText: "Tipo do resultado das fórmulas"
+        helpText: "Tipo do resultado das fórmulas",
+        options: {
+          text: "Texto",
+          number: "Número",
+          boolean: "Booleano",
+          date: "Data",
+          currency: "Moeda",
+          percent: "Porcentagem"
+        }
       },
       "fields.summaryOperations": {
         label: "Operações de resumo",
@@ -270,7 +351,14 @@ export const ptBRMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       "fields.summaryOperations.function": {
         label: "Função",
-        helpText: "Função de agregação"
+        helpText: "Função de agregação",
+        options: {
+          count: "Contagem",
+          sum: "Soma",
+          avg: "Média",
+          min: "Mínimo",
+          max: "Máximo"
+        }
       },
       "fields.autonumberFormat": {
         label: "Formato da numeração automática",
@@ -375,15 +463,31 @@ export const ptBRMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       "indexes.unique": {
         label: "Índice único",
-        helpText: "Escopo de unicidade (ADR-0120). Não definido: não é único. O true simples obsoleto (que significa global) não é oferecido; um índice que o tenha o mantém até você escolher um escopo."
+        helpText: "Escopo de unicidade (ADR-0120). Não definido: não é único. O true simples obsoleto (que significa global) não é oferecido; um índice que o tenha o mantém até você escolher um escopo.",
+        options: {
+          global: "Global — um único detentor em toda a instalação, exatamente sobre estas colunas",
+          organization: "Organização — um detentor por organização (o driver antepõe a coluna de organização)"
+        }
       },
       ownership: {
         label: "Propriedade",
-        helpText: "Modelo de propriedade dos registros. Ausente equivale a user."
+        helpText: "Modelo de propriedade dos registros. Ausente equivale a user.",
+        options: {
+          user: "Usuário — owner_id reatribuível mais owning_business_unit_id",
+          business_unit: "Unidade de negócio — apenas owning_business_unit_id, sem owner_id",
+          org: "Organização",
+          none: "Nenhum — sem proprietário por registro, nenhuma das duas âncoras"
+        }
       },
       sharingModel: {
         label: "Modelo de compartilhamento",
-        helpText: "Visibilidade padrão dos registros em toda a organização para usuários internos. Um objeto personalizado que o omite equivale a private em tempo de execução (ADR-0090 D1)."
+        helpText: "Visibilidade padrão dos registros em toda a organização para usuários internos. Um objeto personalizado que o omite equivale a private em tempo de execução (ADR-0090 D1).",
+        options: {
+          private: "Privado — somente o proprietário",
+          public_read: "Leitura pública — todos leem, o proprietário grava",
+          public_read_write: "Leitura/gravação pública — todos leem e gravam",
+          controlled_by_parent: "Controlado pelo pai — derivado do registro mestre"
+        }
       },
       sharing: {
         label: "Compartilhamento",
@@ -407,7 +511,11 @@ export const ptBRMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       "access.default": {
         label: "Padrão",
-        helpText: "public: coberto pelas concessões curinga '*'. private: precisa de uma concessão explícita por objeto e fica isento da segurança em nível de linha curinga."
+        helpText: "public: coberto pelas concessões curinga '*'. private: precisa de uma concessão explícita por objeto e fica isento da segurança em nível de linha curinga.",
+        options: {
+          public: "Público — coberto por concessões curinga (*)",
+          private: "Privado — requer uma concessão explícita por objeto"
+        }
       },
       requiredPermissions: {
         label: "Permissões exigidas",
@@ -423,11 +531,22 @@ export const ptBRMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       "publicSharing.allowedAudiences": {
         label: "Públicos permitidos",
-        helpText: "Públicos que um novo link pode indicar; qualquer outro é recusado. Não definido: somente link. Todo público ainda precisa do próprio link: signed in também precisa de um usuário conectado, e email também precisa do endereço do destinatário na lista do link."
+        helpText: "Públicos que um novo link pode indicar; qualquer outro é recusado. Não definido: somente link. Todo público ainda precisa do próprio link: signed in também precisa de um usuário conectado, e email também precisa do endereço do destinatário na lista do link.",
+        options: {
+          public: "Público",
+          link_only: "Somente link — qualquer pessoa com o link",
+          signed_in: "Conectado — usuários conectados com o link",
+          email: "E-mail — destinatários listados com o link"
+        }
       },
       "publicSharing.allowedPermissions": {
         label: "Permissões permitidas",
-        helpText: "Níveis de permissão que um novo link pode conceder; qualquer outro é recusado. Não definido: somente visualização."
+        helpText: "Níveis de permissão que um novo link pode conceder; qualquer outro é recusado. Não definido: somente visualização.",
+        options: {
+          view: "Visualizar",
+          comment: "Comentar",
+          edit: "Editar"
+        }
       },
       "publicSharing.maxExpiryDays": {
         label: "Máximo de dias para expiração",
@@ -487,7 +606,11 @@ export const ptBRMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       editMode: {
         label: "Modo de edição",
-        helpText: "Intenção de interação de edição para os registros deste objeto. Ausente, o renderizador escolhe seu próprio padrão. Intenção entre renderizadores, não estilo."
+        helpText: "Intenção de interação de edição para os registros deste objeto. Ausente, o renderizador escolhe seu próprio padrão. Intenção entre renderizadores, não estilo.",
+        options: {
+          modal: "Modal — formulário de edição como diálogo sobre a visualização atual",
+          page: "Página — navegar para uma rota de edição dedicada em página inteira"
+        }
       },
       fileAccessDelegate: {
         label: "Delegado de acesso a arquivos",
@@ -499,7 +622,14 @@ export const ptBRMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       "lifecycle.class": {
         label: "Classe",
-        helpText: "Contrato de persistência das linhas deste objeto"
+        helpText: "Contrato de persistência das linhas deste objeto",
+        options: {
+          record: "Registro (verdade do negócio — permanente)",
+          audit: "Auditoria (registro de conformidade — reter → arquivar → excluir)",
+          telemetry: "Telemetria (log de alta frequência — retenção curta)",
+          transient: "Transitório (estado efêmero — expira por TTL)",
+          event: "Evento (mensagens do barramento — TTL muito curto)"
+        }
       },
       "lifecycle.retention": {
         label: "Retenção",
@@ -527,7 +657,10 @@ export const ptBRMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       "lifecycle.storage.strategy": {
         label: "Estratégia",
-        helpText: "Estratégia de armazenamento"
+        helpText: "Estratégia de armazenamento",
+        options: {
+          rotation: "Rotação (partições por tempo + descartar a mais antiga)"
+        }
       },
       "lifecycle.storage.shards": {
         label: "Shards",
@@ -535,7 +668,12 @@ export const ptBRMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       "lifecycle.storage.unit": {
         label: "Unidade",
-        helpText: "Largura de tempo de um shard"
+        helpText: "Largura de tempo de um shard",
+        options: {
+          day: "Dia",
+          week: "Semana",
+          month: "Mês"
+        }
       },
       "lifecycle.archive": {
         label: "Arquivamento",
@@ -666,7 +804,11 @@ export const ptBRMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       percentDisplay: {
         label: "Exibição em porcentagem",
-        helpText: "Como o valor é exibido em modo somente leitura, nas células da lista e na página do registro. Não definido: uma barra de progresso ao lado da porcentagem. Barra: sempre a barra de progresso, para progresso. Simples: apenas a porcentagem, para uma taxa ou uma probabilidade."
+        helpText: "Como o valor é exibido em modo somente leitura, nas células da lista e na página do registro. Não definido: uma barra de progresso ao lado da porcentagem. Barra: sempre a barra de progresso, para progresso. Simples: apenas a porcentagem, para uma taxa ou uma probabilidade.",
+        options: {
+          bar: "Barra",
+          plain: "Simples"
+        }
       },
       currencyConfig: {
         label: "Configuração de moeda",
@@ -674,7 +816,12 @@ export const ptBRMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       "currencyConfig.currencyMode": {
         label: "Modo de moeda",
-        helpText: "dynamic (o padrão): o campo não tem moeda própria, e os valores são exibidos na moeda padrão do locatário (a configuração localization.currency). fixed: o campo tem uma moeda, defaultCurrency. record: cada registro tem sua própria moeda, armazenada no campo que currencyField nomeia."
+        helpText: "dynamic (o padrão): o campo não tem moeda própria, e os valores são exibidos na moeda padrão do locatário (a configuração localization.currency). fixed: o campo tem uma moeda, defaultCurrency. record: cada registro tem sua própria moeda, armazenada no campo que currencyField nomeia.",
+        options: {
+          dynamic: "Dinâmico — a moeda padrão do locatário",
+          fixed: "Fixa — uma moeda para este campo",
+          record: "Registro — cada registro indica sua moeda"
+        }
       },
       "currencyConfig.currencyField": {
         label: "Campo de moeda",
@@ -771,11 +918,19 @@ export const ptBRMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       deleteBehavior: {
         label: "Comportamento na exclusão",
-        helpText: "O que acontece quando o registro referenciado é excluído"
+        helpText: "O que acontece quando o registro referenciado é excluído",
+        options: {
+          cascade: "Cascata (excluir os filhos)",
+          restrict: "Restringir (bloquear a exclusão)"
+        }
       },
       transferBehavior: {
         label: "Comportamento na troca de proprietário",
-        helpText: "Indica se “Alterar proprietário” no registro referenciado também pode mover os registros que apontam para ele por este campo"
+        helpText: "Indica se “Alterar proprietário” no registro referenciado também pode mover os registros que apontam para ele por este campo",
+        options: {
+          none: "Nenhum (permanecem com o proprietário)",
+          cascade: "Cascata (oferecer mover junto com o registro referenciado)"
+        }
       },
       relatedListFilter: {
         label: "Filtro da lista relacionada",
@@ -819,7 +974,11 @@ export const ptBRMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       inlineEdit: {
         label: "Inline Edit",
-        helpText: "How the parent's form edits this child's rows when a field group of the parent names this child (fieldGroups[].relatedList). Unset: picked from this object's fields."
+        helpText: "How the parent's form edits this child's rows when a field group of the parent names this child (fieldGroups[].relatedList). Unset: picked from this object's fields.",
+        options: {
+          grid: "Grade (editar linhas em uma tabela)",
+          form: "Formulário (abrir cada linha em seu formulário completo)"
+        }
       },
       inlineTitle: {
         label: "Título embutido",
@@ -855,7 +1014,15 @@ export const ptBRMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       returnType: {
         label: "Tipo de retorno",
-        helpText: "Tipo de valor declarado da fórmula, carimbado a partir do tipo CEL inferido. Os consumidores o leem em vez de analisar a expressão de novo. Moeda: um valor monetário, na moeda que a Configuração de moeda deste campo declara (dinâmica quando não definida)."
+        helpText: "Tipo de valor declarado da fórmula, carimbado a partir do tipo CEL inferido. Os consumidores o leem em vez de analisar a expressão de novo. Moeda: um valor monetário, na moeda que a Configuração de moeda deste campo declara (dinâmica quando não definida).",
+        options: {
+          text: "Texto",
+          number: "Número",
+          boolean: "Booleano",
+          date: "Data",
+          currency: "Moeda",
+          percent: "Porcentagem"
+        }
       },
       summaryOperations: {
         label: "Operações de resumo",
@@ -867,7 +1034,14 @@ export const ptBRMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       "summaryOperations.function": {
         label: "Função",
-        helpText: "Função de agregação"
+        helpText: "Função de agregação",
+        options: {
+          count: "Contagem",
+          sum: "Soma",
+          min: "Mínimo",
+          max: "Máximo",
+          avg: "Média"
+        }
       },
       "summaryOperations.field": {
         label: "Campo",
@@ -1007,7 +1181,11 @@ export const ptBRMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       "body.language": {
         label: "Linguagem",
-        helpText: "expression = fórmula pura; js = JavaScript em sandbox"
+        helpText: "expression = fórmula pura; js = JavaScript em sandbox",
+        options: {
+          expression: "Expressão (L1)",
+          js: "JavaScript (L2 em sandbox)"
+        }
       },
       "body.source": {
         label: "Origem",
@@ -1070,7 +1248,11 @@ export const ptBRMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         helpText: "Executar em segundo plano, sem bloquear a transação"
       },
       onError: {
-        label: "Em caso de erro"
+        label: "Em caso de erro",
+        options: {
+          abort: "Abortar",
+          log: "Registrar"
+        }
       },
       timeoutMs: {
         label: "Tempo limite (ms)",
@@ -1078,7 +1260,12 @@ export const ptBRMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       runAs: {
         label: "Executar como",
-        helpText: "Identidade para as operações de dados de ctx.api: herdar a gravação que disparou (padrão), system (elevada) ou user (o usuário que disparou)"
+        helpText: "Identidade para as operações de dados de ctx.api: herdar a gravação que disparou (padrão), system (elevada) ou user (o usuário que disparou)",
+        options: {
+          inherit: "Herdar (gravação que disparou)",
+          system: "Sistema (elevado)",
+          user: "Usuário (usuário que disparou)"
+        }
       },
       condition: {
         label: "Condição",
@@ -1516,7 +1703,14 @@ export const ptBRMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       type: {
         label: "Tipo",
-        helpText: "Tipo de página. \"Lista / Interface\" vincula uma visualização de origem a uma superfície selecionada — a aparência (grade / kanban / calendário / …) é uma visualização definida em Interface, não um tipo de página."
+        helpText: "Tipo de página. \"Lista / Interface\" vincula uma visualização de origem a uma superfície selecionada — a aparência (grade / kanban / calendário / …) é uma visualização definida em Interface, não um tipo de página.",
+        options: {
+          list: "Página de lista / interface",
+          record: "Página de registro",
+          home: "Página inicial",
+          app: "Página do aplicativo",
+          utility: "Painel de utilitários"
+        }
       },
       template: {
         label: "Modelo",
@@ -1629,7 +1823,12 @@ export const ptBRMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       "interfaceConfig.recordAction": {
         label: "Ação do registro",
-        helpText: "Como clicar em um registro abre o detalhe dele"
+        helpText: "Como clicar em um registro abre o detalhe dele",
+        options: {
+          drawer: "Gaveta (prévia à direita)",
+          page: "Página inteira",
+          none: "Não clicável"
+        }
       },
       "interfaceConfig.showRecordCount": {
         label: "Mostrar contagem de registros",
@@ -1794,7 +1993,26 @@ export const ptBRMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       "dateRange.defaultRange": {
         label: "Default Period",
-        helpText: "The period the dashboard opens with."
+        helpText: "The period the dashboard opens with.",
+        options: {
+          today: "Hoje",
+          yesterday: "Ontem",
+          this_week: "Esta semana",
+          last_week: "Semana passada",
+          this_month: "Este mês",
+          last_month: "Mês passado",
+          next_month: "Próximo mês",
+          this_quarter: "Este trimestre",
+          last_quarter: "Trimestre passado",
+          next_quarter: "Próximo trimestre",
+          this_year: "Este ano",
+          last_year: "Ano passado",
+          last_7_days: "Últimos 7 dias",
+          last_30_days: "Últimos 30 dias",
+          last_90_days: "Últimos 90 dias",
+          next_30_days: "Próximos 30 dias",
+          custom: "Personalizado…"
+        }
       },
       "dateRange.allowCustomRange": {
         label: "Allow Custom Range",
@@ -1970,7 +2188,13 @@ export const ptBRMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       mode: {
         label: "Modo",
-        helpText: "Modo semântico da ação. Hoje é lido apenas pela heurística de IA com humano no circuito — nenhum renderizador se ramifica com base nele."
+        helpText: "Modo semântico da ação. Hoje é lido apenas pela heurística de IA com humano no circuito — nenhum renderizador se ramifica com base nele.",
+        options: {
+          create: "Criar",
+          edit: "Editar",
+          delete: "Excluir",
+          custom: "Personalizado"
+        }
       },
       order: {
         label: "Ordem",
@@ -1990,7 +2214,11 @@ export const ptBRMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       "body.language": {
         label: "Linguagem",
-        helpText: "expression = fórmula pura; js = JavaScript em sandbox"
+        helpText: "expression = fórmula pura; js = JavaScript em sandbox",
+        options: {
+          expression: "Expressão (L1)",
+          js: "JavaScript (L2 em sandbox)"
+        }
       },
       "body.source": {
         label: "Origem",
@@ -2107,7 +2335,10 @@ export const ptBRMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       operation: {
         label: "Operação",
-        helpText: "Gravação declarativa de campos de um único registro: 'update' aplica `patch`, mesclado sob os `params` coletados, ao registro atual COMO O CHAMADOR — nunca com elevação de sistema, de modo que as permissões do chamador, os hooks do objeto e suas validações disparam como em uma edição do usuário."
+        helpText: "Gravação declarativa de campos de um único registro: 'update' aplica `patch`, mesclado sob os `params` coletados, ao registro atual COMO O CHAMADOR — nunca com elevação de sistema, de modo que as permissões do chamador, os hooks do objeto e suas validações disparam como em uma edição do usuário.",
+        options: {
+          update: "Atualizar o registro atual"
+        }
       },
       patch: {
         label: "Patch",
@@ -2353,7 +2584,26 @@ export const ptBRMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       "dateRange.defaultRange": {
         label: "Default Period",
-        helpText: "The period the report opens with."
+        helpText: "The period the report opens with.",
+        options: {
+          today: "Hoje",
+          yesterday: "Ontem",
+          this_week: "Esta semana",
+          last_week: "Semana passada",
+          this_month: "Este mês",
+          last_month: "Mês passado",
+          next_month: "Próximo mês",
+          this_quarter: "Este trimestre",
+          last_quarter: "Trimestre passado",
+          next_quarter: "Próximo trimestre",
+          this_year: "Este ano",
+          last_year: "Ano passado",
+          last_7_days: "Últimos 7 dias",
+          last_30_days: "Últimos 30 dias",
+          last_90_days: "Últimos 90 dias",
+          next_30_days: "Próximos 30 dias",
+          custom: "Personalizado…"
+        }
       },
       "dateRange.allowCustomRange": {
         label: "Allow Custom Range",
@@ -3026,7 +3276,11 @@ export const ptBRMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       surface: {
         label: "Superfície",
-        helpText: "Superfície do produto à qual este agente se vincula (ADR-0063 §1). Somente as habilidades cuja própria superfície corresponde — ou é 'both' — são anexadas, e o conjunto de ferramentas do agente é a união das ferramentas dessas habilidades. Padrão 'ask'."
+        helpText: "Superfície do produto à qual este agente se vincula (ADR-0063 §1). Somente as habilidades cuja própria superfície corresponde — ou é 'both' — são anexadas, e o conjunto de ferramentas do agente é a união das ferramentas dessas habilidades. Padrão 'ask'.",
+        options: {
+          ask: "Ask (superfícies conversacionais)",
+          build: "Build (superfícies de criação)"
+        }
       },
       instructions: {
         label: "Instruções",
@@ -3143,7 +3397,12 @@ export const ptBRMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       surface: {
         label: "Superfície",
-        helpText: "Superfície de agente à qual esta habilidade se vincula (ADR-0063 §3). Vinculá-la a um agente cuja superfície difere é uma falha grave na resolução, não um salto silencioso. Padrão 'ask'."
+        helpText: "Superfície de agente à qual esta habilidade se vincula (ADR-0063 §3). Vinculá-la a um agente cuja superfície difere é uma falha grave na resolução, não um salto silencioso. Padrão 'ask'.",
+        options: {
+          ask: "Ask (superfícies conversacionais)",
+          build: "Build (superfícies de criação)",
+          both: "Ambos"
+        }
       },
       instructions: {
         label: "Instruções",
