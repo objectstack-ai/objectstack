@@ -180,7 +180,7 @@ Ruling D2: `knowledge_source` becomes a governed metadata type referencing objec
 | `id` | renamed `name` (K6) | the registry key, the document id (`packages/services/service-knowledge/src/knowledge-service.ts#documentIdFor`), the `sourceIds` of a search |
 | `label`, `description` | kept | the `sources` list of a `search_knowledge` answer (`packages/services/service-knowledge/src/knowledge-tools.ts#SearchKnowledgeSourceSummary`) |
 | `adapter` | kept, and optional from row 3 (◆ below) | adapter routing (`packages/services/service-knowledge/src/knowledge-service.ts#KnowledgeService`) |
-| `adapterConfig` | kept only while an adapter reads it (below) | `packages/plugins/knowledge-ragflow/src/index.ts#extractRagflowOptions` reads four keys of it (`datasetId`, `rerankModel`, `similarityThreshold`, `vectorSimilarityWeight`); #37004 retires that package |
+| `adapterConfig` | kept only while an adapter reads it (below) | `extractRagflowOptions` in the retired `@objectstack/knowledge-ragflow` read four keys of it (`datasetId`, `rerankModel`, `similarityThreshold`, `vectorSimilarityWeight`); #37004 retired that package, and no adapter in the tree reads it now |
 | `source.kind` | kept, with one arm, `object`; see point 1 below | the discriminator the service branches on |
 | `source.object` | kept | the reindex walk, event sync, source admission |
 | `source.contentFields` | renamed `content`; `'*'` refused (K5, K6) | `packages/services/service-knowledge/src/knowledge-service.ts#recordToDocument`; `packages/services/service-knowledge/src/knowledge-source-admission.ts#admitSourceFields` |
