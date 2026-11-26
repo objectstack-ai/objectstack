@@ -41,7 +41,7 @@ describe('knowledge-pgvector search under repeated switches', () => {
     const adapter = new PgvectorKnowledgeAdapter({ pool: store.pool, embedder: new FakeEmbedder() });
 
     const refusal = await adapter
-      .search('granite', { source, topK: 5, index: { fingerprint: 'fp', recipeHash: 'rh' } })
+      .search('granite', { source, topK: 5, index: { fingerprint: 'fp' } })
       .then(
         () => undefined,
         (err: unknown) => err,
