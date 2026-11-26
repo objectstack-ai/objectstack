@@ -10,6 +10,13 @@ import { ObjectSchema, Field } from '@objectstack/spec/data';
  * customizable object — an organization adds fields and views — and comments
  * and attachments work on it as on any record.
  *
+ * Every environment carries it, so an app puts notes in its menu with a
+ * navigation entry naming it instead of declaring its own note object:
+ * `{ type: 'object', objectName: 'sys_note', requiresObject: 'sys_note' }`.
+ * The entry needs `requiresObject` — `defineStack` refuses a menu entry for an
+ * object the stack does not declare unless the entry says the object comes
+ * from elsewhere.
+ *
  * ## The heading a list shows
  *
  * The title is optional. A list and a record header show `heading`, which the
