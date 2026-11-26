@@ -10,6 +10,7 @@
       "delete": false,
       "viewAllRecords": true,
       "modifyAllRecords": false,
+      "viewAllFields": true,
       "sharingModel": "private"
     },
     {
@@ -21,6 +22,7 @@
       "delete": false,
       "viewAllRecords": true,
       "modifyAllRecords": false,
+      "viewAllFields": true,
       "sharingModel": "public_read_write"
     },
     {
@@ -32,6 +34,7 @@
       "delete": false,
       "viewAllRecords": true,
       "modifyAllRecords": false,
+      "viewAllFields": true,
       "sharingModel": "controlled_by_parent"
     },
     {
@@ -43,6 +46,7 @@
       "delete": false,
       "viewAllRecords": true,
       "modifyAllRecords": false,
+      "viewAllFields": true,
       "sharingModel": "private"
     },
     {
@@ -429,6 +433,7 @@
       "delete": true,
       "viewAllRecords": false,
       "modifyAllRecords": true,
+      "viewAllFields": true,
       "sharingModel": "public_read"
     },
     {

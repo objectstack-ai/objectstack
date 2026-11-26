@@ -2563,6 +2563,14 @@ const appTranslationDataShape = () => ({
    *   metadataForms.<type>.fields.<field_path>.label
    *   metadataForms.<type>.fields.<field_path>.helpText
    *   metadataForms.<type>.fields.<field_path>.placeholder
+   *   metadataForms.<type>.fields.<field_path>.options.<value>
+   *
+   * `options.<value>` overlays the `label` of the form field's `options[]`
+   * entry whose `value` matches — the name a select on the form shows for
+   * that choice. It is keyed by value, as
+   * `objects.<object>.fields.<field>.options` is, so a choice is named the
+   * same wherever the row is rendered; a value the row does not offer is
+   * never shown.
    *
    * `field_path` uses dot-notation for nested composite/repeater fields,
    * e.g. `"name"`, `"capabilities.trackHistory"`, and a repeater ROW property
@@ -2611,11 +2619,12 @@ const appTranslationDataShape = () => ({
     fields: z.record(z.string(), strictObject({
       surface: 'this metadata-form field translation',
       history: TRANSLATION_HISTORY,
-      aliases: { name: 'label', title: 'label', help: 'helpText', hint: 'helpText', description: 'helpText' },
+      aliases: { name: 'label', title: 'label', help: 'helpText', hint: 'helpText', description: 'helpText', choices: 'options', values: 'options' },
     }, {
       label: z.string().optional().describe('Translated field label'),
       helpText: z.string().optional().describe('Translated field help/hint text'),
       placeholder: z.string().optional().describe('Translated field placeholder text'),
+      options: z.record(z.string(), z.string()).optional().describe('Option value to translated label map — overlays the label of the form field option whose value matches'),
     })).optional().describe('Field translations keyed by field path (dot-notation for nested fields)'),
   })).optional().describe('Translations for metadata-type configuration forms keyed by metadata type'),
 

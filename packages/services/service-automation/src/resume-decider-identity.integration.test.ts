@@ -385,9 +385,10 @@ const dealRepSet = PermissionSetSchema.parse({
 /**
  * The manager edits every deal — but may not edit `restricted_note`. Every deal
  * is reached by org-wide read and write DEPTH rather than `viewAllRecords` /
- * `modifyAllRecords`: a set holding the super-user bypass on an object votes
- * `editable: true` on every field of it (ADR-0066 D2 ⑧ as amended, ruling of
- * record 6573563853), so its own `restricted_note` lock could not hold.
+ * `modifyAllRecords`: up to v18 a set holding the super-user bypass on an
+ * object voted `editable: true` on every field of it (ADR-0066 D2 ⑧ as amended,
+ * ruling of record 6573563853), so its own `restricted_note` lock could not
+ * hold. From v19 (#36055) the bypass casts no field vote; the depth shape stays.
  */
 const dealManagerSet = PermissionSetSchema.parse({
   name: 'deal_manager', label: 'Deal manager',

@@ -572,7 +572,7 @@ through the one the renderer reads for that node:
 
 | Node | What the panel reads | Resolver |
 |:---|:---|:---|
-| a form field, a composite's child | `FormFieldSpec.label` / `helpText` / `placeholder` | `resolveMetadataFormLabels(form, type, bundle, opts)` |
+| a form field, a composite's child | `FormFieldSpec.label` / `helpText` / `placeholder`, and each `options[].label` by its `value` | `resolveMetadataFormLabels(form, type, bundle, opts)` |
 | a property of a repeater row (a table column header) | the JSON Schema `items.properties[k].title` | `resolveMetadataFormSchemaTitles(schema, type, bundle, opts)` |
 | a column of the type's Studio list (`METADATA_LIST_REGISTRY`) | the served `list.columns[].label` | `resolveMetadataListLabels(list, type, bundle, opts)` |
 
@@ -583,8 +583,8 @@ a column path the form does not declare, with the column's header as the source.
 All three run in `GET /api/v1/meta`, which serves every type's `form`, `list`
 and `schema` already localised for the request's locale; a client deriving the schema itself
 with `z.toJSONSchema` applies the second one to its own copy, over a bundle it
-carries itself. Only `label` crosses over to the schema (as `title`); `helpText`
-and `placeholder` stay on the form.
+carries itself. Only `label` crosses over to the schema (as `title`); `helpText`,
+`placeholder` and the option names stay on the form.
 
 Because the server resolves this group, the bundle a console downloads when it
 opens — `GET /api/v1/i18n/translations/:locale` — leaves `metadataForms` out:

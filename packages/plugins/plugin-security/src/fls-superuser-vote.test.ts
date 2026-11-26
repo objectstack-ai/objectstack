@@ -1,27 +1,26 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 //
-// [ADR-0066 D2 ⑧ — ruling of record 6573563853, letter A] A permission set
-// that holds the super-user bypass on an object votes in the field-permission
-// merge on EVERY field of that object: `viewAllRecords` votes `readable: true`,
-// `modifyAllRecords` votes `readable: true` and `editable: true`. Union without
-// deny is otherwise unchanged.
+// [ADR-0066 D2 ⑧, v19 #36055] View All (`viewAllRecords`) and Modify All
+// (`modifyAllRecords`) widen records only and cast no field vote. The one
+// "every field" vote is `viewAllFields`: `readable: true` on every field of the
+// object, never `editable: true` (the field-axis split, ruling 6912661484).
+// Union without deny is otherwise unchanged.
 //
-// What the card measured: an app set grants `sys_business_unit` read and marks
-// every field but `name` `readable: false`; a platform admin who also holds
-// that set (beside `admin_full_access`) was served `name` only, because
-// `admin_full_access` grants the object through its `'*'` super-user wildcard
-// but declares no field entry, so it cast no vote and the app set's
-// `readable: false` won.
+// What the first card measured (ruling of record 6573563853): an app set
+// grants `sys_business_unit` read and marks every field but `name`
+// `readable: false`; a platform admin who also holds that set (beside
+// `admin_full_access`) was served `name` only. The shipped admin set keeps
+// reading every field through its `'*'` `viewAllFields`; from v19 it no longer
+// edits a field another set it holds locks, because no bit votes an edit.
 //
 // Four groups, each against the shipped `admin_full_access` where it applies,
 // never a hand-rolled copy of it:
 //
-//   1. THE VOTE — the admin + app-set merge keeps every field the app masks;
-//   2. CONTROLS — a caller holding only the app set is still masked, and a
-//      `viewAllRecords`-only set never contributes an edit grant;
-//   3. ONE PREDICATE — the vote is held exactly when `superuserBypassSets`
-//      answers non-empty, so the field merge and the row-level bypass can never
-//      disagree about who is a super-user on an object;
+//   1. THE VOTE — the admin + app-set merge reads every field the app masks,
+//      read-only; View All and Modify All alone read none of them;
+//   2. CONTROLS — a caller holding only the app set is still masked;
+//   3. ONE PREDICATE — the read vote is held exactly when a set carries
+//      `viewAllFields` on the object, and no set ever votes an edit;
 //   4. ROW-BLIND PARITY — `/auth/me/permissions`' merge
 //      (`buildEffectiveFieldPermissions`, `@objectstack/core`) answers the same
 //      bits as `getFieldPermissions` for the same sets.
@@ -34,7 +33,7 @@ import { describe, it, expect } from 'vitest';
 import type { PermissionSet } from '@objectstack/spec/security';
 import { PermissionSetSchema } from '@objectstack/spec/security';
 import { ADMIN_FULL_ACCESS } from '@objectstack/spec';
-import { buildEffectiveFieldPermissions } from '@objectstack/core';
+import { buildEffectiveFieldPermissions, viewAllFieldsReadVote } from '@objectstack/core';
 import { PermissionEvaluator } from './permission-evaluator.js';
 import { defaultPermissionSets } from './objects/default-permission-sets.js';
 
@@ -68,28 +67,34 @@ const MODIFY_ALL = set({
   name: 'operator',
   objects: { [OBJ]: { allowRead: true, allowEdit: true, modifyAllRecords: true } },
 });
-/** A super-user wildcard whose own explicit entry for the object shadows it (`resolveObjectPermission`). */
+const VIEW_ALL_FIELDS = set({ name: 'reader_all', objects: { [OBJ]: { allowRead: true, viewAllFields: true } } });
+/** The ADR-0087 conversion target: Modify All with `viewAllFields: true` beside it. */
+const MODIFY_ALL_CONVERTED = set({
+  name: 'operator_converted',
+  objects: { [OBJ]: { allowRead: true, allowEdit: true, modifyAllRecords: true, viewAllFields: true } },
+});
+/** A `viewAllFields` wildcard whose own explicit entry for the object shadows it (`resolveObjectPermission`). */
 const SHADOWED_WILDCARD = set({
   name: 'shadowed',
-  objects: { '*': { allowRead: true, viewAllRecords: true, modifyAllRecords: true }, [OBJ]: { allowRead: true } },
+  objects: { '*': { allowRead: true, viewAllRecords: true, modifyAllRecords: true, viewAllFields: true }, [OBJ]: { allowRead: true } },
 });
 
 const evaluator = new PermissionEvaluator();
 const merge = (sets: PermissionSet[]) => evaluator.getFieldPermissions(OBJ, sets);
 
-describe('[ADR-0066 ⑧, ruling 6573563853] a super-user set votes on every field of its object', () => {
-  it('the shipped admin_full_access reaches the object through its wildcard super-user bits (premise guard)', () => {
+describe('[ADR-0066 ⑧, v19 #36055] viewAllFields reads every field of its object; View All and Modify All read none', () => {
+  it('the shipped admin_full_access reaches the object through its wildcard, viewAllFields included (premise guard)', () => {
     // Without this, a future explicit `sys_business_unit` entry on the shipped
     // set would make the vote below vanish for a reason this file never names.
     const admin = shipped(ADMIN_FULL_ACCESS);
     expect(admin.objects?.[OBJ]).toBeUndefined();
-    expect(admin.objects?.['*']).toMatchObject({ viewAllRecords: true, modifyAllRecords: true });
+    expect(admin.objects?.['*']).toMatchObject({ viewAllRecords: true, modifyAllRecords: true, viewAllFields: true });
     expect(Object.keys(admin.fields ?? {}).filter((k) => k.startsWith(`${OBJ}.`))).toEqual([]);
   });
 
-  it('[the card] admin_full_access + the app mask: every masked field is readable and editable', () => {
+  it('[the card] admin_full_access + the app mask: every masked field is readable, and no longer editable', () => {
     const fp = merge([shipped(ADMIN_FULL_ACCESS), APP_MASK]);
-    for (const f of MASKED) expect(fp[f], f).toEqual({ readable: true, editable: true });
+    for (const f of MASKED) expect(fp[f], f).toEqual({ readable: true, editable: false });
   });
 
   it('[order] the vote does not depend on which set resolves first', () => {
@@ -101,31 +106,40 @@ describe('[ADR-0066 ⑧, ruling 6573563853] a super-user set votes on every fiel
     for (const f of MASKED) expect(fp[f], f).toEqual({ readable: false, editable: false });
   });
 
-  it('[control] a set with plain object read and no super-user bit casts no vote', () => {
+  it('[control] a set with plain object read and no bit casts no vote', () => {
     const plain = set({ name: 'plain', objects: { [OBJ]: { allowRead: true, allowEdit: true } } });
     const fp = merge([plain, APP_MASK]);
     for (const f of MASKED) expect(fp[f], f).toEqual({ readable: false, editable: false });
   });
 
-  it('viewAllRecords votes readable only — it never grants an edit', () => {
+  it('viewAllRecords alone reads no field another set hides', () => {
     const masked = merge([VIEW_ALL, APP_MASK]);
-    for (const f of MASKED) expect(masked[f], f).toEqual({ readable: true, editable: false });
-    const readOnly = merge([VIEW_ALL, APP_READ_ONLY]);
+    for (const f of MASKED) expect(masked[f], f).toEqual({ readable: false, editable: false });
+  });
+
+  it('modifyAllRecords alone reads no hidden field and edits no locked field', () => {
+    const masked = merge([MODIFY_ALL, APP_MASK]);
+    for (const f of MASKED) expect(masked[f], f).toEqual({ readable: false, editable: false });
+    const readOnly = merge([MODIFY_ALL, APP_READ_ONLY]);
     for (const f of MASKED) expect(readOnly[f], f).toEqual({ readable: true, editable: false });
   });
 
-  it('modifyAllRecords votes readable and editable', () => {
-    const fp = merge([MODIFY_ALL, APP_READ_ONLY]);
-    for (const f of MASKED) expect(fp[f], f).toEqual({ readable: true, editable: true });
+  it('viewAllFields votes readable only — it never grants an edit, beside Modify All included', () => {
+    for (const reader of [VIEW_ALL_FIELDS, MODIFY_ALL_CONVERTED]) {
+      const masked = merge([reader, APP_MASK]);
+      for (const f of MASKED) expect(masked[f], f).toEqual({ readable: true, editable: false });
+      const readOnly = merge([reader, APP_READ_ONLY]);
+      for (const f of MASKED) expect(readOnly[f], f).toEqual({ readable: true, editable: false });
+    }
   });
 
-  it('a super-user wildcard shadowed by the same set\'s explicit entry casts no vote, as at row level', () => {
+  it('a wildcard shadowed by the same set\'s explicit entry casts no vote, as at row level', () => {
     const fp = merge([SHADOWED_WILDCARD, APP_MASK]);
     for (const f of MASKED) expect(fp[f], f).toEqual({ readable: false, editable: false });
   });
 
   it('the vote reaches only the object it is held on', () => {
-    const elsewhere = set({ name: 'elsewhere', objects: { other_object: { allowRead: true, modifyAllRecords: true } } });
+    const elsewhere = set({ name: 'elsewhere', objects: { other_object: { allowRead: true, viewAllFields: true } } });
     const fp = merge([elsewhere, APP_MASK]);
     for (const f of MASKED) expect(fp[f], f).toEqual({ readable: false, editable: false });
   });
@@ -136,46 +150,37 @@ describe('[ADR-0066 ⑧, ruling 6573563853] a super-user set votes on every fiel
   });
 });
 
-describe('[ruling 6573563853] one super-user predicate: the field vote follows superuserBypassSets', () => {
-  const cases: Array<[string, PermissionSet[]]> = [
-    ['admin_full_access', [shipped(ADMIN_FULL_ACCESS)]],
-    ['viewAllRecords', [VIEW_ALL]],
-    ['modifyAllRecords', [MODIFY_ALL]],
-    ['shadowed wildcard', [SHADOWED_WILDCARD]],
-    ['plain object read and edit', [set({ name: 'plain_rw', objects: { [OBJ]: { allowRead: true, allowEdit: true } } })]],
-    ['member_default', [shipped('member_default')]],
+describe('[v19 #36055] one predicate: the read vote follows viewAllFields, and nothing votes an edit', () => {
+  const cases: Array<[string, PermissionSet[], boolean]> = [
+    ['admin_full_access', [shipped(ADMIN_FULL_ACCESS)], true],
+    ['viewAllRecords', [VIEW_ALL], false],
+    ['modifyAllRecords', [MODIFY_ALL], false],
+    ['viewAllFields', [VIEW_ALL_FIELDS], true],
+    ['modifyAllRecords + viewAllFields', [MODIFY_ALL_CONVERTED], true],
+    ['shadowed wildcard', [SHADOWED_WILDCARD], false],
+    ['plain object read and edit', [set({ name: 'plain_rw', objects: { [OBJ]: { allowRead: true, allowEdit: true } } })], false],
+    ['member_default', [shipped('member_default')], false],
   ];
 
-  it.each(cases)('%s: readable/editable votes equal the view/modify bypass answers', (_label, sets) => {
+  it.each(cases)('%s: readable equals the viewAllFields answer, editable is the mask\'s false', (_label, sets, reads) => {
     const all = [...sets, APP_MASK];
     const fp = merge(all);
-    const view = evaluator.superuserBypassSets(OBJ, all, { bit: 'view' }).length > 0;
-    const modify = evaluator.superuserBypassSets(OBJ, all, { bit: 'modify' }).length > 0;
     for (const f of MASKED) {
-      expect(fp[f].readable, `${f} readable`).toBe(view);
-      expect(fp[f].editable, `${f} editable`).toBe(modify);
-    }
-  });
-
-  it.each([false, true])('the private posture never changes the super-user answer (isPrivate: %s)', (isPrivate) => {
-    // The posture withholds only a wildcard WITHOUT the bits, so the field
-    // merge, which takes no posture, reads the same sets as the row bypass.
-    for (const [, sets] of cases) {
-      for (const bit of ['view', 'modify'] as const) {
-        expect(evaluator.superuserBypassSets(OBJ, sets, { bit, isPrivate }))
-          .toEqual(evaluator.superuserBypassSets(OBJ, sets, { bit }));
-      }
+      expect(viewAllFieldsReadVote(all, OBJ, f), `${f} vote`).toBe(reads);
+      expect(fp[f].readable, `${f} readable`).toBe(reads);
+      expect(fp[f].editable, `${f} editable`).toBe(false);
     }
   });
 });
 
-describe('[ruling 6573563853] the row-blind /auth/me/permissions merge agrees with getFieldPermissions', () => {
+describe('[v19 #36055] the row-blind /auth/me/permissions merge agrees with getFieldPermissions', () => {
   const combos: Array<[string, PermissionSet[]]> = [
     ['admin_full_access + mask', [shipped(ADMIN_FULL_ACCESS), APP_MASK]],
     ['mask only', [APP_MASK]],
     ['viewAll + mask', [VIEW_ALL, APP_MASK]],
-    ['viewAll + read-only', [VIEW_ALL, APP_READ_ONLY]],
     ['modifyAll + read-only', [MODIFY_ALL, APP_READ_ONLY]],
+    ['viewAllFields + mask', [VIEW_ALL_FIELDS, APP_MASK]],
+    ['modifyAll converted + read-only', [MODIFY_ALL_CONVERTED, APP_READ_ONLY]],
     ['shadowed wildcard + mask', [SHADOWED_WILDCARD, APP_MASK]],
     ['member_default + mask', [shipped('member_default'), APP_MASK]],
   ];

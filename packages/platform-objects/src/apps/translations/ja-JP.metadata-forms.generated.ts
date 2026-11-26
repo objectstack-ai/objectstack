@@ -114,7 +114,12 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       "fieldGroups.collapse": {
         label: "折りたたみ",
-        helpText: "セクションを折りたためるかどうか。入力フォームは設定どおりに動作します。既定のレコードページでは閲覧者がタイトル付きのグループをすべて折りたためるため、そこでは初期状態だけを決めます。collapsed は閉じた状態、それ以外は開いた状態で始まります。未設定の場合は none です。"
+        helpText: "セクションを折りたためるかどうか。入力フォームは設定どおりに動作します。既定のレコードページでは閲覧者がタイトル付きのグループをすべて折りたためるため、そこでは初期状態だけを決めます。collapsed は閉じた状態、それ以外は開いた状態で始まります。未設定の場合は none です。",
+        options: {
+          none: "なし — 入力フォームで常に開く、切り替えなし",
+          expanded: "展開 — 折りたたみ可、開いた状態で開始",
+          collapsed: "折りたたみ — 折りたたみ可、閉じた状態で開始"
+        }
       },
       "fieldGroups.visibleWhen": {
         label: "表示条件",
@@ -134,7 +139,56 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       "fields.type": {
         label: "型",
-        helpText: "フィールド型"
+        helpText: "フィールド型",
+        options: {
+          text: "テキスト",
+          textarea: "テキストエリア",
+          email: "メール",
+          url: "URL アドレス",
+          phone: "電話",
+          password: "パスワード",
+          markdown: "Markdown テキスト",
+          html: "HTML コンテンツ",
+          richtext: "リッチテキスト",
+          number: "数値",
+          currency: "通貨",
+          percent: "パーセント",
+          date: "日付",
+          datetime: "日時",
+          time: "時刻",
+          boolean: "ブール値",
+          toggle: "トグル",
+          select: "選択",
+          multiselect: "複数選択",
+          radio: "ラジオボタン",
+          checkboxes: "チェックボックス",
+          lookup: "参照（リファレンス）",
+          master_detail: "主従",
+          tree: "ツリー",
+          image: "画像",
+          file: "ファイル",
+          avatar: "アバター",
+          video: "動画",
+          audio: "音声",
+          formula: "数式（計算）",
+          summary: "集計（ロールアップ）",
+          autonumber: "自動採番",
+          composite: "複合（埋め込み）",
+          repeater: "リピーター（埋め込み配列）",
+          record: "レコード（キー付きマップ）",
+          location: "位置（GPS）",
+          address: "住所",
+          code: "コード",
+          json: "JSON データ",
+          color: "色",
+          rating: "評価",
+          slider: "スライダー",
+          signature: "署名",
+          qrcode: "QR / バーコード",
+          progress: "進捗",
+          tags: "タグ",
+          vector: "ベクトル埋め込み"
+        }
       },
       "fields.description": {
         label: "説明",
@@ -186,7 +240,12 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       "fields.valueDomain": {
         label: "値ドメイン",
-        helpText: "書き込む値が属していなければならない標準。メンバー以外の値を含む書き込みは拒否されます"
+        helpText: "書き込む値が属していなければならない標準。メンバー以外の値を含む書き込みは拒否されます",
+        options: {
+          iana_time_zone: "IANA タイムゾーン",
+          iso_4217_currency: "ISO 4217 通貨コード",
+          iso_3166_alpha2: "ISO 3166-1 alpha-2 国コード"
+        }
       },
       "fields.rows": {
         label: "行数",
@@ -226,7 +285,12 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       "fields.options.kind": {
         label: "種別",
-        helpText: "ライフサイクル区分(単一値の選択 / ラジオのみ):途中の段階、成功の終点、または不成功の終点。ステージ項目のすべての選択肢で必須です。"
+        helpText: "ライフサイクル区分(単一値の選択 / ラジオのみ):途中の段階、成功の終点、または不成功の終点。ステージ項目のすべての選択肢で必須です。",
+        options: {
+          open: "オープン",
+          won: "受注",
+          lost: "失注"
+        }
       },
       "fields.reference": {
         label: "参照",
@@ -238,11 +302,20 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       "fields.deleteBehavior": {
         label: "削除動作",
-        helpText: "参照先レコード削除時の動作"
+        helpText: "参照先レコード削除時の動作",
+        options: {
+          set_null: "null に設定",
+          cascade: "カスケード（子を削除）",
+          restrict: "制限（削除をブロック）"
+        }
       },
       "fields.transferBehavior": {
         label: "所有者変更の連動",
-        helpText: "参照先レコードの所有者を変更するとき、このフィールドでそのレコードを参照しているレコードも一緒に移せるかどうか"
+        helpText: "参照先レコードの所有者を変更するとき、このフィールドでそのレコードを参照しているレコードも一緒に移せるかどうか",
+        options: {
+          none: "なし（所有者のもとに残す）",
+          cascade: "カスケード（参照先レコードと一緒に移動するよう提案）"
+        }
       },
       "fields.multiple": {
         label: "複数選択",
@@ -254,7 +327,15 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       "fields.returnType": {
         label: "戻り値の型",
-        helpText: "公式の結果型"
+        helpText: "公式の結果型",
+        options: {
+          text: "テキスト",
+          number: "数値",
+          boolean: "ブール値",
+          date: "日付",
+          currency: "通貨",
+          percent: "パーセント"
+        }
       },
       "fields.summaryOperations": {
         label: "集計操作",
@@ -270,7 +351,14 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       "fields.summaryOperations.function": {
         label: "関数",
-        helpText: "集計関数"
+        helpText: "集計関数",
+        options: {
+          count: "件数",
+          sum: "合計",
+          avg: "平均",
+          min: "最小",
+          max: "最大"
+        }
       },
       "fields.autonumberFormat": {
         label: "自動採番フォーマット",
@@ -375,15 +463,31 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       "indexes.unique": {
         label: "一意",
-        helpText: "一意性のスコープ（ADR-0120）。未設定の場合は一意ではありません。非推奨の裸の true（global を意味します）は選択肢にありません。true を持つインデックスは、スコープを選ぶまでその値を保持します。"
+        helpText: "一意性のスコープ（ADR-0120）。未設定の場合は一意ではありません。非推奨の裸の true（global を意味します）は選択肢にありません。true を持つインデックスは、スコープを選ぶまでその値を保持します。",
+        options: {
+          global: "グローバル — インストール全体で 1 件、ちょうどこれらの列に対して",
+          organization: "組織 — 組織ごとに 1 件（ドライバーが組織列を先頭に追加）"
+        }
       },
       ownership: {
         label: "所有権モデル",
-        helpText: "レコードの所有権モデル。未設定の場合は user として解決されます。"
+        helpText: "レコードの所有権モデル。未設定の場合は user として解決されます。",
+        options: {
+          user: "ユーザー — 再割り当て可能な owner_id と owning_business_unit_id",
+          business_unit: "事業部門 — owning_business_unit_id のみ、owner_id なし",
+          org: "組織",
+          none: "なし — レコードごとの所有者なし、どちらのアンカーもなし"
+        }
       },
       sharingModel: {
         label: "共有モデル",
-        helpText: "社内ユーザー向けの組織既定のレコード可視性（OWD）。カスタムオブジェクトで省略した場合、実行時は private として解決されます（ADR-0090 D1）。"
+        helpText: "社内ユーザー向けの組織既定のレコード可視性（OWD）。カスタムオブジェクトで省略した場合、実行時は private として解決されます（ADR-0090 D1）。",
+        options: {
+          private: "非公開 — 所有者のみ",
+          public_read: "公開読み取り — 全員が読み取り、所有者が書き込み",
+          public_read_write: "公開読み書き — 全員が読み取り・書き込み",
+          controlled_by_parent: "親による制御 — マスターレコードから派生"
+        }
       },
       sharing: {
         label: "共有",
@@ -407,7 +511,11 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       "access.default": {
         label: "既定の公開範囲",
-        helpText: "public: '*' ワイルドカード付与の対象になります。private: オブジェクトごとの明示的な付与が必要で、ワイルドカードの行レベルセキュリティの対象外になります。"
+        helpText: "public: '*' ワイルドカード付与の対象になります。private: オブジェクトごとの明示的な付与が必要で、ワイルドカードの行レベルセキュリティの対象外になります。",
+        options: {
+          public: "公開 — ワイルドカード（*）付与の対象",
+          private: "非公開 — オブジェクトごとの明示的な付与が必要"
+        }
       },
       requiredPermissions: {
         label: "必要な権限",
@@ -423,11 +531,22 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       "publicSharing.allowedAudiences": {
         label: "許可する対象者",
-        helpText: "新しいリンクで指定できる対象者。それ以外は拒否されます。未設定の場合はリンクのみ。どの対象者でもリンクそのものが必要で、signed in ではさらにサインイン済みのユーザーが、email ではさらに受信者のアドレスがリンクのリストに載っていることが必要です。"
+        helpText: "新しいリンクで指定できる対象者。それ以外は拒否されます。未設定の場合はリンクのみ。どの対象者でもリンクそのものが必要で、signed in ではさらにサインイン済みのユーザーが、email ではさらに受信者のアドレスがリンクのリストに載っていることが必要です。",
+        options: {
+          public: "公開",
+          link_only: "リンクのみ — リンクを持つ全員",
+          signed_in: "サインイン済み — リンクを持つサインイン済みユーザー",
+          email: "メール — リンクを持つ指定の受信者"
+        }
       },
       "publicSharing.allowedPermissions": {
         label: "許可する権限",
-        helpText: "新しいリンクで付与できる権限レベル。それ以外は拒否されます。未設定の場合は閲覧のみ。"
+        helpText: "新しいリンクで付与できる権限レベル。それ以外は拒否されます。未設定の場合は閲覧のみ。",
+        options: {
+          view: "閲覧",
+          comment: "コメント",
+          edit: "編集"
+        }
       },
       "publicSharing.maxExpiryDays": {
         label: "最長有効日数",
@@ -487,7 +606,11 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       editMode: {
         label: "編集の開き方",
-        helpText: "このオブジェクトのレコードを編集するときの操作意図。未設定ならレンダラー側の既定に従います。スタイルではなく、レンダラー横断の意図表明です。"
+        helpText: "このオブジェクトのレコードを編集するときの操作意図。未設定ならレンダラー側の既定に従います。スタイルではなく、レンダラー横断の意図表明です。",
+        options: {
+          modal: "モーダル — 現在のビューの上にダイアログとして編集フォームを表示",
+          page: "ページ — 専用のフルページ編集ルートへ移動"
+        }
       },
       fileAccessDelegate: {
         label: "ファイルアクセス委譲サービス",
@@ -499,7 +622,14 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       "lifecycle.class": {
         label: "ライフサイクルクラス",
-        helpText: "このオブジェクトの行の永続化コントラクト"
+        helpText: "このオブジェクトの行の永続化コントラクト",
+        options: {
+          record: "レコード（業務上の事実 — 永続）",
+          audit: "監査（コンプライアンス台帳 — 保持 → アーカイブ → 削除）",
+          telemetry: "テレメトリ（高頻度ログ — 短期保持）",
+          transient: "一時（短命な状態 — TTL で失効）",
+          event: "イベント（バスメッセージ — ごく短い TTL）"
+        }
       },
       "lifecycle.retention": {
         label: "保持期間",
@@ -527,7 +657,10 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       "lifecycle.storage.strategy": {
         label: "戦略",
-        helpText: "ストレージ戦略"
+        helpText: "ストレージ戦略",
+        options: {
+          rotation: "ローテーション（時間シャード + 最古を削除）"
+        }
       },
       "lifecycle.storage.shards": {
         label: "シャード数",
@@ -535,7 +668,12 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       "lifecycle.storage.unit": {
         label: "シャード単位",
-        helpText: "シャード 1 つあたりの時間幅"
+        helpText: "シャード 1 つあたりの時間幅",
+        options: {
+          day: "日",
+          week: "週",
+          month: "月"
+        }
       },
       "lifecycle.archive": {
         label: "アーカイブ",
@@ -666,7 +804,11 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       percentDisplay: {
         label: "パーセント表示",
-        helpText: "読み取り専用時の表示方法（リストのセルとレコードページ）。未設定の場合はパーセントの横に進捗バーを表示します。バー：常に進捗バーを表示します（進捗向け）。プレーン：パーセントのみを表示します（率や確率向け）。"
+        helpText: "読み取り専用時の表示方法（リストのセルとレコードページ）。未設定の場合はパーセントの横に進捗バーを表示します。バー：常に進捗バーを表示します（進捗向け）。プレーン：パーセントのみを表示します（率や確率向け）。",
+        options: {
+          bar: "バー",
+          plain: "プレーン"
+        }
       },
       currencyConfig: {
         label: "通貨設定",
@@ -674,7 +816,12 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       "currencyConfig.currencyMode": {
         label: "通貨モード",
-        helpText: "dynamic（既定）：フィールド自体は通貨を持たず、金額はテナントの既定通貨（localization.currency 設定）で表示されます。fixed：フィールドは 1 つの通貨 defaultCurrency を持ちます。record：各レコードが独自の通貨を持ち、currencyField が指すフィールドに保存されます。"
+        helpText: "dynamic（既定）：フィールド自体は通貨を持たず、金額はテナントの既定通貨（localization.currency 設定）で表示されます。fixed：フィールドは 1 つの通貨 defaultCurrency を持ちます。record：各レコードが独自の通貨を持ち、currencyField が指すフィールドに保存されます。",
+        options: {
+          dynamic: "動的 — テナントの既定通貨",
+          fixed: "固定 — このフィールドで 1 つの通貨",
+          record: "レコード — 各レコードが通貨を指定"
+        }
       },
       "currencyConfig.currencyField": {
         label: "通貨フィールド",
@@ -771,11 +918,19 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       deleteBehavior: {
         label: "削除動作",
-        helpText: "参照先レコード削除時の動作"
+        helpText: "参照先レコード削除時の動作",
+        options: {
+          cascade: "カスケード（子を削除）",
+          restrict: "制限（削除をブロック）"
+        }
       },
       transferBehavior: {
         label: "所有者変更の連動",
-        helpText: "参照先レコードの所有者を変更するとき、このフィールドでそのレコードを参照しているレコードも一緒に移せるかどうか"
+        helpText: "参照先レコードの所有者を変更するとき、このフィールドでそのレコードを参照しているレコードも一緒に移せるかどうか",
+        options: {
+          none: "なし（所有者のもとに残す）",
+          cascade: "カスケード（参照先レコードと一緒に移動するよう提案）"
+        }
       },
       relatedListFilter: {
         label: "関連リストのフィルター",
@@ -819,7 +974,11 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       inlineEdit: {
         label: "インライン編集形式",
-        helpText: "親オブジェクトのフィールドグループがこの子を指定したとき（fieldGroups[].relatedList）、親フォームがこの子の行を編集する形式。未設定: このオブジェクトのフィールドから自動で選択。"
+        helpText: "親オブジェクトのフィールドグループがこの子を指定したとき（fieldGroups[].relatedList）、親フォームがこの子の行を編集する形式。未設定: このオブジェクトのフィールドから自動で選択。",
+        options: {
+          grid: "グリッド（表で行を編集）",
+          form: "フォーム（各行を完全なフォームで開く）"
+        }
       },
       inlineTitle: {
         label: "インライン表のタイトル",
@@ -855,7 +1014,15 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       returnType: {
         label: "数式の戻り値型",
-        helpText: "数式が宣言する値の型。推論された CEL の型から記録され、利用側は式を解析し直さずにこの値を読みます。通貨：金額で、その通貨はこのフィールドの通貨設定が宣言します（未設定の場合は dynamic）。"
+        helpText: "数式が宣言する値の型。推論された CEL の型から記録され、利用側は式を解析し直さずにこの値を読みます。通貨：金額で、その通貨はこのフィールドの通貨設定が宣言します（未設定の場合は dynamic）。",
+        options: {
+          text: "テキスト",
+          number: "数値",
+          boolean: "ブール値",
+          date: "日付",
+          currency: "通貨",
+          percent: "パーセント"
+        }
       },
       summaryOperations: {
         label: "集計操作",
@@ -867,7 +1034,14 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       "summaryOperations.function": {
         label: "関数",
-        helpText: "集計関数"
+        helpText: "集計関数",
+        options: {
+          count: "件数",
+          sum: "合計",
+          min: "最小",
+          max: "最大",
+          avg: "平均"
+        }
       },
       "summaryOperations.field": {
         label: "フィールド",
@@ -1007,7 +1181,11 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       "body.language": {
         label: "言語",
-        helpText: "expression = 純粋な数式; js = サンドボックス化 JavaScript"
+        helpText: "expression = 純粋な数式; js = サンドボックス化 JavaScript",
+        options: {
+          expression: "式（L1）",
+          js: "JavaScript（L2 サンドボックス）"
+        }
       },
       "body.source": {
         label: "ソース",
@@ -1070,7 +1248,11 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         helpText: "バックグラウンドで実行し、トランザクションをブロックしない"
       },
       onError: {
-        label: "エラー時"
+        label: "エラー時",
+        options: {
+          abort: "中止",
+          log: "ログに記録"
+        }
       },
       timeoutMs: {
         label: "タイムアウト（ms）",
@@ -1078,7 +1260,12 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       runAs: {
         label: "実行主体",
-        helpText: "ctx.api のデータ操作の主体：inherit は起点となった書き込みのコンテキストを継承（既定）、system は昇格、user は起点ユーザーに固定"
+        helpText: "ctx.api のデータ操作の主体：inherit は起点となった書き込みのコンテキストを継承（既定）、system は昇格、user は起点ユーザーに固定",
+        options: {
+          inherit: "継承（トリガーとなった書き込み）",
+          system: "システム（昇格）",
+          user: "ユーザー（トリガーしたユーザー）"
+        }
       },
       condition: {
         label: "条件",
@@ -1519,7 +1706,14 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       type: {
         label: "型",
-        helpText: "ページの種類。\"List / Interface\" はソースビューをキュレーションされたサーフェスにバインドします。見せ方（grid / kanban / calendar / …）はページタイプではなく、Interface で設定するビジュアライゼーションです。"
+        helpText: "ページの種類。\"List / Interface\" はソースビューをキュレーションされたサーフェスにバインドします。見せ方（grid / kanban / calendar / …）はページタイプではなく、Interface で設定するビジュアライゼーションです。",
+        options: {
+          list: "リスト / インターフェースページ",
+          record: "レコードページ",
+          home: "ホームページ",
+          app: "アプリページ",
+          utility: "ユーティリティパネル"
+        }
       },
       template: {
         label: "テンプレート",
@@ -1632,7 +1826,12 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       "interfaceConfig.recordAction": {
         label: "レコードアクション",
-        helpText: "レコードをクリックしたときに詳細をどう開くか"
+        helpText: "レコードをクリックしたときに詳細をどう開くか",
+        options: {
+          drawer: "ドロワー（右側にプレビュー）",
+          page: "フルページ",
+          none: "クリック不可"
+        }
       },
       "interfaceConfig.showRecordCount": {
         label: "レコード数を表示",
@@ -1797,7 +1996,26 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       "dateRange.defaultRange": {
         label: "既定の期間",
-        helpText: "ダッシュボードを開いたときに表示される期間。"
+        helpText: "ダッシュボードを開いたときに表示される期間。",
+        options: {
+          today: "今日",
+          yesterday: "昨日",
+          this_week: "今週",
+          last_week: "先週",
+          this_month: "今月",
+          last_month: "先月",
+          next_month: "来月",
+          this_quarter: "今四半期",
+          last_quarter: "前四半期",
+          next_quarter: "来四半期",
+          this_year: "今年",
+          last_year: "昨年",
+          last_7_days: "過去 7 日間",
+          last_30_days: "過去 30 日間",
+          last_90_days: "過去 90 日間",
+          next_30_days: "今後 30 日間",
+          custom: "カスタム…"
+        }
       },
       "dateRange.allowCustomRange": {
         label: "カスタム範囲を許可",
@@ -1973,7 +2191,13 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       mode: {
         label: "セマンティックモード",
-        helpText: "このアクションの意味上のモード。現在読んでいるのは AI の人手確認（HITL）ヒューリスティックだけで、レンダラーはこの値で分岐しません。"
+        helpText: "このアクションの意味上のモード。現在読んでいるのは AI の人手確認（HITL）ヒューリスティックだけで、レンダラーはこの値で分岐しません。",
+        options: {
+          create: "作成",
+          edit: "編集",
+          delete: "削除",
+          custom: "カスタム"
+        }
       },
       order: {
         label: "並び順",
@@ -1993,7 +2217,11 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       "body.language": {
         label: "言語",
-        helpText: "expression = 純粋な数式; js = サンドボックス化 JavaScript"
+        helpText: "expression = 純粋な数式; js = サンドボックス化 JavaScript",
+        options: {
+          expression: "式（L1）",
+          js: "JavaScript（L2 サンドボックス）"
+        }
       },
       "body.source": {
         label: "ソース",
@@ -2110,7 +2338,10 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       operation: {
         label: "宣言的な書き込み",
-        helpText: "単一レコードに対する宣言的な項目書き込み。'update' は `patch`（収集された `params` の下にマージされます）を現在のレコードに適用します。実行は呼び出し元の権限のままで、システム権限に昇格しません。したがって呼び出し元の権限・オブジェクトのフック・バリデーションは、ユーザーが編集した場合と同じように動作します。"
+        helpText: "単一レコードに対する宣言的な項目書き込み。'update' は `patch`（収集された `params` の下にマージされます）を現在のレコードに適用します。実行は呼び出し元の権限のままで、システム権限に昇格しません。したがって呼び出し元の権限・オブジェクトのフック・バリデーションは、ユーザーが編集した場合と同じように動作します。",
+        options: {
+          update: "現在のレコードを更新"
+        }
       },
       patch: {
         label: "固定値（patch）",
@@ -2356,7 +2587,26 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       "dateRange.defaultRange": {
         label: "既定の期間",
-        helpText: "レポートを開いたときに表示される期間。"
+        helpText: "レポートを開いたときに表示される期間。",
+        options: {
+          today: "今日",
+          yesterday: "昨日",
+          this_week: "今週",
+          last_week: "先週",
+          this_month: "今月",
+          last_month: "先月",
+          next_month: "来月",
+          this_quarter: "今四半期",
+          last_quarter: "前四半期",
+          next_quarter: "来四半期",
+          this_year: "今年",
+          last_year: "昨年",
+          last_7_days: "過去 7 日間",
+          last_30_days: "過去 30 日間",
+          last_90_days: "過去 90 日間",
+          next_30_days: "今後 30 日間",
+          custom: "カスタム…"
+        }
       },
       "dateRange.allowCustomRange": {
         label: "カスタム範囲を許可",
@@ -3029,7 +3279,11 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       surface: {
         label: "バインドする製品サーフェス",
-        helpText: "このエージェントがバインドする製品サーフェス（ADR-0063 §1）。自身のサーフェスが一致するか 'both' のスキルだけがアタッチされ、エージェントのツールセットはそれらのスキルのツールの和集合になります。既定は 'ask' です。"
+        helpText: "このエージェントがバインドする製品サーフェス（ADR-0063 §1）。自身のサーフェスが一致するか 'both' のスキルだけがアタッチされ、エージェントのツールセットはそれらのスキルのツールの和集合になります。既定は 'ask' です。",
+        options: {
+          ask: "Ask（対話型サーフェス）",
+          build: "Build（作成サーフェス）"
+        }
       },
       instructions: {
         label: "指示",
@@ -3041,7 +3295,7 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       planning: {
         label: "計画",
-        helpText: "自律推論設定: エージェントが停止するまでの最大推論反復回数（1〜100、既定値 10）。"
+        helpText: "自律推論設定: 暴走ループを止めるヒューズで、モデル呼び出し回数（1 回のモデル呼び出しとそれが要求するツール呼び出しの一括）で数え、達するとエージェントは停止します（1〜1000、既定値 10）。"
       },
       memory: {
         label: "メモリ",
@@ -3146,7 +3400,12 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       surface: {
         label: "バインドするエージェントサーフェス",
-        helpText: "このスキルがバインドするエージェントのサーフェス（ADR-0063 §3）。サーフェスが食い違うエージェントにバインドすると、黙ってスキップされるのではなく解決時にエラーになります。既定は 'ask' です。"
+        helpText: "このスキルがバインドするエージェントのサーフェス（ADR-0063 §3）。サーフェスが食い違うエージェントにバインドすると、黙ってスキップされるのではなく解決時にエラーになります。既定は 'ask' です。",
+        options: {
+          ask: "Ask（対話型サーフェス）",
+          build: "Build（作成サーフェス）",
+          both: "両方"
+        }
       },
       instructions: {
         label: "指示",

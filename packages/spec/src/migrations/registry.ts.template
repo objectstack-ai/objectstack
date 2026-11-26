@@ -3718,16 +3718,22 @@ const step18: MigrationStep = {
  * load-time handshake (ADR-0087 D1) refuses a manifest whose range admits only
  * 18. That refusal is this step's first semantic entry, and the one every
  * upgrading author meets first. Later retirements on the v19 line add their
- * entries as files; a major-19 conversion, once one exists, graduates here the
- * way step 18's do.
+ * entries as files; a major-19 conversion graduates here the way step 18's do
+ * (the first is `permission-view-all-fields-beside-record-bypass`).
  */
 const step19: MigrationStep = {
   toMajor: 19,
   rationale:
     'Protocol 19 moves the load-time handshake: a manifest whose `engines.protocol` range admits '
     + 'protocol 18 and not 19 is refused before any of its metadata loads, so each manifest an app '
-    + 'or package declares moves its range to `^19`, together with its `@objectstack/*` versions.',
-  conversionIds: [],
+    + 'or package declares moves its range to `^19`, together with its `@objectstack/*` versions. '
+    + 'View All and Modify All stop casting a field vote: `viewAllFields: true` is written beside them '
+    + 'in every permission set entry of a source that predates the switch, so the migrated source keeps '
+    + 'the field reads those bits cast; the semantic entry names what it does not keep.',
+  // Derived, not listed, as step 18's are: every major-19 conversion graduates
+  // into this step in the order `CONVERSIONS_BY_MAJOR[19]` applies them. Add a
+  // conversion there, never here.
+  conversionIds: CONVERSIONS_BY_MAJOR[19]!.map((c) => c.id),
   semantic: [
     // One file per entry under `entries/semantic/`, concatenated here sorted by
     // entry id by `gen:migration-registry` (#7297). Add an entry by adding a

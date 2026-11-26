@@ -975,8 +975,8 @@ describe('persona grants — what the card has each persona read and write, agai
       expect(refused({ objects: EDITS_TASKS, fields: { 'task.status': { readable: true, editable: false } } })).toBe(true);
       // A lock on a field the write does not name refuses nothing.
       expect(refused({ objects: EDITS_TASKS, fields: { 'task.title': { readable: true, editable: false } } })).toBe(false);
-      // Modify All votes every field editable, so the lock is overridden.
-      expect(refused({ objects: { project: { allowRead: true }, task: { allowRead: true, modifyAllRecords: true } }, fields: { 'task.status': { readable: true, editable: false } } })).toBe(false);
+      // [v19 #36055] Modify All casts no field vote, so the lock beside it still refuses the write.
+      expect(refused({ objects: { project: { allowRead: true }, task: { allowRead: true, modifyAllRecords: true } }, fields: { 'task.status': { readable: true, editable: false } } })).toBe(true);
     });
 
     it('is not measured when only a row rule could refuse it, and counts in neither figure', () => {

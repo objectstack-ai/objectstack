@@ -49,8 +49,11 @@ void _mirrorPin;
 // label when `floor <= E.retiredAfter` — with the door's two default flips
 // named, as the blocks below already name them.
 
-/** The door's DEFAULT-FLIP refusals, named in their own blocks below (#17885, #15429). */
-const DOOR_DEFAULT_FLIPS: readonly string[] = ['flow-decision-mode-inclusive-explicit'];
+/** The door's DEFAULT-FLIP refusals, named in their own blocks below (#17885, #15429, protocol 19's View All split). */
+const DOOR_DEFAULT_FLIPS: readonly string[] = [
+  'flow-decision-mode-inclusive-explicit',
+  'permission-view-all-fields-beside-record-bypass',
+];
 
 const versionTriple = (v: string): [number, number, number] =>
   v.split(/[.-]/).slice(0, 3).map((n) => Number.parseInt(n, 10)) as [number, number, number];
@@ -1076,6 +1079,105 @@ describe('the artifact door never writes `mode: inclusive` onto an authored excl
     });
     expect(verdictNodeOf(rewritten).config).toEqual({ mode: 'inclusive' });
     expect(notices.map((n) => n.conversionId)).toContain(ID);
+  });
+});
+
+/**
+ * Protocol 19 — the third member of the DEFAULT-FLIP class this door refuses.
+ *
+ * `permission-view-all-fields-beside-record-bypass` writes `viewAllFields: true`
+ * beside `viewAllRecords: true` / `modifyAllRecords: true`, so a source written
+ * while those bits voted on every field keeps its reads. From 19 View All
+ * without `viewAllFields` IS "every record, no field vote", so the rewrite
+ * reinterprets a legal shape; at this door the trigger is a declared floor,
+ * not an age, and replaying it would hand an app authored against the 19
+ * contract a field bypass that re-opens fields another set hides.
+ *
+ * The four legs of the block above: SUBJECT inside each window half · the
+ * strict parse the door feeds · NEGATIVE (window shut) · FIRING CONTROL.
+ */
+describe('the artifact door never writes `viewAllFields` beside an authored View All (protocol 19)', () => {
+  const ID = 'permission-view-all-fields-beside-record-bypass';
+  /** A View All set and a Modify All wildcard, neither naming `viewAllFields` — the shape the entry rewrites. */
+  const viewAllDefinition = (protocolRange: string) => ({
+    manifest: {
+      id: 'app.example.audit', name: 'audit', version: '1.0.0', type: 'app',
+      engines: { protocol: protocolRange },
+    },
+    permissions: [{
+      name: 'field_auditor',
+      label: 'Field Auditor',
+      objects: {
+        crm_lead: { allowRead: true, viewAllRecords: true },
+        '*': { allowRead: true, allowEdit: true, allowDelete: true, modifyAllRecords: true },
+      },
+    }],
+  });
+  const objectsOf = (definition: unknown) =>
+    (definition as { permissions: { objects: Record<string, Record<string, unknown>> }[] }).permissions[0]!.objects;
+  const noBitAnywhere = (definition: unknown) =>
+    Object.values(objectsOf(definition)).every((e) => !('viewAllFields' in e));
+
+  it('leaves View All and Modify All without `viewAllFields` on an artifact the retired window IS open for', () => {
+    const def = viewAllDefinition('^18.0.0');
+    const result = applyArtifactForwardConversions(def, { runtimeSpecVersion: '19.0.0' });
+
+    // ⭐ ANTI-VACUITY: the window really is open on this input.
+    expect(result.verdict).toBe('converted-forward');
+    expect(noBitAnywhere(result.definition), 'no field bypass written').toBe(true);
+    expect(result.notices.map((n) => n.conversionId)).not.toContain(ID);
+    expect(result.definition).toBe(def);
+  });
+
+  it('registers the set without `viewAllFields` — asserted AFTER the strict parse the door feeds', () => {
+    const result = applyArtifactForwardConversions(viewAllDefinition('^18.0.0'), { runtimeSpecVersion: '19.0.0' });
+    expect(result.verdict).toBe('converted-forward');
+    const parsed = ObjectStackDefinitionSchema.parse(result.definition);
+    for (const [name, entry] of Object.entries(objectsOf(parsed))) {
+      expect(entry.viewAllFields, `${name}: what registration receives`).toBeUndefined();
+    }
+  });
+
+  it('stays refused inside the per-entry window — the refusal list is read before retiredAfter', () => {
+    const retiredAfter = (ALL_CONVERSIONS.find((c) => c.id === ID) as { retiredAfter?: string } | undefined)?.retiredAfter;
+    expect(retiredAfter, 'the entry is retired with a version').toBeDefined();
+    const result = applyArtifactForwardConversions(viewAllDefinition(`^${retiredAfter}`), { runtimeSpecVersion: retiredAfter! });
+
+    // ⭐ ANTI-VACUITY: the per-entry window really is open on this input.
+    expect(result.verdict).toBe('converted-retired-after');
+    expect(noBitAnywhere(result.definition)).toBe(true);
+    expect(result.notices.map((n) => n.conversionId)).not.toContain(ID);
+  });
+
+  it('stays refused inside the major-step half — the refusal list is read before toMajor', () => {
+    expect(ALL_CONVERSIONS.find((c) => c.id === ID)?.toMajor, 'the entry is in step 19').toBe(19);
+    const def = viewAllDefinition('^19');
+    const result = applyArtifactForwardConversions(def, { runtimeSpecVersion: '18.6.0' });
+
+    // The half opens every OTHER retired step-19 entry; while this is the only
+    // one, the refusal leaves nothing to open and the door says so.
+    const otherStep19 = ALL_CONVERSIONS.filter((c) => c.toMajor === 19 && c.retiredFromLoadPath === true && c.id !== ID);
+    expect(result.verdict).toBe(otherStep19.length > 0 ? 'converted-major-step' : 'authored-current');
+    expect(noBitAnywhere(result.definition)).toBe(true);
+    expect(result.notices.map((n) => n.conversionId)).not.toContain(ID);
+  });
+
+  it('floor ^99.0.0 — the window is shut and nothing is replayed at all', () => {
+    const result = applyArtifactForwardConversions(viewAllDefinition('^99.0.0'), { runtimeSpecVersion: '19.0.0' });
+    expect(result.verdict).toBe('authored-current');
+    expect(result.notices).toEqual([]);
+    expect(noBitAnywhere(result.definition)).toBe(true);
+  });
+
+  it('FIRING CONTROL — without the refusal, the same fixture IS rewritten to `viewAllFields: true`', () => {
+    const notices: ConversionNotice[] = [];
+    const rewritten = applyConversions(viewAllDefinition('^18.0.0'), {
+      includeRetired: true,
+      onNotice: (n) => notices.push(n),
+    });
+    expect(objectsOf(rewritten).crm_lead!.viewAllFields).toBe(true);
+    expect(objectsOf(rewritten)['*']!.viewAllFields).toBe(true);
+    expect(notices.filter((n) => n.conversionId === ID)).toHaveLength(2);
   });
 });
 
