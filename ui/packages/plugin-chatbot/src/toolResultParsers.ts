@@ -313,9 +313,13 @@ export function chartAnswerParts(
  * (progress frames, build trees) and is not kept. Keyed by the message field
  * that carries the part's payload between rebuilds.
  *
+ * The table names the kept parts; it does not drive the code. A further kept
+ * part takes three edits: an entry here, its write in
+ * {@link storedAnswerParts}, and its read in `storedAnswerData`.
+ *
  * `recordCitations` is spelled here rather than imported so this eager module
  * stays free of `@objectstack/spec/ai` and the schemas it loads;
- * `storedAnswerParts.recordCitations-37487.test.ts` pins it to the spec's
+ * `useObjectChat.recordCitationsReload-37487.test.tsx` pins it to the spec's
  * `RECORD_CITATIONS_PART_TYPE`.
  */
 export const STORED_ANSWER_DATA_PARTS = {

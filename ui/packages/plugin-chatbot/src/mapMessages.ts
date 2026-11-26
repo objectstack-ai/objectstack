@@ -863,8 +863,8 @@ export function extractRecordCitations(parts: readonly AnyPart[]): RecordCitatio
 /**
  * objectstack#37487 — the reading half of `STORED_ANSWER_DATA_PARTS`: every
  * kept data part of a stored message, read back into the message fields the
- * chat draws. A history or cache rebuild calls this once, so a part added to
- * the allow-list is read wherever it is written. The citations list is taken
+ * chat draws. A history or cache rebuild calls this once; a part added to the
+ * allow-list is read here, beside its write in `storedAnswerParts`. The citations list is taken
  * as persisted (ruling Q1): parsed through the contract, never verified again.
  */
 export function storedAnswerData(parts: readonly AnyPart[]): {
