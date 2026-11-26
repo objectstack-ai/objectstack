@@ -2,7 +2,6 @@
 
 import { formTypeWriteRefusal } from './protocol-form-writes.js';
 import { readUnreadableFormBodies } from './protocol-form-reads.js';
-import type { UnreadableFormBody } from '@objectstack/spec/ui';
 import type {
     DataProtocol,
     FlowRegistration,
@@ -84,7 +83,6 @@ import { PLURAL_TO_SINGULAR, unrecognisedMetaTypeRefusal } from '@objectstack/sp
 // live transport in through `attachMetadataMutationPubSub`.
 import type { IPubSub } from '@objectstack/spec/contracts';
 import type { ConversionNotice, ConversionTodoNotice } from '@objectstack/spec';
-import { type I18nLabel } from '@objectstack/spec/ui';
 // [commit ece4dad31] Emitted-specifier pin. This module's inferred public declarations
 // structurally mention `FormFieldInput` (FormView `sections[].fields`), and
 // this file imports BOTH `@objectstack/spec` (root, for
@@ -100,7 +98,7 @@ import { type I18nLabel } from '@objectstack/spec/ui';
 // reference on the narrow `/ui` entry; the export statement is what keeps
 // no-unused-locals green. index.ts deliberately does not re-export it
 // (curated entry, unchanged).
-import { type FormFieldInput } from '@objectstack/spec/ui';
+import { type FormFieldInput, type I18nLabel, type UnreadableFormBody } from '@objectstack/spec/ui';
 export type { FormFieldInput };
 import { type TranslationBundle } from '@objectstack/spec/system';
 import {
@@ -3537,13 +3535,7 @@ export class ObjectStackProtocolImplementation implements
         return getMetaItemsPerPackage(protocolHost(this), request);
     }
 
-    /**
-     * [ADR-0159 D6 rule 7] The stored `view` bodies the `form` projection
-     * cannot read, each with the public links it names: the anonymous form
-     * doors close every one of those links (a server-only extension the doors
-     * feature-detect). Each such row is said once at `error`, naming the row,
-     * the links and the repair save. See `readUnreadableFormBodies`.
-     */
+    /** Contract: {@link readUnreadableFormBodies} [ADR-0159 D6 rule 7]; a server-only extension the anonymous form doors feature-detect. */
     async getUnreadableFormBodies(): Promise<UnreadableFormBody[]> {
         return readUnreadableFormBodies(protocolHost(this));
     }
