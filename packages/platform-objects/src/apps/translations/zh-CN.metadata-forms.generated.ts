@@ -2236,7 +2236,7 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       joined_blocks: {
         label: "joined 报表分块",
-        description: "叠加进同一张报表的其他数据集分块（仅 joined 报表）"
+        description: "叠加进同一张报表的其他分块，各有自己的数据来源（仅 joined 报表）"
       },
       filter_and_chart: {
         label: "筛选与图表",
@@ -2277,11 +2277,11 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       columns: {
         label: "列分组",
-        helpText: "横向展开的维度名（仅 matrix 报表）"
+        helpText: "横向展开的分组（仅 matrix 报表）"
       },
       order: {
         label: "排序",
-        helpText: "排序键，最重要的在前（rows/columns 维度或 values 度量）。时间维度默认按时间顺序排列。"
+        helpText: "排序依据，最重要的在前（某个分组或指标）。时间分组默认按时间先后排列。"
       },
       "order.by": {
         label: "排序依据"
@@ -2295,7 +2295,7 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       blocks: {
         label: "分块",
-        helpText: "绑定数据集的子报表（仅 joined 报表）"
+        helpText: "子报表，各有自己的数据来源（仅 joined 报表）"
       },
       "blocks.name": {
         label: "名称"
@@ -2337,7 +2337,7 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       dateRange: {
         label: "日期范围",
-        helpText: "默认时间段与自定义范围开关。维度必须是数据集的日期维度；数据集只有一个日期维度时可留空"
+        helpText: "打开报表时显示的时间段，以及使用者能否自己选择范围"
       },
       "dateRange.dimension": {
         label: "日期字段",
@@ -2353,7 +2353,7 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       exportOptions: {
         label: "导出选项",
-        helpText: "下载格式（csv、xlsx）与文件名。谁可以下载由数据集对象上的导出权限决定"
+        helpText: "下载格式（csv、xlsx）与文件名。谁可以下载由数据来源对象上的导出权限决定"
       },
       "exportOptions.formats": {
         label: "格式",

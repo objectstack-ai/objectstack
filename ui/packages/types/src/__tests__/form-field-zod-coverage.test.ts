@@ -93,6 +93,8 @@ const DECLARED_KEYS = [
   // read, and the currency widget's fixed-currency declaration, by reference.
   'scale',
   'currencyConfig',
+  // objectstack#35490 — the unit a quantity is drawn with, by reference.
+  'unitConfig',
   'minLength',
   'maxLength',
   'pattern',

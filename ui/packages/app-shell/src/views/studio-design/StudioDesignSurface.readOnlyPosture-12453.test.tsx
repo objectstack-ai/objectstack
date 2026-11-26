@@ -61,6 +61,7 @@ vi.mock('./StudioAiCopilot', () => ({ StudioChatDock: () => null }));
 vi.mock('../../preview/DraftChangesPanel', () => ({ DraftChangesPanel: () => null }));
 
 import { StudioDesignSurface } from './StudioDesignSurface';
+import { StudioPillarRedirect } from './StudioPillarRedirect';
 import { t } from '../metadata-admin/i18n';
 // The source under test reaches these dynamic imports (the command palette's
 // record preview, the drafts panel's lint, the code editor): their first load
@@ -93,7 +94,7 @@ function renderPillar(pillar: (typeof PILLARS)[number]) {
     <MemoryRouter initialEntries={[`/studio/${PACKAGE_ID}/${pillar}`]}>
       <Routes>
         <Route path="/studio/:packageId/metadata/*" element={<StudioDesignSurface area="metadata" />} />
-        <Route path="/studio/:packageId/:tab" element={<StudioDesignSurface />} />
+        <Route path="/studio/:packageId/:tab" element={<StudioPillarRedirect><StudioDesignSurface /></StudioPillarRedirect>} />
       </Routes>
     </MemoryRouter>,
   );

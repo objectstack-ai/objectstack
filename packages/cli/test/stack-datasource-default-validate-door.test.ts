@@ -43,7 +43,7 @@ const stackOf = (name: string) => ({
     name: 'Reserved datasource door probe',
     version: '1.0.0',
     type: 'app',
-    engines: { protocol: '^18' },
+    engines: { protocol: '^19' },
   },
   objects: [
     {

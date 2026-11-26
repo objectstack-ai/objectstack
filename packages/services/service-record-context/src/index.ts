@@ -15,6 +15,7 @@ export {
 export type { RecordContextTools } from './record-context-tools.js';
 export type { RecordContextDoor } from './door.js';
 export { verifyRecordCitations } from './verify-citations.js';
+export type { VerifyRecordCitationsOptions, VerifyingCall } from './verify-citations.js';
 export { RECORD_CONTEXT_BODY_MAX_CHARS, RECORD_CONTEXT_OUTLINE_MAX_ENTRIES } from './body-outline.js';
 export {
   contextPackCandidates,

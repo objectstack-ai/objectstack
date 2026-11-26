@@ -64,7 +64,7 @@ const STACK = {
     name: 'Connector spec file probe',
     version: '0.1.0',
     type: 'app',
-    engines: { protocol: '^18' },
+    engines: { protocol: '^19' },
   },
   requires: ['automation'],
   connectors: [

@@ -430,3 +430,59 @@ describe('[#35138] stdio door: the answer names only what the caller can see', (
     },
   );
 });
+
+describe('[#35429] the record read tools say up front what notRecorded means, and never name the search companion', () => {
+  async function toolDescriptions(bridge: McpDataBridge): Promise<Record<string, string>> {
+    const runtime = new MCPServerRuntime({ name: 't', version: '1.0.0' });
+    const body = { jsonrpc: '2.0', id: 1, method: 'tools/list', params: {} };
+    const req = new Request('http://localhost/api/v1/mcp', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', accept: 'application/json, text/event-stream' },
+      body: JSON.stringify(body),
+    });
+    const res = await runtime.handleHttpRequest(req, { bridge, parsedBody: body });
+    const json: any = await res.json();
+    return Object.fromEntries(json.result.tools.map((t: { name: string; description: string }) => [t.name, t.description]));
+  }
+
+  it.each(['query_records', 'aggregate_records', 'get_record'])(
+    '%s\'s description names notRecorded and ifNotRecorded, and says never to report 0 or empty for it',
+    async (tool) => {
+      const descriptions = await toolDescriptions(makeBridge({ served: { [OBJECT]: SERVED_FIELDS } }));
+      const description = descriptions[tool];
+      expect(typeof description).toBe('string');
+      expect(mentions(description, 'notRecorded')).toBe(true);
+      expect(mentions(description, 'ifNotRecorded')).toBe(true);
+      expect(description).toMatch(/never report 0 or empty/);
+    },
+  );
+
+  it('a where refused for another reason never names the search companion key, at the top or under a logical operator', async () => {
+    const bridge = makeBridge({ served: { [OBJECT]: SERVED_FIELDS }, throws: () => INVALID_FIELD('invoice_total') });
+    const query = await callTool(bridge, 'query_records', {
+      objectName: OBJECT,
+      where: { __search: { $contains: 'acme' }, $or: [{ __search: { $contains: 'x' } }, { invoice_total: { $gt: 1 } }] },
+    });
+    expect(query.isError).toBe(true);
+    expect(query.payload.error.code).toBe('INVALID_FIELD');
+    expect(query.payload.notRecorded).toEqual({ object: OBJECT, fields: ['invoice_total'] });
+    const aggregate = await callTool(bridge, 'aggregate_records', {
+      objectName: OBJECT,
+      where: { __search: { $contains: 'acme' } },
+      aggregations: [{ function: 'count', alias: 'n', filter: { __search: { $contains: 'x' }, invoice_total: { $gt: 0 } } }],
+    });
+    expect(aggregate.isError).toBe(true);
+    expect(aggregate.payload.notRecorded).toEqual({ object: OBJECT, fields: ['invoice_total'] });
+  });
+
+  it('a where whose only unshown key is the search companion carries no member beside its refusal', async () => {
+    const bridge = makeBridge({
+      served: { [OBJECT]: SERVED_FIELDS },
+      throws: () => refusal('PERMISSION_DENIED', 403, 'You do not have permission to perform this action.'),
+    });
+    const answer = await callTool(bridge, 'query_records', { objectName: OBJECT, where: { __search: { $contains: 'acme' }, subject: 'x' } });
+    expect(answer.isError).toBe(true);
+    expect(answer.payload.error.code).toBe('PERMISSION_DENIED');
+    expect(Object.keys(answer.payload)).toEqual(['error']);
+  });
+});

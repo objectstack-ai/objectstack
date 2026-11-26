@@ -3,11 +3,12 @@
 /**
  * objectstack#36895 — no Studio address is built by hand anywhere under `ui/`.
  *
- * The Studio redesign (epic #36890) switches each item type from its pillar
- * address to its metadata address in ONE place, `STUDIO_ITEM_PILLAR` in
- * `studioAddress.ts`. That holds only while every producer calls the builders
- * there: a `/studio/...` string written out anywhere else keeps the old
- * address after the switch, and the area's redirect then sends it in a loop.
+ * The Studio redesign (epic #36890) moved each item type from its pillar
+ * address to its metadata address by changing the builders in
+ * `studioAddress.ts`, and a Studio address changes there or nowhere. That
+ * holds only while every producer calls the builders: a `/studio/...` string
+ * written out anywhere else keeps an old address after a change, and lands
+ * where the address used to go, or in a redirect loop.
  *
  * This pin parses every non-test source under `ui/packages/<pkg>/src` and
  * `ui/apps/<app>/src` (comments are not literals, so prose is free to name an

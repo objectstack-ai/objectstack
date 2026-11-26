@@ -21,11 +21,25 @@ export interface RecordContextService {
  * A host that mounts it serves `get_record_context` on its MCP doors (both
  * resolve the service by structure, as they resolve the dataset and knowledge
  * executors); a host without it registers no `get_record_context`, and
- * nothing else changes (ADR-0160 D5). Composition is explicit: mount it in
- * `plugins[]`.
+ * nothing else changes (ADR-0160 D5). Composition is explicit, by either of
+ * two doors: a stack declares `requires: ['record-context']`, which the CLI
+ * expands to this plugin (`CAPABILITY_PROVIDERS` in `@objectstack/core`), or a
+ * host that composes its own kernel mounts it in `plugins[]` and keeps that
+ * instance when the token is declared too.
  *
  * @example
  * ```ts
+ * // An app that ships only metadata: the token mounts the plugin.
+ * export default defineStack({
+ *   // …
+ *   requires: ['record-context'],
+ *   aiContexts: [policyDocumentPack],
+ * });
+ * ```
+ *
+ * @example
+ * ```ts
+ * // A host that composes its own kernel.
  * import { RecordContextServicePlugin } from '@objectstack/service-record-context';
  *
  * export default defineStack({

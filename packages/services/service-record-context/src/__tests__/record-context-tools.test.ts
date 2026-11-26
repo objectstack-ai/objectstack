@@ -242,13 +242,87 @@ describe('get_record_context — the order of judgement (ADR-0160 D4)', () => {
   });
 });
 
-describe('get_record_context — object level: one refusal is the whole call\'s, within the naming bound (ADR-0160 D3/D4)', () => {
-  it('a child the caller is not served is refused PERMISSION_DENIED without naming it', async () => {
-    const refused = await refusalOf(run(policyApp({ unservedObjects: ['policy_revision'] })));
+describe('get_record_context — object level: a gate that refuses everyone refuses the whole call, within the naming bound (ADR-0160 D3/D4)', () => {
+  /** The fixture pack with a second, served related child (`claim`) beside `policy_revision`. */
+  const twoChildren = (overrides: Partial<FakeApp> = {}): FakeApp => {
+    const app = policyApp(overrides);
+    app.packs = [{
+      name: 'policy_document',
+      label: 'Policy document',
+      object: 'policy',
+      fields: ['title'],
+      related: [
+        { object: 'policy_revision', field: 'policy', fields: ['version'] },
+        { object: 'claim', field: 'policy', fields: ['number'] },
+      ],
+    }];
+    return app;
+  };
+
+  it('[as amended] a child this caller is not served is left out: the root and the served child, ONE not-visible statement, the child named nowhere', async () => {
+    const door = fakeDoor(twoChildren({ unservedObjects: ['policy_revision'] }));
+    const out = await executeGetRecordContext(CALL, door);
+    expect(out.data.fields.map((f) => f.name)).toEqual(['title']);
+    expect(out.data.related!.map((l) => l.object)).toEqual(['claim']);
+    expect(out.data.related![0].rows.map((r) => r.id)).toEqual(['c1']);
+    expect(out.notes).toEqual([{ kind: 'not_visible', text: sentencesFor([]).notVisible }]);
+    const text = JSON.stringify(out);
+    expect(text).not.toContain('policy_revision');
+    expect(text).not.toContain('Policy revision');
+    // Nothing of the child is read after its object-level judgement, its published definition included.
+    expect(door.asked.filter((a) => a.object === 'policy_revision').map((a) => a.member))
+      .toEqual(['readGuard', 'assertApiExposed', 'servedObjectDefinitionOf']);
+    // Control: served, both children answer and nothing is stated.
+    const control = await run(twoChildren());
+    expect(control.data.related!.map((l) => l.object)).toEqual(['policy_revision', 'claim']);
+    expect(control.notes).toEqual([]);
+  });
+
+  it('[as amended] a lookup target reached only through a left-out child is not judged: it refuses nothing', async () => {
+    const app = twoChildren({ unservedObjects: ['policy_revision'], guardedObjects: ['account'] });
+    (app.packs[0] as { related: Array<{ fields: string[] }> }).related[0].fields = ['version', 'reviewer'];
+    const door = fakeDoor(app);
+    const out = await executeGetRecordContext(CALL, door);
+    expect(out.data.related!.map((l) => l.object)).toEqual(['claim']);
+    expect(door.asked).not.toContainEqual({ member: 'readGuard', object: 'account' });
+  });
+
+  it('a child API exposure refuses whose caller is not served it either is refused unnamed (the naming bound)', async () => {
+    const refused = await refusalOf(run(twoChildren({ unexposedObjects: ['policy_revision'], unservedObjects: ['policy_revision'] })));
     expect(refused).toMatchObject({ code: 'PERMISSION_DENIED', status: 403 });
     expect(refused.message).toContain('policy_document');
-    expect(refused.message).toContain('policy');
     expect(refused.message).not.toContain('policy_revision');
+  });
+
+  it('a disabled-package child is refused whole, before its served definition is asked: a disabled package serves its object to nobody', async () => {
+    const door = fakeDoor(twoChildren({ unservedObjects: ['policy_revision'] }));
+    const exposedOf = door.assertApiExposed.bind(door);
+    door.assertApiExposed = async (object, action) => {
+      if (object === 'policy_revision') {
+        door.asked.push({ member: 'assertApiExposed', object });
+        throw Object.assign(new Error(`Object '${object}' belongs to a disabled package`), { code: 'OBJECT_PACKAGE_DISABLED', status: 404 });
+      }
+      return exposedOf(object, action);
+    };
+    const refused = await refusalOf(executeGetRecordContext(CALL, door));
+    expect(refused).toMatchObject({ code: 'PERMISSION_DENIED', status: 403 });
+    expect(refused.message).not.toContain('policy_revision');
+    expect(refused.message).not.toContain('disabled package');
+    expect(door.asked).not.toContainEqual({ member: 'servedObjectDefinitionOf', object: 'policy_revision' });
+    expect(door.reads).toEqual([]);
+  });
+
+  it('a served-definition read that throws is no answer about this caller: it refuses the call unnamed, never left out', async () => {
+    const door = fakeDoor(twoChildren());
+    const servedOf = door.servedObjectDefinitionOf.bind(door);
+    door.servedObjectDefinitionOf = async (object) => {
+      if (object === 'policy_revision') throw new Error('metadata store down: policy_revision');
+      return servedOf(object);
+    };
+    const refused = await refusalOf(executeGetRecordContext(CALL, door));
+    expect(refused).toMatchObject({ code: 'PERMISSION_DENIED', status: 403 });
+    expect(refused.message).not.toContain('policy_revision');
+    expect(door.reads).toEqual([]);
   });
 
   it('a child the read guard refuses is refused with the same code, unnamed', async () => {
@@ -272,13 +346,16 @@ describe('get_record_context — object level: one refusal is the whole call\'s,
   it('a child\'s gates are judged before ANY read of its definition, the published one included', async () => {
     for (const app of [
       policyApp({ guardedObjects: ['policy_revision'] }),
-      policyApp({ unservedObjects: ['policy_revision'] }),
       policyApp({ unexposedObjects: ['policy_revision'] }),
     ]) {
       const door = fakeDoor(app);
       await refusalOf(executeGetRecordContext(CALL, door));
       expect(door.asked).not.toContainEqual({ member: 'publishedObjectDefinitionOf', object: 'policy_revision' });
     }
+    // [as amended] A child left out for this caller is not read either.
+    const leftOut = fakeDoor(policyApp({ unservedObjects: ['policy_revision'] }));
+    await executeGetRecordContext(CALL, leftOut);
+    expect(leftOut.asked).not.toContainEqual({ member: 'publishedObjectDefinitionOf', object: 'policy_revision' });
     const door = fakeDoor(policyApp());
     await executeGetRecordContext(CALL, door);
     const at = (member: string) => door.asked.findIndex((a) => a.member === member && a.object === 'policy_revision');
@@ -416,6 +493,55 @@ describe('get_record_context — row level (ADR-0160 D3)', () => {
     expect(out.notes.map((n) => n.kind)).toEqual(['related_truncated']);
     const listRead = door.reads.find((r) => r.member === 'query' && r.object === 'policy_revision');
     expect((listRead?.opts as { limit: number }).limit).toBe(RECORD_CONTEXT_RELATED_MAX_ROWS + 1);
+  });
+
+  /**
+   * [ADR-0160 D3: every cut is stated] A door whose page cap is below the cut
+   * plus its probe row: this fake cuts a larger page silently, the way a door
+   * that clamps would, so without its cap the executor would carry a cut list
+   * as whole.
+   */
+  const cappedDoor = (app: FakeApp, cap: number | undefined) => {
+    const door = fakeDoor(app);
+    const queryOf = door.query.bind(door);
+    door.query = async (object, opts) =>
+      queryOf(object, { ...opts, ...(cap !== undefined && typeof opts.limit === 'number' ? { limit: Math.min(opts.limit, cap) } : {}) });
+    door.pageCap = () => cap;
+    return door;
+  };
+  const longApp = (rows: number) => {
+    const app = policyApp();
+    app.records.policy_revision = Array.from({ length: rows }, (_, i) => ({ id: `r${i}`, version: `v${i}`, policy: 'p1', reviewer: 'a1', note: 'n' }));
+    return app;
+  };
+
+  it('a door whose page cap is below the cut plus its probe row is asked for at most its cap; the list is cut one row under it, and stated', async () => {
+    const door = cappedDoor(longApp(25), 5);
+    const out = await executeGetRecordContext(CALL, door);
+    const list = out.data.related![0];
+    expect(list.rows).toHaveLength(4);
+    expect(list.truncated).toBe(true);
+    expect(out.notes).toEqual([
+      { kind: 'related_truncated', object: 'policy_revision', text: sentencesFor([]).relatedTruncated('policy_revision', 4) },
+    ]);
+    const listRead = door.reads.find((r) => r.member === 'query' && r.object === 'policy_revision');
+    expect((listRead?.opts as { limit: number }).limit).toBe(5);
+    // A list that fits under the door's cap is carried whole, with nothing stated.
+    const short = await executeGetRecordContext(CALL, cappedDoor(longApp(4), 5));
+    expect(short.data.related![0].rows).toHaveLength(4);
+    expect(short.data.related![0].truncated).toBeUndefined();
+    expect(short.notes).toEqual([]);
+  });
+
+  it('a door cap at or above the cut plus its probe row, or no answer, changes nothing', async () => {
+    for (const cap of [RECORD_CONTEXT_RELATED_MAX_ROWS + 1, 500, undefined, 0, 2.5]) {
+      const door = fakeDoor(longApp(25));
+      door.pageCap = () => cap;
+      const out = await executeGetRecordContext(CALL, door);
+      expect(out.data.related![0].rows).toHaveLength(RECORD_CONTEXT_RELATED_MAX_ROWS);
+      const listRead = door.reads.find((r) => r.member === 'query' && r.object === 'policy_revision');
+      expect((listRead?.opts as { limit: number }).limit).toBe(RECORD_CONTEXT_RELATED_MAX_ROWS + 1);
+    }
   });
 
   it('a list the agent ceiling narrowed carries the security service\'s own sentence', async () => {
@@ -579,6 +705,19 @@ describe('get_record_context — a related list\'s where, orderBy and limit (ADR
     const out = await run(app);
     expect(out.data.related![0].rows.map((r) => r.id)).toEqual(['r2', 'r1', 'r3']);
     expect(out.notes).toEqual([]);
+  });
+
+  it('an orderBy on a registry-injected field (`created_at`) that both definitions carry reads the list in that order', async () => {
+    const app = filteredApp({ orderBy: [{ field: 'created_at', order: 'desc' }] });
+    (app.objects.policy_revision as { fields: Record<string, unknown> }).fields.created_at = {
+      name: 'created_at', type: 'datetime', label: 'Created at', readonly: true,
+    };
+    app.records.policy_revision = app.records.policy_revision.map((r, i) => ({ ...r, created_at: `2026-11-0${i + 1}T00:00:00Z` }));
+    const door = fakeDoor(app);
+    const out = await executeGetRecordContext(CALL, door);
+    expect(out.data.related![0].rows.map((r) => r.id)).toEqual(['r3', 'r2', 'r1']);
+    expect(out.notes).toEqual([]);
+    expect(listReads(door)[0].opts).toMatchObject({ orderBy: [{ field: 'created_at', order: 'desc' }] });
   });
 
   it('the read set is the same with and without the three keys', async () => {
