@@ -237,6 +237,9 @@ describe('the rebuild and index_status actions are administrator-only, at the HT
     admin: () => ({ enforced: true, permissions: ['manage_platform_settings'], userId: 'usr_admin' }),
     // An organization member who may read Setup but holds no platform capability.
     member: () => ({ enforced: true, permissions: ['setup.read', 'setup.write'], userId: 'usr_member' }),
+    // Signed in, no capability at all.
+    bare: () => ({ enforced: true, permissions: [] as string[], userId: 'usr_bare' }),
+    // Not signed in: refused before any manifest is read.
     anonymous: () => ({ enforced: true, permissions: [] as string[] }),
   };
   const door = (who: keyof typeof callers) => {
@@ -254,14 +257,21 @@ describe('the rebuild and index_status actions are administrator-only, at the HT
     ['member', 'rebuild', {}],
     ['member', 'index_status', {}],
     ['member', 'index_status', { source: SECRET_SOURCE.id }],
+    ['bare', 'rebuild', { source: SECRET_SOURCE.id }],
+    ['bare', 'index_status', {}],
     ['anonymous', 'rebuild', { source: SECRET_SOURCE.id }],
     ['anonymous', 'index_status', {}],
-  ] as const)('a %s calling %s %j is refused 403 SETTINGS_FORBIDDEN, names no source, and reaches no handler', async (who, action, body) => {
+  ] as const)('a %s caller of %s %j is refused, names no source, and reaches no handler', async (who, action, body) => {
     const watched = watchService();
     const answer = await post(door(who), 'knowledge', action, body);
 
-    expect(answer.status).toBe(403);
-    expect(answer.body?.error?.code).toBe('SETTINGS_FORBIDDEN');
+    if (who === 'anonymous') {
+      expect(answer.status).toBe(401);
+      expect(answer.body?.error?.code).toBe('UNAUTHENTICATED');
+    } else {
+      expect(answer.status).toBe(403);
+      expect(answer.body?.error?.code).toBe('SETTINGS_FORBIDDEN');
+    }
     // The refusal names the namespace, never a source the caller may not see.
     const text = JSON.stringify(answer.body);
     expect(text).not.toContain(SECRET_SOURCE.id);
