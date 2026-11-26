@@ -227,6 +227,27 @@ A bare name, read by a caller that belongs to package P, resolves to:
 
 A caller with no package (an environment item, a context-free door, an MCP client) resolves against the whole environment: the environment item of that name first (ADR-0005 overlay precedence keeps the environment's own item ahead), else the unique package holder, else the refusal with candidates (`409` at a door, D5).
 
+> **Amendment note (2026-11-26, #37499).** A package-less row stored at a name a package holds is that holder's customization, never the environment's own item (D4, "A package-less row that bears a package-held name is a customization, never a second item"). So it hides with its holder, on the reads and on the writes alike. The maintainer, in the triage session recorded on card #37499, verbatim: 「我觉得停用就该全部消失」, then 「同意」 to the split that card carries.
+>
+> While every package that holds the name is disabled, a caller with no package is answered as follows.
+>
+> - **Reads stay the missing name.** The by-name read, `/published`, `/layers`, the list and `_env` withhold the row and answer what they answer for the holder's own item (`404`). This was already so (#32183, #32814, #33401); the note records it beside the writes.
+> - **Every write naming no package is refused**, `409 RESOURCE_CONFLICT` with no new code: the publish-mode save, the draft save, the delete and the draft discard. The refusal names no package, as the refusal of a name only disabled packages hold already did, and its remedy is the enable: `PATCH /api/v1/packages/:id/enable`, then the same request. It is never `?package=`. A write naming the package addresses that package's own row, so it would leave the hidden row where it is and store a second row beside it.
+> - **A package-less draft counts as the row does.** A package-less draft stored for such a name is the same customization: the draft save and the draft discard are refused over it, and the draft discard is refused with the same remedy when no draft is stored and the customization is the active row.
+> - **Re-enable serves the row untouched.** A refused write stores, edits and removes nothing, so the row the enable serves is byte-identical to the one stored before the disable.
+>
+> What this replaces, measured on `main` `5dbcc02b` for a `dashboard` on both transports and both registration orders: each of the four writes answered `200`. The save edited the hidden row, the draft save stored a draft that the draft read then answered `404 NO_DRAFT` for, the draft discard removed it, and the delete removed the row, so the next enable served the package's item without its customization. The save door skipped the disabled-holders judgment whenever a package-less row was stored at the address.
+>
+> Unchanged, and pinned as controls:
+>
+> - A name no package holds is the environment's own item (the rule above): its save, draft save, draft discard and delete answer as before beside a disabled package.
+> - A package-less row at a name an ENABLED package holds is written as before, the two-enabled-holders cell included.
+> - A name only disabled packages hold with no package-less row stored keeps its refusal and its `?package=` remedy (#34144): there the named write has one row to write and nothing hidden beside it.
+> - A type sealed against overlays refuses these writes one step earlier, as it does with its holder enabled. Measured for `doc` and `action`, before and after a restart: the save, the draft save and the delete answer `403 NOT_OVERRIDABLE`, and the draft discard has no draft to remove.
+> - No write door takes `_env`: neither transport routes a `PUT` or a `DELETE` there.
+>
+> Code: `packages/metadata-protocol/src/protocol-save.ts#packagelessHolderRefusal`, the one judgment the four doors ask, and `#disabledHoldersCustomizationRefusal`. Pins: `packages/runtime/src/domains/meta-disabled-holder-served-stack.test.ts` ("the package-unbound row of a name only the disabled D ships is hidden with it", "a package-unbound draft of a name only the disabled D ships", "a package-unbound row beside the disabled holder's own row") and `packages/objectql/src/disabled-holder-packageless-row-doors.test.ts` (review#2 S3).
+
 **Two consequences of the rule, as R (#31637) implements it.**
 
 - **(a) A package caller never resolves to an environment-authored item by bare name.** A package cannot declare a dependency on the environment, so an environment item is in no package's closure. A name that only an environment item holds is refused for a package caller (`outside-closure`), and the refusal names the environment as the holder. **This is a declared narrowing**, added by this record within the letter of the ruled rule. Today `getItem` serves the bare slot first to every caller (D4's overlay row), so a package flow's `template: welcome` filled by an environment-authored template is served today and refused once its reader is wired. It is carried by the E rows that wire a package caller (E1–E6, E8) and by U only through G1's door: Studio's held id travels as `?package=` (`client.meta.getItem`), so at the door it is the exact qualifier (D5), never a caller. G1 declares what that refuses. It cannot be measured on a package tree (HotCRM holds no environment), so the D10 upgrade report names each such reference as the migration finds it.
