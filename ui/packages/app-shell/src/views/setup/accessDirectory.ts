@@ -25,7 +25,13 @@ import {
 } from '../studio-design/studioAddress.js';
 import { ACCESS_DIRECTORY_CAPABILITY, ACCESS_DIRECTORY_PATH } from './accessDirectoryRef.js';
 
-export { ACCESS_DIRECTORY_CAPABILITY, ACCESS_DIRECTORY_PATH, ACCESS_DIRECTORY_REF } from './accessDirectoryRef.js';
+export {
+  ACCESS_DIRECTORY_CAPABILITY,
+  ACCESS_DIRECTORY_PATH,
+  ACCESS_DIRECTORY_REF,
+  SETUP_ACCESS_CAPABILITY,
+  holdsSetupAccess,
+} from './accessDirectoryRef.js';
 
 function withQuery(path: string, params: URLSearchParams): string {
   const query = params.toString();

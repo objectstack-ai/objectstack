@@ -270,7 +270,8 @@ only what it owns:
   metadata layer (ADR-0094 D1, ADR-0131 D3): Setup → Access control →
   **Positions and Permissions** lists the catalog
   (`/apps/setup/component/security/access-directory/permission?scope=environment`;
-  the old Studio and Setup catalog addresses redirect there), a set opens in
+  the old environment-scope lists in Studio and Setup, the addresses ending in
+  `?scope=environment`, redirect there for anyone who can open Setup), a set opens in
   Studio's editor, and a create or edit there is a metadata save (`PUT /api/v1/meta/permission/:name`) into the
   environment's definition ledger (`sys_metadata`), served from the registry
   beside the packages' sets. No row mirrors it: the `sys_permission_set`

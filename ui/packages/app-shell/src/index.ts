@@ -659,8 +659,9 @@ export { setupMetadataStudioPath } from './views/studio-design/setupMetadataRedi
 export { SETUP_PACKAGES_PATH } from './views/metadata-admin/packageSource.js';
 // objectstack#37565 — Setup → Access control → Positions and permissions: the
 // environment directory that left Studio's cross-package leg. A host's bare
-// `/studio/~all` route lands here in one hop.
-export { ACCESS_DIRECTORY_PATH } from './views/setup/accessDirectoryRef.js';
+// `/studio/~all` route lands here in one hop, for whoever may open Setup
+// (`holdsSetupAccess`); anyone else keeps the cross-package leg.
+export { ACCESS_DIRECTORY_PATH, holdsSetupAccess } from './views/setup/accessDirectoryRef.js';
 // objectstack#36895 — the one builder of Studio addresses. A host that
 // declares the `/studio` routes, or links into them, spells every address
 // through these, never by hand (`studioAddress.guard.test.ts`).

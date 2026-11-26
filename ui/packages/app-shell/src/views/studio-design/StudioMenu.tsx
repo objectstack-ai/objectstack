@@ -125,6 +125,8 @@ import {
 import { t, tFormat, translateMetadataType } from '../metadata-admin/i18n.js';
 import { studioMenuGroupLabel } from './studioMenuGroupLabel.js';
 import { StudioPendingDraftsContext } from './studioItemDraftStatus.js';
+import { useStudioEntryPermissions } from './studioEntryPermissions.js';
+import { holdsSetupAccess } from '../setup/accessDirectory.js';
 import { STUDIO_ACCENT, STUDIO_HEADER_ICON_BUTTON } from './studio-tokens.js';
 import {
   STUDIO_MENU_ADVANCED_COOKIE,
@@ -348,7 +350,9 @@ function StudioMenuBody({
     entry.kind === 'type' ? (labels.get(entry.type ?? '') ?? entry.type ?? '') : t(STUDIO_MENU_ENTRY_LABEL_KEYS[entry.kind], locale);
 
   const current = studioMenuCurrentKey({ segment, pathname, search });
-  const menu = buildStudioMenu({ scope, types, counts, settled: data.countsAnswered });
+  // objectstack#37565 — the catalog's lists open on Setup's page only for whoever may open Setup.
+  const setupDirectory = holdsSetupAccess(useStudioEntryPermissions());
+  const menu = buildStudioMenu({ scope, types, counts, settled: data.countsAnswered, setupDirectory });
   const searching = query.trim().length > 0;
   const matching = menu
     .map((g) => ({ ...g, entries: g.entries.filter((e) => studioMenuEntryMatches(e, labelOf(e), query)) }))

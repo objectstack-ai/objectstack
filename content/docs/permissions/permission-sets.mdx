@@ -426,8 +426,9 @@ as a projection is retired, its object is no longer registered, and no data
 route serves it (ADR-0131 D3). Setup → Access control → Positions and
 Permissions lists the catalog
 (`/apps/setup/component/security/access-directory/permission?scope=environment`;
-the old Studio and Setup catalog addresses redirect there, and a set opens in
-Studio's editor), a grant
+the old environment-scope lists in Studio and Setup, the addresses ending in
+`?scope=environment`, redirect there for anyone who can open Setup, and a set
+opens in Studio's editor), a grant
 names its set by its package and name (`sys_user_permission_set.permission_set_package`
 and `permission_set`), and a write
 goes through the metadata door (`PUT` or `DELETE /api/v1/meta/permission/:name`),

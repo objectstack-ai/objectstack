@@ -170,15 +170,28 @@ describe('/studio — the "All metadata" area\'s routes (objectstack#28561)', ()
   });
 
   // objectstack#37565 — rewritten on purpose: these landed on the leg's root, which is Setup's
-  // environment directory now (ADR-0084, amended 2026-11-26). Still never a pillar.
+  // environment directory now (ADR-0084, amended 2026-11-26), for whoever may open Setup. Still never a pillar.
   it.each(['/studio/~all', '/studio/~all/data', '/studio/~all/flow/f1'])(
     '%s lands on Setup\'s environment directory, in one hop, never on a pillar',
     async (url) => {
+      permissionsFetch = answer([STUDIO_ENTRY_CAPABILITY, 'setup.access']);
       renderStudio(url);
       expect(await screen.findByTestId('setup-directory')).toBeInTheDocument();
       expect(location()).toBe('/apps/setup/component/security/access-directory');
       expect(screen.queryByTestId('studio-pillar-builder')).toBeNull();
       expect(seen).toEqual([url, '/apps/setup/component/security/access-directory']);
+    },
+  );
+
+  // objectstack#37565 — one who may not open Setup keeps the leg's root, where the directory still is for them.
+  it.each(['/studio/~all', '/studio/~all/data'])(
+    '%s, without Setup\'s entry capability, lands on the leg\'s root in one hop',
+    async (url) => {
+      renderStudio(url);
+      expect(await screen.findByTestId('studio-pillar-builder')).toHaveAttribute('data-package', '~all');
+      expect(location()).toBe('/studio/~all/metadata');
+      expect(screen.queryByTestId('setup-directory')).toBeNull();
+      expect(seen).toEqual([url, '/studio/~all/metadata']);
     },
   );
 

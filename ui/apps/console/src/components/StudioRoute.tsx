@@ -46,6 +46,8 @@ import {
   STUDIO_METADATA_AREA,
   STUDIO_ORG_SCOPE_SEGMENT,
   StudioEntryPermissionsProvider,
+  holdsSetupAccess,
+  studioMetadataAreaPath,
   studioOrgScopePath,
   studioPackagePath,
   useHomePath,
@@ -248,6 +250,17 @@ function StudioPackageBuilder({ area }: { area?: typeof STUDIO_METADATA_AREA }) 
  * included) redirects to the page that replaced it in one hop; any other
  * segment renders `children`. The redirect rides in the builder's chunk.
  */
+/**
+ * A `~all` URL outside the area (objectstack#37565): Setup's environment
+ * directory for a principal who may open Setup, else the cross-package leg's
+ * root, where the directory still is for them.
+ */
+function StudioAllLegAddress() {
+  const systemPermissions = useStudioEntryPermissions();
+  const to = holdsSetupAccess(systemPermissions) ? ACCESS_DIRECTORY_PATH : studioMetadataAreaPath(STUDIO_ALL_PACKAGES_SEGMENT);
+  return <Navigate to={to} replace />;
+}
+
 function StudioPillarAddress({ children }: { children?: ReactNode }) {
   return (
     <Suspense fallback={<LoadingFallback />}>
@@ -267,7 +280,8 @@ function StudioPillarAddress({ children }: { children?: ReactNode }) {
  *
  *   `/studio`                         Studio's entry: the last package, else the package list
  *   `/studio/~org`                    the package-less scope lands on its flow list
- *   `/studio/~all/*`                  lands on Setup's environment directory (objectstack#37565)
+ *   `/studio/~all/*`                  lands on Setup's environment directory (objectstack#37565),
+ *                                     or the cross-package area for one who may not open Setup
  *   `/studio/:packageId`              a package lands on its object list
  *   `/studio/:packageId/metadata/*`   a package's "All metadata" area, in the builder
  *   `/studio/:packageId/:tab`         a retired pillar redirects; any other segment is
@@ -310,7 +324,7 @@ export const studioRoutes = (
     <Route path={STUDIO_ORG_SCOPE_SEGMENT} element={<Navigate to={studioOrgScopePath()} replace />} />
     <Route
       path={`${STUDIO_ALL_PACKAGES_SEGMENT}/*`}
-      element={<Navigate to={ACCESS_DIRECTORY_PATH} replace />}
+      element={<StudioAllLegAddress />}
     />
     <Route path=":packageId" element={<StudioPillarAddress />} />
     <Route

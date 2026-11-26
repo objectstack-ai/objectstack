@@ -73,13 +73,17 @@
  * package: their menu is the environment's — the organization's flows and the
  * environment catalog's types — drawn flat, in the same order, with no fold;
  * only the groups that hold an entry are drawn. A catalog type's entry there
- * opens its list on Setup's directory page, where the list now lives.
+ * opens its list on Setup's directory page, where the list now lives, for a
+ * principal who may open Setup (`setupDirectory`); for one who may not, it
+ * keeps the list on the cross-package leg, in the environment scope.
  */
 
+import { ENVIRONMENT_SCOPE_QUERY } from '../metadata-admin/catalog-scope.js';
 import { SETUP_DATASOURCES_PATH } from '../metadata-admin/metadataAreaHost.js';
 import { accessDirectoryPath } from '../setup/accessDirectory.js';
 import { isStudioAllPackagesScope } from './metadataArea.js';
 import {
+  STUDIO_ALL_PACKAGES_SEGMENT,
   STUDIO_OVERVIEW_SECTION,
   STUDIO_OWD_SECTION,
   studioMetadataAreaAddress,
@@ -164,9 +168,12 @@ export function studioMenuScope(segment: string): StudioMenuScope {
   return { kind: 'package', packageId: segment };
 }
 
-function typeEntryPath(scope: StudioMenuScope, type: string): string {
-  // objectstack#37565 — the environment catalog's lists are Setup's now.
-  if (scope.kind !== 'package') return accessDirectoryPath(type);
+function typeEntryPath(scope: StudioMenuScope, type: string, setupDirectory: boolean): string {
+  if (scope.kind !== 'package') {
+    // objectstack#37565 — the environment catalog's lists are Setup's now, for whoever may open Setup.
+    if (setupDirectory) return accessDirectoryPath(type);
+    return studioMetadataAreaAddress(STUDIO_ALL_PACKAGES_SEGMENT, encodeURIComponent(type), { query: ENVIRONMENT_SCOPE_QUERY });
+  }
   // ADR-0146 D1 — a datasource is Setup's runtime configuration, as its directory tile says.
   if (type === 'datasource') return SETUP_DATASOURCES_PATH;
   return studioMetadataAreaAddress(scope.packageId, encodeURIComponent(type), {
@@ -185,14 +192,17 @@ const PLACEMENT_TIER: ReadonlyMap<string, StudioMenuTier> = new Map(STUDIO_MENU_
  * follow the placement table, an unplaced type after the placed ones in
  * served order, then the entries that are not a type. `settled` says the
  * diagnostics sweep has answered, so a missing count means none.
+ * `setupDirectory` says the principal may open Setup, so a package-less
+ * menu's catalog entries open Setup's directory page (objectstack#37565).
  */
 export function buildStudioMenu(input: {
   scope: StudioMenuScope;
   types: ReadonlyArray<{ type: string; domain?: string }>;
   counts: Readonly<Record<string, number>>;
   settled?: boolean;
+  setupDirectory?: boolean;
 }): StudioMenuGroupModel[] {
-  const { scope, types, counts, settled = false } = input;
+  const { scope, types, counts, settled = false, setupDirectory = false } = input;
   const groups = new Map<StudioMenuGroup, StudioMenuEntry[]>(STUDIO_MENU_GROUPS.map((g) => [g, []]));
   // An unplaced type ranks after every row; the sort is stable, so those keep served order.
   const rank = (type: string) => PLACEMENT_INDEX.get(type) ?? STUDIO_MENU_PLACEMENT.length;
@@ -202,7 +212,7 @@ export function buildStudioMenu(input: {
     if (!entries) continue;
     const tier = PLACEMENT_TIER.get(t.type) ?? 'advanced';
     const count = counts[t.type];
-    const entry: StudioMenuEntry = { key: `type:${t.type}`, kind: 'type', type: t.type, to: typeEntryPath(scope, t.type), count, tier };
+    const entry: StudioMenuEntry = { key: `type:${t.type}`, kind: 'type', type: t.type, to: typeEntryPath(scope, t.type, setupDirectory), count, tier };
     if (scope.kind === 'package' && tier === 'common' && settled && !((count ?? 0) > 0)) entry.empty = true;
     entries.push(entry);
   }

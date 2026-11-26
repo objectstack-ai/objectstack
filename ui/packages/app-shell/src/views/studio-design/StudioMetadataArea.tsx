@@ -57,7 +57,8 @@ import {
   studioMetadataAreaPath,
 } from './metadataArea.js';
 import { STUDIO_ORG_SCOPE_SEGMENT } from './studioScope.js';
-import { studioAddressAfterSetupMove, studioAllLegSetupRedirect } from '../setup/accessDirectory.js';
+import { holdsSetupAccess, studioAddressAfterSetupMove, studioAllLegSetupRedirect } from '../setup/accessDirectory.js';
+import { useStudioEntryPermissions } from './studioEntryPermissions.js';
 import { STUDIO_ORG_SCOPE_TYPE } from './studioAddress.js';
 import { StudioBundleItemEditor } from './StudioBundleItemEditor.js';
 import { AutomationsPillar } from './AutomationsPillar.js';
@@ -443,6 +444,8 @@ export function StudioMetadataArea({
 }: StudioMetadataAreaProps): React.ReactElement {
   const { pathname, search } = useLocation();
   const locale = useMetadataLocale();
+  // objectstack#37565 — whoever may open Setup has the leg's directory there.
+  const toSetup = holdsSetupAccess(useStudioEntryPermissions());
   const segment = packageId ?? (orgScope ? STUDIO_ORG_SCOPE_SEGMENT : STUDIO_ALL_PACKAGES_SEGMENT);
   const basePath = studioMetadataAreaPath(segment);
   // The courtesy gate the pillars apply, read for the area from the listed
@@ -486,10 +489,11 @@ export function StudioMetadataArea({
   const rest = pathname.startsWith(basePath) ? pathname.slice(basePath.length).replace(/^\/+/, '') : '';
   // objectstack#37565 — the cross-package leg's directory is Setup's page now
   // (ADR-0084, amended 2026-11-26): its addresses land there, once, whether
-  // the URL is on the leg or the leg is where its query sends it.
+  // the URL is on the leg or the leg is where its query sends it. A principal
+  // who may not open Setup keeps them here, on the leg.
   const redirect = areaLocationRedirect(segment, rest, search);
-  if (redirect) return <Navigate to={studioAddressAfterSetupMove(redirect)} replace />;
-  const moved = segment === STUDIO_ALL_PACKAGES_SEGMENT ? studioAllLegSetupRedirect(rest, search) : null;
+  if (redirect) return <Navigate to={toSetup ? studioAddressAfterSetupMove(redirect) : redirect} replace />;
+  const moved = toSetup && segment === STUDIO_ALL_PACKAGES_SEGMENT ? studioAllLegSetupRedirect(rest, search) : null;
   if (moved) return <Navigate to={moved} replace />;
   // A page must not offer a write before the package's state is known.
   if (packageId !== null && writable === undefined) return <AreaLoading locale={locale} />;

@@ -101,7 +101,7 @@ describe('the menu groups (objectstack#36899, ADR-0084 amended)', () => {
       { type: 'position', domain: 'security' },
       { type: 'permission', domain: 'security' },
     ];
-    const menu = buildStudioMenu({ scope: studioMenuScope(segment), types, counts: {} });
+    const menu = buildStudioMenu({ scope: studioMenuScope(segment), types, counts: {}, setupDirectory: true });
     // objectstack#37201 — the table's order, not the served one: permission set (常用) before position (高级).
     expect(keysOf(menu)).toEqual({
       automation: ['orgFlows'],
@@ -111,6 +111,22 @@ describe('the menu groups (objectstack#36899, ADR-0084 amended)', () => {
     expect(menu.flatMap((g) => g.entries).find((e) => e.key === 'type:position')!.to).toBe(
       '/apps/setup/component/security/access-directory/position?scope=environment',
     );
+  });
+
+  // objectstack#37565 — a principal who may not open Setup keeps the list on Studio's cross-package leg.
+  it.each([
+    ['~org', false, '/studio/~all/metadata/position?scope=environment'],
+    ['~all', false, '/studio/~all/metadata/position?scope=environment'],
+    ['~org', undefined, '/studio/~all/metadata/position?scope=environment'],
+    ['~all', true, '/apps/setup/component/security/access-directory/position?scope=environment'],
+  ] as const)('%s, may open Setup: %s → the catalog row opens %s', (segment, setupDirectory, to) => {
+    const menu = buildStudioMenu({
+      scope: studioMenuScope(segment),
+      types: [{ type: 'position', domain: 'security' }],
+      counts: {},
+      ...(setupDirectory === undefined ? {} : { setupDirectory }),
+    });
+    expect(menu.flatMap((g) => g.entries).find((e) => e.key === 'type:position')!.to).toBe(to);
   });
 });
 

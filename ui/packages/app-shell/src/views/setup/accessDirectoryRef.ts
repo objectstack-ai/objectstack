@@ -25,3 +25,16 @@ export const ACCESS_DIRECTORY_CAPABILITY = 'studio.access';
 
 /** The page's root inside the Setup app. */
 export const ACCESS_DIRECTORY_PATH = `/apps/setup/component/${componentRefToUrlSegments(ACCESS_DIRECTORY_REF).join('/')}`;
+
+/** The Setup app's entry capability: who may open a Setup page at all. */
+export const SETUP_ACCESS_CAPABILITY = 'setup.access';
+
+/**
+ * Whether a capability set opens Setup, so Studio may send the environment
+ * catalog's lists to Setup's page (objectstack#37565). Without it they stay on
+ * Studio's cross-package leg, where they were: a Studio author who cannot open
+ * Setup keeps the lists. `undefined` (no answer reported) holds nothing.
+ */
+export function holdsSetupAccess(systemPermissions: readonly string[] | undefined): boolean {
+  return Array.isArray(systemPermissions) && systemPermissions.includes(SETUP_ACCESS_CAPABILITY);
+}

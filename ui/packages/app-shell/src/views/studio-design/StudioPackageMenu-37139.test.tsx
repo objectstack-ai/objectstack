@@ -45,6 +45,7 @@ import '@objectstack/lint';
 // `lazy()` detail entry: its first load is paid at collection too.
 import '@object-ui/plugin-detail';
 import { MePermissionsProvider, type MePermissionsAuthenticatedResponse } from '@object-ui/permissions';
+import { StudioEntryPermissionsProvider } from './studioEntryPermissions';
 import { loadStudioCatalogue } from '@object-ui/i18n/namespaces/studio';
 await loadStudioCatalogue('zh');
 
@@ -201,15 +202,18 @@ function Elsewhere() {
 }
 
 function renderAt(entry: string, perms = AUTHOR) {
+  // The console's Studio gate hands its pages the set it read (`StudioEntryPermissionsProvider`).
   return render(
     <MePermissionsProvider initialPermissions={perms}>
-      <MemoryRouter initialEntries={[entry]}>
-        <Routes>
-          <Route path="/studio/:packageId/metadata/*" element={<StudioDesignSurface area="metadata" />} />
-          <Route path="/studio/:packageId/:tab" element={<StudioPillarRedirect><StudioDesignSurface /></StudioPillarRedirect>} />
-          <Route path="*" element={<Elsewhere />} />
-        </Routes>
-      </MemoryRouter>
+      <StudioEntryPermissionsProvider value={perms.systemPermissions}>
+        <MemoryRouter initialEntries={[entry]}>
+          <Routes>
+            <Route path="/studio/:packageId/metadata/*" element={<StudioDesignSurface area="metadata" />} />
+            <Route path="/studio/:packageId/:tab" element={<StudioPillarRedirect><StudioDesignSurface /></StudioPillarRedirect>} />
+            <Route path="*" element={<Elsewhere />} />
+          </Routes>
+        </MemoryRouter>
+      </StudioEntryPermissionsProvider>
     </MePermissionsProvider>,
   );
 }
