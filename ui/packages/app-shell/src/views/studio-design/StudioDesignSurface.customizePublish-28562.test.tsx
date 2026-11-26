@@ -259,7 +259,6 @@ function renderWorkbench() {
   );
 }
 
-const publishButton = () => screen.getByRole('button', { name: /^Publish/ });
 const panelPackage = () => screen.getByTestId('changes-panel').getAttribute('data-package');
 /** The base label the host hands the sheet's "saved to" sentence (objectstack#29691); '' when none. */
 const panelCustomizationOf = () => screen.getByTestId('changes-panel').getAttribute('data-customization-of');
@@ -274,8 +273,9 @@ describe('a read-only base with its pair listed: Pending, the panel and Publish 
     // objectstack#29691 — the sheet names the base the pair's drafts are saved for.
     expect(panelCustomizationOf()).toBe('HotCRM');
     await waitFor(() => expect(srv.reads).toContain(`/api/v1/meta/_drafts?package=${encodeURIComponent(PAIR)}`));
-    await waitFor(() => expect(publishButton()).toBeEnabled(), { timeout: 8000 });
-    expect(publishButton().parentElement).not.toHaveAttribute('data-disabled-reason');
+    // The pair's drafts are counted: 概览's badge says so (objectstack#37456 —
+    // the top bar's Publish is gone; the sheet's Publish all is the door).
+    await waitFor(() => expect(screen.getByTestId('studio-menu-overview-pending')).toHaveTextContent('1'), { timeout: 8000 });
 
     fireEvent.click(screen.getByTestId('publish-all-drafts'));
     await waitFor(() => expect(srv.publishes).toEqual([PAIR]));

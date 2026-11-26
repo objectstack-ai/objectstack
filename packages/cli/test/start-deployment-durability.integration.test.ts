@@ -69,6 +69,15 @@ const CLI = resolve(HERE, '../bin/run.js');
 
 const READY = /Press Ctrl\+C to stop/;
 const BOOT_TIMEOUT_MS = 180_000;
+/**
+ * The allowance of one synchronous `os start` (`spawnSync`), and the case
+ * timeout of every case that waits on one. A child start can read past
+ * vitest's default 5 s per case on a loaded runner, so a case that spawns one
+ * carries the spawn's own bound plus room for its assertions: one value, so
+ * the case timeout can never fall below the spawn it waits on.
+ */
+const SPAWN_TIMEOUT_MS = 120_000;
+const SPAWN_CASE_TIMEOUT_MS = SPAWN_TIMEOUT_MS + 10_000;
 const SWITCH = 'OS_DEPLOYMENT_DURABILITY_CHECK_ENABLED';
 
 const scratch: string[] = [];
@@ -273,7 +282,7 @@ describe('#30120 — with the image switch on, a start missing its settings refu
       cwd,
       env: childEnv({ ...baseEnv(home, { [SWITCH]: 'true', ...over }), NODE_ENV: undefined }),
       encoding: 'utf8',
-      timeout: 120_000,
+      timeout: SPAWN_TIMEOUT_MS,
     });
     return { run, home, cwd, out: `${run.stdout}\n${run.stderr}` };
   };
@@ -286,20 +295,20 @@ describe('#30120 — with the image switch on, a start missing its settings refu
     // No secret minted, no key file, no database: the refusal comes first.
     expect(filesUnder(home).filter((f) => /auth-secret|dev-crypto-key|\.db$/.test(f)), out).toEqual([]);
     expect(filesUnder(cwd).filter((f) => /auth-secret|dev-crypto-key|\.db$/.test(f)), out).toEqual([]);
-  });
+  }, SPAWN_CASE_TIMEOUT_MS);
 
   it('only the database missing: names only OS_DATABASE_URL', () => {
     const { run, out } = refuse({ OS_AUTH_SECRET: secret(), OS_SECRET_KEY: secret() });
     expect(run.status, out).toBe(1);
     expect(out).toContain('OS_DATABASE_URL is not set');
     expect(out).not.toMatch(/OS_AUTH_SECRET[^\n]*not set|OS_SECRET_KEY[^\n]*not set/);
-  });
+  }, SPAWN_CASE_TIMEOUT_MS);
 
   it('a switch value that is not a switch is refused too, rather than read as off', () => {
     const { run, out } = refuse({ [SWITCH]: 'yes please' });
     expect(run.status, out).toBe(1);
     expect(out).toContain('is not a switch value');
-  });
+  }, SPAWN_CASE_TIMEOUT_MS);
 });
 
 // ---------------------------------------------------------------------------
@@ -310,11 +319,9 @@ describe('#31600 — a declared multi-replica start on the redis cluster driver 
   // The data key is set on every leg, so the only thing each leg varies is the
   // sign-in secret and the topology. No leg needs a Redis: the door is asked in
   // `os start` itself, before the `serve` child composes any cluster driver.
-  // Each leg is one synchronous `os start`, bounded by the spawn's own 120 s;
+  // Each leg is one synchronous `os start`, bounded by `SPAWN_TIMEOUT_MS`;
   // the two that reach the `serve` child read ~4 s locally, past vitest's
   // default 5 s per test on a loaded runner, so the leg carries the spawn's bound.
-  const SPAWN_TIMEOUT_MS = 120_000;
-  const LEG_TIMEOUT_MS = SPAWN_TIMEOUT_MS + 10_000;
   const start = (over: Record<string, string | undefined>) => {
     const home = tmp('os-31600-home-');
     const cwd = tmp('os-31600-cwd-');
@@ -336,7 +343,7 @@ describe('#31600 — a declared multi-replica start on the redis cluster driver 
     expect(run.stderr).toContain('e.g. OS_AUTH_SECRET=$(openssl rand -hex 32)');
     expect(out).not.toMatch(READY);
     expect(minted, out).toEqual([]);
-  }, LEG_TIMEOUT_MS);
+  }, SPAWN_CASE_TIMEOUT_MS);
 
   it('OS_AUTH_SECRET set: this door passes, and nothing is minted', () => {
     const { minted, out } = start({ OS_EXPECT_MULTI_NODE: 'true', OS_CLUSTER_DRIVER: 'redis', OS_AUTH_SECRET: secret() });
@@ -344,7 +351,7 @@ describe('#31600 — a declared multi-replica start on the redis cluster driver 
     // The banner is printed after the door: the start went on to its child.
     expect(out).toMatch(/Database/);
     expect(minted, out).toEqual([]);
-  }, LEG_TIMEOUT_MS);
+  }, SPAWN_CASE_TIMEOUT_MS);
 
   it('CONTROL: replicas declared over the memory driver mint a secret exactly as before', () => {
     // The child then meets the split-brain guard, today's refusal for this
@@ -352,7 +359,7 @@ describe('#31600 — a declared multi-replica start on the redis cluster driver 
     const { minted, out } = start({ OS_CLUSTER_REPLICAS: '3', OS_CLUSTER_DRIVER: 'memory' });
     expect(out).not.toMatch(REFUSAL);
     expect(minted, out).toEqual([join('.objectstack', 'auth-secret')]);
-  }, LEG_TIMEOUT_MS);
+  }, SPAWN_CASE_TIMEOUT_MS);
 });
 
 // ---------------------------------------------------------------------------

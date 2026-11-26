@@ -123,16 +123,27 @@ async function threeReads(request: APIRequestContext) {
   };
 }
 
-/** Publish the pair's drafts through the surface's Publish / Pending changes dialog. */
+/**
+ * Publish the pair's drafts through 概览's Pending tab, which the menu's 概览
+ * badge opens (objectstack#37456: Studio has no top bar, so its Publish lives
+ * there), then come back to the item the step was on.
+ */
 async function publishPair(page: Page) {
-  await page.getByRole('button', { name: /^Publish/ }).first().click();
+  const item = page.url();
+  await page.getByTestId('studio-menu-overview-pending').click();
+  const panel = page.getByTestId('draft-changes-panel');
+  await expect(panel).toBeVisible();
   const published = page.waitForResponse(
     (r) => r.request().method() === 'POST' && r.url().includes(`/api/v1/packages/${PAIR}/publish-drafts`),
   );
-  await page.getByTestId('draft-changes-publish').click();
+  await panel.getByTestId('draft-changes-publish').click();
   const res = await published;
   expect(res.status(), await res.text()).toBe(200);
   expect((await res.json()).data.outcome).toBe('published');
+  // Back on the item, its header is drawn (the chip in the row, or the ⋯ it
+  // folds into) before anything is read from it.
+  await page.goto(item);
+  await expect(page.getByTestId('studio-override-chip').or(page.getByTestId(ITEM_MORE)).first()).toBeVisible({ timeout: 15_000 });
 }
 
 /**

@@ -135,7 +135,7 @@ const slot = () => screen.getByTestId('studio-right-slot');
 describe('Studio right slot — the rails read whether it squeezes the pillars (objectstack#35061)', () => {
   it('a page with no slot to show (the sharing overview) keeps its host closed', async () => {
     renderAt('owd');
-    await screen.findByTestId('studio-shell-header');
+    await screen.findByTestId('owd-item-header');
     await act(async () => {});
     expect(slot()).not.toBeVisible();
     expect(screen.getByTestId('studio-pillars-host')).toHaveAttribute('data-studio-slot', 'closed');

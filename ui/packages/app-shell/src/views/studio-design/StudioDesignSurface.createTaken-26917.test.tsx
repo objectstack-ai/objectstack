@@ -15,8 +15,8 @@
  *  - Automations: a published flow on this rail is refused with "Open"; one
  *    another package holds is refused without it; nothing is written either way.
  *  - Data: the same for objects (the namespace-prefixed identifier).
- *  - App: an app another package holds is refused (Create app is offered only
- *    to a package with no app, so there is nothing of its own to open).
+ *  - App: Studio's Create app went with the top bar (objectstack#37456, ADR-0084
+ *    amended 2026-11-26, silent item 5), so it has no case here.
  *  - A fresh identifier is created as before, with the pin.
  *
  * The REAL pillars and dialogs, over a client double that keeps published and
@@ -32,7 +32,7 @@ import '@testing-library/jest-dom/vitest';
 import * as React from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
+import { MemoryRouter, useLocation } from 'react-router-dom';
 
 const PKG = 'com.acme.app';
 const OTHER_PKG = 'com.other.app';
@@ -123,8 +123,6 @@ vi.mock('../../components/SuggestedBindingsPanel', () => ({ SuggestedBindingsPan
 vi.mock('../metadata-admin/AccessExplainPanel', () => ({ AccessExplainPanel: () => null }));
 vi.mock('../../preview/DraftChangesPanel', () => ({ DraftChangesPanel: () => null }));
 
-import { StudioDesignSurface } from './StudioDesignSurface';
-import { StudioPillarRedirect } from './StudioPillarRedirect';
 import { ListFlowCreate } from './__tests__/listFlowCreateHost';
 import { MetadataListCreateDialog } from '../metadata-admin/MetadataListCreateDialog';
 import { createEmptyDataSource } from './__tests__/emptyDataSource';
@@ -157,7 +155,6 @@ window.matchMedia = ((query: string) => ({
 
 const en = (key: string) => t(key, 'en');
 const save = mockClient.save as ReturnType<typeof vi.fn>;
-const getDraft = mockClient.getDraft as ReturnType<typeof vi.fn>;
 
 function publish(type: string, pkg: string, body: Record<string, unknown>) {
   door.published.set(`${type}/${String(body.name)}`, { pkg, body } satisfies Row);
@@ -181,7 +178,6 @@ const FLOW_ESCALATE = {
 };
 const OBJ_ACCOUNT = { name: 'acme_account', label: 'Account', fields: { name: { type: 'text', label: 'Name' } } };
 const OBJ_TICKET = { name: 'acme_ticket', label: 'Ticket', fields: { subject: { type: 'text', label: 'Subject' } } };
-const APP_FIELD = { name: 'field_service', label: 'Field Service', active: true, navigation: [{ id: 'nav_x', type: 'object', objectName: 'other_x' }] };
 
 beforeEach(() => {
   door.published.clear();
@@ -337,55 +333,6 @@ describe('objectstack#26917 — Data: New object over a taken identifier', () =>
     expect([type, name, opts]).toEqual([
       'object',
       'acme_ticket',
-      { mode: 'draft', packageId: PKG, ifNoneMatch: '*', surface: 'studio' },
-    ]);
-  });
-});
-
-describe('objectstack#26917 — Create app over a taken identifier', () => {
-  async function openCreateApp() {
-    // objectstack#36903, objectstack#36904 — the Automations and Data pillars
-    // are retired (their addresses redirect to the area); the sharing
-    // overview's page hosts the toolbar's Create app.
-    render(
-      <MemoryRouter initialEntries={[`/studio/${PKG}/owd`]}>
-        <Routes>
-          <Route path="/studio/:packageId/:tab" element={<StudioPillarRedirect><StudioDesignSurface /></StudioPillarRedirect>} />
-        </Routes>
-      </MemoryRouter>,
-    );
-    const toolbar = await screen.findByTestId('studio-shell-header', undefined, { timeout: 8000 });
-    await waitFor(() => expect(within(toolbar).getByRole('button', { name: en('engine.studio.app.create') })).toBeInTheDocument());
-    fireEvent.click(within(toolbar).getByRole('button', { name: en('engine.studio.app.create') }));
-    return await screen.findByRole('dialog');
-  }
-
-  it('a published app another package holds: refused, nothing written', async () => {
-    publish('app', OTHER_PKG, APP_FIELD);
-    const before = publishedBody('app', 'field_service');
-    const dialog = await openCreateApp();
-    submitCreate(dialog, 'Field Service');
-
-    const taken = await within(dialog).findByTestId('app-create-taken');
-    expect(taken).toHaveTextContent(
-      tFormat('engine.studio.app.createTaken', 'en', { name: 'field_service', label: 'Field Service' }),
-    );
-    expect(within(taken).queryByTestId('app-create-open-existing')).toBeNull();
-    expect(save).not.toHaveBeenCalled();
-    expect(door.drafts.size).toBe(0);
-    expect(door.published.get('app/field_service')!.body).toEqual(before);
-  });
-
-  it('a fresh identifier is created as before, under the first-write pin', async () => {
-    publish('app', OTHER_PKG, APP_FIELD);
-    const dialog = await openCreateApp();
-    submitCreate(dialog, 'Dispatch');
-
-    await waitFor(() => expect(save).toHaveBeenCalledTimes(1));
-    const [type, name, , opts] = save.mock.calls[0]!;
-    expect([type, name, opts]).toEqual([
-      'app',
-      'dispatch',
       { mode: 'draft', packageId: PKG, ifNoneMatch: '*', surface: 'studio' },
     ]);
   });

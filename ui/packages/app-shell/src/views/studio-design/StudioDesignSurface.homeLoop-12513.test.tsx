@@ -208,22 +208,21 @@ function renderAt(url: string) {
 }
 
 describe('Studio home loop (objectui#12513)', () => {
-  it('the header’s first way out is 「‹ Back to app」 now, not Studio home (objectstack#36501)', async () => {
+  it('the first way out is the way back, first in the package row, not Studio home (objectstack#36501, objectstack#37456)', async () => {
     // The Studio-home button and the switcher's Studio-home row were removed
-    // with the switcher: the landing is reached from the app. objectstack#36899
-    // — the left menu's show / hide control leads the bar, so the way out is
-    // the button right after it.
+    // with the old switcher: the landing is reached from the app.
+    // objectstack#37456 — the top left's two rows: Studio's row holds the
+    // menu's show / hide control, and the package row starts with the way back.
     // objectstack#36903, objectstack#36904, objectstack#36905 — on the sharing
     // overview's page: the Automations, Data and Access pillars' addresses
     // redirect to the area now.
     renderAt(`/studio/${SHOWCASE}/owd`);
 
-    const back = await screen.findByTestId('studio-back-to-app');
-    const header = screen.getByTestId('studio-shell-header');
-    const buttons = within(header).getAllByRole('button');
-    expect(buttons[0]).toBe(within(header).getByTestId('studio-menu-toggle'));
-    expect(buttons[1]).toBe(back);
-    expect(within(header).queryByRole('button', { name: 'Studio home' })).toBeNull();
+    const back = await screen.findByTestId('studio-package-back');
+    const row = screen.getByTestId('studio-package-row');
+    expect(within(row).getAllByRole('button')[0]).toBe(back);
+    expect(within(screen.getByTestId('studio-brand-row')).getByTestId('studio-menu-toggle')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Studio home' })).toBeNull();
   });
   // objectstack#36903 — the Automations rail's empty blocks went with the rail:
   // the package-less scope's list offers no create (StudioDesignSurface.packageLessFlows-11553).

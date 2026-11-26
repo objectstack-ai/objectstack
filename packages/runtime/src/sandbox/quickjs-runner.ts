@@ -38,7 +38,7 @@ import {
   type QuickJSDeferredPromise,
   type QuickJSHandle,
 } from 'quickjs-emscripten';
-import { resolveSandboxTimeoutMs, sandboxBusinessMessage, isEngineDuplicateRecordEnvelope, INTERNAL_ERROR_MESSAGE } from '@objectstack/types';
+import { resolveSandboxTimeoutMs, sandboxBusinessMessage, isEngineDuplicateRecordEnvelope, isNativeErrorName, INTERNAL_ERROR_MESSAGE } from '@objectstack/types';
 import type { HookBody, ScriptBody, ExpressionBody, HookBodyCapability } from '@objectstack/spec/data';
 import { isUnlandedWriteRefusal } from '@objectstack/objectql';
 import { actionBodyFunctionExpression, hookBodyFunctionExpression } from '@objectstack/lint/runtime';
@@ -573,7 +573,7 @@ export class QuickJSScriptRunner implements ScriptRunner {
           const relayed = readRelayedRefusal(vm);
           const thrown = new SandboxError(
             `${args.origin.kind} '${args.origin.name}' threw: ${errStr}`,
-            relayed ?? userFacingMessage(withoutSandboxErrorPrefix(String(errStr))),
+            relayed ?? refusalSentence(userFacingMessage(withoutSandboxErrorPrefix(String(errStr))), info),
             info,
           );
           if (relayed !== undefined) relayedRefusals.add(thrown);
@@ -2840,4 +2840,26 @@ function readErrorInfo(vm: QuickJSContext): SandboxErrorInfo | undefined {
  */
 function userFacingMessage(raw: string): string {
   return raw.startsWith('Error: ') ? raw.slice('Error: '.length) : raw;
+}
+
+/**
+ * [#37533] A CODED refusal's sentence is its message, without the class name
+ * the reject handler flattened in front of it. A record `ValidationError` a
+ * host write rejected with (`code: 'VALIDATION_FAILED'`, `fields[]`) used to
+ * reach the toast as `ValidationError: <localized message>`, where a form
+ * save of the same refusal shows the message alone.
+ *
+ * Only a throw that carries `code` or `fields` (`__errorInfo`) is a refusal
+ * the author or the engine meant, so only there is the name dropped, and only
+ * a name ending in `Error` that is not a native constructor's: a crash
+ * (`TypeError: …`) keeps its name, which is how every door tells it from a
+ * refusal (`isNativeErrorName`). The class stays in `.message`, the log's
+ * line, and the code in `.code`.
+ */
+const CODED_REFUSAL_NAME_RE = /^([A-Z][A-Za-z0-9_$]*Error): (?=\S)/;
+function refusalSentence(sentence: string, info: SandboxErrorInfo | undefined): string {
+  if (!info?.code && !info?.fields) return sentence;
+  const named = CODED_REFUSAL_NAME_RE.exec(sentence);
+  if (!named || isNativeErrorName(named[1])) return sentence;
+  return sentence.slice(named[0].length);
 }

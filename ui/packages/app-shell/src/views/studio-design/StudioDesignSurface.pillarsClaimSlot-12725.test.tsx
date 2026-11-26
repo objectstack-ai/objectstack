@@ -380,7 +380,7 @@ describe('Automations: the Configuration is in the right slot (objectui#12725)',
 describe('CONTROL — a pillar that claims nothing (objectui#12725)', () => {
   it('the sharing overview keeps its own layout: the slot stays closed and empty', async () => {
     renderAt('owd');
-    await screen.findByTestId('studio-shell-header');
+    await screen.findByTestId('owd-item-header');
     await act(async () => {});
     expect(slot()).not.toBeVisible();
     expect(slotProps()).toBeEmptyDOMElement();
@@ -400,7 +400,9 @@ describe('the slot\'s toggle ends the page\'s title row (objectstack#37520)', ()
 
     const button = await screen.findByTestId('studio-slot-toggle');
     expect(screen.getAllByTestId('studio-slot-toggle')).toHaveLength(1);
-    expect(within(screen.getByTestId('studio-shell-header')).queryByTestId('studio-slot-toggle')).toBeNull();
+    // objectstack#37456 — there is no top bar to hold it, and the left column does not either.
+    expect(screen.queryByTestId('studio-shell-header')).toBeNull();
+    expect(screen.getByTestId('studio-top-left')).not.toContainElement(button);
     expect(screen.getByTestId('studio-pillars-host')).toContainElement(button);
     expect(slot().contains(button)).toBe(false);
     // The last control of its row, the hairline right before it.

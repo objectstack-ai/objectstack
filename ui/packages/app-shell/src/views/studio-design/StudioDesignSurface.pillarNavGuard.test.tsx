@@ -359,20 +359,20 @@ describe('Studio — unsaved pillar edits guard (#2600)', () => {
     dirtyTheMatrix();
 
     confirmSpy.mockReturnValueOnce(false);
-    fireEvent.click(screen.getByTestId('studio-back-to-app'));
+    fireEvent.click(screen.getByTestId('studio-package-back'));
     expect(confirmSpy).toHaveBeenCalledTimes(1);
     expect(inSetHeader().getByTitle('set_a')).toBeInTheDocument();
     matrixEditSurvived();
 
     confirmSpy.mockReturnValueOnce(true);
-    fireEvent.click(screen.getByTestId('studio-back-to-app'));
+    fireEvent.click(screen.getByTestId('studio-package-back'));
     expect(await screen.findByTestId('left-studio')).toBeInTheDocument();
   });
 
   it('never prompts a clean 「‹ Back to app」', async () => {
     await renderSurfaceOnSet();
 
-    fireEvent.click(screen.getByTestId('studio-back-to-app'));
+    fireEvent.click(screen.getByTestId('studio-package-back'));
 
     expect(confirmSpy).not.toHaveBeenCalled();
     expect(await screen.findByTestId('left-studio')).toBeInTheDocument();

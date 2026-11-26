@@ -297,7 +297,8 @@
         },
         "columns": {
           "status": "live",
-          "note": "objectui: ModalForm.tsx:247-258 / DrawerForm.tsx:478 applyAutoLayout column count."
+          "verifiedAt": "2026-11-26",
+          "note": "RE-CITED 2026-11-26 (#37665, ruling A on #37638): the form view's `columns` is the grid width of a sectioned form, capping each section's count; an undeclared section takes it. Readers: ui/apps/console/src/components/FormPage.tsx#buildSections, the named (`/forms/:name`) and public (`/f/:slug`) form page, and the Setup preview canvas, ui/packages/app-shell/src/views/metadata-admin/previews/ViewPreview.tsx#buildFormPreviewSchema handing it to ui/packages/plugin-form/src/ObjectForm.tsx; both resolve through ui/packages/plugin-form/src/autoLayout.ts#sectionedGridLayout. The previous ModalForm / DrawerForm citation was stale: those hosts no longer receive a stored form view."
         },
         "title": {
           "status": "live",

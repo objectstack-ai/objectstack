@@ -14,8 +14,8 @@ import { uiRoot } from '../scripts/ui-root.mjs';
  * jsdom has no layout engine. The unit tests (`StudioMenu.test.tsx`) pin what
  * the menu lists, its current entry, its search and its cookie; this page
  * proves where it is drawn: docked at the left of a wide window with the
- * content beside it, off the canvas once collapsed with the content taking the
- * full width, still collapsed after a reload (Studio's own cookie, on a real
+ * content beside it, a rail of icons once collapsed with the content beside it
+ * (objectstack#37456), still collapsed after a reload (Studio's own cookie, on a real
  * http origin), and a drawer over the page at phone width.
  *
  * objectstack#37201 — the 「高级」 fold laid out: closed by default with its
@@ -239,12 +239,21 @@ test.describe('Studio left menu (objectstack#36899)', () => {
     await expect(page.getByTestId('studio-menu-advanced-toggle')).toHaveAttribute('aria-expanded', 'true');
   });
 
-  test('collapsed: off the canvas, the content takes the full width, and a reload keeps it', async ({ page }, testInfo) => {
+  // objectstack#37456 (ADR-0084, amended 2026-11-26, `#amendment-2026-11-26-frame`): collapsed, the
+  // column is a rail of icons (the sidebar's 3rem icon width), no longer off the canvas; the content
+  // starts where the rail ends.
+  test('collapsed: a rail of icons, the content beside it, and a reload keeps it', async ({ page }, testInfo) => {
     await open(page, 1280);
     await page.getByTestId('studio-menu-toggle').click();
     await expect(page.locator('[data-side="left"][data-state="collapsed"]')).toHaveCount(1);
-    await expect.poll(async () => (await rect(page, PANEL)).right).toBeLessThanOrEqual(0);
-    await expect.poll(async () => (await rect(page, '#content')).left).toBe(0);
+    // Read once the width transition has finished.
+    await expect.poll(async () => (await rect(page, PANEL)).right).toBeLessThanOrEqual(49);
+    const rail = await rect(page, PANEL);
+    expect(rail.left).toBe(0);
+    expect(rail.right).toBeGreaterThan(40);
+    await expect(page.getByTestId('studio-menu-toggle')).toBeVisible();
+    await expect.poll(async () => (await rect(page, '#content')).left).toBeGreaterThanOrEqual(rail.right - 1);
+    expect((await rect(page, '#content')).left).toBeLessThanOrEqual(rail.right + 1);
     const cookies = await page.context().cookies(ORIGIN);
     expect(cookies.find((c) => c.name === 'studio_menu_state')?.value).toBe('false');
     expect(cookies.find((c) => c.name === 'sidebar_state')).toBeUndefined();

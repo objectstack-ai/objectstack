@@ -217,13 +217,14 @@ function renderAt(entry: string, perms = AUTHOR) {
   );
 }
 
-const header = () => screen.getByTestId('studio-shell-header');
+/** objectstack#37456 — no top bar: the left column's top rows, where the package is named. */
+const header = () => screen.getByTestId('studio-top-left');
 /** objectstack#37454 — 概览 Overview's header, where the menu lives now. */
 const overviewHeader = () => screen.getByTestId('studio-package-overview-header');
 
-/** The package name settles in the bar (the list read answered). */
+/** The package name settles in the switcher (the list read answered). */
 async function settledOn(name: string) {
-  await waitFor(() => expect(within(header()).getByTestId('studio-back-app-name')).toHaveTextContent(name), {
+  await waitFor(() => expect(within(header()).getByTestId('studio-pkg-switcher-name')).toHaveTextContent(name), {
     timeout: 8000,
   });
 }
@@ -238,10 +239,10 @@ async function openMenu(): Promise<HTMLElement> {
 const menuItem = (id: string) => screen.getByTestId(`studio-package-menu-${id}`);
 const isGreyed = (id: string) => menuItem(id).hasAttribute('data-disabled');
 
-/** Wait until the pending-changes count is read (the Changes pill shows it). */
+/** Wait until the pending-changes count is read (概览's badge shows it). */
 async function pendingRead(count: number) {
   if (count > 0) {
-    await waitFor(() => expect(within(header()).getByTestId('studio-changes-count')).toHaveTextContent(String(count)), {
+    await waitFor(() => expect(screen.getByTestId('studio-menu-overview-pending')).toHaveTextContent(String(count)), {
       timeout: 8000,
     });
   }
@@ -257,14 +258,15 @@ const LABELS: Record<'en-US' | 'zh-CN', string[]> = {
 };
 
 describe('the 「⋯」 package menu: in the overview header, six items in the table’s order (objectstack#37139, objectstack#37454)', () => {
-  it.each(['en-US', 'zh-CN'] as const)('%s: a manage_metadata holder sees it in the overview header, and not in the top bar', async (locale) => {
+  it.each(['en-US', 'zh-CN'] as const)('%s: a manage_metadata holder sees it in the overview header, and not in the left column', async (locale) => {
     localeFixture = locale;
     renderAt(`/studio/${OWN}/overview`);
     await settledOn('Sales');
     const trigger = await within(overviewHeader()).findByTestId('studio-package-menu', undefined, { timeout: 8000 });
     expect(trigger).toHaveAccessibleName(locale === 'zh-CN' ? '软件包操作' : 'Package actions');
-    // objectstack#37454 — moved: the top bar's left end no longer draws it.
+    // objectstack#37454 — moved: the left column (and, objectstack#37456, no top bar) draws none.
     expect(within(header()).queryByTestId('studio-package-menu')).toBeNull();
+    expect(screen.getAllByTestId('studio-package-menu')).toHaveLength(1);
     // The last control of the header's title row.
     const titleRow = within(overviewHeader()).getByTestId('studio-overview-title').parentElement!;
     const order = [...titleRow.querySelectorAll('[data-testid]')].map((n) => n.getAttribute('data-testid'));
@@ -341,7 +343,7 @@ describe('no 「⋯」 without a current package or without manage_metadata (obj
   it.each(['en-US', 'zh-CN'] as const)('%s: none on ~org/overview and none on ~all/overview', async (locale) => {
     localeFixture = locale;
     renderAt('/studio/~org/overview');
-    await waitFor(() => expect(within(header()).getByTestId('studio-back-app-name')).toHaveTextContent(t('engine.studio.menu.orgFlows', locale)), {
+    await waitFor(() => expect(within(header()).getByTestId('studio-pkg-switcher-name')).toHaveTextContent(t('engine.studio.pkg.orgScope', locale)), {
       timeout: 8000,
     });
     expect(screen.queryByTestId('studio-package-overview')).toBeNull();
@@ -360,7 +362,7 @@ describe('no 「⋯」 without a current package or without manage_metadata (obj
 
     // …and a page the leg still draws carries no 「⋯」 either.
     renderAt('/studio/~all/metadata/permission/admin?scope=environment');
-    await waitFor(() => expect(within(header()).getByTestId('studio-back-app-name')).toHaveTextContent(t('engine.studio.menu.environment', locale)), {
+    await waitFor(() => expect(within(header()).getByTestId('studio-pkg-switcher-name')).toHaveTextContent(t('engine.studio.menu.environment', locale)), {
       timeout: 8000,
     });
     expect(screen.queryByTestId('studio-package-overview')).toBeNull();
@@ -419,7 +421,7 @@ describe('each item runs the development face’s action (objectstack#37139)', (
     await waitFor(() => expect(toast.success).toHaveBeenCalledWith(t('engine.packages.detail.reverted', 'en-US')));
     expect(srv.writes.map((w) => `${w.method} ${w.path}`)).toEqual([`POST /api/v1/packages/${OWN}/revert`]);
     // The pending count re-reads: nothing is left to publish.
-    await waitFor(() => expect(within(header()).queryByTestId('studio-changes-count')).toBeNull(), { timeout: 8000 });
+    await waitFor(() => expect(screen.queryByTestId('studio-menu-overview-pending')).toBeNull(), { timeout: 8000 });
   });
 
   it('Adopt loose items asks first, then adopts and says how many moved', async () => {

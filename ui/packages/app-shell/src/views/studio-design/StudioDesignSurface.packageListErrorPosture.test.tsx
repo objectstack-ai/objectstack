@@ -137,7 +137,7 @@ describe('Studio top bar — package-list fetch failure is reported, not swallow
     expect(screen.getByRole('navigation', { name: 'Studio menu' })).toBeInTheDocument();
     // …and its way out still works (objectstack#36501): no app is known, so
     // it goes to the console's landing.
-    fireEvent.click(screen.getByTestId('studio-back-to-app'));
+    fireEvent.click(screen.getByTestId('studio-package-back'));
     expect(await screen.findByTestId('home-page')).toBeInTheDocument();
   });
 

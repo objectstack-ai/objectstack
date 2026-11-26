@@ -1,8 +1,6 @@
 import React from 'react';
 import ReactMarkdown, { type Components } from 'react-markdown';
-import remarkGfm from 'remark-gfm';
-import rehypeSanitize from 'rehype-sanitize';
-import { RICH_TEXT_SANITIZE_SCHEMA } from './sanitizedHtml.js';
+import { MARKDOWN_REHYPE_PLUGINS, MARKDOWN_REMARK_PLUGINS } from './markdownHeadings.js';
 import {
   RICH_TEXT_CELL_FACE_CLASS,
   RICH_TEXT_DOCUMENT_CLASS,
@@ -16,6 +14,15 @@ import {
  * (objectstack#36344, objectstack#36452).
  */
 export type MarkdownFace = RichTextFace;
+
+/**
+ * The plugin lists this face draws with, and the reader of the headings it
+ * draws, which runs the same lists (objectstack#37562). They live in
+ * `./markdownHeadings.ts` and are answered from here, so the one module the
+ * package loads on demand for markdown is this one: a module both loaded on
+ * demand and imported statically would not leave the eager chunk.
+ */
+export { MARKDOWN_REHYPE_PLUGINS, MARKDOWN_REMARK_PLUGINS, drawnMarkdownHeadings } from './markdownHeadings.js';
 
 /** In the cell face no heading element is drawn (see `cellFaceHeadings`). */
 const CELL_COMPONENTS: Components = cellFaceHeadings('data-markdown-heading');
@@ -31,8 +38,8 @@ export default function MarkdownContent({ value, face = 'document' }: { value: s
   return (
     <div className={cell ? RICH_TEXT_CELL_FACE_CLASS : RICH_TEXT_DOCUMENT_CLASS} data-markdown-face={face}>
       <ReactMarkdown
-        remarkPlugins={[remarkGfm]}
-        rehypePlugins={[[rehypeSanitize, RICH_TEXT_SANITIZE_SCHEMA]]}
+        remarkPlugins={MARKDOWN_REMARK_PLUGINS}
+        rehypePlugins={MARKDOWN_REHYPE_PLUGINS}
         components={cell ? CELL_COMPONENTS : undefined}
       >
         {value}
