@@ -2,7 +2,8 @@
 
 /**
  * `@objectstack/service-record-context` — the context-pack render service and
- * the `get_record_context` executor (ADR-0160 D3–D5).
+ * the `get_record_context` executor (ADR-0160 D3–D5), and the citation
+ * verifier (D9).
  */
 
 export {
@@ -13,6 +14,7 @@ export {
 } from './record-context-tools.js';
 export type { RecordContextTools } from './record-context-tools.js';
 export type { RecordContextDoor } from './door.js';
+export { verifyRecordCitations } from './verify-citations.js';
 export { RECORD_CONTEXT_BODY_MAX_CHARS, RECORD_CONTEXT_OUTLINE_MAX_ENTRIES } from './body-outline.js';
 export {
   contextPackCandidates,
