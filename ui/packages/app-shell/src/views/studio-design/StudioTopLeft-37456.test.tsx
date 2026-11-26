@@ -29,6 +29,9 @@ import * as React from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
+// The switcher's create dialog reaches celAuthoring's dynamic lint import; pay
+// that load during collection, never inside a clocked case (check:test-source-alias).
+import '@objectstack/lint';
 
 const reads = vi.hoisted(() => ({
   pkgs: [] as Array<{ id: string; name: string; writable: boolean; namespace: string | null; kernel?: true }>,
