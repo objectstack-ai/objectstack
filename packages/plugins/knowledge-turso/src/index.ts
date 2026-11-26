@@ -7,9 +7,11 @@ export {
 } from './turso-adapter.js';
 export {
   DEFAULT_KNOWLEDGE_FILE,
+  DEFAULT_REQUEST_TIMEOUT_MS,
   KnowledgeTursoPlugin,
   PLATFORM_DATABASE_FILES,
   defaultStoreUrl,
+  requestBoundFor,
   resolveStoreUrl,
   type KnowledgeTursoPluginOptions,
 } from './plugin.js';

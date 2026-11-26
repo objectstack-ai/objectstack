@@ -309,6 +309,38 @@ for (const kind of ['memory', 'file'] as StoreKind[]) {
       expect((await adapter.search('amber', { source: s, topK: 5 })).map((h) => h.documentId)).toEqual([`${s.id}:r1`]);
     });
 
+    it('a table with the legacy columns but no F32_BLOB vector is not a legacy table', async () => {
+      const client = store.client();
+      const adapter = new TursoKnowledgeAdapter({ id: 'under_test', client, embedder: new FakeEmbedder() });
+      await client.execute(`CREATE TABLE knowledge_blobs (
+        chunk_id TEXT PRIMARY KEY, document_id TEXT NOT NULL, source_record_id TEXT, content TEXT NOT NULL,
+        title TEXT, metadata TEXT, embedding BLOB)`);
+      const s = source('blobs');
+      expect(await adapter.search('x', { source: s, topK: 5 })).toEqual([]);
+      await adapter.upsert([doc(s, '1', 'flint')], ctx(s));
+      await adapter.completeBuild(ctx(s));
+      expect(await tables(client, 'knowledge_blobs%')).toEqual(['knowledge_blobs', 'knowledge_blobs_g1']);
+    });
+
+    it('a search whose generation keeps being switched under it stops after three attempts, SERVICE_UNAVAILABLE', async () => {
+      const client = store.client();
+      const s = source('churn');
+      const builder = new TursoKnowledgeAdapter({ id: 'under_test', client, embedder: new FakeEmbedder() });
+      await builder.upsert([doc(s, '1', 'spruce')], ctx(s));
+      let n = 0;
+      const churning = new (class extends FakeEmbedder {
+        override async embed(texts: string[]): Promise<number[][]> {
+          const next = { fingerprint: `fp-test:churn-${++n}`, recipeHash: 'rh-test:1' };
+          await builder.beginBuild(ctx(s, next));
+          await builder.completeBuild(ctx(s, next));
+          return super.embed(texts);
+        }
+      })();
+      const adapter = new TursoKnowledgeAdapter({ id: 'under_test', client, embedder: churning });
+      expect(await refusal(adapter.search('spruce', { source: s, topK: 5 }))).toMatchObject({ code: 'SERVICE_UNAVAILABLE', status: 503 });
+      expect(n).toBe(3);
+    });
+
     it('a table the store did not make is never dropped, under a legacy name or a generation name', async () => {
       const client = store.client();
       const adapter = new TursoKnowledgeAdapter({ id: 'under_test', client, embedder: new FakeEmbedder() });
@@ -325,7 +357,7 @@ for (const kind of ['memory', 'file'] as StoreKind[]) {
       // Under the name of a generation table it is refused, and left as it is.
       await client.execute('CREATE TABLE knowledge_notes_g1 (id TEXT PRIMARY KEY, body TEXT)');
       const notes = source('notes');
-      await expect(adapter.upsert([doc(notes, '1', 'x')], ctx(notes))).rejects.toThrow(/did not make/);
+      expect(await refusal(adapter.upsert([doc(notes, '1', 'x')], ctx(notes)))).toMatchObject({ code: 'SERVICE_UNAVAILABLE', status: 503 });
       expect(await tables(client, 'knowledge_notes_g1')).toEqual(['knowledge_notes_g1']);
     });
 
@@ -375,6 +407,11 @@ for (const kind of ['memory', 'file'] as StoreKind[]) {
       const adapter = store.adapter();
       const bad = source('x"; DROP TABLE knowledge_generation; --');
       await expect(adapter.upsert([doc(bad, '1', 'x')], ctx(bad))).rejects.toThrow(/cannot name a table/);
+      expect(await refusal(adapter.listDocuments(ctx(bad), { limit: 1 }))).toMatchObject({ code: 'VALIDATION_ERROR', status: 400 });
+      // The spec's own pattern, of any length.
+      const long = source(`s_${'a'.repeat(80)}`);
+      await adapter.upsert([doc(long, '1', 'long name')], ctx(long));
+      expect((await adapter.search('long name', { source: long, topK: 1 })).length).toBe(1);
       await expect(adapter.search('x', { source: bad, topK: 1 })).rejects.toThrow(/cannot name a table/);
     });
   });
@@ -436,6 +473,87 @@ describe('knowledge-turso without a database or an embedder', () => {
     // Without an embedder the service's fingerprint is another one: answered 503, not 409.
     const other = { fingerprint: 'fp-test:no-embedder', recipeHash: 'rh-test:1' };
     expect(await refusal(adapter.listDocuments(ctx(s, other), { limit: 5 }))).toMatchObject({ code: 'SERVICE_UNAVAILABLE', status: 503 });
+    store.closeAll();
+  });
+});
+
+/** A client whose every request (and every request of its transactions) is delayed by `ms`; `stallAt` hangs the Nth. */
+function slowClient(real: Client, ms: number, stallAt?: (request: number) => boolean): Client {
+  let request = 0;
+  const delayed = <T extends object>(target: T, methods: string[], wrap?: (v: unknown) => unknown): T =>
+    new Proxy(target, {
+      get(t, key) {
+        const value = Reflect.get(t, key, t) as unknown;
+        if (typeof value !== 'function') return value;
+        const fn = (value as (...a: unknown[]) => unknown).bind(t);
+        if (typeof key !== 'string' || !methods.includes(key)) return fn;
+        return async (...args: unknown[]) => {
+          request += 1;
+          if (stallAt?.(request)) return new Promise(() => undefined);
+          await new Promise((r) => setTimeout(r, ms));
+          const answered = await (fn(...args) as Promise<unknown>);
+          return key === 'transaction' && wrap ? wrap(answered) : answered;
+        };
+      },
+    });
+  return delayed(real, ['execute', 'batch', 'transaction'], (tx) => delayed(tx as object, ['execute', 'batch', 'commit', 'rollback']));
+}
+
+describe('knowledge-turso with a request bound (a remote database)', () => {
+  it('bounds each request, not a page: a page of 40 documents on a slow database is written whole', async () => {
+    const store = storeOf('file');
+    const client = slowClient(store.client(), 15);
+    const adapter = new TursoKnowledgeAdapter({ id: 'under_test', client, embedder: new FakeEmbedder(), requestTimeoutMs: 120 });
+    const s = source('slow');
+    const docs = Array.from({ length: 40 }, (_, i) =>
+      doc(s, String(i), `heron ${i}`, {
+        chunks: [0, 1].map((index) => ({
+          id: `${s.id}:${i}#${index}`,
+          documentId: `${s.id}:${i}`,
+          index,
+          content: `heron ${i} ${index === 0 ? 'wading' : 'flying'}`,
+        })),
+      }),
+    );
+    await adapter.upsert(docs, ctx(s));
+    // Again, unchanged: every passage is rewritten in place, still within the bound.
+    await adapter.upsert(docs, ctx(s));
+    expect((await adapter.listDocuments(ctx(s), { limit: 100 })).documents.length).toBe(40);
+    store.closeAll();
+  });
+
+  it('a request that stalls inside a write answers SERVICE_UNAVAILABLE naming requestTimeoutMs, and nothing of the write lands', async () => {
+    const store = storeOf('file');
+    const real = store.client();
+    const s = source('stall');
+    const plain = new TursoKnowledgeAdapter({ id: 'under_test', client: real, embedder: new FakeEmbedder() });
+    await plain.upsert([doc(s, 'seed', 'otter')], ctx(s));
+    let batches = 0;
+    // The second batch inside a write transaction hangs, as a remote database can: the first document is written by then.
+    const client = slowClient(real, 0, () => false);
+    const hanging = new Proxy(client, {
+      get(t, key) {
+        if (key !== 'transaction') return Reflect.get(t, key, t);
+        return async (...args: unknown[]) => {
+          const tx = await (t.transaction as (...a: unknown[]) => Promise<object>).apply(t, args);
+          return new Proxy(tx, {
+            get(x, k) {
+              const v = Reflect.get(x, k, x) as unknown;
+              if (k === 'batch' && ++batches === 2) return () => new Promise(() => undefined);
+              return typeof v === 'function' ? (v as (...a: unknown[]) => unknown).bind(x) : v;
+            },
+          });
+        };
+      },
+    }) as Client;
+    const adapter = new TursoKnowledgeAdapter({ id: 'under_test', client: hanging, embedder: new FakeEmbedder(), requestTimeoutMs: 80 });
+    const err = await refusal(adapter.upsert([doc(s, 'a', 'otter pup'), doc(s, 'b', 'otter den')], ctx(s)));
+    expect(err).toMatchObject({ code: 'SERVICE_UNAVAILABLE', status: 503, remedy: expect.stringContaining('requestTimeoutMs') });
+    await new Promise((r) => setTimeout(r, 100));
+    expect((await plain.listDocuments(ctx(s), { limit: 10 })).documents.map((d) => d.documentId)).toEqual([`${s.id}:seed`]);
+    // The next write goes through.
+    await adapter.upsert([doc(s, 'a', 'otter pup')], ctx(s));
+    expect((await plain.listDocuments(ctx(s), { limit: 10 })).documents.length).toBe(2);
     store.closeAll();
   });
 });

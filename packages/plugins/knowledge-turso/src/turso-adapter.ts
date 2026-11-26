@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { createHash } from 'node:crypto';
-import type { Client, InArgs, Transaction } from '@libsql/client';
+import type { Client, InArgs, InStatement, Transaction } from '@libsql/client';
 import type {
   AdapterContext,
   AdapterEmbeddingDescriptor,
@@ -55,12 +55,14 @@ export interface TursoKnowledgeAdapterOptions {
    */
   queryPrefix?: string;
   /**
-   * The longest one turn of database work may take, in milliseconds, before
-   * the call answers `SERVICE_UNAVAILABLE` and the queue moves on. For a
-   * remote database (`libsql://`), whose requests have no bound of their
-   * own: one stalled request would otherwise hold every source of the client,
-   * and the boot that awaits the health check. Absent: no bound (a `file:`
-   * store waits only for the busy timeout).
+   * The longest one request to the database may take, in milliseconds — each
+   * statement, and each commit or rollback, on its own — before the call
+   * answers `SERVICE_UNAVAILABLE` and the queue moves on. For a remote
+   * database (`libsql://`), whose requests have no bound of their own: one
+   * stalled request would otherwise hold every source of the client, and the
+   * boot that awaits the health check. A write of many passages makes many
+   * requests, so the bound never grows with the size of a page. Absent: no
+   * bound (a `file:` store waits only for the busy timeout).
    */
   requestTimeoutMs?: number;
 }
@@ -99,16 +101,44 @@ interface SourceGenerations {
  */
 const queues = new WeakMap<Client, Promise<unknown>>();
 
-function serial<T>(client: Client, work: () => Promise<T>, timeoutMs?: number): Promise<T> {
+function serial<T>(client: Client, work: () => Promise<T>): Promise<T> {
   const before = queues.get(client) ?? Promise.resolve();
-  const bounded = timeoutMs === undefined ? work : () => withTimeout(work(), timeoutMs);
-  const run = before.then(bounded, bounded);
+  const run = before.then(work, work);
   queues.set(client, run.then(() => undefined, () => undefined));
   return run;
 }
 
-/** `work`, or `SERVICE_UNAVAILABLE` when it has not settled within `ms`. */
-function withTimeout<T>(work: Promise<T>, ms: number): Promise<T> {
+/**
+ * A view of `client` whose every request — `execute`, `batch`, opening a
+ * transaction, and a transaction's `execute`, `batch`, `commit` and
+ * `rollback` — is bounded by `ms` on its own. Everything else is the client's.
+ */
+function boundedClient(client: Client, ms: number): Client {
+  const bound = <T extends object>(target: T, methods: readonly string[], wrap?: (answered: unknown) => unknown): T =>
+    new Proxy(target, {
+      get(t, key) {
+        const value = Reflect.get(t, key, t) as unknown;
+        if (typeof value !== 'function') return value;
+        const fn = (value as (...a: unknown[]) => unknown).bind(t);
+        if (typeof key !== 'string' || !methods.includes(key)) return fn;
+        return async (...args: unknown[]) => {
+          const answered = await withTimeout(fn(...args) as Promise<unknown>, ms, key === 'commit');
+          return wrap && key === 'transaction' ? wrap(answered) : answered;
+        };
+      },
+    });
+  return bound(client, ['execute', 'batch', 'transaction'], (tx) =>
+    bound(tx as Transaction, ['execute', 'batch', 'commit', 'rollback']),
+  );
+}
+
+/**
+ * `work`, or `SERVICE_UNAVAILABLE` when it has not settled within `ms`. A
+ * statement that times out inside a transaction is followed by a rollback,
+ * never a commit, so nothing it began lands; only a COMMIT that times out
+ * (`commit`) may still land, and its refusal says so.
+ */
+function withTimeout<T>(work: Promise<T>, ms: number, commit = false): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | undefined;
   const late = new Promise<never>((_, reject) => {
     timer = setTimeout(
@@ -116,7 +146,11 @@ function withTimeout<T>(work: Promise<T>, ms: number): Promise<T> {
         reject(
           notReady(
             'its database did not answer in time',
-            `A request to the libSQL database took longer than ${ms} ms; check that the database is reachable.`,
+            `A request to the libSQL database took longer than ${ms} ms (the store's \`requestTimeoutMs\`); check that ` +
+              'the database is reachable, or raise the bound.' +
+              (commit
+                ? ' It was the commit of a write: that write may still be applied. Writes are idempotent, so retry it.'
+                : ''),
           ),
         ),
       ms,
@@ -195,18 +229,20 @@ function withTimeout<T>(work: Promise<T>, ms: number): Promise<T> {
 export class TursoKnowledgeAdapter implements IKnowledgeAdapter {
   readonly id: string;
   readonly capabilities = { chunks: true } as const;
+  /** The client every request goes through: the one given, bounded when `requestTimeoutMs` is set. */
   private readonly client?: Client;
+  /** The client as given, which keys the in-process queue shared by every adapter on it. */
+  private readonly queueKey?: Client;
   private readonly unavailable?: string;
   private readonly resolveEmbedder: () => IEmbedder | undefined;
   private readonly queryPrefix: string;
-  private readonly requestTimeoutMs?: number;
   private isReady = false;
   /** Sources whose legacy table is known to be absent. */
   private readonly noLegacy = new Set<string>();
 
   constructor(opts: TursoKnowledgeAdapterOptions) {
     this.id = opts.id ?? 'turso';
-    this.client = opts.client;
+    this.queueKey = opts.client;
     this.unavailable = opts.unavailable;
     const embedder = opts.embedder;
     this.resolveEmbedder = typeof embedder === 'function' ? embedder : () => embedder;
@@ -214,12 +250,15 @@ export class TursoKnowledgeAdapter implements IKnowledgeAdapter {
     if (opts.requestTimeoutMs !== undefined && (!Number.isFinite(opts.requestTimeoutMs) || opts.requestTimeoutMs <= 0)) {
       throw new RangeError(`knowledge-turso: requestTimeoutMs must be a positive number, got ${String(opts.requestTimeoutMs)}`);
     }
-    this.requestTimeoutMs = opts.requestTimeoutMs;
+    this.client =
+      opts.client === undefined || opts.requestTimeoutMs === undefined
+        ? opts.client
+        : boundedClient(opts.client, opts.requestTimeoutMs);
   }
 
-  /** `work` on the client's queue, within the request bound when there is one. */
-  private queued<T>(client: Client, work: () => Promise<T>): Promise<T> {
-    return serial(client, work, this.requestTimeoutMs);
+  /** `work` on the queue of the client as given, shared with every adapter on that client. */
+  private queued<T>(_client: Client, work: () => Promise<T>): Promise<T> {
+    return serial(this.queueKey ?? _client, work);
   }
 
   /** What the adapter reports about its embedder (ADR-0161 K8, item 6), read now. */
@@ -313,11 +352,16 @@ export class TursoKnowledgeAdapter implements IKnowledgeAdapter {
           args: [sourceId, target.generation, target.fingerprint, target.dim],
         });
         if (still.rows.length === 0) return { commit: false, value: `${sourceId}#generation-${target.generation}` };
+        // One request per document (its DELETE and its passages, as one batch
+        // inside the transaction): the request bound never meets a page's size.
         for (const { doc, passages } of planned) {
-          await tx.execute({
-            sql: `DELETE FROM ${table} WHERE document_id = ? AND chunk_id NOT IN (SELECT value FROM json_each(?))`,
-            args: [doc.id, JSON.stringify(passages.map((p) => p.id))],
-          });
+          const statements: InStatement[] = [
+            {
+              sql: `DELETE FROM ${table} WHERE document_id = ? AND chunk_id NOT IN (SELECT value FROM json_each(?))`,
+              args: [doc.id, JSON.stringify(passages.map((p) => p.id))],
+            },
+          ];
+          const kept: Array<string | undefined> = [undefined];
           for (const p of passages) {
             const common: InArgs = [
               p.id,
@@ -334,15 +378,15 @@ export class TursoKnowledgeAdapter implements IKnowledgeAdapter {
             const vector = vectorOf.get(p.id);
             if (vector === undefined) {
               // Unchanged text: the stored vector stands; the rest of the row is rewritten.
-              const updated = await tx.execute({
+              statements.push({
                 sql: `UPDATE ${table} SET document_id = ?2, source_record_id = ?3, organization_id = ?4, content = ?5,
                         title = ?6, heading_path = ?7, doc_hash = ?8, metadata = ?10
                       WHERE chunk_id = ?1 AND chunk_hash = ?9`,
                 args: common,
               });
-              if (updated.rowsAffected === 0) return { commit: false, value: p.id };
+              kept.push(p.id);
             } else {
-              await tx.execute({
+              statements.push({
                 sql: `INSERT INTO ${table} (chunk_id, document_id, source_record_id, organization_id, content, title,
                         heading_path, doc_hash, chunk_hash, metadata, embedding)
                       VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, vector32(?11))
@@ -353,8 +397,13 @@ export class TursoKnowledgeAdapter implements IKnowledgeAdapter {
                         embedding = excluded.embedding`,
                 args: [...(common as unknown[]), vectorLiteral(vector)] as InArgs,
               });
+              kept.push(undefined);
             }
           }
+          const results = await tx.batch(statements);
+          // An unchanged passage whose row is gone: rolled back, and planned again.
+          const gone = results.findIndex((r, i) => kept[i] !== undefined && r.rowsAffected === 0);
+          if (gone !== -1) return { commit: false, value: kept[gone]! };
         }
         return { commit: true, value: undefined };
       }),
@@ -413,7 +462,12 @@ export class TursoKnowledgeAdapter implements IKnowledgeAdapter {
     });
   }
 
-  async search(query: string, opts: AdapterSearchOptions, attempt = 1): Promise<KnowledgeHit[]> {
+  async search(query: string, opts: AdapterSearchOptions): Promise<KnowledgeHit[]> {
+    return this.searchAttempt(query, opts, 1);
+  }
+
+  /** One attempt of {@link search}; `attempt` counts the generation switches met so far. */
+  private async searchAttempt(query: string, opts: AdapterSearchOptions, attempt: number): Promise<KnowledgeHit[]> {
     // An empty organization set ranks nothing (ADR-0161 K8, item 9).
     if (opts.organizationIds !== undefined && opts.organizationIds.length === 0) return [];
     // A record scope with no term that has ids ranks nothing (ADR-0161 K8, item 17).
@@ -515,7 +569,7 @@ export class TursoKnowledgeAdapter implements IKnowledgeAdapter {
           `The active generation of source '${opts.source.id}' changed ${SEARCH_ATTEMPTS} times during one search; retry it.`,
         );
       }
-      return this.search(query, opts, attempt + 1);
+      return this.searchAttempt(query, opts, attempt + 1);
     }
     return result.rows.map((r) => {
       const headingPath = parseJson(r.heading_path);
@@ -757,9 +811,11 @@ export class TursoKnowledgeAdapter implements IKnowledgeAdapter {
     // so can a table the store did not make, in a shared database.
     const shape = await this.shapeOf(tx, table);
     if (shape === 'legacy' || shape === 'other') {
-      throw new Error(
-        `knowledge-turso: a table '${table}' that this store did not make as a generation table is in the database; ` +
-          `source '${sourceId}' cannot open generation ${generation} under that name.`,
+      throw notReady(
+        `a table it did not make holds the name of source '${sourceId}''s next index`,
+        `The database holds a table '${table}' that is not one of this store's generation tables, so generation ` +
+          `${generation} of source '${sourceId}' cannot be built under that name. Rename or remove that table, or keep ` +
+          'the store in a database of its own.',
       );
     }
     for (const statement of passageTableDdl(table, embedder.dimensions)) await tx.execute(statement);

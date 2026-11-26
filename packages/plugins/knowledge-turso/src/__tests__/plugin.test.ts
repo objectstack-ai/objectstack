@@ -7,14 +7,14 @@
  * never a failed boot.
  */
 
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { PluginContext } from '@objectstack/core';
 import type { IKnowledgeAdapter, IKnowledgeService } from '@objectstack/spec/contracts';
 import { EMBEDDER_SERVICE, KNOWLEDGE_SERVICE } from '@objectstack/spec/contracts';
-import { KnowledgeTursoPlugin, defaultStoreUrl, resolveStoreUrl } from '../index.js';
+import { DEFAULT_REQUEST_TIMEOUT_MS, KnowledgeTursoPlugin, defaultStoreUrl, requestBoundFor, resolveStoreUrl } from '../index.js';
 import { FakeEmbedder } from './turso.testkit.js';
 
 /** A plugin context with a knowledge service that records registrations, an embedder, and a logger that records. */
@@ -78,10 +78,39 @@ describe('resolveStoreUrl', () => {
       reason: expect.stringContaining("platform's own database file"),
     });
     expect(resolveStoreUrl({ url: 'file:/var/data/%zz.db', env: {} })).toMatchObject({ reason: expect.stringContaining('not a valid file: URL') });
+    // SQLite's side files belong to their database.
+    for (const url of ['file:/srv/app/objectstack.db-wal', 'file:/srv/app/dev.db-shm', 'file:/var/data/app.db-journal']) {
+      expect(resolveStoreUrl({ url, env: { OS_DATABASE_URL: '/var/data/app.db' } })).toMatchObject({
+        reason: expect.stringContaining("platform's own database file"),
+      });
+    }
     expect(resolveStoreUrl({ url: 'file:/var/data/knowledge.db', env: { OS_DATABASE_URL: 'file:/var/data/app.db' } })).toEqual({
       url: 'file:/var/data/knowledge.db',
       from: 'the plugin option `url`',
     });
+  });
+
+  it("refuses a link to the platform's file: the file it resolves to is compared", () => {
+    const dir = mkdtempSync(join(tmpdir(), 'knowledge-turso-link-'));
+    try {
+      writeFileSync(join(dir, 'app.db'), '');
+      symlinkSync(join(dir, 'app.db'), join(dir, 'knowledge.db'));
+      symlinkSync(dir, join(dir, 'alias'));
+      const env = { OS_DATABASE_URL: `file:${join(dir, 'app.db')}` };
+      expect(resolveStoreUrl({ url: `file:${join(dir, 'knowledge.db')}`, env })).toMatchObject({ reason: expect.stringContaining("platform's own database file") });
+      expect(resolveStoreUrl({ url: `file:${join(dir, 'alias', 'app.db')}`, env })).toMatchObject({ reason: expect.stringContaining("platform's own database file") });
+      expect(resolveStoreUrl({ url: `file:${join(dir, 'alias', 'other.db')}`, env })).toMatchObject({ url: `file:${join(dir, 'alias', 'other.db')}` });
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('bounds requests by default on a remote URL only', () => {
+    expect(requestBoundFor('libsql://db.example.turso.io')).toBe(DEFAULT_REQUEST_TIMEOUT_MS);
+    expect(requestBoundFor('https://db.example.turso.io')).toBe(DEFAULT_REQUEST_TIMEOUT_MS);
+    expect(requestBoundFor('file:/srv/app/.objectstack/data/knowledge.db')).toBeUndefined();
+    expect(requestBoundFor(':memory:')).toBeUndefined();
+    expect(requestBoundFor('file:/srv/k.db', 250)).toBe(250);
   });
 
   it('accepts :memory: and libsql:// URLs, refuses anything else', () => {

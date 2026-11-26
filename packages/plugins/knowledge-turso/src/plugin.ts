@@ -1,6 +1,6 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
-import { mkdirSync } from 'node:fs';
+import { mkdirSync, realpathSync } from 'node:fs';
 import { basename, dirname, resolve as resolvePath } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { Client } from '@libsql/client';
@@ -43,7 +43,8 @@ export interface KnowledgeTursoPluginOptions {
    */
   busyTimeoutMs?: number;
   /**
-   * The longest one turn of database work may take before the call answers
+   * The longest one request to the database (a statement, a document's batch,
+   * a commit) may take before the call answers
    * `SERVICE_UNAVAILABLE`, for a remote database (`libsql://`, `https://`,
    * `wss://`), whose requests have no bound of their own. Applies to a
    * `client` given as it is only when set.
@@ -65,8 +66,14 @@ export function defaultStoreUrl(projectRoot: string = process.cwd()): string {
   return `file:${resolvePath(projectRoot, '.objectstack', 'data', DEFAULT_KNOWLEDGE_FILE)}`;
 }
 
-/** The bound on one turn of database work against a remote database (`requestTimeoutMs`). */
+/** The bound on one request to a remote database (`requestTimeoutMs`). */
 export const DEFAULT_REQUEST_TIMEOUT_MS = 10_000;
+
+/** The request bound a store on `url` gets: the one given, else the default for a remote URL, else none. */
+export function requestBoundFor(url: string, given?: number): number | undefined {
+  if (given !== undefined) return given;
+  return fileOf(url) === undefined && url !== ':memory:' ? DEFAULT_REQUEST_TIMEOUT_MS : undefined;
+}
 
 /** The local file a `file:` URL names, or `undefined` for any other URL. */
 export function fileOf(url: string): string | undefined {
@@ -85,6 +92,27 @@ export function fileOf(url: string): string | undefined {
   } catch {
     return undefined;
   }
+}
+
+/** SQLite's side files of a database file: its write-ahead log, shared memory and rollback journal. */
+const SIDE_FILE = /-(wal|shm|journal)$/;
+
+/**
+ * A database file as it is compared: its real path where it (or its directory)
+ * exists, lower-cased, and a side file read as the database it belongs to.
+ */
+function canonicalFile(file: string): string {
+  let real = file;
+  try {
+    real = realpathSync(file);
+  } catch {
+    try {
+      real = resolvePath(realpathSync(dirname(file)), basename(file));
+    } catch {
+      /* neither exists yet: compared as written */
+    }
+  }
+  return real.toLowerCase().replace(SIDE_FILE, '');
 }
 
 /** The file a platform database URL names: a `file:` / `sqlite:` URL, or a bare path. */
@@ -113,12 +141,15 @@ export function resolveStoreUrl(
   }
   if (file !== undefined) {
     const env = opts.env ?? process.env;
-    // Compared without case: on a case-insensitive file system two spellings are one file.
+    // Compared as the file it resolves to (a link to the platform's file is that
+    // file), without case (on a case-insensitive file system two spellings are
+    // one file), and with SQLite's side files read as their database.
     const platform = [env.OS_DATABASE_URL, env.DATABASE_URL]
       .map((u) => (u === undefined ? undefined : platformFileOf(u)))
       .filter((f): f is string => f !== undefined)
-      .map((f) => f.toLowerCase());
-    if (platform.includes(file.toLowerCase()) || PLATFORM_DATABASE_FILES.includes(basename(file).toLowerCase())) {
+      .map((f) => canonicalFile(f));
+    const store = canonicalFile(file);
+    if (platform.includes(store) || PLATFORM_DATABASE_FILES.includes(basename(store))) {
       return {
         reason:
           `its URL names the platform's own database file (${basename(file)}). The store keeps a libSQL file of its ` +
@@ -174,7 +205,7 @@ export class KnowledgeTursoPlugin implements Plugin {
       if (target.url === undefined) {
         unavailable = target.reason;
       } else {
-        if (fileOf(target.url) === undefined && target.url !== ':memory:') requestTimeoutMs ??= DEFAULT_REQUEST_TIMEOUT_MS;
+        requestTimeoutMs = requestBoundFor(target.url, requestTimeoutMs);
         const opened = await openClient(target.url, this.opts);
         if ('client' in opened) client = this.owned = opened.client;
         else unavailable = opened.reason;

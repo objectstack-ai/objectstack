@@ -24,14 +24,14 @@ kernel.use(new KnowledgeTursoPlugin()); // .objectstack/data/knowledge.db
 | `authToken` | — | The token of a `libsql://` URL. |
 | `client` | — | A libSQL client to use as it is (not configured, not closed by the plugin). |
 | `busyTimeoutMs` | `5000` | How long a write waits for another process's lock on a `file:` store. |
-| `requestTimeoutMs` | `10000` for a remote URL | The longest one turn of database work may take on a remote database before the call answers `SERVICE_UNAVAILABLE`. None for a file or `:memory:`; for a `client` given as it is, only when set. |
+| `requestTimeoutMs` | `10000` for a remote URL | The longest one request to a remote database may take (each statement, each document's batch of a write, each commit) before the call answers `SERVICE_UNAVAILABLE`. A write stopped before its commit is rolled back, never committed. None for a file or `:memory:`; for a `client` given as it is, only when set. |
 | `projectRoot` | `process.cwd()` | The directory the default file is under. |
 | `queryPrefix` | `''` | Text put before every query before it is embedded. Passages are embedded as they are. |
 | `embedder` | the kernel's `embedder` service | The embedder to call, read at each call. |
 
 ## Its own file, never the platform's
 
-The store opens a libSQL file of its own. Two engines writing one SQLite file in one process lose rows (measured: a row lost silently under WAL, a failed commit in delete mode), so a URL that names the platform's database — `objectstack.db`, `dev.db`, `standalone.db`, or the file `OS_DATABASE_URL` names — is refused: the plugin registers, warns, and every call answers `SERVICE_UNAVAILABLE`.
+The store opens a libSQL file of its own. Two engines writing one SQLite file in one process lose rows (measured: a row lost silently under WAL, a failed commit in delete mode), so a URL that names the platform's database — `objectstack.db`, `dev.db`, `standalone.db`, or the file `OS_DATABASE_URL` names, compared as the file a link resolves to and with SQLite's `-wal`, `-shm` and `-journal` side files read as their database — is refused: the plugin registers, warns, and every call answers `SERVICE_UNAVAILABLE`.
 
 On a file the store sets WAL and a busy timeout: without them a second process writing the same file lost most of its writes in measurement. Within one process every call of the store runs its database work one at a time.
 
