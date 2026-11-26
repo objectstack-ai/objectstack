@@ -86,6 +86,8 @@ const de = {
       versions: "Versionen",
       noApprovedVersions: "Keine genehmigten Versionen.",
       prerelease: "Vorab",
+      notInstallableHosted: "Nicht in gehosteten Umgebungen installierbar",
+      notInstallableHostedReason: "Ein Code-Plugin: Gehostete Umgebungen führen keine Code-Plugins aus. Installieren Sie es auf einer selbst gehosteten oder Enterprise-Laufzeit.",
       moreOptions: "Weitere Installationsoptionen",
       uninstallFromRuntime: "Aus diesem Laufzeitsystem deinstallieren",
       addSampleData: 'Beispieldaten hinzufügen',

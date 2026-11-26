@@ -23,6 +23,11 @@
  *  8. The 常用 types are listed on a package that holds none of them.
  *  9. `~org` and `~all` draw no fold.
  *
+ * objectstack#37360 — 全部类型 All types (ADR-0084, amended 2026-11-25):
+ * 10. The fold's last row, below its groups and under no group's label; it
+ *     opens the area's type directory and is current there. CONTROL: a 高级
+ *     type the package holds none of is still not in the fold.
+ *
  * The provider, the sidebar primitive and the router are real; only the
  * metadata reads are doubled.
  */
@@ -420,5 +425,64 @@ describe('~org and ~all draw no fold (objectstack#37201)', () => {
     expect(automation.querySelector('[data-sidebar="group-label"]')).toHaveTextContent(/^Automation$/);
     expect(screen.queryByTestId('studio-menu-group-count-automation')).toBeNull();
     expect(within(automation).getAllByRole('link').map((a) => a.getAttribute('data-testid'))).toEqual(['studio-menu-entry-orgFlows']);
+  });
+});
+
+describe('全部类型 All types (objectstack#37360, ADR-0084 amended 2026-11-25)', () => {
+  it('is the fold\'s last row, below its groups and under no group\'s label, and opens the type directory', () => {
+    renderAt(`/studio/${PKG}/data`);
+    fireEvent.click(fold());
+    const row = entry('allTypes');
+    expect(row).toBeVisible();
+    expect(row).toHaveTextContent(/^All types$/);
+    expect(row).toHaveAttribute('href', `/studio/${PKG}/metadata`);
+    // Last: no link of the fold comes after it, and every group of the fold comes before it.
+    const links = within(foldRegion()).getAllByRole('link');
+    expect(links[links.length - 1]).toBe(row);
+    const groups = [...foldRegion().querySelectorAll('[data-testid^="studio-menu-advanced-group-"]')];
+    expect(groups.length).toBeGreaterThan(0);
+    for (const g of groups) expect(g.compareDocumentPosition(row) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    // Under no group: no group holds it, and no group label sits over it.
+    expect(row.closest('[data-testid^="studio-menu-advanced-group-"], [data-testid^="studio-menu-group-"]')).toBeNull();
+    expect(row.closest('[data-sidebar="group"]')).toBeNull();
+    expect(screen.getByTestId('studio-menu-all-types').querySelector('[data-sidebar="group-label"]')).toBeNull();
+  });
+
+  it('on the type directory it is the current page, and the fold opens by itself without writing its cookie', () => {
+    renderAt(`/studio/${PKG}/metadata`);
+    expect(fold()).toHaveAttribute('aria-expanded', 'true');
+    expect(entry('allTypes')).toHaveAttribute('aria-current', 'page');
+    expect(cookie(STUDIO_MENU_ADVANCED_COOKIE)).toBeUndefined();
+  });
+
+  it('a search lists it last when its name matches, and not otherwise', () => {
+    renderAt(`/studio/${PKG}/data`);
+    const search = screen.getByTestId('studio-menu-search');
+    fireEvent.change(search, { target: { value: 'all types' } });
+    expect(within(screen.getByTestId('studio-menu')).getAllByRole('link').map((a) => a.getAttribute('data-testid'))).toEqual([
+      'studio-menu-entry-allTypes',
+    ]);
+    expect(screen.queryByTestId('studio-menu-no-matches')).toBeNull();
+    fireEvent.change(search, { target: { value: 'flow' } });
+    expect(screen.queryByTestId('studio-menu-entry-allTypes')).toBeNull();
+  });
+
+  it('CONTROL: the fold still leaves out a 高级 type the package holds none of', () => {
+    reads.entries = [...SERVED, { type: 'email_template', domain: 'system' }];
+    renderAt(`/studio/${PKG}/data`);
+    fireEvent.click(fold());
+    expect(entry('allTypes')).toBeVisible();
+    expect(entry('type:hook')).toBeVisible();
+    expect(screen.queryByTestId('studio-menu-entry-type:email_template')).toBeNull();
+    expect(screen.queryByTestId('studio-menu-entry-type:position')).toBeNull();
+  });
+
+  it.each([
+    ['~org', '/studio/~org/metadata/flow?source=runtime'],
+    ['~all', '/studio/~all/metadata'],
+  ])('%s draws no fold and no 全部类型 row', (segment, path) => {
+    renderAt(path, segment);
+    expect(screen.queryByTestId('studio-menu-entry-allTypes')).toBeNull();
+    expect(screen.queryByTestId('studio-menu-all-types')).toBeNull();
   });
 });

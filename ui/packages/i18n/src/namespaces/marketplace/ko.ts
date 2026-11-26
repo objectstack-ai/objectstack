@@ -86,6 +86,8 @@ const ko = {
       versions: "버전",
       noApprovedVersions: "승인된 버전 없음.",
       prerelease: "프리릴리즈",
+      notInstallableHosted: "호스팅 환경에 설치 불가",
+      notInstallableHostedReason: "코드 플러그인입니다. 호스팅 환경은 코드 플러그인을 실행하지 않습니다. 자체 호스팅 또는 Enterprise 런타임에 설치하세요.",
       moreOptions: "추가 설치 옵션",
       uninstallFromRuntime: "이 런타임에서 제거",
       addSampleData: '샘플 데이터 추가',

@@ -40,6 +40,7 @@ export interface IMetadataService {
   getDiagnosed?(type: string, name: string): Promise<{ data: unknown | undefined; degraded: boolean; errors: string[] }>;
   list(type: string): Promise<unknown[]>;
   listDiagnosed?(type: string): Promise<{ items: unknown[]; degraded: boolean; errors: string[] }>;
+  listPackageBindings?(type: string): Promise<{ items: MetadataPackageBinding[]; degraded: boolean; errors: string[] }>;
   unregister(type: string, name: string): Promise<void>;
   exists(type: string, name: string): Promise<boolean>;
   listNames(type: string): Promise<string[]>;
@@ -249,6 +250,25 @@ case-sensitive, it covers just the extensions whose serializers are registered
 basename is not a collision.
 </Callout>
 
+### listPackageBindings
+
+Which package an item belongs to is recorded on its **stored row**, in the
+package column the store's own write path fills. `list` returns bodies only,
+and a body's `_packageId` stamp is whatever the row's author wrote, so it is not
+that record. `listPackageBindings(type)` answers every item `list(type)`
+answers, in the same order, as `{ name, data, packageId, source }`:
+
+| the item | `source` | `packageId` |
+|:---|:---|:---|
+| held by a stored row, including the copy the boot priming pass registered from that row | `'row'` | the row's package column; `null` when the column is empty (a row written before the column), whatever package the body names |
+| held by no stored row (registered by code, or held by a loader of no rows) | `'registration'` | the package its registration files it under; `null` for none |
+
+`degraded` and `errors` are reported as `listDiagnosed` reports them. A
+consumer that decides by the binding, for example which app a skill loads in,
+should treat a degraded answer as unknown. The member is optional: a service
+without it cannot tell a row's binding from a body's, so do not substitute
+`list` for it.
+
 ### register / unregister
 
 `register` saves (creates or replaces) the full definition for a `(type, name)`.
@@ -386,6 +406,7 @@ console.log(result.failed);    // failed
 | Type | Description |
 |:---|:---|
 | `MetadataQuery` / `MetadataQueryResult` | Query parameters and paginated result for `query()` |
+| `MetadataPackageBinding` | `{ name, data, packageId: string \| null, source: 'row' \| 'registration' }`, one item of `listPackageBindings` |
 | `MetadataExportOptions` | `{ types?, namespaces?, format? }` for `exportMetadata` |
 | `MetadataImportOptions` | `{ conflictResolution?, validate?, dryRun? }` for `importMetadata` |
 | `MetadataImportResult` | `{ total, imported, skipped, failed, errors? }` |

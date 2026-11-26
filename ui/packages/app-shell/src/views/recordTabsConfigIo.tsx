@@ -7,7 +7,10 @@
  * `relatedLists` (on an installed object whose tabs the paired `.custom`
  * package arranges, its extension's entries first), the listed packages'
  * names (a tab's source, card item 7), and whether the reader's language is
- * the deployment's default (the rename gate's precedent).
+ * the app's source language: the `sourceLocale` the deployment serves on
+ * `GET /i18n/locales`, its default locale where it serves none
+ * (`fetchDeploymentLocales`, `labelLanguageOf`, objectstack#36875), the same
+ * reading the menu's rename gate takes (objectstack#36504).
  *
  * It sits behind `React.lazy` so the record page's own module graph does not
  * gain the metadata client's module (it mints its authenticated fetch when it
@@ -18,7 +21,7 @@
  */
 
 import * as React from 'react';
-import { fetchDefaultLocale, isSameLanguage } from '../layout/designModeMenuSave.js';
+import { fetchDeploymentLocales, labelLanguageOf, type DeploymentLocales } from '../layout/designModeMenuSave.js';
 import { useMetadataClient } from './metadata-admin/useMetadata.js';
 import { fetchListedPackageManifests } from './studio-design/packages-io.js';
 import { readStoredTabEntries, type RecordTabsSaveDoors } from './recordTabsConfigSave.js';
@@ -27,7 +30,7 @@ export interface RecordTabsIo {
   readonly client: RecordTabsSaveDoors['client'];
   /** The object's stored `relatedLists`, once read for `objectName` (`null` when the read failed). */
   readonly stored: { readonly objectName: string; readonly lists: unknown[] | null } | null;
-  /** The reader's language is the deployment's default. */
+  /** The reader's language is the app's source language (`sourceLocale`, else the default locale). */
   readonly sourceLanguage: boolean;
   /** The listed packages' names, by id (empty until read, or when the read failed). */
   readonly packageNames: ReadonlyMap<string, string>;
@@ -47,7 +50,7 @@ const NO_NAMES: ReadonlyMap<string, string> = new Map();
 export default function RecordTabsConfigIo({ objectName, packageId, pairId, language, onIo }: RecordTabsConfigIoProps) {
   const client = useMetadataClient() as unknown as RecordTabsSaveDoors['client'];
   const [stored, setStored] = React.useState<RecordTabsIo['stored']>(null);
-  const [defaultLocale, setDefaultLocale] = React.useState<string | null>(null);
+  const [locales, setLocales] = React.useState<DeploymentLocales | null>(null);
   const [packageNames, setPackageNames] = React.useState<ReadonlyMap<string, string>>(NO_NAMES);
 
   React.useEffect(() => {
@@ -61,15 +64,15 @@ export default function RecordTabsConfigIo({ objectName, packageId, pairId, lang
       },
       () => undefined,
     );
-    void fetchDefaultLocale().then((code) => {
-      if (!cancelled) setDefaultLocale(code);
+    void fetchDeploymentLocales().then((read) => {
+      if (!cancelled) setLocales(read);
     });
     return () => {
       cancelled = true;
     };
   }, [objectName, packageId, pairId, client]);
 
-  const sourceLanguage = !!defaultLocale && isSameLanguage(language, defaultLocale);
+  const sourceLanguage = labelLanguageOf(language, locales).source;
   React.useEffect(() => {
     onIo({ client, stored, sourceLanguage, packageNames });
   }, [onIo, client, stored, sourceLanguage, packageNames]);

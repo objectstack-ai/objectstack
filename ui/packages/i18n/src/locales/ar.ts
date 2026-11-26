@@ -5303,6 +5303,7 @@ const ar = {
   },
   chatbotQuota: {
     title: "الترقية مطلوبة",
+    limitTitle: "تم بلوغ حد الذكاء الاصطناعي",
     fallbackMessage: "لقد بلغت حصتك من الذكاء الاصطناعي.",
     buyCredits: "شراء باقة أرصدة",
     upgradePlan: "ترقية الخطة",

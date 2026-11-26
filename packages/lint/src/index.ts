@@ -384,6 +384,7 @@ export {
   AI_CONTEXT_FIELD_UNKNOWN,
   AI_CONTEXT_RELATED_LINK_UNKNOWN,
   AI_CONTEXT_BODY_NOT_LONG_TEXT,
+  AI_CONTEXT_SORT_FIELD_UNSORTABLE,
 } from './validate-ai-context.js';
 export type { AiContextFinding, AiContextSeverity } from './validate-ai-context.js';
 
