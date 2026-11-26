@@ -302,3 +302,61 @@ export function chartAnswerParts(
   if (cursor < content.length) parts.push({ type: 'text', text: content.slice(cursor) });
   return parts;
 }
+
+/**
+ * objectstack#37487 — the ONE allow-list of the data parts a stored answer
+ * keeps when a rebuild turns it back into parts: the app-shell message cache
+ * (`sanitizeChatMessagesForCache`) and the `useObjectChat` `initialMessages`
+ * store rebuild both write through {@link storedAnswerParts}, and app-shell's
+ * history rebuild reads the same fields back (`storedAnswerData` in
+ * `./mapMessages`). Every other data part a live stream gave is transient
+ * (progress frames, build trees) and is not kept. Keyed by the message field
+ * that carries the part's payload between rebuilds.
+ *
+ * `recordCitations` is spelled here rather than imported so this eager module
+ * stays free of `@objectstack/spec/ai` and the schemas it loads;
+ * `storedAnswerParts.recordCitations-37487.test.ts` pins it to the spec's
+ * `RECORD_CITATIONS_PART_TYPE`.
+ */
+export const STORED_ANSWER_DATA_PARTS = {
+  /** Positional: written between the text runs at each chart's `textOffset`. */
+  charts: 'data-chart',
+  /**
+   * The answer's verified record citations (ADR-0160 D9), kept as the list
+   * that was verified when the answer was produced and never verified again
+   * (ruling Q1 on objectstack#37144). Not positional: it follows the text.
+   */
+  recordCitations: 'data-record-citations',
+} as const;
+
+/** The part id the live stream gives the citations part, so a rebuilt store holds one part as the stream did. */
+const RECORD_CITATIONS_PART_ID = 'record-citations';
+
+/** The payloads {@link storedAnswerParts} keeps, read off a rendered message. */
+export interface StoredAnswerData {
+  charts?: readonly ChatChart[];
+  /** The already-parsed list the message carries; written as it is. */
+  recordCitations?: readonly unknown[];
+}
+
+/** One part {@link storedAnswerParts} writes. */
+export type StoredAnswerPart =
+  | ChartAnswerPart
+  | { type: typeof STORED_ANSWER_DATA_PARTS.recordCitations; id: string; data: unknown[] };
+
+/**
+ * An answer's text with every data part {@link STORED_ANSWER_DATA_PARTS}
+ * keeps: the charts at their offsets ({@link chartAnswerParts}), then the
+ * citations list. An empty or absent list writes no part.
+ */
+export function storedAnswerParts(content: string, data: StoredAnswerData): StoredAnswerPart[] {
+  const parts: StoredAnswerPart[] = chartAnswerParts(content, data.charts);
+  if (data.recordCitations && data.recordCitations.length > 0) {
+    parts.push({
+      type: STORED_ANSWER_DATA_PARTS.recordCitations,
+      id: RECORD_CITATIONS_PART_ID,
+      data: [...data.recordCitations],
+    });
+  }
+  return parts;
+}

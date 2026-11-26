@@ -17,6 +17,10 @@
  *   marked), and the same chip clicked again (a fresh opened-state value)
  *   scrolls again. CONTROL: a navigation that keeps the state (a tab switch)
  *   does not scroll.
+ * - objectstack#37487 (S5): a navigation that DROPS the state is no new click
+ *   either: a state-dropping `replace` (how `useUrlOverlay` opens the command
+ *   palette) and a pushed form overlay followed by Back leave the page where
+ *   it is. CONTROL: a new string value after them scrolls again.
  */
 
 import * as React from 'react';
@@ -259,5 +263,38 @@ describe('a record opened at a cited section (objectstack#37365)', () => {
     await act(async () => {});
     expect(scrolled).toEqual([first, second, second]);
     expect(marked(container)).toEqual([second]);
+  });
+
+  it('a navigation dropping the state does not scroll back (objectstack#37487 S5); CONTROL: a new click after it does', async () => {
+    const { container } = await mount('?section=scope');
+    await waitFor(() => expect(marked(container)).toHaveLength(1), { timeout: 4000 });
+    const [first, second] = headingsNamed(container, 'Scope');
+    const path = `/apps/compliance/${OBJECT_NAME}/record/${RECORD_ID}`;
+    await act(async () => {
+      navigateTo!(`${path}?section=scope-2`, { state: { [RECORD_SECTION_OPENED_STATE]: 'click-1' } });
+    });
+    await waitFor(() => expect(scrolled).toEqual([first, second]), { timeout: 4000 });
+    // A state-dropping replace: an overlay param written over the URL with no state.
+    await act(async () => {
+      navigateTo!(`${path}?section=scope-2&palette=1`, { replace: true });
+    });
+    await act(async () => {});
+    expect(scrolled).toEqual([first, second]);
+    // A pushed overlay (no state), then Back to the entry the click wrote.
+    await act(async () => {
+      navigateTo!(`${path}?section=scope-2&form=edit`);
+    });
+    await act(async () => {});
+    await act(async () => {
+      navigateTo!(-1);
+    });
+    await act(async () => {});
+    expect(scrolled).toEqual([first, second]);
+    expect(marked(container)).toEqual([second]);
+    // CONTROL: a new click after them still opens the section.
+    await act(async () => {
+      navigateTo!(`${path}?section=scope-2`, { state: { [RECORD_SECTION_OPENED_STATE]: 'click-2' } });
+    });
+    await waitFor(() => expect(scrolled).toEqual([first, second, second]), { timeout: 4000 });
   });
 });

@@ -4947,8 +4947,16 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
   // fresh `RECORD_SECTION_OPENED_STATE`, so the same chip clicked again opens
   // the section again, while a tab switch (which keeps the state) does not.
   // Opening another section takes the earlier mark off.
+  // objectstack#37487 (S5) — the click is the last string value the state
+  // carried, kept until a NEW one arrives: a navigation that drops the history
+  // state (an overlay's `replace`, a pushed form and Back) is no new click, so
+  // it neither re-runs the effect nor scrolls the page back to the heading.
   const sectionAnchor = tabSearchParams.get(RECORD_SECTION_PARAM) || null;
-  const sectionOpened = (location.state as Record<string, unknown> | null)?.[RECORD_SECTION_OPENED_STATE];
+  const sectionOpenedState = (location.state as Record<string, unknown> | null)?.[RECORD_SECTION_OPENED_STATE];
+  const [sectionOpened, setSectionOpened] = useState('');
+  if (typeof sectionOpenedState === 'string' && sectionOpenedState !== sectionOpened) {
+    setSectionOpened(sectionOpenedState);
+  }
   const citedSectionCandidates = useMemo(
     () =>
       holdsRouteRecord
@@ -4958,7 +4966,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
   );
   const citedSectionKey =
     citedSectionCandidates.length > 0
-      ? `${routeRecordKey}\n${sectionAnchor}\n${typeof sectionOpened === 'string' ? sectionOpened : ''}`
+      ? `${routeRecordKey}\n${sectionAnchor}\n${sectionOpened}`
       : null;
   const citedSectionCandidatesRef = useRef(citedSectionCandidates);
   citedSectionCandidatesRef.current = citedSectionCandidates;
