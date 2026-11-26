@@ -128,8 +128,8 @@
 // shared'` — because both configs alias bare `@objectstack/spec` to a FILE and
 // had no `/shared` entry above it. The specifier appears in no file of either
 // failing package. It reached them purely because they alias `@objectstack/core`
-// to source. Three more configs (`knowledge-ragflow`, `plugin-dev`,
-// `knowledge-memory`) were latently identical and stayed green by luck of
+// to source. Three more configs (`plugin-dev`, `knowledge-memory` and one in a
+// package since retired) were latently identical and stayed green by luck of
 // coverage, not by resolution.
 //
 // So the walk crosses the boundary into any dependency whose specifier THIS

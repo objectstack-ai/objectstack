@@ -91,13 +91,10 @@ const [vector] = await embedder.embed(['ObjectStack turns an app into typed meta
 console.log(embedder.id, embedder.dimensions, vector.length);
 ```
 
-⚠️ **No knowledge adapter in this repository consumes an `IEmbedder` yet.** The two this
-repo builds — `@objectstack/knowledge-memory` and `@objectstack/knowledge-ragflow` — take
-no embedder option. The vector-computing adapters the contract is written for
-(`@objectstack/knowledge-turso`, `@objectstack/knowledge-sqlite-vec`, named in
-[`embedder.ts`](../../spec/src/contracts/embedder.ts)) are in no directory of this repo,
-so an earlier revision of this page showed a `new KnowledgeTursoPlugin({ embedding })`
-example that no reader could install or run.
+The vector adapters this repository builds, `@objectstack/knowledge-pgvector` and
+`@objectstack/knowledge-turso`, take it as their `embedder` option; without one they call
+the kernel's `embedder` service, which `@objectstack/service-knowledge` registers from the
+`ai.embedder_*` settings. `@objectstack/knowledge-memory` takes no embedder.
 
 ## Options
 

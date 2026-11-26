@@ -32,6 +32,7 @@ const result = GetRecordContextInputSchema.parse(data);
 | **recordId** | `string` | ✅ | The record's `id`, as create_record and query_records answer it |
 | **context** | `string` | optional | The context pack to read the record through, by name. Omit it when the object has one pack |
 | **anchor** | `string` | optional | One section of the record's body, by the `anchor` an earlier answer's body outline issued |
+| **outlineFrom** | `integer` | optional | Where the body outline's page starts: the `outlineNext` an earlier answer's body gave. Omit it for the first page. Not with `anchor` |
 
 
 ---
@@ -78,7 +79,8 @@ const result = GetRecordContextInputSchema.parse(data);
 | **label** | `string` | ✅ | Its label at the caller's locale |
 | **text** | `string` | optional | The body text, or the one section `anchor` asked for |
 | **anchor** | `string` | optional | The section `text` holds, when the call named one |
-| **outline** | `{ anchor: string; heading: string; level: integer }[]` | optional | The body's headings in order, when the body is past the bound and is not carried whole. Held to the service's outline bounds: a cut leaves out the deepest headings first and is stated by an `outline_truncated` note |
+| **outline** | `{ anchor: string; heading: string; level: integer }[]` | optional | The body's headings in body order, when the body is past the bound and is not carried whole. One page, held to the service's outline bounds: the pages run through every heading short enough to list, shallowest level first, so a cut leaves the deepest headings to later pages, and is stated by an `outline_truncated` note, which also counts any heading too long for any page to list |
+| **outlineNext** | `integer` | optional | Present when a heading a later page lists remains past this outline page: pass it as `outlineFrom` to list the next page. Absent on the last page, even when headings too long to list remain |
 | **truncated** | `true` | optional | Present when `text` was cut at the bound: a long body with no headings, or a section past the bound |
 
 ### Nested Shape: `RecordContextBody.outline[number]`
@@ -137,8 +139,8 @@ const result = GetRecordContextInputSchema.parse(data);
 | **object** | `string` | ✅ | The child object |
 | **label** | `string` | ✅ | The child object's plural label at the caller's locale |
 | **field** | `string` | ✅ | The child's field that points at the record |
-| **rows** | `{ id?: string; displayName?: string; fields: object[] }[]` | ✅ | The rows the caller may read, up to the row cap |
-| **truncated** | `true` | optional | Present when more rows existed past the row cap |
+| **rows** | `{ id?: string; displayName?: string; fields: object[] }[]` | ✅ | The rows the caller may read, up to the list's `limit` (the row cap when it names none), or fewer when the door's page cap is lower |
+| **truncated** | `true` | optional | Present when more rows existed past the rows given: at the list's `limit`, at the row cap, or below either at the door's page cap |
 
 ### Nested Shape: `RecordContextData.body`
 
@@ -148,7 +150,8 @@ const result = GetRecordContextInputSchema.parse(data);
 | **label** | `string` | ✅ | Its label at the caller's locale |
 | **text** | `string` | optional | The body text, or the one section `anchor` asked for |
 | **anchor** | `string` | optional | The section `text` holds, when the call named one |
-| **outline** | `{ anchor: string; heading: string; level: integer }[]` | optional | The body's headings in order, when the body is past the bound and is not carried whole. Held to the service's outline bounds: a cut leaves out the deepest headings first and is stated by an `outline_truncated` note |
+| **outline** | `{ anchor: string; heading: string; level: integer }[]` | optional | The body's headings in body order, when the body is past the bound and is not carried whole. One page, held to the service's outline bounds: the pages run through every heading short enough to list, shallowest level first, so a cut leaves the deepest headings to later pages, and is stated by an `outline_truncated` note, which also counts any heading too long for any page to list |
+| **outlineNext** | `integer` | optional | Present when a heading a later page lists remains past this outline page: pass it as `outlineFrom` to list the next page. Absent on the last page, even when headings too long to list remain |
 | **truncated** | `true` | optional | Present when `text` was cut at the bound: a long body with no headings, or a section past the bound |
 
 
@@ -221,8 +224,8 @@ const result = GetRecordContextInputSchema.parse(data);
 | **object** | `string` | ✅ | The child object |
 | **label** | `string` | ✅ | The child object's plural label at the caller's locale |
 | **field** | `string` | ✅ | The child's field that points at the record |
-| **rows** | `{ id?: string; displayName?: string; fields: object[] }[]` | ✅ | The rows the caller may read, up to the row cap |
-| **truncated** | `true` | optional | Present when more rows existed past the row cap |
+| **rows** | `{ id?: string; displayName?: string; fields: object[] }[]` | ✅ | The rows the caller may read, up to the list's `limit` (the row cap when it names none), or fewer when the door's page cap is lower |
+| **truncated** | `true` | optional | Present when more rows existed past the rows given: at the list's `limit`, at the row cap, or below either at the door's page cap |
 
 ### Nested Shape: `RecordContextRelatedList.rows[number]`
 

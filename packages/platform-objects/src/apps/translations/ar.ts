@@ -2,12 +2,15 @@
 
 import type { TranslationData } from '@objectstack/spec/system';
 import { arObjects } from './ar.objects.generated.js';
+import { standardUnitMessages } from './standard-unit-names.js';
 
 /**
  * العربية (ar) — Setup App Translations
  */
 export const ar: TranslationData = {
   objects: arObjects,
+  // ADR-0158 L2 (2A): each standard unit code's name (`standard-unit-names.ts`).
+  messages: standardUnitMessages('ar'),
   apps: {
     account: {
       label: 'الحساب',
@@ -133,7 +136,7 @@ export const ar: TranslationData = {
       },
     },
     studio: {
-      label: 'Studio',
+      label: 'App Studio',
       description: 'منضدة عمل البيانات الوصفية للمطوّرين والمحللين والمنفّذين',
       navigation: {
         group_overview: { label: 'نظرة عامة' },

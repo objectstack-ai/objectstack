@@ -205,7 +205,7 @@ export const SysEmail = ObjectSchema.create({
 
     // ── Delivery state ───────────────────────────────────────────
     status: Field.select(
-      ['queued', 'sent', 'failed'],
+      ['queued', 'sent', { label: 'failed', value: 'failed', color: 'red' }],
       {
         label: 'Status',
         required: true,

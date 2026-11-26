@@ -20,10 +20,10 @@
  * `scopeDirectoryEntries`), plus every 常用 Common type
  * ({@link STUDIO_MENU_ALWAYS_TYPES}), so a package that holds no app, page,
  * dashboard, report, flow, permission set or agent still shows where the
- * first is made. Each opens the type's list in the "All metadata" area; an
- * item opened there that a pillar designs still opens its pillar until the
- * pillars become full-screen pages (`areaItemPillarPath`). objectstack#36905
- * — a permission set already has.
+ * first is made. Each opens the type's list in the "All metadata" area,
+ * where an object, a flow and a permission set open their designers
+ * full-screen (objectstack#36903-36905; objectstack#36909 retired the last of
+ * the pillar redirects).
  *
  * And four entries that open no type's list, each in the group of what it
  * holds (the amendment's "Entries that are not a type"):
@@ -54,6 +54,15 @@
  * `empty`: drawn dimmed, with no number, and still a link. Before the sweep
  * answers (`settled`), nothing is empty: "not counted yet" is not "none".
  *
+ * ## 概览 Overview (ADR-0084, amended 2026-11-26; objectstack#37454)
+ *
+ * On a package, one more entry that opens no type's list and sits under no
+ * group and in no tier: 概览 Overview, the package's own page, the menu's
+ * first row, above the groups ({@link studioMenuOverviewEntry}). It carries
+ * the open package's pending-draft count as a badge, drawn only while
+ * something is pending; the badge leads to the overview's Pending tab. It is
+ * not part of {@link buildStudioMenu}'s groups.
+ *
  * ## Scopes
  *
  * On a package, a group is drawn in a tier only where it holds an entry of
@@ -66,16 +75,17 @@
 
 import { ENVIRONMENT_SCOPE_QUERY } from '../metadata-admin/catalog-scope.js';
 import { SETUP_DATASOURCES_PATH } from '../metadata-admin/metadataAreaHost.js';
-import { AREA_PILLAR_FOR_TYPE, isStudioAllPackagesScope } from './metadataArea.js';
+import { isStudioAllPackagesScope } from './metadataArea.js';
 import {
   STUDIO_ALL_PACKAGES_SEGMENT,
-  STUDIO_METADATA_AREA,
+  STUDIO_OVERVIEW_SECTION,
   STUDIO_OWD_SECTION,
   studioMetadataAreaAddress,
   studioMetadataAreaRoot,
   studioOwdOverviewPath,
   studioPackagePath,
 } from './studioAddress.js';
+import { studioPackageOverviewPath } from './studioOverviewAddress.js';
 import { isStudioOrgScope, studioOrgScopePath } from './studioScope.js';
 import { STUDIO_MENU_PLACEMENT, type StudioMenuTier } from './studioMenuPlacement.js';
 
@@ -229,6 +239,44 @@ export function studioMenuAllTypesEntry(scope: StudioMenuScope): StudioMenuEntry
   return { key: 'allTypes', kind: 'allTypes', to: studioMetadataAreaRoot(scope.packageId), tier: 'advanced' };
 }
 
+/** The key of 概览 Overview's row, and what {@link studioMenuCurrentKey} answers on its page. */
+export const STUDIO_MENU_OVERVIEW_KEY = 'overview';
+
+/**
+ * 概览 Overview's row (objectstack#37454): the package's own page, above the
+ * groups. Not a {@link StudioMenuEntry}: it lists no type, belongs to no group
+ * and no tier, and its number is not an item count.
+ */
+export interface StudioMenuOverviewEntry {
+  key: typeof STUDIO_MENU_OVERVIEW_KEY;
+  /** The overview, on its Info tab. */
+  to: string;
+  /**
+   * The open package's pending drafts, drawn as the row's badge; absent while
+   * nothing is pending, and while the count is not known yet.
+   */
+  pending?: number;
+  /** Where the badge leads: the overview's Pending tab. */
+  pendingTo: string;
+}
+
+/**
+ * 概览 Overview's row on a package, or `null` on `~org` and `~all`, which name
+ * no package (ADR-0084, amended 2026-11-26). `pending` is the open package's
+ * pending-draft count as the surface reads it (`null` while unknown): the badge
+ * is drawn only while it is above zero.
+ */
+export function studioMenuOverviewEntry(scope: StudioMenuScope, pending: number | null | undefined): StudioMenuOverviewEntry | null {
+  if (scope.kind !== 'package') return null;
+  const entry: StudioMenuOverviewEntry = {
+    key: STUDIO_MENU_OVERVIEW_KEY,
+    to: studioPackageOverviewPath(scope.packageId),
+    pendingTo: studioPackageOverviewPath(scope.packageId, { tab: 'pending' }),
+  };
+  if (typeof pending === 'number' && pending > 0) entry.pending = pending;
+  return entry;
+}
+
 /**
  * The menu split into its two tiers on a package: the 常用 groups and the
  * 高级 fold's groups, each holding only that tier's entries, and a group only
@@ -242,11 +290,6 @@ export function studioMenuTiers(menu: readonly StudioMenuGroupModel[]): Record<S
   return { common: of('common'), advanced: of('advanced') };
 }
 
-/** The entry keys of the type each pillar designs (the transition's pillar pages). */
-const PILLAR_TYPE: Readonly<Record<string, string>> = Object.fromEntries(
-  Object.entries(AREA_PILLAR_FOR_TYPE).map(([type, pillar]) => [pillar, type]),
-);
-
 /**
  * The entry the open page is (`aria-current`), or `null` when it is none of
  * them (a not-found pillar).
@@ -256,7 +299,9 @@ const PILLAR_TYPE: Readonly<Record<string, string>> = Object.fromEntries(
  *    directory — 全部类型 All types on a package (objectstack#37360), the
  *    environment catalog on the cross-package leg;
  *  - the sharing overview's route: the OWD overview;
- *  - a pillar page: the type the pillar designs.
+ *  - the package's own page: 概览 Overview (objectstack#37454);
+ *  - a retired pillar's address: none, since it draws no page
+ *    (objectstack#36909: it redirects, `studioPillarRedirectModel.ts`).
  */
 export function studioMenuCurrentKey(input: { segment: string; pathname: string; search: string }): string | null {
   const { segment, pathname } = input;
@@ -270,11 +315,9 @@ export function studioMenuCurrentKey(input: { segment: string; pathname: string;
   }
   const prefix = `${studioPackagePath(segment)}/`;
   const raw = pathname.startsWith(prefix) ? pathname.slice(prefix.length) : '';
-  const pillar = raw.split('/')[0];
-  if (pillar === STUDIO_METADATA_AREA) return null;
-  if (pillar === STUDIO_OWD_SECTION) return 'owd';
-  const type = PILLAR_TYPE[pillar];
-  return type ? `type:${type}` : null;
+  const section = raw.split('/')[0];
+  if (section === STUDIO_OWD_SECTION) return 'owd';
+  return section === STUDIO_OVERVIEW_SECTION ? STUDIO_MENU_OVERVIEW_KEY : null;
 }
 
 /** Whether `entry` matches a menu search, by its label or its type's machine name. */
@@ -282,4 +325,10 @@ export function studioMenuEntryMatches(entry: StudioMenuEntry, label: string, qu
   const q = query.trim().toLowerCase();
   if (!q) return true;
   return label.toLowerCase().includes(q) || (entry.type ?? '').toLowerCase().includes(q);
+}
+
+/** Whether 概览 Overview's row, which lists no type, matches a menu search: by its label alone. */
+export function studioMenuOverviewMatches(label: string, query: string): boolean {
+  const q = query.trim().toLowerCase();
+  return !q || label.toLowerCase().includes(q);
 }

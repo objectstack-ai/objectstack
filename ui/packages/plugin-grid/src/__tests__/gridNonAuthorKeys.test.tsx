@@ -673,9 +673,12 @@ const objectGridSchemaSpan = (): [number, number] => {
   return [start, end];
 };
 
-/** The nine sibling callbacks the type note and the README claim are props-only. */
-const NINE_SIBLINGS = [
-  'onRowClick', 'onRowSelect', 'onCellChange', 'onRowSave', 'onBatchSave',
+/**
+ * The eight sibling callbacks the type note and the README claim are
+ * props-only (`onBatchSave` was the ninth until objectstack#35827 retired it).
+ */
+const EIGHT_SIBLINGS = [
+  'onRowClick', 'onRowSelect', 'onCellChange', 'onRowSave',
   'onEdit', 'onDelete', 'onBulkDelete', 'onAddRecord',
 ] as const;
 
@@ -733,10 +736,10 @@ describe('`onNavigate` — the ledger premises (objectui#5234)', () => {
     ).toBe(1);
   });
 
-  it('…and does NOT declare the nine siblings, which is the contrast the note draws', () => {
-    // The type note and both docs pages say the nine live only on
+  it('…and does NOT declare the eight siblings, which is the contrast the note draws', () => {
+    // The type note and both docs pages say the eight live only on
     // `ObjectGridComponentProps`. Measured here so the claim cannot go stale
-    // under them: a tenth callback arriving on the schema would make the note
+    // under them: a ninth callback arriving on the schema would make the note
     // false while every other assertion in this file stayed green.
     const [start, end] = objectGridSchemaSpan();
     const declaredInSpan = new Set(
@@ -748,11 +751,11 @@ describe('`onNavigate` — the ledger premises (objectui#5234)', () => {
     // Non-vacuity: the scan found the interface's members at all.
     expect(declaredInSpan.size).toBeGreaterThan(20);
     expect(declaredInSpan.has('onNavigate')).toBe(true);
-    for (const sibling of NINE_SIBLINGS) {
+    for (const sibling of EIGHT_SIBLINGS) {
       expect(
         declaredInSpan.has(sibling),
         `\`${sibling}\` is now declared on ObjectGridSchema. The programmatic-only note on`
-          + ' `onNavigate` and the README both say the nine live ONLY on'
+          + ' `onNavigate` and the README both say the eight live ONLY on'
           + ' `ObjectGridComponentProps` — one of them is now wrong.',
       ).toBe(false);
     }

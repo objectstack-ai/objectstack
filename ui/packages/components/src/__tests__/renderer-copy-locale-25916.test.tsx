@@ -10,9 +10,10 @@
  * #25916, third pass — two renderers in this package drew English literals
  * whatever the session's language.
  *
- *   - `data-table`: the hover "open record" affordance's title and the inline
- *     edit row's cancel / save buttons (`table.openRecord`,
- *     `table.cancelChanges`, `table.saveRow`);
+ *   - `data-table`: the hover "open record" affordance's title
+ *     (`table.openRecord`). The staged edit row's cancel / save buttons
+ *     (`table.cancelChanges`, `table.saveRow`) are retired with the staged
+ *     model (objectstack#35827): each cell now saves on commit;
  *   - the `kind:'react'` page renderer: its capability notice, its empty-source
  *     refusal, its loading line and its error titles (`reactPage.*`).
  *
@@ -25,7 +26,7 @@
  *   - control: with no provider each surface still reads its English.
  */
 import { describe, it, expect, afterEach } from 'vitest';
-import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
+import { cleanup, render, screen } from '@testing-library/react';
 import React from 'react';
 import { CAP_REACT_PAGES, ComponentRegistry, disableCapability, enableCapability } from '@object-ui/core';
 import { AdapterCtx, SchemaRenderer } from '@object-ui/react';
@@ -64,28 +65,16 @@ const Table = ComponentRegistry.get('data-table')!;
 function DataTable({ onRowClick }: { onRowClick?: () => void }) {
   const schema = {
     type: 'data-table',
-    editable: true,
-    singleClickEdit: true,
     rowActions: true,
     showRowNumbers: true,
     columns: [
-      { header: 'Task', accessorKey: 'name', editable: false },
+      { header: 'Task', accessorKey: 'name' },
       { header: 'Estimate', accessorKey: 'qty', type: 'number' },
     ],
     data: [ALPHA],
-    onRowSave: async () => undefined,
     ...(onRowClick ? { onRowClick } : {}),
   } as any;
   return <Table schema={schema} />;
-}
-
-/** Stage an edit on Alpha's estimate, so the row draws its cancel / save buttons. */
-function stageEdit(container: HTMLElement) {
-  const cell = container.querySelectorAll('tbody tr td')[2] as HTMLElement;
-  fireEvent.click(cell);
-  const input = cell.querySelector('input') as HTMLInputElement;
-  fireEvent.change(input, { target: { value: '11' } });
-  fireEvent.blur(input);
 }
 
 const PAGE = (source: string): PageDocumentNode => ({
@@ -113,8 +102,6 @@ describe('renderer copy under zh (#25916)', () => {
   it('guard: the zh values read below are real zh rows, not English copies', () => {
     for (const [zhValue, enValue] of [
       [zh.table.openRecord, en.table.openRecord],
-      [zh.table.cancelChanges, en.table.cancelChanges],
-      [zh.table.saveRow, en.table.saveRow],
       [zh.reactPage.disabledTitle, en.reactPage.disabledTitle],
       [zh.reactPage.disabledBody, en.reactPage.disabledBody],
       [zh.reactPage.sourceRequired, en.reactPage.sourceRequired],
@@ -124,13 +111,9 @@ describe('renderer copy under zh (#25916)', () => {
     }
   });
 
-  it('data-table: the open affordance and the edited row buttons are titled in zh', () => {
-    const { container } = withLanguage(<DataTable onRowClick={() => undefined} />, 'zh');
+  it('data-table: the open affordance is titled in zh', () => {
+    withLanguage(<DataTable onRowClick={() => undefined} />, 'zh');
     expect(screen.getByTestId('row-expand-button').getAttribute('title')).toBe(zh.table.openRecord);
-    stageEdit(container);
-    const row = container.querySelector('tbody tr') as HTMLElement;
-    expect(within(row).getByTitle(zh.table.cancelChanges)).toBeTruthy();
-    expect(within(row).getByTitle(zh.table.saveRow)).toBeTruthy();
   });
 
   it('react page, capability off: the notice is zh, its three <code> chips where the zh string put them', async () => {
@@ -159,11 +142,8 @@ describe('renderer copy under zh (#25916)', () => {
 
 describe('control: with no provider each surface still reads its English (#25916)', () => {
   it('data-table', () => {
-    const { container } = withLanguage(<DataTable onRowClick={() => undefined} />, null);
+    withLanguage(<DataTable onRowClick={() => undefined} />, null);
     expect(screen.getByTestId('row-expand-button').getAttribute('title')).toBe('Open record');
-    stageEdit(container);
-    expect(screen.getByTitle('Cancel changes')).toBeTruthy();
-    expect(screen.getByTitle('Save row')).toBeTruthy();
   });
 
   it('react page notice', async () => {

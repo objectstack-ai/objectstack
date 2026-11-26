@@ -292,15 +292,19 @@ const GENERATORS: Record<string, {
      *
      * ## The authoring style is the starter's (#32153)
      *
-     * The `npm create objectstack` starter (`note.object.ts`) and the
-     * getting-started docs declare fields through the `Field.*` builders, export
-     * the object BY NAME (its barrel line is `export { Note } from …`), and put
-     * every field in a `fieldGroups` section. This scaffold used to write a raw
-     * `{ type: 'text', … }` literal and a default export with no field groups, so
-     * a newcomer — or a coding agent copying whichever file it read last — met
-     * two dialects in the first ten minutes. It now writes the starter's: the
-     * builder, a named `export const`, a `details` group the title field joins,
-     * and a barrel line that re-exports the name ({@link GENERATORS} `exportsByName`).
+     * The `npm create objectstack` starter (the blank template's
+     * `company.object.ts` and `contact.object.ts`, the same definitions as the
+     * platform's Starter app in `examples/app-starter`) and the getting-started
+     * docs declare fields through the `Field.*` builders, export the object BY
+     * NAME (its barrel line is `export { Company } from …`), and place every
+     * field in a `fieldGroups` section by listing it in that group's `fields`,
+     * after the field map — never through a per-field `group`. This scaffold
+     * used to write a raw `{ type: 'text', … }` literal and a default export
+     * with no field groups, so a newcomer — or a coding agent copying whichever
+     * file it read last — met two dialects in the first ten minutes. It now
+     * writes the starter's: the builder, a named `export const`, a `details`
+     * group whose `fields` list names the title field, and a barrel line that
+     * re-exports the name ({@link GENERATORS} `exportsByName`).
      *
      * The binding stays {@link toCamelCase} of the name, as it always was:
      * every refusal layer in `runMetadataGeneration` — the parse check that
@@ -328,14 +332,6 @@ export const ${toCamelCase(name)} = ObjectSchema.create({
   label: '${toTitleCase(name)}',
   pluralLabel: '${toTitleCase(name)}s',
 
-  // Field groups: the sections a record's form and detail page draw, top to
-  // bottom in this order. A field joins one by naming its \`key\` in \`group\`.
-  // Give each field you add a \`group\` as well. Field groups versus a view's
-  // own form sections: https://objectstack.ai/docs/ui/field-grouping-and-order
-  fieldGroups: [
-    { key: 'details', label: 'Details' },
-  ],
-
   fields: {
     // The record's title: the platform shows it as each record's name. Add
     // the fields this object needs beside it, each through a \`Field.*\`
@@ -345,9 +341,19 @@ export const ${toCamelCase(name)} = ObjectSchema.create({
       label: 'Name',
       required: true,
       maxLength: 255,
-      group: 'details',
     }),
   },
+
+  // The Details sections of the record page and of the create and edit form,
+  // top to bottom in this order; a section's \`fields\` list names its fields
+  // in display order. \`objectstack validate\` reports a field that nothing
+  // displays or reads, so list each field you add in a section too. Field
+  // groups versus a view's own form sections:
+  // https://objectstack.ai/docs/ui/field-grouping-and-order
+  fieldGroups: [
+    { key: 'details', label: 'Details', fields: ['name'] },
+  ],
+
   // Org-wide default (OWD): who can see records they don't own. 'private' is
   // owner-only until access is widened by a permission grant or a sharing
   // rule. Declaring it is required, deliberately: \`objectstack build\`

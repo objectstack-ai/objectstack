@@ -2,8 +2,9 @@
 
 /**
  * The Studio builder's screens, as the ONE module the console loads them
- * through (objectui#11798): Studio's entry (objectstack#36908), the pillar
- * builder, and the "All metadata" area's cross-package leg (objectstack#28561).
+ * through (objectui#11798): Studio's entry (objectstack#36908), the builder,
+ * the "All metadata" area's cross-package leg (objectstack#28561), and the
+ * retired pillar addresses' redirect (objectstack#36909).
  *
  * `StudioRoute.tsx` (the `/studio` subtree) reaches these components through
  * `import('./studioBuilder')`, behind a `lazy()` boundary. Nothing in the
@@ -29,4 +30,4 @@
  * one, and `pnpm check:eager-closure` weighs the bytes that would come back.
  */
 
-export { StudioDesignSurface, StudioEntryRedirect, StudioMetadataArea } from '@object-ui/app-shell';
+export { StudioDesignSurface, StudioEntryRedirect, StudioMetadataArea, StudioPillarRedirect } from '@object-ui/app-shell';

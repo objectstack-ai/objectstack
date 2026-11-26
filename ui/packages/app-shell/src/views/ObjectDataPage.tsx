@@ -35,6 +35,7 @@
 import * as React from 'react';
 import { Link, useParams, useNavigate, useSearchParams, useLocation } from 'react-router-dom';
 import { ListView, conditionCandidatesOf, conditionOptionsOf, useLookupValueNames } from '@object-ui/plugin-list';
+import { relatedCreateSeedOf } from '@object-ui/plugin-detail/core';
 import { useNavigationOverlay, useRowPredicate } from '@object-ui/react';
 import {
   Button,
@@ -55,7 +56,7 @@ import { formatMetadataError } from '@object-ui/data-objectstack';
 import { useObjectTranslation, useObjectLabel } from '@object-ui/i18n';
 import { usePermissions, useFieldPermissions } from '@object-ui/permissions';
 import { useAuth, useWorkspaceAdminStatus } from '@object-ui/auth';
-import { optionDisplayLabel, resolveAffordance, resolveFilterPlaceholders, type SchemaLike } from '@object-ui/core';
+import { optionDisplayLabel, parentRelationshipFieldDef, resolveAffordance, resolveFilterPlaceholders, type SchemaLike } from '@object-ui/core';
 import { normalizeFilterOperator, ViewFilterRuleSchema } from '@objectstack/spec/ui';
 import type { ViewFilterRule } from '@objectstack/spec/ui';
 import {
@@ -322,6 +323,13 @@ function addressPanelFilterConditionCount(searchParams: URLSearchParams): number
   if (logic !== 'and' && logic !== 'or') return 0;
   return Array.isArray(conditions) ? conditions.length : 0;
 }
+
+/**
+ * objectstack#37290 — how long New under a record trail waits for the parent
+ * read its `dependsOn` seed needs. Past it the form opens with the parent link
+ * alone, as it does when the read is refused or finds nothing.
+ */
+export const TRAIL_NEW_PARENT_READ_TIMEOUT_MS = 5000;
 
 export function ObjectDataPage({ dataSource, objects }: any) {
   const { appName, objectName } = useParams();
@@ -907,6 +915,12 @@ export function ObjectDataPage({ dataSource, objects }: any) {
     label: 'builtin:create:disabledWhen',
   });
   const createDisabled = createPredicates?.disabledWhen != null && createDisabledPred;
+  // objectstack#37290 — New under a record trail may read the parent first
+  // (the `dependsOn` seed). While it does, New is pending; a click's result is
+  // dropped when the page unmounted or the address moved on before it settled.
+  const [newPending, setNewPending] = React.useState(false);
+  const newClickRef = React.useRef(0);
+  React.useEffect(() => () => { newClickRef.current += 1; }, []);
 
   if (!objectDef) {
     return (
@@ -961,13 +975,48 @@ export function ObjectDataPage({ dataSource, objects }: any) {
           const sp = new URLSearchParams(searchParams);
           sp.set(RECORD_FORM_PARAM, 'new');
           sp.set(RECORD_FORM_OBJECT_PARAM, objectDef.name);
-          sp.set(RECORD_FORM_LINK_PARAM, `${sourceField}:${source.i}`);
-          setSearchParams(sp);
+          sp.delete(RECORD_FORM_LINK_PARAM);
+          sp.append(RECORD_FORM_LINK_PARAM, `${sourceField}:${source.i}`);
+          // objectstack#37290 — and seeded as the related tab's New seeds it
+          // (objectstack#37246): each `dependsOn` field of the link takes the
+          // source record's value, or the form gates the lookup. The trail
+          // carries the record's id alone, so the record is read once, and
+          // only when the link declares a `dependsOn` to seed.
+          const dependsOn = (parentRelationshipFieldDef(objectDef.fields, sourceField) as { dependsOn?: unknown } | undefined)?.dependsOn;
+          const open = (parentRecord?: Record<string, unknown>) => {
+            for (const [field, value] of Object.entries(relatedCreateSeedOf(objectDef.fields, sourceField, parentRecord))) {
+              sp.append(RECORD_FORM_LINK_PARAM, `${field}:${value}`);
+            }
+            setSearchParams(sp);
+          };
+          if (Array.isArray(dependsOn) && dependsOn.length > 0 && typeof dataSource?.findOne === 'function') {
+            const click = ++newClickRef.current;
+            const at = `${location.pathname}${location.search}`;
+            setNewPending(true);
+            let timer: ReturnType<typeof setTimeout> | undefined;
+            const timedOut = new Promise<undefined>((resolve) => {
+              timer = setTimeout(() => resolve(undefined), TRAIL_NEW_PARENT_READ_TIMEOUT_MS);
+            });
+            const read = Promise.resolve()
+              .then(() => dataSource.findOne(source.o, source.i))
+              .catch(() => undefined);
+            void Promise.race([read, timedOut]).then((rec: unknown) => {
+              clearTimeout(timer);
+              if (click !== newClickRef.current) return;
+              setNewPending(false);
+              const now = locationRef.current;
+              if (`${now.pathname}${now.search}` !== at) return;
+              open(rec && typeof rec === 'object' ? (rec as Record<string, unknown>) : undefined);
+            });
+            return;
+          }
+          open(undefined);
           return;
         }
         navigate('../new', { relative: 'path' });
       }}
-      disabled={createDisabled}
+      disabled={createDisabled || newPending}
+      aria-busy={newPending || undefined}
       className="shadow-none gap-1.5 h-8 sm:h-9"
       data-testid="object-data-new-button"
     >

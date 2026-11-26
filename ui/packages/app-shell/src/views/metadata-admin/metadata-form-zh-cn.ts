@@ -440,7 +440,7 @@ export const ZH_CN_SPEC_FORMS: NonNullable<TranslationData['metadataForms']> = {
       'sort.order': { label: '排序方向' },
       searchableFields: { label: '可搜索字段', helpText: '可用于快速搜索的字段名' },
       resizable: { label: '可调整大小', helpText: '允许调整列宽' },
-      compactToolbar: { label: '紧凑工具栏', helpText: '将分组 / 颜色 / 密度 / 隐藏字段收进同一个“视图设置”弹出框' },
+      compactToolbar: { label: '紧凑工具栏', helpText: '将分组 / 颜色 / 密度 / 隐藏字段收进同一个“视图设置”弹出框。默认开启：省略或为 `true` 时，渲染器绘制这个紧凑工具栏；为 `false` 时绘制宽工具栏，每个控件一个按钮。紧凑工具栏不绘制刷新按钮，因此 `userActions.refresh` 只作用于宽工具栏；下拉刷新不受这两个键影响。' },
       rowHeight: { label: '行高', helpText: '行高 / 密度设置' },
       selection: { label: '选择', helpText: '行选择配置' },
       'selection.type': { label: '类型', helpText: '选择模式' },

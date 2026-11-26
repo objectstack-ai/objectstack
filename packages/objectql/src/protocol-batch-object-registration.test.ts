@@ -169,11 +169,13 @@ const followingLine = (ns: string, name: string, pointer: string) => ({
         amount: { name: 'amount', type: 'currency', label: 'Amount', currencyConfig: { currencyMode: 'record', currencyField: pointer } },
     },
 });
-/** A child line whose amount carries its OWN currency per row. */
+/** A child line whose amount carries its OWN currency per row. It points back to the
+ *  roll-up's parent too, so the roll-up has a foreign key and only D6's door refuses it. */
 const ownCurrencyLine = (ns: string) => ({
     name: `${ns}_own_line`, label: 'Own line', sharingModel: 'private',
     fields: {
         invoice: { name: 'invoice', type: 'master_detail', reference: `${ns}_invoice`, label: 'Invoice' },
+        own_total: { name: 'own_total', type: 'lookup', reference: `${ns}_own_total`, label: 'Own total' },
         currency_code: { name: 'currency_code', type: 'text', label: 'Currency', ...CODE },
         amount: { name: 'amount', type: 'currency', label: 'Amount', currencyConfig: { currencyMode: 'record', currencyField: 'currency_code' } },
     },

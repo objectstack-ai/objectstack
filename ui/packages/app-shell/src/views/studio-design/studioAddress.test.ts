@@ -10,9 +10,8 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { RESERVED_URL_PARAMS } from '../../urlParams.js';
+import { RECORD_DETAIL_TAB_PARAM, RESERVED_URL_PARAMS } from '../../urlParams.js';
 import {
-  STUDIO_ITEM_PILLAR,
   STUDIO_RETURN_PARAM,
   readStudioReturn,
   withStudioReturn,
@@ -27,10 +26,9 @@ import {
   studioMetadataTypePath,
   studioOwdOverviewPath,
   studioPackagePath,
+  studioAddressParts,
   studioPath,
-  studioPillarItemAddress,
   studioPillarPath,
-  studioSurfaceQuery,
 } from './studioAddress.js';
 import {
   STUDIO_ADDRESS_FAMILIES,
@@ -38,6 +36,7 @@ import {
   STUDIO_QUERY_PARAMS,
   STUDIO_RETIRED_INTERFACES_KEPT_PARAMS,
 } from './studioAddressTable.js';
+import { studioOverviewTab, studioPackageOverviewPath } from './studioOverviewAddress.js';
 import { DESIGNER_SURFACE_PARAM } from '../metadata-admin/nav-selection.js';
 import { CATALOG_SCOPE_PARAM, ENVIRONMENT_SCOPE } from '../metadata-admin/catalog-scope.js';
 import {
@@ -49,8 +48,9 @@ import { STUDIO_CHANGES_PARAM, STUDIO_CHANGES_REVIEW } from './studioChangesLink
 import { STUDIO_NEW_PACKAGE_VALUE, STUDIO_NEW_PARAM } from './studioNewPackage.js';
 import { retiredInterfacesTarget } from './studioInterfacesRetired.js';
 import { studioOrgScopePath } from './studioScope.js';
-import { AREA_PILLAR_FOR_TYPE, areaItemPillarPath, studioMetadataItemPath, studioPillarItemPath } from './metadataArea.js';
+import { studioMetadataItemPath } from './metadataArea.js';
 import { accessPillarRedirect } from './accessPillarRedirect.js';
+import { studioPillarRedirect } from './studioPillarRedirectModel.js';
 
 describe('studioPath — the one path builder (objectstack#36895)', () => {
   it('builds from the left, encoding the scope segment', () => {
@@ -89,20 +89,7 @@ describe("today's addresses, byte for byte", () => {
     expect(studioHomePath('com.acme.crm')).toBe('/studio/com.acme.crm/data');
   });
 
-  it('the three `?surface=` spellings stay distinct', () => {
-    const item = { type: 'object', name: "o'k (x)" };
-    expect(studioSurfaceQuery(item)).toBe("surface=object%3Ao'k%20(x)");
-    expect(studioSurfaceQuery(item, 'name')).toBe("surface=object:o'k%20(x)");
-    expect(studioSurfaceQuery(item, 'form')).toBe('surface=object%3Ao%27k+%28x%29');
-    expect(studioSurfaceQuery({ type: 'object', name: 'a' }, 'form', { action: 'approve' })).toBe(
-      'surface=object%3Aa&action=approve',
-    );
-    expect(studioSurfaceQuery({ type: 'object', name: 'a' }, 'component', { view: 'a.all' })).toBe(
-      'surface=object%3Aa&view=a.all',
-    );
-  });
-
-  it('an item opens its pillar today when the table names one, else its "All metadata" page', () => {
+  it('an item opens its "All metadata" page, where its designer is (objectstack#36909: no item opens a pillar)', () => {
     // objectstack#36904, objectstack#36903 — an object and a flow open their designer on their metadata address.
     expect(studioItemPath('crm', 'object', 'account')).toBe('/studio/crm/metadata/object/account');
     expect(studioItemPath('crm', 'flow', 'notify')).toBe('/studio/crm/metadata/flow/notify');
@@ -114,14 +101,7 @@ describe("today's addresses, byte for byte", () => {
     expect(studioItemPath('crm', 'object', 'account', { qualifiers: { action: 'approve' } })).toBe(
       '/studio/crm/metadata/object/account?action=approve',
     );
-    // A name that is an Object.prototype member is not a pillar type.
     expect(studioItemPath('crm', 'constructor', 'x')).toBe('/studio/crm/metadata/constructor/x');
-  });
-
-  it('a pillar item at a verbatim segment', () => {
-    expect(studioPillarItemAddress('~org', 'automations', { type: 'flow', name: 'f' }, { segmentEncoding: 'verbatim' })).toBe(
-      '/studio/~org/automations?surface=flow%3Af',
-    );
   });
 
   it('the "All metadata" area', () => {
@@ -148,15 +128,31 @@ describe("today's addresses, byte for byte", () => {
     // objectstack#36903 — the package-less scope's flows, on its leg of the area.
     expect(studioOrgScopePath()).toBe('/studio/~org/metadata/flow?source=runtime');
     expect(studioOrgScopePath({ type: 'flow', name: 'a:b' })).toBe('/studio/~org/metadata/flow/a%3Ab?source=runtime');
-    expect(studioPillarItemPath('crm', 'access', { type: 'permission', name: 'p' })).toBe('/studio/crm/access?surface=permission%3Ap');
     expect(studioMetadataItemPath('crm', { type: 'object', name: 'account' })).toBe('/studio/crm/metadata/object/account');
-    // objectstack#36903 — the flow was the last pillar type: no item opens a pillar.
-    expect(
-      areaItemPillarPath({ packageId: 'crm', type: 'flow', name: 'notify', search: new URLSearchParams() }),
-    ).toBeNull();
-    expect(
-      areaItemPillarPath({ packageId: 'crm', type: 'flow', name: 'notify', search: new URLSearchParams('review=1') }),
-    ).toBeNull();
+  });
+});
+
+describe('studioAddressParts — an address read back into its parts (objectstack#36909)', () => {
+  it('inverts the builder for an address with a scope segment', () => {
+    expect(studioAddressParts(studioMetadataItemAddress('a b', 'flow', 'f', { query: 'package=x' }))).toEqual({
+      segment: 'a b',
+      section: 'metadata',
+      rest: 'flow/f',
+      search: '?package=x',
+    });
+    expect(studioAddressParts(studioPackagePath('crm'))).toEqual({ segment: 'crm', section: null, rest: '', search: '' });
+    expect(studioAddressParts(studioPillarPath('~org', 'automations', { hash: '#x' }))).toEqual({
+      segment: '~org',
+      section: 'automations',
+      rest: '',
+      search: '',
+    });
+  });
+
+  it('answers null for anything else', () => {
+    for (const address of [studioLandingPath(), '/studio/', '/studios/crm', '/apps/crm/metadata', '/studio/%E0%A4%A/metadata']) {
+      expect(studioAddressParts(address), address).toBeNull();
+    }
   });
 });
 
@@ -168,27 +164,43 @@ describe('studioOwdOverviewPath — the sharing overview\'s own route (objectsta
   });
 });
 
+describe('studioPackageOverviewPath — 概览 Overview\'s own route (objectstack#37454)', () => {
+  it('is the package\'s `overview` section, on Info, or on Pending with `?tab=pending`', () => {
+    expect(studioPackageOverviewPath('crm')).toBe('/studio/crm/overview');
+    expect(studioPackageOverviewPath('crm', { tab: 'info' })).toBe('/studio/crm/overview');
+    expect(studioPackageOverviewPath('crm', { tab: 'pending' })).toBe('/studio/crm/overview?tab=pending');
+    // The open tab rides the console's reserved key, not a Studio restatement of it (ui AGENTS rule #8).
+    expect(new URL(studioPackageOverviewPath('crm', { tab: 'pending' }), 'http://x').searchParams.get(RECORD_DETAIL_TAB_PARAM)).toBe('pending');
+    expect(RESERVED_URL_PARAMS).toContain(RECORD_DETAIL_TAB_PARAM);
+    expect(studioPackageOverviewPath('com.example crm')).toBe('/studio/com.example%20crm/overview');
+  });
+
+  it('reads `?tab=`: `pending` opens Pending; anything else, or nothing, opens Info', () => {
+    expect(studioOverviewTab('pending')).toBe('pending');
+    expect(studioOverviewTab('info')).toBe('info');
+    expect(studioOverviewTab(null)).toBe('info');
+    expect(studioOverviewTab('history')).toBe('info');
+  });
+});
+
 describe('the mapping table agrees with the code (objectstack#36895)', () => {
-  it("the area's pillar redirect and the item address read ONE type map", () => {
-    expect(AREA_PILLAR_FOR_TYPE).toBe(STUDIO_ITEM_PILLAR);
-  });
-
-  it('every item type the map names has its row, on the same pillar', () => {
-    for (const [type, pillar] of Object.entries(STUDIO_ITEM_PILLAR)) {
-      const row = STUDIO_ITEM_TYPES.find((r) => r.type === type);
-      expect(row, type).toBeDefined();
-      expect(row?.pillar).toBe(pillar);
-      expect(row?.onMetadataAddress).toBe(`/studio/<package>/metadata/${type}/<name>`);
-    }
-  });
-
-  it('every `?surface=` row instantiates to what the builder writes', () => {
+  it('every `?surface=` row redirects from its pillar address to where the row says, in one hop (objectstack#36909)', () => {
+    // Every type has moved: each row names its redirect, and the ONE redirect
+    // table lands every spelling of the row's pillar address there.
+    expect(STUDIO_ITEM_TYPES.map((row) => row.type)).toEqual(['object', 'flow', 'permission', 'owd']);
     for (const row of STUDIO_ITEM_TYPES) {
+      expect(row.redirectsTo, row.type).toBeDefined();
       const [type, name] = row.surface.split(':');
       const value = name === '<name>' ? 'n' : name;
-      expect(studioPillarItemAddress('p', row.pillar, { type, name: value })).toBe(
-        `/studio/p/${row.pillar}?surface=${encodeURIComponent(`${type}:${value}`)}`,
-      );
+      const want = row.redirectsTo!.split('<package>').join('p').replace('<name>', value);
+      const surface = `${type}:${value}`;
+      const spellings = [`surface=${encodeURIComponent(surface)}`, `surface=${type}:${value}`, new URLSearchParams({ surface }).toString()];
+      for (const query of spellings) {
+        const target = studioPillarRedirect('p', row.pillar, `?${query}`);
+        // The Access pillar's target waits on a read for a base's pair; `p` has none, so its mapping is the answer.
+        const to = target?.kind === 'access' ? accessPillarRedirect(target.packageId, query) : target?.to;
+        expect(to, `${row.type} ${query}`).toBe(want);
+      }
     }
   });
 
@@ -203,6 +215,7 @@ describe('the mapping table agrees with the code (objectstack#36895)', () => {
       'review',
       'package',
       CATALOG_SCOPE_PARAM,
+      RECORD_DETAIL_TAB_PARAM,
       'new',
     ]);
     expect(STUDIO_QUERY_PARAMS.find((row) => row.key === CATALOG_SCOPE_PARAM)?.values).toBe(ENVIRONMENT_SCOPE);
@@ -213,33 +226,33 @@ describe('the mapping table agrees with the code (objectstack#36895)', () => {
     const ids = STUDIO_ADDRESS_FAMILIES.map((f) => f.id);
     expect(new Set(ids).size).toBe(ids.length);
     const builders = new Set([
-      'studioLandingPath', 'studioPackagePath', 'studioPillarPath', 'studioItemPath', 'studioOrgScopePath',
+      'studioLandingPath', 'studioPackagePath', 'studioPillarPath', 'studioOrgScopePath',
       'studioMetadataAreaRoot', 'studioMetadataTypePath', 'studioMetadataItemAddress', 'studioChangesReviewPath',
-      'studioItemReviewPath', 'retiredInterfacesTarget', 'studioOwdOverviewPath',
+      'studioItemReviewPath', 'retiredInterfacesTarget', 'studioOwdOverviewPath', 'studioPackageOverviewPath',
     ]);
     for (const family of STUDIO_ADDRESS_FAMILIES) expect(builders.has(family.builder), family.id).toBe(true);
   });
 
   it('a moved type\'s row names where its pillar address redirects, as the redirect does (objectstack#36905)', () => {
     const moved = STUDIO_ITEM_TYPES.filter((row) => row.redirectsTo !== undefined);
-    expect(moved.map((row) => row.type)).toEqual(['permission', 'owd']);
-    for (const row of moved) {
+    const access = moved.filter((row) => row.pillar === 'access');
+    expect(access.map((row) => row.type)).toEqual(['permission', 'owd']);
+    for (const row of access) {
       const [type, name] = row.surface.split(':');
       const value = name === '<name>' ? 'n' : name;
       expect(accessPillarRedirect('p', `?surface=${encodeURIComponent(`${type}:${value}`)}`), row.type).toBe(
         row.redirectsTo!.split('<package>').join('p').replace('<name>', value),
       );
     }
-    // A type still in the pillar map has not moved.
-    for (const type of Object.keys(STUDIO_ITEM_PILLAR)) {
-      expect(STUDIO_ITEM_TYPES.find((r) => r.type === type)?.redirectsTo, type).toBeUndefined();
-    }
   });
 
   it('the retired `/interfaces` redirect keeps exactly what the table marks', () => {
     expect(STUDIO_RETIRED_INTERFACES_KEPT_PARAMS).toEqual([STUDIO_CHANGES_PARAM]);
-    expect(retiredInterfacesTarget('crm', '?surface=page%3Ahome&changes=review&nav=n1')).toBe('/studio/crm/data?changes=review');
-    expect(retiredInterfacesTarget('crm', '?surface=page%3Ahome')).toBe('/studio/crm/data');
+    // objectstack#36909 — on the package's object list, its settled address: no hop through `/data`.
+    expect(retiredInterfacesTarget('crm', '?surface=page%3Ahome&changes=review&nav=n1')).toBe(
+      '/studio/crm/metadata/object?changes=review&package=crm',
+    );
+    expect(retiredInterfacesTarget('crm', '?surface=page%3Ahome')).toBe('/studio/crm/metadata/object?package=crm');
   });
 });
 

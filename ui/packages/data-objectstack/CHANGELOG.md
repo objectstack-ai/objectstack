@@ -1,5 +1,404 @@
 # @object-ui/data-objectstack
 
+## 19.0.0-next.0
+
+### Minor Changes
+
+- c063734: fix(metadata): a skill the platform registers keeps its own slot beside an app's skill of the same name
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: added
+  Skills-docs: none — no skills/ page names `_provenance` or its values, and the new value is one no author writes: the artifact door refuses it
+  
+  `MetadataProvenanceSchema` (`@objectstack/spec/kernel`) gains `'platform'`: the `_provenance` of a record the platform's own code registers at boot. It is a store-slot marker only, read at the item's own top-level `_provenance` key and nowhere else, and only the metadata service sets it.
+  
+  For every type stored per `(package, name)` (`skill`, `agent`, `tool` and the rest of `PACKAGE_SLOTTED_STORE_TYPES`), the platform's built-in record and a package's item of the same name no longer overwrite each other, in memory, in `sys_metadata`, and on a process or cluster peer that reads them back from the rows.
+  
+  - `MetadataManager.register(type, name, data, { origin: 'platform' })` marks a record the platform's own code registers: the body is stamped `_provenance: 'platform'` and the record fills the name's bare slot, in memory and in `sys_metadata`. Before, a package-less write under a name one package held was folded into that package's slot as its customization, so the platform's boot registration rewrote the app's skill.
+  - A package's first item of a name no longer takes over the bare slot when the platform's record is in it; the two stay side by side. For a bundled type (`email_template`) the row judged is the written member's. The environment's own item in the bare slot is still taken over, as before.
+  - A package-less environment write under a platform name keeps today's rule: it takes the bare slot without the stamp, and the platform's next registration restores its record.
+  - The readers that rebuild the store from loaders and rows keep both records: the plural read (`loadMany`, `loadManyKeyed`) gives the platform's entry a key of its own, `list` keeps a loader's platform row beside a package's slot and a loader's package item beside a platform slot, and a read naming a package is never answered from the platform's record.
+  - `MetadataManager.unregister(type, name, { origin: 'platform' })` withdraws the platform's record only, from the registry, every loader (`MetadataLoaderDeleteOptions.platformOnly`) and every cluster peer. A package's item of the name and the environment's own item are never taken, for any type, and nothing is refused however many packages hold the name. Before, a removal naming no package took every slot of a name one package held. On a host that declares a package id, the boot pass leaves the platform's stored record without the host's package, for every type, so the withdrawal takes the registry's copy too.
+  - `MetadataManager.getPlatformItem(type, name)` reads the platform's record only, never a package's item and never the environment's own.
+  - No other write carries the platform stamp. `register` without `origin: 'platform'`, `registerInMemory`, `save` and `rollback` store the body without it, and so do the metadata protocol's save door and its restore doors (`rollbackMetaItem` and the restore limb of `revertCommit`) on every restore whose row is not the platform's own record; a stored row the boot pass re-registers keeps it only when the row held it as read. A restore whose row is the platform's own record is refused (`409 RESOURCE_CONFLICT`, naming the fix), with nothing written, at all three restore doors: `rollback`, and the metadata protocol's `rollbackMetaItem` and the restore limb of `revertCommit`. The metadata protocol's two undo writes, of a refused batch publish's landed promotions and of a failed batch row write, put a row back as the same operation found it, byte for byte, so the mark comes back only where the row held it. A body served from a loader other than a `datasource:` one is served without it; `getPublished` serves it on the answer's top level only when the stored item carries it there (the platform's own record's publish snapshot, served as the answer, keeps the mark it carries at its top), and never on a snapshot nested inside the answer; and the artifact door refuses an item that carries it, with or without a manifest id (`VALIDATION_ERROR` at `_provenance`, naming the fix). A `_provenance` key nested in the body (an authored `metadata` record, for one) is the author's data: it is kept as written and never read as the mark. A body that names a package is that package's item, whatever `_provenance` it carries.
+  - `@objectstack/metadata` exports the mark's one definition (`PLATFORM_PROVENANCE`, `carriesPlatformStamp`, `isPlatformOrigin`, `withoutPlatformOrigin`); the artifact door and the metadata protocol's doors read it.
+  - `@objectstack/metadata-protocol`: the boot census `metadata_sealed_overlay_unserved` no longer names the platform's own row beside a package that ships the name, nor prescribes deleting it.
+  - Reads naming no package, and every removal and write without the option, keep their rules.
+  - Public API added on `MetadataManager`: the `origin` option of `MetadataRegisterOptions` and `MetadataUnregisterOptions`, and `getPlatformItem`. The spec's `MetadataWriteOptions` is not widened.
+  - `@object-ui/data-objectstack`: the layered read's `provenance` is typed from the spec's `MetadataProvenance`, so it accepts `'platform'`.
+  
+  Callers that register built-ins at boot pass `{ origin: 'platform' }` to `register` and `unregister` to get this behaviour; without it, a write is treated as before.
+
+### Patch Changes
+
+- b2d4355: fix(app-shell, plugin-designer, console): app writes send the app as its author stored it, not as the console's locale serves it
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The served app list is translated for the reader's locale, and the metadata save door stores a body verbatim. Four writers seeded a whole-app save from that served list: the Edit app wizard, App management's Disable / Enable / Set default and bulk toggles, the navigation sync that adds or removes an entry when a page, dashboard, report or object is created or deleted, and the Publish button on an unpublished app. In a zh-CN session each of them stored the app's label and every navigation label in Chinese, and readers in every other locale were then served Chinese. Each writer now reads the stored app from the untranslated layers through the new `ObjectStackAdapter.getAuthoredItem(type, name, { packageId })`, and changes only the keys its control owns. The served list is still used to find the app. When the stored app cannot be read, the writer refuses with an error and saves nothing; the Edit app page shows the read error instead of opening the wizard.
+- b1eb500: fix(app-shell, data-objectstack, console): view, form, pair-action and report edits start from the stored item, not the translated served one
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The served metadata reads are translated for the reader's locale, and the metadata save door stores a body verbatim. Four more writers seeded a whole-item save from a served read, so in a zh-CN session each stored the translations as the item's source text and readers in every other locale were then served Chinese. The view config panel (and its draft-bar resume) seeded its buffer from the served view; the adapter's `updateView`, behind Manage views' Rename, Pin and Set as Default, merged onto the served draft or the served published view; Developer → Public Forms spread the served form view into its Publish and Edit writes and prefilled the thank-you text from it; and Studio's pair actions on an installed app's object buffered the pair's served actions. Each now starts from the untranslated layered read through `authoredBuffer` (the pending draft as stored, else the published item) or, for the live-row writers, `authoredPublished`, and changes only the keys its control owns. A pending draft whose stored copy the layered read does not serve is refused, and so is an item with nothing stored to read: nothing is written from the served copy. The report quick edit now hands its served draft to `authoredBuffer`, so a pending report draft the layers do not serve opens no editor instead of one seeded from the published report.
+- f9f45d3: fix(ui): a view a read-only package ships offers no footer calculation menu and no Rename
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  On a list view that ships inside a read-only package (a code or installed package), an admin was offered the footer's calculation menu and the options menu's Rename; the server refuses both saves ("save it into the customization package"), so the pick was taken back with a toast. Neither is offered there now. A shared view the console saved into the customization package, a stored view bound to no package and the reader's own view keep them.
+  
+  The view's name cannot tell these apart, since every stored view is named `object.key`; the package the row was served under does. `listViews()` in `@object-ui/data-objectstack` now carries the row's served `_packageId` on both of its arms (the `config`-flattening arm dropped it). The console reads the server's `writable` verdict for that package from the package list it already holds for the session, the one the app bar's Studio entries read. While that list is unread, or when the read fails or does not name the package, the menu stays offered as before and the server's refusal still applies.
+- a5a5312: feat(console): a list's column widths, row height and tab order are kept in this browser only
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  On a Console object list, the column widths a reader drags, the row height they pick and the order they give the view tabs are now kept in their own browser only, per signed-in user and object (localStorage `list-layout:<user id>:<object>`). Nothing is sent to the server: the Console no longer reads or writes the per-user list preference row `sys_user_preference` `ui.list.<object>`, and its boot read of the reader's preferences no longer asks for that key family. A list opens at once, without waiting for that read.
+  
+  - Another browser or device opens the list on its view's own widths, row height and tab order until the reader changes them there.
+  - Signing out clears these entries with the rest of this browser's Console state, as before.
+  - With nobody signed in, nothing is kept.
+  - The record page's "show empty fields" choice (`ui.record.<object>`) is unchanged and still follows the reader.
+  
+  Upgrade note: what an earlier Console kept for a reader's lists is not carried over. The `ui.list.<object>` rows are no longer read, so every reader's lists open on their views' own widths, row height and tab order until they change them again. This browser's old copies (`list-state:*`, `list-filters:*` and `viewOrder:*` in localStorage) are removed on the first list the Console opens. The server rows stay where they are, unread; leaving them does no harm.
+  
+  `@object-ui/data-objectstack`, `@object-ui/react` and `@objectstack/platform-objects` change only comments and a README example that named the retired key. No metadata key, value or default changes.
+- f3d0a9f: fix(dashboard): a global filter bound to a field holding several values is sent as `$contains`, not `=` / `$in`
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  A dashboard `select` / `lookup` global filter bound to a field that holds several values (`multiple: true` on a select, lookup or user field, or a `multiselect` / `checkboxes` / `tags` field) used to be sent as `field = value`, or `$in` for several values. The server refuses both on such a field: the data query answers `400 INVALID_FILTER`, and the dataset query answers `200` with a count of 0, so the dashboard showed no data. The filter is now sent as `{ field: { $contains: value } }`, and several chosen values as `$or` over one `$contains` each, which the server answers with the matching rows. Single-value fields keep `=` / `$in`.
+  
+  To know whether the bound field holds several values, the dashboard reads the field's definition before it sends the widget's query:
+  
+  - `@object-ui/types`: `DataSource` has a new optional member, `getDataset(name, { callerPackage })`. It reads a dataset definition and resolves `null` when no such dataset is served; a failed read rejects.
+  - `@object-ui/data-objectstack`: `ObjectStackAdapter.getDataset` reads `GET /api/v1/meta/dataset/:name`, sending the reader's package as `callerPackage`, and caches the answer like the adapter's other metadata reads.
+  - `@object-ui/core`: `buildWidgetScopedFilter` takes an optional fifth argument, the operators each bound field takes when it is stored as a JSON column, and lowers a `select` / `lookup` filter on such a field to `$contains`. `boundMemberFilterNames` names the active `select` / `lookup` filters that bind a widget.
+  - `@object-ui/plugin-dashboard`: `DashboardRenderer` reads a dataset-bound widget's base object through `getDataset`, and a `provider: 'object'` widget's own object, through `getObjectSchema`. While that read is in flight, a widget that a `select` / `lookup` filter with a value binds draws a skeleton and sends no query. The operators come from `jsonColumnFilterOperators`, the helper the list quick filter and the filter builder use.
+  
+  A data source without `getDataset`, or a dataset the server does not serve, keeps the `=` / `$in` lowering, and the dashboard logs a console warning that names the filter.
+- cc05e60: feat(console): Manage views restores the factory version of a customized package view
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  A pin, a rename or a set-default on a view a read-only package ships writes the whole view into the package's customization (`<package>.custom`), and every user of the view then sees that copy. Manage views now marks such a view "customized" and offers "Restore factory version" in its `…` menu. After one confirm, which says every user of the view sees the factory version again, the override is removed from the customization and the list shows the package's own view. A view without a customization has no mark and offers no restore; a refused restore is said with the server's own message.
+  
+  - `@object-ui/data-objectstack`: `ObjectStackAdapter.restoreFactoryView(objectName, viewName)` deletes the view's draft, then its row, at the customization the ensure door names for the shipping package (`DELETE /meta/view/NAME?package=PAIR`, the door Studio's "Restore package original" uses). It refuses, sending nothing, a view that is no override of the package it is served under, and throws when the customization held no row of the view. The customization package itself stays. `listViews()` now carries a record's `overrides` declaration onto the flattened row.
+  - `@object-ui/plugin-view`: `ViewTabItem.customized` and `ManageViewsDialogProps.onRestoreFactory`.
+  - `@object-ui/i18n`: the mark, the menu entry, the confirm, its result and the failure title, in every locale pack.
+- 0002eaf: feat(data-objectstack): `MetadataClient.publish` sends `draftVersion`; `updateView` pins its draft write to the draft it read
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: added
+  
+  `MetadataClient.publish(type, name, options)` takes an optional `draftVersion` and sends it in the publish body beside `message`, pinning the promotion to that draft (`409 METADATA_CONFLICT` when the draft moved). Omitted, the body carries no such key and the publish is unpinned, as before.
+  
+  `ObjectStackAdapter.updateView` (Manage views' Rename, Pin and Set as Default) reads a pending draft through `MetadataClient.getDraft`, whose answer carries the draft's `version`, before the layered read it merges from, and writes the merged draft pinned to it (`If-Match`, or `If-None-Match: *` when the read found no draft). A draft another writer changed in between is refused `409 METADATA_CONFLICT` and `updateView` throws the refusal instead of merging over a body it never read. A server whose draft read carries no `version` gets the unpinned write it got before.
+- 70f454a: fix(metadata): two Studio Saves over one published item are no longer last-writer-wins
+  
+  Clause-②: yes (widening) — two new optional members join what the API accepts and answers: `PublishMetaItemRequestSchema.parentVersion` (the `If-Match` / `If-None-Match: *` pin on `POST /meta/:type/:name/publish`) and `GetMetaItemLayeredResponseSchema.overlayVersion` (served on `GET /meta/:type/:name/layers`); nothing is removed or narrowed, and a publish that names no version behaves as before
+  Metadata-protocol: added
+  
+  A Studio Save writes the item's draft and then publishes that one item, so it leaves no draft behind. Two admins who opened the same object with no pending draft both asserted "no draft" on their draft save, and the later Save published over the earlier one without a word: the published layer served no version a Save could pin.
+  
+  - `GET /meta/:type/:name/layers` now answers `overlayVersion`: the version token of the stored active row at the read's address (`?package=`), the same keyed token the plain uncached read serves as `version` and a publish receipt serves as `version`; `null` when no active row is stored there.
+  - `POST /meta/:type/:name/publish` takes that token as `If-Match` (or `If-None-Match: *`, "no active row here"). A token that is not the current active row's is refused `409 METADATA_CONFLICT` with the current token as `currentVersion`, and nothing is promoted: the draft stays pending. The headers are read as the save door reads them, so `If-Match` beside `If-None-Match`, or an `If-None-Match` other than `*`, is refused `400 VALIDATION_ERROR`. A publish with neither header is unpinned, as before. The pin is checked by the store's own lock on the promoting write, not by a separate earlier read.
+  - `MetadataClient.publish` (`@object-ui/data-objectstack`) takes `ifMatch` / `ifNoneMatch`, sent as those headers.
+  - Studio's object page pins its Save's publish to the published row it was loaded at. When another editor published since, the Save shows the reload-or-overwrite dialog the draft conflict shows, worded for a live change: reload takes back the draft the Save wrote and re-reads the live object, overwrite (after a confirmation) publishes over the version the refusal names, and keep editing leaves the edits on the page, unsaved. New locale keys in the studio catalogue (en, zh): `engine.draftConflict.publishedTitle`, `engine.draftConflict.publishedDescription`, `engine.draftConflict.publishedOverwriteTitle`, `engine.draftConflict.publishedOverwriteDescription`.
+  
+  The two members enter the authorable-surface ratchet (`api/GetMetaItemLayeredResponse:overlayVersion`, `api/PublishMetaItemRequest:parentVersion`), so `@objectstack/spec` takes `minor`; the other packages stay `patch`.
+  
+  Nothing to migrate: a client that sends no version is unaffected.
+- 4ed453d: fix(ui): a grouped read the server cut says so, and a kanban board draws no lane figure over it
+  
+  Clause-②: yes (widening) — `@object-ui/types` exports the new type `ListViewGroupHeaderAnswer` (the header rows array plus an optional `hasMore`), and `DataSource.queryGroupHeaders` answers it in place of `ListViewGroupHeaderRow[]`; a source that returns a plain array still satisfies the member, and a caller that reads the answer as an array reads it unchanged; nothing removed or renamed
+  Metadata-protocol: none
+  
+  On a deployment that sets a default page size (`OS_DATA_DEFAULT_PAGE_SIZE` or `OS_DATA_MAX_PAGE_SIZE`), `POST /data/:object/query` cuts a grouped read with no `limit` to that page size and answers `hasMore: true`. `ObjectStackAdapter.queryGroupHeaders` used to return the header rows alone, so a caller could not tell a cut answer from a whole one. It now sets `hasMore: true` on the answer it returns when the server says groups were dropped; a whole answer carries no `hasMore`.
+  
+  The kanban lane statistic (`kanban.summary` of type `sum`, `avg`, `min` or `max`) reads that flag: over a cut answer it draws no figure for any lane. Before, the trailing "Uncategorized" lane could total only the groups the answer carried, and on a board of one query a lane whose group was dropped could draw "Sum 0". A whole answer draws every lane's figure as before.
+  
+  The grouped grid and the currency-code read keep reading the answer as the same array.
+- 8c29b81: feat(console): the metadata list shows when each item last changed and marks items with unpublished changes
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  The generic metadata list (Setup's catalog lists and Studio's "All metadata" area) gains a 「修改时间」 / "Modified" column, read off the list answer's `changedAt` sibling. Only an item served from a stored row has a time; a code-shipped item shows an empty cell. The sort control gains "Modified (newest first)" and "Modified (oldest first)", which ride the address as `sort=-changed` / `sort=changed`; items without a time sort last either way, and the item page's ‹ › follow the same order.
+  
+  Beneath the time, an item with a pending draft on the existing `GET /api/v1/meta/_drafts` ledger is marked 「有未发布的改动」 / "Unpublished changes", including drafts that existed before this change. A draft the AI assistant wrote (any of its recorded changes made by the AI copilot or through the MCP build door, the rule the item page's AI line uses) is marked 「AI 的改动未发布」 / "Unpublished AI changes" instead. A publish removes the mark.
+  
+  `MetadataClient.listResponse` now returns the list's `changedAt` beside the items (each entry read with the spec's own rule; an entry that does not parse is dropped, and absence stays absence). `list` is unchanged.
+  
+  New locale keys in the studio catalogue (en, zh): `engine.list.sort.changed.asc`, `engine.list.sort.changed.desc`, `engine.list.col.changedAt`, `engine.list.draftMark.human`, `engine.list.draftMark.humanTitle`, `engine.list.draftMark.ai`, `engine.list.draftMark.aiTitle`.
+- 1e96009: feat(studio): the generic item page's Save takes effect at once; an AI draft gets the designers' notice and discard
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  Studio's generic item page saves the way the designers do. Save writes the item's draft and then publishes that one item (`POST /meta/:type/:name/publish`, at the same package and bundle member), so the change is live at once and there is no second Publish step. The draft save keeps its version pin and conflict dialog, and the publish is now pinned to the published version the page loaded: when another editor published the item in between, the same dialog asks to reload, overwrite or keep editing. A create publishes right after its first save. The auto-save switch is gone, and edits wait for Save, ⌘S or the destructive-change confirmation.
+  
+  A refused publish shows its reason above the editor in the designers' words, with the server's text under Details. Nothing goes live, the draft the Save wrote is taken back, and the edits stay on the page, unsaved.
+  
+  A pending draft written by the AI assistant (the copilot or an MCP client) is the version on screen, under the designers' line: saving makes it live too, and "Discard AI changes" drops that one item's draft, asking first when the page holds unsaved edits. A pending draft a person wrote before this change is marked "This item has unpublished changes", with its own Publish and Discard for that item. The header's Publish and discard buttons are gone.
+  
+  Leaving the page with unsaved edits still asks first through ×, ‹ ›, the side menu, in-app links, reload and close. The browser's Back is not intercepted.
+  
+  `@object-ui/data-objectstack`: the exported `MetadataLayered` type gains an optional `overlayVersion` member (`string | null`), and `MetadataClient.layered()` now forwards the served `overlayVersion` into it. The client used to rebuild its answer field by field and drop it, so a Studio Save's publish was never pinned on a server that serves it.
+  
+  Locale keys `engine.edit.unpublishedChanges` and `engine.edit.unpublishedPublishDirty` are new, and `engine.edit.autoSaveOn`, `engine.edit.autoSaveOff` and `engine.edit.autoSavingShortly` are removed (en, zh). The per-browser `metadata-admin:autosave` setting is no longer read. No metadata changes; nothing to migrate.
+- ce2645a: fix(data-objectstack): a user-preference save waits for the adapter's in-flight load instead of reading its row again
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The user-state adapters (`createObjectStackUserStateAdapter`) load their `sys_user_preference` rows through one shared read and remember each row's id for later writes. A save issued before that read answered (for example the recent-items flush shortly after a page opens) found no remembered id and sent its own `sys_user_preference` read for the same key before writing, one extra request per page open on a slow connection. A save now waits for the adapter's load if one is in flight, then updates the row that load returned. When no load is in flight, or the load failed or found no row, a save behaves as before: it reads its own row, then updates it or creates it, and recovers from a lost create race by reading again and updating. Saves still run one at a time. The key-family adapter (`createObjectStackUserPreferenceFamily`) had the same gap and gets the same wait.
+- Updated dependencies [8236d9b]
+- Updated dependencies [1d28405]
+- Updated dependencies [b02484e]
+- Updated dependencies [7a3f86c]
+- Updated dependencies [52a2398]
+- Updated dependencies [1c05546]
+- Updated dependencies [42b4d09]
+- Updated dependencies [4ffe9d3]
+- Updated dependencies [b38e133]
+- Updated dependencies [f796089]
+- Updated dependencies [8f49499]
+- Updated dependencies [b68f9ae]
+- Updated dependencies [2e9e1ac]
+- Updated dependencies [8e46424]
+- Updated dependencies [f4dbcc2]
+- Updated dependencies [f5b2eea]
+- Updated dependencies [9c29d73]
+- Updated dependencies [0739dee]
+- Updated dependencies [89364b4]
+- Updated dependencies [dfc6bbf]
+- Updated dependencies [97b9d1e]
+- Updated dependencies [0f29688]
+- Updated dependencies [5ecf937]
+- Updated dependencies [eed422e]
+- Updated dependencies [2df9691]
+- Updated dependencies [55020c3]
+- Updated dependencies [f19e6c6]
+- Updated dependencies [feb9b79]
+- Updated dependencies [b7d2474]
+- Updated dependencies [50f85e9]
+- Updated dependencies [99a0e4f]
+- Updated dependencies [c0716ed]
+- Updated dependencies [7bd5d28]
+- Updated dependencies [9062756]
+- Updated dependencies [cdb327f]
+- Updated dependencies [6ffa816]
+- Updated dependencies [09ba0c7]
+- Updated dependencies [b863d2b]
+- Updated dependencies [e75a528]
+- Updated dependencies [5dd856f]
+- Updated dependencies [5dd856f]
+- Updated dependencies [61722e9]
+- Updated dependencies [f6902e9]
+- Updated dependencies [df81f4c]
+- Updated dependencies [ed906d5]
+- Updated dependencies [3d6dea2]
+- Updated dependencies [e6fa510]
+- Updated dependencies [99ece3c]
+- Updated dependencies [285ad8d]
+- Updated dependencies [bfd1049]
+- Updated dependencies [2495486]
+- Updated dependencies [16a96ac]
+- Updated dependencies [f4de1de]
+- Updated dependencies [dab4712]
+- Updated dependencies [53c9575]
+- Updated dependencies [7411f9b]
+- Updated dependencies [e114324]
+- Updated dependencies [f71d488]
+- Updated dependencies [f44758b]
+- Updated dependencies [ccded86]
+- Updated dependencies [f7b172f]
+- Updated dependencies [a0b01fa]
+- Updated dependencies [5d2ce34]
+- Updated dependencies [59392ed]
+- Updated dependencies [e01b8be]
+- Updated dependencies [c99156e]
+- Updated dependencies [c8e9bec]
+- Updated dependencies [7ee7a61]
+- Updated dependencies [9b6db73]
+- Updated dependencies [f98f18c]
+- Updated dependencies [401eb44]
+- Updated dependencies [29f1280]
+- Updated dependencies [eb7ad70]
+- Updated dependencies [de25d58]
+- Updated dependencies [0585797]
+- Updated dependencies [811858c]
+- Updated dependencies [fe19096]
+- Updated dependencies [4fb7169]
+- Updated dependencies [d953558]
+- Updated dependencies [af566c2]
+- Updated dependencies [cedc094]
+- Updated dependencies [d9be915]
+- Updated dependencies [c9b0a23]
+- Updated dependencies [6b360ab]
+- Updated dependencies [78f7160]
+- Updated dependencies [bb1c55d]
+- Updated dependencies [d7c257e]
+- Updated dependencies [40e22f1]
+- Updated dependencies [5dbcc02]
+- Updated dependencies [bc9ace2]
+- Updated dependencies [d6be99d]
+- Updated dependencies [0a1b69c]
+- Updated dependencies [2e07e61]
+- Updated dependencies [643fe3b]
+- Updated dependencies [0a3dd40]
+- Updated dependencies [6b51822]
+- Updated dependencies [f3c9d42]
+- Updated dependencies [8807dcb]
+- Updated dependencies [8df7bf2]
+- Updated dependencies [170ca48]
+- Updated dependencies [d33bf5a]
+- Updated dependencies [9ed18a5]
+- Updated dependencies [236c804]
+- Updated dependencies [c261a7c]
+- Updated dependencies [f548bdc]
+- Updated dependencies [e72f2aa]
+- Updated dependencies [9f6f306]
+- Updated dependencies [f2a990b]
+- Updated dependencies [a23164e]
+- Updated dependencies [f3d0a9f]
+- Updated dependencies [8c5a81e]
+- Updated dependencies [6db1dc2]
+- Updated dependencies [78437e2]
+- Updated dependencies [ed4d322]
+- Updated dependencies [4ab2c82]
+- Updated dependencies [0628e08]
+- Updated dependencies [b7fe94a]
+- Updated dependencies [0b2118f]
+- Updated dependencies [ad65d82]
+- Updated dependencies [cb5a975]
+- Updated dependencies [92e0475]
+- Updated dependencies [d12ac84]
+- Updated dependencies [ad92dfd]
+- Updated dependencies [bb89b2d]
+- Updated dependencies [8da2b7e]
+- Updated dependencies [7c9b22b]
+- Updated dependencies [9742142]
+- Updated dependencies [f3a8a13]
+- Updated dependencies [bbc7e03]
+- Updated dependencies [543585d]
+- Updated dependencies [7e89bc6]
+- Updated dependencies [70194ff]
+- Updated dependencies [f2ef7d8]
+- Updated dependencies [0002eaf]
+- Updated dependencies [7a5ae65]
+- Updated dependencies [70d07fd]
+- Updated dependencies [73f2cf4]
+- Updated dependencies [8a741ab]
+- Updated dependencies [60e79ed]
+- Updated dependencies [595844b]
+- Updated dependencies [28588d0]
+- Updated dependencies [3b58921]
+- Updated dependencies [c45dd80]
+- Updated dependencies [48c5484]
+- Updated dependencies [cb2d6aa]
+- Updated dependencies [d463c46]
+- Updated dependencies [7501d0c]
+- Updated dependencies [45ef94e]
+- Updated dependencies [573a376]
+- Updated dependencies [cbc06ff]
+- Updated dependencies [8f141a2]
+- Updated dependencies [d24e4ab]
+- Updated dependencies [f66340a]
+- Updated dependencies [fed637c]
+- Updated dependencies [7a7ab47]
+- Updated dependencies [08f4bad]
+- Updated dependencies [70f454a]
+- Updated dependencies [8644ce7]
+- Updated dependencies [8aecf6d]
+- Updated dependencies [8ddadc1]
+- Updated dependencies [a03bc4e]
+- Updated dependencies [021524c]
+- Updated dependencies [129e637]
+- Updated dependencies [13f5466]
+- Updated dependencies [ff6f976]
+- Updated dependencies [00aa574]
+- Updated dependencies [d95d34f]
+- Updated dependencies [76eea0f]
+- Updated dependencies [84b1e0c]
+- Updated dependencies [151e812]
+- Updated dependencies [49c6bf3]
+- Updated dependencies [4ed453d]
+- Updated dependencies [6210a08]
+- Updated dependencies [81c1ae9]
+- Updated dependencies [51b67f1]
+- Updated dependencies [66452df]
+- Updated dependencies [4f9a3f8]
+- Updated dependencies [1cda7ea]
+- Updated dependencies [5078f2f]
+- Updated dependencies [57445a6]
+- Updated dependencies [01967c3]
+- Updated dependencies [5078f2f]
+- Updated dependencies [1f3e9f6]
+- Updated dependencies [8b1841f]
+- Updated dependencies [012f0a1]
+- Updated dependencies [227e952]
+- Updated dependencies [422df61]
+- Updated dependencies [06c1f54]
+- Updated dependencies [489d9fe]
+- Updated dependencies [c349576]
+- Updated dependencies [c063734]
+- Updated dependencies [0439a04]
+- Updated dependencies [5bf7242]
+- Updated dependencies [f92d271]
+- Updated dependencies [6ddb97b]
+- Updated dependencies [3d4f423]
+- Updated dependencies [d7f299c]
+- Updated dependencies [f9fda2a]
+- Updated dependencies [91138ec]
+- Updated dependencies [9981f27]
+- Updated dependencies [3801775]
+- Updated dependencies [40570d6]
+- Updated dependencies [2a6f26a]
+- Updated dependencies [b7dee0e]
+- Updated dependencies [68250f6]
+- Updated dependencies [fd462c5]
+- Updated dependencies [d15e439]
+- Updated dependencies [6831e04]
+- Updated dependencies [efaafe3]
+- Updated dependencies [875ae40]
+- Updated dependencies [da50177]
+- Updated dependencies [7e9c50c]
+- Updated dependencies [5cf9941]
+- Updated dependencies [204356a]
+- Updated dependencies [59571b2]
+- Updated dependencies [c94191d]
+- Updated dependencies [ebac615]
+- Updated dependencies [2d18ba8]
+- Updated dependencies [98b17fe]
+- Updated dependencies [8d60333]
+- Updated dependencies [db46566]
+- Updated dependencies [c385d3b]
+- Updated dependencies [2776e88]
+- Updated dependencies [083e040]
+- Updated dependencies [66c854d]
+- Updated dependencies [372ce7c]
+- Updated dependencies [3aa008d]
+- Updated dependencies [7d50dc8]
+- Updated dependencies [595e9cb]
+- Updated dependencies [20d025f]
+- Updated dependencies [64b278e]
+- Updated dependencies [695b9db]
+- Updated dependencies [d280de9]
+- Updated dependencies [f9dd033]
+- Updated dependencies [6296909]
+- Updated dependencies [660e7cd]
+  - @objectstack/spec@19.0.0-next.0
+  - @object-ui/types@19.0.0-next.0
+  - @object-ui/core@19.0.0-next.0
+  - @objectstack/client@19.0.0-next.0
+
 ## 18.6.0
 
 ### Patch Changes

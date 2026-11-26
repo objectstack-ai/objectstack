@@ -19,7 +19,7 @@
  * said otherwise — every kernel-managed service lives in `packages/services/`
  * as `@objectstack/service-<name>`, and `packages/plugins/` already holds
  * kind-named packages with no `plugin-` prefix (`embedder-openai`,
- * `knowledge-memory`, `knowledge-ragflow`, `organizations`). Nothing written
+ * `knowledge-memory`, `organizations`). Nothing written
  * held either fact, so the name almost shipped. A published name cannot be
  * taken back without a major, so the rule has to bite before the first
  * publish, which is in review, not after.

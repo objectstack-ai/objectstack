@@ -338,6 +338,8 @@ export function AutomationsPillar({
     // objectstack#36726 — and the published flow the buffer was loaded at, for the Save's publish.
     recordPublished: recordFlowPublished,
     publish: publishFlow,
+    // objectstack#37440 — the version the buffer's own Save wrote, which pins its publish.
+    heldDraftVersion: heldFlowDraftVersion,
     dialog: flowConflictDialog,
   } = useDraftSaveGuard(client, reloadFlowDraft);
   const [selection, setSelection] = React.useState<MetadataSelection | null>(null);
@@ -747,7 +749,13 @@ export function AutomationsPillar({
       // objectstack#36726 — pinned to the published flow this buffer was loaded at.
       const live = await publishSavedItem(
         client,
-        { type: 'flow', name: current.name, packageId: target.packageId ?? null },
+        {
+          type: 'flow',
+          name: current.name,
+          packageId: target.packageId ?? null,
+          // objectstack#37440 — and to the draft this Save just wrote (its receipt).
+          draftVersion: heldFlowDraftVersion('flow', current.name, target.packageId),
+        },
         hadDraft,
         publishFlow,
       );
@@ -785,7 +793,7 @@ export function AutomationsPillar({
     } finally {
       setSaving(false);
     }
-  }, [saveFlowDraft, publishFlow, client, current, draft, hasDraft, draftPackageId, locale, rereadFlowVerdict, readOnly, pairForFlow, recordFlowRead, recordFlowPublished]);
+  }, [saveFlowDraft, publishFlow, heldFlowDraftVersion, client, current, draft, hasDraft, draftPackageId, locale, rereadFlowVerdict, readOnly, pairForFlow, recordFlowRead, recordFlowPublished]);
   // objectui#11786 — an edit that leaves a step's required input out (a step
   // just added, before it is filled in) is held, not sent: the server would
   // refuse the flow with a 422 naming that input. The step's inspector hints the
@@ -899,7 +907,13 @@ export function AutomationsPillar({
       // objectstack#36726 — pinned to the published flow this buffer was loaded at, as the Save is.
       const live = await publishSavedItem(
         client,
-        { type: 'flow', name: flowName, packageId: draftPackageId ?? null },
+        {
+          type: 'flow',
+          name: flowName,
+          packageId: draftPackageId ?? null,
+          // objectstack#37440 — and to the draft the flip just wrote (its receipt).
+          draftVersion: heldFlowDraftVersion('flow', flowName, draftPackageId),
+        },
         hadDraft,
         publishFlow,
       );
@@ -928,7 +942,7 @@ export function AutomationsPillar({
     } finally {
       setSaving(false);
     }
-  }, [saveFlowDraft, publishFlow, client, current, draft, draftFor, hasDraft, draftPackageId, locale, readOnly, recordFlowRead, rereadFlowVerdict]);
+  }, [saveFlowDraft, publishFlow, heldFlowDraftVersion, client, current, draft, draftFor, hasDraft, draftPackageId, locale, readOnly, recordFlowRead, rereadFlowVerdict]);
 
   // #27356 row 19 — Delete flow (`FlowItemMoreMenu`): the autosave disarmed,
   // the draft (so none is left to publish the flow back) and then the flow

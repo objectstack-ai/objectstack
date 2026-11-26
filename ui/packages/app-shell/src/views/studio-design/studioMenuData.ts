@@ -43,6 +43,15 @@ export const STUDIO_MENU_ENTRY_LABEL_KEYS: Readonly<Record<Exclude<StudioMenuEnt
   allTypes: 'engine.studio.menu.allTypes',
 };
 
+/** 概览 Overview's name (objectstack#37454): the package's own page, the menu's first row. */
+export const STUDIO_MENU_OVERVIEW_LABEL_KEY = 'engine.studio.menu.overview';
+
+/** The title of 概览 Overview's badge: how many drafts wait for a publish. */
+export const STUDIO_MENU_OVERVIEW_PENDING_KEY = 'engine.studio.menu.overviewPending';
+
+/** {@link STUDIO_MENU_OVERVIEW_PENDING_KEY}'s singular, for a count of one (the catalogue's `…One` form). */
+export const STUDIO_MENU_OVERVIEW_PENDING_ONE_KEY = 'engine.studio.menu.overviewPendingOne';
+
 /** The menu's served data, for one `/studio/:segment` (see {@link useStudioMenuTypes}). */
 export interface StudioMenuData {
   /** The segment the data was read for. */

@@ -1,5 +1,738 @@
 # @objectstack/skills
 
+## 19.0.0-next.0
+
+### Patch Changes
+
+- 2212b16: docs(skills): objectstack-automation names the inbound hook's answer for a disabled package's flow, and the refusal of an undeclared `connector_action` input key
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The inbound hook section gains one bullet: a flow whose package is disabled answers the door's `401 INVALID_SIGNATURE` at both its bare and its qualified address, with nothing enqueued, and a sender's retry is accepted (`202`) once the package is enabled. Text only; the neighbouring bullets are tightened to pay for it.
+  
+  The `connector_action` row and the integration recipes now say that an input key the action's `inputSchema` does not declare fails the step before dispatch, and that on an OpenAPI document nobody de-referenced a `$ref` parameter or a `$ref` / schemaless request body reads as open input, sent unjudged (a `$ref` response is still silently lost).
+- adcb9f8: docs(skills): the hooks skill teaches when a `before*` hook's `ctx.api` writes roll back with a refused save
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  objectstack-data's `references/data-hooks.md`, "Before vs After Hooks" table: the `before*` Transaction cell no longer says only "Within transaction". It now says the hook runs in one transaction with the outer write, so a refusal anywhere in that write (a validation, a later hook, a driver constraint) rolls back the hook's `ctx.api` writes too, with no per-hook opt-out. It names the four exits: a caller's open transaction decides; a hooked object off the default datasource, or a default driver with no transactions (Turso's remote transport), opens none, so those writes stay stored after a refusal; a hook registered in code with `registerHook` opens none. It also says MongoDB needs a replica set, which was read in the driver's code and not measured. Best Practices gains one DON'T: a `before*` hook does not write business records to another datasource through `ctx.api`. Its transaction refuses that write with `CrossDatasourceTransactionWriteError`, and only an append-only ledger (`lifecycle.class` `audit` / `telemetry` / `event`) is written outside it. `evals/hooks-security-seeds-datasources.json` gains two cases, one for each rule. Four restatements in data-hooks.md were removed to pay for the new text.
+- 0d9d982: docs(skills): the api and i18n skills teach `RuntimeBuildIssue.userMessage`
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  objectstack-api's SKILL.md, in the error-envelope section, names the post-publish probe report a batch publish answers (`probes`, `BuildProbeReportSchema`) and its finding element (`RuntimeBuildIssueSchema`): `message` / `fix` are English for the agent that built the app, the optional `userMessage` is the sentence for the person who published, and a client shows a person `userMessage`, never `message`, with its own generic sentence when the field is absent; the publish door reads the request's locale from `Accept-Language` alone. objectstack-i18n's SKILL.md lists the `probes` issue among the server-composed user text, which its platform locale ladder covers. The api skill points at the schema and ADR-0038 for the rest. One new eval case in the api skill grades a client that renders a build finding to a person.
+- fca72df: docs(skills): `objectstack-automation` teaches the `fault` edge on a write after an approval decision, and what `RESUME_FAILED` carries without one
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  `references/state-machines-and-approvals.md` § Branching, side-effects & rejection gains one bullet. When a step on the `approve` / `reject` branch writes a record that a record hook, a validation rule or a permission may refuse, the flow draws a `fault` edge from that step to a handler: the refusal takes that edge and the decision answers normally. Without the edge `POST …/approve` (or `/reject`) answers `500 RESUME_FAILED`: the decision stands (`finalized: true`), the run is stranded, and the body may carry `innerRefusal` (`{ code, message }`) and `userMessage`, the hook's declared sentence for the approver. One eval case covers it; its prompt asks for the flow as a TypeScript `defineFlow`.
+  
+  Paid in place, the token ceiling does not move. Four restatements were cut, each keeping another home: the send-back section's text diagram (the paragraph above it and the snippet below it trace the same path), and three bullets of § Branching: "Conditional step" (the discount-approval example's `needs_director` node and the list item above it that names the `e1` edge), the send-back pointer (the section it pointed to), and "Hard reject" (the examples' `reject` edges into an `end` node).
+- e91d967: docs(skills): `objectstack-ui` teaches an action's `resultDialog` (its `table` format included) and the aggregate bulk handler's `BulkActionResult`
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  `rules/actions.md` gains a `resultDialog` entry beside `preflight`: the keys of the one-shot dialog, the `fields` row, the six formats, and `format: 'table'` with its required `columns` (one row per element of the array, one cell per column). It states that a `text` or `code-list` cell has no copy control while a `secret` or `qrcode` cell keeps its own. A second entry says how an `execution: 'aggregate'` bulk handler's return value is read: one with a top-level `succeeded` or `failed` member is read as a `BulkActionResult`, and any other form of those members is reported as unreadable. One eval case for `resultDialog`.
+- 9d07723: Clause-②: no
+  Metadata-protocol: none
+  
+  `objectstack-ask` gains trigger cases (`evals/triggers.json`); `objectstack-automation`'s flow-type table sends a stepped form that never branches to an `objectstack-ui` form view, `type: 'wizard'`, and `objectstack-ui` gains that trigger case.
+- 5ed945b: Clause-②: no
+  Metadata-protocol: none
+  
+  docs(skills): the `description` of `objectstack-data`, `-ui`, `-automation`, `-formula`, `-i18n` and `-query` now leads with what the user is doing ("design or change a data model, in a project or through MCP"), keeps the `*.object.ts`-style file names as a secondary cue, and ends with a "Not for" clause naming the neighbouring skill. An agent building through MCP has no project files, so a description that triggered on file names never loaded the skill. Each is 432 to 450 characters (432 to 849 before). No skill body changes; the README index and the Skills reference page are regenerated from the new text.
+- 6ec3a73: docs(skills): the sections served to MCP clients show their examples as JSON, and a check pins their headings
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  A client that builds through MCP writes JSON, and the sections of `objectstack-data`, `objectstack-ui` and `objectstack-automation` that the hosted MCP door serves showed their examples in TypeScript. Those sections now give each example as JSON, with one line on how a TypeScript project wraps the same literal:
+  
+  - `objectstack-data`: the object in Object Definition, the `state_machine` rule in State Machine Validation, and the `summary` field and the permission set in Roll-up Summaries. Field Type Selection names the `{ dialect: 'cel', source }` envelope beside the TypeScript tag.
+  - `objectstack-ui`: the write-button action in Actions.
+  - `objectstack-automation`: the `notify` node (its key notes are a list under the block), the `script` and `update_record` pair in Valid-but-silently-wrong, the whole approval flow in Approvals (Flow Nodes), and the start node and window filter of the time-relative trigger, beside its TypeScript flow.
+  
+  The other served sections are prose and tables and read the same to both kinds of client; three of them drop a TypeScript-only phrase.
+  
+  Every JSON block in a served section is parsed and validated against the spec schema for its kind in CI, and a renamed, removed or duplicated heading of a served section now fails there.
+- 693e921: feat(skills): objectstack-mcp-build, the order of work for a client that builds through the MCP draft door
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The skills catalog gains `objectstack-mcp-build`, a short process skill for a client that builds or changes an app's metadata through an environment's MCP draft door, with no project files. It gives the order of work: read what exists (`list_metadata_items`, `get_metadata_item`, and `describe_object` where the connection lists it), load the domain skill for the type, save with `save_metadata_draft`, read the publish verdict in the reply and repair the item until no refusal is left, then report the drafts and give a person the Studio review routes the reply names. The door has no publish tool, so the skill tells the client never to say a draft is live.
+  
+  It restates no shape and no tool argument: the domain skills (`objectstack-data`, `objectstack-ui`, `objectstack-automation` and the others) stay the one copy of each type's keys and traps, for a project author and an MCP client alike.
+  
+  A project that already syncs its skills gets the new one on its next `npx skills@1.7.2 experimental_sync --agent <runtime> --copy -y` after bumping `@objectstack/skills`.
+- f1bf850: docs(skills): the seeds reference drops the retired seed modes `insert` / `replace`, names `locale`, `fallback` and `dependsOn`, and stops teaching array order as load order
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  `objectstack-data`'s `references/seeds.md` no longer lists `insert` or `replace` as import modes: both are refused, and a dataset with no single natural key keeps the default mode with a composite `externalId` (a junction table's `['team', 'project']`), or `'id'` when the records carry their own ids. `objectstack-platform`'s Seed Data passage lists only `ignore`, `upsert` and `update`.
+  
+  The seeds field table now names `locale` (the BCP-47 tags a dataset loads for), `fallback` (`true` on one locale-scoped set per object, which also loads for a resolved locale no set of that object lists) and `dependsOn`.
+  
+  The relationship section says lookups order the load and the exported array's order only breaks ties; a lifecycle hook that reads a seeded object no lookup links to declares `dependsOn` with object names, and a name that is the dataset's own object, is not seeded by the same load, or closes a cycle refuses the whole load with nothing written. Two eval cases cover the composite-key conversion and `fallback`.
+  
+  `seeds.md` pays first by deleting restatement in the same file (three best-practice rows, the `upsert` re-assert clause, "no other mode updates a matched row", "Natural keys remain the portable default"); its token ceiling moves +13, the measured remainder. `objectstack-platform/SKILL.md` re-locks 15 tokens lower.
+- 9c29d73: docs(skills, spec): the ui and i18n skills teach an action's `refusals` catalogue and its translation keys; `action.zod.ts` gains a module description
+  
+  Clause-②: no — skill teaching text, evals and two comment-only edits in packages/spec; no schema, export or accept set moves
+  Metadata-protocol: none — no metadata key is touched
+  
+  objectstack-ui's `rules/actions.md` gains a short section, "Refusing by code (`refusals`)": a `type: 'script'` action with a `js` body declares the refusals it may throw and throws the code instead of a sentence, the catalogue, the throws and the checks are the ones a hook has (taught in objectstack-data's `references/data-hooks.md` § Declared refusals), the sentence is answered as `userMessage` and translated at `objects.<object>._actions.<action>.refusals.<CODE>.message`, and an authored `errorMessage` replaces it in the console's failure toast. The file's Add Line example now declares `refusals: { PRODUCT_NOT_FOUND: … }` and throws `{ code: 'PRODUCT_NOT_FOUND' }` where it threw `new Error('Product not found.')`.
+  
+  objectstack-i18n's SKILL.md lists the keys in the object key table — `_actions.{action_name}.refusals.{CODE}` holds `message` and `reasons.{reason}.message`, the same under `globalActions.{action_name}`, and a key for a code or reason the action does not declare is `translation-target-unknown` — and the server-composed text section names an action's refusal beside a hook's. Each skill's eval file gains one case that grades the rule.
+  
+  `@objectstack/spec`: comments only. `src/ui/action.zod.ts` opens with a module doc block, so the generated reference page and the two skill reference indexes describe the module ("Action protocol schemas — `ActionSchema`, the `action` metadata type, and the parts it is built from.") where they listed its first five exports, and the jsdoc above `actionRefusalsWithoutSandboxedBody` names the third case as the function judges it: a `script` action with no `body`.
+- f54fc93: docs(skills): the `objectstack-ask` skill follows `list_datasets` `nextStep` and cites `query_dataset` `sourceLine` as given, before `provenance`
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The `objectstack-ask` skill, and the page at `GET /mcp/skill` that is generated from it, now tell a connected client two things. Under the step 2 decision table: when the `list_datasets` answer has `nextStep`, follow its `decision` and `note`. In step 3's citation bullet: cite the `query_dataset` answer's `sourceLine` as given, and build the source from `provenance` only when the answer has no `sourceLine`. Both members are answered by servers whose dataset tools fill them; a server that does not answer them leaves the skill's existing steps in force, with the `provenance` citation as before. When a `nextStep` note says to answer one measure and to ask about a word that has only candidates, the skill says to do both and to use none of that word's candidates until the user answers; the question-alone rule (no tool call until the user answers) covers a reply that only asks.
+  
+  Two sentences that restated another line of the same skill are removed: the fallback row's "and say in the answer that no governed metric was used" (step 4 opens every fallback answer with that line) and "no figure" in the paragraph under the table (its next sentence says the same). The `candidates` row also drops "one or several", which its own right cell states. `packages/mcp/src/ask-skill.generated.ts` is regenerated from the skill; no code path changes.
+- 81c0947: docs(skills): the i18n and ui skills teach the `mappings` translation group, an action's `texts` and where hook and action texts sit in a bundle; the stale label-serving caveat is gone
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - `objectstack-i18n`: the top-level group list names `mappings` (`mappings.{mapping}.label`, an import mapping's label by its `name`). The paragraph on keys picked in the organization's language now covers the sentences a hook or a `script` action declares in `texts` and writes through `ctx.text`: `hooks.{hook}.texts.{key}.message` and `_actions.{action_name}.texts.{key}.message`, also under `globalActions`.
+  - `objectstack-i18n`: the caveat that label serving reads inline text as `defaultLocale` text is removed, because serving honours `i18n.sourceLocale`. What is still true stays: validation and refusal messages read labels through `t()`, which falls back to `fallbackLocale`, else `defaultLocale`, so an English-source app with a zh-CN default still declares `fallbackLocale: 'en'`.
+  - `objectstack-ui` `rules/actions.md`: a `script` action declares a sentence it writes into a record under `texts` and asks for it with `ctx.text`. The rule covers the organization's language, the `texts.<key>.message` key beside the refusals key, a missing translation, an unreadable Localization setting and an undeclared key. Two sentences that restated the example below them are shorter.
+  - `objectstack-i18n` pays for its new text in the same file. It drops a sentence that restated the option-key paragraph, two flags from the `extract --help` list that are taught in place, two partial copies of the group list, and the empty "Translate" step.
+  - Evals: the i18n set gains a `mappings` case and a hook-texts bundle-key case, and case 11 states the remaining `t()` reason for `fallbackLocale: 'en'`. The ui set gains an action `texts` case.
+- e4bfa33: docs(skills): the hooks skill says when `ctx.api.transaction` joins an outer unit, that its transaction is one datasource, and teaches hook `texts` with `ctx.text`
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  objectstack-data's `references/data-hooks.md`:
+  
+  - The `api.transaction` capability row no longer says only "commit on return, rollback on throw". It now says the callback runs in one transaction on the default datasource, and that a write in it to an object on any other datasource is refused before it runs (`400 ERR_CROSS_DATASOURCE_TRANSACTION_WRITE`). Inside a unit that is already open (the one the hook's write runs in, or a caller's) it joins that unit: its return is no commit and its throw no rollback, so a throw the body catches keeps the callback's writes, and the outer unit commits or rolls back all of it.
+  - A new "Declared texts (`texts`)" block beside "Declared refusals" teaches a hook's `texts` and `ctx.text(key, params?)`: the sentence is written in the organization's language, translated first and then filled, a missing translation never fails the hook, an unreadable Localization setting rejects, and only declared keys are answered. The sandbox `ctx` table gains a `ctx.text` row that points to it. It names the translation key, `hooks.HOOK.texts.KEY.message`, and leaves the bundle to objectstack-i18n.
+  - Ten restatements in the same file were removed to pay for the new text.
+  
+  `evals/hooks-security-seeds-datasources.json` gains two cases, one on the joined transaction and the default-datasource rule, one on `texts` with `ctx.text`.
+- 7c8d689: docs(skills): `objectstack-data`'s seeds reference says seed rows obey the object's validation rules (all but `state_machine`) as they load: a rule reading a parent roll-up sees the total earlier rows left, a seeded roll-up value is stored as written, and `os verify`, not `os validate`, fails on a dropped row. One eval case covers it; the file pays in deleted restatement and its token ceiling does not move.
+  
+  Clause-②: no
+  Metadata-protocol: none
+- 2c93001: Clause-②: no
+  Metadata-protocol: none
+  
+  `objectstack-data`'s hook reference (`references/data-hooks.md`) now says that `input` and `ctx` are already bound in an action body's `(async (input, ctx) => { … })` wrapper, shows the refused redeclaration (`const input = ctx.input || {};`, `let ctx`) with its rule id `action-body-does-not-compile`, and links the hook-body compile paragraph for the commands, the `422 INVALID_METADATA` save and the fix. That paragraph's suggested local is now `const data = …`, a name no wrapper binds. The file stays inside its token ceiling by dropping two restatements.
+- e25207d: fix(service-analytics): `list_datasets` no longer tells a client outright to ask "which number" when a word that falls back stands beside a grouping word
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  A question such as "How many sales orders are in each status?" names its number. When no dataset measure answers to "sales orders" and none is offered as a candidate, the labelled fallback to the object query tools computes it. Until now the `nextStep` note of such an answer said two things at once whenever the grouping word equalled a dimension, or was near one: answer with the object query tools, and "A grouping alone is no answer: ask the user which number they mean." A client told both asked, and computed nothing.
+  
+  - **`list_datasets` `nextStep.note`** (`@objectstack/service-analytics`): the "which number is meant" sentence is written only when every word sent is a grouping (it equals a dimension, or has only dimensions among its candidates). With an unknown word beside it, the note carries that word's labelled fallback, then one closing sentence that leaves the question to the case only the client can see: "Only when the question has no word for a thing measured, ask the user which number they mean instead." (the unknown word may be a filter value, as in "break it down by stage for the west region"; the server sees words, not which of them names the number). `decision`, `terms`, `matches` and `candidates` are what they were. Unchanged: a word that equals several measures, and a word with a measure among its candidates (one candidate included), are still asked about and never selected.
+  - **`list_datasets` description**: the sentence "A dimension match alone picks a grouping, not a number: a measure must still match." now reads "A dimension match picks a grouping, not a number: when the question has no word for a thing measured, ask which number is meant; beside a word for a thing measured that falls back, ask nothing and take the fallback."
+  - **`objectstack-ask` skill, step 2** (`@objectstack/skills`, and the copy `GET /mcp/skill` serves from `@objectstack/mcp`): the row "Only a dimension matches" becomes "No word for a thing measured, only grouping or filter words", and the fallback row says the fallback is taken without asking, whatever a grouping word or another word matched. The sentence under the table that said the same about another word's matches is cut, since the row now holds it.
+  - **`objectstack-ask` skill, step 1**: a term keeps its counting head ("number of deals", not "deals"), so a phrase the dataset's owner declared as a synonym is sent whole and can equal its one measure.
+  - Four eval cases (21 to 24) cover the fallback beside a grouping candidate, the fallback beside a dimension match, the whole counting phrase, and a question with a grouping and a filter value but no word for a thing measured, which is asked which number is meant.
+  
+  The skill file is 2 bytes shorter than before (1875 tokens by the catalog's count, before and after).
+- 8c18a36: test(skills): the `objectstack-ask` eval cases cover a matched measure beside a grouping word that names nothing
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  Two changes to the eval fixtures of the `objectstack-ask` skill (`evals/metric-selection-fallback.json`, which ships inside the catalog and is inert in a consumer install); the skill text and the page at `GET /mcp/skill` are unchanged.
+  
+  - A new case, 20: the word for the thing measured equals one measure, and the grouping word matches nothing in any dataset and has no candidates. The expected answer computes the measure through `query_dataset` and cites its source, takes the breakdown by that grouping from the object tools (`describe_object`, then `aggregate_records`) under the line saying it is not from a governed metric (非指标口径), and asks the user nothing about the word. This is ADR-0149 D3 rule 2 for the measure and rule 4 for the word, as `list_datasets`' `nextStep.note` already writes it; the skill already says to follow that note and to go to step 4 for a word with no match and no candidates, so no rule and no skill sentence is added.
+  - Case 19 (a reply to an ask-back that names another word) now also forbids the `list_objects(` call spelling, so an answer that starts the object-query fallback at its first call no longer passes by mentioning `list_datasets`.
+- d6ce9ba: docs(skills): the `objectstack-ask` skill says what the client does after the user answers an ask-back
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  Step 2 of the `objectstack-ask` skill, and the page at `GET /mcp/skill` that is generated from it, told a connected client to ask which reading the user meant and stopped there. It now carries the turn after the answer: an option is used only once the user picks it, and is then computed by its exact name as step 3 says (`query_dataset`, with the source cited from the tool's answer); a reply that names another word ("no, I mean ARR") starts at step 1, a new `list_datasets` lookup with that word, before anything else; a user who only picks none of the options gets step 4, the object-query fallback with its label. This is ADR-0149 D3 rule 1, rule 2 and rule 4 applied to the user's reply; no rule is added. The another-word case is also part of the ask-skill iteration loop (Part of #34996, item a of its third round).
+  
+  Four restatements are cut from the same file, each keeping its other home, so the skill does not grow: "and in the user's language" in step 1 (beside "Do not translate or reword a term"), "a fragment's matches are not the user's" in the same bullet (beside "a match on a word you supplied is your reading, not the user's"), the "by stage" example and "You still need a measure match" in the grouping row of step 2, and "use none of that word's candidates until the user answers" under the step 2 table, which the new sentence now states for every option. `packages/mcp/src/ask-skill.generated.ts` is regenerated from the skill; no code path changes.
+- 475ae46: docs(skills): objectstack-ai teaches that an AI-gated action guards its own door only, and pairs an irreversible transition with a lock on the field it changes; the tool-name ladder names its fourth source and the MCP prompts paragraph names `mcpPrompt`
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  objectstack-ai's Common Pitfalls gains "Gating the action, not the state". `ai.requiresConfirmation` guards the action's door, and an agent can still write the same field with `update_record` or any data write. An irreversible transition is a gated `script` action, whose body writes elevated, over a field a non-system write cannot set. `readonly: true` binds every non-system caller (the value is stripped); a field permission without `editable` (refused `403`) binds only a caller no held set grants it, and Modify All grants it. The body skips the caller's edit right, so the action declares who may run it in `requiredPermissions`. A declarative `operation: 'update'` action and a `flow` action under `runAs: 'user'` write as the caller, so the lock stops them too. `readonlyWhen` and a `state_machine` rule bind the elevated body as well, so neither is the door; a `state_machine` dead-end still makes the reached state final for every writer. objectstack-automation's `references/state-machines-and-approvals.md` points to it.
+  
+  The resolution ladder for `skill.tools[]` names four sources: the fourth is `MCP_FILE_TOOL_NAMES`, the MCP door's file tools, resolved only for a skill MCP can offer (`mcpPrompt` not `false`).
+  
+  The paragraph on which skills MCP offers as prompts names `mcpPrompt`: `false` keeps a skill for the in-product agents only, never offered over MCP on any connection whatever its binding, and the stdio transport withholds it too; absent or `true` keeps the binding rule.
+- 60ed6bd: docs(skills): sixteen eval cases forbid the wrong code spelling, not a mention of its name
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  A `must_not_contain` entry is matched as a literal substring, so a bare identifier also fails a correct answer that names it as the thing to avoid: `objectstack-ui` `analytics-inline-vs-dataset` case 5 failed an answer saying an ad-hoc react-page chart "doesn't need a `defineDataset`". Sixteen cases whose bundle or reference answer states such a negative now forbid the spelling a wrong answer writes: a call with its paren (`defineDataset(` in that case and `objectstack-data` `hooks-security-seeds-datasources` 4, `definePage(` in `record-page` 2, `getAppBundle(` / `loadAppBundle(` in `objectstack-i18n` `bundles-locales-coverage` 4), a key with its colon or dot (`categoryField:` in `analytics-inline-vs-dataset` 1; `sourceView:`, `disabledMessage:` / `disabledTooltip:` in `views-apps-actions-pages` 5 and 9; `readonlyWhen:`, `assigned_to:` in the data file's 5 and 8; `subDays:` in `objectstack-query` `filters-pagination-search` 6; `permissionSets:` / `permissionSets.` in the i18n file's 6; `pageName:` / `viewName:`, bare and JSON-quoted, in `objectui` `app-composition` 2 and 4) and a quoted literal (`type: 'record_detail'` in the views file's 4; `'admin_full_access'` and a quote-opened `@objectstack/adapter-` in `objectstack-platform` `config-plugins-ops` 7 and 4). Each of the sixteen has a new case hash, so `skill-evals --regrade` sets it apart from a round recorded before this change: compare it across rounds only after a re-run. No prompt, reference answer, `must_contain` entry or skill text changes.
+- 09ba0c7: docs(skills): the `objectstack-ask` skill and the `list_datasets` output schema ask back only about a word with a measure among its `candidates`
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The `list_datasets` tool description and the MCP `initialize` selection rule already scope the ask-back: "A word whose candidates are all dimensions is at most a possible grouping: never ask about it, and it never stops a matched measure." Two texts a connected client also reads still said to ask about every word with candidates. The skill now carries the same sentence, and the schema description states the same scope in its own words.
+  
+  - The `objectstack-ask` skill, and the page at `GET /mcp/skill` that is generated from it. Step 2's `candidates` row is now two rows. A word with a measure among its `candidates` is asked about the same way as a word that matches several measures; with one candidate, the client asks whether it is the one meant. A word whose `candidates` are all dimensions is at most a possible grouping: the client never asks about it, and it never stops a matched measure. So 「按行业看销售额」, where 销售额 matches a measure and 「按行业」 is only near a 行业 dimension, is computed and grouped with no question back.
+  - `@objectstack/spec`: the description of `ListDatasetsOutputSchema.candidates`, which `list_datasets` serves in its `outputSchema`. It said every candidate is offered for a clarifying question. It now says the clarifying question is for a term with a measure among its candidates, and that a term whose candidates are all dimensions is offered them as a possible grouping, not for a question, and does not stop a matched measure. It states what the candidates are offered for and does not carry the sentence above: the instruction stays in the tool description and the skill. The doc comment of `DatasetTermCandidateSchema` says the same. No shape changes: `candidates` holds the same entries in the same order.
+  
+  The new skill row is paid for inside the same file, by removing text that restated another line of it: the `candidates` row's own listing instruction and "Do not pick one." (the row above states both, and the row now says "Ask the same way"), "A word matches nothing, and" in its left cell (step 1 says a word that matched nothing may have `candidates`), and "on the answer" in that step 1 bullet. `packages/mcp/src/ask-skill.generated.ts` is regenerated from the skill and `content/docs/references/ai/dataset-tools.mdx` from the spec; no code path changes.
+- 1134519: docs(skills): the hierarchy-scope row and the `os verify` row name the capability advisory, the `plugins[]` wiring check and `os verify --json`'s `capabilities`
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  `objectstack-data`'s access-depth section now says the hierarchy-relative scopes need the `@objectstack/security-enterprise` plugin in `plugins[]`, not only installed, and that the CLI only advises on a missing or unwired plugin: `os validate` warns, and `os verify --json` lists it in `capabilities`. The same sentence now says the stack, not the grant, declares `requires: ['hierarchy-security']`.
+  
+  `objectstack-project`'s `os verify` row now says that `os validate`'s capability findings are advisory there, carried on `--json` as `capabilities`.
+  
+  Both files pay for the new text by deleting restatement in the same file: a duplicate link to the security rules that the quick reference already gives, the code comment in the related-title search example, which restated the sentence above it, "so the app never hand-writes it" above the check table (the paragraph under it says so), and "Nothing in its row is checked until someone runs it", which restated the clause before it. Neither file's token ceiling moves.
+- 9e4eabb: docs(skills): the `objectstack-ui` routing table sends a refused action's message to its rule
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The Actions row of the `objectstack-ui` routing table now names `refusals` in the words of the rule's heading, "refusing by code (`refusals`)", so an agent looking for how an action refuses with a declared code and a translated message opens `rules/actions.md`. First checks 3 loses a clause that restated First checks 1.
+- abb40ae: docs(skills): the `objectstack-ask` skill reads `withheldFields`, asks `aggregate_records` for a top or bottom N, and answers "how many" from `totalGroups`
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The `objectstack-ask` skill, and the page at `GET /mcp/skill` that is generated from it, now tell a connected client three things. In step 4: a `query_records` or `get_record` answer whose `withheldFields` names a field means the field exists but is hidden from the caller, so the client says it is not visible, never that it is empty; and a top or bottom N is asked of `aggregate_records` with `orderBy` (an aggregation alias or a group key) and `limit: N`, so the database ranks and cuts the groups. In step 6, one bullet covers `truncated: true`: more rows or groups existed than came back, so the client says the result is partial, and cites `totalGroups` (answered by `query_dataset` and `aggregate_records`) as how many groups existed before the cut; a `query_dataset` answer without `totalGroups` has an unknown total, never `rowCount`. A capped `query_records` page keeps stating its own `total`, which the bullet leaves alone.
+  
+  The two per-tool `truncated` sentences that bullet replaces are removed from steps 3 and 4. `packages/mcp/src/ask-skill.generated.ts` is regenerated from the skill; no code path changes.
+- afbd903: feat(skills): a process skill for running a metadata-app project
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The skills catalog gains `objectstack-project`. The domain skills teach how to write each kind of metadata; this one teaches how a change moves through an app project: whether it belongs in the app or the platform, what to write at each stage, what the app tests itself (with `bootStack` from `@objectstack/verify`) and what `os validate`, `os lint` and `os verify` already check, how a platform defect is handled without a workaround, how a change is described for customers, and how to bump `@objectstack/*` and carry customer data across an upgrade with a backfill. Steps that matter only to an app shipped to customers are marked, and the light path is the default.
+  
+  A project that already syncs its skills gets the new one on its next `npx skills@1.7.2 experimental_sync --agent <runtime> --copy -y` after bumping `@objectstack/skills`.
+  
+  `npm create objectstack` projects now:
+  
+  - point `AGENTS.md` at `objectstack-project` in place of its hand-written skill table, which listed nine of the catalog's skills;
+  - carry a three-line `.github/pull_request_template.md`: what a user can do now, how it was checked, which docs changed.
+  
+  Existing projects are not changed.
+- 0188989: feat(scaffold): new projects run their tests in CI
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  `npm create objectstack` projects now run `pnpm test` in `.github/workflows/ci.yml`, after `validate`, `lint` and `typecheck`, so the starter `note.test.ts` and every test you add run on each push.
+  
+  `os init -t app` and `os init -t empty` now declare a `test` script (`vitest run`), list `vitest` in `devDependencies`, and ship one starter test (`app.test.ts`, `project.test.ts`) that reads the project's definition, so the same CI workflow passes on a project made either way. To test what the engine does with a record, add `@objectstack/verify` and boot the stack with `bootStack`; the `objectstack-project` skill shows how.
+  
+  Existing projects are not changed. To take the CI step, add `- run: pnpm test` after `- run: pnpm typecheck` in your `ci.yml`; a project with no `test` script adds vitest and the script first.
+- cf2e321: docs(skills): the data and automation skills name the publish-time findings in place of their trap warnings; the i18n skill drops the `fallbackLocale` workaround for refusal labels; the ai skill names `MCP_DOOR_TOOL_NAMES` as the fourth tool source
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  **objectstack-data.** A `state_machine` rule that runs on insert declares `initialStates`, or publish refuses it (`state-machine-no-initial-states`); an update-only machine (`events: ['update']`) needs none, since the engine reads them only on insert. `SKILL.md`, `rules/validation.md` and eval 11 say so. The yes/no-flag bullet no longer says "never `required`": on a boolean `required` refuses only `null`, an unchecked box is a value, so it never means "must be checked". A box that must be checked (terms, consent) is a `validations[]` `script` rule, and the bullet carries one. Eval 10 follows, and no longer fails an answer that keeps `required: true`.
+  
+  **objectstack-automation.** `SKILL.md`: a node `type` no executor runs is refused when the flow is published to a running server (`flow-node-type-no-executor`); an `http` node with no positive `timeoutMs` has no timeout and raises the warning `flow-http-timeout-missing`. `references/state-machines-and-approvals.md`: `initialStates` is no longer described as optional with a legacy opt-out, and names the same refusal and the same update-only exception; an approval's downstream nodes hang off out-edges labelled exactly `approve` and `reject`, and with one missing or respelled publish refuses the flow (`flow-approval-decision-unrouted`).
+  
+  **objectstack-ui.** `rules/actions.md`: a standalone action that declares `locations` and no `objectName` is refused at validate and at publish (`action-no-object-binding`); the fix is `objectName`, or `locations: []` for a headless action. Paid in the same file: three parentheticals of the locations table and some wording of the same paragraph.
+  
+  **objectstack-i18n.** Validation, delete-restriction and permission-denial messages name fields and objects in the request's language, as label serving does: a request in `sourceLocale` reads the inline label. The sentence telling an English-authored, Chinese-default app to add `fallbackLocale: 'en'` for that is gone from `SKILL.md` and from eval 11; `fallbackLocale` stays documented as the fallback for a missing translation.
+  
+  **objectstack-ai.** Source 4 of the `skill.tools[]` resolution ladder is `MCP_DOOR_TOOL_NAMES`, every tool the MCP door registers (the `MCP_FILE_TOOL_NAMES` file pair included), resolved only for a skill MCP can offer (`mcpPrompt` not `false`). On a `mcpPrompt: false` skill a name only the door serves still warns, with its own hint.
+  
+  Paid in place, no token ceiling moves. Cut to pay: in `rules/validation.md` the state-machine example loses three states and its default `severity`; in `references/state-machines-and-approvals.md` three asides (automation being AI-generated, a multi-step review reading as one diagram, a back-edge re-entering its node); in objectstack-automation `SKILL.md` a few words of seven node-table rows; in objectstack-data `SKILL.md` two example state names and a few words of the same bullets.
+- 084f606: docs(skills): the objectstack-ui router names action files by the suffix the platform writes
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The Actions row of the `objectstack-ui` routing table pointed at `src/actions/*.actions.ts`. The metadata type registry declares `**/*.action.ts` for actions and `os generate action` writes `src/actions/NAME.action.ts`, so an agent reading a project's actions by that glob missed every generated file. The row now names `src/actions/*.action.ts` first and `*.actions.ts` second: a project loads its actions through the barrel its `objectstack.config.ts` imports, so a plural file the barrel names loads as well.
+  
+  Trap 3 keeps its pointer to the Dashboards rule and drops the list of widgets, datasets and charts after it, which the routing table already sends to that rule.
+- bc75bcd: docs(skills): `objectstack-platform` says which declared capabilities fail the boot and which only warn
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The "Declaring is a demand" rule taught that any capability an app declares in `requires` with its provider package absent is a hard boot error. `os serve` does that for the tokens of the provider table and for `ai` / `ai-studio`. A declared enterprise or cloud token (`hierarchy-security`, `ai-seat`, `governance`, `audit-compliance`, `access-policy-console`) with no provider only prints a warning and the boot goes on; for `hierarchy-security` the hierarchy-relative scopes then fall back to owner-only. The rule now says so, so an agent no longer reads a clean boot as proof that those scopes are enforced, nor tells a user the app will refuse to start when it starts with narrower visibility.
+  
+  Two restatements in the same file were cut to pay for the sentence.
+- 0ca5218: docs(skills): a generated platform catalog, and `objectstack-project` asks "does the platform ship it?" before any new object, field or flow
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  `objectstack-project` gains `references/platform-catalog.md`, generated from `@objectstack/spec`: the platform objects an app would otherwise build (users, attachments, comments, the audit trail, notifications, mail, exchange rates, imports, approvals, sharing, queues, webhooks, settings), each with what it replaces and how the app reaches it; the three value domains and the field names that should declare them; every `requires` capability switch with what it mounts; the master data that stays with each app; and a short Planned section whose rows are marked not available and link to their contract.
+  
+  Its §0 asks a third question: check the catalog before adding an object, a field or a flow; use what the platform ships; when it is absent and a second app would copy it, file a platform card and build the app's own meanwhile, marked `// PLATFORM-CANDIDATE: <link>`. §5's bump sweep now retires those markers beside the `PLATFORM-GAP` tests. A defect (§3) is still never worked around; the new question is about a missing capability.
+  
+  `objectstack-data`'s currency paragraph now teaches `valueDomain` for a time zone (`iana_time_zone`) and a country (`iso_3166_alpha2`) beside the currency code.
+  
+  Six new eval cases (an attachments table, a business-hours calendar, a change-history table, a free-text unit, a country and time zone, an exchange-rate table) expect the platform object, the value domain, or a platform card with the marker.
+- 3d6dea2: feat(formula): `addWorkingDays()`, `workingDaysBetween()` and `addWorkingHours()` count with the organization's working calendar (ADR-0157 D4)
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: added — a formula field's or a stored field's `expression` may now call `addWorkingDays(...)`, `workingDaysBetween(...)` and `addWorkingHours(...)`
+  Skills-docs: updated here — skills/objectstack-formula/SKILL.md teaches the three functions and eval 8 of skills/objectstack-project/evals/project-process.json exercises them (the card's order names both)
+  
+  Not released alone: it ships in the same release as the working calendar service and objects (#35355) and the approval escalation's working-time clock (#35357), ADR-0157 D4.
+  
+  - **Three formula functions** (`@objectstack/formula`). `addWorkingDays(day, n[, code])` answers the calendar day `n` working days after `day` (before it, for a negative `n`); `day` itself never counts and `0` answers `day`. `workingDaysBetween(start, end[, code])` counts the working days after `start` up to and including `end`, negative when `end` is earlier, and is the inverse of `addWorkingDays`. `addWorkingHours(start, hours[, code])` answers the instant `hours` of working time after `start`, counted as elapsed time in the calendar's time zone (D11); a start outside working time begins at the next working period. All three step over the calendar's weekends and holidays and onto its make-up working days. Without `code` a call counts with the organization's default calendar; `code` names a calendar and is written as a quoted literal. They join the advertised standard library (`CEL_STDLIB_FUNCTIONS`).
+  - **Where they count** (`@objectstack/objectql`). A `formula` field and a stored field's `expression` count with the record's own organization's calendars, which the engine loads through the calendar service before it evaluates them: only the calendars the expressions name, once per organization per read, from the service's cache. A formula field counts again on its next read after a calendar edit; a stored due time keeps the value of its last write.
+  - **When the calendar cannot answer** (D8). With no default calendar in the organization, a code the organization has no calendar for, or a count that reaches past the span the calendar is maintained for, the formula reads `null` and the server logs one line naming the object, the field and the reason. A stored field's `expression` stores blank and the write goes through; the blank stays until that record's next write, and a write made while the calendar refuses blanks a value that was valid before. Nothing counts on the weekly pattern or the wall clock instead.
+  - **No calendar arithmetic as a filter.** A query filter, a sharing rule's condition and every filter compiled from CEL refuse the three functions with a message that prescribes the stored due-time field (D6).
+  - **Build refusals** (`@objectstack/lint`). `os build` / `os validate` refuse the three functions at every expression site but a formula field's and a stored field's `expression` (validation rules, visibility, action conditions, flow conditions and values, sharing rules, a field's expression `defaultValue` and a seed value), and refuse a calendar code that is not a quoted literal, with a branch between literal calls as the way to pick a calendar per record.
+  - **Forms** (`@object-ui/core`). A form does not compute a formula that calls one of the three: its calendar is loaded for the server's read, never handed to the form, so the field is unservable there as on the server's write-path check.
+  - **Teaching** (`@objectstack/skills`). objectstack-formula documents the three functions; the platform catalog moves working-day formulas from Planned into what the platform ships; the project-process eval for business-hours SLAs now expects the functions.
+- d1ebe86: docs(skills): the dashboards rule says a drill on a relationship-path dimension offers no "Open in list" link today
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  objectstack-ui's `rules/dashboards.md`, Drilldown: the **Escape hatch — "Open in list →"** bullet said the drill drawer's header always links to the object's full list page. It now adds the exception: today a dimension whose field is a relationship path (`account.industry`) drills into the drawer only, with no link. The drawer still lists the records and a row still opens its record. The list page's `filter[...]` URL has no spelling for a condition on a related record, so the console offers no list destination for that drill instead of a wider list.
+  
+  The Reports paragraph of the same section loses its closing clause ("peek the records, click a row to open one, or "Open in list →" for the full list page"). It restated the three bullets above it and repeated the same promise; the paragraph still says reports drill the same way through the identical drawer. Removing it pays for the new sentence: the file is 2 bytes smaller.
+  
+  `content/docs/ui/dashboards.mdx` states the same exception in its Drill-down section and in the renderer note below it. No code path changes.
+- 908d56c: docs(skills): the data, query and ui skills teach five landed refusals and behaviours
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  Five pieces of published skill text, one per landed behaviour the skills did not teach. Each comes with its own eval case.
+  
+  **The `{current_iso_week}` period key.** objectstack-query's `rules/filters.md`, section "Date Macros", now names the period key beside the date macros and the session tokens. `{current_iso_week}` (or `${current_iso_week}`) resolves to today's ISO week key, `YYYY-Www`, in the workspace time zone: Monday-start weeks, the ISO week-year at year edges. It is text, for a text field that stores week keys. A `date`, `datetime` or `time` field refuses it with `INVALID_FILTER` / 400, as it refuses the literal key; a date dashboard filter's `defaultValue` and `calendar.initialDate` refuse it too. On a date field write `{current_week_start}` / `{current_week_end}`. The section also names `resolveFilterPlaceholders()` as the client resolver for all three vocabularies and `isKnownFilterToken()` as the one spelling check. One eval case covers the text-field / date-field split.
+  
+  **A hook or job `js` body that does not compile is refused.** objectstack-data's `references/data-hooks.md`, "Sandbox restrictions":
+  
+  - A new bullet says a `js` source is compiled, without being run, inside the `(async (ctx) => { … })` wrapper the runtime runs it in, where `ctx` is already declared. `const ctx = ctx.input || {};` (or `let ctx`, one name declared twice, any syntax error) is `hook-body-does-not-compile`: an error from `os validate`, `os build`, `os lint` and a runtime hook save (`422 INVALID_METADATA`), naming the hook, the `SyntaxError` and its line. The fix is to use `ctx` as it is or rename the local (`const input = ctx.input || {};`). A job's `js` body runs in the same wrapper and is `job-body-does-not-compile` from the three commands. A regular-expression pattern the checking engine refuses is a warning: the runtime may accept it.
+  - Six restatements in the same file were removed to pay for the new text; the file is four lines shorter and no larger in tokens than before.
+  
+  `evals/hooks-security-seeds-datasources.json` gains one case on the refusal and its fix.
+  
+  **A seed record with a blank key field is refused at load, and a saved seed naming an unknown object is refused 422.** objectstack-data's `references/seeds.md`:
+  
+  - "`externalId` selection" says every record carries a value for each `externalId` field (each field of a list, or `name` when the seed names none), and that a record leaving one blank (no value, `null` or `''`; whitespace is a value) is refused at load in every mode: the load result names the object, the record index, the field and the fix, and the other records still load. The `externalId` row of the field table points at it.
+  - The note under the field table says a `seed` saved at runtime names its `object` itself, and that one resolving to nothing is refused with `422 INVALID_METADATA` at `object` ("which is not defined"). The fix is the object's full name (`crm_lead`, not `lead`) or creating the object first: a draft of it is enough for a draft seed, a live seed needs it published. The `object` row points at the note.
+  - Three restatements in the same file were removed to pay for part of the new text: the `columns` row's shape literal, the one-row best-practices table (now a sentence) and the second telling of what a refused seed value leaves behind.
+  
+  `evals/hooks-security-seeds-datasources.json` gains one case on each refusal.
+  
+  **A `master_detail` child is a record-page body table by default.** The record page draws a `master_detail` child as a full-width body table whenever its FK declares no `relatedList`. The skills still tied that to `inlineEdit`. They now teach the rule the runtime applies.
+  
+  - objectstack-data's `rules/relationships.md`, "Detail-page related lists": a `master_detail` child is a body table by default and a `lookup` child is a panel. `inlineEdit` governs entry in the parent's form only. The `relatedList` list reads `'primary'` (the `master_detail` default), `true` (the `lookup` default) and `false`. The example no longer writes `inlineEdit` and `relatedList: 'primary'` on a `master_detail` field to get the table.
+  - objectstack-ui's `rules/record-page.md`, step 2: the same defaults, the body table is drawn after the open field sections (it used to say after the first one), and "put the tasks first" is the parent's `relatedLists`. The example field drops its `relatedList: 'primary'`.
+  - objectstack-ui's `evals/record-page.json`, case 1: the expected answer adds no placement flag to a `master_detail` field, and an answer that authors `inlineEdit` fails the case. `evals/README.md` follows.
+  
+  Both of those rules files are shorter than before, and neither one's token ceiling moves.
+- a64c3b8: Clause-②: no
+  Metadata-protocol: none
+  
+  `objectstack-ui` actions rule: no bulk body receives `input.selectedIds`. A name in the list view's `bulkActions` runs the action once per ticked row, its body reading `ctx.recordId` (how the example now writes rows); only a `bulkActionDefs` entry with `operation: 'custom', execution: 'aggregate'` runs it once, the ids in `input._selectedIds`. Also: the new-tab example's `target` uses `${ctx.recordId}` on `record_header`.
+- c4d6acc: Clause-②: yes — widening: one new read on the draft door behind the same `metadata:write` grant and `manage_metadata` check; no save, publish or existing read changes, so nothing accepted today is refused.
+  Metadata-protocol: none
+  
+  feat(runtime): the MCP draft door answers a metadata type's contract
+  
+  - **`list_metadata_items` takes an optional `contract: true`.** The reply then also carries `contract`, read from the same entry `GET /meta/types` serves for the type. By default it is the lean form of the type's JSON Schema: the `required` keys, and for each top-level key its type, a short enum and a one-line description, where `drill` names the JSON Pointer of any key with nested structure, plus the type's `createSeed`. A client that cannot read files can now see which keys a type accepts and which it requires before its first save, also for a type that has no item in the environment yet. A type with no JSON Schema answers `schema: null` with the reason. The read is admitted as the list is: the `metadata:write` scope and the user's own `manage_metadata`, the type-level read admission, and the unknown-type refusal. Without the flag the reply is unchanged.
+  - **`contractPath` drills into that schema.** With `contract: true`, a JSON Pointer such as `/properties/fields` answers the full schema at that pointer. `contractPath` without `contract: true` is refused with a validation error, and so is a pointer that does not resolve, with an error that names the pointer and the keys found there.
+  - **No `contract` takes more than 24 KiB of the reply,** so the largest types (`object`, `view`, `page`) fit an MCP client's tool-result limit. A lean form still over that size drops its descriptions first and says `truncated: true`. A sub-schema over that size is answered in its lean form marked `truncated: true`, so the client can drill again.
+  - **`objectstack-mcp-build` skill, step 3** names that read where it said to copy a published item of the same type: read the lean contract, drill into the key you write with `contractPath`, and let the save check you. The save is still the final check.
+- 9a28a48: docs(skills): objectstack-automation's `references/state-machines-and-approvals.md` says a reject recorded through `ApprovalService.decide()` or `POST …/reject` always carries a non-blank `comment`, its reason, else `400 VALIDATION_ERROR`. Text only; the outputs paragraph gives up a restatement to pay for it.
+  Clause-②: no
+  Metadata-protocol: none
+- 7ba22bb: Clause-②: no
+  Metadata-protocol: none
+  
+  `objectstack-query`'s description no longer claims a records query or aggregation sent over MCP, and its "Not for" names `objectstack-ask` for a business question answered from the app's records (a number, ranking or governed metric). Query trigger case 3 now asks for an aggregation written in server code; `objectstack-ask` gains a negative trigger case for a metadata change asked over MCP.
+- 4c50ec7: Clause-②: no
+  Metadata-protocol: none
+  
+  The `objectstack-ui` skill teaches how an object's list opens a record after `navigation.mode` was deprecated there:
+  
+  - Record-page rule, step 5: on an object's list the record's name opens the full page and the hover icon beside it opens the drawer. `navigation.mode` is deprecated there: `drawer`, `page` and `new_window` change nothing, so the key is omitted; `none` still means rows open nothing (prefer `preventNavigation: true`); a page block's `navigation` still honours every value. The step no longer teaches `navigation: { mode: 'page' }` as the way to open the full page.
+  - Step 6 no longer lists the Display menu's Open records choice or the drawer's full-width state among the reader's own choices: both were removed.
+  - The navigation rule's Surface bullet states the same rule in place of "`page` only by declaration".
+  - `SKILL.md` principle 5 says how a record opens from an object's list is not authored, in place of "one list-view key"; its Where-to-go row for the record page no longer reads "drawer or page".
+  - Eval `record-page` case 2 ("open contracts as a full page, and beside the list") now expects nothing to be authored: it requires the answer to name the icon and forbids a `mode: 'page'` declaration. The case has a new hash, so `skill-evals --regrade` sets it apart from a round recorded before this change.
+- f644321: Clause-②: no
+  Metadata-protocol: none
+  
+  The skills teach where an object extension's additions go on the object it extends:
+  
+  - `objectstack-data` Object Extension Model: `place` puts the extension's own fields, groups and child lists after (or before) a named item of the target, where the target declares `fieldGroups` / `relatedLists`. Example: `place: [{ field: 'tax_id', group: 'basic', after: 'industry' }, { list: 'acme_contract', after: 'crm_opportunity' }]`; a group of the extension's own is `{ group: { key, label }, after }`.
+  - `objectstack-ui` record-page rule: on a parent that declares `relatedLists`, a child list another package adds still shows, after the named lists or where that package's extension places it. The rule no longer says such a list is hidden until the parent names it.
+  - Eval: a new `objectstack-data` case places an add-on package's field after Industry in the account's Basic group and its child list after the Opportunities tab.
+- 337f435: Clause-②: no
+  Metadata-protocol: none
+  
+  The record-page skills teach the parent-declared record page:
+  
+  - `objectstack-ui` record-page rule: the parent's `relatedLists` is the tab list. Without it nothing changes; declared, only the named lists show, in order, with the attachments, approvals and activity tabs named by object (`sys_attachment`, `sys_approval_request`, `sys_activity`), and an entry `{ list, label, columns }` titles one list. "Put the tasks tab first" lists every tab to keep, tasks first, because a list naming only the task hides the rest. A child list another package adds still shows, after the named lists or where that package's extension places it.
+  - The same rule's step 1 no longer teaches a stage bar or a key-field strip: the stage is the status tag beside the title, whose menu moves it, and `highlightFields` feed hover cards, pickers and related-list columns. A field group lists its own members in `fields`. The wide full page pins the details left beside the tabs, unless the details hold a child table or there is no other tab; the right summary rail and its switch are gone from the text, and the details column's dragged width joins the reader's own choices.
+  - A `master_detail` child is a tab by default (`objectstack-data` relationships rule, the record-page rule and an eval); a parent field group naming the child list places its table among the fields, written only when asked, and the list keeps its tab too unless a declared `relatedLists` leaves it out.
+  - `objectstack-data` field-groups example lists each group's members in `fields`; `objectstack-ui` navigation names `fieldGroups` alone.
+  - Evals: the tasks-first case now writes the full tab list; new cases remove the attachments tab, place a Tax ID field after Industry in its group's list, and put a quote's line items above its amount section.
+- e606eff: Clause-②: no
+  Metadata-protocol: none
+  
+  The automation skill teaches the approval escalation clock: `escalation.clock: 'working_time'` counts `timeoutHours` as working hours on a working calendar (the `escalation.calendar` code, else the organization's default, else refused), a calendar that cannot count the deadline holds the escalation and shows why, and `calendar` without `clock: 'working_time'` is the lint error `approval-escalation-calendar-without-working-time`. The row no longer says the platform ships no business-hours calendar. The data skill's hook note calls an hours-table deadline wall-clock hours and points at the approval clock.
+- 72b7f13: Clause-②: no
+  Metadata-protocol: none
+  
+  The platform catalog (`objectstack-project/references/platform-catalog.md`) now lists working calendars as shipped. `sys_work_calendar` and `sys_work_calendar_exception` have rows beside `sys_exchange_rate`: each organization keeps its calendars and holidays in Setup, and an approval's `escalation.clock: 'working_time'` reads them. An app no longer declares its own calendar or holiday object. The Planned section keeps only what is still missing: no formula reads a calendar yet.
+- 1d934ff: Clause-②: no
+  Metadata-protocol: none
+  
+  The platform catalog (`objectstack-project/references/platform-catalog.md`) now lists units of measure as shipped. `sys_unit` has a row beside `sys_exchange_rate`, and the row names the declaration that uses it: `unitConfig` on a `number` field (`unitMode: 'fixed'` with `unit`, or `'record'` with `unitField`) or on a `text` field that holds a unit code (`unitMode: 'code'`). A stored code is a standard UN/ECE Rec 20 code or one of the organization's own units, added in Setup, so an app no longer builds a unit table or a unit picklist. The Planned row narrows to what is still missing: showing the unit beside a quantity, totals per unit and conversion. The page no longer describes an interim unit field, and `objectstack-data` eval 22 expects the shipped answer.
+- 1d06026: docs(skills): objects carry a colour from the nine-name palette; an object navigation item draws its object's colour tile
+  
+  Clause-②: no
+  Metadata-protocol: none
+- ed4d322: docs(skills): the data skill teaches the three permission axes, `viewAllFields` and the sensitivity tiers
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  objectstack-data's `rules/security.md` now teaches the permission model in three axes. Object permission (`allowRead`, `allowCreate`, `allowEdit`, `allowDelete`) decides whether the caller can use the object at all. Record scope (`viewAllRecords`, `modifyAllRecords`) widens which records the caller reaches, and from v19 those two bits open no field. Fields are visible by default, so an author writes only the exceptions: nothing for an ordinary field, `fields` rows in the sets that differ for a position-dependent one, and `requiredPermissions` on the field itself for a high-sensitivity one (salary, ID numbers), with `maskingRule` where a partial value is needed. That gate is strictest-wins over every field row, `viewAllFields`, View All and Modify All.
+  
+  A new section teaches `viewAllFields: true` as the way to say "this set reads every field", for admin-like sets: a read vote on every field, fields added later included, and never an edit vote; the set's own `readable: false` row beats it; it grants no object access and widens no record; on the `'*'` entry it also votes on the fields of private-posture objects, which a plain `'*'` does not grant; it is authored in metadata, as Studio's permission matrix keeps the key and has no control for it.
+  
+  `evals/hooks-security-seeds-datasources.json` gains two cases: a read-everything auditor set written with `viewAllFields`, and salary and ID-number fields gated with `requiredPermissions` and `maskingRule`. Two restatements in `rules/security.md` were removed to pay for part of the new text (the "Locks, never grants" bullet and the recipe link of the `when` section).
+  
+  `@objectstack/spec`: two docblock sentences in `src/security/permission.zod.ts`, comments only. The `viewAllFields` docblock now says the key changes nothing on an object entry that carries View All or Modify All (it said "on a set"), and the `FieldPermissionSchema` docblock names `viewAllFields` beside the super-user bits as a voter in the field merge. No schema, description or generated artifact changes.
+- d2fc055: docs(skills): the data skill's seeds reference says a seeded roll-up value is never stored, not stored as written
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  objectstack-data's `references/seeds.md` kept the rule "never seed the roll-up" but gave a reason that stopped being true: it said a seeded `amount_paid` is stored as written and a cap on payments then refuses the payments it counts. The seed loader takes a value written for a `summary` field out of the record before the write, logs one warning per dataset naming the fields, and the child rows compute the roll-up. The sentence now says that. The record-order point stays: a rule reading a parent roll-up sees the total earlier rows left. The matching eval case in `evals/hooks-security-seeds-datasources.json` expects the same model. Text only; the sentence pays for its new wording in its own bytes.
+- 7ae5e07: Clause-②: no
+  Metadata-protocol: none
+  
+  The `objectstack-ui` actions rule teaches the per-record form for a bulk body that writes rows, now that the action doors read a selection in the caller's scope before the action runs:
+  
+  - A body that writes each selected row is declared `execution: 'perRecord'`, wired by the list view's `bulkActions: ['<name>']`, and writes the row it is handed (`ctx.record`, `ctx.recordId`); a row whose run throws is listed with its message. The rule no longer teaches an `execution: 'aggregate'` handler that writes rows one by one and resolves with `{ succeeded, failed }`.
+  - On an aggregate dispatch (one run for the selection) a script body or a flow receives the ids under the built-in key `params._selectedIds`, at most 5000 and only ids the caller can read: one the caller cannot read refuses the whole call with `404 RECORD_NOT_FOUND` before it starts.
+  - What stays of `BulkActionResult` is how an aggregate return value is read: one with a top-level `succeeded` or `failed` is read as a `BulkActionResult`, and any other form of those members is reported as unreadable.
+  - Eval `views-apps-actions-pages` case 23 (a bulk archive where some rows refuse) expects the per-record form: it requires `perRecord`, `bulkActions: [` and `ctx.record`, and forbids a returned outcome object (`succeeded:`, `{ succeeded`, `{ failed`). The case has a new hash, so `skill-evals --regrade` sets it apart from a round recorded before this change.
+- 934ac07: docs(skills): `objectstack-automation` teaches that clearing a state-machine field is a transition to `''`, and how to make a state clearable
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The state-machine notes in `references/state-machines-and-approvals.md` gain one entry: an update that sets the state field to `null` or `''` is judged from the stored state as a transition to `''`. A state meant to be clearable lists `''` in its targets, e.g. `paused: ['open', '']`; from any other state the machine lists, the clear is refused with `invalid_transition`, and the refusal's `constraint` carries `to: ''` beside `from`. A stored state that is not a key of `transitions` stays unguarded, as before.
+  
+  This is the behaviour `@objectstack/objectql` already ships; the skill only teaches it.
+  
+  Paid for by deletion in the same file, with the token ceiling unchanged (5936): the wording of the section's intro and of six neighbouring notes was shortened, each keeping its fact — one rule per field, `initialStates` gating insert, guards and reactions living outside the machine, the introspection route, the unguarded unlisted `from` state, and the `record.<field>` scope of sibling predicates.
+  
+  Ride-along, same theme: in the `objectstack-data` eval `objects-fields-relationships.json`, the `employee` lifecycle case's expected answer declared a `state_machine` with `transitions` only, which publish refuses for a machine that runs on insert (`state-machine-no-initial-states`). It now declares `initialStates: ['draft']` with the reason, and the case's `must_contain` requires `initialStates`.
+- 59b5779: Clause-②: no
+  Metadata-protocol: none
+  
+  `objectstack-ui` record-page rule: an authored `kind: 'full'` record page is drawn on the desktop full page only. A phone and the side drawer draw the standard page (the object's declarations plus any slotted page), and no key keeps a full page there; a page named in the URL, such as a print page, still draws everywhere. The standard page draws no `record_section` action, so an action that must show on a phone or in the drawer also lists `record_more` in its `locations`. The drawer step now says the drawer always shows the standard page.
+- 65ce798: docs(skills): `objectstack-formula` says that `==` / `!=` between a list-valued field and a scalar is refused, and teaches the membership test each site takes
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The CEL cheat-sheet of the `objectstack-formula` skill gains a note under its operator table: `==` / `!=` between a list-valued field (`multiselect`, `checkboxes`, `tags`, or a `select` / `radio` / `lookup` / `user` / `file` / `image` field with `multiple: true`) and a scalar literal is refused by the validator as `list-equality` ("list compared with a scalar"), because CEL compares the whole list and the expression answers one constant on every row. The note shows the refused form and the rewrite the refusal prescribes at each site, null-guarded (`in` faults on a `null` list) and parenthesised whole, for `==` and for `!=`:
+  
+  - where the expression is evaluated as CEL: `(has(record.tags) && record.tags != null && 'vip' in record.tags)` and `(!has(record.tags) || record.tags == null || !('vip' in record.tags))`; the `has()` covers a sparse action row and a `previous` that is `null`;
+  - a bare name in a flow condition: `(tags != null && 'vip' in tags)` and `(tags == null || !('vip' in tags))`, since `has()` takes no bare name;
+  - a sharing rule's `condition`, which is compiled to a query filter: `(record.tags != null && record.tags.contains('vip'))` and `(record.tags == null || !record.tags.contains('vip'))`, since `has()` and an `in` with the literal first do not lower there.
+  
+  This is the behaviour `@objectstack/formula` already ships; the skill only teaches it.
+  
+  Paid for by deletion in the same file, with the token ceiling unchanged (6008): twelve restatements were cut, each keeping another home — the `has()` section's opening sentence (the cheat-sheet `Key existence (NOT null-safety)` row and the paragraph that follows it), the Salesforce-flavor block's `os build` / runtime clause (the `Verify your work` section), the sentence saying hook conditions and validation predicates bind the same two roots (the `previous` table under it), the sentence saying record-change flow triggers ride the same dispatch (the same table's `after*` row), the closing "It is a refusal" sentence of the 10 000-row paragraph (that paragraph's own "the platform refuses"), the translation table's `"abc"` row (the cheat-sheet `String literal` row), the stdlib intro's "there is no `src/` to read" clause (the same sentence's "ships `dist` only"), the "use `daysBetween` / two `datetime(…)`" sentence of the date-arithmetic note (the table under it), the sub-day-offset row's "the calendar helpers land on UTC midnight" (the `today()` / `daysFromNow` / `daysAgo` rows), the "`previous.status`, where `previous` is `null`" parenthesis of the unevaluable-condition warning (the `previous` table's insert row), the second transition-condition example (the section's first example, the same shape), and the first half of the translation table's `previous.x` warning (the `OLD.x` and `ISCHANGED(x)` rows above it and the same insert row).
+  
+  Two eval cases exercise the note: a hook `condition` over a `tags` field (the CEL spelling) and a sharing rule `condition` over the same field (the `.contains()` spelling).
+- 99fbaa6: docs(skills): entering line items in the parent's form is taught as a parent field group naming the child, not `inlineEdit` alone
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  objectstack-data's `rules/relationships.md` (Inline Editing), objectstack-ui's `rules/list-views.md` (Master-Detail Forms) and the objectstack-ui `SKILL.md` trap list taught that `inlineEdit: true` on the child's `master_detail` field puts the child grid into the parent's form. They now teach the rule the platform applies: the parent's form enters a child's rows where a field group of the parent names that child (`fieldGroups: [{ key: 'lines', label: 'Lines', relatedList: 'invoice_line' }]`), `inlineEdit` only picks how those rows are edited, and without the group the child is a tab and the form has no lines. Text only; each file's old wording is cut to pay for the new. Two eval cases that expected the old answer are corrected and objectstack-data gains one case for form entry of quote lines.
+- 6925b87: docs(skills): the lint table and the `repeater` row name the parent field group, not `inlineEdit`, as what places a child's rows
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  objectstack-data's `references/lint-rules.md` said three `os lint` rules trigger on `inlineEdit`. They read the parent's field groups, and the rows now say so: `relationship/line-items-inline-edit` catches a line-item `master_detail` child that no parent field group places (`fieldGroups[].relatedList`), `relationship/inline-edit-needs-bulk` a placed child whose parent or child withholds `'bulk'`, and `relationship/association-inline-edit` an association a group places. `rules/field-types.md` pointed a typed list at a child object with `inlineEdit: 'grid'`; it now points at a `master_detail` child that a parent `fieldGroups[].relatedList` names. Text only; the rule ids and the lint are unchanged, and each file pays for its new wording in its own bytes.
+- 0a6af56: docs(skills): the data skill teaches that a predicate update or delete of a `controlled_by_parent` detail writes the rows its by-id writes do
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  objectstack-data's `rules/relationships.md`, the `writeRequiresMasterRead: true` bullet under "Writes under `controlled_by_parent`": it no longer says the ownership floor (rows you created) binds a predicate update or delete. It now says a predicate (`multi: true`) update or delete writes the rows a by-id write of each would, all matched rows or none, which is what the runtime does since the change noted as "a predicate update or delete of a `controlled_by_parent` detail now writes every row its caller may write by id". The on-behalf-of half is unchanged: the floor still binds an on-behalf-of update or delete, for both users. `evals/objects-fields-relationships.json`, eval 17: its `expected_output` states the same rule; its assertions are unchanged.
+- 15a5be1: docs(skills): objectstack-ui teaches `navigation: { openNewTab: true }` for a list that opens records in a new tab
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  Step 5 of the record-page rules told authors to omit `navigation.mode: 'new_window'` on an object's list and named no replacement. It now says a list that wants a new tab writes `navigation: { openNewTab: true }`, and that a phone opens the page in place. Text only; nearby prose in the same file is tightened to pay for it.
+- 67154ed: docs(skills): the data skill says a lookup pick copies a currency amount only between fields in the same currency
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  `skills/objectstack-data` described `lookupAutofill` (`rules/field-types.md`) and the line-item grid's catalog auto-fill (`rules/relationships.md`) as unconditional copies. The first now states, and the second points to, the rule the platform applies to a declared pair and to the line-item grid's same-named `autofill` copy: a `currency` amount is copied only between fields in the same currency (a `fixed` code or a per-record one); otherwise the target is left as it was and the form says why. Nothing is converted, so a line in another currency takes its price by hand. The sentence is paid for in the same file by trimming type-table cells that only restated the type name. No behaviour changes.
+- 9d70768: docs(skills): the i18n and data skills teach the flow step-name key `flows.FLOW.nodes.NODE_ID.label` and the related-list title key `objects.OBJECT._relatedLists.LIST.label`
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  objectstack-i18n's SKILL.md, in the paragraph on the keys that sit deeper than their group's `label`, now names the flow step-name key `flows.FLOW.nodes.NODE_ID.label`: a screen is named through its heading `flows.FLOW.screens.NODE_ID.title` and takes a `nodes` key only beside a `title` of its own, `os i18n check` asks for a flow's top-level steps, and a step of one of the `FLOW_TECHNICAL_NODE_TYPES` (listed) is asked only where a decision's branch leads to it. Text only; paid inside the same file by cutting three restatements in the coverage and extract sections.
+  
+  The object translation group table gains the `_relatedLists.LIST` row beside `_tabs`: the `label` of an object-form `relatedLists` entry on the parent object, keyed by the entry's literal `list` (a dotted `object.field` is one key); an entry with no `label` has no key and keeps the child field's `relatedListTitle`, else the child's plural label; the unprefixed `relatedLists` spelling is refused, naming the key. objectstack-data's `rules/relationships.md` says the same on the `relatedLists` entry: its `label` translates at `objects.PARENT._relatedLists.LIST.label`, and an entry with none has nothing to translate. One eval case covers both keys. Paid inside each file by cutting restatement; no ceiling of the skills token ratchet moves.
+- 38a0081: docs(skills): the data skill teaches field-change values as on by default (`enable.fieldHistory`), no longer as the `trackHistory` opt-in
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  `skills/objectstack-data/SKILL.md` still gave `enable.trackHistory`, default `false`, as the field-level audit trail. An agent following it added a flag that no longer decides anything about values, or believed history was off. The `enable` table now has a `fieldHistory` row: a changed field's old → new values show on the record's activity timeline unless the object writes `enable.fieldHistory: false` or the field writes its own `fieldHistory: false`; a media or structured field shows values only with `fieldHistory: true`, and a credential field never does. Each value is served per the reader's read rule for that field, and the audit ledger (`sys_audit_log`) keeps its own grant. The `trackHistory` row now says what the flag still does (the ledger view on the record page and the `history` API verb) and that it is not the values switch.
+  
+  New text is paid for by cuts in the same file: the `aiReadable` row keeps only what an app author needs (platform objects only, refused at parse on an app object), and nine restating phrases are shortened. No metadata shape changes.
+- 159113f: docs(skills): objectstack-ui teaches the board's lane statistic and card settings
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The kanban example in `rules/list-views.md` now writes `kanban.summary` in place of the older sum-only `summarizeField`, and sets `showFieldLabels` and `hideEmptyFields` with their defaults (both `true`). One note names the six lane statistics (`none`, `count`, `sum`, `avg`, `min`, `max`), says the four aggregates cover every record of the lane and not only the loaded cards, names the known gap (a board over a lookup field or in a grouped view), and says `summary` takes precedence over `summarizeField`. Text only; restating comments and sentences in the same file are cut to pay for it.
+- ceaa70e: docs(skills): the UI skill teaches the New and Edit forms as built from the object's fields and field groups, and `showOnCreate`
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  objectstack-ui no longer teaches an object's internal create and edit form views, which the Console's create and edit surfaces stopped loading. `SKILL.md` Traps 1 and `rules/list-views.md` "Form Views" now say that New and Edit are built from the object's fields, sectioned by its `fieldGroups` (`collapse: 'collapsed'` folds a rarely filled section) and following the fields' own rules; that `showOnCreate: false` leaves a field off every create surface and is refused beside `required: true`; and that a container's `form`, `formViews.default` and `formViews.create` still parse, steer nothing, and are reported by `os validate` as `form-view-internal-not-loaded`. The two form views that load are kept: a named `formViews` entry an action of type `form` opens (`/forms/:name`), and a public form (`sharing.enabled: true`), taught as before. "Master-Detail Forms" drops the form-view `subforms` override, which is no longer read; the parent field group naming the child and the page block remain. `evals/views-apps-actions-pages.json`, evals 1, 6, 13 and 19: each taught or assumed an internal form view and now expects the object's field groups and `showOnCreate`.
+- 92e660d: docs(skills): objectstack-formula says an unlowerable `SharingRule` `condition` fails the build and that the rule is skipped at runtime, instead of saying it aborts the write
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The "Surfaces that take an Expression" warning used to group `SharingRule` `condition` with `Hook` `condition` and validation predicates as "aborts the write". A sharing rule's condition is never evaluated on a write: it is compiled to a query filter. One that does not lower to a filter fails the build (`validate-sharing-rule-enforceability`, an `error`), and at runtime the rule is skipped and grants nothing, with one WARN line. The sentence now says so; the `Hook` and validation-predicate halves are unchanged.
+  
+  Text only. Two restatements are cut to pay for it under the token ceiling, which is not raised: the translation-table note that `previous.x` fails the write on an insert (it stays in section 5's `previous` table and warning), and the "ride the same envelope" lead-in of the cron and template section (it stays in Core contract).
+- c0eecb1: Clause-②: no
+  Metadata-protocol: none
+  
+  The `objectstack-data` skill teaches the whole-arrangement keys of the paired `.custom` package's object extension:
+  
+  - Object Extension Model: only the object extension of a base's paired `.custom` package may write `fieldGroups` and `relatedLists`, in the shape an object declares them. A written key replaces that arrangement whole (the owner's and every `place`); an unlisted field shows after the last group, an unnamed tab still shows after the listed ones, and `{ list: 'crm_note', hidden: true }` hides a tab. Outside a `.custom` package both keys are refused at save, publish and install and by `os validate` / `os build`, with the prescription to use `place`.
+  - Eval: a new `objectstack-data` case moves an installed object's tab arrangement from an add-on package's extension, where it is refused, to the pair's extension, and names `place` as what the add-on package writes. The `place` case no longer says an extension has neither key.
+  - Five restatements in the same file are cut to pay for the paragraph; each one's content stays in the bundle (`rules/validation.md`, `rules/indexing.md`, `rules/lifecycle.md`, `references/lint-rules.md`, the object JSON example).
+- 9e2a4ac: docs(skills): the skills index routes a stepped single-object form to a named wizard form an action opens, and the UI skill's `sections` ladder says New and Edit never read sections
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  Two passages still taught what the Console's create and edit surfaces stopped doing. `skills/README.md`, "Cross-skill routing": a stepped form over one object that never branches is a named form view (`type: 'wizard'`) that an action of `type: 'form'` opens; an object's own New and Edit never step, because they are built from its fields and `fieldGroups`. `skills/objectstack-ui/rules/navigation.md`, "Record Presentation": the `sections` ladder now says where sections are read (a named or public form, and a page's `record:details` or form block) and that New and Edit never read them, with a link to "Form Views". The ladder's retired `pane` example is gone; a wizard's steps are the example of sections that must enumerate fields. No metadata shape changes.
+- ecb85bb: docs(skills): the data skill picks an object's colour by business family and teaches `showOnCreate`; the automation skill routes a stepped single-object form to a named wizard form an action opens
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  `skills/objectstack-data` told authors to give every object a colour and avoid repeats in one app. With nine palette names any app past nine objects must repeat one, and the platform's own objects are coloured by business family instead. The `color` row now says to group an app's objects into a few business families with one palette name each, gives the platform's families as the worked example (people `blue`, security `purple`, approvals and work `orange`, messaging `pink`, integrations `teal`, reference data and finance `green`, audit and settings `amber`), keeps `red` for an object that is an alert, and leaves an object nobody opens without one. The quick-start object example declares a `color`.
+  
+  The data skill's field rules now teach `showOnCreate: false` (a field left off every create surface, refused beside `required: true`), and its Relationships rule no longer points at the `subforms` overrides the UI skill dropped. `skills/objectstack-automation` routes a stepped form over one object that never branches to a named form view (`type: 'wizard'`) that a `type: 'form'` action opens. New text is paid for by cuts in the same files. No metadata shape changes.
+- 254e396: docs(skills): objectstack-ui teaches the object's `actionLayout`
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  `rules/actions.md` gains one section, "Button Order (`actionLayout`)": an arm per scope (`list`, `record`), `pinned` (at most 3 buttons, in order, `[]` pins none) and `more` (the order of the overflow menu, unnamed actions after it), which placements each arm takes and where the `record` arm is drawn (record page, side preview, phone bar, a row's menu order), the list page's `$import` / `$export` as pinned-only built-ins, that `os validate` refuses a name the arm's scope does not place, and that on an installed object only its paired `.custom` package's extension writes the key, arm by arm. Text only; one eval case exercises it.
+- b49a264: docs(skills): the data skill teaches `transferBehavior`, the Change Owner cascade of a relationship
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  objectstack-data's `rules/relationships.md`, Delete Behaviors: one paragraph says what `transferBehavior: 'cascade'` on a child's `lookup` / `master_detail` does (the parent's Change Owner dialog offers to move the child rows its previous owner owns too), when to declare it, that the default is `'none'`, and where parse refuses it: the key on any other type, and `cascade` on a `sys_*` reference, on `multiple: true`, and on a child that does not offer Change Owner itself, such as a `controlled_by_parent` detail. `rules/field-types.md` lists the key on the `lookup` and `master_detail` rows. `evals/objects-fields-relationships.json` gains one case. The new text is paid for by removing restatement in the same files: in relationships.md the two "Incorrect" code blocks become one sentence each, and two `required: false` lines and five comment or prose repeats go; in field-types.md the autonumber example that the Autonumber section already gives and two "embedded" repeats go.
+- a03bc4e: docs(skills): the automation skill, the schedule trigger README and the start-node schedule refusals spell only flow shapes the publish checks accept
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  Ten flow checks of `os validate` and publish (`flow-schedule-timezone-missing`, `flow-condition-option-label`, `flow-node-write-unknown-option`, `flow-subflow-unknown` and the rest) landed without the text that teaches flows. Three of them are warnings and refuse nothing: `flow-schedule-timezone-missing`, `flow-subflow-unknown` (run by the CLI only) and `flow-create-update-pair`. Wording only; no schema, rule or reader changes.
+  
+  - `@objectstack/spec`: the three refusals of a start node's `config.schedule` (an empty string, a typed schedule the published schema refuses, a value the readers read nothing from) now offer `{ type: 'cron', expression: '0 8 * * *', timezone: 'UTC' }` as the cron to write. They no longer offer a bare cron string or a cron object with no `timezone`, which `os validate` warns on. The typed-alias hint names `{ type: 'cron', expression: '…', timezone: 'UTC' }`. What is refused is unchanged.
+  - `objectstack-automation` skill: recipe 1's nightly cron states `timezone: 'UTC'`; the schedule example's comment says a cron with no `timezone` (a bare string) runs in UTC and warns, where it said a bare cron string also works; the `subflow` row says `os validate` warns `flow-subflow-unknown` on any name the stack does not hold, a correct call to another package's flow included, where it said `os validate` passes; the select-label rule says a start condition or a `fields` write that uses an option's label is refused at publish where the options are inline, where it said the flow stages clean, and says a label in a `filter` or an edge condition is never checked and silently matches nothing, where it said a `filter` fails the run. Eval 1's expected answer states the cron's `timezone`, and eval 20's states that warning. No skill file passes its token ceiling: `SKILL.md` gains one line, paid for by shorter wording and shorter table separator rows in the same file, and two node labels in recipe 1 are shortened to pay for the `timezone` key.
+  - `@objectstack/trigger-schedule` README: the time-relative example's cron states `timezone: 'UTC'`, and the schedule-shapes table is followed by the UTC reading and the warning.
+- 144d368: Clause-②: no
+  Metadata-protocol: none
+  
+  `objectstack-data`'s hook reference (`references/data-hooks.md`) no longer says every regex pattern the checking engine refuses is a warning. It now says what the compile rules do: a pattern the runtime refuses too is the same `hook-body-does-not-compile` / `job-body-does-not-compile` error, and only a duplicate named capture group, a modifier group such as `(?i:a)` or a Unicode property name only the runtime knows is a warning (on a host whose Unicode tables are older than 17.0, every property name it refuses). The file stays inside its token ceiling and its line count by tightening the same paragraph: it drops the note that the finding names the hook, the `SyntaxError` and its line, and the spelled-out rename example.
+- 4116465: docs(skills): the UI skill says a default or create form an action opens by name still loads and is not reported
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  objectstack-ui `rules/list-views.md` "Form Views" said `os validate` warns `form-view-internal-not-loaded` on every container `form`, `formViews.default` and `formViews.create`. The rule leaves out one that a `type: 'form'` action's literal `target` names, because the Console still loads that form where the action opens it. The passage now says so, and that such a form loads as a named form. The list of what an internal form no longer steers (sections, tabs, steps, `subforms`, `defaults`, `modalSize`) is dropped to pay for the new words: the file stays at its token ceiling and its line count is unchanged.
+- 0f6a1e5: docs(skills): objectstack-platform names the `arrangements` list of the package customizations read
+  
+  Clause-②: no (published prose only; names a list the read already returns on main)
+  Metadata-protocol: none
+  
+  `GET /packages/<base>/customizations` answers an `arrangements` list beside its overrides, extensions and switched-off items: one `{ object, key }` entry per object and whole arrangement (`fieldGroups`, `relatedLists` or `actionLayout`) the pair's object extension writes, with no content and no diff against the base. The `objectstack-platform` sentence that teaches this read now names it. The words are paid for in the same file by cutting four restatements: that the only template is the default, that the bundled template comes with `create-objectstack`, that the default auth mount is `/api/v1/auth`, and that the platform-app plugins load after `AuthPlugin` in a list already in boot order.
+- 489d9fe: docs(skills,spec): `objectstack-ai` says what a package skill does in the in-app `ask` assistant, and that the context a trigger condition reads is client-sent
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  `skills/objectstack-ai/SKILL.md`, *Trigger Conditions*, gains one paragraph on the in-app `ask` assistant (cloud / Enterprise):
+  
+  - A package skill with `surface` `ask` or `both` loads for the app the user is in. The `build` side is not served while in-app build is closed.
+  - A tool the skill names outside the allow-set is dropped with a diagnostic.
+  - A condition can read `appName`, `objectName`, `recordId`, `selectionKind` and `userRole`.
+  - The client sends all five. A `triggerConditions` entry on any of them, `userRole` included, is routing, never access control: the turn's tools still run under the caller's own permissions.
+  
+  Paid for in part by deletion in the same file, with the token ceiling unchanged (6801): three passages that restated text the file keeps elsewhere are cut. They are the one-sentence definition of a skill under *Skill Configuration*, the "extend the platform with skills" sentence under *Platform agents*, and three restated clauses of the open-edition sentence under the built-in skills table.
+  
+  `evals/skills-tools-knowledge.json`, eval 5: its `expected_output` now says the in-app `ask` assistant picks the skill up by surface for the app the user is in, and names the allow-set. Its assertions are unchanged.
+  
+  `@objectstack/spec`: the description of `SkillSchema.triggerConditions` adds that the context fields a condition reads are reported by the client, so a condition is routing, never access control. The reference page `references/ai/skill` is regenerated. Text only: the schema accepts and refuses what it did.
+- c349576: fix(settings)!: `@objectstack/knowledge-ragflow` is retired, and the Knowledge settings page no longer offers the RAGFlow adapter
+  
+  Clause-②: no (narrowing) — narrowed: `PUT /api/settings/knowledge` refuses `adapter: 'ragflow'` (`400 SETTINGS_VALIDATION`, field code `invalid_option`) and refuses `ragflow_base_url`, `ragflow_api_key` and `ragflow_default_dataset` (`400 UNKNOWN_KEY`), where it stored all four; `POST /api/settings/knowledge/test` answers `adapter = ragflow` as an unknown adapter (`400 SETTINGS_ACTION_FAILED`), where it answered a form check
+  Metadata-protocol: none
+  Skills-docs: updated here — `skills/objectstack-ai/SKILL.md` and its eval case 3 teach the `pgvector` adapter where they taught `ragflow`; `content/docs/protocol/knowledge.mdx`, `content/docs/ai/knowledge-rag.mdx` and `content/docs/ai/index.mdx` name the adapters this repository builds.
+  
+  <!-- adr-0087: not-required (runtime-export-retired @objectstack/knowledge-ragflow#*) the package is deleted whole: what it published (`KnowledgeRagflowPlugin`, `KnowledgeRagflowAdapter` and their option types) is runtime code a host registers; no `packages/spec` schema, metadata type or stored shape names it, and `KnowledgeSource.adapter` stays a free string, so there is nothing for `objectstack migrate meta` to rewrite. The settings half has the same answer: a settings manifest is a runtime registration, not authorable metadata; the narrowed answers are doors of one settings namespace, and stored rows are untouched. -->
+  
+  **BREAKING** for a deployment that saved the RAGFlow adapter on the Knowledge settings page, or that registers `KnowledgeRagflowPlugin`.
+  
+  The package `@objectstack/knowledge-ragflow` is removed from this repository and gets no further release. Its requests did not match the RAGFlow HTTP API (it wrote and filtered on chunk metadata the API neither stores nor returns), so a knowledge source bound to it never retrieved anything, and nothing reported that. It is retired rather than repaired; the last published version stays on npm and will be marked deprecated.
+  
+  On the Knowledge settings page (`knowledge` namespace, manifest `version` 3):
+  
+  - The **Adapter** select offers `memory` and `turso`. The `ragflow` option, the RAGFlow group and its three keys (`ragflow_base_url`, `ragflow_api_key`, `ragflow_default_dataset`) are gone, with their strings in all eleven bundled locales.
+  - A stored `adapter = ragflow` is still served as stored, since the settings service never rewrites a stored value. The Console shows the Adapter select with nothing selected. Saving other keys works; saving `ragflow` again is refused; "Test connection" answers "Unknown adapter: ragflow". No code ever read this setting, so nothing else changes behaviour.
+  - Stored rows for the three removed keys are kept, never deleted. The page no longer serves them, and no settings door clears them, the encrypted `ragflow_api_key` included.
+  
+  What leaves, and what to write instead:
+  
+  - FROM `@objectstack/knowledge-ragflow` TO an adapter package this repository builds: `@objectstack/knowledge-pgvector` (`adapter: 'pgvector'`, PostgreSQL with pgvector), `@objectstack/knowledge-turso` (`adapter: 'turso'`, a libSQL file) or `@objectstack/knowledge-memory` (`adapter: 'memory'`, development and tests). Fix: stop registering `KnowledgeRagflowPlugin`, remove the dependency, and bind your sources to one of those; to keep an external engine, register your own `IKnowledgeAdapter` under an id of your choice.
+  
+  On a deployment that used it, also:
+  
+  - A knowledge source that still names `adapter: 'ragflow'` with no such adapter registered boots without an error: searches over it answer no hits and log `references unknown adapter`, and indexing it throws `unknown adapter 'ragflow'`. Change the source's `adapter`.
+  - Pick an adapter on the Knowledge settings page and save, which replaces the stored `ragflow` value.
+  - To remove the stored API key, delete the `knowledge` rows named `ragflow_base_url`, `ragflow_api_key` and `ragflow_default_dataset` from `sys_platform_setting`, and the `sys_secret` row whose `id` the `ragflow_api_key` row holds in `value_enc` (a `sec_` handle). Until then the `sys_secret` orphan report may list it. An earlier note in this release says mounting the knowledge service and clearing the key from Setup removes it; for `ragflow_api_key` that no longer applies, because the page no longer declares the key.
+  
+  Also in this change, text only: `@objectstack/spec` comments on `KnowledgeSource.adapter`, `KnowledgeSource.embedding`, `IKnowledgeAdapter` and `IKnowledgeService` name adapters that exist; the `@objectstack/service-knowledge` README and package description, and the `@objectstack/embedder-openai` README, name the adapters this repository builds (the embedder README now says which of them take an `embedder`).
+  
+  In `@objectstack/skills`, `skills/objectstack-ai/SKILL.md` (*Knowledge Sources (RAG)*, rewritten in place, 487 lines and 6798 tokens before and after):
+  
+  - The wiring paragraph names `@objectstack/knowledge-memory` (`'memory'`, dev/test), `@objectstack/knowledge-pgvector` (`'pgvector'`) and `@objectstack/knowledge-turso` (`'turso'`), where it named the retired package and `'ragflow'`.
+  - The example source uses `'pgvector'`. An agent following the old example wrote a source bound to an adapter that never retrieved anything. The `adapter` row no longer repeats example ids, and the `embedding` row no longer names engines no adapter here serves.
+  - The splitting paragraph says which adapters take the service's passages (`memory`, `pgvector`, `turso`); any other adapter receives whole documents.
+  - `evals/skills-tools-knowledge.json`, case 3: the prompt says the deployment runs PostgreSQL with pgvector, and the expected answer writes `adapter: 'pgvector'` and no `split` key, because the default `recursive` split fits article prose. The case keeps what it exercised (an object source with `where`, `metadataFields` and `refresh`, registered through `KnowledgeServicePlugin`); the in-memory adapter is already case 9.
+- a10345a: docs(skills): the data and UI skills no longer teach a boolean `inlineEdit` on a master-detail relationship
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  objectstack-data's `rules/relationships.md`, "Inline-edit form factor": the `inlineEdit: true // auto (default)` line is gone, and the smart default is now described as what an omitted key gets, with a note that a boolean is refused. The spec parse refuses `true` and `false` on a relationship field's `inlineEdit` since 19.0.0; only `'grid'` and `'form'` are accepted, and leaving the key out picks the form factor from the child's shape. `evals/objects-fields-relationships.json` case 25 drops the same `true` from its expected answer. objectstack-ui's `rules/list-views.md`, Master-Detail Forms: the pointer to that section no longer lists `true` beside `'grid'` and `'form'`; it says `'grid'` / `'form'` or left out.
+- f588898: docs(skills): objectstack-ui says where `os validate` judges `actionLayout` names
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  objectstack-ui's `rules/actions.md`, "Button Order (`actionLayout`)": the sentence "`os validate` refuses a name the arm's scope does not place" now says where that holds: on the object, or on an extension of an object the same stack defines. The next sentence, on the paired `.custom` package's extension of an installed object, now says those names are not judged there and that a wrong name draws nothing. The rule itself is unchanged; the text said more than the rule does. Three Add to Campaign example lines that repeated a key another example in the file already shows (`icon`, `successMessage`, `refreshAfter`) and the gloss "(the handler's answer)" on the copy-holes bullet, which the `resultDialog` bullet above it already says, were removed to pay for the new words.
+- 6c290d3: docs(skills): objectstack-data names `actionLayout` among the keys only the paired `.custom` extension writes, and objectstack-automation says an option label in a flow filter or edge condition is refused
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  objectstack-data: the sentence on what only the pair's object extension writes listed `fieldGroups` and `relatedLists`; it now names `actionLayout` too, with a pointer to objectstack-ui, where the key is taught, and says what differs for that key: it replaces each arm it writes, and outside a `.custom` package an action is placed by its own `locations` and `order`, not by `place`. Paid for in the same file by trimming three Quick Reference lines that repeated what the body says (naming, field types, "partial indexes").
+  
+  objectstack-automation: the trap sentence said a label in a `filter` or an edge `condition` "is never checked". `flow-condition-option-label` now reads those positions, so the sentence says they are refused at publish like a start condition (where the field's options are inline), and that a filter for rows still holding the label takes a CEL envelope operand. Text only; no ceiling of the skills token ratchet moves.
+- a1b26ff: docs(skills): the objectstack-project platform catalog lists the built-in `sys_task` and `sys_note` objects
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The catalog's "Platform objects an app would otherwise build" section gains a "Tasks and notes" group, so an app that needs to-dos or notes uses the platform's objects instead of declaring its own. Each row says what the object holds, that it carries no link to another record, which list views ship (`assigned_to_me`, `created_by_me`, `all` on `sys_task`; `mine`, `all` on `sys_note`), and that rows are private (a task to its creator and assignee, a note to its creator) while `member_default` grants read, create and edit, not delete, without widening that. The task row spells the navigation entry an app uses: `type: 'object'` with `objectName` and `requiresObject` both `sys_task`. The `sys_comment` row now reads "a comments or record-notes table", since neither new object links to a record. One eval case covers the to-do request.
+- 1a62867: docs(skills): objectstack-data says `os validate` and `os build` refuse a seed record its object's validation rules refuse
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  `references/seeds.md` said `os validate` does not run an object's validation rules on seed rows. Both commands now run them: each exits 1 (`--json` too) on a record a rule refuses, naming the record's location (`data[0].records[1]`), the object, the record index and the rule. Only text, number, boolean and single-select literal values (or a field absent or `null` with no default) decide a rule. Anything else it reads (a date, JSON, multi-valued, reference or CEL value, an empty string, a formula or roll-up field), a `beforeInsert` hook on the object or an `update` dataset leaves the rule counted and never refused; the load still judges it, and `os verify` still fails on each dropped row. The `externalId` section now says a blank key field fails `os validate` / `os build` as well as the load. Text only; restatement elsewhere in the file is cut to pay for it.
+- 1f939b1: docs(skills): `objectstack-ai` teaches the `ask_ai` action — the **Ask AI** button on a record
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  `skills/objectstack-ai/SKILL.md`, a new subsection *The Ask AI button — `type: 'ask_ai'`* under *Actions as AI Tools*:
+  
+  - What the action does: it pins the assistant's conversation to the record it runs on and opens the assistant, sending no message; it is declared on the object in `locations: ['record_header']` or `['record_more']`, with a `defineAction` example that type-checks against the spec.
+  - What the parse refuses beside it: a `target`, `ai.exposed: true`, and `actionType: 'ask_ai'` on a dashboard header (a header runs on no record).
+  - That nothing serves it headless: `list_actions` skips it, `run_action` refuses it, and no `action_` tool exists for it.
+  - Where it is absent rather than disabled: the console draws it only where the assistant surface is on and the AI service honours a conversation focus.
+  
+  Paid for by deleting restatement in the same file, with the token ceiling unchanged (6801; the file now measures 6787):
+  
+  - the *App AI Blueprint* table (its first two rows restate *Skill Configuration* and the `KnowledgeServicePlugin` wiring; its third row's claim that `agents` / `tools` / `skills` are the only AI stack collections was stale, since `aiContexts` is a `defineStack` key too);
+  - the alias sentence under *Platform agents* (`data_chat` / `metadata_assistant` for old bookmarks: the agent type is closed to third parties, so no author writes either);
+  - the pointer to `references/_index.md` for `AgentSchema` (the *References* section already points there);
+  - the rung-2 sentence "Read that file for the exact set" (the sentence before it names the file);
+  - the two product-analogy parentheticals beside `ask` and `build`;
+  - the memory clause of pitfall 1, kept to its two facts (the required keys and that there is no storage backend to choose).
+  
+  `evals/skills-tools-knowledge.json`: a new case 10 asks for an Ask AI button on the contract record page; the expected answer is a `type: 'ask_ai'` action in `record_header` with no `target` and no `ai.exposed: true`; its `must_not_contain` holds only `target:`, a token a correct answer never carries. Case 9's reference answer no longer spells the `chunkSize` token it forbids (it says "no chunk-size key"), so the reference passes its own grader; the assertions are unchanged.
+- c2b2e4f: docs(skills): the objectstack-platform stack-config example declares `engines: { protocol: '^19' }`, the major the 19.x boot handshake accepts
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  `PROTOCOL_VERSION` moves to `19.0.0`, and a 19 runtime refuses a manifest that declares `'^18'` at boot (`OS_PROTOCOL_INCOMPATIBLE`). The `objectstack-platform` `defineStack` example, the eval that pins it (`evals/config-plugins-ops.json`, prompt and expected output together) and the `objectstack-upgrade` sentence that says what every scaffold and example writes now say `'^19'`. The upgrade skill's worked examples (`'^17'` → `--from 17`, the `--to 18` acceptance replay of the last ported hop) are unchanged: step 19 carries no conversion and one semantic entry (`protocol-18-range-refused`).
+- 98bda0a: docs(skills): `objectstack-ai` teaches the knowledge source `split` key and names the two keys retired beside it
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  `skills/objectstack-ai/SKILL.md`, *Knowledge Sources (RAG)*:
+  
+  - The object source's fields gain `split?`, and a passage teaches `split: { strategy, maxChars?, minChars? }`, an object-source key: `recursive` (the default) for prose, `markdown` for documents with headings, `whole` for short records only, since a document over the embedder's input budget is removed from the index and reported, never truncated. `maxChars` overrides the **Target chunk size** setting (`knowledge.chunk_target`, else 800), the embedder's input limit can lower it, and `whole` ignores it; `minChars` defaults to 200. Changing `split` re-splits a document only when the document next changes. The key applies to an adapter that declares `capabilities.chunks` (`memory`); one that does not (`ragflow`) receives whole documents, and `split` has no effect on it.
+  - It names the two keys retired with the splitter, and that each is refused when written: the `knowledge.chunk_overlap` setting (`400 UNKNOWN_KEY`; passages never overlap) and `KnowledgeChunk.metadata` (a parse error; a passage takes its document's `metadata`).
+  - The closing note that said chunking is not platform metadata is replaced: the service splits; top-K, score thresholds and rerankers are not source metadata and belong to the adapter or application code.
+  
+  Paid for by deleting restatement in the same file, with the token ceiling unchanged (6801; the file now measures 6800):
+  
+  - the pitfall "Indexing everything" (the `object` row's hygiene column says the same);
+  - the "Skills are your entry point" paragraph under the diagram (the frontmatter description, the `tools` row and *Platform agents* say the same);
+  - the incident sentence after `ai-skill-tool-unresolved`;
+  - the sentence saying what `os validate` confirms;
+  - the clause of the *App AI Blueprint* registration row repeating three facts stated in their own sections;
+  - four clauses that repeated the sentence beside them: "A skill names a platform tool or an `action_<name>`" (*Tool metadata*), "the user never picks from a roster…" (*Platform agents*), "without one the id is unresolvable" (*Wiring*), and "exposure is never automatic" (*Actions as AI Tools*).
+  
+  `evals/skills-tools-knowledge.json`: a new case 9 asks for a Markdown handbook source on the in-memory adapter, split by section at 600 characters with overlapping passages; the expected answer writes `split: { strategy: 'markdown', maxChars: 600 }` and declines the overlap. Case 3 (RAGFlow) no longer says chunking is adapter config: its expected answer writes no `split`, because that adapter receives whole documents.
+- 79fcbe2: docs(skills): `objectstack-automation` spells an `expression` approver's `value` as the plain CEL string the schema accepts
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  `skills/objectstack-automation/references/state-machines-and-approvals.md`, *Dynamic approvers*: the three fragments wrote the approver's `value` with the `cel` tag, which builds a `{ dialect, source }` object. `ApprovalNodeApproverSchema.value` is a string, so an approval node copied from them failed validation with `expected string, received object`. They now read `value: 'current.co_review_departments'`, `value: 'vars.lead_review.next_reviewers'` and `value: 'current.picked_departments'`, the spelling the end-to-end flow below them already used. The `expression` row of the approver table says `value` is the expression string. The file is two bytes shorter and its token ceiling is unchanged.
+- df0894a: docs(skills): objectstack-ai's context-pack reference says a related object the caller cannot read is left out, and names what still refuses the call
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  `skills/objectstack-ai/references/context-packs.md` taught that a `related` object the caller cannot read refuses the whole `get_record_context` call. The tool leaves that list out instead and says so with the one `not_visible` note, which names nothing. The reference now says that, and names what does refuse the whole call with `403 PERMISSION_DENIED`: a `related` object nobody is served (a system object the record tools refuse, one closed to API list reads, or one in a disabled package), and a lookup shown to the caller whose target is such a system object. Text only; restatement elsewhere in the file is cut to pay for it.
+
 ## 18.6.0
 
 ### Patch Changes

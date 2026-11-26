@@ -29,6 +29,7 @@
  * | approval-decision-outputs-reserved         | error    | #3447 P2 resume envelope   |
  * | approval-approver-cross-org-unsupported    | error    | ADR-0105 D9 targeting      |
  * | approval-approver-platform-admin-authored  | error    | save door only (see below) |
+ * | approval-detail-editable-while-pending     | warning  | detail-row lock follows master_detail only |
  *
  * The first two are mutually exclusive by construction — a bad *value* wins,
  * because its fix (`position`) differs from the deprecation's fix
@@ -52,6 +53,7 @@ import {
   normalizeDecisionOutputs,
 } from '@objectstack/spec/automation';
 import { BUILTIN_MEMBERSHIP_ROLES } from '@objectstack/spec';
+import { fieldGroupsPlaceRelationship, isBodyTableRelationship } from '@objectstack/spec/data';
 import { collectCelRootIdentifiers } from '@objectstack/formula';
 import { flowDisplayLabel, flowNodeLabel, walkFlowNodes } from './flow-walk.js';
 import { recordsOf } from './object-graph.js';
@@ -69,6 +71,56 @@ export const APPROVAL_EXPRESSION_NO_EMPTY_POLICY = 'approval-expression-no-empty
 export const APPROVAL_DECISION_OUTPUTS_RESERVED = 'approval-decision-outputs-reserved';
 export const APPROVAL_APPROVER_CROSS_ORG_UNSUPPORTED = 'approval-approver-cross-org-unsupported';
 export const APPROVAL_APPROVER_PLATFORM_ADMIN_AUTHORED = 'approval-approver-platform-admin-authored';
+
+/**
+ * The rule id of an approval whose record shows a detail table the approval
+ * lock does not cover (see {@link unlockedDetailTablesOf}).
+ */
+const APPROVAL_DETAIL_EDITABLE_WHILE_PENDING = 'approval-detail-editable-while-pending';
+
+/** The object a flow's runs carry as `record`: its start node's `config.objectName`. */
+function flowStartObjectName(flow: AnyRec): string | undefined {
+  const nodes = Array.isArray(flow.nodes) ? (flow.nodes as AnyRec[]) : [];
+  const start = nodes.find((n) => n && typeof n === 'object' && n.type === 'start');
+  const config = start && typeof start.config === 'object' && start.config !== null ? (start.config as AnyRec) : {};
+  return typeof config.objectName === 'string' && config.objectName.trim() !== '' ? config.objectName : undefined;
+}
+
+/**
+ * The `lookup` children a record page of `parent` draws as a table in its own
+ * body — its detail rows — which a pending approval of a `parent` record does
+ * NOT lock.
+ *
+ * A locking approval (`lockRecord`, default `true`) refuses edits of the record
+ * (`bindRecordLockHook`) and of the rows of every `master_detail` child under
+ * it (`bindDetailRowLockHook`, whose `masterEdgesOf` reads `master_detail`
+ * fields only, `plugins/plugin-approvals/src/lifecycle-hooks.ts`). A child
+ * linked by a `lookup` is outside that lock, yet when it is a body table
+ * (`relatedList: 'primary'`, or a field group of the parent places it —
+ * `isBodyTableRelationship`) the approver reads its rows as part of the record
+ * under approval while anyone may still change them. A `lookup` child that is
+ * not a body table is a related record, not the record's detail, and is not
+ * reported; nor is a multi-value lookup, which a body table never draws.
+ */
+function unlockedDetailTablesOf(
+  objects: readonly AnyRec[],
+  parent: AnyRec,
+): Array<{ child: string; field: string }> {
+  const out: Array<{ child: string; field: string }> = [];
+  const parentName = parent.name;
+  if (typeof parentName !== 'string') return out;
+  for (const child of objects) {
+    if (typeof child.name !== 'string') continue;
+    for (const field of recordsOf(child.fields)) {
+      if (field.type !== 'lookup' || field.multiple === true || field.reference !== parentName) continue;
+      const name = typeof field.name === 'string' ? field.name : '';
+      if (!name) continue;
+      const placedByGroup = fieldGroupsPlaceRelationship(parent.fieldGroups, child.name, name);
+      if (isBodyTableRelationship(field, { placedByGroup })) out.push({ child: child.name, field: name });
+    }
+  }
+  return out;
+}
 
 /** What {@link validateApprovalApprovers} needs to know about the door that runs it. */
 export interface ValidateApprovalApproversOptions {
@@ -398,6 +450,7 @@ export function validateApprovalApprovers(
   // Stack-level, so it is read once and every node is judged on the same
   // evidence — a per-node re-read would let two identical nodes disagree.
   const managerChainWired = stackWiresManagerChain(stack);
+  const objects = recordsOf(stack.objects);
 
   for (let fi = 0; fi < flows.length; fi++) {
     const flow = flows[fi];
@@ -409,6 +462,9 @@ export function validateApprovalApprovers(
     // Every node, INCLUDING those nested in try_catch / loop / parallel regions
     // — an approval inside a loop body is still an approval (#4380).
     const walked = walkFlowNodes(flow, `flows[${fi}]`);
+    // The detail-table advisory is the flow's, not each node's: said once, at
+    // the first approval step that locks the record.
+    let detailTablesReported = false;
 
     for (let ni = 0; ni < walked.length; ni++) {
       const { node, path: nodePath } = walked[ni];
@@ -418,6 +474,31 @@ export function validateApprovalApprovers(
       const cfg = (node.config ?? {}) as AnyRec;
       const approvers = Array.isArray(cfg.approvers) ? (cfg.approvers as AnyRec[]) : [];
       const where = `flow "${flowName}" · node "${nodeId}"`;
+
+      // A locking approval whose record shows a lookup child as its own detail
+      // table: those rows stay editable while the record waits for approval.
+      if (!detailTablesReported && cfg.lockRecord !== false) {
+        const objectName = flowStartObjectName(flow as AnyRec);
+        const parent = objectName ? objects.find((o) => o.name === objectName) : undefined;
+        if (parent) {
+          detailTablesReported = true;
+          for (const { child, field } of unlockedDetailTablesOf(objects, parent)) {
+            findings.push({
+              severity: 'warning',
+              rule: APPROVAL_DETAIL_EDITABLE_WHILE_PENDING,
+              where,
+              path: `${nodePath}.config.lockRecord`,
+              message:
+                `locks a ${objectName} record while it waits for approval, but the ${child} rows its record page ` +
+                `shows as a table through the lookup "${child}.${field}" stay editable: the lock covers only ` +
+                `master_detail children`,
+              hint:
+                `Make ${child}.${field} a master_detail field so its rows lock with the ${objectName} record, or ` +
+                `take the ${child} table out of the ${objectName} record body if its rows may change during approval.`,
+            });
+          }
+        }
+      }
 
       for (let ai = 0; ai < approvers.length; ai++) {
         const a = approvers[ai];

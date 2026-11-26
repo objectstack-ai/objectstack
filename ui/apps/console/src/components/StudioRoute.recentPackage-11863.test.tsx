@@ -74,9 +74,12 @@ vi.mock('@object-ui/app-shell', async (importOriginal) => ({
   useHomePath: () => '/home',
 }));
 
-vi.mock('./studioBuilder', () => ({
+vi.mock('./studioBuilder', async () => ({
   StudioEntryRedirect: () => <div data-testid="studio-entry">entry</div>,
   StudioDesignSurface: () => <div data-testid="studio-pillar-builder">pillars</div>,
+  // objectstack#36909 — the retired pillar addresses' redirect, real.
+  StudioPillarRedirect: (await vi.importActual<typeof import('@object-ui/app-shell')>('@object-ui/app-shell'))
+    .StudioPillarRedirect,
 }));
 
 import { RecentItemsProvider, useRecentItems } from '@object-ui/app-shell';
@@ -166,13 +169,13 @@ describe('/studio/PKG/TAB records the package as a recent entry (objectui#11863)
     expect(JSON.parse(localStorage.getItem(STORAGE_KEY) ?? '[]')).toEqual([entry]);
   });
 
-  it('the bare package route records it too, once it lands on the Data pillar', async () => {
+  it('the bare package route records it too, once it lands on the object list', async () => {
     renderStudio('/studio/com.acme.crm');
-    await waitFor(() => expect(screen.getByTestId('pathname')).toHaveTextContent('/studio/com.acme.crm/data'));
+    await waitFor(() => expect(screen.getByTestId('pathname')).toHaveTextContent('/studio/com.acme.crm/metadata/object'));
     await waitFor(() => expect(recent().map((r) => r.id)).toEqual(['package:com.acme.crm']));
   });
 
-  it('switching pillars inside the same package changes nothing, so it writes nothing', async () => {
+  it('switching pages inside the same package changes nothing, so it writes nothing', async () => {
     renderStudio('/studio/com.acme.crm/data');
     await waitFor(() => expect(recent()).toHaveLength(1));
     const before = persisted();
@@ -181,7 +184,8 @@ describe('/studio/PKG/TAB records the package as a recent entry (objectui#11863)
     await new Promise((r) => setTimeout(r, 20));
 
     act(() => screen.getByTestId('go:/studio/com.acme.crm/automations').click());
-    await waitFor(() => expect(screen.getByTestId('pathname')).toHaveTextContent('/studio/com.acme.crm/automations'));
+    // objectstack#36909 — the retired Automations address lands on the flow list.
+    await waitFor(() => expect(screen.getByTestId('pathname')).toHaveTextContent('/studio/com.acme.crm/metadata/flow'));
     await screen.findByTestId('studio-pillar-builder');
 
     expect(persisted()).toBe(before);

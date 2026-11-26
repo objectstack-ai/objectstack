@@ -1,5 +1,473 @@
 # Changelog — @objectstack/service-analytics
 
+## 19.0.0-next.0
+
+### Patch Changes
+
+- 7f4970a: fix(plugin-dashboard): a compare widget dated on a related record's field is served through the dataset's declared date dimension over that path
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  A dataset-bound compare widget (`compareTo`) sends its date window to the dataset query under the filtered field's name. The dataset query answers only declared dimensions, and a dimension name has no dot, so a window on a related record's field, such as `account.founded_at`, was refused with `400 INVALID_FIELD`.
+  
+  When such a key is in the window, the widget now reads the dataset definition and sends the window under the one declared dimension with `type: 'date'` and `field` equal to that path (for example `{ name: 'account_founded', field: 'account.founded_at', type: 'date' }`). A `compareTo.dimension` that names the window by the path or by that declared name is sent as the declared name. When no declared date dimension covers the path, or two or more do, the key is sent as authored and the dataset query still refuses it. Keys that can be dimension names, such as `close_date`, are never renamed, and widgets whose window has no such key read nothing extra.
+  
+  To serve a compare widget dated on a related record's field, declare one date dimension over that path on the dataset.
+  
+  The dataset query's `400 INVALID_FIELD` refusal for a comparison-window date key that cannot be a dimension name no longer says the comparison cannot run unless the date field is a field of the dataset's own object; it names the remedy that exists: declare one date dimension over that field (`type: 'date'`, `field` set to it, any snake_case name, the relationship in the dataset's `include`) and name it in `timeDimensions`, which a dashboard compare widget then does itself. The refusal's code, status and when it fires are unchanged.
+- 96faf44: Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  fix(i18n, mcp): a translation fault serves the untranslated text and the fault is logged, instead of failing the read; `list_datasets` is flagged `partial` with a `warning`, while REST `/meta`, the MCP object tools and `query_dataset` log only
+  
+  When the i18n service resolves but its `getLocales` or `getTranslations` throws, the shared `/meta` translator (`translationBundleOf`, `@objectstack/rest`) now answers it as no bundle: the text is served untranslated and the server log says so at `warn` (`The translations could not be read (…), so labels and descriptions are served untranslated.`). Before, the translation rejected, so `GET /meta/:type` and `GET /meta/:type/:name` answered 500, the MCP object tools failed, `list_datasets` answered `datasets: []` with `partial: true`, and `query_dataset` refused 503 on both MCP transports.
+  
+  Now `list_datasets` keeps every dataset, in its authored text, with `partial: true` and that sentence as its `warning`; `query_dataset` answers. A dataset host's `loadDatasets` may return `{ items, warning }` without `partial`: a whole read the tools say something about, which `query_dataset` does not refuse. The translator's sources take an optional `reportTranslationFault(warning)` to carry the sentence on an answer.
+  
+  fix(mcp): `?locale=` reaches the MCP labels, and the dataset tools answer in one language
+  
+  The HTTP MCP door now reads a `?locale=` query parameter as the `/meta` doors do (after `Accept-Language`, before the i18n default), for the object and dataset labels and the app-docs tools; it read headers only, though its docblock promised both. The dataset executor (`createDatasetTools`) takes an optional `translationLocale` dependency, the locale its `loadDatasets` translated the rows for, and reads labels and composes `nextStep` and `sourceLine` in it first. Both MCP transports pass it, so a call with no `Accept-Language` (common for MCP clients, and every stdio call) no longer mixes labels in the i18n default with sentences in the workspace locale.
+- e25207d: fix(service-analytics): `list_datasets` no longer tells a client outright to ask "which number" when a word that falls back stands beside a grouping word
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  A question such as "How many sales orders are in each status?" names its number. When no dataset measure answers to "sales orders" and none is offered as a candidate, the labelled fallback to the object query tools computes it. Until now the `nextStep` note of such an answer said two things at once whenever the grouping word equalled a dimension, or was near one: answer with the object query tools, and "A grouping alone is no answer: ask the user which number they mean." A client told both asked, and computed nothing.
+  
+  - **`list_datasets` `nextStep.note`** (`@objectstack/service-analytics`): the "which number is meant" sentence is written only when every word sent is a grouping (it equals a dimension, or has only dimensions among its candidates). With an unknown word beside it, the note carries that word's labelled fallback, then one closing sentence that leaves the question to the case only the client can see: "Only when the question has no word for a thing measured, ask the user which number they mean instead." (the unknown word may be a filter value, as in "break it down by stage for the west region"; the server sees words, not which of them names the number). `decision`, `terms`, `matches` and `candidates` are what they were. Unchanged: a word that equals several measures, and a word with a measure among its candidates (one candidate included), are still asked about and never selected.
+  - **`list_datasets` description**: the sentence "A dimension match alone picks a grouping, not a number: a measure must still match." now reads "A dimension match picks a grouping, not a number: when the question has no word for a thing measured, ask which number is meant; beside a word for a thing measured that falls back, ask nothing and take the fallback."
+  - **`objectstack-ask` skill, step 2** (`@objectstack/skills`, and the copy `GET /mcp/skill` serves from `@objectstack/mcp`): the row "Only a dimension matches" becomes "No word for a thing measured, only grouping or filter words", and the fallback row says the fallback is taken without asking, whatever a grouping word or another word matched. The sentence under the table that said the same about another word's matches is cut, since the row now holds it.
+  - **`objectstack-ask` skill, step 1**: a term keeps its counting head ("number of deals", not "deals"), so a phrase the dataset's owner declared as a synonym is sent whole and can equal its one measure.
+  - Four eval cases (21 to 24) cover the fallback beside a grouping candidate, the fallback beside a dimension match, the whole counting phrase, and a question with a grouping and a filter value but no word for a thing measured, which is asked which number is meant.
+  
+  The skill file is 2 bytes shorter than before (1875 tokens by the catalog's count, before and after).
+- 7ed18b5: fix(analytics): a grouping or time word with only a near dimension no longer stops a matched measure with a question
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  A question like 「按行业看销售额」 or "revenue this quarter" sends `list_datasets` a measure word with an exact match (销售额, revenue) and a grouping or time word that matches nothing exactly but is near a dimension (「按行业」 contains 行业, "this quarter" contains `quarter`). The `nextStep` note used to tell the model to ask the user about that word before using it, so an ordinary question got a clarifying question back. Now a word whose candidates are all dimensions is offered as a possible grouping: the note says not to ask about it and that it does not stop the matched measure, which is computed. A word with a measure among its candidates still asks, as before: a bare near-miss measure word (销售 near 销售额) is still `candidates_only` and computes nothing until the user answers, and beside a matched measure it is still asked about.
+  
+  What changes is the note only. `decision`, `terms`, `matches` and `candidates` are the same as before for every input: a word with only dimension candidates is still `candidates_only` when it is the reported case, and its candidates are still listed. When such a word is the only word sent, the note offers the grouping and asks which number is meant, as it does for a word that equals a dimension.
+  
+  The `list_datasets` tool description and the MCP `initialize` selection rule now state the scoped rule in the same words: "A word whose candidates are all dimensions is at most a possible grouping: never ask about it, and it never stops a matched measure."
+- 338448e: fix(service-analytics): a derived dataset measure whose operands are all tenant-currency amounts carries the request's tenant currency
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  A dataset `sum` over a `currency` field in `dynamic` mode (the default) already labels its result column with the request's tenant currency (`localization.currency`). A derived `sum` or `difference` over such measures did not: its column carried no `currency`, so it rendered as a bare number beside the plain sums it was built from (a project's actual cost as labor plus expense, for example). Its column now takes the tenant currency too, on `POST /analytics/dataset/query` and on the dataset draft preview alike.
+  
+  A derived measure counts as an amount in the tenant's currency only when every operand is one: an amount aggregate (`sum`, `avg`, `min`, `max`) over a `dynamic` currency field with no `currency` of its own, or a derived `sum` / `difference` of such measures. Unchanged:
+  
+  - A `ratio` or `product` of tenant amounts is no amount and stays bare.
+  - A derived measure that mixes a tenant amount with a `fixed` code, an explicit measure `currency`, a record-mode amount or a `count` stays bare, whichever operand comes first.
+  - A derived `sum` / `difference` over one `fixed` code still carries that code, and a derived measure's own `currency` still wins.
+  - With no tenant currency on the request, the column carries none, as the plain sum under it does.
+  
+  No metadata key, accepted value or default changes; no compile-time guard moves.
+- 8856afc: feat(mcp): a refused record read says the data is not recorded, in the caller's language
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  When `query_records`, `aggregate_records` or `get_record` is refused and the call named an object, or a field, that the caller's own schema does not show (the object as `describe_object` serves it to them), the refusal now carries two members beside it, on the HTTP and the stdio server alike:
+  
+  - `notRecorded`: what is not recorded, as the caller sent it: `{ "object": "<name>" }`, or `{ "object": "<name>", "fields": ["<name>", …] }` for the field names the call sent that the schema does not show, in the order sent. Every sent name is read by its head on every channel (`where`, `fields`, `orderBy`, `groupBy`, an aggregation's `field` and `filter`), so `owner.name` is judged by `owner`, and a dotted name whose head the schema shows is never named.
+  - `ifNotRecorded`: one sentence, in the caller's language (English, Simplified and Traditional Chinese, Japanese), telling the model to say the data is not recorded, never to report 0 or an empty result for it, and not to answer with another object or field in its place.
+  
+  The answer names only what the caller can see: both members are built from the names the caller sent and from the caller's served schema, and nothing else. The refusal itself (`isError`, its `code`, `message` and `status`) is unchanged, byte for byte. A read that answers, a refusal about a field the caller's schema shows, a server fault, and a refusal whose schema read cannot be made carry no member. `id`, `created_at` and `updated_at`, which every object answers, are never named.
+  
+  The language is chosen by one shared picker, `pickSentenceLocale` (with `platformLocaleNamedBy`), now exported from `@objectstack/core`: the first of the caller's locales (the request's, then the workspace default) that names a language the sentence is written in, else `en`. The dataset tools' `nextStep` and `sourceLine` (`@objectstack/service-analytics`) use the same picker, with unchanged behaviour. `McpDataBridge` gains an optional `userTextLocales()` member: the HTTP bridge answers the request's ladder, the stdio bridge the principal's ladder and then the i18n service's default. A bridge without it is answered in `en`.
+- b863d2b: feat(service-analytics): `query_dataset` says how many groups existed before the `limit` cut (`totalGroups`), as `aggregate_records` does
+  
+  Clause-②: yes (widening: QueryDatasetOutputSchema gains totalGroups)
+  Metadata-protocol: added
+  Skills-docs: follow-up #35203
+  
+  `QueryDatasetOutputSchema` gains an optional `totalGroups`: how many groups the selection formed before `offset` and `limit` cut them, the same name and meaning as `aggregate_records`' `totalGroups`. A client asked "how many are there" after a top-N cut can now answer it: a grouped `query_dataset` whose `limit` is below the group count answers `truncated: true` and the full count, and an answer that was not cut answers `totalGroups` equal to `rowCount`.
+  
+  The count never costs a read. Where the window is pushed into the one SQL statement that grouped the answer, the database counts the groups in that statement (`COUNT(*) OVER ()`, after the `GROUP BY` and ahead of the `ORDER BY` and `LIMIT`). Where the window is applied in memory, the count is the length of the grid before the window: an order by a display label (the tool's own order, used when none is sent, sorts every selected dimension, so grouping by any select or reference field brings this in; an order by measures alone does not), a grid assembled from several queries (a measure with its own filter, a derived measure, `compareTo`), and a query the engine's aggregate serves, such as a date bucket, a field-to-field filter, an external object or a driver with no raw SQL. That grid is counted only when every read that built it came back whole; a grid that a cap or row guard cut before the window answers no count.
+  
+  `totalGroups` is absent when: the window was pushed down and the SQL dialect is not one the analytics strategy knows, or a selected member is itself named `__os_group_count`, or the page came back empty after an `offset`; a read was served by a strategy that does not vouch for its grid, such as one a host adds, or was cut by a cap under it; or the dataset's object is missing and the answer is the empty one served for it. Read `totalGroups` as optional.
+  
+  Only the AI tool asks for the count. The REST dataset door, dashboards and reports run the statements they ran before.
+- 068a0f9: fix(service-analytics): `query_dataset` never pairs an empty answer with a group count
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  A selection with `totals` runs its totals reads after the primary grid is counted. When one of those reads met a missing source, the service served the empty answer (`rowCount: 0`), but the group count of the primary grid was already written, so `query_dataset` answered `totalGroups` for a grid it never served. The count now reaches the caller only once the whole call has answered; an answer served empty because a read failed carries no `totalGroups`.
+  
+  The `dataset-group-count.ts` header also states where the whole-grid proof stops: at the strategy's own read seam (`ctx.executeRawSql`, `ctx.executeAggregate`). A host-supplied bridge or an out-of-repo driver that silently truncates an unwindowed read would be counted as whole.
+  
+  No key, member or export changes.
+- c321914: fix(objectql,service-analytics): `query_dataset`'s ObjectQL face orders and cuts a top-N in the database instead of reading every group
+  
+  Clause-②: yes
+  Metadata-protocol: none
+  
+  A top-N (`order` with a `limit`, optionally an `offset`) on the analytics ObjectQL face — date-bucketed queries, `$field` filters, drivers without raw SQL — used to read every group and cut in memory. On a driver that compiles the engine's order-and-cut (the SQL driver family: `driver-sql`, the WASM SQLite driver, Turso's local and replica faces) the face now hands the engine its order and `offset + limit`, the database orders, cuts and counts in one statement, and only the cut rows are read. `totalGroups` stays the count of every group, taken from that statement.
+  
+  Visible change: a text-ordered top-N on such a driver now returns the database's choice of groups — its collation, NULL last in both directions — the same as the native SQL face and `aggregate_records`, instead of the in-memory comparator's (`localeCompare`, `''` read as empty).
+  
+  Where the engine cannot serve the cut — the in-memory driver, MongoDB, OData, Turso's remote face, a date bucket or reference timezone the driver does not compile, a measure filter it does not evaluate — the face reads every group and cuts in memory as before, and no refusal reaches the caller. A select or lookup dimension ordered by its display label is still cut in memory, by label.
+  
+  `@objectstack/objectql`: an `AGGREGATE_ORDER_CUT` request may set `declinable: true`; where the cut cannot be served the engine then reads nothing, answers `[]`, leaves `outcome` unset and records the reason on the request's new `declined` slot instead of refusing `INVALID_QUERY` / 400. Without the flag nothing changes: `aggregate_records` keeps its refusal, and `AggregateOrderCutOutcome` is unchanged.
+- d76d57a: fix(service-analytics): the cube door refuses a total over a formula with the stored-field remedy, not a row count
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  A cube measure that takes the `sum`, `avg`, `min` or `max` of a `formula` field (a configured cube's measure, or an inferred cube's suffix measure such as `expected_sum`) is still refused `INVALID_FIELD` / 400 before anything is read. Its message no longer ends "aggregate a field of one of those types, or count the rows with count": after the accepted set it now prints the spec's one prescription for a virtual field, `VIRTUAL_FIELD_AGGREGATE_REMEDY` ("Computed on read, the field stores no value: make it a field of its return type with the same `expression` (computed and stored on write) and aggregate that. Counting records is a different question."), the sentence the dataset compiler and the engine's aggregate door already print for the same pair. A count in place of a total is a plausible wrong number.
+  
+  Which measures are refused, the error code, the status and the attached `member` / `field` / `object` are unchanged. A refused pair over a stored type (for example `sum` over `text`) keeps its wording.
+- c59ee99: feat(units): a raw total over a `record`-mode quantity is refused unless it groups by the quantity's unit field
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  ADR-0158 U7 R1, mirroring ADR-0144 D6 and its record-currency doors. A `number` field declaring `unitConfig: { unitMode: 'record', unitField }` holds a bare quantity whose unit is each row's code in `unitField`. Before this change, `sum` over a row of 10 KGM and a row of 10 LBR answered `20`, and a `summary` roll-up over such child rows stored `20`.
+  
+  - **The engine aggregate** (`@objectstack/objectql`, `ObjectQL.aggregate`): `sum`, `avg`, `min` or `max` over such a quantity is refused `INVALID_FIELD` / 400 before any driver is asked, unless the query's `groupBy` includes the quantity's `unitField`. The message names the quantity, its unit field and the grouping to add.
+  - **A `summary` roll-up** (`@objectstack/objectql`, object registration): a `summary` that rolls up `sum`, `avg`, `min` or `max` of such a child quantity is refused `INVALID_METADATA` / 422, whichever object registers second. In R1 every such roll-up is refused: a child quantity cannot follow its parent's unit yet. Roll up with `function: 'count'`, or total the quantity with an aggregate grouped by its unit field.
+  - **Analytics** (`@objectstack/service-analytics`): a dataset or cube measure of type `sum`, `avg`, `min` or `max` over such a quantity is refused `INVALID_FIELD` / 400 unless the query has a dimension over the unit field, on every cube path (declared, inferred, augmented), every `totals` grouping and the draft preview.
+  - **The widening.** `AnalyticsServiceConfig.sourceFieldMeta` may answer one more optional key, `unitField`: a `number` field's `unitConfig.unitField`, under `unitMode: 'record'` only. `AnalyticsServicePlugin` relays it for a `number` under `unitMode: 'record'` and for nothing else. A host that does not answer it gets no record-unit judgment from the cube door; the engine aggregate door still refuses the same query on the ObjectQL strategy.
+  
+  Not judged: `count` and `count_distinct`, a `fixed`-mode quantity, and a `number` field with no `unitConfig`. No new error code.
+- 59392ed: fix(service-analytics)!: the analytics doors refuse an object of a disabled package with the data route's `404 OBJECT_PACKAGE_DISABLED`
+  
+  Clause-②: yes (narrowing) — the exported `AnalyticsServiceConfig` (`@objectstack/service-analytics` root) gains the optional key `isObjectPackageDisabled`, and the analytics doors newly answer `404 OBJECT_PACKAGE_DISABLED` for an object of a disabled package, which they answered `200` with data before
+  Metadata-protocol: none
+  Skills-docs: none — no page under `skills/` teaches what analytics answers for a disabled package's object; the refusal carries the data route's own sentence, which names the fix
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any schema is added, removed, renamed or re-shaped, and no stored row, registry key or authored value changes. What moves is the answer the analytics doors give for an object whose owning package is disabled, an answer that returns to what it was the moment the package is re-enabled; there is nothing for a migration to rewrite and no tombstone. -->
+  
+  **BREAKING** for a caller that queries a disabled package's object through analytics. A package disable takes the package's objects off the data plane (`GET /api/v1/data/:object` answers `404 OBJECT_PACKAGE_DISABLED`), but the analytics service asked only whether an object exists and whether it is exposed, never the registry's disabled-package predicate.
+  
+  - FROM: `POST /api/v1/analytics/query` (and `/analytics/sql`, and the dataset door behind dashboards and the AI dataset tools) answered `200` for a disabled package's object: an authored or inferred cube's counts and sums, its field values as group keys, and an enabled object's relationship hop into it. `GET /api/v1/analytics/meta` still listed a cube over it, and a lookup dimension's label pass still read its records' display names.
+  - TO: every analytics door refuses a query whose read set (the cube's base object, a declared join, or a relationship hop) holds an object of a disabled package with `404 OBJECT_PACKAGE_DISABLED`, naming the object, in the data route's words, for every caller (system included, as on the data route). A declared join counts even when the query does not use it, the same read set the exposure and permission gates already judge. `GET /api/v1/analytics/meta` leaves such a cube out (by name it answers an empty list, as for a hidden cube), and a lookup dimension's label is withheld, so the stored id renders, as the data route's `$expand` withholds the target.
+  
+  **Not moved.** An enabled object queried on its own is served while another package is disabled. A registry that cannot answer the question hides nothing. Re-enabling the package serves every read again, and nothing is cached.
+  
+  A host that constructs `AnalyticsService` by hand, instead of through `AnalyticsServicePlugin`, must wire the new `isObjectPackageDisabled` config key (the registry's disabled-package predicate, for example `registryObjectPackageDisabled(engine.registry)` from `@objectstack/core`), or its analytics doors stay ungated for a disabled package's objects.
+  
+  The error-code ledger records the code under `@objectstack/service-analytics` too (a provenance row: the set of registered codes is unchanged).
+  
+  The fix for a caller: re-enable the package, or query only objects of enabled packages.
+- 0a3dd40: feat: analytics compiles the `SharedRecordIds` fixed-read leaf, the access explainer resolves it at the record, and OData refuses it (ADR-0155, step 5 of 6)
+  
+  Clause-②: yes
+  Metadata-protocol: none
+  
+  No visible change on its own: nothing on main writes a `SharedRecordIds` leaf yet. The sharing plugin starts writing it at ADR-0155's last step.
+  
+  - **Analytics, the native SQL path** (`@objectstack/service-analytics`). A read scope carrying `{ id: { $in: SharedRecordIds.read(object, user) } }` compiles to one subquery in the list's own position, `id IN (SELECT "record_id" FROM "sys_record_share" WHERE "object_name" = ? AND "recipient_type" = ? AND "recipient_id" = ? AND "record_id" IS NOT NULL AND "record_id" <> '')`, with every value bound and no tenant scope on the subquery (ADR-0155 ① ruled A). The native strategy takes such a scope only when the host answers `AnalyticsServiceConfig.fixedReadLeafClassOf` with `null` for each leaf (outside both classes ADR-0155 D4 recognises: the object on another datasource than `sys_record_share`, or a middleware or `beforeFind` / `afterFind` hook registered for `sys_record_share` by name) and the dialect is SQLite, PostgreSQL, MySQL or SQL Server. Otherwise it declines, and the ObjectQL engine path answers. A host that wires no answer keeps today's behaviour: the native path declines every scope that carries the leaf. This change ships the hook unwired: `AnalyticsServicePlugin` passes no answer, so the native path declines a scope carrying the leaf and the engine path answers, until #35946 wires it.
+  - **Analytics, the ObjectQL path.** The read-scope merges (`withReadScope`, the related-object scope, the label read) admit a placed read-form leaf and hand it to the engine by reference. The dry-run SQL echo prints the subquery. A leaf in any other position, under `$nin`, on another object or in its write form is refused, `INTERNAL_ERROR` / 500, logged at `error` once per service logger.
+  - **Analytics, the query's `where`.** A leaf reaches analytics only in the read scope. A leaf anywhere in a query's `where`, in either spelling, is now refused before either strategy runs, with `INTERNAL_ERROR` / 500. The message names the leaf and its table, not the recipient. Before this release `{ id: { $in: leaf } }` there answered `INVALID_FILTER` / 400, with a message that printed the recipient. A bare `{ id: leaf }`, or an array-form `=`, was read as a relation condition on `id`. No request can spell the leaf, so only in-process code could reach this.
+  - **The access explainer** (`@objectstack/plugin-security`). `ISecurityService.explain` resolves each leaf in the sharing read filter at the record it judges, with one read of `sys_record_share` under the leaf's own predicate, keyed by the record ids (one read for a whole batch). The sharing layer's `rowFilter` then has the two shapes it has today: `{ id: { $in: [recordId] } }` in the share arm for a caller with a grant on the record, and the share arm left out for a caller without one. The published `rowFilter` never carries the leaf. A leaf it cannot resolve is refused, `INTERNAL_ERROR` / 500, logged at `error` once. That includes a leaf anywhere but `{ id: { $in: leaf } }` in the object's own filter, such as one inside a relation condition or a composed `ReadableIds` scope, as the engine and the analytics compiler refuse it.
+  - **OData** (`@objectstack/driver-odata`). `find` and `count` refuse a `where` carrying the leaf before any request is sent, `INTERNAL_ERROR` / 500. An OData `$filter` has no form of the subquery, and the driver declares no `fixedReadLeaves`. Before this release a direct `find` left the leaf's predicate out of the `$filter` it sent. The engine already refused the leaf before calling this driver.
+  - **The array form** (`@objectstack/spec`). `parseFilterAST` now refuses a leaf in the array form with `INTERNAL_ERROR` / 500 wherever it answered `INVALID_FILTER` / 400: as an `in` / `nin` comparand, as a member of an `in` / `nin` list, or as the comparand of a scalar operator (`!=`, `>` and the rest). The old messages printed the leaf's inputs, the recipient among them. The new message names the leaf and its table only. An unbranded copy that crossed JSON is still `INVALID_FILTER` / 400. An array-form `=` is passed on by reference and refused by the engine, as before.
+  - **New exports** (`@objectstack/objectql`). `fixedReadLeafClassOfEngine(engine, leaf)` answers which ADR-0155 D4 class, if any, keeps the engine from handing a leaf to a driver. `driverEvaluatesFixedReadLeaf` answers whether a driver declares the leaf. Neither reads or writes anything.
+- e72f2aa: feat: the analytics plugin asks the engine which share-grant scopes its native SQL path may compile (ADR-0155 D4)
+  
+  Clause-②: yes
+  Metadata-protocol: none
+  
+  - **New optional contract member** (`@objectstack/spec`). `IObjectQLEngine.fixedReadLeafClassOf(leaf)` answers which of ADR-0155 D4's two classes a `SharedRecordIds` leaf falls in on an engine: `'other-datasource'` (the leaf's object is bound to another datasource than `sys_record_share`) or `'registration-by-name'` (a middleware or a `beforeFind` / `afterFind` hook is registered for `sys_record_share` by name), with what names it. It answers `null` when neither class applies, and throws `TypeError` on a value that is not a fixed-read leaf. The answer type is the new `EngineFixedReadLeafClass`. The member is optional, and because "neither" is `null`, `engine.fixedReadLeafClassOf?.(leaf)` is a caller's whole answer: a class, `null`, or `undefined` from an engine without the member, which cannot say.
+  - **The engine implements it** (`@objectstack/objectql`). `ObjectQL.fixedReadLeafClassOf` returns the seam's own recognition, `fixedReadLeafClassOfEngine(engine, leaf)`, with "neither" spelled `null`. It reads only datasource bindings, middlewares and hooks. It calls no driver and logs nothing.
+  - **The analytics plugin wires it** (`@objectstack/service-analytics`). `AnalyticsServicePlugin` now fills `AnalyticsServiceConfig.fixedReadLeafClassOf` from the `"data"` engine on each call. When the engine answers `null` (neither class), the native SQL path compiles a read scope that carries the leaf. When the engine names a class, throws, answers anything but `null`, or has no such member, the query goes to the ObjectQL engine path, as before. An engine without the member is reported once at `warn`. Neither class is restated in analytics.
+  
+  Nothing a metadata author writes changes. On a host that runs `ObjectQLPlugin`'s engine as `"data"`, a sharing-scoped analytics query outside both classes keeps the native SQL path once the producer starts writing the leaf (ADR-0155 step 6).
+- 7376505: fix(service-analytics)!: the dataset query door, `POST /api/v1/analytics/query` and the native arm of `POST /api/v1/analytics/sql` refuse `=`, `$in` and every other scalar comparison or text operator on a multi-value or JSON field with the data door's `400 INVALID_FILTER`, instead of answering a wrong count
+  
+  Clause-②: no (narrowing) — the dataset query door, `POST /api/v1/analytics/query` and the native SQL arm of `POST /api/v1/analytics/sql` refuse a scalar comparison on a multi-value or JSON field, in a `where` or a `timeDimensions[].dateRange` window, that they answered `200`
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any schema is added, removed, renamed or re-shaped, and no export changes shape. What moves is the answer to a request: a filter the data door already refuses is now refused on the analytics dataset door, `POST /api/v1/analytics/query` and the native arm of `POST /api/v1/analytics/sql` too, so there is no stored row, registry key or authored value for a migration to rewrite and no tombstone. -->
+  
+  **BREAKING** for a client of `POST /api/v1/analytics/dataset/query` (and every other caller of the dataset query on the native SQL strategy or the draft preview) whose `runtimeFilter`, dataset `filter` or measure `filter`, and for a client of `POST /api/v1/analytics/query` or of `POST /api/v1/analytics/sql` answered by the native SQL strategy whose `where`, applies an operator of `JSON_COLUMN_INCOMPATIBLE_OPERATORS` (`@objectstack/core`) — `$eq` or implicit equality, `$ne`, `$in`, `$nin`, `$gt` / `$gte` / `$lt` / `$lte`, `$between`, `$startsWith`, `$endsWith`, `$icontains` — to a multi-value or JSON field: an inherently multi-value type (`tags`, `multiselect`, `checkboxes`), a `select`, `radio`, `lookup`, `user`, `file` or `image` field declared `multiple: true`, or a structured-JSON type. The same holds on all three doors, when the native SQL strategy answers, for a `timeDimensions[].dateRange` window on such a field (the dataset door's `selection.timeDimensions[]` included), which compiles to a `$gte` / `$lte` pair:
+  
+  - FROM: the native SQL strategy compared the stored JSON text (`["a","b"]`) against the comparand and answered `200`: `$in` / `$eq` counted no row, `$nin` / `$ne` counted the rows they were asked to exclude, and the orderings and the text operators matched the serialization. The draft preview (`?preview=draft`) gave the same counts over the drafted rows. TO: `400 INVALID_FILTER` before anything runs, in the words `POST /api/v1/data/:object/query` answers, naming the field and the operator, on every dialect. The ObjectQL strategy already answered this. On a datasource whose SQL dialect the host cannot name (memory, MongoDB), the native strategy now declines a query whose `where`, dataset `filter` or measure `filter` carries such a comparison, so the engine answers it through its own driver; a `timeDimensions[].dateRange` window on such a field is not part of that decline, and is refused `400 INVALID_FILTER` on every datasource the native strategy compiles for.
+  
+  **Not moved.** `$contains` / `$notContains` (membership), `$null`, `$exists` and `$empty` on such a field, `$eq: null` / `$ne: null` (a null predicate), an empty `$in` / `$nin`, and every operator on a scalar field answer as before.
+  
+  The fix for a caller: write `{ "FIELD": { "$contains": "a" } }` for membership, an `$or` of `$contains` for any-of, and `$null` / `$empty` for no value.
+- 03dbbe4: fix(service-analytics): the draft preview answers `$contains` on a multi-value field as membership, as the published dataset does
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The draft preview (`POST /api/v1/analytics/dataset/query?preview=draft`, what Studio's preview mode reads) evaluated `$contains` as a case-folded substring of the value's string form on every column. On a field declared multi-valued (`multiple: true`) or stored as JSON (`tags`, `multiselect`, `json`, …) that searched the drafted list as text: `$contains: 'a'` counted a row holding `['ab']` or `['A']`, and `$contains: 'a,b'` counted a row holding `['a', 'b']`. The published dataset counts none of them, so a drafted chart showed numbers that changed at publish.
+  
+  On such a field the preview now asks whether the comparand is a member of the stored list, reading the comparand as every SQL face does (`'1'` names the string `'1'` or the number `1`; a nested list, an object or a value that is not a list holds no member). On any other column it is the case-exact substring of a stored string, the `$contains` family's rule everywhere else on the platform: `$contains: 'acme'` no longer matches `ACME Corp`, and a stored number never contains a substring.
+  
+  `$notContains` was refused `INVALID_FILTER` / 400 on the preview; it is now answered, as the exact complement, with the same answers the live faces give (a row with no value satisfies it).
+  
+  A drafted filter that relied on the preview's case folding (`$contains: 'acme'` over `Acme`) now counts what the published dataset counts; write the case the data holds. `$icontains` is still refused on the preview.
+- 9a82465: fix(analytics)!: the native dataset face and the draft preview refuse `=` / `$in` / `$ne` on a single-value `image` or `file` column the driver stores as JSON, as the data door does
+  
+  Clause-②: yes (narrowing) — widened: `SqlDriver.jsonColumnFieldClass` (`@objectstack/driver-sql`) is now public, and so on every class that extends it (`TursoDriver`, `SqliteWasmDriver`), and the exported `AnalyticsServiceConfig` (`@objectstack/service-analytics` root) gains the optional key `jsonColumnFieldClass`; narrowed: the native dataset face and the draft preview newly answer `400 INVALID_FILTER` for a scalar comparison on a single-value media column the driver stores as JSON, which they answered `200` with a wrong count before
+  Metadata-protocol: none
+  Skills-docs: none — no published skill documents the dataset door's filter vocabulary per storage class; the refusal text itself carries the prescription (the media-column move), and the operator contract `skills/` describes (`$contains` for membership on a JSON column) is unchanged
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any schema is added, removed, renamed or re-shaped, and no stored row, registry key or authored value changes. What moves is the answer the native dataset face and the draft preview give a scalar comparison on a single-value media column, so no stored row, registry key or authored value changes and there is nothing for a migration to rewrite. -->
+  
+  **BREAKING** for a caller of the dataset query door whose filter compares a single-value `file` / `image` / `avatar` / `video` / `audio` field with `=` (explicit or implicit), `$in`, `$ne`, `$nin`, an ordering comparison, `$between` or the non-membership text family, on a deployment still inside the ADR-0104 dual-encoding window (its media columns not yet moved, which is every deployment that has not run the move).
+  
+  - FROM: the native dataset face compiled the comparison against the stored JSON string (`"file_1"`) and answered `200` with the wrong count — `{ pic: 'file_1' }` and `{ pic: { $in: ['file_1'] } }` counted `0`, `{ pic: { $ne: 'file_1' } }` counted every row — and the draft preview answered `200` with its own counts, matching the bare id a drafted row holds. `POST /api/v1/data/:object/query` and this door's ObjectQL strategy already refused the same filter `400` `INVALID_FILTER`.
+  - TO: all four faces refuse it `400` `INVALID_FILTER`, in `@objectstack/core`'s one refusal text for this column class — the media-column move, not the `$contains` membership repair, which finds no member in a single JSON string.
+  
+  **Widened, alongside.** `SqlDriver.jsonColumnFieldClass(table, field)` is now a public, read-only member: it answers `'single-value-media'`, `'multi-value-or-json'` or `undefined` for a column on this deployment, the same answer the data door's refusal reads. A subclass that redeclares it as `protected` must widen it to `public`. `AnalyticsServiceConfig.jsonColumnFieldClass` is the optional hook the analytics host reads it through; `AnalyticsServicePlugin` wires it from the driver that stores the object, and a host that wires nothing keeps its earlier behaviour. `TursoDriver` answers it on the remote face from the same registry its remote transport already reads.
+  
+  **Not moved.** `$contains` / `$notContains` and the null predicates (`$null`, `$exists`, `$empty`) on such a column, every operator on a scalar column, the multi-value and structured-JSON class (unchanged since it was refused on these faces), and a deployment whose media columns have moved — the column is not JSON there, and the comparison is answered.
+  
+  The fix for a caller: filter on the record the attachment belongs to, ask presence with `$null` / `$empty`, or finish the deployment's media-column move (the column step of `objectstack migrate files-to-references --apply`, which the refusal text prescribes) so the column is comparable.
+- ae97480: Clause-②: no
+  Metadata-protocol: none
+  
+  fix(service-analytics): a `compareTo` bucket with no counterpart in the current window is dropped instead of keeping its own key.
+  
+  With `previousPeriod` on a bucketed time axis, the previous window can tile into one more bucket than the current one (December by week: six previous weeks against five; Q2 by month: four previous months against three). That extra bucket used to keep its own key, so it either overwrote the comparison value of a current bucket it was never aligned to (the previous period's own `2026-W49` replaced the aligned value on December's first week) or appeared as an extra row outside the requested window (a November bar on "this month" by month). It is now left out of the comparison grid; the empty (null) bucket still merges as before.
+- 59a53a6: Clause-②: no
+  Metadata-protocol: none
+  
+  The analytics draft preview (`queryDataset` with `previewDrafts`, the face Studio's preview mode reads) now resolves a `{ $field }` comparand the way the published dataset does. A comparison between two scalar columns of the row (`{ label: { $eq: { $field: 'alias' } } }`, and `$ne` / `$gt` / `$gte` / `$lt` / `$lte`) compares the two columns, with the same answer for empty values as the live faces (both empty is equal). A reference the live faces refuse is refused with their `INVALID_FILTER` / 400: a multi-value, JSON, file or formula column on either side, two columns of different comparison classes, an undeclared column, a dotted path, and a reference in an `$in` / `$nin` list or under a text-pattern operator. Before, the preview compared the row value with the reference object as text, so every field-to-field filter showed a wrong count with no error, and the count changed at publish.
+  
+  One shape is refused on the preview although the published dataset serves it: a reference with an `addDays` offset (`{ $field: 'due_on', addDays: 3 }`). The preview refuses it by name rather than evaluate the day shift differently; publish the draft to chart it.
+- d280de9: docs: stale prose on summary currency, the temporal-comparand door and analytics filters now says what the code does
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  No accepted value, key or answer moves. Two refusal messages change their words:
+  
+  - A `currencyMode: 'dynamic'` summary over a child `currency` field that is neither `dynamic` nor a well-formed `record` / `fixed` (a stored `fixed` field with no `defaultCurrency`, or a `currencyMode` outside the three) is still refused, and the refusal now names what the child lacks: "is a 'currency' field in `fixed` mode with no `defaultCurrency` code (the currency it is fixed to is missing)", or "is a 'currency' field whose `currencyMode` 'X' is none of `dynamic`, `fixed` and `record`". Before, it said only "is a 'currency' field, not a `currency` field in `dynamic` mode".
+  - The temporal-comparand door's refusal of a comparand no temporal rule reads (`'not-a-date'`, the preset name `'last_30_days'`) now ends "As written it would reach the driver and be compared as text: it may select every row, none or the wrong ones (or raise a database error), an answer indistinguishable from a real one." Before, it said the comparison would "compare false for EVERY row", which was wrong for `$lt` and others that selected every row, for a partial day such as `'2026-06'` that selected a subset, and on PostgreSQL, which raised a database error. Its `having` twin says the same of the groups it would keep, where it said "no group or every group, a 200".
+  
+  The upgrade-guide entry `summary-dynamic-currency-rollup-home-amount-judged-as-served` now states the admitted set as both doors enforce it: a `dynamic` summary may roll up any child `currency` field in `dynamic` mode, a stored home amount included. Source comments and published docblocks that said every `{placeholder}` is stepped around by the temporal door now state the per-kind rule: a date macro is stepped around and judged by its year once resolved, a period key and a context token are judged as written, and an unknown or record-context token is left to the resolver.
+- Updated dependencies [8236d9b]
+- Updated dependencies [1d28405]
+- Updated dependencies [b02484e]
+- Updated dependencies [7a3f86c]
+- Updated dependencies [9abc732]
+- Updated dependencies [52a2398]
+- Updated dependencies [1c05546]
+- Updated dependencies [42b4d09]
+- Updated dependencies [4ffe9d3]
+- Updated dependencies [b38e133]
+- Updated dependencies [f796089]
+- Updated dependencies [8f49499]
+- Updated dependencies [b68f9ae]
+- Updated dependencies [2e9e1ac]
+- Updated dependencies [8e46424]
+- Updated dependencies [f4dbcc2]
+- Updated dependencies [9c29d73]
+- Updated dependencies [0739dee]
+- Updated dependencies [89364b4]
+- Updated dependencies [dfc6bbf]
+- Updated dependencies [97b9d1e]
+- Updated dependencies [0f29688]
+- Updated dependencies [5ecf937]
+- Updated dependencies [2df9691]
+- Updated dependencies [f19e6c6]
+- Updated dependencies [feb9b79]
+- Updated dependencies [b7d2474]
+- Updated dependencies [50f85e9]
+- Updated dependencies [4b1eb0e]
+- Updated dependencies [c0716ed]
+- Updated dependencies [7bd5d28]
+- Updated dependencies [8856afc]
+- Updated dependencies [9062756]
+- Updated dependencies [cdb327f]
+- Updated dependencies [6ffa816]
+- Updated dependencies [09ba0c7]
+- Updated dependencies [b863d2b]
+- Updated dependencies [e75a528]
+- Updated dependencies [5dd856f]
+- Updated dependencies [5dd856f]
+- Updated dependencies [61722e9]
+- Updated dependencies [8384d18]
+- Updated dependencies [f6902e9]
+- Updated dependencies [df81f4c]
+- Updated dependencies [ed906d5]
+- Updated dependencies [e6fa510]
+- Updated dependencies [99ece3c]
+- Updated dependencies [3cfa5bc]
+- Updated dependencies [bfd1049]
+- Updated dependencies [2495486]
+- Updated dependencies [16a96ac]
+- Updated dependencies [f4de1de]
+- Updated dependencies [53c9575]
+- Updated dependencies [7411f9b]
+- Updated dependencies [e114324]
+- Updated dependencies [f71d488]
+- Updated dependencies [f44758b]
+- Updated dependencies [f7b172f]
+- Updated dependencies [a0b01fa]
+- Updated dependencies [5d2ce34]
+- Updated dependencies [59392ed]
+- Updated dependencies [c99156e]
+- Updated dependencies [c8e9bec]
+- Updated dependencies [7ee7a61]
+- Updated dependencies [9b6db73]
+- Updated dependencies [7c122ff]
+- Updated dependencies [f98f18c]
+- Updated dependencies [401eb44]
+- Updated dependencies [29f1280]
+- Updated dependencies [eb7ad70]
+- Updated dependencies [de25d58]
+- Updated dependencies [fe19096]
+- Updated dependencies [4fb7169]
+- Updated dependencies [d953558]
+- Updated dependencies [af566c2]
+- Updated dependencies [cedc094]
+- Updated dependencies [bb1c55d]
+- Updated dependencies [d7c257e]
+- Updated dependencies [40e22f1]
+- Updated dependencies [5dbcc02]
+- Updated dependencies [bc9ace2]
+- Updated dependencies [d6be99d]
+- Updated dependencies [0a1b69c]
+- Updated dependencies [2e07e61]
+- Updated dependencies [643fe3b]
+- Updated dependencies [0a3dd40]
+- Updated dependencies [6b51822]
+- Updated dependencies [f3c9d42]
+- Updated dependencies [8df7bf2]
+- Updated dependencies [170ca48]
+- Updated dependencies [d33bf5a]
+- Updated dependencies [236c804]
+- Updated dependencies [c261a7c]
+- Updated dependencies [f548bdc]
+- Updated dependencies [e72f2aa]
+- Updated dependencies [f2a990b]
+- Updated dependencies [a23164e]
+- Updated dependencies [8c5a81e]
+- Updated dependencies [6db1dc2]
+- Updated dependencies [78437e2]
+- Updated dependencies [ed4d322]
+- Updated dependencies [0628e08]
+- Updated dependencies [b7fe94a]
+- Updated dependencies [0b2118f]
+- Updated dependencies [81eae2b]
+- Updated dependencies [ad65d82]
+- Updated dependencies [cb5a975]
+- Updated dependencies [92e0475]
+- Updated dependencies [d12ac84]
+- Updated dependencies [ad92dfd]
+- Updated dependencies [bb89b2d]
+- Updated dependencies [8da2b7e]
+- Updated dependencies [ec545de]
+- Updated dependencies [7c9b22b]
+- Updated dependencies [9742142]
+- Updated dependencies [f3a8a13]
+- Updated dependencies [543585d]
+- Updated dependencies [70194ff]
+- Updated dependencies [0002eaf]
+- Updated dependencies [7a5ae65]
+- Updated dependencies [70d07fd]
+- Updated dependencies [73f2cf4]
+- Updated dependencies [60e79ed]
+- Updated dependencies [595844b]
+- Updated dependencies [28588d0]
+- Updated dependencies [3b58921]
+- Updated dependencies [c45dd80]
+- Updated dependencies [48c5484]
+- Updated dependencies [cb2d6aa]
+- Updated dependencies [d463c46]
+- Updated dependencies [7501d0c]
+- Updated dependencies [45ef94e]
+- Updated dependencies [573a376]
+- Updated dependencies [cbc06ff]
+- Updated dependencies [8f141a2]
+- Updated dependencies [d24e4ab]
+- Updated dependencies [f66340a]
+- Updated dependencies [fed637c]
+- Updated dependencies [7a7ab47]
+- Updated dependencies [08f4bad]
+- Updated dependencies [70f454a]
+- Updated dependencies [8644ce7]
+- Updated dependencies [8aecf6d]
+- Updated dependencies [8ddadc1]
+- Updated dependencies [a03bc4e]
+- Updated dependencies [021524c]
+- Updated dependencies [129e637]
+- Updated dependencies [13f5466]
+- Updated dependencies [ff6f976]
+- Updated dependencies [00aa574]
+- Updated dependencies [d95d34f]
+- Updated dependencies [76eea0f]
+- Updated dependencies [84b1e0c]
+- Updated dependencies [151e812]
+- Updated dependencies [6210a08]
+- Updated dependencies [81c1ae9]
+- Updated dependencies [51b67f1]
+- Updated dependencies [66452df]
+- Updated dependencies [4f9a3f8]
+- Updated dependencies [1cda7ea]
+- Updated dependencies [9c57bd2]
+- Updated dependencies [5078f2f]
+- Updated dependencies [01967c3]
+- Updated dependencies [5078f2f]
+- Updated dependencies [8b1841f]
+- Updated dependencies [012f0a1]
+- Updated dependencies [227e952]
+- Updated dependencies [422df61]
+- Updated dependencies [06c1f54]
+- Updated dependencies [489d9fe]
+- Updated dependencies [c349576]
+- Updated dependencies [c063734]
+- Updated dependencies [0439a04]
+- Updated dependencies [5bf7242]
+- Updated dependencies [f92d271]
+- Updated dependencies [3d4f423]
+- Updated dependencies [d7f299c]
+- Updated dependencies [f9fda2a]
+- Updated dependencies [91138ec]
+- Updated dependencies [9981f27]
+- Updated dependencies [3801775]
+- Updated dependencies [40570d6]
+- Updated dependencies [2a6f26a]
+- Updated dependencies [b7dee0e]
+- Updated dependencies [68250f6]
+- Updated dependencies [fd462c5]
+- Updated dependencies [d15e439]
+- Updated dependencies [6831e04]
+- Updated dependencies [efaafe3]
+- Updated dependencies [875ae40]
+- Updated dependencies [da50177]
+- Updated dependencies [7e9c50c]
+- Updated dependencies [5cf9941]
+- Updated dependencies [204356a]
+- Updated dependencies [59571b2]
+- Updated dependencies [c94191d]
+- Updated dependencies [ebac615]
+- Updated dependencies [98b17fe]
+- Updated dependencies [8d60333]
+- Updated dependencies [db46566]
+- Updated dependencies [2776e88]
+- Updated dependencies [083e040]
+- Updated dependencies [66c854d]
+- Updated dependencies [372ce7c]
+- Updated dependencies [c059e60]
+- Updated dependencies [df8a1b8]
+- Updated dependencies [75925e1]
+- Updated dependencies [7d50dc8]
+- Updated dependencies [595e9cb]
+- Updated dependencies [20d025f]
+- Updated dependencies [64b278e]
+- Updated dependencies [695b9db]
+- Updated dependencies [ecd4b2b]
+- Updated dependencies [d280de9]
+- Updated dependencies [f9dd033]
+- Updated dependencies [6296909]
+- Updated dependencies [660e7cd]
+  - @objectstack/spec@19.0.0-next.0
+  - @objectstack/types@19.0.0-next.0
+  - @objectstack/core@19.0.0-next.0
+
 ## 18.6.0
 
 ### Minor Changes

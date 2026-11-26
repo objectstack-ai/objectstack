@@ -1,5 +1,5 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
-// test-budget: 450 — spawns the real producer once per single-cause fixture: two seed children and 46 spawns of the source CLI (three #21529 commands and eleven #21552 doors, each in its JSON and human faces on the absent database and in JSON on a booted control, plus the four doors that already exited 0), every one a distinct triple; slowest CI reading 355.51 s (run 41271604267) of the five scheduled CI runs 41199450735, 41217827347, 41237094739, 41255489006, 41271604267, x 1.25, rounded up
+// test-budget: 450 — spawns the real producer once per single-cause fixture: two seed children and 49 spawns of the source CLI (three #21529 commands and twelve #21552 doors, each in its JSON and human faces on the absent database and in JSON on a booted control, plus the four doors that already exited 0), every one a distinct triple; slowest CI reading 355.51 s (run 41271604267) of the five scheduled CI runs 41199450735, 41217827347, 41237094739, 41255489006, 41271604267, x 1.25, rounded up
 
 /**
  * [#21529] `os migrate resume`, `os migrate recorded-by` and `os migrate
@@ -42,7 +42,9 @@
  * app record with a covered field. Each command READS it and reports it. A
  * fix that answered empty work without looking would fail here.
  *
- * Every spawn runs in the hook; a case only reads what a run printed.
+ * Every spawn runs in a hook; a case only reads what a run printed. One hook
+ * per command (and per door below) starts that command's runs together, so no
+ * hook ever waits on more than one run's budget: see `BATCH_HOOK_TIMEOUT_MS`.
  *
  * ## [#21552] The rest of the family
  *
@@ -100,8 +102,23 @@ const CLI_ROOT = resolve(HERE, '..', '..', '..');
 /** The source entry, as `test/helpers/serve-process.ts` spawns it; `src/` cannot import that helper. */
 const CLI = resolve(HERE, '../../../bin/run-dev.js');
 
-const HOOK_TIMEOUT_MS = 480_000;
+/** One child's budget: a CLI run is killed at it, and rejects naming its command line. */
 const RUN_BUDGET_MS = 120_000;
+
+/**
+ * A hook's budget, for the hooks that each run ONE batch: a seed child, or one
+ * command's (or door's) runs started together. Each child is killed at
+ * `RUN_BUDGET_MS` on its own, so the batch ends within one run's budget
+ * however many children it holds; the margin lets the kill land and the
+ * rejection reach the hook first, so a hang reads as the run that hung, never
+ * as "Hook timed out".
+ *
+ * Not one hook for the whole file's runs: under a loaded CI shard every child
+ * slows at once, and a hook that ran forty of them one after another summed
+ * them past its own 480 s timeout while each stayed far under its own budget.
+ * A batch's bound does not grow with the roster: a new door is a new hook.
+ */
+const BATCH_HOOK_TIMEOUT_MS = RUN_BUDGET_MS + 30_000;
 
 const ARTIFACT = {
   manifest: { id: 'com.example.os21529', name: 'Absent database', version: '0.0.0', type: 'app' },
@@ -187,6 +204,17 @@ let dir: string;
 let absentDb: string;
 let bootedDb: string;
 
+/**
+ * Wait for every run of one batch, and fail with every run that failed. All
+ * are waited for, so no child outlives the hook that started it.
+ */
+async function settleBatch<T extends readonly Promise<Run>[]>(runs: T): Promise<{ -readonly [K in keyof T]: Run }> {
+  const settled = await Promise.allSettled(runs);
+  const failed = settled.flatMap((s) => (s.status === 'rejected' ? [s.reason instanceof Error ? s.reason.message : String(s.reason)] : []));
+  if (failed.length > 0) throw new Error(failed.join('\n\n'));
+  return settled.map((s) => (s as PromiseFulfilledResult<Run>).value) as { -readonly [K in keyof T]: Run };
+}
+
 function runCommand(command: string, extra: string[], dbFile: string): Promise<Run> {
   return runCli(['migrate', command, ...extra], dbFile);
 }
@@ -271,13 +299,18 @@ beforeAll(async () => {
   if (seed.status !== 0 || !String(seed.stderr).includes('[fixture] seeded')) {
     throw new Error(`the control database was not seeded (status ${seed.status})\n${seed.stderr}`);
   }
+}, BATCH_HOOK_TIMEOUT_MS);
 
-  for (const command of COMMANDS) {
-    absentJson[command] = await runCommand(command, ['--json'], absentDb);
-    absentHuman[command] = await runCommand(command, [], absentDb);
-    bootedJson[command] = await runCommand(command, ['--json'], bootedDb);
-  }
-}, HOOK_TIMEOUT_MS);
+// One hook per command: its three faces at once, each on its own budget.
+for (const command of COMMANDS) {
+  beforeAll(async () => {
+    [absentJson[command], absentHuman[command], bootedJson[command]] = await settleBatch([
+      runCommand(command, ['--json'], absentDb),
+      runCommand(command, [], absentDb),
+      runCommand(command, ['--json'], bootedDb),
+    ] as const);
+  }, BATCH_HOOK_TIMEOUT_MS);
+}
 
 afterAll(() => {
   if (dir) rmSync(dir, { recursive: true, force: true });
@@ -716,16 +749,23 @@ describe('[#21552] the rest of the family: a project with no database yet is emp
     if (seed.status !== 0 || !String(seed.stderr).includes('[fixture] seeded')) {
       throw new Error(`the family control database was not seeded (status ${seed.status})\n${seed.stdout}\n${seed.stderr}`);
     }
+  }, BATCH_HOOK_TIMEOUT_MS);
 
-    for (const door of DOORS) {
-      familyAbsentJson[door.name] = await runCli([...door.argv, '--json'], absentDb);
-      familyAbsentHuman[door.name] = await runCli(door.argv, absentDb);
-      familyBootedJson[door.name] = await runCli([...door.argv, '--json'], familyDb);
-    }
-    for (const control of ALREADY_EXIT_ZERO) {
-      alreadyZero[control.name] = await runCli(control.argv, absentDb);
-    }
-  }, HOOK_TIMEOUT_MS);
+  // One hook per door: its three faces at once, each on its own budget.
+  for (const door of DOORS) {
+    beforeAll(async () => {
+      [familyAbsentJson[door.name], familyAbsentHuman[door.name], familyBootedJson[door.name]] = await settleBatch([
+        runCli([...door.argv, '--json'], absentDb),
+        runCli(door.argv, absentDb),
+        runCli([...door.argv, '--json'], familyDb),
+      ] as const);
+    }, BATCH_HOOK_TIMEOUT_MS);
+  }
+
+  beforeAll(async () => {
+    const runs = await settleBatch(ALREADY_EXIT_ZERO.map((control) => runCli(control.argv, absentDb)));
+    ALREADY_EXIT_ZERO.forEach((control, i) => { alreadyZero[control.name] = runs[i]; });
+  }, BATCH_HOOK_TIMEOUT_MS);
 
   it.each(DOORS.map((d) => [d.name, d] as const))('%s --json: empty work, exit 0, no refused read of its own tables', (name, door) => {
     const run = familyAbsentJson[name];

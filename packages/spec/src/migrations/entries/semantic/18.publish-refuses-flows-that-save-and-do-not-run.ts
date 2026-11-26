@@ -12,8 +12,10 @@ export const entry: SemanticMigration = {
   id: 'publish-refuses-flows-that-save-and-do-not-run',
   surface:
     'Seven author-time flow errors, run by the runtime publish gate and by `os validate` / `lint` / `compile` / `build`: '
-    + 'a record-triggered flow with no `objectName` (`flow-trigger-object-missing`); a start condition that compares a '
-    + 'select field with one of its option labels where the row holds the option value (`flow-condition-option-label`); '
+    + 'a record-triggered flow with no `objectName` (`flow-trigger-object-missing`); a start condition, an edge '
+    + 'condition or a `decision` branch that compares a select field with one of its option labels, or a '
+    + '`get_record` / `update_record` / `delete_record` or `timeRelative` `filter` operand that is one, where the row '
+    + 'holds the option value (`flow-condition-option-label`); '
     + 'a `timeRelative` block under a record `triggerType`, which wins (`flow-time-relative-shadowed`); `filter` or '
     + '`maxRecords` beside `timeRelative` instead of inside it (`flow-time-relative-key-misplaced`); a `timeRelative.dateField` '
     + 'that is not a `date` / `datetime` field of the object (`flow-time-relative-date-field-invalid`); a create / update '

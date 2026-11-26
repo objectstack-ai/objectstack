@@ -486,7 +486,7 @@ The split pane beside an open record keeps the same switcher.
 A Form View is a hand-shaped form for a record. It lives in the same `defineView` container as the object's list views, and it is served only where it is asked for by name:
 
 - `formViews` holds **named forms**. Each one loads where something names it: a form action's `target` (`<object>.<key>`) or a public form (`sharing.enabled: true`) at its own link.
-- The Console's **create and edit forms load no form view**. They lay the record out by the object's `fieldGroups` and the field rules, and leave out of create every field marked `showOnCreate: false`; see [Create form vs edit form](/docs/ui/create-vs-edit-form). A non-public `form`, `formViews.default` or `formViews.create` still parses but changes nothing, and `os validate` reports it as `form-view-internal-not-loaded`.
+- The Console's **create and edit forms load no form view**. They lay the record out by the object's `fieldGroups` and the field rules, and leave out of create every field marked `showOnCreate: false`; see [Create form vs edit form](/docs/ui/create-vs-edit-form). A non-public `form`, `formViews.default` or `formViews.create` still parses but changes nothing on those two forms, and `os validate` reports it as `form-view-internal-not-loaded`. The exception is one that a form action opens by name: it still loads where that action opens it, and is not reported. The action's `target` must be the form's served name written out, since an interpolated target names no form.
 
 ### Basic Structure
 

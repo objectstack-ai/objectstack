@@ -49,7 +49,7 @@
 
 import type { ObjectActionLayout } from '@objectstack/spec/data';
 import { emitMetadataRefresh } from '../assistant/assistantBus.js';
-import { isDraftVersionConflict } from '../views/metadata-admin/DraftConflictDialog.js';
+import { draftReceiptVersion, isDraftVersionConflict } from '../views/metadata-admin/draftVersionGuard.js';
 import { authoredPublished, type AuthoredLayers } from '../views/metadata-admin/authoredObjectBuffer.js';
 import { saveObjectExtensionArrangement } from '../views/objectExtensionArrangementSave.js';
 import {
@@ -68,7 +68,7 @@ export interface ObjectPinsSaveDoors {
     layered: (type: string, name: string, options: { packageId?: string }) => Promise<unknown>;
     get: (type: string, name: string, options?: Record<string, unknown>) => Promise<unknown>;
     save: (type: string, name: string, body: unknown, options: Record<string, unknown>) => Promise<unknown>;
-    publish: (type: string, name: string, options: { packageId?: string }) => Promise<unknown>;
+    publish: (type: string, name: string, options: { packageId?: string; draftVersion?: string }) => Promise<unknown>;
     reset: (type: string, name: string, options: Record<string, unknown>) => Promise<unknown>;
   };
 }
@@ -161,21 +161,37 @@ export async function saveObjectPins(
   if (layers && 'draft' in layers && layers.draft) throw new Error(texts.pendingDraft);
   const authored = authoredPublished('object', layers) as Record<string, unknown>;
   const body = withActionLayout({ ...authored, name: objectName }, actionLayoutValue(authored.actionLayout, pins, changed));
+  let draftVersion: string | undefined;
   try {
-    await doors.client.save('object', objectName, body, { mode: 'draft', packageId, ifNoneMatch: '*' });
+    draftVersion = draftReceiptVersion(
+      await doors.client.save('object', objectName, body, { mode: 'draft', packageId, ifNoneMatch: '*' }),
+    );
   } catch (err) {
     if (isDraftVersionConflict(err)) throw Object.assign(new Error(texts.pendingDraft), { cause: err });
     throw err;
   }
+  // objectstack#37440 — the publish is pinned to the draft this save wrote
+  // (its receipt's version): a draft another writer changed in between is
+  // refused, and nothing is published on their behalf.
+  const pin = draftVersion ? { draftVersion } : {};
   try {
-    await doors.client.publish('object', objectName, { packageId });
+    await doors.client.publish('object', objectName, { packageId, ...pin });
   } catch (err) {
+    // The discard is pinned to the same draft: one that moved holds the
+    // other writer's change, is refused, and stays pending, said as such.
+    let moved = false;
     try {
-      await doors.client.reset('object', objectName, { state: 'draft', packageId });
+      await doors.client.reset('object', objectName, {
+        state: 'draft',
+        packageId,
+        ...(draftVersion ? { ifMatch: draftVersion } : {}),
+      });
     } catch (discardErr) {
-      console.error('[design-mode] a refused publish left the action layout draft pending:', discardErr);
+      moved = !!draftVersion && isDraftVersionConflict(discardErr);
+      if (!moved) console.error('[design-mode] a refused publish left the action layout draft pending:', discardErr);
     }
     emitMetadataRefresh();
+    if (moved) throw Object.assign(new Error(texts.pendingDraft), { cause: err });
     throw err;
   }
   emitMetadataRefresh();

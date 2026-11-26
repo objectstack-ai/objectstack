@@ -192,7 +192,7 @@ describe('the dropdown ends with the way back to Home and the admin Studio row (
     const last = rows[rows.length - 1];
     const studio = menu().getByTestId('app-switcher-edit-in-studio');
     expect(last).toContainElement(studio);
-    expect(studio).toHaveTextContent('Edit HotCRM in Studio');
+    expect(studio).toHaveTextContent('Edit HotCRM in App Studio');
     expect(studio).toHaveAttribute('href', '/studio/com.acme.hotcrm/data');
     // The way back to Home sits right before it (no Setup app in this list).
     expect(rows[rows.length - 2]).toContainElement(menu().getByTestId('app-switcher-home'));

@@ -12,8 +12,9 @@
  * read on the menu:
  *
  * 1. The menu's Access group holds the permission-set entry, a real router
- *    link, with no "More" trigger anywhere; the group carries the shield glyph,
- *    the Data group's is not it.
+ *    link, with no "More" trigger anywhere; that entry carries the shield
+ *    glyph, the Data group's object entry does not (objectstack#37452: a
+ *    group's label draws no glyph, each entry draws its own line icon).
  * 2. With the Access pillar's address open (under any package id) — which
  *    lands on the list of sets since objectstack#36905 — that entry is the
  *    current page and carries the active state; with Data open it carries
@@ -30,7 +31,7 @@ import * as React from 'react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, cleanup, within } from '@testing-library/react';
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
-import { ShieldCheck } from 'lucide-react';
+import { Shield } from 'lucide-react';
 
 const PKG = 'com.acme.app';
 
@@ -128,6 +129,7 @@ vi.mock('./StudioAiCopilot', () => ({ StudioChatDock: () => null }));
 vi.mock('../../preview/DraftChangesPanel', () => ({ DraftChangesPanel: () => null }));
 
 import { StudioDesignSurface } from './StudioDesignSurface';
+import { StudioPillarRedirect } from './StudioPillarRedirect';
 import { translateMetadataDomain } from '../metadata-admin/i18n';
 // The source under test reaches dynamic imports of `@objectstack/lint`; their first
 // load is paid here, at collection, never inside a case's clock (`check:test-source-alias`).
@@ -196,7 +198,7 @@ function renderAt(path: string) {
     <MemoryRouter initialEntries={[path]}>
       <Routes>
         <Route path="/studio/:packageId/metadata/*" element={<StudioDesignSurface area="metadata" />} />
-        <Route path="/studio/:packageId/:tab" element={<StudioDesignSurface />} />
+        <Route path="/studio/:packageId/:tab" element={<StudioPillarRedirect><StudioDesignSurface /></StudioPillarRedirect>} />
         <Route path="/studio/:packageId/metadata/*" element={<StudioDesignSurface area="metadata" />} />
       </Routes>
       <LocationProbe />
@@ -207,9 +209,9 @@ function renderAt(path: string) {
 const menu = () => screen.getByTestId('studio-menu');
 const entry = (testId: string) => within(menu()).getByTestId(testId);
 
-/** The markup of lucide's own `ShieldCheck`, the Access group's glyph. */
+/** The markup of lucide's own `Shield`, the permission-set entry's glyph. */
 function shieldMarkup(): string {
-  const { container, unmount } = render(<ShieldCheck />);
+  const { container, unmount } = render(<Shield />);
   const markup = container.querySelector('svg')!.innerHTML;
   unmount();
   return markup;
@@ -229,8 +231,8 @@ describe('Studio menu: Access is a group of its own, and More is gone (objectui#
     expect(screen.queryByTestId('studio-nav-more')).toBeNull();
     expect(screen.queryByTestId('studio-pillar-nav')).toBeNull();
     const shield = shieldMarkup();
-    expect(group.querySelector('svg')!.innerHTML).toBe(shield);
-    expect(within(menu()).getByTestId('studio-menu-group-data').querySelector('svg')!.innerHTML).not.toBe(shield);
+    expect(within(group).getByTestId(PERMISSION_ENTRY).querySelector('svg')!.innerHTML).toBe(shield);
+    expect(entry(OBJECT_ENTRY).querySelector('svg')!.innerHTML).not.toBe(shield);
   });
 
   it.each(['app.objectstack.hotcrm', PKG])('with Access open in %s, the permission-set entry is the current page', async (pkg) => {

@@ -20,7 +20,8 @@
  *   4. A commit made while the record's save runs is sent after it, alone.
  *   5. A refusal naming a field the list cannot edit offers to open the record.
  *   6. A client-sorted row a save updated stays where it is until the rows load.
- *   7. Control: without the provider the save bar model is unchanged.
+ *   7. No staged fallback (objectstack#35827): without the provider, or
+ *      without `onRowSave`, an editable table renders read-only and warns once.
  *   8. A commit the host asks to confirm (`confirmCommit`, slice S3) is held
  *      with nothing staged: No leaves the cell as it was, Yes writes it; a
  *      paste is asked too, an unchanged value is not.
@@ -268,36 +269,44 @@ describe('data-table autosave — a saved row keeps its place until the rows loa
   });
 });
 
-describe('data-table autosave — control: without the provider the save bar stays', () => {
-  it('a commit stages, the bar shows, and nothing is sent until Save', async () => {
-    const onRowSave = vi.fn(async () => {});
-    const t = renderTable(onRowSave, { singleClickEdit: true }, false);
+describe('data-table autosave — no staged fallback: a table that cannot save renders read-only (objectstack#35827)', () => {
+  // The staged model (pending changes behind a "Save All" bar) is retired, so
+  // an editable table missing either half of the per-cell save edits nothing
+  // and says why once in the console, instead of staging edits it cannot send.
+  afterEach(() => vi.restoreAllMocks());
+  const opensNoEditor = (t: ReturnType<typeof renderTable>) => {
     const cell = t.container.querySelectorAll('tbody tr')[0].querySelectorAll('td')[0] as HTMLElement;
     fireEvent.click(cell);
-    const input = cell.querySelector('input')!;
-    fireEvent.change(input, { target: { value: 'Alpha 2' } });
-    fireEvent.blur(input);
-    await act(async () => {});
-    expect(onRowSave).not.toHaveBeenCalled();
-    expect(screen.getByText(/row modified/)).toBeInTheDocument();
-  });
-});
+    fireEvent.doubleClick(cell);
+    expect(t.container.querySelector('td[data-editing-cell]')).toBeNull();
+    expect(t.container.querySelector('td input:not([type="checkbox"]):not([data-slot="cell-type-catcher"])')).toBeNull();
+    expect(screen.queryByText(/Save All/)).toBeNull();
+  };
 
-describe('data-table autosave — a select-first table with no row save keeps the save bar', () => {
-  // Under the provider the per-cell save needs `onRowSave` to call; a table
-  // wired with `onBatchSave` alone stages as before, so an edit is never held
-  // where nothing can send it.
-  it('a commit stages, the bar and the row buttons show, and Save All sends it', async () => {
-    const onBatchSave = vi.fn(async (_changes: unknown[]) => {});
-    const t = renderTable(undefined as unknown as Save, { onBatchSave });
-    t.typeAndEnter(0, 0, 'Alpha 2');
-    await act(async () => {});
-    expect(onBatchSave).not.toHaveBeenCalled();
-    expect(screen.getByText(/row modified/)).toBeInTheDocument();
-    expect(t.container.querySelector('[data-slot="cell-save-state"]')).toBeNull();
-    fireEvent.click(screen.getByText(/Save All/));
-    await waitFor(() => expect(onBatchSave).toHaveBeenCalledTimes(1));
-    expect((onBatchSave.mock.calls[0][0] as Array<{ changes: unknown }>)[0].changes).toEqual({ name: 'Alpha 2' });
+  it('without the provider: no editor opens, no save bar, one console warning naming the select-first host', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const onRowSave = vi.fn(async () => {});
+    const t = renderTable(onRowSave, {}, false);
+    opensNoEditor(t);
+    expect(onRowSave).not.toHaveBeenCalled();
+    const lines = warn.mock.calls.map((c) => String(c[0])).filter((m) => m.startsWith('[ObjectUI] DataTable editable:'));
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toMatch(/GridCellSelection/);
+  });
+
+  it('under the provider with no onRowSave: no editor opens, no save bar, one console warning naming onRowSave', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const t = renderTable(undefined as unknown as Save);
+    opensNoEditor(t);
+    const lines = warn.mock.calls.map((c) => String(c[0])).filter((m) => m.startsWith('[ObjectUI] DataTable editable:'));
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toMatch(/onRowSave/);
+  });
+
+  it('a read-only table warns nothing', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    renderTable(undefined as unknown as Save, { editable: false }, false);
+    expect(warn.mock.calls.map((c) => String(c[0])).filter((m) => m.startsWith('[ObjectUI] DataTable editable:'))).toEqual([]);
   });
 });
 

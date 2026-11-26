@@ -29,6 +29,7 @@
  */
 
 import * as React from 'react';
+import { SchemaRendererContext, type ApiFetch } from '@object-ui/react';
 
 import type {
   ApproveAiPendingActionResponse,
@@ -177,11 +178,12 @@ function buildUrl(base: string, path: string, params?: Record<string, string | n
 }
 
 async function call<T>(
+  doFetch: ApiFetch,
   url: string,
   init: RequestInit,
   extraHeaders: Record<string, string> | undefined,
 ): Promise<T> {
-  const res = await fetch(url, {
+  const res = await doFetch(url, {
     credentials: 'include',
     ...init,
     headers: {
@@ -301,6 +303,13 @@ function settlePoll(
  * transient failure backs it off, doubling up to a ceiling. A read that
  * succeeds resumes the normal cadence (objectui#11736; see `ListReadOutcome`).
  *
+ * Every request rides the host's AUTHENTICATED fetch (`SchemaRendererProvider`'s
+ * `apiFetch`), the channel the renderers' own reads use: a session held by its
+ * bearer token alone carries no cookie, so `credentials: 'include'` on the bare
+ * global fetch read as anonymous, and a `401` never reached the host's
+ * session-ended check. A host that mounts no provider keeps the global fetch,
+ * cookies included.
+ *
  * @example
  * ```tsx
  * const { items, isLoading, error, approve, reject, refresh } =
@@ -331,8 +340,13 @@ export function usePendingActions(
 
   // Stash mutable bits in a ref so the polling effect doesn't re-arm on
   // every header object identity change.
-  const cfgRef = React.useRef({ apiBase, status, conversationId, limit, headers });
-  cfgRef.current = { apiBase, status, conversationId, limit, headers };
+  // The transport rides with them: the host's authenticated fetch, or the
+  // global one with no provider (see the hook's doc). Read directly, not via
+  // `useSchemaContext`, which throws with no provider.
+  const apiFetch = React.useContext(SchemaRendererContext)?.apiFetch;
+  const doFetch: ApiFetch = apiFetch ?? fetch;
+  const cfgRef = React.useRef({ apiBase, status, conversationId, limit, headers, doFetch });
+  cfgRef.current = { apiBase, status, conversationId, limit, headers, doFetch };
 
   const pollRef = React.useRef<PollSchedule>({
     generation: 0,
@@ -346,7 +360,7 @@ export function usePendingActions(
   const refresh = React.useCallback(async function load(): Promise<void> {
     const poll = pollRef.current;
     const generation = poll.generation;
-    const { apiBase, status, conversationId, limit, headers } = cfgRef.current;
+    const { apiBase, status, conversationId, limit, headers, doFetch } = cfgRef.current;
     setIsLoading(true);
     setError(undefined);
     let outcome: ListReadOutcome = 'ok';
@@ -357,6 +371,7 @@ export function usePendingActions(
         limit,
       });
       const out = await call<{ items: PendingActionRow[]; total?: number }>(
+        doFetch,
         url,
         { method: 'GET' },
         headers,
@@ -381,10 +396,10 @@ export function usePendingActions(
   refreshRef.current = refresh;
 
   const approve = React.useCallback(async (id: string): Promise<ApproveOutcome> => {
-    const { apiBase, headers } = cfgRef.current;
+    const { apiBase, headers, doFetch } = cfgRef.current;
     const url = buildUrl(apiBase, `/pending-actions/${encodeURIComponent(id)}/approve`);
     try {
-      const out = await call<ApproveOutcome>(url, { method: 'POST', body: '{}' }, headers);
+      const out = await call<ApproveOutcome>(doFetch, url, { method: 'POST', body: '{}' }, headers);
       return out;
     } finally {
       void refresh();
@@ -392,10 +407,11 @@ export function usePendingActions(
   }, [refresh]);
 
   const reject = React.useCallback(async (id: string, reason?: string): Promise<RejectOutcome> => {
-    const { apiBase, headers } = cfgRef.current;
+    const { apiBase, headers, doFetch } = cfgRef.current;
     const url = buildUrl(apiBase, `/pending-actions/${encodeURIComponent(id)}/reject`);
     try {
       const out = await call<RejectOutcome>(
+        doFetch,
         url,
         { method: 'POST', body: JSON.stringify(reason ? { reason } : {}) },
         headers,

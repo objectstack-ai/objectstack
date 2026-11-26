@@ -187,7 +187,7 @@ const result = EnhancedApiErrorSchema.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **field** | `string` | ✅ | Field path (supports dot notation) |
-| **code** | `Enum<'required' \| 'invalid_type' \| 'invalid_shape' \| 'unknown_field' \| 'invalid_boolean' \| 'invalid_number' \| 'invalid_date' \| 'invalid_time' \| 'invalid_email' \| … +22 more>` | ✅ | Which constraint the value violated (field-level catalog, ADR-0114) |
+| **code** | `Enum<'required' \| 'invalid_type' \| 'invalid_shape' \| 'unknown_field' \| 'invalid_boolean' \| 'invalid_number' \| 'invalid_date' \| 'invalid_time' \| 'invalid_email' \| … +23 more>` | ✅ | Which constraint the value violated (field-level catalog, ADR-0114) |
 | **message** | `string` | ✅ | Human-readable error message, rendered in the caller’s locale |
 | **label** | `string` | optional | Field display label in the caller’s locale |
 | **hint** | `string` | optional | The full prescription behind a one-line message, when there is more to say |
@@ -222,6 +222,7 @@ const result = EnhancedApiErrorSchema.parse(data);
 * `invalid_value`
 * `reference_not_found`
 * `reference_ambiguous`
+* `reference_out_of_scope`
 * `reference_user_banned`
 * `rule_violation`
 * `json_schema_violation`
@@ -261,6 +262,7 @@ const result = EnhancedApiErrorSchema.parse(data);
 * `invalid_value`
 * `reference_not_found`
 * `reference_ambiguous`
+* `reference_out_of_scope`
 * `reference_user_banned`
 * `rule_violation`
 * `json_schema_violation`

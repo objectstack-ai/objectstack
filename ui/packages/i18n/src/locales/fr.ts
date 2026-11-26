@@ -197,6 +197,7 @@ const fr = {
     uploadInFlight: "Attendez la fin du téléversement avant de sauvegarder.",
     clearedOnHide: "Ce qui ne s'applique plus aux valeurs actuelles a été effacé : {{fields}}",
     visibleWhenFaulted: "Envoi impossible : la règle visibleWhen de {{fields}} n'a pas pu être évaluée. La règle doit être corrigée avant que ce formulaire puisse être envoyé.",
+    uiReadonlyWhenFaulted: "Envoi impossible : la règle uiReadonlyWhen de {{fields}} n'a pas pu être évaluée. La règle doit être corrigée avant que ce formulaire puisse être envoyé.",
     discardTitle: "Abandonner les modifications ?",
     discardMessage: "Vous avez des modifications non enregistrées. Si vous fermez ce formulaire maintenant, vos modifications seront perdues.",
     // objectui#4024 — the create/edit dialog's `sr-only` accessible
@@ -1150,6 +1151,7 @@ const fr = {
     addColumn: "Ajouter une colonne",
     moveCard: "Déplacer la carte",
     noCards: "Aucune carte",
+    notLoaded: "Cartes non chargées : {{count}}",
     columnCards: "Cartes de la colonne {{column}}",
     laneCards: "Cartes de {{column}} - {{lane}}",
     dropBlocked: "Une carte de {{from}} ne peut pas être déplacée vers {{to}}.",
@@ -2197,7 +2199,7 @@ const fr = {
   },
   console: {
     studio: {
-      title: "Studio",
+      title: "App Studio",
       accessRequired: "Vous avez besoin de l'accès à Studio pour ouvrir Studio. Un administrateur peut vous l'accorder avec un ensemble d'autorisations dans Configuration → Attribution des ensembles d’autorisations.",
     },
     saveAdvisoryTitle: "Enregistré — le contrôle de création a signalé {{count}} recommandation(s)",
@@ -2657,6 +2659,7 @@ const fr = {
       savedCleared: "Valeur enregistrée effacée",
       deprecatedBadge: "Obsolète",
       deprecatedBadgeReplacedBy: "Obsolète → {{replacedBy}}",
+      selectValueRetired: "{{value}} (plus disponible)",
       unsupportedSpecifierType: "Type de paramètre non pris en charge : {{type}}",
       mapAddRow: "Ajouter une ligne",
       mapRemoveRow: "Retirer {{key}}",
@@ -3805,11 +3808,11 @@ const fr = {
       tooltip: "Cette plateforme est en avant-première — les fonctionnalités peuvent changer.",
     },
     aiAssistant: "Assistant IA",
-    designInStudio: "Concevoir dans Studio",
+    designInStudio: "Concevoir dans App Studio",
     designLayout: "Concevoir la mise en page",
     editApp: "Modifier l'application",
-    openAppInStudio: "Voir {{app}} dans Studio",
-    viewInStudio: "Voir dans Studio",
+    openAppInStudio: "Voir {{app}} dans App Studio",
+    viewInStudio: "Voir dans App Studio",
   },
   home: {
     build: {
@@ -3951,8 +3954,8 @@ const fr = {
       backToAppHome: "Retour au menu de l'application",
       appsAvailable: "{{count}} applications disponibles",
       allApps: "Toutes les applications",
-      editAppInStudio: "Modifier {{app}} dans Studio",
-      openAppInStudio: "Voir {{app}} dans Studio",
+      editAppInStudio: "Modifier {{app}} dans App Studio",
+      openAppInStudio: "Voir {{app}} dans App Studio",
       backToHome: "Retour à la page de démarrage de l'app",
       settings: "Paramètres",
       productHome: "Accueil {{product}}",
@@ -4774,6 +4777,9 @@ const fr = {
       dataset: 'Jeu de données',
       metrics: 'Indicateurs',
       noAddedFilter: 'Aucun filtre ajouté à la définition du jeu de données',
+    },
+    recordCitations: {
+      title: 'Cité depuis les enregistrements',
     },
     tool: {
       aggregate_data: "Synthétiser les données",

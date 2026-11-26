@@ -63,7 +63,13 @@ export const SysJobRun = ObjectSchema.create({
     // A degraded run puts its reason in `error` below and does not bump the
     // job's `failure_count`.
     status: Field.select(
-      ['running', 'success', 'failed', 'timeout', 'degraded'],
+      [
+        'running',
+        'success',
+        { label: 'failed', value: 'failed', color: 'red' },
+        'timeout',
+        'degraded',
+      ],
       { label: 'Status', required: true, defaultValue: 'running', group: 'State' },
     ),
 

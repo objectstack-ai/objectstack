@@ -156,7 +156,7 @@ describe('bundled template CI workflow', () => {
     expect(invoked).toContain('validate');
     expect(invoked).toContain('lint');
     expect(invoked).toContain('typecheck');
-    // `test` (#35218): the starter `note.test.ts` and every test the app adds.
+    // `test` (#35218): the starter `starter.test.ts` and every test the app adds.
     // The other scaffolder declares it too, with a starter test per template,
     // which `packages/cli/test/scaffold-test-script-passes.test.ts` runs.
     expect(invoked).toContain('test');

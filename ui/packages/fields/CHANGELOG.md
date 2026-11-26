@@ -1,5 +1,1151 @@
 # @object-ui/fields
 
+## 19.0.0-next.0
+
+### Minor Changes
+
+- c7174c3: fix(record-page): business dates read as dates, Save is the edit state's primary button, a new detail line starts on its defaults, and the tabs follow the header with no blank band
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: semantic
+  
+  Four things on the record page.
+  
+  **Dates.** A `date` field that declares no `format` read as a relative phrase on the record page ("6 days ago", "Tomorrow") while the list beside it wrote the date ("Nov 13"), so the reader had to work the day out. The record page's field sections and its highlights strip now write the date itself, with its year, as the list's columns do; the relative phrase (an overdue deadline's "Overdue 5d" included) is the date's tooltip, and a deadline past due still reads red. A declared `format`, `'relative'` included, still wins. A `datetime` field already read as an absolute date there (its cell's default face is the compact one, never the relative phrase), and is now pinned to stay so. The record footer's created and modified times keep their relative wording, and card surfaces (kanban, gallery) are unchanged. `@object-ui/fields`' cell props gain `absoluteDate`, read by the `date` cell.
+  
+  **Edit-state buttons.** In the record page's edit state, Cancel drew as the filled primary button and Save as an outline one, so the hand fell on the button that throws the edit away. Save is now the one filled button, after Cancel, the order a form's footer uses. `page:header` now makes a host button declaring `variant: 'primary'` the primary over the page's own actions, in the place the host gave it; no other host button declares one, so every other header is unchanged.
+  
+  **New detail lines.** A line added to a master-detail table in the record page's edit state started blank, so a required column with a default (a status that defaults to "Pending") read red although the save then stored the default. A new line now starts on the child object's static defaults, the values a create form seeds; a default the server resolves at insert (`NOW()`, a CEL expression) is left to the server. A new line's empty required cell reads red only after a save was refused, with the server's reason listed under the table; a stored line is flagged as before. A line added and never edited, holding only its defaults, is still skipped at save like a blank one; once the user edits a cell of it, it is input and is saved, even when every value they typed equals a default. `LineItemsField` gains `newRowValues` and `newRowRequiredShown`; a line its Add starts on `newRowValues` carries the `UNTOUCHED_NEW_ROW` mark (a symbol key no payload carries) until its first edit, and `isBlankRow` reads that mark. `@object-ui/fields` exports `UNTOUCHED_NEW_ROW` and `isUntouchedNewRow`. A host that passes neither prop sees no change. The save request and its transaction are unchanged.
+  
+  **The band above the tabs.** The record page's scroller and its column layout each padded their top by 24px on a desktop, so a 48px empty band stood between the header and the tab row. The scroller now pads only its sides and bottom, and the column layout keeps a 12px top on every width, so the tabs follow the header at the gap the rest of the page uses; on a phone the title block keeps 16px to the tabs. The print chrome and the approval actions bar that render above the columns keep their own top margin, and an authored page the page renderer draws keeps its own top padding. Side padding is unchanged.
+- 6db1dc2: feat: the form's line-item table edits people, multi-select, tags, check and rating cells the way the main list does
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: semantic
+  
+  `InlineGridColumnSchema.type` (a relationship field's `inlineColumns`, a form view's `subforms[].columns`, and the page blocks that carry the same column) accepts five more cell types, each spelled as its namesake field type: `user` (people), `multiselect`, `tags`, `boolean` (check) and `rating`. The column also takes an optional `max`, the star count of a `rating` cell (default 5).
+  
+  In the line-item table:
+  
+  - A `user` cell opens the main list's person picker under the cell: a searchable list with recent people and Clear; a pick writes and closes. `multiple` holds several people.
+  - A `multiselect` cell holds several of its options and a `tags` cell holds free-form tags. Each opens its searchable list under the cell; a click outside or Tab writes what was picked, Esc writes nothing. A list emptied in the cell writes `null`, as a cleared multi-value field stores, so a line whose only value was removed is still a blank line. A `tags` cell takes no `options`.
+  - A `boolean` cell is a checkbox: a click or Space toggles it and writes `true` / `false`.
+  - A `rating` cell draws its stars; a click on a star, or a digit key on the cell, sets it, and 0 clears it.
+  - Read-only and list-mode cells show people by name, a rating as its stars, a multi-select's option labels, and a check cell as the session's yes/no word.
+  
+  Visible change on existing forms: a column the table derives from a child field (no `type` written) now follows that field. A `boolean` / `toggle` field becomes a checkbox instead of the yes/no select, and it writes `true` / `false` instead of the strings `'true'` / `'false'` (the server reads both the same). A `rating` field becomes stars instead of a number box. `user`, `multiselect`, `checkboxes` and `tags` fields get their own cells instead of a plain text box that took a typed user id or a single option. A column that writes its `type` is unchanged, a `type: 'select'` column over a boolean field included. Which derived columns are visible by default is unchanged.
+  
+  The field-level security scrubber classifies the column's new `max` key as kept (a number, never a field name).
+- 8da2b7e: fix(fields): a lookup pick no longer copies an amount into a field in another currency; the field stays empty and the form says why
+  
+  Clause-②: yes (narrowing) — a cross-currency price copy that happens today stops and the line is left empty with a stated reason (ruled B); widened: three new `@object-ui/i18n` `lookup.autofill*` keys in every locale pack, new `@object-ui/fields` exports from `lookupAutofill.ts` (`planDeclaredLookupAutofill`, `crossCurrencyRefusal`, `amountCurrencyOf`, `pickedAmountCurrencyOf`, `withheldAutofillMessage`, `withLookupAutofillTargets`, `readLookupAutofillTargets`, `LOOKUP_AUTOFILL_TARGETS_KEY` and their types), an optional second argument on `onSelectRecord`, an optional trailing `currency` parameter on `declaredLookupAutofillPatch` and `lookupAutofillPatch`, and the optional `columnFields` prop on `GridField`
+  Metadata-protocol: semantic
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No schema key, accepted value or metadata type is added, removed or renamed, and nothing stored is rewritten: what moved is what a pick copies in the browser. The fix for an author is in the body: the price on a line in another currency is entered by hand. -->
+  
+  **BREAKING** for forms and line-item grids that relied on a pick copying an amount across currencies. On a EUR invoice, picking a product whose price is in the home currency used to copy the number as euros (a $100 product became a €100 line). Nothing converted it. Now the price is not copied: the cell or field stays empty, and a note under the line (in a grid) or under the lookup (in a form) names the picked amount with its currency and the currency of the field, so the price can be entered by hand. The other fields of the same pick (a description) still fill.
+  
+  **The rule.** It applies to the grid's same-named copy (the column key `autofill`), to the grid's declared `lookupAutofill` pairs, and to the record form's declared pairs, on a pick and on a create form's opening fill:
+  
+  - an amount is a `currency` field or a `formula` returning `currency`; a `number` carries no currency and copies as before;
+  - both sides in the home currency (neither declares one) copy as before, also when no home currency is configured;
+  - otherwise the value copies only when both sides name the same known code: a `fixed` code, the code the record holds, or the code its `master_detail` parent holds (ADR-0144 D2 as amended), with the home currency counting as its configured code;
+  - a field that follows a record's currency while that record holds none yet is not filled, and the note says no currency is chosen yet.
+  
+  Nothing is converted at any rate, and no build-time check is added: the line's currency is known only while the form is open.
+  
+  **`@objectstack/spec`.** The describes of `FieldSchema.lookupAutofill` and of the inline grid column key `autofill` state the rule.
+  
+  **`@object-ui/fields`.** `planDeclaredLookupAutofill` returns the writes and the withheld values of a pick; `declaredLookupAutofillPatch` and `lookupAutofillPatch` keep returning the writes alone. `LookupField` hands a host that owns the pick (`onSelectRecord`) the referenced object's field map as a second argument. `GridField` takes `columnFields`, the child field behind each currency column, so a `fixed` code or a code on the line decides that column's currency as on the record form.
+  
+  **`@object-ui/plugin-form`.** The record form stamps the definitions of a lookup's `lookupAutofill` targets on the lookup's field metadata, each with the name the form shows for it, so the lookup can read each target's currency and names it as the form does. The line-item hosts hand their grid each currency column's child field.
+  
+  **`@object-ui/i18n`.** Three new `lookup.autofill*` sentences, in every locale pack.
+- 66452df: feat(fields,plugins): a select option is coloured only when its author declared a colour
+  
+  Clause-②: no
+  Metadata-protocol: semantic
+  
+  **Reach: every app's select options that declare no `color` now render neutral.** Until now an option with no declared colour was still drawn in colour: the renderer looked its value up in a built-in table of English and Chinese words (`won` green, `open` blue, `已联系` blue, ...), and when that missed it hashed the value onto an eight-colour palette. The colour looked meaningful and was not, and could say the opposite of the value. Now a colour on a badge means exactly one thing: the author declared it.
+  
+  - **Badges, dots and chips** (grid cells and group rows, kanban cards, the filter value panel): an option with no declared `color` renders the neutral badge (`bg-muted text-muted-foreground border-border`, theme-aware in light and dark) or the gray dot. Declared colours, family names and hex, render exactly as before.
+  - **`getBadgeColorClasses(color)`** answers the declared family or the neutral badge; **`getSemanticColorName(color)`** answers the declared family or `undefined`. Both keep their second parameter so existing callers compile, and neither reads it.
+  - **Gantt `colorField`**: the bar takes the field's declared option colour (a declared palette family such as `blue` paints that family's palette hex, the colour its badge shows), else the value when it already is a colour literal (hex, `rgb()`, `hsl()`), else the default bar colour. The alert stroke (`borderColorField`) maps a declared palette family to the same palette hex as the bar. No colour is derived from the value any more (a palette name such as `red` stored as the value included), and the record's `status` / `state` / `priority` / `severity` no longer colours a bar.
+  - **Calendar**: an event takes its declared colour (a palette family declared on the option now paints that family's tint), a hex or a Tailwind utility as before, and now an `rgb()` / `hsl()` value too, painted as a hex is; any other value, a palette family name stored as a record value included, paints the default event colour instead of a hashed one.
+  - **`@objectstack/spec`**: the `colorField` descriptions of the calendar and gantt configs say so; the calendar's also names the Tailwind-utility rung.
+  - **A declared colour outside the nine palette families and not a hex** (for example `teal` or `amber`) is accepted by the schema but renders neutral, as no declaration: before, the value hash coloured it. Declare one of `gray`, `red`, `orange`, `yellow`, `green`, `blue`, `indigo`, `purple`, `pink` or a hex instead; a warning for these spellings is tracked in #37435.
+  
+  **To keep a colour, declare it on the option**: `{ label: 'Won', value: 'won', color: 'green' }`. There is no switch that brings automatic colouring back. The platform's own objects declare the colours they rendered with (`sys_notification.severity` and the rest), so their badges do not change.
+
+### Patch Changes
+
+- d6d9645: fix(plugin-detail): a long text summary roll-up wraps on the record page, and the summary's read display follows dark mode
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  A summary (roll-up) field whose value is text read on the record page cut to one line with an ellipsis, the whole value only in a hover tooltip, as a formula did before. The record page's field rows now read a summary through the summary field's own read display, the face the record form draws, so the whole value shows and wraps. A number or money roll-up reads the same text it did.
+  
+  That read display used a fixed grey text colour that stayed the same in dark mode. It now uses the theme's foreground colour, so a roll-up reads at full contrast in both themes.
+  
+  What does not change: list and grid rows keep the one-line cell with the whole value in its tooltip, and the record page's highlights strip keeps its face. A host that registered its own `summary` face keeps it on the record page. No metadata key, value or default changes.
+- 50f85e9: feat(spec): a formula field can return `percent`
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: added
+  
+  A ratio formula (budget used, gross margin) can now declare `returnType: 'percent'` and read and display as a `percent` field does, instead of a bare decimal beside the stored percentages.
+  
+  - **The value.** A `percent` formula result is read exactly as a `percent` field reads its stored value: a fraction (`0.25` shows `25%`, so the expression divides and does not multiply by 100), unless the formula declares a `max` above 1, then percentage points (`percentScaleOf`).
+  - **Its places.** `scale` counts the decimal places of the displayed percentage, as on a `percent` field (absent: 0). The engine rounds a fraction result to `scale + 2` places and a whole percentage to `scale`, so `scale: 1` keeps 0.417 (41.7%) instead of rounding it to 0.4.
+  - **An existing `percent` field computed from its `expression` rounds the same way.** The engine shares one rounding step for computed values, so a stored `percent` field that computes from an `expression` now keeps `scale + 2` places for a fraction (and `scale` for a whole percentage). Before, its computed fraction was rounded to `scale` itself: at `scale: 1`, 0.417 was stored as 0.4 and read 40.0%; it is now stored 0.417 and reads 41.7%. The change applies to the next computed write; rows written earlier are not rewritten.
+  - **Its face.** `percentDisplay` applies to a `percent` formula too (bar or plain). The formula renderer formats the result with the percent formatter, and the field and object forms offer `percent` as a return type. Editing the expression in the Studio field inspector keeps a declared `percent` (or `currency`) unless the new expression proves text, a boolean or a date.
+  - **Declared, never inferred.** No CEL type proves a quotient is a percentage, so authoring keeps a declared `percent` where it would otherwise stamp `number`. Readers that switch on `returnType` (display-name eligibility, filter operator and comparand typing) treat `percent` as a number.
+  
+  The enum only gains a member: every formula that parsed before parses the same, and nothing stored needs migrating.
+- 6f2bd4f: fix(fields): a create form that opens with a lookup value runs that lookup's `lookupAutofill`, and a picker's "+ New" seeds the `dependsOn` parent it filters by
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - **Opening value.** A create form can open with a lookup already set: a related list's New links the parent, a URL prefill sets it, or a form view default does. That lookup now fills the targets its `lookupAutofill` declares from that record, the same way a pick does. Example: from an opportunity, Related → Quotes → New opens a quote with Account filled from the opportunity. Only empty targets fill. A value the form opened with is explicit, so `overwrite: true` does not replace it. The fill uses the record the lookup already reads for its label, so no second request is made. The filled values count as opening values: a form nobody has touched closes without the discard prompt. A later pick replaces what the opening fill wrote, as it replaces what an earlier pick wrote. An edit form fills nothing from the stored record.
+  - **"+ New" in a dependent picker.** When a lookup's picker is filtered by `dependsOn`, its "+ New" now opens the create form with those values already set, under the field name the filter uses (`param`). The new record is then one the picker lists. The one-field inline create, used when no modal host is present, sends the same values. A picker with no `dependsOn` seeds nothing.
+  - **Hosts.** The form renderer passes a lookup the value it opened with (`openingValue`, create forms only). `onAutofill` now takes `{ opening: true }` for a fill made from that value. The console's `useActionModal` opens an object create form with the `initialValues` the descriptor carries.
+  
+  No metadata key is added or changed.
+- a9b36ef: fix(fields): the filter-condition builder takes no edit until the object's schema has answered, so a number bound is never saved as text
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The criteria builder (the `filter-condition` widget a sharing rule's criteria uses) shows a stored criteria as soon as it opens, but it reads the object's field types from a schema request that answers later. Until that answer arrived, a value box was a plain text box, and a number typed into it was saved as text: `{"amount":{"$gt":"6"}}` instead of `{"amount":{"$gt":6}}`. Once the answer arrived, the box changed to a number box but the text already saved stayed. The server reads such a value as the number it spells, so this changed no rule's matches. It did make the saved document depend on whether the admin typed before or after a network read.
+  
+  The builder's controls are now disabled while that request is in flight, and nothing is emitted from them. When the answer arrives they are enabled, and each value box has its column's type. If the request fails, the builder is released with no field types, as before. A host that offers no schema request never holds the builder. The raw-JSON editor is not held.
+  
+  No metadata key, value or default changes. A criteria already saved is not rewritten.
+- f71d488: feat(fields): a quantity displays with its unit's label and display decimal places in grid, form and detail (ADR-0158 R1 display)
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: added
+  
+  A `number` field that declares `unitConfig` now draws its unit beside the number on every face: grid and list cells, the record page (sections, highlights, the quick-look panel, related lists), and the form, both read-only and beside the edited box. A `fixed` quantity shows its one unit; a `record` quantity shows the unit its row's code field holds, and the list, grid and related-list reads fetch that field (and the row's organization) even when no column shows it. A `text` field declaring `unitConfig: { unitMode: 'code' }` shows the code's label.
+  
+  - A standard code (`KGM`, `H87`, …) shows the platform's name for it in the reader's locale; an organization code shows its `sys_unit` label. `@objectstack/spec` now exports the English base name of every standard code, `STANDARD_UNIT_NAMES` and `standardUnitName(code)`, beside `STANDARD_UNITS`. `@objectstack/platform-objects` serves each locale's names through the i18n service, as `messages.standardUnit<CODE>` in every platform bundle, and a reader without a translation falls back to the English base.
+  - Decimal places: a standard code takes its organization's `sys_standard_unit_setting` row, an organization code its `sys_unit.decimal_places`. The row is the record's own organization's, never merely the first one returned. The field's `scale` is the ceiling (ADR-0158 L4). The number is drawn at that fixed width, rounded half away from zero (ADR-0158 Open item 6, ruled A): `1.5` beside a unit of 0 places reads `2`. Only the display rounds; nothing is rounded at write, and footers, exports and the API keep the exact value.
+  - A retired organization unit, and a unit whose row the reader may not read (an external member holds no `sys_unit` read), show the bare code, never an error.
+  - One resolver (`resolveQuantityUnit` in `@object-ui/core`) and one formatter (`formatQuantity` in `@object-ui/fields`) serve every face.
+  - `@object-ui/types`: `unitConfig` is now an authorable key on `FormField` and `FormFieldSchema` (by reference to the spec's `FieldSchema.unitConfig`, beside `currencyConfig`), so `objectui validate` accepts it on a hand-authored form field. The tolerant face now checks its value against the spec's `UnitConfigSchema`, where before it passed as an unknown key. On the form face the `number` widget reads it, and on a `text` field `unitMode: 'code'` makes the text widget the unit picker.
+  - A unit code field is chosen, never typed (ADR-0158 Open item 8): a `text` field declaring `unitMode: 'code'`, and the `unitField` a `record` quantity on the same form points at, draw a searchable picker (`UnitCodeField`) of the organization's non-retired units and the standard codes, each by name and restricted to the declared `unitDimension`. It stores the code; read-only, it shows the unit's name. `@object-ui/core` exports the option list (`unitPickerOptions`) and the pointer helpers (`quantityUnitCodePointers`, `withUnitCodePointer`, `declaresUnitCode`).
+- ec24363: fix(fields): the inline line grid draws no blank entry row beside "Add line", and each column header shows its field's help
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The inline line grid of a master-detail form always drew an empty line under the lines, directly above the "Add line" button. It had no copy or remove action and was never saved, so users read it as a broken line they could not delete. The grid no longer draws it: a grid with lines shows exactly its lines, and an empty grid says "No items yet — click "Add line" to begin." The keyboard path that line carried stays: "Add line" moves focus into the line it adds, and Enter in the last line adds a line and moves to the same column in it. An empty required grid that the form refused still draws one entry line, so the field's failure stays on the cells a user types into.
+  
+  Each column header now shows its field's help as an info icon beside the label. The help appears on hover and on keyboard focus, and it is the icon's accessible name. The text is what the record form shows under the same field: `inlineHelpText`, else `description`, from the child object's definition as the server serves it, so help written by another package's `objectExtensions.fieldPatches` and the reader's language both apply. `GridField` takes the texts as a new `columnHelp` prop, and `columnHelpByField` builds them from a child object's fields. The master-detail form, the line-items panel and the record-body table editor pass them.
+  
+  What does not change: what a save sends, the `allowAdd` / `allowDelete` / `maxRows` behaviour, and every metadata key, value and default. A master-detail entry whose relationship and every column type are authored loads no child schema, so its headers show no help, as it has no lookup autofill.
+- e01b8be: feat(console): the list page's frame — a 44px page bar, a 40px view bar, a denser grid and per-column totals in the grid's own last row
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The object list page is redrawn around two bars and a denser grid (objectstack#35548, the first card of the list-page epic):
+  
+  - **Page bar, 44px.** The object's icon in one colour and its name on the left; ⋮ and 「+ 新建」 on the right. The object's description, Import and Favorite moved into ⋮.
+  - **View bar, 40px.** The view switcher is one trigger on the left, reading the view type's icon, the view name, the record count and a caret (the count beside the name returns, after objectstack#34603 removed it). 「筛选」「排序」「选项」 are text buttons on the right beside the search icon, and open the same panels as before; below `sm` they stay icons. The kanban and every other view type draw the same two bars. An empty condition row under the bar takes no height.
+  - **Grid.** A 32px header and 33px default rows, 13px on the header, the cells and the bar buttons, faint row lines, no rule after the first column, and the frozen-column shadow only once the grid scrolls sideways. The row ⋮ trigger is 24px so it fits the row. Lookup values read as small chips, money and number columns (a money formula with `returnType: 'currency'` among them) align right with tabular digits, and select labels keep their colour at lower saturation.
+  - **Totals.** Column summaries are drawn as the table's own last row, each figure under its column (so they line up at any width and are never covered by pinned columns), led by 「计数 N」; the separate footer line and its doubled colon are gone.
+  
+  `DataTableSchema` gains one host-only runtime slot, `summaryRow` (`{ lead?, cells }`), which `ObjectGrid` fills; like `rowGroups`, the zod face refuses it by name, so it is not authorable. New locale keys: `list.options`, `grid.summary.countLead`.
+- bae933b: fix(record-page): the related tab offers only 「↗」 and 「+ 添加」, and a pick of several is added all or none
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The record page's related tab drew a filter box, condition chips, an options menu, an export and its own New, and repeated the row count under the table. It now carries two entries at its right end. 「↗」 opens the child object's list under this record, on an empty list too. 「+ 添加」 is the one add entry, chosen by the relationship when the page authored no `add`: a `lookup` child opens a picker of that object whose first row is New; a `master_detail` child whose rows name a catalog record (one other required lookup) opens a picker of that catalog; one with no catalog opens the new-record form directly. The count shows once, in the tab title.
+  
+  A pick of several records is one request to the transactional batch route: every row is added or none is, and the list says why when none was. Before, each pick was its own write, and a failure part way left the earlier rows added. A data source without the batch route offers no picker.
+  
+  A child with a status and a deadline that the status settles is grouped by status on the tab: open groups first in the order the status lists them, completed groups last, each collapsible.
+  
+  The reader's header sort and column widths on the tab are remembered per list in the record page's existing per-user preferences.
+  
+  The list page 「↗」 opens names the record it came from: its condition tag reads the record's name, a breadcrumb leads back to it, 「Reset」 puts that condition back after the reader changed the filters, and New opens the record form linked to it.
+  
+  A body table's total under a currency column whose currency does not resolve is drawn as its cells are, an amount with no symbol, instead of being left out (objectstack#35710). Rows that name their own currency are still totalled per currency.
+- c00be39: feat(fields): in a list grid's cell editor, select, multi-select, tags, date, time and colour open ready to pick
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  The widget contract `FieldWidgetComponentProps` gains two optional host keys, `inCell` (draw the face for a grid cell's editor) and `onCommit` (the user has finished: write the last `onChange` value and close). `FieldEditWidget` forwards both, and `ObjectGrid`'s cell editor passes them. A host that passes neither renders every widget exactly as before.
+  
+  In the cell editor of every grid `ObjectGrid` draws:
+  
+  - **Single select and status** show their option list at once, with a search box that filters as you type. The arrow keys move through the list, Enter or a click picks, and the pick is saved; the selection stays on the cell. With nothing picked, Enter commits as before and Escape cancels.
+  - **Multi-select** (and a select declared `multiple`) is the same list with check marks: each pick toggles, and the edit is saved when you move on.
+  - **Tags** list this record's tags with check marks; unchecking removes one, and text that matches no tag is added from the list's leading "Add" row (Enter).
+  - **Date and date-time** open their calendar at once while the typed value stays visible and editable in the text box. The calendar offers Today, Tomorrow, Next week (seven days from today) and Clear. On a date, picking a day or a quick pick saves and closes; on a date-time, a day keeps the calendar open for the time, as in forms.
+  - **Time** opens the browser's time picker when the editor opens.
+  - **Colour** shows the hex box first (Enter saves, Escape leaves) and a row of swatches plus the browser's colour picker; a swatch saves and closes.
+  - A value picked this way hands the keyboard focus back to the selected cell, and in a grid that edits on a single click, the click that picked it no longer opens the editor again.
+  
+  `@object-ui/i18n` adds the strings these faces show in every locale: `fields.datePicker.nextWeek`, `fields.datePicker.clearPick`, `fields.options.search`, `fields.options.noMatches`, `fields.tags.add`, `fields.color.swatches`, `fields.color.custom`.
+  
+  Forms, dialogs and the record page keep their current controls.
+- 1c87956: feat(fields): typed values edit flat in their list cell, a record picker opens its list in place, and a rating is set without an editor
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  In the list grid's cell editor (the layer over the cell, `inCell`):
+  
+  - Text, email, phone, URL, number, currency and percent are the cell itself: one row tall, square, with no border, fill or shadow of their own, the layer's 2px frame the only line around them (square and flat even under a host theme that rounds and lifts every dialog with `!important`). The box starts as wide as its column and grows to the right with the text, over the next cells, without moving them. Numbers are right-aligned and raw (`34500.5`, not `34,500.50`); a currency shows its code before the amount; a percent shows its points and a `%`, without the slider. The grid's built-in text and number editors take the same flat look.
+  - A lookup, master-detail or user cell opens its searchable candidate list at once (recently used first, then results); a pick is the whole edit. Under the list, Browse all records opens the full record picker (classic lookups, gated by `dependsOn` like the list), where a single pick ends the edit too, and Clear is offered while the cell holds a value.
+  - On a select-first grid a rating opens no editor: a digit key sets that many stars (0 clears, capped at the field's scale), a click on a star of the already selected cell sets it, and Backspace or Delete clears it. `GridCellFacts` gains the optional `stars` fact a host sets for this (`ObjectGrid` sets it for `rating` fields).
+  - The record pickers' local "recently used" ring is kept per signed-in user as well as per object, so two accounts in one browser no longer share it. Rings stored under the old object-only key are not read, so each user's recents start empty once after the upgrade.
+  
+  Forms, dialogs and the record page draw these widgets as before. No i18n key is added.
+- 5a68b57: fix(fields): the tags field, the lookup search and the people picker search leave an Enter the input method owns to the input method
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  A user typing Chinese, Japanese or Korean presses Enter (and, in a tags field, the comma) to pick a word from the input method. Those keys also reached the widget: the tags field added the half-typed pinyin as a tag, and the search box of a lookup or of the people picker took the highlighted entry. The arrow keys that move between the input method's candidates also moved the highlighted row.
+  
+  The three widgets now ignore a key pressed while a composition is open, and the Enter Safari raises just after the composition ends (keyCode 229). The next Enter, or comma, does what it always did: it adds the tag or takes the highlighted entry. This applies in the record form and in the list grid's editors alike.
+  
+  No metadata key, value or default changes, and nothing is added to the package's exports.
+- c261a7c: feat(console): a stage confirm names the flows the move would start, in the list cell and on the record page
+  
+  Clause-②: yes (widening) — `@object-ui/plugin-detail` adds the exports `useRecordUpdateStarts`, `StageChangeStarts`, `RECORD_UPDATE_STARTS_PATH` and the type `RecordUpdateStartsAsk`; `@object-ui/fields`' `RequiredFieldsDialog` takes an optional `notice`; `@object-ui/i18n` adds the export `activeFlowsBundle` (with the types `FlowsTranslation` and `TranslationResourceReader`, moved from `@object-ui/app-shell`'s internal `utils/flowsBundle`) and two keys to every pack: `detail.stageChangeStartsHeading`, `detail.stageChangeStartsApproval`. `@object-ui/plugin-grid`'s `StateChangeConfirm` gains an optional `ask`. Nothing existing is removed or re-typed.
+  Metadata-protocol: none
+  Skills-docs: none — no skill under `skills/**` teaches the console's stage confirms; `content/docs/frontend/plugins/plugin-grid.mdx` names the list in this change.
+  
+  When a stage move would start a flow, its confirm now says so (objectstack#35928, ruling record 7073655354):
+  
+  - The list cell's state-machine confirm and the record page's stage confirm (the path's press and the header's stage menu) keep their sentence and add, under it, 「保存后将启动以下流程：」 ("Saving this change starts these flows:") and each flow by its label in the reader's language. A flow that starts an approval is marked 「发起审批」 ("starts an approval").
+  - Both confirms ask one read, `POST /api/v1/automation/_record-starts`, through one shared hook, so the two surfaces cannot disagree. The server decides which flows start; nothing is judged in the browser.
+  - A move that starts nothing shows no list, and a read that fails or is refused leaves the confirm exactly as it was.
+  - A flow label is translated as the flow runner translates it: the app's `flows` translations, read through `activeFlowsBundle`, which now lives in `@object-ui/i18n` so the confirms' packages can read it; the console's flow runner and designer import it from there.
+- 32409a9: fix(form): a new detail line on a master-detail create / edit form starts on the child's defaults, does not read red before a save is tried, and a line added and left untouched is skipped with a notice on the form and the record page
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  On a parent object's create or edit form, a line added to a detail table started blank, so a required column with a default (a status that defaults to "Pending") read red at once although saving would store the default. The record page's edit state already started its new lines on their defaults; the form now does the same.
+  
+  **New lines on the form.** A new line starts on the child object's static defaults, the values a create form of the child seeds, whether it is added with Add or with Enter on the last line. A default the server resolves at insert (`NOW()`, a CEL expression) is left to the server. A new line's empty required cell reads red once a save of the form was tried, not the moment the line appears; a stored line is flagged as before. A line added with Add and then applied from the row editor is the user's input and is saved.
+  
+  **A line added and left untouched** (maintainer ruling, card comment 7056413638: 「跳过并提示未保存」). A line Add started on its defaults that nobody edited holds only those defaults. It is still not written, and the save now says so: once the save lands, the form and the record page's edit state show "1 blank line was not saved" (or "N blank lines were not saved"), also when the host supplies its own save confirmation. Such a line never reads red, before or after a refused save, since there is nothing in it to fix; once the user edits any of its cells it is input, saved and flagged like any other new line. On an edit form that stays open after saving, the skipped line leaves with the save, as it does on the record page. A line the user typed into and then cleared is blank and is skipped as before, without the notice. The pack key is `form.lineItems.untouchedNotSaved`, in every built-in locale.
+  
+  **Seeding context.** The defaults on both the form and the record page's edit state are now read with the session facts a create form uses: a child field defaulted to the acting user starts on that user, and the organization's currency and time zone seed the fields they seed on a create form. With no known user that field starts empty and the server fills it, as before.
+- 9a98a46: feat(list,detail): a change that makes other fields required asks for them in place — the kanban drop's fill-in, now shared by the list cell and the record page
+  
+  Clause-②: yes (widening) — `@object-ui/fields` exports `collectRequiredWhenPromptFields`, `RequiredFieldsDialog` and their types (moved from `@object-ui/plugin-kanban`, which never exported them) and the new `requiredWhenPromptReads`; nothing removed or renamed
+  Metadata-protocol: none
+  
+  When a value about to be written makes another field's `requiredWhen` true while that field is still empty, the write is held and one dialog asks for the missing values:
+  
+  - **Where:** a list cell in the select-first grid every `ListView` draws, the record page's inline Save, and the kanban drop (as before).
+  - **What it shows:** the record's name, the change that set it off (read-only), and one row per field to fill, with the editors the record form uses. A value typed there that makes one more field required adds that field; Save waits for it.
+  - **Save** writes the change and the typed values as ONE update. **Cancel** writes nothing: the list cell keeps its value; on the record page the edit session and its draft stay.
+  - **A refusal of that update stays in the dialog:** under the field it names, as a new row for another field the reader can fill, or at the dialog's foot.
+  - **Not asked for**, and written and refused as before: a field that already has a value, is hidden or read-only, that the reader may not write, or that has no in-place editor (a file, rich text, a formula). The record drawer's per-field save does not ask either.
+  
+  The pre-evaluation is the one the kanban drop already used (`resolveFieldRuleState`, the evaluator the form and the server share, judged as the engine's transition gate), generalised from one key to any set of changed keys.
+- 96b66ca: feat(detail): the record header's stage menu asks for the fields a stage needs through the shared fill-in dialog
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The stage menu beside the record's name now opens the same dialog the list cell, the record page's inline Save and the kanban drop open (`RequiredFieldsDialog`, with `collectRequiredWhenPromptFields` judging which fields to ask for), and its own copy of the pre-check and field form is gone:
+  
+  - **What it shows:** the record's name and the move (「阶段：赢单」, read-only), then the fields the stage makes required while they are still empty. A stage that needs nothing opens the same dialog as the move's confirmation, with Move focused so Enter confirms.
+  - **Move** writes the stage and the typed values as ONE update; **Cancel** writes nothing. A value typed there that makes one more field required adds that field, and Move waits for it.
+  - **A refusal stays in the dialog** and the stage does not move: under the field it names, as a new row for another field the reader can fill, or at the foot (someone else changed the record, which is then re-read; a permission or other refusal as the stage line it was before).
+  - **Now not asked for, and refused as before:** a field with no in-place editor (rich text, a file, a formula). The menu's old form did not ask whether a field has one; the shared pre-check never offers such a field.
+  
+  `record:path`'s stage press keeps its plain confirmation.
+- 33d0169: feat(ui): the object's colour tile replaces its line icon wherever else the object is named
+  
+  Clause-②: yes (widening) — `ConsolePageHeaderProps` gains the optional `iconTile`, and `RecordSearchHit` and `RecordHoverCardObjectDef` the optional `color`; nothing removed or renamed
+  Metadata-protocol: none
+  
+  The tile the navigation already draws for an object (a white glyph on the object's palette colour, gray when it has none) now also names the object in:
+  
+  - **List and data pages:** the page bar and the view bar's object name in front of the view switcher; the URL data page's header.
+  - **The record page and the record drawer:** the record row in front of the record's name.
+  - **The record page's related lists:** each section's title, with the list's own icon else the related object's, on that object's colour.
+  - **Search:** the command palette's recent records, record hits and object entries; the search results page (group headings and hit cards); the global search block.
+  - **Home:** a record row in "Recently accessed".
+  - **References:** a pointer cell in a grid (`referenceVia`) and the record hover card.
+  - **Studio:** the data pillar's object list and header, and the interfaces pillar's object entries and header.
+  
+  `ConsolePageHeader` takes `iconTile`, an icon that draws its own square, drawn as given in every posture in place of `icon`. `RecordSearchHit.color` carries the object's palette name beside `icon`, and `RecordHoverCardObjectDef` names `color` beside `icon`. `ObjectIconTile`'s glyph keeps its size inside a host row that sizes every nested `svg`.
+- 6aacad9: fix(fields, console): condition editors offer a multiple: true field only what its evaluator answers
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  A `select`, `lookup` or `user` field declared `multiple: true` holds a list, and the condition editors used to treat it as a single value: they offered Equals and Is any of on it. The engine refuses those operators on such a field with 400 `INVALID_FILTER`, a dataset filter answered them with 0, and a flow edge guard written as `record.attendees == 'u1'` is false for every record. Each editor now passes the field's `multiple` to the shared filter builder, which offers such a field Contains, Does not contain, Is empty and Is not empty, the operators a `multiselect` already got:
+  
+  - the criteria editor (`@object-ui/fields` `FilterConditionField`, e.g. a sharing rule's criteria);
+  - the Studio filter editor for a dataset's scope and measure filters and a field's related-list filter. A stored `$eq` or `$in` on such a field now opens in Source instead of as an Equals row;
+  - the Studio flow edge rows. On a list-valued field they write Contains as CEL list membership, `record.attendees != null && 'u1' in record.attendees`, and Does not contain as `record.attendees == null || !('u1' in record.attendees)`. A guard spelled that way opens as a row again.
+  
+  A single-value field of the same types keeps its operators. The Studio field list now carries the declared `multiple`, so the CEL condition builder also words and writes Is empty on such a field as an empty list, as the spec's 「is empty」 table says. No metadata key, value or default changes.
+- 8aed508: Clause-②: yes (widening)
+  Metadata-protocol: none
+  Skills-docs: none — no skill teaches the input-method key guard (zero hits for `isImeKey` or `isComposing` under `skills/`); the field behaviour a skill describes is unchanged outside a composition
+  
+  An Enter that picks a word in a Chinese, Japanese or Korean input method no longer acts in three more field widgets: a line grid's cell no longer moves to the next line or appends one (its arrows no longer move either), the date picker no longer commits the half-typed date, and the record picker's page-jump box no longer jumps and clears itself. Safari's 229 Enter raised just after the composition ends is treated the same way; the next Enter does what it always did.
+  
+  `@object-ui/components` now exports `isImeKey(event)`, the one "does the input method own this key?" predicate. The list grid and every `@object-ui/fields` widget that reads its own keys ask it, so the copy `@object-ui/fields` kept is gone.
+- 43580a3: fix(fields): the line grid's column-header help no longer becomes part of every cell's announced column name
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  The widening is additive: the new key `fields.grid.columnHelp` in every locale pack `@object-ui/i18n` publishes through `./locales`, in all eleven locales.
+  
+  The info button beside a line grid's column header used the column's help text as its accessible name. The button sits inside the header cell, so the help joined the column header's name, and a screen reader that announces a cell's column read the whole help sentence with every cell of that column. The button is now named by a short "Help" word in the reader's language (`fields.grid.columnHelp`), and the help is its description (`aria-describedby`), read when the button is reached. The column header is named by the field label and that one word. The tooltip on hover and keyboard focus is unchanged, on the editable grid and on the read-only table.
+  
+  No metadata key is added or changed.
+- dc10b3b: fix(grid): in a list cell a single click only selects, and the email and phone cells draw no copy button
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  On a grid with the select-first cell model (the console's list page), a plain click on a link a cell draws used to follow it: an email opened the mail program, a phone number the dialler, a URL a new tab, a lookup or user chip that record's page, and an image thumbnail its lightbox. The cell was not selected, so a reader who meant to select or edit the cell left the list instead. The email and phone cells also drew a copy button beside the value, easy to hit while selecting.
+  
+  A plain click on any of these now selects the cell and opens nothing. To open one: Ctrl/Cmd-click it (as before), press the open button the selected cell shows on hover (only on the selected cell, never on the row hover), or press Ctrl/Cmd+Enter on the selected cell. A cell of several chips opens the first one that way. A double-click on the link edits the cell, as on any other cell. The name link is the one exception and opens the record on a single click, as before. The copy buttons are not drawn inside such a grid; Ctrl/Cmd+C copies the selected cell.
+  
+  Outside the select-first model nothing changes: the record page, related lists, phone cards, kanban cards and every grid whose host does not turn on `cellSelection` keep their links and copy buttons.
+  
+  For renderer authors: a link (`a[href]`) inside a select-first cell is now treated as part of the cell's value. Mark the one link a single click must still follow with `data-opens-on-click`, a non-link control that opens what the value points at with `data-cell-opener`, and a copy control the grid should not draw with `data-cell-copy`.
+- dca608a: feat(grid): on the list page a lookup chip opens its record in the side drawer, and a lookup cell has an edit button
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  On the console's list page, a single click on a lookup chip (a record of another object, such as a contact's account) now opens that record in the side drawer over the list. This replaces, for lookup chips on that page, the earlier change in this release where a plain click on a lookup chip only selected its cell. The list stays where it was: closing the drawer leaves its scroll position and the selected cell as they were. The drawer's address carries the record and its object (`?recordId=…&recordObject=…`), so a reload keeps it open and Back closes it, as with the name cell's "Open in side panel" icon. A click beside the chips only selects the cell. A cell of several chips opens the chip that was clicked; Ctrl/Cmd+Enter on the selected cell opens the first one in the drawer; Ctrl/Cmd-click still opens the record's page in a new tab.
+  
+  A lookup cell now draws an edit (pencil) button while the pointer is over it and while it is selected. It opens the cell's editor, as a double-click or Enter does, and it is not drawn when the cell cannot be edited (no permission, a read-only field, a locked record). It takes the place of the open button a selected cell shows.
+  
+  A chip naming a person (an owner, a creator: a lookup to `sys_user`) keeps the behaviour it had: a single click only selects the cell, and it opens from the open button or Ctrl/Cmd+Enter. Email, phone and URL cells and the name column are unchanged. On a phone every record still opens as its page.
+  
+  For hosts: `ListView` and `ObjectGrid` take a new runtime prop, `openReferencedRecord(objectName, recordId)`, that opens such a record in the host's place; `GridCellSelection` gains an optional `referenceCells` member (`isReferenceColumn`, `openRecord`), exported with its type `GridReferenceCells` from `@object-ui/components`. A host that passes neither keeps the previous behaviour, where a chip only selects its cell. `ReferencedRecordLink`'s anchor now carries `data-record-object` and `data-record-id`.
+- 13d1e95: feat(ui): in a list cell, a picker opens under the cell, Backspace clears, a refused value stays, and Enter stays on the cell
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  `GridCellFacts` (the select-first grid's per-cell host facts, `@object-ui/components`) gains three optional keys: `editor` (`'below'` draws the cell's editor as a panel under the cell, which keeps showing its value; absent or `'cover'`, the editor stays a layer over the cell), `clearRefusal` (why Backspace or Delete leave the cell as it is) and `validate` (why a committed value is refused). A host that sets none of them gets the editor placement and commits it had, with Backspace now clearing (below).
+  
+  In every grid `ObjectGrid` draws with the select-first model (the list page):
+  
+  - **Pickers open under the cell.** Single and multi select, status, tags, date, date-time, time, colour, lookup and user cells open their list, calendar or palette as a panel under the cell; the cell keeps its value as drawn (a coloured badge stays coloured) and the row height does not change. On a date the typeable box is the top of the panel and the calendar shows beneath it. Typed input, long text and an address still edit in place.
+  - **Backspace or Delete clears the selected cell and saves at once.** A required field keeps its value and says it is required (a required rating too, for Backspace, Delete and the 0 key); a read-only cell says why, as before; a checkbox cell is left alone.
+  - **A value that fails the field's rules is not saved.** The rules are the record form's (required, length, range, email and URL shape), and text a number box cannot read is refused too. The editor stays open with what was typed and says why under it (a number box that already says it cannot read its text is not told twice); correct it and commit again, or press Escape to discard. A click elsewhere does nothing while a refused value is open; a refused value whose cell scrolls out of sight is discarded.
+  - **A person's face no longer makes its row taller.** A user cell drew a 32 px face, which made its list row 41 px tall against 33 px for a row of text; the face is now 24 px and the row stays 33 px, at rest and while the cell is edited.
+  - **The selected cell's frame stays under the frozen columns** when the cell scrolls beneath them, and a cell deselected with Escape is left with no focus ring.
+  - **Enter saves and keeps the same cell selected**, with the focus back on it. It used to save and move the selection one row down. Tab and Shift+Tab still save and move right and left.
+  
+  `@object-ui/i18n` adds `table.cellNotNumber` and `table.cellInvalid` in every locale.
+  
+  Forms, dialogs and the record page keep their current controls.
+- 15b7f51: feat(fields): the line-item grid's select and date cells open their panel under the cell, and Esc in a cell puts its line back as it was when the cell was entered
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  In a form's line-item grid (`GridField`, the master-detail lines):
+  
+  - A **select** cell shows its option label; a click, Enter, Space or a typed letter opens a searchable option list under the cell (the letter becomes the search), and a pick writes the value. Esc closes the list and writes nothing.
+  - A **date** or **date-time** cell keeps the browser's own control, typed into as before, and opens a calendar under the cell when the cell is entered, with Today, Tomorrow, Next week and Clear. A day picked on a date-time keeps its time of day.
+  - A **text** cell whose text is longer than the column floats right over its neighbours while it has the focus.
+  - **Esc** in a cell puts the line back as it was when the cell was entered, and no longer reaches a dialog the form is open in, so the dialog and its other lines stay.
+  - A stored day that does not exist is named at the top of the calendar and in the cell's tooltip instead of a line under the cell, so the row keeps its height.
+  
+  Enter still moves to the next line (and adds one on the last line). Nothing a metadata author writes changes.
+- c297dff: feat(grid): a markdown, HTML or rich text cell opens a text box in a panel under the cell
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  **The list grid edits the rich-content field types in place** (objectstack#36023). On a select-first grid, selecting a `markdown`, `html` or `richtext` cell and pressing Enter, F2, typing or double-clicking opens the record form's own text box over the stored source in a panel under the cell, at least as wide as the column; the cell keeps showing its value and the row keeps its height. Enter in the panel is a new line; on a select-first grid Ctrl/Cmd+Enter saves and keeps the cell selected, Esc discards, and a click outside saves. Backspace or Delete on the selected cell of a select-first grid clears it as for any other editable cell. On a grid without the select-first cell model (an `ObjectGrid` or `object-grid` mounted without `cellSelection`), one click opens the text box over the cell, not in a panel under it: Enter is a new line, Ctrl/Cmd+Enter does nothing, Esc discards, and a click outside keeps the text as a pending change for the grid's save buttons. Before, these cells opened no editor; on a select-first grid the cell said "This field can't be edited in a list". The related tab on the record page draws the same grid and behaves the same way.
+  
+  **Only the grid's cell changes.** The three types stay in `INLINE_EXCLUDED_FIELD_TYPES`, and `hasFieldEditWidget` and `isInlineExcludedFieldType` answer as before, so the record page's field editor, the required-fields dialogs, the kanban and timesheet editors keep them out. `@object-ui/fields` exports `hasInCellPanelEditWidget(type)`, true for the three types, and `FieldEditWidget` draws their editor only when the host asks for the cell face (`inCell`); the editor loads lazily. `html` is edited as text; what the cell then draws goes through the sanitizing HTML renderer, as on every other read surface.
+- 1cd4762: Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  A list cell commit on an object with a `requiredWhen` field the list does not draw no longer reads the record first when the edited column cannot open the fill-in dialog. The pre-read (one `findOne` for the keys the row lacks) is now made only when the column is an operand of an askable field's `requiredWhen`, when such a predicate reads the clock, the acting user or the record as a whole, or when the askable field is also statically `required`. What the user sees is unchanged; commits to other columns save one request sooner. `@object-ui/fields` exports the judgment the grid asks, `requiredWhenPromptAsksOn(objectFields, changedKeys, { fillable })`.
+- 9ae874a: fix(fields): a person picked in a list cell shows their name at once, and avatar initials are letters only
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  A list cell of a `user` field stores the picked person's id, and the save answers the id too, while the cell draws a person from the expanded record a list read brings. So after a pick the cell showed the raw id, marked as an unresolved reference, until the list was read again. The picker now keeps the records a pick hands back in the reference cache the lookup cell already reads (one cache, now in its own module), and the person cell draws a stored id as the person that cache holds for it: the name and face show as soon as the pick commits, while the save is on the wire and after it lands, with no read of the list or of the person. An id nothing on the page holds is still drawn as an unresolved reference, as before. A lookup cell whose column names no display field reads the same entry, so it also shows a picked record's name without reading it again.
+  
+  Avatar initials (`getPersonInitials`, the people-field chips, the person picker rows, the comment author avatar) are made of letters only: brackets, punctuation and digits are skipped, so `Alice (Sales)` draws `AS`, never `A(`, and a name with a single letter draws that letter. The person cell and the `avatar` field widget now draw their initials through the same function instead of their own copies, so a single-word name draws its first two letters (`Ada` → `AD`) and a CJK name its given-name characters, as the chips already did.
+- 3ae62ac: feat(ui): one 8px corner for every control, a white content area beside a light grey sidebar, and badges at weight 500
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - **Controls share one corner, 8px.** Buttons, inputs, selects, toolbar controls, menus and tab lists are `rounded-md`, which the console theme now sets to 8px (it was 12px, derived from the 14px card corner). What sits inside one of them, a tab trigger in its list or a menu row, is `rounded-sm`, 6px. Cards keep their 14px corner, and dialogs, popovers and drawers keep theirs.
+  - **Chips follow.** A lookup chip in a list cell (it was 4px), a person or record chip in a form's lookup field and its selection tray, and the list's Sort, Filter and condition chips (they were pills) take the same 8px corner. Coloured option badges stay pills.
+  - **The content area is white.** The console's `--background` is white instead of the grouped grey, so a list, a record page, a kanban board and the top bar sit on white. The sidebar is the one light grey surface beside it, with its hairline border; in the dark theme the content area is the darkest step and the sidebar one step lighter.
+  - **Badges are weight 500.** `Badge` was `font-semibold` (600), outside the console's two text weights; it is `font-medium` (500). This is a declared local patch on the Shadcn primitive (`badge-medium-weight` in `ui/scripts/shadcn-local-patches.mjs`), so it survives a registry sync.
+- 6c7c6db: feat(ui): the console's pages set text in two sizes, 14 and 12, and two weights, 400 and 500
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - **Two sizes.** Body text, list cells, field values, inputs, menu items, toolbar controls and buttons are 14px (`text-sm`); field labels, column headers, counts, timestamps, hints and chip text are 12px (`text-xs`). The hard-coded 13px is gone from the console's runtime pages, and the 10px, 11px and other odd sizes there are 12px. The in-cell editor is 14px, like the cell it edits.
+  - **Two weights.** Record names, tabs, buttons, section titles and column headers are 500 (`font-medium`); body text is 400. Weight 600 and 700 stay only on page and dialog titles 18px and larger. `DropdownMenuLabel` is weight 500 through a declared local patch on the Shadcn primitive (`dropdown-menu-label-medium-weight` in `ui/scripts/shadcn-local-patches.mjs`), so it survives a registry sync.
+  - **Not changed:** Studio and metadata administration internals, the settings pages, developer tools, phone-only layouts, avatar initials, authored markdown and SDUI heading typography, the docs reader's prose size, and the shape of coloured option badges (still pills).
+  - A list column with no declared width measures its content, so it grows with the 14px text; a column whose width a view or a user set keeps that width and shows about 8% fewer characters before it truncates.
+- 3543b51: fix(comments): Reply puts the caret in the reply box, comments show the author's avatar or initials, the mention menu opens at the caret, and a delete says it went through
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  Four small fixes to comments on the record page:
+  
+  - **Reply.** Pressing Reply on a comment opened the reply box but left focus on the button, so typing went nowhere (or into the main comment box). The caret now goes into the reply box. On a comment whose replies were collapsed, Reply also expands them first.
+  - **Author avatar.** A comment by someone without an avatar showed a generic comment icon. Every comment and reply now leads with a 20 px avatar: the author's image, or their initials on the same round disc the people chips draw.
+  - **Mention menu.** Typing `@` opened the people menu at the top left of the comment box. It now opens under the caret, or above it when the window has no room below.
+  - **Delete.** Deleting a comment now shows a "Comment deleted" toast (zh: 评论已删除). A refused delete still shows its error, as before.
+  
+  Additions, nothing removed or changed in meaning: `@object-ui/plugin-detail` exports `CommentAuthorAvatar` (and its props type), and `ThreadedReplies` takes a new optional `focusReplyOnOpen` prop (default `false`, so a host that always shows the reply box keeps today's focus behaviour). `@object-ui/fields` exports `getPersonInitials`. New locale key `detail.commentDeleted` in all eleven locale packs.
+- 0628e08: perf(fields): the line-item grid's body loads on first use, and the console's first load no longer carries it
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  The line-item grid (the `grid` field and the line items of a master-detail form) was the largest field widget in the console's first-load bytes, though only a form with line items draws it. Its body now loads the first time a grid is drawn, or earlier, when a form that draws line items mounts.
+  
+  - **The same two components.** `GridField` and `LineItemsField` keep their names and their props. They now render the grid's body once it has loaded; a grid mounted before that shows a small busy placeholder until it arrives. A grid mounted after the body loaded renders it directly, and a grid that showed the placeholder draws the body once it arrives and never remounts it on a later render, so its rows and focused cell stay.
+  - **One new export, `preloadGridField()`.** It starts loading the body ahead of the first grid. It is safe to call often, its promise settles once the body has loaded, and it never rejects: a failed load is reported by the grid that needs it, through the nearest error boundary.
+  - **The record forms wait for it.** `MasterDetailForm` and the record page's line-item editor derive a grid's columns from the child object's schema, and now show those columns only once the body has loaded as well, so on a form's first open the grid never shows the placeholder. `LineItemsPanel` starts the load when it mounts.
+  - **The helpers stay where they were.** `evalArith`, `computeRow`, `lookupAutofillPatch`, `columnHelpByField`, `UNTOUCHED_NEW_ROW`, `isUntouchedNewRow` and the `GridColumn`, `ColumnCurrencies` and `ColumnHelp` types are exported as before and load with the package.
+  - **The console loads it on demand.** The console's build puts the grid's body in a chunk of its own (`fields-grid`), loaded on demand, so its first load is about 6 KB (gzip) smaller.
+  - **The liveness ledger points at the helper's new file.** In `@objectstack/spec`, the evidence path for `lookupAutofill` in the field liveness ledger now names `widgets/GridField.ts`, where `lookupAutofillPatch` lives; the verdict does not change.
+  
+  A host that renders `GridField` or `LineItemsField` itself and needs the grid in its first render calls `preloadGridField()` earlier and waits for it, as the record forms do. No metadata key, value or default changes.
+- a6756a2: feat(console): the record page's field area is one list — one field a row in the side preview, on a phone and in the wide page's pinned left column
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  The synthesized record page's field area (objectstack#36147, ruling on the card 7066516044):
+  
+  - **One column at any width.** The drawer (at any width), the split pane, the phone's 「详情」 tab, the wide page's pinned left column and a desktop full page that has other tabs but is not pinned (an opportunity's 详情 tab goes from three columns to one) draw the fields one a row: label left, value right, a hairline between rows. The phone's own grouped-inset face is gone there; it is the same list. A full page whose details are its only face (no other tab, none hidden) keeps laying a group out by width.
+  - **Group title row.** The title sits left and its chevron at the row's right end, pointing down while the group is folded and up while it is open; the whole row toggles.
+  - **Referenced records are chips.** A lookup value is drawn as a pill with the referenced object's colour tile (`ObjectSchema.color` / `icon`, objectstack#35985) and the record's whole name, wrapping rather than cut. A click on the chip opens the record; the rest of an editable lookup's row edits it. Everywhere else a reference keeps its link face.
+  - **Empty fields fold into one row.** Every empty field of every group is folded into the list's one last row (「显示 N 个空字段」), replacing the per-group toggle and the 「N 个空分组」 line on this page. The reader's choice is the per-object record-page preference `showEmptyFields` (objectstack#25883), so it holds for the next record of the object. An authored `hideEmpty` group stays hidden and is not counted.
+  - **「系统信息」 is the last group,** folded until opened: created by, created on, updated by, updated on (when the record was updated), the owner (when the body does not draw it) and the record ID, one fact a row. On this page it **replaces the one-line meta footer that objectui#12307 introduced**; outside the laid-out record page that line is unchanged.
+  - **A click edits; no pencil.** A single click on an editable value enters edit (a click on a link, a button or a text selection inside it is not taken); the hover pencil is no longer drawn, and stays in the DOM only as the keyboard's way in (visible on focus). A double click is no longer needed. **A read-only value takes no click any more**: the click-to-copy on read-only rows is removed on this page. For a mouse or a keyboard its copy icon, shown on hover or keyboard focus, stays; a touch screen shows none, and the value is selected by a long press.
+  - Authored record pages and every other DetailView keep their faces.
+  
+  `@object-ui/fields` widens: it exports `ReferenceChipContext` (a boolean React context, default `false`) that switches `LookupCellRenderer`'s reference link to the chip face.
+  
+  `@object-ui/i18n` widens: five new keys in every pack, `detail.systemInfo` (系统信息 / System information), `detail.createdTime`, `detail.updatedTime`, `detail.recordNumber` and `detail.clickToEdit`.
+- 24366ff: fix(fields): a markdown value that starts with a heading no longer draws at heading size in a list cell
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  In a grid column (list views and related lists pass `inGridColumn`), the `markdown` cell now draws its value in a cell face: a heading is a bold line at the cell's own text size instead of a heading element, and the body takes the cell's font size and line height. A value such as `# Heading` showed a truncated H1 and grew its row; the row now keeps the height of every other row. The record page and readonly form fields keep the full document face and its heading sizes. Nothing changes in what an author writes, and no export changes.
+- f2ef7d8: fix(ui): the kanban card owner, history timeline, user menu and presence stack draw letters-only initials
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  A person whose display name carries punctuation, such as `Alice (Sales)`, now shows `AS` on the kanban card owner's avatar, the history timeline, the user menu and the presence stack, where those four faces drew `A(`. They now use the same rule as the people cell and the avatar widget: initials are made of letters only, a single-word name gives its first two letters (`Admin` → `AD`), a name of three or more words gives its first and last words' first letters (`John Michael Doe` → `JD`), a single CJK word gives its last one or two characters, and a name with no letter gives `?`. The user menu still falls back to the email's first character when there is no name.
+  
+  The rule, `getPersonInitials`, is now exported by `@object-ui/types`, the lowest package all of these faces can reach; `@object-ui/fields` re-exports the same function, so its `getPersonInitials` export is unchanged. `@object-ui/auth` now depends on `@object-ui/types`.
+- 17dbea4: docs(grid): the rich text cell panel is described for the select-first grid only
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The READMEs of `@object-ui/plugin-grid` and `@object-ui/fields` now say that the panel under the cell, with Ctrl/Cmd+Enter and a click outside saving, is the select-first grid's (`cellSelection`). A grid without `cellSelection` opens the text box over the cell, where Ctrl/Cmd+Enter does nothing, Esc discards and a click outside keeps the text as a pending change for the grid's save buttons. Text only; no behaviour changes.
+- 4f19091: fix(fields): a lookup pick that keeps an amount says so over a filled field too, a create form's opening fill no longer waits for ever on a parent it cannot read, and a pick that fills a currency code and an amount in it copies both
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  Three follow-ups to the cross-currency pick rule (a pick copies an amount only into a field in the same currency). Nothing is converted, and no metadata changes.
+  
+  - **A pick over a filled amount says why it kept it.** When a pick would replace an amount that already holds a value (a re-pick in a line-item grid, or a declared pair with `overwrite: true`) and the picked amount is in another currency, the earlier value stays and the note now shows there too, ending "Unit Price still holds its earlier value." Before, the note showed only over an empty field, so the earlier product's price sat under the new product with nothing said. The note goes away once somebody edits the field.
+  - **The opening fill of a create form no longer waits for ever.** A form opened with a lookup already holding a record (a related list's New, a URL prefill) fills its declared targets from it. When an amount there follows the currency of a parent the record names, the fill waited for that parent's read and never ran if the read failed, the data source cannot read single records (`findOne`), or the form names no parent object. Now the wait ends when the read answers, fails or cannot run: the other targets (a description) fill, and the amount is left empty with the note "the currency here could not be read".
+  - **A pick that fills a code field and its amount together copies both.** An amount that follows the record's own code field (`currencyMode: 'record'`) is now judged against the line or record with the same pick's write to that code field applied, in the line-item grid and in the record form. Picking a product that carries `currency_code: EUR` and a price in it onto a fresh line now fills the code and the price, where the price was withheld with a "no currency is chosen" note beside the code the same pick had just written.
+  
+  Also in `@object-ui/fields`: new exports `declaredPickWrites`, `judgePickWrites`, `withheldStillStands` and the type `PickWrite`; `AmountCurrency` gains the kind `unread`, `WithheldAutofill` the reason `targetCurrencyUnread` and the optional `held` (the value a target kept); `amountCurrencyOf` takes an optional third argument, the pick's own writes; `AutofillCurrencyContext.targetCurrency` is handed them as an optional second argument. In `@object-ui/i18n`: two new `lookup.*` sentences, `autofillCurrencyUnread` and `autofillKept`, in every locale pack. In `@object-ui/plugin-form`: the record-form stamp's documentation lists the hosts the rule reaches; no behaviour changes there.
+- e377918: fix(fields): after a currency change in the same edit, a lookup pick's amounts stay as they are and the notes beside them follow the new currency
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  Follows the cross-currency pick rule (a pick copies an amount only into a field in the same currency). Changing the record's currency in the same edit (a new record, one with no saved lines, lines staged in this edit) still changes and clears no amount. Now the notes say what that means, in the line-item grid and in the record form. Nothing is converted, and no metadata changes.
+  
+  - **An amount a pick copied gets a note once the currency changes.** If a pick copied a price while the record was in one currency and the record is now in another, a note under the field says so: "Unit Price was copied as $100.00, but the record is now in EUR. Enter Unit Price in EUR if it should change." The note goes away when the currency changes back or someone edits the amount. An amount typed by hand gets no note.
+  - **A note about a price that was not copied follows the new currency.** The "was not filled" note is judged again against the record's currency as it is now, so it names the new currency, not the one at the pick.
+  - **When the record changes to the picked price's own currency, the note stays and the field stays empty.** It now says "Unit Price was not filled when it was picked. The record is now in USD: pick again to fill $100.00." A currency change never fills a field by itself. If the field still holds an earlier value (a pick over a filled field), the note says to clear it first, because picking the same record again does not replace a value that record did not fill: "Unit Price was not filled when it was picked and still holds its earlier value. The record is now in USD: clear Unit Price, then pick again to fill $100.00."
+  
+  Also in `@object-ui/fields`, a widening of its published surface, with nothing removed or made required: new exports `withheldAutofillNow`, `copiedAutofillNow`, `copiedAutofillMessage` and the type `CopiedAutofill`. `LookupAutofillPlan` gains the optional `copied`, the amounts a pick wrote and the currency each was written in; it is absent when there are none, so a plan built without it is still a valid plan. The `WithheldAutofill.reason` union widens with `nowSameCurrency`: code that switches over every reason gains one case to say. In `@object-ui/i18n`: three new `lookup.*` sentences, `autofillNowSameCurrency`, `autofillNowSameCurrencyHeld` and `autofillCopiedUnder`, in every locale pack.
+- 9c283a1: feat(console): preview images, PDF, text and CSV in the page from a record's attachments and from a file field
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  A file opens in a dialog in the page instead of leaving it. In a record's attachments, the file's name opens the preview; the download stays in the row's menu. On a file field, a click on the file's link opens the preview; a modified click (new tab, new window) still opens the link as before.
+  
+  - **Four views, no new dependency.** Images (PNG, JPEG, GIF, WebP) draw in an image element, and an SVG only ever through an image element, never inlined. A PDF draws in the browser's own viewer in a frame; on a phone it opens in a new tab, which hands it to the system viewer. Plain text draws as text. A CSV draws as a table, read with the same GBK-aware decoder the grid's import wizard uses.
+  - **Download only.** Word, Excel, PowerPoint, HTML and every other type show "This file type cannot be previewed. Please download it." with a download button. An HTML file is never framed and never drawn as markup.
+  - **Limits.** Images and PDF up to 20 MB; text and CSV up to 2 MB, showing their first 1000 rows or lines. Past a limit the dialog shows "This file is too large to preview. Please download it." with a download button.
+  - **Controls.** Previous and next (and the arrow keys) walk a record's attachments; download; open in a new tab.
+  - **Same door as the download.** The preview reads the same signed link through the same permission check as the download, so a reader the download refuses sees the same refusal in the preview. When the browser cannot read a text or CSV file from the page (a bucket on another origin without the CORS rule the preview needs), the dialog offers the new tab instead.
+  
+  New exports from `@object-ui/fields`: `FilePreviewDialog` and its types `FilePreviewDialogProps` and `FilePreviewItem`; `decodeSpreadsheetText` and `parseDelimited`, the delimited-text reader that moved down from `@object-ui/plugin-grid` (which now imports them from `@object-ui/fields`; its own behaviour is unchanged).
+  
+  New `@object-ui/i18n` keys in every pack, under `fields.filePreview`: `title`, `previous`, `next`, `download`, `openInNewTab`, `loading`, `tooLarge`, `unsupported`, `denied`, `loadFailed`, `blocked`, `pdfOutside`, `truncatedRows`, `truncatedLines`, `empty`.
+  
+  No metadata key, value or default changes.
+- 52971ff: fix(fields): a line-item grid whose first load failed loads again on its next mount, with no page reload
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The line-item grid's body loads on first use. When that first load failed once (a network blip, a deploy that swapped chunk names) and the host had not preloaded it, the grid showed its error from then on, even after the body was reachable again, until the page was reloaded. `GridField` / `LineItemsField` no longer hold the body in a `React.lazy`, which keeps a failed load for good: each mount that finds the body still loading asks for it once, a failure still reaches the nearest error boundary, and the next mount asks again. The `grid` form-field widget (the registered `field:grid` and `getLazyFieldWidget('grid')`) now resolves to that same face, so it recovers the same way.
+  
+  What does not change: a mount after the body has loaded renders it directly, `preloadGridField()` still never rejects, and the props of both names are unchanged. A form drawing a `grid` field shows the grid's own loading placeholder while the body loads. No metadata key, value or default changes.
+- 06c3e5a: fix(fields): an html or richtext cell holding a heading keeps the list row one line high
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  An `html` or `richtext` value that holds a heading drew it as a heading element in a grid cell, at the typography scale's heading size, so the row grew taller than the other rows (45 px against 36 px in Chromium for a stored `<h1>`). In a grid column the cell now draws the value in the same cell face a `markdown` cell uses: every heading level is a bold line at the cell's own text size, and the body takes the cell's font size and line height. What the sanitiser keeps and drops is unchanged. The record page and readonly form fields keep their full-size headings.
+- 2da2979: fix(fields): a click in a record form's date box opens the calendar
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  On a record form, and in the dialogs that reuse the same date and date-time widget, the calendar opened only from the small calendar button at the right of the box; a click in the box itself put a text cursor there and nothing else, and users took the field for broken. A click in the box now opens the same calendar popover. The box keeps the focus, so typing a date still works: the text is read on Enter or when the box loses focus, as before, and Enter also closes the popover. Escape closes it and leaves the focus in the box. Focus that arrives by Tab opens nothing, so tabbing through a form does not pop a calendar at each date field. The calendar button works as before. The box now carries the popover relationship the button carries (`aria-haspopup="dialog"`, `aria-expanded`, `aria-controls`). The grid's in-cell date editor, which already shows the calendar beneath the box, is unchanged, and the value written is unchanged.
+- 50bfbb8: fix(fields): a tap anywhere on a lookup picker option selects it, including on a record chip in its preview
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  A lookup picker's option shows a preview of its other columns under its label. A column that references another record drew a link to that record there (on a record page, its chip), and a tap or a click on it opened that record instead of selecting the option, leaving the edit behind. An email, URL or phone column in the preview did the same with the mail client, the browser or the dialer.
+  
+  The preview now draws every column the way the "browse all records" picker table already did: a reference keeps its face, the record page's chip included, without the link, and an email, URL, phone or file column shows its text. A tap or a click anywhere on the option selects it, on a phone and on a desktop. Both picker surfaces now take this rule from the one renderer they share.
+  
+  What does not change: the read cells outside the picker (record page fields, list and grid cells) keep their links. No metadata key, value or default changes.
+- 3110de5: fix(fields): the line-item grid stores an emptied multi-record lookup cell as `null`, draws a people or lookup column's names with one read, and mutes an empty list in list mode
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - **An emptied multi-record lookup cell writes `null`.** Un-picking the last record of a `lookup` column with `multiple: true` wrote an empty list (`[]`) into the line, while an emptied multi-select, tags or people cell writes `null`, the value the field contract stores for a cleared multi-value field. It now writes `null` too, so every emptied multi-value cell in the grid stores the same value and the save's blank-line check reads it as empty.
+  - **Names are read once per referenced object, not once per line.** Each people cell and lookup cell holding a bare record id read that record on its own to draw its name, so a grid of twenty lines with a people column made twenty reads of `sys_user`, and a lookup column twenty more of its target. The grid now gathers those reads into one read per referenced object (an `$in` on the record ids, up to 50 ids per read), with each id asked for once, in editable, read-only and list mode alike. What each cell draws is unchanged.
+  - **A stored empty list reads muted in list mode.** A multi-select or tags cell holding `[]` drew the em dash in the normal text colour; it now takes the muted colour, as an empty value already did.
+  
+  No metadata key, value or default changes.
+- 9f84e5f: fix(fields): a lazily loaded field widget whose chunk failed to load once loads again on its next mount, with no page reload
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The date and datetime pickers, the rich-content editor and read face, the filter-condition cell, the image field's crop dialog and every widget reached through `getLazyFieldWidget` or `registerField` were `React.lazy` components. A lazy component keeps its first import outcome, a rejection included, so after one failed chunk load (a deploy that replaced the chunk, a dropped connection) the widget stayed broken until the page was reloaded. They now load through one shared wrapper: loading and loaded behave as before (the host's `Suspense` fallback shows while the chunk loads), a failed load still reaches the nearest error boundary, and the next mount (an error boundary's reset, a reopened form, a revisited page) asks for the chunk again. The mounted widget that saw the failure does not retry by itself, so an unreachable chunk is not requested in a loop.
+- 6156fdd: fix(fields): a multi-record lookup column in the line-item grid reads its records, not "undefined", in the read-only table and in list mode
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The line-item grid rendered its read-only lookup cell (the read-only table of a read-only record page or print page, and the list form-factor) without the column's `multiple` flag. A multi-record lookup cell's id list was therefore resolved as one id, and the cell printed "undefined". Both read-only sites now pass `multiple` from the column, as the editable cell already did, so the cell shows one badge per related record. Single-record lookup columns are unchanged.
+- 115d387: fix(fields): a currency field's symbol no longer covers the first digits of the amount
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The edit form's currency input reserved a fixed left inset sized for `$`, and the line-item grid's cell editor did the same. The symbol comes from `Intl` per currency and display locale, so wider symbols (`US$` and `HK$` under zh-CN, `CA$` and `CHF` under en-US) were drawn over the amount: `150000` read as `US$50000`. The input's inset now follows the symbol's rendered width; a `$`-wide symbol keeps exactly the inset it had.
+- 021524c: feat(spec,ui): a field can be read-only by hand at the console while actions, imports, the API and flows keep writing it (`uiReadonly` / `uiReadonlyWhen`)
+  
+  Clause-②: yes (widening: two new optional authorable keys `Field.uiReadonly` and `Field.uiReadonlyWhen`)
+  Metadata-protocol: added
+  Skills-docs: follow-up #37405
+  
+  A status column that only moves through actions, or a field an integration fills, used to have no honest declaration: `readonly: true` also strips every client write, so the action, the import and the API lost the field too. Fields now carry two lock tiers:
+  
+  | | server lock: no client writes | hand lock: no person edits at the console |
+  |:--|:--|:--|
+  | always | `readonly` | `uiReadonly` |
+  | conditional | `readonlyWhen` | `uiReadonlyWhen` (CEL, the same scope as `readonlyWhen`) |
+  
+  - **`uiReadonly: true` / `uiReadonlyWhen`.** These console surfaces lock the field: the create and edit dialogs (the field is left off them and out of the payload they submit, so a create from the console lands on the field's `defaultValue`, and a `required` field therefore needs one), the record page's inline edit and stage path, the highlight-strip chip, grid inline edit and its multi-row save, kanban drag between columns grouped by the field, calendar drag, and the line-item grid (a `uiReadonly` child field is not a derived column, and an authored column over it is locked; a `uiReadonlyWhen` one locks its cell per row). The Gantt, the timesheet cell, the kanban swimlane drag and the in-app assistant do not read the keys yet. The engine never reads either key, so REST, import, declarative and script actions, and flows write the field, and the object's validations (a `state_machine`, for one) judge each write.
+  - **`uiReadonlyWhen` is judged on an existing record only** (the create dialog does not read it, nor does a new line-item row), over the host's predicate scope on every surface. Grids and list views fetch the operands of a shown or dragged field's lock predicates. A predicate that cannot be evaluated LOCKS the field (no server judges the hand lock), the edit dialog refuses to submit until it is fixed, and `os validate` checks it as it checks `readonlyWhen`.
+  - **Refused: `uiReadonly: true` beside `readonly: true`** (at `['uiReadonly']`, at every door that parses a field: `defineStack`, `os validate`, metadata save). Keep one: `readonly` when no client may write the field, `uiReadonly` when people at the console may not. `uiReadonlyWhen` beside `readonlyWhen` is accepted.
+  - **Kanban: a `readonly` lane field no longer drags.** The board read no field lock before, so a card grouped by a `readonly` field could be dragged and its PATCH was silently stripped. The board now reads both locks.
+  - **`@object-ui/core` exports the one verdict:** `fieldReadOnlyByHand(def, record?, context?)`, `fieldStaticallyReadOnlyByHand(def)`, `fieldHasConditionalHandLock(def)`. `resolveFieldRuleState` takes `uiReadonlyWhen` in its rules and `uiReadonly` in its statics. The import wizard's target mapping and the Studio/designer reads stay on the raw `readonly`.
+  - **MCP `describe_object`** reports `uiReadonly` and `uiReadonlyWhen` as their own keys where set (never folded into `readonly`, which tells an agent to leave the field out of a write), on the HTTP and the stdio transport, and the tool description names them.
+  - **Censuses and Studio.** The FLS reference scrub classifies both keys (`@objectstack/metadata-core`: `uiReadonly` kept, `uiReadonlyWhen` an expression position). A caller denied a field the `uiReadonlyWhen` reads is served the field with `uiReadonly: true` in place of the predicate, so the lock never opens for them. The Studio field form offers both rows beside Read-only and Read-only when, with their labels and help translated in every metadata-forms locale pack (`@objectstack/platform-objects`).
+- 47ed85d: fix(fields): a lookup's quick-create and "show all results" stay whole and clickable in a short popover, and its list scrolls inside a dialog
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The lookup popover drew its quick-create row and its "show all results" row as the last children of the scrolling option list. The popover is held to the room the browser leaves on the side it opens to, and when that room is shorter than the list the list shrinks, so those two rows were the first thing cut: in a dialog near the bottom of a short window the create row showed only its top edge and could not be clicked. Inside a modal form the list could not be scrolled to it either, because the form dialog's scroll lock cancelled every wheel and touch move on the popover, which is rendered outside the dialog.
+  
+  Both rows now sit in a footer pinned under the list, quick-create on the left and "show all results" on the right, and the list is what gives way. The footer shows quick-create only when the field offers it and the user may create the target record, the same rule as before; when there is nothing to create and nothing more to show, no footer is drawn. A search with no match keeps its centred create button. The popover is now modal, its own scroll-lock layer, so its list scrolls by wheel and touch inside a dialog; while it is open the page behind it is hidden from assistive technology and a click outside closes it first, as with the other dropdown menus. The list cell's editor keeps both rows at the end of its list.
+- 97e0f93: fix(fields): on a phone a lookup's candidates open in a bottom drawer that scrolls by touch
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  On a phone a create or edit form fills the screen as a modal dialog, and a lookup's candidate list opened in a small dropdown rendered outside that dialog. The dialog's scroll lock cancelled every touch move on it, so the list could not be scrolled by touch, and with the keyboard up the dropdown flipped above the field and showed only three or four rows.
+  
+  Below the phone breakpoint (the width at which the search-first people picker already switches to a sheet) the candidate list now opens in a bottom drawer titled with the field's label: the search box at the top, the candidates scrolling by touch in the middle, and quick-create and "show all results" pinned at the bottom. The drawer follows the on-screen keyboard, and the search box is not focused when it opens, so the keyboard comes up only when the user taps it. Quick-create shows under the same rule as on the desktop: only when the field offers it and the user may create the target record. Picking a candidate fills the field and closes the drawer. The desktop dropdown and the list cell's editor are unchanged.
+- 69c3dc4: fix(fields): a dependent lookup filters by its parent's id when the parent arrives populated
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  A lookup with `dependsOn` naming another lookup now scopes its candidates by that parent's id when the record holds the parent as a populated row, as a record page does. Before, the filter carried the stringified object (`"[object Object]"`), so the picker on a record page — for example a quote's contact, scoped by the quote's account — always answered "No options found". The quick-select list, the full picker, the people picker and the create-new seed all use the same filter, so all four are fixed. A parent held as a bare id is unchanged.
+- 62692b7: fix(fields): the people picker's list scrolls by wheel and touch inside a dialog, and in its desktop dialog
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  A user field's inline people picker could not be scrolled when it was opened inside a dialog form. Two things held it. The dropdown is rendered outside the dialog, so the form dialog's scroll lock cancelled every wheel and touch move over it; the dropdown is now modal, its own scroll-lock layer, as the lookup dropdown already is. Under that, the list area took the full height of its rows instead of the room the dropdown gives it, so the rows past the bottom edge were clipped rather than scrollable, inside a dialog or not; the list now shrinks to that room and scrolls. The same list in the people picker's centred desktop dialog scrolls now too. While the inline dropdown is open, the page behind it is hidden from assistive technology and a click outside closes it first, as with the other dropdown menus. The phone's bottom sheet is unchanged.
+- 49c6bf3: fix(fields): an action's lookup param honours the borrowed field's `allowCreate: false`, and a record created in a filtered picker that fails the filters is not selected
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  - **A field-backed lookup param reads the field's `allowCreate`.** A param written `{ field, objectOverride }` already took the field's `lookupFilters`, `lookupColumns`, `lookupPageSize` and `descriptionField`, but not `allowCreate`. As a result, a field declaring `allowCreate: false` still showed "+ New" in an action's picker. `resolveActionParams` now copies it, app-shell's `paramToField` forwards it to the record-header dialog's picker, and the selection toolbar's dialog carries it through `resolvePromotedBulkParams`. Both the desktop popover and the phone drawer honour it. `@object-ui/core`'s `ActionParamDef` gains the optional `allowCreate` member it travels on. An author who writes `allowCreate` on a raw param is warned by name in development, like the other inherited picker keys: the spec's `ActionParamSchema` does not declare it.
+  - **A quick-created record is selected only if the picker could have offered it.** The create form accepts whatever the user enters, so the new record can fail the field's `lookupFilters`, for example a `draft` where the field asks for `approved`. The picker used to select it anyway, and the save or action that read the field then refused it. The picker now re-reads the new id through its own filter, the field's `lookupFilters` and `dependsOn` scope combined with the id. If the server does not return the record, it is not selected, and the picker reopens with the line `lookup.createdOutsideFilters` ("The record was created, but it does not match this field's filters, so it cannot be chosen here."), in every shipped locale. If the check itself fails, the record is not selected either, and the line `lookup.createdUnchecked` says the record was created but could not be checked, so the user searches for it instead of creating a duplicate. A picker with no filter selects the new record as before, without the extra read.
+  - **A create notice no longer hides the candidate list.** A create notice (the two lines above, or a failed inline create) now sits above the list instead of replacing it, so the user can pick an existing record straight away. Closing the picker clears it. Before, a failed inline create hid the list and its create entry until the widget was remounted.
+- 15d2766: fix(fields): a `lookupAutofill` written by hand on a standalone form node's field is not run
+  
+  Clause-②: no (narrowing)
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No schema key, accepted value or metadata type is added, removed or renamed, and nothing stored is rewritten: `lookupAutofill` on a form field was never in a declared accept set. What narrows is the runtime behaviour of @object-ui/fields (`readLookupAutofillTargets`, and `LookupField` handed `onAutofill`), whose consumer is code, not metadata an upgrade could rewrite. This body does carry a code-level prescription (the FROM, TO and Fix lines below, written without an arrow), so the gate admits this marker on a detector miss, not on a checked fact: no fact-based category covers a runtime function whose behaviour narrows (`runtime-interface-only` reads exported types, `runtime-export-retired` reads an export that is gone). The vocabulary gap is #37136. -->
+  
+  `lookupAutofill` is a fact about the object, and it runs where the object is read: in a record form and in a line-item grid column. A lookup on a standalone `form` node whose field carries `lookupAutofill` written by hand now fills nothing when a record is picked. The lookup itself is still set. Before, such a pick copied values into the other fields without the cross-currency rule, so an amount could be copied into a field in another currency with no note. A development build now warns once, naming the field and saying where the key is honoured.
+  
+  Record forms and grid columns behave as before, the cross-currency rule included. The widget recognises a record form by the stamp the record form puts on its lookups (`withLookupAutofillTargets`). That stamp is now written on every lookup that declares pairs, including when no target is a field of the loaded object, and only a stamp the record form issued counts. A `lookupAutofillTargets` key written as data is ignored.
+  
+  No metadata key is added or changed. Fix: declare `lookupAutofill` on the object's lookup field and draw the object's form.
+  
+  **BREAKING** (`@object-ui/fields`, the `lookup` and `master_detail` widgets): `LookupField` handed an `onAutofill` writer runs its field's `lookupAutofill` pairs only when the record form stamped the field.
+  
+  - FROM: a single-value pick, and the opening fill of a create form that opened with the lookup set, filled the declared targets whenever the host handed `onAutofill` (and no `onSelectRecord`) and the field carried `lookupAutofill` pairs.
+  - TO: it also needs the stamp `withLookupAutofillTargets` issues, which the record form applies to every field it draws. A host that hands `onAutofill` without that stamp, such as a standalone `form` node, sets the lookup and fills nothing, on a pick and on the opening fill alike, and a development build warns once per field.
+  - Fix: stamp the field through `withLookupAutofillTargets(field, objectFields)` before handing it to the widget, passing the object's field map as the record form does. With no map the stamp names no target, so the pick copies without the cross-currency rule, which is the copy this change stops. Or declare `lookupAutofill` on the object field and draw the object's record form.
+  
+  **BREAKING** (`@object-ui/fields`, runtime export): `readLookupAutofillTargets(field)` now answers only for a target map that `withLookupAutofillTargets` issued.
+  
+  - FROM: `readLookupAutofillTargets(field)` returned any non-array object found under the field's `lookupAutofillTargets` key.
+  - TO: it returns only the map `withLookupAutofillTargets` stamped, which is what the record form does. A same-name key written by hand reads `undefined`. `withLookupAutofillTargets` now also stamps a lookup whose pairs name no field of the map it is given, with an empty map. Before, it returned the field unchanged. The map it stamps is frozen, and a field with pairs always comes back as a copy.
+  - Fix: stamp the field through `withLookupAutofillTargets`, as the record form does. If you need the raw value, read `field.lookupAutofillTargets` directly.
+- 706c8c6: fix(plugin-list): a gallery card labels and formats a formula or summary column whose result is a number, an amount or a percentage
+  
+  Clause-②: yes
+  Metadata-protocol: none
+  
+  A gallery card, which is also how a phone draws a related list's rows, now gives a `formula` or `summary` column the same treatment as a stored number when its result is a number, an amount or a percentage: the field's label before the value, and the format the related-list table gives the same field. A `returnType: 'currency'` formula reads `Total 12,000.00` on the card, as it does in the table. Before, it read a bare `12,000` beside `Unit price 6,000.00`, so the reader could not tell what the figure was. A summary declaring its `currencyConfig` reads as money in the same way. A formula whose result is text stays unlabeled, as a text field does.
+  
+  The card's field builder now hands the cell `returnType` and `currencyConfig`, the two declarations the related-list table's builder already hands it. A plain `currency` field with a fixed `currencyConfig` therefore also shows its own currency on a card instead of the tenant default.
+  
+  `@object-ui/fields` exports `resolveFormulaValueType(field, value)`, the rule the formula cell uses to choose how it draws a result. The formula cell now calls it, and so does the card's label decision, so the two cannot disagree.
+- 0ad44a3: fix(fields): the required-fields fill-in dialog hands its controls the record the change would leave
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  A change made in place (a stage move on the record page, a list cell, an inline edit, a kanban drop) can make another field required. The fill-in dialog then asks for that field. The dialog handed its controls no record, so every control that reads the record judged it on an empty one. Any option `visibleWhen` that read a record field was judged without that field. A condition guarded by `has(record.x)` was false, so the option was hidden. A condition without that guard could not be evaluated, and the option was offered whatever the condition said. A choice field whose options were all hidden showed "No options available", and the change could not be saved. Example: each loss reason is shown only while the stage is "closed lost", so moving an opportunity to "closed lost" asked for a loss reason and offered none. Every option list gated by `dependsOn`, and every dependent lookup, stayed on its "select the parent first" gate.
+  
+  The dialog now hands every control the record as the write would leave it: the saved record, with the change and the values typed into the dialog so far applied on top. What reads that record now resolves on it:
+  
+  - option visibility;
+  - `dependsOn` gates on option lists and lookups;
+  - dependent-lookup filters;
+  - the currency of a money field that takes its currency from the record or from a parent record.
+  
+  Each option is now shown or hidden by its condition on the record the write would leave. If the condition is true on that record, the option is shown. If it is false, the option is hidden. This includes an option the dialog used to offer only because its condition could not be evaluated on an empty record. For example, an unguarded `record.stage == "closed_lost"` used to be offered whatever the stage. It is now hidden when the stage stays "negotiation". So in an app whose option conditions do not guard with `has()`, the dialog can offer fewer options than before. A condition that still cannot be evaluated on that record is still offered, for example one that names a field the record does not carry. An option that depends on another value typed into the dialog appears once that value is typed. Which fields the dialog asks for was already decided on this record and does not change.
+  
+  Widening: the exported `RequiredWhenPromptField` type gains one optional member, `record?: Record<string, unknown>`. That is the record the field was judged against. `collectRequiredWhenPromptFields` sets it on every field it returns, and `RequiredFieldsDialogField` inherits it. The dialog passes it, with the typed values, to every control as `dependentValues`. A row a host builds itself (a field a refusal names) carries no `record`. It reads the record of another field shown in the dialog. When no shown field carries one, it reads only the typed values.
+  
+  No metadata key, value or default changes.
+- 6361b99: fix(console): data-page filter chips name lookup records and say booleans in the reader's language; filter-condition sentences use translated labels
+  
+  Clause-②: yes (widening) — three new members on the `@object-ui/plugin-list` package entry, `useLookupValueNames` (with its `LookupValueName` and `NamedCondition` types); nothing removed or renamed
+  Metadata-protocol: none
+  
+  On the bare data page (`/:objectName/data?filter[...]`), the page a dashboard drill's "Open in list" lands on, two kinds of filter chip still showed the stored comparand. A chip on a lookup field showed the related record's id; it now shows that record's name, read the way the list's own condition chips read it (the target's records by id, named by the lookup's `displayField`, else the target's name field), and keeps the id while the read is in flight, when it fails, or when it names nothing. A chip on a boolean (`filter[field][bool]=true|false`) showed `= true` / `= false`; it now shows the filter builder's true / false words in the reader's language (in zh-CN, `= 是`). A "not in" chip on a select field draws each member as the option's translated label, as the "in" chip does.
+  
+  The read-only sentence a field declaring `widget: 'filter-condition'` draws (a sharing rule's criteria, for one) now says the object's translated field and option labels, the way a record page draws the same field, and keeps the authored label where the app bundle has none.
+  
+  `@object-ui/plugin-list` adds `useLookupValueNames` (with its `LookupValueName` and `NamedCondition` types) to its public entry, a new export: the read the list's condition chips use to name lookup records, so a host drawing its own chips over the same object names a record the same way.
+- b89f1b5: The auto-number field's read display now uses the theme's foreground colour instead of a fixed grey, so it stays readable in dark mode.
+- d280de9: docs: stale prose on summary currency, the temporal-comparand door and analytics filters now says what the code does
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  No accepted value, key or answer moves. Two refusal messages change their words:
+  
+  - A `currencyMode: 'dynamic'` summary over a child `currency` field that is neither `dynamic` nor a well-formed `record` / `fixed` (a stored `fixed` field with no `defaultCurrency`, or a `currencyMode` outside the three) is still refused, and the refusal now names what the child lacks: "is a 'currency' field in `fixed` mode with no `defaultCurrency` code (the currency it is fixed to is missing)", or "is a 'currency' field whose `currencyMode` 'X' is none of `dynamic`, `fixed` and `record`". Before, it said only "is a 'currency' field, not a `currency` field in `dynamic` mode".
+  - The temporal-comparand door's refusal of a comparand no temporal rule reads (`'not-a-date'`, the preset name `'last_30_days'`) now ends "As written it would reach the driver and be compared as text: it may select every row, none or the wrong ones (or raise a database error), an answer indistinguishable from a real one." Before, it said the comparison would "compare false for EVERY row", which was wrong for `$lt` and others that selected every row, for a partial day such as `'2026-06'` that selected a subset, and on PostgreSQL, which raised a database error. Its `having` twin says the same of the groups it would keep, where it said "no group or every group, a 200".
+  
+  The upgrade-guide entry `summary-dynamic-currency-rollup-home-amount-judged-as-served` now states the admitted set as both doors enforce it: a `dynamic` summary may roll up any child `currency` field in `dynamic` mode, a stored home amount included. Source comments and published docblocks that said every `{placeholder}` is stepped around by the temporal door now state the per-kind rule: a date macro is stepped around and judged by its year once resolved, a period key and a context token are judged as written, and an unknown or record-context token is left to the resolver.
+- Updated dependencies [8236d9b]
+- Updated dependencies [1d28405]
+- Updated dependencies [b02484e]
+- Updated dependencies [7a3f86c]
+- Updated dependencies [52a2398]
+- Updated dependencies [a0b4ecf]
+- Updated dependencies [1c05546]
+- Updated dependencies [42b4d09]
+- Updated dependencies [4ffe9d3]
+- Updated dependencies [c3fb37a]
+- Updated dependencies [b38e133]
+- Updated dependencies [f796089]
+- Updated dependencies [8f49499]
+- Updated dependencies [8b550f8]
+- Updated dependencies [c809deb]
+- Updated dependencies [b68f9ae]
+- Updated dependencies [2e9e1ac]
+- Updated dependencies [c9b3f7a]
+- Updated dependencies [8e46424]
+- Updated dependencies [8896822]
+- Updated dependencies [f4dbcc2]
+- Updated dependencies [9c29d73]
+- Updated dependencies [dc53d4a]
+- Updated dependencies [0739dee]
+- Updated dependencies [ad15579]
+- Updated dependencies [89364b4]
+- Updated dependencies [dfc6bbf]
+- Updated dependencies [97b9d1e]
+- Updated dependencies [0f29688]
+- Updated dependencies [5ecf937]
+- Updated dependencies [eed422e]
+- Updated dependencies [2df9691]
+- Updated dependencies [bfd6b6b]
+- Updated dependencies [55020c3]
+- Updated dependencies [f19e6c6]
+- Updated dependencies [feb9b79]
+- Updated dependencies [b7d2474]
+- Updated dependencies [50f85e9]
+- Updated dependencies [6f2bd4f]
+- Updated dependencies [99a0e4f]
+- Updated dependencies [9f352e8]
+- Updated dependencies [c0716ed]
+- Updated dependencies [7bd5d28]
+- Updated dependencies [fd471d3]
+- Updated dependencies [1b2cd80]
+- Updated dependencies [9062756]
+- Updated dependencies [cdb327f]
+- Updated dependencies [6ffa816]
+- Updated dependencies [6ffa816]
+- Updated dependencies [09ba0c7]
+- Updated dependencies [7702f09]
+- Updated dependencies [05e0eb8]
+- Updated dependencies [b863d2b]
+- Updated dependencies [c890070]
+- Updated dependencies [e75a528]
+- Updated dependencies [5bd7257]
+- Updated dependencies [5dd856f]
+- Updated dependencies [5dd856f]
+- Updated dependencies [58d00db]
+- Updated dependencies [3819afe]
+- Updated dependencies [61722e9]
+- Updated dependencies [f6902e9]
+- Updated dependencies [df81f4c]
+- Updated dependencies [ed906d5]
+- Updated dependencies [3d6dea2]
+- Updated dependencies [e6fa510]
+- Updated dependencies [99ece3c]
+- Updated dependencies [285ad8d]
+- Updated dependencies [bfd1049]
+- Updated dependencies [2495486]
+- Updated dependencies [16a96ac]
+- Updated dependencies [6a35635]
+- Updated dependencies [9212119]
+- Updated dependencies [cda16d4]
+- Updated dependencies [9b3227f]
+- Updated dependencies [fe75349]
+- Updated dependencies [f4de1de]
+- Updated dependencies [dab4712]
+- Updated dependencies [141a826]
+- Updated dependencies [8145424]
+- Updated dependencies [53c9575]
+- Updated dependencies [83a79e6]
+- Updated dependencies [dda665f]
+- Updated dependencies [98b3f87]
+- Updated dependencies [7411f9b]
+- Updated dependencies [e114324]
+- Updated dependencies [f71d488]
+- Updated dependencies [f44758b]
+- Updated dependencies [ccded86]
+- Updated dependencies [f7b172f]
+- Updated dependencies [a0b01fa]
+- Updated dependencies [5d2ce34]
+- Updated dependencies [59392ed]
+- Updated dependencies [e01b8be]
+- Updated dependencies [238661f]
+- Updated dependencies [d96c878]
+- Updated dependencies [c99156e]
+- Updated dependencies [c8e9bec]
+- Updated dependencies [7ee7a61]
+- Updated dependencies [72d19c4]
+- Updated dependencies [b0c624a]
+- Updated dependencies [9b6db73]
+- Updated dependencies [1e018d6]
+- Updated dependencies [6d86b43]
+- Updated dependencies [bae933b]
+- Updated dependencies [a3a74f2]
+- Updated dependencies [f98f18c]
+- Updated dependencies [74d3d83]
+- Updated dependencies [401eb44]
+- Updated dependencies [29f1280]
+- Updated dependencies [eb7ad70]
+- Updated dependencies [227a16a]
+- Updated dependencies [de25d58]
+- Updated dependencies [598a34d]
+- Updated dependencies [0585797]
+- Updated dependencies [811858c]
+- Updated dependencies [fac1e7d]
+- Updated dependencies [4609c48]
+- Updated dependencies [8500ee7]
+- Updated dependencies [a6607c7]
+- Updated dependencies [c00be39]
+- Updated dependencies [1c87956]
+- Updated dependencies [5345905]
+- Updated dependencies [fe19096]
+- Updated dependencies [4fb7169]
+- Updated dependencies [d953558]
+- Updated dependencies [af566c2]
+- Updated dependencies [f909734]
+- Updated dependencies [cedc094]
+- Updated dependencies [c9b0a23]
+- Updated dependencies [f51578e]
+- Updated dependencies [6b360ab]
+- Updated dependencies [c7174c3]
+- Updated dependencies [78f7160]
+- Updated dependencies [bb1c55d]
+- Updated dependencies [1d7015a]
+- Updated dependencies [d7c257e]
+- Updated dependencies [40e22f1]
+- Updated dependencies [5dbcc02]
+- Updated dependencies [7de1bad]
+- Updated dependencies [bc9ace2]
+- Updated dependencies [d6be99d]
+- Updated dependencies [0a1b69c]
+- Updated dependencies [2e07e61]
+- Updated dependencies [643fe3b]
+- Updated dependencies [0a3dd40]
+- Updated dependencies [dea68e9]
+- Updated dependencies [b113178]
+- Updated dependencies [138faaa]
+- Updated dependencies [411fe24]
+- Updated dependencies [6b51822]
+- Updated dependencies [f3c9d42]
+- Updated dependencies [48c732c]
+- Updated dependencies [52fb30c]
+- Updated dependencies [8807dcb]
+- Updated dependencies [8df7bf2]
+- Updated dependencies [170ca48]
+- Updated dependencies [d33bf5a]
+- Updated dependencies [9ed18a5]
+- Updated dependencies [236c804]
+- Updated dependencies [c261a7c]
+- Updated dependencies [c261a7c]
+- Updated dependencies [76cb366]
+- Updated dependencies [32409a9]
+- Updated dependencies [f548bdc]
+- Updated dependencies [e72f2aa]
+- Updated dependencies [9f6f306]
+- Updated dependencies [c757e07]
+- Updated dependencies [a5a5312]
+- Updated dependencies [c1b35c3]
+- Updated dependencies [9a98a46]
+- Updated dependencies [8c8ff0f]
+- Updated dependencies [27e414b]
+- Updated dependencies [eb53d63]
+- Updated dependencies [dda5e74]
+- Updated dependencies [f2a990b]
+- Updated dependencies [035a12c]
+- Updated dependencies [33d0169]
+- Updated dependencies [a23164e]
+- Updated dependencies [f3d0a9f]
+- Updated dependencies [8aed508]
+- Updated dependencies [a60740a]
+- Updated dependencies [8c5a81e]
+- Updated dependencies [43580a3]
+- Updated dependencies [cc05e60]
+- Updated dependencies [dc10b3b]
+- Updated dependencies [dca608a]
+- Updated dependencies [baf2678]
+- Updated dependencies [13d1e95]
+- Updated dependencies [6db1dc2]
+- Updated dependencies [3ae62ac]
+- Updated dependencies [6c7c6db]
+- Updated dependencies [eebb893]
+- Updated dependencies [493ad09]
+- Updated dependencies [78437e2]
+- Updated dependencies [ed4d322]
+- Updated dependencies [3543b51]
+- Updated dependencies [4ab2c82]
+- Updated dependencies [04f9861]
+- Updated dependencies [c30ce97]
+- Updated dependencies [e605773]
+- Updated dependencies [0628e08]
+- Updated dependencies [713545f]
+- Updated dependencies [cbd582f]
+- Updated dependencies [031325d]
+- Updated dependencies [1705ec9]
+- Updated dependencies [b7fe94a]
+- Updated dependencies [a2dc858]
+- Updated dependencies [a6756a2]
+- Updated dependencies [b3bcfef]
+- Updated dependencies [aad35e6]
+- Updated dependencies [0b2118f]
+- Updated dependencies [ad65d82]
+- Updated dependencies [71e02ff]
+- Updated dependencies [cb5a975]
+- Updated dependencies [92e0475]
+- Updated dependencies [d12ac84]
+- Updated dependencies [5e8e243]
+- Updated dependencies [4099ef2]
+- Updated dependencies [6a73185]
+- Updated dependencies [ad92dfd]
+- Updated dependencies [bb89b2d]
+- Updated dependencies [8da2b7e]
+- Updated dependencies [740720c]
+- Updated dependencies [6e643cc]
+- Updated dependencies [7c9b22b]
+- Updated dependencies [9742142]
+- Updated dependencies [f3a8a13]
+- Updated dependencies [96b7975]
+- Updated dependencies [e8b494a]
+- Updated dependencies [bbc7e03]
+- Updated dependencies [27895d7]
+- Updated dependencies [543585d]
+- Updated dependencies [7e89bc6]
+- Updated dependencies [70194ff]
+- Updated dependencies [42e4096]
+- Updated dependencies [a10422d]
+- Updated dependencies [1a2a8a9]
+- Updated dependencies [f2ef7d8]
+- Updated dependencies [0002eaf]
+- Updated dependencies [7a5ae65]
+- Updated dependencies [ff60149]
+- Updated dependencies [ee651ce]
+- Updated dependencies [dad9b55]
+- Updated dependencies [d076975]
+- Updated dependencies [70d07fd]
+- Updated dependencies [73f2cf4]
+- Updated dependencies [8a741ab]
+- Updated dependencies [60e79ed]
+- Updated dependencies [3cf6a44]
+- Updated dependencies [5fecc22]
+- Updated dependencies [595844b]
+- Updated dependencies [6cfa758]
+- Updated dependencies [4f19091]
+- Updated dependencies [e377918]
+- Updated dependencies [28588d0]
+- Updated dependencies [3b58921]
+- Updated dependencies [9c283a1]
+- Updated dependencies [c45dd80]
+- Updated dependencies [48c5484]
+- Updated dependencies [cb2d6aa]
+- Updated dependencies [d463c46]
+- Updated dependencies [ad50d61]
+- Updated dependencies [f26469a]
+- Updated dependencies [7501d0c]
+- Updated dependencies [4ef1ea9]
+- Updated dependencies [41dd132]
+- Updated dependencies [45ef94e]
+- Updated dependencies [d7411fa]
+- Updated dependencies [c6075a7]
+- Updated dependencies [cd51dbb]
+- Updated dependencies [3f568c1]
+- Updated dependencies [573a376]
+- Updated dependencies [5c2d5cf]
+- Updated dependencies [cbc06ff]
+- Updated dependencies [43916f3]
+- Updated dependencies [f590f3e]
+- Updated dependencies [9fa05c6]
+- Updated dependencies [ed0edb1]
+- Updated dependencies [a10987a]
+- Updated dependencies [8f141a2]
+- Updated dependencies [d24e4ab]
+- Updated dependencies [f66340a]
+- Updated dependencies [fed637c]
+- Updated dependencies [f77d078]
+- Updated dependencies [1948c5f]
+- Updated dependencies [0e83fe0]
+- Updated dependencies [7a7ab47]
+- Updated dependencies [08f4bad]
+- Updated dependencies [70f454a]
+- Updated dependencies [368deee]
+- Updated dependencies [8644ce7]
+- Updated dependencies [0d6589d]
+- Updated dependencies [c54aa57]
+- Updated dependencies [53257a5]
+- Updated dependencies [8aecf6d]
+- Updated dependencies [e0050ba]
+- Updated dependencies [14f4d8f]
+- Updated dependencies [8ddadc1]
+- Updated dependencies [183ed23]
+- Updated dependencies [08bf7d2]
+- Updated dependencies [a03bc4e]
+- Updated dependencies [4d4ec16]
+- Updated dependencies [d763ee7]
+- Updated dependencies [8018e00]
+- Updated dependencies [844218f]
+- Updated dependencies [8cce05b]
+- Updated dependencies [0d727b7]
+- Updated dependencies [ff0d1f1]
+- Updated dependencies [021524c]
+- Updated dependencies [4f7d6f7]
+- Updated dependencies [b848b47]
+- Updated dependencies [129e637]
+- Updated dependencies [13f5466]
+- Updated dependencies [ff6f976]
+- Updated dependencies [0819cab]
+- Updated dependencies [c8d4b90]
+- Updated dependencies [00aa574]
+- Updated dependencies [d95d34f]
+- Updated dependencies [76eea0f]
+- Updated dependencies [8695703]
+- Updated dependencies [84b1e0c]
+- Updated dependencies [151e812]
+- Updated dependencies [49c6bf3]
+- Updated dependencies [4ed453d]
+- Updated dependencies [6210a08]
+- Updated dependencies [81c1ae9]
+- Updated dependencies [51b67f1]
+- Updated dependencies [66452df]
+- Updated dependencies [4f9a3f8]
+- Updated dependencies [00dd362]
+- Updated dependencies [1cda7ea]
+- Updated dependencies [bac4864]
+- Updated dependencies [8c29b81]
+- Updated dependencies [a68b475]
+- Updated dependencies [c75453e]
+- Updated dependencies [1e96009]
+- Updated dependencies [4fb03eb]
+- Updated dependencies [ff04943]
+- Updated dependencies [ab91323]
+- Updated dependencies [fbb62e1]
+- Updated dependencies [5078f2f]
+- Updated dependencies [57445a6]
+- Updated dependencies [01967c3]
+- Updated dependencies [0212714]
+- Updated dependencies [5078f2f]
+- Updated dependencies [1f3e9f6]
+- Updated dependencies [8b1841f]
+- Updated dependencies [012f0a1]
+- Updated dependencies [305fe60]
+- Updated dependencies [227e952]
+- Updated dependencies [e91149e]
+- Updated dependencies [422df61]
+- Updated dependencies [06c1f54]
+- Updated dependencies [489d9fe]
+- Updated dependencies [c349576]
+- Updated dependencies [c063734]
+- Updated dependencies [c0dd417]
+- Updated dependencies [0439a04]
+- Updated dependencies [517e415]
+- Updated dependencies [5bf7242]
+- Updated dependencies [f92d271]
+- Updated dependencies [6ddb97b]
+- Updated dependencies [2af9729]
+- Updated dependencies [3d4f423]
+- Updated dependencies [d7f299c]
+- Updated dependencies [f9fda2a]
+- Updated dependencies [91138ec]
+- Updated dependencies [9981f27]
+- Updated dependencies [3801775]
+- Updated dependencies [40570d6]
+- Updated dependencies [f339060]
+- Updated dependencies [40914bd]
+- Updated dependencies [2a6f26a]
+- Updated dependencies [b7dee0e]
+- Updated dependencies [68250f6]
+- Updated dependencies [6161010]
+- Updated dependencies [fd462c5]
+- Updated dependencies [d15e439]
+- Updated dependencies [6831e04]
+- Updated dependencies [efaafe3]
+- Updated dependencies [875ae40]
+- Updated dependencies [8316d3d]
+- Updated dependencies [da50177]
+- Updated dependencies [6cc6177]
+- Updated dependencies [7e9c50c]
+- Updated dependencies [5cf9941]
+- Updated dependencies [5cf9941]
+- Updated dependencies [5f34d65]
+- Updated dependencies [8fe4eaf]
+- Updated dependencies [204356a]
+- Updated dependencies [59571b2]
+- Updated dependencies [84a27e7]
+- Updated dependencies [7939732]
+- Updated dependencies [c94191d]
+- Updated dependencies [dbc1765]
+- Updated dependencies [ebac615]
+- Updated dependencies [2d18ba8]
+- Updated dependencies [c2f8bff]
+- Updated dependencies [98b17fe]
+- Updated dependencies [68b2430]
+- Updated dependencies [bbb4ad3]
+- Updated dependencies [8d60333]
+- Updated dependencies [db46566]
+- Updated dependencies [276174a]
+- Updated dependencies [c385d3b]
+- Updated dependencies [2776e88]
+- Updated dependencies [061e342]
+- Updated dependencies [083e040]
+- Updated dependencies [da7c559]
+- Updated dependencies [e8740c5]
+- Updated dependencies [66c854d]
+- Updated dependencies [372ce7c]
+- Updated dependencies [3aa008d]
+- Updated dependencies [7d3b8d6]
+- Updated dependencies [15f8357]
+- Updated dependencies [378c955]
+- Updated dependencies [56fa31b]
+- Updated dependencies [7d50dc8]
+- Updated dependencies [595e9cb]
+- Updated dependencies [20d025f]
+- Updated dependencies [64b278e]
+- Updated dependencies [695b9db]
+- Updated dependencies [39e9a82]
+- Updated dependencies [9c5fb3e]
+- Updated dependencies [abb5449]
+- Updated dependencies [d280de9]
+- Updated dependencies [f9dd033]
+- Updated dependencies [6296909]
+- Updated dependencies [660e7cd]
+  - @objectstack/spec@19.0.0-next.0
+  - @object-ui/i18n@19.0.0-next.0
+  - @object-ui/types@19.0.0-next.0
+  - @object-ui/core@19.0.0-next.0
+  - @objectstack/formula@19.0.0-next.0
+  - @object-ui/components@19.0.0-next.0
+  - @object-ui/react@19.0.0-next.0
+  - @object-ui/mobile@19.0.0-next.0
+  - @object-ui/permissions@19.0.0-next.0
+
 ## 18.6.0
 
 ### Patch Changes

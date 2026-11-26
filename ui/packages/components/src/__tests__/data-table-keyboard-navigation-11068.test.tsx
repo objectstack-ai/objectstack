@@ -20,20 +20,22 @@
  *   2. ON: the data cells are ONE roving Tab stop; Tab enters them once and the
  *      next Tab leaves; the arrow keys, Home / End and Ctrl+Home / Ctrl+End
  *      move focus; the stop follows focus and survives a shorter page.
- *   3. ON, editable: Enter still opens the focused cell, the editor keeps the
- *      arrows, and an edit ended with Enter or Escape hands focus back to its
- *      cell, so the arrows carry on.
+ *   3. ON, editable: retired with the staged arm (objectstack#35827); an
+ *      editable table is select-first, pinned in data-table-keys-35687.
  *
  * Every "unchanged" reading has a lit control that moves on the same probe.
  */
 import React from 'react';
 import { describe, it, expect, afterEach } from 'vitest';
-import { render, fireEvent, cleanup, waitFor, act } from '@testing-library/react';
+import { render, fireEvent, cleanup, act } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import '@testing-library/jest-dom';
 import { ComponentRegistry } from '@object-ui/core';
 // Registers `data-table` at module scope, not in a hook (objectui#3010).
 import '../renderers';
+// `react-page` reaches a dynamic `import('@object-ui/react-runtime')`: pay its load
+// at collection, never inside a case's clocked window (`check:test-source-alias`).
+import '@object-ui/react-runtime';
 
 afterEach(cleanup);
 
@@ -213,69 +215,12 @@ describe('data-table `keyboardNavigation` ON — one roving Tab stop the arrows 
 
 /* ── 3. On, editable ─────────────────────────────────────────────────────── */
 
-describe('data-table `keyboardNavigation` ON with `editable` — Enter edits, and focus comes back (objectui#11068)', () => {
-  const editableNav = { keyboardNavigation: true, editable: true };
+// Section 3 pinned the staged arm: an editable table with no select-first host,
+// where Enter on a focused cell opened its editor and an Enter or Escape handed
+// focus back to the cell. That arm is retired (objectstack#35827); an editable
+// table is select-first, which turns the navigation on by itself. Its Enter,
+// commit and Escape keys, with focus kept on the cell, are pinned in
+// data-table-keys-35687 ("Enter commits and stays on the cell…", "Escape
+// cancels and keeps the cell selected…") and data-table-select-first-35684
+// ("Enter on the selected cell opens the editor on the value").
 
-  it('Enter opens the focused cell, the editor keeps the arrows, and Enter hands focus back to the cell', async () => {
-    const { container } = renderTable(editableNav);
-    const cell = cellAt(container, 0, 1);
-    cell.focus();
-
-    press('Enter');
-    const input = await waitFor(() => {
-      const el = cell.querySelector('input');
-      expect(el).not.toBeNull();
-      return el as HTMLInputElement;
-    });
-    expect(document.activeElement).toBe(input);
-
-    // The editor's own keys: the caret moves, the cell does not.
-    fireEvent.keyDown(input, { key: 'ArrowDown' });
-    fireEvent.keyDown(input, { key: 'ArrowRight' });
-    expect(cell.querySelector('input')).toBe(input);
-
-    fireEvent.change(input, { target: { value: 'Pending' } });
-    fireEvent.keyDown(input, { key: 'Enter' });
-    await waitFor(() => expect(cell.querySelector('input')).toBeNull());
-    expect(cell).toHaveTextContent('Pending');
-    await waitFor(() => expect(document.activeElement).toBe(cell));
-
-    // …so the arrows carry on from the cell that was just edited.
-    press('ArrowDown');
-    expect(document.activeElement).toBe(cellAt(container, 1, 1));
-  });
-
-  it('Escape cancels the edit and hands focus back to the cell too', async () => {
-    const { container } = renderTable(editableNav);
-    const cell = cellAt(container, 2, 2);
-    cell.focus();
-    press('Enter');
-    const input = await waitFor(() => {
-      const el = cell.querySelector('input');
-      expect(el).not.toBeNull();
-      return el as HTMLInputElement;
-    });
-    fireEvent.change(input, { target: { value: 'Nobody' } });
-    fireEvent.keyDown(input, { key: 'Escape' });
-    await waitFor(() => expect(cell.querySelector('input')).toBeNull());
-    expect(cell).toHaveTextContent('Cy');
-    await waitFor(() => expect(document.activeElement).toBe(cell));
-    press('ArrowLeft');
-    expect(document.activeElement).toBe(cellAt(container, 2, 1));
-  });
-
-  it('LIT CONTROL — with the flag off, the same Enter-commit leaves focus on <body>, where no arrow reaches a cell', async () => {
-    const { container } = renderTable({ editable: true });
-    const cell = cellAt(container, 0, 1);
-    cell.focus();
-    press('Enter');
-    const input = await waitFor(() => {
-      const el = cell.querySelector('input');
-      expect(el).not.toBeNull();
-      return el as HTMLInputElement;
-    });
-    fireEvent.keyDown(input, { key: 'Enter' });
-    await waitFor(() => expect(cell.querySelector('input')).toBeNull());
-    expect(document.activeElement).toBe(document.body);
-  });
-});

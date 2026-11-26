@@ -2,12 +2,15 @@
 
 import type { TranslationData } from '@objectstack/spec/system';
 import { frObjects } from './fr.objects.generated.js';
+import { standardUnitMessages } from './standard-unit-names.js';
 
 /**
  * Français (fr) — Setup App Translations
  */
 export const fr: TranslationData = {
   objects: frObjects,
+  // ADR-0158 L2 (2A): each standard unit code's name (`standard-unit-names.ts`).
+  messages: standardUnitMessages('fr'),
   apps: {
     account: {
       label: 'Compte',
@@ -135,7 +138,7 @@ export const fr: TranslationData = {
       },
     },
     studio: {
-      label: 'Studio',
+      label: 'App Studio',
       description: 'Atelier de métadonnées pour les développeurs, les analystes et les intégrateurs',
       navigation: {
         group_overview: { label: 'Aperçu' },

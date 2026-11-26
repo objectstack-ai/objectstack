@@ -277,11 +277,46 @@ function fieldNoConsumers(stack: AnyRec): { validate: string[]; lint: string[] }
   };
 }
 
-/** `obj` with `field`'s `group` removed, everything else as the starter wrote it. */
-function withoutGroup(obj: AnyRec, field: string): AnyRec {
-  const fields = obj.fields as AnyRec;
-  const { group: _dropped, ...rest } = fields[field] as AnyRec;
-  return { ...obj, fields: { ...fields, [field]: rest } };
+/**
+ * The starter's objects with `field` of `objects[objectIndex]` displayed by
+ * nothing the starter wrote, everything else as written. A starter places a
+ * field in every way ADR-0085 §5 and the object schema allow, and each one is
+ * credited as displayed, so each is removed:
+ *
+ *  - its own `group` key, or its name in a group's `fields` list (how the
+ *    platform's Starter app, and so the blank starter, places every field,
+ *    #36945);
+ *  - its name in the object's `highlightFields` (the record header);
+ *  - its name in the `columns` of a related list of THIS object, declared on
+ *    any object: the list shows the field on the declaring object's record
+ *    page. A column is a field of the child object the entry names (its
+ *    `list`, `child` or `child.field`), and the rule credits it there, so a
+ *    related list of another object keeps its columns: the blank starter's
+ *    company lists its contacts with a `phone` column, which is the
+ *    contact's `phone` and never the company's.
+ */
+function withoutPlacement(objects: readonly AnyRec[], objectIndex: number, field: string): AnyRec[] {
+  const drop = (list: unknown) => (Array.isArray(list) ? (list as string[]).filter((f) => f !== field) : list);
+  const child = String(objects[objectIndex].name);
+  const listsThisChild = (r: unknown): r is AnyRec =>
+    isRec(r) && typeof r.list === 'string' && r.list.split('.')[0] === child && 'columns' in r;
+  const withoutRelatedListColumn = (obj: AnyRec): AnyRec =>
+    Array.isArray(obj.relatedLists)
+      ? { ...obj, relatedLists: (obj.relatedLists as unknown[]).map((r) => (listsThisChild(r) ? { ...r, columns: drop(r.columns) } : r)) }
+      : obj;
+  return objects.map((obj, i) => {
+    if (i === objectIndex) {
+      const fields = obj.fields as AnyRec;
+      const { group: _dropped, ...rest } = fields[field] as AnyRec;
+      const out: AnyRec = { ...obj, fields: { ...fields, [field]: rest } };
+      if (Array.isArray(obj.fieldGroups)) {
+        out.fieldGroups = (obj.fieldGroups as AnyRec[]).map((g) => ('fields' in g ? { ...g, fields: drop(g.fields) } : g));
+      }
+      if ('highlightFields' in obj) out.highlightFields = drop(obj.highlightFields);
+      return withoutRelatedListColumn(out);
+    }
+    return withoutRelatedListColumn(obj);
+  });
 }
 
 // ── The pins ─────────────────────────────────────────────────────────────
@@ -322,7 +357,7 @@ describe('[#21370] CONTROL — a starter field with its `group` removed warns ag
     '%s: `%s.%s` without its group is reported by both commands',
     async (_door, _object, _field, c) => {
       const starter = starterOf(c.door);
-      const objects = starter.objects.map((obj, i) => (i === c.objectIndex ? withoutGroup(obj, c.field) : obj));
+      const objects = withoutPlacement(starter.objects, c.objectIndex, c.field);
       const at = `objects[${c.objectIndex}].fields.${c.field}`;
       const reported = fieldNoConsumers(await projectWith(starter, objects, 'dashboard'));
       expect(reported.validate, 'os validate').toEqual([at]);

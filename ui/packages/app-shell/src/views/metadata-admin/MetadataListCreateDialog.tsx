@@ -32,6 +32,7 @@ import { OWD_OPTION_DESC_KEY, OWD_OPTION_LABEL_KEY } from '../studio-design/Data
 import { buildFlowSkeleton, buildObjectSkeleton } from '../studio-design/skeletons.js';
 import { ensureCustomizationPackage, fetchPackages, prefixObjectName } from '../studio-design/packages-io.js';
 import { publishCreated, publishSavedItem } from '../studio-design/studioSaveBar.js';
+import { draftReceiptVersion } from './DraftConflictDialog.js';
 import { loadPackageSurfaces } from '../studio-design/packageSurfaces.js';
 import { studioItemPath } from '../studio-design/studioAddress.js';
 import { plainRefusal, type StudioRefusal } from '../studio-design/metadataError.js';
@@ -137,11 +138,22 @@ function ObjectCreate({ open, onOpenChange, packageId, inPair, locale, onCreated
         return;
       }
       const body = buildObjectSkeleton(name, label, t('engine.studio.data.nameFieldLabel', locale), owd);
-      await client.save('object', name, body, { mode: 'draft', packageId: target.packageId, ifNoneMatch: '*', surface: 'studio' });
+      const receipt = await client.save('object', name, body, {
+        mode: 'draft',
+        packageId: target.packageId,
+        ifNoneMatch: '*',
+        surface: 'studio',
+      });
       // objectstack#36726 — pinned `If-None-Match: *`, as the flow create is:
       // an object another writer published under the name since the check
-      // above is refused, not replaced.
-      const live = await publishSavedItem(client, { type: 'object', name, packageId: target.packageId }, false, publishCreated);
+      // above is refused, not replaced. objectstack#37440 — and to the draft
+      // this create wrote (its receipt).
+      const live = await publishSavedItem(
+        client,
+        { type: 'object', name, packageId: target.packageId, draftVersion: draftReceiptVersion(receipt) },
+        false,
+        publishCreated,
+      );
       if (!live.ok) {
         if ('error' in live) setError(plainRefusal(live.error));
         return;
@@ -277,12 +289,23 @@ function FlowCreate({ open, onOpenChange, packageId, inPair, locale, onCreated, 
         start,
       );
       const target = await createTarget(packageId, inPair, null);
-      await client.save('flow', name, skeleton, { mode: 'draft', packageId: target.packageId, ifNoneMatch: '*', surface: 'studio' });
+      const receipt = await client.save('flow', name, skeleton, {
+        mode: 'draft',
+        packageId: target.packageId,
+        ifNoneMatch: '*',
+        surface: 'studio',
+      });
       // objectstack#36726 — pinned `If-None-Match: *`, as the Automations
       // pillar's create was (objectstack#36903 moved every flow create here):
       // a flow another writer published under the name since the check above
-      // is refused, not replaced.
-      const live = await publishSavedItem(client, { type: 'flow', name, packageId: target.packageId }, false, publishCreated);
+      // is refused, not replaced. objectstack#37440 — and to the draft this
+      // create wrote (its receipt).
+      const live = await publishSavedItem(
+        client,
+        { type: 'flow', name, packageId: target.packageId, draftVersion: draftReceiptVersion(receipt) },
+        false,
+        publishCreated,
+      );
       if (!live.ok) {
         if ('error' in live) setError(plainRefusal(live.error));
         return;

@@ -118,7 +118,7 @@ export const SysFlowDispatch = ObjectSchema.create({
     // stays null by design. All three read as "not delivered", the safe
     // direction: a replay re-runs rather than refusing on a claim nobody
     // settled.
-    outcome: Field.select(['succeeded', 'failed'], {
+    outcome: Field.select(['succeeded', { label: 'failed', value: 'failed', color: 'red' }], {
       label: 'Outcome',
       required: false,
       description:

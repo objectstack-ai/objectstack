@@ -209,6 +209,7 @@ const ar = {
     uploadInFlight: "انتظر حتى ينتهي الرفع قبل الحفظ.",
     clearedOnHide: "تم مسح ما لم يعد ينطبق على القيم الحالية: {{fields}}",
     visibleWhenFaulted: "تعذّر الإرسال: تعذّر تقييم قاعدة visibleWhen لـ {{fields}}. يجب إصلاح القاعدة قبل أن يصبح إرسال هذا النموذج ممكنًا.",
+    uiReadonlyWhenFaulted: "تعذّر الإرسال: تعذّر تقييم قاعدة uiReadonlyWhen لـ {{fields}}. يجب إصلاح القاعدة قبل أن يصبح إرسال هذا النموذج ممكنًا.",
     discardTitle: "تجاهل التغييرات؟",
     discardMessage: "لديك تغييرات غير محفوظة. إذا أغلقت هذا النموذج الآن، ستفقد تعديلاتك.",
     // objectui#4024 — the create/edit dialog's `sr-only` accessible
@@ -1246,6 +1247,7 @@ const ar = {
     addColumn: "إضافة عمود",
     moveCard: "نقل بطاقة",
     noCards: "لا بطاقات",
+    notLoaded: "بطاقات غير محمّلة: {{count}}",
     columnCards: "بطاقات العمود {{column}}",
     laneCards: "بطاقات {{column}} - {{lane}}",
     dropBlocked: "لا يمكن نقل بطاقة من {{from}} إلى {{to}}.",
@@ -2373,7 +2375,7 @@ const ar = {
   },
   console: {
     studio: {
-      title: "Studio",
+      title: "App Studio",
       accessRequired: "تحتاج إلى صلاحية الوصول إلى Studio لفتح Studio. يمكن للمسؤول منحها بمجموعة أذونات في الإعداد → إسناد مجموعات الأذونات.",
     },
     saveAdvisoryTitle: "تم الحفظ — أنتج فحص التأليف {{count}} ملاحظة إرشادية",
@@ -2875,6 +2877,7 @@ const ar = {
       savedCleared: "تم مسح القيمة المحفوظة",
       deprecatedBadge: "مهمل",
       deprecatedBadgeReplacedBy: "مهمل ← {{replacedBy}}",
+      selectValueRetired: "{{value}} (لم يعد متاحًا)",
       unsupportedSpecifierType: "نوع إعداد غير مدعوم: {{type}}",
       mapAddRow: "إضافة صف",
       mapRemoveRow: "إزالة {{key}}",
@@ -4050,11 +4053,11 @@ const ar = {
       tooltip: "هذه المنصة في مرحلة المعاينة — وقد تتغير الميزات.",
     },
     aiAssistant: "مساعد الذكاء الاصطناعي",
-    designInStudio: "التصميم في Studio",
+    designInStudio: "التصميم في App Studio",
     designLayout: "تصميم التخطيط",
     editApp: "تعديل التطبيق",
-    openAppInStudio: "عرض {{app}} في Studio",
-    viewInStudio: "عرض في Studio",
+    openAppInStudio: "عرض {{app}} في App Studio",
+    viewInStudio: "عرض في App Studio",
   },
   home: {
     build: {
@@ -4202,8 +4205,8 @@ const ar = {
       backToAppHome: "العودة إلى قائمة التطبيق",
       appsAvailable: "{{count}} من التطبيقات المتاحة",
       allApps: "جميع التطبيقات",
-      editAppInStudio: "تعديل {{app}} في Studio",
-      openAppInStudio: "عرض {{app}} في Studio",
+      editAppInStudio: "تعديل {{app}} في App Studio",
+      openAppInStudio: "عرض {{app}} في App Studio",
       backToHome: "العودة إلى صفحة بدء التطبيق",
       settings: "الإعدادات",
       productHome: "الصفحة الرئيسية لـ {{product}}",
@@ -5067,6 +5070,9 @@ const ar = {
       dataset: 'مجموعة البيانات',
       metrics: 'المقاييس',
       noAddedFilter: 'لا يوجد عامل تصفية مضاف إلى تعريف مجموعة البيانات',
+    },
+    recordCitations: {
+      title: 'مقتبس من السجلات',
     },
     tool: {
       aggregate_data: "تجميع البيانات ذات الصلة",

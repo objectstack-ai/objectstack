@@ -893,6 +893,10 @@ export const zhHantMetadataForms: NonNullable<TranslationData['metadataForms']> 
         label: "唯讀",
         helpText: "在表單中唯讀"
       },
+      uiReadonly: {
+        label: "介面唯讀",
+        helpText: "使用者無法在主控台中編輯此欄位（對話框、記錄頁、表格、看板與行事曆拖曳），而動作、匯入、API 與流程仍可寫入，每次寫入都由物件的驗證規則裁決。已開啟「唯讀」時請保持關閉：唯讀已經阻止所有用戶端寫入。"
+      },
       hidden: {
         label: "隱藏",
         helpText: "在預設介面檢視中隱藏"
@@ -916,6 +920,10 @@ export const zhHantMetadataForms: NonNullable<TranslationData['metadataForms']> 
       readonlyWhen: {
         label: "唯讀條件",
         helpText: "基於記錄的 CEL 謂詞（例如 record.status == 'paid'）——為 TRUE 時欄位唯讀，並在伺服器端強制執行：更新中對已鎖定欄位的修改會被丟棄，保留已儲存的值。唯讀取記錄自身的欄；objectstack validate 會拒絕經由參照欄位的讀取。"
+      },
+      uiReadonlyWhen: {
+        label: "介面唯讀條件",
+        helpText: "基於記錄的 CEL 謂詞（例如 record.status != 'draft'）——為 TRUE 時，使用者無法在控制台中編輯既有記錄的該欄位（編輯對話框、記錄頁、表格、看板和行事曆拖曳）；新建記錄的建立對話框不做判斷。動作、匯入、API 和流程仍可寫入，並由物件的驗證規則裁決。與「唯讀條件」一樣讀取記錄自身的欄。"
       },
       requiredWhen: {
         label: "必填條件",
@@ -1282,7 +1290,7 @@ export const zhHantMetadataForms: NonNullable<TranslationData['metadataForms']> 
       },
       compactToolbar: {
         label: "緊湊工具列",
-        helpText: "將分組 / 顏色 / 密度 / 隱藏欄位收進同一個「檢視設定」彈出框"
+        helpText: "將分組 / 顏色 / 密度 / 隱藏欄位收進同一個「檢視設定」彈出框。預設開啟：省略或為 `true` 時，轉譯器繪製這個緊湊工具列；為 `false` 時繪製寬工具列，每個控制項一個按鈕。緊湊工具列不繪製重新整理按鈕，因此 `userActions.refresh` 只作用於寬工具列；下拉重新整理不受這兩個鍵影響。"
       },
       rowHeight: {
         label: "列高",

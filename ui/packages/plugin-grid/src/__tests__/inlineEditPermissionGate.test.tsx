@@ -160,7 +160,7 @@ function renderGrid(c: Case) {
   return render(
     <ActionProvider>
       <SchemaRendererProvider dataSource={ds}>
-        <ObjectGrid cellSelection={false} schema={schema} dataSource={ds} onEdit={() => {}} onDelete={() => {}} />
+        <ObjectGrid schema={schema} dataSource={ds} onEdit={() => {}} onDelete={() => {}} />
       </SchemaRendererProvider>
     </ActionProvider>,
   );
@@ -249,11 +249,12 @@ describe("ObjectGrid `editable` vs can(object, 'update') (#5143)", () => {
     expect(await entersEditState({ editable: true, permUpdate: true })).toBe(true);
   });
 
-  it('e — the save/cancel column follows the same verdict, so the gated grid IS the non-editable grid', async () => {
-    // `rowActions` exists only to carry inline-edit save/cancel. Left on the
-    // raw schema key it would render a permanently empty trailing column for a
-    // read-only principal — a shape no grid has today. The gated grid must be
-    // column-for-column identical to one that never asked to be editable.
+  it('e — no verdict draws a save/cancel column: the gated grid IS the non-editable grid', async () => {
+    // The staged model drew a trailing save/cancel column on an editable grid,
+    // and this case pinned that a read-only principal did not get it. That
+    // column is retired with the staged model (objectstack#35827): each cell
+    // saves on its own, so an editable grid, a gated one and a never-editable
+    // one are column-for-column the same.
     const editableWithGrant = await headerCellCount({ editable: true, permUpdate: true });
     cleanup();
     const editableNoGrant = await headerCellCount({ editable: true, permUpdate: false });
@@ -261,9 +262,7 @@ describe("ObjectGrid `editable` vs can(object, 'update') (#5143)", () => {
     const neverEditable = await headerCellCount({ permUpdate: true });
 
     expect(editableNoGrant).toBe(neverEditable);
-    // Control: the column really is observable, so the equality above is not a
-    // probe that cannot tell the two shapes apart.
-    expect(editableWithGrant).toBe(neverEditable + 1);
+    expect(editableWithGrant).toBe(neverEditable);
   });
 });
 

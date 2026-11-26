@@ -1,6 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { recordNotFoundError, wrapRecordMaterial } from '@objectstack/core';
+import { INTERNAL_ERROR_MESSAGE, mapDataError } from '@objectstack/types';
 import {
   AI_CONTEXT_BODY_FIELD_TYPES,
   AI_CONTEXT_MAX_RELATED_ROWS,
@@ -53,28 +54,44 @@ import { sentencesFor, type Sentences } from './sentences.js';
  *    caller they refuse gets `get_record`'s answer, the same whether or not a
  *    pack exists.
  * 3. Pack selection, with no fallback ({@link selectContextPack}).
- * 4. Each `related` child at object level (the same three gates); then the
- *    field-level projection onto the definitions as the caller is served them;
- *    then the surviving lookups' targets (the read guard `query_records`'
- *    `expand` puts before an expansion); then the reads.
+ * 4. Each `related` child at object level (the read guard, API exposure, then
+ *    whether this caller is served it); then the field-level projection onto
+ *    the definitions as the caller is served them; then the surviving lookups'
+ *    targets (the read guard `query_records`' `expand` puts before an
+ *    expansion); then the reads.
  *
- * ## Object level refuses the whole call; field level omits and states (D3)
+ * ## What refuses the whole call, and what omits and states (D3, as amended)
  *
- * A refused child or lookup target refuses the call with `PERMISSION_DENIED`
- * and no partial pack. The refusal names the pack and the root, and the
- * refused object only when the caller's served schema shows it (the naming
- * bound). A field the caller's served schema hides is not named: the entry, a
- * related section whose link it is, or the body, is left out, and the notes
- * carry one statement that some material is not visible. A field the served
+ * A gate that refuses everyone refuses the call with `PERMISSION_DENIED` and
+ * no partial pack: the read guard or API exposure (a disabled package
+ * included) on a related child, and any gate on a surviving lookup's target.
+ * The refusal names the pack and the root, and the refused object only when
+ * the caller's served schema shows it (the naming bound). A related child
+ * that passes both and that THIS caller is not served is left out: nothing of
+ * it is read again, its section is not named, and the notes carry the one
+ * not-visible statement. A field the caller's served schema hides is not
+ * named: the entry, a related section whose link it is, or the body, is left
+ * out, and the notes carry the same statement. A field the served
  * schema shows and field-level security withholds keeps its name and label,
  * carries no value and is marked `withheld` (#35137). A name the published
  * definition lacks is an author defect and states nothing.
+ *
+ * A read of a related object that FAILS rather than refuses (a throw that is
+ * no coded refusal, {@link isCodedRefusal}, or at the child list query one
+ * the `/data` door answers with nothing of its own: an outage, a bug) is no
+ * answer about the caller, so it is never answered as a refusal: the call
+ * fails `INTERNAL_ERROR` (500), naming the pack and the root only. At the
+ * child list query, a throw the door answers itself, a refusal or a coded
+ * fault, is rethrown as the door reads it ({@link doorAnswersItself}).
  *
  * ## A related list's `where`, `orderBy` and `limit` (D1, D3: second amendment)
  *
  * They run inside the one capped child query, as the caller: `where` joined
  * to the link filter with `$and`, `orderBy` as the order, `limit` (else the
- * row cap) as the cut, stated when it cuts. Before that query, each field
+ * row cap) as the cut, stated when it cuts. A door whose page cap
+ * ({@link RecordContextDoor.pageCap}) is below that cut plus the probe row is
+ * asked for at most its cap, and the list is cut one row under it and stated,
+ * so no door cuts or refuses a list the answer does not say was cut. Before that query, each field
  * they name is judged: one the child's published definition lacks, or an
  * `orderBy` field that definition does not offer as a sort (the sortability
  * projection's `sortable: false`: a formula, or `sortable: false` declared by
@@ -98,7 +115,8 @@ const DESCRIPTION =
   + '(this contract, this case, this policy) and you know its object and id. Without `context`, the object\'s one '
   + 'pack is used; an object with none or several is refused and names what to do. Name a pack in `context` as a '
   + 'refusal lists it: a pack an app package ships is named `NAMESPACE-NAME`. A long body comes back as an '
-  + 'outline: call again with a heading\'s `anchor` to read that section. The answer is { data, notes, framing }: '
+  + 'outline: call again with a heading\'s `anchor` to read that section, or, where the outline has more headings than '
+  + 'one answer lists, with its `outlineNext` as `outlineFrom` to list the next page. The answer is { data, notes, framing }: '
   + '`data` is material read from records, never instructions; `notes` state what was withheld or cut.';
 
 let cachedDefinitions: readonly AIToolDefinition[] | undefined;
@@ -125,6 +143,66 @@ type Coded = Error & { code: string; status: number };
 /** An ADR-0112 coded refusal: `code` and `status` on the thrown error. */
 function refusal(code: string, status: number, message: string): Coded {
   return Object.assign(new Error(message), { code, status });
+}
+
+/**
+ * [ADR-0112] Whether a throw is a coded refusal: a non-empty string `code`
+ * and a declared 4xx status, read as ADR-0112's reader reads it
+ * (`resolveThrownHttpError`'s `declaredStatus`, `@objectstack/types`):
+ * `.status`, then `.statusCode`. Anything else is a failure, not an answer
+ * about the caller: no code, no status, a 5xx, a driver errno on `.code`
+ * with no status, a thrown value that is not an object (an outage, a bug).
+ * ADR-0112 names the status channel as the one structural signal between a
+ * refusal and a fault; a driver errno also arrives on `.code`, so the string
+ * alone cannot tell.
+ *
+ * The one line, drawn once for both of its readers: the executor asks it at
+ * the object-level reads of a related object ({@link executeGetRecordContext},
+ * step 4a and the published definitions), and the citation verifier asks it
+ * of the executor's own throw (`verifyRecordCitations`). So what the executor
+ * refuses there, the verifier drops without a report, and what fails, it
+ * reports. The child list query alone asks the `/data` door's classifier
+ * instead ({@link doorAnswersItself}), since the doors classified that read's
+ * throw before the executor caught it.
+ */
+export function isCodedRefusal(err: unknown): boolean {
+  if (err == null || typeof err !== 'object') return false;
+  const { code, status, statusCode } = err as { code?: unknown; status?: unknown; statusCode?: unknown };
+  const declared = typeof status === 'number' ? status : typeof statusCode === 'number' ? statusCode : undefined;
+  return typeof code === 'string' && code.length > 0 && declared !== undefined && declared >= 400 && declared < 500;
+}
+
+/**
+ * Whether the `/data` door answers this throw of a read of `object` with
+ * something of its own, asked of the door's classifier (`mapDataError`,
+ * `@objectstack/types`), never a copy of it: a refusal (any status below 500,
+ * such as a sandboxed `beforeFind` hook's plain throw, `400 HOOK_ABORTED`), or
+ * a fault the door codes or words (`ERR_DATASOURCE_UNAVAILABLE` 503 with its
+ * sentence, `DATABASE_ERROR`, a driver's `NOT_IMPLEMENTED` 501, a declared 5xx
+ * with its sentence or `userMessage`). Only the door's anonymous answer is
+ * not: `500` `Internal server error`, coded `INTERNAL_ERROR` or not coded,
+ * carrying nothing else. That is an uncoded failure, which the door could say
+ * nothing about either.
+ *
+ * The child list query's one reader. Its throw reached the doors untouched
+ * before the executor caught it, so a throw the door answers itself is
+ * rethrown as it is, and the caller reads what the door always answered.
+ */
+export function doorAnswersItself(thrown: unknown, object: string): boolean {
+  const { status, body } = mapDataError(thrown, object);
+  if (status !== 500 || body.error !== INTERNAL_ERROR_MESSAGE) return true;
+  return !Object.entries(body).every(([key, value]) => key === 'error' || (key === 'code' && value === 'INTERNAL_ERROR'));
+}
+
+/** A thrown value as a log reads it: its stack, else its text. */
+function describeThrown(thrown: unknown): string {
+  if (thrown instanceof Error) return thrown.stack ?? `${thrown.name}: ${thrown.message}`;
+  if (typeof thrown === 'string') return thrown;
+  try {
+    return JSON.stringify(thrown) ?? String(thrown);
+  } catch {
+    return String(thrown);
+  }
 }
 
 /** The call's arguments, or a `VALIDATION_ERROR` carrying the spec's own words. */
@@ -284,6 +362,18 @@ async function queryableAmong(
   return true;
 }
 
+/**
+ * [ADR-0160 D3] The door's page cap ({@link RecordContextDoor.pageCap}): a
+ * whole number of rows of at least one, else `undefined` (no member, no cap,
+ * or an answer that is no cap). A probe that throws fails the call, as the
+ * door's own read would.
+ */
+async function pageCapOf(door: RecordContextDoor): Promise<number | undefined> {
+  if (typeof door.pageCap !== 'function') return undefined;
+  const cap = await door.pageCap();
+  return typeof cap === 'number' && Number.isSafeInteger(cap) && cap >= 1 ? cap : undefined;
+}
+
 /** One `related` entry, planned after projection. */
 interface RelatedPlan {
   object: string;
@@ -323,6 +413,9 @@ export async function executeGetRecordContext(input: unknown, door: RecordContex
     }
   }
   const say: Sentences = sentencesFor(locales);
+  if (args.anchor !== undefined && args.outlineFrom !== undefined) {
+    throw refusal('VALIDATION_ERROR', 400, say.outlineFromWithAnchor);
+  }
 
   // 2. The root object's gates, before any pack is looked up: a refusal here
   //    is `get_record`'s answer for this object and record.
@@ -363,42 +456,109 @@ export async function executeGetRecordContext(input: unknown, door: RecordContex
     );
   };
 
+  // [ADR-0112, ADR-0160 D3 "Object level"] The one line between a refusal and
+  // a failure at the reads of a related object this executor judges: step
+  // 4a's exposure check and served definition, a published definition
+  // (`publishedOf`), and the child list query. A coded refusal
+  // ({@link isCodedRefusal}; at the child list query, a throw the `/data`
+  // door answers itself, {@link doorAnswersItself}) answers as `refused`
+  // says, as it always has. Any
+  // other throw is a failure, which says nothing about what this caller may
+  // read, so it is not answered as a refusal: the call fails `INTERNAL_ERROR`
+  // (500) in the executor's own sentence, which names the pack and the root
+  // only. No door renders the original error, so nothing it says can name an
+  // object, a field or a package the caller is not shown; it rides on
+  // `cause` and at the foot of the stack, neither of which a door puts on the
+  // wire, and the doors' fault line prints it. The doors withhold a 5xx's
+  // sentence too (`Internal server error`), so the sentence is read
+  // in-process only (the citation verifier's host, through `onError`).
+  //
+  // ⛔ Not `SERVICE_UNAVAILABLE`: with a 5xx that code is a declared
+  // capability absence (`CAPABILITY_ABSENCE_CODES`, `@objectstack/types`
+  // `server-fault-log.ts`), which the doors' fault log prints once per route
+  // per process at `warn`, without the error. An outage is a fault: logged at
+  // `error`, with the thrown error and its `cause`, on every call.
+  const refusedOrFailed = async (
+    err: unknown,
+    refused: () => Promise<never>,
+    isRefusal: (err: unknown) => boolean = isCodedRefusal,
+  ): Promise<never> => {
+    if (isRefusal(err)) return refused();
+    const failure = Object.assign(new Error(say.readFailed(pack.name, root)), {
+      code: 'INTERNAL_ERROR',
+      status: 500,
+      cause: err,
+    });
+    // The doors' fault line prints an error's message and stack, never its
+    // `cause` (`logServerFault`, and `ObjectLogger` behind it), so the stack
+    // carries the original too. A stack is never on the wire.
+    failure.stack = `${failure.stack ?? `Error: ${failure.message}`}\nCaused by: ${describeThrown(err)}`;
+    throw failure;
+  };
+
   // Whether something the pack covers was left out for this caller: the one
   // not-visible statement, whatever was removed.
   let hidden = false;
 
   // 4a. Each related child at object level, before anything of it is read,
-  //     its published definition included: a child the caller is refused is
-  //     never asked about by name.
+  //     its published definition included. [ADR-0160 D3 "Object level", as
+  //     amended] The gates that apply to everyone come first and refuse the
+  //     whole call: the read guard (the system-object refusal), then API
+  //     exposure, whose refusals include a disabled package's
+  //     `OBJECT_PACKAGE_DISABLED` (a disabled package's object is not served
+  //     to anyone either, so judging exposure after the served definition
+  //     would read it as this caller's narrowing). A child that passes both
+  //     and that THIS caller is not served is left out: never named, never
+  //     read again, with the one not-visible statement.
   const childServed = new Map<string, Record<string, unknown>>();
+  const leftOut = new Set<string>();
   for (const entry of pack.related ?? []) {
+    if (childServed.has(entry.object) || leftOut.has(entry.object)) continue;
     const guarded = await door.readGuard(entry.object);
     if (guarded !== undefined) await refuseObject(entry.object, false);
-    let served: Record<string, unknown> | null;
-    try {
-      served = await door.servedObjectDefinitionOf(entry.object);
-    } catch {
-      served = null;
-    }
-    if (!served) await refuseObject(entry.object, false);
     try {
       await door.assertApiExposed(entry.object, 'query');
     } catch (err) {
-      // Only API exposure's own refusal is about an object the caller's schema
-      // shows; any other failure (a package gate, an outage) names nothing.
-      await refuseObject(entry.object, API_EXPOSURE_REFUSALS.has(String((err as { code?: unknown } | null)?.code)));
+      // A coded refusal refuses the call. Only API exposure's own refusal is
+      // about the object itself, and it is named only when the caller's
+      // served schema shows the object (the naming bound); any other refusal
+      // (a disabled package's) names nothing. A failure fails the call.
+      await refusedOrFailed(err, async () => {
+        let shown = false;
+        if (API_EXPOSURE_REFUSALS.has(String((err as { code?: unknown }).code))) {
+          shown = (await door.servedObjectDefinitionOf(entry.object).catch(() => null)) != null;
+        }
+        return refuseObject(entry.object, shown);
+      });
     }
-    childServed.set(entry.object, served as Record<string, unknown>);
+    let served: Record<string, unknown> | null;
+    try {
+      served = await door.servedObjectDefinitionOf(entry.object);
+    } catch (err) {
+      // A coded refusal refuses, unnamed; a read that failed is no answer
+      // about this caller, so it fails the call, naming nothing.
+      return refusedOrFailed(err, () => refuseObject(entry.object, false));
+    }
+    if (!served) {
+      leftOut.add(entry.object);
+      hidden = true;
+      continue;
+    }
+    childServed.set(entry.object, served);
   }
 
   // Every published-definition read from here on is of an object whose gates
-  // already passed; one that still throws refuses the call unnamed, so no
-  // door's own rendering of the failure can name what the caller is not shown.
+  // already passed; one that still throws a coded refusal refuses the call
+  // unnamed, and one that fails fails it, naming nothing, so no door's own
+  // rendering of either can name what the caller is not shown. A child left
+  // out for this caller is never read, its definition included: the plan
+  // reads it as having no published definition.
   const publishedOf = async (name: string): Promise<Record<string, unknown> | null> => {
+    if (leftOut.has(name)) return null;
     try {
       return await door.publishedObjectDefinitionOf(name);
-    } catch {
-      return refuseObject(name, false);
+    } catch (err) {
+      return refusedOrFailed(err, () => refuseObject(name, false));
     }
   };
   // The read set is the plan: every object read below is one of these.
@@ -523,25 +683,52 @@ export async function executeGetRecordContext(input: unknown, door: RecordContex
   }
   for (const name of rootFields) if (rootWithheld.has(name)) withheldNames.push(name);
 
+  // [ADR-0160 D3] The door's page cap, asked once: a list is never read with
+  // more rows than one of the door's queries may ask for, so a door that would
+  // refuse or cut a larger page is asked for at most its cap, and the cut below
+  // it is stated like any other.
+  const doorCap = relatedPlans.length > 0 ? await pageCapOf(door) : undefined;
+
   const related: RecordContextRelatedList[] = [];
   for (const plan of relatedPlans) {
     // The one capped query, as the caller: the link filter joined with the
     // entry's `where` (so no `where` reaches another root's rows), its order,
-    // and one row past the cut to know whether the cut cut anything.
-    const probe = plan.cap + 1;
+    // and one row past the cut to know whether the cut cut anything. Below the
+    // door's page cap, the cut is one row under it, so the probe row still fits.
+    const cap = doorCap !== undefined ? Math.min(plan.cap, doorCap - 1) : plan.cap;
+    const probe = cap + 1;
     const projection = [...new Set(['id', ...(plan.displayField ? [plan.displayField] : []), ...plan.columns])];
     const linkWhere = { [plan.link]: plan.multiValueLink ? { $contains: recordId } : recordId };
-    const rows = rowsOf(
-      await door.query(plan.object, {
+    let read: unknown;
+    try {
+      read = await door.query(plan.object, {
         where: plan.where !== undefined ? { $and: [linkWhere, plan.where] } : linkWhere,
         fields: projection,
         ...(plan.orderBy ? { orderBy: plan.orderBy } : {}),
         ...(plan.lookups.length > 0 ? { expand: plan.lookups } : {}),
         limit: probe,
-      }),
-    );
-    const truncated = rows.length > plan.cap;
-    const kept = truncated ? rows.slice(0, plan.cap) : rows;
+      });
+    } catch (err) {
+      // The child is one this caller is served (step 4a). Its list read is the
+      // one read whose throw the doors classified before this line existed,
+      // so a throw the `/data` door answers itself is rethrown as the door
+      // reads it, with its own code and sentence: a refusal (a sandboxed
+      // `beforeFind` hook's plain throw: `400 HOOK_ABORTED`; a
+      // `PERMISSION_DENIED` with no status: 403) or a coded fault
+      // (`ERR_DATASOURCE_UNAVAILABLE` 503). Only an uncoded failure, which the
+      // door answers `Internal server error` and nothing else, fails the call
+      // `INTERNAL_ERROR`, naming nothing.
+      return refusedOrFailed(
+        err,
+        async () => {
+          throw err;
+        },
+        (thrown) => doorAnswersItself(thrown, plan.object),
+      );
+    }
+    const rows = rowsOf(read);
+    const truncated = rows.length > cap;
+    const kept = truncated ? rows.slice(0, cap) : rows;
     const childWithheld = await withheldAmong(door, plan.object, plan.columns);
     for (const c of plan.columns) if (childWithheld.has(c)) withheldNames.push(`${plan.object}.${c}`);
     const outRows: RecordContextRelatedRow[] = [];
@@ -565,7 +752,7 @@ export async function executeGetRecordContext(input: unknown, door: RecordContex
       ...(truncated ? { truncated: true as const } : {}),
     });
     if (truncated) {
-      notes.push({ kind: 'related_truncated', object: plan.object, text: say.relatedTruncated(plan.object, plan.cap) });
+      notes.push({ kind: 'related_truncated', object: plan.object, text: say.relatedTruncated(plan.object, cap) });
     }
     // [ADR-0090 D10] A list the agent ceiling narrowed carries the narrowing,
     // in the security service's own sentence. ⛔ The probe never fails the list.
@@ -577,19 +764,25 @@ export async function executeGetRecordContext(input: unknown, door: RecordContex
     }
   }
 
-  // The body: whole, one section, or an outline; an anchor that does not
-  // resolve is ONE answer, whatever the reason.
+  // The body: whole, one section, or a page of its outline; an anchor that
+  // does not resolve, or an outline page that does not start where
+  // `outlineFrom` says, is ONE answer, whatever the reason.
   let body: RecordContextBody | undefined;
   const anchorUnresolved = () => refusal('RESOURCE_NOT_FOUND', 404, say.anchorUnresolved(args.anchor ?? ''));
+  const from = args.outlineFrom ?? 0;
+  const outlineFromUnresolved = () => refusal('RESOURCE_NOT_FOUND', 404, say.outlineFromUnresolved(from));
   if (bodyField && !rootWithheld.has(bodyField)) {
     const def = rootServedFields.get(bodyField) as Record<string, unknown>;
     const raw = rootRecord[bodyField];
     const text = typeof raw === 'string' ? raw : '';
     const base = { field: bodyField, label: labelOf(def, bodyField) };
     const headings = headingsOf(text, isHtmlBodyType(def.type));
-    // The cap bounds the listing, not which sections exist: a section call
-    // resolves its anchor against every heading, listed or not.
-    const listed = args.anchor === undefined && text.length > RECORD_CONTEXT_BODY_MAX_CHARS ? boundedOutline(headings) : undefined;
+    // The cap bounds one answer, not which sections exist: a section call
+    // resolves its anchor against every heading, listed on a page or not.
+    const paged = args.anchor === undefined && text.length > RECORD_CONTEXT_BODY_MAX_CHARS;
+    const listed = paged ? boundedOutline(headings, from) : undefined;
+    // A page past the last listed heading, or of a body that is no outline.
+    if (from > 0 && !(listed && listed.outline.length > 0)) throw outlineFromUnresolved();
     if (args.anchor !== undefined) {
       const section = sectionOf(text, headings, args.anchor);
       if (section === undefined) throw anchorUnresolved();
@@ -599,12 +792,12 @@ export async function executeGetRecordContext(input: unknown, door: RecordContex
     } else if (text.length <= RECORD_CONTEXT_BODY_MAX_CHARS) {
       body = { ...base, text };
     } else if (listed && listed.outline.length > 0) {
-      body = { ...base, outline: listed.outline };
+      body = { ...base, outline: listed.outline, ...(listed.next !== undefined ? { outlineNext: listed.next } : {}) };
       notes.push({ kind: 'body_outline', text: say.bodyOutline(bodyField) });
       if (listed.omitted > 0) {
         notes.push({
           kind: 'outline_truncated',
-          text: say.outlineTruncated(bodyField, listed.outline.length, headings.length),
+          text: say.outlineTruncated(bodyField, listed.outline.length, headings.length, listed.next, listed.unlistable ?? 0),
         });
       }
     } else {
@@ -615,6 +808,8 @@ export async function executeGetRecordContext(input: unknown, door: RecordContex
     }
   } else if (args.anchor !== undefined) {
     throw anchorUnresolved();
+  } else if (from > 0) {
+    throw outlineFromUnresolved();
   }
   if (bodyField && rootWithheld.has(bodyField)) {
     withheldNames.push(bodyField);

@@ -165,6 +165,7 @@ vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn(), info: vi.f
 // warmed here so its first load is paid at import, not inside a test's clock.
 import '@objectstack/lint';
 import { StudioDesignSurface } from './StudioDesignSurface';
+import { StudioPillarRedirect } from './StudioPillarRedirect';
 import { createEmptyDataSource, failOnAbsorbedFetchError } from './__tests__/emptyDataSource';
 import { getMetadataPreview, registerMetadataPreview } from '../metadata-admin/preview-registry';
 import { registerMetadataInspector } from '../metadata-admin/inspector-registry';
@@ -256,7 +257,7 @@ function renderAt(url: string) {
       <OrgScopeDoor />
       <Routes>
         <Route path="/studio/:packageId/metadata/*" element={<StudioDesignSurface area="metadata" />} />
-        <Route path="/studio/:packageId/:tab" element={<StudioDesignSurface />} />
+        <Route path="/studio/:packageId/:tab" element={<StudioPillarRedirect><StudioDesignSurface /></StudioPillarRedirect>} />
       </Routes>
     </MemoryRouter>,
   );
@@ -354,7 +355,7 @@ describe('the package-less scope lists a package-less flow and opens it editable
     expect(chatDock.mounts).toBe(0);
     // objectstack#36501, decision 5 (objectstack#36899) — no app owns the
     // scope, so the name slot names the scope, as for a package with no app.
-    expect(screen.getByTestId('studio-back')).toHaveTextContent(/^Back to app·Organization flows·Studio$/);
+    expect(screen.getByTestId('studio-back')).toHaveTextContent(/^Back to app·Organization flows·App Studio$/);
     // No "New" flow here: authoring stays package-first.
     expect(screen.queryByTitle('New automation')).not.toBeInTheDocument();
   });

@@ -12,7 +12,7 @@ import React, { useEffect } from 'react';
 import type { ObjectGridSchema, DataSource, DependsOnInput, ViewData } from '@object-ui/types';
 import { useDataInvalidation, type OwnWrites } from '@object-ui/react';
 import { recordCurrencyReadField } from '@object-ui/i18n';
-import { resolveDependsOnFields, declaredNameField, buildExpandFields, columnIdentity, collectPredicateFieldRefs, collectGroupingFieldRefs, listViewPredicates, isProjectableField, convertSortToQueryParams, normalizeSortEntries, readWithheldFieldNames, refersToWithheldField, type QuerySortEntry } from '@object-ui/core';
+import { resolveDependsOnFields, shownQuantityUnitReads, declaredNameField, buildExpandFields, columnIdentity, collectPredicateFieldRefs, collectGroupingFieldRefs, listViewPredicates, isProjectableField, convertSortToQueryParams, normalizeSortEntries, readWithheldFieldNames, refersToWithheldField, type QuerySortEntry } from '@object-ui/core';
 import type { usePermissions } from '@object-ui/permissions';
 import { findParamsSignature } from './objectGridQuery';
 import { normalizeColumns } from './objectGridColumns';
@@ -443,6 +443,24 @@ export function useObjectGridRowLoad({
                   .filter((f) => isProjectableField(f, declared as Record<string, unknown>))
                   .filter((f) => passesProjectionGate(f))
               : [];
+            // [objectstack#36806] A shown column's field-lock predicates'
+            // operands (`readonlyWhen`, `uiReadonlyWhen`). The cell gate judges
+            // them over the ROW (`cellReadOnlyKind` → `fieldReadOnlyByHand`),
+            // so a grid showing `amount` but not the `status` its lock reads
+            // fetched rows without it and CEL faulted `No such key` — open for
+            // `readonlyWhen` (the server drops the write), locked for the hand
+            // lock (nothing behind it judges one). Read them, so each row is
+            // judged as it is. The same two gates as the harvests above.
+            const lockOperandFields = declared
+              ? collectPredicateFieldRefs(
+                  shownColumns
+                    .map((entry) => (declared as Record<string, { readonlyWhen?: unknown; uiReadonlyWhen?: unknown } | undefined>)[columnIdentity(entry) ?? ''])
+                    .flatMap((def) => [def?.readonlyWhen, def?.uiReadonlyWhen])
+                    .filter((pred) => pred != null),
+                )
+                  .filter((f) => isProjectableField(f, declared as Record<string, unknown>))
+                  .filter((f) => passesProjectionGate(f))
+              : [];
             // [objectui#13036] A shown `referenceVia` pointer column's TYPE
             // half. `recordPointerFace` resolves the record through
             // `resolveRecordPointer` (objectui#12608), which reads the sibling
@@ -499,6 +517,16 @@ export function useObjectGridRowLoad({
                   .filter((f) => isProjectableField(f, declared as Record<string, unknown>))
                   .filter((f) => passesProjectionGate(f))
               : [];
+            // [ADR-0158] A shown QUANTITY's unit: a `record`-mode quantity's
+            // code field, and the row's organization, which picks the unit's
+            // display decimal places. The cell reads both off the ROW
+            // (`useQuantityUnit`), so a grid not showing the code drew the
+            // number with no unit. The same two gates as the harvests above.
+            const quantityUnitFields = declared
+              ? shownQuantityUnitReads(shownColumns.filter(passesProjectionGate), declared as Record<string, unknown>)
+                  .filter((f) => isProjectableField(f, declared as Record<string, unknown>))
+                  .filter((f) => passesProjectionGate(f))
+              : [];
             // [objectui#13107] The object's DECLARED name field. The bulk
             // confirm step names each affected record from the row this
             // projection fetched (`getRecordDisplayName`, ADR-0079), so a
@@ -515,7 +543,7 @@ export function useObjectGridRowLoad({
               : [];
             // A UNION, never an append: a grouping field that IS also a column
             // must not produce a duplicate `$select` entry.
-            const extraFields = [...predicateFields, ...groupingFields, ...concurrencyFields, ...rowColorFields, ...deadlineFields, ...referenceViaFields, ...dependsOnFields, ...nameFields, ...recordCurrencyFields];
+            const extraFields = [...predicateFields, ...groupingFields, ...concurrencyFields, ...rowColorFields, ...deadlineFields, ...lockOperandFields, ...referenceViaFields, ...dependsOnFields, ...nameFields, ...recordCurrencyFields, ...quantityUnitFields];
             const withHarvestedFields = (list: any[]): any[] => {
               if (extraFields.length === 0) return list;
               const names = new Set(list.map((f: any) => columnIdentity(f)));

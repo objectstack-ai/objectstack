@@ -23,8 +23,8 @@
     },
     {
       "id": 3,
-      "prompt": "Index our `kb_article` records (title and body) so the assistant can answer from them with RAG. Only published articles, and we want to filter by `category` at search time. We run RAGFlow.",
-      "expected_output": "Emits a `KnowledgeSourceSchema.parse({...})` record with `adapter: 'ragflow'` and `source: { kind: 'object', object: 'kb_article', contentFields: ['title', 'body'], metadataFields: ['category'], where: { published: true } }`, `refresh: { onRecordChange: true }`, registered at boot through `KnowledgeServicePlugin({ sources })`. Top-K and rerankers are not source metadata, and no `split` key is written: the RAGFlow adapter receives whole documents, so `split` would have no effect.",
+      "prompt": "Index our `kb_article` records (title and body) so the assistant can answer from them with RAG. Only published articles, and we want to filter by `category` at search time. We run PostgreSQL with pgvector.",
+      "expected_output": "Emits a `KnowledgeSourceSchema.parse({...})` record with `adapter: 'pgvector'` and `source: { kind: 'object', object: 'kb_article', contentFields: ['title', 'body'], metadataFields: ['category'], where: { published: true } }`, `refresh: { onRecordChange: true }`, registered at boot through `KnowledgeServicePlugin({ sources })`. Top-K and rerankers are not source metadata, and no `split` key is written: the pgvector adapter takes the service's passages, and the default `recursive` split fits article prose.",
       "files": [],
       "assertions": {
         "must_contain": ["KnowledgeSourceSchema", "contentFields", "metadataFields", "where", "KnowledgeServicePlugin"],
@@ -99,6 +99,16 @@
       "assertions": {
         "must_contain": ["ask_ai", "record_header", "locations"],
         "must_not_contain": ["target:"]
+      }
+    },
+    {
+      "id": 11,
+      "prompt": "Give the AI a customer's open opportunities and notes when a user asks about that customer. Customers are `account` records with a long-text `notes` field; an `opportunity` has an `account` lookup and a `stage` whose closed values are `closed_won` and `closed_lost`. Write the metadata.",
+      "expected_output": "Emits a context pack (an `aiContexts` entry or a `*.ai-context.ts` file) with `name`, `label`, `object: 'account'`, a `related` entry on `opportunity` (`field: 'account'`, a few `fields`) whose `where` keeps the open rows on the child's own `stage` field with an admitted operator (`{ stage: { $nin: ['closed_won', 'closed_lost'] } }`), optionally `orderBy: [{ field, order }]` and a `limit` of at most 20, and `body: { field: 'notes' }`. Declares `requires: ['record-context']` (or mounts `RecordContextServicePlugin`) so `get_record_context` is served, and says the pack reads as the caller and grants nothing. No `description` or top-level `filter` key on the pack, no `direction` in `orderBy`, and no `aiReadable` on the object.",
+      "files": [],
+      "assertions": {
+        "must_contain": ["opportunity", "related", "where", "stage", "body", "notes", "record-context"],
+        "must_not_contain": ["filter:", "direction:", "aiReadable"]
       }
     }
   ]

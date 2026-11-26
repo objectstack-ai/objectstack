@@ -43,7 +43,10 @@ export const ChannelAccount = ObjectSchema.create({
         // Encrypted at rest and masked on every read; read only by the server, to send.
         bot_token: Field.secret({ label: 'Bot Token', required: true }),
         // Revoked once the chat app refused the token; setting the token again restores it.
-        status: Field.select([{ label: 'Active', value: 'active' }, { label: 'Revoked', value: 'revoked' }], {
+        status: Field.select([
+            { label: 'Active', value: 'active', color: 'green' },
+            { label: 'Revoked', value: 'revoked' },
+        ], {
             label: 'Status', required: true, defaultValue: 'active',
         }),
     },

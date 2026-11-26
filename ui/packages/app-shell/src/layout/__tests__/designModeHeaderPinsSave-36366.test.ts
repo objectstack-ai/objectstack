@@ -18,6 +18,7 @@ vi.mock('../../assistant/assistantBus', async (importOriginal) => ({
 
 import { saveObjectPins, type ObjectPinsSaveDoors } from '../designModeHeaderPinsSave';
 import type { ObjectPins } from '../designModeHeaderPinsModel';
+import { draftPublishDoor } from '../../views/__tests__/draftPublishDoor-37440';
 
 const TEXTS = {
   notListed: 'not listed',
@@ -232,5 +233,37 @@ describe('saving the header pins (objectstack#36366)', () => {
     const { d, calls } = doors({ writable: true, layers: { code: { name: 'crm_lead' } }, publish: () => Promise.reject(refusal) });
     await expect(saveObjectPins(input({ record: { pinned: ['convert'] } }), TEXTS, d)).rejects.toBe(refusal);
     expect(calls.at(-1)).toEqual(['reset', 'object', 'crm_lead', { state: 'draft', packageId: 'com.acme.crm' }]);
+  });
+});
+
+describe('the header pins Save publishes only the draft it wrote (objectstack#37440)', () => {
+  const authored = { name: 'crm_lead', label: 'Lead', actions: [{ name: 'convert', locations: ['record_header'] }] };
+  function doorDoors() {
+    const door = draftPublishDoor();
+    door.seedLive('object', 'crm_lead', 'com.acme.crm', authored);
+    const d: ObjectPinsSaveDoors = {
+      listPackages: async () =>
+        new Map([['com.acme.crm', { id: 'com.acme.crm', name: 'CRM', writable: true, manifest: { version: '1.0.0' } }]]),
+      ensureCustomization: async (base) => ({ basePackageId: base, packageId: `${base}.custom`, namespace: 'crm_custom', created: false, writable: true }),
+      client: { ...door.client, get: async () => null, layered: async () => ({ code: authored }) },
+    };
+    return { door, d };
+  }
+  const pins = { record: { pinned: ['log_call', 'convert'] } };
+
+  it("PIN: another writer's draft write between the save and its publish is refused, published by nobody, and kept", async () => {
+    const { door, d } = doorDoors();
+    door.interleave('object', 'crm_lead', 'com.acme.crm', { name: 'crm_lead', label: 'theirs' });
+    await expect(saveObjectPins(input(pins), TEXTS, d)).rejects.toThrow('pending draft');
+    expect(door.liveOf('object', 'crm_lead', 'com.acme.crm')).toEqual(authored);
+    expect(door.draftOf('object', 'crm_lead', 'com.acme.crm')).toEqual({ name: 'crm_lead', label: 'theirs' });
+    expect(door.calls.find(([c]) => c === 'publish')?.[3]).toMatchObject({ draftVersion: expect.any(String) });
+  });
+
+  it('CONTROL: with no write in between, the same pinned publish takes the pins live', async () => {
+    const { door, d } = doorDoors();
+    await saveObjectPins(input(pins), TEXTS, d);
+    expect(door.liveOf('object', 'crm_lead', 'com.acme.crm')).toEqual({ ...authored, actionLayout: pins });
+    expect(door.draftOf('object', 'crm_lead', 'com.acme.crm')).toBeUndefined();
   });
 });

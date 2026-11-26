@@ -66,7 +66,8 @@ import {
 import { applySavedRecordEcho } from './recordSaveEcho.js';
 import { authoredRecordPageApplies } from './recordPageSurface.js';
 import { withPageTabsUrlSync } from '../utils/pageTabsUrlSync.js';
-import { RECORD_COMMENT_PARAM, RECORD_COMMENTS_PARAM, RECORD_COMMENTS_PUSHED_STATE as COMMENTS_PUSHED, RECORD_DETAIL_TAB_PARAM, RECORD_DRAWER_PARAM, RECORD_RELATED_ENLARGE_PARAM, RECORD_RELATED_ENLARGE_PUSHED_STATE as RELATED_ENLARGE_PUSHED, RECORD_TRAIL_PARAM, decodeRecordTrail, buildRecordTrailHref } from '../urlParams.js';
+import { RECORD_COMMENT_PARAM, RECORD_COMMENTS_PARAM, RECORD_SECTION_PARAM, RECORD_SECTION_OPENED_STATE, RECORD_COMMENTS_PUSHED_STATE as COMMENTS_PUSHED, RECORD_DETAIL_TAB_PARAM, RECORD_DRAWER_PARAM, RECORD_RELATED_ENLARGE_PARAM, RECORD_RELATED_ENLARGE_PUSHED_STATE as RELATED_ENLARGE_PUSHED, RECORD_TRAIL_PARAM, decodeRecordTrail, buildRecordTrailHref } from '../urlParams.js';
+import { focusRecordSection, sectionCandidates } from './recordSectionAnchor.js';
 import { resolveActionParams } from '@object-ui/fields';
 import { createConsoleServerActionHandler } from '../utils/consoleServerAction.js';
 import { withNewTabUrlFastPath } from '../utils/newTabUrlFastPath.js';
@@ -912,6 +913,25 @@ function ApprovalGroupBeacon({ onHosted }: { onHosted: (update: (n: number) => n
 
 /** The reader's arrangement is not written while the design mode's tab editor previews the default (objectstack#36499, objectstack#36737). */
 const ignoreArrangementChange = (): void => {};
+
+/**
+ * objectstack#37487 (S5) — the cited section the record page last opened, as
+ * `{ target: RECORD\nANCHOR, opened: CLICK }`, kept beside the component so it
+ * outlives a remount or a swapped page root: a record-form overlay pushed over
+ * the page (and Back after it) redraws the page without the click's history
+ * state, and that redraw is no new click. It is dropped once no record page is
+ * mounted any more, so a later visit to the same link opens its section again.
+ */
+let lastCitedSectionOpen: { target: string; opened: string } | null = null;
+let mountedRecordPages = 0;
+
+/** Whether a cited-section open is a new one, and record it when it is. */
+function claimCitedSectionOpen(target: string, opened: string): boolean {
+  const last = lastCitedSectionOpen;
+  if (last && last.target === target && (opened === '' || opened === last.opened)) return false;
+  lastCitedSectionOpen = { target, opened };
+  return true;
+}
 
 export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverride, recordIdOverride, embedded }: RecordDetailViewProps) {
 
@@ -4939,6 +4959,60 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
   // only for a loaded record with nothing to be named by.
   const holdsRouteRecord =
     pageRecordFor === routeRecordKey && !!readablePageRecord && typeof readablePageRecord === 'object';
+  // ADR-0160 D9 — `?section=ANCHOR`, a passage the assistant cited: once the
+  // record is held, the body heading the anchor names is scrolled to and
+  // marked (`recordSectionAnchor.ts`); a stale anchor leaves the page at its
+  // top. Judged once per record, anchor and chip click: a click carries a
+  // fresh `RECORD_SECTION_OPENED_STATE`, so the same chip clicked again opens
+  // the section again, while a tab switch (which keeps the state) does not.
+  // Opening another section takes the earlier mark off.
+  // objectstack#37487 (S5) — the click is the last string value the state
+  // carried, kept until a NEW one arrives: a navigation that drops the history
+  // state (an overlay's `replace`, a pushed form and Back) is no new click, so
+  // it neither re-runs the effect nor scrolls the page back to the heading;
+  // `claimCitedSectionOpen` carries the same judgement across a redraw of the
+  // page itself (the record-form overlay remounts it without the state).
+  const sectionAnchor = tabSearchParams.get(RECORD_SECTION_PARAM) || null;
+  const sectionOpenedState = (location.state as Record<string, unknown> | null)?.[RECORD_SECTION_OPENED_STATE];
+  const [sectionOpened, setSectionOpened] = useState('');
+  if (typeof sectionOpenedState === 'string' && sectionOpenedState !== sectionOpened) {
+    setSectionOpened(sectionOpenedState);
+  }
+  const citedSectionCandidates = useMemo(
+    () =>
+      holdsRouteRecord
+        ? sectionCandidates(objectDef?.fields, readablePageRecord as Record<string, unknown>, sectionAnchor)
+        : [],
+    [holdsRouteRecord, objectDef?.fields, readablePageRecord, sectionAnchor],
+  );
+  const citedSectionKey =
+    citedSectionCandidates.length > 0
+      ? `${routeRecordKey}\n${sectionAnchor}\n${sectionOpened}`
+      : null;
+  const citedSectionCandidatesRef = useRef(citedSectionCandidates);
+  citedSectionCandidatesRef.current = citedSectionCandidates;
+  useEffect(() => {
+    if (!pageRootEl || !citedSectionKey) return undefined;
+    // Claimed when the page would move, so a re-run before that does not spend
+    // it; a redraw at a section already opened marks it again and scrolls nothing.
+    const target = `${routeRecordKey}\n${sectionAnchor}`;
+    const opened = sectionOpened;
+    return focusRecordSection(pageRootEl, citedSectionCandidatesRef.current, undefined, () =>
+      claimCitedSectionOpen(target, opened),
+    );
+    // The key spells the record, anchor and click; the effect reads them through it.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pageRootEl, citedSectionKey]);
+  useEffect(() => {
+    mountedRecordPages += 1;
+    return () => {
+      mountedRecordPages -= 1;
+      // A remount mounts the next page in the same commit, before this runs.
+      setTimeout(() => {
+        if (mountedRecordPages === 0) lastCitedSectionOpen = null;
+      }, 0);
+    };
+  }, []);
   const landedRecordName = holdsRouteRecord && !recordTitle && objectDef
     ? getRecordDisplayName(objectDef, readablePageRecord)
     : undefined;

@@ -257,6 +257,13 @@ export type FieldConstraints = {
 export interface TextFieldMetadata extends BaseFieldMetadata {
   type: 'text';
   /**
+   * A unit-code field's declaration — `@objectstack/spec`'s
+   * `FieldSchema.unitConfig`, typed BY REFERENCE (ADR-0158 Open item 8):
+   * `{ unitMode: 'code' }` on a `text` field that holds a unit code with no
+   * quantity beside it. Its display draws the code's label.
+   */
+  unitConfig?: SpecField['unitConfig'];
+  /**
    * Minimum character length — `@objectstack/spec`'s `FieldSchema.minLength`,
    * typed BY REFERENCE (objectui#11070). The form's validation rules
    * (`buildValidationRules` in `@object-ui/fields`) read it for every field
@@ -472,6 +479,14 @@ export interface RichtextFieldMetadata extends BaseFieldMetadata {
  */
 export interface NumberFieldMetadata extends BaseFieldMetadata {
   type: 'number';
+  /**
+   * The quantity's unit — `@objectstack/spec`'s `FieldSchema.unitConfig`,
+   * typed BY REFERENCE (ADR-0158 U4): `{ unitMode: 'fixed', unit }` or
+   * `{ unitMode: 'record', unitField }`. The display faces draw the number with
+   * its unit's label and display decimal places through `QuantityText`
+   * (`@object-ui/fields`); the stored value stays a bare number.
+   */
+  unitConfig?: SpecField['unitConfig'];
   min?: number;
   max?: number;
   /** Total number of digits (the `p` in a `decimal(p, s)` column). Not a display setting. */

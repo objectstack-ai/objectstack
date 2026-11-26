@@ -195,6 +195,7 @@ const de = {
     uploadInFlight: "Warten Sie, bis der Upload abgeschlossen ist, bevor Sie speichern.",
     clearedOnHide: "Geleert, was für die aktuellen Werte nicht mehr gilt: {{fields}}",
     visibleWhenFaulted: "Absenden nicht möglich: Die visibleWhen-Regel von {{fields}} konnte nicht ausgewertet werden. Die Regel muss korrigiert werden, bevor dieses Formular abgesendet werden kann.",
+    uiReadonlyWhenFaulted: "Absenden nicht möglich: Die uiReadonlyWhen-Regel von {{fields}} konnte nicht ausgewertet werden. Die Regel muss korrigiert werden, bevor dieses Formular abgesendet werden kann.",
     discardTitle: "Änderungen verwerfen?",
     discardMessage: "Sie haben ungespeicherte Änderungen. Wenn Sie dieses Formular jetzt schließen, gehen Ihre Bearbeitungen verloren.",
     // objectui#4024 — the create/edit dialog's `sr-only` accessible
@@ -1121,6 +1122,7 @@ const de = {
     addColumn: "Spalte hinzufügen",
     moveCard: "Karte verschieben",
     noCards: "Keine Karten",
+    notLoaded: "Nicht geladene Karten: {{count}}",
     columnCards: "Karten in Spalte {{column}}",
     laneCards: "Karten in {{column}} - {{lane}}",
     dropBlocked: "Eine Karte aus {{from}} kann nicht nach {{to}} verschoben werden.",
@@ -2141,7 +2143,7 @@ const de = {
   },
   console: {
     studio: {
-      title: "Studio",
+      title: "App Studio",
       accessRequired: "Sie benötigen Studio-Zugriff, um Studio zu öffnen. Ein Administrator kann ihn unter Einrichtung → Berechtigungssatz-Zuweisung mit einem Berechtigungssatz erteilen.",
     },
     saveAdvisoryTitle: "Gespeichert — die Autorenprüfung ergab {{count}} Hinweis(e)",
@@ -2587,6 +2589,7 @@ const de = {
       savedCleared: "Gespeicherter Wert geleert",
       deprecatedBadge: "Veraltet",
       deprecatedBadgeReplacedBy: "Veraltet → {{replacedBy}}",
+      selectValueRetired: "{{value}} (nicht mehr verfügbar)",
       unsupportedSpecifierType: "Nicht unterstützter Einstellungstyp: {{type}}",
       mapAddRow: "Zeile hinzufügen",
       mapRemoveRow: "{{key}} entfernen",
@@ -3727,11 +3730,11 @@ const de = {
       tooltip: "Diese Plattform befindet sich in der Vorschau — Funktionen können sich ändern.",
     },
     aiAssistant: "KI-Assistent",
-    designInStudio: "Im Studio gestalten",
+    designInStudio: "Im App Studio gestalten",
     designLayout: "Layout gestalten",
     editApp: "App bearbeiten",
-    openAppInStudio: "{{app}} im Studio ansehen",
-    viewInStudio: "Im Studio ansehen",
+    openAppInStudio: "{{app}} im App Studio ansehen",
+    viewInStudio: "Im App Studio ansehen",
   },
   home: {
     build: {
@@ -3871,8 +3874,8 @@ const de = {
       backToAppHome: "Zurück zum App-Menü",
       appsAvailable: "{{count}} Apps verfügbar",
       allApps: "Alle Apps",
-      editAppInStudio: "{{app}} im Studio bearbeiten",
-      openAppInStudio: "{{app}} im Studio ansehen",
+      editAppInStudio: "{{app}} im App Studio bearbeiten",
+      openAppInStudio: "{{app}} im App Studio ansehen",
       backToHome: "Zurück zur Startseite der App",
       settings: "Einstellungen",
       productHome: "{{product}} Startseite",
@@ -4681,6 +4684,9 @@ const de = {
       dataset: 'Datenset',
       metrics: 'Kennzahlen',
       noAddedFilter: 'Kein zusätzlicher Filter zur Datenset-Definition',
+    },
+    recordCitations: {
+      title: 'Zitiert aus Datensätzen',
     },
     tool: {
       aggregate_data: "Die Daten zusammenfassen",

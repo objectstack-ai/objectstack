@@ -132,7 +132,7 @@ export const deSourceHashes: Readonly<Record<string, string>> = {
   'apps.setup.navigation.nav_connector_connections.label': '949e9a8fd25c3d57',
   'apps.setup.navigation.nav_slack.label': 'c3c9e181e8c74b22',
   'apps.setup.navigation.nav_oauth_apps.label': '1b26cce61a4c10eb',
-  'apps.studio.label': '5aaaaea2294ee893',
+  'apps.studio.label': '479a1bf587b5965e',
   'apps.studio.description': 'c026a5795933995d',
   'apps.studio.navigation.group_overview.label': 'eebdbe1cc7b59cdf',
   'apps.studio.navigation.nav_app_builder.label': '128446e7650210e7',

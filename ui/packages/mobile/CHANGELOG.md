@@ -1,5 +1,36 @@
 # @object-ui/mobile
 
+## 19.0.0-next.0
+
+### Patch Changes
+
+- Updated dependencies [1c05546]
+- Updated dependencies [2df9691]
+- Updated dependencies [f71d488]
+- Updated dependencies [e01b8be]
+- Updated dependencies [0585797]
+- Updated dependencies [5dbcc02]
+- Updated dependencies [f548bdc]
+- Updated dependencies [9f6f306]
+- Updated dependencies [f3d0a9f]
+- Updated dependencies [6db1dc2]
+- Updated dependencies [4ab2c82]
+- Updated dependencies [f3a8a13]
+- Updated dependencies [bbc7e03]
+- Updated dependencies [543585d]
+- Updated dependencies [7e89bc6]
+- Updated dependencies [f2ef7d8]
+- Updated dependencies [70d07fd]
+- Updated dependencies [7a7ab47]
+- Updated dependencies [021524c]
+- Updated dependencies [4ed453d]
+- Updated dependencies [81c1ae9]
+- Updated dependencies [57445a6]
+- Updated dependencies [1f3e9f6]
+- Updated dependencies [2d18ba8]
+- Updated dependencies [c385d3b]
+  - @object-ui/types@19.0.0-next.0
+
 ## 18.6.0
 
 ### Patch Changes

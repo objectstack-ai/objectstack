@@ -2,6 +2,7 @@
 
 import type { TranslationData } from '@objectstack/spec/system';
 import { enObjects } from './en.objects.generated.js';
+import { standardUnitMessages } from './standard-unit-names.js';
 
 /**
  * English (en) — Setup App Translations
@@ -23,6 +24,8 @@ import { enObjects } from './en.objects.generated.js';
  */
 export const en: TranslationData = {
   objects: enObjects,
+  // ADR-0158 L2 (2A): each standard unit code's name (`standard-unit-names.ts`).
+  messages: standardUnitMessages('en'),
   apps: {
     account: {
       label: 'Account',
@@ -187,7 +190,7 @@ export const en: TranslationData = {
       },
     },
     studio: {
-      label: 'Studio',
+      label: 'App Studio',
       description: 'Metadata workbench for developers, analysts, and implementers',
       navigation: {
         group_overview: { label: 'Overview' },

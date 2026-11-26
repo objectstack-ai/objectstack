@@ -121,8 +121,9 @@ import {
   type PackageRemoval,
   type ReplayOutcome,
 } from './mapMessages';
-import type { DatasetProvenance, ObjectQuerySource } from '@objectstack/spec/ai';
+import type { DatasetProvenance, ObjectQuerySource, RecordCitationParsed } from '@objectstack/spec/ai';
 import { AnswerSourceBlock } from './AnswerSource';
+import { RecordCitations } from './RecordCitations';
 
 /**
  * One chat message as `<ChatbotEnhanced>` RENDERS it — the runtime contract of
@@ -176,6 +177,13 @@ export interface ChatbotEnhancedMessage {
    * only a wall of text.
    */
   charts?: ChatChart[];
+  /**
+   * The answer's verified record citations (ADR-0160 D9), lifted from the
+   * message's `data-record-citations` part by `extractRecordCitations`. Drawn
+   * as chips beside the "How this was computed" block; a click opens the
+   * cited record at its section through `onOpenRecord`.
+   */
+  recordCitations?: RecordCitationParsed[];
 }
 
 /**
@@ -875,8 +883,13 @@ export interface ChatbotEnhancedProps extends React.HTMLAttributes<HTMLDivElemen
    * → the button is disabled (nothing to route to).
    */
   onOpenBuilder?: (handoff: { prompt: string; packageId?: string }) => void;
-  /** cloud#1658 — open the record an `open_record` hand-off points at. */
-  onOpenRecord?: (handoff: { objectName: string; recordId: string; label?: string; reason?: string }) => void;
+  /**
+   * cloud#1658 — open the record an `open_record` hand-off points at. A
+   * record citation's chip calls it too (ADR-0160 D9), with the `anchor` of
+   * the body section it cites when it names one; the host opens the record at
+   * that section.
+   */
+  onOpenRecord?: (handoff: { objectName: string; recordId: string; label?: string; reason?: string; anchor?: string }) => void;
   /**
    * objectstack#31869 — open the list a `/list/OBJECT` link in an answer
    * names: the object, and optionally a view and the Filter panel conditions.
@@ -1181,6 +1194,13 @@ export interface ChatbotModelOption {
    * draws it as `×N` beside the label; absent → nothing is drawn.
    */
   costMultiplier?: number;
+  /**
+   * objectstack#35578 — the display name of the model's tier alone ('Fast'),
+   * `AiModelsResponseSchema`'s `tierLabel`. The closed picker shows it in place
+   * of `label`; the open list keeps `label`. Absent → the closed picker shows
+   * `label`, as before.
+   */
+  tierLabel?: string;
 }
 
 /** A record-write card value as a person reads it: nothing, a list, or the value itself. */
@@ -1264,6 +1284,9 @@ function drawnMultiplierOf(model: ChatbotModelOption): number | undefined {
  *   dropped. Every chat host renders this picker, so none can skip the question.
  * - objectstack#35445: the closed trigger shows the model's label alone. The
  *   multiplier stays on the list rows, where the choice is made.
+ * - objectstack#35578: a model that carries a `tierLabel` shows it on the closed
+ *   trigger in place of its label (the tier name alone); the label stays
+ *   the trigger's title and the list row's text. Without one, the label as above.
  */
 function ModelPicker({
   label,
@@ -1291,7 +1314,10 @@ function ModelPicker({
   // now draws it below the threshold or with no multiplier: drop the pick.
   if (confirmingId !== null && confirming === undefined) setConfirmingId(null);
   const at = models.findIndex((m) => m.id === value);
+  // The model in force's full name (the title, and the list row's text) and what
+  // the closed trigger shows: its tier name alone when it carries one.
   const inForce = at !== -1 ? (models[at].label ?? models[at].id) : value;
+  const shown = at !== -1 ? (models[at].tierLabel ?? inForce) : value;
   // The drawn value is already rounded (drawnMultiplierOf); this only spells it,
   // with as many decimals as that rounding kept.
   const multiplierText = (n: number) =>
@@ -1332,7 +1358,7 @@ function ModelPicker({
               nothing else: no provider, no cost figure (the list, where the
               choice is made, carries those). Truncated, with the name on its title. */}
           <SelectValue>
-            <span className="truncate" data-testid="model-picker-value">{inForce}</span>
+            <span className="truncate" data-testid="model-picker-value">{shown}</span>
           </SelectValue>
         </SelectTrigger>
         <SelectContent>
@@ -5658,6 +5684,10 @@ const ChatbotEnhanced = React.forwardRef<HTMLDivElement, ChatbotEnhancedProps>(
                               : [],
                           )}
                         />
+                      ) : null}
+                      {/* ADR-0160 D9 — the records the answer rests on. */}
+                      {!isUser && message.recordCitations ? (
+                        <RecordCitations citations={message.recordCitations} onOpenRecord={onOpenRecord} />
                       ) : null}
                       {!isUser && sources.length > 0 ? (
                         <Sources>

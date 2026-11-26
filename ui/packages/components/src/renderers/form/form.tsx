@@ -6,7 +6,7 @@
  * LICENSE file in the root directory of this source tree.
  */
 
-import { ComponentRegistry, resolveFieldRuleState, evalFieldPredicate, resolveCascadingOptions, resolveDependsOnFields, CASCADE_OPTION_WIDGET_TYPES, EXPANDABLE_FIELD_TYPES, isValueStillOffered, isMissingForRequired, isServerOwnedValue, isActionSwitchedOff, type FieldRulePredicate } from '@object-ui/core';
+import { ComponentRegistry, resolveFieldRuleState, evalFieldPredicate, resolveCascadingOptions, resolveDependsOnFields, CASCADE_OPTION_WIDGET_TYPES, EXPANDABLE_FIELD_TYPES, isValueStillOffered, isMissingForRequired, isServerOwnedValue, isActionSwitchedOff, declaresUnitCode, quantityUnitCodePointers, withUnitCodePointer, type FieldRulePredicate } from '@object-ui/core';
 import type { FormSchema, FormField as FormFieldConfig, FormFieldTab, FormFieldPane, FieldCondition, SelectOption } from '@object-ui/types';
 import { useForm, type RefCallBack } from 'react-hook-form';
 import { Form, FormField, FormItem, FormLabel, FormControl, FormMessage, FormDescription } from '../../ui/form';
@@ -580,6 +580,10 @@ const useSafeFormTranslation = createSafeTranslation(
     // not be evaluated (see `handleSubmit`). Byte-identical to the `en` pack.
     'form.visibleWhenFaulted':
       "Can't submit: the visibleWhen rule of {{fields}} could not be evaluated. The rule must be fixed before this form can be submitted.",
+    // objectstack#36806 — the same refusal for a faulted `uiReadonlyWhen` (the
+    // hand lock no server judges). Byte-identical to the `en` pack.
+    'form.uiReadonlyWhenFaulted':
+      "Can't submit: the uiReadonlyWhen rule of {{fields}} could not be evaluated. The rule must be fixed before this form can be submitted.",
     // objectui#12108 — the hint under an empty field the server fills at insert
     // (see `renderFieldDescription`). Byte-identical to the `en` pack.
     'form.serverDefaultHint': 'Set automatically when saved.',
@@ -1387,6 +1391,14 @@ function renderFieldDescription(
  */
 const RECORD_CURRENCY_WIDGET_TYPES = new Set(['currency', 'formula', 'summary']);
 
+/**
+ * Widget keys whose display reads a sibling field's value for a quantity's
+ * unit (ADR-0158): a `record`-mode quantity shows the unit its record's code
+ * field holds, and its organization picks the unit's display decimal places.
+ * `NumberField` takes `dependentValues` by name, so it never reaches the DOM.
+ */
+const QUANTITY_WIDGET_TYPES = new Set(['number']);
+
 function stripRegisteredFieldProps(type: string, props: RenderFieldProps): RenderFieldProps {
   const {
     dataSource,
@@ -1438,6 +1450,9 @@ function stripRegisteredFieldProps(type: string, props: RenderFieldProps): Rende
     // A record-mode amount's symbol and decimals follow the code the user picks
     // in its sibling select, so the amount box needs the live record too.
     ...(RECORD_CURRENCY_WIDGET_TYPES.has(normalizedType) ? { dependentValues } : {}),
+    // A record-mode quantity's unit follows the code in its sibling field, and
+    // a unit code field offers its record's organization's units.
+    ...(QUANTITY_WIDGET_TYPES.has(normalizedType) || declaresUnitCode(fieldProps.field as never) ? { dependentValues } : {}),
     // Only the widgets that report unparseable text read it; every other one
     // would spread an unknown handler onto its DOM (objectstack#27483).
     ...(INVALID_INPUT_REPORTING_WIDGET_TYPES.has(normalizedType) ? { onInvalidInputChange } : {}),
@@ -2187,6 +2202,7 @@ ComponentRegistry.register('form',
             // `readonly`, so it has nothing to evaluate it for.
             visibleWhen: isFailClosedSectionGate(f) ? undefined : (f as any).visibleWhen,
             readonlyWhen: isCreateForm ? undefined : (f as any).readonlyWhen,
+            uiReadonlyWhen: isCreateForm ? undefined : (f as any).uiReadonlyWhen,
             requiredWhen: (f as any).requiredWhen,
           },
           ruleRecord,
@@ -2246,14 +2262,36 @@ ComponentRegistry.register('form',
     // stored BLANK field rule is a fault like any other (ADR-0137 D2; see
     // `FieldRuleFaults`) and is refused; a new one is refused earlier, at
     // authoring, by the form schema's triad wire.
-    const { conditionallyHiddenFieldNames, faultedVisibleWhenFieldNames } = React.useMemo(() => {
+    // [objectstack#36806] A faulted `uiReadonlyWhen` (the hand lock's
+    // predicate) is refused the same way, on an edit form (a create never
+    // judges it). It has the one possible judge here: no server evaluates the
+    // hand lock, so ADR-0137 D2's "the submit refuses what render let through"
+    // can only be this form. Render already holds the field locked (the hand
+    // lock fails closed); the refusal says the rule itself must be fixed.
+    const { conditionallyHiddenFieldNames, faultedVisibleWhenFieldNames, faultedUiReadonlyWhenFieldNames } = React.useMemo(() => {
       const hidden = new Set<string>();
       const faulted: string[] = [];
+      const faultedHandLock: string[] = [];
       for (const f of fields as FormFieldConfig[]) {
         const name = f?.name;
         if (!name) continue;
         const visibleWhen = (f as any).visibleWhen;
         const visibleOn = (f as any).visibleOn;
+        const uiReadonlyWhen = isCreateForm ? undefined : (f as any).uiReadonlyWhen;
+        if (uiReadonlyWhen != null && visibleWhen == null && f.type !== 'section-divider') {
+          // `readonlyWhen` rides along so the verdict short-circuits exactly as
+          // on the `visibleWhen` path below: a field the server lock already
+          // holds never has its hand lock judged, so it never blocks the save.
+          const handLock = resolveFieldRuleState(
+            { readonlyWhen: (f as any).readonlyWhen, uiReadonlyWhen },
+            ruleRecord,
+            { readonly: (f as any).readonly === true },
+            previousRecord,
+            predicateScope,
+            `field '${name}'`,
+          );
+          if (handLock.faults.uiReadonlyWhen !== undefined) faultedHandLock.push(name);
+        }
         if (visibleWhen == null && visibleOn == null) continue;
         if (visibleWhen != null) {
           // A fail-closed section gate (objectui#13055) is judged off the triad.
@@ -2262,6 +2300,7 @@ ComponentRegistry.register('form',
             {
               visibleWhen: gate ? undefined : visibleWhen,
               readonlyWhen: isCreateForm ? undefined : (f as any).readonlyWhen,
+              uiReadonlyWhen: isCreateForm ? undefined : (f as any).uiReadonlyWhen,
               requiredWhen: (f as any).requiredWhen,
             },
             ruleRecord,
@@ -2277,6 +2316,7 @@ ComponentRegistry.register('form',
             `field '${name}'`,
           );
           if (st.faults.visibleWhen !== undefined && f.type !== 'section-divider') faulted.push(name);
+          if (st.faults.uiReadonlyWhen !== undefined && f.type !== 'section-divider') faultedHandLock.push(name);
           if (!st.visible || (gate && !sectionGateVisible(f, ruleRecord, previousRecord, predicateScope))) {
             hidden.add(name);
             continue;
@@ -2291,7 +2331,11 @@ ComponentRegistry.register('form',
           hidden.add(name);
         }
       }
-      return { conditionallyHiddenFieldNames: hidden, faultedVisibleWhenFieldNames: faulted };
+      return {
+        conditionallyHiddenFieldNames: hidden,
+        faultedVisibleWhenFieldNames: faulted,
+        faultedUiReadonlyWhenFieldNames: faultedHandLock,
+      };
     }, [fields, ruleRecord, previousRecord, isCreateForm, predicateScope]);
 
     // ── The section grouping contract (objectui#6236, maintainer ruling
@@ -2505,6 +2549,7 @@ ComponentRegistry.register('form',
           {
             visibleWhen: (f as any).visibleWhen,
             readonlyWhen: isCreateForm ? undefined : (f as any).readonlyWhen,
+            uiReadonlyWhen: isCreateForm ? undefined : (f as any).uiReadonlyWhen,
             requiredWhen: (f as any).requiredWhen,
           },
           ruleRecord,
@@ -2566,6 +2611,12 @@ ComponentRegistry.register('form',
     // Read once per object and handed down on the field's own metadata.
     const codeFieldNames = React.useMemo(() => currencyCodeFieldNames(fields as unknown[]), [fields]);
     const usedCurrencyCodes = useUsedCurrencyCodes(contextDataSource, schema.objectName, codeFieldNames);
+    // The unit code fields a quantity on this form points at (ADR-0158 Open
+    // item 8): each is drawn as the unit picker (`withUnitCodePointer`).
+    const unitCodePointers = React.useMemo(
+      () => quantityUnitCodePointers((fields as Array<{ field?: unknown }>).map((f) => f?.field || f)),
+      [fields],
+    );
 
     // The record as each visible update action would leave it
     // (objectstack#28382). A declarative update action writes its static
@@ -3646,6 +3697,16 @@ ComponentRegistry.register('form',
         setRejectedFieldNames(faultedVisibleWhenFieldNames);
         return Promise.resolve();
       }
+      if (faultedUiReadonlyWhenFieldNames.length > 0) {
+        event?.preventDefault?.();
+        raiseRefusal(t('form.uiReadonlyWhenFaulted', {
+          fields: faultedUiReadonlyWhenFieldNames
+            .map((n) => fieldLabelByName[n] || n)
+            .join(t('validation.formInvalidJoiner')),
+        }));
+        setRejectedFieldNames(faultedUiReadonlyWhenFieldNames);
+        return Promise.resolve();
+      }
       return submitThroughValidation(event);
     };
 
@@ -3736,6 +3797,7 @@ ComponentRegistry.register('form',
         readonly: staticReadonly,
         visibleWhen,
         readonlyWhen,
+        uiReadonlyWhen,
         requiredWhen,
         ...fieldProps
       } = field;
@@ -3804,7 +3866,14 @@ ComponentRegistry.register('form',
       // see `isFailClosedSectionGate`.
       const failClosedGate = isFailClosedSectionGate(field);
       const ruleState = resolveFieldRuleState(
-        { visibleWhen: failClosedGate ? undefined : visibleWhen, readonlyWhen: isCreateForm ? undefined : readonlyWhen, requiredWhen },
+        {
+          visibleWhen: failClosedGate ? undefined : visibleWhen,
+          readonlyWhen: isCreateForm ? undefined : readonlyWhen,
+          // The hand lock's predicate (`Field.uiReadonlyWhen`), folded into the
+          // same read-only verdict; judged on an edit only, as `readonlyWhen`.
+          uiReadonlyWhen: isCreateForm ? undefined : uiReadonlyWhen,
+          requiredWhen,
+        },
         ruleRecord,
         {
           required: staticRequired,
@@ -4279,7 +4348,8 @@ ComponentRegistry.register('form',
                   // metadata was stashed (standalone forms).
                   // A record-currency code field also carries the codes its
                   // object's records already hold (`usedCurrencyCodes`).
-                  field: withUsedCurrencyCodes(field.field || field, usedCurrencyCodes[name]),
+                  // A unit code field a quantity points at carries that pointer.
+                  field: withUnitCodePointer(withUsedCurrencyCodes(field.field || field, usedCurrencyCodes[name]), unitCodePointers.get(name)),
                   ...formField,
                   inputType: fieldProps.inputType,
                   // The field's label, forwarded explicitly because the

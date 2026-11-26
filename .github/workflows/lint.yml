@@ -5928,7 +5928,9 @@ jobs:
       # in the ledgered dependency closure (the gate's own enumeration, on an
       # unbuilt worktree), `Build workspace packages` above already covers 54
       # through `./packages/*`. The 55th is `@objectstack/service-knowledge`
-      # (packages/services/, pulled in by the ledgered `knowledge-ragflow`), and
+      # (packages/services/, pulled in by an adapter package ledgered then and
+      # retired since; with DEBT and TEST_DEBT both empty the closure is empty
+      # today, so these counts are the reading the step was added on), and
       # it arrives here only through `./examples/*^...` — because
       # `examples/app-todo` happens to depend on it, the same accident #3037
       # records one step above. Delete this step and the lane's green starts

@@ -10,8 +10,9 @@
  * objectstack-ai/objectstack#28252 — the grid's inline-edit saves carry the
  * write answer's `notice` (the message a hook set,
  * objectstack-ai/objectstack#28000) on their own save toast, so the write is
- * one toast: the per-row save and "Save All" claim their rows' answer
- * feedback, and the write-warning channel raises none of its own.
+ * one toast: each cell's save claims its row's answer feedback, and the
+ * write-warning channel raises none of its own. (The staged "Save All" that
+ * claimed several rows at once is retired, objectstack#35827.)
  *
  * The channel is stood in for by its own door, `parkAnswerWarnings` from
  * `@object-ui/react`, called synchronously inside the write as the adapter's
@@ -22,7 +23,7 @@
  * no notice line); the CONTROL row GREEN on both sides.
  */
 import { describe, it, expect, vi, beforeAll, beforeEach, afterEach } from 'vitest';
-import { render, screen, waitFor, fireEvent, cleanup, within } from '@testing-library/react';
+import { render, screen, waitFor, fireEvent, cleanup, act } from '@testing-library/react';
 import '@testing-library/jest-dom';
 import React from 'react';
 
@@ -118,9 +119,8 @@ async function loaded(dataSource: ReturnType<typeof makeDataSource>) {
   } as GridProps['schema'];
   render(
     <ActionProvider>
-      {/* Row Edit/Delete handlers: the per-row save button exists. */}
       <ObjectGrid
-        cellSelection={false}
+       
         schema={schema}
         // The in-memory double implements the three members the default saves read.
         dataSource={dataSource as unknown as GridProps['dataSource']}
@@ -134,50 +134,52 @@ async function loaded(dataSource: ReturnType<typeof makeDataSource>) {
 
 const rowOf = (title: string) => screen.getByText(title).closest('tr') as HTMLElement;
 
-/** Stage a new Estimate on the row titled `title`, the way a user types it. */
-async function editEstimate(title: string, from: string, to: string) {
+/**
+ * Type a new Estimate on the row titled `title` and commit it with Enter, the
+ * select-first way (a click selects, a double-click edits): the commit is the
+ * cell's save.
+ */
+async function commitEstimate(title: string, from: string, to: string) {
   const td = await waitFor(() => {
     const cell = Array.from(rowOf(title).querySelectorAll('td')).find((c) => c.textContent?.trim() === from);
     if (!cell) throw new Error(`no ${from} cell on ${title}`);
     return cell as HTMLElement;
   });
   fireEvent.click(td);
-  const input = await waitFor(() => {
-    const el = td.querySelector('input') as HTMLInputElement | null;
-    if (!el) throw new Error('editor not open');
-    return el;
-  });
+  fireEvent.doubleClick(td);
+  // The editor mounts on the cell's overlay layer (objectstack#35688).
+  await waitFor(() => expect(td.querySelector('[data-slot="cell-editor-overlay"] input')).toBeTruthy());
+  await act(async () => {});
+  const input = td.querySelector('[data-slot="cell-editor-overlay"] input') as HTMLInputElement;
   fireEvent.change(input, { target: { value: to } });
   fireEvent.keyDown(input, { key: 'Enter' });
-  await waitFor(() => expect(within(rowOf(title)).getByText(to)).toBeInTheDocument());
+  await act(async () => {});
 }
 
-const clickSaveAll = () => fireEvent.click(screen.getByRole('button', { name: /Save All/ }));
-
 describe('ObjectGrid inline-edit saves carry the hook notice (objectstack-ai/objectstack#28252)', () => {
-  it('the per-row save: one success toast, the notice under "1 row saved"; the channel shows nothing', async () => {
+  it('a cell save: one success toast, the notice under "1 row saved"; the channel shows nothing', async () => {
     const channelToast = vi.fn();
     const ds = makeDataSource(channelToast);
     await loaded(ds);
-    await editEstimate('Ingest pipeline', '60', '61');
-    fireEvent.click(within(rowOf('Ingest pipeline')).getByTitle('Save row'));
+    await commitEstimate('Ingest pipeline', '60', '61');
 
     await waitFor(() => expect(toasts.success).toHaveBeenCalledTimes(1));
-    expect(toasts.success).toHaveBeenCalledWith('1 row saved', { description: NOTICE });
+    expect(toasts.success).toHaveBeenCalledWith('1 row saved', expect.objectContaining({ description: NOTICE }));
     expect(toasts.warning).not.toHaveBeenCalled();
     expect(channelToast).not.toHaveBeenCalled();
   });
 
-  it('"Save All" over two rows: one toast, the shared notice once, the warning lines under it', async () => {
+  it('a cell save with a warning: one toast, the notice, the warning line under it', async () => {
     const channelToast = vi.fn();
     const ds = makeDataSource(channelToast, new Set(['t2']));
     await loaded(ds);
-    await editEstimate('Ingest pipeline', '60', '61');
-    await editEstimate('Warehouse schema', '33', '31');
-    clickSaveAll();
+    await commitEstimate('Warehouse schema', '33', '31');
 
     await waitFor(() => expect(toasts.warning).toHaveBeenCalledTimes(1));
-    expect(toasts.warning).toHaveBeenCalledWith('2 rows saved', { description: `${NOTICE}\nEstimate is high on t2` });
+    expect(toasts.warning).toHaveBeenCalledWith(
+      '1 row saved',
+      expect.objectContaining({ description: `${NOTICE}\nEstimate is high on t2` }),
+    );
     expect(toasts.success).not.toHaveBeenCalled();
     expect(channelToast).not.toHaveBeenCalled();
   });
@@ -186,8 +188,7 @@ describe('ObjectGrid inline-edit saves carry the hook notice (objectstack-ai/obj
     const channelToast = vi.fn();
     const ds = makeDataSource(channelToast);
     await loaded(ds);
-    await editEstimate('Ingest pipeline', '60', '61');
-    fireEvent.click(within(rowOf('Ingest pipeline')).getByTitle('Save row'));
+    await commitEstimate('Ingest pipeline', '60', '61');
     await waitFor(() => expect(toasts.success).toHaveBeenCalledTimes(1));
 
     await ds.update(OBJECT, 't1', { estimate_hours: 62 });

@@ -50,7 +50,7 @@
  */
 
 import React from 'react';
-import { isExpandableFieldType, resolveAffordance, type SchemaLike } from '@object-ui/core';
+import { fieldStaticallyReadOnlyByHand, isExpandableFieldType, resolveAffordance, type SchemaLike } from '@object-ui/core';
 import type { DataSource } from '@object-ui/types';
 import { SYSTEM_MANAGED_FIELD_NAMES } from '@object-ui/types';
 import { InlineEditProvider, RecordContextProvider } from '@object-ui/react';
@@ -181,13 +181,17 @@ export function buildRecordDetailFields(
         name,
         label: def.label,
         type: def.type as any,
-        readonly: !!def.readonly || isLookup,
+        // The static hand-lock verdict (`readonly` or `uiReadonly`).
+        readonly: fieldStaticallyReadOnlyByHand(def) || isLookup,
         options: def.options,
         currency: def.currency,
         // The spec's one declaration of a fixed currency: `FieldSchema`
         // refuses a field-level `currency`, so without this a fixed-EUR amount
         // read in the tenant's currency here (objectui#12242).
         currencyConfig: def.currencyConfig,
+        // A quantity's unit (ADR-0158): the number cell draws its label and
+        // display decimal places from it.
+        unitConfig: (def as { unitConfig?: unknown }).unitConfig,
         // A formula's declared result type, which picks its face in the formula
         // cell: `currency` draws through the currency cell with the
         // `currencyConfig` above. Without it a money formula read as a bare

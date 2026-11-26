@@ -202,6 +202,7 @@ const es = {
     uploadInFlight: "Espere a que finalice la carga antes de guardar.",
     clearedOnHide: "Se borró lo que ya no corresponde a los valores actuales: {{fields}}",
     visibleWhenFaulted: "No se puede enviar: no se pudo evaluar la regla visibleWhen de {{fields}}. Hay que corregir la regla antes de poder enviar este formulario.",
+    uiReadonlyWhenFaulted: "No se puede enviar: no se pudo evaluar la regla uiReadonlyWhen de {{fields}}. Hay que corregir la regla antes de poder enviar este formulario.",
     discardTitle: "¿Descartar los cambios?",
     discardMessage: "Tiene cambios sin guardar. Si cierra este formulario ahora, sus ediciones se perderán.",
     // objectui#4024 — the create/edit dialog's `sr-only` accessible
@@ -1155,6 +1156,7 @@ const es = {
     addColumn: "Añadir columna",
     moveCard: "Mover tarjeta",
     noCards: "Sin tarjetas",
+    notLoaded: "Tarjetas no cargadas: {{count}}",
     columnCards: "Tarjetas de la columna {{column}}",
     laneCards: "Tarjetas de {{column}} - {{lane}}",
     dropBlocked: "Una tarjeta de {{from}} no se puede mover a {{to}}.",
@@ -2201,7 +2203,7 @@ const es = {
   },
   console: {
     studio: {
-      title: "Studio",
+      title: "App Studio",
       accessRequired: "Necesita acceso a Studio para abrir Studio. Un administrador puede concedérselo con un conjunto de permisos en Configuración → Asignación de conjuntos de permisos.",
     },
     saveAdvisoryTitle: "Guardado: la comprobación de creación generó {{count}} recomendación(es)",
@@ -2661,6 +2663,7 @@ const es = {
       savedCleared: "Valor guardado borrado",
       deprecatedBadge: "Obsoleto",
       deprecatedBadgeReplacedBy: "Obsoleto → {{replacedBy}}",
+      selectValueRetired: "{{value}} (ya no está disponible)",
       unsupportedSpecifierType: "Tipo de ajuste no admitido: {{type}}",
       mapAddRow: "Añadir una fila",
       mapRemoveRow: "Quitar {{key}}",
@@ -3809,11 +3812,11 @@ const es = {
       tooltip: "Esta plataforma está en versión preliminar — las funciones pueden cambiar.",
     },
     aiAssistant: "Asistente de IA",
-    designInStudio: "Diseñar en Studio",
+    designInStudio: "Diseñar en App Studio",
     designLayout: "Diseñar la disposición",
     editApp: "Editar aplicación",
-    openAppInStudio: "Ver {{app}} en Studio",
-    viewInStudio: "Ver en Studio",
+    openAppInStudio: "Ver {{app}} en App Studio",
+    viewInStudio: "Ver en App Studio",
   },
   home: {
     build: {
@@ -3955,8 +3958,8 @@ const es = {
       backToAppHome: "Volver al menú de la aplicación",
       appsAvailable: "{{count}} aplicaciones disponibles",
       allApps: "Todas las aplicaciones",
-      editAppInStudio: "Editar {{app}} en Studio",
-      openAppInStudio: "Ver {{app}} en Studio",
+      editAppInStudio: "Editar {{app}} en App Studio",
+      openAppInStudio: "Ver {{app}} en App Studio",
       backToHome: "Volver a la página inicial de la app",
       settings: "Configuración",
       productHome: "Inicio de {{product}}",
@@ -4778,6 +4781,9 @@ const es = {
       dataset: 'Conjunto de datos',
       metrics: 'Métricas',
       noAddedFilter: 'Sin filtro añadido a la definición del conjunto de datos',
+    },
+    recordCitations: {
+      title: 'Citado de registros',
     },
     tool: {
       aggregate_data: "Resumir los datos",

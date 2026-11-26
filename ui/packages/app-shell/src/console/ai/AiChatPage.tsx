@@ -21,6 +21,7 @@ import { useServedAppLabel } from '../../hooks/useServedAppLabel.js';
 import { toast } from 'sonner';
 import { Package as PackageIcon, Sparkles as SparklesIcon } from 'lucide-react';
 import { useAdapter } from '../../providers/AdapterProvider.js';
+import { CONSOLE_FULL_HEIGHT } from '../../layout/chromeBannerHost.js';
 import { isPlatformBuiltinApp } from '../../utils/platformApp.js';
 import { useMetadata } from '../../providers/MetadataProvider.js';
 import { formatPublishFailures, type PublishFailure } from '../../views/studio-design/metadataError.js';
@@ -77,7 +78,7 @@ import {
   detectAuthoringVerdict,
   detectBuiltAppPackage,
   buildProgressFromDraftReview,
-  chartsFromParts,
+  storedAnswerData,
   // The authoring/honest -> runtime message seam (objectui#4399 / PR #4416),
   // consumed here one hop up from the plugin's own renderers (objectui#4437).
   // See `runtimeMessages` below for why this host calls it exactly once.
@@ -169,6 +170,7 @@ import {
   type OutboundAgentTextKey,
 } from './outboundAgentText.js';
 import { resolveApiBase } from './resolveApiBase.js';
+import { RECORD_SECTION_OPENED_STATE, RECORD_SECTION_PARAM } from '../../urlParams.js';
 import { AiUnavailable } from './AiUnavailable.js';
 import { recordWriteFormTarget } from '../../utils/recordFormAiDraft.js';
 import { useUpload } from '@object-ui/fields';
@@ -214,6 +216,30 @@ export function listLinkTarget(
   }
   const query = params.toString();
   return `/apps/${encodeURIComponent(app)}/${encodeURIComponent(target.objectName)}${query ? `?${query}` : ''}`;
+}
+
+/**
+ * cloud#1658, ADR-0160 D9 — the console address of a record the chat opens:
+ * `/apps/APP/OBJECT/record/ID`, plus `?section=ANCHOR` (`RECORD_SECTION_PARAM`)
+ * when a record citation names a section of the record's body. A link with no
+ * anchor (an `open_record` hand-off, a record link in an answer) opens the
+ * record as before.
+ */
+export function recordOpenTarget(
+  app: string,
+  target: { objectName: string; recordId: string; anchor?: string },
+): string {
+  const path = `/apps/${encodeURIComponent(app)}/${encodeURIComponent(target.objectName)}/record/${encodeURIComponent(target.recordId)}`;
+  if (!target.anchor) return path;
+  return `${path}?${new URLSearchParams({ [RECORD_SECTION_PARAM]: target.anchor }).toString()}`;
+}
+
+let sectionOpenings = 0;
+
+/** A history-state value no earlier chip click of this page load carried. */
+function nextSectionOpening(): string {
+  sectionOpenings += 1;
+  return `${Date.now().toString(36)}.${sectionOpenings}`;
 }
 
 function partString(part: HydratedUIMessagePart, key: string): string | undefined {
@@ -386,7 +412,11 @@ export function hydratedMessagesToChatMessages(messages: HydratedUIMessage[]): C
     // persisted, each at the offset into `content` where its part sat. The
     // live stream's chart part is never stored, so this is the only way a
     // chart survives a reload.
-    const charts = message.role === 'assistant' ? chartsFromParts(message.parts) : undefined;
+    // objectstack#37487 — with every other kept data part
+    // (`STORED_ANSWER_DATA_PARTS`): the persisted, already-verified
+    // `data-record-citations` list, drawn again as chips, never re-verified.
+    const { charts, recordCitations } =
+      message.role === 'assistant' ? storedAnswerData(message.parts) : {};
 
     return {
       id: message.id,
@@ -395,6 +425,7 @@ export function hydratedMessagesToChatMessages(messages: HydratedUIMessage[]): C
       ...(toolInvocations.length > 0 ? { toolInvocations } : {}),
       ...(buildProgress ? { buildProgress } : {}),
       ...(charts ? { charts } : {}),
+      ...(recordCitations ? { recordCitations } : {}),
     };
   });
 }
@@ -1542,7 +1573,7 @@ export function AiChatPage({ apiBase: apiBaseProp, defaultAgent: defaultAgentPro
   );
 
   return (
-    <div className="flex h-svh w-full flex-col bg-background" data-testid="ai-chat-page">
+    <div className={cn('flex w-full flex-col bg-background', CONSOLE_FULL_HEIGHT.svh)} data-testid="ai-chat-page">
       <header className={cn(CONSOLE_TOP_BAR, 'bg-background/95 backdrop-blur')}>
         {/* Mobile: open the chats list as a sheet. The DESKTOP collapse toggle
             is NOT in the top nav — it lives at the bottom-left of the chats
@@ -1917,11 +1948,19 @@ export function ChatPane({
   // owning package on click — one same-origin metadata read — instead of
   // burdening the agent with an id it may not know. `setup` is the fallback
   // shell for an object no package claims.
+  //
+  // ADR-0160 D9 — a record citation's chip passes the `anchor` of the body
+  // section it cites; it rides as `?section=` (`RECORD_SECTION_PARAM`), and
+  // the record page opens at that heading. The record opened is always the
+  // citation's own `object`/`id`, the pack's root record. Each click carries a
+  // fresh `RECORD_SECTION_OPENED_STATE`, so clicking the same chip again opens
+  // the section again.
   const openRecord = useCallback(
-    async (handoff: { objectName: string; recordId: string }) => {
+    async (handoff: { objectName: string; recordId: string; anchor?: string }) => {
       const app = await appOfObject(handoff.objectName);
       navigate(
-        `/apps/${encodeURIComponent(app)}/${encodeURIComponent(handoff.objectName)}/record/${encodeURIComponent(handoff.recordId)}`,
+        recordOpenTarget(app, handoff),
+        handoff.anchor ? { state: { [RECORD_SECTION_OPENED_STATE]: nextSectionOpening() } } : undefined,
       );
     },
     [navigate],
