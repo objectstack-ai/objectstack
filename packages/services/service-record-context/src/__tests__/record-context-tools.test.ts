@@ -314,11 +314,13 @@ describe('get_record_context — object level: a gate that refuses everyone refu
     expect(door.reads).toEqual([]);
   });
 
-  it('a served-definition read that throws is no answer about this caller: it refuses the call unnamed, never left out', async () => {
+  it('a served-definition read that throws a coded refusal refuses the call unnamed, never left out', async () => {
     const door = fakeDoor(twoChildren());
     const servedOf = door.servedObjectDefinitionOf.bind(door);
     door.servedObjectDefinitionOf = async (object) => {
-      if (object === 'policy_revision') throw new Error('metadata store down: policy_revision');
+      if (object === 'policy_revision') {
+        throw Object.assign(new Error(`Object '${object}' not found`), { code: 'OBJECT_NOT_FOUND', status: 404 });
+      }
       return servedOf(object);
     };
     const refused = await refusalOf(executeGetRecordContext(CALL, door));
@@ -399,6 +401,96 @@ describe('get_record_context — object level: a gate that refuses everyone refu
     expect(refused).toMatchObject({ code: 'PERMISSION_DENIED', status: 403 });
     expect(refused.message).not.toContain('claim');
     expect(door.reads).toEqual([]);
+  });
+});
+
+describe('get_record_context — a read of a related object that fails is a failure, not a refusal (ADR-0112, ADR-0160 D3 "Object level")', () => {
+  /** What the outage says: every name in it is one the caller is not shown. */
+  const OUTAGE = 'store down: policy_revision.secret_note in package acme_private';
+  const outage = () => new Error(OUTAGE);
+
+  /** The thrown failure, with what it must not carry. */
+  async function failureOf(promise: Promise<unknown>): Promise<{ code: string; status: number; message: string; cause: unknown }> {
+    try {
+      await promise;
+    } catch (err) {
+      const e = err as { code: string; status: number; message: string; cause: unknown };
+      return { code: e.code, status: e.status, message: e.message, cause: e.cause };
+    }
+    throw new Error('expected a failure');
+  }
+
+  /** A door whose `member` throws `thrown()` for `policy_revision`, and answers as the fixture otherwise. */
+  const throwingAt = (
+    member: 'assertApiExposed' | 'servedObjectDefinitionOf' | 'publishedObjectDefinitionOf' | 'query',
+    thrown: () => unknown,
+    app: FakeApp = policyApp(),
+  ) => {
+    const door = fakeDoor(app);
+    const real = (door[member] as (...a: unknown[]) => Promise<unknown>).bind(door);
+    (door as unknown as Record<string, unknown>)[member] = async (object: string, ...rest: unknown[]) => {
+      if (object === 'policy_revision') throw thrown();
+      return real(object, ...rest);
+    };
+    return door;
+  };
+
+  /** The failure's answer: `SERVICE_UNAVAILABLE` 503, naming the pack and the root and nothing the outage said. */
+  const expectFailureNamingNothing = (failed: Awaited<ReturnType<typeof failureOf>>, original: unknown) => {
+    expect(failed).toMatchObject({ code: 'SERVICE_UNAVAILABLE', status: 503 });
+    expect(failed.message).toBe(sentencesFor([]).readFailed('policy_document', 'policy'));
+    for (const word of ['policy_revision', 'secret_note', 'acme_private', 'store down']) {
+      expect(failed.message).not.toContain(word);
+    }
+    // The original is the host's, on `cause` (which no door puts on the wire).
+    expect(failed.cause).toBe(original);
+  };
+
+  it.each([
+    ['step 4a: the API-exposure check', 'assertApiExposed'],
+    ['step 4a: the served-definition read', 'servedObjectDefinitionOf'],
+    ['publishedOf: the published-definition read', 'publishedObjectDefinitionOf'],
+    ['the child list query', 'query'],
+  ] as const)('%s throwing an uncoded error fails the call SERVICE_UNAVAILABLE, naming nothing', async (_site, member) => {
+    const thrown = outage();
+    const door = throwingAt(member, () => thrown);
+    expectFailureNamingNothing(await failureOf(executeGetRecordContext(CALL, door)), thrown);
+  });
+
+  it.each([
+    ['step 4a: the API-exposure check', 'assertApiExposed'],
+    ['step 4a: the served-definition read', 'servedObjectDefinitionOf'],
+    ['publishedOf: the published-definition read', 'publishedObjectDefinitionOf'],
+  ] as const)('control, %s: a coded refusal (a disabled package\'s 404) stays PERMISSION_DENIED 403, unnamed', async (_site, member) => {
+    const door = throwingAt(member, () =>
+      Object.assign(new Error("Object 'policy_revision' belongs to a disabled package"), { code: 'OBJECT_PACKAGE_DISABLED', status: 404 }));
+    const refused = await refusalOf(executeGetRecordContext(CALL, door));
+    expect(refused).toMatchObject({ code: 'PERMISSION_DENIED', status: 403 });
+    expect(refused.message).toBe(sentencesFor([]).objectRefusedUnnamed('policy_document', 'policy'));
+  });
+
+  it('control, the child list query: the door\'s own coded refusal of a served child is answered as the door wrote it', async () => {
+    const refusal = Object.assign(new Error("Field 'version' cannot be filtered or sorted on"), { code: 'PERMISSION_DENIED', status: 403 });
+    const door = throwingAt('query', () => refusal);
+    await expect(executeGetRecordContext(CALL, door)).rejects.toBe(refusal);
+  });
+
+  it.each<[string, () => unknown]>([
+    ['a driver errno on `.code` with no status', () => Object.assign(new Error(OUTAGE), { code: 'SQLITE_BUSY' })],
+    ['a coded 5xx', () => Object.assign(new Error(OUTAGE), { code: 'SERVICE_UNAVAILABLE', status: 503 })],
+    ['a status with no code', () => Object.assign(new Error(OUTAGE), { status: 404 })],
+    ['a thrown value that is not an object', () => OUTAGE],
+  ])('%s is a failure too, not a refusal', async (_label, thrown) => {
+    let original: unknown;
+    const door = throwingAt('servedObjectDefinitionOf', () => (original = thrown()));
+    expectFailureNamingNothing(await failureOf(executeGetRecordContext(CALL, door)), original);
+  });
+
+  it('the failure sentence is written in the caller\'s locale', async () => {
+    const door = throwingAt('publishedObjectDefinitionOf', outage, policyApp({ locales: ['zh-CN'] }));
+    const failed = await failureOf(executeGetRecordContext(CALL, door));
+    expect(failed.message).toBe(sentencesFor(['zh-CN']).readFailed('policy_document', 'policy'));
+    expect(failed.message).not.toBe(sentencesFor([]).readFailed('policy_document', 'policy'));
   });
 });
 

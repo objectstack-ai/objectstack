@@ -776,6 +776,29 @@ describe('[ADR-0149 D7 · ADR-0160 D4] get_record_context over one real kernel: 
         expect(answer.text).not.toContain('rc_off');
     });
 
+    it('[ADR-0112] a related child whose list read fails (an outage, no coded refusal) fails the call SERVICE_UNAVAILABLE on both doors, naming nothing, never as a refusal', async () => {
+        const OUTAGE = 'disk I/O error reading rc_revision.version';
+        const real = engine.find.bind(engine);
+        const failing = vi.spyOn(engine, 'find').mockImplementation(async (object: string, ...rest: any[]) => {
+            if (object === 'rc_revision') throw new Error(OUTAGE);
+            return (real as any)(object, ...rest);
+        });
+        try {
+            const answer = await both({ objectName: 'rc_policy', recordId: 'p1', context: 'rc_main' });
+            // Reached through each door, so the answer is the outage's on both.
+            expect(failing.mock.calls.filter(([object]) => object === 'rc_revision').length).toBeGreaterThanOrEqual(2);
+            expect(answer.isError).toBe(true);
+            expect(answer.payload.error).toMatchObject({ code: 'SERVICE_UNAVAILABLE', status: 503 });
+            for (const word of ['rc_revision', 'disk I/O', 'version']) expect(answer.text).not.toContain(word);
+        } finally {
+            failing.mockRestore();
+        }
+        // Control: the same call reads once the list read answers.
+        const control = await both({ objectName: 'rc_policy', recordId: 'p1', context: 'rc_main' });
+        expect(control.isError).toBe(false);
+        expect(control.payload.data.related[0]).toMatchObject({ object: 'rc_revision' });
+    });
+
     it('[ADR-0160 D3, second amendment] where, orderBy and limit on a related list answer the same bytes on both doors: filtered, ordered, cut at the limit and stated', async () => {
         const answer = await both({ objectName: 'rc_policy', recordId: 'p1', context: 'rc_filtered' });
         expect(answer.isError).toBe(false);

@@ -75,6 +75,11 @@ import { sentencesFor, type Sentences } from './sentences.js';
  * carries no value and is marked `withheld` (#35137). A name the published
  * definition lacks is an author defect and states nothing.
  *
+ * A read of a related object that FAILS rather than refuses (a throw that is
+ * no coded refusal, {@link isCodedRefusal}: an outage, a bug) is no answer
+ * about the caller, so it is never answered as a refusal: the call fails
+ * `SERVICE_UNAVAILABLE` (503), naming the pack and the root only.
+ *
  * ## A related list's `where`, `orderBy` and `limit` (D1, D3: second amendment)
  *
  * They run inside the one capped child query, as the caller: `where` joined
@@ -134,6 +139,31 @@ type Coded = Error & { code: string; status: number };
 /** An ADR-0112 coded refusal: `code` and `status` on the thrown error. */
 function refusal(code: string, status: number, message: string): Coded {
   return Object.assign(new Error(message), { code, status });
+}
+
+/**
+ * [ADR-0112] Whether a throw is a coded refusal: a non-empty string `code`
+ * and a declared 4xx status, read as ADR-0112's reader reads it
+ * (`resolveThrownHttpError`'s `declaredStatus`, `@objectstack/types`):
+ * `.status`, then `.statusCode`. Anything else is a failure, not an answer
+ * about the caller: no code, no status, a 5xx, a driver errno on `.code`
+ * with no status, a thrown value that is not an object (an outage, a bug).
+ * ADR-0112 names the status channel as the one structural signal between a
+ * refusal and a fault; a driver errno also arrives on `.code`, so the string
+ * alone cannot tell.
+ *
+ * The one line, drawn once for both of its readers: the executor asks it at
+ * every read of a related object it judges ({@link executeGetRecordContext},
+ * step 4a, the published definitions, the child list query), and the
+ * citation verifier asks it of the executor's own throw
+ * (`verifyRecordCitations`). So what the executor refuses, the verifier
+ * drops without a report, and what fails, it reports.
+ */
+export function isCodedRefusal(err: unknown): boolean {
+  if (err == null || typeof err !== 'object') return false;
+  const { code, status, statusCode } = err as { code?: unknown; status?: unknown; statusCode?: unknown };
+  const declared = typeof status === 'number' ? status : typeof statusCode === 'number' ? statusCode : undefined;
+  return typeof code === 'string' && code.length > 0 && declared !== undefined && declared >= 400 && declared < 500;
 }
 
 /** The call's arguments, or a `VALIDATION_ERROR` carrying the spec's own words. */
@@ -387,6 +417,27 @@ export async function executeGetRecordContext(input: unknown, door: RecordContex
     );
   };
 
+  // [ADR-0112, ADR-0160 D3 "Object level"] The one line between a refusal and
+  // a failure at the reads of a related object this executor judges: step
+  // 4a's exposure check and served definition, a published definition
+  // (`publishedOf`), and the child list query. A coded refusal
+  // ({@link isCodedRefusal}) answers as `refused` says, as it always has. Any
+  // other throw is a failure, which says nothing about what this caller may
+  // read, so it is not answered as a refusal: the call fails
+  // `SERVICE_UNAVAILABLE` (503) in the executor's own sentence, which names
+  // the pack and the root only. No door renders the original error, so
+  // nothing it says can name an object, a field or a package the caller is
+  // not shown; it rides on `cause`, which no door puts on the wire, for the
+  // host (the citation verifier hands it to `onError`).
+  const refusedOrFailed = async (err: unknown, refused: () => Promise<never>): Promise<never> => {
+    if (isCodedRefusal(err)) return refused();
+    throw Object.assign(new Error(say.readFailed(pack.name, root)), {
+      code: 'SERVICE_UNAVAILABLE',
+      status: 503,
+      cause: err,
+    });
+  };
+
   // Whether something the pack covers was left out for this caller: the one
   // not-visible statement, whatever was removed.
   let hidden = false;
@@ -410,22 +461,25 @@ export async function executeGetRecordContext(input: unknown, door: RecordContex
     try {
       await door.assertApiExposed(entry.object, 'query');
     } catch (err) {
-      // Only API exposure's own refusal is about the object itself, and it is
-      // named only when the caller's served schema shows the object (the
-      // naming bound); any other failure (a package gate, an outage) names
-      // nothing.
-      let shown = false;
-      if (API_EXPOSURE_REFUSALS.has(String((err as { code?: unknown } | null)?.code))) {
-        shown = (await door.servedObjectDefinitionOf(entry.object).catch(() => null)) != null;
-      }
-      await refuseObject(entry.object, shown);
+      // A coded refusal refuses the call. Only API exposure's own refusal is
+      // about the object itself, and it is named only when the caller's
+      // served schema shows the object (the naming bound); any other refusal
+      // (a disabled package's) names nothing. A failure fails the call.
+      await refusedOrFailed(err, async () => {
+        let shown = false;
+        if (API_EXPOSURE_REFUSALS.has(String((err as { code?: unknown }).code))) {
+          shown = (await door.servedObjectDefinitionOf(entry.object).catch(() => null)) != null;
+        }
+        return refuseObject(entry.object, shown);
+      });
     }
     let served: Record<string, unknown> | null;
     try {
       served = await door.servedObjectDefinitionOf(entry.object);
-    } catch {
-      // A read that failed is no answer about this caller: it refuses, unnamed.
-      return refuseObject(entry.object, false);
+    } catch (err) {
+      // A coded refusal refuses, unnamed; a read that failed is no answer
+      // about this caller, so it fails the call, naming nothing.
+      return refusedOrFailed(err, () => refuseObject(entry.object, false));
     }
     if (!served) {
       leftOut.add(entry.object);
@@ -436,16 +490,17 @@ export async function executeGetRecordContext(input: unknown, door: RecordContex
   }
 
   // Every published-definition read from here on is of an object whose gates
-  // already passed; one that still throws refuses the call unnamed, so no
-  // door's own rendering of the failure can name what the caller is not shown.
-  // A child left out for this caller is never read, its definition included:
-  // the plan reads it as having no published definition.
+  // already passed; one that still throws a coded refusal refuses the call
+  // unnamed, and one that fails fails it, naming nothing, so no door's own
+  // rendering of either can name what the caller is not shown. A child left
+  // out for this caller is never read, its definition included: the plan
+  // reads it as having no published definition.
   const publishedOf = async (name: string): Promise<Record<string, unknown> | null> => {
     if (leftOut.has(name)) return null;
     try {
       return await door.publishedObjectDefinitionOf(name);
-    } catch {
-      return refuseObject(name, false);
+    } catch (err) {
+      return refusedOrFailed(err, () => refuseObject(name, false));
     }
   };
   // The read set is the plan: every object read below is one of these.
@@ -586,15 +641,24 @@ export async function executeGetRecordContext(input: unknown, door: RecordContex
     const probe = cap + 1;
     const projection = [...new Set(['id', ...(plan.displayField ? [plan.displayField] : []), ...plan.columns])];
     const linkWhere = { [plan.link]: plan.multiValueLink ? { $contains: recordId } : recordId };
-    const rows = rowsOf(
-      await door.query(plan.object, {
+    let read: unknown;
+    try {
+      read = await door.query(plan.object, {
         where: plan.where !== undefined ? { $and: [linkWhere, plan.where] } : linkWhere,
         fields: projection,
         ...(plan.orderBy ? { orderBy: plan.orderBy } : {}),
         ...(plan.lookups.length > 0 ? { expand: plan.lookups } : {}),
         limit: probe,
-      }),
-    );
+      });
+    } catch (err) {
+      // The child is one this caller is served (step 4a), so the door's own
+      // coded refusal of the query is answered as the door wrote it, as it
+      // always was; a query that failed fails the call, naming nothing.
+      return refusedOrFailed(err, async () => {
+        throw err;
+      });
+    }
+    const rows = rowsOf(read);
     const truncated = rows.length > cap;
     const kept = truncated ? rows.slice(0, cap) : rows;
     const childWithheld = await withheldAmong(door, plan.object, plan.columns);
