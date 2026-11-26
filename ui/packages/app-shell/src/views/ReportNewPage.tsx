@@ -119,12 +119,13 @@ export function ReportNewPage({ dataSource }: { dataSource?: DataSource }) {
     },
     [navigate, appName, studioReturn, studioLeaveMessage],
   );
-  // objectstack#36906 — a report made from Studio's report list is saved in
-  // the app's package, where that list finds it, as a new view made in an app
+  // objectstack#36906, objectstack#37261 — a new report is saved in the app's
+  // package, where Studio's report list finds it, as a new view made in an app
   // is (`resolveRuntimeCreatePackage`): the package when it is writable, else
   // its customization package through the ensure door, else, when neither can
-  // be had, naming no package, as before, and a notice says so. A report made
-  // from the app's own reports index is saved as before, naming no package.
+  // be had, naming no package, and a notice says so. One rule for both ways in:
+  // Studio's report list and the app's own reports index. Outside any app it
+  // names no package, as a view does.
   const appPackageId = draftBarPackageOf(appName, apps as Parameters<typeof draftBarPackageOf>[1]);
 
   const handleSave = React.useCallback(
@@ -149,7 +150,7 @@ export function ReportNewPage({ dataSource }: { dataSource?: DataSource }) {
         }
         const body = { ...draft, label, name };
         const ctx = { metadataClient, dataSource: dataSource as any };
-        const packageId = studioReturn ? await resolveRuntimeCreatePackage(appPackageId, 'report') : null;
+        const packageId = await resolveRuntimeCreatePackage(appPackageId, 'report');
         const outcome = packageId
           ? await saveAndPublishInPackage('report', name, body, packageId, ctx)
           : await saveAndPublishRuntimeMetadata('report', name, body, ctx);
@@ -157,11 +158,11 @@ export function ReportNewPage({ dataSource }: { dataSource?: DataSource }) {
           toast.error(t('form.saveError'), { description: t('report.builder.pendingDraft') });
           return false;
         }
-        // Opened from Studio, the app's package (or its customization package)
-        // could not be had, so the report was saved naming no package: the
-        // Studio list × goes back to does not show it. Say so, as a new view
-        // saved outside its app does (`onSavedOutsideApp`).
-        if (studioReturn && appPackageId && !packageId) toast.info(t('report.builder.savedOutsideApp'));
+        // The app's package (or its customization package) could not be had,
+        // so the report was saved naming no package: Studio's report list does
+        // not show it. Say so, whichever way the builder was opened, as a new
+        // view saved outside its app does (`onSavedOutsideApp`).
+        if (appPackageId && !packageId) toast.info(t('report.builder.savedOutsideApp'));
       } catch (err) {
         toast.error(t('form.saveError'), {
           description: formatMetadataError(err),
