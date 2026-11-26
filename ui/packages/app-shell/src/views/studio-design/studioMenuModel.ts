@@ -20,10 +20,10 @@
  * `scopeDirectoryEntries`), plus every 常用 Common type
  * ({@link STUDIO_MENU_ALWAYS_TYPES}), so a package that holds no app, page,
  * dashboard, report, flow, permission set or agent still shows where the
- * first is made. Each opens the type's list in the "All metadata" area; an
- * item opened there that a pillar designs still opens its pillar until the
- * pillars become full-screen pages (`areaItemPillarPath`). objectstack#36905
- * — a permission set already has.
+ * first is made. Each opens the type's list in the "All metadata" area,
+ * where an object, a flow and a permission set open their designers
+ * full-screen (objectstack#36903-36905; objectstack#36909 retired the last of
+ * the pillar redirects).
  *
  * And four entries that open no type's list, each in the group of what it
  * holds (the amendment's "Entries that are not a type"):
@@ -66,10 +66,9 @@
 
 import { ENVIRONMENT_SCOPE_QUERY } from '../metadata-admin/catalog-scope.js';
 import { SETUP_DATASOURCES_PATH } from '../metadata-admin/metadataAreaHost.js';
-import { AREA_PILLAR_FOR_TYPE, isStudioAllPackagesScope } from './metadataArea.js';
+import { isStudioAllPackagesScope } from './metadataArea.js';
 import {
   STUDIO_ALL_PACKAGES_SEGMENT,
-  STUDIO_METADATA_AREA,
   STUDIO_OWD_SECTION,
   studioMetadataAreaAddress,
   studioMetadataAreaRoot,
@@ -242,11 +241,6 @@ export function studioMenuTiers(menu: readonly StudioMenuGroupModel[]): Record<S
   return { common: of('common'), advanced: of('advanced') };
 }
 
-/** The entry keys of the type each pillar designs (the transition's pillar pages). */
-const PILLAR_TYPE: Readonly<Record<string, string>> = Object.fromEntries(
-  Object.entries(AREA_PILLAR_FOR_TYPE).map(([type, pillar]) => [pillar, type]),
-);
-
 /**
  * The entry the open page is (`aria-current`), or `null` when it is none of
  * them (a not-found pillar).
@@ -256,7 +250,8 @@ const PILLAR_TYPE: Readonly<Record<string, string>> = Object.fromEntries(
  *    directory — 全部类型 All types on a package (objectstack#37360), the
  *    environment catalog on the cross-package leg;
  *  - the sharing overview's route: the OWD overview;
- *  - a pillar page: the type the pillar designs.
+ *  - a retired pillar's address: none, since it draws no page
+ *    (objectstack#36909: it redirects, `studioPillarRedirectModel.ts`).
  */
 export function studioMenuCurrentKey(input: { segment: string; pathname: string; search: string }): string | null {
   const { segment, pathname } = input;
@@ -270,11 +265,7 @@ export function studioMenuCurrentKey(input: { segment: string; pathname: string;
   }
   const prefix = `${studioPackagePath(segment)}/`;
   const raw = pathname.startsWith(prefix) ? pathname.slice(prefix.length) : '';
-  const pillar = raw.split('/')[0];
-  if (pillar === STUDIO_METADATA_AREA) return null;
-  if (pillar === STUDIO_OWD_SECTION) return 'owd';
-  const type = PILLAR_TYPE[pillar];
-  return type ? `type:${type}` : null;
+  return raw.split('/')[0] === STUDIO_OWD_SECTION ? 'owd' : null;
 }
 
 /** Whether `entry` matches a menu search, by its label or its type's machine name. */

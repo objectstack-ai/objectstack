@@ -62,6 +62,7 @@ vi.mock('../metadata-admin/AccessExplainPanel', () => ({ AccessExplainPanel: () 
 vi.mock('./StudioAiCopilot', () => ({ StudioChatDock: () => null }));
 
 import { StudioDesignSurface } from './StudioDesignSurface';
+import { StudioPillarRedirect } from './StudioPillarRedirect';
 import { fetchPackages } from './packages-io';
 import { t } from '../metadata-admin/i18n';
 
@@ -120,7 +121,7 @@ function renderWorkbench() {
       <MemoryRouter initialEntries={[`/studio/${PACKAGE_ID}/interfaces`]}>
         <Routes>
           <Route path="/studio/:packageId/metadata/*" element={<StudioDesignSurface area="metadata" />} />
-          <Route path="/studio/:packageId/:tab" element={<StudioDesignSurface />} />
+          <Route path="/studio/:packageId/:tab" element={<StudioPillarRedirect><StudioDesignSurface /></StudioPillarRedirect>} />
         </Routes>
       </MemoryRouter>
     </I18nProvider>,
