@@ -348,7 +348,7 @@ export type DriverModels = Pick<CliArgs, 'model' | 'authorModel' | 'askModel'>;
 /** The effort levels a run may ask the live driver for: `--effort`, `--author-effort`, `--ask-effort`. */
 export type DriverEfforts = Pick<CliArgs, 'effort' | 'authorEffort' | 'askEffort'>;
 
-/** The skills a run may give the live `claude` driver: `--ask-skills`, and door mode's arm (`--door-*`). */
+/** The skills a run may give the live driver: `--ask-skills` (`claude` only), and door mode's arm (`--door-*`; an external command takes its skills, not its rules). */
 export type DriverSkills = Pick<CliArgs, 'askSkills' | 'doorSkills' | 'doorSkillOmit' | 'doorRules' | 'doorRulesOmit'>;
 
 const LIVE_FLAGS: ReadonlyArray<readonly [keyof (DriverLimits & DriverModels & DriverEfforts & DriverSkills), string]> = [

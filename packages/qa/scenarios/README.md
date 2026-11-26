@@ -409,9 +409,11 @@ every rule (that arm is the run without `--door-rules`), and a file inside this 
 A rules-arm run's record and recording (`--record`) hold the client's transcripts, and a transcript can quote rule
 text the client was given: read them before filing either anywhere public.
 
-Door mode runs on the live `claude` driver, or a replay of one (`--driver recorded:FILE` re-sends the recorded draft
-saves through the replay's own door and token, and refuses the run as not faithful when the app answers one
-otherwise). Codex and an external driver are refused.
+Door mode runs on the live `claude` driver, on an external command that speaks `objectstack-scenario-driver/2`
+([the contract](#--driver-externalcommand--the-contract): it takes `--door-skills` and `--door-skill-omit`, not the
+rules arm), or on a replay of either (`--driver recorded:FILE` re-sends the recorded draft saves through the replay's
+own door and token, and refuses the run as not faithful when the app answers one otherwise). Codex is refused, and so
+is an external command on `/1`, before any card runs.
 
 **One round, five reps per arm** (the maintainer's run; each arm writes its own records directory):
 
@@ -905,12 +907,35 @@ whitespace (no shell, no quoting); a word that starts `./` or `../`, and a first
 the directory you run from. For anything more, write a wrapper script.
 
 - **One process per call.** The call is one JSON object on stdin; the answer is one JSON object on stdout; logs go to
-  stderr (the record keeps its last 2,000 characters). Every input starts with `"contract":
-  "objectstack-scenario-driver/1"`; a command should refuse a contract it does not know.
-- **`info`**, once, before any card runs: `{"contract":…,"kind":"info"}` → `{"name":"my-agent","version":"1.4.2"}`.
-  The record's driver is `external:my-agent`, its version `1.4.2`. A command that cannot answer it is refused.
+  stderr (the record keeps its last 2,000 characters). Every input starts with its `contract`; a command should
+  refuse a contract it does not know.
+- **Two versions.** `objectstack-scenario-driver/1` is `info`, `author` and `ask`; `objectstack-scenario-driver/2` is
+  `/1` plus door mode (`door` on an `author` call, below). A command names the version it speaks in its `info`
+  answer, and every later call carries that name, so a `/1` command keeps running every other mode unchanged.
+- **`info`**, once, before any card runs: `{"contract":"objectstack-scenario-driver/1","kind":"info"}` →
+  `{"name":"my-agent","version":"1.4.2","contract":"objectstack-scenario-driver/2"}`. The `info` input is the one
+  input both versions share, so it always carries the `/1` name, whatever the command speaks. The record's driver is
+  `external:my-agent`, its version `1.4.2`. An answer with no `contract` speaks `/1`; one naming a contract this runner
+  does not speak is refused, naming it, and so is a command that cannot answer. A runner built before `/2` refuses an
+  answer that carries `contract`, so a command that must also serve such a runner answers without it, as a `/1`
+  command.
 - **`author`**: build or iterate the app in `cwd` with shell and file tools; the call runs in `cwd`.
   `{"contract":…,"kind":"author","step":{"card","mode","phase","step"},"prompt":"…","cwd":"/abs/project","tier":"starter","limits":{…}}`
+- **`author` with `door`** (`/2` only; `--modes door`, `step.mode` `door`): build the app through the app's **MCP draft
+  door** alone — `save_metadata_draft` and its reads, no project, no shell or file tools — into the package the prompt
+  names; the runner then publishes the drafts as a person and grades what the environment serves
+  ([door mode](#door-mode----modes-door)). `cwd` is an empty directory of the call's own and the call runs there; no
+  file in it is recorded or graded.
+  `{"contract":"objectstack-scenario-driver/2","kind":"author","step":{"card","mode":"door","phase":"build","step":"author"},"prompt":"…","cwd":"/tmp/…","tier":"starter","limits":{…},"door":{"mcp":{"url":"…","configFile":"/tmp/…/mcp.json"},"skillsDir":"/tmp/…/.claude/skills"}}`
+  - `door.mcp.configFile` holds the door's OAuth access token, scoped `openid metadata:write`, exactly as an `ask`
+    call's file holds the persona's key (the same shape, 0600, deleted when the call returns), and lies outside `cwd`.
+  - `door.skillsDir` is present when the run gives skills (`--door-skills DIR`, less `--door-skill-omit`): one directory
+    per skill, each holding its `SKILL.md`, under `cwd/.claude/skills`. The record states the arm as for the `claude`
+    driver (`env.driver.door`: each skill's name, version and sha256, and those left out). The rules arm
+    (`--door-rules`) is a Claude Code session's `CLAUDE.md` and is refused with an external command.
+  - The answer is an `author` answer; name the door's tools as they were called (`save_metadata_draft` or
+    `mcp__app__save_metadata_draft`): a replay (`--driver recorded:FILE`) re-sends the recorded draft saves by name.
+  - A `/1` command is never sent a door: `--modes door` with one is refused before any card runs, naming the contract.
 - **`ask`**: answer one data question or write operation as a persona, over the app's MCP endpoint; the call runs in
   the directory of `mcp.configFile`. `step.mode` is `scratch`, `template` or `ask` (ask mode sends only `ask` calls).
   `{"contract":…,"kind":"ask","step":{"card","mode","phase","step","persona"},"prompt":"…","mcp":{"url":"…","configFile":"/tmp/…/mcp.json"},"limits":{…}}`
@@ -927,8 +952,9 @@ the directory you run from. For anything more, write a wrapper script.
   (build and iterate) costs only when every authoring turn reported one; otherwise they read `not reported`; the `ask
   cost` line and `Ask cost` row sum the question and operation turns' costs per served model under the same rule. The
   runner times every call itself (`elapsedMs`, the command's process), so a command reports no duration. Adding
-  these optional keys kept the contract name `objectstack-scenario-driver/1`; a runner built before them refuses an
-  answer that carries one, so a command that must also serve such a runner leaves them out.
+  these optional keys kept the contract name `objectstack-scenario-driver/1` (they are part of `/2` too); a runner
+  built before them refuses an answer that carries one, so a command that must also serve such a runner leaves them
+  out.
 - **Exit codes**: 0 with an answer of that shape is the turn. Any other end is a failed turn with a named reason,
   never an empty pass: a non-zero exit or a signal is `no-result(exit N)`, stdout that is not one JSON object of that
   shape is `invalid-output(…)`. A failed authoring turn leaves its Build half not measured; a failed persona turn is
@@ -940,15 +966,17 @@ the directory you run from. For anything more, write a wrapper script.
   name as typed) when given. The command may ignore them; the record states them. A command that cannot set the
   effort it is given should fail the call rather than run at its default, or the record names an effort no turn ran
   at.
-- ⛔ **The key**: the persona's API key is only in `mcp.configFile`, a 0600 file in the shape of Claude Code's
-  `--mcp-config` (`{"mcpServers":{"app":{"type":"http","url":…,"headers":{"Authorization":"Bearer …"}}}}`), deleted
-  when the call returns. It is never on argv, in the environment or on stdin, and so never in a run record, a
-  scorecard or a gallery export. A command must not print it.
+- ⛔ **The key and the token**: the persona's API key is only in `mcp.configFile` (an `ask`), and the door's token
+  only in `door.mcp.configFile` (a door `author`): a 0600 file in the shape of Claude Code's `--mcp-config`
+  (`{"mcpServers":{"app":{"type":"http","url":…,"headers":{"Authorization":"Bearer …"}}}}`), deleted when the call
+  returns. Neither is ever on argv, in the environment or on stdin, and so never in a run record, a scorecard or a
+  gallery export. A command must not print either.
 - **Login**: the runner cannot see an external command's login, so the record's login reads `not verified`; the cost
   ruling still applies, and the runner removes `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`, `OPENAI_API_KEY` and
   `CODEX_API_KEY` from the command's environment.
 
-`test/runner/fixtures/fake-external-driver.mjs` is a complete command in about a hundred lines.
+`test/runner/fixtures/fake-external-driver.mjs` is a complete command, door mode included, in about a hundred and fifty
+lines.
 
 **WorkBuddy** (checked 2026-11-07): Tencent's WorkBuddy is a desktop app; no headless mode with structured output
 and an MCP client was found for it, so it is not wired here. A tool that has both rides `--driver external:` with a
