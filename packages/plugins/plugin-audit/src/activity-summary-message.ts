@@ -65,12 +65,24 @@
  * service is registered, when the reader's locale has no template for the code,
  * or when composing throws — the stored sentence stands. A row written before
  * this change carries no code and is served as written (no migration, no
- * backfill). A fired milestone's summary carries no code either: its template
- * is the author's sentence and is never translated (#7290).
+ * backfill).
+ *
+ * [#37524] A fired milestone's row carries a code too (`activityMilestone`):
+ * the milestone's `field` + `value`, the address of its translated template
+ * (`objects.<object>._milestones.<field>.<value>.summary`,
+ * `resolveObjectMilestoneSummary`), and each interpolated token's value. A
+ * reader whose language translates the milestone reads the translated template
+ * interpolated with those values, a select value named by its option label in
+ * the reader's language; a reader whose language has no entry reads the
+ * authored sentence as stored. A tenant that reworded a packaged milestone's
+ * `summary` keeps its words (ADR-0029 D9.2a), as a reworded validation message
+ * does.
  */
 
 import {
   resolveBundleLocale,
+  resolveObjectMilestoneSummary,
+  scalarOverridesPackagedBase,
   translateObject,
   type ResolveOptions,
   type TranslationBundle,
@@ -120,7 +132,16 @@ export interface ActivitySummaryFieldChange {
 export type ActivitySummaryMessage =
   | { key: 'activityCreated' | 'activityDeleted' | 'activityUpdated'; object: string; label: string }
   | { key: 'activityUpdatedFields'; object: string; label: string; fields: string[]; more: number }
-  | { key: 'fieldChanges'; object: string; changes: ActivitySummaryFieldChange[] };
+  | { key: 'fieldChanges'; object: string; changes: ActivitySummaryFieldChange[] }
+  | {
+      key: 'activityMilestone';
+      object: string;
+      /** The watched field and the value the milestone fired on — its translation address. */
+      field: string;
+      value: string;
+      /** Each `{token}` the authored template interpolated, by token name. */
+      tokens: Record<string, ActivitySummaryValue>;
+    };
 
 /** One language a summary is composed in. */
 export interface ActivitySummaryLocale {
@@ -134,6 +155,13 @@ export interface ActivitySummaryLocale {
    * `translateObject` put in the reader's language.
    */
   getObjectDef(objectName: string): any;
+  /**
+   * [#37524] The translated summary template of the milestone `field` +
+   * `value` declares on `objectName`, in this locale; `undefined` when the
+   * locale has none, or the milestone's served `summary` is a tenant's
+   * rewording of the packaged one. Absent on the writer's locale.
+   */
+  milestoneSummary?(objectName: string, field: string, value: string): string | undefined;
 }
 
 /** Interpolate one `{{param}}` template, the shared convention (`createMemoryI18n`, FileI18nAdapter). */
@@ -263,6 +291,19 @@ export function composeActivitySummary(
         )
         .join('; ');
     }
+    case 'activityMilestone': {
+      const template = locale.milestoneSummary?.(message.object, message.field, message.value);
+      if (template === undefined) return undefined;
+      const fields = locale.getObjectDef(message.object)?.fields;
+      // The authored template's tokens are the ones with a stored value; a
+      // token the translation adds, or one whose value was empty, renders
+      // empty, as an empty value does in the authored sentence.
+      return template.replace(/\{(\w+)\}/g, (_match: string, token: string) => {
+        const value = Object.prototype.hasOwnProperty.call(message.tokens, token) ? message.tokens[token] : undefined;
+        if (!value) return '';
+        return value.option !== undefined ? (optionLabelOn(fields?.[token], value.option) ?? value.text) : value.text;
+      });
+    }
   }
 }
 
@@ -287,6 +328,15 @@ export function readActivitySummaryMessage(value: unknown): ActivitySummaryMessa
   }
   if (value.key === 'activityUpdatedFields') {
     return typeof value.label === 'string' && isStringList(value.fields) && typeof value.more === 'number'
+      ? (value as ActivitySummaryMessage)
+      : null;
+  }
+  if (value.key === 'activityMilestone') {
+    const tokens = value.tokens;
+    return typeof value.field === 'string' &&
+      typeof value.value === 'string' &&
+      isRecord(tokens) &&
+      Object.values(tokens).every(isValue)
       ? (value as ActivitySummaryMessage)
       : null;
   }
@@ -434,7 +484,34 @@ export function readerSummaryLocale(
     },
     locale,
     getObjectDef: translatedObjectDef,
+    milestoneSummary: (objectName, field, value) => {
+      try {
+        translation ??= { value: labelTranslationOf(service, locale) };
+        if (!translation.value) return undefined;
+        // ADR-0029 D9.2a: a tenant's rewording of a packaged milestone is
+        // authored data and keeps its words, judged as a validation message
+        // is — the served milestone against the packaged one of the same pair,
+        // through the resolver's one predicate (never a copy of it).
+        const served = milestoneOn(getObjectDef(objectName), field, value);
+        const packaged = milestoneOn(getPackagedObjectBase?.(objectName), field, value);
+        if (scalarOverridesPackagedBase(packaged, 'summary', served?.summary)) return undefined;
+        return resolveObjectMilestoneSummary(translation.value.bundle, objectName, field, value, translation.value.options);
+      } catch {
+        // A misbehaving i18n service must not fail the read: the stored text stands.
+        return undefined;
+      }
+    },
   };
+}
+
+/** [#37524] The first milestone `def` declares for `field` + `value` — the one that fires, as the writer matches. */
+function milestoneOn(def: unknown, field: string, value: string): Record<string, unknown> | undefined {
+  const milestones = isRecord(def) ? def.activityMilestones : undefined;
+  if (!Array.isArray(milestones)) return undefined;
+  for (const m of milestones) {
+    if (isRecord(m) && m.field === field && String(m.value) === value) return m;
+  }
+  return undefined;
 }
 
 /** Parse a stored `metadata` value: a JSON object, or `null` for anything else. */
