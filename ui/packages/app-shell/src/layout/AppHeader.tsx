@@ -481,7 +481,7 @@ export function AppHeader({
   // ADR-0146 D5 — the read-only entry's words: 「Open {app} in Studio」, the
   // app switcher's row text, named for the app the bar is in.
   const viewInStudioText = t('topbar.openAppInStudio', {
-    defaultValue: 'Open {{app}} in Studio',
+    defaultValue: 'Open {{app}} in App Studio',
     app: currentApp ? appLabel(currentApp) : (appName ?? ''),
   });
 

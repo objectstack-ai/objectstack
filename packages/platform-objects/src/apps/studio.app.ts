@@ -29,7 +29,7 @@ import type { App } from '@objectstack/spec/ui';
 
 export const STUDIO_APP: App = {
   name: 'studio',
-  label: 'Studio',
+  label: 'App Studio',
   description: 'Metadata workbench for developers, analysts, and implementers',
   icon: 'hammer',
   active: true,

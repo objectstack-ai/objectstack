@@ -137,7 +137,7 @@ export const ko: TranslationData = {
       },
     },
     studio: {
-      label: 'Studio',
+      label: 'App Studio',
       description: '개발자, 분석가, 구현 담당자를 위한 메타데이터 작업대',
       navigation: {
         group_overview: { label: '개요' },

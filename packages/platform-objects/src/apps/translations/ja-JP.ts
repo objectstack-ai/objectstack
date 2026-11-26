@@ -124,7 +124,7 @@ export const jaJP: TranslationData = {
       },
     },
     studio: {
-      label: 'Studio',
+      label: 'App Studio',
       description: '開発者・アナリスト・実装担当者向けのメタデータワークベンチ',
       navigation: {
         group_overview: { label: '概要' },
