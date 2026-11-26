@@ -91,12 +91,14 @@ import { INTERNAL_ERROR_MESSAGE } from '@objectstack/types';
 import {
     admitInboundHookAddress,
     inboundHookRefusalResponse,
+    operationUserMessage,
     type InboundHookRouteMatch,
 } from '@objectstack/core';
 import { automationAddressRegistryOf } from './automation-address.js';
 import type { ITriggerApiService } from '@objectstack/spec/contracts';
 import type { HttpProtocolContext, HttpDispatcherResult } from '../http-dispatcher.js';
 import type { DomainHandlerDeps } from '../domain-handler-registry.js';
+import { requestLocaleOf } from './own-door-bridge.js';
 
 /** The slot the member lives on — the trigger package's own name (ADR-0041 §2). */
 const TRIGGER_API_SLOT = 'trigger-api';
@@ -182,13 +184,13 @@ export async function handleInboundHookRequest(
 ): Promise<HttpDispatcherResult> {
     const service = await deps.resolveService(context, TRIGGER_API_SLOT, context.environmentId) as
         Pick<ITriggerApiService, 'handleInboundHook'> | undefined;
+    // [#37662] The `501` is the operation-message catalog's, in the request's
+    // top `Accept-Language` tag, as the own-door bridge answers its own.
     if (!service) {
         return {
             handled: true,
             response: deps.error(
-                'Inbound automation hooks are not available: no trigger-api service is registered. '
-                + 'The inbound-hook trigger (@objectstack/trigger-api) serves this route through that '
-                + 'service; compose it on the environment that owns the flow.',
+                operationUserMessage('automation_hooks_service_unregistered', { locale: requestLocaleOf(context) }),
                 501,
             ),
         };
@@ -197,8 +199,7 @@ export async function handleInboundHookRequest(
         return {
             handled: true,
             response: deps.error(
-                'Inbound automation hooks are not available: the registered trigger-api service '
-                + 'does not implement handleInboundHook.',
+                operationUserMessage('automation_hooks_member_missing', { locale: requestLocaleOf(context) }),
                 501,
             ),
         };

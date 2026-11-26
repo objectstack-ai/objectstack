@@ -60,7 +60,7 @@
  * dispatcher's `404 ROUTE_NOT_FOUND`: the route IS mounted, and what is
  * missing is the implementation behind it.
  *
- * ## The `501` is in the request's language when the bridge names its noun
+ * ## The `501` is in the request's language
  *
  * [#37273] The two `501` sentences are the operation-message catalog's
  * (`own_door_service_unregistered`, `own_door_member_missing`), rendered in
