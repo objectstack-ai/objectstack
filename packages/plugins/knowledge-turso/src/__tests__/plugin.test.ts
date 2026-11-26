@@ -7,14 +7,22 @@
  * never a failed boot.
  */
 
-import { mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { PluginContext } from '@objectstack/core';
 import type { IKnowledgeAdapter, IKnowledgeService } from '@objectstack/spec/contracts';
 import { EMBEDDER_SERVICE, KNOWLEDGE_SERVICE } from '@objectstack/spec/contracts';
-import { DEFAULT_REQUEST_TIMEOUT_MS, KnowledgeTursoPlugin, defaultStoreUrl, requestBoundFor, resolveStoreUrl } from '../index.js';
+import {
+  DEFAULT_REQUEST_TIMEOUT_MS,
+  KnowledgeTursoPlugin,
+  dataDirectoryOf,
+  defaultStoreUrl,
+  requestBoundFor,
+  resolveSettingsStoreUrl,
+  resolveStoreUrl,
+} from '../index.js';
 import { FakeEmbedder } from './turso.testkit.js';
 
 /** A plugin context with a knowledge service that records registrations, an embedder, and a logger that records. */
@@ -171,5 +179,140 @@ describe('KnowledgeTursoPlugin', () => {
     expect(adapter.embedding).toBeUndefined();
     services[EMBEDDER_SERVICE] = new FakeEmbedder(32, 'late-model');
     expect(adapter.embedding).toEqual({ dimensions: 32, model: 'late-model' });
+  });
+});
+
+/**
+ * A store URL read from the `knowledge.turso_url` setting: written by an
+ * operator through the settings page, so held to the project's data directory,
+ * and refused when it carries a NUL byte before it reaches the libSQL client
+ * (whose native library ends the process on one).
+ */
+describe('resolveSettingsStoreUrl', () => {
+  const NUL = String.fromCharCode(0);
+
+  it('refuses a NUL byte or another control character, in a setting and in the plugin option alike', () => {
+    const root = tempDir();
+    const inside = `file:${join(dataDirectoryOf(root), 'k.db')}`;
+    for (const url of [`${inside}${NUL}`, `file:${dataDirectoryOf(root)}/k${NUL}.db`, `${inside}\n`, `libsql://db${NUL}.turso.io`, `:memory:${NUL}`]) {
+      expect(resolveSettingsStoreUrl(url, { projectRoot: root, env: {} })).toMatchObject({
+        reason: expect.stringContaining('NUL byte'),
+      });
+      expect(resolveStoreUrl({ url, projectRoot: root, env: {} })).toMatchObject({ reason: expect.stringContaining('NUL byte') });
+    }
+  });
+
+  it('takes a file inside the data directory, and :memory: or a remote URL as they are', () => {
+    const root = tempDir();
+    const file = join(dataDirectoryOf(root), 'search', 'k.db');
+    expect(resolveSettingsStoreUrl(`file:${file}`, { projectRoot: root, env: {} })).toEqual({
+      url: `file:${file}`,
+      from: 'the knowledge setting `turso_url`',
+    });
+    expect(resolveSettingsStoreUrl(':memory:', { projectRoot: root, env: {} })).toMatchObject({ url: ':memory:' });
+    expect(resolveSettingsStoreUrl('libsql://db.example.turso.io', { projectRoot: root, env: {} })).toMatchObject({
+      url: 'libsql://db.example.turso.io',
+    });
+  });
+
+  it('refuses a file outside the data directory: elsewhere, by .., by a link, or the directory itself', () => {
+    const root = tempDir();
+    const data = dataDirectoryOf(root);
+    mkdirSync(data, { recursive: true });
+    const outside = tempDir();
+    symlinkSync(outside, join(data, 'escape'));
+    for (const url of [
+      `file:${join(outside, 'k.db')}`,
+      `file:${data}/../k.db`,
+      `file:${join(root, '.objectstack', 'knowledge.db')}`,
+      `file:${join(data, 'escape', 'k.db')}`,
+      `file:${data}`,
+    ]) {
+      expect(resolveSettingsStoreUrl(url, { projectRoot: root, env: {} })).toMatchObject({
+        reason: expect.stringContaining('outside the data directory'),
+      });
+    }
+  });
+
+  it("still refuses the platform's own database file inside the data directory", () => {
+    const root = tempDir();
+    expect(
+      resolveSettingsStoreUrl(`file:${join(dataDirectoryOf(root), 'objectstack.db')}`, { projectRoot: root, env: {} }),
+    ).toMatchObject({ reason: expect.stringContaining("platform's own database file") });
+  });
+});
+
+/** A settings service answering saved `knowledge` values, as `SettingsService.get` resolves them. */
+function settingsOf(saved: Record<string, string | undefined>, failure?: Error) {
+  return {
+    get: async (namespace: string, key: string) => {
+      if (failure) throw failure;
+      if (namespace !== 'knowledge') throw Object.assign(new Error('unknown'), { code: 'SETTINGS_UNKNOWN_NAMESPACE' });
+      const value = saved[key];
+      return value === undefined ? { value: undefined, source: 'default' } : { value, source: 'global' };
+    },
+  };
+}
+
+describe('KnowledgeTursoPlugin — the store URL from settings (urlFromSettings)', () => {
+  it('opens the file a saved setting names inside the data directory', async () => {
+    const root = tempDir();
+    const file = join(dataDirectoryOf(root), 'saved.db');
+    const { ctx, adapters } = contextOf({ settings: settingsOf({ turso_url: `file:${file}` }) });
+    const plugin = new KnowledgeTursoPlugin({ projectRoot: root, env: {}, urlFromSettings: true });
+    await plugin.start(ctx);
+    expect(await adapters.get('turso')!.healthCheck!()).toMatchObject({ ok: true });
+    expect(existsSync(file)).toBe(true);
+    expect(existsSync(join(dataDirectoryOf(root), 'knowledge.db'))).toBe(false);
+    await plugin.destroy();
+  });
+
+  it('nothing saved, no knowledge namespace or no settings service: the default file', async () => {
+    for (const services of [{ settings: settingsOf({}) }, { settings: { get: async () => { throw Object.assign(new Error('x'), { code: 'SETTINGS_UNKNOWN_NAMESPACE' }); } } }, {}]) {
+      const root = tempDir();
+      const { ctx, adapters } = contextOf(services);
+      const plugin = new KnowledgeTursoPlugin({ projectRoot: root, env: {}, urlFromSettings: true });
+      await plugin.start(ctx);
+      expect(await adapters.get('turso')!.healthCheck!()).toMatchObject({ ok: true });
+      expect(existsSync(join(dataDirectoryOf(root), 'knowledge.db'))).toBe(true);
+      await plugin.destroy();
+    }
+  });
+
+  it('a saved URL with a NUL byte, or outside the data directory, never reaches the libSQL client', async () => {
+    const createClient = vi.fn();
+    vi.doMock('@libsql/client', () => ({ createClient }));
+    vi.resetModules();
+    const { KnowledgeTursoPlugin: Fresh } = await import('../plugin.js');
+    const root = tempDir();
+    for (const [url, reason] of [
+      [`file:${join(dataDirectoryOf(root), 'k.db')}${String.fromCharCode(0)}x`, 'NUL byte'],
+      [`file:${join(tempDir(), 'k.db')}`, 'outside the data directory'],
+    ] as const) {
+      const { ctx, adapters, logs } = contextOf({ settings: settingsOf({ turso_url: url }) });
+      await new Fresh({ projectRoot: root, env: {}, urlFromSettings: true }).start(ctx);
+      expect(await adapters.get('turso')!.healthCheck!()).toMatchObject({ ok: false });
+      expect(logs.some(([level, m]) => level === 'warn' && m.includes(reason))).toBe(true);
+    }
+    expect(createClient).not.toHaveBeenCalled();
+  });
+
+  it('a settings read that fails opens nothing: the store says why', async () => {
+    const root = tempDir();
+    const { ctx, adapters, logs } = contextOf({ settings: settingsOf({}, new Error('database is locked')) });
+    await new KnowledgeTursoPlugin({ projectRoot: root, env: {}, urlFromSettings: true }).start(ctx);
+    expect(await adapters.get('turso')!.healthCheck!()).toMatchObject({ ok: false });
+    expect(logs.some(([level, m]) => level === 'warn' && m.includes('database is locked'))).toBe(true);
+    expect(existsSync(join(dataDirectoryOf(root), 'knowledge.db'))).toBe(false);
+  });
+
+  it('the plugin option `url` wins, and without urlFromSettings the settings are not read', async () => {
+    const root = tempDir();
+    const read = vi.fn(async () => ({ value: `file:${join(dataDirectoryOf(root), 'saved.db')}`, source: 'global' }));
+    const { ctx, adapters } = contextOf({ settings: { get: read } });
+    await new KnowledgeTursoPlugin({ url: ':memory:', env: {}, urlFromSettings: true, projectRoot: root }).start(ctx);
+    await new KnowledgeTursoPlugin({ projectRoot: root, env: {} }).start(ctx);
+    expect(read).not.toHaveBeenCalled();
+    expect(adapters.get('turso')).toBeDefined();
   });
 });

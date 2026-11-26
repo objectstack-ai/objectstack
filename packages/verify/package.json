@@ -28,6 +28,8 @@
   },
   "dependencies": {
     "@objectstack/core": "workspace:*",
+    "@objectstack/knowledge-pgvector": "workspace:*",
+    "@objectstack/knowledge-turso": "workspace:*",
     "@objectstack/mcp": "workspace:*",
     "@objectstack/metadata": "workspace:*",
     "@objectstack/objectql": "workspace:*",
@@ -48,6 +50,7 @@
     "@objectstack/service-cache": "workspace:*",
     "@objectstack/service-datasource": "workspace:*",
     "@objectstack/service-job": "workspace:*",
+    "@objectstack/service-knowledge": "workspace:*",
     "@objectstack/service-mailbox": "workspace:*",
     "@objectstack/service-messaging": "workspace:*",
     "@objectstack/service-package": "workspace:*",

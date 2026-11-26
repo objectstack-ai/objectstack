@@ -479,7 +479,7 @@ export const zhHant: PlatformTranslationData = {
         },
         turso_url: {
           label: '連線 URL',
-          help: '範例：libsql://your-tenant.turso.io · file:./.objectstack/knowledge.db · :memory:',
+          help: '範例：libsql://your-tenant.turso.io · file:./.objectstack/data/knowledge.db · :memory:',
         },
         turso_auth_token: { label: '驗證權杖', help: '僅託管 Turso URL 需要。' },
         ragflow_base_url: { label: 'Base URL', help: '範例：http://localhost:9380' },

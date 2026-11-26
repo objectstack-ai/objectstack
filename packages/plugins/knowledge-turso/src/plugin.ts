@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { mkdirSync, realpathSync } from 'node:fs';
-import { basename, dirname, resolve as resolvePath } from 'node:path';
+import { basename, dirname, isAbsolute, relative as relativePath, resolve as resolvePath } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { Client } from '@libsql/client';
 import type { Plugin, PluginContext } from '@objectstack/core';
@@ -55,7 +55,15 @@ export interface KnowledgeTursoPluginOptions {
   queryPrefix?: string;
   /** The embedder to call. Absent: the kernel's `embedder` service, read at each call. */
   embedder?: IEmbedder;
-  /** The project directory the default file is under. @default process.cwd() */
+  /**
+   * Read the store's URL and auth token from the `knowledge` settings
+   * (`turso_url`, `turso_auth_token`) when neither `url` nor `client` is
+   * given. A URL read from there is held to the data directory
+   * ({@link resolveSettingsStoreUrl}). The runtime's `knowledge` capability
+   * mount sets it. @default false
+   */
+  urlFromSettings?: boolean;
+  /** The project directory the default file and the data directory are under. @default process.cwd() */
   projectRoot?: string;
   /** The environment the platform's database URL is read from. @default process.env */
   env?: Record<string, string | undefined>;
@@ -65,6 +73,19 @@ export interface KnowledgeTursoPluginOptions {
 export function defaultStoreUrl(projectRoot: string = process.cwd()): string {
   return `file:${resolvePath(projectRoot, '.objectstack', 'data', DEFAULT_KNOWLEDGE_FILE)}`;
 }
+
+/** The project's data directory: `<projectRoot>/.objectstack/data`, where the default file is. */
+export function dataDirectoryOf(projectRoot: string = process.cwd()): string {
+  return resolvePath(projectRoot, '.objectstack', 'data');
+}
+
+/**
+ * A control character (U+0000 to U+001F, U+007F) anywhere in a URL. The libSQL
+ * client hands a `file:` URL to its native library, which ends the process on
+ * a NUL byte inside the path rather than answering an error; no URL with a
+ * control character in it names a store, so none reaches the client.
+ */
+const CONTROL_CHARACTER = /[\u0000-\u001f\u007f]/;
 
 /** The bound on one request to a remote database (`requestTimeoutMs`). */
 export const DEFAULT_REQUEST_TIMEOUT_MS = 10_000;
@@ -132,6 +153,9 @@ export function resolveStoreUrl(
   const given = opts.url?.trim();
   const url = given === undefined || given === '' ? defaultStoreUrl(opts.projectRoot) : given;
   const from = given === undefined || given === '' ? 'the default location' : 'the plugin option `url`';
+  if (CONTROL_CHARACTER.test(url)) {
+    return { reason: 'its `url` option carries a NUL byte or another control character, which names no file or database.' };
+  }
   if (!/^(file:|libsql:\/\/|https?:\/\/|wss?:\/\/)/i.test(url) && url !== ':memory:') {
     return { reason: 'its `url` option is not a file:, :memory: or libsql:// URL.' };
   }
@@ -161,6 +185,128 @@ export function resolveStoreUrl(
 }
 
 /**
+ * A path as it is on disk: the real path of its nearest existing ancestor with
+ * the rest appended, so a link anywhere above it is followed and a file not
+ * yet created is still placed.
+ */
+function realPathAllowingMissing(path: string): string {
+  const rest: string[] = [];
+  let current = resolvePath(path);
+  for (;;) {
+    try {
+      return resolvePath(realpathSync(current), ...rest);
+    } catch {
+      const parent = dirname(current);
+      if (parent === current) return resolvePath(path);
+      rest.unshift(basename(current));
+      current = parent;
+    }
+  }
+}
+
+/**
+ * The libSQL URL a store takes from the `knowledge.turso_url` setting, or why
+ * it does not take it.
+ *
+ * A setting is written through the settings page and the settings API, by an
+ * operator who never touches the server's disk, so what it may name is held
+ * tighter than a URL written in code:
+ *
+ * - a control character (a NUL byte above all) is refused before anything
+ *   else, so it never reaches the native client;
+ * - a `file:` URL must name a file inside the project's data directory
+ *   (`.objectstack/data/`, {@link dataDirectoryOf}), compared as the file it
+ *   resolves to, so neither `..` nor a link leads out of it. A relative path is
+ *   read from the process's working directory, as libSQL opens it;
+ * - `:memory:` and a remote `libsql://`, `https://` or `wss://` URL open no
+ *   local file and are taken as they are.
+ *
+ * Every rule {@link resolveStoreUrl} applies holds after these: the platform's
+ * own database file is refused there too.
+ */
+export function resolveSettingsStoreUrl(
+  url: string,
+  opts: Pick<KnowledgeTursoPluginOptions, 'projectRoot' | 'env'> = {},
+): { url: string; from: string } | { url?: undefined; reason: string } {
+  const from = 'the knowledge setting `turso_url`';
+  if (CONTROL_CHARACTER.test(url)) {
+    return {
+      reason:
+        `${from} carries a NUL byte or another control character, which names no file or database. ` +
+        'Save the URL again without it.',
+    };
+  }
+  const trimmed = url.trim();
+  if (/^file:/i.test(trimmed)) {
+    const file = fileOf(trimmed);
+    if (file === undefined) {
+      return { reason: `${from} is not a valid file: URL.` };
+    }
+    const dataDir = realPathAllowingMissing(dataDirectoryOf(opts.projectRoot));
+    const inside = relativePath(dataDir, realPathAllowingMissing(file));
+    if (inside === '' || inside.startsWith('..') || isAbsolute(inside)) {
+      return {
+        reason:
+          `${from} names a file outside the data directory (${dataDir}). A store file named in settings must be ` +
+          `inside it, such as file:${resolvePath(dataDir, DEFAULT_KNOWLEDGE_FILE)}; a file elsewhere is named in the ` +
+          "plugin's own `url` option.",
+      };
+    }
+  }
+  const target = resolveStoreUrl({ url: trimmed, projectRoot: opts.projectRoot, env: opts.env });
+  return target.url === undefined ? { reason: target.reason.replace('its `url` option', from) } : { url: target.url, from };
+}
+
+/** A settings service as this plugin reads it: one key's resolved value and the layer it came from. */
+interface StoreSettingsReader {
+  get(namespace: string, key: string): Promise<{ value?: unknown; source?: string } | undefined>;
+}
+
+/** The settings service's code for a namespace or key nothing declares: nothing is saved there. */
+const UNDECLARED_SETTING = new Set(['SETTINGS_UNKNOWN_NAMESPACE', 'SETTINGS_UNKNOWN_KEY']);
+
+/**
+ * The `knowledge.turso_url` and `knowledge.turso_auth_token` an operator
+ * saved (any layer but the manifest's default, an `OS_*` override included).
+ * Nothing saved, no settings service, or no `knowledge` namespace: `{}`. A
+ * read that fails otherwise is a reason: a store must not open a file other
+ * than the one an operator may have named.
+ */
+async function readStoreSettings(
+  ctx: PluginContext,
+): Promise<{ url?: string; authToken?: string } | { reason: string }> {
+  let settings: StoreSettingsReader | undefined;
+  try {
+    settings = ctx.getService<StoreSettingsReader | undefined>('settings') ?? undefined;
+  } catch {
+    return {};
+  }
+  if (typeof settings?.get !== 'function') return {};
+  const saved = async (key: string): Promise<string | undefined> => {
+    let resolved: { value?: unknown; source?: string } | undefined;
+    try {
+      resolved = await settings.get('knowledge', key);
+    } catch (err) {
+      const code = (err as { code?: unknown } | null)?.code;
+      if (typeof code === 'string' && UNDECLARED_SETTING.has(code)) return undefined;
+      throw err;
+    }
+    if (!resolved || (resolved.source ?? 'default') === 'default') return undefined;
+    const { value } = resolved;
+    return typeof value === 'string' && value.trim() !== '' ? value : undefined;
+  };
+  try {
+    const url = await saved('turso_url');
+    const authToken = url === undefined ? undefined : await saved('turso_auth_token');
+    return { ...(url === undefined ? {} : { url }), ...(authToken === undefined ? {} : { authToken }) };
+  } catch (err) {
+    return {
+      reason: `the knowledge settings could not be read (${err instanceof Error ? err.message : String(err)}).`,
+    };
+  }
+}
+
+/**
  * `KnowledgeTursoPlugin` — registers a {@link TursoKnowledgeAdapter} with the
  * host's `IKnowledgeService` during `start()`.
  *
@@ -176,6 +322,17 @@ export class KnowledgeTursoPlugin implements Plugin {
   name = 'com.objectstack.plugin.knowledge-turso';
   version = '0.1.0';
   type = 'standard' as const;
+  /**
+   * Order-if-present (ADR-0116): start() registers with the knowledge service
+   * and, under `urlFromSettings`, reads the `knowledge` settings, which the
+   * settings service answers from the data engine. Literal ids: the boot-order
+   * gates read this array statically.
+   */
+  optionalDependencies = [
+    'com.objectstack.service.knowledge',
+    'com.objectstack.service.settings',
+    'com.objectstack.engine.objectql',
+  ];
 
   private readonly opts: KnowledgeTursoPluginOptions;
   private owned?: Client;
@@ -201,12 +358,27 @@ export class KnowledgeTursoPlugin implements Plugin {
     let unavailable: string | undefined;
     let requestTimeoutMs = this.opts.requestTimeoutMs;
     if (!client) {
-      const target = resolveStoreUrl(this.opts);
+      let target: ReturnType<typeof resolveStoreUrl> = { reason: '' };
+      let authToken = this.opts.authToken;
+      const given = this.opts.url?.trim();
+      if (this.opts.urlFromSettings && (given === undefined || given === '')) {
+        const saved = await readStoreSettings(ctx);
+        if ('reason' in saved) {
+          target = { reason: saved.reason };
+        } else if (saved.url !== undefined) {
+          target = resolveSettingsStoreUrl(saved.url, this.opts);
+          authToken = saved.authToken;
+        } else {
+          target = resolveStoreUrl(this.opts);
+        }
+      } else {
+        target = resolveStoreUrl(this.opts);
+      }
       if (target.url === undefined) {
         unavailable = target.reason;
       } else {
         requestTimeoutMs = requestBoundFor(target.url, requestTimeoutMs);
-        const opened = await openClient(target.url, this.opts);
+        const opened = await openClient(target.url, { ...this.opts, authToken });
         if ('client' in opened) client = this.owned = opened.client;
         else unavailable = opened.reason;
       }

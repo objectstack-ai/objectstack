@@ -671,7 +671,7 @@ export const ar: PlatformTranslationData = {
         },
         turso_url: {
           label: 'عنوان URL للاتصال',
-          help: 'أمثلة: libsql://your-tenant.turso.io · file:./.objectstack/knowledge.db · :memory:',
+          help: 'أمثلة: libsql://your-tenant.turso.io · file:./.objectstack/data/knowledge.db · :memory:',
         },
         turso_auth_token: { label: 'رمز المصادقة', help: 'مطلوب فقط لعناوين Turso المُدارة.' },
         ragflow_base_url: { label: 'Base URL', help: 'مثال: http://localhost:9380' },

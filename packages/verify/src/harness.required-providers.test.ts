@@ -27,7 +27,7 @@
 
 import { readFileSync } from 'node:fs';
 import { afterEach, describe, expect, it } from 'vitest';
-import { CAPABILITY_PROVIDERS } from '@objectstack/core';
+import { CAPABILITY_PROVIDERS, KNOWLEDGE_STORE_PROVIDERS } from '@objectstack/core';
 import { composeStacks, defineStack } from '@objectstack/spec';
 import { bootStack, type VerifyStack } from './harness.js';
 import { constructServedProviders } from './required-providers.js';
@@ -146,10 +146,11 @@ describe('every provider the table names is a dependency of this package', () =>
     const manifest = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')) as {
       dependencies: Record<string, string>;
     };
-    const packages = Object.values(CAPABILITY_PROVIDERS).flatMap((spec) => [
-      spec.pkg,
-      ...(spec.extras ?? []).map((extra) => extra.pkg),
-    ]);
+    const packages = [
+      ...Object.values(CAPABILITY_PROVIDERS).flatMap((spec) => [spec.pkg, ...(spec.extras ?? []).map((extra) => extra.pkg)]),
+      // The stores the `knowledge` token chooses between (`resolveCapabilityExtras`).
+      ...Object.values(KNOWLEDGE_STORE_PROVIDERS).map((store) => store.pkg),
+    ];
     expect(packages.length).toBeGreaterThan(0);
     expect(packages.filter((pkg) => !(pkg in manifest.dependencies))).toEqual([]);
   });
@@ -244,4 +245,119 @@ describe("requires: ['record-context'] — get_record_context over MCP", () => {
     stack = await bootStack(withPack({ requires: ['record-context'], plugins: [host] }));
     expect(await stack.kernel.getServiceAsync(RECORD_CONTEXT_SERVICE)).toBe(marker);
   }, 120_000);
+});
+
+/**
+ * ADR-0161 — `requires: ['knowledge']` mounts `KnowledgeServicePlugin` and ONE
+ * vector store, chosen by the platform database. This boot's database is an
+ * in-memory SQLite, so the store is `turso` on an in-memory libSQL database
+ * (`resolveKnowledgeStore`); `serve` over SQLite gets `turso` on
+ * `.objectstack/data/knowledge.db`, and over PostgreSQL `pgvector` — that
+ * branch runs on the live PostgreSQL, in `@objectstack/knowledge-pgvector`.
+ * Sources are still written in app code: a plugin registers one here.
+ */
+describe("requires: ['knowledge'] — the knowledge service and one store", () => {
+  const KNOWLEDGE = 'com.objectstack.service.knowledge';
+  const TURSO = 'com.objectstack.plugin.knowledge-turso';
+  const PGVECTOR = 'com.objectstack.plugin.knowledge-pgvector';
+  const article = {
+    name: 'rqp_article', label: 'Article', pluralLabel: 'Articles', sharingModel: 'public_read_write',
+    fields: {
+      title: { name: 'title', type: 'text', label: 'Title', required: true },
+      body: { name: 'body', type: 'textarea', label: 'Body' },
+    },
+  };
+  const app = (extra: Bag = {}): Bag =>
+    defineStack({ manifest: appManifest, objects: [article], ...extra } as never) as unknown as Bag;
+
+  /** A deterministic bag-of-words embedder: shared words, close vectors. */
+  class WordEmbedder {
+    readonly id = 'rqp-words';
+    readonly dimensions = 16;
+    readonly model = 'rqp-words';
+    async embed(texts: string[]): Promise<number[][]> {
+      return texts.map((text) => {
+        const v = new Array<number>(this.dimensions).fill(0);
+        for (const word of text.toLowerCase().split(/\W+/).filter(Boolean)) {
+          let h = 0;
+          for (const ch of word) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
+          v[h % this.dimensions] += 1;
+        }
+        const n = Math.hypot(...v) || 1;
+        return v.map((x) => x / n);
+      });
+    }
+  }
+
+  /** The app's own code: an embedder, a source on the mounted store, and one naming the other store. */
+  class AppKnowledge {
+    readonly name = 'com.example.rqp.knowledge';
+    readonly version = '0.0.0';
+    readonly type = 'standard';
+    async init(ctx: { registerService(name: string, service: unknown): void }): Promise<void> {
+      ctx.registerService('embedder', new WordEmbedder());
+    }
+    async start(ctx: { getService<T>(name: string): T }): Promise<void> {
+      const svc = ctx.getService<{ registerSource(s: unknown): void }>('knowledge');
+      svc.registerSource({ id: 'rqp_articles', label: 'Articles', adapter: 'turso', source: { kind: 'object', object: 'rqp_article', contentFields: ['title', 'body'] } });
+      svc.registerSource({ id: 'rqp_elsewhere', label: 'Elsewhere', adapter: 'pgvector', source: { kind: 'object', object: 'rqp_article', contentFields: ['body'] } });
+    }
+  }
+
+  it('the token: the service and the turso store; a record write is indexed and found, a source naming pgvector is refused', async () => {
+    stack = await bootStack(app({ requires: ['realtime', 'knowledge'] }), { extraPlugins: [new AppKnowledge()] });
+    expect(stack.kernel.hasPlugin(KNOWLEDGE)).toBe(true);
+    expect(stack.kernel.hasPlugin(TURSO)).toBe(true);
+    expect(stack.kernel.hasPlugin(PGVECTOR)).toBe(false);
+    const knowledge = await stack.kernel.getServiceAsync<any>('knowledge');
+    expect(knowledge.listAdapters()).toEqual(['turso']);
+
+    const ql = await stack.kernel.getServiceAsync<any>('objectql');
+    await ql.insert('rqp_article', { title: 'Granite quarry RQP', body: 'basalt and granite slabs' }, { context: { isSystem: true } });
+    const ec = { isSystem: true, userId: 'system', roles: [], permissions: [] };
+    let hits: Array<{ sourceId: string; content: string }> = [];
+    for (let i = 0; i < 50 && hits.length === 0; i++) {
+      hits = (await knowledge.searchWithRefusals('granite quarry', { executionContext: ec, sourceIds: ['rqp_articles'] })).hits;
+      if (hits.length === 0) await new Promise((r) => setTimeout(r, 50));
+    }
+    expect(hits.map((h) => h.sourceId)).toEqual(['rqp_articles']);
+    expect(hits[0]?.content).toContain('granite');
+
+    const refused = await knowledge.search('granite', { executionContext: ec, sourceIds: ['rqp_elsewhere'] }).catch((e: unknown) => e);
+    expect(refused).toMatchObject({ code: 'SERVICE_UNAVAILABLE', status: 503 });
+    expect(String((refused as Error).message)).toContain("adapter 'pgvector' is not mounted (mounted: turso)");
+  }, 120_000);
+
+  it('control — no token: no knowledge service, no store, no Knowledge settings page', async () => {
+    stack = await bootStack(app({ requires: ['realtime'] }));
+    expect(stack.kernel.hasPlugin(KNOWLEDGE)).toBe(false);
+    expect(stack.kernel.hasPlugin(TURSO)).toBe(false);
+    await expect(stack.kernel.getServiceAsync('knowledge')).rejects.toThrow();
+    const settings = await stack.kernel.getServiceAsync<any>('settings');
+    await expect(settings.getNamespace('knowledge')).rejects.toMatchObject({ code: 'SETTINGS_UNKNOWN_NAMESPACE' });
+  }, 120_000);
+
+  it('a host that mounts the service itself keeps its own, and the runtime adds no store', async () => {
+    class HostKnowledge {
+      readonly name = KNOWLEDGE;
+      readonly version = '0.0.0';
+      readonly type = 'standard';
+      async init(): Promise<void> {}
+    }
+    const constructed = await constructServedProviders({
+      config: app({ requires: ['knowledge'] }),
+      held: [new HostKnowledge()],
+      packageRoot: process.cwd(),
+    });
+    const names = constructed.map((p) => (p as { name?: string }).name);
+    expect(names).not.toContain(KNOWLEDGE);
+    expect(names).not.toContain(TURSO);
+    expect(names).not.toContain(PGVECTOR);
+    // The control: without the host's instance both are constructed.
+    const served = (
+      await constructServedProviders({ config: app({ requires: ['knowledge'] }), held: [], packageRoot: process.cwd() })
+    ).map((p) => (p as { name?: string }).name);
+    expect(served).toEqual(expect.arrayContaining([KNOWLEDGE, TURSO]));
+    expect(served).not.toContain(PGVECTOR);
+  });
 });

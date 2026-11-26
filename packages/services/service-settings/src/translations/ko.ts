@@ -540,7 +540,7 @@ export const ko: PlatformTranslationData = {
         },
         turso_url: {
           label: '연결 URL',
-          help: '예: libsql://your-tenant.turso.io · file:./.objectstack/knowledge.db · :memory:',
+          help: '예: libsql://your-tenant.turso.io · file:./.objectstack/data/knowledge.db · :memory:',
         },
         turso_auth_token: { label: '인증 토큰', help: '관리형 Turso URL에만 필요합니다.' },
         ragflow_base_url: { label: 'Base URL', help: '예: http://localhost:9380' },

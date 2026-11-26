@@ -616,6 +616,12 @@ importers:
       '@objectstack/formula':
         specifier: workspace:*
         version: link:../formula
+      '@objectstack/knowledge-pgvector':
+        specifier: workspace:*
+        version: link:../plugins/knowledge-pgvector
+      '@objectstack/knowledge-turso':
+        specifier: workspace:*
+        version: link:../plugins/knowledge-turso
       '@objectstack/lint':
         specifier: workspace:*
         version: link:../lint
@@ -688,6 +694,9 @@ importers:
       '@objectstack/service-job':
         specifier: workspace:*
         version: link:../services/service-job
+      '@objectstack/service-knowledge':
+        specifier: workspace:*
+        version: link:../services/service-knowledge
       '@objectstack/service-mailbox':
         specifier: workspace:*
         version: link:../services/service-mailbox
@@ -3768,6 +3777,12 @@ importers:
       '@objectstack/core':
         specifier: workspace:*
         version: link:../core
+      '@objectstack/knowledge-pgvector':
+        specifier: workspace:*
+        version: link:../plugins/knowledge-pgvector
+      '@objectstack/knowledge-turso':
+        specifier: workspace:*
+        version: link:../plugins/knowledge-turso
       '@objectstack/mcp':
         specifier: workspace:*
         version: link:../mcp
@@ -3828,6 +3843,9 @@ importers:
       '@objectstack/service-job':
         specifier: workspace:*
         version: link:../services/service-job
+      '@objectstack/service-knowledge':
+        specifier: workspace:*
+        version: link:../services/service-knowledge
       '@objectstack/service-mailbox':
         specifier: workspace:*
         version: link:../services/service-mailbox

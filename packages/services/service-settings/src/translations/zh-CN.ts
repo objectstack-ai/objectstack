@@ -596,7 +596,7 @@ export const zhCN: PlatformTranslationData = {
             ragflow: 'RAGFlow(外部)',
           },
         },
-        turso_url: { label: '连接 URL', help: '示例:libsql://your-tenant.turso.io · file:./.objectstack/knowledge.db · :memory:' },
+        turso_url: { label: '连接 URL', help: '示例:libsql://your-tenant.turso.io · file:./.objectstack/data/knowledge.db · :memory:' },
         turso_auth_token: { label: 'Auth Token', help: '仅托管 Turso URL 需要。' },
         ragflow_base_url: { label: 'Base URL', help: '示例:http://localhost:9380' },
         ragflow_api_key: { label: 'API Key' },

@@ -713,7 +713,7 @@ export const de: PlatformTranslationData = {
         },
         turso_url: {
           label: 'Verbindungs-URL',
-          help: 'Beispiele: libsql://your-tenant.turso.io · file:./.objectstack/knowledge.db · :memory:',
+          help: 'Beispiele: libsql://your-tenant.turso.io · file:./.objectstack/data/knowledge.db · :memory:',
         },
         turso_auth_token: { label: 'Auth-Token', help: 'Nur für verwaltete Turso-URLs erforderlich.' },
         ragflow_base_url: { label: 'Base URL', help: 'Beispiel: http://localhost:9380' },

@@ -23,8 +23,10 @@
 //     tokens that schedule background work. No preset: `bootStack` takes none,
 //     so the slate is always mounted, as on a `serve` with no `--preset`.
 //   · WHICH provider: `CAPABILITY_PROVIDERS`, the table
-//     `Serve.CAPABILITY_PROVIDERS` is a handle over — main provider, then its
-//     `extras`.
+//     `Serve.CAPABILITY_PROVIDERS` is a handle over — main provider, then
+//     `resolveCapabilityExtras` (its `extras`; for `knowledge` the one vector
+//     store the database chooses — an in-memory one here, as this boot's
+//     database is in memory).
 //   · WITH WHAT: `resolveCapabilityArgument` — `automation` the app's root
 //     (`hostRoot` here), `analytics` the app's cubes, `email` / `sms` the
 //     deployment's mail and SMS configuration (from the configuration and the
@@ -62,6 +64,8 @@ import {
   CAPABILITY_PROVIDERS,
   providesCapability,
   resolveCapabilityArgument,
+  resolveCapabilityExtras,
+  type CapabilityDatabase,
   resolveServedCapabilities,
   stackDeclaredCapabilities,
 } from '@objectstack/core';
@@ -134,6 +138,12 @@ export async function constructServedProviders(opts: {
   config: unknown;
   held: readonly unknown[];
   packageRoot: string;
+  /**
+   * The database this boot serves, for the providers chosen by it (the
+   * `knowledge` store). The harness boots an in-memory SQLite, so the store
+   * is an in-memory one too. @default `{ driver: 'sqlite-wasm', url: ':memory:' }`
+   */
+  database?: CapabilityDatabase;
 }): Promise<unknown[]> {
   const { tokens, declared } = resolveServedCapabilities(stackDeclaredCapabilities(opts.config));
   const constructed: unknown[] = [];
@@ -157,9 +167,21 @@ export async function constructServedProviders(opts: {
           }).argument,
       }),
     );
-    for (const extra of spec.extras ?? []) {
+    const extras = resolveCapabilityExtras(token, {
+      stack: opts.config,
+      packageRoot: opts.packageRoot,
+      database: opts.database ?? { driver: 'sqlite-wasm', url: ':memory:' },
+    });
+    for (const extra of extras) {
       if (providesCapability(all(), extra.identities)) continue;
-      constructed.push(await constructProvider({ reason, pkg: extra.pkg, exportName: extra.export }));
+      constructed.push(
+        await constructProvider({
+          reason,
+          pkg: extra.pkg,
+          exportName: extra.export,
+          ...(extra.argument === undefined ? {} : { argumentFor: () => extra.argument }),
+        }),
+      );
     }
   }
 

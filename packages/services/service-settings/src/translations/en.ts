@@ -405,7 +405,7 @@ export const en: PlatformTranslationData = {
           },
         },
         turso_url: { label: 'Connection URL',
-          help: 'Examples: libsql://your-tenant.turso.io · file:./.objectstack/knowledge.db · :memory:' },
+          help: 'Examples: libsql://your-tenant.turso.io · file:./.objectstack/data/knowledge.db · :memory:' },
         turso_auth_token: { label: 'Auth token',
           help: 'Only required for managed Turso URLs.' },
         ragflow_base_url: { label: 'Base URL', help: 'Example: http://localhost:9380' },
