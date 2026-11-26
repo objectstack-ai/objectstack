@@ -797,5 +797,17 @@ export const DEFAULT_CHANGES_BY_MAJOR: Readonly<Record<number, readonly Declared
         + 'which moved from `upsert` to `ignore` with `SeedSchema.mode`; every other member is unchanged. '
         + SEED_MODE_CREATE_ONLY_REASON,
     },
+    {
+      key: 'ai/KnowledgeSource:refresh',
+      from: '(none)',
+      to: '{}',
+      reason:
+        'No parsed value changes. `refresh` has parsed to `{}` when omitted since it was declared '
+        + '(`.default({}).optional()`), and the knowledge service reads an absent `onRecordChange` '
+        + 'as on. The published input-shape JSON Schema could not state that default while `cron` '
+        + 'beside it carried a transform (#14825); `cron` is removed (ADR-0161 K6), so the schema '
+        + 'now states the default the parser has always applied. There is nothing to write to keep '
+        + 'the old behaviour.',
+    },
   ],
 };

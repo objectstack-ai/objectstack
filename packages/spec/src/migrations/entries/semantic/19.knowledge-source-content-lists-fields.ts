@@ -23,7 +23,7 @@ export const entry: SemanticMigration = {
     + 'the source was written included. Each field in `content` is sent, for every record the source selects, '
     + 'to the embedding provider the deployment configures, so the list is a statement of what leaves the '
     + 'deployment, and a wildcard states nothing. The parse now refuses the member and names the fix; '
-    + '`os migrate meta --from 18` renames the key, keeps the member and reports the site as a hand edit. '
+    + 'the chain replay renames the key, keeps the member and reports the site as a hand edit. '
     + 'Which fields to list is known only to the source\'s author: the ones users search by, and none that '
     + 'should not be sent to the provider.',
   acceptanceCriteria:

@@ -1,136 +1,247 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 //
-// `KnowledgeRefreshPolicySchema.cron` — pins for the typed cron slot (#14825).
+// `KnowledgeSourceSchema` — pins for the governed `knowledge_source` type
+// (ADR-0161 K4, K5, K6).
 //
-// The slot was a bare `z.string()` under a doc comment promising a 5-field
-// cron, so the promise was enforced nowhere (ADR-0049 declared ≠ enforced). It
-// now carries `CronExpressionInputSchema`, the shared cron-dialect input the
-// other cron-shaped fields already use (`api/export.zod.ts`,
-// `automation/execution.zod.ts`, `integration/connector.zod.ts`). What that
-// schema ENFORCES was measured before these pins were written, and the pins
-// state exactly that — no more:
+// One schema serves every door: the stack's `knowledgeSources`, a `/meta` save,
+// and a registration in code. So what these pins hold is what each door
+// refuses:
 //
-// - a bare non-blank string normalizes to `{ dialect: 'cron', source }`;
-// - a `{ dialect: 'cron' }` envelope passes through;
-// - a blank string (empty or whitespace-only), a non-string, or an envelope
-//   naming any dialect but `cron` is refused with ONE `invalid_union` at the
-//   slot's own path whose message names the fix — the shared dialect fixed its
-//   envelope arm and learned to trim at #15028 / #15035; the sentences are
-//   `TYPED_EXPRESSION_SOURCE_REQUIRED.cron` / `TYPED_EXPRESSION_DIALECT_ONLY.cron`;
-// - cron SYNTAX is not judged at parse time, and no engine judges it later
-//   either. `'not a cron'` normalizes like any other string, and this slot is
-//   parsed and reaches no engine: `croner` judges a cron pattern only where a
-//   schedule is wired (`CronSchedule.expression`, a different slot), and
-//   `@objectstack/formula`'s registered `cron` engine has no caller outside
-//   that package. The syntax verdict belongs to whatever external scheduler
-//   the author hands the value to. That pin is deliberate: it is what keeps the
-//   schema's describe honest. If the shared dialect ever gains parse-time
-//   syntax validation, this pin flips, and the describe on the slot must be
-//   rewritten in the same commit.
+// - the shape is strict at every level — an unknown key is refused, never
+//   dropped;
+// - the six renamed or removed keys are tombstones, each refused with its own
+//   prescription, and the `file` / `http` kinds are refused with theirs;
+// - `content` is a non-empty list of field names, and `'*'` is refused;
+// - `name` takes the router-addressable grammar (ADR-0150 D5).
+//
+// The registry row, the stack collection and the conversions have their own
+// tests; the type-level half (a registration writing `id` does not compile)
+// is the last case here.
 
 import { describe, expect, it } from 'vitest';
-import { TYPED_EXPRESSION_DIALECT_ONLY, TYPED_EXPRESSION_SOURCE_REQUIRED } from '../shared/expression.zod';
+import { DEFAULT_METADATA_TYPE_REGISTRY } from '../kernel/metadata-plugin.zod';
+import { getMetadataTypeSchema } from '../kernel/metadata-type-schemas';
+import { ObjectStackDefinitionSchema } from '../stack.zod';
 import {
-  KnowledgeRefreshPolicySchema,
   KnowledgeSourceSchema,
-  type KnowledgeRefreshPolicy,
-  type KnowledgeRefreshPolicyParsed,
   type KnowledgeSource,
   type KnowledgeSourceParsed,
 } from './knowledge-source.zod';
 
 const SOURCE: KnowledgeSource = {
-  id: 'kb_articles',
+  name: 'kb_articles',
   label: 'KB articles',
   adapter: 'memory',
-  source: { kind: 'object', object: 'kb_article', contentFields: ['title', 'body'] },
+  source: { kind: 'object', object: 'kb_article', content: ['title', 'body'] },
 };
 
-const CRON_5_FIELD = '0 3 * * *';
+/** The issues of a refused parse, as `[code, path, message]`. */
+function issuesOf(input: unknown): Array<[string, string, string]> {
+  const r = KnowledgeSourceSchema.safeParse(input);
+  expect(r.success, 'the input should be refused').toBe(false);
+  if (r.success) return [];
+  return r.error.issues.map((i) => [i.code, i.path.join('.'), i.message]);
+}
 
-describe('KnowledgeRefreshPolicySchema.cron — the typed cron slot', () => {
-  it('positive control: a 5-field cron on a full knowledge source parses and normalizes to the cron envelope', () => {
-    const r = KnowledgeSourceSchema.safeParse({ ...SOURCE, refresh: { cron: CRON_5_FIELD } });
-    expect(r.success, r.success ? '' : JSON.stringify(r.error.issues)).toBe(true);
-    if (!r.success) return;
-    expect(r.data.refresh?.cron).toEqual({ dialect: 'cron', source: CRON_5_FIELD });
+describe('KnowledgeSourceSchema — the one schema of the knowledge_source type', () => {
+  it('positive control: a source parses, with its defaults stated', () => {
+    const parsed: KnowledgeSourceParsed = KnowledgeSourceSchema.parse(SOURCE);
+    expect(parsed).toEqual({
+      ...SOURCE,
+      source: { ...SOURCE.source, metadataFields: [] },
+      refresh: {},
+      aiExposed: true,
+    });
   });
 
-  it('accepts the expression envelope form and passes it through', () => {
-    const envelope = { dialect: 'cron' as const, source: '@daily' };
-    const r = KnowledgeRefreshPolicySchema.safeParse({ cron: envelope });
-    expect(r.success).toBe(true);
-    if (!r.success) return;
-    expect(r.data.cron).toEqual(envelope);
+  it('is the schema the metadata-type registry maps `knowledge_source` to — no second schema', () => {
+    expect(getMetadataTypeSchema('knowledge_source')).toBe(KnowledgeSourceSchema);
   });
 
-  it('absent stays absent — no `cron` key is fabricated by the parse', () => {
-    const withEmptyRefresh = KnowledgeSourceSchema.safeParse({ ...SOURCE, refresh: {} });
-    expect(withEmptyRefresh.success).toBe(true);
-    if (withEmptyRefresh.success) expect(withEmptyRefresh.data.refresh?.cron).toBeUndefined();
-
-    const withoutRefresh = KnowledgeSourceSchema.safeParse(SOURCE);
-    expect(withoutRefresh.success).toBe(true);
-    if (withoutRefresh.success) expect(withoutRefresh.data.refresh?.cron).toBeUndefined();
+  it('is registered runtime-creatable, versioned, and with no environment overlay (ADR-0161 K4 clause 2)', () => {
+    const row = DEFAULT_METADATA_TYPE_REGISTRY.find((t) => t.type === 'knowledge_source');
+    expect(row).toMatchObject({
+      type: 'knowledge_source',
+      domain: 'ai',
+      allowRuntimeCreate: true,
+      allowEnvironmentOverlay: false,
+      supportsVersioning: true,
+      filePatterns: ['**/*.knowledge-source.ts', '**/*.knowledge-source.yml'],
+    });
   });
 
-  it.each([['the empty string', ''], ['whitespace only', '  \t']])(
-    'refuses a blank string (%s) with ONE `invalid_union` at `refresh.cron` whose message is the cron source-required sentence',
-    (_label, blank) => {
-      const r = KnowledgeSourceSchema.safeParse({ ...SOURCE, refresh: { cron: blank } });
-      expect(r.success).toBe(false);
-      if (r.success) return;
-      expect(r.error.issues.map((i) => [i.code, i.path.join('.'), i.message])).toEqual([
-        ['invalid_union', 'refresh.cron', TYPED_EXPRESSION_SOURCE_REQUIRED.cron],
+  it('is the stack collection `knowledgeSources`, parsed by the same schema', () => {
+    const ok = ObjectStackDefinitionSchema.safeParse({ knowledgeSources: [SOURCE] });
+    expect(ok.success, ok.success ? '' : JSON.stringify(ok.error.issues)).toBe(true);
+
+    const refused = ObjectStackDefinitionSchema.safeParse({ knowledgeSources: [{ ...SOURCE, bogus: 1 }] });
+    expect(refused.success).toBe(false);
+    if (!refused.success) {
+      expect(refused.error.issues.map((i) => [i.code, i.path.join('.')])).toContainEqual([
+        'unrecognized_keys',
+        'knowledgeSources.0',
       ]);
-    },
-  );
-
-  it('refuses a non-string value with `invalid_union` at `cron`', () => {
-    const r = KnowledgeRefreshPolicySchema.safeParse({ cron: 42 });
-    expect(r.success).toBe(false);
-    if (r.success) return;
-    expect(r.error.issues.map((i) => [i.code, i.path.join('.')])).toEqual([['invalid_union', 'cron']]);
+    }
   });
+});
+
+describe('KnowledgeSourceSchema — strict: an unknown key is refused, not dropped', () => {
+  it.each([
+    ['the source', { ...SOURCE, bogus: 1 }, '', 'this knowledge source'],
+    ['its `source`', { ...SOURCE, source: { ...SOURCE.source, bogus: 1 } }, 'source', "this knowledge source's `source`"],
+    ['its `refresh`', { ...SOURCE, refresh: { bogus: 1 } }, 'refresh', 'this refresh policy'],
+    [
+      'its `split`',
+      { ...SOURCE, source: { ...SOURCE.source, split: { strategy: 'recursive', bogus: 1 } } },
+      'source.split',
+      'this split',
+    ],
+  ])('on %s', (_label, input, path, surface) => {
+    const issues = issuesOf(input);
+    expect(issues).toHaveLength(1);
+    const [code, at, message] = issues[0]!;
+    expect([code, at]).toEqual(['unrecognized_keys', path]);
+    expect(message).toContain(`Unrecognized key(s) on ${surface}: \`bogus\`.`);
+  });
+
+  it('names the key the author most likely meant', () => {
+    expect(issuesOf({ ...SOURCE, title: 'KB' })[0]![2]).toContain('`title` → `label`');
+    expect(issuesOf({ ...SOURCE, source: { ...SOURCE.source, fields: ['title'] } })[0]![2]).toContain(
+      '`fields` → `content`',
+    );
+  });
+});
+
+describe('KnowledgeSourceSchema — the renamed and removed keys are tombstones (ADR-0161 K6)', () => {
+  const MIGRATE =
+    'Run `os migrate meta --from 18` to list the mechanical edits for existing sources; `--write` applies the '
+    + 'ones it can prove, and you apply the rest by hand.';
 
   it.each([
-    ['a dialect the protocol does not declare (`js`, a retired expression dialect, ADR-0058 addendum)', 'js'],
-    ['a declared dialect that is not this slot\'s (`cel`)', 'cel'],
-  ])('refuses an envelope naming %s with ONE `invalid_union` at `cron` whose message is the cron dialect-only sentence', (_label, dialect) => {
-    const r = KnowledgeRefreshPolicySchema.safeParse({ cron: { dialect, source: 'x' } });
-    expect(r.success).toBe(false);
-    if (r.success) return;
-    expect(r.error.issues.map((i) => [i.code, i.path.join('.'), i.message])).toEqual([
-      ['invalid_union', 'cron', TYPED_EXPRESSION_DIALECT_ONLY.cron],
+    ['id', { ...SOURCE, id: 'kb_articles' }, 'id', 'use `name`'],
+    [
+      'source.contentFields',
+      { ...SOURCE, source: { ...SOURCE.source, contentFields: ['title'] } },
+      'source.contentFields',
+      'use `content`',
+    ],
+    [
+      'embedding',
+      { ...SOURCE, embedding: { provider: 'openai', model: 'text-embedding-3-small' } },
+      'embedding',
+      'The embedder is configured once for the deployment',
+    ],
+    [
+      'vectorStore',
+      { ...SOURCE, vectorStore: { provider: 'pgvector' } },
+      'vectorStore',
+      'The store is the adapter the deployment installs',
+    ],
+    [
+      'adapterConfig',
+      { ...SOURCE, adapterConfig: { datasetId: 'ds_1' } },
+      'adapterConfig',
+      'An adapter takes its settings as options of the plugin that mounts it',
+    ],
+    [
+      'refresh.cron',
+      { ...SOURCE, refresh: { cron: '0 3 * * *' } },
+      'refresh.cron',
+      'call `reindexSource` from a flow or a job',
+    ],
+  ])('`%s` is refused at its own path with its prescription and the migrate sentence', (key, input, path, fix) => {
+    const issues = issuesOf(input);
+    expect(issues).toHaveLength(1);
+    const [code, at, message] = issues[0]!;
+    expect([code, at]).toEqual(['invalid_type', path]);
+    expect(message).toContain(`\`knowledge_source.${key}\` was removed in @objectstack/spec 19.0.0 (ADR-0161 K6)`);
+    expect(message).toContain(fix);
+    expect(message.endsWith(MIGRATE)).toBe(true);
+  });
+
+  it.each(['file', 'http'])('the `%s` kind is refused at `source.kind` with the one-arm prescription', (kind) => {
+    const issues = issuesOf({ ...SOURCE, source: { kind } });
+    const atKind = issues.filter(([, path]) => path === 'source.kind');
+    expect(atKind).toHaveLength(1);
+    expect(atKind[0]![0]).toBe('invalid_value');
+    expect(atKind[0]![2]).toContain(
+      'The `file` and `http` shapes of `knowledge_source.source` were removed in @objectstack/spec 19.0.0 (ADR-0161 K4)',
+    );
+    expect(atKind[0]![2]).toContain("write `source: { kind: 'object', object, content }`");
+  });
+
+  it.each(['prefix', 'mimeTypes', 'urls', 'userAgent'])(
+    'the retired arm key `%s` is refused on an object source, with the same prescription',
+    (key) => {
+      const issues = issuesOf({ ...SOURCE, source: { ...SOURCE.source, [key]: 'x' } });
+      expect(issues).toHaveLength(1);
+      expect([issues[0]![0], issues[0]![1]]).toEqual(['unrecognized_keys', 'source']);
+      expect(issues[0]![2]).toContain(`\`${key}\``);
+      expect(issues[0]![2]).toContain('The `file` and `http` shapes of `knowledge_source.source` were removed');
+    },
+  );
+});
+
+describe('KnowledgeSourceSchema — `content` lists fields (ADR-0161 K5)', () => {
+  it("refuses `'*'` at the member's own path, with the prescription to list the fields", () => {
+    const issues = issuesOf({ ...SOURCE, source: { ...SOURCE.source, content: ['title', '*'] } });
+    expect(issues).toHaveLength(1);
+    const [code, at, message] = issues[0]!;
+    expect([code, at]).toEqual(['invalid_format', 'source.content.1']);
+    expect(message).toContain("the `'*'` member was removed in @objectstack/spec 19.0.0 (ADR-0161 K5)");
+    expect(message).toContain("List the fields whose text should be indexed, for example `content: ['title', 'body']`.");
+  });
+
+  it('refuses an empty list and an absent one', () => {
+    expect(issuesOf({ ...SOURCE, source: { ...SOURCE.source, content: [] } }).map(([c, p]) => [c, p])).toEqual([
+      ['too_small', 'source.content'],
+    ]);
+    const { content: _content, ...withoutContent } = SOURCE.source;
+    expect(issuesOf({ ...SOURCE, source: withoutContent }).map(([c, p]) => [c, p])).toEqual([
+      ['invalid_type', 'source.content'],
     ]);
   });
 
-  it('does NOT judge cron syntax at parse time — measured, and the describe promises no more (declared = enforced)', () => {
-    // Nothing evaluates this slot, so no engine ever issues a syntax verdict on
-    // it: `croner` judges `CronSchedule.expression`, a different slot, and
-    // `@objectstack/formula`'s registered `cron` engine has no caller outside
-    // that package. The verdict belongs to whatever external scheduler the
-    // author hands the value to. The parse only normalizes. If this case
-    // ever goes red because the shared dialect learned to refuse syntax, update
-    // the slot's describe in the same commit — do not weaken this pin.
-    for (const source of ['not a cron', '0 0 3 * * *', '@daily']) {
-      const r = KnowledgeRefreshPolicySchema.safeParse({ cron: source });
-      expect(r.success, `${JSON.stringify(source)} should normalize, not be refused`).toBe(true);
-      if (r.success) expect(r.data.cron).toEqual({ dialect: 'cron', source });
-    }
+  it("a field whose name merely contains `*` is not the wildcard — only the bare `'*'` member is refused here", () => {
+    // Whether such a field exists is the admission gate's question, at save
+    // and at search; the parse refuses the wildcard and nothing else.
+    expect(KnowledgeSourceSchema.safeParse({ ...SOURCE, source: { ...SOURCE.source, content: ['a*'] } }).success).toBe(
+      true,
+    );
+  });
+});
+
+describe('KnowledgeSourceSchema — `name` takes the router-addressable grammar (ADR-0150 D5)', () => {
+  it.each(['_internal', 'Kb', 'kb-articles', '9lives', ''])('refuses %j', (name) => {
+    const issues = issuesOf({ ...SOURCE, name });
+    expect(issues.map(([, path]) => path)).toEqual(['name']);
   });
 
-  it('names both states (ADR-0122): the bare alias is the author state, `XParsed` the parsed state', () => {
-    // Author state: a bare string is what an author writes.
-    const authored: KnowledgeRefreshPolicy = { cron: CRON_5_FIELD };
-    // Parsed state: the envelope is what a consumer holds after the parse.
-    const parsed: KnowledgeRefreshPolicyParsed = KnowledgeRefreshPolicySchema.parse(authored);
-    expect(parsed.cron).toEqual({ dialect: 'cron', source: CRON_5_FIELD });
-    // @ts-expect-error — a bare string is the AUTHOR shape, not the parsed one.
-    const notParsed: KnowledgeRefreshPolicyParsed = { cron: CRON_5_FIELD };
-    expect(notParsed).toBeDefined();
+  it('a leading underscore is refused with the reason: the prefix is not an author\'s to take', () => {
+    expect(issuesOf({ ...SOURCE, name: '_p0123456789abcdef_kb' })[0]![2]).toContain('A leading "_" is reserved');
+  });
+});
 
-    const parsedSource: KnowledgeSourceParsed = KnowledgeSourceSchema.parse({ ...SOURCE, refresh: { cron: CRON_5_FIELD } });
-    expect(parsedSource.refresh?.cron).toEqual({ dialect: 'cron', source: CRON_5_FIELD });
+describe('KnowledgeSource — the compiler is the third channel (ADR-0161 K6 item 3)', () => {
+  it('a TypeScript registration that still writes `id` or `contentFields` does not compile', () => {
+    const viaId: KnowledgeSource = {
+      ...SOURCE,
+      // @ts-expect-error — `id` is a tombstone: its type is `never`.
+      id: 'kb_articles',
+    };
+    const viaContentFields: KnowledgeSource = {
+      ...SOURCE,
+      source: {
+        ...SOURCE.source,
+        // @ts-expect-error — `contentFields` is a tombstone: its type is `never`.
+        contentFields: ['title'],
+      },
+    };
+    const viaFileKind: KnowledgeSource = {
+      ...SOURCE,
+      // @ts-expect-error — `source.kind` has one arm, `object`.
+      source: { kind: 'file', object: 'kb_article', content: ['title'] },
+    };
+    expect([viaId, viaContentFields, viaFileKind]).toHaveLength(3);
   });
 });
