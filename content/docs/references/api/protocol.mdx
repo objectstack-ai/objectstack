@@ -224,7 +224,7 @@ const result = AiAgentCapabilitiesSchema.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **models** | `(string \| { id: string; label: string; default: boolean; costMultiplier?: number })[]` | ✅ | Models this system offers |
+| **models** | `(string \| { id: string; label: string; tierLabel?: string; default: boolean; … })[]` | ✅ | Models this system offers |
 | **defaultModel** | `string` | optional | Default model id, when the service reports one |
 
 ### Nested Shape: `AiModelsResponse.models[number]`
@@ -233,6 +233,7 @@ const result = AiAgentCapabilitiesSchema.parse(data);
 | :--- | :--- | :--- | :--- |
 | **id** | `string` | ✅ | Model id |
 | **label** | `string` | ✅ | Display label for the picker |
+| **tierLabel** | `string` | optional | Display name of the model's tier alone (for example 'Fast'), in the language the response is served in. The closed picker shows it in place of `label`, which may also carry the model's name; the open list keeps `label`. Optional: absent, the picker shows `label` as before. |
 | **default** | `boolean` | ✅ | Whether this is the environment default |
 | **costMultiplier** | `number` | optional | Factor by which one message on this model draws on the AI allowance, compared with one message on the environment's default model: 20 means one message here uses as much allowance as 20 on the default. Normalised to the default: the entry with `default: true` carries 1, and every other entry carries its model's cost weight divided by the default model's cost weight. Written by cloud service-ai's GET /api/v1/ai/models; absent when the service reports none, and then nothing is shown for it. |
 
@@ -569,6 +570,7 @@ A write-path strip event: caller-supplied fields legally dropped from the payloa
 | **message** | `string` | ✅ | Human-readable message — a validation rule's author-written text where one exists. |
 | **rule** | `string` | optional | The `name` of the ADVISORY validation rule this finding reports. Present only on an advisory rule hit. |
 | **severity** | `Enum<'warning' \| 'info'>` | optional | The advisory rule's declared severity, `warning` or `info`. Present only on an advisory rule hit. |
+| **scope** | `{ field: string; value: string }[]` | optional | The row columns a scoped lookup cell was resolved within, each with the cell the row gave it, in the order the refusal names them. Present only on an import cell error whose `code` is `reference_out_of_scope`: the value matches a record, but none within these columns, so a client can name the scoping column and its cell in its own text instead of parsing `message`. |
 
 
 ---
@@ -631,6 +633,7 @@ A write-path strip event: caller-supplied fields legally dropped from the payloa
 | **message** | `string` | ✅ | Human-readable message — a validation rule's author-written text where one exists. |
 | **rule** | `string` | optional | The `name` of the ADVISORY validation rule this finding reports. Present only on an advisory rule hit. |
 | **severity** | `Enum<'warning' \| 'info'>` | optional | The advisory rule's declared severity, `warning` or `info`. Present only on an advisory rule hit. |
+| **scope** | `{ field: string; value: string }[]` | optional | The row columns a scoped lookup cell was resolved within, each with the cell the row gave it, in the order the refusal names them. Present only on an import cell error whose `code` is `reference_out_of_scope`: the value matches a record, but none within these columns, so a client can name the scoping column and its cell in its own text instead of parsing `message`. |
 
 
 ---
@@ -3384,6 +3387,7 @@ A write-path strip event: caller-supplied fields legally dropped from the payloa
 | **message** | `string` | ✅ | Human-readable message — a validation rule's author-written text where one exists. |
 | **rule** | `string` | optional | The `name` of the ADVISORY validation rule this finding reports. Present only on an advisory rule hit. |
 | **severity** | `Enum<'warning' \| 'info'>` | optional | The advisory rule's declared severity, `warning` or `info`. Present only on an advisory rule hit. |
+| **scope** | `{ field: string; value: string }[]` | optional | The row columns a scoped lookup cell was resolved within, each with the cell the row gave it, in the order the refusal names them. Present only on an import cell error whose `code` is `reference_out_of_scope`: the value matches a record, but none within these columns, so a client can name the scoping column and its cell in its own text instead of parsing `message`. |
 
 
 ---
@@ -3522,6 +3526,14 @@ A write-path strip event: caller-supplied fields legally dropped from the payloa
 | **message** | `string` | ✅ | Human-readable message — a validation rule's author-written text where one exists. |
 | **rule** | `string` | optional | The `name` of the ADVISORY validation rule this finding reports. Present only on an advisory rule hit. |
 | **severity** | `Enum<'warning' \| 'info'>` | optional | The advisory rule's declared severity, `warning` or `info`. Present only on an advisory rule hit. |
+| **scope** | `{ field: string; value: string }[]` | optional | The row columns a scoped lookup cell was resolved within, each with the cell the row gave it, in the order the refusal names them. Present only on an import cell error whose `code` is `reference_out_of_scope`: the value matches a record, but none within these columns, so a client can name the scoping column and its cell in its own text instead of parsing `message`. |
+
+### Nested Shape: `ValidateDataIssue.scope[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **field** | `string` | ✅ | API name of the row column that scoped the lookup. |
+| **value** | `string` | ✅ | The cell the row gave that column, as the importer typed it. |
 
 
 ---
