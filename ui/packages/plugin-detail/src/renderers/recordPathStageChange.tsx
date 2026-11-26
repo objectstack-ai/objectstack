@@ -86,6 +86,7 @@ import {
   AlertDialogTitle,
 } from '@object-ui/components';
 import {
+  fieldReadOnlyByHand,
   getRecordDisplayName,
   resolveFieldAffordance,
   stateMachineNextValues,
@@ -164,10 +165,12 @@ export function stageRefusalLines(
 type FieldDef = {
   type?: unknown;
   readonly?: unknown;
+  uiReadonly?: unknown;
   required?: unknown;
   label?: unknown;
   visibleWhen?: any;
   readonlyWhen?: any;
+  uiReadonlyWhen?: any;
   requiredWhen?: any;
 };
 
@@ -247,7 +250,9 @@ export function useStageChange(
     && canUpdate(dataSource)
     && !!inline?.canEdit
     && !inline.editing
-    && fieldDef?.readonly !== true
+    // The one hand-lock verdict over the stored record (`fieldReadOnlyByHand`):
+    // a status that moves only through actions (`uiReadonly`) offers no stage.
+    && !fieldReadOnlyByHand(fieldDef, ctx?.data as Record<string, unknown> | undefined)
     && !isComputedDetailField(undefined, fieldDef)
     && !NON_EDITABLE_SYSTEM_FIELDS.has(statusField)
     && resolveFieldAffordance('recordEdit', perms, objectName, statusField);
@@ -262,7 +267,7 @@ export function useStageChange(
   // fill-in asks the same one).
   const fillable = (name: string, def: Record<string, unknown>): boolean =>
     name !== statusField
-    && def.readonly !== true
+    && !fieldReadOnlyByHand(def, record)
     && !isComputedDetailField(undefined, def as FieldDef)
     && !NON_EDITABLE_SYSTEM_FIELDS.has(name)
     && !!objectName

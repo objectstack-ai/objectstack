@@ -13,6 +13,7 @@
  * acts on a cell, never while it draws.
  */
 import { buildValidationRules, RICH_TEXT_FIELD_TYPES } from '@object-ui/fields';
+import { fieldReadOnlyByHand, type FieldHandLockDef } from '@object-ui/core';
 import { fieldInlineReadOnlyKind } from './inline-edit-options';
 
 /** Why a cell opens no editor, in the order a cell names them. */
@@ -45,7 +46,13 @@ export function readOnlyReasonText(kind: CellReadOnlyKind, t: (key: string) => s
 /** The grid-wide and row answers a cell's reason is read from. */
 export interface CellReadOnlyInputs {
   /** The object's field definition for the column, when it has one. */
-  fieldDef: { type?: unknown; readonly?: unknown } | null | undefined;
+  fieldDef: ({ type?: unknown } & FieldHandLockDef) | null | undefined;
+  /**
+   * The row the cell belongs to: the conditional locks (`readonlyWhen`, and the
+   * hand lock `uiReadonlyWhen`) are judged over it. Absent, only the static
+   * half is read.
+   */
+  row?: Record<string, unknown> | null;
   /** May this reader write the field (`resolveFieldAffordance('listInlineEdit', …)`)? */
   fieldWritable: boolean;
   /** The authored `editable` the grid was handed (the list page folds `userActions.editInline` into it). */
@@ -68,6 +75,8 @@ export interface CellReadOnlyInputs {
 export function cellReadOnlyKind(inputs: CellReadOnlyInputs): CellReadOnlyKind | null {
   const fieldKind = fieldInlineReadOnlyKind(inputs.fieldDef);
   if (fieldKind) return fieldKind;
+  // The conditional half of the one hand-lock verdict, over this row.
+  if (inputs.row != null && fieldReadOnlyByHand(inputs.fieldDef, inputs.row)) return 'readonly';
   if (!inputs.fieldWritable) return 'noFieldPermission';
   if (!inputs.canUpdate) return 'noPermission';
   if (!inputs.objectEditable) return 'objectReadOnly';

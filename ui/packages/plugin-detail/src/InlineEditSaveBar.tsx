@@ -83,7 +83,7 @@ import {
   isExternalWriteRefusal,
   type WriteFieldError,
 } from '@object-ui/react';
-import { getRecordDisplayName, resolveFieldAffordance } from '@object-ui/core';
+import { fieldReadOnlyByHand, getRecordDisplayName, resolveFieldAffordance } from '@object-ui/core';
 import { usePermissions } from '@object-ui/permissions';
 import {
   collectRequiredWhenPromptFields,
@@ -419,12 +419,13 @@ export const InlineEditSaveBar: React.FC<InlineEditSaveBarProps> = ({
   /** A field this reader may fill on this page: the question the inline editors ask. */
   const fillable = React.useCallback(
     (name: string, def: Record<string, unknown>) =>
-      def.readonly !== true
+      // The one hand-lock verdict over this record (`fieldReadOnlyByHand`).
+      !fieldReadOnlyByHand(def, data)
       && !isComputedDetailField(undefined, def as never)
       && !NON_EDITABLE_SYSTEM_FIELDS.has(name)
       && !!objectName
       && resolveFieldAffordance('recordEdit', perms, objectName, name),
-    [objectName, perms],
+    [objectName, perms, data],
   );
 
   /**

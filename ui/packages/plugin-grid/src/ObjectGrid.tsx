@@ -1568,6 +1568,7 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
           const recordUpdate = recordVerdict.current(recordId, 'update');
           const kind = cellReadOnlyKind({
             fieldDef,
+            row,
             fieldWritable: !objectName || resolveFieldAffordance('listInlineEdit', perms, objectName, columnKey),
             gridEditable,
             objectEditable: objectInlineEditable,

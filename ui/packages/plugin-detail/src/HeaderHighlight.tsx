@@ -17,7 +17,7 @@ import {
   TooltipTrigger,
 } from '@object-ui/components';
 import type { HighlightField } from '@object-ui/types';
-import { EXPANDABLE_FIELD_TYPES, resolveFieldAffordance, isDeadlineSettled } from '@object-ui/core';
+import { EXPANDABLE_FIELD_TYPES, fieldReadOnlyByHand, resolveFieldAffordance, isDeadlineSettled } from '@object-ui/core';
 import { usePermissions } from '@object-ui/permissions';
 import { getCellRenderer, resolveCellRendererType, useBooleanValueLabel } from '@object-ui/fields';
 import { useSafeFieldLabel, useInlineEdit, usePredicateScope } from '@object-ui/react';
@@ -223,8 +223,10 @@ export const HeaderHighlight: React.FC<HeaderHighlightProps> = ({
             // keeps its display precedence for renderer selection just below.
             // A stored field carrying an `expression` is computed too (objectstack#31759).
             const isComputed = isComputedDetailField(field.type, objectDefField);
+            // The object field's lock is the one hand-lock verdict over this
+            // record (`fieldReadOnlyByHand`), as the details body reads it.
             const isReadonly =
-              field.readonly === true || objectDefField?.readonly === true;
+              field.readonly === true || fieldReadOnlyByHand(objectDefField, data);
             const isSystem = NON_EDITABLE_SYSTEM_FIELDS.has(field.name);
             // Same shared exclusion the details body and the grid consult, so a
             // credential chip never opens the plain text editor that would show

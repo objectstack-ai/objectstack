@@ -77,6 +77,8 @@ import {
   toast,
 } from '@object-ui/components';
 import {
+  fieldReadOnlyByHand,
+  fieldStaticallyReadOnlyByHand,
   buildExpandFields,
   convertSortToQueryParams,
   getRecordDisplayName,
@@ -1290,6 +1292,13 @@ export const ObjectCalendar: React.FC<ObjectCalendarComponentProps> = ({
   };
   const quickCreateGranted = resolveAffordance('calendarQuickCreate', writeAffordanceSource).allowed;
   const rescheduleGranted = resolveAffordance('calendarReschedule', writeAffordanceSource).allowed;
+  // The static half of the one hand-lock verdict on the date fields a drag
+  // writes (`readonly` / `uiReadonly`): a locked start field closes the drag, a
+  // locked end field the resize handle. The conditional half is judged per
+  // record at the drop (`handleEventDropDefault`).
+  const lockFieldDefs = objectSchema?.fields as Record<string, Record<string, unknown> | undefined> | undefined;
+  const startFieldLocked = !!calendarConfig && fieldStaticallyReadOnlyByHand(lockFieldDefs?.[calendarConfig.startDateField]);
+  const endFieldLocked = !!calendarConfig?.endDateField && fieldStaticallyReadOnlyByHand(lockFieldDefs?.[calendarConfig.endDateField]);
 
   // Default drag-to-reschedule handler. When the caller hasn't provided an
   // `onEventDrop`, persist the new dates back to the data source so dragging
@@ -1315,6 +1324,19 @@ export const ObjectCalendar: React.FC<ObjectCalendarComponentProps> = ({
       sameInstant(newStart, record?.[startDateField]) &&
       (!writesEnd || sameInstant(newEnd as Date, record?.[endDateField as string]))
     ) {
+      return;
+    }
+
+    // A drag is an edit by hand: a date field locked over THIS record — the
+    // one hand-lock verdict (`readonlyWhen`, the hand lock `uiReadonlyWhen`;
+    // the static half closed the gesture below) — takes no write, and a fresh
+    // array identity puts the event back where the record has it.
+    const lockDefs = objectSchema?.fields as Record<string, Record<string, unknown> | undefined> | undefined;
+    if (
+      fieldReadOnlyByHand(lockDefs?.[startDateField], record) ||
+      (writesEnd && fieldReadOnlyByHand(lockDefs?.[endDateField as string], record))
+    ) {
+      setData((prev) => prev.slice());
       return;
     }
 
@@ -1755,7 +1777,7 @@ export const ObjectCalendar: React.FC<ObjectCalendarComponentProps> = ({
           onEventDrop={
             onEventDrop
               ? (event, newStart, newEnd) => onEventDrop(event.data, newStart, newEnd)
-              : rescheduleGranted
+              : rescheduleGranted && !startFieldLocked
                 ? (event, newStart, newEnd) => {
                     void handleEventDropDefault(event.data, newStart, newEnd);
                   }
@@ -1764,7 +1786,7 @@ export const ObjectCalendar: React.FC<ObjectCalendarComponentProps> = ({
           onTimeRangeSelect={rangeSelectCreate}
           // With no `endDateField` the end is not stored, so no gesture may
           // move it on its own: no resize-end handle is drawn.
-          endEditable={Boolean(calendarConfig.endDateField)}
+          endEditable={Boolean(calendarConfig.endDateField) && !endFieldLocked}
         />
       </div>
       {/* objectui#7210 — a month drawn from the first N rows of a larger set

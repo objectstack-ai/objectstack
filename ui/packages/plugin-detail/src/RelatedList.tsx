@@ -54,6 +54,7 @@ import type { DataSource, FieldMetadata } from '@object-ui/types';
 import type { ViewFilterElement } from '@objectstack/spec/ui';
 import { getCellRenderer, resolveCellRendererType, RecordPickerDialog, deriveLookupColumns, MaskedCellRenderer, RecordHoverCard, formatCurrency } from '@object-ui/fields';
 import {
+  fieldStaticallyReadOnlyByHand,
   buildExpandFields,
   collectPredicateFieldRefs,
   columnIdentity,
@@ -1149,7 +1150,8 @@ export function derivedAddOf(
     && def.required === true
     && def.multiple !== true
     && def.hidden !== true
-    && def.readonly !== true
+    // A console create fills no hand-locked field (`uiReadonly`), as no `readonly` one.
+    && !fieldStaticallyReadOnlyByHand(def)
     && typeof def.reference === 'string' && def.reference !== '');
   if (catalogs.length !== 1) return undefined;
   const [catalogField, catalogDef] = catalogs[0];
@@ -1159,7 +1161,7 @@ export function derivedAddOf(
     && name !== catalogField
     && def.required === true
     && !insertDefaults(def)
-    && def.readonly !== true
+    && !fieldStaticallyReadOnlyByHand(def)
     && !isComputedFieldType(undefined, def.type));
   if (leftToWrite) return undefined;
   return { picker: { object: catalogDef.reference as string }, linkField: catalogField };
