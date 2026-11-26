@@ -26,11 +26,13 @@
  *
  * 1. `CREATE TABLE`, through each of the three remote schema doors: one
  *    `dflt_value` per column on both faces, for every kind of default — string
- *    (an embedded quote included), number, integer, boolean both ways, a date
- *    literal, `NOW()` on datetime / date / time and on a text field, and none
- *    for a multi-value column, a runtime token other than `NOW()` and an
- *    object. That equality is the pin on the literal rendering, which the local
- *    face leaves to knex and the shared renderer mirrors.
+ *    (an embedded quote included, and the empty string), number, integer,
+ *    boolean both ways, `toggle`, a date literal, a scalar literal on a
+ *    JSON-typed column, `NOW()` on datetime / date / time and on a text field,
+ *    and none for a multi-value column, a runtime token other than `NOW()` and
+ *    an object; and a boolean declaring the string `'false'` (`'0'` on both
+ *    faces). That equality is the pin on the literal rendering, which the
+ *    local face leaves to knex and the shared renderer mirrors.
  * 2. Drift: a sync followed by a drift read reports nothing, read by either
  *    face over the remote database.
  * 3. `ADD COLUMN` to an existing, EMPTY table: the same DEFAULTs, `NOW()`
@@ -105,6 +107,13 @@ const DEFAULTED: Record<string, Record<string, unknown>> = {
   day: { type: 'date', defaultValue: '2024-01-02' },
   sel: { type: 'select', options: [{ label: 'A', value: 'a' }], defaultValue: 'a' },
   required_nn: { type: 'text', defaultValue: 'x', storage: { notNull: true } },
+  // The renderer's remaining branches: the second `table.boolean` type, the
+  // empty string, and a JSON-typed column (a TEXT builder on SQLite, so knex's
+  // catch-all) holding a scalar literal. Knex's string `'false'` reading has
+  // its own describe below.
+  toggled: { type: 'toggle', defaultValue: true },
+  empty: { type: 'text', defaultValue: '' },
+  cfg: { type: 'json', defaultValue: 3 },
   at: { type: 'datetime', defaultValue: 'NOW()' },
   on: { type: 'date', defaultValue: 'NOW()' },
   clock: { type: 'time', defaultValue: 'NOW()' },
@@ -150,8 +159,9 @@ async function noDriftEitherFace(remote: TursoDriver, file: string, object: { na
 describe('the reference: the local face DEFAULT per kind, and the shared renderer says the same', () => {
   it('reads as measured, and every DEFAULT is the one sqliteDeclaredColumnDefaultSql renders', async () => {
     const reference = await localReference();
-    expect(pick(reference, ['s', 'quoted', 'n', 'neg', 'i', 'yes', 'no', 'day', 'sel', 'required_nn'])).toEqual({
+    expect(pick(reference, ['s', 'quoted', 'n', 'neg', 'i', 'yes', 'no', 'day', 'sel', 'required_nn', 'toggled', 'empty', 'cfg'])).toEqual({
       s: "'d'", quoted: "'it''s'", n: "'5'", neg: "'-2.5'", i: "'7'", yes: "'1'", no: "'0'", day: "'2024-01-02'", sel: "'a'", required_nn: "'x'",
+      toggled: "'1'", empty: "''", cfg: "'3'",
     });
     for (const name of NOW_NAMES) expect(String(reference[name])).toMatch(/^(strftime|case when strftime)/);
     expect(pick(reference, NONE)).toEqual({ tags: null, owner: null, blob: null, plain: null });
@@ -160,6 +170,25 @@ describe('the reference: the local face DEFAULT per kind, and the shared rendere
       const rendered = sqliteDeclaredColumnDefaultSql(DEFAULTED[name]);
       expect(rendered === null ? null : rendered.replace(/^\((.*)\)$/s, '$1')).toBe(reference[name]);
     }
+  });
+});
+
+describe("a boolean declaring the string 'false': both faces write '0'", () => {
+  // Held apart from DEFAULTED, whose door cases also read drift: the shared
+  // differ compares a STRING declaration as text, so it reads the '0' knex
+  // writes for 'false' as `set_column_default` drift on either face, a
+  // differ question and not a parity one (reported with this PR, not fixed here).
+  const OFF = { name: 'off_t', fields: { off_text: { type: 'boolean', defaultValue: 'false' } } };
+
+  it.each<Door>(['syncSchemasBatch', 'syncSchema', 'initObjects'])('local, and remote through %s, as the renderer renders it', async (door) => {
+    const localFile = nextFile();
+    await (await localOver(localFile)).syncSchema(OFF.name, OFF);
+    const remoteFile = nextFile();
+    await SYNC[door](await remoteOver(remoteFile), [OFF]);
+
+    expect(sqliteDeclaredColumnDefaultSql(OFF.fields.off_text)).toBe("'0'");
+    expect((await columnDefaults(localFile, OFF.name)).off_text).toBe("'0'");
+    expect((await columnDefaults(remoteFile, OFF.name)).off_text).toBe("'0'");
   });
 });
 
