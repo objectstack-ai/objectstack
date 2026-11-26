@@ -3189,6 +3189,9 @@ importers:
       '@objectstack/core':
         specifier: workspace:*
         version: link:../../core
+      '@objectstack/embedder-openai':
+        specifier: workspace:*
+        version: link:../../plugins/embedder-openai
       '@objectstack/service-settings':
         specifier: workspace:*
         version: link:../service-settings

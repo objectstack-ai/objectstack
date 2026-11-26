@@ -104,6 +104,25 @@ installed ([Connect an MCP Client](/docs/ai/connect-mcp)).
 - **Inline event sync.** When records on indexed objects change, the kernel's `IRealtimeService` events drive `KnowledgeService.handleRecordUpsert/Delete` automatically. No cron, no queue (yet — Phase 2).
 - **Adapter swap, zero caller changes.** Move from `memory` to `ragflow` to a custom adapter without touching your `search` calls, the `search_knowledge` tool, or any agent prompt.
 
+## Configuring the embedder from Settings
+
+When `KnowledgeServicePlugin` is mounted beside the settings service, Settings → AI & Embedder offers an **Embedder** section (`ai.embedder_*`): provider, API key, model, Base URL (for a custom or Azure endpoint), dimensions and batch size. The knowledge plugin reads those settings once, when the server starts, and registers the `EMBEDDER_SERVICE` (`'embedder'`) that knowledge adapters embed with:
+
+- **An embedder is already registered** — by ObjectOS Cloud, or by your own plugin — **it is kept.** The plugin logs one line saying so and does not apply the settings. It checks at `kernel:bootstrapped`, after every plugin's `init()`, `start()` and `kernel:ready` handler, so an embedder registered in any of those is seen. Register yours there, not later.
+- **A provider is saved and complete** → an `@objectstack/embedder-openai` embedder for that provider. The saved Base URL applies only to the custom and Azure providers; other providers use their preset endpoint. The boot line names the endpoint host. "Complete" is what the **Test embedder** button checks: a provider, an API key (Ollama excepted) and, for a custom or Azure endpoint, a Base URL.
+- **Dimensions and batch size are positive integers**, saved as numbers or set as text through an `OS_*` override (`OS_AI_EMBEDDER_DIMENSIONS=256`). A value that is not a positive integer is refused, with a `warn` at boot and the error below on every use — never silently ignored.
+- **The batch size is passed only when you saved it.** Left unsaved (the form shows 64), the embedder sends as many inputs per request as the model's documented cap allows — 10 for DashScope `text-embedding-v3`, 2048 for OpenAI `text-embedding-3-*` — and 10 for a model it does not know. A saved batch size is held to the saved model's documented cap (`documentedMaxBatchSize(model)` from `@objectstack/embedder-openai`): a saved 64 on `text-embedding-v3` sends 10. For a model without a documented cap the saved size is sent as saved.
+- **Nothing is configured** — no provider saved, `none` saved, or the saved settings incomplete → the server still boots, and every use of the embedder answers an error naming the missing settings: an adapter that embeds refuses indexing and search with it, and nothing is sent anywhere. Nothing is sent to a provider until you have saved one, and the API key is never logged or put in an error.
+
+**A saved change takes effect after a restart** — the page says so under the provider field. There is no hot replacement.
+
+An adapter that embeds resolves the service where it embeds, not at boot:
+
+```ts
+const embedder = ctx.getService<IEmbedder>(EMBEDDER_SERVICE); // from @objectstack/spec/contracts
+const vectors = await embedder.embed(chunks.map((c) => c.content));
+```
+
 ## Splitting documents into passages
 
 The knowledge service cuts each document into passages once, and every adapter that takes passages (`knowledge-memory` does) indexes the same ones. An object source chooses how with `split`:

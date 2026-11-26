@@ -597,6 +597,7 @@ export const ar: PlatformTranslationData = {
         },
         embedder_provider: {
           label: 'المزوّد',
+          help: 'تُقرأ عند بدء تشغيل الخادم: يسري أي تغيير محفوظ على إعدادات التضمين بعد إعادة التشغيل التالية.',
           options: {
             none: 'معطّل (دون تضمينات)',
             openai: 'OpenAI',
