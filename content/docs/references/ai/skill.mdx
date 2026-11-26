@@ -42,6 +42,7 @@ const result = SkillSchema.parse(data);
 | **triggerConditions** | `{ field: string; operator: Enum<'eq' \| 'neq' \| 'in' \| 'not_in' \| 'contains'>; value: string \| string[] }[]` | optional | Programmatic activation conditions — evaluated by the cloud agent runtime only. The context fields a condition reads are reported by the client: a condition is routing, never access control |
 | **active** | `boolean` | optional (default: `true`) | Whether the skill is enabled |
 | **mcpPrompt** | `boolean` | optional | Whether this skill is offered as an MCP prompt. false = written for the in-product agents only: never listed by prompts/list and unknown to prompts/get on any MCP connection, whatever its tools binding. Absent or true = offered where the server serves its tools |
+| **context** | `string` | optional | The context pack (ai_context, by its bare name) this skill works from. Requires get_record_context in tools. Over MCP the skill's prompt then takes an optional record id and asks the model to read that record through the pack |
 | **protection** | `{ lock: Enum<'none' \| 'no-overlay' \| 'no-delete' \| 'full'>; reason: string; docsUrl?: string }` | optional | Package author protection block — lock policy for this skill. |
 | **_lock** | `Enum<'none' \| 'no-overlay' \| 'no-delete' \| 'full'>` | optional | Item-level lock — controls overlay & delete (ADR-0010). |
 | **_lockReason** | `string` | optional | Human-readable reason shown when a write is refused by _lock. |
