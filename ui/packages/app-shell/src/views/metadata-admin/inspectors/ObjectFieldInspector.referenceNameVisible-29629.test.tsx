@@ -24,6 +24,11 @@ import { render, screen, cleanup, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { FieldSchema } from '@objectstack/spec/data';
 import { loadStudioCatalogue } from '@object-ui/i18n/namespaces/studio';
+// The inspector loads the CEL lint and formula engines through dynamic
+// imports; pull them in at module top so their first load is paid at
+// collection, not inside a case's bounded wait.
+import '@objectstack/lint';
+import '@objectstack/formula';
 
 const h = vi.hoisted(() => {
   const CATALOG: Array<Record<string, unknown>> = [{ name: 'vendor', label: 'Vendor' }];
