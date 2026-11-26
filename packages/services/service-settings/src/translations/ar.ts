@@ -650,10 +650,6 @@ export const ar: PlatformTranslationData = {
       groups: {
         adapter: { title: 'الواجهة الخلفية', description: 'اختر مكان تخزين مقاطع المستندات ومتجهاتها.' },
         turso: { title: 'Turso / libSQL', description: 'يعمل مع Turso المُدار أو ملف محلي أو في الذاكرة.' },
-        ragflow: {
-          title: 'RAGFlow',
-          description: 'نشر RAGFlow خارجي. راجع https://ragflow.io لتعليمات الاستضافة الذاتية.',
-        },
         indexing: {
           title: 'افتراضيات الفهرسة',
           description: 'القيمة المضبوطة على مصدر المعرفة نفسه تتقدّم على هذه الافتراضيات.',
@@ -666,7 +662,6 @@ export const ar: PlatformTranslationData = {
           options: {
             memory: 'في الذاكرة (للتطوير / الاختبار فقط)',
             turso: 'Turso / libSQL (سحابي أو محلي)',
-            ragflow: 'RAGFlow (خارجي)',
           },
         },
         turso_url: {
@@ -674,12 +669,6 @@ export const ar: PlatformTranslationData = {
           help: 'أمثلة: libsql://your-tenant.turso.io · file:./.objectstack/knowledge.db · :memory:',
         },
         turso_auth_token: { label: 'رمز المصادقة', help: 'مطلوب فقط لعناوين Turso المُدارة.' },
-        ragflow_base_url: { label: 'Base URL', help: 'مثال: http://localhost:9380' },
-        ragflow_api_key: { label: 'مفتاح API' },
-        ragflow_default_dataset: {
-          label: 'معرّف مجموعة البيانات الافتراضية',
-          help: 'يُستخدم عندما لا يحدد مصدر المعرفة مجموعة بيانات RAGFlow الخاصة به.',
-        },
         chunk_target: {
           label: 'الحجم المستهدف للمقطع (أحرف)',
           help: 'أقصى طول للمقطع بالأحرف عند تقسيم خدمة المعرفة لمستند. تكون الأولوية للحجم المحدد في مصدر المعرفة نفسه، وقد يخفضه حد الإدخال الخاص بنموذج التضمين.',

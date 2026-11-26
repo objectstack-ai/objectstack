@@ -1,15 +1,15 @@
 ---
 title: RAG — embeddings and knowledge retrieval
 navTitle: Knowledge & RAG
-description: The Knowledge Protocol — permission-aware RAG for agents via pluggable adapter plugins (memory, RAGFlow, custom)
+description: The Knowledge Protocol — permission-aware RAG for agents via pluggable adapter plugins (memory, pgvector, turso, custom)
 ---
 
 Part of the [AI module](/docs/ai) — how agents retrieve knowledge through the Knowledge Protocol and its adapter plugins.
 
-ObjectStack ships a Knowledge Protocol that lets you retrieve from pluggable backends (RAGFlow, LlamaIndex, Dify, custom pgvector, …) with one call: `KnowledgeService.search(query, { sourceIds?, topK? })`. The framework defines the contract and runs permission-aware filtering; the adapter plugin does the actual retrieval. See [the protocol design](/docs/protocol/knowledge) for the rationale.
+ObjectStack ships a Knowledge Protocol that lets you retrieve from pluggable backends (the in-memory reference, PostgreSQL + pgvector, a libSQL file, or an adapter you write over the engine you already run) with one call: `KnowledgeService.search(query, { sourceIds?, topK? })`. The framework defines the contract and runs permission-aware filtering; the adapter plugin does the actual retrieval. See [the protocol design](/docs/protocol/knowledge) for the rationale.
 
 <Callout type="info">
-**This whole stack is open.** The `@objectstack/service-knowledge` service, the adapter plugins (`@objectstack/knowledge-memory`, `@objectstack/knowledge-ragflow`, `@objectstack/knowledge-pgvector`, `@objectstack/knowledge-turso`), the `@objectstack/embedder-openai` embedder, and the permission-aware retrieval + event sync below all ship in the **open-source framework**. The workflow is: declare your knowledge sources, pick an adapter, and call `search` — retrieval respects the same row-level security as any ObjectQL query. Only the in-product chat *runtime* that consumes retrieval ships in ObjectOS; see the callout under [Retrieving knowledge](#retrieving-knowledge).
+**This whole stack is open.** The `@objectstack/service-knowledge` service, the adapter plugins (`@objectstack/knowledge-memory`, `@objectstack/knowledge-pgvector`, `@objectstack/knowledge-turso`), the `@objectstack/embedder-openai` embedder, and the permission-aware retrieval + event sync below all ship in the **open-source framework**. The workflow is: declare your knowledge sources, pick an adapter, and call `search` — retrieval respects the same row-level security as any ObjectQL query. Only the in-product chat *runtime* that consumes retrieval ships in ObjectOS; see the callout under [Retrieving knowledge](#retrieving-knowledge).
 </Callout>
 
 ## Wiring
@@ -18,8 +18,8 @@ ObjectStack ships a Knowledge Protocol that lets you retrieve from pluggable bac
 import { ObjectKernel } from '@objectstack/core';
 import { KnowledgeServicePlugin } from '@objectstack/service-knowledge';
 import { KnowledgeMemoryPlugin } from '@objectstack/knowledge-memory';
-// or, for prod:
-// import { KnowledgeRagflowPlugin } from '@objectstack/knowledge-ragflow';
+// or, for prod (PostgreSQL + pgvector; a libSQL file is `@objectstack/knowledge-turso`):
+// import { KnowledgePgvectorPlugin } from '@objectstack/knowledge-pgvector';
 
 const kernel = new ObjectKernel();
 kernel.use(new KnowledgeServicePlugin({
@@ -33,14 +33,13 @@ kernel.use(new KnowledgeServicePlugin({
     {
       id: 'product_docs',
       label: 'Product docs',
-      adapter: 'ragflow',
-      source: { kind: 'http', urls: ['https://docs.example.com/sitemap.xml'] },
-      adapterConfig: { datasetId: 'rgf_doc_dataset' },
+      adapter: 'memory', // 'pgvector' once KnowledgePgvectorPlugin is registered below
+      source: { kind: 'object', object: 'product_doc', contentFields: ['title', 'body'] },
     },
   ],
 }));
 kernel.use(new KnowledgeMemoryPlugin());
-// kernel.use(new KnowledgeRagflowPlugin({ endpoint, apiKey }));
+// kernel.use(new KnowledgePgvectorPlugin());
 ```
 
 ## Retrieving knowledge
@@ -140,7 +139,7 @@ The answer never says how many hits the permission re-check or the scope removed
 
 - **Permission-aware retrieval.** Every hit with a `sourceRecordId` is re-checked against the caller's `ExecutionContext` via `IDataEngine` — the same RLS that gates plain ObjectQL queries. A salesperson asking "find proposals about ACME" only sees the proposals they could already read directly. Before a source is searched, the caller's field-level read rules and the object's API exposure are asked too: a source serving a field the caller may not query is not searched for them (see [the protocol's source admission](/docs/protocol/knowledge#source-admission-exposure-and-field-level-rules)). File / HTTP hits pass through (ACL is the adapter's problem).
 - **Inline event sync.** When records on indexed objects change, the kernel's `IRealtimeService` events drive `KnowledgeService.handleRecordUpsert/Delete` automatically. No cron, no queue (yet — Phase 2).
-- **Adapter swap, zero caller changes.** Move from `memory` to `ragflow` to a custom adapter without touching your `search` calls, the `search_knowledge` tool, or any agent prompt.
+- **Adapter swap, zero caller changes.** Move from `memory` to `pgvector` or `turso`, or to a custom adapter, without touching your `search` calls, the `search_knowledge` tool, or any agent prompt.
 
 ## Configuring the embedder from Settings
 
@@ -246,7 +245,7 @@ A source with `refresh.onRecordChange: false` is left to its external indexer, a
 <Callout type="warn">
 **A build costs money.** A complete build reads every row the source's `where` matches and sends the listed content fields of each one the index does not already hold unchanged to your embedding provider, which bills for them. The first build of a large source, or a rebuild after you change the embedding model or the split, sends all of it. The boot log line that starts a build says so.
 
-The default `memory` adapter holds nothing after a restart, so with it **every boot is a first build**: each boot sends the whole source to the embedding provider again, on every node, because each process keeps its own index. Use a persistent adapter (pgvector, Turso, RAGFlow) for a source you do not want re-embedded on each restart. And "only one node builds a source" holds only with a shared cluster lock driver: the default `memory` cluster driver's lock is a per-process mutex, so with it every node builds the source itself.
+The default `memory` adapter holds nothing after a restart, so with it **every boot is a first build**: each boot sends the whole source to the embedding provider again, on every node, because each process keeps its own index. Use a persistent adapter (pgvector, Turso) for a source you do not want re-embedded on each restart. And "only one node builds a source" holds only with a shared cluster lock driver: the default `memory` cluster driver's lock is a per-process mutex, so with it every node builds the source itself.
 </Callout>
 
 To rebuild a source yourself, as an administrator (an account with `manage_platform_settings`):
@@ -290,7 +289,7 @@ Details are in [the protocol's turso section](/docs/protocol/knowledge#42-knowle
 
 ## Why we did not build a vector DB
 
-Mature OSS (RAGFlow, LlamaIndex, Dify) already nail embedding, hybrid retrieval, rerank, and OCR. ObjectStack's value is **the metadata-native source declaration, one structural split for every adapter, and the permission-aware filter on top of those engines** — not yet-another-RAG-stack. Customers pick the retrieval engine that matches their data; we make sure it talks to ObjectStack the same way every time.
+Mature OSS engines (LlamaIndex, Dify, Vectara and others) already nail embedding, hybrid retrieval, rerank, and OCR. ObjectStack's value is **the metadata-native source declaration, one structural split for every adapter, and the permission-aware filter on top of those engines** — not yet-another-RAG-stack. Customers pick the retrieval engine that matches their data; we make sure it talks to ObjectStack the same way every time.
 
 ---
 

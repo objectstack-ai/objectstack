@@ -901,7 +901,7 @@ function selfTest() {
   ok('classify: docs site (protocol. alias)', classify('https://protocol.objectstack.ai/docs/a') === 'docs-site');
   ok('classify: docs host outside /docs', classify('https://docs.objectstack.ai/blog/x') === 'docs-host-other');
   ok('classify: canonical host outside /docs', classify('https://objectstack.ai/pricing') === 'docs-host-other');
-  ok('classify: another host', classify('https://github.com/infiniflow/ragflow') === 'external');
+  ok('classify: another host', classify('https://github.com/pgvector/pgvector') === 'external');
   ok('classify: mailto', classify('mailto:hi@objectstack.ai') === 'external');
   // The accept-wide half of the split, pinned as a claim rather than left to
   // be inferred: an alias is IN the resolvable class, so assertions 3 and 4

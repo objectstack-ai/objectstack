@@ -104,7 +104,9 @@ describe('settings `visible` — declaration ⇄ evaluator', () => {
     // predicate, and the `indexing` group and `chunk_target` lost their
     // `${data.adapter !== 'memory'}` terms — the in-memory adapter takes the
     // service's passages too, so the target size applies to it.
-    expect(predicates).toHaveLength(87);
+    // 87 -> 83 with the retired third `knowledge.adapter` option: its group and
+    // its three keys each carried one predicate over `data.adapter`.
+    expect(predicates).toHaveLength(83);
   });
 
   it('every bundled predicate is accepted by BOTH sides', () => {
