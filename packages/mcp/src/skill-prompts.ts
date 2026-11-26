@@ -71,7 +71,10 @@
  * resolves to no pack, and the prompt is byte-identical to the prompt of the
  * same skill without the key. Parse requires such a skill to bind
  * `get_record_context`, so the binding test above withholds it on a connection
- * that does not serve the tool.
+ * that does not serve the tool. The long-lived stdio server applies no binding
+ * filter (#37609); it hands this surface no pack listing unless it registers
+ * `get_record_context` (`MCPServerRuntime.bridgePrompts`), so there the skill
+ * is listed as before, without the argument and without the line.
  */
 
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';

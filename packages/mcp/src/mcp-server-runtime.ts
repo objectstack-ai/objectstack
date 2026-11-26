@@ -58,7 +58,7 @@ import {
 } from './skill-prompts.js';
 import { ErrorCode, McpError } from '@modelcontextprotocol/sdk/types.js';
 import { describePackageScopedHolder } from '@objectstack/core';
-import { deriveAiFaceName } from '@objectstack/spec/ai';
+import { deriveAiFaceName, GET_RECORD_CONTEXT_TOOL_NAME } from '@objectstack/spec/ai';
 import { z } from 'zod';
 // [#28715] The engine's own reading of "this field declares options" (its
 // `label()` map is built from it), never a second spelling here.
@@ -2261,6 +2261,16 @@ export class MCPServerRuntime {
    * tool and its source; never a boot failure and never a second
    * registration under the name (the SDK refuses one by throwing).
    */
+  /**
+   * [ADR-0160 D8] Whether this long-lived server registers a tool of this
+   * name now: a native data tool ({@link bridgeDataTools}) or one bridged from
+   * the AI registry ({@link bridgeTools}). Read by {@link bridgePrompts}, so a
+   * host bridges its tools before its prompts (`plugin.ts` does).
+   */
+  private servesTool(name: string): boolean {
+    return this.nativeToolNames.has(name) || this.bridgedTools.has(name);
+  }
+
   private yieldBridgedTool(name: string): void {
     const bridged = this.bridgedTools.get(name);
     if (!bridged) return;
@@ -2669,7 +2679,16 @@ export class MCPServerRuntime {
       // [ADR-0160 D8] The packs a skill's `context` resolves against: the
       // merged listing, the one the stdio bridge's `get_record_context` reads
       // its packs from, so the face a prompt hands on is one the tool selects.
-      listContextPacks: async () => (await mergedDiagnosedList(metadataService, mergedRead, 'ai_context')).items,
+      // Only where THIS server registers `get_record_context` (natively or
+      // bridged from the AI registry), read now: without the listing no skill
+      // resolves a pack, so none lists the record argument and none carries
+      // the line telling the model to call a tool this server does not serve.
+      // This door has no general binding filter (that is #37609); this is the
+      // one tool the platform's own line names. The HTTP bridge gates the same
+      // member on its record-context seam (`packages/runtime/src/domains/mcp.ts`).
+      ...(this.servesTool(GET_RECORD_CONTEXT_TOOL_NAME)
+        ? { listContextPacks: async () => (await mergedDiagnosedList(metadataService, mergedRead, 'ai_context')).items }
+        : {}),
       listSkills: async () => {
         // The verdict of the READ, recorded as the read happens. `listSkills`
         // is also the per-call re-read behind each registered prompt's body, so

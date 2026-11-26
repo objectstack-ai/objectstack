@@ -252,8 +252,11 @@ function projectedOverMcp(skill: AnyRec): boolean {
  * (`stack.aiContexts`). Two verdicts, each a `warning`:
  *
  * - {@link AI_SKILL_CONTEXT_UNKNOWN}: `context` names no pack the stack
- *   defines. At run time the prompt lists no record argument and the tool call
- *   it would lead to is refused; no other pack is substituted (D8).
+ *   defines. This judges ADR-0150 D3 step 1 only: a pack a package this stack
+ *   depends on ships resolves at run time through the closure (step 2), which
+ *   lint does not read (#37609), so the message states the run-time cost only
+ *   on that condition. Where no holder has it, the prompt lists no record
+ *   argument; no other pack is substituted (D8).
  * - {@link AI_SKILL_CONTEXT_OMITTED}: the skill binds `get_record_context`
  *   (by name or a matching wildcard) and declares no `context`, and some object
  *   has more than one pack. The call it makes without `context` on such an
@@ -295,10 +298,10 @@ export function validateAiSkillContext(stack: AnyRec): AiToolRefFinding[] {
         where: `skill "${skillName}" · context`,
         path: `skills[${si}].context`,
         message:
-          `\`context\` names context pack "${context}", which this stack does not define, so the skill's MCP prompt ` +
-          `takes no record and its ${GET_RECORD_CONTEXT_TOOL_NAME} call is refused.` +
+          `\`context\` pack "${context}" is not in this stack's \`aiContexts\`: unless a dependency ships it, ` +
+          `the MCP prompt takes no record and ${GET_RECORD_CONTEXT_TOOL_NAME} is refused.` +
           suggestName(context, packNames),
-        hint: 'Name a pack the stack defines under `aiContexts` (check the spelling), or remove `context`',
+        hint: 'Name a pack the stack defines under `aiContexts` or one a dependency package ships (check the spelling), or remove `context`',
       });
       continue;
     }

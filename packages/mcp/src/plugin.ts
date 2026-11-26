@@ -957,6 +957,17 @@ export class MCPServerPlugin implements Plugin {
       );
     }
 
+    // [#8034] BEFORE `start()`, with the resources and prompts: registering a
+    // tool is also what declares the `tools` capability, and the SDK refuses to
+    // register capabilities once a transport is attached. Every bridge on this
+    // server is complete before the transport claims stdin/stdout.
+    // [ADR-0160 D8] …and before the prompts: the prompt bridge offers a skill's
+    // record argument only where this server registers `get_record_context`,
+    // which it reads from the tools registered by then.
+    if (dataBridge) {
+      this.runtime.bridgeDataTools(dataBridge);
+    }
+
     if (metadataService) {
       // [#25245] The object resources read the view `list_objects` /
       // `describe_object` answer from (`stdioObjectView`), never the metadata
@@ -996,14 +1007,6 @@ export class MCPServerPlugin implements Plugin {
         installedPackageNamespace(ctx),
         installedPackageResolutionClosure(ctx),
       );
-    }
-
-    // [#8034] BEFORE `start()`, with the resources and prompts: registering a
-    // tool is also what declares the `tools` capability, and the SDK refuses to
-    // register capabilities once a transport is attached. Every bridge on this
-    // server is complete before the transport claims stdin/stdout.
-    if (dataBridge) {
-      this.runtime.bridgeDataTools(dataBridge);
     }
 
     if (shouldStart) {

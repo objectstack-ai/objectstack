@@ -729,16 +729,28 @@ describe('[ADR-0160 D8] a skill with context takes a record', () => {
     expect((await rpc(servingBridge([policySkill()], [POLICY_PACK]), 'prompts/list')).result.prompts).toHaveLength(1);
   });
 
-  it('the long-lived stdio server (bridgePrompts) lists the same argument and answers the same message', async () => {
+  /** The long-lived stdio server, its prompts bridged after `tools` were (or, with no bridge, none were). */
+  const stdioServer = async (tools?: ReturnType<typeof servingBridge>) => {
     const metadataService = {
       list: async (type: string) => (type === 'skill' ? [policySkill(), policySkill({ name: 'no_pack', context: 'nothing_here' })] : type === 'ai_context' ? [POLICY_PACK] : []),
     };
     const runtime = new MCPServerRuntime({ name: 'skill-prompts-stdio', version: '0.0.0' });
+    if (tools) runtime.bridgeDataTools(tools);
     await runtime.bridgePrompts(metadataService as never);
     const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
     const client = new Client({ name: 'test-client', version: '0.0.0' });
     await Promise.all([runtime.server.connect(serverTransport), client.connect(clientTransport)]);
+    const close = async () => {
+      await client.close();
+      await runtime.stop().catch(() => {});
+    };
+    return { client, close };
+  };
+
+  it('the long-lived stdio server that registers get_record_context lists the same argument and answers the same message', async () => {
+    const { client, close } = await stdioServer(servingBridge([], undefined));
     try {
+      expect((await client.listTools()).tools.map((t) => t.name)).toContain('get_record_context');
       const prompts = (await client.listPrompts()).prompts;
       const byName = Object.fromEntries(prompts.map((p) => [p.name, p]));
       expect(byName.policy_inquiry.arguments?.map((a) => [a.name, a.required ?? false])).toEqual([[SKILL_PROMPT_RECORD_ARGUMENT, false]]);
@@ -753,8 +765,24 @@ describe('[ADR-0160 D8] a skill with context takes a record', () => {
       const bare = await client.getPrompt({ name: 'policy_inquiry' });
       expect(bare.messages[0].content).toEqual({ type: 'text', text: INSTRUCTIONS });
     } finally {
-      await client.close();
-      await runtime.stop().catch(() => {});
+      await close();
+    }
+  });
+
+  it('the long-lived stdio server that registers no get_record_context offers no record argument, and the prompt is today\'s', async () => {
+    // This door has no general binding filter (#37609): the skill is still
+    // listed. What it must not do is offer the argument or write the line that
+    // tells the model to call a tool this server does not register.
+    const { client, close } = await stdioServer();
+    try {
+      expect((await client.listPrompts()).prompts.find((p) => p.name === 'policy_inquiry')?.arguments).toBeUndefined();
+      const sent = await client.getPrompt({ name: 'policy_inquiry', arguments: { recordId: 'pol_1' } });
+      const bare = await client.getPrompt({ name: 'policy_inquiry' });
+      expect(sent.messages).toEqual([{ role: 'user', content: { type: 'text', text: INSTRUCTIONS } }]);
+      expect(JSON.stringify(sent)).toBe(JSON.stringify(bare));
+      expect(JSON.stringify(sent)).not.toContain(SKILL_PROMPT_RECORD_CONTEXT_LINE);
+    } finally {
+      await close();
     }
   });
 

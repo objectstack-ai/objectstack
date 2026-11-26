@@ -232,8 +232,10 @@ export function skillBindsRecordContextTool(tools: unknown): boolean {
  * filters tools per skill needs it for the first read and for an `anchor`
  * re-read, and the MCP prompt surface reads it to withhold the skill on a
  * connection that does not serve the tool (`skillBindingServed`,
- * `@objectstack/mcp`): a prompt that tells the model to call a tool the
- * connection lacks is never offered.
+ * `@objectstack/mcp`); the long-lived stdio server, which has no binding
+ * filter, offers the record argument only where it registers the tool. A
+ * prompt that tells the model to call a tool the server lacks is never
+ * offered.
  */
 function refuseUnboundRecordContext(
   skill: { context?: unknown; tools?: unknown },
