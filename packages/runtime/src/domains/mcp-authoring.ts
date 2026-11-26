@@ -279,6 +279,8 @@ const READ_TOOLS: readonly AIToolDefinition[] = Object.freeze([
             'Read one metadata item\'s full definition. Without `state`, a pending draft is read in place of '
             + 'the published version and the answer says `draft: true`. `state: "draft"` reads the pending '
             + 'draft only and is refused when there is none; `state: "active"` reads the published version. '
+            + 'A read with `state` answers that version\'s `version`, the token `save_metadata_draft` takes as '
+            + '`ifMatch`; a read without `state` answers none. '
             + 'A flow\'s answer also carries `runtimeState.enabled`: `false` means the flow is switched off and '
             + 'does not run, whatever its `status` reads.',
         parameters: {
@@ -342,7 +344,8 @@ const WRITE_TOOLS: readonly AIToolDefinition[] = Object.freeze([
                 ifMatch: {
                     type: 'string',
                     minLength: 1,
-                    description: 'Optional: the `version` a read or a save answered. The save is refused if the draft changed since.',
+                    description: 'Optional: the `version` a read or a save answered. The save is refused if the item changed since: '
+                        + 'the pending draft, or the published item while it has no draft yet. The refusal names the current version.',
                 },
                 clientSpecVersion: {
                     type: 'string',
