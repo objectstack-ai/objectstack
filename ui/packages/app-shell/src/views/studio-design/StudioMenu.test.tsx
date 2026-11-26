@@ -551,6 +551,16 @@ describe('drawn as the app\'s menu (objectstack#37452)', () => {
     expect(chevron()).not.toHaveClass('rotate-90');
   });
 
+  it('a click on an open group\'s label during a search is not taken: the group is still open once the search is cleared', () => {
+    renderAt('/studio/~all/metadata', '~all');
+    fireEvent.change(screen.getByTestId('studio-menu-search'), { target: { value: 'position' } });
+    fireEvent.click(groupLabel('studio-menu-group-security'));
+    expect(groupLabel('studio-menu-group-security')).toHaveAttribute('aria-expanded', 'true');
+    fireEvent.change(screen.getByTestId('studio-menu-search'), { target: { value: '' } });
+    expect(groupLabel('studio-menu-group-security')).toHaveAttribute('aria-expanded', 'true');
+    expect(entry('type:position')).toBeVisible();
+  });
+
   it('in the phone drawer a group\'s label is the app menu\'s 44 px tap target; CONTROL: docked it is not', async () => {
     setWidth(390);
     renderAt(`/studio/${PKG}/data`);
