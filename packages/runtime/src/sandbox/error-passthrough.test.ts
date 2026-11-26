@@ -117,14 +117,16 @@ describe('#3918 follow-up — VM error → host', () => {
         expect(err.fields).toEqual(FIELDS);
     });
 
-    it('leaves the message channels byte-identical', async () => {
+    it('leaves the log line byte-identical and the toast line the message alone', async () => {
         // `.message` (server log, with the debug wrapper) and `.innerMessage`
         // (what a toast shows) are what every existing consumer reads. The
         // structured payload rides ALONGSIDE them, never instead of them.
         const err = await run(UNCAUGHT, new ValidationError(FIELDS)).catch((e) => e);
 
         expect(err.message).toBe("action 'submit' threw: ValidationError: issued_on is required");
-        expect(err.innerMessage).toBe('ValidationError: issued_on is required');
+        // [#37533] …except the class name in front of a coded refusal's
+        // sentence: the toast shows the message alone, as a form save does.
+        expect(err.innerMessage).toBe('issued_on is required');
     });
 
     it('leaves an ordinary failure with no code/fields at all', async () => {
