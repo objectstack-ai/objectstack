@@ -3,6 +3,7 @@
 '@object-ui/components': minor
 '@object-ui/plugin-grid': minor
 '@object-ui/app-shell': minor
+'@objectstack/spec': minor
 ---
 
 feat(ui): the grid's staged edit model retires with its interface, so every editable grid selects a cell first and saves each cell on its own
