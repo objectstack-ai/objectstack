@@ -1,0 +1,36 @@
+# os-dev 反向验证与消融(做之前读)
+
+- 反向验证与消融是一次性证明:前后运行引在 PR 正文与报告里;⛔ 不留永久测试文件。
+- 两者都先 commit 修复再回退或变异:恢复腿指向 `HEAD`,`HEAD` 必须先装着你的实现。
+- 未提交时 `git checkout origin/main -- <path>` 不留恢复点,`git checkout HEAD -- <path>` 删的正是实现。
+- 通则:失效形态是 exit 0 且什么都没做的清理步骤,只能靠观察状态验证,永不靠读退出码。
+- 恢复腿与变异腿完全对称,四条硬线如下。
+- ① 恢复写 `git checkout HEAD -- <path>`,⛔ 永不裸 `git checkout -- <path>`:裸恢复从索引取。
+- 取回的正是变异本身,exit 0、无异常输出;点名 `HEAD` 绕开被污染的索引。
+- ② 恢复由 `git diff HEAD` 为空来证明(`git status` 干净是同一句话的另一半),不由退出码证明。
+- ③ trap 里的路径一律绝对:变异前先 `REPO_ROOT="$(git rev-parse --show-toplevel)"`。
+- 恢复针对 `"$REPO_ROOT/<path>"`;信任顺序:trap 只是崩溃路径上的便利,字节/哈希比对才是证明。
+- ④ 空哈希读作 FAILURE,不是没得比:`git hash-object` 对解析不到的路径输出的是空。
+- 比对对象是该路径的 HEAD blob 哈希:空或缺失 ⇒ 失败;不匹配 ⇒ 响亮地非零退出并停下。
+- 反向验证跑之前先定预期方向;三个真实方向:转红(常态);诊断变多而非变少;反转。
+- 变多:删掉一个喂计数的读取,能让下游门禁多出一个发现。
+- 反转:canonical-first 的 `??` 链,非法拼写落到 schema 的具名拒收,规则绿、schema 红。
+- 报告你实际观察到的方向;永不硬套模板的预设。
+- ablation 的成立条件是解析路径,不是套件名:被测主体经依赖的 `exports` 解析。
+- 那指向该包的 `dist/`,不是 `src/`;且没有 vitest alias 把 specifier 拉回源码。
+- 这批 pair 的台账是 `scripts/check-test-source-alias.mjs` 的 `KNOWN_UNALIASED_TEST_IMPORTS`。
+- `packages/qa/dogfood` 是一例,不是定义;读成 dogfood 专属,普通单元套件里的 ablation 会被当真。
+- 两个方向不对称:没 build 的修复是会被注意到的假红;没 build 的 ablation 保持绿。
+- 那份绿给一条可能永远失败不了的断言背书,对 CI 永久隐形(CI 构建正确,那边永远绿)。
+- 每一腿(变异与还原)都是:改动 → 证明它真落到了磁盘 → `pnpm --filter <pkg> build`。
+- 落盘走 `node scripts/ablation-replace.mjs`,不走 `-i` 家族:锚点必须命中,写入与还原按磁盘核验。
+- 再证明它到达了 `dist/`,才读运行结果:`node scripts/ablation-dist-preflight.mjs <pkg> '<marker>'`。
+- 删守卫的消融以及每个还原腿,用 `--absent`。
+- ⛔ 还原腿不可跳过:留在 `dist/` 里的 marker 会让变异代码对该树之后的每次运行继续生效。
+- ⛔ 不拿编辑工具的退出码当落盘证据:`sed`、`perl -i`、`str.replace`、`re.sub` 零命中也 exit 0。
+- 这一步无条件成立,没有 build/dist 的消融同样要做。
+- 观察要锚定你打算改的那处文本:注入文本与被删文本各 `grep -c` 一次。
+- 裸 `git diff --stat` 非空只证明有改动:同轮其它编辑会替它变绿,等长替换字节差为零。
+- 确认没过 ⇒ 这次消融没跑,读数作废:改锚点重来,并在报告里说明第一次是空操作。
+- ⛔ 不悄悄重跑到有东西落地,那是把同一个缺陷复制到上一层。
+- 硬线:消融/变异脚本一律自带 `trap '<restore>' EXIT INT TERM` 还原。
