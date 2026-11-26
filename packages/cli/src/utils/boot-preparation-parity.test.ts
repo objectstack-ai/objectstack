@@ -78,6 +78,15 @@ import {
 } from './stack-collections.js';
 import { provisionTelemetryDatasource, standaloneTelemetryPrimary } from './telemetry-datasource.js';
 
+// Paid at collection, not inside a clocked case: what the step modules imported
+// above reach through dynamic `import()`s (`check:test-source-alias`).
+import '@objectstack/service-datasource';
+import '@objectstack/driver-turso';
+import '@objectstack/driver-sql';
+import '@objectstack/platform-objects/plugin';
+import '@objectstack/plugin-security';
+import '@objectstack/rest';
+
 /** …/packages/cli/src/utils */
 const HERE = dirname(fileURLToPath(import.meta.url));
 /** …/packages/cli/src — this package's own source tree. */
