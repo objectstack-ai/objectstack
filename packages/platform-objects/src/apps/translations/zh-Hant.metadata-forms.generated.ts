@@ -3038,7 +3038,7 @@ export const zhHantMetadataForms: NonNullable<TranslationData['metadataForms']> 
       },
       planning: {
         label: "規劃",
-        helpText: "自主推理設定：代理停止前的最大推理迭代次數（1–100，預設 10）。"
+        helpText: "自主推理設定：防止失控迴圈的保險絲，按模型呼叫次數計（一次模型呼叫加上它發起的一批工具呼叫），達到後代理停止（1–1000，預設 10）。"
       },
       memory: {
         label: "記憶",

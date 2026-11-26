@@ -3038,7 +3038,7 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       planning: {
         label: "Planificación",
-        helpText: "Configuración de razonamiento autónomo: el número máximo de iteraciones de razonamiento antes de que el agente se detenga (1–100, 10 por defecto)."
+        helpText: "Configuración de razonamiento autónomo: un fusible contra bucles descontrolados, contado en llamadas al modelo (cada una, una llamada al modelo más su lote de herramientas), tras el cual el agente se detiene (1–1000, 10 por defecto)."
       },
       memory: {
         label: "Memoria",

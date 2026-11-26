@@ -3038,7 +3038,7 @@ export const koMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       planning: {
         label: "계획",
-        helpText: "자율 추론 구성: 에이전트가 멈추기 전의 최대 추론 반복 횟수(1–100, 기본값 10)."
+        helpText: "자율 추론 구성: 모델 호출 횟수(호출 한 번과 그에 따른 도구 일괄 실행)로 세는 폭주 방지 퓨즈로, 이 횟수에 이르면 에이전트가 멈춥니다(1–1000, 기본값 10)."
       },
       memory: {
         label: "메모리",

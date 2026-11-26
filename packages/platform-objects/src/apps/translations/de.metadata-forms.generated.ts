@@ -3038,7 +3038,7 @@ export const deMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       planning: {
         label: "Planung",
-        helpText: "Konfiguration des autonomen Denkens: die maximale Anzahl an Denkdurchläufen, bevor der Agent stoppt (1–100, Standard 10)."
+        helpText: "Konfiguration des autonomen Denkens: eine Sicherung gegen endlose Schleifen, gezählt in Modellaufrufen (je ein Modellaufruf samt seinem Tool-Stapel), nach der der Agent stoppt (1–1000, Standard 10)."
       },
       memory: {
         label: "Gedächtnis",
