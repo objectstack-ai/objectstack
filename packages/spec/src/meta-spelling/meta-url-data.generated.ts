@@ -38,6 +38,7 @@ export const META_URL_TO_SINGULAR: Readonly<Record<string, string>> = Object.fre
   "tools": "tool",
   "skills": "skill",
   "aiContexts": "ai_context",
+  "knowledgeSources": "knowledge_source",
   "hooks": "hook",
   "mappings": "mapping",
   "picklists": "picklist",
@@ -59,6 +60,7 @@ export const META_URL_TO_SINGULAR: Readonly<Record<string, string>> = Object.fre
   "sharing_rules": "sharing_rule",
   "assignment_rules": "assignment_rule",
   "ai_contexts": "ai_context",
+  "knowledge_sources": "knowledge_source",
 });
 
 /**
@@ -99,4 +101,5 @@ export const REGISTRY_DECLARED_META_TYPES: ReadonlyArray<string> = Object.freeze
   "tool",
   "skill",
   "ai_context",
+  "knowledge_source",
 ]);

@@ -36,7 +36,7 @@ are `manifest`, `packages`, `objects`, `objectExtensions`, `picklists`,
 `datasets`, `actions`, `flows`, `jobs`,
 `emailTemplates`, `docs`, `books`, `positions`, `permissions`,
 `capabilities`, `sharingRules`, `queues`, `assignmentRules`, `apis`, `webhooks`, `api`, `server`,
-`agents`, `tools`, `skills`, `aiContexts`, `hooks`, `functions`, `mappings`,
+`agents`, `tools`, `skills`, `aiContexts`, `knowledgeSources`, `hooks`, `functions`, `mappings`,
 `analyticsCubes`, `connectors`, `data` (seed), `datasources`,
 `datasourceMapping`, `translations`, `i18n`, `plugins`, `devPlugins`,
 `devHint`, `devLogins`, `demoStaff`, `requires`, `tiers`, `onEnable`, `appName`, `email`, `sms`, `push`.
@@ -103,10 +103,10 @@ Every stack needs a `manifest`:
 ```typescript
 import { defineStack } from '@objectstack/spec';
 export default defineStack({ manifest: {
-  id: 'com.example.crm', // Reverse domain unique ID
+  id: 'com.example.crm', // Reverse-domain ID
   version: '1.0.0', // Semver
   type: 'app', // app | plugin | driver | module | ...
-  name: 'Acme CRM', // Human-readable display name
+  name: 'Acme CRM', // Display name
   description: 'CRM system', // Optional
   engines: { protocol: '^19' },
 } });

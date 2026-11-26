@@ -30,10 +30,12 @@
     "@objectstack/connector-rest": "workspace:*",
     "@objectstack/connector-slack": "workspace:*",
     "@objectstack/driver-sql": "workspace:*",
+    "@objectstack/knowledge-memory": "workspace:*",
     "@objectstack/organizations": "workspace:*",
     "@objectstack/runtime": "workspace:*",
     "@objectstack/service-datasource": "workspace:*",
     "@objectstack/service-i18n": "workspace:*",
+    "@objectstack/service-knowledge": "workspace:*",
     "@objectstack/service-print": "workspace:*",
     "@objectstack/service-record-context": "workspace:*",
     "@objectstack/spec": "workspace:*"

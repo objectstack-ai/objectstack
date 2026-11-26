@@ -608,16 +608,10 @@ export const EXPRESSION_SURFACE: ExprSurface[] = [
     proof: 'packages/runtime/src/job-schedule.test.ts',
     note: 'The ONE cron slot in the spec with a measured evaluator. `@objectstack/formula` cronEngine is NOT on this path — it has zero consumers outside packages/formula, and the five other cron slots once declared beside this one (the former `cron-declared-unwired` row: export schedules, flow schedule state, connector sync, cache warmup, DR backup/test) never reached it either; they were retired under ADR-0049 as declared-but-never-evaluated.',
   },
-  {
-    // The key and its documented hand-off arrived with #14825.
-    id: 'cron-knowledge-refresh',
-    summary: 'knowledge-source periodic reindex cron (KnowledgeRefreshPolicy.cron) — surfaced, deliberately not scheduled',
-    dialect: 'cron', mode: 'interpret', state: 'experimental', failPolicy: 'unevaluated',
-    enforcement:
-      'PARSE ONLY — `CronExpressionInputSchema` refuses a blank/non-string, non-envelope value and normalizes to `{dialect:"cron",source}`; nothing evaluates the result. service-knowledge/knowledge-service.ts reads `refresh.onRecordChange` and NEVER `refresh.cron` (measured: the only `refresh` reads in that package are the two `onRecordChange` sites)',
-    covers: ['ai/knowledge-source.zod.ts:KnowledgeRefreshPolicySchema.cron'],
-    note: 'EXPERIMENTAL by DESIGN — and that is why it survived the ADR-0049 retirement of the other declared-but-unwired cron slots (the former `cron-declared-unwired` row): the key documents its own hand-off — service-knowledge surfaces the value so an automation flow / external scheduler can call `reindexSource`, and the field docblock says so. Nothing in this repo schedules it, which is the intended state rather than an undelivered one. It still has no evaluator, so it is not `enforced`.',
-  },
+  // `cron-knowledge-refresh` sat here until the `knowledge_source` type's
+  // admission retired its one position, `ai/knowledge-source.zod.ts`
+  // `KnowledgeRefreshPolicySchema.cron` (ADR-0161 K6, #37304: nothing ever
+  // scheduled it; the key is a tombstone that names its migration).
   // `cron-declared-unwired` sat here until #16320 retired every position it
   // covered under ADR-0049 (the #15954 ruling, decision batch #56, option A —
   // retire — per family): `api/export.zod.ts` `ScheduledExportSchema.cronExpression`

@@ -1,21 +1,20 @@
 ---
 title: Knowledge Source — AI Protocol reference
 navTitle: Knowledge Source
-description: "Knowledge Source — declarative metadata describing what to index and which adapter to use."
+description: "Knowledge Source — the governed metadata type knowledge_source: what the knowledge service indexes, from which object, and through which adapter."
 ---
 
 {/* ⚠️  AUTO-GENERATED — DO NOT EDIT. Run build-docs.ts to regenerate. Hand-written docs live in the module folders under content/docs/. */}
 
-Knowledge Source — declarative metadata describing what to index and
-which adapter to use.
+Knowledge Source — the governed metadata type `knowledge_source`
+(ADR-0161 K4): what the knowledge service indexes, from which object, and
+through which adapter.
 
-A KnowledgeSource is the metadata-level equivalent of an
-`IDataEngine` driver binding: it pairs a logical source description
-(object/file/http) with the *id* of an `IKnowledgeAdapter` plugin
-that will actually do the work. The adapter resolves the id at
-runtime via `IKnowledgeService.registerAdapter`.
+One schema for every door (ADR-0005, ADR-0161 K4 point 3): a
+`*.knowledge-source.ts` file in a package, a save through Studio or MCP,
+and a registration in code all parse with `KnowledgeSourceSchema`.
 
-See `content/docs/protocol/knowledge.mdx` for the full design.
+See `content/docs/protocol/knowledge.mdx` for the design.
 
 <Callout type="info">
 **Source:** `packages/spec/src/ai/knowledge-source.zod.ts`
@@ -24,38 +23,12 @@ See `content/docs/protocol/knowledge.mdx` for the full design.
 ## TypeScript Usage
 
 ```typescript
-import { FileKnowledgeSourceSchema, HttpKnowledgeSourceSchema, KnowledgeRefreshPolicySchema, KnowledgeSourceSchema, KnowledgeSourceKindSchema, KnowledgeSplitSchema, KnowledgeSplitStrategySchema, ObjectKnowledgeSourceSchema } from '@objectstack/spec/ai';
-import type { FileKnowledgeSource, HttpKnowledgeSource, KnowledgeRefreshPolicy, KnowledgeSource, KnowledgeSourceKind, KnowledgeSplit, KnowledgeSplitStrategy, ObjectKnowledgeSource } from '@objectstack/spec/ai';
+import { KnowledgeRefreshPolicySchema, KnowledgeSourceSchema, KnowledgeSplitSchema, KnowledgeSplitStrategySchema, ObjectKnowledgeSourceSchema } from '@objectstack/spec/ai';
+import type { KnowledgeRefreshPolicy, KnowledgeSource, KnowledgeSplit, KnowledgeSplitStrategy, ObjectKnowledgeSource } from '@objectstack/spec/ai';
 
 // Validate data
-const result = FileKnowledgeSourceSchema.parse(data);
+const result = KnowledgeRefreshPolicySchema.parse(data);
 ```
-
----
-
-## FileKnowledgeSource
-
-### Properties
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **kind** | `'file'` | ✅ |  |
-| **prefix** | `string` | ✅ | Storage prefix |
-| **mimeTypes** | `string[]` | optional (default: `[]`) |  |
-
-
----
-
-## HttpKnowledgeSource
-
-### Properties
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **kind** | `'http'` | ✅ |  |
-| **urls** | `string[]` | ✅ |  |
-| **userAgent** | `string` | optional |  |
-
 
 ---
 
@@ -65,8 +38,8 @@ const result = FileKnowledgeSourceSchema.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **onRecordChange** | `boolean` | optional (default: `true`) |  |
-| **cron** | `string \| { dialect: 'cron'; source?: string; ast?: any; meta?: object }` | optional | Cron-dialect expression for a periodic full reindex. A bare string is shorthand for `{ dialect: 'cron', source }`; the parse enforces a non-empty string or an expression envelope and normalizes to the envelope — cron syntax is not checked here, and no engine evaluates this slot: the verdict belongs to whatever external scheduler you hand the value to. `service-knowledge` does not schedule it: the value is surfaced so an automation flow / external scheduler can trigger `reindexSource`. |
+| **onRecordChange** | `boolean` | optional (default: `true`) | Sync the index from record events (default true); false leaves the index to an external indexer |
+| **cron** | `never` | optional | [REMOVED] `knowledge_source.refresh.cron` was removed in @objectstack/spec 19.0.0 (ADR-0161 K6) — it was parsed and reached no engine: nothing ever scheduled a reindex from it. Delete the key. To rebuild on a schedule, call `reindexSource` from a flow or a job; keeping the index correct between events is the service's reconcile pass. Run `os migrate meta --from 18` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand. |
 
 
 ---
@@ -77,118 +50,43 @@ const result = FileKnowledgeSourceSchema.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **id** | `string` | ✅ | Snake_case source id |
+| **name** | `string` | ✅ | Source machine name (snake_case) — what search_knowledge lists and its sourceIds argument names |
+| **id** | `never` | optional | [REMOVED] `knowledge_source.id` was removed in @objectstack/spec 19.0.0 (ADR-0161 K6) — a knowledge source is a metadata item, and an item is identified by `name`; use `name`. Rename the key; the value is unchanged, so the source's index is found again and is not rebuilt. Run `os migrate meta --from 18` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand. |
 | **label** | `string` | ✅ |  |
 | **description** | `string` | optional |  |
 | **adapter** | `string` | ✅ | Adapter id |
-| **adapterConfig** | `Record<string, any>` | optional (default: `{}`) |  |
-| **source** | `{ kind: 'object'; object: string; contentFields: string[]; metadataFields?: string[]; … } \| { kind: 'file'; prefix: string; mimeTypes?: string[] } \| { kind: 'http'; urls: string[]; userAgent?: string }` | ✅ |  |
-| **embedding** | `{ provider: Enum<'openai' \| 'cohere' \| 'azure_openai' \| 'huggingface' \| 'local' \| 'custom'>; model: string; dimensions: integer; endpoint?: string; … }` | optional |  |
-| **vectorStore** | `{ provider: Enum<'pgvector' \| 'chroma' \| 'qdrant' \| 'pinecone' \| 'weaviate' \| 'milvus' \| 'redis' \| …>; collection: string; endpoint?: string; secretRef?: string; … }` | optional |  |
-| **refresh** | `{ onRecordChange?: boolean; cron?: string \| object }` | optional | Refresh / sync configuration; omitted parses to `{}` (the runtime default — the published input-shape JSON Schema cannot state it beside `cron`'s transform). |
+| **adapterConfig** | `never` | optional | [REMOVED] `knowledge_source.adapterConfig` was removed in @objectstack/spec 19.0.0 (ADR-0161 K6) — no adapter read it: its one reader was the retired RAGFlow adapter. Delete the key. An adapter takes its settings as options of the plugin that mounts it. Run `os migrate meta --from 18` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand. |
+| **source** | `{ kind: Enum<'object'>; object: string; content: string[]; metadataFields?: string[]; … }` | ✅ |  |
+| **embedding** | `never` | optional | [REMOVED] `knowledge_source.embedding` was removed in @objectstack/spec 19.0.0 (ADR-0161 K6) — it was never read: no service and no adapter chose a model from it. Delete the key. The embedder is configured once for the deployment, and every source is embedded by it. Run `os migrate meta --from 18` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand. |
+| **vectorStore** | `never` | optional | [REMOVED] `knowledge_source.vectorStore` was removed in @objectstack/spec 19.0.0 (ADR-0161 K6) — it was never read: no service and no adapter chose a store from it. Delete the key. The store is the adapter the deployment installs, named by `adapter`. Run `os migrate meta --from 18` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand. |
+| **refresh** | `{ onRecordChange?: boolean }` | optional (default: `{}`) | Refresh / sync configuration; omitted parses to `{}` |
 | **aiExposed** | `boolean` | optional (default: `true`) |  |
+| **_lock** | `Enum<'none' \| 'no-overlay' \| 'no-delete' \| 'full'>` | optional | Item-level lock — controls overlay & delete (ADR-0010). |
+| **_lockReason** | `string` | optional | Human-readable reason shown when a write is refused by _lock. |
+| **_lockSource** | `Enum<'artifact' \| 'package' \| 'env-forced'>` | optional | Layer that set _lock (artifact \| package \| env-forced). |
+| **_provenance** | `Enum<'package' \| 'org' \| 'env-forced' \| 'platform'>` | optional | Origin of the item (package \| org \| env-forced \| platform). |
+| **_packageId** | `string` | optional | Owning package machine id. |
+| **_packageVersion** | `string` | optional | Owning package version. |
+| **_lockDocsUrl** | `string` | optional | Optional documentation link surfaced next to _lockReason. |
 
-### Nested Shape: `KnowledgeSource.source[kind='object']`
+### Nested Shape: `KnowledgeSource.source`
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **kind** | `'object'` | ✅ |  |
+| **kind** | `Enum<'object'>` | ✅ | What the source indexes; `object` is the one kind |
 | **object** | `string` | ✅ | Short object name to index |
-| **contentFields** | `string[]` | ✅ | Fields contributing to document content |
+| **content** | `string[]` | ✅ | Fields whose text is indexed, in order; every name is listed (no wildcard) |
+| **contentFields** | `never` | optional | [REMOVED] `knowledge_source.source.contentFields` was removed in @objectstack/spec 19.0.0 (ADR-0161 K6) — the key is spelled `content` now that a source is a metadata item; use `content`. Rename the key; the value (a list of field names) is unchanged, except that a `'*'` member is no longer accepted and is replaced by the field names it stood for. Run `os migrate meta --from 18` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand. |
 | **metadataFields** | `string[]` | optional (default: `[]`) |  |
 | **where** | `Record<string, any>` | optional |  |
 | **split** | `{ strategy: Enum<'whole' \| 'recursive' \| 'markdown'>; maxChars?: integer; minChars?: integer }` | optional | How the service cuts this object's documents into passages; omitted means recursive |
-
-### Nested Shape: `KnowledgeSource.source[kind='file']`
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **kind** | `'file'` | ✅ |  |
-| **prefix** | `string` | ✅ | Storage prefix |
-| **mimeTypes** | `string[]` | optional (default: `[]`) |  |
-
-### Nested Shape: `KnowledgeSource.embedding`
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **provider** | `Enum<'openai' \| 'cohere' \| 'azure_openai' \| 'huggingface' \| 'local' \| 'custom'>` | ✅ |  |
-| **model** | `string` | ✅ | Provider-specific model identifier |
-| **dimensions** | `integer` | ✅ | Embedding vector dimensions |
-| **endpoint** | `string` | optional | Custom endpoint URL |
-| **secretRef** | `string` | optional | Reference to stored API key secret |
-
-### Nested Shape: `KnowledgeSource.vectorStore`
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **provider** | `Enum<'pgvector' \| 'chroma' \| 'qdrant' \| 'pinecone' \| 'weaviate' \| 'milvus' \| 'redis' \| …>` | ✅ |  |
-| **collection** | `string` | ✅ | Collection / index / namespace name |
-| **endpoint** | `string` | optional | Connection string or endpoint URL |
-| **secretRef** | `string` | optional | Reference to stored credential secret |
-| **dimensions** | `integer` | optional |  |
 
 ### Nested Shape: `KnowledgeSource.refresh`
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **onRecordChange** | `boolean` | optional (default: `true`) |  |
-| **cron** | `string \| { dialect: 'cron'; source?: string; ast?: any; meta?: object }` | optional | Cron-dialect expression for a periodic full reindex. A bare string is shorthand for `{ dialect: 'cron', source }`; the parse enforces a non-empty string or an expression envelope and normalizes to the envelope — cron syntax is not checked here, and no engine evaluates this slot: the verdict belongs to whatever external scheduler you hand the value to. `service-knowledge` does not schedule it: the value is surfaced so an automation flow / external scheduler can trigger `reindexSource`. |
-
-
----
-
-## KnowledgeSourceKind
-
-### Union Options
-
-This schema accepts one of the following structures:
-
-#### Option 1
-
-### Properties
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **kind** | `'object'` | ✅ |  |
-| **object** | `string` | ✅ | Short object name to index |
-| **contentFields** | `string[]` | ✅ | Fields contributing to document content |
-| **metadataFields** | `string[]` | optional (default: `[]`) |  |
-| **where** | `Record<string, any>` | optional |  |
-| **split** | `{ strategy: Enum<'whole' \| 'recursive' \| 'markdown'>; maxChars?: integer; minChars?: integer }` | optional | How the service cuts this object's documents into passages; omitted means recursive |
-
-### Nested Shape: `KnowledgeSourceKind[kind='object'].split`
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **strategy** | `Enum<'whole' \| 'recursive' \| 'markdown'>` | ✅ | Split strategy: whole, recursive or markdown |
-| **maxChars** | `integer` | optional | Longest passage in characters; wins over the settings default, the embedder limit can lower it |
-| **minChars** | `integer` | optional | Adjacent pieces shorter than this are merged up to it (default 200); a value above the effective maxChars reads as maxChars |
-
----
-
-#### Option 2
-
-### Properties
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **kind** | `'file'` | ✅ |  |
-| **prefix** | `string` | ✅ | Storage prefix |
-| **mimeTypes** | `string[]` | optional (default: `[]`) |  |
-
----
-
-#### Option 3
-
-### Properties
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **kind** | `'http'` | ✅ |  |
-| **urls** | `string[]` | ✅ |  |
-| **userAgent** | `string` | optional |  |
-
----
+| **onRecordChange** | `boolean` | optional (default: `true`) | Sync the index from record events (default true); false leaves the index to an external indexer |
+| **cron** | `never` | optional | [REMOVED] `knowledge_source.refresh.cron` was removed in @objectstack/spec 19.0.0 (ADR-0161 K6) — it was parsed and reached no engine: nothing ever scheduled a reindex from it. Delete the key. To rebuild on a schedule, call `reindexSource` from a flow or a job; keeping the index correct between events is the service's reconcile pass. Run `os migrate meta --from 18` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand. |
 
 
 ---
@@ -223,9 +121,10 @@ This schema accepts one of the following structures:
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **kind** | `'object'` | ✅ |  |
+| **kind** | `Enum<'object'>` | ✅ | What the source indexes; `object` is the one kind |
 | **object** | `string` | ✅ | Short object name to index |
-| **contentFields** | `string[]` | ✅ | Fields contributing to document content |
+| **content** | `string[]` | ✅ | Fields whose text is indexed, in order; every name is listed (no wildcard) |
+| **contentFields** | `never` | optional | [REMOVED] `knowledge_source.source.contentFields` was removed in @objectstack/spec 19.0.0 (ADR-0161 K6) — the key is spelled `content` now that a source is a metadata item; use `content`. Rename the key; the value (a list of field names) is unchanged, except that a `'*'` member is no longer accepted and is replaced by the field names it stood for. Run `os migrate meta --from 18` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand. |
 | **metadataFields** | `string[]` | optional (default: `[]`) |  |
 | **where** | `Record<string, any>` | optional |  |
 | **split** | `{ strategy: Enum<'whole' \| 'recursive' \| 'markdown'>; maxChars?: integer; minChars?: integer }` | optional | How the service cuts this object's documents into passages; omitted means recursive |
