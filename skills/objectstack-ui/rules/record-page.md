@@ -1,9 +1,9 @@
 # Record Page — the object declares it, the Console lays it out
 
-Read in order — each step is the remedy for the one before it; author `*.page.ts` only at step 3 or 4 (ADR-0085).
+Read in order: each step is the remedy for the one before it; author `*.page.ts` only at step 3 or 4 (ADR-0085).
 
 **1 · The object's declarations produce the page.** With no page assigned, the
-Console synthesizes the record page from the object alone: `nameField` is the
+Console synthesizes it from the object alone: `nameField` is the
 title, `stageField` the status tag beside it whose menu moves the stage (each
 option declares `kind: 'open' | 'won' | 'lost'`; `false` suppresses it); there is
 no stage bar or key-field strip (`highlightFields` feeds hover cards, pickers and
@@ -29,24 +29,24 @@ table among the fields, a parent group `{ key, label, relatedList: 'quote_line' 
 (no `fields`) places it there; its tab stays unless a declared `relatedLists` omits it.
 
 **3 · A slotted page overrides one slot.** `kind: 'slotted'` replaces only the
-slots it names — `header`, `actions`, `alerts`, `highlights`, `details`,
-`discussion` — each whole. There
-is no `tabs` slot: `slots.tabs`, `slots.related` and `slots.relatedLists` are
+slots it names (`header`, `actions`, `alerts`, `highlights`, `details`,
+`discussion`), each whole. No `tabs` slot: `slots.tabs`, `slots.related` and `slots.relatedLists` are
 refused by name. `isDefault: true` makes it the object's default record page.
 
-**4 · `kind: 'full'` is the escape hatch, on the desktop full page.** A record page
-that looks nothing like the default — a chart tab, a bespoke strip — is `kind: 'full'`: `regions` drawn as authored ([Pages](./pages.md)).
+**4 · `kind: 'full'` is the escape hatch, on the desktop full page.** A page
+that looks nothing like the default (a chart tab, a bespoke strip) is `kind: 'full'`: `regions` drawn as authored ([Pages](./pages.md)).
 A phone and the drawer draw the standard page (steps 1–3); no key keeps a full page
 there, only a page named in the URL (a print page) draws everywhere. The standard page
 draws no `record_section` action: one that must show there also lists `record_more`.
 
 **5 · On an object's list the name opens the page, its hover icon the drawer.**
 `navigation.mode` is deprecated there: `drawer`, `page`, `new_window` change
-nothing, so omit it; `none` still means rows open nothing (prefer
-`preventNavigation: true`); a page block's `navigation` honours every value;
-`modal` / `split` / `popover` are refused with their fix. A phone always pages.
+nothing, so omit it; for a new tab write `navigation: { openNewTab: true }`;
+`none` still opens nothing (prefer `preventNavigation: true`); a page block's
+`navigation` honours every value; `modal`/`split`/`popover` are refused with
+their fix. A phone always pages in place.
 
-**6 · The reader's own choices are not metadata.** ⛔ Never author these: the
+**6 · The reader's own choices are not metadata.** ⛔ Never author the
 tabs' order and hidden set (per user × object), the details column's and the
 drawer's dragged widths. On `navigation` only the `size`
 bucket (`sm`…`full`) nudges the drawer's starting width.
