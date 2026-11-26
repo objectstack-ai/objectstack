@@ -2537,9 +2537,6 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.studio.access.bannerPair': '本应用及 {package} 对象 · 保存后生效',
   // objectstack#35018 — the open set's origin in the builder's words (the Studio title note).
   'engine.studio.access.origin.app': '随应用提供',
-  // objectstack#35018 — the word before the open item's label on the copilot's 「正在看」 line.
-  'engine.studio.copilot.subject.access': '权限',
-  'engine.studio.copilot.subject.flow': '流程',
   'engine.studio.access.bannerTitlePair':
     '这个权限集属于 {package} 的定制，所以除本应用的对象外也列出 {package} 的对象；保存时只改这部分授权，其他应用给出的授权保持不变。改动在点击顶栏「保存」后立即生效。',
   'engine.studio.access.bannerTitleReadOnly':
@@ -3107,18 +3104,11 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.studio.notFound.packageList': '打开软件包列表',
   'engine.studio.notFound.allMetadata': '打开「组织流程」',
   'engine.studio.notFound.pillar': '页面不存在。Studio 没有“{pillar}”这一栏，请在上方选择数据、自动化、界面、权限或全部元数据。',
-  'engine.studio.aiCopilot': 'AI 助手',
-  // objectui#12725 — Studio 右栏：属性或 AI 助手二选一。
+  // objectui#12725 — Studio 右栏（属性面板）。
   'engine.studio.slot.label': '右栏',
-  'engine.studio.slot.switchHint': '⌘.（Ctrl+.）切换',
   'engine.studio.slot.collapse': '收起右栏',
   'engine.studio.slot.expand': '展开右栏',
-  'engine.studio.slot.backToChat': '回到对话',
-  'engine.studio.slot.planPending': '方案待确认',
-  'engine.studio.slot.pendingCount': '{count} 项待确认',
-  'engine.studio.slot.openFullPage': '在完整页面中打开',
-  // objectstack#34725 — 右栏标题栏的「历史」按钮与拖宽手柄。
-  'engine.studio.slot.history': '历史',
+  // objectstack#34725 — 右栏的拖宽手柄。
   'engine.studio.slot.resize': '调整右栏宽度',
   // objectstack#34725 — 画布上方那条提示：AI 助手的草稿改动落在画布上时出现。
   'engine.studio.copilotChanges.lineOne': 'AI 刚改了 {count} 处',

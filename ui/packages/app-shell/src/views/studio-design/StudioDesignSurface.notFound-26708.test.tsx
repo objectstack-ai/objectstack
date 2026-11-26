@@ -76,8 +76,6 @@ vi.mock('@object-ui/react', async (importOriginal) => {
 
 vi.mock('../../components/SuggestedBindingsPanel', () => ({ SuggestedBindingsPanel: () => null }));
 vi.mock('../metadata-admin/AccessExplainPanel', () => ({ AccessExplainPanel: () => null }));
-// A body to find: the right slot keeps its copilot mounted whatever its mode.
-vi.mock('./StudioAiCopilot', () => ({ StudioChatDock: () => <div data-testid="studio-chat-dock" /> }));
 vi.mock('../../preview/DraftChangesPanel', () => ({ DraftChangesPanel: () => null }));
 
 import { StudioDesignSurface } from './StudioDesignSurface';
@@ -278,21 +276,20 @@ describe('Studio: a pillar segment no pillar has renders a not-found state (obje
   });
 });
 
-describe('Studio: no copilot beside a package that is not there (objectstack#32615)', () => {
-  it('the built-in copilot slot is not mounted on the not-found state', async () => {
+describe('Studio: no right slot beside a package that is not there (objectstack#32615)', () => {
+  it('the right slot is not mounted on the not-found state', async () => {
     servePackages();
     renderAt(`/studio/${PHANTOM}/data`);
     await screen.findByTestId('studio-package-not-found');
-    expect(screen.queryByTestId('studio-chat-dock')).toBeNull();
     expect(screen.queryByTestId('studio-right-slot')).toBeNull();
   });
 
-  it('CONTROL — a listed package keeps its copilot', async () => {
+  it('CONTROL — a listed package keeps its right slot', async () => {
     const fetchMock = servePackages();
     renderAt(`/studio/${PACKAGE_ID}/data`);
     await listAnswered(fetchMock);
     expect(screen.queryByTestId('studio-package-not-found')).toBeNull();
-    expect(screen.getByTestId('studio-chat-dock')).toBeInTheDocument();
+    expect(screen.getByTestId('studio-right-slot')).toBeInTheDocument();
   });
 
   it('an injected copilot (the cloud `aiSlot`) is not drawn on the not-found state; CONTROL — it is on a listed package', async () => {

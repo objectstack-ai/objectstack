@@ -125,7 +125,6 @@ vi.mock('../metadata-admin/index.js', () => ({
   MetadataResourceEditPage: () => <div data-testid="area-page" />,
   MetadataResourceHistoryPage: () => <div data-testid="area-page" />,
 }));
-vi.mock('./StudioAiCopilot', () => ({ StudioChatDock: () => null }));
 vi.mock('../../preview/DraftChangesPanel', () => ({ DraftChangesPanel: () => null }));
 
 import { StudioDesignSurface } from './StudioDesignSurface';

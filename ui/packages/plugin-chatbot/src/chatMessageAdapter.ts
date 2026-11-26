@@ -20,7 +20,7 @@
  *     contract — what the React components actually render, so it is
  *     deliberately narrower (three roles, string timestamps) and carries
  *     render-only keys the authoring surface has no business declaring
- *     (`buildProgress`, `charts`).
+ *     (`charts`, `recordCitations`).
  *
  * Until this module they met as three `messages as any` casts, which erased
  * ALL of the drift rather than the parts that are intentional: a new authored
@@ -43,10 +43,9 @@
  * The adapter narrows the drifting fields **by name** and spreads the rest. It
  * deliberately does NOT rebuild the message field-by-field, because the values
  * arriving here are not always plain authored ones: in API mode they are
- * RUNTIME messages carrying `buildProgress`, `blueprintProgress`, `charts` and
- * tool invocations bearing the HITL / draft-review extensions. A field-by-field
- * rebuild would silently drop the approval cards, the "Review N changes"
- * affordance and the build panel.
+ * RUNTIME messages carrying `charts`, `recordCitations` and tool invocations
+ * bearing the HITL approval id. A field-by-field rebuild would silently drop
+ * the approval cards, the charts and the record citations.
  *
  * What changed in objectui#4424: those keys are no longer preserved *by faith*.
  * The hook used to declare its output as the authoring type and reach the
@@ -91,24 +90,15 @@ import type {
  */
 type RuntimeOnlyMessageKeys = Pick<
   RuntimeChatMessage,
-  'buildProgress' | 'blueprintProgress' | 'charts' | 'recordCitations'
+  'charts' | 'recordCitations'
 >;
 
 /**
- * The render-only TOOL-INVOCATION keys — the HITL approval id, the ADR-0033
- * draft review, the proposed plan / changes cards and the ADR-0057 P4 builder
- * handoff. `mapMessages.ts` lifts every one of them out of a tool result; the
- * authoring contract declares none of them. objectui#4424.
+ * The render-only TOOL-INVOCATION keys — the HITL approval id. `mapMessages.ts`
+ * lifts it out of a tool result; the authoring contract does not declare it.
+ * objectui#4424.
  */
-type RuntimeOnlyToolInvocationKeys = Pick<
-  RuntimeToolInvocation,
-  | 'pendingActionId'
-  | 'draftReview'
-  | 'proposedPlan'
-  | 'proposedChanges'
-  | 'builderHandoff'
-  | 'replayOutcome'
->;
+type RuntimeOnlyToolInvocationKeys = Pick<RuntimeToolInvocation, 'pendingActionId'>;
 
 /**
  * One tool invocation as it actually crosses this seam: the authoring contract,
@@ -238,8 +228,7 @@ export function toRuntimeToolState(
  * One authored tool invocation -> one runtime tool invocation.
  *
  * Only `state` drifts; everything else is spread through, which is what keeps
- * the runtime-only extensions (`pendingActionId`, `draftReview`,
- * `proposedPlan`, `proposedChanges`, `builderHandoff`) alive on the API-mode
+ * the runtime-only extension (`pendingActionId`) alive on the API-mode
  * path. Since objectui#4424 the parameter names them ({@link
  * SeamToolInvocation}), so `passthrough` carries them as declared properties
  * instead of as keys the compiler cannot see — see the module doc.

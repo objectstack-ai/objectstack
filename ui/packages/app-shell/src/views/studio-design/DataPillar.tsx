@@ -27,7 +27,6 @@ import {
   type DraftChange,
 } from '@object-ui/data-objectstack';
 import { resolveI18nLabel, type I18nLabel } from '@objectstack/spec/ui';
-import { type StudioSurfaceLabel } from './StudioAiCopilot.js';
 import { useStudioRightSlot } from './studioRightSlotState.js';
 import { StudioInspector } from './StudioInspector.js';
 import { agentDraftMarkOf, DraftChip, DraftSourceLine, isAgentDraftSurface } from './StudioDraftMark.js';
@@ -288,7 +287,6 @@ export function DataPillar({
   readOnly: packageReadOnly = false,
   customization = null,
   onHeldEditChange,
-  onSurfaceLabelChange,
   onReviewChanges,
 }: {
   packageId: string;
@@ -296,8 +294,6 @@ export function DataPillar({
   objectName: string;
   publishNonce?: number;
   onDraftSaved?: (saved?: StudioSavedDraft) => void;
-  /** objectstack#34725 — the open object's display label and tab, for the copilot's chip (see the Interfaces pillar's prop). */
-  onSurfaceLabelChange?: (surface: StudioSurfaceLabel | null) => void;
   /** objectstack#34725 — the copilot-changes line's 查看: open the package's pending changes. */
   onReviewChanges?: () => void;
   /** Courtesy gate: hide/disable metadata-authoring affordances (records stay usable). */
@@ -484,35 +480,6 @@ export function DataPillar({
   const designerTab = useObjectDesignerTab(toolTabs);
   const viewMode = designerTab.location.view;
   const toolTab = designerTab.location.tool;
-  // objectstack#34725 — lift the open object's label to the copilot's chip,
-  // with the tab in view: 「正在看：会议 · 记录」, never the machine name. The
-  // Interfaces pillar's report (objectui#8219) is the same seam; keyed on
-  // primitives, the callback read through a ref.
-  const onSurfaceLabelChangeRef = React.useRef(onSurfaceLabelChange);
-  React.useEffect(() => {
-    onSurfaceLabelChangeRef.current = onSurfaceLabelChange;
-  });
-  const currentObjectName = current.name;
-  const currentObjectLabel = current.label;
-  const viewModeLabel = t(
-    toolTab
-      ? `engine.studio.itemTabs.${toolTab.tab}`
-      : (OBJECT_DESIGNER_VIEWS.find((v) => v.view === viewMode)?.label ?? 'engine.studio.data.tab.records'),
-    locale,
-  );
-  React.useEffect(() => {
-    onSurfaceLabelChangeRef.current?.(
-      currentObjectName && currentObjectLabel
-        ? { type: 'object', name: currentObjectName, label: `${currentObjectLabel} · ${viewModeLabel}` }
-        : null,
-    );
-  }, [currentObjectName, currentObjectLabel, viewModeLabel]);
-  React.useEffect(
-    () => () => {
-      onSurfaceLabelChangeRef.current?.(null);
-    },
-    [],
-  );
   // objectui#11781 — the field inspector belongs to the view that opened it,
   // so a view switch closes it, the same act as its own Close: the selection
   // goes, and its blocking count expires with it (see `blockingReport`). Left

@@ -85,7 +85,6 @@ vi.mock('sonner', () => ({
 }));
 vi.mock('../../components/SuggestedBindingsPanel', () => ({ SuggestedBindingsPanel: () => null }));
 vi.mock('../metadata-admin/AccessExplainPanel', () => ({ AccessExplainPanel: () => null }));
-vi.mock('./StudioAiCopilot', () => ({ StudioChatDock: () => null }));
 /** objectstack#29691 — the sheet's "saved to" line, in the sheet's own words. */
 function SheetSavedTo({ baseLabel }: { baseLabel: string }) {
   const { t } = useObjectTranslation();

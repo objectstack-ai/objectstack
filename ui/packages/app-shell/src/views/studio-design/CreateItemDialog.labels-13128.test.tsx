@@ -44,7 +44,6 @@ vi.mock('./packages-io', async (importOriginal) => {
   };
 });
 
-vi.mock('./StudioAiCopilot', () => ({ StudioChatDock: () => null }));
 vi.mock('../../preview/DraftChangesPanel', () => ({ DraftChangesPanel: () => null }));
 
 import { StudioDesignSurface } from './StudioDesignSurface';

@@ -73,7 +73,6 @@ vi.mock('./packages-io', async (importOriginal) => {
 });
 
 // Docks irrelevant to the names under test — keep the render light.
-vi.mock('./StudioAiCopilot', () => ({ StudioChatDock: () => null }));
 vi.mock('../../preview/DraftChangesPanel', () => ({ DraftChangesPanel: () => null }));
 
 import { StudioDesignSurface } from './StudioDesignSurface';

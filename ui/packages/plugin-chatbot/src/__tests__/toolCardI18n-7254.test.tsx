@@ -27,59 +27,25 @@ function renderZh(ui: React.ReactElement) {
   );
 }
 
-const proposal: ChatbotEnhancedMessage = {
+const lookup: ChatbotEnhancedMessage = {
   id: 'a1',
   role: 'assistant',
   content: '',
   toolInvocations: [
     {
       toolCallId: 't1',
-      toolName: 'apply_edit',
+      toolName: 'query_records',
       state: 'output-available',
-      result: { status: 'changes_proposed', changes: [{ verb: 'add_field' }] },
-      proposedChanges: { changes: [{ verb: 'add_field', object: 'task', field: 'priority' }] },
-    },
-  ],
-};
-
-const plan: ChatbotEnhancedMessage = {
-  id: 'a2',
-  role: 'assistant',
-  content: '',
-  toolInvocations: [
-    {
-      toolCallId: 't2',
-      toolName: 'propose_blueprint',
-      state: 'output-available',
-      result: { status: 'blueprint_proposed', blueprint: {} },
-      proposedPlan: {
-        summary: '',
-        objects: [],
-        questions: [],
-        assumptions: [],
-        counts: { objects: 1, views: 1, dashboards: 1, seedData: 0 },
-      },
+      result: { records: [] },
     },
   ],
 };
 
 describe('tool cards under a zh console (objectui#7254)', () => {
   it('names the tool in Chinese instead of title-casing its internal name', () => {
-    renderZh(<ChatbotEnhanced messages={[proposal]} onSendMessage={vi.fn()} />);
-    expect(screen.getByText('应用这次修改')).toBeInTheDocument();
-    expect(screen.queryByText('Apply edit')).not.toBeInTheDocument();
-  });
-
-  it('localizes the header status badge, which carried its own English table', () => {
-    renderZh(<ChatbotEnhanced messages={[proposal]} onSendMessage={vi.fn()} />);
-    expect(screen.getByText('待确认')).toBeInTheDocument();
-    expect(screen.queryByText(/Awaiting/i)).not.toBeInTheDocument();
-  });
-
-  it('localizes the plan count strip, which was concatenated with an English "+ s" plural', () => {
-    renderZh(<ChatbotEnhanced messages={[plan]} onSendMessage={vi.fn()} />);
-    expect(screen.getByText('拟定应用方案')).toBeInTheDocument();
-    expect(screen.getByText('1 个对象 · 1 个视图 · 1 个仪表盘')).toBeInTheDocument();
+    renderZh(<ChatbotEnhanced messages={[lookup]} onSendMessage={vi.fn()} />);
+    expect(screen.getByText('查找相关记录')).toBeInTheDocument();
+    expect(screen.queryByText('Query records')).not.toBeInTheDocument();
   });
 
   it('an unknown / third-party tool still degrades to the English title-caser', () => {

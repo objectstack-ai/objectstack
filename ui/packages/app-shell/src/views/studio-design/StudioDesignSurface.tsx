@@ -31,22 +31,17 @@ import {
 import type { MetadataClient, MetadataError } from '@object-ui/data-objectstack';
 import { canonicalMetaUrlType } from '@objectstack/spec/shared';
 import { resolveI18nLabel, type I18nLabel } from '@objectstack/spec/ui';
-import { StudioChatDock, type StudioCopilotStatus, type StudioSurfaceLabel } from './StudioAiCopilot.js';
 import { StudioRightSlot } from './StudioRightSlot.js';
 import { CONSOLE_FULL_HEIGHT } from '../../layout/chromeBannerHost.js';
 import { StudioTitleRowProvider } from './studioTitleRow.js';
 import { useStudioAccentOnBody } from './studioAccent.js';
-import { AssistantTopBarButton } from '../../layout/AssistantTopBarButton.js';
-import { ChatDockControlProvider, type ChatDockControl } from '../../layout/chatDockControl.js';
 import {
   StudioRightSlotContext,
   matchStudioSlotShortcut,
   type StudioRightSlotHandle,
-  type StudioSlotMode,
 } from './studioRightSlotState.js';
 import {
   DOCK_STUDIO_EXPANDED_STORAGE_KEY,
-  maximizedDockWidth,
   readStoredDockExpanded,
   writeStoredDockExpanded,
 } from '../../layout/chatDockState.js';
@@ -505,10 +500,10 @@ function StudioDesignSurfaceBody({ aiSlot, area }: StudioDesignSurfaceProps): Re
   // confirm (rows expanded, focus on Publish all), Changes opens it to review.
   const [changesPosture, setChangesPosture] = React.useState<DraftChangesPosture>('review');
   // objectui#12894 — the drawer's one way in from outside the top bar:
-  // `?changes=review` (`studioChangesLink.ts`), written by the copilot's
-  // applied card (查看变更并发布). Opened to review, then the param is dropped
-  // (replace) so a refresh or a Back does not reopen it. Read on every change,
-  // not only at mount: the Studio copilot writes it while the surface is up.
+  // `?changes=review` (`studioChangesLink.ts`). Opened to review, then the
+  // param is dropped (replace) so a refresh or a Back does not reopen it. Read
+  // on every change, not only at mount: a link can write it while the surface
+  // is up.
   const [searchParams, setSearchParams] = useSearchParams();
   const changesRequest = searchParams.get(STUDIO_CHANGES_PARAM);
   React.useEffect(() => {
@@ -1068,9 +1063,7 @@ function StudioDesignSurfaceBody({ aiSlot, area }: StudioDesignSurfaceProps): Re
   }, [resolvePackageApp, publishNonce, draftNonce]);
 
   // objectui#12725 — the Studio grid is `[left: nav/tree] [center: canvas]
-  // [right: ONE slot, properties OR copilot]`. NOT keyed on the async agent
-  // catalog (that would flip the whole grid after load): on an agent-less env
-  // the slot holds the properties alone. An injected `aiSlot` (the cloud seam,
+  // [right: ONE slot, the properties]`. An injected `aiSlot` (the cloud seam,
   // ADR-0080) keeps the legacy left panel and the pillars' own asides — the
   // cloud edition migrates on its own schedule.
   const chatDockMode = !aiSlot;
@@ -1078,24 +1071,14 @@ function StudioDesignSurfaceBody({ aiSlot, area }: StudioDesignSurfaceProps): Re
   // in one line under the header, rather than leave the cramped layout to
   // speak for itself.
   const isMobile = useIsMobile();
-  // objectui#8219 — the Interfaces pillar's open leaf, lifted to the dock so
-  // the copilot's "discussing" chip reads its display label (objectui#7254).
-  // Display-only; the agent's context stays URL-derived. Other pillars report
-  // nothing, so their chip keeps reading `type · name`.
-  const [surfaceLabel, setSurfaceLabel] = React.useState<StudioSurfaceLabel | null>(null);
-
   // objectui#12725 — the one right slot (`StudioRightSlot`): the open item's
-  // properties OR the copilot, the maintainer's 「按「右栏二选一」定稿」. Not in
-  // the package-less scope: its one pillar keeps its own aside, and its build
-  // thread would be a package's, with no package here to build into
-  // (objectui#11553).
-  // objectstack#32615 — nor in a package that is not there (`pkgMissing`): its
-  // copilot would offer to "edit this app" and write drafts under an id no
-  // package has.
+  // properties. Not in the package-less scope: its one pillar keeps its own
+  // aside (objectui#11553).
+  // objectstack#32615 — nor in a package that is not there (`pkgMissing`).
   const slotHost = chatDockMode && packageId !== null && !pkgMissing;
-  // Shown or hidden from the top bar, remembered per tab under the key the
+  // Shown or hidden from the title row, remembered per tab under the key the
   // Studio dock kept its collapse in (#2477 item 2): an author who hid the
-  // copilot finds the slot hidden. Under `md` the slot overlays the page and
+  // slot finds it hidden. Under `md` the slot overlays the page and
   // starts closed — a phone must not open on a panel over the Studio.
   const [slotOpenStored, setSlotOpenStored] = React.useState(() =>
     readStoredDockExpanded(DOCK_STUDIO_EXPANDED_STORAGE_KEY, true),
@@ -1113,25 +1096,9 @@ function StudioDesignSurfaceBody({ aiSlot, area }: StudioDesignSurfaceProps): Re
     },
     [isMobile],
   );
-  // The copilot first: nothing is selected yet, and the card's slot opens on
-  // the conversation. A selection asks for the properties (`showProps`).
-  const [slotMode, setSlotMode] = React.useState<StudioSlotMode>('copilot');
   const [slotPropsTarget, setSlotPropsTarget] = React.useState<HTMLElement | null>(null);
   const [slotPropsClaims, setSlotPropsClaims] = React.useState(0);
-  const [copilotStatus, setCopilotStatus] = React.useState<StudioCopilotStatus>({
-    available: false,
-    planPendingCount: 0,
-  });
-  // objectstack#34610 — the copilot's expand control widens the slot in place
-  // (it used to navigate to `/ai/build`, losing this page).
-  const [copilotWide, setCopilotWide] = React.useState(false);
-  // objectstack#34725 — the copilot's history list, behind the slot header's History button.
-  const [copilotHistoryOpen, setCopilotHistoryOpen] = React.useState(false);
   const slotHasProps = slotPropsClaims > 0;
-  const copilotAvailable = copilotStatus.available;
-  // What the slot SHOWS: a missing half never shows.
-  const shownSlotMode: StudioSlotMode = !copilotAvailable ? 'props' : !slotHasProps ? 'copilot' : slotMode;
-  const slotHasContent = slotHasProps || copilotAvailable;
   const claimSlotProps = React.useCallback(() => {
     setSlotPropsClaims((n) => n + 1);
     return () => setSlotPropsClaims((n) => n - 1);
@@ -1146,46 +1113,26 @@ function StudioDesignSurfaceBody({ aiSlot, area }: StudioDesignSurfaceProps): Re
     setSlotOpenRef.current = setSlotOpen;
   });
   const [showSlotProps] = React.useState(() => () => {
-    setSlotMode('props');
     setSlotOpenRef.current(true);
   });
   const slotHandle = React.useMemo<StudioRightSlotHandle | null>(
     () =>
       slotHost
-        ? { propsTarget: slotPropsTarget, mode: shownSlotMode, claimProps: claimSlotProps, showProps: showSlotProps }
+        ? { propsTarget: slotPropsTarget, claimProps: claimSlotProps, showProps: showSlotProps }
         : null,
-    [slotHost, slotPropsTarget, shownSlotMode, claimSlotProps, showSlotProps],
+    [slotHost, slotPropsTarget, claimSlotProps, showSlotProps],
   );
-  // `⌘.` / `Ctrl+.` — a hidden slot opens; a shown one switches its halves.
+  // `⌘.` / `Ctrl+.` — a hidden slot opens.
   React.useEffect(() => {
     if (!slotHost) return;
     const onKey = (e: KeyboardEvent) => {
       if (!matchStudioSlotShortcut(e)) return;
       e.preventDefault();
-      if (!slotOpen) {
-        setSlotOpen(true);
-        return;
-      }
-      if (slotHasProps && copilotAvailable) setSlotMode(shownSlotMode === 'props' ? 'copilot' : 'props');
+      if (!slotOpen) setSlotOpen(true);
     };
     document.addEventListener('keydown', onKey);
     return () => document.removeEventListener('keydown', onKey);
-  }, [slotHost, slotOpen, setSlotOpen, slotHasProps, copilotAvailable, shownSlotMode]);
-  // objectstack#34725 — the top-bar robot's handle on the slot: pressed while
-  // the slot shows; a press hides it, or shows it on the AI assistant.
-  const openSlotOnCopilot = React.useCallback(() => {
-    setSlotMode('copilot');
-    setSlotOpen(true);
-  }, [setSlotOpen]);
-  const slotRobotControl = React.useMemo<ChatDockControl>(
-    () => ({
-      expanded: slotOpen,
-      fullWindow: copilotWide,
-      toggle: () => (slotOpen ? setSlotOpen(false) : openSlotOnCopilot()),
-      open: openSlotOnCopilot,
-    }),
-    [slotOpen, copilotWide, setSlotOpen, openSlotOnCopilot],
-  );
+  }, [slotHost, slotOpen, setSlotOpen]);
 
   /**
    * Host side of the live `?surface=` channel. Producers below the provider —
@@ -1345,16 +1292,9 @@ function StudioDesignSurfaceBody({ aiSlot, area }: StudioDesignSurfaceProps): Re
       <StudioSaveControls coordinator={saveBar} locale={locale} />
     ) : null;
   // objectui#12725 — the title row's right-most icon shows or hides the right
-  // slot; `⌘.` switches what it shows. objectstack#34725 — with a copilot
-  // served, that icon is the console top bar's robot (the same component),
-  // and it opens the slot on the AI assistant. Without one, the panel icon
-  // stays for the properties.
+  // slot, while a pillar has properties to show in it.
   const titleRowAssistant =
-    !slotHost || !slotHasContent ? null : copilotAvailable ? (
-      <ChatDockControlProvider value={slotRobotControl}>
-        <AssistantTopBarButton />
-      </ChatDockControlProvider>
-    ) : (
+    !slotHost || !slotHasProps ? null : (
       <button
         type="button"
         data-testid="studio-slot-toggle"
@@ -1384,7 +1324,7 @@ function StudioDesignSurfaceBody({ aiSlot, area }: StudioDesignSurfaceProps): Re
           draws takes the app's theme colour (decision 4 of #37424). */}
       <StudioMenuProvider className={cn(CONSOLE_FULL_HEIGHT.screen, 'min-h-0 overflow-hidden bg-background text-foreground', STUDIO_ACCENT)}>
         {/* The ADR-0080 `aiSlot` seam — a cloud edition may still inject its own
-          * left copilot panel; the built-in copilot is the RIGHT dock below. */}
+          * left copilot panel. */}
         {/* objectstack#32615 — not beside a package that is not there. */}
         {aiSlot && !pkgMissing ? (
           <aside className="w-64 shrink-0 overflow-auto border-r bg-muted/40">{aiSlot}</aside>
@@ -1551,7 +1491,7 @@ function StudioDesignSurfaceBody({ aiSlot, area }: StudioDesignSurfaceProps): Re
           <div
             className={cn('min-h-0 min-w-0 flex-1', STUDIO_PILLARS_HOST)}
             data-testid="studio-pillars-host"
-            data-studio-slot={slotHost && slotOpen && slotHasContent && !isMobile ? 'open' : 'closed'}
+            data-studio-slot={slotHost && slotOpen && slotHasProps && !isMobile ? 'open' : 'closed'}
           >
             {/* objectui#11272 — every pillar is keyed by package: a package
                 switch keeps this route mounted, and every piece of a pillar's
@@ -1577,7 +1517,6 @@ function StudioDesignSurfaceBody({ aiSlot, area }: StudioDesignSurfaceProps): Re
                   publishNonce={publishNonce}
                   onDraftSaved={onDraftSaved}
                   onHeldEditChange={setHeldEdit}
-                  onSurfaceLabelChange={setSurfaceLabel}
                 />
               ) : (
                 <Navigate to={studioOrgScopePath()} replace />
@@ -1614,7 +1553,6 @@ function StudioDesignSurfaceBody({ aiSlot, area }: StudioDesignSurfaceProps): Re
                 publishRefusalFor={publishRefusalFor}
                 // objectstack#36904, objectstack#36903 — the object and flow designers' reports, as the pillars' are.
                 onHeldEditChange={setHeldEdit}
-                onSurfaceLabelChange={setSurfaceLabel}
                 onReviewChanges={() => {
                   setChangesPosture('review');
                   setChangesOpen(true);
@@ -1678,36 +1616,16 @@ function StudioDesignSurfaceBody({ aiSlot, area }: StudioDesignSurfaceProps): Re
           </StudioPendingDraftsContext.Provider>
         </div>
 
-        {/* objectui#12725 — the one right slot: properties OR the copilot.
-          * The copilot is the same package-scoped build thread the dock held,
-          * self-gating on the agent catalog as it always has. */}
+        {/* objectui#12725 — the one right slot: the open item's properties. */}
         {slotHost && (
           <StudioRightSlot
             open={slotOpen}
-            mode={shownSlotMode}
-            onModeChange={setSlotMode}
             hasProps={slotHasProps}
-            copilotAvailable={copilotAvailable}
-            planPendingCount={copilotStatus.planPendingCount}
             propsTargetRef={setSlotPropsTarget}
-            wideWidth={copilotWide && !isMobile ? maximizedDockWidth(window.innerWidth) : undefined}
-            wide={copilotWide}
-            onWideChange={setCopilotWide}
-            historyOpen={copilotHistoryOpen}
-            onHistoryOpenChange={setCopilotHistoryOpen}
             onClose={() => setSlotOpen(false)}
             overlay={isMobile}
             onOverlayDismiss={() => setSlotOpen(false)}
             locale={locale}
-            copilot={
-              <StudioChatDock
-                packageId={packageId}
-                surfaceLabel={surfaceLabel}
-                onStatusChange={setCopilotStatus}
-                historyOpen={copilotHistoryOpen}
-                onHistoryOpenChange={setCopilotHistoryOpen}
-              />
-            }
           />
         )}
 

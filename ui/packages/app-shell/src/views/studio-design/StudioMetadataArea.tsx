@@ -68,7 +68,6 @@ import { BUNDLE_MEMBER_PARAM, getMetadataResource } from '../metadata-admin/regi
 import { ITEM_TOOL_TAB_PARAM } from '../item-tools/ItemToolTabs.js';
 import type { StudioBaseCustomization } from './StudioDesignSurface.js';
 import type { StudioRefusal } from './metadataError.js';
-import type { StudioSurfaceLabel } from './StudioAiCopilot.js';
 
 /*
  * The pages load with the area, through the specifier `AppContent` loads them
@@ -146,8 +145,6 @@ interface AreaEditorProps {
   publishRefusalFor?: (type: string, name: string) => StudioRefusal | null;
   /** objectstack#36903 — the area is the package-less scope's: its flows open writable, with no package. */
   orgScope?: boolean;
-  /** objectstack#36904, objectstack#36905, objectstack#36903 — a designer page's open item label, for the copilot's chip. */
-  onSurfaceLabelChange?: (surface: StudioSurfaceLabel | null) => void;
   /** objectstack#36904, objectstack#36903 — the object and flow designers' held edit, reported to the surface. */
   onHeldEditChange?: (clause: string | null) => void;
   /** The object designer's copilot-changes line opens the surface's Changes. */
@@ -218,7 +215,6 @@ function AreaItemOpen({
           publishNonce={editor.publishNonce}
           onDraftSaved={editor.onDraftSaved}
           onHeldEditChange={editor.onHeldEditChange}
-          onSurfaceLabelChange={editor.onSurfaceLabelChange}
           onReviewChanges={editor.onReviewChanges}
         />
       </div>
@@ -238,7 +234,6 @@ function AreaItemOpen({
           publishNonce={editor.publishNonce}
           onDraftSaved={editor.onDraftSaved}
           onHeldEditChange={editor.onHeldEditChange}
-          onSurfaceLabelChange={editor.onSurfaceLabelChange}
         />
       </div>
     );
@@ -252,7 +247,6 @@ function AreaItemOpen({
         readOnly={host.readOnly}
         publishNonce={editor.publishNonce}
         onDraftSaved={editor.onDraftSaved ? () => editor.onDraftSaved?.({ type, name }) : undefined}
-        onSurfaceLabelChange={editor.onSurfaceLabelChange}
       />
     );
   }
@@ -419,13 +413,6 @@ export interface StudioMetadataAreaProps {
    * (`studioScope.ts`), so its host is read-only to the list's create.
    */
   orgScope?: boolean;
-  /**
-   * objectstack#36905, objectstack#36904, objectstack#36903 — told the open
-   * designer page's item label (the permission set's, the object's, the
-   * flow's), for the copilot's chip, as a
-   * pillar tells it.
-   */
-  onSurfaceLabelChange?: (surface: StudioSurfaceLabel | null) => void;
   /** objectstack#36904, objectstack#36903 — handed to the object and flow designers (`AreaEditorProps`). */
   onHeldEditChange?: (clause: string | null) => void;
   onReviewChanges?: () => void;
@@ -439,7 +426,6 @@ export function StudioMetadataArea({
   publishRefusalFor,
   orgScope = false,
   onHeldEditChange,
-  onSurfaceLabelChange,
   onReviewChanges,
 }: StudioMetadataAreaProps): React.ReactElement {
   const { pathname, search } = useLocation();
@@ -480,7 +466,6 @@ export function StudioMetadataArea({
     publishRefusalFor,
     orgScope,
     onHeldEditChange,
-    onSurfaceLabelChange,
     onReviewChanges,
   };
 

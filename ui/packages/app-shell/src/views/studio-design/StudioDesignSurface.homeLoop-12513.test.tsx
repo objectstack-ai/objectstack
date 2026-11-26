@@ -86,7 +86,6 @@ const mockClient = vi.hoisted(() => ({
 
 /** What the surface handed the pending-changes sheet, last render. */
 const panel = vi.hoisted(() => ({ props: null as null | Record<string, unknown> }));
-const chatDock = vi.hoisted(() => ({ mounts: 0 }));
 
 vi.mock('../metadata-admin/useMetadata', async (importOriginal) => {
   const mod = await importOriginal<typeof import('../metadata-admin/useMetadata')>();
@@ -106,13 +105,6 @@ vi.mock('@object-ui/react', async (importOriginal) => {
   const mod = await importOriginal<typeof import('@object-ui/react')>();
   return { ...mod, useAdapter: () => dataSource };
 });
-
-vi.mock('./StudioAiCopilot', () => ({
-  StudioChatDock: () => {
-    chatDock.mounts += 1;
-    return null;
-  },
-}));
 
 vi.mock('../../preview/DraftChangesPanel', () => ({
   DraftChangesPanel: (props: Record<string, unknown>) => {
@@ -189,7 +181,6 @@ beforeEach(() => {
   server.publishedByRef.length = 0;
   server.packageBatches.length = 0;
   panel.props = null;
-  chatDock.mounts = 0;
   for (const fn of Object.values(mockClient)) (fn as unknown as { mockClear: () => void }).mockClear();
   // Two packaged flows on the read-only showcase, and the clone, which names no package.
   seed(flow('showcase_urgent_task_alert', 'Urgent task alert', SHOWCASE));

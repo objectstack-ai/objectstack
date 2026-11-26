@@ -59,7 +59,6 @@ vi.mock('sonner', () => ({
 }));
 vi.mock('../../components/SuggestedBindingsPanel', () => ({ SuggestedBindingsPanel: () => null }));
 vi.mock('../metadata-admin/AccessExplainPanel', () => ({ AccessExplainPanel: () => null }));
-vi.mock('./StudioAiCopilot', () => ({ StudioChatDock: () => null }));
 
 /** Each mounted panel's latest props: the top bar's sheet, and the Pending tab's (`embedded`). */
 const panels: { sheet: Record<string, unknown> | null; embedded: Record<string, unknown> | null } = { sheet: null, embedded: null };
