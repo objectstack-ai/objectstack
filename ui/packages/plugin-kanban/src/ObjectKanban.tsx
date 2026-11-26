@@ -1745,7 +1745,10 @@ export const ObjectKanban: React.FC<ObjectKanbanComponentProps> = ({
       : undefined;
   const laneStatisticQuestion = useMemo((): string => {
     if (!laneReadAsked || !flatLanes || !schema.groupBy) return '';
-    if (typeof dataSource?.queryGroupHeaders !== 'function') return '';
+    // Asked once the definition settles: what it asks (the statistic, the
+    // header total) is gated on the definition, and an earlier ask would be a
+    // second read the moment it settles.
+    if (!objectDefReady || typeof dataSource?.queryGroupHeaders !== 'function') return '';
     const statistic = statisticFieldDrawable && isLaneAggregate(statisticType) && statisticField
       ? { type: statisticType, field: statisticField }
       : undefined;
@@ -1759,7 +1762,7 @@ export const ObjectKanban: React.FC<ObjectKanbanComponentProps> = ({
       searchFields: hostSearch.$searchFields,
     });
     return query ? JSON.stringify([schema.objectName, query]) : '';
-  }, [laneReadAsked, flatLanes, hostLaneRead, headerTotalField, statisticFieldDrawable, statisticType, statisticField, schema.groupBy, schema.objectName, dataSource, hostSearchKey, queryFilter]);
+  }, [laneReadAsked, flatLanes, objectDefReady, hostLaneRead, headerTotalField, statisticFieldDrawable, statisticType, statisticField, schema.groupBy, schema.objectName, dataSource, hostSearchKey, queryFilter]);
   type LaneReadAnswer = {
     question: string;
     figures: Record<string, LaneFigure> | null;
