@@ -75,7 +75,7 @@
 
 import { stripReadDecorations } from '@objectstack/spec/kernel';
 import { emitMetadataRefresh } from '../assistant/assistantBus.js';
-import { isDraftVersionConflict, publishedPinOf, type DraftPin } from '../views/metadata-admin/DraftConflictDialog.js';
+import { draftReceiptVersion, isDraftVersionConflict, publishedPinOf, type DraftPin } from '../views/metadata-admin/DraftConflictDialog.js';
 import { overrideDraftBody } from '../views/studio-design/StudioCustomizeControls.js';
 import {
   ensureCustomizationPackage,
@@ -115,7 +115,11 @@ export interface AppMenuSaveDoors {
   readonly client: {
     layered: (type: string, name: string, options: { packageId?: string }) => Promise<unknown>;
     save: (type: string, name: string, body: unknown, options: Record<string, unknown>) => Promise<unknown>;
-    publish: (type: string, name: string, options: { packageId?: string; ifMatch?: string; ifNoneMatch?: '*' }) => Promise<unknown>;
+    publish: (
+      type: string,
+      name: string,
+      options: { packageId?: string; ifMatch?: string; ifNoneMatch?: '*'; draftVersion?: string },
+    ) => Promise<unknown>;
     reset: (type: string, name: string, options: Record<string, unknown>) => Promise<unknown>;
   };
 }
@@ -328,21 +332,30 @@ export async function writeAppMenu(
       return;
     }
   }
+  let draftVersion: string | undefined;
   try {
-    await doors.client.save('app', appName, body, { mode: 'draft', packageId: target, ifNoneMatch: '*' });
+    draftVersion = draftReceiptVersion(
+      await doors.client.save('app', appName, body, { mode: 'draft', packageId: target, ifNoneMatch: '*' }),
+    );
   } catch (err) {
     if (isDraftVersionConflict(err)) throw Object.assign(new Error(texts.pendingDraft), { cause: err });
     throw err;
   }
   try {
-    await doors.client.publish('app', appName, { packageId: target, ...(publishPin ?? {}) });
+    // objectstack#37440 — pinned to the draft this save wrote (its receipt's
+    // version) beside the published row it was composed over.
+    await doors.client.publish('app', appName, {
+      packageId: target,
+      ...(publishPin ?? {}),
+      ...(draftVersion ? { draftVersion } : {}),
+    });
   } catch (err) {
-    try {
-      await doors.client.reset('app', appName, { state: 'draft', packageId: target });
-    } catch (discardErr) {
-      console.error('[design-mode] a refused publish left the menu draft pending:', discardErr);
-    }
+    // objectstack#37440 — the discard is pinned to the same draft, which is
+    // also what tells the two refusals apart: a draft that moved (another
+    // writer's change is in it) refuses the discard and stays pending.
+    const moved = await discardOwnDraft(doors, 'app', appName, target, draftVersion, 'the menu draft');
     emitMetadataRefresh();
+    if (moved) throw Object.assign(new Error(texts.pendingDraft), { cause: err });
     // A publish somebody landed since the read: nothing went live.
     if (texts.publishedMoved && isDraftVersionConflict(err)) throw Object.assign(new Error(texts.publishedMoved), { cause: err });
     throw err;
@@ -421,8 +434,11 @@ async function writeMenuTranslation(
   }
   const body = { ...stored, name: write.name, locale: write.locale, apps: { ...apps, [appName]: { ...app, navigation } } };
   const pin = publishPinAt(layers);
+  let draftVersion: string | undefined;
   try {
-    await doors.client.save('translation', write.name, body, { mode: 'draft', packageId: target, ifNoneMatch: '*' });
+    draftVersion = draftReceiptVersion(
+      await doors.client.save('translation', write.name, body, { mode: 'draft', packageId: target, ifNoneMatch: '*' }),
+    );
   } catch (err) {
     if (isDraftVersionConflict(err)) {
       throw Object.assign(new Error(texts.translationPendingDraft ?? texts.pendingDraft), { cause: err });
@@ -430,15 +446,44 @@ async function writeMenuTranslation(
     throw err;
   }
   try {
-    await doors.client.publish('translation', write.name, { packageId: target, ...(pin ?? {}) });
+    // objectstack#37440 — pinned to the draft this save wrote, as the menu's is.
+    await doors.client.publish('translation', write.name, {
+      packageId: target,
+      ...(pin ?? {}),
+      ...(draftVersion ? { draftVersion } : {}),
+    });
   } catch (err) {
-    try {
-      await doors.client.reset('translation', write.name, { state: 'draft', packageId: target });
-    } catch (discardErr) {
-      console.error('[design-mode] a refused publish left the menu translation draft pending:', discardErr);
-    }
+    const moved = await discardOwnDraft(doors, 'translation', write.name, target, draftVersion, 'the menu translation draft');
+    if (moved) throw Object.assign(new Error(texts.translationPendingDraft ?? texts.pendingDraft), { cause: err });
     if (texts.publishedMoved && isDraftVersionConflict(err)) throw Object.assign(new Error(texts.publishedMoved), { cause: err });
     throw err;
+  }
+}
+
+/**
+ * objectstack#37440 — take back the draft a refused publish leaves, pinned
+ * (`If-Match`) to the version this save's own draft write returned, so the
+ * server removes that draft only. Answers whether the draft MOVED: another
+ * writer's change is in it, the discard is refused `409 METADATA_CONFLICT`,
+ * and it stays pending — which also says the publish's refusal was the draft
+ * pin's, not the published row's. Any other failure is logged and the draft
+ * stays pending, as before.
+ */
+async function discardOwnDraft(
+  doors: Pick<AppMenuSaveDoors, 'client'>,
+  type: string,
+  name: string,
+  packageId: string,
+  draftVersion: string | undefined,
+  what: string,
+): Promise<boolean> {
+  try {
+    await doors.client.reset(type, name, { state: 'draft', packageId, ...(draftVersion ? { ifMatch: draftVersion } : {}) });
+    return false;
+  } catch (discardErr) {
+    if (draftVersion && isDraftVersionConflict(discardErr)) return true;
+    console.error(`[design-mode] a refused publish left ${what} pending:`, discardErr);
+    return false;
   }
 }
 

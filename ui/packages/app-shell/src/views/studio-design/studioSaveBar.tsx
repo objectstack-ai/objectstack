@@ -45,6 +45,8 @@ import { emitMetadataRefresh } from '../../assistant/assistantBus.js';
 import { t, tFormat } from '../metadata-admin/i18n.js';
 import { LINT_DEBOUNCE_MS } from '../metadata-admin/celLintDebounce.js';
 import {
+  isDraftVersionConflict,
+  isPublishDraftMoved,
   publishedPinOf,
   type BeforeReloadOutcome,
   type DraftPin,
@@ -253,6 +255,19 @@ export function useStudioSaveCoordinator(locale: string): StudioSaveCoordinator 
   return { registry, dirty, saving, save, cancel };
 }
 
+/** The item a Save wrote, at the address its draft save wrote it. */
+export interface SavedItem {
+  type: string;
+  name: string;
+  packageId: string | null;
+  /**
+   * objectstack#37440 — the version the Save's own draft write returned (its
+   * receipt's `version`), which pins the publish to that draft. Absent, the
+   * publish goes unpinned, as before.
+   */
+  draftVersion?: string;
+}
+
 /** What an unpinned {@link publishSavedItem} did. */
 export type UnpinnedPublishOutcome =
   | { ok: true }
@@ -318,7 +333,11 @@ export function publishedPinOfLayers(layered: unknown): DraftPin | null {
  * `If-None-Match: *`: no live row was there when the create checked, so a row
  * another writer published under the name since is refused `409` instead of
  * replaced. For a create with no loaded buffer to reload (a new flow), the
- * refusal is the create's own: no dialog is asked.
+ * refusal is the create's own: no dialog is asked. objectstack#37440 — the
+ * create's own draft pin (`options.draftVersion`, its receipt) rides beside
+ * it; a refusal by either pin is the create's, and the discard
+ * {@link publishSavedItem} pins to the same receipt removes the create's
+ * draft only while it is still the create's own.
  */
 export const publishCreated: PinnedPublish = async (client, type, name, options = {}) => {
   await client.publish(type, name, { ...options, ifNoneMatch: '*' });
@@ -341,30 +360,48 @@ export const publishCreated: PinnedPublish = async (client, type, name, options 
  * instead of replacing it. Omitted, the publish is unpinned, as before.
  * objectstack#36726 — every Studio editor that saves this way passes it; a
  * create passes {@link publishCreated} where no buffer is loaded behind it.
+ *
+ * objectstack#37440 — `item.draftVersion`, the version the Save's OWN draft
+ * write returned (its receipt's `version`; `heldDraftVersion` right after a
+ * guarded save), pins the publish to that draft: a draft another writer
+ * changed in between is refused `409 METADATA_CONFLICT` and nothing is
+ * published on their behalf. That draft now holds the other writer's change,
+ * so it is ⛔ never discarded: the outcome is a refusal with the draft kept.
+ * Every discard of the Save's own draft is pinned to the same version
+ * (`If-Match`), so the server removes only that draft, never one that moved.
+ * Absent (a receipt without a version), both go unpinned, as before.
  */
 export async function publishSavedItem(
-  client: Pick<MetadataClient, 'publish' | 'reset'>,
-  item: { type: string; name: string; packageId: string | null },
+  client: Pick<MetadataClient, 'publish' | 'reset' | 'getDraft'>,
+  item: SavedItem,
   hadDraft: boolean,
 ): Promise<UnpinnedPublishOutcome>;
 export async function publishSavedItem(
-  client: Pick<MetadataClient, 'publish' | 'reset'>,
-  item: { type: string; name: string; packageId: string | null },
+  client: Pick<MetadataClient, 'publish' | 'reset' | 'getDraft'>,
+  item: SavedItem,
   hadDraft: boolean,
   pinned: PinnedPublish,
 ): Promise<PublishSavedOutcome>;
 export async function publishSavedItem(
-  client: Pick<MetadataClient, 'publish' | 'reset'>,
-  item: { type: string; name: string; packageId: string | null },
+  client: Pick<MetadataClient, 'publish' | 'reset' | 'getDraft'>,
+  item: SavedItem,
   hadDraft: boolean,
   pinned?: PinnedPublish,
 ): Promise<PublishSavedOutcome> {
   const scope = item.packageId ? { packageId: item.packageId } : {};
+  const { draftVersion } = item;
+  // objectstack#37440 — the publish names the draft the Save wrote; a discard removes only that draft.
+  const publishScope = draftVersion ? { ...scope, draftVersion } : scope;
+  const discardScope = { state: 'draft' as const, ...scope, ...(draftVersion ? { ifMatch: draftVersion } : {}) };
+  // The refusal is the draft pin's: the guard said so (rule 10), or no other
+  // pin was sent that a `409 METADATA_CONFLICT` could be.
+  const draftMoved = (error: unknown): boolean =>
+    isPublishDraftMoved(error) || (!pinned && !!draftVersion && isDraftVersionConflict(error));
   let draftDiscarded = false;
   const discardSavedDraft = async (): Promise<void> => {
     if (hadDraft) return;
     try {
-      await client.reset(item.type, item.name, { state: 'draft', ...scope });
+      await client.reset(item.type, item.name, discardScope);
       draftDiscarded = true;
     } catch (discardError) {
       // The draft stays pending, listed under Changes, where it can be discarded.
@@ -382,7 +419,7 @@ export async function publishSavedItem(
   // pinned to the published version the conflict was raised on.
   const discardBeforeReload = async (): Promise<BeforeReloadOutcome> => {
     if (hadDraft) return 'kept';
-    await client.reset(item.type, item.name, { state: 'draft', ...scope });
+    await client.reset(item.type, item.name, discardScope);
     draftDiscarded = true;
     return 'discarded';
   };
@@ -390,16 +427,17 @@ export async function publishSavedItem(
     if (pinned) {
       // A reload takes the saved draft back BEFORE the buffer is re-read, so
       // the re-read installs the live row, never the draft that lost.
-      const outcome = await pinned(client, item.type, item.name, scope, discardBeforeReload);
+      const outcome = await pinned(client, item.type, item.name, publishScope, discardBeforeReload);
       if (outcome === 'reloaded') {
         emitMetadataRefresh();
         return { ok: false, reloaded: true, draftDiscarded };
       }
     } else {
-      await client.publish(item.type, item.name, scope);
+      await client.publish(item.type, item.name, publishScope);
     }
   } catch (error) {
-    await discardSavedDraft();
+    // objectstack#37440 — another writer's change is in the draft now: kept.
+    if (!draftMoved(error)) await discardSavedDraft();
     emitMetadataRefresh();
     return { ok: false, error, draftDiscarded };
   }

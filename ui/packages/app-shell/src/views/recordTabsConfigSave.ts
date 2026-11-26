@@ -33,7 +33,7 @@
 
 import { stripReadDecorations } from '@objectstack/spec/kernel';
 import { emitMetadataRefresh } from '../assistant/assistantBus.js';
-import { isDraftVersionConflict } from './metadata-admin/DraftConflictDialog.js';
+import { draftReceiptVersion, isDraftVersionConflict } from './metadata-admin/DraftConflictDialog.js';
 import {
   ensureCustomizationPackage,
   fetchListedPackageManifests,
@@ -53,7 +53,7 @@ export interface RecordTabsSaveDoors {
     get: (type: string, name: string, options: { packageId?: string }) => Promise<unknown>;
     layered: (type: string, name: string, options: { packageId?: string }) => Promise<unknown>;
     save: (type: string, name: string, body: unknown, options: Record<string, unknown>) => Promise<unknown>;
-    publish: (type: string, name: string, options: { packageId?: string }) => Promise<unknown>;
+    publish: (type: string, name: string, options: { packageId?: string; draftVersion?: string }) => Promise<unknown>;
     reset: (type: string, name: string, options: Record<string, unknown>) => Promise<unknown>;
   };
   /** Announces the object changed, so the console reads it again (`emitMetadataRefresh`). */
@@ -156,21 +156,37 @@ export async function saveRecordTabs(
   const entries = recordTabsEntries(draft, base, catalog, initial);
   const { relatedLists: _previous, ...rest } = stored;
   const body: Record<string, unknown> = { ...rest, name: objectName, ...(entries ? { relatedLists: entries } : {}) };
+  let draftVersion: string | undefined;
   try {
-    await doors.client.save('object', objectName, body, { mode: 'draft', packageId: target.packageId, ifNoneMatch: '*' });
+    draftVersion = draftReceiptVersion(
+      await doors.client.save('object', objectName, body, { mode: 'draft', packageId: target.packageId, ifNoneMatch: '*' }),
+    );
   } catch (err) {
     if (isDraftVersionConflict(err)) throw Object.assign(new Error(texts.pendingDraft), { cause: err });
     throw err;
   }
+  // objectstack#37440 — the publish is pinned to the draft this save wrote
+  // (its receipt's version): a draft another writer changed in between is
+  // refused, and nothing is published on their behalf.
+  const pin = draftVersion ? { draftVersion } : {};
   try {
-    await doors.client.publish('object', objectName, { packageId: target.packageId });
+    await doors.client.publish('object', objectName, { packageId: target.packageId, ...pin });
   } catch (err) {
+    // The discard is pinned to the same draft: one that moved holds the
+    // other writer's change, is refused, and stays pending, said as such.
+    let moved = false;
     try {
-      await doors.client.reset('object', objectName, { state: 'draft', packageId: target.packageId });
+      await doors.client.reset('object', objectName, {
+        state: 'draft',
+        packageId: target.packageId,
+        ...(draftVersion ? { ifMatch: draftVersion } : {}),
+      });
     } catch (discardErr) {
-      console.error('[record-tabs] a refused publish left the object draft pending:', discardErr);
+      moved = !!draftVersion && isDraftVersionConflict(discardErr);
+      if (!moved) console.error('[record-tabs] a refused publish left the object draft pending:', discardErr);
     }
     doors.refreshed();
+    if (moved) throw Object.assign(new Error(texts.pendingDraft), { cause: err });
     throw err;
   }
   doors.refreshed();
