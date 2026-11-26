@@ -133,6 +133,33 @@ export const StarterTranslationBundle = defineTranslationBundle({
         description: '公司和联系人，以及任务和备忘',
       },
     },
+    datasets: {
+      starter_company_metrics: {
+        label: '公司统计',
+        description: '公司有多少家，按类型和行业分',
+        dimensions: {
+          type: { label: '类型', description: '公司与本组织的关系：潜在客户、客户、合作伙伴、供应商或其他。' },
+          industry: {
+            label: '行业',
+            description: '公司所在的行业：科技、制造、零售、金融、医疗、教育或其他。未填行业的公司归入“无行业”。',
+          },
+        },
+        measures: {
+          company_count: { label: '公司数', description: '公司有多少家，不论类型。' },
+        },
+      },
+      starter_contact_metrics: {
+        label: '联系人统计',
+        description: '联系人有多少位，按公司和影响力分',
+        dimensions: {
+          company: { label: '公司', description: '联系人所在的公司，结果显示公司名称。没有公司的联系人归入“无公司”。' },
+          influence: { label: '影响力', description: '联系人在公司决策中的分量：决策人、影响者、使用者或其他。' },
+        },
+        measures: {
+          contact_count: { label: '联系人数', description: '联系人有多少位。' },
+        },
+      },
+    },
     dashboards: {
       starter_overview_dashboard: {
         label: '概览',
