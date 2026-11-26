@@ -118,7 +118,7 @@ describe('mintAuthoringToken — both shapes of the authorize redirect', () => {
   it('records a redirect that carries an error as the refusal of the authorization step, without consenting', async () => {
     shape = 'json-error';
     const r = await mintAuthoringToken(base, COOKIE, 'openid metadata:write');
-    expect(r).toMatchObject({ ok: false, status: 200, code: 'invalid_scope' });
+    expect(r).toMatchObject({ ok: false, status: 200, code: 'invalid_scope' }); // adr0112-ok: RFC 6749 OAuth error the authorization server redirects with, not an error.code
     expect(r.message).toBe('authorization: The following scopes are invalid: metadata:write');
     expect(r.token).toBeUndefined();
     expect(consentCall()).toBeUndefined();
