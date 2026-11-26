@@ -39,7 +39,7 @@ export interface RecordCitationsProps {
 }
 
 /** What a citation opens: its `object` and `id` (the root record), and its `anchor` when it names one. */
-export function recordCitationTarget(citation: RecordCitationParsed): RecordCitationTarget {
+function recordCitationTarget(citation: RecordCitationParsed): RecordCitationTarget {
   return {
     objectName: citation.object,
     recordId: citation.id,

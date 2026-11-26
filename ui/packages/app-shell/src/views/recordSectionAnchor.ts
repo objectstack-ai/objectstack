@@ -162,11 +162,11 @@ export function focusRecordSection(
   if (candidates.length === 0) return () => {};
   let done = false;
   let observer: MutationObserver | undefined;
-  let timer: ReturnType<typeof setTimeout> | undefined;
+  const pending: { timer?: ReturnType<typeof setTimeout> } = {};
   const finish = (): void => {
     done = true;
     observer?.disconnect();
-    if (timer !== undefined) clearTimeout(timer);
+    if (pending.timer !== undefined) clearTimeout(pending.timer);
   };
   const attempt = (): void => {
     if (done) return;
@@ -186,7 +186,7 @@ export function focusRecordSection(
     observer = new MutationObserver(attempt);
     observer.observe(root, { childList: true, subtree: true, characterData: true });
   }
-  timer = setTimeout(() => {
+  pending.timer = setTimeout(() => {
     if (done) return;
     const target = locateSection(root, candidates);
     finish();
