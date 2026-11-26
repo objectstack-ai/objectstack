@@ -1014,6 +1014,8 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     commands: ALL,
     source: 'packages/lint/src/validate-transfer-cascades.ts',
     surfaces: CLI_ONLY,
+    // The crossing is follow-up #37397. The number lives in this comment, not in the string below: a
+    // string literal under packages/ carries no tracker number (`pnpm check:doc-authoring`).
     surfaceReason:
       'Not yet crossed, pending a measurement: at the runtime publish gate the snapshot\'s objects are the '
       + 'registry\'s served definitions, which carry the injected system columns (owner_id among them) as '

@@ -6625,7 +6625,11 @@ const TRANSFER_CASCADE_SHARED =
   'objects as the registry serves them, every object extension\'s fields folded in. An object this stack ' +
   'does not declare cannot be judged, on either side of the relationship, and is skipped.';
 
-/** Where these ids run, and what the field parse already refuses. */
+/**
+ * Where these ids run, and what the field parse already refuses. The runtime publish gate crossing is
+ * follow-up #37397; the number stays in this comment, since an author is shown the text and it carries no
+ * tracker number (`rule-explanations.test.ts`, `pnpm check:doc-authoring`).
+ */
 const TRANSFER_CASCADE_SCOPE =
   'Judged by `os validate`, `os build` and `os lint`, not yet at the runtime publish gate (its objects are ' +
   'served definitions carrying the injected owner_id, which the eligibility predicate reads; crossing ' +
