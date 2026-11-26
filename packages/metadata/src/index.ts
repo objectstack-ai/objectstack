@@ -19,7 +19,7 @@ export {
 } from './plugin.js';
 
 // Loaders
-export { type MetadataLoader, type MetadataKeyedItem, type MetadataLoaderDeleteOptions, type MetadataStampOnlyRow } from './loaders/loader-interface.js';
+export { type MetadataLoader, type MetadataKeyedItem, type MetadataLoaderDeleteOptions, type MetadataRowBinding, type MetadataStampOnlyRow } from './loaders/loader-interface.js';
 export { MemoryLoader } from './loaders/memory-loader.js';
 export { RemoteLoader } from './loaders/remote-loader.js';
 export {
