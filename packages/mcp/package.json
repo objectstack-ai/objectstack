@@ -43,6 +43,7 @@
     "@objectstack/metadata-protocol": "workspace:*",
     "@objectstack/objectql": "workspace:*",
     "@objectstack/service-analytics": "workspace:*",
+    "@objectstack/service-knowledge": "workspace:*",
     "@objectstack/service-record-context": "workspace:*",
     "@types/node": "^26.6.5",
     "typescript": "^6.0.3",

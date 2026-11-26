@@ -3622,6 +3622,9 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.list.emptyType': '暂无 {type} 条目',
   'engine.list.emptyQuery': '没有匹配 "{query}" 的结果',
   'engine.list.createHint': '点击上方"新建"创建第一个 {type}。',
+  // objectstack#36907 — a Studio dashboard list's New opens an app's design mode.
+  'engine.list.dashboardNewNoApp': '新仪表盘在应用的设计模式中创建，这样它会挂在菜单上。这个包没有可以创建它的应用。',
+  'engine.list.dashboardNewWiderScreen': '新仪表盘在应用的设计模式中创建，请在更宽的屏幕上操作。',
   'engine.list.readOnlyHint': '此类型为只读 — 实例由包内的代码工件定义。',
   'engine.catalog.col.active': '启用',
   'engine.catalog.status.all': '全部',

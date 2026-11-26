@@ -53,6 +53,8 @@ const zh = {
         versions: '版本',
         noApprovedVersions: '暂无已审核版本。',
         prerelease: '预发布',
+        notInstallableHosted: '托管环境无法安装',
+        notInstallableHostedReason: '这是代码插件：托管环境不运行代码插件。请在自托管或企业版运行时中安装。',
         moreOptions: '更多安装选项',
         uninstallFromRuntime: '从本运行时卸载',
         addSampleData: '添加示例数据',

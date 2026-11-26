@@ -1288,7 +1288,8 @@ export function judgeJobPull(
  * that name than its bodies declare — the flattened top level copies each
  * body job once, so every job of the name beyond those copies is a top-level
  * job of its own (`composeStacks(…, { manifest: 'preserve' })` with an input
- * that has no `manifest`). By count, never by comparing a copy's content with
+ * that has no `manifest`, which composes such a pair only when one of the two
+ * is disabled; an enabled pair it refuses). By count, never by comparing a copy's content with
  * its body's: a conversion replays a body under its own version window, so a
  * genuine copy need not stay equal to the body it was copied from. Such a name
  * answers the one holder when the body and the residual's owner are one
@@ -1390,12 +1391,18 @@ function describeJobRunForm(job: unknown): string {
  * with nothing said. Nothing picks one of them, so the name is refused: none of its jobs is scheduled.
  *
  * The holders the refusal names are every body declaring the name, and — when the artifact holds more jobs
- * of the name than its bodies declare (the residual's own, `composeStacks(…, { manifest: 'preserve' })` with
- * an input that has no `manifest`) — the artifact's top level outside every package body, as
- * {@link jobNameRefusal} names it; an artifact without `packages[]` is its app's alone. The refusal's
- * `candidates` are every declaring body as a `package`, then the residual as `{ kind: 'residual', ownerId }`
- * (the artifact's id), or the app itself for an artifact without `packages[]`. Each job is named by
- * its run form. Counted by name, never by content: a conversion replays a body under its own version window.
+ * of the name than its bodies declare (the residual's own: a top-level job of an input with no `manifest`) —
+ * the artifact's top level outside every package body, as {@link jobNameRefusal} names it; an artifact
+ * without `packages[]` is its app's alone. The refusal's `candidates` are every declaring body as a
+ * `package`, then the residual as `{ kind: 'residual', ownerId }` (the artifact's id), or the app itself for
+ * an artifact without `packages[]`. Each job is named by its run form. Counted by name, never by content: a
+ * conversion replays a body under its own version window.
+ *
+ * `composeStacks` refuses the same names by the same reading (enabled jobs only, by name, each job counted
+ * per place it is reached — one job object two bodies carry is two jobs here — and the residual by count
+ * beyond the bodies' copies), so a composition does not build an artifact this refuses. This stays the
+ * backstop for an artifact no composition built: hand-written, or built before composition judged a shared
+ * job name.
  *
  * A disabled job is scheduled by nothing, so it collides with nothing and is not counted: its enabled twin
  * keeps the run-time attribution refusal {@link jobDeclaringPackages} gives it.
