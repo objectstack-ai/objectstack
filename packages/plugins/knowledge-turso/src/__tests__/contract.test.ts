@@ -25,6 +25,7 @@ for (const kind of ['memory', 'file'] as const) {
         builds: true,
         refusesOtherFingerprint: true,
         generations: true,
+        scope: true,
       },
     });
   });

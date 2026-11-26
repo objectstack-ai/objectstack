@@ -597,9 +597,9 @@ the `embedder` it is given), and answers a search by an exact scan.
   `knowledge_<source>_g<n>`, its vector column sized for that generation. A
   source id that is not snake_case (at most 48 characters) is refused before
   any SQL.
-- **Search.** An exact scan by cosine distance; the organization filter and
-  the metadata `filter` (JSON equality per key) run in the same `WHERE`,
-  before ranking. The store creates no DiskANN index: `vector_top_k` ranks
+- **Search.** An exact scan by cosine distance; the organization filter, the
+  [record scope](#record-scope) and the metadata `filter` (JSON equality per
+  key) run in the same `WHERE`, before ranking. The store creates no DiskANN index: `vector_top_k` ranks
   before it filters, and with one, 1,000 vectors of 1,536 dimensions grew a
   file from 8.2 MB to 329 MB and took 21.8 s to index. Without it the same
   1,000 passages take 8.3 MB and a search about 5 ms; 10,000 take 82 MB and
@@ -980,7 +980,7 @@ up.
 | `knowledge-llamaindex` | ⏳ Phase 2 |  |
 | `knowledge-dify` | ⏳ Phase 3 / community |  |
 | `knowledge-pgvector` | ✅ | PostgreSQL + pgvector; exact scan, organization, record scope and metadata filter in SQL, index fingerprint (§4.1) |
-| `knowledge-turso` | ✅ | A libSQL file of its own; exact scan, organization and metadata filter in SQL, a generation built beside the active one (§4.2) |
+| `knowledge-turso` | ✅ | A libSQL file of its own; exact scan, organization, record scope and metadata filter in SQL, a generation built beside the active one (§4.2) |
 
 ### 7.1 Non-goals for Phase 1
 

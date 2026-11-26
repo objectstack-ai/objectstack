@@ -120,3 +120,10 @@ export const METADATA_VALUE_JSON = `CASE type
   WHEN 'true' THEN 'true' WHEN 'false' THEN 'false' WHEN 'null' THEN 'null'
   WHEN 'object' THEN json(value) WHEN 'array' THEN json(value)
   ELSE json_quote(value) END`;
+
+/**
+ * The `json_each` types a record-scope `metadata` term compares (ADR-0161 K8,
+ * item 17): a string, or a number read as its text, so the stored number 7
+ * matches the id `'7'`. Booleans, null and objects match no id.
+ */
+export const SCOPE_SCALAR_TYPES = `('text', 'integer', 'real')`;

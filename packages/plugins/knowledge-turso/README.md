@@ -41,7 +41,7 @@ On a file the store sets WAL and a busy timeout: without them a second process w
 
 ## Search
 
-An exact scan by cosine distance (`vector_distance_cos`). The organization filter and the metadata `filter` (JSON equality per key) run in the same `WHERE`, before ranking — libSQL's DiskANN index (`vector_top_k`) ranks first and filters after, so the store creates none. Measured on Linux x64 with 1,536-wide vectors: 1,000 passages take 8.3 MB and a search about 5 ms; 10,000 passages take 82 MB and a search about 50 ms. (With a DiskANN index the same 1,000 vectors grew a file to 329 MB, and the index build took 21.8 s.) For larger sources, use `@objectstack/knowledge-pgvector`.
+An exact scan by cosine distance (`vector_distance_cos`). The organization filter, the record scope (a passage's record, or a metadata value equal to an id as text, a list matching by any element) and the metadata `filter` (JSON equality per key) run in the same `WHERE`, before ranking — libSQL's DiskANN index (`vector_top_k`) ranks first and filters after, so the store creates none. Measured on Linux x64 with 1,536-wide vectors: 1,000 passages take 8.3 MB and a search about 5 ms; 10,000 passages take 82 MB and a search about 50 ms. (With a DiskANN index the same 1,000 vectors grew a file to 329 MB, and the index build took 21.8 s.) For larger sources, use `@objectstack/knowledge-pgvector`.
 
 ## Rebuilds
 

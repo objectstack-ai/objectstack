@@ -220,7 +220,7 @@ Details — the tables, an approximate index as an operator's step, rebuilds —
 new KnowledgeTursoPlugin(), // or { url: 'file:/var/lib/app/knowledge.db' }, ':memory:', a libsql:// URL
 ```
 
-- It searches by an exact scan; the organization filter and the metadata `filter` run in SQL before ranking. 10,000 passages of 1,536 dimensions take about 82 MB and a search about 50 ms; larger sources belong on pgvector.
+- It searches by an exact scan; the organization filter, the record scope and the metadata `filter` run in SQL before ranking. 10,000 passages of 1,536 dimensions take about 82 MB and a search about 50 ms; larger sources belong on pgvector.
 - A changed model or split is rebuilt beside the old index, which keeps answering until the reindex completes.
 - Where libSQL has no native build (Windows on ARM), boot goes on and its sources answer `SERVICE_UNAVAILABLE`.
 

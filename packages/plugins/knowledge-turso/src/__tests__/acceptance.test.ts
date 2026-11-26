@@ -229,6 +229,28 @@ for (const kind of ['memory', 'file'] as StoreKind[]) {
       expect(await adapter.search('tidal', { source: s, topK: 5, filter: { rank: '2' } })).toEqual([]);
     });
 
+    it('a record scope matches a field by its stored key, and a string or number only, bound as values', async () => {
+      const adapter = store.adapter();
+      const s = source('scoped');
+      await adapter.upsert(
+        [
+          doc(s, '1', 'harbour rules', { metadata: { 'policy.id': 'p1', flag: true } }),
+          doc(s, '2', 'harbour rules', { metadata: { policy: { id: 'p1' }, flag: 'true' } }),
+          doc(s, '3', 'harbour rules', { metadata: { "it's": ['x', 7.5] } }),
+        ],
+        ctx(s),
+      );
+      const ids = async (scope: NonNullable<Parameters<TursoKnowledgeAdapter['search']>[1]['scope']>) =>
+        (await adapter.search('harbour rules', { source: s, topK: 5, scope })).map((h) => h.documentId).sort();
+      // A dotted name is a key, never a JSON path into a nested object.
+      expect(await ids([{ kind: 'metadata', field: 'policy.id', ids: ['p1'] }])).toEqual([`${s.id}:1`]);
+      // A boolean matches no id; the string 'true' does.
+      expect(await ids([{ kind: 'metadata', field: 'flag', ids: ['true'] }])).toEqual([`${s.id}:2`]);
+      // A quote in a name is a value; a number in a list matches its text.
+      expect(await ids([{ kind: 'metadata', field: "it's", ids: ['7.5'] }])).toEqual([`${s.id}:3`]);
+      expect(await ids([{ kind: 'record', ids: ["1' OR '1'='1"] }])).toEqual([]);
+    });
+
     it("a table of the store's earlier releases answers 'reindex needed', and is replaced by the first build", async () => {
       const client = store.client();
       const adapter = new TursoKnowledgeAdapter({ id: 'under_test', client, embedder: new FakeEmbedder() });
