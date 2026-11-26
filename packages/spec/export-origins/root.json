@@ -156,6 +156,7 @@
     "defineDatasource": "src/data/datasource.zod.ts#defineDatasource (function)",
     "defineEmailTemplateDefinition": "src/system/email-template.zod.ts#defineEmailTemplateDefinition (function)",
     "defineFlow": "src/automation/flow.zod.ts#defineFlow (function)",
+    "defineForm": "src/ui/view.zod.ts#defineForm (function)",
     "defineHook": "src/data/hook.zod.ts#defineHook (function)",
     "defineJob": "src/system/job.zod.ts#defineJob (function)",
     "defineMapping": "src/data/mapping.zod.ts#defineMapping (function)",

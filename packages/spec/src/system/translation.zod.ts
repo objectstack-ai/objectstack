@@ -1100,9 +1100,9 @@ const PER_APP_SETTINGS_PLATFORM_ONLY =
   + '(`@objectstack/service-settings`\'s `settingsBuiltinTranslations`, typed '
   + '`PlatformTranslationData`); a key it does not translate falls back to the manifest\'s own '
   + 'literal, so correct it there rather than filling the gap from an application. For an '
-  + 'application\'s own copy use the seventeen groups this bundle does declare, in the order it '
+  + 'application\'s own copy use the eighteen groups this bundle does declare, in the order it '
   + "declares them — 'objects', 'picklists', 'apps', 'messages', 'globalActions', 'dashboards', "
-  + "'datasets', 'reports', 'pages', 'flows', 'hooks', 'positions', 'permissions', 'books', "
+  + "'datasets', 'reports', 'pages', 'forms', 'flows', 'hooks', 'positions', 'permissions', 'books', "
   + "'mappings', 'metadataForms', 'settingsCommon'. "
   + "Note the last one: 'settingsCommon' IS "
   + 'on this face, so the Settings UI shell strings an application may translate (the source '
@@ -1145,7 +1145,7 @@ const ITEM_SETTINGS_PLATFORM_ONLY =
   + '(`@objectstack/service-settings`\'s `settingsBuiltinTranslations`, typed '
   + '`PlatformTranslationData`); a key it does not translate falls back to the manifest\'s own '
   + 'literal, so correct it there rather than overriding it from an application. For an '
-  + 'application\'s own copy use the groups this item does declare — the same seventeen a per-app '
+  + 'application\'s own copy use the groups this item does declare — the same eighteen a per-app '
   + "bundle declares, 'settingsCommon' among them: the Settings UI shell strings an application "
   + 'may translate (the source badges, under `settingsCommon.sourceLabels`) are NOT what is being '
   + "refused here — only the per-namespace manifest copy under 'settings' is. "
@@ -1184,12 +1184,12 @@ const ITEM_TRANSLATION_KEY_GUIDANCE: Record<string, string> = {
  */
 /**
  * The translation groups an APPLICATION may author, as a shape rather than a
- * schema. Seventeen groups — the eighteenth, `settings`, is platform-only and lives in
+ * schema. Eighteen groups — the nineteenth, `settings`, is platform-only and lives in
  * {@link platformSettingsShape}.
  *
  * Three schemas need exactly these keys: {@link TranslationDataSchema} (one
- * entry of a per-app file-authored bundle — these seventeen and no more),
- * {@link PlatformTranslationDataSchema} (these seventeen plus `settings`) and
+ * entry of a per-app file-authored bundle — these eighteen and no more),
+ * {@link PlatformTranslationDataSchema} (these eighteen plus `settings`) and
  * {@link TranslationItemSchema} (the registered `translation` metadata type —
  * the per-app face plus `locale`, its identity keys and the ADR-0010
  * envelope; it carried the platform face's `settings` too until #19620). The item used to
@@ -1806,6 +1806,36 @@ const appTranslationDataShape = () => ({
       submitBehavior: submitBehaviorTranslationSchema('this page form submit behavior translation').optional().describe("Translated thank-you panel copy — overlays an `object-form` component's `submitBehavior` `title` / `message` when its `kind` is `'thank-you'`; only copy the form authors is translated"),
     })).optional().describe('Per-component copy keyed by component id (`PageComponentSchema.id`)'),
   })).optional().describe('Page translations keyed by page name'),
+
+  /**
+   * [ADR-0159 D8] `form` item translations keyed by the form's name
+   * (`Form.name`, `OBJECT.KEY`).
+   *
+   * Convention:
+   *   forms.<form_name>.label
+   *   forms.<form_name>.description
+   *   forms.<form_name>.title
+   *   forms.<form_name>.submitBehavior.title     (a `thank-you` panel)
+   *   forms.<form_name>.submitBehavior.message
+   *
+   * The translator reads `forms.NAME` first; the form tails a form defined in
+   * a view had under `objects.OBJECT._views.KEY` (`title`, `submitBehavior`)
+   * are the declared fallback, so a bundle written for the old shape keeps
+   * translating the same form. `label` and `description` under `_views.KEY`
+   * are a view's, not form tails: they are neither moved nor read as a
+   * fallback. Section copy keeps `objects.OBJECT._sections.SECTION` as its
+   * object-level default.
+   */
+  forms: z.record(z.string(), strictObject({
+    surface: 'this form translation',
+    history: TRANSLATION_HISTORY,
+    aliases: { name: 'label', heading: 'title' },
+  }, {
+    label: z.string().optional().describe('Translated form label'),
+    description: z.string().optional().describe('Translated form description'),
+    title: z.string().optional().describe('Translated form heading (overlays the form\'s `title`)'),
+    submitBehavior: submitBehaviorTranslationSchema('this form submit behavior translation').optional().describe("Translated thank-you panel copy — overlays the form's `submitBehavior` `title` / `message` when its `kind` is `'thank-you'`"),
+  })).optional().describe('Form translations keyed by form name (ADR-0159 D8)'),
 
   /**
    * Screen-flow translations keyed by flow name (`Flow.name`).
@@ -2730,10 +2760,10 @@ const platformSettingsShape = () => ({
  * One locale of a PER-APP translation bundle — `stack.translations`, and
  * everything {@link defineTranslationBundle} builds.
  *
- * Seventeen groups: every group the platform bundle declares EXCEPT `settings`,
+ * Eighteen groups: every group the platform bundle declares EXCEPT `settings`,
  * which is platform-only and is refused here by name with
  * {@link PER_APP_SETTINGS_PLATFORM_ONLY} as the remedy. See
- * {@link PlatformTranslationDataSchema} for the eighteen-group face and for why
+ * {@link PlatformTranslationDataSchema} for the nineteen-group face and for why
  * the two are separate namespaces.
  */
 export const TranslationDataSchema = lazySchema(() => strictObject({
@@ -2744,7 +2774,7 @@ export const TranslationDataSchema = lazySchema(() => strictObject({
   // `settings`, and an alias prescribing a key the shape rejects is a
   // suggestion the author cannot take (the `alias-integrity` audit judges
   // exactly that). Both spellings are answered by `guidance` above instead.
-  aliases: { object: 'objects', fields: 'objects', app: 'apps', page: 'pages', dashboard: 'dashboards', dataset: 'datasets', report: 'reports', picklist: 'picklists', flow: 'flows', hook: 'hooks', position: 'positions', permission: 'permissions', permissionSets: 'permissions', book: 'books', mapping: 'mappings', message: 'messages', strings: 'messages', labels: 'messages', actions: 'globalActions' },
+  aliases: { object: 'objects', fields: 'objects', app: 'apps', page: 'pages', form: 'forms', dashboard: 'dashboards', dataset: 'datasets', report: 'reports', picklist: 'picklists', flow: 'flows', hook: 'hooks', position: 'positions', permission: 'permissions', permissionSets: 'permissions', book: 'books', mapping: 'mappings', message: 'messages', strings: 'messages', labels: 'messages', actions: 'globalActions' },
   // `locale` lives on the ITEM, not on a bundle entry (the bundle keys ARE the
   // locales). Naming it keeps the suggestion useful for an author who moved a
   // `translation` item into a bundle and left the field behind.
@@ -2754,7 +2784,7 @@ export const TranslationDataSchema = lazySchema(() => strictObject({
 export type TranslationData = z.input<typeof TranslationDataSchema>;
 
 /**
- * One locale of a PLATFORM translation bundle — the eighteen groups, `settings`
+ * One locale of a PLATFORM translation bundle — the nineteen groups, `settings`
  * included.
  *
  * The platform's own bundles are code, not authored metadata
@@ -2789,7 +2819,7 @@ export const PlatformTranslationDataSchema = lazySchema(() => strictObject({
   surface: 'this locale of the platform translation bundle',
   history: TRANSLATION_HISTORY,
   guidance: TRANSLATION_KEY_GUIDANCE,
-  aliases: { object: 'objects', fields: 'objects', app: 'apps', page: 'pages', dashboard: 'dashboards', dataset: 'datasets', report: 'reports', picklist: 'picklists', flow: 'flows', hook: 'hooks', position: 'positions', permission: 'permissions', permissionSets: 'permissions', book: 'books', mapping: 'mappings', setting: 'settings', message: 'messages', strings: 'messages', labels: 'messages', actions: 'globalActions' },
+  aliases: { object: 'objects', fields: 'objects', app: 'apps', page: 'pages', form: 'forms', dashboard: 'dashboards', dataset: 'datasets', report: 'reports', picklist: 'picklists', flow: 'flows', hook: 'hooks', position: 'positions', permission: 'permissions', permissionSets: 'permissions', book: 'books', mapping: 'mappings', setting: 'settings', message: 'messages', strings: 'messages', labels: 'messages', actions: 'globalActions' },
   extraKeys: ['locale'],
 }, {
   ...appTranslationDataShape(),
@@ -2998,7 +3028,7 @@ export type TranslationConfig = z.input<typeof TranslationConfigSchema>;
  * to whoever — or whatever — authored it.
  *
  * `settings` is NOT on this door (#19620, ruling batch #210 item 2 letter B):
- * the item takes the PER-APP face, the same seventeen groups as
+ * the item takes the PER-APP face, the same eighteen groups as
  * {@link TranslationDataSchema}, and refuses `settings` (and the singular
  * `setting`) by name with {@link ITEM_SETTINGS_PLATFORM_ONLY} as the remedy.
  * The file door and the item door are two authoring surfaces for one app
@@ -3037,7 +3067,7 @@ export const TranslationItemSchema = lazySchema(() => strictObject({
   // this door no longer declares `settings`, and an alias prescribing a key
   // the shape rejects is a suggestion the author cannot take. Both spellings
   // are answered by `guidance` above instead.
-  aliases: { object: 'objects', app: 'apps', page: 'pages', dataset: 'datasets', report: 'reports', picklist: 'picklists', flow: 'flows', hook: 'hooks', position: 'positions', permission: 'permissions', permissionSets: 'permissions', book: 'books', mapping: 'mappings', message: 'messages', strings: 'messages', labels: 'messages', actions: 'globalActions', lang: 'locale', language: 'locale' },
+  aliases: { object: 'objects', app: 'apps', page: 'pages', form: 'forms', dataset: 'datasets', report: 'reports', picklist: 'picklists', flow: 'flows', hook: 'hooks', position: 'positions', permission: 'permissions', permissionSets: 'permissions', book: 'books', mapping: 'mappings', message: 'messages', strings: 'messages', labels: 'messages', actions: 'globalActions', lang: 'locale', language: 'locale' },
 }, {
   ...appTranslationDataShape(),
   locale: LocaleSchema.describe('BCP-47 locale this item translates (e.g. "zh-CN")'),

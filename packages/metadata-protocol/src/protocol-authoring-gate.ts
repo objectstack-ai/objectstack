@@ -101,6 +101,12 @@ export interface AuthoringGateHost {
     unknownGrantObjectSaveRefusal: ObjectStackProtocolImplementation['unknownGrantObjectSaveRefusal'];
     unknownPicklistBindingSaveRefusal: ObjectStackProtocolImplementation['unknownPicklistBindingSaveRefusal'];
     seedExternalIdSaveRefusal: ObjectStackProtocolImplementation['seedExternalIdSaveRefusal'];
+    /**
+     * [ADR-0159 card ② item 5] The save door's package-less list-over-form
+     * refusal ({@link packagelessListOverFormRefusal}), asked of a restored
+     * body against the binding it is restored into.
+     */
+    listOverFormRefusal: (type: string, item: unknown, name: string, binding: string | null) => Error | undefined;
     /** [#34776] The automation engine's sealed node-type vocabulary ({@link sealedFlowNodeTypeVocabulary}). */
     sealedFlowNodeTypeVocabulary: () => readonly string[] | undefined;
 }
@@ -115,7 +121,7 @@ export function restoredBodyDerivation(
 
 /** The body of `ObjectStackProtocolImplementation#restoredBodyWriter`; the method's docblock there is its contract. */
 export function restoredBodyWriter(
-    this: Pick<AuthoringGateHost, 'objectExtensionItemRefusal' | 'refuseRestoredBodyTheSaveDoorRefuses' | 'restoredBodyDerivation'>,
+    this: Pick<AuthoringGateHost, 'listOverFormRefusal' | 'objectExtensionItemRefusal' | 'refuseRestoredBodyTheSaveDoorRefuses' | 'restoredBodyDerivation'>,
     type: string, name: string, binding: string | null, source: string): (historyBody: unknown) => Promise<unknown> {
     const derive = this.restoredBodyDerivation(type);
     return async (historyBody) => {
@@ -129,6 +135,13 @@ export function restoredBodyWriter(
         // [#28574] An `object_extension` version against its address, on the same binding.
         const extensionRefusal = this.objectExtensionItemRefusal(type, historyBody, name, binding);
         if (extensionRefusal) throw extensionRefusal;
+        // [ADR-0159 card ② item 5] …and a package-less view whose restored
+        // body would store a list at the name a read-only package authors as a
+        // `form`: the save door refuses that body (`VALIDATION_ERROR`, 400),
+        // so a rollback or a revert restoring it is refused with the same
+        // sentence before anything is written.
+        const listOverForm = this.listOverFormRefusal(type, historyBody, name, binding);
+        if (listOverForm) throw listOverForm;
         await this.refuseRestoredBodyTheSaveDoorRefuses(type, name, historyBody, binding, source);
         // [#37013] A restore is never the platform's registration: the body is
         // written without the platform's mark, read where the store reads it.

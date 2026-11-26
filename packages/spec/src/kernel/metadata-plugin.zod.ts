@@ -96,6 +96,7 @@ export const MetadataTypeSchema = lazySchema(() => z.enum([
 
   // UI Protocol
   'view',        // List/form views (ViewSchema)
+  'form',        // Data-entry forms bound to one object (FormSchema, ADR-0159) — the anonymous intake reads them
   'page',        // Standalone pages (PageSchema)
   'dashboard',   // Dashboard layouts (DashboardSchema)
   'app',         // Application shell (AppSchema)
@@ -964,6 +965,10 @@ export const DEFAULT_METADATA_TYPE_REGISTRY: MetadataTypeRegistryEntryParsed[] =
   // MATERIALIZED into `sys_metadata` (DB-only provenance), which rides the
   // `allowRuntimeCreate` tier, not this flag.
   { type: 'view', label: 'View', filePatterns: ['**/*.view.ts', '**/*.view.yml', '**/*.view.json'], supportsOverlay: true, allowEnvironmentOverlay: true, allowRuntimeCreate: true, supportsVersioning: true, executionPinned: false, loadOrder: 50, domain: 'ui' },
+  // [ADR-0159 D1] `form` carries page's flags exactly: overlayable per org but not
+  // per environment (the ruled scope set is `{global, org, user}`), runtime-
+  // creatable, versioned, unpinned, loaded with the UI tier.
+  { type: 'form', label: 'Form', filePatterns: ['**/*.form.ts', '**/*.form.yml', '**/*.form.json'], supportsOverlay: true, allowEnvironmentOverlay: false, allowRuntimeCreate: true, supportsVersioning: true, executionPinned: false, loadOrder: 50, domain: 'ui' },
   { type: 'page', label: 'Page', filePatterns: ['**/*.page.ts', '**/*.page.yml'], supportsOverlay: true, allowEnvironmentOverlay: false, allowRuntimeCreate: true, supportsVersioning: true, executionPinned: false, loadOrder: 50, domain: 'ui' },
   { type: 'dashboard', label: 'Dashboard', filePatterns: ['**/*.dashboard.ts', '**/*.dashboard.yml', '**/*.dashboard.json'], supportsOverlay: true, allowEnvironmentOverlay: true, allowRuntimeCreate: true, supportsVersioning: true, executionPinned: false, loadOrder: 60, domain: 'ui' },
   { type: 'app', label: 'Application', filePatterns: ['**/*.app.ts', '**/*.app.yml', '**/*.app.json'], supportsOverlay: true, allowEnvironmentOverlay: false, allowRuntimeCreate: true, supportsVersioning: true, executionPinned: false, loadOrder: 70, domain: 'ui' },

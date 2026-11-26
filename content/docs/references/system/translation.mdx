@@ -198,6 +198,7 @@ Platform translation data — the per-app groups plus the platform-only `setting
 | **datasets** | `Record<string, { label?: string; description?: string; dimensions?: Record<string, object>; measures?: Record<string, object> }>` | optional | Analytics dataset translations keyed by dataset name |
 | **reports** | `Record<string, { label?: string; description?: string; blocks?: Record<string, object> }>` | optional | Report translations keyed by report name |
 | **pages** | `Record<string, { label?: string; description?: string; title?: string; subtitle?: string; … }>` | optional | Page translations keyed by page name |
+| **forms** | `Record<string, { label?: string; description?: string; title?: string; submitBehavior?: object }>` | optional | Form translations keyed by form name (ADR-0159 D8) |
 | **flows** | `Record<string, { label?: string; successMessage?: string; errorMessage?: string; screens?: Record<string, object>; … }>` | optional | Screen-flow translations keyed by flow name |
 | **hooks** | `Record<string, { refusals?: Record<string, object>; texts?: Record<string, object> }>` | optional | Hook translations keyed by hook name |
 | **positions** | `Record<string, { label?: string; description?: string }>` | optional | Position translations keyed by position name |
@@ -295,6 +296,15 @@ Translation data for a single object
 | **subtitle** | `string` | optional | Translated `page:header` subtitle |
 | **components** | `Record<string, { title?: string; description?: string; label?: string; placeholder?: string; … }>` | optional | Per-component copy keyed by component id (`PageComponentSchema.id`) |
 
+### Nested Shape: `PlatformTranslationData.forms[string]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **label** | `string` | optional | Translated form label |
+| **description** | `string` | optional | Translated form description |
+| **title** | `string` | optional | Translated form heading (overlays the form's `title`) |
+| **submitBehavior** | `{ title?: string; message?: string }` | optional | Translated thank-you panel copy — overlays the form's `submitBehavior` `title` / `message` when its `kind` is `'thank-you'` |
+
 ### Nested Shape: `PlatformTranslationData.flows[string]`
 
 | Property | Type | Required | Description |
@@ -390,6 +400,7 @@ Served translation data — the platform groups the browser reads, without the s
 | **datasets** | `Record<string, { label?: string; description?: string; dimensions?: Record<string, object>; measures?: Record<string, object> }>` | optional | Analytics dataset translations keyed by dataset name |
 | **reports** | `Record<string, { label?: string; description?: string; blocks?: Record<string, object> }>` | optional | Report translations keyed by report name |
 | **pages** | `Record<string, { label?: string; description?: string; title?: string; subtitle?: string; … }>` | optional | Page translations keyed by page name |
+| **forms** | `Record<string, { label?: string; description?: string; title?: string; submitBehavior?: object }>` | optional | Form translations keyed by form name (ADR-0159 D8) |
 | **flows** | `Record<string, { label?: string; successMessage?: string; errorMessage?: string; screens?: Record<string, object>; … }>` | optional | Screen-flow translations keyed by flow name |
 | **hooks** | `Record<string, { refusals?: Record<string, object>; texts?: Record<string, object> }>` | optional | Hook translations keyed by hook name |
 | **positions** | `Record<string, { label?: string; description?: string }>` | optional | Position translations keyed by position name |
@@ -485,6 +496,15 @@ Translation data for a single object
 | **title** | `string` | optional | Translated `page:header` title. When omitted the header keeps its authored title; `label` stands in only where the header authors no title or its title restates the page label |
 | **subtitle** | `string` | optional | Translated `page:header` subtitle |
 | **components** | `Record<string, { title?: string; description?: string; label?: string; placeholder?: string; … }>` | optional | Per-component copy keyed by component id (`PageComponentSchema.id`) |
+
+### Nested Shape: `ServedTranslationData.forms[string]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **label** | `string` | optional | Translated form label |
+| **description** | `string` | optional | Translated form description |
+| **title** | `string` | optional | Translated form heading (overlays the form's `title`) |
+| **submitBehavior** | `{ title?: string; message?: string }` | optional | Translated thank-you panel copy — overlays the form's `submitBehavior` `title` / `message` when its `kind` is `'thank-you'` |
 
 ### Nested Shape: `ServedTranslationData.flows[string]`
 
@@ -644,6 +664,7 @@ Per-app translation data for objects, apps, and UI messages
 | **datasets** | `Record<string, { label?: string; description?: string; dimensions?: Record<string, object>; measures?: Record<string, object> }>` | optional | Analytics dataset translations keyed by dataset name |
 | **reports** | `Record<string, { label?: string; description?: string; blocks?: Record<string, object> }>` | optional | Report translations keyed by report name |
 | **pages** | `Record<string, { label?: string; description?: string; title?: string; subtitle?: string; … }>` | optional | Page translations keyed by page name |
+| **forms** | `Record<string, { label?: string; description?: string; title?: string; submitBehavior?: object }>` | optional | Form translations keyed by form name (ADR-0159 D8) |
 | **flows** | `Record<string, { label?: string; successMessage?: string; errorMessage?: string; screens?: Record<string, object>; … }>` | optional | Screen-flow translations keyed by flow name |
 | **hooks** | `Record<string, { refusals?: Record<string, object>; texts?: Record<string, object> }>` | optional | Hook translations keyed by hook name |
 | **positions** | `Record<string, { label?: string; description?: string }>` | optional | Position translations keyed by position name |
@@ -739,6 +760,15 @@ Translation data for a single object
 | **title** | `string` | optional | Translated `page:header` title. When omitted the header keeps its authored title; `label` stands in only where the header authors no title or its title restates the page label |
 | **subtitle** | `string` | optional | Translated `page:header` subtitle |
 | **components** | `Record<string, { title?: string; description?: string; label?: string; placeholder?: string; … }>` | optional | Per-component copy keyed by component id (`PageComponentSchema.id`) |
+
+### Nested Shape: `TranslationData.forms[string]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **label** | `string` | optional | Translated form label |
+| **description** | `string` | optional | Translated form description |
+| **title** | `string` | optional | Translated form heading (overlays the form's `title`) |
+| **submitBehavior** | `{ title?: string; message?: string }` | optional | Translated thank-you panel copy — overlays the form's `submitBehavior` `title` / `message` when its `kind` is `'thank-you'` |
 
 ### Nested Shape: `TranslationData.flows[string]`
 
@@ -856,6 +886,7 @@ One locale of translations — the `translation` metadata type
 | **datasets** | `Record<string, { label?: string; description?: string; dimensions?: Record<string, object>; measures?: Record<string, object> }>` | optional | Analytics dataset translations keyed by dataset name |
 | **reports** | `Record<string, { label?: string; description?: string; blocks?: Record<string, object> }>` | optional | Report translations keyed by report name |
 | **pages** | `Record<string, { label?: string; description?: string; title?: string; subtitle?: string; … }>` | optional | Page translations keyed by page name |
+| **forms** | `Record<string, { label?: string; description?: string; title?: string; submitBehavior?: object }>` | optional | Form translations keyed by form name (ADR-0159 D8) |
 | **flows** | `Record<string, { label?: string; successMessage?: string; errorMessage?: string; screens?: Record<string, object>; … }>` | optional | Screen-flow translations keyed by flow name |
 | **hooks** | `Record<string, { refusals?: Record<string, object>; texts?: Record<string, object> }>` | optional | Hook translations keyed by hook name |
 | **positions** | `Record<string, { label?: string; description?: string }>` | optional | Position translations keyed by position name |
@@ -962,6 +993,15 @@ Translation data for a single object
 | **title** | `string` | optional | Translated `page:header` title. When omitted the header keeps its authored title; `label` stands in only where the header authors no title or its title restates the page label |
 | **subtitle** | `string` | optional | Translated `page:header` subtitle |
 | **components** | `Record<string, { title?: string; description?: string; label?: string; placeholder?: string; … }>` | optional | Per-component copy keyed by component id (`PageComponentSchema.id`) |
+
+### Nested Shape: `TranslationItem.forms[string]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **label** | `string` | optional | Translated form label |
+| **description** | `string` | optional | Translated form description |
+| **title** | `string` | optional | Translated form heading (overlays the form's `title`) |
+| **submitBehavior** | `{ title?: string; message?: string }` | optional | Translated thank-you panel copy — overlays the form's `submitBehavior` `title` / `message` when its `kind` is `'thank-you'` |
 
 ### Nested Shape: `TranslationItem.flows[string]`
 

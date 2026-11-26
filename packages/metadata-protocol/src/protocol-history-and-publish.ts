@@ -23,6 +23,7 @@
  * not move.
  */
 
+import { applyOldShapeFormRowRemovals, packagelessListOverFormRefusal, type OldShapeFormRowRemoval } from './protocol-form-writes.js';
 import { stampHtmlPageRequires } from './runtime-authoring-gate.js';
 import type { RuntimeAuthoringIssue, RuntimePendingDeclarations } from './runtime-authoring-gate.js';
 import { DraftConflictError, packagelessAddressAmbiguityRefusal } from './sys-metadata-repository.js';
@@ -674,7 +675,7 @@ export class ProtocolHistoryAndPublishFacet {
      * `recordPendingDenialAudit`, rethrow. Skip it and the refusal is silent
      * again — the pre-#7748 state, not merely a worse one.
      */
-    static async promoteDraftForPublish(host: Pick<ProtocolHost, 'anonymousElevatedFlowRefusal' | 'assertRuntimeAuthoringRules' | 'classifyObjectContribution' | 'credentialChannelFor' | 'declinesStoredRow' | 'defaultRecordPageSaveRefusal' | 'engine' | 'ensureOverlayIndex' | 'externalBindingSaveRefusal' | 'getOverlayRepo' | 'isArtifactBacked' | 'isOverlayAllowed' | 'isRuntimeCreateAllowed' | 'isSealedManagedItem' | 'lockWriteRefusal' | 'metadataConflictRefusal' | 'namedBaseOverlayWriteRefusal' | 'objectExtensionItemRefusal' | 'objectNamespaceObjectNameClash' | 'objectNamespacePrefixViolation' | 'objectRegistrationRefusal' | 'optimisticConflictAuditEntry' | 'overlayPackageMismatchError' | 'overrideWriteVerdict' | 'packagelessAddress' | 'packagelessDraftAddress' | 'permissionSetNameCollisionRefusal' | 'readItemActiveRows' | 'resolveSduiManifest' | 'rethrowUnlessMetadataStoreUnprovisioned' | 'seedExternalIdSaveRefusal' | 'shippedArtifactsOf' | 'storedParentForToken' | 'uninstalledNamedBaseRefusal' | 'unknownDatasourceSaveRefusal' | 'unknownGrantObjectSaveRefusal' | 'unknownPicklistBindingSaveRefusal'>, request: {
+    static async promoteDraftForPublish(host: Pick<ProtocolHost, 'anonymousElevatedFlowRefusal' | 'applyRegistryWriteThrough' | 'readActiveOverlayRows' | 'restoreArtifactRegistryView' | 'storedOverlayEntries' | 'assertRuntimeAuthoringRules' | 'classifyObjectContribution' | 'credentialChannelFor' | 'declinesStoredRow' | 'defaultRecordPageSaveRefusal' | 'engine' | 'ensureOverlayIndex' | 'expandRuntimeViewContainer' | 'externalBindingSaveRefusal' | 'getOverlayRepo' | 'isArtifactBacked' | 'isOverlayAllowed' | 'isRuntimeCreateAllowed' | 'isSealedManagedItem' | 'isWritablePackage' | 'lockWriteRefusal' | 'metadataConflictRefusal' | 'namedBaseOverlayWriteRefusal' | 'objectExtensionItemRefusal' | 'objectNamespaceObjectNameClash' | 'objectNamespacePrefixViolation' | 'objectRegistrationRefusal' | 'optimisticConflictAuditEntry' | 'overlayPackageMismatchError' | 'overrideWriteVerdict' | 'packagelessAddress' | 'packagelessDraftAddress' | 'permissionSetNameCollisionRefusal' | 'readItemActiveRows' | 'resolveSduiManifest' | 'rethrowUnlessMetadataStoreUnprovisioned' | 'seedExternalIdSaveRefusal' | 'shippedArtifactsOf' | 'storedParentForToken' | 'uninstalledNamedBaseRefusal' | 'unknownDatasourceSaveRefusal' | 'unknownGrantObjectSaveRefusal' | 'unknownPicklistBindingSaveRefusal'>, request: {
             type: string; name: string; actor?: string; message?: string;
             /**
              * [#8907] ADR-0048 — the package binding of the draft being promoted,
@@ -1116,6 +1117,18 @@ export class ProtocolHistoryAndPublishFacet {
             );
             if (nameCollision) throw nameCollision;
         }
+        // [ADR-0159 card ② item 5] …and a package-less view draft that would
+        // store a list at the name a read-only package authors as a `form`:
+        // the save door refuses that body (`VALIDATION_ERROR`, 400), and a
+        // draft saved before the gate is refused here with the same sentence
+        // before `repo.promoteDraft` writes. See
+        // {@link packagelessListOverFormRefusal}.
+        if (draftForGate) {
+            const listOverForm = packagelessListOverFormRefusal(
+                host, singularType, draftForGate.body, request.name, promoteInto,
+            );
+            if (listOverForm) throw listOverForm;
+        }
         // [#28905, ADR-0146 D1, D11] …and the promotion INTO the read-only
         // base itself, of an item of one of the five overlay types it ships:
         // the active row it writes is bound to the base, outside the pair D1
@@ -1357,7 +1370,27 @@ export class ProtocolHistoryAndPublishFacet {
                 });
                 expectedActiveHash = await host.storedParentForToken(ref, request.parentVersion, activeHead.head?.hash ?? null);
             }
-            const result = await repo.promoteDraft(ref, {
+            // [ADR-0159 D5, card ② item 5] A `form` made active here removes
+            // the promoted-into package's old-shape row of the name in the
+            // same transaction, as the published save does
+            // ({@link applyOldShapeFormRowRemovals}); the registry is healed
+            // after the commit. ⛔ Form content only.
+            let removedOldShapeRows: OldShapeFormRowRemoval[] = [];
+            const promoteFormAware = async (promote: () => Promise<any>): Promise<any> => {
+                if (singularType !== 'form' || request.judgeOnly) return promote();
+                const run = async () => {
+                    const promoted = await promote();
+                    removedOldShapeRows = await applyOldShapeFormRowRemovals(host, {
+                        name: request.name,
+                        packageId: promoteInto,
+                        actor: request.actor ?? null,
+                        source: 'protocol.publishMetaItem',
+                    });
+                    return promoted;
+                };
+                return typeof host.engine?.transaction === 'function' ? host.engine.transaction(run) : run();
+            };
+            const result = await promoteFormAware(() => repo.promoteDraft(ref, {
                 deriveActiveBody: (draftBody) => stampHtmlPageRequires(singularType, draftBody, sduiManifest),
                 // #4556 — NULL, not 'system', for an actor-less publish.
                 actor: request.actor ?? null,
@@ -1389,7 +1422,17 @@ export class ProtocolHistoryAndPublishFacet {
                 ...(expectedActiveHash !== undefined ? { expectedActiveHash } : {}),
                 // [#22877] …of the member that was judged.
                 ...memberOption(request.member),
-            });
+            }));
+            for (const removal of removedOldShapeRows) {
+                if (removal.kind === 'delete') {
+                    await host.restoreArtifactRegistryView('view', removal.row.name, null, removal.row.packageId);
+                } else {
+                    await host.applyRegistryWriteThrough({
+                        type: 'view', name: removal.row.name, item: removal.body,
+                        packageId: removal.row.packageId, organizationId: null,
+                    });
+                }
+            }
             return {
                 singularType,
                 advisories: runtimeAdvisories,

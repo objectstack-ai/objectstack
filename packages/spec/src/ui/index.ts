@@ -95,6 +95,8 @@ export * from './sharing.zod';
 // read these bindings through `@objectstack/metadata-core`, which re-exports
 // them, and a console imports them from here instead of re-reading the keys.
 export * from './anonymous-form-intake';
+export * from './old-shape-form-withdrawals';
+export * from './form-intake-layer';
 
 // ---------------------------------------------------------------------------
 // RETIRED in v17 (#4988, ADR-0049 enforce-or-remove): the five interaction

@@ -146,6 +146,9 @@
         "manifest.flows.element.errorHandling",
         "manifest.flows.element.nodes.element.in.waitEventConfig",
         "manifest.flows.element.variables.element",
+        "manifest.forms.element",
+        "manifest.forms.element.sections.element",
+        "manifest.forms.element.submitBehavior.options[1].url",
         "manifest.hooks.element",
         "manifest.hooks.element.object",
         "manifest.hooks.element.refusals.valueType",
@@ -194,8 +197,6 @@
         "manifest.translations.element.valueType.flows.valueType.screens.valueType.title",
         "manifest.translations.element.valueType.flows.valueType.successMessage",
         "manifest.views.element.form",
-        "manifest.views.element.form.sections.element",
-        "manifest.views.element.form.submitBehavior.options[1].url",
         "manifest.views.element.list",
         "manifest.views.element.list.bulkActionDefs.element",
         "manifest.views.element.list.emptyState.link.url",
@@ -340,6 +341,9 @@
         "data.options[1].manifest.flows.element.errorHandling",
         "data.options[1].manifest.flows.element.nodes.element.in.waitEventConfig",
         "data.options[1].manifest.flows.element.variables.element",
+        "data.options[1].manifest.forms.element",
+        "data.options[1].manifest.forms.element.sections.element",
+        "data.options[1].manifest.forms.element.submitBehavior.options[1].url",
         "data.options[1].manifest.hooks.element",
         "data.options[1].manifest.hooks.element.object",
         "data.options[1].manifest.hooks.element.refusals.valueType",
@@ -381,8 +385,6 @@
         "data.options[1].manifest.translations.element.valueType.flows.valueType.errorMessage",
         "data.options[1].manifest.translations.element.valueType.flows.valueType.successMessage",
         "data.options[1].manifest.views.element.form",
-        "data.options[1].manifest.views.element.form.sections.element",
-        "data.options[1].manifest.views.element.form.submitBehavior.options[1].url",
         "data.options[1].manifest.views.element.list",
         "data.options[1].manifest.views.element.list.bulkActionDefs.element",
         "data.options[1].manifest.views.element.list.emptyState.link.url",
@@ -514,6 +516,9 @@
         "options[1].manifest.flows.element.errorHandling",
         "options[1].manifest.flows.element.nodes.element.in.waitEventConfig",
         "options[1].manifest.flows.element.variables.element",
+        "options[1].manifest.forms.element",
+        "options[1].manifest.forms.element.sections.element",
+        "options[1].manifest.forms.element.submitBehavior.options[1].url",
         "options[1].manifest.hooks.element",
         "options[1].manifest.hooks.element.object",
         "options[1].manifest.hooks.element.refusals.valueType",
@@ -559,8 +564,6 @@
         "options[1].manifest.translations.element.valueType.flows.valueType.screens.valueType.title",
         "options[1].manifest.translations.element.valueType.flows.valueType.successMessage",
         "options[1].manifest.views.element.form",
-        "options[1].manifest.views.element.form.sections.element",
-        "options[1].manifest.views.element.form.submitBehavior.options[1].url",
         "options[1].manifest.views.element.list",
         "options[1].manifest.views.element.list.bulkActionDefs.element",
         "options[1].manifest.views.element.list.emptyState.link.url",
@@ -616,6 +619,9 @@
         "data.packages.element.options[1].manifest.flows.element.errorHandling",
         "data.packages.element.options[1].manifest.flows.element.nodes.element.in.waitEventConfig",
         "data.packages.element.options[1].manifest.flows.element.variables.element",
+        "data.packages.element.options[1].manifest.forms.element",
+        "data.packages.element.options[1].manifest.forms.element.sections.element",
+        "data.packages.element.options[1].manifest.forms.element.submitBehavior.options[1].url",
         "data.packages.element.options[1].manifest.hooks.element",
         "data.packages.element.options[1].manifest.hooks.element.object",
         "data.packages.element.options[1].manifest.hooks.element.refusals.valueType",
@@ -657,8 +663,6 @@
         "data.packages.element.options[1].manifest.translations.element.valueType.flows.valueType.errorMessage",
         "data.packages.element.options[1].manifest.translations.element.valueType.flows.valueType.successMessage",
         "data.packages.element.options[1].manifest.views.element.form",
-        "data.packages.element.options[1].manifest.views.element.form.sections.element",
-        "data.packages.element.options[1].manifest.views.element.form.submitBehavior.options[1].url",
         "data.packages.element.options[1].manifest.views.element.list",
         "data.packages.element.options[1].manifest.views.element.list.bulkActionDefs.element",
         "data.packages.element.options[1].manifest.views.element.list.filter.element",
@@ -1935,6 +1939,14 @@
     "ui/EmptyState": {
       "sites": [
         "link.url"
+      ]
+    },
+    "ui/Form": {
+      "sites": [
+        "",
+        "sections.element",
+        "subforms.element.columns.element",
+        "submitBehavior.options[1].url"
       ]
     },
     "ui/FormSection": {

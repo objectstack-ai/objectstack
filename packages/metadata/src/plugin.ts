@@ -134,6 +134,7 @@ const ARTIFACT_FIELD_TO_TYPE: Record<string, string> = {
     objectExtensions: 'object_extension',
     apps: 'app',
     views: 'view',
+    forms: 'form',
     pages: 'page',
     dashboards: 'dashboard',
     reports: 'report',

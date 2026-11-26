@@ -4530,7 +4530,7 @@ const METADATA_ARRAY_KEYS = [
   // name instead of registering as items of their own.
   'picklists', 'picklistExtensions',
   // UI Protocol
-  'actions', 'views', 'pages', 'dashboards', 'reports', 'datasets', 'themes',
+  'actions', 'views', 'forms', 'pages', 'dashboards', 'reports', 'datasets', 'themes',
   // Automation Protocol
   'flows', 'workflows', 'approvals', 'webhooks',
   'jobs',

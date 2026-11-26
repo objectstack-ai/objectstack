@@ -157,6 +157,7 @@
     "defineDatasource (function)",
     "defineEmailTemplateDefinition (function)",
     "defineFlow (function)",
+    "defineForm (function)",
     "defineHook (function)",
     "defineJob (function)",
     "defineMapping (function)",

@@ -1,0 +1,343 @@
+// Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
+
+/**
+ * [ADR-0159 D5, D6 rule 11] The effective `form` read: the `form` items a
+ * caller is served, resolved over BOTH types.
+ *
+ * Until card ⑤ every first-party form is still an old shape (a `view`
+ * container's `form`, a `formViews` entry, a `viewKind: 'form'` item), and a
+ * package may move its source to `forms:` while a stored `view` row still
+ * stands over the form. So the `form` read is three readings, combined per
+ * package address `(package, name)`:
+ *
+ *  1. **The generic `form` list** — the authored `form` items the registry
+ *     holds and the stored `form` rows over them, merged as every type is
+ *     merged ({@link ProtocolHost.readFlattenedMetaItems}).
+ *  2. **The projection of the served `view` list** — at an address whose
+ *     package still authors its form as an old shape, the `view` type
+ *     resolves the address today, so the `view` row the served-row order
+ *     serves there is the form's body. Each item of the effective `view`
+ *     list is projected ({@link projectViewForms}); a projected item is
+ *     marked in its envelope ({@link PROJECTED_FORM_SOURCE_KEY}). ⛔ Never
+ *     parsed by `FormSchema`: the authored-only refusals do not apply to it.
+ *  3. **The cross-type resolution** — at an address whose package authors
+ *     the form as a `form` item it has LEFT the `view` type, so the `view`
+ *     merge no longer resolves that address. The `form` read asks the
+ *     served-row order itself ({@link servedOverlayRowCandidates}), at that
+ *     package's address, over the stored rows of both types: the first place
+ *     that holds a row of the name decides, a stored `form` row winning over
+ *     a stored `view` row at the same place, an item row over a container's
+ *     expansion. A `view` row there serves the form it projects; a `view` row
+ *     that projects no form at the name (a list, or a body the projection
+ *     cannot read) closes the address: nothing is served for the name from
+ *     the package (the closed reading, fail-closed). ⛔ "Served" is asked at
+ *     each package's address, never taken from the effective `view` list:
+ *     one row can be the served row at one package's address and be passed
+ *     over at another's.
+ *
+ * Inside one package and one layer an authored item shadows a projected one
+ * of the same name; a package's source item never shadows the projection of
+ * a stored row (step 3 runs over the stored rows first).
+ *
+ * Pure over what the host reads: no write, no registry mutation.
+ */
+
+import { pairsOf, type InstalledManifestLookup } from '@objectstack/metadata-core';
+import { PROJECTED_FORM_SOURCE_KEY, isAggregatedViewContainer, projectViewForms, type UnreadableFormBody } from '@objectstack/spec/ui';
+import { installedManifestsOfEngine } from './installed-manifests.js';
+import type { ProtocolHost } from './protocol-host.js';
+import { holdsServedOverlayCandidate, servedOverlayRowCandidates } from './protocol-overlay-merge.js';
+import type { StoredOverlayEntry } from './protocol-stored-overlay-types.js';
+
+/** What one stored row holds at a form's name, as the `form` read reads it. */
+type StoredHolding =
+    | { readonly kind: 'form'; readonly item: Record<string, unknown> }
+    | { readonly kind: 'closed'; readonly reason: 'list' | 'unreadable' };
+
+/** One stored row of either type, with its binding and what it holds per name. */
+interface StoredFormPlace {
+    readonly type: 'form' | 'view';
+    readonly packageId: string | undefined;
+    readonly entry: StoredOverlayEntry;
+    /** `item` for a row stored under the name itself, `expansion` for a container that expands it. */
+    readonly grain: 'item' | 'expansion';
+    readonly holds: ReadonlyMap<string, StoredHolding>;
+}
+
+/** The host members the effective `form` read reads. */
+export type FormReadHost = Pick<ProtocolHost,
+    'engine' | 'readFlattenedMetaItems' | 'readActiveOverlayRows' | 'storedOverlayEntries'
+    | 'expandStoredViewContainers' | 'rethrowUnlessMetadataStoreUnprovisioned'>;
+
+const keyOf = (pkg: unknown, name: unknown): string => `${typeof pkg === 'string' ? pkg : ''}\u0000${String(name)}`;
+
+/** A listed item's package, as its envelope states it. */
+function packageOf(item: unknown): string | undefined {
+    const pkg = (item as { _packageId?: unknown } | null)?._packageId;
+    return typeof pkg === 'string' && pkg !== '' ? pkg : undefined;
+}
+
+/** The base package a stored body declares it overrides, if any. */
+function declaredOverrideOf(body: unknown): string | undefined {
+    const overrides = (body as { overrides?: unknown } | null)?.overrides;
+    const pkg = overrides && typeof overrides === 'object' ? (overrides as { package?: unknown }).package : undefined;
+    return typeof pkg === 'string' && pkg !== '' ? pkg : undefined;
+}
+
+/**
+ * [ADR-0159 D5] What a stored `view` body holds per name: a projected form, or
+ * a closing holding (a list at the name, a body the projection cannot read).
+ */
+function viewHoldings(body: unknown): Map<string, StoredHolding> {
+    const out = new Map<string, StoredHolding>();
+    const projection = projectViewForms(body);
+    for (const form of projection.forms) if (!out.has(form.name)) out.set(form.name, { kind: 'form', item: form });
+    for (const list of projection.lists) if (!out.has(list)) out.set(list, { kind: 'closed', reason: 'list' });
+    if (projection.unreadable !== undefined) {
+        const name = (body as { name?: unknown } | null)?.name;
+        if (typeof name === 'string' && name !== '' && !out.has(name)) out.set(name, { kind: 'closed', reason: 'unreadable' });
+    }
+    return out;
+}
+
+/** Read the active stored rows of one type as parsed entries; an unprovisioned store reads none. */
+async function storedEntries(host: FormReadHost, type: 'form' | 'view'): Promise<StoredOverlayEntry[]> {
+    try {
+        const rows = await host.readActiveOverlayRows({ type });
+        return rows.length === 0 ? [] : host.storedOverlayEntries({ type }, rows);
+    } catch (error) {
+        host.rethrowUnlessMetadataStoreUnprovisioned(error, 'sys_metadata');
+        return [];
+    }
+}
+
+/** Every stored row of both types as a {@link StoredFormPlace}. */
+async function storedFormPlaces(host: FormReadHost): Promise<StoredFormPlace[]> {
+    const places: StoredFormPlace[] = [];
+    for (const entry of await storedEntries(host, 'form')) {
+        const name = typeof entry.data?.name === 'string' && entry.data.name !== '' ? entry.data.name : entry.name;
+        if (typeof name !== 'string' || name === '') continue;
+        places.push({ type: 'form', packageId: entry.packageId, entry, grain: 'item', holds: new Map([[name, { kind: 'form', item: entry.data }]]) });
+    }
+    const views = await storedEntries(host, 'view');
+    const containers = views.filter((entry) => isAggregatedViewContainer(entry.data));
+    for (const entry of views) {
+        if (isAggregatedViewContainer(entry.data)) continue;
+        places.push({ type: 'view', packageId: entry.packageId, entry, grain: 'item', holds: viewHoldings(entry.data) });
+    }
+    // A stored container is read as the items the runtime door expands it to,
+    // the same expansion the `view` list serves, so a projected name is the
+    // served one.
+    const byContainer = new Map<StoredOverlayEntry, Map<string, StoredHolding>>();
+    for (const { item, container } of host.expandStoredViewContainers('view', containers)) {
+        const holds = byContainer.get(container) ?? new Map<string, StoredHolding>();
+        for (const [name, holding] of viewHoldings(item)) holds.set(name, holding);
+        byContainer.set(container, holds);
+    }
+    for (const container of containers) {
+        const projection = projectViewForms(container.data);
+        const holds = byContainer.get(container) ?? new Map<string, StoredHolding>();
+        // A container the projection cannot read holds nothing it can name;
+        // the doors close the links it names (rule 7), the read serves nothing new.
+        if (projection.unreadable !== undefined && holds.size === 0) continue;
+        places.push({ type: 'view', packageId: container.packageId, entry: container, grain: 'expansion', holds });
+    }
+    return places;
+}
+
+/**
+ * [ADR-0159 D5, rule 11] The stored row the served-row order picks for `name`
+ * at `packageId`'s address, over both types: `undefined` when no place holds a
+ * row of the name (the package's source item is served).
+ */
+export function servedFormHolding(
+    places: readonly StoredFormPlace[],
+    name: string,
+    packageId: string,
+    installed: InstalledManifestLookup,
+): { holding: StoredHolding; place: StoredFormPlace; overrideOf?: string } | undefined {
+    for (const candidate of servedOverlayRowCandidates({ packageId, servedOverride: true, installed })) {
+        // Both spellings are read as one: the `form` read parses rows of
+        // either spelling of its type, and the spelling decides nothing here.
+        if (candidate.spelling === 'other') continue;
+        const at = places.filter((place) => place.holds.has(name)
+            && (candidate.packageId === undefined || (place.packageId ?? null) === candidate.packageId)
+            && holdsServedOverlayCandidate(candidate,
+                { type: place.entry.type, package_id: place.packageId ?? null, metadata: place.entry.data }, installed, undefined));
+        // A stored `form` row wins over a stored `view` row at the same place;
+        // an item row over a container's expansion.
+        const rank = (place: StoredFormPlace): number => (place.type === 'form' ? 0 : place.grain === 'item' ? 1 : 2);
+        const hit = [...at].sort((a, b) => rank(a) - rank(b))[0];
+        if (hit !== undefined) {
+            return candidate.overrideOf === undefined
+                ? { holding: hit.holds.get(name)!, place: hit }
+                : { holding: hit.holds.get(name)!, place: hit, overrideOf: candidate.overrideOf };
+        }
+    }
+    return undefined;
+}
+
+/** A projected item, marked and served under `packageId`'s envelope. */
+function projectedServed(item: Record<string, unknown>, packageId: string | undefined): Record<string, unknown> {
+    const out: Record<string, unknown> = { ...item, [PROJECTED_FORM_SOURCE_KEY]: 'view' };
+    if (packageId !== undefined) out._packageId = packageId;
+    else delete out._packageId;
+    return out;
+}
+
+/**
+ * [ADR-0159 D5] The effective `form` list ({@link FormReadHost}): the generic
+ * `form` list, the projection of the served `view` list, and the cross-type
+ * resolution at each address whose package authors the form as a `form` item.
+ * See the module header for the three readings and how they combine.
+ */
+export async function readEffectiveForms(
+    host: FormReadHost,
+    request: { type: string; packageId?: string; names?: readonly string[]; previewDrafts?: boolean },
+    audience: 'served' | 'execution',
+): Promise<unknown[]> {
+    const { packageId: scope, names, ...rest } = request;
+    const unscoped = { ...rest, type: 'form' };
+    const generic = (await host.readFlattenedMetaItems(unscoped, audience)).items as unknown[];
+    const views = (await host.readFlattenedMetaItems({ ...unscoped, type: 'view' }, audience)).items as unknown[];
+    const installed = installedManifestsOfEngine(host.engine);
+
+    // The packages that author a form of each name as a `form` item: the
+    // addresses that have left the `view` type (step 3).
+    const authored = new Map<string, Set<string>>();
+    for (const item of host.engine.registry.listItems('form') as unknown[]) {
+        const name = (item as { name?: unknown } | null)?.name;
+        const pkg = packageOf(item);
+        if (typeof name !== 'string' || pkg === undefined) continue;
+        const set = authored.get(name) ?? new Set<string>();
+        set.add(pkg);
+        authored.set(name, set);
+    }
+    const leftView = (pkg: string | undefined, name: string): boolean => pkg !== undefined && authored.get(name)?.has(pkg) === true;
+
+    // Step 2: the projection of the served `view` list, per (package, name).
+    const projected = new Map<string, Record<string, unknown>>();
+    const projectedOrder: string[] = [];
+    for (const view of views) {
+        const pkg = packageOf(view);
+        for (const form of projectViewForms(view).forms) {
+            const key = keyOf(pkg, form.name);
+            if (projected.has(key)) continue;
+            projected.set(key, projectedServed(form, pkg));
+            projectedOrder.push(key);
+        }
+    }
+
+    // Step 1: the generic list, a declared override of a base that ships the
+    // name only as an old shape re-keyed to its base: it is the base's item.
+    const out = new Map<string, unknown>();
+    const order: string[] = [];
+    const put = (key: string, item: unknown): void => {
+        if (!out.has(key)) order.push(key);
+        out.set(key, item);
+    };
+    const genericByKey = new Map<string, unknown>();
+    for (let item of generic) {
+        const name = (item as { name?: unknown } | null)?.name;
+        if (typeof name !== 'string') continue;
+        let pkg = packageOf(item);
+        const base = declaredOverrideOf(item);
+        if (base !== undefined && pkg !== base && pairsOf(base, installed).includes(pkg ?? '')
+            && projected.has(keyOf(base, name))) {
+            pkg = base;
+            item = { ...(item as object), _packageId: base };
+        }
+        genericByKey.set(keyOf(pkg, name), item);
+    }
+
+    // Step 3 needs the stored rows of both types, read only when an address
+    // has left the `view` type.
+    let places: StoredFormPlace[] | undefined;
+    const placesOf = async (): Promise<StoredFormPlace[]> => (places ??= await storedFormPlaces(host));
+
+    for (const [key, item] of genericByKey) {
+        const name = String((item as { name?: unknown }).name);
+        const pkg = packageOf(item);
+        if (!leftView(pkg, name)) {
+            put(key, item);
+            continue;
+        }
+        const served = servedFormHolding(await placesOf(), name, pkg!, installed);
+        if (served === undefined || served.place.type === 'form') {
+            // No stored row, or a stored `form` row: the generic merge served
+            // the same candidate order over the `form` rows alone.
+            put(key, item);
+            continue;
+        }
+        // A stored `view` row is the served row at this address.
+        if (served.holding.kind === 'form') put(key, projectedServed(served.holding.item, pkg));
+        // …else the closed reading: nothing is served for the name from the package.
+    }
+    // A package that authors the form but has no item in the generic list (its
+    // item withheld) is not re-introduced here.
+
+    // Step 2's items, where no generic item holds the same address. An
+    // authored item shadows a projected one of the same package and name.
+    const genericNames = new Set([...genericByKey.values()].map((item) => String((item as { name?: unknown }).name)));
+    for (const key of projectedOrder) {
+        if (genericByKey.has(key)) continue;
+        const item = projected.get(key)!;
+        const pkg = packageOf(item);
+        const name = String(item.name);
+        // An address that has left the `view` type is resolved by step 3.
+        if (leftView(pkg, name)) continue;
+        // A package-less projection stands in for the addresses of the name
+        // that step 1 resolved (they read it as a candidate): never listed twice.
+        if (pkg === undefined && genericNames.has(name)) continue;
+        put(key, item);
+    }
+
+    let items = order.map((key) => out.get(key));
+    if (scope !== undefined) items = items.filter((item) => packageOf(item) === scope);
+    if (names !== undefined) {
+        const wanted = new Set(names);
+        items = items.filter((item) => wanted.has(String((item as { name?: unknown }).name)));
+    }
+    return items;
+}
+
+/** The rows {@link readUnreadableFormBodies} has reported, so each is said once per process. */
+const REPORTED_UNREADABLE = new Set<string>();
+
+/**
+ * [ADR-0159 D6 rule 7] Every stored `view` body the projection cannot turn
+ * into `form` items, with the `sharing.publicLink` slugs it names: the doors
+ * close each of those links. Each such row is said ONCE at `error`, naming the
+ * row (type, name, package), the links it closed, and the way out this release
+ * ships: an old-shape save that repairs the body. ⛔ No command that does not
+ * ship is named (the ceremony card, ⑤a, adds its name).
+ */
+export async function readUnreadableFormBodies(
+    host: Pick<FormReadHost, 'readActiveOverlayRows' | 'storedOverlayEntries' | 'rethrowUnlessMetadataStoreUnprovisioned'>,
+    report: (line: string) => void = (line) => console.error(line),
+): Promise<UnreadableFormBody[]> {
+    const out: UnreadableFormBody[] = [];
+    for (const entry of await storedEntries(host as FormReadHost, 'view')) {
+        const projection = projectViewForms(entry.data);
+        if (projection.unreadable === undefined) continue;
+        const body: UnreadableFormBody = {
+            type: 'view',
+            name: entry.name,
+            ...(entry.packageId !== undefined ? { packageId: entry.packageId } : {}),
+            reason: projection.unreadable.reason,
+            links: projection.unreadable.links,
+        };
+        out.push(body);
+        const key = `${body.type}\u0000${body.name}\u0000${body.packageId ?? ''}\u0000${body.reason}\u0000${body.links.join(',')}`;
+        if (REPORTED_UNREADABLE.has(key)) continue;
+        REPORTED_UNREADABLE.add(key);
+        const where = body.packageId !== undefined ? `package '${body.packageId}'` : 'no package';
+        const closed = body.links.length > 0 ? body.links.map((l) => `/forms/${l}`).join(', ') : 'no public link';
+        report(
+            `[Protocol] The stored view '${body.name}' (${where}) carries form content that cannot be read: `
+            + `${body.reason}. The public forms it names are closed: ${closed}. `
+            + `Save the view again with its form content repaired (a \`form\` or \`formViews\` entry that is an object) to re-open them (ADR-0159 D6 rule 7).`,
+        );
+    }
+    return out;
+}

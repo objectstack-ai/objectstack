@@ -23,6 +23,7 @@
  * not move.
  */
 
+import { applyOldShapeFormRowRemovals, type OldShapeFormRowRemoval } from './protocol-form-writes.js';
 import { overlayMemberWhere } from './migrations/overlay-index.js';
 import {
     historyRowsOfMember,
@@ -455,7 +456,7 @@ export class ProtocolDiffDeleteLoadFacet {
     }
 
     /** [#28355] The body of {@link deleteMetaItem} before its refusal audit; that method's docblock is the contract. */
-    static async deleteMetaItemUnaudited(host: Pick<ProtocolHost, 'assertLockAllowsDelete' | 'declinesStoredRow' | 'dropObjectStorage' | 'dropStorageRemainingRowsRefusal' | 'emitMetadataMutation' | 'engine' | 'environmentId' | 'findEnvironmentRow' | 'getOverlayRepo' | 'isArtifactBacked' | 'isOverlayAllowed' | 'isRuntimeCreateAllowed' | 'metadataConflictRefusal' | 'originGatedRemovalRefusal' | 'packagedArtifactOwner' | 'packagedBaseRefusal' | 'packagelessAddress' | 'packagelessDraftAddress' | 'packagelessOverlayWriteRefusal' | 'readItemActiveRows' | 'recordMetadataAudit' | 'recordOptimisticConflictAudit' | 'refuseOrganizationScopedWrite' | 'refusePackagedBaseRemoval' | 'registryAllowsOverlay' | 'restoreArtifactRegistryView' | 'rethrowUnlessMetadataStoreUnprovisioned' | 'runMutationProjector' | 'shippedArtifactsOf' | 'shouldDropStorage' | 'storedParentForToken'>, request: DeleteMetaItemRequest): Promise<{
+    static async deleteMetaItemUnaudited(host: Pick<ProtocolHost, 'assertLockAllowsDelete' | 'declinesStoredRow' | 'dropObjectStorage' | 'dropStorageRemainingRowsRefusal' | 'emitMetadataMutation' | 'engine' | 'environmentId' | 'findEnvironmentRow' | 'getOverlayRepo' | 'isArtifactBacked' | 'isOverlayAllowed' | 'isRuntimeCreateAllowed' | 'metadataConflictRefusal' | 'originGatedRemovalRefusal' | 'packagedArtifactOwner' | 'packagedBaseRefusal' | 'packagelessAddress' | 'packagelessDraftAddress' | 'packagelessOverlayWriteRefusal' | 'readItemActiveRows' | 'recordMetadataAudit' | 'recordOptimisticConflictAudit' | 'refuseOrganizationScopedWrite' | 'refusePackagedBaseRemoval' | 'registryAllowsOverlay' | 'restoreArtifactRegistryView' | 'rethrowUnlessMetadataStoreUnprovisioned' | 'runMutationProjector' | 'shippedArtifactsOf' | 'shouldDropStorage' | 'storedParentForToken' | 'applyRegistryWriteThrough' | 'readActiveOverlayRows' | 'storedOverlayEntries'>, request: DeleteMetaItemRequest): Promise<{
             success: boolean;
             message?: string;
             reset?: boolean;
@@ -894,7 +895,27 @@ export class ProtocolDiffDeleteLoadFacet {
                     ? ((await host.storedParentForToken(ref, request.parentVersion, current.hash)) ?? current.hash)
                     : current.hash;
 
-                const result = await repo.delete(ref, {
+                // [ADR-0159 D5, card ② item 5] A `form` reset or delete also
+                // removes the old-shape row that carries the form at the same
+                // address, in the same transaction (the repository's `delete`
+                // joins it). ⛔ Form content only.
+                let removedOldShapeRows: OldShapeFormRowRemoval[] = [];
+                const formRowRemoval = targetState === 'active' && singularTypeForRepo === 'form';
+                const deleteFormAware = async (del: () => Promise<any>): Promise<any> => {
+                    if (!formRowRemoval) return del();
+                    const run = async () => {
+                        const removed = await del();
+                        removedOldShapeRows = await applyOldShapeFormRowRemovals(host, {
+                            name: request.name,
+                            packageId: packageId ?? null,
+                            actor: request.actor ?? null,
+                            source: 'protocol.deleteMetaItem',
+                        });
+                        return removed;
+                    };
+                    return typeof host.engine?.transaction === 'function' ? host.engine.transaction(run) : run();
+                };
+                const result = await deleteFormAware(() => repo.delete(ref, {
                     parentVersion,
                     // #4556 — NULL, not 'system', for an actor-less delete.
                     actor: request.actor ?? null,
@@ -915,7 +936,17 @@ export class ProtocolDiffDeleteLoadFacet {
                     // row it meets.
                     packageId,
                     ...memberOption(member),
-                });
+                }));
+                for (const removal of removedOldShapeRows) {
+                    if (removal.kind === 'delete') {
+                        await host.restoreArtifactRegistryView('view', removal.row.name, null, removal.row.packageId);
+                    } else {
+                        await host.applyRegistryWriteThrough({
+                            type: 'view', name: removal.row.name, item: removal.body,
+                            packageId: removal.row.packageId, organizationId: null,
+                        });
+                    }
+                }
 
                 // Heal the registry: drop the overlay's runtime shadow so the
                 // packaged artifact is visible again (all kernels), and on

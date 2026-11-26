@@ -244,6 +244,10 @@ export const ERROR_CODE_LEDGER = {
     // ledger is door-agnostic.
     'FIELD_VISIBILITY_UNRESOLVED',
     'FORBIDDEN',
+    // [ADR-0159 ruled question 3 = A] The public address clash: a `form` write
+    // that would leave the form open on a `/forms/SLUG` another form holds
+    // (`formAddressClashRefusal`, `@objectstack/metadata-protocol`), 409.
+    'FORM_ADDRESS_TAKEN',
     'FORM_NOT_FOUND',
     'FORM_RESOLVE_FAILED',
     'IMPORT_JOB_CREATE_FAILED',

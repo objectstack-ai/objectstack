@@ -476,6 +476,18 @@ export function assembleMetadataProtocol(
                 plans?.register?.(createRecordedBySentinelPlan());
             });
 
+            // [ADR-0159 D6 rule 7] A stored `view` body the `form` projection
+            // cannot read closes the public links it names on both anonymous
+            // doors; the boot says so once at `error`, naming the row, the
+            // links and the repair save. Reads only; never fails a bootstrap.
+            (ctx as any)?.hook?.('kernel:ready', async () => {
+                try {
+                    await protocolShim.getUnreadableFormBodies();
+                } catch {
+                    // An unreadable store is the doors' own question per request.
+                }
+            });
+
             // NO `analytics` fallback rides here anymore (#3891 / #3878). The
             // degraded shim this assembly used to register dropped the request's
             // ExecutionContext (aggregates ran without RLS/tenant predicates)

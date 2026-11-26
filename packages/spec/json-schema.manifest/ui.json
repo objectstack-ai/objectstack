@@ -73,6 +73,7 @@
     "ui/ElementTextProps",
     "ui/EmptyState",
     "ui/ExpressionBindableTextKey",
+    "ui/Form",
     "ui/FormButtonConfig",
     "ui/FormField",
     "ui/FormSection",

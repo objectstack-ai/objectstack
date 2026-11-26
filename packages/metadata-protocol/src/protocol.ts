@@ -1,5 +1,8 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
+import { packagelessListOverFormRefusal } from './protocol-form-writes.js';
+import { readUnreadableFormBodies } from './protocol-form-reads.js';
+import type { UnreadableFormBody } from '@objectstack/spec/ui';
 import type {
     DataProtocol,
     FlowRegistration,
@@ -1623,6 +1626,11 @@ export class ObjectStackProtocolImplementation implements
     private restoredBodyWriter(type: string, name: string, binding: string | null, source: string): (historyBody: unknown) => Promise<unknown> {
         // [#25467 cut 8] The body moved to `protocol-authoring-gate.ts` (see `AuthoringGateHost`).
         const host: ThisParameterType<typeof restoredBodyWriter> = {
+            listOverFormRefusal: (t, item, n, binding) => packagelessListOverFormRefusal({
+                expandRuntimeViewContainer: (...a) => this.expandRuntimeViewContainer(...a),
+                isWritablePackage: (...a) => this.isWritablePackage(...a),
+                shippedArtifactsOf: (...a) => this.shippedArtifactsOf(...a),
+            }, t, item, n, binding),
             objectExtensionItemRefusal: (...a) => this.objectExtensionItemRefusal(...a),
             refuseRestoredBodyTheSaveDoorRefuses: (...a) => this.refuseRestoredBodyTheSaveDoorRefuses(...a),
             restoredBodyDerivation: (...a) => this.restoredBodyDerivation(...a),
@@ -3521,6 +3529,17 @@ export class ObjectStackProtocolImplementation implements
     async getMetaItemsPerPackage(request: { type: string; packageId?: string; previewDrafts?: boolean }) {
         // [#25467 E1] The body moved to `protocol-meta-list-reads.ts`; it reaches this class through `protocol-host.ts`.
         return getMetaItemsPerPackage(protocolHost(this), request);
+    }
+
+    /**
+     * [ADR-0159 D6 rule 7] The stored `view` bodies the `form` projection
+     * cannot read, each with the public links it names: the anonymous form
+     * doors close every one of those links (a server-only extension the doors
+     * feature-detect). Each such row is said once at `error`, naming the row,
+     * the links and the repair save. See `readUnreadableFormBodies`.
+     */
+    async getUnreadableFormBodies(): Promise<UnreadableFormBody[]> {
+        return readUnreadableFormBodies(protocolHost(this));
     }
 
     /**

@@ -263,6 +263,7 @@ export interface ExpectedEntry {
     | 'report'
     | 'picklist'
     | 'page'
+    | 'form'
     | 'flow'
     | 'hook'
     | 'position'
@@ -1243,6 +1244,16 @@ function walkObjectSections(config: any, out: ExpectedEntry[]): void {
     }
   }
 
+  // (b) [ADR-0159 D8] authored `form` items' sections, keyed under the
+  // object they bind (the object-level default the translator keeps).
+  const forms: any[] = Array.isArray(config?.forms) ? config.forms : [];
+  for (const form of forms) {
+    if (!form || typeof form !== 'object') continue;
+    const formObject = viewObjectName(form) ?? (typeof form.object === 'string' ? form.object : undefined);
+    addSectionList(index, form.sections, formObject);
+    addSectionEntries(entries, form.sections, formObject);
+  }
+
   // (b) authored page sections — a record page's `record:details`.
   //
   // Reuses `@objectstack/lint`'s shared page traversal rather than growing a
@@ -1846,6 +1857,9 @@ export function collectExpectedEntries(
   // ── Import mappings (`mappings.<name>.label`) ─────────────────────
   walkMappings(config, out);
 
+  // ── [ADR-0159 D8] `form` items (`forms.<name>.…`) ─────────────────
+  walkForms(config, out);
+
   // ── Pages + their `page:header` copy ──────────────────────────────
   const pages: any[] = Array.isArray(config?.pages) ? config.pages : [];
   for (const page of pages) {
@@ -2214,6 +2228,29 @@ function walkMappings(config: any, out: ExpectedEntry[]): void {
     const name = mapping.name;
     if (typeof name !== 'string' || name.length === 0) continue;
     pushOptional(out, ['mappings', name, 'label'], mapping.label, 'mapping');
+  }
+}
+
+/**
+ * [ADR-0159 D8] Emit `forms.<name>.{label, description, title}` and its
+ * thank-you panel's `forms.<name>.submitBehavior.{title, message}` for each
+ * authored `form` item — the address `translateForm` reads first. ⛔ No
+ * `objects.<object>._views.<key>` tail is emitted for an authored `form`: that
+ * address is the old shapes' fallback, read, never scaffolded for the new
+ * type. Section copy stays the object's (`objects.<object>._sections.…`),
+ * walked with the object's sections.
+ */
+function walkForms(config: any, out: ExpectedEntry[]): void {
+  const forms: any[] = Array.isArray(config?.forms) ? config.forms : [];
+  for (const form of forms) {
+    if (!form || typeof form !== 'object') continue;
+    const name = form.name;
+    if (typeof name !== 'string' || name.length === 0) continue;
+    const extra = typeof form.object === 'string' && form.object ? { objectName: form.object } : undefined;
+    pushOptional(out, ['forms', name, 'label'], form.label, 'form', extra);
+    pushOptional(out, ['forms', name, 'description'], form.description, 'form', extra);
+    pushOptional(out, ['forms', name, 'title'], form.title, 'form', extra);
+    pushThankYouPanel(out, ['forms', name], form.submitBehavior, 'form', extra);
   }
 }
 

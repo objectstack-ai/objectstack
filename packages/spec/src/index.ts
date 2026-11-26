@@ -111,7 +111,7 @@ export type { DefineStackOptions, ComposeStacksOptions, ConflictStrategy, Object
 export * from './stack.zod';
 
 // DX Helper Functions (re-exported for convenience)
-export { defineView, defineMetadataForm, defineViewItem, isAggregatedViewContainer, expandViewContainer, expandViewContainerWithDiagnostics } from './ui/view.zod';
+export { defineView, defineForm, defineMetadataForm, defineViewItem, isAggregatedViewContainer, expandViewContainer, expandViewContainerWithDiagnostics } from './ui/view.zod';
 // [#22934] Which object an aggregated `views` container binds to — the registrars'
 // slot key, and the identity the stack's same-stack duplicate-entry refusal reads.
 // `@objectstack/metadata` re-exports this declaration under the same name.

@@ -63,7 +63,7 @@ import { SeedSchema } from './data/seed.zod';
 
 // UI Protocol
 import { AppSchema } from './ui/app.zod';
-import { ViewSchema, isAggregatedViewContainer, expandViewContainer } from './ui/view.zod';
+import { ViewSchema, FormSchema, isAggregatedViewContainer, expandViewContainer } from './ui/view.zod';
 import { deriveViewContainerObject } from './ui/view-container-object';
 import { defaultRecordPageObject } from './ui/default-record-page';
 import { PageSchema } from './ui/page.zod';
@@ -909,6 +909,7 @@ const STACK_DEFINITION_COLLECTIONS_SHAPE = {
     + '(standalone ViewItems, flattened overlays) — written by package export and artifact '
     + 'factories, refused in authored stack sources.',
   ),
+  forms: z.array(FormSchema).optional().describe('Data-entry forms, one object each (ADR-0159): `defineForm` items named `OBJECT.KEY`'),
   pages: z.array(PageSchema).optional().describe('Custom Pages'),
   dashboards: z.array(DashboardSchema).optional().describe('Dashboards'),
   reports: z.array(ReportSchema).optional().describe('Analytics Reports'),
@@ -1674,6 +1675,7 @@ export const COMPOSE_KEY_DISPOSITIONS = Object.freeze({
   // manifests are not `composeStacks` inputs today; if two ever were, their
   // non-container view artifacts would concatenate like every other collection.
   viewItems: 'concat',
+  forms: 'concat',
   pages: 'concat',
   dashboards: 'concat',
   reports: 'concat',
@@ -3397,6 +3399,7 @@ const SAME_STACK_ENTRY_IDENTITY = Object.freeze({
       "one's configuration.",
     remedy: RENAME_OR_MERGE,
   },
+  forms: lastWinsByName('Form', 'forms'),
   pages: lastWinsByName('Page', 'pages'),
   dashboards: lastWinsByName('Dashboard', 'dashboards'),
   reports: lastWinsByName('Report', 'reports'),

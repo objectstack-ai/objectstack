@@ -463,6 +463,7 @@ const SOURCE_SURFACE: Record<CoverageIssue['source'], string> = {
   report: 'reports',
   picklist: 'picklists',
   page: 'pages',
+  form: 'forms',
   flow: 'flow screens, steps, approval steps, toasts and refusals',
   hook: 'hook refusals',
   position: 'positions',
