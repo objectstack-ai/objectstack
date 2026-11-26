@@ -308,6 +308,10 @@ function deriveColumn(name: string, d: any, booleanLabel: BooleanValueLabel): Gr
   // so the grid cell evaluates them per row (against the row + `parent`
   // header).
   if (d?.readonlyWhen) col.readonlyWhen = d.readonlyWhen;
+  // The child FIELD's hand-lock predicate (`uiReadonlyWhen`), carried onto its
+  // column in memory: the cell folds it into the same per-row read-only verdict
+  // (`resolveFieldRuleState`). Not an `inlineColumns` key an author writes.
+  if (d?.uiReadonlyWhen) (col as { uiReadonlyWhen?: unknown }).uiReadonlyWhen = d.uiReadonlyWhen;
   if (d?.requiredWhen) col.requiredWhen = d.requiredWhen;
   // A field carrying an arithmetic `expression` (e.g. amount = quantity *
   // unit_price) becomes a live read-only computed column. The expression may
@@ -432,6 +436,7 @@ export function hydrateColumns(
     }
     if (type === 'file') applyFileColumnProps(next, d);
     if (next.readonlyWhen == null && d?.readonlyWhen) next.readonlyWhen = d.readonlyWhen;
+    if ((next as { uiReadonlyWhen?: unknown }).uiReadonlyWhen == null && d?.uiReadonlyWhen) (next as { uiReadonlyWhen?: unknown }).uiReadonlyWhen = d.uiReadonlyWhen;
     if (next.requiredWhen == null && d?.requiredWhen) {
       next.requiredWhen = d.requiredWhen;
     }

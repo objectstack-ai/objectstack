@@ -148,6 +148,13 @@
       "evidence": "packages/objectql/src/validation/rule-validator.ts",
       "note": "renderer CEL + server write path: stripReadonlyWhenFields drops UPDATE writes when the predicate is TRUE against {...previous, ...data} (B2); INSERT exempt."
     },
+    "uiReadonlyWhen": {
+      "status": "live",
+      "verifiedAt": "2026-11-26",
+      "evidenceScope": "in-repo",
+      "evidence": "ui/packages/core/src/evaluator/handLock.ts#fieldReadOnlyByHand (the one hand-lock verdict, the predicate run through ui/packages/core/src/evaluator/fieldRules.ts#resolveFieldRuleState); its readers are the hand surfaces listed on `uiReadonly`, with the per-record reads in the form renderer (ui/packages/components/src/renderers/form/form.tsx), the record page (DetailSection, HeaderHighlight, InlineEditSaveBar, recordPathStageChange), the grid cell (ui/packages/plugin-grid/src/objectGridCellFacts.ts#cellReadOnlyKind), the line-item cell (ui/packages/fields/src/widgets/grid-field/GridFieldWidget.tsx), kanban and calendar drops; packages/runtime/src/domains/mcp.ts#describedHandLock (describe_object)",
+      "note": "renderer only, by ruling (the two-tier field-lock model): while TRUE no person edits the field at the console; the engine never reads it, so API, import, action and flow writes keep it, judged by validations. Allowed beside `readonlyWhen`, the stricter server lock. Fail-open on a fault, as `readonlyWhen` on the client."
+    },
     "visibleWhen": {
       "status": "live",
       "note": "renderer CEL."
@@ -191,6 +198,13 @@
       "evidence": "packages/objectql/src/validation/rule-validator.ts (stripReadonlyFields — the one strip, UPDATE and INSERT); packages/objectql/src/engine.ts (INSERT call site, isSystem-gated, since the 2026-09-03 ruling)",
       "proof": "packages/qa/dogfood/test/showcase-static-readonly.dogfood.test.ts#readonly-static-write",
       "note": "renderer + server write path: a non-system write to the field is silently dropped on BOTH UPDATE (#2948/#3003 — engine stripReadonlyFields; was renderer-only, i.e. false compliance for approval/status columns) and INSERT — first (#3043) at the DataProtocol createData/import ingress only, so external REST/GraphQL/MCP creates couldn't seed approval_status:'approved' a step shorter than #3003 while a direct engine.insert caller still could; since the maintainer ruling of 2026-09-03 (option C, #14147) inside engine.insert itself, by the SAME stripReadonlyFields under the SAME isSystem gate as UPDATE, with the ingress copy deleted, so every non-system caller is stripped and seeding a readonly column at create time is a system act (isSystem / runAs:'system' / seeds); a stripped INSERT field falls back to its defaultValue; symmetric with readonlyWhen (which stays INSERT-exempt, needing a prior record)."
+    },
+    "uiReadonly": {
+      "status": "live",
+      "verifiedAt": "2026-11-26",
+      "evidenceScope": "in-repo",
+      "evidence": "ui/packages/core/src/evaluator/handLock.ts#fieldStaticallyReadOnlyByHand and #fieldReadOnlyByHand (the one hand-lock verdict every hand surface reads): the create and edit dialogs and their payload (ui/packages/plugin-form/src/autoLayout.ts, sectionFields.ts, ObjectForm.tsx, sanitize.ts), record-page inline edit and the stage path (ui/packages/plugin-detail/src/DetailSection.tsx, InlineEditSaveBar.tsx, renderers/recordPathStageChange.tsx), the highlight-strip chip (HeaderHighlight.tsx), grid inline edit (ui/packages/plugin-grid/src/inline-edit-options.ts), kanban drag (ui/packages/plugin-kanban/src/ObjectKanban.tsx), calendar drag (ui/packages/plugin-calendar/src/ObjectCalendar.tsx), the line-item grid (packages/spec/src/data/inline-grid-columns.ts#deriveInlineGridColumns); packages/spec/src/data/field.zod.ts#uiReadonly (the parse refuses it beside `readonly: true`); packages/runtime/src/domains/mcp.ts#describedHandLock (describe_object)",
+      "note": "renderer only, by ruling (the two-tier field-lock model): no person edits the field at the console, and every other write keeps it — the engine never reads the key, so REST, import, action and flow writes set it, judged by validations (a state_machine rule included); a console create leaves it out and the server applies its defaultValue. The import mapping and Studio reads stay on raw `readonly`."
     },
     "hidden": {
       "status": "live",
