@@ -85,7 +85,7 @@ async function addsRowSensitiveColumnToPopulatedTable(
 async function addColumnsThenBackfill(
   knex: Knex,
   table: string,
-  addColumns: (t: Knex.AlterTableBuilder) => void,
+  addColumns: (t: Knex.CreateTableBuilder) => void,
   fields: Record<string, unknown> | undefined,
   existingColumns: readonly string[],
   fillRows: boolean,

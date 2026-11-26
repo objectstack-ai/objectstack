@@ -26,11 +26,20 @@
  *    DEFAULT, and drift is empty.
  * 4. Control: an EMPTY table still gets the DEFAULT (and NOT NULL) at once,
  *    with no drift.
+ * 5. The shard door (a rotation-declared object's current shard) fills the
+ *    rows the same way.
+ * 6. The backfill fills only NULLs: a value already in the column is kept.
+ * 7. The differ's new arm, beyond this sync: a column that predates the
+ *    `NOW()` declaration and has no DEFAULT reports `set_column_default`, and
+ *    the ceremony clears it; a multi-value `NOW()` field and a column already
+ *    carrying an expression DEFAULT report nothing.
+ * 8. `autoMigrate: 'safe'`: the boot that adds the column also applies the
+ *    owed DEFAULT (the rebuild); the next boot applies nothing.
  */
 
 import { afterEach, describe, expect, it } from 'vitest';
 import { SqlDriver } from './sql-driver.js';
-import { sqliteNowColumnDefaultSql } from './sql-driver-schema-sync.js';
+import { sqliteNowBackfillSql, sqliteNowColumnDefaultSql } from './sql-driver-schema-sync.js';
 import type { ManagedDriftEntry } from './schema-drift.js';
 
 const T = 'now_add_t';
@@ -61,15 +70,15 @@ afterEach(async () => {
   driver = null;
 });
 
-async function open(): Promise<SqlDriver> {
-  driver = new SqlDriver({ client: 'better-sqlite3', connection: { filename: ':memory:' }, useNullAsDefault: true });
+async function open(extra: Record<string, unknown> = {}): Promise<SqlDriver> {
+  driver = new SqlDriver({ client: 'better-sqlite3', connection: { filename: ':memory:' }, useNullAsDefault: true, ...extra } as never);
   await driver.connect();
   return driver;
 }
 
-async function column(d: SqlDriver): Promise<{ notnull: number; dflt_value: unknown }> {
-  const rows: Array<{ name: string; notnull: number; dflt_value: unknown }> = await d.getKnex().raw(`PRAGMA table_info("${T}")`);
-  const row = rows.find((r) => r.name === 'added');
+async function column(d: SqlDriver, table: string = T, name: string = 'added'): Promise<{ notnull: number; dflt_value: unknown }> {
+  const rows: Array<{ name: string; notnull: number; dflt_value: unknown }> = await d.getKnex().raw(`PRAGMA table_info("${table}")`);
+  const row = rows.find((r) => r.name === name);
   expect(row, 'the column was added').toBeDefined();
   return row!;
 }
@@ -117,5 +126,101 @@ describe.each(TYPES)('control: a NOW() %s field added to an EMPTY SQLite table',
     await d.syncSchema(T, V2(type, notNull));
     expect(await column(d)).toMatchObject({ notnull: notNull ? 1 : 0, dflt_value: reported(type) });
     expect(await d.detectManagedDrift([V2(type, notNull)])).toEqual([]);
+  });
+});
+
+describe('the shard door: a rotation-declared object gains a NOW() field (#37413)', () => {
+  const ROTATED = (fields: Record<string, unknown>) => ({
+    name: 'rot_now',
+    fields: { payload: { type: 'text' }, ...fields },
+    lifecycle: { class: 'telemetry', storage: { strategy: 'rotation', shards: 3, unit: 'day' } },
+  });
+
+  it('adds the column to the populated current shard and fills its rows', async () => {
+    const d = await open();
+    await d.initObjects([ROTATED({})]);
+    const shard = `rot_now__r${new Date().toISOString().slice(0, 10).replace(/-/g, '')}`;
+    await d.create('rot_now', { id: 's1', payload: 'x' }, { bypassTenantAudit: true });
+
+    await d.initObjects([ROTATED({ added: { type: 'datetime', defaultValue: 'NOW()' } })]);
+    expect(await column(d, shard)).toMatchObject({ notnull: 0, dflt_value: null });
+    const rows = (await d.execute(`SELECT added FROM "${shard}"`)) as Array<{ added: unknown }>;
+    expect(rows).toHaveLength(1);
+    expect(String(rows[0]!.added)).toMatch(SHAPE.datetime);
+  });
+});
+
+describe('the backfill fills only NULLs (#37413)', () => {
+  it('keeps a value a writer already stored in the column', async () => {
+    const d = await open();
+    const k = d.getKnex();
+    await k.raw(`CREATE TABLE "${T}" (id text primary key, added datetime)`);
+    await k(T).insert([{ id: 'a', added: null }, { id: 'b', added: 'kept' }]);
+    await k.raw(sqliteNowBackfillSql(T, [['added', { type: 'datetime', defaultValue: 'NOW()' }]])!);
+    const rows = await k(T).select('id', 'added').orderBy('id');
+    expect(String(rows[0].added)).toMatch(SHAPE.datetime);
+    expect(rows[1].added).toBe('kept');
+  });
+});
+
+describe('the absent NOW() DEFAULT arm beyond this sync (#37413)', () => {
+  it('reports a column that predates its NOW() declaration, and the ceremony clears it', async () => {
+    const d = await open();
+    await d.syncSchema(T, { name: T, fields: { plain: { type: 'text' }, added: { type: 'datetime' } } });
+    await d.create(T, { id: 'r1', plain: 'x' });
+    const declared = { name: T, fields: { plain: { type: 'text' }, added: { type: 'datetime', defaultValue: 'NOW()' } } };
+    await d.syncSchema(T, declared);
+    const owed = await d.detectManagedDrift([declared]);
+    expect(ownedOps(owed)).toEqual(['set_column_default']);
+    expect(owed.find((e) => e.column === 'added')?.category).toBe('safe');
+
+    await d.applyMigrationEntries(owed);
+    expect(await column(d)).toMatchObject({ dflt_value: reported('datetime') });
+    // The ceremony restates the DEFAULT only; it rewrites no stored row.
+    expect((await d.getKnex()(T).where({ id: 'r1' }).first()).added).toBeNull();
+    expect(await d.detectManagedDrift([declared])).toEqual([]);
+  });
+
+  it('reports nothing for a multi-value field declaring NOW() (a JSON column, no scalar DEFAULT)', async () => {
+    const d = await open();
+    const declared = {
+      name: T,
+      fields: { tags: { type: 'select', multiple: true, options: [{ label: 'A', value: 'a' }], defaultValue: 'NOW()' } },
+    };
+    await d.syncSchema(T, declared);
+    expect(await column(d, T, 'tags')).toMatchObject({ dflt_value: null });
+    expect((await d.detectManagedDrift([declared])).filter((e) => e.column === 'tags')).toEqual([]);
+  });
+
+  it('reports nothing for a column that already carries an expression DEFAULT', async () => {
+    const d = await open();
+    await d.syncSchema(T, V1);
+    await d.getKnex().raw(`ALTER TABLE "${T}" ADD COLUMN added datetime DEFAULT (datetime('now'))`);
+    expect(await column(d)).toMatchObject({ dflt_value: "datetime('now')" });
+    expect((await d.detectManagedDrift([V2('datetime', false)])).filter((e) => e.column === 'added')).toEqual([]);
+  });
+});
+
+describe("autoMigrate: 'safe' (#37413)", () => {
+  it('the boot that adds the column applies the owed DEFAULT by the rebuild; the next boot applies nothing', async () => {
+    const d = await open({ autoMigrate: 'safe' });
+    const lines: string[] = [];
+    (d as unknown as { logger: unknown }).logger = {
+      info: (m: string) => lines.push(String(m)),
+      warn: (m: string) => lines.push(String(m)),
+      error: (m: string) => lines.push(String(m)),
+    };
+    await d.initObjects([V1]);
+    await d.create(T, { id: 'r1', plain: 'x' });
+
+    await d.initObjects([V2('datetime', false)]);
+    expect(lines.filter((l) => l.includes('auto-reconciled'))).toEqual([`[schema-drift] auto-reconciled set_column_default on ${T}.added`]);
+    expect(await column(d)).toMatchObject({ dflt_value: reported('datetime') });
+    expect(String((await d.getKnex()(T).where({ id: 'r1' }).first()).added)).toMatch(SHAPE.datetime);
+
+    lines.length = 0;
+    await d.initObjects([V2('datetime', false)]);
+    expect(lines.filter((l) => l.includes('auto-reconciled'))).toEqual([]);
+    expect(await d.detectManagedDrift([V2('datetime', false)])).toEqual([]);
   });
 });
