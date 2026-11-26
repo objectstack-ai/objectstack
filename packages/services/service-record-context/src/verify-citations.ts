@@ -50,10 +50,12 @@ import { executeGetRecordContext, isCodedRefusal } from './record-context-tools.
  *
  *   The executor draws the same line with the same reader
  *   (`isCodedRefusal`) at the object-level reads of a related object it
- *   judges, and at its child list query asks the `/data` door's classifier,
- *   so a failure there is no refusal either: it arrives here as
- *   `INTERNAL_ERROR` (500), naming nothing, with the original error on its
- *   `cause`, and is reported. The whole 4xx band is a refusal, so a door that declared a coded 408 or
+ *   judges, and at its child list query asks the `/data` door's classifier
+ *   (`doorAnswersItself`), so an uncoded failure there is no refusal either:
+ *   it arrives here as `INTERNAL_ERROR` (500), naming nothing, with the
+ *   original error on its `cause`, and is reported. A fault the door codes
+ *   there (`ERR_DATASOURCE_UNAVAILABLE` 503) arrives as the door reads it,
+ *   with no 4xx, and is reported too. The whole 4xx band is a refusal, so a door that declared a coded 408 or
  *   429 would have a transient condition dropped without a report; no door on
  *   the read path declares one today.
  * - **What a quote is matched against** — the strings of the data member, and

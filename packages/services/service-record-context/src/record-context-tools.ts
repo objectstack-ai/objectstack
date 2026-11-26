@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { recordNotFoundError, wrapRecordMaterial } from '@objectstack/core';
-import { isServerFault, mapDataError } from '@objectstack/types';
+import { INTERNAL_ERROR_MESSAGE, mapDataError } from '@objectstack/types';
 import {
   AI_CONTEXT_BODY_FIELD_TYPES,
   AI_CONTEXT_MAX_RELATED_ROWS,
@@ -78,9 +78,11 @@ import { sentencesFor, type Sentences } from './sentences.js';
  *
  * A read of a related object that FAILS rather than refuses (a throw that is
  * no coded refusal, {@link isCodedRefusal}, or at the child list query one
- * the `/data` door answers as a fault: an outage, a bug) is no answer about
- * the caller, so it is never answered as a refusal: the call fails
- * `INTERNAL_ERROR` (500), naming the pack and the root only.
+ * the `/data` door answers with nothing of its own: an outage, a bug) is no
+ * answer about the caller, so it is never answered as a refusal: the call
+ * fails `INTERNAL_ERROR` (500), naming the pack and the root only. At the
+ * child list query, a throw the door answers itself, a refusal or a coded
+ * fault, is rethrown as the door reads it ({@link doorAnswersItself}).
  *
  * ## A related list's `where`, `orderBy` and `limit` (D1, D3: second amendment)
  *
@@ -160,14 +162,36 @@ function refusal(code: string, status: number, message: string): Coded {
  * of the executor's own throw (`verifyRecordCitations`). So what the executor
  * refuses there, the verifier drops without a report, and what fails, it
  * reports. The child list query alone asks the `/data` door's classifier
- * instead, since the doors classified that read's throw before the executor
- * caught it, and a refusal there is rethrown as the door reads it.
+ * instead ({@link doorAnswersItself}), since the doors classified that read's
+ * throw before the executor caught it.
  */
 export function isCodedRefusal(err: unknown): boolean {
   if (err == null || typeof err !== 'object') return false;
   const { code, status, statusCode } = err as { code?: unknown; status?: unknown; statusCode?: unknown };
   const declared = typeof status === 'number' ? status : typeof statusCode === 'number' ? statusCode : undefined;
   return typeof code === 'string' && code.length > 0 && declared !== undefined && declared >= 400 && declared < 500;
+}
+
+/**
+ * Whether the `/data` door answers this throw of a read of `object` with
+ * something of its own, asked of the door's classifier (`mapDataError`,
+ * `@objectstack/types`), never a copy of it: a refusal (any status below 500,
+ * such as a sandboxed `beforeFind` hook's plain throw, `400 HOOK_ABORTED`), or
+ * a fault the door codes or words (`ERR_DATASOURCE_UNAVAILABLE` 503 with its
+ * sentence, `DATABASE_ERROR`, a driver's `NOT_IMPLEMENTED` 501, a declared 5xx
+ * with its sentence or `userMessage`). Only the door's anonymous answer is
+ * not: `500` `Internal server error`, coded `INTERNAL_ERROR` or not coded,
+ * carrying nothing else. That is an uncoded failure, which the door could say
+ * nothing about either.
+ *
+ * The child list query's one reader. Its throw reached the doors untouched
+ * before the executor caught it, so a throw the door answers itself is
+ * rethrown as it is, and the caller reads what the door always answered.
+ */
+export function doorAnswersItself(thrown: unknown, object: string): boolean {
+  const { status, body } = mapDataError(thrown, object);
+  if (status !== 500 || body.error !== INTERNAL_ERROR_MESSAGE) return true;
+  return !Object.entries(body).every(([key, value]) => key === 'error' || (key === 'code' && value === 'INTERNAL_ERROR'));
 }
 
 /** A thrown value as a log reads it: its stack, else its text. */
@@ -436,8 +460,9 @@ export async function executeGetRecordContext(input: unknown, door: RecordContex
   // a failure at the reads of a related object this executor judges: step
   // 4a's exposure check and served definition, a published definition
   // (`publishedOf`), and the child list query. A coded refusal
-  // ({@link isCodedRefusal}; at the child list query, what the `/data` door
-  // answers below 500) answers as `refused` says, as it always has. Any
+  // ({@link isCodedRefusal}; at the child list query, a throw the `/data`
+  // door answers itself, {@link doorAnswersItself}) answers as `refused`
+  // says, as it always has. Any
   // other throw is a failure, which says nothing about what this caller may
   // read, so it is not answered as a refusal: the call fails `INTERNAL_ERROR`
   // (500) in the executor's own sentence, which names the pack and the root
@@ -686,17 +711,19 @@ export async function executeGetRecordContext(input: unknown, door: RecordContex
     } catch (err) {
       // The child is one this caller is served (step 4a). Its list read is the
       // one read whose throw the doors classified before this line existed,
-      // so what the `/data` door answers below 500 stays the door's refusal,
-      // rethrown as the door reads it (a sandboxed `beforeFind` hook's plain
-      // throw: `400 HOOK_ABORTED`; a `PERMISSION_DENIED` with no status: 403),
-      // asked of the door's own classifier, never a copy of it. A throw the
-      // door answers as a fault fails the call, naming nothing.
+      // so a throw the `/data` door answers itself is rethrown as the door
+      // reads it, with its own code and sentence: a refusal (a sandboxed
+      // `beforeFind` hook's plain throw: `400 HOOK_ABORTED`; a
+      // `PERMISSION_DENIED` with no status: 403) or a coded fault
+      // (`ERR_DATASOURCE_UNAVAILABLE` 503). Only an uncoded failure, which the
+      // door answers `Internal server error` and nothing else, fails the call
+      // `INTERNAL_ERROR`, naming nothing.
       return refusedOrFailed(
         err,
         async () => {
           throw err;
         },
-        (thrown) => !isServerFault(mapDataError(thrown, plan.object).status),
+        (thrown) => doorAnswersItself(thrown, plan.object),
       );
     }
     const rows = rowsOf(read);

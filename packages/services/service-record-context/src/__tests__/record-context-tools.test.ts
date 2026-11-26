@@ -1,6 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { describe, expect, it } from 'vitest';
+import { mapDataError } from '@objectstack/types';
 import {
   AI_CONTEXT_MAX_FIELDS,
   AI_CONTEXT_MAX_RELATED,
@@ -492,6 +493,35 @@ describe('get_record_context — a read of a related object that fails is a fail
   it('the child list query: a sandboxed body that CRASHED (a native error name) is a fault at the door, so it fails the call', async () => {
     const crash = Object.assign(new Error("beforeFind hook 'step_gate' threw: TypeError: x is not a function"), { innerMessage: 'TypeError: x is not a function' });
     expectFailureNamingNothing(await failureOf(executeGetRecordContext(CALL, throwingAt('query', () => crash))), crash);
+  });
+
+  it.each<[string, () => unknown, number, string]>([
+    ['an unavailable datasource: ERR_DATASOURCE_UNAVAILABLE 503 with its sentence', () =>
+      Object.assign(new Error('The datasource for this object is not available'), { code: 'ERR_DATASOURCE_UNAVAILABLE' }), 503, 'ERR_DATASOURCE_UNAVAILABLE'],
+    ['a driver error the door recognises: DATABASE_ERROR', () =>
+      Object.assign(new Error('SQLITE_BUSY: database is locked'), { code: 'SQLITE_BUSY' }), 500, 'DATABASE_ERROR'],
+    ['a driver\'s declared NOT_IMPLEMENTED 501', () =>
+      Object.assign(new Error('Full-text search is not supported by this driver'), { code: 'NOT_IMPLEMENTED', status: 501 }), 501, 'NOT_IMPLEMENTED'],
+    ['a declared 5xx with its sentence', () =>
+      Object.assign(new Error('Revisions are being archived; retry in a minute'), { code: 'SERVICE_UNAVAILABLE', status: 503, refusal: true }), 503, 'SERVICE_UNAVAILABLE'],
+    ['a declared 5xx with a userMessage', () =>
+      Object.assign(new Error('archiving'), { code: 'SERVICE_UNAVAILABLE', status: 503, userMessage: 'Revisions are being archived; retry in a minute' }), 503, 'SERVICE_UNAVAILABLE'],
+  ])('the child list query: a fault the door codes (%s) is rethrown as the door reads it, with its own code and sentence', async (_label, thrown, status, code) => {
+    const fault = thrown();
+    // The case is one the door codes, asked of the door's own classifier.
+    expect(mapDataError(fault, 'policy_revision')).toMatchObject({ status, body: { code } });
+    await expect(executeGetRecordContext(CALL, throwingAt('query', () => fault))).rejects.toBe(fault);
+  });
+
+  it.each<[string, () => unknown]>([
+    ['a status with no code, at 500', () => Object.assign(new Error(OUTAGE), { status: 500 })],
+    ['a coded INTERNAL_ERROR 500', () => Object.assign(new Error(OUTAGE), { code: 'INTERNAL_ERROR', status: 500 })],
+    ['a driver errno the door does not recognise', () => Object.assign(new Error(OUTAGE), { code: 'ECONNREFUSED' })],
+    ['a thrown value that is not an object', () => OUTAGE],
+  ])('control, the child list query: %s, which the door answers with nothing of its own, fails the call INTERNAL_ERROR', async (_label, thrown) => {
+    const failed = thrown();
+    expect(mapDataError(failed, 'policy_revision')).toEqual({ status: 500, body: expect.objectContaining({ error: 'Internal server error' }) });
+    expectFailureNamingNothing(await failureOf(executeGetRecordContext(CALL, throwingAt('query', () => failed))), failed);
   });
 
   it.each<[string, () => unknown]>([

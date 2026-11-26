@@ -847,6 +847,34 @@ describe('[ADR-0149 D7 · ADR-0160 D4] get_record_context over one real kernel: 
         expect(control.payload.data.related[0]).toMatchObject({ object: 'rc_revision' });
     });
 
+    it('[ADR-0112] at the related list read, a fault the /data door codes stays the door\'s answer on both doors: ERR_DATASOURCE_UNAVAILABLE 503 with its sentence, never INTERNAL_ERROR', async () => {
+        const SENTENCE = 'The datasource for this object is not available';
+        const real = engine.find.bind(engine);
+        const unavailable = vi.spyOn(engine, 'find').mockImplementation(async (object: string, ...rest: any[]) => {
+            if (object === 'rc_revision') throw Object.assign(new Error(SENTENCE), { code: 'ERR_DATASOURCE_UNAVAILABLE' });
+            return (real as any)(object, ...rest);
+        });
+        const errorLines = vi.spyOn(console, 'error').mockImplementation(() => {});
+        try {
+            const answer = await both({ objectName: 'rc_policy', recordId: 'p1', context: 'rc_main' });
+            expect(unavailable.mock.calls.filter(([object]) => object === 'rc_revision').length).toBeGreaterThanOrEqual(2);
+            expect(answer.isError).toBe(true);
+            expect(answer.payload.error).toMatchObject({ code: 'ERR_DATASOURCE_UNAVAILABLE', status: 503, message: SENTENCE });
+            // Each door still logs the fault it answered, under the door's own code.
+            const faults = errorLines.mock.calls.filter(([line]) =>
+                typeof line === 'string' && line.startsWith('[5xx]') && line.includes('get_record_context rc_policy'));
+            expect(faults).toHaveLength(2);
+            for (const [line] of faults) expect(String(line)).toMatch(/^\[5xx\] 503\b/);
+            expect(JSON.stringify(errorLines.mock.calls.map(([, meta]) => meta))).not.toContain('INTERNAL_ERROR');
+        } finally {
+            unavailable.mockRestore();
+            errorLines.mockRestore();
+        }
+        const control = await both({ objectName: 'rc_policy', recordId: 'p1', context: 'rc_main' });
+        expect(control.isError).toBe(false);
+        expect(control.payload.data.related[0]).toMatchObject({ object: 'rc_revision' });
+    });
+
     it('[ADR-0160 D3, second amendment] where, orderBy and limit on a related list answer the same bytes on both doors: filtered, ordered, cut at the limit and stated', async () => {
         const answer = await both({ objectName: 'rc_policy', recordId: 'p1', context: 'rc_filtered' });
         expect(answer.isError).toBe(false);
