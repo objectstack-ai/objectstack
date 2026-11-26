@@ -490,7 +490,11 @@ export async function mintAuthoringToken(baseUrl: string, cookie: string, scope:
     if (az.ok && isBag(azBody) && azBody.redirect === true && typeof azBody.url === 'string') loc = azBody.url;
     else return refused('authorization', az, azBody);
   }
-  let code = new URL(loc, baseUrl).searchParams.get('code');
+  const back = new URL(loc, baseUrl).searchParams;
+  // A refusal comes back the same way, as a redirect carrying `error`: it is the answer, not a consent screen.
+  const azError = back.get('error');
+  if (azError) return { ok: false, status: az.status, body: null, code: azError, message: `authorization: ${back.get('error_description') ?? azError}`.slice(0, 500) };
+  let code = back.get('code');
   if (!code) {
     // The consent screen: the person accepts, as they would in the browser.
     const consent = await fetch(`${baseUrl}/api/v1/auth/oauth2/consent`, {
