@@ -197,11 +197,11 @@ describe('[#24769] the two buttons the knowledge service contributes, at the HTT
 
   it('POST /api/settings/knowledge/test is answered by the adapter check (200, not 400)', async () => {
     const answer = await post(http, 'knowledge', 'test', {
-      values: { adapter: 'ragflow', ragflow_base_url: 'http://localhost:9380', ragflow_api_key: 'k' },
+      values: { adapter: 'turso', turso_url: 'file:./knowledge.db' },
     });
     expect(answer.status).toBe(200);
     expect(answer.body?.data?.ok).toBe(true);
-    expect(answer.body?.data?.message).toContain('localhost:9380');
+    expect(answer.body?.data?.message).toContain('file:./knowledge.db');
   });
 });
 
