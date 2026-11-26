@@ -1113,6 +1113,8 @@ export function createAuthClient(config: AuthClientConfig): AuthClient {
         throw new Error(error.message ?? `Auth request failed with status ${error.status}`);
       }
       if (!data) {
+        // Kept although nothing is returned: an empty 2xx is still an anomaly
+        // a caller should hear about, not a silent success.
         throw new Error('Update user returned no data');
       }
       // better-auth's `/update-user` answers the receipt `{ status: true }`,
