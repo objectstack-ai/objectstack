@@ -178,6 +178,12 @@ const SERVE_ONLY: Record<string, string> = {
     + 'the storage root; [#22301], shared with @objectstack/verify\'s bootStack): the declaration boot constructs '
     + 'each provider for its declarations only, with a measured posture per token '
     + '(DECLARATION_PROVIDER_POSTURES), and runs no start() that would read a configuration',
+  resolveCapabilityExtras:
+    'which further providers serve mounts after a token\'s main one, and what each is built with — a row\'s '
+    + 'extras, and for knowledge the one vector store the platform database chooses (shared with '
+    + '@objectstack/verify\'s bootStack): the declaration boot reads a row\'s extras itself (composeServedPlatform) '
+    + 'and composes no knowledge store, whose init() declares nothing — its tables are its own, in a libSQL file '
+    + 'or a PostgreSQL schema of its own, made in the start() this boot does not run',
   findSqlDriverForKernel:
     'the artifact boot migration gate, a kernel:ready hook over a booted kernel — a serving-boot policy that '
     + 'runs after preparation, not a step that shapes what is prepared',
