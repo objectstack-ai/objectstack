@@ -72,6 +72,7 @@ export interface CoverageIssue {
     | 'report'
     | 'picklist'
     | 'page'
+    | 'form'
     | 'flow'
     | 'hook'
     | 'position'
@@ -358,6 +359,8 @@ const COVERAGE_SOURCE: Record<ExpectedEntry['source'], CoverageIssue['source']> 
   // it, so it keeps its own bucket and reports as `i18n/missing-picklist`.
   picklist: 'picklist',
   page: 'page',
+  // A `form` item's copy (`forms.<f>.label`, `.title`, the thank-you tails, ADR-0159) — its own bucket, reported as `i18n/missing-form`.
+  form: 'form',
   // Flow copy (every flow's `flows.<f>.label`, `flows.<f>.screens.<n>.title` /
   // `.description` (#22507), and the per-field `label` / `placeholder` /
   // option labels), the terminal
@@ -415,6 +418,7 @@ const SOURCE_NOUN: Record<CoverageIssue['source'], string> = {
   report: 'Report',
   picklist: 'Picklist',
   page: 'Page',
+  form: 'Form',
   flow: 'Flow',
   hook: 'Hook',
   position: 'Position',

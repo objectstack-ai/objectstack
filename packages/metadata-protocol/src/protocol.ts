@@ -1591,6 +1591,11 @@ export class ObjectStackProtocolImplementation implements
         return restoredBodyDerivation.call(host, type);
     }
 
+    /** [ADR-0159 card ② item 5] {@link packagelessListOverFormRefusal}, asked of a restored body against its binding. */
+    private listOverFormRefusal(type: string, item: unknown, name: string, binding: string | null): Error | undefined {
+        return packagelessListOverFormRefusal(protocolHost(this), type, item, name, binding);
+    }
+
     /**
      * [#21470] What a restore passes to `repo.restoreVersion` as
      * `deriveRestoredBody`: the divergent `name` refusal FIRST, then
@@ -1626,11 +1631,7 @@ export class ObjectStackProtocolImplementation implements
     private restoredBodyWriter(type: string, name: string, binding: string | null, source: string): (historyBody: unknown) => Promise<unknown> {
         // [#25467 cut 8] The body moved to `protocol-authoring-gate.ts` (see `AuthoringGateHost`).
         const host: ThisParameterType<typeof restoredBodyWriter> = {
-            listOverFormRefusal: (t, item, n, binding) => packagelessListOverFormRefusal({
-                expandRuntimeViewContainer: (...a) => this.expandRuntimeViewContainer(...a),
-                isWritablePackage: (...a) => this.isWritablePackage(...a),
-                shippedArtifactsOf: (...a) => this.shippedArtifactsOf(...a),
-            }, t, item, n, binding),
+            listOverFormRefusal: (...a) => this.listOverFormRefusal(...a),
             objectExtensionItemRefusal: (...a) => this.objectExtensionItemRefusal(...a),
             refuseRestoredBodyTheSaveDoorRefuses: (...a) => this.refuseRestoredBodyTheSaveDoorRefuses(...a),
             restoredBodyDerivation: (...a) => this.restoredBodyDerivation(...a),

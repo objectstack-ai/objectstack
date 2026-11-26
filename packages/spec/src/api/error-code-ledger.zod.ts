@@ -738,6 +738,12 @@ export const ERROR_CODE_LEDGER = {
     // string is spelled in each). Served by the `/meta` write doors through
     // `errorFromThrown`.
     'DEFAULT_RECORD_PAGE_CONFLICT',
+    // [ADR-0159 ruled question 3 = A] The public address clash: the `form`
+    // save, draft promotion and restore doors refuse a `form` write that would
+    // leave the form open on a `/forms/SLUG` another form holds, naming both,
+    // 409 (`formAddressClashRefusal`, protocol-form-writes.ts). Served by the
+    // `/meta` write doors through `errorFromThrown`.
+    'FORM_ADDRESS_TAKEN',
     // [#24001] The flow save door's 409 for a refused conversion rename came
     // out with its last producer (this header's "Retiring a code"): protocol
     // 18 reserved the old HTTP-callout node types, so no live owner can

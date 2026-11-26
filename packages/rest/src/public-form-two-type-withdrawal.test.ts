@@ -128,7 +128,7 @@ async function boot(ships: { forms?: unknown[]; views?: unknown[] }) {
     await submit.handler({ params: { slug }, body: { name: 'Ada', email: 'ada@example.test' }, headers: {} } as any, res);
     return { status: res._status ?? 200, body: res._json };
   };
-  const records = async () => ((await engine.find(OBJECT, {}, { context: { isSystem: true } } as any)) as unknown[]).length;
+  const records = async () => ((await engine.find(OBJECT, {}, { context: { isSystem: true } })) as unknown[]).length;
   const install = async (id: string) => protocol.installPackage({
     manifest: {
       id, name: id.split('.').join('-'), version: '0.1.0', type: 'app',
@@ -155,7 +155,7 @@ async function boot(ships: { forms?: unknown[]; views?: unknown[] }) {
       id: `seed_${type}_${name}_${packageId ?? 'unbound'}`, type, name,
       package_id: packageId, state: 'active', metadata: JSON.stringify(item), checksum: hashSpec(item, type),
       version: 1, created_at: now, updated_at: now,
-    }, { context: { isSystem: true } } as any);
+    }, { context: { isSystem: true } });
   };
   return { engine, protocol, get, post, records, install, saveInto, saveBeforeTheGate, seedRow };
 }
@@ -187,12 +187,15 @@ describe('[ADR-0159 D6] the form doors read both types: a withdrawal in either c
   const savedWritable = process.env.OS_METADATA_WRITABLE;
   beforeAll(() => {
     delete process.env.OS_METADATA_WRITABLE;
+    // Pin 6 reads the boot report off console.error, so the REST log level is declared (check:rest-log-spy-declared).
+    vi.stubEnv('OS_REST_LOG', 'info');
   });
   beforeEach(() => {
     ObjectStackProtocolImplementation.resetEnvWritableCache();
     resetEnvWritableMetadataTypes();
   });
   afterAll(async () => {
+    vi.unstubAllEnvs();
     if (savedWritable === undefined) delete process.env.OS_METADATA_WRITABLE;
     else process.env.OS_METADATA_WRITABLE = savedWritable;
     ObjectStackProtocolImplementation.resetEnvWritableCache();
@@ -363,7 +366,7 @@ describe('[ADR-0159 D5] the `form` writes: the old-shape row goes with the save;
   };
   /** The pair's ACTIVE stored `view` rows of the name, read off the store itself. */
   const storedViews = async (b: Booted, name = NAME) => {
-    const rows = (await b.engine.find('sys_metadata', { where: { type: 'view', name, package_id: PAIR, state: 'active' } }, { context: { isSystem: true } } as any)) as any[];
+    const rows = (await b.engine.find('sys_metadata', { where: { type: 'view', name, package_id: PAIR, state: 'active' } }, { context: { isSystem: true } })) as any[];
     return rows.map((r) => (typeof r.metadata === 'string' ? JSON.parse(r.metadata) : r.metadata));
   };
 
