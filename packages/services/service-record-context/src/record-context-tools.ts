@@ -194,17 +194,6 @@ export function doorAnswersItself(thrown: unknown, object: string): boolean {
   return !Object.entries(body).every(([key, value]) => key === 'error' || (key === 'code' && value === 'INTERNAL_ERROR'));
 }
 
-/** A thrown value as a log reads it: its stack, else its text. */
-function describeThrown(thrown: unknown): string {
-  if (thrown instanceof Error) return thrown.stack ?? `${thrown.name}: ${thrown.message}`;
-  if (typeof thrown === 'string') return thrown;
-  try {
-    return JSON.stringify(thrown) ?? String(thrown);
-  } catch {
-    return String(thrown);
-  }
-}
-
 /** The call's arguments, or a `VALIDATION_ERROR` carrying the spec's own words. */
 function parseInput(input: unknown): GetRecordContextInput {
   const parsed = GetRecordContextInputSchema.safeParse(input);
@@ -468,8 +457,8 @@ export async function executeGetRecordContext(input: unknown, door: RecordContex
   // (500) in the executor's own sentence, which names the pack and the root
   // only. No door renders the original error, so nothing it says can name an
   // object, a field or a package the caller is not shown; it rides on
-  // `cause` and at the foot of the stack, neither of which a door puts on the
-  // wire, and the doors' fault line prints it. The doors withhold a 5xx's
+  // `cause`, which no door puts on the wire and the doors' fault line prints
+  // (`logServerFault` and `ObjectLogger` render the `cause` chain). The doors withhold a 5xx's
   // sentence too (`Internal server error`), so the sentence is read
   // in-process only (the citation verifier's host, through `onError`).
   //
@@ -489,10 +478,6 @@ export async function executeGetRecordContext(input: unknown, door: RecordContex
       status: 500,
       cause: err,
     });
-    // The doors' fault line prints an error's message and stack, never its
-    // `cause` (`logServerFault`, and `ObjectLogger` behind it), so the stack
-    // carries the original too. A stack is never on the wire.
-    failure.stack = `${failure.stack ?? `Error: ${failure.message}`}\nCaused by: ${describeThrown(err)}`;
     throw failure;
   };
 
