@@ -58,6 +58,12 @@ export { detectPendingApproval } from './toolResultParsers';
 export { chartsFromParts, chartAnswerParts } from './toolResultParsers';
 export type { ChartAnswerPart } from './toolResultParsers';
 
+// objectstack#37487 — the one allow-list of the data parts a stored answer
+// keeps (charts + verified record citations), and its writer, which the
+// message cache shares with the `useObjectChat` store rebuild.
+export { storedAnswerParts, STORED_ANSWER_DATA_PARTS } from './toolResultParsers';
+export type { StoredAnswerData, StoredAnswerPart } from './toolResultParsers';
+
 // objectstack#30223 — the HITL continuation marker. The chat transcript, the
 // conversation list preview and the conversation-language probe all skip a
 // user turn that `useHitlInChat` composed for the model.
