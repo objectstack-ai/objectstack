@@ -26,6 +26,9 @@ export {
   DatabaseLoader,
   ENVIRONMENT_HISTORY_MARK,
   historyRowAttribution,
+  // [#37130] The platform's record is never restored: the one refusal the
+  // metadata service's rollback and the metadata protocol's restore doors ask.
+  refusePlatformRecordRestore,
   type DatabaseLoaderOptions,
   type MetadataHistoryAddress,
 } from './loaders/database-loader.js';

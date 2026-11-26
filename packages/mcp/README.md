@@ -517,7 +517,7 @@ export default defineStack({
     version: '0.1.0',
     type: 'app',
     name: 'My CRM',
-    engines: { protocol: '^18' },
+    engines: { protocol: '^19' },
   },
   // Optional: the CLI already anchors a persistent SQLite database at
   // `<project>/.objectstack/data/standalone.db`. Declare a datasource only
@@ -627,7 +627,7 @@ export default defineStack({
     version: '0.1.0',
     type: 'app',
     name: 'CRM Assistant',
-    engines: { protocol: '^18' },
+    engines: { protocol: '^19' },
   },
   objects: [account, contact, opportunity],
   // Your actions become MCP tools — the plugin bridges them at start.

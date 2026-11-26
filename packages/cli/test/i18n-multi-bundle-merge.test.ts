@@ -35,7 +35,7 @@ import { computeI18nCoverage, mergeTranslationBundles } from '../src/utils/i18n-
 import { authoringRuleUnionStack } from '../src/utils/stack-collections.js';
 
 const I18N = { defaultLocale: 'en', supportedLocales: ['en', 'zh-CN'], fallbackLocale: 'en' };
-const engines = { protocol: '^18' };
+const engines = { protocol: '^19' };
 
 const object = (name: string, label: string) => ({
   name, label, pluralLabel: label, sharingModel: 'private',

@@ -3,8 +3,9 @@ name: objectstack-ai
 description: >
   Design ObjectStack AI skills, tools, knowledge sources, and the open-edition
   MCP server surface. Use when the user is adding `*.skill.ts` / `*.tool.ts`,
-  configuring an LLM provider, wiring the tools a skill grants, or indexing
-  ObjectStack data as a knowledge source for RAG. Agents themselves are
+  configuring an LLM provider, wiring the tools a skill grants, indexing
+  ObjectStack data as a knowledge source for RAG, or writing a context pack
+  (`aiContexts`). Agents themselves are
   platform-internal (`ask` / `build`) — third parties extend them via skills,
   not by authoring `*.agent.ts`. Do not use for general LLM prompting questions
   unrelated to ObjectStack metadata.
@@ -14,7 +15,7 @@ metadata:
   author: objectstack-ai
   version: "18.6.0"
   domain: ai
-  tags: agent, tool, skill, knowledge, llm, embedding, mcp
+  tags: agent, tool, skill, knowledge, context-pack, llm, embedding, mcp
 ---
 
 # AI Agent Design — ObjectStack AI Protocol
@@ -27,14 +28,6 @@ metadata:
 > in a cloud / EE host. On the **open edition** there is no in-product agent:
 > expose the app to your own AI over **MCP** (below), and author metadata in
 > **source mode** with an AI coding agent (Claude Code, Cursor).
-
-```
-Agent  →  Skill  →  Tool
-  │         │         │
-  │         │         └─ Atomic operation (query, action, flow, API call)
-  │         └─ Capability bundle with instructions & trigger conditions
-  └─ Autonomous actor with role, instructions, and guardrails
-```
 
 ---
 
@@ -137,7 +130,7 @@ still run under the caller's own permissions.
 
 ## Actions as AI Tools — the default path ☁️
 
-You usually **don't author tool definitions by hand** for action invocation. An
+An
 `Action` attached to an object via `defineObject({ actions: [...] })` becomes a
 tool named `action_<actionName>` **only when it opts in** — `ai.exposed: true`
 (default `false`) plus an `ai.description` of ≥ 40 chars, refused by the parse
@@ -234,6 +227,7 @@ permissions and row-level security:
 |:--|:--|
 | `list_objects`, `describe_object` | schema introspection (system objects filtered out by default) |
 | `query_records`, `get_record` | reads — filter, field selection, sorting, pagination |
+| `get_record_context` | one record through its context pack (**Context packs** below) |
 | `aggregate_records` | GROUP BY totals; registered only when the data bridge implements `aggregate` |
 | `validate_expression` | build-accurate CEL check before a formula is authored into metadata |
 | `create_record`, `update_record`, `delete_record` | writes; `delete_record` is refused with `ACTION_CONFIRMATION_REQUIRED` (428) unless it sends `confirm: true`. A request in which the human names the record to delete, with exactly one record matching, is their approval: send `confirm: true` on that call without asking again. When the name matches more than one record, or the request does not identify one, list the candidates, ask which one, and send `confirm: true` only after the answer |
@@ -247,6 +241,15 @@ person performs it in the app. On a long-lived (stdio) server whose bridge serve
 these tools, a client advertising form-mode `elicitation` is asked instead:
 `accept` runs it once; decline, dismissal or five minutes unanswered refuse it
 (`declined` / `cancelled` / `timed_out`). Over Streamable HTTP nobody is asked.
+
+---
+
+## Context packs — one record's material
+
+A context pack (`aiContexts`, `*.ai-context.ts`) lists the fields, related
+lists and body of one record that `get_record_context` hands a model, read as
+the caller; `requires: ['record-context']` serves the tool. Keys, bounds, pack
+names, `os validate` rules: [references/context-packs.md](./references/context-packs.md).
 
 ---
 
@@ -289,7 +292,7 @@ import { KnowledgeSourceSchema, type KnowledgeSource } from '@objectstack/spec/a
 export const supportKb: KnowledgeSource = KnowledgeSourceSchema.parse({
   id: 'support_kb',
   label: 'Support Knowledge Base',
-  adapter: 'ragflow',                       // or 'memory' for dev/test
+  adapter: 'ragflow',
   source: {
     kind: 'object',
     object: 'kb_article',
@@ -467,7 +470,6 @@ author-time gate before reporting done:
 
 ```bash
 os validate     # Zod schema + CEL predicate validation + bindings (no artifact)
-# or: os build  # the same gates, plus emits dist/
 ```
 
 This domain has no CEL site — a model-registry `promptTemplate.system` / `.user` is

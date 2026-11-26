@@ -100,6 +100,16 @@
         "must_contain": ["ask_ai", "record_header", "locations"],
         "must_not_contain": ["target:"]
       }
+    },
+    {
+      "id": 11,
+      "prompt": "Give the AI a customer's open opportunities and notes when a user asks about that customer. Customers are `account` records with a long-text `notes` field; an `opportunity` has an `account` lookup and a `stage` whose closed values are `closed_won` and `closed_lost`. Write the metadata.",
+      "expected_output": "Emits a context pack (an `aiContexts` entry or a `*.ai-context.ts` file) with `name`, `label`, `object: 'account'`, a `related` entry on `opportunity` (`field: 'account'`, a few `fields`) whose `where` keeps the open rows on the child's own `stage` field with an admitted operator (`{ stage: { $nin: ['closed_won', 'closed_lost'] } }`), optionally `orderBy: [{ field, order }]` and a `limit` of at most 20, and `body: { field: 'notes' }`. Declares `requires: ['record-context']` (or mounts `RecordContextServicePlugin`) so `get_record_context` is served, and says the pack reads as the caller and grants nothing. No `description` or top-level `filter` key on the pack, no `direction` in `orderBy`, and no `aiReadable` on the object.",
+      "files": [],
+      "assertions": {
+        "must_contain": ["opportunity", "related", "where", "stage", "body", "notes", "record-context"],
+        "must_not_contain": ["filter:", "direction:", "aiReadable"]
+      }
     }
   ]
 }

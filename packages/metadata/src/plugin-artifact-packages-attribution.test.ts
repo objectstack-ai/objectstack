@@ -63,6 +63,8 @@
 import { describe, it, expect, vi } from 'vitest';
 import { composeStacks, defineStack } from '@objectstack/spec';
 import { MetadataPlugin } from './plugin.js';
+// Pay the plugin's dynamic `@objectstack/metadata-fs` load during collection, never inside a case.
+import '@objectstack/metadata-fs';
 
 const CORE_ID = 'com.example.multi.core';
 const ORDERS_ID = 'com.example.multi.orders';
@@ -74,7 +76,7 @@ const coreStack = {
         namespace: 'crm',
         version: '1.0.0',
         type: 'app',
-        engines: { protocol: '^18' },
+        engines: { protocol: '^19' },
     },
     objects: [
         {
@@ -105,7 +107,7 @@ const ordersStack = {
         // would let a wrong-body stamp pass unnoticed.
         version: '2.4.0',
         type: 'module',
-        engines: { protocol: '^18' },
+        engines: { protocol: '^19' },
         dependencies: { [CORE_ID]: '^1.0.0' },
     },
     objects: [

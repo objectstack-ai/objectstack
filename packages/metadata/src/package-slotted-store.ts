@@ -881,13 +881,20 @@ export function storeRowWriteKey(
  * with `origin: 'platform'` stamps it. Every other write the metadata service
  * and the metadata protocol make strips it ({@link withoutPlatformOrigin}):
  * `register` without the option, `registerInMemory`, `save`, `rollback`, the
- * protocol's save door and its restore doors; and a `rollback` whose row is
- * the platform's own record is refused, never written. Two undo writes of the
- * metadata protocol put a row back as the same operation found it, byte for
- * byte (`undoLandedPromotions`, `undoBatchRowWrite`): the mark comes back only
- * where the row held it. A stored row the boot pass re-registers keeps it only
- * when the row held it as read. A served body carries it on its top level only
- * when the stored item does (`getPublished` included), never in a snapshot.
+ * protocol's save door and its restore doors. A restore whose row is the
+ * platform's own record is refused, never written, at all three restore
+ * doors: the metadata service's `rollback`, and the protocol's
+ * `rollbackMetaItem` and the restore limb of `revertCommit`
+ * (`refusePlatformRecordRestore`). Two undo writes of the metadata protocol
+ * put a row back as the same operation found it, byte for byte: the undo of a
+ * refused batch publish's landed promotions (`undoLandedPromotions`) and the
+ * undo of a batch row the registry refused (`undoBatchRowWrite`); the mark
+ * comes back only where the row held it. A stored row the boot pass
+ * re-registers keeps it only when the row held it as read. A served body
+ * carries it on its top level only when the stored item does (`getPublished`
+ * included: the platform's own record's publish snapshot, served as the
+ * answer, keeps the mark it carries at its top), and never on a snapshot
+ * nested inside the answer.
  */
 export const PLATFORM_PROVENANCE = 'platform';
 

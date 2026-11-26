@@ -10,9 +10,8 @@ field, a list or a row the caller cannot read is never carried, and the answer
 says when something was withheld or cut.
 
 ```ts
-import { RecordContextServicePlugin } from '@objectstack/service-record-context';
-
 export default defineStack({
+  requires: ['record-context'],
   aiContexts: [{
     name: 'policy_document',
     label: 'Policy document',
@@ -21,12 +20,21 @@ export default defineStack({
     related: [{ object: 'policy_revision', fields: ['version', 'published_at'] }],
     body: { field: 'content' },
   }],
-  plugins: [new RecordContextServicePlugin()],
 });
 ```
 
-A host that mounts the plugin serves `get_record_context` on its MCP doors
-(`data:read`, read-only). A host without it serves no such tool.
+Two doors mount the service, and either is enough:
+
+- `requires: ['record-context']` on the stack. The CLI expands the token to
+  `RecordContextServicePlugin` (`CAPABILITY_PROVIDERS` in `@objectstack/core`),
+  so an app that ships only metadata gets the tool with no host code.
+- `plugins: [new RecordContextServicePlugin()]`, for a host that composes its
+  own kernel. A host that lists the plugin keeps its own instance when the
+  token is declared too.
+
+A host that mounts the service serves `get_record_context` on its MCP doors
+(`data:read`, read-only). A host that does neither serves no such tool,
+whatever packs it holds.
 
 The answer is `{ data, notes, framing }`: `data` is the record material,
 `notes` are the executor's statements about it, and `framing` says that `data`

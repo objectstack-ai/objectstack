@@ -53,8 +53,8 @@ const VALUE = { order: ['email', 'name'], widths: { email: 240 } } as const;
 
 // Unanchored: a thrown `ZodError`'s message is the JSON of its issues. The
 // key-first convention is asserted on the issue message itself below.
-const PRESCRIPTION = /`view\.columnState` was removed in @objectstack\/spec 18\.7\.0 \(ADR-0049.*Delete the key\..*`os migrate meta --from 17`/s;
-const LIST_BODY_PRESCRIPTION = /`listView\.columnState` was removed in @objectstack\/spec 18\.7\.0 \(ADR-0049.*Delete the key\./s;
+const PRESCRIPTION = /`view\.columnState` was removed in @objectstack\/spec 19\.0\.0 \(ADR-0049.*Delete the key\..*`os migrate meta --from 17`/s;
+const LIST_BODY_PRESCRIPTION = /`listView\.columnState` was removed in @objectstack\/spec 19\.0\.0 \(ADR-0049.*Delete the key\./s;
 
 type Issue = { code: string; path: PropertyKey[]; message: string; errors?: Issue[][] };
 

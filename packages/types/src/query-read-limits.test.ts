@@ -22,6 +22,7 @@ import {
   assertQueryReadRows,
   planQueryReadWindow,
   resolveQueryReadLimits,
+  resolveQueryReadPageCap,
   type QueryReadRequest,
 } from './query-read-limits.js';
 
@@ -67,6 +68,26 @@ describe('resolveQueryReadLimits — host configuration', () => {
   it('a default page size above the maximum is refused at configuration', () => {
     expect(() => resolveQueryReadLimits({ [DATA_DEFAULT_PAGE_SIZE_ENV]: '500', [DATA_MAX_PAGE_SIZE_ENV]: '200' }))
       .toThrow(`${DATA_DEFAULT_PAGE_SIZE_ENV} (500) is larger than ${DATA_MAX_PAGE_SIZE_ENV} (200)`);
+  });
+});
+
+describe('resolveQueryReadPageCap — the most rows one offset-0 read may ask for', () => {
+  it('is undefined when neither limit is set', () => {
+    expect(resolveQueryReadPageCap({})).toBeUndefined();
+  });
+
+  it('is the one limit that is set', () => {
+    expect(resolveQueryReadPageCap({ [DATA_MAX_PAGE_SIZE_ENV]: '40' })).toBe(40);
+    expect(resolveQueryReadPageCap({ [DATA_QUERY_ROW_BUDGET_ENV]: '12' })).toBe(12);
+  });
+
+  it('is the smaller of the two when both are set', () => {
+    expect(resolveQueryReadPageCap({ [DATA_MAX_PAGE_SIZE_ENV]: '40', [DATA_QUERY_ROW_BUDGET_ENV]: '12' })).toBe(12);
+    expect(resolveQueryReadPageCap({ [DATA_MAX_PAGE_SIZE_ENV]: '5', [DATA_QUERY_ROW_BUDGET_ENV]: '12' })).toBe(5);
+  });
+
+  it('throws on an unreadable value, as the limits do', () => {
+    expect(() => resolveQueryReadPageCap({ [DATA_MAX_PAGE_SIZE_ENV]: 'ten' })).toThrow(DATA_MAX_PAGE_SIZE_ENV);
   });
 });
 

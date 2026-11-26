@@ -34,6 +34,11 @@ import Validate from '../src/commands/validate';
 import { undeclaredFlowCycleMessage } from '@objectstack/metadata-core';
 import { FLOW_CYCLE_CORPUS } from '@objectstack/metadata-core/testing';
 import { defineStackSource, linkSpec } from './helpers/define-stack-fixture.js';
+// Pay the dynamic `import()`s the compile reach makes at MODULE LOAD, not inside a clocked case
+// (`scripts/check-test-source-alias.mjs`, the clocked-window rule).
+import '@objectstack/objectql/core';
+import '@objectstack/plugin-security';
+import '@objectstack/runtime';
 
 const CLI_ROOT = resolve(fileURLToPath(import.meta.url), '..', '..');
 
@@ -103,7 +108,7 @@ const guard = (catchRegion: Record<string, unknown>) =>
   n('guard', 'try_catch', { config: { try: { nodes: [n('work')], edges: [] }, catch: catchRegion } });
 
 const stackWith = (flows: unknown[]) => ({
-  manifest: { id: 'com.example.rgn', namespace: 'rgn', version: '1.0.0', name: 'Rgn', type: 'app', engines: { protocol: '^18' } },
+  manifest: { id: 'com.example.rgn', namespace: 'rgn', version: '1.0.0', name: 'Rgn', type: 'app', engines: { protocol: '^19' } },
   objects: [{ name: OBJECT, label: 'Visa', sharingModel: 'private', fields: { title: { type: 'text', label: 'Title' } } }],
   flows,
 });
@@ -115,7 +120,7 @@ const stackWith = (flows: unknown[]) => ({
  * `packages[0]`, or the stack's empty top level, would pass it.
  */
 const assembledWith = (good: unknown, bad: unknown) => ({
-  manifest: { id: 'com.example.rgn', namespace: 'rgn', version: '1.0.0', name: 'Rgn', type: 'app', engines: { protocol: '^18' } },
+  manifest: { id: 'com.example.rgn', namespace: 'rgn', version: '1.0.0', name: 'Rgn', type: 'app', engines: { protocol: '^19' } },
   packages: [
     {
       manifest: {
