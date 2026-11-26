@@ -794,14 +794,14 @@ describe('[ADR-0149 D7 · ADR-0160 D4] get_record_context over one real kernel: 
             expect(answer.payload.error).toMatchObject({ code: 'INTERNAL_ERROR', status: 500 });
             for (const word of ['rc_revision', 'disk I/O', 'version']) expect(answer.text).not.toContain(word);
             // An outage is a fault, never a declared capability absence: each door logs it at error,
-            // with the thrown error and the outage on its cause, on every call, the second included.
+            // with the outage as its cause, on every call, the second included.
             await both({ objectName: 'rc_policy', recordId: 'p1', context: 'rc_main' });
             const faults = errorLines.mock.calls.filter(([line]) =>
                 typeof line === 'string' && line.startsWith('[5xx] 500') && line.includes('get_record_context rc_policy'));
             expect(faults).toHaveLength(4);
-            for (const [, err] of faults) {
-                expect(err).toMatchObject({ code: 'INTERNAL_ERROR', status: 500 });
-                expect(String((err as { cause?: { message?: unknown } }).cause?.message)).toContain(OUTAGE);
+            for (const [, meta] of faults) {
+                expect(meta).toMatchObject({ status: 500, code: 'INTERNAL_ERROR' });
+                expect(String((meta as { stack?: unknown }).stack)).toContain(`Caused by: Error: ${OUTAGE}`);
             }
             expect(warnLines.mock.calls.filter(([line]) => String(line).includes('capability absence'))).toEqual([]);
         } finally {
@@ -822,9 +822,9 @@ describe('[ADR-0149 D7 · ADR-0160 D4] get_record_context over one real kernel: 
             { code: 'HOOK_ABORTED', status: 400, message: 'Revisions are closed for review' },
         ],
         [
-            'a PERMISSION_DENIED with no status stays 403',
+            'a PERMISSION_DENIED with no status stays PERMISSION_DENIED, as the door renders it',
             () => Object.assign(new Error('Permission denied'), { code: 'PERMISSION_DENIED' }),
-            { code: 'PERMISSION_DENIED', status: 403 },
+            { code: 'PERMISSION_DENIED' },
         ],
     ])('[ADR-0112] at the related list read, a throw the /data door answers as a refusal stays that refusal on both doors: %s', async (_label, thrown, expected) => {
         const real = engine.find.bind(engine);
@@ -837,6 +837,8 @@ describe('[ADR-0149 D7 · ADR-0160 D4] get_record_context over one real kernel: 
             expect(refusing.mock.calls.filter(([object]) => object === 'rc_revision').length).toBeGreaterThanOrEqual(2);
             expect(answer.isError).toBe(true);
             expect(answer.payload.error).toMatchObject(expected);
+            // The door's refusal, as main answered it: never the fault's 500.
+            expect([undefined, 400, 403]).toContain(answer.payload.error.status);
         } finally {
             refusing.mockRestore();
         }

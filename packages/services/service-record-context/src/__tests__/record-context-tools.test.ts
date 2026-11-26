@@ -410,12 +410,12 @@ describe('get_record_context — a read of a related object that fails is a fail
   const outage = () => new Error(OUTAGE);
 
   /** The thrown failure, with what it must not carry. */
-  async function failureOf(promise: Promise<unknown>): Promise<{ code: string; status: number; message: string; cause: unknown }> {
+  async function failureOf(promise: Promise<unknown>): Promise<{ code: string; status: number; message: string; cause: unknown; stack?: string }> {
     try {
       await promise;
     } catch (err) {
-      const e = err as { code: string; status: number; message: string; cause: unknown };
-      return { code: e.code, status: e.status, message: e.message, cause: e.cause };
+      const e = err as { code: string; status: number; message: string; cause: unknown; stack?: string };
+      return { code: e.code, status: e.status, message: e.message, cause: e.cause, stack: e.stack };
     }
     throw new Error('expected a failure');
   }
@@ -442,8 +442,10 @@ describe('get_record_context — a read of a related object that fails is a fail
     for (const word of ['policy_revision', 'secret_note', 'acme_private', 'store down']) {
       expect(failed.message).not.toContain(word);
     }
-    // The original is the host's, on `cause` (which no door puts on the wire).
+    // The original is the host's, on `cause` (which no door puts on the wire), and at the foot of the
+    // stack, which the doors' fault line prints where it prints no `cause`.
     expect(failed.cause).toBe(original);
+    expect(failed.stack).toContain(`Caused by: ${original instanceof Error ? original.stack : String(original)}`);
   };
 
   it.each([
