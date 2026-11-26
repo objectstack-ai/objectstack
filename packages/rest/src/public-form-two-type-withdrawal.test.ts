@@ -1118,7 +1118,7 @@ describe('[ADR-0067 D2] a package publish refused part-way on an engine that can
       refused: [[NAME, 'BATCH_ABORTED'], [SECOND, 'FORM_ADDRESS_TAKEN']],
     },
     {
-      // The first form re-opens the address the pair's switched-off row holds;
+      // The first form opens the address the pair's switched-off row holds;
       // the batch is refused later, at a third form, once the second holds
       // the link they were both saved on.
       intent: 'the address the pair\'s switched-off row holds', slug: SLUG,
