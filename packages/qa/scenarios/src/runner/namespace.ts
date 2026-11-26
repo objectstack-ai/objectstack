@@ -129,9 +129,16 @@ export function namespacedScenario(scenario: LoadedScenario): LoadedScenario {
   return { ...scenario, card };
 }
 
-/** For the citation axis: each namespaced object may also be cited by its bare card name. */
+/**
+ * For the citation axis: each namespaced object may also be cited by its bare
+ * card name (`invoice_line`) and by that name as words (`invoice line`) — how a
+ * reply writes a multi-word object it names as the user reads it ("Source:
+ * Invoice Line"). The grader matches a label case-insensitively inside a
+ * source line only, never anywhere in the reply; a one-word name adds no
+ * second label.
+ */
 export function citationLabels(original: LoadedScenario): Record<string, string[]> {
   const ns = scenarioNamespace(original.card);
   const all = new Set([...original.card.expect.objects, ...(original.card.iterate.expectDelta.objects ?? [])]);
-  return Object.fromEntries([...all].map((name) => [`${ns}_${name}`, [name]]));
+  return Object.fromEntries([...all].map((name) => [`${ns}_${name}`, [...new Set([name, name.replace(/_+/g, ' ').trim()])]]));
 }
