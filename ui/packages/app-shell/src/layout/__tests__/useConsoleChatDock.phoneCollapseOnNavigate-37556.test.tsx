@@ -19,7 +19,7 @@ import '@testing-library/jest-dom/vitest';
 import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
 import React from 'react';
 import { render, screen, fireEvent, cleanup, act } from '@testing-library/react';
-import { MemoryRouter, useLocation, useNavigate } from 'react-router-dom';
+import { MemoryRouter, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
 
 let mobile = true;
 vi.mock('@object-ui/components', async (importOriginal) => ({
@@ -81,6 +81,19 @@ function mount(at = HOME) {
   );
 }
 
+// Home and an app are two layouts, each hosting its own drawer: a chip on Home
+// that opens an app's record unmounts one host and mounts another.
+function mountTwoLayouts() {
+  return render(
+    <MemoryRouter initialEntries={['/home']}>
+      <Routes>
+        <Route path="/home" element={<Host key="home-layout" />} />
+        <Route path="/apps/*" element={<Host key="app-layout" />} />
+      </Routes>
+    </MemoryRouter>,
+  );
+}
+
 const click = (id: string) => act(() => fireEvent.click(screen.getByTestId(id)));
 
 beforeEach(() => {
@@ -117,6 +130,20 @@ describe('a chat navigation closes the phone sheet, not the desktop rail (object
     click('chip');
     expect(screen.getByTestId('location')).toHaveTextContent(CITED);
     expect(screen.getByTestId('chat-dock-mobile-sheet')).toHaveAttribute('data-open', 'false');
+  });
+
+  it('a chip that leaves Home for an app (another layout, another host) closes the sheet too', () => {
+    mountTwoLayouts();
+    click('open-dock');
+    expect(screen.getByTestId('chat-dock-mobile-sheet')).toHaveAttribute('data-open', 'true');
+
+    click('chip');
+    expect(screen.getByTestId('location')).toHaveTextContent(CITED);
+    expect(screen.getByTestId('chat-dock-mobile-sheet')).toHaveAttribute('data-open', 'false');
+
+    click('reopen-dock');
+    expect(screen.getByTestId('chat-dock-mobile-sheet')).toHaveAttribute('data-open', 'true');
+    expect(screen.getByTestId('chat-dock-mobile-sheet')).toHaveAttribute('data-conversation', 'conv-1');
   });
 
   it('a REPLACE that keeps the page (the handoff hand-over) leaves the sheet open', () => {

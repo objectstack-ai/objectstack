@@ -56,6 +56,31 @@ export interface ConsoleChatDock {
   sheet: React.ReactNode;
 }
 
+/**
+ * objectstack#37556 — the history entry (`location.key`) the phone sheet was
+ * last shown open on, per tab (sessionStorage, like the drawer's own state).
+ * Absent while the sheet is closed. A private-mode storage failure just means
+ * a navigation that remounts the layout does not close the sheet.
+ */
+const DOCK_SHEET_SHOWN_AT_STORAGE_KEY = 'ai-chat-dock-sheet-shown-at';
+
+function readSheetShownAt(): string | null {
+  try {
+    return window.sessionStorage.getItem(DOCK_SHEET_SHOWN_AT_STORAGE_KEY);
+  } catch {
+    return null;
+  }
+}
+
+function writeSheetShownAt(key: string | null): void {
+  try {
+    if (key === null) window.sessionStorage.removeItem(DOCK_SHEET_SHOWN_AT_STORAGE_KEY);
+    else window.sessionStorage.setItem(DOCK_SHEET_SHOWN_AT_STORAGE_KEY, key);
+  } catch {
+    /* private mode */
+  }
+}
+
 function hasHandoff(state: BuilderHandoffState | undefined): state is BuilderHandoffState {
   return Boolean(state && (state.handoffPrompt || state.parentConversationId));
 }
@@ -156,20 +181,30 @@ export function useConsoleChatDock({
 
   // objectstack#37556 — on a phone the drawer is a sheet over the page, so a
   // page the chat opens (a citation chip's cited section, a record, a list)
-  // stays hidden under it. A navigation that leaves the page, or a PUSH onto
-  // the same page (clicking the same chip again opens its section again),
-  // closes the sheet; the conversation is kept, so reopening shows it. A
-  // REPLACE that keeps the page (the handoff hand-over above) leaves it open.
-  // The desktop rail sits beside the page and stays as it is.
+  // stays hidden under it. A PUSH or POP away from the history entry the sheet
+  // was shown on closes it, a PUSH onto the same URL included (clicking the
+  // same chip again opens its section again); the conversation is kept, so
+  // reopening shows it. A REPLACE (a page rewriting its own query, the handoff
+  // hand-over above, an old `/ai…` link landing with the drawer armed open)
+  // leaves it open. The entry is kept per tab, not in this hook: a chip that
+  // opens another app's record, or leaves Home for an app, mounts another
+  // layout, and this host with it. The desktop rail sits beside the page and
+  // stays as it is.
   const navigationType = useNavigationType();
-  const lastNavRef = React.useRef({ key: location.key, page });
   React.useEffect(() => {
-    const last = lastNavRef.current;
-    if (last.key === location.key) return;
-    lastNavRef.current = { key: location.key, page };
-    if (!isMobile || !expanded) return;
-    if (last.page !== page || navigationType === NavigationType.Push) collapse();
-  }, [location.key, page, navigationType, isMobile, expanded, collapse]);
+    if (!enabled || !isMobile) return;
+    if (!expanded) {
+      writeSheetShownAt(null);
+      return;
+    }
+    const shownAt = readSheetShownAt();
+    if (shownAt !== null && shownAt !== location.key && navigationType !== NavigationType.Replace) {
+      writeSheetShownAt(null);
+      collapse();
+      return;
+    }
+    writeSheetShownAt(location.key);
+  }, [enabled, isMobile, expanded, location.key, navigationType, collapse]);
 
   // A designer surface can ask the assistant to open through the assistant bus
   // (e.g. an "Ask AI" button).
