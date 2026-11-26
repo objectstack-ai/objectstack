@@ -269,10 +269,12 @@ describe('AppContent — an app with empty navigation lands on an empty state (o
     renderConsoleAt('/apps/studio');
 
     // `metadata:directory` resolves to the app's `metadata` route, which since
-    // objectstack ADR-0146 D1 (N-28) opens Studio's "All metadata" area: the
-    // landing reached the entry, not the empty state.
-    expect(await screen.findByTestId('studio-probe')).toBeInTheDocument();
-    expect(screen.getByTestId('pathname').textContent).toBe('/studio/~all/metadata');
+    // objectstack ADR-0146 D1 (N-28) opened Studio's "All metadata" area and
+    // since objectstack#37565 opens Setup → Access Control → Positions and
+    // Permissions: the landing reached the entry, not the empty state.
+    await waitFor(() =>
+      expect(screen.getByTestId('pathname').textContent).toBe('/apps/setup/component/security/access-directory'),
+    );
     expect(screen.queryByTestId('app-no-access-empty-state')).not.toBeInTheDocument();
   });
 });

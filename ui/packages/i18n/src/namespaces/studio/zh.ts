@@ -3105,7 +3105,7 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.studio.desktopHint': 'Studio 专为桌面屏幕设计。',
   'engine.studio.notFound.package': '未找到包。本部署没有安装 ID 为“{id}”的包，因此无处可构建。',
   'engine.studio.notFound.packageList': '打开软件包列表',
-  'engine.studio.notFound.allMetadata': '打开「全部元数据」',
+  'engine.studio.notFound.allMetadata': '打开「组织流程」',
   'engine.studio.notFound.pillar': '页面不存在。Studio 没有“{pillar}”这一栏，请在上方选择数据、自动化、界面、权限或全部元数据。',
   'engine.studio.aiCopilot': 'AI 助手',
   // objectui#12725 — Studio 右栏：属性或 AI 助手二选一。

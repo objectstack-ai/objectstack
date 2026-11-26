@@ -3520,7 +3520,7 @@ const STUDIO_EN: Record<string, string> = {
   'engine.studio.notFound.packageList': 'Open the package list',
   // The same way out for a principal who may enter Studio but not open
   // Setup → Packages: the "All metadata" area across packages.
-  'engine.studio.notFound.allMetadata': 'Open All metadata',
+  'engine.studio.notFound.allMetadata': 'Open organization flows',
   'engine.studio.notFound.pillar': 'This page does not exist. Studio has no "{pillar}" section; pick Data, Automations, Interfaces, Access or All metadata above.',
   'engine.studio.aiCopilot': 'AI Assistant',
   // objectui#12725 — the Studio right slot: properties OR the copilot.

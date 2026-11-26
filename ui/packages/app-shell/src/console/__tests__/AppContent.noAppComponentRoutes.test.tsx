@@ -97,7 +97,7 @@ import '@testing-library/jest-dom/vitest';
 import '@objectstack/lint';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import React from 'react';
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import {
   MemoryRouter,
   Routes,
@@ -290,6 +290,8 @@ function renderConsoleAt(initialUrl: string) {
 }
 
 const pathname = () => screen.getByTestId('pathname').textContent;
+/** objectstack#37565 — the environment directory's Setup page. */
+const SETUP_DIRECTORY = '/apps/setup/component/security/access-directory';
 
 describe('AppContent — zero-app component/metadata destinations (objectui#3610)', () => {
   beforeEach(() => {
@@ -361,13 +363,14 @@ describe('AppContent — zero-app component/metadata destinations (objectui#3610
     // arm. That arm used to aim at `component/metadata/directory` — the second
     // alias, and the second blank screen without it — and since objectui#3658
     // aims at the canonical directory route directly.
-    // Since objectstack ADR-0146 D1 (N-28) the directory is Studio's.
+    // Since objectstack ADR-0146 D1 (N-28) the directory was Studio's; since
+    // objectstack#37565 it is Setup → Access Control → Positions and Permissions.
     const chain = renderConsoleAt('/apps/setup/system/metadata');
 
-    expect(await screen.findByTestId('studio-probe')).toBeInTheDocument();
-    expect(chain).toEqual(['/apps/setup/system/metadata', '/studio/~all/metadata']);
+    await waitFor(() => expect(pathname()).toBe(SETUP_DIRECTORY));
+    expect(chain).toEqual(['/apps/setup/system/metadata', SETUP_DIRECTORY]);
     expect(chain.some((entry) => entry.includes('component/metadata'))).toBe(false);
-    expect(pathname()).toBe('/studio/~all/metadata');
+    expect(screen.queryByTestId('studio-probe')).not.toBeInTheDocument();
   });
 
   it('the legacy directory alias still resolves when entered directly', async () => {
@@ -385,14 +388,16 @@ describe('AppContent — zero-app component/metadata destinations (objectui#3610
     // wall), so the alias is live input, not a museum piece — entered directly
     // here, exactly as `sys-datasources` above enters the resource alias.
     //
-    // Since objectstack ADR-0146 D1 (N-28) it lands in Studio's "All metadata"
-    // area, still in one hop: this branch's alias aims there directly.
+    // Since objectstack ADR-0146 D1 (N-28) it landed in Studio's "All metadata"
+    // area; since objectstack#37565 the directory is Setup's, still in one hop.
     const chain = renderConsoleAt('/apps/setup/component/metadata/directory');
 
-    expect(await screen.findByTestId('studio-probe')).toBeInTheDocument();
-    expect(chain).toEqual(['/apps/setup/component/metadata/directory', '/studio/~all/metadata']);
-    expect(pathname()).toBe('/studio/~all/metadata');
-    expect(screen.queryByTestId('create-first-app-btn')).not.toBeInTheDocument();
+    await waitFor(() => expect(pathname()).toBe(SETUP_DIRECTORY));
+    expect(chain).toEqual(['/apps/setup/component/metadata/directory', SETUP_DIRECTORY]);
+    expect(screen.queryByTestId('studio-probe')).not.toBeInTheDocument();
+    // The destination is a Setup component page, which this zero-app branch
+    // serves no more than any other (objectstack#37565): what is pinned here is
+    // the one hop onto it, never a bounce to the host.
     expect(screen.queryByTestId('root-landing')).not.toBeInTheDocument();
   });
 
