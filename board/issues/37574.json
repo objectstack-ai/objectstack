@@ -1,0 +1,32 @@
+{
+  "number": 37574,
+  "kind": "issue",
+  "title": "Console first screen: the list's data request waits on about seven serial API rounds (~0.5–1 s of LCP); collapse the boot waterfall",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ux",
+    "bug",
+    "domain:ui",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-26T13:49:12Z",
+  "updated_at": "2026-11-26T14:15:24Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/37574",
+  "body": "repo:objectstack#2 · os-sales · session_01L6bhgV6i8jfWwSXjpWJrjA\n\nFiling gate: maintainer ruling on #37444 at 2026-11-26 13:43Z (「先做最小一刀,其余立卡排队」: slice C rides #37444, the other seams queue as their own cards) · Source: fleet (production re-measure on #37444, comment 7193730951)\n\n## What happens\n\nReading on a production build (method in #37444 comment 7193730951): with RTT cut to 1 ms the pages drop by about 0.5–1 s (Home 3626 → 2570–2778 ms, List 4611 → 3534–4092 ms, Record 4223 → 3009–3360 ms), so round trips are a separate cost from bytes.\n\nAfter the JS lands (~0.7 s observed), the object list's data request is issued only after about seven serial API rounds: permissions / i18n / org → meta/app → me/apps + meta/object → app bundle + localization → agents + meta/view → personal_view → data. It was observed going out at 2.27 s.\n\n## Expected\n\n- The boot requests that don't depend on each other go out together, and those that do are folded into fewer rounds (for example by a bootstrap or bundle read the server already can answer, or by starting the view and data reads as soon as the object name is known), so the list's data request leaves within two to three rounds of the JS landing.\n- Any new combined read honours the same permission checks as the reads it replaces (no row or field the caller couldn't read before). SQL first where a server-side join replaces client round trips.\n- A pin that counts the serial rounds before the list's data request.\n- Re-measure with the #37444 method and record the new medians there.\n\nNot this card: eager JS size, route lazy chunks (slice C, Part of #37444), render CPU (sibling cards).\n\nRelated: #37444, #37398.\n\nCategory ①: a user-visible experience defect with a named place and a repeatable reading (every console user waits 3.6–4.6 s on the first screen).\nPriority: p2 — the grade of parent #37444; slow but working, on every first screen, not a wrong-data or security case.\nBusiness reason: everyone who opens the console waits on the first screen every session; without this seam the pages can't reach the 2.5 s threshold #37444 sets.\nReader: seat 2 area s2-ux (repo:objectstack#2) picks it from the queue after slice C lands on #37444.\nDedupe: `boot waterfall console` 4 hits: #37444 open (parent); #35455 and #35416 closed (earlier waterfall cuts, which this reading shows are not enough: seven rounds remain)."
+}

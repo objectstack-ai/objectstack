@@ -13,18 +13,20 @@
   "labels": [
     "area:ai",
     "domain:server",
-    "pm:queue",
+    "pm:dispatched",
     "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-bill"
+  ],
   "milestone": null,
   "type": "Task",
   "created_at": "2026-11-26T06:22:57Z",
-  "updated_at": "2026-11-26T08:18:43Z",
+  "updated_at": "2026-11-26T13:26:21Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 2,
+  "comments": 6,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/37463",
   "body": "repo:objectstack#5 · os-bill · session_01Utp6CbeF2saT6wUBV4E9uc\n\nFiling gate: ② follow-up out of #37418. The source is seat 5's contract review on PR #37438 (record 7184346569, ③ escalation and N3) and REWORK 7184355118, which ask for this card under #36996 before ACCEPT. The owning area files it, per the maintainer's standing permission for areas to file their own follow-up cards.\nGrading: area:ai · Task · p2 · reach: every `get_record_context` call on a pack with `related` (and every citation the host verifies against such a pack) · evidence: read.\n\n## 维护者速读\n- 做什么：记录资料包读取时，如果关联对象的读取因为故障（比如数据库抖动）失败，现在会被当成「无权访问」整次拒绝。这样核对引用的一方分不清是权限问题还是故障，引用会被悄悄永久丢掉。要让故障以「故障」的形式报出，同时仍然不泄露提问人看不到的对象。\n- 谁受益：AI 回答的引用（云端产生引用那一步）和排障的人。\n- 不做会怎样：故障时整条回答的引用永久丢失，且看起来像权限问题。\n- 需要你做的：无，除非改动需要修改 ADR 文字（受管文件，需要 os-zhuang 批准）。\n\n## What\nIn `executeGetRecordContext` (`packages/services/service-record-context/src/record-context-tools.ts`, on `main` after PR #37412):\n- step 4a: a throwing `servedObjectDefinitionOf(child)` returns `refuseObject(child, false)`, \"A read that failed is no answer about this caller: it refuses, unnamed\";\n- step 4a: an `assertApiExposed` failure that is not an API-exposure refusal (a package gate, an outage) also refuses unnamed;\n- `publishedOf`: a published-definition read that throws after the gates passed refuses the call unnamed;\n- the child list query, where it fails for a reason that is not a refusal.\n\nEach comes out as `PERMISSION_DENIED` 403, which the verifier of #37418 (PR #37438) rightly reads as a refusal. So an outage on a pack with `related` still drops every citation silently and for good.\n1. Tell an outage apart from a refusal at those sites. A failure that is not a coded refusal should surface as a failure, for example a coded 5xx such as `SERVICE_UNAVAILABLE` per ADR-0112, or by rethrowing the original error. It must still name nothing: no object, field or package name the caller is not shown, and no door rendering of the failure. A package gate that is a real refusal stays 403.\n2. Confirm the verifier end to end: a citation on a pack whose child read throws an uncoded error is dropped and reported through `onError`, and a coded refusal is dropped and not reported.\n3. If ADR-0160 (D3 \"Object level\" or point 12, \"one object-level code\") fixes the 403 for these cases, the ADR sentence needs an amendment (governed `docs/adr/**`). State the sentence in the PR, and file or ride the amendment.\n\n## Acceptance\n- A test per site: an uncoded throw surfaces as a failure that names nothing, with a refusal control that stays `PERMISSION_DENIED` 403.\n- The real-kernel harness on both doors carries one outage case.\n- The verifier pin of item 2.\n- `Clause-②`: state the line. The tool's error answer changes for outages, so judge widening or narrowing, and the L2 is owed. `Metadata-protocol: none`.\n\nBlocked-by: #37438 (the PR, on `main`)\nParent: #36996\nSize: S\nDedupe (objectstack, is:issue): `refuses, unnamed outage` 0 · `record-context PERMISSION_DENIED outage` 0.\n\n"

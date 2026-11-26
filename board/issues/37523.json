@@ -1,0 +1,37 @@
+{
+  "number": 37523,
+  "kind": "pull_request",
+  "title": "fix(i18n): the compact toolbar hint says the same thing in every language",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "protocol:ui",
+    "size/s",
+    "tooling"
+  ],
+  "assignees": [
+    "os-bill"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-26T10:56:14Z",
+  "updated_at": "2026-11-26T12:57:37Z",
+  "closed_at": "2026-11-26T12:57:34Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-26T12:57:34Z",
+  "comments": 8,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/37523",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-bill\"} -->\n_Requested by **Bill** · [project thread](https://claude.ai/code/project/chan_016iMXWSZDzqWRWvWzdNo8wg?thread=cmsg_016iMXWSZDzqWRWvWzdNo8wgVAALzqi1uN3mNQFkgfPALM)_\n\nFixes #36874\n\n## 维护者速读\n\n- Studio 里「紧凑工具栏」的说明，十种语言和控制台中文现在和英文一致：补上了「紧凑工具栏没有刷新按钮，`userActions.refresh` 只管宽工具栏」这几句，弹出框用界面上的叫法「视图设置」。\n- 顺手改了两处说错的文档（类型注释和列表插件 README 里的面板内容与刷新按钮），以及 liveness 账本里过时的行号。\n- 只改文字，不改任何键或行为；出错只是提示措辞不对，可直接撤回。\n- 无。\n\n## What changes\n\n- **Ten locale packs** (`packages/platform-objects/src/apps/translations/{ar,de,es-ES,fr,ja-JP,ko,pt-BR,ru,zh-CN,zh-Hant}.metadata-forms.generated.ts`, the `compactToolbar.helpText` leaf only): each now carries the whole English hint, not just its old first sentence. The popover is named with each locale's own label for the \"View settings\" button (`list.viewSettings` in `@object-ui/i18n`: 视图设置, 檢視設定, ビュー設定, 보기 설정, Ansichtseinstellungen, Paramètres de la vue, Ajustes de vista, Configurações da visualização, Настройки представления, إعدادات العرض). ko and es use the UI's own words for refresh (새로고침) and pull to refresh (Tirar para actualizar).\n- **Console zh-CN overlay** (`ui/packages/app-shell/src/views/metadata-admin/metadata-form-zh-cn.ts`, the `compactToolbar` entry): same text as the zh-CN pack.\n- **English source unchanged**: the scope comment asked for the UI's word for the popover. The UI shows \"View settings\" (`list.viewSettings` on the trigger, `ViewSettingsPopover.tsx:1256`; the phone sheet, `ListView.tsx:7791`; the title switcher) and nothing reads `list.display`, so the `view.zod.ts` describe and the `view.form.ts` helpText already use the UI's word and stay as on `main` (seat ruling in L1 7190902038).\n- **N1**: the `compactToolbar` jsdoc in `ui/packages/types/src/objectql.ts` and `ui/packages/plugin-list/README.md` describe the View settings popover as it is: the view's name, its columns, and Layout, Group, Row height and Row color where the host offers them, with Save (when wired), Restore defaults and Export in its footer. No Refresh, Row numbers or Edit inline there; Refresh is drawn only at `ListView.tsx:8171` behind `!compactToolbar`.\n- **Liveness**: the `userActions` note in `packages/spec/liveness/view.json` cites `ListView.tsx:2682-2736` for `toolbarFlags`, `:2717` for `showRefresh` and `:8171` for the button, measured at 54ea3c8c3.\n\n## Why\n\nPR #36872 reworded the English hint; the translations and the zh-CN overlay kept only its old first sentence, so non-English builders were told less than the English says. The scope comment on the card added the wording and line-number fixes.\n\n## Verification\n\n- `pnpm check:i18n` EXIT=0; `pnpm check:i18n-stale-fill` EXIT=0; `pnpm check:i18n-walk-parity` EXIT=0.\n- `pnpm --filter @objectstack/spec check:generated` EXIT=0 (all artifacts current, incl. `check:liveness`, `check:docs`). Rework round 1 (head `f4ae8eda41`): same gates re-run, all EXIT=0.\n- `check:i18n-coverage` could not measure locally (exit 3: `examples/app-showcase` needs `@objectstack/service-print` built); left to CI. This PR adds no key.\n- `overlap-check --branch=HEAD`: clean against main and 6 open PRs.\n\nClause-②: no\nMetadata-protocol: none\n\n## Human Minimum\n\n- [x] 1. Schemas start as Zod; `packages/spec` holds no runtime logic.\n- [x] 2. Every name I added uses the casing for its kind.\n- [x] 3. No formatter ran; `pnpm lint` passes.\n- [x] 4. One issue, one branch off an up-to-date `main`, one pull request.\n- [x] 5. A change that publishes carries a changeset, and both declaration lines are filled in here and in the changeset.\n- [x] 6. `packages/spec` touched: its generated artifacts are regenerated and committed.\n- [x] 7. No hand edits to `content/docs/references/`, `packages/*/CHANGELOG.md` or `content/docs/releases/`.\n- [x] 8. Title, body and comments are in English.\n- [x] The *Before Submitting* list in CONTRIBUTING.md is done.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01Utp6CaA9KCLA988RAhFACC\n\n<!-- signed: repo:objectstack#5 · os-bill · session_01Utp6CaA9KCLA988RAhFACC -->\n"
+}

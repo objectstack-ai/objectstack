@@ -1,0 +1,34 @@
+{
+  "number": 37524,
+  "kind": "issue",
+  "title": "activityMilestones summary has no translation slot, so an app cannot localize the timeline rows its milestones write",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ux",
+    "bug",
+    "domain:spec",
+    "pm:dispatched",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-sales"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-26T10:57:31Z",
+  "updated_at": "2026-11-26T14:07:36Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/37524",
+  "body": "repo:hotcrm#2 · sunhaolin · session_local1adc6fb3954245ba8940a3719cdaea98\n\nFiling gate: ① product defect with a reproduction. Source: fleet (found in a maintainer-ordered local UI test pass of the HotCRM app on 2026-11-26; filed through the pm-dispatch relay on the maintainer's instruction).\nGrading: area:ux · Bug · p2 (triage grades; may be retyped Feature, since the remedy is a new slot) · severity: Cosmetic (UX rule) · reach: every app that declares activity milestones and ships more than one language · evidence: read on main (`packages/spec/src/data/object.zod.ts:4700-4730`); the English rows measured on the released 18.6.0 packages in a zh-CN console\n\n## 维护者速读\n- 做什么：对象的「活动里程碑」摘要模板要能按语言翻译。\n- 谁受益：所有声明了里程碑、又要支持多语言的应用（HotCRM 的工单、商机时间线）。\n- 不做会怎样：中文组织的记录时间线里出现「Case escalated — …」「Deal won — …」这类英文行，应用自己没法改。\n- 需要你做的：无，分诊定级即可（可能改判为 Feature）。\n\n## What\n\nAn object can declare `activityMilestones[]`: when `field` reaches `value`, the platform writes a timeline row whose text is `summary`, a template with `{field}` tokens. `summary` is a plain `z.string()` in a strict object, and the object translation bundle has no key for it. The row is written once, in the authoring language, for every reader.\n\nEvery other label an object shows (field labels, option labels, action labels, list view names) has a translation slot. This one does not, so an app that is otherwise fully translated still shows authoring-language rows on the record timeline.\n\n## Reproduction\n\n1. Declare on an object: `activityMilestones: [{ field: 'status', value: 'closed', summary: 'Case closed — {subject}' }]`, and ship a zh-CN translation bundle for the object.\n2. In a zh-CN console, move a record's `status` to `closed` and open its timeline.\n3. Result: the row reads \"Case closed — …\" in English. There is no key in the translation bundle the app could fill in.\n\n## Where\n\n`packages/spec/src/data/object.zod.ts:4700-4730`: the milestone entry is a strict object with `field`, `value`, `summary`, `type`.\n\n## Acceptance\n\n- A milestone's summary template can be translated through the object translation bundle, with the same `{field}` tokens.\n- The timeline row is rendered in the reader's locale (stored as a key plus its parameters, or resolved at read time), falling back to the authored `summary`.\n- `{field}` tokens that resolve to a select value interpolate the option's translated label.\n- The object translation docs name the new key.\n\nDedupe (open and closed): `activityMilestones`, `activity milestone translation`, `milestone summary i18n` 0 hits.\nBatch-of: local UI deep test pass 2026-11-26, 14 cards (5 in hotcrm, 9 in objectstack).\nBlocked-by: none."
+}

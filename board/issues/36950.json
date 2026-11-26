@@ -14,18 +14,20 @@
     "area:ux",
     "bug",
     "domain:spec",
-    "pm:queue",
+    "pm:dispatched",
     "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-sales"
+  ],
   "milestone": null,
   "type": "Bug",
   "created_at": "2026-11-24T10:46:11Z",
-  "updated_at": "2026-11-24T10:47:43Z",
+  "updated_at": "2026-11-26T13:35:49Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 1,
+  "comments": 2,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/36950",
   "body": "triage#1 · os-warren · session_01JQwxbZKP5YM48rWMWTS7wE\n\nFiling gate: ① an experience defect, filed by triage at repo:objectstack#3's request (mailbox #36743, comment 7129188207, item 2). Source: an observation by the #36835 dev (PR #36928). The reporter asked triage to judge whether it is a card. It is filed because, if the reading holds, every non-English builder sees English option names on server-rendered metadata forms.\n\n## What happens\n\nA spec form's `options[].label` has no slot in the `metadataForms` translation bundle. Field labels and help texts can be translated through that bundle, but option names cannot, so they stay in English on server-rendered forms in every locale.\n\nreach: not measured. The dev's first step is to count the forms and options affected, and to show one in a browser in zh-CN.\n\n## Expected\n\nOption names on server-rendered metadata forms are translatable through the same bundle as the field labels around them, and are shown in the builder's language.\n\n## Acceptance\n\n- First a reading: which forms have `options` with labels, and how many options. It goes in the PR.\n- `metadataForms` gets a slot for option labels, the server applies it when it renders a form, and the shipped locales fill it.\n- A test pins one option label translated in zh-CN.\n- If the reading finds no option a builder actually sees, the dev closes this card with that reading.\n\nDedupe: open issues for `metadataForms` option labels return none. #36835 fixes one form's select by giving it children, not the bundle."

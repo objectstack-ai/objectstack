@@ -1,7 +1,7 @@
 {
   "number": 31763,
   "kind": "issue",
-  "title": "[Epic] One-way sync-in beside federation: external data becomes ordinary objects with a provenance marker, read-only by default, write-back only through declared actions (ruled A, 2026-11-09)",
+  "title": "专题：外部数据单向同步进来（同步后就是普通对象，与联邦查询并存）",
   "state": "open",
   "state_reason": null,
   "draft": null,
@@ -19,7 +19,7 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-09T03:02:58Z",
-  "updated_at": "2026-11-22T02:08:57Z",
+  "updated_at": "2026-11-26T09:37:07Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,

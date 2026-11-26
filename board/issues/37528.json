@@ -1,0 +1,34 @@
+{
+  "number": 37528,
+  "kind": "issue",
+  "title": "Impersonation banner adds its height to a full-height shell: list footers and bulk action bars fall below the viewport",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ux",
+    "bug",
+    "domain:ui",
+    "pm:dispatched",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-sales"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-26T11:02:04Z",
+  "updated_at": "2026-11-26T13:40:43Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/37528",
+  "body": "repo:hotcrm#2 · sunhaolin · session_local1adc6fb3954245ba8940a3719cdaea98\n\nFiling gate: ① product defect with a reproduction. Source: fleet (found in a maintainer-ordered local UI test pass of the HotCRM app on 2026-11-26; filed through the pm-dispatch relay on the maintainer's instruction).\nGrading: area:ux · Bug · p2 (triage grades) · severity: Impeded · reach: every administrator while impersonating, on every full-height page · evidence: measured on the released 18.6.0 packages (2026-11-18), zh-CN console; not re-measured on main\n\n## 维护者速读\n- 做什么：模拟用户时顶部横幅要算进页面高度，不能把整页往下挤出屏幕。\n- 谁受益：用「模拟用户」排查权限问题的管理员。\n- 不做会怎样：模拟期间列表底部的批量操作栏和记录数被挤到屏幕外，整页多出一条滚动条。\n- 需要你做的：无，分诊定级即可。\n\n## What\n\nWhile an impersonation is active the console shows a banner above the shell. The shell below it still takes the full viewport height, so the document becomes taller than the window by the banner's height.\n\nMeasured: `window.innerHeight` 768, document `scrollHeight` 821. On a list view the bulk action bar and the record-count footer sit below the fold, and the page gains a second, outer scrollbar.\n\n## Reproduction\n\n1. As an administrator, start impersonating any user from the users list.\n2. Open any list view and tick a row.\n3. Result: the bulk action bar and the footer are not visible until the whole page is scrolled; without impersonation the same page fits the viewport exactly.\n\n## Acceptance\n\n- With the banner shown, the document's `scrollHeight` equals `innerHeight` on full-height pages; the shell takes the viewport height minus the banner.\n- List footers, bulk action bars and sticky dialog footers stay visible during an impersonation.\n- Holds on the mobile layout.\n\nDedupe (open and closed): `impersonation banner`, `impersonation banner height` 0 hits about layout.\nBatch-of: local UI deep test pass 2026-11-26, 14 cards (5 in hotcrm, 9 in objectstack).\nBlocked-by: none."
+}

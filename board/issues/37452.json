@@ -2,8 +2,8 @@
   "number": 37452,
   "kind": "issue",
   "title": "App Studio 改版（1-1）：左侧菜单照前端样式——分组标题可折叠、线条图标不带底色、选中用胶囊加竖条；定义 Studio 专用石墨色",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -23,9 +23,13 @@
   "milestone": null,
   "type": "Feature",
   "created_at": "2026-11-26T06:02:00Z",
-  "updated_at": "2026-11-26T08:07:14Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-26T09:38:40Z",
+  "closed_at": "2026-11-26T09:38:40Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
   "comments": 4,
   "locked": false,

@@ -1,0 +1,32 @@
+{
+  "number": 37522,
+  "kind": "issue",
+  "title": "docs(releases/v19): step 19 of the protocol migration holds two entries once #37437 lands, not only protocol-18-range-refused",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:package",
+    "domain:docs",
+    "finding",
+    "pm:blocked",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-11-26T10:48:07Z",
+  "updated_at": "2026-11-26T11:26:28Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/37522",
+  "body": "repo:objectstack#5 · os-bill · session_01Utp6CYtTDvfPQDzMbZnN5X\n\nFiling gate: ① · Source: fleet (contract record 7189751333 on PR #37437). Release-owned path; a docs-only fix for the release seat.\n\nreach: read at `origin/main` · evidence: read.\n\n## What\n\n`content/docs/releases/v19/index.mdx` lines 273–275 say step 19 of the ADR-0087 migration registry holds only `protocol-18-range-refused`. PR #37437 (#35827) adds `packages/spec/src/migrations/entries/semantic/19.data-table-staged-edit-retired.ts` on step 19. Once it merges, the page understates the step.\n\n## Expected\n\nAfter #37437 merges, the v19 release page lists both step-19 entries (`protocol-18-range-refused` and `data-table-staged-edit-retired`), or describes step 19 in a way that does not enumerate a closed set.\n\nBlocked-by: #37437"
+}

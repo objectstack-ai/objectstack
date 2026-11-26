@@ -14,18 +14,20 @@
     "area:ux",
     "domain:ui",
     "enhancement",
-    "pm:blocked",
+    "pm:dispatched",
     "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-bill"
+  ],
   "milestone": null,
   "type": "Feature",
   "created_at": "2026-11-26T06:05:21Z",
-  "updated_at": "2026-11-26T06:30:51Z",
+  "updated_at": "2026-11-26T14:03:47Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 1,
+  "comments": 3,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/37456",
   "body": "repo:objectstack#5 · os-bill · session_01Utp6CbL6Nn3scsU8yvLyU4\n\nFiling gate: ③ · Source: topic #37424 — parent decisions 3 and 8, the maintainer's 「现在你软件包的下拉菜单就只剩切换了，还不如做成切换，加上一个新建按钮」, and his pick 「按推荐启动」 of phase 1 (2026-11-26 05:57Z). Sub-issue of #37424 (phase 1, P1-5, last).\nGrade: area:ux · Feature · p2 (takes the parent's grade) · evidence: the parent's decisions, mockups (#37424 comment 7181963746) and the current shell read on origin/main 7d50dc8b.\nReader: area `ux-37424` (seat `repo:objectstack#5`), an `os-dev` subagent or card thread after the blockers land.\n\nBlocked-by: #37451, #37454, #37455\n\n## 维护者速读\n\n- 用户能看到什么变化：Studio 没有顶栏了，和前端一样左右两栏。左上角两行：第一行是应用搭建标志加折叠按钮；第二行是「‹ 返回应用」加软件包切换器，切换器里有「新建软件包」。只读的软件包在名字旁边有一把小锁，「新建」按钮上有提示。菜单折叠后的窄栏保留应用标志和返回按钮。\n- 为什么最后做：顶栏上的按钮先在 1-3、1-4 搬好家，这一步只是删顶栏，任何时候都不缺功能。\n- 需要你做的：无。\n\n## What\n\n- Remove the Studio top bar (`ui/packages/app-shell/src/views/studio-design/StudioDesignSurface.tsx`, `ui/apps/console/src/components/StudioRoute.tsx`); the shell is two columns.\n- Top-left, row 1: the 应用搭建 / App Studio brand (Chinese UI shows 应用搭建, North Star ux ⑤) and the collapse button. Row 2: `StudioBackToApp` plus a package switcher (restored; reverses #36501) whose list ends with 「新建软件包」 reusing the existing create dialog (#37134).\n- Read-only hint: a lock beside the package name in the switcher row and a tooltip on \"New\"; no per-list banner (decision 8).\n- The switcher shows each package's display name in the user's language; today packages have no per-locale display name (#35513), so the Chinese UI would list English names — see #35513 for sequencing.\n- Collapsed rail keeps the app logo and the back button.\n- Delete whatever the top bar still held once P1-3 and P1-4 have moved its tenants; no stopgap buttons.\n\n## Acceptance\n\n- Mockups 1 and 3 (`Main.png`, `AppMenu.png`) for the shell and switcher.\n- No feature reachable today from the top bar is lost (a test walks each former tenant at its new home).\n- Switching package navigates to that package's overview; the switcher lists only packages the user may open.\n\nGoverning text: `docs/adr/0084-application-builder-information-architecture.md` as amended by #37451.\n"

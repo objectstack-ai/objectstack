@@ -1,0 +1,32 @@
+{
+  "number": 37526,
+  "kind": "issue",
+  "title": "Screen flow: a required text field holding only spaces passes the client check, and the server refusal reaches the user as a raw English developer sentence",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ux",
+    "bug",
+    "domain:ui",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-26T10:59:50Z",
+  "updated_at": "2026-11-26T11:26:34Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/37526",
+  "body": "repo:hotcrm#2 · sunhaolin · session_local1adc6fb3954245ba8940a3719cdaea98\n\nFiling gate: ① product defect with a reproduction. Source: fleet (found in a maintainer-ordered local UI test pass of the HotCRM app on 2026-11-26; filed through the pm-dispatch relay on the maintainer's instruction).\nGrading: area:ux · Bug · p2 (triage grades) · severity: Impeded · reach: every screen flow with a required text input · evidence: measured on the released 18.6.0 packages (2026-11-18), zh-CN console; not re-measured on main\n\n## 维护者速读\n- 做什么：屏幕流的必填文本框只填空格时，应在界面上按必填拦住，并用界面语言提示。\n- 谁受益：所有通过屏幕流填表的业务用户（关闭工单、升级工单等）。\n- 不做会怎样：中文界面弹出一整句英文开发者报错，还带着内部字段名清单，用户看不懂该改哪里。\n- 需要你做的：无，分诊定级即可。\n\n## What\n\nA required text field on a flow screen is judged differently by the two sides. The client accepts a value made only of spaces; the server trims it and refuses the submission. The refusal is then shown to the user verbatim:\n\n`Invalid screen input: Screen field \"resolution\" is required — declared fields: 'resolution', 'resolved_by_article'`\n\nThe sentence is English in a zh-CN console and lists machine field names, which is developer text, not a field message.\n\n## Reproduction\n\n1. In an app with a screen flow that has a required text input (HotCRM: Close Case, field `resolution`; the same on Escalate Case, field `reason`), open the screen.\n2. Type three spaces into the required field and submit.\n3. Result: no field-level message; an error surface carrying the sentence above.\n\n## Where\n\n- `packages/services/service-automation/src/engine.ts:9625` builds `Invalid screen input: SUMMARY — declared fields: …`.\n- `packages/runtime/src/domains/automation.ts:3624` maps `INVALID_SCREEN_INPUT` to 400 with the fallback \"Invalid screen input\".\n- The documented contract is `content/docs/automation/flows.mdx:1479-1492`.\n- The client-side required check of the flow screen renderer under `ui/` (not located; the reproduction stands without it).\n\n## Acceptance\n\n- A required text input holding only whitespace is refused by the screen itself, with the same field-level required message an empty field gets, in the UI locale.\n- When the server still refuses a screen input, the user sees a localized message naming the field by its label; the \"declared fields\" list stays in logs and the API body, not on screen.\n- A test covers the whitespace-only value on both sides.\n\nDedupe (open and closed): `Invalid screen input` 6 hits. Nearest is closed #26882 (\"empty required field makes Submit a silent no-op\", closed 2026-10-28): this card is the whitespace-only variant plus the raw sentence, both still present after that fix. Open #36951 is a different mechanism. `screen flow required whitespace` 0 hits.\nBatch-of: local UI deep test pass 2026-11-26, 14 cards (5 in hotcrm, 9 in objectstack).\nBlocked-by: none."
+}

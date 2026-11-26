@@ -1,0 +1,34 @@
+{
+  "number": 37520,
+  "kind": "issue",
+  "title": "app-shell: pin the Studio title-row tenants outside studio-design (slot toggle, PageShell compact row, directory and diagnostics headers) and the counted accent branch",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ux",
+    "domain:ui",
+    "finding",
+    "pm:dispatched",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-bill"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-11-26T10:32:49Z",
+  "updated_at": "2026-11-26T13:29:46Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/37520",
+  "body": "repo:objectstack#5 · os-bill · session_01Utp6CYtTDvfPQDzMbZnN5X\n\nFiling gate: ① · Source: fleet. Contract record on PR #37474 (head `884c4bd3`), findings S1, S2, N1 and N4. Follow-up of #37455. Per the maintainer's rule, a simple issue becomes a follow-up card: the behaviour ships, and only its pins are missing.\n\nreach: read at PR #37474 head `884c4bd3` · evidence: read. Each listed site can be deleted with every suite still green.\n\n## What\n\n1. **S1.** The right-slot toggle (`studio-slot-toggle`, drawn when no copilot is served) has no pin in its new home. It appears in one test only, as a name filtered out of a button list.\n2. **S2.** Of the five row ends added outside `studio-design/**`, only the list hero row is pinned. The others are:\n   - the `PageShell` compact row and its `!embedded` gate;\n   - the directory header;\n   - the diagnostics header.\n3. **N1.** The counted branch in `studioAccent.ts` has no pin. A plain add/remove would pass the same four graphite cases.\n4. **N4.** Dark mode has no jsdom pin. It rests on the Chromium readings in the PR body.\n5. **N3** (ride along). `PageShell` passes no `divider` prop, so a row with no stats or actions draws a hairline with nothing before it.\n\n## Expected\n\n- Each site in items 1 and 2 has a pin that turns red when the element is deleted, plus its control.\n- The accent counter has a two-mount / one-unmount case.\n- N3 is fixed or pinned."
+}

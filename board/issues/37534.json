@@ -1,0 +1,38 @@
+{
+  "number": 37534,
+  "kind": "issue",
+  "title": "Approvals inbox: the sticky Approve / Reject column covers the Submitted column, and the Record column cuts record names short at common desktop widths",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ux",
+    "bug",
+    "domain:ui",
+    "pm:dispatched",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-sales"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-26T11:05:45Z",
+  "updated_at": "2026-11-26T13:57:59Z",
+  "closed_at": "2026-11-26T13:57:59Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/37534",
+  "body": "repo:hotcrm#2 · sunhaolin · session_local1adc6fb3954245ba8940a3719cdaea98\n\nFiling gate: ① product defect with a reproduction. Source: fleet (found in a maintainer-ordered local UI test pass of the HotCRM app on 2026-11-26; filed through the pm-dispatch relay on the maintainer's instruction).\nGrading: area:ux · Bug · p2 (triage grades) · severity: Impeded · reach: every approver using the inbox at a window width around 1100 px or narrower · evidence: measured on the released 18.6.0 packages (2026-11-18), zh-CN console; not re-measured on main\n\n## 维护者速读\n- 做什么：审批收件箱在常见窗口宽度下，记录名和提交时间要能看全。\n- 谁受益：每天在收件箱里批单的经理。\n- 不做会怎样：记录名被截成「Polar Cargo – R…」，提交时间被右侧的通过/拒绝按钮列盖住，分不清在批哪一单、等了多久。\n- 需要你做的：无，分诊定级即可。\n\n## What\n\nThe approvals inbox table keeps the Approve / Reject column sticky on the right. At a content width of 928 px and of 1102 px:\n\n- the Record column shows names cut short (\"Polar Cargo – R…\"; cell `clientWidth` 112 against `scrollWidth` 171), with no tooltip;\n- the Submitted column's header and values are partly under the sticky action column.\n\nBoth hold in English and in zh-CN. The two things an approver decides on, which record and how long it has waited, are the two that are cut.\n\n## Reproduction\n\n1. With at least one pending request assigned to you, open the approvals inbox in a window about 1100 px wide.\n2. Result: the record name ends in an ellipsis and the Submitted column is covered on its right side by the action column.\n\n## Acceptance\n\n- At widths of 928 px and above, the record name is readable in full (wrapping or a wider column), and a cut name carries a tooltip with the full text.\n- The sticky action column never overlaps another column's content; the table scrolls horizontally or drops lower-priority columns instead.\n- A layout test covers 928 px and 1102 px.\n\nDedupe (open and closed): `approvals inbox truncat`, `approvals inbox sticky column` 0 hits.\nBatch-of: local UI deep test pass 2026-11-26, 14 cards (5 in hotcrm, 9 in objectstack).\nBlocked-by: none."
+}

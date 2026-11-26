@@ -1,7 +1,7 @@
 {
   "number": 35154,
   "kind": "issue",
-  "title": "[Epic] Measurement: the eval rounds and scenario cards this epic reads its results from",
+  "title": "专题：评测与场景卡（搭建、问数和技能的评测轮次与场景卡打分）",
   "state": "open",
   "state_reason": null,
   "draft": null,
@@ -18,7 +18,7 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-18T08:18:32Z",
-  "updated_at": "2026-11-20T05:59:09Z",
+  "updated_at": "2026-11-26T09:37:16Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,

@@ -1,7 +1,7 @@
 {
   "number": 27314,
   "kind": "issue",
-  "title": "[Epic] Bridges — vendor suites (DingTalk, WeCom, Feishu) behind the standard protocols the platform speaks: the platform's generic interfaces (webhook channel, inbound webhook, OIDC, SCIM) and the objectstack-ai/bridges repository",
+  "title": "专题：钉钉、企业微信、飞书对接（通过标准协议桥接厂商套件）（暂停）",
   "state": "open",
   "state_reason": null,
   "draft": null,
@@ -21,7 +21,7 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-28T16:22:14Z",
-  "updated_at": "2026-11-18T16:16:57Z",
+  "updated_at": "2026-11-26T09:37:04Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,

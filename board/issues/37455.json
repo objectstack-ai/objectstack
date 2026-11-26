@@ -2,8 +2,8 @@
   "number": 37455,
   "kind": "issue",
   "title": "App Studio 改版（1-4）：顶栏按钮搬家——保存/取消进详情页头，AI 助手和右侧栏开关进每页标题行右端；石墨色挂到整个 Studio",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -23,11 +23,15 @@
   "milestone": null,
   "type": "Feature",
   "created_at": "2026-11-26T06:04:47Z",
-  "updated_at": "2026-11-26T07:44:01Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-26T11:20:00Z",
+  "closed_at": "2026-11-26T11:20:00Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 3,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/37455",
   "body": "repo:objectstack#5 · os-bill · session_01Utp6CbL6Nn3scsU8yvLyU4\n\nFiling gate: ③ · Source: topic #37424 — parent decisions 3–4 and the maintainer's pick 「按推荐启动」 of phase 1 with the top-bar tenants' homes (2026-11-26 05:57Z, quoted on #37451). Sub-issue of #37424 (phase 1, P1-4).\nGrade: area:ux · Feature · p2 (takes the parent's grade) · evidence: the parent's decisions, mockups (#37424 comment 7181963746) and the current shell read on origin/main 7d50dc8b.\nReader: area `ux-37424` (seat `repo:objectstack#5`), an `os-dev` subagent or card thread after the blockers land.\n\nSequencing (2026-11-26T06:55Z): no longer waits for #37451 to merge — the homes this card implements are the maintainer's own pick on the area's decision card (quoted on #37451), and he set phase-1 UI as the priority (「优先还是第一阶段的界面美观度优化」, 2026-11-26T06:46Z). The graphite root mount consumes #37452's tokens: if #37452 has not merged when the rest is ready, merge main once after it lands.\n\n## 维护者速读\n\n- 用户能看到什么变化：编辑一个对象、页面时，保存和取消在详情页头右侧；AI 助手按钮和右侧栏开关在每页标题行的最右边，和前端应用的页头一样。整个 Studio 用石墨色，不跟应用的主题色。\n- 为什么：顶栏要去掉，这几样要先搬好家。\n- 需要你做的：无。\n\n## What\n\n- `StudioSaveControls` (`ui/packages/app-shell/src/views/studio-design/StudioDesignSurface.tsx` ~1541) → the item header's right-aligned action slot (`StudioItemHeader.tsx`).\n- The AI assistant button and the right-slot toggle (`StudioDesignSurface.tsx` ~1543–1570) → the right end of each page's title row (list title row and item header), following the front end's page header button group (#36107 / #36111).\n- Mount the graphite accent defined by #37452 on the Studio root, so every Studio surface ignores the app's theme colour; only the app logo keeps it (decision 4).\n- Read #37440 (publish without the draftVersion pin, names the Studio save bar) and #36660 (AI-draft notice on Save) first: they change the same save controls; sequence with them rather than collide.\n- The top bar keeps its other tenants until P1-5 deletes it; ⛔ do not restyle it.\n\n## Acceptance\n\n- Save / Cancel, AI and the slot toggle work exactly as today from their new places (existing tests re-pointed, not weakened: e.g. the `saveBar-36511`, `copilotDoors`, `rightSlot` suites).\n- A non-default app theme does not tint Studio (one test).\n\nGoverning text: `docs/adr/0084-application-builder-information-architecture.md` as amended by #37451.\n"

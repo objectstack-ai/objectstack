@@ -1,0 +1,34 @@
+{
+  "number": 37549,
+  "kind": "issue",
+  "title": "spec: the registry template has no `<os-generated retired-key:19>` region, so Test Core fails on the 19.0.0-next.0 version tree and the first 19 pre-release cannot merge",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:build",
+    "bug",
+    "domain:spec",
+    "pm:dispatched",
+    "priority:p0"
+  ],
+  "assignees": [
+    "os-sales"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-26T12:42:12Z",
+  "updated_at": "2026-11-26T14:03:57Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/37549",
+  "body": "triage#1 · hotlong · session_01Q4EjjMnyLqJdzuktEmRPXH\n\nFiling gate: ② CI finding on the release path · Source: triage, reading the Version Packages PR #35129 CI (head `2f432d2c`, job \"Test Core (2/10)\" 139908107964, run 45818604866).\n\nTriage: lands in area:build · domain:spec · Bug · priority:p0 · `pm:queue` · size S; rationale: **release blocker**. The maintainer is cutting the first 19 pre-release on `next` (「我想发next版本」). Test Core is a required check, and it fails deterministically on the post-version tree, so #35129 cannot merge. Under the standing rule a release-blocking card is p0, with no `target:`. It returns to p1 after the release.\n\n## What happens\n\n`packages/spec/scripts/build-schemas-check-mode.retired-keys.test.ts` › \"the printed route registers: write exactly the files check (b) names, run the generator, and (b) is silent\" fails:\n\n```\n✗ src/migrations/entries/retired-keys/19.api__PackageInstallManifest__capabilities.ts: registers under protocol major 19, but src/migrations/registry.ts.template has no `<os-generated retired-key:19>` region. Add the region (and, for a semantic entry, the migration st…\n✗ src/migrations/entries/retired-keys/19.system__BookGroup__translations.ts: registers under protocol major 19, but …\n```\n\n**Why only on the version tree:** `CURRENT_MAJOR` is read from the spec package version (`build-schemas.ts:769`, `Number.parseInt(SPEC_VERSION, 10)`; same in `build-schemas-check-mode.fixture.ts:622`). On `main` the spec package is still `18.6.0`, so the test writes `18.*` entries into the existing `retired-key:18` region and passes. The Version PR bumps spec to `19.0.0-next.0`, the test writes `19.*` entries, and `registry.ts.template` has regions only for 17 and 18 (lines ~3885–3897 on `main`). Every `main` push run is green because it never sees major 19 as current; only the post-version tree does.\n\n## Expected\n\n- `packages/spec/src/migrations/registry.ts.template` (and the generator's region list in `scripts/build-migration-registry.ts` near :422–436, if it enumerates them) carries a `retired-key:19` region, with whatever the migration-step side needs for major 19.\n- Proof on the version tree: on a branch with spec bumped to `19.0.0-next.0` (or a refreshed #35129), `pnpm --filter @objectstack/spec test` (repo project) runs this test green.\n- Consider pinning: a test that fails on `main` when `PROTOCOL_VERSION`'s major has no retired-key region, so the next major does not find this at release time.\n\nRelated: #35129 (Version PR), #37461 / #37460 (the earlier release blockers), PR #37314 (PROTOCOL_VERSION 19).\n\nBlocked-by: none."
+}

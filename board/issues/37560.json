@@ -1,0 +1,37 @@
+{
+  "number": 37560,
+  "kind": "pull_request",
+  "title": "fix(console): the approvals inbox's pinned Approve / Reject column covers no other column, and record names read in full at common desktop widths",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "os-sales"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-26T13:16:28Z",
+  "updated_at": "2026-11-26T13:57:59Z",
+  "closed_at": "2026-11-26T13:57:57Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-26T13:57:57Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/37560",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-sales\"} -->\n_Requested by **Sales** · [project thread](https://claude.ai/code/project/chan_01D5bWFY3rFzgJcytD5gD4Uu?thread=cmsg_01D5bWFY3rFzgJcytD5gD4UuQVQdf3PvoJbKFFCUA4gwJB)_\n\nFixes #37534\n\n## What changes\n\nIn the approvals inbox's desktop table (`ApprovalsInboxPage.tsx`), the three text columns wrap instead of holding one line:\n\n- **Request**: the process label and step wrap (`break-words`) instead of `truncate`.\n- **Record**: the title wraps to two lines and is clamped after that (`line-clamp-2 break-words`), still inside the `max-w-0` cell from objectui#12816, so it never sizes the column; the full text stays in the link's `title`. The external-link icon aligns with the first line.\n- **Requester**: the name wraps, and the row is `flex-wrap`, so the \"You submitted this\" badge moves under the name in a narrow column instead of adding to the column's minimum width.\n\nNothing else moves: column heads and widths, the pinned Approve / Reject column (objectui#12816), its always-visible labelled buttons (#34587), and the horizontal overflow box (objectui#12708), which still scrolls the table under the pin below the width where it fits.\n\nNew geometry pin `ui/e2e/approvals-inbox-desktop-columns-37534.spec.ts` (Playwright, same construction as `approvals-inbox-phone.spec.ts`: every class string read out of the page and the `@object-ui/components` primitives at run time, real Tailwind compiled for exactly those classes, the element tree transcribed). The jsdom pin in `ApprovalsInboxPage.pinnedActions-12816.test.tsx` that asserted `truncate` on the record title now asserts `line-clamp-2`, same intent (the title does not size its column).\n\n## Why\n\nThe card measured, on 18.6.0, the record name cut to about 110 px and the Submitted column partly under the pinned column at 928 px and 1102 px content widths. One-line text in Request and Requester set unbreakable minimum widths; with the fixed Status / Submitted widths and the pinned buttons, the table's minimum was wider than the card, so it overflowed, the pin sat over Submitted at rest, and Record, the only column allowed to give, was squeezed.\n\n**Correction to the card:** the \"no tooltip\" half does not hold on `main` — the record name already carries its full text as `title` (seat claim 7192794328, Premise line). The tooltip is kept and now pinned at 928 px.\n\n## Verification\n\nReadings from the new spec in Chromium (fallback fonts), against `main` 021524cd and against this branch:\n\n| Case | Before (main) | After |\n|:---|:---|:---|\n| en, 928 px: table width / box | 1049 / 926 (overflows) | 926 / 926 |\n| en, 928 px: pinned column's left edge vs Submitted's right edge | 738.75 vs 861.5 (covers 123 px) | 738.75 vs 738.75 |\n| en, 928 px / 1102 px: record names cut | both / both | none (wraps to 2 lines at 928) |\n| zh-CN, 928 px: record names cut | both | none |\n| zh-CN, 1102 px | fits, nothing cut | unchanged |\n| en, threshold where the table starts to scroll | — | about 850 px |\n\n- Ablation: the spec's four width cases are red on `main`'s page source (3 of 4 fail: en 928, en 1102, zh-CN 928) and green on this branch; the not-vacuous case (700 px, table scrolls and the pin covers Submitted) is green on both.\n- A 68-character name at 928 px is clamped at 2 lines, keeps its full text in `title`, and the table still fits.\n- vitest (ui root): `apps/console/src/pages/system/` 48 files / 324 tests green; the other suites naming the inbox (`apps/console/src/services/`, `approvalsInboxComponentRef`, `clickableNonControlCensus-13461`, `DeclaredActionsBar`, `approvalQueueAdvance-34586`, `AppContent.setupItemRoutesVerdict-12706`, `dead-pack-keys-retired-8754`) 22 files / 222 tests green.\n- `@object-ui/console` `type-check` exit 0; `type-check:e2e` exit 0; eslint on the three files 0 errors (14 warnings, all pre-existing in the page); `check:new-line-citations` 0 new.\n\nClause-②: no\nMetadata-protocol: none\n\nOwed: L1 (seat). No L2 face: one console page's class strings, a moved jsdom pin and a new geometry spec; no contract surface.\n\n## Human Minimum\n\n- [x] 1. Schemas start as Zod; `packages/spec` holds no runtime logic.\n- [x] 2. Every name I added uses the casing for its kind.\n- [x] 3. No formatter ran; `pnpm lint` passes.\n- [x] 4. One issue, one branch off an up-to-date `main`, one pull request.\n- [x] 5. A change that publishes carries a changeset, and both declaration lines are filled in here and in the changeset.\n- [x] 6. `packages/spec` touched: its generated artifacts are regenerated and committed. (not touched)\n- [x] 7. No hand edits to `content/docs/references/`, `packages/*/CHANGELOG.md` or `content/docs/releases/`.\n- [x] 8. Title, body and comments are in English.\n- [x] The *Before Submitting* list in CONTRIBUTING.md is done.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01L6bhgU7eeqHgQrtv5CeJK6\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01L6bhgU7eeqHgQrtv5CeJK6)_\n<!-- signed: repo:objectstack#2 · os-sales · session_01L6bhgU7eeqHgQrtv5CeJK6 -->\n"
+}

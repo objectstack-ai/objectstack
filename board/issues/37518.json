@@ -1,0 +1,38 @@
+{
+  "number": 37518,
+  "kind": "pull_request",
+  "title": "docs(adr): ADR-0084 — the move door judges a selection as a set, as ruled; three smaller corrections",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "pm:awaiting-merge",
+    "security",
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [
+    "os-bill"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-26T10:19:53Z",
+  "updated_at": "2026-11-26T11:59:42Z",
+  "closed_at": "2026-11-26T11:59:39Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-11-26T11:59:39Z",
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/37518",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-bill\"} -->\n_Requested by **Bill** · [project thread](https://claude.ai/code/project/chan_016iMXWSZDzqWRWvWzdNo8wg?thread=cmsg_016iMXWSZDzqWRWvWzdNo8wgNFUifusaHW7HJRgpb8tzNW)_\n\nrepo:objectstack#5 · os-bill · session_01Utp6CYNbcRTbq4QAT4wBXW\n\nFixes #37514\n\nClause-②: no\nMetadata-protocol: none\nContainer & model: `S`, `mode:thread`, `model: CONTRACT_REVIEW_TIER (mandatory for docs/adr/**; served at tier, read from the thread's session record)`, `effort: xhigh (ADR amendment, standing order)`\n\n## 维护者速读\n\n- 用户能看到什么变化：没有。只改架构记录 ADR-0084 的 9 行文字，不改任何决定。\n- 为什么做：上一个 PR #37470 的合同级审查提了几处小问题。当时它已在合并队列，没有再往里推，所以另开这个小 PR 补上。最要紧的一处：裁决 3 里「把散落项移进软件包时，按整组判定是否跨边界」那一句漏写了，第四阶段照记录拆卡会漏掉这条规则。\n- 出错会怎样：不改代码，不改发布包。\n- 要你做什么：批准合入（受管文件，需要 os-zhuang 和 hotlong 批准）。没有需要你裁定的问题。\n\n## What changes\n\nOne file, text only: `docs/adr/0084-application-builder-information-architecture.md`, +9 / −8 against `main` at `0b1411d4`. No decision changes. Each line answers a nit of the contract record on PR #37470 (comment 7188270415), which passed that PR with the nits open; the seat's L1 accepted them as deviations to carry to a follow-up (comment 7188379901).\n\n| Nit | What the text now says | Its source |\n|---|---|---|\n| N3 | \"Organization-level content\": the door that moves loose items into a package runs each through the judges a save runs, **judging the selection as a set for the cross-boundary rule of ADR-0150 D3 (a)**. The clause had been dropped. `Refs:` gains ADR-0150 D3. | Ruling record 7184753035 on #37424, question 3 |\n| N4 | `form` is \"a type not yet registered\" (was \"registered after this ruling\"), and \"the card that is to register the type\" (was \"that registers\"). | The registry at `0b1411d4` holds no `form` row; PR #37422 is an open draft |\n| N5 | \"Decided by\": the list of the epic's decisions that a ruling of the day changes gains decision 1's line that revises ADR-0146's split. | Epic #37424's body, decision 1; ruling record 7187264388 on #37451, question 1 |\n| N2 | Three sentences the 2026-11-26 amendment narrows now carry their mark: the 2026-11-24 note at the top (\"the development surface of one app\"); the `datasource` example in the 2026-11-24 \"What stands\" row; the same example in item 2 of that day's list. | The amendment's own line: \"each sentence this replaces or narrows is marked where it stands\" |\n\n**Not in scope**, as the card says: N1 (item 11, where `form` sits among the common types; named to the maintainer at the hand-off of #37470, no change owed), N6 (still true), N7 (ADR-0159 D10, carried on #37087).\n\n**Not touched:** the rows of the type → group table, which `studioMenuPlacement.test.ts` pins; ADR-0146.\n\n**The maintainer sources**: none new. This PR restores and corrects text that carries rulings already recorded: 7184753035 on #37424 (questions 2 and 3), and 7185703578 and 7187264388 on #37451. It adds no quotation; the one quotation on a changed line is already on `main`.\n\n**Read first**: the N3 line against the ruling record's sentence, \"runs each item through the save door's judges, judging the selection as a set for the ADR-0150 D3 (a) cross-boundary rule\".\n\n**Two-minute verification**: `cd ui && pnpm exec vitest run --maxWorkers=2 packages/app-shell/src/views/studio-design/studioMenuPlacement.test.ts` → `Tests 12 passed (12)`. It reads ADR-0084 and proves the table pin still holds.\n\n## Tests\n\nn/a — `docs/adr/**` text. The one test that reads ADR-0084 was run and passes (above).\n\n## Acceptance notes\n\n- **The card's acceptance, line by line.** The delta the card lists and nothing else: one file, +9 / −8. The pin test stays 12 of 12, and the diff adds no line of the type → group row shape. Derived gates exit 0 (below). Tier H hand-off: the area sends the green head to the seat.\n- **Why a second PR.** The fix was ready before PR #37470 merged. An approver had already put that PR in the merge queue, and a push would have thrown it out of the queue and off the reviewed head. The commit here is the one prepared then, replayed on `main` after the merge.\n- **The claim was written by this thread**, as the area asked (comment 7188999386 on #37514). `Blocked-by: #37451` was cleared by the merge, and the claim took `pm:blocked` off in the same write.\n- **Tier H by path.** `docs/adr/**` (AGENTS.md Prime Directive #14): approvers os-zhuang and hotlong, and the maintainer merges. The PR stays a draft. The `Rule-change` line is left out, as the template asks for a diff that does not touch `.claude/**`.\n- **No changeset.** `docs/adr/**` is not published; `skip-changeset` is declared with the create.\n\n## Verification\n\n- Gate list derived on the head `6c0f3f2f`: `node scripts/pm/dispatch-gates.mjs --commands` → 21 commands (1 path against merge base `0b1411d4`).\n- All 21 exited 0 on `6c0f3f2f`, each exit code captured before any pipe.\n- `--ran` reconciliation on `6c0f3f2f`: `21 derived famil(ies) accounted for — 21 run, 0 NOT-MEASURED (a DERIVED zero — all 21 recorded an exit code and none of them is 3)`.\n- One commit. Its message names no card.\n- The table pin: `studioMenuPlacement.test.ts`, 12 of 12 passed on `6c0f3f2f`, under the verify lock.\n- `overlap-check.mjs` on `6c0f3f2f`: clean against `origin/main` `0b1411d4` and 0 PR heads. No open PR names ADR-0084 in its title or the file in its body.\n- `dispatch-gates --tier`: `docs/adr/**` is the mandatory contract tier; changed lines 17 against the human-merge threshold 3000: under.\n- `check-prior-rulings --paths` on the file at `0b1411d4`: the 2026-11-24, 2026-11-25 and 2026-11-26 amendments are the rulings in force; this PR changes no decision of any of them.\n- CI-owned families (type-check lanes, artifact rosters, `test:repo`, the always-runs tail) are this PR's check-runs.\n\n```text\nLocal gates (21, each exit 0)\nnode scripts/check-adr-links.mjs [+ --self-test]\nnode scripts/check-closing-keyword-parity.mjs [+ --self-test]\nnode scripts/check-comment-mask-corpus.mjs\nnode scripts/ci/plan-test-core-shards.mjs --self-test\npnpm --filter @objectstack/lint run check:doc-formula-expressions\npnpm check:adr-anchors · check:adr-index · check:adr-symbol-anchors\npnpm check:ci-filter-parity · check:closed-ceremony-text · check:cross-package-test-inputs\npnpm check:doc-authoring · check:driver-memory-census · check:gitlink-declared\npnpm check:nul-bytes · check:pm-governed-merges · check:pm-prior-rulings\npnpm check:refd-timer-probe · check:watch-hint-literal\n```\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01Utp6CYNbcRTbq4QAT4wBXW\n\n<!-- signed: repo:objectstack#5 · os-bill · session_01Utp6CYNbcRTbq4QAT4wBXW -->\n"
+}

@@ -2,8 +2,8 @@
   "number": 36962,
   "kind": "issue",
   "title": "Studio OWD overview Save still publishes unpinned, so two admins saving the same object's sharing default, the later save silently overwrites the earlier",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -15,18 +15,23 @@
     "bug",
     "domain:ui",
     "finding",
-    "pm:queue",
     "priority:p1"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-bill"
+  ],
   "milestone": null,
   "type": "Bug",
   "created_at": "2026-11-24T11:19:20Z",
-  "updated_at": "2026-11-26T06:57:17Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-26T11:22:46Z",
+  "closed_at": "2026-11-26T11:21:49Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 2,
+  "comments": 7,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/36962",
   "body": "repo:objectstack#7 · os-alice · session_011y7As6kDA9BVrMsBR9rmrJ\n\nFiling gate ① · Source: fleet · found by the #36726 dev (os-dev-report comment 7129863132 on #36726), outside that card's surface; PR #36958 (that card) does not touch it. Pre-existing on main 53857591. Read, not measured: same publish shape that #36726's race tests pin for the four editors it wires.\n\n## What happens\n`ui/packages/app-shell/src/views/studio-design/PackageOwdOverviewPanel.tsx:487` publishes each saved object with `publishSavedItem(client, { type: 'object', name, packageId }, s.row.hasDraft)` and passes no `pinned` version. The object page and, after #36726, the extension, hook, action and flow editors pass the version their load read, so a publish over a newer published row is refused and the #36601 conflict dialog opens. The OWD overview's Save has no such pin, so two admins who change one object's org-wide default save last-writer-wins.\n\n## Done when\n- The OWD overview's load records each row's published version, and its Save passes it as `pinned`, the way #36726 wires the Studio editors (`DraftSaveGuard`, `recordPublished`, the `reloaded` outcome).\n- A race pin: another writer publishes between the load and the Save, and the Save is refused with the #36601 dialog. Plus the unpinned control and one ablation.\n\nreach: Studio OWD overview (public UI door), read from source; repro not measured.\nBusiness reason: two admins setting sharing defaults at once lose one change with no warning; it is a security-relevant setting.\nReader: the o7-studio area of seat repo:objectstack#7.\nDedupe: `PackageOwdOverviewPanel publish` → 0; `unpinned publish` → 7, open: #36726 (parent, other editors), #36350 (view drafts, unrelated), the rest seat posts.\nSuggested-grade: p2 · area:build · Bug · admins, rare (two concurrent saves of one object's OWD) · read."

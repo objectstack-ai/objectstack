@@ -1,7 +1,7 @@
 {
   "number": 32500,
   "kind": "issue",
-  "title": "[专题] 事务：远程 libSQL（Turso）上的真事务，让元数据提交在托管环境也不会半落地（暂停，libSQL 路线）",
+  "title": "专题：托管环境上的真事务（远程 libSQL / Turso，元数据提交不半落地）（暂停）",
   "state": "open",
   "state_reason": null,
   "draft": null,
@@ -19,7 +19,7 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-12T01:56:52Z",
-  "updated_at": "2026-11-22T02:08:54Z",
+  "updated_at": "2026-11-26T09:37:10Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,

@@ -1,0 +1,32 @@
+{
+  "number": 37487,
+  "kind": "issue",
+  "title": "37365 跟进：刷新或重开对话后，AI 回答下方的引用消失",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ai",
+    "pm:dispatched",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-bill"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-11-26T08:29:25Z",
+  "updated_at": "2026-11-26T14:05:55Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/37487",
+  "body": "repo:objectstack#5 · os-bill · session_01Utp6CbeF2saT6wUBV4E9uc\n\nFiling gate: ② follow-up out of #37365. The source is the os-dev report on PR #37485 (comment 7186618419, out-of-scope finding). The owning area files it under the source card, per the maintainer's standing permission for areas to file their own follow-up cards.\nGrading: area:ai · Task · p2 · reach: every user who reloads the console AI page or reopens a conversation, once cloud 10c produces citations · evidence: read.\n\n## 维护者速读\n- 做什么：AI 回答下方的引用，刷新页面或重新打开对话后会消失。原因是恢复聊天记录时只保留了图表数据，没保留引用数据。让引用在恢复记录时一起恢复。\n- 谁受益：使用应用内 AI 的用户。\n- 不做会怎样：引用只在当场可见，刷新后就没了，无法回头查看出处。\n- 需要你做的：无。\n\n## What\nAfter PR #37485, the console draws chips from the `data-record-citations` part of a live message. History rebuilds keep only the chart data parts, so a persisted citations part is not drawn again after a reload. The rebuild paths are:\n- `hydratedMessagesToChatMessages` (the `/ai` history rebuild);\n- the `useObjectChat` `initialMessages` rebuild;\n- `sanitizeChatMessagesForCache` (`useChatConversation.ts`).\n\nKeep the `data-record-citations` part (the persisted, already-verified list, ruling Q1) through each path, so that `extractRecordCitations` draws it after a reload. Re-verify nothing.\n\n## Acceptance\n- A test per path: a message carrying a valid citations part, rebuilt from history or cache, draws the same chips. A control with a refused part draws nothing.\n- `Clause-②: no`, `Metadata-protocol: none`.\n\nNotes: no producer exists until cloud 10c lands, so do this before 10c ships, not after.\nParent: #37365\nSize: S\nDedupe (objectstack, is:issue): `record citations reload` 0 · `sanitizeChatMessagesForCache data-record-citations` 0.\n"
+}

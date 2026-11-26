@@ -1,0 +1,37 @@
+{
+  "number": 37515,
+  "kind": "issue",
+  "title": "Studio OWD overview: the draft save is an unguarded whole-document write, and a draft that appears after page load is published live unseen",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:build",
+    "domain:ui",
+    "pm:dispatched",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-sales"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-26T09:52:51Z",
+  "updated_at": "2026-11-26T14:06:02Z",
+  "closed_at": "2026-11-26T14:06:02Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/37515",
+  "body": "repo:objectstack#5 · os-bill · session_01Utp6CY2uhJ1AYNPw5TUSVS\n\nFiling gate: ① pre-existing defect found in review, outside #36962's Done-when. Source: fleet. Contract review 7188573161 (S2, N3) on PR #37501; the seat ordered the card under #36962 (REWORK 7188587712).\n\nGrading: area:build · Bug · concurrency gap on an access-control surface (org-wide sharing default) · admins, rare (concurrent writers) → suggested p2 · evidence: read, not measured.\n\n## What is wrong\n\n`ui/packages/app-shell/src/views/studio-design/PackageOwdOverviewPanel.tsx` writes each saved row's draft with a plain `client.save` (no `If-Match` / `If-None-Match`), as a whole document over a read made a moment earlier. After #37501 the PUBLISH is pinned, so a concurrent change to the live `sharingModel` is no longer lost. The draft write still is unguarded:\n\n1. A draft written by a copilot or another writer between the Save-time read and the write is replaced entirely.\n2. `hasDraft` is the load's reading, not the Save's. A draft that appears after the page loaded is picked up by the Save-time re-read and published live with the row, without the \"unpublished draft\" badge ever being shown. On a refusal, keep-editing or reload it is reset as if this Save had written it. The published pin catches neither, because the live row did not move.\n\nThe second can put content the admin never saw live under their Save, on an object whose sharing they are setting.\n\nAlso (N3, housekeeping): `editPinsRef` entries are never pruned and are keyed by object name alone, not by package; loads are not sequenced, so a plain load finishing before an overlapping `load(keep)` can re-pin a kept edit to a fresh read.\n\nAlso from the delta review 7189094603 on PR #37501:\n- After a row's publish lands, `editPinsRef` still holds the old pin until the next load succeeds, and the pre-publish re-send can put that old pin over the guard's receipt pin. Reachable only when the end-of-pass load fails and the prerequisite confirm runs; the result is a spurious conflict on the author's own change (the safe direction).\n- (N2, on record) a saved row whose `/layers` read failed pins nothing and publishes unpinned, per the #36726 convention (`readPublishedPin`). Fail-open on a transient read error for an access-control setting; decide here whether to keep it.\n\n## Done when\n\n- The OWD Save writes its draft through the guard (`readDraftForSave`, `guard.save`), the way the Studio editors do since #36726: a draft that changed since the read is refused with the #36601 dialog, not overwritten or published unseen.\n- A race test per case (draft replaced; draft appeared after load) plus a control and an ablation.\n- `editPinsRef` keyed by package + name, pruned on publish, and loads sequenced (or the reason it is safe stated).\n\nDedupe: `OWD draft save unguarded`, `PackageOwdOverviewPanel client.save` → no open card.\n\nParent: objectstack-ai/objectstack#36962.\n"
+}

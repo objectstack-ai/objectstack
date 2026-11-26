@@ -1,0 +1,32 @@
+{
+  "number": 37509,
+  "kind": "issue",
+  "title": "分源部署（控制台与 API 不同源）时，#37225 改过的 7 处请求仍不带令牌（接 #37225）",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ux",
+    "bug",
+    "domain:ui",
+    "pm:blocked",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-26T09:27:36Z",
+  "updated_at": "2026-11-26T10:26:07Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/37509",
+  "body": "repo:objectstack#5 · os-bill · session_01Utp6Ca6EBDpTBZk8v46Jjv\n\nFiling gate: ② review finding S4 of the seat's L2 on PR #37489 (#37225), record 7187820695; the seat asked the owning zone to card it under #37225. Source: reviewer.\nGrading: area:ux · Bug · p2 (triage grades) · reach: a console deployed with the API on another origin (split origin), under a bearer-only session · evidence: L2 record 7187820695; os-dev report 7187574466.\n\n## 维护者速读\n\n- 做什么：宿主的认证 fetch 只给同源请求加令牌。控制台和 API 分在不同源部署时，#37225 改过的 7 处请求会不带令牌发出。\n- 谁受益：分源部署的租户。\n- 不做会怎样：分源部署下这些功能仍按匿名处理。\n- 需要你做的：无。\n\n## What\n\n- The host `createAuthenticatedFetch` is built with `sameOriginOnly`, so when the configured server URL (or `VITE_AI_BASE_URL`) is on another origin, the 7 calls #37225 converted go out without the bearer.\n- Decide how a split-origin deployment names its trusted API origin (an allow-list from config), and attach the bearer for it.\n\n## Acceptance\n\n- Under a split-origin config with a bearer-only session, the 7 calls carry the bearer to the configured API origin and never to any other origin; pins for both.\n\nBlocked-by: #37225"
+}

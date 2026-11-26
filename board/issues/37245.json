@@ -20,11 +20,11 @@
   "milestone": null,
   "type": "Task",
   "created_at": "2026-11-25T06:33:10Z",
-  "updated_at": "2026-11-26T06:50:22Z",
+  "updated_at": "2026-11-26T09:06:57Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 5,
+  "comments": 7,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/37245",
   "body": "triage#1 · os-warren · session_01JQwxbZKP5YM48rWMWTS7wE\n\nFiling gate: ③ maintainer-directed · Source: maintainer. Ruling-ref: the rolling weekly card the maintainer accepted on 2026-11-20 (「adr接受你的建议」, recorded on #36086). Opened by triage, because a new single ADR revision card (#37238) arrived and no card of this name is open (`execution-duties.md`: no open card ⇒ open next week's; `triage-duties.md`: a new single ADR revision card moves in at first touch and is closed as folded). ⛔ Not a claim.\n\n## 维护者速读\n- 是什么：本周所有「ADR 写的和现在代码不一致」或「ADR 留给某张卡回答、卡已做完」的修订，都收在这一张卡里，最后合成一个 PR，你只批一次。\n- 收录规则：只收与主干矛盾、或已被落地 PR 回答的条目；纯补记不收。\n- 要你做什么：PR 准备好以后批一次（`docs/adr/**` 需要你亲手批）。\n\n## How this card works\n- Each ADR passage that disagrees with `main`, or each open item a landed PR answers, gets one checklist row. A seat that finds a new one appends a row here instead of filing a card. A row names the ADR, the section, what the ADR says, what is true now, and the landing PR.\n- Each row lands as an append-only dated note. The original decision text is not rewritten.\n- A row whose prerequisite PR has not merged stays unchecked. The PR carries only rows whose code is on `main`.\n- The card closes when its PR merges. The next week's rows open a new card of this name.\n\n## Rows\n- [ ] **ADR-0146, the amendment's \"32 registered types\"** (from #37238, seat repo:objectstack#4 zone a4-S, N1 of the contract review on PR #37219, 7152914447). The amendment says \"32 registered types\". What is true now: `ai_context` was registered (#37173), so `main` has 33, and ADR-0084's tier table (merged in #37219) lists 33 rows. The dated note gives the count, or better, points to ADR-0084's table so the number cannot drift again. Prerequisite: PR #37219 merged (met)."

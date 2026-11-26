@@ -14,18 +14,20 @@
     "area:ux",
     "bug",
     "domain:ui",
-    "pm:queue",
+    "pm:dispatched",
     "priority:p1"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-sales"
+  ],
   "milestone": null,
   "type": "Bug",
   "created_at": "2026-11-26T05:19:59Z",
-  "updated_at": "2026-11-26T06:58:30Z",
+  "updated_at": "2026-11-26T12:46:35Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 2,
+  "comments": 3,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/37440",
   "body": "repo:objectstack#6 · os-lizheng · session_012MmDsSBHy5paNUz6zke9Re\n\nFiling gate: ① a product defect with named locations (one card for one family) · Source: fleet. This is follow-up work owed by landed work: PR #37387 (#36350, ruling 7168616260 A1). It was reported by its dev (7179271525) and confirmed by its contract review (7179921339 ③, 7181638537).\n\n## What happens\n\nPR #37387 gave the per-item publish door an optional `draftVersion` pin. A publish that names the draft version it wrote or read is refused `409 METADATA_CONFLICT` when that draft moved, so an unreviewed draft is never published on someone else's behalf (ruling 7058616478, #35955). Ruling item 3 scoped that PR to four callers. These other draft-then-publish callers on `main` still publish unpinned, so the window #36350 closed for \"Save to this view\" stays open on them:\n\n- `ui/packages/app-shell/src/views/studio-design/studioSaveBar.tsx` (two publish sites)\n- `ui/packages/app-shell/src/views/metadata-admin/DraftConflictDialog.tsx`\n- `ui/packages/app-shell/src/views/metadata-admin/detailSaveAtOnce.ts`\n- `ui/packages/app-shell/src/views/recordTabsConfigSave.ts`\n- `ui/packages/app-shell/src/views/objectExtensionArrangementSave.ts`\n- `ui/packages/app-shell/src/views/layout/designModeMenuSave.ts` (two publish sites)\n- `@objectstack/client`'s `meta.publishItem` cannot state either pin (`draftVersion` or `parentVersion`).\n\nLine positions are as the dev read them at #37387's head. Re-check on claim: `git grep -n \"publishDraft\\|\\.publish(\" ui/packages/app-shell/src/views` against `git grep -n \"draftVersion\" ui/packages/app-shell/src/views`.\n\nreach: read from code per caller. Not reproduced per caller. The door-level harm was measured on #36350: an interleaved draft write between a draft write and its unpinned publish went live (report 7164597391, M1). Each caller here is a draft write followed by an unpinned publish of the same address, so the measured mechanism applies. The claimer reproduces one caller before code.\n\n## Expected\n\nEach caller passes the version of the draft it wrote (its own draft receipt) or showed. It never re-reads blindly, because a re-read would pin someone else's draft. `@objectstack/client`'s `publishItem` accepts `draftVersion` (and `parentVersion`) beside `message`. The pattern is #37387's \"Save to this view\" and draft bar.\n\n## Done when\n\n- Every caller listed above (re-checked on claim) pins, with one pin per caller in that caller's existing harness: an interleaved draft write is refused and nothing unreviewed is published. A CONTROL shows the uninterleaved publish still promotes.\n- Callers found on claim that #37387 did not list are added or named as out of scope with a reason.\n\n## Notes\n\n- Also from #37387's review, outside this card's mechanism but on the same files: nit N6. After a refused Save resolved by \"reload\" in `DraftConflictDialog`, the runtime draft bar keeps the old token, so its Publish fails closed until the panel is reopened. It can ride this card when `DraftConflictDialog.tsx` is touched.\n- Grading suggestion: p2, the same harm as #36350 on narrower paths; triage confirms.\n\nDedupe: open and closed issues for `draftVersion publish callers` (1: #36350), `studioSaveBar publish unpinned draft` (2: #36726 closed, #36350), `draft-then-publish pin` (112, top hits #36963 open, #36726, #36350, #36137). #36963 (Studio create doors for a new object, permission set and app) is the same family on create doors, not these save callers. No open card covers these callers."

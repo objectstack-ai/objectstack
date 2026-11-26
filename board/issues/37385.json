@@ -2,8 +2,8 @@
   "number": 37385,
   "kind": "issue",
   "title": "平台对象的下拉选项自己声明颜色（如通知的严重程度），配合 #36882 去掉默认配色",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -23,9 +23,13 @@
   "milestone": null,
   "type": "Feature",
   "created_at": "2026-11-26T00:44:58Z",
-  "updated_at": "2026-11-26T04:03:55Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-26T10:16:33Z",
+  "closed_at": "2026-11-26T10:16:33Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
   "comments": 2,
   "locked": false,

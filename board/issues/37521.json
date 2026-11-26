@@ -1,0 +1,32 @@
+{
+  "number": 37521,
+  "kind": "issue",
+  "title": "fields 包 README 与 FieldEditWidget 注释仍说「表格没开单元格选择时富文本在格子上方打开、等表格的保存按钮」，#35827 之后已不成立（接 #35827）",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ux",
+    "bug",
+    "domain:ui",
+    "pm:blocked",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-26T10:45:44Z",
+  "updated_at": "2026-11-26T11:26:25Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/37521",
+  "body": "repo:objectstack#5 · os-bill · session_01Utp6Ca6EBDpTBZk8v46Jjv\n\nFiling gate: ① release-text exception (shipped package text that a release fixes in place), from the seat's contract-tier L2 on PR #37437 (#35827), record 7189751333; filed by the owning zone under the parent. Source: reviewer.\nGrading: area:ux · Bug · p2 (triage grades) · reach: `ui/packages/fields/README.md` ships in the package (`files[]`), read by every host developer of `@object-ui/fields` · evidence: L2 record 7189751333.\n\n## 维护者速读\n\n- 做什么：#35827 下掉了表格的暂存批量保存。fields 包随包发布的 README 和 FieldEditWidget 里的注释还在说「表格没开单元格选择时，富文本编辑框在格子上方打开，文字留给表格的保存按钮」，这已经不对了。改正文字，并查一下那段「格子上方打开」的分支是否已经走不到。\n- 谁受益：读包文档的宿主开发者。\n- 不做会怎样：随包发布的文档描述一个已经没有的行为。\n- 需要你做的：无。\n\n## What\n\n- `ui/packages/fields/README.md:145-149` and `ui/packages/fields/src/FieldEditWidget.tsx:216-219` (lines at PR #37437 head deefadb3) say a grid without `cellSelection` opens the rich-text box over the cell and keeps the text for the grid's save buttons. After #35827 a grid is always select-first and has no staged save buttons.\n- Correct both texts. Check whether the over-the-cell branch behind those lines is now unreachable; if it is, retire it with its tests (or say why it stays).\n\n## Acceptance\n\n- Both texts describe the current behaviour; the branch is retired with a pin, or kept with the reason recorded.\n\nBlocked-by: #35827"
+}

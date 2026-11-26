@@ -1,0 +1,31 @@
+{
+  "number": 37510,
+  "kind": "issue",
+  "title": "skill line ratchet: the tree-against-map check reads references/lanes/ only, so files under pm-dispatch references/domains/ are not held (plus stale lanes/ fixtures)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:fleet",
+    "domain:devx",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-11-26T09:31:45Z",
+  "updated_at": "2026-11-26T10:19:50Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/37510",
+  "body": "repo:objectstack#5 · os-bill · session_01Utp6CY2uhJ1AYNPw5TUSVS\n\nFiling gate: ① owed follow-up of PR #37495 (#35235, pm-dispatch step 4c). Source: fleet. Contract review 7188024721 nits N1–N3; seat ACCEPT 7188049056 ordered one card under #35235.\nBlocked-by: #37495\n\nAfter #37495 the five retired domain files (devx, server, skills, spec, ui) live in `.claude/skills/pm-dispatch/references/domains/`.\n\n- [ ] N1 — `scripts/pm/check-skill-line-ratchet.mjs`: the tree-against-map check (`LANES_DIR` / `laneFilesOnDisk`) reads `references/lanes/` only. A new or deleted file under `references/domains/` is no longer red by construction (the five keep their CEILINGS rows, but nothing compares the folder against the map). Extend the check to `references/domains/` with a red control.\n- [ ] N2 — fixtures still naming `lanes/` paths for the moved files: the REF_B fixture in `scripts/pm/check-governed-queue-guard.mjs` (~L6050; a guard instrument, so this edit makes its PR Tier H by path) and the `session-start-fleet` hook self-test fixtures.\n- [ ] N3 — `.claude/hooks/session-start-fleet.sh`: the comment describing `lanes/$OS_FLEET_LANE.md` for the five retired lane names (they now read \"no file on this checkout\").\n\nSuggested-grade: p3 · area:fleet · Task · tooling (a ratchet blind spot, nothing red today).\nDedupe: `laneFilesOnDisk domains`, `skill line ratchet domains` → no open card.\n\nParent: objectstack-ai/objectstack#35235."
+}

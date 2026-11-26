@@ -2,8 +2,8 @@
   "number": 36882,
   "kind": "issue",
   "title": "Select options with no declared colour: render neutral instead of a semantic-table / hash-assigned colour",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "sunhaolin",
@@ -23,11 +23,15 @@
   "milestone": null,
   "type": "Feature",
   "created_at": "2026-11-24T07:02:30Z",
-  "updated_at": "2026-11-26T06:47:34Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-26T10:16:31Z",
+  "closed_at": "2026-11-26T10:16:31Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 10,
+  "comments": 12,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/36882",
   "body": "## Summary\n\nA select option that declares no `color` is still drawn in colour: the renderer looks the option **value** up in a built-in semantic table, and when that misses it hashes the value into one of eight palette families. Ask: stop assigning colour to options whose author declared none, and draw them neutral. Colour on a badge then means exactly one thing — the author declared it.\n\nRequested by the HotCRM maintainer, 2026-11-24: 「去掉系统默认的配色功能。」\n\n## What happens today\n\nObserved in HotCRM on `@objectstack/*` 18.6.0; code read at `main` @ `97e0f934`.\n\n`getBadgeColorClasses(color, val)` in [`ui/packages/fields/src/index.tsx` L1818–L1828](https://github.com/objectstack-ai/objectstack/blob/97e0f934e5e0613179a429ce9fcaa47e2d351768/ui/packages/fields/src/index.tsx#L1818-L1828) resolves in this order:\n\n1. the declared colour (family name, or hex via `getBadgeHexAppearance`);\n2. `SEMANTIC_COLOR_MAP[value]` — about 90 hard-coded English and Chinese values (`new` → gray, `won` → green, `已联系` → blue, …);\n3. `hashToColor(value)` — a djb2-style hash into `BADGE_FALLBACK_PALETTE` (blue, green, purple, orange, pink, indigo, yellow, red).\n\n`getSemanticColorName` (L1839–L1847) and the `appearance: 'dot'` branch of `SelectCellRenderer` (L1929–L1931) repeat rungs 2 and 3.\n\nThere is no way to turn rungs 2 and 3 off: `SelectOption.color` is the only colour key in the spec, and no field, view or renderer option disables the fallback.\n\n## Why it is a problem\n\n- **The colour looks meaningful and is not.** On the HotCRM lead list, *Lead Source* and *Need Type* declare no colours, yet \"Cold Call\" is pink, \"Website\" indigo and \"Replacement\" orange. Nothing in the metadata says so; the hue is a function of the value string. A reader cannot tell an authored colour (the *Status* column, which declares hex) from an accidental one.\n- **The hash can assign a colour that says the opposite of the value.** objectstack#27521 row 4 is this exact failure: `info` hashed to orange, \"the colour of an alarm, for being the quietest level\". It was fixed by adding `info` and `warning` to the semantic table — which repairs two values and leaves the mechanism in place for every other one.\n- **The semantic table is keyed on the value alone, with no field context.** `open` is blue whether the field is a ticket status or a door state; `high` is orange whether it is a priority or a quality grade. It also covers two languages only.\n- **An app cannot opt out without paying per option.** The only escape is to declare `color: 'gray'` on every option of every select field (HotCRM has roughly 280 options with no colour). That is compensating for a platform default in app metadata.\n\n## Proposal\n\nWhen an option declares no colour, render it neutral — the same `bg-muted text-muted-foreground border-border` the function already returns for an empty value — and remove rungs 2 and 3:\n\n- `getBadgeColorClasses`: declared colour, else neutral.\n- `getSemanticColorName`: declared colour, else `undefined`.\n- `SelectCellRenderer` dot branch: declared colour, else `DOT_COLOR_MAP.gray`.\n- `SEMANTIC_COLOR_MAP`, `BADGE_FALLBACK_PALETTE` and `hashToColor` are deleted.\n\nDeclared colours — family names and hex (objectui#5141) — are untouched.\n\n## Blast radius\n\nEvery caller of the two helpers changes for options with no declared colour:\n\n| Surface | Call site | Effect |\n|---|---|---|\n| Grid / list cells | `SelectCellRenderer` | neutral badge |\n| Grid group rows | `plugin-grid` `ObjectGrid.tsx` L4864 | neutral group pill |\n| Kanban | `plugin-kanban` `ObjectKanban.tsx` L1409, L1485 | neutral badge |\n| Filter value panel | `plugin-list` `FilterValuePanel.tsx` L245 | neutral option chip |\n| Gantt bars | `plugin-gantt` `ObjectGantt.tsx` L1535, L1541 | see question 2 |\n\nTests that pin today's behaviour and would change with it: `badge-severity-27521.test.ts` (asserts `info` → blue, `warning` → yellow, `critical` → red with no declared colour) and the no-colour cases in `badge-hex-fidelity-5141.test.tsx`.\n\n## Decisions needed\n\n1. **Does the semantic table go too, or only the hash?** Removing only the hash keeps objectstack#27521 row 4 as ruled, but leaves a value-keyed table that colours some uncoloured options and not others. Removing both reverses that row's remedy. The request reads as both.\n2. **Gantt `colorField`.** `ObjectGantt.tsx` L1532–L1535 relies on `getSemanticColorName` \"always answer[ing] for a non-empty value\", so a declared `colorField` whose options carry no colours still paints distinct bars. Declaring `colorField` is itself an author asking for colour, so this may deserve its own rule rather than falling back to one default bar colour.\n3. **Opt-in.** Whether any author-facing switch (for example on the field) should bring automatic colouring back, or whether declaring colours on the options is the only way to get them.\n\n## Acceptance\n\n- An option with no declared `color` renders with the neutral badge on every surface in the table above, in light and dark themes.\n- An option with a declared family name or hex renders exactly as it does today.\n- `getBadgeColorClasses(undefined, 'info')` no longer contains a palette family class.\n"

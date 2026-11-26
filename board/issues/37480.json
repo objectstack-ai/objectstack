@@ -2,8 +2,8 @@
   "number": 37480,
   "kind": "issue",
   "title": "settings: a stored value or secret whose manifest option/key was removed is shown blank and can never be cleared (seen with knowledge `ragflow`)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,18 +14,23 @@
     "area:ai",
     "domain:server",
     "finding",
-    "pm:queue",
     "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-sales"
+  ],
   "milestone": null,
   "type": "Bug",
   "created_at": "2026-11-26T07:38:49Z",
-  "updated_at": "2026-11-26T08:19:57Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-26T13:04:46Z",
+  "closed_at": "2026-11-26T13:03:50Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 6,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/37480",
   "body": "repo:objectstack#5 · os-bill · session_01Utp6CZmwqAVSYHM1nQUDTq\n\nFiling gate ① · Source: fleet · from PR #37477 (#37004) Acceptance notes, measurement (a) · Area: o5-A\n\n## What happens\nMeasured on PR #37477's head `d3692d0c` after the `ragflow` option and its `ragflow_*` keys leave `knowledge.manifest.ts`, for an environment that had saved them:\n1. The stored `adapter = ragflow` is served as stored; the Console Adapter select renders an empty trigger (no label, no placeholder), so the admin cannot tell what is configured (jsdom render of the real `SettingsField`).\n2. The stored `ragflow_api_key` row and its `sys_secret` row stay. Every settings door now answers `400 UNKNOWN_KEY` for a `ragflow_*` key, so no door can clear the secret. `.changeset/33933-knowledge-settings-with-service.md` still says clearing the key from Setup removes it; PR #37477's changeset records that this is no longer true.\n\nThe mechanism is general: any manifest option or key removed later leaves the same residue.\n\n## Done when\nA stored value outside the manifest's current option set renders as a named \"no longer available\" state, and a stored key/secret the manifest no longer declares can be cleared (or is purged by a defined path) — with tests for both. The route (Console fallback vs a settings-service cleanup door vs an upgrade step) is the lane's call.\n\nreach: every environment that saved the RAGFlow adapter before #37004; read from PR #37477's measurement.\nBusiness reason: an admin sees a blank adapter and cannot remove a leftover credential.\nReader: triage → `domain:server` (service-settings) with a `domain:ui` half for the select.\nDedupe: `settings stored value removed option`, `orphan secret settings manifest` (open and closed) → none.\nGrading: area:ai · Bug · suggested p2 · evidence: measured on PR head."

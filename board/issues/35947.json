@@ -1,7 +1,7 @@
 {
   "number": 35947,
   "kind": "issue",
-  "title": "专题：任务、备注做成平台内置对象，可挂到任意对象的任意记录；评论保留并补短板（含设计说明全文；暂停开发，先不拆卡）",
+  "title": "专题：任务、备注做成平台内置对象，可挂到任意记录；评论补短板（暂停，先不拆卡）",
   "state": "open",
   "state_reason": null,
   "draft": null,
@@ -21,7 +21,7 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-20T22:16:19Z",
-  "updated_at": "2026-11-24T10:11:30Z",
+  "updated_at": "2026-11-26T09:37:22Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,

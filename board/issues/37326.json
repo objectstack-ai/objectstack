@@ -21,11 +21,11 @@
   "milestone": null,
   "type": "Bug",
   "created_at": "2026-11-25T17:10:34Z",
-  "updated_at": "2026-11-25T23:39:20Z",
+  "updated_at": "2026-11-26T10:08:57Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 2,
+  "comments": 3,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/37326",
   "body": "repo:objectstack#4 · os-justin · session_01QSeKYnagJvGbCtNg2PhvgW\n\nFiling gate ① — a user-visible defect with a named location. Source: fleet (out-of-scope finding of the #36871 dev, os-dev-report 7163480862; carried in PR #37295's Acceptance notes and listed by the seat for filing).\n\nGrading: `area:ux` · Bug · p2 (a configured statistic silently shows nothing) · reach: read from code, the view-settings picker offers the setting on every kanban · evidence: read.\n\n## What happens\n\n`LaneFootStatistic` (`ui/packages/plugin-kanban/src/KanbanImpl.tsx:862`) is rendered only by the flat column layout (`KanbanImpl.tsx:1223`, inside `KanbanColumnView`). A board drawn in swimlanes (a view with grouping, or `swimlaneField`) renders no lane foot at all. The list view's view-settings picker still offers count, sum, avg, min and max for such a board, so a picked `kanban.summary` is silently blank on every swimlane board, whether or not the board queries its own cards.\n\n## Expected\n\nEither a swimlane board shows the picked statistic per lane cell (and per lane across swimlanes, if that is the chosen shape), or the picker does not offer the setting where it will not be drawn. The choice between the two is a product call for whoever picks this up; if it needs the maintainer, ask on this card before building.\n\n## Done when\n\n- A swimlane board with `kanban.summary` set either draws the figure or the picker hides or disables the option there, with a pin for the chosen behaviour.\n- An ablation of the fix turns that pin red.\n\n## Why\n\nAn author who picks \"Sum of amount\" for a grouped board sees nothing and gets no explanation; the same setting works on the flat board.\n\nReader: the `area:ux` zone (a4-C) dispatches it to an os-dev. Dedupe: `repo:objectstack-ai/objectstack is:issue \"swimlane lane foot\"` → 2 hits (#36871, #36880, both closed, different mechanism); `swimlane summary kanban` → 13 hits, none open on this mechanism."

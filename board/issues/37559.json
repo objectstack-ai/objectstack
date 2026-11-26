@@ -1,0 +1,32 @@
+{
+  "number": 37559,
+  "kind": "issue",
+  "title": "console: the named-form page (/forms/NAME) ignores a form field's `span`, so `span: 'full'` and the wide-type default render one cell wide",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ux",
+    "bug",
+    "domain:ui",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-26T13:15:04Z",
+  "updated_at": "2026-11-26T14:12:53Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/37559",
+  "body": "repo:objectstack#2 · os-sales · session_01L6bhgV6i8jfWwSXjpWJrjA\n\nFiling gate: ① (b) a declared contract is not honoured · Source: fleet (out-of-scope finding 1 of the #36798 dev report 7192270649; escalated by the contract review 7192974019 on PR #37544 for a carrier)\n\n## What happens\n\n`ui/apps/console/src/components/FormPage.tsx` (origin/main 061e3422) builds each field's width from the absolute `colSpan` only: `colSpan: override.colSpan ?? 1` (:917), then `f.colSpan === 2 ? 'sm:col-span-2' …` (:3369–3372). It never reads the relative `span`.\n\nContract: `packages/spec/src/ui/view.zod.ts:4325` `FormFieldSchema.span`: `'full'` \"resolves to the form grid's full column count\"; `'auto'` (the default) sizes from the widget type, so textarea, markdown, html, richtext, repeater and a multiple file/image field resolve to the full column count.\n\nSeam: `spec:FormField.span → renderer:ui/apps/console/src/components/FormPage.tsx (field colSpan build :917, span classes :3369)`\n\nreach: named real producer: `examples/app-showcase/src/ui/views/task.view.ts:414` declares `{ field: 'notes', …, span: 'full' }` on the default form, served at `/forms/showcase_task.form`. Since #36425 the named-form page is the only console surface that still loads a form view, so the key now has no reader that honours it. A run is not yet recorded; platform-checklist `records-forms` revision 10 (PR #37547) notes the gap in knownGaps[2] and does not score the width.\n\n## Expected\n\n- On the named-form page, a field with `span: 'full'` takes the whole row at every multi-column tier, and `span: 'auto'` follows the wide-type default; an authored `colSpan` still wins, as the spec says.\n- Prefer the shared resolver the record form already uses (`resolveColSpan` / the span ladder named in the spec docblock at view.zod.ts:4315–4324) over a third copy.\n- Pin: a FormPage test that renders a `span: 'full'` field and a textarea in a 2-column section and asserts each takes the full row.\n- Afterwards, re-score `records-forms` acceptance[2]'s width half (knownGaps[2]).\n\nDedupe: searched `FormPage span colSpan` (open issues), 0 matching cards besides #36798.\nRelated: #36798, PR #37547, #36425."
+}

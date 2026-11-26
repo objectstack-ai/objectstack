@@ -2,8 +2,8 @@
   "number": 37451,
   "kind": "issue",
   "title": "App Studio 改版（1-0）：修订 ADR-0084（及 ADR-0146 的分工）——Studio 是开发软件包的入口、恢复软件包切换器、去掉顶栏、「概览」为菜单首项、专用色、顶栏各按钮的新位置",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -23,11 +23,15 @@
   "milestone": null,
   "type": "Task",
   "created_at": "2026-11-26T06:01:14Z",
-  "updated_at": "2026-11-26T07:51:28Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-26T10:07:51Z",
+  "closed_at": "2026-11-26T10:07:51Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
   "merged_at": null,
-  "comments": 8,
+  "comments": 10,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/37451",
   "body": "repo:objectstack#5 · os-bill · session_01Utp6CbL6Nn3scsU8yvLyU4\n\nFiling gate: ③ · Source: topic #37424 — the maintainer's order 「开一个专区处理专题 37424」 (2026-11-26 05:27Z) and his pick of the phase plan on the area's decision card (「按推荐启动」, 2026-11-26 05:57Z, quoted below). Sub-issue of #37424 (phase 1, task 1).\nGrade: area:ux · Task (governed ADR text) · p2 (takes the parent's grade) · evidence: the parent's decisions 1–6 and 9–10, and the area's evaluation on origin/main 7d50dc8b.\nReader: area `ux-37424` (seat `repo:objectstack#5`), a card thread on the contract tier; Tier H, so the seat hands the PR to the approvers and the maintainer merges.\n\n## 维护者速读\n\n- 做什么：把专题 #37424 定下来的方向写进 ADR-0084（顺带改 ADR-0146 的分工一句）：Studio 是开发软件包的入口；恢复软件包切换器；去掉顶栏改左右两栏；菜单第一项是「概览」；Studio 用自己的石墨色；顶栏上每个按钮搬去哪。\n- 为什么：后面第一阶段的五张界面卡都以这份修订为准，不先写清楚，开发会各自猜。\n- 一次写完：菜单分层、设置搬迁这些第三阶段的内容也在这次写进去，分阶段实施，免得 ADR-0084 第四次修订。还没拍板的几条写成「待定，见 #37424」，不替你定。\n- 要你做什么：PR 好了你批准合入（Tier H）。\n\n## Ruled inputs (do not re-decide)\n\n- The parent's decisions 1–6 and 9–10 (#37424 body), with the evaluation's corrections below.\n- Phase-1 top-bar tenants' new homes — the maintainer picked 「按推荐启动」 on the area's decision card (2026-11-26 05:57Z), whose recommended option read: 「返回放左上第二行，⋯和发布进概览页，保存/取消放详情页头，AI放标题行右端。」 In full:\n  - Back to app → the second row of the top-left (`StudioBackToApp.tsx`).\n  - The ⋯ package menu (`StudioPackageMenu.tsx`) → the package overview's header, moved as is.\n  - Pending / Publish (top-bar button + `DraftChangesPanel`) → the overview's Pending tab; the menu's 概览 entry carries a count badge that opens it in one click.\n  - Save / Cancel (`StudioSaveControls`, `StudioDesignSurface.tsx` ~1541) → the item header's action slot (`StudioItemHeader.tsx`).\n  - AI assistant button and right-slot toggle (`StudioDesignSurface.tsx` ~1543–1570) → the right end of each page's title row (list title row, item header), as the front end's page header does (#36107 / #36111).\n- Naming: the maintainer kept 「应用搭建 / App Studio」 and declined renaming to 本体 / Ontology Studio (2026-11-26 thread). The Chinese UI shows 应用搭建 (North Star ux ⑤); today the product label is just \"Studio\" (`packages/platform-objects/src/apps/studio.app.ts:32`), so the amendment says the English display name changes too.\n\n## Corrections the amendment must carry (verified on origin/main 7d50dc8b)\n\n- Positioning: ADR-0084's 11-24 amendment already scopes by package; this is wording plus the restored switcher (reverses #36501's removal).\n- ADR-0146: disable / enable / delete keep their Setup home until the maintainer answers question 1 on #37424 (his 2026-10-30 ruling 「大包 + 设置里启用模块」, #28117, ADR-0070 D2 amendment). Phase 1 only moves the ⋯ menu as is. Write it as open, pointing at #37424.\n- Menu tiers (phase 3): `dataset` (`packages/spec/src/ui/dataset.zod.ts` requires `object`) and `position` (environment-scoped, ADR-0150 D7) break the common-tier rule \"no parent object\"; record them as named placements if the maintainer answers question 4 that way; otherwise mark open.\n- `~all` lists access metadata (positions, permission sets, capabilities, sharing rules); it does not belong under Setup → Diagnostics (question 5, open).\n- 概览 is a menu entry, not a metadata type: ⛔ no `package` metadata type (parent decision 9).\n- The package-less kernel backstop is not closed today (`packages/metadata-protocol/src/protocol-package-scope.ts` ~113–133 still offers \"save without naming a package\"); leave ADR-0070 D1 as is and point at the phase-4 investigation card.\n\n## Acceptance\n\n- One PR amending `docs/adr/0084-application-builder-information-architecture.md` (and the one ADR-0146 sentence on the split, if any wording moves). Each phase-1 child card (#37424 sub-issues) can cite a section of it.\n- Open questions 1–5 on #37424 appear as open, not decided.\n- `Rule-change:` / governed-surface rules per AGENTS.md; the PR body quotes the two maintainer sources above.\n\nGoverning text: `docs/adr/0084-application-builder-information-architecture.md`, `docs/adr/0146-studio-designs-setup-administers-one-editor-per-item-paired-customize-package.md`, `docs/adr/0070-package-first-authoring.md`.\nEvaluation (area-internal, read-only): `/mnt/project-files/objectstack-seat5/topic-37424/fable-evaluation.md`. Mockups: #37424 comment 7181963746."

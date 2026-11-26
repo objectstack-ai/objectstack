@@ -1,0 +1,35 @@
+{
+  "number": 37527,
+  "kind": "issue",
+  "title": "Record edit dialog: choosing a section tab scrolls the dialog element itself, pushing the title and the tab bar out of view with no way back",
+  "state": "closed",
+  "state_reason": "duplicate",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ux",
+    "bug",
+    "domain:ui",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-26T11:00:55Z",
+  "updated_at": "2026-11-26T13:34:03Z",
+  "closed_at": "2026-11-26T13:33:07Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/37527",
+  "body": "repo:hotcrm#2 · sunhaolin · session_local1adc6fb3954245ba8940a3719cdaea98\n\nFiling gate: ① product defect with a reproduction. Source: fleet (found in a maintainer-ordered local UI test pass of the HotCRM app on 2026-11-26; filed through the pm-dispatch relay on the maintainer's instruction).\nGrading: area:ux · Bug · p2 (triage grades) · severity: Impeded · reach: every sectioned object form opened in a dialog on a viewport shorter than the form · evidence: measured on the released 18.6.0 packages (2026-11-18), zh-CN console; not re-measured on main\n\n## 维护者速读\n- 做什么：编辑弹窗里点分区页签时，只滚动表单内容区，不能把整个弹窗滚走。\n- 谁受益：所有在弹窗里编辑多分区记录的用户。\n- 不做会怎样：点一下页签，弹窗标题和页签栏就被顶出屏幕且滚不回来，只能关掉重开。\n- 需要你做的：无，分诊定级即可。\n\n## What\n\nThe record edit dialog draws a sectioned object form with a section tab bar. Choosing a tab scrolls the target section into view, and the scroll lands on the `[role=dialog]` element instead of the form's own scroll area. The dialog's computed `overflow-y` is `hidden`, so it shows no scrollbar and the wheel cannot scroll it back.\n\nMeasured after one click on a later section tab, viewport 768 px tall: dialog `scrollTop` 188, `scrollHeight` 877, `clientHeight` 689. The dialog title and the tab bar are above the visible area.\n\n## Reproduction\n\n1. Open a record whose object form has several sections (HotCRM: an opportunity) and choose Edit, so the form opens in a dialog.\n2. Click a section tab that is not the first.\n3. Result: the title and tab bar leave the dialog's visible area; scrolling inside the form does not bring them back. Closing and reopening is the only recovery.\n\n## Acceptance\n\n- Choosing a section tab scrolls only the form body; the dialog element's `scrollTop` stays 0, and the title, the tab bar and the footer buttons stay visible.\n- Holds for a viewport shorter than the form and for the mobile layout.\n- A test asserts the dialog's `scrollTop` after a section tab click.\n\nDedupe (open and closed): `dialog scroll section tab`, `edit dialog scrollIntoView` 0 hits.\nBatch-of: local UI deep test pass 2026-11-26, 14 cards (5 in hotcrm, 9 in objectstack).\nBlocked-by: none."
+}

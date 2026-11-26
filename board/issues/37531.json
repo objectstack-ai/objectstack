@@ -1,0 +1,32 @@
+{
+  "number": 37531,
+  "kind": "issue",
+  "title": "Approval Actions list shows the step and the system comments in the authoring language while the Approval Requests list is translated",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ux",
+    "bug",
+    "domain:server",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-26T11:03:11Z",
+  "updated_at": "2026-11-26T11:26:49Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/37531",
+  "body": "repo:hotcrm#2 · sunhaolin · session_local1adc6fb3954245ba8940a3719cdaea98\n\nFiling gate: ① product defect with a reproduction. Source: fleet (found in a maintainer-ordered local UI test pass of the HotCRM app on 2026-11-26; filed through the pm-dispatch relay on the maintainer's instruction).\nGrading: area:ux · Bug · p2 (triage grades) · severity: Cosmetic (UX rule) · reach: every translated organization that reads the approval action history · evidence: measured on the released 18.6.0 packages (2026-11-18), zh-CN console; the stored-snapshot column read on main\n\n## 维护者速读\n- 做什么：设置里的「审批动作」列表，步骤名和系统备注要跟随界面语言。\n- 谁受益：查审批留痕的管理员和审计人员。\n- 不做会怎样：同一步骤在「审批请求」里是中文、在「审批动作」里是英文，系统自动写的备注整句英文，留痕读不懂。\n- 需要你做的：无，分诊定级即可。\n\n## What\n\nIn a zh-CN console, Setup → Approval Requests shows a step as 销售经理审核 / 客户审核. Setup → Approval Actions shows the same steps as \"Sales Manager Review\" / \"Account Review\", and the comments the system writes are English sentences, for example \"Auto-cancelled: the crm_account record …\", \"Routed to this organization's administrators because …\", \"The request's submitter was removed from its appro…\".\n\n## Where\n\n- `packages/plugins/plugin-approvals/src/sys-approval-action.object.ts:69`, `:79`, `:89`: the list views show `step_label`.\n- `:130-139`: `step_label` is a text snapshot, \"the step's authored label at the time of the action\", so it is stored in the authoring language and served as stored.\n- The system comments are written into `comment` as English prose at the time of the event.\n\n## Reproduction\n\n1. Declare an approval flow whose step label has a zh-CN translation; submit a record and act on it; let one request be auto-cancelled by deleting its record.\n2. Switch the console to 简体中文, open Setup → Approval Requests, then Setup → Approval Actions.\n3. Result: translated step names in the first list, authored English step names and English system comments in the second.\n\n## Acceptance\n\n- The Approval Actions list and record page serve the step label through the same label resolution the Approval Requests list uses, falling back to the stored snapshot only when the flow or step no longer exists.\n- System-written comments are rendered from a message key and its parameters in the reader's locale, not stored as finished English prose; stored free-text comments from people are untouched.\n\nDedupe (open and closed): `sys_approval_action`, `approval action step label`: closed #24863 (flow and step names in the authoring language only, 2026-10-20), #23889 (display labels for approval lists, 2026-10-16) and #25471 (admin rescue system comment in English, closed as duplicate 2026-10-24). All three closed before 18.6.0 and this surface still shows the authored text there, so it is either not covered by them or regressed.\nBatch-of: local UI deep test pass 2026-11-26, 14 cards (5 in hotcrm, 9 in objectstack).\nBlocked-by: none."
+}

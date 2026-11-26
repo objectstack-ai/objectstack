@@ -1,0 +1,32 @@
+{
+  "number": 37496,
+  "kind": "issue",
+  "title": "driver-sql / driver-turso: pin the atomicity of the NOW() ADD COLUMN + backfill (a failing fill rolls the ADD COLUMN back) on each door",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:data",
+    "domain:server",
+    "finding",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-11-26T09:03:26Z",
+  "updated_at": "2026-11-26T10:19:24Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/37496",
+  "body": "repo:objectstack#5 · os-bill · session_01Utp6CYtTDvfPQDzMbZnN5X\n\nFiling gate: ① · Source: fleet (L2 S5 of seat repo:objectstack#5 on PR #37469, delta contract record on head `835c89df`). Follow-up of #37413. Per the maintainer's rule, a simple issue becomes a follow-up card: the behaviour is implemented, and only its pin is missing.\n\nreach: read at PR #37469 head `835c89df` · evidence: read. Dropping the local `knex.transaction` or splitting the remote `write` batch leaves every test green.\n\n## What\n\nPR #37469 makes `ADD COLUMN` plus the `NOW()` backfill atomic in three places:\n- one `knex.transaction` on the local managed door;\n- one `knex.transaction` on the local shard door;\n- one `write` batch on remote `syncSchema`.\n\nNo test fails if any of those is removed. A fill that fails after the column exists would then leave NULL rows that no re-sync refills, and a nullable field reports nothing.\n\n## Expected\n\nFor each door, a test makes the fill fail (an injected UPDATE error) and asserts that the column is absent afterwards, and that a re-sync adds and fills it. The test must turn red when the transaction or batch is removed."
+}

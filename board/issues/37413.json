@@ -2,8 +2,8 @@
   "number": 37413,
   "kind": "issue",
   "title": "driver-sql on SQLite: a field declaring defaultValue NOW(), added to a table that already holds a row, fails the object's whole schema sync (\"Cannot add a column with non-constant default\")",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,7 +14,6 @@
     "area:data",
     "domain:data",
     "finding",
-    "pm:dispatched",
     "priority:p1"
   ],
   "assignees": [
@@ -23,11 +22,15 @@
   "milestone": null,
   "type": "Bug",
   "created_at": "2026-11-26T02:46:49Z",
-  "updated_at": "2026-11-26T07:10:32Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-26T09:39:32Z",
+  "closed_at": "2026-11-26T09:38:39Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 5,
+  "comments": 7,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/37413",
   "body": "repo:objectstack#5 · os-bill · session_01Utp6CbdHk3orAeensH6EzS\n\nFiling gate: ① · Source: fleet (os-dev measurement while dispatched on #37345, report comment 7181087036) · finding class a · reach: named producer (`SqlDriver.syncSchema` / `initObjects` on every SQLite datasource: `createColumn` → `applyDeclaredColumnDefault` → `nowColumnDefault`, sqlite branch).\n\nGrading: `area:data` · Bug · reach measured at `origin/main` e8740c55 through `TursoDriver`'s local (knex) face · evidence: measured.\nSuggested-grade: p2 · adding a NOW()-defaulted datetime/date/time field to an existing populated table fails that object's sync on SQLite; workaround is to add the field without the default.\n\n## What\n\nOn SQLite, `ALTER TABLE … ADD COLUMN` refuses a non-constant DEFAULT once the table holds a row. The local face's `createColumn` emits the declared `NOW()` default as an expression (`strftime('%Y-%m-%dT%H:%M:%fZ', 'now')` for `datetime`, `strftime('%Y-%m-%d', 'now')` for `date`, a CASE expression for `time`), so the statement fails and the object's whole sync fails:\n\n`alter table r_t add column added datetime [not null] default (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) - Cannot add a column with non-constant default`\n\n- Fails for a nullable field and for a `storage.notNull` field.\n- An empty table accepts the same statement.\n- A literal `defaultValue` on a populated table is accepted (`notnull=1`, `dflt 'd'`).\n\n## Why it matters beyond the local face\n\n#37345 makes the hosted (remote) Turso/libSQL face emit the declared column DEFAULTs the local face emits. Today the remote face accepts a nullable `NOW()` field added to a populated table (it adds the column with no DEFAULT). Copying the local face's `NOW()` emission there would turn that working hosted sync into this refusal, so #37345 keeps the remote face's current answer for exactly that case and this card carries it.\n\n## Acceptance (proposed, for triage)\n\n- The local face adds a field declaring `defaultValue: NOW()` to a populated SQLite table without refusing the sync, nullable and `storage.notNull` alike, and the existing rows get a defined value (the route — e.g. add the column with no DEFAULT then backfill, or a table rebuild — is the dev's to measure; ⛔ never by silently dropping the declared `storage.notNull`).\n- The drift differ reads the result as zero drift on the next sync.\n- The remote face (`driver-turso` `remote-transport.ts`) then gives that same answer through `syncSchema` and `syncSchemasBatch`; `turso-remote-not-null.test.ts` case 5's remaining `NOW()` note is removed.\n\nRelated: #37345 (literal half), #37258, #21241 (MySQL NOW() precision).\nDedupe: searched 'non-constant default', 'NOW() default add column populated', 'nowColumnDefault' — no open card on this path."

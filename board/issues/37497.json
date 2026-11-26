@@ -1,0 +1,38 @@
+{
+  "number": 37497,
+  "kind": "pull_request",
+  "title": "feat(mcp): a refusal with several declared reasons names every line to the agent",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "security",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "os-bill"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-26T09:04:12Z",
+  "updated_at": "2026-11-26T10:07:51Z",
+  "closed_at": "2026-11-26T10:07:49Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-26T10:07:48Z",
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/37497",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-bill\"} -->\n_Requested by **Bill** · [project thread](https://claude.ai/code/project/chan_016iMXWSZDzqWRWvWzdNo8wg?thread=cmsg_016iMXWSZDzqWRWvWzdNo8wgFiXLbrG7d8JVydkmtSf4Bt)_\n\nFixes #37416\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 用户能看到什么变化：智能体通过 MCP 新建、修改、删除记录或运行动作时，如果一次拒绝带了多条原因，它现在能完整拿到每一条原因和最后的总结句，再转告用户；只有一条原因的拒绝和以前一样。\n- 为什么做：接上「一次拒绝可以带多条已翻译原因」那张卡；数据入口把给用户的那句话截在 500 字，原因多时智能体只看到被截断的一段。\n- 出错会怎样：只影响带多条原因的拒绝，智能体多看到一段文字；原来的错误内容一个字不变，可以直接撤回。\n- 要你做什么：无。\n\n## What changes\n\n- `packages/mcp/src/mcp-http-tools.ts`: a refusal thrown as a declared `reasons` list now gets a second text block, the `flowFailureRelaySentence` pattern (card ruling): `content[0]` stays the door's envelope byte for byte, and `content[1]` is a fixed lead (`REFUSAL_REASONS_RELAY_LEAD`) followed by every listed line, whole and in the order thrown, then the closing line.\n- Wired into the two renderers that serve a door's `userMessage`: `errorResultFromThrown` (`run_action`, `resume_run`; the `/actions` answer) and `dataDoorErrorResult` (the record data tools; the `/data` answer, whose `userMessage` is cut at 500).\n- The lines are read through `declaredRefusalLines` (`@objectstack/types`), the one recogniser every door uses for `details.refusals` (imported, not hand-spelled). The closing line is not on the list (the #36877 changeset says so). It is read as the part of the error's own unbounded `userMessage` (`declaredUserMessage`) after the listed lines. If that text does not begin with the lines, no closing line is invented and the block carries the lines alone.\n- Withheld, so these answers are unchanged: a `PERMISSION_DENIED` answer (the #7450 rule; `run_action` already returned before this point, and the data tools now ask the same question), an answer with no `userMessage`, a fault (5xx), and any throw the shared recogniser does not read (a single-reason refusal among them).\n- `packages/mcp/src/stdio-data-bridge.ts` is untouched. It only implements the bridge and renders no tool result. The stdio server's tools are rendered by the same `mcp-http-tools.ts` functions, so the relay applies to both transports with no stdio edit.\n\n## Tests\n\n`packages/mcp/src/mcp-refusal-reasons.test.ts` (new, named for the card): 14 cases through the real HTTP `/mcp` transport (`MCPServerRuntime.handleHttpRequest`), with a bridge double that throws the shape the runtime's catalogue throws (`SandboxError` with `code`, `status`, `userMessage`, `refusals`).\n\n- For each of `run_action`, `resume_run`, `create_record`, `update_record` and `delete_record`: two lines plus the closing line ride as `content[1]`, and `content[0]` equals the answer to the same throw without `refusals`. A single-reason refusal answers one block, as today.\n- A six-line list on `create_record` whose joined text exceeds 500 characters: the envelope's `userMessage` is cut (at most 500 characters, closing line missing), and the relay names every line whole with the closing line last.\n- Controls: `PERMISSION_DENIED` carrying a list gets no relay on all five tools; four malformed lists get none; a `userMessage` that does not begin with the lines gets the lines and no invented closing line.\n\n<details><summary>Package suite, typecheck, ablations</summary>\n\n- `pnpm --filter @objectstack/mcp typecheck && pnpm --filter @objectstack/mcp exec vitest run --maxWorkers=2` on `ef53eb6617`, under the verify lock: `VERDICT command-exit 0`; Test Files 86 passed (86), Tests 1540 passed (1540); `check:test-typecheck: OK` (the new file compiles under `tsconfig.test.json` and has no debt entry).\n- Ablation 1 (`node scripts/ablation-replace.mjs`): `const text = refusalReasonsRelayText(err);` replaced by an always-undefined value (anchor 1 → 0, blob a3118141 → 335b2247). Result: 7 failed / 7 passed, namely the five per-tool relay cases, the 500-cut case and the no-invented-closing case. Restored: blob equals HEAD, `git diff HEAD` empty.\n- Ablation 2: the `PERMISSION_DENIED` guard removed (blob a3118141 → 172d9385). Result: 1 failed / 13 passed, the #7450 control, failing at `create_record` (`run_action` already returns earlier). Restored: blob equals HEAD, `git diff HEAD` empty.\n- The tests import `src/` through relative paths, so no rebuild was needed for either ablation.\n\n</details>\n\n## Acceptance notes\n\n- H3 measured: the closing line is not carried in `details`. The #36877 changeset states that `details.refusals` holds only the listed lines and that the closing line exists only as the last line of `userMessage`. MCP holds the thrown value in process, so it reads the unbounded `userMessage` that the `/data` door would later cut. The closing line is that text minus the listed-lines prefix. This relies on the composition the catalogue documents (lines joined by a line break, then the code's own `message`), and the control pins the case where the composition does not match.\n- On `run_action` / `resume_run`, the `/actions` door does not cut `userMessage`, so the envelope already held every line. The block is added there too so that every tool answers a listed refusal one way. The envelope is unchanged on both doors. `details.refusals` is not added to either envelope: `errorResultFromThrown` serves only a thrown `details`, and the data tools withhold `details` by design (`errorResultWithCode`).\n- Not covered: `delete_records` groups refused rows by the thrown message (`rowRefusalOf`) and reads neither `userMessage` nor `details`. The record resource and the metadata tools render no `userMessage` relay. None of these is changed here.\n- The tests are in a new file, as the dispatch order asked. The closest existing file (`mcp-action-refusal-details.test.ts`) builds its own local harness and is not a shared harness file.\n\n## Verification\n\n- Derived gate list (`node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack`, change set of 3 paths against merge base `eaa9e5447`): 67 derived, run on `ef53eb6617`. 66 exit 0. One NOT MEASURED: `pnpm check:dual-build-cjs-loads` exit 3 (PREREQUISITE NOT MET: it needs the whole workspace built; CI Build Core runs it). `--ran` reconciliation: 67 accounted, 66 run, 1 NOT-MEASURED.\n- CI check-runs are the authority for every family.\n\nTwo-minute check: `pnpm --filter @objectstack/mcp exec vitest run --maxWorkers=2 src/mcp-refusal-reasons.test.ts`. Expect 14 passed.\n\nRead first: `packages/mcp/src/mcp-http-tools.ts`, specifically `withRefusalReasonsRelay` and `refusalReasonsRelayText` (the closing-line read) and the `dataDoorErrorResult` hunk.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01Utp6CZmwqAVSYHM1nQUDTq)_\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n"
+}

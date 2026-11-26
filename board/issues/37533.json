@@ -1,0 +1,32 @@
+{
+  "number": 37533,
+  "kind": "issue",
+  "title": "Action failure toast shows the raw exception class in front of the localized message (\"ValidationError: …\")",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ux",
+    "bug",
+    "domain:ui",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-26T11:04:48Z",
+  "updated_at": "2026-11-26T11:26:55Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/37533",
+  "body": "repo:hotcrm#2 · sunhaolin · session_local1adc6fb3954245ba8940a3719cdaea98\n\nFiling gate: ① product defect with a reproduction. Source: fleet (found in a maintainer-ordered local UI test pass of the HotCRM app on 2026-11-26; filed through the pm-dispatch relay on the maintainer's instruction).\nGrading: area:ux · Bug · p2 (triage grades) · severity: Cosmetic (UX rule) · reach: every script action whose write is refused by a validation rule · evidence: measured on the released 18.6.0 packages (2026-11-18), zh-CN console; not re-measured on main\n\n## 维护者速读\n- 做什么：动作执行失败的提示要去掉前面的异常类名，只留给用户看的那句话。\n- 谁受益：所有通过按钮动作录入数据的业务用户。\n- 不做会怎样：中文提示前面顶着一个英文的「ValidationError:」，像程序报错而不是填写提示。\n- 需要你做的：无，分诊定级即可。\n\n## What\n\nWhen a script action's write is refused by a field validation, the failure toast is the exception's string form: the class name, a colon, then the localized message. Measured in a zh-CN console:\n\n`ValidationError: 时长（分钟）的小数位数不能超过 0 位(当前 1 位)`\n\nThe message itself is correct and translated. The prefix is the error class and is not text for a user. The same refusal on a plain form save shows the message without the prefix.\n\n## Reproduction\n\n1. Declare a script action with a number parameter that the action writes into a number field with scale 0 (HotCRM: Log a Call, Duration).\n2. Run the action and enter 1.5.\n3. Result: an error toast that starts with \"ValidationError:\".\n\n## Acceptance\n\n- An action failure caused by a validation refusal shows the localized message only, the same text a form save shows for the same refusal.\n- The error class stays available in the response body and the logs.\n- A test covers the toast text for a refused action write.\n\nDedupe (open and closed): `ValidationError prefix toast`, `action toast ValidationError` 0 hits.\nBatch-of: local UI deep test pass 2026-11-26, 14 cards (5 in hotcrm, 9 in objectstack).\nBlocked-by: none."
+}

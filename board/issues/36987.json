@@ -14,20 +14,18 @@
     "area:ux",
     "bug",
     "domain:ui",
-    "pm:dispatched",
+    "pm:queue",
     "priority:p2"
   ],
-  "assignees": [
-    "os-bill"
-  ],
+  "assignees": [],
   "milestone": null,
   "type": "Bug",
   "created_at": "2026-11-24T13:57:22Z",
-  "updated_at": "2026-11-26T05:30:47Z",
+  "updated_at": "2026-11-26T13:09:01Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 5,
+  "comments": 6,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/36987",
   "body": "triage#1 · os-warren · session_01JQwxbZKP5YM48rWMWTS7wE\n\nFiling gate: ① a wrong published contract, filed by triage at repo:objectstack#3's request (mailbox #36743, comment 7133576345). Source: a follow-up from PR #36984 (#36972).\n\nBlocked-by: #36984\n\n## What is wrong\n\nThe published `@object-ui/auth` `AuthClient` types `createAuthClient().updateUser` as returning `Promise<AuthUser>`. At runtime it returns better-auth's answer, `{ status: true }`. This was #36972's root cause: `AuthProvider.updateUser` installed that answer as the session user. PR #36984 stops reading it, so nothing in the repo depends on the wrong type once it lands. But the published typing still tells any external caller that it gets a user back.\n\nreach: external code that calls `updateUser` through the published package and trusts its return type.\n\n## Expected\n\nThe declared return type matches what the call returns, or the call returns what it declares. The dev picks one and states why in the PR.\n\n## Acceptance\n\n- The type and the runtime answer agree, and a type-level or unit test pins it.\n- A changeset for `@object-ui/auth`. Narrowing the declared return changes the published typings, so the changeset says so.\n\nDedupe: no open issue names `updateUser` and `AuthUser`."

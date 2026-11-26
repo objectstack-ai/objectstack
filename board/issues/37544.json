@@ -1,0 +1,37 @@
+{
+  "number": 37544,
+  "kind": "pull_request",
+  "title": "docs(skills): the UI skill says a default or create form an action opens by name is not reported",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "pm:awaiting-merge",
+    "size/s",
+    "tooling"
+  ],
+  "assignees": [
+    "os-sales"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-26T12:30:06Z",
+  "updated_at": "2026-11-26T13:33:37Z",
+  "closed_at": "2026-11-26T13:33:34Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-11-26T13:33:34Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/37544",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-sales\"} -->\n_Requested by **Sales** · [project thread](https://claude.ai/code/project/chan_01D5bWFY3rFzgJcytD5gD4Uu?thread=cmsg_01D5bWFY3rFzgJcytD5gD4UuKGddwBcChMgB9UWGoWTjCr)_\n\nPart of #36798\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 用户能看到什么变化：用界面技能写应用的 AI，不再被告知「默认表单和新建表单一律会被检查报出」；动作按名字打开的那一张不报，并且照常加载。\n- 为什么做：检查规则三天前已经改了，技能文字没跟上，AI 可能据此删掉一张还在用的表单。\n- 出错会怎样：只改一段说明文字，写错了 AI 会按错的说法写应用；撤回这次合并即可恢复原文。\n- 要你做什么：这是对外发布的技能包，需要你批准后才能合并。\n\n## What changes\n\n`skills/objectstack-ui/rules/list-views.md`, \"Form Views\": one passage, four lines before and four after.\n\n- Before: a container's `form`, `formViews.default` and `formViews.create` \"still parse and steer nothing\", and `os validate` warns `form-view-internal-not-loaded`, with no exception.\n- After: the warning is stated with its exception. A form that a `type: 'form'` action's literal `target` names is not reported, and it loads as a named form.\n\nThis follows the rule as merged in PR #36793: `validateInternalFormViews` in `packages/lint/src/validate-internal-form-views.ts` skips a site whose served name equals the literal target of a `type: 'form'` action, and an interpolated target exempts nothing.\n\nThe parenthesis listing what an internal form no longer steers (sections, tabs, steps, `subforms`, `defaults`, `modalSize`) is deleted to pay for the new words. The file sat at its token ceiling with no headroom.\n\nThe card keeps this file in a pull request of its own because `skills/**` is a governed surface. The two docs pages and the two checklist items of the same card are in the sibling pull request on branch `claude/project-thread-i00g76`. This one is `Part of` so that neither closes the card before the other lands.\n\n## Skills size readings\n\n| Reading | Before (5dbcc02b) | After (adb46e80) |\n|:---|:---|:---|\n| `skills/objectstack-ui/rules/list-views.md`, lines | 411 | 411 |\n| `skills/objectstack-ui/rules/list-views.md`, bytes | 17767 | 17789 |\n| `skills/objectstack-ui/rules/list-views.md`, tokens (ratchet count) | 4442 | 4448 (ceiling 4448) |\n| All `skills/*/SKILL.md`, lines | 4961 | 4961 |\n| Ratcheted authored bundle, tokens | 199596 | 199602 (ceiling sum 204471) |\n\nNet lines added: 0. The order's budget was 3.\n\n## Tests\n\nNo test pins this passage. `git grep` for the old wording under `skills/`, `content/docs/` and the package tests finds no other copy.\n\n## Acceptance notes\n\n- Read first: the one hunk in `skills/objectstack-ui/rules/list-views.md`. The risk is the deleted parenthesis: the skill no longer lists which keys an internal form stops steering.\n- \"These load:\" replaces \"Two kinds of form view load:\". The two kinds that follow, a named form and a public form, are unchanged.\n- The changeset carries both declaration lines. No claim comment existed when this was opened, so the two lines above are copied from the changeset, not from a claim.\n\n## Verification\n\nTwo-minute check: `node scripts/check-skills-token-ratchet.mjs` prints `skills/objectstack-ui/rules/list-views.md is 4448 tokens (ceiling 4448; headroom 0)` and exits 0.\n\n<details>\n<summary>Local gates at adb46e80: 48 derived commands, 43 exit 0, 5 exit 3 (prerequisite not met)</summary>\n\nDerived with `node scripts/pm/dispatch-gates.mjs --commands` (no paths) on the committed head. Each exit code was captured before any pipe.\n\nExit 0: `check-adr-0087-registration` (and its self-test), `check-changeset-no-major`, `check-closing-keyword-parity` (and self-test), `check-comment-mask-corpus`, `check-doc-route-spelling --advisory` (and self-test), `check-dts-emitted --self-test`, `check-empty-changeset` (and self-test), `check-skills-token-ratchet` (and self-test), the four `scripts/ci` self-tests, `check-governed-queue-guard --self-test`, `release-rehearsal-clone --self-test`, `release-pending-publish --self-test`, `check:skill-served-sections`, `check:adr-anchors`, `check:agent-test-spelling`, `check:changeset-gate-self-tests`, `check:ci-filter-parity`, `check:closed-ceremony-text`, `check:corpus-claim-drift`, `check:cross-package-test-inputs`, `check:doc-authoring`, `check:driver-memory-census`, `check:gitlink-declared`, `check:nul-bytes`, `check:pm-expected-skips`, `check:pm-governed-merges`, `check:pm-skill-id-lint`, `check:published-files`, `check:refd-timer-probe`, `check:role-word`, `check:skill-compatibility`, `check:skill-frame-sync`, `check:skill-identifier-liveness`, `check:skill-links`, `check:watch-hint-literal`.\n\nNOT MEASURED, exit 3, reason: no package was built in this worktree and each reads a `dist/`. The diff is prose only, so no closure was built for them; CI runs them. `check:doc-formula-expressions` (lint), `check:dts-closure`, `check:dual-build-cjs-loads`, `check:lean-entry-closure`, `check:sourcemap-no-sources-content`.\n\n</details>\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01L6bhgXJJCTibebb55zV7AZ)_\n"
+}

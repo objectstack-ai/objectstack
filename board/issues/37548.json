@@ -1,0 +1,32 @@
+{
+  "number": 37548,
+  "kind": "issue",
+  "title": "审批中心：页面开着时，之前发起的批量操作完成后列表不刷新（接 #37328）",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ux",
+    "bug",
+    "domain:ui",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-26T12:39:10Z",
+  "updated_at": "2026-11-26T13:16:40Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/37548",
+  "body": "repo:objectstack#5 · os-bill · session_01Utp6Ca6EBDpTBZk8v46Jjv\n\nFiling gate: ② review finding on PR #37541 (#37328). The seat's L1 ACCEPT is 7192260423 and its contract record is 7192249476. The seat left the carding call to the owning zone, and the zone files it here. Source: reviewer.\nGrading: area:ux · Bug · p3 (triage grades) · reach: a decider who starts a bulk run, leaves the Approval Center, and reopens it (for example from the sidebar, not from the toast) before the run settles · evidence: seat ACCEPT 7192260423. This is not a regression: before #37328, the gone page's setters ran instead.\n\n## 维护者速读\n\n- 做什么：在审批中心发起批量审批后离开，再从别处回到审批中心，批量操作这时才完成，列表不会自动刷新，仍显示已处理的请求。\n- 谁受益：批量处理大量审批的人。\n- 不做会怎样：列表要手动刷新才准确。\n- 需要你做的：无。\n\n## What\n\n- After #37328 (PR #37541), a bulk run that settles after its page unmounted touches no page state. A newer inbox instance that is open at that moment is not told either, so it keeps showing the rows the run already decided.\n- Let a run that settles late signal the live inbox to reload its list and badge, for example with a module-level event or by invalidating the approvals data source. Keep the late toast's Show all path as #37328 shipped it.\n\n## Acceptance\n\n- A pin starts a bulk run, unmounts, mounts a fresh inbox, and lets the run settle. The fresh inbox reloads its list and badge once. Control: with no inbox mounted when the run settles, nothing reloads.\n\nBlocked-by: #37328"
+}

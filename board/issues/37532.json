@@ -1,0 +1,32 @@
+{
+  "number": 37532,
+  "kind": "issue",
+  "title": "Recycle bin page: the object list and the result pane share one scroll container, so picking an object far down the list shows a blank pane",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ux",
+    "bug",
+    "domain:ui",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-26T11:04:10Z",
+  "updated_at": "2026-11-26T11:26:52Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/37532",
+  "body": "repo:hotcrm#2 · sunhaolin · session_local1adc6fb3954245ba8940a3719cdaea98\n\nFiling gate: ① product defect with a reproduction. Source: fleet (found in a maintainer-ordered local UI test pass of the HotCRM app on 2026-11-26; filed through the pm-dispatch relay on the maintainer's instruction).\nGrading: area:ux · Bug · p2 (triage grades) · severity: Impeded · reach: every administrator restoring a record of an object that sits below the first screen of the object list · evidence: measured on the released 18.6.0 packages (2026-11-18), zh-CN console; not re-measured on main\n\n## 维护者速读\n- 做什么：回收站页面左侧对象列表和右侧结果区要各自滚动。\n- 谁受益：到回收站找回误删记录的管理员。\n- 不做会怎样：往下滚选一个对象后右侧一片空白，看起来像「回收站是空的」，其实内容在页面最顶上。\n- 需要你做的：无，分诊定级即可。\n\n## What\n\nSetup → Recycle Bin lays out an object list on the left and the deleted records of the chosen object on the right. Both sit in one scrolling container. The object list is long (38 objects, about 2000 px, in the app measured), so the user scrolls down to reach an object; the result pane's content starts at the top of the same container and is now above the visible area. The right side is blank.\n\n## Reproduction\n\n1. Open Setup → Recycle Bin in an app with more objects than fit one screen.\n2. Scroll the object list down and choose an object near the end that has deleted records.\n3. Result: the right pane is blank. Scrolling the page back to the top reveals the records, the Restore buttons and the Empty button.\n\n## Acceptance\n\n- The object list scrolls on its own; the result pane stays in view, or the page scrolls the result into view when an object is chosen.\n- After choosing any object, its records or its empty state are visible without further scrolling.\n- Holds on the mobile layout.\n\nDedupe (open and closed): `recycle bin scroll`, `recycle bin blank` 0 hits.\nBatch-of: local UI deep test pass 2026-11-26, 14 cards (5 in hotcrm, 9 in objectstack).\nBlocked-by: none."
+}

@@ -1,7 +1,7 @@
 {
   "number": 27108,
   "kind": "issue",
-  "title": "[Epic] ADR-0025 plugin package distribution — the next development phase: M0 record v2, M1 local T0 install loop (first-party, self-signed), M2 cloud fetch + per-plugin permission enforcement, M3 third-party sandbox tier",
+  "title": "专题：插件包分发（ADR-0025 下一阶段：插件包的打包、发布与安装）（暂停）",
   "state": "open",
   "state_reason": null,
   "draft": null,
@@ -21,7 +21,7 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-28T06:00:09Z",
-  "updated_at": "2026-11-18T16:34:53Z",
+  "updated_at": "2026-11-26T09:37:01Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,

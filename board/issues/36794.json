@@ -13,18 +13,20 @@
   "labels": [
     "area:data",
     "domain:spec",
-    "pm:queue",
+    "pm:dispatched",
     "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-sales"
+  ],
   "milestone": null,
   "type": "Feature",
   "created_at": "2026-11-24T00:16:26Z",
-  "updated_at": "2026-11-24T00:35:23Z",
+  "updated_at": "2026-11-26T13:10:54Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 1,
+  "comments": 2,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/36794",
   "body": "repo:objectstack#7 · os-alice · session_011y7As6FyXmJyGyHNKXUkV7\n\nFiling gate: maintainer ruling. The decision card on seat repo:objectstack#7 was answered 2026-11-23T21:15Z with option A, relayed by the seat. Source: the open question in os-dev report 7104848201 on #36159, raised under the seat's message-only ruling (\"if the dev finds a real consumer that needs to tell the two apart, report it\"). Follow-up to PR #36735 (merged 2026-11-23T20:31Z).\nDedupe: `reference_out_of_scope` found no open issue. `formatDryRunError reference` found no open card.\n\n## What happens today\n\nWith #36735 merged, a scoped import lookup miss whose value exists outside the row's scope is refused with a qualified message: `Contract: no record matches \"CTR-0006\" (Account = \"Acme\")`. The reason is still `reference_not_found` (`packages/spec/src/api/errors.zod.ts:286`), and the code is still `import_reference_not_found`.\n\nThe REST import door and the import report carry that qualifier. The Studio Import Wizard dry run does not. `ui/packages/plugin-grid/src/ImportWizard.tsx` `formatDryRunError` (`case 'reference_not_found'`, around :582) builds its own localized text from the code alone (`grid.import.referenceNotFound`: `No matching record for \"{{value}}\"`). It drops the server message by design, because the wizard keys every message on the code. So a wizard user who names a record under another parent still reads \"no matching record\". That is the misreading #36159 was filed for.\n\n## Ruled route (A)\n\n1. **Spec** (o7-spec row): add the reason value `reference_out_of_scope` to the published reason enum, beside `reference_not_found`, with its catalog / validation-message key. The core import (`packages/core/src/utils/import-coerce.ts`, the `referenceNotFound` probe from #36735) answers the out-of-scope case with the new reason. A value that matches nothing anywhere keeps `reference_not_found`. `Clause-②: yes (widening)` on `@objectstack/spec`. The `Metadata-protocol` value is for the spec lane to judge; the card expects `none`, because no authorable key moves. A contract review is owed at CONTRACT_REVIEW_TIER.\n2. **Wizard** (a follow-up PR in o7-studio, after 1 lands): `formatDryRunError` gets a `case 'reference_out_of_scope'` with its own localized key that names the scoping column and its cell, so the wizard keeps keying on the code and never parses server prose. Locale packs follow the repository's usual rule for a new user-text key.\n\n## Constraints\n\n- Purely additive for API clients. A client that switches on `reference_not_found` today keeps receiving it for a truly missing value. The changeset states that the out-of-scope case moves to the new value, and whether that move is itself a narrowing for a client matching on `reason` is for the contract review to rule.\n- The out-of-scope probe keeps the importer's own context, as pinned in #36735: a record the importer cannot read is never named.\n\n## Acceptance\n\n- A row naming a record under another parent answers `reason: 'reference_out_of_scope'` on the REST import door and in the import report. A truly missing value still answers `reference_not_found`. Both are pinned.\n- The Import Wizard dry run shows the out-of-scope text for the new reason, with a component or unit pin. The plain \"no matching record\" text stays for `reference_not_found`.\n- Gates green; L1 and the contract-review L2 PASS on the final head of each PR.\n\nSize: M. Area: data (spec part to the o7-spec row, wizard part to o7-studio). Grade: left to triage, p2 suggested (it completes #36159's user-visible fix in the wizard)."

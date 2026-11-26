@@ -1,0 +1,36 @@
+{
+  "number": 37541,
+  "kind": "pull_request",
+  "title": "fix(console): a bulk run that settles after leaving the Approvals Inbox opens its failed rows back on the inbox",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tooling"
+  ],
+  "assignees": [
+    "os-bill"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-26T12:06:15Z",
+  "updated_at": "2026-11-26T13:01:25Z",
+  "closed_at": "2026-11-26T13:01:23Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-26T13:01:23Z",
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/37541",
+  "body": "Fixes #37328\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 用户能看到什么变化：审批中心里批量批准或驳回还没跑完就离开页面的审批人，事后弹出的失败提示里点「Show all」会带他回到审批中心，并列出这一批里每条失败的请求和原因；以前这个按钮点了没反应。\n- 为什么做：属于审批中心批量处理体验的收尾，替发起大批量批准后转去做别的事的审批人解决「知道有失败却看不到是哪几条」的问题。\n- 出错会怎样：最坏是点「Show all」后回到审批中心但没弹出失败列表，审批结果本身不受影响；改动只在控制台前端，可直接撤回。\n- 要你做什么：无\n\n## What changes\n\n`ApprovalsInboxPage` (`ui/apps/console/src/pages/system/ApprovalsInboxPage.tsx`), the second arm of the card's expected behaviour:\n\n- The page tracks whether it is still mounted (a `mounted` ref set in the same effect whose cleanup dismisses the sticky toasts it raised).\n- `runBulk` records the inbox path (`location.pathname` + `location.search`) when the run starts. When the run settles it reads `mounted`:\n  - **still mounted**: unchanged. The toast is registered for dismissal; \"Show all (M)\" opens the page's dialog in place; the list and badge reload.\n  - **unmounted**: no page state is touched. `setBulkRunning`, `setSelectedRowIds`, `load()` and `refreshBadge()` (which sets the page's pending count) are all skipped. The toast is still raised and stays sticky. Its \"Show all (M)\" navigates back to the recorded inbox path with that run's failed rows in history state, under the key `BULK_FAILURES_STATE_KEY`.\n- On a navigation that carries that key, the inbox opens its failures dialog on those rows (once per location key, set during render, not in an effect). It then replace-navigates to drop the key from the history entry, so a reload or Back does not open the dialog again. The handed value is shape-checked (`handedBulkFailures`): only rows with string `id` / `title` / `reason` are shown.\n\nThe rows travel in react-router history state. Both the code that writes them and the code that reads them are in this file, so no shared state is added outside it (dispatch assumption A1 holds: second arm taken). No new i18n strings: the late toast reuses `bulkPartialSummary` and `bulkFailuresShowAll`.\n\n## Tests\n\nNew pin: `ui/apps/console/src/pages/system/ApprovalsInboxPage.lateBulkToast-37328.test.tsx` (the inbox has no shared harness file, so each card has its own test file, as the 21 neighbours do).\n\n- **Unmounted run**: holds every `approve` call on a gate, starts a 6-row bulk approve (5 refused), navigates away so the inbox unmounts, then releases the gate. Asserts:\n  - `listRequests` is not called again after the run settles (no reload of the gone page's list or badge count; assumption A2).\n  - The toast reads `1 succeeded, 5 failed` with `Show all (5)`.\n  - Clicking it lands on the inbox path and the dialog lists `Bulk Invoice 1`…`5`.\n  - The final history entry carries no `approvalsBulkFailures` key.\n- **CONTROL, mounted run**: the same held run settles while the inbox is mounted. The list reloads, and \"Show all\" opens the dialog with the same 5 rows without any navigation.\n\nAblations, each run through `scripts/ablation-replace.mjs`, which confirmed the mutation landed on disk and the restore matched the HEAD blob (`git diff HEAD` empty). The test imports the page from source, so no rebuild was needed.\n1. `const live = mounted.current;` → `const live = true;`: the pin goes red (`expected \"vi.fn()\" to be called 1 times, but got 3 times`, i.e. the gone page's list and badge were re-read). The control stays green.\n2. `onClick: live` → `onClick: true` (the late toast calls the gone page's setters again): the pin goes red (`Unable to find an element by: [data-testid=\"approvals-inbox-table-scroller\"]`, i.e. \"Show all\" opened nothing). The control stays green.\n\n<details><summary>Readings at head cc5fe18c45</summary>\n\n- `pnpm --dir ui exec vitest run --maxWorkers=2 apps/console/src/pages/system/ApprovalsInboxPage`: Test Files 22 passed (22), Tests 122 passed (122); verify-lock VERDICT command-exit 0.\n- Same runner, the new pin plus `inlineActionsVisible-34587`, `stateInUrl-36966` and `approvalsInboxComponentRef`: Test Files 4 passed (4), Tests 25 passed (25).\n- eslint on the two changed files: 0 errors. The page has 14 warnings, the same count and rule mix as the base blob. The new test file has 3 `no-explicit-any` warnings, from the sonner mock and `mockImplementation` casts copied from the neighbouring inbox tests.\n- Console `tsc --noEmit`: NOT MEASURED locally. In this worktree the unbuilt `@object-ui/*` packages produce TS2307 cascades on every file. `Type Check UI` on this PR is the reading.\n\n</details>\n\n## Acceptance notes\n\n- A late toast with three or fewer failures has no action, as before: its description already lists every failed row with its reason. It stays until the user closes it.\n- A late toast is not registered with any later mount of the inbox, so a later visit's unmount does not dismiss it. Its action works from any page, because it navigates rather than calling a page's setters.\n\n## Verification\n\nRead first (by risk):\n1. `ApprovalsInboxPage.tsx`, the `runBulk` settle block (`const live = mounted.current;` through the `onClick: live` ternary).\n2. `ApprovalsInboxPage.tsx`, the hand-over reader below the `mounted` ref (`handedBulkFailures(location.state)` and the replace-navigate effect).\n3. The new pin file.\n\nTwo-minute check: `pnpm --dir ui exec vitest run apps/console/src/pages/system/ApprovalsInboxPage.lateBulkToast-37328.test.tsx`. Expect 2 passed. Then change `const live = mounted.current;` to `const live = true;` and run it again: the first test goes red.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01Utp6Ca6EBDpTBZk8v46Jjv)_\n"
+}

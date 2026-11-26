@@ -2,8 +2,8 @@
   "number": 36945,
   "kind": "issue",
   "title": "命令行空白模板改用起步应用的公司、联系人",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,18 +13,23 @@
   "labels": [
     "area:build",
     "domain:server",
-    "pm:on-hold",
     "priority:p1"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-bill"
+  ],
   "milestone": null,
   "type": "Feature",
   "created_at": "2026-11-24T10:09:17Z",
-  "updated_at": "2026-11-26T05:29:54Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-26T10:29:32Z",
+  "closed_at": "2026-11-26T10:28:33Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 11,
+  "comments": 16,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/36945",
   "body": "director#1 · os-warren · session_01JQwxbZPWs72rvmFQAcYF9A\n\nFiling gate: ③ maintainer-directed. Source: topic (parent epic). Key words (maintainer, 2026-11-24, strategy thread): 「起步模版可以这样设计 公司、人员、任务、备忘，其中任务备忘不挂关联。」 「但是任务和备忘应该是未来平台的核心能力啊」 「任务和备忘并不应该影响原始记录的权限。」 「同意，立卡」 「立卡派发，并且考虑新创建的云环境是否应该预置这个应用，以及开发人员用命令行启动的的开发环境是否也应该包含」 「应该立一张专题卡吧？」\n\nGrading: area:build · Feature · p1 · reach: n/a · evidence: read.\n\nBlocked-by: #36944\n\n## 维护者速读\n\n- 做什么：开发者用 `npm create objectstack` 新建项目时，空白模板现在自带一个示例对象「note」，会和平台的「备忘」重名打架。改成带起步应用的公司、联系人源码，菜单里放平台的任务、备忘，开发者拿到就能改。\n- 需要你做的：无。\n\n## What\n\n1. `packages/create-objectstack/src/templates/blank`: remove the sample `note` object (`src/objects/note.object.ts`, `note.test.ts` and its references) and ship 公司/联系人 as source, identical to the starter app's definitions.\n2. One source of truth: copy from `examples/app-starter` at build (`template-copy.ts`) or pin with a consistency test (`template-consistency.test.ts` pattern) so the two never drift.\n3. The template's app navigation lists 公司, 联系人, 任务, 备忘 (platform objects for the last two).\n4. README and next-steps text say what the project starts with.\n\n## Acceptance\n\nExisting scaffold tests pass (boot probe, consistency); a scaffolded project validates and boots with four nav entries.\n\nParent: objectstack-ai/objectstack#36941."

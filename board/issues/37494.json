@@ -1,0 +1,32 @@
+{
+  "number": 37494,
+  "kind": "issue",
+  "title": "plugin-security insert-check-post-image sqlite-wasm arm times out at 5000 ms on a saturated CI runner (first wasm boot)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:data",
+    "domain:server",
+    "finding",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-26T08:59:39Z",
+  "updated_at": "2026-11-26T10:19:21Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/37494",
+  "body": "repo:objectstack#5 · os-bill · session_01Utp6CbdHk3orAeensH6EzS\n\nFiling gate: ① · Source: fleet (CI on PR #37469 head `835c89df`, run 45780778844 attempt 1, job 139776420297 `Test Core (10/10)`; the #37413 dev's out-of-scope note in os-dev-report 7187229146). The finder files the flake.\n\nGrading: `area:data` · reach: CI only — `packages/plugins/plugin-security/src/insert-check-post-image.test.ts`, test \"insert on driver-sqlite-wasm (:memory:) … the scoping field lands IN scope\", ran into vitest's default 5000 ms timeout on the first sqlite-wasm boot of the file while the runner was saturated (import 1608 s, duration 842 s on that shard); 112 ms locally; green on the one re-run · evidence: measured once on CI, not reproduced locally.\nSuggested-grade: p3 · a red shard on unrelated PRs, one re-run clears it.\n\n## What\n\nGive the sqlite-wasm arm a budget that does not depend on the shard's load: warm the wasm module once in a `beforeAll` (outside the per-test timeout) or set an explicit per-test timeout for the wasm arm with the reason in a comment. Do not raise the global timeout.\n\nRelated: PR #37469 (where it was met); #37429 (the other sqlite-wasm timing card, merged).\nDedupe: searched open issues for 'insert-check-post-image' — none."
+}
