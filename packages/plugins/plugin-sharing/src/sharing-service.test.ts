@@ -2524,7 +2524,6 @@ const MATRIX_IDS = [
   'own', 'own_created_by_other', 'created_not_owned', 'edit_shared', 'read_shared',
   'queued_mine', 'queued_not_mine', 'queued_other_org', 'ownerless', 'missing',
 ] as const;
-type MatrixId = (typeof MATRIX_IDS)[number];
 const matrixRows = (object: string): Record<string, unknown>[] => [
   { id: `${object}:own`, owner_id: ME, created_by: ME, organization_id: VERDICT_ORG },
   { id: `${object}:own_created_by_other`, owner_id: ME, created_by: OTHER, organization_id: VERDICT_ORG },
