@@ -46,6 +46,7 @@ import {
   admitSourceFields,
   declaredFields,
   documentTitleField,
+  type KnowledgeAdmissionDeps,
   type KnowledgeFieldSecurity,
   type KnowledgeSourceAdmission,
   type ObjectAdmission,
@@ -2098,15 +2099,7 @@ export class KnowledgeService implements IKnowledgeService {
       }
       return [];
     }
-    const deps = {
-      readSchema: (object: string): unknown => {
-        const getSchema = (engine as { getSchema?: (name: string) => unknown }).getSchema;
-        return typeof getSchema === 'function' ? getSchema.call(engine, object) : undefined;
-      },
-      isObjectPackageDisabled: (object: string): boolean =>
-        registryObjectPackageDisabled((engine as { registry?: unknown }).registry)(object),
-      resolveSecurity: (): KnowledgeFieldSecurity | undefined => this.options.resolveSecurity?.(),
-    };
+    const deps = this.admissionDeps(engine);
     const byObject = new Map<string, Promise<ObjectAdmission | undefined>>();
     for (const source of sources) {
       const object = source.source.object;
@@ -2137,6 +2130,131 @@ export class KnowledgeService implements IKnowledgeService {
       }
     }
     return this.scopeByOrganization(out, ctx);
+  }
+
+  /** What the source-admission gates read of the engine and the security service. */
+  private admissionDeps(engine: IDataEngine): KnowledgeAdmissionDeps {
+    return {
+      readSchema: (object: string): unknown => {
+        const getSchema = (engine as { getSchema?: (name: string) => unknown }).getSchema;
+        return typeof getSchema === 'function' ? getSchema.call(engine, object) : undefined;
+      },
+      isObjectPackageDisabled: (object: string): boolean =>
+        registryObjectPackageDisabled((engine as { registry?: unknown }).registry)(object),
+      resolveSecurity: (): KnowledgeFieldSecurity | undefined => this.options.resolveSecurity?.(),
+    };
+  }
+
+  /**
+   * [ADR-0161 K4, guard two] Source admission at save: may `ctx`, the author
+   * saving this `knowledge_source` item, themselves search what it would
+   * index? The gates a search asks per caller ({@link admitSources}: the
+   * object's package is not disabled, the API serves the object for `search`,
+   * a system object opts into AI reads, every served field is queryable by
+   * the caller) are asked once for the author, before the item is written.
+   * Asked by every door that saves an item (`authoredKnowledgeSourceRefusal`,
+   * `@objectstack/metadata-core`), never by the metadata protocol.
+   *
+   * `item` is the body as the door hands it to the protocol, not yet parsed.
+   * What is read of it is `source.object`, `source.content` and
+   * `source.metadataFields` (and `source.contentFields`, the spelling the
+   * ADR-0087 kit renames to `content`, so a converted save is judged on the
+   * fields it will index). An item with no object to judge is admitted here:
+   * the protocol's parse refuses it with the schema's own prescription.
+   *
+   * A refusal is coded (ADR-0112) and names the object, and the field for the
+   * field gate: `403 PERMISSION_DENIED`. Fails closed: with no data engine, a
+   * gate that throws, or a security service that answers neither field
+   * question, the save is refused `503 SERVICE_UNAVAILABLE`. The system
+   * context is admitted, as it bypasses the gates at search.
+   */
+  async admitAuthoredSource(
+    item: unknown,
+    ctx: ExecutionContext | undefined,
+  ): Promise<{ admitted: true } | { admitted: false; status: number; code: string; message: string; object: string; field?: string }> {
+    if (ctx?.isSystem) return { admitted: true };
+    const body = (item as { name?: unknown; source?: unknown } | null | undefined) ?? {};
+    const declared = body.source as
+      | { object?: unknown; content?: unknown; contentFields?: unknown; metadataFields?: unknown }
+      | null
+      | undefined;
+    const object = declared && typeof declared === 'object' ? declared.object : undefined;
+    if (typeof object !== 'string' || object === '') return { admitted: true };
+    const names = (value: unknown): string[] =>
+      Array.isArray(value) ? value.filter((v): v is string => typeof v === 'string' && v !== '') : [];
+    const listed = declared as { content?: unknown; contentFields?: unknown; metadataFields?: unknown };
+    const objSource: ObjectKnowledgeSource = {
+      kind: 'object',
+      object,
+      content: [...names(listed.content), ...names(listed.contentFields)],
+      metadataFields: names(listed.metadataFields),
+    };
+    const named = `The knowledge source${describeName(body)} was not saved`;
+    const refuse = (status: number, code: string, message: string, field?: string) =>
+      ({ admitted: false as const, status, code, message, object, ...(field === undefined ? {} : { field }) });
+    const unavailable = (why: string) =>
+      refuse(
+        503,
+        'SERVICE_UNAVAILABLE',
+        `${named}: whether you may search object '${object}' could not be judged (${why}), and an author must be ` +
+          'allowed to search what their source indexes. Nothing was written; try again.',
+      );
+    if (!ctx) return refuse(403, 'PERMISSION_DENIED', `${named}: the save carries no identity, and a missing identity is not a grant of authority.`);
+    const engine = this.options.dataEngine;
+    if (!engine) return unavailable('the knowledge service has no data engine');
+
+    let admission: ObjectAdmission;
+    try {
+      admission = await admitObject(object, ctx, this.admissionDeps(engine));
+    } catch (err) {
+      this.reportGateFailure(object, err instanceof Error ? err : new Error(String(err)));
+      return unavailable(operatorText(err));
+    }
+    const verdict: KnowledgeSourceAdmission = admission.refused
+      ? { admitted: false, reason: admission.refused, object }
+      : admitSourceFields(objSource, admission);
+    if (verdict.admitted) return { admitted: true };
+    switch (verdict.reason) {
+      case 'object-package-disabled':
+        return refuse(
+          403,
+          'PERMISSION_DENIED',
+          `${named}: its object '${object}' belongs to a disabled package, and a disabled package's records are ` +
+            'not indexed or searched. Enable the package, or index another object.',
+        );
+      case 'object-api-not-served':
+        return refuse(
+          403,
+          'PERMISSION_DENIED',
+          `${named}: the API does not serve object '${object}' for \`search\` (\`enable.apiEnabled\` is false, or ` +
+            "its `enable.apiMethods` list does not include `search`), and a knowledge search is a search over the " +
+            "object's records. Serve the object for `search`, or index another object.",
+        );
+      case 'system-object-not-ai-readable':
+        return refuse(
+          403,
+          'PERMISSION_DENIED',
+          `${named}: '${object}' is a system object that does not opt into AI reads (\`enable.aiReadable: true\`), ` +
+            'so its records are not indexed for retrieval.',
+        );
+      case 'field-not-queryable': {
+        const field = verdict.field ?? '';
+        const listedByAuthor = objSource.content.includes(field) || (objSource.metadataFields ?? []).includes(field);
+        return refuse(
+          403,
+          'PERMISSION_DENIED',
+          `${named}: you may not query field '${field}' of object '${object}' (it is hidden from you, or served ` +
+            'to you masked), and the index would hold its text unmasked. ' +
+            (listedByAuthor
+              ? 'Remove the field from `content` and `metadataFields`, or have someone who may query it save the source.'
+              : "The source does not list it: it is the object's display field, which every document carries as its " +
+                'title. Have someone who may query it save the source.'),
+          field,
+        );
+      }
+      default:
+        return unavailable(`the security service did not answer which fields of '${object}' you may read`);
+    }
   }
 
   /** A gate lookup threw: every source over `object` is refused (fail-closed), reported once at `error`, `warn` as the fallback. */

@@ -275,7 +275,7 @@ export class TursoKnowledgeAdapter implements IKnowledgeAdapter {
   async upsert(docs: KnowledgeDocument[], ctx: AdapterContext): Promise<void> {
     if (docs.length === 0) return;
     const client = this.requireClient();
-    assertSourceId(ctx.source.id);
+    assertSourceId(ctx.source.name);
     const embedder = this.requireEmbedder();
     await this.ready();
     // An unchanged passage is rewritten in place, keeping its vector. When its
@@ -284,11 +284,11 @@ export class TursoKnowledgeAdapter implements IKnowledgeAdapter {
     // passage is embedded and inserted rather than lost.
     for (let attempt = 1; ; attempt++) {
       const target = await this.queued(client, () => this.writeTarget(ctx, embedder, true));
-      const missing = await this.writePassages(docs, ctx.source.id, target!, embedder);
+      const missing = await this.writePassages(docs, ctx.source.name, target!, embedder);
       if (missing === undefined) return;
       if (attempt >= UPSERT_ATTEMPTS) {
         throw new Error(
-          `knowledge-turso: a concurrent write to source '${ctx.source.id}' removed passages this write meant to keep, ` +
+          `knowledge-turso: a concurrent write to source '${ctx.source.name}' removed passages this write meant to keep, ` +
             `${UPSERT_ATTEMPTS} times while it ran; nothing of this batch was written. Retry the write.`,
         );
       }
@@ -413,15 +413,15 @@ export class TursoKnowledgeAdapter implements IKnowledgeAdapter {
   async delete(documentIds: string[], ctx: AdapterContext): Promise<void> {
     if (documentIds.length === 0) return;
     const client = this.requireClient();
-    assertSourceId(ctx.source.id);
+    assertSourceId(ctx.source.name);
     await this.ready();
     // From every generation of the source: a removed document leaves them all.
     await this.queued(client, async () => {
-      const { active, building } = await this.generations(ctx.source.id);
+      const { active, building } = await this.generations(ctx.source.name);
       for (const g of [active, building]) {
         if (!g) continue;
         await client.execute({
-          sql: `DELETE FROM ${quoted(generationTable(ctx.source.id, g.generation))} WHERE document_id IN (SELECT value FROM json_each(?))`,
+          sql: `DELETE FROM ${quoted(generationTable(ctx.source.name, g.generation))} WHERE document_id IN (SELECT value FROM json_each(?))`,
           args: [JSON.stringify(documentIds)],
         });
       }
@@ -433,7 +433,7 @@ export class TursoKnowledgeAdapter implements IKnowledgeAdapter {
       throw new RangeError(`listDocuments: limit must be a positive integer, got ${String(opts.limit)}`);
     }
     const client = this.requireClient();
-    assertSourceId(ctx.source.id);
+    assertSourceId(ctx.source.name);
     // The embedder first, as on every other call: without one the service's
     // fingerprint carries no model or width, and comparing it would refuse a
     // healthy index as one to rebuild. No embedder is SERVICE_UNAVAILABLE.
@@ -443,7 +443,7 @@ export class TursoKnowledgeAdapter implements IKnowledgeAdapter {
       // The generation the writes go to (ADR-0161 K8, item 1).
       const target = await this.writeTarget(ctx, embedder, false);
       if (!target) return { documents: [] };
-      const table = quoted(generationTable(ctx.source.id, target.generation));
+      const table = quoted(generationTable(ctx.source.name, target.generation));
       // SQLite compares TEXT by bytes (BINARY), both the order and the cursor.
       const page = await client.execute({
         sql: `SELECT document_id, max(doc_hash) AS doc_hash FROM ${table}
@@ -473,24 +473,24 @@ export class TursoKnowledgeAdapter implements IKnowledgeAdapter {
     // A record scope with no term that has ids ranks nothing (ADR-0161 K8, item 17).
     if (opts.scope !== undefined && !opts.scope.some((term) => term.ids.length > 0)) return [];
     const client = this.requireClient();
-    assertSourceId(opts.source.id);
+    assertSourceId(opts.source.name);
     // The embedder first: without one the service's fingerprint carries no
     // model or width, and comparing it would refuse a healthy index as one to
     // rebuild. No embedder is SERVICE_UNAVAILABLE, as on every other call.
     const embedder = this.requireEmbedder();
     await this.ready();
-    const { active, building } = await this.queued(client, () => this.generations(opts.source.id));
+    const { active, building } = await this.queued(client, () => this.generations(opts.source.name));
     if (!active) {
-      if (await this.queued(client, () => this.hasLegacy(opts.source.id))) {
-        throw rebuildRequired(opts.source.id, building !== undefined);
+      if (await this.queued(client, () => this.hasLegacy(opts.source.name))) {
+        throw rebuildRequired(opts.source.name, building !== undefined);
       }
       return [];
     }
     // Vectors of two fingerprints are never ranked against each other (K7, rule 5).
     if (opts.index !== undefined && active.fingerprint !== opts.index.fingerprint) {
-      throw rebuildRequired(opts.source.id, building?.fingerprint === opts.index.fingerprint);
+      throw rebuildRequired(opts.source.name, building?.fingerprint === opts.index.fingerprint);
     }
-    if (embedder.dimensions !== active.dim) throw rebuildRequired(opts.source.id, false);
+    if (embedder.dimensions !== active.dim) throw rebuildRequired(opts.source.name, false);
     const topK = Math.max(0, Math.floor(opts.topK));
     if (topK === 0) return [];
 
@@ -543,10 +543,10 @@ export class TursoKnowledgeAdapter implements IKnowledgeAdapter {
       );
     }
     args.push(topK);
-    const table = quoted(generationTable(opts.source.id, active.generation));
+    const table = quoted(generationTable(opts.source.name, active.generation));
     const result = await this.queued(client, async () => {
       // The generation may have been switched while the query was embedded.
-      const now = await this.generations(opts.source.id);
+      const now = await this.generations(opts.source.name);
       if (now.active?.generation !== active.generation) return undefined;
       return client.execute({
         sql: `SELECT * FROM (
@@ -566,7 +566,7 @@ export class TursoKnowledgeAdapter implements IKnowledgeAdapter {
       if (attempt >= SEARCH_ATTEMPTS) {
         throw notReady(
           "its source's index was switched while it searched",
-          `The active generation of source '${opts.source.id}' changed ${SEARCH_ATTEMPTS} times during one search; retry it.`,
+          `The active generation of source '${opts.source.name}' changed ${SEARCH_ATTEMPTS} times during one search; retry it.`,
         );
       }
       return this.searchAttempt(query, opts, attempt + 1);
@@ -576,7 +576,7 @@ export class TursoKnowledgeAdapter implements IKnowledgeAdapter {
       return {
         chunkId: String(r.chunk_id),
         documentId: String(r.document_id),
-        sourceId: opts.source.id,
+        sourceId: opts.source.name,
         ...(r.source_record_id === null ? {} : { sourceRecordId: String(r.source_record_id) }),
         score: 1 - Number(r.distance),
         snippet: String(r.content),
@@ -593,9 +593,9 @@ export class TursoKnowledgeAdapter implements IKnowledgeAdapter {
 
   async indexStatus(ctx: AdapterContext): Promise<AdapterIndexStatus> {
     const client = this.requireClient();
-    assertSourceId(ctx.source.id);
+    assertSourceId(ctx.source.name);
     await this.ready();
-    const { active, building } = await this.queued(client, () => this.generations(ctx.source.id));
+    const { active, building } = await this.queued(client, () => this.generations(ctx.source.name));
     const status: AdapterIndexStatus = {};
     if (active?.fingerprint != null) status.fingerprint = active.fingerprint;
     if (active?.recipeHash != null) status.recipeHash = active.recipeHash;
@@ -606,29 +606,29 @@ export class TursoKnowledgeAdapter implements IKnowledgeAdapter {
   async beginBuild(ctx: AdapterContext): Promise<void> {
     const index = requireIndex(ctx, 'beginBuild');
     const client = this.requireClient();
-    assertSourceId(ctx.source.id);
+    assertSourceId(ctx.source.name);
     const embedder = this.requireEmbedder();
     await this.ready();
     await this.queued(client, async () => {
-      const legacy = await this.hasLegacy(ctx.source.id);
+      const legacy = await this.hasLegacy(ctx.source.name);
       await this.transaction(async (tx) => {
-        const { active, building } = await this.generations(ctx.source.id, tx);
+        const { active, building } = await this.generations(ctx.source.name, tx);
         const fits = (g: GenerationRow | undefined) =>
           g !== undefined && g.fingerprint === index.fingerprint && g.dim === embedder.dimensions;
         // Rebuilt inside the active generation, or the build under way taken up.
         if (fits(active) || fits(building)) return { commit: true, value: undefined };
         if (building) {
           // A build of another fingerprint left unfinished: replaced, one per source.
-          await tx.execute(`DROP TABLE IF EXISTS ${quoted(generationTable(ctx.source.id, building.generation))}`);
+          await tx.execute(`DROP TABLE IF EXISTS ${quoted(generationTable(ctx.source.name, building.generation))}`);
           await tx.execute({
             sql: `DELETE FROM ${quoted(GENERATION_TABLE)} WHERE source_id = ? AND generation = ?`,
-            args: [ctx.source.id, building.generation],
+            args: [ctx.source.name, building.generation],
           });
         }
         // A source that holds nothing takes the fingerprint as its active one;
         // beside an active generation, or a legacy table, it is built aside.
         const state = active === undefined && !legacy ? 'active' : 'building';
-        await this.openGeneration(tx, ctx.source.id, index.fingerprint, embedder, state);
+        await this.openGeneration(tx, ctx.source.name, index.fingerprint, embedder, state);
         return { commit: true, value: undefined };
       });
     });
@@ -637,37 +637,64 @@ export class TursoKnowledgeAdapter implements IKnowledgeAdapter {
   async completeBuild(ctx: AdapterContext): Promise<void> {
     const index = requireIndex(ctx, 'completeBuild');
     const client = this.requireClient();
-    assertSourceId(ctx.source.id);
+    assertSourceId(ctx.source.name);
     await this.ready();
     await this.queued(client, async () => {
-      const legacy = await this.hasLegacy(ctx.source.id);
+      const legacy = await this.hasLegacy(ctx.source.name);
       await this.transaction(async (tx) => {
-        const { active, building } = await this.generations(ctx.source.id, tx);
+        const { active, building } = await this.generations(ctx.source.name, tx);
         const t = quoted(GENERATION_TABLE);
         if (building?.fingerprint === index.fingerprint) {
           if (active) {
-            await tx.execute(`DROP TABLE IF EXISTS ${quoted(generationTable(ctx.source.id, active.generation))}`);
-            await tx.execute({ sql: `DELETE FROM ${t} WHERE source_id = ? AND generation = ?`, args: [ctx.source.id, active.generation] });
+            await tx.execute(`DROP TABLE IF EXISTS ${quoted(generationTable(ctx.source.name, active.generation))}`);
+            await tx.execute({ sql: `DELETE FROM ${t} WHERE source_id = ? AND generation = ?`, args: [ctx.source.name, active.generation] });
           }
           await tx.execute({
             sql: `UPDATE ${t} SET state = 'active', recipe_hash = ? WHERE source_id = ? AND generation = ?`,
-            args: [index.recipeHash, ctx.source.id, building.generation],
+            args: [index.recipeHash, ctx.source.name, building.generation],
           });
         } else if (active?.fingerprint === index.fingerprint) {
           await tx.execute({
             sql: `UPDATE ${t} SET recipe_hash = ? WHERE source_id = ? AND generation = ?`,
-            args: [index.recipeHash, ctx.source.id, active.generation],
+            args: [index.recipeHash, ctx.source.name, active.generation],
           });
         } else {
           throw new Error(
-            `completeBuild: source '${ctx.source.id}' holds no generation for this fingerprint; call beginBuild first.`,
+            `completeBuild: source '${ctx.source.name}' holds no generation for this fingerprint; call beginBuild first.`,
           );
         }
         // The table of the store's earlier releases goes once a generation is active.
-        if (legacy) await tx.execute(`DROP TABLE IF EXISTS ${quoted(legacyTable(ctx.source.id))}`);
+        if (legacy) await tx.execute(`DROP TABLE IF EXISTS ${quoted(legacyTable(ctx.source.name))}`);
         return { commit: true, value: undefined };
       });
-      if (legacy) this.noLegacy.add(ctx.source.id);
+      if (legacy) this.noLegacy.add(ctx.source.name);
+    });
+  }
+
+  /**
+   * Everything held for the source is removed (ADR-0161 K8, item 4), in one
+   * write transaction: the table and the row of each generation — the active
+   * one and one under construction — and the table of the store's earlier
+   * releases, when the source still has one. A source it holds nothing for is
+   * no error.
+   */
+  async dropSource(ctx: AdapterContext): Promise<void> {
+    const client = this.requireClient();
+    const sourceId = ctx.source.name;
+    assertSourceId(sourceId);
+    await this.ready();
+    await this.queued(client, async () => {
+      const legacy = await this.hasLegacy(sourceId);
+      await this.transaction(async (tx) => {
+        const { active, building } = await this.generations(sourceId, tx);
+        for (const g of [active, building]) {
+          if (g !== undefined) await tx.execute(`DROP TABLE IF EXISTS ${quoted(generationTable(sourceId, g.generation))}`);
+        }
+        await tx.execute({ sql: `DELETE FROM ${quoted(GENERATION_TABLE)} WHERE source_id = ?`, args: [sourceId] });
+        if (legacy) await tx.execute(`DROP TABLE IF EXISTS ${quoted(legacyTable(sourceId))}`);
+        return { commit: true, value: undefined };
+      });
+      if (legacy) this.noLegacy.add(sourceId);
     });
   }
 
@@ -839,7 +866,7 @@ export class TursoKnowledgeAdapter implements IKnowledgeAdapter {
     embedder: IEmbedder,
     create: boolean,
   ): Promise<GenerationRow | undefined> {
-    const sourceId = ctx.source.id;
+    const sourceId = ctx.source.name;
     const fingerprint = ctx.index?.fingerprint;
     const { active, building } = await this.generations(sourceId);
     const checked = (g: GenerationRow): GenerationRow => {

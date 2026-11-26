@@ -306,11 +306,11 @@ export class PgvectorKnowledgeAdapter implements IKnowledgeAdapter {
     for (let attempt = 1; ; attempt++) {
       const generation = (await this.writeTarget(ctx, embedder, true))!;
       await this.ensureVectorTable(generation.dim, readiness);
-      const missing = await this.writePassages(docs, ctx.source.id, generation, readiness, embedder);
+      const missing = await this.writePassages(docs, ctx.source.name, generation, readiness, embedder);
       if (missing === undefined) return;
       if (attempt >= UPSERT_ATTEMPTS) {
         throw new Error(
-          `knowledge-pgvector: ${missing} of source '${ctx.source.id}' was removed by a concurrent write ` +
+          `knowledge-pgvector: ${missing} of source '${ctx.source.name}' was removed by a concurrent write ` +
             `${UPSERT_ATTEMPTS} times while this write ran; nothing of this batch was written. Retry the write.`,
         );
       }
@@ -442,13 +442,13 @@ export class PgvectorKnowledgeAdapter implements IKnowledgeAdapter {
     // From every generation of the source: a removed document leaves them all.
     const widths = await pool.query<{ dim: number }>(
       `SELECT DISTINCT dim FROM ${qualified(this.schema, GENERATION_TABLE)} WHERE source_id = $1`,
-      [ctx.source.id],
+      [ctx.source.name],
     );
     for (const { dim } of widths.rows) {
       if (!(await this.tableExists(Number(dim)))) continue;
       await pool.query(
         `DELETE FROM ${qualified(this.schema, vectorTable(Number(dim)))} WHERE source_id = $1 AND document_id = ANY($2::text[])`,
-        [ctx.source.id, documentIds],
+        [ctx.source.name, documentIds],
       );
     }
   }
@@ -470,7 +470,7 @@ export class PgvectorKnowledgeAdapter implements IKnowledgeAdapter {
     if (!generation || !(await this.tableExists(generation.dim))) return { documents: [] };
     // In byte order ("C"), both the order and the cursor's comparison, so a
     // cursor stays valid whatever the database's collation.
-    const params: unknown[] = [ctx.source.id, generation.generation, opts.limit + 1];
+    const params: unknown[] = [ctx.source.name, generation.generation, opts.limit + 1];
     const after = opts.cursor === undefined ? '' : `AND document_id COLLATE "C" > $4`;
     if (opts.cursor !== undefined) params.push(opts.cursor);
     const page = await pool.query<{ document_id: string; doc_hash: string | null }>(
@@ -496,7 +496,7 @@ export class PgvectorKnowledgeAdapter implements IKnowledgeAdapter {
       if (hits !== undefined) return hits;
       if (attempt >= SEARCH_ATTEMPTS) {
         throw new Error(
-          `knowledge-pgvector: the active generation of source '${opts.source.id}' changed ${SEARCH_ATTEMPTS} times during one search; retry it.`,
+          `knowledge-pgvector: the active generation of source '${opts.source.name}' changed ${SEARCH_ATTEMPTS} times during one search; retry it.`,
         );
       }
     }
@@ -516,17 +516,17 @@ export class PgvectorKnowledgeAdapter implements IKnowledgeAdapter {
     // model or width, and comparing it would refuse a healthy index as one to
     // rebuild. No embedder is SERVICE_UNAVAILABLE, as on every other call.
     const embedder = this.requireEmbedder();
-    const { active: generation, building } = await this.generations(opts.source.id);
+    const { active: generation, building } = await this.generations(opts.source.name);
     if (!generation) return [];
     // Vectors of two fingerprints are never ranked against each other (K7,
     // rule 5); while the searched fingerprint's generation is being built, the
     // refusal says so.
     const searched = opts.index?.fingerprint;
     if (searched !== undefined && generation.fingerprint !== searched) {
-      throw rebuildRequired(opts.source.id, building !== undefined && building.fingerprint === searched);
+      throw rebuildRequired(opts.source.name, building !== undefined && building.fingerprint === searched);
     }
     if (embedder.dimensions !== generation.dim) {
-      throw rebuildRequired(opts.source.id, building !== undefined && building.dim === embedder.dimensions);
+      throw rebuildRequired(opts.source.name, building !== undefined && building.dim === embedder.dimensions);
     }
     if (!(await this.tableExists(generation.dim))) return [];
     const topK = Math.max(0, Math.floor(opts.topK));
@@ -543,7 +543,7 @@ export class PgvectorKnowledgeAdapter implements IKnowledgeAdapter {
     if (vector.every((x) => x === 0)) return [];
 
     const ext = readiness.extensionSchema;
-    const params: unknown[] = [opts.source.id, generation.generation, vectorLiteral(vector), topK];
+    const params: unknown[] = [opts.source.name, generation.generation, vectorLiteral(vector), topK];
     const where = [
       'source_id = $1',
       'generation = $2',
@@ -610,13 +610,13 @@ export class PgvectorKnowledgeAdapter implements IKnowledgeAdapter {
     );
     if (result.rows.length === 0) {
       // No hit, or a generation switched out meanwhile: read which.
-      const now = await this.generations(opts.source.id);
+      const now = await this.generations(opts.source.name);
       if (now.active?.generation !== generation.generation) return undefined;
     }
     return result.rows.map((r) => ({
       chunkId: r.chunk_id,
       documentId: r.document_id,
-      sourceId: opts.source.id,
+      sourceId: opts.source.name,
       ...(r.source_record_id === null ? {} : { sourceRecordId: r.source_record_id }),
       score: 1 - Number(r.distance),
       snippet: r.content,
@@ -633,7 +633,7 @@ export class PgvectorKnowledgeAdapter implements IKnowledgeAdapter {
   async indexStatus(ctx: AdapterContext): Promise<AdapterIndexStatus> {
     this.requirePool();
     await this.ready();
-    const { active, building } = await this.generations(ctx.source.id);
+    const { active, building } = await this.generations(ctx.source.name);
     const status: AdapterIndexStatus = {};
     if (active?.fingerprint != null) status.fingerprint = active.fingerprint;
     if (active?.recipe_hash != null) status.recipeHash = active.recipe_hash;
@@ -655,7 +655,7 @@ export class PgvectorKnowledgeAdapter implements IKnowledgeAdapter {
     this.requirePool();
     const readiness = await this.ready();
     const embedder = this.requireEmbedder();
-    const sourceId = ctx.source.id;
+    const sourceId = ctx.source.name;
     await this.takeBuilderLock(sourceId);
     try {
       const target = await this.inTransaction(async (client) => {
@@ -690,7 +690,7 @@ export class PgvectorKnowledgeAdapter implements IKnowledgeAdapter {
     const index = requireIndex(ctx, 'completeBuild');
     this.requirePool();
     await this.ready();
-    const sourceId = ctx.source.id;
+    const sourceId = ctx.source.name;
     try {
       await this.inTransaction(async (client) => {
         const { active, building } = await this.generations(sourceId, client, true);
@@ -728,6 +728,33 @@ export class PgvectorKnowledgeAdapter implements IKnowledgeAdapter {
             'it is never searched, and the source\'s next build deletes the rest.',
         );
       }
+    } finally {
+      await this.releaseBuilderLock(sourceId);
+    }
+  }
+
+  /**
+   * Everything held for the source is removed (ADR-0161 K8, item 4). Every
+   * generation — the active one, and one under construction — is retired in
+   * one transaction, so from its commit no search and no write finds one;
+   * then the passages are deleted in batches and each generation row last, as
+   * a replaced generation's are. A builder lock this adapter holds for the
+   * source is let go. A source it holds nothing for is no error. A drop that
+   * stops after the commit leaves retired generations: never searched, and
+   * deleted by the next drop or the next build of that key.
+   */
+  async dropSource(ctx: AdapterContext): Promise<void> {
+    this.requirePool();
+    await this.ready();
+    const sourceId = ctx.source.name;
+    try {
+      await this.inTransaction(async (client) => {
+        const { active, building } = await this.generations(sourceId, client, true);
+        for (const g of [active, building]) {
+          if (g !== undefined) await this.retire(client, sourceId, g.generation);
+        }
+      });
+      await this.sweepRetired(sourceId);
     } finally {
       await this.releaseBuilderLock(sourceId);
     }
@@ -983,7 +1010,7 @@ export class PgvectorKnowledgeAdapter implements IKnowledgeAdapter {
     embedder: IEmbedder,
     create: boolean,
   ): Promise<GenerationRow | undefined> {
-    const sourceId = ctx.source.id;
+    const sourceId = ctx.source.name;
     const fingerprint = ctx.index?.fingerprint;
     const { active, building } = await this.generations(sourceId);
     const checked = (g: GenerationRow): GenerationRow => {
@@ -1047,7 +1074,7 @@ export class PgvectorKnowledgeAdapter implements IKnowledgeAdapter {
    */
   private touchBuilderLock(ctx: AdapterContext): void {
     if (ctx.reason !== 'reindex') return;
-    this.restartIdleTimer(ctx.source.id);
+    this.restartIdleTimer(ctx.source.name);
   }
 
   private restartIdleTimer(sourceId: string): void {

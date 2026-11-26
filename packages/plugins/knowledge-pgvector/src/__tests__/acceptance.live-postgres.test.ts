@@ -25,10 +25,10 @@ const store = liveStore('kpg_accept');
 
 const source = (id: string): KnowledgeSource =>
   ({
-    id,
+    name: id,
     label: id,
     adapter: 'under_test',
-    source: { kind: 'object', object: 'article', contentFields: ['body'], metadataFields: ['status'] },
+    source: { kind: 'object', object: 'article', content: ['body'], metadataFields: ['status'] },
   }) as KnowledgeSource;
 
 const FP_A = { fingerprint: 'fp-test:a', recipeHash: 'rh-test:1' };
@@ -36,10 +36,10 @@ const FP_B = { fingerprint: 'fp-test:b', recipeHash: 'rh-test:1' };
 const ctx = (s: KnowledgeSource, index = FP_A): AdapterContext => ({ source: s, reason: 'manual', index });
 
 function doc(s: KnowledgeSource, n: string, content: string, extra: Partial<KnowledgeDocument> = {}): KnowledgeDocument {
-  const id = `${s.id}:${n}`;
+  const id = `${s.name}:${n}`;
   return {
     id,
-    sourceId: s.id,
+    sourceId: s.name,
     sourceRecordId: n,
     content,
     title: `Title ${n}`,
@@ -60,7 +60,7 @@ describe.skipIf(!PG_URL)('knowledge-pgvector acceptance on a LIVE PostgreSQL', (
     const s = source('wide');
     await adapter.upsert([doc(s, '1', 'glacier valley ice'), doc(s, '2', 'harbour crane night')], ctx(s));
     const hits = await adapter.search('glacier ice', { source: s, topK: 5, index: { fingerprint: FP_A.fingerprint } });
-    expect(hits.map((h) => h.documentId)).toEqual([`${s.id}:1`]);
+    expect(hits.map((h) => h.documentId)).toEqual([`${s.name}:1`]);
     expect(hits[0].score).toBeGreaterThan(0.5);
     const width = await store.pool().query<{ t: string }>(
       `SELECT format_type(a.atttypid, a.atttypmod) AS t FROM pg_attribute a
@@ -83,9 +83,9 @@ describe.skipIf(!PG_URL)('knowledge-pgvector acceptance on a LIVE PostgreSQL', (
     );
     const search = (organizationIds?: string[]) =>
       adapter.search('alpine meadow', { source: s, topK: 1, index: { fingerprint: FP_A.fingerprint }, ...(organizationIds ? { organizationIds } : {}) });
-    expect((await search()).map((h) => h.documentId)).toEqual([`${s.id}:b`]);
-    expect((await search(['org_a'])).map((h) => h.documentId)).toEqual([`${s.id}:a`]);
-    expect((await search(['org_b'])).map((h) => h.documentId)).toEqual([`${s.id}:b`]);
+    expect((await search()).map((h) => h.documentId)).toEqual([`${s.name}:b`]);
+    expect((await search(['org_a'])).map((h) => h.documentId)).toEqual([`${s.name}:a`]);
+    expect((await search(['org_b'])).map((h) => h.documentId)).toEqual([`${s.name}:b`]);
     expect(await search([])).toEqual([]);
     expect(await search(['org_c'])).toEqual([]);
   });
@@ -101,7 +101,7 @@ describe.skipIf(!PG_URL)('knowledge-pgvector acceptance on a LIVE PostgreSQL', (
       ctx(s),
     );
     const hits = await adapter.search('basalt', { source: s, topK: 1, filter: { status: 'published' }, index: { fingerprint: FP_A.fingerprint } });
-    expect(hits.map((h) => h.documentId)).toEqual([`${s.id}:2`]);
+    expect(hits.map((h) => h.documentId)).toEqual([`${s.name}:2`]);
     expect(hits[0].metadata).toEqual({ status: 'published' });
   });
 
@@ -119,8 +119,8 @@ describe.skipIf(!PG_URL)('knowledge-pgvector acceptance on a LIVE PostgreSQL', (
     const before = embedder.calls;
     await adapter.upsert(
       [{ ...doc(s, '1', 'x'), chunks: [
-        { id: `${s.id}:1#0`, documentId: `${s.id}:1`, index: 0, content: 'copper wire conducts heat' },
-        { id: `${s.id}:1#1`, documentId: `${s.id}:1`, index: 1, content: 'drawn through dies' },
+        { id: `${s.name}:1#0`, documentId: `${s.name}:1`, index: 0, content: 'copper wire conducts heat' },
+        { id: `${s.name}:1#1`, documentId: `${s.name}:1`, index: 1, content: 'drawn through dies' },
       ] }],
       ctx(s),
     );
@@ -139,11 +139,11 @@ describe.skipIf(!PG_URL)('knowledge-pgvector acceptance on a LIVE PostgreSQL', (
     svc.registerAdapter('under_test', adapter);
     const s = source('svc_same');
     svc.registerSource(s);
-    expect(await svc.reindexSource(s.id)).toMatchObject({ ok: true, indexed: 2 });
+    expect(await svc.reindexSource(s.name)).toMatchObject({ ok: true, indexed: 2 });
     const after = embedder.calls;
-    expect(await svc.reindexSource(s.id)).toMatchObject({ ok: true, indexed: 0, skipped: 2 });
+    expect(await svc.reindexSource(s.name)).toMatchObject({ ok: true, indexed: 0, skipped: 2 });
     expect(embedder.calls).toBe(after);
-    expect((await svc.search('granite', { topK: 3, executionContext: SYSTEM })).map((h) => h.documentId)).toEqual([`${s.id}:r1`]);
+    expect((await svc.search('granite', { topK: 3, executionContext: SYSTEM })).map((h) => h.documentId)).toEqual([`${s.name}:r1`]);
   });
 
   it('a changed embedding model changes the fingerprint: search is refused by name, and the old rows are not served', async () => {
@@ -153,7 +153,7 @@ describe.skipIf(!PG_URL)('knowledge-pgvector acceptance on a LIVE PostgreSQL', (
     svc.registerAdapter('under_test', adapter);
     const s = source('svc_model');
     svc.registerSource(s);
-    await svc.reindexSource(s.id);
+    await svc.reindexSource(s.name);
     expect(await svc.search('granite', { topK: 3, executionContext: SYSTEM })).toHaveLength(1);
 
     embedder.model = 'model-two';
@@ -162,12 +162,12 @@ describe.skipIf(!PG_URL)('knowledge-pgvector acceptance on a LIVE PostgreSQL', (
       (e: unknown) => e as { code?: string; status?: number; message?: string },
     );
     expect(refused).toMatchObject({ code: KNOWLEDGE_REBUILD_REQUIRED, status: 409 });
-    expect(refused?.message).toContain(s.id);
+    expect(refused?.message).toContain(s.name);
     // The caller is told the source needs a rebuild, never SQL.
     expect(refused?.message).not.toContain('DELETE');
     // A complete reindex under the new model builds the new generation, and search answers again.
     const before = embedder.calls;
-    expect(await svc.reindexSource(s.id)).toMatchObject({ ok: true, indexed: 1, skipped: 0 });
+    expect(await svc.reindexSource(s.name)).toMatchObject({ ok: true, indexed: 1, skipped: 0 });
     expect(embedder.calls).toBe(before + 1);
     expect(await svc.search('granite', { topK: 3, executionContext: SYSTEM })).toHaveLength(1);
   });
@@ -180,19 +180,19 @@ describe.skipIf(!PG_URL)('knowledge-pgvector acceptance on a LIVE PostgreSQL', (
     svc.registerAdapter('under_test', adapter);
     const s = source('svc_leftover');
     svc.registerSource(s);
-    expect(await svc.reindexSource(s.id)).toMatchObject({ ok: true, indexed: 1 });
+    expect(await svc.reindexSource(s.name)).toMatchObject({ ok: true, indexed: 1 });
 
     // Same width, another model; an operator deletes only the generation row.
     embedder.model = 'model-two';
-    await store.pool().query(`DELETE FROM "${schema}"."knowledge_generation" WHERE source_id = $1`, [s.id]);
+    await store.pool().query(`DELETE FROM "${schema}"."knowledge_generation" WHERE source_id = $1`, [s.name]);
     const before = embedder.calls;
-    expect(await svc.reindexSource(s.id)).toMatchObject({ ok: true, indexed: 1, skipped: 0 });
+    expect(await svc.reindexSource(s.name)).toMatchObject({ ok: true, indexed: 1, skipped: 0 });
     // The passage was embedded again under the new model: the old vector was not adopted.
     expect(embedder.calls).toBe(before + 1);
     expect(embedder.texts.slice(-1)).toEqual(['granite quarry']);
     const rows = await store.pool().query<{ n: string }>(
       `SELECT count(*) AS n FROM "${schema}"."knowledge_vec_d384" WHERE source_id = $1`,
-      [s.id],
+      [s.name],
     );
     expect(Number(rows.rows[0].n)).toBe(1);
   });
@@ -218,12 +218,12 @@ describe.skipIf(!PG_URL)('knowledge-pgvector acceptance on a LIVE PostgreSQL', (
     await adapter.upsert([doc(s, '1', 'copper wire conducts heat')], ctx(s));
     expect(embedder.calls).toBe(1);
     interfere = async () => {
-      await base.query(`DELETE FROM "${schema}"."knowledge_vec_d384" WHERE source_id = $1`, [s.id]);
+      await base.query(`DELETE FROM "${schema}"."knowledge_vec_d384" WHERE source_id = $1`, [s.name]);
     };
     await adapter.upsert([doc(s, '1', 'copper wire conducts heat', { metadata: { status: 'archived' } })], ctx(s));
     expect(embedder.calls).toBe(2);
     const [hit] = await adapter.search('copper', { source: s, topK: 1, index: { fingerprint: FP_A.fingerprint } });
-    expect(hit).toMatchObject({ documentId: `${s.id}:1`, metadata: { status: 'archived' } });
+    expect(hit).toMatchObject({ documentId: `${s.name}:1`, metadata: { status: 'archived' } });
   });
 
   it('beginBuild under its own fingerprint opens nothing; a search under another is refused and never served', async () => {

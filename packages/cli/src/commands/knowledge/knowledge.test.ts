@@ -97,7 +97,7 @@ const running = (discovered: number) => ({
 const statusOf = (build: unknown) => ok({
   ok: true,
   message: '1 source(s)',
-  details: { sources: [{ id: 'kb', label: 'KB', adapter: 'pgvector', kind: 'object', index: { state: 'current', due: false, detail: 'current.' }, build }] },
+  details: { sources: [{ id: 'kb', label: 'KB', adapter: 'pgvector', index: { state: 'current', due: false, detail: 'current.' }, build }] },
 });
 
 const target = ['--url', SERVER, '--token', 'tok'];
@@ -170,7 +170,9 @@ describe('os knowledge status', () => {
         ok: true,
         details: {
           sources: [
-            { id: 'kb', label: 'KB', adapter: 'pgvector', kind: 'object', index: { state: 'nothing', due: true, detail: 'never built.' }, build: null },
+            { id: 'kb', label: 'KB', adapter: 'pgvector', index: { state: 'nothing', due: true, detail: 'never built.' }, build: null },
+            // A package's source is listed under its NAMESPACE-NAME, with the package that holds it.
+            { id: 'crm-faq', label: 'FAQ', adapter: 'turso', packageId: 'com.acme.crm', index: { state: 'current', due: false }, build: null },
           ],
         },
       }),
@@ -178,7 +180,8 @@ describe('os knowledge status', () => {
     expect(run.failure).toBeUndefined();
     expect(run.requests[0]).toMatchObject({ url: `${SERVER}/api/settings/knowledge/index_status`, body: {} });
     const text = run.logs.join('\n');
-    expect(text).toContain('kb  (KB; adapter pgvector, object source)');
+    expect(text).toContain('kb  (KB; adapter pgvector)');
+    expect(text).toContain('crm-faq  (FAQ; adapter turso, package com.acme.crm)');
     expect(text).toContain('index: nothing — a build is due — never built.');
     expect(text).toContain('last build on this node: none');
   });

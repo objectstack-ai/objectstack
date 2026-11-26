@@ -402,3 +402,98 @@ describe('field gate — the title field is the object\'s display field', () => 
     expect(ids(await svc.search('q', { executionContext: MEMBER }))).toEqual(['s']);
   });
 });
+
+// [ADR-0161 K4, guard two] The same gates, asked once for the AUTHOR when a
+// `knowledge_source` item is saved: nobody builds an index over an object or
+// a field they could not themselves search.
+describe('admitAuthoredSource — source admission at save, as the authoring principal', () => {
+  const item = (object: string, content: string[], extra: Record<string, unknown> = {}) => ({
+    name: 'authored', label: 'Authored', adapter: 'memory', source: { kind: 'object', object, content, ...extra },
+  });
+  const sealed: ObjectDef = { ...TICKET, name: 'sealed', enable: { apiEnabled: false } };
+  const getOnly: ObjectDef = { ...TICKET, name: 'get_only', enable: { apiMethods: ['get'] } };
+  const sysClosed: ObjectDef = { ...TICKET, name: 'sys_closed_note' };
+  const sysOpen: ObjectDef = { ...TICKET, name: 'sys_open_note', enable: { aiReadable: true } };
+
+  it('a field the author may not query is refused PERMISSION_DENIED / 403, naming the object and the field', async () => {
+    const { svc } = setup({ sources: [], security: salaryHiddenFromMembers });
+    const verdict = await svc.admitAuthoredSource(item('ticket', ['body', 'salary_note']), MEMBER);
+    expect(verdict).toMatchObject({ admitted: false, code: 'PERMISSION_DENIED', status: 403, object: 'ticket', field: 'salary_note' });
+    const message = (verdict as { message: string }).message;
+    expect(message).toContain('knowledge source "authored" was not saved');
+    expect(message).toContain("field 'salary_note' of object 'ticket'");
+    expect(message).toContain('Remove the field from `content` and `metadataFields`');
+    // The same source, by an author who may query the field, and by the engine itself.
+    expect(await svc.admitAuthoredSource(item('ticket', ['body', 'salary_note']), MANAGER)).toEqual({ admitted: true });
+    expect(await svc.admitAuthoredSource(item('ticket', ['body', 'salary_note']), SYSTEM)).toEqual({ admitted: true });
+  });
+
+  it('a `metadataFields` member, and the retired `contentFields` spelling, are judged as the fields they index', async () => {
+    const { svc } = setup({ sources: [], security: salaryHiddenFromMembers });
+    expect(await svc.admitAuthoredSource(item('ticket', ['body'], { metadataFields: ['salary_note'] }), MEMBER))
+      .toMatchObject({ admitted: false, code: 'PERMISSION_DENIED', status: 403, field: 'salary_note' });
+    const retired = { name: 'authored', label: 'A', adapter: 'memory', source: { kind: 'object', object: 'ticket', contentFields: ['salary_note'] } };
+    expect(await svc.admitAuthoredSource(retired, MEMBER))
+      .toMatchObject({ admitted: false, code: 'PERMISSION_DENIED', status: 403, field: 'salary_note' });
+  });
+
+  it("the object's display field is indexed as the title: an author who may not query it is refused though the source does not list it", async () => {
+    const hideTitle = makeSecurity(() => ['id', 'body', 'salary_note', 'status']);
+    const { svc } = setup({ sources: [], security: hideTitle });
+    const verdict = await svc.admitAuthoredSource(item('ticket', ['body']), MEMBER);
+    expect(verdict).toMatchObject({ admitted: false, code: 'PERMISSION_DENIED', status: 403, field: 'title' });
+    expect((verdict as { message: string }).message).toContain("display field");
+  });
+
+  it.each([
+    ['an object of a disabled package', { objects: [TICKET], disabled: ['ticket'] }, 'ticket', 'disabled package'],
+    ['an object the API does not serve at all', { objects: [sealed] }, 'sealed', 'does not serve object'],
+    ['an object whose `apiMethods` do not grant `search`', { objects: [getOnly] }, 'get_only', 'does not serve object'],
+    ['a system object without `enable.aiReadable`', { objects: [sysClosed] }, 'sys_closed_note', 'does not opt into AI reads'],
+  ])('%s is refused PERMISSION_DENIED / 403, naming the object', async (_label, opts, object, said) => {
+    const { svc } = setup({ sources: [], ...opts });
+    const verdict = await svc.admitAuthoredSource(item(object, ['body']), MANAGER);
+    expect(verdict).toMatchObject({ admitted: false, code: 'PERMISSION_DENIED', status: 403, object });
+    expect((verdict as { message: string }).message).toContain(`'${object}'`);
+    expect((verdict as { message: string }).message).toContain(said);
+    // The engine's own write is admitted: a package install is judged at validate and publish.
+    expect(await svc.admitAuthoredSource(item(object, ['body']), SYSTEM)).toEqual({ admitted: true });
+  });
+
+  it('CONTROL: a served object, and a system object that opts into AI reads, are admitted', async () => {
+    const { svc } = setup({ sources: [], objects: [TICKET, sysOpen] });
+    expect(await svc.admitAuthoredSource(item('ticket', ['body']), MANAGER)).toEqual({ admitted: true });
+    expect(await svc.admitAuthoredSource(item('sys_open_note', ['body']), MANAGER)).toEqual({ admitted: true });
+  });
+
+  it('fails closed, SERVICE_UNAVAILABLE / 503: a gate that throws, a security service that answers neither question, no data engine', async () => {
+    const thrown = setup({ sources: [], schemaThrows: true, logger: { warn: vi.fn(), error: vi.fn() } });
+    expect(await thrown.svc.admitAuthoredSource(item('ticket', ['body']), MANAGER))
+      .toMatchObject({ admitted: false, code: 'SERVICE_UNAVAILABLE', status: 503, object: 'ticket' });
+
+    const mute: KnowledgeFieldSecurity = { getQueryableFields: async () => undefined, getReadableFields: async () => undefined };
+    const unanswered = setup({ sources: [], security: mute });
+    expect(await unanswered.svc.admitAuthoredSource(item('ticket', ['body']), MANAGER))
+      .toMatchObject({ admitted: false, code: 'SERVICE_UNAVAILABLE', status: 503 });
+
+    const noEngine = new KnowledgeService({});
+    expect(await noEngine.admitAuthoredSource(item('ticket', ['body']), MANAGER))
+      .toMatchObject({ admitted: false, code: 'SERVICE_UNAVAILABLE', status: 503 });
+  });
+
+  it('a save that carries no identity is refused; an item naming no object is left to the parse', async () => {
+    const { svc } = setup({ sources: [] });
+    expect(await svc.admitAuthoredSource(item('ticket', ['body']), undefined))
+      .toMatchObject({ admitted: false, code: 'PERMISSION_DENIED', status: 403 });
+    for (const shapeless of [null, {}, { name: 'x' }, { name: 'x', source: { kind: 'object' } }, { name: 'x', source: 'ticket' }]) {
+      expect(await svc.admitAuthoredSource(shapeless, MANAGER), JSON.stringify(shapeless)).toEqual({ admitted: true });
+    }
+  });
+
+  it('registers nothing and searches nothing: the verdict is a read', async () => {
+    const { svc, adapter } = setup({ sources: [], security: salaryHiddenFromMembers });
+    await svc.admitAuthoredSource(item('ticket', ['body']), MANAGER);
+    expect(svc.listSources()).toEqual([]);
+    expect(adapter.searchSpy).not.toHaveBeenCalled();
+  });
+});

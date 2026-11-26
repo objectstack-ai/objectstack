@@ -157,7 +157,7 @@ describe('KnowledgeTursoPlugin', () => {
     await new Fresh({ url: ':memory:', env: {} }).start(ctx);
     const adapter = adapters.get('turso')!;
     const err = await adapter
-      .search('x', { source: { id: 's', label: 's', adapter: 'turso', source: { kind: 'object', object: 'o', contentFields: ['b'] } } as never, topK: 1 })
+      .search('x', { source: { name: 's', label: 's', adapter: 'turso', source: { kind: 'object', object: 'o', content: ['b'] } } as never, topK: 1 })
       .catch((e: unknown) => e);
     expect(err).toMatchObject({ code: 'SERVICE_UNAVAILABLE', status: 503 });
     expect(logs.some(([level, m]) => level === 'warn' && m.includes('@libsql/client could not be loaded'))).toBe(true);

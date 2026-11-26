@@ -22,20 +22,20 @@ import { FakeEmbedder, storeOf, type StoreKind } from './turso.testkit.js';
 
 const source = (id: string, extra: Record<string, unknown> = {}): KnowledgeSource =>
   ({
-    id,
+    name: id,
     label: id,
     adapter: 'under_test',
-    source: { kind: 'object', object: 'article', contentFields: ['body'], metadataFields: ['status'], ...extra },
+    source: { kind: 'object', object: 'article', content: ['body'], metadataFields: ['status'], ...extra },
   }) as KnowledgeSource;
 
 const FP_A = { fingerprint: 'fp-test:a', recipeHash: 'rh-test:1' };
 const ctx = (s: KnowledgeSource, index = FP_A): AdapterContext => ({ source: s, reason: 'manual', index });
 
 function doc(s: KnowledgeSource, n: string, content: string, extra: Partial<KnowledgeDocument> = {}): KnowledgeDocument {
-  const id = `${s.id}:${n}`;
+  const id = `${s.name}:${n}`;
   return {
     id,
-    sourceId: s.id,
+    sourceId: s.name,
     sourceRecordId: n,
     content,
     title: `Title ${n}`,
@@ -108,7 +108,7 @@ for (const kind of ['memory', 'file'] as StoreKind[]) {
         ctx(s),
       );
       const hits = await adapter.search('客户续约提醒', { source: s, topK: 5, index: { fingerprint: FP_A.fingerprint } });
-      expect(hits[0]).toMatchObject({ documentId: `${s.id}:1`, snippet: '合同到期前三十天提醒客户续约' });
+      expect(hits[0]).toMatchObject({ documentId: `${s.name}:1`, snippet: '合同到期前三十天提醒客户续约' });
       expect(hits[0].score).toBeGreaterThan(0.3);
     });
 
@@ -119,8 +119,8 @@ for (const kind of ['memory', 'file'] as StoreKind[]) {
       const two = (second: string): KnowledgeDocument => ({
         ...doc(s, '1', `granite quarry. ${second}`),
         chunks: [
-          { id: `${s.id}:1#0`, documentId: `${s.id}:1`, index: 0, content: 'granite quarry' },
-          { id: `${s.id}:1#1`, documentId: `${s.id}:1`, index: 1, content: second },
+          { id: `${s.name}:1#0`, documentId: `${s.name}:1`, index: 0, content: 'granite quarry' },
+          { id: `${s.name}:1#1`, documentId: `${s.name}:1`, index: 1, content: second },
         ],
       });
       await adapter.upsert([two('marble cliffs')], ctx(s));
@@ -130,7 +130,7 @@ for (const kind of ['memory', 'file'] as StoreKind[]) {
       await adapter.upsert([two('basalt columns')], ctx(s));
       expect(embedder.texts.slice(2)).toEqual(['basalt columns']);
       const hits = await adapter.search('basalt granite', { source: s, topK: 5 });
-      expect(hits.map((h) => h.chunkId).sort()).toEqual([`${s.id}:1#0`, `${s.id}:1#1`]);
+      expect(hits.map((h) => h.chunkId).sort()).toEqual([`${s.name}:1#0`, `${s.name}:1#1`]);
     });
 
     for (const [label, next] of [
@@ -149,8 +149,8 @@ for (const kind of ['memory', 'file'] as StoreKind[]) {
         const svc = new KnowledgeService({ dataEngine: rowsEngine(rows) });
         svc.registerAdapter('under_test', adapter);
         svc.registerSource(s);
-        expect(await svc.reindexSource(s.id)).toMatchObject({ ok: true, indexed: 2 });
-        expect(await tables(client, `knowledge_${s.id}_g%`)).toEqual([`knowledge_${s.id}_g1`]);
+        expect(await svc.reindexSource(s.name)).toMatchObject({ ok: true, indexed: 2 });
+        expect(await tables(client, `knowledge_${s.name}_g%`)).toEqual([`knowledge_${s.name}_g1`]);
         const before = await adapter.indexStatus(ctx(s));
 
         embedder = next();
@@ -159,15 +159,15 @@ for (const kind of ['memory', 'file'] as StoreKind[]) {
           code: KNOWLEDGE_REBUILD_REQUIRED,
           status: 409,
         });
-        expect(await svc.reindexSource(s.id)).toMatchObject({ ok: true, indexed: 2, skipped: 0 });
-        expect(await tables(client, `knowledge_${s.id}_g%`)).toEqual([`knowledge_${s.id}_g2`]);
+        expect(await svc.reindexSource(s.name)).toMatchObject({ ok: true, indexed: 2, skipped: 0 });
+        expect(await tables(client, `knowledge_${s.name}_g%`)).toEqual([`knowledge_${s.name}_g2`]);
         const after = await adapter.indexStatus(ctx(s));
         expect(after.fingerprint).toBeDefined();
         expect(after.fingerprint).not.toBe(before.fingerprint);
         const hits = await svc.search('glacier', { topK: 5, executionContext: SYSTEM });
-        expect(hits.map((h) => h.documentId)).toEqual([`${s.id}:r1`]);
+        expect(hits.map((h) => h.documentId)).toEqual([`${s.name}:r1`]);
         const width = await client.execute(
-          `SELECT dim, model FROM knowledge_generation WHERE source_id = '${s.id}'`,
+          `SELECT dim, model FROM knowledge_generation WHERE source_id = '${s.name}'`,
         );
         expect(width.rows.map((r) => [Number(r.dim), r.model])).toEqual([[embedder.dimensions, embedder.model]]);
       });
@@ -180,14 +180,14 @@ for (const kind of ['memory', 'file'] as StoreKind[]) {
       await adapter.upsert([doc(s, '1', 'granite quarry')], ctx(s));
       const FP_B = { fingerprint: 'fp-test:b', recipeHash: 'rh-test:1' };
       await adapter.beginBuild(ctx(s, FP_B));
-      expect(await tables(client, `knowledge_${s.id}_g%`)).toEqual([`knowledge_${s.id}_g1`, `knowledge_${s.id}_g2`]);
+      expect(await tables(client, `knowledge_${s.name}_g%`)).toEqual([`knowledge_${s.name}_g1`, `knowledge_${s.name}_g2`]);
       const err = await refusal(adapter.search('granite', { source: s, topK: 5, index: { fingerprint: FP_B.fingerprint } }));
       expect(err).toMatchObject({ code: KNOWLEDGE_REBUILD_REQUIRED, status: 409 });
       expect(String(err.message)).toMatch(/is being rebuilt/);
       // A third fingerprint abandons the unfinished build: one builder per source.
       const FP_C = { fingerprint: 'fp-test:c', recipeHash: 'rh-test:1' };
       await adapter.beginBuild(ctx(s, FP_C));
-      const rows = await client.execute(`SELECT generation, fingerprint, state FROM knowledge_generation WHERE source_id = '${s.id}' ORDER BY generation`);
+      const rows = await client.execute(`SELECT generation, fingerprint, state FROM knowledge_generation WHERE source_id = '${s.name}' ORDER BY generation`);
       expect(rows.rows.map((r) => [Number(r.generation), r.fingerprint, r.state])).toEqual([
         [1, FP_A.fingerprint, 'active'],
         [2, FP_C.fingerprint, 'building'],
@@ -207,9 +207,9 @@ for (const kind of ['memory', 'file'] as StoreKind[]) {
         ctx(s),
       );
       const asA = await adapter.search('alpine meadow', { source: s, topK: 1, organizationIds: ['org_a'] });
-      expect(asA.map((h) => h.documentId)).toEqual([`${s.id}:a`]);
+      expect(asA.map((h) => h.documentId)).toEqual([`${s.name}:a`]);
       const asB = await adapter.search('alpine meadow harbour', { source: s, topK: 5, organizationIds: ['org_b'] });
-      expect(asB.map((h) => h.documentId)).toEqual([`${s.id}:b`]);
+      expect(asB.map((h) => h.documentId)).toEqual([`${s.name}:b`]);
     });
 
     it('the metadata filter runs before ranking, by JSON equality', async () => {
@@ -223,8 +223,8 @@ for (const kind of ['memory', 'file'] as StoreKind[]) {
         ctx(s),
       );
       const top = await adapter.search('tidal pool', { source: s, topK: 1, filter: { status: 'published' } });
-      expect(top.map((h) => h.documentId)).toEqual([`${s.id}:2`]);
-      expect((await adapter.search('tidal', { source: s, topK: 5, filter: { pinned: true } })).map((h) => h.documentId)).toEqual([`${s.id}:1`]);
+      expect(top.map((h) => h.documentId)).toEqual([`${s.name}:2`]);
+      expect((await adapter.search('tidal', { source: s, topK: 5, filter: { pinned: true } })).map((h) => h.documentId)).toEqual([`${s.name}:1`]);
       expect((await adapter.search('tidal', { source: s, topK: 5, filter: { rank: 2 } })).length).toBe(2);
       expect(await adapter.search('tidal', { source: s, topK: 5, filter: { rank: '2' } })).toEqual([]);
     });
@@ -243,13 +243,13 @@ for (const kind of ['memory', 'file'] as StoreKind[]) {
       const ids = async (scope: NonNullable<Parameters<TursoKnowledgeAdapter['search']>[1]['scope']>) =>
         (await adapter.search('harbour rules', { source: s, topK: 5, scope })).map((h) => h.documentId).sort();
       // A dotted name is a key, never a JSON path into a nested object.
-      expect(await ids([{ kind: 'metadata', field: 'policy.id', ids: ['p1'] }])).toEqual([`${s.id}:1`]);
+      expect(await ids([{ kind: 'metadata', field: 'policy.id', ids: ['p1'] }])).toEqual([`${s.name}:1`]);
       // A boolean matches no id, by either spelling; the string 'true' does. An object matches nothing.
-      expect(await ids([{ kind: 'metadata', field: 'flag', ids: ['true'] }])).toEqual([`${s.id}:2`]);
+      expect(await ids([{ kind: 'metadata', field: 'flag', ids: ['true'] }])).toEqual([`${s.name}:2`]);
       expect(await ids([{ kind: 'metadata', field: 'flag', ids: ['1'] }])).toEqual([]);
       expect(await ids([{ kind: 'metadata', field: 'policy', ids: ['{"id":"p1"}'] }])).toEqual([]);
       // A quote in a name is a value; a number in a list matches its text.
-      expect(await ids([{ kind: 'metadata', field: "it's", ids: ['7.5'] }])).toEqual([`${s.id}:3`]);
+      expect(await ids([{ kind: 'metadata', field: "it's", ids: ['7.5'] }])).toEqual([`${s.name}:3`]);
       expect(await ids([{ kind: 'record', ids: ["1' OR '1'='1"] }])).toEqual([]);
     });
 
@@ -275,10 +275,10 @@ for (const kind of ['memory', 'file'] as StoreKind[]) {
       const svc = new KnowledgeService({ dataEngine: rowsEngine(rows) });
       svc.registerAdapter('under_test', adapter);
       svc.registerSource(s);
-      expect(await svc.reindexSource(s.id)).toMatchObject({ ok: true, indexed: 1 });
+      expect(await svc.reindexSource(s.name)).toMatchObject({ ok: true, indexed: 1 });
       expect(await tables(client, 'knowledge_legacy%')).toEqual(['knowledge_legacy_g1']);
       const hits = await svc.search('glacier', { topK: 5, executionContext: SYSTEM });
-      expect(hits.map((h) => h.documentId)).toEqual([`${s.id}:r1`]);
+      expect(hits.map((h) => h.documentId)).toEqual([`${s.name}:r1`]);
     });
 
     it('a generation table of another source is never taken for a legacy table', async () => {
@@ -303,10 +303,10 @@ for (const kind of ['memory', 'file'] as StoreKind[]) {
       const svc = new KnowledgeService({ dataEngine: rowsEngine([{ id: 'r1', body: 'amber resin', status: 'published' }]) });
       svc.registerAdapter('under_test', adapter);
       svc.registerSource(s);
-      expect(await svc.reindexSource(s.id)).toMatchObject({ ok: true, indexed: 1 });
+      expect(await svc.reindexSource(s.name)).toMatchObject({ ok: true, indexed: 1 });
       expect(await tables(client, 'knowledge_generation')).toEqual(['knowledge_generation']);
       expect((await adapter.search('amber', { source: other, topK: 5 })).map((h) => h.snippet)).toEqual(['amber lamp']);
-      expect((await adapter.search('amber', { source: s, topK: 5 })).map((h) => h.documentId)).toEqual([`${s.id}:r1`]);
+      expect((await adapter.search('amber', { source: s, topK: 5 })).map((h) => h.documentId)).toEqual([`${s.name}:r1`]);
     });
 
     it('a table with the legacy columns but no F32_BLOB vector is not a legacy table', async () => {
@@ -352,7 +352,7 @@ for (const kind of ['memory', 'file'] as StoreKind[]) {
       const svc = new KnowledgeService({ dataEngine: rowsEngine([{ id: 'r1', body: 'slate roof', status: 'published' }]) });
       svc.registerAdapter('under_test', adapter);
       svc.registerSource(s);
-      expect(await svc.reindexSource(s.id)).toMatchObject({ ok: true, indexed: 1 });
+      expect(await svc.reindexSource(s.name)).toMatchObject({ ok: true, indexed: 1 });
       expect((await client.execute('SELECT body FROM knowledge_articles')).rows.map((r) => r.body)).toEqual(['kept']);
       // Under the name of a generation table it is refused, and left as it is.
       await client.execute('CREATE TABLE knowledge_notes_g1 (id TEXT PRIMARY KEY, body TEXT)');
@@ -385,9 +385,9 @@ for (const kind of ['memory', 'file'] as StoreKind[]) {
       const adapter = new TursoKnowledgeAdapter({ id: 'under_test', client, embedder: new FakeEmbedder() });
       const s = source('fresh');
       await adapter.upsert([doc(s, 'old', 'cedar chest')], ctx(s));
-      await client.execute({ sql: 'DELETE FROM knowledge_generation WHERE source_id = ?', args: [s.id] });
+      await client.execute({ sql: 'DELETE FROM knowledge_generation WHERE source_id = ?', args: [s.name] });
       await adapter.upsert([doc(s, 'new', 'cedar fence')], ctx(s));
-      expect((await adapter.search('cedar', { source: s, topK: 5 })).map((h) => h.documentId)).toEqual([`${s.id}:new`]);
+      expect((await adapter.search('cedar', { source: s, topK: 5 })).map((h) => h.documentId)).toEqual([`${s.name}:new`]);
     });
 
     it('concurrent calls on one client are queued, never refused for a held connection', async () => {
@@ -508,8 +508,8 @@ describe('knowledge-turso with a request bound (a remote database)', () => {
     const docs = Array.from({ length: 40 }, (_, i) =>
       doc(s, String(i), `heron ${i}`, {
         chunks: [0, 1].map((index) => ({
-          id: `${s.id}:${i}#${index}`,
-          documentId: `${s.id}:${i}`,
+          id: `${s.name}:${i}#${index}`,
+          documentId: `${s.name}:${i}`,
           index,
           content: `heron ${i} ${index === 0 ? 'wading' : 'flying'}`,
         })),
@@ -550,7 +550,7 @@ describe('knowledge-turso with a request bound (a remote database)', () => {
     const err = await refusal(adapter.upsert([doc(s, 'a', 'otter pup'), doc(s, 'b', 'otter den')], ctx(s)));
     expect(err).toMatchObject({ code: 'SERVICE_UNAVAILABLE', status: 503, remedy: expect.stringContaining('requestTimeoutMs') });
     await new Promise((r) => setTimeout(r, 100));
-    expect((await plain.listDocuments(ctx(s), { limit: 10 })).documents.map((d) => d.documentId)).toEqual([`${s.id}:seed`]);
+    expect((await plain.listDocuments(ctx(s), { limit: 10 })).documents.map((d) => d.documentId)).toEqual([`${s.name}:seed`]);
     // The next write goes through.
     await adapter.upsert([doc(s, 'a', 'otter pup')], ctx(s));
     expect((await plain.listDocuments(ctx(s), { limit: 10 })).documents.length).toBe(2);

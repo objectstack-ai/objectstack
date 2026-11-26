@@ -50,10 +50,12 @@ export interface KnowledgeBuildView {
 
 /** One source of an `index_status` answer. */
 export interface KnowledgeSourceView {
+  /** The source as `search_knowledge` lists it: `NAMESPACE-NAME` for a package's source, the bare name otherwise. */
   id: string;
   label?: string;
   adapter?: string;
-  kind?: string;
+  /** The package that holds the source; absent for a source no package holds. */
+  packageId?: string;
   index?: { state?: string; due?: boolean; detail?: string };
   build?: KnowledgeBuildView | null;
 }
