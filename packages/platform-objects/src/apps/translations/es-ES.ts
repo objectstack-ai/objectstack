@@ -79,6 +79,7 @@ export const esES: TranslationData = {
         // the same case as the entry above; see `en.ts` (#31123).
         nav_scim_credentials: { label: 'Credenciales SCIM' },
         nav_api_keys: { label: 'Claves API' },
+        nav_access_directory: { label: 'Puestos y permisos' },
 
         nav_approvals_inbox: { label: 'Centro de aprobaciones' },
         nav_approval_requests: { label: 'Solicitudes' },

@@ -3139,6 +3139,7 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.studio.menu.owd': '默认共享',
   'engine.studio.menu.diagnostics': '诊断',
   'engine.studio.menu.environment': '岗位与权限',
+  'engine.setup.accessDirectory.notAllowed': '打开此页需要 {capability} 权限，即进入 Studio 所需的权限。',
   // objectstack#37201 — the 「高级」 fold (ADR-0084, amended 2026-11-25), and a 常用 type with no item yet.
   'engine.studio.menu.advanced': '高级',
   'engine.studio.menu.emptyType': '还没有：打开列表新建第一项',

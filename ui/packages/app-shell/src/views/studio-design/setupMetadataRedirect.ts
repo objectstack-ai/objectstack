@@ -6,10 +6,12 @@
  *
  * Every `/apps/<app>/metadata/...` URL, and every legacy alias that chained
  * into one, opens Studio's "All metadata" area (`metadataArea.ts`) on the same
- * page: the area mounts the metadata-admin pages under the same route shapes,
- * so the path below `metadata` carries over as it is. The query carries over
- * too, because `?package=`, `?scope=environment` and `?review=1` keep their
- * Setup meaning there. The URL is put on the leg its query names here, with
+ * page, except the environment directory and its lists, which are Setup's own
+ * page again (`views/setup/accessDirectory.ts`, objectstack#37565). The area
+ * mounts the metadata-admin pages under the same route shapes, so the path
+ * below `metadata` carries over as it is. The query carries over too, because
+ * `?package=`, `?scope=environment` and `?review=1` keep their Setup meaning
+ * there. The URL is put on the leg its query names here, with
  * {@link areaLocationRedirect}, so an old link lands in one hop.
  *
  * ⛔ Not the datasource. D1 places it in Setup (runtime configuration, not
@@ -20,6 +22,7 @@
 import { STUDIO_ALL_PACKAGES_SEGMENT, areaLocationRedirect } from './metadataArea.js';
 import { studioHomePath, studioMetadataAreaAddress, studioPillarPath } from './studioAddress.js';
 import { SETUP_PACKAGES_PATH } from '../metadata-admin/packageSource.js';
+import { studioAddressAfterSetupMove } from '../setup/accessDirectory.js';
 
 /** The one metadata type whose Setup pages stay in Setup (ADR-0146 D1). */
 export const SETUP_KEPT_METADATA_TYPE = 'datasource';
@@ -38,8 +41,11 @@ export function setupMetadataStudioPath(rest: string, search: string, hash = '')
   if (segments[0] === SETUP_KEPT_METADATA_TYPE) return null;
   const tail = segments.join('/');
   const onLeg = areaLocationRedirect(STUDIO_ALL_PACKAGES_SEGMENT, tail, search);
-  if (onLeg) return `${onLeg}${hash}`;
-  return studioMetadataAreaAddress(STUDIO_ALL_PACKAGES_SEGMENT, tail, { query: new URLSearchParams(search), hash });
+  const studio = onLeg
+    ? `${onLeg}${hash}`
+    : studioMetadataAreaAddress(STUDIO_ALL_PACKAGES_SEGMENT, tail, { query: new URLSearchParams(search), hash });
+  // objectstack#37565 — the leg's directory is Setup's page: land there in one hop.
+  return studioAddressAfterSetupMove(studio);
 }
 
 /**

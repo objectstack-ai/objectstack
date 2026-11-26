@@ -39,13 +39,13 @@ import { Link, Navigate, Outlet, Route, useParams } from 'react-router-dom';
 import { Lock } from 'lucide-react';
 import { Button, Empty, EmptyTitle } from '@object-ui/components';
 import {
+  ACCESS_DIRECTORY_PATH,
   LoadingFallback,
   LoadingScreen,
   STUDIO_ALL_PACKAGES_SEGMENT,
   STUDIO_METADATA_AREA,
   STUDIO_ORG_SCOPE_SEGMENT,
   StudioEntryPermissionsProvider,
-  studioMetadataAreaPath,
   studioOrgScopePath,
   studioPackagePath,
   useHomePath,
@@ -267,7 +267,7 @@ function StudioPillarAddress({ children }: { children?: ReactNode }) {
  *
  *   `/studio`                         Studio's entry: the last package, else the package list
  *   `/studio/~org`                    the package-less scope lands on its flow list
- *   `/studio/~all/*`                  lands on the "All metadata" area across packages
+ *   `/studio/~all/*`                  lands on Setup's environment directory (objectstack#37565)
  *   `/studio/:packageId`              a package lands on its object list
  *   `/studio/:packageId/metadata/*`   a package's "All metadata" area, in the builder
  *   `/studio/:packageId/:tab`         a retired pillar redirects; any other segment is
@@ -286,14 +286,16 @@ function StudioPillarAddress({ children }: { children?: ReactNode }) {
  * `/studio/crm/metadata/flow` would match no route at all. The static
  * `metadata` segment outranks `:tab`. `~all` is the area's reserved
  * cross-package segment (`metadataArea.ts` in app-shell says why it is not
- * `~org`); every `~all` URL outside the area lands on it, so none reaches the
- * builder as a package id.
+ * `~org`); every `~all` URL outside the area lands on Setup's environment
+ * directory, the leg's root's page since it moved out of Studio
+ * (objectstack#37565), so none reaches the builder as a package id.
  *
  * objectstack#36899 — the cross-package leg (`/studio/~all/metadata/*`) is
  * served by the generic area route: the SAME `StudioDesignSurface`, which
  * reads `~all` as "no package" and draws the area alone, under the left menu
  * every Studio page draws. The more specific `:packageId/metadata/*` outranks
- * `~all/*` for an area URL; every other `~all` URL still lands on the area.
+ * `~all/*` for an area URL; the area sends its root and the directory's lists
+ * to Setup, and keeps the items, which still open in Studio.
  *
  * objectstack#36909 — no pillar draws a page any more. Each retired pillar
  * address (`data`, `automations`, `access`, `interfaces`, and the bare package
@@ -308,7 +310,7 @@ export const studioRoutes = (
     <Route path={STUDIO_ORG_SCOPE_SEGMENT} element={<Navigate to={studioOrgScopePath()} replace />} />
     <Route
       path={`${STUDIO_ALL_PACKAGES_SEGMENT}/*`}
-      element={<Navigate to={studioMetadataAreaPath(STUDIO_ALL_PACKAGES_SEGMENT)} replace />}
+      element={<Navigate to={ACCESS_DIRECTORY_PATH} replace />}
     />
     <Route path=":packageId" element={<StudioPillarAddress />} />
     <Route

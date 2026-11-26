@@ -65,7 +65,6 @@ import {
   Gauge,
   Globe,
   Inbox,
-  KeyRound,
   Languages,
   LayoutGrid,
   ListChecks,
@@ -185,7 +184,6 @@ const STUDIO_MENU_KIND_ICONS: Readonly<Record<Exclude<StudioMenuEntry['kind'], '
   orgFlows: Building2,
   owd: ShieldCheck,
   diagnostics: Activity,
-  environment: KeyRound,
   allTypes: AppWindow,
 };
 

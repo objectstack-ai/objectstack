@@ -79,6 +79,7 @@ export const jaJP: TranslationData = {
         // the same case as the entry above; see `en.ts` (#31123).
         nav_scim_credentials: { label: 'SCIM 資格情報' },
         nav_api_keys: { label: 'API キー' },
+        nav_access_directory: { label: '役職と権限' },
 
         nav_approvals_inbox: { label: '承認センター' },
         nav_approval_requests: { label: 'リクエスト' },

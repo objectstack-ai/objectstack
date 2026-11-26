@@ -57,6 +57,7 @@ import {
   studioMetadataAreaPath,
 } from './metadataArea.js';
 import { STUDIO_ORG_SCOPE_SEGMENT } from './studioScope.js';
+import { studioAllLegSetupRedirect } from '../setup/accessDirectory.js';
 import { STUDIO_ORG_SCOPE_TYPE } from './studioAddress.js';
 import { StudioBundleItemEditor } from './StudioBundleItemEditor.js';
 import { AutomationsPillar } from './AutomationsPillar.js';
@@ -485,6 +486,10 @@ export function StudioMetadataArea({
   const rest = pathname.startsWith(basePath) ? pathname.slice(basePath.length).replace(/^\/+/, '') : '';
   const redirect = areaLocationRedirect(segment, rest, search);
   if (redirect) return <Navigate to={redirect} replace />;
+  // objectstack#37565 — the cross-package leg's directory is Setup's page now
+  // (ADR-0084, amended 2026-11-26): its addresses land there, once.
+  const moved = segment === STUDIO_ALL_PACKAGES_SEGMENT ? studioAllLegSetupRedirect(rest, search) : null;
+  if (moved) return <Navigate to={moved} replace />;
   // A page must not offer a write before the package's state is known.
   if (packageId !== null && writable === undefined) return <AreaLoading locale={locale} />;
 
