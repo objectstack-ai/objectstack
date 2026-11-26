@@ -24,11 +24,20 @@ import '@testing-library/jest-dom';
 import React from 'react';
 import { ComponentRegistry } from '@object-ui/core';
 import '../data-table';
+import { GridCellSelectionProvider } from '../../../context/gridCellSelection';
 
+/**
+ * Mounted select-first with a per-cell save, the one way an editable table
+ * edits (objectstack#35827); without both, `editable: true` renders read-only.
+ */
 function DataTable(props: { schema: Record<string, unknown> }) {
   const Impl = ComponentRegistry.get('data-table') as React.ComponentType<{ schema: unknown }> | undefined;
   if (!Impl) throw new Error('data-table not registered');
-  return <Impl schema={props.schema} />;
+  return (
+    <GridCellSelectionProvider value={{}}>
+      <Impl schema={{ onRowSave: () => Promise.resolve(), ...props.schema }} />
+    </GridCellSelectionProvider>
+  );
 }
 
 const headerWidth = (label: string): string => {

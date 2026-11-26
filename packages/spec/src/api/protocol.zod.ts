@@ -4588,6 +4588,11 @@ export const AiModelsResponseSchema = lazySchema(() => z.object({
     z.object({
       id: z.string().describe('Model id'),
       label: z.string().describe('Display label for the picker'),
+      tierLabel: z.string().min(1).optional().describe(
+        "Display name of the model's tier alone (for example 'Fast'), in the language the response is "
+        + "served in. The closed picker shows it in place of `label`, which may also carry the model's name; the "
+        + 'open list keeps `label`. Optional: absent, the picker shows `label` as before.',
+      ),
       default: z.boolean().describe('Whether this is the environment default'),
       costMultiplier: z.number().positive().optional().describe(
         'Factor by which one message on this model draws on the AI allowance, compared with one message on the '

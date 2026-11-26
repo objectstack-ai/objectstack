@@ -170,12 +170,35 @@ export function describeServedObject(def: ServedObjectDef, declared: ServedObjec
       // is read there; the served definition, without that expression, is
       // what the answer is built from.
       readonly: writeNeverSetsField(declared.fields?.[key]),
+      ...describedHandLock(f),
       system: f?.system === true,
       ...(declaresOptions(f) ? { options: describedOptions(f.options as unknown[]) } : {}),
       ...(f?.defaultValue !== undefined ? { defaultValue: f.defaultValue } : {}),
     })),
     validations: describedRules(def.validations),
     enableFeatures: def.enable ?? {},
+  };
+}
+
+/**
+ * The HAND lock as `describe_object` serves it (ruling record 7180466652, the
+ * two-tier field-lock model): `uiReadonly: true` and the `uiReadonlyWhen`
+ * predicate text, each its own key and only where the field authors it, so a
+ * definition that authors neither keeps the shape it always had. ⛔ Never
+ * folded into `readonly`: that key tells an agent to leave the field out of a
+ * write, and a hand-locked field is exactly the one an agent's write (an API,
+ * import or action write) still sets, judged by the object's validations — a
+ * person at the console cannot edit it. Read off the served field.
+ *
+ * The twin is `describedHandLock` in `packages/runtime/src/domains/mcp.ts`.
+ */
+function describedHandLock(f: unknown): { uiReadonly?: true; uiReadonlyWhen?: string } {
+  const field = (f ?? {}) as { uiReadonly?: unknown; uiReadonlyWhen?: unknown };
+  const when = field.uiReadonlyWhen as string | { source?: unknown } | undefined;
+  const source = typeof when === 'string' ? when : typeof when?.source === 'string' ? when.source : undefined;
+  return {
+    ...(field.uiReadonly === true ? { uiReadonly: true as const } : {}),
+    ...(source !== undefined && source.trim() !== '' ? { uiReadonlyWhen: source } : {}),
   };
 }
 

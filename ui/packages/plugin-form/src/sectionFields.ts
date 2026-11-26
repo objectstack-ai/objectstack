@@ -41,7 +41,7 @@
  */
 
 import type { FormField } from '@object-ui/types';
-import { evalFieldPredicate, isBlankPredicateText, isExpressionComputedField, type FieldRulePredicate } from '@object-ui/core';
+import { evalFieldPredicate, fieldStaticallyReadOnlyByHand, isBlankPredicateText, isExpressionComputedField, type FieldRulePredicate } from '@object-ui/core';
 import { mapFieldTypeToFormType, buildValidationRules, fieldHelpText, withFollowedParentObject, withFormObject } from '@object-ui/fields';
 import { withHomeAmountSource } from '@object-ui/i18n';
 import { isCreateFormMode, isRequiredInForm } from './schemaDefaults';
@@ -341,7 +341,8 @@ export function fromObjectSchema(fieldName: string, ctx: SectionFieldsContext): 
     // out of every write): an underscore-private convention between two of
     // this repository's packages, never an authoring key. It is drawn disabled
     // rather than `readonly`, which `filterSystemFields` drops before render.
-    disabled: ctx.readOnly || ctx.mode === 'view' || field.readonly || field._draftOnly === true,
+    // `uiReadonly` is the hand lock: the dialog draws the field, never fills it.
+    disabled: ctx.readOnly || ctx.mode === 'view' || fieldStaticallyReadOnlyByHand(field) || field._draftOnly === true,
     placeholder: field.placeholder,
     // The help line under the control: the spec's `inlineHelpText`, else
     // `description`, through the one read `ObjectForm`'s field builder shares
@@ -369,6 +370,9 @@ export function fromObjectSchema(fieldName: string, ctx: SectionFieldsContext): 
     // silently dropped rules that the flat (schema-order) form honors.
     visibleWhen: field.visibleWhen,
     readonlyWhen: field.readonlyWhen,
+    // The hand lock's predicate (`Field.uiReadonlyWhen`): the form renderer
+    // folds it into the same read-only verdict as `readonlyWhen`.
+    uiReadonlyWhen: field.uiReadonlyWhen,
     requiredWhen: field.requiredWhen,
     // A stored field carrying an `expression` is computed by the engine on
     // every write, so a typed value never stands (objectstack#31759): it draws

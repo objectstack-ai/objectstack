@@ -1280,6 +1280,18 @@ export interface ActionFieldError {
 }
 
 /**
+ * One reason of a refusal that names several (objectstack#36877), as the
+ * server answers it in `error.details.refusals`: the declared reason's key
+ * and its sentence, already rendered in the request's locale.
+ */
+export interface ActionRefusalLine {
+  /** The declared reason's key. */
+  reason: string;
+  /** The reason's sentence, shown verbatim. */
+  message: string;
+}
+
+/**
  * Action execution result — the ONE declaration of this name (objectui#6349,
  * batch 4). `@object-ui/core`'s `ActionRunner` module used to declare a second
  * `ActionResult` (the contract its handlers return and its runner reads); it
@@ -1318,6 +1330,15 @@ export interface ActionResult {
    * failure to the end user shows this when present (objectstack#34173).
    */
   userMessage?: string;
+
+  /**
+   * The reasons of a refusal that names several, in the order the server
+   * answered them (`error.details.refusals`, objectstack#36877). Set only on a
+   * failed result whose refusal carried such a list. The refusal's closing
+   * sentence is not on the list: it is the last line of `userMessage` and of
+   * `error`, which stay the whole text.
+   */
+  refusals?: ActionRefusalLine[];
 
   /** Whether the caller should reload its data after the action */
   reload?: boolean;

@@ -195,6 +195,7 @@ const de = {
     uploadInFlight: "Warten Sie, bis der Upload abgeschlossen ist, bevor Sie speichern.",
     clearedOnHide: "Geleert, was für die aktuellen Werte nicht mehr gilt: {{fields}}",
     visibleWhenFaulted: "Absenden nicht möglich: Die visibleWhen-Regel von {{fields}} konnte nicht ausgewertet werden. Die Regel muss korrigiert werden, bevor dieses Formular abgesendet werden kann.",
+    uiReadonlyWhenFaulted: "Absenden nicht möglich: Die uiReadonlyWhen-Regel von {{fields}} konnte nicht ausgewertet werden. Die Regel muss korrigiert werden, bevor dieses Formular abgesendet werden kann.",
     discardTitle: "Änderungen verwerfen?",
     discardMessage: "Sie haben ungespeicherte Änderungen. Wenn Sie dieses Formular jetzt schließen, gehen Ihre Bearbeitungen verloren.",
     // objectui#4024 — the create/edit dialog's `sr-only` accessible
@@ -2587,6 +2588,7 @@ const de = {
       savedCleared: "Gespeicherter Wert geleert",
       deprecatedBadge: "Veraltet",
       deprecatedBadgeReplacedBy: "Veraltet → {{replacedBy}}",
+      selectValueRetired: "{{value}} (nicht mehr verfügbar)",
       unsupportedSpecifierType: "Nicht unterstützter Einstellungstyp: {{type}}",
       mapAddRow: "Zeile hinzufügen",
       mapRemoveRow: "{{key}} entfernen",

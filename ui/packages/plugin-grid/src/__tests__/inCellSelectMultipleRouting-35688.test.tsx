@@ -107,7 +107,7 @@ function makeDataSource() {
   } as any;
 }
 
-function renderGrid(cellSelection = false) {
+function renderGrid(cellSelection?: true) {
   const ds = makeDataSource();
   const schema: any = {
     type: 'object-grid',
@@ -143,14 +143,14 @@ function cellUnder(container: HTMLElement, label: string): HTMLElement {
   return container.querySelectorAll('tbody tr')[0].querySelectorAll('td')[at] as HTMLElement;
 }
 
-// The grid batches edits (no `cellSelection`, so no per-cell autosave): what a
-// pick wrote shows as the row's pending change, and nothing reaches `update`.
+// An editable grid is select-first and saves each committed cell at once
+// (objectstack#35827): what a pick wrote reaches `update` as the row's one write.
 describe('ObjectGrid cell editor: a select declared multiple (objectstack#35688 S2)', () => {
   it('each check stages and the editor stays open; moving on closes it with every check', async () => {
-    const { container } = renderGrid();
+    const { container, ds } = renderGrid();
     await waitFor(() => expect(screen.getByText('Design system')).toBeInTheDocument());
 
-    fireEvent.click(cellUnder(container, 'Colors'));
+    { const opened = cellUnder(container, 'Colors'); fireEvent.click(opened); fireEvent.doubleClick(opened); }
     await waitFor(() => expect(screen.getByTestId('in-cell-option-red')).toBeInTheDocument());
 
     fireEvent.click(screen.getByTestId('in-cell-option-red'));
@@ -162,39 +162,43 @@ describe('ObjectGrid cell editor: a select declared multiple (objectstack#35688 
 
     fireEvent.pointerDown(screen.getByTestId('outside'));
     await waitFor(() => expect(screen.queryByTestId('in-cell-option-red')).toBeNull());
-    // This grid batches its edits: the row carries the three colours, pending.
-    await waitFor(() => expect(screen.getByText(/1 row modified/)).toBeInTheDocument());
+    // One write, with the three colours: the checks were staged while open.
+    await waitFor(() => expect(ds.update).toHaveBeenCalledTimes(1));
+    expect(ds.update.mock.calls[0][1]).toBe('r1');
+    expect([...(ds.update.mock.calls[0][2] as { colors: string[] }).colors].sort()).toEqual(['blue', 'green', 'red']);
     const cell = cellUnder(container, 'Colors');
     for (const label of ['Blue', 'Red', 'Green']) expect(cell.textContent).toContain(label);
     expect(screen.queryByTestId('in-cell-option-red')).toBeNull();
   });
 
   it('CONTROL: a single select saves on the pick and closes', async () => {
-    const { container } = renderGrid();
+    const { container, ds } = renderGrid();
     await waitFor(() => expect(screen.getByText('Design system')).toBeInTheDocument());
 
-    fireEvent.click(cellUnder(container, 'Priority'));
+    { const opened = cellUnder(container, 'Priority'); fireEvent.click(opened); fireEvent.doubleClick(opened); }
     await waitFor(() => expect(screen.getByTestId('in-cell-option-low')).toBeInTheDocument());
     fireEvent.click(screen.getByTestId('in-cell-option-low'));
 
     // The pick closes the editor, and the click that made it does not open it again.
     await waitFor(() => expect(screen.queryByTestId('in-cell-option-low')).toBeNull());
-    await waitFor(() => expect(screen.getByText(/1 row modified/)).toBeInTheDocument());
+    await waitFor(() => expect(ds.update).toHaveBeenCalledTimes(1));
+    expect(ds.update.mock.calls[0].slice(1, 3)).toEqual(['r1', { priority: 'low' }]);
     expect(cellUnder(container, 'Priority').textContent).toContain('Low');
   });
 });
 
 describe('ObjectGrid cell editor: lookups and ratings (objectstack#35688 S3)', () => {
   it('a lookup cell opens its candidate list in place; a pick ends the edit', async () => {
-    const { container } = renderGrid();
+    const { container, ds } = renderGrid();
     await waitFor(() => expect(screen.getByText('Design system')).toBeInTheDocument());
 
-    fireEvent.click(cellUnder(container, 'Tier'));
+    { const opened = cellUnder(container, 'Tier'); fireEvent.click(opened); fireEvent.doubleClick(opened); }
     await waitFor(() => expect(screen.getByTestId('lookup-in-cell')).toBeInTheDocument());
     fireEvent.click(await screen.findByText('Silver'));
 
     await waitFor(() => expect(screen.queryByTestId('lookup-in-cell')).toBeNull());
-    await waitFor(() => expect(screen.getByText(/1 row modified/)).toBeInTheDocument());
+    await waitFor(() => expect(ds.update).toHaveBeenCalledTimes(1));
+    expect(ds.update.mock.calls[0].slice(1, 3)).toEqual(['r1', { tier: 'silver' }]);
   });
 
   it('a single pick from Browse all ends the edit too, and saves the picked id', async () => {

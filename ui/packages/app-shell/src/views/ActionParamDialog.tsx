@@ -670,6 +670,9 @@ export function ActionParamDialog({ state, onOpenChange }: ActionParamDialogProp
   const [submitting, setSubmitting] = useState(false);
   // The last run's refusal, shown above the buttons until the next Confirm.
   const [refusal, setRefusal] = useState<string | null>(null);
+  // The reasons a refusal that names several listed (objectstack#36877), shown
+  // one per line in the refusal box.
+  const [refusalLines, setRefusalLines] = useState<ActionResult['refusals']>(undefined);
 
   // A param may carry a `visible` predicate (CEL) gating it on the same scope as
   // action visibility (features / user / app / data) — e.g. `create_user`'s
@@ -901,6 +904,7 @@ export function ActionParamDialog({ state, onOpenChange }: ActionParamDialogProp
         const { marks, complete } = refusalParamMarks(result, dialogParams);
         setErrors(marks);
         setRefusal(complete ? null : refusalText(result));
+        setRefusalLines(result.refusals);
         return;
       }
     }
@@ -1246,7 +1250,7 @@ export function ActionParamDialog({ state, onOpenChange }: ActionParamDialogProp
             data-testid="action-param-refusal"
             className="rounded-md border border-destructive/50 bg-destructive/10 p-3 text-sm text-destructive whitespace-pre-line"
           >
-            <RefusalMessage text={refusal} />
+            <RefusalMessage text={refusal} lines={refusalLines} />
           </div>
         )}
 

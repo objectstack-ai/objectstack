@@ -893,6 +893,10 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "Readonly",
         helpText: "Field is read-only in forms"
       },
+      uiReadonly: {
+        label: "Ui Readonly",
+        helpText: "People cannot edit this field in the console (dialogs, the record page, grids, kanban and calendar drag), while actions, imports, the API and flows still write it, each write judged by the object's validations. Leave it off when Read-only is on: that one already keeps every client write out."
+      },
       hidden: {
         label: "Hidden",
         helpText: "Hide field from default UI views"
@@ -916,6 +920,10 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       readonlyWhen: {
         label: "Readonly When",
         helpText: "CEL predicate over the record (e.g. record.status == 'paid') — the field is read-only while it is TRUE, enforced server-side: an update's change to a locked field is dropped and the stored value kept. Reads the record's own columns; objectstack validate refuses a read through a reference field."
+      },
+      uiReadonlyWhen: {
+        label: "Ui Readonly When",
+        helpText: "CEL predicate over the record (e.g. record.status != 'draft') — while it is TRUE, people cannot edit the field of an existing record in the console (the edit dialog, the record page, grids, kanban and calendar drag); a new record's create dialog is not judged. Actions, imports, the API and flows still write it, judged by the object's validations. Reads the record's own columns, as Read-only when does."
       },
       requiredWhen: {
         label: "Required When",

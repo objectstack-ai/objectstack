@@ -2900,7 +2900,7 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
 
   // --- P2: Auto-subscribe to DataSource mutation events ---
   // Refetch whenever the bound object is mutated through the DataSource. This
-  // is the ONLY refresh signal for inline-edit "Save All": ObjectGrid persists
+  // is the ONLY refresh signal for inline-edit cell saves: ObjectGrid persists
   // those edits by calling dataSource.update() directly, with no form-success
   // handler to bump an external refreshTrigger — so subscribing even when
   // `refreshTrigger` is provided is required, not redundant. Form/delete flows
@@ -4538,6 +4538,32 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
               .map((c) => deadlineDefs?.[c])
               .filter((def) => def?.dueLike === true && def.settledWhen != null)
               .map((def) => def!.settledWhen),
+          )) addSpeculative(f);
+
+          // [objectstack#36806] The field locks' operands (`readonlyWhen`,
+          // `uiReadonlyWhen`) of every field a person edits in place from
+          // this list: the shown grid columns, the kanban's lane field (a card
+          // drag writes it) and the calendar's start / end fields (an event
+          // drag writes them). Each surface judges the lock over the ROW
+          // (`fieldReadOnlyByHand`), so a row projected without the operand
+          // faulted `No such key`: open for `readonlyWhen` (the server drops
+          // the write), locked for the hand lock (nothing behind it judges
+          // one). Through `addSpeculative`, like every binding here: an
+          // operand the viewer may not read is never requested — and that
+          // viewer is never served the predicate either: the definition's FLS
+          // scrub (`@objectstack/metadata-core`) deletes it and serves the
+          // field `uiReadonly: true` in its place, so it stays locked by hand.
+          const lockDefs = objectDef?.fields as Record<string, { readonlyWhen?: unknown; uiReadonlyWhen?: unknown } | undefined> | undefined;
+          const editedInPlace = [
+            ...cols,
+            (schema.kanban as { groupByField?: unknown } | undefined)?.groupByField,
+            (schema.calendar as { startDateField?: unknown } | undefined)?.startDateField,
+            (schema.calendar as { endDateField?: unknown } | undefined)?.endDateField,
+          ].filter((name): name is string => typeof name === 'string' && name.length > 0);
+          for (const f of collectPredicateFieldRefs(
+            editedInPlace
+              .flatMap((name) => [lockDefs?.[name]?.readonlyWhen, lockDefs?.[name]?.uiReadonlyWhen])
+              .filter((pred) => pred != null),
           )) addSpeculative(f);
 
           // [objectui#13036] A shown `referenceVia` pointer column's TYPE

@@ -44,7 +44,7 @@
  */
 
 import React from 'react';
-import { getRecordDisplayName, resolveFieldAffordance } from '@object-ui/core';
+import { fieldStaticallyReadOnlyByHand, getRecordDisplayName, resolveFieldAffordance } from '@object-ui/core';
 import {
   collectRequiredWhenPromptFields,
   requiredWhenPromptReads,
@@ -117,7 +117,7 @@ export function useCellRequiredPrompt(inputs: CellRequiredPromptInputs): {
   // A field this reader may write from the list: the field grant the cell
   // editors ask (`listInlineEdit`).
   const fillable = (name: string, def: Record<string, unknown>): boolean =>
-    def.readonly !== true
+    !fieldStaticallyReadOnlyByHand(def)
     && (!objectName || resolveFieldAffordance('listInlineEdit', perms, objectName, name));
 
   const label = (f: RequiredWhenPromptField): RequiredFieldsDialogField => {

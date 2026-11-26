@@ -127,7 +127,7 @@ describe('#33933 — no knowledge settings on a default boot', async () => {
     // "Not reached" is judged against the hub's own no-handler answer for this
     // id, never against a copy of its wording.
     expect(embedder.body?.error?.details?.message).toBe(settingsActionCopy(undefined).noHandler('test_embedder', 'ai'));
-    const knowledge = await call(http, route, { namespace: 'knowledge', actionId: 'test' }, { values: { adapter: 'ragflow' } });
+    const knowledge = await call(http, route, { namespace: 'knowledge', actionId: 'test' }, { values: { adapter: 'turso' } });
     expect(knowledge.status).toBe(404);
     expect(knowledge.body?.error?.code).toBe('UNKNOWN_NAMESPACE');
   });

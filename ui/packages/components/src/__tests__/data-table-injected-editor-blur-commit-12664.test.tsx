@@ -14,7 +14,9 @@
  * text on blur). Before Enter or a pointer press outside commits, the table
  * blurs the control that holds focus inside the editor, and it commits the
  * LAST value staged — not the value from before a stage made earlier in the
- * same event. Escape discards without reading the control.
+ * same event. Escape discards without reading the control. The table is
+ * mounted select-first with a per-cell save, the one way it edits
+ * (objectstack#35827).
  *
  * `packages/components` does not depend on `@object-ui/fields`, so the
  * commit-on-blur widget is reproduced here with a plain input; the real
@@ -25,14 +27,16 @@ import { describe, it, expect, vi } from 'vitest';
 import { fireEvent, waitFor } from '@testing-library/react';
 import '@testing-library/jest-dom';
 import React from 'react';
-import { renderComponent } from './test-utils';
+import { openCellEditor, renderSelectFirstTable } from './test-utils';
 // Module scope, not a hook — see object-ui/no-dynamic-import-in-test-hook.
 import '../renderers';
+// `react-page` reaches a dynamic `import('@object-ui/react-runtime')`: pay its load
+// at collection, never inside a case's clocked window (`check:test-source-alias`).
+import '@object-ui/react-runtime';
 
 const baseSchema = {
   type: 'data-table' as const,
   editable: true,
-  singleClickEdit: true,
   columns: [
     { header: 'Name', accessorKey: 'name', editable: false },
     { header: 'Due', accessorKey: 'due' },
@@ -58,7 +62,7 @@ const blurCommitEditor = ({ column, value, stage }: any) =>
 
 function openEditor(container: HTMLElement): HTMLInputElement {
   const dueCell = container.querySelectorAll('tbody td')[1] as HTMLElement;
-  fireEvent.click(dueCell);
+  openCellEditor(dueCell);
   const editor = dueCell.querySelector('[data-testid="blur-commit-editor"]') as HTMLInputElement;
   expect(editor).toBeTruthy();
   editor.focus();
@@ -69,7 +73,7 @@ function openEditor(container: HTMLElement): HTMLInputElement {
 describe('data-table — a commit-on-blur injected editor (objectui#12664)', () => {
   it('Enter blurs the control first and commits what it staged', async () => {
     const onCellChange = vi.fn();
-    const { container } = renderComponent({ ...baseSchema, onCellChange, renderCellEditor: blurCommitEditor });
+    const { container } = renderSelectFirstTable({ ...baseSchema, onCellChange, renderCellEditor: blurCommitEditor });
     const editor = openEditor(container);
     fireEvent.keyDown(editor, { key: 'Enter' });
     expect(onCellChange).toHaveBeenCalledTimes(1);
@@ -79,7 +83,7 @@ describe('data-table — a commit-on-blur injected editor (objectui#12664)', () 
 
   it('a pointer press outside blurs the control first and commits what it staged', async () => {
     const onCellChange = vi.fn();
-    const { container } = renderComponent({ ...baseSchema, onCellChange, renderCellEditor: blurCommitEditor });
+    const { container } = renderSelectFirstTable({ ...baseSchema, onCellChange, renderCellEditor: blurCommitEditor });
     openEditor(container);
     fireEvent.pointerDown(document.body);
     expect(onCellChange).toHaveBeenCalledTimes(1);
@@ -87,14 +91,13 @@ describe('data-table — a commit-on-blur injected editor (objectui#12664)', () 
     await waitFor(() => expect(container.querySelector('[data-testid="blur-commit-editor"]')).toBeNull());
   });
 
-  it('Escape discards: the control is not read and nothing is committed or staged', async () => {
+  it('Escape discards: the control is not read and nothing is committed', async () => {
     const onCellChange = vi.fn();
-    const { container, queryByText } = renderComponent({ ...baseSchema, onCellChange, renderCellEditor: blurCommitEditor });
+    const { container } = renderSelectFirstTable({ ...baseSchema, onCellChange, renderCellEditor: blurCommitEditor });
     const editor = openEditor(container);
     fireEvent.keyDown(editor, { key: 'Escape' });
     await waitFor(() => expect(container.querySelector('[data-testid="blur-commit-editor"]')).toBeNull());
     fireEvent.pointerDown(document.body);
     expect(onCellChange).not.toHaveBeenCalled();
-    expect(queryByText(/Save All/i)).toBeNull();
   });
 });

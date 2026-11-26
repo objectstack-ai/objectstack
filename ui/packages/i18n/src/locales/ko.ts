@@ -195,6 +195,7 @@ const ko = {
     uploadInFlight: "업로드가 완료된 후에 저장하세요.",
     clearedOnHide: "현재 값에 더 이상 해당하지 않는 항목을 비웠습니다: {{fields}}",
     visibleWhenFaulted: "제출할 수 없습니다: {{fields}}의 visibleWhen 규칙을 평가할 수 없습니다. 이 양식을 제출하려면 먼저 규칙을 수정해야 합니다.",
+    uiReadonlyWhenFaulted: "제출할 수 없습니다: {{fields}}의 uiReadonlyWhen 규칙을 평가할 수 없습니다. 이 양식을 제출하려면 먼저 규칙을 수정해야 합니다.",
     discardTitle: "변경 내용을 버릴까요?",
     discardMessage: "저장하지 않은 변경 내용이 있습니다. 지금 이 양식을 닫으면 편집 내용이 사라집니다.",
     // objectui#4024 — the create/edit dialog's `sr-only` accessible
@@ -2587,6 +2588,7 @@ const ko = {
       savedCleared: "저장된 값을 지웠습니다",
       deprecatedBadge: "지원 중단됨",
       deprecatedBadgeReplacedBy: "지원 중단됨 → {{replacedBy}}",
+      selectValueRetired: "{{value}} (더 이상 사용할 수 없음)",
       unsupportedSpecifierType: "지원되지 않는 설정 항목 유형: {{type}}",
       mapAddRow: "행 추가",
       mapRemoveRow: "{{key}} 삭제",

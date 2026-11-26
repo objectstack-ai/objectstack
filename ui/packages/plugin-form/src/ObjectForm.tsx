@@ -21,7 +21,7 @@ import { pickLocalized, useObjectTranslation, useLocalization, withHomeAmountSou
 import { useRecordInvalidation } from './recordInvalidation';
 import { useReportedDirtyChange } from './formDirtyReport';
 import { mapFieldTypeToFormType, buildValidationRules, formatFileSize, fieldHelpText, withFollowedParentObject, withFormObject, PERMISSION_SET_GRANT_COLUMNS } from '@object-ui/fields';
-import { isExpressionComputedField } from '@object-ui/core';
+import { fieldStaticallyReadOnlyByHand, isExpressionComputedField } from '@object-ui/core';
 import { useIsMobile, toast, FormSectionNavContext } from '@object-ui/components';
 import { resolveSuccessNavigate } from './successBehavior';
 import { resolveSubmitRedirect, submitRedirectScope } from './submitRedirect';
@@ -1006,7 +1006,8 @@ const SimpleObjectForm: React.FC<{ schema: LocalizedObjectFormSchema; dataSource
           required: isRequiredInForm(field, isCreateFormMode(schema)),
           // `_draftOnly`: a field only the draft declares, under the console's
           // draft preview — drawn, never fillable (see `fromObjectSchema`).
-          disabled: schema.readOnly || schema.mode === 'view' || field.readonly || field._draftOnly === true,
+          // `uiReadonly` is the hand lock: drawn, never filled by a person.
+          disabled: schema.readOnly || schema.mode === 'view' || fieldStaticallyReadOnlyByHand(field) || field._draftOnly === true,
           placeholder: field.placeholder,
           // The help line under the control: the spec's `inlineHelpText`,
           // else `description`, through the one read `fromObjectSchema`
@@ -1019,6 +1020,8 @@ const SimpleObjectForm: React.FC<{ schema: LocalizedObjectFormSchema; dataSource
           // engine (same dialect the server enforces). Undefined when absent.
           visibleWhen: field.visibleWhen,
           readonlyWhen: field.readonlyWhen,
+          // The hand lock's predicate, folded with `readonlyWhen` by the form renderer.
+          uiReadonlyWhen: field.uiReadonlyWhen,
           requiredWhen: field.requiredWhen,
           // Field-group membership (Field.group → object.fieldGroups[].key).
           // Carried through so the form can auto-derive sections from the
