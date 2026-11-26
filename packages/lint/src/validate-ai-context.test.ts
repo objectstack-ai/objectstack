@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest';
 import {
   AI_CONTEXT_BODY_NOT_LONG_TEXT,
   AI_CONTEXT_FIELD_UNKNOWN,
+  AI_CONTEXT_FIELD_UNPROVISIONED,
   AI_CONTEXT_OBJECT_UNKNOWN,
   AI_CONTEXT_RELATED_LINK_UNKNOWN,
   AI_CONTEXT_SORT_FIELD_UNSORTABLE,
@@ -166,7 +167,7 @@ describe('validateAiContext — ADR-0160 D1 author defects', () => {
   // and `get_record_context` answers both in the root's `fields`, a related
   // list's `fields`, its `where` and its `orderBy`. On an `ownership: 'org'`
   // object the platform injects no `owner_id` and the tool leaves it out.
-  // `service-record-context`'s injected-system-columns test pins the
+  // `service-record-context`'s shared harness (`record-context-tools.test.ts`) pins the
   // executor's half over a door serving the same registry-injected shape.
   it('an injected system column the object does not declare is no unknown field (owner_id, created_at)', () => {
     const stack = {
@@ -230,8 +231,105 @@ describe('validateAiContext — ADR-0160 D1 author defects', () => {
   it('every verdict is a warning, and every rule it emits has an `os explain` entry', () => {
     const findings = validateAiContext({ objects, aiContexts: [pack({ fields: ['nope'], body: { field: 'title' } })] });
     expect(findings.every((f) => f.severity === 'warning')).toBe(true);
-    for (const id of [AI_CONTEXT_OBJECT_UNKNOWN, AI_CONTEXT_FIELD_UNKNOWN, AI_CONTEXT_RELATED_LINK_UNKNOWN, AI_CONTEXT_BODY_NOT_LONG_TEXT, AI_CONTEXT_SORT_FIELD_UNSORTABLE]) {
+    for (const id of [AI_CONTEXT_OBJECT_UNKNOWN, AI_CONTEXT_FIELD_UNKNOWN, AI_CONTEXT_FIELD_UNPROVISIONED, AI_CONTEXT_RELATED_LINK_UNKNOWN, AI_CONTEXT_BODY_NOT_LONG_TEXT, AI_CONTEXT_SORT_FIELD_UNSORTABLE]) {
       expect(explainRule(id), id).toBeTruthy();
+    }
+  });
+
+  it('the `ai-context-field-unknown` explanation counts injected columns as defined, and names the external case', () => {
+    const text = explainRule(AI_CONTEXT_FIELD_UNKNOWN)?.paragraphs.join(' ') ?? '';
+    expect(text).toContain('injected');
+    expect(text).toContain('owner_id');
+    expect(text).toContain(AI_CONTEXT_FIELD_UNPROVISIONED);
+  });
+});
+
+/**
+ * [ADR-0015] An `external` object's injected columns resolve — the published
+ * definition carries them, so `ai-context-field-unknown` stays silent — but
+ * the platform provisions no column behind them. The provenance answer is the
+ * spec's (`unprovisionedInjectedColumnsFor`), the one every unprovisioned-anchor
+ * rule here reads; an author-declared column of the same name is the author's.
+ */
+describe('validateAiContext — an injected column with no storage on an external object (ADR-0015)', () => {
+  const external = (names: string[]) =>
+    objects.map((o) => (names.includes(o.name) ? { ...o, external: { remoteName: `${o.name}s` } } : o));
+  const injectedPack = pack({
+    fields: ['title', 'owner_id', 'created_at'],
+    related: [{
+      object: 'policy_revision',
+      field: 'policy',
+      fields: ['version', 'created_by'],
+      where: { owner_id: 'usr_1' },
+      orderBy: [{ field: 'created_at', order: 'desc' }],
+    }],
+  });
+
+  it('warns at every name the pack reads off an injected column, on the root and a related list', () => {
+    const findings = validateAiContext({ objects: external(['policy', 'policy_revision']), aiContexts: [injectedPack] });
+    expect(findings.map((f) => [f.rule, f.path])).toEqual([
+      [AI_CONTEXT_FIELD_UNPROVISIONED, 'aiContexts[0].fields[1]'],
+      [AI_CONTEXT_FIELD_UNPROVISIONED, 'aiContexts[0].fields[2]'],
+      [AI_CONTEXT_FIELD_UNPROVISIONED, 'aiContexts[0].related[0].fields[1]'],
+      [AI_CONTEXT_FIELD_UNPROVISIONED, 'aiContexts[0].related[0].where'],
+      [AI_CONTEXT_FIELD_UNPROVISIONED, 'aiContexts[0].related[0].orderBy[0].field'],
+    ]);
+    expect(findings.every((f) => f.severity === 'warning')).toBe(true);
+    // Each finding names its object and column, the shared anchor fix beside it.
+    const [rootOwner, , childCreator] = findings;
+    expect(rootOwner?.message).toContain("'owner_id'");
+    expect(rootOwner?.message).toContain("external object 'policy'");
+    expect(childCreator?.message).toContain("external object 'policy_revision'");
+    expect(rootOwner?.hint).toContain('columnMap');
+  });
+
+  it('the same pack on objects that are not external is clean', () => {
+    expect(validateAiContext({ objects, aiContexts: [injectedPack] })).toEqual([]);
+  });
+
+  it('judges each object by its own provenance: an external child under a local root', () => {
+    expect(rulesOf({ objects: external(['policy_revision']), aiContexts: [injectedPack] })).toEqual([
+      [AI_CONTEXT_FIELD_UNPROVISIONED, 'aiContexts[0].related[0].fields[1]'],
+      [AI_CONTEXT_FIELD_UNPROVISIONED, 'aiContexts[0].related[0].where'],
+      [AI_CONTEXT_FIELD_UNPROVISIONED, 'aiContexts[0].related[0].orderBy[0].field'],
+    ]);
+  });
+
+  it('a column the author declares on the external object is theirs, and never judged', () => {
+    const declared = external(['policy']).map((o) =>
+      o.name === 'policy' ? { ...o, fields: { ...o.fields, owner_id: { type: 'text', label: 'Remote owner' } } } : o);
+    expect(rulesOf({ objects: declared, aiContexts: [pack({ fields: ['title', 'owner_id'] })] })).toEqual([]);
+  });
+
+  it('a body on an injected column carries no body twice over: not long text, and no storage', () => {
+    expect(rulesOf({ objects: external(['policy']), aiContexts: [pack({ body: { field: 'created_at' } })] })).toEqual([
+      [AI_CONTEXT_BODY_NOT_LONG_TEXT, 'aiContexts[0].body.field'],
+      [AI_CONTEXT_FIELD_UNPROVISIONED, 'aiContexts[0].body.field'],
+    ]);
+  });
+
+  it('a related list linked through an injected reference of an external child reads no rows', () => {
+    const withUser = [
+      ...objects,
+      { name: 'sys_user', fields: { name: { type: 'text' } } },
+      { name: 'task', fields: { subject: { type: 'text' } } },
+    ];
+    const userPack = { name: 'user_brief', object: 'sys_user', fields: ['name'], related: [{ object: 'task', field: 'owner_id' }] };
+    const local = validateAiContext({ objects: withUser, aiContexts: [userPack] });
+    expect(local).toEqual([]);
+    const externalTask = withUser.map((o) => (o.name === 'task' ? { ...o, external: { remoteName: 'tasks' } } : o));
+    const [finding, ...rest] = validateAiContext({ objects: externalTask, aiContexts: [userPack] });
+    expect(rest).toEqual([]);
+    expect([finding?.rule, finding?.path]).toEqual([AI_CONTEXT_FIELD_UNPROVISIONED, 'aiContexts[0].related[0].field']);
+    expect(finding?.message).toContain("external object 'task'");
+  });
+
+  it('has an `os explain` entry that states the cause, the cost per position and the remedy', () => {
+    const entry = explainRule(AI_CONTEXT_FIELD_UNPROVISIONED);
+    expect(entry?.rule).toBe(AI_CONTEXT_FIELD_UNPROVISIONED);
+    const text = entry?.paragraphs.join(' ') ?? '';
+    for (const fact of ['ADR-0015', 'external', '`fields`', '`body.field`', '`where`', '`orderBy`', 'columnMap', AI_CONTEXT_FIELD_UNKNOWN]) {
+      expect(text, fact).toContain(fact);
     }
   });
 });
