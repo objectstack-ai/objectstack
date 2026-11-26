@@ -286,6 +286,7 @@ describe('[#29985] the census reads the modules the split moved bodies to', () =
             .toEqual([
                 'protocol-form-writes.ts: applyOldShapeFormRowRemovals',
                 'protocol-form-writes.ts: applyOldShapeFormRowRemovals',
+                'protocol-form-writes.ts: restoreOldShapeFormRowRemovals',
                 'protocol-packageless-overlay-migration.ts: migratePackagelessOverlays',
             ]);
     });
