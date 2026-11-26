@@ -223,7 +223,14 @@ describe('Studio right slot — its control ends the page\'s title row (objectst
 
   it('a list page: the AI assistant ends the list\'s title row, inside the page, not the top bar', async () => {
     renderAt('data');
-    const ai = await screen.findByTestId('topbar-ai-assistant', undefined, { timeout: 4000 });
+    // objectstack#37456 — while the list loads it has no title row, and the
+    // pane's fallback holds the control (`StudioTitleRowFallback`); once the
+    // list's title row is drawn the control is there, and only there.
+    await waitFor(
+      () => expect(screen.getByTestId('topbar-ai-assistant').closest('[data-slot="studio-title-row-end"]')).not.toBeNull(),
+      { timeout: 4000 },
+    );
+    const ai = screen.getByTestId('topbar-ai-assistant');
     expect(within(screen.getByTestId('studio-shell-header')).queryByTestId('topbar-ai-assistant')).toBeNull();
     expect(screen.getByTestId('studio-pillars-host')).toContainElement(ai);
     expect(ai.closest('[data-slot="studio-title-row-end"]')).not.toBeNull();

@@ -466,9 +466,13 @@ function mounts(component: string): string[] {
 }
 
 describe('every create-package door offers 「同时创建应用」 (objectstack#37134)', () => {
-  it('Setup → Packages (its button and the `?new=package` door) and the resource list mount CreatePackageDialog', () => {
+  it('Setup → Packages (its button and the `?new=package` door), the resource list and Studio’s package switcher (objectstack#37456) mount CreatePackageDialog', () => {
     const doors = mounts('CreatePackageDialog').map((m) => m.split(':')[0]);
-    expect(doors.sort()).toEqual(['views/metadata-admin/PackagesPage.tsx', 'views/metadata-admin/ResourceListPage.tsx']);
+    expect(doors.sort()).toEqual([
+      'views/metadata-admin/PackagesPage.tsx',
+      'views/metadata-admin/ResourceListPage.tsx',
+      'views/studio-design/StudioPackageSwitcher.tsx',
+    ]);
   });
 
   it('no create-mode PackageFormDialog is mounted outside CreatePackageDialog, and that one passes the step', () => {
