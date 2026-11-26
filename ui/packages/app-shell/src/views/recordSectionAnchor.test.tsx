@@ -12,11 +12,12 @@
  * draws a different number of same-titled headings than the outline lists, the
  * field is opened rather than a heading that may be another one.
  */
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { headingsOf } from '@objectstack/spec/ai';
 import {
   RECORD_SECTION_TARGET_ATTR,
   focusRecordSection,
+  loadSectionHeadingReader,
   locateSection,
   sectionCandidates,
 } from './recordSectionAnchor';
@@ -42,6 +43,9 @@ const RECORD = {
 function row(field: string, inner: string): string {
   return `<div data-detail-field="${field}">${inner}</div>`;
 }
+
+// The markdown face's parse, loaded once, as the record page loads it.
+beforeAll(() => loadSectionHeadingReader());
 
 afterEach(() => {
   document.body.innerHTML = '';
@@ -166,24 +170,59 @@ describe('objectstack#37365 — locateSection finds the drawn heading', () => {
     expect(locateSection(document.body, sectionCandidates(FIELDS, { content: control }, 'scope'))?.heading?.id).toBe('atx');
   });
 
-  it('objectstack#37562 N6 — counts every place a face draws a same-titled heading the outline does not list; CONTROL: other titles and fenced code count none', () => {
-    const unlisted = (value: string, field = 'content'): number | undefined =>
-      sectionCandidates(FIELDS, { [field]: value }, 'scope')[0]?.unlisted;
-    const atx = '# Scope';
-    expect(unlisted(['Scope', '-----', '', atx].join('\n'))).toBe(1);
-    expect(unlisted(['Sco', 'pe', '===', '', atx].join('\n'))).toBe(1);
-    expect(unlisted(['> # Scope', '', atx].join('\n'))).toBe(1);
-    expect(unlisted(['- # Scope', '', atx].join('\n'))).toBe(1);
-    expect(unlisted(['1. ## Scope', '', atx].join('\n'))).toBe(1);
-    expect(unlisted(['   # Scope', '', atx].join('\n'))).toBe(1);
-    expect(unlisted(['<h2>Scope</h2>', '', atx].join('\n'))).toBe(1);
-    // An html body: a heading tag left unclosed, and one opened inside another.
-    expect(unlisted('<h2>Scope</h2><p>x</p><h2>Scope', 'legal')).toBe(1);
-    expect(unlisted('<h2>About <h2>Scope</h2><h2>Scope</h2>', 'legal')).toBe(1);
-    // CONTROL: other titles, a rule under a blank line, a list item, fenced code.
-    expect(unlisted(['Preface', '=======', '', '> # Intro', '', '---', '', '- Scope', '', atx].join('\n'))).toBe(0);
-    expect(unlisted(['```', 'Scope', '===', '> # Scope', '```', '', atx].join('\n'))).toBe(0);
-    expect(unlisted('<h2>Scope</h2><hr><header>Scope</header>', 'legal')).toBe(0);
+  it.each([
+    ['a setext heading', ['Scope', '-----']],
+    ['a two-line setext heading', ['Sco', 'pe', '===']],
+    ['a setext heading inside a quote', ['> Scope', '> ---']],
+    ['a setext heading under a comment line', ['<!-- note -->', 'Scope', '---']],
+    ['a setext heading under a link definition', ['[a]: https://example.com', 'Scope', '===']],
+    ['a setext heading under indented code', ['    code', 'Scope', '---']],
+    ['an ATX heading behind a quote', ['> # Scope']],
+    ['an ATX heading in a list item', ['1. ## Scope']],
+    ['an ATX heading behind blanks', ['   # Scope']],
+    ['an ATX heading in a footnote', ['x[^1]', '', '[^1]: # Scope']],
+  ])('objectstack#37562 S1 — %s, which the face draws, counts as unlisted', (_shape, lines) => {
+    const value = [...lines, '', '# Scope'].join('\n');
+    expect(sectionCandidates(FIELDS, { content: value }, 'scope')[0]?.unlisted).toBe(1);
+  });
+
+  it("objectstack#37562 S1 — the footnote section's Footnotes label counts against a cited `Footnotes`; CONTROL: with no footnote, none", () => {
+    const value = ['# Footnotes', '', 'x[^1]', '', '[^1]: y'].join('\n');
+    expect(sectionCandidates(FIELDS, { content: value }, 'footnotes')[0]?.unlisted).toBe(1);
+    expect(sectionCandidates(FIELDS, { content: '# Footnotes\n\nx' }, 'footnotes')[0]?.unlisted).toBe(0);
+  });
+
+  it.each([
+    ['a raw heading tag', ['<h2>Scope</h2>']],
+    ['an indented code line', ['    # Scope']],
+    ['a lazy quote line over a rule', ['> Scope', '---']],
+    ['fenced code', ['```', 'Scope', '===', '> # Scope', '```']],
+    ['other titles, a rule under a blank line, a plain list item', ['Preface', '=======', '', '> # Intro', '', '---', '', '- Scope']],
+  ])('objectstack#37562 N1 — %s, which the face never draws, does not count', (_shape, lines) => {
+    const value = [...lines, '', '# Scope'].join('\n');
+    expect(sectionCandidates(FIELDS, { content: value }, 'scope')[0]?.unlisted).toBe(0);
+  });
+
+  it('an html body counts a heading tag left unclosed or opened inside another; CONTROL: hr and header tags count none', () => {
+    const unlisted = (value: string): number | undefined => sectionCandidates(FIELDS, { legal: value }, 'scope')[0]?.unlisted;
+    expect(unlisted('<h2>Scope</h2><p>x</p><h2>Scope')).toBe(1);
+    expect(unlisted('<h2>About <h2>Scope</h2><h2>Scope</h2>')).toBe(1);
+    expect(unlisted('<h2>Scope</h2><hr><header>Scope</header>')).toBe(0);
+  });
+
+  it('objectstack#37562 — before the face’s parse loads, a markdown count is not trusted; once it loads, the heading is marked', async () => {
+    vi.resetModules();
+    const fresh = await import('./recordSectionAnchor');
+    const candidates = fresh.sectionCandidates(FIELDS, RECORD, 'scope');
+    expect(candidates[0].unlisted).toBeUndefined();
+    document.body.innerHTML = row('content', '<h1>Intro</h1><h2 id="s">Scope</h2><h2>Scope</h2>');
+    expect(fresh.locateSection(document.body, candidates)?.heading).toBeUndefined();
+    const heading = document.getElementById('s')!;
+    heading.scrollIntoView = vi.fn();
+    fresh.focusRecordSection(document.body, candidates, 5000);
+    expect(heading.hasAttribute(RECORD_SECTION_TARGET_ATTR)).toBe(false);
+    await vi.waitFor(() => expect(heading.getAttribute(RECORD_SECTION_TARGET_ATTR)).toBe('true'));
+    expect(heading.scrollIntoView).toHaveBeenCalledTimes(1);
   });
 
   it('a heading with no letter or digit opens the field; CONTROL: a titled heading beside it is marked', () => {
@@ -266,6 +305,29 @@ describe('objectstack#37365 — focusRecordSection', () => {
     // CONTROL: `Intro` is not drawn yet, so the page waits for it until the settle.
     scroll.mockClear();
     focusRecordSection(document.body, sectionCandidates(FIELDS, { content: body }, intro.anchor), 50);
+    expect(scroll).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(60);
+    expect(scroll).toHaveBeenCalledTimes(1);
+  });
+
+  it('objectstack#37562 N3 — a body drawing a same-titled heading the outline does not list scrolls to the field at once; CONTROL: without it, an undrawn heading still waits for the settle', () => {
+    vi.useFakeTimers();
+    const body = ['Scope', '=====', '', 'x', '', '# Scope', '', 'y'].join('\n');
+    document.body.innerHTML = row('content', '<h1>Scope</h1><p>x</p><h1>Scope</h1><p>y</p>');
+    const field = document.querySelector<HTMLElement>('[data-detail-field="content"]')!;
+    const scroll = vi.fn();
+    field.scrollIntoView = scroll;
+    focusRecordSection(document.body, sectionCandidates(FIELDS, { content: body }, 'scope'), 50);
+    expect(scroll).toHaveBeenCalledTimes(1);
+    vi.advanceTimersByTime(60);
+    expect(scroll).toHaveBeenCalledTimes(1);
+    expect(document.querySelector(`[${RECORD_SECTION_TARGET_ATTR}]`)).toBeNull();
+    // CONTROL: the setext heading titled otherwise and `Scope` not drawn yet.
+    scroll.mockClear();
+    document.body.innerHTML = row('content', '<h1>Preface</h1><p>x</p><p>loading</p>');
+    document.querySelector<HTMLElement>('[data-detail-field="content"]')!.scrollIntoView = scroll;
+    const control = ['Preface', '=======', '', 'x', '', '# Scope', '', 'y'].join('\n');
+    focusRecordSection(document.body, sectionCandidates(FIELDS, { content: control }, 'scope'), 50);
     expect(scroll).not.toHaveBeenCalled();
     vi.advanceTimersByTime(60);
     expect(scroll).toHaveBeenCalledTimes(1);

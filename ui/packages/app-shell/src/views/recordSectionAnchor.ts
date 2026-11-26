@@ -24,26 +24,29 @@
  * not list (a setext heading, an empty one, one inside a quote) from shifting
  * every later one onto the wrong section. The count is trusted only when the
  * face draws exactly as many headings of that reading as the outline lists,
- * and the body holds no place outside the outline that could draw a heading
- * of that reading: a same-titled heading the outline does not list, or a
- * listed one the face does not draw, would move the index onto another
- * heading, and one of each would leave the count equal while doing it, so then
- * the field is opened instead.
+ * and the body draws no heading of that reading the outline does not list: a
+ * same-titled heading the outline does not list, or a listed one the face does
+ * not draw, would move the index onto another heading, and one of each would
+ * leave the count equal while doing it, so then the field is opened instead.
+ * A markdown body's unlisted headings are counted from the face's own parse
+ * (`@object-ui/fields`' `loadDrawnMarkdownHeadings`, loaded on demand), so they
+ * are the ones drawn by construction; an html body's from its heading tags.
  *
  * - A `textarea` body draws no heading elements, so the field is scrolled to
  *   as soon as it is drawn. So is a heading with no letter or digit, which no
- *   reading tells apart: no drawing of the face can change that answer.
+ *   reading tells apart, and one whose body draws a same-titled heading the
+ *   outline does not list: no drawing of the face can change those answers.
  * - A heading that is not drawn (the face has not rendered it, reads it
  *   differently, or draws a different number of same-titled headings than the
  *   outline lists) also scrolls to the field, with no error, once
- *   {@link RECORD_SECTION_SETTLE_MS} pass. So does a heading whose body holds
- *   a same-titled heading the outline does not list.
+ *   {@link RECORD_SECTION_SETTLE_MS} pass.
  * - An anchor no field resolves (a stale one: the heading was renamed or
  *   removed) opens the record at its top, as if no section were named.
  *
  * Nothing here re-verifies a citation: the anchor is only a place to open at.
  */
 import { headingsOf, stripBodyTags, type BodyHeading } from '@objectstack/spec/ai';
+import { loadDrawnMarkdownHeadings, type DrawnMarkdownHeading } from '@object-ui/fields';
 
 /** The attribute a marked heading carries. */
 export const RECORD_SECTION_TARGET_ATTR = 'data-record-section-target';
@@ -89,12 +92,13 @@ export interface SectionCandidate {
   /** How many of the field's headings, in all, read the same: what the drawn face must match. */
   count: number;
   /**
-   * How many places of the body, outside the outline, could draw a heading
-   * that reads the same (a setext heading, one in a quote or a list item, a
-   * raw heading tag): any one leaves the count unable to say which drawn
-   * heading is the cited one.
+   * How many headings that read the same the body draws and the outline does
+   * not list (a setext heading, one in a quote, a list item or a footnote, the
+   * footnote section's label): any one leaves the count unable to say which
+   * drawn heading is the cited one. `undefined` while the markdown face's
+   * parse is not loaded: the count is then not trusted.
    */
-  unlisted: number;
+  unlisted: number | undefined;
 }
 
 /** What a drawn section resolved to: the field's row, and the heading when it is drawn. */
@@ -114,58 +118,6 @@ export function headingReading(text: string): string {
   return text.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '');
 }
 
-const isBlank = (c: string | undefined): boolean => c === ' ' || c === '\t';
-
-/** Whether `line` opens or closes a fenced code block, as the spec's outline reads one. */
-function isFence(line: string): boolean {
-  let i = 0;
-  while (i < line.length && isBlank(line[i])) i++;
-  return line.startsWith('```', i) || line.startsWith('~~~', i);
-}
-
-/** A setext underline: up to three blanks, a run of `=` or of `-`, trailing blanks. */
-function isSetextUnderline(line: string): boolean {
-  let i = 0;
-  while (i < 3 && line[i] === ' ') i++;
-  const mark = line[i];
-  if (mark !== '=' && mark !== '-') return false;
-  while (line[i] === mark) i++;
-  while (isBlank(line[i])) i++;
-  return i === line.length;
-}
-
-/**
- * The text of an ATX heading behind a container prefix (blanks, `>` quotes,
- * list markers), or `undefined` when `line` is no such heading. A forward
- * scan: a body is author-written, so no pattern that can backtrack.
- */
-function containedAtxText(line: string): string | undefined {
-  let i = 0;
-  for (;;) {
-    while (isBlank(line[i])) i++;
-    if (line[i] === '>') {
-      i++;
-      continue;
-    }
-    if ((line[i] === '-' || line[i] === '*' || line[i] === '+') && isBlank(line[i + 1])) {
-      i++;
-      continue;
-    }
-    let j = i;
-    while (j - i < 9 && line[j] !== undefined && line[j] >= '0' && line[j] <= '9') j++;
-    if (j > i && (line[j] === '.' || line[j] === ')') && isBlank(line[j + 1])) {
-      i = j + 1;
-      continue;
-    }
-    break;
-  }
-  let level = 0;
-  while (line[i + level] === '#') level++;
-  if (level < 1 || level > 6) return undefined;
-  const after = line[i + level];
-  return after === undefined || isBlank(after) ? line.slice(i + level) : undefined;
-}
-
 /** A raw heading tag's opener (`<h1` to `<h6`, not `<hr>` or `<header>`) at `at` of `lower`. */
 function isHeadingOpener(lower: string, at: number): boolean {
   const level = lower.charCodeAt(at + 2) - 48;
@@ -178,16 +130,13 @@ function blankEntities(text: string): string {
 }
 
 /**
- * The texts of every place in `value` that a face could draw as a heading the
- * outline (`headings`) does not list. Markdown: a setext heading, an ATX
- * heading behind a quote, a list marker or a blank, and a line holding a raw
- * heading tag; fenced code draws none. HTML: a heading tag the outline does
- * not list (one left unclosed, or opened inside another).
+ * The texts of every heading tag in an html `value` that the outline
+ * (`headings`) does not list: one left unclosed, or opened inside another.
  */
-function unlistedHeadingTexts(value: string, html: boolean, headings: readonly BodyHeading[]): string[] {
+function unlistedHtmlHeadingTexts(value: string, headings: readonly BodyHeading[]): string[] {
   const listed = new Set(headings.map((h) => h.start));
   const out: string[] = [];
-  if (html) {
+  {
     // Every search remembers where it landed and starts no earlier than an
     // earlier one, so the scan stays linear however many openers are unclosed.
     const lower = value.toLowerCase();
@@ -209,39 +158,50 @@ function unlistedHeadingTexts(value: string, html: boolean, headings: readonly B
     }
     return out;
   }
-  let inFence = false;
-  let offset = 0;
-  let paragraph: string[] = [];
-  for (const raw of value.split('\n')) {
-    const start = offset;
-    offset += raw.length + 1;
-    const line = raw.endsWith('\r') ? raw.slice(0, -1) : raw;
-    if (isFence(line)) {
-      inFence = !inFence;
-      paragraph = [];
-      continue;
-    }
-    if (inFence || listed.has(start) || line.trim() === '') {
-      paragraph = [];
-      continue;
-    }
-    if (paragraph.length > 0 && isSetextUnderline(line)) {
-      out.push(paragraph.join(' '));
-      paragraph = [];
-      continue;
-    }
-    const atx = containedAtxText(line);
-    const lower = line.toLowerCase();
-    let tag = false;
-    for (let at = lower.indexOf('<h'); at >= 0 && !tag; at = lower.indexOf('<h', at + 1)) tag = isHeadingOpener(lower, at);
-    if (atx !== undefined || tag) {
-      out.push(stripBodyTags(atx ?? line));
-      paragraph = [];
-      continue;
-    }
-    paragraph.push(line);
-  }
-  return out;
+}
+
+/** The markdown face's drawn headings, once `loadSectionHeadingReader` has loaded the reader. */
+let readDrawnMarkdown: ((value: string) => DrawnMarkdownHeading[]) | undefined;
+let readerLoading: Promise<void> | undefined;
+
+/**
+ * Loads the markdown face's heading reader, once. A load that fails leaves
+ * the reader unloaded, so a markdown body's count stays untrusted (the field
+ * is opened, never a heading that may be another section) and a later call
+ * tries again.
+ */
+export function loadSectionHeadingReader(): Promise<void> {
+  if (readDrawnMarkdown) return Promise.resolve();
+  readerLoading ??= loadDrawnMarkdownHeadings().then(
+    (read) => {
+      readDrawnMarkdown = read;
+    },
+    () => {
+      readerLoading = undefined;
+    },
+  );
+  return readerLoading;
+}
+
+/**
+ * How many headings reading `reading` the markdown `value` draws that are not
+ * the outline's headings of that reading (`listedAt`, their starts), or
+ * `undefined` while the reader is not loaded.
+ */
+function unlistedMarkdownCount(value: string, reading: string, listedAt: ReadonlySet<number>): number | undefined {
+  if (!readDrawnMarkdown) return undefined;
+  return readDrawnMarkdown(value).filter(
+    (h) => headingReading(h.text) === reading && (h.start === undefined || !listedAt.has(h.start)),
+  ).length;
+}
+
+/** A markdown candidate counted before the reader loaded: how to count it once it has. */
+const pendingUnlisted = new WeakMap<SectionCandidate, () => number | undefined>();
+
+/** `candidate`, with its unlisted count read now when it was pending. */
+function withUnlistedCount(candidate: SectionCandidate): SectionCandidate {
+  const count = candidate.unlisted === undefined ? pendingUnlisted.get(candidate) : undefined;
+  return count ? { ...candidate, unlisted: count() } : candidate;
 }
 
 /**
@@ -266,11 +226,17 @@ export function sectionCandidates(
     const readings = headings.map((h) => headingReading(h.heading));
     const ordinal = readings.slice(0, at).filter((r) => r === reading).length;
     const count = readings.filter((r) => r === reading).length;
+    const listedAt = new Set(headings.filter((_, i) => readings[i] === reading).map((h) => h.start));
+    const countMarkdown = (): number | undefined => unlistedMarkdownCount(value, reading, listedAt);
     const unlisted =
       face === 'text' || reading === ''
         ? 0
-        : unlistedHeadingTexts(value, face === 'html', headings).filter((t) => headingReading(t) === reading).length;
-    out.push({ field, face, reading, ordinal, count, unlisted });
+        : face === 'html'
+          ? unlistedHtmlHeadingTexts(value, headings).filter((t) => headingReading(t) === reading).length
+          : countMarkdown();
+    const candidate: SectionCandidate = { field, face, reading, ordinal, count, unlisted };
+    if (unlisted === undefined) pendingUnlisted.set(candidate, countMarkdown);
+    out.push(candidate);
   }
   return out;
 }
@@ -292,7 +258,7 @@ export function locateSection(root: ParentNode, candidates: readonly SectionCand
     const field = root.querySelector<HTMLElement>(`[${DETAIL_FIELD_ATTR}="${escapeAttr(candidate.field)}"]`);
     if (!field) continue;
     const { face } = candidate;
-    if (face === 'text' || candidate.reading === '') return { field, face, fieldOnly: true };
+    if (face === 'text' || candidate.reading === '' || (candidate.unlisted ?? 0) > 0) return { field, face, fieldOnly: true };
     const drawn = Array.from(field.querySelectorAll<HTMLElement>('h1, h2, h3, h4, h5, h6')).filter(
       (el) => headingReading(el.textContent ?? '') === candidate.reading,
     );
@@ -324,8 +290,11 @@ function scrollIntoStart(el: HTMLElement): void {
 /**
  * Opens the page at the cited section once it is drawn: the heading scrolled
  * to and marked, or the field scrolled to (at once when the field is the whole
- * answer — a `textarea` body, or a heading that reads as nothing — and
- * otherwise once {@link RECORD_SECTION_SETTLE_MS} pass without the heading). With
+ * answer — a `textarea` body, a heading that reads as nothing, or one whose
+ * body draws a same-titled heading the outline does not list — and otherwise
+ * once {@link RECORD_SECTION_SETTLE_MS} pass without the heading). A markdown
+ * candidate counted before the face's parse loaded is counted once it has
+ * (`loadSectionHeadingReader`); until then no heading is trusted. With
  * no candidate, or no candidate field drawn by then, nothing moves. Answers
  * the cleanup, which also takes the mark off: a page opened at another
  * section, or at the same one again, marks only the section it opens.
@@ -343,6 +312,7 @@ export function focusRecordSection(
     if (mayScroll()) scrollIntoStart(el);
   };
   if (candidates.length === 0) return () => {};
+  let current = candidates.map(withUnlistedCount);
   let done = false;
   let observer: MutationObserver | undefined;
   const pending: { timer?: ReturnType<typeof setTimeout>; unmark?: () => void } = {};
@@ -358,7 +328,7 @@ export function focusRecordSection(
   };
   const attempt = (): void => {
     if (done) return;
-    const target = locateSection(root, candidates);
+    const target = locateSection(root, current);
     if (target?.heading) {
       finish();
       pending.unmark = markSection(target.heading);
@@ -370,13 +340,19 @@ export function focusRecordSection(
   };
   attempt();
   if (done) return cleanup;
+  if (current.some((c) => c.unlisted === undefined)) {
+    void loadSectionHeadingReader().then(() => {
+      current = current.map(withUnlistedCount);
+      attempt();
+    });
+  }
   if (typeof MutationObserver === 'function') {
     observer = new MutationObserver(attempt);
     observer.observe(root, { childList: true, subtree: true, characterData: true });
   }
   pending.timer = setTimeout(() => {
     if (done) return;
-    const target = locateSection(root, candidates);
+    const target = locateSection(root, current);
     finish();
     if (target?.heading) {
       pending.unmark = markSection(target.heading);

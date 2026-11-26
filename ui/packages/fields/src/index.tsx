@@ -5555,5 +5555,15 @@ export { useUploadingScope, UploadingScopeProvider } from './widgets/uploadingSc
 export { useUploadingSignal } from './widgets/useUploadingSignal.js';
 export type { UploadingScope } from './widgets/uploadingScope.js';
 
+// The headings a markdown value's `document` face draws, read from the face's
+// own parse (`./widgets/markdownHeadings.ts`, objectstack#37562): a reader that
+// must agree with the drawn page (the record page opening a cited section)
+// counts them here, never with a second markdown reader. Loaded on demand, so
+// react-markdown stays in the lazy chunk `MarkdownContent` already lives in.
+export function loadDrawnMarkdownHeadings(): Promise<typeof import('./widgets/markdownHeadings.js').drawnMarkdownHeadings> {
+  return import('./widgets/markdownHeadings.js').then((m) => m.drawnMarkdownHeadings);
+}
+export type { DrawnMarkdownHeading } from './widgets/markdownHeadings.js';
+
 // Initialize registry
 registerAllFields();

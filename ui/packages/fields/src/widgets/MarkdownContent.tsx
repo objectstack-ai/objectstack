@@ -1,5 +1,5 @@
 import React from 'react';
-import ReactMarkdown, { type Components } from 'react-markdown';
+import ReactMarkdown, { type Components, type Options } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import rehypeSanitize from 'rehype-sanitize';
 import { RICH_TEXT_SANITIZE_SCHEMA } from './sanitizedHtml.js';
@@ -17,6 +17,16 @@ import {
  */
 export type MarkdownFace = RichTextFace;
 
+/**
+ * The remark plugins a markdown value is parsed with: GitHub Flavored Markdown.
+ * `./markdownHeadings.ts` reads the drawn headings through the same list, so a
+ * reader of the face and the face never disagree on what is a heading.
+ */
+export const MARKDOWN_REMARK_PLUGINS: NonNullable<Options['remarkPlugins']> = [remarkGfm];
+
+/** The rehype plugins the parsed value is drawn through: sanitized, against the `html` / `richtext` schema. */
+export const MARKDOWN_REHYPE_PLUGINS: NonNullable<Options['rehypePlugins']> = [[rehypeSanitize, RICH_TEXT_SANITIZE_SCHEMA]];
+
 /** In the cell face no heading element is drawn (see `cellFaceHeadings`). */
 const CELL_COMPONENTS: Components = cellFaceHeadings('data-markdown-heading');
 
@@ -31,8 +41,8 @@ export default function MarkdownContent({ value, face = 'document' }: { value: s
   return (
     <div className={cell ? RICH_TEXT_CELL_FACE_CLASS : RICH_TEXT_DOCUMENT_CLASS} data-markdown-face={face}>
       <ReactMarkdown
-        remarkPlugins={[remarkGfm]}
-        rehypePlugins={[[rehypeSanitize, RICH_TEXT_SANITIZE_SCHEMA]]}
+        remarkPlugins={MARKDOWN_REMARK_PLUGINS}
+        rehypePlugins={MARKDOWN_REHYPE_PLUGINS}
         components={cell ? CELL_COMPONENTS : undefined}
       >
         {value}
