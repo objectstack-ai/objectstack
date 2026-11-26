@@ -224,15 +224,14 @@ export function studioMenuTiers(menu: readonly StudioMenuGroupModel[]): Record<S
 
 /**
  * The entry the open page is (`aria-current`), or `null` when it is none of
- * them (the area's type directory, a not-found page).
+ * them (the area's type directory, a not-found pillar).
  *
  *  - the package-less scope: its flows;
  *  - an area URL: its type, diagnostics, or on the cross-package leg's root
  *    the environment catalog;
- *  - the sharing overview's route: the OWD overview.
- *
- * objectstack#36909 — a retired pillar's address draws no page (it redirects,
- * `studioPillarRedirectModel.ts`), so no entry is current on one.
+ *  - the sharing overview's route: the OWD overview;
+ *  - a retired pillar's address: none, since it draws no page
+ *    (objectstack#36909: it redirects, `studioPillarRedirectModel.ts`).
  */
 export function studioMenuCurrentKey(input: { segment: string; pathname: string; search: string }): string | null {
   const { segment, pathname } = input;
