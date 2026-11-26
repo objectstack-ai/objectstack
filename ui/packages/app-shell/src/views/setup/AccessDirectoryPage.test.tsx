@@ -16,6 +16,8 @@
  */
 
 import '@testing-library/jest-dom/vitest';
+// The page's source reach loads this lazily; pay that load during collection (check:test-source-alias).
+import '@objectstack/lint';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import * as React from 'react';
 import { cleanup, render, screen } from '@testing-library/react';
